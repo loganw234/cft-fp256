@@ -12154,3 +12154,115 @@ sixteen, on one tile), `reduce` 11/11, `reducenowide` 11/11, `krnlseq`
 launched at 12:24 in the second checkout, whose verdict the next entry
 carries. No host source changed in this merge; the host gates are the
 P1 entry's.
+
+## 2026-09-15 - P1 on main: an input block fetched through an index table (R16), the round's long pole, verified three times over
+
+**The claim.** Asks 1 and 4 of cft-rebound's list (a gathered operand;
+a scatter of a corrector's body into the lanes that need it) are one
+mechanism: a program run whose stream or scratch block is read through
+a table of indices instead of densely, `A[i] = idx[i] == CFT_IDX_NONE ?
++0 : a[idx[i]]`, the table's sentinel reading as +0 and issuing no
+read, the definition one line per field (docs/SEQUENCER.md revision 6,
+R16). Parcel P1 built it end to end: four states in `rtl/cft_seq.sv`
+(`S_GTH_GO`, `S_GTH_TBL`, `S_GTH_ELEM`, `S_GTH_WAIT`) entered in place
+of the dense load for a stream and in place of the scratch preload,
+reading a table's beats and then one element per entry through the A
+master and packing the elements into beats so the register file never
+learns the difference; `cfg_indexed[3:0] = MODE[22:19]` in the CSR
+under `CAPS2[9]`, the guard on the reserved half refusing the bits on
+a build without the feature; the model's `run(..., idx_a, idx_b, idx_c,
+idx_scratch_in)`; the C executor's blocking with tables that straddle
+a block of 64; the XRT backend binding the four tables into the slots
+the seam passes and sizing an indexed source from `idx_*_src`; a fourth
+corpus in `seq_check.py` (source lengths of 1, 3, n/2, n and n+37
+against every n, tables with sentinels, identity and permuted
+controls); `device-test`'s `check_indexed` leg; and
+`host/tools/gathertime.py`, the card script at the gravity shape,
+written and dry-run on the software backend but not run - there is no
+card day inside a parcel.
+
+**The cost, measured.** The sequencer's read side keeps ONE burst in
+flight, so a gathered element is a whole round trip: about four cycles
+an element at every format on the model's memory (`make seqcycles`,
+the gathered row beside the dense table - 2.32 -> 6.69, 3.39 -> 7.63,
+5.54 -> 9.51, 9.83 -> 13.27 cycles a lane at fp32 / fp64 / fp128 /
+fp256; read bursts 6 -> 578, 6 -> 290, 6 -> 146, 6 -> 74 over the
+probe's shape) and one HBM round trip an element on the card, which is
+the number `gathertime.py` exists to measure. The dense table is
+byte-for-byte what it was (fp32 60.8 / 297.2 / 835.2 / 607.2 / 653.2 a
+block, fp64 44.8 / 217.2 / 563.2 / 527.2 / 573.2, fp128 36.8 / 177.2 /
+427.2 / 487.2 / 533.2), re-measured from a clean build by the verifier
+at every tip. The plan's brief had priced the gather without naming
+that divisor; P1 corrected the brief in its first report.
+
+**What the verifier found, in three rounds.** V1 at P1's first tip
+(1252e62): `rd_need` decided by an operand FIELD rather than by the
+opcode's reads, so a defaulted `rb` marked stream a needed and the
+whole gather ran for nothing - the rule is now `op_reads(op)` (FMA and
+SELECT read a, b and c; ADD and SUB a and c; MUL and the two-operand
+ops a and b; ABS and NEG a), which changed the dense path's read count
+for every program and moved no cycle number; the XRT path staging AND
+binding an indexed source at `n * esz` instead of `idx_*_src * esz`, in
+both the staged and the resident configuration (V1's own correction of
+its first reading); and the device-test leg reading dense b and c past
+a short buffer, found with a guard page. All three fixed at b812a53
+and confirmed. V1's final report then named two gaps no gate would
+catch: `MODE[22]` was IGNORED, not refused, when a program declared no
+scratch input (`S_ZERO` skipped the bit); and `device-test -b` had no
+indexed case, so the registry path for the tables had no gate on any
+backend. P1's follow-up (991603f) closed both: the header check
+refuses the bit from the header's own bits (`!hdr_q[193] ||
+hdr_q[239:224] == 0`, not from `h_nsin`, which is assigned in the same
+cycle and would be a run behind - the same trap as the constants
+riding the pipe), one read burst and nothing written, no over-refusal;
+and `compare_buffers_indexed` runs the same call staged and resident
+with every buffer from `cft_alloc` over a source and a pool shorter
+than n, asserting resident == staged, `source[idx]` with +0 at the
+sentinel, and - where the device reports resident buffers - that the
+second run BOUND the table rather than staging it again, a card-day
+gate that a forced call site fires at all four formats. V1's scoped
+check of the follow-up confirmed all of it and added two notes the
+lead took at the merge: the new term is an OR and only one half had a
+bench case (SCRATCH_IO set with no input slot and an output slot is the
+image an assembler emits for a program that only writes the block; it
+is refused identically and now has its case), and a
+`cft_buffer_get_info` that failed on a resident device would have
+removed the binding check silently inside one `&&` chain (it is a
+counted failure now).
+
+**What the seam got wrong, and where it was caught.** The seam's
+refusal for an indexed program was in exactly the one function P1
+would edit, so removing it opened the remote route: a remote handle
+would have published INDEXED (the server's own truthful word) and then
+failed the call. P1 masked the bit off remote handles at open and
+refused the route by name in the program run's remote branch; parcel
+P2 replaces both with the client-side gather. The public header's
+CAPS2 paragraph, written at the seam that morning, was out of step on
+three counts by the time the parcel landed; V1 read it, and the lead
+fixed it (5c0c655).
+
+**The gates.** Main fast-forwarded to 5c0c655 at 11:37 on the box's
+suite at the staging commit 1c6b63a (`~/cft-fp256-b`, 10:36-11:29):
+`make sim SIM=verilator` 24 benches, no failures recorded; `seq_coremc`
+27/27, `krnlseqmc` 1/1, `seqbanksmc` 1/1, `reducemc` 6/6, `krnlmc`
+2/2; `yosys-lint` clean; then the Icarus tail, `seq_core` 27/27,
+`krnlseq` 1/1, `seqbanks` 1/1, `faults` 5/5, done 11:55. The
+follow-up merged at 6457cee on the box's suite at its staging commit
+29809cb (`~/cft-fp256`, 11:47-12:42): 24 benches, the same five census
+targets, lint. The host side, with every test executable built by
+name at 11:50 (the lead's first two gate runs of the day had run a
+device-test binary from 05:13 - `make -C host all` does not build the
+test executables, and the tell was a count that did not move across a
+commit adding a leg; the ledger carries the correction and the
+verdicts never rested on those numbers): `api-test` all contract
+checks passed; `python/tests/test_seq.py` 66 passed; `seq_check.py
+--trials 200` agreeing on every program across the three corpora (158
+indexed programs, 460 tables, 5,101 sentinels, 24 identity and 23
+permuted controls); `device-test sw -n 32` 4,078 checks, `sw -b -n 32`
+4,386 with the indexed-program leg's own line, `sw -b -q -n 16` 722 -
+P1's number; `remote_check.py` every check passed over thirty
+connections against its own server; the docs index, five generators
+and the Arduino copy true. On the merged tree with the lead's three
+edits, `krnlseq` under Verilator with the second-half case 1/1, and
+the host gates again; the box's full suite at the pushed tip follows
+in the next entry.
