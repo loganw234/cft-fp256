@@ -268,7 +268,7 @@ attribute. What changes is cycles.
 
 You are parcel **P1** in `cft-fp256` (a git worktree of
 `C:\Users\logan\source\repos\cft-fp256`, branched from `main` at the P0
-commit `<P0 sha - the lead fills this at dispatch>`). **Check you are on
+commit `fd9ec1e` (P0), or any later commit of `main` that contains it - `git merge-base --is-ancestor fd9ec1e HEAD` says so). **Check you are on
 that commit and in that repository** - `git log --oneline -1` and
 `git remote -v` (it must say `loganw234/cft-fp256`) - and if either is
 wrong, say so in the ledger's `urgent/` and stop.
