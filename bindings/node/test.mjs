@@ -34,7 +34,8 @@ import { fileURLToPath } from "node:url";
 import { Context, formatFor } from "./index.mjs";
 import { decode, encodeExact } from "./core.mjs";
 import { FLAGS_ALL, FLAG_INEXACT, FLAG_INVALID, FLAG_DIVBYZERO,
-         FLAG_OVERFLOW, FLAG_UNDERFLOW, FORMATOF_METHOD, MINMAG_METHOD,
+         FLAG_OVERFLOW, FLAG_UNDERFLOW, FORMATOF_METHOD, IDX_NONE,
+         MINMAG_METHOD,
          OPS_BY_NAME,
          is754version1985, is754version2008, is754version2019 }
   from "./lib.mjs";
@@ -2847,6 +2848,250 @@ test("map() sends a formatOf name somewhere useful", () => {
     ok(/mapFormatOf/.test(err.message),
        `the refusal points at mapFormatOf (got: ${err.message})`);
   }
+});
+
+// ---------------------------------------------------------------------
+// mapEx: the scalar mask (ABI 0.12) and the index tables (ABI 0.14)
+// ---------------------------------------------------------------------
+//
+// cft_run_ex reached JavaScript on 2026-09-15 and not before: the C
+// had the scalar mask from 0.12 and the three tables from 0.14, and
+// bindings/ wrapped neither, so this whole surface is new and nothing
+// here is a regression check.
+//
+// EVERY EXPECTED VALUE BELOW COMES OUT OF map(), which is cft_run.
+// Not one is a constant typed into this file, and that is the point
+// of the shape rather than a convenience: the contract defines an
+// indexed run as the DENSE run over the gathered operands, and a
+// scalar operand as the dense run over an array of copies, so the
+// only honest oracle for either is the dense run itself. A table of
+// expected bits here would be this file's opinion of the library
+// agreeing with itself.
+//
+// The refusals are the library's, by name. This file checks that its
+// words arrive - `cft_last_error` through checkStatus - and does not
+// re-state the rules in JavaScript.
+
+const IDX_SRC = ["1.5", "-2.25", "3.75", "0.5", "-7", "11.125",
+                 "0.0625", "-0.75", "6", "-0.125"];
+const IDX_YS = ["0.25", "8", "-3.5", "2", "-0.5", "1.25", "-16", "0.75"];
+const IDX_N = IDX_YS.length;                       // 8, over a 10-element source
+const IDENTITY = Uint32Array.from({ length: IDX_N }, (_, i) => i);
+const PERM = Uint32Array.from([9, 1, 7, 0, 5, 2, 6, 4]);
+
+/** Every element's bits equal, and the array lengths with them. */
+function sameArray(got, want, what) {
+  eq(got.length, want.length, `${what}: length `);
+  for (let i = 0; i < want.length; i++)
+    ok(got[i].sameBits(want[i]),
+       `${what}[${i}]: ${got[i].toString()} is not ${want[i].toString()}`);
+}
+function anyDiffer(got, want) {
+  return got.some((f, i) => !f.sameBits(want[i]));
+}
+/** The gather, done here in JavaScript - the definition, written out
+ *  where it can be read. */
+function gather(src, table) {
+  return Array.from(table, (j) => src[j]);
+}
+
+test("mapEx: an identity table is the dense run, bit for bit, at every format",
+     () => {
+  for (const w of WIDTHS) {
+    const ctx = ctxs[w];
+    const xs = IDX_SRC.slice(0, IDX_N);
+    const dense = ctx.map("add", xs, null, IDX_YS);
+    const denseFlags = ctx.lastFlags;
+    // a on a table, c dense; then both on tables; then the table on c
+    // alone. All three are the same run through a different door.
+    sameArray(ctx.mapEx("add", { a: xs, c: IDX_YS, idxA: IDENTITY }),
+              dense, `fp${w} idxA identity`);
+    eq(ctx.lastFlags, denseFlags, `fp${w} idxA identity flags: `);
+    sameArray(ctx.mapEx("add", { a: xs, c: IDX_YS,
+                                 idxA: IDENTITY, idxC: IDENTITY }),
+              dense, `fp${w} both tables identity`);
+    sameArray(ctx.mapEx("add", { a: xs, c: IDX_YS, idxC: IDENTITY }),
+              dense, `fp${w} idxC identity`);
+    // And with no table and no mask at all, mapEx IS map: the same
+    // call with the same arguments through cft_run_ex's struct.
+    sameArray(ctx.mapEx("add", { a: xs, c: IDX_YS }), dense,
+              `fp${w} mapEx with neither`);
+    // An array-valued opcode with three operands, so the table is not
+    // only ever checked on the two-operand shape.
+    const zs = IDX_SRC.slice(2, 2 + IDX_N);
+    const fma = ctx.map("fma", xs, IDX_YS, zs);
+    sameArray(ctx.mapEx("fma", { a: xs, b: IDX_YS, c: zs,
+                                 idxA: IDENTITY, idxB: IDENTITY,
+                                 idxC: IDENTITY }),
+              fma, `fp${w} fma, all three identity`);
+    ctx.clearFlags();
+  }
+});
+
+test("mapEx: a permuted table is the JavaScript gather, and is not the dense run",
+     () => {
+  for (const w of WIDTHS) {
+    const ctx = ctxs[w];
+    // The source is TEN elements and the run is eight: with a table
+    // the operand array is the source, not the run, which is the half
+    // of this that a dense call cannot express at all.
+    const dense = ctx.map("add", IDX_SRC.slice(0, IDX_N), null, IDX_YS);
+    const got = ctx.mapEx("add", { a: IDX_SRC, c: IDX_YS, idxA: PERM });
+    const want = ctx.map("add", gather(IDX_SRC, PERM), null, IDX_YS);
+    sameArray(got, want, `fp${w} permuted a`);
+    ok(anyDiffer(got, dense),
+       `fp${w}: the permutation has to MOVE something, or this case ` +
+       `passes without the table being read`);
+    // The other two operands take one too, and two tables at once are
+    // two independent gathers.
+    const gotC = ctx.mapEx("add", { a: IDX_SRC, c: IDX_YS,
+                                    idxA: PERM, idxC: PERM.map((j) => j % IDX_N) });
+    const wantC = ctx.map("add", gather(IDX_SRC, PERM), null,
+                          gather(IDX_YS, PERM.map((j) => j % IDX_N)));
+    sameArray(gotC, wantC, `fp${w} two tables`);
+    ctx.clearFlags();
+  }
+});
+
+test("mapEx: a scalar operand is the dense run over the scalar repeated",
+     () => {
+  for (const w of WIDTHS) {
+    const ctx = ctxs[w];
+    const k = "2.5";
+    // MUL reads a and b, so the scalar rides on each in turn.
+    const gotA = ctx.mapEx("mul", { a: [k], b: IDX_YS, scalar: "a" });
+    const wantA = ctx.map("mul", Array(IDX_N).fill(k), IDX_YS);
+    sameArray(gotA, wantA, `fp${w} scalar a`);
+    const gotB = ctx.mapEx("mul", { a: IDX_YS, b: [k], scalar: ["b"] });
+    const wantB = ctx.map("mul", IDX_YS, Array(IDX_N).fill(k));
+    sameArray(gotB, wantB, `fp${w} scalar b`);
+    // Two scalars at once, and the third operand the only array: FMA
+    // reads all three.
+    const zs = IDX_SRC.slice(0, IDX_N);
+    const gotAB = ctx.mapEx("fma", { a: [k], b: ["-3"], c: zs,
+                                     scalar: ["a", "b"] });
+    const wantAB = ctx.map("fma", Array(IDX_N).fill(k),
+                           Array(IDX_N).fill("-3"), zs);
+    sameArray(gotAB, wantAB, `fp${w} scalar a and b`);
+    ctx.clearFlags();
+  }
+});
+
+test("mapEx: a scalar operand beside an indexed one", () => {
+  for (const w of WIDTHS) {
+    const ctx = ctxs[w];
+    const k = "1.25";
+    // a scalar, b through a table over the ten-element source, c dense.
+    const got = ctx.mapEx("fma", { a: [k], b: IDX_SRC, c: IDX_YS,
+                                   scalar: "a", idxB: PERM });
+    const want = ctx.map("fma", Array(IDX_N).fill(k),
+                         gather(IDX_SRC, PERM), IDX_YS);
+    sameArray(got, want, `fp${w} scalar a, indexed b`);
+    // The same operand cannot be both, and the library says so rather
+    // than this file: a stride of zero and a table are two answers to
+    // one question.
+    try {
+      ctx.mapEx("fma", { a: [k], b: IDX_SRC, c: IDX_YS,
+                         scalar: "a", idxA: IDENTITY, idxB: PERM });
+      throw new Error("scalar AND indexed on a should refuse");
+    } catch (err) {
+      ok(/both scalar/.test(err.message) && /indexed/.test(err.message),
+         `fp${w}: the library names the collision (got: ${err.message})`);
+    }
+    ctx.clearFlags();
+  }
+});
+
+test("mapEx: CFT_IDX_NONE reads as +0, not as an element", () => {
+  for (const w of WIDTHS) {
+    const ctx = ctxs[w];
+    const table = Uint32Array.from(IDENTITY);
+    table[3] = IDX_NONE;
+    table[6] = IDX_NONE;
+    const got = ctx.mapEx("add", { a: IDX_SRC, c: IDX_YS, idxA: table });
+    // The expectation is the dense run over the same source with those
+    // two lanes replaced by the format's own +0 - ctx.zero(), not a
+    // constant, and the arithmetic map()'s.
+    const src = IDX_SRC.slice(0, IDX_N)
+      .map((v, i) => (i === 3 || i === 6) ? ctx.zero() : v);
+    const want = ctx.map("add", src, null, IDX_YS);
+    sameArray(got, want, `fp${w} IDX_NONE`);
+    // +0 and not -0, which the sum above cannot tell apart: x + (-0)
+    // is x + (+0) for every finite x under RNE. NEG can - it is the
+    // sign bit and nothing else - so a none-lane negated must be the
+    // MINUS zero, and would be the plus zero if the lane had held -0.
+    const none = Uint32Array.from(IDENTITY, () => IDX_NONE);
+    const negated = ctx.mapEx("neg", { a: IDX_SRC, idxA: none });
+    sameArray(negated, ctx.map("neg", Array(IDX_N).fill(ctx.zero())),
+              `fp${w} IDX_NONE negated`);
+    ok(negated.every((f) => f.bits === ctx.zero(1).bits),
+       `fp${w}: a none-lane negates to -0, so the lane held +0`);
+    ctx.clearFlags();
+  }
+});
+
+test("mapEx: the library's refusals arrive by name", () => {
+  const ctx = ctxs[64];
+  const xs = IDX_SRC.slice(0, IDX_N);
+  const refuses = (fn, pattern, what) => {
+    try { fn(); } catch (err) {
+      ok(pattern.test(err.message),
+         `${what}: the refusal does not say it (got: ${err.message})`);
+      return;
+    }
+    throw new Error(`${what}: expected a refusal, got a value`);
+  };
+
+  // A table on an operand the OPCODE does not read. ADD reads a and c,
+  // MUL reads a and b; a table on the other one is a buffer built for
+  // a fetch this call would never make, and is refused rather than
+  // ignored the way the operand itself is.
+  refuses(() => ctx.mapEx("add", { a: xs, b: xs, c: IDX_YS, idxB: IDENTITY }),
+          /idx_b gathers operand b/,
+          "idxB on an ADD");
+  refuses(() => ctx.mapEx("mul", { a: xs, b: IDX_YS, c: xs, idxC: IDENTITY }),
+          /idx_c gathers operand c/,
+          "idxC on a MUL");
+  // And the positive half of the same rule: FMA and SELECT read all
+  // three, so all three tables are legal on them. Without this the
+  // case above would also pass if every table were refused.
+  for (const op of ["fma", "select"]) {
+    const got = ctx.mapEx(op, { a: IDX_SRC, b: IDX_SRC, c: IDX_SRC,
+                                idxA: PERM, idxB: IDENTITY, idxC: PERM });
+    const want = ctx.map(op, gather(IDX_SRC, PERM), gather(IDX_SRC, IDENTITY),
+                         gather(IDX_SRC, PERM));
+    sameArray(got, want, `${op} reads all three`);
+  }
+
+  // An index AT the source's length, and one past it. The source here
+  // is the ten-element IDX_SRC, so 10 is the first index out of range
+  // and the message names the length it was bounded against.
+  for (const bad of [IDX_SRC.length, IDX_SRC.length + 7, 0x7fffffff]) {
+    const table = Uint32Array.from(IDENTITY);
+    table[5] = bad;
+    refuses(() => ctx.mapEx("add", { a: IDX_SRC, c: IDX_YS, idxA: table }),
+            /idx_a\[5\] = \d+ is at or past the 10 elements/,
+            `index ${bad} into a ten-element source`);
+  }
+  // A table on an operand that is not there at all.
+  refuses(() => ctx.mapEx("fma", { a: xs, c: IDX_YS, idxB: IDENTITY }),
+          /idx_b indexes operand b, which is NULL/,
+          "a table on a NULL operand");
+  // And the JavaScript-side refusals, which are the marshalling's own
+  // and are named as such: a field this call does not know, an operand
+  // called scalar that is not one element, and two statements of the
+  // run's length that disagree.
+  refuses(() => ctx.mapEx("add", { a: xs, c: IDX_YS, bank: new Uint8Array(4) }),
+          /does not know the field "bank"/, "a Program.runEx field");
+  refuses(() => ctx.mapEx("mul", { a: xs, b: IDX_YS, scalar: "a" }),
+          /named scalar and holds 8 elements/, "a scalar that is an array");
+  refuses(() => ctx.mapEx("add", { a: xs, c: IDX_YS.slice(0, 4) }),
+          /stated more than once and the statements disagree/,
+          "operands of different lengths");
+  refuses(() => ctx.mapEx("add", { a: xs, c: IDX_YS, idxA: IDENTITY.slice(0, 4) }),
+          /stated more than once and the statements disagree/,
+          "a table shorter than the dense operand beside it");
+  ctx.clearFlags();
 });
 
 // ---------------------------------------------------------------------

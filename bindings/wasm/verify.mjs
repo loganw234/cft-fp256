@@ -453,7 +453,19 @@ const NEEDED = ["cftw_run", "cftw_reduce", "cftw_reduce_seg", "cftw_conformance"
                 // transcribes them.
                 "cftw_caps_max_scratch", "cftw_prog_flag_scratch_io",
                 "cftw_seq_feat_kx9", "cftw_seq_feat_scratch",
-                "cftw_seq_feat_scratch_io"];
+                "cftw_seq_feat_scratch_io",
+                // The elementwise run that carries what cft_run's
+                // eleven fixed arguments cannot: ABI 0.12's scalar
+                // mask and ABI 0.14's three index tables, through
+                // cft_elem_args. Named here because it is the entry
+                // point this module spent three ABI steps not having
+                // - the C had it from 0.12 and nothing in bindings/
+                // wrapped it, so a JavaScript caller could pass
+                // neither - and a list that does not name it is a
+                // list that would not notice it going again.
+                // CFT_IDX_NONE rides beside it as a call, for
+                // cftw_flags_all's reason.
+                "cftw_run_ex", "cftw_idx_none"];
 for (const needed of NEEDED) {
   if (!exported.includes(needed)) bad(`the module does not export ${needed}`);
 }

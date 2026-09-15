@@ -1831,7 +1831,17 @@ built; docs/SEQUENCER.md holds the program-model ones.
    at 1.3 to 2.1 times the loop on the panels that can be programs and
    nothing on the zoom's pixel phase. Wrapping them is small, and it is
    a module rebuild, so it waits for the next step that rebuilds the
-   module anyway.
+   module anyway. **DONE** - the program calls at ABI 0.9 and the last
+   missing elementwise one, `cft_run_ex`, at 0.14 (2026-09-15): it had
+   been unwrapped since 0.12, so neither a scalar operand nor an index
+   table was reachable from JavaScript. `cftw_run_ex`, its entry point
+   `Context.mapEx(op, {a, b, c, scalar, idxA, idxB, idxC})` and the
+   rebuilt module landed in ONE commit, because `cwrap` of an export
+   the module lacks returns `undefined` rather than throwing - a call
+   table and a module that disagree give a package whose entry point
+   silently does not exist. `lib.mjs`' `audit()` now CALLS
+   `cftw_idx_none` at load and `verify.mjs` names both exports, so
+   that disagreement fails at import and by name instead.
 
 ## The remote backend: a device behind a socket (2026-09-06)
 

@@ -2241,6 +2241,181 @@ export class Context {
     return split(r.bytes);
   }
 
+  /** map(), with the two things `cft_run`'s eleven fixed arguments
+   *  cannot carry: a SCALAR operand (ABI 0.12) and an INDEX TABLE per
+   *  operand (ABI 0.14). This is `cft_run_ex` with `cft_elem_args`.
+   *
+   *  THIS IS NOT `Program.runEx`. That one issues a sequencer program
+   *  and takes a bank, deposits and a scratch block; this one is
+   *  map()'s elementwise run and takes neither. They are two entry
+   *  points with one "Ex" between them because the C has two structs,
+   *  and this package spells them apart rather than overloading a
+   *  name: `ctx.mapEx(op, {...})` against `prog.runEx({...})`.
+   *
+   *      ctx.mapEx("add", { a: xs, c: ys })          // == map("add", ...)
+   *      ctx.mapEx("mul", { a: [k], b: ys, scalar: "a" })
+   *      ctx.mapEx("add", { a: src, c: ys, idxA: table })
+   *
+   *  `a`, `b`, `c` are map()'s operand arrays - Floats, or anything
+   *  from() accepts - or null for a slot the opcode does not read.
+   *
+   *  `scalar` names the operands that are ONE element applying to the
+   *  whole run ("a", or ["a", "c"]), which is `scalar_mask` bit 0, 1
+   *  and 2. Such an operand is a ONE-ELEMENT array, because that is
+   *  what it is: `d[i] = op(a[0], b[i], c[i])` for a scalar a. An
+   *  array of any other length there is refused here, since the
+   *  library would be handed one element and the caller plainly meant
+   *  more.
+   *
+   *  `idxA`, `idxB`, `idxC` are index tables - `n` entries, a
+   *  Uint32Array or an array of numbers. WITH A TABLE THE OPERAND
+   *  ARRAY IS THE SOURCE, not the run: it may hold any number of
+   *  elements, element `i` of the run is `a[idxA[i]]`, and this call
+   *  passes the source's length as `idx_a_src`. `IDX_NONE` (exported
+   *  from this package, held to the module by lib.mjs' audit) reads
+   *  as the format's +0 rather than as an element.
+   *
+   *  `n` is the run's length, and is only needed when nothing else
+   *  states it - every operand scalar. Otherwise it comes from the
+   *  arrays exactly as map()'s does: a dense operand is `n` elements,
+   *  a table is `n` entries, and two of them disagreeing is a
+   *  RangeError here rather than a run of whichever was shorter.
+   *
+   *  Returns map()'s array of Floats and sets `lastFlags` the same
+   *  way. An identity table returns the DENSE run's bits, and not
+   *  approximately: the contract defines the indexed run as the dense
+   *  run over the gathered operands.
+   *
+   *  EVERY OTHER REFUSAL IS THE LIBRARY'S, by name and in its own
+   *  words through `cft_last_error` - a table on an operand the
+   *  opcode does not read (ADD reads a and c, MUL a and b, FMA and
+   *  SELECT all three), an index at or past the source, an operand
+   *  that is both scalar and indexed, a reserved mask bit, a table on
+   *  a NULL operand. This method invents none of those and checks
+   *  none of them: a second opinion in JavaScript is a second
+   *  vocabulary for one rule, and the rules are cft.h's. */
+  mapEx(op, spec = {}) {
+    const fi = this._fi;
+    const NAMES = ["a", "b", "c"];
+    const FIELDS = ["a", "b", "c", "scalar", "idxA", "idxB", "idxC", "n"];
+    for (const k of Object.keys(spec))
+      if (!FIELDS.includes(k))
+        throw new TypeError(
+          `mapEx does not know the field ${JSON.stringify(k)} - it takes ` +
+          `${FIELDS.join(", ")}. (A bank, deposits or a scratch block ` +
+          `belong to Program.runEx, which is a different call.)`);
+
+    const code = typeof op === "string" ? OPS[op] : op;
+    if (code === undefined)
+      throw new TypeError(
+        `mapEx takes one of cft_run's opcodes - ${Object.keys(OPS).join(", ")} ` +
+        `- or an opcode number, and got ${JSON.stringify(op)}. The ` +
+        `transcendentals, the augmented three, the payload three, 9.6's ` +
+        `magnitude four and the formatOf six are separate C entry points ` +
+        `that take no mask and no table; map() and mapFormatOf() reach ` +
+        `those.`);
+
+    const opnd = [spec.a ?? null, spec.b ?? null, spec.c ?? null];
+    const idx = [spec.idxA ?? null, spec.idxB ?? null, spec.idxC ?? null];
+    for (let r = 0; r < 3; r++) {
+      const t = idx[r];
+      if (t === null) continue;
+      if (!(t instanceof Uint32Array) && !Array.isArray(t))
+        throw new TypeError(
+          `mapEx: idx${NAMES[r].toUpperCase()} is an index TABLE - a ` +
+          `Uint32Array of the run's length, or an array of numbers - and ` +
+          `got ${typeof t}`);
+      idx[r] = t instanceof Uint32Array ? t : Uint32Array.from(t);
+    }
+
+    const scalar = spec.scalar ?? [];
+    const asked = typeof scalar === "string" ? [scalar] : scalar;
+    if (!Array.isArray(asked))
+      throw new TypeError(
+        `mapEx: scalar names the operands that are one element - "a", or ` +
+        `["a", "c"] - and got ${typeof scalar}`);
+    let mask = 0;
+    for (const name of asked) {
+      const r = NAMES.indexOf(name);
+      if (r < 0)
+        throw new TypeError(
+          `mapEx: scalar names an operand as "a", "b" or "c", not ` +
+          `${JSON.stringify(name)}`);
+      mask |= 1 << r;
+    }
+
+    // How long the run is, said by whatever says it. A table is n
+    // entries whether or not its operand is there, so a table on a
+    // NULL operand still states the length and the call still reaches
+    // the library, which refuses it by name; deciding that here would
+    // replace the library's sentence with this file's.
+    const claims = [];
+    for (let r = 0; r < 3; r++) {
+      if (idx[r]) claims.push([`idx${NAMES[r].toUpperCase()}`, idx[r].length]);
+      else if (opnd[r] && !((mask >> r) & 1))
+        claims.push([NAMES[r], opnd[r].length]);
+    }
+    if (spec.n !== undefined) claims.push(["n", spec.n]);
+    if (!claims.length)
+      throw new TypeError(
+        "mapEx cannot tell how long this run is: every operand it was " +
+        "given is scalar, and a scalar operand says nothing about n. " +
+        "Pass n.");
+    const n = claims[0][1];
+    if (claims.some(([, len]) => len !== n))
+      throw new RangeError(
+        `mapEx: the run's length is stated more than once and the ` +
+        `statements disagree (${claims.map(([w, l]) => `${w} ${l}`)
+          .join(", ")}). A dense operand is n elements and an index table ` +
+        `is n entries; an INDEXED operand is a source of any length and ` +
+        `says nothing about n.`);
+
+    for (let r = 0; r < 3; r++)
+      if (opnd[r] && !idx[r] && ((mask >> r) & 1) && opnd[r].length !== 1)
+        throw new RangeError(
+          `mapEx: operand ${NAMES[r]} is named scalar and holds ` +
+          `${opnd[r].length} elements. A scalar operand is ONE element ` +
+          `applying to the whole run, and this call would hand the ` +
+          `library that one and drop the rest.`);
+
+    const pack = (arr, count) => {
+      const buf = new Uint8Array(fi.size * Math.max(count, 1));
+      for (let i = 0; i < count; i++)
+        buf.set(this.from(arr[i]).bytes, i * fi.size);
+      return buf;
+    };
+
+    return withScratch(this._M, (s) => {
+      const pIdx = [0, 0, 0], src = [0, 0, 0], p = [0, 0, 0];
+      for (let r = 0; r < 3; r++) {
+        if (!idx[r]) continue;
+        pIdx[r] = s.putU32(idx[r]);
+        // The source's length in ELEMENTS, which is what idx_*_src
+        // means and what the library bounds the table against.
+        src[r] = opnd[r] ? opnd[r].length : 0;
+      }
+      for (let r = 0; r < 3; r++) {
+        if (!opnd[r]) continue;
+        const count = idx[r] ? opnd[r].length
+                    : ((mask >> r) & 1) ? 1 : n;
+        p[r] = s.put(pack(opnd[r], count));
+      }
+      const pd = s.alloc(fi.size * Math.max(n, 1));
+      const fl = s.alloc(4);
+      const st = this._C.runEx(this._dev, code, fi.code, this._rnd,
+                               p[0], p[1], p[2], pd, n, mask, fl, 0,
+                               pIdx[0], pIdx[1], pIdx[2],
+                               src[0], src[1], src[2]);
+      checkStatus(this._C, st, `cft_run_ex(${op})`);
+      this.lastFlags = s.u32(fl);
+      const bytes = s.get(pd, fi.size * Math.max(n, 1));
+      const out = [];
+      for (let i = 0; i < n; i++)
+        out.push(new Float(this, bytes.slice(i * fi.size, (i + 1) * fi.size)));
+      return out;
+    });
+  }
+
   /** Many sequences -> many encodings in ONE library call: the from_
    *  conversions are the batch-shaped half of clause 5.12, and this is
    *  that shape. The flag word is the OR across the batch; a sequence
