@@ -1766,6 +1766,19 @@ the tile: MASK_PTR at 0xA8 (argument 16), MODE[23], CAPS2[10]; the
 block's opening active mask is `blk_act & mask` and the three drains
 skip a masked lane's elements.
 
+**The MODE guard is one rule for every bit above 15.** A MODE bit the
+BUILD cannot honour is refused at the CSR with STATUS[3] - the guard on
+the reserved half of MODE, narrowed as each feature lands: MODE[18:16]
+under CAPS2[7], MODE[22:19] under CAPS2[9], MODE[23] under CAPS2[10].
+A bit the RUN'S KIND does not read is ignored: the scalar operand
+(MODE[18:16]) on a program run, the lane mask (MODE[23]) on an
+elementwise run. No library call produces either shape - `cft_run_args`
+has no scalar field and `cft_elem_args` no mask - so only a raw
+register write reaches it, and a run-kind refusal would be a new
+sentence in this contract that had to refuse the scalar bits on program
+runs too, on tiles already shipped. The rule is the build's, not the
+run's (P3's question, 2026-09-15).
+
 ### What revision 6 is at the seam
 
 The registers, the version (0xA00), the MODE bits under the existing

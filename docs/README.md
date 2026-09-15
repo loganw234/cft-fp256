@@ -44,7 +44,7 @@ product, not the implementation.
 |---|---|---|
 | [DETERMINISM.md](DETERMINISM.md) | 1,424 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 1,127 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
-| [SEQUENCER.md](SEQUENCER.md) | 1,775 | The orbit sequencer and the program model. |
+| [SEQUENCER.md](SEQUENCER.md) | 1,788 | The orbit sequencer and the program model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 701 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 188 | How values sit in memory: beats, lanes, element order. |
 
