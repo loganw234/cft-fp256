@@ -11713,6 +11713,10 @@ Arduino copy.
   from the patched sources for the next image's card day).
 - `yosys-lint` clean; Verilator's lint of the kernel adds nothing beyond
   the pre-existing notes.
+- The WebAssembly module rebuilt at 0.13 and replayed: `verify.mjs` OK,
+  832,915 cases over 148 sets through the wrappers themselves, the
+  reduction family 10,240 over 20/20; `bindings/node/test.mjs` 128
+  passed, `reduceSeg` held to `reduce` per slice for every opcode.
 
 The card has no image with the register yet. The measurement the ask
 was for - one run of `seg = L` over `E * L` resident coordinates against
@@ -11769,3 +11773,73 @@ sequencer change touches. The default stays the older route until the
 image with the streaming issue (R14, 16 cycles an instruction) and the
 retire fix is measured, which is the next entry; that measurement
 decides it.
+
+## 2026-09-14 - R15, forwarding at the fire stage: a dependent instruction costs the array's depth
+
+**The Windows desktop's Docker sim image, Verilator. RTL: the working
+tree over 78b4a3b, `rtl/cft_seq.sv` alone.**
+
+After R14 a dependent instruction cost 20 cycles against an
+independent one's 16, all of it register file: the producer's beat
+fires as a registered request, lands LATENCY + 1 later, is written the
+cycle after, read the cycle after that and fired two cycles on. R15
+forwards. On a single-pass tile the array's validity line is shadowed
+in the sequencer, a dependent beat's address goes on the bus as soon as
+the producer's beat will have landed by the time F fires, and F takes
+the operand from the array's output, the write in flight or the write
+that landed as B sampled, merged word by word over what B read (a
+multi-pass tile keeps R14's rule, `FWD = MUL_PASSES == 1`).
+
+| twenty dependent FMAs, one deposit, cycles a block | fp32 | fp64 | fp128 |
+|---|---|---|---|
+| after R14 | 701 | 621 | 581 |
+| after R15 | 653 | 573 | 533 |
+
+(653 - 18 - 297) / 19 = 17.8 cycles a dependent instruction, LATENCY
++ 1 and a cycle at the first beat; independent unchanged at 16; every
+other row unchanged. `seq_core` 20/20 (the whole divide and the
+every-block-length case among them), `krnlseq`, `seqbanks`, `faults`
+under Verilator; the reduce-then-program and back-pressure probes; the
+multi-pass sequencer benches (`seq_coremc`, `krnlseqmc`, the `FWD = 0`
+path); `yosys-lint` clean.
+
+## 2026-09-14 - the R14 image's program costs on a clean unit, and the multi-pass tile's constants
+
+**amd-arc-box, the U50, `cft_hw_r14_1x.xclbin` (9891cfe: R9-R14 and the
+drain fix, the retire-gate hang still in it, so programs on a freshly
+programmed unit only; kernel WNS +0.191 ns at 135 MHz, 17:07-19:00
+under `nice`). The same three scripts as the seq5 entry, same sizes.**
+
+**Per instruction (`progcost`, fp128, 768 lanes):** nop x 214 1.09 us
+an element against seq5's 1.49 and the morning's 2.3 - (836.7 - 173.2)
+us over 213 instructions and 384 beats is 8.1 ns a beat an instruction,
+1.1 cycles at 135 MHz, against 1.6 with R13 and 2.2 before revision 5;
+the 16-cycle issue leaves only the memory between blocks. The whole
+divide 1.25 us an element (seq5 1.58, morning 2.33), the divide core
+0.54 (0.61).
+
+**The divide (`divtime`, per element):** fp128 whole program 1.473 us
+(seq5 1.523, morning 2.330), fp128 square root 1.342; the older route
+1.921 / 1.673. The whole program is the faster route at fp128 by a
+third. `depcost`'s per-lane rows are within noise of seq5's - the
+halt-only and one-deposit rows are HBM, which no issue change touches
+(fp128 0.026 / 0.075 / 0.143 / 0.164 us a lane; fp32 0.023 / 0.049 /
+0.099 / 0.086).
+
+**And what the multi-pass benches said the same hour.** `seq_coremc`
+(the sequencer at `MUL_PASSES=10`, the third-tier tile's own census,
+which `make sim` does not run and no revision-5 commit had run) failed
+5 of 20 on 78b4a3b - every case with a constant operand - and passed on
+6e1c418. R14 read the constant bank from the instruction register every
+clock and fired a beat, two stages after its address, from that read a
+stage later: right when the array accepts every clock, and on a
+multi-pass tile the pipe holds between accepts, the instruction
+register moves on, and an instruction's LAST beat fires with the next
+instruction's constants. The fix (the commit after 78b4a3b, with R15):
+the address stage captures the beat's three indices as it captures its
+opcode, the bank is read from the B stage's indices under the pipe's
+own hold, and F fires from that - the register operands' own two-stage
+lead, whatever the array's pace. `seq_coremc` 20/20 and `krnlseqmc`
+after it; the single-pass benches unchanged. No shipping image is
+multi-pass, so no image carried this; the census is why it was found
+the same day.

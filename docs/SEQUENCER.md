@@ -1552,7 +1552,10 @@ the array took nothing. The issue is now a three-stage pipe that runs
 every cycle whatever state the machine is in: A puts a beat's three
 register addresses on the file's bus (the state machine, in
 `S_ALU_ISSUE`), B is the file's read, F fires the beat into the array
-with the data on the bus and the constants read two stages ago. Each
+with the data on the bus and the constants the address stage's indices
+fetched a stage ago (captured with the beat, read under the pipe's
+hold - the first version read the bank from the instruction register
+every clock, which the multi-pass tile caught the same evening). Each
 stage carries the context of the instruction its beat belongs to -
 opcode, rounding attribute, which operands are constants - because A
 can be addressing one instruction's first beat while F fires the
@@ -1596,28 +1599,63 @@ change mid-program, a register nothing wrote - at one, two, three,
 five, nine and sixteen beats and ragged between, across a block
 boundary, fp32/64/128, against the model.
 
+
+### R15. Forwarding: a dependent beat takes its operand as it lands
+
+After R14 an independent instruction cost its sixteen beats and a
+dependent one twenty: the producer's beat fires from F as a registered
+request, lands LATENCY + 1 cycles later, is written the cycle after,
+read the cycle after that, and fires two cycles on - four cycles of
+register file between a landing and the fire that needed it. On a
+single-pass tile the array accepts every cycle, so its validity line
+can be shadowed exactly in the sequencer (`fs`, LATENCY bits: the top
+is `al_ov`, the next lands next cycle, the one below the cycle after),
+and a dependent beat's address goes on the bus as soon as the
+producer's beat will have landed BY THE TIME F FIRES - two cycles on -
+rather than once it is in the bank. F then takes the operand from
+wherever it is: the array's output if it lands that cycle, the write in
+flight if it landed the cycle before, or the write that landed as B
+sampled, kept a cycle for the purpose; each merged word by word over
+what B read, which is what the bank holds for the words the write does
+not touch and `+0` where the entry was unwritten. Younger source first,
+because the same address can appear in two of them only as one
+instruction's write of it behind another's. A multi-pass tile keeps
+R14's rule and reads only the bank (`FWD = MUL_PASSES == 1`).
+
+| program | fp32, 128 lanes | fp64, 64 lanes | fp128, 32 lanes |
+|---|---|---|---|
+| twenty IANDs, one deposit | 607 -> 607 | 527 -> 527 | 487 -> 487 |
+| twenty dependent FMAs, one deposit | 701 -> 653 | 621 -> 573 | 581 -> 533 |
+
+Per instruction: 16 independent as before; a dependent one about 18
+- (653 - 18 - 297) / 19 = 17.8 - which is LATENCY + 1 - the fire is a registered request and the landing
+is what it waits for - so a dependent chain now costs what the array's
+depth costs and nothing more.
+
 ### What it measures
 
 `make seqcycles` (`tb/probe_seq_cycles.py`, a diagnostic beside
 `seqprobe`, not part of `make sim`): cycles per block through the unit
 bench's harness, four blocks, model RAM (so HBM latency is not in these;
-every cycle the state machine spends is). Four columns: before
-revision 5, after R9-R11 (0843b62), after R12-R13 (6e1c418), after R14.
+every cycle the state machine spends is). Five columns: before
+revision 5, after R9-R11 (0843b62), after R12-R13 (6e1c418), after R14
+(9891cfe), after R15.
 
 | program | fp32, 128 lanes | fp64, 64 lanes | fp128, 32 lanes |
 |---|---|---|---|
-| halt only, no deposit | 729 / 61 / 61 / 61 | 657 / 45 / 45 / 45 | 621 / 37 / 37 / 37 |
-| one IAND, one deposit | 1,219 / 299 / 297 / 297 | 955 / 219 / 217 / 217 | 823 / 179 / 177 / 177 |
-| one IAND, four deposits | 2,573 / 837 / 835 / 835 | 1,733 / 565 / 563 / 563 | 1,313 / 429 / 427 / 427 |
-| twenty IANDs, one deposit | 1,947 / 1,027 / 702 / 607 | 1,683 / 947 / 622 / 527 | 1,551 / 907 / 582 / 487 |
-| twenty dependent FMAs, one deposit | - / 1,005 / 720 / 701 | - / 925 / 640 / 621 | - / 885 / 600 / 581 |
+| halt only, no deposit | 729 / 61 / 61 / 61 / 61 | 657 / 45 / 45 / 45 / 45 | 621 / 37 / 37 / 37 / 37 |
+| one IAND, one deposit | 1,219 / 299 / 297 / 297 / 297 | 955 / 219 / 217 / 217 / 217 | 823 / 179 / 177 / 177 / 177 |
+| one IAND, four deposits | 2,573 / 837 / 835 / 835 / 835 | 1,733 / 565 / 563 / 563 / 563 | 1,313 / 429 / 427 / 427 / 427 |
+| twenty IANDs, one deposit | 1,947 / 1,027 / 702 / 607 / 607 | 1,683 / 947 / 622 / 527 / 527 | 1,551 / 907 / 582 / 487 / 487 |
+| twenty dependent FMAs, one deposit | - / 1,005 / 720 / 701 / 653 | - / 925 / 640 / 621 / 573 | - / 885 / 600 / 581 / 533 |
 
 Per instruction, from the twenty-IAND row: 38 cycles before R12, 21
 after, 16 after R14. The dependent row sits 18 cycles above the IAND
 row at every format, and that is the r1 stream the FMA reads and the
 IAND does not (sixteen beats and two of setup), not a wait: after R13,
 (720 - 18 - 297) / 19 is the same 21 as the IAND's; after R14 it is
-20 against the IAND's 16, the data dependence through the file. Per
+20 against the IAND's 16, the data dependence through the file; after
+R15 it is about 18, LATENCY + 1 and a cycle at the first beat. Per
 lane, one deposit: 9.5 -> 2.3 cycles at fp32, 14.9 -> 3.4 at fp64,
 25.7 -> 5.6 at fp128.
 

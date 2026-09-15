@@ -165,11 +165,12 @@
 // beats + LATENCY + a few cycles of state machine a link, and an
 // independent one the same, because every instruction waited for the
 // last result of the one before). An instruction costs its beats. A
-// dependent one waits, a beat at a time, for the beat it needs to
-// land: LATENCY + 4 cycles behind the beat that produced it (the fire
-// is a registered request, the landing a registered write, the read
-// a registered sample, and the lead two), so a dependent chain costs
-// 20 a link at sixteen beats.
+// dependent one waits, a beat at a time, for the beat it needs, and on
+// a single-pass tile takes it as it lands - forwarded to the fire
+// stage from the array's output, the write in flight or the write that
+// landed as the file was read - so a link of a dependent chain costs
+// LATENCY + 1 cycles at sixteen beats: the fire is a registered
+// request and the landing is what it waits for.
 
 `timescale 1ns/1ps
 
@@ -985,14 +986,18 @@ module cft_seq #(
   // COMBINATIONALLY on the issue path; at 256 entries it is a memory,
   // and a memory wants a registered read.
   //
-  // There is no cycle cost. `cur` holds an instruction from the cycle
-  // it is decoded until the cycle after its last address, and the F
-  // stage fires a beat two cycles after its address from kq2_*, which
-  // is this register a stage later - so what F sees is always the
-  // constants of the instruction that addressed the beat, across the
-  // cycle `cur` moves on to the next one. It is also strictly LESS
-  // work than before: one read per instruction where the issue path
-  // did one per beat, for a value that cannot change during a run.
+  // There is no cycle cost, and the read rides the pipe (2026-09-14,
+  // twice): the address stage captures the beat's three indices as it
+  // captures its opcode (pb_kidx_*), the bank is read from those under
+  // the hold the file's read registers hold under, and F fires from
+  // the result - the register operands' own two-stage lead, so the
+  // constants F sees are the constants of the instruction that
+  // addressed the beat whatever the array's pace. The first version
+  // read the bank from `cur` every clock and fired from that register
+  // a stage later, which is the same thing only when the array accepts
+  // every clock: a multi-pass tile holds the pipe between accepts,
+  // `cur` moves on, and an instruction's last beat fired with the next
+  // instruction's constants.
   //
   // In its own always_ff, not in the state machine's, and that is not
   // tidiness: one write port and three unconditional synchronous read
@@ -1001,11 +1006,14 @@ module cft_seq #(
   // flip-flops behind three 256:1 muxes. No read enable, for the same
   // reason - the addresses are stable whenever the answer is wanted,
   // so gating the read would buy nothing and cost a condition.
-  logic [BEAT_BITS-1:0] kq_a, kq_b, kq_c;
+  logic [BEAT_BITS-1:0] kq_a, kq_b, kq_c;   // the constants F fires with
+  logic [KAW-1:0] pb_kidx_a, pb_kidx_b, pb_kidx_c;   // the B stage's beat's indices
   always_ff @(posedge ap_clk) begin
-    kq_a <= kmem[k_idx_a];
-    kq_b <= kmem[k_idx_b];
-    kq_c <= kmem[k_idx_c];
+    if (!issue_hold) begin
+      kq_a <= kmem[pb_kidx_a];
+      kq_b <= kmem[pb_kidx_b];
+      kq_c <= kmem[pb_kidx_c];
+    end
   end
 
   // ---- state ----------------------------------------------------------
@@ -1064,10 +1072,16 @@ module cft_seq #(
                                (q_after >= 2'd1 && q_e0 == adm_rc));
   assign dep_p_c = (q_after >= 2'd2 && q_e1 == adm_rc) ? 2'd1 : 2'd0;
   // the per-beat wait: the producer is not the head yet, or its beat
-  // for the one being addressed has not landed
-  assign dep_hold_a = dep_v_a && (dep_pos_a != 2'd0 || wb_bt <= bt);
-  assign dep_hold_b = dep_v_b && (dep_pos_b != 2'd0 || wb_bt <= bt);
-  assign dep_hold_c = dep_v_c && (dep_pos_c != 2'd0 || wb_bt <= bt);
+  // for the one being addressed has not landed - or, forwarding, will
+  // not have landed by the time F fires (wb_bt + la counts the head's
+  // beats landed two cycles from now; a beat in that window that is
+  // not the head's means the head's are all in it, so overcounting
+  // only ever says yes when yes is right)
+  logic [5:0] wb_soon;
+  assign wb_soon = FWD ? wb_bt + 6'(la) : wb_bt;
+  assign dep_hold_a = dep_v_a && (dep_pos_a != 2'd0 || wb_soon <= bt);
+  assign dep_hold_b = dep_v_b && (dep_pos_b != 2'd0 || wb_soon <= bt);
+  assign dep_hold_c = dep_v_c && (dep_pos_c != 2'd0 || wb_soon <= bt);
   assign raw_hold = (st == S_ALU_ISSUE) &&
                     (dep_hold_a || dep_hold_b || dep_hold_c);
   assign rd_hold  = issue_hold || raw_hold;
@@ -1079,9 +1093,9 @@ module cft_seq #(
   // three-stage pipe that runs every unheld cycle whatever state the
   // machine is in: A puts a beat's three register addresses on the
   // file's bus (the state machine, in S_ALU_ISSUE), B is the file's
-  // read (the bank registers into the slice bus), F fires the beat into
-  // the array with the data now on the bus and the constants read two
-  // stages ago (kq2_*). Each stage carries the context of the
+  // read (the bank registers into the slice bus) and the constant
+  // bank's, F fires the beat into the array with the data now on the
+  // bus and the constants (kq_*). Each stage carries the context of the
   // instruction its beat belongs to, because A can be addressing one
   // instruction's first beat while F fires the previous one's last:
   // the next instruction is read under this one's issue (imem_q) and
@@ -1134,7 +1148,47 @@ module cft_seq #(
   logic [7:0]    pb_op, pf_op;
   logic [2:0]    pb_rnd, pf_rnd;
   logic          pb_ka, pb_kb, pb_kc, pf_ka, pf_kb, pf_kc;
-  logic [BEAT_BITS-1:0] kq2_a, kq2_b, kq2_c;   // the constants F fires with
+  // Forwarding (2026-09-14, the second step). On a single-pass tile
+  // the array accepts every cycle, so its validity line can be
+  // shadowed exactly (fs: fs[LATENCY-1] is al_ov, fs[LATENCY-2] lands
+  // next cycle, fs[LATENCY-3] the cycle after) and a dependent beat's
+  // address can go on the bus as soon as the producer's beat will have
+  // landed BY THE TIME F FIRES - two cycles on - rather than once it
+  // is in the bank. F then takes the operand from wherever it is: the
+  // array's output if it lands that cycle, the write in flight if it
+  // landed the cycle before, or the write that landed as B sampled
+  // (kept a cycle in wa1/wd1/wwe1), each merged word by word over
+  // what B read - which is what the bank holds for the words the
+  // write does not touch, and +0 where the entry was unwritten.
+  // Younger source first: the same address can appear in two of them
+  // only as one instruction's write of it behind another's. A
+  // multi-pass tile keeps R14's rule and reads only the bank.
+  localparam bit FWD = (MUL_PASSES == 1);
+  logic [LATENCY-1:0]   fs;
+  logic [1:0]           la;                    // landing within two cycles of now
+  logic                 we1;
+  logic [RFAW-1:0]      wa1;
+  logic [BEAT_BITS-1:0] wd1;
+  logic [WORDS-1:0]     wwe1;
+  logic [RFAW-1:0]      pf_aa, pf_ab, pf_ac;   // where F's beat was read from
+  logic                 h1_a, h2_a, h3_a, h1_b, h2_b, h3_b, h1_c, h2_c, h3_c;
+  logic [BEAT_BITS-1:0] op_a, op_b, op_c;      // F's register operands, forwarded
+  assign la = {1'b0, fs[LATENCY-1]} + {1'b0, fs[LATENCY-2]} + {1'b0, fs[LATENCY-3]};
+  always_ff @(posedge ap_clk) begin
+    if (!ap_rst_n) begin
+      fs <= '0; we1 <= 1'b0;
+    end else begin
+      // the array's own line shifts on its enable, which on a
+      // single-pass tile is every cycle; the shadow is only read there
+      if (al_rdy) fs <= {fs[LATENCY-2:0], al_valid};
+      we1 <= rf_we; wa1 <= rf_waddr; wd1 <= rf_wdata; wwe1 <= rf_wwe;
+    end
+  end
+  generate
+    if (FWD && LATENCY < 3) begin : g_fwd_latency
+      $error("cft_seq: forwarding looks two cycles ahead along the array's validity line - LATENCY must be at least 3");
+    end
+  endgenerate
   // The instruction memory's one read register: its address is pc + 1
   // while an instruction issues (the next one, read under the issue)
   // and pc otherwise (S_FETCH and the skip take their word from it a
@@ -1379,6 +1433,38 @@ module cft_seq #(
   endfunction
   logic [WORDS-1:0] wb_wwe;
   assign wb_wwe = wb_wwe_fn(wb_act, wpe_sh);
+  // Forwarding's hits and merge (declared with the pipe, above): the
+  // landing beat, the write in flight, the write that landed as B
+  // sampled - younger first - each merged over what B read.
+  assign h1_a = FWD && al_ov && ({q_rd0, wb_bt[NBSH-1:0]} == pf_aa);
+  assign h1_b = FWD && al_ov && ({q_rd0, wb_bt[NBSH-1:0]} == pf_ab);
+  assign h1_c = FWD && al_ov && ({q_rd0, wb_bt[NBSH-1:0]} == pf_ac);
+  assign h2_a = FWD && rf_we && (rf_waddr == pf_aa);
+  assign h2_b = FWD && rf_we && (rf_waddr == pf_ab);
+  assign h2_c = FWD && rf_we && (rf_waddr == pf_ac);
+  assign h3_a = FWD && we1 && (wa1 == pf_aa);
+  assign h3_b = FWD && we1 && (wa1 == pf_ab);
+  assign h3_c = FWD && we1 && (wa1 == pf_ac);
+  function automatic logic [BEAT_BITS-1:0] fwd_fn(
+      input logic h1, input logic h2, input logic h3,
+      input logic [WORDS-1:0] m1, input logic [WORDS-1:0] m2,
+      input logic [WORDS-1:0] m3,
+      input logic [BEAT_BITS-1:0] d1, input logic [BEAT_BITS-1:0] d2,
+      input logic [BEAT_BITS-1:0] d3, input logic [BEAT_BITS-1:0] base);
+    logic [BEAT_BITS-1:0] r;
+    begin
+      r = base;
+      for (int w = 0; w < WORDS; w = w + 1) begin
+        if (h1)      r[w*32 +: 32] = m1[w] ? d1[w*32 +: 32] : base[w*32 +: 32];
+        else if (h2) r[w*32 +: 32] = m2[w] ? d2[w*32 +: 32] : base[w*32 +: 32];
+        else if (h3) r[w*32 +: 32] = m3[w] ? d3[w*32 +: 32] : base[w*32 +: 32];
+      end
+      fwd_fn = r;   // the name, not `return`: Yosys reads this file too
+    end
+  endfunction
+  assign op_a = fwd_fn(h1_a, h2_a, h3_a, wb_wwe, rf_wwe, wwe1, al_d, rf_wdata, wd1, rf_rdata_a);
+  assign op_b = fwd_fn(h1_b, h2_b, h3_b, wb_wwe, rf_wwe, wwe1, al_d, rf_wdata, wd1, rf_rdata_b);
+  assign op_c = fwd_fn(h1_c, h2_c, h3_c, wb_wwe, rf_wwe, wwe1, al_d, rf_wdata, wd1, rf_rdata_c);
   // The same mask for the beat the SCRATCH states are working on. A
   // store is a register write for P3's purposes and a load writes rd,
   // so both are masked by exactly this - an all-inactive loop body
@@ -1743,6 +1829,7 @@ module cft_seq #(
       lane_cursor <= '0; slot_cursor <= '0;
       pc <= '0; bt <= '0; wb_bt <= '0; lp_sp <= '0; q_n <= '0;
       pb_v <= 1'b0; pf_v <= 1'b0; nxt_ok <= 1'b0;
+      pf_aa <= '0; pf_ab <= '0; pf_ac <= '0;
       dep_v_a <= 1'b0; dep_v_b <= 1'b0; dep_v_c <= 1'b0;
       // The constant bank is read unconditionally on every cycle, so
       // the instruction word that supplies its three addresses must
@@ -2797,7 +2884,7 @@ module cft_seq #(
       // B: the file reads what A addressed (the bank registers, in the
       // generate above, sample under the same hold), and the context
       // follows. F: the beat fires with the data on the bus and the
-      // constants read two stages ago; the request it makes stands
+      // constants its indices fetched a stage ago; the request it makes stands
       // until taken, and is re-made for the next beat the cycle it is.
       // A held on a dependent beat (raw_hold) is simply a cycle A put
       // nothing on the bus: a bubble, drained like any other beat.
@@ -2806,18 +2893,19 @@ module cft_seq #(
         pb_op  <= c_op;
         pb_rnd <= c_rnd;
         pb_ka  <= c_ka; pb_kb <= c_kb; pb_kc <= c_kc;
+        pb_kidx_a <= k_idx_a; pb_kidx_b <= k_idx_b; pb_kidx_c <= k_idx_c;
         pf_v   <= pb_v;
         pf_op  <= pb_op;
         pf_rnd <= pb_rnd;
         pf_ka  <= pb_ka; pf_kb <= pb_kb; pf_kc <= pb_kc;
-        kq2_a  <= kq_a; kq2_b <= kq_b; kq2_c <= kq_c;
+        pf_aa  <= rf_raddr_a; pf_ab <= rf_raddr_b; pf_ac <= rf_raddr_c;
         if (pf_v) begin
           al_valid <= 1'b1;
           al_op <= pf_op;
           al_rnd <= pf_rnd;
-          al_a <= pf_ka ? kq2_a : rf_rdata_a;
-          al_b <= pf_kb ? kq2_b : rf_rdata_b;
-          al_c <= pf_kc ? kq2_c : rf_rdata_c;
+          al_a <= pf_ka ? kq_a : op_a;
+          al_b <= pf_kb ? kq_b : op_b;
+          al_c <= pf_kc ? kq_c : op_c;
         end
       end
       // the read register holds imem[pc + 1] from the cycle after an
