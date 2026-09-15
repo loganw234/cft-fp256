@@ -666,11 +666,19 @@ nothing in the frames (`remote.h` and `cft-serve.c` are unchanged: no
 new opcode, and if you find you need one, that is a report, not an
 edit). `host/tests/device_test.c` - one leg beside `compare`.
 `host/tests/remote_test.c` - the indexed case in `identity_tests`.
-`bindings/wasm/wasm_api.c` and `bindings/node/core.mjs` - `cftw_run_ex`
-and `runEx` grow the six arguments; `bindings/node/test.mjs` gains the
-case. The wasm rebuild is the lead's (say in your report that it is
-due). `docs/HOSTAPI.md` - the `cft_run_ex` paragraph under the 0.14
-heading P0 left.
+`bindings/wasm/wasm_api.c` - a `cftw_run_ex` export as a pure
+pass-through of `cft_run_ex` (the scalar mask and the three tables),
+safe on its own because nothing `cwrap`s it until the lead's rebuild.
+**Corrected 2026-09-15 11:58 (P2's finding):** this brief said
+`cftw_run_ex` and an elementwise `runEx` "grow the six arguments"; they
+do not exist - ABI 0.12's `cft_run_ex` was never bound in wasm or node,
+and `Program.runEx` in `bindings/node/core.mjs` is the PROGRAM run. The
+JavaScript half (`bindings/node/lib.mjs`'s eager `cwrap` table,
+`core.mjs`, `test.mjs`) is the lead's, in the same commit as the module
+rebuild, because a `cwrap` of an export the shipped module lacks throws
+at import and takes every node gate with it. The wasm rebuild is the
+lead's (say in your report that it is due). `docs/HOSTAPI.md` - the
+`cft_run_ex` paragraph under the 0.14 heading P0 left.
 
 Not yours: `rtl/`, `python/cft_golden/seq.py`, `host/src/program.c`
 (P3 is in them), `cft.h`, `backend.h`.
@@ -991,7 +999,9 @@ The lead watches the whole directory. Parcels watch `urgent/`.
   script from the seq6 day), then the card day: `device-test` with the
   new legs, the P1 script at the gravity shape, P3's half-masked probe,
   P4's segmented timing against the seq6 entry's table.
-- **The bindings and the docs sweep**: the wasm rebuild, the Arduino
+- **The bindings and the docs sweep**: the wasm rebuild, with the
+  elementwise `runEx` bound in JavaScript for the first time (P2's
+  finding, 2026-09-15: it never was), the Arduino
   vendor copy (`bindings/arduino/sync.py`), `CAPABILITIES.md` rows,
   `docs/COMPATIBILITY.md`'s 0.14 table, `docs/VALIDATION.md`, the
   README counts (`python/check_docs_index.py`), `docs/ROADMAP.md`'s
