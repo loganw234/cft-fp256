@@ -474,6 +474,50 @@ Every repetition must produce the identical checksum. A determinism
 claim that holds for one run and not for a thousand is not a
 determinism claim.
 
+## Round 2's additions to the day (2026-09-15)
+
+The round that built the gather, the composed elementwise gather, the
+lane mask and the beat-wide accumulator (docs/ROUND2.md) left these for
+the card, each a claim a host cannot hold. The image is the round's
+merged main at 135 MHz (`KERNEL_FREQ=135000000`, never the script's
+default), built once at the end of wave 2.
+
+- **`device-test` with the new legs**, both `-b` and not: the indexed
+  program leg's third assertion (`compare_buffers_indexed`) fires only
+  where the device reports resident buffers - on the software backend
+  it is not counted - and says whether the second run BOUND the table
+  rather than staging it again. The first run of that leg on a card is
+  the first time that assertion has counted.
+- **`host/tools/gathertime.py` at the gravity shape**: one HBM round
+  trip a gathered element is the model's prediction (the read side
+  keeps one burst in flight); the number goes into docs/ROADMAP.md's
+  ask 1 and 4 entries and docs/SEQUENCER.md R16.
+- **The composed elementwise run's `bus_out` and STATUS word.** On a
+  device the composed route returns `cft_program_run_ex`'s STATUS where
+  a dense elementwise run returns the engine's; both are zero on a
+  host, so no gate compares them (V2). Run an indexed `cft_run_ex` and
+  its dense twin on the tile and compare the words.
+- **P3's half-masked probe** (`tb/probe_seq_cycles.py`'s masked rows
+  have the model-memory numbers: dense plus four cycles and one read a
+  block, all-masked equal to half-masked): on the card the extra read
+  is one HBM round trip a block. Measure dense, half-masked and
+  all-masked at each format; the mask buys bytes, flags and the early
+  exit, never compute, and the card's number is the one docs/ROADMAP.md's
+  ask 5 entry wants.
+- **P4's segmented timing against the seq6 entry's table**
+  (docs/SEQUENCER.md "What it measures"): fp32 `CFT_SUM` 11.3147 -> 1.4152
+  cycles a beat marginal on the model; the per-segment flush (~100
+  cycles) dominates a short segment, so measure `cft_reduce_seg` at the
+  requester's segment lengths as well as whole-array sums.
+- **The area column.** V3 measured the mask's logic at +59% of
+  `cft_seq`'s own cells after a full yosys pass (before P3's rewrite of
+  the block slice); the image's utilisation and WNS say what it cost
+  in the shell, and that goes beside the cycle numbers.
+- **The under-promising word**: a remote handle publishes its server's
+  CAPS2[9] and [10] while both routes are the client's (docs/REMOTE.md);
+  a card-backed `cft-serve` fronting a tile without a feature is the
+  first place that sentence is reachable.
+
 ## What to record
 
 The manifest format already exists; the run record should match it in

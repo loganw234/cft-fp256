@@ -2896,6 +2896,41 @@ above was 2.3 us an element at binary128 with the instruction cost at
 the R14 image measured it at 1.25 us an element, the older route at
 1.92 (docs/VALIDATION.md, the same evening).
 
+### Library debts the round's verifiers found (2026-09-15)
+
+Each is a number or a sentence from a verifier's report, none a wrong
+bit; recorded here so the next round starts from them rather than
+rediscovering them.
+
+- **A program run is not split across tiles today.** `cftx_program_run`
+  uses `D.tiles[0]` and never calls `cft_plan_slices` (the slicing is
+  `cftx_run`'s), so P3's per-tile mask repack always starts at bit 0
+  and a multi-tile image runs a program on one tile. The scale-out
+  doctrine above assumes otherwise for elementwise work; for programs
+  it is a sentence that does not exist yet. (V3.)
+- **Beat skipping for masked lanes** is a revision-7 item: the sequencer
+  issues per beat and the active bit decides what is written, so the
+  lane mask saves bytes, flags and the early exit and no compute
+  (P3's table in docs/SEQUENCER.md R17: dense plus four cycles and one
+  read a block, all-masked equal to half-masked). Buying the compute
+  means skipping a beat with no active lane in the issue pipe (R14/R15)
+  and a beat nobody reads in the stream loads (R10); P3's numbers are
+  the before-side.
+- **`ensure_capacity` sizes all four operand BOs to the largest unbound
+  source** (V1): memory, not correctness; a caller with one large
+  indexed source and three small streams pays for four large buffers.
+- **Several dense refusals set no `cft_last_error` sentence** (a bad
+  format, attribute or reduction opcode; `d` NULL) while
+  `cft_last_error()` is sticky, so a caller can read the previous
+  failure's message after them (V2); the round's own refusals all
+  speak, which trains a caller to trust the string. The program-run
+  path's two early returns had the same shape and were given
+  sentences at the round's end.
+- **The mask's area** (V3): `mask_blk_fn`'s one-hot beat slice
+  elaborated to a priority chain worth +59% of `cft_seq`'s cells after
+  a full yosys pass; rewritten as a select before the image was built,
+  with the before and after in docs/VALIDATION.md's P3 entry.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
