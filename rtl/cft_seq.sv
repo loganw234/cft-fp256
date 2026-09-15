@@ -1928,31 +1928,45 @@ module cft_seq #(
   // is the NBEATS guard above (1..16, a power of two): NBEATS << 3 is
   // the widest a block can be and 128 is at most half a beat.
   //
-  // The slice is picked by an EQUALITY on a small set of elaboration-
-  // time positions, not by shifting the beat: blk_base is a multiple of
-  // `blk_cap = NBEATS << lpb_sh` and therefore of NBEATS whatever the
-  // format, so the only positions a block can start at are the
-  // multiples of NBEATS - sixteen of them in a beat at NBEATS 16, one
-  // comparison each. The first draft computed the block's width inside
-  // the loop and made its BOUND depend on it, which is what yosys means
-  // by "2nd expression of procedural for-loop is not constant"; every
-  // bound here is a parameter expression and every index is a literal.
+  // The block's bits are a SELECT, and the shape of the select is the
+  // whole cost of this feature.
   //
-  // The `& (BEAT_BITS-1)` on the bit select is not arithmetic: it makes
-  // every one of the elaborated indices legal, including the ones the
-  // guard beside it has already excluded. Nothing reads a bit at or
-  // past the block's own lanes, because `bn` is blk_n.
+  // `blk_base` is a multiple of the block's lane count, which is
+  // `NBEATS << lpb_sh` and therefore a multiple of NBEATS at every
+  // format. So a beat divides into `BEAT_BITS / NBEATS` slots of
+  // NBEATS bits, a block always begins at a slot boundary, and the
+  // block is `BLK_LANES / NBEATS` consecutive slots. Reading it that
+  // way makes each one an INDEXED PART-SELECT of CONSTANT WIDTH - one
+  // mux a slot, eight of them.
+  //
+  // The first version asked, for each of the sixteen positions and each
+  // of the 128 lanes, whether `mbit == j * NBEATS`, and assigned one
+  // bit under it. That is the same function and it elaborates to 2,048
+  // conditional updates in a priority chain: V3 measured this module at
+  // 28,626 cells and 22,911 $mux against 9,823 and 4,792 before the
+  // mask existed, and stubbing this function's body alone accounted for
+  // ~96% of the difference. A lane mask is worth a few muxes; it is not
+  // worth a third of the sequencer.
+  //
+  // The `& (BEAT_BITS/NBEATS - 1)` on the slot index is not arithmetic:
+  // it keeps every elaborated part-select inside the beat for the slots
+  // a NARROW format's block does not have (at fp256 a block is one slot
+  // and the other seven wrap). Nothing reads a lane at or past blk_n -
+  // `blk_act_fn` zeroes those slots before the AND, the count drain
+  // tests `cl < blk_n`, and neither element drain walks past it - so
+  // what those slots hold is not a value any run can distinguish, for
+  // the reason the scratch wipe's own comment gives about slots above
+  // the program's reach.
   function automatic [BLK_LANES-1:0] mask_blk_fn(input [BEAT_BITS-1:0] beat,
-                                                 input [LB:0] bn,
                                                  input [7:0] mbit);
     logic [BLK_LANES-1:0] v;
+    int slot;
     begin
       v = '0;
-      for (int j = 0; j < BEAT_BITS / NBEATS; j = j + 1)
-        if (32'(mbit) == j * NBEATS)
-          for (int t = 0; t < BLK_LANES; t = t + 1)
-            if ((j * NBEATS + t) < BEAT_BITS && t < 32'(bn))
-              v[t] = beat[(j * NBEATS + t) & (BEAT_BITS - 1)];
+      slot = 32'(mbit) >> NBSH;
+      for (int c = 0; c < BLK_LANES / NBEATS; c = c + 1)
+        v[c*NBEATS +: NBEATS] =
+            beat[((slot + c) & (BEAT_BITS/NBEATS - 1)) * NBEATS +: NBEATS];
       mask_blk_fn = v;
     end
   endfunction
@@ -2574,7 +2588,7 @@ module cft_seq #(
 
         S_MSK_W: begin
           if (m_rd_rvalid && m_rd_rready) begin
-            mask_lane <= mask_blk_fn(m_rd_rdata, blk_n, blk_base[7:0]);
+            mask_lane <= mask_blk_fn(m_rd_rdata, blk_base[7:0]);
             m_rd_rready <= 1'b0;
             rd_stream_on <= 1'b0;
             st <= S_ZERO;
@@ -3313,7 +3327,11 @@ module cft_seq #(
         // through the same write master. It is NOT masked by the
         // active bit - it is a drain, like the deposit drain, and a
         // lane that converged early still has state worth carrying to
-        // the next call. Padding lanes write nothing, because the
+        // the next call. It IS masked by the CALLER'S bit (R17): a
+        // lane the mask cleared was never this run's, so its slots
+        // keep the caller's bytes - the two questions differ exactly
+        // here, and S_SO_PACK's strobe below is where the difference
+        // is written. Padding lanes write nothing, because the
         // element count is blk_n * n_scratch_out.
         S_SO_SETUP: begin
           lane_cursor <= '0;

@@ -3704,3 +3704,147 @@ async def masked_and_gathered_compose(dut):
         fmt, prog, src, operands(fmt, n, 7802), operands(fmt, n, 7803),
         n, _keep(n, 4), "fp64: a gathered block, masked", idx_a=tbl)
     dut._log.info("a mask and a table compose")
+
+
+@cocotb.test()
+async def masked_actall_is_invisible_in_bytes_and_must_be_caught_elsewhere(dut):
+    """V3's gate hole, closed (2026-09-15).
+
+    `ACTALL` reading the block's lanes instead of the CALLER's revives a
+    masked lane in hardware - and every case above still PASSES, because
+    a revived lane's deposits, its count and its scratch-out slots are
+    each held back by their own drain strobe. The bytes cannot show it.
+
+    What is NOT behind a strobe is the run's sticky FLAGS word and the
+    err bits beside it, so those are what this case reads:
+
+    1. every lane dropped by SETACT, then ACTALL, then a MUL that
+       overflows IN THE MASKED LANE ALONE. FLAGS must be 0; a build
+       whose ACTALL ignores the mask gives 0b10100 (overflow, inexact).
+    2. the same shape for DEPOSIT OVERFLOW: after ACTALL, a second
+       SETACT leaves only the masked lane a candidate, and two deposits
+       into a one-slot budget. err[3] must be clear; a build that
+       revived the lane raises it.
+
+    Both at more than one format, because the block geometry the revived
+    lane sits in differs at each.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for name in ("fp32", "fp64", "fp256"):
+        fmt = FORMATS[name]
+        lpb = lanes_per_block(fmt)
+        n = lpb + max(1, lpb // 4)          # a ragged block, on purpose
+        keep = _keep(n, 0)                  # every third lane masked
+        k = next(i for i in range(n) if not keep[i])
+        one = sf.one_bits(fmt)
+        big = sf.max_normal_bits(fmt)
+
+        # 1. the flags. Only lane k's operands can signal, and lane k is
+        #    masked; every other lane multiplies 1.0 by 1.0.
+        a = [one] * n
+        b = [one] * n
+        a[k] = b[k] = big
+        prog = seq.Program(fmt, [
+            seq.setact(5),                  # r5 is +0: every lane drops
+            seq.actall(),                   # ...and the caller's return
+            seq.alu(sf.OP_MUL, rd=3, ra=0, rb=1),
+            seq.deposit(3), seq.halt()], max_deposits=1)
+        want = seq.run(prog, a, b, b, lane_mask=keep)
+        assert want.flags == 0, (
+            f"{name}: the model says this masked run signals "
+            f"{want.flags:#07b}, so the case is not the one intended")
+        loud = seq.run(prog, a, b, b)
+        assert loud.flags & sf.FLAG_OVERFLOW, (
+            f"{name}: lane {k} does not overflow unmasked, so a revived "
+            f"lane would raise nothing and this case could not fail")
+        await bench.masked(fmt, prog, a, b, b, n, keep,
+                           f"{name}: ACTALL, then an overflow in the "
+                           f"masked lane alone")
+
+        # 2. the deposit-overflow status bit. After ACTALL the caller's
+        #    lanes are back; the second SETACT drops every lane whose
+        #    stream-a element is +0, which is all of them EXCEPT lane k -
+        #    and lane k is masked, so in a correct build nothing is left
+        #    active and nothing deposits at all.
+        a2 = [sf.zero_bits(fmt)] * n
+        a2[k] = one
+        prog2 = seq.Program(fmt, [
+            seq.setact(5),                  # every lane drops
+            seq.actall(),                   # the caller's lanes return
+            seq.setact(0),                  # ...and only lane k survives
+            seq.deposit(0), seq.deposit(0), # two into a one-slot budget
+            seq.halt()], max_deposits=1)
+        want2 = seq.run(prog2, a2, [one] * n, [one] * n, lane_mask=keep)
+        assert want2.status == 0 and want2.counts == [0] * n, (
+            f"{name}: the model's masked run already deposits or "
+            f"overflows, so this case is not the one intended")
+        unmasked2 = seq.run(prog2, a2, [one] * n, [one] * n)
+        assert unmasked2.status & seq.STATUS_DEPOSIT_OVERFLOW, (
+            f"{name}: lane {k} does not overflow its budget when it is "
+            f"NOT masked, so a revived lane would raise nothing")
+        await bench.masked(fmt, prog2, a2, [one] * n, [one] * n, n, keep,
+                           f"{name}: ACTALL, then a deposit overflow "
+                           f"reachable only in the masked lane")
+    dut._log.info("ACTALL that revived a masked lane would be invisible "
+                  "in the deposits and is caught in FLAGS and err[3]")
+
+
+@cocotb.test()
+async def masked_scratch_out_drains_a_converged_lane(dut):
+    """V3's case (2026-09-15): the scratch-out drain is NOT masked by
+    the active bit and IS masked by the caller's, and only a run with
+    both kinds of lane in it can tell the two apart.
+
+    Every case above masks lanes but never drops one with SETACT, so
+    "a lane that converged still drains its scratch-out" went untested:
+    a drain masked by the ACTIVE bit would have passed all of them.
+    Here a quarter of the lanes converge and a third are masked, so
+    every combination is present in one run - and at fp256 as well as
+    fp32, because the drain's element selection differs with the beat.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for name in ("fp32", "fp256"):
+        fmt = FORMATS[name]
+        lpb = lanes_per_block(fmt)
+        n = lpb + max(1, lpb // 3)
+        keep = _keep(n, 0)                    # every third lane masked
+        one = sf.one_bits(fmt)
+        zero = sf.zero_bits(fmt)
+        # r1 is +0 in every fourth lane, so SETACT drops exactly those -
+        # and they are NOT the same lanes the mask clears.
+        b = [one if i % 4 else zero for i in range(n)]
+        conv = [i for i in range(n) if b[i] == zero]
+        assert any(keep[i] for i in conv), (
+            f"{name}: no lane both converges and is the caller's, so "
+            f"this case cannot see the difference it exists for")
+        prog = seq.Program(fmt, [
+            seq.stl(0, 0),                    # slot 0 <- r0, every lane
+            seq.setact(1),                    # the +0 lanes drop out
+            seq.stl(0, 1),                    # slot 1 <- r0, the rest
+            seq.deposit(0), seq.halt()],
+            max_deposits=1, flags=seq.FLAG_SCRATCH_IO,
+            n_scratch_in=0, n_scratch_out=2)
+        a = operands(fmt, n, 7900 + n)
+        want = await bench.masked(
+            fmt, prog, a, b, b, n, keep,
+            f"{name}: a converged lane drains its scratch-out under a "
+            f"mask")
+        # ...and the run really did have all three kinds of lane in it.
+        assert any(not keep[i] for i in range(n)), f"{name}: no masked lane"
+        assert any(keep[i] and b[i] == zero for i in conv), \
+            f"{name}: no lane that converged AND belongs to the caller"
+        assert any(keep[i] and b[i] != zero for i in range(n)), \
+            f"{name}: no lane that stayed active"
+        # slot 1 separates them: a converged lane never reached the
+        # second STL, so its slot 1 is +0 while an active lane's is r0.
+        for i in range(n):
+            if not keep[i]:
+                continue
+            want_s1 = zero if b[i] == zero else (a[i] & ((1 << fmt.width) - 1))
+            assert want.scratch_out[i * 2 + 1] == want_s1, (
+                f"{name}: lane {i}: the model's slot 1 is not what "
+                f"convergence says, so the case is mis-built")
+    dut._log.info("the scratch-out drain skips a masked lane and keeps a "
+                  "converged one")
