@@ -250,6 +250,83 @@ WASM_EXPORT int cftw_run(cft_device *dev, int op, int fmt, int rnd,
                         a, b, c, d, (size_t)n, flags_out, bus_out);
 }
 
+/* The same elementwise run, with cft_elem_args   (ABI 0.12 and 0.14)
+ *
+ * cft_run_ex is the entry point that carries what cft_run's eleven
+ * fixed arguments cannot: 0.12's `scalar_mask` - one operand is a
+ * single element applying to the whole run - and 0.14's three INDEX
+ * TABLES, one per operand, element i reading source[idx[i]] with
+ * CFT_IDX_NONE reading as +0.
+ *
+ * Wrapped for the reason every other wrapper here exists and then
+ * some: it is the one library entry point of 0.12 that this module
+ * never carried, so a JavaScript caller could pass neither a scalar
+ * operand nor a table. The C had both since 2026-09-12 and
+ * 2026-09-15; the module simply had no door.
+ *
+ * The struct is assembled HERE, out of arguments in a fixed order,
+ * exactly as cftw_program_run_ex assembles cft_run_args, and for the
+ * identical reason: struct_size is a handshake between a caller and a
+ * library, and a JavaScript caller writing struct offsets into the
+ * heap is the silent ABI coupling that handshake exists to prevent.
+ * struct_size is filled in by this file, so the layout never crosses.
+ *
+ * The order is cft_elem_args' own, field for field, so the two read
+ * side by side - the three tables and then the three source lengths,
+ * as the struct appends them, and not interleaved into something
+ * tidier. Eighteen arguments is not pretty; a wrapper whose argument
+ * list is a memory layout would be worse.
+ *
+ * Nothing is checked here. A table on an operand the opcode does not
+ * read, an index at or past its source, an operand that is both
+ * scalar and indexed, a reserved mask bit, `d` overlapping an operand
+ * with a table present: every one of those is refused BY NAME in
+ * cft_run_ex, in the order cft.h specifies, and the sentence reaches
+ * JavaScript through cftw_last_error. A second opinion in this file
+ * is the failure the argument checks exist to prevent. */
+WASM_EXPORT int cftw_run_ex(cft_device *dev, int op, int fmt, int rnd,
+                            const void *a, const void *b, const void *c,
+                            void *d, uint32_t n, uint32_t scalar_mask,
+                            uint32_t *flags_out, uint32_t *bus_out,
+                            const uint32_t *idx_a, const uint32_t *idx_b,
+                            const uint32_t *idx_c,
+                            uint32_t idx_a_src, uint32_t idx_b_src,
+                            uint32_t idx_c_src)
+{
+    cft_elem_args args;
+    memset(&args, 0, sizeof args);
+    args.struct_size = sizeof args;
+    args.a           = a;
+    args.b           = b;
+    args.c           = c;
+    args.d           = d;
+    args.n           = (size_t)n;
+    args.scalar_mask = scalar_mask;
+    args.flags_out   = flags_out;
+    args.bus_out     = bus_out;
+    args.idx_a       = idx_a;
+    args.idx_b       = idx_b;
+    args.idx_c       = idx_c;
+    args.idx_a_src   = (size_t)idx_a_src;
+    args.idx_b_src   = (size_t)idx_b_src;
+    args.idx_c_src   = (size_t)idx_c_src;
+    return (int)cft_run_ex(dev, (cft_op)op, (cft_format)fmt, (cft_round)rnd,
+                           &args);
+}
+
+/* CFT_IDX_NONE, projected for the reason cftw_flags_all projects
+ * CFT_FLAGS_ALL: a macro is the one part of a header the far side of
+ * a wasm boundary cannot reach, and a JavaScript caller building an
+ * index table needs the value BEFORE it builds one. Transcribing
+ * 0xFFFFFFFF on the other side would be a number that can go stale
+ * against a header, and stale in the worst direction - a value this
+ * side calls "none" that the library reads as an index is a silent
+ * gather of some element rather than a refusal. */
+WASM_EXPORT uint32_t cftw_idx_none(void)
+{
+    return (uint32_t)CFT_IDX_NONE;
+}
+
 WASM_EXPORT int cftw_reduce(cft_device *dev, int op, int fmt, int rnd,
                             const void *a, const void *b,
                             void *d, uint32_t n,

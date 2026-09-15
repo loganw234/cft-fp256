@@ -179,6 +179,24 @@ export function seqFeatureNames(features) {
   return out;
 }
 
+/** CFT_IDX_NONE (ABI 0.14) - the index that reads as the format's
+ *  POSITIVE ZERO instead of an element, so a lane whose row has run
+ *  out contributes nothing to a fold and a row of unequal lengths
+ *  needs no second table. Not an index: every real index is below its
+ *  source's declared length, and this one is never out of range.
+ *
+ *  A macro, so this is a transcription and audit() holds it to
+ *  cftw_idx_none() for the reason FLAGS_ALL and
+ *  STATUS_DEPOSIT_OVERFLOW are held to theirs. The consequence of a
+ *  stale copy is sharper than either: a value this package called
+ *  "none" that the library reads as an INDEX would be a silent gather
+ *  of some element, and a value the library calls none that this
+ *  package does not would be refused as out of range.
+ *
+ *  Written as a number rather than ~0 because it crosses as a uint32
+ *  and JavaScript's ~0 is -1. */
+export const IDX_NONE = 0xffffffff;
+
 /** The IEEE exception names set in a flag word. An unknown bit is
  *  reported as a number rather than dropped: a flag word this package
  *  cannot name is news, not noise. */
@@ -415,6 +433,23 @@ async function instantiate() {
     capsMaxScratch:  M.cwrap("cftw_caps_max_scratch", n, [n]),
 
     run:          M.cwrap("cftw_run", n, [n,n,n,n,n,n,n,n,n,n,n]),
+    // cft_run_ex with cft_elem_args (ABI 0.12's scalar mask, 0.14's
+    // three index tables), positionally in the struct's own field
+    // order with wasm_api.c assembling the struct on the far side -
+    // programRunEx's arrangement, for programRunEx's reason. The
+    // eighteen are a, b, c, d, n, scalar_mask, flags_out, bus_out,
+    // then idx_a/idx_b/idx_c and their three source lengths, behind
+    // the usual dev/op/fmt/rnd.
+    //
+    // Never bound until 2026-09-15: the C has had this entry point
+    // since 0.12 and the module had no door to it, so neither a
+    // scalar operand nor a table was reachable from JavaScript.
+    // verify.mjs holds the shipped module to the export by name.
+    runEx:        M.cwrap("cftw_run_ex", n,
+                          [n,n,n,n,n,n,n,n,n,n,n,n,n,n,n,n,n,n]),
+    // CFT_IDX_NONE as a call, for the reason flagsAll is one; audit()
+    // holds the IDX_NONE above to it.
+    idxNone:      M.cwrap("cftw_idx_none", n, []),
     reduce:       M.cwrap("cftw_reduce", n, [n,n,n,n,n,n,n,n,n,n]),
     reduceSeg:    M.cwrap("cftw_reduce_seg", n, [n,n,n,n,n,n,n,n,n,n,n]),
     div:          M.cwrap("cftw_div", n, [n,n,n,n,n,n,n,n,n]),
@@ -662,6 +697,22 @@ function audit(M, C) {
                `0x${moduleOverflow.toString(16)} in the module, ` +
                `0x${STATUS_DEPOSIT_OVERFLOW.toString(16)} here - the ` +
                `sequencer's status bit moved and this package did not`);
+  // CFT_IDX_NONE (ABI 0.14) is a macro too, and the one whose stale
+  // copy would be least visible: a table entry this package calls
+  // "none" and the library reads as an INDEX gathers some element and
+  // returns a plausible number, refusing nothing.
+  //
+  // This is also the check that makes the module and this file land
+  // together. cwrap does not throw on an export the module lacks - it
+  // returns undefined, measured on 6.0.9 - so a call table alone
+  // would go on loading happily and fail at the first mapEx. A CALL
+  // here fails at import instead, which is where a package and a
+  // module that disagree should fail.
+  const moduleIdxNone = C.idxNone() >>> 0;
+  if (moduleIdxNone !== IDX_NONE)
+    wrong.push(`CFT_IDX_NONE is 0x${moduleIdxNone.toString(16)} in the ` +
+               `module, 0x${IDX_NONE.toString(16)} here - the index that ` +
+               `reads as +0 moved and this package did not`);
   // ABI 0.9's five: the program header's flag bit and the four
   // published feature bits. Same argument as the two above, and a
   // sharper consequence for one of them - a stale SEQ_FEAT_BANK_PTR
@@ -763,6 +814,27 @@ export class Scratch {
     const vec = this.alloc(4 * Math.max(ptrs.length, 1));
     ptrs.forEach((p, i) => { this.M.HEAPU32[(vec >> 2) + i] = p; });
     return vec;
+  }
+
+  /** n uint32 values - an INDEX TABLE, as cft_elem_args and
+   *  cft_run_args take one (ABI 0.14). Written through the module's
+   *  own HEAPU32 rather than a view kept across the allocation, for
+   *  putI64's reason.
+   *
+   *  The byte count is `4 * values.length` and the loop writes
+   *  exactly that many: an index table shorter than the run's `n` is
+   *  a read past the buffer INSIDE the library, not a JavaScript
+   *  error, so this is the one place here where a count off by one is
+   *  a memory bug rather than a wrong answer. Measured both ways in a
+   *  copy of this package on 2026-09-15 - allocate and write one
+   *  short and the library's bound check refuses on heap garbage;
+   *  write one short into a right-sized block and the last lane
+   *  silently gathers element 0. */
+  putU32(values) {
+    const p = this.alloc(4 * Math.max(values.length, 1));
+    for (let i = 0; i < values.length; i++)
+      this.M.HEAPU32[(p >> 2) + i] = values[i] >>> 0;
+    return p;
   }
 
   /** n int64 values. Written through a BigInt64Array view taken here

@@ -173,6 +173,41 @@ These are host operations: no device pass, no bus word, and nothing
 here computes them - each call is one `cftw_*` call on bytes, exactly
 like every other operation in this package.
 
+## Scalar operands and index tables: `mapEx` (ABI 0.12 and 0.14)
+
+`map()` wants every operand to be an array of the run's length.
+`mapEx()` is the same elementwise run through `cft_run_ex`, which
+carries the two things `cft_run`'s fixed arguments cannot.
+
+```js
+ctx.mapEx("add", { a: xs, c: ys });              // exactly map("add", xs, null, ys)
+ctx.mapEx("mul", { a: [k], b: ys, scalar: "a" }); // k applies to the whole run
+ctx.mapEx("add", { a: src, c: ys, idxA: table }); // element i is src[table[i]]
+```
+
+A **scalar** operand is a one-element array named in `scalar` (`"a"`,
+or `["a", "b"]`). It computes exactly what an array of copies would:
+`d[i] = op(a[0], b[i], c[i])`. What it saves is what crosses the bus,
+and only on a device - `cft_caps().seqFeatures` says which.
+
+An **index table** is `n` entries (a `Uint32Array`, or an array of
+numbers) and *the operand array becomes the source*, of any length:
+element `i` of the run is `a[idxA[i]]`, and `IDX_NONE` - exported from
+this package - reads as the format's `+0` rather than as an element,
+so a row that has run out contributes nothing. An identity table
+returns the dense run's bits by construction, because the contract
+defines the indexed run as the dense run over the gathered operands.
+
+The rules are the library's and arrive by name: a table on an operand
+the opcode does not read (ADD reads `a` and `c`, MUL `a` and `b`, FMA
+and SELECT all three), an index at or past the source, an operand that
+is both scalar and indexed. `n` comes from the arrays the way `map()`'s
+does, and is only ever passed explicitly when every operand is scalar.
+
+Do not confuse it with `Program.runEx` - that one issues a sequencer
+program and takes a bank, deposits and a scratch block. This is
+`ctx.mapEx`; that is `prog.runEx`.
+
 ## Programs: the orbit sequencer
 
 `cft_run` applies one operation to every element. A **program** applies
