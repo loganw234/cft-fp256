@@ -523,21 +523,16 @@ static void caps_block_tests(cft_device *rm, cft_device *sw)
           "CAPS answers %u bytes, got %lu", (unsigned)CFTR_CAPS_BYTES,
           (unsigned long)len);
     if (resp && len == CFTR_CAPS_BYTES) {
-        /* CFT_SEQ_FEAT_INDEXED is the one bit the client does NOT
-         * adopt from the block (ABI 0.14, R16): the bit means "a
-         * program run with index tables succeeds on this device", and
-         * the program run's remote route does not carry a table yet -
-         * it is a client-side gather and it is parcel P2's. A server
-         * that is itself a software device publishes it truthfully
-         * about ITSELF, so the wire has it and the handle must not,
-         * and that is asserted below rather than papered over here.
-         * P2 removes the mask, the refusal in device.c's remote
-         * branch, and these three lines together. */
+        /* Every bit of the block, CFT_SEQ_FEAT_INDEXED included, as
+         * of parcel P2: the client-side gather makes the bit's claim
+         * true on this route (device.c's remote branch gathers and
+         * sends a dense program run), so the handle adopts it like
+         * every other capability and the mask that used to exclude it
+         * here is gone. */
         CHECK(cftr_get32(resp + 56) == c.max_deposits &&
               cftr_get32(resp + 60) == c.max_insns &&
               cftr_get32(resp + 64) == c.max_consts &&
-              (cftr_get32(resp + 68) & ~(uint32_t)CFT_SEQ_FEAT_INDEXED)
-                  == c.seq_features &&
+              cftr_get32(resp + 68) == c.seq_features &&
               cftr_get32(resp + 72) == c.max_scratch,
               "the block's sequencer capacities are what cft_get_caps "
               "reports (%lu/%lu/%lu/0x%lx/%lu on the wire, "
@@ -570,23 +565,23 @@ static void caps_block_tests(cft_device *rm, cft_device *sw)
         CHECK(c.max_deposits == cs.max_deposits &&
               c.max_insns == cs.max_insns &&
               c.max_consts == cs.max_consts &&
-              c.seq_features ==
-                  (cs.seq_features & ~(uint32_t)CFT_SEQ_FEAT_INDEXED) &&
+              c.seq_features == cs.seq_features &&
               c.max_scratch == cs.max_scratch,
-              "a software server's capacities are this library's own, "
-              "less CFT_SEQ_FEAT_INDEXED");
-        /* ...and the mask is a POSITIVE claim, not a tolerance: the
-         * local software backend has the bit, and a remote handle to
-         * that same backend must NOT report it, because
-         * cft_program_run_ex with a table is refused on this route
-         * and a capability word that says yes to a call that says no
-         * is what cft_get_caps exists to prevent. */
+              "a software server's capacities are this library's own");
+        /* ...and INDEXED is the one that had to be argued (P2). It is
+         * a POSITIVE claim on both sides now: the local software
+         * backend has the bit, and a remote handle to that same
+         * backend has it too, because the client gathers before the
+         * frame and the call really does succeed. A capability word
+         * that says yes to a call that says no is what cft_get_caps
+         * exists to prevent, and the identity tests below are where
+         * the call is made rather than only claimed. */
         CHECK((cs.seq_features & CFT_SEQ_FEAT_INDEXED) != 0,
               "the local software backend publishes "
               "CFT_SEQ_FEAT_INDEXED");
-        CHECK((c.seq_features & CFT_SEQ_FEAT_INDEXED) == 0,
-              "a REMOTE handle does not, because the program run's "
-              "remote route does not carry an index table yet "
+        CHECK((c.seq_features & CFT_SEQ_FEAT_INDEXED) != 0,
+              "and so does a REMOTE handle to it, because the program "
+              "run's remote route gathers on the client "
               "(docs/ROUND2.md, parcel P2)");
     } else {
         printf("  server backend is '%s', not compared with the local "
@@ -756,6 +751,57 @@ static void protocol_tests(cft_device *dev)
               (unsigned long long)S0.requests, (unsigned long long)S1.requests);
         printf("  REDUCE_SEG shape  refused in the client, no frame sent\n");
     }
+    /* R16's argument rules are the CLIENT's in the same way (P2): a
+     * table on an operand the OPCODE does not read, an index at or
+     * past the source's declared length, and `d` overlapping an
+     * indexed source are each refused before any frame exists. That
+     * is the "refused by name, with no round trip made" half of this
+     * parcel's negative control, and it is measured here rather than
+     * argued: the server's RUN counter does not move, and the only
+     * new request is the STATS call that reads it. */
+    {
+        stats S0, S1;
+        uint8_t a8[8 * 4], d8[8 * 4];
+        uint32_t ix[8];
+        cft_elem_args E;
+        size_t q;
+        memset(a8, 0, sizeof a8);
+        for (q = 0; q < 8; q++)
+            ix[q] = (uint32_t)q;
+        CHECK(!get_stats(dev, hw, &S0), "STATS before the indexed refusals");
+        memset(&E, 0, sizeof E);
+        E.struct_size = sizeof E;
+        E.a = a8; E.b = a8; E.c = a8; E.d = d8; E.n = 8;
+        E.idx_b = ix; E.idx_b_src = 8;
+        CHECK(cft_run_ex(dev, CFT_ADD, CFT_FP32, CFT_RNE, &E)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "a table on operand b of CFT_ADD, which does not read it, "
+              "is refused by the client");
+        E.idx_b = NULL; E.idx_b_src = 0;
+        E.idx_a = ix; E.idx_a_src = 8;
+        ix[3] = 8;
+        CHECK(cft_run_ex(dev, CFT_ADD, CFT_FP32, CFT_RNE, &E)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "an index at the source's length is refused by the client");
+        ix[3] = 3;
+        E.d = a8;
+        CHECK(cft_run_ex(dev, CFT_ADD, CFT_FP32, CFT_RNE, &E)
+                  == CFT_ERR_INVALID_ARGUMENT,
+              "d overlapping the indexed source is refused by the client");
+        CHECK(!get_stats(dev, hw, &S1) &&
+              S1.op[CFTR_OP_RUN] == S0.op[CFTR_OP_RUN] &&
+              S1.requests == S0.requests + 1,
+              "none of the three indexed refusals became a frame (RUN "
+              "%llu -> %llu, requests %llu -> %llu)",
+              (unsigned long long)S0.op[CFTR_OP_RUN],
+              (unsigned long long)S1.op[CFTR_OP_RUN],
+              (unsigned long long)S0.requests,
+              (unsigned long long)S1.requests);
+        printf("  indexed shape     refused in the client, no frame sent "
+               "(RUN %llu -> %llu)\n",
+               (unsigned long long)S0.op[CFTR_OP_RUN],
+               (unsigned long long)S1.op[CFTR_OP_RUN]);
+    }
     CHECK(!get_stats(dev, hw, &S) && S.requests > 10 && S.op[CFTR_OP_HELLO] == 1,
           "STATS after the above: %llu requests",
           (unsigned long long)S.requests);
@@ -766,6 +812,281 @@ static void protocol_tests(cft_device *dev)
 }
 
 /* ---- bit identity against the software backend -------------------- */
+
+/* R16 over the wire (ABI 0.14, docs/ROUND2.md P2)
+ *
+ * The remote route for an index table is a CLIENT-SIDE GATHER: the
+ * tables are resolved in this process, the dense run crosses, and the
+ * server - which has no field for a table and gains none - answers the
+ * call it always could. So what has to be true is that the answer is
+ * the LOCAL one, bit for bit and flag for flag, on all three shapes
+ * that carry a table: an elementwise run, a program run's streams, and
+ * a program run's scratch block.
+ *
+ * And the controls, because a gather that dropped its table on the
+ * floor would pass the first half of every one of them: an identity
+ * table is the dense run, and a rotation of it is not.
+ *
+ * Returns the number of disagreements, which the caller adds to its
+ * own count. */
+static int indexed_wire(cft_device *sw, cft_device *rm, int fmt, size_t n)
+{
+    const size_t esz = cft_format_size((cft_format)fmt);
+    const size_t src_n = (n / 3) + 1;          /* deliberately short */
+    uint8_t *src = NULL, *full = NULL, *bb = NULL, *cc = NULL;
+    uint8_t *d_sw = NULL, *d_rm = NULL, *d_dense = NULL, *d_rot = NULL;
+    uint8_t *pool = NULL, *ds2 = NULL, *dr2 = NULL, *d_elem = NULL;
+    cft_caps rc;
+    uint32_t *tab = NULL, *ident = NULL, *rot = NULL, *stab = NULL;
+    uint8_t img[64];
+    uint64_t ins[3];
+    cft_program *pr = NULL, *ps = NULL;
+    cft_elem_args E;
+    cft_run_args A;
+    uint32_t f1 = 0, f2 = 0;
+    size_t i;
+    int bad = 0;
+
+    if (n < 4)
+        return 0;
+    src   = (uint8_t *)malloc(src_n * esz);
+    full  = (uint8_t *)malloc(n * esz);
+    bb    = (uint8_t *)malloc(n * esz);
+    cc    = (uint8_t *)malloc(n * esz);
+    d_sw  = (uint8_t *)malloc(n * esz);
+    d_rm  = (uint8_t *)malloc(n * esz);
+    d_dense = (uint8_t *)malloc(n * esz);
+    d_rot = (uint8_t *)malloc(n * esz);
+    pool  = (uint8_t *)malloc(src_n * esz);
+    ds2   = (uint8_t *)malloc(n * esz);
+    dr2   = (uint8_t *)malloc(n * esz);
+    d_elem = (uint8_t *)malloc(n * esz);
+    tab   = (uint32_t *)malloc(n * 4);
+    ident = (uint32_t *)malloc(n * 4);
+    rot   = (uint32_t *)malloc(n * 4);
+    stab  = (uint32_t *)malloc(n * 4);
+    if (!src || !full || !bb || !cc || !d_sw || !d_rm || !d_dense ||
+        !d_rot || !pool || !ds2 || !dr2 || !d_elem || !tab || !ident ||
+        !rot || !stab) {
+        CHECK(0, "indexed over the wire: out of memory");
+        goto out;
+    }
+    fill(src, src_n * esz);
+    fill(full, n * esz);
+    fill(bb, n * esz);
+    fill(cc, n * esz);
+    fill(pool, src_n * esz);
+    for (i = 0; i < n; i++) {
+        ident[i] = (uint32_t)i;
+        rot[i]   = (uint32_t)((i + 1) % n);
+        tab[i]   = (i % 5 == 0) ? CFT_IDX_NONE
+                                : (uint32_t)((i * 7 + 1) % src_n);
+        stab[i]  = (i % 3 == 0) ? CFT_IDX_NONE
+                                : (uint32_t)((i * 5 + 2) % src_n);
+    }
+
+#define WIRE_ELEM(dev_, dst_, f_, a_, t_, sn_)                         \
+    do {                                                               \
+        memset(&E, 0, sizeof E);                                       \
+        E.struct_size = sizeof E;                                      \
+        E.a = (a_); E.b = bb; E.c = cc;                                \
+        E.d = (dst_); E.n = n; E.flags_out = (f_);                     \
+        E.idx_a = (t_); E.idx_a_src = (t_) ? (sn_) : 0;                \
+        memset((dst_), 0x5a, n * esz);                                 \
+    } while (0)
+
+    /* 1. the elementwise run, gathered on the client either way -
+     *    locally by the same code, remotely before the frame. */
+    WIRE_ELEM(sw, d_sw, &f1, src, tab, src_n);
+    CHECK(cft_run_ex(sw, CFT_FMA, (cft_format)fmt, CFT_RNE, &E) == CFT_OK,
+          "%s indexed cft_run_ex locally: %s",
+          cft_format_name((cft_format)fmt), cft_last_error());
+    WIRE_ELEM(rm, d_rm, &f2, src, tab, src_n);
+    CHECK(cft_run_ex(rm, CFT_FMA, (cft_format)fmt, CFT_RNE, &E) == CFT_OK,
+          "%s indexed cft_run_ex over the wire: %s",
+          cft_format_name((cft_format)fmt), cft_last_error());
+    CHECK(memcmp(d_sw, d_rm, n * esz) == 0 && f1 == f2,
+          "%s indexed cft_run_ex: the server and this process agree "
+          "(flags %02x/%02x) %s", cft_format_name((cft_format)fmt),
+          f1, f2, memcmp(d_sw, d_rm, n * esz) ? "BYTES DIFFER" : "");
+    if (memcmp(d_sw, d_rm, n * esz) || f1 != f2)
+        bad++;
+    memcpy(d_elem, d_sw, n * esz);     /* kept for the seam check below */
+
+    /* 2. the controls, on the REMOTE handle: an identity table over a
+     *    full-length source is the dense run, and a rotation is not. */
+    CHECK(cft_run(rm, CFT_FMA, (cft_format)fmt, CFT_RNE, full, bb, cc,
+                  d_dense, n, NULL, NULL) == CFT_OK, "%s dense run",
+          cft_format_name((cft_format)fmt));
+    WIRE_ELEM(rm, d_rm, NULL, full, ident, n);
+    CHECK(cft_run_ex(rm, CFT_FMA, (cft_format)fmt, CFT_RNE, &E) == CFT_OK &&
+          memcmp(d_rm, d_dense, n * esz) == 0,
+          "%s an identity table over the wire is the dense run",
+          cft_format_name((cft_format)fmt));
+    if (memcmp(d_rm, d_dense, n * esz))
+        bad++;
+    WIRE_ELEM(rm, d_rot, NULL, full, rot, n);
+    CHECK(cft_run_ex(rm, CFT_FMA, (cft_format)fmt, CFT_RNE, &E) == CFT_OK &&
+          memcmp(d_rot, d_dense, n * esz) != 0,
+          "%s a rotated table over the wire is NOT the dense run - the "
+          "table is being carried", cft_format_name((cft_format)fmt));
+    if (memcmp(d_rot, d_dense, n * esz) == 0)
+        bad++;
+#undef WIRE_ELEM
+
+    /* 3. a PROGRAM run's streams through a table. `FMA r3, r0, r1, r2;
+     *    DEPOSIT r3; HALT` - the three-instruction shape the library
+     *    composes an indexed elementwise run into on a device, run
+     *    here as an ordinary program so that the remote branch's
+     *    gather is what is under test. */
+    ins[0] = 0ull | (3ull << 8) | (0ull << 12) | (1ull << 16) |
+             (2ull << 20);                                   /* FMA r3 */
+    ins[1] = 3ull | (3ull << 12) | (1ull << 31);             /* DEPOSIT */
+    ins[2] = 0ull | (1ull << 31);                            /* HALT */
+    memset(img, 0, sizeof img);
+    cftr_put32(img + 0, 0x50544643u);
+    cftr_put32(img + 4, 1);
+    cftr_put32(img + 8, 3);
+    cftr_put32(img + 12, 0);
+    cftr_put32(img + 16, 1);                   /* max_deposits */
+    cftr_put32(img + 20, (uint32_t)fmt);
+    cftr_put32(img + 24, 0);
+    cftr_put32(img + 28, 0);
+    for (i = 0; i < 3; i++)
+        cftr_put64(img + 32 + i * 8, ins[i]);
+    if (cft_program_load(rm, img, 32 + 3 * 8, &pr) == CFT_OK &&
+        cft_program_load(sw, img, 32 + 3 * 8, &ps) == CFT_OK) {
+        f1 = f2 = 0;
+        memset(&A, 0, sizeof A);
+        A.struct_size = sizeof A;
+        A.a = src; A.b = bb; A.c = cc;
+        A.n = n;
+        A.idx_a = tab; A.idx_a_src = src_n;
+        A.deposits = d_sw; A.flags_out = &f1;
+        memset(d_sw, 0x5a, n * esz);
+        CHECK(cft_program_run_ex(ps, &A) == CFT_OK,
+              "%s indexed program run locally: %s",
+              cft_format_name((cft_format)fmt), cft_last_error());
+        A.deposits = d_rm; A.flags_out = &f2;
+        memset(d_rm, 0xa5, n * esz);
+        CHECK(cft_program_run_ex(pr, &A) == CFT_OK,
+              "%s indexed program run over the wire: %s",
+              cft_format_name((cft_format)fmt), cft_last_error());
+        CHECK(memcmp(d_sw, d_rm, n * esz) == 0 && f1 == f2,
+              "%s indexed program run: the server and this process agree "
+              "(flags %02x/%02x) %s", cft_format_name((cft_format)fmt),
+              f1, f2, memcmp(d_sw, d_rm, n * esz) ? "BYTES DIFFER" : "");
+        if (memcmp(d_sw, d_rm, n * esz) || f1 != f2)
+            bad++;
+        /* ...and the elementwise call in step 1 composes to exactly
+         * this, which is the seam the round is built on: the same
+         * tables over the same operands, through cft_run_ex and
+         * through the three-instruction program, are the same bytes
+         * and the same flags. */
+        CHECK(memcmp(d_sw, d_elem, n * esz) == 0,
+              "%s the three-instruction program with these tables is "
+              "cft_run_ex with them", cft_format_name((cft_format)fmt));
+        if (memcmp(d_sw, d_elem, n * esz))
+            bad++;
+    } else {
+        CHECK(0, "%s: the three-instruction image would not load (%s)",
+              cft_format_name((cft_format)fmt), cft_last_error());
+    }
+    cft_program_free(pr); pr = NULL;
+    cft_program_free(ps); ps = NULL;
+
+    /* 4. a program run's SCRATCH BLOCK through its table, which is the
+     *    one remaining table the remote branch gathers and the only
+     *    one whose byte count changes meaning when the table goes:
+     *    with a table, scratch_in_bytes is the POOL's length, and the
+     *    dense block sent to the server is n * n_scratch_in. */
+    memset(&rc, 0, sizeof rc);
+    rc.struct_size = sizeof rc;
+    if (cft_get_caps(rm, &rc) != CFT_OK ||
+        !(rc.seq_features & CFT_SEQ_FEAT_SCRATCH_IO)) {
+        printf("  %s: the server does not publish SCRATCH_IO, the "
+               "indexed scratch block NOT TESTED\n",
+               cft_format_name((cft_format)fmt));
+        goto out;
+    }
+    ins[0] = 7ull | (4ull << 8) | (1ull << 31) | (0ull << 32);  /* LDL 0 */
+    ins[1] = 3ull | (4ull << 12) | (1ull << 31);                /* DEP r4 */
+    ins[2] = 0ull | (1ull << 31);                               /* HALT */
+    memset(img, 0, sizeof img);
+    cftr_put32(img + 0, 0x50544643u);
+    cftr_put32(img + 4, 1);
+    cftr_put32(img + 8, 3);
+    cftr_put32(img + 12, 0);
+    cftr_put32(img + 16, 1);
+    cftr_put32(img + 20, (uint32_t)fmt);
+    cftr_put32(img + 24, CFT_PROG_FLAG_SCRATCH_IO);
+    cftr_put32(img + 28, 1u);                  /* 1 slot in, 0 out */
+    for (i = 0; i < 3; i++)
+        cftr_put64(img + 32 + i * 8, ins[i]);
+    if (cft_program_load(rm, img, 32 + 3 * 8, &pr) == CFT_OK &&
+        cft_program_load(sw, img, 32 + 3 * 8, &ps) == CFT_OK) {
+        f1 = f2 = 0;
+        memset(&A, 0, sizeof A);
+        A.struct_size = sizeof A;
+        A.a = full;
+        A.n = n;
+        A.scratch_in = pool;
+        A.scratch_in_bytes = src_n * esz;      /* the POOL, not the block */
+        A.idx_scratch_in = stab;
+        A.idx_scratch_src = src_n;
+        A.deposits = ds2; A.flags_out = &f1;
+        memset(ds2, 0x5a, n * esz);
+        CHECK(cft_program_run_ex(ps, &A) == CFT_OK,
+              "%s indexed scratch block locally: %s",
+              cft_format_name((cft_format)fmt), cft_last_error());
+        A.deposits = dr2; A.flags_out = &f2;
+        memset(dr2, 0xa5, n * esz);
+        CHECK(cft_program_run_ex(pr, &A) == CFT_OK,
+              "%s indexed scratch block over the wire: %s",
+              cft_format_name((cft_format)fmt), cft_last_error());
+        CHECK(memcmp(ds2, dr2, n * esz) == 0 && f1 == f2,
+              "%s indexed scratch block: the server and this process "
+              "agree (flags %02x/%02x) %s",
+              cft_format_name((cft_format)fmt), f1, f2,
+              memcmp(ds2, dr2, n * esz) ? "BYTES DIFFER" : "");
+        if (memcmp(ds2, dr2, n * esz) || f1 != f2)
+            bad++;
+        /* The control: the same program with a DENSE block of the same
+         * bytes the table would have gathered must give the same
+         * deposits, and a block gathered through a DIFFERENT table
+         * must not - so the pool really is being indexed rather than
+         * copied. */
+        for (i = 0; i < n; i++)
+            stab[i] = (uint32_t)((i * 2 + 1) % src_n);
+        A.deposits = d_rot; A.flags_out = NULL;
+        memset(d_rot, 0x5a, n * esz);
+        CHECK(cft_program_run_ex(pr, &A) == CFT_OK,
+              "%s a second scratch table over the wire: %s",
+              cft_format_name((cft_format)fmt), cft_last_error());
+        CHECK(memcmp(d_rot, dr2, n * esz) != 0,
+              "%s two scratch tables, two answers over the wire",
+              cft_format_name((cft_format)fmt));
+        if (memcmp(d_rot, dr2, n * esz) == 0)
+            bad++;
+    } else {
+        CHECK(0, "%s: the SCRATCH_IO image would not load (%s)",
+              cft_format_name((cft_format)fmt), cft_last_error());
+    }
+
+out:
+    printf("  %-6s indexed: run_ex, a program's streams and its scratch "
+           "block gathered on the client, %lu lanes through a %lu-element "
+           "source; identity == dense, rotated != dense%s\n",
+           cft_format_name((cft_format)fmt), (unsigned long)n,
+           (unsigned long)src_n, bad ? " - WITH DISAGREEMENTS" : "");
+    cft_program_free(pr);
+    cft_program_free(ps);
+    free(src); free(full); free(bb); free(cc);
+    free(d_sw); free(d_rm); free(d_dense); free(d_rot);
+    free(pool); free(ds2); free(dr2); free(d_elem);
+    free(tab); free(ident); free(rot); free(stab);
+    return bad;
+}
 
 static void identity_tests(cft_device *sw, cft_device *rm, size_t n)
 {
@@ -903,6 +1224,11 @@ static void identity_tests(cft_device *sw, cft_device *rm, size_t n)
                 }
             }
         }
+        /* R16's tables, over the wire: the elementwise run, a program
+         * run's streams and its scratch block, each gathered on the
+         * client and each held to the local answer (P2). */
+        bad += indexed_wire(sw, rm, fmt, n);
+
         /* the composed operations, on whatever route the environment
          * selects: div and sqrt through the program route by default
          * on a remote device, the chunk route under CFT_DIVSQRT_SEQ=0 */

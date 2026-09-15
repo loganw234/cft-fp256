@@ -3016,6 +3016,671 @@ out:
     free(d_id); free(d_pm); free(cnt); free(tab); free(ident);
 }
 
+/* ---------------------------------------------------------------
+ * R16 for an ELEMENTWISE run: cft_run_ex's index tables     (P2)
+ *
+ * The claim is that an indexed elementwise run IS the dense run over
+ * the gathered operands - every bit and every flag, on both backends,
+ * at every opcode, attribute and format the device carries. So the
+ * reference is built HERE, by gathering with the contract's own
+ * sentence (element i is source[idx[i]], and CFT_IDX_NONE is +0) and
+ * running the ordinary cft_run over it. Nothing below asks the
+ * library what the answer ought to be.
+ *
+ * Three more properties ride along, because they are the same run:
+ *
+ *  - the IDENTITY control (idx[i] = i over a full-length source) is
+ *    bit-identical to the plain dense run, and a ROTATION of it is
+ *    not. The first alone would pass on a gather that ignored its
+ *    table, which is what makes the second the half that matters;
+ *  - the FLAGS of the indexed run are the flags of the dense one.
+ *    A program run's flags are the sticky OR over active lanes and an
+ *    elementwise run's are the OR over elements - the same set said
+ *    twice, which the composition needs and does not get to assume;
+ *  - and the same tables through cft_program_run_ex over the very
+ *    three-instruction program the library composes, which holds the
+ *    composition's SHAPE to the same answer. On a software device the
+ *    library takes the gather route, so this is what gates the shape
+ *    the device route builds.
+ * --------------------------------------------------------------- */
+
+/* Which operands this opcode reads, asked of the library rather than
+ * transcribed into a table here: a NULL operand the opcode needs is
+ * CFT_ERR_INVALID_ARGUMENT and one it does not need runs. Derived, so
+ * that an opcode whose operand set changes cannot leave a stale copy
+ * of it in this file. */
+static unsigned op_reads_probe(cft_device *dev, cft_op op, cft_format fmt)
+{
+    uint8_t one[MAXE], out[MAXE];
+    unsigned mask = 0;
+    int r;
+    memset(one, 0, sizeof one);
+    for (r = 0; r < 3; r++) {
+        const void *p[3];
+        p[0] = p[1] = p[2] = one;
+        p[r] = NULL;
+        if (cft_run(dev, op, fmt, CFT_RNE, p[0], p[1], p[2], out, 1,
+                    NULL, NULL) == CFT_ERR_INVALID_ARGUMENT)
+            mask |= 1u << r;
+    }
+    return mask;
+}
+
+/* The contract's gather, written out once here so the test's answer
+ * and the library's cannot come from the same code. */
+static void gather_ref(uint8_t *dst, const uint8_t *src,
+                       const uint32_t *idx, size_t n, size_t esz)
+{
+    size_t i;
+    for (i = 0; i < n; i++) {
+        if (idx[i] == CFT_IDX_NONE)
+            memset(dst + i * esz, 0, esz);          /* +0 */
+        else
+            memcpy(dst + i * esz, src + (size_t)idx[i] * esz, esz);
+    }
+}
+
+static void compare_indexed_elem(cft_device *sw, cft_device *hw,
+                                 cft_format fmt, cft_op op, cft_round rnd,
+                                 size_t n, uint32_t seed)
+{
+    const size_t esz = cft_format_size(fmt);
+    const size_t src_n = (n / 3) + 1;       /* deliberately short */
+    unsigned need;
+    uint8_t *src[3], *gat[3], *full[3];
+    uint32_t *tab[3], *ident = NULL, *rot = NULL;
+    uint8_t *d_ref = NULL, *d_idx = NULL, *d_sw = NULL;
+    uint8_t *d_dense = NULL, *d_id = NULL, *d_rot = NULL, *d_rref = NULL;
+    uint8_t *d_prog = NULL;
+    uint8_t img[256];
+    uint64_t ins[3];
+    uint32_t fld[3];
+    int n_strm = 0;
+    size_t ibytes, i;
+    int r, holes = 0;
+    uint32_t f_ref = 0, f_idx = 0, f_sw = 0, f_dense = 0, f_prog = 0;
+    cft_status st;
+    cft_elem_args E;
+    cft_run_args A;
+    cft_program *prog = NULL;
+
+    for (r = 0; r < 3; r++) {
+        src[r] = gat[r] = full[r] = NULL;
+        tab[r] = NULL;
+    }
+    need = op_reads_probe(sw, op, fmt);
+    if (need == 0)
+        return;            /* nothing to index; the refusal is scored
+                            * in check_indexed_elem_refusals */
+
+    rs = seed ? seed : 1;
+    for (r = 0; r < 3; r++) {
+        if (!((need >> r) & 1u))
+            continue;
+        src[r]  = (uint8_t *)malloc(src_n * esz);
+        gat[r]  = (uint8_t *)malloc(n * esz);
+        full[r] = (uint8_t *)malloc(n * esz);
+        tab[r]  = (uint32_t *)malloc(n * 4);
+        if (!src[r] || !gat[r] || !full[r] || !tab[r]) {
+            CHECK(0, "idx elem %s: out of memory", cft_format_name(fmt));
+            goto out;
+        }
+        fill(src[r], src_n, esz);
+        fill(full[r], n, esz);
+    }
+    ident  = (uint32_t *)malloc(n * 4);
+    rot    = (uint32_t *)malloc(n * 4);
+    d_ref  = (uint8_t *)malloc(n * esz);
+    d_idx  = (uint8_t *)malloc(n * esz);
+    d_sw   = (uint8_t *)malloc(n * esz);
+    d_dense= (uint8_t *)malloc(n * esz);
+    d_id   = (uint8_t *)malloc(n * esz);
+    d_rot  = (uint8_t *)malloc(n * esz);
+    d_rref = (uint8_t *)malloc(n * esz);
+    d_prog = (uint8_t *)malloc(n * esz);
+    if (!ident || !rot || !d_ref || !d_idx || !d_sw || !d_dense ||
+        !d_id || !d_rot || !d_rref || !d_prog) {
+        CHECK(0, "idx elem %s: out of memory", cft_format_name(fmt));
+        goto out;
+    }
+
+    /* One table per read operand. A different stride each, so two
+     * operands never take the same element in the same lane, and one
+     * entry in five is the sentinel - derived here and reflected in
+     * the reference by the same rule, never by a typed expectation. */
+    for (i = 0; i < n; i++) {
+        ident[i] = (uint32_t)i;
+        rot[i]   = (uint32_t)((i + 1) % n);
+        for (r = 0; r < 3; r++) {
+            if (!tab[r])
+                continue;
+            if ((i + (size_t)r) % 5 == 0) {
+                tab[r][i] = CFT_IDX_NONE;
+                if (r == 0)
+                    holes++;
+            } else {
+                tab[r][i] =
+                    (uint32_t)((i * (size_t)(2 * r + 3) + 1) % src_n);
+            }
+        }
+    }
+    for (r = 0; r < 3; r++)
+        if (tab[r])
+            gather_ref(gat[r], src[r], tab[r], n, esz);
+
+    /* 1. the reference: the dense run over the gathered operands. */
+    st = cft_run(hw, op, fmt, rnd, gat[0], gat[1], gat[2], d_ref, n,
+                 &f_ref, NULL);
+    CHECK(st == CFT_OK, "idx elem %s %s: the dense reference run was "
+          "refused (%s)", cft_format_name(fmt), cft_op_name(op),
+          cft_strerror(st));
+    if (st != CFT_OK)
+        goto out;
+
+#define ELEM_RUN(dev_, dst_, f_, s0_, s1_, s2_, t0_, t1_, t2_, sn_)     \
+    do {                                                               \
+        memset(&E, 0, sizeof E);                                       \
+        E.struct_size = sizeof E;                                      \
+        E.a = (s0_); E.b = (s1_); E.c = (s2_);                         \
+        E.d = (dst_);                                                  \
+        E.n = n;                                                       \
+        E.flags_out = (f_);                                            \
+        E.idx_a = (t0_); E.idx_b = (t1_); E.idx_c = (t2_);             \
+        E.idx_a_src = (t0_) ? (sn_) : 0;                               \
+        E.idx_b_src = (t1_) ? (sn_) : 0;                               \
+        E.idx_c_src = (t2_) ? (sn_) : 0;                               \
+        memset((dst_), 0x5a, n * esz);                                 \
+        st = cft_run_ex((dev_), op, fmt, rnd, &E);                     \
+    } while (0)
+
+    /* 2. the same run through the tables, on the device and on the
+     *    software backend. Both must be the reference, bit for bit
+     *    and flag for flag. */
+    ELEM_RUN(hw, d_idx, &f_idx, src[0], src[1], src[2],
+             tab[0], tab[1], tab[2], src_n);
+    CHECK(st == CFT_OK, "idx elem %s %s: the device refused the indexed "
+          "run (%s: %s)", cft_format_name(fmt), cft_op_name(op),
+          cft_strerror(st), cft_last_error());
+    if (st != CFT_OK)
+        goto out;
+    ELEM_RUN(sw, d_sw, &f_sw, src[0], src[1], src[2],
+             tab[0], tab[1], tab[2], src_n);
+    CHECK(st == CFT_OK, "idx elem %s %s: the software backend refused "
+          "the indexed run (%s: %s)", cft_format_name(fmt),
+          cft_op_name(op), cft_strerror(st), cft_last_error());
+    if (st != CFT_OK)
+        goto out;
+    CHECK(memcmp(d_idx, d_ref, n * esz) == 0,
+          "idx elem %s %s rnd %d: the device's indexed run is not the "
+          "dense run over the gathered operands (%lu lanes, %d sentinels "
+          "in a, source %lu elements)", cft_format_name(fmt),
+          cft_op_name(op), (int)rnd, (unsigned long)n, holes,
+          (unsigned long)src_n);
+    CHECK(memcmp(d_sw, d_ref, n * esz) == 0,
+          "idx elem %s %s rnd %d: the software backend's indexed run is "
+          "not the dense run over the gathered operands",
+          cft_format_name(fmt), cft_op_name(op), (int)rnd);
+    CHECK(f_idx == f_ref, "idx elem %s %s: device flags 0x%02x, dense "
+          "0x%02x", cft_format_name(fmt), cft_op_name(op),
+          (unsigned)f_idx, (unsigned)f_ref);
+    CHECK(f_sw == f_ref, "idx elem %s %s: software flags 0x%02x, dense "
+          "0x%02x", cft_format_name(fmt), cft_op_name(op),
+          (unsigned)f_sw, (unsigned)f_ref);
+
+    /* 3. the controls. An identity table over a FULL-LENGTH source is
+     *    the plain dense run, bit for bit; a rotation of the same
+     *    table is the dense run over the rotated operands and - where
+     *    those differ at all - not the dense run. */
+    st = cft_run(hw, op, fmt, rnd, full[0], full[1], full[2], d_dense, n,
+                 &f_dense, NULL);
+    CHECK(st == CFT_OK, "idx elem %s %s: the plain dense run was refused "
+          "(%s)", cft_format_name(fmt), cft_op_name(op), cft_strerror(st));
+    if (st != CFT_OK)
+        goto out;
+    ELEM_RUN(hw, d_id, NULL, full[0], full[1], full[2],
+             tab[0] ? ident : NULL, tab[1] ? ident : NULL,
+             tab[2] ? ident : NULL, n);
+    CHECK(st == CFT_OK, "idx elem %s %s: an identity table was refused "
+          "(%s)", cft_format_name(fmt), cft_op_name(op), cft_strerror(st));
+    CHECK(st != CFT_OK || memcmp(d_id, d_dense, n * esz) == 0,
+          "idx elem %s %s rnd %d: an identity table is not the dense run",
+          cft_format_name(fmt), cft_op_name(op), (int)rnd);
+
+    for (r = 0; r < 3; r++)
+        if (tab[r])
+            gather_ref(gat[r], full[r], rot, n, esz);
+    st = cft_run(hw, op, fmt, rnd, tab[0] ? gat[0] : full[0],
+                 tab[1] ? gat[1] : full[1], tab[2] ? gat[2] : full[2],
+                 d_rref, n, NULL, NULL);
+    CHECK(st == CFT_OK, "idx elem %s %s: the rotated reference was "
+          "refused (%s)", cft_format_name(fmt), cft_op_name(op),
+          cft_strerror(st));
+    ELEM_RUN(hw, d_rot, NULL, full[0], full[1], full[2],
+             tab[0] ? rot : NULL, tab[1] ? rot : NULL,
+             tab[2] ? rot : NULL, n);
+    CHECK(st == CFT_OK, "idx elem %s %s: a rotated table was refused "
+          "(%s)", cft_format_name(fmt), cft_op_name(op), cft_strerror(st));
+    CHECK(st != CFT_OK || memcmp(d_rot, d_rref, n * esz) == 0,
+          "idx elem %s %s rnd %d: a rotated table is not the dense run "
+          "over the rotated operands", cft_format_name(fmt),
+          cft_op_name(op), (int)rnd);
+    /* The discriminating half, asserted only where this opcode and
+     * this data CAN discriminate: if the rotated reference happens to
+     * equal the dense one, a run that ignored its table would too, and
+     * the honest thing is to say so rather than to assert nothing or
+     * to assert something that is not true of the data. */
+    if (memcmp(d_rref, d_dense, n * esz) != 0)
+        CHECK(memcmp(d_rot, d_dense, n * esz) != 0,
+              "idx elem %s %s rnd %d: a rotated table gave the DENSE "
+              "answer - the table is being ignored",
+              cft_format_name(fmt), cft_op_name(op), (int)rnd);
+
+    /* 4. the composition's shape: the same tables through
+     *    cft_program_run_ex over the three-instruction program the
+     *    library builds on a device - `op r3, <streams>; DEPOSIT r3;
+     *    HALT` with max_deposits 1, the streams packed down in operand
+     *    order and an operand the opcode does not read carrying r4.
+     *    Built here, so that the encoding is checked against a second
+     *    reading of docs/SEQUENCER.md rather than against itself. */
+    for (r = 0; r < 3; r++)
+        fld[r] = ((need >> r) & 1u) ? (uint32_t)(n_strm++) : 4u;
+    ins[0] = seq_alu5((unsigned)op, 3, fld[0], fld[1], fld[2],
+                      (unsigned)rnd, 0, 0, 0);
+    ins[1] = seq_ctrl(3, 3, 0);                 /* DEPOSIT r3 */
+    ins[2] = seq_ctrl(0, 0, 0);                 /* HALT */
+    ibytes = seq_image(img, fmt, ins, 3, NULL, 0, 1);
+    st = cft_program_load(hw, img, ibytes, &prog);
+    CHECK(st == CFT_OK, "idx elem %s %s: the composed image was refused "
+          "(%s)", cft_format_name(fmt), cft_op_name(op), cft_strerror(st));
+    if (st == CFT_OK) {
+        const void *pstrm[3];
+        const uint32_t *ptab[3];
+        size_t psrc[3];
+        int s = 0;
+        pstrm[0] = pstrm[1] = pstrm[2] = NULL;
+        ptab[0] = ptab[1] = ptab[2] = NULL;
+        psrc[0] = psrc[1] = psrc[2] = 0;
+        for (r = 0; r < 3; r++) {
+            if (!((need >> r) & 1u))
+                continue;
+            pstrm[s] = src[r];
+            ptab[s]  = tab[r];
+            psrc[s]  = src_n;
+            s++;
+        }
+        memset(&A, 0, sizeof A);
+        A.struct_size = sizeof A;
+        A.a = pstrm[0]; A.b = pstrm[1]; A.c = pstrm[2];
+        A.n = n;
+        A.deposits = d_prog;
+        A.flags_out = &f_prog;
+        A.idx_a = ptab[0]; A.idx_b = ptab[1]; A.idx_c = ptab[2];
+        A.idx_a_src = psrc[0]; A.idx_b_src = psrc[1];
+        A.idx_c_src = psrc[2];
+        memset(d_prog, 0x5a, n * esz);
+        st = cft_program_run_ex(prog, &A);
+        CHECK(st == CFT_OK, "idx elem %s %s: the composed program run was "
+              "refused (%s: %s)", cft_format_name(fmt), cft_op_name(op),
+              cft_strerror(st), cft_last_error());
+        CHECK(st != CFT_OK || memcmp(d_prog, d_ref, n * esz) == 0,
+              "idx elem %s %s rnd %d: the three-instruction program with "
+              "the same tables is not the dense run over the gathered "
+              "operands", cft_format_name(fmt), cft_op_name(op), (int)rnd);
+        CHECK(st != CFT_OK || f_prog == f_ref,
+              "idx elem %s %s: the program run's flags are 0x%02x and the "
+              "elementwise run's are 0x%02x - the sticky OR over active "
+              "lanes and the OR over elements are the same set",
+              cft_format_name(fmt), cft_op_name(op),
+              (unsigned)f_prog, (unsigned)f_ref);
+    }
+out:
+    cft_program_free(prog);
+#undef ELEM_RUN
+    for (r = 0; r < 3; r++) {
+        free(src[r]); free(gat[r]); free(full[r]); free(tab[r]);
+    }
+    free(ident); free(rot);
+    free(d_ref); free(d_idx); free(d_sw); free(d_dense);
+    free(d_id); free(d_rot); free(d_rref); free(d_prog);
+}
+
+/* A SCALAR operand beside an INDEXED one - the shape the composition
+ * cannot express as a stream, because the sequencer has no stride-0
+ * one, and which the library therefore puts in the program's own
+ * CONSTANT BANK.
+ *
+ * EVERY ORDERED PAIR the opcode allows, at every format (V2's finding,
+ * 2026-09-15: this leg used to make operand `a` the scalar and nothing
+ * else, so a scalar `b` or `c` beside an indexed operand was in no
+ * gate). FMA gives six pairs, ADD and MUL two each, a unary opcode
+ * none - and the pair matters, because which operand is the scalar
+ * decides which STREAM SLOT each of the others lands in once the
+ * streams pack down past it.
+ *
+ * Two things are checked per pair and they are different things: that
+ * the call gives the dense answer over (the scalar repeated, the
+ * gathered operand, the rest dense), and that the PROGRAM form of it -
+ * one constant in the image, that operand's field carrying the
+ * constant's index with its `k` bit set, the streams packed down past
+ * it - gives the same. The second is the encoding the device route
+ * builds, held to the first. */
+static void compare_indexed_scalar(cft_device *sw, cft_device *hw,
+                                   cft_format fmt, cft_op op, size_t n,
+                                   uint32_t seed)
+{
+    const size_t esz = cft_format_size(fmt);
+    const size_t src_n = (n / 2) + 1;
+    unsigned need = op_reads_probe(sw, op, fmt);
+    uint8_t *sc = NULL, *rep = NULL, *src = NULL, *gat = NULL, *dns = NULL;
+    uint8_t *d_ref = NULL, *d_mix = NULL, *d_sw = NULL, *d_prog = NULL;
+    uint32_t *tab = NULL;
+    uint8_t img[256];
+    uint64_t ins[3];
+    size_t ibytes, i;
+    int s, x, pairs = 0;
+    cft_status st;
+    cft_elem_args E;
+    cft_run_args A;
+    cft_program *prog = NULL;
+
+    /* Needs at least two operands: one to be the scalar and one to
+     * carry the table. */
+    if (need != 3u && need != 5u && need != 6u && need != 7u)
+        return;
+
+    sc     = (uint8_t *)malloc(esz);
+    rep    = (uint8_t *)malloc(n * esz);
+    src    = (uint8_t *)malloc(src_n * esz);
+    gat    = (uint8_t *)malloc(n * esz);
+    dns    = (uint8_t *)malloc(n * esz);
+    d_ref  = (uint8_t *)malloc(n * esz);
+    d_mix  = (uint8_t *)malloc(n * esz);
+    d_sw   = (uint8_t *)malloc(n * esz);
+    d_prog = (uint8_t *)malloc(n * esz);
+    tab    = (uint32_t *)malloc(n * 4);
+    if (!sc || !rep || !src || !gat || !dns || !d_ref || !d_mix ||
+        !d_sw || !d_prog || !tab) {
+        CHECK(0, "idx+scalar %s: out of memory", cft_format_name(fmt));
+        goto out;
+    }
+
+    rs = seed ? seed : 1;
+    fill(sc, 1, esz);
+    fill(src, src_n, esz);
+    fill(dns, n, esz);
+    for (i = 0; i < n; i++) {
+        memcpy(rep + i * esz, sc, esz);         /* the scalar, repeated */
+        tab[i] = (i % 4 == 0) ? CFT_IDX_NONE
+                              : (uint32_t)((i * 5 + 2) % src_n);
+    }
+    gather_ref(gat, src, tab, n, esz);
+
+    for (s = 0; s < 3; s++) {
+        if (!((need >> s) & 1u))
+            continue;
+        for (x = 0; x < 3; x++) {
+            const void *ref[3], *ev[3];
+            const uint32_t *et[3];
+            uint32_t f_ref = 0, f_mix = 0, f_sw = 0, f_prog = 0;
+            int r;
+            if (x == s || !((need >> x) & 1u))
+                continue;
+
+            /* The operands, three ways: the REFERENCE has the scalar
+             * repeated and the indexed one gathered; the CALL has the
+             * one-element buffer and the source with its table; and the
+             * third operand, where the opcode reads one, is the same
+             * dense array in both. */
+            for (r = 0; r < 3; r++) {
+                if (!((need >> r) & 1u)) { ref[r] = ev[r] = NULL; et[r] = NULL; continue; }
+                if (r == s)      { ref[r] = rep; ev[r] = sc;  et[r] = NULL; }
+                else if (r == x) { ref[r] = gat; ev[r] = src; et[r] = tab;  }
+                else             { ref[r] = dns; ev[r] = dns; et[r] = NULL; }
+            }
+
+            st = cft_run(hw, op, fmt, CFT_RNE, ref[0], ref[1], ref[2],
+                         d_ref, n, &f_ref, NULL);
+            CHECK(st == CFT_OK, "idx+scalar %s %s (scalar %c, indexed %c): "
+                  "the reference run was refused (%s)", cft_format_name(fmt),
+                  cft_op_name(op), 'a' + s, 'a' + x, cft_strerror(st));
+            if (st != CFT_OK)
+                continue;
+
+#define MIX_RUN(dev_, dst_, f_)                                        \
+            do {                                                       \
+                memset(&E, 0, sizeof E);                               \
+                E.struct_size = sizeof E;                              \
+                E.a = ev[0]; E.b = ev[1]; E.c = ev[2];                 \
+                E.d = (dst_); E.n = n;                                 \
+                E.scalar_mask = 1u << s;                               \
+                E.flags_out = (f_);                                    \
+                if (x == 0) { E.idx_a = tab; E.idx_a_src = src_n; }    \
+                if (x == 1) { E.idx_b = tab; E.idx_b_src = src_n; }    \
+                if (x == 2) { E.idx_c = tab; E.idx_c_src = src_n; }    \
+                memset((dst_), 0x5a, n * esz);                         \
+                st = cft_run_ex((dev_), op, fmt, CFT_RNE, &E);         \
+            } while (0)
+
+            MIX_RUN(hw, d_mix, &f_mix);
+            CHECK(st == CFT_OK, "idx+scalar %s %s: a scalar %c beside an "
+                  "indexed %c was refused on the device (%s: %s)",
+                  cft_format_name(fmt), cft_op_name(op), 'a' + s, 'a' + x,
+                  cft_strerror(st), cft_last_error());
+            if (st != CFT_OK)
+                continue;
+            MIX_RUN(sw, d_sw, &f_sw);
+            CHECK(st == CFT_OK, "idx+scalar %s %s: a scalar %c beside an "
+                  "indexed %c was refused on the software backend (%s: %s)",
+                  cft_format_name(fmt), cft_op_name(op), 'a' + s, 'a' + x,
+                  cft_strerror(st), cft_last_error());
+#undef MIX_RUN
+            CHECK(memcmp(d_mix, d_ref, n * esz) == 0,
+                  "idx+scalar %s %s: a scalar %c beside an indexed %c is "
+                  "not the dense run over the repeated scalar and the "
+                  "gathered operand", cft_format_name(fmt), cft_op_name(op),
+                  'a' + s, 'a' + x);
+            CHECK(memcmp(d_sw, d_ref, n * esz) == 0,
+                  "idx+scalar %s %s (scalar %c, indexed %c): the software "
+                  "backend differs from the dense run",
+                  cft_format_name(fmt), cft_op_name(op), 'a' + s, 'a' + x);
+            CHECK(f_mix == f_ref && f_sw == f_ref,
+                  "idx+scalar %s %s (scalar %c, indexed %c): flags "
+                  "0x%02x/0x%02x, dense 0x%02x", cft_format_name(fmt),
+                  cft_op_name(op), 'a' + s, 'a' + x,
+                  (unsigned)f_mix, (unsigned)f_sw, (unsigned)f_ref);
+
+            /* And the program form, with the library's packing rule
+             * followed here independently: an operand the opcode does
+             * not read carries r4, the scalar carries its constant
+             * index with the `k` bit set, and every other read operand
+             * takes the next free STREAM slot - which is a different
+             * slot for each of the six pairs, and is why the pair has
+             * to be swept rather than sampled. */
+            {
+                const void *pstrm[3];
+                const uint32_t *ptab[3];
+                size_t psrc[3];
+                unsigned fld[3], kb_[3];
+                int strm = 0;
+                pstrm[0] = pstrm[1] = pstrm[2] = NULL;
+                ptab[0] = ptab[1] = ptab[2] = NULL;
+                psrc[0] = psrc[1] = psrc[2] = 0;
+                for (r = 0; r < 3; r++) {
+                    if (!((need >> r) & 1u)) { fld[r] = 4u; kb_[r] = 0u; continue; }
+                    if (r == s)              { fld[r] = 0u; kb_[r] = 1u; continue; }
+                    pstrm[strm] = ev[r];
+                    ptab[strm]  = et[r];
+                    psrc[strm]  = et[r] ? src_n : 0;
+                    fld[r] = (unsigned)strm;
+                    kb_[r] = 0u;
+                    strm++;
+                }
+                ins[0] = seq_alu5((unsigned)op, 3, fld[0], fld[1], fld[2],
+                                  (unsigned)CFT_RNE, kb_[0], kb_[1], kb_[2]);
+                ins[1] = seq_ctrl(3, 3, 0);
+                ins[2] = seq_ctrl(0, 0, 0);
+                ibytes = seq_image(img, fmt, ins, 3, sc, 1, 1);
+                st = cft_program_load(hw, img, ibytes, &prog);
+                CHECK(st == CFT_OK, "idx+scalar %s %s (scalar %c): the "
+                      "one-constant image was refused (%s)",
+                      cft_format_name(fmt), cft_op_name(op), 'a' + s,
+                      cft_strerror(st));
+                if (st == CFT_OK) {
+                    memset(&A, 0, sizeof A);
+                    A.struct_size = sizeof A;
+                    A.a = pstrm[0]; A.b = pstrm[1]; A.c = pstrm[2];
+                    A.n = n;
+                    A.deposits = d_prog;
+                    A.flags_out = &f_prog;
+                    A.idx_a = ptab[0]; A.idx_b = ptab[1]; A.idx_c = ptab[2];
+                    A.idx_a_src = psrc[0]; A.idx_b_src = psrc[1];
+                    A.idx_c_src = psrc[2];
+                    memset(d_prog, 0x5a, n * esz);
+                    st = cft_program_run_ex(prog, &A);
+                    CHECK(st == CFT_OK, "idx+scalar %s %s (scalar %c, "
+                          "indexed %c): the one-constant program run was "
+                          "refused (%s: %s)", cft_format_name(fmt),
+                          cft_op_name(op), 'a' + s, 'a' + x,
+                          cft_strerror(st), cft_last_error());
+                    CHECK(st != CFT_OK ||
+                          memcmp(d_prog, d_ref, n * esz) == 0,
+                          "idx+scalar %s %s (scalar %c, indexed %c): the "
+                          "scalar in the program's constant bank is not "
+                          "the scalar repeated over n lanes",
+                          cft_format_name(fmt), cft_op_name(op),
+                          'a' + s, 'a' + x);
+                    CHECK(st != CFT_OK || f_prog == f_ref,
+                          "idx+scalar %s %s (scalar %c, indexed %c): "
+                          "constant-bank flags 0x%02x, dense 0x%02x",
+                          cft_format_name(fmt), cft_op_name(op),
+                          'a' + s, 'a' + x,
+                          (unsigned)f_prog, (unsigned)f_ref);
+                }
+                cft_program_free(prog);
+                prog = NULL;
+            }
+            pairs++;
+        }
+    }
+    printf("    %s %s: %d (scalar, indexed) operand pairs, call and "
+           "constant-bank program both == dense\n",
+           cft_format_name(fmt), cft_op_name(op), pairs);
+out:
+    cft_program_free(prog);
+    free(sc); free(rep); free(src); free(gat); free(dns);
+    free(d_ref); free(d_mix); free(d_sw); free(d_prog); free(tab);
+}
+
+/* The refusals cft_run_ex's tables carry, which are the library's own
+ * and reach no device - so they are scored on the software handle and
+ * are the same sentence on every backend. Three of them are this
+ * parcel's decisions and are the reason they are written down:
+ *
+ *  - a table on an operand the OPCODE does not read is refused by
+ *    name, not ignored the way the dense path ignores the operand;
+ *  - `d` overlapping an INDEXED source is refused, because a gathered
+ *    lane reads any element of its source and a source the run is also
+ *    writing is read after write;
+ *  - an index at or past idx_*_src is refused before the run, by name
+ *    and by value, on every backend. */
+static void check_indexed_elem_refusals(cft_device *dev, cft_format fmt,
+                                        size_t n)
+{
+    const size_t esz = cft_format_size(fmt);
+    uint8_t *a = (uint8_t *)malloc(n * esz);
+    uint8_t *b = (uint8_t *)malloc(n * esz);
+    uint8_t *d = (uint8_t *)malloc(n * esz);
+    uint32_t *tab = (uint32_t *)malloc(n * 4);
+    cft_elem_args E;
+    cft_status st;
+    size_t i;
+
+    if (!a || !b || !d || !tab)
+        goto out;
+    rs = 0x1D6E ^ (uint32_t)fmt;
+    fill(a, n, esz);
+    fill(b, n, esz);
+    for (i = 0; i < n; i++)
+        tab[i] = (uint32_t)(i % n);
+
+#define EX_REFUSE(setup_)                                              \
+    do {                                                               \
+        memset(&E, 0, sizeof E);                                       \
+        E.struct_size = sizeof E;                                      \
+        E.a = a; E.b = b; E.c = b;                                     \
+        E.d = d; E.n = n;                                              \
+        setup_;                                                        \
+        st = cft_run_ex(dev, CFT_ADD, fmt, CFT_RNE, &E);               \
+    } while (0)
+
+    /* CFT_ADD reads a and c and does NOT read b (b is steered to 1.0),
+     * which is the brief's own example - asserted here rather than
+     * assumed, so that this case cannot quietly stop being the case it
+     * means to be. */
+    CHECK((op_reads_probe(dev, CFT_ADD, fmt) & 2u) == 0,
+          "idx refusals %s: CFT_ADD is expected not to read operand b "
+          "and this device says it does", cft_format_name(fmt));
+
+    EX_REFUSE(E.idx_b = tab; E.idx_b_src = n);
+    CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+          "idx refusals %s: a table on operand b of CFT_ADD, which does "
+          "not read it, was not refused (%s)", cft_format_name(fmt),
+          cft_strerror(st));
+
+    /* d overlapping the indexed source. Exactly aliased first, then
+     * overlapping by one element - the second is the case a pointer
+     * comparison would miss. */
+    EX_REFUSE(E.idx_a = tab; E.idx_a_src = n; E.d = a);
+    CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+          "idx refusals %s: d aliasing the indexed source a was not "
+          "refused (%s)", cft_format_name(fmt), cft_strerror(st));
+    if (n > 1) {
+        EX_REFUSE(E.idx_a = tab; E.idx_a_src = n; E.d = a + esz);
+        CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+              "idx refusals %s: d overlapping the indexed source a by "
+              "n-1 elements was not refused (%s)", cft_format_name(fmt),
+              cft_strerror(st));
+    }
+    /* ...and a DENSE operand aliased with d is refused too WHEN A
+     * TABLE IS PRESENT, because the run is then a program whose
+     * deposit window is a separate buffer role. */
+    EX_REFUSE(E.idx_c = tab; E.idx_c_src = n; E.d = a);
+    CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+          "idx refusals %s: d aliasing the dense operand a beside an "
+          "indexed c was not refused (%s)", cft_format_name(fmt),
+          cft_strerror(st));
+    /* ...while a DENSE RUN with no table at all still allows it, which
+     * is what makes the rule above a rule about gathering and not a
+     * new restriction on cft_run_ex. */
+    EX_REFUSE(E.d = a);
+    CHECK(st == CFT_OK,
+          "idx refusals %s: d aliasing a in a dense cft_run_ex was "
+          "refused (%s: %s)", cft_format_name(fmt), cft_strerror(st),
+          cft_last_error());
+
+    /* The bound: one index at the source's length, one far past it. */
+    tab[n / 2] = (uint32_t)n;
+    EX_REFUSE(E.idx_a = tab; E.idx_a_src = n);
+    CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+          "idx refusals %s: an index AT idx_a_src was not refused (%s)",
+          cft_format_name(fmt), cft_strerror(st));
+    tab[n / 2] = 0xFFFFFFFEu;
+    EX_REFUSE(E.idx_a = tab; E.idx_a_src = n);
+    CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+          "idx refusals %s: an index far past idx_a_src was not refused "
+          "(%s)", cft_format_name(fmt), cft_strerror(st));
+    /* ...and CFT_IDX_NONE in the same slot is NOT out of range. */
+    tab[n / 2] = CFT_IDX_NONE;
+    EX_REFUSE(E.idx_a = tab; E.idx_a_src = n);
+    CHECK(st == CFT_OK,
+          "idx refusals %s: CFT_IDX_NONE was treated as an index (%s: %s)",
+          cft_format_name(fmt), cft_strerror(st), cft_last_error());
+#undef EX_REFUSE
+
+out:
+    free(a); free(b); free(d); free(tab);
+}
+
 static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
                         size_t n, uint32_t seed)
 {
@@ -4513,11 +5178,28 @@ int main(int argc, char **argv)
             for (r = 0; r < nrnd; r++) {
                 compare(sw, hw, fmt, ops[o], rnds[r], n,
                         0x51ce0000u + (uint32_t)(f * 100 + o * 10 + r));
+                /* ...and the same opcode and attribute through index
+                 * tables (R16, ABI 0.14): the indexed run is the dense
+                 * run over the gathered operands, every bit and every
+                 * flag. Beside `compare` and not in its own pass, so
+                 * that the two can never be run over different
+                 * opcodes, formats or attributes. */
+                compare_indexed_elem(sw, hw, fmt, ops[o], rnds[r], n,
+                                     0x1dced000u +
+                                     (uint32_t)(f * 100 + o * 10 + r));
                 printf("  %s %s: %d checks so far, %d failed\n",
                        cft_op_name(ops[o]), "ok", checks, failures);
                 fflush(stdout);
             }
+            /* The scalar-beside-indexed shape, once per opcode: a
+             * stride-0 operand the composition puts in the program's
+             * constant bank, beside one it gathers. */
+            compare_indexed_scalar(sw, hw, fmt, ops[o], n,
+                                   0x5ca10000u + (uint32_t)(f * 100 + o));
         }
+        /* And the refusals the tables carry, which are the library's
+         * own and reach no device - scored once at each format. */
+        check_indexed_elem_refusals(sw, fmt, n);
 
         /* The composed divide and square root. Every floating step
          * runs on whichever backend is under test, so this is where

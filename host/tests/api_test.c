@@ -3877,11 +3877,84 @@ int main(void)
         st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E);
         CHECK(st == CFT_OK, "cft_run_ex beside the 0.14 fields: %s",
               cft_strerror(st));
+        /* P2: the refusal that stood here is gone and the run is real.
+         * An identity table over a full-length source is the dense run
+         * - the numbers are device_test's business and the contract
+         * surface is this file's, so what is checked here is that the
+         * call succeeds and that the three rules P2 added refuse what
+         * they say they refuse. */
         E.idx_a = ix; E.idx_a_src = 8;
         st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E);
-        CHECK(st == CFT_ERR_UNSUPPORTED && strstr(cft_last_error(), "P2"),
-              "an indexed operand is refused by name: %s (%s)",
+        CHECK(st == CFT_OK, "an indexed operand runs (P2): %s (%s)",
               cft_strerror(st), cft_last_error());
+        /* A table on an operand the OPCODE does not read. CFT_ADD reads
+         * a and c; b is steered to 1.0 and never fetched, so a table
+         * for it would be built and never used. */
+        E.idx_b = ix; E.idx_b_src = 8;
+        st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E);
+        CHECK(st == CFT_ERR_INVALID_ARGUMENT &&
+              strstr(cft_last_error(), "does not read it"),
+              "a table on an operand the opcode does not read: %s (%s)",
+              cft_strerror(st), cft_last_error());
+        E.idx_b = NULL; E.idx_b_src = 0;
+        /* `d` overlapping an INDEXED source: a gathered lane reads any
+         * element of its source, so a source the run is also writing is
+         * read after write. Dense aliasing is still allowed and the
+         * dense run at the end of this block is the proof. */
+        E.d = a8;
+        st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E);
+        CHECK(st == CFT_ERR_INVALID_ARGUMENT &&
+              strstr(cft_last_error(), "overlaps"),
+              "d overlapping an indexed source: %s (%s)",
+              cft_strerror(st), cft_last_error());
+        E.d = d8;
+        /* The bound, by name and by value, before the run. */
+        ix[3] = 8;                          /* one past the last element */
+        st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E);
+        CHECK(st == CFT_ERR_INVALID_ARGUMENT &&
+              strstr(cft_last_error(), "idx_a[3]"),
+              "an index at the source's length: %s (%s)",
+              cft_strerror(st), cft_last_error());
+        ix[3] = CFT_IDX_NONE;               /* ...and the sentinel is not */
+        st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E);
+        CHECK(st == CFT_OK, "CFT_IDX_NONE is not an out-of-range index: "
+              "%s (%s)", cft_strerror(st), cft_last_error());
+        ix[3] = 3;
+        /* An `n` the DENSE path refuses without touching a byte must be
+         * refused before a single table entry is read (V2, 2026-09-15).
+         * The table pointer here is a POISONED address that would fault
+         * if anything dereferenced it, and the huge n is one
+         * `n > SIZE_MAX / esz` rejects - so this case passes only if
+         * every dense-path check runs first. Before the fix it walked
+         * the table for n entries and segfaulted. */
+        {
+            const uint32_t *poison = (const uint32_t *)(uintptr_t)0x10;
+            cft_elem_args H;
+            memset(&H, 0, sizeof H);
+            H.struct_size = sizeof H;
+            H.a = a8; H.b = a8; H.c = a8; H.d = d8;
+            H.n = (size_t)-1 / 4u;          /* n * esz cannot be sized */
+            H.idx_a = poison; H.idx_a_src = 8;
+            st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &H);
+            CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+                  "an n too large to size, with a table, is refused "
+                  "without reading it: %s", cft_strerror(st));
+            /* ...and the same for the NULL output, the other check the
+             * dense path makes before it touches memory. */
+            H.n = 8;
+            H.d = NULL;
+            st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &H);
+            CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+                  "a NULL d, with a table, is refused without reading "
+                  "it: %s", cft_strerror(st));
+            /* ...and a reduction opcode, which this call refuses
+             * whatever its operands are. */
+            H.d = d8;
+            st = cft_run_ex(dev, CFT_SUM, CFT_FP64, CFT_RNE, &H);
+            CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+                  "a reduction opcode, with a table, is refused without "
+                  "reading it: %s", cft_strerror(st));
+        }
         E.idx_a_src = 0;
         st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E);
         CHECK(st == CFT_ERR_INVALID_ARGUMENT,

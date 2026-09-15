@@ -2423,23 +2423,77 @@ follow, and each is a refusal rather than a surprise:
   would have computed.
 * **A device that does not publish `CFT_SEQ_FEAT_INDEXED` is refused
   by name.** Ask `cft_get_caps` first. The software backend always
-  carries it; a tile carries it from CAPS2[9]; the program run's
-  REMOTE route does not carry it at all yet and says so (gather on the
-  client and send the dense block).
+  carries it; a tile carries it from CAPS2[9]; a REMOTE handle
+  publishes what its server's HELLO publishes and gathers on the
+  client before the frame (P2), so the protocol has no field for a
+  table and needs none.
 * **An identity table is bit-identical to the dense run**, by
   construction and not by luck: the run is defined as the dense run
   over the gathered block, so there is no new rounding rule and
   nothing new for the model to define.
 
-`cft_elem_args`'s three tables (P2) and the lane mask (P3) are still
-refused by name.
+The lane mask (P3) is still refused by name.
 
-**What lands with the parcels**, and where this section grows: P1 is
-in (above); P2 -
-`cft_run_ex`'s tables, composed on a tile as a three-instruction
-program over P1's mechanism, gathered on the client for the remote
-backend; P3 - the mask, with the tile publishing
+**`cft_run_ex`'s three tables are built (P2, 2026-09-15).** They mean
+on an elementwise operand exactly what P1's mean on a stream - `a` is
+the SOURCE, `idx_a_src` says how long it is, element `i` is
+`a[idx_a[i]]` and `CFT_IDX_NONE` is `+0` - and the answer is the dense
+`cft_run` over the gathered operands, every bit and every flag. The
+shape rules above are unchanged, the bound is checked the same way and
+on every backend, and three more rules are this call's:
+
+* **A table on an operand the OPCODE does not read is refused by
+  name** (`CFT_ERR_INVALID_ARGUMENT`). `cft_run(CFT_ADD, a, b, c)`
+  ignores `b`, because ADD reads `a` and `c`; `idx_b` on an ADD is not
+  ignored in the same way, because a table is a buffer you built for a
+  fetch this call would then not make. Give the table to the operand
+  the opcode reads, or pass the opcode whose operand it is. An
+  UNASSIGNED opcode reads nothing at all, so every table on one is
+  refused: its result is the canonical quiet NaN whatever any operand
+  holds.
+* **With a table, `d` may not overlap ANY operand.** Dense, `d` may
+  alias `a`, `b` or `c` and still does: the run loads element `i`
+  before it stores element `i`, so the two never disagree. Through a
+  table lane `i` reads `source[idx[i]]`, which is any element of the
+  source - read after write - and the dense operands beside it are
+  refused for a second reason: a table makes the run a PROGRAM on a
+  device, and a program's deposit window is a separate buffer role
+  with its own write discipline, so `d` overlapping an operand would
+  mean something different on each backend. Refused on every backend
+  rather than only where it bites, and refused before a single index is
+  read - it is checked behind every argument rule the dense run has,
+  so an `n` the dense path rejects is rejected the same way here. The
+  rule looks at all three operand pointers and not only the ones the
+  opcode reads, so `d` overlapping `b` on an `ADD` is refused as well:
+  over-broad by a pointer the run would never have fetched, which is
+  the direction to be wrong in. A caller who wants an in-place update
+  runs into their own buffer and copies.
+* **A SCALAR operand beside an indexed one is legal and works.**
+  `scalar_mask` and a table on the SAME operand remain
+  `CFT_ERR_INVALID_ARGUMENT` (a stride of zero and a table are two
+  answers to one question); on different operands they compose. On a
+  tile the scalar becomes one of the composed program's own
+  CONSTANTS - zero bytes a lane, no stride-0 stream needed - and the
+  streams pack down past it.
+
+**How it runs, per backend**, which is a performance statement and not
+a contract one - the bits are the same on all three. On an XRT device
+the library composes the run as a three-instruction program over P1's
+mechanism (`op r3, <streams>; DEPOSIT r3; HALT`, `max_deposits` 1, one
+deposit a lane landing dense in `d`), so the TILE gathers and the
+elements the caller did not ask for never cross the bus; a device
+without a sequencer, and then a device without CAPS2[9], is refused by
+name in that order. A scalar operand on that route needs no
+`CFT_SEQ_FEAT_SCALAR`: it becomes one of the composed program's
+constants rather than `MODE[18:16]`, so CAPS2[7] gates the DENSE
+scalar-mask run and nothing else. On the software backend the operands are gathered
+and the dense path runs over them, which is the definition rather than
+an approximation of it. On the remote backend the client gathers and
+sends a dense `RUN`: the call is portable and the saving is not, which
+is what `cft_get_caps` is for and is the same division the scalar
+operand shipped with.
+
+**What lands with the parcels**, and where this section grows: P1 and
+P2 are in (above); P3 - the mask, with the tile publishing
 `CFT_SEQ_FEAT_LANE_MASK` and the remote backend copying back only the
-lanes the mask names. The saving is the tile's and the call is
-portable, as with the scalar operand: a caller asks `cft_get_caps` to
-learn which it has.
+lanes the mask names.
