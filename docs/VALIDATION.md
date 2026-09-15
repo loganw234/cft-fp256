@@ -12045,3 +12045,112 @@ other number is the number it was at 122eb69. Parcels P1 and P4 were
 dispatched at 06:40 on the Verilator suite, the census and lint -
 Logan's call, "utilize the quick tests" - with the Icarus tail landing
 ten minutes later and changing nothing.
+
+## 2026-09-15 - P4 on main: the accumulator reduces a whole beat a cycle, same bits, and the defect its verifier found on the way
+
+**The claim.** `cft_reduce` and `cft_reduce_seg` on a tile were
+streaming one element a cycle through the accumulator's lane 0 while
+the other lanes of the beat sat idle: fp32 `CFT_SUM` cost 11.3147
+cycles a beat marginal (docs/SEQUENCER.md's seq6 entry, the card's
+number). Round 2's parcel P4 (docs/ROUND2.md) builds a heap of adders
+in the idle lanes - four, two, one and one fp32 lanes at the four
+levels, the same `cft_reduce_acc` fed through a second input port
+(`win_*`), a 64-deep queue of partials with credits, a beat eligible
+only where the segment length is a multiple of the elements per beat -
+so that a beat of eight fp32 elements folds in one pass and the serial
+path is what remains for the tail and for the shapes the tree
+declines. The tree contract (docs/HOSTAPI.md, "Reductions, and why they are a second entry point"; `cft.h` above `cft_reduce`)
+says which pairs are summed in which order, and the heap is a
+different traversal of the SAME pairing, which is why the bits are
+unchanged rather than merely close: V4 broke the pairing on purpose and
+five of the nine reduce cases failed with the model's exact strings; a
+pair-preserving permutation (the two halves of the beat exchanged at
+the bottom level) passed nine of nine, the commutativity claim holding
+in the RTL as it does in the model.
+
+**The measurement** (`make cycles`, `tb/test_krnl_cycles.py`'s new
+REDCYC rows, at rd=wr=0 and at rd=wr=150): fp32 `CFT_SUM` marginal
+**11.3147 -> 1.4152 cycles a beat**, fixed 195.9 -> 193.4 (493.4 at
+the long latency), latency-independent - the tree is behind the same
+FIFO the serial path was. The seven shapes the tree declines (a segment
+of three at any format; every fp256 shape, where a beat is one
+element) are cycle-identical between the tree and the `EN_WIDE=0`
+build - 27344 / 13745 / 6864 at fp32 / fp64 / fp128 seg=3, and 3505 /
+1787 / 1167 / 445 at fp256 - and the `EN_WIDE=0` build's whole table
+is b0b9add's own measured numbers, the pre-tree tile. The per-segment
+flush (about 100 cycles) dominates a short segment; that is the number
+the card day measures against the seq6 entry.
+
+**What the verifier found.** P4 reported at 09:06 with nine reduction
+benches green on both simulators and the census. V4 (a verifier the
+plan had not budgeted; the method's criterion - a parcel that crosses a
+seam gets one - said yes) reproduced every gate, built eleven cases P4
+had not (segments not a multiple of the elements per beat, every tail
+length at every format, a flag whose only source is a tree lane, the
+partial queue saturated with the read side stalled by a bus fault,
+maxall with an sNaN in a tree lane), and found nothing - until it ran
+the one target outside its list. `make redprog`
+(`tb/probe_reduce_then_prog.py`, the reduce-then-program probe written
+for the seq6 hang) failed at P4's tip with `fp32 op 24 n=1000 seg=0:
+flags 0b11000 want 0b10000`: the bits right and FLAGS wrong. The
+minimal form has no sequencer in it - an elementwise fp32 FMA of 2^-100
+by 2^-100, then `CFT_SUM` over a thousand ones, a run the model calls
+exact, returned UNDERFLOW and INEXACT. The new sticky-flag arm ORed the
+array's lane flags at accepted edges 0..15 of the reduction, before
+this run's own results had returned, so it read the previous run's
+flags out of the shared array. The array is shared with the engine and
+its lane-flag and lane-data vectors are not self-qualifying: every
+reader needs its own delay line, which is the rule 2026-09-14's retire
+gate already stated for data and which flags had now broken in the same
+way.
+
+**The fix** (778dabf): a heap level contributes only on its own return
+strobe, `stg_go[k-l]`, the earliest LATENCY+1 accepted edges after the
+first admission, and the shift register is held at zero while not
+running. V4 re-verified it from a clean build: `redprog` green on both
+simulators; the two regression cases P4 added to `tb/test_krnl_reduce.py`
+(an elementwise run that underflows then an exact sum; a program then
+reductions at every format) fail with only the narrowing reverted and
+pass with it; an instrumented copy that fatals on any lane flag reaching
+the accumulator at or below edge 16 ran the benches without firing
+(8,690 flag collections, the earliest at edge 21) while the UNQUALIFIED
+OR was non-zero at edges 0..15 on 127 occasions - so the gate blocks
+real bits and is not vacuously true; and the tap is pinned both ways,
+because moving it one stage early fails nine of eleven cases, losing a
+real flag in one and gaining a spurious one in another. Nothing else
+moved: section-by-section hashes of the engine show the tree, the
+`wide_f` decode and one comment changed and the readers, writer, run
+control, FIFOs, assembler and fault blocks byte-identical.
+
+**What the merge changed besides P4's files.** `redprog` joined
+`SIM_BENCHES` (401627c) - it had caught two real defects while sitting
+outside the gate. Every single bench target now runs `check_results.py`
+over its own results and exits non-zero on a failed test (2318281): P4
+measured that `make reduce` exited 0 with `TESTS=3 PASS=0 FAIL=3`,
+because cocotb cannot set an exit code and only `make sim` ran the
+checker. `EN_WIDE` became a parameter of `cft_krnl` (it was
+`cft_engine_stream`'s alone, and `tb/cocotb.mk` refuses a `-P` for any
+module but the top, so the tree-less control was a source edit no gate
+built - V4's finding), and `make reducenowide` builds that control
+inside the suite every time: the same eleven reduction cases on a tile
+without the tree, the bench's wide-beat counter asserted zero at every
+shape. The suite is twenty-five benches.
+
+**The gates, at the merge** (main a061d3f = 27c424d, the merge of
+`round2/merged-p4`, plus the six stated counts at twenty-five). The box
+at the staging commit 9a24607 (`~/cft-fp256-c`, 11:24-12:22 under
+`nice`, two other suites sharing the machine): `make sim SIM=verilator`
+25 benches, no failures recorded; the census `seq_coremc` 20/20,
+`krnlseqmc` 1/1, `seqbanksmc` 1/1, `reducemc` 11/11, `krnlmc` 2/2;
+`yosys-lint` clean; the Icarus tail running as this is written. The
+staging commit was cut from main before P1's merge, so the combined
+tree - P1's gather and P4's tree on one tile - had never run: the seam
+test on the merged tree on the desktop, `redprog` 2/2 (a segmented fp64
+sum, an fp32 fold through a gathered scratch pool of six slots over
+forty lanes, fp32 segments of eight and an fp128 whole sum, a gathered
+fold of 150 fp32 lanes across a block, an fp64 segmented sum of
+sixteen, on one tile), `reduce` 11/11, `reducenowide` 11/11, `krnlseq`
+1/1, all under Verilator; and the box's full suite at a061d3f itself,
+launched at 12:24 in the second checkout, whose verdict the next entry
+carries. No host source changed in this merge; the host gates are the
+P1 entry's.
