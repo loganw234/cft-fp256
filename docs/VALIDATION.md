@@ -12033,3 +12033,15 @@ the seam's:
   rather than fixed at the seam, because the fix is a toolchain
   decision (a gnu-target `rustc`, or the example linking MinGW's
   runtime) and not P0's.
+
+**The sims on the box** (amd-arc-box, `~/box_sims_p0.sh` at c3c8b7e -
+the seam's RTL with three docs commits over it - under `nice`,
+05:24-06:30): `make sim SIM=verilator` 23 benches, no failures
+recorded; the multi-pass census `seq_coremc` 20/20, `krnlseqmc` 1/1,
+`seqbanksmc` 1/1; then under Icarus `seq_core` 20/20 (1,050 s),
+`krnlseq` 1/1, `seqbanks` 1/1, `faults` 5/5; `yosys-lint` clean here
+and on the box. The four benches that assert VERSION read 0xA00; every
+other number is the number it was at 122eb69. Parcels P1 and P4 were
+dispatched at 06:40 on the Verilator suite, the census and lint -
+Logan's call, "utilize the quick tests" - with the Icarus tail landing
+ten minutes later and changing nothing.
