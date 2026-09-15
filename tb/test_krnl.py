@@ -474,8 +474,9 @@ async def krnl_end_to_end(dut):
     assert await axil.read_dword(MAGIC) == 0x43465430
     # 0x700 -> 0x800 at revision 3: the map GREW again, by CAPS2 at
     # 0x6C and the two scratch pointers at 0x70 and 0x78; 0x800 ->
-    # 0x900 on 2026-09-14, by SEG/NRES at 0x80/0x84 (ask 7).
-    assert await axil.read_dword(VERSION) == 0x00000900
+    # 0x900 on 2026-09-14, by SEG/NRES at 0x80/0x84 (ask 7); 0xA00 on
+    # 2026-09-15 by the five pointers at 0x88..0xA8 (docs/ROUND2.md).
+    assert await axil.read_dword(VERSION) == 0x00000A00
     caps = await axil.read_dword(CAPS)
     # CAPS[3:0] against what this bench was BUILT with, not against 0xF: a
     # trimmed build (make krnlf128) must advertise exactly the rungs it

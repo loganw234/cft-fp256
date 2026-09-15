@@ -604,6 +604,38 @@ written against 0.12 gets the same bits from the same calls, and
 | Arduino | the vendored copy re-synced (29 files identical); the entry point is there and refuses on a board as it does on any device without the bit |
 | Python (cftmpfr) | no surface: cftmpfr is an MPFR drop-in and carries no reduction entry point |
 
+**ABI 0.14 (2026-09-15)** is a SEAM, not a feature: the declarations of
+one parcel round (docs/ROUND2.md) landed first so that every parcel
+builds against one definition of each field. `cft_run_args` gains index
+tables for its three streams and its scratch block (`idx_a`, `idx_b`,
+`idx_c`, `idx_scratch_in`, each with the source's length in elements)
+and a per-run lane mask (`lane_mask`, `lane_mask_bytes`);
+`cft_elem_args` gains the same three tables; `CFT_IDX_NONE` is the index
+that reads as +0; `CFT_SEQ_FEAT_INDEXED` (CAPS2[9]) and
+`CFT_SEQ_FEAT_LANE_MASK` (CAPS2[10]) are the bits a tile will publish;
+the register map is VERSION 0xA00 with five pointer registers at
+0x88..0xA8 as kernel arguments 12..16. At this step every new field is
+REFUSED BY NAME on every backend after its shape is checked -
+`CFT_ERR_INVALID_ARGUMENT` with a sentence for a malformed table or
+mask, `CFT_ERR_UNSUPPORTED` naming the parcel for a well-formed one -
+so no caller can be run with a field silently dropped. ADDITIVE for
+every existing call: code written against 0.13 gets the same bits from
+the same calls; the two input structs grew and are refused at their old
+size, as an input struct always is.
+
+| surface | status at ABI 0.14 (the seam) |
+|---|---|
+| C (`cft.h`) | declared; refused by name. `api-test` holds eleven refusals - each shape rule on both entry points, the two named refusals, and the dense run beside them still running |
+| hardware | five registers appended, read and written back, read by nothing; VERSION 0xA00; the four benches that assert the version moved with it; CAPS2[9] and [10] zero from the localparams the parcels will set; MODE[23:19] refused by the guard on MODE[31:19] as before |
+| XRT | 0xA00 accepted; the five arguments passed on every program launch on such a map, one beat each until bound; CAPS2[9] and [10] decoded onto `seq_features` bits 13 and 14 where the map has them |
+| remote | no frame change: the refusals are the library's and never reach a frame; both routes are planned client-side |
+| Node / Browser | the module rebuilt at 0.14 as every step requires; no new surface until P2 |
+| Arduino | the vendored copy re-synced |
+| the model | `seq.run()` takes the five keyword arguments and raises `NotImplementedError` naming the parcel for each |
+
+What each surface says once P1, P2 and P3 land is in the sections those
+parcels' merges add below this one.
+
 
 ## Hosts and boards
 

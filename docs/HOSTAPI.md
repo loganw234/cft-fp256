@@ -2369,3 +2369,49 @@ exactly associative and commutative, flags included, which is the
 argument the opcode's own block in `cft.h` makes and the reason a
 hardware maxall could be added without a tree contract. A tile without
 the bit decodes 31 as elementwise and libcft never sends it there.
+
+## ABI 0.14: the seam of a parcel round (2026-09-15)
+
+Declared first, built by parcels (docs/ROUND2.md). Three fields on
+`cft_run_args`, one on `cft_elem_args`, two feature bits and one
+sentinel:
+
+    cft_run_args   idx_a, idx_b, idx_c        n uint32 indices each, or NULL
+                   idx_a_src, idx_b_src,      the indexed source's length in elements
+                   idx_c_src
+                   idx_scratch_in             n * n_scratch_in indices, lane-major, or NULL
+                   idx_scratch_src            the scratch pool's length in elements
+                   lane_mask, lane_mask_bytes (n + 7) / 8 bytes, bit i lane i, or NULL
+    cft_elem_args  idx_a, idx_b, idx_c, idx_a_src, idx_b_src, idx_c_src
+    CFT_IDX_NONE   0xFFFFFFFF, the index that reads as +0
+    CFT_SEQ_FEAT_INDEXED (CAPS2[9]), CFT_SEQ_FEAT_LANE_MASK (CAPS2[10])
+
+**The contract** is docs/SEQUENCER.md revision 6: with a table, element
+`i` of a block is `source[idx[i]]`, `CFT_IDX_NONE` reading as +0, and
+the run is exactly the dense run over the gathered block; a masked lane
+runs nothing and writes nothing, its outputs left as the caller had
+them. Both are one line in the software backend, which is the
+definition.
+
+**At this step every field is refused.** The shape rules are checked
+first and are final - a table on a NULL operand, a table on an operand
+that is also scalar, a source length of zero beside a table or a length
+beside no table, a scratch table on a program that declares no scratch
+input, a mask whose byte count is not `(n + 7) / 8` - each
+`CFT_ERR_INVALID_ARGUMENT` with a sentence naming the field. A
+well-formed table or mask is then `CFT_ERR_UNSUPPORTED` with a sentence
+naming the parcel that builds it (P1 the program run's tables, P2 the
+elementwise run's, P3 the mask). A caller built against 0.14 today
+therefore gets a refusal it can read rather than a run with a field
+silently dropped, and every existing call runs exactly as it did.
+
+**What lands with the parcels**, and where this section grows: P1 -
+the tables on a program run, on the software backend, the model, the
+C executor and a tile publishing `CFT_SEQ_FEAT_INDEXED`; P2 -
+`cft_run_ex`'s tables, composed on a tile as a three-instruction
+program over P1's mechanism, gathered on the client for the remote
+backend; P3 - the mask, with the tile publishing
+`CFT_SEQ_FEAT_LANE_MASK` and the remote backend copying back only the
+lanes the mask names. The saving is the tile's and the call is
+portable, as with the scalar operand: a caller asks `cft_get_caps` to
+learn which it has.

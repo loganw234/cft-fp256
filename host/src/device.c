@@ -1148,6 +1148,65 @@ CFT_API cft_status cft_run_ex(cft_device *dev,
         ((args->scalar_mask & 2u) && !args->b) ||
         ((args->scalar_mask & 4u) && !args->c))
         return CFT_ERR_INVALID_ARGUMENT;
+    /* ABI 0.14's index tables (docs/ROUND2.md, P2). The SHAPE rules are
+     * the seam's and final: a table on an operand that is NULL, or that
+     * is also scalar, or with a source length of zero, and a source
+     * length beside no table, are each an argument error. A well-formed
+     * table is then REFUSED BY NAME until the parcel that builds the
+     * route lands - never ignored, because a run that quietly read the
+     * dense array in place of the gathered one would return an array's
+     * worth of the wrong answer with clean flags. */
+    {
+        const uint32_t *idx[3];
+        size_t src[3];
+        const void *opnd[3];
+        int r;
+        idx[0] = args->idx_a; idx[1] = args->idx_b; idx[2] = args->idx_c;
+        src[0] = args->idx_a_src; src[1] = args->idx_b_src;
+        src[2] = args->idx_c_src;
+        opnd[0] = args->a; opnd[1] = args->b; opnd[2] = args->c;
+        for (r = 0; r < 3; r++) {
+            if (!idx[r]) {
+                if (src[r]) {
+                    cft_set_error("cft_run_ex: idx_%c_src = %lu names a "
+                                  "source length for operand %c, which has "
+                                  "no index table", 'a' + r,
+                                  (unsigned long)src[r], 'a' + r);
+                    return CFT_ERR_INVALID_ARGUMENT;
+                }
+                continue;
+            }
+            if (!opnd[r]) {
+                cft_set_error("cft_run_ex: idx_%c indexes operand %c, "
+                              "which is NULL", 'a' + r, 'a' + r);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
+            if (args->scalar_mask & (1u << r)) {
+                cft_set_error("cft_run_ex: operand %c is both scalar "
+                              "(scalar_mask bit %d) and indexed (idx_%c); "
+                              "a stride of zero and a table are two answers "
+                              "to one question", 'a' + r, r, 'a' + r);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
+            if (src[r] == 0) {
+                cft_set_error("cft_run_ex: idx_%c is set and idx_%c_src is "
+                              "zero, so no index could be in range - the "
+                              "source's length in elements is what bounds "
+                              "the table", 'a' + r, 'a' + r);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
+        }
+        for (r = 0; r < 3; r++) {
+            if (idx[r]) {
+                cft_set_error("cft_run_ex: an indexed operand (idx_%c) is "
+                              "declared at ABI 0.14 and not yet built on "
+                              "any backend (docs/ROUND2.md, parcel P2); the "
+                              "call is refused rather than run over the "
+                              "dense operand", 'a' + r);
+                return CFT_ERR_UNSUPPORTED;
+            }
+        }
+    }
     /* A scalar operand on a device that cannot do it is refused BY NAME,
      * which is the whole reason CAPS2[7] exists. The alternative - run it
      * anyway and let the tile ignore MODE[18:16] - reads n elements from

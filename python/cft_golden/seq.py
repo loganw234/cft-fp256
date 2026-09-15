@@ -977,7 +977,9 @@ class Result:
 
 
 def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
-        early_exit=True, insn_budget=None, n_active=None):
+        early_exit=True, insn_budget=None, n_active=None,
+        idx_a=None, idx_b=None, idx_c=None, idx_scratch_in=None,
+        lane_mask=None):
     """Execute `prog` over len(a) lanes.
 
     The three input streams initialise r0, r1 and r2 - the same three
@@ -1017,7 +1019,35 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
     early_exit=False forces every loop to run its full trip count. The
     results must be identical either way; that is P3 in
     docs/SEQUENCER.md and test_seq.py checks it.
+
+    ABI 0.14 (docs/ROUND2.md), declared here so that the two parcels
+    extending this executor share one signature and one definition each:
+
+    `idx_a`, `idx_b`, `idx_c` - an index table per stream, n uint32
+    values, or None for a dense stream: element i of the stream is
+    `source[idx[i]]`, and `CFT_IDX_NONE` (0xFFFFFFFF) reads as +0. With
+    a table, the stream argument is the SOURCE, of any length, and an
+    index at or past it is refused. `idx_scratch_in` likewise for the
+    scratch block, `n * n_scratch_in` indices lane-major into the pool
+    passed as `scratch_in`. Parcel P1 writes the definition.
+
+    `lane_mask` - a list of n booleans, or None for every lane. A masked
+    lane runs no instruction and writes nothing: its deposit slots, its
+    count and its scratch-out slots are left as the caller had them, it
+    raises no flag, and it is inactive for the early exit from its first
+    cycle; `n_active` is the prefix form of the same thing. Parcel P3
+    writes the definition.
+
+    Until each lands, a non-None value is refused by name.
     """
+    if any(t is not None for t in (idx_a, idx_b, idx_c, idx_scratch_in)):
+        raise NotImplementedError(
+            "indexed inputs are declared at ABI 0.14 and not built in the "
+            "model yet: docs/ROUND2.md, parcel P1")
+    if lane_mask is not None:
+        raise NotImplementedError(
+            "the lane mask is declared at ABI 0.14 and not built in the "
+            "model yet: docs/ROUND2.md, parcel P3")
     fmt = prog.fmt
     prog._check_bank(bank)
     consts = list(bank) if prog.bank_ext else prog.consts

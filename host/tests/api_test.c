@@ -3395,6 +3395,76 @@ int main(void)
               memcmp(dig, dig2, 32) != 0,
               "image and bank do not digest to the image alone");
 
+        /* -- ABI 0.14's fields on a program run (docs/ROUND2.md, P0) --
+         *
+         * Declared and refused: the shape rules are argument errors
+         * with a sentence naming the field, and a well-formed table or
+         * mask is CFT_ERR_UNSUPPORTED naming the parcel that builds it.
+         * The dense run beside them still runs, which is what makes
+         * the refusals additive rather than a regression. */
+        {
+            cft_run_args R;
+            uint32_t ix[1], fl2 = 0;
+            uint8_t mask1[1] = { 0x01u };
+            uint8_t dep2[4];
+            ix[0] = 0;
+            memset(&R, 0, sizeof R);
+            R.struct_size = sizeof R;
+            R.a = a4; R.n = 1; R.deposits = dep2; R.flags_out = &fl2;
+            st = cft_program_run_ex(prog, &R);
+            CHECK(st == CFT_OK, "a dense run beside the 0.14 fields: %s (%s)",
+                  cft_strerror(st), cft_last_error());
+            R.idx_a = ix; R.idx_a_src = 1;
+            st = cft_program_run_ex(prog, &R);
+            CHECK(st == CFT_ERR_UNSUPPORTED &&
+                  strstr(cft_last_error(), "ROUND2") &&
+                  strstr(cft_last_error(), "P1"),
+                  "an index table is refused by name: %s (%s)",
+                  cft_strerror(st), cft_last_error());
+            R.idx_a_src = 0;
+            st = cft_program_run_ex(prog, &R);
+            CHECK(st == CFT_ERR_INVALID_ARGUMENT &&
+                  strstr(cft_last_error(), "idx_a_src"),
+                  "a table with a source length of zero is a shape error: "
+                  "%s (%s)", cft_strerror(st), cft_last_error());
+            R.idx_a = NULL; R.idx_a_src = 1;
+            st = cft_program_run_ex(prog, &R);
+            CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+                  "a source length beside no table is a shape error: %s",
+                  cft_strerror(st));
+            R.idx_a_src = 0; R.idx_b = ix; R.idx_b_src = 1;   /* b is NULL */
+            st = cft_program_run_ex(prog, &R);
+            CHECK(st == CFT_ERR_INVALID_ARGUMENT &&
+                  strstr(cft_last_error(), "NULL"),
+                  "a table on a NULL stream is a shape error: %s (%s)",
+                  cft_strerror(st), cft_last_error());
+            R.idx_b = NULL; R.idx_b_src = 0;
+            R.idx_scratch_in = ix; R.idx_scratch_src = 1;
+            st = cft_program_run_ex(prog, &R);
+            CHECK(st == CFT_ERR_INVALID_ARGUMENT &&
+                  strstr(cft_last_error(), "no scratch input"),
+                  "an indexed scratch block on a program without one is a "
+                  "shape error: %s (%s)", cft_strerror(st), cft_last_error());
+            R.idx_scratch_in = NULL; R.idx_scratch_src = 0;
+            R.lane_mask = mask1; R.lane_mask_bytes = 2;
+            st = cft_program_run_ex(prog, &R);
+            CHECK(st == CFT_ERR_INVALID_ARGUMENT &&
+                  strstr(cft_last_error(), "lane_mask_bytes"),
+                  "a mask of the wrong length is a shape error: %s (%s)",
+                  cft_strerror(st), cft_last_error());
+            R.lane_mask_bytes = 1;
+            st = cft_program_run_ex(prog, &R);
+            CHECK(st == CFT_ERR_UNSUPPORTED &&
+                  strstr(cft_last_error(), "ROUND2") &&
+                  strstr(cft_last_error(), "P3"),
+                  "a well-formed lane mask is refused by name: %s (%s)",
+                  cft_strerror(st), cft_last_error());
+            R.lane_mask = NULL; R.lane_mask_bytes = 0;
+            st = cft_program_run_ex(prog, &R);
+            CHECK(st == CFT_OK, "and the dense run still runs after them: %s",
+                  cft_strerror(st));
+        }
+
         cft_program_free(prog);
         cft_program_free(pext);
         cft_program_free(NULL);       /* must be safe */
@@ -3763,6 +3833,54 @@ int main(void)
         }
         cft_buffer_free(pa);
         cft_buffer_free(pd);
+    }
+
+    /* --- ABI 0.14's fields on an elementwise run (docs/ROUND2.md, P0) --
+     *
+     * The same discipline as the program run's: shape errors by name,
+     * then a refusal naming the parcel, and the dense run beside them
+     * unaffected. */
+    {
+        uint8_t a8[8 * 8], d8[8 * 8];
+        uint32_t ix[8], fl = 0;
+        cft_elem_args E;
+        memset(a8, 0, sizeof a8);
+        for (i = 0; i < 8; i++)
+            ix[i] = (uint32_t)i;
+        memset(&E, 0, sizeof E);
+        E.struct_size = sizeof E;
+        E.a = a8; E.b = a8; E.c = a8; E.d = d8; E.n = 8; E.flags_out = &fl;
+        st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E);
+        CHECK(st == CFT_OK, "cft_run_ex beside the 0.14 fields: %s",
+              cft_strerror(st));
+        E.idx_a = ix; E.idx_a_src = 8;
+        st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E);
+        CHECK(st == CFT_ERR_UNSUPPORTED && strstr(cft_last_error(), "P2"),
+              "an indexed operand is refused by name: %s (%s)",
+              cft_strerror(st), cft_last_error());
+        E.idx_a_src = 0;
+        st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E);
+        CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+              "a table with a source length of zero: %s", cft_strerror(st));
+        E.idx_a_src = 8; E.scalar_mask = 1u;
+        st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E);
+        CHECK(st == CFT_ERR_INVALID_ARGUMENT &&
+              strstr(cft_last_error(), "both scalar"),
+              "scalar and indexed on one operand: %s (%s)",
+              cft_strerror(st), cft_last_error());
+        E.scalar_mask = 0; E.idx_a = NULL; E.idx_a_src = 0;
+        E.idx_c = ix; E.idx_c_src = 8; E.c = NULL;
+        st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E);
+        CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+              "a table on a NULL operand: %s", cft_strerror(st));
+        E.idx_c = NULL;                    /* idx_c_src still 8 */
+        st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E);
+        CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+              "a source length beside no table: %s", cft_strerror(st));
+        E.idx_c_src = 0; E.c = a8;
+        st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E);
+        CHECK(st == CFT_OK, "and the dense run still runs: %s",
+              cft_strerror(st));
     }
 
     cft_close(dev);

@@ -21,7 +21,7 @@
     {
       "source": "host/include/cft.h",
       "dest": "src/cft/include/cft.h",
-      "sha256": "89008e09d30092905b7e1cdb96e1b0d0bafab8d1023ce7e6d2fa1e62aa43eae7"
+      "sha256": "b9bac191aba692caacca4c29c7754241636d46c6f6dd42227e665f045f1d3208"
     },
     {
       "source": "host/include/cft_config.h",
@@ -41,7 +41,7 @@
     {
       "source": "host/src/backend.h",
       "dest": "src/cft/src/backend.h",
-      "sha256": "46f3a0dca83cd578153eff06916fdadd7d686a47cc8a601d2e804b0203410f4e"
+      "sha256": "ec4b803a6de63ec20d17d35e35035561bf7a8bad2c1091b5c7f149cc3452f0e0"
     },
     {
       "source": "host/src/backend_remote.c",
@@ -76,7 +76,7 @@
     {
       "source": "host/src/device.c",
       "dest": "src/cft/src/device.c",
-      "sha256": "33ee62851ff4079b02239bb3d9257b345938b71636039f5ae31982b4d0410817"
+      "sha256": "f59add70f2c3a34f5def117115186cab58fdb007ba76c2c2b73f1f03c2ec391c"
     },
     {
       "source": "host/src/divfull_images.h",
@@ -116,7 +116,7 @@
     {
       "source": "host/src/program.c",
       "dest": "src/cft/src/program.c",
-      "sha256": "64c28dbae9d3e97d23e35cb398a84a92afc5aeda5f128d3d37b0fe613838de0d"
+      "sha256": "8825d796375ac3ae31a406bc08f0fd12cfaec485fd4c3d9e00cc0a570432928d"
     },
     {
       "source": "host/src/reduce.c",

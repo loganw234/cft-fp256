@@ -1327,17 +1327,18 @@ static void check_caps_enforced(cft_device *dev, const char *who)
 
     /* seq_features is CAPS[7:4] in its low nibble, CAPS[31:28] - the
      * ALU extensions, IMUL first - in the next one (cft.h, 2026-09-07),
-     * CAPS2[7:4] in the third since revision 3, and CAPS2[8] on bit 12
-     * since ABI 0.13 (CFT_FEAT_REDUCE_SEG). Anything above
-     * those thirteen bits is a decode fault, not a feature. */
+     * CAPS2[7:4] in the third since revision 3, CAPS2[8] on bit 12
+     * since ABI 0.13 (CFT_FEAT_REDUCE_SEG), and CAPS2[10:9] on bits 14
+     * and 13 since ABI 0.14 (INDEXED, LANE_MASK). Anything above those
+     * fifteen bits is a decode fault, not a feature. */
     checks++;
-    if (c.seq_features & ~0x1FFFu) {
+    if (c.seq_features & ~0x7FFFu) {
         printf("  FAIL %s: seq_features 0x%lx has bits outside CAPS[7:4], "
-               "CAPS[31:28] and CAPS2[7:4]\n", who,
+               "CAPS[31:28] and CAPS2[10:4]\n", who,
                (unsigned long)c.seq_features);
         failures++;
     }
-    printf("    features:%s%s%s%s%s%s%s   max_scratch %lu\n",
+    printf("    features:%s%s%s%s%s%s%s%s%s%s   max_scratch %lu\n",
            (c.seq_features & CFT_SEQ_FEAT_WIDE_CONST) ? " kx" : "",
            (c.seq_features & CFT_SEQ_FEAT_REGS32)     ? " REGS32" : "",
            (c.seq_features & CFT_SEQ_FEAT_BANK_PTR)   ? " BANK_PTR" : "",
@@ -1345,6 +1346,9 @@ static void check_caps_enforced(cft_device *dev, const char *who)
            (c.seq_features & CFT_ALU_EXT_IMUL)        ? " IMUL" : "",
            (c.seq_features & CFT_SEQ_FEAT_SCRATCH)    ? " SCRATCH" : "",
            (c.seq_features & CFT_SEQ_FEAT_SCRATCH_IO) ? " SCRATCH_IO" : "",
+           (c.seq_features & CFT_FEAT_REDUCE_SEG)     ? " REDUCE_SEG" : "",
+           (c.seq_features & CFT_SEQ_FEAT_INDEXED)    ? " INDEXED" : "",
+           (c.seq_features & CFT_SEQ_FEAT_LANE_MASK)  ? " LANE_MASK" : "",
            (unsigned long)c.max_scratch);
 
     /* Revision 2's two feature bits, held to the same invariant as

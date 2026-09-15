@@ -1725,6 +1725,109 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
  * scratch block is precisely the failure every byte-count rule here
  * exists to prevent, so a size this library does not recognise is
  * refused, in both directions and with a different message for each. */
+/* ABI 0.14's fields (docs/ROUND2.md): the index tables of the three
+ * streams and the scratch block, and the lane mask. The SHAPE rules are
+ * the seam's and final; a well-formed table or mask is then REFUSED BY
+ * NAME until the parcel that builds it lands (P1 the tables, P3 the
+ * mask), never ignored - a run that quietly read the dense stream, or
+ * ran every lane, would return the wrong answer with clean flags. */
+static cft_status seq_check_round2(const cft_program *p,
+                                   const cft_run_args *A, const char *who)
+{
+    const uint32_t *idx[3];
+    size_t src[3];
+    const void *strm[3];
+    int r;
+
+    idx[0] = A->idx_a; idx[1] = A->idx_b; idx[2] = A->idx_c;
+    src[0] = A->idx_a_src; src[1] = A->idx_b_src; src[2] = A->idx_c_src;
+    strm[0] = A->a; strm[1] = A->b; strm[2] = A->c;
+    for (r = 0; r < 3; r++) {
+        if (!idx[r]) {
+            if (src[r]) {
+                cft_set_error("%s: idx_%c_src = %lu names a source length "
+                              "for stream %c, which has no index table",
+                              who, 'a' + r, (unsigned long)src[r], 'a' + r);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
+            continue;
+        }
+        if (!strm[r]) {
+            cft_set_error("%s: idx_%c indexes stream %c, which is NULL",
+                          who, 'a' + r, 'a' + r);
+            return CFT_ERR_INVALID_ARGUMENT;
+        }
+        if (src[r] == 0) {
+            cft_set_error("%s: idx_%c is set and idx_%c_src is zero, so no "
+                          "index could be in range - the source's length "
+                          "in elements is what bounds the table",
+                          who, 'a' + r, 'a' + r);
+            return CFT_ERR_INVALID_ARGUMENT;
+        }
+    }
+    if (!A->idx_scratch_in && A->idx_scratch_src) {
+        cft_set_error("%s: idx_scratch_src = %lu names a pool length with "
+                      "no idx_scratch_in table", who,
+                      (unsigned long)A->idx_scratch_src);
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    if (A->idx_scratch_in) {
+        if (p->n_scratch_in == 0) {
+            cft_set_error("%s: idx_scratch_in is set and this program "
+                          "declares no scratch input - there is no block "
+                          "to gather into", who);
+            return CFT_ERR_INVALID_ARGUMENT;
+        }
+        if (!A->scratch_in) {
+            cft_set_error("%s: idx_scratch_in indexes scratch_in, which is "
+                          "NULL", who);
+            return CFT_ERR_INVALID_ARGUMENT;
+        }
+        if (A->idx_scratch_src == 0) {
+            cft_set_error("%s: idx_scratch_in is set and idx_scratch_src "
+                          "is zero, so no index could be in range", who);
+            return CFT_ERR_INVALID_ARGUMENT;
+        }
+    }
+    if (!A->lane_mask && A->lane_mask_bytes) {
+        cft_set_error("%s: lane_mask_bytes = %lu with no lane_mask", who,
+                      (unsigned long)A->lane_mask_bytes);
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    if (A->lane_mask && A->lane_mask_bytes != (A->n + 7u) / 8u) {
+        cft_set_error("%s: lane_mask_bytes is %lu and a mask over %lu lanes "
+                      "is exactly %lu bytes - a mask of the wrong length "
+                      "would give lanes somebody else's bit", who,
+                      (unsigned long)A->lane_mask_bytes, (unsigned long)A->n,
+                      (unsigned long)((A->n + 7u) / 8u));
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    for (r = 0; r < 3; r++) {
+        if (idx[r]) {
+            cft_set_error("%s: an indexed stream (idx_%c) is declared at "
+                          "ABI 0.14 and not yet built on any backend "
+                          "(docs/ROUND2.md, parcel P1); the run is refused "
+                          "rather than made over the dense stream",
+                          who, 'a' + r);
+            return CFT_ERR_UNSUPPORTED;
+        }
+    }
+    if (A->idx_scratch_in) {
+        cft_set_error("%s: an indexed scratch block (idx_scratch_in) is "
+                      "declared at ABI 0.14 and not yet built on any backend "
+                      "(docs/ROUND2.md, parcel P1)", who);
+        return CFT_ERR_UNSUPPORTED;
+    }
+    if (A->lane_mask) {
+        cft_set_error("%s: the lane mask is declared at ABI 0.14 and not "
+                      "yet built on any backend (docs/ROUND2.md, parcel "
+                      "P3); the run is refused rather than made over every "
+                      "lane", who);
+        return CFT_ERR_UNSUPPORTED;
+    }
+    return CFT_OK;
+}
+
 CFT_API cft_status cft_program_run_ex(cft_program *prog,
                                       const cft_run_args *args)
 {
@@ -1756,6 +1859,9 @@ CFT_API cft_status cft_program_run_ex(cft_program *prog,
     if (st != CFT_OK)
         return st;
     st = seq_check_scratch(prog, &A, "cft_program_run_ex");
+    if (st != CFT_OK)
+        return st;
+    st = seq_check_round2(prog, &A, "cft_program_run_ex");
     if (st != CFT_OK)
         return st;
     if (!A.bank_bytes)

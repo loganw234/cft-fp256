@@ -279,6 +279,19 @@ module cft_krnl #(
    * Published from the localparam the engine is built with. */
   localparam bit FEAT_REDUCE_SEG = 1'b1;
   logic [31:0] cfg_seg, cfg_nres;
+  /* ABI 0.14 (docs/ROUND2.md, P0): the registers exist at 0x88..0xA8
+   * and nothing reads them yet. CAPS2[9] (INDEXED) is set by the parcel
+   * that teaches cft_seq to fetch a stream or the scratch block through
+   * its table (P1) and CAPS2[10] (LANE_MASK) by the one that teaches
+   * the block setup and the drains the mask (P3), each from the
+   * localparam its RTL is built with, so a tile cannot advertise a bit
+   * it would turn away - and until then the CSR refuses the MODE bits
+   * that would select them, as it refuses every bit of MODE[31:19]. */
+  localparam bit FEAT_INDEXED   = 1'b0;
+  localparam bit FEAT_LANE_MASK = 1'b0;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [63:0] cfg_idx_a, cfg_idx_b, cfg_idx_c, cfg_idx_si, cfg_mask;
+  /* verilator lint_on UNUSEDSIGNAL */
 
   logic [2:0] cfg_scalar;
   logic mode_bad;
@@ -523,7 +536,13 @@ module cft_krnl #(
       // log2 fields of CAPS are: two copies of a number is how a
       // capability register ends up describing a memory that is no
       // longer that size.
-      .caps2({7'b0,        // [15:9] reserved, zero
+      .caps2({5'b0,        // [15:11] reserved, zero
+              FEAT_LANE_MASK, // [10] LANE_MASK: MASK_PTR at 0xA8 is read
+                           //      at block setup under MODE[23] (ABI
+                           //      0.14, docs/ROUND2.md P3; 0 until built)
+              FEAT_INDEXED,   // [9] INDEXED: the four tables at
+                           //      0x88..0xA0 are read under MODE[22:19]
+                           //      (docs/ROUND2.md P1; 0 until built)
               FEAT_REDUCE_SEG, // [8] REDUCE_SEG: SEG/NRES at 0x80/0x84
                            //     and opcode 31 a streaming maximum
                            //     (2026-09-14, VERSION 0x900)
@@ -572,7 +591,9 @@ module cft_krnl #(
       .cfg_sin(cfg_sin), .cfg_sout(cfg_sout), .cfg_cnt(cfg_cnt),
       .cfg_scalar(cfg_scalar), .cfg_mode_bad(mode_bad),
       .feat_scalar(FEAT_SCALAR),
-      .cfg_seg(cfg_seg), .cfg_nres(cfg_nres)
+      .cfg_seg(cfg_seg), .cfg_nres(cfg_nres),
+      .cfg_idx_a(cfg_idx_a), .cfg_idx_b(cfg_idx_b), .cfg_idx_c(cfg_idx_c),
+      .cfg_idx_si(cfg_idx_si), .cfg_mask(cfg_mask)
   );
 
   // ---- the shared masters --------------------------------------------

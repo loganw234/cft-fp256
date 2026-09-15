@@ -141,7 +141,7 @@ def run_in_c(lib, dev, prog, a, b, c):
 
 
 class RunArgs(ctypes.Structure):
-    """cft_run_args, field for field (host/include/cft.h, ABI 0.10)."""
+    """cft_run_args, field for field (host/include/cft.h, ABI 0.14)."""
     _fields_ = [("struct_size", ctypes.c_size_t),
                 ("a", ctypes.c_void_p), ("b", ctypes.c_void_p),
                 ("c", ctypes.c_void_p),
@@ -154,7 +154,21 @@ class RunArgs(ctypes.Structure):
                 ("deposits", ctypes.c_void_p),
                 ("counts", ctypes.POINTER(ctypes.c_uint32)),
                 ("flags_out", ctypes.POINTER(ctypes.c_uint32)),
-                ("bus_out", ctypes.POINTER(ctypes.c_uint32))]
+                ("bus_out", ctypes.POINTER(ctypes.c_uint32)),
+                # ABI 0.14 (docs/ROUND2.md), appended in cft.h's order.
+                # The size handshake refuses a struct this mirror gets
+                # wrong, which is how a missing field is found: every
+                # program run "refused by C" at once (2026-09-15).
+                ("idx_a", ctypes.c_void_p),
+                ("idx_b", ctypes.c_void_p),
+                ("idx_c", ctypes.c_void_p),
+                ("idx_a_src", ctypes.c_size_t),
+                ("idx_b_src", ctypes.c_size_t),
+                ("idx_c_src", ctypes.c_size_t),
+                ("idx_scratch_in", ctypes.c_void_p),
+                ("idx_scratch_src", ctypes.c_size_t),
+                ("lane_mask", ctypes.c_void_p),
+                ("lane_mask_bytes", ctypes.c_size_t)]
 
 
 def run_in_c_ex(lib, dev, prog, a, b, c, scratch_in):

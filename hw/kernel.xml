@@ -125,6 +125,31 @@
       <arg name="seg" addressQualifier="0" id="11" port="s_axi_control"
            size="0x8" offset="0x80" type="unsigned long long"
            hostOffset="0x0" hostSize="0x8"/>
+      <!-- 12..16 (ABI 0.14, 2026-09-15, docs/ROUND2.md; VERSION 0xA00):
+           the INDEX TABLES of a program run's three streams and its
+           scratch block, and its LANE MASK. APPENDED, for the reason
+           every argument above was. All five are READ by the sequencer
+           through the same master the image, the bank and the preload
+           arrive on, so they bind to m_axi_a and hw/link.cfg is
+           unchanged. Offsets 0x88, 0x90, 0x98, 0xA0 and 0xA8, matching
+           IDX_A_PTR .. MASK_PTR in rtl/cft_csr.sv. Declared at the seam
+           of the round that reads them: nothing reads them at 0xA00
+           until CAPS2[9] and CAPS2[10] say so. -->
+      <arg name="idx_a" addressQualifier="1" id="12" port="m_axi_a"
+           size="0x8" offset="0x88" type="void*"
+           hostOffset="0x0" hostSize="0x8"/>
+      <arg name="idx_b" addressQualifier="1" id="13" port="m_axi_a"
+           size="0x8" offset="0x90" type="void*"
+           hostOffset="0x0" hostSize="0x8"/>
+      <arg name="idx_c" addressQualifier="1" id="14" port="m_axi_a"
+           size="0x8" offset="0x98" type="void*"
+           hostOffset="0x0" hostSize="0x8"/>
+      <arg name="idx_si" addressQualifier="1" id="15" port="m_axi_a"
+           size="0x8" offset="0xA0" type="void*"
+           hostOffset="0x0" hostSize="0x8"/>
+      <arg name="mask" addressQualifier="1" id="16" port="m_axi_a"
+           size="0x8" offset="0xA8" type="void*"
+           hostOffset="0x0" hostSize="0x8"/>
     </args>
   </kernel>
 </root>

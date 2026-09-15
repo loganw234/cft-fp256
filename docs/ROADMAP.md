@@ -2551,7 +2551,11 @@ The first three are in the order the measurements rank them - which is
 not the order they were guessed in - and the last three carry the
 requester's own ranking.
 
-**1. A device-side scatter. This is the expensive one.**
+**1. A device-side scatter. This is the expensive one.** *Planned
+2026-09-15 as one mechanism with ask 4 - docs/ROUND2.md, parcel P1:
+the requester's scatter is a gather by a static table followed by a
+fixed-order fold, so an input block fetched through an index table is
+both asks.*
 
 The integrator computes gravity over particle PAIRS and then scatters
 each pair's contribution back onto its two particles. Issued through
@@ -2643,7 +2647,9 @@ renamed its cases where a reduction has none to rename. Docs that RECORD
 a past run still say 1,071,635 and are correct to - that run replayed
 that many.
 
-**4. A device-side gather.** Steps 2 and 3 of that integrator's force
+**4. A device-side gather.** *Planned 2026-09-15 with ask 1, above:
+docs/ROUND2.md, parcel P1; ABI 0.14's `idx_*` tables are its seam.*
+Steps 2 and 3 of that integrator's force
 evaluation need a lane to read another lane's result, and the prototype's
 host does it. The asks are a device-side index-table copy, or a
 program-model change letting a lane read a neighbour's deposit
@@ -2651,7 +2657,11 @@ program-model change letting a lane read a neighbour's deposit
 serve it: lane *i*'s slot is reachable by lane *i* alone, which is what
 keeps P2 true of the scratch as it is of the deposit buffer.
 
-**5. A per-run lane mask in `cft_run_args`.** A host-supplied bitmap the
+**5. A per-run lane mask in `cft_run_args`.** *Planned 2026-09-15 as
+docs/ROUND2.md's parcel P3, smallest and last, with its ceiling stated
+there: by the requester's own table it is worth at most about two
+percent of a step today. ABI 0.14's `lane_mask` is its seam.*
+A host-supplied bitmap the
 engine honours, so an idle lane costs neither a beat nor a byte. The
 prototype masks a member that has left the corrector by a byte snapshot
 and restore on the host; on a tile that is a `SETACT` mask, which the
@@ -2660,11 +2670,15 @@ crosses the bus in the scratch block. The waste is measured:
 `pc_lane_efficiency` 0.77 to 0.92 at binary64
 (`cft-rebound/docs/HARDWARE.md:303-314`).
 
-**6. A scalar-broadcast operand for `cft_run`.** Stated as the smallest
-of the six and worth 300 staged vectors a step: about 300 of the ~350
-vectors an ensemble carries are broadcast constants, and today their
-width is bus traffic rather than device memory
-(`cft-rebound/docs/HARDWARE.md:353-358`).
+**6. A scalar-broadcast operand for `cft_run`. DONE, 2026-09-12, as
+`cft_run_ex` with `cft_elem_args.scalar_mask` (ABI 0.12, CAPS2[7]) -
+and not marked here until 2026-09-15**, which is how it reached a
+round's deferred list three days after it shipped. Stated as the
+smallest of the six and worth 300 staged vectors a step: about 300 of
+the ~350 vectors an ensemble carries are broadcast constants, and
+their width was bus traffic rather than device memory
+(`cft-rebound/docs/HARDWARE.md:353-358`). The requester's own document
+records it as "delivered and unadopted"; the adoption is theirs.
 
 **What the same exercise found the library does NOT need.** Nothing
 about difficulty: a problem with close encounters, whose adaptive step

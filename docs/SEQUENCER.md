@@ -1664,3 +1664,54 @@ case new), `krnlseq`, `seqbanks` and `faults` under Verilator and again
 under Icarus; `yosys-lint` clean. The four-change commit is 0843b62,
 the overlap 6e1c418, the streaming issue and the drain's read-register
 hold the commit after it.
+
+## Revision 6 (2026-09-15, the seam): indexed inputs and a lane mask - declared
+
+The parcel round that follows ask 7 (docs/ROUND2.md) adds two things
+to the program model, and this section is their CONTRACT, written at
+the seam before either is built so that the parcel building each and
+the parcel verifying it read one text. The software backend is the
+definition and the model its authority, as everywhere here.
+
+### R16. An input block fetched through an index table (P1, not yet built)
+
+For a stream with a table, `A[i] = idx[i] == CFT_IDX_NONE ? +0 :
+a[idx[i]]` for `i` in `[0, n)`, and the run proceeds exactly as a dense
+run over `A`. For the scratch block, `S[i * k + s] = idx[i * k + s] ==
+CFT_IDX_NONE ? +0 : pool[idx[i * k + s]]` with `k = n_scratch_in`,
+lane-major as the block is. An index at or past the source's declared
+length (`idx_*_src`) is refused before the run starts, on every
+backend, by name and by value: a device must never read past a buffer
+for a caller. `+0` is the format's positive zero encoding. There is no
+new rounding rule and nothing for the model to define beyond these two
+lines - the answer is what the dense run over the gathered block
+gives. On the tile: four pointer registers (0x88..0xA0, kernel
+arguments 12..15), MODE[22:19] saying which blocks are indexed,
+CAPS2[9] saying the bits are honoured; the sequencer reads a table's
+beats and then one element per entry through the A master, packs the
+elements into beats, and the register file never learns the
+difference.
+
+### R17. A per-run lane mask (P3, not yet built)
+
+Lane `i` with bit `i` of the mask clear runs no instruction. Its
+deposit slots, its count and its scratch-out slots are NOT written - the
+buffers hold what the caller put there, on the host and in a device
+copy alike; the normative "+0 for an untouched slot" of the deposition
+section applies to the lanes the run owns, and a masked lane is not one
+of them. It contributes no flag, it is inactive for the early exit from
+its first cycle, and it cannot raise deposit overflow. `ACTALL`
+reactivates every lane THE CALLER HAS, and a masked lane is not one the
+caller has. A run whose every lane is masked completes with nothing
+written and nothing raised. All ones is bit-identical to no mask. On
+the tile: MASK_PTR at 0xA8 (argument 16), MODE[23], CAPS2[10]; the
+block's opening active mask is `blk_act & mask` and the three drains
+skip a masked lane's elements.
+
+### What revision 6 is at the seam
+
+The registers, the version (0xA00), the MODE bits under the existing
+guard, the two CAPS2 bits at zero, the struct fields and the feature
+bits in `cft.h`, the model's signature, and a refusal by name on every
+backend for every new field. The parcels replace the refusals; the
+lead's seam tests hold the two together once both exist.

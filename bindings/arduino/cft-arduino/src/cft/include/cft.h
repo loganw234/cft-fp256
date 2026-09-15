@@ -109,7 +109,7 @@ extern "C" {
  * library is the normal case, not the exceptional one.
  * --------------------------------------------------------------- */
 #define CFT_ABI_VERSION_MAJOR 0
-#define CFT_ABI_VERSION_MINOR 13  /* 0.13 (2026-09-14), bumped by the integrator together with the WebAssembly module's rebuild, as every step is. 0.13 is one addition a real workload asked for (cft-rebound's docs/HARDWARE.md, its seventh ask: a maximum per SYSTEM over a resident corrector's L coordinates, which no whole-array reduction expresses): cft_reduce_seg, n / seg results, d[s] DEFINED as cft_reduce over slice s of `seg` elements - the same tree, so the software backend is exact by definition. On a tile it is one run behind CFT_FEAT_REDUCE_SEG (CAPS2[8]: a SEG/NRES register pair at 0x80/0x84, VERSION 0x900, and opcode 31 a streaming maximum folded with the elementwise maximum), and on a tile without the bit it is REFUSED by name - a caller must never pay n / seg round trips believing it fast. The same bit lets cft_reduce's CFT_MAXALL run as one pass on the tile in place of ceil(log2 n) halvings, returning the bits 754 maximum's associativity guarantees are the halving's. ADDITIVE: code written against 0.12 gets the same bits from the same calls; cft_get_caps reports the feature. 0.12 (2026-09-12) is two additions a real workload asked for (cft-rebound's docs/HARDWARE.md) and one safety guard that came with the second. CFT_MAXALL (31): a maximum over the array, the fifth COMPOSED reduction - no hardware, because a tile handed opcode 31 as a reduction would decode it as elementwise and write n elements where the caller sized one, and no tree contract either, because 754-2019 maximum is exactly associative and commutative including its flags, so every shape returns the same bits. cft_run_ex with cft_elem_args: an elementwise run whose operands need not all be arrays - scalar_mask makes one of a, b or c a single element applying to the whole run, which on a tile is MODE[18:16] and ONE BEAT read instead of n, behind CAPS2[7] (CFT_SEQ_FEAT_SCALAR). That capability bit is load-bearing rather than advisory: nothing checked MODE[31:16] before this step, so a tile that predates it IGNORES the flag and reads n elements from a one-element buffer - an out-of-bounds read, measured as a segfault in the negative control, not a wrong number. Both additions are ADDITIVE: code written against 0.11 gets the same bits from the same calls, and a caller can detect either through what it asks for rather than the version - cft_supports answers for CFT_MAXALL, cft_get_caps reports CFT_SEQ_FEAT_SCALAR. 0.11 (2026-09-09), bumped by the integrator together with the WebAssembly module's rebuild, as every step is (bindings/wasm/verify.mjs holds the shipped module's cftw_abi_version() to this macro, and the remote protocol refuses a frame whose ABI word differs at all, docs/REMOTE.md); a caller can also detect the 0.11 additions through the size handshake, since cft_get_caps returns a struct_size that reaches cft_caps.buffers_resident and an older library does not. 0.11: the buffer API becomes real on a device backend - cft_alloc's pointers are recognised in cft_run, cft_reduce and cft_program_run_ex and the operands they name are not staged again, so a caller who fills once and runs many gets the engine's rate rather than the bus's. cft_caps.buffers_resident says whether THIS device does that; cft_buffer_get_info and cft_buffer_info say what actually happened to one buffer. Nothing moved and nothing changed meaning: code written against 0.10 gets the same bits, and on the software and remote backends the same no-ops it always had. 0.10: the sequencer's revision 3 - a per-lane scratch memory behind CFT_SEQ_FEAT_SCRATCH with its per-run block behind CFT_SEQ_FEAT_SCRATCH_IO, the ninth constant-index bit behind CFT_SEQ_FEAT_KX9, and cft_run_args with cft_program_run_ex so the positional signatures stop growing by an argument a round - cft_program_run and cft_program_run_bank are wrappers over it now. cft_caps.max_scratch; cft_program_info.n_scratch_in, n_scratch_out and scratch_used. 0.9: the sequencer's revision 2 - thirty-two registers behind CFT_SEQ_FEAT_REGS32, the per-run constant bank behind CFT_SEQ_FEAT_BANK_PTR with cft_program_run_bank, cft_program_info.flags, and cft_program_digest attesting image and data together. 0.8: cft_caps carries the sequencer's capacities - max_deposits, max_insns, max_consts, seq_features - published from CAPS and enforced by every backend the same way. 0.7: conforms in radix 2 - formatOf, the status word, the predicates; 9.6 complete */
+#define CFT_ABI_VERSION_MINOR 14  /* 0.14 (2026-09-15), bumped by the integrator together with the WebAssembly module's rebuild, as every step is. 0.14 is the SEAM of a parcel round (docs/ROUND2.md) and nothing yet runs behind it: cft_run_args gains index tables for its three streams and its scratch block, their sources' lengths, and a per-run lane mask; cft_elem_args gains the same three tables; CFT_IDX_NONE is the index that reads as +0; CFT_SEQ_FEAT_INDEXED (CAPS2[9]) and CFT_SEQ_FEAT_LANE_MASK (CAPS2[10]) are the bits a tile will publish; the register map is VERSION 0xA00 with five pointer registers appended at 0x88..0xA8 as kernel arguments 12..16. Every one of the new fields is REFUSED BY NAME on every backend at this step - after its shape is checked, never ignored - so that a caller built against 0.14 today gets a sentence naming the parcel rather than a run with a field silently dropped; the parcels replace the refusals with the implementations, and the software backend's definition (docs/SEQUENCER.md revision 6) is one line per field. ADDITIVE for every existing call: code written against 0.13 gets the same bits from the same calls, the two input structs excepted, which grew and are refused at their old size as an input struct always is. 0.13 (2026-09-14) is one addition a real workload asked for (cft-rebound's docs/HARDWARE.md, its seventh ask: a maximum per SYSTEM over a resident corrector's L coordinates, which no whole-array reduction expresses): cft_reduce_seg, n / seg results, d[s] DEFINED as cft_reduce over slice s of `seg` elements - the same tree, so the software backend is exact by definition. On a tile it is one run behind CFT_FEAT_REDUCE_SEG (CAPS2[8]: a SEG/NRES register pair at 0x80/0x84, VERSION 0x900, and opcode 31 a streaming maximum folded with the elementwise maximum), and on a tile without the bit it is REFUSED by name - a caller must never pay n / seg round trips believing it fast. The same bit lets cft_reduce's CFT_MAXALL run as one pass on the tile in place of ceil(log2 n) halvings, returning the bits 754 maximum's associativity guarantees are the halving's. ADDITIVE: code written against 0.12 gets the same bits from the same calls; cft_get_caps reports the feature. 0.12 (2026-09-12) is two additions a real workload asked for (cft-rebound's docs/HARDWARE.md) and one safety guard that came with the second. CFT_MAXALL (31): a maximum over the array, the fifth COMPOSED reduction - no hardware, because a tile handed opcode 31 as a reduction would decode it as elementwise and write n elements where the caller sized one, and no tree contract either, because 754-2019 maximum is exactly associative and commutative including its flags, so every shape returns the same bits. cft_run_ex with cft_elem_args: an elementwise run whose operands need not all be arrays - scalar_mask makes one of a, b or c a single element applying to the whole run, which on a tile is MODE[18:16] and ONE BEAT read instead of n, behind CAPS2[7] (CFT_SEQ_FEAT_SCALAR). That capability bit is load-bearing rather than advisory: nothing checked MODE[31:16] before this step, so a tile that predates it IGNORES the flag and reads n elements from a one-element buffer - an out-of-bounds read, measured as a segfault in the negative control, not a wrong number. Both additions are ADDITIVE: code written against 0.11 gets the same bits from the same calls, and a caller can detect either through what it asks for rather than the version - cft_supports answers for CFT_MAXALL, cft_get_caps reports CFT_SEQ_FEAT_SCALAR. 0.11 (2026-09-09), bumped by the integrator together with the WebAssembly module's rebuild, as every step is (bindings/wasm/verify.mjs holds the shipped module's cftw_abi_version() to this macro, and the remote protocol refuses a frame whose ABI word differs at all, docs/REMOTE.md); a caller can also detect the 0.11 additions through the size handshake, since cft_get_caps returns a struct_size that reaches cft_caps.buffers_resident and an older library does not. 0.11: the buffer API becomes real on a device backend - cft_alloc's pointers are recognised in cft_run, cft_reduce and cft_program_run_ex and the operands they name are not staged again, so a caller who fills once and runs many gets the engine's rate rather than the bus's. cft_caps.buffers_resident says whether THIS device does that; cft_buffer_get_info and cft_buffer_info say what actually happened to one buffer. Nothing moved and nothing changed meaning: code written against 0.10 gets the same bits, and on the software and remote backends the same no-ops it always had. 0.10: the sequencer's revision 3 - a per-lane scratch memory behind CFT_SEQ_FEAT_SCRATCH with its per-run block behind CFT_SEQ_FEAT_SCRATCH_IO, the ninth constant-index bit behind CFT_SEQ_FEAT_KX9, and cft_run_args with cft_program_run_ex so the positional signatures stop growing by an argument a round - cft_program_run and cft_program_run_bank are wrappers over it now. cft_caps.max_scratch; cft_program_info.n_scratch_in, n_scratch_out and scratch_used. 0.9: the sequencer's revision 2 - thirty-two registers behind CFT_SEQ_FEAT_REGS32, the per-run constant bank behind CFT_SEQ_FEAT_BANK_PTR with cft_program_run_bank, cft_program_info.flags, and cft_program_digest attesting image and data together. 0.8: cft_caps carries the sequencer's capacities - max_deposits, max_insns, max_consts, seq_features - published from CAPS and enforced by every backend the same way. 0.7: conforms in radix 2 - formatOf, the status word, the predicates; 9.6 complete */
 
 /* Returns (major << 16) | minor of the library actually loaded.
  *
@@ -663,6 +663,40 @@ typedef struct cft_caps {
  * as it always did. Not a sequencer feature, but seq_features is where
  * CAPS2's bits land (CAPS2[7:4] on bits 11:8; this is CAPS2[8] on 12). */
 #define CFT_FEAT_REDUCE_SEG 0x1000u        /* CAPS2[8] */
+
+/* The two features of the parcel round after ask 7 (docs/ROUND2.md,
+ * 2026-09-15), declared at ABI 0.14 so that every surface carries one
+ * definition of each while the parcels build them:
+ *
+ *   INDEXED    a program run's three streams and its scratch block may
+ *              each be fetched THROUGH AN INDEX TABLE - element i of
+ *              the block is source[idx[i]], and CFT_IDX_NONE reads as
+ *              +0 - so a lane can take any element of a source the
+ *              caller did not rearrange. The tile has four pointer
+ *              registers for the tables (0x88..0xA0, kernel arguments
+ *              12..15, VERSION 0xA00) and MODE[22:19] say which are
+ *              present. cft-rebound's gather and scatter are both this
+ *              (docs/ROADMAP.md, asks 1 and 4).
+ *   LANE_MASK  a program run honours a host bitmap: a masked lane runs
+ *              nothing and writes nothing - its deposit slots, its
+ *              count and its scratch-out slots keep what the caller put
+ *              there. MASK_PTR at 0xA8, kernel argument 16, MODE[23].
+ *              cft-rebound's ask 5.
+ *
+ * Both are SAFETY gates in the sense CFT_SEQ_FEAT_SCALAR is: the MODE
+ * bits that request them are refused by the guard on MODE[31:19] on
+ * every tile built since 2026-09-12, so a tile without the feature
+ * turns the request away rather than reading a table register it has
+ * not got. The software backend carries both by definition and needs
+ * no bit; the remote backend carries both on the client's side. Until
+ * the parcels land, libcft refuses each BY NAME on every backend. */
+#define CFT_SEQ_FEAT_INDEXED   0x2000u     /* CAPS2[9]  */
+#define CFT_SEQ_FEAT_LANE_MASK 0x4000u     /* CAPS2[10] */
+/* The index that reads as +0 (the format's positive zero) in an index
+ * table, so a lane whose row has run out contributes nothing to a fold
+ * and a row of unequal lengths needs no second table. Not an index:
+ * every real index is below its source's declared length. */
+#define CFT_IDX_NONE 0xFFFFFFFFu
 
 CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out);
 
@@ -2365,6 +2399,41 @@ CFT_API cft_status cft_program_run_bank(cft_program *prog,
  *   flags_out     the run's sticky IEEE exceptions, or NULL
  *   bus_out       STATUS, carrying CFT_STATUS_DEPOSIT_OVERFLOW, or NULL
  *
+ *   idx_a, idx_b,  ABI 0.14 (docs/ROUND2.md): an INDEX TABLE per stream,
+ *   idx_c         or NULL for a dense stream. With a table, element i
+ *                 of the stream is source[idx[i]] - n uint32 indices -
+ *                 and CFT_IDX_NONE reads as +0, so a lane can take any
+ *                 element of a source the caller did not rearrange,
+ *                 or nothing. The source's length in elements goes in
+ *                 idx_a_src (idx_b_src, idx_c_src): an index at or past
+ *                 it is refused before the run starts, on every
+ *                 backend, because a device must never read past a
+ *                 buffer for a caller. Zero beside a table is refused,
+ *                 and so is a length beside no table.
+ *   idx_scratch_in likewise for the scratch block: n * n_scratch_in
+ *                 indices, lane-major exactly as the block is, into a
+ *                 POOL of idx_scratch_src elements at scratch_in -
+ *                 whose scratch_in_bytes is then the pool's length,
+ *                 idx_scratch_src * element size, not the block's
+ *   lane_mask     (n + 7) / 8 bytes, bit (i % 8) of byte i / 8 is lane
+ *                 i, set for a lane that RUNS; or NULL for every lane.
+ *                 lane_mask_bytes is exactly that count or the call is
+ *                 refused. A masked lane runs no instruction and
+ *                 writes nothing: its deposit slots, its count and its
+ *                 scratch-out slots keep what the caller put there, it
+ *                 raises no flag, and it is inactive for the early exit
+ *                 from its first cycle. All ones is bit-identical to no
+ *                 mask
+ *
+ * The three are DECLARED at ABI 0.14 and REFUSED BY NAME on every
+ * backend until the parcels that build them land (docs/ROUND2.md, P1
+ * and P3): the shape rules above are checked first and are final, and
+ * a present table or mask then returns CFT_ERR_UNSUPPORTED with a
+ * sentence naming the parcel. Their contract is docs/SEQUENCER.md's
+ * revision 6. A device that carries them publishes
+ * CFT_SEQ_FEAT_INDEXED and CFT_SEQ_FEAT_LANE_MASK; the software
+ * backend is the definition and needs no bit.
+ *
  * BYTE COUNTS MUST MATCH EXACTLY, all three of them. A buffer that is
  * merely large enough would let the library and the caller disagree
  * about the shape of the block while both believing they agreed, and
@@ -2386,6 +2455,13 @@ typedef struct cft_run_args {
     void       *scratch_out; size_t scratch_out_bytes;  /* n * n_scratch_out * esz, or NULL */
     void       *deposits;    uint32_t *counts;
     uint32_t   *flags_out;   uint32_t *bus_out;
+    /* ABI 0.14, appended: each NULL (zero) when absent */
+    const uint32_t *idx_a, *idx_b, *idx_c;   /* n indices each, or NULL */
+    size_t idx_a_src, idx_b_src, idx_c_src;  /* elements the indexed source holds */
+    const uint32_t *idx_scratch_in;          /* n * n_scratch_in, lane-major, or NULL */
+    size_t idx_scratch_src;                  /* elements the scratch pool holds */
+    const uint8_t *lane_mask;                /* (n + 7) / 8 bytes, or NULL */
+    size_t lane_mask_bytes;                  /* exactly that, or refused */
 } cft_run_args;
 
 CFT_API cft_status cft_program_run_ex(cft_program *prog,
@@ -2412,6 +2488,17 @@ CFT_API cft_status cft_program_run_ex(cft_program *prog,
  *                 NULL cannot be scalar.
  *   flags_out     the run's sticky IEEE exceptions, or NULL
  *   bus_out       STATUS, or NULL
+ *   idx_a, idx_b, ABI 0.14 (docs/ROUND2.md, P2): an INDEX TABLE per
+ *   idx_c         operand, or NULL for a dense one - the same tables
+ *                 cft_run_args carries, with the same rules: n uint32
+ *                 indices into a source of idx_a_src (idx_b_src,
+ *                 idx_c_src) elements, CFT_IDX_NONE reading as +0, an
+ *                 index at or past the source refused before the run.
+ *                 An operand cannot be both scalar and indexed, and a
+ *                 table on a NULL operand is refused. DECLARED at 0.14
+ *                 and refused by name on every backend until P2 lands;
+ *                 on a tile it will be a three-instruction program over
+ *                 the sequencer's indexed streams, never new engine RTL
  *
  * THE ANSWER IS THE CONTRACT'S BY CONSTRUCTION. A scalar operand computes
  * exactly what an array of copies would have: the same op() on the same
@@ -2442,6 +2529,9 @@ typedef struct cft_elem_args {
     uint32_t    scalar_mask;          /* bit 0 a, bit 1 b, bit 2 c */
     uint32_t   *flags_out;
     uint32_t   *bus_out;
+    /* ABI 0.14, appended: NULL (zero) when absent */
+    const uint32_t *idx_a, *idx_b, *idx_c;   /* n indices each, or NULL */
+    size_t idx_a_src, idx_b_src, idx_c_src;  /* elements the indexed source holds */
 } cft_elem_args;
 
 CFT_API cft_status cft_run_ex(cft_device *dev, cft_op op, cft_format fmt,

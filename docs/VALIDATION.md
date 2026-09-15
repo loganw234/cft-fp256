@@ -11959,3 +11959,47 @@ cft_reduce", visible on the wire.
 
 The plan for the next round - the gather, the scatter, the lane mask
 and the broadcast - is docs/ROUND2.md.
+
+## 2026-09-15 - ABI 0.14 and VERSION 0xA00: the seam of round 2, declared and refused everywhere
+
+**DESKTOP-T33SK86 for the host gates, the WebAssembly rebuild in the
+pinned emscripten container; amd-arc-box for the sims (its entry
+follows this one). The tree over 99eb290; docs/ROUND2.md is the plan
+this is P0 of.**
+
+What landed, and the claim it has to satisfy: EVERYTHING EXISTING
+BEHAVES AS IT DID. `cft_run_args` and `cft_elem_args` grew (index
+tables, their sources' lengths, a lane mask), two feature bits and a
+sentinel index were declared, five pointer registers were appended to
+the map at 0x88..0xA8 as kernel arguments 12..16 and VERSION moved to
+0xA00, the XRT backend passes seventeen arguments on a program launch
+against such a map, the model's `run()` took five keyword arguments -
+and not one of them does anything yet. Every new field is refused by
+name after its shape is checked; every new MODE bit is refused by the
+guard that has stood since 2026-09-12; both CAPS2 bits are zero.
+
+The host gates, all green, on the same binaries:
+
+    api-test                      all contract checks passed, eleven new
+                                  refusals among them (each shape rule on
+                                  both entry points, the two named refusals,
+                                  the dense run beside them still running)
+    python/tests/test_seq.py      58 passed
+    host/tests/seq_check.py       200 + 200 + 132 programs, libcft and the
+                                  model agree on every one
+    device-test sw -q -n 16       1,758 checks, 0 failed
+    device-test sw -b -q -n 16    702 checks, 0 failed
+    bindings/arduino/sync.py      29 files vendored, all identical to host/
+    bindings/wasm/build.sh        the module at 0.14 (wasm 248,888 bytes),
+                                  the page and the node loader rebuilt
+
+One thing the size handshake found in the first hour, which is what it
+is for: `seq_check.py` mirrors `cft_run_args` in ctypes, and a mirror
+one field short is refused by the library at every program run - 74
+"disagreements" at once, every scratch-corpus program "refused by C".
+The mirror grew and the count went to zero. A binding that declares
+the struct by hand has to move with it, and this is the one that does.
+
+The before side of the claim is the entries above this one: the sims
+at 122eb69 (no RTL changed between it and this seam) and the loopback
+remote suite at f223d7a this morning.

@@ -219,7 +219,8 @@ constexpr uint32_t TILE_MAGIC  = 0x43465430u;   /* "CFT0" */
  * argument counts. */
 constexpr uint32_t KNOWN_VERSIONS[] = { 0x00000410u, 0x00000500u,
                                         0x00000600u, 0x00000700u,
-                                        0x00000800u, 0x00000900u };
+                                        0x00000800u, 0x00000900u,
+                                        0x00000A00u };
 constexpr uint32_t SEQ_VERSION = 0x00000600u;   /* first map with PROG_PTR */
 constexpr uint32_t BANK_VERSION = 0x00000700u;  /* first map with BANK_PTR */
 /* first map with CAPS2 and the two scratch pointers */
@@ -235,6 +236,16 @@ constexpr uint32_t SCRATCH_VERSION = 0x00000800u;
  * The pair travels with the launch or not at all; zero for a
  * whole-array reduction, so one after a segmented one inherits nothing. */
 constexpr uint32_t SEG_VERSION = 0x00000900u;
+/* 0xA00 (2026-09-15, docs/ROUND2.md P0): five pointer registers at
+ * 0x88..0xA8 as kernel arguments 12..16 - the index tables of a program
+ * run's three streams and its scratch block, and its lane mask. Every
+ * program launch on such a tile passes all seventeen arguments, a
+ * one-beat buffer standing in for each of the five until the parcels
+ * bind real ones (the lesson SEG_VERSION records: a declared argument
+ * travels with the launch or not at all). Reductions and elementwise
+ * runs pass what they passed; the five they leave unset go out as zero,
+ * and the tile reads none of them without MODE[23:19]. */
+constexpr uint32_t IDX_VERSION = 0x00000A00u;
 
 inline bool version_known(uint32_t v)
 {
@@ -252,6 +263,11 @@ inline bool version_known(uint32_t v)
 constexpr int ARG_A = 2, ARG_B = 3, ARG_C = 4, ARG_D = 5;
 constexpr int ARG_PROG = 6, ARG_CNT = 7, ARG_BANK = 8;
 constexpr int ARG_SCRATCH_IN = 9, ARG_SCRATCH_OUT = 10;
+/* 11 is the SEG/NRES pair (a scalar). 12..16 (ABI 0.14, docs/ROUND2.md):
+ * the four index tables and the lane mask, all read by the sequencer
+ * through the A master as the image, the bank and the preload are. */
+constexpr int ARG_IDX_A = 12, ARG_IDX_B = 13, ARG_IDX_C = 14;
+constexpr int ARG_IDX_SI = 15, ARG_MASK = 16;
 
 /* MODE[15]: this run belongs to cft_seq and MODE[7:0] is ignored. */
 constexpr uint32_t MODE_SEQ = 1u << 15;
@@ -399,6 +415,13 @@ struct Tile {
      * them in that case. */
     xrt::bo     si, so;
     size_t      si_cap = 0, so_cap = 0;
+    /* And the five of 0xA00 (docs/ROUND2.md): the four index tables
+     * and the lane mask, arguments 12..16. Sized per run once the
+     * parcels bind them; one beat each until then, because the kernel
+     * has the arguments and a program launch on such a tile passes
+     * every one of them. */
+    xrt::bo     ia, ib, ic, isi, mk;
+    size_t      ia_cap = 0, ib_cap = 0, ic_cap = 0, isi_cap = 0, mk_cap = 0;
 };
 
 struct Dev {
@@ -525,7 +548,9 @@ void stage(xrt::bo &bo, const uint8_t *src, size_t real_bytes,
  * group_id(), which XRT range-checked and threw - "__n (which is 1040)".
  * The gate caught it on the card. */
 constexpr int ROLE_ARG[CFT_ROLE_COUNT] = {ARG_A, ARG_B, ARG_C, ARG_D,
-                                          ARG_SCRATCH_IN, ARG_SCRATCH_OUT};
+                                          ARG_SCRATCH_IN, ARG_SCRATCH_OUT,
+                                          ARG_IDX_A, ARG_IDX_B, ARG_IDX_C,
+                                          ARG_IDX_SI, ARG_MASK};
 /* A role added without an argument id leaves the tail of that list
  * zero-initialised, which is not a compile error and IS a valid-looking
  * argument index - it would bind the wrong buffer silently. ARG_A is 2,
@@ -862,18 +887,23 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
         return ST_ARTIFACT;
     }
     if (!version_known(ver)) {
-        char buf[256];
-        std::snprintf(buf, sizeof buf,
-                      "hardware contract 0x%08x is not one this library "
-                      "knows (0x%08x, 0x%08x, 0x%08x, 0x%08x, 0x%08x) - the "
-                      "register map may differ, and guessing is how a host "
-                      "misreads a result. What a tile IMPLEMENTS is CAPS, "
-                      "not this.",
-                      ver, KNOWN_VERSIONS[0], KNOWN_VERSIONS[1],
-                      KNOWN_VERSIONS[2], KNOWN_VERSIONS[3],
-                      KNOWN_VERSIONS[4]);
+        /* The list is derived from KNOWN_VERSIONS, not typed: the
+         * first version of this message named five of six. */
+        std::string known;
+        for (uint32_t k : KNOWN_VERSIONS) {
+            char one[16];
+            std::snprintf(one, sizeof one, "%s0x%x", known.empty() ? "" : ", ", k);
+            known += one;
+        }
+        std::string msg = "hardware contract 0x";
+        char hexv[16];
+        std::snprintf(hexv, sizeof hexv, "%08x", ver);
+        msg += hexv;
+        msg += " is not one this library knows (" + known + ") - the "
+               "register map may differ, and guessing is how a host "
+               "misreads a result. What a tile IMPLEMENTS is CAPS, not this.";
         delete D;
-        set_err(buf);
+        set_err(msg);
         return ST_UNSUPPORTED;
     }
 
@@ -937,6 +967,13 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
          * set would be a capability register lying about its map. */
         if (ver >= SEG_VERSION && (caps2 & 0x100u))
             seq->features |= 0x1000u;
+        /* CAPS2[9] and [10] land on bits 13 and 14 (ABI 0.14,
+         * docs/ROUND2.md): INDEXED and LANE_MASK, only where the map
+         * has the five registers they need. */
+        if (ver >= IDX_VERSION) {
+            if (caps2 & 0x200u) seq->features |= 0x2000u;
+            if (caps2 & 0x400u) seq->features |= 0x4000u;
+        }
         /* And the depth: CAPS2[3:0] is log2 of it, meaningful only
          * where CAPS2[4] says the memory is there. A tile below 0x800
          * reads a zero word here, which is no scratch and a depth of
@@ -1588,7 +1625,9 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
              * and the kernel call below only passes them there, so an
              * older contract never dereferences these two. */
             xrt::bo *tb[CFT_ROLE_COUNT] = {&tile.a, &tile.b, &tile.c,
-                                           &tile.d, &tile.si, &tile.so};
+                                           &tile.d, &tile.si, &tile.so,
+                                           &tile.ia, &tile.ib, &tile.ic,
+                                           &tile.isi, &tile.mk};
             for (int r = 0; r < CFT_ROLE_COUNT; r++)
                 if (!ob[r])
                     ob[r] = tb[r];
@@ -1664,7 +1703,24 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
          * uses it - the bank on a 0x700, the two scratch blocks on an
          * 0x800; the tile reads or writes each only when the image's
          * flags say BANK_EXT or SCRATCH_IO. */
-        xrt::run r = (D.version >= SCRATCH_VERSION)
+        if (D.version >= IDX_VERSION) {
+            /* One beat each until P1 and P3 bind the caller's tables
+             * and mask: the kernel has the five arguments, and a launch
+             * on this map passes all seventeen (IDX_VERSION above). */
+            ensure_one(D, tile, tile.ia, tile.ia_cap, ARG_IDX_A, 32);
+            ensure_one(D, tile, tile.ib, tile.ib_cap, ARG_IDX_B, 32);
+            ensure_one(D, tile, tile.ic, tile.ic_cap, ARG_IDX_C, 32);
+            ensure_one(D, tile, tile.isi, tile.isi_cap, ARG_IDX_SI, 32);
+            ensure_one(D, tile, tile.mk, tile.mk_cap, ARG_MASK, 32);
+        }
+        xrt::run r = (D.version >= IDX_VERSION)
+                   ? tile.k(mode, static_cast<uint64_t>(n),
+                            *ob[0], *ob[1], *ob[2], *ob[3],
+                            tile.pg, tile.cn, tile.bk,
+                            *ob[CFT_ROLE_SI], *ob[CFT_ROLE_SO],
+                            static_cast<uint64_t>(0),
+                            tile.ia, tile.ib, tile.ic, tile.isi, tile.mk)
+                   : (D.version >= SCRATCH_VERSION)
                    ? tile.k(mode, static_cast<uint64_t>(n),
                             *ob[0], *ob[1], *ob[2], *ob[3],
                             tile.pg, tile.cn, tile.bk,

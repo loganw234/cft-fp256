@@ -101,8 +101,16 @@ void cftx_close(void *hw);
  * wrong silently was bind_clear's loop bound - two roles left holding
  * whatever the stack held, read by a backend as a resident binding to
  * an arbitrary pointer. */
+/* And the five of ABI 0.14 (docs/ROUND2.md): the four index tables of
+ * a program run and its lane mask, each a buffer of its own that a run
+ * split across tiles slices by lane exactly as the streams and the
+ * scratch block are sliced - which is why they are roles and not one
+ * concatenated table. All five are READ by the sequencer through the A
+ * master (kernel arguments 12..16, hw/kernel.xml). */
 enum { CFT_ROLE_A = 0, CFT_ROLE_B = 1, CFT_ROLE_C = 2, CFT_ROLE_D = 3,
-       CFT_ROLE_SI = 4, CFT_ROLE_SO = 5, CFT_ROLE_COUNT = 6 };
+       CFT_ROLE_SI = 4, CFT_ROLE_SO = 5,
+       CFT_ROLE_IA = 6, CFT_ROLE_IB = 7, CFT_ROLE_IC = 8, CFT_ROLE_ISI = 9,
+       CFT_ROLE_MASK = 10, CFT_ROLE_COUNT = 11 };
 
 /* Which of a call's operands live in a resident buffer, and where in
  * it they start. A NULL `buf[r]` is an operand that is ordinary host
@@ -245,12 +253,31 @@ int  cftx_reduce_seg(void *hw, int op, int fmt, int rnd, const void *a,
  *              [off * n_scratch_in, (off + k) * n_scratch_in), and a
  *              transport that sliced the block by bytes alone would
  *              hand every chunk the first lanes' slots
+ * idx_*        ABI 0.14 (docs/ROUND2.md): the index tables of the
+ *              three streams and the scratch block, n (or n *
+ *              n_scratch_in) uint32 entries each, lane-major, NULL when
+ *              the block is dense; and each indexed source's length in
+ *              elements. A chunk of k lanes from `off` carries entries
+ *              [off, off + k) of a stream's table and [off *
+ *              n_scratch_in, (off + k) * n_scratch_in) of the block's,
+ *              and the WHOLE source - an index reaches anywhere in it
+ * lane_mask    (n + 7) / 8 bytes, bit i lane i, or NULL; a chunk from
+ *              `off` starts at BIT off, which is not a byte boundary at
+ *              every format, so a backend repacks rather than points
+ *
+ * The 0.14 fields are checked and REFUSED in the library until the
+ * parcels that build them land; a backend that sees one set before
+ * then has found a bug above it, not a request.
  */
 typedef struct cft_seq_run_io {
     const void *bank;        size_t bank_bytes;
     const void *scratch_in;  size_t scratch_in_bytes;
     void       *scratch_out; size_t scratch_out_bytes;
     uint32_t    n_scratch_in, n_scratch_out;
+    /* ABI 0.14, appended */
+    const uint32_t *idx_a, *idx_b, *idx_c, *idx_scratch_in;
+    size_t idx_a_src, idx_b_src, idx_c_src, idx_scratch_src;
+    const uint8_t *lane_mask; size_t lane_mask_bytes;
 } cft_seq_run_io;
 
 /* Run a sequencer program (docs/SEQUENCER.md) on ONE compute unit.

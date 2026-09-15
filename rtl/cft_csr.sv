@@ -35,6 +35,13 @@
 //                 a build without it REFUSES the bit rather than
 //                 ignoring it, because ignoring it would read n
 //                 elements from a one-element buffer.
+//                 [23:19] RESERVED FOR ABI 0.14 (docs/ROUND2.md): [19]
+//                 a, [20] b, [21] c and [22] scratch_in fetched through
+//                 the index table at 0x88..0xA0, honoured only under
+//                 CAPS2[9]; [23] the lane mask at 0xA8, only under
+//                 CAPS2[10]. Until those bits are set (parcels P1 and
+//                 P3) the five are refused exactly as the rest of
+//                 [31:19] are:
 //                 [31:19] RESERVED, MUST BE ZERO. A non-zero bit here
 //                 is refused at start with STATUS[3], nothing begins
 //                 and no memory is touched. This guard did not exist
@@ -59,7 +66,7 @@
 //                 a refusal is not a run, and scrubbing the previous
 //                 run's flags would be quietly rewriting history
 //   0x44  MAGIC   RO: 0x43465430 "CFT0"
-//   0x48  VERSION RO: 0x00000900 (v0.9.0). Guards the REGISTER MAP,
+//   0x48  VERSION RO: 0x00000A00 (v0.10.0). Guards the REGISTER MAP,
 //                 not the feature set - features are announced in CAPS.
 //                 A host accepts any version whose map it knows.
 //   0x4C  CAPS    RO: what this bitstream actually implements.
@@ -241,6 +248,24 @@
 //                 this tile - the accumulator issuing maximum in place
 //                 of add - where an older tile decodes 31 as an
 //                 elementwise opcode and writes n elements.
+//   0x88  IDX_A_PTR   ABI 0.14 (2026-09-15, docs/ROUND2.md; VERSION
+//   0x90  IDX_B_PTR   0xA00; kernel arguments 12..15): the INDEX
+//   0x98  IDX_C_PTR   TABLES of a program run's three streams and its
+//   0xA0  IDX_SI_PTR  scratch block - n (or n * n_scratch_in) u32
+//                 entries each, lane-major, beat-padded; element i of
+//                 the block is source[idx[i]] and 0xFFFFFFFF reads as
+//                 +0. Read by the sequencer through the A master,
+//                 each only when its MODE bit ([19] a, [20] b, [21] c,
+//                 [22] scratch_in) is set, and those bits are honoured
+//                 only where CAPS2[9] is set; on every other build the
+//                 guard on MODE[31:19] refuses them at start. Appended
+//                 here at the seam so that the parcel building the
+//                 fetch (P1) and the parcel building the mask (P3)
+//                 share one map and one version.
+//   0xA8  MASK_PTR    the run's LANE MASK (argument 16): (n + 7) / 8
+//                 bytes, bit i lane i, set for a lane that runs; read
+//                 at block setup when MODE[23] is set, which CAPS2[10]
+//                 announces and the same guard refuses without it.
 
 `timescale 1ns/1ps
 
@@ -335,7 +360,13 @@ module cft_csr (
     // SEG / NRES (0x80 / 0x84): a reduction's segment length and its
     // result count; zero is the whole array.
     output logic [31:0] cfg_seg,
-    output logic [31:0] cfg_nres
+    output logic [31:0] cfg_nres,
+    // ABI 0.14 (docs/ROUND2.md): the four index-table pointers and the
+    // lane-mask pointer, 0x88..0xA8. Registers only at this version -
+    // the MODE bits that would select them are refused (cfg_mode_bad)
+    // until the parcels that read them set CAPS2[9] and [10].
+    output logic [63:0] cfg_idx_a, cfg_idx_b, cfg_idx_c, cfg_idx_si,
+    output logic [63:0] cfg_mask
 );
 
   localparam [31:0] MAGIC   = 32'h4346_5430;
@@ -388,7 +419,19 @@ module cft_csr (
   // default and gets one result where it sized NRES. The host accepts
   // {0x410, 0x500, 0x600, 0x700, 0x800, 0x900}. The feature the
   // register serves is announced in CAPS2[8] as every feature is.
-  localparam [31:0] VERSION = 32'h0000_0900;
+  //
+  // 0x900 -> 0xA00 (2026-09-15, docs/ROUND2.md) is the same bump a
+  // fifth time, and the first made at a SEAM rather than with a
+  // feature: five registers exist at 0x88..0xAF as kernel arguments
+  // 12..16 - four index-table pointers and a lane-mask pointer - so
+  // that the two parcels that will read them share one map. Nothing
+  // reads them at this version: the MODE bits that would are still
+  // refused by the guard below, and CAPS2[9] and [10] are zero until
+  // each parcel sets its own. A host that wrote a table pointer to a
+  // 0x900 tile would write into a decode default, which is the whole
+  // of why VERSION moves. The host accepts {0x410, 0x500, 0x600,
+  // 0x700, 0x800, 0x900, 0xA00}.
+  localparam [31:0] VERSION = 32'h0000_0A00;
 
   logic ap_start_q, ap_done_q, ap_idle;
   logic [31:0] gier_q, ier_q;
@@ -396,6 +439,7 @@ module cft_csr (
   logic [63:0] n_q, a_q, b_q, c_q, d_q, prog_q, bank_q, cnt_q;
   logic [63:0] sin_q, sout_q;
   logic [31:0] seg_q, nres_q;              // 0x80 / 0x84
+  logic [63:0] idx_a_q, idx_b_q, idx_c_q, idx_si_q, mask_q;   // 0x88 .. 0xAF
 
   assign ap_idle  = !busy;
   assign cfg_op   = mode_q[7:0];
@@ -412,6 +456,11 @@ module cft_csr (
   assign cfg_sin  = sin_q;
   assign cfg_seg  = seg_q;
   assign cfg_nres = nres_q;
+  assign cfg_idx_a  = idx_a_q;
+  assign cfg_idx_b  = idx_b_q;
+  assign cfg_idx_c  = idx_c_q;
+  assign cfg_idx_si = idx_si_q;
+  assign cfg_mask   = mask_q;
   assign cfg_sout = sout_q;
 
   assign cfg_scalar   = mode_q[18:16];
@@ -470,6 +519,8 @@ module cft_csr (
       prog_q <= '0; cnt_q <= '0; bank_q <= '0;
       sin_q <= '0; sout_q <= '0;
       seg_q <= '0; nres_q <= '0;
+      idx_a_q <= '0; idx_b_q <= '0; idx_c_q <= '0; idx_si_q <= '0;
+      mask_q <= '0;
     end else begin
       start <= 1'b0;
 
@@ -541,6 +592,19 @@ module cft_csr (
           // words before them were appended.
           10'h020: seg_q  <= (seg_q  & ~wmask) | (wdata_q & wmask);
           10'h021: nres_q <= (nres_q & ~wmask) | (wdata_q & wmask);
+          // 0x88 .. 0xA8: the four index tables and the lane mask (ABI
+          // 0.14), appended for the reason the nine words before them
+          // were, at the seam of the round that reads them.
+          10'h022: idx_a_q[31:0]   <= (idx_a_q[31:0]   & ~wmask) | (wdata_q & wmask);
+          10'h023: idx_a_q[63:32]  <= (idx_a_q[63:32]  & ~wmask) | (wdata_q & wmask);
+          10'h024: idx_b_q[31:0]   <= (idx_b_q[31:0]   & ~wmask) | (wdata_q & wmask);
+          10'h025: idx_b_q[63:32]  <= (idx_b_q[63:32]  & ~wmask) | (wdata_q & wmask);
+          10'h026: idx_c_q[31:0]   <= (idx_c_q[31:0]   & ~wmask) | (wdata_q & wmask);
+          10'h027: idx_c_q[63:32]  <= (idx_c_q[63:32]  & ~wmask) | (wdata_q & wmask);
+          10'h028: idx_si_q[31:0]  <= (idx_si_q[31:0]  & ~wmask) | (wdata_q & wmask);
+          10'h029: idx_si_q[63:32] <= (idx_si_q[63:32] & ~wmask) | (wdata_q & wmask);
+          10'h02A: mask_q[31:0]    <= (mask_q[31:0]    & ~wmask) | (wdata_q & wmask);
+          10'h02B: mask_q[63:32]   <= (mask_q[63:32]   & ~wmask) | (wdata_q & wmask);
           default: ;
         endcase
       end
@@ -604,6 +668,16 @@ module cft_csr (
           10'h01F: s_axi_control_rdata <= sout_q[63:32];
           10'h020: s_axi_control_rdata <= seg_q;
           10'h021: s_axi_control_rdata <= nres_q;
+          10'h022: s_axi_control_rdata <= idx_a_q[31:0];
+          10'h023: s_axi_control_rdata <= idx_a_q[63:32];
+          10'h024: s_axi_control_rdata <= idx_b_q[31:0];
+          10'h025: s_axi_control_rdata <= idx_b_q[63:32];
+          10'h026: s_axi_control_rdata <= idx_c_q[31:0];
+          10'h027: s_axi_control_rdata <= idx_c_q[63:32];
+          10'h028: s_axi_control_rdata <= idx_si_q[31:0];
+          10'h029: s_axi_control_rdata <= idx_si_q[63:32];
+          10'h02A: s_axi_control_rdata <= mask_q[31:0];
+          10'h02B: s_axi_control_rdata <= mask_q[63:32];
           default: s_axi_control_rdata <= 32'h0;
         endcase
       end
