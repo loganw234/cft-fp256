@@ -96,7 +96,7 @@ the numbers that matter are the fp128 and fp256 ones.
 | `u50-5xfp128` | 5x fp128-max | 5 | 20 | 150* | 654,666 | 75.2% | fits |  | placeholder (needs variant packaging; host-ready) |
 | `u50-7xfp64` | 7x fp64-max | 7 | 28 | 170* | 679,580 | 78.0% | fits |  | placeholder (needs variant packaging; host-ready) |
 | `u50-8xfp32` | 8x fp32-max | 8 | 32 | 190* | 558,335 | 64.1% | fits |  | placeholder (needs variant packaging; host-ready) |
-| `u50-7xfp64fp128` | 7x fp64fp128-max | 7 | 28 | 150* | 685,880 | 78.8% | fits |  | placeholder (needs variant packaging; host-ready) |
+| `u50-7xfp64fp128` | 7x fp64fp128-max | 7 | 28 | 135* | 685,880 | 78.8% | fits |  | placeholder (needs variant packaging; host-ready) |
 
 *(this table is written by `python hw/gen_layouts.py`; the two "built" rows are `hw/link_quad.cfg` and `hw/link.cfg` by another name - identical connectivity)*
 
