@@ -384,8 +384,18 @@ there is no card day inside a parcel.
 - A new `rtl/cft_gather.sv` if you want the fetcher its own module (and
   then its own bench, `tb/test_gather.py`, added to `SIM_BENCHES` in
   `tb/Makefile`).
-- `rtl/cft_krnl.sv` - only the `caps2` bit [9] and, if you need it, the
+- `rtl/cft_krnl.sv` - only the `caps2` bit [9] (from `FEAT_INDEXED`),
+  the wiring of the two CSR ports below, and, if you need it, the
   read-master mux for a second read source; nothing else in that file.
+- `rtl/cft_csr.sv` - exactly three things, mirroring `feat_scalar`:
+  `input logic feat_indexed`; `output logic [3:0] cfg_indexed =
+  mode_q[22:19]` (the sequencer has to see which streams are indexed,
+  and the CSR exports nothing for those bits at the seam); and the
+  reserved-bits guard `cfg_mode_bad` narrowed to `mode_q[31:23]` with
+  `(|mode_q[22:19] && !feat_indexed)` added. MODE[23] stays refused on
+  every build - it is P3's. Nothing else in the file. (Decided
+  2026-09-15 on P1's escalation: the seam's own comment in the CSR
+  said the parcels change it, and this list said the opposite.)
 - `python/cft_golden/seq.py` - `run()`'s indexed arguments and a
   `gather()` helper; nothing about the ISA.
 - `python/tests/test_seq.py` - your cases.
@@ -419,9 +429,9 @@ there is no card day inside a parcel.
 
 ### Files you must NOT touch
 
-- `host/include/cft.h`, `host/src/backend.h`, `rtl/cft_csr.sv`,
-  `hw/kernel.xml` - **the lead's**, landed in P0. If a declaration is
-  wrong, say so in the ledger, do not fix it.
+- `host/include/cft.h`, `host/src/backend.h`, `hw/kernel.xml` - **the
+  lead's**, landed in P0; and `rtl/cft_csr.sv` beyond the three items
+  above. If a declaration is wrong, say so in the ledger, do not fix it.
 - `rtl/cft_engine_stream.sv`, `rtl/cft_reduce_acc.sv` - **P4** is
   editing them now.
 - `host/src/backend_remote.c`, `host/src/remote.h`, `host/tools/cft-serve.c`
@@ -651,7 +661,12 @@ report what the repack costs and where the buffer lives.
 `rtl/cft_seq.sv` - `S_BLK_SETUP`, `blk_act_fn`, `ACTALL`'s use of it,
 the three drains' lane selection, and the mask fetch you add; nothing
 in the load/preload states P1 just landed or the issue pipe.
-`rtl/cft_krnl.sv` - `caps2` bit [10] only. `python/cft_golden/seq.py` -
+`rtl/cft_krnl.sv` - `caps2` bit [10] (from `FEAT_LANE_MASK`) and the
+wiring of the two CSR ports below. `rtl/cft_csr.sv` - exactly the
+mirror of P1's three items, in the file P1 leaves: `input logic
+feat_lane_mask`; `output logic cfg_mask_en = mode_q[23]`; the guard
+narrowed to `mode_q[31:24]` with `(mode_q[23] && !feat_lane_mask)`
+added. Nothing else in the file. `python/cft_golden/seq.py` -
 `lane_mask` in `run()`. `host/src/program.c` - the block loop's
 `active[]` initialisation and the three output writes.
 `host/src/program.c` - `seq_check_round2`'s lane-mask arm, the refusal
@@ -668,8 +683,8 @@ cannot change an active lane's bits). Tests: `tb/test_seq_core.py`,
 `tb/test_krnl_seq.py`, `python/tests/test_seq.py`, `seq_check.py` (a
 masked corpus), `device_test.c` (one leg).
 
-Not yours: `cft.h`, `backend.h`, `cft_csr.sv`, `kernel.xml`, the
-bindings, the docs the lead keeps.
+Not yours: `cft.h`, `backend.h`, `kernel.xml`, `cft_csr.sv` beyond the
+three items above, the bindings, the docs the lead keeps.
 
 ### The negative control
 
