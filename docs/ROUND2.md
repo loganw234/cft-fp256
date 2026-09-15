@@ -42,8 +42,10 @@ slot, with a particle whose row has run out contributing +0 (their own
 argument for why that is exact stands: the running sum starts at +0 and
 cannot become -0 under any attribute, so x + (+0) is x). On the tile
 that is a program over lanes whose scratch block was filled THROUGH AN
-INDEX TABLE: `r0 = +0; LDL r1, s; ADD r0, r0, r1` for each slot, one
-deposit. And step 2 of their resident design - pair lane l needs
+INDEX TABLE: `LDL r4, s; ADD r3, r3, r4` for each slot, one deposit of
+r3 - r3 starts at +0 and names no stream, so none of the three is
+loaded (the first draft of this sketch accumulated into r0, which IS
+the a stream; P1 caught it on 2026-09-15). And step 2 of their resident design - pair lane l needs
 `x[i_l]` and `x[j_l]` from the predictor's deposits - is the same
 mechanism on the streams. So the device-side primitive both asks need is
 **an input block fetched through an index table**: the three streams
@@ -352,11 +354,13 @@ there is no card day inside a parcel.
   true by construction), so no reorder buffer: the returns match the
   table's order.
 - Throughput is bounded by outstanding reads and HBM latency, not by
-  the bus: a gathered stream costs about one memory round trip per
-  element divided by the reads in flight. The engine's readers cap
-  outstanding requests at `AR_MAX`; find the sequencer's equivalent and
-  say in your report what a gathered beat costs against a dense one in
-  the cycle probe, at every format.
+  the bus. **Corrected by P1 (2026-09-15):** the sequencer's read side
+  issues ONE burst at a time (`rd_burst_left == 0` gates the AR), for
+  the image and the dense streams too, so a gathered element is a whole
+  round trip and there is no divisor - about four cycles an element on
+  model RAM at every format, and an HBM round trip each on the card.
+  Making that cheaper is a change to the read side, not to the gather,
+  and is a roadmap item for after the round, priced on the card first.
 - **A finding you should confirm before relying on it.** `rd_need`
   marks a stream as needed only when an instruction reads it, so an
   indexed stream nobody reads should issue no reads at all - the same
