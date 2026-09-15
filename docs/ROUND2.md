@@ -566,7 +566,7 @@ read P1's section for them, they are not repeated.
 
 ### What wave 1 learned that binds you (added 2026-09-15 11:40, before dispatch)
 
-- **Your base is `main` at `5c0c655`** (P1 merged 2026-09-15 11:37).
+- **Your base is `main` at `5c0c655` or the docs-only commits after it** (P1 merged 2026-09-15 11:37; your dispatch names the exact tip).
   `git rev-parse HEAD` before anything; if your worktree is not there,
   stop and put it in `urgent/` rather than working on the wrong tree.
   Your ledger file is `P2.md`; create it, append only, `date` stamps.
@@ -696,7 +696,7 @@ block setup and the three drains, stop and report.
 
 ### What wave 1 learned that binds you (added 2026-09-15 11:40, before dispatch)
 
-- **Your base is `main` at `5c0c655`** (P1 merged 2026-09-15 11:37).
+- **Your base is `main` at `5c0c655` or the docs-only commits after it** (P1 merged 2026-09-15 11:37; your dispatch names the exact tip).
   `git rev-parse HEAD` before anything; if your worktree is not there,
   stop and put it in `urgent/`. Your ledger file is `P3.md`; create it,
   append only, `date` stamps.
