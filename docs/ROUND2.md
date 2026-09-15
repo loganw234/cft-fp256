@@ -319,7 +319,10 @@ that makes the rest worth having.
 `C:\Users\logan\source\repos\cft-round2-ledger\`. Read every file there
 before you start, again before you design anything touching a file this
 brief calls shared, and again before you write your report. Append to
-`P1.md` only. Its README says what clears the bar.
+`P1.md` only. Its README says what clears the bar. **Stamp every entry
+with the output of `date` at the moment of writing** - on 2026-09-15
+every author guessed the time and the guesses drifted up to ninety
+minutes, so commit times had to serve as the record.
 
 **Before anything else, arm a persistent watcher on
 `C:\Users\logan\source\repos\cft-round2-ledger\urgent\`** with the loop
@@ -482,24 +485,35 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$MOUNT:/work" -w /work/tb cft-sim python3
 MOUNT=$(pwd -W); MSYS_NO_PATHCONV=1 docker run --rm -v "$MOUNT:/work" -w /work cft-sim make yosys-lint
 ```
 
-**A single bench target exits 0 when its tests FAIL** (P4 measured it
-on 2026-09-15 with a broken pairing: `TESTS=3 PASS=0 FAIL=3`, exit 0;
-cocotb cannot set an exit code, and only `make sim` runs
-`tb/check_results.py` over its results). So a bench run is the target
-AND the checker over that target's `SIM_BUILD` directory (the
-multi-pass targets append the pass count: `sim_build/seq_coremc10`),
-and your report carries the checker's line, not the exit code.
-Background anything over a minute and read its log. Build only inside
-your own worktree. The full `make sim` and the image build are the
-lead's, on the build box; you never touch the box or the card.
+**Every single bench target runs `tb/check_results.py` over its own
+results and exits non-zero when a test fails** - since `2318281`
+(2026-09-15). Before that a target exited 0 with `TESTS=3 PASS=0
+FAIL=3` (P4 measured it with a broken pairing; cocotb cannot set an
+exit code), which is why the second `docker run` above exists; it is
+now redundant and harmless. Your report still carries the checker's
+line (`PASS: 1 bench(es), no failures recorded`, or the `TESTS=` line),
+not the exit code; the multi-pass targets append the pass count to
+their build directory (`sim_build/seq_coremc10`). Background anything
+over a minute and read its log; a background shell holding a sequence
+of `docker run`s can be reaped while its container runs on, so run
+targets one at a time and check `docker ps` before reading a truncated
+log as a failure (P1, 2026-09-15). Build only inside your own worktree.
+The full `make sim` and the image build are the lead's, on the build
+box; you never touch the box or the card.
 
 ### Working rules this repository learned the hard way
 
 - **The Bash tool mangles backslashes and tabs in long heredocs.** Write
   a patch script with the Write tool and run it; the scratchpad has
   thirty of them from the last two days as the pattern.
-- **Never kill a process by image name.** Your own PIDs only, and a
-  `pgrep -f` inline self-matches the asking shell.
+- **Never kill a process by image name, and never `docker kill` a
+  list.** On 2026-09-15 a parcel's `docker kill $(docker ps -q ...)`
+  killed a sibling's census containers mid-run. The command is
+  `docker ps --no-trunc` (the mount path in the command line says whose
+  the container is - yours is your worktree), then `docker kill <one
+  container ID>` whose command line is yours. For processes, your own
+  PIDs only; a `pgrep -f` inline self-matches the asking shell, so
+  check from a script file or with the `[b]racket` trick.
 - **Bench every shape a mechanism changes with.** Twenty-three green
   benches missed a drain slip and a two-beat deadlock on 2026-09-14; one
   case sweeping block length and burst boundary found both in minutes.
@@ -549,6 +563,59 @@ inventing a different design.
 Dispatched after P1 is merged; its base is that merge commit. Same
 repository, ledger, working rules, host build and do-nots as P1 -
 read P1's section for them, they are not repeated.
+
+### What wave 1 learned that binds you (added 2026-09-15 11:40, before dispatch)
+
+- **Your base is `main` at `5c0c655`** (P1 merged 2026-09-15 11:37).
+  `git rev-parse HEAD` before anything; if your worktree is not there,
+  stop and put it in `urgent/` rather than working on the wrong tree.
+  Your ledger file is `P2.md`; create it, append only, `date` stamps.
+- **The opcode read rule.** `op_reads` in `rtl/cft_seq.sv` (grep for
+  it) decides which streams an instruction fetches: FMA and SELECT read
+  a, b and c; ADD and SUB read a and c; MUL, COPYSIGN, MIN, MAX, MINNUM,
+  MAXNUM, the compares and the integer ops read a and b; ABS and NEG
+  read a. The elementwise API has the same shape already (`cft.h`:
+  "unused operands (b for ADD, c for MUL) may be NULL"), so the
+  composition maps a to r0, b to r1, c to r2 with no remapping. What is
+  yours to decide is a table on an operand the opcode does not read
+  (`idx_b` on an ADD): refuse it by name, or ignore it as the dense path
+  ignores the operand - write the rule down and test it, and the
+  software backend's gather must never touch a NULL source for an
+  unread operand. P1's original defect was a read decision made from an
+  operand field instead of the opcode (a defaulted rb fetched stream a:
+  the whole gather for nothing, V1's finding); make no per-operand
+  decision on the host that the opcode already makes.
+- **P1's remote route is yours to replace, in three places, together.**
+  (i) `host/src/device.c`, the remote-open block that masks
+  `CFT_SEQ_FEAT_INDEXED` off a remote handle (`dev->seq.features &=
+  ~CFT_SEQ_FEAT_INDEXED`, with the comment that names you); (ii)
+  `host/src/device.c`, the refusal by name in `cft_backend_program_run`'s
+  remote branch ("an indexed input block needs CFT_SEQ_FEAT_INDEXED,
+  which this device does not publish"); (iii) `host/tests/remote_test.c`,
+  the three checks that the client's capability word omits INDEXED
+  while the server's HELLO carries it (grep `CFT_SEQ_FEAT_INDEXED`).
+  This extends your ownership by exactly those regions of the
+  program-run path: the client-side gather for `cft_program_run_ex`
+  over remote - the tables gathered into dense temporaries on the
+  client, a dense program run sent, the deposits landing dense as they
+  already do - and nothing else in that path. Once the route carries
+  tables a remote handle publishes the bit its server publishes, and
+  `remote_test.c`'s `identity_tests` gains the indexed program case
+  beside the `reduce_seg` block (identity table equal to dense, permuted
+  table equal to the software backend). The server side (`cft-serve.c`,
+  `remote.h`) is unchanged: no new opcode.
+- **MODE[22] without a scratch input is P1's follow-up**, in flight on
+  P1's branch (the sequencer ignores `idx_scratch_in` when the program
+  declares no scratch input; it is being turned into a refusal). Your
+  composition declares no scratch block and passes no scratch table, so
+  nothing to do - only do not rely on the bit either way.
+- **The lead's seam test after you** runs the composed `cft_run_ex`
+  against `cft_program_run_ex` with the same tables on the same device;
+  keep the composition in one helper the device-test leg goes through,
+  so the seam test can name it.
+- Everything in P1's "Building and testing" and "Working rules" is
+  current as amended above: every bench target runs its checker; the
+  process rule is a command; `date` on ledger entries.
 
 ### Your job
 
@@ -626,6 +693,65 @@ this document before you start**: this parcel is worth at most about
 two percent of the requester's step today, and the point of building it
 small and last is to keep it small. If the RTL wants to grow past the
 block setup and the three drains, stop and report.
+
+### What wave 1 learned that binds you (added 2026-09-15 11:40, before dispatch)
+
+- **Your base is `main` at `5c0c655`** (P1 merged 2026-09-15 11:37).
+  `git rev-parse HEAD` before anything; if your worktree is not there,
+  stop and put it in `urgent/`. Your ledger file is `P3.md`; create it,
+  append only, `date` stamps.
+- **What P1 left in `rtl/cft_csr.sv`, which your three items mirror:**
+  `input logic feat_indexed`; `assign cfg_indexed = mode_q[22:19];`;
+  and the guard `(mode_q[31:23] != 9'b0) || (|mode_q[22:19] &&
+  !feat_indexed) || ...` (around lines 371, 480 and 497 at 5c0c655).
+  Yours: `feat_lane_mask`; `assign cfg_mask_en = mode_q[23];`; the
+  guard narrowed to `(mode_q[31:24] != 8'b0)` with `(mode_q[23] &&
+  !feat_lane_mask)` beside the indexed term. `mask_q` at `10'h02B` and
+  `cfg_mask` (MASK_PTR 0xA8) are P0's and already there; `FEAT_LANE_MASK`
+  in `rtl/cft_krnl.sv` already feeds `caps2[10]` - check what P0 set it
+  to and whether `cft_krnl` wires a `feat_lane_mask` port to the CSR the
+  way P1 wired `feat_indexed`.
+- **A parameter below `cft_krnl` cannot be set from the command line**
+  (V4, 2026-09-15): `tb/cocotb.mk` errors out on any `KRNL_PARAMS`
+  naming a module other than `TOPLEVEL`. If your CAPS2[10]-clear
+  control wants a build switch, it is a parameter OF `cft_krnl` (the way
+  `EN_WIDE` is now threaded on the P4 staging branch); the other way,
+  which V1 and P1 used for CAPS2[9], is a copy of the tree under the
+  scratchpad with the localparam edited, run, and deleted. Either is
+  acceptable; say which.
+- **Lane flags are qualified by their own strobe** (P4's defect at
+  6b5582e, fixed at 778dabf): the array's lane-flag and lane-data
+  vectors are not self-qualifying - a reader that ORs lane flags must
+  qualify each lane by the return strobe of the instruction that
+  produced them, on its own delay line, or it reads a previous run's
+  flags. For you: the sticky OR must exclude a masked lane at the edge
+  its result would have returned, by the active bit as it stands THEN,
+  not by the mask sampled at block setup. Two cases, both required: a
+  run whose only overflowing lane is masked reports clear flags; and an
+  unmasked program that overflows in lane k, followed by a masked run
+  with lane k masked and nothing overflowing, reports clear flags.
+- **The read side has one burst in flight** (P1's measurement): every
+  sequencer read is a whole round trip, and the mask fetch at block
+  setup is one more read per block (at fp256 a beat is one lane, so a
+  block's 64 mask bits are eight bytes: one beat). Measure block setup
+  dense against masked in the cycle probe at each format and put it in
+  the report; the two-percent ceiling assumes that fetch is one burst.
+- **P1's follow-up is in flight on P1's branch** and merges beside you:
+  the MODE[22]-without-scratch refusal (the program header check in
+  `rtl/cft_seq.sv`, and the model's and the C executor's matching
+  refusal), a `seq_core` case for it, a device-test `-b` indexed leg in
+  `host/tests/device_test.c`, and a comment in `tb/probe_seq_cycles.py`.
+  Stay out of those regions: your `cft_seq.sv` work is `S_BLK_SETUP`,
+  `blk_act_fn`, `ACTALL`, the drains and the mask fetch; your test
+  additions are new functions and cases, never edits to existing
+  indexed ones.
+- `python/cft_golden/seq.py`'s `run()` already takes `lane_mask` (P0
+  made it raise; check what P1 left) and `host/src/program.c`'s
+  `seq_check_round2` still refuses the lane-mask arm by name (P0): both
+  are yours to make real.
+- Everything in P1's "Building and testing" and "Working rules" is
+  current as amended above: every bench target runs its checker; the
+  process rule is a command; `date` on ledger entries.
 
 ### Your job
 
@@ -816,6 +942,20 @@ slice starting at lane 3 of a byte - by reading the code and building
 the case in the software leg; (5) the flags; (6) scope; (7) comments;
 (8) what else.
 
+**V2, on P2** (added 2026-09-15; the method's criterion - a parcel that
+crosses a seam gets a verifier - says yes, as it did for P4). Attack
+list: (1) the scalar-beside-indexed trap, a scalar `b` beside an
+indexed `a` on every backend, bits against the model; (2) the aliasing
+rule, by building the aliased case; (3) the flags, an overflow in a
+gathered lane only; (4) the remote route: the server's STATS counters
+on a refusal, and the byte count of the RUN the client sends for a
+gathered call; (5) which refusal fires first on a device without the
+sequencer and on one without the bit; (6) the composed program's shape
+(three instructions, `max_deposits` 1) against `cft_program_run_ex`
+with the same tables - the lead's seam test, run early; (7) a table on
+an operand the opcode does not read; (8) scope; (9) comments; (10)
+what else.
+
 ## The ledger
 
 `C:\Users\logan\source\repos\cft-round2-ledger\` - outside every
@@ -866,8 +1006,8 @@ The lead watches the whole directory. Parcels watch `urgent/`.
   script. Expect it to correct this brief.
 - Merge P4 first if it arrives first (its suite run is the reduction
   benches and the cycle probe); merge P1 after V1.
-- Wave 2: P2 and P3 in parallel from the P1 merge, V3 when P3 reports.
-  P2 shares no file with P3.
+- Wave 2: P2 and P3 in parallel from the P1 merge (`5c0c655`), V2 and
+  V3 when each reports. P2 shares no file with P3.
 - The suite after each merge is the constraint, not the merging: budget
   about an hour a merge on the box, four merges.
 - Then the image and the card day, which is a day.
