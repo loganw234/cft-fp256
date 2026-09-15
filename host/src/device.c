@@ -538,6 +538,24 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
          * lives there and is rewritten every corrector pass, so staging
          * it put a round trip in the innermost loop
          * (cft-rebound/docs/HARDWARE.md, the first ask). */
+        /* R16 on a tile that cannot gather is REFUSED BY NAME, which
+         * is the whole reason CAPS2[9] exists. The alternative - hand
+         * the run over and let the tile refuse MODE[22:19] - comes back
+         * as STATUS[3], which reads as "this bitstream lacks the
+         * precision" and names nothing; and a tile old enough to ignore
+         * the bits instead would answer from the DENSE stream, which is
+         * a wrong number with clean flags. The software backend always
+         * carries it and the remote route is refused below. */
+        if (io && (io->idx_a || io->idx_b || io->idx_c ||
+                   io->idx_scratch_in) &&
+            !(dev->seq.features & CFT_SEQ_FEAT_INDEXED)) {
+            cft_set_error(
+                "an indexed input block needs CFT_SEQ_FEAT_INDEXED, which "
+                "this device does not publish (CAPS2[9]); ask cft_get_caps "
+                "before passing a table, or gather on the host and pass "
+                "the dense block");
+            return CFT_ERR_UNSUPPORTED;
+        }
         buf_sync_in(dev, a, n * esz);
         buf_sync_in(dev, b, n * esz);
         buf_sync_in(dev, c, n * esz);
@@ -558,6 +576,34 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
         if (io && io->scratch_out_bytes)
             bind_role(dev, &bd, CFT_ROLE_SO, io->scratch_out,
                       io->scratch_out_bytes);
+        /* The four index tables (ABI 0.14), on exactly the scratch
+         * block's terms: READ by the tile, so each is brought home
+         * first, and bound where it is a resident buffer so a caller
+         * who fills a table once and runs many pays no round trip for
+         * it - which is the shape the gravity fold has, where the
+         * table is rebuilt once a step and read by every call in it.
+         *
+         * Four bytes an entry at every format, because a table holds
+         * INDICES and not elements: n of them for a stream and
+         * n * n_scratch_in for the block, lane-major as the block is.
+         * Guarded on the pointer alone - a table with no entries is
+         * not a table, and n is non-zero here. */
+        if (io) {
+            const void *itab[3];
+            int r;
+            itab[0] = io->idx_a; itab[1] = io->idx_b; itab[2] = io->idx_c;
+            for (r = 0; r < 3; r++) {
+                if (!itab[r])
+                    continue;
+                buf_sync_in(dev, itab[r], n * 4u);
+                bind_role(dev, &bd, CFT_ROLE_IA + r, itab[r], n * 4u);
+            }
+            if (io->idx_scratch_in && io->n_scratch_in) {
+                size_t ib = n * (size_t)io->n_scratch_in * 4u;
+                buf_sync_in(dev, io->idx_scratch_in, ib);
+                bind_role(dev, &bd, CFT_ROLE_ISI, io->idx_scratch_in, ib);
+            }
+        }
         backend_call();
         return cftx_program_run(dev->hw, fmt, image, image_bytes, io,
                                 max_deposits, a, b, c, deposits, counts, n,
@@ -566,6 +612,21 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
 #endif
 #ifndef CFT_NO_REMOTE
     if (dev && dev->backend == CFT_BACKEND_REMOTE) {
+        /* The program run's REMOTE route does not carry a table yet
+         * (docs/ROUND2.md: it is a client-side gather, and it is P2's).
+         * Refused by name here rather than in the frame, because the
+         * protocol has no field for a table: a run that reached
+         * cftr_program_run would send a dense RUN and come back with
+         * the wrong elements and clean flags. */
+        if (io && (io->idx_a || io->idx_b || io->idx_c ||
+                   io->idx_scratch_in)) {
+            cft_set_error(
+                "an indexed input block on a program run is not carried by "
+                "the remote protocol (docs/ROUND2.md, parcel P2); gather on "
+                "the client and pass the dense block, or run the program "
+                "on a local device");
+            return CFT_ERR_UNSUPPORTED;
+        }
         backend_call();
         return cftr_program_run(dev->hw, fmt, image, image_bytes, io,
                                 max_deposits, a, b, c, deposits, counts, n,

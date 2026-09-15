@@ -553,7 +553,14 @@ void cft_sw_seq_caps(cft_seq_caps *out)
     out->features     = CFT_SEQ_FEAT_WIDE_CONST | CFT_SEQ_FEAT_REGS32 |
                         CFT_SEQ_FEAT_BANK_PTR   | CFT_SEQ_FEAT_KX9 |
                         CFT_ALU_EXT_IMUL        | CFT_SEQ_FEAT_SCRATCH |
-                        CFT_SEQ_FEAT_SCRATCH_IO | CFT_SEQ_FEAT_SCRATCH_STRICT;
+                        CFT_SEQ_FEAT_SCRATCH_IO | CFT_SEQ_FEAT_SCRATCH_STRICT |
+                        /* R16, ABI 0.14: this executor gathers an input
+                         * block through its table, so it publishes the
+                         * bit - the software backend is the contract and
+                         * carries every feature the contract defines. A
+                         * tile publishes it from CAPS2[9] and a tile
+                         * without it is refused BY NAME (device.c). */
+                        CFT_SEQ_FEAT_INDEXED;
 }
 
 /* A program image against the capacities the device it was loaded for
