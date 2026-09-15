@@ -21,7 +21,7 @@
     {
       "source": "host/include/cft.h",
       "dest": "src/cft/include/cft.h",
-      "sha256": "cd52beee6f84206c5643fea15919ee99a61b95656eebd62ac1e3ed5b9bec931c"
+      "sha256": "146ac12d000f7ddcaf2829bafa3eaa116c49bef2992d8234ced695e7e85592e3"
     },
     {
       "source": "host/include/cft_config.h",
@@ -76,7 +76,7 @@
     {
       "source": "host/src/device.c",
       "dest": "src/cft/src/device.c",
-      "sha256": "d902df2385c4cce2e4acde58e738b98419156901e16925d727647f79d31c7d38"
+      "sha256": "fcdb25d733edc178804c2c5c795f2a0dfb8b9d6f098663568581e68e651825ee"
     },
     {
       "source": "host/src/divfull_images.h",

@@ -392,20 +392,23 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
         dev->tiles          = tiles;
         dev->device_version = ver;
         dev->flags_readable = readable;
+        /* CFT_SEQ_FEAT_INDEXED among them, as of parcel P2: the mask
+         * that used to clear it here went out with the refusal it
+         * matched, and a remote handle now publishes the bit its
+         * server's HELLO publishes, like every other capability.
+         *
+         * The bit's meaning is "cft_program_run_ex with index tables
+         * SUCCEEDS on this device", and it now does: the client
+         * gathers before the frame and sends the dense run
+         * (cft_backend_program_run's remote branch). Note which way
+         * the remaining inaccuracy points - the CLIENT can gather
+         * whatever the server publishes, so a handle to a server
+         * WITHOUT the bit under-promises rather than over-promises,
+         * and a caller who believes it and gathers for themselves gets
+         * the right answer by a longer road. The opposite - a word
+         * saying yes to a call that says no - is the one this project
+         * refuses, and it cannot arise here. */
         dev->seq            = seq;
-        /* ...except CFT_SEQ_FEAT_INDEXED, which is MASKED OFF on a
-         * remote handle (ABI 0.14, R16). The bit's meaning is
-         * "cft_program_run_ex with index tables SUCCEEDS on this
-         * device", and the program run's remote route does not carry a
-         * table yet - it is a client-side gather and it is parcel P2's
-         * (docs/ROUND2.md). A server that is itself a software device
-         * publishes the bit truthfully about ITSELF, and a client that
-         * adopted it would read a capability word saying yes to a call
-         * that then says no. A caller is told to ask cft_get_caps
-         * before issuing one, so the answer has to be the one the call
-         * will give. P2 removes this mask and the refusal in
-         * cft_backend_program_run's remote branch together. */
-        dev->seq.features  &= ~(uint32_t)CFT_SEQ_FEAT_INDEXED;
         dev->backend_name   = "remote";
         dev->hw             = hw;
         *out = dev;
@@ -503,6 +506,47 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
     dev->hw             = NULL;
     *out = dev;
     return CFT_OK;
+}
+
+/* ---- the host-side gather (R16, ABI 0.14, docs/ROUND2.md P2) -------
+ *
+ * The +0 a CFT_IDX_NONE entry reads as, in THIS format's encoding -
+ * derived from the same bignum store both executors write their
+ * results through, not assumed to be an all-zero element. (It is one,
+ * for every binary format this library carries; deriving it is what
+ * keeps that true rather than believed.) */
+static void idx_zero_elem(uint8_t *dst, size_t esz)
+{
+    cft_bn z;
+    cft_bn_zero(&z);
+    cft_bn_store(&z, dst, (int)esz);
+}
+
+/* The contract's gather, in the one place every host-side route
+ * reaches it: A[i] = idx[i] == CFT_IDX_NONE ? +0 : src[idx[i]], for i
+ * in [0, count).
+ *
+ * Two callers, deliberately one function. The elementwise run's
+ * software and remote routes gather their operands with it, and the
+ * REMOTE route of a program run gathers its streams and its scratch
+ * block with it - the block is n * n_scratch_in entries of the same
+ * shape, lane-major, so "count" is all that differs.
+ *
+ * Every index has already been held to the source's declared length
+ * before the run started - by cft_run_ex for the first caller and by
+ * seq_check_round2 for the second - so this function cannot be where a
+ * bad index is discovered, and does not look. The same division of
+ * labour seq_load_in has on the software program path. */
+static void idx_gather(uint8_t *dst, const uint8_t *src,
+                       const uint32_t *idx, size_t count, size_t esz)
+{
+    size_t i;
+    for (i = 0; i < count; i++) {
+        if (idx[i] == CFT_IDX_NONE)
+            idx_zero_elem(dst + i * esz, esz);
+        else
+            memcpy(dst + i * esz, src + (size_t)idx[i] * esz, esz);
+    }
 }
 
 #if defined(CFT_ENABLE_XRT) || !defined(CFT_NO_REMOTE)
@@ -643,20 +687,77 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
 #endif
 #ifndef CFT_NO_REMOTE
     if (dev && dev->backend == CFT_BACKEND_REMOTE) {
-        /* The program run's REMOTE route does not carry a table yet
-         * (docs/ROUND2.md: it is a client-side gather, and it is P2's).
-         * Refused by name here rather than in the frame, because the
-         * protocol has no field for a table: a run that reached
-         * cftr_program_run would send a dense RUN and come back with
-         * the wrong elements and clean flags. */
-        if (io && (io->idx_a || io->idx_b || io->idx_c ||
-                   io->idx_scratch_in)) {
-            cft_set_error(
-                "an indexed input block on a program run is not carried by "
-                "the remote protocol (docs/ROUND2.md, parcel P2); gather on "
-                "the client and pass the dense block, or run the program "
-                "on a local device");
-            return CFT_ERR_UNSUPPORTED;
+        /* R16 over the wire is a CLIENT-SIDE GATHER (docs/ROUND2.md,
+         * parcel P2). The protocol has no field for a table and gains
+         * none: the tables are resolved here, into dense temporaries,
+         * and what crosses is the dense program run the server already
+         * understands - no new opcode, no new frame, and a server that
+         * predates this parcel answers it.
+         *
+         * The SAVING is not portable and the CALL is, which is the
+         * same division cft_run_ex's scalar mask shipped with and is
+         * the honest one for a socket: the run's n elements cross
+         * either way, so a table on the wire would buy a protocol
+         * field and nothing else. What it buys the caller is that one
+         * source works on every backend.
+         *
+         * The deposits land dense as they already do, so nothing is
+         * unpacked on the way back.
+         *
+         * Every index has been held to its source's length by
+         * seq_check_round2 before this point, on this same host, so
+         * the gathers below cannot read past a source. */
+        int need_gather = io && (io->idx_a || io->idx_b || io->idx_c ||
+                                 io->idx_scratch_in);
+        if (need_gather) {
+            const size_t resz = cft_format_size((cft_format)fmt);
+            const void *strm[3];
+            uint8_t *tmp[4];
+            cft_seq_run_io dio = *io;
+            int r, rc;
+
+            strm[0] = a; strm[1] = b; strm[2] = c;
+            tmp[0] = tmp[1] = tmp[2] = tmp[3] = NULL;
+            for (r = 0; r < 3; r++) {
+                const uint32_t *t = (r == 0) ? io->idx_a
+                                  : (r == 1) ? io->idx_b : io->idx_c;
+                if (!t)
+                    continue;
+                tmp[r] = (uint8_t *)malloc(n * resz);
+                if (!tmp[r]) {
+                    while (r-- > 0) free(tmp[r]);
+                    return CFT_ERR_OUT_OF_MEMORY;
+                }
+                idx_gather(tmp[r], (const uint8_t *)strm[r], t, n, resz);
+                strm[r] = tmp[r];
+            }
+            if (io->idx_scratch_in && io->n_scratch_in) {
+                /* The block, lane-major, n * n_scratch_in entries out
+                 * of a pool of idx_scratch_src elements - and the
+                 * dense block's byte count is the BLOCK's, not the
+                 * pool's, which is the one field that changes meaning
+                 * when the table goes. */
+                size_t entries = n * (size_t)io->n_scratch_in;
+                tmp[3] = (uint8_t *)malloc(entries * resz);
+                if (!tmp[3]) {
+                    free(tmp[2]); free(tmp[1]); free(tmp[0]);
+                    return CFT_ERR_OUT_OF_MEMORY;
+                }
+                idx_gather(tmp[3], (const uint8_t *)io->scratch_in,
+                           io->idx_scratch_in, entries, resz);
+                dio.scratch_in       = tmp[3];
+                dio.scratch_in_bytes = entries * resz;
+            }
+            dio.idx_a = dio.idx_b = dio.idx_c = NULL;
+            dio.idx_scratch_in = NULL;
+            dio.idx_a_src = dio.idx_b_src = dio.idx_c_src = 0;
+            dio.idx_scratch_src = 0;
+            backend_call();
+            rc = cftr_program_run(dev->hw, fmt, image, image_bytes, &dio,
+                                  max_deposits, strm[0], strm[1], strm[2],
+                                  deposits, counts, n, flags, bus);
+            free(tmp[3]); free(tmp[2]); free(tmp[1]); free(tmp[0]);
+            return rc;
         }
         backend_call();
         return cftr_program_run(dev->hw, fmt, image, image_bytes, io,
@@ -977,6 +1078,52 @@ CFT_API int cft_supports(cft_device *dev, cft_op op, cft_format fmt)
  * The core call
  * --------------------------------------------------------------- */
 
+/* ---- R16 for an ELEMENTWISE run (ABI 0.14, docs/ROUND2.md P2) ------
+ *
+ * The three tables and their sources' lengths, as one argument rather
+ * than six: cft_run carries none of them and passes NULL, cft_run_ex
+ * fills one in. A NULL `tab`, and a `tab` whose three pointers are all
+ * NULL, are the same dense run - which is what makes every existing
+ * call site of run_impl unchanged in behaviour as well as in shape. */
+typedef struct {
+    const uint32_t *idx[3];
+    size_t          src[3];
+} run_tables;
+
+static int tables_present(const run_tables *tab)
+{
+    return tab && (tab->idx[0] || tab->idx[1] || tab->idx[2]);
+}
+
+/* Do two byte windows share a byte? Used for the aliasing rule below.
+ * Comparing pointers into separate objects is what buf_find in this
+ * file already does to decide whether a caller's operand lies inside a
+ * registered buffer, and for the same reason: there is no portable
+ * answer and every backend this library targets is flat-addressed. */
+static int windows_overlap(const void *p, size_t pbytes,
+                           const void *q, size_t qbytes)
+{
+    const uint8_t *x = (const uint8_t *)p;
+    const uint8_t *y = (const uint8_t *)q;
+    if (!x || !y || !pbytes || !qbytes)
+        return 0;
+    return (x < y + qbytes) && (y < x + pbytes);
+}
+
+/* A little-endian word into the composed image below. The image format
+ * is docs/SEQUENCER.md's and it is little-endian on the wire whatever
+ * this host is, which is why this exists rather than a cast. Only the
+ * composition builds an image, so it lives under the same guard. */
+#ifndef CFT_NO_PROGRAM
+static void put_le32_img(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+}
+#endif
+
 /* The elementwise run, with the scalar mask. cft_run and cft_run_ex are
  * both one line over this; the body stayed where it was rather than being
  * moved into a new entry point, because the diff of a move is unreadable
@@ -994,6 +1141,48 @@ static cft_status run_impl(cft_device *dev,
                            void       *d,
                            size_t      n,
                            uint32_t    scalar_mask,
+                           const run_tables *tab,
+                           uint32_t   *flags_out,
+                           uint32_t   *bus_out);
+
+/* The two R16 routes, defined after run_impl because each of them ends
+ * in a dense run through it. Which one a call takes is decided in one
+ * place, inside run_impl and after every check it already makes, so
+ * that an indexed run is refused for a bad format, a bad attribute, a
+ * reduction opcode or an opcode group this device lacks in exactly the
+ * words and exactly the order a dense one is. */
+static cft_status run_gathered(cft_device *dev, cft_op op, cft_format fmt,
+                               cft_round rnd, const void *a, const void *b,
+                               const void *c, void *d, size_t n,
+                               uint32_t scalar_mask, const run_tables *tab,
+                               size_t esz, uint32_t *flags_out,
+                               uint32_t *bus_out);
+/* The composition is a PROGRAM, so it exists only where the sequencer
+ * and its loader do. A profile built with -DCFT_NO_PROGRAM (which is
+ * what -DCFT_TINY selects, bindings/arduino/loopback) has neither
+ * cft_program_load nor cft_program_run_ex to call, and no device in
+ * such a build can publish CFT_SEQ_FEAT_INDEXED either - so the host
+ * gather is not a lesser route there, it is the only one there is. */
+#ifndef CFT_NO_PROGRAM
+static cft_status run_composed(cft_device *dev, cft_op op, cft_format fmt,
+                               cft_round rnd, const void *a, const void *b,
+                               const void *c, void *d, size_t n,
+                               uint32_t scalar_mask, const run_tables *tab,
+                               size_t esz, uint32_t *flags_out,
+                               uint32_t *bus_out);
+#endif
+
+static cft_status run_impl(cft_device *dev,
+                           cft_op      op,
+                           cft_format  fmt,
+                           cft_round   rnd,
+                           const void *a,
+                           const void *b,
+                           const void *c,
+                           void       *d,
+                           size_t      n,
+                           uint32_t    scalar_mask,
+                           const run_tables *tab,
                            uint32_t   *flags_out,
                            uint32_t   *bus_out)
 {
@@ -1068,6 +1257,191 @@ static cft_status run_impl(cft_device *dev,
     esz = (size_t)f->width / 8;
     if (n > ((size_t)-1) / esz)
         return CFT_ERR_INVALID_ARGUMENT;
+
+    /* ==== R16's two MEMORY-TOUCHING argument rules ===================
+     *
+     * They live HERE, and not beside the shape rules in cft_run_ex,
+     * because they are the first things in this call that read a
+     * caller's index table or compute a byte count from `n` - and
+     * everything above this line is every check the DENSE path makes
+     * before it touches a byte: the format, the attribute, the opcode
+     * and its group, the early return for n == 0, the NULL output,
+     * the NULL operand an opcode requires, and `n > SIZE_MAX / esz`.
+     *
+     * Putting them before those was a regression of the elementwise
+     * entry point and not only of the new feature (V2, 2026-09-15): an
+     * `n` the dense path refuses as an argument error without touching
+     * a byte walked the caller's table for n entries first, and
+     * n = 2**61 with an 8-entry table segmentation-faulted where the
+     * same n with no table returned CFT_ERR_INVALID_ARGUMENT. The
+     * ordering rule is unchanged and is now true of memory as well as
+     * of messages: argument errors before capability refusals, and no
+     * byte of a caller's buffer read until every dense-path check has
+     * passed.
+     *
+     * Behind run_impl's checks rather than duplicating the two named
+     * ones, so that a check added to the dense path later is inherited
+     * here instead of being forgotten here. */
+    if (tables_present(tab)) {
+        const void *opnd[3];
+        int r;
+        opnd[0] = a; opnd[1] = b; opnd[2] = c;
+    /* ALIASING. `d` may alias a, b or c in a DENSE run and still
+     * may: the element loop loads before it stores and element i
+     * of the output is element i of the input, so the two never
+     * disagree. WITH A TABLE the run is a different machine and
+     * `d` may overlap nothing.
+     *
+     * For the indexed operand itself the reason is immediate: lane
+     * i reads source[idx[i]], which is ANY element of the source
+     * rather than element i, so a source the run is also writing is
+     * read after write and the answer depends on the order the
+     * lanes happen to run in.
+     *
+     * For the DENSE operands beside it the reason is the route. A
+     * table makes this run a program on a device, and a program's
+     * deposit window is a separate buffer ROLE with its own write
+     * discipline - the software executor zeroes the whole window
+     * before its first block, the XRT path binds it as an output
+     * and never syncs it in - so `d` overlapping any operand means
+     * something different on each backend. Refusing all three is
+     * the only rule that gives one answer everywhere, which is
+     * worth more than the in-place update it costs: a caller who
+     * wants one can run into their own buffer and copy, and will
+     * know they did.
+     *
+     * Refused on every backend and not only where it bites - the
+     * software route gathers into temporaries first and would
+     * survive it, and a rule that held on two backends out of three
+     * is not a rule.
+     *
+     * Windows, not pointers: an indexed source is idx_*_src
+     * elements, a dense one is n, the output is n, and none of them
+     * need start at the same place to collide. */
+    if (tables_present(tab)) {
+        const size_t fsz = cft_format_size(fmt);
+        const size_t dbytes = n * fsz;
+        for (r = 0; r < 3; r++) {
+            size_t obytes;
+            if (!opnd[r])
+                continue;
+            obytes = (tab->idx[r] ? tab->src[r]
+                             : ((scalar_mask >> r) & 1u)
+                                 ? 1u : n) * fsz;
+            if (windows_overlap(d, dbytes, opnd[r], obytes)) {
+                cft_set_error(
+                    "cft_run_ex: d overlaps operand %c, and a run with "
+                    "an index table may not write over any of its "
+                    "operands (%lu elements at %c, %lu written at d); "
+                    "a gathered lane reads any element of its source, "
+                    "and the deposit window of the program this "
+                    "composes into is a separate buffer - give the "
+                    "gather its own output",
+                    'a' + r, (unsigned long)(obytes / fsz), 'a' + r,
+                    (unsigned long)n);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
+        }
+    }
+    /* The bound, checked BEFORE the run and on every backend, by
+     * name and by value: an index at or past the source's declared
+     * length is refused, because a device must never read past a
+     * buffer for a caller. Word for word the rule seq_check_round2
+     * holds a program run to, so the composed route and the program
+     * it composes into refuse the same table with the same
+     * sentence. CFT_IDX_NONE is not an index and is never out of
+     * range. */
+    for (r = 0; r < 3; r++) {
+        size_t e;
+        if (!tab->idx[r])
+            continue;
+        for (e = 0; e < n; e++) {
+            if (tab->idx[r][e] == CFT_IDX_NONE)
+                continue;
+            if ((size_t)tab->idx[r][e] >= tab->src[r]) {
+                cft_set_error(
+                    "cft_run_ex: idx_%c[%lu] = %lu is at or past the "
+                    "%lu elements idx_%c_src says operand %c holds",
+                    'a' + r, (unsigned long)e,
+                    (unsigned long)tab->idx[r][e], (unsigned long)tab->src[r],
+                    'a' + r, 'a' + r);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
+        }
+    }
+    }
+    /* ==== R16: an indexed elementwise run (ABI 0.14) =================
+     *
+     * The fork, and the only one. Everything above is what a dense run
+     * checks and it is checked identically; everything below is the
+     * dense run itself, which both routes end in.
+     *
+     * On a DEVICE the run is composed as a three-instruction program
+     * over P1's mechanism, so the tile does the gather and the bytes
+     * the caller did not ask for never cross the bus - which is the
+     * whole of the ask (docs/ROUND2.md, asks 1 and 4).
+     *
+     * On the software and the remote backends it is gathered HERE and
+     * the dense path runs over the gathered block. That is not a
+     * fallback to apologise for on either one: the software backend is
+     * the CONTRACT, and the contract's sentence is "the run proceeds
+     * exactly as a dense run over the gathered block", so gathering
+     * and running dense is the definition rather than an
+     * approximation of it. On the remote backend the SAVING was never
+     * portable and the CALL is - the same division cft_run_ex's scalar
+     * mask already ships with, and for the same reason: the whole
+     * array crosses the socket either way, so a table on the wire
+     * would buy a protocol field and nothing else. */
+    if (tables_present(tab)) {
+#ifndef CFT_NO_PROGRAM
+        if (dev->backend == CFT_BACKEND_XRT && a)
+            return run_composed(dev, op, fmt, rnd, a, b, c, d, n,
+                                scalar_mask, tab, esz, flags_out, bus_out);
+#endif
+        /* `a` NULL on a device is the one shape the composition cannot
+         * express - a program run's stream a is required - and it is
+         * unreachable rather than merely unlikely: the only opcodes
+         * that do not require `a` are the unassigned ones, whose
+         * cft_sf_op_operands is zero, and cft_run_ex refuses a table
+         * on an operand the opcode does not read. The host gather is
+         * here so that "unreachable" does not have to be load
+         * bearing. */
+        return run_gathered(dev, op, fmt, rnd, a, b, c, d, n,
+                            scalar_mask, tab, esz, flags_out, bus_out);
+    }
+    /* ==== end of R16 ================================================= */
+
+    /* A scalar operand on a device that cannot do it is refused BY NAME,
+     * which is the whole reason CAPS2[7] exists. The alternative - run it
+     * anyway and let the tile ignore MODE[18:16] - reads n elements from
+     * a one-element buffer, and that is an out-of-bounds read rather than
+     * a wrong number. The software and remote backends always carry it:
+     * one indexes 0 and the other expands locally.
+     *
+     * AFTER the R16 fork, deliberately (V2, 2026-09-15). The refusal is
+     * about MODE[18:16], and MODE[18:16] is what the DENSE device route
+     * uses; the composed route does not touch it at all - a scalar
+     * operand becomes one of the program's own CONSTANTS, which is the
+     * whole point of that design. Refusing a composed run for a
+     * capability it does not use would have made a tile publishing the
+     * sequencer and CAPS2[9] but not CAPS2[7] reject exactly the call
+     * this parcel exists to serve.
+     *
+     * The gathered route still reaches this line, because run_gathered
+     * re-enters run_impl with no tables and the dense device path then
+     * really does set MODE[18:16] - so a build with -DCFT_NO_PROGRAM,
+     * where nothing can compose, is refused here as it always was. Which
+     * is the test of whether this is in the right place: it is reached
+     * by exactly the runs that use the bit. */
+    if (scalar_mask && dev->backend == CFT_BACKEND_XRT &&
+        !(dev->seq.features & CFT_SEQ_FEAT_SCALAR)) {
+        cft_set_error(
+            "a scalar operand needs CFT_SEQ_FEAT_SCALAR, which this device "
+            "does not publish (CAPS2[7]); ask cft_get_caps before issuing "
+            "one, or pass the value as an array of copies - which is what "
+            "this run would otherwise have read past the end of");
+        return CFT_ERR_UNSUPPORTED;
+    }
 
 #ifdef CFT_ENABLE_XRT
     if (dev->backend == CFT_BACKEND_XRT) {
@@ -1198,6 +1572,287 @@ static cft_status run_impl(cft_device *dev,
     return CFT_OK;
 }
 
+/* ---- R16 route one: gather here, then the dense run ----------------
+ *
+ * One allocation per INDEXED operand and none for the others: a dense
+ * operand is passed through as it stands, and so is a scalar one -
+ * its stride of zero and a table are two answers to one question, and
+ * cft_run_ex refuses an operand that carries both, so the two cases
+ * cannot meet on one pointer.
+ *
+ * The recursion into run_impl with a NULL `tab` is deliberate and is
+ * one level deep: the dense run over the gathered block is not LIKE
+ * the answer, it IS the answer, so the honest way to write it is to
+ * call the dense path rather than to copy it. */
+static cft_status run_gathered(cft_device *dev, cft_op op, cft_format fmt,
+                               cft_round rnd, const void *a, const void *b,
+                               const void *c, void *d, size_t n,
+                               uint32_t scalar_mask, const run_tables *tab,
+                               size_t esz, uint32_t *flags_out,
+                               uint32_t *bus_out)
+{
+    const void *opnd[3];
+    uint8_t *tmp[3];
+    cft_status st;
+    int r;
+
+    opnd[0] = a; opnd[1] = b; opnd[2] = c;
+    tmp[0] = tmp[1] = tmp[2] = NULL;
+
+    for (r = 0; r < 3; r++) {
+        if (!tab->idx[r])
+            continue;
+        tmp[r] = (uint8_t *)malloc(n * esz);
+        if (!tmp[r]) {
+            while (r-- > 0)
+                free(tmp[r]);
+            return CFT_ERR_OUT_OF_MEMORY;
+        }
+        idx_gather(tmp[r], (const uint8_t *)opnd[r], tab->idx[r], n, esz);
+        opnd[r] = tmp[r];
+    }
+    st = run_impl(dev, op, fmt, rnd, opnd[0], opnd[1], opnd[2], d, n,
+                  scalar_mask, NULL, flags_out, bus_out);
+    free(tmp[2]); free(tmp[1]); free(tmp[0]);
+    return st;
+}
+
+/* ---- R16 route two: the composition, on a device -------------------
+ *
+ * An indexed elementwise run as a THREE-INSTRUCTION PROGRAM over the
+ * mechanism P1 built, with no new RTL and no new register:
+ *
+ *     op r3, r0, r1, r2  ;  DEPOSIT r3  ;  HALT
+ *
+ * and `max_deposits` 1, so lane i deposits exactly once, its slot is
+ * element i * 1 + 0, and the deposit window IS the dense `d` the
+ * caller passed - nothing is unpacked afterwards.
+ *
+ * a, b and c map onto r0, r1 and r2 with NO remapping, because they
+ * are the same three streams in the same order (docs/SEQUENCER.md R9)
+ * and an elementwise opcode and an ALU opcode are the same byte. That
+ * is what makes the bits the dense run's BY CONSTRUCTION rather than
+ * by agreement: one pipeline, one rounding attribute, one opcode. The
+ * gate beside this file checks it anyway.
+ *
+ * r3 is the destination because r0, r1 and r2 ARE the streams: writing
+ * the result into one of them would overwrite an operand the same
+ * instruction reads, and it would also name a stream in a field R10
+ * reads (P1's op_reads follows the OPCODE now, so it would cost
+ * nothing today - but a program that does not depend on the decode
+ * being right is the one to write, which is P1's own advice to this
+ * parcel). r3 is the first register that starts at +0 and names no
+ * stream.
+ *
+ * A SCALAR operand becomes one of the image's own CONSTANTS. The
+ * sequencer has no stride-0 stream, so the alternative was an
+ * n-element expansion on the host - which is precisely the thing
+ * CAPS2[7] exists to avoid, and it would turn a one-element buffer
+ * into n * esz bytes across the bus in the call whose whole purpose is
+ * to move fewer of them. A constant costs zero bytes a lane, rides in
+ * the image beside the instruction that reads it, needs no bank
+ * pointer and no CFT_SEQ_FEAT_BANK_PTR (the image carries its own),
+ * and the four-bit operand field addresses it directly with the `k`
+ * bit set - so at most three constants, indices 0, 1 and 2, well
+ * inside the sixteen a field without `kx` can name. */
+#ifndef CFT_NO_PROGRAM
+static cft_status run_composed(cft_device *dev, cft_op op, cft_format fmt,
+                               cft_round rnd, const void *a, const void *b,
+                               const void *c, void *d, size_t n,
+                               uint32_t scalar_mask, const run_tables *tab,
+                               size_t esz, uint32_t *flags_out,
+                               uint32_t *bus_out)
+{
+    /* Header, three constants at the widest format THIS BUILD carries,
+     * three instructions - every term derived from the shape above and
+     * from cft_config.h's own ceiling, so a profile that narrows
+     * CFT_MAX_FORMAT narrows this with it and a format added above
+     * fp256 grows it without anyone remembering to. (fp32 is 4 bytes
+     * and each rung doubles, which is what the shift is.) */
+    uint8_t img[32 + 3 * (4 << CFT_MAX_FORMAT) + 3 * 8];
+    const void *opnd[3];
+    const void *strm[3];
+    const uint32_t *stab[3];
+    size_t ssrc[3];
+    uint32_t fld[3], kbit[3];
+    uint64_t w[3];
+    cft_seq_caps sc;
+    cft_program *prog = NULL;
+    cft_run_args A;
+    size_t off = 32;
+    unsigned n_consts = 0, need;
+    int n_strm = 0;
+    cft_status st;
+    int r, i;
+
+    strm[0] = strm[1] = strm[2] = NULL;
+    stab[0] = stab[1] = stab[2] = NULL;
+    ssrc[0] = ssrc[1] = ssrc[2] = 0;
+    /* The image cannot outgrow its buffer - the array above is sized
+     * from the same ceiling `esz` comes from - but the run that would
+     * find out is one that wrote past a stack array, so it is checked
+     * rather than argued. */
+    if (32u + 3u * esz + 3u * 8u > sizeof img)
+        return CFT_ERR_INTERNAL;
+
+    /* The two capability refusals, BY NAME and in this order.
+     *
+     * The sequencer's capacities first. A tile that publishes none has
+     * no sequencer at all, and on such a tile "compose the run as a
+     * program" is not a slower route, it is not a route - so the
+     * sentence a caller needs is that this image has no sequencer.
+     * CAPS2[9] on a tile with no sequencer is a bit inside a word that
+     * means nothing, and naming it would send the caller to check
+     * something whose zero says nothing about what is missing.
+     *
+     * Then CAPS2[9], which is the refusal for the tile that HAS a
+     * sequencer and lacks the gather - the one CFT_SEQ_FEAT_INDEXED
+     * exists to make askable in advance. Neither refusal gathers, runs
+     * or allocates anything; both come before the image is built. */
+    cft_device_seq_caps(dev, &sc);
+    if (sc.max_insns == 0) {
+        cft_set_error(
+            "cft_run_ex: an indexed operand is run on a device as a "
+            "three-instruction sequencer program, and this device "
+            "publishes no sequencer capacities at all (cft_caps.max_insns "
+            "is zero) - ask cft_get_caps before passing a table, or "
+            "gather on the host and call cft_run");
+        return CFT_ERR_UNSUPPORTED;
+    }
+    if (!(dev->seq.features & CFT_SEQ_FEAT_INDEXED)) {
+        cft_set_error(
+            "cft_run_ex: an indexed operand needs CFT_SEQ_FEAT_INDEXED, "
+            "which this device does not publish (CAPS2[9]); ask "
+            "cft_get_caps before passing a table, or gather on the host "
+            "and call cft_run");
+        return CFT_ERR_UNSUPPORTED;
+    }
+
+    opnd[0] = a; opnd[1] = b; opnd[2] = c;
+    need = cft_sf_op_operands((int)op);
+    for (r = 0; r < 3; r++) {
+        if (!((need >> r) & 1u)) {
+            /* An operand this OPCODE does not read. It still has a
+             * field in the instruction, and what goes in the field is
+             * r4: a register at or above three, which R10 never turns
+             * into a stream load whatever the decode does, and which
+             * holds +0 because nothing has written it (R9). Naming r0,
+             * r1 or r2 here would work today - P1's op_reads follows
+             * the opcode - and would make this program's cost depend
+             * on the decode being right, which is exactly the
+             * dependency P1 told this parcel not to take. The dense
+             * path ignores such an operand in the same way and for the
+             * same reason. */
+            fld[r]  = 4u;
+            kbit[r] = 0u;
+            continue;
+        }
+        if ((scalar_mask >> r) & 1u) {
+            /* One element, into the image's own constant section, in
+             * operand order - so the index is the count of scalars
+             * before it and nothing has to be looked up later. */
+            memcpy(img + off, opnd[r], esz);
+            off += esz;
+            fld[r]  = n_consts++;
+            kbit[r] = 1u;
+            continue;
+        }
+        /* A real stream, and it takes the NEXT free stream slot rather
+         * than the one its own letter names.
+         *
+         * The three streams are three pointer registers that
+         * initialise r0, r1 and r2, and which OPERAND a register
+         * carries is the instruction's business - the ALU steers by
+         * FIELD (ra, rb, rc), not by register number. So packing the
+         * streams down keeps two promises at once. A program run
+         * requires stream a to be non-NULL, and a scalar `a` beside an
+         * indexed `b` would otherwise have to pass the caller's
+         * ONE-ELEMENT buffer as an n-element stream - which is the
+         * over-read CAPS2[7] exists to prevent, arriving through the
+         * back door. And an operand the opcode does not read now
+         * carries no stream pointer at all, so nothing is bound,
+         * synced or staged for it.
+         *
+         * Stream a is always used: the composed route is only taken
+         * when a table is present, a table's operand is non-NULL and
+         * not scalar (the shape rules) and is read by the opcode
+         * (refused above if not), so at least one operand reaches
+         * here and the first to do so is slot 0. */
+        strm[n_strm]  = opnd[r];
+        stab[n_strm]  = tab->idx[r];
+        ssrc[n_strm]  = tab->idx[r] ? tab->src[r] : 0u;
+        fld[r]  = (uint32_t)n_strm;     /* r0, r1, r2 in turn */
+        kbit[r] = 0u;
+        n_strm++;
+    }
+
+    /* The instruction words. No `kx`, so every constant index is the
+     * operand's own four-bit field; no fifth register bit and no ninth
+     * constant bit, so imm is zero throughout - which is what makes
+     * this encoding legal on a device that publishes neither
+     * CFT_SEQ_FEAT_REGS32 nor CFT_SEQ_FEAT_KX9. */
+    w[0] = (uint64_t)(uint32_t)op
+         | ((uint64_t)3u << 8)                          /* rd = r3 */
+         | ((uint64_t)fld[0] << 12)
+         | ((uint64_t)fld[1] << 16)
+         | ((uint64_t)fld[2] << 20)
+         | ((uint64_t)((uint32_t)rnd & 7u) << 24)
+         | ((uint64_t)kbit[0] << 27)
+         | ((uint64_t)kbit[1] << 28)
+         | ((uint64_t)kbit[2] << 29);
+    w[1] = (uint64_t)3u                                 /* DEPOSIT */
+         | ((uint64_t)3u << 12)                         /* of r3 */
+         | ((uint64_t)1u << 31);                        /* control */
+    w[2] = (uint64_t)1u << 31;                          /* HALT */
+
+    put_le32_img(img +  0, 0x50544643u);                /* "CFTP" */
+    put_le32_img(img +  4, 1u);                         /* image version */
+    put_le32_img(img +  8, 3u);                         /* n_insns */
+    put_le32_img(img + 12, n_consts);
+    put_le32_img(img + 16, 1u);                         /* max_deposits */
+    put_le32_img(img + 20, (uint32_t)fmt);
+    put_le32_img(img + 24, 0u);                         /* header flags */
+    put_le32_img(img + 28, 0u);                         /* scratch_io */
+    for (i = 0; i < 3; i++) {
+        int byte;
+        for (byte = 0; byte < 8; byte++)
+            img[off + (size_t)byte] = (uint8_t)(w[i] >> (8 * byte));
+        off += 8;
+    }
+
+    /* Loaded rather than hand-dispatched, so the composed run is a
+     * PROGRAM RUN in every sense the rest of the library means it: the
+     * device's own capacity and format refusals, the image bytes the
+     * tile executes, and the one dispatcher in cft_backend_program_run
+     * that P1's tables already ride. The seam test the lead runs after
+     * this parcel compares this route against cft_program_run_ex with
+     * the same tables, and it is comparing two paths through the same
+     * executor by construction. */
+    st = cft_program_load(dev, img, off, &prog);
+    if (st != CFT_OK)
+        return st;
+
+    memset(&A, 0, sizeof A);
+    A.struct_size = sizeof A;
+    A.a = strm[0]; A.b = strm[1]; A.c = strm[2];
+    A.n = n;
+    A.deposits  = d;            /* n * max_deposits(1) elements: dense */
+    A.counts    = NULL;
+    A.flags_out = flags_out;
+    A.bus_out   = bus_out;
+    A.idx_a     = stab[0];
+    A.idx_b     = stab[1];
+    A.idx_c     = stab[2];
+    A.idx_a_src = ssrc[0];
+    A.idx_b_src = ssrc[1];
+    A.idx_c_src = ssrc[2];
+    st = cft_program_run_ex(prog, &A);
+    cft_program_free(prog);
+    return st;
+}
+
+#endif  /* CFT_NO_PROGRAM */
+
 CFT_API cft_status cft_run(cft_device *dev,
                            cft_op      op,
                            cft_format  fmt,
@@ -1210,7 +1865,7 @@ CFT_API cft_status cft_run(cft_device *dev,
                            uint32_t   *flags_out,
                            uint32_t   *bus_out)
 {
-    return run_impl(dev, op, fmt, rnd, a, b, c, d, n, 0u,
+    return run_impl(dev, op, fmt, rnd, a, b, c, d, n, 0u, NULL,
                     flags_out, bus_out);
 }
 
@@ -1243,11 +1898,19 @@ CFT_API cft_status cft_run_ex(cft_device *dev,
     /* ABI 0.14's index tables (docs/ROUND2.md, P2). The SHAPE rules are
      * the seam's and final: a table on an operand that is NULL, or that
      * is also scalar, or with a source length of zero, and a source
-     * length beside no table, are each an argument error. A well-formed
-     * table is then REFUSED BY NAME until the parcel that builds the
-     * route lands - never ignored, because a run that quietly read the
-     * dense array in place of the gathered one would return an array's
-     * worth of the wrong answer with clean flags. */
+     * length beside no table, are each an argument error. Then three
+     * more rules this parcel adds, and then the run.
+     *
+     * ARGUMENT ERRORS COME FIRST AND CAPABILITY REFUSALS AFTER, which
+     * is the order cft_program_run_ex already has (seq_check_round2
+     * runs before cft_backend_program_run's CAPS2[9] refusal) and is
+     * therefore the order the composed run has to have: the same
+     * mistake must be told in the same words by both calls, or a
+     * caller who moves from one to the other is debugging the library
+     * instead of their program. It also means the bound is checked on
+     * EVERY backend, which is what the contract says - a device must
+     * never read past a buffer for a caller, and a check the feature
+     * bit could skip would not be that. */
     {
         const uint32_t *idx[3];
         size_t src[3];
@@ -1288,35 +1951,62 @@ CFT_API cft_status cft_run_ex(cft_device *dev,
                 return CFT_ERR_INVALID_ARGUMENT;
             }
         }
-        for (r = 0; r < 3; r++) {
-            if (idx[r]) {
-                cft_set_error("cft_run_ex: an indexed operand (idx_%c) is "
-                              "declared at ABI 0.14 and not yet built on "
-                              "any backend (docs/ROUND2.md, parcel P2); the "
-                              "call is refused rather than run over the "
-                              "dense operand", 'a' + r);
-                return CFT_ERR_UNSUPPORTED;
+        /* A table on an operand THIS OPCODE DOES NOT READ is refused by
+         * name, and is not quietly ignored the way the dense path
+         * ignores the operand itself.
+         *
+         * The two look alike and are not. Ignoring a pointer costs
+         * nothing and reads nothing - cft.h has said "unused operands
+         * (b for ADD, c for MUL) may be NULL" since the beginning, and
+         * a caller who passes one anyway has simply passed a pointer.
+         * A TABLE is a buffer the caller built at a cost, for a fetch
+         * they are asking this call to make; running and returning
+         * success would tell them the gather happened. It also would
+         * not mean one thing on three backends - the gather here, a
+         * MODE bit and a bound table there - so "ignore" would be
+         * three behaviours wearing one word.
+         *
+         * An UNASSIGNED opcode reads nothing at all
+         * (cft_sf_op_operands is zero for one), so every table on one
+         * is refused here, which is the same rule and not a special
+         * case: the result is the canonical quiet NaN whatever any
+         * operand holds.
+         *
+         * Skipped for an opcode run_impl is about to refuse anyway - a
+         * reduction, or a byte outside 0..255 - so that the refusal a
+         * caller gets names the call they got wrong rather than a
+         * table they merely also passed. */
+        if ((int)op >= 0 && (int)op <= 255 && !cft_sf_is_reduction((int)op)) {
+            unsigned need = cft_sf_op_operands((int)op);
+            for (r = 0; r < 3; r++) {
+                if (idx[r] && !((need >> r) & 1u)) {
+                    cft_set_error(
+                        "cft_run_ex: idx_%c gathers operand %c and opcode "
+                        "%d (%s) does not read it, so the table would be "
+                        "built and never used; drop idx_%c, or pass the "
+                        "opcode whose operand %c is",
+                        'a' + r, 'a' + r, (int)op, cft_op_name(op),
+                        'a' + r, 'a' + r);
+                    return CFT_ERR_INVALID_ARGUMENT;
+                }
             }
         }
     }
-    /* A scalar operand on a device that cannot do it is refused BY NAME,
-     * which is the whole reason CAPS2[7] exists. The alternative - run it
-     * anyway and let the tile ignore MODE[18:16] - reads n elements from
-     * a one-element buffer, and that is an out-of-bounds read rather than
-     * a wrong number. The software and remote backends always carry it:
-     * one indexes 0 and the other expands locally. */
-    if (args->scalar_mask && dev->backend == CFT_BACKEND_XRT &&
-        !(dev->seq.features & CFT_SEQ_FEAT_SCALAR)) {
-        cft_set_error(
-            "a scalar operand needs CFT_SEQ_FEAT_SCALAR, which this device "
-            "does not publish (CAPS2[7]); ask cft_get_caps before issuing "
-            "one, or pass the value as an array of copies - which is what "
-            "this run would otherwise have read past the end of");
-        return CFT_ERR_UNSUPPORTED;
+    /* The two rules that READ a table's entries, or do arithmetic on
+     * `n`, are NOT here. They are in run_impl, behind every check the
+     * dense path makes before it touches memory - see the block there.
+     * Everything above this line reads a pointer's value and nothing
+     * it points at, which is what lets it run first. */
+    {
+        run_tables tab;
+        tab.idx[0] = args->idx_a; tab.idx[1] = args->idx_b;
+        tab.idx[2] = args->idx_c;
+        tab.src[0] = args->idx_a_src; tab.src[1] = args->idx_b_src;
+        tab.src[2] = args->idx_c_src;
+        return run_impl(dev, op, fmt, rnd, args->a, args->b, args->c,
+                        args->d, args->n, args->scalar_mask, &tab,
+                        args->flags_out, args->bus_out);
     }
-    return run_impl(dev, op, fmt, rnd, args->a, args->b, args->c, args->d,
-                    args->n, args->scalar_mask,
-                    args->flags_out, args->bus_out);
 }
 
 /* ---------------------------------------------------------------

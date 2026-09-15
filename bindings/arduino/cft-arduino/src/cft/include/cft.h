@@ -691,11 +691,14 @@ typedef struct cft_caps {
  * MODE[23] under CAPS2[10] once P3 lands. The SOFTWARE backend
  * computes the definition and publishes INDEXED in seq_features so a
  * caller gating on the bit is answered the same way everywhere (LANE_MASK
- * likewise once built); a REMOTE handle does not show INDEXED and refuses
- * an indexed program run by name until parcel P2 builds the client-side
- * route, so the capability word never says yes to a call that says no.
- * The elementwise tables of cft_elem_args (P2) and the lane mask (P3)
- * are refused BY NAME on every backend until their parcels land. */
+ * likewise once built); a REMOTE handle publishes what its server's
+ * HELLO says, and its program-run route gathers the tables on the client
+ * and sends a dense run (P2, 2026-09-15), so the word never says yes to
+ * a call that says no - a handle to a server WITHOUT CAPS2[9] says no to
+ * a call the client-side gather would make succeed, the direction this
+ * library accepts. The elementwise tables of cft_elem_args are real on
+ * every backend since P2; the lane mask (P3) is refused BY NAME on every
+ * backend until its parcel lands. */
 #define CFT_SEQ_FEAT_INDEXED   0x2000u     /* CAPS2[9]  */
 #define CFT_SEQ_FEAT_LANE_MASK 0x4000u     /* CAPS2[10] */
 /* The index that reads as +0 (the format's positive zero) in an index
@@ -2485,7 +2488,10 @@ CFT_API cft_status cft_program_run_ex(cft_program *prog,
  *                 library does not know is REFUSED rather than truncated -
  *                 a newer caller's scalar_mask silently ignored is a run
  *                 that returns an array of the wrong answer.
- *   a, b, c, d    as cft_run's, and d may alias any of them
+ *   a, b, c, d    as cft_run's; d may alias any of them in a DENSE run,
+ *                 and may overlap none of them once a table is present
+ *                 (P2's rule: a table makes the run a program, whose
+ *                 deposit window is its own buffer role; refused by name)
  *   n             elements, as cft_run's
  *   scalar_mask   bit 0 a, bit 1 b, bit 2 c. A set bit makes that operand
  *                 ONE element which applies to every element of the run:
@@ -2501,10 +2507,17 @@ CFT_API cft_status cft_program_run_ex(cft_program *prog,
  *                 idx_c_src) elements, CFT_IDX_NONE reading as +0, an
  *                 index at or past the source refused before the run.
  *                 An operand cannot be both scalar and indexed, and a
- *                 table on a NULL operand is refused. DECLARED at 0.14
- *                 and refused by name on every backend until P2 lands;
- *                 on a tile it will be a three-instruction program over
- *                 the sequencer's indexed streams, never new engine RTL
+ *                 table on a NULL operand, or on an operand the opcode
+ *                 does not read, is refused. REAL on every backend since
+ *                 P2 (2026-09-15): on a tile with the sequencer and
+ *                 CAPS2[9] the library composes the run as a three-
+ *                 instruction program over the sequencer's indexed
+ *                 streams (a scalar operand rides as one of the image's
+ *                 own constants; never new engine RTL); the software
+ *                 backend gathers and calls the dense path, which is the
+ *                 definition; a remote handle gathers on the client and
+ *                 sends a dense run. Argument errors fire before
+ *                 capability refusals, in cft_program_run_ex's order
  *
  * THE ANSWER IS THE CONTRACT'S BY CONSTRUCTION. A scalar operand computes
  * exactly what an array of copies would have: the same op() on the same
