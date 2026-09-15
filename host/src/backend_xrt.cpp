@@ -1649,9 +1649,7 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
      * split the mask is the one operand whose slice is not a byte
      * offset, and a split that got everything else right would give
      * every tile but the first the wrong lanes' bits. */
-    const uint8_t *const lane_mask =
-        io ? static_cast<const uint8_t *>(
-                 static_cast<const void *>(io->lane_mask)) : nullptr;
+    const uint8_t *const lane_mask = io ? io->lane_mask : nullptr;
     const size_t mask_first = 0;
     const size_t mask_lanes = n;
     const size_t mask_real = lane_mask ? cft_mask_bytes(mask_lanes) : 0;
