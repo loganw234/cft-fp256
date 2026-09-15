@@ -683,13 +683,19 @@ typedef struct cft_caps {
  *              there. MASK_PTR at 0xA8, kernel argument 16, MODE[23].
  *              cft-rebound's ask 5.
  *
- * Both are SAFETY gates in the sense CFT_SEQ_FEAT_SCALAR is: the MODE
- * bits that request them are refused by the guard on MODE[31:19] on
- * every tile built since 2026-09-12, so a tile without the feature
- * turns the request away rather than reading a table register it has
- * not got. The software backend carries both by definition and needs
- * no bit; the remote backend carries both on the client's side. Until
- * the parcels land, libcft refuses each BY NAME on every backend. */
+ * Both are SAFETY gates in the sense CFT_SEQ_FEAT_SCALAR is: a tile
+ * without the feature refuses the MODE bits that request it (the guard
+ * on the reserved half of MODE, on every tile built since 2026-09-12)
+ * rather than reading a table register it has not got, and a tile with
+ * it honours them - MODE[22:19] under CAPS2[9] since P1 (2026-09-15),
+ * MODE[23] under CAPS2[10] once P3 lands. The SOFTWARE backend
+ * computes the definition and publishes INDEXED in seq_features so a
+ * caller gating on the bit is answered the same way everywhere (LANE_MASK
+ * likewise once built); a REMOTE handle does not show INDEXED and refuses
+ * an indexed program run by name until parcel P2 builds the client-side
+ * route, so the capability word never says yes to a call that says no.
+ * The elementwise tables of cft_elem_args (P2) and the lane mask (P3)
+ * are refused BY NAME on every backend until their parcels land. */
 #define CFT_SEQ_FEAT_INDEXED   0x2000u     /* CAPS2[9]  */
 #define CFT_SEQ_FEAT_LANE_MASK 0x4000u     /* CAPS2[10] */
 /* The index that reads as +0 (the format's positive zero) in an index
