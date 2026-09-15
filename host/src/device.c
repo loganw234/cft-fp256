@@ -1519,10 +1519,13 @@ static cft_status run_composed(cft_device *dev, cft_op op, cft_format fmt,
                                size_t esz, uint32_t *flags_out,
                                uint32_t *bus_out)
 {
-    /* Header, three constants at the widest format this library
-     * carries, three instructions - derived from the shape above, not
-     * a round number. */
-    uint8_t img[32 + 3 * 32 + 3 * 8];
+    /* Header, three constants at the widest format THIS BUILD carries,
+     * three instructions - every term derived from the shape above and
+     * from cft_config.h's own ceiling, so a profile that narrows
+     * CFT_MAX_FORMAT narrows this with it and a format added above
+     * fp256 grows it without anyone remembering to. (fp32 is 4 bytes
+     * and each rung doubles, which is what the shift is.) */
+    uint8_t img[32 + 3 * (4 << CFT_MAX_FORMAT) + 3 * 8];
     const void *opnd[3];
     const void *strm[3];
     const uint32_t *stab[3];
@@ -1541,6 +1544,12 @@ static cft_status run_composed(cft_device *dev, cft_op op, cft_format fmt,
     strm[0] = strm[1] = strm[2] = NULL;
     stab[0] = stab[1] = stab[2] = NULL;
     ssrc[0] = ssrc[1] = ssrc[2] = 0;
+    /* The image cannot outgrow its buffer - the array above is sized
+     * from the same ceiling `esz` comes from - but the run that would
+     * find out is one that wrote past a stack array, so it is checked
+     * rather than argued. */
+    if (32u + 3u * esz + 3u * 8u > sizeof img)
+        return CFT_ERR_INTERNAL;
 
     /* The two capability refusals, BY NAME and in this order.
      *
