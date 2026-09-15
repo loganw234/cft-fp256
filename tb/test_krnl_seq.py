@@ -1216,6 +1216,60 @@ async def krnl_sequencer(dut):
         "an identity table must be bit-identical to the dense run, and "
         "both of these came off the tile")
 
+    # ---- the guard is still armed on the bit above ours ---------------
+    #
+    # MODE[24] is the bottom of what is left of the reserved range, and
+    # MODE[31] its top: both must be REFUSED with STATUS[3] and no
+    # memory touched, which is what says that opening [22:19] and [23]
+    # did not open the window above them.
+    flags_before = await axil.read_dword(FLAGS)
+    await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
+                           1 << 24, "MODE[24], reserved on every build",
+                           flags_before)
+    await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
+                           1 << 31, "MODE[31], reserved on every build",
+                           flags_before)
+
+    # ---- and elementwise still works after all of it ------------------
+    await run_op(dut, axil, ram, FP32, OP_MUL, 24, seed=903, bases=EW_BASES)
+    dut._log.info(f"sequencer bench complete "
+                  f"(loop run raised flags {flags_loop:#07b})")
+
+
+@cocotb.test()
+async def krnl_lane_mask(dut):
+    """ABI 0.14's lane mask (docs/SEQUENCER.md R17) through the CSR, on
+    the tile whose ALU array is SHARED with the elementwise engine.
+
+    Its own test rather than more cases inside `krnl_sequencer`: R17 is
+    one feature with one setup, and a reset between it and everything
+    else is worth having when what it asserts is that a masked lane's
+    flag does not reach the run after it.
+    """
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n,
+                         reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n,
+                       reset_active_level=False, size=2 ** 21)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"), dut.ap_clk,
+                dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+                mem=ram_a.mem)
+    ram = ram_a
+
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+
+    pg32 = prog_two_deposits(FP32)
     # ---- the lane mask through the CSR (R17) --------------------------
     #
     # MODE[23] with MASK_PTR, on the shared array: the same program
@@ -1275,21 +1329,6 @@ async def krnl_sequencer(dut):
         "word or the array's lane flags outlived the run that raised "
         "them")
 
-    # ---- the guard is still armed on the bit above ours ---------------
-    #
-    # MODE[24] is the bottom of what is left of the reserved range, and
-    # MODE[31] its top: both must be REFUSED with STATUS[3] and no
-    # memory touched, which is what says that opening [22:19] and [23]
-    # did not open the window above them.
-    flags_before = await axil.read_dword(FLAGS)
-    await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
-                           1 << 24, "MODE[24], reserved on every build",
-                           flags_before)
-    await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
-                           1 << 31, "MODE[31], reserved on every build",
-                           flags_before)
-
-    # ---- and elementwise still works after all of it ------------------
-    await run_op(dut, axil, ram, FP32, OP_MUL, 24, seed=903, bases=EW_BASES)
-    dut._log.info(f"sequencer bench complete "
-                  f"(loop run raised flags {flags_loop:#07b})")
+    dut._log.info("lane mask through the CSR: masked == model, all-ones "
+                  "== dense, holed != dense, and a masked lane's flag "
+                  "does not reach the run after it")
