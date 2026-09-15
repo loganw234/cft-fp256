@@ -12292,3 +12292,110 @@ which is what happened at 12:56, and the relaunch a minute later is the
 run above. And the filtered log is block-buffered through `grep`, so a
 suite's lines appear together when `make sim` exits; the raw log beside
 it (`<log>.raw`) is where progress is read.
+
+## 2026-09-15 - P2 on main: an indexed elementwise run is a three-instruction program, and its verifier found the round's one host-side regression
+
+**The claim.** `cft_elem_args.idx_a / idx_b / idx_c` (ask 1's shape for
+the elementwise entry point) become real on every backend with no new
+RTL. The software backend gathers with the contract's own sentence
+(element i is `source[idx[i]]`, `CFT_IDX_NONE` is +0) and calls the
+dense path, which is the definition. A remote handle gathers on the
+client and sends a dense run - for `cft_run_ex` and for
+`cft_program_run_ex`'s four tables alike, so P1's placeholder (the
+INDEXED bit masked off a remote handle, the route refused by name) is
+gone and a handle publishes its server's word: a handle to a server
+WITHOUT CAPS2[9] would say no to a call the gather makes succeed, the
+direction this library accepts and the opposite of the seam's own
+defect. On a device with the sequencer and CAPS2[9] the library
+composes the run as a program - `op r3; DEPOSIT r3; HALT`, one deposit
+a lane landing dense in `d` - and inherits P1's bounds, capacities and
+`idx_*_src` staging for free.
+
+**The trap, met and solved.** The brief named one trap (a scalar
+operand beside an indexed one: the sequencer has no stride-0 stream)
+and P2 found the harder half of it: a program run REQUIRES stream a,
+so a scalar a beside an indexed b has no stream to hand over but the
+caller's one-element buffer, which the program path would bind and
+stage at n elements - the over-read CAPS2[7] exists to prevent,
+arriving by the back door. The streams therefore pack down by what the
+opcode reads: an operand the opcode does not read carries r4 in its
+field and no stream; a scalar operand becomes one of the image's own
+constants with its `k` bit set (the RTL parser gates each `rd_need`
+arm on the `k` bits, so a constant marks no stream - measured, not
+assumed); every other read operand takes the next stream slot. A
+constant costs zero bytes a lane and needs no bank pointer and no
+`CFT_SEQ_FEAT_SCALAR`. Three rules, refused by name: a table on an
+operand the opcode does not read; `d` overlapping ANY operand when a
+table is present (a table makes the run a program, whose deposit
+window is its own buffer role with its own write discipline; the only
+rule with one answer on every backend); an index at or past the
+source, on every backend, before the run. Argument errors fire before
+capability refusals, in `cft_program_run_ex`'s order; the sequencer's
+capacities before CAPS2[9].
+
+**How the composed route is measured on a host with no card.** One
+substitution in `device.c` (the backend test on the fork) makes the
+software backend compose instead of gather, and `device-test sw` then
+returns the same count with no failure - 9,554 checks at the merged
+tip - so the composition's bits are the dense run's on every opcode
+group, attribute and format the device carries; V2 reproduced it from
+a copy. The test's own three-instruction program is built by code that
+predates P2 (`seq_alu5`, `seq_ctrl`, `seq_image`), so the gate does not
+compare a function to itself; the same tables also run through
+`cft_program_run_ex` over the wire in `remote_test.c`, and the server's
+RUN counter does not move on an argument refusal (no frame is sent).
+
+**What the verifier found.** V2 (29 minutes, the cheapest agent of the
+round) confirmed every item on its list with drivers of its own - six
+ordered (scalar, indexed) pairs at every format, a one-byte overlap,
+flags reachable only through the gather, the wire frame byte-identical
+to the dense one - and found the round's one host-side regression: the
+new per-index bound loop ran BEFORE the elementwise path's n-sanity
+check, so an n the dense call refuses without touching a byte walked
+the caller's table for n entries - a segmentation fault at n = 2^61
+with an eight-entry table, in the call whose own comment says a device
+must never read past a buffer for a caller. Also: the report's "+4,720
+checks" was 4,676 (P2 had subtracted a number this file's author had
+retracted an hour earlier); scalar b and c beside a table were right
+but held by no gate; and on a tile with the sequencer and CAPS2[9] but
+not CAPS2[7], the scalar refusal fired before the fork, refusing a call
+the constant bank would have run. Fixed at 7309864 in one commit: the
+bound loop and the aliasing check moved into `run_impl` behind every
+check the dense path makes before it touches memory, so a check added
+later is inherited rather than forgotten; an api-test case with a
+POISONED table pointer at 0x10 and n = SIZE_MAX/4 (a read faults; the
+check neutered, api-test segfaults - the only faithful witness of "no
+read happened" is the fault); the CAPS2[7] refusal moved after the
+fork, reached by exactly the runs that use the thing it names (the
+gathered route still reaches it through `run_gathered`'s re-entry, so
+a build that cannot compose is refused as before); the scalar sweep
+over every ordered pair the opcode allows, its count derived (28 pairs
+a format, 112 over four; 10 checks a pair; 9,554 = 8,754 + 800). V2
+re-verified all three with the poisoned pointer in eighteen shapes.
+
+**What the brief got wrong**, as P2 reported it: the bindings item
+named an elementwise `runEx` and a `cftw_run_ex` that never existed
+(ABI 0.12's scalar mask was never bound in wasm or node; the module is
+already at 0.14; emscripten's `cwrap` is lazy, so a missing export
+fails only when called) - the export and its JavaScript half land
+together in the integrator's rebuild; `backend_remote.c` needed no
+edit (the gather lives beside `scalar_mask`'s remote expansion, one
+definition for three routes); the third negative control had no
+subject once the remote route gathered instead of refusing, so the
+no-round-trip control attached to the argument refusals instead.
+
+**The gates at the merge** (5901932 merges 7309864 into main;
+e8638f5 makes the public header's seam sentences true again and
+re-vendors the Arduino copy). P2's diff touches no `rtl/`, `tb/` or
+`python/` file, so the RTL suite cannot change and was not re-run for
+this merge - the box's run at the next merge, which has RTL, covers
+the combined tree - and the merge's gates are the host's, with every
+test executable built by name: api-test all contract checks passed;
+`test_seq.py` 66 passed; `seq_check.py --trials 200` agreeing on every
+program across four corpora; `device-test sw -n 32` 9,554 checks and
+`sw -b -n 32` 4,386 with no failure; `remote_check.py` every check
+passed over its own server, the whole device-test suite among its
+stages over the wire; the docs index, five generators and the vendored
+copy true. The composed-versus-program leg in `device_test.c` and V2's
+reproduction of the one-line control stand as the seam evidence the
+plan asked the integrator to write after P2.
