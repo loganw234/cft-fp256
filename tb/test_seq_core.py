@@ -3481,8 +3481,14 @@ async def masked_at_every_block_length(dut):
     """
     bench = Bench(dut)
     await bench.start()
-    for name, ns in (("fp32", (8, 128, 129, 192, 256)),
-                     ("fp64", (5, 64, 65, 96, 128)),
+    # n=384 at fp32 and n=320 at fp64 are the ones that matter most:
+    # their third and fifth blocks start at global lane 256, which is
+    # the FIRST BIT OF THE SECOND BEAT of the mask. Every other case
+    # here reads beat zero, so a fetch that ignored the beat index
+    # entirely - or scaled it by the element size, or by the block's
+    # byte count - would pass all of them.
+    for name, ns in (("fp32", (8, 128, 129, 192, 256, 384)),
+                     ("fp64", (5, 64, 65, 96, 128, 320)),
                      ("fp128", (3, 32, 33, 48)),
                      ("fp256", (1, 16, 17, 24, 32))):
         fmt = FORMATS[name]
@@ -3492,6 +3498,12 @@ async def masked_at_every_block_length(dut):
                 fmt, prog, operands(fmt, n, 7100 + n),
                 operands(fmt, n, 7200 + n), operands(fmt, n, 7300 + n),
                 n, _keep(n, n), f"{name} n={n}: a mask with holes")
+    # ...and that the second beat is really reached, derived from the
+    # geometry rather than believed: a block at global lane 256 or
+    # beyond reads MASK_BASE + 32 or further.
+    assert any(base >= BEAT_BYTES * 8
+               for base in range(0, 384, lanes_per_block(FP32))), \
+        "no case above crosses a mask beat boundary"
     dut._log.info(f"masked at every block length: "
                   f"{bench.cases['masked']} runs")
 
