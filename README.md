@@ -16,7 +16,7 @@ everything here is Apache-2.0.
 | What it computes | How you call it | How it is checked | On the card | When it pays |
 |---|---|---|---|---|
 | binary32 / 64 / 128 / 256 | C, C++, Python, Rust, Julia, Go, C#, R, Fortran | **1,068,915** conformance cases | Alveo U50, run on silicon | **binary128 4.5x**, **binary256 5.5x** |
-| 30 opcodes, 5 rounding modes, 39 transcendentals | one ABI; software, FPGA or remote; no dependencies | **38** gate stages, 23 RTL sims, 30 proofs | 427 M elem/s, 4 tiles, ~35 W | **binary32 / 64: a CPU wins** |
+| 30 opcodes, 5 rounding modes, 39 transcendentals | one ABI; software, FPGA or remote; no dependencies | **38** gate stages, 24 RTL sims, 30 proofs | 427 M elem/s, 4 tiles, ~35 W | **binary32 / 64: a CPU wins** |
 
 <sub>Speed-ups are one tile against the fastest software on the same machine - the CPU's own FPU, `__float128` or MPFR, never our own softfloat. Four tiles reach 17.5x and 21.1x. [Where that line falls, measured](#when-this-matters-and-when-it-does-not).</sub>
 
@@ -147,7 +147,7 @@ the tables and the method; the charts regenerate with
 |---|---|
 | `python/cft_golden` | The definition of correct. Exact, dependency-free Python: 30 opcodes, all five rounding modes, the complete IEEE clause 5 function set, and all thirty-nine transcendentals correctly rounded. Everything else is scored against this, never against each other. |
 | `rtl/` | The tile. A 16-stage pipelined fused-multiply-add core that splits one 256-bit lane into 2x fp128, 4x fp64 or 8x fp32, plus operand steering, a streaming engine, a reduction accumulator and an on-chip program sequencer. Yosys-clean, portability enforced in CI. |
-| `tb/` and `formal/` | 23 simulation targets checking every result and every flag against the golden model, and 30 machine-checked proofs, plus a negative control that must be refuted or the gate has stopped being able to catch a bug. |
+| `tb/` and `formal/` | 24 simulation targets checking every result and every flag against the golden model, and 30 machine-checked proofs, plus a negative control that must be refuted or the gate has stopped being able to catch a bug. |
 | `host/` | **libcft**: about 22,000 lines of C99 in `host/src`, no dependencies, no build step for callers. One ABI reachable from C, C++, Python, Rust, Julia, Go, C#, R and Fortran, with software, FPGA and remote backends behind identical calls. |
 | `bindings/` | The WebAssembly build behind the pages above, a Node package, and a Python drop-in for the MPFR pattern. |
 | `hw/` | Vitis packaging, HBM layout and the build pipeline. Bitstreams built and run on silicon. |
