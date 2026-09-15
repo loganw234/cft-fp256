@@ -2792,6 +2792,230 @@ static void check_program_refusals(cft_device *dev, cft_format fmt)
     }
 }
 
+
+/* ==== ABI 0.14, R16: an input block fetched through an index table ====
+ *
+ * The device against the software backend, which is the definition -
+ * and against ITSELF, which is the control: the same program over the
+ * same n values with an IDENTITY table must give the dense run's bits
+ * exactly, and with a PERMUTED table must not. The first alone would
+ * pass on a device that ignored the table; the pair cannot.
+ *
+ * The program is `DEPOSIT r0`, so the deposit IS the gathered element
+ * and a wrong entry is a wrong output rather than something an ALU
+ * might have hidden. The source is deliberately shorter than the run,
+ * which is the shape the feature exists for: the gravity fold reads a
+ * short array of contributions from many lanes.
+ * ==================================================================== */
+
+static void check_indexed(cft_device *sw, cft_device *hw, cft_format fmt,
+                          size_t n)
+{
+    const size_t esz = cft_format_size(fmt);
+    const size_t src_n = (n / 3) + 1;          /* shorter than the run */
+    uint8_t img[256];
+    uint64_t ins[2];
+    size_t bytes, i;
+    cft_caps hc;
+    uint8_t *src = (uint8_t *)malloc(src_n * esz);
+    /* The DENSE operands, at n elements. cft_program_run_ex reads b
+     * and c for every one of the run's n lanes whatever the program
+     * names - the executor loads r1 and r2 from them unless the
+     * pointer is NULL - so handing it the short SOURCE here read n
+     * lanes out of a src_n-element allocation, which V1 reproduced
+     * against a guard page. An indexed operand is the only one whose
+     * buffer may be short, and only through its own table. */
+    uint8_t *bdense = (uint8_t *)malloc(n * esz);
+    uint8_t *dense = (uint8_t *)malloc(n * esz);
+    uint8_t *d_sw = (uint8_t *)malloc(n * esz);
+    uint8_t *d_hw = (uint8_t *)malloc(n * esz);
+    uint8_t *d_id = (uint8_t *)malloc(n * esz);
+    uint8_t *d_pm = (uint8_t *)malloc(n * esz);
+    uint32_t *cnt = (uint32_t *)malloc(n * 4);
+    uint32_t *tab = (uint32_t *)malloc(n * 4);
+    uint32_t *ident = (uint32_t *)malloc(n * 4);
+    cft_program *ps = NULL, *ph = NULL;
+    cft_run_args A;
+    uint32_t fl = 0, bus = 0;
+    cft_status st;
+    int holes = 0;
+
+    memset(&hc, 0, sizeof hc);
+    hc.struct_size = sizeof hc;
+    if (cft_get_caps(hw, &hc) != CFT_OK)
+        memset(&hc, 0, sizeof hc);
+    if (!(hc.seq_features & CFT_SEQ_FEAT_INDEXED)) {
+        printf("  seq indexed inputs: this device does not publish "
+               "CFT_SEQ_FEAT_INDEXED, NOT COMPARED\n");
+        goto out;
+    }
+    if (!src || !bdense || !dense || !d_sw || !d_hw || !d_id ||
+        !d_pm || !cnt || !tab || !ident) {
+        printf("  FAIL seq indexed: out of memory\n");
+        failures++;
+        goto out;
+    }
+
+    rs = 0x1D6E + (uint32_t)fmt;
+    fill(src, src_n, esz);
+    fill(bdense, n, esz);
+
+    /* One in five entries is CFT_IDX_NONE, which must read as +0 -
+     * derived here and checked below against the same rule, never
+     * against a typed expectation. */
+    for (i = 0; i < n; i++) {
+        if (i % 5 == 0) {
+            tab[i] = CFT_IDX_NONE;
+            holes++;
+            memset(dense + i * esz, 0, esz);       /* +0 */
+        } else {
+            tab[i] = (uint32_t)((i * 7 + 1) % src_n);
+            memcpy(dense + i * esz, src + (size_t)tab[i] * esz, esz);
+        }
+        ident[i] = (uint32_t)i;
+    }
+
+    ins[0] = seq_ctrl(3, 0, 0);            /* DEPOSIT r0 */
+    ins[1] = seq_ctrl(0, 0, 0);            /* HALT */
+    bytes = seq_image(img, fmt, ins, 2, NULL, 0, 1);
+
+    st = cft_program_load(sw, img, bytes, &ps);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq indexed: the software backend refused the "
+               "image (%s)\n", cft_strerror(st));
+        failures++;
+        goto out;
+    }
+    st = cft_program_load(hw, img, bytes, &ph);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq indexed: the device refused the image (%s)\n",
+               cft_strerror(st));
+        failures++;
+        goto out;
+    }
+
+#define IDX_RUN(prog_, dst_, a_, an_, table_)                          \
+    do {                                                               \
+        memset(&A, 0, sizeof A);                                       \
+        A.struct_size = sizeof A;                                      \
+        A.a = (a_); A.b = bdense;  A.c = bdense;                            \
+        A.n = n;                                                       \
+        A.deposits = (dst_);                                           \
+        A.counts = cnt;                                                \
+        A.flags_out = &fl;                                             \
+        A.bus_out = &bus;                                              \
+        A.idx_a = (table_);                                            \
+        A.idx_a_src = (table_) ? (an_) : 0;                            \
+        memset((dst_), 0x5a, n * esz);                                 \
+        st = cft_program_run_ex((prog_), &A);                          \
+    } while (0)
+
+    /* 1. the gathered run, software against the device. */
+    IDX_RUN(ps, d_sw, src, src_n, tab);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq indexed: the software backend refused the run "
+               "(%s: %s)\n", cft_strerror(st), cft_last_error());
+        failures++;
+        goto out;
+    }
+    IDX_RUN(ph, d_hw, src, src_n, tab);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq indexed: the device refused the run (%s: %s)\n",
+               cft_strerror(st), cft_last_error());
+        failures++;
+        goto out;
+    }
+    checks++;
+    if (memcmp(d_sw, d_hw, n * esz) != 0) {
+        for (i = 0; i < n * esz; i++)
+            if (d_sw[i] != d_hw[i])
+                break;
+        printf("  FAIL seq indexed: the device and the software backend "
+               "differ first at byte %lu (lane %lu, table entry %u)\n",
+               (unsigned long)i, (unsigned long)(i / esz),
+               tab[i / esz]);
+        failures++;
+    }
+    /* ...and the answer is the gather's definition, element for
+     * element, including +0 where the sentinel is. */
+    checks++;
+    if (memcmp(d_hw, dense, n * esz) != 0) {
+        printf("  FAIL seq indexed: the run is not source[idx[i]] with "
+               "CFT_IDX_NONE reading as +0 (%d sentinels in %lu "
+               "entries)\n", holes, (unsigned long)n);
+        failures++;
+    }
+
+    /* 2. the control. An identity table over a full-length source is
+     *    the dense run, bit for bit; a rotation of it is not. */
+    IDX_RUN(ph, d_id, dense, n, ident);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq indexed: an identity table was refused (%s)\n",
+               cft_strerror(st));
+        failures++;
+        goto out;
+    }
+    IDX_RUN(ph, d_pm, dense, n, NULL);
+    checks++;
+    if (st != CFT_OK || memcmp(d_id, d_pm, n * esz) != 0) {
+        printf("  FAIL seq indexed: an identity table is not the dense "
+               "run on this device\n");
+        failures++;
+    }
+    if (n > 1) {
+        for (i = 0; i < n; i++)
+            ident[i] = (uint32_t)((i + 1) % n);
+        IDX_RUN(ph, d_pm, dense, n, ident);
+        checks++;
+        if (st != CFT_OK) {
+            printf("  FAIL seq indexed: a rotated table was refused "
+                   "(%s)\n", cft_strerror(st));
+            failures++;
+        } else if (memcmp(d_id, d_pm, n * esz) == 0) {
+            printf("  FAIL seq indexed: a ROTATED table gave the dense "
+                   "run's bits, so the control above could not have "
+                   "failed - the table may be being ignored\n");
+            failures++;
+        }
+    }
+
+    /* 3. the bound, on both backends: an index AT the source's length
+     *    is refused by name and by value, before the run. */
+    for (i = 0; i < n; i++)
+        ident[i] = (uint32_t)((i + 1) % n);
+    ident[n / 2] = (uint32_t)n;                /* one past the last */
+    IDX_RUN(ps, d_pm, dense, n, ident);
+    checks++;
+    if (st != CFT_ERR_INVALID_ARGUMENT) {
+        printf("  FAIL seq indexed: the software backend accepted an "
+               "index at the source's length (%s)\n", cft_strerror(st));
+        failures++;
+    }
+    IDX_RUN(ph, d_pm, dense, n, ident);
+    checks++;
+    if (st != CFT_ERR_INVALID_ARGUMENT) {
+        printf("  FAIL seq indexed: the device accepted an index at the "
+               "source's length (%s)\n", cft_strerror(st));
+        failures++;
+    }
+#undef IDX_RUN
+
+    printf("  seq indexed inputs: %lu lanes through a %lu-element "
+           "source, %d of them +0, identity == dense and rotated != "
+           "dense, the bound refused on both\n",
+           (unsigned long)n, (unsigned long)src_n, holes);
+out:
+    cft_program_free(ps);
+    cft_program_free(ph);
+    free(src); free(bdense); free(dense); free(d_sw); free(d_hw);
+    free(d_id); free(d_pm); free(cnt); free(tab); free(ident);
+}
+
 static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
                         size_t n, uint32_t seed)
 {
@@ -2940,6 +3164,11 @@ static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
      *    with the feature has its own memory and its own two
      *    pointers. */
     check_scratch(hw, fmt, n);
+
+    /* 7b. ABI 0.14's index tables (R16), gated on the feature bit the
+     *     same way and skipped by name where the device does not
+     *     publish it. */
+    check_indexed(sw, hw, fmt, n);
 
     /* 8. the argument refusals, which are the library's own and reach
      *    no device at all - so they are scored once, on the software

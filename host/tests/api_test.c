@@ -3414,13 +3414,37 @@ int main(void)
             st = cft_program_run_ex(prog, &R);
             CHECK(st == CFT_OK, "a dense run beside the 0.14 fields: %s (%s)",
                   cft_strerror(st), cft_last_error());
+            /* P1 has landed, so a well-formed table RUNS, and the one
+             * that reads as +0 runs too. What is refused here is an
+             * index at or past the source, by name and by value - the
+             * bound being the length the caller declared and not the
+             * length of anything this library can see. */
+            memcpy(dep2, "\xAA\xAA\xAA\xAA", 4);
             R.idx_a = ix; R.idx_a_src = 1;
             st = cft_program_run_ex(prog, &R);
-            CHECK(st == CFT_ERR_UNSUPPORTED &&
-                  strstr(cft_last_error(), "ROUND2") &&
-                  strstr(cft_last_error(), "P1"),
-                  "an index table is refused by name: %s (%s)",
+            CHECK(st == CFT_OK,
+                  "an identity table runs: %s (%s)",
                   cft_strerror(st), cft_last_error());
+            {
+                uint8_t dense_dep[4];
+                memcpy(dense_dep, dep2, 4);
+                ix[0] = CFT_IDX_NONE;
+                st = cft_program_run_ex(prog, &R);
+                CHECK(st == CFT_OK, "CFT_IDX_NONE runs: %s (%s)",
+                      cft_strerror(st), cft_last_error());
+                CHECK(memcmp(dense_dep, dep2, 4) != 0,
+                      "the sentinel read +0 where the identity table read "
+                      "the caller's element, so these must differ");
+                ix[0] = 1;                 /* idx_a_src is 1: 1 is past it */
+                st = cft_program_run_ex(prog, &R);
+                CHECK(st == CFT_ERR_INVALID_ARGUMENT &&
+                      strstr(cft_last_error(), "idx_a[0] = 1") &&
+                      strstr(cft_last_error(), "at or past"),
+                      "an index at the source's length is refused by name "
+                      "and by value: %s (%s)",
+                      cft_strerror(st), cft_last_error());
+                ix[0] = 0;
+            }
             R.idx_a_src = 0;
             st = cft_program_run_ex(prog, &R);
             CHECK(st == CFT_ERR_INVALID_ARGUMENT &&

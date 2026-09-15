@@ -1502,6 +1502,26 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
         return ST_UNSUPPORTED;
     }
 
+    /* And a fourth time, for the index tables: a tile below 0xA00 has
+     * no IDX_A_PTR..IDX_SI_PTR and no twelfth through fifteenth kernel
+     * argument, so there is nowhere to put a table and no MODE bit that
+     * would select it. device.c has already refused a table against a
+     * device whose CAPS2[9] is clear, which is the refusal a caller
+     * should see; this is the second line of the same defence, for a
+     * device whose CAPS2 and whose VERSION disagree. */
+    if (io && (io->idx_a || io->idx_b || io->idx_c || io->idx_scratch_in) &&
+        D.version < IDX_VERSION) {
+        char buf[256];
+        std::snprintf(buf, sizeof buf,
+                      "this bitstream's contract is 0x%08x, which has no "
+                      "index-table registers - an indexed input block "
+                      "arrived at 0x%08x. CAPS2 bit 9 says in advance which "
+                      "it is.",
+                      D.version, IDX_VERSION);
+        set_err(buf);
+        return ST_UNSUPPORTED;
+    }
+
     if (n == 0) {
         if (flags) *flags = 0;
         if (bus)   *bus   = 0;
@@ -1512,9 +1532,25 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
     if (max_deposits && n > (static_cast<size_t>(-1) / max_deposits / esz))
         return ST_INVALID_ARGUMENT;
 
-    const size_t epb        = 32u / esz;         /* elements per beat */
-    const size_t real_bytes = n * esz;
-    const size_t opnd_bytes = ((n + epb - 1) / epb) * epb * esz;
+    /* R16: an INDEXED stream's buffer is the SOURCE the table indexes,
+     * `idx_*_src` elements, which has no reason to be n. Both numbers
+     * matter and for different failures: `sreal` is what buf_bind
+     * memcpys out of the host mirror and what stage() copies, so a
+     * source LONGER than n would be truncated on the device - resident
+     * or staged, since a resident bind makes a device copy the same
+     * way - and `spad` is the buffer the tile may address, so a source
+     * SHORTER than n would have stage() read past the caller's
+     * allocation. Dense, both are what they always were:
+     * beat_round(n * esz) is the element-padded n * esz this used to
+     * compute as `((n + epb - 1) / epb) * epb * esz`, because epb *
+     * esz is exactly one beat - so the dense path's two byte counts
+     * are the same two numbers they have always been. */
+    const size_t sreal[3] = {
+        ((io && io->idx_a) ? io->idx_a_src : n) * esz,
+        ((io && io->idx_b) ? io->idx_b_src : n) * esz,
+        ((io && io->idx_c) ? io->idx_c_src : n) * esz};
+    const size_t spad[3] = {beat_round(sreal[0]), beat_round(sreal[1]),
+                            beat_round(sreal[2])};
     const size_t dep_bytes  = beat_round(n * max_deposits * esz);
     const size_t cnt_bytes  = beat_round(n * 4);
     const size_t img_bytes  = beat_round(image_bytes);
@@ -1530,6 +1566,32 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
      * counts buffer. */
     const size_t sin_pad    = sin_bytes  ? beat_round(sin_bytes)  : 32u;
     const size_t sout_pad   = sout_bytes ? beat_round(sout_bytes) : 32u;
+    /* ABI 0.14's index tables (docs/SEQUENCER.md R16). FOUR BYTES an
+     * entry at every format, because a table holds indices and not
+     * elements: n entries for a stream, n * n_scratch_in for the
+     * block, lane-major as the block is. Beat-padded like everything
+     * else the tile reads, and one beat when there is no table at all,
+     * so an 0xA00 tile's arguments 12..15 are always real buffers. */
+    const uint32_t *const itab[4] = {
+        io ? io->idx_a : nullptr, io ? io->idx_b : nullptr,
+        io ? io->idx_c : nullptr, io ? io->idx_scratch_in : nullptr};
+    const size_t isi_entries = (io && io->idx_scratch_in)
+                             ? n * static_cast<size_t>(io->n_scratch_in) : 0;
+    const size_t itab_bytes[4] = {
+        itab[0] ? n * 4u : 0, itab[1] ? n * 4u : 0, itab[2] ? n * 4u : 0,
+        isi_entries * 4u};
+    const size_t itab_pad[4] = {
+        itab_bytes[0] ? beat_round(itab_bytes[0]) : 32u,
+        itab_bytes[1] ? beat_round(itab_bytes[1]) : 32u,
+        itab_bytes[2] ? beat_round(itab_bytes[2]) : 32u,
+        itab_bytes[3] ? beat_round(itab_bytes[3]) : 32u};
+    /* MODE[22:19], set from the same four pointers the buffers come
+     * from, so a table cannot be bound without its bit or a bit set
+     * without its table. */
+    uint32_t idx_mode = 0;
+    for (int r = 0; r < 4; r++)
+        if (itab[r] && itab_bytes[r])
+            idx_mode |= 1u << (19 + r);
 
     Tile &tile = D.tiles[0];
 
@@ -1554,8 +1616,8 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
             for (int r = 0; r < 3; r++)
                 if (bind->buf[r] && src[r])
                     ob[r] = buf_bind(*static_cast<Buf *>(bind->buf[r]),
-                                     0, r, bind->off[r], real_bytes,
-                                     opnd_bytes, false);
+                                     0, r, bind->off[r], sreal[r],
+                                     spad[r], false);
             if (bind->buf[CFT_ROLE_D] && deposits && max_deposits)
                 ob[3] = buf_bind(*static_cast<Buf *>(bind->buf[CFT_ROLE_D]),
                                  0, CFT_ROLE_D, bind->off[CFT_ROLE_D],
@@ -1576,6 +1638,19 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                     buf_bind(*static_cast<Buf *>(bind->buf[CFT_ROLE_SO]),
                              0, CFT_ROLE_SO, bind->off[CFT_ROLE_SO],
                              sout_bytes, sout_pad, true);
+            /* The four tables, on the scratch block's terms exactly:
+             * bound where the caller's table is a resident buffer and
+             * staged where it is not, guarded on the BYTE COUNT as
+             * well as the pointer so a zero-length window is never
+             * bound. A table is read and never written, so `false`. */
+            for (int r = 0; r < 4; r++) {
+                const int role = CFT_ROLE_IA + r;
+                if (bind->buf[role] && itab[r] && itab_bytes[r])
+                    ob[role] =
+                        buf_bind(*static_cast<Buf *>(bind->buf[role]),
+                                 0, role, bind->off[role],
+                                 itab_bytes[r], itab_pad[r], false);
+            }
         }
 
         /* One cap covers a, b, c and d together, so the operand
@@ -1592,8 +1667,9 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
          * legal and XRT will not submit a run with an argument
          * unbound. */
         size_t need = 0;
-        if (!ob[0] || !ob[1] || !ob[2])
-            need = opnd_bytes;
+        for (int r = 0; r < 3; r++)
+            if (!ob[r] && spad[r] > need)
+                need = spad[r];
         if (!ob[3])
             need = std::max(need, std::max(dep_bytes, static_cast<size_t>(32)));
         ensure_capacity(D, tile, need);
@@ -1611,15 +1687,32 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                 ensure_one(D, tile, tile.so, tile.so_cap, ARG_SCRATCH_OUT,
                            sout_pad);
         }
+        /* The index tables, sized per run and cached by ensure_one as
+         * the counts buffer is - they grow with n, so the one-beat
+         * buffers the launch site creates for a dense run are not
+         * enough for a gathered one. Only where the caller's table is
+         * not already resident. */
+        if (D.version >= IDX_VERSION) {
+            xrt::bo *const ib[4] = {&tile.ia, &tile.ib, &tile.ic,
+                                    &tile.isi};
+            size_t *const ic[4] = {&tile.ia_cap, &tile.ib_cap,
+                                   &tile.ic_cap, &tile.isi_cap};
+            const int iarg[4] = {ARG_IDX_A, ARG_IDX_B, ARG_IDX_C,
+                                 ARG_IDX_SI};
+            for (int r = 0; r < 4; r++)
+                if (!ob[CFT_ROLE_IA + r])
+                    ensure_one(D, tile, *ib[r], *ic[r], iarg[r],
+                               itab_pad[r]);
+        }
         if (!ob[0])
-            stage(tile.a, static_cast<const uint8_t *>(a), real_bytes,
-                  opnd_bytes);
+            stage(tile.a, static_cast<const uint8_t *>(a), sreal[0],
+                  spad[0]);
         if (!ob[1])
-            stage(tile.b, static_cast<const uint8_t *>(b), real_bytes,
-                  opnd_bytes);
+            stage(tile.b, static_cast<const uint8_t *>(b), sreal[1],
+                  spad[1]);
         if (!ob[2])
-            stage(tile.c, static_cast<const uint8_t *>(c), real_bytes,
-                  opnd_bytes);
+            stage(tile.c, static_cast<const uint8_t *>(c), sreal[2],
+                  spad[2]);
         {
             /* tile.si and tile.so are only created on an 0x800 device,
              * and the kernel call below only passes them there, so an
@@ -1665,6 +1758,21 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
         if (D.version >= SCRATCH_VERSION && ob[CFT_ROLE_SI] == &tile.si)
             stage(tile.si, static_cast<const uint8_t *>(scratch_in),
                   sin_bytes, sin_pad);
+        /* The tables, staged on the same terms and with the same
+         * POINTER IDENTITY test: the tb[] fallback above has run, so an
+         * unbound role is &tile.ia and not null, and a null test here
+         * would skip exactly the staging that is needed. A table whose
+         * MODE bit is clear gets its one-beat buffer zeroed, which the
+         * tile never reads. */
+        if (D.version >= IDX_VERSION) {
+            xrt::bo *const ib[4] = {&tile.ia, &tile.ib, &tile.ic,
+                                    &tile.isi};
+            for (int r = 0; r < 4; r++)
+                if (ob[CFT_ROLE_IA + r] == ib[r])
+                    stage(*ib[r],
+                          reinterpret_cast<const uint8_t *>(itab[r]),
+                          itab_bytes[r], itab_pad[r]);
+        }
     } catch (const std::bad_alloc &) {
         set_err("out of memory staging a program");
         return ST_OUT_OF_MEMORY;
@@ -1689,7 +1797,7 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
      * count and NOT the padded one: lanes at or beyond it start
      * inactive, which is how beat padding is made harmless for a
      * program whose map nobody has read. */
-    const uint32_t mode = MODE_SEQ |
+    const uint32_t mode = MODE_SEQ | idx_mode |
                           (static_cast<uint32_t>(fmt & 0xF) << 8);
 
     int status = ST_OK;
@@ -1704,13 +1812,13 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
          * 0x800; the tile reads or writes each only when the image's
          * flags say BANK_EXT or SCRATCH_IO. */
         if (D.version >= IDX_VERSION) {
-            /* One beat each until P1 and P3 bind the caller's tables
-             * and mask: the kernel has the five arguments, and a launch
-             * on this map passes all seventeen (IDX_VERSION above). */
-            ensure_one(D, tile, tile.ia, tile.ia_cap, ARG_IDX_A, 32);
-            ensure_one(D, tile, tile.ib, tile.ib_cap, ARG_IDX_B, 32);
-            ensure_one(D, tile, tile.ic, tile.ic_cap, ARG_IDX_C, 32);
-            ensure_one(D, tile, tile.isi, tile.isi_cap, ARG_IDX_SI, 32);
+            /* The four tables have their real buffers by now - bound,
+             * or created and staged above - and the MASK is still one
+             * beat until P3 binds the caller's: the kernel has five
+             * arguments and a launch on this map passes all seventeen,
+             * because XRT's start sends the whole argument register
+             * image and a declared argument the launch does not set
+             * goes out as zero (2026-09-14). */
             ensure_one(D, tile, tile.mk, tile.mk_cap, ARG_MASK, 32);
         }
         xrt::run r = (D.version >= IDX_VERSION)
@@ -1719,7 +1827,8 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                             tile.pg, tile.cn, tile.bk,
                             *ob[CFT_ROLE_SI], *ob[CFT_ROLE_SO],
                             static_cast<uint64_t>(0),
-                            tile.ia, tile.ib, tile.ic, tile.isi, tile.mk)
+                            *ob[CFT_ROLE_IA], *ob[CFT_ROLE_IB],
+                            *ob[CFT_ROLE_IC], *ob[CFT_ROLE_ISI], tile.mk)
                    : (D.version >= SCRATCH_VERSION)
                    ? tile.k(mode, static_cast<uint64_t>(n),
                             *ob[0], *ob[1], *ob[2], *ob[3],

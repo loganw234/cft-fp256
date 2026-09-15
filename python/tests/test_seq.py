@@ -1464,3 +1464,204 @@ def test_kx9_refusals():
     with pytest.raises(seq.ProgramError, match="63:32 must be zero"):
         seq.Program(fmt, [seq.encode(sf.OP_ADD, 0, ra=1, imm=1 << 29),
                           seq.halt()], consts, 1)
+
+
+# ---- revision 6, R16: an input block fetched through an index table ---
+#
+# The contract is two lines (docs/SEQUENCER.md R16), so these cases are
+# about the two ways it can be got wrong rather than about arithmetic:
+# a table that is silently ignored, and a table that reads the wrong
+# element. Every case compares against the DENSE run over the gathered
+# block, which is the definition, never against a typed expectation.
+
+def _gather_prog(fmt, op=None):
+    """r0 + r2, deposited: two indexed streams land in two registers an
+    instruction actually reads, so a table that reached the wrong one
+    shows up as an answer and not as an unread register."""
+    return seq.Program(fmt, [
+        seq.alu(sf.OP_ADD if op is None else op, rd=3, ra=0, rc=2),
+        seq.deposit(3), seq.halt()], max_deposits=1)
+
+
+def _vals(fmt, rng, m):
+    return [sf.from_int(fmt, rng.randrange(1, 1000))[0] for _ in range(m)]
+
+
+def test_r16_identity_table_is_the_dense_run():
+    """Control (a): idx[i] = i is bit-identical to no table at all, at
+    every format and for every observable, and a PERMUTED table is not
+    - the second half being what makes the first half a gate."""
+    rng = random.Random(1616)
+    for name in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        prog = _gather_prog(fmt)
+        n = 37
+        a = _vals(fmt, rng, n)
+        c = _vals(fmt, rng, n)
+        dense = seq.run(prog, a, [0] * n, c)
+        ident = seq.run(prog, a, [0] * n, c,
+                        idx_a=list(range(n)), idx_c=list(range(n)))
+        assert ident.state() == dense.state(), \
+            f"{name}: an identity table changed the run"
+        perm = [(i * 7 + 3) % n for i in range(n)]
+        got = seq.run(prog, a, [0] * n, c, idx_a=perm, idx_c=perm)
+        want = seq.run(prog, [a[t] for t in perm], [0] * n,
+                       [c[t] for t in perm])
+        assert got.state() == want.state(), \
+            f"{name}: a permuted table is not the dense run over it"
+        assert got.deposits != dense.deposits, \
+            f"{name}: the permutation was indistinguishable from dense, " \
+            "so this case could not have failed"
+
+
+def test_r16_idx_none_reads_plus_zero():
+    """Control (b): CFT_IDX_NONE is +0 in exactly those lanes and
+    nowhere else. `a + (+0)` is a, so the lanes that took the sentinel
+    are the lanes whose deposit is the other operand unchanged."""
+    fmt = FP32
+    rng = random.Random(7)
+    n = 24
+    src = _vals(fmt, rng, 64)
+    c = _vals(fmt, rng, n)
+    tbl = [seq.IDX_NONE if i % 3 == 0 else (i * 5) % 64 for i in range(n)]
+    prog = _gather_prog(fmt)
+    res = seq.run(prog, src, [0] * n, c, idx_a=tbl)
+    zero = sf.zero_bits(fmt, 0)
+    for i in range(n):
+        lhs = zero if tbl[i] == seq.IDX_NONE else src[tbl[i]]
+        want, _ = sf.compute(fmt, sf.OP_ADD, lhs, 0, c[i])
+        assert res.deposits[i] == want, f"lane {i}"
+        if tbl[i] == seq.IDX_NONE:
+            assert res.deposits[i] == c[i], \
+                f"lane {i}: +0 must be the additive identity here"
+    # and the sentinel is the ABI's number, not this file's opinion
+    assert seq.IDX_NONE == 0xFFFFFFFF
+
+
+def test_r16_index_at_or_past_the_source_is_refused_by_value():
+    fmt = FP32
+    prog = _gather_prog(fmt)
+    src = _vals(fmt, random.Random(3), 8)
+    n = 4
+    for table, bad_i, bad_v in (([0, 1, 2, 8], 3, 8),
+                                ([9, 1, 2, 3], 0, 9),
+                                ([0, 1, 0xFFFFFFFE, 3], 2, 0xFFFFFFFE)):
+        with pytest.raises(seq.ProgramError,
+                           match=rf"idx_a\[{bad_i}\] = {bad_v} is at or "
+                                 r"past the 8 elements"):
+            seq.run(prog, src, [0] * n, [0] * n, idx_a=table)
+    # the LAST element of the source is in range: an off-by-one in the
+    # bound would refuse it
+    seq.run(prog, src, [0] * n, [0] * n, idx_a=[7, 7, 7, 7])
+
+
+def test_r16_table_length_is_the_run_length():
+    """With a table the stream argument is the SOURCE, so n comes from
+    the table - a source shorter than the run is the normal case and
+    must not be mistaken for a short run."""
+    fmt = FP32
+    prog = _gather_prog(fmt)
+    src = _vals(fmt, random.Random(11), 3)
+    n = 9
+    res = seq.run(prog, src, [0] * n, [0] * n,
+                  idx_a=[i % 3 for i in range(n)])
+    assert len(res.deposits) == n
+    assert len(res.counts) == n
+    # a table on b that disagrees with a's is refused by name
+    with pytest.raises(ValueError, match=r"idx_b holds 4 indices"):
+        seq.run(prog, src, src, [0] * n,
+                idx_a=[0] * n, idx_b=[0, 1, 2, 0])
+
+
+def test_r16_scratch_block_is_gathered_lane_major():
+    """The block's table is n * n_scratch_in entries, lane-major as the
+    block is: lane i's slot s is entry i * k + s. A table read
+    slot-major would pass at k = 1 and fail at any other k, so k is 3
+    here and the lanes are distinguishable."""
+    fmt = FP64
+    k = 3
+    prog = seq.Program(fmt, [
+        seq.ldl(3, 0), seq.ldl(4, 2),
+        seq.alu(sf.OP_ADD, rd=5, ra=3, rc=4),
+        seq.deposit(5), seq.halt()],
+        max_deposits=1, flags=seq.FLAG_SCRATCH_IO,
+        n_scratch_in=k, n_scratch_out=k)
+    rng = random.Random(99)
+    pool = _vals(fmt, rng, 20)
+    n = 7
+    tbl = [seq.IDX_NONE if (i + s) % 5 == 0 else (i * k + s) % 20
+           for i in range(n) for s in range(k)]
+    zero = sf.zero_bits(fmt, 0)
+    block = [zero if t == seq.IDX_NONE else pool[t] for t in tbl]
+    got = seq.run(prog, [0] * n, [0] * n, scratch_in=pool,
+                  idx_scratch_in=tbl)
+    want = seq.run(prog, [0] * n, [0] * n, scratch_in=block)
+    assert got.state() == want.state()
+    assert got.scratch_out == want.scratch_out
+    # ...and this table is not the identity, so the case can fail
+    assert block != pool[:n * k]
+
+
+def test_r16_scratch_table_refusals():
+    fmt = FP32
+    k = 2
+    prog = seq.Program(fmt, [
+        seq.ldl(3, 0), seq.deposit(3), seq.halt()],
+        max_deposits=1, flags=seq.FLAG_SCRATCH_IO,
+        n_scratch_in=k, n_scratch_out=0)
+    pool = _vals(fmt, random.Random(5), 6)
+    n = 4
+    with pytest.raises(seq.ProgramError, match="is at or past the 6"):
+        seq.run(prog, [0] * n, [0] * n, scratch_in=pool,
+                idx_scratch_in=[0, 1, 2, 3, 4, 6, 0, 1])
+    with pytest.raises(seq.ProgramError, match="holds 4 indices"):
+        seq.run(prog, [0] * n, [0] * n, scratch_in=pool,
+                idx_scratch_in=[0, 1, 2, 3])
+    with pytest.raises(seq.ProgramError, match="which is None"):
+        seq.run(prog, [0] * n, [0] * n, idx_scratch_in=[0] * (n * k))
+    # a program with no scratch input has no block to gather into
+    plain = _gather_prog(fmt)
+    with pytest.raises(seq.ProgramError, match="declares no scratch input"):
+        seq.run(plain, [0] * n, [0] * n, idx_scratch_in=[0] * n)
+
+
+def test_r16_tables_compose_with_n_active_and_the_early_exit():
+    """An indexed run is the dense run over the gathered block, so
+    every property already proved of a dense run has to survive it -
+    the early exit above all, which is the one cross-lane condition."""
+    fmt = FP32
+    rng = random.Random(2026)
+    limit = sf.one_bits(fmt)
+    prog = seq.Program(fmt, [
+        seq.repeat(4),
+        seq.alu(sf.OP_ADD, rd=3, ra=3, rc=0),
+        seq.setact(3),
+        seq.endrep(),
+        seq.deposit(3), seq.halt()],
+        consts=[limit], max_deposits=1)
+    n = 40
+    src = _vals(fmt, rng, 13)
+    tbl = [seq.IDX_NONE if i % 4 == 0 else (i * 3) % 13 for i in range(n)]
+    zero = sf.zero_bits(fmt, 0)
+    block = [zero if t == seq.IDX_NONE else src[t] for t in tbl]
+    for n_active in (0, 1, 17, n):
+        got = seq.run(prog, src, [0] * n, [0] * n, idx_a=tbl,
+                      n_active=n_active)
+        want = seq.run(prog, block, [0] * n, [0] * n, n_active=n_active)
+        assert got.state() == want.state(), f"n_active={n_active}"
+        slow = seq.run(prog, src, [0] * n, [0] * n, idx_a=tbl,
+                       n_active=n_active, early_exit=False)
+        assert slow.state() == got.state(), \
+            f"n_active={n_active}: the early exit is not invisible"
+
+
+def test_r16_gather_helper_is_the_contract():
+    """`gather()` alone, so the two lines are tested where they are
+    written and not only through a run."""
+    fmt = FP32
+    src = [1, 2, 3]
+    assert seq.gather(src, [2, 0, seq.IDX_NONE, 1], fmt) == \
+        [3, 1, sf.zero_bits(fmt, 0), 2]
+    assert seq.gather(src, [], fmt) == []
+    with pytest.raises(seq.ProgramError, match=r"idx\[3\] = 3"):
+        seq.gather(src, [0, 0, 0, 3], fmt, "idx")

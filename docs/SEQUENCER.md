@@ -1665,7 +1665,7 @@ under Icarus; `yosys-lint` clean. The four-change commit is 0843b62,
 the overlap 6e1c418, the streaming issue and the drain's read-register
 hold the commit after it.
 
-## Revision 6 (2026-09-15, the seam): indexed inputs and a lane mask - declared
+## Revision 6 (2026-09-15): indexed inputs, and a lane mask declared
 
 The parcel round that follows ask 7 (docs/ROUND2.md) adds two things
 to the program model, and this section is their CONTRACT, written at
@@ -1673,7 +1673,7 @@ the seam before either is built so that the parcel building each and
 the parcel verifying it read one text. The software backend is the
 definition and the model its authority, as everywhere here.
 
-### R16. An input block fetched through an index table (P1, not yet built)
+### R16. An input block fetched through an index table (P1, built 2026-09-15)
 
 For a stream with a table, `A[i] = idx[i] == CFT_IDX_NONE ? +0 :
 a[idx[i]]` for `i` in `[0, n)`, and the run proceeds exactly as a dense
@@ -1691,6 +1691,58 @@ CAPS2[9] saying the bits are honoured; the sequencer reads a table's
 beats and then one element per entry through the A master, packs the
 elements into beats, and the register file never learns the
 difference.
+
+**What it is on the tile.** Four states in `rtl/cft_seq.sv`, entered in
+place of `S_LD_GO`'s dense load for a stream and in place of the
+scratch preload for the block. The two passes INTERLEAVE on the one
+read channel the module has: a beat of the table - eight `u32` entries
+at every format, because a table holds indices and not elements - then
+one single-beat read per entry at that element's own beat, then the
+next table beat. What comes back reaches the same two destinations the
+dense loads use and by the same two paths: packed into a register-file
+beat as `S_LD_STREAM` writes one, or written a slot at a time into the
+scratch as `S_SIN_PARSE` writes one. `CFT_IDX_NONE` writes `+0` and
+issues no read at all, and a stream no instruction reads is skipped
+with its table by R10's `rd_need`.
+
+The block's table starts at ENTRY `blk_base` (or `blk_base *
+n_scratch_in`), which is four bytes an entry and NOT the dense
+stream's `in_off`: that offset is scaled by the element size, and using
+it would read a plausible neighbour's element at every format above
+fp32. `tb/test_seq_core.py` asserts the gather's reads against the
+table - one burst per table beat at the block's own entry offset, one
+per non-sentinel entry at that element's beat, in order - so a slip of
+one entry is an ADDRESS in the failure and not a number that looks
+almost right.
+
+**What it costs.** The read side carries ONE burst in flight
+(`rd_burst_left`), so gathered elements do not overlap: on the card a
+gathered element is one HBM round trip, where a dense beat of `lpb`
+elements is a fraction of one. Through the unit bench's model RAM,
+which answers in the cycle it is asked, what is left is the state
+machine's own cost, and `make seqcycles` prints it beside the dense
+table (four blocks, one IAND and one deposit, an identity table so the
+two runs' answers are identical):
+
+| | lanes | dense | gathered | reads dense / gathered |
+|---|---|---|---|---|
+| fp32  | 512 | 1,189 cyc (2.32/lane) | 3,425 cyc (6.69/lane) | 6 / 578 |
+| fp64  | 256 |   869 cyc (3.39/lane) | 1,953 cyc (7.63/lane) | 6 / 290 |
+| fp128 | 128 |   709 cyc (5.54/lane) | 1,217 cyc (9.51/lane) | 6 / 146 |
+| fp256 |  64 |   629 cyc (9.83/lane) |   849 cyc (13.27/lane) | 6 / 74 |
+
+About four cycles a gathered element at every format, which is the
+table peel, the address, the return and the pack; the read count is
+exactly the elements plus `ceil(blk_n / 8)` table beats a block, and
+the bench derives both from the table rather than from this paragraph.
+The dense numbers in "What it measures" above are unchanged by this
+revision, which is the other half of the same probe.
+
+Making a gathered element cost less than a round trip means more than
+one read in flight, which the module's single-burst read side does not
+do for anything - the image, the bank, the scratch preload and the
+dense streams included. That is a change to the read side rather than
+to the gather, and it is not in this revision.
 
 ### R17. A per-run lane mask (P3, not yet built)
 

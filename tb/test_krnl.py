@@ -182,8 +182,15 @@ def caps2_expected():
     scalar = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_SCALAR")
     # [8] likewise: SEG/NRES and the streaming maximum (2026-09-14).
     seg = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_REDUCE_SEG")
-    return ((seg << 8) | (scalar << 7) | (1 << 6) | (1 << 5) | (1 << 4) |
-            (d.bit_length() - 1))
+    # [9] and [10], ABI 0.14: an input block fetched through an index
+    # table (R16) and a per-run lane mask (R17). Read from the RTL like
+    # every bit above them, so a build that carries one and not the
+    # other is described rather than failed - which is exactly the
+    # state of the tile while the two parcels land one at a time.
+    indexed = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_INDEXED")
+    lmask = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_LANE_MASK")
+    return ((lmask << 10) | (indexed << 9) | (seg << 8) | (scalar << 7) |
+            (1 << 6) | (1 << 5) | (1 << 4) | (d.bit_length() - 1))
 
 
 def _localparam_bit(path, name):
@@ -207,7 +214,8 @@ def check_caps2(caps2):
         f"CAPS2 is {caps2:#010x}, want {want:#010x} - [3:0] log2 of the "
         f"scratch slots a lane, [4] a scratch exists, [5] the per-run "
         f"block exists, [6] SCRATCH_STRICT, [7] SCALAR operands, "
-        f"[31:8] reserved zero")
+        f"[8] REDUCE_SEG, [9] INDEXED, [10] LANE_MASK, "
+        f"[31:11] reserved zero")
 
 
 def seq_caps_expected():

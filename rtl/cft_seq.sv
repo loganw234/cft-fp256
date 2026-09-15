@@ -234,6 +234,18 @@ module cft_seq #(
     input  logic [ADDR_W-1:0] cfg_sin,
     input  logic [ADDR_W-1:0] cfg_sout,
     input  logic [ADDR_W-1:0] cfg_cnt,
+    /* ABI 0.14, docs/SEQUENCER.md R16: the four index tables and the
+     * MODE bits that say which input blocks are fetched through one -
+     * [0] a, [1] b, [2] c, [3] scratch_in, decoded in the CSR out of
+     * MODE[22:19]. The CSR has already REFUSED those bits on a build
+     * whose FEAT_INDEXED is clear, so a bit that arrives here is one
+     * this module implements and nothing below re-checks it - the same
+     * division of labour cfg_prec has. */
+    input  logic [3:0]        cfg_indexed,
+    input  logic [ADDR_W-1:0] cfg_idx_a,
+    input  logic [ADDR_W-1:0] cfg_idx_b,
+    input  logic [ADDR_W-1:0] cfg_idx_c,
+    input  logic [ADDR_W-1:0] cfg_idx_si,
     output logic              busy,
     output logic              done,       // one-cycle pulse
     output logic              refuse,     // valid with done
@@ -358,6 +370,12 @@ module cft_seq #(
   logic [63:0]       n_q;
   logic [ADDR_W-1:0] a_q, b_q, c_q, d_q, prog_q, bank_q, cnt_q;
   logic [ADDR_W-1:0] sin_q, sout_q;
+  // R16's four tables and the bits that select them, latched with the
+  // rest of the run's configuration for the reason every other pointer
+  // is: a register the host rewrites mid-run cannot change what this
+  // run reads.
+  logic [ADDR_W-1:0] idx_a_q, idx_b_q, idx_c_q, idx_si_q;
+  logic [3:0]        idx_en_q;
 
   // element bytes / lanes per beat / log2(lanes per beat)
   logic [5:0] esz;
@@ -883,6 +901,59 @@ module cft_seq #(
   assign sin_room = ((sin_left > 32'd1) && (esz < 6'd8)) ? {1'b0, esz}
                                                         : 7'd8;
 
+  // ---- the gather (revision 6, R16) -----------------------------------
+  //
+  // An indexed block is read in two passes that INTERLEAVE on the one
+  // read channel this module has: a beat of the TABLE (eight u32
+  // entries at every format - the table holds indices, not elements),
+  // then one single-beat read per entry at the element's own address,
+  // then the next table beat. The two cannot overlap, because the
+  // channel carries one burst at a time; that is also why the block's
+  // whole table is not fetched in one burst, since the entries would
+  // have nowhere to wait but a BLK_LANES-entry buffer and the saving
+  // would be ceil(blk_n / 8) address phases against blk_n data round
+  // trips.
+  //
+  // What comes back goes to the SAME two destinations the dense loads
+  // have, by the same two paths: packed into beats for the register
+  // file as S_LD_STREAM writes them, or one slot at a time into the
+  // scratch as S_SIN_PARSE writes them. The gather is the drains'
+  // beat assembler run backwards and the preload's transpose run
+  // forwards; it invents no third way in.
+  logic [BEAT_BITS-1:0] gt_tbl;    // the table beat being consumed
+  logic [3:0]           gt_have;   // entries still in it, 0..WORDS
+  logic [31:0]          gt_left;   // entries still owed for this block
+  logic [ADDR_W-1:0]    gt_taddr;  // where the NEXT table beat is
+  logic [ADDR_W-1:0]    gt_base;   // the source the entries index into
+  logic [31:0]          gt_idx;    // the entry whose read is in flight
+  logic                 gt_scr;    // this gather fills the scratch
+  logic [BEAT_BITS-1:0] gt_beat;   // the beat being assembled
+  logic [2:0]           gt_pos;    // where in it the next element goes
+  logic [LB:0]          gt_lane;   // scratch only: lane and slot, the
+  logic [SCRSW:0]       gt_slot;   // two counters S_SIN_PARSE keeps
+  // The entry at the window's head, and whether it is the sentinel.
+  // 32'hFFFF_FFFF is CFT_IDX_NONE (host/include/cft.h): the element
+  // reads as +0 and NO read is issued for it, which is what makes a
+  // row that has run out cost nothing in a gathered fold.
+  logic [31:0] gt_ent;
+  logic        gt_none;
+  assign gt_ent  = gt_tbl[31:0];
+  assign gt_none = (gt_ent == 32'hFFFF_FFFF);
+  // Where the element sits inside the beat it arrives in. (idx * esz)
+  // mod BEAT_BYTES is esz * (idx mod lpb), so no byte offset is ever
+  // formed: the position IS the low bits of the index, and the select
+  // is scr_elem_fn - the one the scratch-out drain already uses.
+  logic [2:0] gt_sel;
+  assign gt_sel = gt_idx[2:0] & 3'(lpb - 4'd1);
+  // ONE placement path for both arms that produce an element - the
+  // sentinel's +0, which needs no read, and a returned beat. Written
+  // as a strobe and a value outside the case for the reason the retire
+  // path is written that way: two copies of "pack an element into a
+  // beat" is two chances to pack it differently.
+  logic         gt_take;
+  logic [255:0] gt_val;
+  logic         gt_flush;   // this element closes a register-file beat
+
   // ---- AXI read side (single outstanding burst) -----------------------
   logic [ADDR_W-1:0] rd_addr;
   logic [1:0]        rd_sel;   // which buffer rd_addr points into
@@ -898,6 +969,77 @@ module cft_seq #(
   logic              wr_aw_open;      // AW issued, not yet accepted
   logic [3:0]        wr_bresp_left;
   logic              wr_stream_on;
+
+  /* WHICH OF THE THREE OPERANDS AN OPCODE ACTUALLY READS.
+   *
+   * R10 skips a stream no instruction reads, and until 2026-09-15 it
+   * decided that from the OPERAND FIELD - a register number below
+   * three in any of ra, rb, rc marked that stream needed. That is an
+   * over-approximation, and the section that introduced it said so and
+   * called it free, because it "only ever loads more": a defaulted
+   * field is zero, so `alu(op, rd, ra=.., rc=..)` marked stream a and
+   * cost one extra beat read a block.
+   *
+   * R16 made it anything but free. Through an index table that same
+   * unread stream costs the whole table's beats AND one memory round
+   * trip per entry - measured by this parcel's verifier at 9 table
+   * bursts plus 70 element bursts for an fp64 program that names r0
+   * only through a defaulted rb. The saving inverted into the most
+   * expensive path the module has.
+   *
+   * So the rule is now the opcode's, and it is the model's: an operand
+   * the ALU steers away from is not read. ADD and SUB take a and c
+   * (b is steered to 1.0); MUL takes a and b (c is steered to a zero
+   * of the product's sign); FMA and SELECT take all three; the unary
+   * members of the simple group take a alone and the binary ones a and
+   * b. Anything unassigned on this datapath keeps all three, because a
+   * decode that guessed narrow would leave a register reading +0 and
+   * answer confidently.
+   *
+   * Under-approximating here is a SILENT WRONG ANSWER - the stream is
+   * not loaded and its register reads +0 - so the table is held to the
+   * model twice over: tb/test_seq_core.py derives the same three bits
+   * from `sf.steer` and the signatures of `sf.SIMPLE_IMPL` and asserts
+   * every opcode, and every single-op, fuzz and corpus case in the
+   * suite runs opcodes over r0..r2 and compares to the model, where a
+   * stream wrongly skipped is a deposit that differs. */
+  function automatic [2:0] op_reads(input [7:0] op);
+    begin
+      case (op)
+        8'd0:  op_reads = 3'b111;   // FMA          a, b, c
+        8'd1:  op_reads = 3'b101;   // ADD          a, c
+        8'd2:  op_reads = 3'b101;   // SUB          a, c
+        8'd3:  op_reads = 3'b011;   // MUL          a, b
+        8'd4:  op_reads = 3'b001;   // ABS          a
+        8'd5:  op_reads = 3'b001;   // NEG          a
+        8'd6:  op_reads = 3'b011;   // COPYSIGN     a, b
+        8'd7:  op_reads = 3'b011;   // MIN
+        8'd8:  op_reads = 3'b011;   // MAX
+        8'd9:  op_reads = 3'b011;   // MINNUM
+        8'd10: op_reads = 3'b011;   // MAXNUM
+        8'd11: op_reads = 3'b111;   // SELECT       a, b, c
+        8'd12: op_reads = 3'b011;   // CMPLT
+        8'd13: op_reads = 3'b011;   // CMPLE
+        8'd14: op_reads = 3'b011;   // CMPEQ
+        8'd16: op_reads = 3'b011;   // IAND
+        8'd17: op_reads = 3'b011;   // IOR
+        8'd18: op_reads = 3'b011;   // IXOR
+        8'd19: op_reads = 3'b011;   // IADD
+        8'd20: op_reads = 3'b011;   // ISUB
+        8'd21: op_reads = 3'b011;   // ISHL
+        8'd22: op_reads = 3'b011;   // ISHR
+        8'd23: op_reads = 3'b011;   // ICMPLT
+        8'd26: op_reads = 3'b001;   // RECIP_SEED   a
+        8'd27: op_reads = 3'b001;   // RSQRT_SEED   a
+        8'd30: op_reads = 3'b011;   // IMUL         a, b
+        // 15, 24, 25, 28, 29 and 31 upward are unassigned on this
+        // datapath (24/25/28/29/31 are the REDUCTIONS, which a program
+        // cannot issue). All three, so a stream is never skipped for
+        // an opcode whose operand use nobody has written down.
+        default: op_reads = 3'b111;
+      endcase
+    end
+  endfunction
 
   function automatic [7:0] burst_len(input [ADDR_W-1:0] addr,
                                      input [31:0] beats);
@@ -919,6 +1061,14 @@ module cft_seq #(
   // moment its inputs first change - simulation time stops with vvp
   // at full CPU. The bisect that found this took nine builds; the
   // assign form is semantically identical and immune.
+  // The operand use of the instruction at the head of the peel window.
+  // A continuous assign and not an inline call: a function's result
+  // cannot be part-selected here, and calling it three times would
+  // elaborate three copies of the decode. Assign rather than
+  // always_comb, for the reason rd_bl below is an assign.
+  logic [2:0] pw_reads;
+  assign pw_reads = op_reads(pw[7:0]);
+
   logic [7:0] rd_bl, wr_bl;
   assign rd_bl = burst_len(rd_addr, rd_beats_left);
   assign wr_bl = burst_len(wr_addr, wr_beats_left);
@@ -1020,6 +1170,7 @@ module cft_seq #(
   typedef enum logic [5:0] {
     S_IDLE, S_HDR_GO, S_HDR_R, S_CHECK, S_BNK_GO, S_IMG_GO, S_IMG_PARSE,
     S_BLK_SETUP, S_ZERO, S_SIN_GO, S_SIN_PARSE, S_LD_GO, S_LD_STREAM,
+    S_GTH_GO, S_GTH_TBL, S_GTH_ELEM, S_GTH_WAIT,
     S_FETCH, S_FETCH2, S_DECODE,
     S_ALU_ISSUE,
     S_DEP_RD, S_DEP_W8, S_DEP_WR,
@@ -1032,6 +1183,18 @@ module cft_seq #(
     S_WAIT_B, S_NEXT_BLK, S_FIN
   } state_e;
   state_e st;
+  // R16's placement strobe. The sentinel arm of S_GTH_ELEM and the
+  // return in S_GTH_WAIT are the only two producers, and gt_flush says
+  // whether the element closes a beat: either it fills the last
+  // position the format has, or it is the block's last entry and the
+  // beat is short.
+  assign gt_take = ((st == S_GTH_ELEM) && (gt_left != 0) &&
+                    (gt_have != 0) && gt_none) ||
+                   ((st == S_GTH_WAIT) && m_rd_rvalid && m_rd_rready);
+  assign gt_val  = (st == S_GTH_WAIT)
+                 ? scr_elem_fn(gt_sel, m_rd_rdata, wpe_sh) : 256'b0;
+  assign gt_flush = (32'({29'b0, gt_pos}) == 32'(lpb) - 32'd1) ||
+                    (gt_left == 32'd1);
   assign rf_clear = (st == S_BLK_SETUP);
   // The array is SHARED with the engine on the shipping tile, so its
   // result pulses reach this module while the engine runs; only a
@@ -1698,6 +1861,16 @@ module cft_seq #(
   logic [BLK_LANES-1:0] blk_act;
   assign blk_act = blk_act_fn(blk_n, lpb, lpb_sh);
 
+  // Where THIS block's index table starts, for whichever block is
+  // being gathered - written once, read twice in S_GTH_GO, so the
+  // address the first read uses and the address the second table beat
+  // is derived from cannot be two different expressions.
+  logic [ADDR_W-1:0] gt_tbl_base;
+  assign gt_tbl_base =
+      gt_scr ? idx_si_q + ((sin_off >> esz_sh) << 2)
+             : (ld_reg == 2'd0 ? idx_a_q
+              : ld_reg == 2'd1 ? idx_b_q : idx_c_q) + (blk_base << 2);
+
   // lane_cursor counts lanes densely - the drain visits them in the
   // caller's index order - while the lane state is addressed by slot,
   // so the two meet here.
@@ -1840,6 +2013,11 @@ module cft_seq #(
       in_off <= '0; dep_off <= '0;
       sin_off <= '0; sout_off <= '0;
       rd_addr <= '0; rd_sel <= 2'd0; wr_addr <= '0;
+      idx_a_q <= '0; idx_b_q <= '0; idx_c_q <= '0; idx_si_q <= '0;
+      idx_en_q <= '0;
+      gt_tbl <= '0; gt_have <= '0; gt_left <= '0; gt_taddr <= '0;
+      gt_base <= '0; gt_idx <= '0; gt_scr <= 1'b0; gt_beat <= '0;
+      gt_pos <= '0; gt_lane <= '0; gt_slot <= '0;
       bank_phase <= 1'b0; bank_ext_q <= 1'b0;
       bank_q <= '0; sin_q <= '0; sout_q <= '0;
       scr_we <= '0; scr_raddr <= '0;
@@ -1910,6 +2088,58 @@ module cft_seq #(
         wr_burst_left <= wr_burst_left - 1;
       end
 
+      // ---- R16: one gathered element lands ---------------------------
+      //
+      // Outside the case because two states produce one, and after the
+      // rf_we / scr_we defaults above because it asserts them. The
+      // window advances here too, so an entry is consumed exactly
+      // where its element is written and the two cannot get out of
+      // step.
+      if (gt_take) begin
+        gt_tbl  <= {32'b0, gt_tbl[BEAT_BITS-1:32]};
+        gt_have <= gt_have - 4'd1;
+        gt_left <= gt_left - 32'd1;
+        if (gt_scr) begin
+          // The scratch takes one element at a time, lane-major, at
+          // the position its lane owns - S_SIN_PARSE's write, reached
+          // by a different road.
+          scr_we    <= lane_wwe_fn(gt_lane[2:0] & 3'(lpb - 4'd1),
+                                   wpe_sh);
+          scr_waddr <= scr_flat_fn(gt_slot[SCRSW-1:0],
+                                   6'(32'(gt_lane[LB-1:0]) >> lpb_sh));
+          scr_wdata <= place_elem_fn(gt_val,
+                                     gt_lane[2:0] & 3'(lpb - 4'd1),
+                                     wpe_sh);
+          if ((gt_slot + (SCRSW+1)'(1)) >= h_nsin) begin
+            gt_slot <= '0;
+            gt_lane <= gt_lane + 1;
+          end else
+            gt_slot <= gt_slot + (SCRSW+1)'(1);
+        end else begin
+          // A stream's register entry is a whole beat, so elements are
+          // packed until the beat closes. The positions are disjoint,
+          // so the assembly is an OR and needs no strobes.
+          gt_beat <= gt_beat |
+                     BEAT_BITS'(place_elem_fn(gt_val, gt_pos, wpe_sh));
+          if (gt_flush) begin
+            rf_we    <= 1'b1;
+            rf_waddr <= {3'b0, ld_reg, bt[NBSH-1:0]};
+            rf_wdata <= gt_beat |
+                        BEAT_BITS'(place_elem_fn(gt_val, gt_pos, wpe_sh));
+            // Every word, as S_LD_STREAM writes every word: a beat's
+            // padding positions are +0 here rather than whatever the
+            // caller's buffer held past n, which is the one place a
+            // gathered block is not merely the dense block reordered.
+            // No lane the caller has can read them.
+            rf_wwe   <= {WORDS{1'b1}};
+            gt_beat  <= '0;
+            gt_pos   <= '0;
+            bt       <= bt + 1;
+          end else
+            gt_pos <= gt_pos + 3'd1;
+        end
+      end
+
       case (st)
         // --------------------------------------------------------------
         S_IDLE: begin
@@ -1919,6 +2149,9 @@ module cft_seq #(
             d_q <= cfg_d; prog_q <= cfg_prog; cnt_q <= cfg_cnt;
             bank_q <= cfg_bank;
             sin_q <= cfg_sin; sout_q <= cfg_sout;
+            idx_a_q <= cfg_idx_a; idx_b_q <= cfg_idx_b;
+            idx_c_q <= cfg_idx_c; idx_si_q <= cfg_idx_si;
+            idx_en_q <= cfg_indexed;
             flags_q <= '0; dep_ovf_q <= 1'b0; scr_rng_q <= 1'b0;
             refuse_q <= 1'b0;
             rd_fault_q <= 1'b0; wr_fault_q <= 1'b0; len_fault_q <= 1'b0;
@@ -2100,12 +2333,20 @@ module cft_seq #(
             // fields are {imm[25..27], the 4-bit field} since revision
             // 2; a control code reads ra (DEPOSIT, SETACT, STL, STX) or
             // rb (STX, LDX) and never rc.
+            //
+            // `op_reads` gates each field by what the OPCODE consumes,
+            // for the reason its own comment gives at length: through a
+            // table, a stream marked by a defaulted field costs the
+            // whole table and a round trip an entry.
             if (!pw[31]) begin
-              if (!pw[27] && {pw[57], pw[15:12]} < 5'd3)
+              if (pw_reads[0] &&
+                  !pw[27] && {pw[57], pw[15:12]} < 5'd3)
                 rd_need[pw[13:12]] <= 1'b1;
-              if (!pw[28] && {pw[58], pw[19:16]} < 5'd3)
+              if (pw_reads[1] &&
+                  !pw[28] && {pw[58], pw[19:16]} < 5'd3)
                 rd_need[pw[17:16]] <= 1'b1;
-              if (!pw[29] && {pw[59], pw[23:20]} < 5'd3)
+              if (pw_reads[2] &&
+                  !pw[29] && {pw[59], pw[23:20]} < 5'd3)
                 rd_need[pw[21:20]] <= 1'b1;
             end else begin
               if ((pw[7:0] == C_DEPOSIT || pw[7:0] == C_SETACT ||
@@ -2258,7 +2499,11 @@ module cft_seq #(
             // where the contract puts it: a program that declares
             // none skips the phase entirely and touches neither the
             // pointer nor the bus.
-            st <= (h_nsin != 0) ? S_SIN_GO : S_LD_GO;
+            // An indexed scratch block takes the gather in place of
+            // the dense preload; both end at S_LD_GO.
+            gt_scr <= idx_en_q[3];
+            st <= (h_nsin == 0) ? S_LD_GO
+                : idx_en_q[3]   ? S_GTH_GO : S_SIN_GO;
           end
         end
 
@@ -2337,6 +2582,15 @@ module cft_seq #(
               st <= S_FETCH;
             else
               ld_reg <= ld_reg + 1;
+          end else if (idx_en_q[ld_reg]) begin
+            // This stream is fetched through its table. The ELEMENTS
+            // come from the stream's own base and NOT from `+ in_off`:
+            // an entry is a global index into the caller's source,
+            // which has no reason to hold n elements and in the shape
+            // this was built for holds far fewer. The block's slice is
+            // applied to the TABLE instead, in S_GTH_GO.
+            gt_scr <= 1'b0;
+            st <= S_GTH_GO;
           end else begin
             rd_addr <= (ld_reg == 0 ? a_q : ld_reg == 1 ? b_q : c_q)
                        + in_off;
@@ -2367,6 +2621,117 @@ module cft_seq #(
               end
             end
           end
+        end
+
+        // ---- an input block through its index table (R16) -------------
+        //
+        // Entered from S_ZERO for the scratch block and from S_LD_GO
+        // for a stream, and it leaves the way the state it replaced
+        // does: the scratch gather to S_LD_GO, a stream's to the next
+        // stream or to S_FETCH. `gt_scr` is the whole difference
+        // between the two below this setup, and it chooses the
+        // destination and nothing else.
+        S_GTH_GO: begin
+          // WHERE THE BLOCK'S TABLE STARTS - the trap this feature
+          // has. An entry is indexed by the GLOBAL lane, so block b's
+          // entries begin at ENTRY blk_base (or blk_base *
+          // n_scratch_in), a count of entries and not of beats. An
+          // entry is four bytes at every format, being an index and
+          // not an element, so the byte offset is blk_base shifted by
+          // two - and NOT in_off, which is scaled by esz and differs
+          // by a factor of esz/4: at fp64 every lane would read a
+          // plausible neighbour's element and no assertion about
+          // lengths would notice.
+          //
+          // The scratch table is n_scratch_in entries a lane, so its
+          // offset is that product - taken from sin_off, which holds
+          // blk_base * esz * n_scratch_in already, rather than formed
+          // a second time from a second multiplier that could
+          // disagree with the first.
+          gt_base  <= gt_scr ? sin_q
+                    : (ld_reg == 0 ? a_q : ld_reg == 1 ? b_q : c_q);
+          gt_taddr <= gt_tbl_base + ADDR_W'(BEAT_BYTES);
+          gt_left  <= gt_scr ? sin_elems : 32'({24'b0, blk_n});
+          rd_addr  <= gt_tbl_base;
+          // Every read of this gather is a SINGLE BEAT, table and
+          // element alike, so rd_beats_left is set to one at each
+          // issue and rd_stream_on simply stays high: with no beats
+          // owed the address channel issues nothing, and a beat only
+          // arrives because this machine asked for it.
+          rd_sel   <= 2'd0;          // the table rides the A master
+          rd_beats_left <= 32'd1;
+          rd_stream_on <= 1'b1;
+          m_rd_rready <= 1'b1;
+          gt_have <= '0;
+          gt_beat <= '0;
+          gt_pos  <= '0;
+          gt_lane <= '0;
+          gt_slot <= '0;
+          bt      <= '0;
+          st <= S_GTH_TBL;
+        end
+
+        // A beat of the table: eight entries at every format, because
+        // an entry is a u32 and a beat is thirty-two bytes. The block
+        // may own fewer than eight in its last beat, and gt_left, not
+        // gt_have, is what says so.
+        S_GTH_TBL: begin
+          if (m_rd_rvalid && m_rd_rready) begin
+            gt_tbl   <= m_rd_rdata;
+            gt_have  <= 4'(WORDS);
+            // gt_taddr is advanced where a table read is ISSUED (here
+            // it would advance a second time for the same beat), so it
+            // always names the beat after the one in flight.
+            st <= S_GTH_ELEM;
+          end
+        end
+
+        // One entry: +0 and no read for the sentinel (the placement
+        // path above does it and this state simply stays), otherwise
+        // one single-beat read of the beat the element lives in.
+        S_GTH_ELEM: begin
+          if (gt_left == 0) begin
+            // The block is complete; a short last beat has already
+            // been written by gt_flush.
+            m_rd_rready <= 1'b0;
+            rd_stream_on <= 1'b0;
+            if (gt_scr)
+              st <= S_LD_GO;
+            else if (ld_reg == 2'd2)
+              st <= S_FETCH;
+            else begin
+              ld_reg <= ld_reg + 1;
+              st <= S_LD_GO;
+            end
+          end else if (gt_have == 0) begin
+            rd_addr <= gt_taddr;
+            rd_sel  <= 2'd0;
+            rd_beats_left <= 32'd1;
+            gt_taddr <= gt_taddr + ADDR_W'(BEAT_BYTES);
+            st <= S_GTH_TBL;
+          end else if (!gt_none) begin
+            gt_idx  <= gt_ent;
+            // (idx * esz) with the low five bits cleared: the beat the
+            // element lives in. esz is 1 << esz_sh at every format, so
+            // this is a shift and not a product.
+            rd_addr <= gt_base +
+                       ((ADDR_W'({32'b0, gt_ent}) << esz_sh) &
+                        ~(ADDR_W'(BEAT_BYTES) - ADDR_W'(1)));
+            // An element read belongs to the buffer it came from: the
+            // stream's own master, the A master for the scratch pool,
+            // exactly as the dense loads choose.
+            rd_sel  <= gt_scr ? 2'd0 : ld_reg;
+            rd_beats_left <= 32'd1;
+            st <= S_GTH_WAIT;
+          end
+        end
+
+        // The element's beat. One element is selected out of it at the
+        // position the index's low bits give, by the same scr_elem_fn
+        // the scratch-out drain uses; the placement path writes it.
+        S_GTH_WAIT: begin
+          if (m_rd_rvalid && m_rd_rready)
+            st <= S_GTH_ELEM;
         end
 
         // ---- fetch/decode --------------------------------------------

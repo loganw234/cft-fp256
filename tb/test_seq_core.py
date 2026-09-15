@@ -122,6 +122,16 @@ CNT_BASE = 0x04_0000
 # regions overlapped.
 SIN_BASE = 0x05_0000
 SOUT_BASE = 0x08_0000
+# The four index tables (ABI 0.14, R16), each in its own region and all
+# of them far from the buffers they index, for the reason BANK_BASE is
+# far from the image: a gather that read its entries out of the stream
+# it was indexing, or read the A table for the B stream, would pass
+# every check here if the regions were adjacent. Sixty-four kilobytes
+# apart is 16,384 entries, far more than any case below uses.
+IA_BASE = 0x0A_0000
+IB_BASE = 0x0B_0000
+IC_BASE = 0x0C_0000
+ISI_BASE = 0x0D_0000
 D_BASE = 0x10_0000
 
 POISON = 0xA5
@@ -178,6 +188,12 @@ class SeqRam:
         self.aw_count = 0
         self.ar_count = 0
         self.unaligned_ar = 0
+        # Every read burst, in the order it was issued: (address,
+        # beats). A gather's whole behaviour is visible here - which
+        # entries it read, from where, in what order and how many -
+        # and R16's read count is asserted against it rather than
+        # inferred from the answer being right.
+        self.arlog = []
 
     def stage(self, addr, data):
         assert addr + len(data) <= self.size, "staging past the model RAM"
@@ -185,6 +201,10 @@ class SeqRam:
 
     def fetch(self, addr, nbytes):
         return bytes(self.mem[addr:addr + nbytes])
+
+    def reads_in(self, lo, hi):
+        """Every read burst that landed in [lo, hi), in order."""
+        return [(a, b) for (a, b) in self.arlog if lo <= a < hi]
 
     # -- checks ----------------------------------------------------------
 
@@ -285,6 +305,7 @@ class SeqRam:
                     self.unaligned_ar += 1
                 pend.append([addr, alen + 1])
                 self.ar_count += 1
+                self.arlog.append((addr, alen + 1))
             if rvalid and _i(dut.m_rd_rready):
                 cur_r[0] += BEAT_BYTES
                 cur_r[1] -= 1
@@ -456,7 +477,8 @@ class Bench:
         dut.cfg_prec.value = 0
         for name in ("cfg_n", "cfg_a", "cfg_b", "cfg_c", "cfg_d",
                      "cfg_prog", "cfg_bank", "cfg_sin", "cfg_sout",
-                     "cfg_cnt"):
+                     "cfg_cnt", "cfg_indexed", "cfg_idx_a", "cfg_idx_b",
+                     "cfg_idx_c", "cfg_idx_si"):
             getattr(dut, name).value = 0
         cocotb.start_soon(self.ram.serve())
         dut.ap_rst_n.value = 0
@@ -512,7 +534,8 @@ class Bench:
             "max_deposits for this case")
         assert CNT_BASE + cnt_bytes + GUARD <= D_BASE
 
-    def _drive_cfg(self, fmt, n, bank_ptr=None, scratch=False):
+    def _drive_cfg(self, fmt, n, bank_ptr=None, scratch=False,
+                   idx_mask=0):
         dut = self.dut
         dut.cfg_prec.value = PREC_CODE[fmt.name]
         dut.cfg_n.value = n
@@ -534,6 +557,14 @@ class Bench:
         # and here it lands on the write logger's window assertion.
         dut.cfg_sin.value = SIN_BASE if scratch else 0xDEAD_1000
         dut.cfg_sout.value = SOUT_BASE if scratch else 0xDEAD_2000
+        # ...and the four index tables on the same terms (R16). A table
+        # whose MODE bit is clear must never be read, so its pointer is
+        # aimed at nothing; with the bit set it is the staged region.
+        dut.cfg_indexed.value = idx_mask
+        dut.cfg_idx_a.value = IA_BASE if idx_mask & 1 else 0xDEAD_3000
+        dut.cfg_idx_b.value = IB_BASE if idx_mask & 2 else 0xDEAD_4000
+        dut.cfg_idx_c.value = IC_BASE if idx_mask & 4 else 0xDEAD_5000
+        dut.cfg_idx_si.value = ISI_BASE if idx_mask & 8 else 0xDEAD_6000
 
     # -- a refused run ---------------------------------------------------
 
@@ -615,6 +646,159 @@ class Bench:
         self._compare_scratch_out(fmt, prog, n, want, label)
         self.cases["program"] += 1
         return want
+
+    # -- an INDEXED run (revision 6, R16) --------------------------------
+
+    async def gathered(self, fmt, prog, a, b, c, n, label, *,
+                       idx_a=None, idx_b=None, idx_c=None,
+                       scratch_in=None, idx_scratch_in=None,
+                       check_flags=True, check_reads=True):
+        """Run `prog` over `n` lanes with some of its input blocks
+        fetched through index tables, and compare the whole machine -
+        the same comparison `program()` makes, against the model run
+        with the same tables.
+
+        `a`, `b`, `c` are SOURCES where the matching table is given:
+        arbitrarily long, indexed by entry, and staged whole. Where it
+        is not, they are the dense streams they always were.
+
+        `check_reads` asserts the gather's READ TRAFFIC against the
+        table: one burst per table beat at the block's own entry
+        offset, then one single-beat read per non-sentinel entry at
+        that element's beat, in table order. That is the assertion
+        that fails when the block offset is scaled by the element size
+        rather than by four - the failure that otherwise reads as a
+        plausible neighbour's value.
+        """
+        dut = self.dut
+        ebytes = fmt.width // 8
+        maxdep = prog.max_deposits
+        image = prog.to_bytes()
+        dep_bytes = n * maxdep * ebytes
+        cnt_bytes = 4 * n
+        tables = (idx_a, idx_b, idx_c)
+        idx_mask = ((1 if idx_a is not None else 0) |
+                    (2 if idx_b is not None else 0) |
+                    (4 if idx_c is not None else 0) |
+                    (8 if idx_scratch_in is not None else 0))
+        assert idx_mask, f"{label}: a gathered run with no table"
+        # ACTALL over a ragged block is the one place the model and the
+        # hardware read the padding differently (see the module
+        # docstring), and a gathered block's padding is +0 rather than
+        # the caller's bytes - so the two ambiguities would compound.
+        # Every case here is therefore ACTALL-free, which is checked
+        # rather than remembered.
+        assert not has_actall(prog.insns), (
+            f"{label}: a gathered case must not contain ACTALL")
+
+        want = seq.run(prog, list(a), list(b), list(c),
+                       scratch_in=scratch_in,
+                       idx_a=idx_a, idx_b=idx_b, idx_c=idx_c,
+                       idx_scratch_in=idx_scratch_in)
+        sout_bytes = n * prog.n_scratch_out * ebytes
+
+        self._stage(fmt, image, a, b, c, n, dep_bytes, cnt_bytes,
+                    scratch_in=scratch_in)
+        for base, table in ((IA_BASE, idx_a), (IB_BASE, idx_b),
+                            (IC_BASE, idx_c), (ISI_BASE, idx_scratch_in)):
+            if table is None:
+                continue
+            # Beat-padded, as the ABI says a table is - the tile reads
+            # whole beats and the last one of a block may reach past
+            # the entries the caller has.
+            raw = b"".join(int(t).to_bytes(4, "little") for t in table)
+            raw += bytes(POISON for _ in
+                         range(-len(raw) % BEAT_BYTES))
+            self.ram.stage(base, raw)
+        self._drive_cfg(fmt, n, scratch=prog.scratch_io, idx_mask=idx_mask)
+
+        budget = self._budget(fmt, prog, n, len(image))
+        # ...plus the gather's own traffic, which the dense budget knows
+        # nothing about: every entry is a round trip through this
+        # bench's RAM and the state machine spends a handful of cycles
+        # on each. Derived from the tables, never typed.
+        entries = sum(len(t) for t in tables if t is not None)
+        entries += len(idx_scratch_in) if idx_scratch_in is not None else 0
+        budget += 64 * (entries + 64)
+
+        refused, flags, err = await self._go(budget, label)
+        assert refused == 0, f"{label}: the module refused a valid program"
+
+        windows = []
+        if dep_bytes:
+            windows.append((D_BASE, dep_bytes, "deposit"))
+        if cnt_bytes:
+            windows.append((CNT_BASE, cnt_bytes, "count"))
+        if sout_bytes:
+            windows.append((SOUT_BASE, sout_bytes, "scratch-out"))
+        self.ram.assert_writes_inside(windows, label)
+        self.ram.assert_guards(windows, label)
+
+        if check_reads:
+            for r, (tbase, sbase, table) in enumerate((
+                    (IA_BASE, A_BASE, idx_a), (IB_BASE, B_BASE, idx_b),
+                    (IC_BASE, C_BASE, idx_c))):
+                if table is None:
+                    continue
+                self._check_gather_reads(
+                    fmt, tbase, sbase, table, n, 1,
+                    f"{label}: stream {'abc'[r]}")
+            if idx_scratch_in is not None:
+                self._check_gather_reads(
+                    fmt, ISI_BASE, SIN_BASE, idx_scratch_in, n,
+                    prog.n_scratch_in, f"{label}: the scratch block")
+
+        self._compare(fmt, prog, n, want, flags, err, a, b, c, label,
+                      check_flags)
+        self._compare_scratch_out(fmt, prog, n, want, label)
+        self.cases["gathered"] += 1
+        return want
+
+    def _check_gather_reads(self, fmt, tbase, sbase, table, n, per_lane,
+                            label):
+        """The gather's reads, derived from the table and the format.
+
+        Two claims, and each of them is a defect this bench has to be
+        able to see:
+
+        * the table's beats start at the block's own ENTRY offset -
+          blk_base * per_lane entries, four bytes each, and NOT the
+          dense stream's offset, which is scaled by the element size;
+        * one single-beat read per NON-SENTINEL entry, at the beat that
+          holds `source[idx]`, in the table's order - so a sentinel
+          costs no read at all and a mis-scaled address is visible as
+          an address and not as a wrong answer.
+        """
+        ebytes = fmt.width // 8
+        lpb = lanes_per_block(fmt)
+        entries_per_beat = BEAT_BYTES // 4
+        want_tbl, want_el = [], []
+        for base in range(0, n, lpb):
+            blk_n = min(lpb, n - base)
+            first = base * per_lane
+            count = blk_n * per_lane
+            beats = -(-count // entries_per_beat)
+            for j in range(beats):
+                want_tbl.append((tbase + first * 4 + j * BEAT_BYTES, 1))
+            for e in range(first, first + count):
+                if table[e] == seq.IDX_NONE:
+                    continue
+                want_el.append(
+                    (sbase + ((table[e] * ebytes) & ~(BEAT_BYTES - 1)), 1))
+        got_tbl = self.ram.reads_in(tbase, tbase + (1 << 16))
+        got_el = self.ram.reads_in(sbase, sbase + (1 << 16))
+        assert got_tbl == want_tbl, (
+            f"{label}: the table's reads are not the block's entries. "
+            f"got {got_tbl[:6]}... ({len(got_tbl)} bursts), want "
+            f"{want_tbl[:6]}... ({len(want_tbl)}). A block's entries "
+            f"start at entry blk_base * {per_lane}, four bytes each.")
+        assert got_el == want_el, (
+            f"{label}: the element reads are not the table's. got "
+            f"{got_el[:6]}... ({len(got_el)} bursts), want "
+            f"{want_el[:6]}... ({len(want_el)}). "
+            f"{sum(1 for t in table if t == seq.IDX_NONE)} of "
+            f"{len(table)} entries are CFT_IDX_NONE and must cost no "
+            f"read at all.")
 
     def _budget(self, fmt, prog, n, image_bytes):
         blocks = max(1, -(-n // lanes_per_block(fmt)))
@@ -2639,3 +2823,415 @@ async def zero_max_deposits_is_legal(dut):
                         operands(FP32, n, 990), operands(FP32, n, 991),
                         operands(FP32, n, 992), n,
                         "fp32 max_deposits=0: accepted, all overflow")
+
+
+# ======================================================================
+# 13. revision 6, R16: an input block fetched through an index table
+#
+# The mechanism is a gather, so the cases are about ADDRESSES as much
+# as about answers: `Bench.gathered` asserts the read traffic against
+# the table - one burst per table beat at the block's own entry
+# offset, one single-beat read per non-sentinel entry at that
+# element's beat, in order - and then compares every observable
+# against `seq.run()` with the same tables. A one-beat slip in the
+# block offset is an address here, not a plausible neighbour's value.
+# ======================================================================
+
+def _perm_table(n, src_len, seed, none_every=0):
+    """A table with a DISTINCT value in every lane where the source is
+    long enough to have one, so a slip of one entry cannot land on the
+    value the right entry would have given.
+
+    `none_every` puts CFT_IDX_NONE at every k-th lane; those lanes read
+    +0 and must cost no read at all."""
+    rng = random.Random(seed)
+    if src_len >= n:
+        vals = rng.sample(range(src_len), n)
+    else:
+        vals = [(i * 7 + 3) % src_len for i in range(n)]
+    if none_every:
+        for i in range(0, n, none_every):
+            vals[i] = seq.IDX_NONE
+    return vals
+
+
+def _gather_prog(fmt):
+    """r0 + r2 deposited, then r1 * r2: two indexed streams reaching two
+    registers an instruction reads, and a third answer that depends on
+    both, so a table delivered to the wrong register is an answer and
+    not an unread value."""
+    A, M = sf.OP_ADD, sf.OP_MUL
+    return seq.Program(fmt, [
+        seq.alu(A, 3, ra=0, rc=2),
+        seq.alu(M, 4, ra=1, rb=2),
+        seq.alu(A, 5, ra=3, rc=4),
+        seq.deposit(3), seq.deposit(4), seq.deposit(5),
+        seq.halt()], max_deposits=3)
+
+
+@cocotb.test()
+async def gathered_streams_at_every_block_length(dut):
+    """The sweep. Every block length at every format, with a distinct
+    index in every lane and the block's table beats landing where they
+    fall - including `n` a block and a half, where the block's entries
+    start partway through the table and the last beat of a block is
+    short.
+
+    This is the case the block-offset trap has to survive: an entry is
+    indexed by the GLOBAL lane and is four bytes wide at every format,
+    so block b's entries begin at entry blk_base. Scaling that offset
+    by the element size instead - the natural mistake, because every
+    other per-block offset in the module is scaled that way - reads
+    the wrong entries at fp64 and above, and reads them from an
+    address this bench prints.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for name, ns in (("fp32", (8, 129, 192, 256)),
+                     ("fp64", (5, 65, 96, 128)),
+                     ("fp128", (3, 33, 48)),
+                     ("fp256", (1, 17, 24, 32))):
+        fmt = FORMATS[name]
+        prog = _gather_prog(fmt)
+        for n in ns:
+            src = operands(fmt, max(n, 37), 4100 + n)
+            ta = _perm_table(n, len(src), 5100 + n)
+            tc = _perm_table(n, len(src), 5200 + n)
+            await bench.gathered(
+                fmt, prog, src, operands(fmt, n, 4200 + n), src, n,
+                f"{name} n={n}: a and c gathered",
+                idx_a=ta, idx_c=tc)
+    dut._log.info(f"gathered at every block length: "
+                  f"{bench.cases['gathered']} runs")
+
+
+@cocotb.test()
+async def gathered_identity_is_the_dense_run(dut):
+    """Control (a). An identity table must be BIT-IDENTICAL to the dense
+    run over the same stream - every deposit, every count, the flags -
+    and a permuted table must differ from it and equal the model. The
+    second half is what makes the first half a gate: an identity table
+    that agreed because the tile ignored the MODE bit would pass the
+    first and fail the second.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for name in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        prog = _gather_prog(fmt)
+        n = lanes_per_block(fmt) + lanes_per_block(fmt) // 2
+        a = operands(fmt, n, 6100)
+        b = operands(fmt, n, 6200)
+        c = operands(fmt, n, 6300)
+        dense = await bench.program(fmt, prog, a, b, c, n,
+                                    f"{name}: the dense run")
+        ident = await bench.gathered(fmt, prog, a, b, c, n,
+                                     f"{name}: an identity table",
+                                     idx_a=list(range(n)))
+        assert ident.deposits == dense.deposits and \
+            ident.counts == dense.counts and ident.flags == dense.flags, \
+            (f"{name}: an identity table is not the dense run - and both "
+             f"came back from the tile, so this is the tile's answer")
+        perm = _perm_table(n, n, 6400)
+        got = await bench.gathered(fmt, prog, a, b, c, n,
+                                   f"{name}: a permuted table",
+                                   idx_a=perm)
+        assert got.deposits != dense.deposits, (
+            f"{name}: the permuted table gave the dense run's deposits, "
+            f"so this control could not have failed. The permutation is "
+            f"{perm[:8]}...")
+    dut._log.info("identity == dense, permuted != dense, at four formats")
+
+
+@cocotb.test()
+async def gathered_sentinel_reads_plus_zero_and_costs_no_read(dut):
+    """Control (b). CFT_IDX_NONE is +0 in exactly those lanes, and the
+    run issues exactly that many fewer reads.
+
+    The count is measured twice and both are derived: `gathered`
+    asserts the element reads one for one against the table (so a
+    sentinel that issued a read is an extra address), and the run is
+    then repeated with the sentinels replaced by real indices, with the
+    DIFFERENCE in total read bursts asserted against the number of
+    sentinels. Neither number is typed.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for name, every in (("fp32", 3), ("fp64", 2), ("fp256", 4)):
+        fmt = FORMATS[name]
+        prog = _gather_prog(fmt)
+        n = lanes_per_block(fmt) + 3
+        src = operands(fmt, max(n, 29), 7100)
+        full = _perm_table(n, len(src), 7200)
+        holey = list(full)
+        for i in range(0, n, every):
+            holey[i] = seq.IDX_NONE
+        holes = sum(1 for t in holey if t == seq.IDX_NONE)
+        assert holes, f"{name}: this case has no sentinels in it"
+
+        # c is DENSE here and so has exactly n elements; only `a` is
+        # the source, and a source has no reason to be n long.
+        cdense = operands(fmt, n, 7400)
+        await bench.gathered(fmt, prog, src, operands(fmt, n, 7300),
+                             cdense, n, f"{name}: {holes} sentinels",
+                             idx_a=holey)
+        with_holes = bench.ram.ar_count
+        await bench.gathered(fmt, prog, src, operands(fmt, n, 7300),
+                             cdense, n, f"{name}: no sentinels",
+                             idx_a=full)
+        dense_reads = bench.ram.ar_count
+        assert dense_reads - with_holes == holes, (
+            f"{name}: a table with {holes} sentinels issued "
+            f"{dense_reads - with_holes} fewer read bursts than the same "
+            f"table without them. +0 is the format's zero and needs no "
+            f"element, so the saving must be exactly one read a "
+            f"sentinel.")
+        dut._log.info(f"{name}: {holes} sentinels, {dense_reads} reads "
+                      f"dense against {with_holes} gathered")
+
+
+@cocotb.test()
+async def gathered_scratch_block(dut):
+    """The scratch block through its table: n * n_scratch_in entries,
+    lane-major as the block is.
+
+    n_scratch_in is three, so a table read slot-major or a lane's
+    entries taken from the wrong stride lands on another lane's slot
+    and the scratch-out block says so. The pool is deliberately shorter
+    than the block, which is the shape the feature exists for - the
+    gravity fold's contributions are a short array read many times.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for name in ("fp32", "fp64", "fp256"):
+        fmt = FORMATS[name]
+        k = 3
+        prog = seq.Program(fmt, [
+            seq.ldl(3, 0), seq.ldl(4, 1), seq.ldl(5, 2),
+            seq.alu(sf.OP_ADD, 6, ra=3, rc=4),
+            seq.alu(sf.OP_ADD, 6, ra=6, rc=5),
+            seq.stl(6, 3),
+            seq.deposit(6), seq.halt()],
+            max_deposits=1, flags=seq.FLAG_SCRATCH_IO,
+            n_scratch_in=k, n_scratch_out=4)
+        n = lanes_per_block(fmt) + lanes_per_block(fmt) // 2 + 1
+        pool = operands(fmt, 23, 8100 + len(name))
+        tbl = _perm_table(n * k, len(pool), 8200, none_every=5)
+        await bench.gathered(
+            fmt, prog, operands(fmt, n, 8300), operands(fmt, n, 8400),
+            operands(fmt, n, 8500), n,
+            f"{name} n={n}: the scratch block gathered from a "
+            f"{len(pool)}-element pool",
+            scratch_in=pool, idx_scratch_in=tbl)
+    dut._log.info("the scratch block gathers lane-major at three formats")
+
+
+@cocotb.test()
+async def gathered_stream_no_instruction_reads_is_never_fetched(dut):
+    """R10 and R16 together: a stream no instruction reads is not
+    loaded, and that must hold for an indexed one - table included.
+
+    The saving is the reason the fold program in the gravity shape can
+    index one stream and leave the other two alone. Asserted by
+    ADDRESS: with the MODE bit set on b and c and a program that reads
+    r0 alone, not one burst may land in either table's region or in
+    either stream's.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    prog = seq.Program(fmt, [
+        seq.alu(sf.OP_ADD, 3, ra=0, rc=0),
+        seq.deposit(3), seq.halt()], max_deposits=1)
+    n = 40
+    src = operands(fmt, 64, 9100)
+    ta = _perm_table(n, len(src), 9200)
+    tb = _perm_table(n, len(src), 9300)
+    tc = _perm_table(n, len(src), 9400)
+    await bench.gathered(fmt, prog, src, src, src, n,
+                         "fp32: b and c indexed and never read",
+                         idx_a=ta, idx_b=tb, idx_c=tc, check_reads=False)
+    for base, what in ((IB_BASE, "the b table"), (IC_BASE, "the c table"),
+                       (B_BASE, "the b stream"), (C_BASE, "the c stream")):
+        got = bench.ram.reads_in(base, base + (1 << 16))
+        assert not got, (
+            f"{what} was read {len(got)} time(s) by a program that names "
+            f"r0 alone: {got[:4]}. R10 skips a stream no instruction "
+            f"reads, and an indexed stream's TABLE is part of what is "
+            f"skipped.")
+    # ...and the one stream that IS read was gathered, so the case is
+    # not passing because nothing happened at all.
+    bench._check_gather_reads(fmt, IA_BASE, A_BASE, ta, n, 1,
+                              "fp32: the a stream")
+    dut._log.info("an unread indexed stream costs no read, table included")
+
+
+# ======================================================================
+# 14. R10's rule, corrected 2026-09-15: a stream is needed when the
+#     OPCODE reads it, not when an operand field happens to name it
+#
+# The old rule marked a stream from the field alone, so
+# `alu(op, rd, ra=.., rc=..)` - rb defaulted to 0 - marked stream a.
+# Dense that was one extra beat read a block and the section that
+# introduced it called it free. Through an index table it is the whole
+# table plus one round trip an entry, which is the most expensive path
+# the module has, for a stream nothing reads.
+#
+# Under-approximating the other way is a silent wrong answer: the
+# stream is not loaded and its register reads +0. So the RTL's table is
+# derived from the MODEL here and asserted opcode by opcode, and the
+# read counts are measured on the tile beside it.
+# ======================================================================
+
+def _model_reads(op):
+    """Which operand positions opcode `op` consumes, taken from the
+    model's own code rather than from a second copy of the table.
+
+    For the four arithmetic opcodes the authority is `sf.steer`, which
+    maps (op, a, b, c) onto the FMA's three inputs exactly as the RTL's
+    operand mux does: vary one input, and if the mapped triple does not
+    move, the ALU cannot read it. (Membership would be wrong here -
+    SUB passes `negate(xc)`, which is not `xc`.)
+
+    For the simple group the authority is the implementation's own
+    SIGNATURE: `def fabs(fmt, xa, *_)` reads a and nothing else, and
+    `*_` is exactly the statement "the rest is not read".
+
+    An opcode the model does not implement reads all three, which is
+    what the RTL must also assume."""
+    import inspect
+    if op in sf.ARITH_OPS:
+        fmt = FP64
+        base = (0x3FF1_1111_1111_1111, 0x4002_2222_2222_2222,
+                0x4008_3333_3333_3333)
+        alt = (0x3FF4_4444_4444_4444, 0x4005_5555_5555_5555,
+               0x400A_6666_6666_6666)
+        ref = sf.steer(fmt, op, *base)
+        out = []
+        for i in range(3):
+            args = list(base)
+            args[i] = alt[i]
+            out.append(sf.steer(fmt, op, *args) != ref)
+        return tuple(out)
+    impl = sf.SIMPLE_IMPL.get(op)
+    if impl is None:
+        return (True, True, True)
+    names = [p.name for p in inspect.signature(impl).parameters.values()
+             if p.kind is p.POSITIONAL_OR_KEYWORD]
+    return ("xa" in names, "xb" in names, "xc" in names)
+
+
+def _rtl_op_reads():
+    """The RTL's own table, parsed out of rtl/cft_seq.sv's `op_reads`
+    rather than retyped: `8'dN: op_reads = 3'bCBA;`, with the default
+    arm filling every opcode the case does not name."""
+    import re
+    src = (Path(__file__).resolve().parents[1] / "rtl" /
+           "cft_seq.sv").read_text(encoding="utf-8")
+    body = src.split("function automatic [2:0] op_reads", 1)[1]
+    body = body.split("endfunction", 1)[0]
+    table = {}
+    for m in re.finditer(r"8'd(\d+):\s*op_reads\s*=\s*3'b([01]{3})", body):
+        bits = m.group(2)
+        table[int(m.group(1))] = (bits[2] == "1", bits[1] == "1",
+                                  bits[0] == "1")
+    dm = re.search(r"default:\s*op_reads\s*=\s*3'b([01]{3})", body)
+    assert dm, "cft_seq.sv's op_reads has no default arm"
+    d = dm.group(1)
+    default = (d[2] == "1", d[1] == "1", d[0] == "1")
+    assert table, "cft_seq.sv's op_reads named no opcode"
+    return table, default
+
+
+@cocotb.test()
+async def operand_use_is_the_opcode_s(dut):
+    """The RTL's `op_reads` against the model, for all 256 opcodes.
+
+    This is the assertion that stands between a narrowed rd_need and a
+    silent wrong answer: an opcode whose table says "does not read b"
+    while the ALU reads b would leave r1 at +0 for a whole run.
+    """
+    table, default = _rtl_op_reads()
+    bad = []
+    for op in range(256):
+        want = _model_reads(op)
+        got = table.get(op, default)
+        # The RTL may over-approximate (loading a stream nobody reads
+        # is only slower); it may never under-approximate.
+        for p in range(3):
+            if want[p] and not got[p]:
+                bad.append((op, "abc"[p], "model reads it, the RTL "
+                                          "would skip the stream"))
+    assert not bad, (
+        f"rtl/cft_seq.sv's op_reads under-approximates for "
+        f"{len(bad)} (opcode, operand) pair(s), each of which would "
+        f"leave a stream register at +0: {bad[:8]}")
+    # ...and it is not simply "all three everywhere", which would pass
+    # the loop above and buy nothing.
+    narrowed = sum(1 for op, r in table.items() if not all(r))
+    assert narrowed >= 20, (
+        f"only {narrowed} opcodes have a narrowed operand use, so this "
+        f"case is passing on an over-approximation that would leave "
+        f"R16's saving inverted")
+    dut._log.info(f"op_reads: {len(table)} opcodes named, {narrowed} of "
+                  f"them narrower than a, b and c, none under the model")
+
+
+@cocotb.test()
+async def an_unread_stream_costs_nothing_dense_or_gathered(dut):
+    """V1's case, measured. `ADD rd, ra, rc` with rb defaulted to zero
+    names r0 in its rb FIELD and does not read it; neither the stream
+    nor - when it is indexed - its table may be touched.
+
+    Both halves are here because they are different failures: dense it
+    is beats the module did not need, gathered it is a round trip an
+    entry."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP64
+    # ADD reads ra and rc. Both are registers at or above three, so no
+    # stream is read at all - but rb defaults to 0, which is r0.
+    prog = seq.Program(fmt, [
+        seq.ldl(3, 0), seq.ldl(4, 1),
+        seq.alu(sf.OP_ADD, rd=6, ra=3, rc=4),
+        seq.deposit(6), seq.halt()],
+        max_deposits=1, flags=seq.FLAG_SCRATCH_IO,
+        n_scratch_in=2, n_scratch_out=0)
+    assert seq.decode(prog.insns[2])["rb"] == 0, \
+        "this case needs the defaulted rb field that names r0"
+    n = 70
+    block = operands(fmt, n * 2, 4400)
+    await bench.program(fmt, prog, operands(fmt, n, 4401),
+                        operands(fmt, n, 4402), operands(fmt, n, 4403),
+                        n, "fp64: ADD with a defaulted rb, dense",
+                        scratch_in=block)
+    got = bench.ram.reads_in(A_BASE, A_BASE + (1 << 16))
+    assert not got, (
+        f"the a stream was read {len(got)} time(s) by a program whose "
+        f"only mention of r0 is an rb field an ADD does not read: "
+        f"{got[:4]}. R10 skips a stream no instruction READS.")
+
+    # ...and the same program with a table on a. Nothing may be read
+    # from either region - the table above all, which is the cost R16
+    # turned from one beat into one round trip an entry.
+    src = operands(fmt, 23, 4404)
+    tbl = _perm_table(n, len(src), 4405)
+    await bench.gathered(
+        fmt, prog, src, operands(fmt, n, 4402), operands(fmt, n, 4403),
+        n, "fp64: ADD with a defaulted rb, a indexed",
+        idx_a=tbl, scratch_in=block,
+        idx_scratch_in=_perm_table(n * 2, len(block), 4406),
+        check_reads=False)
+    for base, what in ((IA_BASE, "the a table"), (A_BASE, "the a stream")):
+        got = bench.ram.reads_in(base, base + (1 << 16))
+        assert not got, (
+            f"{what} was read {len(got)} time(s) for a stream the "
+            f"program does not read: {got[:4]}. Through a table that "
+            f"is the whole table plus a round trip an entry.")
+    # ...while the block that IS indexed was gathered, so the case is
+    # not passing because nothing happened.
+    bench._check_gather_reads(fmt, ISI_BASE, SIN_BASE,
+                              _perm_table(n * 2, len(block), 4406), n, 2,
+                              "fp64: the scratch block")
+    dut._log.info("an operand field the opcode does not read costs no "
+                  "stream and no table")

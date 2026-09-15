@@ -257,8 +257,9 @@
 //                 +0. Read by the sequencer through the A master,
 //                 each only when its MODE bit ([19] a, [20] b, [21] c,
 //                 [22] scratch_in) is set, and those bits are honoured
-//                 only where CAPS2[9] is set; on every other build the
-//                 guard on MODE[31:19] refuses them at start. Appended
+//                 only where CAPS2[9] is set; on a build without it
+//                 the guard (feat_indexed, below) refuses them at
+//                 start with STATUS[3] and no read issued. Appended
 //                 here at the seam so that the parcel building the
 //                 fetch (P1) and the parcel building the mask (P3)
 //                 share one map and one version.
@@ -351,11 +352,23 @@ module cft_csr (
     /* The MODE bits are decoded here so every consumer reads one
      * name rather than a bit index, which is how MODE[15] is handled. */
     output logic [2:0]  cfg_scalar,    // MODE[18:16], a/b/c stride-0
+    /* MODE[22:19] (ABI 0.14, R16): which of a program run's four input
+     * blocks are fetched through an index table - [0] a, [1] b, [2] c,
+     * [3] scratch_in, the order the four pointer registers are in at
+     * 0x88..0xA0. Decoded here beside cfg_scalar and for the same
+     * reason: the sequencer reads one name rather than a bit index. */
+    output logic [3:0]  cfg_indexed,
     output logic        cfg_mode_bad,  // a MODE bit this build refuses
     /* Constants from cft_krnl's localparams, exactly as prec_caps and
      * op_caps are: the tile decides what it carries, the CSR decides
      * what to refuse, and neither hard-codes the other's answer. */
     input  logic        feat_scalar,
+    /* ...and the same for the index tables (CAPS2[9]). A build whose
+     * sequencer cannot gather refuses MODE[22:19] rather than ignoring
+     * it, which is the same argument feat_scalar makes: an ignored
+     * table would read the dense stream and answer confidently from
+     * the wrong elements. */
+    input  logic        feat_indexed,
     output logic [63:0] cfg_cnt,
     // SEG / NRES (0x80 / 0x84): a reduction's segment length and its
     // result count; zero is the whole array.
@@ -464,17 +477,25 @@ module cft_csr (
   assign cfg_sout = sout_q;
 
   assign cfg_scalar   = mode_q[18:16];
+  assign cfg_indexed  = mode_q[22:19];
 
   /* A MODE bit this build will not honour, which must be REFUSED and
    * never ignored: an ignored stride-0 flag reads n elements from a
-   * one-element buffer. [31:22] is reserved on every build; [21:16] is
-   * refused unless the feature parameter says this tile carries it.
+   * one-element buffer, and an ignored index table reads the dense
+   * stream and answers from the wrong elements with clean flags.
+   * [31:23] is reserved on every build; [22:16] is refused unless the
+   * feature parameter says this tile carries it.
    *
    * Written as an OR of named terms rather than a mask compare, for the
    * reason op_caps is written as a bit per group in cft_krnl.sv: a mask
-   * is one typo away from silently permitting a bit. */
+   * is one typo away from silently permitting a bit.
+   *
+   * MODE[23], the lane mask, is still reserved-must-be-zero on every
+   * build: it stays inside the first term until the parcel that reads
+   * it (P3) gives it a feature bit of its own. */
   assign cfg_mode_bad =
-      (mode_q[31:19] != 13'b0)                    ||
+      (mode_q[31:23] != 9'b0)                     ||
+      (|mode_q[22:19] && !feat_indexed)           ||
       (|mode_q[18:16] && !feat_scalar);
   assign cfg_cnt  = cnt_q;
 

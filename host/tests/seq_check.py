@@ -51,6 +51,22 @@ static slot past the depth, a field a scratch code does not read,
 a ninth bit on an operand that names a register, `imm[31]`, the
 header's `scratch_io` word without its flag or past the depth - are
 corrupted in and must be refused by both.
+
+Since 2026-09-15 a FOURTH corpus runs after the three, again from its
+own generator seed so the first three still draw what they always drew:
+revision 6's R16 - an input block fetched through an index table. Each
+program's streams and scratch block are drawn as SOURCES of a length
+unrelated to n, with a table per block that carries distinct values and
+`CFT_IDX_NONE` in some fraction of its entries, and both executors are
+asked for the same run. Three things this corpus reaches that no other
+does: the gather itself, blocked in sixty-fours on the C side and whole
+in the model (the third claim of this file applied to tables, which
+must be sliced the same way); the bound, an index at or past the
+declared source length, which both must refuse by name and by value;
+and the identity table, which must give BIT-IDENTICAL output to the
+dense run the same program makes over the same values - the control
+that a table which was quietly ignored would also pass, and which the
+permuted half beside it is there to fail.
 """
 
 import argparse
@@ -169,6 +185,285 @@ class RunArgs(ctypes.Structure):
                 ("idx_scratch_src", ctypes.c_size_t),
                 ("lane_mask", ctypes.c_void_p),
                 ("lane_mask_bytes", ctypes.c_size_t)]
+
+
+def run_in_c_idx(lib, dev, prog, a, b, c, n, scratch_in, idx):
+    """-> (deposits, counts, flags, status, scratch_out), or the
+    library's refusal as a RuntimeError, through cft_program_run_ex
+    with ABI 0.14's index tables.
+
+    `a`, `b`, `c` and `scratch_in` are the SOURCES the tables index and
+    have no reason to hold n elements; `idx` is
+    (idx_a, idx_b, idx_c, idx_scratch_in), each a list or None. This is
+    a separate entry point from run_in_c_ex and not a widening of it,
+    so that the three corpora above keep calling the function they have
+    always called with the arguments they have always passed."""
+    fmt = prog.fmt
+    esz = fmt.width // 8
+    image = prog.to_bytes()
+    nsin, nsout = prog.n_scratch_in, prog.n_scratch_out
+
+    handle = ctypes.c_void_p()
+    st = lib.cft_program_load(dev, image, len(image), ctypes.byref(handle))
+    if st != CFT_OK:
+        raise RuntimeError(f"cft_program_load: "
+                           f"{lib.cft_strerror(st).decode()}")
+    try:
+        def pack(vals):
+            return ctypes.create_string_buffer(
+                b"".join(v.to_bytes(esz, "little") for v in vals),
+                max(1, len(vals) * esz))
+
+        def pack_idx(vals):
+            if vals is None:
+                return None
+            return ctypes.create_string_buffer(
+                b"".join(int(v).to_bytes(4, "little") for v in vals),
+                max(1, len(vals) * 4))
+
+        buf_a, buf_b, buf_c = pack(a), pack(b), pack(c)
+        ndep = n * prog.max_deposits
+        buf_d = ctypes.create_string_buffer(max(1, ndep * esz))
+        counts = (ctypes.c_uint32 * max(1, n))()
+        flags = ctypes.c_uint32(0)
+        bus = ctypes.c_uint32(0)
+        buf_si = pack(scratch_in) if nsin else None
+        buf_so = (ctypes.create_string_buffer(max(1, n * nsout * esz))
+                  if nsout else None)
+        tabs = [pack_idx(t) for t in idx]
+
+        args = RunArgs()
+        args.struct_size = ctypes.sizeof(RunArgs)
+        args.a = ctypes.cast(buf_a, ctypes.c_void_p)
+        args.b = ctypes.cast(buf_b, ctypes.c_void_p)
+        args.c = ctypes.cast(buf_c, ctypes.c_void_p)
+        args.n = n
+        args.bank, args.bank_bytes = None, 0
+        args.scratch_in = (ctypes.cast(buf_si, ctypes.c_void_p)
+                           if buf_si is not None else None)
+        # With a table this is the POOL's length, not the block's -
+        # which is the one shape rule the indexed scratch block adds.
+        args.scratch_in_bytes = (len(scratch_in) * esz) if nsin else 0
+        args.scratch_out = (ctypes.cast(buf_so, ctypes.c_void_p)
+                            if buf_so is not None else None)
+        args.scratch_out_bytes = n * nsout * esz
+        args.deposits = ctypes.cast(buf_d, ctypes.c_void_p)
+        args.counts = counts
+        args.flags_out = ctypes.pointer(flags)
+        args.bus_out = ctypes.pointer(bus)
+        for field, src, buf, srclen in (
+                ("idx_a", idx[0], tabs[0], len(a)),
+                ("idx_b", idx[1], tabs[1], len(b)),
+                ("idx_c", idx[2], tabs[2], len(c))):
+            if src is None:
+                continue
+            setattr(args, field, ctypes.cast(buf, ctypes.c_void_p))
+            setattr(args, field + "_src", srclen)
+        if idx[3] is not None:
+            args.idx_scratch_in = ctypes.cast(tabs[3], ctypes.c_void_p)
+            args.idx_scratch_src = len(scratch_in)
+        st = lib.cft_program_run_ex(handle, ctypes.byref(args))
+        if st != CFT_OK:
+            raise RuntimeError(f"cft_program_run_ex: "
+                               f"{lib.cft_strerror(st).decode()}")
+        raw = buf_d.raw
+        deposits = [int.from_bytes(raw[i * esz:(i + 1) * esz], "little")
+                    for i in range(ndep)]
+        sout = []
+        if nsout:
+            raw = buf_so.raw
+            sout = [int.from_bytes(raw[i * esz:(i + 1) * esz], "little")
+                    for i in range(n * nsout)]
+        return deposits, list(counts)[:n], flags.value, bus.value, sout
+    finally:
+        lib.cft_program_free(handle)
+
+
+def make_table(rng, n, src_len, none_frac):
+    """A table of n entries into a source of src_len, with some
+    fraction of them CFT_IDX_NONE. Distinct where the source is long
+    enough to allow it, so an entry read one place out lands on a value
+    the right entry could not have given."""
+    if src_len >= n:
+        vals = rng.sample(range(src_len), n)
+    else:
+        vals = [rng.randrange(src_len) for _ in range(n)]
+    for i in range(n):
+        if rng.random() < none_frac:
+            vals[i] = seq.IDX_NONE
+    return vals
+
+
+def indexed_corpus(lib, dev, fmt, name, args, S):
+    """The fourth corpus, for one format. Mutates the counters in S."""
+    rng = random.Random(args.seed ^ (fmt.width * 6151) ^ 0x1D6ED)
+    checked = 0
+    for _trial in range(max(1, args.trials // 2)):
+        insns, consts = seq.random_program(fmt, rng, nconst=3,
+                                           extended=True, wide_regs=True,
+                                           scratch=True)
+        maxdep = rng.choice([1, 2, 4])
+        io = rng.random() < 0.5
+        nsin = rng.choice([1, 2, 3]) if io else 0
+        nsout = rng.choice([0, 1, 2]) if io else 0
+        flags = seq.FLAG_SCRATCH_IO if io else 0
+        try:
+            prog = seq.Program(fmt, insns, consts, maxdep, flags=flags,
+                               n_scratch_in=nsin, n_scratch_out=nsout)
+        except seq.ProgramError:
+            continue
+        # n and the SOURCE lengths are drawn independently: a source
+        # shorter than the run is the shape this feature exists for,
+        # and a source longer than it is the one where an index past n
+        # is still perfectly legal.
+        n = rng.choice([1, 2, 63, 64, 65, 100, 129])
+        if n > 64:
+            S["blocked"] += 1
+        alen = rng.choice([1, 3, max(1, n // 2), n, n + 37])
+        blen = rng.choice([1, max(1, n // 3), n, 2 * n])
+        clen = rng.choice([1, 7, n, n + 5])
+        a = seq.random_inputs(fmt, rng, alen)
+        b = seq.random_inputs(fmt, rng, blen)
+        c = seq.random_inputs(fmt, rng, clen)
+        none_frac = rng.choice([0.0, 0.1, 0.4])
+        # Which blocks are indexed: at least one, or there is nothing
+        # here this file does not already test.
+        want_idx = [rng.random() < 0.6 for _ in range(3)]
+        want_si = io and nsin and rng.random() < 0.6
+        if not any(want_idx) and not want_si:
+            want_idx[0] = True
+        tabs = [make_table(rng, n, ln, none_frac) if w else None
+                for w, ln in zip(want_idx, (alen, blen, clen))]
+        pool = None
+        if io and nsin:
+            plen = rng.choice([1, 5, n, n * nsin])
+            pool = seq.random_inputs(fmt, rng, plen)
+        si_tab = (make_table(rng, n * nsin, len(pool), none_frac)
+                  if want_si else None)
+        for t in tabs + [si_tab]:
+            if t is None:
+                continue
+            S["tables"] += 1
+            S["none"] += sum(1 for v in t if v == seq.IDX_NONE)
+        # Streams with no table must be exactly n long, as they always
+        # were; the gathered ones are their own length.
+        for r, t in enumerate(tabs):
+            if t is not None:
+                continue
+            vals = seq.random_inputs(fmt, rng, n)
+            if r == 0:
+                a = vals
+            elif r == 1:
+                b = vals
+            else:
+                c = vals
+        sin_dense = (seq.random_inputs(fmt, rng, n * nsin)
+                     if (io and nsin and not want_si) else None)
+        sin_arg = pool if want_si else sin_dense
+
+        # One trial in six puts an index AT the source's length - the
+        # off-by-one the bound exists for - and both sides must refuse
+        # it by name and by value, before the run.
+        if rng.random() < 1 / 6:
+            which = next((i for i, t in enumerate(tabs) if t is not None),
+                         None)
+            if which is not None:
+                lens = (len(a), len(b), len(c))
+                tabs[which] = list(tabs[which])
+                tabs[which][rng.randrange(n)] = lens[which]
+                try:
+                    seq.run(prog, a, b, c, scratch_in=sin_arg,
+                            idx_a=tabs[0], idx_b=tabs[1], idx_c=tabs[2],
+                            idx_scratch_in=si_tab)
+                    print(f"  MISMATCH {name} (indexed corpus): the model "
+                          f"ACCEPTED an index at the source's length")
+                    S["bad"] += 1
+                    continue
+                except seq.ProgramError:
+                    pass
+                try:
+                    run_in_c_idx(lib, dev, prog, a, b, c, n, sin_arg,
+                                 (tabs[0], tabs[1], tabs[2], si_tab))
+                    print(f"  MISMATCH {name} (indexed corpus): libcft ran "
+                          f"a program whose index is at the source's "
+                          f"length, which the model refuses")
+                    S["bad"] += 1
+                except RuntimeError:
+                    S["oob"] += 1
+                continue
+
+        want = seq.run(prog, a, b, c, scratch_in=sin_arg,
+                       idx_a=tabs[0], idx_b=tabs[1], idx_c=tabs[2],
+                       idx_scratch_in=si_tab)
+        try:
+            got = run_in_c_idx(lib, dev, prog, a, b, c, n, sin_arg,
+                               (tabs[0], tabs[1], tabs[2], si_tab))
+        except RuntimeError as e:
+            print(f"  MISMATCH {name} (indexed corpus): the model runs "
+                  f"this program and libcft refuses it: {e}")
+            S["bad"] += 1
+            continue
+        got_dep, got_counts, got_flags, got_status, got_so = got
+        if (got_dep != want.deposits or got_counts != want.counts
+                or got_flags != want.flags or got_status != want.status
+                or got_so != want.scratch_out):
+            S["bad"] += 1
+            if S["bad"] <= 3:
+                print(f"  MISMATCH {name} (indexed corpus) n={n} "
+                      f"lens={len(a)},{len(b)},{len(c)} "
+                      f"tables={[t is not None for t in tabs]} "
+                      f"si={si_tab is not None}")
+                print(f"    program  {[hex(i) for i in insns]}")
+                print(f"    flags    model 0x{want.flags:02x}  "
+                      f"libcft 0x{got_flags:02x}")
+                for i, (w, g) in enumerate(zip(want.deposits, got_dep)):
+                    if w != g:
+                        print(f"    deposit[{i}] model 0x{w:x} "
+                              f"libcft 0x{g:x}")
+                        break
+        checked += 1
+        S["total"] += 1
+
+        # The control, on one trial in five. Its program is not the
+        # random one: DEPOSIT r0 puts the gathered element itself in
+        # the output, so an identity table is bit-identical to the
+        # dense run BY CONSTRUCTION and a rotated one cannot be -
+        # which is what makes the first half a gate rather than a
+        # tautology. A random program may never read r0 at all, and
+        # then both halves pass and neither proves anything.
+        if rng.random() < 0.2:
+            ctl = seq.Program(fmt, [seq.deposit(0), seq.halt()],
+                              max_deposits=1)
+            vals = seq.random_inputs(fmt, rng, n)
+            ident = list(range(n))
+            dense = run_in_c_idx(lib, dev, ctl, vals, vals, vals, n,
+                                 None, (None, None, None, None))
+            same = run_in_c_idx(lib, dev, ctl, vals, vals, vals, n,
+                                None, (ident, None, None, None))
+            if dense != same:
+                print(f"  MISMATCH {name} (indexed corpus): an identity "
+                      f"table is not the dense run, in libcft")
+                S["bad"] += 1
+            S["identity"] += 1
+            if n > 1 and len(set(vals)) > 1:
+                perm = [(i + 1) % n for i in range(n)]
+                other = run_in_c_idx(lib, dev, ctl, vals, vals, vals, n,
+                                     None, (perm, None, None, None))
+                if other == dense:
+                    print(f"  MISMATCH {name} (indexed corpus): a rotated "
+                          f"table gave the DENSE answer from a program "
+                          f"that deposits r0, so the identity half of "
+                          f"this control could not have failed")
+                    S["bad"] += 1
+                else:
+                    S["permuted"] += 1
+                # ...and the rotation is what the model says it is.
+                want_rot = seq.run(ctl, vals, vals, vals, idx_a=perm)
+                if other[0] != want_rot.deposits:
+                    print(f"  MISMATCH {name} (indexed corpus): the "
+                          f"rotated run differs from the model")
+                    S["bad"] += 1
+    print(f"{name}: {checked} indexed-corpus programs compared")
 
 
 def run_in_c_ex(lib, dev, prog, a, b, c, scratch_in):
@@ -543,6 +838,11 @@ def main():
     extended = saw_kx = saw_imul = saw_wide = 0
     S = dict(total=0, refused=0, bad=0, stl=0, ldl=0, stx=0, ldx=0,
              io=0, kx9=0, blocked=0, strict=0, range=0)
+    # The fourth corpus keeps its own counters, so a form it fails to
+    # reach is named as the indexed corpus's and not hidden in the
+    # scratch corpus's totals (R16, 2026-09-15).
+    X = dict(total=0, bad=0, blocked=0, tables=0, none=0, oob=0,
+             identity=0, permuted=0)
     try:
         for name in args.formats:
             fmt = FORMATS[name]
@@ -646,6 +946,7 @@ def main():
                 total += 1
             print(f"{name}: {checked} programs compared")
             scratch_corpus(lib, dev, fmt, name, args, S)
+            indexed_corpus(lib, dev, fmt, name, args, X)
     finally:
         lib.cft_close(dev)
 
@@ -663,7 +964,20 @@ def main():
           f"block declared, {S['kx9']} constant indices at or past "
           f"256, {S['strict']} with SCRATCH_STRICT of which "
           f"{S['range']} reported an out-of-range index")
-    bad += S["bad"]
+    print(f"{X['total']} programs from the indexed corpus run through "
+          f"both, {X['blocked']} across the block boundary: {X['tables']} "
+          f"tables with {X['none']} CFT_IDX_NONE entries among them, "
+          f"{X['oob']} indices at the source's length refused by both, "
+          f"{X['identity']} identity-table controls and {X['permuted']} "
+          f"permuted ones")
+    bad += S["bad"] + X["bad"]
+    if X["total"] and not (X["tables"] and X["none"] and X["oob"]
+                           and X["identity"] and X["permuted"]):
+        print("THE INDEXED CORPUS DID NOT REACH EVERY FORM - no table, "
+              "no CFT_IDX_NONE entry, no index refused at the source's "
+              "length, or no identity/permuted control pair, which "
+              "would mean R16 was not actually compared")
+        return 1
     if S["total"] and not (S["stl"] and S["ldl"] and S["stx"]
                            and S["ldx"] and S["io"] and S["kx9"]
                            and S["refused"] and S["strict"]
