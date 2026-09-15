@@ -2393,21 +2393,49 @@ runs nothing and writes nothing, its outputs left as the caller had
 them. Both are one line in the software backend, which is the
 definition.
 
-**At this step every field is refused.** The shape rules are checked
-first and are final - a table on a NULL operand, a table on an operand
-that is also scalar, a source length of zero beside a table or a length
-beside no table, a scratch table on a program that declares no scratch
-input, a mask whose byte count is not `(n + 7) / 8` - each
-`CFT_ERR_INVALID_ARGUMENT` with a sentence naming the field. A
-well-formed table or mask is then `CFT_ERR_UNSUPPORTED` with a sentence
-naming the parcel that builds it (P1 the program run's tables, P2 the
-elementwise run's, P3 the mask). A caller built against 0.14 today
-therefore gets a refusal it can read rather than a run with a field
-silently dropped, and every existing call runs exactly as it did.
+**The shape rules are checked first and are final** - a table on a
+NULL operand, a table on an operand that is also scalar, a source
+length of zero beside a table or a length beside no table, a scratch
+table on a program that declares no scratch input, a mask whose byte
+count is not `(n + 7) / 8` - each `CFT_ERR_INVALID_ARGUMENT` with a
+sentence naming the field. A well-formed field a backend does not yet
+build is `CFT_ERR_UNSUPPORTED` with a sentence naming the parcel that
+builds it. A caller built against 0.14 gets a refusal it can read
+rather than a run with a field silently dropped, and every existing
+call runs exactly as it did.
 
-**What lands with the parcels**, and where this section grows: P1 -
-the tables on a program run, on the software backend, the model, the
-C executor and a tile publishing `CFT_SEQ_FEAT_INDEXED`; P2 -
+**`cft_program_run_ex`'s four tables are built (P1, 2026-09-15).**
+Pass `idx_a` and `a` is the SOURCE the table indexes rather than the
+run's `n` elements: it may hold any number of them, and `idx_a_src`
+states how many. Element `i` of the stream is `a[idx_a[i]]`, and
+`CFT_IDX_NONE` is `+0` - the format's positive zero, in a lane that
+issues no read for it at all. `idx_scratch_in` is the same for the
+scratch block: `n * n_scratch_in` entries, lane-major as the block is,
+into the pool passed as `scratch_in`, whose length `idx_scratch_src`
+states and whose `scratch_in_bytes` must agree with it. Three things
+follow, and each is a refusal rather than a surprise:
+
+* **An index at or past `idx_*_src` is refused BEFORE the run**, on
+  every backend, `CFT_ERR_INVALID_ARGUMENT` naming the table, the
+  entry and the value. A device must never read past a buffer for a
+  caller, and a bound checked on the host is one every backend
+  inherits without any of them having to agree on what a bad index
+  would have computed.
+* **A device that does not publish `CFT_SEQ_FEAT_INDEXED` is refused
+  by name.** Ask `cft_get_caps` first. The software backend always
+  carries it; a tile carries it from CAPS2[9]; the program run's
+  REMOTE route does not carry it at all yet and says so (gather on the
+  client and send the dense block).
+* **An identity table is bit-identical to the dense run**, by
+  construction and not by luck: the run is defined as the dense run
+  over the gathered block, so there is no new rounding rule and
+  nothing new for the model to define.
+
+`cft_elem_args`'s three tables (P2) and the lane mask (P3) are still
+refused by name.
+
+**What lands with the parcels**, and where this section grows: P1 is
+in (above); P2 -
 `cft_run_ex`'s tables, composed on a tile as a three-instruction
 program over P1's mechanism, gathered on the client for the remote
 backend; P3 - the mask, with the tile publishing
