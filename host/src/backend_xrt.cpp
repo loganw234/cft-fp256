@@ -1912,7 +1912,7 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
             rr.set_arg(11, static_cast<uint64_t>(0));
             rr.set_arg(12, *ob[CFT_ROLE_IA]); rr.set_arg(13, *ob[CFT_ROLE_IB]);
             rr.set_arg(14, *ob[CFT_ROLE_IC]); rr.set_arg(15, *ob[CFT_ROLE_ISI]);
-            rr.set_arg(16, &addr, sizeof addr);
+            rr.set_arg(16, addr);
             std::fprintf(stderr, "[xrt trace] argument 16 overridden with "
                          "0x%016llx\n", static_cast<unsigned long long>(addr));
             rr.start();
