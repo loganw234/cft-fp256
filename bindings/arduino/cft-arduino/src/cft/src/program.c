@@ -2073,13 +2073,13 @@ CFT_API cft_status cft_program_run_ex(cft_program *prog,
             const size_t per = esz * (prog->max_deposits ? prog->max_deposits
                                                           : 1u);
             if (A.n > ((size_t)-1) / per) {
-                cft_set_error("cft_program_run_ex: n = %lu elements is more "
+                cft_set_error("cft_program_run_ex: n = %llu elements is more "
                               "than this library can size (max_deposits "
-                              "%u, %lu bytes an element) - refused before "
+                              "%u, %llu bytes an element) - refused before "
                               "any table or mask is read",
-                              (unsigned long)A.n,
+                              (unsigned long long)A.n,
                               (unsigned)prog->max_deposits,
-                              (unsigned long)esz);
+                              (unsigned long long)esz);
                 return CFT_ERR_INVALID_ARGUMENT;
             }
         }

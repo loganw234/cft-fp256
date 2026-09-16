@@ -1313,42 +1313,41 @@ static cft_status run_impl(cft_device *dev,
      * ones, so that a check added to the dense path later is inherited
      * here instead of being forgotten here. */
     if (tables_present(tab)) {
-        const void *opnd[3];
-        int r;
-        opnd[0] = a; opnd[1] = b; opnd[2] = c;
-    /* ALIASING. `d` may alias a, b or c in a DENSE run and still
-     * may: the element loop loads before it stores and element i
-     * of the output is element i of the input, so the two never
-     * disagree. WITH A TABLE the run is a different machine and
-     * `d` may overlap nothing.
-     *
-     * For the indexed operand itself the reason is immediate: lane
-     * i reads source[idx[i]], which is ANY element of the source
-     * rather than element i, so a source the run is also writing is
-     * read after write and the answer depends on the order the
-     * lanes happen to run in.
-     *
-     * For the DENSE operands beside it the reason is the route. A
-     * table makes this run a program on a device, and a program's
-     * deposit window is a separate buffer ROLE with its own write
-     * discipline - the software executor zeroes the whole window
-     * before its first block, the XRT path binds it as an output
-     * and never syncs it in - so `d` overlapping any operand means
-     * something different on each backend. Refusing all three is
-     * the only rule that gives one answer everywhere, which is
-     * worth more than the in-place update it costs: a caller who
-     * wants one can run into their own buffer and copy, and will
-     * know they did.
-     *
-     * Refused on every backend and not only where it bites - the
-     * software route gathers into temporaries first and would
-     * survive it, and a rule that held on two backends out of three
-     * is not a rule.
-     *
-     * Windows, not pointers: an indexed source is idx_*_src
-     * elements, a dense one is n, the output is n, and none of them
-     * need start at the same place to collide. */
-    if (tables_present(tab)) {
+            const void *opnd[3];
+            int r;
+            opnd[0] = a; opnd[1] = b; opnd[2] = c;
+        /* ALIASING. `d` may alias a, b or c in a DENSE run and still
+         * may: the element loop loads before it stores and element i
+         * of the output is element i of the input, so the two never
+         * disagree. WITH A TABLE the run is a different machine and
+         * `d` may overlap nothing.
+         *
+         * For the indexed operand itself the reason is immediate: lane
+         * i reads source[idx[i]], which is ANY element of the source
+         * rather than element i, so a source the run is also writing is
+         * read after write and the answer depends on the order the
+         * lanes happen to run in.
+         *
+         * For the DENSE operands beside it the reason is the route. A
+         * table makes this run a program on a device, and a program's
+         * deposit window is a separate buffer ROLE with its own write
+         * discipline - the software executor zeroes the whole window
+         * before its first block, the XRT path binds it as an output
+         * and never syncs it in - so `d` overlapping any operand means
+         * something different on each backend. Refusing all three is
+         * the only rule that gives one answer everywhere, which is
+         * worth more than the in-place update it costs: a caller who
+         * wants one can run into their own buffer and copy, and will
+         * know they did.
+         *
+         * Refused on every backend and not only where it bites - the
+         * software route gathers into temporaries first and would
+         * survive it, and a rule that held on two backends out of three
+         * is not a rule.
+         *
+         * Windows, not pointers: an indexed source is idx_*_src
+         * elements, a dense one is n, the output is n, and none of them
+         * need start at the same place to collide. */
         const size_t fsz = cft_format_size(fmt);
         const size_t dbytes = n * fsz;
         for (r = 0; r < 3; r++) {
@@ -1372,33 +1371,32 @@ static cft_status run_impl(cft_device *dev,
                 return CFT_ERR_INVALID_ARGUMENT;
             }
         }
-    }
-    /* The bound, checked BEFORE the run and on every backend, by
-     * name and by value: an index at or past the source's declared
-     * length is refused, because a device must never read past a
-     * buffer for a caller. Word for word the rule seq_check_round2
-     * holds a program run to, so the composed route and the program
-     * it composes into refuse the same table with the same
-     * sentence. CFT_IDX_NONE is not an index and is never out of
-     * range. */
-    for (r = 0; r < 3; r++) {
-        size_t e;
-        if (!tab->idx[r])
-            continue;
-        for (e = 0; e < n; e++) {
-            if (tab->idx[r][e] == CFT_IDX_NONE)
+        /* The bound, checked BEFORE the run and on every backend, by
+         * name and by value: an index at or past the source's declared
+         * length is refused, because a device must never read past a
+         * buffer for a caller. Word for word the rule seq_check_round2
+         * holds a program run to, so the composed route and the program
+         * it composes into refuse the same table with the same
+         * sentence. CFT_IDX_NONE is not an index and is never out of
+         * range. */
+        for (r = 0; r < 3; r++) {
+            size_t e;
+            if (!tab->idx[r])
                 continue;
-            if ((size_t)tab->idx[r][e] >= tab->src[r]) {
-                cft_set_error(
-                    "cft_run_ex: idx_%c[%lu] = %lu is at or past the "
-                    "%lu elements idx_%c_src says operand %c holds",
-                    'a' + r, (unsigned long)e,
-                    (unsigned long)tab->idx[r][e], (unsigned long)tab->src[r],
-                    'a' + r, 'a' + r);
-                return CFT_ERR_INVALID_ARGUMENT;
+            for (e = 0; e < n; e++) {
+                if (tab->idx[r][e] == CFT_IDX_NONE)
+                    continue;
+                if ((size_t)tab->idx[r][e] >= tab->src[r]) {
+                    cft_set_error(
+                        "cft_run_ex: idx_%c[%lu] = %lu is at or past the "
+                        "%lu elements idx_%c_src says operand %c holds",
+                        'a' + r, (unsigned long)e,
+                        (unsigned long)tab->idx[r][e], (unsigned long)tab->src[r],
+                        'a' + r, 'a' + r);
+                    return CFT_ERR_INVALID_ARGUMENT;
+                }
             }
         }
-    }
     }
     /* ==== R16: an indexed elementwise run (ABI 0.14) =================
      *
