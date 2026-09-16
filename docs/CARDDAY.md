@@ -518,6 +518,40 @@ default), built once at the end of wave 2.
   a card-backed `cft-serve` fronting a tile without a feature is the
   first place that sentence is reachable.
 
+### What the card said (2026-09-15, the round-2 single tile; docs/VALIDATION.md has the whole day)
+
+- **The new legs**: green on both images once the tests were right
+  for an older image (1ee9189) - and on the round-2 image only after
+  TWO host defects the card found, neither in the RTL: a masked run's
+  staged deposit window came back holding the previous run's output
+  (the tile strobes a masked lane off; the device copy was never the
+  caller's - be1ac1f/db085ab stage it first), and buffer-object
+  capacities above ~300 lanes corrupted the heap (page-granular
+  behaviour behind a beat-granular capacity - d40ad23). device-test
+  -n 8 / 336 / 1000 / 4097: 2,248 checks, 0 failed; -b: 729, 0, the
+  resident-binds assertion counting for the first time.
+- **gathertime at the gravity shape**: 310-340 ns a gathered element
+  at every format - one HBM round trip, as R16 predicted; 128 bodies
+  fp64 one run 15.6 ms against 127 calls at 26.7 ms (x1.71, the host
+  gathers removed as well).
+- **The composed route's STATUS word**: compared with the dense run's
+  in `compare_indexed_elem` (ce01e41) - equal on the card.
+- **The mask's cost**: x1.013 of the unmasked run at 384 lanes, every
+  format - one beat read a block and no compute saved, as R17 said.
+- **P4's segmented timing**: fp64 E = 1000 x L = 192 sum 2,351 us in
+  one call against 91,108 us in a thousand; fp32 1,739 us; fp128
+  3,863 us; the whole-array flush dominates below E = 64 (220 us).
+- **The area column**: kernel WNS +0.266 ns at 135 MHz for the single
+  tile; the quad's is its own entry.
+- **The three instruments that told a host defect from a tile defect**
+  - `CFT_XRT_TRACE` (what the tile received, and a pattern in the
+  count window's staging pad that the strobes must leave alone),
+  `CFT_XRT_MASK_ADDR_OVERRIDE` (does the tile read the mask: a fault
+  says yes), `host/tools/maskflags.py` (did the mask reach the lanes:
+  FLAGS under poisoned masked lanes) - stay in the tree and belong to
+  every card day after this one: read them in the order above, and
+  the RTL last.
+
 ## What to record
 
 The manifest format already exists; the run record should match it in
