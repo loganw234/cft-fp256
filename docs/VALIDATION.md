@@ -12740,3 +12740,43 @@ Instruments left in the tree, all named above: `CFT_XRT_TRACE` (now
 also the count pad), `CFT_XRT_MASK_ADDR_OVERRIDE`, `maskflags.py`, the
 fingerprint line in `gathertime.py`, `tb/probe_mask_latency.py`. The
 quad image is the next entry.
+
+## 2026-09-16 - round 2's quad: the first implementation missed 135 MHz, on the engine's oldest path
+
+`hw/build-pair.sh --tag round2` finished its quad half at 02:55, 359
+minutes after the single was staged: `design did not meet timing`,
+system-clock slack -0.224 ns, kernel-side WNS -0.363 ns, 1,824 failing
+endpoints of 1,042,969. Nothing was staged for the quad; the single
+(kernel +0.266 ns, routed +0.032 ns, `97482ec7...`) is unaffected and
+is the image the card day's second half validated.
+
+**Where.** The three worst paths in the routed timing summary are the
+same path in three tiles: the elementwise engine's operand FIFO to the
+FMA's bypass register (`u_engine/u_fifo_a/mem_reg` ->
+`u_lanes/g_bank64.g_lane64[0].u_fma/s0_byp_d_reg`), 17-18 logic
+levels through the DSP cascade, 7.5-7.7 ns of data path against a
+7.407 ns period, roughly 55% logic and 45% route. Not the sequencer,
+not R17's mask logic, not P4's accumulator: the path every image since
+the engine's first has carried, and one the nine earlier quads closed
+at 130-135 MHz with kernel margins between 0.009 and 0.143 ns (the
+manifests under `~/cardday-*` on the box). The round's additions are
+in the same tile and take LUTs and routing near it, so the spread on a
+path that was always at the edge landed on the wrong side this time.
+`hw/rebuild-2022.sh` names the implementation directive as the one
+exploration axis (its measured spread: 0.113 ns from a directive
+change), and this is exactly that size of shortfall.
+
+**The second attempt** (`~/box_quad_b.sh`, launched 03:01): quad only,
+the same commit 5b7aa19 asserted with the two RTL tokens, the same
+135 MHz, retiming and phys_opt, plus `PLACE_DIRECTIVE=ExtraTimingOpt`
+and `ROUTE_DIRECTIVE=AggressiveExplore`; build dir
+`build-round2-quad-b`, log `~/r8-logs-round2/quad-b.log`. It stages
+into `~/cardday-round2` on build-pair's own terms (verify-image, copy,
+re-hash, SHA256SUMS, a README that says which directives each half
+used), and the four-tile card run waits on that file. A second single
+was NOT built: the staged one is card-validated and a re-implemented
+one would be a different image. If this attempt does not close either,
+the honest answer is a single at 135 MHz and a quad that wants a
+slower clock (130 MHz would give 0.285 ns) or a register in the
+engine's bypass path - a round-3 item, since the sequencer is not the
+path. The outcome is the next entry.
