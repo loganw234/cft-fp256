@@ -1750,7 +1750,7 @@ do for anything - the image, the bank, the scratch preload and the
 dense streams included. That is a change to the read side rather than
 to the gather, and it is not in this revision.
 
-### R17. A per-run lane mask (P3, not yet built)
+### R17. A per-run lane mask (P3, built 2026-09-15)
 
 Lane `i` with bit `i` of the mask clear runs no instruction. Its
 deposit slots, its count and its scratch-out slots are NOT written - the
@@ -1778,6 +1778,74 @@ register write reaches it, and a run-kind refusal would be a new
 sentence in this contract that had to refuse the scalar bits on program
 runs too, on tiles already shipped. The rule is the build's, not the
 run's (P3's question, 2026-09-15).
+
+**What it is on the tile.** Two states in `rtl/cft_seq.sv`, between the
+block setup and the wipe, and three write strobes. A mask bit is a LANE
+at every format - it is the one ABI 0.14 field whose units are not
+elements - so a 256-bit beat holds 256 consecutive lanes' bits, a block
+is at most `NBEATS << 3` = 128 lanes, and `blk_base` is a multiple of
+the block: a block's bits therefore never straddle a beat, and the
+fetch is ONE single-beat read a block at every precision, at
+`mask + ((blk_base >> 8) << 5)` with the block's bits at bit
+`blk_base[7:0]` inside it. What comes back is ANDed into `blk_act` -
+the lanes the caller has - so the block's opening `active` and `ACTALL`
+read one expression and cannot drift apart, which is what makes
+"`ACTALL` reactivates every lane the caller has" and "a masked lane is
+not one the caller has" the same sentence in the hardware.
+
+Everything else follows from the active bit, which already gates the
+register writes, the deposits and the FLAG contributions per lane
+(`wb_flags_or` ORs `lane_flags` under `wb_act`, the active mask as it
+stands at the edge the result returns). The three DRAINS are the
+exception and are the only new arithmetic: they are deliberately not
+masked by the active bit - a lane that converged early still has
+deposits and scratch worth carrying - so each is masked by the
+CALLER's bit instead, as a WRITE STROBE. The element keeps its
+position in the stream, because the deposit window is
+`n * max_deposits` whatever the mask says, and loses its strobe; the
+caller's bytes stay.
+
+**What it costs, and what it does not save.** `make seqcycles` prints
+it beside the dense and gathered tables (four blocks, one IAND and one
+deposit - the same program in all three columns):
+
+| | lanes | dense | half masked | all masked | reads |
+|---|---|---|---|---|---|
+| fp32  | 512 | 1,189 cyc | 1,205 | 1,205 | 6 -> 10 |
+| fp64  | 256 |   869 cyc |   885 |   885 | 6 -> 10 |
+| fp128 | 128 |   709 cyc |   725 |   725 | 6 -> 10 |
+| fp256 |  64 |   629 cyc |   645 |   645 | 6 -> 10 |
+
+**Four cycles and one read a block, and the same four whether half the
+lanes are masked or all of them.** The block setup alone - a bare HALT,
+no deposit, nothing to hide behind - shows the same figure: 60.8 ->
+64.8 cycles a block at fp32, 44.8 -> 48.8 at fp64, 36.8 -> 40.8 at
+fp128, 32.8 -> 36.8 at fp256.
+
+That "all masked costs what half masked costs" is the important half,
+and it is a statement about this machine's shape rather than about this
+implementation: **the sequencer issues per BEAT, not per lane.** The
+issue loop walks a block's `nb_blk` beats whatever the active mask
+holds, and the active bit decides what is WRITTEN rather than what is
+computed - the same reason a lane that drops out at `SETACT` costs its
+block exactly what a lane that does not costs it. So a lane mask on
+this tile buys the BYTES (a masked lane's outputs are the caller's),
+the FLAGS (it contributes none) and, through `any(active)`, the EARLY
+EXIT: a block whose every lane is masked leaves its loops at the first
+test, which is the one shape where a mask is a large saving. It does
+not buy back an idle lane's arithmetic, because an idle lane's
+arithmetic was never separately paid for.
+
+Making it buy that means skipping a beat with no active lane in the
+ISSUE pipe, and skipping a beat nobody reads in the stream loads. Both
+are changes to the machinery R14/R15 and R10 settled, neither is in
+this revision, and the numbers above are what says whether they would
+be worth making.
+
+On the card the fetch is one HBM round trip a block rather than the
+four cycles model RAM charges (the read side carries ONE burst at a
+time - R16's last paragraph), and the saving is unchanged, so the
+card's number is this table plus a round trip a block.
 
 ### What revision 6 is at the seam
 

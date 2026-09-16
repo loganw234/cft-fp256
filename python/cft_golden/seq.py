@@ -1083,15 +1083,23 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
     lane runs no instruction and writes nothing: its deposit slots, its
     count and its scratch-out slots are left as the caller had them, it
     raises no flag, and it is inactive for the early exit from its first
-    cycle; `n_active` is the prefix form of the same thing. Parcel P3
-    writes the definition.
+    cycle; `n_active` is the prefix form of the same thing.
 
-    Until the mask lands, a non-None `lane_mask` is refused by name.
+    THE MODEL'S OWN ARRAYS ARE FRESH, so "left as the caller had them"
+    has to be said in the model's terms: a masked lane's deposit slots
+    read +0 here, its count is 0 and its scratch-out slots are +0 -
+    exactly what a PADDING lane (one at or past `n_active`) already
+    gets, and for the same reason. The executors, which write into the
+    caller's buffers, leave those bytes alone; a test that hands them a
+    zeroed buffer sees the model's answer and one that hands them a
+    pattern sees the pattern. `host/tests/seq_check.py`'s masked corpus
+    does the first and `host/tests/device_test.c`'s masked leg the
+    second, because the two claims are different claims.
+
+    `ACTALL` reactivates every lane the CALLER has, which a masked lane
+    is not: the mask is the floor under the active bit and not a value
+    an instruction can raise.
     """
-    if lane_mask is not None:
-        raise NotImplementedError(
-            "the lane mask is declared at ABI 0.14 and not built in the "
-            "model yet: docs/ROUND2.md, parcel P3")
     fmt = prog.fmt
     prog._check_bank(bank)
     consts = list(bank) if prog.bank_ext else prog.consts
@@ -1124,6 +1132,17 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
         n_active = n
     if not 0 <= n_active <= n:
         raise ValueError(f"n_active={n_active} outside 0..{n}")
+    # R17. One bit a lane and n of them: a mask of the wrong length
+    # would give lanes somebody else's bit, which is the sentence the
+    # C executor's shape check uses for the byte count.
+    if lane_mask is None:
+        keep = [True] * n
+    else:
+        keep = [bool(v) for v in lane_mask]
+        if len(keep) != n:
+            raise ValueError(
+                f"lane_mask holds {len(keep)} bits and the run is {n} "
+                f"lanes: a mask is one bit a lane")
 
     if idx_scratch_in is not None:
         # The block's table is lane-major over the same block the dense
@@ -1177,7 +1196,7 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
         for i in range(min(n, n_active)):
             for s in range(nsin):
                 scratch[i][s] = scratch_in[i * nsin + s] & mask
-    active = [i < n_active for i in range(n)]
+    active = [i < n_active and keep[i] for i in range(n)]
     counts = [0] * n
     deposits = [zero] * (n * prog.max_deposits)
     flags = 0
@@ -1265,7 +1284,14 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
             pc += 1
             continue
         if code == ACTALL:
-            active = [True] * n
+            # Every lane THE CALLER HAS (R17), which is every lane the
+            # mask keeps - `keep` is all True without one, so this is
+            # `[True] * n` for every run written before the mask
+            # existed. A masked lane is not the caller's to revive, and
+            # the hardware says the same thing in one place: its
+            # blk_act is the block's lanes ANDed with the mask, and
+            # both the block's start and ACTALL read blk_act.
+            active = list(keep)
             pc += 1
             continue
         if code in (STL, LDL, STX, LDX):
@@ -1320,9 +1346,17 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
     # drain, and a lane that converged early still has state worth
     # carrying to the next call. Padding lanes write nothing, so their
     # slots stay +0.
+    # ...and R17: nor is a MASKED lane's block written, which is the
+    # one place the two questions "did this lane converge" and "is this
+    # lane the caller's" give different answers. The deposit slots and
+    # the counts need no such test here because nothing wrote them: a
+    # masked lane is inactive from its first cycle, and DEPOSIT is
+    # masked by the active bit.
     nsout = prog.n_scratch_out if prog.scratch_io else 0
     scratch_out = [zero] * (n * nsout)
     for i in range(min(n, n_active)):
+        if not keep[i]:
+            continue
         for s in range(nsout):
             scratch_out[i * nsout + s] = scratch[i][s]
 

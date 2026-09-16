@@ -2442,8 +2442,6 @@ follow, and each is a refusal rather than a surprise:
   over the gathered block, so there is no new rounding rule and
   nothing new for the model to define.
 
-The lane mask (P3) is still refused by name.
-
 **`cft_run_ex`'s three tables are built (P2, 2026-09-15).** They mean
 on an elementwise operand exactly what P1's mean on a stream - `a` is
 the SOURCE, `idx_a_src` says how long it is, element `i` is
@@ -2503,7 +2501,45 @@ sends a dense `RUN`: the call is portable and the saving is not, which
 is what `cft_get_caps` is for and is the same division the scalar
 operand shipped with.
 
-**What lands with the parcels**, and where this section grows: P1 and
-P2 are in (above); P3 - the mask, with the tile publishing
-`CFT_SEQ_FEAT_LANE_MASK` and the remote backend copying back only the
-lanes the mask names.
+**`cft_program_run_ex`'s lane mask is built (P3, 2026-09-15).** Pass
+`lane_mask` with `lane_mask_bytes` of exactly `(n + 7) / 8` and bit `i`
+is lane `i`: a lane whose bit is SET runs, and a lane whose bit is
+clear runs no instruction at all. What that means for the caller's
+memory is the whole of it, and it is a promise about bytes rather than
+about values:
+
+* **A masked lane's outputs are NOT WRITTEN.** Its deposit slots, its
+  deposit count and its scratch-out slots come back holding exactly
+  what the caller put there. The normative "+0 in a slot nobody
+  deposited into" is about the lanes the run OWNS, and a masked lane is
+  not one of them - so a caller can mask a lane precisely in order to
+  keep the value already in its slot, and a caller who wants +0 there
+  must write it.
+* **A masked lane contributes no flag and no status bit.** It cannot
+  raise `inexact` any more than it can raise deposit overflow, and a
+  run whose every lane is masked completes with nothing written and
+  `flags` of zero. `ACTALL` reactivates every lane the CALLER has,
+  which a masked lane is not.
+* **An all-ones mask is bit-identical to no mask**, by construction:
+  the mask is the floor under the active bit that `n_active` already
+  was for the padding lanes.
+* **A device that does not publish `CFT_SEQ_FEAT_LANE_MASK` is refused
+  by name.** Ask `cft_get_caps` first. The software backend always
+  carries it; a tile carries it from CAPS2[10]; the REMOTE route
+  carries it by running only the lanes the mask keeps - the server
+  never sees a mask, which is why it works against a server of any
+  age and why the flags are the kept lanes' and nobody else's.
+
+The mask is also the one field here that costs the tile a read: the
+sequencer fetches a block's bits at block setup, one beat a block at
+every format (a beat is 256 lanes' bits), and saves whatever the masked
+lanes would have computed. docs/SEQUENCER.md R17 has the cycles.
+
+**What lands with the parcels**, and where this section grew: P1
+(the four tables of a program run), P2 (`cft_run_ex`'s three tables,
+composed on a tile as a three-instruction program over P1's mechanism,
+gathered on the client for the remote backend) and P3 (the mask, with
+the tile publishing `CFT_SEQ_FEAT_LANE_MASK` and the remote backend
+running only the lanes the mask keeps) are all in, above. The saving is
+the tile's and the call is portable, as with the scalar operand: a
+caller asks `cft_get_caps` to learn which it has.

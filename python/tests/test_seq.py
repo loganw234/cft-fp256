@@ -1665,3 +1665,264 @@ def test_r16_gather_helper_is_the_contract():
     assert seq.gather(src, [], fmt) == []
     with pytest.raises(seq.ProgramError, match=r"idx\[3\] = 3"):
         seq.gather(src, [0, 0, 0, 3], fmt, "idx")
+
+
+# ---- revision 6, R17: a per-run lane mask ------------------------------
+#
+# The contract is one paragraph (docs/SEQUENCER.md R17) and every case
+# here is one sentence of it. The shape of the argument is the same one
+# R16's cases have: a mask that is silently IGNORED and a mask that
+# masks the WRONG lane are the two ways this can be wrong, so every
+# expectation is a run of the same program over the lanes the mask
+# keeps - never a typed answer.
+
+
+def _mask_prog(fmt, iters=1):
+    """r0 + r1 into r3, deposited once an iteration. Both streams are
+    read, so a lane that ran when it should not have shows up in the
+    deposits, in the counts and - with a signalling operand - in the
+    flags."""
+    body = [seq.alu(sf.OP_ADD, rd=3, ra=0, rc=1), seq.deposit(3)]
+    if iters == 1:
+        return seq.Program(fmt, body + [seq.halt()], max_deposits=1)
+    return seq.Program(fmt, [seq.repeat(iters)] + body +
+                       [seq.endrep(), seq.halt()], max_deposits=iters)
+
+
+def test_r17_all_ones_is_bit_identical_to_no_mask():
+    """The first sentence of the negative control: an all-ones mask is
+    the unmasked run in every observable, at every format - and a mask
+    with a hole in it is NOT, which is what makes the first half a
+    gate rather than a tautology."""
+    rng = random.Random(1717)
+    for name in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        prog = _mask_prog(fmt)
+        n = 37
+        a = _vals(fmt, rng, n)
+        b = _vals(fmt, rng, n)
+        plain = seq.run(prog, a, b)
+        ones = seq.run(prog, a, b, lane_mask=[True] * n)
+        assert ones.state() == plain.state(), \
+            f"{name}: an all-ones mask changed the run"
+        holes = [i % 4 != 1 for i in range(n)]
+        holed = seq.run(prog, a, b, lane_mask=holes)
+        assert holed.state() != plain.state(), \
+            f"{name}: a mask with holes was indistinguishable from none, " \
+            "so this case could not have failed"
+
+
+def test_r17_a_masked_lane_writes_nothing_and_an_active_lane_is_unchanged():
+    """The second sentence: deposits, counts and scratch_out. An active
+    lane's three outputs are exactly the unmasked run's, and a masked
+    lane's are the model's form of "not written" - +0 and a count of
+    zero, which is what a padding lane already gets."""
+    fmt = FP64
+    rng = random.Random(17)
+    n = 20
+    a = _vals(fmt, rng, n)
+    b = _vals(fmt, rng, n)
+    prog = seq.Program(
+        fmt,
+        [seq.ldl(4, 0), seq.alu(sf.OP_ADD, rd=3, ra=0, rc=4),
+         seq.deposit(3), seq.stl(3, 0), seq.halt()],
+        max_deposits=1, flags=seq.FLAG_SCRATCH_IO,
+        n_scratch_in=1, n_scratch_out=1)
+    sin = _vals(fmt, rng, n)
+    keep = [i % 3 != 0 for i in range(n)]
+    plain = seq.run(prog, a, b, scratch_in=sin)
+    got = seq.run(prog, a, b, scratch_in=sin, lane_mask=keep)
+    zero = sf.zero_bits(fmt, 0)
+    for i in range(n):
+        if keep[i]:
+            assert got.deposits[i] == plain.deposits[i], f"lane {i}"
+            assert got.counts[i] == plain.counts[i], f"lane {i}"
+            assert got.scratch_out[i] == plain.scratch_out[i], f"lane {i}"
+        else:
+            assert got.deposits[i] == zero, f"lane {i} deposited"
+            assert got.counts[i] == 0, f"lane {i} has a count"
+            assert got.scratch_out[i] == zero, f"lane {i} wrote scratch_out"
+            assert plain.scratch_out[i] != zero, \
+                f"lane {i}: the unmasked run wrote nothing there either, " \
+                "so this case could not have failed"
+
+
+def test_r17_a_masked_lane_contributes_no_flag():
+    """The third sentence, and the first of the two cases the wave-1
+    ledger asks for: the ONLY lane that would signal is masked, so the
+    run's flags are clear. The unmasked run beside it raises the flag,
+    which is what says the program really would have."""
+    fmt = FP32
+    n = 8
+    bad = 3
+    a = [sf.one_bits(fmt)] * n
+    b = [sf.one_bits(fmt)] * n
+    b[bad] = sf.snan_bits(fmt, 1)
+    prog = _mask_prog(fmt)
+    loud = seq.run(prog, a, b)
+    assert loud.flags != 0, "the program does not signal, so nothing is proved"
+    keep = [i != bad for i in range(n)]
+    quiet = seq.run(prog, a, b, lane_mask=keep)
+    assert quiet.flags == 0, "a masked lane raised a flag"
+
+
+def test_r17_a_previously_loud_lane_is_quiet_when_masked():
+    """The second of the two: lane k overflows in an unmasked run, and
+    the NEXT run masks lane k and signals nowhere - its flags are clear.
+    In the model this is the same statement as the case above; on the
+    tile it is a different one (the sticky word is a register), which
+    is why the RTL bench carries it as two runs on one instance."""
+    fmt = FP32
+    n = 6
+    k = 4
+    big = sf.max_normal_bits(fmt)
+    a = [sf.one_bits(fmt)] * n
+    b = [sf.one_bits(fmt)] * n
+    a[k] = b[k] = big
+    prog = seq.Program(fmt, [seq.alu(sf.OP_MUL, rd=3, ra=0, rb=1),
+                             seq.deposit(3), seq.halt()], max_deposits=1)
+    first = seq.run(prog, a, b)
+    assert first.flags & sf.FLAG_OVERFLOW, \
+        "lane k does not overflow, so nothing is proved"
+    keep = [i != k for i in range(n)]
+    second = seq.run(prog, a, b, lane_mask=keep)
+    assert second.flags == 0, \
+        "the run that masked the overflowing lane still reported its flag"
+
+
+def test_r17_actall_does_not_revive_a_masked_lane():
+    """ACTALL reactivates every lane the CALLER has, and a masked lane
+    is not one. A program that deactivates everything and then calls
+    ACTALL must bring back exactly the unmasked lanes."""
+    fmt = FP32
+    n = 12
+    keep = [i % 2 == 0 for i in range(n)]
+    zero = sf.zero_bits(fmt)
+    prog = seq.Program(
+        fmt,
+        [seq.alu(sf.OP_ADD, rd=4, ra=0, rc=0),
+         seq.setact(5),                 # r5 is +0: every lane drops out
+         seq.actall(),
+         seq.deposit(0),
+         seq.halt()],
+        max_deposits=1)
+    a = [sf.one_bits(fmt)] * n
+    res = seq.run(prog, a, [zero] * n, lane_mask=keep)
+    assert res.active == keep, "ACTALL revived a lane the caller masked"
+    for i in range(n):
+        assert res.counts[i] == (1 if keep[i] else 0), f"lane {i}"
+
+
+def test_r17_every_lane_masked_completes_with_nothing_written():
+    """"A run whose every lane is masked completes with nothing written
+    and nothing raised" - including a program whose loops would run
+    their trip count, because the early exit sees an empty active mask
+    from the first cycle."""
+    fmt = FP32
+    n = 9
+    a = [sf.snan_bits(fmt, 1)] * n
+    prog = _mask_prog(fmt, iters=4)
+    res = seq.run(prog, a, a, lane_mask=[False] * n)
+    assert res.flags == 0 and res.status == 0
+    assert res.counts == [0] * n
+    assert res.deposits == [sf.zero_bits(fmt, 0)] * (n * prog.max_deposits)
+    assert not any(res.active)
+    # and the same program with the mask lifted is loud, so the case
+    # could have failed
+    loud = seq.run(prog, a, a)
+    assert loud.flags != 0
+
+
+def test_r17_a_masked_lane_cannot_raise_deposit_overflow():
+    """Deposit overflow is a status bit a lane raises by depositing
+    past max_deposits; a masked lane deposits nothing, so it cannot."""
+    fmt = FP32
+    n = 4
+    over = 2
+    a = [sf.one_bits(fmt)] * n
+    # three deposits into a two-slot budget: every ACTIVE lane overflows
+    prog = seq.Program(
+        fmt,
+        [seq.alu(sf.OP_ADD, rd=3, ra=0, rc=0), seq.deposit(3),
+         seq.deposit(3), seq.deposit(3), seq.halt()],
+        max_deposits=over)
+    assert seq.run(prog, a, a).status & seq.STATUS_DEPOSIT_OVERFLOW
+    res = seq.run(prog, a, a, lane_mask=[False] * n)
+    assert res.status == 0, "a masked lane overflowed its deposit budget"
+
+
+def test_r17_mask_and_n_active_are_the_same_kind_of_thing():
+    """`n_active` is the prefix form of the mask, so a prefix mask and
+    an n_active must agree in every observable - and the two compose:
+    a lane past n_active stays inactive whatever its bit says."""
+    fmt = FP64
+    rng = random.Random(4)
+    n, real = 16, 11
+    a = _vals(fmt, rng, n)
+    b = _vals(fmt, rng, n)
+    prog = _mask_prog(fmt, iters=2)
+    pref = seq.run(prog, a, b, lane_mask=[i < real for i in range(n)])
+    nact = seq.run(prog, a, b, n_active=real)
+    assert pref.state() == nact.state(), \
+        "a prefix mask is not the same run as n_active"
+    both = seq.run(prog, a, b, n_active=real,
+                   lane_mask=[True] * n)
+    assert both.state() == nact.state(), \
+        "an all-ones mask changed an n_active run"
+
+
+def test_r17_mask_composes_with_a_table():
+    """R16 and R17 on one run: the mask decides which lanes run, the
+    table decides what they read, and neither reaches into the other.
+    The expectation is the gathered run with the mask and nothing
+    else."""
+    fmt = FP32
+    rng = random.Random(1716)
+    n = 30
+    src = _vals(fmt, rng, 64)
+    c = _vals(fmt, rng, n)
+    tbl = [seq.IDX_NONE if i % 7 == 0 else (i * 11) % 64 for i in range(n)]
+    keep = [i % 3 != 2 for i in range(n)]
+    prog = _gather_prog(fmt)
+    got = seq.run(prog, src, [0] * n, c, idx_a=tbl, lane_mask=keep)
+    dense = seq.run(prog, seq.gather(src, tbl, fmt), [0] * n, c,
+                    lane_mask=keep)
+    assert got.state() == dense.state(), \
+        "a gathered masked run is not the dense masked run over the block"
+    # ...and the bound is checked over EVERY entry, masked lanes
+    # included: the refusal is a property of the arguments and not of
+    # which lanes happen to run.
+    bad = list(tbl)
+    bad[2] = 64                       # lane 2 is masked (2 % 3 == 2)
+    assert not keep[2]
+    with pytest.raises(seq.ProgramError, match=r"idx_a\[2\] = 64"):
+        seq.run(prog, src, [0] * n, c, idx_a=bad, lane_mask=keep)
+
+
+def test_r17_mask_shape_is_refused():
+    fmt = FP32
+    prog = _mask_prog(fmt)
+    a = [sf.one_bits(fmt)] * 5
+    with pytest.raises(ValueError, match="one bit a lane"):
+        seq.run(prog, a, a, lane_mask=[True] * 4)
+    with pytest.raises(ValueError, match="one bit a lane"):
+        seq.run(prog, a, a, lane_mask=[True] * 6)
+
+
+def test_r17_the_early_exit_is_still_invisible():
+    """P3's property (docs/SEQUENCER.md), re-run with a mask: forcing
+    every loop to its full trip count must not change a single
+    observable, whatever the mask is."""
+    fmt = FP32
+    rng = random.Random(99)
+    n = 24
+    prog = escape_program(fmt, 6, sf.from_int(fmt, 2)[0])
+    a = _seeds(fmt, n, 5)
+    b = [sf.from_int(fmt, 1)[0]] * n
+    for label, keep in (("holes", [i % 5 != 0 for i in range(n)]),
+                        ("none", [False] * n),
+                        ("all", [True] * n)):
+        fast = seq.run(prog, a, b, lane_mask=keep)
+        slow = seq.run(prog, a, b, lane_mask=keep, early_exit=False)
+        assert fast.state() == slow.state(), \
+            f"{label}: the early exit is not invisible under a mask"

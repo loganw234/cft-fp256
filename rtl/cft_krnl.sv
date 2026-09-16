@@ -295,13 +295,10 @@ module cft_krnl #(
    * it would turn away - and until then the CSR refuses the MODE bits
    * that would select them, as it refuses every bit of MODE[31:19]. */
   localparam bit FEAT_INDEXED   = 1'b1;
-  localparam bit FEAT_LANE_MASK = 1'b0;
+  localparam bit FEAT_LANE_MASK = 1'b1;
   logic [63:0] cfg_idx_a, cfg_idx_b, cfg_idx_c, cfg_idx_si;
-  /* MASK_PTR is read by nothing until P3; the four index pointers are
-   * read by cft_seq below. */
-  /* verilator lint_off UNUSEDSIGNAL */
   logic [63:0] cfg_mask;
-  /* verilator lint_on UNUSEDSIGNAL */
+  logic        cfg_mask_en;
 
   logic [2:0] cfg_scalar;
   logic [3:0] cfg_indexed;
@@ -549,8 +546,13 @@ module cft_krnl #(
       // longer that size.
       .caps2({5'b0,        // [15:11] reserved, zero
               FEAT_LANE_MASK, // [10] LANE_MASK: MASK_PTR at 0xA8 is read
-                           //      at block setup under MODE[23] (ABI
-                           //      0.14, docs/ROUND2.md P3; 0 until built)
+                           //      at block setup under MODE[23] and a
+                           //      lane whose bit is clear runs nothing
+                           //      and has none of the three drains
+                           //      write an element of its
+                           //      (docs/SEQUENCER.md R17, 2026-09-15).
+                           //      From the same localparam the CSR's
+                           //      refusal reads, as CAPS2[9] is.
               FEAT_INDEXED,   // [9] INDEXED: the four tables at
                            //      0x88..0xA0 are read under MODE[22:19]
                            //      and an input block is fetched through
@@ -607,8 +609,10 @@ module cft_krnl #(
       .cfg_prog(cfg_prog), .cfg_bank(cfg_bank),
       .cfg_sin(cfg_sin), .cfg_sout(cfg_sout), .cfg_cnt(cfg_cnt),
       .cfg_scalar(cfg_scalar), .cfg_indexed(cfg_indexed),
+      .cfg_mask_en(cfg_mask_en),
       .cfg_mode_bad(mode_bad),
       .feat_scalar(FEAT_SCALAR), .feat_indexed(FEAT_INDEXED),
+      .feat_lane_mask(FEAT_LANE_MASK),
       .cfg_seg(cfg_seg), .cfg_nres(cfg_nres),
       .cfg_idx_a(cfg_idx_a), .cfg_idx_b(cfg_idx_b), .cfg_idx_c(cfg_idx_c),
       .cfg_idx_si(cfg_idx_si), .cfg_mask(cfg_mask)
@@ -846,6 +850,10 @@ module cft_krnl #(
       .cfg_indexed(cfg_indexed),
       .cfg_idx_a(cfg_idx_a), .cfg_idx_b(cfg_idx_b), .cfg_idx_c(cfg_idx_c),
       .cfg_idx_si(cfg_idx_si),
+      /* ...and ABI 0.14's lane mask (R17), on exactly those terms: the
+       * CSR has already refused MODE[23] on a build whose
+       * FEAT_LANE_MASK is 0, so what arrives here is honoured. */
+      .cfg_mask_en(cfg_mask_en), .cfg_mask(cfg_mask),
       .busy(seq_busy), .done(seq_done), .refuse(seq_refuse),
       .lane_valid(seq_lv), .lane_op(seq_lop), .lane_rnd(seq_lrnd),
       .lane_prec(seq_lprec), .lane_a(seq_la), .lane_b(seq_lb), .lane_c(seq_lc),

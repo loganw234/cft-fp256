@@ -62,6 +62,7 @@ from pathlib import Path
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import ClockCycles, ReadOnly, RisingEdge, with_timeout
+from cocotb.utils import get_sim_time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
@@ -132,6 +133,11 @@ IA_BASE = 0x0A_0000
 IB_BASE = 0x0B_0000
 IC_BASE = 0x0C_0000
 ISI_BASE = 0x0D_0000
+# The lane mask (ABI 0.14, R17), in its own region for the same reason:
+# a mask fetch that read the A stream, or a table, would pass every
+# check here if the regions were adjacent. One bit a lane, so 64 KB is
+# half a million lanes - far more than any case below uses.
+MASK_BASE = 0x0E_0000
 D_BASE = 0x10_0000
 
 POISON = 0xA5
@@ -478,7 +484,7 @@ class Bench:
         for name in ("cfg_n", "cfg_a", "cfg_b", "cfg_c", "cfg_d",
                      "cfg_prog", "cfg_bank", "cfg_sin", "cfg_sout",
                      "cfg_cnt", "cfg_indexed", "cfg_idx_a", "cfg_idx_b",
-                     "cfg_idx_c", "cfg_idx_si"):
+                     "cfg_idx_c", "cfg_idx_si", "cfg_mask_en", "cfg_mask"):
             getattr(dut, name).value = 0
         cocotb.start_soon(self.ram.serve())
         dut.ap_rst_n.value = 0
@@ -535,7 +541,7 @@ class Bench:
         assert CNT_BASE + cnt_bytes + GUARD <= D_BASE
 
     def _drive_cfg(self, fmt, n, bank_ptr=None, scratch=False,
-                   idx_mask=0):
+                   idx_mask=0, lane_mask=False):
         dut = self.dut
         dut.cfg_prec.value = PREC_CODE[fmt.name]
         dut.cfg_n.value = n
@@ -565,6 +571,12 @@ class Bench:
         dut.cfg_idx_b.value = IB_BASE if idx_mask & 2 else 0xDEAD_4000
         dut.cfg_idx_c.value = IC_BASE if idx_mask & 4 else 0xDEAD_5000
         dut.cfg_idx_si.value = ISI_BASE if idx_mask & 8 else 0xDEAD_6000
+        # ...and the lane mask on exactly those terms (R17). A run
+        # without MODE[23] must never read MASK_PTR, so its pointer is
+        # aimed at nothing and the model RAM's window assertion is what
+        # says it was not read.
+        dut.cfg_mask_en.value = 1 if lane_mask else 0
+        dut.cfg_mask.value = MASK_BASE if lane_mask else 0xDEAD_7000
 
     # -- a refused run ---------------------------------------------------
 
@@ -799,6 +811,195 @@ class Bench:
             f"{sum(1 for t in table if t == seq.IDX_NONE)} of "
             f"{len(table)} entries are CFT_IDX_NONE and must cost no "
             f"read at all.")
+
+    # -- a MASKED run (revision 6, R17) ----------------------------------
+
+    async def masked(self, fmt, prog, a, b, c, n, keep, label, *,
+                     check_flags=True, check_reads=True, scratch_in=None,
+                     pre=None, idx_a=None, idx_b=None, idx_c=None,
+                     idx_scratch_in=None):
+        """Run `prog` over `n` lanes with a lane mask and compare the
+        whole machine: the lanes the mask keeps against the model, and
+        the lanes it clears against the BYTES THAT WERE THERE BEFORE.
+
+        That second half is the whole of R17 and it is why this is a
+        separate method rather than a flag on `program()`. The model's
+        arrays are fresh, so a masked lane reads +0 there; the tile
+        writes into the caller's memory, so a masked lane must read
+        whatever the caller left - which in this bench is POISON,
+        everywhere, because `_stage` poisons the RAM before each run.
+        A drain that wrote the model's +0 over a masked lane would
+        agree with the model and still be wrong.
+
+        `keep` is n booleans, one a lane, global. `pre` is an optional
+        coroutine run on this instance BEFORE the masked run, for the
+        two-run flag cases: the sticky word is a register, so "a lane
+        that was loud in the last run is quiet in this one" is a claim
+        about state and not about one run.
+        """
+        ebytes = fmt.width // 8
+        maxdep = prog.max_deposits
+        image = prog.to_bytes()
+        dep_bytes = n * maxdep * ebytes
+        cnt_bytes = 4 * n
+        assert len(keep) == n, f"{label}: a mask is one bit a lane"
+
+        # FIRST, so that this run's staging - which poisons the whole
+        # model RAM and clears the traffic log - is what the masked run
+        # actually sees, and so the reads asserted below are its own.
+        if pre is not None:
+            await pre()
+
+        # R16 and R17 on one run where the caller asks for it: the
+        # mask decides which lanes run, the table decides what they
+        # read, and the model resolves both.
+        idx_mask = ((1 if idx_a is not None else 0) |
+                    (2 if idx_b is not None else 0) |
+                    (4 if idx_c is not None else 0) |
+                    (8 if idx_scratch_in is not None else 0))
+        want = seq.run(prog, list(a), list(b), list(c),
+                       scratch_in=scratch_in, lane_mask=list(keep),
+                       idx_a=idx_a, idx_b=idx_b, idx_c=idx_c,
+                       idx_scratch_in=idx_scratch_in)
+        sout_bytes = n * prog.n_scratch_out * ebytes
+
+        self._stage(fmt, image, a, b, c, n, dep_bytes, cnt_bytes,
+                    scratch_in=scratch_in)
+        for base, table in ((IA_BASE, idx_a), (IB_BASE, idx_b),
+                            (IC_BASE, idx_c), (ISI_BASE, idx_scratch_in)):
+            if table is None:
+                continue
+            tb = b"".join(int(t).to_bytes(4, "little") for t in table)
+            tb += bytes(POISON for _ in range(-len(tb) % BEAT_BYTES))
+            self.ram.stage(base, tb)
+        # The mask itself: one bit a lane, little-endian within the
+        # byte, and the tail of the last byte and the rest of the beat
+        # left POISON - the tile reads whole beats, so bits past the
+        # block's own lanes must be ones it cannot use. Built from
+        # `keep` here rather than typed.
+        raw = bytearray((n + 7) // 8)
+        for i, k in enumerate(keep):
+            if k:
+                raw[i >> 3] |= 1 << (i & 7)
+        pad = -len(raw) % BEAT_BYTES
+        self.ram.stage(MASK_BASE, bytes(raw) + bytes([POISON]) * pad)
+        self._drive_cfg(fmt, n, scratch=prog.scratch_io, lane_mask=True,
+                        idx_mask=idx_mask)
+
+        budget = self._budget(fmt, prog, n, len(image))
+        # ...plus the mask fetch, one round trip a block, and the
+        # gather's own traffic where there is a table. Derived from the
+        # tables and the geometry, never typed.
+        budget += 64 * (1 + -(-n // lanes_per_block(fmt)))
+        entries = sum(len(t) for t in
+                      (idx_a, idx_b, idx_c, idx_scratch_in)
+                      if t is not None)
+        budget += 64 * (entries + 64) if entries else 0
+        refused, flags, err = await self._go(budget, label)
+        assert refused == 0, f"{label}: the module refused a valid program"
+
+        windows = []
+        if dep_bytes:
+            windows.append((D_BASE, dep_bytes, "deposit"))
+        if cnt_bytes:
+            windows.append((CNT_BASE, cnt_bytes, "count"))
+        if sout_bytes:
+            windows.append((SOUT_BASE, sout_bytes, "scratch-out"))
+        self.ram.assert_writes_inside(windows, label)
+        self.ram.assert_guards(windows, label)
+
+        if check_reads:
+            self._check_mask_reads(fmt, n, label)
+        self._compare_masked(fmt, prog, n, keep, want, flags, err, label,
+                             check_flags)
+        self.cases["masked"] += 1
+        return want
+
+    def _check_mask_reads(self, fmt, n, label):
+        """The mask fetch's traffic, derived from the block geometry.
+
+        One single-beat read a block, at the beat holding that block's
+        first lane's bit - `MASK_BASE + (blk_base // 256) * 32`, which
+        is a count of LANES and not of elements. A mask offset scaled
+        by the element size, or by the byte count of a block's bits,
+        would give a block somebody else's lanes and the deposits would
+        still look plausible, so this is asserted as an ADDRESS.
+        """
+        lpb = lanes_per_block(fmt)
+        want = []
+        for base in range(0, n, lpb):
+            want.append((MASK_BASE + (base // (BEAT_BYTES * 8)) * BEAT_BYTES,
+                         1))
+        got = self.ram.reads_in(MASK_BASE, MASK_BASE + (1 << 16))
+        assert got == want, (
+            f"{label}: the mask fetch read {got} and the block geometry "
+            f"says {want} - one single-beat read a block, at the beat "
+            f"holding bit blk_base. n={n}, {lpb} lanes a block.")
+
+    def _compare_masked(self, fmt, prog, n, keep, want, flags, err, label,
+                        check_flags):
+        ebytes = fmt.width // 8
+        maxdep = prog.max_deposits
+        nsout = prog.n_scratch_out if prog.scratch_io else 0
+        poison_el = bytes([POISON]) * ebytes
+
+        got_dep = self.ram.fetch(D_BASE, n * maxdep * ebytes)
+        for idx in range(n * maxdep):
+            lane, slot = divmod(idx, maxdep)
+            raw = got_dep[idx * ebytes:(idx + 1) * ebytes]
+            if keep[lane]:
+                g = int.from_bytes(raw, "little")
+                assert g == want.deposits[idx], (
+                    f"{label}: deposit[lane {lane} slot {slot}] got {g:#x} "
+                    f"want {want.deposits[idx]:#x} - an unmasked lane must "
+                    f"be exactly the run without the mask")
+            else:
+                assert raw == poison_el, (
+                    f"{label}: deposit[lane {lane} slot {slot}] at "
+                    f"{D_BASE + idx * ebytes:#x} was WRITTEN ({raw.hex()}); "
+                    f"a masked lane's slots keep the caller's bytes, and "
+                    f"+0 over them is still a write")
+
+        got_cnt = self.ram.fetch(CNT_BASE, 4 * n)
+        for i in range(n):
+            raw = got_cnt[i * 4:i * 4 + 4]
+            if keep[i]:
+                g = int.from_bytes(raw, "little")
+                assert g == want.counts[i], (
+                    f"{label}: count[lane {i}] got {g} want {want.counts[i]}")
+            else:
+                assert raw == bytes([POISON]) * 4, (
+                    f"{label}: count[lane {i}] at {CNT_BASE + 4 * i:#x} was "
+                    f"written ({raw.hex()}); a masked lane has no count")
+
+        if nsout:
+            got_so = self.ram.fetch(SOUT_BASE, n * nsout * ebytes)
+            for idx in range(n * nsout):
+                lane, slot = divmod(idx, nsout)
+                raw = got_so[idx * ebytes:(idx + 1) * ebytes]
+                if keep[lane]:
+                    g = int.from_bytes(raw, "little")
+                    assert g == want.scratch_out[idx], (
+                        f"{label}: scratch_out[lane {lane} slot {slot}] got "
+                        f"{g:#x} want {want.scratch_out[idx]:#x}")
+                else:
+                    assert raw == poison_el, (
+                        f"{label}: scratch_out[lane {lane} slot {slot}] was "
+                        f"written; the scratch-out drain is not masked by "
+                        f"the ACTIVE bit, and it IS masked by the caller's")
+
+        if check_flags:
+            assert flags == want.flags, (
+                f"{label}: FLAGS {flags:#07b}, model says {want.flags:#07b}. "
+                f"A masked lane contributes nothing, so a surplus bit is a "
+                f"lane that ran when the caller did not ask for it.")
+        want_ovf = bool(want.status & seq.STATUS_DEPOSIT_OVERFLOW)
+        assert bool(err & 0x8) == want_ovf, (
+            f"{label}: err[3] (deposit overflow) is {bool(err & 0x8)}, "
+            f"model says {want_ovf}")
+        assert (err & 0x7) == 0, (
+            f"{label}: err[2:0]={err & 0x7} - the model memory answered "
+            f"OKAY on every beat")
 
     def _budget(self, fmt, prog, n, image_bytes):
         blocks = max(1, -(-n // lanes_per_block(fmt)))
@@ -3235,3 +3436,415 @@ async def an_unread_stream_costs_nothing_dense_or_gathered(dut):
                               "fp64: the scratch block")
     dut._log.info("an operand field the opcode does not read costs no "
                   "stream and no table")
+
+
+# ----------------------------------------------------------------------
+# revision 6, R17: a per-run lane mask
+#
+# Every case below compares the kept lanes against the model and the
+# masked lanes against the POISON the bench wrote before the run - see
+# Bench.masked. The two halves are different failures: a drain that
+# packed only the kept lanes would move every later lane's slot, and a
+# drain that wrote the model's +0 over a masked lane would agree with
+# the model and still have overwritten the caller's memory.
+# ----------------------------------------------------------------------
+
+def _mask_prog(fmt, maxdep=1):
+    """r0 + r1, deposited. Both streams are read, so a lane that ran
+    when it should not have shows in the deposits, in the counts and -
+    with a signalling operand - in the flags."""
+    insns = [seq.alu(sf.OP_ADD, rd=3, ra=0, rc=1)]
+    insns += [seq.deposit(3)] * maxdep
+    return seq.Program(fmt, insns + [seq.halt()], max_deposits=maxdep)
+
+
+def _keep(n, seed, frac=3):
+    """A mask with holes, derived rather than typed: every `frac`th
+    lane cleared, offset by the seed so the holes fall in different
+    places in different cases - including on a beat boundary, on a
+    block boundary and in the middle of a byte."""
+    return [(i + seed) % frac != 0 for i in range(n)]
+
+
+@cocotb.test()
+async def masked_at_every_block_length(dut):
+    """The sweep. Every format, every interesting block length - a
+    partial block, a whole one, a block and a half, several - with the
+    mask's holes falling at a different offset each time.
+
+    This is where a mask fetched from the wrong beat shows up: a block
+    reads 256 consecutive lanes' bits at every format, so block b's
+    bits begin at BIT blk_base, and the natural mistakes (scaling the
+    offset by the element size, or by the block's byte count) give a
+    block somebody else's lanes. Bench.masked asserts the fetch as an
+    ADDRESS as well as comparing the answer.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    # n=384 at fp32 and n=320 at fp64 are the ones that matter most:
+    # their third and fifth blocks start at global lane 256, which is
+    # the FIRST BIT OF THE SECOND BEAT of the mask. Every other case
+    # here reads beat zero, so a fetch that ignored the beat index
+    # entirely - or scaled it by the element size, or by the block's
+    # byte count - would pass all of them.
+    for name, ns in (("fp32", (8, 128, 129, 192, 256, 384)),
+                     ("fp64", (5, 64, 65, 96, 128, 320)),
+                     ("fp128", (3, 32, 33, 48)),
+                     ("fp256", (1, 16, 17, 24, 32))):
+        fmt = FORMATS[name]
+        prog = _mask_prog(fmt)
+        for n in ns:
+            await bench.masked(
+                fmt, prog, operands(fmt, n, 7100 + n),
+                operands(fmt, n, 7200 + n), operands(fmt, n, 7300 + n),
+                n, _keep(n, n), f"{name} n={n}: a mask with holes")
+    # ...and that the second beat is really reached, derived from the
+    # geometry rather than believed: a block at global lane 256 or
+    # beyond reads MASK_BASE + 32 or further.
+    assert any(base >= BEAT_BYTES * 8
+               for base in range(0, 384, lanes_per_block(FP32))), \
+        "no case above crosses a mask beat boundary"
+    dut._log.info(f"masked at every block length: "
+                  f"{bench.cases['masked']} runs")
+
+
+@cocotb.test()
+async def masked_all_ones_is_the_unmasked_run(dut):
+    """Control (a). An all-ones mask must be BIT-IDENTICAL to no mask
+    at all - every deposit, every count, every scratch-out slot, the
+    flags and the status - and a mask with holes must differ from it.
+    The second half is what makes the first a gate: an all-ones mask
+    that agreed because the tile ignored MODE[23] would pass the first
+    half and prove nothing.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for name in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        n = lanes_per_block(fmt) + lanes_per_block(fmt) // 2
+        prog = seq.Program(fmt, [
+            seq.ldl(4, 0),
+            seq.alu(sf.OP_ADD, rd=3, ra=0, rc=4),
+            seq.deposit(3), seq.stl(3, 1), seq.halt()],
+            max_deposits=1, flags=seq.FLAG_SCRATCH_IO,
+            n_scratch_in=1, n_scratch_out=2)
+        a = operands(fmt, n, 7400 + n)
+        b = operands(fmt, n, 7500 + n)
+        blk = operands(fmt, n, 7600 + n)
+        ebytes = fmt.width // 8
+
+        await bench.program(fmt, prog, a, b, b, n,
+                            f"{name}: the dense run beside the mask",
+                            scratch_in=blk)
+        plain = (bench.ram.fetch(D_BASE, n * ebytes),
+                 bench.ram.fetch(CNT_BASE, 4 * n),
+                 bench.ram.fetch(SOUT_BASE, n * 2 * ebytes))
+
+        await bench.masked(fmt, prog, a, b, b, n, [True] * n,
+                           f"{name}: an all-ones mask", scratch_in=blk)
+        ones = (bench.ram.fetch(D_BASE, n * ebytes),
+                bench.ram.fetch(CNT_BASE, 4 * n),
+                bench.ram.fetch(SOUT_BASE, n * 2 * ebytes))
+        assert ones == plain, (
+            f"{name}: an all-ones mask is not bit-identical to no mask - "
+            f"deposits {'differ' if ones[0] != plain[0] else 'agree'}, "
+            f"counts {'differ' if ones[1] != plain[1] else 'agree'}, "
+            f"scratch_out {'differ' if ones[2] != plain[2] else 'agree'}")
+
+        keep = _keep(n, 1)
+        await bench.masked(fmt, prog, a, b, b, n, keep,
+                           f"{name}: a mask with holes", scratch_in=blk)
+        holed = (bench.ram.fetch(D_BASE, n * ebytes),
+                 bench.ram.fetch(CNT_BASE, 4 * n),
+                 bench.ram.fetch(SOUT_BASE, n * 2 * ebytes))
+        assert holed != plain, (
+            f"{name}: a mask with holes was indistinguishable from no "
+            f"mask, so the all-ones half above could not have failed")
+    dut._log.info("all-ones is the unmasked run, and a holed mask is not")
+
+
+@cocotb.test()
+async def masked_lanes_contribute_no_flag(dut):
+    """The flags, both cases the wave-1 ledger asks for.
+
+    (1) The only lane that would signal is masked: the run's FLAGS are
+    clear, and the same run unmasked is loud - which is what says the
+    program really would have raised it.
+
+    (2) An unmasked program overflows in lane k, and the NEXT run on
+    the same instance masks lane k and signals nowhere: FLAGS clear.
+    That is a claim about a REGISTER rather than about one run, which
+    is why it is two runs on one Bench and not a second instance.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    n = lanes_per_block(fmt)
+    k = 37
+    prog = _mask_prog(fmt)
+
+    # (1) the signalling lane, masked.
+    a = [sf.one_bits(fmt)] * n
+    b = [sf.one_bits(fmt)] * n
+    b[k] = sf.snan_bits(fmt, 1)
+    loud = await bench.program(fmt, prog, a, b, b, n,
+                               "fp32: the signalling lane runs")
+    assert loud.flags != 0, "the program does not signal; nothing is proved"
+    await bench.masked(fmt, prog, a, b, b, n, [i != k for i in range(n)],
+                       "fp32: the only signalling lane is masked")
+
+    # (2) lane k overflows in one run; the next run masks it and is
+    # quiet. The masked run's operands cannot signal anywhere, so any
+    # bit in its FLAGS came from the run before it.
+    big = sf.max_normal_bits(fmt)
+    mul = seq.Program(fmt, [seq.alu(sf.OP_MUL, rd=3, ra=0, rb=1),
+                            seq.deposit(3), seq.halt()], max_deposits=1)
+    over_a = [sf.one_bits(fmt)] * n
+    over_b = [sf.one_bits(fmt)] * n
+    over_a[k] = over_b[k] = big
+
+    async def overflowing_run():
+        res = await bench.program(fmt, mul, over_a, over_b, over_b, n,
+                                  "fp32: lane k overflows, unmasked")
+        assert res.flags & sf.FLAG_OVERFLOW, \
+            "lane k did not overflow, so the second run proves nothing"
+
+    await bench.masked(fmt, mul, over_a, over_b, over_b, n,
+                       [i != k for i in range(n)],
+                       "fp32: lane k masked, after a run in which it "
+                       "overflowed", pre=overflowing_run)
+    dut._log.info("a masked lane contributes no flag, in its own run or "
+                  "after a run in which it was loud")
+
+
+@cocotb.test()
+async def masked_actall_does_not_revive_a_masked_lane(dut):
+    """ACTALL reactivates every lane THE CALLER HAS, and a masked lane
+    is not one. A program that drops every lane with SETACT and then
+    calls ACTALL must come back with exactly the unmasked lanes: if
+    ACTALL read the block's lanes rather than the caller's, every
+    masked lane would deposit into the caller's buffer from there on.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for name in ("fp32", "fp64"):
+        fmt = FORMATS[name]
+        n = lanes_per_block(fmt) + 3
+        zero = sf.zero_bits(fmt)
+        prog = seq.Program(fmt, [
+            seq.deposit(0),            # every lane the caller has
+            seq.setact(5),             # r5 is +0: all of them drop out
+            seq.deposit(0),            # nothing
+            seq.actall(),
+            seq.deposit(0),            # the caller's lanes again
+            seq.halt()], max_deposits=3)
+        a = operands(fmt, n, 7700)
+        await bench.masked(fmt, prog, a, [zero] * n, [zero] * n, n,
+                           _keep(n, 2), f"{name}: ACTALL under a mask")
+    dut._log.info("ACTALL does not revive a masked lane")
+
+
+@cocotb.test()
+async def masked_every_lane_completes_with_nothing_written(dut):
+    """"A run whose every lane is masked completes with nothing written
+    and nothing raised" - and the early exit sees an empty active mask
+    from the first cycle, so a loop must not run its trip count. The
+    operands are signalling NaNs: any flag at all would be a lane that
+    ran.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for name in ("fp32", "fp256"):
+        fmt = FORMATS[name]
+        n = lanes_per_block(fmt) + 1
+        loud = [sf.snan_bits(fmt, 1)] * n
+        prog = seq.Program(fmt, [
+            seq.repeat(8),
+            seq.alu(sf.OP_ADD, rd=3, ra=0, rc=1),
+            seq.deposit(3), seq.endrep(), seq.halt()], max_deposits=8)
+        t0 = get_sim_time("ns")
+        await bench.masked(fmt, prog, loud, loud, loud, n, [False] * n,
+                           f"{name}: every lane masked")
+        empty = get_sim_time("ns") - t0
+        # ...and the same program with the mask lifted takes longer,
+        # which is the early exit having fired rather than a loop that
+        # ran eight times over dead lanes.
+        t0 = get_sim_time("ns")
+        res = await bench.program(fmt, prog, loud, loud, loud, n,
+                                  f"{name}: every lane running",
+                                  check_flags=True)
+        full = get_sim_time("ns") - t0
+        assert res.flags != 0, "the program does not signal; nothing proved"
+        assert empty < full, (
+            f"{name}: an all-masked run took {empty} ns and the same "
+            f"program with every lane live took {full} ns - the early "
+            f"exit did not see the mask")
+    dut._log.info("an all-masked run writes nothing, raises nothing and "
+                  "exits its loops at once")
+
+
+@cocotb.test()
+async def masked_and_gathered_compose(dut):
+    """R16 and R17 on one run: the mask decides which lanes run and the
+    table decides what they read. The expectation is the model with
+    both, so a mask that reached the gather - or a gather that skipped
+    a lane because of the mask - is a wrong ANSWER here and not a cycle
+    count.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP64
+    n = lanes_per_block(fmt) + 7
+    src = operands(fmt, 29, 7800)
+    tbl = _perm_table(n, len(src), 7801, none_every=5)
+    prog = seq.Program(fmt, [
+        seq.alu(sf.OP_ADD, rd=3, ra=0, rc=2),
+        seq.deposit(3), seq.halt()], max_deposits=1)
+    await bench.masked(
+        fmt, prog, src, operands(fmt, n, 7802), operands(fmt, n, 7803),
+        n, _keep(n, 4), "fp64: a gathered block, masked", idx_a=tbl)
+    dut._log.info("a mask and a table compose")
+
+
+@cocotb.test()
+async def masked_actall_is_invisible_in_bytes_and_must_be_caught_elsewhere(dut):
+    """V3's gate hole, closed (2026-09-15).
+
+    `ACTALL` reading the block's lanes instead of the CALLER's revives a
+    masked lane in hardware - and every case above still PASSES, because
+    a revived lane's deposits, its count and its scratch-out slots are
+    each held back by their own drain strobe. The bytes cannot show it.
+
+    What is NOT behind a strobe is the run's sticky FLAGS word and the
+    err bits beside it, so those are what this case reads:
+
+    1. every lane dropped by SETACT, then ACTALL, then a MUL that
+       overflows IN THE MASKED LANE ALONE. FLAGS must be 0; a build
+       whose ACTALL ignores the mask gives 0b10100 (overflow, inexact).
+    2. the same shape for DEPOSIT OVERFLOW: after ACTALL, a second
+       SETACT leaves only the masked lane a candidate, and two deposits
+       into a one-slot budget. err[3] must be clear; a build that
+       revived the lane raises it.
+
+    Both at more than one format, because the block geometry the revived
+    lane sits in differs at each.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for name in ("fp32", "fp64", "fp256"):
+        fmt = FORMATS[name]
+        lpb = lanes_per_block(fmt)
+        n = lpb + max(1, lpb // 4)          # a ragged block, on purpose
+        keep = _keep(n, 0)                  # every third lane masked
+        k = next(i for i in range(n) if not keep[i])
+        one = sf.one_bits(fmt)
+        big = sf.max_normal_bits(fmt)
+
+        # 1. the flags. Only lane k's operands can signal, and lane k is
+        #    masked; every other lane multiplies 1.0 by 1.0.
+        a = [one] * n
+        b = [one] * n
+        a[k] = b[k] = big
+        prog = seq.Program(fmt, [
+            seq.setact(5),                  # r5 is +0: every lane drops
+            seq.actall(),                   # ...and the caller's return
+            seq.alu(sf.OP_MUL, rd=3, ra=0, rb=1),
+            seq.deposit(3), seq.halt()], max_deposits=1)
+        want = seq.run(prog, a, b, b, lane_mask=keep)
+        assert want.flags == 0, (
+            f"{name}: the model says this masked run signals "
+            f"{want.flags:#07b}, so the case is not the one intended")
+        loud = seq.run(prog, a, b, b)
+        assert loud.flags & sf.FLAG_OVERFLOW, (
+            f"{name}: lane {k} does not overflow unmasked, so a revived "
+            f"lane would raise nothing and this case could not fail")
+        await bench.masked(fmt, prog, a, b, b, n, keep,
+                           f"{name}: ACTALL, then an overflow in the "
+                           f"masked lane alone")
+
+        # 2. the deposit-overflow status bit. After ACTALL the caller's
+        #    lanes are back; the second SETACT drops every lane whose
+        #    stream-a element is +0, which is all of them EXCEPT lane k -
+        #    and lane k is masked, so in a correct build nothing is left
+        #    active and nothing deposits at all.
+        a2 = [sf.zero_bits(fmt)] * n
+        a2[k] = one
+        prog2 = seq.Program(fmt, [
+            seq.setact(5),                  # every lane drops
+            seq.actall(),                   # the caller's lanes return
+            seq.setact(0),                  # ...and only lane k survives
+            seq.deposit(0), seq.deposit(0), # two into a one-slot budget
+            seq.halt()], max_deposits=1)
+        want2 = seq.run(prog2, a2, [one] * n, [one] * n, lane_mask=keep)
+        assert want2.status == 0 and want2.counts == [0] * n, (
+            f"{name}: the model's masked run already deposits or "
+            f"overflows, so this case is not the one intended")
+        unmasked2 = seq.run(prog2, a2, [one] * n, [one] * n)
+        assert unmasked2.status & seq.STATUS_DEPOSIT_OVERFLOW, (
+            f"{name}: lane {k} does not overflow its budget when it is "
+            f"NOT masked, so a revived lane would raise nothing")
+        await bench.masked(fmt, prog2, a2, [one] * n, [one] * n, n, keep,
+                           f"{name}: ACTALL, then a deposit overflow "
+                           f"reachable only in the masked lane")
+    dut._log.info("ACTALL that revived a masked lane would be invisible "
+                  "in the deposits and is caught in FLAGS and err[3]")
+
+
+@cocotb.test()
+async def masked_scratch_out_drains_a_converged_lane(dut):
+    """V3's case (2026-09-15): the scratch-out drain is NOT masked by
+    the active bit and IS masked by the caller's, and only a run with
+    both kinds of lane in it can tell the two apart.
+
+    Every case above masks lanes but never drops one with SETACT, so
+    "a lane that converged still drains its scratch-out" went untested:
+    a drain masked by the ACTIVE bit would have passed all of them.
+    Here a quarter of the lanes converge and a third are masked, so
+    every combination is present in one run - and at fp256 as well as
+    fp32, because the drain's element selection differs with the beat.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for name in ("fp32", "fp256"):
+        fmt = FORMATS[name]
+        lpb = lanes_per_block(fmt)
+        n = lpb + max(1, lpb // 3)
+        keep = _keep(n, 0)                    # every third lane masked
+        one = sf.one_bits(fmt)
+        zero = sf.zero_bits(fmt)
+        # r1 is +0 in every fourth lane, so SETACT drops exactly those -
+        # and they are NOT the same lanes the mask clears.
+        b = [one if i % 4 else zero for i in range(n)]
+        conv = [i for i in range(n) if b[i] == zero]
+        assert any(keep[i] for i in conv), (
+            f"{name}: no lane both converges and is the caller's, so "
+            f"this case cannot see the difference it exists for")
+        prog = seq.Program(fmt, [
+            seq.stl(0, 0),                    # slot 0 <- r0, every lane
+            seq.setact(1),                    # the +0 lanes drop out
+            seq.stl(0, 1),                    # slot 1 <- r0, the rest
+            seq.deposit(0), seq.halt()],
+            max_deposits=1, flags=seq.FLAG_SCRATCH_IO,
+            n_scratch_in=0, n_scratch_out=2)
+        a = operands(fmt, n, 7900 + n)
+        want = await bench.masked(
+            fmt, prog, a, b, b, n, keep,
+            f"{name}: a converged lane drains its scratch-out under a "
+            f"mask")
+        # ...and the run really did have all three kinds of lane in it.
+        assert any(not keep[i] for i in range(n)), f"{name}: no masked lane"
+        assert any(keep[i] and b[i] == zero for i in conv), \
+            f"{name}: no lane that converged AND belongs to the caller"
+        assert any(keep[i] and b[i] != zero for i in range(n)), \
+            f"{name}: no lane that stayed active"
+        # slot 1 separates them: a converged lane never reached the
+        # second STL, so its slot 1 is +0 while an active lane's is r0.
+        for i in range(n):
+            if not keep[i]:
+                continue
+            want_s1 = zero if b[i] == zero else (a[i] & ((1 << fmt.width) - 1))
+            assert want.scratch_out[i * 2 + 1] == want_s1, (
+                f"{name}: lane {i}: the model's slot 1 is not what "
+                f"convergence says, so the case is mis-built")
+    dut._log.info("the scratch-out drain skips a masked lane and keeps a "
+                  "converged one")

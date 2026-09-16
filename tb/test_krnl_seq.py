@@ -91,7 +91,8 @@ IDXSIPTR, MASKPTR = 0xA0, 0xA8
 MODE_SEQ = 1 << 15          # this run belongs to cft_seq
 CAPS_SEQ = 1 << 15          # ... and this bitstream has one
 # MODE[22:19]: which input blocks are fetched through a table (R16),
-# and MODE[23]: the lane mask (R17), which no build carries yet.
+# and MODE[23]: the lane mask (R17). Both are honoured on this build
+# and each is refused on one whose feature localparam is clear.
 MODE_IDX_A, MODE_IDX_B = 1 << 19, 1 << 20
 MODE_IDX_C, MODE_IDX_SI = 1 << 21, 1 << 22
 MODE_LANE_MASK = 1 << 23
@@ -132,6 +133,11 @@ SIN_BASE, SOUT_BASE = 0x110000, 0x140000
 # would pass every check here if the two regions touched.
 IA_BASE, IB_BASE = 0x150000, 0x158000
 IC_BASE, ISI_BASE = 0x160000, 0x168000
+# ...and the lane mask (R17), in its own region for the same reason: a
+# fetch that read the mask out of a table, or out of a stream, would
+# pass every check here if the regions touched. One bit a lane, so
+# 64 KB is half a million lanes.
+MASK_BASE = 0x170000
 EW_BASES = (0xC0000, 0xD0000, 0xE0000, 0xF0000)
 
 POISON = 0xAA
@@ -199,7 +205,7 @@ def pack_idx(table):
 async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
                           prec_code, op_noise=0, bank=None,
                           scratch_in=None, idx=(None, None, None, None),
-                          mode_extra=0):
+                          mode_extra=0, mask=None):
     """Everything a host does between having a program and having an
     answer, in the order XRT does it.
 
@@ -247,7 +253,24 @@ async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
         ram.write(base, pack_idx(table))
         await write64(axil, reg, base)
         idx_mode |= bit
-    await write64(axil, MASKPTR, 0xDEAD_8000)
+    # ABI 0.14's lane mask, on the tables' terms: staged where MASK_PTR
+    # points and MODE[23] set only when one was given, and the pointer
+    # POISONED when it was not - a tile that read a mask it was not
+    # given would read nothing that exists. One bit a lane, little end
+    # first, built from `mask` here rather than typed.
+    if mask is not None:
+        raw = bytearray((n + 7) // 8)
+        for _i, _k in enumerate(mask):
+            if _k:
+                raw[_i >> 3] |= 1 << (_i & 7)
+        # The tile reads whole beats, so the bits past the run's lanes
+        # are left POISON: a fetch that used them would give a block
+        # lanes the caller does not have.
+        ram.write(MASK_BASE, bytes(raw) + bytes([POISON]) * 64)
+        await write64(axil, MASKPTR, MASK_BASE)
+        idx_mode |= MODE_LANE_MASK
+    else:
+        await write64(axil, MASKPTR, 0xDEAD_8000)
     await axil.write_dword(MODE, op_noise | (prec_code << 8) | MODE_SEQ |
                            idx_mode | mode_extra)
     await write64(axil, NREG, n)
@@ -284,7 +307,7 @@ async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
 
 async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0,
                    bank=None, scratch_in=None, tries=3000,
-                   idx=(None, None, None, None), n=None):
+                   idx=(None, None, None, None), n=None, mask=None):
     """One sequencer run, scored against the model on every observable.
 
     With an index table, `va`/`vb`/`vc` are the SOURCES that table
@@ -300,17 +323,28 @@ async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0,
 
     res = seq.run(prog, va, vb, vc, bank=bank, scratch_in=scratch_in,
                   idx_a=idx[0], idx_b=idx[1], idx_c=idx[2],
-                  idx_scratch_in=idx[3])
+                  idx_scratch_in=idx[3], lane_mask=mask)
     sout_bytes = n * prog.n_scratch_out * ebytes
+    # R17: a masked lane's slots are the CALLER'S bytes, which here are
+    # the poison written a few lines above. The model's arrays are
+    # fresh and read +0 there, so comparing a masked lane against the
+    # model would accept a drain that had overwritten the buffer.
+    keep = [True] * n if mask is None else list(mask)
 
     await stage_and_start(axil, ram, prog.to_bytes(), prog, va, vb, vc, n,
                           PREC_CODE[fmt.name], op_noise, bank=bank,
-                          scratch_in=scratch_in, idx=idx)
+                          scratch_in=scratch_in, idx=idx, mask=mask)
     await poll_done(dut, axil, name, tries=tries)
 
     got_dep = ram.read(D_BASE, dep_bytes + GUARD)
     bad = 0
     for k in range(n * maxd):
+        if not keep[k // maxd]:
+            assert got_dep[k * ebytes:(k + 1) * ebytes] == \
+                bytes([POISON]) * ebytes, (
+                f"{name}: deposit slot {k} belongs to lane {k // maxd}, "
+                f"which the mask cleared, and it was WRITTEN")
+            continue
         g = int.from_bytes(got_dep[k * ebytes:(k + 1) * ebytes], "little")
         if g != res.deposits[k]:
             bad += 1
@@ -324,6 +358,10 @@ async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0,
 
     got_cnt = ram.read(CNT_BASE, cnt_bytes + GUARD)
     for i in range(n):
+        if not keep[i]:
+            assert got_cnt[i * 4:(i + 1) * 4] == bytes([POISON]) * 4, (
+                f"{name}: lane {i} is masked and its count was written")
+            continue
         g = int.from_bytes(got_cnt[i * 4:(i + 1) * 4], "little")
         assert g == res.counts[i], (
             f"{name}: lane {i} deposit count {g}, model says "
@@ -338,6 +376,14 @@ async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0,
     # half and runs on every other case in this file.
     got_so = ram.read(SOUT_BASE, sout_bytes + GUARD)
     for k in range(n * prog.n_scratch_out):
+        if not keep[k // prog.n_scratch_out]:
+            assert got_so[k * ebytes:(k + 1) * ebytes] == \
+                bytes([POISON]) * ebytes, (
+                f"{name}: scratch_out element {k} belongs to a masked "
+                f"lane and was written - the scratch-out drain is not "
+                f"masked by the ACTIVE bit and it IS masked by the "
+                f"caller's")
+            continue
         g = int.from_bytes(got_so[k * ebytes:(k + 1) * ebytes], "little")
         assert g == res.scratch_out[k], (
             f"{name}: scratch_out element {k} (lane "
@@ -1174,16 +1220,13 @@ async def krnl_sequencer(dut):
 
     # ---- the guard is still armed on the bit above ours ---------------
     #
-    # MODE[23] is the lane mask, which no build carries yet: it must be
-    # REFUSED with STATUS[3] and no memory touched - the same control
-    # every parcel inherits, run here to prove that opening MODE[22:19]
-    # did not open the reserved window with it.
+    # MODE[24] is the bottom of what is left of the reserved range, and
+    # MODE[31] its top: both must be REFUSED with STATUS[3] and no
+    # memory touched, which is what says that opening [22:19] and [23]
+    # did not open the window above them.
     flags_before = await axil.read_dword(FLAGS)
-    assert not ((await axil.read_dword(CAPS2)) & CAPS2_LANE_MASK), (
-        "this case asserts that MODE[23] is refused, which is only a "
-        "control while CAPS2[10] is clear")
     await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
-                           MODE_LANE_MASK, "MODE[23] with CAPS2[10] clear",
+                           1 << 24, "MODE[24], reserved on every build",
                            flags_before)
     await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
                            1 << 31, "MODE[31], reserved on every build",
@@ -1224,3 +1267,101 @@ async def krnl_sequencer(dut):
     await run_op(dut, axil, ram, FP32, OP_MUL, 24, seed=903, bases=EW_BASES)
     dut._log.info(f"sequencer bench complete "
                   f"(loop run raised flags {flags_loop:#07b})")
+
+
+@cocotb.test()
+async def krnl_lane_mask(dut):
+    """ABI 0.14's lane mask (docs/SEQUENCER.md R17) through the CSR, on
+    the tile whose ALU array is SHARED with the elementwise engine.
+
+    Its own test rather than more cases inside `krnl_sequencer`: R17 is
+    one feature with one setup, and a reset between it and everything
+    else is worth having when what it asserts is that a masked lane's
+    flag does not reach the run after it.
+    """
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n,
+                         reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n,
+                       reset_active_level=False, size=2 ** 21)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"), dut.ap_clk,
+                dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+                mem=ram_a.mem)
+    ram = ram_a
+
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+
+    pg32 = prog_two_deposits(FP32)
+    # ---- the lane mask through the CSR (R17) --------------------------
+    #
+    # MODE[23] with MASK_PTR, on the shared array: the same program
+    # run masked and dense, with the masked lanes' slots left poison.
+    # This is the path the software backend's CAPS2[10] refusal exists
+    # to protect, and the only one where the mask, the CSR and the
+    # shared array are all in play at once.
+    assert (await axil.read_dword(CAPS2)) & CAPS2_LANE_MASK, (
+        "this build's CAPS2[10] is clear, so the lane mask below would "
+        "be refused rather than honoured")
+    n_mk = 96
+    rng_mk = random.Random(0x17A7)
+    a_mk = gen_stream(FP32, n_mk, rng_mk, tame=True)
+    b_mk = gen_stream(FP32, n_mk, rng_mk, tame=True)
+    c_mk = gen_stream(FP32, n_mk, rng_mk, tame=True)
+    keep_mk = [i % 3 != 0 for i in range(n_mk)]
+    await run_prog(dut, axil, ram, pg32, a_mk, b_mk, c_mk,
+                   "fp32 a lane mask through the CSR", mask=keep_mk)
+    masked_dep = ram.read(D_BASE, n_mk * pg32.max_deposits * 4)
+    await run_prog(dut, axil, ram, pg32, a_mk, b_mk, c_mk,
+                   "fp32 the same run, all lanes", mask=[True] * n_mk)
+    ones_dep = ram.read(D_BASE, n_mk * pg32.max_deposits * 4)
+    await run_prog(dut, axil, ram, pg32, a_mk, b_mk, c_mk,
+                   "fp32 the same run, no mask at all")
+    dense_dep = ram.read(D_BASE, n_mk * pg32.max_deposits * 4)
+    assert ones_dep == dense_dep, (
+        "an all-ones mask must be bit-identical to no mask, and both of "
+        "these came off the tile")
+    assert masked_dep != dense_dep, (
+        "a mask with holes gave the unmasked run's bits, so the "
+        "all-ones half of this control could not have failed")
+
+    # ...and the flags, the two cases the wave-1 ledger asks for on a
+    # tile whose ALU array is SHARED with the elementwise engine. The
+    # first: the only lane that would signal is masked. The second: a
+    # run in which lane k overflowed, then a masked run with lane k
+    # masked and nothing else able to signal - whose FLAGS must be
+    # clear, which is a claim about the sticky word and the array
+    # between two runs and not about either run alone.
+    loud_a = [one_bits(FP32)] * n_mk
+    loud_b = [one_bits(FP32)] * n_mk
+    k_mk = 41
+    loud_b[k_mk] = max_normal_bits(FP32)
+    loud_a[k_mk] = max_normal_bits(FP32)
+    pg_mul = seq.Program(FP32, [seq.alu(OP_MUL, rd=3, ra=0, rb=1),
+                                seq.deposit(3), seq.halt()],
+                         max_deposits=1)
+    res_loud = await run_prog(dut, axil, ram, pg_mul, loud_a, loud_b,
+                              loud_b, "fp32 lane k overflows, unmasked")
+    assert res_loud.flags, \
+        "lane k did not overflow, so the masked run below proves nothing"
+    await run_prog(dut, axil, ram, pg_mul, loud_a, loud_b, loud_b,
+                   "fp32 lane k masked, after the run it was loud in",
+                   mask=[i != k_mk for i in range(n_mk)])
+    assert (await axil.read_dword(FLAGS)) == 0, (
+        "a masked lane's flag reached the run after it - the sticky "
+        "word or the array's lane flags outlived the run that raised "
+        "them")
+
+    dut._log.info("lane mask through the CSR: masked == model, all-ones "
+                  "== dense, holed != dense, and a masked lane's flag "
+                  "does not reach the run after it")

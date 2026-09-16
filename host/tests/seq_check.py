@@ -466,6 +466,250 @@ def indexed_corpus(lib, dev, fmt, name, args, S):
     print(f"{name}: {checked} indexed-corpus programs compared")
 
 
+def run_in_c_mask(lib, dev, prog, a, b, c, n, scratch_in, keep,
+                  fill=0xA5):
+    """-> (deposits, counts, flags, status, scratch_out), each read
+    back RAW, through cft_program_run_ex with ABI 0.14's lane mask.
+
+    Every output buffer is filled with `fill` BEFORE the call rather
+    than left zeroed, which is the whole point of this entry point: R17
+    says a masked lane's deposit slots, count and scratch-out slots are
+    not written, and against a zeroed buffer "not written" and "written
+    with +0" are the same bytes. Against a pattern they are not.
+
+    The deposits and the scratch-out block come back as byte strings,
+    not as integers, so a masked lane can be compared against the
+    pattern without inventing a number for it; the counts come back as
+    a list of the uint32s, pattern included."""
+    fmt = prog.fmt
+    esz = fmt.width // 8
+    image = prog.to_bytes()
+    nsin, nsout = prog.n_scratch_in, prog.n_scratch_out
+
+    handle = ctypes.c_void_p()
+    st = lib.cft_program_load(dev, image, len(image), ctypes.byref(handle))
+    if st != CFT_OK:
+        raise RuntimeError(f"cft_program_load: "
+                           f"{lib.cft_strerror(st).decode()}")
+    try:
+        def pack(vals):
+            return ctypes.create_string_buffer(
+                b"".join(v.to_bytes(esz, "little") for v in vals),
+                max(1, len(vals) * esz))
+
+        buf_a, buf_b, buf_c = pack(a), pack(b), pack(c)
+        ndep = n * prog.max_deposits
+        buf_d = ctypes.create_string_buffer(
+            bytes([fill]) * max(1, ndep * esz), max(1, ndep * esz))
+        counts = (ctypes.c_uint32 * max(1, n))()
+        for i in range(n):
+            counts[i] = 0xA5A5A5A5
+        flags = ctypes.c_uint32(0)
+        bus = ctypes.c_uint32(0)
+        buf_si = pack(scratch_in) if nsin else None
+        buf_so = (ctypes.create_string_buffer(
+                      bytes([fill]) * max(1, n * nsout * esz),
+                      max(1, n * nsout * esz))
+                  if nsout else None)
+        mbytes = (n + 7) // 8
+        raw = bytearray(mbytes)
+        for i, k in enumerate(keep):
+            if k:
+                raw[i >> 3] |= 1 << (i & 7)
+        buf_m = ctypes.create_string_buffer(bytes(raw), max(1, mbytes))
+
+        args = RunArgs()
+        args.struct_size = ctypes.sizeof(RunArgs)
+        args.a = ctypes.cast(buf_a, ctypes.c_void_p)
+        args.b = ctypes.cast(buf_b, ctypes.c_void_p)
+        args.c = ctypes.cast(buf_c, ctypes.c_void_p)
+        args.n = n
+        args.bank, args.bank_bytes = None, 0
+        args.scratch_in = (ctypes.cast(buf_si, ctypes.c_void_p)
+                           if buf_si is not None else None)
+        args.scratch_in_bytes = (n * nsin * esz) if nsin else 0
+        args.scratch_out = (ctypes.cast(buf_so, ctypes.c_void_p)
+                            if buf_so is not None else None)
+        args.scratch_out_bytes = n * nsout * esz
+        args.deposits = ctypes.cast(buf_d, ctypes.c_void_p)
+        args.counts = counts
+        args.flags_out = ctypes.pointer(flags)
+        args.bus_out = ctypes.pointer(bus)
+        args.lane_mask = ctypes.cast(buf_m, ctypes.c_void_p)
+        args.lane_mask_bytes = mbytes
+        st = lib.cft_program_run_ex(handle, ctypes.byref(args))
+        if st != CFT_OK:
+            raise RuntimeError(f"cft_program_run_ex: "
+                               f"{lib.cft_strerror(st).decode()}")
+        dep = buf_d.raw[:ndep * esz]
+        sout = buf_so.raw[:n * nsout * esz] if nsout else b""
+        return dep, list(counts)[:n], flags.value, bus.value, sout
+    finally:
+        lib.cft_program_free(handle)
+
+
+def masked_corpus(lib, dev, fmt, name, args, M):
+    """The fifth corpus (R17), for one format. Mutates the counters in M.
+
+    Its own seed, so the four corpora above draw exactly what they drew
+    before it existed. Its claim is two claims, and they fail
+    differently: an UNMASKED lane must be bit-for-bit the model's, and
+    a MASKED lane's bytes must be the ones the caller put there - which
+    is why the buffers are filled with a pattern rather than zeroed.
+    """
+    rng = random.Random(args.seed ^ (fmt.width * 7919) ^ 0x5A5E1)
+    esz = fmt.width // 8
+    checked = 0
+    for _trial in range(max(1, args.trials // 2)):
+        insns, consts = seq.random_program(fmt, rng, nconst=3,
+                                           extended=True, wide_regs=True,
+                                           scratch=True)
+        maxdep = rng.choice([1, 2, 4])
+        io = rng.random() < 0.5
+        nsin = rng.choice([1, 2, 3]) if io else 0
+        nsout = rng.choice([0, 1, 2]) if io else 0
+        flags = seq.FLAG_SCRATCH_IO if io else 0
+        try:
+            prog = seq.Program(fmt, insns, consts, maxdep, flags=flags,
+                               n_scratch_in=nsin, n_scratch_out=nsout)
+        except seq.ProgramError:
+            continue
+        # The block boundary matters more here than anywhere: libcft
+        # runs 64 lanes at a time and the mask is indexed by the GLOBAL
+        # lane, so a mask sliced per block rather than read per lane
+        # gives every block after the first somebody else's bits.
+        n = rng.choice([1, 2, 63, 64, 65, 100, 129, 193])
+        if n > 64:
+            M["blocked"] += 1
+        # Four shapes of mask, because they fail differently: all ones
+        # (which must be the unmasked run), all zeros (which must write
+        # nothing at all), a sparse mask and a dense one.
+        shape = rng.choice(["ones", "zeros", "sparse", "dense", "dense"])
+        if shape == "ones":
+            keep = [True] * n
+        elif shape == "zeros":
+            keep = [False] * n
+        elif shape == "sparse":
+            keep = [rng.random() < 0.2 for _ in range(n)]
+        else:
+            keep = [rng.random() < 0.8 for _ in range(n)]
+        M[shape] += 1
+        kept = sum(1 for k in keep if k)
+        M["kept"] += kept
+        M["masked_lanes"] += n - kept
+
+        a = seq.random_inputs(fmt, rng, n)
+        b = seq.random_inputs(fmt, rng, n)
+        c = seq.random_inputs(fmt, rng, n)
+        sin_arg = (seq.random_inputs(fmt, rng, n * nsin)
+                   if (io and nsin) else None)
+
+        want = seq.run(prog, a, b, c, scratch_in=sin_arg, lane_mask=keep)
+        try:
+            got = run_in_c_mask(lib, dev, prog, a, b, c, n, sin_arg, keep)
+        except RuntimeError as e:
+            print(f"  MISMATCH {name} (masked corpus): the model runs "
+                  f"this program and libcft refuses it: {e}")
+            M["bad"] += 1
+            continue
+        got_dep, got_counts, got_flags, got_status, got_so = got
+        bad = []
+        if got_flags != want.flags:
+            bad.append(f"flags model 0x{want.flags:02x} "
+                       f"libcft 0x{got_flags:02x}")
+        if got_status != want.status:
+            bad.append(f"status model 0x{want.status:02x} "
+                       f"libcft 0x{got_status:02x}")
+        pat_el = bytes([0xA5]) * esz
+        for i in range(n):
+            if keep[i]:
+                if got_counts[i] != want.counts[i]:
+                    bad.append(f"count[{i}] model {want.counts[i]} "
+                               f"libcft {got_counts[i]}")
+                for s in range(maxdep):
+                    j = i * maxdep + s
+                    g = int.from_bytes(got_dep[j * esz:(j + 1) * esz],
+                                       "little")
+                    if g != want.deposits[j]:
+                        bad.append(f"deposit[lane {i} slot {s}] model "
+                                   f"0x{want.deposits[j]:x} libcft 0x{g:x}")
+                        break
+                for s in range(nsout):
+                    j = i * nsout + s
+                    g = int.from_bytes(got_so[j * esz:(j + 1) * esz],
+                                       "little")
+                    if g != want.scratch_out[j]:
+                        bad.append(f"scratch_out[lane {i} slot {s}] model "
+                                   f"0x{want.scratch_out[j]:x} "
+                                   f"libcft 0x{g:x}")
+                        break
+            else:
+                if got_counts[i] != 0xA5A5A5A5:
+                    bad.append(f"count[{i}] was WRITTEN ({got_counts[i]}) "
+                               f"for a lane the mask cleared")
+                for s in range(maxdep):
+                    j = i * maxdep + s
+                    if got_dep[j * esz:(j + 1) * esz] != pat_el:
+                        bad.append(f"deposit[lane {i} slot {s}] was "
+                                   f"WRITTEN for a lane the mask cleared")
+                        break
+                for s in range(nsout):
+                    j = i * nsout + s
+                    if got_so[j * esz:(j + 1) * esz] != pat_el:
+                        bad.append(f"scratch_out[lane {i} slot {s}] was "
+                                   f"WRITTEN for a lane the mask cleared")
+                        break
+        if bad:
+            M["bad"] += 1
+            if M["bad"] <= 3:
+                print(f"  MISMATCH {name} (masked corpus) n={n} "
+                      f"shape={shape} kept={kept} maxdep={maxdep} "
+                      f"nsin={nsin} nsout={nsout}")
+                print(f"    program  {[hex(i) for i in insns]}")
+                for line in bad[:6]:
+                    print(f"    {line}")
+        checked += 1
+        M["total"] += 1
+
+        # The control, on one trial in five, and it is the negative
+        # control of the parcel written as a corpus check: an all-ones
+        # mask must be bit-identical to NO mask, and a mask with holes
+        # must not be - the second half being what makes the first a
+        # gate rather than a tautology. The program is the random one,
+        # so this is the same claim over arbitrary programs.
+        if rng.random() < 0.2:
+            plain = run_in_c_ex(lib, dev, prog, a, b, c, sin_arg)
+            ones = run_in_c_mask(lib, dev, prog, a, b, c, n, sin_arg,
+                                 [True] * n, fill=0x00)
+            plain_dep = b"".join(v.to_bytes(esz, "little")
+                                 for v in plain[0])
+            plain_so = b"".join(v.to_bytes(esz, "little") for v in plain[4])
+            if (ones[0] != plain_dep or ones[1] != plain[1]
+                    or ones[2] != plain[2] or ones[3] != plain[3]
+                    or ones[4] != plain_so):
+                print(f"  MISMATCH {name} (masked corpus): an all-ones "
+                      f"mask is not the unmasked run, in libcft")
+                M["bad"] += 1
+            M["allones"] += 1
+            # ...and the half that makes it a gate. Only where the
+            # program actually deposits something: with every count
+            # zero, a holed mask and an all-ones mask write the same
+            # +0 everywhere and the comparison would prove nothing.
+            if n > 1 and any(plain[1]):
+                holes = [i % 2 == 0 for i in range(n)]
+                other = run_in_c_mask(lib, dev, prog, a, b, c, n, sin_arg,
+                                      holes, fill=0x00)
+                if other[0] == ones[0] and other[1] == ones[1]:
+                    print(f"  MISMATCH {name} (masked corpus): a mask with "
+                          f"holes gave the unmasked answer, so the "
+                          f"all-ones half of this control could not have "
+                          f"failed")
+                    M["bad"] += 1
+                else:
+                    M["holed"] += 1
+    print(f"{name}: {checked} masked-corpus programs compared")
+
+
 def run_in_c_ex(lib, dev, prog, a, b, c, scratch_in):
     """-> (deposits, counts, flags, status, scratch_out) through
     cft_program_run_ex, the entry point a program that declares scratch
@@ -843,6 +1087,11 @@ def main():
     # scratch corpus's totals (R16, 2026-09-15).
     X = dict(total=0, bad=0, blocked=0, tables=0, none=0, oob=0,
              identity=0, permuted=0)
+    # ...and the fifth's, for the same reason: a mask shape this corpus
+    # never drew must be visible as a zero here and not hidden in a
+    # total (R17, 2026-09-15).
+    M = dict(total=0, bad=0, blocked=0, kept=0, masked_lanes=0,
+             ones=0, zeros=0, sparse=0, dense=0, allones=0, holed=0)
     try:
         for name in args.formats:
             fmt = FORMATS[name]
@@ -947,6 +1196,7 @@ def main():
             print(f"{name}: {checked} programs compared")
             scratch_corpus(lib, dev, fmt, name, args, S)
             indexed_corpus(lib, dev, fmt, name, args, X)
+            masked_corpus(lib, dev, fmt, name, args, M)
     finally:
         lib.cft_close(dev)
 
@@ -970,7 +1220,20 @@ def main():
           f"{X['oob']} indices at the source's length refused by both, "
           f"{X['identity']} identity-table controls and {X['permuted']} "
           f"permuted ones")
-    bad += S["bad"] + X["bad"]
+    print(f"{M['total']} programs from the masked corpus run through "
+          f"both, {M['blocked']} across the block boundary: "
+          f"{M['kept']} lanes run and {M['masked_lanes']} masked, "
+          f"{M['ones']} all-ones masks, {M['zeros']} all-zero, "
+          f"{M['sparse']} sparse and {M['dense']} dense, "
+          f"{M['allones']} all-ones controls and {M['holed']} holed ones")
+    bad += S["bad"] + X["bad"] + M["bad"]
+    if M["total"] and not (M["kept"] and M["masked_lanes"] and M["zeros"]
+                           and M["allones"] and M["holed"]):
+        print("THE MASKED CORPUS DID NOT REACH EVERY FORM - no lane was "
+              "masked, no lane ran, no all-zero mask was drawn, or no "
+              "all-ones/holed control pair, which would mean R17 was not "
+              "actually compared")
+        return 1
     if X["total"] and not (X["tables"] and X["none"] and X["oob"]
                            and X["identity"] and X["permuted"]):
         print("THE INDEXED CORPUS DID NOT REACH EVERY FORM - no table, "
