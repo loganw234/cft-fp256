@@ -51,7 +51,11 @@ def main():
     esz = fmt.width // 8
     N, L = args.elements, args.length
     if N % L:
-        raise SystemExit(f"--elements {N} is not a multiple of --length {L}")
+        # A power of two is never a multiple of 192; take the largest
+        # multiple below it and say so, rather than refuse a shape a
+        # driver typed in round numbers.
+        print(f"note: --elements {N} rounded down to {N - N % L}, a multiple of L={L}")
+        N -= N % L
     E = N // L
 
     lib = load_library()
