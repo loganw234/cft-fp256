@@ -934,6 +934,28 @@ this directory's.
 
 ---
 
+### Rebuilt at ABI 0.14, 2026-09-15 - the elementwise `cft_run_ex` reaches the module
+
+Round 2's last parcel (P5): `cftw_run_ex` passes `cft_elem_args`
+positionally with the struct assembled in `wasm_api.c`, `cftw_idx_none`
+projects `CFT_IDX_NONE` as a call, and `bindings/node`'s
+`Context.mapEx(op, {a, b, c, scalar, idxA, idxB, idxC})` is the entry
+point beside `map()`. ABI 0.12's scalar mask was never bound either, so
+this is the first JavaScript that can pass one. The module is
+`81f34e12...`, 256,485 bytes from 248,888 - `cft_run_ex` and the
+indexed path behind it were dead code until an export referenced them
+- with **141 `cftw_*` exports** (139 before). `verify.mjs` OK: abi 14
+on both sides, 110 named exports present, 1,068,915 cases through the
+page's bytes and 832,915 through the wrappers; `verify_demos.mjs` 44
+ok with every chain hash unchanged and only the module stamp
+re-recorded. Two things learned on the way, both now enforced:
+`cwrap` of an export the module lacks returns `undefined` rather than
+throwing (measured, emscripten 6.0.9), so `audit()` calls
+`cftw_idx_none` at load and `verify.mjs` names both exports; and the
+export, the JavaScript and the module had to land in ONE commit, which
+they did. The page's calculator does not drive the tables - that is
+`mapEx` in Node, and the panel is a later step.
+
 ## A second page: the five workloads, measured (2026-09-04)
 
 `demos.html` is the other deliverable of this directory. Same

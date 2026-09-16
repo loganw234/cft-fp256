@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Thirty-five files, 43,687 lines. Flat in one directory they look like one
+Thirty-five files, 45,034 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **15,840 lines you consult while working** — the three under *Start here*,
+- **16,130 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **5,383 lines of tool manual**, one per shipped program;
-- **1,539 lines of operations**, read when you are about to do something to
+- **1,617 lines of operations**, read when you are about to do something to
   hardware;
-- **20,925 lines of record and argument** — the ledger, the roadmap and the
+- **21,904 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -31,7 +31,7 @@ answer is not in here — it is `make verify-quick`, and
 
 | document | lines | what it is for |
 |---|---|---|
-| [INTEGRATION.md](INTEGRATION.md) | 241 | Choosing a path: which surface to use for which job. The shortest route from "I have a workload" to "I know what to call." |
+| [INTEGRATION.md](INTEGRATION.md) | 253 | Choosing a path: which surface to use for which job. The shortest route from "I have a workload" to "I know what to call." |
 | [VERIFICATION.md](VERIFICATION.md) | 319 | Every gate, what it proves, how long it really takes. Twelve tiers, thirty-eight runner stages. |
 | [COMPLIANCE.md](COMPLIANCE.md) | 172 | IEEE 754-2019 clause by clause: what is implemented, what is refused, and where each is proven. |
 
@@ -42,9 +42,9 @@ product, not the implementation.
 
 | document | lines | what it is for |
 |---|---|---|
-| [DETERMINISM.md](DETERMINISM.md) | 1,424 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 1,127 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
-| [SEQUENCER.md](SEQUENCER.md) | 1,856 | The orbit sequencer and the program model. |
+| [DETERMINISM.md](DETERMINISM.md) | 1,425 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 1,132 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
+| [SEQUENCER.md](SEQUENCER.md) | 1,867 | The orbit sequencer and the program model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 786 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 188 | How values sit in memory: beats, lanes, element order. |
 
@@ -52,13 +52,13 @@ product, not the implementation.
 
 | document | lines | what it is for |
 |---|---|---|
-| [HOSTAPI.md](HOSTAPI.md) | 2,553 | The host API, function by function. The largest reference here and the one most often wanted. |
+| [HOSTAPI.md](HOSTAPI.md) | 2,557 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,667 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
 | [REMOTE.md](REMOTE.md) | 1,387 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
-| [PROGRAMS.md](PROGRAMS.md) | 472 | Programs as files: the assembler, the program library, the runner. |
+| [PROGRAMS.md](PROGRAMS.md) | 475 | Programs as files: the assembler, the program library, the runner. |
 | [EMBEDDED.md](EMBEDDED.md) | 675 | libcft on microcontrollers, and the profiles the embedded gate runs. |
 | [PLATFORMS.md](PLATFORMS.md) | 2,879 | Every platform the library has been built and run on, with dates and results. |
-| [SCALING.md](SCALING.md) | 384 | What more tiles buy, and what they do not. |
+| [SCALING.md](SCALING.md) | 388 | What more tiles buy, and what they do not. |
 
 ## The tools, one document each
 
@@ -80,9 +80,9 @@ running.
 
 | document | lines | what it is for |
 |---|---|---|
-| [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 190 | Building a bitstream, and the four traps — three of which exit 0. `hw/build-pair.sh` is this document as an executable. |
-| [CARDDAY.md](CARDDAY.md) | 666 | Card day: the runbook as it was actually run, the staged pairs, and the forensics kept when build trees are reclaimed. |
-| [BRINGUP.md](BRINGUP.md) | 761 | Hardware bring-up, and the gates CI's green tick does not cover. |
+| [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 221 | Building a bitstream, and the five traps — three of which exit 0, and one that looks like a design failure. `hw/build-pair.sh` is this document as an executable. |
+| [CARDDAY.md](CARDDAY.md) | 681 | Card day: the runbook as it was actually run, the staged pairs, and the forensics kept when build trees are reclaimed. |
+| [BRINGUP.md](BRINGUP.md) | 768 | Hardware bring-up, and the gates CI's green tick does not cover. |
 
 ## The record
 
@@ -92,9 +92,9 @@ reading material for a working session.
 | document | lines | what it is for |
 |---|---|---|
 | [VALIDATION.md](VALIDATION.md) | 12,782 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
-| [ROADMAP.md](ROADMAP.md) | 2,965 | What is built, what is next, and what was decided against. |
-| [ROUND2.md](ROUND2.md) | 1063 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
-| [NOVEL.md](NOVEL.md) | 553 | Results for which no prior description was found, with the standard of evidence stated first. |
+| [ROADMAP.md](ROADMAP.md) | 2,980 | What is built, what is next, and what was decided against. |
+| [ROUND2.md](ROUND2.md) | 1080 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
+| [NOVEL.md](NOVEL.md) | 557 | Results for which no prior description was found, with the standard of evidence stated first. |
 | [ATLAS.md](ATLAS.md) | 362 | The atlas-engine integration, assessed before any of it was done. |
 | [FUNDING.md](FUNDING.md) | 44 | Funding landscape. |
 

@@ -151,7 +151,7 @@ suite - so a Linux host lands nearer the quiet column or below it.
 
 | gate | quiet | loaded | notes |
 |---|---|---|---|
-| `golden` (pytest, 2,150 tests since revision 3's model and assembler cases joined on 2026-09-08 evening; 2,075 before it) | 2.6 min at four workers | 8 to 13 min | 5 skip by their own conditions; one revision-3 assembler test ran for the first time on the merged tree and had its expectation corrected |
+| `golden` (pytest, 2,264 tests since revision 3's model and assembler cases joined on 2026-09-08 evening; 2,075 before it) | 2.6 min at four workers | 8 to 13 min | 5 skip by their own conditions; one revision-3 assembler test ran for the first time on the merged tree and had its expectation corrected |
 | `vectors` (`make vectors`, 168 sets) | 5 min | 7 to 8.5 min | |
 | `libcft` / `make -C host test` (build + the 1,068,915-case replay) | 7.5 min | 8.5 to 11 min | the census was 1,071,635 until 2026-09-12, when opcode 31 became `maxall`: a reduction has no elementwise case to inherit, so 4,000 `reserved31` cases left and 1,280 maxall cases arrived. A document recording an earlier RUN still says 1,071,635 and is right to |
 | `make -C host reducetest` (`reduce_check.py --trials 1500`: the tree, the scaling, the bits and the flags against the model) | 2 to 3 min | | listed here from 2026-09-12, having been absent from a page that calls itself the map of everything - found by asking which docs the round had made stale rather than by a gate. 13,516 reductions over four formats and all seven of clause 9.4 plus `maxall`, whose two sides are deliberately DIFFERENT SHAPES: the model folds left, the library halves. Comparing them is what tests 754-2019 `maximum`'s associativity instead of assuming it |

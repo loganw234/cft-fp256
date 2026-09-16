@@ -221,7 +221,9 @@ delivers rounded with underflow and inexact raised.
 ## The package, from ABI 0.7 on
 
 The two sections above are the first two steps; the package kept pace
-with every step after them - the library is at ABI 0.11 now - and this
+with every step after them - the library is at ABI 0.14 now
+(2026-09-15; docs/COMPATIBILITY.md says what each step added and which
+surfaces carry it) - and this
 is the map. Every method is on
 `Context` and, where the C has a batch shape, in `batch` too; the
 semantics are the library's, documented in docs/HOSTAPI.md, and
