@@ -1893,7 +1893,32 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
          * because XRT's start sends the whole argument register image
          * and a declared argument the launch does not set goes out as
          * zero (2026-09-14). */
-        xrt::run r = (D.version >= IDX_VERSION)
+        xrt::run r;
+        const char *const mask_ov = std::getenv("CFT_XRT_MASK_ADDR_OVERRIDE");
+        if (mask_ov && D.version >= IDX_VERSION) {
+            /* A card-day instrument (2026-09-15): argument 16 replaced by
+             * a raw address, so that a read of it faults if the tile
+             * issues one - the way to tell "the mask was never read"
+             * from "the mask was read and not applied", from the host. */
+            const uint64_t addr = std::strtoull(mask_ov, nullptr, 16);
+            xrt::run rr(tile.k);
+            rr.set_arg(0, mode);
+            rr.set_arg(1, static_cast<uint64_t>(n));
+            rr.set_arg(2, *ob[0]);  rr.set_arg(3, *ob[1]);
+            rr.set_arg(4, *ob[2]);  rr.set_arg(5, *ob[3]);
+            rr.set_arg(6, tile.pg); rr.set_arg(7, tile.cn);
+            rr.set_arg(8, tile.bk);
+            rr.set_arg(9, *ob[CFT_ROLE_SI]); rr.set_arg(10, *ob[CFT_ROLE_SO]);
+            rr.set_arg(11, static_cast<uint64_t>(0));
+            rr.set_arg(12, *ob[CFT_ROLE_IA]); rr.set_arg(13, *ob[CFT_ROLE_IB]);
+            rr.set_arg(14, *ob[CFT_ROLE_IC]); rr.set_arg(15, *ob[CFT_ROLE_ISI]);
+            rr.set_arg(16, &addr, sizeof addr);
+            std::fprintf(stderr, "[xrt trace] argument 16 overridden with "
+                         "0x%016llx\n", static_cast<unsigned long long>(addr));
+            rr.start();
+            r = rr;
+        } else
+        r = (D.version >= IDX_VERSION)
                    ? tile.k(mode, static_cast<uint64_t>(n),
                             *ob[0], *ob[1], *ob[2], *ob[3],
                             tile.pg, tile.cn, tile.bk,
