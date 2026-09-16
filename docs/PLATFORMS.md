@@ -407,8 +407,10 @@ is why cooling has not yet been a problem (docs/BRINGUP.md).
   ships." A U55C would not introduce a second toolchain era; it would
   use the one already installed.
 * **Above 4G Decoding** in BIOS, or the card does not enumerate
-  (docs/BRINGUP.md). Already confirmed active on the Windows box and
-  unconfirmed on amd-arc-box's X99-UD4.
+  (docs/BRINGUP.md). Confirmed active on the Windows box, and on
+  amd-arc-box's X99-UD4 by the only proof that counts: the U50 has
+  enumerated at 0000:02:00.1 and run every card day there since
+  2026-09-08 (docs/VALIDATION.md).
 * **A used card carries no entitlement.** See §5.
 
 ### Per-card notes and used-market prices

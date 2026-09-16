@@ -736,7 +736,7 @@ expected to work. A row says what was measured, not what compiles.
 
 | Board | Part | What ran |
 |---|---|---|
-| Waveshare ESP32-S3-Touch-LCD-1.69 | ESP32-S3, 512 KB SRAM | **on the bench.** The elementwise, transcendental and augmented sets replayed case by case over its USB serial, 222,000 of them matching bit for bit before an unrelated transport fault; the reduction, character and magnitude sets replay clean since. Two environment fixes were needed and are in docs/EMBEDDED.md: a 96 KB loop-task stack, and a USB receive ring raised to match the line the responder publishes |
+| Waveshare ESP32-S3-Touch-LCD-1.69 | ESP32-S3, 512 KB SRAM | **on the bench.** The elementwise, transcendental and augmented sets replayed case by case over its USB serial, 508,000 of them matching bit for bit - every binary32 and binary64 family, complete - before an unrelated transport fault (docs/EMBEDDED.md; an earlier row here said 222,000, the count at the time it was written); the reduction, character and magnitude sets replay clean since. Two environment fixes were needed and are in docs/EMBEDDED.md: a 96 KB loop-task stack, and a USB receive ring raised to match the line the responder publishes |
 | Raspberry Pi Pico | RP2040 | compiles, all three sketches, no warnings. **Not run on the part** |
 | Arduino Mega | ATmega2560 | compiles, all three sketches. **Not run on the part** |
 | Arduino Uno / Nano | ATmega328P | compiles at the `CFT_TINY` profile, 24,266 bytes of flash and 957 of RAM for VectorReplay. **Not run on the part**, and the 130-byte stack margin is still a static analysis |

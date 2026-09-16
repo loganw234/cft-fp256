@@ -370,6 +370,37 @@ are in `docs/bench/tipping-points.json`. Raw sweeps and peer runs
 for both machines are beside it, and `python/readme_charts.py`
 regenerates the two README charts from exactly those files.
 
+## Round 2 on the card (2026-09-15)
+
+The parcel round that built the gather, the lane mask and the beat-wide
+accumulator (docs/ROUND2.md) was measured on the round-2 single tile
+the night it landed, with the tools that measure it checked into
+`host/tools/` so the numbers regenerate: `gathertime.py` (the gravity
+accumulate as one indexed program run against the dense calls it
+replaces, checked against a host fold first) and the seq6 day's
+`segtime.py` (a thousand segmented reductions in one call against a
+thousand calls). Every figure is a median of five, and the full tables
+with the two host defects the day found are docs/VALIDATION.md's
+"round 2's card day, second half".
+
+| what | one run | the calls it replaces | ratio |
+|---|---|---|---|
+| gather, 64 bodies fp64 (192 lanes, rows of 63) | 4.052 ms, 335 ns a gathered element | 63 dense calls | x3.25 |
+| gather, 128 bodies fp64 (384 lanes, rows of 127) | 15.588 ms, 320 ns an element | 127 calls, 26.729 ms | x1.71 |
+| gather, 128 bodies fp32 / fp128 | 15.113 / 16.464 ms, 310 / 338 ns | 24.725 / 24.894 ms | x1.64 / x1.51 |
+| the same run, every third lane masked | x1.013 of the unmasked run at every format | one beat read a block | |
+| `cft_reduce_seg` sum, fp64, 1,000 segments of 192 | 2,351 us | 1,000 calls, 91,108 us | x38.8 |
+| the same at fp128 / fp32 | 3,863 / 1,739 us | 86,042 / 84,410 us | x22.3 / x48.5 |
+| the same at 64 segments, fp64 | 220.5 us | 5,808 us | x26.3 |
+
+Two readings the ratios carry. A gathered element costs one HBM round
+trip whatever the format - 310 to 340 ns - because the sequencer keeps
+one burst in flight, so the gather's win over dense calls is the call
+count and the host gathers removed, not bandwidth; and the mask buys
+bytes and flags, never compute, at about one percent of a run. The
+segmented reduction's ratio is the per-call round trip against a
+per-segment flush, which is why it grows with the segment count.
+
 ## Workloads designed for the contract
 
 The tables above adapt other libraries' benchmarks to this one. The

@@ -57,7 +57,7 @@ product, not the implementation.
 | [REMOTE.md](REMOTE.md) | 1,387 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 475 | Programs as files: the assembler, the program library, the runner. |
 | [EMBEDDED.md](EMBEDDED.md) | 675 | libcft on microcontrollers, and the profiles the embedded gate runs. |
-| [PLATFORMS.md](PLATFORMS.md) | 2,879 | Every platform the library has been built and run on, with dates and results. |
+| [PLATFORMS.md](PLATFORMS.md) | 2,881 | Every platform the library has been built and run on, with dates and results. |
 | [SCALING.md](SCALING.md) | 388 | What more tiles buy, and what they do not. |
 
 ## The tools, one document each
@@ -74,7 +74,7 @@ running.
 | [ENCLOSE.md](ENCLOSE.md) | 844 | `cft-enclose` — directed-rounding interval enclosure |
 | [COLLATZ.md](COLLATZ.md) | 647 | `cft-collatz` — Collatz trajectories |
 | [DEMOS.md](DEMOS.md) | 744 | the same five workloads in one browser tab, on the conformance wasm module |
-| [BENCHMARKS.md](BENCHMARKS.md) | 473 | what all of the above measure, in software and on the card |
+| [BENCHMARKS.md](BENCHMARKS.md) | 504 | what all of the above measure, in software and on the card |
 
 ## Operations — doing a thing to hardware
 
