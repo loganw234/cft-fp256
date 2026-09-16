@@ -121,7 +121,7 @@
     {
       "source": "host/src/program.c",
       "dest": "src/cft/src/program.c",
-      "sha256": "892d7ae9bf1e398761940c304eab4d9adb48ac01b03984989fd40a2de8b867ce"
+      "sha256": "3eae32b8b79e2a7da7867534578e5a694e765f33231c1730b728e86c22ce17d3"
     },
     {
       "source": "host/src/reduce.c",

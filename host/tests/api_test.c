@@ -3504,7 +3504,9 @@ int main(void)
             {
                 cft_run_args H;
                 memcpy(&H, &R, sizeof H);
-                H.n = ((size_t)-1) / 8;
+                /* above the bound for any format and any deposit count:
+                 * n elements of the smallest format would not fit */
+                H.n = ((size_t)-1) / 2;
                 H.idx_a = (const uint32_t *)16;
                 H.idx_a_src = 0xFFFFFFFEu;
                 st = cft_program_run_ex(prog, &H);

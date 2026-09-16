@@ -2066,15 +2066,22 @@ CFT_API cft_status cft_program_run_ex(cft_program *prog,
                           (unsigned)prog->max_deposits);
             return CFT_ERR_INVALID_ARGUMENT;
         }
-        if (prog->max_deposits &&
-            A.n > ((size_t)-1) / prog->max_deposits / esz) {
-            cft_set_error("cft_program_run_ex: n = %lu elements is more "
-                          "than this library can size (max_deposits %u, "
-                          "%lu bytes an element) - refused before any "
-                          "table or mask is read",
-                          (unsigned long)A.n, (unsigned)prog->max_deposits,
-                          (unsigned long)esz);
-            return CFT_ERR_INVALID_ARGUMENT;
+        {
+            /* the bytes one lane reads and writes: its element in each
+             * stream and its deposit slots; a program with no deposit
+             * slot still reads n elements a stream */
+            const size_t per = esz * (prog->max_deposits ? prog->max_deposits
+                                                          : 1u);
+            if (A.n > ((size_t)-1) / per) {
+                cft_set_error("cft_program_run_ex: n = %lu elements is more "
+                              "than this library can size (max_deposits "
+                              "%u, %lu bytes an element) - refused before "
+                              "any table or mask is read",
+                              (unsigned long)A.n,
+                              (unsigned)prog->max_deposits,
+                              (unsigned long)esz);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
         }
     }
     st = seq_check_bank(prog, A.bank, A.bank_bytes, "cft_program_run_ex");
