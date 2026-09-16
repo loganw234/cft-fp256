@@ -695,6 +695,32 @@ Argument errors fire before capability refusals, in
 | Arduino | the vendored copy re-synced |
 | the model | nothing: the definition is the gather followed by the dense run |
 
+### P3 on main (2026-09-15, 69f3df2): the per-run lane mask
+
+R17 is real: `cft_run_args.lane_mask` with `lane_mask_bytes` of
+exactly `(n + 7) / 8`, bit `i` lane `i`. A masked lane's deposit slots,
+count and scratch-out slots are the CALLER'S bytes (a caller masks a
+lane to keep what is in its slot), it contributes no flag and no
+deposit overflow, the early exit sees it, `ACTALL` does not revive it,
+and all ones is bit-identical to no mask. What it costs and what it
+buys, measured: on this tile the sequencer issues per beat and the
+active bit decides what is written, not what is computed, so the mask
+saves bytes, flags and the early exit and no compute - dense plus one
+single-beat read a block (four cycles at every format on the model's
+memory, one HBM round trip a block on the card), half-masked equal to
+all-masked. Its logic is +690 cells over the maskless `cft_seq` after
+a full yosys pass, after its block slice was rewritten as a select.
+
+| surface | status after P3 |
+|---|---|
+| C (`cft.h`) | the mask runs; a device that does not publish `CFT_SEQ_FEAT_LANE_MASK` refuses it by name; the shape rule (`lane_mask_bytes` exactly `(n + 7) / 8`) is unchanged; the mask's bytes are read only past the bounding checks |
+| hardware | `S_MSK_GO / S_MSK_W` between block setup and the wipe, one beat of the mask a block; `blk_act & mask` for the opening active and for `ACTALL`; a strobe in each of the three drains; `cfg_mask_en = MODE[23]` under CAPS2[10], the guard narrowed to `MODE[31:24]`; VERSION 0xA00 unchanged |
+| XRT | the caller's bitmap REPACKED per launch into the tile's own buffer (argument 16), never bound - bit 0 of what a tile reads is that tile's lane 0; a program run uses one tile today, so the repack's offset is always zero |
+| remote | the client COMPACTS a masked run to its kept lanes and scatters the outputs back - FLAGS is a whole-run word, so a masked lane computed on the server would otherwise report; the refusal reads the server's CAPS2[10] (under-promise, as for INDEXED); no frame change |
+| Node / Browser | nothing: the program API of the bindings carries no mask yet |
+| Arduino | the vendored copy re-synced, `mask_bits.h` among the files |
+| the model | `seq.run(lane_mask=)`: `keep[]` under `active`, `ACTALL -> list(keep)`, the scratch-out skipping masked lanes; `seq_check.py`'s fifth (masked) corpus |
+
 
 ## Hosts and boards
 

@@ -12399,3 +12399,126 @@ stages over the wire; the docs index, five generators and the vendored
 copy true. The composed-versus-program leg in `device_test.c` and V2's
 reproduction of the one-line control stand as the seam evidence the
 plan asked the integrator to write after P2.
+
+## 2026-09-15 - P3 on main: the lane mask, which buys bytes and flags and not compute, and the two things its verifier found that no byte would show
+
+**The claim.** R17 (docs/SEQUENCER.md revision 6): a masked lane runs
+nothing it can avoid and writes no byte - its deposit slots, its count
+and its scratch-out slots are the caller's bytes, it contributes no
+flag and no deposit overflow, the early exit sees it, `ACTALL` does
+not revive it, all ones is bit-identical to no mask. Parcel P3 built it
+on every backend: two states in `rtl/cft_seq.sv` between block setup
+and the wipe reading one beat of the mask per block, the block's
+opening active mask ANDed with it so the opening active and `ACTALL`
+read one expression, a strobe in each of the three drains (they skip
+padding lanes by lane COUNT, never by the active bit, so a masked lane
+inside the count was skipped by nothing that existed - the brief had
+assumed otherwise); `cfg_mask_en = MODE[23]` under CAPS2[10] with the
+guard narrowed by exactly one bit; the model's `keep[]` under `active`
+and the C executor's beside `active[]`; the XRT backend repacking the
+caller's bitmap per launch into the tile's own buffer rather than
+binding it (bit 0 of what a tile reads is that tile's lane 0; a program
+run uses one tile today, so the repack's offset is always zero - a
+sentence the scale-out doctrine did not have); the remote backend
+COMPACTING a masked run to its kept lanes and scattering the outputs
+back, because the brief's sketch - run unmasked on the server, copy
+back the active lanes - would have returned a masked lane's flag in the
+whole-run word (P3 argued it, V3 built the sketch as a control and
+measured `FLAGS 0x14` against `0`).
+
+**The measurement that corrected the plan.** The plan priced ask 5 at
+up to two percent of a step for removing idle lanes' compute and bytes.
+P3 measured (`make seqcycles`, four blocks, one IAND and one deposit)
+that half-masked costs exactly what all-masked costs - fp32 512 lanes
+1,189 / 1,205 / 1,205 cycles, fp64 869 / 885 / 885, fp128 709 / 725 /
+725, fp256 629 / 645 / 645, reads 6 -> 10; block setup alone 60.8 ->
+64.8, 44.8 -> 48.8, 36.8 -> 40.8, 32.8 -> 36.8 a block - because the
+sequencer issues per BEAT and the active bit decides what is written,
+not what is computed. So the mask buys bytes, flags and the early exit
+(a block whose every lane is masked leaves its loops at the first
+test, measured) and no compute; buying the compute means skipping
+beats in the issue pipe and the stream loads, which is R14/R15 and R10
+and a revision-7 item. P3 stopped at the brief's line and reported,
+and docs/ROUND2.md's value statement is corrected with the table in
+it. The dense column is unchanged to the cycle, and a dense run pays no
+mask read (six bursts over four blocks dense, ten masked).
+
+**What the verifier found.** V3 (1 h 44 min) re-ran every gate from a
+clean tree and built cases beside the parcel's (a converged lane under
+a mask at fp256; a mask straddling two beat boundaries with a ragged
+tail; the compaction at every chunk shape with the chunk cut to twelve
+lanes, a masked lane at the first and last position, a chunk with
+every lane masked, a kept count of one, FLAGS included; 1,764 repack
+shapes past the parcel's sweep), found the shipped code right
+everywhere, and found two things no byte would show. First, a hole in
+the RTL gate: with the `ACTALL` arm reading the pre-mask active set in
+a copy - `ACTALL` reviving a masked lane, in hardware - every masked
+case passed, because a revived lane's deposits, count and scratch-out
+are each held back by their own drain strobe, so the defect is
+invisible in bytes and visible only in FLAGS, the deposit-overflow
+status and the scratch-range report, and no case combined `ACTALL`
+with an operation that signals in a masked lane. Second, the mask's
+AREA, which nobody had priced: yosys over `cft_seq.sv` under the lint
+target's own flow, 9,823 -> 28,626 cells (`opt -full`: 6,844 ->
+10,863, +59%), $mux 4,792 -> 22,911, $shift unchanged at 4 - ~96% of
+it the block slice `mask_blk_fn`, a sixteen-way one-hot written as an
+equality test per position around a per-bit assignment, which
+elaborates to 2,048 conditional updates in a priority chain rather
+than 128 sixteen-to-one selects. Also: for a PROGRAM run the mask's
+bits are read only past `seq_program_run`'s n guard (a run at
+n = SIZE_MAX/8 with a poisoned mask is refused without a read), while
+`seq_check_round2` walked an index table before that guard - P1's
+inheritance, the program-run twin of V2's finding in P2.
+
+**The fix** (f79db02, one commit, `cft_seq.sv` and `test_seq_core.py`):
+two cases at fp32, fp64 and fp256 - `SETACT` drops every lane, `ACTALL`
+returns the caller's, then a MUL overflowing in the masked lane alone
+(FLAGS must be 0), and two deposits into a one-slot budget with only
+the masked lane a candidate (the overflow status must be clear) - which
+fail V3's control by the exact bits (`FLAGS 0b10100, model says
+0b00000`, one failure in thirty-five) and pass the shipped tile; V3's
+converged-lane scratch-out case; the state header's missing sentence;
+and `mask_blk_fn` as eight indexed part-selects of constant width (the
+beat divides into NBEATS-bit slots and a block always starts on one):
+28,626 -> 10,513 cells under `opt -fast`, 10,863 -> 7,534 under `opt
+-full` - +690 over the maskless tile against +4,019 - $mux 22,911 ->
+4,927, the same bits and the same cycles, P3 having reproduced V3's
+two old-tip numbers before changing anything. The general facts both
+of them wrote down: when a mechanism is enforced in two places, a gate
+that reads only the cheapest observable cannot see a defect in the
+other; and an equality test per position around a per-bit assignment
+is a priority chain, not a select - say "these bits of that word" as a
+part-select and read the $mux count in `stat`.
+
+**What the merge changed besides P3's files.** The two wave-2 seam
+tests the plan asked the integrator to write: on the tile,
+`indexed_and_masked_program_between_reductions` in
+`tb/probe_reduce_then_prog.py` (a gathered fold with every third lane
+masked across a lane block after a segmented reduction, the all-ones
+mask held bit-for-bit to the unmasked gathered run, a gathered and
+masked fold at fp64 whose masked lanes' table rows are all sentinels,
+reductions around them - 3/3 first time); on the host,
+`check_indexed_masked` in `device_test.c` (a program run both indexed
+and masked, device against software, masked slots at the pattern on
+both, all-ones over the table equal to the unmasked gathered run),
+which through `remote_check`'s device-test stage is where P2's
+client-side gather and P3's compaction first meet on a remote handle.
+And the program-run path's bounding checks (stream a, the deposits, n
+against SIZE_MAX / max_deposits / esz) moved in `cft_program_run_ex`
+ahead of every rule that reads a caller's buffer, the two early
+returns in `seq_program_run` given their sentences, and an api-test
+case with a poisoned table pointer and then a poisoned mask at
+n = SIZE_MAX/8 - the same shape V2 found and P2 fixed for the
+elementwise path. The public header's seam sentences are true for the
+mask; the Arduino copy re-synced (`mask_bits.h` vendored with it).
+
+**The gates at the merge** (69f3df2 merges f79db02; b81b144 and
+cf13fa0 the integrator's edits above): every one re-run on the merged
+tree with the test executables built by name - the host side (api-test
+with the new case, test_seq.py 77, seq_check.py with the masked corpus,
+device-test both legs with the seam leg, remote_check with that leg
+over the wire, the docs index, the generators, the vendored copy) and,
+under Verilator on the desktop, redprog 3/3, krnlseq 2/2, seq_core
+35/35, seqcycles 4/4 with the dense table byte-identical to the one
+above and the masked rows as P3 measured. The box's full suite at the
+pushed tip follows in the next entry, as does its Icarus tail.

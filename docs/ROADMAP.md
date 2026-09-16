@@ -2665,10 +2665,28 @@ program-model change letting a lane read a neighbour's deposit
 serve it: lane *i*'s slot is reachable by lane *i* alone, which is what
 keeps P2 true of the scratch as it is of the deposit buffer.
 
-**5. A per-run lane mask in `cft_run_args`.** *Planned 2026-09-15 as
-docs/ROUND2.md's parcel P3, smallest and last, with its ceiling stated
-there: by the requester's own table it is worth at most about two
-percent of a step today. ABI 0.14's `lane_mask` is its seam.*
+**5. A per-run lane mask in `cft_run_args`.** *BUILT 2026-09-15 as
+docs/ROUND2.md's parcel P3, on main at 69f3df2 - and its value
+statement corrected by the parcel's own measurement. The plan priced
+it at up to two percent of a step for removing idle lanes' compute and
+bytes; the compute is not there to remove, because the sequencer
+issues per BEAT and the active bit decides what is written, not what
+is computed (a lane that drops out at SETACT has cost its block the
+same since revision 1). Measured (`make seqcycles`, docs/SEQUENCER.md
+R17): half-masked costs what all-masked costs, dense plus one
+single-beat read a block - four cycles at every format on the model's
+memory, one HBM round trip a block on the card; fp32 512 lanes 1,189
+-> 1,205 cycles over four blocks. What the mask buys is the BYTES (a
+masked lane's outputs are the caller's), the FLAGS (it contributes
+none) and the EARLY EXIT (a block whose every lane is masked leaves
+its loops at the first test). Buying the compute means skipping a beat
+with no active lane in the issue pipe and a beat nobody reads in the
+stream loads - R14/R15 and R10, a revision-7 item in the debts list
+below. The mask's logic: +690 cells over the maskless `cft_seq` after
+a full yosys pass (+4,019 before its block slice was rewritten as a
+select; the shape, not the size, was the cost). The requester's item 4
+gets its tile-side answer from this: zero, so their ensemble
+measurement prices the host side alone.*
 A host-supplied bitmap the
 engine honours, so an idle lane costs neither a beat nor a byte. The
 prototype masks a member that has left the corrector by a byte snapshot
