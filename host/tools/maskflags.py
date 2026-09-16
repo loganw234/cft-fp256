@@ -59,6 +59,11 @@ def main():
                                                          "fp128", "fp256"])
     ap.add_argument("--lanes", type=int, default=48)
     ap.add_argument("--masked-every", type=int, default=2)
+    ap.add_argument("--mask-bits", default=None,
+                    help="the mask as a hex integer, bit i for lane i (a "
+                         "clear bit masks the lane); overrides "
+                         "--masked-every, so a trailing, a leading and an "
+                         "interleaved strobe pattern can each be tried")
     ap.add_argument("--artifact", default=None)
     args = ap.parse_args()
 
@@ -92,6 +97,9 @@ def main():
     pinf = sf.inf_bits(fmt, 0)
     ninf = sf.inf_bits(fmt, 1)
     masked = [i % K == 0 for i in range(n)]
+    if args.mask_bits is not None:
+        mb = int(args.mask_bits, 16)
+        masked = [not ((mb >> i) & 1) for i in range(n)]
     a_vals = [pinf if masked[i] else one for i in range(n)]
     c_vals = [ninf if masked[i] else two for i in range(n)]
     buf_a = ctypes.create_string_buffer(
@@ -154,10 +162,18 @@ def main():
         print(f"  masked lanes' counts: {m_cnt_pat} hold the pattern, "
               f"{m_cnt_one} hold 1, "
               f"{len(m_idx) - m_cnt_pat - m_cnt_one} something else")
+        # lane by lane: K a kept lane holding 3, x a kept lane holding
+        # something else, m a masked lane untouched, W a masked lane
+        # written
+        lane_map = "".join(
+            ("m" if got[i] == pat else "W") if masked[i]
+            else ("K" if got[i] == three else "x") for i in range(n))
+        print(f"  lanes: {lane_map}")
         return flags.value
 
     f_un = run("UNMASKED run, masked-to-be lanes poisoned", False)
-    f_ma = run(f"MASKED run, every {K}th lane masked", True)
+    f_ma = run(f"MASKED run, mask bits {args.mask_bits}" if args.mask_bits
+               else f"MASKED run, every {K}th lane masked", True)
     print()
     if not (f_un & sf.FLAG_INVALID):
         print("VERDICT: the poison did not raise INVALID unmasked - the probe "
