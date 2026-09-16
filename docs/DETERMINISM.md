@@ -198,8 +198,9 @@ and this table is that definition.
 
 ### Unassigned opcodes
 
-Opcode 15, opcode **31** and everything above are unassigned - 30
-became `imul` on 2026-09-07. They return the
+Opcode 15 and everything above **31** are unassigned - 30 became
+`imul` on 2026-09-07 and 31 became `maxall` on 2026-09-12, the
+assignments the next paragraph counts. They return the
 canonical quiet NaN with **invalid** raised, in the hardware and in
 the golden model alike. Deterministic, and visible in the flags, so a
 host that issues one early learns it now rather than getting a

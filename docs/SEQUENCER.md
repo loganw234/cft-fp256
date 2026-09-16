@@ -1,24 +1,35 @@
 # The orbit sequencer
 
-*The sections below describe **revision 4** (2026-09-11): revision 3's
+*The sections below describe **revision 6** (2026-09-15): revision 3's
 thirty-two registers a lane, **256-slot per-lane scratch memory** with a
 per-run block that fills it and empties it, **16,384 instructions** a
-tile and **512-entry constant bank**, plus **R8** - a program may ask
-that an indexed scratch access at or past the depth be REPORTED rather
-than reduced modulo it. The three sections at the end of this file are
-the record of revisions 2, 3 and 4 and the reasoning behind each change;
-everything before them has been updated to describe the model as it now
-is. VERSION 0x800, CAPS[7:4] and CAPS2.*
+tile and **512-entry constant bank**; revision 4's **R8**, an indexed
+scratch access at or past the depth REPORTED rather than reduced;
+revision 5's per-lane costs (R9-R15: no register-file wipe, operand
+streams on demand, the drains at a beat a cycle, overlapped issue,
+three beats in flight, forwarding); and revision 6's **R16** - an input
+block fetched through an index table, one round trip a gathered
+element - and **R17** - a per-run lane mask, one beat read a block. The
+sections at the end of this file are the record of revisions 2 through
+6 and the reasoning behind each change; everything before them has been
+updated to describe the model as it now is. VERSION 0xA00, CAPS[7:4]
+and CAPS2[10:0].*
 
-*Revision 4 is complete through the RTL as of 2026-09-11: the golden
-model, libcft's executor, both assemblers and `rtl/cft_seq.sv` carry R8,
-and `cft_krnl` publishes CAPS2[6]. What has NOT happened is a bitstream -
-every image on a card today predates the feature, reads CAPS2[6] as
-zero, and refuses a strict image at its header check under the
-reserved-bit rule that has guarded `flags` since revision 2. That is not
-a divergence: such a tile declines to run rather than computing
-something else, and libcft refuses the image earlier and by name
-(`CFT_ERR_UNSUPPORTED`) rather than letting the header check say it with
+*Revision 6 is on silicon. The round-2 single tile (VERSION 0xA00,
+built from 5b7aa19 at 135 MHz) ran its programs, gathers, masks and
+reductions on the U50 on 2026-09-15 - after two HOST defects the card
+found, neither in this RTL (docs/VALIDATION.md, "round 2's card day,
+second half"; its quad is that day's open item). Every pair since the
+revision-4 pair (`~/cardday-rev4`, 2026-09-13) carries R8 and CAPS2[6];
+the pair before round 2, `~/cardday-seq6`, is VERSION 0x900 and
+publishes neither CAPS2[9] nor [10], which is what the card day's first
+half used to show that the ABI 0.14 library refuses the round's
+features BY NAME on an older tile. That is the rule throughout: a tile
+older than a feature reads its CAPS2 bit as zero and declines to run
+rather than computing something else - under the reserved-bit rule that
+has guarded `flags` since revision 2 and MODE's upper half since
+revision 4 - and libcft refuses earlier and by name
+(`CFT_ERR_UNSUPPORTED`) rather than letting the tile say it with
 STATUS[3] after the crossing.*
 
 STATUS: design, golden model, software implementation, kernel

@@ -1013,7 +1013,11 @@ that is what it composes from. And `cft_run` refuses it, as it refuses
 every reduction: opcode 31 reaching a tile would be decoded as
 elementwise - `cfg_is_reduce` is `(cfg_op == 8'd24)` - and would write
 `n` elements where the caller sized one, which is memory corruption
-rather than a wrong number. The composition therefore sits above the
+rather than a wrong number - on every tile before VERSION 0x900. Since
+it (2026-09-14, ABI 0.13) opcode 31 is a streaming maximum behind
+CAPS2[8], so `cft_reduce(CFT_MAXALL)` is one pass on such a tile; the
+software definition below is unchanged and `cft_run` still refuses the
+opcode as it refuses every reduction. The composition therefore sits above the
 backend dispatch, and no tile ever sees the opcode.
 
 **Three are named host entry points**, because they return a PAIR:
