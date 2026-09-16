@@ -12561,3 +12561,55 @@ entry - timing, utilisation with the mask's logic in it, the verify
 line - follows when it lands; the card day after it is Logan's call,
 with docs/CARDDAY.md's round-2 list as its agenda and a card-free proof
 first.
+
+## 2026-09-15 - round 2's card day, first half: the 0.14 library against the seq6 image, and the test gate it found wrong
+
+Logan's word at 19:27: the card is free. `xbutil examine` - the U50 at
+0000:02:00.1, shell `xilinx_u50_gen3x16_xdma_base_5`, ready, nothing
+loaded, no process of ours on it. The round's image was still linking
+(the single tile since 18:49), so the day's first half is the claim no
+host can test: the library at the round's tip, built with XRT on the
+box, against the previous image - the seq6 pair's single tile (VERSION
+0x900, fp32/fp64/fp128, `~/cardday-seq6`, its SHA256SUMS re-checked
+OK), which publishes neither CAPS2[9] nor CAPS2[10].
+
+**The first run found a test gate wrong for an older image.**
+`device-test -q -n 8` at 5b7aa19: the probe and every leg green -
+P1's and P3's program legs printing "this device does not publish
+CFT_SEQ_FEAT_INDEXED / LANE_MASK, NOT COMPARED" as designed, the
+resident-buffer legs serving from device copies - except P2's two
+elementwise indexed legs, which counted the device's refusal by name
+("cft_run_ex: an indexed operand needs CFT_SEQ_FEAT_INDEXED, which this
+device does not publish (CAPS2[9])") as a failure: seven a format,
+twenty-one in 1,400 checks. The library was right - that refusal IS
+the contract for a device without the tile mechanism the composed
+route needs - and the test was not gated on the capability. Fixed at
+1ee9189: the two legs run only where the device publishes CAPS2[9],
+and a device without it is scored once a format on the refusal by
+name (`CFT_ERR_UNSUPPORTED` naming `CFT_SEQ_FEAT_INDEXED`, or the
+sequencer's capacities on a device with none, in the order the call
+fires them). Four minutes from the failing run to the passing one.
+
+**The half, with the fixed test** (the library at 1ee9189 and then
+ce01e41, which also compares the indexed route's STATUS word with the
+dense run's - V2's card-day gap, zero on a host):
+
+    device-test -q -n 8        1,361 checks, 0 failed; three NOT COMPARED
+                               lines, each naming its bit
+    device-test -q -n 64       1,361 checks, 0 failed
+    device-test -b -q -n 64      540 checks, 0 failed; 129 windows served
+                               from a device copy with no transfer, 141
+                               copied ("first use of this window on this
+                               tile and role")
+    cft-selftest replay        111 sets, 892,548 cases, all matching
+                               (the elementwise and transcendental sets
+                               twice, one element at a time for exact
+                               flags and then as arrays); the fp256 sets
+                               skipped by name, not on this device
+
+So ABI 0.14's library is what COMPATIBILITY.md's seam section claimed
+of it: a VERSION 0x900 image runs everything it ran before, bit for
+bit, and answers the round's three new features with a refusal that
+names the missing bit. The second half - the round's own image - is
+the next entry; `~/box_round2_cardday.sh` waits for it to be staged
+and runs the day in docs/CARDDAY.md's order.
