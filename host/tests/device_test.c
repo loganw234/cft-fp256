@@ -3099,6 +3099,7 @@ static void compare_indexed_elem(cft_device *sw, cft_device *hw,
     size_t ibytes, i;
     int r, holes = 0;
     uint32_t f_ref = 0, f_idx = 0, f_sw = 0, f_dense = 0, f_prog = 0;
+    uint32_t bus_ref = 0, bus_run = 0;
     cft_status st;
     cft_elem_args E;
     cft_run_args A;
@@ -3170,7 +3171,7 @@ static void compare_indexed_elem(cft_device *sw, cft_device *hw,
 
     /* 1. the reference: the dense run over the gathered operands. */
     st = cft_run(hw, op, fmt, rnd, gat[0], gat[1], gat[2], d_ref, n,
-                 &f_ref, NULL);
+                 &f_ref, &bus_ref);
     CHECK(st == CFT_OK, "idx elem %s %s: the dense reference run was "
           "refused (%s)", cft_format_name(fmt), cft_op_name(op),
           cft_strerror(st));
@@ -3185,6 +3186,7 @@ static void compare_indexed_elem(cft_device *sw, cft_device *hw,
         E.d = (dst_);                                                  \
         E.n = n;                                                       \
         E.flags_out = (f_);                                            \
+        E.bus_out = &bus_run;                                          \
         E.idx_a = (t0_); E.idx_b = (t1_); E.idx_c = (t2_);             \
         E.idx_a_src = (t0_) ? (sn_) : 0;                               \
         E.idx_b_src = (t1_) ? (sn_) : 0;                               \
@@ -3201,6 +3203,14 @@ static void compare_indexed_elem(cft_device *sw, cft_device *hw,
     CHECK(st == CFT_OK, "idx elem %s %s: the device refused the indexed "
           "run (%s: %s)", cft_format_name(fmt), cft_op_name(op),
           cft_strerror(st), cft_last_error());
+    /* The STATUS word too: on a device the composed route returns the
+     * program run's word where the dense run returns the engine's, and
+     * both are zero on a host, so this comparison first means something
+     * on a card (V2, 2026-09-15). */
+    CHECK(st != CFT_OK || bus_run == bus_ref,
+          "idx elem %s %s: STATUS %#x on the indexed route, %#x on the "
+          "dense run", cft_format_name(fmt), cft_op_name(op),
+          (unsigned)bus_run, (unsigned)bus_ref);
     if (st != CFT_OK)
         goto out;
     ELEM_RUN(sw, d_sw, &f_sw, src[0], src[1], src[2],
