@@ -344,7 +344,7 @@ def write_elementwise(job, path):
     rnd = RND_BY_NAME[rname]
     cases = pool_elementwise(job["fmt"], job["directed"], job["random"],
                              job["simple"], job["seed"])
-    with open(path, "w") as f:
+    with open(path, "w", newline="\n") as f:
         for op, xa, xb, xc in cases:
             d, flags = compute(fmt, op, xa, xb, xc, rnd)
             f.write(json.dumps({
@@ -367,7 +367,7 @@ def write_transcend(job, path):
     tcases = pool_transcend(job["fmt"], job["extra"], job["seed"])
     if not tcases:
         return None
-    with open(path, "w") as f:
+    with open(path, "w", newline="\n") as f:
         for fn, xa, xb, nn in tcases:
             d, flags = transcend.compute(fmt, fn, xa, xb, rnd, nn)
             rec = {
@@ -389,7 +389,7 @@ def write_minmaxmag(job, path):
     fmt = FORMATS[job["fmt"]]
     hexw = fmt.width // 4
     mcases = pool_minmaxmag(job["fmt"], job["extra"], job["seed"])
-    with open(path, "w") as f:
+    with open(path, "w", newline="\n") as f:
         for fn, xa, xb in mcases:
             d, flags = MINMAX_MAG_BY_754[fn](fmt, xa, xb)
             f.write(json.dumps({
@@ -407,7 +407,7 @@ def write_augmented(job, path):
     fmt = FORMATS[job["fmt"]]
     hexw = fmt.width // 4
     acases = pool_augmented(job["fmt"], job["extra"], job["seed"])
-    with open(path, "w") as f:
+    with open(path, "w", newline="\n") as f:
         for fn, xa, xb in acases:
             r, e, flags = augmented.compute(fmt, fn, xa, xb)
             f.write(json.dumps({
@@ -429,7 +429,7 @@ def write_reduce(job, path):
     rnd = RND_BY_NAME[rname]
     rcases = pool_reduce(job["fmt"], job["extra"], job["seed"])
     elems = 0
-    with open(path, "w") as f:
+    with open(path, "w", newline="\n") as f:
         for fn, xs, ys in rcases:
             out = REDUCE_IMPL[fn](fmt, xs, ys, rnd)
             rec = {
@@ -461,7 +461,7 @@ def write_character(job, path):
     rnd = RND_BY_NAME[rname]
     ccases = pool_character(job["fmt"], job["extra"], job["seed"])
     written = 0
-    with open(path, "w") as f:
+    with open(path, "w", newline="\n") as f:
         for case in ccases:
             rec = character_record(fmt, hexw, rname, rnd, case)
             if rec is None:
@@ -478,7 +478,7 @@ def write_formatof(job, path):
     rname = job["rnd"]
     rnd = RND_BY_NAME[rname]
     fcases = pool_formatof(sname, dname, job["extra"], job["seed"])
-    with open(path, "w") as f:
+    with open(path, "w", newline="\n") as f:
         for fn, xa, xb, xc in fcases:
             long_fn = FORMATOF_LONG[fn]
             d, flags = formatof.compute(sfmt, dfmt, long_fn, xa, xb, xc, rnd)

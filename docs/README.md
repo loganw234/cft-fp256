@@ -46,7 +46,7 @@ product, not the implementation.
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 1,132 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
 | [SEQUENCER.md](SEQUENCER.md) | 1,867 | The orbit sequencer and the program model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 786 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
-| [LAYOUTS.md](LAYOUTS.md) | 188 | How values sit in memory: beats, lanes, element order. |
+| [LAYOUTS.md](LAYOUTS.md) | 188 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
 
 ## Reference you call into
 
@@ -113,6 +113,8 @@ look before reopening one of these questions.
 
 ---
 
-Two more live outside `docs/`: [../CAPABILITIES.md](../CAPABILITIES.md) is
-what a given build can do, and [../CLAUDE.md](../CLAUDE.md) is the short
-list of things that have already cost hours.
+Three more live outside `docs/`: [../CONFORMANCE.md](../CONFORMANCE.md) is
+the contract as a profile an independent implementation is scored against,
+[../CAPABILITIES.md](../CAPABILITIES.md) is what a given build can do, and
+[../CLAUDE.md](../CLAUDE.md) is the short list of things that have already
+cost hours.

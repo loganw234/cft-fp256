@@ -178,6 +178,11 @@ reason** rather than passed. `bash verify/run.sh --list` prints all 38 with
 a `*` against the ones a given budget selects, and `docs/VERIFICATION.md`
 maps what each one proves and how long it really takes.
 
+What is being checked is written down once, as a profile an independent
+implementation can be scored against: `CONFORMANCE.md`, which says where
+this contract is stricter than IEEE 754, what it defines that the
+standard does not, and which files and hashes "conforming" means.
+
 The rule is that a number in a document has a run behind it, and the
 runs that failed stay in the record. The load-bearing ones:
 
