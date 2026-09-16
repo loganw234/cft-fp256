@@ -191,6 +191,14 @@ def main():
                          "particles, which makes the rows ragged and so "
                          "exercises CFT_IDX_NONE (the default is every "
                          "particle active, where every row is full)")
+    ap.add_argument("--masked-every", type=int, default=None,
+                    help="also time the same run with every Kth lane "
+                         "MASKED (ABI 0.14's lane_mask, R17): the masked "
+                         "lanes' slots must keep the pre-run pattern and "
+                         "the kept lanes the unmasked run's deposits; on "
+                         "the tile a mask costs one beat read a block and "
+                         "saves no compute (docs/SEQUENCER.md R17), so "
+                         "this is the number that says what it costs")
     ap.add_argument("--artifact", default=None,
                     help="an xclbin, or cft://host:port; omitted is the "
                          "software backend")
@@ -309,6 +317,40 @@ def main():
     bad = [i for i in range(lanes) if got[i] != want[i]]
     one = sorted(times)[len(times) // 2]
 
+    # The same run with every Kth lane masked (R17): a masked lane's
+    # slot keeps what was there, a kept lane deposits what the unmasked
+    # run deposited, and the time is the cost of the mask itself.
+    masked_one, mbad, mkept = None, [], 0
+    if args.masked_every:
+        K = args.masked_every
+        mbytes = (lanes + 7) // 8
+        mask = bytearray(mbytes)
+        for i in range(lanes):
+            if i % K != 0:
+                mask[i >> 3] |= 1 << (i & 7)
+                mkept += 1
+        buf_mask = ctypes.create_string_buffer(bytes(mask), mbytes)
+        A.lane_mask = ctypes.cast(buf_mask, ctypes.c_void_p)
+        A.lane_mask_bytes = mbytes
+        mtimes = []
+        for _ in range(max(1, args.reps)):
+            ctypes.memset(buf_dep, 0x5A, lanes * esz)
+            t0 = time.perf_counter()
+            st = lib.cft_program_run_ex(handle, ctypes.byref(A))
+            mtimes.append(time.perf_counter() - t0)
+            if st != CFT_OK:
+                raise SystemExit(f"cft_program_run_ex (masked): "
+                                 f"{lib.cft_strerror(st).decode()}: "
+                                 f"{lib.cft_last_error().decode()}")
+        A.lane_mask = None
+        A.lane_mask_bytes = 0
+        mgot = [int.from_bytes(buf_dep.raw[i * esz:(i + 1) * esz], "little")
+                for i in range(lanes)]
+        pat = int.from_bytes(bytes([0x5A]) * esz, "little")
+        mbad = [i for i in range(lanes)
+                if ((mgot[i] != pat) if i % K == 0 else (mgot[i] != got[i]))]
+        masked_one = sorted(mtimes)[len(mtimes) // 2]
+
     # ...and the calls it replaces: scat_max host gathers, each feeding
     # one dense vector add over the same 3N lanes. Timed the same way,
     # against the same device, so the two numbers are comparable.
@@ -356,6 +398,14 @@ def main():
           f"(+0, and no read)")
     print(f"  ONE program run        {one * 1e3:9.3f} ms   "
           f"{one / elems * 1e9:8.1f} ns a gathered element")
+    if masked_one is not None:
+        print(f"  MASKED program run     {masked_one * 1e3:9.3f} ms   "
+              f"every {args.masked_every}th lane masked, "
+              f"{lanes - mkept} of {lanes}; x{masked_one / one:.3f} of "
+              f"the unmasked run (a mask costs one beat read a block "
+              f"and saves no compute: docs/SEQUENCER.md R17)")
+        print(f"  masked slots untouched, kept lanes the unmasked run's: "
+              f"{'YES' if not mbad else f'NO - {len(mbad)} lanes'}")
     print(f"  the calls it replaces  {many * 1e3:9.3f} ms   "
           f"{scat_max} cft_run calls over {lanes} lanes "
           f"(+{gath * 1e3:.3f} ms of host gather, not counted: it is "
@@ -375,7 +425,7 @@ def main():
 
     lib.cft_program_free(handle)
     lib.cft_close(dev)
-    return 1 if (bad or got2 != want) else 0
+    return 1 if (bad or got2 != want or mbad) else 0
 
 
 if __name__ == "__main__":
