@@ -1739,14 +1739,6 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
         ensure_capacity(D, tile, need);
         ensure_one(D, tile, tile.pg, tile.pg_cap, ARG_PROG, img_bytes);
         ensure_one(D, tile, tile.cn, tile.cn_cap, ARG_CNT, cnt_bytes);
-        if (std::getenv("CFT_XRT_TRACE")) {
-            /* The count window's staging pad - the last beat's lanes
-             * past n, which the tile strobes off - filled with a
-             * pattern and read back after the run: a WSTRB test that
-             * owes nothing to the lane mask (card day, 2026-09-15). */
-            std::memset(tile.cn.map<uint8_t *>(), 0xCC, cnt_bytes);
-            tile.cn.sync(XCL_BO_SYNC_BO_TO_DEVICE, cnt_bytes, 0);
-        }
         if (D.version >= BANK_VERSION)
             ensure_one(D, tile, tile.bk, tile.bk_cap, ARG_BANK, bnk_bytes);
         if (D.version >= SCRATCH_VERSION) {
@@ -1788,6 +1780,43 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
         if (!ob[2])
             stage(tile.c, static_cast<const uint8_t *>(c), sreal[2],
                   spad[2]);
+        /* R17 on a STAGED deposit window (the card day of 2026-09-15).
+         * The tile does not write a masked lane's slots or its count -
+         * the drains strobe them off, and the U50's memory path
+         * honours the strobes - so what the caller's buffer "keeps" is
+         * whatever the DEVICE copy held when the run began, because
+         * the readback below brings the device copy home whole. For a
+         * resident window that is the contract: the device copy is
+         * the authority. For a staged window the device copy was the
+         * PREVIOUS run's output until this line, and the caller's
+         * masked lanes came back holding that run's values - every
+         * masked lane "written", with exactly the value the lane would
+         * have deposited unmasked, which is the fingerprint the round-2
+         * image showed while FLAGS proved the mask had reached the
+         * lanes and a pattern in the count pad proved the strobes
+         * held. So under a mask the caller's deposit window and counts
+         * go to the device first and the tile writes the kept lanes
+         * over them. An unmasked run writes every slot and every count
+         * and uploads nothing, as before. */
+        if (lane_mask) {
+            if (!ob[3] && deposits && max_deposits)
+                stage(tile.d, static_cast<const uint8_t *>(deposits),
+                      n * max_deposits * esz, dep_bytes);
+            if (counts)
+                stage(tile.cn, reinterpret_cast<const uint8_t *>(counts),
+                      n * 4, cnt_bytes);
+        }
+        if (std::getenv("CFT_XRT_TRACE") && cnt_bytes > n * 4) {
+            /* The count window's staging pad - the last beat's lanes
+             * past n, which the tile strobes off - filled with a
+             * pattern and read back after the run: a WSTRB test that
+             * owes nothing to the lane mask (card day, 2026-09-15).
+             * After the upload above, so a masked run's pad is this
+             * pattern and not the zero the staging wrote. */
+            std::memset(tile.cn.map<uint8_t *>() + n * 4, 0xCC,
+                        cnt_bytes - n * 4);
+            tile.cn.sync(XCL_BO_SYNC_BO_TO_DEVICE, cnt_bytes, 0);
+        }
         {
             /* tile.si and tile.so are only created on an 0x800 device,
              * and the kernel call below only passes them there, so an
