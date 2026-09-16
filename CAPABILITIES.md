@@ -16,8 +16,12 @@ word "general purpose" hung on programmability alone - and later the
 SAME day, the orbit sequencer's RTL landed and benched bit-exact
 against its model; on 2026-09-08 it went through the real XRT stack in
 all four formats and then onto silicon, which is what closed the last
-gap between "benched" and "yes". The boxes below say exactly where
-everything stands, and the distance between those two marks is kept in
+gap between "benched" and "yes". On 2026-09-15 a parcel round
+(docs/ROUND2.md) added the access-pattern pieces the first outside
+workload had asked for - an input block fetched through an index
+table, a per-run lane mask, a reduction accumulator a beat wide - and
+the card ran them the same night (docs/VALIDATION.md, "round 2's card
+day"). The boxes below say exactly where everything stands, and the distance between those two marks is kept in
 the key because it is the file's whole discipline.
 
 | mark | meaning |
@@ -254,8 +258,13 @@ on-chip program is the ~25x traffic win).
 | reductions on-chip | **yes** | streaming accumulator with the contract's tree |
 | a SCALAR (stride-0) operand | **yes** (2026-09-12) | `cft_run_ex` with `cft_elem_args.scalar_mask`: one of `a`, `b` or `c` may be a single element applying to the whole run. On a tile that is MODE[18:16] and ONE BEAT read instead of `n`, behind CAPS2[7] - the first relaxation of "three dense linear streams" below, and the cheapest one, because a stride of zero needs no address arithmetic. The CALL is portable and the SAVING is not: the software backend indexes element 0, the remote backend expands locally because its frames chunk, and `cft_caps` reports `CFT_SEQ_FEAT_SCALAR` so a caller can tell which it has |
 | a reduction per SEGMENT, and `maxall` streamed | **yes** (2026-09-14) | `cft_reduce_seg`: `n / seg` results, `d[s]` the same tree over slice `s` - the software backend is the definition, a tile behind CAPS2[8] (`CFT_FEAT_REDUCE_SEG`: a SEG/NRES register pair, VERSION 0x900) runs it as ONE call, and a tile without the bit refuses it by name rather than looping the segments over the bus. The same bit makes opcode 31 a streaming maximum, so `cft_reduce(CFT_MAXALL)` is one pass there. Built for cft-rebound's per-system convergence test (docs/ROADMAP.md, ask 7) |
-| strided or gathered access | **no** | three dense linear streams. Stride-0 above is the exception and is not a step toward this: a broadcast reads one beat and needs no index, where a gather needs an index per element. That one is still the remaining gap |
-| on-chip program / loop | **yes** | `cft_seq` behind MODE[15] (VERSION 0x800 at revision 3, CAPS bit 15), computing on the tile's ONE `cft_lanes` array - the same instances the streaming engine uses, MODE[15] naming the owner, no arbitration because the two never run at once: programs of the existing opcodes with per-instruction rounding, 4-deep bounded loops, convergence masking and index-addressed deposition, verified bit-exact against seq.py in simulation at unit and kernel level, then through real XRT in all four formats, then on silicon. Revision 3's capacities, from `rtl/cft_krnl.sv`: 32 registers a lane, 16,384 instructions, a 512-entry constant bank, 256 scratch slots a lane and 64 deposit slots a lane, every one of them published in CAPS/CAPS2 so a host sizes a program instead of discovering a refusal |
+| a per-run LANE MASK | **yes** (2026-09-15) | `cft_run_args.lane_mask`, one bit a lane (docs/SEQUENCER.md R17; CAPS2[10]): a masked lane runs no instruction, its deposit slots, count and scratch-out slots keep the caller's bytes, it contributes no flag and no status bit, and `ACTALL` does not revive it. The tile issues per beat, so the mask saves bytes, flags and the early exit and no compute: one single-beat read a block, x1.013 of the unmasked run at 384 lanes on the U50 |
+| a reduction a whole BEAT a cycle | **yes** (2026-09-15) | the engine's accumulator folds a beat at once with the contract's tree (docs/ROUND2.md P4): fp32 `CFT_SUM` from 11.31 to 1.42 cycles a beat marginal on the model, the same bits; on the card a thousand 192-element segments sum in 2.35 ms against 91 ms in a thousand calls |
+| operands RESIDENT on the device across calls | **yes** (2026-09-09, ABI 0.11) | `cft_alloc` buffers published once and bound by `cft_run`, `cft_reduce` and `cft_program_run_ex` - one device copy per tile and role, staged nothing; the software and remote backends make the same four calls an allocation and two no-ops (docs/HOSTAPI.md, "Device-resident buffers") |
+| the same library on a microcontroller | **yes** | an ESP32-S3 replayed 508,000 published conformance cases over its serial line, all matching, from the vendored copy `bindings/arduino` keeps byte-identical to `host/` (docs/EMBEDDED.md) |
+| gathered access | **yes** (2026-09-15) | an input block fetched through a per-lane index table (docs/SEQUENCER.md R16; ABI 0.14's `cft_run_args.idx_a/b/c/scratch_in`, one uint32 an element, `CFT_IDX_NONE` for +0 and no read): a program run's streams and its scratch preload, and one elementwise call through `cft_elem_args.idx_*` (composed as a three-instruction program on a tile, gather-then-dense in software, a client-side gather over remote). One HBM round trip a gathered element - 310 to 340 ns at every format on the U50 - and no beat skipped, so a gathered block costs its round trips and nothing else |
+| a scatter-ADD (a lane writing another lane's address) | **no** | the requester's scatter is a gather by a static table followed by a fixed-order fold, which is what the row above serves (docs/ROADMAP.md, ask 1); a true device-side scatter stays absent, and so does strided access |
+| on-chip program / loop | **yes** | `cft_seq` behind MODE[15] (VERSION 0xA00 at revision 6 - 0x800 at revision 3, 0x900 with the segmented reduction, 0xA00 with the index tables and the mask - CAPS bit 15), computing on the tile's ONE `cft_lanes` array - the same instances the streaming engine uses, MODE[15] naming the owner, no arbitration because the two never run at once: programs of the existing opcodes with per-instruction rounding, 4-deep bounded loops, convergence masking and index-addressed deposition, verified bit-exact against seq.py in simulation at unit and kernel level, then through real XRT in all four formats, then on silicon. Revision 3's capacities, from `rtl/cft_krnl.sv`: 32 registers a lane, 16,384 instructions, a 512-entry constant bank, 256 scratch slots a lane and 64 deposit slots a lane, every one of them published in CAPS/CAPS2 so a host sizes a program instead of discovering a refusal |
 | in-place operation (D aliasing A/B/C) | **yes** | documented in cft.h: each element is read before written |
 | a tile reached from another machine | **yes** (2026-09-06) | `cft_open("cft://host:port")` and `cft-serve`: only device-touching calls cross the wire, the same bits come back, and a Windows client computes against a Linux-hosted device - docs/REMOTE.md |
 | a tile on a part a third the size | **the DSP axis, yes** (2026-09-06) | `MUL_PASSES` iterates the multiplier: 262 DSPs to 56, bit-identical, fp32 at full rate. LUTs move 6.4%, so the fused ladders remain the area lever; with both on, a tile synthesises to 99,287 LUT and 56 DSP on 7-series fabric, and IMPLEMENTS at 95,695 LUT - 47.0% of a -2 Kintex-7 325T - routing at 100 MHz with +0.096 ns (2026-09-07). The -1 grade of the same part misses, at about 77 MHz: the speed grade is the finding - docs/ARCHITECTURE.md |
@@ -335,13 +344,22 @@ in docs/COMPATIBILITY.md) gets the full story.
   out of the tile and closing timing put a register on the reduction
   path. Neither moved a result - the numbers are the same numbers -
   but calling that work plumbing was wrong, and docs/BRINGUP.md is
-  where every gate's verdict now lives. What is still short of a
-  general-purpose processor is not the sequencer: it is the access
-  pattern. The engine reads three dense linear streams, there is no
-  device-side scatter and no gather (the row above), and the first
-  outside workload found that to be the cost that decides its rate -
-  docs/ROADMAP.md ranks it, docs/INTEGRATION.md says how to recognise
-  it.
+  where every gate's verdict now lives. What was still short of a
+  general-purpose processor on 2026-09-10 was not the sequencer but
+  the access pattern: three dense linear streams, no gather, and the
+  first outside workload finding that to be the cost that decides its
+  rate. Since 2026-09-15 a program run reads any of its streams and
+  its scratch preload through a per-lane index table, one elementwise
+  call can do the same, and a per-run lane mask keeps a lane's bytes
+  and flags out of a run - all on silicon, at one HBM round trip a
+  gathered element (310 to 340 ns at every format), where one indexed
+  run replaced 127 dense calls at 1.5 to 1.7 times their speed and
+  removed the host gathers with them. What the device still has no
+  primitive for is a scatter-ADD, a lane writing another lane's
+  address, which that workload expresses as a gather by a static
+  table and a fold; and a program run executes on one tile today.
+  docs/ROADMAP.md keeps both, docs/INTEGRATION.md says how to
+  recognise the pattern.
 - As a **library people can already run something on**: five
   workloads written for the contract rather than adapted to it - exact
   Collatz trajectories, rigorous enclosures, Lucas-Lehmer on fp256

@@ -145,10 +145,10 @@ the tables and the method; the charts regenerate with
 
 | piece | what it is |
 |---|---|
-| `python/cft_golden` | The definition of correct. Exact, dependency-free Python: 30 opcodes, all five rounding modes, the complete IEEE clause 5 function set, and all thirty-nine transcendentals correctly rounded. Everything else is scored against this, never against each other. |
+| `python/cft_golden` | The definition of correct. Exact, dependency-free Python: 31 opcodes, all five rounding modes, the complete IEEE clause 5 function set, and all thirty-nine transcendentals correctly rounded. Everything else is scored against this, never against each other. |
 | `rtl/` | The tile. A 16-stage pipelined fused-multiply-add core that splits one 256-bit lane into 2x fp128, 4x fp64 or 8x fp32, plus operand steering, a streaming engine, a reduction accumulator and an on-chip program sequencer. Yosys-clean, portability enforced in CI. |
 | `tb/` and `formal/` | 25 simulation targets checking every result and every flag against the golden model, and 30 machine-checked proofs, plus a negative control that must be refuted or the gate has stopped being able to catch a bug. |
-| `host/` | **libcft**: about 22,000 lines of C99 in `host/src`, no dependencies, no build step for callers. One ABI reachable from C, C++, Python, Rust, Julia, Go, C#, R and Fortran, with software, FPGA and remote backends behind identical calls. |
+| `host/` | **libcft**: about 24,000 lines of C99 in `host/src`, no dependencies, no build step for callers. One ABI reachable from C, C++, Python, Rust, Julia, Go, C#, R and Fortran, with software, FPGA and remote backends behind identical calls. |
 | `bindings/` | The WebAssembly build behind the pages above, a Node package, and a Python drop-in for the MPFR pattern. |
 | `hw/` | Vitis packaging, HBM layout and the build pipeline. Bitstreams built and run on silicon. |
 | `vectors/` | The conformance sets: 1,068,915 cases, deterministic and seeded. |
@@ -296,8 +296,10 @@ throughput and what bounds each number.
 `docs/ROADMAP.md` has the detail. In short: the card is up and
 reproducing the vectors; the next tier is the same tile on an open
 Kintex-7 board, where one tile fits in 47% of a 325T; and the roadmap
-now also carries what the first outside workload asked the library for,
-ranked by measurement rather than by guess.
+carries what the first outside workload asked the library for, ranked
+by measurement rather than by guess - six of its seven asks built by
+2026-09-15, the last four of them as one parcel round
+(`docs/ROUND2.md`) and measured on the card the same night.
 
 ## Built on it
 
@@ -343,10 +345,16 @@ What it has shown so far:
   the tile - which is now the first thing that integrator asks of this
   library.
 
-It also sent work back the other way: what that integrator needs and the
-library does not have is recorded in `docs/ROADMAP.md`, ranked by
-measurement, and the general lesson about irregular access patterns is
-in `docs/INTEGRATION.md`.
+It also sent work back the other way. What that integrator asked for
+is recorded in `docs/ROADMAP.md`, ranked by measurement, and by
+2026-09-15 six of its seven asks were built - the device-side gather
+(its scatter is a gather by a static table and a fold), the per-run
+lane mask, the scalar broadcast, the per-segment reduction - and
+measured on the card the same night: one indexed program run replaces
+127 dense calls at 1.5 to 1.7 times their speed and removes the host
+gathers with them (`docs/VALIDATION.md`, the card day of 2026-09-15).
+The general lesson about irregular access patterns is in
+`docs/INTEGRATION.md`.
 
 The port is in active development and its own `docs/VALIDATION.md`
 carries the numbers, the dates and the failures.
