@@ -1739,6 +1739,14 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
         ensure_capacity(D, tile, need);
         ensure_one(D, tile, tile.pg, tile.pg_cap, ARG_PROG, img_bytes);
         ensure_one(D, tile, tile.cn, tile.cn_cap, ARG_CNT, cnt_bytes);
+        if (std::getenv("CFT_XRT_TRACE")) {
+            /* The count window's staging pad - the last beat's lanes
+             * past n, which the tile strobes off - filled with a
+             * pattern and read back after the run: a WSTRB test that
+             * owes nothing to the lane mask (card day, 2026-09-15). */
+            std::memset(tile.cn.map<uint8_t *>(), 0xCC, cnt_bytes);
+            tile.cn.sync(XCL_BO_SYNC_BO_TO_DEVICE, cnt_bytes, 0);
+        }
         if (D.version >= BANK_VERSION)
             ensure_one(D, tile, tile.bk, tile.bk_cap, ARG_BANK, bnk_bytes);
         if (D.version >= SCRATCH_VERSION) {
@@ -2075,6 +2083,16 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                             n * max_deposits * esz);
         }
         tile.cn.sync(XCL_BO_SYNC_BO_FROM_DEVICE, cnt_bytes, 0);
+        if (std::getenv("CFT_XRT_TRACE") && cnt_bytes > n * 4) {
+            const uint8_t *cp = tile.cn.map<const uint8_t *>();
+            std::fprintf(stderr, "[xrt trace] count pad bytes [%zu, %zu) "
+                         "after the run:", n * 4, cnt_bytes);
+            for (size_t i = n * 4; i < cnt_bytes; i++)
+                std::fprintf(stderr, " %02x", cp[i]);
+            std::fprintf(stderr, "\n[xrt trace]   (cc = untouched, the "
+                         "strobes held; anything else the tile wrote "
+                         "through a strobe that was off)\n");
+        }
         if (counts)
             std::memcpy(counts, tile.cn.map<uint8_t *>(), n * 4);
         /* And the scratch-out block, on exactly the same terms as the
