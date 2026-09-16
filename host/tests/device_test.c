@@ -3883,6 +3883,51 @@ out:
     free(c_sw); free(c_hw); free(mask); free(ones);
 }
 
+/* The indexed elementwise call on a device that does not publish
+ * CFT_SEQ_FEAT_INDEXED: refused by name, before any run. This is the
+ * round-2 library against an older image (the seq6 pair, VERSION 0x900,
+ * on the card on 2026-09-15), where the composed route has no tile
+ * mechanism to compose over, and the contract is the refusal itself - a
+ * caller must never pay for a gather believing it fast. On a device with
+ * no sequencer at all the sentence names the capacities instead, in the
+ * order cft_run_ex fires them; either is the refusal by name. */
+static void check_indexed_elem_absent(cft_device *hw, cft_format fmt,
+                                      size_t n)
+{
+    const size_t esz = cft_format_size(fmt);
+    uint8_t *a = (uint8_t *)malloc(n * esz);
+    uint8_t *b = (uint8_t *)malloc(n * esz);
+    uint8_t *d = (uint8_t *)malloc(n * esz);
+    uint32_t *tab = (uint32_t *)malloc(n * 4);
+    cft_elem_args E;
+    cft_status st;
+    size_t i;
+
+    if (!a || !b || !d || !tab) {
+        CHECK(0, "idx elem absent %s: out of memory", cft_format_name(fmt));
+        goto out;
+    }
+    fill(a, n, esz);
+    fill(b, n, esz);
+    for (i = 0; i < n; i++)
+        tab[i] = (uint32_t)i;
+    memset(&E, 0, sizeof E);
+    E.struct_size = sizeof E;
+    E.a = a; E.b = b; E.c = b; E.d = d; E.n = n;
+    E.idx_a = tab; E.idx_a_src = n;
+    st = cft_run_ex(hw, CFT_FMA, fmt, CFT_RNE, &E);
+    CHECK(st == CFT_ERR_UNSUPPORTED &&
+          (strstr(cft_last_error(), "CFT_SEQ_FEAT_INDEXED") != NULL ||
+           strstr(cft_last_error(), "sequencer") != NULL),
+          "idx elem %s: a device without CAPS2[9] must refuse an indexed "
+          "elementwise run by name, got %s (%s)", cft_format_name(fmt),
+          cft_strerror(st), cft_last_error());
+    printf("  idx elem: this device does not publish CFT_SEQ_FEAT_INDEXED - "
+           "refused by name, NOT COMPARED\n");
+out:
+    free(a); free(b); free(d); free(tab);
+}
+
 /* The seam of round 2's wave 2 on the host side (docs/ROUND2.md, "What
  * the lead keeps"): a program run that is BOTH indexed (R16: stream a
  * read through a table into a source shorter than n, with sentinels)
@@ -5571,6 +5616,18 @@ int main(int argc, char **argv)
             }
             continue;
         }
+        {
+        /* R16 on an ELEMENTWISE call needs the device to publish
+         * CFT_SEQ_FEAT_INDEXED - the composed route is a program over
+         * the tile's gather. A device that does not (the seq6 image,
+         * VERSION 0x900) refuses it by name, and that refusal is the
+         * contract: scored once a format, and the indexed legs are then
+         * skipped by name, as the program legs are. Found on the card
+         * on 2026-09-15, when this library first met an older image. */
+        const int hw_indexed =
+            (caps.seq_features & CFT_SEQ_FEAT_INDEXED) != 0;
+        if (!hw_indexed)
+            check_indexed_elem_absent(hw, fmt, n);
         for (o = 0; o < nops; o++) {
             if (!cft_supports(hw, ops[o], fmt)) {
                 note_skip(cft_op_name(ops[o]));
@@ -5585,9 +5642,10 @@ int main(int argc, char **argv)
                  * flag. Beside `compare` and not in its own pass, so
                  * that the two can never be run over different
                  * opcodes, formats or attributes. */
-                compare_indexed_elem(sw, hw, fmt, ops[o], rnds[r], n,
-                                     0x1dced000u +
-                                     (uint32_t)(f * 100 + o * 10 + r));
+                if (hw_indexed)
+                    compare_indexed_elem(sw, hw, fmt, ops[o], rnds[r], n,
+                                         0x1dced000u +
+                                         (uint32_t)(f * 100 + o * 10 + r));
                 printf("  %s %s: %d checks so far, %d failed\n",
                        cft_op_name(ops[o]), "ok", checks, failures);
                 fflush(stdout);
@@ -5595,8 +5653,10 @@ int main(int argc, char **argv)
             /* The scalar-beside-indexed shape, once per opcode: a
              * stride-0 operand the composition puts in the program's
              * constant bank, beside one it gathers. */
-            compare_indexed_scalar(sw, hw, fmt, ops[o], n,
-                                   0x5ca10000u + (uint32_t)(f * 100 + o));
+            if (hw_indexed)
+                compare_indexed_scalar(sw, hw, fmt, ops[o], n,
+                                       0x5ca10000u + (uint32_t)(f * 100 + o));
+        }
         }
         /* And the refusals the tables carry, which are the library's
          * own and reach no device - scored once at each format. */
