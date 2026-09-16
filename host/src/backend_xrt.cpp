@@ -288,6 +288,21 @@ inline size_t beat_round(size_t bytes)
     return (bytes + 31u) & ~static_cast<size_t>(31u);
 }
 
+/* The CAPACITY of a buffer object, as distinct from the bytes a
+ * transfer moves: a whole number of 4 KiB pages. Found on the card on
+ * 2026-09-15: a buffer object of 1,344 bytes (336 fp32 lanes, beat-
+ * rounded) ended in heap corruption on the first elementwise runs -
+ * "corrupted size vs. prev_size" - while 64 lanes never did, and
+ * AddressSanitizer showed XRT sizing a 4 KiB-aligned host allocation
+ * to exactly our byte count. What the runtime and the driver move
+ * behind that allocation is page-granular; a capacity that is too is
+ * memory nobody runs off the end of. The byte counts handed to sync
+ * and memcpy are unchanged. */
+inline size_t page_round(size_t bytes)
+{
+    return (bytes + 4095u) & ~static_cast<size_t>(4095u);
+}
+
 /* The most compute units this backend will bind on one device.
  *
  * Not a prediction that 64 will ever be built as one bitstream - the
@@ -459,10 +474,10 @@ void ensure_capacity(Dev &D, Tile &t, size_t bytes)
     const int args[4] = {ARG_A, ARG_B, ARG_C, ARG_D};
     for (int i = 0; i < 4; i++) {
         *bufs[i] = xrt::bo();                       /* release first */
-        *bufs[i] = xrt::bo(D.dev, bytes, xrt::bo::flags::normal,
+        *bufs[i] = xrt::bo(D.dev, page_round(bytes), xrt::bo::flags::normal,
                            t.k.group_id(args[i]));
     }
-    t.cap = bytes;
+    t.cap = page_round(bytes);
 }
 
 /* Grow one buffer, for the two that are not operand-shaped. Same
@@ -476,8 +491,9 @@ void ensure_one(Dev &D, Tile &t, xrt::bo &bo, size_t &cap, int arg,
         return;
     cap = 0;
     bo = xrt::bo();
-    bo = xrt::bo(D.dev, bytes, xrt::bo::flags::normal, t.k.group_id(arg));
-    cap = bytes;
+    bo = xrt::bo(D.dev, page_round(bytes), xrt::bo::flags::normal,
+                 t.k.group_id(arg));
+    cap = page_round(bytes);
 }
 
 /* One tile's LANE MASK (R17), repacked into its buffer.
@@ -672,7 +688,8 @@ xrt::bo *buf_bind(Buf &B, size_t tile, int role, size_t off,
         try {
             c.live = false;
             c.bo = xrt::bo();          /* release before requesting */
-            c.bo = xrt::bo(B.D->dev, padded, xrt::bo::flags::normal,
+            c.bo = xrt::bo(B.D->dev, page_round(padded),
+                           xrt::bo::flags::normal,
                            B.D->tiles[tile].k.group_id(ROLE_ARG[role]));
         } catch (const std::exception &e) {
             /* An HBM channel is 256 MB a tile. A buffer that does not
