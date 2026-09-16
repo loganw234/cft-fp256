@@ -2943,6 +2943,24 @@ rediscovering them.
 - **`ensure_capacity` sizes all four operand BOs to the largest unbound
   source** (V1): memory, not correctness; a caller with one large
   indexed source and three small streams pays for four large buffers.
+  Sharper on the card (2026-09-16, the saturation runs): it allocates
+  the tile's own buffer for a role that is BOUND to a resident copy in
+  the same 256 MB channel, so a resident operand of half a channel
+  (16M fp64) is refused on a single tile for want of a buffer the run
+  will never use ("failed to allocate userptr bo: Operation not
+  permitted"). The quad hides it by slicing.
+- **Reductions on the card run far below the engine, and four tiles'
+  reductions do not overlap** (2026-09-16, the saturation runs): one
+  tile reduces resident memory at 33 to 62 M beats a second (a third
+  to a half of the 107 M it moves on elementwise work, and far from
+  the 1.42 cycles a beat P4's accumulator measured on the model), and
+  four tiles reducing at once run at about 13 M beats a second each -
+  no more in total than one tile alone - while four elementwise runs
+  overlap perfectly. Candidates, in the order to instrument: the
+  reduction path's launch, wait and result-sync ordering in
+  `cftx_reduce` / `cftx_reduce_seg` (a wait or sync between launches
+  serialises exactly so), then the tile's reduction read side, which
+  never got the read-ahead. The next card day's first item.
 - **Several dense refusals set no `cft_last_error` sentence** (a bad
   format, attribute or reduction opcode; `d` NULL) while
   `cft_last_error()` is sticky, so a caller can read the previous

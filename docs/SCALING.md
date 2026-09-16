@@ -231,7 +231,19 @@ through the library on the card in docs/BENCHMARKS.md). One thing tile
 count does NOT buy yet: a PROGRAM run, resident or staged, executes on
 one tile - `cftx_program_run` uses the first tile and never partitions
 (docs/ROADMAP.md's debts list, 2026-09-15) - so a four-tile image runs
-a program at one tile's rate. At high tile
+a program at one tile's rate. And what it buys on elementwise work was
+measured on the round-2 pair (2026-09-16, docs/VALIDATION.md,
+"saturating the pair"): the engine is exactly four times one at every
+format and size, each unit at the single's 107 M beats a second, and
+through the library the four-tile cost is a FIXED cost a call - a
+fifth of the rate at a million fp32 elements, under three percent at
+sixteen million, under five percent at fp256 from a million up. Many
+small calls pay it every time (127 dense calls cost twice on four tiles
+what they cost on one); wide resident calls pay it once. The largest
+resident shape is also bigger on four tiles, since a buffer is sliced
+per tile and each tile's quarter fits its channel beside the library's
+own staging. Reductions were the outlier at 13 M beats a second a tile
+on a whole-array sum, an open question in that entry. At high tile
 counts the resident path stops being an optimisation and becomes the
 only workable one. Measured 2026-09-08 with the staging
 in place (docs/BENCHMARKS.md): every format and both tile counts sit

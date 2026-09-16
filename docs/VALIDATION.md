@@ -12850,3 +12850,108 @@ The staged pair is the round's deliverable on the card: both images
 from one commit, both at 135 MHz, both green on every leg, with the
 two host defects of the single's card day fixed in the library both
 halves now run under.
+
+## 2026-09-16 - saturating the pair: four tiles are four times one on resident work, a fixed cost per call, and the reductions are the outlier
+
+Logan's ask, 10:5x: if the quad looks slow, saturate it and see whether
+the loss is amortised over heavy work. Two drivers on the box
+(`~/box_round2_saturate.sh`, `~/box_round2_saturate2.sh`; logs
+`~/cardday-round2-saturate*.log`, one file a run), the same shapes on
+the single and the quad, everything resident so the bus is out of the
+way, every result checked - `cft-resident` against the software
+backend, every other unit and a repeat with STATUS read back;
+`cft-bench --resident` against the host-pointer path; `segsat.py`
+(new, 6e2b138) against exact integer sums. The tree is ~/cft-fp256-d
+at ffefb5c with the tests built by name.
+
+**1. The engine, bus out** (`cft-resident`, fma, 10 timed reps after a
+warm-up; the quad's four units at once). Elements a second, and the
+beats a second EACH unit moved:
+
+    n               fp32              fp64              fp128             fp256            beats/s per unit
+    1M   single      812 M             417 M             212 M             107 M            101-107 M
+    1M   quad      3,187 M  (x3.93)  1,665 M  (x3.99)    846 M  (x3.99)    427 M  (x3.99)   100-107 M
+    4M   single      846 M             427 M             215 M             108 M            106-108 M
+    4M   quad      3,378 M  (x3.99)  1,708 M  (x4.00)    858 M  (x4.00)    431 M  (x4.00)   106-108 M
+    16M  single      859 M             431 M             216 M             (no channel)     107-108 M
+    16M  quad      3,432 M  (x4.00)  1,722 M  (x4.00)    863 M  (x4.00)    (no channel)     107-108 M
+    the quad, ONE unit at a time, 1M:  826 / 423 / 212 / 107 M - the single's numbers, in the quad's image
+
+Every row's bytes identical on every unit, on repeat and in software,
+STATUS clean, the flags word (inexact) the same on both sides. Four
+tiles are four times one at every format and size, 55 GB/s over
+sixteen streams; each unit moves the 107 M beats a second the single
+moves, which is the read-ahead pair's rate and twice the revision-3
+number docs/BENCHMARKS.md's engine table records - so that table is the
+one to read against this. A unit of the quad alone is the single.
+
+**2. Through the library** (`cft-bench --resident`, fma, eight seconds
+a row): what a caller gets, partitioning included.
+
+    n               fp32              fp64              fp128             fp256
+    1M   single      786 M             412 M             211 M             107 M
+    1M   quad      2,435 M  (x3.10)  1,417 M  (x3.44)    778 M  (x3.69)    408 M  (x3.82)
+    16M  single      859 M             431 M             216 M             (no channel)
+    16M  quad      3,356 M  (x3.91)  1,714 M  (x3.98)    858 M  (x3.98)    430 M
+
+So the four-tile loss is a FIXED COST A CALL - the partitioning, four
+launches and four waits - and it is amortised by size: a fifth of the
+rate at a million fp32 elements, under three percent at sixteen
+million, and under five percent at fp256 from a million up, where a
+call moves eight times the bytes for the same element count. The
+answer to the ask is yes: wide resident work pays the tile count back
+in full; many small calls do not, which the card day's 127 dense calls
+at twice the single's cost had already shown from the other side.
+
+**3. The largest shape is bigger on four tiles than on one.** A port's
+HBM channel is 256 MB and a resident copy shares it with the library's
+own staging (the correctness check's host-pointer path, and
+`ensure_capacity`'s operand buffers). On the single, 16M fp128 (256 MB
+a buffer) refused in `cft-bench` ("out of memory") and 16M fp256 in
+both tools ("failed to allocate userptr bo: Operation not permitted",
+which is XRT's spelling of a full channel); on the quad every 16M shape
+ran, because a resident buffer is sliced per tile and each tile holds
+a quarter. Four tiles raise the ceiling as well as the rate.
+
+**4. Reductions, resident** (`segsat.py`, `cft_reduce_seg`, median of
+five, every segment's sum checked exact):
+
+    shape                                   single                           quad
+    fp64, segments of 192, ~1M elements     10.2 ms   102 M/s               5.05 ms   208 M/s   (x2.0)
+    fp64, segments of 192, ~8M / ~16M       93.6 ms    90 M/s  (8M)         100.5 ms  167 M/s   (16M; the single cannot hold 16M here)
+    fp64, one whole-array sum               24.1 ms   174 M/s   (4M, one tile)                      16.8 ms   249 M/s   (4M); 80.5 ms   208 M/s   (16M)
+    fp64, maxall, segments of 192, ~1M      10.2 ms   103 M/s                        5.3 ms    198 M/s   (x1.9)
+    fp256, segments of 192, ~1M             39.2 ms    27 M/s                20.8 ms    50 M/s   (x1.9)
+
+This is the outlier, recorded with its signature and not an
+explanation. Per tile, after the per-segment flushes (~100 cycles a
+segment) are taken out: the single reduces at 33 to 42 M beats a
+second in every shape, a third of the 107 M its engine moves on
+elementwise work; a segmented run hands whole segments to tiles, one
+launch a tile (`cftx_reduce_seg`: `use = min(tiles, segments)`), so a
+one-segment whole-array sum is ONE tile's work on either image - and
+that one tile on the quad image ran at 62 M beats a second (16.8 ms for
+4M); but four tiles reducing at once ran at about 13 M beats a second
+EACH, no more in total than one tile alone, in every shape with four
+or more segments (x1.9 to x2.0 over the single at ~1M, 12 M beats a
+second a tile at 16M). Four elementwise runs overlap perfectly (table
+1); four reductions do not. The candidates, in the order to instrument:
+the library's launch, wait and result-sync ordering in the reduction
+path (a wait or a sync between launches would serialise exactly this
+way), then the tile's reduction read side, which never got the
+read-ahead the elementwise engine did. A `CFT_XRT_TRACE`-style timing
+of the reduction path's launches is the next card day's first item. On the single, 16M fp64
+whole-array refused to allocate: `ensure_capacity` allocates the
+tile's own operand buffer for a role that is BOUND, so a resident
+operand of half a channel leaves no room for the buffer the library
+will not use - V1's debt in a sharper form, added to docs/ROADMAP.md.
+
+**5. Power.** Idle 20.1 to 20.3 W at the card's meter. Under a long
+fp256 resident run: single 18.9 W against an idle reading that wandered between 16.6 and 20.3 W, so one tile's draw is inside the meter's idle spread; quad 35.4 W steady against 20.2 W idle, about 15 W for four tiles at full rate, which is the README's 'about 35 watts'. (The first driver's
+"under load" readings were taken beside a failed allocation and are
+not readings of a load.)
+
+What the day changes in the documents: docs/SCALING.md's tile-count
+paragraph now carries the amortisation, docs/BENCHMARKS.md's round-2
+section the four-tile table, docs/ROADMAP.md's debts the bound-role
+allocation and the reduction rate.

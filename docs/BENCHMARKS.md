@@ -393,6 +393,24 @@ with the two host defects the day found are docs/VALIDATION.md's
 | the same at fp128 / fp32 | 3,863 / 1,739 us | 86,042 / 84,410 us | x22.3 / x48.5 |
 | the same at 64 segments, fp64 | 220.5 us | 5,808 us | x26.3 |
 
+**Four tiles, resident, on the same pair** (2026-09-16, `cft-resident`
+fma, ten timed reps; docs/VALIDATION.md "saturating the pair" has the
+library-path and reduction tables beside it):
+
+| n | fp32 | fp64 | fp128 | fp256 | beats/s a unit |
+|---|---|---|---|---|---|
+| 1M, one tile | 812 M/s | 417 M/s | 212 M/s | 107 M/s | 101-107 M |
+| 1M, four tiles | 3,187 M/s | 1,665 M/s | 846 M/s | 427 M/s | 100-107 M |
+| 16M, one tile | 859 M/s | 431 M/s | 216 M/s | no channel | 107-108 M |
+| 16M, four tiles | 3,432 M/s | 1,722 M/s | 863 M/s | no channel | 107-108 M |
+
+Four times one at every format and size, 55 GB/s over sixteen streams;
+each unit moves the read-ahead pair's 107 M beats a second, twice the
+revision-3 rate the engine table above records. Through the library
+(`cft-bench --resident`) the four-tile cost is a fixed cost a call: a
+fifth of the rate at a million fp32 elements, under three percent at
+sixteen million, under five percent at fp256 from a million up.
+
 Two readings the ratios carry. A gathered element costs one HBM round
 trip whatever the format - 310 to 340 ns - because the sequencer keeps
 one burst in flight, so the gather's win over dense calls is the call
