@@ -143,6 +143,37 @@ Not just the one you are about to rebuild. `cft-asm`, `positive-run`,
 `api-test`, `reduce-parts` - all of them. If you clean, rebuild with
 `all` and the extra targets, not with the single one you wanted.
 
+### 5. A quad that misses timing by tenths of a nanosecond is not a design failure
+
+Round 2's quad (2026-09-16) ended after 359 minutes with `design did
+not meet timing`: kernel-side WNS -0.363 ns, 1,824 failing endpoints
+of 1,042,969, while the single from the same commit closed with 0.032
+ns of routed margin. Before touching RTL, read the worst paths in
+`_x_hw/link/vivado/vpl/prj/prj.runs/impl_1/*timing_summary_routed.rpt`
+(`Source:` and `Destination:` under each `Slack (VIOLATED)`). There
+they were the elementwise engine's FIFO-to-FMA bypass through the DSP
+cascade - the design's oldest critical path, which nine earlier quads
+had closed with 0.009 to 0.143 ns to spare - and not any of the
+round's logic. A miss of that size on that path is placement spread,
+and `hw/rebuild-2022.sh`'s directive knobs are the axis that moves it
+(its comment measured 0.113 ns from a directive change):
+
+```
+PLACE_DIRECTIVE=ExtraTimingOpt ROUTE_DIRECTIVE=AggressiveExplore
+```
+
+`build-pair.sh` passes them through from the environment but has no
+quad-only mode, and rebuilding the single would produce a different
+image from the one the card validated. The pattern that worked is a
+launcher that runs `hw/rebuild-2022.sh` with `BUILD`, `TARGETS=hw` and
+`LINK_CFG=hw/link_quad.cfg` for the quad alone and then does what
+`build-pair.sh` does for one half - `hw/verify-image.sh`, copy,
+re-hash, `SHA256SUMS`, a README saying which directives each half used
+- into the pair's staging directory. docs/VALIDATION.md's entries of
+2026-09-16 carry the miss and the rebuild's result. If the directive
+axis is not enough, the honest choices are a slower quad clock (130
+MHz buys 0.285 ns) or a register in that bypass path.
+
 ### 4. One heavy link at a time
 
 A quad `place_design` wants 25-30 GB. `cft2204` has ~47 GB. Two links

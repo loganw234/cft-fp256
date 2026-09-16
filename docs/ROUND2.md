@@ -1,5 +1,22 @@
 # Round 2: the gather, the scatter, the lane mask and the broadcast (plan, 2026-09-15)
 
+> **Outcome (2026-09-16).** The round ran as planned on 2026-09-15 and
+> every parcel is on main: P0 the seam (fd9ec1e), P1 the input block
+> fetched through an index table (5c0c655, 6457cee), P4 the beat-wide
+> accumulator (27c424d), P2 the composed indexed `cft_run_ex`
+> (5901932), P3 the per-run lane mask (69f3df2), P5 the bindings'
+> elementwise entry point (2676e71); the code tip of the round is
+> 5b7aa19, box-verified, and the single-tile image built from it ran
+> on the U50 the same night. Its first card gate failed, and the RTL
+> was never the reason: two HOST defects, found by instruments built
+> in the hour and fixed without a rebuild. The quad's first
+> implementation missed 135 MHz on the engine's oldest critical path
+> and a second is in flight. The record is docs/VALIDATION.md (the
+> entries of 2026-09-15 and 2026-09-16), the numbers are in
+> docs/ROADMAP.md's ask entries, and the method's case study is
+> `ParcelRound/CASE-STUDY-2.md`. Everything below is the plan as it
+> was written before any parcel existed, kept as written.
+
 The four asks cft-rebound's `docs/HARDWARE.md` still carries after ask 7
 landed, planned as one parcel round in the sense of
 `../../ParcelRound/METHOD.md`: a seam the lead lands first, parcels an

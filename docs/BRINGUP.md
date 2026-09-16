@@ -730,14 +730,21 @@ is the runbook it followed.
 
 ## Known open questions to settle on the box
 
-- U50C shell confirmation. No `xilinx_u50c_*` platform exists in AMD's
-  published packages (checked 2026-08-28); "U50C"-branded cards run
-  standard U50 shells, and the part on this card
-  (`xcu50-fsvh2104-2-e`) is standard U50 silicon. `xbmgmt examine`
-  is ground truth - confirm the running shell matches the installed
-  deployment package generation before the first link.
+- ~~U50C shell confirmation.~~ **Answered on the card.** No
+  `xilinx_u50c_*` platform exists in AMD's published packages (checked
+  2026-08-28); "U50C"-branded cards run standard U50 shells, and the
+  part on this card (`xcu50-fsvh2104-2-e`) is standard U50 silicon.
+  `xbutil examine` on the box reports `xilinx_u50_gen3x16_xdma_base_5`
+  at 0000:02:00.1, and every pair since first light (2026-09-08) has
+  linked against that shell and loaded (docs/VALIDATION.md, each card
+  day's entry).
 - Whether `interrupt="false"` polling latency is acceptable for the
   intended run lengths, or the v1 CSR should export the interrupt.
+  Every card day so far has run with XRT's `run.wait()` and no run
+  length has made the polling visible against the tile's own time; it
+  stays a question for a workload that issues very short runs at a
+  very high rate, which docs/INTEGRATION.md already tells a port to
+  avoid for a different reason.
 - ~~Behavioural-core synthesis QoR~~ **answered 2026-08-28** with
   `hw/synth_ooc.tcl` on Vivado 2026.1, xcu50-fsvh2104-2-e:
 

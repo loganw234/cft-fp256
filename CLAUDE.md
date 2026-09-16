@@ -96,6 +96,21 @@ The bench list is the variable `SIM_BENCHES` and the files checked are
 *derived* from it, so a bench cannot be added to the run and left out of
 the check. Override it to gate a subset: `make sim SIM_BENCHES=fp32`.
 
+**`make -C host all` does not build the test executables, on any
+host.** `api-test`, `device-test`, `remote-test` and `cft-serve` are
+separate targets, and they link `libcft.a` STATICALLY - so after a
+library fix, `all` leaves a test binary that still runs the old
+backend. It cost a merge gate on 2026-09-15 (a device-test from 05:13
+scoring two later commits) and, the same night, a card run that
+repeated the exact twelve failures a fix had removed. Name the tests
+on the make line and print their build time before trusting a run;
+`ldd host/device-test | grep cft` printing nothing is the tell that
+the library inside is whatever was archived when it was linked.
+
+**Never pipe a long make or test through `| grep | head -N` on this
+desktop.** It deadlocks at zero CPU with no message (2026-09-15, twice
+in one round). Redirect to a file, then grep the file.
+
 **`make all XRT=1` now builds `cft-resident` (fixed 2026-09-12).** It
 appended to `$(TOOLS)` from below the `all` rule, and make expands a
 prerequisite list when it *reads* the rule — so the tool was in `$(TOOLS)`
@@ -103,8 +118,11 @@ and absent from `all:`. The repo's idiom is a second `all: <tool>` line,
 which make merges; this one tool had skipped it. It also had no clean
 rule, so a stale binary could outlive a `clean`.
 
-**`bindings/arduino/sync.py --check` passes.** Measured 2026-09-12: 28
-vendored files, all identical to `host/`. This entry previously claimed it
+**`bindings/arduino/sync.py --check` passes.** Measured 2026-09-16: 30
+vendored files, all identical to `host/` (28 on 2026-09-12; round 2
+added `mask_bits.h` and its neighbour). Any edit to a vendored host
+source fails it until `sync.py` is re-run - which is the gate doing its
+job, not a divergence. This entry previously claimed it
 failed on a clean checkout; it does not. Treat a failure from it as a real
 divergence.
 
