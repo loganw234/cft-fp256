@@ -12536,8 +12536,10 @@ path's bounding checks on top. The box's suite at that tip
 25 benches, no failures recorded; the census `seq_coremc` 35/35,
 `krnlseqmc` 2/2, `seqbanksmc` 1/1, `reducemc` 11/11, `krnlmc` 2/2;
 `yosys-lint` clean; thirty `TESTS=` lines in the raw log, none with a
-failure, no simulator error line. The Icarus tail runs on as this is
-written. The host side at the same tip, with every test executable
+failure, no simulator error line; the Icarus tail landed at 19:15,
+`seq_core` 35/35, `krnlseq` 2/2, `seqbanks` 1/1, `faults` 5/5 - both
+simulators green at the round's tip. The host side at the same tip,
+with every test executable
 built by name: api-test all contract checks passed (the poisoned-table
 and poisoned-mask case among them), `test_seq.py` 77, `seq_check.py`
 with five corpora agreeing on every program, `device-test sw -n 32`
