@@ -19,7 +19,8 @@ and CAPS2[10:0].*
 built from 5b7aa19 at 135 MHz) ran its programs, gathers, masks and
 reductions on the U50 on 2026-09-15 - after two HOST defects the card
 found, neither in this RTL (docs/VALIDATION.md, "round 2's card day,
-second half"; its quad is that day's open item). Every pair since the
+second half"); the quad closed at 135 MHz on its second implementation
+and ran green on four tiles on 2026-09-16. Every pair since the
 revision-4 pair (`~/cardday-rev4`, 2026-09-13) carries R8 and CAPS2[6];
 the pair before round 2, `~/cardday-seq6`, is VERSION 0x900 and
 publishes neither CAPS2[9] nor [10], which is what the card day's first

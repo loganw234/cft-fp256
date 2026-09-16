@@ -169,10 +169,17 @@ launcher that runs `hw/rebuild-2022.sh` with `BUILD`, `TARGETS=hw` and
 `LINK_CFG=hw/link_quad.cfg` for the quad alone and then does what
 `build-pair.sh` does for one half - `hw/verify-image.sh`, copy,
 re-hash, `SHA256SUMS`, a README saying which directives each half used
-- into the pair's staging directory. docs/VALIDATION.md's entries of
-2026-09-16 carry the miss and the rebuild's result. If the directive
-axis is not enough, the honest choices are a slower quad clock (130
-MHz buys 0.285 ns) or a register in that bypass path.
+- into the pair's staging directory. It worked: the rebuild closed at
++0.040 ns kernel-side (routed +0.031) in 468 minutes, zero failing
+endpoints, and its four-tile legs on the card were green two minutes
+after it staged (docs/VALIDATION.md, 2026-09-16). The router's
+intermediate slack sat at -0.317 ns through its passes and the
+post-route physical optimisation recovered the last quarter of a
+nanosecond, so do not read the intermediate summaries as the verdict.
+If the directive axis is not enough, the honest choices are a slower
+quad clock - 130 MHz buys 0.285 ns, and Logan's standing word
+(2026-09-16) is that a quad which misses 135 rebuilds at 130 rather
+than chasing tenths - or a register in that bypass path.
 
 ### 4. One heavy link at a time
 

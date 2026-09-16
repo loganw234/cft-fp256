@@ -54,20 +54,25 @@ the element count is an operand rather than a loop bound.
       quad's nine-picosecond squeak at 130. High-speed testing (145+)
       stays deliberately deferred past first light.
 
-- [x] **THE ROUND-2 SINGLE: built 2026-09-15 from main 5b7aa19 at 135
-      MHz, verified, staged and run on the card the same night**
-      (`~/cardday-round2`; docs/VALIDATION.md, "round 2's card day,
-      second half"). Sequencer revision 6 - an input block fetched
+- [x] **THE ROUND-2 PAIR: the single built 2026-09-15 from main
+      5b7aa19 at 135 MHz and run on the card the same night; the quad
+      closed on the second implementation, 2026-09-16, and ran its
+      four-tile legs within two minutes of staging** (`~/cardday-round2`;
+      docs/VALIDATION.md, "round 2's card day, second half" and the
+      2026-09-16 entries). Sequencer revision 6 - an input block fetched
       through an index table, a per-run lane mask, the beat-wide
       reduction accumulator - VERSION 0xA00, CAPS2[9] and [10], and it
-      needs a host at ABI 0.14. Kernel margin +0.266 ns, routed +0.032.
-      Its first gate on the card failed and the RTL was not the reason:
-      two host defects (a masked run's stale device copy; page-granular
-      buffer capacities), fixed the same night with no rebuild. Its
-      quad missed 135 MHz by 0.363 ns on the engine's oldest path after
-      359 minutes; a second implementation with the placement and
-      routing directives ran from 03:01 on 2026-09-16 (the outcome is
-      that day's VALIDATION entry).
+      needs a host at ABI 0.14. Single: kernel margin +0.266 ns, routed
+      +0.032. Quad: +0.040 kernel, +0.031 routed, with
+      `PLACE_DIRECTIVE=ExtraTimingOpt ROUTE_DIRECTIVE=AggressiveExplore`
+      after the default-directive quad missed by 0.363 ns on the
+      engine's oldest path (359 minutes wasted, 468 spent well; the
+      README in the staging directory says which half used what). The
+      single's first gate on the card failed and the RTL was not the
+      reason: two host defects (a masked run's stale device copy;
+      page-granular buffer capacities), fixed the same night with no
+      rebuild. A quad that misses 135 MHz rebuilds at 130 on Logan's
+      word (2026-09-16); this one did not need it.
 
 - [x] **THE REVISION-4 PAIR: built 2026-09-12 into 09-13 from main
       f636cf3, both halves at 135 MHz, verified, staged and exercised on

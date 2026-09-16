@@ -11,7 +11,9 @@
 > was never the reason: two HOST defects, found by instruments built
 > in the hour and fixed without a rebuild. The quad's first
 > implementation missed 135 MHz on the engine's oldest critical path
-> and a second is in flight. The record is docs/VALIDATION.md (the
+> and the second, with the placement and routing directives, closed at
+> +0.040 ns and ran green on four tiles on 2026-09-16. The record is
+> docs/VALIDATION.md (the
 > entries of 2026-09-15 and 2026-09-16), the numbers are in
 > docs/ROADMAP.md's ask entries, and the method's case study is
 > `ParcelRound/CASE-STUDY-2.md`. Everything below is the plan as it
