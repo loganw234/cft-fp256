@@ -3893,6 +3893,169 @@ out:
     free(c_sw); free(c_hw); free(mask); free(ones);
 }
 
+/* R17 on the scratch-out block. HOSTAPI.md's first mask bullet names
+ * three things a masked lane does not write - its deposit slots, its
+ * count and its scratch-out slots - and check_masked above covers two.
+ * The third had no leg until the card day of 2026-09-15 found the
+ * deposit window's DEVICE copy holding the previous run's output under
+ * a mask (the tile strobes a masked lane off, so what its slot "keeps"
+ * is whatever the device copy held; the library now stages the
+ * caller's bytes first). The scratch-out block is staged on the same
+ * terms, and this is the leg that says so: one STL of `a` into the one
+ * scratch-out slot, every third lane masked, the block pre-filled with
+ * a pattern on both backends - the device must agree with the software
+ * backend byte for byte, a masked lane's slot must hold the pattern
+ * and a kept lane's must hold its `a`. */
+static void check_masked_scratch_out(cft_device *sw, cft_device *hw,
+                                     cft_format fmt, size_t n)
+{
+    const size_t esz = cft_format_size(fmt);
+    uint8_t img[256];
+    uint64_t ins[2];
+    size_t bytes, i;
+    cft_caps hc;
+    uint8_t *a = (uint8_t *)malloc(n * esz);
+    uint8_t *so_sw = (uint8_t *)malloc(n * esz);
+    uint8_t *so_hw = (uint8_t *)malloc(n * esz);
+    uint32_t *c_sw = (uint32_t *)malloc(n * 4);
+    uint32_t *c_hw = (uint32_t *)malloc(n * 4);
+    uint8_t *mask = (uint8_t *)malloc((n + 7) / 8);
+    cft_program *ps = NULL, *ph = NULL;
+    cft_run_args A;
+    uint32_t fl = 0, bus = 0;
+    cft_status st;
+    size_t masked_lanes = 0;
+
+    memset(&hc, 0, sizeof hc);
+    hc.struct_size = sizeof hc;
+    if (cft_get_caps(hw, &hc) != CFT_OK)
+        memset(&hc, 0, sizeof hc);
+    if (!(hc.seq_features & CFT_SEQ_FEAT_LANE_MASK) ||
+        !(hc.seq_features & CFT_SEQ_FEAT_SCRATCH_IO)) {
+        printf("  seq lane mask, scratch-out: this device does not publish "
+               "%s, NOT COMPARED\n",
+               (hc.seq_features & CFT_SEQ_FEAT_LANE_MASK)
+                   ? "CFT_SEQ_FEAT_SCRATCH_IO" : "CFT_SEQ_FEAT_LANE_MASK");
+        goto out;
+    }
+    if (!a || !so_sw || !so_hw || !c_sw || !c_hw || !mask) {
+        printf("  FAIL seq lane mask, scratch-out: out of memory\n");
+        failures++;
+        goto out;
+    }
+
+    rs = 0x5C4A + (uint32_t)fmt;
+    fill(a, n, esz);
+    memset(mask, 0, (n + 7) / 8);
+    for (i = 0; i < n; i++) {
+        if (i % 3 == 0)
+            masked_lanes++;
+        else
+            mask[i >> 3] |= (uint8_t)(1u << (i & 7u));
+    }
+
+    /* STL slot 0 := r0 (the a stream); HALT. No deposit at all -
+     * max_deposits is zero, which is a legal program - so the only
+     * bytes this run writes are the scratch-out block and the counts. */
+    ins[0] = seq_stl(0, 0);
+    ins[1] = seq_ctrl(0, 0, 0);
+    bytes = seq_image_scratch(img, fmt, ins, 2, NULL, 0, 0,
+                              CFT_PROG_FLAG_SCRATCH_IO, 0, 1);
+
+    st = cft_program_load(sw, img, bytes, &ps);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq lane mask, scratch-out: the software backend "
+               "refused the image (%s: %s)\n", cft_strerror(st),
+               cft_last_error());
+        failures++;
+        goto out;
+    }
+    st = cft_program_load(hw, img, bytes, &ph);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq lane mask, scratch-out: the device refused the "
+               "image (%s: %s)\n", cft_strerror(st), cft_last_error());
+        failures++;
+        goto out;
+    }
+
+#define SO_RUN(prog_, so_, cnt_)                                       \
+    do {                                                               \
+        memset(&A, 0, sizeof A);                                       \
+        A.struct_size = sizeof A;                                      \
+        A.a = a; A.b = a; A.c = a;                                     \
+        A.n = n;                                                       \
+        A.counts = (cnt_);                                             \
+        A.scratch_out = (so_);                                         \
+        A.scratch_out_bytes = n * esz;                                 \
+        A.flags_out = &fl;                                             \
+        A.bus_out = &bus;                                              \
+        A.lane_mask = mask;                                            \
+        A.lane_mask_bytes = (n + 7) / 8;                               \
+        memset((so_), 0xA5, n * esz);                                  \
+        memset((cnt_), 0x5a, n * 4);                                   \
+        st = cft_program_run_ex((prog_), &A);                          \
+    } while (0)
+
+    SO_RUN(ps, so_sw, c_sw);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq lane mask, scratch-out: the software backend "
+               "refused the run (%s: %s)\n", cft_strerror(st),
+               cft_last_error());
+        failures++;
+        goto out;
+    }
+    SO_RUN(ph, so_hw, c_hw);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq lane mask, scratch-out: the device refused the "
+               "run (%s: %s)\n", cft_strerror(st), cft_last_error());
+        failures++;
+        goto out;
+    }
+#undef SO_RUN
+    checks++;
+    if (memcmp(so_sw, so_hw, n * esz) != 0 || memcmp(c_sw, c_hw, n * 4) != 0) {
+        printf("  FAIL seq lane mask, scratch-out: the device and the "
+               "software backend differ under a mask\n");
+        failures++;
+    }
+    checks++;
+    for (i = 0; i < n; i++) {
+        int kept = (mask[i >> 3] >> (i & 7u)) & 1;
+        const uint8_t *slot = so_hw + i * esz;
+        size_t k;
+        int patterned = 1;
+        for (k = 0; k < esz; k++)
+            if (slot[k] != 0xA5)
+                patterned = 0;
+        if (!kept && (!patterned || c_hw[i] != 0x5a5a5a5au)) {
+            printf("  FAIL seq lane mask, scratch-out: lane %lu is masked "
+                   "and its scratch-out slot or count was written on the "
+                   "device\n", (unsigned long)i);
+            failures++;
+            break;
+        }
+        if (kept && (memcmp(slot, a + i * esz, esz) != 0 || c_hw[i] != 0)) {
+            printf("  FAIL seq lane mask, scratch-out: lane %lu is NOT "
+                   "masked and its scratch-out slot is not its own store "
+                   "(or its count is not zero)\n", (unsigned long)i);
+            failures++;
+            break;
+        }
+    }
+    printf("  seq lane mask, scratch-out: %lu lanes, %lu of them masked, "
+           "device == software, masked slots and counts untouched, kept "
+           "lanes hold their own store\n",
+           (unsigned long)n, (unsigned long)masked_lanes);
+out:
+    cft_program_free(ps);
+    cft_program_free(ph);
+    free(a); free(so_sw); free(so_hw); free(c_sw); free(c_hw); free(mask);
+}
+
 /* The indexed elementwise call on a device that does not publish
  * CFT_SEQ_FEAT_INDEXED: refused by name, before any run. This is the
  * round-2 library against an older image (the seq6 pair, VERSION 0x900,
@@ -4290,6 +4453,7 @@ static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
     check_indexed(sw, hw, fmt, n);
     check_masked(sw, hw, fmt, n);
     check_indexed_masked(sw, hw, fmt, n);
+    check_masked_scratch_out(sw, hw, fmt, n);
 
     /* 8. the argument refusals, which are the library's own and reach
      *    no device at all - so they are scored once, on the software
