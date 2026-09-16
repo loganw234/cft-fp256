@@ -3514,7 +3514,7 @@ int main(void)
                       "an n this library cannot size is refused before its "
                       "table is read: %s (%s)",
                       cft_strerror(st), cft_last_error());
-                CHECK(strstr(cft_last_error(), "cannot size") != NULL,
+                CHECK(strstr(cft_last_error(), "than this library can size") != NULL,
                       "...and the refusal says why: '%s'", cft_last_error());
                 H.idx_a = NULL; H.idx_a_src = 0;
                 H.lane_mask = (const uint8_t *)16;
