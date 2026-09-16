@@ -2514,7 +2514,15 @@ about values:
   deposited into" is about the lanes the run OWNS, and a masked lane is
   not one of them - so a caller can mask a lane precisely in order to
   keep the value already in its slot, and a caller who wants +0 there
-  must write it.
+  must write it. On a tile that promise is kept in TWO places: the
+  tile strobes a masked lane's bytes off, and the library stages the
+  caller's deposit window, counts and scratch-out block to the device
+  BEFORE a masked launch, because what a staged device copy "keeps" is
+  whatever it held when the run began - and until 2026-09-15 it held
+  the previous run's output (the card day found every masked lane
+  holding exactly the value it would have deposited unmasked; the fix
+  is `be1ac1f` and the sentence after it, `host/src/backend_xrt.cpp`).
+  A RESIDENT window needs no upload: its device copy is the authority.
 * **A masked lane contributes no flag and no status bit.** It cannot
   raise `inexact` any more than it can raise deposit overflow, and a
   run whose every lane is masked completes with nothing written and

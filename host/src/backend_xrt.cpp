@@ -1805,6 +1805,13 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
             if (counts)
                 stage(tile.cn, reinterpret_cast<const uint8_t *>(counts),
                       n * 4, cnt_bytes);
+            /* ...and the scratch-out block, which the same sentence of
+             * HOSTAPI.md promises: a masked lane's scratch-out slots
+             * come back holding what the caller put there. */
+            if (D.version >= SCRATCH_VERSION && !ob[CFT_ROLE_SO] &&
+                scratch_out && sout_bytes)
+                stage(tile.so, static_cast<const uint8_t *>(scratch_out),
+                      sout_bytes, sout_pad);
         }
         if (std::getenv("CFT_XRT_TRACE") && cnt_bytes > n * 4) {
             /* The count window's staging pad - the last beat's lanes

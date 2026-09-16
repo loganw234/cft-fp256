@@ -15,10 +15,20 @@ FLAGS:
   * the mask never reached the lanes (the slice of the beat, or its
     capture, built wrong): every lane is active, so a MASKED lane's
     exception reaches FLAGS exactly as an unmasked one's does;
-  * the mask reached the lanes and only the drains' byte strobes were
-    lost on the way to memory: a masked lane is not active, so its
+  * the mask reached the lanes: a masked lane is not active, so its
     exception does NOT reach FLAGS (docs/SEQUENCER.md R17), and the
-    deposit bytes are the only thing wrong.
+    deposit bytes are the only thing wrong - which points at the bytes'
+    ROUTE, not at the tile.
+
+What it found: FLAGS clean under the mask, every masked slot holding
+exactly the value its lane would have deposited unmasked, and (under
+CFT_XRT_TRACE) a pattern in the count window's staging pad surviving
+a run - the strobes held. The tile leaves a masked lane's bytes as
+they are ON THE DEVICE, and the staged device copy held the previous
+run's output because a deposit window is an output the host never
+uploaded. Fixed in backend_xrt.cpp: under a mask the caller's deposit
+window and counts go to the device before the launch. With that fix
+this probe prints every masked lane as `m`.
 
 So: one dense program, `ADD r3 = a + c; DEPOSIT r3; HALT`, with the
 KEPT lanes exact (1 + 2) and the MASKED lanes poisoned (+inf + -inf,
@@ -169,11 +179,12 @@ def main():
             ("m" if got[i] == pat else "W") if masked[i]
             else ("K" if got[i] == three else "x") for i in range(n))
         print(f"  lanes: {lane_map}")
-        return flags.value
+        return flags.value, len(m_idx) - m_pat
 
-    f_un = run("UNMASKED run, masked-to-be lanes poisoned", False)
-    f_ma = run(f"MASKED run, mask bits {args.mask_bits}" if args.mask_bits
-               else f"MASKED run, every {K}th lane masked", True)
+    f_un, _ = run("UNMASKED run, masked-to-be lanes poisoned", False)
+    f_ma, m_written = run(
+        f"MASKED run, mask bits {args.mask_bits}" if args.mask_bits
+        else f"MASKED run, every {K}th lane masked", True)
     print()
     if not (f_un & sf.FLAG_INVALID):
         print("VERDICT: the poison did not raise INVALID unmasked - the probe "
@@ -183,9 +194,15 @@ def main():
         print("VERDICT: a MASKED lane's INVALID reached FLAGS - the mask never "
               "reached the lanes (the beat's slice or its capture)")
         return 1
-    print("VERDICT: FLAGS is clean under the mask - the mask reached the "
-          "lanes; what is lost is the drains' byte strobes on the way to "
-          "memory")
+    if m_written:
+        print("VERDICT: FLAGS is clean under the mask - the mask reached the "
+              "lanes - and masked slots were still written: the bytes' route "
+              "is wrong, not the tile (a staged device copy the caller's "
+              "bytes were never uploaded to; backend_xrt.cpp's masked "
+              "upload is the fix)")
+        return 1
+    print("VERDICT: the mask works end to end - FLAGS clean, every masked "
+          "slot and count untouched, every kept lane deposited")
     return 0
 
 
