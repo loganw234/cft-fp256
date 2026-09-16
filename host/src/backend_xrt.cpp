@@ -1955,6 +1955,46 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
         set_err(std::string("reading status after a program: ") + e.what());
         return ST_INTERNAL;
     }
+    /* CFT_XRT_TRACE: what the tile received against what the host
+     * sent, read back through the same register path CAPS uses. A
+     * card-day instrument (2026-09-15: the tile wrote every masked
+     * lane while every host-side value looked right on paper). */
+    if (std::getenv("CFT_XRT_TRACE")) {
+        try {
+            const uint32_t r_mode = tile.k.read_register(0x10);
+            const uint32_t r_n_lo = tile.k.read_register(0x18);
+            const uint32_t r_n_hi = tile.k.read_register(0x1C);
+            std::fprintf(stderr, "[xrt trace] host mode=0x%08x n=%llu | "
+                         "tile MODE=0x%08x N=0x%08x%08x STATUS=0x%08x "
+                         "FLAGS=0x%08x\n", mode,
+                         static_cast<unsigned long long>(n), r_mode,
+                         r_n_hi, r_n_lo, status_acc, flag_acc);
+            static const char *const pname[5] = {"IDX_A", "IDX_B", "IDX_C",
+                                                 "IDX_SI", "MASK"};
+            for (int i = 0; i < 5; i++) {
+                const uint32_t lo = tile.k.read_register(0x88u + 8u * i);
+                const uint32_t hi = tile.k.read_register(0x8Cu + 8u * i);
+                std::fprintf(stderr, "[xrt trace]   %-6s = 0x%08x%08x\n",
+                             pname[i], hi, lo);
+            }
+            if (D.version >= IDX_VERSION) {
+                std::fprintf(stderr, "[xrt trace]   mask bo address "
+                             "0x%016llx, %zu bytes staged (real %zu); "
+                             "device bytes:",
+                             static_cast<unsigned long long>(
+                                 tile.mk.address()),
+                             mask_pad, mask_real);
+                tile.mk.sync(XCL_BO_SYNC_BO_FROM_DEVICE, mask_pad, 0);
+                auto *mp = tile.mk.map<const uint8_t *>();
+                for (size_t i = 0; i < mask_pad && i < 32; i++)
+                    std::fprintf(stderr, " %02x", mp[i]);
+                std::fprintf(stderr, "\n");
+            }
+        } catch (const std::exception &e) {
+            std::fprintf(stderr, "[xrt trace] register read failed: %s\n",
+                         e.what());
+        }
+    }
 
     /* Faults before results, as everywhere in this file. Three
      * outcomes rather than the elementwise path's two, because a
