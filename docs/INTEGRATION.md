@@ -187,9 +187,21 @@ equally to both sides.
 rather than many: accumulate into a contiguous buffer and issue a
 single wide operation, even if that means computing values you discard.
 On a device, arithmetic on elements you do not need is usually cheaper
-than a second call. Where the pattern cannot be flattened, that is the
-honest limit of the current API, and it is a known gap rather than a
-mystery - the device has no scatter-add and no gather primitive today.
+than a second call. Where the pattern cannot be flattened, hand the
+library the index table instead: since ABI 0.14 (2026-09-15) a program
+run reads any of its streams and its scratch preload through a
+per-lane table (`cft_run_args.idx_a/b/c/scratch_in`, one uint32 an
+element, `CFT_IDX_NONE` for +0 and no read), and one elementwise call
+can do the same (`cft_elem_args.idx_*`). On the card a gathered element
+costs one HBM round trip, 310 to 340 ns at every format, and the first
+outside workload's scatter-and-fold became one run at 1.5 to 1.7 times
+the speed of the calls it replaced, with the host gathers gone as well
+(docs/ROADMAP.md, asks 1 and 4; docs/SEQUENCER.md R16). What the device
+still has no primitive for is a scatter-ADD - a lane writing another
+lane's address - which that workload expresses as a gather by a static
+table and a fold; a lane mask (`cft_run_args.lane_mask`, R17) keeps the
+lanes a step does not need out of its bytes and flags, though not out
+of its compute.
 
 **How to tell this is what you have.** Divide your wall clock by your
 call count. If the quotient is flat as you widen the problem, you are

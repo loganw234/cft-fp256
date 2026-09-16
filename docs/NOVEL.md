@@ -209,7 +209,11 @@ rounding semantics undocumented; here the same architectural move
 lands on a specified, machine-checked 754 contract. The claim stays
 calibrated the same way as before: proven in simulation and against
 two independent oracles (the golden model and, at fp32/64, the host
-CPU's own IEEE hardware), not yet on a card.
+CPU's own IEEE hardware), and on the card since first light
+(2026-09-08): every pair's conformance replay runs the composed divide
+and square root through the tile's seed opcodes (docs/VALIDATION.md),
+and the first outside workload spent half its card time in them
+(README, "Built on it").
 
 **The nearest miss, and it is worth respecting: GRAPE-MP /
 GRAPE9-MPX** (Daisaka, Nakasato, Ishikawa et al.; structured ASIC

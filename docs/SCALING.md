@@ -227,7 +227,11 @@ transfers. Device-resident buffers are the remedy, and since ABI
 `cft_reduce` and `cft_program_run_ex` bind a resident buffer's device
 copy - one per tile and role, holding that tile's window - and stage
 nothing for it (docs/HOSTAPI.md, "Device-resident buffers"; measured
-through the library on the card in docs/BENCHMARKS.md). At high tile
+through the library on the card in docs/BENCHMARKS.md). One thing tile
+count does NOT buy yet: a PROGRAM run, resident or staged, executes on
+one tile - `cftx_program_run` uses the first tile and never partitions
+(docs/ROADMAP.md's debts list, 2026-09-15) - so a four-tile image runs
+a program at one tile's rate. At high tile
 counts the resident path stops being an optimisation and becomes the
 only workable one. Measured 2026-09-08 with the staging
 in place (docs/BENCHMARKS.md): every format and both tile counts sit

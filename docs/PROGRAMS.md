@@ -437,7 +437,10 @@ one.
 
 The run goes through `cft_program_run_ex` and `cft_run_args`, ABI
 0.10's one entry point that takes everything a run can carry,
-compiled under `CFT_SEQ_FEAT_SCRATCH_IO`.
+compiled under `CFT_SEQ_FEAT_SCRATCH_IO` - and since ABI 0.14 the same
+struct carries the four index tables and the lane mask (docs/HOSTAPI.md,
+"ABI 0.14: the seam of a parcel round"), which the runner does not yet
+expose as options.
 
 ### What waited on the other halves, and how it said so
 

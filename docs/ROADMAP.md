@@ -2954,6 +2954,21 @@ rediscovering them.
   elaborated to a priority chain worth +59% of `cft_seq`'s cells after
   a full yosys pass; rewritten as a select before the image was built,
   with the before and after in docs/VALIDATION.md's P3 entry.
+- **Two host defects the card found on 2026-09-15**, neither a
+  verifier's, both paid the same night. Under a lane mask a STAGED
+  output window came back holding the previous run's output - the tile
+  strobes a masked lane off, and the device copy was never the
+  caller's, because an output is nothing the host had ever uploaded
+  (be1ac1f, db085ab: the deposit window, counts and scratch-out block
+  go to the device before a masked launch). And buffer-object
+  capacities above ~300 lanes corrupted the heap: the runtime moves
+  memory in pages behind a capacity the library sized in beats
+  (d40ad23: capacities are whole pages). Each names a gap the next
+  round starts from - no host in the suite has a device copy with a
+  previous run in it (the benches start empty, the C executor writes
+  in place), and every test ran at 64 lanes until the requester's own
+  shape did not. docs/VALIDATION.md's card-day entry has the three
+  instruments that told a host defect from a tile defect.
 
 ## The adoption story these serve
 
