@@ -44,7 +44,7 @@ product, not the implementation.
 |---|---|---|
 | [DETERMINISM.md](DETERMINISM.md) | 1,424 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 1,127 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
-| [SEQUENCER.md](SEQUENCER.md) | 1,788 | The orbit sequencer and the program model. |
+| [SEQUENCER.md](SEQUENCER.md) | 1,856 | The orbit sequencer and the program model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 760 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 188 | How values sit in memory: beats, lanes, element order. |
 
@@ -52,7 +52,7 @@ product, not the implementation.
 
 | document | lines | what it is for |
 |---|---|---|
-| [HOSTAPI.md](HOSTAPI.md) | 2,509 | The host API, function by function. The largest reference here and the one most often wanted. |
+| [HOSTAPI.md](HOSTAPI.md) | 2,545 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,667 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
 | [REMOTE.md](REMOTE.md) | 1,387 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 472 | Programs as files: the assembler, the program library, the runner. |

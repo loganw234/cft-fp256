@@ -560,7 +560,14 @@ void cft_sw_seq_caps(cft_seq_caps *out)
                          * carries every feature the contract defines. A
                          * tile publishes it from CAPS2[9] and a tile
                          * without it is refused BY NAME (device.c). */
-                        CFT_SEQ_FEAT_INDEXED;
+                        CFT_SEQ_FEAT_INDEXED |
+                        /* R17, ABI 0.14, on exactly those terms: this
+                         * executor honours a lane mask, so it publishes
+                         * the bit, and a tile that does not carry
+                         * CAPS2[10] is refused by name rather than
+                         * handed a run it would compute over every
+                         * lane. */
+                        CFT_SEQ_FEAT_LANE_MASK;
 }
 
 /* A program image against the capacities the device it was loaded for
@@ -1091,6 +1098,15 @@ CFT_API cft_status cft_program_get_info(cft_program *prog,
 typedef struct {
     cft_bn regs[BLOCK_LANES][SEQ_NREG];
     int    active[BLOCK_LANES];
+    /* The lanes THE CALLER HAS in this block (R17): every lane without
+     * a mask, the mask's bits with one. It is the floor under `active`
+     * - what ACTALL restores, and what the three output writes test -
+     * and it is a second array rather than a re-read of the mask
+     * because ACTALL is inside the instruction loop, where the block's
+     * global offset is not in scope. The hardware makes the same
+     * choice for the same reason: its `blk_act` is the block's lanes
+     * ANDed with the mask, computed once and read by both. */
+    int    keep[BLOCK_LANES];
     uint32_t counts[BLOCK_LANES];
     /* SEQ_SCRATCH_D slots a lane, or NULL for a program that touches
      * no scratch and declares no block. Out of line rather than inside
@@ -1250,8 +1266,11 @@ static cft_status seq_run_block(const cft_program *p, const cft_bn *konst,
             break;
 
         case SEQ_ACTALL:
+            /* Every lane the caller has, which under R17 is not every
+             * lane of the block. `keep` is all ones without a mask, so
+             * this is `= 1` for every program written before it. */
             for (i = 0; i < nlane; i++)
-                B->active[i] = 1;
+                B->active[i] = B->keep[i];
             pc++;
             break;
 
@@ -1590,6 +1609,11 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
      * is seq_load_in below. */
     const uint32_t *ia = A->idx_a, *ib = A->idx_b, *ic = A->idx_c;
     const uint32_t *isi = A->idx_scratch_in;
+    /* R17's lane mask, or NULL for every lane. Bit i of the buffer is
+     * lane i of the RUN - global, so a block of this loop reads bits
+     * off + i and not bits 0..k, the same rule the index tables have
+     * one field along. */
+    const uint8_t *msk = A->lane_mask;
     uint8_t *pso = (uint8_t *)A->scratch_out;
     uint8_t *pd = (uint8_t *)deposits;
     size_t esz, off;
@@ -1703,9 +1727,24 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
     /* Every slot is written, including ones no lane deposits into: an
      * untouched slot reads as +0 by definition, and a run that left
      * the caller's previous contents there would not be reproducible.
-     */
-    if (pd && prog->max_deposits)
-        memset(pd, 0, n * prog->max_deposits * esz);
+     *
+     * Except a MASKED lane's slots (R17), which are the one thing in
+     * this buffer that is NOT this run's to write: the caller keeps
+     * its bytes. So the zero-fill is per lane when there is a mask and
+     * one memset when there is not - the same bytes in the same order
+     * either way, and no run written before the mask existed pays for
+     * the loop. */
+    if (pd && prog->max_deposits) {
+        if (!msk) {
+            memset(pd, 0, n * prog->max_deposits * esz);
+        } else {
+            size_t i;
+            for (i = 0; i < n; i++)
+                if (msk[i >> 3] & (uint8_t)(1u << (i & 7u)))
+                    memset(pd + i * prog->max_deposits * esz, 0,
+                           prog->max_deposits * esz);
+        }
+    }
 
     B = (seq_block *)calloc(1, sizeof *B);
     if (!B) {
@@ -1746,7 +1785,14 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
                 seq_load_in(&B->regs[i][1], pb, ib, off + i, esz);
             if (pc_)
                 seq_load_in(&B->regs[i][2], pc_, ic, off + i, esz);
-            B->active[i] = 1;
+            /* R17: a lane the mask clears starts inactive and stays
+             * that way - ACTALL reactivates the lanes the CALLER has
+             * and this is not one, which seq_run_block reads out of
+             * the same array. The bit is the GLOBAL lane's. */
+            B->keep[i] = (!msk ||
+                (msk[(off + i) >> 3] & (uint8_t)(1u << ((off + i) & 7u))))
+                    ? 1 : 0;
+            B->active[i] = B->keep[i];
             B->counts[i] = 0;
             /* "Slots start at +0 for every lane at the start of a run,
              * except where R5 preloads them" - so every slot is zeroed
@@ -1775,9 +1821,13 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
             free(loaded);
             return st;
         }
+        /* ...and a masked lane's count is not written either (R17): the
+         * caller's array keeps what it held, which is what the tile
+         * does by leaving that lane's four bytes unstrobed. */
         if (counts)
             for (i = 0; i < k; i++)
-                counts[off + i] = B->counts[i];
+                if (B->keep[i])
+                    counts[off + i] = B->counts[i];
         /* And the block's scratch-out, after its last deposit. Every
          * element is written, including a slot no instruction ever
          * stored to: it reads as +0, which is the same normative rule
@@ -1785,11 +1835,18 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
         if (pso && prog->n_scratch_out) {
             uint32_t s;
             for (i = 0; i < k; i++)
-                for (s = 0; s < prog->n_scratch_out; s++)
-                    cft_bn_store(&B->scratch[i * SEQ_SCRATCH_D + s],
-                                 pso + ((off + i) * prog->n_scratch_out + s)
-                                       * esz,
-                                 (int)esz);
+                /* Not masked by the ACTIVE bit - a lane that converged
+                 * early still has state worth carrying - and masked by
+                 * the CALLER'S bit, because a lane the caller did not
+                 * give this run has no state of this run's at all.
+                 * R17's one place where the two questions differ. */
+                if (B->keep[i]) {
+                    for (s = 0; s < prog->n_scratch_out; s++)
+                        cft_bn_store(&B->scratch[i * SEQ_SCRATCH_D + s],
+                                     pso + ((off + i) * prog->n_scratch_out
+                                            + s) * esz,
+                                     (int)esz);
+                }
         }
     }
 
@@ -1945,13 +2002,10 @@ static cft_status seq_check_round2(const cft_program *p,
             }
         }
     }
-    if (A->lane_mask) {
-        cft_set_error("%s: the lane mask is declared at ABI 0.14 and not "
-                      "yet built on any backend (docs/ROUND2.md, parcel "
-                      "P3); the run is refused rather than made over every "
-                      "lane", who);
-        return CFT_ERR_UNSUPPORTED;
-    }
+    /* R17 needs no check of its own beyond the two shapes above. A
+     * mask BIT cannot be out of range the way an index can - it names
+     * a lane of this run and nothing else - so the byte count is the
+     * whole of it, and the executor below reads the bits. */
     return CFT_OK;
 }
 

@@ -3883,6 +3883,203 @@ out:
     free(c_sw); free(c_hw); free(mask); free(ones);
 }
 
+/* The seam of round 2's wave 2 on the host side (docs/ROUND2.md, "What
+ * the lead keeps"): a program run that is BOTH indexed (R16: stream a
+ * read through a table into a source shorter than n, with sentinels)
+ * and masked (R17: every third lane). P2 built the client-side gather
+ * and P3 the compaction, each measured alone; through remote_check's
+ * device-test stage this leg is where the two meet on a remote handle,
+ * and on a card it is where the gather states and the mask fetch share
+ * one run. The device must match the software backend bit for bit,
+ * the masked lanes' slots must keep the pattern on both, and the
+ * all-ones mask over the same table must equal the unmasked gathered
+ * run. Gated on both feature bits; skipped by name otherwise. */
+static void check_indexed_masked(cft_device *sw, cft_device *hw,
+                                 cft_format fmt, size_t n)
+{
+    const size_t esz = cft_format_size(fmt);
+    const size_t src_n = (n / 3) + 1;               /* deliberately short */
+    uint8_t img[256];
+    uint64_t ins[3];
+    size_t bytes, i;
+    cft_caps hc;
+    uint8_t *src = (uint8_t *)malloc(src_n * esz);
+    uint8_t *b = (uint8_t *)malloc(n * esz);
+    uint8_t *d_sw = (uint8_t *)malloc(n * esz);
+    uint8_t *d_hw = (uint8_t *)malloc(n * esz);
+    uint8_t *d_on = (uint8_t *)malloc(n * esz);
+    uint8_t *d_no = (uint8_t *)malloc(n * esz);
+    uint32_t *c_sw = (uint32_t *)malloc(n * 4);
+    uint32_t *c_hw = (uint32_t *)malloc(n * 4);
+    uint32_t *tab = (uint32_t *)malloc(n * 4);
+    uint8_t *mask = (uint8_t *)malloc((n + 7) / 8);
+    uint8_t *ones = (uint8_t *)malloc((n + 7) / 8);
+    cft_program *ps = NULL, *ph = NULL;
+    cft_run_args A;
+    uint32_t fl_sw = 0, fl_hw = 0, bus = 0;
+    cft_status st;
+    size_t masked_lanes = 0, sentinels = 0;
+
+    memset(&hc, 0, sizeof hc);
+    hc.struct_size = sizeof hc;
+    if (cft_get_caps(hw, &hc) != CFT_OK)
+        memset(&hc, 0, sizeof hc);
+    if (!(hc.seq_features & CFT_SEQ_FEAT_LANE_MASK) ||
+        !(hc.seq_features & CFT_SEQ_FEAT_INDEXED)) {
+        printf("  seq indexed and masked: this device does not publish "
+               "both CFT_SEQ_FEAT_INDEXED and CFT_SEQ_FEAT_LANE_MASK, "
+               "NOT COMPARED\n");
+        goto out;
+    }
+    if (!src || !b || !d_sw || !d_hw || !d_on || !d_no || !c_sw || !c_hw ||
+        !tab || !mask || !ones || n < 4) {
+        printf("  FAIL seq indexed and masked: out of memory\n");
+        failures++;
+        goto out;
+    }
+
+    rs = 0x1D17 + (uint32_t)fmt;
+    fill(src, src_n, esz);
+    fill(b, n, esz);
+    memset(mask, 0, (n + 7) / 8);
+    memset(ones, 0xFF, (n + 7) / 8);
+    for (i = 0; i < n; i++) {
+        /* every third lane masked; every fifth entry a sentinel; the
+         * rest a permutation-ish walk of the short source - all derived
+         * here and never a typed list */
+        if (i % 3 == 0)
+            masked_lanes++;
+        else
+            mask[i >> 3] |= (uint8_t)(1u << (i & 7u));
+        if (i % 5 == 0) {
+            tab[i] = CFT_IDX_NONE;
+            sentinels++;
+        } else {
+            tab[i] = (uint32_t)((i * 7 + 1) % src_n);
+        }
+    }
+
+    /* r3 = r0 + r1: ADD reads ra and rc, so the gathered stream a and
+     * the dense stream b both reach the deposit; rb is r3 (no stream
+     * loaded for a field the opcode does not read). */
+    ins[0] = seq_alu(CFT_ADD, 3, 0, 3, 1, CFT_RNE, 0, 0);
+    ins[1] = seq_ctrl(3, 3, 0);                          /* DEPOSIT r3 */
+    ins[2] = seq_ctrl(0, 0, 0);                          /* HALT */
+    bytes = seq_image(img, fmt, ins, 3, NULL, 0, 1);
+
+    st = cft_program_load(sw, img, bytes, &ps);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq indexed and masked: the software backend "
+               "refused the image (%s)\n", cft_strerror(st));
+        failures++;
+        goto out;
+    }
+    st = cft_program_load(hw, img, bytes, &ph);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq indexed and masked: the device refused the "
+               "image (%s)\n", cft_strerror(st));
+        failures++;
+        goto out;
+    }
+
+#define IXMK_RUN(prog_, dst_, cnt_, fl_, msk_)                          \
+    do {                                                                \
+        memset(&A, 0, sizeof A);                                        \
+        A.struct_size = sizeof A;                                       \
+        A.a = src; A.b = b; A.c = b;                                    \
+        A.n = n;                                                        \
+        A.idx_a = tab; A.idx_a_src = src_n;                             \
+        A.deposits = (dst_);                                            \
+        A.counts = (cnt_);                                              \
+        A.flags_out = (fl_);                                            \
+        A.bus_out = &bus;                                               \
+        A.lane_mask = (msk_);                                           \
+        A.lane_mask_bytes = (msk_) ? (n + 7) / 8 : 0;                   \
+        memset((dst_), 0x5a, n * esz);                                  \
+        memset((cnt_), 0x5a, n * 4);                                    \
+        st = cft_program_run_ex((prog_), &A);                           \
+    } while (0)
+
+    /* 1. indexed AND masked, software against the device */
+    IXMK_RUN(ps, d_sw, c_sw, &fl_sw, mask);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq indexed and masked: the software backend "
+               "refused the run (%s: %s)\n", cft_strerror(st),
+               cft_last_error());
+        failures++;
+        goto out;
+    }
+    IXMK_RUN(ph, d_hw, c_hw, &fl_hw, mask);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq indexed and masked: the device refused the "
+               "run (%s: %s)\n", cft_strerror(st), cft_last_error());
+        failures++;
+        goto out;
+    }
+    checks++;
+    if (memcmp(d_sw, d_hw, n * esz) != 0 || memcmp(c_sw, c_hw, n * 4) != 0 ||
+        fl_sw != fl_hw) {
+        printf("  FAIL seq indexed and masked: the device and the "
+               "software backend differ (flags %#x against %#x)\n",
+               (unsigned)fl_hw, (unsigned)fl_sw);
+        failures++;
+        goto out;
+    }
+    /* 2. a masked lane's slots hold the pattern on BOTH backends, and
+     *    a lane the table sends to a sentinel still deposits (+0 plus
+     *    b), so the two mechanisms are told apart lane by lane */
+    checks++;
+    for (i = 0; i < n; i++) {
+        size_t k;
+        int untouched = 1;
+        for (k = 0; k < esz; k++)
+            if (d_hw[i * esz + k] != 0x5a)
+                untouched = 0;
+        if ((i % 3 == 0) != untouched || (c_hw[i] == 0x5a5a5a5au) != (i % 3 == 0)) {
+            printf("  FAIL seq indexed and masked: lane %lu is %s and its "
+                   "slot was %s\n", (unsigned long)i,
+                   (i % 3 == 0) ? "masked" : "active",
+                   untouched ? "left alone" : "written");
+            failures++;
+            goto out;
+        }
+    }
+    /* 3. all ones over the same table equals the unmasked gathered run,
+     *    both on the device */
+    IXMK_RUN(ph, d_on, c_hw, &fl_hw, ones);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq indexed and masked: the all-ones run was "
+               "refused (%s)\n", cft_strerror(st));
+        failures++;
+        goto out;
+    }
+    IXMK_RUN(ph, d_no, c_sw, &fl_sw, (const uint8_t *)NULL);
+    checks++;
+    if (st != CFT_OK || memcmp(d_on, d_no, n * esz) != 0 ||
+        memcmp(c_hw, c_sw, n * 4) != 0 || fl_hw != fl_sw) {
+        printf("  FAIL seq indexed and masked: an all-ones mask over a "
+               "table is not the unmasked gathered run\n");
+        failures++;
+        goto out;
+    }
+#undef IXMK_RUN
+    printf("  seq indexed and masked: %lu lanes, %lu masked, a table of "
+           "%lu sentinels into a %lu-element source, device == software, "
+           "masked lanes untouched, all-ones == unmasked\n",
+           (unsigned long)n, (unsigned long)masked_lanes,
+           (unsigned long)sentinels, (unsigned long)src_n);
+out:
+    cft_program_free(ps);
+    cft_program_free(ph);
+    free(src); free(b); free(d_sw); free(d_hw); free(d_on); free(d_no);
+    free(c_sw); free(c_hw); free(tab); free(mask); free(ones);
+}
+
 static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
                         size_t n, uint32_t seed)
 {
@@ -4037,6 +4234,7 @@ static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
      *     publish it. */
     check_indexed(sw, hw, fmt, n);
     check_masked(sw, hw, fmt, n);
+    check_indexed_masked(sw, hw, fmt, n);
 
     /* 8. the argument refusals, which are the library's own and reach
      *    no device at all - so they are scored once, on the software

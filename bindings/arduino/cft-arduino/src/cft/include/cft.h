@@ -688,17 +688,23 @@ typedef struct cft_caps {
  * on the reserved half of MODE, on every tile built since 2026-09-12)
  * rather than reading a table register it has not got, and a tile with
  * it honours them - MODE[22:19] under CAPS2[9] since P1 (2026-09-15),
- * MODE[23] under CAPS2[10] once P3 lands. The SOFTWARE backend
+ * MODE[23] under CAPS2[10] since P3 (the same day). The SOFTWARE backend
  * computes the definition and publishes INDEXED in seq_features so a
  * caller gating on the bit is answered the same way everywhere (LANE_MASK
- * likewise once built); a REMOTE handle publishes what its server's
+ * likewise); a REMOTE handle publishes what its server's
  * HELLO says, and its program-run route gathers the tables on the client
  * and sends a dense run (P2, 2026-09-15), so the word never says yes to
  * a call that says no - a handle to a server WITHOUT CAPS2[9] says no to
  * a call the client-side gather would make succeed, the direction this
  * library accepts. The elementwise tables of cft_elem_args are real on
- * every backend since P2; the lane mask (P3) is refused BY NAME on every
- * backend until its parcel lands. */
+ * every backend since P2, and the lane mask since P3: on a tile the
+ * caller's bitmap is REPACKED per launch into the tile's own buffer (bit
+ * 0 of what a tile reads is that tile's lane 0), never bound; a remote
+ * handle COMPACTS a masked run to its kept lanes and scatters the
+ * outputs back, because FLAGS is a whole-run word and a masked lane
+ * computed on the server would otherwise report. The mask saves bytes,
+ * flags and the early exit, not compute: the sequencer issues per beat
+ * (P3's measurement, four cycles and one read a block). */
 #define CFT_SEQ_FEAT_INDEXED   0x2000u     /* CAPS2[9]  */
 #define CFT_SEQ_FEAT_LANE_MASK 0x4000u     /* CAPS2[10] */
 /* The index that reads as +0 (the format's positive zero) in an index

@@ -1626,13 +1626,20 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
         cft_flags_emit(prog->dev, 0, flags);
         return CFT_OK;
     }
-    if (!A->a || (!deposits && prog->max_deposits))
+    if (!A->a || (!deposits && prog->max_deposits)) {
+        cft_set_error("cft_program_run_ex: %s", !A->a
+                      ? "stream a is NULL"
+                      : "deposits is NULL for a program that deposits");
         return CFT_ERR_INVALID_ARGUMENT;
+    }
 
     esz = (size_t)prog->f->width / 8;
     if (prog->max_deposits &&
-        n > ((size_t)-1) / prog->max_deposits / esz)
+        n > ((size_t)-1) / prog->max_deposits / esz) {
+        cft_set_error("cft_program_run_ex: n = %lu elements is more than "
+                      "this library can size", (unsigned long)n);
         return CFT_ERR_INVALID_ARGUMENT;
+    }
 
 #if defined(CFT_ENABLE_XRT) || !defined(CFT_NO_REMOTE)
     /* The device runs the program if the device is where it was
@@ -2036,6 +2043,40 @@ CFT_API cft_status cft_program_run_ex(cft_program *prog,
     A = *args;
     if (A.bus_out)
         *A.bus_out = 0;
+    /* The arguments that bound every byte this run will READ are checked
+     * before any rule that reads a caller's buffer: seq_check_scratch
+     * sizes the block from n, and seq_check_round2 walks the index tables
+     * for n entries. A rule that dereferences a caller's buffer belongs
+     * behind every rule that does not (V2's finding in P2's cft_run_ex,
+     * and V3's reading of its twin here, 2026-09-15). The same three
+     * tests stand in seq_program_run as the last line, where they were
+     * alone until now and said nothing; n == 0 is the no-op run and is
+     * not refused for a NULL stream, as it never was. */
+    if (A.n != 0) {
+        const size_t esz = (size_t)prog->f->width / 8;
+        if (!A.a) {
+            cft_set_error("cft_program_run_ex: stream a is NULL - a program "
+                          "run requires its first stream, which initialises "
+                          "r0 in every lane");
+            return CFT_ERR_INVALID_ARGUMENT;
+        }
+        if (!A.deposits && prog->max_deposits) {
+            cft_set_error("cft_program_run_ex: deposits is NULL for a "
+                          "program with max_deposits = %u",
+                          (unsigned)prog->max_deposits);
+            return CFT_ERR_INVALID_ARGUMENT;
+        }
+        if (prog->max_deposits &&
+            A.n > ((size_t)-1) / prog->max_deposits / esz) {
+            cft_set_error("cft_program_run_ex: n = %lu elements is more "
+                          "than this library can size (max_deposits %u, "
+                          "%lu bytes an element) - refused before any "
+                          "table or mask is read",
+                          (unsigned long)A.n, (unsigned)prog->max_deposits,
+                          (unsigned long)esz);
+            return CFT_ERR_INVALID_ARGUMENT;
+        }
+    }
     st = seq_check_bank(prog, A.bank, A.bank_bytes, "cft_program_run_ex");
     if (st != CFT_OK)
         return st;

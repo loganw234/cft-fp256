@@ -3494,6 +3494,34 @@ int main(void)
             st = cft_program_run_ex(prog, &R);
             CHECK(st == CFT_OK, "a dense run beside the 0.14 fields: %s (%s)",
                   cft_strerror(st), cft_last_error());
+            /* The arguments that bound every byte the run reads are
+             * checked BEFORE any table or mask is read: an n this
+             * library cannot size, beside a table pointer and then a
+             * mask pointer that would fault if dereferenced. V2 found
+             * this shape in cft_run_ex and V3 read its twin here
+             * (2026-09-15); with the guard behind the table walk, the
+             * first case is a read of address 16 for n entries. */
+            {
+                cft_run_args H;
+                memcpy(&H, &R, sizeof H);
+                H.n = ((size_t)-1) / 8;
+                H.idx_a = (const uint32_t *)16;
+                H.idx_a_src = 0xFFFFFFFEu;
+                st = cft_program_run_ex(prog, &H);
+                CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+                      "an n this library cannot size is refused before its "
+                      "table is read: %s (%s)",
+                      cft_strerror(st), cft_last_error());
+                CHECK(strstr(cft_last_error(), "cannot size") != NULL,
+                      "...and the refusal says why: '%s'", cft_last_error());
+                H.idx_a = NULL; H.idx_a_src = 0;
+                H.lane_mask = (const uint8_t *)16;
+                H.lane_mask_bytes = (H.n + 7) / 8;
+                st = cft_program_run_ex(prog, &H);
+                CHECK(st == CFT_ERR_INVALID_ARGUMENT,
+                      "...and before its mask is read: %s (%s)",
+                      cft_strerror(st), cft_last_error());
+            }
             /* P1 has landed, so a well-formed table RUNS, and the one
              * that reads as +0 runs too. What is refused here is an
              * index at or past the source, by name and by value - the

@@ -24,7 +24,7 @@ from cocotbext.axi import (  # noqa: E402
 from cft_golden import FP32, FP64, FP128, seq, softfloat as sf  # noqa: E402
 from cft_golden.reduce import OP_SUM  # noqa: E402
 from test_krnl_reduce import run_reduce  # noqa: E402
-from test_krnl_seq import MAGIC, gen_stream, run_prog  # noqa: E402
+from test_krnl_seq import D_BASE, MAGIC, gen_stream, run_prog  # noqa: E402
 
 
 @cocotb.test()
@@ -154,3 +154,105 @@ async def indexed_program_between_reductions(dut):
                      seg=16)
     dut._log.info("indexed programs between reductions: every result the "
                   "model's")
+
+
+@cocotb.test()
+async def indexed_and_masked_program_between_reductions(dut):
+    """The seam of round 2's wave 2 (docs/ROUND2.md, "What the lead
+    keeps": after P3, an indexed AND masked run against the model): a
+    gathered fold whose lanes are also masked, between reductions on
+    the same tile. R16 and R17 were built by two parcels that never ran
+    together; what could go wrong lives in their meeting - a masked
+    lane whose table entries are still fetched and wrongly deposited, a
+    gathered block whose opening active mask lost the caller's bits, a
+    masked lane's flag reaching the reduction after it - and in the
+    shared array's hand-off, which is where 2026-09-14's hang lived.
+    Every result is the model's; the masked lanes' slots stay poison;
+    the all-ones mask is bit-identical to the unmasked gathered run."""
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n, reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                       size=2 ** 21)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"),
+               dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+               size=2 ** 21, mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"),
+               dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+               size=2 ** 21, mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"),
+                dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                size=2 ** 21, mem=ram_a.mem)
+    ram = ram_a
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+    assert await axil.read_dword(MAGIC) == 0x43465430
+    rng = random.Random(0x5EA2)
+
+    def gathered_run(fmt, lanes, slots, pool_len, holes):
+        pool = gen_stream(fmt, pool_len, rng, tame=True)
+        table = [rng.randrange(pool_len) for _ in range(lanes * slots)]
+        for k in holes:
+            table[k] = seq.IDX_NONE
+        va = gen_stream(fmt, lanes, rng, tame=True)
+        vb = gen_stream(fmt, lanes, rng, tame=True)
+        vc = gen_stream(fmt, lanes, rng, tame=True)
+        return pool, table, va, vb, vc
+
+    # 1. a segmented reduction on the engine
+    await run_reduce(dut, axil, ram, FP32, 1000, 0, seed=7101, op=OP_SUM,
+                     seg=8)
+    # 2. a gathered AND masked fold across a lane block at fp32 (128
+    #    lanes a block): every third lane masked, one whole block's
+    #    worth of the table pointing at sentinels, the mask's bits
+    #    straddling the block boundary
+    pg32 = prog_fold_scratch(FP32, 3)
+    pool, table, va, vb, vc = gathered_run(FP32, 150, 3, 31,
+                                           holes=range(5, 450, 11))
+    keep = [i % 3 != 1 for i in range(150)]
+    await run_prog(dut, axil, ram, pg32, va, vb, vc,
+                   "fp32 gathered and masked fold across a lane block, "
+                   "after a segmented reduction", scratch_in=pool,
+                   idx=(None, None, None, table), n=150, mask=keep)
+    # 3. the same run with every lane kept must be the unmasked
+    #    gathered run, bit for bit, on the tile
+    await run_prog(dut, axil, ram, pg32, va, vb, vc,
+                   "fp32 the same gathered fold, all lanes kept",
+                   scratch_in=pool, idx=(None, None, None, table), n=150,
+                   mask=[True] * 150)
+    ones_dep = ram.read(D_BASE, 150 * pg32.max_deposits * 4)
+    await run_prog(dut, axil, ram, pg32, va, vb, vc,
+                   "fp32 the same gathered fold, no mask",
+                   scratch_in=pool, idx=(None, None, None, table), n=150)
+    assert ram.read(D_BASE, 150 * pg32.max_deposits * 4) == ones_dep, (
+        "an all-ones mask over a gathered run must be bit-identical to "
+        "the gathered run with no mask, and both came off the tile")
+    # 4. the engine again, whole-array sums at two formats
+    await run_reduce(dut, axil, ram, FP128, 40, 0, seed=7102, op=OP_SUM)
+    await run_reduce(dut, axil, ram, FP64, 100, 0, seed=7103, op=OP_SUM,
+                     seg=20)
+    # 5. a gathered and masked fold at fp64, one partial block, the
+    #    masked lanes exactly the ones whose table rows are all sentinels
+    #    - so a lane that would deposit +0 is instead left alone
+    pg = prog_fold_scratch(FP64, 6)
+    pool, table, va, vb, vc = gathered_run(FP64, 40, 6, 50,
+                                           holes=range(3, 240, 7))
+    keep64 = [True] * 40
+    for lane in (4, 11, 30):
+        for slot in range(6):
+            table[lane * 6 + slot] = seq.IDX_NONE
+        keep64[lane] = False
+    keep64[17] = False
+    await run_prog(dut, axil, ram, pg, va, vb, vc,
+                   "fp64 gathered and masked fold after two reductions",
+                   scratch_in=pool, idx=(None, None, None, table), n=40,
+                   mask=keep64)
+    # 6. and the engine once more, so a phantom or a masked lane's flag
+    #    left by the program would meet a reduction rather than silence
+    await run_reduce(dut, axil, ram, FP64, 64, 0, seed=7104, op=OP_SUM,
+                     seg=16)
+    dut._log.info("indexed and masked programs between reductions: every "
+                  "result the model's, every masked slot untouched")
