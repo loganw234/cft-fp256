@@ -12522,3 +12522,40 @@ under Verilator on the desktop, redprog 3/3, krnlseq 2/2, seq_core
 35/35, seqcycles 4/4 with the dense table byte-identical to the one
 above and the masked rows as P3 measured. The box's full suite at the
 pushed tip follows in the next entry, as does its Icarus tail.
+
+## 2026-09-15 - round 2's main, green on the box at its tip; the image build launched
+
+Main at 5b7aa19 carries every parcel of round 2 - P0 (the seam), P1
+(the indexed input block, both parts), P4 (the beat-wide
+accumulator), P2 (the composed indexed elementwise run), P3 (the lane
+mask) and P5 (the bindings' elementwise entry point) - each merged on
+its verifier's word where it had one and on the box's suite at its
+staging commit, with the two wave-2 seam tests and the program-run
+path's bounding checks on top. The box's suite at that tip
+(`~/cft-fp256-d`, 17:49-18:47 under `nice`): `make sim SIM=verilator`
+25 benches, no failures recorded; the census `seq_coremc` 35/35,
+`krnlseqmc` 2/2, `seqbanksmc` 1/1, `reducemc` 11/11, `krnlmc` 2/2;
+`yosys-lint` clean; thirty `TESTS=` lines in the raw log, none with a
+failure, no simulator error line. The Icarus tail runs on as this is
+written. The host side at the same tip, with every test executable
+built by name: api-test all contract checks passed (the poisoned-table
+and poisoned-mask case among them), `test_seq.py` 77, `seq_check.py`
+with five corpora agreeing on every program, `device-test sw -n 32`
+9,622 checks and `sw -b -n 32` 4,386 with no failure, `remote_check.py`
+every check passed with the indexed-and-masked seam leg among its
+device-test stage's cases, the docs index true, the generators up to
+date, the thirty vendored Arduino files identical; the node and wasm
+gates green at P5's merge (verify.mjs, 134 + 37 + 67 node checks, the
+1,901,830-case conformance replay, the demos page).
+
+**The image.** `hw/build-pair.sh --tag round2 --commit 5b7aa19...
+--require S_MSK_GO --require-in rtl/cft_krnl.sv:EN_WIDE`, launched on
+amd-arc-box at 18:49 from `~/cft-fp256` detached at the tip
+after its `--dry-run` had passed every assertion: 135 MHz, retiming
+and phys_opt on, default directives, single (`build-round2-hw`) before
+quad (`build-round2-quad`), staged to `~/cardday-round2` only after
+`hw/verify-image.sh`, logs in `~/r8-logs-round2`. The build's own
+entry - timing, utilisation with the mask's logic in it, the verify
+line - follows when it lands; the card day after it is Logan's call,
+with docs/CARDDAY.md's round-2 list as its agenda and a card-free proof
+first.
