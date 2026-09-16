@@ -12780,3 +12780,73 @@ the honest answer is a single at 135 MHz and a quad that wants a
 slower clock (130 MHz would give 0.285 ns) or a register in the
 engine's bypass path - a round-3 item, since the sequencer is not the
 path. The outcome is the next entry.
+
+## 2026-09-16 - round 2's pair complete: the quad closed at 135 MHz on the directive rebuild, and four tiles on the card
+
+**The build.** `~/box_quad_b.sh`, launched 03:01 from the same commit
+5b7aa19, the same 135 MHz, retiming and phys_opt, plus
+`PLACE_DIRECTIVE=ExtraTimingOpt ROUTE_DIRECTIVE=AggressiveExplore`:
+rc 0 in 468 minutes. Kernel-side WNS **+0.040 ns**, routed +0.031,
+zero failing endpoints of a million, hold met at +0.006 - against the
+default-directive quad's -0.363 ns with 1,824 failing endpoints
+(previous entry). The router's intermediate summaries sat at -0.317 ns
+through its rip-up passes and the post-route physical optimisation
+recovered the last quarter of a nanosecond, which is the reading to
+keep: the intermediate numbers are not the verdict. verify-image 8 of
+8; staged at 10:47 as `~/cardday-round2/cft_hw_quad.xclbin`, re-hashed
+byte-identical (`226d6c76...`), SHA256SUMS over the pair, and a README
+that says which half used which directives. Logan's standing word from
+07:50 - a quad that misses 135 MHz rebuilds at 130 - was armed as a
+wrapper that would have launched the 130 MHz build the moment this one
+failed to stage; it read the staged file and stood down.
+
+**The pair, as built** (routed utilisation of the whole design, from
+`full_util_routed.rpt`; the U50 has 870,720 LUTs, 1,743,360 registers,
+5,952 DSPs, 1,344 block RAM tiles and 640 URAMs):
+
+    image    tiles   clock    kernel WNS   routed WNS   LUTs            registers       DSPs          BRAM tiles     URAM
+    single   1       135 MHz  +0.266 ns    +0.032 ns    267,188 (31%)   234,266 (13%)   311 (5%)      262 (19%)      12 (2%)
+    quad     4       135 MHz  +0.040 ns    +0.031 ns    696,542 (80%)   457,266 (26%)   1,232 (21%)   505.5 (38%)    36 (6%)
+
+Four tiles at 80% of the part's LUTs is why the quad is the half that
+squeaks: the earlier quads in the lineage sat near 69%, and round 2's
+mask logic (+690 cells a tile after P3's rewrite) and the beat-wide
+accumulator are in every tile.
+
+**Four tiles on the card**, `~/box_round2_quad.sh` from ~/cft-fp256-d
+at ffefb5c, tests rebuilt by name at 10:48, the legs starting 74
+seconds after the image staged:
+
+    device-test -q -n 8 / -n 64 / -n 336 / -n 4097   2,248 checks, 0 failed, each ("4 tiles, contract 0x00000a00")
+    device-test -b -q -n 64                          729 checks, 0 failed
+    gathertime 128 bodies fp64, every third lane masked
+        one run 15.429 ms = 316 ns a gathered element; masked x1.005; masked slots untouched
+        the 127 dense calls it replaces: 54.329 ms -> x3.52 (26.729 ms on the single: x1.71)
+    segtime fp64, E = 1,000 segments of L = 192
+        sum    one call 1,453 us   (2,351 us on the single)   1,000 calls 431,064 us   (91,108 on the single)
+        maxall one call 1,436 us   (2,412 us on the single)   1,000 calls  80,647 us
+    conformance replay on the quad                   168 sets, 1,224,915 cases, all matching
+
+Three readings the four-tile numbers carry, none of them new and all
+of them now measured on this image:
+
+1. **A program run is one tile's.** 316 ns a gathered element on four
+   tiles is 320 on one: `cftx_program_run` uses the first tile and
+   never partitions (docs/ROADMAP.md's debts list). The x3.52 is not
+   the run getting faster; it is the dense calls getting slower.
+2. **Tile count is a cost for many small calls.** The 127 dense calls
+   cost 54 ms on four tiles against 27 on one, and a thousand
+   segmented sums issued one at a time cost 431 ms against 91,
+   because the library partitions every call across every tile
+   ([[measure-partitioning-before-buying-more]] in the lead's memory;
+   cft-rebound's own finding on 2026-09-14). One call over whole
+   segments is where four tiles pay: 1,453 us against 2,351, x1.62,
+   the segments split across tiles with the tree order held.
+3. **The mask costs less on four tiles than on one** (x1.005 against
+   x1.013) only because the run is the same one tile's work under a
+   noisier clock; the beat read a block is the same beat.
+
+The staged pair is the round's deliverable on the card: both images
+from one commit, both at 135 MHz, both green on every leg, with the
+two host defects of the single's card day fixed in the library both
+halves now run under.
