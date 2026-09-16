@@ -12613,3 +12613,130 @@ bit, and answers the round's three new features with a refusal that
 names the missing bit. The second half - the round's own image - is
 the next entry; `~/box_round2_cardday.sh` waits for it to be staged
 and runs the day in docs/CARDDAY.md's order.
+
+## 2026-09-15 - round 2's card day, second half: the round's image on the U50, two host defects the card found, and the numbers
+
+**The image.** `hw/build-pair.sh --tag round2 --commit 5b7aa19`, on
+the box at 135 MHz from the round's final main: the single tile staged
+at 20:56 (`~/cardday-round2/cft_hw_single.xclbin`, kernel WNS +0.266
+ns, image check 8 of 8, manifest beside it); the quad was still in the
+placer at 22:00 and is the next entry. VERSION 0xA00, CAPS2[9] and
+CAPS2[10] published, EN_WIDE in the kernel.
+
+**Its first gate failed, and the RTL was not the reason.** device-test
+-q -n 8 at 3a5e091: 12 failures, every one a lane-mask leg - every
+masked lane written, at every format, FLAGS and STATUS clean - while
+P1's gather, P2's composition, P4's reductions and a 1,224,915-case
+replay were right on the same image. In order, what the card said:
+
+1. `CFT_XRT_TRACE` (1a5d643): the tile received MODE 0x00c08000, the
+   mask pointer and the bytes (aa aa aa aa aa aa 00 ...) - the host
+   side right register by register.
+2. `CFT_XRT_MASK_ADDR_OVERRIDE` (3a5e091): argument 16 replaced by an
+   address no bank has; STATUS 0x1 (a read fault) on the masked run,
+   0 on the unmasked - the tile READS the mask when MODE[23] is set.
+3. `tb/probe_mask_latency.py`: krnl_lane_mask and krnl_sequencer at
+   200 cycles of read and write latency, PASSED 2/2 (simulated time
+   32,752 ns against 10,344 at zero latency, so the latency was in).
+4. The fingerprint (gathertime.py, one line): every masked slot held
+   EXACTLY the value its lane would have deposited unmasked - 24 of 24
+   at fp32, 16 of 16 at fp64. Not the pattern, not garbage.
+5. `host/tools/maskflags.py` (11bb6d7): the masked lanes' inputs
+   poisoned (+inf + -inf), the kept lanes exact; FLAGS = INVALID
+   unmasked and CLEAN masked, on the card at fp32 and fp64. The flags
+   are ORed under the active bits, which are `blk_act`, which is the
+   mask - so the mask reached the lanes.
+6. The count window's staging pad under `CFT_XRT_TRACE` (11bb6d7):
+   the lanes past n, strobed off by `cnt_beat_ok` with no mask
+   involved, filled with 0xCC and read back after dense runs at n =
+   5 and 13 (fp32) and 3 (fp64): 0xCC throughout. The U50's memory
+   path honours WSTRB. Trailing, leading and interleaved masks (0f,
+   f0, 01, 80, 55, aa at n = 8; 00ff, ff00, 5555 at fp64 n = 16) all
+   wrote their masked lanes, so the strobe pattern's shape was not it.
+
+The one reading that fits all six: the tile leaves a masked lane's
+bytes as they are ON THE DEVICE, and a staged deposit window's device
+copy held the PREVIOUS run's output, because a deposit window is an
+output the host never uploaded - the readback brought it home whole.
+"Every masked lane written with the unmasked value" was the previous
+run's value, still there. The bench could not see it (cocotbext's RAM
+starts every test empty) and neither could the C executor (it writes
+the caller's buffer in place); device-test's masked leg after an
+unmasked one on the same window is the one test that could, and did.
+
+**Fixed in the host, be1ac1f, then db085ab**: under a lane mask the
+caller's deposit window, counts and scratch-out block are staged to
+the device before the launch, and the tile writes the kept lanes over
+them; an unmasked run uploads nothing, as before, and a RESIDENT
+window was never wrong (its device copy is the authority). No
+bitstream rebuilt. Proof on the card, the library rebuilt at 21:41:
+
+    maskflags 0f / 55 / 01 (fp32 n = 8), 5555 (fp64 n = 16)   every masked lane and count untouched,
+                                                             every kept lane 3, FLAGS clean
+    gathertime 64 bodies fp64, every third lane masked        64 of 64 slots hold the pattern; 4.146 ms
+                                                             against 4.042 unmasked (x1.026: one beat
+                                                             read a block, three blocks)
+    device-test -q -n 8 / -b -q -n 64 / -q -n 64             2,224 / 729 / 2,224 checks, 0 failed
+                                                             (the first relaunch ran a statically
+                                                             linked test binary from 21:06 and repeated
+                                                             the 12: `make all` does not build the tests)
+
+A third leg for the same sentence of HOSTAPI.md, `check_masked_scratch_out`
+(301c21d): one STL into the one scratch-out slot, every third lane
+masked, the block pre-filled - software 2,246/0, the card 2,248
+checks 0 failed.
+
+**The second defect: heap corruption above ~300 lanes.** gathertime at
+128 bodies fp64 died in glibc ("corrupted size vs. prev_size") on the
+XRT path and not on the software backend. Bracketed on the card: 100
+bodies fine, 112 an abort, 120 a segfault, 128 an abort - and
+`device-test -q -n 336` alone died the same way in its FIRST
+elementwise legs, so it was never the gather; the seq6 image with the
+same library at -n 336 ran 1,361 checks 0 failed. AddressSanitizer (a
+build in ~/cft-fp256-b) stopped on XRT sizing a 4 KiB-aligned host
+allocation to exactly the library's beat-rounded byte count: 0x540 =
+1,344 = 336 fp32 lanes. **Fixed at d40ad23**: buffer-object CAPACITIES
+are whole 4 KiB pages (`page_round` beside `beat_round`, at the three
+`xrt::bo` sites; every transfer's byte count unchanged). After it:
+
+    device-test -q -n 336 / -n 1000 / -n 4097     2,248 checks, 0 failed, each
+    device-test -b -q -n 336                      729 checks, 0 failed
+    gathertime 112 and 128 bodies fp64            three reps each, correct
+
+The round's tests ran everything at 64 lanes; the number that found
+this was the requester's own shape.
+
+**The numbers** (`~/cft-fp256-d` at d40ad23, the single tile, reps 5
+unless said; every result checked against a host fold first):
+
+    gathertime, 64 bodies (192 lanes, rows of 63)
+      fp64   one run 4.052 ms = 335 ns a gathered element, x3.25 against 63 calls
+      fp32   one run 3.931 ms, x1.40
+      fp128, 32 bodies (96 lanes)  1.387 ms, x1.99
+      fp64, 48 of 64 active (ragged rows, CFT_IDX_NONE)  3.073 ms, x1.34
+
+    gathertime, 128 bodies (384 lanes, rows of 127), every third lane masked in the masked run
+      fp64   one run 15.588 ms = 319.6 ns an element; masked x1.013; 127 calls 26.729 ms -> x1.71
+      fp32   one run 15.113 ms = 309.9 ns;            masked x1.013; 127 calls 24.725 ms -> x1.64
+      fp128  one run 16.464 ms = 337.6 ns;            masked x1.011; 127 calls 24.894 ms -> x1.51
+      (127 host gathers removed as well, not counted; masked slots untouched at every format)
+
+    segtime (ask 7's shape, E = 1000 segments of L = 192)
+      fp64   sum one call 2,351 us against 1,000 calls 91,108 us (a Python fold 6,142); maxall 2,412 us
+      fp128  3,863 us against 86,042 us
+      fp32   1,739 us against 84,410 us
+      fp64, E = 64  220.5 us against 5,808 us
+      (the software backend, fp64 E = 1000: 69,983 us for the one call)
+
+    cft-selftest replay on the image   1,224,915 cases, all matching
+
+What the tile's mask costs on silicon is what SEQUENCER.md R17 said it
+would: one beat read a block, 1.1-1.3% on a three-to-six-block run, and
+no compute saved. What the gather costs is one round trip a gathered
+element, 310-340 ns at every format, which is the number the requester
+compares against three memcpys and a dense call.
+
+Instruments left in the tree, all named above: `CFT_XRT_TRACE` (now
+also the count pad), `CFT_XRT_MASK_ADDR_OVERRIDE`, `maskflags.py`, the
+fingerprint line in `gathertime.py`, `tb/probe_mask_latency.py`. The
+quad image is the next entry.
