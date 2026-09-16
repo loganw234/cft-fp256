@@ -2559,7 +2559,7 @@ fetched through an index table (R16, ABI 0.14's `idx_*` tables) is
 both asks. The cost is one round trip a gathered element - the read
 side keeps one burst in flight - about four cycles an element on the
 model's memory; `host/tools/gathertime.py` measures it on a card day
-at the gravity shape, and that number goes here when it exists.*
+at the gravity shape, and that number goes here when it exists. On the card (2026-09-15, the round-2 single tile, docs/VALIDATION.md "card day, second half"): 310-340 ns a gathered element at every format - 64 bodies fp64 335 ns, 128 bodies fp64 / fp32 / fp128 320 / 310 / 338 ns; at 128 bodies one run 15.6 / 15.1 / 16.5 ms against the 127 dense calls it replaces at 26.7 / 24.7 / 24.9 ms, x1.71 / x1.64 / x1.51 with the 127 host gathers removed as well. The requester's shape also found the library's buffer capacities page-unsafe above ~300 lanes (d40ad23), which every test at 64 lanes had missed.*
 
 The integrator computes gravity over particle PAIRS and then scatters
 each pair's contribution back onto its two particles. Issued through
@@ -2686,7 +2686,7 @@ below. The mask's logic: +690 cells over the maskless `cft_seq` after
 a full yosys pass (+4,019 before its block slice was rewritten as a
 select; the shape, not the size, was the cost). The requester's item 4
 gets its tile-side answer from this: zero, so their ensemble
-measurement prices the host side alone.*
+measurement prices the host side alone. On the card: x1.013 of the unmasked run at 384 lanes (six blocks at fp64), the same at fp32 and fp128 - one beat read a block, as measured on the model. And the card's first verdict on the mask was a HOST defect that no bench could see: a staged deposit window's device copy held the previous run's output, so "a masked lane's slot keeps what the caller put there" needs the caller's bytes uploaded before a masked launch (be1ac1f, db085ab; the scratch-out block too, with a third device-test leg).*
 A host-supplied bitmap the
 engine honours, so an idle lane costs neither a beat nor a byte. The
 prototype masks a member that has left the corrector by a byte snapshot
@@ -2795,7 +2795,13 @@ is one pass on such a tile; the model's `freduce_seg`; and the benches
 (docs/HOSTAPI.md, "Reductions per segment"). What the card says about
 the corrector's test - one run of `seg = L` over `E * L` resident
 coordinates against the host loop it replaces - is the measurement the
-image carrying it makes, and the one their doc asked for first.
+image carrying it makes, and the one their doc asked for first. Made
+on the round-2 image (2026-09-15, with P4's beat-wide accumulator):
+fp64, E = 1,000 segments of L = 192 - `sum` 2,351 us in one call
+against 91,108 us in a thousand (a Python fold of the same values
+6,142 us), `maxall` 2,412 us; fp128 3,863 us against 86,042; fp32
+1,739 us against 84,410; at E = 64 the flush dominates, 220 us against
+5,808. The software backend's one call at fp64 E = 1,000: 69,983 us.
 
 **8. Correct rounding of divide and square root ON the card
 (2026-09-14).** Their measurement (`cft-rebound/docs/HARDWARE.md:604-612`):
