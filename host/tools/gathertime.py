@@ -350,6 +350,16 @@ def main():
         mbad = [i for i in range(lanes)
                 if ((mgot[i] != pat) if i % K == 0 else (mgot[i] != got[i]))]
         masked_one = sorted(mtimes)[len(mtimes) // 2]
+        # The fingerprint of a masked slot that was written anyway: does
+        # it hold the value the lane would have deposited unmasked (the
+        # strobe lost, the lane computed), the pattern (untouched), or
+        # something else?
+        m_idx = [i for i in range(lanes) if i % K == 0]
+        m_same = sum(1 for i in m_idx if mgot[i] == got[i])
+        m_pat = sum(1 for i in m_idx if mgot[i] == pat)
+        print(f"  masked slots: {len(m_idx)} lanes; {m_pat} hold the pattern, "
+              f"{m_same} hold the unmasked run's value, "
+              f"{len(m_idx) - m_pat - m_same} hold something else")
 
     # ...and the calls it replaces: scat_max host gathers, each feeding
     # one dense vector add over the same 3N lanes. Timed the same way,
