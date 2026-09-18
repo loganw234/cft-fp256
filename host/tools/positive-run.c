@@ -81,13 +81,20 @@
  * made this file two of the eight places the flag list had been written
  * out by hand - and those eight had drifted to three revisions at once.
  *
- * FLAGS_KNOWN below stays this tool's OWN subset, deliberately smaller
- * than every defined flag: CFT_PROG_FLAG_SCRATCH_STRICT exists and this
- * cannot emit it, so an image asking for it is refused here rather than
- * written out as something no tile will load. */
+ * FLAGS_KNOWN below stays this tool's OWN subset - a flag joins it
+ * when this file has been read against what the flag changes, not when
+ * cft.h defines it. CFT_PROG_FLAG_SCRATCH_STRICT was left out on
+ * 2026-09-11, when no tile would load a strict image; every pair since
+ * the revision-4 one loads it, libcft's loader and asm.py take it, and
+ * by 2026-09-17 this was the one tool on the path to a card that turned
+ * a strict image away - 63 of the 140 cases in atlas-engine's program
+ * set. It changes nothing this tool computes: the header is checked
+ * here and the image goes to cft_program_load whole, which is where
+ * strict is honoured or refused by the device's own CAPS2[6]. */
 #define FLAG_BANK_EXT   CFT_PROG_FLAG_BANK_EXT
 #define FLAG_SCRATCH_IO CFT_PROG_FLAG_SCRATCH_IO
-#define FLAGS_KNOWN     (FLAG_BANK_EXT | FLAG_SCRATCH_IO)
+#define FLAGS_KNOWN     (FLAG_BANK_EXT | FLAG_SCRATCH_IO | \
+                         CFT_PROG_FLAG_SCRATCH_STRICT)
 #define MAX_ESZ         32
 /* The four control codes of docs/SEQUENCER.md's R4, read here so the
  * tool can name what an image needs before the loader is handed it. */
@@ -923,9 +930,15 @@ int main(int argc, char **argv)
 
     flag_words(flags, words, sizeof words);
     printf("flags         0x%08x  %s\n", (unsigned)flags, words);
-    printf("status        0x%08x%s\n", (unsigned)bus,
+    /* The word first and in hex, because replayers read it from there
+     * (atlas-engine's run_set.py does); the names follow it. */
+    printf("status        0x%08x%s%s\n", (unsigned)bus,
            (bus & CFT_STATUS_DEPOSIT_OVERFLOW)
            ? "  deposit-overflow: a lane deposited more than max_deposits"
+           : "",
+           (bus & CFT_STATUS_SCRATCH_RANGE)
+           ? "  scratch-range: a strict image indexed the scratch at or "
+             "past the depth"
            : "");
 
     /* the program digest: image bytes, then bank bytes */
