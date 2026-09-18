@@ -573,6 +573,10 @@ they were handed over. What only a card can still say:
   a pass is 1,048,576 lanes - thirty-two times past the boundary the
   old mask buffer overran - so this is also the fix at scale.
 - **The reductions' overlap**, still first in docs/ROADMAP.md's debts.
+  *Paid too, later the same morning: it was never the tiles. Found by
+  reading, proved in a scratch build, fixed and re-measured
+  (docs/VALIDATION.md, "the reductions' missing rate" and "the
+  reductions' fix").*
 
 ### What the card said (2026-09-15, the round-2 single tile; docs/VALIDATION.md has the whole day)
 
@@ -600,6 +604,15 @@ they were handed over. What only a card can still say:
 - **The area column**: kernel WNS +0.266 ns at 135 MHz for the single
   tile; the quad's is its own entry.
 - **The three instruments that told a host defect from a tile defect**
+  - `CFT_XRT_REDUCE_BC` (2026-09-18): what the XRT reduction paths do
+    with the `b` and `c` buffers a reduction never uses. Unset, they are
+    allocated and never written; `poison` fills them with 0xFF - a NaN
+    at every format - and uploads them, which is how to ask a NEW image
+    whether its reductions still ignore them (`device-test` does it for
+    you on an XRT device; by hand, `CFT_XRT_REDUCE_BC=poison
+    device-test -r -q <image>`); `zero` is the behaviour before that
+    date, for an A/B timing. Under `CFT_XRT_TRACE` each reduction launch
+    says which it did.
   - `CFT_XRT_TRACE` (what the tile received, and a pattern in the
   count window's staging pad that the strobes must leave alone),
   `CFT_XRT_MASK_ADDR_OVERRIDE` (does the tile read the mask: a fault

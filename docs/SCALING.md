@@ -245,8 +245,13 @@ small calls pay it every time (127 dense calls cost twice on four tiles
 what they cost on one); wide resident calls pay it once. The largest
 resident shape is also bigger on four tiles, since a buffer is sliced
 per tile and each tile's quarter fits its channel beside the library's
-own staging. Reductions were the outlier at 13 M beats a second a tile
-on a whole-array sum, an open question in that entry. At high tile
+own staging. Reductions looked like the exception that day - 13 M
+beats a second a tile - and were not: on 2026-09-18 the cause turned out
+to be the host, whose reduction paths uploaded two operand-sized buffers
+of zeros on every call, one tile after another. With that gone a
+whole-array sum runs at the engine's 100 M beats a second on one tile
+and 3.6 to 3.8 times that on four (docs/VALIDATION.md, "the reductions'
+fix"). At high tile
 counts the resident path stops being an optimisation and becomes the
 only workable one. Measured 2026-09-08 with the staging
 in place (docs/BENCHMARKS.md): every format and both tile counts sit

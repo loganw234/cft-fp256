@@ -2987,8 +2987,12 @@ rediscovering them.
   on both images. It is twice the operand's bytes over PCIe a call,
   serial across tiles, and it was the whole signature: with the upload
   skipped in a scratch build one tile reduces at the engine's 100 M
-  beats a second and four tiles at 3.8 times that. **main still
-  uploads**; the fix is a few lines and waits for Logan's word. The
+  beats a second and four tiles at 3.8 times that. **FIXED the same
+  day on Logan's word** (`reduce_unread` in `backend_xrt.cpp`: the
+  buffers are allocated and never written; `CFT_XRT_REDUCE_BC=poison`
+  and `=zero` keep the proof and the old behaviour one variable away,
+  and `device-test` re-runs its reductions under `poison` on every XRT
+  device). What is still open is the twin: the
   elementwise path has the same shape - an operand the opcode does not
   read is zero-filled and uploaded at full size every call, a resident
   `add`'s unread `b` included - which is NOT yet measured or proven

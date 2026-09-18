@@ -13282,3 +13282,63 @@ saturation runs used `fma`, which reads all three, so they never saw
 it. It wants the same poison test before anything is skipped, because
 there the steering in the tile and not a comment is what makes the
 operand unread.
+
+## 2026-09-18 - the reductions' fix: b and c allocated and never written, held by a poisoned leg, re-measured on the card
+
+Logan's word, after the morning's experiment: go ahead, and push when
+ready.
+
+**The change** (`host/src/backend_xrt.cpp`). Both reduction paths call
+`reduce_unread(tile.b, tile.c, ...)` where they called `stage` twice
+with a null source. By default it does nothing: `ensure_capacity` has
+already made `b` and `c` real, readable memory of the run's length,
+which is all the engine's three-stream read needs. `CFT_XRT_REDUCE_BC`,
+read per call, keeps two other behaviours one variable away: `poison`
+fills both with 0xFF - a NaN at every format - and uploads them, and
+`zero` is the behaviour before today, for an A/B timing. Under
+`CFT_XRT_TRACE` each reduction launch says which it did.
+
+**The property it rests on is held by a test, not by a comment**
+(`host/tests/device_test.c`). On an XRT device the reductions block
+ends by setting `CFT_XRT_REDUCE_BC=poison` and re-running five
+comparisons a format against the software backend - a sum over finite
+operands and over any bit pattern, a `maxall`, a segmented sum and a
+segmented `maxall` - then removing the variable. A reduction that ever
+came to depend on `b` or `c` would carry the NaN, or its invalid flag,
+into a result software does not have. On any other backend the leg
+says by name that it was NOT RUN and why. It needs `setenv`, which ISO
+C does not have, so the file asks for POSIX before its includes and
+uses `_putenv` on Windows; the build stays warning-free on both.
+
+**On the card**, first from a scratch build holding the two changed
+files (09:54), so that nothing unproven reached main:
+
+    device-test -q -n 8                 2,367 checks, 0 failed, single and quad (2,287 + the leg's 80)
+    device-test -r -q -n 64             1,256 checks, 0 failed, single and quad (1,176 + 80)
+    "reductions with b and c POISONED"  present on both images, 0 failed
+    the trace, -r -q -n 8, single       224 launches "unwritten", 20 "poison", 0 "zeros" - the 20 are
+                                        the leg's five comparisons at four formats, so the switch the
+                                        test sets is the one the backend reads
+    the conformance replay, single      168 sets, 1,224,915 cases, all matching
+
+    resident reductions, median of five, every result exact        one tile                  four tiles
+    (before = CFT_XRT_REDUCE_BC=zero, the same build)              before     after          before     after
+    fp64, one whole-array sum, 4M elements                         24.41 ms   10.45 ms x2.3  16.68 ms    2.77 ms x6.0
+    fp32, one whole-array sum, 4M elements                         10.80 ms    5.31 ms x2.0   8.03 ms    1.46 ms x5.5
+    fp64, segments of 192, ~8M elements                            95.47 ms   58.58 ms x1.6  50.55 ms   14.90 ms x3.4
+    fp64, segments of 192, ~1M elements                            10.20 ms    7.49 ms x1.4   5.38 ms    2.04 ms x2.6
+    fp256, segments of 192, ~1M elements                           39.90 ms   23.53 ms x1.7  21.15 ms    6.13 ms x3.5
+
+A whole-array sum runs at 100 M beats a second on one tile at fp64 and
+99 M at fp32 - the engine's own rate - and at 379 M and 359 M on four,
+3.8 and 3.6 times one. The segmented rows keep the tile's per-segment
+flush, which is what is left to improve there and is the tile's.
+
+**The local gate** on the working tree: binaries built fresh by name; api-test; 77 model tests; seq_check; device-test sw -n 32 9,925 checks 0 failed (the poisoned leg is NOT RUN on software and says so, four times); the resident legs 4,386 and 722; remote_check every check passed; docs index; five generators; 30 vendored files identical
+
+**What this does not touch.** The elementwise path still zero-fills and
+uploads any operand an opcode does not read, a resident `add`'s unread
+`b` included. It is the same shape and a different proof - there the
+steering inside the tile, not a comment, is what makes the operand
+unread - so it stays in docs/ROADMAP.md's debts until it has had its
+own poison test.

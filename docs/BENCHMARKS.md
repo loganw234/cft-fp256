@@ -497,6 +497,27 @@ times one core here and a GPU is far faster than either at binary32 -
 which was never the tile's case: its case is the same guarantee at
 binary128 and binary256, where a GPU has no answer at all.
 
+### Reductions on resident memory, after the zeros stopped (2026-09-18)
+
+Until this date both XRT reduction paths uploaded two operand-sized
+buffers of zeros on every call, and every reduction time recorded
+before it includes that. `host/tools/segsat.py`, one `cft_reduce_seg`
+over resident operands, median of five, every result exact;
+"before" is the same library with `CFT_XRT_REDUCE_BC=zero`:
+
+| shape | one tile, before | one tile | four tiles, before | four tiles |
+|---|---|---|---|---|
+| fp64, one whole-array sum, 4M elements | 24.4 ms | **10.5 ms**, 401 M/s | 16.7 ms | **2.8 ms**, 1,516 M/s |
+| fp32, one whole-array sum, 4M elements | 10.8 ms | **5.3 ms**, 789 M/s | 8.0 ms | **1.5 ms**, 2,875 M/s |
+| fp64, segments of 192, about 8M elements | 95.5 ms | **58.6 ms** | 50.5 ms | **14.9 ms** |
+| fp64, segments of 192, about 1M elements | 10.2 ms | **7.5 ms** | 5.4 ms | **2.0 ms** |
+| fp256, segments of 192, about 1M elements | 39.9 ms | **23.5 ms** | 21.1 ms | **6.1 ms** |
+
+A whole-array sum now runs at about 100 M beats a second a tile, the
+engine's own rate, and four tiles are 3.6 to 3.8 times one. What is
+left in the segmented rows is the tile's per-segment flush, about a
+hundred cycles a segment.
+
 ## Workloads designed for the contract
 
 The tables above adapt other libraries' benchmarks to this one. The
