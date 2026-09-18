@@ -39,6 +39,11 @@
  *      below is there because of that bug.
  */
 
+/* setenv, for the one leg that re-runs the reductions under
+ * CFT_XRT_REDUCE_BC; ISO C has getenv and nothing to set one with. */
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200112L
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,6 +67,21 @@ static int checks;
 #define MAX_SKIP 32
 static int  skipped;
 static const char *skip_name[MAX_SKIP];
+
+/* One environment variable, set or removed, on either platform. */
+static void put_env(const char *name, const char *value)
+{
+#ifdef _WIN32
+    char buf[160];
+    snprintf(buf, sizeof buf, "%s=%s", name, value ? value : "");
+    _putenv(buf);                       /* "NAME=" removes it */
+#else
+    if (value)
+        setenv(name, value, 1);
+    else
+        unsetenv(name);
+#endif
+}
 
 static void note_skip(const char *what)
 {
@@ -6258,6 +6278,44 @@ int main(int argc, char **argv)
                                : "");
                 fflush(stdout);
             }
+
+            /* The XRT backend leaves a reduction's b and c buffers
+             * allocated and UNWRITTEN - it used to upload zeros into
+             * them on every call, twice the operand's bytes for
+             * nothing (backend_xrt.cpp, reduce_unread). What makes
+             * that safe is the tile ignoring them, which is a property
+             * of an image and not of a comment, so it is asked of
+             * every image this runs on: the same comparisons with b
+             * and c filled with 0xFF, a NaN at every format. A
+             * reduction that ever comes to depend on them would carry
+             * the NaN, or its invalid flag, straight into a result
+             * the software backend does not have. */
+            if (!strcmp(caps.backend, "xrt")) {
+                const int seg_bit =
+                    (caps.seq_features & CFT_FEAT_REDUCE_SEG) != 0;
+                put_env("CFT_XRT_REDUCE_BC", "poison");
+                compare_reduce(sw, hw, fmt, CFT_SUM, CFT_RNE, 37,
+                               0x9015000u + (uint32_t)f, 1);
+                compare_reduce(sw, hw, fmt, CFT_SUM, CFT_RNE, 64,
+                               0x9015100u + (uint32_t)f, 0);
+                if (cft_supports(hw, CFT_MAXALL, fmt))
+                    compare_reduce(sw, hw, fmt, CFT_MAXALL, CFT_RNE, 37,
+                                   0x9015200u + (uint32_t)f, 0);
+                compare_reduce_seg(sw, hw, fmt, CFT_SUM, CFT_RNE, 35, 7,
+                                   0x9015300u + (uint32_t)f, 1, seg_bit);
+                if (cft_supports(hw, CFT_MAXALL, fmt))
+                    compare_reduce_seg(sw, hw, fmt, CFT_MAXALL, CFT_RNE,
+                                       33, 11, 0x9015400u + (uint32_t)f,
+                                       0, seg_bit);
+                put_env("CFT_XRT_REDUCE_BC", NULL);
+                printf("    reductions with b and c POISONED (0xFF, a NaN): "
+                       "%d checks, %d failed\n", checks, failures);
+            } else {
+                printf("    reductions with b and c poisoned: NOT RUN - the "
+                       "%s backend has no b and c of its own to poison\n",
+                       caps.backend);
+            }
+            fflush(stdout);
         } else {
             note_skip(cft_op_name(CFT_SUM));
             printf("  no reduction opcode group on this device "
