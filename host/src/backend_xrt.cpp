@@ -273,12 +273,27 @@ constexpr int ARG_IDX_SI = 15, ARG_MASK = 16;
 /* MODE[15]: this run belongs to cft_seq and MODE[7:0] is ignored. */
 constexpr uint32_t MODE_SEQ = 1u << 15;
 
-/* STATUS, as rtl/cft_csr.sv lays it out. Bit 4 is also
- * CFT_STATUS_DEPOSIT_OVERFLOW in the public header; the two must not
- * drift, and this file cannot include cft.h. */
+/* STATUS, as rtl/cft_csr.sv lays it out. Bits 4 and 5 are also
+ * CFT_STATUS_DEPOSIT_OVERFLOW and CFT_STATUS_SCRATCH_RANGE in the
+ * public header; they must not drift, and this file cannot include
+ * cft.h.
+ *
+ * ST_REPORTS is every bit a SUCCESSFUL program run hands back: reports
+ * and not errors, because what fit is correct and what was in range is
+ * correct. It is one mask because it was the same literal written at
+ * two return sites until 2026-09-18, and both had stopped at bit 4:
+ * the tile raised STATUS[5] for a strict image's index past the depth
+ * (revision 4's R8, on silicon since the rev4 pair) and this backend
+ * handed the caller 0, where the software backend and the golden
+ * model hand it 0x20. Found by atlas-engine's first card day
+ * (2026-09-17) with CFT_XRT_TRACE, which read 0x20 off the tile's own
+ * register; no test had ever run an index past the depth on a device
+ * and read the status back (device-test's scratch leg does now). */
 constexpr uint32_t ST_BUS_BITS  = 0x7u;
 constexpr uint32_t ST_REFUSED   = 0x8u;
 constexpr uint32_t ST_DEPOSIT_OVERFLOW = 0x10u;
+constexpr uint32_t ST_SCRATCH_RANGE    = 0x20u;
+constexpr uint32_t ST_REPORTS = ST_DEPOSIT_OVERFLOW | ST_SCRATCH_RANGE;
 
 /* Round `n` up to a whole 256-bit beat's worth of bytes. The masters
  * move whole beats whatever the format, so a buffer that ends mid-beat
@@ -2023,7 +2038,7 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
             st_acc = 0;
         }
         if (bus)
-            *bus = st_acc & ST_DEPOSIT_OVERFLOW;
+            *bus = st_acc & ST_REPORTS;
         set_err(err + " - the compute unit may still be active, so this "
                       "handle is finished; close and reopen it" +
                 (st_acc ? " (STATUS 0x" + hex32(st_acc) + ")"
@@ -2183,7 +2198,7 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
      * is the tail. Telling it the results are invalid would be a
      * worse lie than saying nothing. */
     if (bus)
-        *bus = status_acc & ST_DEPOSIT_OVERFLOW;
+        *bus = status_acc & ST_REPORTS;
     return ST_OK;
 }
 
