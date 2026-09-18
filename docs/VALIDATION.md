@@ -13052,6 +13052,21 @@ sibling session had it the day before and nobody had said it was free.
                                  stock runner gave 77 matched and 63 refused)
     the local gate               binaries built fresh by name; api-test all contract checks; 77 model tests; seq_check 200 trials; device-test sw -n 32 9,925 checks 0 failed (9,886 before: the two legs are the 39), -b -n 32 4,386, -b -q -n 16 722; remote_check every check passed; docs index; five generators; 30 vendored files identical
 
+After the push (4bede85), on amd-arc-box from the main checkout, still
+without the card: `make -C host -j8 XRT=1 ... all device-test
+positive-run api-test` rc 0 with no new warning, XRT-linked, and on the
+software backend `device-test sw -q -n 8` 2,285 checks, 0 failed with
+the strict section at all four formats and the page leg's line, and
+`api-test` passing. *The first attempt at this ran the old binaries and
+said so*: the checkout was refused by an untracked `segsat.py` copied
+into that tree by hand on the 16th and committed since, the chain
+carried on past the refusal, and the run printed 2,246 checks with no
+strict section - the count and the missing lines were the tell, the
+same trap as the 15th's `maskflags.py`. The stray copy was identical to
+the tracked file and was removed; a box run is believed when the tree's
+SHA and a grep for the new code both say so, and a chain that checks
+out stops when the checkout fails.
+
 The two library patches' CARD evidence is atlas-engine's, taken with
 the same diffs on both images before the handoff: the strict probe
 reading 0x20 on software, the single and the quad, 0 for its modulo
