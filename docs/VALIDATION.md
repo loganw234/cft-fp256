@@ -12955,3 +12955,124 @@ What the day changes in the documents: docs/SCALING.md's tile-count
 paragraph now carries the amortisation, docs/BENCHMARKS.md's round-2
 section the four-tile table, docs/ROADMAP.md's debts the bound-role
 allocation and the reduction rate.
+
+## 2026-09-18 - atlas-engine's handoff: three host defects a real workload found on the pair, fixed and gated without a card
+
+**Where it came from.** atlas-engine's first card day on the round-2
+pair (2026-09-17; its `docs/CFT-SILICON.md` is the narrative and
+`docs/silicon/FINDINGS-for-cft-fp256.md` the findings), handed over as
+`build/cft/handoff-2026-09-17.tar.gz`: a 140-case program test set,
+three defects each with a patch verified on the card, an operating
+limit, two pieces of stale text, and what each kind of instruction
+costs. It is the first use of revision-6 silicon by a workload from
+outside this project, from a CLEAN clone of 56ad0cd with the host built
+`XRT=1` and this project's gate run first (`device-test -q -n 8` on the
+single tile: 2,248 checks, 0 failed, the round-2 card day's own count).
+
+**Read before it was believed** (against main 56ad0cd): every claim
+checked in the source, both library diffs `git apply --check` clean -
+they were cut against the same `backend_xrt.cpp` blob main has - and
+all 1,120 SHA-256s of the program set verified. Nothing in it was
+wrong.
+
+**The three defects, none in the RTL.**
+
+1. *The XRT backend dropped STATUS[5].* `cftx_program_run` reduced the
+   tile's STATUS to bit 4 at both return sites, so
+   `CFT_STATUS_SCRATCH_RANGE` - revision 4's R8, the report that a
+   strict image indexed the scratch past the depth - never reached a
+   caller on a card. The tile raised it: `CFT_XRT_TRACE`, the
+   instrument left in the tree on 2026-09-15, read `STATUS=0x00000020`
+   off the tile's own register while the library returned 0, which put
+   the defect on the host in one run. The software backend and the
+   golden model return 0x20. It made the card path non-conforming with
+   CONFORMANCE.md's scratch rule, written two days before.
+2. *A program run past 32,768 lanes overran the lane-mask buffer.* With
+   no mask the buffer was sized at one beat, `ensure_one` made that one
+   4,096-byte page, and `stage_mask` filled a bit for EVERY lane -
+   `cft_mask_repack` with a null source writes `(n + 7) / 8` bytes of
+   0xFF whatever it is given. Past one page of bits the fill left the
+   mapping: every deposit right, because the tile never reads a mask
+   whose MODE bit is clear, and the host heap corrupted (exit 134 or
+   139 at teardown; "malloc(): corrupted top size" inside the call at
+   65,536 lanes). Bisected by them to the boundary with two programs of
+   different deposit widths, so the lane count and not the deposit
+   buffer. This is round 2's code, and round 2's card runs never
+   passed a few thousand program lanes.
+3. *`positive-run` refused `SCRATCH_STRICT`* by its own flag subset,
+   deliberately narrower than `cft.h`'s since 2026-09-11, when no tile
+   would load a strict image. Every pair since the revision-4 one
+   does, and the runner was the one tool on the path to a card that
+   turned 63 of the 140 cases away.
+
+**What changed** (1dd6983, 772e87e, 76d02fd, d3721f9, c555251,
+5313c64): one mask, `ST_REPORTS`, at both return sites; the mask buffer
+sized for the run's lanes with or without a mask, which also keeps the
+invariant `stage_mask`'s comment argues for (no mask reads as every
+lane, for EVERY lane), and a size check inside `stage_mask` so a sizing
+mistake is a named failure of one run and not a corrupted heap; the
+flag in the runner's subset and bit 5 named on its status line;
+`cft.h` and `backend.h` no longer calling the bit unproduced and
+unreported (comments; the Arduino library's vendored copies follow);
+the Node package naming the four feature bits it printed as `bit10`,
+`bit11`, `bit13`, `bit14`, held to `cft.h` by a test because the module
+at this build exports no projection for them.
+
+**Two legs, each the test that would have caught its defect**
+(`host/tests/device_test.c`):
+
+- the scratch leg's section 2b runs an index past the depth under
+  `SCRATCH_STRICT` - odd lanes past, even lanes at slot 5, in ONE run -
+  and requires +0 and no store past the depth, the usual behaviour in
+  range, and STATUS carrying bit 5; then the same image all in range
+  must report nothing. *Negative control*: with the report dropped in
+  `program.c` the leg fails once a format, naming it, **with every
+  deposit check still passing** (2,285 checks, 4 failed) - which is
+  exactly what the card had shown - and passes restored;
+- a program run of 32,768 lanes and of 32,769 with no mask, once a
+  device, skipped by name under hardware emulation. Every other
+  sequencer leg in the file runs at most 200 lanes (`nseq` in main),
+  which is why the shape had never been run. It has no negative
+  control on a host - the software backend has no mask buffer - so its
+  control is on the card and is owed (docs/CARDDAY.md).
+
+**How it was gated without a card.** The card was not touched: a
+sibling session had it the day before and nobody had said it was free.
+
+    XRT compile, amd-arc-box     the working-tree files in the scratch checkout,
+                                 `make -C host -j8 XRT=1 ... all device-test positive-run
+                                 api-test`: rc 0, the two read_register deprecations in
+                                 cft_resident.cpp that were there before and nothing new;
+                                 backend_xrt.cpp committed byte-identical to the file compiled
+    device-test, software        2,285 checks, 0 failed, both new legs' lines present
+    Node package                 135 passed; with one name removed, 134 passed and 1 failed
+                                 naming CFT_SEQ_FEAT_LANE_MASK
+    atlas-engine's program set   140 matched, 0 mismatched, 0 refused by name, on the software backend in 17 min 43 s
+                                 (the STOCK runner built from this tree; their card day's
+                                 stock runner gave 77 matched and 63 refused)
+    the local gate               binaries built fresh by name; api-test all contract checks; 77 model tests; seq_check 200 trials; device-test sw -n 32 9,925 checks 0 failed (9,886 before: the two legs are the 39), -b -n 32 4,386, -b -q -n 16 722; remote_check every check passed; docs index; five generators; 30 vendored files identical
+
+The two library patches' CARD evidence is atlas-engine's, taken with
+the same diffs on both images before the handoff: the strict probe
+reading 0x20 on software, the single and the quad, 0 for its modulo
+twin, deposits unchanged; and the bisect clean from 33,792 to 262,144
+lanes, with every card-scale timing run after it - up to 1,048,576
+lanes - on the patched library.
+
+**What the day says about the suite.** The same thing round 2's card
+day said, from the other end: the defects were in SHAPES nothing ran.
+No sequencer leg passed 200 lanes and none read the status word after
+an index past the depth, and for the first defect a leg that compared
+deposits alone would have passed on the card. A workload that was not
+written by the people who wrote the tests reached both on its first
+day.
+
+**Also from the handoff, recorded where it belongs.** What an
+instruction costs on the card by kind - arithmetic 0.98 ns a lane,
+every control code about 4 - is beside R12 in docs/SEQUENCER.md, which
+already said why (a control code waits for the queue to empty), and in
+docs/BENCHMARKS.md with the programs' rates; the one-minute program
+wait and the blind tile after a timeout are in docs/ROADMAP.md's debts;
+and so is the plan of record for programs across tiles, which
+atlas-engine measured the need for - every program at the single's
+rate to the hundredth on the quad.
