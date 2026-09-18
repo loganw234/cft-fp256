@@ -1481,10 +1481,11 @@ static void check_caps_enforced(cft_device *dev, const char *who)
      * names the flag. The absent branch is the one that matters, and no
      * software device can reach it - the software backend is the
      * contract and carries every feature it defines - so it fires
-     * against a tile that predates R8, which is every tile there is
-     * until the RTL lands. Accepting a strict image on a device that
-     * cannot honour it would run the program under the modulo, and that
-     * is a different contract, not a graceful degradation. */
+     * against a tile that predates R8: an image older than the
+     * revision-4 pair, since every pair from that one on carries it.
+     * Accepting a strict image on a device that cannot honour it would
+     * run the program under the modulo, and that is a different
+     * contract, not a graceful degradation. */
     st = try_load_strict(dev, fmt);
     checks++;
     if (c.seq_features & CFT_SEQ_FEAT_SCRATCH_STRICT) {
@@ -2028,6 +2029,113 @@ static void check_scratch(cft_device *dev, cft_format fmt, size_t n)
             cft_program_free(prog);
             prog = NULL;
         }
+    }
+
+    /* ---- 2b. The same index under SCRATCH_STRICT: suppressed, +0,
+     * and REPORTED --------------------------------------------------
+     * Section 2's index again, in an image that asks for revision 4's
+     * R8. Odd lanes carry the index past the depth and even lanes carry
+     * 5, in ONE run, so a device that suppressed every lane because one
+     * was out of range, or none because one was in, cannot pass:
+     *
+     *   an even lane  LDX reads slot 5 (a), STX writes b there -> a, b
+     *   an odd lane   LDX reads +0, STX is suppressed          -> +0, a
+     *
+     * and STATUS carries CFT_STATUS_SCRATCH_RANGE, which is the half
+     * nothing read back from a device until 2026-09-18: the XRT
+     * backend masked STATUS down to bit 4 on the way out, the tile had
+     * raised bit 5 all along, and every deposit was right - so a leg
+     * that compared deposits alone would have passed (atlas-engine's
+     * card day, 2026-09-17). Then the same image with every index in
+     * range must report NOTHING, which is what says the word is this
+     * run's and not the last one's. */
+    if (c.max_scratch && (c.seq_features & CFT_SEQ_FEAT_SCRATCH_STRICT)) {
+        const uint32_t past = 3u * c.max_scratch + 5u;
+        int pass;
+        ins[0] = seq_stl(0, 5);          /* slot 5 := a */
+        ins[1] = seq_ldx(4, 2);          /* r4 := scratch[r2], or +0 */
+        ins[2] = seq_ctrl(3, 4, 0);
+        ins[3] = seq_stx(1, 2);          /* scratch[r2] := b, or nothing */
+        ins[4] = seq_ldl(5, 5);          /* r5 := slot 5 */
+        ins[5] = seq_ctrl(3, 5, 0);
+        ins[6] = seq_ctrl(0, 0, 0);
+        bytes = seq_image_flags(img, fmt, ins, 7, NULL, 0, 2,
+                                CFT_PROG_FLAG_SCRATCH_STRICT);
+        checks++;
+        if (cft_program_load(dev, img, bytes, &prog) != CFT_OK) {
+            printf("  FAIL seq scratch: SCRATCH_STRICT is published and "
+                   "the strict STX/LDX image did not load: %s\n",
+                   cft_last_error());
+            failures++;
+        } else {
+            for (pass = 0; pass < 2; pass++) {
+                /* pass 0: odd lanes past the depth; pass 1: none */
+                uint32_t fl = 0xFFu, bus = 0xFFFFFFFFu;
+                const uint32_t want_bus =
+                    (pass == 0 && n > 1) ? CFT_STATUS_SCRATCH_RANGE : 0u;
+                for (i = 0; i < n; i++)
+                    put_index(cc + i * esz, fmt,
+                              (pass == 0 && (i & 1u)) ? past : 5u);
+                checks++;
+                if (cft_program_run(prog, a, b, cc, dep, cnt, n, &fl, &bus)
+                    != CFT_OK) {
+                    printf("  FAIL seq scratch: the strict STX/LDX program "
+                           "did not run: %s\n", cft_last_error());
+                    failures++;
+                    continue;
+                }
+                {
+                    uint8_t zero[MAXE];
+                    int bad = 0;
+                    memset(zero, 0, esz);
+                    for (i = 0; i < n; i++) {
+                        const int out = pass == 0 && (i & 1u);
+                        const uint8_t *w0 = out ? zero : a + i * esz;
+                        const uint8_t *w1 = out ? a + i * esz : b + i * esz;
+                        if (memcmp(dep + (2 * i) * esz, w0, esz) != 0 ||
+                            memcmp(dep + (2 * i + 1) * esz, w1, esz) != 0 ||
+                            cnt[i] != 2)
+                            bad = 1;
+                    }
+                    checks++;
+                    if (bad) {
+                        printf("  FAIL seq scratch: strict, an index of "
+                               "%lu past a depth of %lu must read +0 and "
+                               "store nothing, and an index of 5 beside "
+                               "it must behave as ever (pass %d)\n",
+                               (unsigned long)past,
+                               (unsigned long)c.max_scratch, pass);
+                        failures++;
+                    }
+                }
+                checks++;
+                if (bus != want_bus) {
+                    printf("  FAIL seq scratch: strict, STATUS is %#x and "
+                           "%#x was due - %s\n", bus, want_bus,
+                           pass == 0
+                           ? "an index past the depth must be REPORTED "
+                             "(CFT_STATUS_SCRATCH_RANGE), not only "
+                             "suppressed"
+                           : "every index was in range, so the word must "
+                             "be this run's and clean");
+                    failures++;
+                }
+                checks++;
+                if (fl != 0) {
+                    printf("  FAIL seq scratch: strict, a suppressed "
+                           "access raised flags 0x%02x - the range report "
+                           "is deliberately not an IEEE flag\n", fl);
+                    failures++;
+                }
+            }
+            printf("    SCRATCH_STRICT: an index past the depth reads +0, "
+                   "stores nothing and is reported; in range, nothing is\n");
+            cft_program_free(prog);
+            prog = NULL;
+        }
+    } else {
+        printf("    this device does not publish SCRATCH_STRICT, R8's "
+               "range report NOT RUN\n");
     }
 
     /* ---- 3. A store is masked by the active bit --------------------
@@ -4298,6 +4406,106 @@ out:
     free(c_sw); free(c_hw); free(tab); free(mask); free(ones);
 }
 
+/* A program run at the largest lane count one PAGE of lane-mask bits
+ * holds, and at one lane past it - with no mask at all.
+ *
+ * Every other sequencer leg in this file runs at most 200 lanes (see
+ * `nseq` in main), which is why this shape had never been run: a
+ * backend that binds the tile's mask argument on every launch sized
+ * that buffer at one beat when the caller gave no mask and then filled
+ * a bit for EVERY lane, so past 32,768 lanes - 4,096 bytes of bits -
+ * the fill ran off the end of the mapping. The deposits came back
+ * right, because the tile never reads a mask whose MODE bit is clear,
+ * and the host heap did not (atlas-engine's card day, 2026-09-17, which
+ * met it at 65,536 lanes and bisected it to this boundary). So the
+ * deposits are checked here and they are not the point: the point is
+ * that the run RETURNS, at the boundary and one past it, and that a
+ * sizing mistake is a named failure of the run rather than a corrupted
+ * heap - which stage_mask's own check now makes it.
+ *
+ * The expectation is absolute, not the software backend's: the program
+ * deposits stream a, so the window must be stream a.
+ *
+ * ONCE A DEVICE, at the first format the sequencer legs reach: a mask
+ * bit is a lane at every precision, so the boundary does not move with
+ * the format and four runs would say what one does. And NOT under
+ * hardware emulation, by name: 65,537 lanes of xsim is most of an
+ * hour, the staging code is the same code on a card, and
+ * hw/run-device-test.sh exports the variable this reads. */
+static void check_program_past_a_page(cft_device *dev, cft_format fmt)
+{
+    static const size_t lanes[] = {32768u, 32769u};
+    static int done;
+    const size_t esz = cft_format_size(fmt);
+    uint8_t img[64];
+    uint64_t ins[2];
+    cft_program *prog = NULL;
+    size_t bytes, k;
+
+    if (done)
+        return;
+    done = 1;
+    if (getenv("XCL_EMULATION_MODE")) {
+        printf("    a program run past one page of mask bits: NOT RUN under "
+               "emulation (XCL_EMULATION_MODE is set) - a card and the "
+               "software backend run it\n");
+        return;
+    }
+    ins[0] = seq_ctrl(3, 0, 0);                  /* deposit r0 = a */
+    ins[1] = seq_ctrl(0, 0, 0);                  /* halt */
+    bytes = seq_image(img, fmt, ins, 2, NULL, 0, 1);
+    checks++;
+    if (cft_program_load(dev, img, bytes, &prog) != CFT_OK) {
+        printf("  FAIL seq lanes: the one-deposit image did not load: %s\n",
+               cft_last_error());
+        failures++;
+        return;
+    }
+    for (k = 0; k < sizeof lanes / sizeof lanes[0]; k++) {
+        const size_t n = lanes[k];
+        uint8_t *a = (uint8_t *)malloc(n * esz);
+        uint8_t *dep = (uint8_t *)malloc(n * esz);
+        uint32_t *cnt = (uint32_t *)malloc(n * 4);
+        uint32_t fl = 0xFFu, bus = 0xFFFFFFFFu;
+        size_t i;
+        cft_status st;
+
+        checks++;
+        if (!a || !dep || !cnt) {
+            printf("  FAIL seq lanes: out of memory at %lu lanes\n",
+                   (unsigned long)n);
+            failures++;
+            free(a); free(dep); free(cnt);
+            continue;
+        }
+        fill_finite(a, fmt, n);
+        memset(dep, 0x5a, n * esz);
+        st = cft_program_run(prog, a, NULL, NULL, dep, cnt, n, &fl, &bus);
+        if (st != CFT_OK) {
+            printf("  FAIL seq lanes: a program run of %lu lanes with no "
+                   "mask: %s (%s)\n", (unsigned long)n, cft_strerror(st),
+                   cft_last_error());
+            failures++;
+        } else {
+            int bad = memcmp(dep, a, n * esz) != 0;
+            for (i = 0; i < n && !bad; i++)
+                if (cnt[i] != 1)
+                    bad = 1;
+            if (bad || fl != 0 || bus != 0) {
+                printf("  FAIL seq lanes: %lu lanes, the deposits must be "
+                       "stream a with one a lane, flags and STATUS clean "
+                       "(flags %#x, STATUS %#x)\n", (unsigned long)n, fl,
+                       bus);
+                failures++;
+            }
+        }
+        free(a); free(dep); free(cnt);
+    }
+    printf("    a program run of 32,768 lanes and of 32,769, no mask: one "
+           "page of mask bits and one bit past it\n");
+    cft_program_free(prog);
+}
+
 static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
                         size_t n, uint32_t seed)
 {
@@ -4446,6 +4654,7 @@ static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
      *    with the feature has its own memory and its own two
      *    pointers. */
     check_scratch(hw, fmt, n);
+    check_program_past_a_page(hw, fmt);
 
     /* 7b. ABI 0.14's index tables (R16), gated on the feature bit the
      *     same way and skipped by name where the device does not
