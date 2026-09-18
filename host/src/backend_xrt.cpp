@@ -566,6 +566,60 @@ void stage(xrt::bo &bo, const uint8_t *src, size_t real_bytes,
     bo.sync(XCL_BO_SYNC_BO_TO_DEVICE, padded_bytes, 0);
 }
 
+/* A reduction's b and c: buffers the engine READS and nothing USES.
+ *
+ * The engine streams all three operands - one read enable feeds all
+ * three FIFOs - so for a reduction, which takes only `a`, b and c must
+ * still be real, readable memory of the run's length. ensure_capacity
+ * makes them that. Until 2026-09-18 both reduction paths ALSO zero-
+ * filled them and uploaded them, for every tile on every call: twice
+ * the operand's bytes over PCIe, one tile after another, to deliver
+ * zeros no reduction looks at. It was the whole of the signature the
+ * saturation runs of 2026-09-16 could not explain - a tile reducing at
+ * a third of the engine's rate, and four tiles together no faster than
+ * one - and none of it was the tiles: with the upload gone a
+ * whole-array sum runs at the engine's 100 M beats a second on one
+ * tile and at 3.8 times that on four (docs/VALIDATION.md, 2026-09-18).
+ *
+ * What makes skipping it safe is a property of the TILE, so it is held
+ * by a test and not by this comment: with b and c filled with 0xFF - a
+ * NaN at every format - every reduction still matches the software
+ * backend, bits and flags. device-test re-runs its reductions that way
+ * on an XRT device, which is what CFT_XRT_REDUCE_BC=poison is for:
+ *
+ *   unset    b and c are allocated and never written (the default)
+ *   poison   they are filled with 0xFF and uploaded - adversarial
+ *            contents at the old cost; a reduction that ever comes to
+ *            depend on them goes red under it
+ *   zero     the behaviour before 2026-09-18, for an A/B timing
+ *
+ * Read per call, so a test can switch it between two runs. A future
+ * reduction that really reads b in the tile (a fused dot) must not
+ * come through here with a null b. */
+void reduce_unread(xrt::bo &b, xrt::bo &c, size_t real_bytes,
+                   size_t padded_bytes)
+{
+    const char *const m = std::getenv("CFT_XRT_REDUCE_BC");
+    if (std::getenv("CFT_XRT_TRACE"))
+        std::fprintf(stderr, "[xrt trace] reduction b and c, %zu bytes: %s\n",
+                     padded_bytes,
+                     (!m || !*m) ? "unwritten"
+                     : !std::strcmp(m, "poison") ? "poison (0xFF), uploaded"
+                     : !std::strcmp(m, "zero") ? "zeros, uploaded"
+                     : "unwritten (unknown mode ignored)");
+    if (!m || !*m)
+        return;
+    if (!std::strcmp(m, "poison")) {
+        std::memset(b.map<uint8_t *>(), 0xFF, padded_bytes);
+        std::memset(c.map<uint8_t *>(), 0xFF, padded_bytes);
+        b.sync(XCL_BO_SYNC_BO_TO_DEVICE, padded_bytes, 0);
+        c.sync(XCL_BO_SYNC_BO_TO_DEVICE, padded_bytes, 0);
+    } else if (!std::strcmp(m, "zero")) {
+        stage(b, nullptr, real_bytes, padded_bytes);
+        stage(c, nullptr, real_bytes, padded_bytes);
+    }
+}
+
 /* ====================================================================
  * Device-resident buffers (cft.h's cft_alloc; backend.h's seam)
  *
@@ -2321,9 +2375,9 @@ extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
                 /* b and c are unread by a sum, but the engine streams
                  * all three - one read enable feeds all three FIFOs -
                  * so they must be real, readable memory of the same
-                 * length. */
-                stage(tile.b, nullptr, m * esz, padded * esz);
-                stage(tile.c, nullptr, m * esz, padded * esz);
+                 * length. ensure_capacity above made them that; their
+                 * CONTENTS are nothing's business (reduce_unread). */
+                reduce_unread(tile.b, tile.c, m * esz, padded * esz);
             }
         } catch (const std::bad_alloc &) {
             set_err("out of memory staging a reduction");
@@ -2527,8 +2581,7 @@ extern "C" int cftx_reduce_seg(void *hw, int op, int fmt, int rnd,
                 stage(tile.a, pa + lo * esz, m * esz, padded * esz);
                 wa[j] = &tile.a;
             }
-            stage(tile.b, nullptr, m * esz, padded * esz);
-            stage(tile.c, nullptr, m * esz, padded * esz);
+            reduce_unread(tile.b, tile.c, m * esz, padded * esz);
         }
     } catch (const std::bad_alloc &) {
         set_err("out of memory staging a segmented reduction");
