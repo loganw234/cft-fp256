@@ -538,6 +538,30 @@ default), built once at the end of wave 2.
   a card-backed `cft-serve` fronting a tile without a feature is the
   first place that sentence is reachable.
 
+### Owed to the next card day (added 2026-09-18, after atlas-engine's handoff)
+
+Two host defects found on the card by a workload from outside this
+project were fixed on 2026-09-18 without a card: the XRT backend is
+compiled on the box and the tests run on the software backend, and the
+patches themselves were verified on both images by atlas-engine before
+they were handed over. What only a card can still say:
+
+- **`device-test -q -n 8` on both round-2 images with the two new
+  legs**: the scratch leg's section 2b (an index past the depth under
+  `SCRATCH_STRICT`: +0, no store, and STATUS carrying bit 5 - the word
+  the XRT backend used to drop) and the program run of 32,768 and
+  32,769 lanes with no mask. Expect the round-2 count plus the legs'.
+- **The second leg's negative control, which exists only on XRT**: with
+  the mask buffer's sizing put back to one beat and `stage_mask`'s
+  check left in, the leg must FAIL by name ("a sizing defect in this
+  backend") and the process must exit cleanly - a named failure of one
+  run where there used to be a corrupted heap. Then restored, green.
+- **atlas-engine's program set with the STOCK runner**:
+  `python3 run_set.py --runner host/positive-run --device <image>` from
+  the handoff's `program-set/`; 140 of 140 on both images, where the
+  patched runner and the unpatched library gave 139.
+- **The reductions' overlap**, still first in docs/ROADMAP.md's debts.
+
 ### What the card said (2026-09-15, the round-2 single tile; docs/VALIDATION.md has the whole day)
 
 - **The new legs**: green on both images once the tests were right

@@ -231,7 +231,10 @@ through the library on the card in docs/BENCHMARKS.md). One thing tile
 count does NOT buy yet: a PROGRAM run, resident or staged, executes on
 one tile - `cftx_program_run` uses the first tile and never partitions
 (docs/ROADMAP.md's debts list, 2026-09-15) - so a four-tile image runs
-a program at one tile's rate. And what it buys on elementwise work was
+a program at one tile's rate. atlas-engine measured exactly that on
+2026-09-17, every program at the single's rate to the hundredth on the
+quad, and the plan for it is docs/ROADMAP.md, "Programs across tiles: a
+partitioner and a scheduler". And what it buys on elementwise work was
 measured on the round-2 pair (2026-09-16, docs/VALIDATION.md,
 "saturating the pair"): the engine is exactly four times one at every
 format and size, each unit at the single's 107 M beats a second, and

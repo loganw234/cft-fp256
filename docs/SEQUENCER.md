@@ -1344,9 +1344,14 @@ It exists because the depth is a BUILD PARAMETER, which makes a
 correct-looking program silently portable in the wrong way.
 
 This section is the CONTRACT; the sections above describe it. Unlike
-revisions 2 and 3, it carries no build-cost note, because the tile half
-has not been built. Saying anything else in this position would read as
-a measurement.
+revisions 2 and 3, it carries no build-cost note, and the reason changed:
+when this was written the tile half had not been built, and since the
+revision-4 pair (2026-09-13, from f636cf3) it has never been built ALONE
+- that pair carried R8 and the scalar route together, and its entry in
+docs/VALIDATION.md prices the pair (+0.210 ns kernel-side on the single,
++0.022 on the quad, the thinnest margin in the lineage) and not the
+feature. A number for R8 by itself would have to be measured; none has
+been, so none is given.
 
 ### R8. `SCRATCH_STRICT`: the index that is not there
 
@@ -1405,11 +1410,19 @@ mapping `scr_addr_fn` already uses.
 
 ### What revision 4 does not do
 
-It has not been built. The RTL is written and simulated - 18/18 and 1/1
-under Verilator and again under Icarus, `yosys-lint` clean, and the
-directed case fails when the flag is disconnected - but no bitstream
-carries it, so every card in service reads CAPS2[6] as zero and turns a
-strict image away.
+*It is on silicon, which this paragraph denied until 2026-09-18.* The
+revision-4 pair (2026-09-13) and every pair since publish CAPS2[6] and
+load a strict image; an image older than that pair reads the bit as
+zero and turns a strict image away by name. What a card had been ASKED
+until 2026-09-17 was only that a strict image loads. That day
+atlas-engine ran an index past the depth on the round-2 pair: the
+deposits were right, the tile's own register read STATUS = 0x20 under
+`CFT_XRT_TRACE`, and libcft handed the caller 0 - the XRT backend
+reduced STATUS to bit 4 on the way out. Fixed on 2026-09-18, and
+`device-test`'s scratch leg now runs the index past the depth on
+whatever device it is given and reads the word back (section 2b; with
+the report dropped it fails once a format and the deposits still pass,
+which is exactly what the card had shown).
 
 It does not change what a program without the flag computes, anywhere:
 the modulo is untouched, and that is what every image built before
@@ -1523,6 +1536,26 @@ reads the file (DEPOSIT, SETACT, the scratch ops), moves the mask
 (SETACT, ACTALL) or ends the block (HALT, the implicit halt) waits for
 the queue to empty first; REPEAT and ENDREP read only the mask, which
 no result moves, and do not.
+
+*What that wait costs, measured on the card* (atlas-engine, 2026-09-17,
+the round-2 pair; five fp32 programs that differ only in the pair of
+instructions inside one `repeat 1024`, 16,384 lanes, the run alone on
+the clock, every deposit buffer matching the model): an arithmetic
+instruction **0.98 ns a lane** - about one cycle a beat at 135 MHz,
+which is what R12 to R15 were built to reach - and a static scratch
+store or load **3.9 ns**, an indexed one **4.0 ns**, a `SETACT`
+**4.0 ns**: about four cycles a beat for every control code measured,
+whatever it does. A `SETACT` that reads a register nothing near it
+writes costs what an `STL`/`LDL` pair on one register costs, so the
+cost is the drain this paragraph describes and not the memory. On the
+software backend the order is reversed - a scratch access is half an
+arithmetic instruction - so a program tuned on a host is tuned the
+wrong way for a tile. What it is worth to a workload that spills:
+atlas-engine's `throughput` makes 2,183 scratch accesses among its
+14,801 instructions a lane, about two fifths of its instruction time at
+these prices. Letting a control code join the overlap when nothing in
+the queue writes what it reads is a revision-7 item in
+docs/ROADMAP.md's debts, beside beat skipping.
 
 ### R13. The one hazard, a beat at a time
 

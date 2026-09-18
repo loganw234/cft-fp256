@@ -2276,6 +2276,26 @@ names, or the device's whole depth when an indexed form is present,
 because an `STX`'s slot is not known until the run. All three
 struct-size-gated, as `flags` is.
 
+### What a program run's `bus_out` carries
+
+Two REPORTS on a run that returned `CFT_OK`, and neither invalidates
+the output:
+
+| bit | name | what happened |
+|---|---|---|
+| 4 | `CFT_STATUS_DEPOSIT_OVERFLOW` | a lane deposited more than `max_deposits`; the excess was dropped, what fit is correct |
+| 5 | `CFT_STATUS_SCRATCH_RANGE` | a `SCRATCH_STRICT` image indexed the scratch at or past the device's depth; the store was suppressed, the load read +0, and the run went on (docs/SEQUENCER.md R8) |
+
+Bits 0 to 2 are the engine's bus faults and arrive only with
+`CFT_ERR_BUS_FAULT`; bit 3 is the trimmed-build precision refusal.
+Every backend hands back both reports - the software backend, a tile
+and the remote route. On a tile that was true of bit 4 only until
+2026-09-18: the XRT backend dropped bit 5 on the way out, so a strict
+image was computed correctly on a card and its caller was told
+nothing, which is the one thing strict exists to prevent
+(docs/VALIDATION.md, that date). A caller that relies on strict should
+run against libcft at or after that commit.
+
 ### The ninth constant-index bit (R7)
 
 Under `kx`, `imm[28]`, `imm[29]` and `imm[30]` are the ninth bits of

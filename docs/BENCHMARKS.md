@@ -419,6 +419,46 @@ bytes and flags, never compute, at about one percent of a run. The
 segmented reduction's ratio is the per-call round trip against a
 per-segment flush, which is why it grows with the segment count.
 
+### A real workload's programs on the pair (atlas-engine, 2026-09-17)
+
+The first programs from outside this project to run on revision-6
+silicon: atlas-engine's shape functions lowered to sequencer programs,
+binary32, timed through libcft with the run alone on the clock and
+every deposit buffer checked (their `docs/CFT-SILICON.md`; the handoff
+is recorded in docs/VALIDATION.md, 2026-09-18). One tile; the quad ran
+every one of them at the single's rate to the hundredth, because a
+program run is one tile's.
+
+| program | instructions | per lane | lanes a second |
+|---|---|---|---|
+| `psf` | 185 | 0.27 us | 3.75 M |
+| `hopf` | 638 | 0.72 us | 1.39 M |
+| `mand` | 1,111 | 3.00 us | 334 k |
+| `jong` | 737 | 3.96 us | 252 k |
+| `starfield` | 5,475 | 5.85 us | 171 k |
+| `throughput`, 2,183 scratch accesses | 14,801 | 24.98 us | 40 k |
+| `stdmap` | 912 | 95.4 us | 10.5 k |
+| `nested` | 1,401 | 171 us | 5.8 k |
+| `threebody`, one loop of 2,560 trips | 2,029 | 3,286 us | 304 |
+
+And what one instruction costs by kind, from five programs that differ
+only in the pair inside one `repeat 1024` (16,384 lanes; per lane for
+the whole program):
+
+| 1,024 trips of | one tile | software, one core |
+|---|---|---|
+| one arithmetic instruction | 1.24 us | 14.77 us |
+| two arithmetic instructions | 2.24 us | 29.23 us |
+| `stl` and `ldl`, one slot | 8.18 us | 16.08 us |
+| `stx` and `ldx` | 8.41 us | 23.34 us |
+| one arithmetic and a `setact` | 5.38 us | 24.76 us |
+
+So an arithmetic instruction is 0.98 ns a lane on the tile and every
+control code about 4 ns - the drain docs/SEQUENCER.md R12 describes -
+while on a host a scratch access is the CHEAP instruction. The tile is
+twelve to thirteen times one core on arithmetic and two to three times
+on a spill, and a program's shape decides which it sees.
+
 ## Workloads designed for the contract
 
 The tables above adapt other libraries' benchmarks to this one. The

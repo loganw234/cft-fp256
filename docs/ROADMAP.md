@@ -2931,7 +2931,25 @@ rediscovering them.
   `cftx_run`'s), so P3's per-tile mask repack always starts at bit 0
   and a multi-tile image runs a program on one tile. The scale-out
   doctrine above assumes otherwise for elementwise work; for programs
-  it is a sentence that does not exist yet. (V3.)
+  it is a sentence that does not exist yet. (V3.) Measured from outside
+  on 2026-09-17: atlas-engine's programs ran on the quad at the
+  single's rate to the hundredth. The sentence now exists as a plan -
+  "Programs across tiles: a partitioner and a scheduler", below.
+- **Control codes do not join the instruction overlap** - a revision-7
+  item beside beat skipping. R12's rule is that every control code
+  which reads the register file waits for the queue of in-flight
+  results to empty, and atlas-engine priced it on the card
+  (2026-09-17): arithmetic 0.98 ns an instruction a lane, a scratch
+  store or load 3.9, an indexed one 4.0, a `SETACT` 4.0 - four cycles a
+  beat for every control code, whatever it touches, against one for
+  arithmetic. The rule is conservative: a control code need only wait
+  for a queued result that writes what it READS (R13's hazard test
+  already names that set for ALU instructions), and a store whose
+  source is settled could issue under the overlap as a read does.
+  What it buys is the spilling workload: about two fifths of
+  `throughput`'s instruction time, and one `SETACT` a trip in every
+  loop with an early exit. The before-side is their five probes
+  (`probes/insn-cost/` in the handoff) and docs/BENCHMARKS.md's table.
 - **Beat skipping for masked lanes** is a revision-7 item: the sequencer
   issues per beat and the active bit decides what is written, so the
   lane mask saves bytes, flags and the early exit and no compute
@@ -2987,6 +3005,175 @@ rediscovering them.
   in place), and every test ran at 64 lanes until the requester's own
   shape did not. docs/VALIDATION.md's card-day entry has the three
   instruments that told a host defect from a tile defect.
+- **Two more the card found on 2026-09-17, for a workload from outside
+  this project**, fixed on 2026-09-18 (docs/VALIDATION.md): the XRT
+  backend reduced a program run's STATUS to bit 4, so revision 4's
+  range report never reached a caller on a card; and with no lane mask
+  the mask buffer was one page while the fill wrote a bit a lane, so a
+  program run past 32,768 lanes overran it and corrupted the heap with
+  every deposit right. Both name the same gap as the two above, from
+  the other end: every sequencer leg of `device-test` ran at most 200
+  lanes, and none read STATUS back after an index past the depth. Both
+  legs exist now. What is still owed is the general form - a program
+  leg at every capacity boundary the backend has (a page of mask bits,
+  a page of counts, an HBM channel), not only the one that was hit.
+- **The program-run wait is one minute by default and a timed-out
+  handle is finished** (`CFT_TIMEOUT_MS`, capped at twenty minutes).
+  atlas-engine's heaviest program is 3.3 ms a lane, so 65,536 lanes is
+  three and a half minutes on one tile. After a timeout the tile may
+  still be running and nothing tells the host when it stops, so the
+  next run on it waits blind. A caller can split its lanes today, and
+  did, with every result matching; what is owed is a completion the
+  host can see after a timeout, and a per-tile rather than per-handle
+  notion of "finished" - both of which the scheduler below needs
+  anyway.
+- **atlas-engine's program set is not a verify stage yet.** 140 cases,
+  20 MB, whose expected deposits were agreed by libcft, the golden
+  model, the assembler, the runner and the pinned GLSL interpreted at
+  binary32 - the only program corpus this project has that it did not
+  write. It replays in under two minutes on a card and about a quarter
+  of an hour on one core. Vendoring 20 MB of binaries is a decision,
+  not a chore: the alternative is a stage that fetches the set by its
+  SHA256SUMS from atlas-engine's tree when it is present and is
+  skipped by name when it is not.
+- **The Node module exports no projection for four feature bits**
+  (`SCRATCH_STRICT`, `SCALAR`, `INDEXED`, `LANE_MASK`), so the package
+  holds them to `cft.h` by test rather than to the module by `audit()`
+  (2026-09-18). At the next module rebuild they become four
+  `cftw_seq_feat_*` exports and join the seven that are audited.
+
+### Programs across tiles: a partitioner and a scheduler (plan of record, 2026-09-18)
+
+Logan's word, 2026-09-18: when this work begins it takes the proper
+approach - a partitioner and a scheduler - rather than a loop over
+tiles inside `cftx_program_run`. This section is what that means, what
+decides whether a cut pays, and the order. Nothing here is built.
+
+**What a program is, for this purpose.** One instruction stream
+executed over a block of lanes at once - 128 lanes at fp32, 16 at
+fp256 - and the blocks in sequence, on one tile. It is already
+parallel; it is confined. On a four-tile image three tiles idle while
+it runs. There are three ways to use them, and they are one mechanism
+seen at three grains:
+
+| grain | what is cut | edges between the pieces |
+|---|---|---|
+| **lanes** | the same image over disjoint lane ranges, one range a tile | none |
+| **runs** | different programs, or different runs of one, on different tiles at once | none |
+| **the program** | one program's dataflow graph into sub-programs, placed on different tiles | the values live across the cut |
+
+**Why the contract already allows all three.** docs/SEQUENCER.md's
+promise is "same bits, on one tile or four", and what a partition
+leans on is already stated there: a lane has thirty-two private
+registers and 256 private scratch slots and no path to another lane;
+deposition is addressed by lane index, never by arrival (P2); and the
+early exit is invisible (P3), so a lane's deposit count cannot depend
+on which lanes share its block. Flags and STATUS are sticky ORs,
+which are associative, so they recombine in any order. For a cut
+through the program the argument is the partitioner's to make: the
+pieces must be dataflow-equivalent to the whole, and the whole is the
+definition, so the oracle is free - the golden model runs the task
+graph and must equal the uncut program bit for bit.
+
+**The scheduler** owns tile assignment for every kind of run. Today
+there are three ad-hoc policies - elementwise work is sliced across
+every tile, a reduction cuts its tree across a power of two of them, a
+program takes tile 0 - each with its own launch-and-wait code, and one
+of the three does not overlap its launches for a reason nobody has
+found yet (the reductions debt above). One scheduler replaces them:
+
+- a **task** is a sub-image, a lane range, its operands and its
+  outputs; a **job** is a graph of tasks; a synchronous call is a job
+  submitted and waited for, so nothing a caller has today changes;
+- **asynchronous submit and wait** in the API (the next ABI step), with
+  an optional tile affinity, which is what lets a caller with many
+  different programs - atlas-engine has sixty-nine - keep four tiles
+  busy without the library guessing;
+- **placement follows the data**: a resident buffer is a device copy
+  per tile and role, and it comes in two flavours the scheduler must
+  tell apart - SLICED (each tile holds its window; what `cft_alloc`
+  gives elementwise work today) and REPLICATED (each tile holds the
+  whole; what a gathered source, an image and a bank need, because a
+  table may index anywhere and a tile cannot read another tile's
+  channel);
+- **any placement, the same bits.** The scheduler may choose any
+  placement and any order, so the gate is placement invariance: the
+  program analogue of `device-test`'s `compare_partitioned`, fuzzing the
+  cut points and the tile order and requiring identical deposits,
+  counts, flags and STATUS, plus atlas-engine's program set
+  byte-identical on the single and the quad;
+- **failure is per tile**: a fault or a timeout on one tile fails the
+  job and leaves the other tiles usable, where today a timeout
+  finishes the handle.
+
+**The partitioner** lives where the program's structure is known, in
+`python/cft_golden/asm.py`, and emits a task graph of sub-images and
+the carriers between them. What it has to get right:
+
+- **the lane cut** needs no analysis: every lane-major operand - the
+  three streams, the deposit window, the counts, both scratch blocks,
+  an index table's rows - slices by lane range, cut at block boundaries
+  so a tile sees the blocks it would have seen; the image, the bank and
+  a gathered SOURCE replicate; the lane mask repacks from a bit offset,
+  which `cft_mask_repack` has done since round 2 for exactly this day;
+- **independent components** - sub-graphs of the dataflow with no value
+  in common - are the cheap cut through a program, legal when the
+  deposit order can be rebuilt statically: a lane's deposit address is
+  its own count, so a cut that leaves deposits on both sides needs a
+  static map from each piece's k-th deposit to the whole's j-th, which
+  exists only when no deposit sits under a data-dependent exit;
+- **a pipeline cut** at a point outside every loop hands the live set
+  across it, and the carrier already exists: a resumable program's
+  scratch-out block is the next run's scratch-in block
+  (`CFT_PROG_FLAG_SCRATCH_IO`, R5). What does NOT exist is the active
+  set as an output - a stage that ends with lanes switched off by
+  `SETACT` must start the next stage with those lanes off, which is a
+  lane mask (R17) the host can only build if the run tells it which
+  lanes are live. An indexed scratch access is a may-alias of the whole
+  scratch and is a barrier to any cut through the scratch;
+- **the cost model** decides, from measured prices rather than belief:
+  0.98 ns an arithmetic instruction a lane and about 4 ns a control
+  code (above); a hand-off through the host at what a staged call
+  costs, about a fifth of a millisecond plus the bytes at the staged
+  path's 2 to 3 GB/s; a launch's fixed cost from the saturation runs.
+  On today's images every edge crosses the host, so a cut through a
+  program pays only when both sides are milliseconds long - the lane
+  cut and the run cut have no edges and pay from the first millisecond.
+
+**What would make program cuts cheap is a link configuration, not
+RTL.** `hw/link_quad.cfg` gives each of a tile's four ports its own HBM
+bank, which is why four tiles are exactly four times one on elementwise
+work and also why no tile can read another's output. Mapping tile k's
+`d` port and tile k+1's `a` port onto one bank makes a hand-off a
+buffer bound to two kernels' arguments - no copy, no host - at the
+price of those two ports sharing a bank's bandwidth, and of routing
+pressure on a quad that closed at +0.040 ns with 80% of the part's
+LUTs. It is a build experiment with a measurable answer, and it comes
+last.
+
+**The order.**
+
+1. *Instrument the launches.* The reductions that do not overlap are
+   the same machinery; find that first, because a scheduler built on a
+   launch path that serialises by accident inherits it.
+2. *The scheduler core inside the library, with the lane cut as its
+   first strategy for programs.* Host only: no RTL, no bitstream, no
+   change to the conformance profile. Gate: placement invariance, the
+   program set on both images, and close to four times on any run
+   longer than a few milliseconds - `threebody` at 65,536 lanes is
+   three and a half minutes on one tile.
+3. *Asynchronous submit, wait and affinity in the API*, and per-tile
+   failure. The run cut falls out of it.
+4. *The partitioner in `asm.py`*: the dataflow graph, the legality
+   rules above, the static deposit map, the cost model; independent
+   components first, loop-free pipeline cuts second, with the golden
+   model running every task graph against the uncut program.
+5. *The shared-bank link configuration*, measured, and zero-copy edges
+   if it closes.
+
+Per-tile speed multiplies all of it: revision 7's two items above - a
+control code joining the overlap, a masked beat skipped - make each
+tile faster, and the tile count then multiplies that.
 
 ## The adoption story these serve
 
