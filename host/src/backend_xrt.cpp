@@ -84,6 +84,7 @@
 #include <cstring>
 #include <exception>
 #include <new>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -527,8 +528,22 @@ void ensure_one(Dev &D, Tile &t, xrt::bo &bo, size_t &cap, int arg,
 void stage_mask(xrt::bo &bo, const uint8_t *src, size_t first,
                 size_t lanes, size_t padded_bytes)
 {
-    auto *p = bo.map<uint8_t *>();
     const size_t real = cft_mask_bytes(lanes);
+    /* The repack below writes `real` bytes whatever the buffer holds,
+     * so the buffer's size is checked HERE and not trusted to the
+     * caller. It was trusted until 2026-09-18, and a run with no mask
+     * sized the buffer at one beat while this wrote a bit for every
+     * lane: past 32,768 lanes - one page's worth of bits - the all-ones
+     * fill ran off the end of the mapping, the deposits came back right
+     * and the host heap did not (atlas-engine's card day, 2026-09-17).
+     * A sizing mistake is now a named failure of this one run. */
+    if (real > padded_bytes)
+        throw std::length_error("stage_mask: the lane-mask buffer holds " +
+                                std::to_string(padded_bytes) + " bytes and " +
+                                std::to_string(lanes) + " lanes need " +
+                                std::to_string(real) + " - a sizing defect "
+                                "in this backend, not the caller's");
+    auto *p = bo.map<uint8_t *>();
     cft_mask_repack(p, src, first, lanes);
     if (padded_bytes > real)
         std::memset(p + real, src ? 0 : 0xFF, padded_bytes - real);
@@ -1668,8 +1683,12 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
             idx_mode |= 1u << (19 + r);
     /* ABI 0.14's lane mask (R17). ONE BIT A LANE at every format, so
      * the tile's buffer is (lanes + 7) / 8 bytes rounded up to a beat,
-     * and one beat when there is no mask - an 0xA00 tile's argument 16
-     * is always a real buffer, the way 12..15 are. MODE[23] is set
+     * WITH OR WITHOUT a mask - an 0xA00 tile's argument 16 is always a
+     * real buffer, the way 12..15 are, and with no mask it holds a one
+     * for every lane of the run, so a MODE[23] the host did not set
+     * could only ever read as "every lane". (It was one beat when there
+     * was no mask until 2026-09-18, while stage_mask filled a bit a
+     * lane regardless: see the guard there.) MODE[23] is set
      * from the same pointer the bytes come from, so a mask cannot be
      * staged without its bit or a bit set without its mask.
      *
@@ -1684,8 +1703,9 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
     const uint8_t *const lane_mask = io ? io->lane_mask : nullptr;
     const size_t mask_first = 0;
     const size_t mask_lanes = n;
-    const size_t mask_real = lane_mask ? cft_mask_bytes(mask_lanes) : 0;
-    const size_t mask_pad = mask_real ? beat_round(mask_real) : 32u;
+    const size_t mask_real = cft_mask_bytes(mask_lanes);
+    const size_t mask_pad = std::max(beat_round(mask_real),
+                                     static_cast<size_t>(32));
     if (lane_mask)
         idx_mode |= 1u << 23;
 
