@@ -2212,15 +2212,18 @@ typedef struct cft_program cft_program;
  * is the tail. */
 #define CFT_STATUS_DEPOSIT_OVERFLOW (1u << 4)
 
-/* RESERVED, revision 4's R8, and not yet produced by anything in this
- * library. An indexed scratch access at or past the device's scratch
- * depth, in a program whose header sets CFT_PROG_FLAG_SCRATCH_STRICT:
- * the access is suppressed, LDX reads +0, and the run continues, which
- * is what a deposit past max_deposits already does. The number is
- * published here before any device can report it for the reason the
+/* Revision 4's R8. An indexed scratch access at or past the device's
+ * scratch depth, in a program whose header sets
+ * CFT_PROG_FLAG_SCRATCH_STRICT: the access is suppressed, LDX reads +0,
+ * and the run continues, which is what a deposit past max_deposits
+ * already does - so like the bit above it is a REPORT on a successful
+ * run and does not invalidate the output. The software backend and
+ * every tile since the revision-4 pair produce it. The number was
+ * published here before any device could report it for the reason the
  * bit above moved to 4 - a status bit is free to choose only while it
  * has never crossed a device boundary. Like the deposit bit it is
- * deliberately not an IEEE flag. */
+ * deliberately not an IEEE flag. (Until 2026-09-18 the XRT backend
+ * dropped it on the way back from the tile: docs/VALIDATION.md.) */
 #define CFT_STATUS_SCRATCH_RANGE (1u << 5)
 
 CFT_API cft_status cft_program_load(cft_device *dev, const void *image,

@@ -21,7 +21,7 @@
     {
       "source": "host/include/cft.h",
       "dest": "src/cft/include/cft.h",
-      "sha256": "9fd16d5a1ddfa6823d47bea0e8945c1af4d7da5e319421a135445da30564f6e5"
+      "sha256": "a57d2641428e3de933c56e0f6e1d8b49ed77f021fbe82beb4579b448af14c46b"
     },
     {
       "source": "host/include/cft_config.h",
@@ -41,7 +41,7 @@
     {
       "source": "host/src/backend.h",
       "dest": "src/cft/src/backend.h",
-      "sha256": "ec4b803a6de63ec20d17d35e35035561bf7a8bad2c1091b5c7f149cc3452f0e0"
+      "sha256": "04fdf14da66a6e5a3e825482f8275729a09558c2ea6ee6b83967b485eb651ba5"
     },
     {
       "source": "host/src/backend_remote.c",

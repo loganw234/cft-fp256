@@ -293,8 +293,12 @@ typedef struct cft_seq_run_io {
  *
  * flags is the run's sticky IEEE word. bus carries STATUS: bits 0..2
  * only on CFT_ERR_BUS_FAULT, as everywhere else in this header, and
- * CFT_STATUS_DEPOSIT_OVERFLOW (bit 4) on success - which is a report
- * rather than an error, because what fit is correct.
+ * on success the two REPORTS, CFT_STATUS_DEPOSIT_OVERFLOW (bit 4) and
+ * CFT_STATUS_SCRATCH_RANGE (bit 5) - reports rather than errors,
+ * because what fit is correct and what was in range is correct. A
+ * backend hands back BOTH or it is not this contract: one that stopped
+ * at bit 4 computed a strict image correctly and told the caller
+ * nothing, which is the one thing strict exists to prevent.
  *
  * ONE compute unit, deliberately. See the note in the implementation
  * beside cftx_run's partitioning: an elementwise element depends on
