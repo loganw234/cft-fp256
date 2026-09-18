@@ -540,6 +540,12 @@ default), built once at the end of wave 2.
 
 ### Owed to the next card day (added 2026-09-18, after atlas-engine's handoff)
 
+*Paid the same day, 09:11 to 09:16, on Logan's word that the card was
+free - every item but the last, and every one as predicted
+(docs/VALIDATION.md, "the card half"). Left as written, because the
+list is also the recipe: `~/box_handoff_cardcheck.sh <commit>` on the
+box runs it.*
+
 Two host defects found on the card by a workload from outside this
 project were fixed on 2026-09-18 without a card: the XRT backend is
 compiled on the box and the tests run on the software backend, and the

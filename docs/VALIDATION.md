@@ -13166,3 +13166,45 @@ matched, 0 mismatched, 0 refused**, 48 strict images among them, in
 card run used their own patch, which is the same sizing change - added
 to docs/CARDDAY.md's list and to the scripted check on the box. The
 card was not touched today.
+
+## 2026-09-18 - the card half: main's own fixes and the photograph on the U50, and a negative control that fails by name
+
+Logan's word at 09:1x: the card is free. Pre-flight - no process on the
+box using the library (checked from a command that names none of the
+tools, after the inline form matched its own command line twice more
+today), the U50 ready at 0000:02:00.1, 14.96 W, the round-2 pair's
+SHA256SUMS clean. Then `~/box_handoff_cardcheck.sh fbc10cf`, which
+asserts the tree's SHA and greps it for the new code before it builds:
+~/cft-fp256-d at fbc10cf, `XRT=1`, tests built by name, XRT-linked.
+09:11:45 to 09:16:08.
+
+    device-test -q -n 8, single        2,287 checks, 0 failed   the round-2 count (2,248) plus the two legs' 39;
+    device-test -q -n 8, quad          2,287 checks, 0 failed   the strict section at all four formats and the page
+                                                                leg once, on each image; nothing NOT RUN, nothing
+                                                                NOT COMPARED
+    atlas-engine's set, STOCK          140 matched, 0 refused   on the single and on the quad; `r8-strict` among
+    runner, main's library                                      them - the case the unpatched library missed, which
+                                                                made it 139
+    the hopf photograph,               4 of 4 passes MATCH      on the single and on the quad: the GPU's record,
+    main's library                     the GPU, on each image   bit for bit, 1,048,576 lanes a pass - thirty-two
+                                                                times past the old mask boundary; 2 s a pass after
+                                                                the first, which carries the image load (5 s, 9 s)
+    the page leg's NEGATIVE CONTROL    711 checks, 2 failed,    sizing put back to one beat in the scratch tree,
+    (XRT only)                         rc 1                     `stage_mask`'s check left in: "the lane-mask buffer
+                                                                holds 32 bytes and 32768 lanes need 4096 - a sizing
+                                                                defect in this backend, not the caller's", and the
+                                                                same at 32,769; NO heap abort, exit 1 and not 134
+                                                                or 139; tree restored
+
+So every claim the morning's entries made without a card now has one:
+the dropped status bit reaches a caller through MAIN's library (the
+set's one miss is gone on both images), the mask buffer's fix holds at
+the boundary, one past it and a million lanes out, the guard turns the
+old heap corruption into a named failure of one run, and the GPU's
+photograph is reproduced by main's library on the tile as it was by
+atlas-engine's patched one. The card was left idle at 14.93 W with both
+box trees clean.
+
+What is still owed to a card is what was owed before today: the
+reductions that do not overlap across tiles, first in docs/ROADMAP.md's
+debts.
