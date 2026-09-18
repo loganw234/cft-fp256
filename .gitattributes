@@ -21,6 +21,12 @@
 Makefile text eol=lf
 
 *.png binary
+# Program images and constant banks are binary fixtures
+# (host/tests/photograph). Say so rather than let git sniff it: a bank
+# that happened to hold no zero byte would be "text", and a bank with
+# its line endings normalised is a different set of constants.
+*.cftp binary
+*.bank binary
 *.jpg binary
 *.xclbin binary
 *.xo binary

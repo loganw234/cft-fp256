@@ -161,10 +161,10 @@ and the measurements.
 One command runs the gates, in three sizes:
 
 ```bash
-make verify-quick   # ~20 min, 25 of 38 stages: model-vs-C, the bindings,
+make verify-quick   # ~20 min, 26 of 39 stages: model-vs-C, the bindings,
                     # seven language legs, soak, the five workloads,
                     # the browser demos and the remote backend
-make verify-gate    # ~2 h, 33 of 38: the above plus the golden model,
+make verify-gate    # ~2 h, 34 of 39: the above plus the golden model,
                     # vectors, libcft, transcendentals, MPFR, C++,
                     # the Yosys lint and the formal proofs
 make verify         # the full census, hours: adds the cocotb suites,
@@ -174,7 +174,7 @@ make verify         # the full census, hours: adds the cocotb suites,
 Every stage names itself, logs itself and writes a `.ok` or `.fail`
 marker; `--resume` continues an interrupted run and refuses to cross
 commits. A stage whose tools are absent is **skipped by name with the
-reason** rather than passed. `bash verify/run.sh --list` prints all 38 with
+reason** rather than passed. `bash verify/run.sh --list` prints all 39 with
 a `*` against the ones a given budget selects, and `docs/VERIFICATION.md`
 maps what each one proves and how long it really takes.
 
@@ -193,6 +193,14 @@ runs that failed stay in the record. The load-bearing ones:
   the host CPU's own IEEE hardware, and 999,000 cases of GNU MPFR.
 - **The transcendentals** are held against MPFR over 739,234 cases, with
   zero value and zero flag mismatches.
+- **A GPU agrees, bit for bit, on a real workload.** atlas-engine's
+  deterministic camera around a plate, lowered to a sequencer program:
+  a million samples a pass, five words a sample, and every pass's
+  deposit buffer is the one an NVIDIA RTX 5060 Ti recorded while
+  rendering the same frame from pinned GLSL - on the U50's tile and on
+  the software backend alike (2026-09-18). It is the one check here
+  whose expected bits this project did not compute, and the `photograph`
+  stage reruns it in a minute and a half.
 - **The same program in nine languages** prints byte-identical
   checksums, each on the platform and date `docs/COMPATIBILITY.md`
   records.

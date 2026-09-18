@@ -1,0 +1,107 @@
+{
+  "schema": "atlas-engine photo card case, 1",
+  "plate": "hopf",
+  "frame": {
+    "side": 512,
+    "tile": 512,
+    "buffer": [
+      512,
+      512
+    ],
+    "samples_a_pass": 1048576,
+    "passes": 4,
+    "levers": {
+      "BAND LOBES": 2,
+      "BAND SWING": 0.92,
+      "4D SPIN XW": 0.11,
+      "4D SPIN YZ": 0.07,
+      "SCALE": 0.36
+    },
+    "cam": {
+      "dist": 3.5,
+      "pitch": 0.32,
+      "tgtY": 0,
+      "rot": 0.05
+    },
+    "fix_scale": null
+  },
+  "device": {
+    "renderer": "NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2",
+    "gl_version": "4.3.0 NVIDIA 591.86"
+  },
+  "image": {
+    "file": "camera.cftp",
+    "sha256": "aa174eef6977e255d9202a771fe8081e5a345d6a3487078a69c097112cbe46de"
+  },
+  "words": 1081,
+  "registers": 17,
+  "deposits": [
+    "recX",
+    "recY",
+    "recR",
+    "recG",
+    "recB"
+  ],
+  "a": {
+    "file": "camera.a.bin",
+    "sha256": "1f7a6345e9b0e88fbda1b3deadf54bb6f18ccbf548a244bf2de33179c243c0ff"
+  },
+  "passes": [
+    {
+      "pass": 0,
+      "bank": {
+        "file": "camera.p0000.bank",
+        "sha256": "446e03a7c0e81f726605a3a1b0a94cc2c3bfef219d10bf1f824c8f2075f212a1"
+      },
+      "expect": {
+        "file": "../records.p0000.bin",
+        "sha256": "c3de029663d4154a93855cdfb24cbdaa478dd6a110f4d4a98bda95789ed3673b",
+        "what": "the GPU's records: five u32 a lane, x y r g b, x = 0xFFFFFFFF where nothing deposited"
+      }
+    },
+    {
+      "pass": 1,
+      "bank": {
+        "file": "camera.p0001.bank",
+        "sha256": "60536d229db3ee8f2978b3cf6faa25f0b0261433dba797b48dfcea894803b722"
+      },
+      "expect": {
+        "file": "../records.p0001.bin",
+        "sha256": "077c3252aea1c408b029076b0cb89cab8f231ba14b2c57862107f046e4722ef9",
+        "what": "the GPU's records: five u32 a lane, x y r g b, x = 0xFFFFFFFF where nothing deposited"
+      }
+    },
+    {
+      "pass": 2,
+      "bank": {
+        "file": "camera.p0002.bank",
+        "sha256": "fd6f30914912f581e7b529d2c31a9b36c1e07e48d47d09b8bbc573e01f3c7007"
+      },
+      "expect": {
+        "file": "../records.p0002.bin",
+        "sha256": "750ddad59c7c5f95d42e78e4be287f1ef2b483b220434d73f595fd371ecb65c8",
+        "what": "the GPU's records: five u32 a lane, x y r g b, x = 0xFFFFFFFF where nothing deposited"
+      }
+    },
+    {
+      "pass": 3,
+      "bank": {
+        "file": "camera.p0003.bank",
+        "sha256": "d451281eeb181b7c7945788000a1957c8a05da934c55a5b3cd46458904a840f7"
+      },
+      "expect": {
+        "file": "../records.p0003.bin",
+        "sha256": "81c593c573dcbe3b58b8ce094bf41f943b6a9d84e1ff398960f365a70267e22c",
+        "what": "the GPU's records: five u32 a lane, x y r g b, x = 0xFFFFFFFF where nothing deposited"
+      }
+    }
+  ],
+  "planes": {
+    "file": "../planes.gpu.bin",
+    "sha256": "bbbd38e6adc845fb2ec855cc9c2c8ca8e7b27e948088fefe593237ce5418be9b",
+    "buffer": [
+      512,
+      512
+    ]
+  }
+}

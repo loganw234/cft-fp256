@@ -15,10 +15,10 @@
 #   bash verify/run.sh --require-all   # a skipped stage FAILS the run
 #   SIM_JOBS=12 bash verify/run.sh    # the cocotb targets twelve at a time
 #   bash verify/run.sh --only cpp,node,wasm,lang-rust   # language legs, by name
-#   bash verify/run.sh --budget quick   # ~20 min: every model-vs-C check, bindings,
-#                                      # the language legs, soak, the five workloads,
-#                                      # the browser demos and the remote backend -
-#                                      # after a host build
+#   bash verify/run.sh --budget quick   # ~20 min: every model-vs-C check, the GPU's
+#                                      # photograph, bindings, the language legs, soak,
+#                                      # the five workloads, the browser demos and the
+#                                      # remote backend - after a host build
 #   bash verify/run.sh --budget gate    # ~2 h quiet, ~4 h loaded: quick + golden,
 #                                      # vectors, libcft, transcend, mpfr, cpp, lint, formal
 #   bash verify/run.sh --budget full    # everything: the census (adds sim, simmc,
@@ -139,7 +139,7 @@ BUDGET=""
 # now that the formal gate holds thirty-one proofs, full longer by the
 # simulation suite and the two browser replays; on the WSL distro the
 # replay stages take seconds.
-BUDGET_QUICK=docs,generated,buildargs,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
+BUDGET_QUICK=docs,generated,buildargs,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
 BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp
 RESUME=""
 FRESH=0
@@ -665,6 +665,25 @@ stage seq "the sequencer: C vs model over fuzzed programs, plain and with indexe
 need host-cc python
 stage reduce "all seven clause-9.4 reductions: C vs model, the tree, the two composition identities, the scaled products' invariant" -- \
   PY "$ROOT/host/tests/reduce_check.py" --trials 1500
+
+# The one stage whose expected bits this project did not compute. Every
+# stage above holds the C to the golden model, and the model is ours; a
+# defect shared by both would pass them all. This one holds the library
+# to an NVIDIA GPU: atlas-engine's deterministic camera around a plate,
+# lowered to a sequencer program, four passes of 1,048,576 samples, and
+# the SHA-256 of each pass's deposit buffer as the GPU recorded it while
+# rendering the same frame from pinned GLSL (host/tests/photograph/hopf,
+# and its README). The passes run side by side - about a minute and a
+# half on a desktop, which is what keeps it in the quick budget. With
+# the library's multiply forced to round toward zero all four passes
+# differ, and a fixture with one bit flipped is named as a damaged
+# fixture and nothing is run (docs/VALIDATION.md, 2026-09-18).
+do_photograph() {
+  HOSTMAKE "positive-run$EXE" || return 1
+  PY "$ROOT/host/tests/photograph_check.py"
+}
+need host-cc python
+stage photograph "a GPU's record of a real workload, bit for bit: atlas-engine's hopf photograph, four passes of 1,048,576 samples, each deposit buffer held to the SHA-256 an NVIDIA GPU wrote" -- do_photograph
 
 # The MPFR-compatible Python binding, which is a different claim from
 # the MPFR ORACLE below. do_mpfr asks whether libcft's arithmetic agrees

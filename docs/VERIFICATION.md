@@ -54,6 +54,16 @@ authority:
    conversions, the thirty-nine transcendentals, the augmented
    operations, the status word, the cross-format arithmetic, the
    alignment boundary, the sequencer's fuzzed programs, the reductions.
+   One stage in this layer holds the library to something this project
+   did not compute (`photograph`): atlas-engine's deterministic camera
+   around a plate as a sequencer program, each pass's deposit buffer
+   held to the SHA-256 an NVIDIA GPU wrote while rendering the same
+   frame from pinned GLSL. Every other stage here compares the C with
+   the golden model, and a defect the two shared would pass them all;
+   this one would not. Negative controls, run on 2026-09-18: with the
+   library's multiply forced to round toward zero all four passes
+   differ; a fixture with one bit flipped is named as damaged and
+   nothing runs.
 4. **The RTL, in simulation** (`tb/`, `make sim` in the `cft-sim`
    image). Twenty-five cocotb targets hold the hardware to the model, and
    since 2026-09-12 the target's exit code reports whether they passed:
@@ -174,6 +184,7 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | `wasm` (`verify.mjs`, the page without a browser) | 11 min | 30 min | 1,068,915 cases through the page's bytes, then 832,915 over 148 sets through the wrappers. The module must be REBUILT when an opcode is assigned, not merely revisioned: this lane replays the sets, so one predating opcode 31 failed 128 of 148 - all twenty reduce sets, each at its first `maxall` case |
 | `mpfr` | 8 min | | |
 | `soak-quick` | 1.6 min | | |
+| `photograph` (a GPU's record, four passes of 1,048,576 samples side by side) | 1.7 min | | 101 s a pass on one core with four running, 88 s alone; 1.2 s a pass on the U50's tile (atlas-engine, 2026-09-18). The expected hashes are an NVIDIA GPU's, not the model's |
 | the workload checks (`collatztest` ... `zoomtest`) | 1 to 3 min each | 1 to 3 min each | |
 | `remote` (`make -C host remotetest`) | | 10 to 12 min | the bounded replay is most of it |
 | `wstest` | | 2 min | |
@@ -201,7 +212,7 @@ fresh invocation re-runs everything and `--resume` is the only thing that
 skips work. (cft-rebound is the sibling repo with a content-addressed gate
 cache and a warm five-second check; this runner does not have one.)
 
-`bash verify/run.sh --list` prints all thirty-eight stages with a marker
+`bash verify/run.sh --list` prints all thirty-nine stages with a marker
 against the ones the given `--budget` or `--only` would actually run, so
 the list cannot imply a budget covers more than it does. The stage names
 are derived from the `stage` calls themselves rather than kept in a second

@@ -1,0 +1,380 @@
+{
+  "schema": "atlas-engine photo-gpu, 1",
+  "plate": "hopf",
+  "roman": "I",
+  "bundle": {
+    "path": "C:\\Users\\logan\\source\\repos\\atlas-darkroom\\tools\\determinism\\emitted-det-bundle.json",
+    "sha256": "ba48348768540af2f68aed4b6083ded39bf7f0c2a2b6a8fe6b2130d94dc1048f",
+    "era": "deterministic camera, EMITTED plates",
+    "date": "2026-08-24",
+    "camera_version": 3
+  },
+  "frame": {
+    "side": 512,
+    "tile": 512,
+    "buffer": [
+      512,
+      512
+    ],
+    "samples_a_pass": 1048576,
+    "passes": 4,
+    "levers": {
+      "BAND LOBES": 2,
+      "BAND SWING": 0.92,
+      "4D SPIN XW": 0.11,
+      "4D SPIN YZ": 0.07,
+      "SCALE": 0.36
+    },
+    "cam": {
+      "dist": 3.5,
+      "pitch": 0.32,
+      "tgtY": 0,
+      "rot": 0.05
+    },
+    "fix_scale": null
+  },
+  "device": {
+    "renderer": "NVIDIA GeForce RTX 5060 Ti/PCIe/SSE2",
+    "gl_version": "4.3.0 NVIDIA 591.86"
+  },
+  "kernel": {
+    "file": "kernel.glsl",
+    "sha256": "fc9e5a34d305ba965c1704db969c23e6359301851c54779ad436197f583aca69"
+  },
+  "capture": {
+    "file": "capture.glsl",
+    "sha256": "d92297b2b3478d66cf57efc3a5e6e228b1a1173dd86d8b742a24fcd0e3f188fd",
+    "made_by": {
+      "mode": "capture",
+      "plate": "hopf",
+      "kernelSha256": "fc9e5a34d305ba965c1704db969c23e6359301851c54779ad436197f583aca69",
+      "outSha256": "d92297b2b3478d66cf57efc3a5e6e228b1a1173dd86d8b742a24fcd0e3f188fd",
+      "lines": 1823
+    }
+  },
+  "uniforms": {
+    "accB": {
+      "bytes": "64000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 36963
+    },
+    "accG": {
+      "bytes": "64000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 36963
+    },
+    "accR": {
+      "bytes": "64000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 36963
+    },
+    "uAnam": {
+      "bytes": "0000803f",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uAspect": {
+      "bytes": "0000803f",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uAstig": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uBladeCurve": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uBladeRot": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uBladeStar": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uBlades": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uCA": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uCatEye": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uChrom": {
+      "bytes": "000000000000000000000080",
+      "dimension": 3,
+      "array_length": 1,
+      "gl_type": 35665
+    },
+    "uComa": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uCountN": {
+      "bytes": "00001000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5125
+    },
+    "uDist1": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uDist2": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uDoCount": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5124
+    },
+    "uFieldCurv": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uFieldFrac": {
+      "bytes": "0000803f",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uFirst": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5125
+    },
+    "uFishScale": {
+      "bytes": "0000803f0000803f",
+      "dimension": 2,
+      "array_length": 1,
+      "gl_type": 35664
+    },
+    "uFisheye": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uFocusD": {
+      "bytes": "00006040",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uFovHalf": {
+      "bytes": "aa619c3e",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uGain": {
+      "bytes": "0000803f",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uLensR": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uObstruct": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uP": {
+      "bytes": "000000401f856b3fae47e13d295c8f3dec51b83e000000000000000000000000",
+      "dimension": 1,
+      "array_length": 8,
+      "gl_type": 5126
+    },
+    "uPeak": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uPeakBand": {
+      "bytes": "cdcc4c3d",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uProj": {
+      "bytes": "69fb4a400000000000000000000000000000000069fb4a4000000000000000000000000000000000a93680bf000080bf000000000000000087f8ccbd00000000",
+      "dimension": 16,
+      "array_length": 1,
+      "gl_type": 35676
+    },
+    "uSeedSalt": {
+      "bytes": "2b6da6da",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5125
+    },
+    "uSeqOffset": {
+      "bytes": "6da65a3ffa7d873e",
+      "dimension": 2,
+      "array_length": 1,
+      "gl_type": 35664
+    },
+    "uShutter": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uSpher": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uSubExt": {
+      "bytes": "0002000000020000",
+      "dimension": 2,
+      "array_length": 1,
+      "gl_type": 35667
+    },
+    "uSubOrg": {
+      "bytes": "0000000000000000",
+      "dimension": 2,
+      "array_length": 1,
+      "gl_type": 35667
+    },
+    "uT0": {
+      "bytes": "00000000",
+      "dimension": 1,
+      "array_length": 1,
+      "gl_type": 5126
+    },
+    "uTileC": {
+      "bytes": "0000000000000000",
+      "dimension": 2,
+      "array_length": 1,
+      "gl_type": 35664
+    },
+    "uTileS": {
+      "bytes": "0000803f0000803f",
+      "dimension": 2,
+      "array_length": 1,
+      "gl_type": 35664
+    },
+    "uTilt": {
+      "bytes": "0000000000000000",
+      "dimension": 2,
+      "array_length": 1,
+      "gl_type": 35664
+    },
+    "uView": {
+      "bytes": "0000803f000000000000000000000000000000001801733fde0ea13e0000000000000000de0ea1be1801733f00000000000000006037eea4000060c00000803f",
+      "dimension": 16,
+      "array_length": 1,
+      "gl_type": 35676
+    },
+    "uVpSize": {
+      "bytes": "0002000000020000",
+      "dimension": 2,
+      "array_length": 1,
+      "gl_type": 35667
+    }
+  },
+  "per_pass": [
+    {
+      "pass": 0,
+      "uSeqOffset": "0000000000000000",
+      "uSeedSalt": "00000000"
+    },
+    {
+      "pass": 1,
+      "uSeqOffset": "7a371e3faa3f413f",
+      "uSeedSalt": "b979379e"
+    },
+    {
+      "pass": 2,
+      "uSeqOffset": "cebb713e537f023f",
+      "uSeedSalt": "72f36e3c"
+    },
+    {
+      "pass": 3,
+      "uSeqOffset": "6da65a3ffa7d873e",
+      "uSeedSalt": "2b6da6da"
+    }
+  ],
+  "planes": {
+    "file": "planes.gpu.bin",
+    "sha256": "bbbd38e6adc845fb2ec855cc9c2c8ca8e7b27e948088fefe593237ce5418be9b",
+    "layout": "3 x bh x bw u32, rows bottom-up",
+    "lit": 0.6469917297363281
+  },
+  "records": [
+    {
+      "pass": 0,
+      "file": "records.p0000.bin",
+      "sha256": "c3de029663d4154a93855cdfb24cbdaa478dd6a110f4d4a98bda95789ed3673b",
+      "deposited": 1015205
+    },
+    {
+      "pass": 1,
+      "file": "records.p0001.bin",
+      "sha256": "077c3252aea1c408b029076b0cb89cab8f231ba14b2c57862107f046e4722ef9",
+      "deposited": 1015221
+    },
+    {
+      "pass": 2,
+      "file": "records.p0002.bin",
+      "sha256": "750ddad59c7c5f95d42e78e4be287f1ef2b483b220434d73f595fd371ecb65c8",
+      "deposited": 1015232
+    },
+    {
+      "pass": 3,
+      "file": "records.p0003.bin",
+      "sha256": "81c593c573dcbe3b58b8ce094bf41f943b6a9d84e1ff398960f365a70267e22c",
+      "deposited": 1015211
+    }
+  ],
+  "records_binned_equal_planes": true,
+  "seconds": {
+    "render": 0.007011890411376953,
+    "capture": 0.6034078598022461
+  }
+}
