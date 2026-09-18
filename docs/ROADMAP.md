@@ -2979,6 +2979,20 @@ rediscovering them.
   `cftx_reduce` / `cftx_reduce_seg` (a wait or sync between launches
   serialises exactly so), then the tile's reduction read side, which
   never got the read-ahead. The next card day's first item.
+  **FOUND, 2026-09-18, and it was neither candidate**
+  (docs/VALIDATION.md, "the reductions' missing rate"): both paths
+  zero-fill and UPLOAD full-size `b` and `c` buffers on every call,
+  because the engine streams all three operands and the buffers must be
+  real - but nothing needs their contents, which a poisoned run proved
+  on both images. It is twice the operand's bytes over PCIe a call,
+  serial across tiles, and it was the whole signature: with the upload
+  skipped in a scratch build one tile reduces at the engine's 100 M
+  beats a second and four tiles at 3.8 times that. **main still
+  uploads**; the fix is a few lines and waits for Logan's word. The
+  elementwise path has the same shape - an operand the opcode does not
+  read is zero-filled and uploaded at full size every call, a resident
+  `add`'s unread `b` included - which is NOT yet measured or proven
+  safe; it wants the same poison test before anything is skipped.
 - **Several dense refusals set no `cft_last_error` sentence** (a bad
   format, attribute or reduction opcode; `d` NULL) while
   `cft_last_error()` is sticky, so a caller can read the previous
@@ -3161,7 +3175,10 @@ last.
 
 1. *Instrument the launches.* The reductions that do not overlap are
    the same machinery; find that first, because a scheduler built on a
-   launch path that serialises by accident inherits it.
+   launch path that serialises by accident inherits it. (Found the same
+   day: the launches overlap; the time was two uploads of zeros a call.
+   What the scheduler inherits is the lesson - an operand nobody reads
+   costs a transfer unless the staging knows it is unread.)
 2. *The scheduler core inside the library, with the lane cut as its
    first strategy for programs.* Host only: no RTL, no bitstream, no
    change to the conformance profile. Gate: placement invariance, the

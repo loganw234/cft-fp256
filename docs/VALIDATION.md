@@ -13208,3 +13208,77 @@ box trees clean.
 What is still owed to a card is what was owed before today: the
 reductions that do not overlap across tiles, first in docs/ROADMAP.md's
 debts.
+
+## 2026-09-18 - the reductions' missing rate: two uploads of zeros a call, found by reading and proved on the card
+
+The saturation runs of 2026-09-16 left one signature unexplained: a
+tile reduced resident memory at a third to a half of the engine's rate,
+and four tiles reducing at once were no faster in total than one. The
+candidates recorded then were the launch ordering and the tile's read
+side. It was neither.
+
+**Read first.** `cftx_reduce` and `cftx_reduce_seg` launch every tile
+and then wait - nothing serialises there. But the staging loop above
+the launches does this for every tile on every call:
+
+    stage(tile.b, nullptr, m * esz, padded * esz);
+    stage(tile.c, nullptr, m * esz, padded * esz);
+
+and `stage` with a null source zero-fills the mapping and uploads it.
+The comment beside it gives the reason the buffers must EXIST - "the
+engine streams all three - one read enable feeds all three FIFOs - so
+they must be real, readable memory of the same length" - and no reason
+they must be written. That is twice the operand's bytes over PCIe a
+call, one tile after another, and it fits every reduction time of
+2026-09-16 at about 3 GB/s whatever the format or the tile count: 16 MB
+of zeros and 5 ms at a million fp64 elements, 64 MB and 17 ms at four
+million, 256 MB and 80 to 100 ms at sixteen.
+
+**Then the card** (Logan's word that it was free; 09:21 to 09:22;
+`~/box_reduce_bc_experiment.sh`, a SCRATCH build of 5930f19 with one
+switch, main untouched, the tree restored after). Three modes: as main;
+`poison`, which fills `b` and `c` with 0xFF - a NaN at every format -
+and uploads that instead; `skip`, which leaves them allocated and never
+written.
+
+    correctness, device-test -r -q -n 64     poison: 1,176 checks, 0 failed, single and quad
+    (every reduction against software,       skip:   1,176 checks, 0 failed, single and quad
+     bits and flags, per segment too)
+
+So no reduction's bits or flags depend on what `b` and `c` hold, at any
+format, on either image - NaNs in both change nothing - and an
+allocated, unwritten buffer is enough.
+
+    resident reductions, median of five,       single                       quad
+    every result exact (host/tools/segsat.py)  as main   skipped            as main   skipped
+    fp64, segments of 192, ~1M elements        10.39 ms   7.45 ms  x1.39     5.35 ms   2.04 ms  x2.62
+    fp64, segments of 192, ~8M elements        94.16 ms  58.53 ms  x1.61    49.31 ms  14.89 ms  x3.31
+    fp64, one whole-array sum, 4M elements     24.04 ms  10.45 ms  x2.30    16.67 ms   2.77 ms  x6.01
+    fp256, segments of 192, ~1M elements       40.00 ms  23.56 ms  x1.70    20.74 ms   6.04 ms  x3.43
+
+With the upload gone a whole-array sum runs at 100 M beats a second on
+one tile - the engine's own rate, where 2026-09-16 measured a third of
+it - and at 378 M on four, 3.8 times one. The segmented shapes keep
+their per-segment flush, which is the tile's and is what remains: 7.4
+ms for 5,460 segments on one tile, 2.0 ms on four. Four tiles'
+reductions overlap as well as four elementwise runs do; what did not
+overlap was the host uploading zeros to them one after another.
+
+**A correction to the 2026-09-16 entry.** It read a one-segment
+whole-array call as one tile's work on either image. It is not:
+`cft_reduce_seg` with `seg == n` returns `cft_reduce`, which cuts the
+tree across the tiles (`host/src/device.c`), so the quad's 16.8 ms was
+four tiles' work behind 64 MB of zeros. The numbers there stand; that
+sentence does not.
+
+**What is not changed.** main still uploads. The fix is a few lines in
+the two functions - allocate, never write - and it waits for Logan's
+word, with the poison mode worth keeping as a switch so any new image
+can re-prove the property it rests on. And the ELEMENTWISE path has the
+same shape, unmeasured: an operand the opcode does not read reaches the
+backend as a null source and is zero-filled and uploaded at the slice's
+full size every call, a resident `add`'s unread `b` included. The
+saturation runs used `fma`, which reads all three, so they never saw
+it. It wants the same poison test before anything is skipped, because
+there the steering in the tile and not a comment is what makes the
+operand unread.
