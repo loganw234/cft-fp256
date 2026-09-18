@@ -393,6 +393,13 @@ with the two host defects the day found are docs/VALIDATION.md's
 | the same at fp128 / fp32 | 3,863 / 1,739 us | 86,042 / 84,410 us | x22.3 / x48.5 |
 | the same at 64 segments, fp64 | 220.5 us | 5,808 us | x26.3 |
 
+(The three `cft_reduce_seg` rows were measured while both reduction
+paths still uploaded two operand-sized buffers of zeros on every call.
+The first of them on 2026-09-18, with that gone: 1,860 us in one call
+against 64,026 us in a thousand on one tile, x34.4, and 994 us against
+219,331 us on four. "Reductions on resident memory" below has the
+resident numbers.)
+
 **Four tiles, resident, on the same pair** (2026-09-16, `cft-resident`
 fma, ten timed reps; docs/VALIDATION.md "saturating the pair" has the
 library-path and reduction tables beside it):

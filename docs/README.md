@@ -74,7 +74,7 @@ running.
 | [ENCLOSE.md](ENCLOSE.md) | 844 | `cft-enclose` — directed-rounding interval enclosure |
 | [COLLATZ.md](COLLATZ.md) | 647 | `cft-collatz` — Collatz trajectories |
 | [DEMOS.md](DEMOS.md) | 744 | the same five workloads in one browser tab, on the conformance wasm module |
-| [BENCHMARKS.md](BENCHMARKS.md) | 621 | what all of the above measure, in software and on the card |
+| [BENCHMARKS.md](BENCHMARKS.md) | 628 | what all of the above measure, in software and on the card |
 
 ## Operations — doing a thing to hardware
 
@@ -91,8 +91,8 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 13,344 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
-| [ROADMAP.md](ROADMAP.md) | 3,212 | What is built, what is next, and what was decided against. |
+| [VALIDATION.md](VALIDATION.md) | 13,389 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [ROADMAP.md](ROADMAP.md) | 3,216 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
 | [NOVEL.md](NOVEL.md) | 557 | Results for which no prior description was found, with the standard of evidence stated first. |
 | [ATLAS.md](ATLAS.md) | 362 | The atlas-engine integration, assessed before any of it was done. |

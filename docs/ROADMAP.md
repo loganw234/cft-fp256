@@ -2802,6 +2802,10 @@ against 91,108 us in a thousand (a Python fold of the same values
 6,142 us), `maxall` 2,412 us; fp128 3,863 us against 86,042; fp32
 1,739 us against 84,410; at E = 64 the flush dominates, 220 us against
 5,808. The software backend's one call at fp64 E = 1,000: 69,983 us.
+(Re-measured on 2026-09-18, once the XRT reduction paths had stopped
+uploading two operand-sized buffers of zeros a call: fp64 `sum` 1,860
+us in one call against 64,026 us in a thousand, `maxall` 1,848 us; on
+four tiles 994 and 980 us.)
 
 **8. Correct rounding of divide and square root ON the card
 (2026-09-14).** Their measurement (`cft-rebound/docs/HARDWARE.md:604-612`):

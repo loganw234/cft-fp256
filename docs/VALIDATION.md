@@ -13342,3 +13342,48 @@ uploads any operand an opcode does not read, a resident `add`'s unread
 steering inside the tile, not a comment, is what makes the operand
 unread - so it stays in docs/ROADMAP.md's debts until it has had its
 own poison test.
+
+## 2026-09-18 - the reductions' fix, from the PUSHED commit on the card, and the staged timing re-measured
+
+The entry above was taken from a scratch build holding the same bytes
+(`git hash-object` of both files equal on the desktop and on the box
+before the commit). This is the pushed commit itself: ~/cft-fp256-d at
+9d5d0de - SHA asserted and the tree grepped for `reduce_unread` and the
+poisoned leg before the build - `XRT=1`, tests built by name at 10:07,
+no new warning, XRT-linked. 10:07 to 10:19.
+
+    device-test -q -n 8                2,367 checks, 0 failed, single and quad
+    device-test -r -q -n 64            1,256 checks, 0 failed, single and quad
+    the poisoned leg                   present on every run, 0 failed
+    the trace                          unwritten 224, poison 20, zeros 0
+    the conformance replay, single     168 sets, 1,224,915 cases, all matching
+    resident reductions (segsat)       the scratch build's numbers within noise: fp64 whole-array 4M
+                                       23.87 -> 10.45 ms on one tile and 16.53 -> 2.76 ms on four;
+                                       fp32 10.75 -> 5.33 and 8.17 -> 1.48; fp64 segments of 192 at ~8M
+                                       93.89 -> 58.51 and 49.78 -> 14.86; fp256 39.95 -> 23.54 and
+                                       20.24 -> 6.06
+
+**The STAGED shape the record has quoted since 2026-09-15**
+(`segtime.py <image> 1000 192 fp64`: a thousand segments of 192, the
+operand staged on every call, so before today it uploaded three
+operand-sized buffers where one was needed). The same library, with
+`CFT_XRT_REDUCE_BC=zero` for the before side:
+
+                         one call, sum     1,000 calls, sum     one call, maxall   1,000 calls, maxall
+    one tile, before       2,318 us           83,626 us            2,314 us            82,231 us
+    one tile               1,860 us           64,026 us            1,848 us            66,654 us
+    four tiles, before     1,466 us          459,497 us            1,445 us            86,706 us
+    four tiles               994 us          219,331 us              980 us            65,726 us
+
+every result equal to the E calls and to the model, flags as the
+model's. The "before" rows reproduce 2026-09-15's 2,351 us and
+2026-09-16's 1,453 us, so the comparison is like for like. A thousand
+separate sums on four tiles halve, because each one cut its tree across
+four tiles and paid eight uploads of zeros for 192 elements - which is
+also why that column is three times the single tile's: many small
+calls are what four tiles are worst at (docs/SCALING.md), and they were
+paying for it twice. docs/BENCHMARKS.md's round-2 table and
+docs/ROADMAP.md's ask 7 keep their dated numbers, each with this
+re-measurement noted beside it.
+
+The card was left idle and the scratch tree restored.
