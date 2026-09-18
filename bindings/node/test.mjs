@@ -36,7 +36,7 @@ import { decode, encodeExact } from "./core.mjs";
 import { FLAGS_ALL, FLAG_INEXACT, FLAG_INVALID, FLAG_DIVBYZERO,
          FLAG_OVERFLOW, FLAG_UNDERFLOW, FORMATOF_METHOD, IDX_NONE,
          MINMAG_METHOD,
-         OPS_BY_NAME,
+         OPS_BY_NAME, SEQ_FEATURE_NAMES, seqFeatureNames,
          is754version1985, is754version2008, is754version2019 }
   from "./lib.mjs";
 import { replayCorpus } from "./seq_corpus.mjs";
@@ -108,6 +108,48 @@ function abiFromHeader() {
 test("the module is the tree's own ABI, on the software backend", () => {
   eq(c64.abiVersion, abiFromHeader(), "abi (cft.h says): ");
   eq(c64.backend, "software", "backend: ");
+});
+
+/** Every feature bit cft.h defines is one this package can name, and the
+ *  package names no bit the header does not define.
+ *
+ *  seqFeatureNames() reports a bit it cannot name as `bitN` rather than
+ *  dropping it, which is honest and is also how four bits went on printing
+ *  as numbers for three revisions: CAPS2[6], [7], [9] and [10] came off a
+ *  card as `bit10`, `bit11`, `bit13` and `bit14` on 2026-09-17, and nothing
+ *  here was red, because nothing here knew the header had grown. Seven of
+ *  the table's bits are held to the MODULE by audit(); this holds ALL of
+ *  them to the HEADER, in both directions, so a bit added to cft.h turns
+ *  this red until the package can name it - the direction the dependency
+ *  has to run - and a bit this file invents is caught too. */
+function featureBitsFromHeader() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const h = readFileSync(join(resolve(here, "..", ".."), "host", "include",
+                              "cft.h"), "utf8");
+  const bits = new Map();
+  const re = /^#define\s+(CFT_SEQ_FEAT_\w+|CFT_ALU_EXT_\w+)\s+0x([0-9a-fA-F]+)u/gm;
+  for (let m = re.exec(h); m; m = re.exec(h))
+    bits.set(parseInt(m[2], 16), m[1]);
+  if (bits.size < 7) throw new Error(`cft.h gave only ${bits.size} feature bits`);
+  return bits;
+}
+
+test("every feature bit cft.h defines has a name here, and no other does", () => {
+  const header = featureBitsFromHeader();
+  const named = new Map(SEQ_FEATURE_NAMES.map(([bit, name]) => [bit, name]));
+  eq(named.size, SEQ_FEATURE_NAMES.length, "a bit is named twice: ");
+  for (const [bit, macro] of header)
+    ok(named.has(bit), `${macro} (0x${bit.toString(16)}) has no name in ` +
+                       `SEQ_FEATURE_NAMES - it would print as a number`);
+  for (const [bit, name] of named)
+    ok(header.has(bit), `SEQ_FEATURE_NAMES calls 0x${bit.toString(16)} ` +
+                        `"${name}" and cft.h defines no such bit`);
+  let all = 0;
+  for (const bit of header.keys()) all |= bit;
+  const names = seqFeatureNames(all >>> 0);
+  eq(names.length, header.size, "names for the whole word: ");
+  ok(!names.some((s) => /^bit\d+$/.test(s)),
+     `a defined bit still prints as a number: ${names.join(" ")}`);
 });
 
 /** Every reduction name the MODEL emits must be one this package resolves.

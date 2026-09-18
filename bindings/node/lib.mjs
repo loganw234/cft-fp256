@@ -157,6 +157,20 @@ export const ALU_EXT_IMUL        = 0x10;   // CAPS[28]: opcode 30, IMUL
 // rather than the next bits of the first, and why audit() checks them.
 export const SEQ_FEAT_SCRATCH    = 0x100;  // CAPS2[4]: the per-lane scratch
 export const SEQ_FEAT_SCRATCH_IO = 0x200;  // CAPS2[5]: its per-run block
+// Four more the word has carried since revisions 4 to 6, which this
+// package printed as `bit10`, `bit11`, `bit13` and `bit14` until
+// 2026-09-18 (atlas-engine's card day read them off a card that way).
+// They are NOT in audit(): the module at this build exports no
+// projection for them, and a call to an export that is not there
+// returns undefined rather than throwing. What holds them instead is
+// test.mjs, which reads every CFT_SEQ_FEAT_* and CFT_ALU_EXT_* value out
+// of host/include/cft.h and requires this table to be exactly that set -
+// declared once and checked, the second grade, until the module is next
+// rebuilt and they join the seven above.
+export const SEQ_FEAT_SCRATCH_STRICT = 0x400;  // CAPS2[6]: R8's range report
+export const SEQ_FEAT_SCALAR     = 0x800;  // CAPS2[7]: a scalar operand on the tile
+export const SEQ_FEAT_INDEXED    = 0x2000; // CAPS2[9]: an input block through a table
+export const SEQ_FEAT_LANE_MASK  = 0x4000; // CAPS2[10]: a per-run lane mask
 
 /** The feature bits' names, for a message. */
 export const SEQ_FEATURE_NAMES = [
@@ -164,6 +178,8 @@ export const SEQ_FEATURE_NAMES = [
   [SEQ_FEAT_BANK_PTR, "BANK_PTR"], [SEQ_FEAT_KX9, "KX9"],
   [ALU_EXT_IMUL, "IMUL"],
   [SEQ_FEAT_SCRATCH, "SCRATCH"], [SEQ_FEAT_SCRATCH_IO, "SCRATCH_IO"],
+  [SEQ_FEAT_SCRATCH_STRICT, "SCRATCH_STRICT"], [SEQ_FEAT_SCALAR, "SCALAR"],
+  [SEQ_FEAT_INDEXED, "INDEXED"], [SEQ_FEAT_LANE_MASK, "LANE_MASK"],
 ];
 
 /** The features a `seq_features` word publishes, by name. An unnamed

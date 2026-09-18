@@ -395,8 +395,17 @@ import { SEQ_FEAT_KX9, SEQ_FEAT_SCRATCH, SEQ_FEAT_SCRATCH_IO }
 ctx.seqFeatures & SEQ_FEAT_SCRATCH;    // CAPS2[4]
 ctx.maxScratch;                        // slots a lane; 0 is UNKNOWN
 ctx.seqFeatureNames;   // ["kx","REGS32","BANK_PTR","KX9","IMUL",
-                       //  "SCRATCH","SCRATCH_IO"]
+                       //  "SCRATCH","SCRATCH_IO","SCRATCH_STRICT",
+                       //  "SCALAR","INDEXED","LANE_MASK"]
 ```
+
+The last four - `SEQ_FEAT_SCRATCH_STRICT`, `SEQ_FEAT_SCALAR`,
+`SEQ_FEAT_INDEXED` and `SEQ_FEAT_LANE_MASK` - printed as `bit10`,
+`bit11`, `bit13` and `bit14` until 2026-09-18. The module at this build
+exports no projection for them, so `audit()` cannot hold them to the
+module; `test.mjs` holds the whole table to `host/include/cft.h`
+instead, in both directions, and goes red when the header grows a bit
+this package cannot name.
 
 `SEQ_FEAT_SCRATCH` is `0x100` and `SEQ_FEAT_SCRATCH_IO` `0x200`, not
 the next two bits after `BANK_PTR`: revision 3 opened a SECOND feature
