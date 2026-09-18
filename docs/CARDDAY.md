@@ -560,6 +560,12 @@ they were handed over. What only a card can still say:
   `python3 run_set.py --runner host/positive-run --device <image>` from
   the handoff's `program-set/`; 140 of 140 on both images, where the
   patched runner and the unpatched library gave 139.
+- **The photograph through MAIN's library**:
+  `python3 host/tests/photograph_check.py --device <image>` on both
+  images. atlas-engine's card run matched the GPU on every pass with
+  their own patched library; main's fix is the same sizing change, and
+  a pass is 1,048,576 lanes - thirty-two times past the boundary the
+  old mask buffer overran - so this is also the fix at scale.
 - **The reductions' overlap**, still first in docs/ROADMAP.md's debts.
 
 ### What the card said (2026-09-15, the round-2 single tile; docs/VALIDATION.md has the whole day)

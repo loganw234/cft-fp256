@@ -3027,15 +3027,21 @@ rediscovering them.
   host can see after a timeout, and a per-tile rather than per-handle
   notion of "finished" - both of which the scheduler below needs
   anyway.
-- **atlas-engine's program set is not a verify stage yet.** 140 cases,
-  20 MB, whose expected deposits were agreed by libcft, the golden
-  model, the assembler, the runner and the pinned GLSL interpreted at
-  binary32 - the only program corpus this project has that it did not
-  write. It replays in under two minutes on a card and about a quarter
-  of an hour on one core. Vendoring 20 MB of binaries is a decision,
-  not a chore: the alternative is a stage that fetches the set by its
-  SHA256SUMS from atlas-engine's tree when it is present and is
-  skipped by name when it is not.
+- **atlas-engine's program set is not a verify stage yet; one of its
+  photographs is** (`photograph`, 2026-09-18). The photograph was the
+  cheap one to vendor - the input is the sample index and the expected
+  side is four hashes, 305 KB with its print - and it is the stronger
+  claim, a GPU's bytes rather than ours. `mand` is the natural second
+  case, because it is the one with a loop that exits early by `SETACT`
+  (P3, the invisible early exit, against an outside reference); it is
+  two passes of about 140 s on one core. The SET is still a decision:
+  138 cases and 17 MB, whose expected deposits were agreed by libcft,
+  the golden model, the assembler, the runner and the pinned GLSL
+  interpreted at binary32, replaying in under two minutes on a card and
+  about a quarter of an hour on one core. Vendoring it is a choice, not
+  a chore: the alternative is a stage that fetches the set by its
+  SHA256SUMS from atlas-engine's tree when it is present and is skipped
+  by name when it is not.
 - **The Node module exports no projection for four feature bits**
   (`SCRATCH_STRICT`, `SCALAR`, `INDEXED`, `LANE_MASK`), so the package
   holds them to `cft.h` by test rather than to the module by `audit()`

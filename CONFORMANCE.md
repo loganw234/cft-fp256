@@ -245,8 +245,13 @@ Conformance is scored, not read.
 5. **The independent oracle.** GNU MPFR arbitrates every operation it
    can reach, at the format's precision and the caller's attribute
    (`host/tools/mpfr_check.c`), which is how the model itself is held
-   to something outside this project. `docs/VALIDATION.md` carries
-   every run.
+   to something outside this project. A second outside reference
+   covers what MPFR cannot, a whole program: a GPU's own record of a
+   real binary32 workload, a million samples a pass, which the library
+   and a tile both reproduce bit for bit (`host/tests/photograph`, the
+   runner's `photograph` stage). It is evidence about this
+   implementation, not part of the profile's score.
+   `docs/VALIDATION.md` carries every run.
 
 ## Versioning
 

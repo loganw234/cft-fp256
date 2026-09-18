@@ -459,6 +459,44 @@ while on a host a scratch access is the CHEAP instruction. The tile is
 twelve to thirteen times one core on arithmetic and two to three times
 on a spill, and a program's shape decides which it sees.
 
+**A compiler that knows the prices** (atlas-engine, 2026-09-18, the
+same tile and the same input streams). Their lowering now charges a
+scratch access or a `SETACT` four arithmetic instructions when it
+chooses, coalesces a loop's copy-backs and hoists every per-run value
+into the bank. The deposits are unchanged, bit for bit, and the
+programs are shorter and faster:
+
+| program | instructions | per lane | against the first lowering |
+|---|---|---|---|
+| `psf` | 185 to 118 | 0.27 to 0.20 us | x1.34 |
+| `hopf` | 638 to 526 | 0.72 to 0.61 us | x1.19 |
+| `mand` | 1,111 to 832 | 3.00 to 2.59 us | x1.16 |
+| `jong` | 737 to 508 | 3.97 to 3.70 us | x1.07 |
+| `starfield` | 5,475 to 4,483 | 5.86 to 4.72 us | x1.24 |
+| `throughput` | 14,801 to 11,356 | 24.98 to 15.42 us | x1.62 |
+| `stdmap` | 912 to 733 | 95.45 to 81.35 us | x1.17 |
+| `nested` | 1,401 to 1,055 | 171.4 to 147.2 us | x1.16 |
+| `threebody` | 2,029 to 1,754 | 3,286 to 2,617 us | x1.26 |
+| `rule30`, 4,096 lanes | 4,720 to 3,671 | 9,438 to 5,103 us | x1.85 |
+
+That is what R12's drain is worth to a workload that can route around
+it, from the software side alone; docs/ROADMAP.md's revision-7 item is
+the same saving taken in the tile, for every workload.
+
+**The photograph** (the same day): the darkroom's camera around a
+plate, 1,048,576 samples a pass, five deposits a lane.
+
+| | `hopf`, 1,081 instructions | `mand`, 1,272 with an early-exit loop |
+|---|---|---|
+| the U50's tile, a pass | 1.21 s, 1.15 us a lane | 3.17 s, 3.02 us a lane |
+| this library on one desktop core, a pass | 88 s | 137 s |
+| the GPU that made the record | the render call returned in 7 ms; reading back every sample's record took 0.60 s | 2 ms; 0.46 s |
+
+Every one of them produced the same bytes. The tile is forty to seventy
+times one core here and a GPU is far faster than either at binary32 -
+which was never the tile's case: its case is the same guarantee at
+binary128 and binary256, where a GPU has no answer at all.
+
 ## Workloads designed for the contract
 
 The tables above adapt other libraries' benchmarks to this one. The

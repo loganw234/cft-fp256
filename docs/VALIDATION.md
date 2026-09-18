@@ -13091,3 +13091,78 @@ wait and the blind tile after a timeout are in docs/ROADMAP.md's debts;
 and so is the plan of record for programs across tiles, which
 atlas-engine measured the need for - every program at the single's
 rate to the hundredth on the quad.
+
+## 2026-09-18 - a GPU, the tile and the library agree bit for bit on a real workload: atlas-engine's photographs, and the `photograph` stage
+
+**What it is.** atlas-engine's second handoff
+(`build/cft/handoff-2026-09-18.tar.gz`; its `docs/CFT-PHOTOGRAPH.md` is
+the narrative). The darkroom's deterministic camera around a plate,
+lowered to a sequencer program: one input stream, the sample index
+(`positive-run --iota 1048576`); five `u32` deposits a lane, the pixel
+and three fixed-point channels; one constant bank a pass. `hopf` is
+1,081 instructions, straight-line, with `IMUL`, indexed constants and
+thirty-two registers, four passes. `mand` is 1,272 with a loop that
+exits early by `SETACT`, two passes. The expected deposit buffers are
+**an NVIDIA GeForce RTX 5060 Ti's own record of every sample** (driver
+591.86, OpenGL 4.3), written while rendering the same frame from
+atlas-engine's pinned GLSL - 20,971,520 bytes a pass, held as SHA-256.
+Nothing on the expected side was computed by this project.
+
+**Three implementations, one set of bytes.**
+
+    the GPU, which made the record         hopf 4 passes, mand 2       the render call returned in 7 ms and 2 ms; reading back
+                                                                       every sample's record took 0.60 s and 0.46 s
+    the U50's round-2 single tile          every pass MATCH            1.21 s a pass hopf (1.15 us a lane), 3.17 s mand (3.02);
+      (atlas-engine's run, their                                       matched again as eight contiguous blocks
+       patched library)
+    libcft's software backend, main        every pass MATCH            88 s a pass hopf, 137 s mand, one desktop core, through
+      66e074f (this project's run)                                     main's STOCK positive-run; flags 0x11 and 0x1d, STATUS 0
+
+6,291,456 samples and 31,457,280 words, identical from a GPU's compiler
+and silicon, an FPGA's gates and a C executor. Every other gate in this
+repository compares something with the golden model, and the model is
+this project's own; a defect the model and the C shared would pass all
+of them. This comparison has no such blind spot, and
+docs/DETERMINISM.md's "the two meet at the primitive set" - an argument
+since the first day - is now a measurement. It also says something
+about the GPU backend sketched in conversation on 2026-09-17: at
+binary32 under roundTiesToEven, for the operations this workload uses,
+a pinned GPU already produces the profile's bits.
+
+On speed the record is plain: the GPU is far faster than the tile at
+binary32, and the tile forty to seventy times one core. The tile's case
+was never binary32 throughput; it is the same guarantee at binary128
+and binary256, where a GPU has no answer.
+
+**The `photograph` stage.** `host/tests/photograph/hopf` (305 KB: the
+image, four banks, the GPU's four hashes, the two records, the print),
+`host/tests/photograph_check.py`, and a stage in the quick budget - 39
+stages, 26 quick, 34 gate. Each pass goes through `positive-run`, side
+by side, and must exit clean, PRINT the GPU's hash and have WRITTEN a
+buffer with the GPU's hash, with STATUS zero; the fixture is held to
+its own record first. Through the runner: `photograph ok 102s`, four passes MATCH (101 s a pass with
+four running, 88 s alone). *Negative controls*: one bit of a bank
+flipped in a copy of the fixture is named - "FIXTURE: camera.p0002.bank
+is not the bank camera.json records", rc 2, nothing run; and with the
+library's multiply forced to roundTowardZero (one line of `program.c`)
+4 of 4 passes DIFFER, rc 1 - restored, rebuilt, green. `mand` is not
+vendored and is the natural second case, because its loop exits early
+by `SETACT` (docs/ROADMAP.md).
+
+**The program set, re-lowered** (the same archive; 138 cases, packed
+against 66e074f). atlas-engine's lowering now charges a scratch access
+or a `SETACT` four arithmetic instructions - docs/SEQUENCER.md R12's
+drain, as they measured it on 2026-09-17 - coalesces loop copy-backs and
+hoists per-run values into the bank. The deposits are unchanged and on
+the card the programs run 1.07x to 1.85x faster (their run;
+docs/BENCHMARKS.md has the table: `throughput` 24.98 to 15.42 us a
+lane, `rule30` x1.85). Verified here: all 1,108 checksums, and the
+whole set through main's stock runner on the software backend - **138
+matched, 0 mismatched, 0 refused**, 48 strict images among them, in
+15 minutes. The set's README still lists the runner's refusal "at
+56ad0cd"; that has been stale since 76d02fd.
+
+**Owed to a card**: the photograph through MAIN's library - atlas-engine's
+card run used their own patch, which is the same sizing change - added
+to docs/CARDDAY.md's list and to the scripted check on the box. The
+card was not touched today.

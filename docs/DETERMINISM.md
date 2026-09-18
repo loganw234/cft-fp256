@@ -26,6 +26,20 @@ RNE, denormals, and exact selections. An algorithm written against
 those primitives (every `det_*` function is fma/Newton/polynomial
 chains over them) lands on identical bits wherever the primitives do.
 
+*That was an argument until 2026-09-18, and is a measurement since.*
+atlas-engine lowered its darkroom's deterministic camera - a real
+image, not a test - to a sequencer program, and held every sample's
+output to the record an NVIDIA RTX 5060 Ti wrote while rendering the
+same frame from the pinned GLSL: a million samples a pass, five words a
+sample, six passes across two plates, one of them a loop with an early
+exit. The U50's tile produced the GPU's bytes on every pass, and so did
+this library's software backend. Three implementations that share no
+code and no vendor - a GPU's compiler and silicon, an FPGA's gates, a C
+executor - and one set of bytes. One of those passes is a verification
+stage here (`photograph`, host/tests/photograph/hopf), and it is the
+only one whose expected bits this project did not compute
+(docs/VALIDATION.md, that date).
+
 ## Formats
 
 The IEEE 754-2019 binary interchange ladder, exactly:
