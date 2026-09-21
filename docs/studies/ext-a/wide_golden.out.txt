@@ -1,0 +1,20 @@
+1. interior - the oracle's own primitives as the witness
+  binary256   interior exp_w=19 p=237    5970 arithmetic checks, 0 mismatches; 375 sqrt checks, 0 failures   [exact 1090, inexact 4880]   model 0.05s
+  binary512   interior exp_w=23 p=489    5950 arithmetic checks, 0 mismatches; 375 sqrt checks, 0 failures   [exact 865, inexact 5085]   model 0.05s
+  binary1024  interior exp_w=27 p=997    5965 arithmetic checks, 0 mismatches; 375 sqrt checks, 0 failures   [exact 860, inexact 5105]   model 0.06s
+  binary2048  interior exp_w=31 p=2017   3975 arithmetic checks, 0 mismatches; 250 sqrt checks, 0 failures   [exact 585, inexact 3390]   model 0.06s
+  binary4096  interior exp_w=35 p=4061   2390 arithmetic checks, 0 mismatches; 150 sqrt checks, 0 failures   [exact 405, inexact 1985]   model 0.07s
+  binary8192  interior exp_w=39 p=8153   1195 arithmetic checks, 0 mismatches;  75 sqrt checks, 0 failures   [exact 160, inexact 1035]   model 0.07s
+2. is the integer reference right? scored by ref754.ref_pack where that is affordable
+  integer reference vs ref754.ref_pack, e4m3/e5m2/e3m4: 338,505 checks, 0 disagreements
+  integer reference vs ref754.ref_pack, binary256 edges:  280 checks, 0 disagreements
+3. edges - overflow, underflow, tininess, subnormals, the widest alignments
+  binary256   edges    exp_w=19 p=237    3980 arithmetic checks, 0 mismatches; 250 sqrt checks, 0 failures   [exact 585, inexact 2263, overflow 367, underflow 765]   model 0.16s
+  binary512   edges    exp_w=23 p=489    3985 arithmetic checks, 0 mismatches; 250 sqrt checks, 0 failures   [exact 560, inexact 2173, overflow 447, underflow 805]   model 4.24s
+  binary1024  edges    exp_w=27 p=997     800 arithmetic checks, 0 mismatches;  50 sqrt checks, 0 failures   [exact 120, inexact 443, overflow 67, underflow 170]   model 13.98s
+4. what the model's plain-shift alignment costs at the widest spread a format admits
+  binary256   widest alignment       524,521 bits (    0.06 MiB integer): fma(max, 1, min_subnormal)      0.2 ms (flags 0x14, +inf True); remainder(max, small)      0.2 ms
+  binary512   widest alignment     8,389,093 bits (    1.00 MiB integer): fma(max, 1, min_subnormal)      5.0 ms (flags 0x14, +inf True); remainder(max, small)      6.2 ms
+  binary1024  widest alignment   134,218,721 bits (   16.00 MiB integer): fma(max, 1, min_subnormal)     73.6 ms (flags 0x14, +inf True); remainder(max, small)    138.2 ms
+  binary2048  widest alignment 2,147,485,661 bits (  256.00 MiB integer): fma(max, 1, min_subnormal)   1145.0 ms (flags 0x14, +inf True); remainder(max, small)   3419.0 ms
+total mismatches and failures: 0

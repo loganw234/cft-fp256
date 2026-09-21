@@ -1,0 +1,39 @@
+1. the schedule as shipped (PREC_CAP_CEILING = 832)
+  fp256   p=237  start=514   cap=832   attempts=[514, 832]
+  fp512   p=489  start=1018  cap=832   attempts=[832]
+  fp1024  p=997  start=2034  cap=832   attempts=[832]
+  exp(3) @ fp256                               0x40003415e5bf6fb105...  flags=0x10  (52 ms)
+  log(3) @ fp256                               0x3ffff193ea7aad030a...  flags=0x10  (0 ms)
+  atan(3) @ fp256                              0x3ffff3fc176b7a855f...  flags=0x10  (0 ms)
+  exp(3) @ fp512                               0x400003415e5bf6fb10...  flags=0x10  (0 ms)
+  log(3) @ fp512                               0x3fffff193ea7aad030...  flags=0x10  (0 ms)
+  atan(3) @ fp512                              0x3fffff3fc176b7a855...  flags=0x10  (0 ms)
+  exp(3) @ fp1024                              REFUSED  ZivEscalation: fp1024: the enclosure still did not decide the rounding at 832 b...
+  log(3) @ fp1024                              REFUSED  ZivEscalation: fp1024: the enclosure still did not decide the rounding at 832 b...
+  atan(3) @ fp1024                             REFUSED  ZivEscalation: fp1024: the enclosure still did not decide the rounding at 832 b...
+
+2. the same, with the ceiling lifted in this process (1 << 20)
+  fp512   attempts now begin [1018, 2036, 4040]
+  exp(3) @ fp512                               0x400003415e5bf6fb10...  flags=0x10  (0 ms)
+  log(3) @ fp512                               0x3fffff193ea7aad030...  flags=0x10  (0 ms)
+  atan(3) @ fp512                              0x3fffff3fc176b7a855...  flags=0x10  (0 ms)
+  fp1024  attempts now begin [2034, 4068, 8104]
+  exp(3) @ fp1024                              0x4000003415e5bf6fb1...  flags=0x10  (0 ms)
+  log(3) @ fp1024                              0x3ffffff193ea7aad03...  flags=0x10  (1 ms)
+  atan(3) @ fp1024                             0x3ffffff3fc176b7a85...  flags=0x10  (2 ms)
+
+3. pow(2^(2^25), 2^-25) at binary1024: the true value is 2, exactly, so every
+   attribute must deliver 2.0 and raise nothing
+  pow(2^(2^25), 2^-25)  RNE   [k = 25]         0x400000000000000000...  flags=0x10  (8 ms)
+      value is 2.0: True    inexact raised: True
+  pow(2^(2^25), 2^-25)  RTZ   [k = 25]         REFUSED  ZivEscalation: fp1024: the enclosure still did not decide the rounding at 8104 ...
+  pow(2^(2^25), 2^-25)  RDN   [k = 25]         REFUSED  ZivEscalation: fp1024: the enclosure still did not decide the rounding at 8104 ...
+  pow(2^(2^25), 2^-25)  RUP   [k = 25]         REFUSED  ZivEscalation: fp1024: the enclosure still did not decide the rounding at 8104 ...
+  pow(2^(2^25), 2^-25)  RMM   [k = 25]         0x400000000000000000...  flags=0x10  (7 ms)
+      value is 2.0: True    inexact raised: True
+   the same shape INSIDE the proof's envelope, for contrast:
+  pow(2^(2^24), 2^-24)  RNE   [k = 24]         0x400000000000000000...  flags=0x00  (0 ms)
+      value is 2.0: True    inexact raised: False
+   and at binary512, where |E| < 2^23 and the proof still holds, the widest such pair:
+  pow(2^(2^21), 2^-21)  RNE   [k = 21]         0x400000000000000000...  flags=0x00  (0 ms)
+      value is 2.0: True    inexact raised: False

@@ -1,0 +1,142 @@
+
+==============================================================================
+1. Format geometry, and the widths the pipe hard-codes or guards
+==============================================================================
+     k exp_w      p             emax   NW=3man_w+9 lsh bits granules half-add tree add chunks tree lv
+    32     8     24              127            78        7        2       39       96      1       0
+    64    11     53            1,023           165        8        3       83      154      3       2
+   128    15    113           16,383           345        9        6      173      274      5       3
+   256    19    237          262,143           717       10       12      359      522     10       4
+   512    23    489        4,194,303         1,473       11       24      737    1,026     21       5
+  1024    27    997       67,108,863         2,997       12       47    1,499    2,042     42       6
+  2048    31   2017    1,073,741,823         6,057       13       95    3,029    4,082     85       7
+  4096    35   4061   17,179,869,183        12,189       14      191    6,095    8,170    170       8
+  8192    39   8153  274,877,906,943        24,465       15      383   12,233   16,354    340       9
+ 16384    43  16341 4,398,046,511,103        49,029       16      767   24,515   32,730    681      10
+guards today: cft_lzcone NW <= 1024 and lsh[9:0]; nrm_csh/aln_csh [3:0] = 16 granules;
+              the pipe's own tree holds 16 chunks; the exponent algebra is `int`.
+-> the LZC guard admits man_w <= 338 (the pipe's comment says 383, from the 16-chunk tree alone)
+   binary256: man_w=236  NW=717   chunks=10  elaborates
+   binary288: man_w=267  NW=810   chunks=12  elaborates
+   binary320: man_w=299  NW=906   chunks=13  elaborates
+   binary352: man_w=330  NW=999   chunks=14  elaborates
+   binary384: man_w=362  NW=1095  chunks=16  REFUSED
+   binary416: man_w=393  NW=1188  chunks=17  REFUSED
+   binary448: man_w=425  NW=1284  chunks=18  REFUSED
+   binary480: man_w=456  NW=1377  chunks=20  REFUSED
+   binary512: man_w=488  NW=1473  chunks=21  REFUSED
+
+==============================================================================
+2. Exponent arithmetic: where 32 and 64 bits run out
+==============================================================================
+libcft's rule (host/include/cft_config.h): INT_MAX >= 2 * |ea + eb|, ea in [emin-(p-1), emax-(p-1)]
+  binary256     exp_w=19  ea+eb reaches                     -524,756   int32: ok   int64: ok
+  binary512     exp_w=23  ea+eb reaches                   -8,389,580   int32: ok   int64: ok
+  binary1024    exp_w=27  ea+eb reaches                 -134,219,716   int32: ok   int64: ok
+  binary2048    exp_w=31  ea+eb reaches               -2,147,487,676   int32: RAW OVERFLOW   int64: ok
+  binary4096    exp_w=35  ea+eb reaches              -34,359,746,484   int32: RAW OVERFLOW   int64: ok
+  binary8192    exp_w=39  ea+eb reaches             -549,755,830,188   int32: RAW OVERFLOW   int64: ok
+  binary16384   exp_w=43  ea+eb reaches           -8,796,093,054,884   int32: RAW OVERFLOW   int64: ok
+  binary65536   exp_w=51  ea+eb reaches       -2,251,799,813,816,212   int32: RAW OVERFLOW   int64: ok
+  binary262144  exp_w=59  ea+eb reaches     -576,460,752,303,947,652   int32: RAW OVERFLOW   int64: ok
+  binary524288  exp_w=63  ea+eb reaches   -9,223,372,036,855,824,252   int32: RAW OVERFLOW   int64: gone
+  binary2048 passes INT32_MIN by 4,028
+
+==============================================================================
+3. What scales with 2^emax rather than with p
+==============================================================================
+     k exp_w   2/pi table  decimal digits of it   align span, bits  min subnormal, digits
+   256    19     33.0 KiB             8.138e+04            524,522              1.834e+05
+   512    23    513.0 KiB             1.265e+06          8,389,094              2.932e+06
+  1024    27      8.0 MiB             2.020e+07        134,218,722              4.691e+07
+  2048    31    128.0 MiB             3.232e+08      2,147,485,662              7.505e+08
+  4096    35      2.0 GiB             5.172e+09     34,359,742,426              1.201e+10
+  8192    39     32.0 GiB             8.275e+10    549,755,822,038              1.921e+11
+ 16384    43    512.0 GiB             1.324e+12  8,796,093,038,546              3.074e+12
+ 32768    47      8.0 TiB             2.118e+13 140,737,488,388,046              4.919e+13
+ 65536    51    128.0 TiB             3.389e+14 2,251,799,813,750,730              7.870e+14
+largest computations of pi to date are of order 3e14 decimal digits
+
+==============================================================================
+4. The area model, and its residuals against the four measured lanes
+==============================================================================
+READ  MUL_PASSES 1 -> 10 saved 7,904 LUT for 3,461 column-bits removed, +~1,095 of accumulators
+      -> 2.60 LUT per column-bit (a column is p bits)
+      calibrated on the fp256 lane (35,333 all-in): base = 94.7 LUT per significand bit
+      lane(p, C) = p * (base + 3 log2(3p)) + 2.60 p C      residuals:
+        p=  24 measured   3,324  model     2,779   -16.4%
+        p=  53 measured   6,326  model     6,593    +4.2%
+        p= 113 measured  13,746  model    15,015    +9.2%
+        p= 237 measured  35,333  model    35,333    +0.0%
+      DSP check: shipping tile, model 274 against 262 routed
+
+==============================================================================
+5. If only the widths move: the 16-stage map kept, the clock allowed to fall
+==============================================================================
+clock: linear in p through the two published OOC points: 4.03 ns + 11.49 ps/bit, +0.9 ns in the shell
+       (optimistic from binary1024 up: the critical path is already two-thirds routing)
+     k passes     DSP   lane LUT of U50 w/ shell   MHz   ns/elem x MPFR mul x MPFR fma
+   512      1     609     88,421             27%    95      26.6        2.2        3.0
+  1024      1   2,478    237,791             44%    61      82.7        1.6        2.3
+  2048      4   2,618    382,329             60%    36     283.6        1.3        1.8
+  4096     16   2,629    665,927             93%    19    1041.2        1.1        1.5
+for scale, today: one fp256 lane at 107 M/s = 9.35 ns/elem -> 4.0x MPFR mul, 5.8x fma (this desktop's MPFR; README.md's 5.5x is another machine's)
+
+==============================================================================
+6. With the clock held at 135 MHz: wide-only tiles on the U50
+==============================================================================
+beat-limited means an element every (k/256) * 1.262 cycles; the multiplier keeps up with
+C = ceil(chunks / floor(that period)) columns - which comes out CONSTANT, because both grow with k
+     k cols passes DSP/tile   tile LUT tiles  of U50 card Mfma/s  MPFR cores fma/mul  vs mpfr+754 fma
+   256   10      1      140     60,310     8     80%       856.0        46.7 / 32.3              58.4
+   512   11      2      319    105,976     5     81%       267.5        21.6 / 15.8              25.2
+  1024    9      5      531    193,181     2     60%        53.5        10.1 / 7.2               11.0
+  2048    9     10    1,071    376,509     1     57%        13.4         6.9 / 4.9                6.8
+  4096    9     19    2,151    750,090     0    100%         0.0                   -                -
+  8192    9     38    4,320  1,510,347     0    188%         0.0                   -                -
+ 16384    9     76    8,658  3,056,267     0    365%         0.0                   -                -
+today: 4 full-ladder tiles, 428 M fma/s = 23.4 MPFR cores (fma), 16.1 (mul), 29.2 against mpfr+754 (fma)
+sensitivity: the restaging overhead (+21 LUT/bit) and the flat infra (20k) are guesses.
+   +10 LUT/bit, infra 15,000: binary512: 5 (25% for one); binary1024: 3 (35% for one); binary2048: 1 (54% for one); binary4096: 0 (95% for one)
+   +21 LUT/bit, infra 20,000: binary512: 5 (26% for one); binary1024: 2 (36% for one); binary2048: 1 (57% for one); binary4096: 0 (100% for one)
+   +30 LUT/bit, infra 40,000: binary512: 4 (29% for one); binary1024: 2 (40% for one); binary2048: 1 (62% for one); binary4096: 0 (107% for one)
+
+==============================================================================
+7. What the multiplier is worth: effective bit-products per second
+==============================================================================
+  MPFR, one core, binary256   mul: 1.49e+12 bp/s   (step from the rung below: x2.33 in time)
+  MPFR, one core, binary512   mul: 4.05e+12 bp/s   (step from the rung below: x1.56 in time)
+  MPFR, one core, binary1024  mul: 7.43e+12 bp/s   (step from the rung below: x2.27 in time)
+  MPFR, one core, binary2048  mul: 1.12e+13 bp/s   (step from the rung below: x2.72 in time)
+  MPFR, one core, binary4096  mul: 1.46e+13 bp/s   (step from the rung below: x3.11 in time)
+  MPFR, one core, binary8192  mul: 2.06e+13 bp/s   (step from the rung below: x2.85 in time)
+  one shipping fp256 lane (107 M/s x 237^2):            6.01e+12 bp/s
+  the whole U50, every DSP on a 24x17 product at 135 MHz: 3.28e+14 bp/s = 22 MPFR cores at binary4096
+
+==============================================================================
+8. ASIC, from docs/ROADMAP.md's own napkin figures (5-8 gates per bit-product)
+==============================================================================
+  130 nm open PDK: ~1M gates in 15-25 mm2, 50-150 MHz: 2.5e+11 .. 2.0e+12 bp/s per mm2 of multiplier
+  28 nm: ~15x the density, ~1 GHz: 6.0e+13 .. 2.0e+14 bp/s per mm2 of multiplier
+  for scale: one desktop core under MPFR = 1.5e+13 bp/s; at ~7.5 mm2 a core, ~1.9e+12 bp/s/mm2
+  binary4096, a 16-stage pipe held on `en`: ~259,904 flops (~1.6M gates) beside one p x 24 column (~585k gates)
+  a 3p+6 = 12,189-bit add spread over 170 passes is a 72-bit adder
+
+==============================================================================
+9. Bytes moved per bit-product, streaming elementwise (three operands in, one out)
+==============================================================================
+  binary256    2.28e-03 B/bp -> 1e14 bp/s (about 1 mm2 of 28 nm columns) wants   227.9 GB/s
+  binary1024   5.15e-04 B/bp -> 1e14 bp/s (about 1 mm2 of 28 nm columns) wants    51.5 GB/s
+  binary4096   1.24e-04 B/bp -> 1e14 bp/s (about 1 mm2 of 28 nm columns) wants    12.4 GB/s
+  binary16384  3.07e-05 B/bp -> 1e14 bp/s (about 1 mm2 of 28 nm columns) wants     3.1 GB/s
+
+==============================================================================
+10. Newton steps from the 2^-8.5 seed, and the divide/sqrt program lengths
+==============================================================================
+  binary256    p=237    steps=5   div program 49 words, sqrt program 60 words (host/src/divsqrt.c holds 80); sqrt image 800 bytes (SQ_IMAGE_MAX is 960)
+  binary512    p=489    steps=6   div program 51 words, sqrt program 63 words (host/src/divsqrt.c holds 80); sqrt image 1,112 bytes (SQ_IMAGE_MAX is 960)
+  binary1024   p=997    steps=7   div program 53 words, sqrt program 66 words (host/src/divsqrt.c holds 80); sqrt image 1,712 bytes (SQ_IMAGE_MAX is 960)
+  binary2048   p=2017   steps=8   div program 55 words, sqrt program 69 words (host/src/divsqrt.c holds 80); sqrt image 2,888 bytes (SQ_IMAGE_MAX is 960)
+  binary4096   p=4061   steps=9   div program 57 words, sqrt program 72 words (host/src/divsqrt.c holds 80); sqrt image 5,216 bytes (SQ_IMAGE_MAX is 960)
+  binary8192   p=8153   steps=10  div program 59 words, sqrt program 75 words (host/src/divsqrt.c holds 80); sqrt image 9,848 bytes (SQ_IMAGE_MAX is 960)
+  binary16384  p=16341  steps=11  div program 61 words, sqrt program 78 words (host/src/divsqrt.c holds 80); sqrt image 19,088 bytes (SQ_IMAGE_MAX is 960)
