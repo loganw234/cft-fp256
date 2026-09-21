@@ -80,9 +80,10 @@ to the contract `div`/`sqrt` over the model matrix (29,124 cases, every
 format and attribute, per-element flags); **23.875 billion cases
 against the host CPU's own IEEE hardware** at fp32/fp64 - exhaustive
 fp32 square root under every attribute - zero disagreements, flags
-included; and **999,000 cases against GNU MPFR** across all four
-formats, the only external oracle that reaches binary128/256. All in
-docs/VALIDATION.md.
+included; and the **999,000-case MPFR parity run** across all four
+formats - six operations together, `add`, `sub`, `mul`, `fma`, `div`
+and `sqrt`, under all five attributes - MPFR being the only external
+oracle that reaches binary128/256. All in docs/VALIDATION.md.
 
 ## Rounding (clause 4.3)
 

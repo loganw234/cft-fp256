@@ -10,15 +10,18 @@ or on the FPGA card it was designed for.
 That guarantee is the product. The hardware only makes it faster.
 
 Formally it is the Coordinated Fusion Compute Tile, built for the
-AMD/Xilinx Alveo U50C through the open Vitis RTL kernel flow, and
-everything here is Apache-2.0.
+AMD/Xilinx Alveo U50 through the open Vitis RTL kernel flow - the card
+here is a "U50C"-branded unit, and every build since first light has
+linked against the standard U50 shell
+(`xilinx_u50_gen3x16_xdma_5_202210_1`) - and everything here is
+Apache-2.0.
 
 | What it computes | How you call it | How it is checked | On the card | When it pays |
 |---|---|---|---|---|
-| binary32 / 64 / 128 / 256 | C, C++, Python, Rust, Julia, Go, C#, R, Fortran | **1,068,915** conformance cases | Alveo U50, run on silicon | **binary128 4.5x**, **binary256 5.5x** |
-| 30 opcodes, 5 rounding modes, 39 transcendentals | one ABI; software, FPGA or remote; no dependencies | **38** gate stages, 25 RTL sims, 30 proofs | 427 M elem/s, 4 tiles, ~35 W | **binary32 / 64: a CPU wins** |
+| binary32 / 64 / 128 / 256 | C, C++, Python, Rust, Julia, Go, C#, R, Fortran | **1,068,915** conformance cases | Alveo U50: 1,071,635 then 1,224,915 cases replayed on silicon | **binary128 4.5x**, **binary256 5.5x** |
+| 31 opcodes, 5 rounding modes, 39 transcendentals | one ABI; software, FPGA or remote; no dependencies | **39** gate stages, 25 RTL sims, 30 proofs | 427 M elem/s, 4 tiles, ~35 W | **binary32 / 64: a CPU wins** |
 
-<sub>Speed-ups are one tile against the fastest software on the same machine - the CPU's own FPU, `__float128` or MPFR, never our own softfloat. Four tiles reach 17.5x and 21.1x. [Where that line falls, measured](#when-this-matters-and-when-it-does-not).</sub>
+<sub>Speed-ups are **multiply**, one tile against the fastest software on the same machine - the CPU's own FPU, `__float128` or MPFR, never our own softfloat. Four tiles reach 17.5x and 21.1x. Fused multiply-add is a different picture, and better: 14.0x at binary128 on one tile. [Where those lines fall, measured](#when-this-matters-and-when-it-does-not).</sub>
 
 ## Try it without installing anything
 
@@ -70,8 +73,12 @@ offer, and on the guarantee that the answer does not move.
 ## Where it runs, and how fast
 
 The same library, the same bits, on four very different machines. Rates
-are for binary256, the widest and slowest format; binary32 runs roughly
-eight times faster on every row.
+are for binary256, the widest and slowest format. What binary32 buys
+depends on which row you are reading: on the tile it is about seven and
+a half times faster (812 against 107 million elements a second,
+resident, one tile), because the tile is beat-limited; in software the
+gap is about 2.2x (3.76 against 1.74 million a second, one thread); and
+the microcontroller row is in *cases* a second, not elements.
 
 | where | what it is | binary256 throughput |
 |---|---|---|
@@ -102,6 +109,11 @@ format - the CPU's own FPU where the format has one, gcc's
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/bench/when-hardware-pays-dark.svg">
   <img alt="Speedup of the resident tiles against the fastest available software, by format. The card loses at binary32 and binary64 and wins by four to twenty-one times at binary128 and binary256." src="docs/img/bench/when-hardware-pays-light.svg">
 </picture>
+
+**Every figure in this section is multiply**, which is what the chart
+plots (`python/readme_charts.py` sets `op = "mul"`). Fused
+multiply-add moves the line, and always in the tile's favour: see the
+end of this section.
 
 **Read the losses first.** At binary32 and binary64 a single tile is
 *slower* than a CPU - 1.6x and 1.1x behind an x86-64 workstation, and
@@ -135,6 +147,16 @@ across PCIe costs roughly five times running them from device memory,
 so at binary256 **one tile over PCIe is about parity with MPFR** and
 the win needs resident execution.
 
+**On fused multiply-add the card does better, at every format.** The
+same comparison, same runs, `op = "fma"`: at binary128 one tile is
+14.0x and four tiles 55.1x against MPFR, and at binary32 and binary64
+one tile is 1.55x and 1.25x *ahead* of the x86-64 workstation - not
+because the tile improved but because glibc's `fma` is a function call
+rather than an instruction. The M2 Pro still wins both narrow formats
+(one tile reaches 0.19x and 0.18x of it). The headline figures above
+stay on multiply because it is the honest comparison: the CPU does it
+in one instruction.
+
 Every number above is in `docs/bench/` - the raw sweeps, the peer
 runs from both machines, and `tipping-points.json` with each crossing
 and the bracket it was interpolated from. `docs/BENCHMARKS.md` carries
@@ -145,13 +167,13 @@ the tables and the method; the charts regenerate with
 
 | piece | what it is |
 |---|---|
-| `python/cft_golden` | The definition of correct. Exact, dependency-free Python: 31 opcodes, all five rounding modes, the complete IEEE clause 5 function set, and all thirty-nine transcendentals correctly rounded. Everything else is scored against this, never against each other. |
-| `rtl/` | The tile. A 16-stage pipelined fused-multiply-add core that splits one 256-bit lane into 2x fp128, 4x fp64 or 8x fp32, plus operand steering, a streaming engine, a reduction accumulator and an on-chip program sequencer. Yosys-clean, portability enforced in CI. |
+| `python/cft_golden` | The definition of correct. Exact Python - integers only, the standard library alone for the arithmetic, with mpmath's interval context deciding the transcendentals: 31 opcodes, all five rounding modes, the complete IEEE clause 5 function set, and all thirty-nine transcendentals correctly rounded. Everything else is scored against this, never against each other. |
+| `rtl/` | The tile. Fifteen 16-stage pipelined fused-multiply-add cores in four banks - 8x fp32, 4x fp64, 2x fp128, 1x fp256, each a separate pipe at its own significand width - plus operand steering, a streaming engine, a reduction accumulator and an on-chip program sequencer. (A shared fracturable multiplier exists behind `FUSE_MUL` and ships **off**: fracturing spends DSP blocks to save logic, which is the wrong trade on an FPGA - `docs/NOVEL.md` entry 6.) Yosys-clean, portability enforced in CI. |
 | `tb/` and `formal/` | 25 simulation targets checking every result and every flag against the golden model, and 30 machine-checked proofs, plus a negative control that must be refuted or the gate has stopped being able to catch a bug. |
-| `host/` | **libcft**: about 24,000 lines of C99 in `host/src`, no dependencies, no build step for callers. One ABI reachable from C, C++, Python, Rust, Julia, Go, C#, R and Fortran, with software, FPGA and remote backends behind identical calls. |
+| `host/` | **libcft**: about 24,000 lines of C99 in `host/src`, no dependencies, no build step for callers. One ABI reachable from C, C++, Python, Rust, Julia, Go, C#, R and Fortran, with software, FPGA and remote backends behind identical calls. On a multi-tile card an elementwise call is split across every tile and a segmented reduction by whole segments; a whole-array reduction takes the largest power of two of the tiles, because only that cuts the tree at a node; and a sequencer program runs on tile 0 alone. |
 | `bindings/` | The WebAssembly build behind the pages above, a Node package, and a Python drop-in for the MPFR pattern. |
 | `hw/` | Vitis packaging, HBM layout and the build pipeline. Bitstreams built and run on silicon. |
-| `vectors/` | The conformance sets: 1,068,915 cases, deterministic and seeded. |
+| `vectors/` | The conformance sets: 1,068,915 cases, deterministic and seeded, at the counts `make vectors` passes the generator. The verification runner's `vectors` stage regenerates at the generator's own defaults instead, which is a larger census - 1,224,915 cases over the same 168 sets. |
 
 Each of these has a document in `docs/` carrying the detail, the dates
 and the measurements.
@@ -186,13 +208,24 @@ standard does not, and which files and hashes "conforming" means.
 The rule is that a number in a document has a run behind it, and the
 runs that failed stay in the record. The load-bearing ones:
 
-- **The card reproduced every published case on silicon**, through one
-  tile and through four. `docs/CARDDAY.md` is the runbook as it was
-  actually run; `docs/VALIDATION.md` is the running record.
-- **Division and square root** are held against 23.9 billion cases of
-  the host CPU's own IEEE hardware, and 999,000 cases of GNU MPFR.
-- **The transcendentals** are held against MPFR over 739,234 cases, with
-  zero value and zero flag mismatches.
+- **The card replayed the conformance sets on silicon**, through one
+  tile and through four: 1,071,635 cases on 2026-09-08 and 2026-09-09,
+  the published set as it then stood, and the runner's larger
+  1,224,915-case generation on 2026-09-15, 09-16 and 09-18. The
+  published set is **1,068,915** cases since opcode 31 was assigned on
+  2026-09-12, and that exact set has been replayed on hosts rather than
+  on the card. `docs/CARDDAY.md` is the runbook as it was actually run;
+  `docs/VALIDATION.md` is the running record.
+- **Division and square root** are held against 23.875 billion cases of
+  the host CPU's own IEEE hardware - binary32 and binary64 only, that
+  being where a CPU can arbitrate, and exhaustive binary32 square root
+  under every attribute is 21.47 billion of it.
+- **MPFR arbitrates all four formats**: the 999,000-case parity run
+  covers add, subtract, multiply, fused multiply-add, divide and square
+  root together, under all five attributes (2026-08-31).
+- **The transcendentals** are held against MPFR over 306,460 cases -
+  the transcendental share of a 739,234-case campaign at ABI 0.7
+  (2026-09-04) - with zero value and zero flag mismatches.
 - **A GPU agrees, bit for bit, on a real workload.** atlas-engine's
   deterministic camera around a plate, lowered to a sequencer program:
   a million samples a pass, five words a sample, and every pass's
@@ -201,9 +234,13 @@ runs that failed stay in the record. The load-bearing ones:
   the software backend alike (2026-09-18). It is the one check here
   whose expected bits this project did not compute, and the `photograph`
   stage reruns it in a minute and a half.
-- **The same program in nine languages** prints byte-identical
-  checksums, each on the platform and date `docs/COMPATIBILITY.md`
-  records.
+- **The same program in nine languages**, of which **eight print
+  byte-identical checksums** - FNV-1a over the raw output encodings, so
+  no locale or decimal spelling can get into the line being diffed.
+  The ninth, Fortran, builds and runs through `iso_c_binding` and
+  prints decimals rather than a checksum line, so it is the one example
+  not in that diff. Each on the platform and date
+  `docs/COMPATIBILITY.md` records.
 - **CI's green tick does not cover synthesis, timing or silicon.**
   `docs/BRINGUP.md` owns those gates and defines "done" for each;
   `docs/VERIFICATION.md` maps every gate, what it proves, and how long
@@ -273,7 +310,8 @@ host/src/            libcft - software, XRT and remote backends, conformance
 host/tests/          contract tests, device-vs-software, differential
 host/fuzz/           the four parsers that face untrusted bytes, fuzzed (opt-in)
 host/tools/          the workload tools, the assembler, the image runner
-host/examples/       the same program in nine languages, byte-identical checksums
+host/examples/       the same program in nine languages; eight print byte-identical
+                     checksums, Fortran prints its own decimals instead
 bindings/            the WASM build, the Node package, the Python MPFR drop-in
 verify/              the standardized verification runner (make verify)
 vectors/             conformance-set emitter (JSONL)
@@ -294,8 +332,10 @@ throughput and what bounds each number.
 ## Design rules the repo is built around
 
 - **One definition of correct.** The golden model is integer-exact
-  Python with zero dependencies. RTL, host and vectors are all scored
-  against it, never against each other.
+  Python: the arithmetic needs nothing but the standard library, and
+  the transcendentals need mpmath, whose interval context is what
+  decides a result that is not exact. RTL, host and vectors are all
+  scored against it, never against each other.
 - **The contract outranks the implementation.** Each shared definition
   exists in exactly one other place, and changes move together.
 - **Claims stay measurable.** A number has a run behind it, and a
@@ -352,8 +392,8 @@ What it has shown so far:
   point where that turns over was not sampled between 6 and 64. Two
   results from the same run that a first reading would get wrong: four
   tiles and six were *slower* than one at every size, because the
-  library partitions each call across every tile and this integrator
-  issues thousands of short calls a step; and at 256 bodies over half
+  library partitions an elementwise call across every tile and this
+  integrator issues thousands of short calls a step; and at 256 bodies over half
   the card's time was the correctly rounded divide and square root, not
   the tile - which is now the first thing that integrator asks of this
   library.

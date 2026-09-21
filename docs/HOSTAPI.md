@@ -1743,9 +1743,12 @@ they are re-derivable rather than remembered.
 ## Calling it from somewhere else
 
 `host/examples/` has the same program in nine languages - C, C++,
-Python, Fortran, Rust, Julia, Go, C# and R - each printing the same
-four checksum lines, each diffed against the C example's bytes by its
-own `make -C host lang-*` leg (docs/COMPATIBILITY.md has the per-language
+Python, Fortran, Rust, Julia, Go, C# and R. Eight of them print the
+same four checksum lines and are diffed against the C example's bytes
+by their own `make -C host lang-*` leg; the Fortran example prints
+decimals instead, so its `lang-fortran` leg builds and runs it through
+`iso_c_binding` and compares its output against its own header rather
+than against the C bytes (docs/COMPATIBILITY.md has the per-language
 platforms and dates). Three of them carry the argument this document
 makes:
 
