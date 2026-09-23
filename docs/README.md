@@ -1,19 +1,19 @@
 # The documents, by what you open them for
 
-Thirty-six files, 47,884 lines. Flat in one directory they look like one
+Thirty-seven files, 48,469 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **16,329 lines you consult while working** — the three under *Start here*,
+- **16,346 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **5,538 lines of tool manual**, one per shipped program;
-- **1,731 lines of operations**, read when you are about to do something to
+- **1,743 lines of operations**, read when you are about to do something to
   hardware;
-- **24,286 lines of record and argument** — the ledger, the roadmap and the
+- **24,842 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
 Half is therefore history. That is deliberate, and it is also why a
-flat listing of thirty-six names feels heavier than the work actually is.
+flat listing of thirty-seven names feels heavier than the work actually is.
 
 This index exists because the README links eight of these and nothing linked
 the other twenty-seven. Nothing has moved: a file's path is part of its
@@ -91,7 +91,7 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 13,963 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [VALIDATION.md](VALIDATION.md) | 14,037 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
 | [ROADMAP.md](ROADMAP.md) | 3,227 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
 | [NOVEL.md](NOVEL.md) | 557 | Results for which no prior description was found, with the standard of evidence stated first. |
@@ -101,7 +101,8 @@ reading material for a working session.
 ## The design studies
 
 Four rounds of "should we build it this way", with the measurements that
-settled each, and one of "how far would it stretch". History of reasoning,
+settled each, one of "how far would it stretch", and one
+reading of the open toolchain's router. History of reasoning,
 not current reference — but the place to look before reopening one of these
 questions.
 
@@ -112,6 +113,7 @@ questions.
 | [studies/OPT-C-timing.md](studies/OPT-C-timing.md) | 1,151 | timing, and what the physical tools will and will not give |
 | [studies/OPT-D-contract.md](studies/OPT-D-contract.md) | 1,048 | the contract and the system above the RTL |
 | [studies/EXT-A-wide-ladder.md](studies/EXT-A-wide-ladder.md) | 1,146 | how far the ladder extends above binary256, what an MPFR-shaped tile is worth on an FPGA and on an ASIC, and what counting in MPFR cores leaves out; its instruments and their captured runs are in `studies/ext-a/` |
+| [studies/TOOL-A-dense-router.md](studies/TOOL-A-dense-router.md) | 252 | why openXC7's router does not converge on the tile, what to change in it and in what order, and why a fork of it (loganw234/nextpnr-xilinx, `dense`) starts at the pinned 0.9.6 |
 
 ---
 

@@ -13961,3 +13961,77 @@ the part of it that is fixed for the run, in a register is the obvious
 one if 150 misses - with care for `wfinish`, which compares against
 `wr_total` in a run's first cycle); nothing about the openXC7 routes,
 which were still converging.
+
+## 2026-09-23 - the open router: three routes stopped, the curves they leave, a study of the router, and a fork to work on it
+
+**The curves.** Four runs of openXC7's nextpnr-xilinx 0.9.6 on the tile,
+each placing and routing in one run in the toolchain image (56bca0f723e3)
+on amd-arc-box, `--freq 100 --timing-allow-fail`; none converged. Total
+overuse after each router iteration, and nextpnr's own frequency estimate
+after placement:
+
+    pnr                board, ef9c3ec        39% of LUT bels   19.8 MHz est.   334,494  85,421  56,656  47,133  43,343
+    pnr-f1             full rate, ladders on 44%               21.9            542,678, and no second iteration in six hours
+    pnr-f2             full rate, ladders off 52%              25.9            420,129 128,231  89,419  77,116  69,979
+    pnr-board-6a2b26c  board, 6a2b26c        39%               22.4            340,836  98,546 (running)
+
+The routing stayed on 1.3 to 1.5 cores of 36, and the board run's fifth
+iteration took more than two hours to remove 8% of what was left. The three
+on ef9c3ec were stopped at 13:05 by Logan's decision, to give the router
+experiments the machine: `docker stop`, exit 137 after the 30 s grace,
+each directory keeping its `pnr.log`, a copy taken at the stop and a
+`STOPPED` note. The 6a2b26c board run continues as the unmodified router's
+long-run reference.
+
+**The study.** `docs/studies/TOOL-A-dense-router.md` reads the router and
+says why: a congestion price that grows by addition from a first pass that
+barely negotiates; a search that keeps the first path to reach each wire,
+not the cheapest (its relaxation test can never be true); an estimate
+weight of 1.75; bounding boxes that widen one tile per ten failures; four
+threads at most; per-wire `std::map`s and hash lookups in the innermost
+loop; an estimate that walks up to 200 tile positions a call. LUT input
+permutation, one thing Vivado leans on for density, is present. Mainline
+nextpnr has fixed the search's revisit test and added congestion heatmaps,
+and has neither the thread count nor the price's growth fixed.
+
+**A correction to what was said in conversation.** The first reading said a
+`--pre-route` script could set every router option without rebuilding. It
+cannot: 0.9.6's Python bindings do not reach `ctx->settings`.
+
+**And a trap the study found.** A placed design's own `settings` are
+written over the command line's when it is loaded (`frontend_base.h`,
+nextpnr-xilinx 0.9.6, lines 281-283), so routing a placed design again with
+another `--freq`, `--no-tmdriv` or `--seed` silently keeps the file's -
+and the command line recorded for such a run would misstate it.
+
+**The fork.** loganw234/nextpnr-xilinx, public, forked from openXC7 on
+2026-09-23 at Logan's choice; branch `dense` from 3fd78784 (tag 0.9.6, the
+pinned binary, so its unmodified build is the control). Its first four
+commits change no routing: router2 prints the settings it applies and
+refuses unknown `router2/` keys by name (74730d1); `--set KEY=VALUE` is
+applied after the design loads, and every setting a design file overrides
+is logged (8e70c59); `DENSE.md`, a ledger and the build and bench scripts
+(9ffb7d6); and the build control's own correction (2860169, below). The
+router experiments are recorded in the fork's `dense/LEDGER.md`; this
+ledger records what they come to for the tile.
+
+**No bitstream reproduces, and the first control learned that the hard
+way.** The fork's first build control compared blinky-kc705 bitstreams and
+reported them different: 9d0befc4... from the image's own binary, 3109a856...
+from the fork, and neither the 2471bcc7... the image manifest recorded. Taken
+apart: Yosys gave identical netlists twice; the image's nextpnr gave
+identical FASM twice, and again on one OpenMP thread; the fork's FASM
+differed from it only in the comment naming the version. `xc7frames2bit`
+writes the date and time into every `.bit` header ("2026/09/23 20:18:39"),
+so no two bitstreams hash alike. Two things here follow: the image
+manifest's self-test hash is a record of that build and can never be
+reproduced - the Dockerfile already says "recorded, not compared" - and the
+`harness.bit.sha256` that `hw/openxc7/run_pnr_inner.sh` writes names one
+bitstream, not a reproducible result. Compare FASM. nextpnr's determinism on
+blinky is what the router experiments' curve comparisons rest on; on the
+tile it is still to be shown, by routing one configuration twice.
+
+**Running when this was written:** one placement of the 6a2b26c board
+netlist, by the image's binary with `--no-route`, from 13:06, for every
+experiment to route (`~/dense-bench`, its provenance beside it: netlist
+dc57f63e..., chip database d3d90cb6..., constraints f62b793a...).
