@@ -13716,3 +13716,18 @@ written.
 read); a U50 build with the change, whose 135 MHz is therefore
 unmeasured; any card run; 120 MHz on the K325T; the openXC7 flow on
 6a2b26c.
+
+## 2026-09-23 - a correction: the U50 single's 262 is block RAM, not DSPs
+
+The entry "the Kintex-7 in both flows" above says the U50 images built
+since the integer multiply report "262 DSPs, the FMA ladder's count
+alone". That misreads the table of 2026-09-16: 262 is the single's block
+RAM tiles. Its DSPs are **311** - the ladder's 262, the integer
+multiply's 45 (three in each of fifteen lanes, as on the K325T) and four
+more - and the quad's 1,232 is four tiles of 307 and the same four. The
+U50 builds the multiply as a DSP cascade too: `build-rev4-hw`'s
+kernel-clock worst path (`~/cardday-forensics` on amd-arc-box, read by
+the clock's name, 135 MHz, +0.210 ns, 6.977 ns of data path) is operand
+FIFO A into an fp64 lane's stage-0 bypass register through three
+DSP48E2 - A to P, then C to P twice, the shape the K325T routed. What
+registering it buys on the U50 was not measured when this was written.
