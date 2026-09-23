@@ -112,11 +112,13 @@
 // cfg_prog is 32-byte aligned (the library guarantees it); cfg_cnt is
 // 4-byte aligned. n == 0 completes immediately, touching nothing.
 //
-// The read master serves the program image and the three input
-// streams (phases never overlap); the write master serves deposits
-// and counts. B and C stay quiet in sequencer runs - bandwidth is not
-// what a sequencer run is for, and one read channel keeps the whole
-// machine a straight line. One burst is in flight at a time on each
+// The read port serves the program image and the three input streams
+// (phases never overlap); the write port serves deposits and counts.
+// cft_krnl steers each read to the A, B or C master by the buffer it
+// belongs to (m_rd_sel), since on HBM a master reaches only its own
+// bank; one read port still keeps the whole machine a straight line.
+// (Until 2026-09-23 this said B and C stayed quiet in sequencer runs,
+// which stopped being true on 2026-09-02.) One burst is in flight at a time on each
 // channel: a sequencer run's memory traffic is bounded by its
 // register file, not by the bus, so the simplicity is free.
 //

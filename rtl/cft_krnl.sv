@@ -27,12 +27,14 @@
 // interconnect only ever sees one owner, and the masters are shared
 // rather than duplicated.
 //
-// The sequencer wants one read stream and one write stream, so it
-// borrows A and D and leaves B and C quiet; a program's inputs arrive
-// through A's beats along with its image, and bandwidth is not what a
-// sequencer run is for. Four masters for a machine that reads one
-// array slowly would buy nothing and cost three HBM pseudo-channel
-// groups.
+// The sequencer has one read port and one write port. Its writes go
+// out on D; each read is steered to A, B or C by the buffer it belongs
+// to (m_rd_sel, below), because on HBM a master reaches only its own
+// bank - wiring the port to A alone failed on the first device run
+// (docs/VALIDATION.md, 2026-09-02). One burst is in flight at a time,
+// so the steering needs no reordering; bandwidth is not what a
+// sequencer run is for. (Until 2026-09-23 this comment still said the
+// sequencer borrowed A and D and left B and C quiet.)
 //
 // The mux select is REGISTERED at the accepted start, never read live
 // from MODE. A host that rewrote MODE mid-run would otherwise hand the
