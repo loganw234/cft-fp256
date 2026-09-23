@@ -212,7 +212,7 @@ cycles krnlfused krnlplain simmc:
 # cft_normseg's ports are packed vectors now, which is all 0.33 could not parse.
 yosys-lint:
 	yosys -q -p "read_verilog -sv -I rtl rtl/cft_fpfma.sv rtl/cft_fpfma_pipe.sv \
-	  rtl/cft_opmux.sv rtl/cft_simpleops.sv rtl/cft_seedop.sv rtl/cft_csr.sv \
+	  rtl/cft_opmux.sv rtl/cft_simpleops.sv rtl/cft_imul.sv rtl/cft_seedop.sv rtl/cft_csr.sv \
 	  rtl/cft_fifo.sv rtl/cft_mulfrac.sv rtl/cft_mulpass.sv rtl/cft_reduce_acc.sv rtl/cft_normseg.sv \
 	  rtl/cft_engine.sv rtl/cft_engine_stream.sv \
 	  rtl/cft_lanes.sv rtl/cft_seq.sv rtl/cft_krnl.sv; \

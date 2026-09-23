@@ -93,7 +93,13 @@
 
 module cft_simpleops #(
     parameter int EXP_W = 8,
-    parameter int MAN_W = 23
+    parameter int MAN_W = 23,
+    // 1: IMUL's product is formed OUTSIDE this module, registered, by
+    // cft_imul beside the lane, and d carries a zero placeholder for it
+    // (valid and flags unchanged). cft_lanes sets it; the default keeps
+    // the combinational product, which this module's bench and proofs
+    // hold as the reference.
+    parameter bit IMUL_EXT = 1'b0
 ) (
     input  logic [7:0]           op,
     input  logic [EXP_W+MAN_W:0] a,
@@ -432,6 +438,14 @@ module cft_simpleops #(
   // where every other integer opcode sits, on the precomputed-result
   // sideband, so it is off the FMA datapath entirely and the fp pipe
   // is untouched.
+  //
+  // Inside a lane that sideband is the path from the operand FIFO's
+  // block RAM to the pipe's stage-0 register, and three combinational
+  // DSP48s on it set the Kintex-7 325T's clock (2026-09-23,
+  // docs/VALIDATION.md). So the lanes set IMUL_EXT and take the
+  // product from cft_imul, registered, at the output level; with
+  // IMUL_EXT the value below is a constant zero and the multiply
+  // leaves the netlist.
   logic [31:0] mul_a32, mul_b32;
   logic [15:0] mul_al, mul_ah, mul_bl, mul_bh, mul_mid;
   logic [31:0] mul_lo;
@@ -447,7 +461,8 @@ module cft_simpleops #(
   assign mul_bh  = mul_b32[31:16];
   assign mul_mid = 16'((mul_al * mul_bh) + (mul_ah * mul_bl));
   assign mul_lo  = 32'(mul_al * mul_bl) + {mul_mid, 16'b0};
-  assign mul_val = W'(mul_lo);            // the zero extension
+  assign mul_val = IMUL_EXT ? '0          // the lane substitutes cft_imul's
+                            : W'(mul_lo); // the zero extension
 
   logic [W-1:0] int_val;
   always_comb begin

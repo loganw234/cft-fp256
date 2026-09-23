@@ -431,7 +431,7 @@ module cft_lanes #(
             .op(op), .a(sa), .b(sb), .c(sc),
             .fa(fa), .fb(fb), .fc(fc));
         logic bv; logic [31:0] bd; logic [4:0] bf;
-        cft_simpleops #(.EXP_W(8), .MAN_W(23)) u_simple (
+        cft_simpleops #(.EXP_W(8), .MAN_W(23), .IMUL_EXT(1'b1)) u_simple (
             .op(op), .a(sa), .b(sb), .c(sc),
             .valid(bv), .d(bd), .flags(bf));
         // Divide/sqrt seeds: quiet unary precomputed results, delivered
@@ -461,7 +461,16 @@ module cft_lanes #(
             .nrm_d(ns_dout[gi*NSEG_SLOTW +: NW32]),
             .aln_v(av32[gi]), .aln_csh(ac32[gi]), .aln_fsh(af32[gi]),
             .aln_dir(ad32[gi]), .aln_d(as_dout[gi*NSEG_SLOTW +: AW32]));
-        assign d32[gi*32 +: 32] = dd;
+        // IMUL's product, registered beside the pipe (rtl/cft_imul.sv):
+        // the pipe carried simpleops' placeholder for it (IMUL_EXT), and
+        // the product replaces that at the output level. Same issue
+        // qualifier as the pipe's in_valid, same operands as simpleops.
+        logic imv; logic [31:0] imp;
+        cft_imul #(.DEPTH(LATENCY)) u_imul (
+            .clk(clk), .rst_n(rst_n), .en(en),
+            .issue(in_valid && (prec == PREC_FP32)), .op(op),
+            .a(sa[31:0]), .b(sb[31:0]), .out_v(imv), .out_p(imp));
+        assign d32[gi*32 +: 32] = imv ? imp : dd;
       end
     end else begin : g_no_bank32
       assign d32 = '0;
@@ -485,7 +494,7 @@ module cft_lanes #(
             .op(op), .a(sa), .b(sb), .c(sc),
             .fa(fa), .fb(fb), .fc(fc));
         logic bv; logic [63:0] bd; logic [4:0] bf;
-        cft_simpleops #(.EXP_W(11), .MAN_W(52)) u_simple (
+        cft_simpleops #(.EXP_W(11), .MAN_W(52), .IMUL_EXT(1'b1)) u_simple (
             .op(op), .a(sa), .b(sb), .c(sc),
             .valid(bv), .d(bd), .flags(bf));
         logic sev; logic [63:0] sed;
@@ -511,7 +520,13 @@ module cft_lanes #(
             .nrm_d(ns_dout[gi*2*NSEG_SLOTW +: NW64]),
             .aln_v(av64[gi]), .aln_csh(ac64[gi]), .aln_fsh(af64[gi]),
             .aln_dir(ad64[gi]), .aln_d(as_dout[gi*2*NSEG_SLOTW +: AW64]));
-        assign d64[gi*64 +: 64] = dd;
+        // IMUL, registered - as in the fp32 bank, zero-extended.
+        logic imv; logic [31:0] imp;
+        cft_imul #(.DEPTH(LATENCY)) u_imul (
+            .clk(clk), .rst_n(rst_n), .en(en),
+            .issue(in_valid && (prec == PREC_FP64)), .op(op),
+            .a(sa[31:0]), .b(sb[31:0]), .out_v(imv), .out_p(imp));
+        assign d64[gi*64 +: 64] = imv ? {32'b0, imp} : dd;
       end
     end else begin : g_no_bank64
       assign d64 = '0;
@@ -535,7 +550,7 @@ module cft_lanes #(
             .op(op), .a(sa), .b(sb), .c(sc),
             .fa(fa), .fb(fb), .fc(fc));
         logic bv; logic [127:0] bd; logic [4:0] bf;
-        cft_simpleops #(.EXP_W(15), .MAN_W(112)) u_simple (
+        cft_simpleops #(.EXP_W(15), .MAN_W(112), .IMUL_EXT(1'b1)) u_simple (
             .op(op), .a(sa), .b(sb), .c(sc),
             .valid(bv), .d(bd), .flags(bf));
         logic sev; logic [127:0] sed;
@@ -561,7 +576,13 @@ module cft_lanes #(
             .nrm_d(ns_dout[gi*4*NSEG_SLOTW +: NW128]),
             .aln_v(av128[gi]), .aln_csh(ac128[gi]), .aln_fsh(af128[gi]),
             .aln_dir(ad128[gi]), .aln_d(as_dout[gi*4*NSEG_SLOTW +: AW128]));
-        assign d128[gi*128 +: 128] = dd;
+        // IMUL, registered - as in the fp32 bank, zero-extended.
+        logic imv; logic [31:0] imp;
+        cft_imul #(.DEPTH(LATENCY)) u_imul (
+            .clk(clk), .rst_n(rst_n), .en(en),
+            .issue(in_valid && (prec == PREC_FP128)), .op(op),
+            .a(sa[31:0]), .b(sb[31:0]), .out_v(imv), .out_p(imp));
+        assign d128[gi*128 +: 128] = imv ? {96'b0, imp} : dd;
       end
     end else begin : g_no_bank128
       assign d128 = '0;
@@ -581,7 +602,7 @@ module cft_lanes #(
           .op(op), .a(a[255:0]), .b(b[255:0]), .c(c[255:0]),
           .fa(fa), .fb(fb), .fc(fc));
       logic bv; logic [255:0] bd; logic [4:0] bf;
-      cft_simpleops #(.EXP_W(19), .MAN_W(236)) u_simple (
+      cft_simpleops #(.EXP_W(19), .MAN_W(236), .IMUL_EXT(1'b1)) u_simple (
           .op(op), .a(a[255:0]), .b(b[255:0]), .c(c[255:0]),
           .valid(bv), .d(bd), .flags(bf));
       logic sev; logic [255:0] sed;
@@ -606,7 +627,13 @@ module cft_lanes #(
           .nrm_d(ns_dout[0 +: NW256]),
           .aln_v(av256), .aln_csh(ac256), .aln_fsh(af256),
           .aln_dir(ad256), .aln_d(as_dout[0 +: AW256]));
-      assign d256 = dd;
+      // IMUL, registered - as in the fp32 bank, zero-extended.
+      logic imv; logic [31:0] imp;
+      cft_imul #(.DEPTH(LATENCY)) u_imul (
+          .clk(clk), .rst_n(rst_n), .en(en),
+          .issue(in_valid && (prec == PREC_FP256)), .op(op),
+          .a(a[31:0]), .b(b[31:0]), .out_v(imv), .out_p(imp));
+      assign d256 = imv ? {224'b0, imp} : dd;
     end else begin : g_no_bank256
       assign d256 = '0;
       assign f256_l = '0;
