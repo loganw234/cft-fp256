@@ -14067,3 +14067,33 @@ to look for at 145. It is the 2026-09-01 entry's point measured a second
 time - slack at a met target is where the router stopped, and only a missed
 point measures the edge. 155 MHz was building when this was written.
 
+## 2026-09-23 - the U50 single closes 155 MHz with 12 ps to spare, and the whole conformance set agrees on the card
+
+The sweep's third point: 307872e, 155 MHz, the standard recipe.
+
+    build        138 min; memory floor 12 GB available, no OOM in the kernel log
+    kernel WNS   +0.012 ns, 0 of 143,880 endpoints failing (post-route summary; the
+                 manifest agrees) - and for the first time the design's worst path:
+                 routed WNS 0.012, below the shell's 0.055
+    verify-image PASS, 8 of 8; staged ~/cardday-u50-155, sha256 e9de63ba...
+    device-test  -q -n 8 on the U50: rc 0, 2,367 checks, 0 failed
+    replay       cft-selftest vectors/out: rc 0, backend xrt, 1,068,915 cases checked,
+                 12 min 9 s
+
+**The single tile runs at 155 MHz, 14.8% above its shipping 135, and
+computes right there.** The margin is 12 ps, and it is not one path at the
+edge but a family: the ten worst kernel paths all start at an operand
+FIFO's block RAM (`u_engine/u_fifo_b`, `u_fifo_a`) and end in the stage-0
+bypass register of the fp256 lane (nine) and of an fp128 lane (one), at
++0.012 to +0.046 ns; the worst runs 20 levels, eight of them CARRY8, with a
+MUXF7, 6.269 ns of data path. It is the family docs/BITSTREAM-BUILDS.md
+calls the design's oldest critical path - FIFO into an FMA lane's bypass -
+which nine earlier quads closed with 0.009 to 0.143 ns to spare; in the
+builds from 2026-09-07 on it ran through the integer multiply's DSP
+cascade, and now, with the multiply registered, through carry logic alone. It is back in front now that the
+multiply, the write master's arithmetic and the operation register have
+each been worked around or routed past on the way up. 160 MHz, 0.2 ns shorter, was
+building when this was written; with a family of paths within 46 ps of
+the edge at 155, a miss there is the expectation, and it is what the sweep
+exists to measure rather than assume.
+
