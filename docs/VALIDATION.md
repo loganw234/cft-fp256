@@ -14035,3 +14035,35 @@ tile it is still to be shown, by routing one configuration twice.
 netlist, by the image's binary with `--no-route`, from 13:06, for every
 experiment to route (`~/dense-bench`, its provenance beside it: netlist
 dc57f63e..., chip database d3d90cb6..., constraints f62b793a...).
+
+## 2026-09-23 - the U50 single closes 150 MHz as well, and the whole conformance set agrees on the card
+
+The sweep's second point: 307872e (rtl c9b67d4b), single tile,
+`hw/build-pair.sh --single-only --freq 150000000`, the standard recipe, on
+amd-arc-box.
+
+    build        125 min, beside the openXC7 routes and the router experiments;
+                 memory floor 8 GB available, no OOM in the kernel log
+    kernel WNS   +0.122 ns, 0 of 142,833 endpoints failing (post-route summary; the
+                 manifest's routed number agrees, re-read with hw/sweep_freq.sh --judge)
+    whole design +0.055 ns - the shell's, as at every clock so far
+    verify-image PASS, 8 of 8; staged ~/cardday-u50-150, re-hashed byte-identical,
+                 sha256 916efef6...
+    device-test  -q -n 8 on the U50: rc 0, 2,367 checks, 0 failed
+    replay       cft-selftest vectors/out: rc 0, backend xrt, 1,068,915 cases checked,
+                 12 min 23 s
+
+**The single tile runs at 150 MHz, 11% above the 135 it ships at, and
+computes right there** - timing closed, image verified, every published case
+agreeing with the model on the card.
+
+**The worst path moved again.** All ten worst kernel paths at 150 end in the
+fp256 lane's stage-0 bypass register (`g_bank256.u_fma/s0_byp_d_reg[...]`),
+at +0.122 to +0.204 ns; the worst starts at the stream engine's operation
+register `op_r[3]` and runs 23 levels, ten of them CARRY8, 6.394 ns of data
+path. The write-master arithmetic that bounded 145 at +0.163 is not among
+them: asked for 150, the router found room on that path it had no reason
+to look for at 145. It is the 2026-09-01 entry's point measured a second
+time - slack at a met target is where the router stopped, and only a missed
+point measures the edge. 155 MHz was building when this was written.
+
