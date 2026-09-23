@@ -97,10 +97,10 @@ The bench list is the variable `SIM_BENCHES` and the files checked are
 the check. Override it to gate a subset: `make sim SIM_BENCHES=fp32`.
 
 **`make -C host all` does not build the test executables, on any
-host.** `api-test`, `device-test`, `remote-test` and `cft-serve` are
-separate targets, and they link `libcft.a` STATICALLY - so after a
-library fix, `all` leaves a test binary that still runs the old
-backend. It cost a merge gate on 2026-09-15 (a device-test from 05:13
+host.** `api-test`, `device-test` and `remote-test` are separate
+targets, and they link `libcft.a` STATICALLY - so after a library fix,
+`all` leaves a test binary that still runs the old backend. (`cft-serve`
+is the exception: it is in `all`, and has been since it was written.) It cost a merge gate on 2026-09-15 (a device-test from 05:13
 scoring two later commits) and, the same night, a card run that
 repeated the exact twelve failures a fix had removed. Name the tests
 on the make line and print their build time before trusting a run;

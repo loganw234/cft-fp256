@@ -20,7 +20,7 @@ against a vendor's marketing arithmetic. The constants:
 | full tile, flattened (shipping settings) | **123,420 LUT** | 9f73107, 2026-09-02, docs/ROADMAP.md |
 | full tile, hierarchy preserved (the sizing figure) | **131,386 LUT** | `hw/synth_attrib.tcl` on eb8ef2a, docs/LAYOUTS.md |
 | DSP per tile | 292 ladders off / 277 ladders on | docs/SCALING.md |
-| BRAM per tile | 16 | docs/LAYOUTS.md |
+| BRAM per tile | 36 RAMB36 on the 2026-09-07 tree; **116** on the tree of 2026-09-23 on 7-series fabric, Vivado and Yosys alike, with no UltraRAM to take the sequencer's memories | docs/VALIDATION.md, 2026-09-07 and 2026-09-23 (this row said 16 until then, citing docs/LAYOUTS.md, which states no BRAM figure) |
 | fp128-max tile (drop fp256) | 96,053 LUT | 131,386 - 35,333, docs/LAYOUTS.md bank costs |
 | fp64-max tile | 68,561 LUT | less the 27,492 fp128 bank |
 | fp32-max tile | 43,257 LUT | less the 25,304 fp64 bank; LAYOUTS' "a third of a full one" |
@@ -145,7 +145,10 @@ adder uses 21 CARRY8 per critical path, which becomes 42 CARRY4 on
 18x18 partials rather than Vivado's 25x18, so a tile there should be
 counted near 390-400 DSPs rather than 292 - which raises every
 7-series DSP percentage by about 1.5x and, on every row above, still
-flips no verdict.
+flips no verdict. *Measured 2026-09-22 in the `board` configuration
+(ten passes):* Yosys infers 120 DSP48E1 where Vivado places 101 on the
+same tree - two DSP rows for each 24-bit multiplier chunk
+(docs/VALIDATION.md).
 
 ## 1. Used data-centre cards
 
@@ -995,24 +998,35 @@ board pricing could be sourced.
 
 ### Three findings, before any board
 
-**1. You cannot currently have cheap, open and PCIe at the same time.**
-`PCIE_2_1` is not in nextpnr-xilinx's supported-primitive list, there
-is no PCIe demo in openXC7's CI, and no open issue tracks it. The
-metadata exists (`site_type_PCIE_2_1.json` in both the artix7 and
-kintex7 trees of `nextpnr-xilinx-meta`) but the packer does not claim
-the block. GTP transceivers *do* work - the
-`litex-sata-alientek-davincipro` demo runs SATA Gen1 over GTPs on an
-XC7A35T in CI, and despite the `litex_pcie` name in its source it
-instantiates `LiteSATAPHY`, not `S7PCIEPHY`. **PCIe on any of these
-boards means Vivado.** Which, after the 2026.1 licensing change, is no
-longer the objection it was.
+**1. Cheap, open and PCIe at once is unshown - not unsupported.**
+*Corrected 2026-09-22: this finding first said PCIe on these boards
+meant Vivado, reading the absence of `PCIE_2_1` from nextpnr-xilinx's
+README primitive list as absence from the tool.* The block is
+supported: openXC7/nextpnr-xilinx#61 (merged 2025-03-03) added it with
+a hardware test on Artix-7 at Gen1 x1, and #88 (merged 2026-04-17)
+brought PCIe up through GTX on Kintex-7 - both inside the 0.9.3 release
+this survey checked. What is missing is evidence at this project's
+shape: no openXC7 demo builds LitePCIe's `S7PCIEPHY`, the one outside
+endpoint (`regymm/pcie_7x`) claims Gen1/Gen2 x1 on a 480T and a 70T
+board, and nobody has shown x8 on a 325T. GTP transceivers work too -
+the `litex-sata-alientek-davincipro` demo runs SATA Gen1 over GTPs on an
+XC7A35T in CI (despite the `litex_pcie` name in its source it
+instantiates `LiteSATAPHY`). **PCIe on these boards is open-flow ground
+still to be proven, with Vivado as the known-good fallback** - which,
+after the 2026.1 licensing change, is no longer the objection it was.
 
 **2. openXC7's DSP48E1 correctness bug is still open.** docs/ROADMAP.md
 recorded [openXC7/nextpnr-xilinx
-#159](https://github.com/openXC7/nextpnr-xilinx/issues/159) on
+#159](https://github.com/openXC7/nextpnr-xilinx/pull/159) on
 2026-08-20 as "one in-flight fix away". Re-checked 2026-09-05: **the
-issue is still open and no DSP48E1 fix has been merged** (the 15
-most-recently-updated pull requests contain none). The title is its
+fix is still unmerged** (the 15 most-recently-updated pull requests
+contain none). *Re-checked 2026-09-22, with a correction: #159 is itself
+the pull request carrying the fix, not an issue.* It is still open;
+`xilinx/pack_dsp_xc7.cc` on main still comments out the INMODE and
+ALUMODE2/3 lines ("these seem to be inverted for unknown reasons"); a
+maintainer could not reproduce the fault on xc7s50; and a comparison
+against Vivado on 2026-09-22 matched it on the constant-1 pins while its
+constant-0 tie-off trips Vivado's DRC PDCN-6. The title is its
 own summary - "inferred DSP48E1 ignores its A operand -- INMODE/ALUMODE2/3/OPMODE6
 never get their tile constant bits" - and the reported hardware pass
 rates before the proposed fix are **1 of 315** for a dual 16x16 DSP and
@@ -1161,20 +1175,31 @@ adjacent 420T is present, so adding the 410T remains plausible work
 rather than new science - but it is still unproven, and buying a 410T
 on the assumption is still the thing not to do. That rules the
 PZ-K7410T-SOM out of an open flow specifically, while leaving it a
-perfectly good Vivado part now that Kintex-7 is free.
+perfectly good Vivado part now that Kintex-7 is free. *Measured
+2026-09-22:* the 410T brings no tile type and no site type the kintex7
+database lacks - its 113 tile types are the database's 113 and its site
+types the 325T's; it is the 325T's height at the 480T's width - so
+adding it is per-part data for openXC7's part-only fuzzers, not new
+fuzzing (docs/VALIDATION.md, 2026-09-22; `hw/openxc7/census.tcl`).
 
 `zynq7` covering 7z045 confirms docs/ROADMAP.md's ZC706 row.
 
 **What CI actually builds**, from the `PART` line of each Makefile in
-`openXC7/demo-projects` - 21 projects, all passing:
+`openXC7/demo-projects` - 21 projects, all passing, as first read.
+*Re-read 2026-09-22 at demo-projects a38fb897 (31 directories): the
+Kintex-7 rows were incomplete and are replaced below; the Artix-7 rows
+are as first read; `picosoc` also builds, its part chosen by a BOARD
+variable (qmtech, genesys2, kx2 or hpc_420t).* CI proves that a
+bitstream builds, not that it behaves - demo-projects' own README says
+so.
 
 | part | project |
 |---|---|
 | `xc7k480tffg1156-1` | blinky-ypcb003381p1 |
 | `xc7k420tffg901-1` | **litex-ddr-hpcstore-k420t** - a LiteX SoC with DDR3, 789 KB of generated Verilog |
-| `xc7k325tffg900-2` | blinky-genesys2 |
-| `xc7k325tffg676-1` | blinky-qmtech, blinky-stlv7325 |
-| `xc7k160tffg676-2` | litex-ddr-enclustra-kx2 |
+| `xc7k325tffg900-2` | blinky-genesys2, **blinky-kc705, litex-ddr-kc705** - LiteDRAM DDR3 on the PZ-K7325T-SOM's exact part string, in CI since 2023-06-06 |
+| `xc7k325tffg676-1` | blinky-qmtech, blinky-stlv7325, hdmi-stlv7325, litex-ddr-stlv7325, litex-ddr-hdmi-stlv7325, litex-ddr-qmtech-kintex7 |
+| `xc7k160tffg676-2` | litex-ddr-enclustra-kx2, litex-ddr-hdmi-enclustra-kx2 |
 | `xc7a100tfgg676-1` | litex-ddr-qmtech-artix7 |
 | `xc7a35tfgg484-2` | litex-sata-alientek-davincipro |
 
@@ -1763,6 +1788,11 @@ board that *runs* the tile, a -2 part is worth the difference - the
 $341 K325T PCIe card of section 5 (`XC7K325T-2FFG676I`, Gen2 x8, 1 GB
 DDR3) or the PZ-K7325T SOM in the Puzhi rows at the end of this
 document, both -2, in the two packages the routed runs covered.
+*On the tree of 2026-09-23 the -2 no longer closes 100 MHz:* the
+integer multiply added after those runs puts three combinational
+DSP48E1s on the lanes' input path, and the same cell routes at 53.8%
+and about 82 MHz (docs/VALIDATION.md, 2026-09-23). The grade argument
+stands; the absolute clocks moved.
 
 The reasoning is about evidence, not specifications. `xc7k325tffg676-1`
 is the exact die *and package* that openXC7's CI builds
@@ -1776,7 +1806,7 @@ Vivado-versus-openXC7 A/B on one board is exactly the build-diversity
 pairing docs/ROADMAP.md wants.
 
 **But the first result to want from it is not a tile.** It is whether
-[#159](https://github.com/openXC7/nextpnr-xilinx/issues/159) still
+[#159](https://github.com/openXC7/nextpnr-xilinx/pull/159) still
 poisons DSP48E1 results, measured with this project's own conformance
 vectors, which is the one instrument that would catch a complemented
 INMODE in the first multiply. That is a $100 experiment answering a
@@ -1791,8 +1821,10 @@ than discovering it.
 
 If a host link is wanted in the same step, the **$341 XC7K325T PCIe
 Gen2 x8 card** is the cheapest board found with a real x8 edge and 1
-GB of DDR3 - but PCIe on it means Vivado, because openXC7 has no PCIe
-hard-block support at all.
+GB of DDR3 - and PCIe on it is Vivado's known ground and openXC7's
+unshown one: nextpnr-xilinx has carried `PCIE_2_1` since 2025, but
+nobody has shown x8 on a 325T through it (§3, corrected 2026-09-22; this
+sentence first said openXC7 had no PCIe hard-block support at all).
 
 *Not recommended:* the PZ SOM family, until the carrier price is
 quoted (the x8 KFB has no published price and the cheaper FH variant
@@ -2044,7 +2076,7 @@ document.
   (MT41K128M16), and flash size conflicts between sources (128 vs 256
   Mbit).
 * Confirm a JTAG programmer is included or on hand.
-* **Re-check [#159](https://github.com/openXC7/nextpnr-xilinx/issues/159)
+* **Re-check [#159](https://github.com/openXC7/nextpnr-xilinx/pull/159)
   before treating any openXC7 arithmetic result as meaningful.** If it
   is still open, plan the DSP vector run as the *first* experiment, not
   a later one.

@@ -22,9 +22,9 @@ kernel flow, XRT host runtime.
     +-------------------+           +-----------+
     | cft_engine_stream |           |  cft_seq  |  on-chip programs,
     +-------------------+           +-----------+  index-addressed deposits
-     m_axi_a/b/c/d (AXI4-256)        m_axi_a/d - the same two masters,
-     beat FSM, A/B/C reads,          handed over by MODE[15]
-     D write, reduction accumulator
+     m_axi_a/b/c/d (AXI4-256)        m_axi_a/b/c/d - the same masters,
+     beat FSM, A/B/C reads,          handed over by MODE[15]; each read
+     D write, reduction accumulator  steered to the master of its buffer
               |                            |
               +-------------+--------------+
                             |
@@ -829,6 +829,13 @@ the path delay, not the slack: the U50 runs both met their ask and
 say nothing about headroom, and neither part has had the frequency
 sweep that would put a number on its ceiling.
 
+*The current tree, 2026-09-23.* The integer multiply that arrived the
+same evening as this section's runs (4e8dfff) is now the K325T's wall:
+three DSP48E1s in combinational mode between the operand FIFO's block
+RAM and a lane's stage-0 bypass register, 12.211 ns routed against the
+100 MHz ask - about 82 MHz, where this section's tree reached ~119
+(docs/VALIDATION.md, 2026-09-23).
+
 
 ## The multi-cycle rung (built 2026-09-06: rtl/cft_mulpass.sv)
 
@@ -1044,6 +1051,11 @@ predicts 15.3% more wire against 13.5% measured. The package makes no
 difference out of context. **Still not measured:** either part's
 ceiling, which wants the frequency sweep that study specifies, and any
 post-route figure under a shell rather than out of context.
+
+*Re-run on the current tree, 2026-09-23:* the -2 cell above misses 100
+MHz by 2.239 ns at 109,685 LUT (53.8%), 116 block RAM and 101 DSP, the
+integer multiply of the timing section being the critical path
+(docs/VALIDATION.md, 2026-09-23).
 
 ## The fractured array (built 2026-08-30: rtl/cft_mulfrac.sv)
 

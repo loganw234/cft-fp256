@@ -2277,7 +2277,8 @@ constant bits - INMODE0-4, ALUMODE2/3, OPMODE6 - never get those bits
 emitted, so on silicon they can read back complemented, INMODE[1]=1
 gates the multiplier's A operand to zero, and an inferred multiply
 returns garbage. Demonstrated with vectors on Zynq-7010 hardware, with
-a hardware-validated fix attached to the issue; the maintainer could
+a hardware-validated fix - #159 is the pull request carrying it, not an
+issue, which this paragraph first said it was; the maintainer could
 not reproduce it on Spartan-7 and put a standing serial-verified DSP
 board test into demo-projects CI (`dsp-test-arty-s7`, 2026-08-26), and
 the openXC7 regression suite carries the case expected-red until the
@@ -2287,7 +2288,7 @@ to reported fmax, never to bits. So multipliers land in DSP48E1 on
 every 7-series row and the LUTs-for-multipliers disaster scenario is
 off the table, but bit-correct DSP results through the released
 toolchain are one still-open fix away (openXC7/nextpnr-xilinx#159,
-unmerged as of 2026-09-05 - docs/PLATFORMS.md), and the bring-up check is the
+unmerged as of 2026-09-05 and again on 2026-09-22 - docs/PLATFORMS.md), and the bring-up check is the
 one this repo always runs anyway: the conformance vectors, which would
 catch a complemented INMODE in the first multiply.
 
@@ -2357,7 +2358,9 @@ routed in the `board` configuration on 2026-09-07 - at about 77 MHz on
 that board's -1 grade, 100 MHz on a -2, and about 119 MHz on a -2 once
 the leading-zero cone was cut into its own stage later that day:
 120 MHz misses by 0.078 ns and the wall is the engine's control chain,
-not the datapath - docs/ARCHITECTURE.md), two tiles on a **480T** and
+not the datapath - docs/ARCHITECTURE.md; the tree since, with the
+integer multiply added that evening, routes at 53.8% and about 82 MHz
+on the -2, docs/VALIDATION.md 2026-09-23), two tiles on a **480T** and
 not on the 325T or 410T, and the ring above that.
 Reaching two full tiles on a 325T would need ~92,000 LUT each after a
 platform budget; sharing both shift paths projects to ~96,000, and
@@ -2477,12 +2480,15 @@ size. The steps, in order, each with the gate that says it is done:
 2. **The hundred-dollar Kintex-7 and the openXC7 DSP experiment.** A
    purchase and a census: the conformance vectors through an
    openXC7-built fp32 lane, which is the one instrument that catches a
-   complemented DSP48E1 control pin (nextpnr-xilinx#159, open as of
-   2026-09-05). Nothing open proceeds on that flow until this is green.
+   complemented DSP48E1 control pin (nextpnr-xilinx#159, a pull request,
+   open as of 2026-09-05 and still on 2026-09-22). Nothing open proceeds
+   on that flow until this is green.
    The routed runs of 2026-09-07 add a speed-grade clause to the
    purchase: the -1 QMTech board runs this tile near 77 MHz and a -2
    K325T closes 100 MHz (docs/VALIDATION.md), so the flow test can use
-   the cheap board and the tile that runs should not.
+   the cheap board and the tile that runs should not. (On the tree of
+   2026-09-23 the -2 is about 82 MHz: the integer multiply added after
+   those runs is the new wall - docs/VALIDATION.md, 2026-09-23.)
 3. **The multi-cycle fp256 variant** behind a build parameter.
    **Done 2026-09-06** (`MUL_PASSES`, docs/ARCHITECTURE.md's "The
    multi-cycle rung"), and it did not do what this step assumed it
@@ -2505,7 +2511,9 @@ size. The steps, in order, each with the gate that says it is done:
    about 103 MHz, where the Zynq-7020's -1 fabric had suggested 58;
    an Artix-7 200T holds it at 73.5% and about 57 MHz - and the routed
    run a day later beat the synthesis estimate on the -2 K325T:
-   **95,695 LUT, 47.0% of the part, +0.096 ns at 100 MHz**. So step 4's
+   **95,695 LUT, 47.0% of the part, +0.096 ns at 100 MHz** (on that
+   day's tree; the integer multiply added the same evening makes it
+   53.8% and about 82 MHz - docs/VALIDATION.md, 2026-09-23). So step 4's
    board is reachable at a real clock, the pass count is what stops a DSP-poor part refusing
    outright, and the ladders remain the LUT lever. **The formal proof
    of the pass accumulation closed on 2026-09-07**, which this step

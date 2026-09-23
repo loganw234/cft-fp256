@@ -1,0 +1,20 @@
+# Where do the wider lanes' IMUL multipliers go? cft_simpleops alone keeps
+# three DSP48E1 at every width, but the kernel's synthesised netlist has
+# them only in the fp32 lanes. List every $mul cell after each early pass
+# of synth_xilinx's own order and see which pass drops them.
+read_verilog -defer -sv -I rtl rtl/cft_fpfma.sv rtl/cft_fpfma_pipe.sv rtl/cft_opmux.sv rtl/cft_simpleops.sv rtl/cft_seedop.sv rtl/cft_csr.sv rtl/cft_fifo.sv rtl/cft_mulfrac.sv rtl/cft_mulpass.sv rtl/cft_reduce_acc.sv rtl/cft_normseg.sv rtl/cft_engine.sv rtl/cft_engine_stream.sv rtl/cft_lanes.sv rtl/cft_seq.sv rtl/cft_krnl.sv
+hierarchy -top cft_krnl -chparam MUL_PASSES 10 -chparam FUSE_NORM 1 -chparam FUSE_ALIGN 1
+tee -o /out/m0_hierarchy.txt select -list t:$mul
+proc
+tee -o /out/m1_proc.txt select -list t:$mul
+flatten
+tee -o /out/m2_flatten.txt select -list t:$mul
+opt_expr
+tee -o /out/m3_opt_expr.txt select -list t:$mul
+opt_clean
+tee -o /out/m4_opt_clean.txt select -list t:$mul
+opt -full
+tee -o /out/m5_opt_full.txt select -list t:$mul
+wreduce
+opt_clean
+tee -o /out/m6_wreduce.txt select -list t:$mul

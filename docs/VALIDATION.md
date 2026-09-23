@@ -13387,3 +13387,239 @@ docs/ROADMAP.md's ask 7 keep their dated numbers, each with this
 re-measurement noted beside it.
 
 The card was left idle and the scratch tree restored.
+
+## 2026-09-22 - the open core meets its toolchain: the board configuration re-run, the whole kernel through openXC7's synthesis, the 410T censused, and a licence misreading corrected
+
+Before today nothing in this repository had put the tile through the
+open toolchain itself: `make yosys-lint` elaborates at the default
+parameters and stops, and the `board` targets were last recorded on
+2026-09-09. Everything below is ef9c3ec, on the desktop and on
+amd-arc-box.
+
+**The toolchain, as an image.** `docker/Dockerfile.openxc7` builds
+`cft-openxc7` from openXC7's own `toolchain-sources-builder.sh` at
+toolchain-installer 3752d35d, sha256-pinned. That commit pins yosys
+v0.69, nextpnr-xilinx 3fd78784 (tag 0.9.6), prjxray ed3331c6 and
+prjxray-db 1768fb35; FASM's ANTLR runtime resolved to c79b0fd8 through
+a pinned submodule; LiteX 2026.04 sits beside it. The xc7k325tffg900
+chip database is generated at build time, because LiteX's openXC7 flow
+generates a missing one through an unchecked `subprocess.run`. Built on
+amd-arc-box 19:54 to 20:20 (25.5 min), image 56bca0f723e3, 7.13 GB. Its
+self-test deletes the bitstream openXC7's blinky-kc705 commits, then
+builds that project - the SOM's own part string - through all five
+steps:
+
+    blinky-kc705 @ demo-projects a38fb897, xc7k325tffg900-2
+      built       2471bcc7...531f, 11,443,717 bytes
+      committed   5946a9a1...a961 - recorded, not compared
+
+The first launch failed within a second and is kept: amd-arc-box's
+Docker 29.1.3 has no buildx, so its legacy builder refuses `--progress`
+(exit 125).
+
+**The board configuration on the current tree.** A fresh clone at
+ef9c3ec on amd-arc-box, asserted three ways before it ran - the SHA,
+then `rtl/` and `tb/` tree hashes (61f3cf78, 1fd1b9e0) equal to the
+desktop's, then the tip's newest file present - through `make -j3
+board` in cft-sim (d4e6d376: Icarus 12.0, Verilator 5.020, cocotb 1.9.2,
+cocotbext-axi 0.1.28). The parameters were read back from the compile
+lines, because before 2026-09-07 a Verilator build received none of
+them: `-Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1
+-Pcft_krnl.MUL_PASSES=10` for Icarus, `-GFUSE_ALIGN=1 -GFUSE_NORM=1
+-GMUL_PASSES=10` for Verilator.
+
+    boardfp256   Icarus      1 test,  1 passed   521,948 ns simulated     58 s
+    boardkrnl    Verilator   2 tests, 2 passed    53,640 ns               19 s after its compile
+    boardseq     Icarus      2 tests, 2 passed   332,132 ns            3,170 s
+    check_results.py         "PASS: 1 bench(es), no failures recorded", three times
+    20:08:31 to 21:03:16     54 min 45 s
+
+Five tests where 2026-09-07 had four: `boardseq` now carries round 2's
+`krnl_lane_mask`, so the board configuration is bit-exact for the lane
+mask as well. No negative control was run in this session; the reader's
+own controls date from 2026-09-12.
+
+**The whole kernel through openXC7's synthesis, for the first time.**
+openXC7's own command (demo-projects' openXC7.mk: `synth_xilinx
+-flatten -abc9 -arch xc7`), Yosys 0.69 from cft-openxc7's toolchain
+layer, the board parameters by `chparam`, the source mounted read-only:
+
+    rc 0, 0 errors, 314 warnings    20:12:09 to 21:15:45; Yosys's own count 3,814 s, 4,867 MB peak
+    LUT2..LUT6       21,986 + 22,263 + 21,171 + 34,824 + 14,690 = 114,934, and 3,114 INV
+                     Yosys's pairing estimate: 92,948 LCs
+    SRL16E           5,064
+    LUTRAM           86 RAM64M + 15 RAM32M (404 LUTs)
+    FDRE + FDSE      42,515 + 232 = 42,747
+    CARRY4           5,723
+    DSP48E1          120
+    RAMB36E1 + 18E1  104 + 24 = 116 RAMB36 equivalent
+    ports            859 IBUF, 699 OBUF - the kernel's own boundary
+
+Against the XC7K325T (203,800 LUT, 407,600 FF, 840 DSP, 445 RAMB36):
+LUTs between 48% (the pairing estimate plus SRLs and LUTRAM) and 61%
+(no small LUT paired - the packer decides where in that range), FFs
+10.5%, DSPs 14.3%, block RAM 26.1%. **None of it is like for like with
+2026-09-07's routed 95,695 LUT, 56 DSP and 36 BRAM**, which were Vivado
+on the tree before revisions 2 to 4: 116 RAMB36 is in the range the
+revision-3 arithmetic above predicted (~108), and the tree has since
+gained the integer multiply. A current-tree Vivado run is the next
+entry's.
+
+Where the 120 DSPs are, from the flattened names:
+
+    fp256 lane          the multi-pass column, cft_mulpass            28
+    fp128 lanes         2 x 14                                         28
+    fp64 lanes          4 x 6                                          24
+    fp32 lanes          8 x 2, the pipe's product (cft_fpfma_pipe.sv:601)  16
+    fp32 lanes          8 x 3, cft_simpleops' integer multiply         24
+
+Yosys spends two DSP rows on each 24-bit chunk, which was sized for the
+DSP48E2's 27 x 18 (rtl/cft_mulgeom.svh). And every one of the 120 has
+OPMODE, INMODE and ALUMODE tied to constants - the class
+openXC7/nextpnr-xilinx #159 says reaches silicon wrong (a pull request,
+open on this date, not an issue as docs/PLATFORMS.md has it). 96 are
+registered (88 AREG and BREG, 8 with PREG as well) and 56 take PCIN from
+a cascade; nextpnr-xilinx times a registered DSP48E1 as TMG_IGNORE, so
+its timing report cannot see through four fifths of them.
+
+Read from the log rather than assumed: the synthesised hierarchy uses
+`cft_normseg` and `cft_mulpass`, and MUL_PASSES reads 10 in 42
+derivations. It also reads 1 in 23: without `read_verilog -defer`,
+Yosys elaborates every module at its defaults before `chparam`
+re-derives - an hour's run partly spent twice, not a wrong netlist. The
+27 "latch inferred" warnings are the loop variable of `bcast_beat`
+(rtl/cft_engine_stream.sv:1715), declared inside `case` branches of an
+automatic function; the final netlist holds no latch cell.
+
+**The 410T, censused.** Vivado 2026.1 on the desktop with the Basic-only
+licence file (docs/BRINGUP.md), each part opened by `link_design -part`
+with no netlist - because SITE_TYPE on a placed design reports what a
+site is configured as (openXC7/prjxray#16) - 98 s for all five:
+
+    part               tiles    tile types  site types  grid     clock regions  INT columns
+    xc7k70tfbg676-2     24,453     113          51       117x209        8            44
+    xc7k160tffg676-2    49,590     113          51       190x261       10            74
+    xc7k325tffg900-2    86,505     113          51       237x365       14            96
+    xc7k410tffg900-2   113,880     113          51       312x365       14           124
+    xc7k480tffg1156-1  136,359      97          44       327x417       16           124
+
+The 410T's 113 tile types are exactly the 113 in prjxray-db 1768fb35's
+kintex7, and its site types are the 325T's. Every hard block is
+unchanged from the 325T - four GTX quads, the PCIe block, ten CMTs, the
+configuration centre, the same I/O tiles (168 LIOB33, 72 RIOB18), the
+XADC - and only fabric tiles grow: DSP tiles 420 to 770 (840 to 1,540
+DSP48E1), BRAM tiles 445 to 795, INT tiles 31,750 to 41,550. It is the
+325T's height at the 480T's width. The census reads the device the
+database describes: for the 325T, 86,505 tiles and every per-type count
+identical to prjxray-db 1768fb35's `kintex7/xc7k325t/tilegrid.json`. So
+adding the 410T to openXC7 is per-part data - the part-only fuzzers,
+cross-checked by openXC7/prjxray#18's `tilegrid_derive.py`, which
+rebuilds all five kintex7 models byte for byte - and not new tile-type
+fuzzing. Not started: the fuzzers need Vivado 2026.1 on Linux, and
+amd-arc-box's 2022.2 is licensed for Alveo only.
+
+**Corrections to this record.** Each is a fact about an earlier entry;
+those entries are not edited.
+
+- The K325T runs for revisions 2 and 3 were not skipped because "this
+  machine cannot run" the part (the entries near lines 8002-8011 and
+  8905-8907). The 2026-09-08 21:35 log ends at `create_project -part
+  xc7k325tffg900-2` with Vivado's `Your current selected license is
+  ALVEO. This license doesn't cover the device you selected` - the
+  licence-tier trap docs/BRINGUP.md records. The device files were
+  installed; the census above ran the part.
+- The routed runs recorded under "2026-09-07 - the open-core board"
+  finished on 2026-09-06 (last file 23:43), and their 410T row is
+  95,773 LUT, 37.68% of that part.
+- Re-checked against upstream on this date (docs/PLATFORMS.md's live
+  text is not edited here): `PCIE_2_1` has been in nextpnr-xilinx since
+  openXC7/nextpnr-xilinx#61 (2025-03-03, Artix-7 Gen1 x1) and #88
+  (2026-04-17, Kintex-7 GTX), so the survey's "PCIe on any of these
+  boards means Vivado" was wrong when it was written; no openXC7 LitePCIe
+  demo exists and x8 on a 325T is unshown. demo-projects builds
+  blinky-kc705 and litex-ddr-kc705 on xc7k325tffg900-2 - the survey's
+  Kintex-7 list missed both. xc7k410t is still absent from prjxray-db.
+
+**Preserved.** The 2026-09-06 to 09-08 7-series build trees lived in an
+agent session's temporary scratchpad; 111 MB of them - the routed runs
+above, both 120 MHz K325T routed checkpoints, and the 2026-09-08 log -
+are now in `Data/forensics/2026-09-06-7series/` (gitignored), 157 files
+re-hashed identical after the copy, with a README naming each. This
+entry's instruments are in `hw/openxc7/` (its README names each):
+`census.tcl` and its output, the tile-type list it was compared with,
+and the synthesis script. The pinned builder and `litex_setup.py` are
+kept, hashed, in `Data/runs/2026-09-22-openxc7-instruments/`.
+
+**Not run.** Placement and routing of the tile by any open tool (the
+next entry), any bitstream of it, the 410T's fuzzers, and hardware of
+any kind.
+
+## 2026-09-23 - the Kintex-7 in both flows: the current tree in Vivado, the integer multiply as the new wall, and where Yosys puts that multiply
+
+**The current tree, routed in Vivado.** No 7-series number existed for
+any tree after 2026-09-07. On the desktop, Vivado 2026.1 with the
+Basic-only licence file, `hw/mc_sweep.sh xc7k325tffg900-2 100 10 1
+impl` at ef9c3ec - the `board` cell of 2026-09-07's table, same part,
+script and generics, which Vivado's own elaboration bound as
+MUL_PASSES 10 and FUSE_NORM, FUSE_ALIGN 1'b1 - 04:15:47 to 04:46:57:
+
+    synthesis   WNS -1.630 ns   112,065 LUT (54.99%)   50,732 FF          116 BRAM   101 DSP
+                worst: u_engine/u_fifo_a/mem_reg_1 -> g_lane32[7].u_fma/s0_byp_d_reg, 9 levels, 11.604 ns
+    routed      WNS -2.239 ns   109,685 LUT (53.82%: 106,578 logic, 3,107 memory)
+                                50,771 FF (12.46%)                        116 BRAM   101 DSP (12.02%)
+                worst: u_engine/u_fifo_a/mem_reg_0 -> g_lane32[6].u_fma/s0_byp_d_reg, 10 levels, 12.211 ns
+
+2026-09-07's routed cell was +0.096 ns, 95,695 LUT, 43,365 FF, 36 BRAM
+and 56 DSP. Read as a path, 12.211 ns is about 82 MHz, where that tree
+closed 100 and its cone-cut successor reached ~119.
+
+**The path is the integer multiply.** Cell by cell, the worst routed
+path is the operand FIFO's RAMB36 read (clock to DOADO, unregistered),
+four LUTs of operand steering into the lane, `cft_simpleops`' 32-bit
+multiply as three DSP48E1s chained in combinational mode (A to P, then
+C to P twice: the `mul_mid` and `mul_lo` partial products), three LUTs
+of result muxing, and the lane's stage-0 bypass register `s0_byp_d`.
+The multiply arrived in 4e8dfff, "IMUL and indexed constants", on
+2026-09-07 - after the routed runs of that entry, which the entry of
+2026-09-22 dates to 2026-09-06 - so every 7-series number before this
+one predates it. The U50 images built since carry the same RTL and
+closed at 135 MHz (2026-09-16); what their multiply maps to was not
+examined here, and their single-tile image reports 262 DSPs, the FMA
+ladder's count alone. Two remedies, neither built: register the
+multiply inside its DSPs and let it enter the bypass sideband a stage
+or two later - the pipe has sixteen stages and the sideband travels
+them - or register the FIFO block RAM's output, worth about 1.2 ns of
+the 12.2. Either changes the RTL and owes the suite, the formal `imul`
+task and a routed re-run.
+
+**Where Vivado's 101 DSPs are**, counted from the routed checkpoint by
+`hw/openxc7/dsp_by_lane.tcl`, because the hierarchical report stops at
+depth three and charges merged `cft_simpleops` cells to their parent:
+
+    FMA        fp256 14, fp128 2 x 7, fp64 4 x 3, fp32 8 x 2        56
+    IMUL       3 in EVERY lane's cft_simpleops, 15 lanes              45
+                                                                     101
+
+**Yosys keeps that multiply in eight lanes, not fifteen.** Its netlist
+of 2026-09-22 has the three IMUL DSPs in the fp32 lanes only (24),
+though `cft_simpleops` synthesised alone keeps three DSP48E1 at every
+width (602 cells at fp32, 1,195 at fp64, 4,957 at fp256) and
+`cft_lanes` gates no opcode by bank. `hw/openxc7/imul_bisect.ys` lists
+the `$mul` cells after each early pass of synth_xilinx's order,
+06:03 on amd-arc-box:
+
+    pass                 all $mul   IMUL $mul by lane width
+    hierarchy / proc     151 / 125  12 (four widths x 3, per module)
+    flatten              265        fp32 24, fp64 12, fp128 6, fp256 3 - all 45
+    opt_expr, opt_clean  228        all 45
+    opt -full            46         fp32 24 only
+    wreduce              46         fp32 24
+
+`opt -full` is several passes. Some would be sound here by construction
+- `opt_merge` joins only cells with identical inputs, `opt_share` only
+cells proven mutually exclusive - and some would not be:
+`opt_expr -undriven` or `-mux_undef` acting on a value Yosys read as
+undriven would make the openXC7 netlist compute IMUL differently from
+the RTL at fp64 and wider. Which one it is decides whether this is an
+optimisation Vivado misses or a divergence, and the second cut of the
+bisect, `hw/openxc7/imul_bisect2.ys`, runs the sub-passes one at a time.

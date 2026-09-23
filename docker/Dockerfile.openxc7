@@ -1,0 +1,155 @@
+# Open-toolchain environment for cft-fp256's Kintex-7 tile: openXC7
+# (Yosys, nextpnr-xilinx, Project X-Ray and its database), the chip
+# database for the XC7K325T-2FFG900 that the PZ-K7325T-SOM carries,
+# LiteX for the platform around the tile, the RISC-V compiler a LiteX
+# BIOS needs, and openFPGALoader.
+#
+#   docker build -t cft-openxc7 -f docker/Dockerfile.openxc7 docker
+#   docker build --build-arg JOBS=24 ...      # on a box with the cores
+#   docker run --rm -v <repo>:/work -w /work cft-openxc7 <command>
+#
+# The build context is docker/, as for Dockerfile.formal: nothing is
+# COPYed.
+#
+# Every pin below was measured on 2026-09-22, not transcribed:
+#
+#   * The base digest is Dockerfile.formal's (measured 2026-08-31), so
+#     the two images share one Ubuntu.
+#   * openXC7's toolchain-sources-builder.sh at toolchain-installer
+#     3752d35d (2026-09-20): 20,166 bytes from that commit's raw URL,
+#     sha256 below. That commit pins yosys v0.69, nextpnr-xilinx
+#     3fd78784 (tag 0.9.6, 2026-09-19), prjxray ed3331c6 and prjxray-db
+#     1768fb35 - the last matched to nextpnr-xilinx's own database
+#     submodule, which the builder refuses to build without.
+#   * LiteX release 2026.04, through litex_setup.py at that tag, sha256
+#     below.
+#   * openXC7/demo-projects a38fb897 (2026-09-22), for the self-test.
+#
+# What upstream does NOT pin is recorded rather than claimed: the pip
+# packages the builder and litex_setup.py resolve at build time, and any
+# repository litex_setup.py checks out by branch instead of by tag. The
+# image writes all of it to /opt/cft-openxc7.manifest, so an image is
+# identified by what it contains and not by this file.
+#
+# The chip database is generated here, once, because LiteX's openXC7
+# flow generates a missing one through an UNCHECKED subprocess.run
+# (litex/build/xilinx/yosys_nextpnr.py at 2026.04, lines 137-140): a
+# failed generation there carries on into place-and-route. A database
+# that exists before any flow runs removes that path.
+#
+# The self-test builds openXC7's own blinky-kc705 - the same part string
+# as the SOM, xc7k325tffg900-2 - through all five steps. That directory
+# COMMITS a blinky.bit, so the test deletes it first: otherwise "a .bit
+# exists" would pass on a toolchain that produced nothing. What the
+# self-test proves is that this image turns RTL into a bitstream for
+# this die. It says nothing about whether a bitstream BEHAVES: DSP48E1
+# constant pins (nextpnr-xilinx PR #159, open on 2026-09-22) and the
+# untimed registered-DSP paths are questions for the board and the
+# conformance vectors, not for a blinky.
+
+FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
+
+# pipefail: several steps below pipe a build through tee, and without it
+# the step's status would be tee's.
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+ENV DEBIAN_FRONTEND=noninteractive
+
+# The builder's own APT_DEPENDENCIES, installed here so its dependency
+# check finds nothing missing, plus curl for the pinned downloads,
+# openFPGALoader for JTAG, and the RISC-V cross compiler with the meson
+# and ninja a LiteX BIOS build needs.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git ca-certificates cmake pkg-config bison flex gawk \
+        python3 python3-dev python3-venv default-jre-headless uuid-dev \
+        libboost-filesystem-dev libboost-iostreams-dev libboost-thread-dev \
+        libboost-program-options-dev libboost-python-dev libeigen3-dev \
+        libreadline-dev zlib1g-dev tcl-dev libffi-dev graphviz xdot pypy3 \
+        curl xz-utils make openfpgaloader \
+        gcc-riscv64-unknown-elf meson ninja-build \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG OXC7_INSTALLER=3752d35d3be2a9c4072e69cd26db780f39966ecf
+ARG OXC7_BUILDER_SHA256=0fc9881056049932dc0b4ffe6accfe74999b717e03f2d2d330e8d13ca72f44d7
+ARG JOBS=8
+
+# The builder clones into its working directory and says that directory
+# is only needed while it runs; the resolved commit of every tree is
+# written down before the trees are removed.
+RUN mkdir -p /build && cd /build \
+    && curl -fsSL -o builder.sh \
+         "https://raw.githubusercontent.com/openXC7/toolchain-installer/${OXC7_INSTALLER}/toolchain-sources-builder.sh" \
+    && echo "${OXC7_BUILDER_SHA256}  builder.sh" | sha256sum -c - \
+    && INSTALL_PREFIX=/opt/openxc7 JOBS="${JOBS}" bash builder.sh all \
+    && { for r in yosys prjxray prjxray-db nextpnr-xilinx; do \
+           printf '%-16s %s\n' "$r" "$(git -C "$r" rev-parse HEAD)"; \
+         done; \
+         printf '%-16s %s\n' antlr4 \
+           "$(git -C prjxray/third_party/fasm/third_party/antlr4 rev-parse HEAD 2>/dev/null || echo unresolved)"; \
+         printf '%-16s %s\n' installer "${OXC7_INSTALLER}"; \
+       } > /opt/openxc7/SOURCES \
+    && cd / && rm -rf /build
+
+# One database serves every speed grade: DBPART drops it, exactly as
+# demo-projects' openXC7.mk does.
+RUN . /opt/openxc7/export.sh \
+    && mkdir -p /opt/openxc7/chipdb \
+    && pypy3 "$NEXTPNR_XILINX_PYTHON_DIR/bbaexport.py" \
+         --device xc7k325tffg900-2 --bba /tmp/xc7k325tffg900.bba \
+    && bbasm -l /tmp/xc7k325tffg900.bba /opt/openxc7/chipdb/xc7k325tffg900.bin \
+    && rm -f /tmp/xc7k325tffg900.bba \
+    && test -s /opt/openxc7/chipdb/xc7k325tffg900.bin
+
+ARG LITEX_TAG=2026.04
+ARG LITEX_SETUP_SHA256=1a63a8c27b3e50c5b9858255edeb6b7e4ece80787bdcf10ff44b8267e5972381
+
+# LiteX gets its own venv. Its openXC7 flow reaches the toolchain only
+# through PATH and three environment variables and never imports
+# prjxray, so the two environments need not share an interpreter.
+RUN python3 -m venv /opt/litex/venv \
+    && mkdir -p /opt/litex/src && cd /opt/litex/src \
+    && curl -fsSL -o litex_setup.py \
+         "https://raw.githubusercontent.com/enjoy-digital/litex/${LITEX_TAG}/litex_setup.py" \
+    && echo "${LITEX_SETUP_SHA256}  litex_setup.py" | sha256sum -c - \
+    && /opt/litex/venv/bin/python3 litex_setup.py --init --install --config=standard --tag="${LITEX_TAG}" \
+    && /opt/litex/venv/bin/python3 litex_setup.py --freeze --freeze-output /opt/litex/FREEZE \
+    && test -s /opt/litex/FREEZE
+
+# The environment the image ships. The LiteX venv comes first so that
+# `python3` is LiteX's; fasm2frames, bbasm, xc7frames2bit, yosys and
+# nextpnr-xilinx exist only in the openXC7 prefix and resolve there.
+ENV PATH=/opt/litex/venv/bin:/opt/openxc7/venv/bin:/opt/openxc7/bin:$PATH \
+    NEXTPNR_XILINX_PYTHON_DIR=/opt/openxc7/lib/python \
+    PRJXRAY_DB_DIR=/opt/openxc7/share/nextpnr/prjxray-db \
+    CHIPDB=/opt/openxc7/chipdb \
+    KINTEX7_CHIPDB=/opt/openxc7/chipdb
+
+ARG DEMO_PROJECTS=a38fb89796f6f0d3d19c3c6b22ff177fae7609c2
+
+# The self-test runs in the environment above rather than through
+# export.sh, so it tests what a user of the image gets.
+RUN git clone --quiet https://github.com/openXC7/demo-projects.git /tmp/demo \
+    && git -C /tmp/demo checkout --quiet --detach "${DEMO_PROJECTS}" \
+    && cd /tmp/demo/blinky-kc705 \
+    && rm -f blinky.bit blinky.frames blinky.fasm blinky.json \
+    && make 2>&1 | tee /opt/openxc7/selftest.log \
+    && test -s blinky.bit \
+    && { echo "demo-projects ${DEMO_PROJECTS} blinky-kc705 (xc7k325tffg900-2)"; \
+         echo "built     $(sha256sum < blinky.bit | cut -d' ' -f1)  $(stat -c %s blinky.bit) bytes"; \
+         echo "committed $(git -C /tmp/demo show HEAD:blinky-kc705/blinky.bit | sha256sum | cut -d' ' -f1)  (recorded, not compared)"; \
+       } > /opt/openxc7/SELFTEST \
+    && cd / && rm -rf /tmp/demo
+
+RUN { echo "cft-openxc7 image manifest"; \
+      echo "base   ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517"; \
+      echo "--- openXC7 sources"; cat /opt/openxc7/SOURCES; \
+      echo "--- tools"; yosys -V; nextpnr-xilinx --version 2>&1 | head -1; \
+      pypy3 --version 2>&1 | tail -1; openFPGALoader --Version 2>&1 | head -1; \
+      riscv64-unknown-elf-gcc --version | head -1; \
+      echo "--- chip databases"; sha256sum /opt/openxc7/chipdb/*.bin; \
+      echo "--- self-test"; cat /opt/openxc7/SELFTEST; \
+      echo "--- litex_setup.py --freeze"; cat /opt/litex/FREEZE; \
+      echo "--- pip, openXC7 venv"; /opt/openxc7/venv/bin/python3 -m pip freeze; \
+      echo "--- pip, LiteX venv"; /opt/litex/venv/bin/python3 -m pip freeze; \
+    } > /opt/cft-openxc7.manifest
+
+WORKDIR /work

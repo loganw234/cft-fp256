@@ -348,7 +348,7 @@ throughput and what bounds each number.
 
 `docs/ROADMAP.md` has the detail. In short: the card is up and
 reproducing the vectors; the next tier is the same tile on an open
-Kintex-7 board, where one tile fits in 47% of a 325T; and the roadmap
+Kintex-7 board, where one tile fits in 54% of a 325T; and the roadmap
 carries what the first outside workload asked the library for, ranked
 by measurement rather than by guess - six of its seven asks built by
 2026-09-15, the last four of them as one parcel round

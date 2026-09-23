@@ -1,0 +1,34 @@
+# The second cut of imul_bisect.ys: that run showed the fp64/fp128/fp256
+# lanes' IMUL multipliers survive flatten, opt_expr and opt_clean and are
+# gone after `opt -full`, which also takes all $mul cells from 228 to 46.
+# Here `opt -full` is run as its sub-passes, one at a time, listing the
+# $mul cells after each - and the fp64 lane 0 multiply's result wire is
+# probed for its driver before and after, which says whether the cell
+# was MERGED onto another (its wire now driven by a surviving cell) or
+# DELETED as unused.
+read_verilog -defer -sv -I rtl rtl/cft_fpfma.sv rtl/cft_fpfma_pipe.sv rtl/cft_opmux.sv rtl/cft_simpleops.sv rtl/cft_seedop.sv rtl/cft_csr.sv rtl/cft_fifo.sv rtl/cft_mulfrac.sv rtl/cft_mulpass.sv rtl/cft_reduce_acc.sv rtl/cft_normseg.sv rtl/cft_engine.sv rtl/cft_engine_stream.sv rtl/cft_lanes.sv rtl/cft_seq.sv rtl/cft_krnl.sv
+hierarchy -top cft_krnl -chparam MUL_PASSES 10 -chparam FUSE_NORM 1 -chparam FUSE_ALIGN 1
+proc
+flatten
+opt_expr
+opt_clean
+tee -o /out/p0_drivers.txt select -list w:*g_lane64?0?.u_simple.mul_lo %ci1
+tee -o /out/p0_loads.txt select -list w:*g_lane64?0?.u_simple.mul_lo %co1
+opt_expr -mux_undef -mux_bool -undriven -noclkinv -fine -full
+tee -o /out/s1_opt_expr_full.txt select -list t:$mul
+opt_merge -share_all
+tee -o /out/s2_opt_merge.txt select -list t:$mul
+tee -o /out/p2_drivers.txt select -list w:*g_lane64?0?.u_simple.mul_lo %ci1
+opt_muxtree
+tee -o /out/s3_opt_muxtree.txt select -list t:$mul
+opt_reduce -full
+tee -o /out/s4_opt_reduce.txt select -list t:$mul
+opt_merge -share_all
+tee -o /out/s5_opt_merge2.txt select -list t:$mul
+opt_share
+tee -o /out/s6_opt_share.txt select -list t:$mul
+opt_dff -sat
+tee -o /out/s7_opt_dff.txt select -list t:$mul
+opt_clean -purge
+tee -o /out/s8_opt_clean_purge.txt select -list t:$mul
+tee -o /out/p8_drivers.txt select -list w:*g_lane64?0?.u_simple.mul_lo %ci1

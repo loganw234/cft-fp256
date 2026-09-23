@@ -1,0 +1,12 @@
+# cft_krnl in the `board` configuration (tb/Makefile BOARD_PARAMS:
+# MUL_PASSES=10, FUSE_NORM=1, FUSE_ALIGN=1), through openXC7's own
+# synthesis command - demo-projects' openXC7.mk:
+#   synth_xilinx -flatten -abc9 ${SYNTH_OPTS} -arch xc7 -top ${TOP_MODULE}
+# with SYNTH_OPTS empty. The file list is `make yosys-lint`'s (Makefile:214).
+# Run from the repository root with /out writable.
+read_verilog -sv -I rtl rtl/cft_fpfma.sv rtl/cft_fpfma_pipe.sv rtl/cft_opmux.sv rtl/cft_simpleops.sv rtl/cft_seedop.sv rtl/cft_csr.sv rtl/cft_fifo.sv rtl/cft_mulfrac.sv rtl/cft_mulpass.sv rtl/cft_reduce_acc.sv rtl/cft_normseg.sv rtl/cft_engine.sv rtl/cft_engine_stream.sv rtl/cft_lanes.sv rtl/cft_seq.sv rtl/cft_krnl.sv
+chparam -set MUL_PASSES 10 -set FUSE_NORM 1 -set FUSE_ALIGN 1 cft_krnl
+synth_xilinx -flatten -abc9 -arch xc7 -top cft_krnl
+tee -o /out/stat.txt stat
+tee -o /out/stat_tech.txt stat -tech xilinx
+write_json /out/cft_krnl_board.json
