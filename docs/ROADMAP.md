@@ -2359,8 +2359,9 @@ that board's -1 grade, 100 MHz on a -2, and about 119 MHz on a -2 once
 the leading-zero cone was cut into its own stage later that day:
 120 MHz misses by 0.078 ns and the wall is the engine's control chain,
 not the datapath - docs/ARCHITECTURE.md; the tree since, with the
-integer multiply added that evening, routes at 53.8% and about 82 MHz
-on the -2, docs/VALIDATION.md 2026-09-23), two tiles on a **480T** and
+integer multiply added that evening, routed at 53.8% and about 82 MHz
+on the -2 until that multiply was registered on 2026-09-23, which
+closes 100 MHz again at +0.411 ns - docs/VALIDATION.md), two tiles on a **480T** and
 not on the 325T or 410T, and the ring above that.
 Reaching two full tiles on a 325T would need ~92,000 LUT each after a
 platform budget; sharing both shift paths projects to ~96,000, and
@@ -2486,9 +2487,10 @@ size. The steps, in order, each with the gate that says it is done:
    The routed runs of 2026-09-07 add a speed-grade clause to the
    purchase: the -1 QMTech board runs this tile near 77 MHz and a -2
    K325T closes 100 MHz (docs/VALIDATION.md), so the flow test can use
-   the cheap board and the tile that runs should not. (On the tree of
-   2026-09-23 the -2 is about 82 MHz: the integer multiply added after
-   those runs is the new wall - docs/VALIDATION.md, 2026-09-23.)
+   the cheap board and the tile that runs should not. (The integer
+   multiply added after those runs cost the -2 its 100 MHz - about 82
+   MHz - until it was registered on 2026-09-23: +0.411 ns at 100 MHz
+   again, docs/VALIDATION.md.)
 3. **The multi-cycle fp256 variant** behind a build parameter.
    **Done 2026-09-06** (`MUL_PASSES`, docs/ARCHITECTURE.md's "The
    multi-cycle rung"), and it did not do what this step assumed it
@@ -2512,8 +2514,9 @@ size. The steps, in order, each with the gate that says it is done:
    an Artix-7 200T holds it at 73.5% and about 57 MHz - and the routed
    run a day later beat the synthesis estimate on the -2 K325T:
    **95,695 LUT, 47.0% of the part, +0.096 ns at 100 MHz** (on that
-   day's tree; the integer multiply added the same evening makes it
-   53.8% and about 82 MHz - docs/VALIDATION.md, 2026-09-23). So step 4's
+   day's tree; the integer multiply added the same evening made it
+   53.8% and about 82 MHz until it was registered on 2026-09-23 - 53.3%
+   and +0.411 ns at 100 MHz, docs/VALIDATION.md). So step 4's
    board is reachable at a real clock, the pass count is what stops a DSP-poor part refusing
    outright, and the ladders remain the LUT lever. **The formal proof
    of the pass accumulation closed on 2026-09-07**, which this step

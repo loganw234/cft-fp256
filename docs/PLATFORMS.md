@@ -1788,11 +1788,11 @@ board that *runs* the tile, a -2 part is worth the difference - the
 $341 K325T PCIe card of section 5 (`XC7K325T-2FFG676I`, Gen2 x8, 1 GB
 DDR3) or the PZ-K7325T SOM in the Puzhi rows at the end of this
 document, both -2, in the two packages the routed runs covered.
-*On the tree of 2026-09-23 the -2 no longer closes 100 MHz:* the
-integer multiply added after those runs puts three combinational
-DSP48E1s on the lanes' input path, and the same cell routes at 53.8%
-and about 82 MHz (docs/VALIDATION.md, 2026-09-23). The grade argument
-stands; the absolute clocks moved.
+*On the tree of 2026-09-23 the -2 missed 100 MHz* - the integer
+multiply added after those runs put three combinational DSP48E1s on
+the lanes' input path, about 82 MHz at 53.8% - *until the multiply was
+registered the same day (6a2b26c): +0.411 ns at 100 MHz, 53.3%*
+(docs/VALIDATION.md, 2026-09-23). The grade argument stands.
 
 The reasoning is about evidence, not specifications. `xc7k325tffg676-1`
 is the exact die *and package* that openXC7's CI builds

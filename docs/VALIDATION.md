@@ -13623,3 +13623,96 @@ undriven would make the openXC7 netlist compute IMUL differently from
 the RTL at fp64 and wider. Which one it is decides whether this is an
 optimisation Vivado misses or a divergence, and the second cut of the
 bisect, `hw/openxc7/imul_bisect2.ys`, runs the sub-passes one at a time.
+
+## 2026-09-23 - the integer multiply registered: every configuration closes 100 MHz on the 325T, the full tile at 67%, and Yosys's missing multipliers were a merge
+
+**Where Yosys's multipliers went.** The second cut of the bisect
+(`hw/openxc7/imul_bisect2.ys`, 06:04 to 06:47 on amd-arc-box) ran
+`opt -full` as its sub-passes:
+
+    after                    all $mul   IMUL $mul by lane width
+    opt_expr -full           228        all 45
+    opt_merge -share_all     46         fp32 24
+    every later sub-pass     46         fp32 24
+
+and the probe says what `opt_merge` did: before it, fp64 lane 0's
+`mul_lo` is driven by that lane's own adder; after it, by fp32 lane 0's
+`mul_lo`. Each lane's IMUL reads the RAW low 32 bits of its operand, and
+fp64 lane k's are the beat bits of fp32 lane 2k - fp128 lane j's of fp32
+lane 4j, the fp256 lane's of fp32 lane 0 - so the wider lanes' products
+are the same function of the same wires, and `opt_merge`, which joins
+only cells with identical inputs, joined them. Sound by construction:
+an optimisation Vivado did not make on the combinational form, not a
+divergence. (That also means one multiply per 32-bit beat slot, not per
+lane, is all the tile needs; the RTL does not say so yet.)
+
+**Before the change, the full-scale tile in Vivado** - the two
+configurations the U50 builds from, on the 325T at ef9c3ec, same script
+and part as the board cell above:
+
+    full rate, ladders on    05:28 to 06:00   -2.335 ns   121,165 LUT (59.45%)   55,778 FF   307 DSP   116 BRAM
+    full rate, ladders off   06:00 to 06:32   -2.058 ns   137,037 LUT (67.24%)   65,509 FF   307 DSP   116 BRAM
+
+both with the integer multiply as the worst routed path (12.337 and
+12.030 ns).
+
+**The change, 6a2b26c.** `rtl/cft_imul.sv` beside each lane: the
+operands registered at level 0 with a marker, on the pipe's own `en`;
+the three partial products at level 1; the sum at level 2; a delay line
+to level 15, where the marker selects the product in place of the pipe's
+result, which carried a zero placeholder through the bypass sideband
+(`cft_simpleops`' new `IMUL_EXT`; its default keeps the combinational
+product that module's bench and proofs hold). No change to the pipe, the
+latency, the flags or any other opcode.
+
+**The gates, all on 6a2b26c** - a clone on amd-arc-box fetched from a
+bundle of the commit, its SHA and `rtl/` and `tb/` tree hashes (c9b67d4b,
+5b20d74b) equal to the desktop's:
+
+    make yosys-lint         rc 0, 0 errors, 78 warnings against ef9c3ec's 77: the new one is
+                            "Replacing memory \p with list of registers" in cft_imul, the kind the 77 are
+    make -j12 sim           25 benches, 116 tests, 116 passed, check_results rc 0      06:38 to 07:09
+    make -j8 MC=10 simmc    16 benches (13 multi-cycle, 3 board), 71 tests, 71 passed   07:09 to 08:10
+    negative control        out_v = v[DEPTH-2], the product one level early, under Verilator:
+                            seq_core 34 of 35, the failure indexed_constants_and_imul
+                            ("2/36 deposit slots differ from the model"), FAIL, rc 2    06:38 to 06:44
+
+`seq_core` and `seq_coremc10` carry the IMUL cases at all four widths
+through the real `cft_lanes` - `cft_seq` builds its own array when it
+stands alone - the second under the multi-cycle `en` pacing the board
+configuration runs with.
+
+**The timing** - Vivado 2026.1 on the desktop, xc7k325tffg900-2, 100 MHz,
+out of context, routed:
+
+    configuration                       ef9c3ec      6a2b26c
+    board: MUL_PASSES=10, ladders on    -2.239 ns    +0.411 ns   108,531 LUT (53.25%)   51,040 FF    80 DSP   116 BRAM
+    full rate, ladders on               -2.335 ns    +0.155 ns   120,543 LUT (59.15%)   56,047 FF   286 DSP   116 BRAM
+    full rate, ladders off (the U50's)  -2.058 ns    +0.182 ns   136,737 LUT (67.09%)   65,789 FF   286 DSP   116 BRAM
+
+The worst routed paths are back where the tree before the multiply had
+them: an operand FIFO into an fp256 lane's stage-0 register (9.591 and
+9.789 ns) and the engine's `seg_r -> w_cnt` control chain (9.581 ns).
+**The full tile the U50 ships closes 100 MHz on a -2 Kintex-7 325T at
+67% of its LUTs.** The DSPs fell by 21 in every configuration - 101 to
+80, 307 to 286, which is 4 x 3 + 2 x 3 + 3, the wider lanes' multiplies:
+registered, their operand registers are the same flops as the fp32
+lanes', and Vivado merged them as Yosys had merged the combinational
+form. Each run's reports and routed checkpoint are in
+`Data/runs/2026-09-23-k325t-vivado*` (gitignored).
+
+**The full-scale tile through openXC7, so far** (ef9c3ec, before the
+change, `hw/openxc7/run_pnr_inner.sh` with the harness at
+`MUL_PASSES=1`): synthesis takes 1,227 s and 6.07 GB with the ladders
+off and 3,330 s with them on, the segmented shifters being what Yosys
+is slow on; with the ladders off it packs to 506 DSP48E1 (60% of the
+part), 104 RAMB36 and 24 RAMB18, 57,994 flip-flops (14%) and 214,154 of
+407,600 LUT BELs - nextpnr counts two BELs to a physical LUT, so that
+52% is not Vivado's 67%. Its routing had not converged when this was
+written.
+
+**Not run.** The formal gate (no module it proves changed:
+`cft_simpleops` at its default is what `equiv.sby` and `imul.sby`
+read); a U50 build with the change, whose 135 MHz is therefore
+unmeasured; any card run; 120 MHz on the K325T; the openXC7 flow on
+6a2b26c.

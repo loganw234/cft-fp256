@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Thirty-six files, 47,762 lines. Flat in one directory they look like one
+Thirty-six files, 47,869 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **16,318 lines you consult while working** — the three under *Start here*,
+- **16,329 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **5,538 lines of tool manual**, one per shipped program;
 - **1,731 lines of operations**, read when you are about to do something to
   hardware;
-- **24,175 lines of record and argument** — the ledger, the roadmap and the
+- **24,271 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -43,7 +43,7 @@ product, not the implementation.
 | document | lines | what it is for |
 |---|---|---|
 | [DETERMINISM.md](DETERMINISM.md) | 1,439 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 1,144 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 1,155 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
 | [SEQUENCER.md](SEQUENCER.md) | 1,901 | The orbit sequencer and the program model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 786 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 188 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
@@ -91,8 +91,8 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 13,625 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
-| [ROADMAP.md](ROADMAP.md) | 3,224 | What is built, what is next, and what was decided against. |
+| [VALIDATION.md](VALIDATION.md) | 13,718 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [ROADMAP.md](ROADMAP.md) | 3,227 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
 | [NOVEL.md](NOVEL.md) | 557 | Results for which no prior description was found, with the standard of evidence stated first. |
 | [ATLAS.md](ATLAS.md) | 362 | The atlas-engine integration, assessed before any of it was done. |

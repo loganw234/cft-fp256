@@ -79,7 +79,13 @@ kernel flow, XRT host runtime.
   sideband - the same path infinities and NaNs already take - so it
   arrives at exactly the arithmetic latency with no delay line of its
   own, and one bypassed operation can be in flight beside a computed
-  one on every cycle.
+  one on every cycle. `imul` (30) is the one exception since
+  2026-09-23: its three 16x16 partial products are formed by
+  **cft_imul** beside the lane, from registered operands on the pipe's
+  own `en`, and the product replaces the sideband's zero placeholder
+  at the output level (`cft_simpleops`' `IMUL_EXT`) - because three
+  DSP48s in combinational mode on this path set the Kintex-7's clock
+  (docs/VALIDATION.md, 2026-09-23).
 - **cft_lanes** - the tile's **one** beat-wide ALU array: eight fp32 /
   four fp64 / two fp128 lanes or one fp256 unit, each lane the recipe
   above (`cft_opmux` into `cft_fpfma_pipe`, with `cft_simpleops` and
@@ -834,7 +840,10 @@ same evening as this section's runs (4e8dfff) is now the K325T's wall:
 three DSP48E1s in combinational mode between the operand FIFO's block
 RAM and a lane's stage-0 bypass register, 12.211 ns routed against the
 100 MHz ask - about 82 MHz, where this section's tree reached ~119
-(docs/VALIDATION.md, 2026-09-23).
+(docs/VALIDATION.md, 2026-09-23). Registered the same day
+(rtl/cft_imul.sv, 6a2b26c), the -2 closes 100 MHz again with +0.411
+ns, its worst path back on the FIFO-to-stage-0 route of the tree
+before the multiply, 9.591 ns routed; 120 MHz has not been re-run.
 
 
 ## The multi-cycle rung (built 2026-09-06: rtl/cft_mulpass.sv)
@@ -1055,7 +1064,9 @@ post-route figure under a shell rather than out of context.
 *Re-run on the current tree, 2026-09-23:* the -2 cell above misses 100
 MHz by 2.239 ns at 109,685 LUT (53.8%), 116 block RAM and 101 DSP, the
 integer multiply of the timing section being the critical path
-(docs/VALIDATION.md, 2026-09-23).
+(docs/VALIDATION.md, 2026-09-23). With the multiply registered
+(6a2b26c) the same cell closes at +0.411 ns, 108,531 LUT (53.3%), 116
+block RAM and 80 DSP.
 
 ## The fractured array (built 2026-08-30: rtl/cft_mulfrac.sv)
 

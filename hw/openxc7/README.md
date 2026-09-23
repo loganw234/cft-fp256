@@ -30,6 +30,7 @@ so its legacy builder refuses `--progress`.
 | `census-2026-09-22.txt` | its output for five Kintex-7 parts (Vivado 2026.1) | as measured |
 | `prjxray-db-1768fb35-kintex7-tile-types.txt` | the 113 kintex7 tile types of prjxray-db at the commit the image pins, which the census was compared against | fetched 2026-09-22 |
 | `imul_bisect.ys` | lists every `$mul` cell after each early synthesis pass, to find where a multiplier leaves the netlist | 2026-09-23 |
+| `imul_bisect2.ys` | the second cut: `opt -full` run as its sub-passes, with the fp64 lane-0 IMUL result wire probed for its driver before and after. It named `opt_merge`, and a merge onto fp32 lane 0's identical product | 2026-09-23 |
 | `dsp_by_lane.tcl` | counts a routed Vivado checkpoint's DSP48E1 cells by bank, lane and module | 2026-09-23 |
 
 ## Running them
