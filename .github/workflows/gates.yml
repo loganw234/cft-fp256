@@ -96,4 +96,4 @@ jobs:
       # counts and two stale generated artifacts reached main: the stages
       # existed, sat in the quick budget, and nothing on push selected
       # them. A gate that CI does not name is a gate that does not run.
-      - run: bash verify/run.sh --require-all --only docs,generated,buildargs,vectors,libcft,augmented,reduce,character,formatof,status96,bindings,cpp,lang-cpp,lang-rust,lang-go,lang-csharp,lang-fortran,node,wasm,workloads,demos
+      - run: bash verify/run.sh --require-all --only docs,generated,buildargs,sweepjudge,vectors,libcft,augmented,reduce,character,formatof,status96,bindings,cpp,lang-cpp,lang-rust,lang-go,lang-csharp,lang-fortran,node,wasm,workloads,demos

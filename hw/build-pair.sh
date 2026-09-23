@@ -26,7 +26,10 @@
 # no pair: the staging directory is what a later session trusts.
 #
 # USAGE
-#   hw/build-pair.sh --tag rev4 [options]
+#   bash hw/build-pair.sh --tag rev4 [options]
+#
+#   With `bash`: every hw/*.sh is committed mode 644, so a fresh clone
+#   answers `hw/build-pair.sh` with "Permission denied" (2026-09-23).
 #
 #   --tag NAME         names the staging dir (~/cardday-NAME) and the logs
 #                      (~/r8-logs-NAME). Required.
@@ -50,8 +53,11 @@
 #                      nobody knows works.
 #   --repo DIR         default: the repo this script is in.
 #
-# Run it detached - `setsid nohup hw/build-pair.sh --tag x &` - because a
-# pair is four to seven hours and an ssh session is not.
+# Run it detached - `setsid nohup bash hw/build-pair.sh --tag x &` - because
+# a pair is four to seven hours and an ssh session is not.
+#
+# It exits 0 once the assertions pass, whatever the builds did: the
+# verdict is 00-summary.txt and the staging directory, not the exit code.
 set -uo pipefail
 
 TAG=""; COMMIT=""; NOTES=""; FREQ=135000000; MIN_FREQ=100000000
@@ -116,6 +122,11 @@ fi
 export KERNEL_FREQ="$FREQ"
 export RETIMING=1
 export PHYS_OPT=1
+# The directives are NOT set here: PLACE_DIRECTIVE and ROUTE_DIRECTIVE
+# pass through from the caller's environment to hw/rebuild-2022.sh. The
+# recipe line reports what will apply; it printed "default directives" as
+# fixed text until 2026-09-23, which a directive retry made false.
+DIRECTIVES="place=${PLACE_DIRECTIVE:-default} route=${ROUTE_DIRECTIVE:-default}"
 
 STAGE="$HOME/cardday-$TAG"
 LOGDIR="$HOME/r8-logs-$TAG"
@@ -126,7 +137,7 @@ LOGDIR="$HOME/r8-logs-$TAG"
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "cft-fp256 $TAG pair from $HAVE"
   echo "host $(hostname), $(nproc) threads"
-  echo "recipe: ${KERNEL_FREQ} Hz, retiming=$RETIMING, phys_opt=$PHYS_OPT, default directives"
+  echo "recipe: ${KERNEL_FREQ} Hz, retiming=$RETIMING, phys_opt=$PHYS_OPT, $DIRECTIVES"
   echo "--dry-run: every assertion passed; would now build, creating nothing"
   echo "  single -> build-$TAG-hw   (hw/link.cfg)"
   [ "$SINGLE_ONLY" -eq 1 ] || echo "  quad   -> build-$TAG-quad (hw/link_quad.cfg)"
@@ -139,7 +150,7 @@ mkdir -p "$LOGDIR"
 S="$LOGDIR/00-summary.txt"
 { echo "cft-fp256 $TAG pair from $HAVE"
   echo "host $(hostname), $(nproc) threads"
-  echo "recipe: ${KERNEL_FREQ} Hz, retiming=$RETIMING, phys_opt=$PHYS_OPT, default directives"
+  echo "recipe: ${KERNEL_FREQ} Hz, retiming=$RETIMING, phys_opt=$PHYS_OPT, $DIRECTIVES"
   date -Is; } | tee "$S"
 
 WNS_K=""; WNS_R=""

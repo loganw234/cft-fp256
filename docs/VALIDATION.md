@@ -13731,3 +13731,181 @@ the clock's name, 135 MHz, +0.210 ns, 6.977 ns of data path) is operand
 FIFO A into an fp64 lane's stage-0 bypass register through three
 DSP48E2 - A to P, then C to P twice, the shape the K325T routed. What
 registering it buys on the U50 was not measured when this was written.
+
+## 2026-09-23 - the U50 clock sweep: its first launch stopped at its own gate, and what the relaunch fixed before a build was spent
+
+**The question.** Whether the registered integer multiply lets the U50
+single tile run faster than its 135 MHz. The last bracket (2026-09-01:
+145 MHz closed at +0.032 ns, 150 missed by 0.070 ns) was built on the tree
+of 2026-08-31, before the sequencer and the integer multiply.
+
+**The sweep.** `~/u50-sweep.sh` on amd-arc-box, pinned to 307872e (rtl
+tree c9b67d4b, the one the gates of 6a2b26c ran on), builds the single
+with `hw/build-pair.sh --single-only` - the recipe of every pair since
+2026-09-02 - at 145, 150, ... 175 MHz. A frequency whose standard recipe
+misses gets one retry with `PLACE_DIRECTIVE=ExtraTimingOpt
+ROUTE_DIRECTIVE=AggressiveExplore`; the sweep stops at the first frequency
+neither closes. Every image that closes goes on the card: device-test's
+quick matrix, then the whole conformance replay, because an image that
+closed timing is not yet an image shown to compute right at that clock.
+`hw/sweep_freq.sh` was not used. It predates build-pair (2026-08-29),
+builds without retiming or phys_opt, reads the whole-design WNS - the
+number `hw/rebuild-2022.sh`'s manifest has kept apart from the kernel's
+since the 130 and 145 MHz singles both reported the shell's 0.055 ns -
+and runs its points at once, ~12 GB each.
+
+**The first launch stopped at its own gate** at 08:44:56, before anything
+was built. It ran `hw/build-pair.sh` directly, and every `hw/*.sh` is
+committed mode 644: "Permission denied". The gate was the script's
+build-pair `--dry-run`, put first so that a refused assertion reads as a
+refusal rather than as "did not close"; it read as a refusal.
+`docs/BITSTREAM-BUILDS.md` and build-pair's own usage gave the same
+direct invocation, and the old clone on the box has the file mode 664
+too, so the documented command was never the one that ran. Both now say
+`bash hw/build-pair.sh`, the way build-pair runs its own children.
+
+**Three quieter faults, found reviewing the relaunch:**
+
+- XRT's `setup.sh` was never sourced. `xbutil` was missing - the
+  summary's card line came out empty - and `cft-selftest` could not have
+  loaded `libxrt_coreutil`. The script's check, `ldd host/device-test |
+  grep -q xrt`, passed on the line `libxrt_coreutil.so.2 => not found`:
+  it asserted the link request, not its resolution. (CLAUDE.md's `ldd |
+  grep xrt` is right for what it is for, catching an `XRT=0` build, which
+  prints no such line at all.)
+- `hw/build-pair.sh` exits 0 once its assertions pass, whatever the
+  builds did - its last command is a `tee` - and the script read that
+  exit code. build-pair's header now says so.
+- "Staged" was read as "closed". build-pair stages an image with a
+  negative kernel WNS whenever v++ lets one through, under a NEGATIVE
+  banner. The relaunch judges each build from its artifacts: CLOSED is a
+  staged image whose manifest's `kernel_wns_ns` is not negative; MISSED is
+  a negative kernel WNS, from the manifest or the routed report; a build
+  with neither, or one build-pair's memory guard refused, is no verdict,
+  and stops the sweep saying so.
+
+XRT's environment is sourced only around `xbutil`, `ldd` and the card
+tests. `hw/rebuild-2022.sh` sources Vitis 2022.2 and nothing of XRT, so
+the builds run in the environment every earlier U50 build did, not in one
+this sweep would be the first to try.
+
+**build-pair's recipe line** printed "default directives" as fixed text,
+while `PLACE_DIRECTIVE` and `ROUTE_DIRECTIVE` pass from the caller's
+environment through to `hw/rebuild-2022.sh`: a directive retry's summary
+would have said the opposite of what ran, with only the image's manifest
+right. It now prints `place=... route=...`, both cases checked with
+`--dry-run`. The sweep builds from the pinned 307872e, so its retries'
+`00-summary.txt` will still carry the old line; their manifests and the
+sweep's own summary name the directives.
+
+**The XRT=1 host build is not warning-free.** The relaunch rebuilt
+`host/` from clean on amd-arc-box, XRT 2.19.194: two warnings,
+`tools/cft_resident.cpp:255` and `:256`, `-Wdeprecated-declarations` on
+`xrt::kernel::read_register()` for a kernel XRT manages. The 2026-09-12
+entry "The XRT=1 build is warning-free" was measured at f636cf3, three
+hours before f192bf0 put `cft-resident` into `all`, and CLAUDE.md carried
+it on as a standing fact; corrected there. Whether cft2204's XRT flags the
+same calls was not measured.
+
+**The desktop's U50 out-of-context pair was stopped, with no result.** It
+was to compare the U50 shipping configuration at 175 MHz before
+(ef9c3ec) and after (307872e) the change. The "before" run's wrapper
+returned 127 at 557 s with its synthesis finished (0 errors, 3.5 GB peak,
+8 min 23 s) and vivado.exe still running, unlogged; the "after" run then
+started beside it. Both were stopped when Logan asked for the desktop to
+be kept free - only this session's processes, matched by command line.
+The cause of the 127 was not established. The in-shell sweep replaces the
+pair; `Data/runs/2026-09-23-u50-ooc-imul` holds what there is.
+
+**Running when this was written:** the 145 MHz standard build, from
+08:52:24, with 27 GB available beside three openXC7 routes of ~5 GB each
+and a fourth run's synthesis. `~/u50-sweep/mem.log` records memory each
+minute, and the sweep reads the kernel log for OOM kills after each
+build, because an OOM kill reads like a design failure.
+
+## 2026-09-23 - hw/sweep_freq.sh rebuilt on build-pair, and two defects its fixtures found in the build script's timing record
+
+**Why.** Logan asked for it after the entry above. The first version
+(27f94cf, 2026-08-29) would misreport a sweep today, and the builds it
+left on amd-arc-box show how. Its own `sweep/sweep_summary.txt`:
+
+    115 MHz  CLOSED   WNS 0.036 ns
+    145 MHz  CLOSED   WNS 0.055 ns
+    175 MHz  FAILED   ERROR: [VPL 101-2] design did not meet timing ...
+
+Those are whole-design numbers; the kernel clock, read by name from the
+same reports, had +0.409, +0.084 and -0.562 ns. It also built without
+retiming or phys_opt (`hw/rebuild-2022.sh`'s defaults), ran every point
+at once, and called every failed build "did not close".
+
+**What it is now.** Each point is `bash hw/build-pair.sh --single-only`,
+run in turn, each waiting for 24 GB of available memory and followed by
+a read of the kernel log for OOM kills. Verdicts come from artifacts:
+CLOSED is a kernel WNS that is not negative, and the point counts only
+if build-pair also staged the image; MISSED is a negative one, staged or
+not; NONE is no number, or records that disagree, and stops the sweep.
+The kernel WNS is read by name from the last timing summary the flow
+wrote, and the manifest is held to the summary it names. A MISSED point
+gets one ExtraTimingOpt/AggressiveExplore retry. `--card` puts each
+staged CLOSED image through device-test's quick matrix and the
+conformance replay; `--judge` gives the verdict on a build already on
+disk; `hw/kernel_worst.py` - the kernel clock's worst path cell by
+cell, until now a scratch script in `~/cardday-forensics` - runs on
+every point.
+
+**Held.** `hw/test-sweep-judge.sh`, run by a new stage, `sweepjudge`, in
+the quick budget (the runner now has 40 stages, 27 quick, 35 gate): 13
+synthetic builds, all judged right; and each of the old version's two
+misreadings - the whole-design WNS, and a staged image taken for a
+closed one - put back into a copy of the script and caught by the case
+written for it (8 and 1 cases wrong). 0.74 s on amd-arc-box, about a
+minute under Git Bash. On real builds on amd-arc-box the judge agreed
+with every staged manifest (the round2 and rev4 singles +0.266 and
++0.210, the rev4 quad +0.022), gave the old sweep's builds their kernel
+numbers, called `build-diet-quad` MISSED at -0.113, and called
+`build-135-hw`, which holds no report, NONE. The refusals, by
+`--dry-run` in a scratch clone on the box: a wrong `--commit`, a 95 MHz
+point, a stale `~/cardday-` directory, no tag, a malformed frequency -
+each by name, exit 1, nothing created; with `--card` the dry run names
+the card.
+
+**Found by the fixtures: the manifest recorded the routed timing, not
+the image's.** Of the twenty builds on amd-arc-box with a post-route
+phys_opt summary, nineteen read the same kernel WNS in the routed
+summary, the post-route summary and the manifest.
+`cft-rebound-f128/build-hw-f128x6` did not: routed -0.558 (written
+17:55), post-route -0.391 (19:09), `dr_timing_summary` -0.391 (19:13),
+and the manifest -0.558, from `timing_report:
+hw_bb_locked_timing_summary_routed.rpt`. phys_opt runs after routing, so
+`hw/rebuild-2022.sh` recorded a number 74 minutes older than the image.
+There the verdict was the same, but a build that phys_opt rescues would
+have had a miss recorded for an image that closed, and build-pair's
+NEGATIVE banner printed over it. It now reads post-route phys_opt's
+summary first, then the routed one, then dr.
+
+**And its `violating_clocks` line collected path slacks.** That scan
+never stopped: it ran from the Intra Clock Table to the end of the
+report, so the same manifest's line carried, after its two real entries,
+nineteen `slack -0.xxx /` items - each failing path's closing line in
+the Timing Details. Nor did it ever see what its comment says it is for,
+a violation on a clock crossing: an Inter Clock Table row is From, To,
+WNS, so the WNS is the third field, not the second. It now reads each
+table by its own columns and stops at "Other Path Groups Table". The
+committed text, extracted and run: the five real reports give exactly
+their violating clocks (f128x6 `hbm_aclk -0.005 9/103249;
+clk_out1_ulp_clk_wiz_0 -0.558 3015/632233`, the two that closed
+nothing), and a synthetic report with a crossing gives
+`clk_out1_ulp_clk_wiz_0->hbm_aclk -0.123 5/1000`. No real report on the
+box holds a crossing violation, so that branch has met only the
+synthetic one. `buildargs` passes on the edited script, its negative
+control included.
+
+**What it means for the sweep running now.** `~/u50-sweep.sh` builds
+from the pinned 307872e, whose `rebuild-2022.sh` still records the
+routed number, and reads its verdict from that manifest. A point
+phys_opt rescues would read there as MISSED, so its verdicts are re-read
+with `hw/sweep_freq.sh --judge` before they are recorded here.
+
+Also corrected: `docs/VERIFICATION.md` gave a one-tile shell link 12 GB;
+the rev4 and round2 singles' implementation peaked at 15,021 and 15,262
+MB.

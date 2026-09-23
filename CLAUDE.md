@@ -6,8 +6,8 @@ The README says what this project is; this says what will bite you.
 ## Start here: one command answers "does it still hold?"
 
 ```
-make verify-quick            # ~20 min, 26 of 39 stages
-make verify-gate             # ~2 h quiet, 34 of 39 - what a change should pass
+make verify-quick            # ~20 min, 27 of 40 stages
+make verify-gate             # ~2 h quiet, 35 of 40 - what a change should pass
 make verify                  # the full census, hours
 bash verify/run.sh --list    # every stage, with * on the ones a budget selects
 ```
@@ -126,11 +126,14 @@ job, not a divergence. This entry previously claimed it
 failed on a clean checkout; it does not. Treat a failure from it as a real
 divergence.
 
-**The XRT=1 host build is warning-free as of 2026-09-12** — the first time.
-`cft-serve.c` was writing a `long` into `char[16]` under
-`-Wformat-truncation`; provably unreachable, because the value is a port
-validated to five digits, but GCC could not see the bound across two
-conditions. Treat any warning there as new.
+**The XRT=1 host build carries exactly two warnings, both known
+(2026-09-23).** A clean `make -C host XRT=1 all` on amd-arc-box (XRT
+2.19.194) gives `tools/cft_resident.cpp:255` and `:256`,
+`-Wdeprecated-declarations` on `xrt::kernel::read_register()` for a kernel
+XRT manages. The "warning-free as of 2026-09-12" this entry used to claim
+was measured at `f636cf3`, three hours before `f192bf0` put
+`cft-resident` into `all`. The `cft-serve.c` truncation fixed that day
+stays fixed. Treat a third warning as new.
 
 **`make fp32 SIM=verilator` elaborates again (fixed 2026-09-12).** fp32 is
 the one format whose mantissa fits a single multiplier pass, so its pass

@@ -194,7 +194,7 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | a wasm module rebuild (`bindings/wasm/build.sh`) | 5 min | | in the pinned emscripten image |
 | OOC synthesis, one kernel (`hw/mc_sweep.sh ... synth`) | 10 to 32 min | | U50 647 to 1,905 s; K325T 626 to 1,272 s; A200T and Z020 6 to 12 min |
 | OOC implementation, one kernel (`... impl`) | 24 min to 1 h 46 | | K325T 1,429 to 2,608 s including its synthesis; U50 2,591 s quiet, 6,351 s under load |
-| a shell link, one tile | about 1 h 50 | | 12 GB |
+| a shell link, one tile | about 1 h 50 | | 15 GB at implementation's peak - 15,021 and 15,262 MB in the rev4 and round2 singles' `runme.log` (read 2026-09-23); older notes, and the first `hw/sweep_freq.sh`, say 12 |
 | a shell link, four tiles | 3 to 4 h | | 25 to 30 GB of the build box's 46; one at a time or the placer is killed and it looks like a design failure |
 
 The budgets in `verify/run.sh` are cuts of that table: `quick` is the
@@ -212,7 +212,7 @@ fresh invocation re-runs everything and `--resume` is the only thing that
 skips work. (cft-rebound is the sibling repo with a content-addressed gate
 cache and a warm five-second check; this runner does not have one.)
 
-`bash verify/run.sh --list` prints all thirty-nine stages with a marker
+`bash verify/run.sh --list` prints all forty stages with a marker
 against the ones the given `--budget` or `--only` would actually run, so
 the list cannot imply a budget covers more than it does. The stage names
 are derived from the `stage` calls themselves rather than kept in a second
@@ -270,6 +270,23 @@ prepends the real toolchain - measured on amd-arc-box, where a stub first
 on `PATH` became `/data/Xilinx/Vitis/2022.2/bin/v++` after the source. The
 stub would lose and a two-hour link would start on a build host. So the
 stage runs where Vitis is absent, which includes CI.
+
+`sweepjudge` holds a frequency sweep's verdicts without a build. A point
+of `hw/sweep_freq.sh` is CLOSED when the kernel clock's own WNS - read by
+name from the last timing summary the flow wrote, the manifest held to
+the summary it names - is not negative, MISSED when it is, and NONE when
+there is no such number or the records disagree. The script's first
+version (2026-08-29) read the whole-design WNS: on the builds it left on
+amd-arc-box its own summary says 0.036 and 0.055 ns at 115 and 145 MHz,
+where the kernel clock had +0.409 and +0.084. `hw/test-sweep-judge.sh`
+holds thirteen synthetic builds in Vivado's report layout to their
+verdicts - the shell's +0.055 above a kernel miss, an image staged with a
+negative WNS, a post-route phys_opt that moved the number after the
+routed summary was written, manifests that no longer agree with their
+summaries - and puts each of the two defects back into a copy of the
+script, where the case written for it must catch the copy. It needs no
+Vivado and no card, so it is never skipped: 0.7 s on amd-arc-box, about a
+minute under Git Bash.
 
 Two things are always true of the wall time. **Vivado runs one at a
 time** on a shared host - the queue scripts this project uses check

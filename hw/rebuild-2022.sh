@@ -389,11 +389,18 @@ for t in $TARGETS; do
     # came in at global -0.001 on an HBM interconnect path, kernel +0.022,
     # and Vitis fixed it itself by scaling hbm_aclk 450 -> 449.8 MHz).
     #
-    # Prefer the routed summary: it exists earlier than dr_timing_summary
-    # and it carries the per-clock Intra Clock Table that the split needs.
+    # The summary of the design the bitstream was written from: post-route
+    # phys_opt's when it ran, else the routed one, else dr_timing_summary.
+    # All three carry the per-clock Intra Clock Table the split needs. This
+    # read the routed summary first until 2026-09-23, and phys_opt runs
+    # AFTER routing: build-hw-f128x6's manifest said -0.558 where its image
+    # had -0.391 - the routed number, from 74 minutes before the end. A
+    # build that phys_opt rescues would have recorded a miss for an image
+    # that closed.
     imp="$BUILD/_x_$t/link/vivado/vpl/prj/prj.runs/impl_1"
     rpt=""
-    for cand in "$imp/hw_bb_locked_timing_summary_routed.rpt" \
+    for cand in "$imp/hw_bb_locked_timing_summary_postroute_physopted.rpt" \
+                "$imp/hw_bb_locked_timing_summary_routed.rpt" \
                 "$imp/dr_timing_summary.rpt"; do
       [ -f "$cand" ] && { rpt="$cand"; break; }
     done
@@ -433,9 +440,19 @@ for t in $TARGETS; do
       # WNS, and a global violation can sit on a clock crossing, which
       # a scan that stops at "Inter Clock Table" would report as no
       # violating clocks at all with no explanation.
-      worst=$(awk '/Intra Clock Table/{f=1}
-                   f && $2 ~ /^-[0-9]+\.[0-9]+$/ {
-                     printf "%s%s %s %s/%s", sep, $1, $2, $4, $5; sep="; " }' "$rpt")
+      #
+      # Until 2026-09-23 this scan never stopped, and never saw a
+      # crossing: an Inter Clock Table row is From, To, WNS, so its WNS is
+      # the THIRD field, while the scan ran on to the end of the report
+      # collecting every failing path's closing "slack -0.005" line
+      # (build-hw-f128x6's manifest carried nineteen of them). It now reads
+      # each table by its own columns and stops where they end.
+      worst=$(awk '/Intra Clock Table/ {f = 1} /Inter Clock Table/ {g = 1}
+                   /Other Path Groups Table/ {exit}
+                   f && !g && $2 ~ /^-[0-9]+\.[0-9]+$/ {
+                     printf "%s%s %s %s/%s", sep, $1, $2, $4, $5; sep = "; " }
+                   g && $3 ~ /^-[0-9]+\.[0-9]+$/ {
+                     printf "%s%s->%s %s %s/%s", sep, $1, $2, $3, $5, $6; sep = "; " }' "$rpt")
       [ -n "$worst" ] && printf 'violating_clocks: %s\n' "$worst"
 
       # Vitis auto-frequency scaling writes what it actually settled on.

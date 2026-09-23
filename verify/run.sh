@@ -139,7 +139,7 @@ BUDGET=""
 # now that the formal gate holds thirty-one proofs, full longer by the
 # simulation suite and the two browser replays; on the WSL distro the
 # replay stages take seconds.
-BUDGET_QUICK=docs,generated,buildargs,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
+BUDGET_QUICK=docs,generated,buildargs,sweepjudge,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
 BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp
 RESUME=""
 FRESH=0
@@ -453,6 +453,17 @@ for _vroot in /data/Xilinx /opt/Xilinx /tools/Xilinx; do
 done
 stage buildargs "hw/rebuild-2022.sh hands v++ the clock constraint with VPP_PROPS set, CFT_GENERICS reaches vivado and the manifest, a lying wrapper read-back stops the build before v++; each with its negative control" -- \
   bash "$ROOT/hw/test-rebuild-argv.sh"
+
+# A frequency sweep's verdicts, without a build. hw/sweep_freq.sh judges
+# CLOSED / MISSED / NONE from the artifacts a build leaves; its first
+# version read the whole-design WNS (the shell's 0.055 ns where the kernel
+# had +0.084) and would have taken a staged image for a closed one. The
+# test holds 13 synthetic builds to their verdicts and puts each of those
+# two defects back into a copy of the script, which the case written for
+# it must catch. No Vivado and no card, so nothing here is skipped.
+need
+stage sweepjudge "hw/sweep_freq.sh judges a sweep point by the kernel clock's own WNS, never the shell's, and a staged image is not a closed one; each with its negative control" -- \
+  bash "$ROOT/hw/test-sweep-judge.sh"
 
 stage golden "golden-model pytest suite (the definition of correct)" -- \
   PY -m pytest "$ROOT/python/tests" -q

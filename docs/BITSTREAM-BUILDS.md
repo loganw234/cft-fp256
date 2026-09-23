@@ -32,7 +32,7 @@ Nothing FPGA runs on Windows itself — `xclbinutil` is Linux-only.
 ## The script, which is the short answer
 
 ```bash
-setsid nohup hw/build-pair.sh --tag rev4 \
+setsid nohup bash hw/build-pair.sh --tag rev4 \
     --commit <sha> --require <token> --require-in rtl/cft_krnl.sv:<token> \
     > ~/build-rev4.out 2>&1 &
 ```
@@ -49,7 +49,16 @@ assertion and builds nothing, which is how the refusals are tested.
 
 It exists because this recipe was rebuilt from memory several times and
 memory got it wrong in ways that exit 0 — once costing five hours on a
-10 MHz image.
+10 MHz image. It also exits 0 whatever its builds did: the verdict is its
+`00-summary.txt` and the staging directory.
+
+To find how fast a tree will go, `bash hw/sweep_freq.sh --tag <name>
+--commit <sha> 145 150 155` runs build-pair's single at one clock after
+another and judges each from the artifacts, by the kernel clock's own WNS
+(`--judge <build-dir>` does the same for a build already on disk, and
+`--card` puts each image that closes on the card). Its first version read
+the whole-design WNS - `145 MHz CLOSED WNS 0.055` in its own summary,
+where the kernel had +0.084 - and was rewritten on 2026-09-23.
 
 ## The commands it runs, which are the explanation
 
@@ -148,9 +157,12 @@ Not just the one you are about to rebuild. `cft-asm`, `positive-run`,
 Round 2's quad (2026-09-16) ended after 359 minutes with `design did
 not meet timing`: kernel-side WNS -0.363 ns, 1,824 failing endpoints
 of 1,042,969, while the single from the same commit closed with 0.032
-ns of routed margin. Before touching RTL, read the worst paths in
-`_x_hw/link/vivado/vpl/prj/prj.runs/impl_1/*timing_summary_routed.rpt`
-(`Source:` and `Destination:` under each `Slack (VIOLATED)`). There
+ns of routed margin. Before touching RTL, read the worst paths -
+`python3 hw/kernel_worst.py` on the last timing summary in
+`_x_hw/link/vivado/vpl/prj/prj.runs/impl_1/`, which is post-route
+phys_opt's when it ran (it moved one build's kernel WNS from -0.558 to
+-0.391 after the routed summary was written), or by hand, `Source:` and
+`Destination:` under each `Slack (VIOLATED)` of the kernel clock. There
 they were the elementwise engine's FIFO-to-FMA bypass through the DSP
 cascade - the design's oldest critical path, which nine earlier quads
 had closed with 0.009 to 0.143 ns to spare - and not any of the
