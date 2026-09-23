@@ -13909,3 +13909,55 @@ with `hw/sweep_freq.sh --judge` before they are recorded here.
 Also corrected: `docs/VERIFICATION.md` gave a one-tile shell link 12 GB;
 the rev4 and round2 singles' implementation peaked at 15,021 and 15,262
 MB.
+
+## 2026-09-23 - the U50 single closes 145 MHz with the registered multiply, and the whole conformance set agrees on the card
+
+The first point of the sweep two entries above: 307872e (rtl c9b67d4b),
+single tile, `hw/build-pair.sh --single-only --freq 145000000`, the
+standard recipe, on amd-arc-box.
+
+    build        170 min, beside four openXC7 routes; memory floor 9 GB available, no OOM in the kernel log
+    kernel WNS   +0.163 ns, 0 of 142,834 endpoints failing (clk_out1_ulp_clk_wiz_0, post-route summary;
+                 the manifest's routed number agrees, re-read with hw/sweep_freq.sh --judge)
+    whole design +0.055 ns - the shell's number, as at 130 and 145 before
+    verify-image PASS, 8 of 8; staged ~/cardday-u50-145, re-hashed byte-identical, sha256 de74e306...
+    device-test  -q -n 8 on the U50: rc 0, 2,367 checks, 0 failed, 4 s
+    replay       cft-selftest vectors/out: rc 0, backend xrt, 1,068,915 cases checked, 12 min 17 s
+
+**An image, not only a timing number.** It closed, verified, and on the
+card agreed with the model on every published case. The last bracket
+(2026-09-01, the tree of 08-31, before the sequencer and the integer
+multiply) closed 145 at +0.032 ns; this tree, larger by both, closes it
+at +0.163. As that entry said of its own numbers, slack at a met target
+is where the router stopped, not what it could do: the ceiling is
+whatever the first missed point says, and 150 MHz was building when this
+was written.
+
+**The wall has moved off the multiply, and not where it was predicted.**
+The prediction before this build was the sequencer's instruction-memory
+block-RAM cascade, the worst kernel path of the read-ahead pair's single
+at 135 MHz (+0.089 ns, 2026-09-09). It is not among the ten worst paths
+here. All ten start at one register, the stream engine's segment length
+`seg_r[29]` (`rtl/cft_engine_stream.sv`), 28 logic levels, 14 of them
+CARRY8:
+
+    +0.163  +0.163  +0.163   -> FSM_onehot_wr_state_reg[0..2]/CE   data path 6.519 ns
+    +0.303 ... +0.355        -> w_cnt_reg[0..6]/CE                 data path 6.35 to 6.40 ns
+
+The chain is the write master's arithmetic, recomputed every cycle:
+`seg_r == 0` chooses `nres_eff`, which becomes `wr_total` through a 64-bit
+add and a variable shift (the reduction branch), then `rem_w = wr_total
+- wr_sent`, its minimum against the burst size and the 4 KB bound
+(`w_target`), and the FIFO occupancy compare that gives `w_go`, the
+enable of `wr_state`, `w_cnt` and `w_len`. Everything before the
+subtraction is a function of registers fixed for the run. The K325T's
+worst path after the multiply change, the engine's `seg_r -> w_cnt`
+chain at 9.581 ns, is the same logic on the other part. At 150 MHz the
+period is 0.230 ns shorter than the 0.163 this path has; whether the
+router finds the difference is what the next point measures.
+
+**Not done.** The quad at 145; no RTL change (holding `wr_total`, or
+the part of it that is fixed for the run, in a register is the obvious
+one if 150 misses - with care for `wfinish`, which compares against
+`wr_total` in a run's first cycle); nothing about the openXC7 routes,
+which were still converging.
