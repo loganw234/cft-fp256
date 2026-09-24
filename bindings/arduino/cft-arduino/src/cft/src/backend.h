@@ -266,12 +266,13 @@ int  cftx_reduce_seg(void *hw, int op, int fmt, int rnd, const void *a,
  *              every format, so a backend repacks rather than points
  *
  * The 0.14 fields are live, not refused (docs/SEQUENCER.md revision
- * 6): program.c holds them to their shapes, and device.c refuses a
- * table or a mask the device's CAPS2 does not publish. The XRT backend
- * binds or stages the tables for the tile to gather and repacks the
- * mask; the remote backend never sees a table, because device.c
- * gathers the blocks dense before calling it, and it compacts a masked
- * run to its kept lanes itself.
+ * 6): program.c holds them to their shapes, and on an XRT device
+ * device.c refuses a table or a mask the device's CAPS2 does not
+ * publish. The XRT backend binds or stages the tables for the tile to
+ * gather and repacks the mask. A remote device is refused neither:
+ * its backend never sees a table, because device.c gathers the blocks
+ * dense on the client before calling it, and it compacts a masked run
+ * to its kept lanes itself.
  */
 typedef struct cft_seq_run_io {
     const void *bank;        size_t bank_bytes;
