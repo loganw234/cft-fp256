@@ -14097,3 +14097,33 @@ building when this was written; with a family of paths within 46 ps of
 the edge at 155, a miss there is the expectation, and it is what the sweep
 exists to measure rather than assume.
 
+## 2026-09-23 - the U50 single closes 160 MHz, which the entry above expected it to miss, and the whole conformance set agrees on the card
+
+The sweep's fourth point: 307872e, 160 MHz, the standard recipe.
+
+    build        159 min, beside four router experiments and a reference route;
+                 memory floor 9 GB available, no OOM in the kernel log
+    kernel WNS   +0.075 ns, 0 of 143,170 endpoints failing (post-route summary; the
+                 manifest agrees); the design's worst is the shell's hbm_aclk again, +0.018
+    verify-image PASS, 8 of 8; staged ~/cardday-u50-160, sha256 d3200b49...
+    device-test  -q -n 8 on the U50: rc 0, 2,367 checks, 0 failed
+    replay       cft-selftest vectors/out: rc 0, backend xrt, 1,068,915 cases checked,
+                 12 min 33 s
+
+**The single tile runs at 160 MHz, 18.5% above its shipping 135, and
+computes right there.**
+
+**The entry above expected a miss, and was wrong.** At 155 the FIFO-to-bypass
+family sat within 46 ps of the edge, and 160 takes 0.19 ns off the period;
+asked for it, the router found about 0.26 ns on the same family - the worst
+path, operand FIFO B into the fp256 lane's stage-0 bypass, now 18 levels
+and 5.934 ns where it was 20 and 6.269 at 155. The router's intermediate
+summaries read -0.620 ns in the middle of routing and +0.018 at its end, so
+this is the 2026-09-01 lesson a third time over: neither slack at a met
+target nor an intermediate summary is the edge; only a missed point
+measures it. The worst paths: that family from +0.075 to +0.109 ns, and the
+engine's `seg_r` into the reduction's `fold_r` at +0.105.
+
+165 MHz was next when this was written, its build waiting on the sweep's own
+memory gate (24 GB) while the router experiments held the machine.
+
