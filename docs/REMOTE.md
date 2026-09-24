@@ -82,7 +82,7 @@ client's own copy of the library, which is bit-identical by contract.
 | `cft_program_run` | server | one `PROG_RUN` per chunk of lanes |
 | `cft_program_run_bank` | server | one `PROG_RUN_BANK` per chunk of lanes, the bank on each |
 | `cft_program_digest` | client, over the bytes it holds | nothing |
-| `cft_program_free` | both | `PROG_FREE` |
+| `cft_program_free` | client: its own memory only | nothing - `PROG_FREE` goes out when a different image displaces the cached handle, and the server frees the rest with the connection |
 | `cft_get_caps`, `cft_supports` | client, from the capabilities the handshake returned | nothing after `HELLO` |
 | `cft_alloc`, `cft_buffer_to_device`, `cft_buffer_from_device`, `cft_buffer_free` | client: host memory, as on the software backend | nothing (see below) |
 | `cft_get_caps().buffers_resident`, `cft_buffer_get_info` | client, from its own knowledge: 0 and no device copies | nothing |

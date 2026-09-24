@@ -332,7 +332,7 @@ deposition that column alone can claim.
    `CFT_SEQ_FEAT_WIDE_CONST`, and `cft_program_load` refuses an image
    that uses either on a device that does not publish it. The indexed
    form is what lets step 3 emit one image per positive.
-3. **The emitter target** (atlas-engine): `core/emit-cft.mjs` from the
+3. **The emitter target**: `atlas-engine/core/emit-cft.mjs` from the
    same parse, producing the image, the constant bank, the seven-wide
    input block and the deposit schema; a runner in cft-fp256
    (`host/tools/positive-run.c`, on the pattern of the workload tools:

@@ -979,10 +979,11 @@ them.
   the feature had to pass, since indexed constants reorder nothing and
   re-associate nothing. docs/ENCLOSE.md carries the measurement.
 - **A per-iteration broadcast** (zoom). The perturbed pixel step needs
-  two values that change every iteration and are shared by every lane
-  - the reference orbit's point - and there is no operand source shared
-    by every lane that advances with the loop counter: a fourth stream
-    read by iteration index, or a constant bank the counter can address.
+  two values that change every iteration and are shared by every
+  lane - the reference orbit's point - and there is no operand source
+  shared by every lane that advances with the loop counter: a fourth
+  stream read by iteration index, or a constant bank the counter can
+  address.
 - **A lane shift and an in-program cross-lane reduction** (Mersenne).
   A carry chain reads a neighbour and a convolution sums across lanes;
   a lane has thirty-two private registers and 256 private scratch

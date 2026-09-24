@@ -13,10 +13,11 @@ is a bring-up you do not have.
 
 **Linux only, the whole flow.** Vivado alone runs on Windows, but v++
 linking, XRT, pyxrt, and the Alveo platform packages (.deb/.rpm) are
-Linux-only - keep packaging, linking, and the card on one Ubuntu box
-rather than splitting the flow across OSes. WSL2 can *build* (it is a
-Linux userland) but cannot reach the card; treat it as a compiler at
-most.
+Linux-only - keep `-t hw` linking, the packaging of the .xo it links,
+and the card on one Ubuntu box (amd-arc-box) rather than splitting that
+flow across OSes. WSL2 can *build* (it is a Linux userland) but cannot
+reach the card; the `cft2204` distro is this project's hw_emu host (the
+split below), and nothing that touches the card runs there.
 
 Before installing anything, three pairings have to agree - check, then
 install, in this order:

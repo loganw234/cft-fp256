@@ -1,12 +1,12 @@
 # The documents, by what you open them for
 
-Thirty-seven files, 48,793 lines. Flat in one directory they look like one
+Thirty-seven files, 48,795 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **16,436 lines you consult while working** — the three under *Start here*,
+- **16,437 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **5,567 lines of tool manual**, one per shipped program;
-- **1,759 lines of operations**, read when you are about to do something to
+- **1,760 lines of operations**, read when you are about to do something to
   hardware;
 - **25,031 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
@@ -45,7 +45,7 @@ product, not the implementation.
 |---|---|---|
 | [DETERMINISM.md](DETERMINISM.md) | 1,442 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 1,163 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
-| [SEQUENCER.md](SEQUENCER.md) | 1,912 | The orbit sequencer and the program model. |
+| [SEQUENCER.md](SEQUENCER.md) | 1,913 | The orbit sequencer and the program model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 786 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
 
@@ -83,7 +83,7 @@ running.
 |---|---|---|
 | [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 244 | Building a bitstream, and the five traps — three of which exit 0, and two that look like a design failure. `hw/build-pair.sh` is this document as an executable. |
 | [CARDDAY.md](CARDDAY.md) | 736 | Card day: the runbook as it was actually run, the staged pairs, and the forensics kept when build trees are reclaimed. |
-| [BRINGUP.md](BRINGUP.md) | 779 | Hardware bring-up, and the gates CI's green tick does not cover. |
+| [BRINGUP.md](BRINGUP.md) | 780 | Hardware bring-up, and the gates CI's green tick does not cover. |
 
 ## The record
 
