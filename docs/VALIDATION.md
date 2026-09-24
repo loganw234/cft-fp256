@@ -14178,3 +14178,122 @@ ten worst paths are theirs:
 
 175 MHz, the sweep's last point, began building at 01:48.
 
+
+## 2026-09-24 - the documents swept against the tree: 432 corrections in three rounds, each verified, and a docs gate that holds every document
+
+**Why.** Logan asked for every document to be brought up to date, the
+agents run by ParcelRound's method and the claims held by
+HonestFramework's. Run on the desktop, read-only against amd-arc-box,
+which was building the clock sweep's 175 MHz point throughout; nothing
+was run on the box. Commits 080fe30, 5541aa8, 2ca3754, f6cf3bc and this
+one; the working ledger and every agent's return value are in the
+session's scratch directory, not in the tree.
+
+**How it ran.** Before any agent, the lead derived the facts several
+documents state - stage, bench, proof, opcode and function counts, the
+ABI, CAPS bits, the card's latest runs - each with the command that
+derives it. Fifteen read-only auditors then read all 53 tracked `.md`
+files in full (the 8 tracked `.txt` are data), against the code, the
+scripts, the generators and this ledger, with a shared ledger outside
+the tree for facts that crossed groups. Every finding went to a
+verifier told to refute it from the source. Only live claims changed;
+a dated figure is history and reads as it did; this file was not edited
+above this entry.
+
+    round 1   303 findings: 193 confirmed, 89 amended, 14 to the lead, 7 refuted
+              291 applied; then 12 reviewers read every applied hunk in
+              context: 85 more fixes (51 must/should, 34 notes), all applied
+    round 2   the round-1 verifiers' 314 side notes and the critic's 12:
+              93 already fixed, 72 not defects, 39 optional wording,
+              22 dated history, 40 out of scope, 11 to the lead,
+              47 became 51 findings: 38 confirmed, 10 amended, 1 to the
+              lead (accepted), 2 refuted; 49 applied
+    round 3   the round-2 verifiers' 49 notes: 6 live defects, all held;
+              6 applied, and one twin of one of them by the lead
+    agents    117 (63 + 12 + 30 + 12), 18.6 M subagent tokens,
+              09:04 to 11:53 on the desktop
+
+The yield fell 303, 51, 6, and the loop stopped there. The largest
+classes: counts that had moved (40 stages, 29 programs, 141 wasm
+exports, 512 constants, 512-beat FIFOs); statuses overtaken (the
+published 1,068,915 cases replayed on the card at every point of the
+clock sweep above; the sequencer on silicon since 2026-09-08; ABI
+0.14's fields live on every backend); CLAUDE.md's traps (without XRT=1
+`backend_xrt.cpp` is left out of the build, it never compiled to an
+inert object; `make -C host clean` leaves `cft-zoom`); and paths in other
+repositories, now written with the repository's name inside the
+backticks.
+
+**The clock.** By Logan's instruction the U50 single tile is stated as
+175 MHz (assumed; 170 MHz closed and proven on the card, 2026-09-24),
+the quad as 135 MHz; no measured throughput was restated at another
+clock. The 175 point's verdict was not read for this entry. When it is
+recorded, the "(assumed)" is what to change: ten statements in five
+files, and `grep -rn 'assumed;' --include=*.md .` finds each one (the
+text wraps, so a grep for 'assumed; 170' misses one).
+
+**What the method caught in the lead's own work**, which is the record
+that makes the rest credible:
+
+- the facts sheet was wrong three times before the auditors finished -
+  the CAPS2 row listed `seq_features` bits as the register, a grep
+  missed a four-target Makefile rule, and `cft-resident` is in `all`
+  only under XRT=1 - each corrected in the ledger by the auditor who
+  found it;
+- a brief said `docs/BITSTREAM.md` does not exist; it is cft-rebound's;
+- the lead widened the checker in the tree the auditors were reading,
+  and one reported the docs stage red at HEAD from the half-written
+  file (retracted by the same auditor within ten minutes);
+- the lead's applier replaced only the original span where a verifier
+  had widened it in prose (14 half-replaced sentences), re-filled into
+  three code blocks and merged two list items. The reviewers found all
+  of it; round 2's verdicts carry the exact span, and the applier no
+  longer re-fills inside a fence or across an item;
+- the widened gate claimed a planted fault per check and had nine checks
+  with none - found by a reviewer told to break it (below).
+
+**The gate.** `python/check_docs_index.py` (the `docs` stage) held
+docs/README.md's links and counts and four files' stage and bench
+counts; README.md's "**39** gate stages", bold, passed it. It now holds
+every tracked document's relative links and quoted repository paths
+(read a paragraph at a time; the ledger, ROUND2.md and the studies
+exempt only while the index files them as records; build and run
+products exempt only while their producer still writes them), the
+stage, bench, proof, tier and document counts with bold stripped, and
+the index's totals. On HEAD's documents it reports seven problems, all
+among this sweep's fixes. Every run plants 32 faults and requires each caught
+by name. A mutation test (in memory, each of 29 checks and branches
+disabled in turn) was killed 29 of 29 by those controls; the version
+before the review survived nine.
+
+    python python/check_docs_index.py      rc 0: 37 indexed, 53 tracked,
+                                           48 links, 735 quoted paths, 32 controls
+    bash verify/run.sh --only docs,generated   PASS (inside `generated`,
+                                           make_seq_corpus.py skipped by name:
+                                           no built libcft on this desktop)
+    python hw/gen_layouts.py --check       rc 0
+    python bindings/arduino/sync.py --check    30 vendored files identical
+
+Two changes outside docs/ made documented text true: `make seqcycles`
+is forwarded to tb/ (twelve citations, four above in this file), and
+`hw/gen_layouts.py` reads a variant's clock as a target from its own
+note - fp64+fp128 closed 135 in the shell on 2026-09-14 and its layouts
+still read 135*.
+
+**Not done.** 179 notes out of the sweep's scope, kept with the round's
+records: stale code comments above all (`host/include/cft.h` 20,
+`rtl/cft_csr.sv` 10, `rtl/cft_krnl.sv` 8, including cft.h's own ABI
+comment calling 0.14's fields refused); the published wasm pages' prose
+(`conformance.html`'s family counts predate 2026-09-12; a template edit
+needs `bindings/wasm/build.sh` in the pinned container to regenerate the
+committed page); two a verifier noted and this entry did not re-derive
+- the committed `bindings/node/cft_node.wasm` answering seq_features
+0x271f where the source now publishes 0x671f, and the software backend
+accepting a scalar operand without publishing `CFT_SEQ_FEAT_SCALAR`;
+the runner's summary says "nothing skipped" when
+a check inside a stage skipped; the layout catalogue still builds the
+single at 135; NOVEL.md entry 4's cascade rule does not fit the fp32
+column, and its source (UG579) was not checked. The planted-fault
+control on the auditors themselves (HonestFramework §9) was skipped by
+decision, so the verdict rates above are the only measure of the
+verifiers - suggestive, not a detection rate.
