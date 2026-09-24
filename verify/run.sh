@@ -50,7 +50,8 @@
 #   * A check INSIDE a stage that did not run is an INNER skip: its
 #     script prints a line whose first word is SKIP or SKIPPED (or the
 #     conformance replay's "<set>: ... skipped, ... on this device"),
-#     and the runner reads a passing stage's log for those lines. They
+#     and the runner reads a passing stage's log for those lines, with
+#     terminal colour codes removed first. They
 #     are named under the stage's row and in the census, counted in the
 #     JSONL, the VERDICT and the census, and --require-all fails them
 #     like any other skip.
@@ -345,11 +346,24 @@ json_esc() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; printf '%s' "${s//$'\t'/\\t
 # print only the replay's counts, so a set skipped under the cpp or
 # remote stage reaches no log. A check that reports its skip in any
 # third way is invisible here, and should print the SKIP marker.
+#
+# A line is matched as text, not as a terminal paints it. pytest under
+# FORCE_COLOR=1, PY_COLORS=1 or PYTEST_ADDOPTS=--color=yes writes
+# "ESC[33mSKIPPEDESC[0m [n] ...", and when only the ESC byte was removed
+# the first word read "[33mSKIPPED" - so on 2026-09-24 a coloured
+# `--only golden --require-all` said "VERDICT: PASS, nothing skipped"
+# over seven skips, exit 0 (verify-P4, measured). The two pytest stages
+# pass --color=no, which outranks all three settings (measured, pytest
+# 9.1); and every stage's log has its CSI sequences (ESC [ params final)
+# and charset selections (ESC ( B) removed here before anything is
+# matched, for whatever else colours its output. Any other ESC byte goes
+# with the control characters after that.
+ANSI_STRIP=$'s/\033\\[[0-9;:<=>?]*[@-~]//g; s/\033[()][0-9A-Za-z]//g'    # INNER-SKIP-ANSI
 INNER_SKIP_RE='^[[:space:]]*SKIP(PED)?([[:space:]:]|$)'
 REPLAY_SKIP_RE=': ([^[:space:]]+ )?skipped, .*on this device$'    # INNER-SKIP-REPLAY
 inner_scan() {  # <log>  ->  its inner-skip lines, trimmed, one per line
-  tr -d '\000-\010\013-\037' < "$1" | grep -E -e "$INNER_SKIP_RE" -e "$REPLAY_SKIP_RE" \
-    | sed -E 's/^[[:space:]]+//'
+  LC_ALL=C sed -E "$ANSI_STRIP" < "$1" | tr -d '\000-\010\013-\037' \
+    | grep -E -e "$INNER_SKIP_RE" -e "$REPLAY_SKIP_RE" | sed -E 's/^[[:space:]]+//'
 }
 
 stage() {  # <name> <description> -- command...
@@ -542,10 +556,12 @@ stage sweepjudge "hw/sweep_freq.sh judges a sweep point by the kernel clock's ow
 # a second ("No module named pytest") instead of skipping it by name,
 # measured on 2026-09-24 with a venv that lacks it. -rs has pytest
 # name every test it skipped, one "SKIPPED [n] <file>:<line>: <reason>"
-# line per reason, which is the marker the inner-skip count reads.
+# line per reason, which is the marker the inner-skip count reads;
+# --color=no keeps a coloured environment from painting that marker
+# (inner_scan, above).
 need python pytest
 stage golden "golden-model pytest suite (the definition of correct)" -- \
-  PY -m pytest "$ROOT/python/tests" -q -rs
+  PY -m pytest "$ROOT/python/tests" -q -rs --color=no
 
 need python
 stage vectors "regenerate the conformance sets from the model, all five attributes" -- \
@@ -806,7 +822,7 @@ stage photograph "a GPU's record of a real workload, bit for bit: atlas-engine's
 # and -rs names what the bare box skipped, as inner skips.
 do_bindings() {
   HOSTMAKE "$SHLIB_NAME" >/dev/null 2>&1 || HOSTMAKE all >/dev/null 2>&1 || true
-  CFT_LIB="$ROOT/host/$SHLIB_NAME" PY -m pytest -q -rs \
+  CFT_LIB="$ROOT/host/$SHLIB_NAME" PY -m pytest -q -rs --color=no \
     "$ROOT/bindings/python/test_cftmpfr.py"
 }
 need host-cc python pytest

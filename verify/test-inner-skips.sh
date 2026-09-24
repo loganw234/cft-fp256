@@ -27,11 +27,14 @@
 #    PASSes;
 #  - the same under --require-all FAILS, naming the stages on the VERDICT,
 #    and so does the imul stage alone;
-#  - a --resume runs those stages again instead of serving them from cache.
-# Three negative controls put a defect back into a copy of the runner -
-# the scan disabled, the replay's form dropped, and a pass with inner
-# skips cached like a clean one - and the check written for each must
-# catch it.
+#  - a --resume runs those stages again instead of serving them from cache;
+#  - pytest's marker as a coloured terminal gets it, "ESC[33mSKIPPEDESC[0m
+#    [2] ...", counts two and is named without its colour, a coloured
+#    "2 skipped" beside it counts nothing, and --require-all FAILS it.
+# Four negative controls put a defect back into a copy of the runner -
+# the scan disabled, the replay's form dropped, a pass with inner skips
+# cached like a clean one, and the colour left in - and the check written
+# for each must catch it.
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 T=$(mktemp -d)
@@ -56,6 +59,11 @@ need
 stage replay "a replay that skipped one opcode" -- \
   printf '%s\n' 'fp32-rne.jsonl: 19600 cases, all matching' \
     'fp32-rne.jsonl: imul skipped, not on this device'
+need
+stage colour "a pytest run painted by FORCE_COLOR, as pytest 9.1 paints it on Windows" -- \
+  printf '%b\r\n' 'ok    a coloured pass' \
+    '\033[33mSKIPPED\033[0m [2] tests/test_y.py:4: painted by FORCE_COLOR' \
+    '\033[32m\033[32m\033[1m5 passed\033[0m, \033[33m2 skipped\033[0m\033[32m in 0.10s\033[0m\033[0m'
 EOF
 
 # mkrunner <run.sh> <dir>: <dir>/verify/run.sh is that runner with its
@@ -149,9 +157,22 @@ cases () {  # <runner>  ->  returns the number of checks it got wrong
   check "resume: gappy runs again, not from cache" \
         grep -qE '^gappy +ok +[0-9]+s  \+ 5 inner skip\(s\)' "$OUT" || bad=$((bad + 1))
   same  "resume: the VERDICT still names them" "$VERDICT" "$PASSV" || bad=$((bad + 1))
+
+  echo "-- colour: pytest's marker, painted"
+  go "$d" colour --only colour
+  same  "colour: exit 0" "$RC" 0 || bad=$((bad + 1))
+  check "colour: its row counts 2" grep -qE '^colour +ok +[0-9]+s  \+ 2 inner skip\(s\)' "$OUT" || bad=$((bad + 1))
+  check "colour: the line named under the row, colour removed" \
+        grep -qxF '             SKIPPED [2] tests/test_y.py:4: painted by FORCE_COLOR' "$OUT" || bad=$((bad + 1))
+  check "colour: report.jsonl counts and names it, colour removed" grep -qF \
+        '"inner_skips":2,"inner_skip_lines":["SKIPPED [2] tests/test_y.py:4: painted by FORCE_COLOR"]}' "$JSONL" || bad=$((bad + 1))
+  go "$d" strict-colour --only colour --require-all
+  same  "strict: the coloured skip alone fails --require-all" "$RC" 1 || bad=$((bad + 1))
+  same  "strict: the coloured skip alone, on the VERDICT" "$VERDICT" \
+        "VERDICT: FAIL (1 stage(s), including under --require-all 2 inner skip(s) in colour (2))" || bad=$((bad + 1))
   return "$bad"
 }
-NCHECKS=26
+NCHECKS=32
 
 echo "== verify/run.sh, as committed"
 cases "$ROOT/verify/run.sh"; n=$?
@@ -184,9 +205,12 @@ control replay-form-dropped INNER-SKIP-REPLAY \
 control cached-like-clean INNER-SKIP-NO-CACHE \
   '    : > "$RUNDIR/$name.ok"    # the control: a gap cached as a clean pass' \
   "resume: gappy runs again, not from cache"
+control colour-left-in INNER-SKIP-ANSI \
+  "ANSI_STRIP='s/^//'    # the control: no colour removed, only the ESC byte" \
+  "strict: the coloured skip alone fails --require-all"
 
 if [ "$FAILS" -eq 0 ]; then
-  echo "PASS: $NCHECKS checks right, all three controls caught by their own checks"
+  echo "PASS: $NCHECKS checks right, all four controls caught by their own checks"
   exit 0
 fi
 echo "FAIL: $FAILS problem(s)"
