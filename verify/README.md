@@ -11,7 +11,7 @@ the repo root, or `bash verify/run.sh` with the flags below.
     bash verify/run.sh --only golden,sim
     bash verify/run.sh --resume       # continue the most recent run
     bash verify/run.sh --fresh        # force a new run id
-    bash verify/run.sh --require-all  # skips become failures
+    bash verify/run.sh --require-all  # skips, inner ones too, become failures
     SIM_JOBS=12 bash verify/run.sh    # the sim stage's targets, twelve at a time
     bash verify/run.sh --only cpp,node,wasm,lang-rust   # language legs, by name
     bash verify/run.sh --budget quick   # ~20 min after a host build
@@ -49,7 +49,7 @@ command in the `cft2204` distro.
 | docs | docs/README.md indexes every document; every tracked document's relative links and quoted repository paths resolve; the stated stage, bench, proof and index counts are true; a planted fault per check, each caught by name (`python/check_docs_index.py`) | python |
 | buildargs | `hw/rebuild-2022.sh` hands v++ the clock constraint with VPP_PROPS set, CFT_GENERICS reaches vivado and the manifest, a lying wrapper read-back stops the build before v++ - each with its negative control (`hw/test-rebuild-argv.sh`, stub v++ and vivado) | bash; skipped by name where Vitis 2022.2 is installed under /data/Xilinx, /opt/Xilinx or /tools/Xilinx |
 | sweepjudge | `hw/sweep_freq.sh` judges a sweep point by the kernel clock's own WNS, never the shell's, and a staged image is not a closed one - thirteen verdicts on synthetic builds, both defects put back as negative controls (`hw/test-sweep-judge.sh`) | bash |
-| golden | the model's own invariants and oracles | python |
+| golden | the model's own invariants and oracles | python with pytest |
 | vectors | the conformance sets regenerate from the model | python |
 | sim | RTL == model across all cocotb targets | docker (usable, not merely present) |
 | simmc | the same suite at the multi-cycle pass budget MC, plus the open-core board configuration - in `full` only, never in `quick` or `gate` | docker |
@@ -69,7 +69,7 @@ command in the `cft2204` distro.
 | seq | sequencer C-vs-model over fuzzed programs | cc, python |
 | reduce | canonical reduction ranges vs the model | cc, python |
 | photograph | a GPU's record of a real workload, bit for bit: atlas-engine's hopf photograph, four passes of 1,048,576 samples, each deposit buffer held to the SHA-256 an NVIDIA GPU wrote | cc, python |
-| bindings | the cftmpfr drop-in vs gmpy2's IEEE emulation | cc, python |
+| bindings | the cftmpfr drop-in vs gmpy2's IEEE emulation | cc, python with pytest |
 | cpp | `cft.hpp` vs `cft.h` at C++17 and C++20: every entry point, same bits and flags, plus the conformance replay through the wrapper | cc, g++ |
 | lang-cpp, lang-rust, lang-julia, lang-go, lang-csharp, lang-r | that language's example vs the C example, same bits (`make -C host examples-lang`, one leg at a time) | cc + that toolchain |
 | lang-fortran | the Fortran example builds and runs through iso_c_binding; it prints no checksum line | cc, gfortran |
@@ -105,8 +105,9 @@ failing target does not hide the others): the whole suite cold at -j12
 on that box is 3 min, warm under a minute (docs/VALIDATION.md
 2026-09-02). Budget 1-2 GB a job under Verilator. The formal gate was 29
 s when it held four proofs and is about 7 minutes (420 s of solver time)
-now that it holds thirty-one; `transcend` is 13 minutes quiet and 52
-loaded. docs/VERIFICATION.md carries every number with its provenance.
+now that it holds thirty and a negative control; `transcend` is 13
+minutes quiet and 52 loaded. docs/VERIFICATION.md carries every number
+with its provenance.
 
 Two things the runner learned on 2026-09-02, both now built in: the
 libcft stage cleans `host/` before building it, because a checkout
@@ -145,7 +146,9 @@ Each run gets an id (timestamp to the second + commit, bumped on
 collision) under `verify/state/`, and each stage leaves a
 `.ok`/`.fail` marker beside its log. Interrupt anywhere; `--resume`
 reruns only what lacks a `.ok`, and a stage that already passed stays
-passed - `--skip` cannot re-verdict green work. Resuming across
+passed - `--skip` cannot re-verdict green work. A stage that passed
+with inner skips (below) gets no `.ok`, so a resume runs it again
+rather than serving its gaps from cache as a clean pass. Resuming across
 COMMITS is refused: a report stitched from two trees certifies
 nothing. `--fresh` starts over on purpose and contradicts `--resume`
 loudly. Flags are PER-INVOCATION: a resume does not remember the
@@ -163,6 +166,22 @@ reason and the run can still PASS - a laptop without XRT is allowed
 to verify everything else. `--require-all` inverts that for machines
 that claim to be full verification hosts: there, a skip is a failure.
 This is the knob a future open-core compliance run should set.
+
+A stage can also pass while a check inside it did not run: `generated`
+without a built libcft cannot run `make_seq_corpus.py`'s check, and
+until 2026-09-24 that stage reported ok and the run "PASS, nothing
+skipped". The scripts name such a check with a line whose first word is
+`SKIP` or `SKIPPED` (upper case, then a space, a colon or the end of the
+line), and after a stage passes the runner reads its log for those
+lines. Each is an **inner skip**: named beneath the stage's row, counted
+in `report.jsonl` (`inner_skips`, `inner_skip_lines`), named by stage on
+the `VERDICT:` line and counted in the census - and under
+`--require-all` the stage fails. The golden and bindings stages run
+pytest with `-rs`, whose `SKIPPED [n] <file>:<line>: <reason>` lines
+count n each. A script that reports a skip any other way - lower case,
+or mid-line - is invisible to this, and should print the marker.
+`bash verify/test-inner-skips.sh` holds the accounting to synthetic
+stages, with two negative controls.
 
 ## What is deliberately not here
 

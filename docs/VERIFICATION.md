@@ -144,7 +144,8 @@ authority:
     slack" applies (docs/BRINGUP.md).
 
 Three rules hold across all of it. A gate whose tool is absent is
-**skipped by name with the reason**, never silently passed; a negative
+**skipped by name with the reason**, never silently passed, and so is a
+check skipped inside a stage that passed; a negative
 control that stops failing fails the run; and a number in a test that
 copies a number in the RTL is a defect, which is why the CAPS test
 parses the kernel's parameters instead of restating them.
@@ -254,7 +255,8 @@ comment rather than a guarantee; this stage is what makes the comment
 true. `make_seq_corpus.py` needs a built libcft and `cft_golden` on the
 path and is skipped by name when they are absent, so staleness is
 recognised from the generator's own message rather than from exit status
-alone.
+alone. That skip is an inner skip: the runner names it under the stage's
+row and on its `VERDICT:` line, and `--require-all` fails it.
 
 `buildargs` is the third of that family and the only one that tests a
 build without building. `hw/rebuild-2022.sh` assembles the v++ link line
@@ -333,7 +335,11 @@ So that a log can be read without the harness:
   browser's compute core produced the C tools' chains`.
 - the runner ends with a census block shaped for docs/VALIDATION.md,
   after a line per stage (ok, FAIL, or SKIP with the skip's reason) and a
-  `VERDICT:` line.
+  `VERDICT:` line. An ok stage whose log has lines whose first word is
+  `SKIP` or `SKIPPED` - checks inside it that did not run, pytest's `-rs`
+  lines among them - carries `+ n inner skip(s)` with each line beneath
+  it; the `VERDICT:` line, the census and `report.jsonl` count them by
+  stage, and `--require-all` fails them (verify/README.md).
 
 ## Running one thing
 
