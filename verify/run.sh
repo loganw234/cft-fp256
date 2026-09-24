@@ -48,10 +48,12 @@
 #     reason, never silently passed; --require-all turns those into
 #     failures for machines that claim to be full verification hosts.
 #   * A check INSIDE a stage that did not run is an INNER skip: its
-#     script prints a line whose first word is SKIP or SKIPPED, and the
-#     runner reads a passing stage's log for those lines. They are named
-#     under the stage's row and counted in the JSONL, the VERDICT and
-#     the census, and --require-all fails them like any other skip.
+#     script prints a line whose first word is SKIP or SKIPPED (or the
+#     conformance replay's "<set>: ... skipped, ... on this device"),
+#     and the runner reads a passing stage's log for those lines. They
+#     are named under the stage's row and in the census, counted in the
+#     JSONL, the VERDICT and the census, and --require-all fails them
+#     like any other skip.
 #   * The exit code is the verdict: nonzero iff any stage FAILED
 #     (or, under --require-all, was skipped or skipped a check inside).
 #   * The report ends with a census block shaped for pasting into
@@ -305,6 +307,7 @@ CACHED=0
 declare -a ROWS=()
 INNER=0                 # inner skips, summed over the run
 declare -a INNER_BY=()  # "<stage> (<n>)" for each stage that had any
+declare -a INNER_LINES=()  # "<stage>: <its log line>", for the census
 
 
 note() { ROWS+=("$1"); printf '%s\n' "$1"; }
@@ -330,11 +333,23 @@ json_esc() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; printf '%s' "${s//$'\t'/\\t
 # the word in other places - cocotb's "SKIP=0", pytest's "5 skipped",
 # prose about skipping - and every one of those is a line that names
 # no skipped check. A pytest line folds tests with one reason into
-# "SKIPPED [n]", so it counts n. A check that reports its skip any
-# other way is invisible here, and should be made to print the marker.
+# "SKIPPED [n]", so it counts n.
+#
+# One other form is read, because the runner cannot change it: the
+# conformance replay (host/src/conformance.c) reports a set or an opcode
+# it could not replay as "<set>: skipped, <what> not on this device" or
+# "<set>: <op> skipped, not on this device", one line each, and none of
+# the 67 runs kept in the main checkout's verify/state on 2026-09-24
+# logged a line of that shape at all. cft-selftest prints that report,
+# so it reaches the libcft stage's log; cpp_api_test and remote_check.py
+# print only the replay's counts, so a set skipped under the cpp or
+# remote stage reaches no log. A check that reports its skip in any
+# third way is invisible here, and should print the SKIP marker.
 INNER_SKIP_RE='^[[:space:]]*SKIP(PED)?([[:space:]:]|$)'
+REPLAY_SKIP_RE=': ([^[:space:]]+ )?skipped, .*on this device$'    # INNER-SKIP-REPLAY
 inner_scan() {  # <log>  ->  its inner-skip lines, trimmed, one per line
-  tr -d '\000-\010\013-\037' < "$1" | grep -E "$INNER_SKIP_RE" | sed -E 's/^[[:space:]]+//'
+  tr -d '\000-\010\013-\037' < "$1" | grep -E -e "$INNER_SKIP_RE" -e "$REPLAY_SKIP_RE" \
+    | sed -E 's/^[[:space:]]+//'
 }
 
 stage() {  # <name> <description> -- command...
@@ -391,7 +406,9 @@ stage() {  # <name> <description> -- command...
       [ "$REQUIRE_ALL" = 1 ] && FAILED=$((FAILED+1))
       note "$(printf '%-12s %-7s %ss  + %s inner skip(s) - checks inside it that did not run:' \
              "$name" "ok" "$dur" "$n")"
-      while IFS= read -r l; do note "$(printf '%-12s %s' "" "$l")"; done <<< "$inner"
+      while IFS= read -r l; do
+        note "$(printf '%-12s %s' "" "$l")"; INNER_LINES+=("$name: $l")
+      done <<< "$inner"
     fi
     echo "{\"stage\":\"$name\",\"verdict\":\"ok\",\"seconds\":$dur,\"inner_skips\":$n,\"inner_skip_lines\":[$js]}" >> "$JSONL"
   else
@@ -521,10 +538,11 @@ stage sweepjudge "hw/sweep_freq.sh judges a sweep point by the kernel clock's ow
 
 # pytest is this stage's precondition. It used to sit on `docs`, which
 # does not import it, while the bare `need` calls above cleared it - so
-# a host without pytest skipped docs for nothing and FAILED golden in
-# 0 s instead of skipping it by name. -rs has pytest name every test it
-# skipped, one "SKIPPED [n] <file>:<line>: <reason>" line per reason,
-# which is the marker the inner-skip count reads.
+# a python without pytest skipped docs for nothing and FAILED golden in
+# a second ("No module named pytest") instead of skipping it by name,
+# measured on 2026-09-24 with a venv that lacks it. -rs has pytest
+# name every test it skipped, one "SKIPPED [n] <file>:<line>: <reason>"
+# line per reason, which is the marker the inner-skip count reads.
 need python pytest
 stage golden "golden-model pytest suite (the definition of correct)" -- \
   PY -m pytest "$ROOT/python/tests" -q -rs
@@ -987,6 +1005,10 @@ stage remote "the remote backend on loopback: cft-serve started and stopped by P
   echo "verify/run.sh at $COMMIT: $RAN stage(s) executed," \
        "$CACHED cached from earlier in the run, $FAILED failed," \
        "$SKIPPED skipped, $INNER inner skip(s)${inner_list:+ ($inner_list)}."
+  if [ "$INNER" -gt 0 ]; then
+    echo "Inner skips - checks inside a stage that passed, which did not run:"
+    for s in "${INNER_LINES[@]}"; do echo "    $s"; done
+  fi
   echo "Run id $RUNID; per-stage logs under verify/state/."
 } | tee "$SUMMARY"
 

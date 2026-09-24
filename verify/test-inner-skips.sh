@@ -11,20 +11,27 @@
 # run used to vanish there: `generated` logged "SKIP  bindings/node/
 # make_seq_corpus.py - cannot run its check here" and the run printed
 # "VERDICT: PASS, nothing skipped". The runner now reads a passing
-# stage's log for lines whose first word is SKIP or SKIPPED. This builds
-# a copy of the runner whose stage list is two synthetic stages, runs it,
-# and holds the report to:
+# stage's log for lines whose first word is SKIP or SKIPPED, and for the
+# conformance replay's "<set>: [<op>] skipped, ... on this device". This
+# builds a copy of the runner whose stage list is three synthetic stages,
+# runs it, and holds the report to:
 #  - a clean stage whose log is full of look-alikes (cocotb's SKIP=0,
-#    pytest's "2 skipped", SKIPPING, SKIPPED mid-line) counts nothing,
-#    and the run still says "PASS, nothing skipped";
-#  - a stage that skips one check and prints a pytest line folding three
-#    more counts four, names both lines under its row, in report.jsonl
-#    (escaped, CR-free) and on the VERDICT and census lines, and PASSes;
-#  - the same under --require-all FAILS, naming the stage on the VERDICT;
-#  - a --resume runs that stage again instead of serving it from cache.
-# Two negative controls put a defect back into a copy of the runner - the
-# scan disabled, and a pass with inner skips cached like a clean one -
-# and the check written for each must catch it.
+#    pytest's "2 skipped", SKIPPING, SKIPPED mid-line, a replay line that
+#    skipped nothing) counts nothing, and the run says "PASS, nothing
+#    skipped";
+#  - a stage with a SKIP line, a pytest line folding three tests and a
+#    replay's skipped set counts five, and one whose only gap is the
+#    replay's "imul skipped, not on this device" counts one; each line is
+#    named under its stage's row, in report.jsonl (escaped, CR-free) and in
+#    the census, the VERDICT and census count them by stage, and the run
+#    PASSes;
+#  - the same under --require-all FAILS, naming the stages on the VERDICT,
+#    and so does the imul stage alone;
+#  - a --resume runs those stages again instead of serving them from cache.
+# Three negative controls put a defect back into a copy of the runner -
+# the scan disabled, the replay's form dropped, and a pass with inner
+# skips cached like a clean one - and the check written for each must
+# catch it.
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 T=$(mktemp -d)
@@ -38,11 +45,17 @@ cat > "$T/stages.sh" << 'EOF'
 need
 stage clean "a stage whose log only looks as though it skipped" -- \
   printf '%s\n' 'ok    the only check' '** TESTS=3 PASS=3 FAIL=0 SKIP=0 **' \
-    '5 passed, 2 skipped in 0.10s' 'SKIPPING is not a skip' 'it SKIPPED nothing' ''
+    '5 passed, 2 skipped in 0.10s' 'SKIPPING is not a skip' 'it SKIPPED nothing' \
+    'fp32-rne.jsonl: 19600 cases, none skipped, all on this device' ''
 need
-stage gappy "a stage that passes having skipped four checks" -- \
+stage gappy "a stage that passes having skipped five checks" -- \
   printf '%s\r\n' 'ok    first' '  SKIP  second - cannot run its check here: no "lib" at C:\x\y' \
-    'SKIPPED [3] tests\t_x.py:9: gmpy2 not installed'
+    'SKIPPED [3] tests\t_x.py:9: gmpy2 not installed' \
+    'fp256-rne.jsonl: skipped, fp256 not on this device'
+need
+stage replay "a replay that skipped one opcode" -- \
+  printf '%s\n' 'fp32-rne.jsonl: 19600 cases, all matching' \
+    'fp32-rne.jsonl: imul skipped, not on this device'
 EOF
 
 # mkrunner <run.sh> <dir>: <dir>/verify/run.sh is that runner with its
@@ -79,6 +92,7 @@ same () {  # <name> <got> <want>
   echo "  FAIL  $1: got '$2', wanted '$3'"; return 1
 }
 
+PASSV="VERDICT: PASS with 6 inner skip(s) in gappy (5), replay (1) - see reasons above"
 cases () {  # <runner>  ->  returns the number of checks it got wrong
   local d="$T/r.$RANDOM$RANDOM" bad=0 gappy_run
   mkrunner "$1" "$d" || return 1
@@ -91,39 +105,53 @@ cases () {  # <runner>  ->  returns the number of checks it got wrong
   check "clean: the census counts 0 inner skips" grep -qF ', 0 skipped, 0 inner skip(s).' "$OUT" || bad=$((bad + 1))
   check "clean: report.jsonl records 0" grep -qF '"inner_skips":0,"inner_skip_lines":[]}' "$JSONL" || bad=$((bad + 1))
 
-  echo "-- gappy: four checks that did not run, no --require-all"
-  go "$d" gappy --only clean,gappy; gappy_run=$RUNID
+  echo "-- gappy and replay: six checks that did not run, no --require-all"
+  go "$d" gappy --only clean,gappy,replay; gappy_run=$RUNID
   same  "gappy: exit 0" "$RC" 0 || bad=$((bad + 1))
-  same  "gappy: the VERDICT names and counts them" "$VERDICT" \
-        "VERDICT: PASS with 4 inner skip(s) in gappy (4) - see reasons above" || bad=$((bad + 1))
-  check "gappy: its row counts 4" grep -qE '^gappy +ok +[0-9]+s  \+ 4 inner skip\(s\)' "$OUT" || bad=$((bad + 1))
+  same  "gappy: the VERDICT names and counts them" "$VERDICT" "$PASSV" || bad=$((bad + 1))
+  check "gappy: its row counts 5" grep -qE '^gappy +ok +[0-9]+s  \+ 5 inner skip\(s\)' "$OUT" || bad=$((bad + 1))
   check "gappy: the SKIP line named under the row" \
         grep -qxF '             SKIP  second - cannot run its check here: no "lib" at C:\x\y' "$OUT" || bad=$((bad + 1))
   check "gappy: the pytest line named under the row" \
         grep -qxF '             SKIPPED [3] tests\t_x.py:9: gmpy2 not installed' "$OUT" || bad=$((bad + 1))
-  check "gappy: the census counts them" grep -qF ', 0 skipped, 4 inner skip(s) (gappy (4)).' "$OUT" || bad=$((bad + 1))
+  check "gappy: the replay's skipped set named under the row" \
+        grep -qxF '             fp256-rne.jsonl: skipped, fp256 not on this device' "$OUT" || bad=$((bad + 1))
+  check "replay: its row counts 1" grep -qE '^replay +ok +[0-9]+s  \+ 1 inner skip\(s\)' "$OUT" || bad=$((bad + 1))
+  check "replay: the imul line named under the row" \
+        grep -qxF '             fp32-rne.jsonl: imul skipped, not on this device' "$OUT" || bad=$((bad + 1))
+  check "gappy: the census counts them" \
+        grep -qF ', 0 skipped, 6 inner skip(s) (gappy (5), replay (1)).' "$OUT" || bad=$((bad + 1))
+  check "gappy: the census names them" \
+        grep -qxF '    gappy: SKIPPED [3] tests\t_x.py:9: gmpy2 not installed' "$OUT" || bad=$((bad + 1))
+  check "replay: the census names it" \
+        grep -qxF '    replay: fp32-rne.jsonl: imul skipped, not on this device' "$OUT" || bad=$((bad + 1))
   check "gappy: report.jsonl counts and names them, escaped" grep -qF \
-        '"inner_skips":4,"inner_skip_lines":["SKIP  second - cannot run its check here: no \"lib\" at C:\\x\\y","SKIPPED [3] tests\\t_x.py:9: gmpy2 not installed"]}' \
+        '"inner_skips":5,"inner_skip_lines":["SKIP  second - cannot run its check here: no \"lib\" at C:\\x\\y","SKIPPED [3] tests\\t_x.py:9: gmpy2 not installed","fp256-rne.jsonl: skipped, fp256 not on this device"]}' \
         "$JSONL" || bad=$((bad + 1))
-  check "gappy: clean beside it still counts nothing" grep -qE '^clean +ok +[0-9]+s$' "$OUT" || bad=$((bad + 1))
+  check "replay: report.jsonl counts and names it" grep -qF \
+        '"inner_skips":1,"inner_skip_lines":["fp32-rne.jsonl: imul skipped, not on this device"]}' "$JSONL" || bad=$((bad + 1))
+  check "gappy: clean beside them still counts nothing" grep -qE '^clean +ok +[0-9]+s$' "$OUT" || bad=$((bad + 1))
 
   echo "-- strict: the same under --require-all"
-  go "$d" strict --only clean,gappy --require-all
+  go "$d" strict --only clean,gappy,replay --require-all
   same  "strict: exit 1" "$RC" 1 || bad=$((bad + 1))
   same  "strict: the VERDICT fails and names them" "$VERDICT" \
-        "VERDICT: FAIL (1 stage(s), including under --require-all 4 inner skip(s) in gappy (4))" || bad=$((bad + 1))
+        "VERDICT: FAIL (2 stage(s), including under --require-all 6 inner skip(s) in gappy (5), replay (1))" || bad=$((bad + 1))
+  go "$d" strict-replay --only replay --require-all
+  same  "strict: the imul skip alone fails --require-all" "$RC" 1 || bad=$((bad + 1))
+  same  "strict: the imul skip alone, on the VERDICT" "$VERDICT" \
+        "VERDICT: FAIL (1 stage(s), including under --require-all 1 inner skip(s) in replay (1))" || bad=$((bad + 1))
 
   echo "-- resume: the gappy run, resumed"
-  go "$d" resume --resume "$gappy_run" --only clean,gappy
+  go "$d" resume --resume "$gappy_run" --only clean,gappy,replay
   check "resume: clean is served from cache" \
         grep -qE '^clean +ok +\(cached from earlier in this run\)$' "$OUT" || bad=$((bad + 1))
   check "resume: gappy runs again, not from cache" \
-        grep -qE '^gappy +ok +[0-9]+s  \+ 4 inner skip\(s\)' "$OUT" || bad=$((bad + 1))
-  same  "resume: the VERDICT still names them" "$VERDICT" \
-        "VERDICT: PASS with 4 inner skip(s) in gappy (4) - see reasons above" || bad=$((bad + 1))
+        grep -qE '^gappy +ok +[0-9]+s  \+ 5 inner skip\(s\)' "$OUT" || bad=$((bad + 1))
+  same  "resume: the VERDICT still names them" "$VERDICT" "$PASSV" || bad=$((bad + 1))
   return "$bad"
 }
-NCHECKS=18
+NCHECKS=26
 
 echo "== verify/run.sh, as committed"
 cases "$ROOT/verify/run.sh"; n=$?
@@ -150,12 +178,15 @@ control () {  # <name> <marker> <replacement line> <the check that must catch it
 control scan-disabled INNER-SKIP-SCAN \
   '    inner=""    # the control: nothing read from the log' \
   "gappy: the VERDICT names and counts them"
+control replay-form-dropped INNER-SKIP-REPLAY \
+  "REPLAY_SKIP_RE='^the control: a pattern no log line matches\$'" \
+  "strict: the imul skip alone fails --require-all"
 control cached-like-clean INNER-SKIP-NO-CACHE \
   '    : > "$RUNDIR/$name.ok"    # the control: a gap cached as a clean pass' \
   "resume: gappy runs again, not from cache"
 
 if [ "$FAILS" -eq 0 ]; then
-  echo "PASS: $NCHECKS checks right, both controls caught by their own checks"
+  echo "PASS: $NCHECKS checks right, all three controls caught by their own checks"
   exit 0
 fi
 echo "FAIL: $FAILS problem(s)"

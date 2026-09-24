@@ -173,15 +173,21 @@ until 2026-09-24 that stage reported ok and the run "PASS, nothing
 skipped". The scripts name such a check with a line whose first word is
 `SKIP` or `SKIPPED` (upper case, then a space, a colon or the end of the
 line), and after a stage passes the runner reads its log for those
-lines. Each is an **inner skip**: named beneath the stage's row, counted
-in `report.jsonl` (`inner_skips`, `inner_skip_lines`), named by stage on
-the `VERDICT:` line and counted in the census - and under
-`--require-all` the stage fails. The golden and bindings stages run
-pytest with `-rs`, whose `SKIPPED [n] <file>:<line>: <reason>` lines
-count n each. A script that reports a skip any other way - lower case,
-or mid-line - is invisible to this, and should print the marker.
+lines. Each is an **inner skip**: named beneath the stage's row and in
+the census, counted in `report.jsonl` (`inner_skips`,
+`inner_skip_lines`), and counted by stage on the `VERDICT:` line and in
+the census - and under `--require-all` the stage fails. The golden and
+bindings stages run pytest with `-rs`, whose
+`SKIPPED [n] <file>:<line>: <reason>` lines count n each. One other
+form is read, because the runner cannot change it: the conformance
+replay's `<set>: skipped, <what> not on this device` and
+`<set>: <op> skipped, not on this device`, which reach the libcft
+stage's log through `cft-selftest` (the cpp and remote stages print
+only the replay's counts, so a set skipped there reaches no log). A
+script that reports a skip any other way - lower case, or mid-line -
+is invisible to this, and should print the marker.
 `bash verify/test-inner-skips.sh` holds the accounting to synthetic
-stages, with two negative controls.
+stages, with three negative controls.
 
 ## What is deliberately not here
 

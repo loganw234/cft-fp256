@@ -337,9 +337,11 @@ So that a log can be read without the harness:
   after a line per stage (ok, FAIL, or SKIP with the skip's reason) and a
   `VERDICT:` line. An ok stage whose log has lines whose first word is
   `SKIP` or `SKIPPED` - checks inside it that did not run, pytest's `-rs`
-  lines among them - carries `+ n inner skip(s)` with each line beneath
-  it; the `VERDICT:` line, the census and `report.jsonl` count them by
-  stage, and `--require-all` fails them (verify/README.md).
+  lines among them - or the conformance replay's
+  `<set>: ... skipped, ... on this device` carries `+ n inner skip(s)`
+  with each line beneath it; the `VERDICT:` line, the census and
+  `report.jsonl` count them by stage, the census names them, and
+  `--require-all` fails them (verify/README.md).
 
 ## Running one thing
 
