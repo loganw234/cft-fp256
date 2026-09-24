@@ -97,15 +97,15 @@ docs/VALIDATION.md.
       probe would have missed.
 - The fused significand array: one physical multiplier serving 1x fp256
   / 2x fp128 / 4x fp64 / 8x fp32 per beat with mode-gated partial
-  products (granule tiling study in docs/ARCHITECTURE.md), pipelined to
-  platform clock - the chunked column decomposition above is exactly the
-  granule structure the fracture needs, so this work is its foundation,
-  and the four-bank version just landed is its behavioural spec: the
-  array replaces the banks only when it produces identical bits. *Built
-  2026-08-30 as `cft_mulfrac` behind `FUSE_MUL`: bit-identical, measured
-  not to pay, and it ships off. It shares the number of partial
-  products, not their width; the granule grid that would cut the width
-  remains unbuilt - see "What can be shared" below.*
+  products (the granule tiling docs/ARCHITECTURE.md once sketched),
+  pipelined to platform clock - the chunked column decomposition above
+  is exactly the granule structure the fracture needs, so this work is
+  its foundation, and the four-bank version just landed is its
+  behavioural spec: the array replaces the banks only when it produces
+  identical bits. *Built 2026-08-30 as `cft_mulfrac` behind `FUSE_MUL`:
+  bit-identical, measured not to pay, and it ships off. It shares the
+  number of partial products, not their width; the granule grid that
+  would cut the width remains unbuilt - see "What can be shared" below.*
 
   **Why this and not trimmed tiles (decided 2026-08-30).** Area
   measurement put three options on the table, and heterogeneous tiles
@@ -925,11 +925,12 @@ numbers also shrink with sharing; unmeasured). The 7-series caveat
 stands: these are UltraScale+ figures and CARRY4 makes them
 optimistic.
 
-The module is built, proven against 2,977 comparisons at every legal
-shift and every rung, and measured. What was NOT done when this was
-written - it landed the same morning, 8428c11 and the `EXT_NORM` entry
-above - is `EXT_NORM` plumbing through `cft_fpfma_pipe`, which is the
-bit-exact core and a different risk class from everything above it.
+The module (`cft_normseg`) is built, proven against 2,977 comparisons at
+every legal shift and every rung, and measured. What was NOT done when
+this was written - it landed the same morning, 8428c11 and the
+`EXT_NORM` entry above - is `EXT_NORM` plumbing through
+`cft_fpfma_pipe`, which is the bit-exact core and a different risk class
+from everything above it.
 
 **What none of this buys: low-precision throughput.** Lane count is
 pinned by the 256-bit beat - 8x32, 4x64, 2x128 and 1x256 all consume
@@ -1579,14 +1580,16 @@ What that closed, and what it did not:
   terms and is narrow, decidable and wrong at any working precision
   above 41 bits. Both are now fixed and both are described in
   docs/TRANSCENDENTALS.md.
-- **Not closed: the reduction against pi.** `sin`, `cos` and `tan` of a
-  radian argument still need `x mod (pi/2)` for an argument up to
-  `2^262143`, which means `2/pi` to about 524,000 bits and a
-  Payne-Hanek-style reduction with its own worst-case measurement.
-  Everything else phase 3 needs is built: `mp_sincos` already computes
-  sin and cos of a reduced argument in [0, pi/4].
-- **Not closed: the hyperbolics.** sinh, cosh, tanh and their inverses
-  need neither a reduction nor a new constant - they are exp and log in
+- **Not closed: the reduction against pi** *(closed the same day - see
+  the phase-3 entry below)*. `sin`, `cos` and `tan` of a radian argument
+  still need `x mod (pi/2)` for an argument up to `2^262143`, which
+  means `2/pi` to about 524,000 bits and a Payne-Hanek-style reduction
+  with its own worst-case measurement. Everything else phase 3 needs is
+  built: `mp_sincos` already computes sin and cos of a reduced argument
+  in [0, pi/4].
+- **Not closed: the hyperbolics** *(closed the same day - see the
+  phase-3 entry below)*. sinh, cosh, tanh and their inverses need
+  neither a reduction nor a new constant - they are exp and log in
   different clothes, with cancellation questions phase 1 already
   answers - and are a smaller job than either phase so far. Nothing has
   been written, so nothing is claimed.
@@ -1769,10 +1772,10 @@ What that closed, and what it did not:
   so in those words.
 - **Not closed: clause 9.5's augmented arithmetic** *(closed the same
   day, in the 0.6 step - the entry above)*, which sits beside 9.4 in the
-  standard and is a genuinely different operation - one rounding for a
-  whole accumulation, in a rounding direction (roundTiesTowardZero) this
-  contract does not otherwise carry. Nothing has been written, so
-  nothing is claimed.
+  standard and is a genuinely different operation - one sum, difference
+  or product rounded and returned with the error that rounding made, in
+  a rounding direction (roundTiesTowardZero) this contract does not
+  otherwise carry. Nothing has been written, so nothing is claimed.
 
 The measurements are in docs/VALIDATION.md's 2026-09-03 clause-9.4
 entry.

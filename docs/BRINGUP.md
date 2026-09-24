@@ -1,7 +1,7 @@
 # Hardware bring-up
 
 The ordered gates between "green in simulation" and "the card reproduces
-the vectors". Everything here needs the Linux box with Vitis/Vivado
+the vectors". Everything here needs a Linux box with Vitis/Vivado
 (2022.2, the era-matched release - see the tooling verdict below) and
 XRT; nothing before this file does.
 
@@ -633,8 +633,12 @@ family:
 6.84, 6.28 ns for the same RTL. That is what constraint-driven
 implementation looks like measured rather than asserted: the tool
 works the critical path exactly as hard as it must and then stops. It
-also explains why every closing build lands ~50 ps above zero, which
-was first misread here as the shell eating all the margin.
+does not explain why every closing build lands ~50 ps above zero,
+which this note first read as the shell eating all the margin and
+then as the tool stopping once met: those are whole-design numbers,
+and the same 115 and 145 MHz reports put the kernel clock at +0.409
+and +0.084 ns (docs/VALIDATION.md, 2026-09-23), so the path delays
+implied for those two rows are not the kernel's.
 
 So a routed WNS tells you the design met what it was asked for and
 almost nothing about headroom. **The number that predicts the ceiling

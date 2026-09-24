@@ -239,9 +239,10 @@ a quiet pass - is the part worth keeping.
   all three macros, so those lines read `present` and the four SKIPs
   are gone. The mechanism stays - a tool that lacks a feature refuses
   such an image BY NAME rather than running something else.
-- **A program per positive.** docs/ATLAS.md's sixty-eight maps are
-  step 3 of that document and belong to `core/emit-cft.mjs` in
-  atlas-engine; this library is the shape they will be emitted into.
+- **A program per positive.** docs/ATLAS.md's sixty-eight maps are step
+  3 of that document and belong to `core/emit-cft.mjs` in atlas-engine;
+  this library is the shape they are emitted into - that emitter target
+  landed on 2026-09-08.
 
 ## Writing one
 

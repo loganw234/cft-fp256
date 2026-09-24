@@ -990,7 +990,7 @@ reduction is simpler than the other four rather than harder:
 - four tiles fold their partials with a maximum, with nothing to get
   right twice - the failure mode docs/DETERMINISM.md describes for a
   sum's fold cannot arise;
-- a hardware maxall added later, behind a capability bit, would return
+- a hardware maxall, added later behind CAPS2[8] (2026-09-14), returns
   these same bits. The composition is therefore a complete answer and
   not a staging post.
 
@@ -1749,14 +1749,15 @@ they are re-derivable rather than remembered.
 ## Calling it from somewhere else
 
 `host/examples/` has the same program in nine languages - C, C++,
-Python, Fortran, Rust, Julia, Go, C# and R. Eight of them print the
-same four checksum lines and are diffed against the C example's bytes
-by their own `make -C host lang-*` leg; the Fortran example prints
-decimals instead, so its `lang-fortran` leg builds and runs it through
-`iso_c_binding` and compares its output against its own header rather
-than against the C bytes (docs/COMPATIBILITY.md has the per-language
-platforms and dates). Three of them carry the argument this document
-makes:
+Python, Fortran, Rust, Julia, Go, C# and R. Eight of them print the same
+four checksum lines and the seven besides C are diffed against the C
+example's bytes - Python by `make -C host test`, the other six by their
+own `make -C host lang-*` leg; the Fortran example prints decimals
+instead, so its `lang-fortran` leg builds and runs it through
+`iso_c_binding` and compares nothing - its expected output sits in its
+own header and is compared by eye rather than against the C bytes
+(docs/COMPATIBILITY.md has the per-language platforms and dates). Three
+of them carry the argument this document makes:
 
 - `vector_fma.c` - C, linked against the static library.
 - `vector_fma_ctypes.py` - Python, via `ctypes.CDLL` and seven
@@ -1820,7 +1821,7 @@ built; docs/SEQUENCER.md holds the program-model ones.
    MODE[18:16] on the tile, behind CAPS2[7]. Every workload that applies
    one value to a batch - the zoom's reference point against every pixel,
    the Mersenne carry base, an interval coefficient - filled an array with
-   copies first; in the demos that was 6,144 JavaScript stores per pixel
+   copies first; in the demos that was 7,168 JavaScript stores per pixel
    iteration, and in C the same loop.
 
    This entry said it "would need the model and the tile to agree on it
@@ -1840,21 +1841,22 @@ built; docs/SEQUENCER.md holds the program-model ones.
    `CFT_SEQ_FEAT_SCALAR` so a caller can tell which it has.
 3. **The program API in the wasm surface.** `cftw_*` carries every
    library operation but not `cft_program_load/run`, so the demos run
-   the tools' loop engines; the program engines were measured native
-   at 1.3 to 2.1 times the loop on the panels that can be programs and
+   the tools' loop engines; the program engines were measured native at
+   1.3 to 2.1 times the loop on the panels that can be programs and
    nothing on the zoom's pixel phase. Wrapping them is small, and it is
    a module rebuild, so it waits for the next step that rebuilds the
-   module anyway. **DONE** - the program calls at ABI 0.9 and the last
-   missing elementwise one, `cft_run_ex`, at 0.14 (2026-09-15): it had
-   been unwrapped since 0.12, so neither a scalar operand nor an index
-   table was reachable from JavaScript. `cftw_run_ex`, its entry point
-   `Context.mapEx(op, {a, b, c, scalar, idxA, idxB, idxC})` and the
-   rebuilt module landed in ONE commit, because `cwrap` of an export
-   the module lacks returns `undefined` rather than throwing - a call
-   table and a module that disagree give a package whose entry point
-   silently does not exist. `lib.mjs`' `audit()` now CALLS
-   `cftw_idx_none` at load and `verify.mjs` names both exports, so
-   that disagreement fails at import and by name instead.
+   module anyway. **DONE** - the program calls at ABI 0.8 (2026-09-07)
+   and the last missing elementwise one, `cft_run_ex`, at 0.14
+   (2026-09-15): it had been unwrapped since 0.12, so neither a scalar
+   operand nor an index table was reachable from JavaScript.
+   `cftw_run_ex`, its entry point `Context.mapEx(op, {a, b, c, scalar,
+   idxA, idxB, idxC})` and the rebuilt module landed in ONE commit,
+   because `cwrap` of an export the module lacks returns `undefined`
+   rather than throwing - a call table and a module that disagree give a
+   package whose entry point silently does not exist. `lib.mjs`'
+   `audit()` now CALLS `cftw_idx_none` at load and `verify.mjs` names
+   both exports, so that disagreement fails at import and by name
+   instead.
 
 ## The remote backend: a device behind a socket (2026-09-06)
 
@@ -1869,22 +1871,23 @@ cft_open("cft://host:port", 0, &dev);     /* a remote device */
 One additive spelling of `cft_open`'s artifact argument, and nothing
 else in the ABI moved. The handle is a `cft_device` like any other:
 `cft_get_caps` reports backend `remote` and the server's device for the
-format mask, opcode groups, tile count, contract version and
-`flags_readable`; `cft_supports` answers from those; every entry point
-takes the handle. What is different is where the arithmetic happens,
-and the rule for that is the one `host/src/device.c` already draws for
-the XRT backend: **only the calls that touch a device cross the wire** -
-`cft_run`, `cft_reduce` for `CFT_SUM` and `CFT_DOT`, `cft_reduce_seg`
-(ABI 0.13), and `cft_program_run` - and every host operation runs in
-the caller's own process on the caller's own copy of the library,
-which is bit-identical to the server's by contract. The clause-5 host
-operations, the transcendentals, the character conversions, the
-augmented operations, the scaled products, the magnitude forms and
-`cft_convert` never make a round trip; the composed operations
-(`cft_div`, `cft_sqrt`, `cft_rint`, `cft_scaleb`, `cft_cmp_sig`, the
-formatOf widening route) issue their passes through the backend and
-make one round trip per pass, or one per chunk on the program route,
-which a remote device takes by default as a tile does.
+format mask, tile count, contract version and `flags_readable`;
+`cft_supports` answers from those and from the server's opcode groups,
+which the handshake carries and `cft_caps` has no field for; every entry
+point takes the handle. What is different is where the arithmetic
+happens, and the rule for that is the one `host/src/device.c` already
+draws for the XRT backend: **only the calls that touch a device cross
+the wire** - `cft_run`, `cft_reduce` for `CFT_SUM` and `CFT_DOT`,
+`cft_reduce_seg` (ABI 0.13), and `cft_program_run` - and every host
+operation runs in the caller's own process on the caller's own copy of
+the library, which is bit-identical to the server's by contract. The
+clause-5 host operations, the transcendentals, the character
+conversions, the augmented operations, the scaled products, the
+magnitude forms and `cft_convert` never make a round trip; the composed
+operations (`cft_div`, `cft_sqrt`, `cft_rint`, `cft_scaleb`,
+`cft_cmp_sig`, the formatOf widening route) issue their passes through
+the backend and make one round trip per pass, or one per chunk on the
+program route, which a remote device takes by default as a tile does.
 
 **The status word stays on the handle.** A remote call returns its flag
 word in the response and `device.c` ORs it in through `cft_flags_emit`,

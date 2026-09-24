@@ -395,7 +395,7 @@ import { SEQ_FEAT_KX9, SEQ_FEAT_SCRATCH, SEQ_FEAT_SCRATCH_IO }
   from "./index.mjs";
 ctx.seqFeatures & SEQ_FEAT_SCRATCH;    // CAPS2[4]
 ctx.maxScratch;                        // slots a lane; 0 is UNKNOWN
-ctx.seqFeatureNames;   // ["kx","REGS32","BANK_PTR","KX9","IMUL",
+ctx.seqFeatureNames;   // the set bits, named from ["kx","REGS32","BANK_PTR","KX9","IMUL",
                        //  "SCRATCH","SCRATCH_IO","SCRATCH_STRICT",
                        //  "SCALAR","INDEXED","LANE_MASK"]
 ```

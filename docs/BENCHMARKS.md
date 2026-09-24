@@ -600,20 +600,20 @@ rounded fma than this repo's whole softfloat path costs, while
 architecture is a bet that the interesting ones are - the "slow
 portable library" is already the faster soft option on stock gcc.
 
-**The emulation tax on MPFR is visible and small: 4-8 ns.** That is
+**The emulation tax on MPFR is visible and small: up to 11 ns.** That is
 what `mpfr_check_range` + `mpfr_subnormalize` add per call. What it
 does not buy from MPFR: binary interchange encodings, NaN payloads,
 signaling NaNs, or this contract's flag definitions. mpfr+754 is the
 closest MPFR gets to a binary-format drop-in, and the remaining
 distance is semantic, not performance.
 
-**Silicon is 300-5000x below every soft path.** The cpu-hw rows are
-the CPU doing fp32/fp64 in hardware; even MPFR pays 15-45x against
-them. That differential is the whole argument for the tile: above
-binary64 there is no silicon in a CPU to fall back to, so every
-fp128/fp256 user today is paying soft-float prices - and the tile's
-job is to move those two rungs to the hardware side of that gap, with
-bits identical to what the software tier already produced.
+**Silicon is 290-5,400x below libcft's software backend.** The cpu-hw
+rows are the CPU doing fp32/fp64 in hardware; even MPFR pays 9-46x
+against them. That differential is the whole argument for the tile:
+above binary64 there is no silicon in a CPU to fall back to, so every
+fp128/fp256 user today is paying soft-float prices - and the tile's job
+is to move those two rungs to the hardware side of that gap, with bits
+identical to what the software tier already produced.
 
 **The Python tier is its own decade.** mpmath at any precision costs
 more than libcft at fp256 on add and mul, and 25-210x MPFR. That is the

@@ -94,10 +94,10 @@ an `int16_t`'s -32,768. `cft_config.h` refuses the combination at
 compile time with that number in the message. binary64's worst is
 -2,148, fifteen times inside the range.
 
-**The transcendentals need 117 KB of constant table.** The
+**The transcendentals need 33 KB of constant table.** The
 trigonometric argument reduction reads a window of 2/pi from
 `mp_2opi.h`, and on AVR every `const` object is copied into RAM at
-startup. 117 KB into 8 KB is not a tuning problem.
+startup. 33 KB into 8 KB is not a tuning problem.
 
 ## The examples
 

@@ -123,9 +123,9 @@ by `cft_sqrt`, correctly rounded. The check script recovers `a` and
 `e` from the stored bits and confirms they are `1` and `3/4` to within
 `5e-71`.
 
-The two zeros in that initial condition are not a convenience. They
-are the only reason the sequencer can run this problem at all - see
-"The step, and where it runs".
+The two zeros in that initial condition are not a convenience. They are
+the only reason this tool's program engine can run this problem at all -
+see "The step, and where it runs".
 
 ### `--problem outer`
 

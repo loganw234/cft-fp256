@@ -176,7 +176,9 @@ pipelining, page-boundary splits - and `AxiRam` is not HBM. Read 1.250
 as an upper bound on cycles per beat under a plausible memory, not as a
 property of the arithmetic, and note that hw_emu cannot settle it either
 (its own banner warns that global memory and interconnect are
-approximate models). The card settles it, under docs/CARDDAY.md gate 6.
+approximate models). The card settled it, under docs/CARDDAY.md gate 6,
+and not as an upper bound: 2.25 cycles a beat on the revision-3 pair and
+1.26 to 1.34 after the read-ahead, both 2026-09-09 (docs/VALIDATION.md).
 
 **The fixed 36 cycles is the number the sequencer argument needs.** A
 run pays it once, so it is invisible across 512 beats and dominant

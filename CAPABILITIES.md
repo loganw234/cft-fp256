@@ -287,16 +287,16 @@ in docs/COMPATIBILITY.md) gets the full story.
    open-core argument that a DDR- or PCIe-fed tile cannot afford a
    memory pass per step - and holds bit-exact to seq.py at unit and
    full-kernel bench level. The engineering that this entry said was
-   underestimated was real and is done: the first sequencer tile did
-   not fit the part at all, sharing the ALU array to make it fit put a
+   underestimated was real and is done: the first sequencer tile did not
+   fit the part at all, sharing the ALU array to make it fit put a
    timing regression on the reduction path, and for a week after that
-   hw_emu was part-run, no sequencer bitstream had closed and there
-   was no card. All three have since happened - programs in all four
-   formats through real XRT on a four-tile image (2026-09-08), then
-   silicon, then three more pairs at revisions 2 and 3 and the
-   read-ahead. A det_* function can be one launch rather than ~25-30
-   host-issued passes; what is not done is the port itself, and
-   docs/ATLAS.md tracks that.
+   hw_emu was part-run, no sequencer bitstream had closed and there was
+   no card. All three have since happened - programs in all four formats
+   through real XRT on a four-tile image (2026-09-08), then silicon,
+   then three more pairs at revisions 2 and 3 and the read-ahead. A
+   det_* function can be one launch rather than ~25-30 host-issued
+   passes; the port itself landed in atlas-engine on 2026-09-07 and
+   2026-09-08, and docs/ATLAS.md tracks what remains.
 
 2. ~~The cheap operations, which are cheap.~~ **Done** (2026-09-01):
    `roundToIntegral`, the conversions, classification, and the rest of

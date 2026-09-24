@@ -126,8 +126,9 @@ correctness.
 
 ### 4. The DSP count is a structural checksum on the multiplier mapping
 
-The per-lane DSP ladder is fully determined by the significand widths
-and the DSP48E2 cascade rule `N = ceil((P-10)/17)`:
+The per-lane DSP ladder is determined by the significand widths
+and the DSP48E2 cascade rule `N = ceil((P-10)/17)` - except at fp32,
+whose column measures two where the rule gives one:
 
     8 x fp32   8 x 1 x 2   =  16
     4 x fp64   4 x 3 x 3   =  36

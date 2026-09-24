@@ -155,9 +155,9 @@ them, for a format an ATmega would take the better part of a second an
 element on. **The binding limit on the Mega is not its 8 KB of RAM -
 it is the width of `int`.**
 
-**The transcendentals need 117 KB of constant table.** Phase 3's
-argument reduction reads a window of 2/pi from `mp_2opi.h`, which is
-117,220 bytes. On AVR that is RAM. Against 8 KB.
+**The transcendentals need 33 KB of constant table.** Phase 3's
+argument reduction reads a window of 2/pi from `mp_2opi.h`, whose table
+is 33,792 bytes. On AVR that is RAM. Against 8 KB.
 
 **A wide `cft_bn` costs stack, and stack is the scarce thing.**
 `cft_bn` is the container every intermediate lives in, so a call's
@@ -291,12 +291,13 @@ reader does - the same sets, walked in the same order, the same fields,
 the same expected values - sends the case, and compares what comes back
 bit for bit. The report is `cft-selftest`'s shape:
 
-    libcft ABI 0.11 over csrp/1
+    libcft ABI 0.14 over csrp/1
     transport      COM7 at 115200 baud
     backend        software
     formats        fp32 fp64
     buffers        line 96, stage 0 x2, out 0
-    verbs          clr,get,id,put,run
+    verbs          clr,env,get,id,put,run
+    board          heap=... up=...
 
     replaying vectors/out
     ...
@@ -549,9 +550,10 @@ The layout preserves `include/` and `src/` as siblings so that every
 which is what lets the copy be compared by hash. `src/cft.h` is a
 three-line shim so a sketch can write `#include <cft.h>`.
 
-Two directories under `src/` are not vendored and not audited by
-`sync.py`: `src/remote/`, which belongs to the remote client for these
-same boards, and the hand-written `src/cft_replay.[ch]`.
+Besides that shim, `src/remote/` and its root header `src/cft_remote.h`,
+which belong to the remote client for these same boards, and the
+hand-written `src/cft_replay.[ch]` are not vendored and not audited by
+`sync.py`.
 
 ## What has been checked
 

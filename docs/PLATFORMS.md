@@ -142,15 +142,15 @@ and [DS180 v2.6.1,
 UltraScale+ measurements and the carry structure differs: the fp256
 adder uses 21 CARRY8 per critical path, which becomes 42 CARRY4 on
 7-series (docs/ROADMAP.md). And openXC7 splits wide multiplies into
-18x18 partials rather than Vivado's 25x18, so a tile there was
-estimated at 390-400 DSPs rather than 292, and measured at 506
-against Vivado's 307 on the same tree, the full tile with the ladders
-off (docs/VALIDATION.md, 2026-09-23) - which raises every 7-series
-DSP percentage by about 1.65x and, on every row above, still
-flips no verdict. *Measured 2026-09-22 in the `board` configuration
-(ten passes):* Yosys infers 120 DSP48E1 where Vivado places 101 on the
-same tree - two DSP rows for each 24-bit multiplier chunk
-(docs/VALIDATION.md).
+18x18 partials rather than Vivado's 25x18, so a tile there was estimated
+at 390-400 DSPs rather than 292, and measured at 506 against Vivado's
+307 on the same tree, the full tile with the ladders off
+(docs/VALIDATION.md, 2026-09-23) - which raises every 7-series DSP
+percentage by about 1.65x and, on every row above, still flips no
+verdict. *Measured 2026-09-22 and 2026-09-23 in the `board`
+configuration (ten passes):* Yosys infers 120 DSP48E1 where Vivado
+places 101 on the same tree - two DSP rows for each 24-bit multiplier
+chunk (docs/VALIDATION.md).
 
 ## 1. Used data-centre cards
 

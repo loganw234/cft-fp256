@@ -721,9 +721,9 @@ Three things the table does not say on its own:
   asks - a callable composed operation - with a number beside it.
 
 One smaller note, not a request: what would help the zoom panel is not
-on the sequencer's side at all. The pixel batch broadcasts six scalars
+on the sequencer's side at all. The pixel batch broadcasts seven scalars
 across 1,024 elements every iteration with a JavaScript fill loop -
-6,144 stores per iteration, outside the library, measurably more than
+7,168 stores per iteration, outside the library, measurably more than
 the wasm call they accompany. `cft_run_ex`'s scalar operand (ABI 0.12's
 `scalar_mask`, used by neither this page nor the C tool yet) would
 remove them. `dfill` in `pixel_chunk` is the same loop in C, so this is

@@ -4,11 +4,11 @@ The plan for the day the U50C goes in a slot. It is written down so
 the day executes a script rather than improvises, and so the record it
 produces is a census rather than a memory.
 
-**The day was 2026-09-08, and this file is kept as the runbook that
-was actually followed** - the steps below carry what each one printed,
+**The day was 2026-09-08, and this file is kept as the runbook that was
+actually followed** - the steps below carry what most of them printed,
 and the checklist above them carries the six image pairs staged since.
-The run itself is in docs/VALIDATION.md ("card day: first light, and
-the published sets match on silicon", and the five pairs after it);
+The run itself is in docs/VALIDATION.md ("card day: first light, and the
+published sets match on silicon", and the five pairs after it);
 docs/BRINGUP.md carries the gate verdicts and docs/BENCHMARKS.md the
 throughput. Read this file as the procedure and those as the record.
 

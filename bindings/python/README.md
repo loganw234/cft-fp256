@@ -10,20 +10,20 @@ per call, and the identical calls drive the CFT FPGA tile when one is
 present.
 
 "Same bits" is a proven claim, not a goal. libcft's software backend
-agrees with the project's golden model across its full differential
-and conformance suites, with 23.9 billion CPU-checked cases at
-binary32/64 - and with **GNU MPFR itself**:
+agrees with the project's golden model across its full differential and
+conformance suites, with 23.9 billion CPU-checked cases at binary32/64 -
+and with **GNU MPFR itself**:
 [host/tools/mpfr_check.c](../../host/tools/mpfr_check.c) drives add,
 sub, mul, fma, div and sqrt against MPFR's IEEE emulation at all four
-precisions under all five rounding attributes - **999,000 cases,
-values and flags, zero disagreements** - and, since ABI 0.3, the
-transcendentals and the clause-5.12 conversions through the same
-oracle, which for those is the only one there is. One asterisk, stated rather
-than buried: MPFR has no roundTiesToAway, so that suite's RNDNA rows
-compare against a ties-to-away oracle *built from* pure-MPFR
-intermediates (the p+1 guard/sticky construction) - there is no
-native MPFR mode to compare against, which is also why cftmpfr's
-RNDNA is worth having: it is the 754 attribute MPFR is missing.
+precisions under all five rounding attributes - **999,000 cases, values
+and flags, zero disagreements** - and, since ABI 0.3, the
+transcendentals and, since 0.6, the clause-5.12 conversions through the
+same oracle, which for those is the only one there is. One asterisk,
+stated rather than buried: MPFR has no roundTiesToAway, so that suite's
+RNDNA rows compare against a ties-to-away oracle *built from* pure-MPFR
+intermediates (the p+1 guard/sticky construction) - there is no native
+MPFR mode to compare against, which is also why cftmpfr's RNDNA is worth
+having: it is the 754 attribute MPFR is missing.
 
 The package is pure stdlib `ctypes` - no build step, no binding
 generator, no compiled extension. That is not a convenience, it is
@@ -235,7 +235,7 @@ the library bit for bit.
 | the transcendentals, all thirty-nine of table 9.1 | `exp`, `expm1`, `exp2`, `exp2m1`, `exp10`, `exp10m1`, `log`, `log1p`, `log2`, `log2p1`, `log10`, `log10p1`, `pow`, `pown`, `powr`, `compound`, `rootn`, `rsqrt`, `hypot`, `sin`, `cos`, `tan`, `sinpi`, `cospi`, `tanpi`, `asin`, `acos`, `atan`, `atan2`, `asinpi`, `acospi`, `atanpi`, `atan2pi`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` - the integer-operand three take a Python int |
 | the reductions (9.4) | `tree_sum`, `tree_dot`, `tree_sumsq`, `tree_sumabs`, `scaled_prod`, `scaled_prod_sum`, `scaled_prod_diff` in `batch` |
 | augmented arithmetic (9.5) | `augmented_add`, `augmented_sub`, `augmented_mul` - a pair out, no rounding argument |
-| character sequences (5.12) and payloads (9.7) | `from_str`, `from_hex`, `to_hex` and `to_decimal` through the library's own conversions (`to_str` still takes its digits from gmpy2); `get_payload`, `set_payload`, `set_payload_signaling` |
+| character sequences (5.12) and payloads (9.7) | `from_str`, `from_decimal`, `from_hex`, `to_hex` and `to_decimal` through the library's own conversions (`to_str` still takes its digits from gmpy2); `get_payload`, `set_payload`, `set_payload_signaling` |
 | formatOf arithmetic (5.4.1, ABI 0.7) | `formatof_add`, `formatof_sub`, `formatof_mul`, `formatof_div`, `formatof_sqrt`, `formatof_fma` - the destination context is an argument, the result a `Float` of that context |
 | min/max, all eight (9.6) | the four opcodes as before, and `min_mag`, `max_mag`, `minnum_mag`, `maxnum_mag` |
 | the status word (7.1, 5.7.4, ABI 0.7) | `Context.flags` is a property over the library's own word; `clear_flags()` lowers it; `lower_flags`, `raise_flags`, `test_flags`, `save_all_flags`, `restore_flags`, `test_saved_flags` are 754's names for the same word |

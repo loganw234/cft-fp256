@@ -39,7 +39,7 @@ all it needs, and Windows has had one of those since 1993.
   browser" below.
 - **One request at a time, many connections.** The server multiplexes
   its connections with `select()` rather than threads: it opens a
-  library device for each connection when it is accepted, and then
+  library device for each connection at its first HELLO, and then
   serves requests from every open connection one at a time, in arrival
   order, each to completion. Two clients, or one client holding two
   handles, interleave at request granularity and neither waits for the
@@ -212,24 +212,23 @@ length does not match what its opcode requires - a `RUN` whose operand
 bytes are not `n` elements of the format's width - is refused by the
 operation's decoder.
 
-**Refusal.** A frame that fails any check above is answered with kind
-2, `status` naming the reason (`CFT_ERR_INTERNAL` for a transport
-fault, `CFT_ERR_UNSUPPORTED` for an ABI or protocol-version mismatch,
-`CFT_ERR_INVALID_ARGUMENT` for a payload an operation cannot decode)
-and a NUL-terminated message as payload, and then the sender of the
-refusal CLOSES THE CONNECTION. After a framing error the byte stream
-is unsynchronised, and pretending to resume it is how a later request
-gets answered with an earlier response. A client that receives a
-refusal, or that fails any check on a response, marks its handle
-POISONED: every later call on that handle returns the status that
-poisoned it, with "close it and open it again" in
-`cft_last_error()`, the same discipline the
-XRT backend applies to a handle whose compute units may still be
-running. A kind-1 response whose `status` is not `CFT_OK` is not a
-refusal: it is the operation's own answer (`CFT_ERR_UNSUPPORTED` for a
-format the server's device lacks, `CFT_ERR_BUS_FAULT` from a tile), the
-connection continues, and the payload is the message for
-`cft_last_error()`.
+**Refusal.** A frame that fails any check above is answered with kind 2,
+`status` naming the reason (`CFT_ERR_INTERNAL` for a transport fault,
+`CFT_ERR_UNSUPPORTED` for an ABI or protocol-version mismatch,
+`CFT_ERR_INVALID_ARGUMENT` for a payload an operation cannot decode) and
+a NUL-terminated message as payload, and then the sender of the refusal
+CLOSES THE CONNECTION. After a framing error the byte stream is
+unsynchronised, and pretending to resume it is how a later request gets
+answered with an earlier response. A client that receives a refusal, or
+that fails any check on a response, marks its handle POISONED: every
+later call on that handle that needs the server returns the status that
+poisoned it, with "close it and open it again" in `cft_last_error()`,
+the same discipline the XRT backend applies to a handle whose compute
+units may still be running. A kind-1 response whose `status` is not
+`CFT_OK` is not a refusal: it is the operation's own answer
+(`CFT_ERR_UNSUPPORTED` for a format the server's device lacks,
+`CFT_ERR_BUS_FAULT` from a tile), the connection continues, and the
+payload is the message for `cft_last_error()`.
 
 **Request ids.** The client numbers requests from 1 and the server
 echoes the number; a response carrying any other id is refused by the
@@ -971,11 +970,12 @@ CAN:
 
 CANNOT:
 
-- `PROG_LOAD`, `PROG_RUN` and the three run-with-data opcodes. Not for
-  want of room: an image must be HELD to be checksummed, and holding a
-  buffer is the one thing the budget forbids. The sequencer's whole
-  value on a remote device is collapsing round trips, and a board's
-  round trips are already dominated by the wire.
+- `PROG_LOAD`, `PROG_FREE` and the three run-with-data opcodes,
+  `PROG_RUN`, `PROG_RUN_BANK` and `PROG_RUN_EX`. Not for want of room:
+  an image must be HELD to be checksummed, and holding a buffer is the
+  one thing the budget forbids. The sequencer's whole value on a remote
+  device is collapsing round trips, and a board's round trips are
+  already dominated by the wire.
 - The buffer operations, `REDUCE_SEG` and `STATS`. None is implemented;
   all are frames a future version could add without changing anything
   here.

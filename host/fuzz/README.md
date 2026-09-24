@@ -127,7 +127,7 @@ from a state the file did not describe.
     fuzz_ckpt.py               the five tools' --resume readers
     make_seeds.py              writes corpus/{program,serve,client}
     run.sh run_ckpt.sh repro.sh leaks.sh   (run through `sh`, as
-                                            verify/run.sh is: this
+                                            verify/run.sh is through `bash`: this
                                             directory does not carry
                                             the executable bit)
     corpus/<target>/           seeds, plus whatever the engine kept

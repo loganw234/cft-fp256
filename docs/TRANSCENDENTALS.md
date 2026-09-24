@@ -557,8 +557,9 @@ a phase of their own rather than part of the next one.
   there is nothing to reduce at all. pi enters only as a factor of the
   ANSWER, at one multiplication's worth of precision.
 
-`sin`, `cos` and `tan` of a radian argument are still not here. That is
-phase 3, and it is the reduction problem rather than this one.
+`sin`, `cos` and `tan` of a radian argument were not here yet. That is
+phase 3 (ABI 0.5, the same day, below), and it is the reduction problem
+rather than this one.
 
 ## The exact cases, proved complete
 
