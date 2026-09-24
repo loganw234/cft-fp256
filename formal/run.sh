@@ -171,10 +171,14 @@ run_proof lzcone.sby   fp256  3 "cft_lzcone == frozen cone, 717-bit window"
 # minutes for the integrator and two and a half hours inside this gate
 # on the merged tree without returning either. A miter over a
 # multiplier is what a bit-blasting engine does worst at. Until one
-# closes, IMUL's value rests on tb/test_simpleops.py's test_imul (6,225
-# operand pairs at four rungs against the golden model) and
-# host/tests/seq_check.py's differential; the harness and the .sby
-# stay in the tree. `sby -f imul.sby check` or `value` to try again.
+# closes, the value of the form it reads - cft_simpleops at its
+# default, the combinational reference - rests on tb/test_simpleops.py's
+# test_imul (6,225 operand pairs at four rungs against the golden
+# model). The lanes have taken IMUL's product from rtl/cft_imul.sv
+# since 2026-09-23 (IMUL_EXT), and that rests on tb/test_seq_core.py's
+# indexed_constants_and_imul, all four widths through the real
+# cft_lanes. The harness and the .sby stay in the tree.
+# `sby -f imul.sby check` or `value` to try again.
 
 # cft_mulpass, at CFT_MUL_MCH = 24 - the chunk the tile synthesises -
 # for all seven (P, COLS) pairs cft_lanes can build. Lemma A (fold) is
@@ -205,7 +209,7 @@ run_proof mulexact.sby cover_sel   4 "every pass selection reached"
 # an independent check under it. Four of the seven geometries close
 # this way, including fp256 at MUL_PASSES=10, the deepest the tile
 # builds. The engine here is boolector, not the bitwuzla the rest of
-# this directory uses: on this property they are not close, and
+# this directory's SMT tasks use: on this property they are not close, and
 # docs/VALIDATION.md's 2026-09-07 entry has the measurement.
 run_proof mulpass_real.sby p53c2   1 "fp64 x2:  whole claim, one property"
 run_proof mulpass_real.sby p53c1   1 "fp64 x5:  whole claim, one property"

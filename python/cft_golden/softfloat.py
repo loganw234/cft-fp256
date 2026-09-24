@@ -46,7 +46,9 @@ from .formats import FpFormat
 # flag bits (sticky, OR-accumulated by callers; matches rtl/cft_fpfma.sv
 # and the FLAGS CSR)
 FLAG_INVALID = 1 << 0
-FLAG_DIVZERO = 1 << 1  # raised by div for finite/0 and logb(+-0) (754 7.3)
+FLAG_DIVZERO = 1 << 1  # an exact infinity from finite operands (754 7.3):
+                       # div for finite/0 and logb(+-0) here, the poles of
+                       # transcend.py (log(0) and kin), formatof.py's x/0
 FLAG_OVERFLOW = 1 << 2
 FLAG_UNDERFLOW = 1 << 3
 FLAG_INEXACT = 1 << 4
@@ -652,7 +654,9 @@ OP_MIN, OP_MAX, OP_MINNUM, OP_MAXNUM = 7, 8, 9, 10
 # reads three independent pointers, so a > b is compute(LT, b, a) with
 # the buffers swapped, at no cost. NE is SELECT over EQ, or an inverted
 # read. Only the orderings that cannot be reached by swapping operands
-# earn an opcode. MODE[7:0] is a byte; 15, 31 and above are unassigned.
+# earn an opcode. MODE[7:0] is a byte; 15 and everything above 31 are
+# unassigned (31 is reduce.py's maxall, a reduction, which compute()
+# answers as it answers every reduction: qNaN and invalid).
 OP_SELECT, OP_CMPLT, OP_CMPLE, OP_CMPEQ = 11, 12, 13, 14
 # Integer and bitwise operations on the encoding, treated as a W-bit
 # unsigned word. Not floating point at all: they never round, never

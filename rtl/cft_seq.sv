@@ -737,12 +737,12 @@ module cft_seq #(
     //
     // Since revision 4 the model does the same only while the header's
     // SCRATCH_STRICT is clear; with it, an index at or past the depth
-    // is reported (STATUS[5]) instead. The sentence above still holds
-    // for THIS tile because it refuses a strict image at the header -
-    // flags[2] is inside the reserved range checked there - so every
-    // image it accepts is one the model reduces too. It stops holding
-    // the moment this file implements R8, and the first thing that
-    // work touches is the header check, not this comment.
+    // is reported (STATUS[5]) instead. This file implements that too
+    // (R8: scr_strict_q takes flags[2] at the header check, and
+    // lane_oor_fn / scr_oor below suppress and report the access), so
+    // the sentence above now holds for every image whose flags[2] is
+    // clear - every image built before revision 4 - and a strict one
+    // takes the range test rather than the modulo, as the model does.
     //
     // The assertion below is load-bearing twice now. A power-of-two
     // depth is what makes a mask a modulo, AND what makes

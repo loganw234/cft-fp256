@@ -198,9 +198,9 @@ def test_round_trip_on_a_revision_two_corpus():
 
 
 def test_disassembly_of_an_unnamed_opcode_reassembles():
-    """An image may carry an opcode this ISA does not name - 24 and 25
-    are the reductions, and 31..255 are unassigned. The numeric escape
-    is what keeps such an image readable-back."""
+    """An image may carry an opcode this ISA does not name - 24, 25, 28,
+    29 and 31 are the reductions, and 15 and 32..255 are unassigned. The
+    numeric escape is what keeps such an image readable-back."""
     word = asm.encode(24, rd=1, ra=2, rb=3, rc=4)
     img = asm.Image(FP64, [word, asm.halt()], max_deposits=1)
     text = asm.disassemble(img.to_bytes())

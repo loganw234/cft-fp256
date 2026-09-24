@@ -4,7 +4,8 @@
 #
 # The era-toolchain pipeline: package the .xo and link hardware +
 # hw_emu xclbins with Vitis 2022.2 (the release whose Vivado owns this
-# platform's IP encryption keys - BRINGUP.md gate 3). Run from the
+# platform's IP encryption keys - BRINGUP.md's TOOLING VERDICT,
+# 2026-08-29). Run from the
 # repo root on any 2022.2 host: the amd-arc-box (/data/Xilinx) or the
 # cft2204 WSL distro (/opt/Xilinx).
 #
@@ -99,7 +100,8 @@ VPP_PROPS=${VPP_PROPS:-}
 # getting it wrong is expensive and silent until the end: a quad build
 # whose constraint names only cft_krnl_1 leaves the other three at the
 # platform default (300 MHz on this shell, roughly double the design's
-# ceiling), and you learn that after a full ~1h45m implementation run.
+# ceiling), and you learn that after a full implementation run - hours;
+# docs/BITSTREAM-BUILDS.md has a quad at ~250-470 min.
 # The nk= line already lists every CU, so there is one source of truth
 # and it is the file that defines them.
 #

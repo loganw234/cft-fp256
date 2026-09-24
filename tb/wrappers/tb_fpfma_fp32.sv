@@ -36,8 +36,10 @@ module tb_fpfma_fp32 #(
   localparam int PHW = (NP > 1) ? $clog2(NP) : 1;
   logic [PHW-1:0] ph;
   logic           en;
-  // fp32 is the one format whose mantissa fits a SINGLE multiplier pass:
-  // cft_mul_passes(24, MUL_PASSES) is 1 here where fp64/128/256 give more.
+  // fp32 is the one format whose mantissa fits a SINGLE multiplier chunk:
+  // cft_mul_passes(24, MUL_PASSES) is 1 here at EVERY budget, where
+  // fp64/128/256 are 1 only at the default MUL_PASSES=1 and give more
+  // above it (the paragraph below has what that did to their wrappers).
   // So PHW'(NP - 1) is zero, and an unsigned `ph >= 0` is constant-true -
   // which is the INTENDED behaviour, not a bug: at one pass every cycle
   // completes a pass and `en` is always asserted. Verilator says so as

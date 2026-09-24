@@ -12,7 +12,7 @@
 // computing it on a `uint`. Three things follow from that sentence,
 // and none of them is checkable by sampling:
 //
-//   * NO BIT OF EITHER OPERAND ABOVE 31 REACHES THE ANSWER. Proven as
+//   * NO BIT OF EITHER OPERAND ABOVE 31 REACHES THE ANSWER. Stated as
 //     a self-miter: two instances of the module see the same low 32
 //     bits of `a` and of `b` and arbitrary, unequal, high halves, and
 //     must produce the same `d` and the same flags. This is the half
@@ -37,9 +37,12 @@
 // high bits to vary, so neither of the first two properties would say
 // anything.
 //
-// WHAT IS NOT PROVEN HERE, and where it is checked instead. The VALUE
+// WHAT IS NOT PROVEN HERE, and where it is checked instead. Nothing
+// in this file is in formal/run.sh's gate: the `check` task that
+// states the three properties above ran two and a half hours inside
+// the gate without returning (formal/run.sh has the times). The VALUE
 // - that `d` equals a truncated 32x32 multiply - is the `value` task
-// below, guarded by IMUL_VALUE, and it is NOT in formal/run.sh's gate:
+// below, guarded by IMUL_VALUE, and it has not returned either:
 // bitwuzla ran twenty-six minutes on it without returning and was
 // stopped, which is what a miter of two differently-associated
 // multipliers costs a bit-blasting engine and is the same wall
@@ -49,8 +52,8 @@
 // python/cft_golden/softfloat.py - the directed corpus
 // docs/studies/OPT-D-contract.md names, every power of two, every
 // 2^k-1, the two `lowbias32` constants and the wraparound boundary -
-// and on the C-versus-model differential. Two gates, two jobs, stated
-// so nobody reads this file as more than it is.
+// and on the C-versus-model differential. Stated so nobody reads this
+// file as more than it is.
 //
 // The opcode number comes from the golden model's map
 // (python/cft_golden/softfloat.py: OP_IMUL = 30; mirrored in

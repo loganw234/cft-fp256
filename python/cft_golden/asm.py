@@ -38,8 +38,9 @@ comment; names are case-insensitive; numbers are decimal or `0x` hex.
 `.bank external` declares a program whose constants arrive per run;
 `.const NAME = value` appends to the bank; `.reg NAME = rN` names a
 register; `.slot NAME = N` names a scratch slot; `.scratch N` declares
-the scratch depth the program assumes and `.scratch in N` /
-`.scratch out M` the per-run block it wants carried in and out. An ALU
+the scratch depth the program assumes, `.scratch in N` /
+`.scratch out M` the per-run block it wants carried in and out, and
+`.scratch strict` sets `flags.SCRATCH_STRICT` (revision 4's R8). An ALU
 line is a mnemonic (with an optional rounding suffix) followed by the
 destination and the operands the opcode reads, in `ra, rb, rc` field
 order; the control lines are `repeat N` / `endrep`, `deposit rA`,
@@ -201,8 +202,8 @@ OP_FIELDS = {
     sf.OP_IMUL: (A, B),
 }
 # Opcode -> mnemonic, for exactly the opcodes a sequencer program may
-# name. 24, 25, 28 and 29 have names in the shared opcode table
-# (`sum`, `dot`, `sumsq`, `sumabs`) and are REDUCTIONS: cft_reduce
+# name. 24, 25, 28, 29 and 31 have names in the shared opcode table
+# (`sum`, `dot`, `sumsq`, `sumabs`, `maxall`) and are REDUCTIONS: cft_reduce
 # issues them, the ALU does not implement them, and `sf.compute`
 # answers the canonical quiet NaN with `invalid`. They are reachable
 # from the text form only through the numeric `opNN` escape, which is
@@ -943,9 +944,10 @@ class _Asm:
     def do_scratch(self, args):
         """`.scratch N` - the depth the program assumes; `.scratch in N`
         and `.scratch out M` - the per-run block, which is the header's
-        `scratch_io` and `flags.SCRATCH_IO`.
+        `scratch_io` and `flags.SCRATCH_IO`; `.scratch strict` -
+        `flags.SCRATCH_STRICT`.
 
-        All three must precede the instructions: a depth that changed
+        All four must precede the instructions: a depth that changed
         halfway through would make the slot bound depend on where a
         line sits, and a scratch-I/O count is a header word, not
         something a program acquires as it goes."""

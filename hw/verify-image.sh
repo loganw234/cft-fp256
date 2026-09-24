@@ -336,8 +336,9 @@ fi
 # Sanity only, and deliberately NOT where kernel_freq is asserted. The
 # section lists the SHELL's scalable clocks (hbm_aclk 450, KERNEL_CLK
 # 500, DATA_CLK 300 on this platform) - the clock-wizard INPUTS, which
-# XRT programs at load. The wizard's 130 MHz output exists only in the
-# bitstream and the v++ line. Asserting manifest kernel_freq against
+# XRT programs at load. The wizard's output - the kernel clock the
+# build asked for, KERNEL_FREQ - exists only in the bitstream and the
+# v++ line. Asserting manifest kernel_freq against
 # KERNEL_CLK here would fail every good image ever built; asserting
 # nothing while claiming to have "checked clocks" would be worse.
 if [ -n "$CLK" ]; then
