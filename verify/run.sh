@@ -437,6 +437,13 @@ stage() {  # <name> <description> -- command...
   fi
 }
 
+# A C compiler HOSTMAKE can use: the one predicate behind `need host-cc`
+# and behind do_generated's decision to build the library itself.
+have_host_cc() {
+  if [ "$WIN" = 1 ]; then [ -x /c/msys64/mingw64/bin/gcc.exe ]
+  else command -v cc >/dev/null 2>&1; fi
+}
+
 # Tool preconditions, expressed as a skip reason for the NEXT stage.
 need() {  # docker|host-cc|xclbinutil ...
   STAGE_SKIP_REASON=""
@@ -448,11 +455,9 @@ need() {  # docker|host-cc|xclbinutil ...
       # in 0 s each instead of skipping them by name.
       docker) docker version >/dev/null 2>&1 \
         || STAGE_SKIP_REASON="docker not usable on this host (absent, or present without a reachable engine)";;
-      host-cc) if [ "$WIN" = 1 ]; then
-                 [ -x /c/msys64/mingw64/bin/gcc.exe ] \
-                   || STAGE_SKIP_REASON="mingw64 gcc not found";
-               else command -v cc >/dev/null 2>&1 \
-                   || STAGE_SKIP_REASON="no C compiler"; fi;;
+      host-cc) have_host_cc || if [ "$WIN" = 1 ]; then
+                 STAGE_SKIP_REASON="mingw64 gcc not found"
+               else STAGE_SKIP_REASON="no C compiler"; fi;;
       python) command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1 \
         || STAGE_SKIP_REASON="no python";;
       # A module, not a command: the interpreter PY() picks must import
@@ -647,15 +652,35 @@ stage libcft "host library: build + contract tests + conformance replay" -- do_l
 # is checked by nothing is a comment, not a guarantee. This is the gate
 # that makes the comment true.
 #
-# make_seq_corpus.py is the one with prerequisites: it drives libcft
-# through ctypes and imports cft_golden. When those are missing it is
-# skipped BY NAME rather than counted as agreement - the distinction
-# this suite exists to keep - which is why staleness is recognised by
-# the generator's own message rather than by exit status alone. The
-# SKIP line is an inner skip (stage(), above): it reaches the stage's
-# row, the VERDICT and the census, and fails the run under --require-all.
+# make_seq_corpus.py is the one with a prerequisite beyond python: it
+# drives libcft through ctypes, host/$SHLIB_NAME. So this stage builds
+# that library itself - `make -C host cft.dll` on Windows, libcft.so on
+# Linux, libcft.dylib on Darwin: the Makefile's $(SHLIB) target - on any
+# host with a C compiler, as `reduce` builds reduce-parts. The libcft
+# stage runs first and builds it too, but an --only run without libcft,
+# a --skip libcft run and a clean checkout would otherwise take the skip
+# path, and measured on 2026-09-24 `--only generated` on a clean
+# checkout did, on a desktop whose compiler could have built it in
+# seconds. Only with no compiler AND no library is the check skipped BY
+# NAME rather than counted as agreement - the distinction this suite
+# exists to keep. That SKIP line is an inner skip (stage(), above): it
+# reaches the stage's row, the VERDICT and the census, and fails the run
+# under --require-all.
+#
+# Any other nonzero --check is a FAIL. Staleness is recognised by the
+# generator's own message and printed as STALE; anything else is a check
+# that broke, and until 2026-09-24 that was printed as a SKIP as well -
+# a traceback in any of the five read as "cannot run its check here".
 do_generated() {
-  local rc=0 g out grc
+  local rc=0 g out grc cc=0
+  if have_host_cc; then
+    cc=1
+    HOSTMAKE "$SHLIB_NAME" || {
+      printf '  FAIL  make -C host %s: the library make_seq_corpus.py loads did not build\n' \
+             "$SHLIB_NAME"
+      rc=1
+    }
+  fi
   for g in hw/gen_layouts.py host/tools/gen_2opi.py \
            host/tools/gen_mp_consts.py bindings/node/make_seq_corpus.py \
            python/gen_divfull.py; do
@@ -666,9 +691,14 @@ do_generated() {
       printf '  STALE %s - regenerate with: python %s\n' "$g" "$g"
       printf '%s\n' "$out" | tail -3 | sed 's/^/        /'
       rc=1
+    elif [ "$cc" = 0 ] && [ "$g" = bindings/node/make_seq_corpus.py ] \
+         && [ ! -f "$ROOT/host/$SHLIB_NAME" ]; then
+      printf '  SKIP  %s - no C compiler here to build host/%s, which its check loads: %s\n' \
+             "$g" "$SHLIB_NAME" "$(printf '%s' "$out" | tail -1)"
     else
-      printf '  SKIP  %s - cannot run its check here: %s\n' \
-             "$g" "$(printf '%s' "$out" | tail -1)"
+      printf '  FAIL  %s - its --check exited %s:\n' "$g" "$grc"
+      printf '%s\n' "$out" | tail -3 | sed 's/^/        /'
+      rc=1
     fi
   done
   return $rc
