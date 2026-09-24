@@ -65,7 +65,7 @@ go () {
   local d=$1; OUT="$T/$2.out"; shift 2
   bash "$d/verify/run.sh" "$@" > "$OUT" 2>&1; RC=$?
   VERDICT=$(grep '^VERDICT:' "$OUT")
-  RUNID=$(sed -n 's/^== \(run\|resuming\) //p' "$OUT")
+  RUNID=$(sed -n -e 's/^== run //p' -e 's/^== resuming //p' "$OUT")
   JSONL="$d/verify/state/$RUNID/report.jsonl"
 }
 
