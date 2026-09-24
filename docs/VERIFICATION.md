@@ -226,6 +226,17 @@ The `docs` stage is the cheapest of them and exists for the same reason:
 `docs/README.md` indexes the thirty-seven documents, and
 `python/check_docs_index.py` refuses a broken link, a document missing
 from the index, or a stated line count that no longer matches the file.
+Since 2026-09-24 it holds every tracked document, not only the index:
+every relative link resolves, every repository path quoted in backticks
+exists (a path in another repository carries its name,
+`cft-rebound/docs/...`; the record documents and the products of a build
+are exempt, each exemption re-derived from the file that justifies it),
+and the counts the front-door files state - stages, benches, proofs, this
+page's twelve tiers, the index's own totals - are derived, bold or not.
+The sweep that added this found `README.md`'s at-a-glance table a stage
+short, in bold, where the old patterns could not see it. Every run plants
+a fault for each check in a scratch copy and requires it to be caught by
+name, so the stage cannot pass without having just watched itself fail.
 
 `generated` is the same idea aimed at code rather than prose. Four
 scripts in the tree own a committed artifact and each already had a

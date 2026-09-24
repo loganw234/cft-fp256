@@ -427,7 +427,7 @@ if [ "$BUDGET" = quick ]; then
 fi
 
 need python pytest
-stage docs "docs/README.md indexes every document, links resolve, counts true" -- \
+stage docs "docs/README.md indexes every document; every document's links and quoted paths resolve; stated counts true; a planted fault per check, each caught by name" -- \
   PY "$ROOT/python/check_docs_index.py" --quiet
 
 

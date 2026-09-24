@@ -46,7 +46,7 @@ command in the `cft2204` distro.
 
 | stage | what it proves | needs |
 |---|---|---|
-| docs | docs/README.md indexes every document, links resolve, and the counts it checks are true (`python/check_docs_index.py`) | python |
+| docs | docs/README.md indexes every document; every tracked document's relative links and quoted repository paths resolve; the stated stage, bench, proof and index counts are true; a planted fault per check, each caught by name (`python/check_docs_index.py`) | python |
 | buildargs | `hw/rebuild-2022.sh` hands v++ the clock constraint with VPP_PROPS set, CFT_GENERICS reaches vivado and the manifest, a lying wrapper read-back stops the build before v++ - each with its negative control (`hw/test-rebuild-argv.sh`, stub v++ and vivado) | bash; skipped by name where Vitis 2022.2 is installed under /data/Xilinx, /opt/Xilinx or /tools/Xilinx |
 | sweepjudge | `hw/sweep_freq.sh` judges a sweep point by the kernel clock's own WNS, never the shell's, and a staged image is not a closed one - thirteen verdicts on synthetic builds, both defects put back as negative controls (`hw/test-sweep-judge.sh`) | bash |
 | golden | the model's own invariants and oracles | python |
