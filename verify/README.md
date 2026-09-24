@@ -56,7 +56,7 @@ command in the `cft2204` distro.
 | lint | every RTL file elaborates in Yosys, no latches | docker |
 | formal | the FIFO, seedop and simpleops theorems, the leading-zero cone's equivalence at every window width, the multi-cycle multiplier's exactness at the real chunk for every pass geometry, and the negative control - 31 tasks, about 7 minutes (420 s of solver time on the merged tree, docs/VALIDATION.md 2026-09-07; formal/README.md) | docker |
 | libcft | C library contract + the conformance replay: 168 sets, 1.2M cases at the runner's generator counts - opcodes, transcendentals, character sequences, augmented pairs, reductions, magnitude forms, formatOf | cc, python |
-| generated | the committed output of five generators still matches a fresh generation, by each one's `--check` (`hw/gen_layouts.py`, `host/tools/gen_2opi.py`, `host/tools/gen_mp_consts.py`, `bindings/node/make_seq_corpus.py`, `python/gen_divfull.py`) | python |
+| generated | the committed output of five generators still matches a fresh generation, by each one's `--check` (`hw/gen_layouts.py`, `host/tools/gen_2opi.py`, `host/tools/gen_mp_consts.py`, `bindings/node/make_seq_corpus.py`, `python/gen_divfull.py`) | python; cc to build the library `make_seq_corpus.py` loads, and with neither a compiler nor a built library that one check is an inner skip |
 | selfcheck | device-test harness can detect, full sw matrix | cc |
 | divsqrt | composed div/sqrt + seeds vs model, per-element flags | cc, python |
 | clause5 | the clause-5 completion set vs model | cc, python |
@@ -168,9 +168,12 @@ that claim to be full verification hosts: there, a skip is a failure.
 This is the knob a future open-core compliance run should set.
 
 A stage can also pass while a check inside it did not run: `generated`
-without a built libcft cannot run `make_seq_corpus.py`'s check, and
-until 2026-09-24 that stage reported ok and the run "PASS, nothing
-skipped". The scripts name such a check with a line whose first word is
+on a host with no C compiler and no built libcft cannot run
+`make_seq_corpus.py`'s check, and until 2026-09-24 that stage reported
+ok and the run "PASS, nothing skipped". (Where there is a compiler the
+stage now builds the library itself, `make -C host` with the shared
+library's name as the target, so the check runs.) The scripts name such
+a check with a line whose first word is
 `SKIP` or `SKIPPED` (upper case, then a space, a colon or the end of the
 line), and after a stage passes the runner reads its log for those
 lines. Each is an **inner skip**: named beneath the stage's row and in
@@ -178,16 +181,30 @@ the census, counted in `report.jsonl` (`inner_skips`,
 `inner_skip_lines`), and counted by stage on the `VERDICT:` line and in
 the census - and under `--require-all` the stage fails. The golden and
 bindings stages run pytest with `-rs`, whose
-`SKIPPED [n] <file>:<line>: <reason>` lines count n each. One other
+`SKIPPED [n] <file>:<line>: <reason>` lines count n each, and with
+`--color=no`; every log also has its terminal colour codes removed
+before it is read, because a coloured `SKIPPED` is not a first word
+(`FORCE_COLOR=1` passed a `--require-all` golden run over seven skips
+before that). One other
 form is read, because the runner cannot change it: the conformance
 replay's `<set>: skipped, <what> not on this device` and
 `<set>: <op> skipped, not on this device`, which reach the libcft
 stage's log through `cft-selftest` (the cpp and remote stages print
 only the replay's counts, so a set skipped there reaches no log). A
 script that reports a skip any other way - lower case, or mid-line -
-is invisible to this, and should print the marker.
+is invisible to this, and should print the marker. The ones known on
+2026-09-24: device-test's `<format> not on this device, skipped` and
+`buffers, ...: SKIPPED - this device does not publish ...` lines,
+remote-test's `<format> skipped, not on the server`,
+`bindings/wasm/verify_demos.mjs`'s `skipped: run ...` when the demos
+page is not built, cpp-api-test's
+`cpp-api-test: SKIP conformance: no vector sets`,
+`tb/check_results.py`'s `(N skipped)` after a bench's case count, and a
+vector set absent from the directory the replay reads, which the replay
+reports only as a smaller count on its `N sets, ... all matching` line
+(168 when every set is there).
 `bash verify/test-inner-skips.sh` holds the accounting to synthetic
-stages, with three negative controls.
+stages, with four negative controls.
 
 ## What is deliberately not here
 

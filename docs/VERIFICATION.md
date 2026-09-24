@@ -145,7 +145,11 @@ authority:
 
 Three rules hold across all of it. A gate whose tool is absent is
 **skipped by name with the reason**, never silently passed, and so is a
-check skipped inside a stage that passed; a negative
+check skipped inside a stage that passed - when its script reports the
+skip in a form the runner reads: a line whose first word is `SKIP` or
+`SKIPPED`, or the conformance replay's `skipped, ... on this device`. A
+skip reported any other way, lower case or mid-line, still passes
+unnamed; verify/README.md lists the forms known. A negative
 control that stops failing fails the run; and a number in a test that
 copies a number in the RTL is a defect, which is why the CAPS test
 parses the kernel's parameters instead of restating them.
@@ -252,11 +256,14 @@ corruption kinds landed - so the wasm harness replayed a 192-case corpus
 containing none of them, and passed. A file whose header says "GENERATED
 by X; edit the table there, not this file" and which nothing checks is a
 comment rather than a guarantee; this stage is what makes the comment
-true. `make_seq_corpus.py` needs a built libcft and `cft_golden` on the
-path and is skipped by name when they are absent, so staleness is
-recognised from the generator's own message rather than from exit status
-alone. That skip is an inner skip: the runner names it under the stage's
-row and on its `VERDICT:` line, and `--require-all` fails it.
+true. `make_seq_corpus.py` needs a built libcft, which the stage builds
+itself wherever a C compiler is (the Makefile's shared-library target:
+`make -C host cft.dll`, `libcft.so` or `libcft.dylib`). Only on a host
+with neither a compiler nor a built library is it skipped by name, and
+that skip is an inner skip: the runner names it under the stage's row
+and on its `VERDICT:` line, and `--require-all` fails it. Staleness is
+recognised from the generator's own message, and any other nonzero
+`--check` fails the stage rather than reading as a skip.
 
 `buildargs` is the third of that family and the only one that tests a
 build without building. `hw/rebuild-2022.sh` assembles the v++ link line
