@@ -14297,3 +14297,74 @@ column, and its source (UG579) was not checked. The planted-fault
 control on the auditors themselves (HonestFramework §9) was skipped by
 decision, so the verdict rates above are the only measure of the
 verifiers - suggestive, not a detection rate.
+
+## 2026-09-24 - the U50 single closes 175 MHz with the second recipe, by 1 ps, and the whole conformance set agrees on the card; the sweep's own STOP was wrong
+
+The sweep's seventh and last point: 307872e, 175 MHz.
+
+    standard     232 min, beside router experiments; memory floor 6 GB available, no OOM
+                 in the kernel log. Kernel WNS -0.102 ns in the post-route summary (the
+                 routed one, which the sweep read: -0.171, 684 failing endpoints). The worst
+                 path, the engine's ser_beat_idx into FIFO B's read address, 17 levels
+                 (8 CARRY8). Nothing staged.
+    retry        ExtraTimingOpt placement, AggressiveExplore routing (place_design and
+                 route_design took both, impl_1/runme.log); 329 min; memory floor 6 GB, no OOM
+    kernel WNS   +0.001 ns, 0 of 143,450 endpoints failing (post-route summary)
+    verify-image PASS, 8 of 8; staged ~/cardday-u50-175x, sha256 8ef1f4ea...
+    device-test  -q -n 8 on the U50: rc 0, 2,367 checks, 0 failed
+    replay       cft-selftest vectors/out: rc 0, backend xrt, 1,068,915 cases checked,
+                 12 min 28 s
+
+**The single tile runs at 175 MHz, 29.6% above its shipping 135, and
+computes right there** - with the second recipe, and 1 ps to spare.
+
+**The sweep said STOP, and was wrong.** Its verdict reads the manifest.
+The manifest of the pinned 307872e build records the routed timing
+summary's kernel WNS - -0.049 ns, 92 failing endpoints, beside the comment
+"THIS is the design's margin". Post-route phys_opt then closed the
+design: the post-route summary, the netlist the bitstream is written
+from, reads +0.001 ns and none failing. 3b25665 fixed the build script to
+read that summary, and the sweep ran pinned to the tree before it. Every
+verdict of the sweep has been re-read with `hw/sweep_freq.sh --judge` for
+exactly this reason (the 2026-09-23 entries), and this is the first
+verdict the re-reading changed. The image was card-tested by hand, as the
+sweep tests a closed point. Its manifest still says -0.049; it is left as
+the build wrote it, with a WNS-NOTE.txt beside it saying why.
+
+At 175 no single wall is left. The ten worst paths lie within 6 ps of the
+edge and come from eight places:
+
+- the sequencer's precision into its write data;
+- fp256's normalisation;
+- the operand FIFOs into the lanes' stage-0 bypass (A into fp32, B into
+  fp128);
+- the serialiser's beat index into FIFO C's address;
+- the engine's opcode into its write queue;
+- the write master's `seg_r -> w_cnt` enable, the 145 MHz wall;
+- the readers' reservation count;
+- the shell's HBM interconnect into the register file's write data.
+
+180 would take more than one RTL change.
+
+**The documents.** The entry above (the documents swept against the tree)
+stated the single's clock as 175 MHz "(assumed; 170 MHz closed and
+proven on the card, 2026-09-24)" by Logan's instruction, and named the
+ten statements to change when this verdict was recorded. They now read
+"(closed and proven on the card, 2026-09-24)" - docs/ARCHITECTURE.md,
+docs/PLATFORMS.md (five), docs/MERSENNE.md, docs/LAYOUTS.md (two, the
+catalogue row gaining this measurement) and README.md - and
+`grep -rn 'assumed;' --include=*.md docs README.md` finds only that
+entry's own account of them, which stays as written.
+
+The sweep, every point on 307872e, kernel WNS from the post-route summary:
+
+| MHz | recipe | kernel WNS | on the card |
+|---|---|---|---|
+| 145 | standard | +0.163 | device-test and replay pass |
+| 150 | standard | +0.122 | pass |
+| 155 | standard | +0.012 | pass |
+| 160 | standard | +0.075 | pass |
+| 165 | standard | +0.013 | pass |
+| 170 | standard | +0.029 | pass |
+| 175 | standard | -0.102 | - |
+| 175 | ExtraTimingOpt / AggressiveExplore | **+0.001** | pass |

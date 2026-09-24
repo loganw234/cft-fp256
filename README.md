@@ -120,7 +120,7 @@ end of this section.
 behind an M2 Pro, which vectorises both formats hard. Four tiles pass the
 workstation and still lose to the laptop. Those formats have been in silicon
 for forty years, this tile was measured at 135 MHz (one tile closes 175 MHz,
-assumed; 170 MHz closed and proven on the card, 2026-09-24), and it was
+proven on the card, 2026-09-24), and it was
 never going to win them.
 
 **At binary128 and binary256 that inverts and stays inverted** - 4.5x

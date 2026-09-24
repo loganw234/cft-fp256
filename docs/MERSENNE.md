@@ -820,8 +820,8 @@ exact route is a number-theoretic transform, which is a different
 machine: modular arithmetic, not IEEE 754.
 
 The hardware half would not be closed by this project's tile either. A
-tile issues one beat a cycle - one fp256 lane - so at 175 MHz (assumed;
-170 MHz closed and proven on the card, 2026-09-24) it is order 10^8
+tile issues one beat a cycle - one fp256 lane - so at 175 MHz (closed
+and proven on the card, 2026-09-24) it is order 10^8
 fp256 operations a second against this backend's ~10^6.2. Two orders,
 not six.
 

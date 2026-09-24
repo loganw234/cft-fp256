@@ -27,7 +27,7 @@ against a vendor's marketing arithmetic. The constants:
 | shell + one CU (U50) | 123,897 LUT | differenced routed builds, docs/SCALING.md |
 | each further CU | +12,626 LUT | (161,775 - 123,897) / 3, docs/LAYOUTS.md |
 | practical routing ceiling | ~85% | docs/SCALING.md; the routed quad closed at 80.6% |
-| kernel clock | 135 MHz, -2 grade, retimed - the quad's, and the clock the demand derivation below uses; the single tile's is 175 MHz (assumed; 170 MHz closed and proven on the card, 2026-09-24) | 9f73107, docs/LAYOUTS.md; docs/VALIDATION.md, 2026-09-16 and 2026-09-24 |
+| kernel clock | 135 MHz, -2 grade, retimed - the quad's, and the clock the demand derivation below uses; the single tile's is 175 MHz (closed and proven on the card, 2026-09-24) | 9f73107, docs/LAYOUTS.md; docs/VALIDATION.md, 2026-09-16 and 2026-09-24 |
 | beat | 256 bits, one per cycle per stream | docs/ARCHITECTURE.md |
 | streams | 3 in + 1 out = 4 AXI masters per tile | docs/ARCHITECTURE.md |
 | measured cost | 1.125 cycles/beat marginal, 40 fixed, since the read-ahead of 2026-09-09; the demand below is derived from the 1.250 and 36 measured before it | `make cycles`, docs/VALIDATION.md 2026-09-09, docs/SCALING.md |
@@ -923,8 +923,8 @@ Three rows deserve comment.
 free tier that holds a whole tile.** Same CARRY8 structure as the U50,
 so the project's area and timing numbers transfer directly instead of
 carrying the 7-series penalty - it is the one board on which a tile's
-measured 123,420 LUT and its clock, 175 MHz (assumed; 170 MHz closed and
-proven on the card, 2026-09-24), mean what they mean. The
+measured 123,420 LUT and its clock, 175 MHz (closed and proven on the
+card, 2026-09-24), mean what they mean. The
 board: XCKU5P-2FFVB676E, "DDR4 up to 32-bits", "PCIe Gen3 x8 compliant",
 $6,495.00 new, part EK-U1-KCU116-G, 8-week lead time ([AMD
 store](https://www.xilinx.com/products/boards-and-kits/ek-u1-kcu116-g.html),
@@ -1741,8 +1741,8 @@ Worth recording because it is the reason renting is not a shortcut:
   the AXI4 masters `v++` wires up on a U50.
 * **Clocks.** F1 caps the kernel clock at 250 MHz; F2's shell fixes
   `clk_main_a0` at 250 MHz with `clk_hbm_axi` configurable to 450 MHz.
-  The project's 135 MHz quad and 175 MHz (assumed; 170 MHz closed and
-  proven on the card, 2026-09-24) single are comfortably inside both.
+  The project's 135 MHz quad and 175 MHz (closed and proven on the card,
+  2026-09-24) single are comfortably inside both.
 * **XRT version.** Neither AWS platform pairs with XRT 2.13/2.14.
 * **The host.** F2 replaces XRT buffer management with a
   user-implemented DMA or AWS's Streaming Data Engine, and pyxrt with
@@ -2263,8 +2263,8 @@ one matters to a decision.
   part.** DS890 says a -2L runs like a plain UltraScale device at 0.72 V
   and "over 30% faster" at 0.85 V. The U200, U250 and VCU1525 are all
   -2L. Whether a U250 would reach the U50's clocks - 135 MHz for the
-  quad, 175 MHz (assumed; 170 MHz closed and proven on the card,
-  2026-09-24) for the single - therefore cannot be answered from
+  quad, 175 MHz (closed and proven on the card, 2026-09-24) for the
+  single - therefore cannot be answered from
   documents; it needs a card. This is the second-most decision-relevant
   gap in the survey after used pricing.
 * **The U55C's and U280's shipped speed grades.** No AMD datasheet
@@ -2554,7 +2554,7 @@ satisfied. XCZU7EV/EG is 230,400 LUT - one tile at **53.6%**, two at
 inside the free **Basic** tier (§2: Zynq UltraScale+ MPSoC covered "up
 to XCZU7EV / XCZU7EG / XCZU7CG"), and both are UltraScale+ CARRY8, so
 the project's measured 123,420 LUT and the tile's clock, 175 MHz
-(assumed; 170 MHz closed and proven on the card, 2026-09-24), transfer
+(closed and proven on the card, 2026-09-24), transfer
 without the 7-series carry penalty the survey warns about. The decisive
 number is on p.16 of the catalogue: **"PL侧4GB 2400Mhz*64bit"** - four
 gigabytes of DDR4 on a 64-bit bus at 2400 Mbps wired to the

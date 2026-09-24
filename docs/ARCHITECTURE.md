@@ -579,8 +579,8 @@ context** (fp64/fp128 land between; QoR numbers recorded in
 ROADMAP.md).
 
 **In the shell, which is the number that matters, the single tile's
-clock is 175 MHz (assumed; 170 MHz closed and proven on the card,
-2026-09-24), the quad's 135 MHz.** On 2026-08-29 the ceiling was ~141
+clock is 175 MHz (closed and proven on the card, 2026-09-24),
+the quad's 135 MHz.** On 2026-08-29 the ceiling was ~141
 MHz and the critical path the round stage - the 237-bit
 attribute-directed increment, S12 into S13 - about two-thirds routing,
 so a placement problem as much as a logic one. At 170 MHz the ten worst
