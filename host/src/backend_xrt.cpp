@@ -241,12 +241,14 @@ constexpr uint32_t SEG_VERSION = 0x00000900u;
 /* 0xA00 (2026-09-15, docs/ROUND2.md P0): five pointer registers at
  * 0x88..0xA8 as kernel arguments 12..16 - the index tables of a program
  * run's three streams and its scratch block, and its lane mask. Every
- * program launch on such a tile passes all seventeen arguments, a
- * one-beat buffer standing in for each of the five until the parcels
- * bind real ones (the lesson SEG_VERSION records: a declared argument
- * travels with the launch or not at all). Reductions and elementwise
- * runs pass what they passed; the five they leave unset go out as zero,
- * and the tile reads none of them without MODE[23:19]. */
+ * program launch on such a tile passes all seventeen arguments - each
+ * table the caller's resident buffer or one staged at the run's size,
+ * one beat when the run has no table, and the mask a bit for every
+ * lane whether or not the run has one (the lesson SEG_VERSION records:
+ * a declared argument travels with the launch or not at all).
+ * Reductions and elementwise runs pass what they passed; the five they
+ * leave unset go out as zero, and the tile reads none of them without
+ * MODE[23:19]. */
 constexpr uint32_t IDX_VERSION = 0x00000A00u;
 
 inline bool version_known(uint32_t v)
@@ -448,10 +450,11 @@ struct Tile {
     xrt::bo     si, so;
     size_t      si_cap = 0, so_cap = 0;
     /* And the five of 0xA00 (docs/ROUND2.md): the four index tables
-     * and the lane mask, arguments 12..16. Sized per run once the
-     * parcels bind them; one beat each until then, because the kernel
-     * has the arguments and a program launch on such a tile passes
-     * every one of them. */
+     * and the lane mask, arguments 12..16. Sized per run and cached by
+     * ensure_one like the counts buffer - a table one beat when the run
+     * has none, the mask a bit a lane with or without one - because
+     * the kernel has the arguments and a program launch on such a tile
+     * passes every one of them. */
     xrt::bo     ia, ib, ic, isi, mk;
     size_t      ia_cap = 0, ib_cap = 0, ic_cap = 0, isi_cap = 0, mk_cap = 0;
 };

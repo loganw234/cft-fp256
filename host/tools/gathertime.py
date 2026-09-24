@@ -8,7 +8,8 @@
 This is the measurement ABI 0.14's R16 was built for, written to be run
 ON THE CARD and runnable today against the software backend, which is
 where its correctness half is scored. It is the seq6 day's `segtime.py`
-for the gather: same shape, same question - how many round trips does
+(a card-day script, not checked into this repository) for the gather:
+same shape, same question - how many round trips does
 one entry point replace, and what does the one cost.
 
 THE SHAPE, from cft-rebound's `src/ias15_cft.c` (`build_scatter` at line

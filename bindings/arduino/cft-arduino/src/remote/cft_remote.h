@@ -58,11 +58,12 @@
  *
  * WHAT THIS CLIENT DOES NOT DO
  *
- * PROG_LOAD, PROG_RUN and the three run-with-data opcodes, the buffer
- * operations, and STATS are not implemented. The program opcodes are
- * out for a structural reason and not for want of room: an image must
- * be held to be checksummed, and holding a buffer is the one thing the
- * budget forbids. RUN and REDUCE and the status-word operations are
+ * PROG_LOAD, PROG_FREE and the three run-with-data opcodes (PROG_RUN,
+ * PROG_RUN_BANK and PROG_RUN_EX), the buffer operations, REDUCE_SEG
+ * and STATS are not implemented. The program opcodes are out for a
+ * structural reason and not for want of room: an image must be held to
+ * be checksummed, and holding a buffer is the one thing the budget
+ * forbids. RUN and REDUCE and the status-word operations are
  * here, at every format, and they are what a board is for.
  */
 
@@ -388,7 +389,7 @@ public:
                uint32_t n, Operands &in, void *d,
                uint32_t *flags = 0, uint32_t *bus = 0);
 
-    /* The device's sticky exception flags: the five status-word
+    /* The device's sticky exception flags: the six status-word
      * operations of docs/REMOTE.md, which the C client never issues
      * because libcft keeps that word on the host. Over the wire the
      * word lives on the server, so a board can read it. */

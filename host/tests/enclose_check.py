@@ -64,8 +64,9 @@ rather than about the mathematics:
                   land mid-item, inside the series recurrence, or the
                   in-flight state was never exercised.
 8. The chain.     Recomputed with hashlib, which is what proves the
-                  tool's from-first-principles derivation of SHA-256's
-                  round constants right.
+                  from-first-principles derivation of SHA-256's round
+                  constants the tool calls (host/src/sha256.c, since
+                  c0effe9) right.
 9. Formats.       fp256 against fp64 on the same data: the numbers that
                   say what fp64 loses.
 10. Refusals.     A degree that is not a whole number of

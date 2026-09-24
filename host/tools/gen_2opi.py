@@ -47,7 +47,7 @@ a slightly different number. So:
     series with binary splitting, in plain Python integers, sharing no
     code with mpmath - Machin in Fractions, which is what phase 2 used
     for pi at 1088 bits, is far too slow at a quarter of a million;
-  * cft_mp_two_over_pi_selfcheck() in the C checks the stored top limbs
+  * tr_2opi_ok() in host/src/transcend.c checks the stored top limbs
     against 2/pi derived from the INDEPENDENTLY verified pi already in
     mp_consts.h, and a checksum over every limb.
 

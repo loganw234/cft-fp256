@@ -48,8 +48,9 @@ extern "C" {
  * a corrupted length field must not become an allocation. 1 GiB. */
 #define CFTR_MAX_PAYLOAD    ((uint32_t)1u << 30)
 
-/* The client splits RUN and PROG_RUN so that no frame carries more
- * than this much operand and result data. 16 MiB. */
+/* The client splits RUN, PROG_RUN, PROG_RUN_BANK and PROG_RUN_EX so
+ * that no frame carries more than this much operand and result data.
+ * 16 MiB. */
 #define CFTR_CHUNK_BYTES    ((size_t)16u << 20)
 
 /* opcodes */

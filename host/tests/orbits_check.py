@@ -47,8 +47,9 @@ Seven groups of checks:
                   sidereal periods. A mistyped digit moves a period by
                   percent.
  5. The chain.    Recomputed with hashlib, which is what proves the
-                  tool's from-first-principles derivation of SHA-256's
-                  round constants.
+                  from-first-principles derivation of SHA-256's round
+                  constants the tool calls (host/src/sha256.c, since
+                  c0effe9).
  6. Determinism.  Batch-size independence, program-versus-loop bit
                   identity, and interrupt/resume equivalence - all as
                   byte comparisons of checkpoints and records.

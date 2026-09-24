@@ -224,13 +224,15 @@ cft-bench$(EXE): tools/cft_bench.c libcft.a
 # XRT=1, and C++ for the reason backend_xrt.cpp is.
 ifeq ($(XRT),1)
 TOOLS += cft-resident$(EXE)
-# The second line the idiom at Makefile:586 requires, and the one this
-# tool went without until 2026-09-12. `all:` above was read before this
-# point, so its prerequisite list is already expanded and `TOOLS +=`
-# cannot reach it; a separate `all:` rule for the same target is how
-# make merges a prerequisite in from below. Without it `make all XRT=1`
-# silently skipped this tool and any cft-resident on disk was left over
-# from whenever somebody last named it explicitly.
+# The second line the idiom requires (`all: <tool>`, as the cft-orbits,
+# cft-zoom, cft-mersenne, cft-serve and cft-asm blocks below each
+# carry), and the one this tool went without until 2026-09-12. `all:`
+# above was read before this point, so its prerequisite list is already
+# expanded and `TOOLS +=` cannot reach it; a separate `all:` rule for
+# the same target is how make merges a prerequisite in from below.
+# Without it `make all XRT=1` silently skipped this tool and any
+# cft-resident on disk was left over from whenever somebody last named
+# it explicitly.
 all: cft-resident$(EXE)
 endif
 
@@ -328,8 +330,10 @@ cpptest: all cpp-api-test$(EXE) cpp-api-test20$(EXE)
 	./cpp-api-test$(EXE) ../vectors/out
 	./cpp-api-test20$(EXE) ../vectors/out
 
-# Only meaningful in an XRT build, and only useful with an artifact:
-#   ./device-test cardday/quad_emu/cft_hw_emu.xclbin 256
+# Against an artifact in an XRT build, or with no card at all against
+# `sw` (software against software: verify/run.sh's selfcheck stage) or a
+# cft:// device (the remote stage):
+#   ./device-test cardday/quad_emu/cft_hw_emu.xclbin -n 256
 device-test$(EXE): tests/device_test.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
 
@@ -341,8 +345,8 @@ device-test$(EXE): tests/device_test.c libcft.a
 #   the C/Python    the cross-language claim. Two languages, one
 #   comparison      library, and the output has to be identical or the
 #                   ABI is not doing its job (examples-lang re-runs
-#                   this one for julia and rustc, whichever this
-#                   machine carries)
+#                   this one for C++, Julia, Rust, Go, C# and R,
+#                   whichever this machine carries)
 #   diff_check.py   this library against the golden model right now,
 #                   over the far/near alignment boundary that neither
 #                   of the first two reaches. Needs Python and takes a

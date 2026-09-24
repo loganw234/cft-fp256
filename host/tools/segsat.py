@@ -10,7 +10,8 @@ whole segments across the image's tiles, not the bus.
                                 [--reps 5] [--op sum|maxall]
 
 Written for the round-2 pair's saturation runs (2026-09-16): the card
-day's `segtime.py` stages its operands on every call, which is the
+day's `segtime.py` (not checked into this repository) stages its
+operands on every call, which is the
 right measurement of the call count and the wrong one of four tiles.
 Every result is checked exactly - the values are small integers, so
 every segment's sum is an exact integer in every format and a wrong

@@ -159,8 +159,10 @@
  * loaded into lane registers once, every step executes from the
  * instruction memory, and the sampled states come back through the
  * deposit stream. It is restricted to `--problem kepler --rsqrt
- * newton`, and BOTH restrictions are facts about the program model
- * rather than about this tool:
+ * newton`, and both restrictions were facts about the program model
+ * when this tool was written. The second still is; since the
+ * sequencer's revision 3 the first is a gap in this tool, because
+ * the scratch block answers it and this tool does not use it:
  *
  *   (1) THREE INPUT STREAMS. cft_program_run initialises r0, r1 and
  *       r2 from a, b and c; r3..r31 start at +0, normatively (r3..r15
@@ -175,7 +177,11 @@
  *       reachable and no later step is. That is why the program
  *       engine runs the whole integration in one call and cannot
  *       resume into the middle of one, and it is why the outer solar
- *       system has no program engine at all.
+ *       system has no program engine at all. Revision 3's scratch
+ *       block (cft_program_run_ex's scratch_in; docs/SEQUENCER.md,
+ *       "What the workloads asked of the program model") lets a
+ *       program be entered at any state it can spell; this engine
+ *       still calls cft_program_run and has not been moved onto it.
  *
  *   (2) CORRECTLY ROUNDED DIVIDE AND SQUARE ROOT ARE NOT PROGRAMS.
  *       python/cft_golden/seqprogs.py - which is the library's own
@@ -247,8 +253,8 @@
  * from the library, pi comes from cft_acos(-1), 2^(1/3) from
  * cft_rootn, the Gaussian constant is squared rather than copied, the
  * Newton iteration count is derived from p, and SHA-256's round
- * constants are computed from the cube roots of the primes exactly as
- * host/tools/collatz.c computes them.
+ * constants are computed from the cube roots of the primes by
+ * host/src/sha256.c, the one copy this tool shares with collatz.c.
  */
 #if !defined(_WIN32)
 #  define _POSIX_C_SOURCE 200112L   /* 199309L hid snprintf on Darwin (2026-09-09) */

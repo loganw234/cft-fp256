@@ -8,7 +8,7 @@
  * came to include parts with 32 KB of flash and 2 KB of RAM. The
  * arithmetic already runs there unchanged: it is integer code over
  * 32-bit limbs with no floating-point dependence and no platform
- * conditional. What does not fit is the SURROUNDING library - a 117 KB
+ * conditional. What does not fit is the SURROUNDING library - a 33 KB
  * table of 2/pi for the trigonometric argument reduction, a sequencer,
  * a file-reading conformance replay, a socket backend - and the
  * intermediate width the widest format demands.
@@ -353,8 +353,8 @@ which fit a 16-bit int fifteen times over) - see cft_config.h."
  *                       (host/tools/serial_replay.py).
  *   CFT_NO_TRANSCEND    transcend.c and mpfloat.c - the 39 correctly
  *                       rounded transcendentals, their multiprecision
- *                       evaluator, and mp_2opi.h, which is a 117 KB
- *                       table of 2/pi. Much the largest single thing
+ *                       evaluator, and mp_2opi.h, whose table of 2/pi
+ *                       is 33,792 bytes. Much the largest single thing
  *                       in the library.
  *   CFT_NO_PROGRAM      program.c and sha256.c - the sequencer, its
  *                       image loader and cft_sha256().
@@ -373,8 +373,10 @@ which fit a 16-bit int fifteen times over) - see cft_config.h."
  *   CFT_NO_REDUCE       reduce.c - cft_reduce() and the 9.4 scaled
  *                       products. The reduction TREE is in
  *                       softfloat.c and stays either way.
- *   CFT_NO_GETENV       the two getenv() route overrides
- *                       (CFT_DIVSQRT_SEQ, CFT_TRANSCEND_MINPREC).
+ *   CFT_NO_GETENV       the three getenv() reads in divsqrt.c and
+ *                       transcend.c: two route overrides
+ *                       (CFT_DIVSQRT_SEQ, CFT_DIVSQRT_FULL) and a test
+ *                       hook (CFT_TRANSCEND_MINPREC).
  *                       avr-libc has no environment; a freestanding
  *                       build has nothing for one to mean.
  *
