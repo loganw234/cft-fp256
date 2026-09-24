@@ -14127,3 +14127,26 @@ engine's `seg_r` into the reduction's `fold_r` at +0.105.
 165 MHz was next when this was written, its build waiting on the sweep's own
 memory gate (24 GB) while the router experiments held the machine.
 
+## 2026-09-23 - the U50 single closes 165 MHz, with two walls at the edge together, and the whole conformance set agrees on the card
+
+The sweep's fifth point: 307872e, 165 MHz, the standard recipe. Its build
+waited 45 minutes on the sweep's memory gate, until the unmodified openXC7
+reference route was stopped (the dense branch's ledger records why).
+
+    build        160 min, beside four router experiments; memory floor 6 GB available,
+                 no OOM in the kernel log
+    kernel WNS   +0.013 ns, 0 of 142,999 endpoints failing (post-route summary; the
+                 manifest agrees), again the design's worst (routed WNS 0.013)
+    verify-image PASS, 8 of 8; staged ~/cardday-u50-165, sha256 52d8a9da...
+    device-test  -q -n 8 on the U50: rc 0, 2,367 checks, 0 failed
+    replay       cft-selftest vectors/out: rc 0, backend xrt, 1,068,915 cases checked,
+                 12 min 13 s
+
+**The single tile runs at 165 MHz, 22.2% above its shipping 135, and
+computes right there.** Both walls met on the way up now sit at the edge at
+once: operand FIFO B into an fp128 lane's stage-0 bypass at +0.013 and
++0.015 ns (15 levels, 5.781 ns of data path), and the write master's
+`seg_r -> w_cnt` enable chain - the 145 MHz wall - at +0.020 to +0.021.
+170 MHz was building when this was written; no prediction is offered, the
+last one having been wrong.
+
