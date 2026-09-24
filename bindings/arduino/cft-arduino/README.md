@@ -159,8 +159,8 @@ outside a library directory.
 `src/cft.h`, `src/cft_replay.[ch]`, `library.properties`,
 `keywords.txt`, this README and the examples are written here rather
 than copied. The first six are listed in `vendor.json` under `owned`;
-the examples and `src/remote/` are simply outside the subtree
-`sync.py` audits.
+the examples, `src/cft_remote.h` and `src/remote/` are simply outside
+the subtree `sync.py` audits.
 
 Do not edit anything under `src/cft/`. Edit `host/` and run:
 

@@ -6,9 +6,9 @@ produces is a census rather than a memory.
 
 **The day was 2026-09-08, and this file is kept as the runbook that
 was actually followed** - the steps below carry what each one printed,
-and the checklist above them carries the four image pairs staged since.
+and the checklist above them carries the six image pairs staged since.
 The run itself is in docs/VALIDATION.md ("card day: first light, and
-the published sets match on silicon", and the three pairs after it);
+the published sets match on silicon", and the five pairs after it);
 docs/BRINGUP.md carries the gate verdicts and docs/BENCHMARKS.md the
 throughput. Read this file as the procedure and those as the record.
 
@@ -413,7 +413,7 @@ Reductions are part of that matrix and run automatically, but they are
 worth being able to run alone when something goes wrong, because they
 are the only path where the element count is an operand:
 
-    bash hw/run-device-test.sh ~/cardday-135/cft_hw_single.xclbin -r
+    bash hw/run-device-test.sh ~/cardday-0907/cft_hw_single.xclbin -r
 
 One tile means one canonical range and no fold, so a failure here is
 the reduction datapath itself rather than the split.
@@ -440,14 +440,14 @@ because on silicon the ~30-invocation sequence costs microseconds,
 and that run completes the general-purpose story emulation priced in
 days.
 
-Every case is a separate kernel launch in the element pass, so budget
-for launch overhead rather than arithmetic - on the order of tens of
-seconds, not minutes. If it is much slower than that, something is
+Every case is a separate kernel launch in the element pass, so budget for
+launch overhead rather than arithmetic - on the order of ten minutes an
+image (584 s on 2026-09-08). If it is much slower than that, something is
 wrong with the driver path rather than with the tile.
 
 **5. Four tiles are correct, and identical to one.**
 
-    bash hw/run-device-test.sh ~/cardday-135/cft_hw_quad.xclbin -n 4096
+    bash hw/run-device-test.sh ~/cardday-0907/cft_hw_quad.xclbin -n 4096
 
 Then the part that matters most: **run the same inputs through the
 single-tile image and the quad image and compare the output buffers
@@ -458,7 +458,7 @@ notice later.
 Reductions carry the sharpest version of that test, and it is worth
 doing explicitly rather than trusting the matrix:
 
-    bash hw/run-device-test.sh ~/cardday-135/cft_hw_quad.xclbin -r
+    bash hw/run-device-test.sh ~/cardday-0907/cft_hw_quad.xclbin -r
 
 An elementwise op splits across tiles trivially - element i does not
 care which tile computed it. A reduction does not: the array is cut
@@ -603,7 +603,8 @@ they were handed over. What only a card can still say:
   3,863 us; the whole-array flush dominates below E = 64 (220 us).
 - **The area column**: kernel WNS +0.266 ns at 135 MHz for the single
   tile; the quad's is its own entry.
-- **The three instruments that told a host defect from a tile defect**
+- **The three instruments that told a host defect from a tile defect, and
+  a fourth added on 2026-09-18**
   - `CFT_XRT_REDUCE_BC` (2026-09-18): what the XRT reduction paths do
     with the `b` and `c` buffers a reduction never uses. Unset, they are
     allocated and never written; `poison` fills them with 0xFF - a NaN

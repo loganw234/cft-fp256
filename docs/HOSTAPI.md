@@ -72,7 +72,7 @@ behind one ABI keeps the guarantee checkable.
 It also closes a hole we already have: pyxrt exposes no way to read a
 kernel's status registers in either XRT version this project has
 tested (2.14 and 2.19), so `FLAGS` and `STATUS` are unreadable from
-Python. XRT's C++ API does expose them, so the device backend will
+Python. XRT's C++ API does expose them, so the device backend does
 close that hole as a side effect rather than as a special effort - a
 Python caller reaching the card through `libcft` gets flags that a
 Python caller reaching it through pyxrt cannot.
@@ -134,7 +134,7 @@ a failure.
 
 ## The device backend
 
-`host/src/backend_xrt.cpp` implements all four of those bullets. It is
+`host/src/backend_xrt.cpp` implements all five of those bullets. It is
 the only C++ in the library, because XRT's API is C++, and it exports
 nothing but the C functions in `src/backend.h` - so the library still
 builds with no dependencies at all when XRT is absent, which is the
@@ -213,29 +213,32 @@ mode, so it says so and stops.
 
 ### Device-resident buffers, and what a port must do to get the rate
 
-**Which buffers can be resident.** The operand-shaped ones: a `cft_run`'s
-three inputs and its output, and a program run's three streams, its
-deposit window and - since 2026-09-12 - its two scratch blocks. Those all
+**Which buffers can be resident.** The operand-shaped ones, and the
+tables that index them: a `cft_run`'s three inputs and its output, and a
+program run's three streams, its deposit window and - since 2026-09-12 -
+its two scratch blocks, and its four index tables (ABI 0.14). Those all
 grow with `n`, which is what makes a device copy worth keeping.
 
 The rest of a program run is staged on every call, and the reasons are
 structural rather than unfinished: the image and the constant bank do not
-grow with `n` at all, and the per-lane deposit counts are four bytes an
-element whatever the format. `cft_buffer_get_info` says what actually
+grow with `n` at all, the per-lane deposit counts are four bytes an
+element whatever the format, and the lane mask is repacked for the
+tile's own lanes on every launch. `cft_buffer_get_info` says what actually
 happened to one buffer, and its `staged_why` says why, when a number
 looks wrong.
 
 
-The measured gap is the whole reason this exists. On the card, through
-`cft_run` staging every operand on every call, one tile does **141.8 /
-81.4 / 40.3 / 20.0** M fma elements a second at fp32/64/128/256. With
-the operands already on the device the same tile does **462.6 / 235.1
-/ 118.7 / 59.6**, and four tiles do **1,833.9 / 937.2 / 474.0 /
-238.4** (docs/BENCHMARKS.md). Everything below is the machinery that
-lets `libcft` reach the second set, and none of it changes an answer:
-the same call over the same bytes returns the same bits and the same
-flags either way, which is what `device-test -b` checks and what makes
-this an optimisation rather than a second contract.
+The measured gap is the whole reason this exists. On the card at 135
+MHz, through `cft_run` staging every operand on every call, one tile
+does **141.8 / 81.4 / 40.3 / 20.0** M fma elements a second at
+fp32/64/128/256. With the operands already on the device the same tile
+does **462.6 / 235.1 / 118.7 / 59.6**, and four tiles do **1,833.9 /
+937.2 / 474.0 / 238.4** (docs/BENCHMARKS.md). Everything below is the
+machinery that lets `libcft` reach the second set, and none of it
+changes an answer: the same call over the same bytes returns the same
+bits and the same flags either way, which is what `device-test -b`
+checks and what makes this an optimisation rather than a second
+contract.
 
 **What a port must do.** Four lines, and no second code path
 (docs/INTEGRATION.md says when to take them, and when a program or a
@@ -329,10 +332,10 @@ publish check is what proves publishing takes effect.
 own array; the composed reductions (`CFT_DOT`, `CFT_SUMSQ`,
 `CFT_SUMABS`) pass through an internal scratch array, so those spend
 one staged pass whatever their operands are; and
-`cft_program_run_ex` binds `a`, `b`, `c` and `deposits` but stages the
-image, the constant bank, the counts and the two scratch blocks, none
-of which is operand-shaped and two of which do not grow with `n` at
-all.
+`cft_program_run_ex` binds `a`, `b`, `c`, `deposits`, the two
+scratch blocks and the four index tables but stages the image, the
+constant bank, the counts and the lane mask, none of which is
+operand-shaped and two of which do not grow with `n` at all.
 
 **Asking rather than assuming**, as everywhere else here:
 `cft_caps.buffers_resident` says whether this device keeps device
@@ -353,7 +356,7 @@ flags, every supported format, opcode and attribute. Anything that
 differs is a device-path bug by definition, because the software
 backend is the one replayed against the golden model.
 
-    bash hw/run-device-test.sh cardday/quad_emu/cft_hw_emu.xclbin 64
+    bash hw/run-device-test.sh cardday/quad_emu/cft_hw_emu.xclbin -n 64
 
 It runs against a **hw_emu image with no card present**, which is the
 point: four-CU partitioning gets exercised, and its bugs found, before
@@ -1008,17 +1011,18 @@ chosen, and chosen so that folding an empty range into a non-empty one
 cannot change it. A `+0` there, the additive identity the other four
 use, would win against every negative element.
 
-`cft_supports()` answers for it through the **min/max** group, since
-that is what it composes from. And `cft_run` refuses it, as it refuses
-every reduction: opcode 31 reaching a tile would be decoded as
-elementwise - `cfg_is_reduce` is `(cfg_op == 8'd24)` - and would write
-`n` elements where the caller sized one, which is memory corruption
-rather than a wrong number - on every tile before VERSION 0x900. Since
-it (2026-09-14, ABI 0.13) opcode 31 is a streaming maximum behind
-CAPS2[8], so `cft_reduce(CFT_MAXALL)` is one pass on such a tile; the
-software definition below is unchanged and `cft_run` still refuses the
-opcode as it refuses every reduction. The composition therefore sits above the
-backend dispatch, and no tile ever sees the opcode.
+`cft_supports()` answers for it through the reduction group and also the
+**min/max** group, since that is what it composes from. And `cft_run`
+refuses it, as it refuses every reduction: opcode 31 reaching a tile
+would be decoded as elementwise - `cfg_is_reduce` is `(cfg_op ==
+8'd24)` - and would write `n` elements where the caller sized one, which
+is memory corruption rather than a wrong number - on every tile before
+VERSION 0x900. Since it (2026-09-14, ABI 0.13) opcode 31 is a streaming
+maximum behind CAPS2[8], so `cft_reduce(CFT_MAXALL)` is one pass on such
+a tile; the software definition below is unchanged and `cft_run` still
+refuses the opcode as it refuses every reduction. The composition
+therefore sits above the backend dispatch, and no tile without CAPS2[8]
+ever sees the opcode.
 
 **Three are named host entry points**, because they return a PAIR:
 
@@ -1053,14 +1057,15 @@ one multiply and an exact binade extraction, so a scaled product is
 about the price of a dot.
 
 **The vectors carry all seven**, in a THIRD set type:
-`<fmt>-reduce[-<rnd>].jsonl`, 448 cases and 9,513 elements per file,
-20 files. It had to be a new type - a reduction's operand is a whole
-vector whose length is part of the case, and both existing schemas are
-one line per case with a fixed number of single-element operands. The
-scaled products' cases carry `pr` and `sf` where the others carry `d`,
-because a set that recorded only the significand would score half the
-operation. Before this the published sets carried no reductions at all,
-not even `sum`.
+`<fmt>-reduce[-<rnd>].jsonl`, 512 cases and 10,872 elements per file
+(448 and 9,513 until maxall's 64 cases a file joined them on
+2026-09-12), 20 files. It had to be a new type - a reduction's operand
+is a whole vector whose length is part of the case, and both existing
+schemas are one line per case with a fixed number of single-element
+operands. The scaled products' cases carry `pr` and `sf` where the
+others carry `d`, because a set that recorded only the significand would
+score half the operation. Before this the published sets carried no
+reductions at all, not even `sum`.
 
 ## The rest of table 9.1 (part of the 0.6 step)
 
@@ -1668,7 +1673,8 @@ whole-array answer:
 | `reduce-parts`, every canonical partition vs the whole | 4,060 partitions (4 formats x 29 sizes x 7 part counts x 5 attributes) | every partition reproduces the whole |
 
 And the divide/sqrt era (2026-08-31 onward), same discipline, more
-oracles - current numbers, with docs/VALIDATION.md as the ledger:
+oracles - numbers as first recorded (2026-08-31 and 2026-09-01), with
+docs/VALIDATION.md as the ledger:
 
 | check | cases | result |
 |---|---|---|
@@ -1753,7 +1759,7 @@ platforms and dates). Three of them carry the argument this document
 makes:
 
 - `vector_fma.c` - C, linked against the static library.
-- `vector_fma_ctypes.py` - Python, via `ctypes.CDLL` and eight
+- `vector_fma_ctypes.py` - Python, via `ctypes.CDLL` and seven
   `argtypes` lines. No build step, no binding generator, no pyxrt.
 - `vector_fma.f90` - Fortran, via `iso_c_binding`, verified with
   gfortran 13.3. A native `real(c_double)` array goes straight to
@@ -1781,13 +1787,13 @@ promised to a caller.
 
 1. **`CAPS` reported precisions but not operations.** A host could ask
    which formats a bitstream carried and not which opcodes it
-   implemented - fine while every build has every op, actively wrong
-   the moment one does not, and `cft_supports()` would have had to
-   guess from the version number. CAPS[15:8] is now an opcode-group
-   bitmask: arithmetic, sign, min/max, predicate, integer, with
-   reserved bits for reduction, divide/sqrt and conversion. Groups
-   rather than 256 individual bits, because opcodes arrive in groups
-   and a bit per opcode is a register nobody keeps current.
+   implemented - fine while every build has every op, actively wrong the
+   moment one does not, and `cft_supports()` would have had to guess
+   from the version number. CAPS[15:8] is now an opcode-group bitmask:
+   arithmetic, sign, min/max, predicate, integer, reduction, divide/sqrt
+   and the sequencer, on bit 15, which was reserved for conversion. Groups
+   rather than 256 individual bits, because opcodes arrive in groups and
+   a bit per opcode is a register nobody keeps current.
 
 2. **Unassigned opcodes silently did arithmetic.** Opcode 15 and
    everything from 24 up fell through to the FMA datapath with
@@ -1867,28 +1873,29 @@ format mask, opcode groups, tile count, contract version and
 `flags_readable`; `cft_supports` answers from those; every entry point
 takes the handle. What is different is where the arithmetic happens,
 and the rule for that is the one `host/src/device.c` already draws for
-the XRT backend: **only the calls that touch a device cross the wire**
-- `cft_run`, `cft_reduce` for `CFT_SUM` and `CFT_DOT`, and
-`cft_program_run` - and every host operation runs in the caller's own
-process on the caller's own copy of the library, which is bit-identical
-to the server's by contract. The clause-5 host operations, the
-transcendentals, the character conversions, the augmented operations,
-the scaled products, the magnitude forms and `cft_convert` never make
-a round trip; the composed operations (`cft_div`, `cft_sqrt`,
-`cft_rint`, `cft_scaleb`, `cft_cmp_sig`, the formatOf widening route)
-issue their passes through the backend and make one round trip per
-pass, or one per chunk on the program route, which a remote device
-takes by default as a tile does.
+the XRT backend: **only the calls that touch a device cross the wire** -
+`cft_run`, `cft_reduce` for `CFT_SUM` and `CFT_DOT`, `cft_reduce_seg`
+(ABI 0.13), and `cft_program_run` - and every host operation runs in
+the caller's own process on the caller's own copy of the library,
+which is bit-identical to the server's by contract. The clause-5 host
+operations, the transcendentals, the character conversions, the
+augmented operations, the scaled products, the magnitude forms and
+`cft_convert` never make a round trip; the composed operations
+(`cft_div`, `cft_sqrt`, `cft_rint`, `cft_scaleb`, `cft_cmp_sig`, the
+formatOf widening route) issue their passes through the backend and
+make one round trip per pass, or one per chunk on the program route,
+which a remote device takes by default as a tile does.
 
 **The status word stays on the handle.** A remote call returns its flag
-word in the response and `device.c` ORs it in through
-`cft_flags_emit`, the seam every backend uses, so the six operations of
-5.7.4 cost no round trip and a composed operation's internal passes are
-muted exactly as they are locally. The server's device has a word too,
-since it is a library device; nothing reads it and it dies with the
-connection. **Buffers stay on the client** for the same reason they are
-host memory on the software backend: `cft_run` copies from whatever
-pointers it is given on every backend today.
+word in the response and `device.c` ORs it in through `cft_flags_emit`,
+the seam every backend uses, so the six operations of 5.7.4 cost no
+round trip and a composed operation's internal passes are muted exactly
+as they are locally. The server's device has a word too, since it is a
+library device; nothing reads it and it dies with the connection.
+**Buffers stay on the client** for the same reason they are host memory
+on the software backend: `cft_run` copies from whatever pointers it is
+given on every backend but XRT, whose `cft_alloc` buffers are
+device-resident.
 
 The server, `host/tools/cft-serve.c`, opens one library device per
 connection - the software backend, or `--artifact` for a card on a
@@ -1954,27 +1961,30 @@ whose `VERSION` predates them, which is every card-day 0x410 image.
 
 `max_consts` is the number of constants an instruction can *address*,
 not the `n_consts` a header may declare. The `ka`/`kb`/`kc` bits
-redirect four-bit operand fields at the constant bank, so the answer
-was 16 on the tile and 16 here until 2026-09-07, when `kx`
-(docs/SEQUENCER.md) gave an instruction 8-bit indices in its
-immediate: it is 256 on both now, and `seq_features` says which a
-device is. Bit 0 (`CFT_SEQ_FEAT_WIDE_CONST`, from CAPS[4]) is `kx`;
-bit 4 (`CFT_ALU_EXT_IMUL`, from CAPS[28]) is opcode 30, `IMUL`. **A
-feature bit that is clear is absent, not unknown**: `cft_program_load`
-refuses an image that uses `kx` or `IMUL` on a device that does not
-publish them, naming the instruction, and `cft_supports(dev,
-CFT_IMUL, fmt)` answers no - so a card-day image that predates both
-is never handed a program its operand mux would misread.
+redirect four-bit operand fields at the constant bank, so the answer was
+16 on the tile and 16 here until 2026-09-07, when `kx`
+(docs/SEQUENCER.md) gave an instruction 8-bit indices in its immediate:
+it was 256 on both until revision 3's ninth bit (`CFT_SEQ_FEAT_KX9`)
+made it 512, and `seq_features` says which a device is. Bit 0
+(`CFT_SEQ_FEAT_WIDE_CONST`, from CAPS[4]) is `kx`; bit 4
+(`CFT_ALU_EXT_IMUL`, from CAPS[28]) is opcode 30, `IMUL`. **A feature
+bit that is clear is absent, not unknown**: `cft_program_load` refuses
+an image that uses `kx` or `IMUL` on a device that does not publish
+them, naming the instruction, and `cft_supports(dev, CFT_IMUL, fmt)`
+answers no - so a card-day image that predates both is never handed a
+program its operand mux would misread.
 
-**Each backend reports what it enforces and enforces what it
-reports.** The XRT backend decodes `CAPS[7:4]` and `CAPS[27:16]`,
-three four-bit exponents and a feature nibble, and does not
-transcribe a 64 into C. The remote backend takes them from the
-handshake. The software backend reports its own - 2^20 deposit slots
-a lane, the header field's own 2^32-1 instructions, 256 addressable
-constants, both feature bits - from `host/src/program.c`, which is the file that
-enforces them, so the number a host is told and the number a program
-is held to are one declaration.
+**Each backend reports what it enforces and enforces what it reports.**
+The XRT backend decodes `CAPS[7:4]`, `CAPS[27:16]`, `CAPS[31:28]` and
+`CAPS2`, three four-bit exponents and the feature bits, and does not
+transcribe a 64 into C. The
+remote backend takes them from the handshake. The software backend
+reports its own - 2^20 deposit slots a lane, the header field's own
+2^32-1 instructions, 512 addressable constants, every feature bit but
+`CFT_SEQ_FEAT_SCALAR` and `CFT_FEAT_REDUCE_SEG` - from
+`host/src/program.c`, which is the file that enforces them, so the
+number a host is told and the number a program is held to are one
+declaration.
 
 **The software backend was not narrowed to the tile's 64**, and that
 is a decision rather than an omission. It models the program model,
@@ -2008,12 +2018,12 @@ backend, so a refusal libcft made never goes on explaining someone
 else's failure.
 
 **Every `CFT_ERR_UNSUPPORTED` carries a sentence (2026-09-14).** It did
-not: `cft_run`, `cft_reduce` and `cft_program_load` refused a format
-the device lacked, or an opcode group it did not implement, with
+not: `cft_run`, `cft_reduce` and `cft_program_load` refused a format the
+device lacked, or an opcode group it did not implement, with
 `cft_last_error()` empty - or, worse, still holding the previous
 failure's text. cft-rebound found this on its trimmed binary128 image
-and worked around it at open (its `docs/BITSTREAM.md`, ask 3). Now
-a format the device lacks says what it does carry:
+and worked around it at open (`cft-rebound/docs/BITSTREAM.md`, ask 3).
+Now a format the device lacks says what it does carry:
 
     cft_run: this device carries fp32 fp64 fp128; fp256 is not among
     them. cft_supports(dev, op, fmt), or cft_get_caps -
@@ -2394,9 +2404,11 @@ coordinates, every pass, and `CFT_MAXALL` over the whole array expresses
 neither the segments nor the "normal values only" - the second is the
 five-instruction mask that already exists as a program
 (`programs/normalabs-<fmt>.cfta`), and the first is this call. A call
-per segment would have been about 35 ms a pass at a thousand systems
+per segment was estimated at about 35 ms a pass at a thousand systems
 against the 0.2 ms the host loop costs; one run is the shape that can
-compete, and whether it does is the measurement the next image makes.
+compete, and the next image measured it: one run 4.15 ms against 86.4 ms
+for the thousand calls at fp64 maxall, and still not faster than the
+host loop (docs/VALIDATION.md, 2026-09-14).
 
 **And `maxall` on the tile.** The same bit says opcode 31 is a REDUCTION
 on this tile - the accumulator issuing the elementwise maximum in place
@@ -2430,16 +2442,16 @@ runs nothing and writes nothing, its outputs left as the caller had
 them. Both are one line in the software backend, which is the
 definition.
 
-**The shape rules are checked first and are final** - a table on a
-NULL operand, a table on an operand that is also scalar, a source
-length of zero beside a table or a length beside no table, a scratch
-table on a program that declares no scratch input, a mask whose byte
-count is not `(n + 7) / 8` - each `CFT_ERR_INVALID_ARGUMENT` with a
-sentence naming the field. A well-formed field a backend does not yet
-build is `CFT_ERR_UNSUPPORTED` with a sentence naming the parcel that
-builds it. A caller built against 0.14 gets a refusal it can read
-rather than a run with a field silently dropped, and every existing
-call runs exactly as it did.
+**The shape rules are checked first and are final** - a table on a NULL
+operand, a table on an operand that is also scalar, a source length of
+zero beside a table or a length beside no table, a scratch table on a
+program that declares no scratch input, a mask whose byte count is not
+`(n + 7) / 8` - each `CFT_ERR_INVALID_ARGUMENT` with a sentence naming
+the field. A well-formed field on a tile that does not publish its
+feature bit is `CFT_ERR_UNSUPPORTED` with a sentence naming what the
+tile lacks. A caller built against 0.14 gets a refusal it can read
+rather than a run with a field silently dropped, and every existing call
+runs exactly as it did.
 
 **`cft_program_run_ex`'s four tables are built (P1, 2026-09-15).**
 Pass `idx_a` and `a` is the SOURCE the table indexes rather than the

@@ -39,13 +39,13 @@ FIFOs, reduction accumulator and CSR are `BEAT_BITS`-wide and stay.
 
 | kernel | rungs | generics off | clock (MHz) | provenance |
 |---|---|---|---|---|
-| `cft_krnl` | fp32 fp64 fp128 fp256 | - | 135 | measured: single closes +0.618, quad +0.143 (9f73107, 2026-09-02, retimed + phys_opt) |
+| `cft_krnl` | fp32 fp64 fp128 fp256 | - | 135 (quad, and every catalogue row below that carries a full tile - the recipe clock); single 175 (assumed; 170 MHz closed and proven on the card, 2026-09-24) | measured: single closes +0.618, quad +0.143 (9f73107, 2026-09-02, retimed + phys_opt); round-2 quad +0.040 (5b7aa19, 2026-09-16, retimed + phys_opt, ExtraTimingOpt/AggressiveExplore); single +0.029 at 170 MHz (307872e, 2026-09-24, retimed + phys_opt) |
 | `cft_krnl_f128` | fp32 fp64 fp128 | `EN_FP256=0` | 150* | target, unmeasured |
 | `cft_krnl_f64` | fp32 fp64 | `EN_FP128=0 EN_FP256=0` | 170* | target, unmeasured |
 | `cft_krnl_f32` | fp32 | `EN_FP64=0 EN_FP128=0 EN_FP256=0` | 190* | target, unmeasured |
 | `cft_krnl_f64f128` | fp64 fp128 | `EN_FP32=0 EN_FP256=0` | 135 | measured: single closes +0.253 ns kernel WNS at 135 MHz (c56b368, 2026-09-14, retimed + phys_opt, 0 of 89,576 endpoints failing), about 72.2k LUT in-shell against the 69,461 modelled; the tile cft-rebound asked for (its docs/BITSTREAM.md, ask 5), and the first narrow variant on silicon: CAPS 0x6, fp32 refused by name, 543 device-test checks agreeing with the software backend (docs/VALIDATION.md, that day) |
 
-`*` targets, not results: the OOC ceilings in docs/ARCHITECTURE.md
+`*` targets, not results, and two of them (150*, 170*) are now at or below the full single's own clock, 175 MHz (assumed; 170 MHz closed and proven on the card, 2026-09-24): the OOC ceilings in docs/ARCHITECTURE.md
 (232 MHz at fp32, 148 at fp256, the middle rungs between) less the
 ~0.9 ns the shell has cost in practice. The widest rung a tile carries
 sets its clock, which is the whole reason narrow tiles exist. The
@@ -96,7 +96,7 @@ the numbers that matter are the fp128 and fp256 ones.
 | `u50-5xfp128` | 5x fp128-max | 5 | 20 | 150* | 654,666 | 75.2% | fits |  | placeholder (needs variant packaging; host-ready) |
 | `u50-7xfp64` | 7x fp64-max | 7 | 28 | 170* | 679,580 | 78.0% | fits |  | placeholder (needs variant packaging; host-ready) |
 | `u50-8xfp32` | 8x fp32-max | 8 | 32 | 190* | 558,335 | 64.1% | fits |  | placeholder (needs variant packaging; host-ready) |
-| `u50-7xfp64fp128` | 7x fp64fp128-max | 7 | 28 | 135* | 685,880 | 78.8% | fits |  | placeholder (needs variant packaging; host-ready) |
+| `u50-7xfp64fp128` | 7x fp64fp128-max | 7 | 28 | 135 | 685,880 | 78.8% | fits |  | placeholder (needs variant packaging; host-ready) |
 
 *(this table is written by `python hw/gen_layouts.py`; the two "built" rows are `hw/link_quad.cfg` and `hw/link.cfg` by another name - identical connectivity)*
 
@@ -132,14 +132,17 @@ Calibration: the model puts the routed quad at 687,319 against the
 80% "fits" line the quad itself sits on at 80.6%. A narrow tile is the
 full tile less the banks it drops; the remainder does not shrink with
 the rungs. Every narrow figure is a model until a narrow tile has been
-linked; the first one built will recalibrate this table.
+linked; the first one built, `cft_krnl_f64f128` (c56b368, 2026-09-14),
+placed about 4% over its model (72.2k against 69,461) - optimistic, as
+on the quad - and the table has not been recalibrated.
 
-Since these costs were measured (eb8ef2a) the round stage's
-precompute took the full tile to 123,420 flattened, -6,288 (9f73107,
-docs/ROADMAP.md); the bank costs above are one commit behind and the
-counts are conservative by about that much. They will be re-measured
-with `hw/synth_attrib.tcl` on the same tree before any narrow tile is
-packaged.
+Since these costs were measured (eb8ef2a) the round stage's precompute
+took the full tile to 123,420 flattened, -6,288 (9f73107,
+docs/ROADMAP.md); the bank costs above were then one commit behind and the
+counts conservative by about that much.
+They were not re-measured with `hw/synth_attrib.tcl` before the first
+narrow tile was packaged (c56b368, 2026-09-14), and the RTL has moved on
+since.
 
 ## What makes a placeholder a build
 
@@ -147,20 +150,20 @@ Every layout that names a narrow variant is a complete, correct link
 config for an `.xo` that does not exist yet. Two changes, both in the
 build flow and neither in the RTL:
 
-1. **Variant packaging.** Half done as of 2026-09-14. The generics
-   half: `CFT_GENERICS="EN_FP256=0" bash hw/rebuild-2022.sh` reaches
+1. **Variant packaging.** Half done as of 2026-09-14. The generics half:
+   `CFT_GENERICS="EN_FP256=0" bash hw/rebuild-2022.sh` reaches
    `hw/package_kernel.tcl`, which sets each value on the HDL parameter
-   before it strips the user parameters (the same mechanism
-   cft-rebound proved on its binary128 image, `docs/BITSTREAM.md`
-   there), prints every parameter the `.xo` carries as `HDLPARAM:`,
-   and with generics set `rebuild-2022.sh` runs `hw/verify_xo.tcl` -
-   the packaged IP instantiated and its synthesis wrapper read back -
-   and refuses to link if a requested value is not in the wrapper. The
-   manifest records `generics:` and the `HDLPARAM:` lines. The kernel
-   keeps the name `cft_krnl`, and the host no longer cares: it opens
-   compute units by what the image declares and what each answers to
-   `MAGIC`, so the variant names in this catalogue need no host change
-   to open. Still open: substituting the name into `hw/kernel.xml`, and
+   before it strips the user parameters (the same mechanism cft-rebound
+   proved on its binary128 image, `cft-rebound/docs/BITSTREAM.md`),
+   prints every parameter the `.xo` carries as `HDLPARAM:`, and with
+   generics set `rebuild-2022.sh` runs `hw/verify_xo.tcl` - the packaged
+   IP instantiated and its synthesis wrapper read back - and refuses to
+   link if a requested value is not in the wrapper. The manifest records
+   `generics:` and the `HDLPARAM:` lines. The kernel keeps the name
+   `cft_krnl`, and the host no longer cares: it opens compute units by
+   what the image declares and what each answers to `MAGIC`, so the
+   variant names in this catalogue need no host change to open. Still
+   open: substituting the name into `hw/kernel.xml`, and
    `rebuild-2022.sh` packaging one `.xo` per variant a *mixed* layout
    uses and handing all of them to `v++ -l`.
 2. **Per-variant clocks.** `rebuild-2022.sh` derives one `--clock.freqHz`
@@ -181,7 +184,7 @@ they are marked host-ready.
 ## Building one
 
     LINK_CFG=hw/layouts/u50-4xfp256.cfg KERNEL_FREQ=135000000 \
-      RETIMING=1 bash hw/rebuild-2022.sh
+      RETIMING=1 PHYS_OPT=1 bash hw/rebuild-2022.sh
 
 works today for the two full-tile rows. Every other row builds the
 same way once the two changes above land, and the manifest records

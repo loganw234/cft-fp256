@@ -125,10 +125,12 @@ bits and the flags.
   like-signed zeros keep their sign; a zero product carries the XOR of
   the operand signs; an `fma` that is zero because of rounding takes
   the sign of the exact result.
-- **The reductions** (opcodes 24, 25, 28, 29, 31 and `cft_reduce_seg`):
-  a fixed tree in which each node splits so that its left child is the
-  largest power of two strictly below the range, evaluated with the
-  caller's attribute at every node; never a sequential accumulation,
+- **The reductions** (opcodes 24, 25, 28, 29 and `cft_reduce_seg` over
+  them; `maxall`, 31, is exactly associative and commutative, flags
+  included, so its order is free and every order gives the model's
+  bits): a fixed tree in which each node splits so that its left child
+  is the largest power of two strictly below the range, evaluated with
+  the caller's attribute at every node; never a sequential accumulation,
   never reassociated, never padded. n = 0 gives +0 and raises nothing
   for `sum`, `dot`, `sumsq` and `sumabs`, and **-infinity** for
   `maxall`; n = 1 returns the element verbatim with no flag, a signaling
@@ -209,27 +211,30 @@ bit.
 
 Conformance is scored, not read.
 
-1. **The vector sets.** `vectors/gen_vectors.py`, run as the
-   Makefile's `vectors` target runs it (`--formats fp32 fp64 fp128
-   fp256 --rounding rne rtz rdn rup rmm --directed 3000 --random 4000
-   --simple 200`, the generator's default seed), writes 168 JSON-lines
-   files under `vectors/out/`: for each format, the opcode sets at each
-   attribute, the transcendental sets, the character-conversion sets,
-   the formatOf sets to each other format, the reduction sets, the
+1. **The vector sets.** `vectors/gen_vectors.py`, run as the Makefile's
+   `vectors` target runs it (`--formats fp32 fp64 fp128 fp256 --rounding
+   rne rtz rdn rup rmm --directed 3000 --random 4000 --simple 200`, the
+   generator's default seed), writes 168 JSON-lines files under
+   `vectors/out/`: for each format, the opcode sets at each attribute,
+   the transcendental sets, the character-conversion sets, the formatOf
+   sets to every format (its own included), the reduction sets, the
    augmented set and the magnitude set - **1,068,915 cases at profile
    1**, each line one case with its inputs, its expected result and its
    expected flags. `vectors/SHA256SUMS` lists the SHA-256 of each set,
    and the generator writes LF line endings on every platform so those
    hashes mean one thing everywhere.
-2. **The score.** Every case's result and flags must match exactly.
-   The replayers in this repository are `cft-selftest` (from
-   `host/tools/cft_selftest.c`; any backend, a device included), `bindings/wasm/verify.mjs` (the
-   module), the Python package's test suite and the Node package's
-   `conformance.mjs`; an independent implementation needs its own
-   replayer, which is a loop over the lines.
-3. **The identity protocol.** Every binding and language example drives
-   the same vectors through the library and prints one FNV-1a checksum
-   line per format over the raw output encodings:
+2. **The score.** Every case's result and flags must match exactly. The
+   replayers in this repository are `cft-selftest` (from
+   `host/tools/cft_selftest.c`; any backend, a device included),
+   `bindings/wasm/verify.mjs` (the module), `cpp-api-test` (the C++
+   header), `host/tools/serial_replay.py` (a board, over a wire) and the
+   Node package's `conformance.mjs`; an independent implementation needs
+   its own replayer, which is a loop over the lines.
+3. **The identity protocol.** The example in each of eight languages
+   (docs/COMPATIBILITY.md; the Fortran example, a ninth, prints decimals
+   and is not in the checksum diff) drives the same vectors through the library
+   and prints one FNV-1a checksum line per format over the raw output
+   encodings:
 
        fp32   0x9af9d3973816adcf
        fp64   0x04110a4c30c6df4d

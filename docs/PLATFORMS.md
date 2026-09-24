@@ -19,7 +19,7 @@ against a vendor's marketing arithmetic. The constants:
 |---|---|---|
 | full tile, flattened (shipping settings) | **123,420 LUT** | 9f73107, 2026-09-02, docs/ROADMAP.md |
 | full tile, hierarchy preserved (the sizing figure) | **131,386 LUT** | `hw/synth_attrib.tcl` on eb8ef2a, docs/LAYOUTS.md |
-| DSP per tile | 292 ladders off / 277 ladders on | docs/SCALING.md |
+| DSP per tile | 292 ladders off / 277 ladders on, the pre-route estimate; routed, 307 a tile on the round-2 U50 pair (the integer multiply's 45 included) and 286 on the XC7K325T once that multiply was registered (6a2b26c), ladders on or off | docs/SCALING.md; docs/VALIDATION.md, 2026-09-16 and 2026-09-23 with its correction |
 | BRAM per tile | 36 RAMB36 on the 2026-09-07 tree; **116** on the tree of 2026-09-23 on 7-series fabric, Vivado and Yosys alike, with no UltraRAM to take the sequencer's memories | docs/VALIDATION.md, 2026-09-07 and 2026-09-23 (this row said 16 until then, citing docs/LAYOUTS.md, which states no BRAM figure) |
 | fp128-max tile (drop fp256) | 96,053 LUT | 131,386 - 35,333, docs/LAYOUTS.md bank costs |
 | fp64-max tile | 68,561 LUT | less the 27,492 fp128 bank |
@@ -27,10 +27,10 @@ against a vendor's marketing arithmetic. The constants:
 | shell + one CU (U50) | 123,897 LUT | differenced routed builds, docs/SCALING.md |
 | each further CU | +12,626 LUT | (161,775 - 123,897) / 3, docs/LAYOUTS.md |
 | practical routing ceiling | ~85% | docs/SCALING.md; the routed quad closed at 80.6% |
-| kernel clock | 135 MHz, -2 grade, retimed | 9f73107, docs/LAYOUTS.md |
+| kernel clock | 135 MHz, -2 grade, retimed - the quad's, and the clock the demand derivation below uses; the single tile's is 175 MHz (assumed; 170 MHz closed and proven on the card, 2026-09-24) | 9f73107, docs/LAYOUTS.md; docs/VALIDATION.md, 2026-09-16 and 2026-09-24 |
 | beat | 256 bits, one per cycle per stream | docs/ARCHITECTURE.md |
 | streams | 3 in + 1 out = 4 AXI masters per tile | docs/ARCHITECTURE.md |
-| measured cost | 1.250 cycles/beat marginal, 36 fixed | `make cycles`, docs/SCALING.md |
+| measured cost | 1.125 cycles/beat marginal, 40 fixed, since the read-ahead of 2026-09-09; the demand below is derived from the 1.250 and 36 measured before it | `make cycles`, docs/VALIDATION.md 2026-09-09, docs/SCALING.md |
 
 Two older figures appear in the brief and are kept here as the
 historical lower bound, because they measure a different thing - out
@@ -142,9 +142,11 @@ and [DS180 v2.6.1,
 UltraScale+ measurements and the carry structure differs: the fp256
 adder uses 21 CARRY8 per critical path, which becomes 42 CARRY4 on
 7-series (docs/ROADMAP.md). And openXC7 splits wide multiplies into
-18x18 partials rather than Vivado's 25x18, so a tile there should be
-counted near 390-400 DSPs rather than 292 - which raises every
-7-series DSP percentage by about 1.5x and, on every row above, still
+18x18 partials rather than Vivado's 25x18, so a tile there was
+estimated at 390-400 DSPs rather than 292, and measured at 506
+against Vivado's 307 on the same tree, the full tile with the ladders
+off (docs/VALIDATION.md, 2026-09-23) - which raises every 7-series
+DSP percentage by about 1.65x and, on every row above, still
 flips no verdict. *Measured 2026-09-22 in the `board` configuration
 (ten passes):* Yosys infers 120 DSP48E1 where Vivado places 101 on the
 same tree - two DSP rows for each 24-bit multiplier chunk
@@ -284,11 +286,11 @@ host-side splitting, and for the deep-zoom and orbit workloads it is a
 real gain rather than a curiosity.
 
 **5. And the workload the tile exists for is not the one being
-penalised.** 13.82 GB/s per tile is the **elementwise streaming**
-worst case: three operand streams and a writer, one beat per cycle,
-every cycle. A sequencer run is a different shape. docs/ATLAS.md's
-positives become "a sequencer program image, a constant bank, a stream
-layout and a deposit schema" - the program and its sixteen constants
+penalised.** 13.82 GB/s per tile is the **elementwise streaming** worst
+case: three operand streams and a writer, one beat per cycle, every
+cycle. A sequencer run is a different shape. docs/ATLAS.md's positives
+become "a sequencer program image, a constant bank, a stream layout and
+a deposit schema" - the program and its constants (a 512-entry bank)
 live on-chip, `s.orbit` becomes `REPEAT`/`ENDREP` executing many
 instructions per sample, and the traffic is the deposits rather than
 three streams at line rate. **Per unit of arithmetic, a sequencer
@@ -307,7 +309,7 @@ measured against cocotbext-axi's `AxiRam`, which docs/SCALING.md
 already declines to call a prediction for HBM. It is even less of one
 for DDR4, where a row miss costs far more and the engine's 16-beat
 512-byte bursts become 8 beats on a 512-bit port. The engine pipelines
-address phases and holds 128-beat FIFOs, so it should absorb it. Should.
+address phases and holds 512-beat FIFOs, so it should absorb it. Should.
 
 ### Shell-less bring-up, and why it might be the point
 
@@ -522,14 +524,14 @@ performs like a plain UltraScale part at about 30% less power, and at
 and a -2L at 0.72 V is materially slower. **Which VCCINT the Alveo
 deployment shell actually programs is UNVERIFIED.**
 
-The project's kernel closes at 135 MHz with **+0.143 ns** of slack on
-the quad (docs/LAYOUTS.md) - a margin that a slower voltage-speed
-operating point would eat outright. **Do not assume a U200 or U250
-reaches the U50's clock.** Verify the operating voltage on the card
-before committing to any Fmax, and treat 135 MHz as a hypothesis there
-rather than a carried-over result. Nothing similar applies to the
-U55C, whose grade was not established either but which at least shares
-the U50's HBM-part lineage.
+The project's kernel closes at 135 MHz with **+0.040 ns** of slack on
+the quad, and only on a directive rebuild (docs/VALIDATION.md,
+2026-09-16) - a margin that a slower voltage-speed operating point would
+eat outright. **Do not assume a U200 or U250 reaches the U50's clock.**
+Verify the operating voltage on the card before committing to any Fmax,
+and treat 135 MHz as a hypothesis there rather than a carried-over
+result. Nothing similar applies to the U55C, whose grade was not
+established either but which at least shares the U50's HBM-part lineage.
 
 #### The SmartNICs and video cards: ruled out, with reasons
 
@@ -921,14 +923,15 @@ Three rows deserve comment.
 free tier that holds a whole tile.** Same CARRY8 structure as the U50,
 so the project's area and timing numbers transfer directly instead of
 carrying the 7-series penalty - it is the one board on which a tile's
-measured 123,420 LUT and 135 MHz mean what they mean. The board:
-XCKU5P-2FFVB676E, "DDR4 up to 32-bits", "PCIe Gen3 x8 compliant",
-$6,495.00 new, part EK-U1-KCU116-G, 8-week lead time
-([AMD store](https://www.xilinx.com/products/boards-and-kits/ek-u1-kcu116-g.html),
-seen 2026-09-05). The 32-bit DDR4 is the catch: at DDR4-2400 that is
-9.6 GB/s against a tile's 13.82 GB/s demand, so **one tile on a
-KCU116 is memory-starved by about 30%** unless the DDR4 runs faster
-than 2400 - which is UNVERIFIED for this board.
+measured 123,420 LUT and its clock, 175 MHz (assumed; 170 MHz closed and
+proven on the card, 2026-09-24), mean what they mean. The
+board: XCKU5P-2FFVB676E, "DDR4 up to 32-bits", "PCIe Gen3 x8 compliant",
+$6,495.00 new, part EK-U1-KCU116-G, 8-week lead time ([AMD
+store](https://www.xilinx.com/products/boards-and-kits/ek-u1-kcu116-g.html),
+seen 2026-09-05). The 32-bit DDR4 is the catch: at DDR4-2400 that is 9.6
+GB/s against a tile's 13.82 GB/s demand, so **one tile on a KCU116 is
+memory-starved by about 30%** unless the DDR4 runs faster than 2400 -
+which is UNVERIFIED for this board.
 
 **VC707 / XC7VX485T is openXC7's largest supported die.** The
 openXC7 database carries `xc7vx485tffg1761-{1,2,2L,3}`, which is the
@@ -1579,7 +1582,7 @@ row names no individual device.
   documentation says what the tier covers; it does not say what the
   FEATURE lines in one particular `Xilinx.lic` enumerate. Whether that
   file gates on device is answerable in ten minutes without buying
-  anything - see the checklist in §8.
+  anything - see the checklist in §9.
 * **Also unverified:** whether the free-tier Alveo coverage of the
   2022.x era continues to apply to a *newly downloaded* 2022.2
   installation today, given that the licensing infrastructure has since
@@ -1738,7 +1741,8 @@ Worth recording because it is the reason renting is not a shortcut:
   the AXI4 masters `v++` wires up on a U50.
 * **Clocks.** F1 caps the kernel clock at 250 MHz; F2's shell fixes
   `clk_main_a0` at 250 MHz with `clk_hbm_axi` configurable to 450 MHz.
-  The project's 135 MHz is comfortably inside both.
+  The project's 135 MHz quad and 175 MHz (assumed; 170 MHz closed and
+  proven on the card, 2026-09-24) single are comfortably inside both.
 * **XRT version.** Neither AWS platform pairs with XRT 2.13/2.14.
 * **The host.** F2 replaces XRT buffer management with a
   user-implemented DMA or AWS's Streaming Data Engine, and pyxrt with
@@ -1785,7 +1789,7 @@ board's `xc7k325tffg676-1` is the -1 grade, and this tile misses an
 -2 K325T closes 100 MHz with 0.096 ns to spare (docs/VALIDATION.md,
 2026-09-07). As the flow test below the board is still right; as a
 board that *runs* the tile, a -2 part is worth the difference - the
-$341 K325T PCIe card of section 5 (`XC7K325T-2FFG676I`, Gen2 x8, 1 GB
+$341 K325T PCIe card of §3 (`XC7K325T-2FFG676I`, Gen2 x8, 1 GB
 DDR3) or the PZ-K7325T SOM in the Puzhi rows at the end of this
 document, both -2, in the two packages the routed runs covered.
 *On the tree of 2026-09-23 the -2 missed 100 MHz* - the integer
@@ -1797,13 +1801,13 @@ registered the same day (6a2b26c): +0.411 ns at 100 MHz, 53.3%*
 The reasoning is about evidence, not specifications. `xc7k325tffg676-1`
 is the exact die *and package* that openXC7's CI builds
 (`blinky-qmtech`, `blinky-stlv7325`), and a demonstrated part is worth
-more than a better one. A full tile is 60.6% of an XC7K325T - 47.0%
-routed in the `board` configuration, docs/VALIDATION.md 2026-09-07 -
-which is
-the comfortable-fit row of §2's table, and Kintex-7 became free-tier
-in Vivado 2026.1 so the same board is also a vendor-flow target - a
-Vivado-versus-openXC7 A/B on one board is exactly the build-diversity
-pairing docs/ROADMAP.md wants.
+more than a better one. A full tile is 60.6% of an XC7K325T by §2's
+arithmetic, 67% routed in Vivado (docs/VALIDATION.md, 2026-09-23) -
+47.0% routed in the `board` configuration, docs/VALIDATION.md
+2026-09-07 - which is the comfortable-fit row of §2's table, and
+Kintex-7 became free-tier in Vivado 2026.1 so the same board is also a
+vendor-flow target - a Vivado-versus-openXC7 A/B on one board is exactly
+the build-diversity pairing docs/ROADMAP.md wants.
 
 **But the first result to want from it is not a tile.** It is whether
 [#159](https://github.com/openXC7/nextpnr-xilinx/pull/159) still
@@ -1826,8 +1830,8 @@ unshown one: nextpnr-xilinx has carried `PCIE_2_1` since 2025, but
 nobody has shown x8 on a 325T through it (§3, corrected 2026-09-22; this
 sentence first said openXC7 had no PCIe hard-block support at all).
 
-*Not recommended:* the PZ SOM family, until the carrier price is
-quoted (the x8 KFB has no published price and the cheaper FH variant
+*Not recommended:* the PZ SOM family's -FH- carriers (the x8 KFB is
+priced in the appendix, which shortlists it; the cheaper FH variant
 silently wires only two lanes); and the PZ-K7410T specifically, since
 XC7K410T is absent from the openXC7 database.
 
@@ -1872,7 +1876,7 @@ is 5.57 tiles at an efficiency no controller achieves under four
 interleaved streams per tile. Against a U50 quad that is somewhere
 between "no gain" and "one extra tile", for a 215 W dual-width card
 that also brings **a -2L device where the U50 is a -2** - so the
-135 MHz that closes with +0.143 ns on the owned card is a hypothesis
+135 MHz the quad closes with +0.040 ns on the owned card is a hypothesis
 there, not a carried-over result - and:
 
 * the **same encrypted-shell-IP era problem** - the U200 platform was
@@ -2040,7 +2044,7 @@ no purchase:
 
 ```bash
 grep -i '^\(FEATURE\|INCREMENT\)' ~/.Xilinx/Xilinx.lic   # what is granted
-# then the real test, on the Windows box or amd-arc-box under 2026.1:
+# then the real test, on the Windows box under 2026.1 with XILINXD_LICENSE_FILE on its Alveo file (docs/BRINGUP.md; amd-arc-box has 2022.2 only):
 vivado -mode batch -source /dev/stdin <<'EOF'
 create_project -in_memory -part xcu250-figd2104-2L-e
 EOF
@@ -2053,9 +2057,11 @@ under license control", so synthesis succeeding is not proof that
 bitstream generation will.
 
 **Is "Basic" actually the free tier?** The same session settles it.
-Install 2026.1 with no licence file present and check that `xc7k325t`,
-`xc7k480t` and `xc7vx485t` are selectable and that `write_bitstream`
-completes. Every Kintex-7 recommendation in §3 rests on an inference
+2026.1 will not launch without a licence (docs/BRINGUP.md), so the
+check runs on the Basic-only licence file: under it `xc7k325t` and
+`xc7k480t` open and the 325T routes (docs/VALIDATION.md, 2026-09-22
+and 2026-09-23); `xc7vx485t` and a completed `write_bitstream` are
+still to check. Every Kintex-7 recommendation in §3 rests on an inference
 from UG973's tier ordering, not on AMD stating the word "free" in that
 document.
 
@@ -2168,7 +2174,7 @@ Everything in list 2, plus:
   needs one.
 * **Above 4G Decoding** in the host BIOS. Note §1's correction: this is
   not actually documented by AMD for Alveo compute cards. Enable it
-  regardless - it costs nothing - but **still confirm it on
+  regardless - it costs nothing - and it is **confirmed on
   amd-arc-box's X99-UD4**, which is the box holding the licence
   node-lock and the 46 GB of RAM, and if a card fails to enumerate go
   to the BIOS fastboot / bifurcation / USB-cable checklist first.
@@ -2217,12 +2223,17 @@ one matters to a decision.
   already warns that the shell crossbar "grows with port count and
   goes superlinear eventually"; twenty masters on a U250 is well past
   where that was measured.
-* **7-series area for this design.** Every 7-series percentage is an
-  UltraScale+ measurement carried across a different carry structure
-  (21 CARRY8 becomes 42 CARRY4). Nothing in this document is a
-  7-series measurement of this tile, because none exists.
+* **7-series area for this design.** Nothing in this document is a
+  7-series measurement of this tile except the runs it cites from
+  docs/VALIDATION.md, among them the full tile the U50 ships routed in
+  Vivado on a -2 325T at 67% of its LUTs (2026-09-23); every other
+  7-series percentage is an UltraScale+ measurement carried across a
+  different carry structure (21 CARRY8 becomes 42 CARRY4).
 * **openXC7 DSP counts.** The 390-400 figure is docs/ROADMAP.md's
-  estimate from the 18x18 decomposition, un-measured.
+  estimate from the 18x18 decomposition; measured since at 120 DSP48E1
+  in the `board` configuration and 506 for the full tile with the
+  ladders off, against Vivado's 101 and 307 on the same tree
+  (docs/VALIDATION.md, 2026-09-22 and 2026-09-23).
 * **A sequencer program's memory bandwidth**, on any memory. `make
   cycles` measures the streaming engine only, so every per-tile
   bandwidth figure here prices the elementwise mode and none of them
@@ -2249,11 +2260,13 @@ one matters to a decision.
 **Things simply not found.**
 
 * **Which VCCINT the Alveo deployment shells actually program on a -2L
-  part.** DS890 says a -2L runs like a plain UltraScale device at
-  0.72 V and "over 30% faster" at 0.85 V. The U200, U250 and VCU1525
-  are all -2L. Whether a U250 would reach the U50's 135 MHz therefore
-  cannot be answered from documents; it needs a card. This is the
-  second-most decision-relevant gap in the survey after used pricing.
+  part.** DS890 says a -2L runs like a plain UltraScale device at 0.72 V
+  and "over 30% faster" at 0.85 V. The U200, U250 and VCU1525 are all
+  -2L. Whether a U250 would reach the U50's clocks - 135 MHz for the
+  quad, 175 MHz (assumed; 170 MHz closed and proven on the card,
+  2026-09-24) for the single - therefore cannot be answered from
+  documents; it needs a card. This is the second-most decision-relevant
+  gap in the survey after used pricing.
 * **The U55C's and U280's shipped speed grades.** No AMD datasheet
   states a speed grade for any Alveo card; the three -2L strings above
   come from third-party mirrors of UG1289 and UG1268, and no
@@ -2519,7 +2532,8 @@ fetched 2026-09-06), and `xc7k325tffg900-2` is the `PART` line of the
 product in the entire Puzhi catalogue whose exact device-package-speed
 string is an openXC7 continuous-integration target.** One full tile at
 60.6% raw, 71.2% of the 85% budget; DSP 840 is 2.9 tiles at the
-survey's 292, and still 2.1 tiles at openXC7's inflated 390-400. The
+survey's 292, and still 1.7 tiles at the 506 openXC7 measured for the
+full tile (docs/VALIDATION.md, 2026-09-23). The
 memory is the other half of the case: **2 GB DDR3 on a 64-bit bus**,
 stated in the catalogue, on en.puzhi.com, and independently by
 CodeRobin as "4x 512MB, 64bit Bus". At DDR3-1600 that is 12.80 GB/s
@@ -2534,25 +2548,26 @@ two SFP cages, SATA, and a gigabit PHY that en.puzhi.com specifies as
 interface LiteEth wants.
 
 **Zynq UltraScale+: PZ-ZU7EV-SOM / PZ-ZU7EG-SOM + PZ-ZU7EV-KFB.** The
-one place in this catalogue where a full tile and its bandwidth are
-both satisfied. XCZU7EV/EG is 230,400 LUT - one tile at **53.6%**, two
-at 107% (no) - with 1,728 DSP and 27 Mb of UltraRAM. Both devices sit
+one place in this catalogue where a full tile and its bandwidth are both
+satisfied. XCZU7EV/EG is 230,400 LUT - one tile at **53.6%**, two at
+107% (no) - with 1,728 DSP and 27 Mb of UltraRAM. Both devices sit
 inside the free **Basic** tier (§2: Zynq UltraScale+ MPSoC covered "up
 to XCZU7EV / XCZU7EG / XCZU7CG"), and both are UltraScale+ CARRY8, so
-the project's measured 123,420 LUT and 135 MHz transfer without the
-7-series carry penalty the survey warns about. The decisive number is
-on p.16 of the catalogue: **"PL侧4GB 2400Mhz*64bit"** - four gigabytes
-of DDR4 on a 64-bit bus at 2400 Mbps wired to the *programmable logic*,
-independent of the identical PS-side bank. That is **19.20 GB/s, 139%
-of one tile's demand**, and it is the only figure in the catalogue
-where the rate is printed rather than assumed. CodeRobin's English
-listing confirms it verbatim: "4x 1GB DDR4, total 4GB, 64bit Bus, Data
-Rate 2400Mbps" on each side. The carrier adds **a second gigabit PHY
-on the PL side** alongside the PS one, two SFP+ cages, an FMC-HPC, two
-SATA and Gen3 x4. Read against the KCU116 row in §2 - same free tier,
-same architecture, 230,400 LUT against 216,960, and 19.2 GB/s against
-the KCU116's memory-starved 9.6 - this module is strictly the better
-object, at roughly a fifth of the KCU116's $6,495 list.
+the project's measured 123,420 LUT and the tile's clock, 175 MHz
+(assumed; 170 MHz closed and proven on the card, 2026-09-24), transfer
+without the 7-series carry penalty the survey warns about. The decisive
+number is on p.16 of the catalogue: **"PL侧4GB 2400Mhz*64bit"** - four
+gigabytes of DDR4 on a 64-bit bus at 2400 Mbps wired to the
+*programmable logic*, independent of the identical PS-side bank. That is
+**19.20 GB/s, 139% of one tile's demand**, and it is the only figure in
+the catalogue where the rate is printed rather than assumed. CodeRobin's
+English listing confirms it verbatim: "4x 1GB DDR4, total 4GB, 64bit
+Bus, Data Rate 2400Mbps" on each side. The carrier adds **a second
+gigabit PHY on the PL side** alongside the PS one, two SFP+ cages, an
+FMC-HPC, two SATA and Gen3 x4. Read against the KCU116 row in §2 - same
+free tier, same architecture, 230,400 LUT against 216,960, and 19.2 GB/s
+against the KCU116's memory-starved 9.6 - this module is strictly the
+better object, at roughly a fifth of the KCU116's $6,495 list.
 
 **Zynq-7000: PZ7100-SOM-900 and PZ7045-SOM-900.** Overlooked in the
 survey and worth a second look, because openXC7's `zynq7` database

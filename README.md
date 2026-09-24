@@ -18,8 +18,8 @@ Apache-2.0.
 
 | What it computes | How you call it | How it is checked | On the card | When it pays |
 |---|---|---|---|---|
-| binary32 / 64 / 128 / 256 | C, C++, Python, Rust, Julia, Go, C#, R, Fortran | **1,068,915** conformance cases | Alveo U50: 1,071,635 then 1,224,915 cases replayed on silicon | **binary128 4.5x**, **binary256 5.5x** |
-| 31 opcodes, 5 rounding modes, 39 transcendentals | one ABI; software, FPGA or remote; no dependencies | **39** gate stages, 25 RTL sims, 30 proofs | 427 M elem/s, 4 tiles, ~35 W | **binary32 / 64: a CPU wins** |
+| binary32 / 64 / 128 / 256 | C, C++, Python, Rust, Julia, Go, C#, R, Fortran | **1,068,915** conformance cases | Alveo U50: 1,071,635, 1,224,915, then the published 1,068,915 cases replayed on silicon | **binary128 4.5x**, **binary256 5.5x** |
+| 31 opcodes, 5 rounding modes, 39 transcendentals | one ABI; software, FPGA or remote; no dependencies | **40** gate stages, 25 RTL sims, 30 proofs | 427 M elem/s, 4 tiles, ~35 W | **binary32 / 64: a CPU wins** |
 
 <sub>Speed-ups are **multiply**, one tile against the fastest software on the same machine - the CPU's own FPU, `__float128` or MPFR, never our own softfloat. Four tiles reach 17.5x and 21.1x. Fused multiply-add is a different picture, and better: 14.0x at binary128 on one tile. [Where those lines fall, measured](#when-this-matters-and-when-it-does-not).</sub>
 
@@ -116,10 +116,11 @@ multiply-add moves the line, and always in the tile's favour: see the
 end of this section.
 
 **Read the losses first.** At binary32 and binary64 a single tile is
-*slower* than a CPU - 1.6x and 1.1x behind an x86-64 workstation, and
-7.2x behind an M2 Pro, which vectorises both formats hard. Four tiles
-pass the workstation and still lose to the laptop. Those formats have
-been in silicon for forty years, this tile runs at 135 MHz, and it was
+*slower* than a CPU - 1.6x and 1.1x behind an x86-64 workstation, and 7.2x
+behind an M2 Pro, which vectorises both formats hard. Four tiles pass the
+workstation and still lose to the laptop. Those formats have been in silicon
+for forty years, this tile was measured at 135 MHz (one tile closes 175 MHz,
+assumed; 170 MHz closed and proven on the card, 2026-09-24), and it was
 never going to win them.
 
 **At binary128 and binary256 that inverts and stays inverted** - 4.5x
@@ -208,14 +209,15 @@ standard does not, and which files and hashes "conforming" means.
 The rule is that a number in a document has a run behind it, and the
 runs that failed stay in the record. The load-bearing ones:
 
-- **The card replayed the conformance sets on silicon**, through one
-  tile and through four: 1,071,635 cases on 2026-09-08 and 2026-09-09,
-  the published set as it then stood, and the runner's larger
-  1,224,915-case generation on 2026-09-15, 09-16 and 09-18. The
-  published set is **1,068,915** cases since opcode 31 was assigned on
-  2026-09-12, and that exact set has been replayed on hosts rather than
-  on the card. `docs/CARDDAY.md` is the runbook as it was actually run;
-  `docs/VALIDATION.md` is the running record.
+- **The card replayed the conformance sets on silicon**, through one tile
+  and through four: 1,071,635 cases on 2026-09-08 and 2026-09-09, the
+  published set as it then stood, and the runner's larger 1,224,915-case
+  generation on 2026-09-15, 09-16 and 09-18. The published set is
+  **1,068,915** cases since opcode 31 was assigned on 2026-09-12, and that
+  exact set was replayed on the card, one tile, at each point of the
+  2026-09-23/24 clock sweep from 145 to 170 MHz. `docs/CARDDAY.md` is the
+  runbook as it was actually run; `docs/VALIDATION.md` is the running
+  record.
 - **Division and square root** are held against 23.875 billion cases of
   the host CPU's own IEEE hardware - binary32 and binary64 only, that
   being where a CPU can arbitrate, and exhaustive binary32 square root
@@ -385,7 +387,7 @@ What it has shown so far:
 - **One tile overtakes the software backend somewhere between 6 and 64
   bodies, and is still pulling away at 512.** Measured 2026-09-14 on a
   one-tile binary128 image at 150 MHz, against the same integration in
-  software at binary128 (cft-rebound's `docs/VALIDATION.md`, entry 37):
+  software at binary128 (`cft-rebound/docs/VALIDATION.md`, entry 37):
   0.13 to 0.25x on two-, three- and six-body problems, 2.2x at 64
   bodies, 3.7x at 256 and 3.9x at 512 - no plateau seen. The engine's
   width is its whole advantage and a small system leaves it idle; the
@@ -409,8 +411,9 @@ gathers with them (`docs/VALIDATION.md`, the card day of 2026-09-15).
 The general lesson about irregular access patterns is in
 `docs/INTEGRATION.md`.
 
-The port is in active development and its own `docs/VALIDATION.md`
-carries the numbers, the dates and the failures.
+The port is in active development and its own
+`cft-rebound/docs/VALIDATION.md` carries the numbers, the dates and the
+failures.
 
 ## Neighbours
 

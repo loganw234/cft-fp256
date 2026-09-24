@@ -264,16 +264,17 @@ bit for bit, and the cross-check holds them to that over every
 starting value it tries, in both directions of the exactness
 boundary. It is also what a device without `MODE[15]` would run.
 
-**One thing the program model could not do**, recorded because it is
-the kind of observation the sequencer's designers can act on: a
-program has three input streams (`a`, `b`, `c` into `r0`, `r1`, `r2`)
-and no way to initialise any other register. This workload needs four
-pieces of per-element state to resume mid-trajectory - n, the step
-count, the peak, and whether it escaped - and it only fits because the
-fourth is an output that always starts at +0. A workload needing four
-*inputs* would have to split into two programs or pack two values into
-one element. A fourth stream, or a "load `r3..` from the deposit
-buffer" mode, would remove that.
+**One thing the program model could not do**, recorded because it is the
+kind of observation the sequencer's designers can act on: a program has
+three input streams (`a`, `b`, `c` into `r0`, `r1`, `r2`) and, until
+revision 3's scratch block, no way to initialise any other register.
+This workload needs four pieces of per-element state to resume
+mid-trajectory - n, the step count, the peak, and whether it escaped -
+and it only fits because the fourth is an output that always starts at
++0. A workload needing four *inputs* would have had to split into two
+programs or pack two values into one element. A fourth stream, or a
+"load `r3..` from the deposit buffer" mode, would remove that, and
+revision 3's scratch block did (docs/SEQUENCER.md).
 
 **And one thing that would remove the witness entirely**: an optional
 per-element flag output on `cft_run` and `cft_program_run`. The union
@@ -351,11 +352,11 @@ clean stop at an arbitrary pass, which leaves exactly the file an
 interval-triggered write would have left at that moment.
 
 SHA-256's eight initial words and sixty-four round constants are
-**derived** in the tool from the square and cube roots of the first 64
-primes, by integer binary search in 128-bit arithmetic, rather than
-typed in - this repository's standing rule about constants. The
-cross-check recomputes the chain with Python's `hashlib`, which is
-what proves the derivation right.
+**derived** in the library (`host/src/sha256.c`) from the square and
+cube roots of the first 64 primes, by integer binary search in 128-bit
+arithmetic, rather than typed in - this repository's standing rule about
+constants. The cross-check recomputes the chain with Python's `hashlib`,
+which is what proves the derivation right.
 
 ---
 
@@ -380,7 +381,7 @@ every call for exactly that reason, and does.
 |---|---|
 | results | every record against a Python big-integer oracle that models the stopping rule exactly - including *which* step exactness ran out on - at fp256, fp64 and fp32, over ordinary starts and over starts sitting on the boundary |
 | engines | the sequencer program and the host `cft_run` loop must produce byte-identical records, and must land on the same checkpoint |
-| formats | where a trajectory stays inside binary64's exact range, fp64, fp128 and fp256 must produce identical records - and they produce identical **chains**, which is the ladder's one contract seen from the outside |
+| formats | where a trajectory stays inside binary64's exact range, fp64 and fp256 must produce identical records - and they produce identical **chains**, which is the ladder's one contract seen from the outside |
 | batch size | 64, 1000 and 4096 over the same range must end on byte-identical checkpoints |
 | interruption | a run stopped every few passes and resumed, at a *different* batch size and trip count, must end on the same checkpoint - byte for byte - as one that was never stopped |
 | the chain | recomputed with `hashlib` |

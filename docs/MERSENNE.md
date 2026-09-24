@@ -283,11 +283,15 @@ every intermediate residue.
 chain.** This is the observation for the sequencer's designers, and it
 is a different one from the Collatz tool's:
 
-- a convolution coefficient is a **cross-element reduction**. A lane
-  has thirty-two private registers, three input streams and **no path
-  to another lane** (`docs/SEQUENCER.md`), and `cft_reduce`'s tree is
-  not in the sequencer's opcode set. Thirty-two registers could hold
-  thirty-two limbs, but nothing can get limb *j* into lane *i*.
+- a convolution coefficient is a **cross-element reduction**. A lane has
+  thirty-two private registers, three input streams and **no path to
+  another lane** (`docs/SEQUENCER.md`), and `cft_reduce`'s tree is not
+  in the sequencer's opcode set. Thirty-two registers could hold
+  thirty-two limbs, and since revision 3 (2026-09-08) the host can
+  preload a lane's scratch with limbs of its choosing - through an index
+  table, without copying them, since round 2 (2026-09-15) - but nothing
+  inside a program can get limb *j* into lane *i*, and this tool preloads
+  none.
 - the carry chain's shifted add reads the **neighbouring** element's
   carry. Same obstacle.
 
@@ -363,12 +367,13 @@ over records in **exponent-list order**, where a record is
     <P> <prime|composite> <squarings> <res64 in hex>
 
 That record mentions **no format and no limb geometry**, which is
-deliberate: fp32, fp64, fp128 and fp256 therefore return the same
-chain, and res64 is the number an unrelated Lucas-Lehmer implementation
-would print. SHA-256's eight initial words and sixty-four round
-constants are **derived** in the tool from the square and cube roots of
-the first 64 primes by integer binary search, rather than typed in -
-this repository's standing rule about constants - and the cross-check
+deliberate: fp32, fp64, fp128 and fp256 therefore return the same chain,
+and res64 is the number an unrelated Lucas-Lehmer implementation would
+print. SHA-256's eight initial words and sixty-four round constants are
+**derived** in `host/src/sha256.c`, the library's one copy that the tool
+has included since 2026-09-08, from the square and cube roots of the
+first 64 primes by integer binary search, rather than typed in - this
+repository's standing rule about constants - and the cross-check
 recomputes the chain with Python's `hashlib`, which is what proves the
 derivation right.
 
@@ -548,12 +553,12 @@ library calls that takes.
 **1.02x to 1.27x**, where `docs/COLLATZ.md` measured 1.5x to 2.1x for
 the same route on the same backend. The difference is honest and
 structural rather than disappointing: in Collatz the program IS the
-whole step, and here it is only the carry split. The convolution -
-which cannot be a program at all, for the reason in the section above -
-is where most of the time goes, and it is identical in both engines. On
-a device the picture changes, because a call becomes a round trip;
-that is the number the "what a device would change" section owns, and
-it is not measured here.
+whole step, and here it is only the carry split. The convolution - which
+cannot be a program at all, for the reason in the section above - is
+where most of the time goes, and it is identical in both engines. On a
+device the picture changes, because a call becomes a round trip; that is
+the number the "What a device run would change" section owns, and it is
+not measured here.
 
 ### Throughput against batch size
 
@@ -646,7 +651,7 @@ the software backend and issues the identical program. What changes:
   below 16 elements runs at pipeline speed rather than throughput
   speed. That is a real constraint here: a linear convolution's dots
   are 1, 2, 3, ... elements long at the ends, and at L = 12 **every one
-  of the 23** is under 15. The small exponents would gain least from a
+  of the 23** is under 16. The small exponents would gain least from a
   card, which is the opposite of the usual shape.
 - **What would not be measured honestly.** Numbers from `hw_emu` are
   RTL simulation seconds and mean nothing as hardware performance;
@@ -815,9 +820,10 @@ exact route is a number-theoretic transform, which is a different
 machine: modular arithmetic, not IEEE 754.
 
 The hardware half would not be closed by this project's tile either. A
-tile issues one beat a cycle - one fp256 lane - so at 135 MHz it is
-order 10^8 fp256 operations a second against this backend's ~10^6.2.
-Two orders, not six.
+tile issues one beat a cycle - one fp256 lane - so at 175 MHz (assumed;
+170 MHz closed and proven on the card, 2026-09-24) it is order 10^8
+fp256 operations a second against this backend's ~10^6.2. Two orders,
+not six.
 
 ### What the exactness actually buys, since it is not speed
 

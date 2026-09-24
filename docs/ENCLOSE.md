@@ -318,13 +318,14 @@ still chunks this kernel at 128 is the tool's own `CHUNK_KX`
 (`host/tools/enclose.c`), which was sized to the 256-entry reach and
 has not been raised. That is a tool limit now, not a tile one.
 
-Two smaller notes on the same subject, both consistent with what
+Three smaller notes on the same subject, consistent with what
 `docs/COLLATZ.md` recorded:
 
 - **A program has three input streams and no fourth.** Here that is
   exactly enough - point, lower bound, upper bound - and it is exactly
   enough by luck rather than by design. An interval Horner over an
-  interval `x` rather than a point would need four.
+  interval `x` rather than a point would need four, or revision 3's
+  scratch block, which the host preloads per lane.
 - **Composed operations are not in the ISA.** The series kernel divides,
   and `cft_div` is a host-orchestrated seed-and-Newton sequence, so a
   program cannot issue one. (The library already issues that sequence
@@ -484,11 +485,11 @@ over records in **item order**, where a record is
 
 `--records PATH` writes exactly those lines, so the chain can be
 recomputed by anything; `host/tests/enclose_check.py` recomputes it with
-`hashlib`, which is what proves the tool's derivation of SHA-256's
-round constants from the cube roots of the first sixty-four primes
-right. That file is truncated at the start of each run and is not
-resume-aware - the checkpoint's chain is the thing that spans an
-interruption.
+`hashlib`, which is what proves the library's derivation
+(`host/src/sha256.c`) of SHA-256's round constants from the cube roots
+of the first sixty-four primes right. That file is truncated at the
+start of each run and is not resume-aware - the checkpoint's chain is
+the thing that spans an interruption.
 
 The **width** is `RUP(hi - lo)`, so the number reported is itself an
 upper bound on the true width. It is in the chained record because it
@@ -510,7 +511,7 @@ for the point kernels - not available per item.
 | interruption | a run stopped every four passes and resumed, at a different batch size, must end on the same checkpoint - byte for byte - as one that was never stopped, and the stops must land MID-ITEM |
 | the chain | recomputed with `hashlib` |
 | formats | fp256 against fp64 on provably identical input data |
-| refusals | a degree the constant bank cannot hold, a point count that is not a power of two, a format whose exponent range cannot carry the ladder, an unknown kernel name |
+| refusals | a degree that is not a whole number of eight-coefficient blocks, a point count that is not a power of two, a format whose exponent range cannot carry the ladder, an unknown kernel name |
 
 The interrupt test uses `--stop-after-passes 4` against a 54-term
 series so that a stop lands *inside* an item's recurrence, with partly
@@ -518,8 +519,8 @@ summed terms in flight: 40 of the 41 interruptions in the last run did.
 A resume that only ever restarted on a batch boundary would be testing
 the cursor and nothing else.
 
-`make -C host enclosetest` on this tree: **2,658 comparisons, 0
-failures.**
+`make -C host enclosetest` on 2026-09-08 (`docs/VALIDATION.md`): **2,664
+comparisons, 0 failures.**
 
 ---
 

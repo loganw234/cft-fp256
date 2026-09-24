@@ -1,7 +1,7 @@
 # IEEE 754-2019, clause by clause
 
 What this library has of the standard, what it deliberately leaves
-out, what is not there yet, and what the standard's own conformance
+out, and what the standard's own conformance
 clause would ask before the word "conforms" could be used. Status at ABI 0.7 (2026-09-04), for the binary formats. The operation lists
 below were taken from the standard's text, clause by clause, not from
 memory; the counts are derived from those lists.

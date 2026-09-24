@@ -112,14 +112,15 @@ is sitting on it - where the pre-sequencer tile reached six. The
 interface wall at eight is no longer the binding one; area is, and by
 a comfortable margin.
 
-Two cautions on that table. It uses the SINGLE-tile shell for every
-row, which is what ROADMAP.md's five-tile sizing does, and it
-understates a quad: differencing the failed pre-refactor quad link
-(1,316,831 asked against 4 x 288,764 = 1,155,056 in the kernels) puts
-the quad's own fixed cost near 161,775 LUT, sixteen masters' worth of
-crossbar rather than four. Carry that instead and a quad is 719,391
-(82.5%) with the ladders off and 656,171 (75.3%) with them on, which is
-where ROADMAP.md's and `rtl/cft_krnl.sv`'s ~80% / ~75% come from. And
+Two cautions on that table. It uses the SINGLE-tile shell for every row,
+which is what ROADMAP.md's five-tile sizing does, and it understates a
+quad: differencing the failed pre-refactor quad link (1,316,831 asked
+against 4 x 288,764 = 1,155,056 in the kernels) puts the quad's own
+fixed cost near 161,775 LUT, sixteen masters' worth of crossbar rather
+than four. Carry that instead and a quad is 719,391 (82.5%) with the
+ladders off and 656,171 (75.3%) with them on, which is where
+ROADMAP.md's 82.5% / 75.3% come from; the ~80% `rtl/cft_krnl.sv` still
+quotes matches neither this nor the table's 78%, as ROADMAP.md says. And
 all of it is **out of context**: a single tile linked at 135 MHz with
 the ladders on missed timing at -0.577 ns where OOC had read +0.097, so
 these are area figures and nothing more. A single and a quad are
@@ -141,7 +142,7 @@ the part could carry from measured bank costs, narrow tiles included.
 kernel WNS +0.143 with 0 failing endpoints, the single at +0.618 -
 docs/CARDDAY.md's primary pair.*
 
-### What one tile retires, in cycles (measured 2026-09-02)
+### What one tile retires, in cycles (measured 2026-09-02; `make cycles` reads 1.125 a beat since the read-ahead, 2026-09-09, and 1.415 for the fp32 sum since the reduction tree, 2026-09-15)
 
 Until now every throughput figure here was calculated from the beat
 geometry. `make cycles` (tb/test_krnl_cycles.py) measures it instead, on
@@ -275,16 +276,19 @@ to be.
   tile is independent.
 - **HBM bandwidth.** ~13.3 GB/s per tile projected against 316 GB/s
   available; 7.6 GB/s a tile measured on 2026-09-09 at the read path's
-  current depth, 30 GB/s over four tiles, scaling exactly.
-- **DSPs.** 292 per tile with the ladders off, 277 with them on, so
-  four tiles are 1,168 or 1,108 of the part's 5,952 - **19.6% or
-  18.6%**, up from 17.67% before the sequencer. Those two are the
-  pre-route estimate; the routed design reports 262 a tile
-  (docs/ARCHITECTURE.md's MUL_PASSES table), so the real quad is 1,048
-  and 17.6%, and every number in this bullet is an upper bound. Not a constraint on
+  earlier depth, 30 GB/s over four tiles, and 12.9 to 13.7 GB/s a tile,
+  51 to 55 GB/s over four, after the read-ahead the same day - scaling
+  exactly.
+- **DSPs.** 292 per tile with the ladders off, 277 with them on, so four
+  tiles are 1,168 or 1,108 of the part's 5,952 - **19.6% or 18.6%**, up
+  from 17.67% before the sequencer. Those two are the pre-route
+  estimate; the routed design reports 262 a tile (docs/ARCHITECTURE.md's
+  MUL_PASSES table), so the real quad is 1,048 and 17.6% before the
+  integer multiply's 45 a tile; the round-2 quad routes 1,232, 21%
+  (docs/VALIDATION.md, 2026-09-16 and 2026-09-23). Not a constraint on
   this part and it will not become one; `cft_seq` contributes none of
-  them at all since its address arithmetic came off the DSP columns
-  (15 -> 0), which is why area moved and this barely did.
+  them at all since its address arithmetic came off the DSP columns (15
+  -> 0), which is why area moved and this barely did.
 - **Determinism.** Invariant by construction, as above.
 
 ## The orchestrator
@@ -301,16 +305,16 @@ by anything in the data path. Its job:
 **Most of this is already built.** The orbit sequencer
 (docs/SEQUENCER.md) is a micro-sequencer running programs on-chip with
 deposition addressed by index, and it is RTL now - `rtl/cft_seq.sv`,
-benched bit-exact against `python/cft_golden/seq.py` and through
-hw_emu at fp32 on the real XRT stack (2026-09-02), with fp64 and
-wider, a bitstream and silicon still ahead of it. Its three determinism properties are argued
-and tested, and P1 - "the sequencer introduces no arithmetic, only a
-schedule" - stopped being an argument on 2026-09-01, when the private
-second lane array went away: there is one `cft_lanes` per tile and the
-sequencer issues into it, so P1 is a fact about the netlist. Adding a
-fan-out dimension is a smaller step than designing an orchestrator from
-nothing, and the P1/P2/P3 arguments carry over. Treat orchestrator and
-sequencer as one component.
+benched bit-exact against `python/cft_golden/seq.py` and through hw_emu
+at fp32 on the real XRT stack (2026-09-02), and on the card since the
+first card day (2026-09-08, docs/VALIDATION.md). Its three determinism
+properties are argued and tested, and P1 - "the sequencer introduces no
+arithmetic, only a schedule" - stopped being an argument on 2026-09-01,
+when the private second lane array went away: there is one `cft_lanes`
+per tile and the sequencer issues into it, so P1 is a fact about the
+netlist. Adding a fan-out dimension is a smaller step than designing an
+orchestrator from nothing, and the P1/P2/P3 arguments carry over. Treat
+orchestrator and sequencer as one component.
 
 For the chiplet endgame the orchestrator is not optional: there is no
 shared HBM, the pseudo-channel wall is replaced by ring bandwidth, and

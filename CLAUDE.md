@@ -52,7 +52,7 @@ amd-arc-box — `docs/BRINGUP.md` names it for exactly that.
 
 Nothing FPGA can run on Windows itself: `xclbinutil` is Linux-only.
 
-## Bitstream builds: four traps, three of which exit 0
+## Bitstream builds: four of the five traps, three of which exit 0
 
 Full procedure in **`docs/BITSTREAM-BUILDS.md`**. The short version:
 
@@ -62,17 +62,17 @@ Full procedure in **`docs/BITSTREAM-BUILDS.md`**. The short version:
    timing trivially and cannot be staged. **The tell is an absurd kernel
    WNS**: +84 ns against a 100 ns period is a design being asked for
    nothing; 135 MHz wants a fraction of a nanosecond.
-2. **`make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt`** on any box that
-   will open an artifact. `XRT ?= 0`, and `backend_xrt.cpp` still
-   *compiles* without it — so the build looks clean and `cft_open()` of
-   an xclbin answers `CFT_ERR_NO_DEVICE`, printed as `no such device`.
-   Every image on the box fails at once, old ones included, which reads
-   as a broken emulation environment rather than a broken binary. Check
-   `ldd host/device-test | grep xrt` before believing any card or
-   hw_emu result.
+2. **`make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt`** on any box that will
+   open an artifact. `XRT ?= 0`, and without it `backend_xrt.cpp` is
+   silently left out of the build — so the build looks clean and
+   `cft_open()` of an xclbin answers `CFT_ERR_NO_DEVICE`, printed as `no
+   such device`. Every image on the box fails at once, old ones included,
+   which reads as a broken emulation environment rather than a broken
+   binary. Check `ldd host/device-test | grep xrt` before believing any
+   card or hw_emu result.
 3. **`make -C host clean` removes every tool in `host/`**, not the one
-   you are rebuilding. Rebuild what you need, or `make -C host all
-   XRT=1`.
+   you are rebuilding (all but `cft-zoom`, which has its own
+   `zoomclean`). Rebuild what you need, or `make -C host all XRT=1`.
 4. **One heavy link at a time.** A quad `place_design` wants 25–30 GB,
    and an OOM kill reads like a design failure.
 
@@ -135,11 +135,12 @@ was measured at `f636cf3`, three hours before `f192bf0` put
 `cft-resident` into `all`. The `cft-serve.c` truncation fixed that day
 stays fixed. Treat a third warning as new.
 
-**`make fp32 SIM=verilator` elaborates again (fixed 2026-09-12).** fp32 is
-the one format whose mantissa fits a single multiplier pass, so its pass
+**`make fp32 SIM=verilator` elaborates again (fixed 2026-09-12).** At the
+default `MUL_PASSES=1` every rung is one multiplier pass, so each pass
 counter compares against zero and Verilator called it constant — fatal,
 since warnings are fatal in this suite by design. Scoped `lint_off
-UNSIGNED` on the two lines, with the argument beside them.
+UNSIGNED` on the two lines, with the argument beside them, in all four
+`tb/wrappers/tb_fpfma_*.sv` (fp32 on 2026-09-12, the rest 2026-09-14).
 
 ## Before believing a remote build
 

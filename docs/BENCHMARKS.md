@@ -6,18 +6,18 @@ already run, and - since 2026-09-08 - the Alveo U50 itself.
 
 - The hardware numbers were measured under docs/CARDDAY.md's step 6
   ("Throughput. Now, and not before, measure."), on the day the first
-  card came up, and they measure `cft_run`: the path a first port
-  gets, which stages every operand across PCIe on each call. That is
-  the honest default and it is bus-bound, as the section below shows.
-  The pipeline's own rate was measured the next morning, 2026-09-09,
-  with `cft-resident` - device-resident buffers filled once and the
-  kernel run on them back to back - and "The engine, measured" below
-  says what it is and what bounds it now. The projection in
-  docs/SCALING.md (`make cycles` measures 1.250 cycles per beat
-  marginal and 36 fixed on the RTL; cycles x period is the
-  prediction) stays labelled as a projection, and the measured
-  number is where it meets HBM: 2.25 cycles a beat, for a reason
-  that section names.
+  card came up, and they measure `cft_run`: the path a first port gets,
+  which stages every operand across PCIe on each call. That is the
+  honest default and it is bus-bound, as the section below shows. The
+  pipeline's own rate was measured the next morning, 2026-09-09, with
+  `cft-resident` - device-resident buffers filled once and the kernel
+  run on them back to back - and "The engine, measured" below says what
+  it is and what bounds it now. The projection in docs/SCALING.md (`make
+  cycles` measures 1.125 cycles per beat marginal and 40 fixed on the
+  RTL; cycles x period is the prediction) stays labelled as a
+  projection, and the measured number is where it meets HBM: 2.25 cycles
+  a beat on revision 3 and 1.26 to 1.34 on the read-ahead pair, both at
+  135 MHz, for reasons that section names.
 - Emulation produces no throughput numbers at all. hw_emu is an RTL
   simulation running many orders of magnitude below fabric speed; its
   wall clock measures the simulator. (Its cycle counts are real, and
@@ -373,15 +373,15 @@ regenerates the two README charts from exactly those files.
 ## Round 2 on the card (2026-09-15)
 
 The parcel round that built the gather, the lane mask and the beat-wide
-accumulator (docs/ROUND2.md) was measured on the round-2 single tile
-the night it landed, with the tools that measure it checked into
-`host/tools/` so the numbers regenerate: `gathertime.py` (the gravity
-accumulate as one indexed program run against the dense calls it
-replaces, checked against a host fold first) and the seq6 day's
-`segtime.py` (a thousand segmented reductions in one call against a
-thousand calls). Every figure is a median of five, and the full tables
-with the two host defects the day found are docs/VALIDATION.md's
-"round 2's card day, second half".
+accumulator (docs/ROUND2.md) was measured on the round-2 single tile the
+night it landed, with the tools that measure it, the first checked into
+`host/tools/` so its numbers regenerate and the second not in the
+repository: `gathertime.py` (the gravity accumulate as one indexed
+program run against the dense calls it replaces, checked against a host
+fold first) and the seq6 day's `segtime.py` (a thousand segmented
+reductions in one call against a thousand calls). Every figure is a
+median of five, and the full tables with the two host defects the day
+found are docs/VALIDATION.md's "round 2's card day, second half".
 
 | what | one run | the calls it replaces | ratio |
 |---|---|---|---|
@@ -430,11 +430,11 @@ per-segment flush, which is why it grows with the segment count.
 
 The first programs from outside this project to run on revision-6
 silicon: atlas-engine's shape functions lowered to sequencer programs,
-binary32, timed through libcft with the run alone on the clock and
-every deposit buffer checked (their `docs/CFT-SILICON.md`; the handoff
-is recorded in docs/VALIDATION.md, 2026-09-18). One tile; the quad ran
-every one of them at the single's rate to the hundredth, because a
-program run is one tile's.
+binary32, timed through libcft with the run alone on the clock and every
+deposit buffer checked (their `atlas-engine/docs/CFT-SILICON.md`; the
+handoff is recorded in docs/VALIDATION.md, 2026-09-18). One tile; the
+quad ran every one of them at the single's rate to the hundredth,
+because a program run is one tile's.
 
 | program | instructions | per lane | lanes a second |
 |---|---|---|---|
@@ -527,19 +527,20 @@ hundred cycles a segment.
 
 ## Workloads designed for the contract
 
-The tables above adapt other libraries' benchmarks to this one. The
-five tools below were written the other way round, on 2026-09-04, each
-for a property the contract has and a conventional float library does
-not: exact integers to 2^237 with the inexact flag as the proof, five
-rounding attributes per instruction, correctly rounded results that
-are the same bits on every host, and a sequencer that runs the inner
-loop as a program. Each is a resumable C tool in `host/tools/` with a
-Python oracle in `host/tests/`, a design note in `docs/`, and an entry
-in docs/VALIDATION.md; each runs at fp64 beside fp256 and says what
-fp64 loses, or that it loses nothing; each measures the software
-backend today and takes `--artifact` for a device later. The numbers
-are one thread on the Windows desktop, software backend, and they are
-measurements of a slow backend, not a promise.
+The tables above adapt other libraries' benchmarks to this one. The five
+tools below were written the other way round, on 2026-09-04, each for a
+property the contract has and a conventional float library does not:
+exact integers to 2^237 with the inexact flag as the proof, five
+rounding attributes per instruction, correctly rounded results that are
+the same bits on every host, and a sequencer that runs the inner loop as
+a program. Each is a resumable C tool in `host/tools/` with a Python
+oracle in `host/tests/`, a design note in `docs/`, and an entry in
+docs/VALIDATION.md; each runs at fp64 beside fp256 and says what fp64
+loses, or that it loses nothing; each measures the software backend and
+takes `--artifact` for a device (cft-zoom's reference orbit has run on
+the card - the soak above). The numbers are one thread on the Windows
+desktop, software backend, and they are measurements of a slow backend,
+not a promise.
 
 | tool | the workload | what the contract supplies | software backend, fp256 | fp64 beside it |
 |---|---|---|---|---|
@@ -549,22 +550,24 @@ measurements of a slow backend, not a promise.
 | `cft-orbits` (docs/ORBITS.md) | symplectic few-body integration, Kepler and the outer solar system | correctly rounded arithmetic, bit-identical ensembles | 95,263 element-steps/s for the Kepler leapfrog as a program (284 library calls where the loop needs 295,195); 12,077 for the Yoshida scheme with correctly rounded 1/r^3; the outer solar system 3,136 | energy drift identical at every format - the method: 7.9e-4 leapfrog, 2.0e-5 Yoshida over 2,000 periods - while angular-momentum drift, the arithmetic, is 9.0e-69 at fp256 against 1.4e-13 at fp64, 2^184 apart |
 | `cft-zoom` (docs/ZOOM.md) | a deep-zoom Mandelbrot reference orbit with fp64 perturbation | a bit-identical fp256 reference orbit as a sequencer escape loop | 174,462 reference iterations/s as a program (98 calls per 100,000 iterations on the software backend; 3,125 at a tile's 64-deposit cap), 162,374 as a loop; 399,782 fp64 pixel-iterations/s with an identical pixel chain at every batch size | at a 3.1e-61 pixel the fp64 reference is 9.4e30 pixels off and wrong from iteration 1 while raising no flag; all 4,096 pixels differ; fp256 addresses pixels to 1e-71 against fp64's 1e-15 |
 
-Three of the five asked the sequencer for something it does not have,
-and the asks are recorded in their design notes rather than worked
-around silently: a fourth input stream and an optional per-element
-flag output (Collatz); more than sixteen addressable constants, since
-operand fields are four bits (enclose); a lane shift and an in-program
-cross-lane reduction, which would put a whole carry chain and a
-convolution on-chip (Mersenne). Composed operations and reductions
-cannot be called from inside a program, which is why the enclosure
-tool's series and dot kernels, and the Mersenne convolution, run as
-host-issued calls around program passes.
+Three of the five asked the sequencer for something it did not have (two
+since built: indexed constants for enclose, 2026-09-07, and revision 3's
+scratch block for Collatz's fourth input), and the asks are recorded in
+their design notes rather than worked around silently: a fourth input
+stream and an optional per-element flag output (Collatz); more than
+sixteen addressable constants, since operand fields are four bits
+(enclose); a lane shift and an in-program cross-lane reduction, which
+would put a whole carry chain and a convolution on-chip (Mersenne).
+Composed operations and reductions cannot be called from inside a
+program, which is why the enclosure tool's series and dot kernels, and
+the Mersenne convolution, run as host-issued calls around program
+passes.
 
 All five also run in the browser (docs/DEMOS.md): a second committed
 page on the module the conformance page embeds, each panel a port of
 the tool's loop engine with elements batched, and each panel's chain
 matched to the C tool's for the same configuration - 13 chains over 11
-configurations on 2026-09-04. Browser rates came out at 0.8 to 1.4
+configurations on 2026-09-04. Browser rates came out at 0.7 to 1.0
 times the native loop engines wherever a call carries a batch (zoom
 pixels 343,381 against 346,414 pixel-iterations/s, Mersenne 473,911
 against 646,661 limb products/s, orbits 22,645 against 24,922
@@ -576,7 +579,7 @@ the page says so.
 ## Reading the numbers
 
 **MPFR is 7-25x faster than libcft's software backend on the
-single-rounding ops, and 90-300x on division and square root.** Both
+single-rounding ops, and 90-365x on division and square root.** Both
 gaps are real and neither is mysterious. MPFR is thirty years of
 CPU-tuned limb assembly (the prefix build configures GMP for the exact
 microarchitecture) with native algorithms for every operation; libcft
@@ -613,16 +616,15 @@ job is to move those two rungs to the hardware side of that gap, with
 bits identical to what the software tier already produced.
 
 **The Python tier is its own decade.** mpmath at any precision costs
-more than libcft at fp256, and ~40-60x MPFR. That is the audience
-bindings/python/cftmpfr exists for: same Python, contract bits, and a path
-down to the C prices above (and eventually the card) without leaving
-the language.
+more than libcft at fp256 on add and mul, and 25-210x MPFR. That is the
+audience bindings/python/cftmpfr exists for: same Python, contract bits,
+and a path down to the C prices above (and eventually the card) without
+leaving the language.
 
-**What these numbers do not cover:** subnormal-heavy or
-special-heavy streams (every soft path here slows down on them, each
-differently - the operand generator's header says why fast-path
-normals are the published case), rounding modes other than RNE,
-multi-threading (everything above is one core), and the flag/status
-plumbing cost of a real caller. And nothing here is the tile:
-hardware rows land in this file when a card produces them, measured,
-under docs/CARDDAY.md gate 6.
+**What these numbers do not cover:** subnormal-heavy or special-heavy
+streams (every soft path here slows down on them, each differently - the
+operand generator's header says why fast-path normals are the published
+case), rounding modes other than RNE, multi-threading (every software row
+above is one core), and the flag/status plumbing cost of a real caller. And
+nothing in these software tables is the tile: the card's rows are in the
+sections above, measured since docs/CARDDAY.md step 6 on 2026-09-08.

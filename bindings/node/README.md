@@ -137,7 +137,8 @@ What the eleven have in common is what they do *not* need: an argument
 reduction against pi. `sinPi`'s reduction is x mod 2, a mask on the
 encoding, so it is exact at every magnitude - `ctx.sinpi(maxFinite)` is
 a zero decided by integer arithmetic. `sin`, `cos` and `tan` of a
-*radian* argument are a different problem and are not here.
+*radian* argument are a different problem, reduced against pi inside the
+library since ABI 0.5 (above).
 
 **Correctly rounded** is the whole point, and it is not the usual
 promise. Not "accurate to an ulp", not "faithful", not
@@ -188,7 +189,7 @@ ctx.mapEx("add", { a: src, c: ys, idxA: table }); // element i is src[table[i]]
 A **scalar** operand is a one-element array named in `scalar` (`"a"`,
 or `["a", "b"]`). It computes exactly what an array of copies would:
 `d[i] = op(a[0], b[i], c[i])`. What it saves is what crosses the bus,
-and only on a device - `cft_caps().seqFeatures` says which.
+and only on a device - `ctx.seqFeatures` says which.
 
 An **index table** is `n` entries (a `Uint32Array`, or an array of
 numbers) and *the operand array becomes the source*, of any length:
@@ -404,8 +405,9 @@ The last four - `SEQ_FEAT_SCRATCH_STRICT`, `SEQ_FEAT_SCALAR`,
 `bit11`, `bit13` and `bit14` until 2026-09-18. The module at this build
 exports no projection for them, so `audit()` cannot hold them to the
 module; `test.mjs` holds the whole table to `host/include/cft.h`
-instead, in both directions, and goes red when the header grows a bit
-this package cannot name.
+instead, in both directions, and goes red when the header grows a
+`CFT_SEQ_FEAT_*` or `CFT_ALU_EXT_*` bit this package cannot name
+(`CFT_FEAT_REDUCE_SEG`, 0x1000, is neither, and prints as `bit12`).
 
 `SEQ_FEAT_SCRATCH` is `0x100` and `SEQ_FEAT_SCRATCH_IO` `0x200`, not
 the next two bits after `BANK_PTR`: revision 3 opened a SECOND feature
@@ -494,10 +496,11 @@ tabulated (`pow5Limit`): about 7 significant digits and |exponent| ≤ 10
 at binary32, 15 and 22 at binary64, 34 and 48 at binary128, 71 and 102
 at binary256. Inside it, this package rounds decimals under
 **roundTiesToAway** as happily as under the other four - which the
-Python drop-in cannot do at all, because MPFR has no such attribute and
-cftmpfr will not substitute its own. Outside it, `"1e100"` at binary64
-is a refusal rather than a guess (it is fine at binary256, where the
-format holds 10<sup>100</sup>'s factors exactly).
+Python drop-in's `from_str` has also done since ABI 0.6, through the
+library's own 5.12 parse rather than MPFR, which has no such attribute.
+Outside it, `"1e100"` at binary64 is a refusal rather than a guess (it
+is fine at binary256, where the format holds 10<sup>100</sup>'s factors
+exactly).
 
 Two consequences worth naming. The sign of a zero needs no special
 handling on the rounded path - a negative decimal reaches the library
@@ -842,7 +845,7 @@ conformance.mjs  the vectors replay - the package's conformance test;
 program_test.mjs the orbit sequencer: the recorded corpus, programs
                  written by hand, revision 2's registers and bank, the
                  refusals, the memory, a negative control
-seq_corpus.mjs   the corpus reader and replay, and a revision-2
+seq_corpus.mjs   the corpus reader and replay, and a revision-3
                  instruction encoder for tests that write a program by
                  hand
 seq_corpus.jsonl what libcft's C executor answered for the shared fuzz

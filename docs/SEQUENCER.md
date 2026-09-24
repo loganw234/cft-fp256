@@ -61,7 +61,9 @@ architecture.
 What exists around it as of 2026-09-01: `cft_seq` is instantiated in
 `cft_krnl` as a peer of `cft_engine_stream`, sharing the A and D
 masters *and the tile's one `cft_lanes` array* under a `MODE[15]`
-select registered at the accepted start; the CSR map carries
+select registered at the accepted start - and, since the bank fix of
+2026-09-02 (40149b1), the B and C masters too, each read steered to
+the master that owns its buffer; the CSR map carries
 `PROG_PTR` and `CNT_PTR` at 0x54 and 0x5C, `BANK_PTR` at 0x64 since
 revision 2, and since revision 3 the read-only `CAPS2` at 0x6C with
 `SCRATCH_IN_PTR` at 0x70 and `SCRATCH_OUT_PTR` at 0x78 (VERSION 0x800,
@@ -77,21 +79,20 @@ deposits, counts, FLAGS and STATUS. The plumbing is therefore testable
 ahead of the core, which is the point of writing the contract down
 first.
 
-The core is green - `tb/test_seq_core.py` scores its fetch, execute
-and drain body against `seq.py` directly, **17/17 suites** since
-revision 3 added five (the four scratch codes, the block in and out,
-the header refusals, and a scratch fuzz), where indexed constants
-made it 10 on 2026-09-07 and revision 2 made it 12 - and both
-sequencer targets,
-`krnlseq` and `seq_core`, are in `make sim`, folded in on the day the
-core passed, which was the only day the claim would mean anything. On
-this tree the whole set holds: seq_core 17/17, krnlseq 1/1, krnl 2/2,
-reduce 3/3, reduceacc 5/5, krnlfused 2/2, krnlplain 2/2, quarter 1/1,
-faults 5/5, the golden model's own pytest cases, `make yosys-lint`
-clean, and the Verilator width gate clean. The last of
-those is not decoration: it is fatal-on-width here, and it caught seven
-implicit-width sites in `cft_seq.sv` that Icarus and yosys both
-passed.
+The core is green - `tb/test_seq_core.py` scores its fetch, execute and
+drain body against `seq.py` directly, **35/35 suites** at revision 6
+(2026-09-15), 17/17 when revision 3 added five (the four scratch codes,
+the block in and out, the header refusals, and a scratch fuzz), where
+indexed constants made it 10 on 2026-09-07 and revision 2 made it 12 -
+and both sequencer targets, `krnlseq` and `seq_core`, are in `make sim`,
+folded in on the day the core passed, which was the only day the claim
+would mean anything. On the revision-3 tree (2026-09-08) the whole set
+held: seq_core 17/17, krnlseq 1/1, krnl 2/2, reduce 3/3, reduceacc 5/5,
+krnlfused 2/2, krnlplain 2/2, quarter 1/1, faults 5/5, the golden
+model's own pytest cases, `make yosys-lint` clean, and the Verilator
+width gate clean. The last of those is not decoration: it is
+fatal-on-width here, and it caught seven implicit-width sites in
+`cft_seq.sv` that Icarus and yosys both passed.
 
 The one v1 deviation from the shape below is gone. The first RTL gave
 the sequencer a PRIVATE copy of the lane array (`cft_seq_lanes`, the
@@ -213,8 +214,8 @@ rather than something to believe:
 
 **P1. The ALU is the existing pipeline.** The sequencer introduces no
 arithmetic. Its opcodes are the same 8-bit space `MODE[7:0]` already
-carries, executed by the same `cft_fpfma_pipe` and `cft_simpleops`
-that 441,000 conformance and differential cases already cover. A
+carries, executed by the same `cft_fpfma_pipe` and `cft_simpleops` that
+the 1,068,915-case conformance set and the differential already cover. A
 sequencer program is a schedule over verified operations, so the
 numerics need no new verification surface - only the scheduling does.
 Since the array was extracted this is structural rather than
@@ -408,7 +409,8 @@ pipeline full the sequencer must hold
 on-chip, and issue one instruction across all of them before it needs
 the first result. A dependent chain then costs `LATENCY + LATENCY`
 cycles per instruction with every ALU busy, instead of `LATENCY` with
-all but one idle.
+all but one idle - and since revision 5's overlap (R12 to R15), about
+`LATENCY + 1` on a single-pass tile.
 
 The pleasing part is that this makes the register file
 **precision-independent**. A beat is 32 bytes whatever the format, so
@@ -698,15 +700,16 @@ the hardware does not have to be:
   `SCRATCH_IO` program run without the block it declares, one whose
   block is not `n * n_scratch_in` values, or a program that declares
   none handed one.
-- a program that names a register above 15, or uses `kx`, or is
-  `BANK_EXT`, or uses the scratch, or declares scratch I/O, or names a
-  constant at or past 256, on a device whose CAPS or CAPS2 does not
+- a program that names a register above 15, or uses `kx` or `IMUL`, or
+  is `BANK_EXT`, or uses the scratch, or declares scratch I/O, or names
+  a constant at or past 256, on a device whose CAPS or CAPS2 does not
   publish that feature - by name, naming the instruction, before the
-  register map is touched. An old tile has no rule that would refuse
-  any of them: its operand mux reads the low four bits of a register
-  field or the low eight of a constant index, its FETCH reads
-  constants out of an image that may have none, and it decodes an
-  unknown control code as `HALT`.
+  register map is touched. An old tile has no rule that would refuse any
+  of them: its operand mux reads the low four bits of a register field
+  or the low eight of a constant index, its FETCH reads constants out of
+  an image that may have none, its integer group answers opcode 30 with
+  the unassigned-opcode result, and it decodes an unknown control code as
+  `HALT`.
 - **any field an instruction does not read being non-zero.** An ALU
   instruction has no immediate; `DEPOSIT` reads only `ra`. Leaving
   those free would mean one operation had many encodings, and then a
@@ -860,13 +863,18 @@ Four structures, sized in the section above:
   program owns a slot, and a program that names none must cost nothing
   for a memory it never touches.
 
-The control is an issue/drain state machine, and the counts fall out
-of the sizing: issue `LATENCY` beats of one instruction back to back,
-then drain `LATENCY` cycles while the results retire and write back,
-then advance the program counter. Every ALU is busy during issue, so a
-dependent chain costs `2 * LATENCY` cycles per instruction rather than
-`LATENCY` with one ALU busy - a factor of `lanes_per_beat * LATENCY`
-more work per cycle than the naive schedule.
+The control began as an issue/drain state machine, and the counts fell
+out of the sizing: issue `LATENCY` beats of one instruction back to
+back, then drain `LATENCY` cycles while the results retire and write
+back, then advance the program counter. Every ALU was busy during
+issue, so a dependent chain cost `2 * LATENCY` cycles per instruction
+rather than `LATENCY` with one ALU busy - a factor of `lanes_per_beat *
+LATENCY` more work per cycle than the naive schedule. Since revision 5
+(R12 to R15 below) the instructions overlap: the next issues while this
+one retires, so an independent instruction costs its beats and, on a
+single-pass tile, a dependent one about `LATENCY + 1`; only a control
+code that reads the file, moves the mask or ends the block still waits
+for the results to land.
 
 Two things the state machine does not need, both because the early
 exit is allowed to be late (P3): the `any(active)` reduction can use
@@ -898,12 +906,14 @@ Two more entry points sit beside it rather than replacing it, one per
 revision: `cft_program_run_bank` for a `BANK_EXT` program's constants
 (R3), and `cft_program_run_ex`, which takes a `cft_run_args` struct
 carrying everything a run can carry - the streams, the bank, the two
-scratch blocks, the outputs (R5's ABI 0.10). The struct exists so the
-positional signatures stop growing by an argument a round; the older
-two remain as wrappers that fill it, and a program that declares
-scratch I/O refuses both by name and takes `run_ex`. The model's
-`run(prog, a, b, c, bank=None, scratch_in=None)` is the same shape,
-and returns the scratch-out block beside the deposits.
+scratch blocks, the outputs (R5's ABI 0.10), and since ABI 0.14 the
+index tables and the lane mask (R16, R17). The struct exists so the
+positional signatures stop growing by an argument a round; the older two
+remain as wrappers that fill it, and a program that declares scratch I/O
+refuses both by name and takes `run_ex`. The model's `run(prog, a, b, c,
+bank=None, scratch_in=None)`, with `idx_a`, `idx_b`, `idx_c`,
+`idx_scratch_in` and `lane_mask` keywords since revision 6, is the same
+shape, and returns the scratch-out block beside the deposits.
 
 Partitioning across tiles, beat padding and flag accumulation stay the
 library's problem, and stay invisible. Because deposit addresses
@@ -930,12 +940,13 @@ and six constants.
 
 Five workloads were written against the contract after the first
 customer (docs/BENCHMARKS.md, "Workloads designed for the contract"),
-each told to run its inner step as a program where the model could
-hold it and to say precisely what stopped it where it could not. Four
-of the five stopped somewhere, and the asks below are theirs, recorded
-here because this is where the next revision of the model will be
-designed. None is built; all five tools keep a host loop that is bit
-for bit the program's equal, so nothing waits on them.
+each told to run its inner step as a program where the model could hold
+it and to say precisely what stopped it where it could not. Four of the
+five stopped somewhere, and the asks below are theirs, recorded here
+because this is where the next revision of the model will be designed.
+None was built then - two are now, marked below; all five tools keep a
+host loop that is bit for bit the program's equal, so nothing waits on
+them.
 
 - **More input streams, or a way to load registers from the deposit
   buffer** (Collatz, orbits). **BUILT, revision 3**, as R5's scratch
@@ -1731,17 +1742,17 @@ a[idx[i]]` for `i` in `[0, n)`, and the run proceeds exactly as a dense
 run over `A`. For the scratch block, `S[i * k + s] = idx[i * k + s] ==
 CFT_IDX_NONE ? +0 : pool[idx[i * k + s]]` with `k = n_scratch_in`,
 lane-major as the block is. An index at or past the source's declared
-length (`idx_*_src`) is refused before the run starts, on every
-backend, by name and by value: a device must never read past a buffer
-for a caller. `+0` is the format's positive zero encoding. There is no
-new rounding rule and nothing for the model to define beyond these two
-lines - the answer is what the dense run over the gathered block
-gives. On the tile: four pointer registers (0x88..0xA0, kernel
-arguments 12..15), MODE[22:19] saying which blocks are indexed,
-CAPS2[9] saying the bits are honoured; the sequencer reads a table's
-beats and then one element per entry through the A master, packs the
-elements into beats, and the register file never learns the
-difference.
+length (`idx_*_src`) is refused before the run starts, on every backend,
+by name and by value: a device must never read past a buffer for a
+caller. `+0` is the format's positive zero encoding. There is no new
+rounding rule and nothing for the model to define beyond these two
+lines - the answer is what the dense run over the gathered block gives.
+On the tile: four pointer registers (0x88..0xA0, kernel arguments
+12..15), MODE[22:19] saying which blocks are indexed, CAPS2[9] saying
+the bits are honoured; the sequencer reads a table's beats through the A
+master and then one element per entry through the master that owns its
+buffer, packs the elements into beats, and the register file never
+learns the difference.
 
 **What it is on the tile.** Four states in `rtl/cft_seq.sv`, entered in
 place of `S_LD_GO`'s dense load for a stream and in place of the

@@ -1,8 +1,8 @@
 # Building a bitstream
 
-The commands, and the four ways a build silently produces something
-nobody can use. Every failure recorded here cost hours, and three of
-them exit zero.
+The commands, and the five traps: the ways a build silently produces
+something nobody can use, and the two that read as a design failure.
+Every failure recorded here cost hours, and three of them exit zero.
 
 Written 2026-09-12, after an overnight run produced two images at the
 wrong clock and a probe script quietly disabled XRT on the build host.
@@ -60,7 +60,7 @@ another and judges each from the artifacts, by the kernel clock's own WNS
 the whole-design WNS - `145 MHz CLOSED WNS 0.055` in its own summary,
 where the kernel had +0.084 - and was rewritten on 2026-09-23.
 
-## The commands it runs, which are the explanation
+## The commands by hand, which are the explanation
 
 From the repo root, on whichever host you chose:
 
@@ -75,17 +75,17 @@ git checkout --quiet --detach <sha>
 make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt all
 
 # 3. the bitstream, AT THE CLOCK YOU MEAN
-KERNEL_FREQ=135000000 BUILD=build-<name> TARGETS=hw \
+KERNEL_FREQ=135000000 RETIMING=1 PHYS_OPT=1 BUILD=build-<name> TARGETS=hw \
     LINK_CFG=hw/link.cfg bash hw/rebuild-2022.sh        # one tile
-KERNEL_FREQ=135000000 BUILD=build-<name>q TARGETS=hw \
+KERNEL_FREQ=135000000 RETIMING=1 PHYS_OPT=1 BUILD=build-<name>q TARGETS=hw \
     LINK_CFG=hw/link_quad.cfg bash hw/rebuild-2022.sh   # four
 
 # 3b. a TRIMMED tile: generics reach hw/package_kernel.tcl through the
 #     environment (never -tclargs: cmd.exe splits at '='), the .xo's
 #     wrapper is read back before the link, and the manifest records
 #     what was packaged as generics: and hdlparam: lines
-CFT_GENERICS="EN_FP256=0" KERNEL_FREQ=150000000 BUILD=build-<name>f128 \
-    TARGETS=hw LINK_CFG=hw/link.cfg bash hw/rebuild-2022.sh
+CFT_GENERICS="EN_FP256=0" KERNEL_FREQ=150000000 RETIMING=1 PHYS_OPT=1 \
+    BUILD=build-<name>f128 TARGETS=hw LINK_CFG=hw/link.cfg bash hw/rebuild-2022.sh
 
 # 3c. package and verify ONLY - three minutes, no link: the check that a
 #     trim's generics reached the wrapper, before committing to hours.
@@ -99,15 +99,16 @@ CFT_GENERICS="EN_FP32=0 EN_FP256=0" BUILD=build-<name>-pkg TARGETS="" \
 exactly that reason: two links sharing a directory overwrite each
 other's `.xo`, temp dir and xclbin.
 
-## The four traps
+## The five traps
 
 ### 1. KERNEL_FREQ defaults to 10 MHz
 
-`hw/rebuild-2022.sh` line 17: `KERNEL_FREQ=${KERNEL_FREQ:-10000000}`,
+`hw/rebuild-2022.sh` line 19: `KERNEL_FREQ=${KERNEL_FREQ:-10000000}`,
 commented "v0 behavioural core". That value is from the first bring-up,
 before any higher clock had been shown to work. **It is dead history in
-a default, not a safe starting point.** Every card-day image is 135 MHz
-(docs/CARDDAY.md).
+a default, not a safe starting point.** The card-day clock is 135 MHz
+(docs/CARDDAY.md); the 2026-09-23/24 sweep's singles ran on the card at
+145 to 170 MHz (docs/VALIDATION.md).
 
 A build at 10 MHz succeeds, meets timing trivially, and produces an
 image roughly thirteen times slower than the shipped pair. It cannot be
@@ -125,9 +126,9 @@ grep -m1 "Clock constraint argument" <log>   # want 135000000:...
 ### 2. XRT is off by default in the host build
 
 `host/Makefile`: `XRT ?= 0`, and `-DCFT_ENABLE_XRT` is added only under
-`XRT=1`. Without it `src/backend_xrt.cpp` **still compiles** to an
-object and lands in `libcft.a`, so nothing about the build looks wrong -
-but the backend is inert, and `cft_open()` of an xclbin PATH answers
+`XRT=1`. Without it `src/backend_xrt.cpp` is left out and `src/device.c`
+compiles its XRT paths away, so nothing about the build looks wrong -
+but the library has no XRT backend, and `cft_open()` of an xclbin PATH answers
 `CFT_ERR_NO_DEVICE`:
 
 ```
@@ -145,12 +146,15 @@ ldd host/device-test | grep xrt     # want libxrt_coreutil.so
 Never run a bare `make -C host <target>` on a host that opens
 artifacts. It will replace a working library with an XRT-less one.
 
-### 3. `make -C host clean` removes every tool
+### 3. `make -C host clean` removes every tool but one
 
 Not just the one you are about to rebuild. `cft-asm`, `positive-run`,
-`cft-selftest`, `cft-serve`, `cft-collatz`, `cft-orbits`, `cft-zoom`,
-`api-test`, `reduce-parts` - all of them. If you clean, rebuild with
-`all` and the extra targets, not with the single one you wanted.
+`cft-selftest`, `cft-bench`, `cft-serve`, `cft-collatz`, `cft-enclose`,
+`cft-orbits`, `cft-mersenne`, `cft-resident`, `api-test`,
+`reduce-parts`, `device-test`, `remote-test` - all of them but
+`cft-zoom`, which only `make -C host zoomclean` removes. If you clean,
+rebuild with `all` and the extra targets, not with the single one you
+wanted.
 
 ### 5. A quad that misses timing by tenths of a nanosecond is not a design failure
 
@@ -201,8 +205,8 @@ design failure - which is the expensive way to find out. Order the legs
 cheapest-first so a flow mistake surfaces in minutes:
 
     hw_emu single  ~4 min
-    hw single      ~105 min
-    hw quad        ~175 min
+    hw single      ~120-170 min
+    hw quad        ~250-470 min
 
 `hw_emu` takes no clock constraint at all (`rebuild-2022.sh` adds
 `--clock.freqHz` only for `hw`), so an emulation image does not need

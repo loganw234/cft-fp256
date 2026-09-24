@@ -95,14 +95,17 @@ docs/VALIDATION.md.
       DSP - ~11% and 4.4% of the VU35P, and confirmation that the
       engine, CSR and bank muxes add no critical path the per-core
       probe would have missed.
-- The fused significand array: one physical multiplier serving
-  1x fp256 / 2x fp128 / 4x fp64 / 8x fp32 per beat with
-  mode-gated partial products (granule tiling study in
-  docs/ARCHITECTURE.md), pipelined to platform clock - the chunked
-  column decomposition above is exactly the granule structure the
-  fracture needs, so this work is its foundation, and the four-bank
-  version just landed is its behavioural spec: the array replaces
-  the banks only when it produces identical bits.
+- The fused significand array: one physical multiplier serving 1x fp256
+  / 2x fp128 / 4x fp64 / 8x fp32 per beat with mode-gated partial
+  products (granule tiling study in docs/ARCHITECTURE.md), pipelined to
+  platform clock - the chunked column decomposition above is exactly the
+  granule structure the fracture needs, so this work is its foundation,
+  and the four-bank version just landed is its behavioural spec: the
+  array replaces the banks only when it produces identical bits. *Built
+  2026-08-30 as `cft_mulfrac` behind `FUSE_MUL`: bit-identical, measured
+  not to pay, and it ships off. It shares the number of partial
+  products, not their width; the granule grid that would cut the width
+  remains unbuilt - see "What can be shared" below.*
 
   **Why this and not trimmed tiles (decided 2026-08-30).** Area
   measurement put three options on the table, and heterogeneous tiles
@@ -204,8 +207,8 @@ docs/VALIDATION.md.
       was therefore structurally incapable of failing on a partitioning
       bug. Each set is now replayed twice, and the array pass was
       verified by injecting a slice off-by-one.
-- Engine knobs still open: multiple outstanding ARs, per-CU HBM
-  pseudo-channel groups.
+- [x] Engine knobs, both since built ("One AXI master per stream"
+  below): multiple outstanding ARs, per-CU HBM pseudo-channel groups.
 - [x] **Directed rounding attributes (2026-08-29):** all five of
       754-2019's attributes in the MODE rounding field (RISC-V frm),
       carried with each operation down the pipeline rather than
@@ -338,14 +341,16 @@ docs/VALIDATION.md.
   port was the bottleneck and that splitting it removed that
   bottleneck; where the number lands on silicon is CARDDAY step 6.
 
-  What is NOT yet known is the area. Per-CU AXI plumbing was already
-  24k LUT - 20% of a tile, as large as the whole fp128 bank - and this
-  is four masters per tile against one, on a quad that already sits at
-  69% of the device. A single-tile measurement against the known
-  243,440-LUT baseline is the outstanding number, and if sixteen
-  masters do not route on a quad then the honest summary is "3.5x per
-  tile, at the cost of tile count", which is a decision rather than a
-  detail.
+  What is NOT yet known is the area *(since measured the same day:
+  138,083 LUT for one tile in shell with four masters and the
+  reductions - "What a tile actually costs" below - and every quad since
+  has routed its sixteen masters)*. Per-CU AXI plumbing was already 24k
+  LUT - 20% of a tile, as large as the whole fp128 bank - and this is
+  four masters per tile against one, on a quad that already sits at 69%
+  of the device. A single-tile measurement against the known 243,440-LUT
+  baseline is the outstanding number, and if sixteen masters do not
+  route on a quad then the honest summary is "3.5x per tile, at the cost
+  of tile count", which is a decision rather than a detail.
 - [x] **Reduction ops (2026-08-30):** `CFT_SUM` (24) and `CFT_DOT` (25),
   with the index-fixed tree the contract had already promised. Golden
   model, libcft, RTL and the device path, plus the multi-tile
@@ -921,9 +926,10 @@ stands: these are UltraScale+ figures and CARRY4 makes them
 optimistic.
 
 The module is built, proven against 2,977 comparisons at every legal
-shift and every rung, and measured. What is NOT done is `EXT_NORM`
-plumbing through `cft_fpfma_pipe`, which is the bit-exact core and a
-different risk class from everything above it.
+shift and every rung, and measured. What was NOT done when this was
+written - it landed the same morning, 8428c11 and the `EXT_NORM` entry
+above - is `EXT_NORM` plumbing through `cft_fpfma_pipe`, which is the
+bit-exact core and a different risk class from everything above it.
 
 **What none of this buys: low-precision throughput.** Lane count is
 pinned by the 256-bit beat - 8x32, 4x64, 2x128 and 1x256 all consume
@@ -1328,12 +1334,15 @@ coarse normalise into `s11_valw` - the path the SPLIT sweep found under
 the shared ladder, now visible in the private one.
 
 **Two things worth keeping from the exercise.** A DRC count is not a
-critical path: DPOP-3/4 were real and pointed at the multiplier, and
-the multiplier was never the worst path - reading the chain is what
-found the seed lookup. And `NBEATS >= LATENCY + 1` in cft_seq is a
-comment, not a guard: every option above is latency-neutral because
-LATENCY 16 forces NBEATS to 32 and changes the block model seq.py is
-bit-exact to. A guard belongs there before anyone changes the depth.
+critical path: DPOP-3/4 were real and pointed at the multiplier, and the
+multiplier was never the worst path - reading the chain is what found
+the seed lookup. And `NBEATS >= LATENCY + 1` in cft_seq is a comment,
+not a guard: every option above is latency-neutral because LATENCY 16
+forces NBEATS to 32 and changes the block model seq.py is bit-exact to.
+A guard belongs there before anyone changes the depth. *(Since
+written, 2026-09-07, when the depth did change to 16: `cft_seq.sv`'s
+NBEATS guard, deliberately not that relation - NBEATS stays 16 and
+results retire in arrival order.)*
 
 ##### The round stage's arithmetic moves up a stage (2026-09-02)
 
@@ -1489,13 +1498,16 @@ except silicon:
   conformance cases replay clean; `device_test` gained div/sqrt and
   seed coverage for the emulation and card-day runs.
 
-Remaining for the milestone build: rebuild the contract-0x500 image
-with the seed opcodes (CAPS bit 14 set), run `device-test` under
-hw_emu on the build box, and then card day makes it real. The
-sequence's ~25-30 passes per call are the honest price of correct
-rounding composed from FMA; a fused on-chip program via the orbit
-sequencer is the recorded path to cutting the round trips without
-touching the contract.
+Remaining for the milestone build *(since: the image built and staged
+2026-09-01; its hw_emu run stopped by decision before the div/sqrt
+verdict, which the card gave from first light, 2026-09-08 -
+docs/VALIDATION.md, docs/NOVEL.md entry 10; and the sequencer program,
+2026-09-01, above)*: rebuild the contract-0x500 image with the seed
+opcodes (CAPS bit 14 set), run `device-test` under hw_emu on the build
+box, and then card day makes it real. The sequence's ~25-30 passes per
+call are the honest price of correct rounding composed from FMA; a fused
+on-chip program via the orbit sequencer is the recorded path to cutting
+the round trips without touching the contract.
 
 ## The transcendentals, phase 1 (status, 2026-09-02)
 
@@ -1578,16 +1590,22 @@ What that closed, and what it did not:
   different clothes, with cancellation questions phase 1 already
   answers - and are a smaller job than either phase so far. Nothing has
   been written, so nothing is claimed.
-- **Not closed: a JavaScript surface.** The Node binding and the wasm
-  page were not rebuilt for 0.4, so neither knows the eleven; a 0.4
-  vector set handed to either fails on a function name, which is the
-  refusal it should give. docs/COMPATIBILITY.md says so per row.
+- **Not closed: a JavaScript surface** *(closed the same day -
+  docs/VALIDATION.md, "the JavaScript surface reaches ABI 0.4")*. The
+  Node binding and the wasm page were not rebuilt for 0.4, so neither
+  knows the eleven; a 0.4 vector set handed to either fails on a
+  function name, which is the refusal it should give.
+  docs/COMPATIBILITY.md says so per row.
 
 The measurements are in docs/VALIDATION.md's 2026-09-03 entry:
 365,845 conformance cases replayed, 154,269 model comparisons over
 twenty functions, 414,008 MPFR cases with zero value and zero flag
 mismatches, 38,338 escalations driven through the forced-low run, and a
 negative control that five gates caught.
+
+*Phase 1's closing bullet and measurements (2026-09-02), above which
+the phase-2 entry was inserted:*
+
 - **Not closed: a tile-assisted fast path.** Every one of the nine is
   host work today, at hundreds of multiprecision operations per
   element. A polynomial on the tile's FMA for fp32 and fp64, with the
@@ -1596,11 +1614,11 @@ negative control that five gates caught.
   these bits exactly, which makes it a speed change and not a contract
   change. Nothing has been measured, so nothing is claimed.
 
-The measurements that exist are in docs/VALIDATION.md's 2026-09-02
-entry: 456,325 conformance cases replayed, 77,315 model comparisons,
-95,680 MPFR cases with zero value and zero flag mismatches, and a
-negative control that three gates caught and a fourth was extended to
-catch.
+The phase-1 measurements that exist are in docs/VALIDATION.md's
+2026-09-02 entry: 456,325 conformance cases replayed, 77,315 model
+comparisons, 95,680 MPFR cases with zero value and zero flag mismatches,
+and a negative control that three gates caught and a fourth was extended
+to catch.
 
 ## The transcendentals, phase 3 (status, 2026-09-03)
 
@@ -1749,11 +1767,12 @@ What that closed, and what it did not:
   guards the shape is two independent implementations of it, the
   streaming accumulator, and the vector sets. The tool's banner says
   so in those words.
-- **Not closed: clause 9.5's augmented arithmetic**, which sits beside
-  9.4 in the standard and is a genuinely different operation - one
-  rounding for a whole accumulation, in a rounding direction
-  (roundTiesTowardZero) this contract does not otherwise carry.
-  Nothing has been written, so nothing is claimed.
+- **Not closed: clause 9.5's augmented arithmetic** *(closed the same
+  day, in the 0.6 step - the entry above)*, which sits beside 9.4 in the
+  standard and is a genuinely different operation - one rounding for a
+  whole accumulation, in a rounding direction (roundTiesTowardZero) this
+  contract does not otherwise carry. Nothing has been written, so
+  nothing is claimed.
 
 The measurements are in docs/VALIDATION.md's 2026-09-03 clause-9.4
 entry.
@@ -1881,9 +1900,10 @@ What that closed, and what it did not:
   to formats this contract does not carry and is not going to; the
   ladder is the binary one, and identity needs one definition per
   width.
-- **Not closed: the JavaScript surface.** The wasm and Node layers do
-  not reach these yet; that is a separate step and nothing is claimed
-  for it here.
+- **Not closed: the JavaScript surface** *(closed the same day,
+  40123c7 - docs/VALIDATION.md, "the ABI 0.6 census ... with the
+  JavaScript surface in")*. The wasm and Node layers do not reach these
+  yet; that is a separate step and nothing is claimed for it here.
 
 The measurements are in docs/VALIDATION.md's 2026-09-03 clause-5.12
 entry: 648,731 conformance cases replayed across sixty sets, 20,819
@@ -1951,19 +1971,25 @@ measured with, and what they found is the agenda:
   remembering, because it is the case a flag cannot catch and only a
   wider format prevents.
 - **What the program model lacks**, recorded in docs/SEQUENCER.md's
-  last section: register loading beyond three input streams, a
-  per-element flag output, more than sixteen constants, a
-  per-iteration broadcast, a lane shift, an in-program reduction, a
-  callable composed operation. None is built; every tool runs without
-  them.
-- **What the host API lacks**, in docs/HOSTAPI.md's last section: the
-  per-element flags, a stride-0 operand, the program API in the wasm
-  surface.
-- **Next**: the program-API wrappers when the module is next rebuilt;
-  and, on card day, the same five commands with `--artifact`, which is
-  the first hardware number this repo will publish. (The `workloads`
-  and `demos` runner stages landed the same day, in the quick budget
-  and in CI.)
+  "What the workloads asked of the program model": register loading
+  beyond three input streams, a per-element flag output, more than
+  sixteen constants, a per-iteration broadcast, a lane shift, an
+  in-program reduction, a callable composed operation. None was built
+  then - two have been since (more than sixteen constants, 2026-09-07;
+  register loading, revision 3), as docs/SEQUENCER.md marks them; every
+  tool can run without them.
+- **What the host API lacks**, in docs/HOSTAPI.md's "What the workloads
+  asked of the host API" (the wasm program API done 2026-09-07, the
+  stride-0 operand 2026-09-12): the per-element flags, a stride-0
+  operand, the program API in the wasm surface.
+- **Next**: the program-API wrappers when the module is next rebuilt
+  (done, 2026-09-07); and, on card day, the same five commands with
+  `--artifact`, which is the first hardware number this repo will
+  publish *(card day was 2026-09-08, and its first numbers were
+  device-test's and the published sets' on silicon; of the five,
+  cft-zoom's reference orbit ran, on both images - docs/VALIDATION.md)*.
+  (The `workloads` and `demos` runner stages landed the same day, in
+  the quick budget and in CI.)
 
 ## The open core
 
@@ -2538,7 +2564,7 @@ size. The steps, in order, each with the gate that says it is done:
 5. **The ring**, once there are two of them, on the doctrine already
    written here.
 
-Steps 1 and 3 landed on 2026-09-06, the same day the plan was written;
+Steps 1 and 3 landed on 2026-09-06, the day after the plan was written;
 step 2 is a purchase; step 4 is the hard one and is the reason the
 others came first. What step 4 now waits on is a board and an open
 flow, not a smaller tile.
@@ -2551,15 +2577,16 @@ that every floating-point operation is a `cft.h` call and run on the
 read-ahead quad. It is a fifteenth-order adaptive N-body integrator and
 it wants things the library does not have.
 
-**Six, and this list said three until 2026-09-12.** The requester's own
-statement is `cft-rebound/docs/HARDWARE.md`, which its ROADMAP.md:302
-names as the place the asks live; the three that were missing here are
-the gather, the lane mask and the scalar broadcast. A list that is the
-input to "what next" is worth exactly its completeness, and an
-incomplete one sent a round of work somewhere else first.
+**Eight, and this list said three until 2026-09-12 and six until
+2026-09-14.** The requester's own statement is
+`cft-rebound/docs/HARDWARE.md`, which its ROADMAP.md:305-307 names as
+the place the asks live; the three that were missing here are the
+gather, the lane mask and the scalar broadcast. A list that is the input
+to "what next" is worth exactly its completeness, and an incomplete one
+sent a round of work somewhere else first.
 
 The first three are in the order the measurements rank them - which is
-not the order they were guessed in - and the last three carry the
+not the order they were guessed in - and asks 4 to 6 carry the
 requester's own ranking.
 
 **1. A device-side scatter. This is the expensive one.** *BUILT
@@ -2640,13 +2667,15 @@ is not; the scatter is. Kept because the discipline of the project is
 that a wrong hypothesis with a number beats a right one without, and
 because it correctly ranked these three.
 
-It is **composed**, not hardware: `ceil(log2 n)` elementwise `CFT_MAX`
-passes on the tile, which is the same door `CFT_SUMSQ` and `CFT_SUMABS`
-came through. Two things made that the right answer rather than the
-cheap one. A tile handed opcode 31 as a reduction would decode it as
-ELEMENTWISE - `cfg_is_reduce` is `(cfg_op == 8'd24)` - and write `n`
-elements where the caller sized one, so the opcode must never reach a
-tile at all. And 754-2019 `maximum` is exactly associative and
+It is **composed**, not hardware, everywhere but the XRT backend on a
+CAPS2[8] tile, where ask 7 below made opcode 31 a streaming maximum (ABI
+0.13, 2026-09-14): `ceil(log2 n)` elementwise `CFT_MAX` passes on the
+tile, which is the same door `CFT_SUMSQ` and `CFT_SUMABS` came through.
+Two things made that the right answer rather than the cheap one. A tile
+without CAPS2[8] handed opcode 31 as a reduction decodes it as
+ELEMENTWISE - `cfg_is_reduce` was `(cfg_op == 8'd24)` until ABI 0.13 -
+and writes `n` elements where the caller sized one, so the opcode must
+never reach such a tile. And 754-2019 `maximum` is exactly associative and
 commutative including its flags, so the composition's bits ARE the bits
 a hardware maxall would return: it works on all four staged pairs today
 with no new silicon, and forecloses nothing.
@@ -2919,21 +2948,23 @@ to price, not this route.
 *Priced and built the same evening* (docs/SEQUENCER.md, revision 5;
 0843b62 and the commit after it). The per-lane fixed cost was the
 register-file wipe - 512 cycles a block, sixteen a lane at fp128 - and
-it is gone (a valid bit per entry); the streams load only when read;
-the deposit and count drains run an element and a beat a cycle; and
+it is gone (a valid bit per entry); the streams load only when read; the
+deposit and count drains run an element and a beat a cycle; and
 instructions overlap, the next issuing while the last retires, a
-dependent one a beat behind the beat it needs. In the unit bench's
-cycle probe (`make seqcycles`, model RAM) a block that only halts went
-from 621 to 37 cycles at fp128, one IAND and one deposit from 823 to
-177, and an instruction from 38 cycles to 16 - its beats, the next
-instruction fetched under its issue and addressed from the cycle after
-its last address - or 20 when it reads the one before, the data
-dependence through the register file. What the card says is in
-docs/VALIDATION.md under the image that carries it; the whole program
-above was 2.3 us an element at binary128 with the instruction cost at
-38 cycles, and 210 instructions at 16 to 18 is a different number:
-the R14 image measured it at 1.25 us an element, the older route at
-1.92 (docs/VALIDATION.md, the same evening).
+dependent one a beat behind the beat it needs. In the unit bench's cycle
+probe (`make seqcycles`, model RAM) a block that only halts went from
+621 to 37 cycles at fp128, one IAND and one deposit from 823 to 177, and
+an instruction from 38 cycles to 16 - its beats, the next instruction
+fetched under its issue and addressed from the cycle after its last
+address - or 20 when it reads the one before, the data dependence
+through the register file. What the card says is in docs/VALIDATION.md
+under the image that carries it; the whole program above was 2.3 us an
+element at binary128 with the instruction cost at 38 cycles, and 210
+instructions at 16 to 18 is a different number: the R14 image measured
+it at 1.25 us an element, the older route at 1.92 (docs/VALIDATION.md,
+the same evening) - the older route's figure taken under load; idle, on
+the seq6 image, it is 1.01 against the whole program's 1.185 at fp128,
+and it stays the default.
 
 ### Library debts the round's verifiers found (2026-09-15)
 
@@ -3118,8 +3149,9 @@ graph and must equal the uncut program bit for bit.
 there are three ad-hoc policies - elementwise work is sliced across
 every tile, a reduction cuts its tree across a power of two of them, a
 program takes tile 0 - each with its own launch-and-wait code, and one
-of the three does not overlap its launches for a reason nobody has
-found yet (the reductions debt above). One scheduler replaces them:
+of the three looked as if it did not overlap its launches until the
+reductions debt above was found and fixed (two uploads of zeros a
+call). One scheduler replaces them:
 
 - a **task** is a sub-image, a lane range, its operands and its
   outputs; a **job** is a graph of tasks; a synchronous call is a job

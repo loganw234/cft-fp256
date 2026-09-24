@@ -51,9 +51,10 @@ with the hash it produced.
 
 ## Provenance
 
-atlas-engine d4178cc, `tools/photo-gpu.py` and `tools/photo-cft.mjs
---pack`; handed over in `build/cft/handoff-2026-09-18.tar.gz`, whose
+atlas-engine d4178cc, `atlas-engine/tools/photo-gpu.py` and
+`atlas-engine/tools/photo-cft.mjs --pack`; handed over in
+`atlas-engine/build/cft/handoff-2026-09-18.tar.gz`, whose
 `photographs/hopf/` this directory is (without the 20 MB copy of pass
 0's buffer and the GPU's summed planes, which the hashes stand for). Its
-`docs/CFT-PHOTOGRAPH.md` is the narrative; this project's record is
-docs/VALIDATION.md, 2026-09-18.
+narrative is `atlas-engine/docs/CFT-PHOTOGRAPH.md`; this project's
+record is docs/VALIDATION.md, 2026-09-18.

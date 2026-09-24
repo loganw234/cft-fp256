@@ -107,15 +107,15 @@ lemma contains any multiplier reasoning at all, and all seven
 geometries close in seconds to minutes.
 
 **And the engine matters more than the property does.** Everything else
-in this directory runs on bitwuzla, boolector's successor, which is
-faster on all of it. On this one property they are not comparable:
-bitwuzla did not return on `p53c1` in **sixty minutes**, and boolector
-closed the same task in **twenty-nine seconds**. yices, z3 and cvc5
-were tried on it too and none returned in five minutes; the AIG
+in this directory that uses an SMT solver runs on bitwuzla, boolector's
+successor, which is faster on all of it. On this one property they are
+not comparable: bitwuzla did not return on `p53c1` in **sixty minutes**,
+and boolector closed the same task in **twenty-nine seconds**. yices, z3
+and cvc5 were tried on it too and none returned in five minutes; the AIG
 engines never reached a solver, because the aiger backend rejects the
 model over undefined bits. That is why `mulpass_real.sby` carries its
-own `[engines]` line instead of inheriting the directory's, and why
-the four tasks that are in the gate are in it at all.
+own `[engines]` line instead of inheriting the directory's, and why the
+four tasks that are in the gate are in it at all.
 
 **The geometries are all seven.** `cft_mulgeom.svh` maps
 (P, MUL_PASSES) to (COLS, passes); `cft_lanes` builds the fp64, fp128
@@ -220,23 +220,33 @@ table.
 ## What is NOT proven
 
 * **Other parameterizations.** The FIFO proof runs one small instance
-  (8x8, not the deployed 256x32) and the two float modules run at the
-  fp32 rung, not 11/52, 15/112, 19/236. The modules are parameterized
-  and nothing in them branches on the parameter values, but that is an
-  argument, not a proof. Small is complete in the dimension that
-  matters for the FIFO - every control shape exists at DEPTH 8 and the
-  covers prove them reachable - and the seedop exponent algebra is
-  re-derived per rung by the Python side (test_seeds.py, exhaustively
-  at 8/23). **cft_mulpass is the exception**: it is proven at the real
-  24-bit chunk and at every (P, COLS) pair the tile builds, which is
-  every rung and every `MUL_PASSES` value, so no width argument is
-  being made for it.
+  (8x8, not the deployed 256x512 stream FIFOs or the 256x64 partial
+  queue) and the two float modules run at the fp32 rung, not 11/52,
+  15/112, 19/236. The modules are parameterized and nothing in them
+  branches on the parameter values, but that is an argument, not a
+  proof. Small is complete in the dimension that matters for the FIFO -
+  every control shape exists at DEPTH 8 and the covers prove them
+  reachable - and the seedop exponent algebra is re-derived per rung by
+  the Python side (test_seeds.py, exhaustively at 8/23). **cft_mulpass
+  is the exception**: it is proven at the real 24-bit chunk and at every
+  (P, COLS) pair the tile builds, which is every rung and every
+  `MUL_PASSES` value, so no width argument is being made for it.
 * **cft_mulpass off the live rung.** The harnesses pace at exactly the
   lane's own NP, which is what `cft_lanes` gives the live rung. The
   module's header says a lane seeing a LONGER enabled period still
   produces the right product (its pass counter saturates and it folds
   zeros) and a lane seeing a shorter one produces garbage that nothing
   reads. Neither is proven here; only the live rung's pacing is.
+* **IMUL's value.** `imul.sby` and `tb_imul_formal.sv` stay in the tree
+  but out of the gate: neither its `check` task nor its `value` miter
+  has returned (formal/run.sh has the times). Both elaborate
+  cft_simpleops at its default, the combinational product that is the
+  reference form; since 2026-09-23 the lanes take IMUL's product from
+  rtl/cft_imul.sv instead (`IMUL_EXT`). The reference rests on
+  tb/test_simpleops.py's test_imul, and the lanes' product on
+  tb/test_seq_core.py's indexed_constants_and_imul, which runs IMUL at
+  all four widths through the real `cft_lanes` (docs/VALIDATION.md,
+  2026-09-23).
 * **Seed values.** This gate proves cft_seedop routes specials
   correctly; that the table entries approximate 1/x and 1/sqrt(x)
   within 2^-8.5 is python/tests/test_seeds.py's exhaustive claim, and

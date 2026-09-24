@@ -108,7 +108,8 @@ authority:
    C++17 and C++20, through the wasm module in node, through the
    committed conformance page without a browser, through the Python
    drop-in against gmpy2's IEEE emulation, and one example per language
-   diffed against the C example's bits.
+   diffed against the C example's bits (Fortran's, which prints no
+   checksum, is built and run).
 8. **The workloads and the demos** (`workloads`, `demos` stages, and
    `make -C host <tool>test`). The five contract workloads - Collatz,
    interval enclosure, Mersenne, orbits, deep zoom - each against an
@@ -163,12 +164,12 @@ suite - so a Linux host lands nearer the quiet column or below it.
 |---|---|---|---|
 | `golden` (pytest, 2,264 tests since revision 3's model and assembler cases joined on 2026-09-08 evening; 2,075 before it) | 2.6 min at four workers | 8 to 13 min | 5 skip by their own conditions; one revision-3 assembler test ran for the first time on the merged tree and had its expectation corrected |
 | `vectors` (`make vectors`, 168 sets) | 5 min | 7 to 8.5 min | |
-| `libcft` / `make -C host test` (build + the 1,068,915-case replay) | 7.5 min | 8.5 to 11 min | the census was 1,071,635 until 2026-09-12, when opcode 31 became `maxall`: a reduction has no elementwise case to inherit, so 4,000 `reserved31` cases left and 1,280 maxall cases arrived. A document recording an earlier RUN still says 1,071,635 and is right to |
+| `libcft` / `make -C host test` (build + the replay: 1,068,915 cases on `make vectors`' sets, about 1.2 million at the runner's generator counts) | 7.5 min | 8.5 to 11 min | the census was 1,071,635 until 2026-09-12, when opcode 31 became `maxall`: a reduction has no elementwise case to inherit, so 4,000 `reserved31` cases left and 1,280 maxall cases arrived. A document recording an earlier RUN still says 1,071,635 and is right to |
 | `make -C host reducetest` (`reduce_check.py --trials 1500`: the tree, the scaling, the bits and the flags against the model) | 2 to 3 min | | listed here from 2026-09-12, having been absent from a page that calls itself the map of everything - found by asking which docs the round had made stale rather than by a gate. 13,516 reductions over four formats and all seven of clause 9.4 plus `maxall`, whose two sides are deliberately DIFFERENT SHAPES: the model folds left, the library halves. Comparing them is what tests 754-2019 `maximum`'s associativity instead of assuming it |
 | `sim` (25 cocotb targets, `cft-sim` image) | 10 min at the runner's job count; about 40 min serial | **55 min at four jobs** | 3 min at twelve jobs on a 36-core box; almost all compilation |
 | `simmc MC=10` (13 multi-cycle + 4 board targets) | not measured quiet | about 50 min at four jobs for sixteen of the seventeen | the seventeenth, the engine-driven board kernel, **does not finish under Icarus** in this configuration: 2.5 ns of simulated time a second through the small operations and about 0.03 ns a second inside the 1,104-element stream, 57 of 71 operations after four hours, on the tree before the cone change and after it alike; under Verilator, which its target selects, the bench is **16 s of simulation after an eleven-minute compile** (44,920 ns, both tests, parameters applied - until the evening of 2026-09-07 a Verilator build received none of a target's parameters and simulated the default, docs/VALIDATION.md) |
 | `lint` (Yosys, every RTL file) | 1 min | 1.5 to 2 min | |
-| `make programs-check` (the .cfta library: both assemblers, seventeen images, a check each, generated revision-2 and revision-3 corpora) | 10 to 60 s | | not a runner stage yet; `make programs` rebuilds the manifest it checks, so the two are separate on purpose; four of the checks waited on the revision-3 model and host by name (SKIP, not PASS) until both merged on 2026-09-08 |
+| `make programs-check` (the .cfta library: both assemblers, twenty-nine images (seventeen when timed), a check each, generated revision-2 and revision-3 corpora) | 10 to 60 s | | not a runner stage yet; `make programs` rebuilds the manifest it checks, so the two are separate on purpose; four of the checks waited on the revision-3 model and host by name (SKIP, not PASS) until both merged on 2026-09-08 |
 | on the card: `hw/run-device-test.sh <xclbin> -q -n 8`, `-n 4096`, `-r` (docs/CARDDAY.md steps 2-3) | seconds each | | measured 2026-09-08 on the U50: 4 to 8 s, 2 s, 1 s |
 | on the card: `cft-selftest vectors/out <xclbin>`, the published sets through the tile (step 4) | **about 10 min an image** | 11 min beside a Vivado run | one element a call for exact flags, so latency-bound; the same 584-642 s on one tile and on four |
 | on the card: the soak (five matrices, the sets again, ten orbit checkpoints per image; step 7) | about 20 min an image | | a tool that talks to the card must be built with `XRT=1`, or it says "no such device" |
@@ -190,7 +191,7 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | `wstest` | | 2 min | |
 | `embedded` (`make embedded`) | 18 to 19 min | | the vendored-copy check, four loopback profiles built, the published sets replayed through each (1,068,915 cases twice, 271,776 and 195,248 for the two `CFT_TINY` profiles), the corruption control, and fifteen board compiles through `arduino-cli`. Needs the AVR, ESP32 and RP2040 cores installed; skips the compiles with a note if `arduino-cli` is absent |
 | a board census (`serial_replay.py --port COMn`) | 1 h+ per board | | not a gate and not in the runner: it needs a part plugged in. About 200 to 550 cases a second on an ESP32-S3 depending on format and operation, so the full 1,068,915 is hours. Use `--sets` and `--limit` for anything routine |
-| the fuzz lane (`make -C host fuzz-run`) | 30 min per target by design | | `FUZZ_SECONDS`; the sanitizers need the `cft-sim` image, MSYS gcc has none |
+| the fuzz lane (`make -C host fuzz-run`) | 1 min per target at the default; 30 min in the 2026-09-07 campaign | | `FUZZ_SECONDS`; the sanitizers need the `cft-sim` image, MSYS gcc has none |
 | a wasm module rebuild (`bindings/wasm/build.sh`) | 5 min | | in the pinned emscripten image |
 | OOC synthesis, one kernel (`hw/mc_sweep.sh ... synth`) | 10 to 32 min | | U50 647 to 1,905 s; K325T 626 to 1,272 s; A200T and Z020 6 to 12 min |
 | OOC implementation, one kernel (`... impl`) | 24 min to 1 h 46 | | K325T 1,429 to 2,608 s including its synthesis; U50 2,591 s quiet, 6,351 s under load |
@@ -198,19 +199,21 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | a shell link, four tiles | 3 to 4 h | | 25 to 30 GB of the build box's 46; one at a time or the placer is killed and it looks like a design failure |
 
 The budgets in `verify/run.sh` are cuts of that table: `quick` is the
-`docs`, `generated` and `buildargs` checks, the model-versus-C stages, the bindings, the language
+`docs`, `generated`, `buildargs` and `sweepjudge` checks, the
+model-versus-C stages, the GPU's photograph, the bindings, the language
 legs, the soak spot check, the workloads, the demos and the remote
-backend - about twenty minutes after a host build; `gate` adds the golden suite, the vectors,
-the library replay, the transcendentals, MPFR, the C++ replay, lint and
-formal - **about two hours quiet and four loaded on this host**, most
-of it `cpp`, `transcend` and `formal`; `full` adds the simulation
-suite, node, wasm and the staged images, which is the census. The
-runner writes a `.ok` per stage and `--resume` reruns only what has
-none, so an interrupted run loses at most the stage it was in. There is
-**no cache across runs**: a run id is a timestamp plus the commit, so a
-fresh invocation re-runs everything and `--resume` is the only thing that
-skips work. (cft-rebound is the sibling repo with a content-addressed gate
-cache and a warm five-second check; this runner does not have one.)
+backend - about twenty minutes after a host build; `gate` adds the golden
+suite, the vectors, the library replay, the transcendentals, MPFR, the
+C++ replay, lint and formal - **about two hours quiet and four loaded on
+this host**, most of it `cpp`, `transcend` and `formal`; `full` adds the
+simulation suites (`sim`, `simmc`), node, wasm and the staged images,
+which is the census. The runner writes a `.ok` per stage and `--resume`
+reruns only what has none, so an interrupted run loses at most the stage
+it was in. There is **no cache across runs**: a run id is a timestamp
+plus the commit, so a fresh invocation re-runs everything and `--resume`
+is the only thing that skips work. (cft-rebound is the sibling repo with
+a content-addressed gate cache and a warm five-second check; this runner
+does not have one.)
 
 `bash verify/run.sh --list` prints all forty stages with a marker
 against the ones the given `--budget` or `--only` would actually run, so
@@ -220,24 +223,25 @@ list - they were kept by hand in three places once, and two of the copies
 drifted.
 
 The `docs` stage is the cheapest of them and exists for the same reason:
-`docs/README.md` indexes the thirty-four documents, and
-`python/check_docs_index.py` refuses a broken link, a document missing from
-the index, or a stated line count that no longer matches the file.
+`docs/README.md` indexes the thirty-seven documents, and
+`python/check_docs_index.py` refuses a broken link, a document missing
+from the index, or a stated line count that no longer matches the file.
 
 `generated` is the same idea aimed at code rather than prose. Four
 scripts in the tree own a committed artifact and each already had a
 `--check` mode that exits 1 when the file on disk differs from a fresh
 generation - `hw/gen_layouts.py`, `host/tools/gen_2opi.py`,
-`host/tools/gen_mp_consts.py` and `bindings/node/make_seq_corpus.py`.
-**Nothing invoked any of them**, and by 2026-09-13 two had drifted: the
-five `hw/layouts/*.cfg` carried a superseded WNS note in a commented-out
-clock line, and `bindings/node/seq_corpus.jsonl` had been stale since the
-`kx` corruption kinds landed - so the wasm harness replayed a 192-case
-corpus containing none of them, and passed. A file whose header says
-"GENERATED by X; edit the table there, not this file" and which nothing
-checks is a comment rather than a guarantee; this stage is what makes the
-comment true. `make_seq_corpus.py` needs a built libcft and `cft_golden`
-on the path and is skipped by name when they are absent, so staleness is
+`host/tools/gen_mp_consts.py` and `bindings/node/make_seq_corpus.py` (a
+fifth, `python/gen_divfull.py`, joined on 2026-09-14). **Nothing invoked
+any of them**, and by 2026-09-13 two had drifted: the five
+`hw/layouts/*.cfg` carried a superseded WNS note in a commented-out clock
+line, and `bindings/node/seq_corpus.jsonl` had been stale since the `kx`
+corruption kinds landed - so the wasm harness replayed a 192-case corpus
+containing none of them, and passed. A file whose header says "GENERATED
+by X; edit the table there, not this file" and which nothing checks is a
+comment rather than a guarantee; this stage is what makes the comment
+true. `make_seq_corpus.py` needs a built libcft and `cft_golden` on the
+path and is skipped by name when they are absent, so staleness is
 recognised from the generator's own message rather than from exit status
 alone.
 
@@ -308,15 +312,17 @@ So that a log can be read without the harness:
   ends with `FORMAL GATE: PASS (n of n, negative control refuted)`; a
   task whose solved model carried fewer checks than the gate expects
   prints `VACUOUS` and fails.
-- the library replay prints `168 sets, 1071635 cases, all matching`
-  and `api-test: all contract checks passed`; the remote gate ends with
+- the library replay prints `168 sets, 1068915 cases, all matching` after
+  `make vectors` (1224915 in the runner's `libcft` stage) and
+  `api-test: all contract checks passed`; the remote gate ends with
   `remote_check: every check passed`; each workload check ends with its
-  `... CHECK OK` line and a comparison count; `verify.mjs` ends with
-  the case count and `library matches the vectors exactly`;
-  `verify_demos.mjs` with `VERDICT: the browser's compute core produced
-  the C tools' chains`.
+  `... CHECK OK` line and a comparison count; `verify.mjs` ends with the
+  case count and `library matches the vectors exactly`, then the
+  wrappers' count, and `VERIFY OK`; `verify_demos.mjs` with `VERDICT: the
+  browser's compute core produced the C tools' chains`.
 - the runner ends with a census block shaped for docs/VALIDATION.md,
-  listing every stage as PASS, FAIL or SKIP with the skip's reason.
+  after a line per stage (ok, FAIL, or SKIP with the skip's reason) and a
+  `VERDICT:` line.
 
 ## Running one thing
 

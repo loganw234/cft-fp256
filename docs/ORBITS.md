@@ -49,8 +49,10 @@ Three things this says that a microbenchmark cannot:
    step-size study needs and binary64 does not have.
 3. **The sequencer cannot hold this workload, and the reason is
    precise.** Two independent obstacles, each fatal on its own, and
-   both of them are facts about the program model rather than about
-   this tool. That observation is the deliverable for the sequencer's
+   both of them were facts about the program model rather than about
+   this tool when it was written; revision 3's scratch block
+   (2026-09-08) has since answered the first, and this tool does not
+   use it. That observation is the deliverable for the sequencer's
    designers; it is written out in full below.
 
 ---
@@ -290,8 +292,10 @@ and it is **forced**, which is the whole point of the next section.
 
 `--engine program` refuses `--problem outer`, refuses `--rsqrt exact`
 and refuses `--resume`. All three refusals are one of two facts about
-the program model. Neither is a gap in this tool and neither can be
-worked around by writing the program differently.
+the program model as it stood when this tool was written. Since
+revision 3 (2026-09-08) the first is a gap in this tool - the scratch
+block answers it, and this tool does not use it; the second still
+cannot be worked around by writing the program differently.
 
 **(1) Three input streams against 2d state values.**
 `cft_program_run` initialises `r0`, `r1` and `r2` from `a`, `b` and
@@ -301,8 +305,8 @@ worked around by writing the program differently.
     planar Kepler          2d = 4
     outer solar system     2d = 30
 
-So **a program can be entered only at a state with at most three
-non-zero components.** The Kepler initial condition has exactly two -
+So, without revision 3's scratch block, **a program can be entered only
+at a state with at most three non-zero components.** The Kepler initial condition has exactly two -
 `q = (1-e, 0)`, `v = (0, v0)` - and the two components that must be
 zero can be put in registers that start at `+0` (`r2` by passing
 `c = NULL`, `r3` because `r3..r31` always do). Step 0 is therefore
@@ -318,8 +322,9 @@ output that always starts at +0". This one shows the limit binding.
 **A fourth input stream, or a "load `r3..` from the deposit buffer"
 mode, would make every 2-degree-of-freedom system resumable and every
 3-degree-of-freedom one expressible.** Thirty-two registers are
-already far more than a 6-value state needs; only the loading is
-missing.
+already far more than a 6-value state needs, and since revision 3
+(2026-09-08) the scratch block is that loading; this tool does not use
+it.
 
 **(2) Correctly rounded divide and square root are not programs.**
 `python/cft_golden/seqprogs.py` is the library's own in-program
@@ -345,7 +350,8 @@ leapfrog step has all four state values live. The two obstacles are
 independent and either is fatal alone.
 
 **What the sequencer would need to run this workload as one program:**
-a way to load more than three registers, and either a callable
+a way to load more than three registers (revision 3's scratch block,
+since built, which this tool does not use), and either a callable
 composed operation or an in-program correctly-rounded divide. Neither
 is proposed here as a change; both are what this workload found.
 
@@ -495,10 +501,11 @@ of the batch size, of the engine and of where a run was interrupted.
 the chain; `orbits_check.py` does, with `hashlib`.
 
 SHA-256's eight initial words and sixty-four round constants are
-**derived** in the tool from the square and cube roots of the first 64
-primes by integer binary search in 128-bit arithmetic, exactly as
-`host/tools/collatz.c` derives them, rather than typed in. The
-`hashlib` comparison is what proves the derivation right.
+**derived** in `host/src/sha256.c` - the library's one copy since
+2026-09-08, lifted from `host/tools/collatz.c` - from the square and
+cube roots of the first 64 primes by integer binary search in 128-bit
+arithmetic, rather than typed in. The `hashlib` comparison is what
+proves the derivation right.
 
 ---
 

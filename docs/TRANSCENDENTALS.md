@@ -491,22 +491,23 @@ family. The rest were decided at 2p+40.
 Because a path never taken is a path never tested, both implementations
 carry a test-only knob that lowers the FIRST attempt's precision -
 `CFT_TRANSCEND_MINPREC` in the C, `START_PREC_OVERRIDE` in the model -
-and the `transcend` stage of `verify/run.sh` runs the whole sweep twice,
+and the `transcend` stage of `verify/run.sh` runs the sweep twice,
 once normally and once with the C forced to start at 64 bits against an
-UNESCALATED model. That second run drives 6,542 escalations through the
-MPFR campaign, and it is what found the exact-cancellation hole in the
-error bound described above. The knob cannot change a result: a
-rounding the enclosure decides at some precision is decided the same
-way at every higher one, because raising the precision only narrows the
-enclosure - and the run proves it, over 72,275 comparisons against a
-reference that did not escalate.
+UNESCALATED model. That second run drives 6,542 escalations through
+`transcend_check.py`'s pools, and it is what found the
+exact-cancellation hole in the error bound described above. The knob
+cannot change a result: a rounding the enclosure decides at some
+precision is decided the same way at every higher one, because raising
+the precision only narrows the enclosure - and the run proves it, over
+72,275 comparisons against a reference that did not escalate.
 
 ## What was not here on 2026-09-02
 
-*Status 2026-09-04: everything below except tile assistance has since
-landed - phases 2 and 3 and the rest of table 9.1 follow in this file,
-and docs/COMPLIANCE.md is the statement. The section stays as written
-because the prediction it makes was tested by what came after.*
+*Status 2026-09-04: everything below except tile assistance and a
+performance claim has since landed - phases 2 and 3 and the rest of
+table 9.1 follow in this file, and docs/COMPLIANCE.md is the statement.
+The section stays as written because the prediction it makes was tested
+by what came after.*
 
 - **Tile assistance.** Every one of these is host work today. A
   narrow-format fast path on the tile's FMA is a phase-2 optimisation
@@ -998,13 +999,13 @@ hopeless at a quarter of a million bits; Chudnovsky's binary splitting
 takes seconds. A third test ties `CFT_TR_PH_WINDOW_MAX` to the
 constant's size, so widening the window without regenerating the header
 fails rather than reading past the end of the array. At run time
-`cft_mp_two_over_pi_selfcheck()` checks two things that prove different
-things: the top 512 bits against 2/pi derived from the independently
-re-derived pi in `mp_consts.h`, which says the stream really is 2/pi to
-the bits that other header carries; and an FNV-1a over every word,
-which says the array in the binary is the array the generator emitted
-and nothing at all about the deep bits. Only regeneration proves those,
-and the test does it on every run.
+`tr_2opi_ok()` in `host/src/transcend.c` checks two things that prove
+different things: the top 512 bits against 2/pi derived from the
+independently re-derived pi in `mp_consts.h`, which says the stream
+really is 2/pi to the bits that other header carries; and an FNV-1a over
+every word, which says the array in the binary is the array the
+generator emitted and nothing at all about the deep bits. Only
+regeneration proves those, and the test does it on every run.
 
 ## The cancellation, and why it is a measurement
 

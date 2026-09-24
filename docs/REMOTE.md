@@ -76,6 +76,7 @@ client's own copy of the library, which is bit-identical by contract.
 | `cft_run` | server | one `RUN` request per chunk of the call |
 | `cft_reduce` for `CFT_SUM`, `CFT_DOT` | server | one `REDUCE` request |
 | `cft_reduce` for `CFT_SUMSQ`, `CFT_SUMABS` | the composition on the client, its two passes on the server | `REDUCE` (dot), or `RUN` (abs) then `REDUCE` (sum) |
+| `cft_reduce` for `CFT_MAXALL` (ABI 0.12) | the composition on the client, halving with `CFT_MAX`, each pass on the server | one `RUN` (max) per chunk of each halving pass, `ceil(log2 n)` passes |
 | `cft_reduce_seg` (ABI 0.13) | server, its own `cft_reduce_seg` over whatever device it has | one `REDUCE_SEG` request, `n / seg` elements back |
 | `cft_program_load` | validated on the client, then loaded on the server | `PROG_LOAD` once per distinct image |
 | `cft_program_run` | server | one `PROG_RUN` per chunk of lanes |
@@ -220,8 +221,9 @@ refusal CLOSES THE CONNECTION. After a framing error the byte stream
 is unsynchronised, and pretending to resume it is how a later request
 gets answered with an earlier response. A client that receives a
 refusal, or that fails any check on a response, marks its handle
-POISONED: every later call on that handle returns `CFT_ERR_INTERNAL`
-with "close and reopen" in `cft_last_error()`, the same discipline the
+POISONED: every later call on that handle returns the status that
+poisoned it, with "close it and open it again" in
+`cft_last_error()`, the same discipline the
 XRT backend applies to a handle whose compute units may still be
 running. A kind-1 response whose `status` is not `CFT_OK` is not a
 refusal: it is the operation's own answer (`CFT_ERR_UNSUPPORTED` for a
@@ -449,6 +451,7 @@ its time. A timeout poisons the handle and returns `CFT_ERR_TIMEOUT`.
 ## The server
 
     cft-serve [--port N] [--bind ADDR] [--artifact PATH] [--max-conns N]
+              [--pid-file PATH] [--port-file PATH]
               [--ws PORT] [--ws-port-file PATH] [--verbose]
 
 Listens on `127.0.0.1:7754` by default (the port is a choice, not a
@@ -647,7 +650,7 @@ for a C client, it is not offering a WebSocket unless someone typed
   number: `abi` is a required option whose natural value is the wasm
   module's own `cftw_abi_version()`, because every frame carries the
   sender's and the server refuses a mismatch. The caps block is read
-  by offset and not by total length - the 56 bytes this document
+  by offset and not by total length - the 76 bytes this document
   defines, and whatever a later server appends kept as `extra` - so a
   server that grows its `HELLO` stays readable by a client that has
   not been rebuilt.
@@ -957,7 +960,7 @@ CAN:
   request streams out of a generator and the response is eight bytes
   and one element, so nothing about a reduction is chunked or held: a
   Nano can `sum` four thousand binary256 values it makes up as it goes.
-- The five status-word operations, which libcft's own client never
+- The six status-word operations, which libcft's own client never
   issues because libcft keeps that word on the host. Over the wire the
   word lives on the server, so a board can read it.
 - CARRY an encoding it cannot represent. This is the whole point. A
@@ -973,8 +976,9 @@ CANNOT:
   buffer is the one thing the budget forbids. The sequencer's whole
   value on a remote device is collapsing round trips, and a board's
   round trips are already dominated by the wire.
-- The buffer operations and `STATS`. Neither is implemented; both are
-  frames a future version could add without changing anything here.
+- The buffer operations, `REDUCE_SEG` and `STATS`. None is implemented;
+  all are frames a future version could add without changing anything
+  here.
 - Represent what it computes with. An AVR's `double` IS its `float`,
   thirty-two bits, so there is no way to make a binary64 encoding out
   of an arithmetic value on one. `packF32` exists everywhere;
@@ -1127,10 +1131,11 @@ The transcribed constants are held at COMPILE time, which is the only
 reason the embedded header is allowed to have them: `host_check.cc`
 includes `host/src/remote.h` and `host/include/cft.h` beside
 `cft_remote.h` and `static_assert`s every pair equal - the magic, the
-protocol version, the header size, all twenty-one opcodes, all nine
-statuses, four formats, five rounding attributes, five flag bits and
-the caps block's three lengths. A value that drifts is a compile error
-in the gate rather than a refusal on a bench.
+protocol version, the header size, the twenty-one opcodes it names (all
+but `REDUCE_SEG`), all nine statuses, four formats, five rounding
+attributes, five flag bits and the caps block's three lengths. A value
+that drifts is a compile error in the gate rather than a refusal on a
+bench.
 
 `src/remote/test/compile_check.py` compiles the examples for
 `arduino:avr:uno`, `arduino:avr:nano`, `arduino:avr:mega`,
@@ -1322,16 +1327,17 @@ everything else.
 
 ## The runner stage
 
-`verify/run.sh`'s `remote` stage, in the quick budget: build the
-server and the client tools, then hand the server's lifecycle to
+`verify/run.sh`'s `remote` stage, in the quick budget: build the server
+and the client tools, then hand the server's lifecycle to
 `host/tests/remote_check.py`, which starts a loopback server on a free
 port as its own child, records its PID in the run directory
 (`remote-server.pid`), replays a bounded vector set through it and
 locally and compares the two reports, runs `device-test` and
-`remote-test` against it, runs one workload both ways and compares
-the chains, reads the round-trip counts on both routes, and stops the
-server by the recorded PID - never by image name, on a host where
-other people's processes share the image names.
+`remote-test` against it, runs one workload both ways and compares the
+chains, reads the round-trip counts on both routes, and stops the server
+by the recorded PID - never by image name, on a host where other
+people's processes share the image names. Then, with node on PATH, the
+stage runs `make -C host wstest`, the same contract over WebSocket.
 
 ## The negative control
 

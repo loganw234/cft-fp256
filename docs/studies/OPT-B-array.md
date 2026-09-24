@@ -1,6 +1,7 @@
 # Design study B: the array, the beat, and how many tiles a part can hold
 
-*A design study, 2026-09-06. Nothing here is built, and nothing here
+*A design study, 2026-09-06. Nothing here was built when it was written
+(idea 2 later landed as round 2's P4, docs/ROUND2.md), and nothing here
 should be built on this document's word. The job is to widen the option
 space and price each option honestly enough that someone can choose.*
 

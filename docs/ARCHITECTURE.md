@@ -108,25 +108,25 @@ kernel flow, XRT host runtime.
   module exists - "the sequencer introduces no arithmetic, only a
   schedule" is now a statement about the netlist rather than a claim
   about two copies of the same source.
-- **cft_seq** - the orbit sequencer: on-chip programs over the
-  existing opcodes, entered by MODE[15], reading its image from
-  PROG_PTR - and, when the header's `flags.BANK_EXT` is set, its
-  constants from BANK_PTR instead of from the image - and writing
-  per-lane deposits and counts. A lane owns **32 registers** of format
-  width since revision 2, so the register file is `32 * NBEATS` beats
-  of 32 bytes - 16 KiB a tile at `NBEATS` 16, the same silicon at
-  every precision - and since revision 3 **256 scratch slots** of the
-  same width, addressed `{slot, beat}` the way the register file is
-  addressed `{reg, beat}`: `256 * NBEATS` beats of 32 bytes, **128 KiB
-  a tile**, eight times the register file. The instruction
-  memory holds **16,384** (4,096 at revision 2, 1,024 before it) and
-  the constant bank **512**, which is another 128 KiB and 16 KiB - so
-  the module's two largest memories are now the scratch and the
-  instruction stream, at exactly the same size.
-  It borrows the A and D masters from the streaming engine and issues
-  into the same `cft_lanes`. docs/SEQUENCER.md is the design and
-  `python/cft_golden/seq.py` the definition of correct; benched
-  bit-exact against it, hw_emu and silicon still ahead.
+- **cft_seq** - the orbit sequencer: on-chip programs over the existing
+  opcodes, entered by MODE[15], reading its image from PROG_PTR - and,
+  when the header's `flags.BANK_EXT` is set, its constants from BANK_PTR
+  instead of from the image - and writing per-lane deposits and counts.
+  A lane owns **32 registers** of format width since revision 2, so the
+  register file is `32 * NBEATS` beats of 32 bytes - 16 KiB a tile at
+  `NBEATS` 16, the same silicon at every precision - and since revision
+  3 **256 scratch slots** of the same width, addressed `{slot, beat}`
+  the way the register file is addressed `{reg, beat}`: `256 * NBEATS`
+  beats of 32 bytes, **128 KiB a tile**, eight times the register file.
+  The instruction memory holds **16,384** (4,096 at revision 2, 1,024
+  before it) and the constant bank **512**, which is another 128 KiB and
+  16 KiB - so the module's two largest memories are now the scratch and
+  the instruction stream, at exactly the same size. It borrows all four
+  masters from the streaming engine - each read steered to A, B or C by
+  its buffer, the writes on D - and issues into the same `cft_lanes`.
+  docs/SEQUENCER.md is the design and `python/cft_golden/seq.py` the
+  definition of correct; benched bit-exact against it, and run on hw_emu
+  (2026-09-02) and on the U50 (2026-09-08).
 - **cft_csr** - AXI4-Lite slave, Vitis ap_ctrl_hs protocol, argument
   registers, and the read-only FLAGS/MAGIC/VERSION/CAPS block.
 - **cft_engine_stream** - the v1 streaming sequencer the kernel
@@ -214,16 +214,16 @@ The two full-tile numbers are the same RTL: FUSE_NORM and FUSE_ALIGN
 alignment and normalise shifters with two segmented 720-bit ladders,
 equivalence-proven per lane in the 2026-08-31 campaign (-18.6k LUT
 against the pre-sequencer tile, 116,932 -> 98,310; docs/ROADMAP.md
-carries that table) and now through the whole kernel by `make
-krnlfused` / `make krnlplain`. In the tile that exists they are worth
-139,404 - 123,599 = **15,805 LUT**, and they are off anyway: out of
-context they leave +0.097 ns of slack against ladders-off's +0.307,
-and a shell build at 135 MHz is what settled it. Sharing stays
-per-build - the Alveo image declines it, an area-bound open build
-takes it - and `hw/package_kernel.tcl` strips user parameters, so a
-bitstream carries whatever the RTL default is and nothing else.
-All three ladders self-gate on the full-tile geometry, so a quarter
-tile ignores them either way.
+carries that table) and now through the whole kernel by `make krnlfused`
+/ `make krnlplain`. In the tile that exists they are worth 139,404 -
+123,599 = **15,805 LUT**, and they are off anyway: out of context they
+leave +0.097 ns of slack against ladders-off's +0.307, and a shell build
+at 135 MHz is what settled it. Sharing stays per-build - the Alveo image
+declines it, an area-bound open build takes it - and
+`hw/package_kernel.tcl` strips user parameters, so a bitstream carries
+the RTL default unless `CFT_GENERICS` overrides it at packaging
+(2026-09-14). All three ladders self-gate on the full-tile geometry, so
+a quarter tile ignores them either way.
 
 **The width is a real constraint, not a preference, and the sequencer
 tightened it.** A full tile was 139,404 LUT and 292 DSPs with the
@@ -251,7 +251,7 @@ does not work yet.
 | 0x04 | GIER | RW | storage only; no interrupt exported in v0 |
 | 0x08 | IER  | RW | storage only |
 | 0x0C | ISR  | RO | 0 |
-| 0x10 | MODE | RW | [7:0] op (see the opcode table below); [11:8] precision: 0 fp32x8, 1 fp64x4, 2 fp128x2, 3 fp256 - issue only precisions set in CAPS; [14:12] rounding attribute, RISC-V frm encoding: 0 rne, 1 rtz, 2 rdn, 3 rup, 4 rmm (5-7 reserved, behave as rne; ignored by the non-arithmetic opcodes); **[15] SEQUENCER RUN** - this run belongs to `cft_seq` and the op field is ignored, because the program says what to compute and carries a rounding attribute on every instruction. Precision still applies and is still refused the same way: a program is compiled for one format (its constants are format-width values), so a rung the build lacks is exactly as unrunnable here as it is for an elementwise op. CAPS[15] says whether there is a sequencer at all; **[18:16] SCALAR operands** (2026-09-12) - [16] a, [17] b, [18] c; a set bit makes that operand STRIDE-0, so the engine reads ONE beat and broadcasts element 0 of it over the whole run. That is where the saving is: a value applied to a batch no longer crosses the bus n times. Advertised in CAPS2[7], and the bit is REFUSED rather than ignored on a build that lacks it. **[23:19] reserved for ABI 0.14** (docs/ROUND2.md): [19] `a`, [20] `b`, [21] `c` and [22] `scratch_in` fetched through the index tables at 0x88..0xA0, honoured only under CAPS2[9]; [23] the lane mask at 0xA8, only under CAPS2[10] - until those bits are set the five are refused exactly as the rest of the reserved half is. **[31:19] reserved, MUST BE ZERO** - and now enforced: a non-zero bit is refused at start with STATUS[3], nothing begins and no memory is touched. Before 2026-09-12 nothing checked this half of MODE at all, which is exactly why [18:16] each need a CAPS2 bit: a tile that predates the guard IGNORES an unknown MODE bit, and an ignored stride-0 flag is not a wrong answer but an out-of-bounds read of n-1 elements from a one-element buffer. Measured, not argued: the host-side control of that shape segfaults. The guard cannot teach a shipped bitstream to refuse; it makes every bit added after it fail safe |
+| 0x10 | MODE | RW | [7:0] op (see the opcode table below); [11:8] precision: 0 fp32x8, 1 fp64x4, 2 fp128x2, 3 fp256 - issue only precisions set in CAPS; [14:12] rounding attribute, RISC-V frm encoding: 0 rne, 1 rtz, 2 rdn, 3 rup, 4 rmm (5-7 reserved, behave as rne; ignored by the non-arithmetic opcodes); **[15] SEQUENCER RUN** - this run belongs to `cft_seq` and the op field is ignored, because the program says what to compute and carries a rounding attribute on every instruction. Precision still applies and is still refused the same way: a program is compiled for one format (its constants are format-width values), so a rung the build lacks is exactly as unrunnable here as it is for an elementwise op. CAPS[15] says whether there is a sequencer at all; **[18:16] SCALAR operands** (2026-09-12) - [16] a, [17] b, [18] c; a set bit makes that operand STRIDE-0, so the engine reads ONE beat and broadcasts element 0 of it over the whole run. That is where the saving is: a value applied to a batch no longer crosses the bus n times. Advertised in CAPS2[7], and the bit is REFUSED rather than ignored on a build that lacks it. **[23:19] ABI 0.14** (2026-09-15, docs/ROUND2.md): [19] `a`, [20] `b`, [21] `c` and [22] `scratch_in` fetched through the index tables at 0x88..0xA0, honoured only under CAPS2[9]; [23] the lane mask at 0xA8, only under CAPS2[10] - until those bits are set the five are refused exactly as the rest of the reserved half is. **[31:24] reserved, MUST BE ZERO** - and now enforced: a non-zero bit is refused at start with STATUS[3], nothing begins and no memory is touched. Before 2026-09-12 nothing checked this half of MODE at all, which is exactly why [18:16] each need a CAPS2 bit: a tile that predates the guard IGNORES an unknown MODE bit, and an ignored stride-0 flag is not a wrong answer but an out-of-bounds read of n-1 elements from a one-element buffer. Measured, not argued: the host-side control of that shape segfaults. The guard cannot teach a shipped bitstream to refuse; it makes every bit added after it fail safe |
 | 0x18 | N    | RW | element count, 64-bit |
 | 0x20 | A_PTR | RW | 64-bit HBM byte address |
 | 0x28 | B_PTR | RW | 64-bit |
@@ -261,16 +261,16 @@ does not work yet.
 | 0x44 | MAGIC | RO | 0x43465430 "CFT0" |
 | 0x48 | VERSION | RO | 0x00000A00 on the round-2 image (0x800 at sequencer revision 3; 0x900 added SEG and NRES at 0x80/0x84; 0xA00 added the five pointers at 0x88..0xA8 and MODE[23:19]). **Guards the REGISTER MAP, not the feature set** - a host accepts a SET of known versions and lets CAPS decide what an image can do. One accepted value would orphan a still-good bitstream every time a feature landed, which nearly happened when reductions bumped 0x410 to 0x500 and the card-day images were already built at 0x410. 0x600 is the first bump that GREW the map rather than only adding a capability: PROG_PTR and CNT_PTR exist at 0x54 and 0x5C, and two kernel arguments exist that did not. 0x700 (revision 2, 2026-09-08) is the second, and for exactly the same reason: BANK_PTR exists at 0x64/0x68 as kernel argument 8, so a host that writes it to a 0x600 tile writes into a decode default and runs a `BANK_EXT` program against constants at address zero. Revision 2's other two changes add no register and so do not move VERSION - five-bit register fields and IMEM_D 4096 are announced in CAPS, at [5] and in the [23:20] field that already published the capacity. 0x800 (revision 3, the same evening) is the third bump of the same kind and the largest: CAPS2 exists at 0x6C read-only, SCRATCH_IN_PTR at 0x70/0x74 and SCRATCH_OUT_PTR at 0x78/0x7C as kernel arguments 9 and 10, so a host that writes a scratch pointer to a 0x700 tile writes into a decode default and would run a `SCRATCH_IO` program against a preload at address zero. Revision 3's other two changes add no register either: IMEM_D 16384 and the ninth constant-index bit are published in CAPS[23:20] and CAPS[7]. The older versions stay accepted because their registers are still read correctly; what they cannot do is run a program, and libcft refuses that outright rather than binding an eight-argument call to a six-argument xclbin. **0x900 (2026-09-14, ask 7) is the fourth bump of the same kind**: SEG and NRES exist at 0x80/0x84 as kernel argument 11 - a reduction's segment length and result count - so a host that writes them to an 0x800 tile writes into a decode default and gets one result where it sized `n / seg`. The host accepts {0x410, 0x500, 0x600, 0x700, 0x800, 0x900}; the feature the pair serves is announced in CAPS2[8]. **0xA00 (2026-09-15, docs/ROUND2.md) is the fifth, and the first made at a seam rather than with a feature**: five pointer registers exist at 0x88..0xA8 as kernel arguments 12..16 - the index tables of a program run's three streams and its scratch block, and its lane mask - read by nothing until CAPS2[9] and CAPS2[10] say so. The host accepts {0x410, 0x500, 0x600, 0x700, 0x800, 0x900, 0xA00} |
 | 0x4C | CAPS | RO | what this bitstream implements. [3:0] precision bitmask, bit p = MODE precision p (full tile 0xF). [15:8] opcode-group bitmask: 8 arithmetic, 9 sign, 10 min/max, 11 predicate+select, 12 integer, 13 reduction, 14 divide/sqrt, 15 sequencer (13 set from VERSION 0x500 onward, 14 with the seed opcodes, 15 from 0x600). **Bit 15 read "conversion - reserved" until 0x600.** The conversions landed as library entry points - `cft_convert`, the integer forms, the rest of clause 5 - composed from opcodes that already exist, so the group will never take a MODE opcode and the bit was never going to be spent on it. A group bit nothing can ever set is a reserved bit; the sequencer is a real thing a host must ask about before it writes PROG_PTR, so it takes the bit. **Bit 15 means MODE[15] reaches a `cft_seq`,** and nothing about which programs it will accept - the on-chip instruction, constant and deposit capacities are the tile's, and a program past them is refused at run time with STATUS[3]. **Bit 13 means opcode 24 only.** The group nominally covers 24 and 25, but `dot` (25) is a host-side composition of `mul` then `sum` - the kernel treats 25 as a reserved opcode and answers with canonical qNaN and invalid raised. A host that reads bit 13 and issues 25 to the tile directly gets that, not a dot product; libcft never does, because `cft_reduce` decomposes it. **Bit 14 means opcodes 26 and 27** - `recip_seed`/`rsqrt_seed`, the quiet table lookups the composed divide and square root start from. The full operations are not single opcodes at all: they are FMA sequences the host library issues (python/cft_golden/sequences.py is the specification), and bit 14 is what tells it the starting points exist in this bitstream. Groups rather than a bit per opcode, because opcodes arrive in groups and a 256-bit register is one nobody keeps current. **[7:4] sequencer feature nibble**: [4] wide constant index, set from 2026-09-07 (`kx`, three 8-bit constant indices in the immediate); **[5] `REGS32`** and **[6] `BANK_PTR`**, both set from 2026-09-08 (revision 2) - five-bit register fields with the fifth bit of each in `imm[27:24]`, and the per-run constant bank at 0x64/0x68; **[7] `KX9`** from revision 3 the same evening - a ninth bit for each `kx` index at `imm[30:28]`, so the bank reaches 512. Each needed a bit because an OLD bitstream has no rule that would refuse the new form: a pre-REGS32 operand mux reads the low four bits and silently addresses the wrong register, a pre-KX9 one reads eight index bits and addresses constant 5 where the program meant 261, and a 0x600 tile checks neither reserved header word, so its FETCH would read constants out of an image that has none. **The nibble is now full**, which is why revision 3's scratch is published in CAPS2 (0x6C) instead. **[19:16], [23:20], [27:24] are the sequencer's on-chip capacities as LOG2**: deposit slots a lane (`MAXD`, 6 -> 64), instruction capacity (`IMEM_D`, 14 -> 16384 since revision 3; 12 -> 4096 at revision 2 and 10 -> 1024 before it, which is what the card-day images publish), and constants an instruction can ADDRESS (9 -> 512 since revision 3, which is now the same number as the image-side `KMEM_D`; it was 4 -> 16 before `kx`, the width of the `ka`/`kb`/`kc` operand field, and the ceiling `host/tools/enclose.c` chunked its Horner kernel around). An exponent rather than a count, which is what makes each fit four bits and is honest only because each capacity is a power of two by construction; `rtl/cft_krnl.sv` names them once, as the localparams it hands `cft_seq`, and `tb/test_krnl.py` parses that file and checks the register against it. A tile whose VERSION predates them reads zero in all three, which `cft_caps` documents as UNKNOWN and enforces nothing against - the card-day 0x410 images are exactly that. **[31:28] ALU extensions beyond the group bits**: [28] `IMUL` (opcode 30, 2026-09-07), which joined the integer group after bitstreams had shipped with that group's bit set, so the group bit cannot announce it; [31:29] reserved, zero. Publishing the capacities is what turns "the tile refused your image with STATUS[3]" into a sizing calculation a tool does at startup: `cft-zoom` reads the deposit budget and halves it for its trip count, `cft-orbits` refuses by name against it, and `cft_program_load` refuses an image past any of them with a message that says which cap and by how much (docs/HOSTAPI.md). Values inside a register that already exists, so **VERSION does not move for them** |
-| 0x50 | STATUS | RO | sticky faults of the last run, cleared at an accepted ap_start: [0] a read response was not OKAY, [1] a write response was not OKAY, [2] a read burst delivered the wrong beat count, [3] the run was REFUSED, [4] DEPOSIT OVERFLOW on a sequencer run. **[3] covers two refusals with one answer.** Either MODE selected a precision this build does not implement (or a code above 3), in which case neither engine started and no memory was touched at all; or a sequencer run's program image failed the tile's own header check - bad magic, a format that is not MODE's, more instructions, constants or deposit slots than the tile holds. The second kind may have READ the image before refusing it, but it wrote nothing and computed nothing, and a host's response to both is the same: the run did not happen and the output buffer holds what it held. `ap_done` still asserts either way, so a refusal costs a register read rather than a timeout, and FLAGS is left at the previous run's value because a refusal is not a run. CAPS[3:0] says in advance which precisions exist and CAPS[15] whether there is a sequencer; the refusal is what a host that did not ask gets instead of plausible garbage. **[4] is a report, not a fault** - a lane deposited past the program's `max_deposits`, the excess was dropped, and what fit is correct and reproducible. It is deliberately not an IEEE flag: the five in FLAGS mean what 754 says they mean and "your buffer was too small" is not one of them. It moved here from bit 3 on 2026-09-01, when the precision refusal took that position in silicon-bound RTL and the sequencer's bit had still never crossed a device boundary. **Bits [2:0] non-zero mean the D buffer must not be trusted.** [0] and [1] do not disturb the run - the beat still arrives, so it completes and STATUS is read after. [2] does: withheld beats starve compute, so the engine ABANDONS the run rather than waiting - no new bursts, any committed write burst finished (with stale data if the FIFO ran dry, since AXI4 A3.4.1 permits no way to withdraw it), outstanding reads allowed to land, then `ap_done`. A protocol violation ends as a prompt fault instead of a hang; a slave that stops answering altogether is indistinguishable from a slow one and still belongs to the host's timeout |
+| 0x50 | STATUS | RO | sticky faults of the last run, cleared at an accepted ap_start: [0] a read response was not OKAY, [1] a write response was not OKAY, [2] a read burst delivered the wrong beat count, [3] the run was REFUSED, [4] DEPOSIT OVERFLOW on a sequencer run, [5] an indexed scratch access at or past `SCRATCH_D` by a program whose header sets `flags.SCRATCH_STRICT` (CAPS2[6]). **[3] covers two refusals with one answer.** Either MODE selected a precision this build does not implement (or a code above 3) or set a bit this build refuses, in which case neither engine started and no memory was touched at all; or a sequencer run's program image failed the tile's own header check - bad magic, a format that is not MODE's, more instructions, constants or deposit slots than the tile holds. The second kind may have READ the image before refusing it, but it wrote nothing and computed nothing, and a host's response to both is the same: the run did not happen and the output buffer holds what it held. `ap_done` still asserts either way, so a refusal costs a register read rather than a timeout, and FLAGS is left at the previous run's value because a refusal is not a run. CAPS[3:0] says in advance which precisions exist and CAPS[15] whether there is a sequencer; the refusal is what a host that did not ask gets instead of plausible garbage. **[4] is a report, not a fault** - a lane deposited past the program's `max_deposits`, the excess was dropped, and what fit is correct and reproducible. It is deliberately not an IEEE flag: the five in FLAGS mean what 754 says they mean and "your buffer was too small" is not one of them. It moved here from bit 3 on 2026-09-01, when the precision refusal took that position in silicon-bound RTL and the sequencer's bit had still never crossed a device boundary. **Bits [2:0] non-zero mean the D buffer must not be trusted.** [0] and [1] do not disturb the run - the beat still arrives, so it completes and STATUS is read after. [2] does: withheld beats starve compute, so the engine ABANDONS the run rather than waiting - no new bursts, any committed write burst finished (with stale data if the FIFO ran dry, since AXI4 A3.4.1 permits no way to withdraw it), outstanding reads allowed to land, then `ap_done`. A protocol violation ends as a prompt fault instead of a hang; a slave that stops answering altogether is indistinguishable from a slow one and still belongs to the host's timeout |
 | 0x54 | PROG_PTR | RW | 64-bit HBM byte address of the program image - header, constant bank, instruction stream, exactly as `cft_program_load` validated it (docs/SEQUENCER.md). 32-byte aligned. Read by the sequencer at start; ignored when MODE[15] is clear |
 | 0x5C | CNT_PTR | RW | 64-bit HBM byte address of the per-lane deposit counts, `n` uint32s, 4-byte aligned. An output rather than a convenience: `+0` is both a legal deposit and the defined value of a slot no lane wrote, so the count cannot be recovered from the deposit buffer |
 | 0x64 | BANK_PTR | RW | 64-bit HBM byte address of a run's CONSTANT BANK (revision 2). Read by the sequencer only when the program header's `flags.BANK_EXT` is set, and then it is the only source of constants: `n_consts` dense format-width values, laid out exactly as an image's constant section is, which is what lets FETCH read one the way it reads the other. One image per positive, loaded once, with the levers riding as data. Kernel argument 8 on `m_axi_a` - the master the image already arrives on, since the image fetch and the bank fetch are two passes of one FETCH and never overlap in time, so no master is added and `hw/link.cfg` is unchanged. CAPS[6] says whether it exists |
-| 0x6C | CAPS2 | RO | the SECOND capability word (revision 3). CAPS is full - its feature nibble ends at [7] and its three log2 capacity fields fill [27:16] - so a fourth capacity needed a register rather than a field. [3:0] log2 of the SCRATCH slots a lane (`SCRATCH_D`, 8 -> 256); [4] a per-lane scratch exists, so `STL`/`LDL`/`STX`/`LDX` decode; [5] its per-run block exists, so the header's `flags.SCRATCH_IO` is understood and the two pointers below are read; [6] `SCRATCH_STRICT` (revision 4's R8) - an indexed scratch access at or past `SCRATCH_D` is REPORTED in STATUS[5] rather than reduced modulo the depth; [7] `SCALAR` (2026-09-12) - MODE[18:16] are honoured, so an operand may be stride-0. [8] `REDUCE_SEG` (2026-09-14, ask 7) - the SEG/NRES pair exists at 0x80/0x84 (VERSION 0x900) and a reduction restarts every SEG elements, AND opcode 31 (`maxall`) is a REDUCTION on this tile, the accumulator folding with the elementwise maximum, where every earlier tile decodes 31 as elementwise; one bit for both because they arrived together and a host that sees it may send either, a host that does not must send neither. [9] `INDEXED` and [10] `LANE_MASK` (ABI 0.14, docs/ROUND2.md) - the tables at 0x88..0xA0 and the mask at 0xA8 are read under MODE[23:19]; both zero at the seam and set by the parcel that builds each. [31:11] reserved zero, and room for the capacities and features that come next. Neither [6] nor [7] moved VERSION, because both live inside a register that already exists - the same rule the capacity fields above follow. [4] exists beside [3:0] because a log2 field of zero would have to mean one slot rather than none; a tile older than this register reads 0x00000000 from an unmapped address, which says "none of it" correctly |
+| 0x6C | CAPS2 | RO | the SECOND capability word (revision 3). CAPS is full - its feature nibble ends at [7] and its three log2 capacity fields fill [27:16] - so a fourth capacity needed a register rather than a field. [3:0] log2 of the SCRATCH slots a lane (`SCRATCH_D`, 8 -> 256); [4] a per-lane scratch exists, so `STL`/`LDL`/`STX`/`LDX` decode; [5] its per-run block exists, so the header's `flags.SCRATCH_IO` is understood and the two pointers below are read; [6] `SCRATCH_STRICT` (revision 4's R8) - an indexed scratch access at or past `SCRATCH_D` is REPORTED in STATUS[5] rather than reduced modulo the depth; [7] `SCALAR` (2026-09-12) - MODE[18:16] are honoured, so an operand may be stride-0. [8] `REDUCE_SEG` (2026-09-14, ask 7) - the SEG/NRES pair exists at 0x80/0x84 (VERSION 0x900) and a reduction restarts every SEG elements, AND opcode 31 (`maxall`) is a REDUCTION on this tile, the accumulator folding with the elementwise maximum, where every earlier tile decodes 31 as elementwise; one bit for both because they arrived together and a host that sees it may send either, a host that does not must send neither. [9] `INDEXED` and [10] `LANE_MASK` (ABI 0.14, docs/ROUND2.md) - the tables at 0x88..0xA0 and the mask at 0xA8 are read under MODE[23:19]; both zero at the seam and set since 2026-09-15 by the parcels that built them (P1, P3). [31:11] reserved zero, and room for the capacities and features that come next. Neither [6] nor [7] moved VERSION, because both live inside a register that already exists - the same rule the capacity fields above follow. [4] exists beside [3:0] because a log2 field of zero would have to mean one slot rather than none; a tile older than this register reads 0x00000000 from an unmapped address, which says "none of it" correctly |
 | 0x70 | SCRATCH_IN_PTR | RW | 64-bit HBM byte address of a run's scratch PRELOAD (revision 3): `n * n_scratch_in` format-width values, lane-major and dense, lane *i*'s slot *s* at element `i * n_scratch_in + s`. Read only when the header's `flags.SCRATCH_IO` is set, in its own phase after the image and the bank and before the first instruction. Kernel argument 9 on `m_axi_a`, with the image and the bank, for the reason the bank is there: three phases of one read stream that never overlap in time |
 | 0x78 | SCRATCH_OUT_PTR | RW | 64-bit HBM byte address of the block the run hands back: `n * n_scratch_out` values in the same layout, written after the last deposit of each lane block. Kernel argument 10 on `m_axi_d`, beside `d` and `cnt`, because it is WRITTEN - which is what puts it in the HBM group the write master can reach. Together with SCRATCH_IN_PTR this is the resumable-run mechanism docs/SEQUENCER.md's R5 records: a program whose state leaves through one and returns through the other computes in two calls what one call computes |
 | 0x80 | SEG | RW | a reduction's SEGMENT LENGTH (2026-09-14, ask 7; VERSION 0x900, CAPS2[8]). Zero, the decode default, is the whole array and one result - every reduction before this register. Non-zero, the engine's accumulator restarts every SEG elements and the results land contiguously at D_PTR: `d[s]` is the same tree over `a[s*SEG .. (s+1)*SEG)` that a whole-array reduction of those elements gives (docs/HOSTAPI.md, `cft_reduce_seg`). Ignored by an elementwise run and by a program. Kernel argument 11 with NRES, one 64-bit scalar, SEG in the low word |
 | 0x84 | NRES | RW | how many results that is, `n / SEG`, which the host computes and guarantees exact (`n == NRES * SEG`): the writer needs its beat count before the first result lands, and a divider in the tile would be a second opinion on the host's arithmetic. libcft writes the pair before EVERY reduction on a 0x900 tile, zero included, because the register keeps its last value and a whole-array reduction after a segmented one must not inherit a segment |
-| 0x88 | IDX_A_PTR | RW | 64-bit HBM byte address of the INDEX TABLE of a program run's `a` stream (ABI 0.14, 2026-09-15, docs/ROUND2.md; VERSION 0xA00): `n` uint32 entries, beat-padded, element *i* of the stream being `a[idx[i]]` and 0xFFFFFFFF reading as +0. Read by the sequencer through `m_axi_a` only when MODE[19] is set, which CAPS2[9] announces and the guard on MODE[31:19] refuses without it. Kernel argument 12. Appended at the SEAM of the round that reads it, so the parcel building the fetch and the parcel building the mask share one map and one version; at 0xA00 nothing reads it |
+| 0x88 | IDX_A_PTR | RW | 64-bit HBM byte address of the INDEX TABLE of a program run's `a` stream (ABI 0.14, 2026-09-15, docs/ROUND2.md; VERSION 0xA00): `n` uint32 entries, beat-padded, element *i* of the stream being `a[idx[i]]` and 0xFFFFFFFF reading as +0. Read by the sequencer through `m_axi_a` only when MODE[19] is set, which CAPS2[9] announces and the guard on MODE[31:19] refuses without it. Kernel argument 12. Appended at the SEAM of the round that reads it, so the parcel building the fetch and the parcel building the mask share one map and one version; P1 (2026-09-15) is the parcel that reads it |
 | 0x90 | IDX_B_PTR | RW | the `b` stream's table, MODE[20], argument 13 |
 | 0x98 | IDX_C_PTR | RW | the `c` stream's table, MODE[21], argument 14 |
 | 0xA0 | IDX_SI_PTR | RW | the scratch block's table, `n * n_scratch_in` entries lane-major into the pool at SCRATCH_IN_PTR, MODE[22], argument 15 |
@@ -324,16 +324,16 @@ record.
 | 30 | `imul` | integer | low 32 bits of an unsigned 32x32 product, at every rung; announced in CAPS[28] rather than by the integer group bit, because bitstreams shipped with that bit set before it existed (2026-09-07) |
 | 31 | `maxall` | reduction | a maximum over the whole array, IEEE `maximum` (NaN-propagating, subnormals and infinities counted), from `-inf`. Assigned 2026-09-12 as the fifth composed reduction, when a tile handed it would have decoded it as elementwise; since VERSION 0x900 (2026-09-14, CAPS2[8]) the engine streams it, so `cft_reduce(CFT_MAXALL)` is one pass on such a tile. `cft_run` refuses it, as it refuses every reduction |
 
-Opcode 15 and everything above 31 are unassigned, and return
-the canonical quiet NaN with invalid raised - in hardware and in the
-golden model alike (`rtl/cft_simpleops.sv`'s `is_reserved`, and
+Opcode 15 and everything above 31 are unassigned, and return the
+canonical quiet NaN with invalid raised - in hardware and in the golden
+model alike (`rtl/cft_simpleops.sv`'s `is_reserved`, and
 `python/cft_golden/softfloat.py`'s own note that "15, 31 and above are
-unassigned"). Codes 24, 25, 28 and 29 are reserved in `cft_simpleops`
-too, because they are reductions and belong to the accumulator rather
-than to the ALU. The field was four
-bits until the integer group needed a fifteenth opcode; it is a byte
-now so that divide, square root, conversions and the reductions have
-somewhere to go without moving the precision and rounding fields again.
+unassigned"). Codes 24, 25, 28, 29 and 31 are reserved in
+`cft_simpleops` too, because they are reductions and belong to the
+accumulator rather than to the ALU. The field was four bits until the
+integer group needed a fifteenth opcode; it is a byte now so that
+divide, square root, conversions and the reductions have somewhere to go
+without moving the precision and rounding fields again.
 
 **There is no `cmpgt` or `cmpge`, and none is needed.** The engine
 reads three independent pointers, so `a > b` is `cmplt` with the A and
@@ -373,8 +373,8 @@ hardware far more than it needs a transcendental.
 - Read CAPS once at open: bit p set means MODE precision p is
   implemented in this bitstream. The full Alveo tile reads 0xF;
   trimmed open-core tiles clear what they dropped. Issuing a
-  non-advertised precision is undefined (no arithmetic hazard - the
-  run completes - but D's contents are meaningless). Bit 15 says
+  non-advertised precision is refused (STATUS[3]: nothing starts, no
+  memory is touched and D holds what it held). Bit 15 says
   whether MODE[15] reaches a sequencer at all; without it, PROG_PTR
   and CNT_PTR may not exist either, and VERSION is what says so.
   BANK_PTR is one step further out: it exists only from VERSION 0x700,
@@ -443,8 +443,8 @@ hardware far more than it needs a transcendental.
   mid-run write cannot corrupt the run in progress. That snapshot is
   the guarantee; the registers are still yours to reprogram for the
   next run as soon as ap_done is observed. **MODE[15] is part of the
-  snapshot** and has to be: it selects which engine owns the shared A
-  and D masters, so reading it live would let a mid-run write hand
+  snapshot** and has to be: it selects which engine owns the shared
+  masters, so reading it live would let a mid-run write hand
   them over partway through a burst - a corrupted run and an AXI
   protocol violation together.
 
@@ -549,11 +549,11 @@ order, which is also AW order - AXI4 forbids write-data interleaving
 (A3.4.4) - so responses on the single AWID come back in the same
 order, and the engine only has to count them.
 
-Every one of these is a build parameter on `cft_krnl`, because a
-smaller part wants smaller: docs/ROADMAP.md's K325T target has block
-RAM and no UltraRAM, and a 100 MHz board against DDR has a shorter
-round trip to hide. `hw/package_kernel.tcl` strips user parameters, so
-an Alveo bitstream carries the defaults above and nothing else.
+Every one of these is a build parameter on `cft_krnl`, because a smaller
+part wants smaller: docs/ROADMAP.md's K325T target has block RAM and no
+UltraRAM, and a 100 MHz board against DDR has a shorter round trip to
+hide. `hw/package_kernel.tcl` strips user parameters, so an Alveo
+bitstream carries the defaults above unless `CFT_GENERICS` sets one.
 
 hw/link.cfg gives each master its own HBM pseudo-channel group, and
 the quad gives all sixteen their own. Four masters sharing one group
@@ -578,11 +578,14 @@ The core, at the 15 stages it had when this was measured, closes
 context** (fp64/fp128 land between; QoR numbers recorded in
 ROADMAP.md).
 
-**In the shell, which is the number that matters, the ceiling is
-~141 MHz and it has moved.** The critical path is the round stage -
-the 237-bit attribute-directed increment, S12 into S13 - and it is
-about two-thirds routing, so it is a placement problem as much as a
-logic one.
+**In the shell, which is the number that matters, the single tile's
+clock is 175 MHz (assumed; 170 MHz closed and proven on the card,
+2026-09-24), the quad's 135 MHz.** On 2026-08-29 the ceiling was ~141
+MHz and the critical path the round stage - the 237-bit
+attribute-directed increment, S12 into S13 - about two-thirds routing,
+so a placement problem as much as a logic one. At 170 MHz the ten worst
+paths are the lanes' stage-0 bypass and the write master's state enable
+(docs/VALIDATION.md, 2026-09-24).
 
 *2026-09-02, a correction and two results.* The DSP chain on every
 routed critical path was never the significand multiplier: it was the
@@ -1123,7 +1126,7 @@ quarter tile (BEAT_BITS=64, fp32+fp64) has two and one lanes and does
 not build the fp256 rung the array is sized for, so sharing there would
 cost more than it saved. `USE_FUSED_MUL`, the localparam in
 `cft_lanes` that gates it, requires `FUSE_MUL` **and** BEAT_BITS==256
-**and** all three trim parameters; the other two ladders self-gate the
+**and** all four trim parameters; the other two ladders self-gate the
 same way. Open-toolchain targets fall back to private multipliers with
 no other change.
 
@@ -1137,14 +1140,17 @@ switches with the pipe draining, 160 of nothing but specials.
 
 `hw/link.cfg` gives each of the four masters its own single HBM
 pseudo-channel - `m_axi_a:HBM[0]`, `b:HBM[1]`, `c:HBM[2]`, `d:HBM[3]`.
-It used to say `HBM[0:3]`, spanning one master across a group, and
-that file's own header says why it stopped: a spanned master reorders
+It used to say `HBM[0:3]`, spanning one master across a group, and that
+file's own header says why it stopped: a spanned master reorders
 responses. The U50 HBM subsystem exposes 32 pseudo-channels, which is
 what bounds a build to eight tiles at four masters each;
-`hw/link_quad.cfg` and the eleven configurations under `hw/layouts/`
-are the multi-CU case, built and run. What still belongs to a later
-milestone is the RAMA IP and anything else for scatter workloads,
-because access patterns here are still three linear streams.
+`hw/link_quad.cfg` is the multi-CU case, built and run; the twelve
+configurations under `hw/layouts/` are the catalogue `hw/gen_layouts.py`
+derives, and docs/LAYOUTS.md says which of them are built. What still
+belongs to a later milestone is the RAMA IP and a scatter-add, a lane writing another lane's address
+(docs/INTEGRATION.md). Reads are no longer only three linear streams:
+since ABI 0.14 a program's input can be gathered through an index table
+(docs/SEQUENCER.md, R16), one round trip an element.
 
 ## Platform notes
 

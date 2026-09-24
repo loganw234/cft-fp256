@@ -16,13 +16,13 @@ the repo root, or `bash verify/run.sh` with the flags below.
     bash verify/run.sh --only cpp,node,wasm,lang-rust   # language legs, by name
     bash verify/run.sh --budget quick   # ~20 min after a host build
     bash verify/run.sh --budget gate    # ~2 h quiet, ~4 h loaded (2026-09-07)
-    bash verify/run.sh --budget full    # the census: gate + sim, node, wasm, images
+    bash verify/run.sh --budget full    # the census: gate + sim, simmc, node, wasm, images
 
 ## Budgets
 
 **None of this is a quick test suite.** Several stages run for twenty
-to fifty minutes on their own, the simulation suites and the formal
-gate for more than an hour each on a busy box, and the sum moves with
+to fifty minutes on their own, the simulation suites
+for more than an hour each on a busy box, and the sum moves with
 the load: docs/VERIFICATION.md has the measured table, quiet against
 loaded, for every gate in and out of this runner, and the reader who
 thinks a stage has hung should look there first. `--budget` names
@@ -30,8 +30,8 @@ three cuts, kept in `run.sh` beside the stage list:
 
 | budget | stages | measured on the Windows desktop |
 |---|---|---|
-| `quick` | every model-vs-C check (selfcheck, divsqrt, clause5, character, augmented, status96, formatof, diff, seq, reduce), the GPU's photograph, bindings, the seven language legs, the five workloads, the browser demos, soak-quick and the remote backend - after a host build the budget makes itself | about 20 minutes, loaded or not |
-| `gate` | quick + golden, vectors, lint, formal, libcft, transcend, mpfr, cpp - what a package's reviewer ran before merging | about an hour with the box quiet; 2-3 hours beside a CUDA job |
+| `quick` | the `docs`, `generated`, `buildargs` and `sweepjudge` checks, every model-vs-C check (selfcheck, divsqrt, clause5, character, augmented, status96, formatof, diff, seq, reduce), the GPU's photograph, bindings, the seven language legs, the five workloads, the browser demos, soak-quick and the remote backend - after a host build the budget makes itself | about 20 minutes, loaded or not |
+| `gate` | quick + golden, vectors, lint, formal, libcft, transcend, mpfr, cpp - what a package's reviewer ran before merging | about 2 hours with the box quiet, about 4 loaded (2026-09-07) |
 | `full` | everything: gate + sim, simmc, node, wasm, images | about 2 hours quiet (2026-09-04, run 20260904-035237), 227 minutes loaded (2026-09-03, run 20260903-164537) |
 
 The slow stages are the replays and the RTL simulation, and they are
@@ -46,13 +46,17 @@ command in the `cft2204` distro.
 
 | stage | what it proves | needs |
 |---|---|---|
+| docs | docs/README.md indexes every document, links resolve, and the counts it checks are true (`python/check_docs_index.py`) | python |
+| buildargs | `hw/rebuild-2022.sh` hands v++ the clock constraint with VPP_PROPS set, CFT_GENERICS reaches vivado and the manifest, a lying wrapper read-back stops the build before v++ - each with its negative control (`hw/test-rebuild-argv.sh`, stub v++ and vivado) | bash; skipped by name where Vitis 2022.2 is installed under /data/Xilinx, /opt/Xilinx or /tools/Xilinx |
+| sweepjudge | `hw/sweep_freq.sh` judges a sweep point by the kernel clock's own WNS, never the shell's, and a staged image is not a closed one - thirteen verdicts on synthetic builds, both defects put back as negative controls (`hw/test-sweep-judge.sh`) | bash |
 | golden | the model's own invariants and oracles | python |
 | vectors | the conformance sets regenerate from the model | python |
 | sim | RTL == model across all cocotb targets | docker (usable, not merely present) |
 | simmc | the same suite at the multi-cycle pass budget MC, plus the open-core board configuration - in `full` only, never in `quick` or `gate` | docker |
 | lint | every RTL file elaborates in Yosys, no latches | docker |
-| formal | the FIFO, seedop and simpleops theorems, the leading-zero cone's equivalence at every window width, the multi-cycle multiplier's exactness at the real chunk for every pass geometry, and the negative control - 31 tasks, about 14 minutes of solver time quiet and well over an hour loaded (formal/README.md) | docker |
+| formal | the FIFO, seedop and simpleops theorems, the leading-zero cone's equivalence at every window width, the multi-cycle multiplier's exactness at the real chunk for every pass geometry, and the negative control - 31 tasks, about 7 minutes (420 s of solver time on the merged tree, docs/VALIDATION.md 2026-09-07; formal/README.md) | docker |
 | libcft | C library contract + the conformance replay: 168 sets, 1.2M cases at the runner's generator counts - opcodes, transcendentals, character sequences, augmented pairs, reductions, magnitude forms, formatOf | cc, python |
+| generated | the committed output of five generators still matches a fresh generation, by each one's `--check` (`hw/gen_layouts.py`, `host/tools/gen_2opi.py`, `host/tools/gen_mp_consts.py`, `bindings/node/make_seq_corpus.py`, `python/gen_divfull.py`) | python |
 | selfcheck | device-test harness can detect, full sw matrix | cc |
 | divsqrt | composed div/sqrt + seeds vs model, per-element flags | cc, python |
 | clause5 | the clause-5 completion set vs model | cc, python |
@@ -64,6 +68,7 @@ command in the `cft2204` distro.
 | diff | the alignment-boundary sweep vs the model | cc, python |
 | seq | sequencer C-vs-model over fuzzed programs | cc, python |
 | reduce | canonical reduction ranges vs the model | cc, python |
+| photograph | a GPU's record of a real workload, bit for bit: atlas-engine's hopf photograph, four passes of 1,048,576 samples, each deposit buffer held to the SHA-256 an NVIDIA GPU wrote | cc, python |
 | bindings | the cftmpfr drop-in vs gmpy2's IEEE emulation | cc, python |
 | cpp | `cft.hpp` vs `cft.h` at C++17 and C++20: every entry point, same bits and flags, plus the conformance replay through the wrapper | cc, g++ |
 | lang-cpp, lang-rust, lang-julia, lang-go, lang-csharp, lang-r | that language's example vs the C example, same bits (`make -C host examples-lang`, one leg at a time) | cc + that toolchain |
@@ -72,7 +77,7 @@ command in the `cft2204` distro.
 | wasm | the committed conformance page, verified without a browser | node |
 | workloads | the five contract workloads vs their oracles and their own determinism properties - `collatztest`, `enclosetest`, `mersennetest`, `orbitstest`, `zoomtest` in host/ | cc, python with mpmath |
 | demos | the browser demos' compute core reproduces the C tools' chains, without a browser (`bindings/wasm/verify_demos.mjs`) | cc, node |
-| mpfr | GNU MPFR parity, every rung and mode (third oracle) | cc, python |
+| mpfr | GNU MPFR parity, every rung and mode (third oracle) | cc, libmpfr/libgmp (below) |
 | soak-quick | native-oracle spot check + the sabotage control | cc |
 | images | staged xclbins match their manifests (IMAGES=...) | xclbinutil |
 | remote | the remote backend (docs/REMOTE.md) held to the contract on loopback: `host/tests/remote_check.py` starts `cft-serve` as its own child, records the PID beside the run's logs, runs the protocol refusals, `device-test`'s full matrix, a bounded conformance replay local and remote, one Collatz chain both ways and the round-trip counts on both div/sqrt routes through it, and terminates that PID - never an image name | cc, python with mpmath |
@@ -87,23 +92,21 @@ and R); a full census runs them wherever the toolchains are, and
 docs/COMPATIBILITY.md keeps the dated per-language rows, and the
 recipe for giving a Windows host every toolchain the stages want.
 
-Wall time for the standard set is dominated by `sim`, `formal`,
-`transcend` and `cpp`. `sim` is ~40 min serial in the container, ~25
-min under Verilator on a 36-core box, almost all of it compilation,
-and **55 minutes at four jobs on this desktop beside a Vivado run**
-(2026-09-07); `simmc MC=10`, which is not in any budget, is about
-50 minutes at four jobs, its engine-driven board kernel under
-Verilator because Icarus does not finish that one
-(docs/VERIFICATION.md). The targets are parallel-safe by construction - each writes
-its own sim_build/<name> and results file - so `SIM_JOBS=n` hands
-make `-j n` (and `-k`, so one failing target does not hide the
-others): the whole suite cold at -j12 on that box is 3 min, warm
-under a minute (docs/VALIDATION.md 2026-09-02). Budget 1-2 GB a job
-under Verilator. The formal gate was 29 s when it held four proofs
-and is about 14 minutes of solver time now that it holds thirty-one,
-over an hour when the box is shared; `transcend` is 13 minutes quiet
-and 52 loaded. docs/VERIFICATION.md carries every number with its
-provenance.
+Wall time for the standard set is dominated by `sim`,
+`transcend` and `cpp`. `sim` is ~40 min serial in the container, ~25 min
+under Verilator on a 36-core box, almost all of it compilation, and **55
+minutes at four jobs on this desktop beside a Vivado run** (2026-09-07);
+`simmc MC=10`, which is in `full` only, is about 50 minutes at four
+jobs, its engine-driven board kernel under Verilator because Icarus does
+not finish that one (docs/VERIFICATION.md). The targets are
+parallel-safe by construction - each writes its own sim_build/<name> and
+results file - so `SIM_JOBS=n` hands make `-j n` (and `-k`, so one
+failing target does not hide the others): the whole suite cold at -j12
+on that box is 3 min, warm under a minute (docs/VALIDATION.md
+2026-09-02). Budget 1-2 GB a job under Verilator. The formal gate was 29
+s when it held four proofs and is about 7 minutes (420 s of solver time)
+now that it holds thirty-one; `transcend` is 13 minutes quiet and 52
+loaded. docs/VERIFICATION.md carries every number with its provenance.
 
 Two things the runner learned on 2026-09-02, both now built in: the
 libcft stage cleans `host/` before building it, because a checkout

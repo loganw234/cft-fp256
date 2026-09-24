@@ -30,7 +30,7 @@ generator, no compiled extension. That is not a convenience, it is
 the design: the C ABI is the product's portability story, and this
 package is the demonstration that reaching it costs one `CDLL` and a
 page of argtypes. gmpy2 and numpy are both optional; without gmpy2
-the decimal-string and inexact-conversion paths refuse loudly instead
+`to_str` and the inexact-conversion paths refuse loudly instead
 of guessing, and everything else works.
 
 ## Quickstart
@@ -48,7 +48,7 @@ if the library lives elsewhere):
 from cftmpfr import Context, batch
 
 ctx = Context(237)                # binary256; or 24/53/113, or "binary64"
-x = ctx("1.5")                    # decimal parse via gmpy2, correctly rounded
+x = ctx("1.5")                    # decimal parse by libcft, correctly rounded
 y = ctx.sqrt(x + 2)               # every op is a libcft call
 print(y, ctx.flag_names(ctx.last_flags))
 
@@ -134,8 +134,9 @@ the contract.
   rounding AND inexact), OR'd across each batch call, sticky on the
   Context like MPFR's own flag model.
 * **Conversions:** bit-exact or refused. The only rounding ever
-  performed on the way in or out is gmpy2's own (decimal strings,
-  over-long ints, float narrowing); with gmpy2 absent those refuse
+  performed on the way in or out is the library's own (decimal and
+  hexadecimal sequences, since ABI 0.6) or gmpy2's (over-long ints,
+  float narrowing); with gmpy2 absent the gmpy2 ones refuse
   with instructions, and under RNDNA they refuse because MPFR cannot
   round ties-to-away and this package will not substitute its own
   arithmetic - a second implementation of the semantics is how
@@ -221,20 +222,20 @@ delivers rounded with underflow and inexact raised.
 ## The package, from ABI 0.7 on
 
 The two sections above are the first two steps; the package kept pace
-with every step after them - the library is at ABI 0.14 now
-(2026-09-15; docs/COMPATIBILITY.md says what each step added and which
-surfaces carry it) - and this
-is the map. Every method is on
-`Context` and, where the C has a batch shape, in `batch` too; the
-semantics are the library's, documented in docs/HOSTAPI.md, and
-`test_cftmpfr.py` holds each one to the library bit for bit.
+with every step after them through ABI 0.7, and the steps from 0.8 on
+left it unchanged - the library is at ABI 0.14 now (2026-09-15;
+docs/COMPATIBILITY.md says what each step added and which surfaces carry
+it) - and this is the map. Every method is on `Context` and, where the C
+has a batch shape, in `batch` too; the semantics are the library's,
+documented in docs/HOSTAPI.md, and `test_cftmpfr.py` holds each one to
+the library bit for bit.
 
 | family | methods |
 |---|---|
 | the transcendentals, all thirty-nine of table 9.1 | `exp`, `expm1`, `exp2`, `exp2m1`, `exp10`, `exp10m1`, `log`, `log1p`, `log2`, `log2p1`, `log10`, `log10p1`, `pow`, `pown`, `powr`, `compound`, `rootn`, `rsqrt`, `hypot`, `sin`, `cos`, `tan`, `sinpi`, `cospi`, `tanpi`, `asin`, `acos`, `atan`, `atan2`, `asinpi`, `acospi`, `atanpi`, `atan2pi`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, `atanh` - the integer-operand three take a Python int |
 | the reductions (9.4) | `tree_sum`, `tree_dot`, `tree_sumsq`, `tree_sumabs`, `scaled_prod`, `scaled_prod_sum`, `scaled_prod_diff` in `batch` |
 | augmented arithmetic (9.5) | `augmented_add`, `augmented_sub`, `augmented_mul` - a pair out, no rounding argument |
-| character sequences (5.12) and payloads (9.7) | `from_str`, `to_str`, `from_hex`, `to_hex` through the library's own conversions; `get_payload`, `set_payload`, `set_payload_signaling` |
+| character sequences (5.12) and payloads (9.7) | `from_str`, `from_hex`, `to_hex` and `to_decimal` through the library's own conversions (`to_str` still takes its digits from gmpy2); `get_payload`, `set_payload`, `set_payload_signaling` |
 | formatOf arithmetic (5.4.1, ABI 0.7) | `formatof_add`, `formatof_sub`, `formatof_mul`, `formatof_div`, `formatof_sqrt`, `formatof_fma` - the destination context is an argument, the result a `Float` of that context |
 | min/max, all eight (9.6) | the four opcodes as before, and `min_mag`, `max_mag`, `minnum_mag`, `maxnum_mag` |
 | the status word (7.1, 5.7.4, ABI 0.7) | `Context.flags` is a property over the library's own word; `clear_flags()` lowers it; `lower_flags`, `raise_flags`, `test_flags`, `save_all_flags`, `restore_flags`, `test_saved_flags` are 754's names for the same word |

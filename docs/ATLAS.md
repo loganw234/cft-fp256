@@ -28,7 +28,7 @@ operation is single-rounded `precise` fma, add, subtract or multiply,
 every transcendental is one of the det library's thirteen functions
 built from those, every selection is exact, and the stream of draws is
 an integer hash on the bit patterns. That discipline is what gives the
-engine one hash across four GPU vendors (its docs/DETERMINISM.md), and
+engine one hash across three GPU vendors (its docs/DETERMINISM.md), and
 it is exactly the contract this tile implements natively.
 
 So the backend swap is a second emitter target. A positive parses once;
@@ -99,25 +99,27 @@ the arithmetic:
 ## What the program model lacks for this workload
 
 The five workloads of docs/BENCHMARKS.md found six asks of the program
-model (docs/SEQUENCER.md, last section). The atlas port needs three of
-them and adds one:
+model (docs/SEQUENCER.md, "What the workloads asked of the program
+model"). The atlas port needs three of them and adds one:
 
 1. **An integer multiply. BUILT 2026-09-07.** `IMUL`, 32-bit low
-   product, the next free opcode (30), in the integer group. Three
-   16x16 partial products in `cft_simpleops` - the fourth lands
-   entirely above bit 31 and is not computed - so it is off the fp
-   datapath and rides the precomputed-result sideband the rest of the
-   integer group already uses. `softfloat.py`'s `imul()` is the
-   one-line definition; `host/src/softfloat.c` is the port;
-   `tb/test_simpleops.py`'s `test_imul` and `tb/test_seq_core.py`'s
-   `indexed_constants_and_imul` are the benches. `formal/imul.sby`
-   STATES the claim that the three partial products equal a truncated
-   32x32 multiply, and it does NOT close: both its tasks were stopped
-   without returning - a miter over a multiplier is what a bit-blasting
-   engine does worst at - so it is parked outside `formal/run.sh` with
-   its measurements in that file. IMUL's value rests on the two benches
-   above and on `host/tests/seq_check.py`'s differential. The whole draw stream is now
-   in-lane and the three input streams are enough.
+   product, the next free opcode (30), in the integer group. Three 16x16
+   partial products in `cft_simpleops` - the fourth lands entirely above
+   bit 31 and is not computed - so it is off the fp datapath and, until
+   2026-09-23, rode the precomputed-result sideband the rest of the
+   integer group uses; that day the lanes moved it to `rtl/cft_imul.sv`,
+   registered beside the lane (docs/VALIDATION.md). `softfloat.py`'s
+   `imul()` is the one-line definition; `host/src/softfloat.c` is the
+   port; `tb/test_simpleops.py`'s `test_imul` and
+   `tb/test_seq_core.py`'s `indexed_constants_and_imul` are the benches.
+   `formal/imul.sby` STATES the claim that the three partial products
+   equal a truncated 32x32 multiply, and it does NOT close: both its
+   tasks were stopped without returning - a miter over a multiplier is
+   what a bit-blasting engine does worst at - so it is parked outside
+   `formal/run.sh` with its measurements in that file. IMUL's value
+   rests on the two benches above and on `host/tests/seq_check.py`'s
+   differential. The whole draw stream is now in-lane and the three
+   input streams are enough.
 2. **Indexed constants. BUILT 2026-09-07.** Bit 30 of the instruction
    word was reserved and `imm` is 32 bits wide and unused by ALU
    instructions. The form built is an INDEX rather than a value - `kx`
@@ -235,7 +237,7 @@ builds the three and one more, golden model first as always:
    before the first instruction and reads the first slots back after
    the last deposit, through `SCRATCH_IN_PTR` and `SCRATCH_OUT_PTR`
    (0x70/0x74 and 0x78/0x7C, kernel arguments 9 and 10; the map grew,
-   so VERSION is 0x800; CAPS2[5], `CFT_SEQ_FEAT_SCRATCH_IO`). On the
+   so VERSION stepped to 0x800; CAPS2[5], `CFT_SEQ_FEAT_SCRATCH_IO`). On the
    host, ABI 0.10's `cft_program_run_ex` takes everything a run
    carries in one `cft_run_args`, and the two older calls are
    wrappers over it, so the positional signatures stop growing by an
@@ -250,7 +252,7 @@ halves most images and decides no positive's fit once the image is
 loops, bounds 6 to 32; `SETACT` at the top level already serves the
 other forty-two and the engine did that the same evening), and a
 per-sample clock (0 to 3 bank slots a positive when the shutter is
-open). What the engine does next is its own list in that file:
+open). What the engine did next was its own list in that file:
 hoisting the per-run frontier into the bank, copy coalescing, then
 the spiller against item 6 and the parity harness behind it.
 
@@ -301,23 +303,22 @@ deposition that column alone can claim.
    register discipline written down, plus `u2f` as the six-instruction
    conversion and the two integer-multiply sites marked as needing
    `IMUL`. Verified function by function against the pinned GLSL on a
-   sweep of arguments, through libcft's software backend.
-   **Done 2026-09-07**, on atlas-engine's branch `cft-detlib` (commit
-   af5feda, unmerged, for review): `gen-detlib --target cft` emits
-   all nineteen functions - the thirteen det_*, their four helpers,
-   `u2f`, `hashu` - with the register discipline written down in
-   that repository's docs/CFT-DETLIB.md, and
-   `tools/verify-cft-detlib.mjs` holds every one bit-identical to
-   the shipped library on 4,096-point sweeps through libcft's
-   software backend, `hashu` with its two `IMUL`s emulated because the
-   opcode did not exist on that branch's day; it does now, at 30, and
-   CAPS[28] publishes it. It corrected this document three times
-   on the way (the table above): the library is unfused, `min`/`max`
-   are comparisons, `u2f` is nine instructions. Eleven of the
-   nineteen need indexed constants (`det_div` lands on exactly 16,
-   `det_pow` wants 43; 77 distinct constants in all, inside
-   `KMEM_D`'s 256), `hashu` alone needs `IMUL`, and `det_pow` alone
-   needs a seventeenth register.
+   sweep of arguments, through libcft's software backend. **Done
+   2026-09-07**, on atlas-engine's branch `cft-detlib` (commit af5feda,
+   since merged to that repository's main): `gen-detlib --target cft`
+   emits all nineteen functions - the thirteen det_*, their four
+   helpers, `u2f`, `hashu` - with the register discipline written down
+   in that repository's docs/CFT-DETLIB.md, and
+   `tools/verify-cft-detlib.mjs` holds every one bit-identical to the
+   shipped library on 4,096-point sweeps through libcft's software
+   backend, `hashu` with its two `IMUL`s emulated because the opcode did
+   not exist on that branch's day; it does now, at 30, and CAPS[28]
+   publishes it. It corrected this document three times on the way (the
+   table above): the library is unfused, `min`/`max` are comparisons,
+   `u2f` is nine instructions. Eleven of the nineteen need indexed
+   constants (`det_div` lands on exactly 16, `det_pow` wants 43; 77
+   distinct constants in all, inside `KMEM_D`'s 256), `hashu` alone
+   needs `IMUL`, and `det_pow` alone needs a seventeenth register.
 2. **`IMUL` and indexed constants** (cft-fp256): model, softfloat,
    RTL, cocotb, CAPS and VERSION; the API gains nothing, since a
    program image is data. **Done.** The model, libcft,
@@ -327,7 +328,7 @@ deposition that column alone can claim.
    3. A host asks rather than guesses today: `rtl/cft_krnl.sv` drives
    `alu_ext` to publish `IMUL` at CAPS[28] and the sequencer feature
    nibble to `4'b1111`, so `kx` reads at CAPS[4], and VERSION is
-   `0x800`. `cft.h` names those bits `CFT_ALU_EXT_IMUL` and
+   `0xA00`. `cft.h` names those bits `CFT_ALU_EXT_IMUL` and
    `CFT_SEQ_FEAT_WIDE_CONST`, and `cft_program_load` refuses an image
    that uses either on a device that does not publish it. The indexed
    form is what lets step 3 emit one image per positive.
@@ -343,7 +344,7 @@ deposition that column alone can claim.
    and prints the counts, the flags, the program digest and the
    deposit buffer's SHA-256, on the software backend, in emulation
    and on the card alike (docs/PROGRAMS.md). The emitter target on
-   the atlas side is the open half of this step.
+   the atlas side followed on 2026-09-08 (`atlas-engine/core/emit-cft.mjs`).
 4. **`CALL`, if the budgets demand it** (cft-fp256), which step 3
    measures on the sixty-eight positives rather than guesses; the
    wider input block is withdrawn (item 3 above) and the two
@@ -354,9 +355,13 @@ deposition that column alone can claim.
    known, and the second round's spill memory, deeper image and
    wider bank (items 6 to 9 above) are built in its place.
 5. **The GPU record capture and the per-sample comparison**
-   (atlas-engine), then the negative's hash beside the matrix.
+   (atlas-engine), then the negative's hash beside the matrix. The
+   per-sample half is done (2026-09-18): for `hopf` and `mand`, an
+   NVIDIA GPU's own record of every sample is matched bit for bit on the
+   U50 and by the software backend, and the `photograph` stage holds the
+   software backend to `hopf`'s four passes (docs/VALIDATION.md).
 
-Steps 1 and 3 need no hardware and no ABI change; they are the
-"det_* to program port and the parity harness against the GLSL bits"
-that CAPABILITIES.md has called startable since 2026-09-01. Step 2 is
-the first RTL this workload asks for, and it is small.
+Steps 1 and 3 need no hardware and no ABI change; they are the "det_* to
+program port and the parity harness against the GLSL bits" that
+CAPABILITIES.md called startable from 2026-09-01 to 2026-09-07. Step 2
+is the first RTL this workload asks for, and it is small.

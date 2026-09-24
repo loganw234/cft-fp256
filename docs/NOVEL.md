@@ -136,15 +136,18 @@ and the DSP48E2 cascade rule `N = ceil((P-10)/17)`:
                             ----
                              262
 
-The routed design reports **exactly 262**. Four rungs, four exact
-matches, no slack anywhere in the arithmetic.
+The routed design's FMA ladder reports **exactly 262** (the whole
+single-tile image staged on 2026-09-15 reports 311: the ladder's 262,
+the integer multiply's 45 and four more - docs/VALIDATION.md,
+2026-09-23). Four rungs, four exact matches, no slack anywhere in the
+arithmetic.
 
 That makes the DSP count a cheap falsifiable check on something no
 other report states directly: whether Vivado is still accumulating
 partial products *inside* the DSP column on the `PCIN` cascade path
 rather than spilling them into fabric adders. A change that pushes one
-multiply into LUTs moves the count off 262 and is visible in one line
-of any utilisation report.
+multiply into LUTs moves the ladder's count off 262 and is visible in
+one line of a hierarchical utilisation report.
 
 **What is not new:** the cascade rule is UG579; using resource counts
 as a sanity check is ordinary practice.
@@ -153,8 +156,8 @@ as a sanity check is ordinary practice.
 match against a derived ladder certifies the cascade mapping, used as
 a standing regression check.
 
-**Evidence:** `docs/ROADMAP.md` open-core sizing table; any
-`*_util.rpt` in a build directory.
+**Evidence:** `docs/ROADMAP.md` open-core sizing table; the
+hierarchical report `hw/synth_attrib.tcl` writes in a build directory.
 
 ### 5. Contract-level exactness used to remove hardware
 

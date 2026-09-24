@@ -97,7 +97,7 @@ $(BUILD)/emconfig.json:
 seqflags:
 	$(PYTHON) python/gen_seq_flags.py --check
 
-# docs/README.md is the index of the thirty-four documents: it must link
+# docs/README.md is the index of the thirty-seven documents: it must link
 # every one of them, every link must resolve, and the line counts it
 # states must be the files' own. A hand-written list of files is exactly
 # what drifted twice before in this repo (verify/run.sh's stage names,
@@ -199,7 +199,7 @@ libcft-docker:
 sim:
 	$(MAKE) -C tb sim SIM=$(SIM)
 
-cycles krnlfused krnlplain simmc:
+cycles krnlfused krnlplain simmc seqcycles:
 	$(MAKE) -C tb $@ SIM=$(SIM)
 
 # Open-toolchain portability gate: the whole kernel must elaborate in

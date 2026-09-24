@@ -27,18 +27,18 @@ those primitives (every `det_*` function is fma/Newton/polynomial
 chains over them) lands on identical bits wherever the primitives do.
 
 *That was an argument until 2026-09-18, and is a measurement since.*
-atlas-engine lowered its darkroom's deterministic camera - a real
-image, not a test - to a sequencer program, and held every sample's
-output to the record an NVIDIA RTX 5060 Ti wrote while rendering the
-same frame from the pinned GLSL: a million samples a pass, five words a
-sample, six passes across two plates, one of them a loop with an early
-exit. The U50's tile produced the GPU's bytes on every pass, and so did
-this library's software backend. Three implementations that share no
-code and no vendor - a GPU's compiler and silicon, an FPGA's gates, a C
-executor - and one set of bytes. One of those passes is a verification
-stage here (`photograph`, host/tests/photograph/hopf), and it is the
-only one whose expected bits this project did not compute
-(docs/VALIDATION.md, that date).
+atlas-engine lowered its darkroom's deterministic camera - a real image,
+not a test - to a sequencer program, and held every sample's output to
+the record an NVIDIA RTX 5060 Ti wrote while rendering the same frame
+from the pinned GLSL: a million samples a pass, five words a sample, six
+passes across two plates, one of them a loop with an early exit. The
+U50's tile produced the GPU's bytes on every pass, and so did this
+library's software backend. Three implementations that share no code and
+no vendor - a GPU's compiler and silicon, an FPGA's gates, a C
+executor - and one set of bytes. One of those plates, all four of its
+passes, is a verification stage here (`photograph`,
+host/tests/photograph/hopf), and it is the only stage whose expected bits
+this project did not compute (docs/VALIDATION.md, that date).
 
 ## Formats
 
@@ -882,14 +882,15 @@ What belongs HERE is what an independent implementation is scored on:
   subnormal and 78,914 for the largest binary256 normal. Those lengths
   are a property of the format, not of this implementation.
 - **The round trip is guaranteed at Pmin and is NOT guaranteed one
-  digit short.** Pmin is `1 + ceiling(p * log10 2)` - 9, 17, 36 and 73
-  - and 5.12.2 promises that a to-decimal / from-decimal pair at that
-  many digits under a round-to-nearest attribute reproduces the
+  digit short.** Pmin is `1 + ceiling(p * log10 2)` - 9, 17, 36 and
+  73 - and 5.12.2 promises that a to-decimal / from-decimal pair at
+  that many digits under a round-to-nearest attribute reproduces the
   original encoding. This contract holds it and exhibits its edge
   rather than asserting one: at Pmin - 1 there are neighbouring
-  encodings whose decimals collide, and both host/tests/character_check.py
-  and host/tests/api_test.c name a pair per format (0x417ffff5 and
-  0x417ffff6 at binary32, which both write `1.5999990e+1`).
+  encodings whose decimals collide, and host/tests/character_check.py
+  finds a pair per format and host/tests/api_test.c names one
+  (0x417ffff5 and 0x417ffff6 at binary32, which both write
+  `1.5999990e+1`).
 - **inexact is the only flag either output conversion can raise**, and
   only when a digit was dropped. The exponent is written out in full,
   so 5.12.2's "exponent not of sufficient width" overflow and
@@ -1299,9 +1300,9 @@ Per 6.3, and the standard's words carry the two rules people miss:
 
 Flags are sticky data, never traps: every element yields a 5-bit set
 `{inexact, underflow, overflow, divzero, invalid}` (divzero raised by
-`cft_div` for finite/0 and by `logB(+-0)`, exactly per 7.3), and a
-run's FLAGS CSR is the OR over all elements - order-independent by
-construction.
+`cft_div` and `cft_formatof_div` for finite/0, by `logB(+-0)` and by the
+clause-9.2 poles, exactly per 7.3), and a run's FLAGS CSR is the OR over
+all elements - order-independent by construction.
 
 Tininess is detected **after rounding**: a result is tiny when "a
 non-zero result computed as though the exponent range were unbounded
@@ -1407,9 +1408,11 @@ Behaviour on a physical card WAS outside it when this was written, and
 is not any more: on 2026-09-08 both card-day images replayed the
 published sets on an Alveo U50 - 1,071,635 cases through one tile and
 through four, all matching (docs/CARDDAY.md, docs/VALIDATION.md).
-docs/BRINGUP.md still owns the gates. What no card has yet shown is the
-cross-DEVICE half of the promise: two different cards in two different
-machines returning the same bits.
+docs/BRINGUP.md still owns the gates. What no second card carrying this
+tile has yet shown is the cross-DEVICE half of the promise: two
+different cards in two different machines returning the same bits. The
+nearest is the photograph in The promise, above - the U50 returning the
+bytes an NVIDIA GPU recorded, on 2026-09-18.
 
 ## Clause locator index
 

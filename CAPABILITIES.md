@@ -111,7 +111,7 @@ and the clause 6.3 signed zero of an exact cancellation.
 | underflow | **yes** | tininess after rounding, raised only when tiny **and** inexact |
 | overflow | **yes** | with the per-attribute delivered result |
 | invalid | **yes** | sNaN operand, `inf * 0`, `inf - inf`, `0/0`, `inf/inf`, sqrt of a negative |
-| divideByZero | **yes** | raised by `cft_div` for finite/0, exactly per 7.3 |
+| divideByZero | **yes** | raised by `cft_div` and `cft_formatof_div` for finite/0, by `logB(0)` and at the poles of the clause 9.2 functions, exactly per 7.3 |
 | trap handling | **out** | flags are sticky data, never control flow. Deterministic by construction |
 | per-element flags | **no** | the FLAGS register is the OR over the run, not per lane |
 
@@ -150,7 +150,7 @@ attribute).
 | comparisons (5.6.1, 5.11) | `compareQuietLess`, `LessEqual`, `Equal` - as floats a select can consume; **greater/greaterEqual come free by swapping the operand pointers** | **yes** |
 | comparisons (5.6.1) | `compareSignaling{Less,LessEqual,Equal}` (`cft_cmp_sig`) | **composed** - the quiet predicate's value from the tile, invalid-for-any-NaN synthesised exactly on the host |
 | reductions | `sum`, `dot` with the index-fixed tree | **yes** - contract 0x500; the tree shape is part of the contract, four tiles return what one returns, and `dot(a,b) == sum(mul(a,b))` exactly, flags included |
-| reductions (9.6) | `maxall`, a maximum over the array | **composed** (2026-09-12) - `ceil(log2 n)` elementwise `max` passes on the tile. Not one of 9.4's seven; asked for by the first outside workload. The one reduction with NO tree contract, because 754-2019 `maximum` is exactly associative and commutative including its flags - so every shape agrees, four tiles fold with a maximum, and a hardware version could not change an answer |
+| reductions (9.6) | `maxall`, a maximum over the array | **composed** (2026-09-12) - `ceil(log2 n)` elementwise `max` passes on the tile, or **yes** (2026-09-14) as one streamed pass on a tile publishing CAPS2[8] (below). Not one of 9.4's seven; asked for by the first outside workload. The one reduction with NO tree contract, because 754-2019 `maximum` is exactly associative and commutative including its flags - so every shape agrees, four tiles fold with a maximum, and a hardware version could not change an answer |
 | round to integral (5.3.1) | `roundToIntegral{TiesToEven..TiesToAway}` + `Exact` (`cft_rint`) | **composed** - the magic-constant addition under the caller's attribute, made total by host bookkeeping; the named variants signal nothing, per the standard |
 | scaling (5.3.3) | `scaleB` (`cft_scaleb`) | **composed** - multiplies by exact powers of two; one rounding, the mul's flags ARE the contract flags |
 | conversions (5.4.1) | int32/uint32/int64/uint64 -> float, float -> int, all five roundings + Exact variants (`cft_cvt_*`) | **library** - with the invalid-case delivery 754 leaves open pinned to RISC-V's FCVT table |
@@ -181,27 +181,27 @@ docs/DETERMINISM.md.
 
 ## Recommended operations (clause 9.2)
 
-**All thirty-nine functions of table 9.1 are yes**, and have been
-since 2026-09-03 (ABI 0.6): the exp/log/pow family and hypot on
-2026-09-02 (ABI 0.3), the Pi-variants and the inverse trigonometry
-the next morning (0.4), sin, cos and tan of a radian argument with the
-six hyperbolics that afternoon (0.5), and exp2m1, exp10, exp10m1,
-log2p1, log10p1, rSqrt, pown, powr, compound and rootn that evening
-(0.6). Correctly rounded at all four formats under all five rounding
-attributes with 9.2.1's special values and exact flags. Not
-"accurate" - correctly rounded, which is the only version of these
-functions a determinism contract can score, because two accurate
-implementations disagree in the last bit and neither is wrong. In the
-library, not in the tile: they are host operations over a
-multiprecision evaluator built on the same bigint core, and unlike
-divide they could not have been anything else - division composes
-from FMA because it has an exactly measurable residual and an
-exponential has none. The radian three reduce their argument against a
-270,336-bit 2/pi generated at build time; the exact cases of every
-function are proved closed rather than sampled. docs/TRANSCENDENTALS.md
-is the design and the proofs; the numbers are in docs/VALIDATION.md,
-phase by phase, and in its 0.7 census (607,217 comparisons against the
-model over the thirty-nine, MPFR parity over every one).
+**All thirty-nine functions of table 9.1 are yes**, and have been since
+2026-09-03 (ABI 0.6): the exp/log/pow family and hypot on 2026-09-02
+(ABI 0.3), the Pi-variants and the inverse trigonometry the next morning
+(0.4), sin, cos and tan of a radian argument with the six hyperbolics
+that afternoon (0.5), and exp2m1, exp10, exp10m1, log2p1, log10p1,
+rSqrt, pown, powr, compound and rootn that evening (0.6). Correctly
+rounded at all four formats under all five rounding attributes with
+9.2.1's special values and exact flags. Not "accurate" - correctly
+rounded, which is the only version of these functions a determinism
+contract can score, because two accurate implementations disagree in the
+last bit and neither is wrong. In the library, not in the tile: they are
+host operations over a multiprecision evaluator built on the same bigint
+core, and unlike divide they could not have been anything else -
+division composes from FMA because it has an exactly measurable residual
+and an exponential has none. The radian three reduce their argument
+against a 270,336-bit 2/pi generated rather than transcribed; the exact
+cases of every function are proved closed rather than sampled.
+docs/TRANSCENDENTALS.md is the design and the proofs; the numbers are in
+docs/VALIDATION.md, phase by phase, and in its 0.7 census (607,217
+comparisons against the model over the thirty-nine, MPFR parity over
+every one).
 
 **Still none of this is a hardware transcendental**, and that remains
 deliberate. The atlas det library computes these *in software from
@@ -214,14 +214,14 @@ getting one.
 
 ## The atlas-engine det_* library
 
-`atlas-engine`'s deterministic library is the workload this tile
-exists to serve, and the most useful measure of readiness. It is 38
-functions built almost entirely from `fma` (51 uses against a handful
+`atlas-engine`'s deterministic library is the workload this tile exists
+to serve, and the most useful measure of readiness. It is thirteen
+functions built almost entirely from `fma` (56 sites against a handful
 of everything else), deliberately, so a GLSL driver's quirks cannot
-reach the results. The shipped template is unfused - every `fma` is
-a multiply then an add, 56 sites counted on 2026-09-07 - so what the
-tile must reproduce is two roundings per `fma`, and `FMA` itself
-would compute a different library (docs/ATLAS.md).
+reach the results. The shipped template is unfused - every `fma` is a
+multiply then an add, 56 sites counted on 2026-09-07 - so what the tile
+must reproduce is two roundings per `fma`, and `FMA` itself would
+compute a different library (docs/ATLAS.md).
 
 The distance to running it on-chip:
 
@@ -232,18 +232,19 @@ The distance to running it on-chip:
 | integer add / subtract / shift on the bit pattern | **yes** |
 | compare and branchless select | **yes** |
 | `abs`, `min`, `max` | **yes** |
-| `clamp` | **yes** as `min`+`max`; one pass each until there is a sequencer |
+| `clamp` | **yes** as `CMPLT`+`SELECT` twice - GLSL's `min`/`max` are comparisons, not the `MIN`/`MAX` opcodes (docs/ATLAS.md); a pass each, or one sequencer program |
 | division / sqrt / rsqrt seeds to refine | **yes** - opcodes 26/27, plus the fully-composed `cft_div`/`cft_sqrt` when the correctly-rounded answer is wanted outright; on a program-capable device the whole composition issues as ONE sequencer program rather than ~28 elementwise round trips |
 | `floor`, `round`, `step` | **composed** (2026-09-01) - `cft_rint` under the directed attributes IS floor/ceil/trunc/round; `step` was always cmple+select |
 | a sequencer to run a chain on-chip | **yes** (2026-09-08) - `cft_seq` drives the kernel's one ALU array and holds bit-exact to `seq.py`: 9/9 unit suites across four formats, the full-kernel bench, and a banked-memory bench that proves each operand arrives through its own master. It FAILED its first device run - every program, bus faults - because all three operand reads left through m_axi_a while `link.cfg` binds that master to one HBM pseudo-channel; the reads are now steered per bank. Since then: **28 checks, 0 failed** at fp32 through real XRT (2026-09-02), programs in all four formats bit-exact against the software backend on a four-tile hw_emu image (2026-09-08, 98 checks, 0 failed), and then silicon - card day's soak ran the zoom reference orbit as a sequencer program, 32 steps a call, to one checkpoint hash on one tile, on four, and in software, ten runs each. docs/VALIDATION.md carries all three |
 
 Today a det_* function could be evaluated as a hybrid - the tile doing
 the fma passes, the host doing the integer and select work between
-them - and the result would be bit-exact. `cft_div` and `cft_sqrt` ARE
-that hybrid, shipped and proven: ~25-30 passes per call, which is the
-honest price of correct rounding composed from FMA, and the measured
-reason the sequencer is v2's headline (the same sequence as one
-on-chip program is the ~25x traffic win).
+them - and the result would be bit-exact. `cft_div` and `cft_sqrt`, on a
+device that cannot run programs, ARE that hybrid, shipped and proven:
+~25-30 passes per call, which is the honest price of correct rounding
+composed from FMA, and the measured reason the sequencer is v2's
+headline (the same sequence as one on-chip program is the ~25x traffic
+win).
 
 ## Engine and host
 
@@ -255,7 +256,7 @@ on-chip program is the ~25x traffic win).
 | capability discovery (CAPS) | **yes** | formats and opcode groups this bitstream carries |
 | unsupported precision | **refused** | STATUS[3]: engine never starts, memory untouched, done still asserts - an error, not an output |
 | bus-fault reporting (STATUS) | **yes** | including the abandon-on-length-violation path, so a protocol fault is a prompt error rather than a hang |
-| multiple compute units | **yes** | libcft partitions elementwise runs and reductions across up to 64 CUs; four tiles return what one returns, flags included. Quad images have been built and run on the card at every sequencer revision since - the card-day pair (2026-09-08), revision 2, revision 3 and the read-ahead pair - each replaying the published sets on four tiles to the same bits as one |
+| multiple compute units | **yes** | libcft partitions elementwise runs and reductions across up to 64 CUs; four tiles return what one returns, flags included. Quad images have been built and run on the card - the card-day pair (2026-09-08), revision 2, revision 3, the read-ahead pair and round 2's pair (2026-09-16) - each replaying the conformance sets on four tiles to the same bits as one (revision 4's quad, 2026-09-13, ran device-test rather than the sets) |
 | reductions on-chip | **yes** | streaming accumulator with the contract's tree |
 | a SCALAR (stride-0) operand | **yes** (2026-09-12) | `cft_run_ex` with `cft_elem_args.scalar_mask`: one of `a`, `b` or `c` may be a single element applying to the whole run. On a tile that is MODE[18:16] and ONE BEAT read instead of `n`, behind CAPS2[7] - the first relaxation of "three dense linear streams" below, and the cheapest one, because a stride of zero needs no address arithmetic. The CALL is portable and the SAVING is not: the software backend indexes element 0, the remote backend expands locally because its frames chunk, and `cft_caps` reports `CFT_SEQ_FEAT_SCALAR` so a caller can tell which it has |
 | a reduction per SEGMENT, and `maxall` streamed | **yes** (2026-09-14) | `cft_reduce_seg`: `n / seg` results, `d[s]` the same tree over slice `s` - the software backend is the definition, a tile behind CAPS2[8] (`CFT_FEAT_REDUCE_SEG`: a SEG/NRES register pair, VERSION 0x900) runs it as ONE call, and a tile without the bit refuses it by name rather than looping the segments over the bus. The same bit makes opcode 31 a streaming maximum, so `cft_reduce(CFT_MAXALL)` is one pass there. Built for cft-rebound's per-system convergence test (docs/ROADMAP.md, ask 7) |
@@ -369,15 +370,16 @@ in docs/COMPATIBILITY.md) gets the full story.
   matches the tool's (docs/BENCHMARKS.md, docs/DEMOS.md). They are the
   benchmark a device will be measured with, and they say what fp64
   loses on each, or that it loses nothing.
-- For the **atlas det library**: every primitive it refines from
-  exists on the tile, including its seeds and now floor/round; the
-  on-chip sequence to chain them exists in RTL, is benched, and has
-  run on the card. The
-  det_* -> program port's first half landed on 2026-09-07
+- For the **atlas det library**: every primitive it refines from exists
+  on the tile, including its seeds and now floor/round; the on-chip
+  sequence to chain them exists in RTL, is benched, and has run on the
+  card. The det_* -> program port's first half landed on 2026-09-07
   (atlas-engine branch `cft-detlib`): all nineteen functions of the
-  shipped library emit as sequencer instruction sequences and
-  reproduce its bits on 4,096-point sweeps through libcft's software
-  backend, with the ISA asks counted rather than guessed - eleven
-  functions need indexed constants, one needs `IMUL`, one needs a
-  seventeenth register (docs/ATLAS.md). The parity harness against
-  the GPU bits remains.
+  shipped library - the thirteen det_*, their four helpers, `u2f` and
+  `hashu` - emit as sequencer instruction sequences and reproduce
+  its bits on 4,096-point sweeps through libcft's software backend, with
+  the ISA asks counted rather than guessed - eleven functions need
+  indexed constants, one needs `IMUL`, one needs a seventeenth register
+  (docs/ATLAS.md). The parity harness against the GPU bits followed on
+  2026-09-18: atlas-engine's photographs, every pass matching an RTX
+  5060 Ti's record on the U50 and in software (docs/VALIDATION.md).

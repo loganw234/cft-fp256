@@ -1,6 +1,6 @@
 # libcft in WebAssembly - the contract, one browser away
 
-`conformance.html` is the whole product of this directory: a single
+`conformance.html` is the main product of this directory: a single
 self-contained HTML file (committed, ~1 MB) that loads libcft's
 software backend compiled to wasm, prints the library's identity, and
 replays conformance vectors through `cft_conformance()` - the same C
@@ -43,15 +43,15 @@ it did not.**
    per-case flags, then the array pass, per set.
 
 The embedded sample (4,015 cases; deterministic rule below) spans all
-four formats, all five rounding attributes and every opcode class,
-the divide/sqrt seeds 26/27 and the unassigned `reserved15/31/255`
-included - that list lost 28 when ABI 0.6 assigned it to `sumsq` and
-30 when `imul` took it on 2026-09-07. For
-the full 1,068,915-case claim, generate the sets in a
-checkout (`make vectors`) and drag the `vectors/out/*.jsonl` files
-onto the page - same code path, whole files. Verified at build time:
-the full 20-set drop replays with zero mismatches, from both
-LF (Linux) and CRLF (Windows) generated files.
+four formats, all five rounding attributes and every opcode class, the
+divide/sqrt seeds 26/27 and the unassigned `reserved15/255` included -
+that list lost 28 when ABI 0.6 assigned it to `sumsq`, 30 when `imul`
+took it on 2026-09-07 and 31 when `maxall` did on 2026-09-12. For the
+full 1,068,915-case claim, generate the sets in a checkout (`make
+vectors`) and drag the `vectors/out/*.jsonl` files onto the page - same
+code path, whole files. Verified at build time: the full 20-set drop
+replays with zero mismatches, from both LF (Linux) and CRLF (Windows)
+generated files.
 
 Since 2026-09-03 the drop zone also accepts the **twenty
 transcendental sets** ABI 0.3 added (`<fmt>-transcend[-<rnd>].jsonl`),
@@ -117,14 +117,14 @@ watched working on 2026-09-02 with a stub `emcc` earlier on `PATH`:
 it refuses at once with the pinned version in the message, and under
 the override it warns and proceeds. Stages:
 
-1. regenerate the published vector sets into `build/vectors/` with
-   the exact `make vectors` arguments (deterministic, seed 3; the
-   build trusts its own regeneration, not whatever `vectors/out`
+1. regenerate the published vector sets into `build/vectors/` with the
+   `make vectors` arguments plus `--transcend 0` (deterministic, seed 3;
+   the build trusts its own regeneration, not whatever `vectors/out`
    holds);
 2. `emcc` the library sources - **asked of `host/Makefile`, not
-   listed here** (see below), currently thirteen: bigint, softfloat,
+   listed here** (see below), currently fifteen: bigint, softfloat,
    device, divsqrt, clause5, chars, augmented, mpfloat, transcend,
-   program, reduce, formatof, conformance
+   program, reduce, formatof, conformance, sha256, backend_remote
    - `mpfloat.c` and `transcend.c` arrived with ABI 0.3 and
    `formatof.c` with 0.7, each compiled in without anyone editing this
    directory, which is the
@@ -162,14 +162,14 @@ build instead of vanishing from it.
 
 **The sampling rule** (also in `build.sh`, `make_page.py`, and on the
 page): from each of the 20 sets (4 formats × 5 rounding attributes,
-12,000 lines each) take every 60th line - 0-based lines 0, 60, 120, …
+11,800 lines each) take every 59th line - 0-based lines 0, 59, 118, …
 = exactly 200 per set - then add the set's first line of any opcode
 name the stride missed, so every opcode class is embedded per set by
 construction rather than by luck. `conformance.html` is a committed
 build product; rebuild it with the pinned image and the only intended
 diff is none.
 
-`wasm_api.c` is the module's complete exported surface: 58 `cftw_*`
+`wasm_api.c` is the module's complete exported surface: 141 `cftw_*`
 wrappers that project `host/include/cft.h` one declaration at a time,
 adapting only what JavaScript cannot reach (out-params, the sized
 caps struct, a uint64). No invented semantics; cft.h remains the
@@ -196,7 +196,7 @@ wrong while still returning a plausible number for every input.
 
 ```bash
 make vectors                       # from the repo root, once
-node bindings/wasm/verify.mjs      # 2 min, node 22
+node bindings/wasm/verify.mjs      # ~20 min, node 22
 ```
 
 No build is needed: the loader it drives is `bindings/node`'s
@@ -236,26 +236,25 @@ the build directory:
    `cftw_atan2pi`, `cftw_sin` … `cftw_atanh`, and since ABI 0.6
    `cftw_exp2m1` … `cftw_rootn`), clause 9.5's `cftw_augmented_add` …
    `cftw_augmented_mul` with their two outputs, clause 9.4's four sum
-   reductions through `cftw_reduce` at opcodes 24/25/28/29 and the
-   three `cftw_scaled_prod*` with their int64 scale, clause 5.12's
-   `cftw_from_decimal_char` … `cftw_set_payload_signaling` - the last
-   through the sizing protocol exactly as cft.h states it, short buffer
-   included - and since ABI 0.7 clause 9.6's `cftw_min_mag` …
-   `cftw_maxnum_mag` and clause 5.4.1's `cftw_formatof_add` …
-   `cftw_formatof_fma`, the one family whose operand and result
-   buffers are different widths in the same call. One element at a
-   time for exact per-case flags, then as
-   arrays wherever the C has a batch shape, comparing encodings,
-   sequences, scales and flags against the file. Step 4 cannot
-   substitute for this and it is worth being blunt about why:
-   `cft_conformance` dispatches all of it internally, in C, so it is
-   green whether or not a single `cftw_*` wrapper for it exists. For
-   a day it was (docs/COMPATIBILITY.md's half-step). Step 5 is the one
-   that fails when the JavaScript surface is missing, or present and
-   wrong - including `atan2` with its two operands the wrong way
-   round, which is the negative control the 0.4 block below records,
-   `scaled_prod_diff` the same way at 0.6, and at 0.7 a formatOf call
-   whose two formats are the wrong way round.
+   reductions and `maxall` through `cftw_reduce` at opcodes
+   24/25/28/29/31 and the three `cftw_scaled_prod*` with their int64
+   scale, clause 5.12's `cftw_from_decimal_char` …
+   `cftw_set_payload_signaling` - the last through the sizing protocol
+   exactly as cft.h states it, short buffer included - and since ABI 0.7
+   clause 9.6's `cftw_min_mag` … `cftw_maxnum_mag` and clause 5.4.1's
+   `cftw_formatof_add` … `cftw_formatof_fma`, the one family whose
+   operand and result buffers are different widths in the same call. One
+   element at a time for exact per-case flags, then as arrays wherever
+   the C has a batch shape, comparing encodings, sequences, scales and
+   flags against the file. Step 4 cannot substitute for this and it is
+   worth being blunt about why: `cft_conformance` dispatches all of it
+   internally, in C, so it is green whether or not a single `cftw_*`
+   wrapper for it exists. For a day it was (docs/COMPATIBILITY.md's
+   half-step). Step 5 is the one that fails when the JavaScript surface
+   is missing, or present and wrong - including `atan2` with its two
+   operands the wrong way round, which is the negative control the 0.4
+   block below records, `scaled_prod_diff` the same way at 0.6, and at
+   0.7 a formatOf call whose two formats are the wrong way round.
 
 **Measured 2026-09-02**, node 22.19.0 on Windows 11, against the page
 rebuilt that day: module 66,422 bytes, sha256 `7504440ef7ca5c9d…`,
@@ -556,12 +555,12 @@ what a rerun on the same sources should do.
   four magnitude sets of 9.6 (**9,728**) and eighty formatOf sets of
   5.4.1 (**176,250**), one per ordered pair of formats per attribute.
   `make vectors` writes all 168; the drop zone accepts all 168. (That
-  count is larger than the **1,068,915** the page quotes for
+  count is larger than the **1,067,635** the page quoted then for
   `make vectors`, and the difference is entirely the opcode sets:
   `verify/run.sh`'s own `vectors` stage takes the generator's default
   directed/random/simple pools rather than `make vectors`'s
   `--directed 3000 --random 4000 --simple 200`, so its opcode sets
-  carry 19,800 lines each where the published ones carry 12,000. The
+  carry 19,600 lines each where the published ones carry 11,800. The
   other six families are pool-size-independent and identical either
   way, which is why the step-5 numbers below are the same in both.)
 * **831,635 of those driven through the wrappers themselves**, over
@@ -797,7 +796,7 @@ against the header rather than against a version typed into a test.
 ```
 build.sh             the containerized build, image pinned by tag+digest
 wasm_api.c           the exported C surface (cftw_* ≙ cft.h, 1:1)
-page_template.html   the page, with three @CFT_*@ splice tokens open
+page_template.html   the page, with four @CFT_*@ splice tokens open
 make_page.py         sampling rule + page assembly (+ --corrupt)
 conformance.html     THE DELIVERABLE - committed build product
 verify.mjs           the browserless check of that build product:
@@ -811,9 +810,13 @@ remote.mjs           docs/REMOTE.md's frame protocol in JavaScript,
                      over WebSocket and over TCP - the same bytes the
                      C client sends, including PROG_RUN_BANK (0x0023)
                      since ABI 0.9 and PROG_RUN_EX (0x0024) since
-                     0.10. Driven by
+                     0.10, but not REDUCE_SEG (0x0012), which the C
+                     client has sent since 0.13. Driven by
                      bindings/node/remote_test.mjs, which
                      `make -C host wstest` runs
+remote.html          docs/REMOTE.md's page: a check run on cft-serve
+                     over WebSocket and in the local module, compared,
+                     and a dropped vector set replayed through the server
 build/               untracked: vectors, module, node loader,
                      negative control
 ```
@@ -920,7 +923,8 @@ which is exactly why the module still had to be rebuilt - `verify.mjs`
 holds the shipped module's `cftw_abi_version()` to `CFT_ABI_VERSION_MINOR`
 and the remote protocol refuses a frame whose ABI word differs at all.
 
-What is committed today, measured on the files themselves:
+What was committed at 0.11, measured on the files themselves (the 0.14
+block below supersedes it):
 
     bindings/node/cft_node.wasm      225,354 bytes  sha256 29cce150ec46676b...
     bindings/wasm/conformance.html 1,356,544 bytes  sha256 698b9b975b770ae5...
@@ -973,8 +977,10 @@ demos_core.js        the compute core: five panels, each a port of one
                      page's Worker and node run the same bytes.
 demos_worker.js      the driver - Worker, or main thread where a
                      browser refuses a blob: Worker from file://
-demos_chains.json    what the NATIVE tools printed: 11 configurations,
-                     13 chains, each with its command line
+demos_chains.json    what the NATIVE tools printed: 13 configurations,
+                     15 chains, each with its command line (11 and 13
+                     when this block was measured; the two newton
+                     orbits runs joined on 2026-09-07)
 make_demos.py        page assembly (+ --corrupt), and the three module
                      identity checks
 build_demos.sh       the containerized build; the image pin is READ

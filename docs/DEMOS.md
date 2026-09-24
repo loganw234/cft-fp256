@@ -19,12 +19,12 @@ Live beside the conformance page at
 
 | | |
 |---|---|
-| page | `bindings/wasm/demos.html`, 539,646 bytes |
-| sha256 | `b78d6a6dd57e7411ef98783c17f080bb3d429ab50e021926fba2638e9924fdc1` |
-| module | `bindings/node/cft_node.wasm`, 225,354 bytes, sha256 `29cce150ec46676ba4783e5d8395c825ce85930b0999de2e422ad7b050bcfea4` |
+| page | `bindings/wasm/demos.html`, 574,656 bytes |
+| sha256 | `3c412c0a000d765ab28325b6657ff78f14ea8a6faae211740e647b8d52292cb9` |
+| module | `bindings/node/cft_node.wasm`, 256,485 bytes, sha256 `81f34e1263c9966587ac34a093232bb66b675f1638372ec3ae30439718edff4a` |
 | toolchain | emcc 6.0.9 (4e4223852a0835923411059a3929907d7df1232e), `emscripten/emsdk:6.0.9@sha256:96617f27fe16421588241def73908fd348a7f9d260440ed0d00b36dcf7a063cc` |
 | configurations | 13, over 15 chains |
-| recorded | 2026-09-09, per `bindings/wasm/demos_chains.json`'s own `recorded` field |
+| recorded | 2026-09-15, per `bindings/wasm/demos_chains.json`'s own `recorded` field |
 
 ---
 
@@ -263,18 +263,18 @@ different program is a chain about a different program.
 ## How the panels were ported
 
 Each panel is a port of one tool's engine. Three of the five have only
-the `--engine loop` path, because their step does not fit the program
-model and each says exactly what stopped it - docs/SEQUENCER.md's "What
-the workloads asked of the program model" is that list. **Two of them,
-zoom and orbits, carry both engines**, because since 2026-09-07 the
-wasm module exports the sequencer's program API. It began as five -
+the `--engine loop` path in this port; where a tool's step does not fit
+the program model it says exactly what stopped it - docs/SEQUENCER.md's
+"What the workloads asked of the program model" is that list. **Two of
+them, zoom and orbits, carry both engines**, because since 2026-09-07
+the wasm module exports the sequencer's program API. It began as five -
 `cftw_program_load`, `cftw_program_get_info`, `cftw_program_run`,
 `cftw_program_free` and `cftw_status_deposit_overflow`, one per
 declaration in cft.h's program section plus the macro projected as a
-call - and grew with each sequencer revision the same way: thirteen in
+call - and grew with each sequencer revision the same way: fourteen in
 `bindings/wasm/wasm_api.c` today, adding `cftw_program_run_bank`,
-`cftw_program_digest`, `cftw_program_flags`, `cftw_program_run_ex`,
-the three scratch accessors and two more macro projections.
+`cftw_program_digest`, `cftw_program_flags`, `cftw_program_run_ex`, the
+three scratch accessors and two more macro projections.
 
 The engine is a control on those two panels and it changes no bit. Each
 tool's own gate already holds its two engines to byte-identical
@@ -351,14 +351,17 @@ carry. The images are compared byte for byte against the tools' own
 | zoom, the reference orbit | 15 instructions, 3 constants (4, `c_re`, `c_im`): the same eight ALU issues an iteration the host loop makes, the escape test **before** the step, and the two `DEPOSIT`s that ARE the orbit | `--steps-per-call`, 1,024, so 1,001 here in one call | `2 * trip` |
 | orbits, the whole integration | 49 instructions at fp256 and 37 at fp64, 4 constants: two nested `REPEAT`s - samples outside, `--sample-every` steps inside - with four `DEPOSIT`s at the top and four at the end of each sample | the whole run, `nsamples * stride` | `(nsamples + 1) * 4` = 260 |
 
-Three things follow from the model rather than from these ports, and
-each is a line in docs/SEQUENCER.md's "What the workloads asked":
+Three things follow from the model as the C tools use it, rather than
+from these ports, and each is a line in docs/SEQUENCER.md's "What the
+workloads asked":
 
 - **The orbits program is one call and cannot resume.** A program can
-  be entered only at a state with at most three non-zero components,
-  because `cft_program_run` initialises `r0`, `r1` and `r2` and the
-  rest start at `+0`. Step 0 of a planar Kepler orbit is such a state
-  and no later step is.
+  be entered through `cft_program_run` only at a state with at most
+  three non-zero components, because that call initialises `r0`, `r1`
+  and `r2` and the rest start at `+0`. Step 0 of a planar Kepler orbit
+  is such a state and no later step is. Revision 3's scratch block lets
+  a program be entered at any state it can spell (docs/SEQUENCER.md,
+  R5); neither the tool nor this port uses it.
 - **260 deposit slots a lane is a software-backend number.** A tile
   holds 64 (`MAXD`, `rtl/cft_krnl.sv`), which is 15 samples; the page
   is the software backend, which holds 2^20, and the core refuses at
@@ -457,7 +460,7 @@ Read the ratios and the orders, not the third digit, exactly as
 | enclose / fp256 | 49 enclosures | 1,526 /s | 980 /s | 1,247 /s |
 | mersenne / to-2281 | 2,425,336 limb products | 646,661 /s | 403,953 /s | 473,911 /s |
 
-**Reading them:** wasm runs these between 0.8x and 1.4x of native on
+**Reading them:** wasm runs these between 0.6x and 1.0x of native on
 the batched workloads, and the browser is consistently a little faster
 than node on the same module - V8's tiering on a hot loop of wasm calls
 is the whole difference, and neither number is about the arithmetic,
@@ -514,8 +517,8 @@ one fact is not paranoia when the fact is the whole argument.
 with `bindings/wasm/build/` removed between them (2026-09-07; the
 2026-09-04 page was 486,822 bytes, sha256 `e3711319627e6828...`, built
 the same way). Those are that day's bytes. The page has been rebuilt
-with the module since - the committed one is 539,646 bytes, sha256
-`b78d6a6dd57e7411...`, at ABI 0.11 - so read the pair above as the
+with the module since - the committed one is 574,656 bytes, sha256
+`3c412c0a000d765a...`, at ABI 0.14 - so read the pair above as the
 2026-09-07 measurement and the table at the top of this file as what
 is in the tree.
 
@@ -717,14 +720,14 @@ Three things the table does not say on its own:
   not a disappointment, it is the last of docs/SEQUENCER.md's recorded
   asks - a callable composed operation - with a number beside it.
 
-One smaller note, not a request, and unchanged: what would help the
-zoom panel is not on the sequencer's side at all. The pixel batch
-broadcasts six scalars across 1,024 elements every iteration with a
-JavaScript fill loop - 6,144 stores per iteration, outside the library,
-measurably more than the wasm call they accompany. A `cft_run` that
-accepted a scalar (stride-0) operand would remove them. `dfill` in
-`pixel_chunk` is the same loop in C, so this is a shape the contract
-has, not a JavaScript problem.
+One smaller note, not a request: what would help the zoom panel is not
+on the sequencer's side at all. The pixel batch broadcasts six scalars
+across 1,024 elements every iteration with a JavaScript fill loop -
+6,144 stores per iteration, outside the library, measurably more than
+the wasm call they accompany. `cft_run_ex`'s scalar operand (ABI 0.12's
+`scalar_mask`, used by neither this page nor the C tool yet) would
+remove them. `dfill` in `pixel_chunk` is the same loop in C, so this is
+a shape the plain `cft_run` call has, not a JavaScript problem.
 
 ## What was not done
 
@@ -736,7 +739,7 @@ has, not a JavaScript problem.
   byte-for-byte comparison came from compiling those same sources
   unchanged and interposing on `cft_program_load` at link time.
 - **No device.** The panels run the software backend, which is the
-  only backend a browser can be (`wasm_api.c` says why). Nothing here
+  only backend the wasm module has (`wasm_api.c` says why). Nothing here
   is a hardware number.
 - **The `known` and `device` Mersenne sets are offered, not run.**
   3217..11213 is minutes in a browser and 19937..44497 is hours;

@@ -217,8 +217,12 @@ same for every lane (`zr_k`, `zi_k`). The program model provides:
   Either way it is a bank fixed at load time, and unrolling `z_k` was
   never what it could not do.
 
-There is no operand source that advances with the loop counter. So the
-one thing this workload needs that the ISA cannot express is **a
+There is no operand source shared by every lane that advances with the
+loop counter; revision 3's `LDX` (2026-09-08) indexes only a lane's own
+scratch, which ABI 0.14's `idx_scratch_in` can fill from one shared
+pool - a per-lane copy, at most 128 orbit points a call in 256 slots,
+which this tool does not use. So the
+one thing this workload needs that the ISA cannot express directly is **a
 per-iteration broadcast**: an operand that steps through a vector as
 the loop iterates, shared by every lane. Two shapes would do it, and
 either is a small change:
@@ -332,7 +336,7 @@ of two (the tool refuses anything else), so
 
     Dc_x = (2*ix + 1 - W) * 2^(-E-log2 W)
 
-has at most 12 significant bits and is exact in binary64 and in
+has at most 15 significant bits and is exact in binary64 and in
 binary256 alike. The grid contributes no rounding of its own, which is
 what lets the fp64 and fp256 frames be compared pixel for pixel.
 
@@ -464,7 +468,7 @@ computed per iteration: doing that cost four single-element library
 calls per orbit point - half as much work again as the eight the step
 needs, and 400,000 calls where the sequencer had got the count down to
 98. It is now three whole-array passes and a `MIN` tournament after the
-run, about `2*log2(n) + 4` calls for any `n`. **A per-iteration
+run, about `log2(n) + 4` calls for any `n`. **A per-iteration
 host-side statistic quietly undoes exactly what the sequencer is for**,
 and that is worth writing down because it is easy to add one without
 noticing.
@@ -492,7 +496,7 @@ The claim in the tool's header is:
 | the pixels | every escape iteration and verdict against the golden model's own binary64 semantics, at three centres including the glitching one |
 | the chains | recomputed with `hashlib` |
 | the status word | 754-2019 7.1's word, lowered once when setup ended, must equal the union of every call's `flags_out` - checked on an orbit-only run and on a full frame |
-| refusals | a width that is not a power of two, a centre the format cannot hold exactly, an unknown option, a resume that moves the centre, a zoom below binary64's normal range, a glitch tolerance outside the format's precision, sizes larger than memory |
+| refusals | a width that is not a power of two, a centre the format cannot hold exactly, an unknown option, a resume that moves the centre, a zoom below binary64's normal range, a glitch tolerance outside the format's precision, sizes larger than memory, a checkpoint recording an escape its orbit never reached |
 
 The interrupt leg stops every five engine calls at `--steps-per-call
 37`, so a stop lands in the middle of the orbit rather than on a
@@ -509,7 +513,7 @@ that must still work.
 
 The gate on this tree:
 
-    11222 comparisons, 0 failures
+    11223 comparisons, 0 failures
     ZOOM CHECK OK - the tool, the golden model and mpmath agree
 
 about 14 seconds. mpmath is optional - the golden-model half of the
@@ -710,7 +714,7 @@ the software backend and issues the identical program. What changes:
   multi-reference deep-zoom rendering does anyway, and what turns this
   workload into the sequencer's best case rather than its worst.
 - **The arithmetic intensity is already right.** Each reference point is
-  loaded once and deposited 2,048 times per call at the default trip
+  loaded once and deposited 64 times per call at a tile's 32-trip
   count; `docs/SEQUENCER.md` puts the memory-bound crossover at K ~ 30.
 - **The pixel half would not use the sequencer at all**, for the reason
   in "What the program model could NOT do" above. It would run as
@@ -719,7 +723,9 @@ the software backend and issues the identical program. What changes:
 - **What would not be measured honestly.** Numbers from `hw_emu` are RTL
   simulation seconds and mean nothing as hardware performance;
   `docs/BRINGUP.md` owns those gates. No device number is quoted here
-  because no device has run this.
+  because no device has timed this: the card has run the reference
+  orbit, and matched the software backend's checkpoint hash
+  (docs/VALIDATION.md, 2026-09-08).
 
 ---
 
@@ -842,4 +848,7 @@ failures.**
   given above, and that gap is reported rather than worked around.
 - **The reference is a single lane**, so on a device it would run at
   pipeline speed. See "What a device run would change".
-- **No device has run it.** Everything above is the software backend.
+- **No device has timed it.** Everything above is the software backend;
+  the card has run the reference orbit - 2,000 iterations, 32 steps a
+  call - and returned the software backend's checkpoint hash on one
+  tile and on four (docs/VALIDATION.md, 2026-09-08).

@@ -3,8 +3,8 @@
 What can call this library today, what is on its way, and what
 "compatible" means here - because in this project it is not a
 feelings word. The compatibility test is the identity protocol in
-`host/examples/`: every binding drives the same vectors through the
-same library and must print byte-identical checksum lines, and the
+`host/examples/`: the example in each of eight languages drives the
+same vectors through the same library and must print byte-identical checksum lines, and the
 canonical four are
 
     fp32   0x9af9d3973816adcf
@@ -16,7 +16,7 @@ on every platform, from every language, forever (a change to these is
 a contract change, not a refresh). "Verified" below means that diff
 has actually been run and matched, on the named platform and date,
 and the claim regenerates with `make -C host examples-lang` wherever
-the toolchain exists. Nothing here is checked in CI's default lane -
+the toolchain exists. Julia and R are not checked in CI -
 toolchains are optional by design - so the honest status is recorded
 per row and updated when it changes, the census way: no row says more
 than its diff has shown.
@@ -48,8 +48,8 @@ output lives in its own header and is compared by eye.
 | Go | `host/examples/vector_fma.go` | single-file cgo example; compiles the real cft.h (nothing transcribed), FNV from stdlib | Linux 2026-09-01 (go 1.18); 2026-09-02 as runner stage `lang-go` on the desktop's WSL, CI, and Windows (go 1.26.4 from pacman, GOROOT carried by the runner) | static-links libcft.a as a direct linker input |
 | C# / .NET | `host/examples/VectorFma.cs` (+ minimal csproj) | single-file P/Invoke, no NuGet | Windows 2026-09-02 (dotnet 10.0.301) + Linux 2026-09-01 (dotnet 8); 2026-09-02 as runner stage `lang-csharp` on Windows, the desktop's WSL (dotnet 8.0.130) and CI | resolver maps to exactly one candidate; error paths byte-identical |
 | R | `host/examples/vector_fma.R` | example + the ~70-line .Call shim base R genuinely needs (it cannot pass by-value ints) | Linux 2026-09-01 (R 4.1.2); 2026-09-02 as runner stage `lang-r` on the desktop's WSL, and on Windows (R 4.6.1 with Rtools45, whose gcc 14.3 builds the shim) | 64-bit checksum computed exactly in split doubles - every intermediate below 2^42, proven never to round |
-| Browser / WASM | `bindings/wasm/` - live at https://loganw234.github.io/cft-fp256/ | the software backend compiled to WebAssembly + a single-file conformance page (works from file://, wasm 211,869 bytes) with drag-drop full-set replay over every published set family - opcodes, transcendentals, augmented, reductions, character sequences, formatOf, the magnitude forms - and a compute panel covering every operation of the library, the status word included | Windows 2026-09-04, node 22.19.0: `verify.mjs` replays 1,223,635 cases through `cft_conformance` and 831,635 through the wrappers themselves; two clean container builds byte-identical (page sha256 `e1b42b3873416e39…`); beside it `demos.html` (2026-09-04), the five contract workloads of docs/BENCHMARKS.md running on the same module bytes, 13 chains matched to the C tools, two builds byte-identical (sha256 `e3711319627e6828…`), live at /demos.html | ABI 0.7 on the identity line when first recorded, 0.11 since 2026-09-09 with 138 `cftw_*` exports; the program API reached the page at 0.8, and the zoom and orbits demos run on it - the ABI passages below carry each step's module hash |
-| Node / JavaScript | `bindings/node/` (package 0.11.0) | full package: the 138 `cftw_*` exports one-to-one (111 at 0.7, 116 at 0.8, 129 at 0.9), plus Context/Float scalars, batch `map`/`reduce`, every operation of clause 5 including the cross-format six and the character conversions, all thirty-nine transcendentals, the augmented pairs, every reduction, all eight forms of 9.6, the status word by its 754 names, exact-decimal I/O | Windows 2026-09-04, node 22.19.0: 125 tests; 2,055,270 cases over every set family replayed through the page's own module, the non-opcode families through the package's own methods | the same module as the page, byte for byte |
+| Browser / WASM | `bindings/wasm/` - live at https://loganw234.github.io/cft-fp256/ | the software backend compiled to WebAssembly + a single-file conformance page (works from file://, wasm 256,485 bytes) with drag-drop full-set replay over every published set family - opcodes, transcendentals, augmented, reductions, character sequences, formatOf, the magnitude forms - and a compute panel covering every operation of the library, the status word included | Windows 2026-09-04, node 22.19.0: `verify.mjs` replays 1,223,635 cases through `cft_conformance` and 831,635 through the wrappers themselves; two clean container builds byte-identical (page sha256 `e1b42b3873416e39…`); beside it `demos.html` (2026-09-04), the five contract workloads of docs/BENCHMARKS.md running on the same module bytes, 13 chains matched to the C tools, two builds byte-identical (sha256 `e3711319627e6828…`), live at /demos.html | ABI 0.7 on the identity line when first recorded, 0.14 since 2026-09-15 with 141 `cftw_*` exports; the program API reached the page at 0.8, and the zoom and orbits demos run on it - the ABI passages below carry each step's module hash |
+| Node / JavaScript | `bindings/node/` (package 0.11.0) | full package: the 141 `cftw_*` exports one-to-one (111 at 0.7, 116 at 0.8, 129 at 0.9, 138 at 0.10), plus Context/Float scalars, batch `map`/`reduce`, every operation of clause 5 including the cross-format six and the character conversions, all thirty-nine transcendentals, the augmented pairs, every reduction, all eight forms of 9.6, the status word by its 754 names, exact-decimal I/O | Windows 2026-09-04, node 22.19.0: 125 tests; 2,055,270 cases over every set family replayed through the page's own module, the non-opcode families through the package's own methods | the same module as the page, byte for byte |
 | MATLAB | - | planned (loadlibrary) | - | namechecked in cft.h; wants a licensed seat to verify honestly |
 | Java | - | planned (Panama FFI) | - | waiting for the FFI story to be the obvious one |
 
@@ -538,12 +538,12 @@ LUTs and no block RAM. The macro moved to 0.11 with the module rebuild;
 | RTL | the read-ahead: `AR_DEPTH` 4 to 16, `FIFO_LOG2` 7 to 9, `AW_DEPTH` 16 new, bursts issued at full length or not at all, a latency-modelled cocotb memory (`RD_LATENCY`/`WR_LATENCY`) that reproduces the card's 2.25 cycles a beat at a 125-cycle read latency and a 16-cycle write response; on the merged tree the full suite 69/69, the multi-cycle census 43/43, formal 31/31 with the FIFO proof still unbounded, both lints clean with no suppression added (run 20260909-074330-51140af, certified); out of context +637 LUT (+0.51%), 0 block RAM, WNS +1.196 unchanged, one implementation routed at +0.481 ns. The pair built from it (main 49a9a1b) measured 100.6 to 106.8 M beats a second a tile on the card - 1.8x revision 3's 59, 84 to 89 percent of the predicted 120 - with every check clean (docs/VALIDATION.md, the read-ahead pair's entry). |
 
 **ABI 0.12 (2026-09-12)** is the step a real workload asked for, twice.
-The asks are cft-rebound's, stated in its `docs/HARDWARE.md`; this repo's
-own list had recorded three of six until that day, so the list that is the
-input to "what next" was incomplete and a round of work went elsewhere
-first on the strength of it. Two additions answer two of them, and both
-are ADDITIVE - code written against 0.11 gets the same bits from the same
-calls.
+The asks are cft-rebound's, stated in `cft-rebound/docs/HARDWARE.md`;
+this repo's own list had recorded three of six until that day, so the
+list that is the input to "what next" was incomplete and a round of work
+went elsewhere first on the strength of it. Two additions answer two of
+them, and both are ADDITIVE - code written against 0.11 gets the same
+bits from the same calls.
 
 `CFT_MAXALL` (31) is a maximum over the array, the fifth COMPOSED
 reduction. It has no hardware on purpose: a tile handed opcode 31 as a
@@ -729,7 +729,7 @@ expected to work. A row says what was measured, not what compiles.
 
 | Host | Toolchain | What ran |
 |---|---|---|
-| Windows 11 x86_64 | mingw64 gcc 16.1 | everything: `make -C host test` over all 1,071,635 published cases, `remotetest`, `wstest`, `programs-check`, the runner's stages, and the card through XRT from WSL |
+| Windows 11 x86_64 | mingw64 gcc 16.1 | everything: `make -C host test` over all 1,068,915 published cases, `remotetest`, `wstest`, `programs-check`, the runner's stages, and the card through XRT from WSL |
 | Linux x86_64 (the box) | gcc 13.3 + XRT | the card itself - `cft-serve`, `device-test`, `cft-selftest`, `cft-resident`, the soaks; the tile numbers in docs/BENCHMARKS.md are from here |
 | macOS 26 arm64 | Apple clang 21 | the library and its gates locally (1,071,635 cases in 388 s), and the card as a remote client: `remote-test` 279 checks and `device-test -n 256` 2,658 checks, 0 failed, agreeing with the card bit for bit. **The whole published census over the network is NOT yet claimed from this host** - `cft-selftest` against a remote device stops early with an internal error on a request the server logged as answered; macOS-specific, parked, docs/VALIDATION.md has the evidence |
 | WebAssembly | emscripten, node 22 | no device; the software backend, 1,903,270 cases over 316 set replays |
@@ -752,7 +752,7 @@ so adopting the library does not mean rewriting numerics.
 
 | Drop-in | Path | Replaces / accelerates | Status |
 |---|---|---|---|
-| `cftmpfr` | `bindings/python/cftmpfr/` | MPFR-as-IEEE-emulator usage in Python (the gmpy2 pattern) at binary32/64/128/256 | working. 300,000/300,000 encodings bit-identical to gmpy2 in the demo workload, re-run 2026-09-02; 80 tests; parity claim backed by the 999,000-case MPFR oracle suite (docs/VALIDATION.md). Honest performance story in its README, dated there because it moved: div/sqrt is the tile's win, and the batch FMA phase - a 1.06x win when first recorded on 2026-08-31 - measured 0.85-0.94x at binary256 on the same host on 2026-09-02. Same calls either way |
+| `cftmpfr` | `bindings/python/cftmpfr/` | MPFR-as-IEEE-emulator usage in Python (the gmpy2 pattern) at binary32/64/128/256 | working. 300,000/300,000 encodings bit-identical to gmpy2 in the demo workload, re-run 2026-09-02; 834 tests (2026-09-04, ABI 0.7); parity claim backed by the 999,000-case MPFR oracle suite (docs/VALIDATION.md). Honest performance story in its README, dated there because it moved: div/sqrt is the tile's win, and the batch FMA phase - a 1.06x win when first recorded on 2026-08-31 - measured 0.85-0.94x at binary256 on the same host on 2026-09-02. Same calls either way |
 
 Candidates worth building when their audience shows up: a NumPy
 dtype/ufunc layer over the batch API; an mpmath context; a

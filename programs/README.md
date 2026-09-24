@@ -205,11 +205,11 @@ nothing about it, which is the point.
 
 ## What waited on another half of the round, and no longer does
 
-Both entries below were written while the halves of the 2026-09-08
-round were landing separately. Both have landed; the paragraphs are
-kept because the SHAPE of the answer - a capability the tool reports,
-a check that says SKIP and names what it waited on, never a quiet pass
-- is the part worth keeping.
+The first two entries below were written while the halves of the
+2026-09-08 round were landing separately. Both have landed; the
+paragraphs are kept because the SHAPE of the answer - a capability the
+tool reports, a check that says SKIP and names what it waited on, never
+a quiet pass - is the part worth keeping.
 
 - **The `BANK_EXT` path itself.** `cft_program_run_bank` and
   `cft_program_digest` arrived with the host half of that round, at

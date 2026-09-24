@@ -23,8 +23,9 @@ The kernel variants are one RTL with generics off (rtl/cft_krnl.sv:
 EN_FP32 / EN_FP64 / EN_FP128 / EN_FP256). prec_ok refuses the
 rungs a variant lacks and CAPS[3:0] advertises what it has, so a host
 that reads CAPS cannot be lied to. Only `cft_krnl` (all four rungs)
-is packaged today; the narrow variants need hw/package_kernel.tcl to
-take a kernel name and generics, and rebuild-2022.sh to package one .xo
+is packaged by name today; the narrow variants need hw/package_kernel.tcl
+to take a kernel name (it takes the generics through CFT_GENERICS since
+2026-09-14, which is how the fp64+fp128 tile was built, as cft_krnl), and rebuild-2022.sh to package one .xo
 per variant and take clocks per variant - the two changes that turn a
 placeholder into a build. Until then every layout naming a narrow
 variant is a PLACEHOLDER: a correct, complete link config for an .xo
@@ -91,8 +92,11 @@ BANK_LUT = {
 
 # ---- the kernel variants ----------------------------------------------
 # name -> (rungs carried, generics off, target clock in MHz, clock provenance)
-# Clocks: only the full tile has a measured in-shell figure (135 MHz,
-# single closes at +0.045 retimed; quad pending). The narrow targets
+# Clocks: a variant whose note begins "measured" has an in-shell figure
+# (the full tile, and fp64+fp128 since 2026-09-14). The full tile's 135
+# is the catalogue's recipe clock, single and quad alike; the single
+# alone has since closed 145-170 MHz on the card (docs/VALIDATION.md,
+# 2026-09-23/24), which no layout here uses yet. The other narrow targets
 # are the OOC ceilings from docs/ARCHITECTURE.md ("232 MHz fp32 / 148
 # fp256, fp64/fp128 between") less the ~0.9 ns the shell has cost in
 # practice - TARGETS TO MEASURE, not results.
@@ -107,8 +111,9 @@ VARIANTS = {
                           mhz=190, clock="target, unmeasured"),
     # The shape cft-rebound asked for (its docs/BITSTREAM.md, ask 5):
     # binary64 and binary128 with NEITHER end, expressible since
-    # 2026-09-14 when fp32 gained a generic. Its clock target is the
-    # fp128 rung's, the widest it carries.
+    # 2026-09-14 when fp32 gained a generic. Its clock target was the
+    # fp128 rung's, the widest it carries; it closed 135 in the shell
+    # (c56b368, 2026-09-14), which is the figure it carries.
     "cft_krnl_f64f128": dict(rungs=("fp64", "fp128"), generics="EN_FP32=0 EN_FP256=0",
                              mhz=135, clock="measured: single closes +0.253 kernel WNS @135 (c56b368, 2026-09-14, retimed + phys_opt; 0 of 89,576 endpoints failing, ~72.2k LUT in-shell against the 69,461 modelled)"),
 }
@@ -224,7 +229,7 @@ def render_cfg(name, mix, note) -> str:
     p("\n# One clock per variant (the platform has two kernel clocks, so at\n")
     p("# most two distinct frequencies per layout). rebuild-2022.sh passes\n")
     p("# --clock.freqHz from KERNEL_FREQ today; these are what a per-variant\n")
-    p("# flow would pass. Full tile: measured. Narrow tiles: targets.\n")
+    p("# flow would pass. Each line's note says measured or target.\n")
     p("#[clock]\n")
     for v, c in mix:
         cus = ",".join(f"{v}_{i + 1}.ap_clk" for i in range(c))
@@ -243,7 +248,11 @@ def render_table(rows) -> str:
         pc = pct(lut)
         fit = "fits" if pc <= FITS_PCT else ("tight" if pc <= LIMIT_PCT else "no")
         tiles = " + ".join(f"{c}x {SHORT[v]}-max" if v != "cft_krnl" else f"{c}x fp256 (full)" for v, c in mix)
-        clocks = " / ".join(f"{VARIANTS[v]['mhz']}{'' if v == 'cft_krnl' else '*'}" for v, _ in mix)
+        # `*` marks a target. It is read from the variant's own clock note
+        # rather than from its name: until 2026-09-24 every narrow variant
+        # was starred, and cft_krnl_f64f128 had closed 135 in the shell on
+        # 2026-09-14 while its layouts still said "target".
+        clocks = " / ".join(f"{VARIANTS[v]['mhz']}{'' if VARIANTS[v]['clock'].startswith('measured') else '*'}" for v, _ in mix)
         ok = "**✓**" if any(v == "cft_krnl" for v, _ in mix) else ""
         if all(v == "cft_krnl" for v, _ in mix):
             status = "built" if name == "u50-4xfp256" or name == "u50-1xfp256" else "placeholder"

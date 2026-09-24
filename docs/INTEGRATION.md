@@ -230,7 +230,7 @@ elements and up.
 ## Before running anything
 
 Ask, do not guess. `cft_get_caps` publishes what a device enforces:
-the formats and opcode groups, the sequencer's capacities (deposit
+the formats, the sequencer's capacities (deposit
 slots a lane, instructions, constants, scratch slots), its feature
 bits, and whether buffers can be resident. `cft_supports` answers for
 one operation and format. `cft_program_load` refuses an image that

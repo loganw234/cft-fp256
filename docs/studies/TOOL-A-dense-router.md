@@ -191,14 +191,15 @@ from openXC7 on 2026-09-23, with a `dense` branch.
 
 It starts at **3fd78784**, the pinned 0.9.6, because every measurement so
 far came from that binary, so the fork's unmodified build is the control
-(`dense/build.sh` checks it on blinky-kc705, bitstream against bitstream).
-openXC7's `main` was seven commits ahead, none in the router or placer:
-BRAM cascade placement, pad drive, FASM, and a prjxray-db bump that changes
-the chip database - a confound for every comparison, so rebasing waits
-until something here is worth sending back. Mainline's own Xilinx support
-(`himbaechel/uarch/xilinx`) is a separate implementation with its own chip
-database; moving to it would change everything at once. Its router2 is the
-source of backports, not the base.
+(`dense/build.sh` checks it on blinky-kc705, FASM against FASM - a
+bitstream carries its build time). openXC7's `main` was seven commits
+ahead, none in the router or placer: BRAM cascade placement, pad drive,
+FASM, and a prjxray-db bump that changes the chip database - a confound for
+every comparison, so rebasing waits until something here is worth sending
+back. Mainline's own Xilinx support (`himbaechel/uarch/xilinx`) is a
+separate implementation with its own chip database; moving to it would
+change everything at once. Its router2 is the source of backports, not the
+base.
 
 Every change that alters what the router does goes in behind a setting,
 off by default, until the ledger records it helping: one binary runs both

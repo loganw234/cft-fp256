@@ -20,9 +20,9 @@ disassembler, a library of named programs with a manifest, and a
 runner that takes an image and data in and deposits and a hash out.
 
 **Where it stands.** All three are built and green on the software
-backend. `programs/` holds seventeen programs with a check each, `make
+backend. `programs/` holds twenty-nine programs with a check each, `make
 programs-check` runs them and generated revision-2 and revision-3
-corpora in about twelve seconds. The `BANK_EXT` run path landed with
+corpora (in about twelve seconds when there were seventeen). The `BANK_EXT` run path landed with
 the host half of the afternoon round and passes; revision 3's own
 arithmetic - the four scratch codes, the per-run scratch block and the
 ninth constant-index bit - reached `seq.py` and libcft with the
@@ -71,6 +71,7 @@ Directives:
 | `.slot NAME = N` | a scratch-slot alias, in the same namespace |
 | `.scratch N` | the scratch depth the program assumes; 256 by default, a power of two, and a static slot at or past it is refused |
 | `.scratch in N` / `.scratch out M` | the per-run scratch block: the header's `scratch_io` word and `flags.SCRATCH_IO` |
+| `.scratch strict` | `flags.SCRATCH_STRICT` (revision 4's R8): an indexed access at or past the depth is suppressed and reported in `STATUS[5]` rather than reduced modulo it |
 
 A constant literal is one of three things, and the character that
 decides is a `p`, which is not a hexadecimal digit:
@@ -86,16 +87,15 @@ Instructions:
 - an ALU mnemonic is the opcode's `cft_op_name` (`fma`, `add`, `sub`,
   `mul`, `abs`, `neg`, `copysign`, `min`, `max`, `minnum`, `maxnum`,
   `select`, `cmplt`, `cmple`, `cmpeq`, `iand`, `ior`, `ixor`, `iadd`,
-  `isub`, `ishl`, `ishr`, `icmplt`, `imul`, `recip_seed`,
-  `rsqrt_seed`) followed by `rd` and **the operands the opcode READS**,
-  in `ra, rb, rc` field order. That is three for `fma` and `select`,
-  two for the binaries, one for the unaries - and two for `add` and
-  `sub`, which read `a` and `c` and not `b`, because the pipeline
-  steers `b` to 1 itself. `sum`, `dot`, `sumsq` and `sumabs` have
-  names in the shared opcode table and are NOT accepted: they are
-  reductions `cft_reduce` issues, the sequencer's ALU does not
-  implement them, and `opNN` below is how an image carrying one is
-  still readable back.
+  `isub`, `ishl`, `ishr`, `icmplt`, `imul`, `recip_seed`, `rsqrt_seed`)
+  followed by `rd` and **the operands the opcode READS**, in `ra, rb,
+  rc` field order. That is three for `fma` and `select`, two for the
+  binaries, one for the unaries - and two for `add` and `sub`, which
+  read `a` and `c` and not `b`, because the pipeline steers `b` to 1
+  itself. `sum`, `dot`, `sumsq`, `sumabs` and `maxall` have names in the
+  shared opcode table and are NOT accepted: they are reductions
+  `cft_reduce` issues, the sequencer's ALU does not implement them, and
+  `opNN` below is how an image carrying one is still readable back.
 - **all three fields may be written explicitly instead**, in `ra, rb,
   rc` order, when a field the opcode ignores is not zero. The loader
   tolerates that (a unary `abs` with a non-zero `rb` has always
@@ -190,8 +190,9 @@ two agree is what the byte-for-byte check proves.
     programs/
       README.md          the index: one row per program - name, format,
                          instructions, constants, deposits, features it
-                         needs (kx, REGS32, BANK_PTR, IMUL), what it
-                         computes, which tool or entry checks it
+                         needs (kx, REGS32, BANK_PTR, KX9, IMUL,
+                         SCRATCH, SCRATCH_IO), what it computes,
+                         which tool or entry checks it
       MANIFEST           sha256 of every built image, written by `make
                          programs`, checked by `make programs-check`
       <name>.cfta        the sources
@@ -200,7 +201,7 @@ two agree is what the byte-for-byte check proves.
       build.py check.py  what the two make targets run
 
 A program earns a row by having a check: something that runs it and
-compares against the model or a tool's own chain. Seventeen so far -
+compares against the model or a tool's own chain. Twenty-nine so far -
 `programs/README.md` is the index and the argument; in brief:
 
 | family | rows | its check |
@@ -214,6 +215,8 @@ compares against the model or a tool's own chain. Seventeen so far -
 | `conv-fp64` | 1 | a three-tap convolution over a local array addressed by loop counters through `stx`/`ldx`, against a softfloat model |
 | `resume-fp64` | 1 | two runs carrying state out and back in through `.scratch out` / `.scratch in`, against a single run of twice the length |
 | `horner-wide-fp64` | 1 | a degree-299 Horner over a 300-entry external bank - the ninth constant-index bit - against a softfloat Horner |
+| `divfull-<fmt>`, `sqrtfull-<fmt>` | 8 | byte-identical to the image `divfull.py` generates, and 64 raw lanes - specials included - through `positive-run --bank`, both deposits against `softfloat.div` or `softfloat.sqrt` |
+| `normalabs-<fmt>` | 4 | byte-identical to `seqprogs.normal_abs_program`, and 64 raw lanes of every class in both signs through `positive-run` against `softfloat`'s class, no flag raised |
 
 *A note on the naming.* The contract called for
 `divsqrt-<format>.cfta`. A `.cfta` file is one program and
@@ -304,8 +307,7 @@ A run reads, in full:
     counts        min 1, max 1, total 8
     flags         0x00000000  clean
     status        0x00000000
-    digest        89a66e7e3901918d...  program and bank (computed here:
-                                        this build has no cft_program_digest)
+    digest        89a66e7e3901918d...  program and bank
     sha256        6290bc41ab11a777b152c69115d5050d3b10ea5968cacd306f79420417d53ffe  deposit buffer
 
 

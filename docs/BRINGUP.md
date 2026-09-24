@@ -1,8 +1,8 @@
 # Hardware bring-up
 
-The ordered gates between "green in simulation" and "the card
-reproduces the vectors". Everything here needs the Linux box with
-Vitis/Vivado (2022.2 or later recommended for the platform below) and
+The ordered gates between "green in simulation" and "the card reproduces
+the vectors". Everything here needs the Linux box with Vitis/Vivado
+(2022.2, the era-matched release - see the tooling verdict below) and
 XRT; nothing before this file does.
 
 Record each gate the way a census is recorded: tool versions, platform
@@ -23,12 +23,13 @@ install, in this order:
 
 1. **Ubuntu release <-> Vitis release.** Vitis versions support
    specific Ubuntu point releases (2022.2 tops out at 22.04.1-era;
-   24.04 needs a newer Vitis). `lsb_release -a` first, then pick the
+   24.04 needs a newer Vitis for support, though 2022.2 runs on it with
+   two legacy libs - the tooling verdict below). `lsb_release -a` first, then pick the
    Vitis whose supported-OS table names it (UG1301 / release notes).
 2. **Vitis release <-> platform package.** The platform here
    (`*_202210_1`) is the 2022.2-generation U50 platform; later Vitis
-   releases still link against it while U50 remains in their support
-   matrix.
+   releases cannot be assumed to link against it: 2026.1 cannot (the
+   tooling verdict below).
 3. **XRT <-> platform.** Install the XRT .deb the AMD U50 download
    page pairs with the deployment platform (the `-dev` platform
    package declares its minimum XRT).
@@ -65,10 +66,13 @@ hw_manager access that stock U50s route through the PCIe shell only.
 | nvidia-box | i5-6600K 4t, 8 GB, 117 GB SSD, GTX 1080, mini-ITX, Ubuntu 24.04 | too small for v++ links (8 GB); last-resort card host - single slot means pulling the 1080, which breaks an atlas census column |
 | Windows box (MSI PRO B760-P) | Vivado 2026.1 installed with U50 part support; Above-4G decoding confirmed ACTIVE | .xo packaging + synthesis experiments today; strong card-host fallback via dual-boot Ubuntu on a spare drive |
 
-Both Linux boxes run Ubuntu 24.04, so the native Linux Vitis must be a
-24.04-capable release (2026.1, matching Windows). The open question is
+Both Linux boxes run Ubuntu 24.04, so the survey took the native Linux
+Vitis to be a 24.04-capable release (2026.1, matching Windows); the
+tooling verdict below overturned that the next day - 2026.1 cannot link
+for this platform, and 2022.2 runs bare-metal on 24.04 with two legacy
+libs. The open question was
 whether v++ 2026.1 still links against the 2022-era U50 platform
-(`*_202210_1`); if it refuses, the fallback is the link step inside an
+(`*_202210_1`); if it refused, the fallback was to be the link step inside an
 Ubuntu 22.04 Docker container carrying an older Vitis on amd-arc-box -
 the OS-pairing problem dissolves in a container.
 
@@ -220,7 +224,7 @@ So the split is:
 
 | job | where | why |
 |---|---|---|
-| `-t hw` links, timing, bitstreams | amd-arc-box | 36 threads, 46 GB - a link is ~1h50m and ~12 GB |
+| `-t hw` links, timing, bitstreams | amd-arc-box | 36 threads, 46 GB - a one-tile link is ~120-170 min and ~15 GB |
 | `-t hw_emu` and anything that runs under emulation | cft2204 (WSL, Ubuntu 22.04) | its glibc is old enough for Vivado's bundled linker |
 | kernel packaging, OOC QoR | Windows / Vivado 2026.1 | no encrypted shell IP in the picture |
 
@@ -477,7 +481,7 @@ docs/VALIDATION.md's entry "the tip quad closes at 135 MHz" is the
 record.*
 
 ```bash
-TARGETS=hw KERNEL_FREQ=100000000 bash hw/rebuild-2022.sh
+TARGETS=hw KERNEL_FREQ=135000000 RETIMING=1 PHYS_OPT=1 bash hw/rebuild-2022.sh
 ```
 
 Bitstreams banked on amd-arc-box, oldest first. The first six are
@@ -541,11 +545,12 @@ frequency table below: 145 closes and 175 misses by 0.562 ns, so
 either choice sits well inside the envelope.
 
 Build cost on amd-arc-box, measured on the four-rung design: synthesis
-18m, logic opt 3m, placement 44m, routing 18m, bitstream 25m - 1h47m
-end to end, or ~1h25m if a run only needs the timing report and stops
-after routing. One link peaks at ~12 GB, so the 31 GB box runs two
-concurrently; that is the binding constraint on any frequency sweep,
-not the 36 cores.
+18m, logic opt 3m, placement 44m, routing 18m, bitstream 25m - 1h47m end
+to end, or ~1h25m if a run only needs the timing report and stops after
+routing. One link peaked at ~12 GB then (~15 GB for the rev4 and round2 singles, a
+quad's place_design 25-30 GB), so the 46 GB box runs one heavy link at a
+time; that is the binding constraint on any frequency sweep, not the 36
+cores.
 
 ### The sequencer tile: one miss, and a pending pair (2026-09-01)
 
@@ -594,15 +599,16 @@ cat build/cft_hw.manifest.txt
 
 `hw/rebuild-2022.sh` writes one manifest per artifact carrying the
 commit, `git describe`, whether the tree was dirty, the platform,
-part, link config, kernel clock, Vivado version and the routed WNS.
+part, link config, kernel clock, Vivado version, the routed WNS and the
+kernel clock's own (`kernel_wns_ns`).
 
 The hash is the key rather than the filename, because filenames get
-copied and renamed and the tag does not stay put. **`cardday-base` is
-a moving marker**: it names the last state that passed everything, and
-it advances as the week does, because most of this design is
-verifiable without the card and there is no reason to sit on a stale
-point. That makes the tag useless for provenance by design, which is
-exactly why the manifest exists.
+copied and renamed and the tag was meant to move. **`cardday-base` was
+meant as a moving marker** - the last state that passed everything,
+advancing as the week did, because most of this design is verifiable
+without the card and there is no reason to sit on a stale point - but it
+has sat at 91728a9 (2026-08-29) ever since. Either way a tag is useless
+for provenance, which is exactly why the manifest exists.
 
 A bitstream built from a dirty tree says so, in those words. It should
 never reach the card; if it does, its results correspond to no commit
@@ -674,10 +680,11 @@ current design over a faster image of an older one.
 **Done when:** `build/cft_hw.xclbin` exists with timing met at the
 constrained clock, **for the design being taken to the card** - this
 gate is earned per design, not once and for all, which is why the
-sequencer tile has to earn it again. (v++ fails the link on a timing
-violation, so a bitstream existing IS the closure evidence; the routed
-WNS is in
-`build/_x_hw/link/vivado/vpl/prj/prj.runs/impl_1/dr_timing_summary.rpt`.)
+sequencer tile has to earn it again. (v++ fails most links that miss
+timing, but not every one - build-pair stages a negative image when
+v++ lets one through - so the closure evidence is the manifest's
+`kernel_wns_ns`, read from the last timing summary in
+`build/_x_hw/link/vivado/vpl/prj/prj.runs/impl_1/`.)
 
 ## 4. Gate: first light - **MET 2026-09-08 on the U50, both images**
 

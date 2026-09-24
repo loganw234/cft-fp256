@@ -106,9 +106,10 @@ loader took it.
 is; an image one loader accepts and the other refuses is a device
 executing something the host believed it had rejected.
 `host/tests/seq_check.py` already asks that question about valid
-programs and nine named corruptions of them; this asks it about mutated
-bytes, repaired only far enough to get past the header. That is how the
-multiplication in `seq_validate`'s worst-case bound was found to wrap.
+programs and twenty-nine named corruptions of them; this asks it about
+mutated bytes, repaired only far enough to get past the header. That is
+how the multiplication in `seq_validate`'s worst-case bound was found to
+wrap.
 
 **`fuzz_ckpt.py`** mutates each tool's own checkpoint and resumes from
 it. The contract being tested is the one the tools state: a malformed
@@ -127,7 +128,7 @@ from a state the file did not describe.
     make_seeds.py              writes corpus/{program,serve,client}
     run.sh run_ckpt.sh repro.sh leaks.sh   (run through `sh`, as
                                             verify/run.sh is: this
-                                            repository does not carry
+                                            directory does not carry
                                             the executable bit)
     corpus/<target>/           seeds, plus whatever the engine kept
     crashes/<target>/          reproducers, checked in when small

@@ -90,7 +90,7 @@ all fifteen is 280,248 bytes before and after.
 | `CFT_NO_REDUCE` | `reduce.c` | off |
 | `CFT_NO_CONFORMANCE` | `conformance.c` | off, on under `ARDUINO` |
 | `CFT_NO_REMOTE` | `backend_remote.c` | off, on under `ARDUINO` |
-| `CFT_NO_GETENV` | the two route-override environment reads | off |
+| `CFT_NO_GETENV` | the three environment reads in `divsqrt.c` and `transcend.c`: two route overrides and a test hook | off |
 
 Each module switch removes its translation unit **entirely** rather
 than leaving it for the linker's `--gc-sections`, because what does not
