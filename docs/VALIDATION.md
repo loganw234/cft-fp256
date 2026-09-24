@@ -14150,3 +14150,31 @@ once: operand FIFO B into an fp128 lane's stage-0 bypass at +0.013 and
 170 MHz was building when this was written; no prediction is offered, the
 last one having been wrong.
 
+## 2026-09-24 - the U50 single closes 170 MHz, and the whole conformance set agrees on the card
+
+The sweep's sixth point: 307872e, 170 MHz, the standard recipe, started at
+23:14 on 2026-09-23 when the 165 image's card tests were done.
+
+    build        141 min, beside four router experiments; memory floor 6 GB available
+                 (23:19: four routes and Vivado), no OOM in the kernel log
+    kernel WNS   +0.029 ns, 0 of 143,847 endpoints failing (post-route summary; the
+                 manifest agrees), again the design's worst (routed WNS 0.029)
+    verify-image PASS, 8 of 8; staged ~/cardday-u50-170, sha256 c745ef37...
+    device-test  -q -n 8 on the U50: rc 0, 2,367 checks, 0 failed
+    replay       cft-selftest vectors/out: rc 0, backend xrt, 1,068,915 cases checked,
+                 12 min 2 s
+
+**The single tile runs at 170 MHz, 25.9% above its shipping 135, and
+computes right there.** The two walls of 165 still hold the edge, and the
+ten worst paths are theirs:
+
+- the lanes' stage-0 bypass, seven of the ten: operand FIFO A into the
+  fp256 lane's at +0.029 ns (11 levels, all LUTs, 5.596 ns of data path),
+  and the rest at +0.041 to +0.046, from FIFOs A and C and from the
+  engine's opcode register into fp32, fp64, fp128 and fp256 lanes;
+- the write master's state enable, three of the ten, at +0.039 to +0.041
+  ns: 25 levels, 13 of them CARRY8, 5.743 ns of data path, reached now
+  from the engine's opcode register `op_r` rather than from `seg_r`.
+
+175 MHz, the sweep's last point, began building at 01:48.
+
