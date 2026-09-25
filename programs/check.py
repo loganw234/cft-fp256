@@ -36,15 +36,21 @@ things, in this order, and stops at the first failure:
    three ODE rows gen_odes.py writes (2026-09-25) - the generator byte
    for byte, each bank slot against the definition of the name the
    source gives it, each row's numbers against literals pinned here and
-   programs/README.md's and the source's own statements of them against
-   the image, the census, three executors bit for bit, each step
+   programs/README.md's, the source's own and gen_odes.py's docstring's
+   statements of them against the image, the census, three executors
+   bit for bit, each step
    against the textbook scheme in exact rationals, the 300-digit
-   scheme, and resumption. Every one of those but the header and the
-   executor's count in the census carries a negative control that must
-   fail, and the comment above check_ode says which. The textbook
-   arm's independence of the mirror is held by name as well: no path
-   through this file from its verdict may reach the mirror, the
-   generator or an executor (check_textbook_independence).
+   scheme, and resumption. Each of those arms but the header and the
+   census's executor count carries a negative control that must fail;
+   a control watches the comparison it names, not every clause of its
+   arm, and the comment above check_ode says which comparison each one
+   watches. The textbook arm's code is held apart from what it judges
+   as well (check_textbook_independence): within this file, no path
+   from its verdict reaches the mirror, the generator or an executor,
+   by name or as an attribute, and no definition is reached both from
+   its verdict and from them. What those two rules cannot see - code in
+   another module, a name built at run time, a copy - the comment above
+   them says.
 
 Revision 3's rows have two arms and they are not the same claim. The
 STATIC arm - constants against their derivation, the header against
@@ -1495,17 +1501,27 @@ def check_revision3_corpus(args, tmp, trials=120):
 #                control codes a step, instruction and bank counts and
 #                scratch slots against LITERALS in _ODE_PINNED. Every arm
 #                takes N and the step count from there, not from
-#                gen_odes.py. Controls: gen_odes.py's own text with its
-#                STEPS entry (and Lorenz-96's L96_N) edited, executed as
-#                a module and swapped in for gen_odes for the whole
-#                verdict - as a real edit would be - then regenerated,
-#                must be refused by name.
-#   prose        programs/README.md's row (its cells, and the numbers its
-#                text states) and the source's own comments against the
-#                IMAGE's numbers, so a change the pinned table is made to
-#                follow cannot leave either stale. Control: the README
-#                row's instruction count and the source's ALU count, each
-#                one more, must both be named.
+#                gen_odes.py. Controls: each of the image's numbers
+#                moved one on must be refused under its own key (the
+#                comparator); and gen_odes.py's own text with its STEPS
+#                entry (and Lorenz-96's L96_N) edited, executed as a
+#                module and swapped in for gen_odes for the whole verdict
+#                - as a real edit would be - then regenerated, must be
+#                refused by name (the expectations are not the
+#                generator's).
+#   prose        programs/README.md's row (its cells, and what its text
+#                states), its paragraph, the source's own comments and
+#                gen_odes.py's docstring against the IMAGE's numbers and
+#                the names of the system and the scheme, so a change the
+#                pinned table is made to follow cannot leave any of them
+#                stale (_ODE_PROSE says what is held, and what is not).
+#                Control: one number changed through each of its five
+#                readings - the row's instruction-count cell, the ALU
+#                count the row states (a digit put before it, so the
+#                phrase's bound is watched too), the state count the
+#                paragraph spells, the ALU count the comments state and
+#                the state count the docstring spells - each named where
+#                it is.
 #   static       the header: BANK_EXT, SCRATCH_IO, no deposits, the slot
 #                counts and the bank size the source declares. A read of
 #                the header, with no control.
@@ -1521,7 +1537,10 @@ def check_revision3_corpus(args, tmp, trials=120):
 #                bit - so it is a second transcription by the same hand,
 #                not an independent reference: an error made in both
 #                places passes this arm. Control: a source with one
-#                instruction's operands swapped.
+#                instruction's operands swapped, run by the golden
+#                executor, must not match ode_step. (The claim's other
+#                half, the library's executor against the golden one, has
+#                no control of its own.)
 #   textbook     the program's first two steps, each from the state the
 #                program itself began it with, against the TEXTBOOK step
 #                in exact rationals: the vector field in its textbook
@@ -1538,14 +1557,18 @@ def check_revision3_corpus(args, tmp, trials=120):
 #                against ode_step carrying it, bit for bit, from this
 #                arm's states over two steps: the error really is
 #                shared) and fall outside the textbook bound. Re-point
-#                the textbook arm at ode_step and these go red; that it
-#                has not been is also held by name (the tripwire, below).
+#                the textbook arm at ode_step and these go red. Its code
+#                is held apart from theirs as well, by two rules over
+#                this file's syntax (check_textbook_independence: no path
+#                to them by name, no definition shared under any name),
+#                whose own comment says what they cannot see.
 #   scheme       ode_step at 300 digits from the same encodings: over
 #                the whole segment the program is within round-off of
 #                its own scheme, and not equal to it (the round-off is
 #                really there). The same transcription as identity, so
 #                not independent either. Control: ode_step with a wrong
-#                weight or kick must exceed the ceiling.
+#                weight or kick must exceed the ceiling. Without mpmath
+#                neither runs, and each is named as skipped.
 #   resume       two segments chained through the scratch block are one
 #                segment of twice the steps. Controls, through the same
 #                code path as the claim: the second segment entered with
@@ -1557,7 +1580,11 @@ def check_revision3_corpus(args, tmp, trials=120):
 #                no segment boundary carries - one ulp in one or two
 #                lanes, so only a comparison of every lane, bit for bit,
 #                against a long run built independently of the chained
-#                one refuses it.
+#                one refuses it. That difference can vanish when the
+#                lanes, steps or states change, and then the golden
+#                executor's own runs decide whether the message blames
+#                the resume arm or the control (the comment at the
+#                control says how).
 
 ODE_ROWS = ("lorenz63-rk4", "lorenz96-rk4", "henonheiles-lf")
 
@@ -1642,6 +1669,15 @@ def _ode_measure(img):
             "features": img.features()}
 
 
+# The pinned comparator's control: each number _ode_measure reads that the
+# comparator holds, and the key its problem must be led by.
+_PINNED_MOVES = (("nstate", "nstate"), ("nstate_out", "nstate"),
+                 ("steps", "steps"), ("alu", "alu"), ("ctl", "ctl"),
+                 ("insns", "insns"), ("consts", "consts"),
+                 ("slots", "slots"), ("loops", "loops"),
+                 ("deepest", "loops"))
+
+
 def _ode_pinned_problems(base, m):
     """[problem] - an image's numbers `m` (_ode_measure) against
     _ODE_PINNED, each problem led by the key it is about."""
@@ -1702,24 +1738,40 @@ def _as_gen_odes(mod):
 
 # ---- the prose arm -------------------------------------------------------
 #
-# What programs/README.md and each source's own comments say of a row,
-# as templates filled from the IMAGE's numbers and this file's lane
-# counts; each must appear word for word (whitespace aside), or the arm
-# names it. "row" is the image's README row - its what and check cells,
-# an "as above" read as the cell above; "readme" is anywhere in it; and
-# "source" is the source's comment lines, run together. The README row's
-# format, insns, consts, deposits and needs cells are held besides.
+# What programs/README.md, each source's own comments and gen_odes.py's
+# docstring say of a row, as templates filled from the IMAGE's numbers,
+# this file's lane counts and the bank's derivations. Each must appear as
+# written - whitespace aside, and not as the tail or the head of a longer
+# number or word (_phrase_re: "153 ALU" does not say "53 ALU") - or the
+# arm names it. "row" is the image's README row, its what and check cells,
+# an "as above" read as the cell above; "readme" is anywhere in the
+# README; "source" is the source's comment lines run together, so that a
+# re-wrapped comment reads the same; "generator" is gen_odes.py's
+# docstring. The row's format, insns, consts, deposits and needs cells
+# are held besides. Beside the numbers the templates hold each text's
+# names for the system, its year and the scheme, which the textbook arm
+# holds the program to. Every other word is NOT held: the equations as
+# the comments write them, the scratch layout and the bank's comments in
+# a source, the README paragraph's account of the arms, what a row says
+# of its controls, and an "as `lorenz63-rk4`" cell (Henon-Heiles's lanes
+# and states are not read from its row at all).
 _ODE_PROSE = {
     "lorenz63-rk4": {
-        "row": ("a segment of {steps} classic Runge-Kutta steps",
+        "row": ("a segment of {steps} classic Runge-Kutta steps of Lorenz "
+                "1963",
                 "{alu} ALU instructions a step and {ctl_text} but the "
                 "loop's ENDREP",
                 "own count of a step - {per_step}, the ENDREP included",
                 "bit for bit over {lanes} lanes",
                 "the first two steps from {states} states"),
         "readme": ("emit them: {word} state values or",),
-        "source": ("a step is {alu} ALU instructions and {ctl_text} but "
-                   "the loop's own ENDREP",),
+        "source": ("Lorenz (1963):",
+                   "stepped by the classic fourth-order Runge-Kutta scheme",
+                   "a step is {alu} ALU instructions and {ctl_text} but "
+                   "the loop's own ENDREP"),
+        "generator": ("Lorenz (1963), sigma {SIGMA}, rho {RHO}, beta {BETA} "
+                      "by default, the classic fourth-order Runge-Kutta "
+                      "step; {word} state values",),
     },
     "lorenz96-rk4": {
         "row": ("{steps} Runge-Kutta steps of Lorenz 1996 on a ring of "
@@ -1731,16 +1783,26 @@ _ODE_PROSE = {
                 "the executor counting {per_step:,} a step"),
         "readme": ("step is all arithmetic; {word} do not,",),
         "source": ("Lorenz (1996) on a ring of N = {nstate}:",
+                   "Stepped by the same Runge-Kutta scheme as lorenz63-rk4",
                    "{Word} values do not fit thirty-two registers",
                    "- {slots} slots.",
                    "A step is {alu} ALU instructions, {ctl} scratch "
                    "accesses and the loop's ENDREP"),
+        "generator": ("Lorenz (1996) with N = {nstate} and forcing F = {F} "
+                      "by default, the same Runge-Kutta step; {word} state "
+                      "values, which do not fit thirty-two registers",),
     },
     "henonheiles-lf": {
-        "row": ("{steps} Stormer-Verlet steps of Henon-Heiles",
+        "row": ("{steps} Stormer-Verlet steps of Henon-Heiles, "
+                "drift-kick-drift",
                 "{alu} ALU instructions a step"),
         "readme": ("state values or {word} fit the registers",),
-        "source": ("a step is {alu} ALU instructions.",),
+        "source": ("Henon-Heiles (1964):",
+                   "stepped by Stormer-Verlet, drift-kick-drift:",
+                   "a step is {alu} ALU instructions."),
+        "generator": ("Henon-Heiles (1964), Stormer-Verlet in its "
+                      "drift-kick-drift form; {word} state values in "
+                      "registers",),
     },
 }
 
@@ -1768,6 +1830,26 @@ def _comment_text(src):
                     if line.strip().startswith(";"))
 
 
+def _generator_doc():
+    """gen_odes.py's docstring, read from its source (python -OO drops
+    __doc__, and a check must not change its verdict with a flag)."""
+    return ast.get_docstring(ast.parse((HERE / "gen_odes.py").read_text(
+        encoding="utf-8"))) or ""
+
+
+def _phrase_re(phrase):
+    """`phrase` as a pattern: its words in order, any whitespace between
+    them, and not the tail or the head of a longer number or word - so
+    "153 ALU" and "1100 Stormer-Verlet" do not say "53 ALU" and "100
+    Stormer-Verlet"."""
+    pat = r"\s+".join(re.escape(w) for w in phrase.split())
+    if re.match(r"\w", phrase):
+        pat = r"(?<![\w.,])" + pat
+    if re.search(r"\w$", phrase):
+        pat += r"(?!\w)"
+    return re.compile(pat)
+
+
 def _readme_rows(text):
     """{program: [its rows' cells]} for every row of programs/README.md's
     index, whitespace collapsed and an "as above" cell read as the one
@@ -1788,18 +1870,20 @@ def _readme_rows(text):
     return rows
 
 
-def _ode_prose_problems(base, name, fmtname, m, src, readme, lanes,
-                        states):
-    """[problem] - programs/README.md's row for `name`, and the source's
-    own comments, against the image's numbers `m` (_ode_measure) and this
-    file's lane counts. Each problem is led by where it is."""
+def _ode_prose_problems(base, name, fmtname, m, texts, lanes, states):
+    """[problem] - programs/README.md's row for `name`, the source's own
+    comments and gen_odes.py's docstring (`texts`: "readme" as written,
+    "source" run together by _comment_text, "generator") against the
+    image's numbers `m` (_ode_measure), this file's lane counts and the
+    bank's derivations. Each problem is led by where it is."""
     words = _number_word(m["nstate"])
     fill = dict(m, per_step=m["alu"] + m["ctl"] + 1, lanes=lanes,
                 states=states, word=words, Word=words.capitalize(),
                 ctl_text=("no control code" if m["ctl"] == 0 else
-                          f"{m['ctl']} control codes"))
+                          f"{m['ctl']} control codes"),
+                **{c: str(v) for c, v in _bank_derivations(base).items()})
     problems = []
-    rows = _readme_rows(readme).get(name, [])
+    rows = _readme_rows(texts["readme"]).get(name, [])
     if len(rows) != 1:
         problems.append(f"readme: programs/README.md has {len(rows)} rows "
                         f"for {name}, not one")
@@ -1815,19 +1899,16 @@ def _ode_prose_problems(base, name, fmtname, m, src, readme, lanes,
                 problems.append(f"readme {label}: the row says {have!r}, "
                                 f"the image {w!r}")
         text = " ".join(cells[6:])
-        for t in _ODE_PROSE[base]["row"]:
-            if t.format(**fill) not in text:
+        for tpl in _ODE_PROSE[base]["row"]:
+            if not _phrase_re(tpl.format(**fill)).search(text):
                 problems.append(f"readme: the row does not say "
-                                f"{t.format(**fill)!r}")
-    flat = " ".join(readme.split())
-    for t in _ODE_PROSE[base]["readme"]:
-        if t.format(**fill) not in flat:
-            problems.append(f"readme: it does not say {t.format(**fill)!r}")
-    comments = _comment_text(src)
-    for t in _ODE_PROSE[base]["source"]:
-        if t.format(**fill) not in comments:
-            problems.append(f"source: its comments do not say "
-                            f"{t.format(**fill)!r}")
+                                f"{tpl.format(**fill)!r}")
+    for where, what in (("readme", "it does not say"),
+                        ("source", "its comments do not say"),
+                        ("generator", "its docstring does not say")):
+        for tpl in _ODE_PROSE[base][where]:
+            if not _phrase_re(tpl.format(**fill)).search(texts[where]):
+                problems.append(f"{where}: {what} {tpl.format(**fill)!r}")
     return problems
 
 
@@ -2437,22 +2518,41 @@ def _tb_verdict(base, fmt, P, h, nstate, s_tb, runs):
     return worst, max(r.k for lane in refs1 for r in lane)
 
 
-# ---- the textbook arm's independence, by name ----------------------------
+# ---- the textbook arm's independence, by its code's structure -----------
 #
-# HonestFramework METHOD section 1: "the authority's module must not
-# import anything from the implementations. That is one grep, and it
-# belongs in the gate." For the ODE rows the textbook step is the
-# authority and the implementations are the mirror, the generator and
-# the program's executors. So: from the functions that compute the
-# textbook verdict, follow every name they use - through every function,
-# class and constant of this file those use in turn - and none may be one
-# of these. The shared-error controls in check_ode catch the same
-# refactor by behaviour; this names it by its path, and it also sees a
-# route those cannot - the generator's own default output taken as the
-# reference. It is a tripwire for a refactor, not a proof: a COPY of the
-# mirror under a new name, or a name reached through globals() or
-# getattr, passes it as it passes the behavioural controls. Only review
-# guards against that.
+# HonestFramework METHOD section 1: the authority "must not share code
+# with the thing it judges", and "the authority's module must not import
+# anything from the implementations. That is one grep, and it belongs in
+# the gate." For the ODE rows the textbook step is the authority, and the
+# implementations are the mirror, the generator and the program's
+# executors. Two rules, over this file's own source read as a syntax tree:
+#
+#   named   from the functions that compute the textbook verdict
+#           (_TB_ROOTS), follow every name they load - through every
+#           function, class and constant of this file those load in turn -
+#           and none may be one of _TB_FORBIDDEN, loaded as a name or read
+#           as an attribute of anything (`ode_step`, `module.ode_step`).
+#   shared  no definition in this file may be reached both from those
+#           roots and from the implementations' own - the _TB_FORBIDDEN
+#           names this file defines - whatever it is called. On
+#           2026-09-25 verifier-V5 put Lorenz-63's right-hand side into
+#           one helper for ode_step and _tb_lorenz63, wrote y' = x (z -
+#           rho) - y into it and into the generator, and the whole gate
+#           passed with the first rule green: a new name is on no list.
+#           This rule refuses such a helper with the error in it or not,
+#           and whatever it does - one that only slices lanes counts too,
+#           since a mistake in it is made on both sides at once. Write
+#           such a thing twice.
+#
+# The shared-error controls in check_ode catch the arm computing through
+# the mirror by what it computes; these name it by the code's shape, and
+# see what those cannot - a helper that carries an error the controls do
+# not, or the generator's own default output taken as the reference. What
+# neither rule sees: code outside this file (a helper in another module
+# that both import, the generator's source, the golden model's); a name
+# built at run time (globals()[...], getattr with a string); a COPY of the
+# mirror's code under new names; and whether check_ode's claim calls
+# _tb_verdict at all (verifier-V5's O16). Only review guards against those.
 _TB_ROOTS = ("_tb_verdict", "_tb_refs", "_tb_worst", "_tb_params")
 _TB_FORBIDDEN = frozenset((
     # the mirror of the program's rounding order, and its switches
@@ -2464,21 +2564,50 @@ _TB_FORBIDDEN = frozenset((
     "asm", "seq", "run_image", "model_run", "_patch_trip", "_tb_runs",
     "mpmath"))
 
-# The tripwire's control: _tb_step re-pointed at ode_step through a
-# helper, which the same walk must name, path and all.
-_TB_PROBE = '''
+# The rules' controls: each a small module whose definitions replace this
+# file's own before the same walk, the rule that must refuse it, and what
+# the walk must then report. Each replaces _tb_step, which _tb_refs calls,
+# rather than anything deeper in the arm, so that a control still applies
+# when the arm's insides change - verifier-V5's O2a is the third, in
+# miniature. A probe that replaces a definition this file no longer has is
+# named stale, not run.
+_TB_PROBES = (
+    ("_tb_step re-pointed at ode_step through a helper", "named",
+     ("_tb_step", "_tb_probe_hop", "ode_step"), """
 def _tb_step(base, P, h, Y):
     return _tb_probe_hop(base, Y)
 
 
 def _tb_probe_hop(base, Y):
     return ode_step(base, None, None, Y, 1)
-'''
+"""),
+    ("_tb_step computing through a second instance of this module "
+     "(verifier-V5's O1)", "named", ("_tb_step", ".ode_step"), """
+def _tb_step(base, P, h, Y):
+    import importlib
+    return importlib.import_module("check").ode_step(base, None, None, Y,
+                                                     1)
+"""),
+    ("one helper for the textbook step and ode_step alike (verifier-V5's "
+     "O2a)", "shared", ("_tb_probe_rhs",), """
+def _tb_step(base, P, h, Y):
+    return _tb_probe_rhs(None, P, Y)
+
+
+def ode_step(base, o, K, s, steps, detuned=False):
+    return _tb_probe_rhs(o, K, s)
+
+
+def _tb_probe_rhs(o, P, Y):
+    return Y
+"""),
+)
 
 
 def _defs_and_uses(tree):
-    """{name defined at the top of a module: every name loaded anywhere
-    inside its definition}, for functions, classes and assignments."""
+    """{name defined at the top of a module: what its definition reads}
+    for functions, classes and assignments - every name loaded anywhere
+    inside it, and every attribute read there as ".attr"."""
     uses = {}
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
@@ -2491,16 +2620,21 @@ def _defs_and_uses(tree):
             targets = [node.target.id]
         else:
             continue
-        loads = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)
-                 and isinstance(n.ctx, ast.Load)}
+        reads = set()
+        for n in ast.walk(node):
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
+                reads.add(n.id)
+            elif isinstance(n, ast.Attribute):
+                reads.add("." + n.attr)
         for t in targets:
-            uses.setdefault(t, set()).update(loads)
+            uses.setdefault(t, set()).update(reads)
     return uses
 
 
 def _reaching(uses, roots, forbidden):
-    """-> ({forbidden name: the path of names that reaches it}, how many
-    names were followed, [root that is not defined])."""
+    """-> ({forbidden name: the path of names that reaches it}, the set of
+    definitions followed, [root that is not defined]). A forbidden name
+    is found loaded, or read as an attribute (".ode_step")."""
     missing = [r for r in roots if r not in uses]
     hits, seen = {}, set()
     stack = [(r, (r,)) for r in reversed(roots) if r in uses]
@@ -2510,42 +2644,96 @@ def _reaching(uses, roots, forbidden):
             continue
         seen.add(name)
         for used in sorted(uses[name], reverse=True):
-            if used in forbidden:
-                hits.setdefault(used, path + (used,))
+            bare = used[1:] if used[:1] == "." else used
+            if bare in forbidden:
+                hits.setdefault(bare, path + (used,))
             elif used in uses and used not in seen:
                 stack.append((used, path + (used,)))
-    return hits, len(seen), missing
+    return hits, seen, missing
+
+
+def _tb_independence(uses):
+    """Both rules over `uses` (_defs_and_uses) -> ([roots not defined],
+    {forbidden name: path}, [definitions reached from the verdict AND
+    from the implementations], how many the verdict reaches, the
+    implementations' roots)."""
+    hits, tb_seen, missing = _reaching(uses, _TB_ROOTS, _TB_FORBIDDEN)
+    impl = sorted(n for n in _TB_FORBIDDEN if n in uses)
+    _hits, impl_seen, _missing = _reaching(uses, impl, frozenset())
+    return missing, hits, sorted(tb_seen & impl_seen), len(tb_seen), impl
+
+
+def _golden_unresumed(image, bank, s_in, n, nstate, steps):
+    """[lanes] where two segments of `image` chained through the golden
+    executor end differently from one segment of twice the steps - the
+    resume arm's question asked without segment() or resumes(), to tell a
+    comparison gone blind from a control that has lost its difference."""
+    z = [0] * n
+    prog = seq.Program.from_bytes(image)
+    twice = seq.Program.from_bytes(_patch_trip(image, steps, 2 * steps,
+                                               0).to_bytes())
+    first = seq.run(prog, z, z, None, bank=bank, scratch_in=s_in)
+    two = seq.run(prog, z, z, None, bank=bank,
+                  scratch_in=first.scratch_out).scratch_out
+    one = seq.run(twice, z, z, None, bank=bank, scratch_in=s_in).scratch_out
+    return [i for i in range(n) if two[i * nstate:(i + 1) * nstate] !=
+            one[i * nstate:(i + 1) * nstate]]
 
 
 def check_textbook_independence():
-    """The tripwire above, over this file's own source, and its control."""
+    """The two rules above, over this file's own source, and their
+    controls."""
     uses = _defs_and_uses(ast.parse(Path(__file__).read_text(
         encoding="utf-8")))
-    hits, followed, missing = _reaching(uses, _TB_ROOTS, _TB_FORBIDDEN)
-    if missing:
+    missing, hits, shared, followed, impl = _tb_independence(uses)
+    if missing or not impl:
         bad("textbook arm: independence",
-            f"check.py defines no {', '.join(missing)} - the tripwire's "
-            f"roots are stale, so it would check nothing")
+            f"check.py defines no {', '.join(missing or ['implementation'])}"
+            f" - the rules' roots are stale, so they would check nothing")
         return
-    if hits:
-        bad("textbook arm: independence",
-            "the textbook verdict reaches " +
-            "; ".join(" -> ".join(p) for p in hits.values()))
+    if hits or shared:
+        bad("textbook arm: independence", "; ".join(
+            [f"the textbook verdict reaches {' -> '.join(p)}"
+             for p in hits.values()] +
+            [f"{', '.join(shared)}: reached both from the textbook verdict "
+             f"and from the implementations - code the authority shares "
+             f"with what it judges"] * bool(shared)))
         return
     ok(f"textbook arm: from {', '.join(_TB_ROOTS)}, no path through "
        f"check.py reaches the mirror, the generator or an executor of the "
-       f"program", f"{followed} names followed")
-    probed = dict(uses)
-    probed.update(_defs_and_uses(ast.parse(_TB_PROBE)))
-    hits2, _n, _m = _reaching(probed, _TB_ROOTS, _TB_FORBIDDEN)
-    path = hits2.get("ode_step", ())
-    if path[-3:] != ("_tb_step", "_tb_probe_hop", "ode_step"):
-        bad("textbook arm: NEGATIVE CONTROL FAILED TO FAIL",
-            f"_tb_step re-pointed at ode_step through a helper was not "
-            f"named (it found {hits2 or 'nothing'})")
-        return
-    ok("textbook arm: NEGATIVE CONTROL - _tb_step re-pointed at ode_step "
-       "through a helper is named", " -> ".join(path))
+       f"program, as a name or an attribute", f"{followed} definitions "
+       f"followed")
+    ok(f"textbook arm: none of those {followed} definitions is reached from "
+       f"the implementations' {len(impl)} roots as well - no code shared "
+       f"under any name")
+    for what, rule, want, probe in _TB_PROBES:
+        replaced = _defs_and_uses(ast.parse(probe))
+        stale = [d for d in replaced
+                 if not d.startswith("_tb_probe") and d not in uses]
+        if stale:
+            bad("textbook arm: control", f"{what}: it replaces "
+                f"{', '.join(stale)}, which check.py no longer defines - "
+                f"the probe is stale; rewrite it against the arm as it is")
+            return
+        probed = dict(uses)
+        probed.update(replaced)
+        _m, hits2, shared2, _n, _i = _tb_independence(probed)
+        if rule == "named":
+            got = hits2.get(want[-1].lstrip("."), ())
+            caught = got[-len(want):] == want
+            said = " -> ".join(got)
+        else:
+            caught = shared2 == list(want)
+            said = f"shared: {', '.join(shared2)}"
+        if not caught:
+            bad("textbook arm: NEGATIVE CONTROL FAILED TO FAIL",
+                f"{what} was not refused by the {rule} rule (it found "
+                f"{hits2 or 'no path'} and shared {shared2 or 'nothing'}; "
+                f"if _tb_refs no longer calls _tb_step, the probe is what "
+                f"needs rewriting)")
+            return
+        ok(f"textbook arm: NEGATIVE CONTROL - {what} is refused by the "
+           f"{rule} rule", said)
 
 
 def check_ode(args, name, image, image_path, tmp):
@@ -2639,6 +2827,21 @@ def check_ode(args, name, image, image_path, tmp):
        f"{m['insns']} instructions, {m['consts']} bank values, "
        f"{m['slots']} scratch slots - as pinned here, not as gen_odes.py "
        f"says")
+    # The comparator, number by number: each of the image's numbers moved
+    # one on must be refused, and under its own key. (verifier-V5's O11:
+    # a comparator cut down to the state size and the steps passed every
+    # control below, which move only those two.)
+    moved = [(field, key) for field, key in _PINNED_MOVES
+             if [p.split(":")[0] for p in _ode_pinned_problems(
+                 base, dict(m, **{field: m[field] + 1}))] != [key]]
+    if moved:
+        bad(f"{name}: NEGATIVE CONTROL FAILED TO FAIL",
+            "moved one on, " + ", ".join(f"{f}" for f, _k in moved) +
+            " went unrefused, or refused under another key")
+        return
+    ok(f"{name}: NEGATIVE CONTROL - each of the image's "
+       f"{len(_PINNED_MOVES)} pinned numbers, moved one on, is refused "
+       f"under its own key")
     for old, new, key in _PINNED_EDITS[base]:
         try:
             mod = _gen_odes_edited(old, new)
@@ -2659,54 +2862,67 @@ def check_ode(args, name, image, image_path, tmp):
         ok(f"{name}: NEGATIVE CONTROL - gen_odes.py with `{new}` in place "
            f"of `{old}`, regenerated, is refused", "; ".join(mine))
 
-    # -- prose: the README's row and the source's comments, against the image
-    readme = (HERE / "README.md").read_text(encoding="utf-8")
-    problems = _ode_prose_problems(base, name, fmtname, m, src, readme, n,
-                                   n_tb)
+    # -- prose: the README's row, the source's comments and the generator's
+    # docstring, against the image
+    texts = {"readme": (HERE / "README.md").read_text(encoding="utf-8"),
+             "source": _comment_text(src), "generator": _generator_doc()}
+    problems = _ode_prose_problems(base, name, fmtname, m, texts, n, n_tb)
     if problems:
         bad(f"{name}: prose", "; ".join(problems))
         return
     said = sum(len(v) for v in _ODE_PROSE[base].values())
-    ok(f"{name}: programs/README.md's row and the source's own comments "
-       f"state the image's numbers", f"5 cells and {said} phrases")
-    # The control: one number of each kind the arm reads, one off - the
-    # row's instruction-count cell, the ALU count its text states, the
-    # state count the paragraph spells, and the ALU count the source's
-    # comments state - and each must be named where it is.
-    para = _ODE_PROSE[base]["readme"][0]
+    ok(f"{name}: programs/README.md's row, the source's own comments and "
+       f"gen_odes.py's docstring state the image's numbers",
+       f"5 cells and {said} phrases")
+    # The control: one number changed through each of the arm's five
+    # readings, and each must be named where it is - the row's
+    # instruction-count cell moved one on; the ALU count the row's text
+    # states with a digit put before it ("153 ALU" for "53 ALU"), which
+    # also watches that a phrase is not found inside a longer number
+    # (verifier-V5's O5); and one on, the state count the README's
+    # paragraph spells, the ALU count the source's comments state (run
+    # together, as the claim reads them, so that a re-wrapped comment is
+    # moved the same way - its O5h) and the state count the generator's
+    # docstring spells. The trailing bound (_phrase_re) has no control
+    # of its own; of the templates, only "of Lorenz 1963" ends in a
+    # number.
     words = _number_word(m["nstate"])
     wrong = _number_word(m["nstate"] + 1)
+    para = _ODE_PROSE[base]["readme"][0]
+    gdoc = _ODE_PROSE[base]["generator"][0].format(
+        **{c: str(v) for c, v in _bank_derivations(base).items()},
+        nstate=m["nstate"], word="{word}")
     edits = (
         ("readme", f"| `{name}` | {fmtname} | {m['insns']:,} |",
          f"| `{name}` | {fmtname} | {m['insns'] + 1:,} |", "readme insns:"),
         ("readme", f"{m['alu']} ALU instructions",
-         f"{m['alu'] + 1} ALU instructions", "readme: the row does not say"),
+         f"1{m['alu']} ALU instructions", "readme: the row does not say"),
         ("readme", para.format(word=words), para.format(word=wrong),
          "readme: it does not say"),
         ("source", f"is {m['alu']} ALU", f"is {m['alu'] + 1} ALU",
-         "source: its comments do not say"))
-    texts = {"readme": readme, "source": src}
+         "source: its comments do not say"),
+        ("generator", gdoc.format(word=words), gdoc.format(word=wrong),
+         "generator: its docstring does not say"))
+    moved = dict(texts)
     for where, was, now, _named in edits:
-        # whitespace as the arm reads it: a re-wrapped line still matches
-        pat = r"\s+".join(re.escape(w) for w in was.split())
-        if len(re.findall(pat, texts[where])) != 1:
+        pat = _phrase_re(was)
+        if was == now or len(pat.findall(moved[where])) != 1:
             bad(f"{name}: control", f"`{was}` is not in the {where} once, "
                                     f"so the prose control cannot move it")
             return
-        texts[where] = re.sub(pat, lambda _m, now=now: now, texts[where],
-                              count=1)
-    why = _ode_prose_problems(base, name, fmtname, m, texts["source"],
-                              texts["readme"], n, n_tb)
+        moved[where] = pat.sub(lambda _m, now=now: now, moved[where], 1)
+    why = _ode_prose_problems(base, name, fmtname, m, moved, n, n_tb)
     unnamed = [was for _w, was, _n, named in edits
                if not any(p.startswith(named) for p in why)]
     if unnamed:
         bad(f"{name}: NEGATIVE CONTROL FAILED TO FAIL",
-            f"with each moved one on, {'; '.join(unnamed)} went unnamed "
+            f"with each changed, {'; '.join(unnamed)} went unnamed "
             f"(it named: {'; '.join(why) or 'nothing'})")
         return
-    ok(f"{name}: NEGATIVE CONTROL - the README row's instruction count and "
-       f"ALU count, the paragraph's state count and the source's ALU "
-       f"count, each one on, are each named", f"{len(why)} problems")
+    ok(f"{name}: NEGATIVE CONTROL - the row's instruction count one on "
+       f"and its ALU count with a digit before it, and the paragraph's "
+       f"state count, the source's ALU count and the generator's state "
+       f"count each one on, are each named", f"{len(why)} problems")
 
     # -- static --------------------------------------------------------------
     feats = set(img.features())
@@ -2861,7 +3077,13 @@ def check_ode(args, name, image, image_path, tmp):
 
     # -- scheme ----------------------------------------------------------------------
     if mpmath is None:
-        skip(f"{name}: the 300-digit scheme", "python has no mpmath module")
+        # Two checks do not run - the claim and its control - and each is
+        # named, one SKIP line apiece, which is what verify/run.sh counts
+        # as an inner skip. (One line stood for both until 2026-09-25:
+        # "6 inner skips" over 12 checks that had not run - verifier-V4.)
+        for what in ("the 300-digit scheme", "the 300-digit scheme's "
+                     "negative control (a weight or a kick changed)"):
+            skip(f"{name}: {what}", "python has no mpmath module")
     else:
         mp = mpmath.mp
         saved = mp.dps
@@ -2972,9 +3194,19 @@ def check_ode(args, name, image, image_path, tmp):
     ok(f"{name}: NEGATIVE CONTROL - the second segment entered with the "
        f"original state instead is not the long run")
     # A program that is right step by step and still cannot be resumed.
-    # Measured 2026-09-25: its chained run differs from its long one by
-    # one ulp in one component - lane 5 of 8 at fp64, lanes 0 and 4 at
-    # fp256 - so the claim's comparison must read every lane, bit for bit.
+    # Its difference is small - measured 2026-09-25, one ulp in one
+    # component, lane 5 of 8 at fp64 and lanes 0 and 4 of 8 at fp256 - so
+    # the claim's comparison must read every lane, bit for bit. And it can
+    # VANISH: with 4 lanes no lane differs at fp64, nor at either format
+    # with 4 lanes and 150-step segments (verifier-V5's sweep), so a
+    # change to _ODE_LANES, the steps or ode_initial can take it away, and
+    # this control then goes red though the resume arm is sound - a false
+    # alarm, loud. So when the resume arm's comparison does not refuse
+    # it, the golden executor, asked the same question without segment()
+    # or resumes(), tells the two apart: if its chained and long runs
+    # differ, the comparison has gone blind; if they do not, the control
+    # has lost its difference, and the message says that. The witness
+    # chooses the message; the run is red either way.
     for mutant, what in gen_odes.UNRESUMABLE.get(base, {}).items():
         kimg = asm.assemble_image(gen_odes.GENERATORS[base](
             fmtname, mutant=mutant), f"{name}-{mutant}")
@@ -2998,9 +3230,21 @@ def check_ode(args, name, image, image_path, tmp):
             return
         (kgood, kdiffer), _one = got
         if kgood or not kdiffer:
-            bad(f"{name}: NEGATIVE CONTROL FAILED TO FAIL",
-                f"{what}: two chained segments are still one segment of "
-                f"{2 * steps} steps")
+            gl = _golden_unresumed(kbytes, K, s_in, n, nstate, steps)
+            if gl:
+                bad(f"{name}: NEGATIVE CONTROL FAILED TO FAIL",
+                    f"{what}: the resume arm's comparison did not refuse "
+                    f"it, yet the golden executor's chained and long runs "
+                    f"differ in lane(s) {gl} of {n} - the comparison has "
+                    f"gone blind")
+            else:
+                bad(f"{name}: control {mutant}",
+                    f"{what}: its difference is gone - no lane of {n} "
+                    f"differs, in the golden executor's runs either. This "
+                    f"says nothing against the resume arm: the lanes, the "
+                    f"{steps}-step segments or ode_initial's states it was "
+                    f"measured at have changed; restore them, or find a "
+                    f"setting where it differs and pin that")
             return
         ok(f"{name}: NEGATIVE CONTROL - {what}: the textbook arm passes it "
            f"({float(kw):.3g} of the bound) and the resume arm refuses it",
@@ -3210,8 +3454,8 @@ def main():
     check_manifest_refusals(tmp)
     check_gen_odes(tmp)
 
-    print("\n-- the ODE rows' textbook arm, independent of the mirror by "
-          "name --")
+    print("\n-- the ODE rows' textbook arm, held apart from the mirror, the "
+          "generator and the executors --")
     check_textbook_independence()
 
     print("\n-- the revision-2 corpus, in both languages --")
