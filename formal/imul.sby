@@ -1,14 +1,15 @@
-# Formal gate for cft_simpleops' IMUL - see tb_imul_formal.sv for the
-# properties and the scope statement (one rung, EXP_W=11/MAN_W=52; the
-# VALUE is the `value` task, which is NOT in the gate and is the
-# bench's job until it closes).
+# Formal harness for cft_simpleops' IMUL - see tb_imul_formal.sv for the
+# properties and the scope statement (one rung, EXP_W=11/MAN_W=52). NOT
+# IN THE GATE: neither the `check` task nor the `value` task has
+# returned (formal/run.sh has the times), so both are the benches' job
+# until one closes.
 #
 # The module is combinational, so bmc here is not a bounded compromise:
 # every step quantifies over the full input space and no state carries
 # between steps. Depth 2 is one step of margin over the one that
 # already covers everything.
 #
-#   sby -f imul.sby check    the proof formal/run.sh runs
+#   sby -f imul.sby check    the decode and width proof; out of the gate
 #   sby -f imul.sby cover    the decode's corners are satisfiable
 #   sby -f imul.sby value    the truncated-32x32 miter; does not close
 #

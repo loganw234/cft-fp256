@@ -79,7 +79,7 @@
 //                        [11] predicate   select/cmplt/cmple/cmpeq
 //                        [12] integer     the eight bitwise/integer
 //                        [13] reduction   sum (dot via the host)
-//                        [14] divide/sqrt reserved
+//                        [14] divide/sqrt the seed opcodes 26/27
 //                        [15] sequencer   MODE[15] runs a program
 //                 Bit 15 was labelled "conversion - reserved" and is
 //                 now the sequencer's, because conversion will never
@@ -102,8 +102,11 @@
 //                             lane owns 32 registers (2026-09-08)
 //                         [6] BANK_PTR - the per-run constant bank
 //                             at 0x64/0x68 (2026-09-08)
-//                         [7] reserved; assignments are made at the
-//                             seq_feat port below and nowhere else
+//                         [7] KX9 - a ninth constant-index bit under
+//                             kx, so the bank reaches 512 (revision 3,
+//                             2026-09-08). The nibble is full;
+//                             assignments are made at the seq_feat
+//                             port below and nowhere else
 //                 [19:16] log2 of the deposit slots a lane (MAXD)
 //                 [23:20] log2 of the instruction capacity (IMEM_D)
 //                 [27:24] log2 of the constants an instruction can
@@ -127,7 +130,7 @@
 //                 guards the map.
 //   0x50  STATUS  RO: sticky faults from the last run, cleared by
 //                 hardware at an accepted ap_start. A run that ends
-//                 with STATUS non-zero either computed on data the
+//                 with STATUS[3:0] non-zero either computed on data the
 //                 memory system did not vouch for or never computed at
 //                 all; its D buffer must not be trusted either way:
 //                 [0] a read response was not OKAY
@@ -135,14 +138,18 @@
 //                 [2] a read burst delivered the wrong beat count
 //                 [3] the run was REFUSED, for either of two reasons:
 //                     MODE selected a precision this build does not
-//                     implement (or a code above 3) - the engine never
+//                     implement (or a code above 3), or something else
+//                     this build refuses at start (a MODE bit the guard
+//                     below turns away, or a sequencer run on a beat
+//                     narrower than 256) - the engine never
 //                     started and no memory was touched at all; or a
 //                     SEQUENCER run's program image failed the
 //                     hardware's own header check (bad magic, a format
 //                     that is not MODE's, more instructions, constants
 //                     or deposit slots than the tile holds, a header
 //                     `flags` bit this tile does not implement, or a
-//                     non-zero reserved[1] - the last two are checked
+//                     non-zero reserved[1] (scratch_io since revision
+//                     3) without flags.SCRATCH_IO - the last two are checked
 //                     from revision 2 and were not before, which is
 //                     what makes an image built for a LATER revision
 //                     thrown back rather than half-understood). That
@@ -163,6 +170,12 @@
 //                     an IEEE flag. The five in FLAGS mean what 754
 //                     says they mean and "your buffer was too small"
 //                     is not one of them.
+//                 [5] SCRATCH RANGE on a sequencer run (revision 4's
+//                     R8): a program whose header sets
+//                     flags.SCRATCH_STRICT (CAPS2[6]) made an indexed
+//                     scratch access at or past SCRATCH_D, and the
+//                     access was suppressed rather than reduced modulo
+//                     the depth. A report like [4], not an IEEE flag.
 //   0x54  PROG_PTR 64-bit HBM byte address of the program image
 //                 (header, constants, instructions - see
 //                 docs/SEQUENCER.md), 32-byte aligned. Read by the
@@ -197,7 +210,17 @@
 //                 [5]    the scratch I/O block exists: the header's
 //                        flags.SCRATCH_IO is understood and the two
 //                        pointers below are read
-//                 [31:6] reserved, zero - room for the capacities and
+//                 [6]    SCRATCH_STRICT: revision 4's R8 - an indexed
+//                        access at or past the depth is reported
+//                        (STATUS[5]) under flags.SCRATCH_STRICT
+//                 [7]    SCALAR: MODE[18:16] are honoured (2026-09-12)
+//                 [8]    REDUCE_SEG: SEG/NRES at 0x80/0x84, and opcode
+//                        31 a reduction (2026-09-14)
+//                 [9]    INDEXED: the tables at 0x88..0xA0 are read
+//                        under MODE[22:19] (2026-09-15)
+//                 [10]   LANE_MASK: the mask at 0xA8 is read under
+//                        MODE[23] (2026-09-15)
+//                 [31:11] reserved, zero - room for the capacities and
 //                        features that come next, so the NEXT one
 //                        does not move the map again
 //                 A log2 field of zero would have to mean "one slot",
@@ -319,10 +342,12 @@ module cft_csr (
     input  logic [3:0]  seq_feat,    // constant; CAPS[7:4]
     // CAPS2 (0x6C), the second capability word: [3:0] log2 of the
     // scratch slots a lane, [4] a scratch exists, [5] its per-run
-    // block exists, [31:6] reserved. Assembled by cft_krnl from the
-    // same localparams cft_seq elaborates its scratch from, so the
-    // register cannot drift from the memory it describes without the
-    // elaboration changing too.
+    // block exists, [6] SCRATCH_STRICT, [7] SCALAR, [8] REDUCE_SEG,
+    // [9] INDEXED, [10] LANE_MASK, [31:11] reserved (the port is
+    // sixteen bits; the read pads the top half). The scratch fields
+    // are assembled by cft_krnl from the same localparams cft_seq
+    // elaborates its scratch from, so the register cannot drift from
+    // the memory it describes without the elaboration changing too.
     input  logic [15:0] caps2,
     // The sequencer's on-chip capacities, as LOG2, from the very
     // parameters cft_krnl hands cft_seq - so CAPS cannot drift from
@@ -384,9 +409,10 @@ module cft_csr (
     output logic [31:0] cfg_seg,
     output logic [31:0] cfg_nres,
     // ABI 0.14 (docs/ROUND2.md): the four index-table pointers and the
-    // lane-mask pointer, 0x88..0xA8. Registers only at this version -
-    // the MODE bits that would select them are refused (cfg_mode_bad)
-    // until the parcels that read them set CAPS2[9] and [10].
+    // lane-mask pointer, 0x88..0xA8. Read by cft_seq since 2026-09-15,
+    // when the parcels that read them set CAPS2[9] and [10]; on a
+    // build whose FEAT_INDEXED or FEAT_LANE_MASK is clear, the MODE
+    // bits that would select them are refused (cfg_mode_bad).
     output logic [63:0] cfg_idx_a, cfg_idx_b, cfg_idx_c, cfg_idx_si,
     output logic [63:0] cfg_mask
 );
@@ -447,12 +473,13 @@ module cft_csr (
   // feature: five registers exist at 0x88..0xAF as kernel arguments
   // 12..16 - four index-table pointers and a lane-mask pointer - so
   // that the two parcels that will read them share one map. Nothing
-  // reads them at this version: the MODE bits that would are still
-  // refused by the guard below, and CAPS2[9] and [10] are zero until
-  // each parcel sets its own. A host that wrote a table pointer to a
-  // 0x900 tile would write into a decode default, which is the whole
-  // of why VERSION moves. The host accepts {0x410, 0x500, 0x600,
-  // 0x700, 0x800, 0x900, 0xA00}.
+  // read them at the seam: the MODE bits that would were refused by
+  // the guard below, and CAPS2[9] and [10] stayed zero until each
+  // parcel set its own - both on 2026-09-15, and at this same
+  // version, because a feature bit does not move VERSION. A host
+  // that wrote a table pointer to a 0x900 tile would write into a
+  // decode default, which is the whole of why VERSION moves. The
+  // host accepts {0x410, 0x500, 0x600, 0x700, 0x800, 0x900, 0xA00}.
   localparam [31:0] VERSION = 32'h0000_0A00;
 
   logic ap_start_q, ap_done_q, ap_idle;
@@ -493,7 +520,7 @@ module cft_csr (
    * never ignored: an ignored stride-0 flag reads n elements from a
    * one-element buffer, and an ignored index table reads the dense
    * stream and answers from the wrong elements with clean flags.
-   * [31:23] is reserved on every build; [22:16] is refused unless the
+   * [31:24] is reserved on every build; [23:16] is refused unless the
    * feature parameter says this tile carries it.
    *
    * Written as an OR of named terms rather than a mask compare, for the

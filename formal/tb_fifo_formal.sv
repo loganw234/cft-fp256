@@ -33,7 +33,8 @@
 //     argument: every word is the watched word.
 //
 // HONEST SCOPE: the proof runs at WIDTH=8, DEPTH_LOG2=3 (DEPTH 8),
-// not at the deployed 256x32. The module is parameterized and nothing
+// not at the deployed 256x512 stream FIFOs (FIFO_LOG2 = 9) or the
+// 256x64 partial queue. The module is parameterized and nothing
 // in it branches on the parameter values, but a proof at one size is
 // a proof at one size: the properties are proven for this instance
 // and argued, not proven, for the rest. Small is still complete in

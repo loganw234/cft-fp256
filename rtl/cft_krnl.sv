@@ -79,13 +79,15 @@ module cft_krnl #(
     // against ladders-off's +0.307, with the critical path moving to
     // the ladder's own LZC-fed shift, and out-of-context slack does not
     // survive the shell. The tile fits either way - 123,599 LUT with
-    // them, 139,404 without, about 75% and 80% of the device for a quad
-    // - so the five points of area are not worth a bitstream that does
+    // them, 139,404 without, about 75% and 82.5% of the device for a
+    // quad (docs/ROADMAP.md, with the quad's differenced interconnect)
+    // - so the seven points of area are not worth a bitstream that does
     // not close. Turn them on for a slower clock or a smaller part
-    // (the open-core target, where footprint is the objective);
-    // hw/package_kernel.tcl strips user parameters, so a bitstream can
-    // only carry these defaults. Both self-gate on the full-tile
-    // geometry, so a quarter tile ignores them either way.
+    // (the open-core target, where footprint is the objective); a
+    // bitstream carries these defaults unless CFT_GENERICS overrides
+    // one at packaging (hw/package_kernel.tcl, since 2026-09-14 -
+    // before that it stripped every user parameter). Both self-gate
+    // on the full-tile geometry, so a quarter tile ignores them either way.
     // A command-line override of a 1-bit parameter is a 32-bit literal
     // on Verilator's side (-GFUSE_NORM=1), and the truncation it warns
     // about is the intended one: the value is 0 or 1 and nothing
@@ -109,9 +111,10 @@ module cft_krnl #(
     // ---- the streaming engine's read-ahead -----------------------------
     //
     // The tile's rate against a real memory, and the ONLY place the
-    // shipping numbers are written down: hw/package_kernel.tcl strips
-    // user parameters, so a bitstream carries these defaults and
-    // nothing else. rtl/cft_engine_stream.sv's header has the
+    // shipping numbers are written down: a bitstream carries these
+    // defaults unless CFT_GENERICS overrides one at packaging
+    // (hw/package_kernel.tcl, since 2026-09-14 - before that it
+    // stripped every user parameter). rtl/cft_engine_stream.sv's header has the
     // measurement that set them - 2.25 cycles a beat on the U50 at
     // AR_DEPTH 4, which is 64 beats in flight against a round trip of
     // about 146 cycles.
@@ -288,14 +291,15 @@ module cft_krnl #(
    * Published from the localparam the engine is built with. */
   localparam bit FEAT_REDUCE_SEG = 1'b1;
   logic [31:0] cfg_seg, cfg_nres;
-  /* ABI 0.14 (docs/ROUND2.md, P0): the registers exist at 0x88..0xA8
-   * and nothing reads them yet. CAPS2[9] (INDEXED) is set by the parcel
-   * that teaches cft_seq to fetch a stream or the scratch block through
-   * its table (P1) and CAPS2[10] (LANE_MASK) by the one that teaches
-   * the block setup and the drains the mask (P3), each from the
+  /* ABI 0.14 (docs/ROUND2.md, P0): the registers exist at 0x88..0xA8.
+   * CAPS2[9] (INDEXED) was set by the parcel that taught cft_seq to
+   * fetch a stream or the scratch block through its table (P1) and
+   * CAPS2[10] (LANE_MASK) by the one that taught the block setup and
+   * the drains the mask (P3), both 2026-09-15, each from the
    * localparam its RTL is built with, so a tile cannot advertise a bit
-   * it would turn away - and until then the CSR refuses the MODE bits
-   * that would select them, as it refuses every bit of MODE[31:19]. */
+   * it would turn away - and a build that clears one has the CSR
+   * refuse the MODE bits that would select it, as it refuses every
+   * bit of MODE[31:24]. */
   localparam bit FEAT_INDEXED   = 1'b1;
   localparam bit FEAT_LANE_MASK = 1'b1;
   logic [63:0] cfg_idx_a, cfg_idx_b, cfg_idx_c, cfg_idx_si;
