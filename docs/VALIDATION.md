@@ -14561,3 +14561,125 @@ grant or rule (below).
   Git Bash's `/tmp` mount (enter it by its `/c/` path).
 - `hw/gen_layouts.py` still builds the single at 135, though 175 closed
   with the second recipe.
+
+## 2026-09-25 - corrections to the two entries above, and nine notes their verifiers left, made true
+
+**Why.** The round those two entries record was written up for
+ParcelRound as a case study (loganw234/ParcelRound, `CASE-STUDY-3.md`),
+from the lead's and the agents' transcripts, the workflow journals, the
+two ledgers and git, and checked by verifiers against them. It found
+that each entry says things the record does not support, and that nine
+notes the round's verifiers had left beside their verdicts were never
+acted on. The entries above are not edited; this one corrects them, and
+records the nine fixes (0ae1c5e).
+
+**Corrections to "the documents swept against the tree" (0aede0f).**
+
+- "all 53 tracked `.md` files in full": the auditors covered 52 tracked
+  `.md` files and `keywords.txt`; six of them were read in part, by
+  scope (ROUND2.md below its outcome box and five studies), and this
+  file was out of scope by design.
+- Round 2's input, "the critic's 12": the critic wrote twelve findings;
+  ten were routed to round 2's triage (CR-05 was made true by the
+  Makefile's `seqcycles` forward, CR-12 was about an HTML template and
+  became follow-up 2), so round 2 triaged 324 items - not 326, as
+  f6cf3bc's message has it.
+- "432 corrections ..., each verified": 85 of them, the review
+  workflow's fixes, were written by the reviewers and applied without a
+  second agent checking them, and one (ATLAS.md:335, a twin of a round-3
+  fix) was the lead's alone.
+- "a brief said `docs/BITSTREAM.md` does not exist": one of six wrong
+  premises the auditors reported in their briefs. The others: PLATFORMS.md
+  described as the platform results (it is a survey of boards to buy,
+  borrow or rent), LAYOUTS.md as generated end to end (only between its
+  markers), COMPATIBILITY.md as having per-surface columns (it has
+  none), `keywords.txt`'s names as living in `cft.h` (eight live in
+  `cft_replay.h` and `cft_config.h`), and openXC7 "sections" that were
+  dated notes.
+- Left out of its account of the lead's own errors: two overrides
+  (E-18, E-19) that put back the construction their verifier had
+  removed - an assumed clock written as measured; seven applied edits
+  that left a neighbouring sentence contradicted which the finding's own
+  verifier had pointed to; a verifier's wrong staging date (J-10)
+  accepted; and a round-2 launch that crashed because its work list was
+  passed as a placeholder string. The review workflow caught all but the
+  last, which the harness caught.
+
+**Corrections to "the sweep's four follow-ups" (987ee41).**
+
+- "`CFT_NO_PROGRAM`, `CFT_TINY` and the tiny128 board profile did not
+  build, and nothing built them": `make embedded` builds tiny and
+  tiny128 (bindings/arduino/verify.sh, a gate docs/VERIFICATION.md
+  names). What was true is that no runner stage or CI job builds them,
+  and `make embedded` has no recorded run in this file since 2026-09-09.
+- "It found a real overwrite", of `make -C host profiles-check`: P6's
+  scratch compile of each switch on its own found it, before
+  profiles-check covered single switches; the lead's grant then made
+  profiles-check compile every switch and assert the refusal.
+- "*A silent drop, found at the seam.*": P2 found it (its ledger, 17:59:
+  the WebSocket replay skipped the imul cases with `if (op === null)
+  continue`), and P7 named the same line. The lead's seam made it a
+  named failure, watched failing before P2's change.
+- The comment checker's two wrong versions, "the parcels found both": a
+  parcel (P1-rtl) found the first; the P1 verifiers found the second's
+  holes - statement-leading strings in Python, a Makefile comment's
+  continuation, pragma comments stripped like prose.
+- "Each comment parcel's diff was proved comment-only": P1-rtl's,
+  P1-host's and P1b's comment edits were; P1b's two granted generator
+  changes and the vendored manifest were proved separately, and P2's
+  comment fixes, in files that also carried granted code or that the
+  checker cannot read, were checked by its verifier by inspection.
+- "each re-check found nothing further": all six returned MERGE with no
+  defect, but three noted things beside the verdict - a false comment in
+  `device.c` (fixed by P1b in wave 2), an overclaim in P7's own fix and a
+  silent skip in `remote_test.c`, and an imprecision in EMBEDDED.md. The
+  last three are fixed below.
+- Not carried forward from the sweep's own open list: NOVEL.md entry 4's
+  rule does not fit the fp32 column, and its source (UG579) was not
+  checked. It is still open.
+
+**The nine notes, made true (0ae1c5e).** Every one was checked against
+the source before it was changed.
+
+    docker/Dockerfile.vitis2022   the key-obsolescence pointer is BRINGUP's TOOLING
+                                  VERDICT (2026-08-29), not gate 3; the image is that
+                                  verdict's fallback to bare metal
+    tb/Makefile (krnlfused)       package_kernel.tcl stripped user parameters until
+                                  2026-09-14; CFT_GENERICS reaches the bitstream since
+    formal/tb_imul_formal.sv      opcode 31 is maxall, a reduction cft_simpleops traps,
+                                  not "unassigned"; the RTL value no longer rests on the
+                                  C-versus-model differential, which tests the C library
+    formal/imul.sby               the `check` task has never returned; not "the proof"
+    docs/EMBEDDED.md              what profiles-check compiles alone, and what only in
+                                  combination (CFT_MAX_FORMAT, CFT_BN_LIMBS); ARDUINO added
+    verify/test-inner-skips.sh    the stray check's comment says which NOT-word shapes
+                                  its pattern refuses, not "any without ' - <why>'"
+    host/tests/remote_test.c      a segmented reduction the server does not serve was a
+                                  bare `continue`; now "<format> <op>, segmented: NOT
+                                  COMPARED - not on the server", listed in verify/README.md
+    bindings/node/conformance.mjs a passing set's report printed nothing, so a case the
+    bindings/wasm/verify.mjs      replay skipped inside it reached no log; its skip lines
+                                  are printed on a pass now, in the form the runner counts
+
+**Measurements.**
+
+    bash verify/run.sh --only docs,formal,remote,node,wasm
+      (0ae1c5e, the desktop, 06:56-07:56)  PASS, nothing skipped, 0 inner skip(s): formal
+                                           31 of 31 with its negative control refuted;
+                                           remote-test 424 checks, 0 failures, and the
+                                           WebSocket leg 68; node 137 passed and
+                                           1,224,915 cases over 168 sets; wasm VERIFY OK
+    bash verify/test-inner-skips.sh        PASS: 32 checks, four controls, 15 pins; the
+                                           one form held in remote_test.c, new line included
+    remote_test.c, watched to fire         maxall forced absent in a copy: "fp32 maxall,
+                                           segmented: NOT COMPARED - not on the server" at
+                                           all four formats, 412 checks, 0 failures, and
+                                           nothing the runner's scan counts
+    the JS replays, watched to fire        the three skip-line shapes conformance.c writes
+                                           print through the new filter and the summary
+                                           line does not; the runner's scan counts 3 of 3
+    comment_only.py (32-case self-test)    formal/imul.sby, formal/tb_imul_formal.sv,
+                                           tb/Makefile and verify/test-inner-skips.sh
+                                           comment-only; the Dockerfile changed in '#'
+                                           lines only; code in exactly the three files
+    python python/check_docs_index.py      rc 0; sync.py --check: 30 files identical
