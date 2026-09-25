@@ -55,6 +55,11 @@ export const OP_RECIP_SEED = 26, OP_RSQRT_SEED = 27;
 // makes - DOT over (a, a), and an ABS pass then SUM - with one row of
 // their own, 9.4's infinity ahead of NaN.
 export const OP_SUMSQ = 28, OP_SUMABS = 29;
+// Appended on 2026-09-07, on the same terms: the integer group's
+// multiply, the low 32 bits of a 32 x 32 product zero-extended to the
+// format width (cft.h). Elementwise through cft_run like IADD; a
+// device without CAPS[28] (ALU_EXT_IMUL) answers cft_supports() no.
+export const OP_IMUL = 30;
 // Appended by ABI 0.12, on the same terms. A maximum over the array, and the
 // fifth reduction the library COMPOSES rather than issues: a tile handed 31 as
 // a reduction would decode it as elementwise and write n elements where the
@@ -161,13 +166,15 @@ export const SEQ_FEAT_SCRATCH_IO = 0x200;  // CAPS2[5]: its per-run block
 // package printed as `bit10`, `bit11`, `bit13` and `bit14` until
 // 2026-09-18 (atlas-engine's card day read them off a card that way),
 // and a fifth, CAPS2[8], which printed as `bit12` until 2026-09-24.
-// They are NOT in audit(): the module at this build exports no
-// projection for them, and a call to an export that is not there
-// returns undefined rather than throwing. What holds them instead is
-// test.mjs, which reads every CFT_SEQ_FEAT_*, CFT_ALU_EXT_* and
+// They are NOT in audit(): the module exports no projection for them -
+// bindings/wasm/wasm_api.c projects the seven above and no others, so
+// rebuilding the module does not add them (it was rebuilt on
+// 2026-09-24 and still has seven) - and a call to an export that is not
+// there returns undefined rather than throwing. What holds them instead
+// is test.mjs, which reads every CFT_SEQ_FEAT_*, CFT_ALU_EXT_* and
 // CFT_FEAT_* value out of host/include/cft.h and requires this table to
 // be exactly that set - declared once and checked, the second grade,
-// until the module is next rebuilt and they join the seven above.
+// until wasm_api.c projects them and they join the seven above.
 export const SEQ_FEAT_SCRATCH_STRICT = 0x400;  // CAPS2[6]: R8's range report
 // CAPS2[7]: this handle takes a scalar operand of mapEx - a tile with the
 // bit, and the software backend always (it publishes the bit since
@@ -783,6 +790,7 @@ const OPS_BY_NAME = {
   sum: OP_SUM, dot: OP_DOT,
   recip_seed: OP_RECIP_SEED, rsqrt_seed: OP_RSQRT_SEED,
   sumsq: OP_SUMSQ, sumabs: OP_SUMABS,
+  imul: OP_IMUL,
   maxall: OP_MAXALL,
 };
 export { OPS_BY_NAME };

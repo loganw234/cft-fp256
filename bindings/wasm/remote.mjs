@@ -981,9 +981,9 @@ export class CftRemote {
  *  not by total length: the first 56 bytes are the block as first
  *  shipped, bytes 56..71 are the sequencer capacities cft_caps gained
  *  at ABI 0.8 (max_deposits, max_insns, max_consts, seq_features -
- *  host/src/remote.h), and they read as zero, meaning unknown, from a
- *  server that predates them. A server that appends further stays
- *  readable here. */
+ *  host/src/remote.h), bytes 72..75 are ABI 0.10's max_scratch, and
+ *  each reads as zero, meaning unknown, from a server that predates
+ *  it. A server that appends further stays readable here. */
 export function parseCaps(p) {
   if (p.length < CAPS_BYTES)
     throw new FrameError(`HELLO answered with ${p.length} bytes, not the ` +

@@ -160,10 +160,12 @@
   <p class="dim" style="margin:0 0 .6rem">
     Drop one of <code>vectors/out</code>'s opcode sets
     (<code>fp64.jsonl</code>, <code>fp256-rdn.jsonl</code>, &hellip;) here.
-    Every case is replayed on the server and compared with BOTH the local
-    module's answer and the golden model's published one, which is the
-    same three-way comparison <code>bindings/node/remote_test.mjs</code>
-    makes headless.
+    Every case whose opcode this page has a number for is replayed on the
+    server and compared with BOTH the local module's answer and the golden
+    model's published one, which is the same three-way comparison
+    <code>bindings/node/remote_test.mjs</code> makes headless. A line it
+    has no number for (<code>imul</code>'s, today) is not replayed; the
+    report counts those as skipped.
   </p>
   <div class="row">
     <input id="file" type="file" accept=".jsonl">

@@ -23,12 +23,18 @@
 //      demos_core.js and reports on demos.html. Without this line the
 //      two could drift and the report would be about the wrong file.
 //
-//   3  THE CHAINS, three ways. For each of the eleven configurations:
+//   3  THE CHAINS, three ways. For each of the thirteen configurations:
 //      run the NATIVE tool with the flags the page prints, run the
 //      browser's compute core over the committed wasm module, and
 //      compare both against the chain recorded in demos_chains.json.
 //      All three must agree. --no-native drops the tool run (and says
 //      so); --record writes the file instead of checking it.
+//
+//   4  THE PROGRAM ENGINE. Each zoom and orbits configuration the
+//      sequencer can hold is run again with the program engine: its
+//      chains must equal the loop engine's, and every program image it
+//      loads must be the C tool's image, byte for byte (section 4
+//      below says why both).
 //
 // The native tools are the reference for every bit. If the core and a
 // tool disagree, the core is wrong until shown otherwise.

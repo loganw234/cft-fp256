@@ -10,7 +10,8 @@
 #                     browser can check the contract without cloning
 #                     anything.
 #   demos.html        the five contract workloads of docs/BENCHMARKS.md,
-#                     each panel a port of one C tool's loop engine,
+#                     each panel a port of one C tool's loop engine
+#                     (zoom's and orbits' of the program engine too),
 #                     each chain printed beside the chain the native
 #                     tool produced (docs/DEMOS.md).
 #

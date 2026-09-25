@@ -4,8 +4,9 @@
 #
 # Build bindings/wasm/demos.html: the five contract workloads of
 # docs/BENCHMARKS.md, each panel a faithful port of its C tool's
-# `--engine loop` path, running on THE SAME wasm module the
-# conformance page embeds - assembled into ONE self-contained HTML
+# `--engine loop` path (zoom's and orbits' of their `--engine program`
+# path too), running on THE SAME wasm module the conformance page
+# embeds - assembled into ONE self-contained HTML
 # file that runs from file:// with no server, no CDN and no network.
 #
 #     bash bindings/wasm/build_demos.sh
@@ -18,8 +19,8 @@
 # WHAT THIS BUILD DOES NOT DO: it does not touch conformance.html, it
 # does not regenerate the vector sets, and it does not produce a new
 # wasm module. bindings/node/cft_node.wasm is a committed build
-# product whose sha256 is quoted by the conformance page and by three
-# documents; stage 2 recompiles the module only so that the SINGLE_FILE
+# product that the conformance page embeds and whose sha256 three
+# documents quote; stage 2 recompiles the module only so that the SINGLE_FILE
 # loader exists, and stage 3 REFUSES to assemble a page whose embedded
 # bytes are not byte-identical to that committed module. If emcc ever
 # stops being reproducible, this build fails loudly instead of shipping

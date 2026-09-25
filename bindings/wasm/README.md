@@ -140,7 +140,10 @@ the override it warns and proceeds. Stages:
    deliberately flipped, so anyone can watch the page fail. The
    corrupted expectation, the red verdict and the library's verbatim
    disagreement report are the proof that this checker *can* fail;
-   a checker never seen failing proves nothing;
+   a checker never seen failing proves nothing. Without a browser,
+   `node bindings/wasm/verify.mjs --page
+   bindings/wasm/build/negative_control.html` fails it at step 3b, by
+   name;
 5. the same module once more with `-sENVIRONMENT=node` →
    `build/cft_node.js` + `.wasm`, and into `bindings/node/` when that
    package is present. `-sENVIRONMENT` changes the loader and not the
@@ -219,6 +222,17 @@ the build directory:
 3. checks the node loader's `.wasm` is the same module by sha256,
    because a replay through a lookalike would prove nothing about
    the page;
+
+   3b. replays the page's **embedded sample** the way its section 2
+   does on load - each of the twenty sampled opcode sets in its own
+   MEMFS directory, one `cft_conformance()` call per set on the page's
+   own bytes, stopping at the first failure - and holds the case count
+   to the one the page's provenance prints. The steps around it read
+   the module and the vector files, never the sample, so before
+   2026-09-24 the build's negative control (`build/negative_control.html`,
+   one expected value flipped in that sample) passed all of them; it
+   fails here by name, and `node bindings/wasm/verify.mjs --page
+   bindings/wasm/build/negative_control.html` is how to watch it;
 4. hands the extracted bytes to the node loader as
    `Module.wasmBinary` and replays the full sets through
    `cft_conformance()` over MEMFS - the page's own bytes, the
@@ -800,7 +814,8 @@ page_template.html   the page, with four @CFT_*@ splice tokens open
 make_page.py         sampling rule + page assembly (+ --corrupt)
 conformance.html     THE DELIVERABLE - committed build product
 verify.mjs           the browserless check of that build product:
-                     identity, module hash, the 168-set vector replay,
+                     identity, module hash, the page's own embedded
+                     sample, the 168-set vector replay,
                      and every non-opcode operation driven through its
                      own wrapper. Its NEEDED list is the export gate -
                      a module can carry every entry point but one and
@@ -923,8 +938,8 @@ which is exactly why the module still had to be rebuilt - `verify.mjs`
 holds the shipped module's `cftw_abi_version()` to `CFT_ABI_VERSION_MINOR`
 and the remote protocol refuses a frame whose ABI word differs at all.
 
-What was committed at 0.11, measured on the files themselves (the 0.14
-block below supersedes it):
+What was committed at 0.11, measured on the files themselves (the
+2026-09-24 block below supersedes it):
 
     bindings/node/cft_node.wasm      225,354 bytes  sha256 29cce150ec46676b...
     bindings/wasm/conformance.html 1,356,544 bytes  sha256 698b9b975b770ae5...
@@ -960,6 +975,56 @@ export, the JavaScript and the module had to land in ONE commit, which
 they did. The page's calculator does not drive the tables - that is
 `mapEx` in Node, and the panel is a later step.
 
+### Rebuilt on 2026-09-24, no ABI step - the software handle's answers reach the module
+
+Still ABI 0.14 on both sides, which is why nothing refused the old
+module: the three capability answers made true that day
+(docs/COMPATIBILITY.md) changed what the library ANSWERS, not an entry
+point or the version word. The committed module had last been rebuilt
+on 2026-09-15 (`b558a56`), and its software handle reported
+`seq_features` 0x271f and `cftw_supports(dev, 30, fmt)` = 0 at every
+format (measured in node 22). It computed SCALAR, REDUCE_SEG and IMUL
+without publishing them: a scalar operand of `mapEx`, `reduceSeg` and
+opcode 30 return the rebuilt module's bits at all four formats
+(IMUL's CAPS[28] bit, `0x10`, was in its word; `cftw_supports`
+answered 0). It reported LANE_MASK clear truthfully because it did not
+yet implement it: at `b558a56` `cft_program_run_ex` refused every
+well-formed lane mask by name on every backend (`CFT_ERR_UNSUPPORTED`,
+"not yet built on any backend", which that tree's own api-test
+asserts), and the mask arrived later that day with `69f3df2`, which is
+not an ancestor of `b558a56`. Rebuilt with `build.sh`, it reports
+**0x7f1f** and 1, and `bindings/node/test.mjs` now holds both:
+against the old module that test fails by name,
+`missing [SCALAR REDUCE_SEG LANE_MASK]` and `cftw_supports(dev, 30
+imul) = 0` at all four formats.
+
+What is committed now, measured on the files themselves:
+
+    bindings/node/cft_node.wasm      257,252 bytes  sha256 3737534db4d44304...
+    bindings/node/cft_node.js         74,146 bytes  sha256 dc845833acf075cb...  (unchanged)
+    bindings/wasm/conformance.html 1,389,485 bytes  sha256 87294879d63993d1...
+    bindings/wasm/demos.html         575,555 bytes  sha256 5ce2fc2b34f22c1e...
+
+still 141 `cftw_*` exports. Two clean container builds, with
+`bindings/wasm/build/` removed between them, produced all four
+byte for byte, and the build's two negative-control pages as well.
+The conformance page's markup moved too, on purpose: its prose was
+audited against the tree - the drop section's family breakdown (236,000
+opcode and 10,240 reduction cases, which now sum to the 1,068,915 it
+heads), the reserved list (`reserved15/255`, shed five times), the six
+families the sample leaves out, the sequencer's export, and the
+provenance line, which said the module was "embedded as base64" where
+emcc 6.0.9 embeds it as a string literal. `demos_chains.json` was
+re-recorded with `verify_demos.mjs --record`: of its seventeen
+sha256-shaped values fifteen came back identical - the fifteen chains,
+which are every chain it holds - and the two that moved are the module
+stamp and the compute core's, the core's because three of its comments
+were corrected. The program images are not in that file: they are
+`verify_demos.mjs`'s `PROGRAM_IMAGES` constants, unchanged, which its
+fourth check (the demos stage) holds every program-engine run's loaded
+images to byte for byte. `verify.mjs` gained step 3b, the embedded
+sample, above.
+
 ## A second page: the five workloads, measured (2026-09-04)
 
 `demos.html` is the other deliverable of this directory. Same
@@ -973,8 +1038,9 @@ was measured.
 ```
 demos_template.html  the page, with six @CFT_*@ splice tokens open
 demos_core.js        the compute core: five panels, each a port of one
-                     tool's --engine loop path. A PLAIN SCRIPT, so the
-                     page's Worker and node run the same bytes.
+                     tool's --engine loop path (zoom's and orbits' of
+                     its --engine program path too). A PLAIN SCRIPT, so
+                     the page's Worker and node run the same bytes.
 demos_worker.js      the driver - Worker, or main thread where a
                      browser refuses a blob: Worker from file://
 demos_chains.json    what the NATIVE tools printed: 13 configurations,

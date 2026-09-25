@@ -14,7 +14,8 @@
 // ===================================================================
 // THE RULE THIS FILE KEEPS
 //
-// Every panel below is a port of ONE C tool's `--engine loop` path:
+// Every panel below is a port of ONE C tool's `--engine loop` path,
+// and the zoom and orbits panels of its `--engine program` path too:
 // the same operation sequence, the same rounding attributes, the same
 // flag handling, the same record text, the same SHA-256 chain over it.
 // Nothing numeric is computed here. Every result bit is what a cftw_*
@@ -46,7 +47,7 @@
   //
   // K[i] and H0[i] are the fractional parts of the cube and square
   // roots of the first sixty-four primes. The C tools compute them
-  // (collatz.c's root_frac32, over a 128-bit power); so does this,
+  // (host/src/sha256.c's root_frac32, over a 128-bit power); so does this,
   // over BigInt, rather than carrying sixty-four hand-typed words that
   // nothing would check.
   // =================================================================
@@ -2978,7 +2979,7 @@
     return ENCLOSE_BASE.dotTop - 2 * mw - f32.emin;
   }
 
-  /** Every (panel, run) pair, flattened - the eleven configurations the
+  /** Every (panel, run) pair, flattened - the thirteen configurations the
    *  page computes and verify_demos.mjs checks against the tools. */
   function allRuns() {
     const out = [];

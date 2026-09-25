@@ -22,22 +22,24 @@
 #      a minute on vectors. CFT_WASM_EMCC_ANY=1 downgrades it to a
 #      warning, for trying a new emsdk on purpose.
 #   1  regenerate the published vector sets into build/vectors/ with
-#      the exact `make vectors` arguments. Vectors are derived data
+#      the `make vectors` arguments plus --transcend 0 (GEN_ARGS below
+#      says why). Vectors are derived data
 #      (gitignored); the build regenerates its own copy rather than
 #      trusting whatever vectors/out currently holds.
 #   2  emcc the library sources - DERIVED from host/Makefile, see
 #      below - plus wasm_api.c, twice with identical flags: once
 #      split (.js + .wasm, so the wasm size below is a measured fact)
-#      and once -sSINGLE_FILE (wasm embedded as base64) for splicing
-#      into the page.
+#      and once -sSINGLE_FILE (wasm embedded in the loader as a JS
+#      string literal, one byte per code unit) for splicing into the
+#      page.
 #   3  make_page.py samples the sets and assembles the page. THE
 #      SAMPLING RULE (also stated in make_page.py and on the page):
 #      from each of the 20 OPCODE sets (4 formats x 5 rounding
 #      attributes, 11,800 lines each) take every 59th line - 0-based
-#      lines 0, 60, 120, ... = exactly 200 per set - then add the
+#      lines 0, 59, 118, ... = exactly 200 per set - then add the
 #      set's first line of any opcode name the stride missed, so every
 #      opcode class is embedded per set by construction, seeds 26/27
-#      and the unassigned reserved15/30/255 included. The other six
+#      and the unassigned reserved15/255 included. The other six
 #      families the generator writes - transcendental, augmented,
 #      reduction, character, and since ABI 0.7 the magnitude forms of
 #      9.6 and the eighty formatOf sets of 5.4.1 - are droppable in
@@ -49,8 +51,8 @@
 #   5  the same module a third time for node (-sENVIRONMENT=node),
 #      into build/ and, when bindings/node exists, into the package.
 #      The .wasm is byte-identical to the page's - only the loader
-#      differs - which is what lets a node harness replay all 236,000
-#      cases against THE PAGE'S module instead of a lookalike.
+#      differs - which is what lets a node harness replay all 1,068,915
+#      published cases against THE PAGE'S module instead of a lookalike.
 #      bindings/wasm/verify.mjs checks that identity rather than
 #      assuming it.
 #
@@ -144,15 +146,17 @@ if [ "$EMCC_DOTTED" != "$EMCC_EXPECT" ]; then
     fi
 fi
 
-# The user-facing regeneration command: identical arguments to `make
-# vectors`, and to stage 1 below except for --out. It is what the
-# page tells people to run for droppable full sets, so the sample and
-# the files they drop come from the same deterministic generator run.
+# The user-facing regeneration command: the `make vectors` arguments
+# without its --jobs, plus --transcend 0, and stage 1's below except
+# for --out. It is what the page tells people to run to regenerate the
+# sets it samples, so the sample and the opcode sets they drop come
+# from the same deterministic generator run; the transcendental sets it
+# leaves out come from `make vectors`.
 #
 # --transcend 0 for two reasons, and both are worth stating. The page
-# samples the twenty OPCODE sets by name and drives cft_run; the
-# transcendental sets name library entry points it has no UI for, so
-# they would be generated and then ignored. And this generator runs
+# samples the twenty OPCODE sets by name and nothing else
+# (make_page.py says why), so the transcendental sets would be
+# generated here and then ignored. And this generator runs
 # inside the pinned emscripten image, which carries no mpmath - the
 # transcendental reference needs one, because a transcendental value is
 # not a rational number and integer arithmetic cannot write it down.
