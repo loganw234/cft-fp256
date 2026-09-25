@@ -122,7 +122,9 @@ rule, so a stale binary could outlive a `clean`.
 
 **`bindings/arduino/sync.py --check` passes.** Measured 2026-09-16: 30
 vendored files, all identical to `host/` (28 on 2026-09-12; round 2
-added `mask_bits.h` and its neighbour). Any edit to a vendored host
+added `mask_bits.h` and its neighbour; 31 from 2026-09-25, when
+`tile_select.h` joined `host/src`). A NEW file in `host/src` fails it
+too, as unvendored, until `sync.py` is re-run. Any edit to a vendored host
 source fails it until `sync.py` is re-run - which is the gate doing its
 job, not a divergence. This entry previously claimed it
 failed on a clean checkout; it does not. Treat a failure from it as a real

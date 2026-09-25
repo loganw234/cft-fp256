@@ -159,6 +159,11 @@
       "sha256": "79e4862b8c9e28d4f21865234f6ca1b758e27fc86525f2c0db2923154bdee80f"
     },
     {
+      "source": "host/src/tile_select.h",
+      "dest": "src/cft/src/tile_select.h",
+      "sha256": "102ce8e5f166d8eda06a429136006abd536d543349d545a443b6b21473fd9719"
+    },
+    {
       "source": "host/src/transcend.c",
       "dest": "src/cft/src/transcend.c",
       "sha256": "01ab19d00ab51fe3e9959083b0628a46e3a160b8c8d540d29927ad9ed1bb3bdd"

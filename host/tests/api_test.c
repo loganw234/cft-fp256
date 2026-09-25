@@ -24,6 +24,7 @@
 
 #include "cft.h"
 #include "../src/slice.h"
+#include "../src/tile_select.h"
 #include "../src/mask_bits.h"
 
 static int failures;
@@ -132,6 +133,100 @@ static void expect256(cft_device *dev, const char *what, cft_op op,
     CHECK(memcmp(d, want_d, 32) == 0 && flags == want_f,
           "%s: got %s/0x%02x want %s/0x%02x",
           what, hg, (unsigned)flags, hw, (unsigned)want_f);
+}
+
+/* ---- CFT_XRT_TILES: the lists, and the parse that must fail them -- */
+
+static const struct { const char *s; int n; int o[3]; } tile_good[] = {
+    {"1", 1, {1}}, {"2", 1, {2}}, {"64", 1, {64}},
+    {"1,3", 2, {1, 3}}, {"3,1", 2, {3, 1}}, {"4,2,1", 3, {4, 2, 1}},
+    {"007", 1, {7}},
+};
+static const char *const tile_bad[] = {
+    "", "0", "65", "99999999999999999999", "-1", "+1", " 1", "1 ",
+    "1,", ",1", "1,,2", "1;2", "1.5", "a", "1,1", "2,1,2", "1 ,3",
+};
+
+typedef int (*tile_parse_fn)(const char *, int *, char *, size_t);
+
+/* How many of the lists above `parse` misreads: a good list read as
+ * anything but its ordinals in order, a bad one accepted or refused
+ * without a sentence, or the sixty-four at once cut short. With
+ * `report`, each misread is a FAIL line. One function judges both the
+ * real parse and the control below, so the control is evidence that
+ * THESE checks fail, not that some other check would. */
+static int tile_select_misreads(tile_parse_fn parse, int report)
+{
+    int order[CFT_TILE_SELECT_MAX], k, i, j, wrong, misread = 0;
+    char why[320], all[CFT_TILE_SELECT_MAX * 3 + 1];
+    size_t used = 0;
+
+    for (i = 0; i < (int)(sizeof tile_good / sizeof tile_good[0]); i++) {
+        k = parse(tile_good[i].s, order, why, sizeof why);
+        wrong = k != tile_good[i].n;
+        for (j = 0; !wrong && j < k; j++)
+            wrong = order[j] != tile_good[i].o[j];
+        if (wrong) {
+            misread++;
+            if (report)
+                CHECK(0, "CFT_XRT_TILES=\"%s\" read as %d ordinals, or "
+                      "out of order; want %d as written",
+                      tile_good[i].s, k, tile_good[i].n);
+        }
+    }
+    for (i = 0; i < (int)(sizeof tile_bad / sizeof tile_bad[0]); i++) {
+        why[0] = 0;
+        k = parse(tile_bad[i], order, why, sizeof why);
+        if (k != -1 || !why[0]) {
+            misread++;
+            if (report)
+                CHECK(0, "CFT_XRT_TILES=\"%s\" was accepted (%d), or "
+                      "refused without a sentence", tile_bad[i], k);
+        }
+    }
+    for (i = 1; i <= CFT_TILE_SELECT_MAX; i++)
+        used += (size_t)snprintf(all + used, sizeof all - used,
+                                 i > 1 ? ",%d" : "%d", i);
+    k = parse(all, order, why, sizeof why);
+    if (k != CFT_TILE_SELECT_MAX || order[0] != 1 ||
+        order[CFT_TILE_SELECT_MAX - 1] != CFT_TILE_SELECT_MAX) {
+        misread++;
+        if (report)
+            CHECK(0, "all 64 ordinals at once: parsed %d", k);
+    }
+    return misread;
+}
+
+/* THE NEGATIVE CONTROL for the checks above: a parse that reads a list
+ * the way atoi would - skip a space or a sign, take the leading digits,
+ * move on to the next comma - so " 1" is tile 1, "1;2" is tile 1 and
+ * "1 ,3" is tiles 1 and 3. That is "the nearest thing it resembles",
+ * which tile_select.h promises never to do. It refuses, with a
+ * sentence, only a list naming no tile in range, so what catches it is
+ * the strictness and nothing else. */
+static int tile_select_loose(const char *s, int *order, char *why,
+                             size_t whylen)
+{
+    int n = 0, v;
+
+    while (*s && n < CFT_TILE_SELECT_MAX) {
+        while (*s == ' ' || *s == '+')
+            s++;
+        for (v = 0; *s >= '0' && *s <= '9'; s++)
+            if (v <= CFT_TILE_SELECT_MAX)
+                v = v * 10 + (*s - '0');
+        if (v >= 1 && v <= CFT_TILE_SELECT_MAX)
+            order[n++] = v;
+        s = strchr(s, ',');
+        if (!s)
+            break;
+        s++;
+    }
+    if (!n) {
+        snprintf(why, whylen, "no tile in 1..%d named", CFT_TILE_SELECT_MAX);
+        return -1;
+    }
+    return n;
 }
 
 /* ------------------------------------------------------------------ */
@@ -768,6 +863,31 @@ int main(void)
             printf("  work splits correctly for 27 sizes x 4 formats x "
                    "64 tile counts, and the padding total never depends "
                    "on the tile count\n");
+    }
+
+    /* --- which tiles a device opens: CFT_XRT_TILES (2026-09-25) -----
+     *
+     * host/src/tile_select.h, here for slice.h's reason: the XRT
+     * backend's open path reads it, and reaching that needs a card. A
+     * selection is a claim about hardware, so the parse is strict and
+     * every way a list can be malformed is a refusal with a sentence.
+     * tile_select_misreads() holds the accepted forms AND each refusal,
+     * and tile_select_loose() - which reads "1 ,3" as tiles 1 and 3 -
+     * must be counted wrong by those same checks, or they prove
+     * nothing about strictness. */
+    {
+        int misread = tile_select_misreads(cft_tile_select_parse, 1);
+        int caught = tile_select_misreads(tile_select_loose, 0);
+
+        CHECK(caught > 0, "NEGATIVE CONTROL: an atoi-style parse of "
+              "CFT_XRT_TILES passed every check, so they cannot tell a "
+              "strict parse from a loose one");
+        if (!misread && caught > 0)
+            printf("  CFT_XRT_TILES: %d selections read as written, %d "
+                   "malformed ones refused with a sentence, and all 64 "
+                   "at once; an atoi-style parse is caught on %d\n",
+                   (int)(sizeof tile_good / sizeof tile_good[0]),
+                   (int)(sizeof tile_bad / sizeof tile_bad[0]), caught);
     }
 
     /* --- a lane mask cut for one tile (ABI 0.14, R17) -------------

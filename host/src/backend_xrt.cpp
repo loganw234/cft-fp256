@@ -111,6 +111,7 @@
 #include "backend.h"
 #include "slice.h"
 #include "mask_bits.h"
+#include "tile_select.h"
 
 /* mirrors cft_status; see backend.h */
 enum {
@@ -333,12 +334,10 @@ inline size_t page_round(size_t bytes)
  * on card day. */
 constexpr int MAX_TILES = 64;
 
-#if CFT_XRT_XCLBIN_API
 /* The number a compute-unit name ends in - "cft_krnl:{cft_krnl_12}" is
- * 12 - or -1 if it ends in none. Only used to put tiles in a stable
- * order; nothing decides what a compute unit IS from its name. Only
- * where the listing branch exists, which is the only place it is
- * called. */
+ * 12 - or -1 if it ends in none. Used to put tiles in a stable order
+ * and to find the one CFT_XRT_TILES names; nothing decides what a
+ * compute unit IS from its name - MAGIC does that once it is open. */
 static long cu_ordinal(const std::string &nm)
 {
     size_t end = nm.size();
@@ -351,7 +350,6 @@ static long cu_ordinal(const std::string &nm)
         return -1;
     return std::strtol(nm.c_str() + beg, nullptr, 10);
 }
-#endif
 
 std::string g_err;
 
@@ -938,12 +936,65 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
         for (int i = 1; i <= MAX_TILES; i++)
             names.push_back("cft_krnl:{cft_krnl_" + std::to_string(i) + "}");
 
+    /* CFT_XRT_TILES (host/src/tile_select.h): open only the tiles it
+     * names, in the order it names them - one process per tile is how
+     * independent jobs share a card - and REFUSE, never shrink, when a
+     * named tile is not in the image, will not open, or is not a cft
+     * tile. Absent, every tile the image declares is opened, as before.
+     * The ordinal is the number a compute unit's name ends in, which is
+     * also the order tiles are opened in by default. */
+    const char *const sel_env = std::getenv("CFT_XRT_TILES");
+    const bool selecting = sel_env != nullptr;
+    if (selecting) {
+        int order[CFT_TILE_SELECT_MAX];
+        char why[320];
+        const int k = cft_tile_select_parse(sel_env, order, why, sizeof why);
+        if (k < 0) {
+            delete D;
+            set_err(why);
+            return ST_INVALID_ARGUMENT;
+        }
+        std::vector<std::string> picked;
+        for (int i = 0; i < k; i++) {
+            std::string hit, also;
+            for (const std::string &nm : names)
+                if (cu_ordinal(nm) == order[i]) {
+                    if (hit.empty())
+                        hit = nm;
+                    else
+                        also += " " + nm;
+                }
+            if (hit.empty()) {
+                delete D;
+                set_err(std::string("CFT_XRT_TILES names tile ") +
+                        std::to_string(order[i]) + ", and " + artifact +
+                        (declared.empty() ? std::string(" declares no such "
+                                                        "compute unit")
+                                          : " declares " + declared));
+                return ST_ARTIFACT;
+            }
+            if (!also.empty()) {
+                /* A foreign kernel numbered like a tile: which one is
+                 * the tile is MAGIC's call after an open, and a
+                 * selection must not open the wrong one to find out. */
+                delete D;
+                set_err(std::string("CFT_XRT_TILES names tile ") +
+                        std::to_string(order[i]) + ", and more than one "
+                        "compute unit in " + artifact + " ends in that "
+                        "number: " + hit + also);
+                return ST_ARTIFACT;
+            }
+            picked.push_back(hit);
+        }
+        names.swap(picked);
+    }
+
     std::string first_failure, not_tiles;
     for (const std::string &nm : names) {
         try {
             xrt::kernel k(D->dev, D->uuid, nm,
                           xrt::kernel::cu_access_mode::exclusive);
-            if (!probing) {
+            if (!probing || selecting) {
                 uint32_t m = 0;
                 try {
                     m = k.read_register(CSR_MAGIC);
@@ -951,6 +1002,13 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
                     m = 0;
                 }
                 if (m != TILE_MAGIC) {
+                    if (selecting) {
+                        delete D;
+                        set_err("CFT_XRT_TILES names " + nm + ", which "
+                                "opened but did not answer MAGIC as a cft "
+                                "tile");
+                        return ST_ARTIFACT;
+                    }
                     not_tiles += (not_tiles.empty() ? "" : " ") + nm;
                     continue;      /* opened, answered, not ours; released */
                 }
@@ -958,6 +1016,16 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
             D->tiles.emplace_back();
             D->tiles.back().k = std::move(k);
         } catch (const std::exception &e) {
+            if (selecting) {
+                /* The commonest reason is that another process holds
+                 * it, which is exactly the case a selection exists for:
+                 * say which tile, and say that. */
+                delete D;
+                set_err("CFT_XRT_TILES names " + nm + ", which could not be "
+                        "opened: " + e.what() + " (a compute unit another "
+                        "process holds fails exactly this way)");
+                return ST_ARTIFACT;
+            }
             if (first_failure.empty())
                 first_failure = e.what();
             if (probing)
