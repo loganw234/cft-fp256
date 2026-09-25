@@ -313,11 +313,34 @@ which fit a 16-bit int fifteen times over) - see cft_config.h."
 /* ---------------------------------------------------------------
  * CFT_ERRMSG_MAX - the library's own last-error slot, in bytes
  *
- * cft_last_error() returns this buffer. Its one producer in a build
- * with no device backend is cft_program_load's capacity refusal, which
- * CFT_NO_PROGRAM removes - so the tiny profile keeps the empty string
- * the function must still return and drops both the 320-byte buffer
- * and the vsnprintf that fills it.
+ * cft_last_error() returns this buffer, and the refusals libcft makes
+ * without reaching a device backend write their sentences here - a
+ * format above the build's ceiling or absent from the device, a CAPS
+ * group the device lacks, an operand shape cft_run_ex will not take,
+ * a composed operation's missing step, among others. A build with no
+ * device backend and no sequencer still has plenty of them: counted
+ * on 2026-09-24, not counting the one inside each of backend.h's
+ * refusal helpers, a CFT_TINY build compiles 31 call sites that write
+ * one and a default build 83. CFT_NO_PROGRAM removes the sequencer's
+ * - program.c's 44 and the two on device.c's program route for an
+ * indexed operand - and no others.
+ *
+ * The tiny profile drops the slot anyway, to save RAM: 320 bytes is
+ * sixteen percent of an ATmega328P's two kilobytes, and the vsnprintf
+ * that fills it goes with it. (Not every formatted write does:
+ * device.c's render_format_mask, which lists the formats a refusal
+ * names, still calls snprintf at every profile, and at 1 its result is
+ * discarded.) At 1 the slot is the empty string cft_last_error() must
+ * still return. What a caller loses is the sentence and nothing else:
+ * no status depends on this value, so every refusal still returns the
+ * status it would have explained.
+ *
+ * Until 2026-09-24 this comment gave the reason as cft_program_load's
+ * capacity refusal being the one producer, which CFT_NO_PROGRAM
+ * removes. It was not the only one when the slot was sized
+ * (2026-09-09: cft_run's IMUL refusal was a second), and since
+ * 2026-09-14, when every CFT_ERR_UNSUPPORTED was given a sentence, it
+ * has been one of dozens.
  * --------------------------------------------------------------- */
 #ifndef CFT_ERRMSG_MAX
 #  ifdef CFT_TINY

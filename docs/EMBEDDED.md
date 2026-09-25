@@ -79,7 +79,7 @@ all fifteen is 280,248 bytes before and after.
 | `CFT_MAX_FORMAT` | formats above the ceiling, and sizes `CFT_BN_LIMBS` from it | 3 (fp256) |
 | `CFT_BN_LIMBS` | the width of every intermediate | 64 / 18 / 9 by ceiling |
 | `CFT_CHUNK` | elements per pass in the composed operations | 4096, 32 on a board, 8 tiny |
-| `CFT_ERRMSG_MAX` | the last-error buffer and its `vsnprintf` | 320, 1 tiny |
+| `CFT_ERRMSG_MAX` | the last-error buffer and its `vsnprintf`: at 1 every refusal keeps its status and loses its sentence, and `cft_last_error()` returns `""` | 320, 1 tiny |
 | `CFT_NO_TRANSCEND` | `transcend.c`, `mpfloat.c`, `mp_2opi.h` | off |
 | `CFT_NO_PROGRAM` | `program.c`, `sha256.c` | off |
 | `CFT_NO_CHARS` | `chars.c` | off |
