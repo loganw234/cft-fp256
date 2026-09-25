@@ -237,7 +237,9 @@ unit, so four jobs run on a quad at once, a small call is not
 partitioned across tiles it does not need (round 2 measured a thousand
 small segmented sums, issued one at a time, at 431 ms on the quad
 against 91 ms on the single-tile image, docs/VALIDATION.md 2026-09-16),
-and a timeout finishes one tile rather than the card.
+and a timeout finishes one process's handle rather than every tile's
+work - though the tile it happened on then wants a reload (below, "A
+tile a run was abandoned on").
 
 `CFT_XRT_TILES` names the tiles a process opens, as the 1-based
 ordinals their compute units end in (`cft_krnl_1` is 1):
@@ -257,7 +259,10 @@ reports that as `failed to open cu context: Invalid argument`, and a
 unit the image lacks as `No compute units matching` (both on the card),
 so the sentence names the tile and says what XRT said. An XRT without
 the listing API (2.14's build takes that path) cannot tell the two
-apart for a selection, and the sentence says so rather than guessing.
+apart for a selection, and the sentence says so rather than guessing -
+which is why, on that path, a tile the image does not declare is
+`CFT_ERR_ARTIFACT` and not `CFT_ERR_INVALID_ARGUMENT`: the backend only
+knows it would not open (verifier-V4, 2026-09-25).
 The status code is still the generic `CFT_ERR_ARTIFACT` ("artifact
 missing, unreadable, or not a tile"), because the contract has no
 "busy" status. That is a gap in the contract, not a detail; Logan's
@@ -428,6 +433,7 @@ authoritative:
 | `cft_alloc`, `cft_buffer_to_device` | the host mirror | the mirror, copied into each window on first use |
 | a run that wrote the buffer as `d` | the device copies that wrote | those copies |
 | `cft_buffer_from_device` | the host mirror again | the mirror |
+| a run that FAILED once the device may have started it | nothing: the buffer is lost | nothing - refused by name until `cft_buffer_to_device` |
 
 `cft_buffer_to_device` moves nothing: it marks every copy stale, and
 each refills at its next binding for the window that binding needs.
@@ -443,6 +449,30 @@ wrote. The one case the library cannot see is a store into the mirror
 with no `cft_buffer_to_device` after it, because a plain store leaves
 no trace; that is why the sync calls exist, and `device-test -b`'s
 publish check is what proves publishing takes effect.
+
+**A lane mask reads the output it writes.** Under a lane mask a program
+leaves a masked lane's deposit slots and scratch-out slots as they
+were, so its resident deposit window and scratch-out block are made
+current before the run, like an input: a device copy is kept only if it
+already holds the newest bytes, and is otherwise filled from the mirror.
+Until 2026-09-25 an output copy was never refreshed, and a masked lane
+came back with whatever the device copy held - after an unmasked run and
+a republish, the unmasked run's deposit in every masked lane (verifier-
+V4). `device-test`'s "seq lane mask into resident outputs" holds both
+shapes at every format.
+
+**A failed run loses what it would have written.** A run that fails once
+the device may have started it - a timeout, a fault the tile reported,
+a run refused after it ran (the completion witness, above) - may have
+written part of a resident window over bytes an earlier run left there
+that never came home. Nothing can vouch for that buffer any more, so
+`cft_buffer_from_device` on it, and any run that reads it, is refused
+with `CFT_ERR_INTERNAL` and a sentence, until `cft_buffer_to_device`
+publishes the mirror as the truth again. Until 2026-09-25 the device
+copy kept the earlier run's "written" mark and the failed run's bytes
+came back with `CFT_OK` (verifier-V4). device-test plants the refusal
+with `CFT_XRT_WITNESS=busy-after` over a window an earlier run left
+unflushed and holds both refusals and the recovery.
 
 **What is not resident.** `cft_reduce`'s partials are the library's
 own array; the composed reductions (`CFT_DOT`, `CFT_SUMSQ`,
