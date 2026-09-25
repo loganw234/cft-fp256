@@ -326,7 +326,10 @@ NFORMS=45
 # printed before has no old line to refuse. cpp-api-test's SKIP is also
 # held to the condition that prints it: an empty directory only, told
 # apart by the replay's own sentence - until 2026-09-24 any
-# CFT_ERR_ARTIFACT printed it, a malformed set included.
+# CFT_ERR_ARTIFACT printed it, a malformed set included - and its FAIL
+# to the line that stopped the replay, the last one not indented: until
+# the same day it named the report's last line, which after a
+# disagreement is "  got ...".
 pins () {  # -> returns the number of pins that do not hold
   local row f new old bad=0 rows
   mapfile -t rows << 'PINS'
@@ -338,6 +341,7 @@ host/tests/remote_test.c|printf("  SKIPPED %s: not on the server\n",|printf("  %
 host/tests/cpp_api_test.cpp|std::printf("SKIP  cpp-api-test conformance: no vector sets in "|std::printf("cpp-api-test: SKIP conformance: no vector sets in "
 host/tests/cpp_api_test.cpp|std::fputs(r.report.c_str(), stdout);|
 host/tests/cpp_api_test.cpp|r.report.find("no vector sets found under ")|if (r.status == CFT_ERR_ARTIFACT) {
+host/tests/cpp_api_test.cpp|if (end > at && r.report[at] != ' ')|stop_line.erase(0, stop_line.rfind('\n') + 1);
 host/tests/remote_check.py|print(tag + rep_line)|
 tb/check_results.py|print("  SKIP  %s: %s" % (bench, line))|
 PINS
@@ -353,7 +357,7 @@ PINS
   done
   return "$bad"
 }
-NPINS=10
+NPINS=11
 
 echo "== verify/run.sh, as committed"
 cases "$ROOT/verify/run.sh"; n=$?

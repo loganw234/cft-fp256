@@ -2013,8 +2013,27 @@ int main(int argc, char **argv)
      * read every CFT_ERR_ARTIFACT as "no vector sets" - so a malformed
      * set passed here while cft-selftest failed the same directory.
      * The empty case is told apart by the replay's own sentence and a
-     * count of zero; anything else is a FAIL naming the report's last
-     * line, which is the one that stopped the replay. */
+     * count of zero; anything else is a FAIL naming the line that
+     * stopped the replay.
+     *
+     * Which line that is depends on how it stopped (host/src/
+     * conformance.c). A set it cannot parse, or a call that fails,
+     * APPENDS one line and returns: that line is the report's last. A
+     * disagreement CLEARS the report and writes the failing case alone,
+     * a header naming the set, the line and the case ("<set>:<n>: fp32
+     * fma rne", or "<set>: ARRAY PASS element ...") and, for most,
+     * indented detail - operands, "expected", "got", and after an
+     * array-pass mismatch "the same case passes one element at a time
+     * ..." - so there the last line is detail and the header is the
+     * FIRST. In
+     * both, the line that stopped the replay is the last one that does
+     * not begin with a space, and that is the line named here. (The
+     * status does not tell the two apart: a device's cft_run can answer
+     * CFT_ERR_INTERNAL, which appends "<set>:<n>: cft_run failed:
+     * internal error" after any skip lines, the same status a
+     * disagreement returns with a cleared report.) Until 2026-09-24
+     * this named the last line outright, which for a disagreement was
+     * "  got      0x7fc00000 flags 0x00". */
     {
         const cft::device::conformance_result r = dev.conformance(vdir);
         std::fputs(r.report.c_str(), stdout);
@@ -2023,11 +2042,18 @@ int main(int argc, char **argv)
         const bool no_sets =
             r.status == CFT_ERR_ARTIFACT && r.cases == 0 &&
             r.report.find("no vector sets found under ") != std::string::npos;
-        std::string stop_line = r.report;
-        while (!stop_line.empty() && stop_line.back() == '\n')
-            stop_line.pop_back();
-        if (stop_line.rfind('\n') != std::string::npos)
-            stop_line.erase(0, stop_line.rfind('\n') + 1);
+        std::string stop_line;
+        {
+            std::size_t at = 0;
+            while (at < r.report.size()) {
+                std::size_t end = r.report.find('\n', at);
+                if (end == std::string::npos)
+                    end = r.report.size();
+                if (end > at && r.report[at] != ' ')
+                    stop_line = r.report.substr(at, end - at);
+                at = end + 1;
+            }
+        }
         if (no_sets) {
             std::printf("SKIP  cpp-api-test conformance: no vector sets in "
                         "%s (run `make vectors` from the repo root)\n", vdir);
