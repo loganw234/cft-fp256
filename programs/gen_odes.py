@@ -44,7 +44,10 @@ again in check.py: that mirror is NOT independent of this file - an
 error made in both places passes it. And against the textbook scheme in
 exact rationals, which shares no transcription with this file, one step
 at a time within a rounding bound derived from the precision; MUTANTS
-below are that comparison's negative controls.
+below are that comparison's negative controls, each carried by the
+mirror too, so that each is an error made in both places. UNRESUMABLE
+is the resume check's: a program right at every step that still cannot
+be resumed.
 
 The default banks are data (`<name>.classic.bank`): raw format-width
 values, dense, in the order the source declares them. check.py holds
@@ -77,11 +80,15 @@ L96_N = 40          # Lorenz-96's ring
 # asks for each one, assembles it, runs it and requires its textbook arm to
 # FAIL on it - that arm's permanent negative controls, which make "the
 # check can tell this program from a wrong one" something the gate shows
-# every run rather than something once believed. None is on by default;
-# outputs() and --check never ask for one, so no committed file can be a
-# mutant; and a name not listed here is refused rather than ignored, since
-# an ignored name would hand back the real program and a control that
-# cannot fail.
+# every run rather than something once believed. check.py's mirror of the
+# rounding order (ode_step) carries each of the same mistakes behind a
+# switch of its own, so every one of these is a SHARED error, the shape
+# that once passed the whole gate: the check requires the mirror arm to
+# pass it bit for bit - proof that the error really is shared - and the
+# textbook arm to refuse it. None is on by default; outputs() and --check
+# never ask for one, so no committed file can be a mutant; and a name not
+# listed here is refused rather than ignored, since an ignored name would
+# hand back the real program and a control that cannot fail.
 MUTANTS = {
     "lorenz63-rk4": {
         "zsign": "z' = x y + beta z",
@@ -99,11 +106,30 @@ MUTANTS = {
     },
 }
 
+# A program that is RIGHT step by step and still cannot be resumed: it
+# carries state from one step to the next in a register the scratch block
+# does not carry, so a second segment starts that state afresh where one
+# longer segment would have kept it. A compiler that compensates its sums
+# emits exactly this. The textbook arm passes it - every step is Stormer-
+# Verlet within the rounding bound - and only the resume arm can refuse
+# it, which check.py requires every run: that arm's control that is not
+# decided by construction (verifier-V3, 2026-09-25). Same rules as
+# MUTANTS: never on by default, never written to disk, unknown names
+# refused.
+UNRESUMABLE = {
+    "henonheiles-lf": {
+        "kahan": "the px kick Kahan-compensated, its compensation carried "
+                 "from step to step in a register the scratch block does "
+                 "not carry",
+    },
+}
+
 
 def _mutant(name, mutant):
-    if mutant is not None and mutant not in MUTANTS[name]:
+    known = {**MUTANTS.get(name, {}), **UNRESUMABLE.get(name, {})}
+    if mutant is not None and mutant not in known:
         raise ValueError(f"{name} has no test mutant {mutant!r}; it has "
-                         f"{', '.join(MUTANTS[name])}")
+                         f"{', '.join(known)}")
     return mutant
 
 
@@ -111,7 +137,8 @@ def _mutant_note(name, mutant):
     """The mutant's own first comment lines; none for the real program."""
     if mutant is None:
         return []
-    return [f"TEST-ONLY MUTANT {mutant}: {MUTANTS[name][mutant]}. A negative",
+    known = {**MUTANTS.get(name, {}), **UNRESUMABLE.get(name, {})}
+    return [f"TEST-ONLY MUTANT {mutant}: {known[mutant]}. A negative",
             "control for programs/check.py - never written to disk.", ""]
 
 
@@ -483,13 +510,39 @@ def henonheiles(fmtname, mutant=None):
         "a(q); q += h/2 p. Scratch slots 0..3 carry x, y, px, py in and out;",
         "the state stays in registers, and a step is 12 ALU instructions.",
     ])
+    kahan = mutant == "kahan"
     for r, n in (("x", 3), ("y", 4), ("px", 5), ("py", 6), ("t0", 7),
-                 ("t1", 8), ("t2", 9)):
+                 ("t1", 8), ("t2", 9)) + ((("e", 10),) if kahan else ()):
         S(f".reg      {r:<3} = r{n}")
     S("")
     for i, r in enumerate(("x", "y", "px", "py")):
         S(f"ldl  {r}, {i}")
     S(f"repeat {STEPS['henonheiles-lf']}")
+    if kahan:
+        # e is minus the rounding error the last px sum lost. A register
+        # starts every run at +0 (docs/SEQUENCER.md), so e starts afresh
+        # with each segment - and nothing else in the step differs.
+        S("  fma  x, H2, px, x         ; drift")
+        S("  fma  y, H2, py, y")
+        S("  fma  t0, TWO, y, ONE      ; 1 + 2 y")
+        S("  mul  t0, x, t0            ; x (1 + 2 y)")
+        S("  fma  t1, MH, t0, e        ; the kick, compensated")
+        S("  add  t2, px, t1")
+        S("  sub  e, px, t2            ; what the sum lost, negated,")
+        S("  add  e, e, t1             ; carried to the next step")
+        S("  mul  px, t2, ONE          ; px = the sum, exactly")
+        S("  mul  t1, x, x             ; x^2")
+        S("  neg  t1, t1")
+        S("  sub  t2, y, ONE           ; y - 1")
+        S("  fma  t2, y, t2, t1        ; y (y - 1) - x^2")
+        S("  fma  py, H, t2, py        ; kick: py + h (...)")
+        S("  fma  x, H2, px, x         ; drift")
+        S("  fma  y, H2, py, y")
+        S("endrep")
+        for i, r in enumerate(("x", "y", "px", "py")):
+            S(f"stl  {r}, {i}")
+        S("halt")
+        return S.text()
     if mutant == "kdk":
         def half_kick():
             S("  fma  t0, TWO, y, ONE")

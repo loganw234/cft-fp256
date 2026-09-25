@@ -68,11 +68,11 @@ so in the open.
 | `conv-fp64` | fp64 | 19 | 6 | 14 | `SCRATCH` | a sixteen-sample local array written and read under loop counters through `stx`/`ldx`, and a three-tap convolution over it | the six constants against their derivation and no static slot at all; then 24 lanes x 14 outputs against a softfloat three-tap convolution |
 | `resume-fp64` | fp64 | 11 | 3 | 16 | `SCRATCH`, `SCRATCH_IO` | eight steps of `v <- 1.5v + 0.25` with a step count, entered and left through the per-run scratch block | `scratch_io` 0x00020002 behind `flags` bit 1; then two runs whose deposits are the two halves of a single sixteen-step run's |
 | `horner-wide-fp64` | fp64 | 302 | 300 | 1 | `kx`, `BANK_PTR`, `KX9` | a degree-299 Horner over a 300-entry external bank - 44 coefficients past the 256 a byte of `imm` reaches | 44 ninth index bits in `imm[30:28]`, the bank file against `C[k] = (-1)^k/(k+1)`; then 16 points against a softfloat Horner |
-| `lorenz63-rk4-fp64` | fp64 | 62 | 7 | 0 | `REGS32`, `BANK_PTR`, `SCRATCH`, `SCRATCH_IO` | a segment of 100 classic Runge-Kutta steps of Lorenz 1963, the state in and out through the scratch, the parameters as the bank; 53 ALU instructions a step and no control code but the loop's ENDREP | gen_odes.py's output byte for byte (the source with CRLF line ends refused); each bank slot against the definition of the name the source gives it (RHO and BETA transposed, and RHO an ulp off, refused); the census, and the golden executor's own count of a step - 54, the ENDREP included; the library's executor, the golden model's and check.py's mirror of the program's rounding order bit for bit over 8 lanes (an operand swap refused); the first two steps from 4 states against textbook Runge-Kutta in exact rationals, within a rounding bound derived from the precision (z' = x y + beta z, stage 4 at h/2 and the 3/8 rule, each written by the generator, refused); the mirror at 300 digits within round-off (a changed weight refused); two segments chained are one (the second entered with the original state refused) |
+| `lorenz63-rk4-fp64` | fp64 | 62 | 7 | 0 | `REGS32`, `BANK_PTR`, `SCRATCH`, `SCRATCH_IO` | a segment of 100 classic Runge-Kutta steps of Lorenz 1963, the state in and out through the scratch, the parameters as the bank; 53 ALU instructions a step and no control code but the loop's ENDREP | gen_odes.py's output byte for byte (the source with CRLF line ends, written to disk and read back through the same reader, refused); each bank slot against the definition of the name the source gives it (RHO and BETA transposed in the bank, RHO an ulp off, and their two `.const` lines transposed in the source, refused); its numbers against literals in check.py rather than gen_odes.py's constants (the generator's step count edited and regenerated refused), and this row's, this page's and the source's statements of them against the image (each such number moved one on, refused); the census, and the golden executor's own count of a step - 54, the ENDREP included; the library's executor, the golden model's and check.py's mirror of the program's rounding order bit for bit over 8 lanes (an operand swap refused); the first two steps from 4 states against textbook Runge-Kutta in exact rationals, within a rounding bound derived from the precision (z' = x y + beta z, stage 4 at h/2 and the 3/8 rule, each a SHARED error - written by the generator and carried by the mirror, which the mirror arm passes - refused); the mirror at 300 digits within round-off (a changed weight refused); two segments chained are one, every lane bit for bit (the second entered with the original state refused) |
 | `lorenz63-rk4-fp256` | fp256 | 62 | 7 | 0 | as above | as above | as above |
-| `lorenz96-rk4-fp64` | fp64 | 1,455 | 5 | 0 | `BANK_PTR`, `SCRATCH`, `SCRATCH_IO` | 20 Runge-Kutta steps of Lorenz 1996 on a ring of 40: every stage vector in the scratch (200 slots), a four-register window round the ring; 760 ALU instructions, 692 scratch accesses and the loop's ENDREP a step | as above, over 4 lanes, the textbook arm from 2 states, and the executor counting 1,453 a step; the bank's controls transpose H2 and H6 and move F an ulp, and x_(i+1) where x_(i-1) belongs takes the z sign's place among the generator's |
+| `lorenz96-rk4-fp64` | fp64 | 1,455 | 5 | 0 | `BANK_PTR`, `SCRATCH`, `SCRATCH_IO` | 20 Runge-Kutta steps of Lorenz 1996 on a ring of 40: every stage vector in the scratch (200 slots), a four-register window round the ring; 760 ALU instructions, 692 scratch accesses and the loop's ENDREP a step | as above, over 4 lanes, the textbook arm from 2 states, and the executor counting 1,453 a step; the bank's controls transpose H2 and H6 and move F an ulp, the pinned numbers' change the ring to 36 and halve the step count, and x_(i+1) where x_(i-1) belongs takes the z sign's place among the shared errors |
 | `lorenz96-rk4-fp256` | fp256 | 1,455 | 5 | 0 | as above | as above | as above |
-| `henonheiles-lf-fp64` | fp64 | 23 | 5 | 0 | `BANK_PTR`, `SCRATCH`, `SCRATCH_IO` | 100 Stormer-Verlet steps of Henon-Heiles, drift-kick-drift; 12 ALU instructions a step | as `lorenz63-rk4`, with the textbook step Stormer-Verlet's and its force differentiated out of the potential; the generator's controls are the x force with its sign flipped and kick-drift-kick, the bank's ONE and TWO transposed and H an ulp off, and the 300-digit arm's a half kick |
+| `henonheiles-lf-fp64` | fp64 | 23 | 5 | 0 | `BANK_PTR`, `SCRATCH`, `SCRATCH_IO` | 100 Stormer-Verlet steps of Henon-Heiles, drift-kick-drift; 12 ALU instructions a step | as `lorenz63-rk4`, with the textbook step Stormer-Verlet's and its force differentiated out of the potential; the shared errors are the x force with its sign flipped and kick-drift-kick, the bank's controls ONE and TWO transposed and H an ulp off, the 300-digit arm's a half kick, and the resume arm's also a program with its kick Kahan-compensated from step to step, which the textbook arm passes and only the resume arm can refuse |
 | `henonheiles-lf-fp256` | fp256 | 23 | 5 | 0 | as above | as above | as above |
 
 `needs` is what a device must publish before the image will load:
@@ -222,16 +222,34 @@ with the format's unit roundoff u = 2^-p, k the most roundings any term
 of the step can pass through and a the step evaluated over absolute
 values, both computed alongside the exact step, so nothing in it is
 chosen. Its negative controls are wrong programs the generator itself
-writes behind a test-only switch - among them the 3/8-rule Runge-Kutta,
-which has exactly classic Runge-Kutta's linear behaviour, so that only a
-nonlinear state tells the two apart; from the arm's states it lands at
-least 3 x 10^7 times outside the bound at fp64 and 9 x 10^62 at fp256,
-and the gate prints each ratio. The bank is held the same way round: the
-value in each slot against the definition of the name the SOURCE gives
-that slot, so the parameters cannot be transposed inside the generator's
-bank list without a failure. The 300-digit arm needs mpmath and says
-SKIP and why without it; the textbook arm needs only the standard
-library.
+writes behind a test-only switch, each carried by the mirror too behind
+a switch of its own: SHARED errors, the shape that once passed the whole
+gate, which the mirror arm passes bit for bit and the textbook arm must
+refuse - so an arm re-pointed at the mirror goes red. Among them is the
+3/8-rule Runge-Kutta, which has exactly classic Runge-Kutta's linear
+behaviour, so that only a nonlinear state tells the two apart; from the
+arm's states it landed at least 3 x 10^7 times outside the bound at fp64
+and 9 x 10^62 at fp256 (2026-09-25), and the gate prints each ratio. That
+the arm reaches nothing of the mirror, the generator or an executor is
+held by name as well: the check follows every name its verdict uses,
+through the file, and refuses a path to any of them. The bank is held
+the same way round: the value in each slot against the definition of the
+name the SOURCE gives that slot, so the parameters cannot be transposed
+inside the generator's bank list, or the source's `.const` lines moved,
+without a failure. The 300-digit arm needs mpmath and says SKIP and why
+without it; the textbook arm needs only the standard library.
+
+Each row's numbers - the state size, the steps a segment, the census,
+the image's size - are literals in `check.py`, not the generator's
+constants, and this index's rows and each source's own comments are held
+to the image: a ring or a segment changed in `gen_odes.py` and
+regenerated fails until all three say it. Resumption's control on every
+row is the second segment entered with the original state, which watches
+the plumbing; Henon-Heiles adds a program whose kick is Kahan-compensated
+from step to step - right at every step, so the textbook arm passes it,
+but carrying what no segment boundary carries. Its chained run differs
+from its long one by one ulp in one or two lanes, so the check compares
+every lane, bit for bit.
 
 **`horner-bank-fp64`** is the `BANK_EXT` worked example. One image,
 many polynomials: the image is 240 bytes of pure schedule and the
