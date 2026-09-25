@@ -9,7 +9,12 @@ things, in this order, and stops at the first failure:
    `host/tools/cft-asm` and again with `python/cft_golden/asm.py`, and
    the bytes must be identical - then compared against the MANIFEST,
    so a rebuild that moved a byte is caught here and not in a diff
-   nobody read.
+   nobody read. The MANIFEST and the sources must also match one for
+   one: a line whose source is gone is a row that vanished, and until
+   2026-09-25 that - or every source gone at once - still passed. And
+   gen_odes.py's own `--check` runs here, so a generated file that is
+   missing or differs fails the run rather than waiting for someone to
+   run the generator.
 
 2. **The disassembler is a readback.** Every built image is
    disassembled by both implementations, the two texts must agree, and
@@ -25,10 +30,13 @@ things, in this order, and stops at the first failure:
    revision 3's four scratch rows - the same arithmetic without the
    spill, a softfloat convolution, a longer run's second half, and a
    softfloat Horner over three hundred coefficients, and - for the
-   three ODE rows gen_odes.py writes (2026-09-25) - the generator,
-   the bank's derivation, the census, three executors against a
-   reference written from the equations, the 300-digit scheme, and
-   resumption, each with a control that must fail.
+   three ODE rows gen_odes.py writes (2026-09-25) - the generator byte
+   for byte, each bank slot against the definition of the name the
+   source gives it, the census, three executors bit for bit, each step
+   against the textbook scheme in exact rationals, the 300-digit
+   scheme, and resumption. Every one of those but the header and the
+   census carries a negative control that must fail, and the comment
+   above check_ode says which.
 
 Revision 3's rows have two arms and they are not the same claim. The
 STATIC arm - constants against their derivation, the header against
@@ -46,13 +54,16 @@ perform.
 """
 
 import argparse
+import contextlib
 import hashlib
+import io
 import random
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
+from fractions import Fraction
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -1438,38 +1449,68 @@ def check_revision3_corpus(args, tmp, trials=120):
        f"{scratch_io} carry a per-run block, {kx9} need KX9")
 
 
-# ================= main =================================================
-
 # ================= the ODE rows (programs/gen_odes.py) ===================
 #
 # Three dynamical systems as segment programs. What each row's check
-# establishes, in order, and what it holds each claim to:
+# establishes, in order; what it holds each claim to; and the negative
+# control beside it, whose failure is asserted ("NEGATIVE CONTROL FAILED
+# TO FAIL" fails the run). Every control goes through the same function
+# as the claim it guards, differing only in the fault it injects.
 #
 #   generated    the committed .cfta and its bank are gen_odes.py's
 #                output, byte for byte - the generator is the one
-#                definition of the instruction stream
-#   bank         every default value is the correctly rounded value of
-#                its exact definition, shown with exact rationals and
-#                the value's two neighbours, not by rounding again
-#   static       the header: BANK_EXT, SCRATCH_IO, no deposits, the
-#                slot counts and the bank size the source declares
-#   census       ALU and control codes a lane-step, read off the image,
-#                against the counts the program's structure implies
+#                definition of the instruction stream. Control: the same
+#                source with CRLF line ends is refused (a comparison of
+#                text a reader had normalised would pass it).
+#   bank         the value in each slot is the correctly rounded value of
+#                the definition of the NAME the source gives that slot -
+#                the golden assembler's reading of the .const lines, in
+#                order - shown with exact rationals and the value's two
+#                neighbours, not by rounding again. Controls: gen_odes'
+#                own bank_values with two entries transposed, and with
+#                one value an ulp off.
+#   static       the header: BANK_EXT, SCRATCH_IO, no deposits, the slot
+#                counts and the bank size the source declares. A read of
+#                the header, with no control.
+#   census       ALU instructions and control codes a lane-step besides
+#                the loop's ENDREP, read off the image, against the counts
+#                the program's structure implies - and the golden
+#                executor's own count of what one step more runs, which
+#                must be those and the ENDREP. Two measurements that must
+#                agree; no control.
 #   identity     the library's executor (positive-run), the golden
-#                model's (seq.run) and a reference written HERE from the
-#                equations - not from gen_odes.py - agree bit for bit
-#   scheme       the same discrete scheme at 300 digits from the same
-#                encodings: the program is within round-off of it, and
-#                not equal to it (the round-off is really there)
+#                model's (seq.run) and ode_step agree bit for bit.
+#                ode_step is the scheme written again here IN THE
+#                PROGRAM'S ROUNDING ORDER - it has to be, to be bit for
+#                bit - so it is a second transcription by the same hand,
+#                not an independent reference: an error made in both
+#                places passes this arm. Control: a source with one
+#                instruction's operands swapped.
+#   textbook     the program's first two steps, each from the state the
+#                program itself began it with, against the TEXTBOOK step
+#                in exact rationals: the vector field in its textbook
+#                form, classic Runge-Kutta from its Butcher tableau
+#                through a generic stepper, Stormer-Verlet from its
+#                textbook update with the force differentiated out of
+#                the potential - within a bound derived from the
+#                precision (_Tb says how). It shares no transcription
+#                with gen_odes.py or ode_step. Controls: every wrong
+#                program gen_odes.MUTANTS names, written by the generator
+#                itself, must fall outside the bound.
+#   scheme       ode_step at 300 digits from the same encodings: over
+#                the whole segment the program is within round-off of
+#                its own scheme, and not equal to it (the round-off is
+#                really there). The same transcription as identity, so
+#                not independent either. Control: ode_step with a wrong
+#                weight or kick must exceed the ceiling.
 #   resume       two segments chained through the scratch block are one
-#                segment of twice the steps
-#
-# and three controls, each of which must FAIL its comparison: a source
-# with one instruction's operands swapped against the reference; the
-# 300-digit scheme with a wrong weight or kick against the program; and
-# one flipped bit against the chained resume.
+#                segment of twice the steps. Control, through the same
+#                code path as the claim: the second segment entered with
+#                the ORIGINAL state instead.
 
 ODE_ROWS = ("lorenz63-rk4", "lorenz96-rk4", "henonheiles-lf")
+_ODE_NSTATE = {"lorenz63-rk4": 3, "lorenz96-rk4": gen_odes.L96_N,
+               "henonheiles-lf": 4}
 
 
 def _ode_base(name):
@@ -1530,11 +1571,14 @@ class _MpOps:
 
 
 def ode_step(base, o, K, s, steps, mutant=False):
-    """The scheme, written from the equations - a reference independent
-    of gen_odes.py's text. `o` is _SfOps (bits) or _MpOps (values); `K`
-    the bank in declaration order; `s` one lane's state. `mutant` is the
-    negative control: a wrong weight (Runge-Kutta) or a half kick
-    (Stormer-Verlet), which the 300-digit comparison must catch."""
+    """The scheme written again, in the PROGRAM'S rounding order - which
+    it must share to be bit-identical, so it mirrors gen_odes.py rather
+    than being independent of it: an error written into both passes every
+    comparison with this function. The textbook arm (_tb_step) is the
+    reference that shares no transcription. `o` is _SfOps (bits) or
+    _MpOps (values); `K` the bank in declaration order; `s` one lane's
+    state. `mutant` is the 300-digit arm's negative control: a wrong
+    weight (Runge-Kutta) or a half kick (Stormer-Verlet)."""
     if base == "lorenz63-rk4":
         H, H2, H6, TWO, SIG, RHO, BETA = K
         x, y, z = s
@@ -1618,7 +1662,6 @@ def ode_initial(base, fmt, n):
 
 def _frac(fmt, bits):
     """An encoding's exact value, as a Fraction. Finite only."""
-    from fractions import Fraction
     u = sf.unpack(fmt, bits)
     if u.kind == sf.ZERO:
         return Fraction(0)
@@ -1644,66 +1687,372 @@ def _nearest(fmt, bits, target):
 
 
 def _bank_derivations(base):
-    """name -> the exact rational each default bank value rounds, or a
-    function of the values already checked (exact operations)."""
-    from fractions import Fraction as Fr
-    common = {"H": Fr(1, 100), "TWO": Fr(2), "ONE": Fr(1)}
+    """name -> the exact rational each default bank value rounds. H2, H6
+    and MH are exact operations on (or one rounding of) the value in the
+    slot named H, and _bank_problems derives them from it."""
+    common = {"H": Fraction(1, 100), "TWO": Fraction(2), "ONE": Fraction(1)}
     if base == "lorenz63-rk4":
-        common.update({"SIGMA": Fr(10), "RHO": Fr(28), "BETA": Fr(8, 3)})
+        common.update({"SIGMA": Fraction(10), "RHO": Fraction(28),
+                       "BETA": Fraction(8, 3)})
     if base == "lorenz96-rk4":
-        common.update({"F": Fr(8)})
+        common.update({"F": Fraction(8)})
     return common
+
+
+def _bank_problems(fmt, base, names, bits):
+    """[problem], one sentence each, for a bank read BY NAME: `names` are
+    the constants the SOURCE declares, in slot order, and `bits` what the
+    bank holds in those slots. A value is held to the definition of the
+    name its slot has, never to a list of names written beside the
+    values - which is how a transposition inside gen_odes.bank_values
+    once passed, the program running rho = 8/3 and beta = 28."""
+    if len(names) != len(bits):
+        return [f"the source declares {len(names)} constants and the bank "
+                f"holds {len(bits)} values"]
+    exact = _bank_derivations(base)
+    byname = dict(zip(names, bits))
+    problems = []
+    for cname, b in zip(names, bits):
+        if cname in exact:
+            if not _nearest(fmt, b, exact[cname]):
+                problems.append(f"{cname} is not RN({exact[cname]})")
+        elif cname in ("H2", "H6", "MH") and "H" not in byname:
+            problems.append(f"{cname} is derived from H, and the source "
+                            f"declares no H")
+        elif cname == "H2":
+            if _frac(fmt, b) != _frac(fmt, byname["H"]) / 2:
+                problems.append("H2 is not exactly H / 2")
+        elif cname == "H6":
+            if not _nearest(fmt, b, _frac(fmt, byname["H"]) / 6):
+                problems.append("H6 is not RN(H / 6)")
+        elif cname == "MH":
+            if _frac(fmt, b) != -_frac(fmt, byname["H"]):
+                problems.append("MH is not exactly -H")
+        else:
+            problems.append(f"{cname} has no derivation here")
+    return problems
+
+
+# The bank arm's two controls, a row each: the entries transposed inside
+# bank_values (the shape that passed on 2026-09-25: RHO and BETA), and the
+# constant nudged one ulp.
+_ODE_TRANSPOSE = {"lorenz63-rk4": ("RHO", "BETA"),
+                  "lorenz96-rk4": ("H2", "H6"),
+                  "henonheiles-lf": ("ONE", "TWO")}
+_ODE_NUDGE = {"lorenz63-rk4": "RHO", "lorenz96-rk4": "F",
+              "henonheiles-lf": "H"}
+
+
+# ---- the textbook arm --------------------------------------------------
+#
+# Written from the textbooks, not from gen_odes.py or ode_step: each
+# vector field in its textbook vector form (Lorenz-96 by cyclic indexing
+# of the whole ring, not by the program's sliding window), classic
+# Runge-Kutta from its published Butcher tableau through a generic
+# explicit stepper rather than hand-written stages, and Stormer-Verlet
+# from its textbook drift-kick-drift update with the Henon-Heiles force
+# taken out of the potential V by dual numbers rather than derived by
+# hand. Exact rationals throughout, from the standard library, so this
+# arm never skips.
+
+
+class _Tb:
+    """An exact value `v` with the two numbers its rounding bound needs:
+    `a`, the same expression evaluated over absolute values - the sum of
+    |t| over the terms t of its expansion - and `k`, the most roundings
+    any of those terms can pass through when a program evaluates the
+    same expression in floating point. An operation counts one; a
+    product counts both factors' and one; a sum of n terms counts n - 1
+    whatever its association (_tb_sum); the step multiples h a_ij and
+    h b_i count as carried rounded once (_tb_rounded), as a bank carries
+    H6. A program that evaluates the same expression - fused or not,
+    reassociated or not - leaves each term with at most k factors
+    (1 + d), |d| <= u = 2^-p under round to nearest, so
+
+        |program - v| <= gamma_k a,   gamma_k = k u / (1 - k u)
+
+    (the gamma_n lemma: Higham, Accuracy and Stability of Numerical
+    Algorithms, chapter 3; no value here comes near the subnormal
+    range). Nothing in the bound is chosen: u is the format's, k and a
+    are the textbook step's own. Measured once for the six shipped
+    images from this arm's states (2026-09-25, an exact run of each
+    image's step carrying the same k and a through ITS operations): in
+    every component the program's own k is 11 to 62 below this k, its a
+    is this a to 17 digits, and its exact result is within 0.23 u a of
+    this v (H6 is RN(h/6), not h/6) - so the bound holds with room."""
+
+    __slots__ = ("v", "a", "k")
+
+    def __init__(self, v, a, k):
+        self.v, self.a, self.k = v, a, k
+
+    def __add__(self, o):
+        return _Tb(self.v + o.v, self.a + o.a, max(self.k, o.k) + 1)
+
+    def __sub__(self, o):
+        return _Tb(self.v - o.v, self.a + o.a, max(self.k, o.k) + 1)
+
+    def __mul__(self, o):
+        return _Tb(self.v * o.v, self.a * o.a, self.k + o.k + 1)
+
+
+def _tb_exact(v):
+    """An input, or a constant a program holds exactly."""
+    v = Fraction(v)
+    return _Tb(v, abs(v), 0)
+
+
+def _tb_rounded(v):
+    """A constant a program may carry rounded once (h/6, h/3, h/2)."""
+    v = Fraction(v)
+    return _Tb(v, abs(v), 1)
+
+
+def _tb_sum(terms):
+    return _Tb(sum((t.v for t in terms), Fraction(0)),
+               sum((t.a for t in terms), Fraction(0)),
+               max(t.k for t in terms) + len(terms) - 1)
+
+
+def _tb_lorenz63(P):
+    """Lorenz (1963): x' = sigma (y - x), y' = x (rho - z) - y,
+    z' = x y - beta z."""
+    sigma, rho, beta = P["SIGMA"], P["RHO"], P["BETA"]
+
+    def f(Y):
+        x, y, z = Y
+        return [sigma * (y - x), x * (rho - z) - y, x * y - beta * z]
+    return f
+
+
+def _tb_lorenz96(P):
+    """Lorenz (1996): x_i' = (x_(i+1) - x_(i-2)) x_(i-1) - x_i + F, the
+    indices cyclic over the whole ring."""
+    F = P["F"]
+
+    def f(X):
+        N = len(X)
+        return [(X[(i + 1) % N] - X[(i - 2) % N]) * X[(i - 1) % N]
+                - X[i] + F for i in range(N)]
+    return f
+
+
+# The classic fourth-order Runge-Kutta method's tableau (Butcher,
+# Numerical Methods for Ordinary Differential Equations): A below the
+# diagonal, row by row, and the weights b; c = (0, 1/2, 1/2, 1) is
+# implied by A's row sums.
+_RK4_TABLEAU = (((), (Fraction(1, 2),), (Fraction(0), Fraction(1, 2)),
+                 (Fraction(0), Fraction(0), Fraction(1))),
+                (Fraction(1, 6), Fraction(1, 3), Fraction(1, 3),
+                 Fraction(1, 6)))
+
+
+def _tb_erk(f, h, Y, tableau):
+    """One step of the explicit Runge-Kutta method `tableau` = (A, b):
+    k_i = f(Y + h sum_j a_ij k_j), Y + h sum_i b_i k_i."""
+    A, b = tableau
+    ks = []
+    for i in range(len(b)):
+        Yi = [_tb_sum([Y[m]] + [_tb_rounded(h * A[i][j]) * ks[j][m]
+                                for j in range(i) if A[i][j]])
+              for m in range(len(Y))]
+        ks.append(f(Yi))
+    return [_tb_sum([Y[m]] + [_tb_rounded(h * b[i]) * ks[i][m]
+                              for i in range(len(b)) if b[i]])
+            for m in range(len(Y))]
+
+
+class _Dual:
+    """Forward-mode differentiation: a value and its derivative, both
+    _Tb, so the derivative carries its own rounding bound."""
+
+    __slots__ = ("x", "d")
+
+    def __init__(self, x, d):
+        self.x, self.d = x, d
+
+    def __add__(self, o):
+        return _Dual(self.x + o.x, self.d + o.d)
+
+    def __sub__(self, o):
+        return _Dual(self.x - o.x, self.d - o.d)
+
+    def __mul__(self, o):
+        return _Dual(self.x * o.x, self.d * o.x + self.x * o.d)
+
+
+def _tb_henon_heiles_V(x, y, half, third):
+    """Henon and Heiles (1964): V = (x^2 + y^2)/2 + x^2 y - y^3/3."""
+    return (x * x + y * y) * half + x * x * y - y * y * y * third
+
+
+def _tb_grad_V(q):
+    zero, one = _tb_exact(0), _tb_exact(1)
+    half = _Dual(_tb_exact(Fraction(1, 2)), zero)
+    third = _Dual(_tb_exact(Fraction(1, 3)), zero)
+    out = []
+    for j in range(len(q)):
+        args = [_Dual(qi, one if i == j else zero) for i, qi in enumerate(q)]
+        out.append(_tb_henon_heiles_V(*args, half, third).d)
+    return out
+
+
+def _tb_verlet(h, S):
+    """Stormer-Verlet, drift-kick-drift, for H = |p|^2/2 + V(q):
+    q' = q + h/2 p, p1 = p - h grad V(q'), q1 = q' + h/2 p1."""
+    q, p = S[:2], S[2:]
+    half_h, full_h = _tb_rounded(h / 2), _tb_exact(h)
+    qh = [qi + half_h * pi for qi, pi in zip(q, p)]
+    p1 = [pi - full_h * gi for pi, gi in zip(p, _tb_grad_V(qh))]
+    q1 = [qi + half_h * pi for qi, pi in zip(qh, p1)]
+    return q1 + p1
+
+
+def _tb_step(base, P, h, Y):
+    """The textbook step of row `base` from Y (a list of _Tb)."""
+    if base == "henonheiles-lf":
+        return _tb_verlet(h, Y)
+    f = _tb_lorenz63(P) if base == "lorenz63-rk4" else _tb_lorenz96(P)
+    return _tb_erk(f, h, Y, _RK4_TABLEAU)
+
+
+_TB_NEEDS = {"lorenz63-rk4": ("H", "SIGMA", "RHO", "BETA"),
+             "lorenz96-rk4": ("H", "F"), "henonheiles-lf": ("H",)}
+
+
+def _tb_params(base, fmt, names, bits):
+    """-> (h, {name: _Tb}): the step and the system's parameters, taken
+    from the bank BY THE NAMES the source declares - the bank arm holds
+    each name to its definition. Raises, naming what is missing."""
+    byname = dict(zip(names, bits))
+    missing = [c for c in _TB_NEEDS[base] if c not in byname]
+    if missing:
+        raise ValueError(f"the source declares no {', '.join(missing)}")
+    P = {c: _tb_exact(_frac(fmt, byname[c])) for c in _TB_NEEDS[base]}
+    return P["H"].v, P
+
+
+def _tb_states(base, fmt, n):
+    """n generic starting states, lane-major bits, far from every
+    equilibrium. Classic Runge-Kutta and the 3/8 rule share their whole
+    linear behaviour, so only a state where the nonlinear terms are as
+    large as the linear ones can tell them apart - which the rk38
+    controls show these do, every run."""
+    rng = random.Random({"lorenz63-rk4": 1963, "lorenz96-rk4": 1996,
+                         "henonheiles-lf": 1964}[base])
+
+    def d(lo, hi):
+        return chars.from_decimal(fmt, f"{rng.uniform(lo, hi):.6f}",
+                                  sf.RND_RNE)[0]
+    out = []
+    for _ in range(n):
+        if base == "lorenz63-rk4":
+            out += [d(-15, 15), d(-20, 20), d(5, 40)]
+        elif base == "lorenz96-rk4":
+            out += [d(-4, 12) for _ in range(gen_odes.L96_N)]
+        else:
+            out += [d(-0.4, 0.4), d(-0.4, 0.4), d(-0.3, 0.3), d(-0.3, 0.3)]
+    return out
+
+
+def _tb_runs(image, base, bank, s_in, n, trips):
+    """{trip: seq.Result} - the program after `trip` steps from s_in: the
+    same image with its one REPEAT's trip count changed (_patch_trip, as
+    the resume arm builds its long run), through the golden executor."""
+    out = {}
+    for t in trips:
+        img = _patch_trip(image, gen_odes.STEPS[base], t, 0)
+        out[t] = seq.run(seq.Program.from_bytes(img.to_bytes()), [0] * n,
+                         [0] * n, None, bank=bank, scratch_in=s_in)
+    return out
+
+
+def _tb_worst(fmt, got, refs):
+    """max over every component of |program - exact| / (gamma_k a); a
+    component whose bound is 0 (every term exact) is infinitely far if it
+    is not exact. `got` is lane-major bits, `refs` a list of _Tb a lane."""
+    u = Fraction(1, 2 ** fmt.prec)
+    flat = [r for lane in refs for r in lane]
+    if len(got) != len(flat):
+        return float("inf")         # a run of the wrong shape is no match
+    worst = Fraction(0)
+    for bits, r in zip(got, flat):
+        e = abs(_frac(fmt, bits) - r.v)
+        tol = r.k * u / (1 - r.k * u) * r.a
+        if tol == 0:
+            if e:
+                return float("inf")
+            continue
+        worst = max(worst, e / tol)
+    return worst
 
 
 def check_ode(args, name, image, image_path, tmp):
     base, fmtname = _ode_base(name)
     fmt = FORMATS[fmtname]
-    esz = fmt.width // 8
-    src = (HERE / (name + ".cfta")).read_text(encoding="utf-8")
+    nstate = _ODE_NSTATE[base]
     bank_path = HERE / (name + ".classic.bank")
 
     # -- generated ---------------------------------------------------------
-    want_src = gen_odes.GENERATORS[base](fmtname)
+    have_src = (HERE / (name + ".cfta")).read_bytes()
+    have_bank = bank_path.read_bytes() if bank_path.exists() else None
+    want_src = gen_odes.GENERATORS[base](fmtname).encode("ascii")
     want_bank = gen_odes.bank_bytes(base, fmt)
-    if src != want_src or not bank_path.exists() or \
-            bank_path.read_bytes() != want_bank:
+
+    def generated(src_bytes):
+        return src_bytes == want_src and have_bank == want_bank
+
+    if not generated(have_src):
         bad(f"{name}: generated", "the committed source or bank is not "
-                                  "gen_odes.py's output - run it")
+                                  "gen_odes.py's output, byte for byte - "
+                                  "run it")
         return
     ok(f"{name}: source and bank are gen_odes.py's output, byte for byte")
+    crlf = have_src.replace(b"\n", b"\r\n")
+    if generated(crlf):
+        bad(f"{name}: NEGATIVE CONTROL FAILED TO FAIL",
+            "the source with CRLF line ends still matched the generator")
+        return
+    ok(f"{name}: NEGATIVE CONTROL - the same source with CRLF line ends "
+       f"is refused", f"{len(crlf) - len(have_src)} bytes more")
+    src = have_src.decode("ascii")
 
-    # -- bank ---------------------------------------------------------------
-    names = [n for n, _v in gen_odes.bank_values(base, fmt)]
-    K = values(bank_path.read_bytes(), fmt)
-    byname = dict(zip(names, K))
-    exact = _bank_derivations(base)
-    from fractions import Fraction as Fr
-    problems = []
-    for cname, bits in zip(names, K):
-        if cname in exact:
-            if not _nearest(fmt, bits, exact[cname]):
-                problems.append(f"{cname} is not RN({exact[cname]})")
-        elif cname == "H2":
-            if _frac(fmt, bits) != _frac(fmt, byname["H"]) / 2:
-                problems.append("H2 is not exactly H / 2")
-        elif cname == "H6":
-            if not _nearest(fmt, bits, _frac(fmt, byname["H"]) / 6):
-                problems.append("H6 is not RN(H / 6)")
-        elif cname == "MH":
-            if _frac(fmt, bits) != -_frac(fmt, byname["H"]):
-                problems.append("MH is not exactly -H")
-        else:
-            problems.append(f"{cname} has no derivation here")
+    # -- bank, slot by slot under the names the source declares ---------------
+    simg = asm.assemble_image(src, name)
+    if simg.to_bytes() != image:
+        bad(f"{name}: bank", "the source's own assembly is not the image "
+                             "checked above, so its names are not this "
+                             "image's")
+        return
+    names = list(simg.const_names)
+    K = values(have_bank, fmt)
+    problems = _bank_problems(fmt, base, names, K)
     if problems:
         bad(f"{name}: bank", "; ".join(problems))
         return
-    ok(f"{name}: the {len(K)} bank values are the correctly rounded values "
-       f"of their definitions", ", ".join(names))
+    ok(f"{name}: each of the {len(K)} bank values is the correctly rounded "
+       f"value of the definition of the name the source gives its slot",
+       ", ".join(names))
+    vals = gen_odes.bank_values(base, fmt)
+    order = [c for c, _v in vals]
+    ta, tb = _ODE_TRANSPOSE[base]
+    moved = [v for _c, v in vals]
+    moved[order.index(ta)], moved[order.index(tb)] = \
+        moved[order.index(tb)], moved[order.index(ta)]
+    nudged = [v for _c, v in vals]
+    nudged[order.index(_ODE_NUDGE[base])] += 1
+    for what, bits in ((f"bank_values with {ta} and {tb} transposed", moved),
+                       (f"bank_values with {_ODE_NUDGE[base]} one ulp off",
+                        nudged)):
+        why = _bank_problems(fmt, base, names, bits)
+        if not why:
+            bad(f"{name}: NEGATIVE CONTROL FAILED TO FAIL",
+                f"{what} passed the bank check")
+            return
+        ok(f"{name}: NEGATIVE CONTROL - {what} is refused", "; ".join(why))
 
     # -- static --------------------------------------------------------------
     img = asm.Image.from_bytes(image)
-    nstate = gen_odes.L96_N if base == "lorenz96-rk4" else \
-        (3 if base == "lorenz63-rk4" else 4)
     feats = set(img.features())
     if (img.flags != (asm.FLAG_BANK_EXT | asm.FLAG_SCRATCH_IO) or
             img.max_deposits != 0 or img.n_consts != len(K) or
@@ -1716,12 +2065,21 @@ def check_ode(args, name, image, image_path, tmp):
     ok(f"{name}: BANK_EXT and SCRATCH_IO, no deposits, {nstate} slots in "
        f"and out, {len(K)} bank values", " ".join(img.features()))
 
+    # The textbook arm's states, and the program's first two steps from
+    # them through the golden executor. The census reads that executor's
+    # instruction count off the same two runs.
+    n_tb = 2 if base == "lorenz96-rk4" else 4
+    s_tb = _tb_states(base, fmt, n_tb)
+    runs = _tb_runs(image, base, K, s_tb, n_tb, (1, 2))
+
     # -- census ----------------------------------------------------------------
-    alu = ctl = depth = 0
+    alu = ctl = depth = loops = deepest = 0
     for word in img.insns:
         dd = asm.decode(word)
         if dd["ctrl"] and dd["op"] == asm.REPEAT:
             depth += 1
+            loops += 1
+            deepest = max(deepest, depth)
             continue
         if dd["ctrl"] and dd["op"] == asm.ENDREP:
             depth -= 1
@@ -1738,13 +2096,20 @@ def check_ode(args, name, image, image_path, tmp):
             # stores and loads a component over the four stages
             "lorenz96-rk4": (19 * N, 4 * (N + 3) + 13 * N),
             "henonheiles-lf": (12, 0)}[base]
-    if (alu, ctl) != want:
-        bad(f"{name}: census", f"{alu} ALU and {ctl} control codes a step; "
-                               f"the structure says {want[0]} and {want[1]}")
+    per_step = runs[2].insns_executed - runs[1].insns_executed
+    if (alu, ctl) != want or (loops, deepest) != (1, 1) or \
+            per_step != alu + ctl + 1:
+        bad(f"{name}: census", f"{alu} ALU and {ctl} control codes a step "
+            f"besides the ENDREP, {loops} loop(s) {deepest} deep, and the "
+            f"golden executor runs {per_step} instructions a step; the "
+            f"structure says {want[0]} and {want[1]}, one loop, and "
+            f"{want[0] + want[1] + 1}")
         return
     ok(f"{name}: census - a lane-step is {alu} ALU instructions and {ctl} "
-       f"control codes ({100.0 * ctl / (alu + ctl):.1f}% control), "
-       f"{len(img.insns)} instructions in all")
+       f"control codes besides the loop's ENDREP "
+       f"({100.0 * ctl / (alu + ctl):.1f}% of those {alu + ctl}); the golden "
+       f"executor runs {per_step} a step, the ENDREP included",
+       f"{len(img.insns)} instructions in the image")
 
     # -- identity -----------------------------------------------------------------
     steps = gen_odes.STEPS[base]
@@ -1753,7 +2118,7 @@ def check_ode(args, name, image, image_path, tmp):
     ap, bp = tmp / (name + ".a.bin"), tmp / (name + ".bank")
     sip, sop = tmp / (name + ".s0.bin"), tmp / (name + ".s1.bin")
     ap.write_bytes(pack([0] * n, fmt))
-    bp.write_bytes(bank_path.read_bytes())
+    bp.write_bytes(have_bank)
     sip.write_bytes(pack(s_in, fmt))
     dep, rep = run_image(args, image_path, tmp, name, a=ap, bank=bp,
                          scratch_in=sip, scratch_out=sop)
@@ -1770,14 +2135,14 @@ def check_ode(args, name, image, image_path, tmp):
     if not (len(lib) == n * nstate and lib == gold.scratch_out == ref and
             gold.status == 0 and ref != s_in):
         which = ("library != golden" if lib != gold.scratch_out else
-                 "golden != reference" if gold.scratch_out != ref else
+                 "golden != ode_step" if gold.scratch_out != ref else
                  "the state did not move" if ref == s_in else
                  f"status {gold.status}")
         bad(f"{name}: identity", which)
         return
-    ok(f"{name}: the library's executor, the golden model's and a reference "
-       f"written from the equations agree bit for bit",
-       f"{n} lanes x {steps} steps, scratch-out "
+    ok(f"{name}: the library's executor, the golden model's and ode_step - "
+       f"this file's mirror of the program's rounding order - agree bit "
+       f"for bit", f"{n} lanes x {steps} steps, scratch-out "
        f"{hashlib.sha256(sop.read_bytes()).hexdigest()[:16]}")
 
     # the control: one instruction's operands swapped must be caught
@@ -1794,10 +2159,69 @@ def check_ode(args, name, image, image_path, tmp):
                    bank=K, scratch_in=s_in)
     if mres.scratch_out == ref:
         bad(f"{name}: NEGATIVE CONTROL FAILED TO FAIL",
-            f"{old.strip()} -> {new.strip()} still matched the reference")
+            f"{old.strip()} -> {new.strip()} still matched ode_step")
         return
     ok(f"{name}: NEGATIVE CONTROL - `{new.strip()}` in place of "
        f"`{old.strip()}` is caught by the same comparison")
+
+    # -- textbook -------------------------------------------------------------
+    scheme = ("Stormer-Verlet step" if base == "henonheiles-lf" else
+              "classic Runge-Kutta step")
+    try:
+        h, P = _tb_params(base, fmt, names, K)
+    except ValueError as exc:
+        bad(f"{name}: textbook", str(exc))
+        return
+
+    def refs_from(block, h=h, P=P):
+        return [_tb_step(base, P, h, [_tb_exact(_frac(fmt, b)) for b in
+                                      block[i * nstate:(i + 1) * nstate]])
+                for i in range(n_tb)]
+    got1, got2 = runs[1].scratch_out, runs[2].scratch_out
+    refs1 = refs_from(s_tb)
+    worst = max(_tb_worst(fmt, got1, refs1),
+                _tb_worst(fmt, got2, refs_from(got1)))
+    if not (worst <= 1 and got1 != s_tb and got2 != got1 and
+            runs[1].status == 0 and runs[2].status == 0):
+        bad(f"{name}: textbook", f"the program's step is {float(worst):.3g} "
+            f"x the rounding bound from the textbook {scheme}"
+            if worst > 1 else "the state did not move, or the run's status "
+            "is not 0")
+        return
+    ok(f"{name}: its first two steps from {n_tb} states are the textbook "
+       f"{scheme} in exact rationals, within gamma_k a",
+       f"worst {float(worst):.3g} of the bound, k up to "
+       f"{max(r.k for lane in refs1 for r in lane)}")
+    for mutant, what in gen_odes.MUTANTS[base].items():
+        text = gen_odes.GENERATORS[base](fmtname, mutant=mutant)
+        if text == src:
+            bad(f"{name}: NEGATIVE CONTROL FAILED TO FAIL",
+                f"gen_odes.py's {mutant} switch changed nothing")
+            return
+        mimg = asm.assemble_image(text, f"{name}-{mutant}")
+        mvals = dict(gen_odes.bank_values(base, fmt, mutant=mutant))
+        lost = [c for c in mimg.const_names if c not in mvals]
+        if lost:
+            bad(f"{name}: control {mutant}", f"its bank has no "
+                                             f"{', '.join(lost)}")
+            return
+        mbank = [mvals[c] for c in mimg.const_names]
+        try:
+            mh, mP = _tb_params(base, fmt, mimg.const_names, mbank)
+        except ValueError as exc:
+            bad(f"{name}: control {mutant}", str(exc))
+            return
+        same = mh == h and all(mP[c].v == P[c].v for c in P)
+        mres = _tb_runs(mimg.to_bytes(), base, mbank, s_tb, n_tb, (1,))[1]
+        r = _tb_worst(fmt, mres.scratch_out,
+                      refs1 if same else refs_from(s_tb, mh, mP))
+        if not r > 1:
+            bad(f"{name}: NEGATIVE CONTROL FAILED TO FAIL",
+                f"{what}, written by gen_odes.py, is within the bound "
+                f"({float(r):.3g} of it)")
+            return
+        ok(f"{name}: NEGATIVE CONTROL - {what}, written by gen_odes.py's "
+           f"test-only switch, is refused", f"{float(r):.3g} x the bound")
 
     # -- scheme ----------------------------------------------------------------------
     if mpmath is None:
@@ -1832,40 +2256,181 @@ def check_ode(args, name, image, image_path, tmp):
                 f"worst relative deviation {mpmath.nstr(worst, 4)}, ceiling "
                 f"{mpmath.nstr(ceiling, 4)} (it must be above 0 and below)")
             return
-        ok(f"{name}: within round-off of the same scheme at 300 digits",
-           f"worst relative deviation {mpmath.nstr(worst, 4)} against a "
-           f"{mpmath.nstr(ceiling, 3)} ceiling (steps^2 2^-(p-1) x 64)")
+        ok(f"{name}: within round-off of ode_step's scheme at 300 digits "
+           f"over all {steps} steps", f"worst relative deviation "
+           f"{mpmath.nstr(worst, 4)} against a {mpmath.nstr(ceiling, 3)} "
+           f"ceiling (steps^2 2^-(p-1) x 64)")
         if not control:
             bad(f"{name}: NEGATIVE CONTROL FAILED TO FAIL",
                 f"a wrong scheme is within the ceiling "
                 f"({mpmath.nstr(worst_mut, 4)})")
             return
-        ok(f"{name}: NEGATIVE CONTROL - the program against a WRONG scheme "
-           f"(a weight or a kick changed) exceeds the ceiling",
+        ok(f"{name}: NEGATIVE CONTROL - the program against ode_step with "
+           f"a weight or a kick changed exceeds the ceiling",
            f"{mpmath.nstr(worst_mut, 4)}")
 
     # -- resume -------------------------------------------------------------------------
     long_img = _patch_trip(image, steps, 2 * steps, 0)
     lp = tmp / (name + ".long.cftp")
     lp.write_bytes(long_img.to_bytes())
-    s2 = tmp / (name + ".s2.bin")
-    dep2, rep2 = run_image(args, image_path, tmp, name + "-2", a=ap, bank=bp,
-                           scratch_in=sop, scratch_out=s2)
     sl = tmp / (name + ".sl.bin")
     depl, repl = run_image(args, lp, tmp, name + "-long", a=ap, bank=bp,
                            scratch_in=sip, scratch_out=sl)
-    if dep2 is None or depl is None:
-        bad(f"{name}: resume runs", rep2 if dep2 is None else repl)
+    if depl is None:
+        bad(f"{name}: resume, the long run", repl)
         return
-    two, one = s2.read_bytes(), sl.read_bytes()
-    flipped = bytearray(two)
-    flipped[len(flipped) // 2] ^= 1
-    if two != one or bytes(flipped) == one or two == sop.read_bytes():
+    one = sl.read_bytes()
+    first = sop.read_bytes()
+
+    def second(block, tag):
+        """The second segment entered with `block` -> its scratch-out
+        bytes, or None having recorded a failure. The claim and its
+        control both go through here, and that is what makes the control
+        worth running: once the claim has passed, a deterministic
+        executor entered with the ORIGINAL state must give back the first
+        segment's output, which the claim has just shown is not the long
+        run's - so the control can only fail to fail if this path stops
+        handing the segment the block it was given. (The flipped bit it
+        replaces watched nothing: a copy of `two` with one bit flipped
+        cannot equal `one` once `two == one`.) A one-ulp change to one
+        carried slot is NOT a usable control here: in some lanes of four
+        of the six rows it merges back bit for bit before the segment
+        ends - measured 2026-09-25, through both executors."""
+        bin_in = tmp / f"{name}.{tag}.in.bin"
+        bin_out = tmp / f"{name}.{tag}.out.bin"
+        bin_in.write_bytes(block)
+        d, r = run_image(args, image_path, tmp, f"{name}-{tag}", a=ap,
+                         bank=bp, scratch_in=bin_in, scratch_out=bin_out)
+        if d is None:
+            bad(f"{name}: resume, the second segment ({tag})", r)
+            return None
+        return bin_out.read_bytes()
+
+    two = second(first, "chained")
+    if two is None:
+        return
+    if two != one or two == first:
         bad(f"{name}: resume", "two chained segments are not one segment of "
                                "twice the steps")
         return
     ok(f"{name}: two segments chained through the scratch block ARE one "
-       f"segment of {2 * steps} steps; one flipped bit is caught")
+       f"segment of {2 * steps} steps")
+    orig = second(sip.read_bytes(), "original")
+    if orig is None:
+        return
+    if orig == one:
+        bad(f"{name}: NEGATIVE CONTROL FAILED TO FAIL", "the second segment "
+            "entered with the original state still matched the long run")
+        return
+    ok(f"{name}: NEGATIVE CONTROL - the second segment entered with the "
+       f"original state instead is not the long run")
+
+
+# ================= main =================================================
+
+def read_manifest(path):
+    """-> ({image name: digest}, [problem]). A missing MANIFEST, one that
+    lists nothing, a line that is not `sha256 name`, and a name listed
+    twice are each a problem, by name - never a quieter run."""
+    if not path.exists():
+        return {}, [f"{path.name} is missing"]
+    manifest, problems = {}, []
+    for lineno, line in enumerate(path.read_text().splitlines(), 1):
+        if line.startswith("#") or not line.strip():
+            continue
+        parts = line.split()
+        if len(parts) != 2 or len(parts[0]) != 64 or \
+                parts[0].strip("0123456789abcdef"):
+            problems.append(f"line {lineno} is not `sha256 image`")
+        elif parts[1] in manifest:
+            problems.append(f"{parts[1]} is listed twice (line {lineno})")
+        else:
+            manifest[parts[1]] = parts[0]
+    if not manifest and not problems:
+        problems.append("it lists no image")
+    return manifest, problems
+
+
+def manifest_gaps(manifest, stems):
+    """-> (MANIFEST lines whose source is gone, sources with no line):
+    `stems` are the .cfta sources' stems, `manifest` read_manifest's."""
+    built = {s + ".cftp" for s in stems}
+    return (sorted(set(manifest) - built),
+            sorted(s for s in stems if s + ".cftp" not in manifest))
+
+
+def check_manifest_complete(manifest, stems):
+    """Every MANIFEST line has a source and every source a line. With
+    lorenz96-rk4-fp256.cfta deleted this script once said 173 passed,
+    and with every source deleted "2 passed ... 0 images", exit 0:
+    nothing asked that a line still had its source. The control takes
+    one source away from the same comparison, which must name it."""
+    gone, unlisted = manifest_gaps(manifest, stems)
+    for image_name in gone:
+        bad(f"{image_name[:-len('.cftp')]}: MANIFEST",
+            "a line for an image with no source - the row vanished, or "
+            "the line is stale (`make programs` rewrites it)")
+    for stem in unlisted:
+        bad(f"{stem}: MANIFEST", "a source with no line")
+    if gone or unlisted or not stems:
+        return
+    taken = "lorenz96-rk4-fp256" if "lorenz96-rk4-fp256" in stems \
+        else stems[len(stems) // 2]
+    gone2, _unlisted2 = manifest_gaps(manifest,
+                                      [s for s in stems if s != taken])
+    if gone2 != [taken + ".cftp"]:
+        bad("MANIFEST: NEGATIVE CONTROL FAILED TO FAIL",
+            f"with {taken}.cfta taken away the comparison named {gone2}")
+        return
+    ok(f"MANIFEST: each of its {len(manifest)} lines has a source, and "
+       f"each of the {len(stems)} sources a line")
+    ok(f"MANIFEST: NEGATIVE CONTROL - {taken}.cfta taken away is named")
+
+
+def _gen_odes_check(where=None):
+    """gen_odes.main(["--check"]) in this process -> (exit code, its
+    lines). `where` points it at a copy of its files - the control's
+    only use - and gen_odes.HERE is put back whatever happens."""
+    saved = gen_odes.HERE
+    buf = io.StringIO()
+    try:
+        if where is not None:
+            gen_odes.HERE = Path(where)
+        with contextlib.redirect_stdout(buf):
+            rc = gen_odes.main(["--check"])
+    finally:
+        gen_odes.HERE = saved
+    return rc, buf.getvalue().splitlines()
+
+
+def check_gen_odes(tmp):
+    """gen_odes.py's own --check: every file it owns exists and is its
+    output byte for byte. Nothing ran it before 2026-09-25, so a missing
+    or CRLF generated file passed. Control: the same check over a copy
+    of its files with one deleted and one given CRLF line ends must name
+    both."""
+    rc, lines = _gen_odes_check()
+    if rc != 0:
+        bad("gen_odes.py --check", "; ".join(lines))
+        return
+    ok("gen_odes.py --check", lines[-1] if lines else "")
+    copy = tmp / "gen_odes-control"
+    copy.mkdir()
+    for fname in gen_odes.outputs():
+        shutil.copyfile(HERE / fname, copy / fname)
+    gone, crlf = "lorenz96-rk4-fp256.cfta", "henonheiles-lf-fp64.cfta"
+    (copy / gone).unlink()
+    (copy / crlf).write_bytes(
+        (copy / crlf).read_bytes().replace(b"\n", b"\r\n"))
+    rc2, lines2 = _gen_odes_check(copy)
+    named = (any(gone in s and "missing" in s for s in lines2) and
+             any(crlf in s and "differs" in s for s in lines2))
+    if rc2 == 0 or not named:
+        bad("gen_odes.py --check: NEGATIVE CONTROL FAILED TO FAIL",
+            f"exit {rc2}: {'; '.join(lines2)}")
+        return
+    ok(f"gen_odes.py --check: NEGATIVE CONTROL - {gone} deleted and {crlf} "
+       f"with CRLF line ends are both named", lines2[-1])
 
 
 def main():
@@ -1894,18 +2459,14 @@ def main():
           f"scratch-io {caps.get('scratch-io', '?')}, "
           f"run-path {caps.get('run-path', '?')}")
 
-    manifest = {}
-    mpath = HERE / "MANIFEST"
-    if mpath.exists():
-        for line in mpath.read_text().splitlines():
-            if line.startswith("#") or not line.strip():
-                continue
-            digest, image_name = line.split()
-            manifest[image_name] = digest
+    manifest, problems = read_manifest(HERE / "MANIFEST")
+    for problem in problems:
+        bad("MANIFEST", problem)
 
     print("\n-- the two assemblers, and the readback --")
     images = {}
-    for src in sorted(HERE.glob("*.cfta")):
+    sources = sorted(HERE.glob("*.cfta"))
+    for src in sources:
         image_path = out / (src.stem + ".cftp")
         image = assemble_both(args, src, image_path)
         if image is None:
@@ -1914,7 +2475,7 @@ def main():
         digest = hashlib.sha256(image).hexdigest()
         want = manifest.get(image_path.name)
         if want is None:
-            bad(f"{src.stem}: MANIFEST", "no line for this image")
+            pass                # named once, by check_manifest_complete
         elif want != digest:
             bad(f"{src.stem}: MANIFEST",
                 f"{digest[:16]} vs the recorded {want[:16]} - run "
@@ -1923,6 +2484,11 @@ def main():
             ok(f"{src.stem}: cft-asm == asm.py == MANIFEST",
                f"{len(image)} bytes, {digest[:16]}")
         roundtrip(args, src.stem, image, tmp)
+
+    print("\n-- the MANIFEST against the sources, and gen_odes.py's own "
+          "check --")
+    check_manifest_complete(manifest, [s.stem for s in sources])
+    check_gen_odes(tmp)
 
     print("\n-- the revision-2 corpus, in both languages --")
     check_revision2_corpus(args, tmp)

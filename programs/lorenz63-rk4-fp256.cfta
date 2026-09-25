@@ -15,7 +15,7 @@
 ;
 ; Scratch slots 0..2 carry x, y, z in and out. The state stays in
 ; registers for the whole segment: a step is 53 ALU instructions and
-; no control codes at all.
+; no control code but the loop's own ENDREP.
 
 .format   fp256
 .deposits 0

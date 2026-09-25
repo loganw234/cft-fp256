@@ -16,8 +16,8 @@
 ; sum at 160.. - 200 slots. A four-register window slides
 ; round the ring, so each component loads one new value; the other
 ; loads and stores are the stage vectors'. A step is 760 ALU
-; instructions and 692 control codes: this is the program the
-; scratch's cost is measured on.
+; instructions, 692 scratch accesses and the loop's ENDREP: this is
+; the program the scratch's cost is measured on.
 
 .format   fp256
 .deposits 0
