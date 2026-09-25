@@ -8,8 +8,8 @@
 #   make                 static + shared library and the tools
 #   make test            build, then run the contract tests and replay
 #                        the published vectors through the library
-#   make profiles-check  compile the library at each reduced build
-#                        profile docs/EMBEDDED.md names, which
+#   make profiles-check  compile the library at every build profile
+#                        and every cft_config.h switch alone, which
 #                        nothing that builds the default one does
 #   make examples-lang   the C/Python identity check again, for the
 #                        optional toolchains: C++, Julia, Rust, Go, C#
@@ -365,8 +365,8 @@ test: all $(TESTS)
 	@rm -f .out-c.txt .out-py.txt
 
 # ====================================================================
-# profiles-check - the library compiled at every reduced build profile,
-# not only at the default one.
+# profiles-check - the library compiled at every build profile and at
+# every switch on its own, not only at the default.
 #
 # include/cft_config.h's switches remove translation units, and blocks
 # inside them, so a call added outside the block that declares its
@@ -378,39 +378,103 @@ test: all $(TESTS)
 # on the implicit declaration under gcc 14 or later. `make embedded`
 # builds the tiny profiles in its loopback and would have said so, but
 # it is not a runner stage; this is, inside verify/run.sh's `libcft`.
+# And the first time each switch was compiled on its own, CFT_MAX_FORMAT
+# below 3 turned out to overwrite the stack (cft_config.h, where that
+# combination is now refused).
 #
-# The profiles are docs/EMBEDDED.md's - the ones
-# bindings/arduino/loopback/Makefile builds - less the default, which
-# `all` compiles, plus CFT_NO_PROGRAM on its own, the switch that
-# broke. Each source gets the library's own flags and
-# -Werror=implicit-function-declaration, which is an error by default
-# only from gcc 14: pinned, an older compiler fails the same way rather
-# than warning. Every source is compiled even after one fails, so a
-# failure names them all. The targets are phony, so every run compiles
-# everything; the object goes to one file per profile, overwritten
-# source by source and deleted at the end, so nothing is left behind
-# for a later build to take for its own.
+# What it compiles, the fifteen sources each, with the library's flags:
 #
-# One target per profile, its defines a target-specific variable: `make
-# -j` runs the profiles side by side, and no lookup keyed on a stem can
-# leave a profile compiled with no defines at all, the failure
-# bindings/arduino/loopback/Makefile records.
+#   the profiles docs/EMBEDDED.md names - CFT_TINY, CFT_TINY at fp128,
+#     the 32-bit boards' - and the default;
+#   every cft_config.h switch alone - the ten CFT_NO_ module switches,
+#     CFT_CHUNK and CFT_ERRMSG_MAX at their tiny values, the ARDUINO
+#     auto-profile, and CFT_MAX_FORMAT=0 with the CFT_NO_TRANSCEND it
+#     needs;
+#   the combinations cft_config.h refuses - CFT_MAX_FORMAT 2, 1 and 0
+#     alone, and CFT_BN_LIMBS=18 alone. There EVERY source must fail,
+#     and with the refusing #error's own words: a refusal that stops
+#     being raised, or a build that fails for some other reason, fails
+#     the check.
+#
+# Three warnings are errors here, the three that have found something:
+# implicit-function-declaration (the divsqrt.c call; an error by default
+# only from gcc 14, so pinned, and an older compiler fails the same
+# way), array-bounds and aggressive-loop-optimizations (gcc's two
+# reports of mpfloat.c's copy into a narrowed cft_bn). The last is
+# gcc's own; a compiler that does not know it (clang) is not given it,
+# which a probe decides once, the first time the flags are expanded.
+#
+# Every source is compiled even after one fails, so a failure names
+# them all. The targets are phony, so every run compiles everything;
+# the object goes to one file per target, overwritten source by source
+# and deleted at the end, so nothing is left behind for a later build
+# to take for its own. One target per profile, its defines a
+# target-specific variable: `make -j` runs them side by side, and no
+# lookup keyed on a stem can leave a profile compiled with no defines
+# at all, the failure bindings/arduino/loopback/Makefile records.
+# `make -k profiles-check` names every one that fails, as the runner
+# runs it.
 # ====================================================================
-PROFILE_CHECKS := profiles-check-noprogram profiles-check-tiny \
-                  profiles-check-tiny128 profiles-check-board
+PROFILE_CHECKS := \
+    profiles-check-default profiles-check-tiny profiles-check-tiny128 \
+    profiles-check-board profiles-check-arduino profiles-check-fp32 \
+    profiles-check-noprogram profiles-check-noremote \
+    profiles-check-noconformance profiles-check-notranscend \
+    profiles-check-nochars profiles-check-noformatof \
+    profiles-check-nodivsqrt profiles-check-noclause5 \
+    profiles-check-noaugmented profiles-check-noreduce \
+    profiles-check-nogetenv profiles-check-chunk8 profiles-check-errmsg1
+PROFILE_REFUSALS := \
+    profiles-check-maxformat2-refused profiles-check-maxformat1-refused \
+    profiles-check-maxformat0-refused profiles-check-bnlimbs18-refused
 
-profiles-check-noprogram: PROFILE_DEFS := -DCFT_NO_PROGRAM
-profiles-check-tiny:      PROFILE_DEFS := -DCFT_TINY
-profiles-check-tiny128:   PROFILE_DEFS := -DCFT_TINY -DCFT_MAX_FORMAT=2
-profiles-check-board:     PROFILE_DEFS := -DCFT_NO_REMOTE -DCFT_NO_CONFORMANCE
+profiles-check-default:       PROFILE_DEFS :=
+profiles-check-tiny:          PROFILE_DEFS := -DCFT_TINY
+profiles-check-tiny128:       PROFILE_DEFS := -DCFT_TINY -DCFT_MAX_FORMAT=2
+profiles-check-board:         PROFILE_DEFS := -DCFT_NO_REMOTE -DCFT_NO_CONFORMANCE
+profiles-check-arduino:       PROFILE_DEFS := -DARDUINO
+profiles-check-fp32:          PROFILE_DEFS := -DCFT_MAX_FORMAT=0 -DCFT_NO_TRANSCEND
+profiles-check-noprogram:     PROFILE_DEFS := -DCFT_NO_PROGRAM
+profiles-check-noremote:      PROFILE_DEFS := -DCFT_NO_REMOTE
+profiles-check-noconformance: PROFILE_DEFS := -DCFT_NO_CONFORMANCE
+profiles-check-notranscend:   PROFILE_DEFS := -DCFT_NO_TRANSCEND
+profiles-check-nochars:       PROFILE_DEFS := -DCFT_NO_CHARS
+profiles-check-noformatof:    PROFILE_DEFS := -DCFT_NO_FORMATOF
+profiles-check-nodivsqrt:     PROFILE_DEFS := -DCFT_NO_DIVSQRT
+profiles-check-noclause5:     PROFILE_DEFS := -DCFT_NO_CLAUSE5
+profiles-check-noaugmented:   PROFILE_DEFS := -DCFT_NO_AUGMENTED
+profiles-check-noreduce:      PROFILE_DEFS := -DCFT_NO_REDUCE
+profiles-check-nogetenv:      PROFILE_DEFS := -DCFT_NO_GETENV
+profiles-check-chunk8:        PROFILE_DEFS := -DCFT_CHUNK=8
+profiles-check-errmsg1:       PROFILE_DEFS := -DCFT_ERRMSG_MAX=1
 
+# The refusals, by the opening words of cft_config.h's #error strings,
+# quote included: gcc prints `#error "...`, clang `error: "...`, and
+# both carry the string as written.
+REFUSE_MAXFORMAT := "CFT_MAX_FORMAT below 3 needs CFT_NO_TRANSCEND:
+REFUSE_BNLIMBS   := "CFT_BN_LIMBS below 64 needs CFT_NO_TRANSCEND:
+profiles-check-maxformat2-refused: PROFILE_DEFS := -DCFT_MAX_FORMAT=2
+profiles-check-maxformat2-refused: PROFILE_REFUSAL := $(REFUSE_MAXFORMAT)
+profiles-check-maxformat1-refused: PROFILE_DEFS := -DCFT_MAX_FORMAT=1
+profiles-check-maxformat1-refused: PROFILE_REFUSAL := $(REFUSE_MAXFORMAT)
+profiles-check-maxformat0-refused: PROFILE_DEFS := -DCFT_MAX_FORMAT=0
+profiles-check-maxformat0-refused: PROFILE_REFUSAL := $(REFUSE_MAXFORMAT)
+profiles-check-bnlimbs18-refused:  PROFILE_DEFS := -DCFT_BN_LIMBS=18
+profiles-check-bnlimbs18-refused:  PROFILE_REFUSAL := $(REFUSE_BNLIMBS)
+
+# Expanded where it is used and then replaced by its own value, so the
+# probe runs once, and only in a make that runs this check.
+PROFILE_ALO = $(eval PROFILE_ALO := $(shell echo 'int x;' | $(CC) -Werror \
+    -Werror=aggressive-loop-optimizations -fsyntax-only -x c - \
+    >/dev/null 2>&1 && echo -Werror=aggressive-loop-optimizations))$(PROFILE_ALO)
 PROFILE_FLAGS = $(CSTD) $(CFLAGS) $(WARN) $(INC) $(PROFILE_DEFS) \
-                -Werror=implicit-function-declaration
+                -Werror=implicit-function-declaration -Werror=array-bounds \
+                $(PROFILE_ALO)
 
-.PHONY: profiles-check $(PROFILE_CHECKS) clean-profiles
+.PHONY: profiles-check $(PROFILE_CHECKS) $(PROFILE_REFUSALS) clean-profiles
 
-profiles-check: $(PROFILE_CHECKS)
-	@echo "profiles-check: libcft compiles at all $(words $(PROFILE_CHECKS)) reduced profiles"
+profiles-check: $(PROFILE_CHECKS) $(PROFILE_REFUSALS)
+	@echo "profiles-check: libcft compiles at all $(words $(PROFILE_CHECKS)) profiles and switches, and all $(words $(PROFILE_REFUSALS)) refused combinations are refused by name"
 
 $(PROFILE_CHECKS):
 	@echo "$@: $(CC) $(PROFILE_FLAGS) -c <each of $(words $(SRC)) sources>"
@@ -419,13 +483,28 @@ $(PROFILE_CHECKS):
 	done; \
 	rm -f $@.o; \
 	if [ -n "$$fail" ]; then \
-		echo "$@: FAILED at $(PROFILE_DEFS):$$fail"; exit 1; \
+		echo "$@: FAILED at $(or $(PROFILE_DEFS),the default):$$fail"; exit 1; \
 	fi; \
-	echo "$@: $(words $(SRC)) of $(words $(SRC)) sources compile at $(PROFILE_DEFS)"
+	echo "$@: $(words $(SRC)) of $(words $(SRC)) sources compile at $(or $(PROFILE_DEFS),the default)"
+
+$(PROFILE_REFUSALS):
+	@echo "$@: $(CC) $(PROFILE_FLAGS) -c <each of $(words $(SRC)) sources>, each to be refused"
+	@bad=; for f in $(SRC); do \
+		if $(CC) $(PROFILE_FLAGS) -c $$f -o $@.o > $@.log 2>&1; then \
+			bad="$$bad $$f(compiled)"; \
+		elif ! grep -qF '$(PROFILE_REFUSAL)' $@.log; then \
+			cat $@.log; bad="$$bad $$f(failed-otherwise)"; \
+		fi; \
+	done; \
+	rm -f $@.o $@.log; \
+	if [ -n "$$bad" ]; then \
+		echo "$@: NOT REFUSED BY NAME at $(PROFILE_DEFS):$$bad"; exit 1; \
+	fi; \
+	echo '$@: $(words $(SRC)) of $(words $(SRC)) sources refused at $(PROFILE_DEFS), each with $(PROFILE_REFUSAL)'
 
 clean: clean-profiles
 clean-profiles:
-	rm -f $(addsuffix .o,$(PROFILE_CHECKS))
+	rm -f profiles-check-*.o profiles-check-*.log
 
 # `FC ?= gfortran` looks right and does nothing: make defines FC as a
 # built-in (f77), so ?= never fires and the target silently used

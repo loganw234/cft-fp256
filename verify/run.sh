@@ -624,12 +624,14 @@ PYBIN=$(if [ "$WIN" = 1 ] && command -v python >/dev/null 2>&1; then
 # builds in seconds; a census that could be poisoned by whichever
 # platform touched the tree last is not a census.
 #
-# Then the library compiled at each reduced profile docs/EMBEDDED.md
-# names (host/Makefile's profiles-check, which says why): the default
-# build cannot see a call that only a CFT_NO_PROGRAM or CFT_TINY build
-# leaves undeclared, and one did, unseen, from 2026-09-14 to 2026-09-24.
-# It runs whether or not `test` passed, and with -k, so one log names
-# every profile that fails as well as a failing test.
+# Then the library compiled at every build profile and every
+# cft_config.h switch alone, and the combinations cft_config.h refuses
+# held to their refusal (host/Makefile's profiles-check, which says
+# why): the default build cannot see a call that only a CFT_NO_PROGRAM
+# or CFT_TINY build leaves undeclared, and one did, unseen, from
+# 2026-09-14 to 2026-09-24. It runs whether or not `test` passed, and
+# with -k, so one log names every profile that fails as well as a
+# failing test.
 #
 # The vectors: `test` replays vectors/out, and so do cpptest, the Node
 # binding and the wasm page below. The `vectors` stage regenerates
@@ -653,7 +655,7 @@ do_libcft() {
   return $rc
 }
 need host-cc python
-stage libcft "host library: build + contract tests + conformance replay + the reduced profiles compile" -- do_libcft
+stage libcft "host library: build + contract tests + conformance replay + every build profile compiles" -- do_libcft
 
 # Placed after `libcft` on purpose: make_seq_corpus.py's check loads
 # libcft through ctypes, and that stage is what builds it. Sitting

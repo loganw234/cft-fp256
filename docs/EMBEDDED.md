@@ -76,8 +76,8 @@ all fifteen is 280,248 bytes before and after.
 
 | macro | removes | default |
 |---|---|---|
-| `CFT_MAX_FORMAT` | formats above the ceiling, and sizes `CFT_BN_LIMBS` from it | 3 (fp256) |
-| `CFT_BN_LIMBS` | the width of every intermediate | 64 / 18 / 9 by ceiling |
+| `CFT_MAX_FORMAT` | formats above the ceiling, and sizes `CFT_BN_LIMBS` from it. Below 3 it needs `CFT_NO_TRANSCEND`, and without it the build stops on an `#error` that says so: the transcendentals' constants are 1,088 bits (34 limbs), which a narrowed `cft_bn` (18 or 9 limbs) cannot hold. Until 2026-09-24 the combination compiled, with a copy in `mpfloat.c` that writes past the end of one on the stack | 3 (fp256) |
+| `CFT_BN_LIMBS` | the width of every intermediate. Below 64 it needs `CFT_NO_TRANSCEND`, refused by `#error` the same way: 64 is the only width the transcendentals are built at | 64 / 18 / 9 by ceiling |
 | `CFT_CHUNK` | elements per pass in the composed operations | 4096, 32 on a board, 8 tiny |
 | `CFT_ERRMSG_MAX` | the last-error buffer and its `vsnprintf`: at 1 every refusal keeps its status and loses its sentence, and `cft_last_error()` returns `""` | 320, 1 tiny |
 | `CFT_NO_TRANSCEND` | `transcend.c`, `mpfloat.c`, `mp_2opi.h` | off |
@@ -97,19 +97,26 @@ than leaving it for the linker's `--gc-sections`, because what does not
 fit on a small part is as often a constant table as it is code, and a
 table reachable from one live function is not collected.
 
-**That every profile still compiles is checked on every host build.**
-`make -C host profiles-check`, which runs in `verify/run.sh`'s `libcft`
-stage, compiles the library's fifteen sources at `CFT_TINY`, at
-`CFT_TINY CFT_MAX_FORMAT=2`, at the boards' `CFT_NO_REMOTE
-CFT_NO_CONFORMANCE` and at `CFT_NO_PROGRAM` alone, with
-`-Werror=implicit-function-declaration`. It exists because none of
-them was compiled by any runner stage: from 2026-09-14 until
-2026-09-24 `divsqrt.c` called a function whose declaration only a
-build with the sequencer included, and with gcc 14 or later - where
-an implicit declaration is an error - neither `CFT_TINY` profile
-compiled. [The loopback](#the-loopback-and-the-negative-control)
-builds the first three from the vendored copy and runs them, under
-`make embedded`, which is not a runner stage; this only compiles them,
+**That every profile, and every switch on its own, still compiles is
+checked in the runner.** `make -C host profiles-check`, which runs in
+`verify/run.sh`'s `libcft` stage, compiles the library's fifteen
+sources at the default, at `CFT_TINY`, at `CFT_TINY CFT_MAX_FORMAT=2`,
+at the boards' `CFT_NO_REMOTE CFT_NO_CONFORMANCE`, and at each switch
+in the table above alone (the value switches at their tiny values),
+with implicit function declarations, array-bounds and
+aggressive-loop-optimizations warnings as errors. The combinations
+`cft_config.h` refuses - `CFT_MAX_FORMAT` below 3 or `CFT_BN_LIMBS`
+below 64 without `CFT_NO_TRANSCEND` - must fail in every source with
+the refusal's own words. It exists because no runner stage compiled
+any of these: from 2026-09-14 until 2026-09-24 `divsqrt.c` called a
+function whose declaration only a build with the sequencer included,
+and with gcc 14 or later - where an implicit declaration is an error -
+neither `CFT_TINY` profile compiled; and the first time each switch was
+compiled alone, a narrowed ceiling with the transcendentals left in
+turned out to write past a `cft_bn` on the stack.
+[The loopback](#the-loopback-and-the-negative-control) builds the
+three named reduced profiles from the vendored copy and runs them,
+under `make embedded`, which is not a runner stage; this only compiles,
 and needs nothing but the host compiler.
 
 None of this changes an answer. Every profile computes what the golden

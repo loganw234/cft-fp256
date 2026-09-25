@@ -268,6 +268,41 @@ which fit a 16-bit int fifteen times over) - see cft_config.h."
 #endif
 
 /* ---------------------------------------------------------------
+ * The transcendentals need the full-width cft_bn - refused otherwise
+ *
+ * "Too few limbs is loud", above, is true of bigint.c, which checks
+ * every operation's width. It is not true of the transcendentals'
+ * evaluator: mpfloat.c's cft_mp_const copies a stored constant - ln 2,
+ * pi and four more, 1,088 bits, 34 limbs each (mp_consts.h) - into a
+ * cft_bn limb by limb, with no check, so at 18 or 9 limbs it writes
+ * past the end of one on the stack, on the first transcendental that
+ * asks for a constant. gcc 16.1 at -O2 says so (-Warray-bounds at
+ * mpfloat.c's copy loop, and at transcend.c's too at 9 limbs), and
+ * nothing else would: every profile this repository builds leaves the
+ * transcendentals out when it narrows the ceiling (CFT_TINY defines
+ * CFT_NO_TRANSCEND), so no build here compiled the combination until
+ * 2026-09-24, when host/Makefile's profiles-check began compiling each
+ * switch on its own.
+ *
+ * So the combination is refused here, by name, rather than left to
+ * overwrite the stack: a narrowed ceiling, or a CFT_BN_LIMBS below the
+ * 64 that is the only width this repository builds the transcendentals
+ * at, needs CFT_NO_TRANSCEND. Making them work at a narrower width is
+ * a change to mpfloat.c, not to this file.
+ * --------------------------------------------------------------- */
+#if !defined(CFT_NO_TRANSCEND) && CFT_MAX_FORMAT < 3
+#error "CFT_MAX_FORMAT below 3 needs CFT_NO_TRANSCEND: the transcendentals' \
+constants are 1,088 bits (34 limbs) and a narrowed cft_bn (18 or 9 limbs) \
+cannot hold them - define CFT_NO_TRANSCEND, as CFT_TINY does, or leave \
+CFT_MAX_FORMAT at 3 (see cft_config.h)"
+#elif !defined(CFT_NO_TRANSCEND) && CFT_BN_LIMBS < 64
+#error "CFT_BN_LIMBS below 64 needs CFT_NO_TRANSCEND: the transcendentals' \
+constants are 1,088 bits (34 limbs) and 64 limbs is the only cft_bn they \
+are built at here - define CFT_NO_TRANSCEND, or leave CFT_BN_LIMBS at 64 \
+(see cft_config.h)"
+#endif
+
+/* ---------------------------------------------------------------
  * CFT_CHUNK - how many elements a composed operation works on at once
  *
  * divsqrt.c and clause5.c reach their answers by issuing passes over
