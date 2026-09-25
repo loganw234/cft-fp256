@@ -1094,21 +1094,29 @@ int main(void)
          * to an order with a repeated tile, which it must reject. */
         {
             static const size_t dup[4] = {0, 2, 2, 3};
-            size_t ord[64], ord2[64], nt, w, j, moved = 0, bad = 0;
+            /* Five seeds, the extremes included: until verifier-V4 read
+             * it (2026-09-25) this drew every order from 12345 alone and
+             * printed "every seeded order". */
+            static const uint64_t seeds[5] = {1u, 7u, 12345u,
+                                              0x8000000000000000ull,
+                                              0xFFFFFFFFFFFFFFFFull};
+            size_t ord[64], ord2[64], nt, w, j, s, moved = 0, bad = 0;
             for (nt = 1; nt <= 64; nt++)
                 for (w = 0; w < 8; w++) {
                     cft_tile_order(nt, 0, w, ord);
                     for (j = 0; j < nt; j++)
                         if (ord[j] != j)
                             bad++;
-                    cft_tile_order(nt, 12345, w, ord);
-                    cft_tile_order(nt, 12345, w, ord2);
-                    if (!tile_order_is_perm(ord, nt) ||
-                        memcmp(ord, ord2, nt * sizeof ord[0]))
-                        bad++;
-                    for (j = 0; j < nt; j++)
-                        if (ord[j] != j)
-                            moved++;
+                    for (s = 0; s < 5; s++) {
+                        cft_tile_order(nt, seeds[s], w, ord);
+                        cft_tile_order(nt, seeds[s], w, ord2);
+                        if (!tile_order_is_perm(ord, nt) ||
+                            memcmp(ord, ord2, nt * sizeof ord[0]))
+                            bad++;
+                        for (j = 0; j < nt; j++)
+                            if (ord[j] != j)
+                                moved++;
+                    }
                 }
             CHECK(!bad, "cft_tile_order: %lu orders not a permutation, not "
                   "the identity at seed 0, or not repeatable",
@@ -1120,7 +1128,7 @@ int main(void)
                   "permutation test");
             if (!bad && moved)
                 printf("  tile order: 64 tile counts x 8 waves, seed 0 the "
-                       "identity, every seeded order a permutation and "
+                       "identity, five seeds' orders each a permutation and "
                        "repeatable, %lu tasks moved off their tile; an order "
                        "naming a tile twice is refused\n",
                        (unsigned long)moved);

@@ -21,7 +21,7 @@
     {
       "source": "host/include/cft.h",
       "dest": "src/cft/include/cft.h",
-      "sha256": "34a02829feb99a20c235c3d3570c971d34eedfaf7c43ec2f16fc8dc907cb0f5b"
+      "sha256": "df82e866590175c706c67fd7f3d14f9f82046adb059043a53d9decd230120e55"
     },
     {
       "source": "host/include/cft_config.h",
@@ -41,7 +41,7 @@
     {
       "source": "host/src/backend.h",
       "dest": "src/cft/src/backend.h",
-      "sha256": "d03b026928bf5c0e0b578c0b3add0aca090c6aff4f1f331e3f975be8a123fe8c"
+      "sha256": "884189841d0077693940617c07ea3ebd5ed099f54181a0805b1af588b4cd1df5"
     },
     {
       "source": "host/src/backend_remote.c",
@@ -76,7 +76,7 @@
     {
       "source": "host/src/device.c",
       "dest": "src/cft/src/device.c",
-      "sha256": "06667c661f90b73aafcddb3648b6d3083cf3ae5a5517c514ccc20164bff19bcc"
+      "sha256": "d8bffcd006fe2c1d797914740a7086a539295bf419ba8987cb22b725ce160858"
     },
     {
       "source": "host/src/divfull_images.h",
@@ -166,7 +166,7 @@
     {
       "source": "host/src/tile_select.h",
       "dest": "src/cft/src/tile_select.h",
-      "sha256": "0fdef80bc5bc62dfa7ec5094e6f69fecbde44f277ab5e9be8a3bb1a031eedc86"
+      "sha256": "69e7aa2e884c5c80cf3585693556f34a32d20dddd38766ff84e024d00f91eca4"
     },
     {
       "source": "host/src/transcend.c",

@@ -211,13 +211,19 @@ static cft_buffer *buf_find(cft_device *dev, const void *p, size_t bytes,
  * the bytes could be misread - whether the reader is the tile (the
  * buffer is about to be an input) or this file itself (9.4's infinity
  * scan walks the caller's array on the host). Breaking the rule costs
- * the round trip; it never costs the answer. */
-static void buf_sync_in(cft_device *dev, const void *p, size_t bytes)
+ * the round trip; it never costs the answer.
+ *
+ * It can refuse, and the caller passes the refusal on: a resident buffer
+ * a failed run left LOST (backend_xrt.cpp, Buf::lost - the run may have
+ * written part of it over bytes that never came home) has no contents
+ * anyone can vouch for, so neither the tile nor this file may read it
+ * until the caller publishes it again (verifier-V4, 2026-09-25). */
+static cft_status buf_sync_in(cft_device *dev, const void *p, size_t bytes)
 {
     cft_buffer *b;
     (void)bytes;
     if (!dev || !p)
-        return;
+        return CFT_OK;
     /* Deliberately NOT buf_find. That one demands the whole window fit,
      * because a window that overruns must not be BOUND; this one only
      * has to decide whether the mirror about to be read is stale, and
@@ -235,10 +241,13 @@ static void buf_sync_in(cft_device *dev, const void *p, size_t bytes)
         if (qi < bi || qi - bi > b->bytes)
             continue;
 #ifdef CFT_ENABLE_XRT
-        (void)cftx_buffer_from_device(b->dbuf);
+        backend_call();
+        return (cft_status)cftx_buffer_from_device(b->dbuf);
+#else
+        return CFT_OK;
 #endif
-        return;
     }
+    return CFT_OK;
 }
 
 #ifdef CFT_ENABLE_XRT
@@ -668,7 +677,12 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
             sbytes[1] = ((io && io->idx_b) ? io->idx_b_src : n) * esz;
             sbytes[2] = ((io && io->idx_c) ? io->idx_c_src : n) * esz;
             for (r = 0; r < 3; r++) {
-                buf_sync_in(dev, strm[r], sbytes[r]);
+                {
+                    const cft_status sync_st =
+                        buf_sync_in(dev, strm[r], sbytes[r]);
+                    if (sync_st != CFT_OK)
+                        return sync_st;
+                }
                 bind_role(dev, &bd, CFT_ROLE_A + r, strm[r], sbytes[r]);
             }
         }
@@ -679,7 +693,12 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
             /* Read by the tile, so it is brought home first, exactly as
              * a, b and c are. scratch_out needs none of this: it is
              * written and not read, which is why `d` needs none. */
-            buf_sync_in(dev, io->scratch_in, io->scratch_in_bytes);
+            {
+                const cft_status sync_st =
+                    buf_sync_in(dev, io->scratch_in, io->scratch_in_bytes);
+                if (sync_st != CFT_OK)
+                    return sync_st;
+            }
             bind_role(dev, &bd, CFT_ROLE_SI, io->scratch_in,
                       io->scratch_in_bytes);
         }
@@ -705,12 +724,22 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
             for (r = 0; r < 3; r++) {
                 if (!itab[r])
                     continue;
-                buf_sync_in(dev, itab[r], n * 4u);
+                {
+                    const cft_status sync_st =
+                        buf_sync_in(dev, itab[r], n * 4u);
+                    if (sync_st != CFT_OK)
+                        return sync_st;
+                }
                 bind_role(dev, &bd, CFT_ROLE_IA + r, itab[r], n * 4u);
             }
             if (io->idx_scratch_in && io->n_scratch_in) {
                 size_t ib = n * (size_t)io->n_scratch_in * 4u;
-                buf_sync_in(dev, io->idx_scratch_in, ib);
+                {
+                    const cft_status sync_st =
+                        buf_sync_in(dev, io->idx_scratch_in, ib);
+                    if (sync_st != CFT_OK)
+                        return sync_st;
+                }
                 bind_role(dev, &bd, CFT_ROLE_ISI, io->idx_scratch_in, ib);
             }
             /* ...and the lane mask (R17), which is brought home like
@@ -728,7 +757,12 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
              * device copy is brought home first, exactly as it is for
              * a table. */
             if (io->lane_mask && io->lane_mask_bytes)
-                buf_sync_in(dev, io->lane_mask, io->lane_mask_bytes);
+                {
+                    const cft_status sync_st =
+                        buf_sync_in(dev, io->lane_mask, io->lane_mask_bytes);
+                    if (sync_st != CFT_OK)
+                        return sync_st;
+                }
         }
         backend_call();
         return cftx_program_run(dev->hw, fmt, image, image_bytes, io,
@@ -1540,9 +1574,21 @@ static cft_status run_impl(cft_device *dev,
         const size_t b_bytes = (scalar_mask & 2u) ? esz : n * esz;
         const size_t c_bytes = (scalar_mask & 4u) ? esz : n * esz;
 
-        buf_sync_in(dev, a, a_bytes);
-        buf_sync_in(dev, b, b_bytes);
-        buf_sync_in(dev, c, c_bytes);
+        {
+            const cft_status sync_st = buf_sync_in(dev, a, a_bytes);
+            if (sync_st != CFT_OK)
+                return sync_st;
+        }
+        {
+            const cft_status sync_st = buf_sync_in(dev, b, b_bytes);
+            if (sync_st != CFT_OK)
+                return sync_st;
+        }
+        {
+            const cft_status sync_st = buf_sync_in(dev, c, c_bytes);
+            if (sync_st != CFT_OK)
+                return sync_st;
+        }
         bind_role(dev, &bd, CFT_ROLE_A, a, a_bytes);
         bind_role(dev, &bd, CFT_ROLE_B, b, b_bytes);
         bind_role(dev, &bd, CFT_ROLE_C, c, c_bytes);
@@ -2243,8 +2289,16 @@ CFT_API cft_status cft_reduce(cft_device *dev,
      * for 9.4's infinity override, and the software backend reads all
      * of it. A buffer whose last writer was a run has a stale mirror
      * until this brings it home. */
-    buf_sync_in(dev, a, n * esz);
-    buf_sync_in(dev, b, n * esz);
+    {
+        const cft_status sync_st = buf_sync_in(dev, a, n * esz);
+        if (sync_st != CFT_OK)
+            return sync_st;
+    }
+    {
+        const cft_status sync_st = buf_sync_in(dev, b, n * esz);
+        if (sync_st != CFT_OK)
+            return sync_st;
+    }
 
     /* sumSquare and sumAbs are COMPOSITIONS of what is already here,
      * and are implemented as such rather than as a second tree walker.
@@ -2622,8 +2676,16 @@ CFT_API cft_status cft_reduce_seg(cft_device *dev,
     if (seg == n)
         return cft_reduce(dev, op, fmt, rnd, a, b, d, n, flags_out, bus_out);
 
-    buf_sync_in(dev, a, n * esz);
-    buf_sync_in(dev, b, n * esz);
+    {
+        const cft_status sync_st = buf_sync_in(dev, a, n * esz);
+        if (sync_st != CFT_OK)
+            return sync_st;
+    }
+    {
+        const cft_status sync_st = buf_sync_in(dev, b, n * esz);
+        if (sync_st != CFT_OK)
+            return sync_st;
+    }
 
 #ifdef CFT_ENABLE_XRT
     if (dev->backend == CFT_BACKEND_XRT) {

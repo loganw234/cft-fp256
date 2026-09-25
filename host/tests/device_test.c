@@ -4789,8 +4789,9 @@ static void check_program_capacity(cft_device *dev, cft_format fmt)
                  "channel", "this backend has no HBM channel to run past");
         return;
     }
-    if (fmt != CFT_FP32)
-        return;
+    /* At whatever format first reaches this leg: the sizes below are the
+     * element size's, and until verifier-V4 read it (2026-09-25) a run
+     * whose first format was not fp32 skipped this half without a line. */
     {
         const size_t chan = (size_t)256 << 20;
         const uint32_t slots = caps.max_deposits && caps.max_deposits < 80u
@@ -4844,7 +4845,8 @@ static void check_program_capacity(cft_device *dev, cft_format fmt)
         free(a); free(dep); free(cnt);
     }
     {
-        const size_t per = (size_t)1 << 20, n = tiles * per;
+        /* 64 MiB of deposits a tile at 16 slots: a quarter of a channel */
+        const size_t per = ((size_t)64 << 20) / (16u * esz), n = tiles * per;
         checks++;
         bytes = seq_image(img, fmt, ins, 2, NULL, 0, 16);
         if (cft_program_load(dev, img, bytes, &big) != CFT_OK) {
@@ -5015,6 +5017,278 @@ out:
     free(a); free(b); free(c); free(base); free(got); free(dbase); free(dgot);
 }
 
+/* The resident-buffer helpers are defined with the -b legs further down;
+ * the two legs below use them too, so the struct lives here and the two
+ * functions are declared. */
+struct rbuf { cft_buffer *b; uint8_t *p; };
+static int rbuf_alloc(cft_device *dev, struct rbuf *r, size_t bytes);
+static void rbuf_free(struct rbuf *r);
+
+/* A lane mask on a program whose deposit window and scratch-out block
+ * are RESIDENT (cft_alloc): a masked lane's slots must come back holding
+ * what the caller put there (docs/HOSTAPI.md, R17), whatever the
+ * device's copy held. Two shapes, each at every format:
+ *   - fresh buffers, the caller's sentinels published, one masked run;
+ *   - the same buffers after an UNMASKED run wrote every lane and was
+ *     brought home, the caller's new sentinels published over it, then
+ *     the masked run - the shape verifier-V4 found returning the
+ *     unmasked run's deposit in every masked lane (2026-09-25), because
+ *     an output copy was never refreshed before a run.
+ * The program deposits a and stores it to scratch-out slot 0, so a kept
+ * lane holds a in both and a count of 1, and a masked lane holds the
+ * caller's bytes in both and the caller's count. On the software
+ * backend the buffers are plain memory and this passes by construction,
+ * which is what proves the harness; the device is the test. */
+static void check_masked_resident(cft_device *hw, cft_format fmt)
+{
+    const size_t esz = cft_format_size(fmt), n = 257;
+    uint8_t img[128];
+    uint64_t ins[3];
+    uint8_t *a = (uint8_t *)malloc(n * esz);
+    uint8_t *mask = (uint8_t *)calloc((n + 7) / 8, 1);
+    uint32_t cnt[257];
+    struct rbuf dep, so;
+    cft_program *prog = NULL;
+    cft_run_args A;
+    cft_caps hc;
+    uint32_t fl = 0, bus = 0;
+    cft_status st;
+    size_t i, shape, wrong[2] = {0, 0};
+    const uint8_t sd[2] = {0x5a, 0x3c}, ss[2] = {0xa5, 0xc3};
+
+    dep.b = so.b = NULL;
+    memset(&hc, 0, sizeof hc);
+    hc.struct_size = sizeof hc;
+    if (cft_get_caps(hw, &hc) != CFT_OK)
+        memset(&hc, 0, sizeof hc);
+    if (!(hc.seq_features & CFT_SEQ_FEAT_LANE_MASK) ||
+        !(hc.seq_features & CFT_SEQ_FEAT_SCRATCH_IO)) {
+        not_here(NH_OTHER, "TESTED", "  seq lane mask into resident outputs",
+                 "this device does not publish %s",
+                 (hc.seq_features & CFT_SEQ_FEAT_LANE_MASK)
+                     ? "CFT_SEQ_FEAT_SCRATCH_IO" : "CFT_SEQ_FEAT_LANE_MASK");
+        goto out;
+    }
+    if (!a || !mask || !rbuf_alloc(hw, &dep, n * esz) ||
+        !rbuf_alloc(hw, &so, n * esz)) {
+        printf("  FAIL seq lane mask into resident outputs: out of memory\n");
+        failures++;
+        goto out;
+    }
+    rs = 0x3A5C0000u + (uint32_t)fmt;
+    fill(a, n, esz);
+    for (i = 0; i < n; i++)
+        if (i % 3)
+            mask[i >> 3] |= (uint8_t)(1u << (i & 7u));
+    ins[0] = seq_ctrl(3, 0, 0);                  /* deposit r0 = a */
+    ins[1] = seq_stl(0, 0);                      /* scratch slot 0 := r0 */
+    ins[2] = seq_ctrl(0, 0, 0);                  /* halt */
+    st = cft_program_load(hw, img,
+                          seq_image_scratch(img, fmt, ins, 3, NULL, 0, 1,
+                                            CFT_PROG_FLAG_SCRATCH_IO, 0, 1),
+                          &prog);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq lane mask into resident outputs: the image did "
+               "not load (%s: %s)\n", cft_strerror(st), cft_last_error());
+        failures++;
+        goto out;
+    }
+    for (shape = 0; shape < 2; shape++) {
+        if (shape == 1) {
+            /* every lane written by an unmasked run, and brought home */
+            memset(&A, 0, sizeof A);
+            A.struct_size = sizeof A;
+            A.a = a; A.n = n;
+            A.deposits = dep.p;
+            A.counts = cnt;
+            A.scratch_out = so.p;
+            A.scratch_out_bytes = n * esz;
+            A.flags_out = &fl;
+            A.bus_out = &bus;
+            st = cft_program_run_ex(prog, &A);
+            CHECK(st == CFT_OK && cft_buffer_from_device(dep.b) == CFT_OK &&
+                      cft_buffer_from_device(so.b) == CFT_OK,
+                  "seq lane mask into resident outputs (%s): the unmasked "
+                  "run before the second shape: %s (%s)",
+                  cft_format_name(fmt), cft_strerror(st), cft_last_error());
+        }
+        memset(dep.p, sd[shape], n * esz);
+        memset(so.p, ss[shape], n * esz);
+        CHECK(cft_buffer_to_device(dep.b) == CFT_OK &&
+                  cft_buffer_to_device(so.b) == CFT_OK,
+              "seq lane mask into resident outputs (%s): publishing the "
+              "caller's sentinels", cft_format_name(fmt));
+        for (i = 0; i < n; i++)
+            cnt[i] = 0xA5A5A5A5u;
+        memset(&A, 0, sizeof A);
+        A.struct_size = sizeof A;
+        A.a = a; A.n = n;
+        A.deposits = dep.p;
+        A.counts = cnt;
+        A.scratch_out = so.p;
+        A.scratch_out_bytes = n * esz;
+        A.lane_mask = mask;
+        A.lane_mask_bytes = (n + 7) / 8;
+        A.flags_out = &fl;
+        A.bus_out = &bus;
+        st = cft_program_run_ex(prog, &A);
+        checks++;
+        if (st != CFT_OK || cft_buffer_from_device(dep.b) != CFT_OK ||
+            cft_buffer_from_device(so.b) != CFT_OK) {
+            printf("  FAIL seq lane mask into resident outputs (%s, %s): %s "
+                   "(%s)\n", cft_format_name(fmt),
+                   shape ? "after an unmasked run" : "fresh",
+                   cft_strerror(st), cft_last_error());
+            failures++;
+            continue;
+        }
+        for (i = 0; i < n; i++) {
+            const int kept = (i % 3) != 0;
+            const uint8_t *d = dep.p + i * esz, *s = so.p + i * esz;
+            size_t k;
+            int lane_bad = 0;
+            if (kept)
+                lane_bad = memcmp(d, a + i * esz, esz) ||
+                           memcmp(s, a + i * esz, esz) || cnt[i] != 1;
+            else {
+                for (k = 0; k < esz; k++)
+                    lane_bad |= d[k] != sd[shape] || s[k] != ss[shape];
+                lane_bad |= cnt[i] != 0xA5A5A5A5u;
+            }
+            if (lane_bad && wrong[shape]++ < 3)
+                printf("  FAIL seq lane mask into resident outputs (%s, %s): "
+                       "lane %lu (%s) is not what it should hold\n",
+                       cft_format_name(fmt),
+                       shape ? "after an unmasked run" : "fresh",
+                       (unsigned long)i, kept ? "kept" : "masked");
+        }
+        checks++;
+        if (wrong[shape])
+            failures++;
+    }
+    if (!wrong[0] && !wrong[1])
+        printf("    seq lane mask into resident outputs (%s): %lu lanes, a "
+               "third masked, fresh and after an unmasked run - every masked "
+               "lane the caller's, every kept lane the run's\n",
+               cft_format_name(fmt), (unsigned long)n);
+out:
+    cft_program_free(prog);
+    if (dep.b)
+        rbuf_free(&dep);
+    if (so.b)
+        rbuf_free(&so);
+    free(a);
+    free(mask);
+}
+
+/* A run refused once its units ran leaves its resident outputs LOST
+ * (backend_xrt.cpp, Buf::lost): the tile may have written part of a
+ * window over bytes an earlier run left there, so reading the buffer
+ * back, or using it as an input, is refused by name until the caller
+ * publishes it again. Before 2026-09-25 the copy kept the earlier run's
+ * dirty flag and cft_buffer_from_device returned the failed run's bytes
+ * with CFT_OK (verifier-V4). Planted here with CFT_XRT_WITNESS=busy-after
+ * - a refusal after the runs completed - over a window an earlier good
+ * run left dirty. The planted run computes the same bytes as the good
+ * one, so the leg holds the STATUS, not the bytes. XRT only; once a
+ * device. */
+static void check_lost_after_refusal(cft_device *hw, cft_format fmt)
+{
+    static int done;
+    const size_t esz = cft_format_size(fmt), n = 64;
+    uint8_t img[64];
+    uint64_t ins[2];
+    uint8_t *a = (uint8_t *)malloc(n * esz), *b = (uint8_t *)malloc(n * esz);
+    uint8_t *out = (uint8_t *)malloc(n * esz);
+    uint32_t cnt[64], fl = 0, bus = 0;
+    struct rbuf dep;
+    cft_program *prog = NULL;
+    cft_run_args A;
+    cft_caps caps;
+    cft_status st, s_back, s_in, s_repub, s_after, s_back2;
+    int right = 0;
+
+    dep.b = NULL;
+    if (done)
+        goto out;
+    done = 1;
+    memset(&caps, 0, sizeof caps);
+    caps.struct_size = sizeof caps;
+    if (cft_get_caps(hw, &caps) != CFT_OK || strcmp(caps.backend, "xrt")) {
+        not_here(NH_OTHER, "TESTED", "    a resident output lost by a refused "
+                 "run", "the %s backend has no tile to refuse a run on",
+                 caps.backend[0] ? caps.backend : "this");
+        goto out;
+    }
+    if (!a || !b || !out || !rbuf_alloc(hw, &dep, n * esz)) {
+        printf("  FAIL: out of memory for the lost-output leg\n");
+        failures++;
+        goto out;
+    }
+    rs = 0x1057u;
+    fill(a, n, esz);
+    fill(b, n, esz);
+    ins[0] = seq_ctrl(3, 0, 0);                  /* deposit r0 = a */
+    ins[1] = seq_ctrl(0, 0, 0);                  /* halt */
+    st = cft_program_load(hw, img, seq_image(img, fmt, ins, 2, NULL, 0, 1),
+                          &prog);
+    CHECK(st == CFT_OK, "the lost-output leg's image (%s): %s",
+          cft_format_name(fmt), cft_last_error());
+    if (st != CFT_OK)
+        goto out;
+    memset(&A, 0, sizeof A);
+    A.struct_size = sizeof A;
+    A.a = a; A.n = n;
+    A.deposits = dep.p;
+    A.counts = cnt;
+    A.flags_out = &fl;
+    A.bus_out = &bus;
+    /* a good run leaves the window dirty on the device... */
+    st = cft_program_run_ex(prog, &A);
+    CHECK(st == CFT_OK, "the lost-output leg's good run (%s): %s (%s)",
+          cft_format_name(fmt), cft_strerror(st), cft_last_error());
+    /* ...and a run refused after its units ran writes the same window */
+    put_env("CFT_XRT_WITNESS", "busy-after");
+    st = cft_program_run_ex(prog, &A);
+    put_env("CFT_XRT_WITNESS", NULL);
+    CHECK(st == CFT_ERR_INTERNAL, "the lost-output leg's planted refusal "
+          "(%s): %s (%s)", cft_format_name(fmt), cft_strerror(st),
+          cft_last_error());
+    s_back = cft_buffer_from_device(dep.b);
+    CHECK(s_back != CFT_OK && strstr(cft_last_error(), "cft_buffer_to_device"),
+          "a resident output written by a refused run was read back with %s "
+          "(%s) - it must be refused by name until it is published again",
+          cft_strerror(s_back), cft_last_error());
+    s_in = cft_run(hw, CFT_ADD, fmt, CFT_RNE, dep.p, b, b, out, n, &fl, &bus);
+    CHECK(s_in != CFT_OK && strstr(cft_last_error(), "cft_buffer_to_device"),
+          "a resident buffer a refused run lost was used as an input with %s "
+          "(%s) - it must be refused by name", cft_strerror(s_in),
+          cft_last_error());
+    /* published again, it is the caller's */
+    memset(dep.p, 0x77, n * esz);
+    s_repub = cft_buffer_to_device(dep.b);
+    s_after = cft_program_run_ex(prog, &A);
+    s_back2 = cft_buffer_from_device(dep.b);
+    CHECK(s_repub == CFT_OK && s_after == CFT_OK && s_back2 == CFT_OK &&
+              !memcmp(dep.p, a, n * esz),
+          "after publishing it again, a run into the buffer and its read-back "
+          "(%s): %s / %s / %s (%s)", cft_format_name(fmt),
+          cft_strerror(s_repub), cft_strerror(s_after), cft_strerror(s_back2),
+          cft_last_error());
+    right = s_back != CFT_OK && s_in != CFT_OK && s_repub == CFT_OK &&
+            s_after == CFT_OK && s_back2 == CFT_OK && !memcmp(dep.p, a, n * esz);
+    if (right)
+        printf("    a resident output a refused run wrote (%s): its read-back "
+               "and its use as an input refused by name, and published "
+               "again it is right\n", cft_format_name(fmt));
+out:
+    cft_program_free(prog);
+    if (dep.b)
+        rbuf_free(&dep);
+    free(a); free(b); free(out);
+}
+
 static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
                         size_t n, uint32_t seed)
 {
@@ -5168,6 +5442,8 @@ static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
     check_program_past_a_page(hw, fmt);
     check_program_capacity(hw, fmt);
     check_completion_witness(hw, fmt);
+    check_lost_after_refusal(hw, fmt);
+    check_masked_resident(hw, fmt);
 
     /* 7b. ABI 0.14's index tables (R16), gated on the feature bit the
      *     same way and named NOT COMPARED where the device does not
@@ -5200,7 +5476,7 @@ static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
  * leg that can be run on a laptop before an hour of emulation.
  * --------------------------------------------------------------- */
 
-struct rbuf { cft_buffer *b; uint8_t *p; };
+/* struct rbuf is defined above check_masked_resident. */
 
 static int rbuf_alloc(cft_device *dev, struct rbuf *r, size_t bytes)
 {
@@ -5338,12 +5614,19 @@ static void check_moved_output_window(cft_device *sw, cft_device *hw,
                    (unsigned long)n);
         }
     }
-    printf("  buffers, an output window moved onto another tile's unflushed "
-           "one (%s): %s\n", cft_format_name(fmt),
-           bad ? "FAILED"
-           : tiles > 1 ? "the second run's results survived"
-                       : "passed - one tile, so the overlap across tiles it "
-                         "exists for was not reachable");
+    if (!bad && tiles <= 1)
+        /* The two runs were still compared above; what one tile cannot
+         * reach is the overlap across tiles the leg exists for, and a
+         * pass would claim it (verifier-V4, 2026-09-25). */
+        not_here(NH_OTHER, "TESTED",
+                 "  buffers, an output window moved onto another tile's "
+                 "unflushed one", "one tile (%s), so the overlap across "
+                 "tiles it exists for is not reachable; the two runs "
+                 "themselves were compared", cft_format_name(fmt));
+    else
+        printf("  buffers, an output window moved onto another tile's "
+               "unflushed one (%s): %s\n", cft_format_name(fmt),
+               bad ? "FAILED" : "the second run's results survived");
 out:
     if (x.b)
         rbuf_free(&x);

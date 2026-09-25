@@ -7,8 +7,11 @@
  * with exclusive access, and is one device of that many tiles. A
  * service that runs independent jobs wants the other shape: one
  * process per tile, each owning its own compute unit, so that four
- * jobs run on a quad at once and a timeout finishes one tile rather
- * than the card (docs/VALIDATION.md, 2026-09-25). The variable names
+ * jobs run on a quad at once and a timeout finishes one process's
+ * handle rather than every tile's work (docs/VALIDATION.md,
+ * 2026-09-25) - though the tile it happened on wants its image
+ * reloaded before it is trusted again (docs/HOSTAPI.md, "A tile a run
+ * was abandoned on"). The variable names
  * the tiles a process opens, as the 1-based ordinals their compute
  * units carry (cft_krnl_1 is 1):
  *

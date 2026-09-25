@@ -2171,6 +2171,21 @@ CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
  *     answer, and it is why the sync calls exist at all. Call
  *     cft_buffer_to_device after every write to the mirror; it costs
  *     nothing when nothing changed hands.
+ *   - A LANE MASK on a program run whose deposit window or scratch-out
+ *     block is resident leaves a masked lane's slots holding the
+ *     buffer's current contents, exactly as it does for a plain host
+ *     pointer: the library makes each such window's device copy current
+ *     first, as it does an input. (Until 2026-09-25 a masked lane of a
+ *     resident window came back with whatever the device copy held.)
+ *   - A run that FAILS once the device may have started it - a timeout,
+ *     a fault the tile reported, a run refused after it ran - leaves
+ *     the resident buffers it writes LOST: the tile may have written
+ *     part of a window over bytes that had not come home, so nothing
+ *     can vouch for what either copy holds. cft_buffer_from_device on a
+ *     lost buffer, and any run that reads it, is CFT_ERR_INTERNAL with
+ *     a sentence saying so, until cft_buffer_to_device publishes the
+ *     mirror as the truth again. (Until 2026-09-25 the failed run's
+ *     bytes could come back with CFT_OK.)
  *
  * cft_buffer_free releases the device copies with the mirror. Closing
  * the device first is allowed and releases them too: the buffer stays

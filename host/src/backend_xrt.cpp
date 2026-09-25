@@ -85,6 +85,7 @@
 #include <cstring>
 #include <exception>
 #include <functional>
+#include <memory>
 #include <new>
 #include <stdexcept>
 #include <string>
@@ -484,6 +485,8 @@ struct Tile {
     std::string cu;
 };
 
+struct Buf;
+
 struct Dev {
     xrt::device       dev;
     xrt::uuid         uuid;
@@ -494,6 +497,12 @@ struct Dev {
      * See the header comment: there is no way to make the device safe
      * again from here, so the handle is finished. */
     bool              poisoned = false;
+    /* The resident buffers the job in progress has bound as OUTPUTS,
+     * filled by buf_bind and cleared by run_job. A job that fails once
+     * a unit may have run marks each of them lost (Buf::lost): the tile
+     * may have written part of a window whose earlier contents had not
+     * come home yet, so no copy of it can be vouched for. */
+    std::vector<Buf *> job_outs;
 };
 
 /* Grow a tile's buffers to hold `bytes`.
@@ -721,6 +730,11 @@ struct BufCopy {
                                * something */
     bool     dirty  = false;  /* a run wrote this window and the mirror
                                * has not been told */
+    bool     filled = false;  /* its bytes were copied FROM the mirror at
+                               * `gen` - true for every input, and for an
+                               * output bound under a lane mask; an output
+                               * a run will overwrite whole is allocated
+                               * and never filled */
 };
 
 struct Buf {
@@ -735,6 +749,19 @@ struct Buf {
                                    * [t * CFT_ROLE_COUNT + role] */
     uint64_t             resident_binds = 0, staged_binds = 0;
     std::string          why;
+    /* Set when a run that bound this buffer as an output failed once a
+     * unit may have run (run_job's lose_outputs), with the sentence
+     * saying so. Its contents are then nobody's - the failed run may have
+     * written part of a window, over bytes an earlier run left on the
+     * device that never came home - so reading it back or binding it
+     * again is refused by name until the caller publishes the mirror as
+     * the truth (cft_buffer_to_device). Found by verifier-V4
+     * (2026-09-25): before this, the copy kept the earlier run's dirty
+     * flag, and cft_buffer_from_device handed the failed run's bytes to
+     * the caller with CFT_OK. The flag is separate from the sentence so
+     * that setting it cannot fail. */
+    bool                 lost = false;
+    std::string          lost_why;
 };
 
 /* Carry one copy's window home. The whole copy is synced and only the
@@ -753,33 +780,55 @@ void buf_flush(Buf &B, BufCopy &c)
  *
  * Returns the buffer object to hand the kernel, or nullptr to say
  * "stage this one from host memory as before" - which is never wrong,
- * only slower, and is what every failure here degrades to.
+ * only slower, and is what every failure here degrades to. Throws, and
+ * so refuses the job before anything starts, for a buffer a failed run
+ * left lost (Buf::lost): staging it from the mirror would be the one
+ * wrong thing.
  *
- * `output` is the D role: its contents before the run are nobody's
- * business, so a window that matches binds whatever generation it was
- * filled at, and a fresh one is not filled at all. */
+ * `output` is a role the tile WRITES. Unmasked, it writes every lane of
+ * the window, so the copy's contents before the run are nobody's
+ * business: a window that matches binds whatever generation it was
+ * filled at, and a fresh one is not filled at all. `preserve` is an
+ * output under a lane mask (R17): the tile's strobes leave a masked
+ * lane's bytes exactly as they were, and those bytes must be what the
+ * caller's buffer holds - so the copy must be current before the run,
+ * like an input: it is kept only if it holds the newest bytes (a dirty
+ * copy of this window, which nothing is newer than, or one filled from
+ * the mirror at this generation), and otherwise filled from the mirror.
+ * Until 2026-09-25 a masked run's resident deposit window and scratch-
+ * out block kept whatever the device copy held in their masked lanes -
+ * another run's deposits after a republish (verifier-V4). */
 xrt::bo *buf_bind(Buf &B, size_t tile, int role, size_t off,
-                  size_t real, size_t padded, bool output)
+                  size_t real, size_t padded, bool output,
+                  bool preserve = false)
 {
     if (!B.D || tile >= B.D->tiles.size() ||
         role < 0 || role >= CFT_ROLE_COUNT)
         return nullptr;
+    if (B.lost)
+        throw std::runtime_error(
+            B.lost_why.empty() ? std::string("a failed run lost this "
+                                             "buffer's contents; publish "
+                                             "them again with "
+                                             "cft_buffer_to_device")
+                               : B.lost_why);
 
     BufCopy &c =
         B.copies[tile * CFT_ROLE_COUNT + static_cast<size_t>(role)];
 
     /* Before a run is handed an OUTPUT window, every OTHER copy of this
      * buffer holding unflushed bytes that overlap it goes home first.
-     * Two copies can only overlap when a window moved to another tile -
-     * a different cut, or a different placement, from one call to the
-     * next - and cftx_buffer_from_device flushes copies in table order,
-     * not write order, so the older bytes could otherwise land last and
-     * silently replace the newer run's. The mirror changed, so the
-     * generation moves too: an input copy filled before this flush must
-     * not be reused as current. (Found reading this file for the
-     * scheduler, 2026-09-25. Under fixed placement the unused tiles are
-     * always the high ones and their old windows sit above the new, so
-     * it could not happen; CFT_XRT_TILE_ORDER makes it possible.) */
+     * Two copies can overlap when a window moved to another tile - a
+     * different cut, a different placement, or a window reached through
+     * an offset into the buffer - and cftx_buffer_from_device flushes
+     * copies in table order, not write order, so the older bytes could
+     * otherwise land last and silently replace the newer run's. The
+     * mirror changed, so the generation moves too: an input copy filled
+     * before this flush must not be reused as current. (Found reading
+     * this file for the scheduler, 2026-09-25. It was reachable under
+     * fixed placement too: verifier-V4's random-window property test
+     * found 32 of 300 trials wrong at 617b753 on four tiles and 16 of 300
+     * on three, with no placement instrument; 0 of 1,200 since.) */
     if (output) {
         bool moved = false;
         for (auto &o : B.copies)
@@ -794,7 +843,12 @@ xrt::bo *buf_bind(Buf &B, size_t tile, int role, size_t off,
     const bool same_window =
         c.live && c.off == off && c.real == real && c.padded == padded;
 
-    if (same_window && (output || c.gen == B.gen)) {
+    const bool current = preserve
+                             ? (c.dirty || (c.filled && c.gen == B.gen))
+                             : (output || c.gen == B.gen);
+    if (same_window && current) {
+        if (output)
+            B.D->job_outs.push_back(&B);
         B.resident_binds++;
         return &c.bo;
     }
@@ -844,21 +898,31 @@ xrt::bo *buf_bind(Buf &B, size_t tile, int role, size_t off,
     c.dirty = false;
     c.gen = B.gen;
 
-    if (!output) {
+    if (!output || preserve) {
         auto *p = c.bo.map<uint8_t *>();
         std::memcpy(p, B.host + off, real);
         if (padded > real)
             std::memset(p + real, 0, padded - real);
         c.bo.sync(XCL_BO_SYNC_BO_TO_DEVICE, padded, 0);
+        c.filled = true;
         B.staged_binds++;
-        B.why = same_window
+        B.why = preserve
+                    ? "an output under a lane mask, filled so its masked "
+                      "lanes are the caller's"
+                : same_window
                     ? "the mirror was republished, so this copy refilled"
                     : "first use of this window on this tile and role";
     } else {
         /* Nothing crossed the bus: an output copy is written by the
          * tile, and allocating one is not a transfer. */
+        c.filled = false;
         B.resident_binds++;
     }
+    /* An output bound to a device copy is this job's to lose if it
+     * fails; one declined above is staged, and a failed run never
+     * writes a staged output back. */
+    if (output)
+        B.D->job_outs.push_back(&B);
     return &c.bo;
 }
 
@@ -931,6 +995,10 @@ struct Job {
     std::string oom_words;   /* why this kind's staging runs out */
     std::vector<Task> tasks;
     bool (*faulty)(uint32_t);
+    /* Filled by run_job when the job's test stops it: which tiles, with
+     * their STATUS - for the caller's sentence, so a fault names the
+     * tile it happened on. */
+    std::string where;
 };
 
 /* CFT_XRT_TILE_ORDER and CFT_XRT_PROGRAM_CUTS take "seed:<N>", and the
@@ -969,13 +1037,96 @@ int instrument_seed(const char *name, bool allow_skew, uint64_t *seed,
     return ST_OK;
 }
 
+/* "tile N (cft_krnl:{cft_krnl_M})": this handle's index for a tile and
+ * the compute unit an operator finds in xbutil and names in
+ * CFT_XRT_TILES - which, after a timeout, is the tile to reload. */
+std::string tile_name(const Dev &D, size_t t)
+{
+    return "tile " + std::to_string(t) + " (" + D.tiles[t].cu + ")";
+}
+
+/* g_err from a sentence built by `build`, or - if building it runs out
+ * of memory - from a fallback short enough to need no allocation. Used
+ * on every path where a unit may have run, which must go on to wait,
+ * poison and mark outputs whatever the message costs (verifier-V4,
+ * 2026-09-25: a bad_alloc while run_job built its message escaped with
+ * started runs unwaited and the handle not poisoned). */
+template <class F>
+void set_err_or(F build, const char *fallback) noexcept
+{
+    try {
+        set_err(build());
+    } catch (...) {
+        try {
+            g_err.assign(fallback);
+        } catch (...) {
+        }
+    }
+}
+
+/* The C boundary's handlers, shared by every extern "C" entry point that
+ * does real work: run `body` and turn an escaping bad_alloc into
+ * ST_OUT_OF_MEMORY and anything else into ST_INTERNAL, each with a
+ * sentence - no C++ exception may cross into C. */
+template <class F>
+int at_boundary(const char *what, F body) noexcept
+{
+    try {
+        return body();
+    } catch (const std::bad_alloc &) {
+        set_err_or([&] { return std::string("out of memory in ") + what; },
+                   "out of memory");
+        return ST_OUT_OF_MEMORY;
+    } catch (const std::exception &e) {
+        set_err_or([&] { return std::string(what) + ": " + e.what(); },
+                   "internal error");
+        return ST_INTERNAL;
+    } catch (...) {
+        set_err_or([&] { return std::string(what) + " failed"; },
+                   "internal error");
+        return ST_INTERNAL;
+    }
+}
+
+/* A job that failed once a unit may have run loses its resident outputs
+ * (Buf::lost). Never throws: the flag needs no allocation and the
+ * sentence is best-effort. */
+void lose_outputs(Dev &D, const char *how) noexcept
+{
+    for (Buf *B : D.job_outs) {
+        if (!B || B->lost)
+            continue;
+        B->lost = true;
+        try {
+            B->lost_why = std::string("a run that wrote this resident "
+                                      "buffer failed on the device (") +
+                          how + "), so what the tile left in it is not "
+                          "known - publish its contents again with "
+                          "cft_buffer_to_device before reading it back or "
+                          "running on it";
+        } catch (...) {
+        }
+    }
+    D.job_outs.clear();
+}
+
+/* " (tile 2 (cft_krnl:{cft_krnl_3}) STATUS 0x1)", or nothing: the tiles
+ * a job's test stopped it on, for the caller's sentence. */
+std::string at_where(const Job &J)
+{
+    return J.where.empty() ? std::string() : " (" + J.where + ")";
+}
+
 /* Run a job. ST_OK means every wave ran: *status and *flags are the
  * words ORed over the tiles that ran, and *faulted says whether the
  * job's test stopped it before a wave's results were collected (the
- * caller then names the fault; nothing it collected is to be trusted).
- * Anything else is a failure with g_err set; *fail_status is then a
- * best-effort STATUS read, for the caller's message, and the handle is
- * poisoned when a unit may still be running. */
+ * caller then names the fault, with J.where; nothing it collected is to
+ * be trusted). Anything else is a failure with g_err set; *fail_status
+ * is then a best-effort STATUS read, for the caller's message, and the
+ * handle is poisoned when a unit may still be running. Once a unit may
+ * have run, every path out - including one that runs out of memory
+ * building its sentence - waits on every started run, and a failure
+ * loses the job's resident outputs (Buf::lost). */
 int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
             bool *faulted, uint32_t *fail_status)
 {
@@ -983,6 +1134,8 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
     *flags = 0;
     *faulted = false;
     *fail_status = 0;
+    D.job_outs.clear();
+    J.where.clear();
 
     uint64_t seed = 0;
     const int ist = instrument_seed("CFT_XRT_TILE_ORDER", false, &seed,
@@ -1025,7 +1178,8 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
             for (size_t j = 0; j < count; j++)
                 J.tasks[base + j].stage(order[j]);
         } catch (const std::bad_alloc &) {
-            set_err("out of memory staging " + J.what);
+            set_err_or([&] { return "out of memory staging " + J.what; },
+                       "out of memory");
             return ST_OUT_OF_MEMORY;
         } catch (const std::exception &e) {
             const std::string w = e.what();
@@ -1055,82 +1209,136 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
             try {
                 c = t.k.read_register(CSR_CTRL);
             } catch (const std::exception &e) {
-                set_err("reading tile " + std::to_string(order[j]) + " (" +
-                        t.cu + ")'s CTRL before " + J.what + ": " + e.what());
+                set_err("reading " + tile_name(D, order[j]) + "'s CTRL "
+                        "before " + J.what + ": " + e.what());
                 return ST_INTERNAL;
             }
             if (plant == 1 && base == 0 && j == 0)
                 c = CTRL_START;                  /* CFT_XRT_WITNESS */
             if ((c & CTRL_IDLE) && !(c & CTRL_START))
                 continue;
-            set_err("tile " + std::to_string(order[j]) + " (" + t.cu +
-                    ") is running work this process did not start (CTRL 0x" +
-                    hex32(c) + ", not idle): a run abandoned on it - by a "
-                    "timeout, or by a process that ended mid-run - is still "
-                    "going. The tile would drop this start and XRT would "
-                    "report " + J.what + " complete when that run ends, so "
-                    "it is refused and nothing was started. Retry when that "
-                    "run has finished; until the image is reloaded XRT may "
-                    "also complete later runs on this tile early, which is "
-                    "refused by name when it happens");
+            set_err(tile_name(D, order[j]) + " is running work this "
+                    "process did not start (CTRL 0x" + hex32(c) + ", not "
+                    "idle): a run abandoned on it - by a timeout, or by a "
+                    "process that ended mid-run - is still going. The tile "
+                    "would drop this start and XRT would report " + J.what +
+                    " complete when that run ends, so it is refused and "
+                    "nothing was started. Retry when that run has finished; "
+                    "until the image is reloaded XRT may also complete "
+                    "later runs on this tile early, which is refused by "
+                    "name when it happens");
             return ST_INTERNAL;
         }
 
-        /* From here a compute unit may be running. */
+        /* From here a compute unit may be running. Nothing below may
+         * leave without waiting on every run in `runs`: the handlers
+         * record what failed in fixed storage and the sentence is built
+         * after the waits, by set_err_or. */
         std::vector<xrt::run> runs;
-        runs.reserve(count);
+        runs.reserve(count);      /* before any start: never grows below */
         int st = ST_OK;
-        std::string err;
+        int kind = 0;       /* 1 a start, 2 a wait's state, 3 a wait threw */
+        size_t bad = 0;
+        int bad_state = 0;
+        char what[240] = "";
         for (size_t j = 0; j < count; j++) {
             try {
                 runs.push_back(J.tasks[base + j].start(order[j]));
             } catch (const std::exception &e) {
-                err = "starting " + J.what + " on tile " +
-                      std::to_string(order[j]) + ": " + e.what();
                 st = ST_INTERNAL;
+                kind = 1;
+                bad = order[j];
+                std::snprintf(what, sizeof what, "%s", e.what());
                 break;      /* stop launching, but wait on the started */
+            } catch (...) {
+                st = ST_INTERNAL;
+                kind = 1;
+                bad = order[j];
+                break;
             }
         }
-        for (auto &r : runs) {
+        for (size_t j = 0; j < runs.size(); j++) {
             try {
                 const ert_cmd_state s =
-                    r.wait(std::chrono::milliseconds(D.wait_ms));
+                    runs[j].wait(std::chrono::milliseconds(D.wait_ms));
                 if (s != ERT_CMD_STATE_COMPLETED && st == ST_OK) {
                     st = (s == ERT_CMD_STATE_TIMEOUT) ? ST_TIMEOUT
                                                       : ST_INTERNAL;
-                    err = "a compute unit did not complete " + J.what +
-                          " (state " + std::to_string(static_cast<int>(s)) +
-                          ")";
+                    kind = 2;
+                    bad = order[j];
+                    bad_state = static_cast<int>(s);
                 }
             } catch (const std::exception &e) {
                 if (st == ST_OK) {
                     st = ST_INTERNAL;
-                    err = "waiting on " + J.what + ": " + e.what();
+                    kind = 3;
+                    bad = order[j];
+                    std::snprintf(what, sizeof what, "%s", e.what());
+                }
+            } catch (...) {
+                if (st == ST_OK) {
+                    st = ST_INTERNAL;
+                    kind = 3;
+                    bad = order[j];
                 }
             }
         }
         if (st != ST_OK) {
             D.poisoned = true;
+            lose_outputs(D, st == ST_TIMEOUT ? "a timeout" : "a failure");
             uint32_t acc = 0;
             try {
                 for (size_t j = 0; j < runs.size(); j++)
                     acc |= D.tiles[order[j]].k.read_register(CSR_STATUS);
-            } catch (const std::exception &) {
+            } catch (...) {
                 acc = 0;          /* the handle is going away regardless */
             }
             *fail_status = acc;
-            set_err(err + " - compute units may still be active, so this "
-                          "handle is finished; close and reopen it" +
-                    (acc == 0x8u
-                         ? " (STATUS 0x8 - only a REFUSAL is latched; the "
-                           "units never started this work, so this is a "
-                           "hang or a slow run, not a memory fault)"
-                     : acc ? " (STATUS 0x" + hex32(acc) + " - the memory "
+            const bool ran = !runs.empty();
+            set_err_or([&] {
+                std::string m;
+                if (kind == 1)
+                    m = "starting " + J.what + " on " + tile_name(D, bad) +
+                        ": " + what + " - a unit may have begun before the "
+                        "failure, so this handle is finished; close and "
+                        "reopen it";
+                else if (st == ST_TIMEOUT)
+                    m = tile_name(D, bad) + " did not complete " + J.what +
+                        " within CFT_TIMEOUT_MS (" +
+                        std::to_string(D.wait_ms) + " ms) and may still be "
+                        "running it, so this handle is finished; close and "
+                        "reopen it. A run left running on a tile can make "
+                        "XRT complete later runs there early, in any "
+                        "process, until the image is reloaded: reload it "
+                        "before trusting that tile (docs/HOSTAPI.md)";
+                else if (kind == 2)
+                    m = tile_name(D, bad) + " did not complete " + J.what +
+                        " (state " + std::to_string(bad_state) + ") - "
+                        "compute units may still be active, so this handle "
+                        "is finished; close and reopen it";
+                else
+                    m = "waiting on " + J.what + " on " + tile_name(D, bad) +
+                        ": " + what + " - compute units may still be "
+                        "active, so this handle is finished; close and "
+                        "reopen it";
+                if (ran) {
+                    if (acc == 0x8u)
+                        m += " (STATUS 0x8 - only a REFUSAL is latched; the "
+                             "units never started this work, so this is a "
+                             "hang or a slow run, not a memory fault)";
+                    else if (acc)
+                        m += " (STATUS 0x" + hex32(acc) + " - the memory "
                              "system or the tile reported something, so "
-                             "this is more than a slow run)"
-                           : " (STATUS clean on every unit that ran, so "
-                             "this is a hang or a genuinely slow run "
-                             "rather than a bus fault)"));
+                             "this is more than a slow run)";
+                    else if (kind == 1)
+                        m += " (STATUS clean on every unit that ran)";
+                    else
+                        m += " (STATUS clean on every unit that ran, so "
+                             "this is a hang or a genuinely slow run rather "
+                             "than a bus fault)";
+                }
+                return m;
+            }, "run failed");
             return st;
         }
 
@@ -1148,8 +1356,8 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
          * write of this job lands after the call returns, and then the
          * job is refused - nothing of the wave is collected. */
         {
-            std::string early;
-            bool still = false;
+            bool early = false, still = false;
+            size_t first_early = 0;
             for (size_t j = 0; j < count; j++) {
                 const Tile &t = D.tiles[order[j]];
                 uint32_t c = 0;
@@ -1167,48 +1375,68 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
                             std::chrono::milliseconds(1));
                         c = t.k.read_register(CSR_CTRL);
                     }
-                } catch (const std::exception &e) {
+                } catch (...) {
                     D.poisoned = true;
-                    set_err("reading tile " + std::to_string(order[j]) +
-                            " (" + t.cu + ")'s CTRL after " + J.what + ": " +
-                            e.what());
+                    lose_outputs(D, "an unreadable CTRL");
+                    set_err_or([&] {
+                        return "reading " + tile_name(D, order[j]) +
+                               "'s CTRL after " + J.what + " failed, so "
+                               "whether it finished is not known; this "
+                               "handle is finished";
+                    }, "run failed");
                     return ST_INTERNAL;
                 }
                 if (!(c & CTRL_IDLE))
                     still = true;
-                early += (early.empty() ? "" : ", ") + std::string("tile ") +
-                         std::to_string(order[j]) + " (" + t.cu + ")";
+                if (!early)
+                    first_early = order[j];
+                early = true;
             }
-            if (!early.empty()) {
+            if (early) {
                 if (still)
                     D.poisoned = true;
-                set_err("XRT reported " + J.what + " complete while " +
-                        early + " was still running it, so it is refused "
-                        "and nothing of this wave was collected: XRT's "
-                        "scheduler completes runs early on a tile after a "
-                        "run there was abandoned (a timeout, or a process "
-                        "that ended mid-run, in this process or any other) "
-                        "until the image is reloaded" +
-                        (still ? std::string("; a tile was still running "
-                                             "after the run's whole wait, "
-                                             "so this handle is finished")
-                               : std::string("; each such tile has since "
-                                             "finished it")) +
-                        ". Reload the image - load another xclbin and then "
-                        "this one - before trusting this tile again");
+                lose_outputs(D, "an early completion");
+                set_err_or([&] {
+                    return "XRT reported " + J.what + " complete while " +
+                           tile_name(D, first_early) + " was still running "
+                           "it, so it is refused and nothing of this wave "
+                           "was collected: XRT's scheduler completes runs "
+                           "early on a tile after a run there was abandoned "
+                           "(a timeout, or a process that ended mid-run, in "
+                           "this process or any other) until the image is "
+                           "reloaded" +
+                           (still ? std::string("; a tile was still running "
+                                                "after the run's whole wait, "
+                                                "so this handle is finished")
+                                  : std::string("; each such tile has since "
+                                                "finished it")) +
+                           ". Reload the image - load another xclbin and "
+                           "then this one - before trusting this tile "
+                           "again";
+                }, "run refused");
                 return ST_INTERNAL;
             }
         }
 
         uint32_t ws = 0, wf = 0;
+        uint32_t per[64] = {0};   /* a device has at most 64 tiles */
         try {
             for (size_t j = 0; j < count; j++) {
-                ws |= D.tiles[order[j]].k.read_register(CSR_STATUS);
+                const uint32_t sj =
+                    D.tiles[order[j]].k.read_register(CSR_STATUS);
+                if (j < 64)
+                    per[j] = sj;
+                ws |= sj;
                 wf |= D.tiles[order[j]].k.read_register(CSR_FLAGS);
             }
-        } catch (const std::exception &e) {
+        } catch (...) {
             D.poisoned = true;
-            set_err("reading status after " + J.what + ": " + e.what());
+            lose_outputs(D, "an unreadable STATUS");
+            set_err_or([&] {
+                return "reading STATUS and FLAGS after " + J.what +
+                       " failed, so whether its results are valid is not "
+                       "known; this handle is finished";
+            }, "run failed");
             return ST_INTERNAL;
         }
         *status |= ws;
@@ -1218,16 +1446,30 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
                 J.tasks[base + j].after(order[j]);
         if (J.faulty(*status)) {
             *faulted = true;
+            lose_outputs(D, "a fault the tile reported");
+            try {
+                for (size_t j = 0; j < count && j < 64; j++)
+                    if (J.faulty(per[j]))
+                        J.where += (J.where.empty() ? "" : ", ") +
+                                   tile_name(D, order[j]) + " STATUS 0x" +
+                                   hex32(per[j]);
+            } catch (...) {
+            }
             return ST_OK;
         }
         try {
             for (size_t j = 0; j < count; j++)
                 J.tasks[base + j].collect(order[j]);
         } catch (const std::exception &e) {
-            set_err("reading the results of " + J.what + ": " + e.what());
+            lose_outputs(D, "a result that could not be read back");
+            set_err_or([&] {
+                return "reading the results of " + J.what + ": " +
+                       std::string(e.what());
+            }, "run failed");
             return ST_INTERNAL;
         }
     }
+    D.job_outs.clear();
     return ST_OK;
 }
 
@@ -1238,10 +1480,10 @@ extern "C" const char *cftx_last_error(void)
     return g_err.c_str();
 }
 
-extern "C" int cftx_open(const char *artifact, int index, void **out,
-                         uint32_t *format_mask, uint32_t *op_groups,
-                         uint32_t *tiles, uint32_t *version,
-                         int *flags_readable, cft_seq_caps *seq)
+static int cftx_open_impl(const char *artifact, int index, void **out,
+                          uint32_t *format_mask, uint32_t *op_groups,
+                          uint32_t *tiles, uint32_t *version,
+                          int *flags_readable, cft_seq_caps *seq)
 {
     if (!artifact || !out)
         return ST_INVALID_ARGUMENT;
@@ -1253,15 +1495,18 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
      * card visible" is a driver or a slot, "bad xclbin" is a build.
      * Reporting both as one status is the sort of small dishonesty
      * that costs an hour at a bench. */
-    Dev *D = new (std::nothrow) Dev();
-    if (!D)
+    /* Owned here until the open succeeds, so no path out - a refusal, or
+     * an exception reaching the wrapper - can leak it or delete it
+     * twice. */
+    std::unique_ptr<Dev> own(new (std::nothrow) Dev());
+    if (!own)
         return ST_OUT_OF_MEMORY;
+    Dev *D = own.get();
     D->wait_ms = timeout_ms();
 
     try {
         D->dev = xrt::device(static_cast<unsigned int>(index));
     } catch (const std::exception &e) {
-        delete D;
         set_err(std::string("opening device ") + std::to_string(index) +
                 ": " + e.what());
         return ST_NO_DEVICE;
@@ -1269,7 +1514,6 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
     try {
         D->uuid = D->dev.load_xclbin(artifact);
     } catch (const std::exception &e) {
-        delete D;
         set_err(std::string("loading ") + artifact + ": " + e.what());
         return ST_ARTIFACT;
     }
@@ -1358,7 +1602,6 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
         const int k = cft_tile_select_parse(sel_env, order, why, sizeof why);
         if (k < 0) {
             std::string msg(why);
-            delete D;
             set_err(std::move(msg));
             return ST_INVALID_ARGUMENT;
         }
@@ -1385,7 +1628,6 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
                                        ? std::string(" declares no such "
                                                      "compute unit")
                                        : " declares " + declared);
-                delete D;
                 set_err(std::move(msg));
                 return ST_INVALID_ARGUMENT;
             }
@@ -1397,7 +1639,6 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
                                   std::to_string(order[i]) + ", and more "
                                   "than one compute unit in " + artifact +
                                   " ends in that number: " + hit + also;
-                delete D;
                 set_err(std::move(msg));
                 return ST_ARTIFACT;
             }
@@ -1408,10 +1649,10 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
 
     std::string first_failure, not_tiles;
     /* A selection's refusal is decided inside the loop and carried out
-     * after it: the message is built while D is alive and D is deleted
-     * once, outside every try. Deleting inside the try and then
-     * building the message let a bad_alloc reach the catch below and
-     * delete D a second time (verifier-V2, 2026-09-25, under ASan). */
+     * after it. Deleting D inside the try and then building the message
+     * once let a bad_alloc reach the catch below and delete it a second
+     * time (verifier-V2, 2026-09-25, under ASan); D is now owned by a
+     * unique_ptr for the whole open, so no path deletes it by hand. */
     int refused = ST_OK;
     std::string refusal;
     for (const std::string &nm : names) {
@@ -1470,12 +1711,10 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
         }
     }
     if (refused != ST_OK) {
-        delete D;
         set_err(std::move(refusal));
         return refused;
     }
     if (D->tiles.empty()) {
-        delete D;
         std::string msg = "no cft tile could be opened in " + std::string(artifact);
         if (!probing)
             msg += ": the image declares compute unit(s) " + declared +
@@ -1510,7 +1749,6 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
          * bitstream does not carry and receiving a buffer of zeros
          * with clean flags. A library whose product is exception-exact
          * reproducibility cannot run in that mode. */
-        delete D;
         set_err(std::string("status registers are unreadable on this "
                             "runtime, so exception flags and bus faults "
                             "cannot be reported and capabilities cannot "
@@ -1523,7 +1761,6 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
         std::snprintf(buf, sizeof buf,
                       "not a cft tile: MAGIC reads 0x%08x, expected 0x%08x",
                       magic, TILE_MAGIC);
-        delete D;
         set_err(buf);
         return ST_ARTIFACT;
     }
@@ -1543,7 +1780,6 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
         msg += " is not one this library knows (" + known + ") - the "
                "register map may differ, and guessing is how a host "
                "misreads a result. What a tile IMPLEMENTS is CAPS, not this.";
-        delete D;
         set_err(msg);
         return ST_UNSUPPORTED;
     }
@@ -1558,7 +1794,6 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
         try {
             caps2 = D->tiles[0].k.read_register(CSR_CAPS2);
         } catch (const std::exception &e) {
-            delete D;
             set_err(std::string("this bitstream's contract is 0x800, whose "
                                 "map has CAPS2 at 0x6C, and reading it "
                                 "failed: ") + e.what());
@@ -1631,8 +1866,28 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
             seq->max_consts   = 1u << ((caps >> 24) & 0xFu);
         }
     }
-    *out            = D;
+    *out            = own.release();
     return ST_OK;
+}
+
+/* The C boundary. No C++ exception may cross it: every entry point
+ * below is a thin wrapper that runs its implementation and turns an
+ * escaping bad_alloc into CFT_ERR_OUT_OF_MEMORY and anything else into
+ * CFT_ERR_INTERNAL, with a sentence. Once a unit may have run, run_job
+ * itself lets nothing escape (it waits, poisons and marks outputs
+ * first), so what reaches these handlers happened before any start or
+ * after every run finished. Before 2026-09-25 most allocation failures
+ * in cftx_open escaped as bad_alloc and leaked the device object
+ * (verifier-V2, then verifier-V4). */
+extern "C" int cftx_open(const char *artifact, int index, void **out,
+                         uint32_t *format_mask, uint32_t *op_groups,
+                         uint32_t *tiles, uint32_t *version,
+                         int *flags_readable, cft_seq_caps *seq)
+{
+    return at_boundary("opening the device", [&] {
+        return cftx_open_impl(artifact, index, out, format_mask, op_groups,
+                              tiles, version, flags_readable, seq);
+    });
 }
 
 extern "C" void cftx_close(void *hw)
@@ -1688,6 +1943,9 @@ extern "C" int cftx_buffer_to_device(void *buf)
     B.gen++;
     for (auto &c : B.copies)
         c.dirty = false;
+    /* ...and a buffer a failed run lost is the caller's again. */
+    B.lost = false;
+    B.lost_why.clear();
     return ST_OK;
 }
 
@@ -1696,6 +1954,19 @@ extern "C" int cftx_buffer_from_device(void *buf)
     if (!buf)
         return ST_INVALID_ARGUMENT;
     Buf &B = *static_cast<Buf *>(buf);
+    /* A failed run may have written part of a window over bytes that
+     * never came home: nothing on the device, and nothing in the mirror,
+     * is this buffer's contents any more (Buf::lost). */
+    if (B.lost) {
+        set_err_or([&] {
+            return B.lost_why.empty()
+                       ? std::string("a failed run lost this resident "
+                                     "buffer's contents; publish them "
+                                     "again with cft_buffer_to_device")
+                       : B.lost_why;
+        }, "buffer lost");
+        return ST_INTERNAL;
+    }
     bool moved = false;
     try {
         for (auto &c : B.copies) {
@@ -1745,11 +2016,11 @@ extern "C" void cftx_buffer_stat(void *buf, int *resident,
  * and one place here. */
 constexpr uint32_t MODE_SCALAR_SH = 16;
 
-extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
-                        const void *a, const void *b, const void *c,
-                        void *d, size_t n, uint32_t scalar_mask,
-                        const cft_bindings *bind,
-                        uint32_t *flags, uint32_t *bus)
+static int cftx_run_impl(void *hw, int op, int fmt, int rnd,
+                         const void *a, const void *b, const void *c,
+                         void *d, size_t n, uint32_t scalar_mask,
+                         const cft_bindings *bind,
+                         uint32_t *flags, uint32_t *bus)
 {
     Dev &D = *static_cast<Dev *>(hw);
     g_err.clear();
@@ -1926,18 +2197,31 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
                     "this bitstream does not implement (STATUS 0x" +
                     hex32(status_acc) + "). CAPS advertised otherwise, "
                     "which is a device/library disagreement worth "
-                    "reporting");
+                    "reporting" + at_where(J));
             return ST_UNSUPPORTED;
         }
         if (bus)
             *bus = status_acc;
-        set_err("kernel reported bus faults; the output is not valid");
+        set_err("kernel reported bus faults; the output is not valid" +
+                at_where(J));
         return ST_BUS_FAULT;
     }
 
     if (flags)
         *flags = flag_acc;
     return ST_OK;
+}
+
+extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
+                        const void *a, const void *b, const void *c,
+                        void *d, size_t n, uint32_t scalar_mask,
+                        const cft_bindings *bind,
+                        uint32_t *flags, uint32_t *bus)
+{
+    return at_boundary("a run", [&] {
+        return cftx_run_impl(hw, op, fmt, rnd, a, b, c, d, n, scalar_mask,
+                             bind, flags, bus);
+    });
 }
 
 /* ---- sequencer programs -------------------------------------------
@@ -1964,14 +2248,14 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
  * zeroing first would make a tile that skipped a slot indistinguishable
  * from one that wrote the zero it promised.
  */
-extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
-                                size_t image_bytes,
-                                const cft_seq_run_io *io,
-                                uint32_t max_deposits,
-                                const void *a, const void *b, const void *c,
-                                void *deposits, uint32_t *counts, size_t n,
-                                const cft_bindings *bind,
-                                uint32_t *flags, uint32_t *bus)
+static int cftx_program_run_impl(void *hw, int fmt, const void *image,
+                                 size_t image_bytes,
+                                 const cft_seq_run_io *io,
+                                 uint32_t max_deposits,
+                                 const void *a, const void *b, const void *c,
+                                 void *deposits, uint32_t *counts, size_t n,
+                                 const cft_bindings *bind,
+                                 uint32_t *flags, uint32_t *bus)
 {
     if (!hw || !image || image_bytes == 0 || !io)
         return ST_INVALID_ARGUMENT;
@@ -2294,12 +2578,17 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                         ob[r] = buf_bind(*static_cast<Buf *>(bind->buf[r]),
                                          tl, r, bind->off[r] + w[r].off,
                                          w[r].len, p.spad[r], false);
+                /* Under a lane mask the tile leaves a masked lane's
+                 * deposit slots and scratch-out slots as they were, so a
+                 * resident window is bound PRESERVING: its copy made
+                 * current first, like an input (buf_bind). */
+                const bool keep = lane_mask != nullptr;
                 if (bind->buf[CFT_ROLE_D] && deposits && max_deposits)
                     ob[3] = buf_bind(
                         *static_cast<Buf *>(bind->buf[CFT_ROLE_D]), tl,
                         CFT_ROLE_D,
                         bind->off[CFT_ROLE_D] + w[CFT_LANE_DEP].off,
-                        w[CFT_LANE_DEP].len, p.dep_pad, true);
+                        w[CFT_LANE_DEP].len, p.dep_pad, true, keep);
                 /* The scratch blocks, on the deposit window's terms.
                  * Guarded on the BYTE COUNT and not only the pointer: a
                  * program that declares no scratch I/O gets a one-beat
@@ -2317,7 +2606,7 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                         *static_cast<Buf *>(bind->buf[CFT_ROLE_SO]), tl,
                         CFT_ROLE_SO,
                         bind->off[CFT_ROLE_SO] + w[CFT_LANE_SOUT].off,
-                        w[CFT_LANE_SOUT].len, p.sout_pad, true);
+                        w[CFT_LANE_SOUT].len, p.sout_pad, true, keep);
                 /* The four tables on the same terms. A table is read and
                  * never written, so `false`. */
                 for (int r = 0; r < 4; r++) {
@@ -2666,14 +2955,15 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                 "not implement, or the tile rejected the program image - "
                 "too many instructions, constants or deposit slots for its "
                 "on-chip memories, or a header it did not recognise. "
-                "Nothing was computed and nothing was written.");
+                "Nothing was computed and nothing was written." +
+                at_where(J));
         return ST_UNSUPPORTED;
     }
     if (faulted) {
         if (bus)
             *bus = status_acc;
         set_err("kernel reported bus faults during a program; the deposits "
-                "are not valid");
+                "are not valid" + at_where(J));
         return ST_BUS_FAULT;
     }
 
@@ -2689,6 +2979,22 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
     return ST_OK;
 }
 
+extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
+                                size_t image_bytes,
+                                const cft_seq_run_io *io,
+                                uint32_t max_deposits,
+                                const void *a, const void *b, const void *c,
+                                void *deposits, uint32_t *counts, size_t n,
+                                const cft_bindings *bind,
+                                uint32_t *flags, uint32_t *bus)
+{
+    return at_boundary("a program", [&] {
+        return cftx_program_run_impl(hw, fmt, image, image_bytes, io,
+                                     max_deposits, a, b, c, deposits,
+                                     counts, n, bind, flags, bus);
+    });
+}
+
 /* ---- reductions ---------------------------------------------------
  *
  * One range per tile, round-robin when there are more ranges than
@@ -2699,12 +3005,12 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
  * still has to hold whole beats, so the staging pads the memory - the
  * arithmetic simply never reaches it.
  */
-extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
-                           const void *a,
-                           const size_t *lo, const size_t *hi,
-                           size_t nranges, void *partials,
-                           const cft_bindings *bind,
-                           uint32_t *flags, uint32_t *bus)
+static int cftx_reduce_impl(void *hw, int op, int fmt, int rnd,
+                            const void *a,
+                            const size_t *lo, const size_t *hi,
+                            size_t nranges, void *partials,
+                            const cft_bindings *bind,
+                            uint32_t *flags, uint32_t *bus)
 {
     if (!hw || !a || !lo || !hi || !partials || nranges == 0)
         return ST_INVALID_ARGUMENT;
@@ -2840,16 +3146,29 @@ extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
              * cft.h promise */
             set_err("kernel REFUSED the reduction: MODE selected a "
                     "precision this bitstream does not implement "
-                    "(STATUS 0x" + hex32(bs) + ")");
+                    "(STATUS 0x" + hex32(bs) + ")" + at_where(J));
             return ST_UNSUPPORTED;
         }
         if (bus) *bus = bs;
         set_err("the memory system reported a fault during a reduction; "
-                "the result is not to be trusted");
+                "the result is not to be trusted" + at_where(J));
         return ST_BUS_FAULT;
     }
     if (flags) *flags = fl;
     return ST_OK;
+}
+
+extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
+                           const void *a,
+                           const size_t *lo, const size_t *hi,
+                           size_t nranges, void *partials,
+                           const cft_bindings *bind,
+                           uint32_t *flags, uint32_t *bus)
+{
+    return at_boundary("a reduction", [&] {
+        return cftx_reduce_impl(hw, op, fmt, rnd, a, lo, hi, nranges,
+                                partials, bind, flags, bus);
+    });
 }
 
 /* ---- cftx_reduce_seg: segments across tiles (ABI 0.13) --------------
@@ -2860,10 +3179,10 @@ extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
  * the partition is by whole segments, as even as the tile count allows,
  * one wave. op is 24 (sum) or 31 (maxall), the two the tile streams;
  * the caller took the composed opcodes apart. */
-extern "C" int cftx_reduce_seg(void *hw, int op, int fmt, int rnd,
-                               const void *a, size_t n, size_t seg,
-                               void *d, const cft_bindings *bind,
-                               uint32_t *flags, uint32_t *bus)
+static int cftx_reduce_seg_impl(void *hw, int op, int fmt, int rnd,
+                                const void *a, size_t n, size_t seg,
+                                void *d, const cft_bindings *bind,
+                                uint32_t *flags, uint32_t *bus)
 {
     if (!hw || !a || !d || seg == 0 || n == 0 || (n % seg) != 0)
         return ST_INVALID_ARGUMENT;
@@ -2964,14 +3283,26 @@ extern "C" int cftx_reduce_seg(void *hw, int op, int fmt, int rnd,
         if ((bs & 0x8u) && !(bs & 0x7u)) {
             set_err("kernel REFUSED the reduction: MODE selected a "
                     "precision this bitstream does not implement "
-                    "(STATUS 0x" + hex32(bs) + ")");
+                    "(STATUS 0x" + hex32(bs) + ")" + at_where(J));
             return ST_UNSUPPORTED;
         }
         if (bus) *bus = bs;
         set_err("the memory system reported a fault during a segmented "
-                "reduction; the results are not to be trusted");
+                "reduction; the results are not to be trusted" +
+                at_where(J));
         return ST_BUS_FAULT;
     }
     if (flags) *flags = fl;
     return ST_OK;
+}
+
+extern "C" int cftx_reduce_seg(void *hw, int op, int fmt, int rnd,
+                               const void *a, size_t n, size_t seg,
+                               void *d, const cft_bindings *bind,
+                               uint32_t *flags, uint32_t *bus)
+{
+    return at_boundary("a segmented reduction", [&] {
+        return cftx_reduce_seg_impl(hw, op, fmt, rnd, a, n, seg, d, bind,
+                                    flags, bus);
+    });
 }

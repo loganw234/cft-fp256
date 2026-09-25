@@ -308,11 +308,13 @@ typedef struct cft_seq_run_io {
  * at bit 4 computed a strict image correctly and told the caller
  * nothing, which is the one thing strict exists to prevent.
  *
- * ONE compute unit, deliberately. See the note in the implementation
- * beside cftx_run's partitioning: an elementwise element depends on
- * its own index alone, and a sequencer lane does too - but the early
- * exit is a CROSS-LANE condition, so splitting lanes across tiles is
- * a claim about P3 that wants its own fuzz before it ships. */
+ * Every tile the device has, since 2026-09-25 (backend_xrt.cpp's
+ * run_job): a sequencer lane depends on its own index alone, as an
+ * elementwise element does, and the early exit - a cross-lane
+ * condition inside a block - is invisible by SEQUENCER.md's P3, which
+ * is what lets a backend cut the lanes across tiles. The card gate
+ * fuzzes the cut and the tile order rather than assuming it
+ * (docs/CARDDAY.md, CFT_XRT_PROGRAM_CUTS). */
 /* `bind` names a, b, c and `deposits` when they are resident, in the
  * four role slots - deposits being the D master's buffer, which is
  * what CFT_ROLE_D means here - and the two scratch blocks and the four
