@@ -415,9 +415,12 @@ cannot name.
 `SEQ_FEAT_SCALAR` and `FEAT_REDUCE_SEG` say whether THIS handle takes
 `mapEx` with a `scalar` operand and `reduceSeg` - not where either
 saves anything, which only a tile does. libcft's software backend
-publishes both since 2026-09-24; a module built before that (the one
-committed beside this file until the next rebuild) reports them clear
-on the software backend while computing both.
+publishes both since 2026-09-24, and the module committed beside this
+file was rebuilt that day: its software handle reports `seqFeatures`
+**0x7f1f** and `cftw_supports(dev, 30, fmt)` = 1 for IMUL, which
+`test.mjs` holds. The module committed before it (built 2026-09-15)
+reported 0x271f - SCALAR, REDUCE_SEG and LANE_MASK clear - and 0 for
+IMUL, while computing all four.
 
 `SEQ_FEAT_SCRATCH` is `0x100` and `SEQ_FEAT_SCRATCH_IO` `0x200`, not
 the next two bits after `BANK_PTR`: revision 3 opened a SECOND feature

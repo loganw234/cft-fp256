@@ -4,6 +4,10 @@
 // Check the committed conformance.html without a browser.
 //
 //     node bindings/wasm/verify.mjs [vectors-dir]
+//     node bindings/wasm/verify.mjs --page bindings/wasm/build/negative_control.html
+//
+// --page checks another assembly of the page instead of the committed
+// one - the build's negative control, which step 3b must fail by name.
 //
 // A browser is where the page is USED, and a person watching one is
 // how it was signed off before. Neither is a test you can re-run
@@ -12,7 +16,7 @@
 // on 2026-09-01 answered ABI 0.1 for a day, see the README). This
 // script is the re-runnable half.
 //
-// It checks five things, in the order that makes the last two mean
+// It checks six things, in the order that makes the last two mean
 // something:
 //
 //   1  THE PAGE'S OWN MODULE, extracted from the HTML. Emscripten's
@@ -26,6 +30,15 @@
 //      -sENVIRONMENT changes the loader, not the wasm, and that is a
 //      claim worth measuring rather than repeating: without it a
 //      replay under node would be a replay of a lookalike.
+//   3b THE PAGE'S EMBEDDED SAMPLE, replayed the way the page's section
+//      2 replays it on load: each of the twenty sampled opcode sets
+//      written into its own MEMFS directory and handed to
+//      cft_conformance() on the page's own bytes, and the case count
+//      held to the one the page prints. The sample is the one part of
+//      the page the steps around it never read - they check the
+//      module and replay vector FILES - so until this step the build's
+//      negative control, which corrupts one expected value in the
+//      sample and nothing else, passed every one of them.
 //   4  The replay itself, through the page's own bytes: the node
 //      loader is handed the extracted module as Module.wasmBinary, so
 //      cft_conformance() runs on the literal contents of
@@ -41,7 +54,8 @@
 //   5  EVERY OPERATION THAT IS NOT AN OPCODE, driven THROUGH ITS OWN
 //      WRAPPER from JavaScript: the thirty-nine transcendentals, the
 //      three augmented operations of clause 9.5, clause 9.4's four
-//      sum reductions and three scaled products, clause 5.12's
+//      sum reductions and three scaled products with maxall beside
+//      them, clause 5.12's
 //      character conversions with 9.7's payload operations, and since
 //      ABI 0.7 clause 9.6's four magnitude forms and clause 5.4.1's
 //      six formatOf operations over all sixteen ordered pairs of
@@ -58,7 +72,7 @@
 //      itself, calls cftw_exp … cftw_hypot, cftw_sinpi …
 //      cftw_atan2pi, cftw_sin … cftw_atanh, cftw_exp2m1 …
 //      cftw_rootn, cftw_augmented_add … cftw_augmented_mul,
-//      cftw_reduce at opcodes 24/25/28/29, cftw_scaled_prod …
+//      cftw_reduce at opcodes 24/25/28/29/31, cftw_scaled_prod …
 //      cftw_scaled_prod_diff, cftw_from_decimal_char …
 //      cftw_set_payload_signaling, cftw_min_mag … cftw_maxnum_mag and
 //      cftw_formatof_add … cftw_formatof_fma, one element at a time
@@ -87,7 +101,18 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..", "..");
-const PAGE = join(HERE, "conformance.html");
+// --page FILE names another assembly of the page; anything else on the
+// command line is the vectors directory.
+const ARGV = process.argv.slice(2);
+const PAGE_AT = ARGV.indexOf("--page");
+if (PAGE_AT >= 0 && !ARGV[PAGE_AT + 1]) {
+  console.log("--page needs a file");
+  process.exit(2);
+}
+const PAGE = PAGE_AT >= 0 ? resolve(ARGV[PAGE_AT + 1])
+                          : join(HERE, "conformance.html");
+const VDIR_ARG = ARGV.filter((a, i) =>
+  PAGE_AT < 0 || (i !== PAGE_AT && i !== PAGE_AT + 1))[0];
 
 const FORMATS = ["fp32", "fp64", "fp128", "fp256"];
 const ROUNDINGS = ["rne", "rtz", "rdn", "rup", "rmm"];
@@ -498,38 +523,8 @@ else
       `replay through it would not be a replay of the page`);
 
 // ---------------------------------------------------------------------
-// 4. the replay - the page's bytes, the library's own cft_conformance
+// The page's module under the node loader, for steps 3b, 4 and 5
 // ---------------------------------------------------------------------
-
-const vdirs = [process.argv[2], join(ROOT, "vectors", "out"),
-               join(HERE, "build", "vectors")].filter(Boolean);
-const vdir = vdirs.find((d) => existsSync(d) &&
-  CANONICAL.every((n) => existsSync(join(d, n))));
-if (!vdir) {
-  console.log(`\nno complete vector directory in: ${vdirs.join(", ")}`);
-  console.log("Steps 1-3 stand; the replay did NOT run. Run `make vectors` " +
-              "from the repo root, or pass a directory.");
-  process.exit(failed ? 1 : 2);
-}
-console.log(`vectors ${vdir}`);
-// Every family the generator writes and cft_conformance enumerates:
-// the twenty opcode sets, the twenty transcendental ones, the four
-// augmented, twenty reduction and twenty character sets of ABI 0.6,
-// and since ABI 0.7 the four magnitude sets of 9.6 and the eighty
-// formatOf sets of 5.4.1 - one per ordered pair of formats per
-// attribute. 168 names in all; anything else in the directory is named
-// and skipped rather than replayed under a schema it does not have.
-const ALL_SET_NAMES = [...CANONICAL,
-                       ...TRANSCEND_SETS.map((s) => s.name),
-                       ...AUGMENTED_SETS.map((s) => s.name),
-                       ...REDUCE_SETS.map((s) => s.name),
-                       ...CHARACTER_SETS.map((s) => s.name),
-                       ...MINMAXMAG_SETS.map((s) => s.name),
-                       ...FORMATOF_SETS.map((s) => s.name)];
-const KNOWN = new Set(ALL_SET_NAMES);
-const stray = readdirSync(vdir).filter((n) => n.endsWith(".jsonl") &&
-  !KNOWN.has(n));
-if (stray.length) console.log(`        (ignoring ${stray.join(", ")})`);
 
 const { default: createCftModule } = await import(pathToFileURL(loaderJs));
 // The page's module, not the loader's file: same bytes by step 3, and
@@ -625,6 +620,113 @@ function replayOneSet(name, text) {
     try { M.FS.rmdir(dir); } catch { /* ditto */ }
   }
 }
+
+// ---------------------------------------------------------------------
+// 3b. the page's embedded sample, replayed as the page replays it
+//
+// page_template.html's section 2 replays CFT_SAMPLE on load: each set
+// written into a fresh MEMFS directory under its canonical name, one
+// cft_conformance() call per set, stopping at the first set that
+// fails - replayOneSet() above is that function. The sample is JSON
+// the build spliced into one line of the page, `const CFT_SAMPLE =
+// {...};`, and it is read as data rather than evaluated, for the
+// reason the module is. The page also prints how many cases it embeds
+// (CFT_BUILD.sample_cases), and that number is held to the count the
+// library reports, so the provenance line cannot drift from the sample.
+// ---------------------------------------------------------------------
+
+function pageJson(name) {
+  const m = html.match(new RegExp(`^const ${name}\\s*=\\s*(.*);$`, "m"));
+  return m ? JSON.parse(m[1]) : undefined;
+}
+
+console.log("\nsample  (the page's embedded sample, replayed as its section 2 " +
+            "replays it)");
+let sample, build;
+try {
+  sample = pageJson("CFT_SAMPLE");
+  build = pageJson("CFT_BUILD");
+} catch (err) {
+  bad(`the page's CFT_SAMPLE or CFT_BUILD line is not JSON: ${err.message}`);
+}
+if (!sample || typeof sample !== "object") {
+  bad("the page carries no embedded sample (`const CFT_SAMPLE = {...};`), " +
+      "so its section 2 has nothing to replay");
+} else {
+  const names = Object.keys(sample);
+  const absent = CANONICAL.filter((n) => !names.includes(n));
+  const extra = names.filter((n) => !CANONICAL.includes(n));
+  if (absent.length || extra.length)
+    bad(`the embedded sample is not the twenty opcode sets: missing ` +
+        `[${absent.join(" ")}], extra [${extra.join(" ")}]`);
+  let sampleCases = 0, sampleClean = 0, sampleFail = null;
+  for (const name of names) {
+    const r = replayOneSet(name, sample[name]);
+    sampleCases += r.cases;
+    const n = r.cases.toLocaleString("en-US").padStart(7);
+    if (r.status === 0 && r.cases > 0) {
+      sampleClean++;
+      console.log(`  ${name.padEnd(26)} ${n}  all matching`);
+      continue;
+    }
+    console.log(`  ${name.padEnd(26)} ${n}  FAILED: ${C.strerror(r.status)}`);
+    console.log(r.report.trim().split("\n").map((l) => "      " + l).join("\n"));
+    sampleFail = { name, status: r.status };
+    break;                  // the page stops at the first failing set too
+  }
+  if (sampleFail)
+    bad(`the page's embedded sample fails its own replay at ` +
+        `${sampleFail.name} (${C.strerror(sampleFail.status)}) - this page ` +
+        `shows CONFORMANCE FAILED on load`);
+  else if (sampleClean === 0 || sampleCases === 0)
+    bad("the page's embedded sample replayed nothing - an empty replay is " +
+        "not a pass");
+  else {
+    ok(`${sampleCases.toLocaleString("en-US")} embedded cases over ` +
+       `${sampleClean} sets, library matches the page's own sample exactly`);
+    const claimed = build && build.sample_cases;
+    if (claimed === sampleCases.toLocaleString("en-US"))
+      ok(`the page's provenance says ${claimed} cases embedded - the same ` +
+         `count`);
+    else
+      bad(`the page's provenance says ${claimed} cases embedded; its ` +
+          `sample replays ${sampleCases.toLocaleString("en-US")}`);
+  }
+}
+
+// ---------------------------------------------------------------------
+// 4. the replay - the page's bytes, the library's own cft_conformance
+// ---------------------------------------------------------------------
+
+const vdirs = [VDIR_ARG, join(ROOT, "vectors", "out"),
+               join(HERE, "build", "vectors")].filter(Boolean);
+const vdir = vdirs.find((d) => existsSync(d) &&
+  CANONICAL.every((n) => existsSync(join(d, n))));
+if (!vdir) {
+  console.log(`\nno complete vector directory in: ${vdirs.join(", ")}`);
+  console.log("Steps 1-3b stand; the replay did NOT run. Run `make vectors` " +
+              "from the repo root, or pass a directory.");
+  process.exit(failed ? 1 : 2);
+}
+console.log(`vectors ${vdir}`);
+// Every family the generator writes and cft_conformance enumerates:
+// the twenty opcode sets, the twenty transcendental ones, the four
+// augmented, twenty reduction and twenty character sets of ABI 0.6,
+// and since ABI 0.7 the four magnitude sets of 9.6 and the eighty
+// formatOf sets of 5.4.1 - one per ordered pair of formats per
+// attribute. 168 names in all; anything else in the directory is named
+// and skipped rather than replayed under a schema it does not have.
+const ALL_SET_NAMES = [...CANONICAL,
+                       ...TRANSCEND_SETS.map((s) => s.name),
+                       ...AUGMENTED_SETS.map((s) => s.name),
+                       ...REDUCE_SETS.map((s) => s.name),
+                       ...CHARACTER_SETS.map((s) => s.name),
+                       ...MINMAXMAG_SETS.map((s) => s.name),
+                       ...FORMATOF_SETS.map((s) => s.name)];
+const KNOWN = new Set(ALL_SET_NAMES);
+const stray = readdirSync(vdir).filter((n) => n.endsWith(".jsonl") &&
+  !KNOWN.has(n));
+if (stray.length) console.log(`        (ignoring ${stray.join(", ")})`);
 
 // Every set the page's drop zone accepts, one at a time in its own
 // directory - which is exactly what the page does with a dropped file,
@@ -978,9 +1080,9 @@ function driveAugmentedSet(set, text) {
 
 /** The reduction sets (9.4). A case IS an array call, so there is no
  *  second array pass and none is needed - and the flags stay exact per
- *  case for the same reason. sum/dot/sumsq/sumabs go through
- *  cftw_reduce at opcodes 24/25/28/29; the three scaled products have
- *  their own entry points and return a pair. */
+ *  case for the same reason. sum/dot/sumsq/sumabs/maxall go through
+ *  cftw_reduce at opcodes 24/25/28/29/31; the three scaled products
+ *  have their own entry points and return a pair. */
 function driveReduceSet(set, text) {
   const esz = C.formatSize(set.fmt);
   let lineno = 0, checked = 0;

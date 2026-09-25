@@ -187,7 +187,7 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | `bindings` (cftmpfr vs gmpy2) | 2.4 min | 8 min | |
 | `cpp` (C++17 and C++20, each a full replay) | 25 min | not measured loaded | |
 | `node` (unit tests + `conformance.mjs`) | 5 min + 17 min | | |
-| `wasm` (`verify.mjs`, the page without a browser) | 11 min | 30 min | 1,068,915 cases through the page's bytes on `make vectors`' sets (about 1.2 million at the runner's generator counts), then 832,915 over 148 sets through the wrappers. The module must be REBUILT when an opcode is assigned, not merely revisioned: this lane replays the sets, so one predating opcode 31 failed 20 of 148 - all twenty reduce sets, each at its first `maxall` case |
+| `wasm` (`verify.mjs`, the page without a browser) | 11 min | 30 min | the page's own embedded sample first, 4,015 cases over 20 sets replayed as its section 2 does (the build's `negative_control.html` fails there by name, `verify.mjs --page`); then 1,068,915 cases through the page's bytes on `make vectors`' sets (about 1.2 million at the runner's generator counts), then 832,915 over 148 sets through the wrappers. The module must be REBUILT when an opcode is assigned, not merely revisioned: this lane replays the sets, so one predating opcode 31 failed 20 of 148 - all twenty reduce sets, each at its first `maxall` case |
 | `mpfr` | 8 min | | |
 | `soak-quick` | 1.6 min | | |
 | `photograph` (a GPU's record, four passes of 1,048,576 samples side by side) | 1.7 min | | 101 s a pass on one core with four running, 88 s alone; 1.2 s a pass on the U50's tile (atlas-engine, 2026-09-18). The expected hashes are an NVIDIA GPU's, not the model's |

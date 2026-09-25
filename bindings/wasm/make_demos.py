@@ -15,7 +15,8 @@ exists.
 THE ONE THING THIS SCRIPT REFUSES TO DO is ship a page whose module is
 not bindings/node/cft_node.wasm. The demos page exists to run the
 conformance page's own bits: its chains are a claim about THAT module,
-whose sha256 the conformance page and three documents quote. So the
+which the conformance page embeds and whose sha256 three documents
+quote. So the
 module is checked twice here - against the split .wasm the same emcc
 run produced, and by walking the bytes back out of the assembled HTML
 - on top of the check build_demos.sh already made. Three checks of one

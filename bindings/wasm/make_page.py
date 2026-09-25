@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Assemble bindings/wasm/conformance.html from its three ingredients.
 
-    page_template.html   the page, with three @CFT_*@ tokens open
+    page_template.html   the page, with four @CFT_*@ tokens open
     cft_runtime.js       emcc -sSINGLE_FILE output (wasm embedded as
-                         base64), spliced in verbatim
+                         a JS string literal, one byte per code
+                         unit), spliced in verbatim
     a vectors directory  the 20 regenerated .jsonl sets, sampled here
 
 Run by build.sh inside the pinned container; pure stdlib, so it also
@@ -22,7 +23,7 @@ a sample nobody can regenerate is a sample nobody can audit:
     it, so every opcode class is embedded per set by construction
     rather than by luck: arithmetic, sign, min/max, predicates,
     integer, the divide/sqrt seeds (26/27), and the unassigned
-    reserved15/30/255 whose defined qNaN+invalid answer is contract
+    reserved15/255 whose defined qNaN+invalid answer is contract
     surface too. Lines keep file order.
 
 ONLY THE OPCODE SETS ARE SAMPLED, and that is unchanged at ABI 0.7.
@@ -228,9 +229,9 @@ def main():
                         "stride missed"),
         "sample_cases": f"{total_sampled:,}",
         "total_cases": f"{LINES_PER_SET * len(names):,}",
-        "wasm_note": (f"wasm module {wasm_bytes:,} bytes, embedded as "
-                      f"base64 in this page; modularized runtime js "
-                      f"{js_bytes:,} bytes"),
+        "wasm_note": (f"wasm module {wasm_bytes:,} bytes, embedded in "
+                      f"this page as a JS string literal; modularized "
+                      f"runtime js {js_bytes:,} bytes"),
     }
 
     page = Path(args.template).read_text(encoding="utf-8")

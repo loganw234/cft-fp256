@@ -5,8 +5,9 @@
 //
 // The package's own tests: conversions, the decimal contract, flags,
 // refusals, the clause-5 surface, batch-equals-scalar and the
-// contract's reduction tree. The 236,000-case conformance replay is
-// conformance.mjs; this file is everything the vectors cannot express.
+// contract's reduction tree. The conformance replay of the published
+// sets is conformance.mjs; this file is everything the vectors cannot
+// express.
 //
 // Two of these are worth naming, because they are checks against
 // something this repository did not write:
@@ -110,6 +111,45 @@ test("the module is the tree's own ABI, on the software backend", () => {
   eq(c64.backend, "software", "backend: ");
 });
 
+/** The software handle's capability answers, asked of the MODULE.
+ *
+ *  libcft's software backend publishes CFT_SEQ_FEAT_SCALAR and
+ *  CFT_FEAT_REDUCE_SEG since 2026-09-24, CFT_SEQ_FEAT_LANE_MASK since
+ *  2026-09-15, and answers cft_supports(CFT_IMUL) from CAPS[28] since
+ *  2026-09-24 - host/tests/api_test.c holds the C library to all of it.
+ *  None of that reaches JavaScript until the module is rebuilt: the
+ *  ABI did not move, so the test above is green over a module that
+ *  still answers the old way, and the one committed until the
+ *  2026-09-24 rebuild reported 0x271f and supports(30) = 0 while
+ *  computing all four. This is the line that says which module is in
+ *  the package. 0x7f1f is every seq_features bit cft.h defines today,
+ *  and a missing bit is named, not just counted. 30 is asked of the
+ *  module's own name table first, so the number is not a transcription. */
+const SW_SEQ_FEATURES = 0x7f1f;
+test("the module's software handle publishes seq_features 0x7f1f and supports imul", () => {
+  eq(c64._C.opName(30), "imul", "the module's name for opcode 30: ");
+  // Every format and both answers, collected before failing, so a stale
+  // module is named for everything it gets wrong rather than the first.
+  const wrong = [];
+  for (const w of WIDTHS) {
+    const ctx = ctxs[w];
+    const got = ctx.seqFeatures;
+    if (got !== SW_SEQ_FEATURES)
+      wrong.push(`${ctx.format.name}: seqFeatures 0x${got.toString(16)}, ` +
+                 `expected 0x${SW_SEQ_FEATURES.toString(16)} - missing [` +
+                 seqFeatureNames(SW_SEQ_FEATURES & ~got).join(" ") +
+                 "], extra [" + seqFeatureNames(got & ~SW_SEQ_FEATURES)
+                   .join(" ") + "]");
+    const imul = ctx._C.supports(ctx._dev, 30, ctx.format.code);
+    if (imul !== 1)
+      wrong.push(`${ctx.format.name}: cftw_supports(dev, 30 imul) = ` +
+                 `${imul} on the software backend, which computes it and ` +
+                 `publishes CAPS[28]`);
+  }
+  ok(!wrong.length, wrong.join("; ") + " - the module predates the " +
+     "software backend's answers; rebuild it with bindings/wasm/build.sh");
+});
+
 /** Every feature bit cft.h defines is one this package can name, and the
  *  package names no bit the header does not define.
  *
@@ -161,6 +201,44 @@ test("every feature bit cft.h defines has a name here, and no other does", () =>
   eq(names.length, header.size, "names for the whole word: ");
   ok(!names.some((s) => /^bit\d+$/.test(s)),
      `a defined bit still prints as a number: ${names.join(" ")}`);
+});
+
+/** Every opcode cft.h's cft_op defines has a name in OPS_BY_NAME, and the
+ *  table names no opcode the header does not define.
+ *
+ *  audit() holds each ENTRY of the table to the module's cft_op_name(), so
+ *  a wrong number fails at import - but a MISSING entry is invisible to
+ *  it, and that is how opcode 30 went unnamed here from 2026-09-07 to
+ *  2026-09-24 while the module computed it and, on the rebuilt module,
+ *  cftw_supports() said yes. The enum is read out of the header, as the
+ *  feature bits are above, so an opcode appended to cft.h turns this red
+ *  until the package can name it. */
+function opcodesFromHeader() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const h = readFileSync(join(resolve(here, "..", ".."), "host", "include",
+                              "cft.h"), "utf8");
+  const body = h.match(/typedef enum cft_op \{([\s\S]*?)\} cft_op;/);
+  if (!body) throw new Error("cft.h has no `typedef enum cft_op { ... } cft_op;`");
+  const ops = new Map();
+  const re = /^\s*CFT_([A-Z0-9_]+)\s*=\s*(\d+)/gm;
+  for (let m = re.exec(body[1]); m; m = re.exec(body[1]))
+    ops.set(Number(m[2]), m[1].toLowerCase());
+  if (ops.size < 28) throw new Error(`cft.h's cft_op gave only ${ops.size} opcodes`);
+  return ops;
+}
+
+test("every opcode cft.h defines has a name here, and no other does", () => {
+  const header = opcodesFromHeader();
+  const named = new Map(Object.entries(OPS_BY_NAME).map(([n, v]) => [v, n]));
+  eq(named.size, Object.keys(OPS_BY_NAME).length, "an opcode is named twice: ");
+  for (const [v, name] of header)
+    ok(named.get(v) === name,
+       `CFT_${name.toUpperCase()} (${v}) is ` +
+       (named.has(v) ? `called "${named.get(v)}"` : "not named") +
+       ` in lib.mjs's OPS_BY_NAME`);
+  for (const [v, name] of named)
+    ok(header.has(v), `OPS_BY_NAME names ${v} "${name}" and cft.h's ` +
+                      `cft_op defines no such opcode`);
 });
 
 /** Every reduction name the MODEL emits must be one this package resolves.

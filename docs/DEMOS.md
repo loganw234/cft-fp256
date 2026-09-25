@@ -19,12 +19,12 @@ Live beside the conformance page at
 
 | | |
 |---|---|
-| page | `bindings/wasm/demos.html`, 574,656 bytes |
-| sha256 | `3c412c0a000d765ab28325b6657ff78f14ea8a6faae211740e647b8d52292cb9` |
-| module | `bindings/node/cft_node.wasm`, 256,485 bytes, sha256 `81f34e1263c9966587ac34a093232bb66b675f1638372ec3ae30439718edff4a` |
+| page | `bindings/wasm/demos.html`, 575,555 bytes |
+| sha256 | `5ce2fc2b34f22c1e873684dfcdbdc394b767ca1049063eec81e5c5372b8b75aa` |
+| module | `bindings/node/cft_node.wasm`, 257,252 bytes, sha256 `3737534db4d44304674d66228b96287725cefa43069ff4d4b97b4e3775ef1435` |
 | toolchain | emcc 6.0.9 (4e4223852a0835923411059a3929907d7df1232e), `emscripten/emsdk:6.0.9@sha256:96617f27fe16421588241def73908fd348a7f9d260440ed0d00b36dcf7a063cc` |
 | configurations | 13, over 15 chains |
-| recorded | 2026-09-15, per `bindings/wasm/demos_chains.json`'s own `recorded` field |
+| recorded | 2026-09-25, per `bindings/wasm/demos_chains.json`'s own `recorded` field - the recorder writes the UTC date, and it was 2026-09-24 on the recording desktop's clock |
 
 ---
 
@@ -498,8 +498,8 @@ Docker; no host compiler, no host emsdk, no host Python.
               build/demos_negative_control.html (untracked)
 
 **This build does not produce a new module.** `bindings/node/cft_node.wasm`
-is a committed build product whose sha256 the conformance page and
-three documents quote; stage 1 recompiles it only so that the
+is a committed build product that the conformance page embeds and
+whose sha256 three documents quote; stage 1 recompiles it only so that the
 SINGLE_FILE loader exists, and stages 2 and 3 refuse to ship a page
 whose bytes are not identical to it. The one emcc flag that differs
 from `build.sh` is `-sENVIRONMENT=web,worker` instead of
@@ -517,8 +517,8 @@ one fact is not paranoia when the fact is the whole argument.
 with `bindings/wasm/build/` removed between them (2026-09-07; the
 2026-09-04 page was 486,822 bytes, sha256 `e3711319627e6828...`, built
 the same way). Those are that day's bytes. The page has been rebuilt
-with the module since - the committed one is 574,656 bytes, sha256
-`3c412c0a000d765a...`, at ABI 0.14 - so read the pair above as the
+with the module since - the committed one is 575,555 bytes, sha256
+`5ce2fc2b34f22c1e...`, at ABI 0.14 - so read the pair above as the
 2026-09-07 measurement and the table at the top of this file as what
 is in the tree.
 
