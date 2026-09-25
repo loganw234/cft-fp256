@@ -4609,6 +4609,247 @@ static void check_program_past_a_page(cft_device *dev, cft_format fmt)
     cft_program_free(prog);
 }
 
+/* The capacity boundaries a program run's cut puts on each TILE
+ * (2026-09-25).
+ *
+ * check_program_past_a_page holds one boundary for a whole run. Since
+ * the scheduler cuts a program's lanes across the tiles
+ * (backend_xrt.cpp, run_job), every per-lane buffer is a tile's slice,
+ * so a boundary is a tile's and a quad reaches it at four times the
+ * lanes - the leg above now tests a quarter page there. What the round
+ * of 2026-09-17 left owed (docs/ROADMAP.md's debts list: "a program leg
+ * at every capacity boundary the backend has - a page of mask bits, a
+ * page of counts, an HBM channel"), each on a tile's own slice:
+ *
+ *   - a page of counts: 1,024 lanes a tile (4,096 bytes of counts), and
+ *     one beat past it;
+ *   - a page of mask bits: 32,768 lanes a tile, and one beat past it,
+ *     without a mask and with one (every third lane off);
+ *   - an HBM channel: a deposit window one tile's 256 MB cannot hold is
+ *     REFUSED BY NAME - out of memory, with the library's sentence, the
+ *     heap intact - and a quarter of it runs right.
+ *
+ * The expectation is absolute: the program deposits stream a, so a kept
+ * lane's first slot is a, its other slots +0 and its count 1, and a
+ * masked lane's slots and count are what the caller put there (R17). ONCE
+ * A DEVICE, at the first format the sequencer legs reach; not under
+ * emulation. */
+static int capacity_run(cft_program *prog, cft_format fmt, size_t n,
+                        uint32_t maxdep, int masked, const char *what,
+                        size_t per_tile)
+{
+    const size_t esz = cft_format_size(fmt);
+    uint8_t *a = (uint8_t *)malloc(n * esz);
+    uint8_t *dep = (uint8_t *)malloc(n * maxdep * esz);
+    uint32_t *cnt = (uint32_t *)malloc(n * 4);
+    uint8_t *mask = masked ? (uint8_t *)calloc((n + 7) / 8, 1) : NULL;
+    uint8_t zero[MAXE];
+    uint32_t fl = 0xFFu, bus = 0xFFFFFFFFu;
+    cft_run_args A;
+    cft_status st;
+    size_t i, bad = 0, first_bad = 0;
+    int ok = 1;
+
+    memset(zero, 0, sizeof zero);
+    if (!a || !dep || !cnt || (masked && !mask)) {
+        printf("  FAIL seq capacity: out of memory for %s at %lu lanes\n",
+               what, (unsigned long)n);
+        free(a); free(dep); free(cnt); free(mask);
+        return 0;
+    }
+    fill_finite(a, fmt, n);
+    memset(dep, 0x5a, n * maxdep * esz);
+    for (i = 0; i < n; i++)
+        cnt[i] = 0xA5A5A5A5u;
+    if (masked)
+        for (i = 0; i < n; i++)
+            if (i % 3)
+                mask[i / 8] |= (uint8_t)(1u << (i % 8));
+    memset(&A, 0, sizeof A);
+    A.struct_size = sizeof A;
+    A.a = a;
+    A.n = n;
+    A.deposits = dep;
+    A.counts = cnt;
+    A.flags_out = &fl;
+    A.bus_out = &bus;
+    A.lane_mask = mask;
+    A.lane_mask_bytes = masked ? (n + 7) / 8 : 0;
+    st = cft_program_run_ex(prog, &A);
+    if (st != CFT_OK) {
+        printf("  FAIL seq capacity: %s, %lu lanes (%lu a tile): %s (%s)\n",
+               what, (unsigned long)n, (unsigned long)per_tile,
+               cft_strerror(st), cft_last_error());
+        ok = 0;
+    } else {
+        for (i = 0; i < n; i++) {
+            const int kept = !masked || (i % 3);
+            const uint8_t *slot = dep + i * maxdep * esz;
+            uint32_t d;
+            int lane_bad = 0;
+            if (kept) {
+                lane_bad = memcmp(slot, a + i * esz, esz) != 0 ||
+                           cnt[i] != 1;
+                for (d = 1; d < maxdep && !lane_bad; d++)
+                    lane_bad = memcmp(slot + d * esz, zero, esz) != 0;
+            } else {
+                for (d = 0; d < maxdep * esz && !lane_bad; d++)
+                    lane_bad = slot[d] != 0x5a;
+                lane_bad |= cnt[i] != 0xA5A5A5A5u;
+            }
+            if (lane_bad && !bad++)
+                first_bad = i;
+        }
+        if (bad || fl != 0 || (bus & ~0x30u) != 0) {
+            printf("  FAIL seq capacity: %s, %lu lanes (%lu a tile): %lu "
+                   "lanes wrong, the first %lu (%s); flags %#x, STATUS %#x\n",
+                   what, (unsigned long)n, (unsigned long)per_tile,
+                   (unsigned long)bad, (unsigned long)first_bad,
+                   masked && !(first_bad % 3) ? "masked" : "kept", fl, bus);
+            ok = 0;
+        }
+    }
+    free(a); free(dep); free(cnt); free(mask);
+    return ok;
+}
+
+static void check_program_capacity(cft_device *dev, cft_format fmt)
+{
+    static const struct {
+        size_t per_tile;
+        int masked;
+        const char *what;
+    } legs[] = {
+        {1024, 0, "a page of counts"},
+        {32768, 0, "a page of mask bits, no mask"},
+        {32768, 1, "a page of mask bits, every third lane masked"},
+    };
+    static int done;
+    const size_t esz = cft_format_size(fmt), epb = 32 / esz;
+    uint8_t img[64];
+    uint64_t ins[2];
+    cft_program *prog = NULL, *big = NULL;
+    cft_caps caps;
+    size_t tiles, l, bytes;
+    int passed = 0, ran = 0;
+
+    if (done)
+        return;
+    done = 1;
+    if (getenv("XCL_EMULATION_MODE")) {
+        not_here(NH_OTHER, "RUN", "    a program at each tile's capacity "
+                 "boundaries", "under emulation (XCL_EMULATION_MODE is "
+                 "set); a card and the software backend run it");
+        return;
+    }
+    memset(&caps, 0, sizeof caps);
+    caps.struct_size = sizeof caps;
+    tiles = (cft_get_caps(dev, &caps) == CFT_OK && caps.tiles) ? caps.tiles
+                                                               : 1;
+    ins[0] = seq_ctrl(3, 0, 0);                  /* deposit r0 = a */
+    ins[1] = seq_ctrl(0, 0, 0);                  /* halt */
+    bytes = seq_image(img, fmt, ins, 2, NULL, 0, 1);
+    checks++;
+    if (cft_program_load(dev, img, bytes, &prog) != CFT_OK) {
+        printf("  FAIL seq capacity: the one-deposit image did not load: "
+               "%s\n", cft_last_error());
+        failures++;
+        return;
+    }
+    for (l = 0; l < sizeof legs / sizeof legs[0]; l++) {
+        size_t plus;
+        for (plus = 0; plus <= epb; plus += epb) {
+            const size_t n = tiles * legs[l].per_tile + plus;
+            checks++;
+            ran++;
+            if (capacity_run(prog, fmt, n, 1, legs[l].masked, legs[l].what,
+                             legs[l].per_tile + plus))
+                passed++;
+            else
+                failures++;
+        }
+    }
+    printf("    a program at each tile's boundaries, %lu tile%s: a page of "
+           "counts and of mask bits, each exactly and one beat past, with "
+           "and without a mask - %d of %d right\n", (unsigned long)tiles,
+           tiles == 1 ? "" : "s", passed, ran);
+    cft_program_free(prog);
+
+    /* An HBM channel: 1M lanes a tile at 80 deposit slots of fp32 is
+     * 320 MB of deposit window a tile against a 256 MB channel - it must
+     * be refused as out of memory, by name; 16 slots (64 MB, a quarter
+     * of the channel) must run right. Only where there is a channel:
+     * the software backend has none. */
+    if (strcmp(caps.backend, "xrt") != 0) {
+        not_here(NH_OTHER, "TESTED", "    a program past one tile's HBM "
+                 "channel", "this backend has no HBM channel to run past");
+        return;
+    }
+    if (fmt != CFT_FP32)
+        return;
+    {
+        const size_t per = (size_t)1 << 20, n = tiles * per;
+        cft_status st;
+        uint8_t *a = (uint8_t *)malloc(n * esz);
+        uint8_t *dep = (uint8_t *)malloc(n * 80u * esz);
+        uint32_t *cnt = (uint32_t *)malloc(n * 4);
+        cft_run_args A;
+        uint32_t fl = 0, bus = 0;
+
+        checks++;
+        bytes = seq_image(img, fmt, ins, 2, NULL, 0, 80);
+        if (!a || !dep || !cnt ||
+            cft_program_load(dev, img, bytes, &big) != CFT_OK) {
+            printf("  FAIL seq capacity: could not set up the HBM leg (%s)\n",
+                   cft_last_error());
+            failures++;
+        } else {
+            fill_finite(a, fmt, n);
+            memset(&A, 0, sizeof A);
+            A.struct_size = sizeof A;
+            A.a = a;
+            A.n = n;
+            A.deposits = dep;
+            A.counts = cnt;
+            A.flags_out = &fl;
+            A.bus_out = &bus;
+            st = cft_program_run_ex(big, &A);
+            if (st == CFT_ERR_OUT_OF_MEMORY &&
+                strstr(cft_last_error(), "device buffer allocation failed")) {
+                printf("    a program past one tile's HBM channel (%lu lanes a "
+                       "tile, 320 MB of deposits each): refused by name - %s\n",
+                       (unsigned long)per, cft_last_error());
+            } else {
+                printf("  FAIL seq capacity: a deposit window past one tile's "
+                       "channel gave %s (%s), not a named out-of-memory "
+                       "refusal\n", cft_strerror(st), cft_last_error());
+                failures++;
+            }
+        }
+        cft_program_free(big);
+        big = NULL;
+        free(a); free(dep); free(cnt);
+    }
+    {
+        const size_t per = (size_t)1 << 20, n = tiles * per;
+        checks++;
+        bytes = seq_image(img, fmt, ins, 2, NULL, 0, 16);
+        if (cft_program_load(dev, img, bytes, &big) != CFT_OK) {
+            printf("  FAIL seq capacity: the 16-slot image did not load: %s\n",
+                   cft_last_error());
+            failures++;
+        } else if (capacity_run(big, fmt, n, 16, 0,
+                                "a quarter of one tile's HBM channel", per)) {
+            printf("    a program at a quarter of one tile's HBM channel "
+                   "(%lu lanes a tile, 64 MB of deposits each): right\n",
+                   (unsigned long)per);
+        } else {
+            failures++;
+        }
+        cft_program_free(big);
+    }
+}
+
 static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
                         size_t n, uint32_t seed)
 {
@@ -4760,6 +5001,7 @@ static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
      *    pointers. */
     check_scratch(hw, fmt, n);
     check_program_past_a_page(hw, fmt);
+    check_program_capacity(hw, fmt);
 
     /* 7b. ABI 0.14's index tables (R16), gated on the feature bit the
      *     same way and named NOT COMPARED where the device does not
