@@ -38,12 +38,18 @@ the run.
 
 The instruction stream IS each program's definition - the order of every
 rounding is fixed here and nowhere else - so programs/check.py holds the
-committed `.cfta` to this file byte for byte, and holds the arithmetic to
-an independent reference written from the equations, not from this file.
+committed `.cfta` to this file byte for byte. It holds the arithmetic
+two ways. Bit for bit against a mirror of this rounding order written
+again in check.py: that mirror is NOT independent of this file - an
+error made in both places passes it. And against the textbook scheme in
+exact rationals, which shares no transcription with this file, one step
+at a time within a rounding bound derived from the precision; MUTANTS
+below are that comparison's negative controls.
 
 The default banks are data (`<name>.classic.bank`): raw format-width
 values, dense, in the order the source declares them. check.py holds
-each value to its derivation from exact decimals.
+the value in each slot to the derivation of the NAME the source gives
+that slot, from exact decimals.
 """
 
 import argparse
@@ -65,6 +71,50 @@ STEPS = {"lorenz63-rk4": 100, "lorenz96-rk4": 20, "henonheiles-lf": 100}
 L96_N = 40          # Lorenz-96's ring
 
 
+# ---- test-only mutants ----------------------------------------------------
+#
+# Wrong programs, written by the SAME generators below: programs/check.py
+# asks for each one, assembles it, runs it and requires its textbook arm to
+# FAIL on it - that arm's permanent negative controls, which make "the
+# check can tell this program from a wrong one" something the gate shows
+# every run rather than something once believed. None is on by default;
+# outputs() and --check never ask for one, so no committed file can be a
+# mutant; and a name not listed here is refused rather than ignored, since
+# an ignored name would hand back the real program and a control that
+# cannot fail.
+MUTANTS = {
+    "lorenz63-rk4": {
+        "zsign": "z' = x y + beta z",
+        "stage4-half": "stage 4 at Y + h/2 k3",
+        "rk38": "the 3/8-rule Runge-Kutta",
+    },
+    "lorenz96-rk4": {
+        "index": "x_(i+1) where x_(i-1) belongs",
+        "stage4-half": "stage 4 at Y + h/2 k3",
+        "rk38": "the 3/8-rule Runge-Kutta",
+    },
+    "henonheiles-lf": {
+        "xforce-sign": "the x force with its sign flipped",
+        "kdk": "kick-drift-kick in place of drift-kick-drift",
+    },
+}
+
+
+def _mutant(name, mutant):
+    if mutant is not None and mutant not in MUTANTS[name]:
+        raise ValueError(f"{name} has no test mutant {mutant!r}; it has "
+                         f"{', '.join(MUTANTS[name])}")
+    return mutant
+
+
+def _mutant_note(name, mutant):
+    """The mutant's own first comment lines; none for the real program."""
+    if mutant is None:
+        return []
+    return [f"TEST-ONLY MUTANT {mutant}: {MUTANTS[name][mutant]}. A negative",
+            "control for programs/check.py - never written to disk.", ""]
+
+
 # ---- the banks, from exact decimals --------------------------------------
 
 def _dec(fmt, text):
@@ -72,9 +122,23 @@ def _dec(fmt, text):
     return bits
 
 
-def bank_values(name, fmt):
-    """[(constant name, bits)] in declaration order - the default bank."""
+def bank_values(name, fmt, mutant=None):
+    """[(constant name, bits)] in declaration order - the default bank, or
+    the one a test-only mutant declares (only rk38 declares another)."""
+    _mutant(name, mutant)
     h = _dec(fmt, "0.01")
+    if mutant == "rk38":
+        h3, _ = sf.div(fmt, h, _dec(fmt, "3"))    # one rounding
+        mh3, _ = sf.neg(fmt, h3)
+        mh, _ = sf.neg(fmt, h)
+        h8, _ = sf.mul(fmt, h, _dec(fmt, "0.125"))    # exact
+        rk = [("H", h), ("H3", h3), ("MH3", mh3), ("MH", mh), ("H8", h8),
+              ("THREE", _dec(fmt, "3"))]
+        if name == "lorenz63-rk4":
+            beta, _ = sf.div(fmt, _dec(fmt, "8"), _dec(fmt, "3"))
+            return rk + [("SIGMA", _dec(fmt, "10")), ("RHO", _dec(fmt, "28")),
+                         ("BETA", beta)]
+        return rk + [("F", _dec(fmt, "8"))]
     two = _dec(fmt, "2")
     h2, _ = sf.mul(fmt, h, _dec(fmt, "0.5"))      # exact: a power of two
     six = _dec(fmt, "6")
@@ -131,9 +195,21 @@ def _header(S, name, fmtname, nstate, consts, what):
     S("")
 
 
-def lorenz63(fmtname):
+def lorenz63(fmtname, mutant=None):
+    _mutant("lorenz63-rk4", mutant)
+    rk38 = mutant == "rk38"
     S = _Src()
     _header(S, "lorenz63-rk4", fmtname, 3, [
+        ("H", "the step h"),
+        ("H3", "h / 3, one rounding"),
+        ("MH3", "-(h / 3)"),
+        ("MH", "-h, exact"),
+        ("H8", "h / 8, exact"),
+        ("THREE", "3"),
+        ("SIGMA", "sigma"),
+        ("RHO", "rho"),
+        ("BETA", "beta"),
+    ] if rk38 else [
         ("H", "the step h"),
         ("H2", "h / 2, exact"),
         ("H6", "h / 6, one rounding"),
@@ -141,7 +217,7 @@ def lorenz63(fmtname):
         ("SIGMA", "sigma"),
         ("RHO", "rho"),
         ("BETA", "beta"),
-    ], [
+    ], _mutant_note("lorenz63-rk4", mutant) + [
         "Lorenz (1963):  x' = sigma (y - x),  y' = x (rho - z) - y,",
         "                z' = x y - beta z,",
         "stepped by the classic fourth-order Runge-Kutta scheme,",
@@ -156,17 +232,22 @@ def lorenz63(fmtname):
         "",
         "Scratch slots 0..2 carry x, y, z in and out. The state stays in",
         "registers for the whole segment: a step is 53 ALU instructions and",
-        "no control codes at all.",
+        "no control code but the loop's own ENDREP.",
     ])
     regs = [("x", 3), ("y", 4), ("z", 5), ("px", 6), ("py", 7), ("pz", 8),
             ("ax", 9), ("ay", 10), ("az", 11), ("bx", 12), ("by", 13),
             ("bz", 14), ("cx", 15), ("cy", 16), ("cz", 17), ("t0", 18),
             ("t1", 19)]
+    if rk38:
+        regs += [("dx", 20), ("dy", 21), ("dz", 22)]
     S("; x y z: the state   px py pz: a stage's input   ax ay az: k1")
     S("; bx by bz: k2, k3, k4 in turn   cx cy cz: the weighted sum")
+    if rk38:
+        S("; dx dy dz: Y + h k1 - h k2")
     for r, n in regs:
         S(f".reg      {r:<3} = r{n}")
     S("")
+    zc = "t0" if mutant == "zsign" else "t1"
 
     def f(X, Y, Z, KX, KY, KZ):
         S(f"  sub  t0, {Y}, {X}          ; y - x")
@@ -176,11 +257,48 @@ def lorenz63(fmtname):
         S(f"  fma  {KY}, {X}, t0, t1      ; x (rho - z) - y")
         S(f"  mul  t0, BETA, {Z}        ; beta z")
         S("  neg  t1, t0")
-        S(f"  fma  {KZ}, {X}, {Y}, t1      ; x y - beta z")
+        S(f"  fma  {KZ}, {X}, {Y}, {zc}      ; x y - beta z")
 
     for i, r in enumerate(("x", "y", "z")):
         S(f"ldl  {r}, {i}")
     S(f"repeat {STEPS['lorenz63-rk4']}")
+    if rk38:
+        # k1 = f(Y), k2 = f(Y + h/3 k1), k3 = f(Y - h/3 k1 + h k2),
+        # k4 = f(Y + h k1 - h k2 + h k3), Y + h/8 (k1 + 3 k2 + 3 k3 + k4)
+        S("  ; stage 1")
+        f("x", "y", "z", "ax", "ay", "az")
+        for c in "xyz":
+            S(f"  fma  p{c}, H3, a{c}, {c}")
+        S("  ; stage 2")
+        f("px", "py", "pz", "bx", "by", "bz")
+        for c in "xyz":
+            S(f"  fma  c{c}, THREE, b{c}, a{c}")
+        for c in "xyz":
+            S(f"  fma  d{c}, H, a{c}, {c}")
+        for c in "xyz":
+            S(f"  fma  d{c}, MH, b{c}, d{c}")
+        for c in "xyz":
+            S(f"  fma  p{c}, MH3, a{c}, {c}")
+        for c in "xyz":
+            S(f"  fma  p{c}, H, b{c}, p{c}")
+        S("  ; stage 3")
+        f("px", "py", "pz", "bx", "by", "bz")
+        for c in "xyz":
+            S(f"  fma  c{c}, THREE, b{c}, c{c}")
+        for c in "xyz":
+            S(f"  fma  p{c}, H, b{c}, d{c}")
+        S("  ; stage 4")
+        f("px", "py", "pz", "bx", "by", "bz")
+        for c in "xyz":
+            S(f"  add  c{c}, c{c}, b{c}")
+        for c in "xyz":
+            S(f"  fma  {c}, H8, c{c}, {c}")
+        S("endrep")
+        for i, r in enumerate(("x", "y", "z")):
+            S(f"stl  {r}, {i}")
+        S("halt")
+        return S.text()
+    h4 = "H2" if mutant == "stage4-half" else "H"
     S("  ; stage 1")
     f("x", "y", "z", "ax", "ay", "az")
     for c in "xyz":
@@ -196,7 +314,7 @@ def lorenz63(fmtname):
     for c in "xyz":
         S(f"  fma  c{c}, TWO, b{c}, c{c}       ; + 2 k3")
     for c in "xyz":
-        S(f"  fma  p{c}, H, b{c}, {c}")
+        S(f"  fma  p{c}, {h4}, b{c}, {c}")
     S("  ; stage 4")
     f("px", "py", "pz", "bx", "by", "bz")
     for c in "xyz":
@@ -213,18 +331,63 @@ def lorenz63(fmtname):
 # Lorenz-96's scratch layout: five stage vectors of N.
 L96_Y, L96_TA, L96_TB, L96_K1, L96_ACC = (0, L96_N, 2 * L96_N, 3 * L96_N,
                                           4 * L96_N)
+L96_TC = 5 * L96_N      # the rk38 mutant's sixth: Y + h k1 - h k2
 
 
-def lorenz96(fmtname):
+def _l96_rk38(S, s, i, w):
+    """Component i's share of stage s under the 3/8 rule (the rk38
+    mutant): k1 = f(Y), k2 = f(Y + h/3 k1), k3 = f(Y - h/3 k1 + h k2),
+    k4 = f(Y + h k1 - h k2 + h k3), Y + h/8 (k1 + 3 k2 + 3 k3 + k4)."""
+    if s == 1:
+        S(f"  stl  k, {L96_K1 + i}")
+        S(f"  fma  t0, H3, k, {w(i)}")
+        S(f"  stl  t0, {L96_TB + i}")
+    elif s == 2:
+        S(f"  ldl  y, {L96_Y + i}")
+        S(f"  ldl  a, {L96_K1 + i}")
+        S("  fma  t0, MH3, a, y")
+        S("  fma  t0, H, k, t0")
+        S(f"  stl  t0, {L96_TA + i}")
+        S("  fma  t1, H, a, y")
+        S("  fma  t1, MH, k, t1")
+        S(f"  stl  t1, {L96_TC + i}")
+        S("  fma  a, THREE, k, a")
+        S(f"  stl  a, {L96_ACC + i}")
+    elif s == 3:
+        S(f"  ldl  t0, {L96_TC + i}")
+        S("  fma  t0, H, k, t0")
+        S(f"  stl  t0, {L96_TB + i}")
+        S(f"  ldl  a, {L96_ACC + i}")
+        S("  fma  a, THREE, k, a")
+        S(f"  stl  a, {L96_ACC + i}")
+    else:
+        S(f"  ldl  a, {L96_ACC + i}")
+        S("  add  a, a, k")
+        S(f"  ldl  y, {L96_Y + i}")
+        S("  fma  y, H8, a, y")
+        S(f"  stl  y, {L96_Y + i}")
+
+
+def lorenz96(fmtname, mutant=None):
+    _mutant("lorenz96-rk4", mutant)
+    rk38 = mutant == "rk38"
     N = L96_N
     S = _Src()
     _header(S, "lorenz96-rk4", fmtname, N, [
+        ("H", "the step h"),
+        ("H3", "h / 3, one rounding"),
+        ("MH3", "-(h / 3)"),
+        ("MH", "-h, exact"),
+        ("H8", "h / 8, exact"),
+        ("THREE", "3"),
+        ("F", "the forcing"),
+    ] if rk38 else [
         ("H", "the step h"),
         ("H2", "h / 2, exact"),
         ("H6", "h / 6, one rounding"),
         ("TWO", "2"),
         ("F", "the forcing"),
-    ], [
+    ], _mutant_note("lorenz96-rk4", mutant) + [
         f"Lorenz (1996) on a ring of N = {N}:",
         "",
         "    x_i' = (x_(i+1) - x_(i-2)) x_(i-1) - x_i + F,  indices mod N,",
@@ -240,8 +403,8 @@ def lorenz96(fmtname):
         f"sum at {L96_ACC}.. - {5 * N} slots. A four-register window slides",
         "round the ring, so each component loads one new value; the other",
         "loads and stores are the stage vectors'. A step is 760 ALU",
-        "instructions and 692 control codes: this is the program the",
-        "scratch's cost is measured on.",
+        "instructions, 692 scratch accesses and the loop's ENDREP: this is",
+        "the program the scratch's cost is measured on.",
     ])
     S("; w0..w3: the window, x_(i-2) .. x_(i+1) rotating through the four")
     S("; t0, t1: temporaries   k: the component's f   y: Y_i   a: k1 or the sum")
@@ -265,8 +428,11 @@ def lorenz96(fmtname):
         for i in range(N):
             S(f"  sub  t0, {w(i + 1)}, {w(i - 2)}")
             S(f"  sub  t1, F, {w(i)}")
-            S(f"  fma  k, t0, {w(i - 1)}, t1")
-            if s == 1:
+            S(f"  fma  k, t0, {w(i + 1) if mutant == 'index' else w(i - 1)}"
+              f", t1")
+            if rk38:
+                _l96_rk38(S, s, i, w)
+            elif s == 1:
                 S(f"  stl  k, {L96_K1 + i}")
                 S(f"  fma  t0, H2, k, {w(i)}")
                 S(f"  stl  t0, {L96_TB + i}")
@@ -279,7 +445,8 @@ def lorenz96(fmtname):
                 S(f"  stl  a, {L96_ACC + i}")
             elif s == 3:
                 S(f"  ldl  y, {L96_Y + i}")
-                S("  fma  t0, H, k, y")
+                S(f"  fma  t0, {'H2' if mutant == 'stage4-half' else 'H'}, "
+                  f"k, y")
                 S(f"  stl  t0, {L96_TB + i}")
                 S(f"  ldl  a, {L96_ACC + i}")
                 S("  fma  a, TWO, k, a")
@@ -297,7 +464,8 @@ def lorenz96(fmtname):
     return S.text()
 
 
-def henonheiles(fmtname):
+def henonheiles(fmtname, mutant=None):
+    _mutant("henonheiles-lf", mutant)
     S = _Src()
     _header(S, "henonheiles-lf", fmtname, 4, [
         ("H", "the step h"),
@@ -305,7 +473,7 @@ def henonheiles(fmtname):
         ("MH", "-h, exact"),
         ("ONE", "1"),
         ("TWO", "2"),
-    ], [
+    ], _mutant_note("henonheiles-lf", mutant) + [
         "Henon-Heiles (1964):  H = (px^2 + py^2)/2 + (x^2 + y^2)/2",
         "                          + x^2 y - y^3/3,",
         "",
@@ -322,11 +490,32 @@ def henonheiles(fmtname):
     for i, r in enumerate(("x", "y", "px", "py")):
         S(f"ldl  {r}, {i}")
     S(f"repeat {STEPS['henonheiles-lf']}")
+    if mutant == "kdk":
+        def half_kick():
+            S("  fma  t0, TWO, y, ONE")
+            S("  mul  t0, x, t0")
+            S("  neg  t0, t0")
+            S("  fma  px, H2, t0, px")
+            S("  mul  t1, x, x")
+            S("  neg  t1, t1")
+            S("  sub  t2, y, ONE")
+            S("  fma  t2, y, t2, t1")
+            S("  fma  py, H2, t2, py")
+        half_kick()
+        S("  fma  x, H, px, x")
+        S("  fma  y, H, py, y")
+        half_kick()
+        S("endrep")
+        for i, r in enumerate(("x", "y", "px", "py")):
+            S(f"stl  {r}, {i}")
+        S("halt")
+        return S.text()
     S("  fma  x, H2, px, x         ; drift")
     S("  fma  y, H2, py, y")
     S("  fma  t0, TWO, y, ONE      ; 1 + 2 y")
     S("  mul  t0, x, t0            ; x (1 + 2 y)")
-    S("  fma  px, MH, t0, px       ; kick: px - h x (1 + 2 y)")
+    S(f"  fma  px, {'H' if mutant == 'xforce-sign' else 'MH'}, t0, px"
+      f"       ; kick: px - h x (1 + 2 y)")
     S("  mul  t1, x, x             ; x^2")
     S("  neg  t1, t1")
     S("  sub  t2, y, ONE           ; y - 1")
@@ -356,11 +545,11 @@ def outputs():
     return out
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--check", action="store_true",
                     help="compare with the committed files; write nothing")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     bad = 0
     for fname, data in outputs().items():
         path = HERE / fname
