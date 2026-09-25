@@ -824,14 +824,18 @@ transport. The page's own dropped-set replay ran 300 cases of
   replaying them through a client that is not libcft would be
   replaying the client. `cft_conformance` replays all seven through
   the TCP path and did, above.
-- **No sequencer program was loaded from JavaScript.** `remote.mjs`
-  implements `PROG_LOAD`, `PROG_RUN` and `PROG_FREE`, and the
-  headless test drives `PROG_LOAD`'s frame path with bytes that are
-  not an image (the server's library refuses them, the connection
-  carries on) - but a valid image was never sent, so `PROG_RUN` over
-  WebSocket is written and not exercised. The buffer and status-word
-  operations ARE exercised, over WebSocket, in section I of that
-  test.
+- **Plain `PROG_RUN` was not sent from JavaScript.** Valid images
+  have been, since 2026-09-08: section I of the headless test loads
+  them with `PROG_LOAD` and runs them with `PROG_RUN_BANK` (265fadb,
+  two banks, each answer equal to the same image run in the local
+  module) and `PROG_RUN_EX` (153b962, the scratch block, and a run
+  resumed through it), and frees them with `PROG_FREE`; it also
+  sends `PROG_LOAD` bytes that are not an image, which the server's
+  library refuses with the connection carrying on. `remote.mjs`
+  sends `PROG_RUN` for a program with neither header flag, run with
+  no bank and no scratch block, and no test runs one over WebSocket.
+  The buffer and status-word
+  operations are exercised, over WebSocket, in the same section.
 - **No workload chain was computed through the WebSocket path.** The
   five workload tools are C and speak the TCP one; a chain over
   WebSocket would need the tools to take a `ws://` URL, which is a

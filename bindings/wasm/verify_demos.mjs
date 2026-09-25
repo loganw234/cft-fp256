@@ -192,7 +192,9 @@ if (existsSync(PAGE)) {
 } else {
   console.log(`page    ${PAGE} is not built yet - checking the core alone`);
   console.log("\n== 1-2. the page ==");
-  note("skipped: run `bash bindings/wasm/build_demos.sh` to build it");
+  // A missing build product: the marker first, so the runner counts it.
+  console.log("SKIP  verify_demos.mjs checks 1-2: the page is not built - run " +
+              "`bash bindings/wasm/build_demos.sh`");
 }
 
 // ---------------------------------------------------------------------

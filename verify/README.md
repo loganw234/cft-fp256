@@ -194,15 +194,17 @@ through cpp-api-test and `host/tests/remote_check.py` (which printed
 only the replay's counts until 2026-09-24, so a set skipped there
 reached no log). A script that reports a skip any other way - lower
 case, or mid-line - is invisible to this, and should print the marker.
-The ones known on 2026-09-24:
+The one known on 2026-09-24 is a vector set absent from the directory
+the replay reads, which the replay reports only as a smaller count on
+its `N sets, ... all matching` line (168 when every set is there).
+These were on that list until they were reprinted with the marker first
+the same day: cpp-api-test's `cpp-api-test: SKIP conformance: no vector
+sets`; `tb/check_results.py`'s bare `(N skipped)` (it keeps the count,
+and adds a `SKIP` line per skipped case);
 `bindings/wasm/verify_demos.mjs`'s `skipped: run ...` when the demos
-page is not built, and a vector set absent from the directory the
-replay reads, which the replay reports only as a smaller count on its
-`N sets, ... all matching` line (168 when every set is there).
-cpp-api-test's `cpp-api-test: SKIP conformance: no vector sets` and
-`tb/check_results.py`'s bare `(N skipped)` were on that list until they
-were reprinted with the marker first the same day (check_results.py
-keeps the count, and adds a `SKIP` line per skipped case).
+page is not built; and `bindings/node/remote_test.mjs`'s two
+`vectors/out is not generated ... NOT RUN` lines, a missing input the
+rule below counts - the remote stage now generates the vectors first.
 
 **What is counted, and what is only named.** The rule, once: an inner
 skip is a check that exists for this host and did not run for a HOST

@@ -394,6 +394,8 @@ function chooseSets(dir, sets) {
  *  is the file's shape and not its head. One file at a time, because
  *  the whole of vectors/out is 168 sets of up to 12,000 lines and holding
  *  them all as typed arrays is memory spent for nothing. */
+const unsendable = new Map();       // op name -> sampled cases it had
+
 function loadCases(dir, f, cases) {
   const fmt = FORMAT_OF_NAME[f.split(/[-.]/)[0]];
   const esz = FORMAT_SIZE[fmt];
@@ -404,7 +406,13 @@ function loadCases(dir, f, cases) {
   for (let i = 0; i < lines.length; i += stride) {
     const j = JSON.parse(lines[i]);
     const op = opcodeOf(j.op);
-    if (op === null) continue;
+    if (op === null) {
+      // A published case this client has no opcode for. Not dropped
+      // quietly: the replay claims the sets it chose, so each such
+      // case is counted here and fails section D by name.
+      unsendable.set(j.op, (unsendable.get(j.op) || 0) + 1);
+      continue;
+    }
     out.push({
       set: f, line: i + 1, name: j.op, op, fmt,
       rnd: ROUND_NAMES.indexOf(j.rnd),
@@ -640,10 +648,15 @@ async function main() {
                       `cases, ${tally.n} so far`);
       }
     } else {
-      console.log(`  vectors/out is not generated (${VECTORS}); the golden ` +
-                  `comparison is NOT RUN. Falling back to LCG inputs, which ` +
-                  `still compare the server with the local module and the ` +
-                  `two transports with each other.`);
+      // A missing input file, which verify/README.md's rule counts, so
+      // the marker comes first and the runner sees it. The LCG fallback
+      // still holds the server to the local module and the transports
+      // to each other - not to the published answers.
+      console.log(`SKIP  remote_test.mjs golden comparison: no vector ` +
+                  `sets in ${VECTORS} (run \`make vectors\` from the repo ` +
+                  `root). Falling back to LCG inputs, which still compare ` +
+                  `the server with the local module and the two ` +
+                  `transports with each other.`);
       const cases = lcgCases(CASES);
       firstCase = cases[0];
       await replayBatch(M, C, localDev, wsDev, tcpDev, cases, false, tally);
@@ -658,6 +671,10 @@ async function main() {
           `module's` +
           (tally.firstBad ? ` (first difference: ${tally.firstBad})` : ""));
     if (golden) {
+      check(unsendable.size === 0,
+            "every op the chosen sets name is one this client sends" +
+            (unsendable.size ? " - not sent: " + [...unsendable]
+              .map(([k, v]) => `${k} (${v} cases)`).join(", ") : ""));
       check(tally.badGolden === 0,
             `${tally.n} cases: every WebSocket result equals the golden ` +
             `model's published d`);
@@ -704,7 +721,7 @@ async function main() {
       check(redBadCross === 0,
             `${redN} REDUCE cases: WebSocket and TCP agree on bytes and flags`);
     } else {
-      console.log("  vectors/out is not generated; NOT RUN.");
+      console.log(`SKIP  remote_test.mjs REDUCE replay: no vector sets in ${VECTORS}`);
     }
 
     // ---- E. the counters ---------------------------------------------
@@ -977,9 +994,10 @@ async function main() {
     {
       // PROG_LOAD's frame path, with bytes that are not an image: the
       // server's library refuses them, which is the operation's own
-      // failure and leaves the connection usable. A VALID sequencer
-      // image is not loaded from JavaScript here - see docs/REMOTE.md's
-      // "what was not run".
+      // failure and leaves the connection usable. VALID images follow,
+      // run with PROG_RUN_BANK and PROG_RUN_EX; plain PROG_RUN is the
+      // one run opcode not sent from here (docs/REMOTE.md, "what was
+      // not run").
       let bad = null;
       try {
         await wsDev.programLoad(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));

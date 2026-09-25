@@ -1030,9 +1030,10 @@ do_remote() {
   # TCP, compares both with the local wasm module and the published
   # answers, and runs the negative controls. Node 22 carries a WebSocket
   # client of its own; without node the leg is an inner skip, named on
-  # the stage's row and counted, not failed.
+  # the stage's row and counted, not failed. The leg replays vectors/out,
+  # so an --only run generates it first, as the other replays do.
   if command -v node >/dev/null 2>&1; then
-    HOSTMAKE wstest
+    ensure_vectors && HOSTMAKE wstest
   else
     echo "SKIP  remote's WebSocket leg (make -C host wstest): no node on PATH"
   fi

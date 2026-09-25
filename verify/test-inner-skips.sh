@@ -387,7 +387,9 @@ NUNCOUNTED=14
 # the same day it named the report's last line, which after a
 # disagreement is "  got ...". device-test's and remote-test's not-here
 # lines are held to the one form, and refuse the SKIPPED-first lines they
-# replaced.
+# replaced. remote_test.mjs's missing vectors and verify_demos.mjs's
+# unbuilt page are host reasons the rule counts, reprinted with the
+# marker first at the merge; they refuse the forms they replaced.
 pins () {  # -> returns the number of pins that do not hold
   local row f new old bad=0 rows
   mapfile -t rows << 'PINS'
@@ -403,6 +405,9 @@ host/tests/cpp_api_test.cpp|r.report.find("no vector sets found under ")|if (r.s
 host/tests/cpp_api_test.cpp|if (end > at && r.report[at] != ' ')|stop_line.erase(0, stop_line.rfind('\n') + 1);
 host/tests/remote_check.py|print(tag + rep_line)|
 tb/check_results.py|print("  SKIP  %s: %s" % (bench, line))|
+bindings/node/remote_test.mjs|console.log(`SKIP  remote_test.mjs golden comparison: no vector ` +|comparison is NOT RUN. Falling back
+bindings/node/remote_test.mjs|console.log(`SKIP  remote_test.mjs REDUCE replay: no vector sets in ${VECTORS}`);|vectors/out is not generated; NOT RUN.
+bindings/wasm/verify_demos.mjs|console.log("SKIP  verify_demos.mjs checks 1-2: the page is not built - run " +|note("skipped: run `bash bindings/wasm/build_demos.sh`
 PINS
   for row in "${rows[@]}"; do
     IFS='|' read -r f new old <<< "$row"
@@ -416,7 +421,7 @@ PINS
   done
   return "$bad"
 }
-NPINS=12
+NPINS=15
 
 # ...and no other shape survives in the two programs whose matrices adapt
 # to the device: no printf that starts SKIP, and none of the shapes the

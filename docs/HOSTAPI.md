@@ -2035,7 +2035,9 @@ now has a third source, cleared the moment anything reaches a device
 backend, so a refusal libcft made never goes on explaining someone
 else's failure.
 
-**Every `CFT_ERR_UNSUPPORTED` carries a sentence (2026-09-14).** It did
+**Every `CFT_ERR_UNSUPPORTED` carries a sentence (2026-09-14)** - on
+every profile but `CFT_TINY`, whose one-byte `CFT_ERRMSG_MAX` keeps
+the status and drops every sentence (docs/EMBEDDED.md). It did
 not: `cft_run`, `cft_reduce` and `cft_program_load` refused a format the
 device lacked, or an opcode group it did not implement, with
 `cft_last_error()` empty - or, worse, still holding the previous
@@ -2594,12 +2596,15 @@ about values:
 * **An all-ones mask is bit-identical to no mask**, by construction:
   the mask is the floor under the active bit that `n_active` already
   was for the padding lanes.
-* **A device that does not publish `CFT_SEQ_FEAT_LANE_MASK` is refused
+* **A tile that does not publish `CFT_SEQ_FEAT_LANE_MASK` is refused
   by name.** Ask `cft_get_caps` first. The software backend always
   carries it; a tile carries it from CAPS2[10]; the REMOTE route
   carries it by running only the lanes the mask keeps - the server
   never sees a mask, which is why it works against a server of any
-  age and why the flags are the kept lanes' and nobody else's.
+  age and why the flags are the kept lanes' and nobody else's. A
+  remote handle publishes the bit its server's HELLO carries, so
+  against a server without it the bit under-promises: the run is
+  never refused there.
 
 The mask is also the one field here that costs the tile a read: the
 sequencer fetches a block's bits at block setup, one beat a block at
