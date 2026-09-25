@@ -583,6 +583,57 @@ static void caps_block_tests(cft_device *rm, cft_device *sw)
               "and so does a REMOTE handle to it, because the program "
               "run's remote route gathers on the client "
               "(docs/ROUND2.md, parcel P2)");
+        /* CAPS2[7] and CAPS2[8], published by the software backend
+         * since 2026-09-24 because it computes both calls. A remote
+         * handle to it carries them as the server's word - and there
+         * the scalar operand is the case where the word is NOT what
+         * decides the call: the client expands the operand before a
+         * frame exists, so a remote handle takes one whatever its word
+         * says (cft.h, CFT_SEQ_FEAT_SCALAR). What CAN be held here is
+         * the direction that matters - the word says yes, and the call
+         * over the wire is the definition's bits, the local run over
+         * an array of copies. */
+        CHECK((cs.seq_features & CFT_SEQ_FEAT_SCALAR) != 0 &&
+              (cs.seq_features & CFT_FEAT_REDUCE_SEG) != 0,
+              "the local software backend publishes CFT_SEQ_FEAT_SCALAR "
+              "and CFT_FEAT_REDUCE_SEG (seq_features 0x%lx)",
+              (unsigned long)cs.seq_features);
+        CHECK((c.seq_features & CFT_SEQ_FEAT_SCALAR) != 0 &&
+              (c.seq_features & CFT_FEAT_REDUCE_SEG) != 0,
+              "and so does a remote handle to it, from HELLO "
+              "(seq_features 0x%lx)", (unsigned long)c.seq_features);
+        {
+            enum { RN = 5 };
+            uint8_t a1[RN * 8], rep[RN * 8], bb[RN * 8], cc[RN * 8];
+            uint8_t d_rm[RN * 8], d_sw[RN * 8];
+            uint32_t f_rm = 0, f_sw = 0;
+            cft_elem_args E;
+            size_t q;
+            /* a scalar 1.5 in a[0], and POISON after it, so a route
+             * that streamed a would differ; b and c ordinary */
+            for (q = 0; q < RN; q++) {
+                cftr_put32(a1 + q * 8, 0);
+                cftr_put32(a1 + q * 8 + 4, q ? 0x7ff00000u : 0x3ff80000u);
+                cftr_put32(bb + q * 8, 0x9999999Au);
+                cftr_put32(bb + q * 8 + 4, 0x3fb99999u + (uint32_t)q);
+                cftr_put32(cc + q * 8, 0);
+                cftr_put32(cc + q * 8 + 4, 0xbff00000u);
+                memcpy(rep + q * 8, a1, 8);
+            }
+            CHECK(cft_run(sw, CFT_FMA, CFT_FP64, CFT_RNE, rep, bb, cc,
+                          d_sw, RN, &f_sw, NULL) == CFT_OK,
+                  "the local run over an array of copies");
+            memset(&E, 0, sizeof E);
+            E.struct_size = sizeof E;
+            E.a = a1; E.b = bb; E.c = cc; E.d = d_rm; E.n = RN;
+            E.scalar_mask = 1u; E.flags_out = &f_rm;
+            CHECK(cft_run_ex(rm, CFT_FMA, CFT_FP64, CFT_RNE, &E) == CFT_OK,
+                  "a scalar operand over the wire: %s", cft_last_error());
+            CHECK(memcmp(d_rm, d_sw, sizeof d_rm) == 0 && f_rm == f_sw,
+                  "a scalar operand over the wire is the local run over "
+                  "an array of copies (flags 0x%lx, want 0x%lx)",
+                  (unsigned long)f_rm, (unsigned long)f_sw);
+        }
     } else {
         printf("  server backend is '%s', not compared with the local "
                "software backend\n", cftr_server_backend(hw));

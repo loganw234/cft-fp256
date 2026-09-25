@@ -568,6 +568,12 @@ void cft_sw_seq_caps(cft_seq_caps *out)
                          * handed a run it would compute over every
                          * lane. */
                         CFT_SEQ_FEAT_LANE_MASK;
+    /* Not here, and not missing: CFT_SEQ_FEAT_SCALAR and
+     * CFT_FEAT_REDUCE_SEG. The software backend publishes both (since
+     * 2026-09-24), but they are features of device.c's elementwise path
+     * and of cft_reduce_seg, which a -DCFT_NO_PROGRAM build keeps and
+     * this file does not - so device.c's software open ORs them in after
+     * this, in every build, from the constants its refusals read. */
 }
 
 /* A program image against the capacities the device it was loaded for

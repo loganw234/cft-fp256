@@ -1358,7 +1358,10 @@ static void check_caps_enforced(cft_device *dev, const char *who)
                (unsigned long)c.seq_features);
         failures++;
     }
-    printf("    features:%s%s%s%s%s%s%s%s%s%s   max_scratch %lu\n",
+    /* Every bit cft.h defines, SCRATCH_STRICT and SCALAR included since
+     * 2026-09-24 - the line used to skip both, so a word that carried
+     * them printed as though it did not. */
+    printf("    features:%s%s%s%s%s%s%s%s%s%s%s%s   max_scratch %lu\n",
            (c.seq_features & CFT_SEQ_FEAT_WIDE_CONST) ? " kx" : "",
            (c.seq_features & CFT_SEQ_FEAT_REGS32)     ? " REGS32" : "",
            (c.seq_features & CFT_SEQ_FEAT_BANK_PTR)   ? " BANK_PTR" : "",
@@ -1366,6 +1369,9 @@ static void check_caps_enforced(cft_device *dev, const char *who)
            (c.seq_features & CFT_ALU_EXT_IMUL)        ? " IMUL" : "",
            (c.seq_features & CFT_SEQ_FEAT_SCRATCH)    ? " SCRATCH" : "",
            (c.seq_features & CFT_SEQ_FEAT_SCRATCH_IO) ? " SCRATCH_IO" : "",
+           (c.seq_features & CFT_SEQ_FEAT_SCRATCH_STRICT)
+                                                   ? " SCRATCH_STRICT" : "",
+           (c.seq_features & CFT_SEQ_FEAT_SCALAR)     ? " SCALAR" : "",
            (c.seq_features & CFT_FEAT_REDUCE_SEG)     ? " REDUCE_SEG" : "",
            (c.seq_features & CFT_SEQ_FEAT_INDEXED)    ? " INDEXED" : "",
            (c.seq_features & CFT_SEQ_FEAT_LANE_MASK)  ? " LANE_MASK" : "",

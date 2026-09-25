@@ -572,7 +572,9 @@ refuse, but it makes every bit added after it fail safe. The CALL is
 portable and the SAVING is not: the software backend indexes element 0,
 the remote backend expands locally because its frames chunk, and
 `cft_caps` reports `CFT_SEQ_FEAT_SCALAR` so a caller can tell which it
-has.
+has. (Not as written, on the software backend: it computed scalar
+operands with the bit CLEAR until 2026-09-24. The bit says which handles
+take the call rather than which save - the section after P3 below.)
 
 | surface | status at ABI 0.12 |
 |---|---|
@@ -720,6 +722,47 @@ a full yosys pass, after its block slice was rewritten as a select.
 | Node / Browser | nothing: the program API of the bindings carries no mask yet |
 | Arduino | the vendored copy re-synced, `mask_bits.h` among the files |
 | the model | `seq.run(lane_mask=)`: `keep[]` under `active`, `ACTALL -> list(keep)`, the scratch-out skipping masked lanes; `seq_check.py`'s fifth (masked) corpus |
+
+### Three capability answers made true (2026-09-24, no ABI step)
+
+No call gained or lost a meaning its definition in `cft.h` did not
+already give it; three answers stopped contradicting what the handle
+does. A caller that asked first, as the header says to, was told no by
+a software handle that would have said yes:
+
+- `cft_caps.seq_features` on a software handle is **0x7f1f**, from
+  0x671f: `CFT_SEQ_FEAT_SCALAR` (CAPS2[7]) and `CFT_FEAT_REDUCE_SEG`
+  (CAPS2[8]) are published, because that backend computes a scalar
+  operand and `cft_reduce_seg` by their definitions. It reads the same
+  two bits before computing either, so the word is load-bearing there.
+  No other field of `cft_get_caps` moved. A `-DCFT_NO_PROGRAM` build's
+  word is 0x1810, from 0x10.
+- `cft_supports(dev, CFT_IMUL, fmt)` answers from CAPS[28] as it was
+  written to: yes on the software backend and on a tile publishing
+  `CFT_ALU_EXT_IMUL`, no elsewhere. It answered no on every device
+  before, because opcode 30 was missing from the assigned list the call
+  consults first.
+- Opcode 30 reads `a` and `b` like the rest of the integer group, which
+  moves two edges: `cft_run(CFT_IMUL)` with a NULL `a` or `b` is
+  `CFT_ERR_INVALID_ARGUMENT` (it computed with a zero operand before),
+  and `cft_run_ex` takes an index table on `a` or `b` (it refused one
+  as "an operand the opcode does not read"). The bits of every IMUL
+  that ran before are the bits it returns now.
+
+A caller that gated a scalar operand or a segmented reduction on the
+bit now issues it on a software handle, and gets the definition's bits;
+none is refused that was accepted, except the NULL IMUL operand above.
+On a remote handle both bits are the server's: a scalar operand is
+expanded by the client and taken whatever the bit says, and
+`cft_reduce_seg` is one frame the server refuses by name where its
+device lacks CAPS2[8] (`cft.h` has the three backends beside each bit).
+
+| surface | status |
+|---|---|
+| C (`cft.h`) | the two definitions say per backend who takes the call; `api-test` holds the software word, a scalar-operand run against the array-of-copies run over all four formats, seven masks and five attributes (the scalar buffer poisoned past element 0), `cft_reduce_seg` against `cft_reduce` slice by slice, and `cft_supports(CFT_IMUL)`; each fails by name with its bit cleared |
+| remote | no frame change; `remote-test` holds a remote handle to a software server to both bits and a scalar operand over the wire to the local run over copies |
+| Node / Browser | `FEAT_REDUCE_SEG` named (`REDUCE_SEG`; it printed as `bit12`), `test.mjs` reading `CFT_FEAT_*` from the header too. The committed module was last rebuilt on 2026-09-15 (`b558a56`), before the software backend published `CFT_SEQ_FEAT_LANE_MASK` (merged at `69f3df2` later that day) and before this change, so until its next rebuild its software handle reports **0x271f** - SCALAR, REDUCE_SEG and LANE_MASK all clear - and `cftw_supports(dev, 30, fmt)`, IMUL, answers 0 at all four formats (measured in node 22, 2026-09-24) |
+| Arduino | the vendored copy re-synced |
 
 
 ## Hosts and boards

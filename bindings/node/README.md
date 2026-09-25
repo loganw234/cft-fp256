@@ -313,7 +313,7 @@ riding as data.
 ```js
 import { SEQ_FEAT_BANK_PTR } from "./index.mjs";
 ctx.seqFeatures & SEQ_FEAT_BANK_PTR;   // CAPS[6]
-ctx.seqFeatureNames;                   // ["kx", "REGS32", "BANK_PTR", "IMUL"]
+ctx.seqFeatureNames;                   // a revision-2 card: ["kx", "REGS32", "BANK_PTR", "IMUL"]
 ctx.maxDeposits; ctx.maxInsns; ctx.maxConsts;
 ```
 
@@ -397,17 +397,27 @@ ctx.seqFeatures & SEQ_FEAT_SCRATCH;    // CAPS2[4]
 ctx.maxScratch;                        // slots a lane; 0 is UNKNOWN
 ctx.seqFeatureNames;   // the set bits, named from ["kx","REGS32","BANK_PTR","KX9","IMUL",
                        //  "SCRATCH","SCRATCH_IO","SCRATCH_STRICT",
-                       //  "SCALAR","INDEXED","LANE_MASK"]
+                       //  "SCALAR","REDUCE_SEG","INDEXED","LANE_MASK"]
 ```
 
-The last four - `SEQ_FEAT_SCRATCH_STRICT`, `SEQ_FEAT_SCALAR`,
-`SEQ_FEAT_INDEXED` and `SEQ_FEAT_LANE_MASK` - printed as `bit10`,
-`bit11`, `bit13` and `bit14` until 2026-09-18. The module at this build
+The last five - `SEQ_FEAT_SCRATCH_STRICT`, `SEQ_FEAT_SCALAR`,
+`FEAT_REDUCE_SEG`, `SEQ_FEAT_INDEXED` and `SEQ_FEAT_LANE_MASK` -
+printed as `bit10`, `bit11`, `bit12`, `bit13` and `bit14`: all but
+`bit12` until 2026-09-18, and `bit12` until 2026-09-24, because
+`test.mjs` read only `CFT_SEQ_FEAT_*` and `CFT_ALU_EXT_*` out of the
+header and CAPS2[8] is `CFT_FEAT_REDUCE_SEG`. The module at this build
 exports no projection for them, so `audit()` cannot hold them to the
 module; `test.mjs` holds the whole table to `host/include/cft.h`
 instead, in both directions, and goes red when the header grows a
-`CFT_SEQ_FEAT_*` or `CFT_ALU_EXT_*` bit this package cannot name
-(`CFT_FEAT_REDUCE_SEG`, 0x1000, is neither, and prints as `bit12`).
+`CFT_SEQ_FEAT_*`, `CFT_ALU_EXT_*` or `CFT_FEAT_*` bit this package
+cannot name.
+
+`SEQ_FEAT_SCALAR` and `FEAT_REDUCE_SEG` say whether THIS handle takes
+`mapEx` with a `scalar` operand and `reduceSeg` - not where either
+saves anything, which only a tile does. libcft's software backend
+publishes both since 2026-09-24; a module built before that (the one
+committed beside this file until the next rebuild) reports them clear
+on the software backend while computing both.
 
 `SEQ_FEAT_SCRATCH` is `0x100` and `SEQ_FEAT_SCRATCH_IO` `0x200`, not
 the next two bits after `BANK_PTR`: revision 3 opened a SECOND feature

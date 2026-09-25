@@ -239,6 +239,7 @@ bash hw/run-device-test.sh <build>/cft_hw_emu.xclbin -n 8 -f fp32
 `device-test` reads `CAPS2` over AXI and checks both directions - a
 published feature must load its image, an absent one must be refused
 *by name*. On the software backend only the positive branch can ever
-fire, because `cft_sw_seq_caps` carries every feature the contract
-defines; a device image is the first thing that can exercise the other
-half.
+fire, because it publishes every feature the contract defines
+(`cft_sw_seq_caps` the sequencer's, and `device.c`'s software open
+CAPS2[7] and CAPS2[8], since 2026-09-24); a device image is the first
+thing that can exercise the other half.

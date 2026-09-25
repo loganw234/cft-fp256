@@ -159,16 +159,25 @@ export const SEQ_FEAT_SCRATCH    = 0x100;  // CAPS2[4]: the per-lane scratch
 export const SEQ_FEAT_SCRATCH_IO = 0x200;  // CAPS2[5]: its per-run block
 // Four more the word has carried since revisions 4 to 6, which this
 // package printed as `bit10`, `bit11`, `bit13` and `bit14` until
-// 2026-09-18 (atlas-engine's card day read them off a card that way).
+// 2026-09-18 (atlas-engine's card day read them off a card that way),
+// and a fifth, CAPS2[8], which printed as `bit12` until 2026-09-24.
 // They are NOT in audit(): the module at this build exports no
 // projection for them, and a call to an export that is not there
 // returns undefined rather than throwing. What holds them instead is
-// test.mjs, which reads every CFT_SEQ_FEAT_* and CFT_ALU_EXT_* value out
-// of host/include/cft.h and requires this table to be exactly that set -
-// declared once and checked, the second grade, until the module is next
-// rebuilt and they join the seven above.
+// test.mjs, which reads every CFT_SEQ_FEAT_*, CFT_ALU_EXT_* and
+// CFT_FEAT_* value out of host/include/cft.h and requires this table to
+// be exactly that set - declared once and checked, the second grade,
+// until the module is next rebuilt and they join the seven above.
 export const SEQ_FEAT_SCRATCH_STRICT = 0x400;  // CAPS2[6]: R8's range report
-export const SEQ_FEAT_SCALAR     = 0x800;  // CAPS2[7]: a scalar operand on the tile
+// CAPS2[7]: this handle takes a scalar operand of mapEx - a tile with the
+// bit, and the software backend always (it publishes the bit since
+// 2026-09-24). Not "the bus saving is here": that is a tile's alone.
+export const SEQ_FEAT_SCALAR     = 0x800;
+// CAPS2[8]: this handle takes reduceSeg - cft.h's CFT_FEAT_REDUCE_SEG,
+// which is not a sequencer feature and so carries no SEQ_ in its name,
+// but lives in the same word. Named here since 2026-09-24, when the
+// software backend began publishing it; it printed as `bit12` before.
+export const FEAT_REDUCE_SEG     = 0x1000;
 export const SEQ_FEAT_INDEXED    = 0x2000; // CAPS2[9]: an input block through a table
 export const SEQ_FEAT_LANE_MASK  = 0x4000; // CAPS2[10]: a per-run lane mask
 
@@ -179,6 +188,7 @@ export const SEQ_FEATURE_NAMES = [
   [ALU_EXT_IMUL, "IMUL"],
   [SEQ_FEAT_SCRATCH, "SCRATCH"], [SEQ_FEAT_SCRATCH_IO, "SCRATCH_IO"],
   [SEQ_FEAT_SCRATCH_STRICT, "SCRATCH_STRICT"], [SEQ_FEAT_SCALAR, "SCALAR"],
+  [FEAT_REDUCE_SEG, "REDUCE_SEG"],
   [SEQ_FEAT_INDEXED, "INDEXED"], [SEQ_FEAT_LANE_MASK, "LANE_MASK"],
 ];
 

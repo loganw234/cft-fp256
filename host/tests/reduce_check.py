@@ -477,12 +477,18 @@ def check_refusals(lib, dev, fmt):
     if lib.cft_op_name(31) != b"maxall":
         print("FAIL opcode 31 should now name maxall")
         bad += 1
-    # IMUL is named, and NOT yet published: the opcode exists and the
-    # sequencer executes it, but no CAPS bit says a device carries it,
-    # so cft_supports must still answer no. When the integer group's
-    # CAPS bit grows to cover 30 this line is what will say so.
+    # IMUL is named, and published: CAPS[28] (CFT_ALU_EXT_IMUL) says a
+    # device carries it, and the software backend does. This comment said
+    # "NOT yet published" until 2026-09-24, and cft_supports agreed for
+    # the wrong reason - cft_sf_op_assigned left 30 off, so the CAPS[28]
+    # branch never ran. Now the answer is asked for rather than assumed.
     if lib.cft_op_name(30) != b"imul":
         print("FAIL opcode 30 is IMUL and must be named")
+        bad += 1
+    if not lib.cft_supports(dev, 30, PREC_CODE[fmt.name]):
+        print(f"FAIL cft_supports says the software backend lacks imul at "
+              f"{fmt.name}, which it publishes (CFT_ALU_EXT_IMUL) and "
+              f"computes")
         bad += 1
     return bad
 

@@ -306,6 +306,18 @@ software server publishes both bits); it becomes reachable the day a
 card-backed `cft-serve` fronts a tile built without the feature, and
 this paragraph is where that day starts.
 
+**CAPS2[7] and CAPS2[8] (bits 11, SCALAR; 12, REDUCE_SEG) are the
+server's word too, and they split.** A scalar operand of `cft_run_ex`
+never reaches the wire as one: the client expands it to `n` copies
+before the `RUN` frame exists, so a remote handle takes one whatever
+bit 11 says - the same under-promise as INDEXED's, and for the same
+reason. `cft_reduce_seg` is the opposite case: one `REDUCE_SEG` frame,
+and the SERVER's library reads bit 12 and refuses by name where its
+device lacks it, so the word and the call agree. A software server has
+published both since 2026-09-24 (it computed both before and said
+neither), so a handle to one reports them; `remote-test` holds that,
+and a scalar operand over the wire to the local run over copies.
+
 **`CFTR_PROTO_VERSION` does not move for this**, and that is
 deliberate. The `proto` field is compared for EQUALITY at both ends,
 so bumping it would turn "an older server answers with a shorter

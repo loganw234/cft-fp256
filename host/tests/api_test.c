@@ -239,6 +239,186 @@ int main(void)
     CHECK(cft_supports(dev, (cft_op)200, CFT_FP32) == 0, "op 200 unassigned");
     CHECK(cft_supports(dev, CFT_FMA, (cft_format)9) == 0, "bad format");
 
+    /* --- the software handle's CAPS2[7] and CAPS2[8] (2026-09-24) ----
+     *
+     * cft.h defines CFT_SEQ_FEAT_SCALAR and CFT_FEAT_REDUCE_SEG as "does
+     * THIS HANDLE take the call", and the software backend computes both
+     * calls by their definitions - so it must publish both, or a caller
+     * that asks cft_get_caps first, as the header tells it to, is told
+     * no by a handle that would have said yes. That was this library's
+     * state until 2026-09-24 (seq_features 0x671f, now 0x7f1f).
+     *
+     * Each claim is held two ways: the bit is in the word, AND the call
+     * it names returns the definition's bits and flags - the scalar run
+     * against the same run over an array of copies, the segmented
+     * reduction against cft_reduce slice by slice. Removing either bit
+     * from the software open fails the first half by name and, because
+     * libcft reads the same bit before computing, the second half too.
+     *
+     * The scalar operand's buffer holds n elements: element 0 is the
+     * scalar and the rest are POISON, so a path that ignored scalar_mask
+     * and streamed the buffer would compute from the poison. `poisoned`
+     * counts the cases where the poison would have shown - if it is
+     * zero, the comparison could not have failed and says so. */
+    {
+        enum { SN = 9, NSEG = 12 };
+        /* every subset of a, b, c that is not empty */
+        static const uint32_t masks[] = { 1u, 2u, 4u, 3u, 5u, 6u, 7u };
+        static const cft_op rops[] = { CFT_SUM, CFT_DOT, CFT_SUMSQ,
+                                       CFT_SUMABS, CFT_MAXALL };
+        static const size_t segs[] = { 1, 3, 4, 6 };
+        uint8_t sbuf[3][SN * 32], rep[3][SN * 32];
+        uint8_t d_sc[SN * 32], d_rep[SN * 32], d_dense[SN * 32];
+        uint8_t ra[NSEG * 32], rb[NSEG * 32], d_seg[NSEG * 32],
+                d_one[32];
+        uint64_t lcg = 0x243F6A8885A308D3ull;   /* pi's fraction */
+        unsigned long cases = 0, poisoned = 0, rcases = 0;
+        const int failures0 = failures;
+        int fmt, r, rnd;
+        size_t k, q, mi, oi, si;
+
+        CHECK((caps.seq_features & CFT_SEQ_FEAT_SCALAR) != 0,
+              "the software backend publishes CFT_SEQ_FEAT_SCALAR "
+              "(CAPS2[7]) - it computes a scalar operand exactly, so a "
+              "caller gating on the bit must be told yes "
+              "(seq_features 0x%lx)", (unsigned long)caps.seq_features);
+        CHECK((caps.seq_features & CFT_FEAT_REDUCE_SEG) != 0,
+              "the software backend publishes CFT_FEAT_REDUCE_SEG "
+              "(CAPS2[8]) - it computes cft_reduce_seg by its definition, "
+              "so a caller gating on the bit must be told yes "
+              "(seq_features 0x%lx)", (unsigned long)caps.seq_features);
+
+        for (fmt = 0; fmt < 4; fmt++) {
+            const size_t esz = cft_format_size((cft_format)fmt);
+            if (!(caps.format_mask & (1u << fmt)))
+                continue;
+            for (mi = 0; mi < sizeof masks / sizeof masks[0]; mi++) {
+                for (rnd = 0; rnd < 5; rnd++) {
+                    const uint32_t m = masks[mi];
+                    const void *op3[3];
+                    uint32_t f_sc = 0, f_rep = 0, f_dense = 0;
+                    cft_elem_args E;
+                    /* fresh operands every case, and the repeated
+                     * form of each scalar one */
+                    for (r = 0; r < 3; r++) {
+                        for (k = 0; k < SN * esz; k++) {
+                            lcg = lcg * 6364136223846793005ull +
+                                  1442695040888963407ull;
+                            sbuf[r][k] = (uint8_t)(lcg >> 56);
+                        }
+                        for (k = 0; k < SN; k++)
+                            memcpy(rep[r] + k * esz,
+                                   sbuf[r] + (((m >> r) & 1u) ? 0 : k * esz),
+                                   esz);
+                        op3[r] = rep[r];
+                    }
+                    memset(d_rep, 0x5a, sizeof d_rep);
+                    st = cft_run(dev, CFT_FMA, (cft_format)fmt,
+                                 (cft_round)rnd, op3[0], op3[1], op3[2],
+                                 d_rep, SN, &f_rep, NULL);
+                    CHECK(st == CFT_OK, "scalar: the array-of-copies "
+                          "reference run was refused: %s",
+                          cft_strerror(st));
+
+                    memset(&E, 0, sizeof E);
+                    E.struct_size = sizeof E;
+                    E.a = sbuf[0]; E.b = sbuf[1]; E.c = sbuf[2];
+                    E.d = d_sc; E.n = SN; E.scalar_mask = m;
+                    E.flags_out = &f_sc;
+                    memset(d_sc, 0xa5, sizeof d_sc);
+                    st = cft_run_ex(dev, CFT_FMA, (cft_format)fmt,
+                                    (cft_round)rnd, &E);
+                    CHECK(st == CFT_OK,
+                          "a scalar operand (mask %lu) on the software "
+                          "backend, which publishes CFT_SEQ_FEAT_SCALAR, "
+                          "was refused: %s (%s)", (unsigned long)m,
+                          cft_strerror(st), cft_last_error());
+                    CHECK(memcmp(d_sc, d_rep, SN * esz) == 0 &&
+                          f_sc == f_rep,
+                          "%s fma rnd %d scalar mask %lu: the scalar run "
+                          "is not the run over an array of copies (flags "
+                          "0x%lx, want 0x%lx)",
+                          cft_format_name((cft_format)fmt), rnd,
+                          (unsigned long)m, (unsigned long)f_sc,
+                          (unsigned long)f_rep);
+                    cases++;
+
+                    /* would a path that ignored the mask have shown? */
+                    memset(d_dense, 0x5a, sizeof d_dense);
+                    if (cft_run(dev, CFT_FMA, (cft_format)fmt,
+                                (cft_round)rnd, sbuf[0], sbuf[1], sbuf[2],
+                                d_dense, SN, &f_dense, NULL) == CFT_OK &&
+                        (memcmp(d_dense, d_rep, SN * esz) != 0 ||
+                         f_dense != f_rep))
+                        poisoned++;
+                }
+            }
+
+            /* cft_reduce_seg against cft_reduce, slice by slice: the
+             * bits of every result and the OR of the flags */
+            for (oi = 0; oi < sizeof rops / sizeof rops[0]; oi++) {
+                for (si = 0; si < sizeof segs / sizeof segs[0]; si++) {
+                    const size_t seg = segs[si], nres = NSEG / seg;
+                    uint32_t f_seg = 0, f_want = 0;
+                    for (k = 0; k < NSEG * esz; k++) {
+                        lcg = lcg * 6364136223846793005ull +
+                              1442695040888963407ull;
+                        ra[k] = (uint8_t)(lcg >> 56);
+                        rb[k] = (uint8_t)(lcg >> 48);
+                    }
+                    memset(d_seg, 0x5a, sizeof d_seg);
+                    st = cft_reduce_seg(dev, rops[oi], (cft_format)fmt,
+                                        CFT_RNE, ra,
+                                        rops[oi] == CFT_DOT ? rb : NULL,
+                                        d_seg, NSEG, seg, &f_seg, NULL);
+                    CHECK(st == CFT_OK,
+                          "cft_reduce_seg %s seg %lu on the software "
+                          "backend, which publishes CFT_FEAT_REDUCE_SEG, "
+                          "was refused: %s (%s)", cft_op_name(rops[oi]),
+                          (unsigned long)seg, cft_strerror(st),
+                          cft_last_error());
+                    for (q = 0; q < nres; q++) {
+                        uint32_t fq = 0;
+                        memset(d_one, 0xa5, sizeof d_one);
+                        st = cft_reduce(dev, rops[oi], (cft_format)fmt,
+                                        CFT_RNE, ra + q * seg * esz,
+                                        rops[oi] == CFT_DOT
+                                            ? rb + q * seg * esz : NULL,
+                                        d_one, seg, &fq, NULL);
+                        CHECK(st == CFT_OK &&
+                              memcmp(d_one, d_seg + q * esz, esz) == 0,
+                              "%s %s seg %lu: result %lu is not "
+                              "cft_reduce over its slice",
+                              cft_format_name((cft_format)fmt),
+                              cft_op_name(rops[oi]), (unsigned long)seg,
+                              (unsigned long)q);
+                        f_want |= fq;
+                    }
+                    CHECK(f_seg == f_want,
+                          "%s %s seg %lu: flags 0x%lx, the slices' OR "
+                          "0x%lx", cft_format_name((cft_format)fmt),
+                          cft_op_name(rops[oi]), (unsigned long)seg,
+                          (unsigned long)f_seg, (unsigned long)f_want);
+                    rcases++;
+                }
+            }
+        }
+        CHECK(cases == 4u * 7u * 5u && rcases == 4u * 5u * 4u,
+              "the CAPS2[7]/[8] sweep ran %lu scalar and %lu segmented "
+              "cases, want 140 and 80", cases, rcases);
+        CHECK(poisoned > 0,
+              "no scalar case would have caught a path that ignored "
+              "scalar_mask - the poison did not differ, so the "
+              "comparison above could not fail");
+        if (failures == failures0)
+            printf("  the software handle publishes CAPS2[7] and CAPS2[8] "
+                   "(seq_features 0x%lx), and both calls are the "
+                   "definition: %lu scalar-operand runs, %lu of them where "
+                   "an ignored mask would have shown; %lu segmented "
+                   "reductions\n", (unsigned long)caps.seq_features,
+                   cases, poisoned, rcases);
+    }
+
     /* --- argument checking --------------------------------------- */
     {
         uint8_t a[4], b[4], c[4], d[4];
@@ -430,23 +610,15 @@ int main(void)
                     }
                     continue;
                 }
-                /* IMUL is the one opcode where cft_supports and the
-                 * software backend disagree, on purpose and in the
-                 * safe direction: opcode 30 was DEFINED on 2026-09-07
-                 * and both executors compute it, but no CAPS bit
-                 * publishes it yet, so cft_supports still answers no.
-                 * More works than is advertised, never less. When the
-                 * caps bit lands this special case collapses back
-                 * into the line below it.
-                 *
-                 * The padding property this block exists for holds
-                 * for it either way: the low 32 bits of zero times
-                 * zero are zero and nothing is raised, so a padded
-                 * tail contributes nothing to the reported flags. */
-                want = (op_i == CFT_IMUL)
-                       ? 0u
-                       : (cft_supports(dev, (cft_op)op_i, (cft_format)f_i)
-                          ? 0u : CFT_FLAG_INVALID);
+                /* IMUL was special-cased here - computed, flag-free, and
+                 * answered no by cft_supports - until 2026-09-24, when
+                 * cft_sf_op_assigned took 30 and cft_supports began
+                 * answering from CAPS[28] as it was written to. The
+                 * special case collapsed into this line, as it said it
+                 * would: the low 32 bits of zero times zero are zero and
+                 * nothing is raised, and cft_supports now says yes. */
+                want = cft_supports(dev, (cft_op)op_i, (cft_format)f_i)
+                       ? 0u : CFT_FLAG_INVALID;
                 for (r_i = 0; r_i < 5; r_i++) {
                     uint32_t fl = 0xdead;
                     memset(out, 0xa5, sizeof out);
@@ -1826,12 +1998,52 @@ int main(void)
         CHECK(cft_supports(dev, (cft_op)15, CFT_FP32) == 0,
               "op 15 unassigned");
         /* IMUL is defined and executed - by a sequencer program, and
-         * elementwise on the software backend - but no CAPS bit
-         * publishes it, so a portable caller still cannot ask for it.
-         * When the integer group's caps grow to cover opcode 30 this
-         * is the line that will say so. */
-        CHECK(cft_supports(dev, CFT_IMUL, CFT_FP32) == 0,
-              "imul is not published in CAPS yet");
+         * elementwise on the software backend - and CAPS[28]
+         * (CFT_ALU_EXT_IMUL) publishes it, since 925efab on 2026-09-07.
+         * This line said 0 until 2026-09-24 and was right to, but for
+         * the wrong reason: cft_sf_op_assigned left 30 off, so
+         * cft_supports returned before the CAPS[28] branch that exists
+         * to answer for it, on every device. It is the line the old
+         * comment promised would say so when the caps grew; they grew,
+         * and nothing moved it. Every format, and the other two things
+         * that "unassigned" had got wrong for 30: a NULL operand it
+         * reads is refused as its group's siblings' are, and an index
+         * table on a or b is taken rather than refused as an operand it
+         * does not read. */
+        {
+            int fi;
+            uint8_t ia[4 * 4], ib[4 * 4], id[4 * 4], ig[4 * 4];
+            uint32_t tab[4] = { 3, 0, 2, 1 }, fa = 0, fb = 0;
+            cft_elem_args IX;
+            for (fi = 0; fi < 4; fi++)
+                CHECK(cft_supports(dev, CFT_IMUL, (cft_format)fi) == 1,
+                      "cft_supports(CFT_IMUL, %s) on the software "
+                      "backend, which publishes CFT_ALU_EXT_IMUL "
+                      "(seq_features 0x%lx) and computes opcode 30",
+                      cft_format_name((cft_format)fi),
+                      (unsigned long)caps.seq_features);
+            for (fi = 0; fi < 16; fi++) {
+                ia[fi] = (uint8_t)(0x9d * fi + 7);
+                ib[fi] = (uint8_t)(0x3b * fi + 1);
+            }
+            CHECK(cft_run(dev, CFT_IMUL, CFT_FP32, CFT_RNE, ia, NULL, NULL,
+                          id, 4, NULL, NULL) == CFT_ERR_INVALID_ARGUMENT,
+                  "cft_run(CFT_IMUL) with NULL b is refused - imul reads "
+                  "b, as iand does");
+            memset(&IX, 0, sizeof IX);
+            IX.struct_size = sizeof IX;
+            IX.a = ia; IX.b = ib; IX.d = id; IX.n = 4;
+            IX.idx_a = tab; IX.idx_a_src = 4; IX.flags_out = &fa;
+            st = cft_run_ex(dev, CFT_IMUL, CFT_FP32, CFT_RNE, &IX);
+            CHECK(st == CFT_OK, "an index table on imul's operand a is "
+                  "taken: %s (%s)", cft_strerror(st), cft_last_error());
+            for (fi = 0; fi < 4; fi++)
+                memcpy(ig + fi * 4, ia + tab[fi] * 4, 4);
+            CHECK(cft_run(dev, CFT_IMUL, CFT_FP32, CFT_RNE, ig, ib, NULL,
+                          ig, 4, &fb, NULL) == CFT_OK &&
+                  memcmp(id, ig, sizeof id) == 0 && fa == fb,
+                  "indexed imul is the dense imul over the gathered a");
+        }
 
         /* sumSquare([3, 4]) = 9 + 16 = 25, exactly. */
         put32(v, 0x40400000u);          /* 3.0 */

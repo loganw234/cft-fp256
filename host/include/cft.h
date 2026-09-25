@@ -644,11 +644,44 @@ typedef struct cft_caps {
  * This bit is not a performance hint, it is a SAFETY gate. MODE[18:16]
  * carry the request, and no tile built before 2026-09-12 checks the upper
  * half of MODE at all - so such a tile would IGNORE the flag and read n
- * elements from a one-element buffer. libcft therefore refuses a scalar
- * operand on a device that does not publish this, by name, rather than
- * letting the run happen. The same reasoning REGS32 and KX9 have in
- * docs/ARCHITECTURE.md: an old bitstream has no rule that would refuse
- * the new form. */
+ * elements from a one-element buffer. The same reasoning REGS32 and KX9
+ * have in docs/ARCHITECTURE.md: an old bitstream has no rule that would
+ * refuse the new form.
+ *
+ * What it answers is "does THIS HANDLE take a scalar operand of
+ * cft_run_ex and compute the definition", per backend:
+ *
+ *   xrt       CAPS2[7], as the tile publishes it. A dense scalar-operand
+ *             run on a device without it is CFT_ERR_UNSUPPORTED, naming
+ *             this bit, before anything reaches the tile. (An INDEXED
+ *             run with a scalar operand is composed as a program whose
+ *             constant carries the scalar and does not need the bit.)
+ *   software  published, in every build (-DCFT_NO_PROGRAM included),
+ *             because this backend computes the definition - element 0
+ *             for every i. libcft's refusal reads the same bit on this
+ *             backend too, so the publication is load-bearing: without
+ *             the bit the call would be refused by name, never computed
+ *             behind a clear bit. Published since 2026-09-24; before
+ *             that the software handle computed scalar operands while
+ *             reporting the bit clear.
+ *   remote    the SERVER device's bit, from HELLO - and the handle takes
+ *             a scalar operand whatever it says, because the client
+ *             expands the operand to n copies before a frame exists and
+ *             the server never sees MODE[18:16] set. So a remote handle
+ *             can report the bit CLEAR on a call it completes (a server
+ *             fronting a tile without CAPS2[7]); it never reports it SET
+ *             on a call it refuses. That is the direction a caller can
+ *             act on safely - one who gates on the bit expands the
+ *             operand itself and gets the same bits - and the direction
+ *             this library accepts for INDEXED and LANE_MASK on the same
+ *             route, below.
+ *
+ * What it does NOT answer is where the bus saving is: one beat instead
+ * of n happens only on a tile with the bit. The software backend saves
+ * the caller the copies and nothing more; a remote handle saves nothing,
+ * because its frames chunk and the expanded array crosses either way.
+ * A caller that wants the saving asks for the bit AND a device backend
+ * (cft_caps.backend "xrt"). */
 #define CFT_SEQ_FEAT_SCALAR 0x800u         /* CAPS2[7] */
 
 /* Segmented reductions and the streaming maximum (2026-09-14, ABI 0.13).
@@ -661,7 +694,34 @@ typedef struct cft_caps {
  * buffer sized for one. So the bit gates both: without it libcft refuses
  * cft_reduce_seg on the device by name and computes maxall by halving,
  * as it always did. Not a sequencer feature, but seq_features is where
- * CAPS2's bits land (CAPS2[7:4] on bits 11:8; this is CAPS2[8] on 12). */
+ * CAPS2's bits land (CAPS2[7:4] on bits 11:8; this is CAPS2[8] on 12).
+ *
+ * What it answers is "does THIS HANDLE take cft_reduce_seg" - with seg
+ * below n: seg == n is cft_reduce itself and is never refused - per
+ * backend:
+ *
+ *   xrt       CAPS2[8], as the tile publishes it; without it the call is
+ *             CFT_ERR_UNSUPPORTED naming this bit, never looped over the
+ *             bus. With it, cft_reduce(CFT_MAXALL) is also one streamed
+ *             pass on the tile rather than ceil(log2 n) halvings - the
+ *             same bits either way (cft_reduce, below).
+ *   software  published, in every build, because this backend computes
+ *             cft_reduce_seg by its definition, slice by slice; libcft
+ *             reads the same bit before doing so, so the publication is
+ *             load-bearing. It says nothing about maxall here: the
+ *             software backend halves on the host with or without it.
+ *             Published since 2026-09-24; before that the software
+ *             handle computed the call while reporting the bit clear.
+ *   remote    the SERVER device's bit, from HELLO, and here the word and
+ *             the call agree without the client testing anything: the
+ *             call is one REDUCE_SEG frame and the server's own library
+ *             refuses it by name where its device lacks the bit. A
+ *             remote cft_reduce(CFT_MAXALL) halves over RUN frames
+ *             whatever the bit says.
+ *
+ * bindings/node names it FEAT_REDUCE_SEG ("REDUCE_SEG" in
+ * seqFeatureNames); its test.mjs reads this definition out of this
+ * header beside the CFT_SEQ_FEAT_* ones. */
 #define CFT_FEAT_REDUCE_SEG 0x1000u        /* CAPS2[8] */
 
 /* The two features of the parcel round after ask 7 (docs/ROUND2.md,
@@ -884,9 +944,11 @@ CFT_API cft_status cft_reduce(cft_device *dev,
  * bit the call is REFUSED with CFT_ERR_UNSUPPORTED and a sentence
  * naming it; it never loops the segments over the bus for you, because
  * a caller who wants that can write it and a caller who does not must
- * not be given it silently. The software and remote backends carry it
- * always (the remote in one frame, the server's own library doing the
- * work). */
+ * not be given it silently. The software backend carries it always and
+ * publishes the bit to say so (since 2026-09-24); a remote handle
+ * reports its server device's bit and sends one frame, the server's own
+ * library doing the work - or refusing by name, where its device lacks
+ * the bit. CFT_FEAT_REDUCE_SEG's definition has the three. */
 CFT_API cft_status cft_reduce_seg(cft_device *dev,
                                   cft_op      op,
                                   cft_format  fmt,
@@ -2534,15 +2596,18 @@ CFT_API cft_status cft_program_run_ex(cft_program *prog,
  * define beyond this sentence. What differs is only what crosses the bus.
  *
  * WHERE IT ACTUALLY SAVES ANYTHING. On a tile - MODE[18:16], one beat
- * read instead of n. The software backend indexes element 0, which costs
- * nothing but saves nothing either; the remote backend expands the value
- * locally, because its frames chunk and element 0 would have to ride
- * every chunk. So the call is portable and the SAVING is not, which is
- * why cft_caps reports CFT_SEQ_FEAT_SCALAR rather than this being
- * silent.
+ * read instead of n. The software backend indexes element 0, which saves
+ * the caller the copies and no bus traffic, since there is no bus; the
+ * remote backend expands the value locally, because its frames chunk and
+ * element 0 would have to ride every chunk. So the call is portable and
+ * the SAVING is not.
  *
- * A scalar operand on an XRT device without CFT_SEQ_FEAT_SCALAR is
- * CFT_ERR_UNSUPPORTED with a message naming the bit. That refusal is
+ * WHO TAKES IT is what CFT_SEQ_FEAT_SCALAR answers, and its definition
+ * above says it per backend: a tile publishing CAPS2[7], the software
+ * backend always (it publishes the bit since 2026-09-24), and a remote
+ * handle always, whatever its server's bit - the client expands. A
+ * scalar operand on an XRT device without the bit is
+ * CFT_ERR_UNSUPPORTED with a message naming it. That refusal is
  * load-bearing: no tile built before 2026-09-12 checks MODE's upper
  * half, so one would ignore the flag and read n elements from a
  * one-element buffer.

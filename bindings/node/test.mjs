@@ -121,16 +121,27 @@ test("the module is the tree's own ABI, on the software backend", () => {
  *  the table's bits are held to the MODULE by audit(); this holds ALL of
  *  them to the HEADER, in both directions, so a bit added to cft.h turns
  *  this red until the package can name it - the direction the dependency
- *  has to run - and a bit this file invents is caught too. */
+ *  has to run - and a bit this file invents is caught too.
+ *
+ *  CFT_FEAT_* is read beside CFT_SEQ_FEAT_* and CFT_ALU_EXT_* since
+ *  2026-09-24: CAPS2[8] is CFT_FEAT_REDUCE_SEG, a bit of the same word
+ *  without the SEQ_ in its name, and this regex's narrower form let it
+ *  print as `bit12` with nothing here red - the hole this test exists to
+ *  close, one prefix wide. Every CFT_FEAT_* in the header today is a
+ *  seq_features bit; one that ever is not turns the test below red by
+ *  its macro name, which is the right place to decide about it. */
 function featureBitsFromHeader() {
   const here = dirname(fileURLToPath(import.meta.url));
   const h = readFileSync(join(resolve(here, "..", ".."), "host", "include",
                               "cft.h"), "utf8");
   const bits = new Map();
-  const re = /^#define\s+(CFT_SEQ_FEAT_\w+|CFT_ALU_EXT_\w+)\s+0x([0-9a-fA-F]+)u/gm;
+  const re = /^#define\s+(CFT_SEQ_FEAT_\w+|CFT_ALU_EXT_\w+|CFT_FEAT_\w+)\s+0x([0-9a-fA-F]+)u/gm;
   for (let m = re.exec(h); m; m = re.exec(h))
     bits.set(parseInt(m[2], 16), m[1]);
   if (bits.size < 7) throw new Error(`cft.h gave only ${bits.size} feature bits`);
+  if (!bits.has(0x1000))
+    throw new Error("cft.h gave no CFT_FEAT_REDUCE_SEG - the regex is " +
+                    "narrower than the word again");
   return bits;
 }
 

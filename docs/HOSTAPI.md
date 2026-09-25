@@ -1835,10 +1835,15 @@ built; docs/SEQUENCER.md holds the program-model ones.
    it is in cft.h beside the struct.
 
    The saving is NOT portable and the call is. On a tile the value crosses
-   once; the software backend indexes element 0 (free, and saves nothing);
-   the remote backend expands locally, because its frames chunk and
-   element 0 would have to ride every chunk. `cft_caps` reports
-   `CFT_SEQ_FEAT_SCALAR` so a caller can tell which it has.
+   once; the software backend indexes element 0 (it saves the caller the
+   copies, and there is no bus to save); the remote backend expands
+   locally, because its frames chunk and element 0 would have to ride
+   every chunk. `CFT_SEQ_FEAT_SCALAR` says which handles TAKE the call,
+   not where it saves: a tile publishing CAPS2[7], the software backend
+   (which publishes the bit since 2026-09-24 - it computed scalar
+   operands with the bit clear before that), and a remote handle whatever
+   its server's bit says, since the client expands. A tile without the
+   bit refuses it by name. The saving is the bit AND a device backend.
 3. **The program API in the wasm surface.** `cftw_*` carries every
    library operation but not `cft_program_load/run`, so the demos run
    the tools' loop engines; the program engines were measured native at
@@ -1975,7 +1980,11 @@ bit that is clear is absent, not unknown**: `cft_program_load` refuses
 an image that uses `kx` or `IMUL` on a device that does not publish
 them, naming the instruction, and `cft_supports(dev, CFT_IMUL, fmt)`
 answers no - so a card-day image that predates both is never handed a
-program its operand mux would misread.
+program its operand mux would misread. Where the bit IS published -
+a CAPS[28] tile, and the software backend - it answers yes, since
+2026-09-24; before that it answered no on every device, because
+`cft_sf_op_assigned` had left opcode 30 off the list `cft_supports`
+consults first, and the CAPS[28] branch behind it never ran.
 
 **Each backend reports what it enforces and enforces what it reports.**
 The XRT backend decodes `CAPS[7:4]`, `CAPS[27:16]`, `CAPS[31:28]` and
@@ -1983,11 +1992,17 @@ The XRT backend decodes `CAPS[7:4]`, `CAPS[27:16]`, `CAPS[31:28]` and
 transcribe a 64 into C. The
 remote backend takes them from the handshake. The software backend
 reports its own - 2^20 deposit slots a lane, the header field's own
-2^32-1 instructions, 512 addressable constants, every feature bit but
-`CFT_SEQ_FEAT_SCALAR` and `CFT_FEAT_REDUCE_SEG` - from
-`host/src/program.c`, which is the file that enforces them, so the
-number a host is told and the number a program is held to are one
-declaration.
+2^32-1 instructions, 512 addressable constants, and every feature bit
+`cft.h` defines (`seq_features` 0x7f1f) - the capacities and the
+sequencer's bits from `host/src/program.c`, which is the file that
+enforces them, so the number a host is told and the number a program
+is held to are one declaration. `CFT_SEQ_FEAT_SCALAR` and
+`CFT_FEAT_REDUCE_SEG` come from `host/src/device.c` instead, for the
+same reason: they are features of its elementwise path and of
+`cft_reduce_seg`, which a `-DCFT_NO_PROGRAM` build keeps and
+`program.c` does not, and the refusals that read them are there. Both
+were computed but unpublished until 2026-09-24 (0x671f), so a caller
+that asked first was told no by a handle that would have said yes.
 
 **The software backend was not narrowed to the tile's 64**, and that
 is a decision rather than an omission. It models the program model,
@@ -2397,9 +2412,15 @@ the bit the call is refused with `CFT_ERR_UNSUPPORTED` and a sentence
 naming the bit and the count of round trips it would have cost: it
 never loops the segments over the bus for you, because a caller who
 wants that can write it in three lines and a caller who does not must
-not be given it silently. The software backend carries it always, and
-the remote backend in one frame (`REDUCE_SEG`, docs/REMOTE.md), the
-server's own library doing the work.
+not be given it silently. The software backend carries it always and
+publishes the bit to say so (since 2026-09-24; it computed the call
+with the bit clear before that), reading the same bit before it
+computes. A remote handle reports its server device's bit and sends one
+frame (`REDUCE_SEG`, docs/REMOTE.md), the server's own library doing
+the work - or refusing it by name, where the server's device lacks the
+bit, so the word and the call agree there too. The bit says nothing
+about `CFT_MAXALL` off a tile: the software backend and a remote handle
+halve, whatever it says.
 
 **Why it exists** is cft-rebound's seventh ask (docs/ROADMAP.md): the
 corrector's convergence test is a maximum per SYSTEM over its `L`

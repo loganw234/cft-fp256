@@ -502,6 +502,26 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
 #else
     dev->seq.features = CFT_ALU_EXT_IMUL;
 #endif
+    /* CAPS2[7] and CAPS2[8] are not the sequencer's either, and unlike
+     * IMUL they are not even the ALU's: they are features of THIS file's
+     * dense elementwise path (a scalar operand, element 0 for every i)
+     * and of cft_reduce_seg (the definition, slice by slice), which every
+     * build carries, the -DCFT_NO_PROGRAM one included. So they are
+     * published here, after both branches, rather than from
+     * cft_sw_seq_caps - which that build compiles out, and which would
+     * have left a tiny-profile handle computing a scalar operand while
+     * saying it could not. The two refusals that read them (run_impl's
+     * scalar refusal and cft_reduce_seg's) read them on THIS backend as
+     * well as on a tile's, so the word and the path are one constant:
+     * a software handle that stopped publishing either would refuse the
+     * call by name rather than go on doing it behind a clear bit.
+     *
+     * Until 2026-09-24 neither was published here while both calls were
+     * computed, so a caller that asked cft_get_caps first, as cft.h tells
+     * it to, was told no by a handle that would have said yes (the
+     * default build's seq_features was 0x671f; it is 0x7f1f since, and
+     * a -DCFT_NO_PROGRAM build's 0x1810 rather than 0x10). */
+    dev->seq.features  |= CFT_SEQ_FEAT_SCALAR | CFT_FEAT_REDUCE_SEG;
     dev->backend_name   = "software";
     dev->hw             = NULL;
     *out = dev;
@@ -1090,7 +1110,10 @@ CFT_API int cft_supports(cft_device *dev, cft_op op, cft_format fmt)
         return 0;
     /* IMUL joined the integer group after bitstreams shipped with that
      * group's bit set, so the group cannot vouch for it: CAPS[28] does
-     * (cft_caps.seq_features, CFT_ALU_EXT_IMUL). */
+     * (cft_caps.seq_features, CFT_ALU_EXT_IMUL). Live since 2026-09-24:
+     * until then cft_sf_op_assigned left 30 off, the return above fired
+     * first, and this answered no for IMUL on every device - a software
+     * handle and a CAPS[28] tile included (softfloat.c says the rest). */
     if ((int)op == (int)CFT_IMUL && !(dev->seq.features & CFT_ALU_EXT_IMUL))
         return 0;
     /* A composed reduction is supported only if what it composes from
@@ -1443,8 +1466,22 @@ static cft_status run_impl(cft_device *dev,
      * which is the whole reason CAPS2[7] exists. The alternative - run it
      * anyway and let the tile ignore MODE[18:16] - reads n elements from
      * a one-element buffer, and that is an out-of-bounds read rather than
-     * a wrong number. The software and remote backends always carry it:
-     * one indexes 0 and the other expands locally.
+     * a wrong number.
+     *
+     * The test is the BIT, on every backend that computes here, and not
+     * "is this a tile": the software backend publishes CFT_SEQ_FEAT_SCALAR
+     * (cft_open, above) and indexes element 0, and reading the same word
+     * on it is what makes that publication load-bearing - drop the bit
+     * and this refuses, rather than a caller who asked first being told
+     * no by a handle that goes on computing the call (the state of this
+     * library until 2026-09-24, when the test was `backend == XRT`).
+     * The REMOTE backend is the one exception and is excluded by name: it
+     * never sets MODE[18:16] anywhere - its block below expands the
+     * operand before a frame exists - so the server's CAPS2[7], which is
+     * all its word can carry, gates nothing on that route. A remote
+     * handle therefore takes a scalar operand whatever its word says: it
+     * can say no to a call that works (a server fronting a tile without
+     * the bit), never yes to one that is refused.
      *
      * AFTER the R16 fork, deliberately (V2, 2026-09-15). The refusal is
      * about MODE[18:16], and MODE[18:16] is what the DENSE device route
@@ -1461,7 +1498,7 @@ static cft_status run_impl(cft_device *dev,
      * where nothing can compose, is refused here as it always was. Which
      * is the test of whether this is in the right place: it is reached
      * by exactly the runs that use the bit. */
-    if (scalar_mask && dev->backend == CFT_BACKEND_XRT &&
+    if (scalar_mask && dev->backend != CFT_BACKEND_REMOTE &&
         !(dev->seq.features & CFT_SEQ_FEAT_SCALAR)) {
         cft_set_error(
             "a scalar operand needs CFT_SEQ_FEAT_SCALAR, which this device "
@@ -1530,9 +1567,11 @@ static cft_status run_impl(cft_device *dev,
          * is and the answer exactly what the contract says, which are the
          * two things that have to be true.
          *
-         * Not a fallback to be ashamed of: the SAVING was never portable
-         * (cft_caps says so through CFT_SEQ_FEAT_SCALAR), only the CALL
-         * is. */
+         * Not a fallback to be ashamed of: the SAVING was never portable,
+         * only the CALL is. Which is also why this route takes the
+         * operand whatever the handle's CFT_SEQ_FEAT_SCALAR says - that
+         * word is the server device's, from HELLO, and nothing here asks
+         * the server's device to read a scalar operand at all. */
         void *exp[3] = {NULL, NULL, NULL};
         const void *opnd[3] = {a, b, c};
         if (scalar_mask) {
@@ -2258,7 +2297,14 @@ CFT_API cft_status cft_reduce(cft_device *dev,
          * flags included - the block above the opcode has the whole
          * argument, and tb/test_krnl_reduce.py holds the tile to the
          * left fold python/cft_golden/reduce.py defines. A tile without
-         * the bit decodes 31 as ELEMENTWISE and must never see it. */
+         * the bit decodes 31 as ELEMENTWISE and must never see it.
+         *
+         * The backend test is not redundant with the bit: the software
+         * backend publishes CAPS2[8] too (2026-09-24, for cft_reduce_seg,
+         * which it computes) and has no tile to stream on, so it halves
+         * below like every handle that is not a tile with the bit. So
+         * does a remote handle, whatever its server publishes: its
+         * halving passes are cft_run calls, and so RUN frames. */
         if (dev->backend == CFT_BACKEND_XRT &&
             (dev->seq.features & CFT_FEAT_REDUCE_SEG)) {
             cft_bindings bd;
@@ -2646,6 +2692,12 @@ CFT_API cft_status cft_reduce_seg(cft_device *dev,
     }
 #endif
 #ifndef CFT_NO_REMOTE
+    /* One REDUCE_SEG frame, whatever the handle's word says: the word is
+     * the server device's CAPS2[8], and it is the server's own
+     * cft_reduce_seg that reads it - a server fronting a tile without the
+     * bit answers with this function's refusal above, by name. So on a
+     * remote handle the word and the call agree without the client
+     * testing anything. */
     if (dev->backend == CFT_BACKEND_REMOTE) {
         cft_status st;
         backend_call();
@@ -2657,7 +2709,21 @@ CFT_API cft_status cft_reduce_seg(cft_device *dev,
         return st;
     }
 #endif
-    /* the software backend: the definition, slice by slice */
+    /* the software backend: the definition, slice by slice - behind the
+     * bit this backend publishes (cft_open), read here for the reason
+     * run_impl reads CFT_SEQ_FEAT_SCALAR on it: so that the word and the
+     * path are one constant, and a software handle that stopped
+     * publishing CAPS2[8] would refuse the call by name rather than go on
+     * computing it behind a clear bit. Unreachable while cft_open
+     * publishes it, which is every build. */
+    if (!(dev->seq.features & CFT_FEAT_REDUCE_SEG)) {
+        cft_set_error("cft_reduce_seg: this handle does not publish "
+                      "CFT_FEAT_REDUCE_SEG (CAPS2[8]), so it does not take "
+                      "a segmented reduction - %lu calls of cft_reduce, "
+                      "one a segment, are the same bits",
+                      (unsigned long)nres);
+        return CFT_ERR_UNSUPPORTED;
+    }
     {
         const int muted = cft_flags_mute(dev, 1);
         cft_status st = CFT_OK;

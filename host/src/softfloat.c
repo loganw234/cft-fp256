@@ -788,11 +788,28 @@ static int sf_rsqrt_seed(const cft_fmt_desc *f, const cft_bn *x, cft_bn *out)
 
 /* ---- dispatch ---------------------------------------------------- */
 
+/* IMUL (30) is on this list since 2026-09-24. It was left off when it
+ * was defined (4e8dfff, 2026-09-07 08:22) on purpose - no CAPS bit
+ * published it yet, and this list is what cft_supports answers with -
+ * and stayed off when CAPS[28] arrived two hours later (925efab) with
+ * device.c's branch that lets CFT_ALU_EXT_IMUL vouch for opcode 30.
+ * That branch was dead from then on, and the omission made three
+ * things quietly wrong: cft_supports answered no on every device, the
+ * software backend and a CAPS[28] tile included; the vector replay's
+ * skip-by-name for an assigned opcode a device lacks could not fire
+ * for it, so on an image without CAPS[28] an imul case reached cft_run
+ * and its refusal failed the set (conformance.c's own comment intends
+ * the skip); and cft_sf_op_operands fell to its unassigned answer,
+ * "reads nothing", for an opcode that reads a and b - so cft_run took
+ * a NULL operand for it that it refuses for every sibling in its
+ * group, and cft_run_ex refused an index table on a or b as "an
+ * operand the opcode does not read". Its arithmetic is unchanged by
+ * this line, and so is every other opcode's answer here. */
 int cft_sf_op_assigned(int op)
 {
     return (op >= 0 && op <= 14) || (op >= 16 && op <= 23) ||
            (op >= CFT_SF_SUM && op <= CFT_SF_SUMABS) ||
-           op == CFT_SF_MAXALL;
+           op == CFT_SF_IMUL || op == CFT_SF_MAXALL;
 }
 
 int cft_sf_is_reduction(int op)
