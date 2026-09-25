@@ -1069,10 +1069,10 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
                     "timeout, or by a process that ended mid-run - is still "
                     "going. The tile would drop this start and XRT would "
                     "report " + J.what + " complete when that run ends, so "
-                    "nothing was started. Retry when it has finished; until "
-                    "the image is reloaded XRT may also complete later runs "
-                    "on this tile early, which is refused by name when it "
-                    "happens");
+                    "it is refused and nothing was started. Retry when that "
+                    "run has finished; until the image is reloaded XRT may "
+                    "also complete later runs on this tile early, which is "
+                    "refused by name when it happens");
             return ST_INTERNAL;
         }
 
@@ -1183,12 +1183,12 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
                 if (still)
                     D.poisoned = true;
                 set_err("XRT reported " + J.what + " complete while " +
-                        early + " was still running it: its scheduler "
-                        "completed the run early, which it does on a tile "
-                        "after a run there was abandoned (a timeout, or a "
-                        "process that ended mid-run, in this process or "
-                        "any other) until the image is reloaded. Nothing of "
-                        "this wave was collected" +
+                        early + " was still running it, so it is refused "
+                        "and nothing of this wave was collected: XRT's "
+                        "scheduler completes runs early on a tile after a "
+                        "run there was abandoned (a timeout, or a process "
+                        "that ended mid-run, in this process or any other) "
+                        "until the image is reloaded" +
                         (still ? std::string("; a tile was still running "
                                              "after the run's whole wait, "
                                              "so this handle is finished")
