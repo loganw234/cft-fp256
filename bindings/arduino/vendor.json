@@ -86,7 +86,7 @@
     {
       "source": "host/src/divsqrt.c",
       "dest": "src/cft/src/divsqrt.c",
-      "sha256": "641b260117722f4f9df4bac1b1f9ff205722d18bf67cbf314975c497321caf87"
+      "sha256": "3d25c014d01f8072dede8dea2fab265ec1933e5fe7cdb7123c6329412a771a07"
     },
     {
       "source": "host/src/formatof.c",

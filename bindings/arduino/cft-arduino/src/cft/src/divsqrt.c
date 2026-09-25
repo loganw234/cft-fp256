@@ -64,6 +64,14 @@
 
 #include "../include/cft.h"
 #include "softfloat.h"
+/* At every profile, not inside the CFT_NO_PROGRAM block below that
+ * uses the rest of it: divsqrt_validate, compiled at every profile,
+ * calls cft_composed_refusal, which is declared here. The call arrived
+ * on 2026-09-14 with this include still inside that block, and until
+ * 2026-09-24 a -DCFT_NO_PROGRAM build - CFT_TINY's among them - stopped
+ * on the implicit declaration, an error since gcc 14. `make -C host
+ * profiles-check` compiles those profiles now. */
+#include "backend.h"
 
 /* Elements per pass. 4096 on a host, and whatever a small part can
  * hold on one (cft_config.h derives the scratch bytes per format).
@@ -840,8 +848,6 @@ static cft_status sqrt_chunk(cft_device *dev, const cft_fmt_desc *f,
  * under the same attributes, and therefore the same bits.
  */
 #ifndef CFT_NO_PROGRAM
-
-#include "backend.h"
 
 enum { RG_A = 0, RG_B = 1, RG_Y = 3, RG_NB = 4, RG_T1 = 5, RG_T2 = 6,
        RG_Q = 7, RG_PW = 8, RG_DN = 9, RG_UP = 10, RG_TMP = 11,
