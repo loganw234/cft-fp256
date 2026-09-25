@@ -44,6 +44,7 @@
 #if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
 #define _POSIX_C_SOURCE 200112L
 #endif
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,18 +56,83 @@
 static int failures;
 static int checks;
 
-/* What CAPS said the device could not do.
+/* What the device under test does not publish.
  *
- * A skip is not a failure, which is correct, and it is also how a
- * whole opcode group can vanish without anyone noticing: op_caps was
- * once written so that it advertised reductions and silently dropped
- * the integer group, and every integer opcode was then skipped rather
- * than run. The suite stayed green. So the count is kept, the names
- * are kept, and the final summary refuses to say "the device and the
- * software backend agree on every case" when cases never ran. */
-#define MAX_SKIP 32
-static int  skipped;
-static const char *skip_name[MAX_SKIP];
+ * The matrix adapts to the device by design: a format it does not
+ * carry, an opcode CAPS says it lacks, a feature bit it does not
+ * publish, a limit it has none of - each leaves a check with nothing
+ * to test on THAT device, and each is named where it happens, in one
+ * form, by not_here() below:
+ *
+ *     <what>: NOT COMPARED - <why>   a comparison with the software
+ *                                    backend the device cannot take
+ *     <what>: NOT TESTED - <why>     a limit or refusal of the device's
+ *                                    own, with nothing to hold it to
+ *     <what>: NOT RUN - <why>        a leg the device's backend or mode
+ *                                    has nothing for
+ *
+ * None of them is a skip, and none starts with SKIP. verify/run.sh
+ * counts a SKIP-first line as a check that exists for this HOST and
+ * did not run for a host reason - a missing tool, build product or
+ * input file - and these are about the DEVICE (verify/README.md,
+ * "Skips are named, never silent", has the rule). device-test has no
+ * check of the first kind: every input it reads is the artifact on its
+ * command line, which it fails without. The conformance replay, which
+ * claims the whole published set, still counts a published case the
+ * device cannot run as a skip - so an image whose CAPS drops a group
+ * is counted wherever that replay is run against it.
+ *
+ * Not tested is not a failure, and it is not a pass either: op_caps
+ * was once written so that it advertised reductions and silently
+ * dropped the integer group, and every integer opcode then went
+ * unrun. The suite stayed green. So every line is counted here, by
+ * kind and by word, the opcode names are kept, and the final summary
+ * refuses to say "the device and the software backend agree on every
+ * case" when any of them printed.
+ *
+ * On 2026-09-24 the format, buffers-leg and opcode lines were printed
+ * SKIPPED first for part of the day, and so counted by the runner as
+ * skips, while seven NOT COMPARED lines for the same kind of absence
+ * went uncounted - one device, one capability, opposite accounting.
+ * They are all this form now, and so are the lower-case "not run" and
+ * "nothing tested" lines that predate it. */
+#define MAX_OPS_ABSENT 32
+static int  ops_absent;                 /* opcodes NOT COMPARED */
+static const char *op_absent_name[MAX_OPS_ABSENT];
+static int  nh_fmts;                    /* formats NOT COMPARED */
+static int  nh_buf_legs;                /* -b legs NOT COMPARED */
+static int  nh_compared;                /* any other NOT COMPARED line */
+static int  nh_tested;                  /* NOT TESTED lines */
+static int  nh_run;                     /* NOT RUN lines */
+
+enum { NH_FORMAT, NH_BUFFERS, NH_OPCODES, NH_OTHER };
+
+/* "<what>: NOT <word> - <why>", and counted. word is "COMPARED",
+ * "TESTED" or "RUN"; what carries its own indent. The opcode line is
+ * counted by the names it carries (ops_absent), not as a line. */
+#if defined(__GNUC__)
+__attribute__((format(printf, 4, 5)))
+#endif
+static void not_here(int kind, const char *word, const char *what,
+                     const char *why, ...)
+{
+    va_list ap;
+    printf("%s: NOT %s - ", what, word);
+    va_start(ap, why);
+    vprintf(why, ap);
+    va_end(ap);
+    printf("\n");
+    if (!strcmp(word, "TESTED"))
+        nh_tested++;
+    else if (!strcmp(word, "RUN"))
+        nh_run++;
+    else if (kind == NH_FORMAT)
+        nh_fmts++;
+    else if (kind == NH_BUFFERS)
+        nh_buf_legs++;
+    else if (kind != NH_OPCODES)
+        nh_compared++;
+}
 
 /* One environment variable, set or removed, on either platform. */
 static void put_env(const char *name, const char *value)
@@ -83,15 +149,17 @@ static void put_env(const char *name, const char *value)
 #endif
 }
 
-static void note_skip(const char *what)
+/* An opcode the device says it does not implement: named once, on the
+ * summary's NOT COMPARED line, not once per format. */
+static void note_op_absent(const char *what)
 {
     int i;
-    for (i = 0; i < skipped && i < MAX_SKIP; i++)
-        if (!strcmp(skip_name[i], what))
+    for (i = 0; i < ops_absent && i < MAX_OPS_ABSENT; i++)
+        if (!strcmp(op_absent_name[i], what))
             return;               /* one line per thing, not per format */
-    if (skipped < MAX_SKIP)
-        skip_name[skipped] = what;
-    skipped++;
+    if (ops_absent < MAX_OPS_ABSENT)
+        op_absent_name[ops_absent] = what;
+    ops_absent++;
 }
 
 #define CHECK(cond, ...)                                                 \
@@ -1150,7 +1218,9 @@ static void check_caps_enforced(cft_device *dev, const char *who)
         return;
     }
     if (!cft_supports(dev, CFT_FMA, fmt)) {
-        printf("  %s: no fp32 here, capacity check not run\n", who);
+        not_here(NH_OTHER, "TESTED", "  capacity checks",
+                 "no fp32 on the %s handle, and every probe is an fp32 "
+                 "program", who);
         return;
     }
     printf("  %s reports max_deposits %lu, max_insns %lu, max_consts %lu, "
@@ -1197,12 +1267,13 @@ static void check_caps_enforced(cft_device *dev, const char *who)
      * 1 << 20 instructions is an 8 MiB image; anything larger is
      * reported as untested rather than pretended. */
     if (!c.max_insns) {
-        printf("    max_insns is 0 (unknown): nothing enforced, "
-               "nothing tested\n");
+        not_here(NH_OTHER, "TESTED", "    max_insns",
+                 "reported as 0 (unknown), so nothing is enforced");
     } else if (c.max_insns > (1u << 20)) {
-        printf("    max_insns %lu: an image past it is %llu bytes, "
-               "NOT TESTED\n", (unsigned long)c.max_insns,
-               (unsigned long long)(c.max_insns + 1ull) * 8ull + 32ull);
+        not_here(NH_OTHER, "TESTED", "    max_insns",
+                 "%lu, and an image past it is %llu bytes",
+                 (unsigned long)c.max_insns,
+                 (unsigned long long)(c.max_insns + 1ull) * 8ull + 32ull);
     } else {
         st = try_load(dev, fmt, c.max_insns, 0, 1, 0, PROBE_NONE);
         checks++;
@@ -1242,8 +1313,8 @@ static void check_caps_enforced(cft_device *dev, const char *who)
      * the loader refuses it otherwise and the refusal would be about
      * the wrong thing. */
     if (!c.max_consts) {
-        printf("    max_consts is 0 (unknown): nothing enforced, "
-               "nothing tested\n");
+        not_here(NH_OTHER, "TESTED", "    max_consts",
+                 "reported as 0 (unknown), so nothing is enforced");
     } else {
         const int wide = (c.seq_features & CFT_SEQ_FEAT_WIDE_CONST) != 0;
         const int kx9  = (c.seq_features & CFT_SEQ_FEAT_KX9) != 0;
@@ -1291,25 +1362,28 @@ static void check_caps_enforced(cft_device *dev, const char *who)
                        cft_last_error());
             }
         } else {
-            printf("    max_consts %lu: an index past it does not fit the "
-                   "%s, NOT TESTED\n", (unsigned long)c.max_consts,
-                   c.max_consts >= 512u ? "immediate's nine bits"
-                 : c.max_consts >= 256u ? "immediate's byte"
-                                        : "four-bit field");
+            not_here(NH_OTHER, "TESTED", "    max_consts, one past it",
+                     "%lu, and an index past it does not fit the %s",
+                     (unsigned long)c.max_consts,
+                     c.max_consts >= 512u ? "immediate's nine bits"
+                   : c.max_consts >= 256u ? "immediate's byte"
+                                          : "four-bit field");
         }
     }
 
     /* max_scratch, on exactly the same terms: a static STL slot at the
      * cap must load and one past it must not. Both halves are always
      * representable here - the slot is imm[23:0], which reaches sixteen
-     * million - so unlike max_consts there is no arm that says NOT
-     * TESTED. */
+     * million - so unlike max_consts no arm says NOT TESTED for want of
+     * an encoding; only for want of a scratch, or of a cap. */
     if (!(c.seq_features & CFT_SEQ_FEAT_SCRATCH)) {
-        printf("    no scratch published: max_scratch %lu, nothing "
-               "tested\n", (unsigned long)c.max_scratch);
+        not_here(NH_OTHER, "TESTED", "    max_scratch",
+                 "no scratch published (max_scratch %lu)",
+                 (unsigned long)c.max_scratch);
     } else if (!c.max_scratch) {
-        printf("    SCRATCH published with max_scratch 0 (unknown): "
-               "nothing enforced, nothing tested\n");
+        not_here(NH_OTHER, "TESTED", "    max_scratch",
+                 "SCRATCH published with max_scratch 0 (unknown), so "
+                 "nothing is enforced");
     } else {
         st = try_load_scratch(dev, fmt, c.max_scratch - 1u, 0, 0);
         checks++;
@@ -1545,8 +1619,8 @@ static void check_caps_enforced(cft_device *dev, const char *who)
      * count. On a device without kx at all this cannot be asked -
      * there is no encoding for an index above 15 - and says so. */
     if (!(c.seq_features & CFT_SEQ_FEAT_WIDE_CONST)) {
-        printf("    kx absent, so KX9 has no encoding to test with, "
-               "NOT TESTED\n");
+        not_here(NH_OTHER, "TESTED", "    KX9",
+                 "kx absent, so KX9 has no encoding to test with");
     } else {
         st = try_load(dev, fmt, 2, 257, 1, 256, PROBE_KX9);
         checks++;
@@ -1941,7 +2015,8 @@ static void check_scratch(cft_device *dev, cft_format fmt, size_t n)
     c.struct_size = sizeof c;
     if (cft_get_caps(dev, &c) != CFT_OK ||
         !(c.seq_features & CFT_SEQ_FEAT_SCRATCH)) {
-        printf("  no scratch on this device, R4/R5 not run\n");
+        not_here(NH_OTHER, "TESTED", "  seq scratch, R4/R5",
+                 "no scratch published on this device");
         goto out;
     }
     if (!a || !b || !cc || !dep || !sin_buf || !sout_buf || !cnt) {
@@ -2160,8 +2235,8 @@ static void check_scratch(cft_device *dev, cft_format fmt, size_t n)
             prog = NULL;
         }
     } else {
-        printf("    this device does not publish SCRATCH_STRICT, R8's "
-               "range report NOT RUN\n");
+        not_here(NH_OTHER, "TESTED", "    R8's range report",
+                 "this device does not publish SCRATCH_STRICT");
     }
 
     /* ---- 3. A store is masked by the active bit --------------------
@@ -2979,8 +3054,8 @@ static void check_indexed(cft_device *sw, cft_device *hw, cft_format fmt,
     if (cft_get_caps(hw, &hc) != CFT_OK)
         memset(&hc, 0, sizeof hc);
     if (!(hc.seq_features & CFT_SEQ_FEAT_INDEXED)) {
-        printf("  seq indexed inputs: this device does not publish "
-               "CFT_SEQ_FEAT_INDEXED, NOT COMPARED\n");
+        not_here(NH_OTHER, "COMPARED", "  seq indexed inputs",
+                 "this device does not publish CFT_SEQ_FEAT_INDEXED");
         goto out;
     }
     if (!src || !bdense || !dense || !d_sw || !d_hw || !d_id ||
@@ -3869,8 +3944,8 @@ static void check_masked(cft_device *sw, cft_device *hw, cft_format fmt,
     if (cft_get_caps(hw, &hc) != CFT_OK)
         memset(&hc, 0, sizeof hc);
     if (!(hc.seq_features & CFT_SEQ_FEAT_LANE_MASK)) {
-        printf("  seq lane mask: this device does not publish "
-               "CFT_SEQ_FEAT_LANE_MASK, NOT COMPARED\n");
+        not_here(NH_OTHER, "COMPARED", "  seq lane mask",
+                 "this device does not publish CFT_SEQ_FEAT_LANE_MASK");
         goto out;
     }
     if (!a || !b || !d_sw || !d_hw || !d_pl || !d_on || !c_sw || !c_hw ||
@@ -4066,10 +4141,10 @@ static void check_masked_scratch_out(cft_device *sw, cft_device *hw,
         memset(&hc, 0, sizeof hc);
     if (!(hc.seq_features & CFT_SEQ_FEAT_LANE_MASK) ||
         !(hc.seq_features & CFT_SEQ_FEAT_SCRATCH_IO)) {
-        printf("  seq lane mask, scratch-out: this device does not publish "
-               "%s, NOT COMPARED\n",
-               (hc.seq_features & CFT_SEQ_FEAT_LANE_MASK)
-                   ? "CFT_SEQ_FEAT_SCRATCH_IO" : "CFT_SEQ_FEAT_LANE_MASK");
+        not_here(NH_OTHER, "COMPARED", "  seq lane mask, scratch-out",
+                 "this device does not publish %s",
+                 (hc.seq_features & CFT_SEQ_FEAT_LANE_MASK)
+                     ? "CFT_SEQ_FEAT_SCRATCH_IO" : "CFT_SEQ_FEAT_LANE_MASK");
         goto out;
     }
     if (!a || !so_sw || !so_hw || !c_sw || !c_hw || !mask) {
@@ -4229,8 +4304,9 @@ static void check_indexed_elem_absent(cft_device *hw, cft_format fmt,
           "idx elem %s: a device without CAPS2[9] must refuse an indexed "
           "elementwise run by name, got %s (%s)", cft_format_name(fmt),
           cft_strerror(st), cft_last_error());
-    printf("  idx elem: this device does not publish CFT_SEQ_FEAT_INDEXED - "
-           "refused by name, NOT COMPARED\n");
+    not_here(NH_OTHER, "COMPARED", "  idx elem",
+             "this device does not publish CFT_SEQ_FEAT_INDEXED (the "
+             "refusal by name is scored above)");
 out:
     free(a); free(b); free(d); free(tab);
 }
@@ -4245,7 +4321,7 @@ out:
  * one run. The device must match the software backend bit for bit,
  * the masked lanes' slots must keep the pattern on both, and the
  * all-ones mask over the same table must equal the unmasked gathered
- * run. Gated on both feature bits; skipped by name otherwise. */
+ * run. Gated on both feature bits; named NOT COMPARED otherwise. */
 static void check_indexed_masked(cft_device *sw, cft_device *hw,
                                  cft_format fmt, size_t n)
 {
@@ -4278,9 +4354,9 @@ static void check_indexed_masked(cft_device *sw, cft_device *hw,
         memset(&hc, 0, sizeof hc);
     if (!(hc.seq_features & CFT_SEQ_FEAT_LANE_MASK) ||
         !(hc.seq_features & CFT_SEQ_FEAT_INDEXED)) {
-        printf("  seq indexed and masked: this device does not publish "
-               "both CFT_SEQ_FEAT_INDEXED and CFT_SEQ_FEAT_LANE_MASK, "
-               "NOT COMPARED\n");
+        not_here(NH_OTHER, "COMPARED", "  seq indexed and masked",
+                 "this device does not publish both CFT_SEQ_FEAT_INDEXED "
+                 "and CFT_SEQ_FEAT_LANE_MASK");
         goto out;
     }
     if (!src || !b || !d_sw || !d_hw || !d_on || !d_no || !c_sw || !c_hw ||
@@ -4472,9 +4548,10 @@ static void check_program_past_a_page(cft_device *dev, cft_format fmt)
         return;
     done = 1;
     if (getenv("XCL_EMULATION_MODE")) {
-        printf("    a program run past one page of mask bits: NOT RUN under "
-               "emulation (XCL_EMULATION_MODE is set) - a card and the "
-               "software backend run it\n");
+        not_here(NH_OTHER, "RUN",
+                 "    a program run past one page of mask bits",
+                 "under emulation (XCL_EMULATION_MODE is set); a card and "
+                 "the software backend run it");
         return;
     }
     ins[0] = seq_ctrl(3, 0, 0);                  /* deposit r0 = a */
@@ -4661,8 +4738,9 @@ static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
                                seed + 6, "seq r31 renaming");
         }
     } else {
-        printf("  seq r16..r31: this device does not publish REGS32, "
-               "NOT COMPARED (the refusal is scored above)\n");
+        not_here(NH_OTHER, "COMPARED", "  seq r16..r31",
+                 "this device does not publish REGS32 (the refusal is "
+                 "scored above)");
     }
 
     /* 6. the per-run constant bank, and the digest over image and
@@ -4670,11 +4748,12 @@ static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
     if (hcaps.seq_features & CFT_SEQ_FEAT_BANK_PTR)
         compare_seq_bank(sw, hw, fmt, n, seed + 5);
     else
-        printf("  seq BANK_EXT: this device does not publish BANK_PTR, "
-               "NOT COMPARED (the refusal is scored above)\n");
+        not_here(NH_OTHER, "COMPARED", "  seq BANK_EXT",
+                 "this device does not publish BANK_PTR (the refusal is "
+                 "scored above)");
 
     /* 7. the per-lane scratch memory and its per-run block, revision
-     *    3's R4 and R5, gated the same way and skipped by name where
+     *    3's R4 and R5, gated the same way and named NOT TESTED where
      *    the device does not publish them. Run against the device
      *    under test rather than the software handle, because a tile
      *    with the feature has its own memory and its own two
@@ -4683,7 +4762,7 @@ static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
     check_program_past_a_page(hw, fmt);
 
     /* 7b. ABI 0.14's index tables (R16), gated on the feature bit the
-     *     same way and skipped by name where the device does not
+     *     same way and named NOT COMPARED where the device does not
      *     publish it. */
     check_indexed(sw, hw, fmt, n);
     check_masked(sw, hw, fmt, n);
@@ -5871,8 +5950,9 @@ int main(int argc, char **argv)
                 }
             }
             if (!absent)
-                printf("  format refusals: this image carries all four "
-                       "formats, NOT TESTED\n");
+                not_here(NH_OTHER, "TESTED", "  format refusals",
+                         "this image carries all four formats, so there "
+                         "is nothing to refuse");
             else
                 printf("  format refusals: %d absent format%s, %d checks, "
                        "%d failed\n", absent, absent == 1 ? "" : "s",
@@ -5903,8 +5983,13 @@ int main(int argc, char **argv)
         if (only_fmt >= 0 && f != only_fmt)
             continue;
         if (!cft_supports(hw, CFT_FMA, fmt)) {
-            printf("%-6s not on this device, skipped\n",
-                   cft_format_name(fmt));
+            /* A format the device does not carry: named, counted on
+             * the summary, and not a skip (the comment at not_here).
+             * It read "fp128  not on this device, skipped" until
+             * 2026-09-24, then "SKIPPED fp128: ..." for part of that
+             * day. */
+            not_here(NH_FORMAT, "COMPARED", cft_format_name(fmt),
+                     "not on this device");
             continue;
         }
         printf("%s\n", cft_format_name(fmt));
@@ -5923,7 +6008,7 @@ int main(int argc, char **argv)
             int bops = quick ? 2 : (int)(sizeof ops / sizeof ops[0]);
             for (bo = 0; bo < bops; bo++) {
                 if (!cft_supports(hw, ops[bo], fmt)) {
-                    note_skip(cft_op_name(ops[bo]));
+                    note_op_absent(cft_op_name(ops[bo]));
                     continue;
                 }
                 for (br = 0; br < nrnd; br++)
@@ -5982,13 +6067,19 @@ int main(int argc, char **argv)
                            "checks, %d failed\n", checks,
                            failures);
                 } else {
-                    printf("  buffers, an indexed program: "
-                           "SKIPPED - this device does not "
-                           "publish CFT_SEQ_FEAT_INDEXED\n");
+                    /* Not a skip, as the format line above; it read
+                     * "...: SKIPPED - this device ..." until
+                     * 2026-09-24, then SKIPPED first for part of that
+                     * day. */
+                    not_here(NH_BUFFERS, "COMPARED",
+                             "  buffers, an indexed program",
+                             "this device does not publish "
+                             "CFT_SEQ_FEAT_INDEXED");
                 }
             } else {
-                printf("  buffers, a program's scratch: SKIPPED - this "
-                       "device does not publish SCRATCH_IO\n");
+                not_here(NH_BUFFERS, "COMPARED",
+                         "  buffers, a program's scratch",
+                         "this device does not publish SCRATCH_IO");
             }
             fflush(stdout);
 
@@ -6021,7 +6112,7 @@ int main(int argc, char **argv)
                        checks, failures);
                 fflush(stdout);
             } else {
-                note_skip(cft_op_name(CFT_SUM));
+                note_op_absent(cft_op_name(CFT_SUM));
             }
             continue;
         }
@@ -6031,7 +6122,7 @@ int main(int argc, char **argv)
          * the tile's gather. A device that does not (the seq6 image,
          * VERSION 0x900) refuses it by name, and that refusal is the
          * contract: scored once a format, and the indexed legs are then
-         * skipped by name, as the program legs are. Found on the card
+         * named NOT COMPARED, as the program legs are. Found on the card
          * on 2026-09-15, when this library first met an older image. */
         const int hw_indexed =
             (caps.seq_features & CFT_SEQ_FEAT_INDEXED) != 0;
@@ -6039,7 +6130,7 @@ int main(int argc, char **argv)
             check_indexed_elem_absent(hw, fmt, n);
         for (o = 0; o < nops; o++) {
             if (!cft_supports(hw, ops[o], fmt)) {
-                note_skip(cft_op_name(ops[o]));
+                note_op_absent(cft_op_name(ops[o]));
                 continue;
             }
             for (r = 0; r < nrnd; r++) {
@@ -6094,7 +6185,7 @@ int main(int argc, char **argv)
 
         if (!only_reduce) {
             if (!cft_supports(hw, CFT_RECIP_SEED, fmt)) {
-                note_skip("div/sqrt");
+                note_op_absent("div/sqrt");
             } else {
                 for (r = 0; r < nrnd; r++) {
                     compare_divsqrt(sw, hw, fmt, rnds[r], n,
@@ -6317,15 +6408,17 @@ int main(int argc, char **argv)
                 printf("    reductions with b and c POISONED (0xFF, a NaN): "
                        "%d checks, %d failed\n", checks, failures);
             } else {
-                printf("    reductions with b and c poisoned: NOT RUN - the "
-                       "%s backend has no b and c of its own to poison\n",
-                       caps.backend);
+                not_here(NH_OTHER, "RUN",
+                         "    reductions with b and c poisoned",
+                         "the %s backend has no b and c of its own to "
+                         "poison", caps.backend);
             }
             fflush(stdout);
         } else {
-            note_skip(cft_op_name(CFT_SUM));
-            printf("  no reduction opcode group on this device "
-                   "(CAPS says so) - nothing to check\n");
+            note_op_absent(cft_op_name(CFT_SUM));
+            not_here(NH_OTHER, "COMPARED", "  reductions",
+                     "no reduction opcode group on this device (CAPS "
+                     "says so)");
         }
     }
 
@@ -6360,23 +6453,51 @@ int main(int argc, char **argv)
     cft_close(sw);
     printf("\n%d checks, %d failed\n", checks, failures);
 
-    if (skipped) {
-        int i, n_named = skipped < MAX_SKIP ? skipped : MAX_SKIP;
-        printf("SKIPPED %d opcode%s this device says it does not "
-               "implement:", skipped, skipped == 1 ? "" : "s");
-        for (i = 0; i < n_named; i++)
-            printf(" %s", skip_name[i]);
-        printf("\n  A skip is not a failure, but it is not a pass "
-               "either. If the device\n"
-               "  should implement one of these, CAPS is wrong and "
-               "nothing above tested it.\n");
+    if (ops_absent) {
+        char what[512];
+        size_t at;
+        int i, n_named = ops_absent < MAX_OPS_ABSENT ? ops_absent
+                                                     : MAX_OPS_ABSENT;
+        at = (size_t)snprintf(what, sizeof what, "opcode%s",
+                              ops_absent == 1 ? "" : "s");
+        for (i = 0; i < n_named && at < sizeof what; i++)
+            at += (size_t)snprintf(what + at, sizeof what - at, " %s",
+                                   op_absent_name[i]);
+        not_here(NH_OPCODES, "COMPARED", what,
+                 "this device says it does not implement %s",
+                 ops_absent == 1 ? "it" : "them");
+        printf("  Not a failure, and not a pass either. If the device "
+               "should implement\n"
+               "  one of these, CAPS is wrong and nothing above tested "
+               "it.\n");
     }
 
-    if (!failures)
-        printf(skipped
-               ? "the device and the software backend agree on every case "
-                 "that RAN, bits and flags\n"
-               : "the device and the software backend agree on every "
-                 "case, bits and flags\n");
+    /* Everything above with nothing to test on this device, counted by
+     * kind and by word, whether or not anything failed. Not SKIP first,
+     * because none of it is a skip (the comment at not_here); and no
+     * skip count beside it, because device-test has no check that a
+     * host reason can stop - its one input is the artifact it opens.
+     * Until 2026-09-24 only the opcodes reached the summary, so a run
+     * that compared nothing in fp128 still ended "agree on every case";
+     * then, for part of that day, the formats and buffers legs reached
+     * it as "skipped: ..." while the rest of these lines did not. */
+    {
+        const int any = ops_absent || nh_fmts || nh_buf_legs ||
+                        nh_compared || nh_tested || nh_run;
+        if (any)
+            printf("not on this device, each named above: NOT COMPARED "
+                   "%d format%s, %d buffers leg%s, %d opcode%s and %d "
+                   "other leg%s; NOT TESTED %d; NOT RUN %d\n",
+                   nh_fmts, nh_fmts == 1 ? "" : "s",
+                   nh_buf_legs, nh_buf_legs == 1 ? "" : "s",
+                   ops_absent, ops_absent == 1 ? "" : "s",
+                   nh_compared, nh_compared == 1 ? "" : "s",
+                   nh_tested, nh_run);
+        if (!failures)
+            printf(any ? "the device and the software backend agree on "
+                         "every case that RAN, bits and flags\n"
+                       : "the device and the software backend agree on "
+                         "every case, bits and flags\n");
+    }
     return failures ? 1 : 0;
 }

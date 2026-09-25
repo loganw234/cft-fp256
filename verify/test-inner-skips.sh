@@ -13,8 +13,8 @@
 # "VERDICT: PASS, nothing skipped". The runner now reads a passing
 # stage's log for lines whose first word is SKIP or SKIPPED, and for the
 # conformance replay's "<set>: [<op>] skipped, ... on this device". This
-# builds a copy of the runner whose stage list is three synthetic stages,
-# runs it, and holds the report to:
+# builds a copy of the runner whose stage list is the synthetic stages
+# below, runs it, and holds the report to:
 #  - a clean stage whose log is full of look-alikes (cocotb's SKIP=0,
 #    pytest's "2 skipped", SKIPPING, SKIPPED mid-line, a replay line that
 #    skipped nothing) counts nothing, and the run says "PASS, nothing
@@ -35,6 +35,17 @@
 # the scan disabled, the replay's form dropped, a pass with inner skips
 # cached like a clean one, and the colour left in - and the check written
 # for each must catch it.
+# Then the skip lines the stages' programs print (cpp-api-test,
+# remote_check.py, tb/check_results.py), each as printed since 2026-09-24
+# and as printed before: the new one counts and fails --require-all
+# alone, the old one counts nothing even under --require-all. Then
+# device-test's and remote-test's lines for a check with nothing to test
+# on the device under test ("<what>: NOT COMPARED|NOT TESTED|NOT RUN -
+# <why>"), which must count nothing even under --require-all, beside the
+# same absences printed SKIPPED first, which must count. A pin per form
+# holds the source to the line the fixture claims it prints, and refuses
+# the old one; and no printf in those two programs may keep a shape the
+# one form replaced, with a control that puts one back.
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 T=$(mktemp -d)
@@ -64,6 +75,91 @@ stage colour "a pytest run painted by FORCE_COLOR, as pytest 9.1 paints it on Wi
   printf '%b\r\n' 'ok    a coloured pass' \
     '\033[33mSKIPPED\033[0m [2] tests/test_y.py:4: painted by FORCE_COLOR' \
     '\033[32m\033[32m\033[1m5 passed\033[0m, \033[33m2 skipped\033[0m\033[32m in 0.10s\033[0m\033[0m'
+need
+stage nh-dt-format "device-test: a format the device does not carry, and its summary" -- \
+  printf '%s\n' 'fp32' '  buffers, elementwise: 40 checks, 0 failed' \
+    'fp128: NOT COMPARED - not on this device' '' '1723 checks, 0 failed' \
+    'not on this device, each named above: NOT COMPARED 1 format, 0 buffers legs, 0 opcodes and 0 other legs; NOT TESTED 5; NOT RUN 3' \
+    'the device and the software backend agree on every case that RAN, bits and flags'
+need
+stage nh-dt-format-skip "the same format, as device-test printed it SKIPPED first for part of 2026-09-24" -- \
+  printf '%s\n' 'fp32' '  buffers, elementwise: 40 checks, 0 failed' \
+    'SKIPPED fp128: not on this device'
+need
+stage nh-dt-buffers "device-test -b: no INDEXED and no SCRATCH_IO, so two buffers legs compare nothing" -- \
+  printf '%s\n' '  buffers, publish takes effect: 60 checks, 0 failed' \
+    '  buffers, an indexed program: NOT COMPARED - this device does not publish CFT_SEQ_FEAT_INDEXED' \
+    '  buffers, a program'"'"'s scratch: NOT COMPARED - this device does not publish SCRATCH_IO'
+need
+stage nh-dt-buffers-skip "the same legs, as device-test printed them SKIPPED first for part of 2026-09-24" -- \
+  printf '%s\n' '  buffers, publish takes effect: 60 checks, 0 failed' \
+    '  SKIPPED buffers, an indexed program: this device does not publish CFT_SEQ_FEAT_INDEXED' \
+    '  SKIPPED buffers, a program'"'"'s scratch: this device does not publish SCRATCH_IO'
+need
+stage nh-dt-opcodes "device-test: an opcode CAPS says the device lacks" -- \
+  printf '%s\n' '9385 checks, 0 failed' \
+    'opcode add: NOT COMPARED - this device says it does not implement it' \
+    '  Not a failure, and not a pass either. If the device should implement' \
+    '  one of these, CAPS is wrong and nothing above tested it.'
+need
+stage nh-dt-opcodes-skip "the same opcode, as device-test printed it until 2026-09-24" -- \
+  printf '%s\n' '9385 checks, 0 failed' \
+    'SKIPPED 1 opcode this device says it does not implement: add' \
+    '  A skip is not a failure, but it is not a pass either. If the device'
+need
+stage nh-dt-other "device-test: a limit, a leg and a backend with nothing to test on the device" -- \
+  printf '%s\n' '    max_insns: NOT TESTED - 4294967295, and an image past it is 34359738400 bytes' \
+    '  seq indexed inputs: NOT COMPARED - this device does not publish CFT_SEQ_FEAT_INDEXED' \
+    '    reductions with b and c poisoned: NOT RUN - the software backend has no b and c of its own to poison'
+need
+stage nh-rt "remote-test: a format, a feature bit and a backend the server's device does not have" -- \
+  printf '%s\n' '  fp128: NOT COMPARED - not on the server' \
+    '  the constant bank: NOT COMPARED - the server'"'"'s device does not publish BANK_PTR (seq_features 0x7d1b)' \
+    '  caps and a scalar operand against the local software backend: NOT COMPARED - the server'"'"'s backend is '"'"'xrt'"'"
+need
+stage nh-rt-skip "the same format, as remote-test printed it SKIPPED first for part of 2026-09-24" -- \
+  printf '%s\n' '  SKIPPED fp128: not on the server'
+need
+stage cpp-nosets "cpp-api-test: no vector sets to replay" -- \
+  printf '%s\n' 'no vector sets found under ../vectors/out - nothing was checked' \
+    'SKIP  cpp-api-test conformance: no vector sets in ../vectors/out (run `make vectors` from the repo root)' \
+    'cpp-api-test: all 4130 checks passed'
+need
+stage cpp-nosets-old "the same, as cpp-api-test printed it until 2026-09-24" -- \
+  printf '%s\n' \
+    'cpp-api-test: SKIP conformance: no vector sets in ../vectors/out (run `make vectors` from the repo root)' \
+    'cpp-api-test: all 4130 checks passed'
+need
+stage cpp-replay "cpp-api-test: a replay that skipped a set, its report printed" -- \
+  printf '%s\n' '../vectors/out/fp32-rne.jsonl: imul skipped, not on this device' \
+    '168 sets, 1068915 cases, all matching (the elementwise and transcendental sets replayed twice)' \
+    'cpp-api-test: conformance replayed 1068915 cases from ../vectors/out'
+need
+stage cpp-replay-old "the same replay, as cpp-api-test printed it until 2026-09-24" -- \
+  printf '%s\n' 'cpp-api-test: conformance replayed 1068915 cases from ../vectors/out'
+need
+stage rc-replay "remote_check.py: both replays skipped a set, their reports printed" -- \
+  printf '%s\r\n' \
+    'local : C:\Users\u\AppData\Local\Temp\cft-remote-vectors-k2/fp32-rne.jsonl: imul skipped, not on this device' \
+    'remote: C:\Users\u\AppData\Local\Temp\cft-remote-vectors-k2/fp32-rne.jsonl: imul skipped, not on this device' \
+    'local : 12 sets, 40211 cases, all matching (the elementwise sets replayed twice)' \
+    'remote: 12 sets, 40211 cases, all matching (the elementwise sets replayed twice)' \
+    'PASS conformance replay of C:\Users\u\AppData\Local\Temp\cft-remote-vectors-k2: local and remote agree (40211 cases checked; remote 3.1 s)'
+need
+stage rc-replay-old "the same replays, as remote_check.py printed them until 2026-09-24" -- \
+  printf '%s\r\n' \
+    'local : 12 sets, 40211 cases, all matching (the elementwise sets replayed twice)' \
+    'remote: 12 sets, 40211 cases, all matching (the elementwise sets replayed twice)' \
+    'PASS conformance replay of C:\Users\u\AppData\Local\Temp\cft-remote-vectors-k2: local and remote agree (40211 cases checked; remote 3.1 s)'
+need
+stage sim-case "tb/check_results.py: a bench that skipped one case" -- \
+  printf '%s\n' '  fp32           ok       3 case(s)  (1 skipped)' \
+    '  SKIP  fp32: test_fpfma.random_ops' \
+    '-- 1 bench(es), 3 case(s), 1 skipped' 'PASS: 1 bench(es), no failures recorded'
+need
+stage sim-case-old "the same bench, as check_results.py printed it until 2026-09-24" -- \
+  printf '%s\n' '  fp32           ok       3 case(s)  (1 skipped)' \
+    '-- 1 bench(es), 3 case(s), 1 skipped' 'PASS: 1 bench(es), no failures recorded'
 EOF
 
 # mkrunner <run.sh> <dir>: <dir>/verify/run.sh is that runner with its
@@ -174,9 +270,206 @@ cases () {  # <runner>  ->  returns the number of checks it got wrong
 }
 NCHECKS=32
 
+# The skip lines the stages' own programs print for a check a HOST
+# reason stopped, or a published conformance case the device cannot run.
+# On 2026-09-24 cpp-api-test's and tb/check_results.py's were reprinted
+# with the marker first, and the replay's report was printed by the two
+# programs that had kept only its counts (cpp-api-test,
+# host/tests/remote_check.py). Each form has a stage above as its
+# program prints it now, and a stage carrying the same gap as it was
+# printed before. The first must count, and fail --require-all alone;
+# the second must count nothing even under --require-all - the proof
+# that the reprint was needed, not merely harmless.
+FORMS="cpp-nosets cpp-replay rc-replay sim-case"
+nskips () { if [ "$1" = rc-replay ]; then echo 2; else echo 1; fi; }
+named () {  # <stage> <the line as the runner names it under the row>
+  check "$1: named under its row: ${2:0:64}" grep -qxF "             $2" "$OUT"
+}
+forms () {  # <runner>  ->  returns the number of checks it got wrong
+  local d="$T/f.$RANDOM$RANDOM" bad=0 st n new="" old="" by=""
+  mkrunner "$1" "$d" || return 1
+  for st in $FORMS; do
+    new="$new${new:+,}$st"; old="$old${old:+,}$st-old"
+    by="$by${by:+, }$st ($(nskips "$st"))"
+  done
+
+  echo "-- forms: each line as its program prints it now"
+  go "$d" forms --only "$new"
+  same  "forms: exit 0" "$RC" 0 || bad=$((bad + 1))
+  same  "forms: the VERDICT counts every one, by stage" "$VERDICT" \
+        "VERDICT: PASS with 5 inner skip(s) in $by - see reasons above" || bad=$((bad + 1))
+  for st in $FORMS; do
+    n=$(nskips "$st")
+    check "$st: its row counts $n" grep -qE "^$st +ok +[0-9]+s  \\+ $n inner skip\\(s\\)" "$OUT" || bad=$((bad + 1))
+  done
+  named cpp-nosets 'SKIP  cpp-api-test conformance: no vector sets in ../vectors/out (run `make vectors` from the repo root)' || bad=$((bad + 1))
+  named cpp-replay '../vectors/out/fp32-rne.jsonl: imul skipped, not on this device' || bad=$((bad + 1))
+  named rc-replay  'local : C:\Users\u\AppData\Local\Temp\cft-remote-vectors-k2/fp32-rne.jsonl: imul skipped, not on this device' || bad=$((bad + 1))
+  named rc-replay  'remote: C:\Users\u\AppData\Local\Temp\cft-remote-vectors-k2/fp32-rne.jsonl: imul skipped, not on this device' || bad=$((bad + 1))
+  named sim-case   'SKIP  fp32: test_fpfma.random_ops' || bad=$((bad + 1))
+
+  echo "-- forms: each one alone, under --require-all"
+  for st in $FORMS; do
+    n=$(nskips "$st")
+    go "$d" "strict-$st" --only "$st" --require-all
+    same "$st: alone, --require-all exits 1" "$RC" 1 || bad=$((bad + 1))
+    same "$st: alone, on the VERDICT" "$VERDICT" \
+         "VERDICT: FAIL (1 stage(s), including under --require-all $n inner skip(s) in $st ($n))" || bad=$((bad + 1))
+  done
+
+  echo "-- the control: the same gaps, printed as they were until 2026-09-24"
+  go "$d" forms-old --only "$old" --require-all
+  same "old forms: exit 0, under --require-all" "$RC" 0 || bad=$((bad + 1))
+  same "old forms: the VERDICT" "$VERDICT" "VERDICT: PASS, nothing skipped" || bad=$((bad + 1))
+  for st in $FORMS; do
+    check "$st-old: its row carries no count" grep -qE "^$st-old +ok +[0-9]+s\$" "$OUT" || bad=$((bad + 1))
+  done
+  return "$bad"
+}
+NFORMS=25
+
+# The lines device-test and remote-test print for a check with nothing to
+# test on the DEVICE UNDER TEST - a format, opcode or feature bit it does
+# not publish, a limit it has none of, a leg its backend has nothing for.
+# Their matrices adapt to the device by design, so these are named in one
+# form, "<what>: NOT COMPARED|NOT TESTED|NOT RUN - <why>", and counted by
+# device-test's own summary, never by the runner: a selfcheck or remote
+# stage must not fail --require-all because the device it drove lacks
+# something (verify/README.md, "Skips are named, never silent"). For part
+# of 2026-09-24 the format, buffers-leg and opcode lines were printed
+# SKIPPED first while the rest were not - one device, one capability,
+# opposite accounting. Each nh- stage is a real line as printed now and
+# must count nothing even under --require-all; each -skip stage is the
+# same absence as it was printed SKIPPED first, and must count - the
+# proof that the scan is live here, so the silence above is the form's.
+NH="nh-dt-format nh-dt-buffers nh-dt-opcodes nh-dt-other nh-rt"
+NHS="nh-dt-format-skip nh-dt-buffers-skip nh-dt-opcodes-skip nh-rt-skip"
+nhskips () { if [ "$1" = nh-dt-buffers-skip ]; then echo 2; else echo 1; fi; }
+uncounted () {  # <runner>  ->  returns the number of checks it got wrong
+  local d="$T/u.$RANDOM$RANDOM" bad=0 st n nh="" nhs="" by=""
+  mkrunner "$1" "$d" || return 1
+  for st in $NH; do nh="$nh${nh:+,}$st"; done
+  for st in $NHS; do
+    nhs="$nhs${nhs:+,}$st"; by="$by${by:+, }$st ($(nhskips "$st"))"
+  done
+
+  echo "-- not on the device: every form as printed now, under --require-all"
+  go "$d" nh --only "$nh" --require-all
+  same "nh: exit 0, under --require-all" "$RC" 0 || bad=$((bad + 1))
+  same "nh: the VERDICT" "$VERDICT" "VERDICT: PASS, nothing skipped" || bad=$((bad + 1))
+  for st in $NH; do
+    check "$st: its row carries no count" grep -qE "^$st +ok +[0-9]+s\$" "$OUT" || bad=$((bad + 1))
+  done
+
+  echo "-- the contrast: the same absences, printed SKIPPED first"
+  go "$d" nh-skip --only "$nhs"
+  same "nh-skip: exit 0" "$RC" 0 || bad=$((bad + 1))
+  same "nh-skip: the VERDICT counts every one, by stage" "$VERDICT" \
+       "VERDICT: PASS with 5 inner skip(s) in $by - see reasons above" || bad=$((bad + 1))
+  for st in $NHS; do
+    n=$(nhskips "$st")
+    check "$st: its row counts $n" grep -qE "^$st +ok +[0-9]+s  \\+ $n inner skip\\(s\\)" "$OUT" || bad=$((bad + 1))
+  done
+  go "$d" nh-skip-strict --only "$nhs" --require-all
+  same "nh-skip: --require-all exits 1" "$RC" 1 || bad=$((bad + 1))
+  return "$bad"
+}
+NUNCOUNTED=14
+
+# ...and the sources still print them so. A fixture line is a claim
+# about a program's output; these hold each claim to the line of source
+# that makes it, and refuse the form it replaced. A form that was never
+# printed before has no old line to refuse. cpp-api-test's SKIP is also
+# held to the condition that prints it: an empty directory only, told
+# apart by the replay's own sentence - until 2026-09-24 any
+# CFT_ERR_ARTIFACT printed it, a malformed set included - and its FAIL
+# to the line that stopped the replay, the last one not indented: until
+# the same day it named the report's last line, which after a
+# disagreement is "  got ...". device-test's and remote-test's not-here
+# lines are held to the one form, and refuse the SKIPPED-first lines they
+# replaced.
+pins () {  # -> returns the number of pins that do not hold
+  local row f new old bad=0 rows
+  mapfile -t rows << 'PINS'
+host/tests/device_test.c|printf("%s: NOT %s - ", what, word);|printf("SKIPPED %d opcode%s this device says it does not "
+host/tests/device_test.c|not_here(NH_FORMAT, "COMPARED", cft_format_name(fmt),|printf("SKIPPED %s: not on this device\n",
+host/tests/device_test.c|"  buffers, an indexed program",|printf("  SKIPPED buffers, an indexed program: "
+host/tests/device_test.c|"  buffers, a program's scratch",|printf("  SKIPPED buffers, a program's scratch: this "
+host/tests/device_test.c|"not on this device, each named above: NOT COMPARED "|"that RAN, bits and flags - skipped: %d format%s, %d "
+host/tests/remote_test.c|printf("  %s: NOT COMPARED - not on the server\n",|printf("  SKIPPED %s: not on the server\n",
+host/tests/cpp_api_test.cpp|std::printf("SKIP  cpp-api-test conformance: no vector sets in "|std::printf("cpp-api-test: SKIP conformance: no vector sets in "
+host/tests/cpp_api_test.cpp|std::fputs(r.report.c_str(), stdout);|
+host/tests/cpp_api_test.cpp|r.report.find("no vector sets found under ")|if (r.status == CFT_ERR_ARTIFACT) {
+host/tests/cpp_api_test.cpp|if (end > at && r.report[at] != ' ')|stop_line.erase(0, stop_line.rfind('\n') + 1);
+host/tests/remote_check.py|print(tag + rep_line)|
+tb/check_results.py|print("  SKIP  %s: %s" % (bench, line))|
+PINS
+  for row in "${rows[@]}"; do
+    IFS='|' read -r f new old <<< "$row"
+    if ! grep -qF -- "$new" "$ROOT/$f"; then
+      echo "  FAIL  $f no longer carries: $new"; bad=$((bad + 1))
+    elif [ -n "$old" ] && grep -qF -- "$old" "$ROOT/$f"; then
+      echo "  FAIL  $f prints the old form again: $old"; bad=$((bad + 1))
+    else
+      echo "  ok    $f: $new"
+    fi
+  done
+  return "$bad"
+}
+NPINS=12
+
+# ...and no other shape survives in the two programs whose matrices adapt
+# to the device: no printf that starts SKIP, and none of the shapes the
+# one form replaced - lower-case "not run" at a line's end, "nothing
+# tested", "not compared", "skipped", "nothing to check", or a NOT word
+# with no " - <why>" after it. Only printf lines, their string
+# continuations and not_here calls are read, so prose in comments is not
+# held to it.
+STRAY_RE='printf\("[[:space:]]*SKIP|not run[\]n|nothing tested|not compared|[Ss]kipped|nothing to check|NOT (TESTED|COMPARED|RUN)([\]n|,| \(| under)'
+strays () {  # [<root>] -> returns the number of files with a stray line
+  local r=${1:-$ROOT} f hits bad=0
+  for f in host/tests/device_test.c host/tests/remote_test.c; do
+    hits=$(grep -nE '^[[:space:]]*("|[a-z_:]*printf\(|not_here\()' "$r/$f" | grep -E "$STRAY_RE")
+    if [ -n "$hits" ]; then
+      echo "  FAIL  $f prints a not-here line outside the one form:"
+      printf '%s\n' "$hits" | sed 's/^/          /' | cut -c1-160
+      bad=$((bad + 1))
+    else
+      echo "  ok    $f: every not-here line in the one form"
+    fi
+  done
+  return "$bad"
+}
+
 echo "== verify/run.sh, as committed"
 cases "$ROOT/verify/run.sh"; n=$?
 [ "$n" -eq 0 ] || { echo "FAIL: $n of $NCHECKS check(s) wrong"; FAILS=$((FAILS + 1)); }
+echo "== the programs' skip lines, as committed"
+forms "$ROOT/verify/run.sh"; n=$?
+[ "$n" -eq 0 ] || { echo "FAIL: $n of $NFORMS check(s) wrong"; FAILS=$((FAILS + 1)); }
+echo "== the programs' not-on-this-device lines, as committed"
+uncounted "$ROOT/verify/run.sh"; n=$?
+[ "$n" -eq 0 ] || { echo "FAIL: $n of $NUNCOUNTED check(s) wrong"; FAILS=$((FAILS + 1)); }
+echo "== the sources that print them"
+pins; n=$?
+[ "$n" -eq 0 ] || { echo "FAIL: $n of $NPINS pin(s) do not hold"; FAILS=$((FAILS + 1)); }
+strays; n=$?
+[ "$n" -eq 0 ] || { echo "FAIL: $n source(s) print a not-here line outside the one form"; FAILS=$((FAILS + 1)); }
+# ...and the stray check, watched to fail: a copy of device_test.c with
+# the format line put back as it was printed until 2026-09-24.
+mkdir -p "$T/stray/host/tests"
+cp "$ROOT/host/tests/remote_test.c" "$T/stray/host/tests/"
+{ cat "$ROOT/host/tests/device_test.c"
+  printf '%s\n' '            printf("%-6s not on this device, skipped\n",'; } > "$T/stray/host/tests/device_test.c"
+echo "== negative control, stray-form"
+if strays "$T/stray" > "$T/stray.out" 2>&1; then
+  cat "$T/stray.out"
+  echo "FAIL: control stray-form - the old format line was put back and the stray check did not catch it"
+  FAILS=$((FAILS + 1))
+else
+  grep -F 'FAIL  host/tests/device_test.c' "$T/stray.out"
+  echo "  caught: $(grep -c 'not on this device, skipped' "$T/stray.out") line(s) named"
+fi
 
 # Each control: the defect put back into a copy that still parses, and
 # the check written for it must be among those that catch it.
@@ -210,7 +503,10 @@ control colour-left-in INNER-SKIP-ANSI \
   "strict: the coloured skip alone fails --require-all"
 
 if [ "$FAILS" -eq 0 ]; then
-  echo "PASS: $NCHECKS checks right, all four controls caught by their own checks"
+  echo "PASS: $NCHECKS checks right, all four controls caught by their own checks;" \
+       "$NFORMS checks of the programs' skip lines right, $NUNCOUNTED of their" \
+       "not-on-this-device lines right, $NPINS pins held, and the one form held" \
+       "with its control caught"
   exit 0
 fi
 echo "FAIL: $FAILS problem(s)"

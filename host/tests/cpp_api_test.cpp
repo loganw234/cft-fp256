@@ -1998,14 +1998,69 @@ int main(int argc, char **argv)
     /* Conformance through the wrapper: the published vector sets,
      * replayed by cft_conformance itself rather than by a restatement
      * of it here. A missing set directory is reported by name - a
-     * replay that quietly checked nothing must not read as a pass. */
+     * replay that quietly checked nothing must not read as a pass.
+     *
+     * The replay's report is printed whole, as cft-selftest prints it:
+     * a set it skipped ("<set>: skipped, <op> not on this device") is
+     * a line of that report and nowhere else, and until 2026-09-24
+     * this printed only the case count, so a set skipped here reached
+     * no log. SKIP is the first word of the no-sets line for the same
+     * reason - it is the marker verify/run.sh counts.
+     *
+     * Only an EMPTY directory is a skip. cft_conformance answers
+     * CFT_ERR_ARTIFACT both for that ("no vector sets found under
+     * ...") and for a set it cannot parse, and until 2026-09-24 this
+     * read every CFT_ERR_ARTIFACT as "no vector sets" - so a malformed
+     * set passed here while cft-selftest failed the same directory.
+     * The empty case is told apart by the replay's own sentence and a
+     * count of zero; anything else is a FAIL naming the line that
+     * stopped the replay.
+     *
+     * Which line that is depends on how it stopped (host/src/
+     * conformance.c). A set it cannot parse, or a call that fails,
+     * APPENDS one line and returns: that line is the report's last. A
+     * disagreement CLEARS the report and writes the failing case alone,
+     * a header naming the set, the line and the case ("<set>:<n>: fp32
+     * fma rne", or "<set>: ARRAY PASS element ...") and, for most,
+     * indented detail - operands, "expected", "got", and after an
+     * array-pass mismatch "the same case passes one element at a time
+     * ..." - so there the last line is detail and the header is the
+     * FIRST. In
+     * both, the line that stopped the replay is the last one that does
+     * not begin with a space, and that is the line named here. (The
+     * status does not tell the two apart: a device's cft_run can answer
+     * CFT_ERR_INTERNAL, which appends "<set>:<n>: cft_run failed:
+     * internal error" after any skip lines, the same status a
+     * disagreement returns with a cleared report.) Until 2026-09-24
+     * this named the last line outright, which for a disagreement was
+     * "  got      0x7fc00000 flags 0x00". */
     {
         const cft::device::conformance_result r = dev.conformance(vdir);
-        if (r.status == CFT_ERR_ARTIFACT) {
-            std::printf("cpp-api-test: SKIP conformance: no vector sets in "
+        std::fputs(r.report.c_str(), stdout);
+        if (!r.report.empty() && r.report.back() != '\n')
+            std::fputc('\n', stdout);   /* a report cut at its buffer */
+        const bool no_sets =
+            r.status == CFT_ERR_ARTIFACT && r.cases == 0 &&
+            r.report.find("no vector sets found under ") != std::string::npos;
+        std::string stop_line;
+        {
+            std::size_t at = 0;
+            while (at < r.report.size()) {
+                std::size_t end = r.report.find('\n', at);
+                if (end == std::string::npos)
+                    end = r.report.size();
+                if (end > at && r.report[at] != ' ')
+                    stop_line = r.report.substr(at, end - at);
+                at = end + 1;
+            }
+        }
+        if (no_sets) {
+            std::printf("SKIP  cpp-api-test conformance: no vector sets in "
                         "%s (run `make vectors` from the repo root)\n", vdir);
         } else {
-            CHECK(r.ok(), "conformance replay: %s", cft_strerror(r.status));
+            CHECK(r.ok(), "conformance replay: %s%s%s",
+                  cft_strerror(r.status), r.ok() ? "" : " - ",
+                  r.ok() ? "" : stop_line.c_str());
             CHECK(r.cases > 0 && !r.report.empty(),
                   "conformance reports its summary even on success");
             std::printf("cpp-api-test: conformance replayed %llu cases from "

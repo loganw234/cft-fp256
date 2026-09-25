@@ -41,7 +41,12 @@ red suite.
 Skipped cases are reported but do not fail. cocotb marks a case skipped
 when the bench itself decided the configuration does not apply, which is
 a statement about coverage rather than correctness - but it is printed,
-because a suite quietly skipping half its cases is worth seeing.
+because a suite quietly skipping half its cases is worth seeing. Each
+skipped case gets its own line whose first word is SKIP, beside the
+"(N skipped)" count on its bench's row: that first word is the marker
+verify/run.sh counts as a check that did not run, and until 2026-09-24
+the count alone was printed, so the sim stage passed over a skipped case
+without naming it.
 """
 import sys
 import xml.etree.ElementTree as ET
@@ -49,18 +54,19 @@ from pathlib import Path
 
 
 def read_one(path):
-    """-> (n_cases, [failure strings], n_skipped) or None if unreadable."""
+    """-> (n_cases, [failure strings], [skipped-case strings]) or None if
+    unreadable."""
     p = Path(path)
     if not p.is_file():
         return None
     try:
         root = ET.parse(p).getroot()
     except ET.ParseError as exc:
-        return ("unparseable", ["%s: %s" % (p, exc)], 0)
+        return ("unparseable", ["%s: %s" % (p, exc)], [])
 
     cases = 0
     bad = []
-    skipped = 0
+    skipped = []
     # The root may be <testsuites> or a single <testsuite>; iterate
     # descendants so both shapes read the same.
     for case in root.iter("testcase"):
@@ -73,7 +79,11 @@ def read_one(path):
                        or tag)
                 bad.append("%s: %s" % (name, msg.splitlines()[0][:120]))
             elif tag == "skipped":
-                skipped += 1
+                # cocotb writes a bare <skipped/>; a JUnit writer that
+                # records why puts it in message= or the element's text.
+                why = (child.get("message") or (child.text or "").strip())
+                skipped.append("%s - %s" % (name, why.splitlines()[0][:120])
+                               if why else name)
     return (cases, bad, skipped)
 
 
@@ -101,7 +111,7 @@ def main(argv):
             print("  %-14s MISSING  %s" % (bench, path))
             continue
         cases, bad, skipped = got
-        total_skipped += skipped
+        total_skipped += len(skipped)
         if cases == "unparseable":
             failed_benches.append(bench)
             print("  %-14s UNPARSEABLE" % bench)
@@ -125,8 +135,11 @@ def main(argv):
             for line in bad:
                 print("       %s" % line)
         else:
-            note = "  (%d skipped)" % skipped if skipped else ""
+            note = "  (%d skipped)" % len(skipped) if skipped else ""
             print("  %-14s ok       %d case(s)%s" % (bench, cases, note))
+        # One line per skipped case, SKIP first (the module docstring).
+        for line in skipped:
+            print("  SKIP  %s: %s" % (bench, line))
 
     print("-- %d bench(es), %d case(s), %d skipped" %
           (len(paths), total_cases, total_skipped))

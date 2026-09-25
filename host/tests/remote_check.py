@@ -221,6 +221,21 @@ def main():
         cr = [l for l in out_r.splitlines() if l.endswith("cases checked")]
         sets_l = [l for l in out_l.splitlines() if " sets, " in l]
         sets_r = [l for l in out_r.splitlines() if " sets, " in l]
+        # The rest of each replay's report, as cft-selftest printed it
+        # after "replaying <dir>": a set it skipped ("<set>: skipped,
+        # <op> not on this device") is a line of that report and
+        # nowhere else, and until 2026-09-24 only the sets line was
+        # printed, so a set skipped here reached no log - and
+        # verify/run.sh counts that line as a check that did not run.
+        for tag, rep_out, sets in (("local : ", out_l, sets_l),
+                                   ("remote: ", out_r, sets_r)):
+            lines = rep_out.splitlines()
+            at = next((i for i, l in enumerate(lines)
+                       if l.startswith("replaying ")), len(lines))
+            for rep_line in lines[at + 1:]:
+                if (rep_line not in sets
+                        and not rep_line.endswith("cases checked")):
+                    print(tag + rep_line)
         print("local : " + (sets_l[0] if sets_l else out_l.strip()[-200:]))
         print("remote: " + (sets_r[0] if sets_r else out_r.strip()[-200:]))
         note(rc_l == 0 and rc_r == 0 and cl == cr and sets_l == sets_r and cl,
