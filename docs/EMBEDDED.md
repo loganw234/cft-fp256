@@ -76,10 +76,10 @@ all fifteen is 280,248 bytes before and after.
 
 | macro | removes | default |
 |---|---|---|
-| `CFT_MAX_FORMAT` | formats above the ceiling, and sizes `CFT_BN_LIMBS` from it | 3 (fp256) |
-| `CFT_BN_LIMBS` | the width of every intermediate | 64 / 18 / 9 by ceiling |
+| `CFT_MAX_FORMAT` | formats above the ceiling, and sizes `CFT_BN_LIMBS` from it: 18 limbs at 2, 9 below. A narrowed default with the transcendentals in is refused by the next row's `#error`; `CFT_NO_TRANSCEND` (as `CFT_TINY` sets) or `CFT_BN_LIMBS=64` builds | 3 (fp256) |
+| `CFT_BN_LIMBS` | the width of every intermediate. With the transcendentals in, below 64 the build stops on an `#error` that names both ways to get there - setting this, or a `CFT_MAX_FORMAT` below 3 whose default narrows it - and both remedies, `CFT_NO_TRANSCEND` or `CFT_BN_LIMBS=64`. 64 is the only width they are validated at; below 34, `mpfloat.c` copies their 1,088-bit constants past the end of a `cft_bn` on the stack, which is what that combination did until 2026-09-24; and at 34, the refusal taken out, the fp128 set stops on `CFT_ERR_INTERNAL`. `CFT_MAX_FORMAT=2 CFT_BN_LIMBS=64` replays the fp32, fp64 and fp128 transcendental sets | 64 / 18 / 9 by ceiling |
 | `CFT_CHUNK` | elements per pass in the composed operations | 4096, 32 on a board, 8 tiny |
-| `CFT_ERRMSG_MAX` | the last-error buffer and its `vsnprintf` | 320, 1 tiny |
+| `CFT_ERRMSG_MAX` | the last-error buffer and its `vsnprintf`: at 1 every refusal keeps its status and loses its sentence, and `cft_last_error()` returns `""` | 320, 1 tiny |
 | `CFT_NO_TRANSCEND` | `transcend.c`, `mpfloat.c`, `mp_2opi.h` | off |
 | `CFT_NO_PROGRAM` | `program.c`, `sha256.c` | off |
 | `CFT_NO_CHARS` | `chars.c` | off |
@@ -96,6 +96,34 @@ Each module switch removes its translation unit **entirely** rather
 than leaving it for the linker's `--gc-sections`, because what does not
 fit on a small part is as often a constant table as it is code, and a
 table reachable from one live function is not collected.
+
+**That every profile, and every switch on its own, still compiles is
+checked in the runner.** `make -C host profiles-check`, which runs in
+`verify/run.sh`'s `libcft` stage, compiles the library's fifteen
+sources at the default, at `CFT_TINY`, at `CFT_TINY CFT_MAX_FORMAT=2`,
+at the boards' `CFT_NO_REMOTE CFT_NO_CONFORMANCE`, and at each switch
+in the table above on its own - `CFT_CHUNK` and `CFT_ERRMSG_MAX` at
+their tiny values, and `CFT_MAX_FORMAT` with what its narrowed `cft_bn`
+needs, at 0 with `CFT_NO_TRANSCEND` and at 2 with `CFT_BN_LIMBS=64` -
+with implicit function declarations, array-bounds and
+aggressive-loop-optimizations warnings as errors. The `CFT_NO_`
+switches it compiles are read out of `cft_config.h` rather than
+copied, and a `CFT_NO_` name a library source tests that the header
+does not name fails the check by name.
+The combination `cft_config.h` refuses - the transcendentals with a
+`cft_bn` below 64 limbs, whether `CFT_BN_LIMBS` set it or a
+`CFT_MAX_FORMAT` below 3 defaulted it - must fail in every source with
+the refusal's own words. It exists because no runner stage compiled
+any of these: from 2026-09-14 until 2026-09-24 `divsqrt.c` called a
+function whose declaration only a build with the sequencer included,
+and with gcc 14 or later - where an implicit declaration is an error -
+neither `CFT_TINY` profile compiled; and the first time each switch was
+compiled alone, a narrowed ceiling with the transcendentals left in
+turned out to write past a `cft_bn` on the stack.
+[The loopback](#the-loopback-and-the-negative-control) builds the
+three named reduced profiles from the vendored copy and runs them,
+under `make embedded`, which is not a runner stage; this only compiles,
+and needs nothing but the host compiler.
 
 None of this changes an answer. Every profile computes what the golden
 model computes; the switches decide what is PRESENT, and an absent

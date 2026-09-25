@@ -623,12 +623,39 @@ PYBIN=$(if [ "$WIN" = 1 ] && command -v python >/dev/null 2>&1; then
 # after it in 1-3 s, ten FAILs from one stale build. The library
 # builds in seconds; a census that could be poisoned by whichever
 # platform touched the tree last is not a census.
+#
+# Then the library compiled at every build profile and every
+# cft_config.h switch alone, and the combinations cft_config.h refuses
+# held to their refusal (host/Makefile's profiles-check, which says
+# why): the default build cannot see a call that only a CFT_NO_PROGRAM
+# or CFT_TINY build leaves undeclared, and one did, unseen, from
+# 2026-09-14 to 2026-09-24. It runs whether or not `test` passed, and
+# with -k, so one log names every profile that fails as well as a
+# failing test.
+#
+# The vectors: `test` replays vectors/out, and so do cpptest, the Node
+# binding and the wasm page below. The `vectors` stage regenerates
+# them earlier in a full run; an --only run may not have them. Absent
+# sets are generated, not skipped past - a replay of nothing is not a
+# replay. Defined here, above the first stage that calls it, because a
+# stage runs where it is declared: until 2026-09-24 this sat beside
+# do_cpp, do_libcft did not call it, and `--only libcft` in a fresh
+# checkout failed with "no vector sets found".
+ensure_vectors() {
+  [ -n "$(ls "$ROOT/vectors/out" 2>/dev/null)" ] && return 0
+  PY "$ROOT/vectors/gen_vectors.py" --out "$ROOT/vectors/out" \
+     --rounding rne rtz rdn rup rmm
+}
+
 do_libcft() {
+  local rc=0
   HOSTMAKE clean >/dev/null 2>&1
-  HOSTMAKE test PYTHON="$PYBIN"
+  ensure_vectors && HOSTMAKE test PYTHON="$PYBIN" || rc=1
+  HOSTMAKE -k profiles-check || rc=1
+  return $rc
 }
 need host-cc python
-stage libcft "host library: build + contract tests + conformance replay" -- do_libcft
+stage libcft "host library: build + contract tests + conformance replay + every build profile compiles" -- do_libcft
 
 # Placed after `libcft` on purpose: make_seq_corpus.py's check loads
 # libcft through ctypes, and that stage is what builds it. Sitting
@@ -868,14 +895,8 @@ stage bindings "the cftmpfr drop-in vs gmpy2's IEEE emulation: encodings, flags,
 # different bits FAILs, which is the point of the diff.
 #
 # The vectors: cpptest, the Node binding and the wasm page all replay
-# vectors/out, which the `vectors` stage regenerates earlier in a full
-# run and an --only run may not have. Absent sets are generated, not
-# skipped past - a replay of nothing is not a replay.
-ensure_vectors() {
-  [ -n "$(ls "$ROOT/vectors/out" 2>/dev/null)" ] && return 0
-  PY "$ROOT/vectors/gen_vectors.py" --out "$ROOT/vectors/out" \
-     --rounding rne rtz rdn rup rmm
-}
+# vectors/out, through ensure_vectors - defined above do_libcft, the
+# first stage that replays them.
 
 do_cpp() { ensure_vectors && HOSTMAKE cpptest; }
 need host-cc cxx

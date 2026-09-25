@@ -257,14 +257,81 @@ which fit a 16-bit int fifteen times over) - see cft_config.h."
  * replays the fp32 and fp64 sets through the CFT_TINY profile at 9,
  * and the fp128 sets through the fp128 profile at 18.
  * --------------------------------------------------------------- */
+/* The width at the default ceiling. Named, because it is also the
+ * transcendentals' threshold below: the default build's width, and so
+ * the width this repository replays their vector sets at. */
+#define CFT_BN_LIMBS_FULL 64
+
 #ifndef CFT_BN_LIMBS
 #  if CFT_MAX_FORMAT >= 3
-#    define CFT_BN_LIMBS 64
+#    define CFT_BN_LIMBS CFT_BN_LIMBS_FULL
 #  elif CFT_MAX_FORMAT == 2
 #    define CFT_BN_LIMBS 18
 #  else
 #    define CFT_BN_LIMBS 9
 #  endif
+#endif
+
+/* ---------------------------------------------------------------
+ * The transcendentals need the full-width cft_bn - refused otherwise
+ *
+ * "Too few limbs is loud", above, is true of bigint.c, which checks
+ * every operation's width. It is not true of the transcendentals'
+ * evaluator: mpfloat.c's cft_mp_const copies a stored constant - ln 2,
+ * pi and four more, 1,088 bits, 34 limbs each (CFT_MP_CONST_LIMBS,
+ * mp_consts.h) - into a cft_bn limb by limb, with no check, so at 18
+ * or 9 limbs it writes past the end of one on the stack, on the first
+ * transcendental that asks for a constant; transcend.c's self-check of
+ * its 2/pi table copies 16 limbs the same way. gcc 16.1 at -O2 says so
+ * (-Warray-bounds at mpfloat.c's copy loop, and at transcend.c's too at
+ * 9 limbs), and nothing else would: every profile this repository
+ * builds leaves the transcendentals out when it narrows the ceiling
+ * (CFT_TINY defines CFT_NO_TRANSCEND), so no build here compiled the
+ * combination until 2026-09-24, when host/Makefile's profiles-check
+ * began compiling each switch on its own.
+ *
+ * The cause is the WIDTH of cft_bn, and that is what is refused: the
+ * transcendentals with a CFT_BN_LIMBS below CFT_BN_LIMBS_FULL. A build
+ * reaches one in two ways - by setting CFT_BN_LIMBS, or by a
+ * CFT_MAX_FORMAT below 3, which only narrows it by default (18 limbs at
+ * fp128, 9 below) - and the refusal names both, with both remedies:
+ * CFT_NO_TRANSCEND, or CFT_BN_LIMBS of at least 64. So
+ * -DCFT_MAX_FORMAT=2 -DCFT_BN_LIMBS=64 builds, overwrites nothing, and
+ * replays the fp32, fp64 and fp128 transcendental sets - 15 sets,
+ * 402,345 cases, all matching (measured 2026-09-24) - and
+ * profiles-check compiles it. From 00e4492 until the commit that wrote
+ * this paragraph a CFT_MAX_FORMAT below 3 was refused as such, whatever
+ * CFT_BN_LIMBS said: broader than the cause.
+ *
+ * Why 64 and not 34. 34 limbs is the proven floor: below it the copy
+ * above writes past the struct. 64 is the width the transcendentals
+ * are VALIDATED at - CFT_BN_LIMBS_FULL, the default build's width, and
+ * the only one verify/run.sh replays their sets at. The copy fitting
+ * is not the evaluator fitting: at 34, with this refusal taken out of
+ * a scratch copy, the fp128 transcendental set stops at its 6,616th
+ * case, a sin, on CFT_ERR_INTERNAL - loud, but a refusal of a case the
+ * default build answers (measured 2026-09-24; the cause not traced).
+ * Between 34 and 64 nothing is validated, and a replay that passed
+ * there would be a sample, not a bound. Making the transcendentals
+ * work at a narrower width, and showing it, is a change to mpfloat.c.
+ * --------------------------------------------------------------- */
+/* #error does not expand a macro, so the refusal below QUOTES
+ * CFT_BN_LIMBS_FULL as 64; this keeps the quotation from outliving the
+ * value. The 34 is CFT_MP_CONST_LIMBS, in src/mp_consts.h, which this
+ * public header cannot see. */
+#if CFT_BN_LIMBS_FULL != 64
+#error "CFT_BN_LIMBS_FULL is no longer 64: change the 64 the refusal \
+below quotes, and REFUSE_BNLIMBS and profiles-check-bnlimbs63-refused in \
+host/Makefile, with it"
+#endif
+
+#if !defined(CFT_NO_TRANSCEND) && CFT_BN_LIMBS < CFT_BN_LIMBS_FULL
+#error "CFT_BN_LIMBS below 64 needs CFT_NO_TRANSCEND: 64 limbs, the fp256 \
+default, is the only cft_bn the transcendentals are validated at, and \
+below 34 their 1,088-bit constants overwrite the stack. A build reaches a \
+narrower one by setting CFT_BN_LIMBS, or by a CFT_MAX_FORMAT below 3, \
+whose default narrows it. Define CFT_NO_TRANSCEND, as CFT_TINY does, or \
+CFT_BN_LIMBS=64 (see cft_config.h)"
 #endif
 
 /* ---------------------------------------------------------------
@@ -313,11 +380,34 @@ which fit a 16-bit int fifteen times over) - see cft_config.h."
 /* ---------------------------------------------------------------
  * CFT_ERRMSG_MAX - the library's own last-error slot, in bytes
  *
- * cft_last_error() returns this buffer. Its one producer in a build
- * with no device backend is cft_program_load's capacity refusal, which
- * CFT_NO_PROGRAM removes - so the tiny profile keeps the empty string
- * the function must still return and drops both the 320-byte buffer
- * and the vsnprintf that fills it.
+ * cft_last_error() returns this buffer, and the refusals libcft makes
+ * without reaching a device backend write their sentences here - a
+ * format above the build's ceiling or absent from the device, a CAPS
+ * group the device lacks, an operand shape cft_run_ex will not take,
+ * a composed operation's missing step, among others. A build with no
+ * device backend and no sequencer still has plenty of them: counted
+ * on 2026-09-24, not counting the one inside each of backend.h's
+ * refusal helpers, a CFT_TINY build compiles 31 call sites that write
+ * one and a default build 83. CFT_NO_PROGRAM removes the sequencer's
+ * - program.c's 44 and the two on device.c's program route for an
+ * indexed operand - and no others.
+ *
+ * The tiny profile drops the slot anyway, to save RAM: 320 bytes is
+ * sixteen percent of an ATmega328P's two kilobytes, and the vsnprintf
+ * that fills it goes with it. (Not every formatted write does:
+ * device.c's render_format_mask, which lists the formats a refusal
+ * names, still calls snprintf at every profile, and at 1 its result is
+ * discarded.) At 1 the slot is the empty string cft_last_error() must
+ * still return. What a caller loses is the sentence and nothing else:
+ * no status depends on this value, so every refusal still returns the
+ * status it would have explained.
+ *
+ * Until 2026-09-24 this comment gave the reason as cft_program_load's
+ * capacity refusal being the one producer, which CFT_NO_PROGRAM
+ * removes. It was not the only one when the slot was sized
+ * (2026-09-09: cft_run's IMUL refusal was a second), and since
+ * 2026-09-14, when every CFT_ERR_UNSUPPORTED was given a sentence, it
+ * has been one of dozens.
  * --------------------------------------------------------------- */
 #ifndef CFT_ERRMSG_MAX
 #  ifdef CFT_TINY

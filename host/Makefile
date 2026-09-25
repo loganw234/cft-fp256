@@ -8,6 +8,9 @@
 #   make                 static + shared library and the tools
 #   make test            build, then run the contract tests and replay
 #                        the published vectors through the library
+#   make profiles-check  compile the library at every build profile
+#                        and every cft_config.h switch alone, which
+#                        nothing that builds the default one does
 #   make examples-lang   the C/Python identity check again, for the
 #                        optional toolchains: C++, Julia, Rust, Go, C#
 #                        and R are each run and diffed if present,
@@ -185,7 +188,15 @@ all: libcft.a $(SHLIB) $(TOOLS) $(EXAMPLES)
 # program.o reported a STATUS bit the model had moved - and the build
 # is small enough that over-rebuilding costs seconds where a stale
 # object costs a debugging session.
-HDRS := include/cft.h $(wildcard src/*.h)
+#
+# Every header by wildcard, include/ as well as src/. Until 2026-09-24
+# include/ was named by hand as cft.h alone, so editing cft_config.h -
+# which every source includes, directly or through cft.h, and which
+# sizes cft_bn - rebuilt nothing, and neither did editing
+# cft_seq_flags.h, which cft-asm and positive-run include (they reach
+# this list through libcft.a). A header named by hand is a header
+# somebody forgets.
+HDRS := $(wildcard include/*.h) $(wildcard src/*.h)
 $(OBJ) $(PICOBJ): $(HDRS)
 
 %.o: %.c
@@ -360,6 +371,187 @@ test: all $(TESTS)
 	diff .out-c.txt .out-py.txt
 	@echo "C and Python reached the same library and got the same bits"
 	@rm -f .out-c.txt .out-py.txt
+
+# ====================================================================
+# profiles-check - the library compiled at every build profile and at
+# every switch on its own, not only at the default.
+#
+# include/cft_config.h's switches remove translation units, and blocks
+# inside them, so a call added outside the block that declares its
+# callee compiles at the default profile and at no other - and nothing
+# that builds the default would ever say so. That happened: from
+# e0aa96b (2026-09-14) divsqrt.c called cft_composed_refusal outside
+# the CFT_NO_PROGRAM block that included backend.h, and until
+# 2026-09-24 a -DCFT_NO_PROGRAM build, CFT_TINY's among them, stopped
+# on the implicit declaration under gcc 14 or later. `make embedded`
+# builds the tiny profiles in its loopback and would have said so, but
+# it is not a runner stage; this is, inside verify/run.sh's `libcft`.
+# And the first time each switch was compiled on its own, the
+# transcendentals in a cft_bn narrowed by CFT_MAX_FORMAT below 3 turned
+# out to overwrite the stack (cft_config.h, where a cft_bn that narrow
+# is now refused with them, however it was reached).
+#
+# What it compiles, the fifteen sources each, with the library's flags:
+#
+#   the profiles docs/EMBEDDED.md names - CFT_TINY, CFT_TINY at fp128,
+#     the 32-bit boards' - and the default;
+#   every CFT_NO_ module switch alone, the list DERIVED from
+#     cft_config.h (PROFILE_SWITCHES below; eleven on 2026-09-24, and
+#     profiles-check-switches prints the count and the names);
+#   the other settings - CFT_CHUNK and CFT_ERRMSG_MAX at their tiny
+#     values, the ARDUINO auto-profile, CFT_MAX_FORMAT=0 with the
+#     CFT_NO_TRANSCEND its narrowed cft_bn needs, and CFT_MAX_FORMAT=2
+#     with the CFT_BN_LIMBS=64 that keeps the transcendentals instead;
+#   the combinations cft_config.h refuses - the transcendentals with a
+#     cft_bn narrower than 64 limbs, reached through CFT_MAX_FORMAT 2, 1
+#     and 0 alone and through CFT_BN_LIMBS 18 and 63 alone. There EVERY
+#     source must fail, and with the refusing #error's own words: a
+#     refusal that stops being raised, or a build that fails for some
+#     other reason, fails the check.
+#
+# Three warnings are errors here, the three that have found something:
+# implicit-function-declaration (the divsqrt.c call; an error by default
+# only from gcc 14, so pinned, and an older compiler fails the same
+# way), array-bounds and aggressive-loop-optimizations (gcc's two
+# reports of mpfloat.c's copy into a narrowed cft_bn). The last is
+# gcc's own; a compiler that does not know it (clang) is not given it,
+# which a probe decides once, the first time the flags are expanded.
+#
+# Every source is compiled even after one fails, so a failure names
+# them all. The targets are phony, so every run compiles everything;
+# the object goes to one file per target, overwritten source by source
+# and deleted at the end, so nothing is left behind for a later build
+# to take for its own. One target per profile, its defines a
+# target-specific variable: `make -j` runs them side by side, and no
+# lookup keyed on a stem can leave a profile compiled with no defines
+# at all, the failure bindings/arduino/loopback/Makefile records.
+# `make -k profiles-check` names every one that fails, as the runner
+# runs it.
+# ====================================================================
+
+# The module switches, DERIVED rather than listed: every CFT_NO_ name
+# include/cft_config.h mentions gets a target that compiles the library
+# with it alone, named after it (profiles-check-CFT_NO_REMOTE). Until
+# 2026-09-24 they were copied here by hand - the comment said ten while
+# eleven were compiled - and a switch added to cft_config.h would never
+# have been compiled on its own, with nothing to say so.
+#
+# Two names cft_config.h mentions are not module switches, and are left
+# out by name:
+#   CFT_NO_AUTO_PROFILE  switches the ARDUINO block off; without ARDUINO
+#                        it changes nothing, so alone it IS the default
+#                        build, which profiles-check-default compiles
+#   CFT_NO_HEAP          named there as the switch that does not exist
+#
+# profiles-check-switches holds the other direction: a CFT_NO_ name a
+# library source or header tests that cft_config.h does not name - or
+# names only to be excluded above - is a switch this derivation cannot
+# see, and it fails naming the switch and the file. It also fails if
+# the derivation found nothing at all, which is what a moved header
+# would look like. Override PROFILE_CONFIG to point it at another copy.
+PROFILE_CONFIG       := include/cft_config.h
+PROFILE_NOT_SWITCHES := CFT_NO_AUTO_PROFILE CFT_NO_HEAP
+PROFILE_SWITCHES     := $(filter-out $(PROFILE_NOT_SWITCHES),$(sort \
+    $(shell grep -o 'CFT_NO_[A-Z0-9_]*' $(PROFILE_CONFIG))))
+PROFILE_SWITCH_USERS := $(SRC) $(wildcard src/*.h src/*.cpp) include/cft.h
+PROFILE_SWITCH_CHECKS := $(addprefix profiles-check-,$(PROFILE_SWITCHES))
+
+PROFILE_CHECKS := \
+    profiles-check-default profiles-check-tiny profiles-check-tiny128 \
+    profiles-check-board profiles-check-arduino profiles-check-fp32 \
+    profiles-check-fp128-bn64 $(PROFILE_SWITCH_CHECKS) \
+    profiles-check-chunk8 profiles-check-errmsg1
+PROFILE_REFUSALS := \
+    profiles-check-maxformat2-refused profiles-check-maxformat1-refused \
+    profiles-check-maxformat0-refused profiles-check-bnlimbs18-refused \
+    profiles-check-bnlimbs63-refused
+
+profiles-check-default:       PROFILE_DEFS :=
+profiles-check-tiny:          PROFILE_DEFS := -DCFT_TINY
+profiles-check-tiny128:       PROFILE_DEFS := -DCFT_TINY -DCFT_MAX_FORMAT=2
+profiles-check-board:         PROFILE_DEFS := -DCFT_NO_REMOTE -DCFT_NO_CONFORMANCE
+profiles-check-arduino:       PROFILE_DEFS := -DARDUINO
+profiles-check-fp32:          PROFILE_DEFS := -DCFT_MAX_FORMAT=0 -DCFT_NO_TRANSCEND
+profiles-check-fp128-bn64:    PROFILE_DEFS := -DCFT_MAX_FORMAT=2 -DCFT_BN_LIMBS=64
+$(foreach s,$(PROFILE_SWITCHES),$(eval profiles-check-$(s): PROFILE_DEFS := -D$(s)))
+profiles-check-chunk8:        PROFILE_DEFS := -DCFT_CHUNK=8
+profiles-check-errmsg1:       PROFILE_DEFS := -DCFT_ERRMSG_MAX=1
+
+# The refusal, by the opening words of cft_config.h's #error string,
+# quote included: gcc prints `#error "...`, clang `error: "...`, and
+# both carry the string as written. One refusal, reached two ways: the
+# three CFT_MAX_FORMAT targets through the narrowed default width, the
+# two CFT_BN_LIMBS ones directly - 63 the widest width refused, beside
+# profiles-check-fp128-bn64's 64, the narrowest one allowed.
+REFUSE_BNLIMBS := "CFT_BN_LIMBS below 64 needs CFT_NO_TRANSCEND:
+$(PROFILE_REFUSALS): PROFILE_REFUSAL := $(REFUSE_BNLIMBS)
+profiles-check-maxformat2-refused: PROFILE_DEFS := -DCFT_MAX_FORMAT=2
+profiles-check-maxformat1-refused: PROFILE_DEFS := -DCFT_MAX_FORMAT=1
+profiles-check-maxformat0-refused: PROFILE_DEFS := -DCFT_MAX_FORMAT=0
+profiles-check-bnlimbs18-refused:  PROFILE_DEFS := -DCFT_BN_LIMBS=18
+profiles-check-bnlimbs63-refused:  PROFILE_DEFS := -DCFT_BN_LIMBS=63
+
+# Expanded where it is used and then replaced by its own value, so the
+# probe runs once, and only in a make that runs this check.
+PROFILE_ALO = $(eval PROFILE_ALO := $(shell echo 'int x;' | $(CC) -Werror \
+    -Werror=aggressive-loop-optimizations -fsyntax-only -x c - \
+    >/dev/null 2>&1 && echo -Werror=aggressive-loop-optimizations))$(PROFILE_ALO)
+PROFILE_FLAGS = $(CSTD) $(CFLAGS) $(WARN) $(INC) $(PROFILE_DEFS) \
+                -Werror=implicit-function-declaration -Werror=array-bounds \
+                $(PROFILE_ALO)
+
+.PHONY: profiles-check profiles-check-switches $(PROFILE_CHECKS) \
+        $(PROFILE_REFUSALS) clean-profiles
+
+profiles-check: profiles-check-switches $(PROFILE_CHECKS) $(PROFILE_REFUSALS)
+	@echo "profiles-check: libcft compiles at all $(words $(PROFILE_CHECKS)) profiles and switches ($(words $(PROFILE_SWITCHES)) of them the CFT_NO_ switches $(PROFILE_CONFIG) names), and all $(words $(PROFILE_REFUSALS)) refused combinations are refused by name"
+
+profiles-check-switches:
+	@if [ -z "$(PROFILE_SWITCHES)" ]; then \
+		echo "$@: no CFT_NO_ switch found in $(PROFILE_CONFIG) - nothing to compile alone"; exit 1; \
+	fi; \
+	undoc=; for f in $(PROFILE_SWITCH_USERS); do \
+		for s in `grep -o 'CFT_NO_[A-Z0-9_]*' $$f | sort -u`; do \
+			case " $(PROFILE_SWITCHES) " in \
+			*" $$s "*) ;; \
+			*) undoc="$$undoc $$s($$f)" ;; \
+			esac; \
+		done; \
+	done; \
+	if [ -n "$$undoc" ]; then \
+		echo "$@: tested in the library and not a switch $(PROFILE_CONFIG) names, so never compiled alone:$$undoc"; exit 1; \
+	fi; \
+	echo "$@: $(words $(PROFILE_SWITCHES)) CFT_NO_ switches named in $(PROFILE_CONFIG), each compiled alone: $(PROFILE_SWITCHES)"
+
+$(PROFILE_CHECKS):
+	@echo "$@: $(CC) $(PROFILE_FLAGS) -c <each of $(words $(SRC)) sources>"
+	@fail=; for f in $(SRC); do \
+		$(CC) $(PROFILE_FLAGS) -c $$f -o $@.o || fail="$$fail $$f"; \
+	done; \
+	rm -f $@.o; \
+	if [ -n "$$fail" ]; then \
+		echo "$@: FAILED at $(or $(PROFILE_DEFS),the default):$$fail"; exit 1; \
+	fi; \
+	echo "$@: $(words $(SRC)) of $(words $(SRC)) sources compile at $(or $(PROFILE_DEFS),the default)"
+
+$(PROFILE_REFUSALS):
+	@echo "$@: $(CC) $(PROFILE_FLAGS) -c <each of $(words $(SRC)) sources>, each to be refused"
+	@bad=; for f in $(SRC); do \
+		if $(CC) $(PROFILE_FLAGS) -c $$f -o $@.o > $@.log 2>&1; then \
+			bad="$$bad $$f(compiled)"; \
+		elif ! grep -qF '$(PROFILE_REFUSAL)' $@.log; then \
+			cat $@.log; bad="$$bad $$f(failed-otherwise)"; \
+		fi; \
+	done; \
+	rm -f $@.o $@.log; \
+	if [ -n "$$bad" ]; then \
+		echo "$@: NOT REFUSED BY NAME at $(PROFILE_DEFS):$$bad"; exit 1; \
+	fi; \
+	echo '$@: $(words $(SRC)) of $(words $(SRC)) sources refused at $(PROFILE_DEFS), each with $(PROFILE_REFUSAL)'
+
+clean: clean-profiles
+clean-profiles:
+	rm -f profiles-check-*.o profiles-check-*.log
 
 # `FC ?= gfortran` looks right and does nothing: make defines FC as a
 # built-in (f77), so ?= never fires and the target silently used

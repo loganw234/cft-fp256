@@ -26,7 +26,7 @@
     {
       "source": "host/include/cft_config.h",
       "dest": "src/cft/include/cft_config.h",
-      "sha256": "65ca9e83bb547922894dc91989153c76f02a130d8d69289c2500681b34adfce8"
+      "sha256": "b04c2c35eb07ddbdf7b105bc9879a454d87b63120eb4b3d7e19ff41d53f5a523"
     },
     {
       "source": "host/include/cft_seq_flags.h",
@@ -86,7 +86,7 @@
     {
       "source": "host/src/divsqrt.c",
       "dest": "src/cft/src/divsqrt.c",
-      "sha256": "641b260117722f4f9df4bac1b1f9ff205722d18bf67cbf314975c497321caf87"
+      "sha256": "3d25c014d01f8072dede8dea2fab265ec1933e5fe7cdb7123c6329412a771a07"
     },
     {
       "source": "host/src/formatof.c",
