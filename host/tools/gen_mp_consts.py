@@ -147,7 +147,10 @@ def main():
         print(f"{out}: matches the generator, "
               f"{len(constants())} constants at {BITS} bits")
         return 0
-    out.write_text(text)
+    # LF on every host, as the committed header is: a bare write_text()
+    # writes CRLF on Windows, which --check (read_text, universal
+    # newlines) cannot see and bindings/arduino/sync.py would hash.
+    out.write_text(text, encoding="utf-8", newline="\n")
     print(f"{out}: {len(constants())} constants at {BITS} bits")
     return 0
 
