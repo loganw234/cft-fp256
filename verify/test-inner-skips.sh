@@ -427,7 +427,10 @@ NPINS=15
 # to the device: no printf that starts SKIP, and none of the shapes the
 # one form replaced - lower-case "not run" at a line's end, "nothing
 # tested", "not compared", "skipped", "nothing to check", or a NOT word
-# with no " - <why>" after it. Only printf lines, their string
+# followed directly by the line's end, a comma, " (" or " under", which
+# is how the old lines put it. That is a list of old shapes, not a
+# grammar: a NOT word followed by anything else passes, so a new wrong
+# shape needs its own alternative here. Only printf lines, their string
 # continuations and not_here calls are read, so prose in comments is not
 # held to it.
 STRAY_RE='printf\("[[:space:]]*SKIP|not run[\]n|nothing tested|not compared|[Ss]kipped|nothing to check|NOT (TESTED|COMPARED|RUN)([\]n|,| \(| under)'

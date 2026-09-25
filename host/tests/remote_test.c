@@ -1234,8 +1234,16 @@ static void identity_tests(cft_device *sw, cft_device *rm, size_t n)
             lens[1] = n - (n % 6); segs[1] = 6;
             for (r = 0; r < 5; r++) {
                 const cft_op op = (cft_op)sops[r];
-                if (!cft_supports(rm, op, (cft_format)fmt))
+                if (!cft_supports(rm, op, (cft_format)fmt)) {
+                    /* Not a skip, and not silent either: a reduction the
+                     * server's device does not serve, in the one form
+                     * above. It was a bare `continue` until 2026-09-25,
+                     * so an absent one read as nothing at all. */
+                    printf("  %s %s, segmented: NOT COMPARED - not on the "
+                           "server\n",
+                           cft_format_name((cft_format)fmt), cft_op_name(op));
                     continue;
+                }
                 for (li = 0; li < 2; li++) {
                     const size_t nres = lens[li] / segs[li];
                     uint32_t f1 = 0, f2 = 0;

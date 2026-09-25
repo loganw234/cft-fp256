@@ -9,7 +9,8 @@
 # between steps. Depth 2 is one step of margin over the one that
 # already covers everything.
 #
-#   sby -f imul.sby check    the decode and width proof; out of the gate
+#   sby -f imul.sby check    the decode and width properties; has not
+#                            returned, so out of the gate
 #   sby -f imul.sby cover    the decode's corners are satisfiable
 #   sby -f imul.sby value    the truncated-32x32 miter; does not close
 #

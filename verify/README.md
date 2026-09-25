@@ -268,6 +268,7 @@ uncounted form, by name:
   `reductions with b and c poisoned: NOT RUN - the <backend> backend has no b and c of its own to poison`.
 - remote-test (`host/tests/remote_test.c`), `NOT COMPARED`:
   `<format>: NOT COMPARED - not on the server`;
+  `<format> <op>, segmented: NOT COMPARED - not on the server`;
   `<format>, the indexed scratch block: NOT COMPARED - the server does not publish SCRATCH_IO`;
   `the constant bank: NOT COMPARED - the server's device does not publish BANK_PTR (seq_features <hex>)`;
   `the per-run scratch block: NOT COMPARED - the server's device does not publish SCRATCH_IO (seq_features <hex>)`;

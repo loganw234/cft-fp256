@@ -2,9 +2,11 @@
 #
 # The U50 shell (xilinx_u50_gen3x16_xdma_5_202210_1) carries IP
 # encrypted with 2022-era keys that current Vivado releases can no
-# longer decrypt (AMD 5-year key obsolescence; BRINGUP.md gate 3), so
-# hardware links happen in Vitis 2022.2 on its native Ubuntu 22.04 -
-# in a container, wherever disk is plentiful. Vitis itself is
+# longer decrypt (AMD 5-year key obsolescence; BRINGUP.md's TOOLING
+# VERDICT, 2026-08-29), so hardware links need Vitis 2022.2. The
+# verdict's flow is bare metal on the build box; this image is its
+# fallback - 2022.2's native Ubuntu 22.04, in a container, wherever
+# disk is plentiful. Vitis itself is
 # installed into a bind mount at /opt/Xilinx (the ~65 GB does not
 # live in the image); this image only carries the OS prerequisites.
 #

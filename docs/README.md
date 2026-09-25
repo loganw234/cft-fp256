@@ -1,9 +1,9 @@
 # The documents, by what you open them for
 
-Thirty-seven files, 49,311 lines. Flat in one directory they look like one
+Thirty-seven files, 49,313 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **16,566 lines you consult while working** — the three under *Start here*,
+- **16,568 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **5,570 lines of tool manual**, one per shipped program;
 - **1,761 lines of operations**, read when you are about to do something to
@@ -57,7 +57,7 @@ product, not the implementation.
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,669 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
 | [REMOTE.md](REMOTE.md) | 1,409 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 477 | Programs as files: the assembler, the program library, the runner. |
-| [EMBEDDED.md](EMBEDDED.md) | 705 | libcft on microcontrollers, and the profiles the embedded gate runs. |
+| [EMBEDDED.md](EMBEDDED.md) | 707 | libcft on microcontrollers, and the profiles the embedded gate runs. |
 | [PLATFORMS.md](PLATFORMS.md) | 2,928 | Which FPGA to buy, borrow or rent next, measured against the tile this project builds; every figure carries a source and every price the date it was seen. |
 | [SCALING.md](SCALING.md) | 414 | What more tiles buy, and what they do not. |
 

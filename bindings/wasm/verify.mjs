@@ -750,6 +750,13 @@ for (const name of present) {
   if (r.status === 0 && r.cases > 0) {
     clean++;
     console.log(`  ${name.padEnd(26)} ${n}  all matching`);
+    // A set can pass with cases it skipped - an opcode the device does
+    // not carry - and the report says which. Those lines are printed on
+    // a pass too, so verify/run.sh counts them (verify/README.md); until
+    // 2026-09-25 the report reached the log only when a set failed.
+    for (const l of r.report.split("\n"))
+      if (/: (\S+ )?skipped, .*on this device$/.test(l))
+        console.log("      " + l.trim());
   } else {
     failed = true;
     console.log(`  ${name.padEnd(26)} ${n}  FAILED: ${C.strerror(r.status)}`);

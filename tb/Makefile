@@ -425,8 +425,10 @@ krnlseq:
 # The kernel with BOTH fused ladders on - the configuration the size
 # campaign built, measured and equivalence-proved lane by lane, and
 # then never ran through the full-kernel bench, because Alveo had room
-# and hw/package_kernel.tcl strips user parameters so no bitstream
-# ever carried it. This bench says the kernel, not just the ladder, is
+# and, until 2026-09-14, hw/package_kernel.tcl stripped every user
+# parameter, so no bitstream could carry it (CFT_GENERICS can set them
+# since; no bitstream built with the fused ladders is recorded). This
+# bench says the kernel, not just the ladder, is
 # bit-exact with them on. They do NOT ship at 135 MHz - they cost more
 # slack than their 16k LUT is worth (docs/ROADMAP.md) - so this target
 # is what keeps the configuration honest for the slower clock and the

@@ -51,9 +51,10 @@
 // drives 6,225 operand pairs at all four rungs against
 // python/cft_golden/softfloat.py - the directed corpus
 // docs/studies/OPT-D-contract.md names, every power of two, every
-// 2^k-1, the two `lowbias32` constants and the wraparound boundary -
-// and on the C-versus-model differential. Stated so nobody reads this
-// file as more than it is.
+// 2^k-1, the two `lowbias32` constants and the wraparound boundary.
+// (The C-versus-model differential holds the C library's IMUL to the
+// model, not this RTL; formal/run.sh names the bench that holds the
+// lanes' IMUL.) Stated so nobody reads this file as more than it is.
 //
 // The opcode number comes from the golden model's map
 // (python/cft_golden/softfloat.py: OP_IMUL = 30; mirrored in
@@ -81,7 +82,7 @@ module tb_imul_formal #(
   // and its two reserved neighbours.
   localparam logic [7:0] OP_IMUL  = 8'd30;
   localparam logic [7:0] OP_BELOW = 8'd29;   // sumAbs: a reduction, trapped
-  localparam logic [7:0] OP_ABOVE = 8'd31;   // unassigned
+  localparam logic [7:0] OP_ABOVE = 8'd31;   // maxall: a reduction, trapped
 
   // Shared low 32 bits, two different everything-above-32, and the
   // two operands' low halves independent of each other so the miter

@@ -97,16 +97,18 @@ than leaving it for the linker's `--gc-sections`, because what does not
 fit on a small part is as often a constant table as it is code, and a
 table reachable from one live function is not collected.
 
-**That every profile, and every switch on its own, still compiles is
-checked in the runner.** `make -C host profiles-check`, which runs in
+**That every profile, and every switch, still compiles is checked in
+the runner.** `make -C host profiles-check`, which runs in
 `verify/run.sh`'s `libcft` stage, compiles the library's fifteen
 sources at the default, at `CFT_TINY`, at `CFT_TINY CFT_MAX_FORMAT=2`,
-at the boards' `CFT_NO_REMOTE CFT_NO_CONFORMANCE`, and at each switch
-in the table above on its own - `CFT_CHUNK` and `CFT_ERRMSG_MAX` at
-their tiny values, and `CFT_MAX_FORMAT` with what its narrowed `cft_bn`
-needs, at 0 with `CFT_NO_TRANSCEND` and at 2 with `CFT_BN_LIMBS=64` -
-with implicit function declarations, array-bounds and
-aggressive-loop-optimizations warnings as errors. The `CFT_NO_`
+at the boards' `CFT_NO_REMOTE CFT_NO_CONFORMANCE`, at the `ARDUINO`
+auto-profile, at each `CFT_NO_` switch in the table above on its own,
+at `CFT_CHUNK` and `CFT_ERRMSG_MAX` on their own at their tiny values,
+and at `CFT_MAX_FORMAT` with what its narrowed `cft_bn` needs - 0 with
+`CFT_NO_TRANSCEND`, and 2 with `CFT_BN_LIMBS=64`, the one allowed
+`CFT_BN_LIMBS` it compiles (it sets `CFT_BN_LIMBS` alone only at the
+widths it must refuse, below) - with implicit function declarations,
+array-bounds and aggressive-loop-optimizations warnings as errors. The `CFT_NO_`
 switches it compiles are read out of `cft_config.h` rather than
 copied, and a `CFT_NO_` name a library source tests that the header
 does not name fails the check by name.

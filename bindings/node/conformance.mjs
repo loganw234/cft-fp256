@@ -217,6 +217,9 @@ const ALL_SETS = [...CANONICAL,
                   ...DRIVEN.flatMap((f) => f.sets.map((s) => s.name))]
   .filter((n) => existsSync(join(vdir, n)));
 
+// The replay's own skip line, as verify/run.sh's REPLAY_SKIP_RE reads it.
+const REPLAY_SKIP = /: (\S+ )?skipped, .*on this device$/;
+
 let total = 0, clean = 0, bad = 0;
 const t0 = Date.now();
 for (const name of ALL_SETS) {
@@ -226,6 +229,12 @@ for (const name of ALL_SETS) {
   if (r.status === 0 && r.cases > 0) {
     clean++;
     console.log(`  ${name.padEnd(26)} ${n}  all matching`);
+    // A set can pass with cases it skipped - an opcode the device does
+    // not carry - and the report says which. Those lines are printed on
+    // a pass too, so verify/run.sh counts them (verify/README.md); until
+    // 2026-09-25 the report reached the log only when a set failed.
+    for (const l of r.report.split("\n"))
+      if (REPLAY_SKIP.test(l)) console.log("      " + l.trim());
   } else {
     bad++;
     console.log(`  ${name.padEnd(26)} ${n}  FAILED: ${C.strerror(r.status)}`);
