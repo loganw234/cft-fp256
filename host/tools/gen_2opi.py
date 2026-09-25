@@ -163,7 +163,7 @@ def render():
     add(" * python/tests/test_mp_consts.py fails if this file and the")
     add(" * script disagree, AND re-derives the value from Chudnovsky's")
     add(" * series in plain Python integers, which shares nothing with")
-    add(" * mpmath. cft_mp_two_over_pi_selfcheck() checks the top of the")
+    add(" * mpmath. tr_2opi_ok() in host/src/transcend.c checks the top of the")
     add(" * array against pi and the whole of it against the checksum.")
     add(" */")
     add("")

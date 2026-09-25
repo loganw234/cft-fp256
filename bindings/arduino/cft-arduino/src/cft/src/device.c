@@ -622,7 +622,8 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
          * precision" and names nothing; and a tile old enough to ignore
          * the bits instead would answer from the DENSE stream, which is
          * a wrong number with clean flags. The software backend always
-         * carries it and the remote route is refused below. */
+         * carries it, and the remote route gathers on the client below
+         * (P2) and so needs no bit. */
         if (io && (io->idx_a || io->idx_b || io->idx_c ||
                    io->idx_scratch_in) &&
             !(dev->seq.features & CFT_SEQ_FEAT_INDEXED)) {
@@ -879,15 +880,18 @@ CFT_API void cft_close(cft_device *dev)
  * load would go on explaining a run that failed for another reason
  * ten calls later.
  *
- * The one producer today is cft_program_load's capacity refusal.
+ * Its producers are the refusals by name in this file and in
+ * program.c; cft_program_load's capacity refusal was the first
+ * (2026-09-07).
  *
- * Its size is a build choice (cft_config.h): a profile with no
- * sequencer and no device backend has no producer at all, and on a
- * part with two kilobytes of RAM a 320-byte buffer that nothing ever
- * writes is sixteen percent of it. At CFT_ERRMSG_MAX == 1 the slot is
- * the empty string cft_last_error() must still return, and the
- * vsnprintf that would have filled it - the library's only formatted
- * output - goes with it. */
+ * Its size is a build choice (cft_config.h): on a part with two
+ * kilobytes of RAM a 320-byte buffer is sixteen percent of it. At
+ * CFT_ERRMSG_MAX == 1 the slot is the empty string cft_last_error()
+ * must still return, and the vsnprintf that would have filled it -
+ * the library's only formatted output - goes with it. So a refusal in
+ * such a build keeps its status and loses its sentence, and most of
+ * this file's refusals are compiled into every profile, sequencer or
+ * not. */
 static char g_msg[CFT_ERRMSG_MAX];
 
 void cft_set_error(const char *fmt, ...)
@@ -2260,13 +2264,16 @@ CFT_API cft_status cft_reduce(cft_device *dev,
     /* maxall: halving with the elementwise maximum.
      *
      * The fifth composed reduction, and the first whose composition is
-     * not one pass plus the sum tree. No tile streams a maximum and none
-     * needs to - but unlike sumSquare and sumAbs, opcode 31 must NEVER
-     * be handed to a tile as a reduction: `cfg_is_reduce` is
-     * `(cfg_op == 8'd24)`, so a tile would decode 31 as elementwise and
-     * write n elements where a reduction's caller sized `d` for one.
-     * That is memory corruption, not a wrong answer, and it is why this
-     * block sits above the device dispatch rather than beside it.
+     * not one pass plus the sum tree. A tile publishing CAPS2[8] streams
+     * a maximum in one pass (the XRT block below, ABI 0.13), and no
+     * other handle needs to for the bits - but unlike sumSquare and
+     * sumAbs, opcode 31 must NEVER be handed as a reduction to a tile
+     * WITHOUT that bit: its `cfg_is_reduce` is `(cfg_op == 8'd24)`, so
+     * it would decode 31 as elementwise and write n elements where a
+     * reduction's caller sized `d` for one (rtl/cft_engine_stream.sv
+     * has added 8'd31 since the RTL that publishes CAPS2[8]). That is
+     * memory corruption, not a wrong answer, and it is why this block
+     * sits above the device dispatch rather than beside it.
      *
      * Halving is allowed to BE the shape because 754-2019 maximum is
      * exactly associative and commutative, flags included: any NaN gives
@@ -2274,9 +2281,9 @@ CFT_API cft_status cft_reduce(cft_device *dev,
      * raised exactly when some operand is signalling and every element is
      * an operand of one comparison whatever the shape, and max(+0, -0) is
      * +0 which is also the maximum among zeros. So these bits are the
-     * software tree's bits, and a hardware maxall added later behind a
-     * capability bit would return them too - which is what makes this a
-     * complete answer rather than a staging post.
+     * software tree's bits, and the hardware maxall added behind CAPS2[8]
+     * at 0.13 returns them too (the XRT block below) - which is what
+     * makes this a complete answer rather than a staging post.
      *
      * ceil(log2 n) device passes against the ~2n width-one calls the
      * first caller issues today (cft-rebound/docs/HARDWARE.md).

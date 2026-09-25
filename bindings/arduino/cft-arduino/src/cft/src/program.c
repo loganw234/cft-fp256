@@ -1889,10 +1889,14 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
  * refused, in both directions and with a different message for each. */
 /* ABI 0.14's fields (docs/ROUND2.md): the index tables of the three
  * streams and the scratch block, and the lane mask. The SHAPE rules are
- * the seam's and final; a well-formed table or mask is then REFUSED BY
- * NAME until the parcel that builds it lands (P1 the tables, P3 the
- * mask), never ignored - a run that quietly read the dense stream, or
- * ran every lane, would return the wrong answer with clean flags. */
+ * the seam's and final, and R16's bound on every index is checked here
+ * too, before the run, on every backend. A well-formed table or mask is
+ * then CARRIED - by seq_program_run on the software backend, by the
+ * device backend otherwise, which refuses it BY NAME on a tile that
+ * does not publish the feature (device.c) - and never ignored: a run
+ * that quietly read the dense stream, or ran every lane, would return
+ * the wrong answer with clean flags. Until P1 (the tables) and P3 (the
+ * mask) landed on 2026-09-15 this refused every one by name. */
 static cft_status seq_check_round2(const cft_program *p,
                                    const cft_run_args *A, const char *who)
 {

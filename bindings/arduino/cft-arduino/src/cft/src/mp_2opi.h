@@ -24,7 +24,7 @@
  * python/tests/test_mp_consts.py fails if this file and the
  * script disagree, AND re-derives the value from Chudnovsky's
  * series in plain Python integers, which shares nothing with
- * mpmath. cft_mp_two_over_pi_selfcheck() checks the top of the
+ * mpmath. tr_2opi_ok() in host/src/transcend.c checks the top of the
  * array against pi and the whole of it against the checksum.
  */
 
