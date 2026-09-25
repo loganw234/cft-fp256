@@ -211,6 +211,53 @@ carry and receiving a buffer of zeros with clean flags. A library
 whose product is exception-exact reproducibility cannot run in that
 mode, so it says so and stops.
 
+### One process per tile: `CFT_XRT_TILES` (2026-09-25)
+
+By default a device opens every tile the image declares, each with
+exclusive access, and is one device of that many tiles. Work that is
+many independent jobs wants the other shape: one process per compute
+unit, so four jobs run on a quad at once, a small call is not
+partitioned across tiles it does not need (round 2 measured a thousand
+small segmented sums, issued one at a time, at 431 ms on the quad
+against 91 ms on the single-tile image, docs/VALIDATION.md 2026-09-16),
+and a timeout finishes one tile rather than the card.
+
+`CFT_XRT_TILES` names the tiles a process opens, as the 1-based
+ordinals their compute units end in (`cft_krnl_1` is 1):
+
+    CFT_XRT_TILES=2      tile 2 alone
+    CFT_XRT_TILES=3,1    tiles 3 and 1, in that order, as a two-tile device
+
+It **refuses rather than shrinks**, naming the tile each time: a
+malformed list is `CFT_ERR_INVALID_ARGUMENT` with a sentence (digits
+only, 1..64, no empty item, no duplicate, and an empty variable is not
+"every tile"); a tile the image does not declare, two compute units
+ending in the same number, a tile that will not open and one that opens
+without answering MAGIC are `CFT_ERR_ARTIFACT`. The commonest reason a
+declared tile will not open is that another process holds it. XRT
+reports that as `failed to open cu context: Invalid argument`, the same
+words it uses for a unit that is broken, so the sentence says which tile
+and that holding is the likely cause. The status code is still the
+generic `CFT_ERR_ARTIFACT` ("artifact missing, unreadable, or not a
+tile"), because the contract has no "busy" status. That is a gap in the
+contract, not a detail.
+
+**Without it, a held tile is skipped and the device is smaller.**
+Measured on round 2's quad with tile 2 held by another process: the
+default open succeeded with three tiles and passed device-test. Nothing
+is wrong in the answers - partition invariance holds at any tile count -
+but a caller who assumed four has three, and only `cft_get_caps`'s
+`tiles` says so. A caller that needs a particular shape names it.
+
+On the card (docs/VALIDATION.md, 2026-09-25): each selection opened
+exactly what it named and passed device-test's quick matrix; four
+processes on tiles 1-4 at once all passed; four independent orbit
+integrations, one per tile at once, each matched the software loop
+engine byte for byte; tile 9, `1;2`, an empty value and a tile another
+process held were each refused with their sentence, while tile 3 opened
+beside the held tile 2. The parse is `host/src/tile_select.h`, held on
+any machine by api-test with an atoi-style parse as its control.
+
 ### Device-resident buffers, and what a port must do to get the rate
 
 **Which buffers can be resident.** The operand-shaped ones, and the

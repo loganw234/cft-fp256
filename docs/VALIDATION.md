@@ -14683,3 +14683,136 @@ the source before it was changed.
                                            comment-only; the Dockerfile changed in '#'
                                            lines only; code in exactly the three files
     python python/check_docs_index.py      rc 0; sync.py --check: 30 files identical
+
+## 2026-09-25 - controlled divergence, steps 0 and 1a: segments on the card byte for byte, three ODE references and the census that prices scratch, and one process per tile
+
+**Why.** The direction under discussion is a service that sells
+deterministic runs and certificates for them: one baseline run, then a
+fan-out across tiles in which only chosen variables move, each member
+provably diverging only from its own change. The order agreed for the
+work: step 0, finish `cft-orbits`' program engine and hand-write
+reference ODE programs, with a census of what they cost; step 1,
+per-tile distribution and the capacity-boundary tests owed; step 2,
+segments, a certificate format and an audit tool; step 3, the language
+and its compiler; step 4, one program-model RTL revision (the owner's
+decision); later the gallery and the in-program math library. This
+entry records step 0 and step 1a. The ODE rows are the first references
+an equations-in, ensemble-out solver - the step-3 compiler - will be
+measured against, which is what `programs/gen_odes.py` and
+`programs/README.md` point here for.
+
+**Step 0a - `cft-orbits --engine segments`** (34349b1; fixes 77be921,
+0b1325c). The integration as resumable sequencer-program segments, each
+lane's whole state entering and leaving through the scratch block
+(docs/SEQUENCER.md R5), driven by the loop engine's own control loop.
+
+- On the card (U50 single, the 145 MHz image `de74e306`, 34349b1): 16
+  of 16 configurations - fp32 to fp256, kepler and outer, leapfrog and
+  yoshida4, 64 members - segments on the card equal the software loop
+  engine, checkpoints and records byte for byte (and so the chains,
+  which hash the records). At scale, a 4,096-member Kepler run at fp256
+  and a 1,024-member outer run at fp64 ended on the same checkpoint on
+  the card as the same segments through the software backend.
+- verifier-S0a (34349b1): 640 configurations, 160 relays and 60 stop
+  cases byte-identical to the loop engine; the tool's encoder equal to
+  `asm.py`'s on 22,560 words; an ASan+UBSan build clean over 452 runs.
+  And a gate that passed three defect classes green (a Newton pass
+  count wrong off binary256, a segment stopping a step late, a
+  segment's flags dropped), a false sentence ("an interruption costs at
+  most one `--checkpoint-interval`" - a segment was a whole sample
+  interval), two unnamed refusals and an inert control. 77be921 answers
+  each: engine comparisons at every format with operation counts, stop
+  points, the flag path through a planted zero `r^2`, segments sized to
+  the loader's exact 2^40 ceiling and to the checkpoint interval (a run
+  killed 3 s into a 30,000-step interval left a checkpoint at step 257;
+  the old sizing left none), buffers sized by the chunk. Seven mutants
+  went through the whole gate and each turned it red on its own leg.
+  orbitstest: 62 checks, 17 s (51, 8 s before).
+
+**Step 0b - three ODE references** (5246ad0). `programs/gen_odes.py`
+writes Lorenz-63 and Lorenz-96 (N = 40) under classic Runge-Kutta and
+Henon-Heiles under Stormer-Verlet, at fp64 and fp256: six segment
+programs, their banks and a check each. programs-check 184 passed, 0
+failed, 0 skipped, 35 images.
+
+- **The front door had a hole.** `programs/check.py` ran in no runner
+  stage and no CI job (docs/VERIFICATION.md said "not a runner stage
+  yet"), so a new row was gated only when someone ran it by hand. A
+  `programs` stage now runs it (41 stages, 28 quick, 36 gate) and CI
+  names it; it was watched failing on one altered MANIFEST digest.
+- On the card (the same image, 5246ad0): 12 of 12 identity legs, card
+  equal to software - three programs, two formats, two trip counts,
+  over 1,024 lanes (256 for Lorenz-96).
+- verifier-S0b: the programs ARE the textbook equations, by its own
+  exact-rational interpreter sharing no code with the check. But the
+  check would pass a wrong equation or scheme shared by the generator
+  and the reference, a transposed bank, a deleted row and a CRLF
+  source, and its resume control could never fail. Parcel F0b is
+  answering those; its result will be its own entry.
+
+**The census** (U50 single, 145 MHz). Per lane per step, t = a*ALU +
+s*SCR + e: each program run at two trip counts so per-run costs
+difference out, `a` and the loop's own per-step cost `e` from the two
+pure-arithmetic programs, `s` from Lorenz-96.
+`Data/runs/2026-09-25-ode-round/card-0a/census_fit.py` recomputes it
+from the log (desktop records):
+
+    fp64    a  1.72 ns   e 3.07 ns a step   s  8.93 ns = 5.21 ALU
+    fp256   a  7.18 ns   e 2.93 ns a step   s 36.45 ns = 5.08 ALU
+
+Lorenz-96's body is 692 scratch accesses in 1,452 instructions (47.7%,
+its ENDREP not counted) and 82% of its time on the card. docs/ROADMAP.md
+put a control code at about four arithmetic instructions from an
+isolated measurement; `s` here includes the load-then-use stall of the
+pattern these bodies are made of. It is the measured case for revision
+7's "control codes join the overlap", which is step 4's to decide.
+
+**A finding for the service** (F0b, 10:24). The floating-point step
+map is many-to-one at the ulp scale: a state one ulp off merged back,
+bit for bit, within one segment, in lanes of four of the six ODE rows.
+Ensemble members displaced by one ulp may rejoin; the displacement a
+fan-out uses is a parameter to measure, not assume.
+
+**Step 1a - one process per tile** (64a3f70). `CFT_XRT_TILES` names the
+tiles a process opens (docs/HOSTAPI.md, "One process per tile"). On the
+desktop: api-test holds the parse (7 lists read as written, 17 refused
+with a sentence, all 64 at once; an atoi-style parse through the same
+checks is caught on 11); `backend_xrt.cpp` compiled against WSL's XRT
+2.14 with and without the listing API, 0 warnings; `verify/run.sh
+--only libcft,generated,docs` PASS, nothing skipped (libcft 872 s). On
+the card: round 2's quad (5b7aa19, 135 MHz, `226d6c76`), 64a3f70 built
+on amd-arc-box with `XRT=1`, 0 warnings, api-test green there:
+
+    L0   the default open                     4 tiles    2,367 checks, 0 failed
+    L1   CFT_XRT_TILES=2                      1 tile     2,367 checks, 0 failed
+    L2   CFT_XRT_TILES=3,1                    2 tiles    2,367 checks, 0 failed
+    L3   four processes, tiles 1-4, at once   1 tile each, 2,367/0 each, overlapping in time
+    L5   four orbit integrations at once, one per tile (outer, yoshida4,
+         fp256, 64 members, --spread 1..4): each equal to the software
+         loop engine, checkpoint and records
+    N1   CFT_XRT_TILES=9                      refused: "... declares cft_krnl_1 cft_krnl_2 cft_krnl_3 cft_krnl_4"
+    N3   "1;2"   N4  ""                       refused, each with its sentence
+    tile 2 held by another process (cft_hold, 20 s, nothing in flight):
+    N2   another process asks for tile 2      refused: "failed to open cu context: Invalid
+                                              argument (a compute unit another process
+                                              holds fails exactly this way)"
+    L4c  tile 3 beside it                     1 tile, 2,367/0
+    M4   the default open, measured           3 tiles, 2,367/0 - the held tile skipped
+
+The first contention attempt used a device-test as the holder. On
+silicon its quick matrix finishes in under a second, so it had released
+before the second opener arrived, and that run's N2 failure and "4
+tiles" showed nothing either way. The holder became a program that
+opens and runs nothing. Killing a running program instead would have
+left the tile running with no abort, for the next opener to read.
+
+**Open.**
+
+- A held tile is refused with the generic `CFT_ERR_ARTIFACT`: the
+  contract has no "busy" status. Adding one is an ABI change across
+  every binding - the owner's decision.
+- Step 1b: `cftx_program_run` still runs every program on the first
+  tile, so a several-tile device gains nothing on program runs until
+  the lane cut lands.
+- 34349b1's message calls its 25 new checks "[6b]"; 22 are [6b] and 3
+  [7b].
