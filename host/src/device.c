@@ -880,18 +880,20 @@ CFT_API void cft_close(cft_device *dev)
  * load would go on explaining a run that failed for another reason
  * ten calls later.
  *
- * Its producers are the refusals by name in this file and in
- * program.c; cft_program_load's capacity refusal was the first
+ * Its producers are the library's refusals by name - this file's,
+ * program.c's, and the other modules' through the helpers backend.h
+ * declares; cft_program_load's capacity refusal was the first
  * (2026-09-07).
  *
  * Its size is a build choice (cft_config.h): on a part with two
  * kilobytes of RAM a 320-byte buffer is sixteen percent of it. At
  * CFT_ERRMSG_MAX == 1 the slot is the empty string cft_last_error()
- * must still return, and the vsnprintf that would have filled it -
- * the library's only formatted output - goes with it. So a refusal in
- * such a build keeps its status and loses its sentence, and most of
- * this file's refusals are compiled into every profile, sequencer or
- * not. */
+ * must still return, and the vsnprintf that would have filled it goes
+ * with it - though not every formatted write does: render_format_mask,
+ * below, still builds its argument and the slot drops the sentence.
+ * So a refusal in such a build keeps its status and loses its
+ * sentence, and most of this file's refusals are compiled into every
+ * profile, sequencer or not. */
 static char g_msg[CFT_ERRMSG_MAX];
 
 void cft_set_error(const char *fmt, ...)

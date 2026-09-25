@@ -76,7 +76,7 @@
     {
       "source": "host/src/device.c",
       "dest": "src/cft/src/device.c",
-      "sha256": "e4e01f9aaec945afede667805fda8e24483edc0eb48b24b991afa43068271061"
+      "sha256": "06667c661f90b73aafcddb3648b6d3083cf3ae5a5517c514ccc20164bff19bcc"
     },
     {
       "source": "host/src/divfull_images.h",
