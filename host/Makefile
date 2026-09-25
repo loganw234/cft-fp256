@@ -8,6 +8,9 @@
 #   make                 static + shared library and the tools
 #   make test            build, then run the contract tests and replay
 #                        the published vectors through the library
+#   make profiles-check  compile the library at each reduced build
+#                        profile docs/EMBEDDED.md names, which
+#                        nothing that builds the default one does
 #   make examples-lang   the C/Python identity check again, for the
 #                        optional toolchains: C++, Julia, Rust, Go, C#
 #                        and R are each run and diffed if present,
@@ -360,6 +363,69 @@ test: all $(TESTS)
 	diff .out-c.txt .out-py.txt
 	@echo "C and Python reached the same library and got the same bits"
 	@rm -f .out-c.txt .out-py.txt
+
+# ====================================================================
+# profiles-check - the library compiled at every reduced build profile,
+# not only at the default one.
+#
+# include/cft_config.h's switches remove translation units, and blocks
+# inside them, so a call added outside the block that declares its
+# callee compiles at the default profile and at no other - and nothing
+# that builds the default would ever say so. That happened: from
+# e0aa96b (2026-09-14) divsqrt.c called cft_composed_refusal outside
+# the CFT_NO_PROGRAM block that included backend.h, and until
+# 2026-09-24 a -DCFT_NO_PROGRAM build, CFT_TINY's among them, stopped
+# on the implicit declaration under gcc 14 or later. `make embedded`
+# builds the tiny profiles in its loopback and would have said so, but
+# it is not a runner stage; this is, inside verify/run.sh's `libcft`.
+#
+# The profiles are docs/EMBEDDED.md's - the ones
+# bindings/arduino/loopback/Makefile builds - less the default, which
+# `all` compiles, plus CFT_NO_PROGRAM on its own, the switch that
+# broke. Each source gets the library's own flags and
+# -Werror=implicit-function-declaration, which is an error by default
+# only from gcc 14: pinned, an older compiler fails the same way rather
+# than warning. Every source is compiled even after one fails, so a
+# failure names them all. The targets are phony, so every run compiles
+# everything; the object goes to one file per profile, overwritten
+# source by source and deleted at the end, so nothing is left behind
+# for a later build to take for its own.
+#
+# One target per profile, its defines a target-specific variable: `make
+# -j` runs the profiles side by side, and no lookup keyed on a stem can
+# leave a profile compiled with no defines at all, the failure
+# bindings/arduino/loopback/Makefile records.
+# ====================================================================
+PROFILE_CHECKS := profiles-check-noprogram profiles-check-tiny \
+                  profiles-check-tiny128 profiles-check-board
+
+profiles-check-noprogram: PROFILE_DEFS := -DCFT_NO_PROGRAM
+profiles-check-tiny:      PROFILE_DEFS := -DCFT_TINY
+profiles-check-tiny128:   PROFILE_DEFS := -DCFT_TINY -DCFT_MAX_FORMAT=2
+profiles-check-board:     PROFILE_DEFS := -DCFT_NO_REMOTE -DCFT_NO_CONFORMANCE
+
+PROFILE_FLAGS = $(CSTD) $(CFLAGS) $(WARN) $(INC) $(PROFILE_DEFS) \
+                -Werror=implicit-function-declaration
+
+.PHONY: profiles-check $(PROFILE_CHECKS) clean-profiles
+
+profiles-check: $(PROFILE_CHECKS)
+	@echo "profiles-check: libcft compiles at all $(words $(PROFILE_CHECKS)) reduced profiles"
+
+$(PROFILE_CHECKS):
+	@echo "$@: $(CC) $(PROFILE_FLAGS) -c <each of $(words $(SRC)) sources>"
+	@fail=; for f in $(SRC); do \
+		$(CC) $(PROFILE_FLAGS) -c $$f -o $@.o || fail="$$fail $$f"; \
+	done; \
+	rm -f $@.o; \
+	if [ -n "$$fail" ]; then \
+		echo "$@: FAILED at $(PROFILE_DEFS):$$fail"; exit 1; \
+	fi; \
+	echo "$@: $(words $(SRC)) of $(words $(SRC)) sources compile at $(PROFILE_DEFS)"
+
+clean: clean-profiles
+clean-profiles:
+	rm -f $(addsuffix .o,$(PROFILE_CHECKS))
 
 # `FC ?= gfortran` looks right and does nothing: make defines FC as a
 # built-in (f77), so ?= never fires and the target silently used

@@ -623,12 +623,22 @@ PYBIN=$(if [ "$WIN" = 1 ] && command -v python >/dev/null 2>&1; then
 # after it in 1-3 s, ten FAILs from one stale build. The library
 # builds in seconds; a census that could be poisoned by whichever
 # platform touched the tree last is not a census.
+#
+# Then the library compiled at each reduced profile docs/EMBEDDED.md
+# names (host/Makefile's profiles-check, which says why): the default
+# build cannot see a call that only a CFT_NO_PROGRAM or CFT_TINY build
+# leaves undeclared, and one did, unseen, from 2026-09-14 to 2026-09-24.
+# It runs whether or not `test` passed, and with -k, so one log names
+# every profile that fails as well as a failing test.
 do_libcft() {
+  local rc=0
   HOSTMAKE clean >/dev/null 2>&1
-  HOSTMAKE test PYTHON="$PYBIN"
+  HOSTMAKE test PYTHON="$PYBIN" || rc=1
+  HOSTMAKE -k profiles-check || rc=1
+  return $rc
 }
 need host-cc python
-stage libcft "host library: build + contract tests + conformance replay" -- do_libcft
+stage libcft "host library: build + contract tests + conformance replay + the reduced profiles compile" -- do_libcft
 
 # Placed after `libcft` on purpose: make_seq_corpus.py's check loads
 # libcft through ctypes, and that stage is what builds it. Sitting

@@ -97,6 +97,21 @@ than leaving it for the linker's `--gc-sections`, because what does not
 fit on a small part is as often a constant table as it is code, and a
 table reachable from one live function is not collected.
 
+**That every profile still compiles is checked on every host build.**
+`make -C host profiles-check`, which runs in `verify/run.sh`'s `libcft`
+stage, compiles the library's fifteen sources at `CFT_TINY`, at
+`CFT_TINY CFT_MAX_FORMAT=2`, at the boards' `CFT_NO_REMOTE
+CFT_NO_CONFORMANCE` and at `CFT_NO_PROGRAM` alone, with
+`-Werror=implicit-function-declaration`. It exists because none of
+them was compiled by any runner stage: from 2026-09-14 until
+2026-09-24 `divsqrt.c` called a function whose declaration only a
+build with the sequencer included, and with gcc 14 or later - where
+an implicit declaration is an error - neither `CFT_TINY` profile
+compiled. [The loopback](#the-loopback-and-the-negative-control)
+builds the first three from the vendored copy and runs them, under
+`make embedded`, which is not a runner stage; this only compiles them,
+and needs nothing but the host compiler.
+
 None of this changes an answer. Every profile computes what the golden
 model computes; the switches decide what is PRESENT, and an absent
 entry point is absent at link time, which is a message a caller can
