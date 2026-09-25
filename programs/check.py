@@ -45,12 +45,16 @@ things, in this order, and stops at the first failure:
    a control watches the comparison it names, not every clause of its
    arm, and the comment above check_ode says which comparison each one
    watches. The textbook arm's code is held apart from what it judges
-   as well (check_textbook_independence): within this file, no path
-   from its verdict reaches the mirror, the generator or an executor,
-   by name or as an attribute, and no definition is reached both from
-   its verdict and from them. What those two rules cannot see - code in
-   another module, a name built at run time, a copy - the comment above
-   them says.
+   as well (check_textbook_independence). Within this file - its top
+   level and the blocks of its top-level if, try, with, for, while and
+   match statements - nothing its verdict reaches is the mirror, the
+   generator or an executor, and no definition is reached both by its
+   verdict and by them, whether by name, by an attribute of the same
+   name, or handed as a value to a call of either side's code. What
+   those rules cannot see - code in another module, a name built at run
+   time, a copy, a value handed through the calling function's own
+   parameters or a local computed by a call - the comment above them
+   says.
 
 Revision 3's rows have two arms and they are not the same claim. The
 STATIC arm - constants against their derivation, the header against
@@ -1521,7 +1525,9 @@ def check_revision3_corpus(args, tmp, trials=120):
 #                phrase's bound is watched too), the state count the
 #                paragraph spells, the ALU count the comments state and
 #                the state count the docstring spells - each named where
-#                it is.
+#                it is; then the row's ALU count after a hyphen, and a
+#                row phrase with a hyphen, then a letter, after its end
+#                (each edge of the bounds).
 #   static       the header: BANK_EXT, SCRATCH_IO, no deposits, the slot
 #                counts and the bank size the source declares. A read of
 #                the header, with no control.
@@ -1559,9 +1565,11 @@ def check_revision3_corpus(args, tmp, trials=120):
 #                shared) and fall outside the textbook bound. Re-point
 #                the textbook arm at ode_step and these go red. Its code
 #                is held apart from theirs as well, by two rules over
-#                this file's syntax (check_textbook_independence: no path
-#                to them by name, no definition shared under any name),
-#                whose own comment says what they cannot see.
+#                this file's syntax (check_textbook_independence: nothing
+#                it reaches by name, by attribute or handed in by a
+#                caller is theirs, and no definition is reached by both,
+#                whatever it is called), whose own comment says what they
+#                cannot see.
 #   scheme       ode_step at 300 digits from the same encodings: over
 #                the whole segment the program is within round-off of
 #                its own scheme, and not equal to it (the round-off is
@@ -1590,11 +1598,16 @@ ODE_ROWS = ("lorenz63-rk4", "lorenz96-rk4", "henonheiles-lf")
 
 # Each ODE row's numbers as LITERALS - the one place this file states
 # them. Every arm below takes the state size and the step count from
-# here, never from gen_odes.py; the pinned arm holds the image to all of
-# them, and the prose arm holds programs/README.md's row and the source's
-# own comments to the image. So gen_odes.py's L96_N or STEPS changed and
-# everything regenerated fails the run by name until this table - and the
-# README and the comments with it - is changed on purpose. Until
+# here, never from gen_odes.py: check_ode reads them and hands each arm
+# the numbers it needs, and no implementation of the program (ode_step,
+# _tb_runs, ...) reads this table itself - so the textbook arm may read
+# it too without the independence rules' shared rule seeing a table
+# both sides reach, and no number needs a second copy. The pinned arm
+# holds the image to all of them, and the prose arm holds
+# programs/README.md's row and the source's own comments to the image.
+# So gen_odes.py's L96_N or STEPS changed and everything regenerated
+# fails the run by name until this table - and the README and the
+# comments with it - is changed on purpose. Until
 # 2026-09-25 every arm imported both, and a ring of 36 or a 50-step
 # segment passed the whole gate while the regenerated source still said
 # "Forty values" and "760 ALU instructions" (verifier-V3). Lorenz-96's
@@ -1840,13 +1853,14 @@ def _generator_doc():
 def _phrase_re(phrase):
     """`phrase` as a pattern: its words in order, any whitespace between
     them, and not the tail or the head of a longer number or word - so
-    "153 ALU" and "1100 Stormer-Verlet" do not say "53 ALU" and "100
-    Stormer-Verlet"."""
+    "153 ALU", "20-53 ALU" and "1100 Stormer-Verlet" do not say "53 ALU"
+    and "100 Stormer-Verlet", nor "Lorenz 19630" or "kick-drift-kick"
+    what ends in "1963" or "drift"."""
     pat = r"\s+".join(re.escape(w) for w in phrase.split())
     if re.match(r"\w", phrase):
-        pat = r"(?<![\w.,])" + pat
+        pat = r"(?<![\w.,-])" + pat
     if re.search(r"\w$", phrase):
-        pat += r"(?!\w)"
+        pat += r"(?![\w-])"
     return re.compile(pat)
 
 
@@ -1870,18 +1884,25 @@ def _readme_rows(text):
     return rows
 
 
+def _prose_fill(base, m, lanes, states):
+    """What _ODE_PROSE's templates are filled with: the image's numbers
+    `m`, their sums and words, this file's lane counts, and the bank's
+    derivations."""
+    words = _number_word(m["nstate"])
+    return dict(m, per_step=m["alu"] + m["ctl"] + 1, lanes=lanes,
+                states=states, word=words, Word=words.capitalize(),
+                ctl_text=("no control code" if m["ctl"] == 0 else
+                          f"{m['ctl']} control codes"),
+                **{c: str(v) for c, v in _bank_derivations(base).items()})
+
+
 def _ode_prose_problems(base, name, fmtname, m, texts, lanes, states):
     """[problem] - programs/README.md's row for `name`, the source's own
     comments and gen_odes.py's docstring (`texts`: "readme" as written,
     "source" run together by _comment_text, "generator") against the
     image's numbers `m` (_ode_measure), this file's lane counts and the
     bank's derivations. Each problem is led by where it is."""
-    words = _number_word(m["nstate"])
-    fill = dict(m, per_step=m["alu"] + m["ctl"] + 1, lanes=lanes,
-                states=states, word=words, Word=words.capitalize(),
-                ctl_text=("no control code" if m["ctl"] == 0 else
-                          f"{m['ctl']} control codes"),
-                **{c: str(v) for c, v in _bank_derivations(base).items()})
+    fill = _prose_fill(base, m, lanes, states)
     problems = []
     rows = _readme_rows(texts["readme"]).get(name, [])
     if len(rows) != 1:
@@ -1988,9 +2009,13 @@ class _MpOps:
 # The mistake reaches ode_step through this module-level switch, not
 # through an argument, on purpose: a mistake written into ode_step
 # reaches every caller of ode_step, so the control's must too. If the
-# textbook reference is ever computed through ode_step, it carries the
-# program's mistake, the program lands inside the bound, and the control
-# fails to fail - which is the alarm.
+# textbook reference is computed through THIS module's ode_step, it
+# carries the program's mistake, the program lands inside the bound, and
+# the control fails to fail - which is the alarm. Through a second
+# instance of the module (importlib.import_module("check"), verifier-V5's
+# O1) it does not: that instance's switch is never set, its ode_step is
+# right, and every control passes - the attribute read the independence
+# rules name (check_textbook_independence) is what catches that.
 _MIRROR_MUTANTS = {"lorenz63-rk4": ("zsign", "stage4-half", "rk38"),
                    "lorenz96-rk4": ("index", "stage4-half", "rk38"),
                    "henonheiles-lf": ("xforce-sign", "kdk")}
@@ -2464,13 +2489,16 @@ def _tb_states(base, fmt, n):
     return out
 
 
-def _tb_runs(image, base, bank, s_in, n, trips):
+def _tb_runs(image, steps, bank, s_in, n, trips):
     """{trip: seq.Result} - the program after `trip` steps from s_in: the
-    same image with its one REPEAT's trip count changed (_patch_trip, as
-    the resume arm builds its long run), through the golden executor."""
+    same image, whose one REPEAT runs `steps`, with that trip count
+    changed (_patch_trip, as the resume arm builds its long run), through
+    the golden executor. The caller hands in `steps` rather than this
+    reading _ODE_PINNED, so that no implementation reads the table the
+    verdict may read (check_textbook_independence's shared rule)."""
     out = {}
     for t in trips:
-        img = _patch_trip(image, _ODE_PINNED[base]["steps"], t, 0)
+        img = _patch_trip(image, steps, t, 0)
         out[t] = seq.run(seq.Program.from_bytes(img.to_bytes()), [0] * n,
                          [0] * n, None, bank=bank, scratch_in=s_in)
     return out
@@ -2525,34 +2553,75 @@ def _tb_verdict(base, fmt, P, h, nstate, s_tb, runs):
 # anything from the implementations. That is one grep, and it belongs in
 # the gate." For the ODE rows the textbook step is the authority, and the
 # implementations are the mirror, the generator and the program's
-# executors. Two rules, over this file's own source read as a syntax tree:
+# executors. Two rules, over this file's own source read as a syntax
+# tree. A DEFINITION is a function, a class or an assignment this file
+# makes at module level - at its top level, or inside a top-level if,
+# try, with, for, while or match block at any depth. (verifier-V5 hid a
+# helper in such a block, N6a, and bound a second instance of this
+# module's ode_step in another, N6c, where the walk did not look: it
+# followed 12 definitions of 19 without a word.) An import is not one -
+# what it brings in is code outside this file. A side's REACH is every
+# definition reached from its roots, and from what it reaches in turn:
 #
-#   named   from the functions that compute the textbook verdict
-#           (_TB_ROOTS), follow every name they load - through every
-#           function, class and constant of this file those load in turn -
-#           and none may be one of _TB_FORBIDDEN, loaded as a name or read
-#           as an attribute of anything (`ode_step`, `module.ode_step`).
-#   shared  no definition in this file may be reached both from those
-#           roots and from the implementations' own - the _TB_FORBIDDEN
-#           names this file defines - whatever it is called. On
-#           2026-09-25 verifier-V5 put Lorenz-63's right-hand side into
-#           one helper for ode_step and _tb_lorenz63, wrote y' = x (z -
-#           rho) - y into it and into the generator, and the whole gate
-#           passed with the first rule green: a new name is on no list.
-#           This rule refuses such a helper with the error in it or not,
-#           and whatever it does - one that only slices lanes counts too,
-#           since a mistake in it is made on both sides at once. Write
-#           such a thing twice.
+#   by name       a definition loads the name;
+#   by attribute  a definition reads an attribute of the same name, so
+#                 sys.modules[__name__].x and a second instance's .x are
+#                 x (verifier-V5's N6b, O1);
+#   handed        it is handed as a value to a call of the side's code,
+#                 from anywhere in this file: a function or a table
+#                 handed whole, a class or an instance of one, a lambda
+#                 (everything it names), what a wrapper such as
+#                 functools.partial is given, a table indexed (what the
+#                 table names), or a local bound to one of these by an
+#                 alias, a lambda, a nested def or class, an instance or
+#                 a table entry. What a call computes before it hands
+#                 anything over - a function's result, a number read
+#                 from a table - is data, not a definition handed; and a
+#                 local a call computed is followed no further, for the
+#                 same reason (verifier-V5's N7: check_ode handing a
+#                 generic textbook arm the helper ode_step calls).
+#
+# The verdict's roots are _TB_ROOTS; the implementations' are the
+# _TB_FORBIDDEN names this file defines.
+#
+#   named   no forbidden name may be in the verdict's reach - loaded,
+#           read as an attribute, or handed to it.
+#   shared  no definition may be in both reaches, whatever it is called:
+#           a function, a class, or data such as a coefficient table. A
+#           helper shared under a new name passed a wrong Lorenz-63
+#           through the whole gate on 2026-09-25 (verifier-V5's O2b), and
+#           one that only slices lanes would share its mistakes the same
+#           way: give the textbook arm its own. The image's numbers are
+#           not an exception to this but outside it: _ODE_PINNED is read
+#           by check_ode, which hands each side the numbers it needs (a
+#           number read from a table is data), and by no implementation,
+#           so the verdict may read it as well.
+#
+# A census comes first: every function and class this file defines
+# outside a function or class - found by a walk of its own - must be one
+# the recorder holds, so that a place the recorder does not look is
+# named rather than passed over. It counts functions and classes, not
+# assignments.
 #
 # The shared-error controls in check_ode catch the arm computing through
 # the mirror by what it computes; these name it by the code's shape, and
 # see what those cannot - a helper that carries an error the controls do
-# not, or the generator's own default output taken as the reference. What
-# neither rule sees: code outside this file (a helper in another module
-# that both import, the generator's source, the golden model's); a name
-# built at run time (globals()[...], getattr with a string); a COPY of the
-# mirror's code under new names; and whether check_ode's claim calls
-# _tb_verdict at all (verifier-V5's O16). Only review guards against those.
+# not, a second instance of this module whose switch no control sets, or
+# the generator's own default output taken as the reference. What neither
+# rule sees: code outside this file (a helper in another module both
+# import, the generator's source, the golden model's); a name built at
+# run time (globals()[...], getattr with a string); a COPY of the
+# mirror's code under new names; a value handed through a parameter of
+# the calling function, from its own caller; a local a call computed,
+# such as functools.partial(helper) put in a variable first, or a
+# factory function's result; an instance made through a table or an
+# attribute rather than by a class's name; a definition made from inside
+# a function (global) or by exec, setattr or a walrus; and whether
+# check_ode's claim calls _tb_verdict at all (verifier-V5's O16).
+# Only review guards against those. The attribute rule is broad on
+# purpose: an attribute read that merely shares a definition's name is
+# taken to be it, and the message names the attribute - a loud false
+# alarm, never a quiet pass.
 _TB_ROOTS = ("_tb_verdict", "_tb_refs", "_tb_worst", "_tb_params")
 _TB_FORBIDDEN = frozenset((
     # the mirror of the program's rounding order, and its switches
@@ -2566,11 +2635,29 @@ _TB_FORBIDDEN = frozenset((
 
 # The rules' controls: each a small module whose definitions replace this
 # file's own before the same walk, the rule that must refuse it, and what
-# the walk must then report. Each replaces _tb_step, which _tb_refs calls,
-# rather than anything deeper in the arm, so that a control still applies
-# when the arm's insides change - verifier-V5's O2a is the third, in
-# miniature. A probe that replaces a definition this file no longer has is
-# named stale, not run.
+# the walk must then report - for "named", the tail of the path to the
+# forbidden name; for "shared", the definitions in both reaches, and the
+# kind the message gives them. Each replaces _tb_step, which _tb_refs
+# calls, or hands a value to _tb_verdict, rather than touching anything
+# deeper in the arm, so that a control still applies when the arm's
+# insides change. A probe that replaces a definition this file no longer
+# has is named stale, not run.
+_TB_PROBE_SHARED = """
+def ode_step(base, o, K, s, steps, detuned=False):
+    return _tb_probe_rhs(o, K, s)
+
+
+def _tb_probe_rhs(o, K, Y):
+    return Y
+"""
+_TB_PROBE_N6A = """
+if True:
+    try:
+        def _tb_step(base, P, h, Y):
+            return _tb_probe_rhs(None, P, Y)
+    except NameError:
+        pass
+""" + _TB_PROBE_SHARED
 _TB_PROBES = (
     ("_tb_step re-pointed at ode_step through a helper", "named",
      ("_tb_step", "_tb_probe_hop", "ode_step"), """
@@ -2589,78 +2676,411 @@ def _tb_step(base, P, h, Y):
                                                      1)
 """),
     ("one helper for the textbook step and ode_step alike (verifier-V5's "
-     "O2a)", "shared", ("_tb_probe_rhs",), """
+     "O2a)", "shared", ("_tb_probe_rhs", "a function"), """
 def _tb_step(base, P, h, Y):
     return _tb_probe_rhs(None, P, Y)
+""" + _TB_PROBE_SHARED),
+    ("that helper handed to a generic textbook arm by its caller "
+     "(verifier-V5's N7)", "shared", ("_tb_probe_rhs", "a function"), """
+def _tb_step(base, P, h, Y, rhs=None):
+    return rhs(Y)
+
+
+def _tb_probe_caller(base, fmt, P, h, nstate, s_tb, runs):
+    return _tb_verdict(base, fmt, P, h, nstate, s_tb, runs,
+                       rhs=_tb_probe_rhs)
+""" + _TB_PROBE_SHARED),
+    ("that helper handed inside a lambda, through a local lambda and a "
+     "local alias", "shared", ("_tb_probe_rhs", "a function"), """
+def _tb_step(base, P, h, Y, rhs=None):
+    return rhs(Y)
+
+
+def _tb_probe_caller(base, fmt, P, h, nstate, s_tb, runs):
+    f = _tb_probe_rhs
+    g = lambda Y: f(None, P, Y)
+    return _tb_verdict(base, fmt, P, h, nstate, s_tb, runs,
+                       rhs=lambda Y: g(Y))
+""" + _TB_PROBE_SHARED),
+    ("that helper handed out of a table, indexed", "shared",
+     ("_tb_probe_rhs", "a function"), """
+_tb_probe_table = {"lorenz63-rk4": _tb_probe_rhs}
+
+
+def _tb_step(base, P, h, Y, rhs=None):
+    return rhs(Y)
+
+
+def _tb_probe_caller(base, fmt, P, h, nstate, s_tb, runs):
+    return _tb_verdict(base, fmt, P, h, nstate, s_tb, runs,
+                       rhs=_tb_probe_table[base])
+""" + _TB_PROBE_SHARED),
+    ("an instance of a class ode_step also uses, handed to the textbook "
+     "arm", "shared", ("_tb_probe_ops", "a class"), """
+class _tb_probe_ops:
+    def fma(self, a, b, c):
+        return a
+
+
+def _tb_step(base, P, h, Y, ops=None):
+    return ops.fma(Y, Y, Y)
 
 
 def ode_step(base, o, K, s, steps, detuned=False):
-    return _tb_probe_rhs(o, K, s)
+    return _tb_probe_ops().fma(s, s, s)
 
 
-def _tb_probe_rhs(o, P, Y):
-    return Y
+def _tb_probe_caller(base, fmt, P, h, nstate, s_tb, runs):
+    return _tb_verdict(base, fmt, P, h, nstate, s_tb, runs,
+                       ops=_tb_probe_ops())
+"""),
+    ("the shared helper's user defined in a try inside a top-level if "
+     "(verifier-V5's N6a, a level deeper)", "shared",
+     ("_tb_probe_rhs", "a function"), _TB_PROBE_N6A),
+    ("the second instance used inside a top-level try (verifier-V5's "
+     "N6c)", "named", ("_tb_step", ".ode_step"), """
+try:
+    import importlib as _tb_probe_il
+
+    def _tb_step(base, P, h, Y):
+        return _tb_probe_il.import_module("check").ode_step(base, None,
+                                                             None, Y, 1)
+except ImportError:
+    _tb_probe_il = None
+"""),
+    ("the shared helper read as an attribute of this module "
+     "(verifier-V5's N6b)", "shared", ("_tb_probe_rhs", "a function"), """
+def _tb_step(base, P, h, Y):
+    import sys
+    return sys.modules[__name__]._tb_probe_rhs(None, P, Y)
+""" + _TB_PROBE_SHARED),
+    ("a coefficient table read by both (verifier-V5's N3a)", "shared",
+     ("_tb_probe_table", "data"), """
+_tb_probe_table = (1, 2, 2, 1)
+
+
+def _tb_step(base, P, h, Y):
+    return _tb_probe_table
+
+
+def ode_step(base, o, K, s, steps, detuned=False):
+    return _tb_probe_table
 """),
 )
 
 
-def _defs_and_uses(tree):
-    """{name defined at the top of a module: what its definition reads}
-    for functions, classes and assignments - every name loaded anywhere
-    inside it, and every attribute read there as ".attr"."""
-    uses = {}
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
-                             ast.ClassDef)):
-            targets = [node.name]
-        elif isinstance(node, ast.Assign):
-            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
-        elif isinstance(node, ast.AnnAssign) and \
-                isinstance(node.target, ast.Name):
-            targets = [node.target.id]
+class _Def:
+    """A module-level definition: its kind, what it reads (names, and
+    attributes as ".attr"), and the calls in it - (callee, what each call
+    hands over) - for the handed rule."""
+
+    __slots__ = ("kind", "reads", "calls")
+
+    def __init__(self, kind):
+        self.kind, self.reads, self.calls = kind, set(), []
+
+
+def _module_statements(body, blocks):
+    """Every statement at module level: the top level and, with
+    `blocks`, the bodies of top-level if, try, with, for, while and
+    match statements at any depth - never a function's or a class's."""
+    for node in body:
+        yield node
+        if not blocks or isinstance(node, (ast.FunctionDef,
+                                           ast.AsyncFunctionDef,
+                                           ast.ClassDef)):
+            continue
+        for field in ("body", "orelse", "finalbody"):
+            yield from _module_statements(getattr(node, field, None) or [],
+                                          blocks)
+        for h in getattr(node, "handlers", None) or []:
+            yield from _module_statements(h.body, blocks)
+        for c in getattr(node, "cases", None) or []:
+            yield from _module_statements(c.body, blocks)
+
+
+def _stored(target):
+    """The names an assignment target binds."""
+    return [n.id for n in ast.walk(target) if isinstance(n, ast.Name)]
+
+
+def _local_binds(node):
+    """{name: [what it is bound to]} inside a function or class, nested
+    ones included: an expression, a nested function, class or lambda, or
+    None for a parameter or an import, whose value this file does not
+    show."""
+    binds = {}
+
+    def bind(target, value):
+        for n in _stored(target):
+            binds.setdefault(n, []).append(value)
+    for n in ast.walk(node):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef,
+                          ast.Lambda)):
+            for arg in (n.args.posonlyargs + n.args.args +
+                        n.args.kwonlyargs + [n.args.vararg, n.args.kwarg]):
+                if arg is not None:
+                    binds.setdefault(arg.arg, []).append(None)
+            if n is not node and not isinstance(n, ast.Lambda):
+                binds.setdefault(n.name, []).append(n)
+        elif isinstance(n, ast.ClassDef) and n is not node:
+            binds.setdefault(n.name, []).append(n)
+        elif isinstance(n, ast.Assign):
+            for target in n.targets:
+                bind(target, n.value)
+        elif isinstance(n, (ast.AnnAssign, ast.AugAssign)) and n.value:
+            bind(n.target, n.value)
+        elif isinstance(n, (ast.For, ast.AsyncFor, ast.comprehension)):
+            bind(n.target, n.iter)
+        elif isinstance(n, (ast.With, ast.AsyncWith)):
+            for item in n.items:
+                if item.optional_vars is not None:
+                    bind(item.optional_vars, item.context_expr)
+        elif isinstance(n, ast.NamedExpr):
+            bind(n.target, n.value)
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            binds.setdefault(n.name, []).append(None)
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            for alias in n.names:
+                binds.setdefault((alias.asname or alias.name)
+                                 .split(".")[0], []).append(None)
+    return binds
+
+
+def _named_in(node):
+    """Every name a piece of code loads, and every attribute it reads as
+    ".attr" - what a lambda or a nested function carries with it."""
+    out = []
+    for n in ast.walk(node):
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
+            out.append(n.id)
+        elif isinstance(n, ast.Attribute):
+            out.append("." + n.attr)
+    return out
+
+
+def _code_shaped(v, classes):
+    """Can a local bound to `v` hold code - a name, an attribute, a
+    lambda, a nested function or class, an instance of one of `classes`,
+    an entry of a table, or a container of these? A value a call computes,
+    or arithmetic, a comprehension or a literal makes, is data: a local
+    bound to one is not followed (in check_ode, whose locals are reused
+    for many things, following those tied every table the function reads
+    to the verdict)."""
+    if isinstance(v, (ast.Name, ast.Attribute, ast.Lambda, ast.FunctionDef,
+                      ast.AsyncFunctionDef, ast.ClassDef)):
+        return True
+    if isinstance(v, ast.Call):
+        return isinstance(v.func, ast.Name) and v.func.id in classes
+    if isinstance(v, (ast.Subscript, ast.Starred)):
+        return _code_shaped(v.value, classes)
+    if isinstance(v, (ast.Tuple, ast.List, ast.Set)):
+        return all(_code_shaped(e, classes) for e in v.elts)
+    if isinstance(v, ast.Dict):
+        return all(_code_shaped(e, classes) for e in v.values)
+    if isinstance(v, ast.IfExp):
+        return (_code_shaped(v.body, classes) and
+                _code_shaped(v.orelse, classes))
+    return False
+
+
+def _handed(exprs, binds, classes, memo):
+    """What the expressions `exprs` hand over when a call is given them:
+    module-level names, ".attr" for an attribute, and "[" + x for what
+    the table x names when it is indexed. A local resolves through those
+    of its bindings in `binds` that can hold code (_code_shaped), each
+    once (`memo`, one per definition; a local that depends on itself adds
+    nothing more). A call made on the way hands over its result, not its
+    callee, unless the callee is one of `classes` (an instance carries
+    its class) - but its arguments go on being read, since a wrapper
+    (functools.partial) keeps what it is given."""
+    def local(name):
+        if name not in memo:
+            memo[name] = set()
+            got = set()
+            for v in binds[name]:
+                if v is None or not _code_shaped(v, classes):
+                    continue
+                if isinstance(v, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                  ast.ClassDef, ast.Lambda)):
+                    got |= names(_named_in(v))
+                else:
+                    got |= expr(v)
+            memo[name] = got
+        return memo[name]
+
+    def names(items):
+        got = set()
+        for s in items:
+            if s[:1] != "." and s in binds:
+                got |= local(s)
+            else:
+                got.add(s)
+        return got
+
+    def expr(e):
+        got, todo = set(), [e]
+        while todo:
+            e = todo.pop()
+            if isinstance(e, ast.Lambda):
+                got |= names(_named_in(e))
+            elif isinstance(e, ast.Call):
+                if isinstance(e.func, ast.Name) and e.func.id in classes:
+                    got |= names([e.func.id])
+                todo.extend(e.args)
+                todo.extend(k.value for k in e.keywords)
+            elif isinstance(e, ast.Subscript):
+                got |= {"[" + x for x in expr(e.value)}
+            elif isinstance(e, ast.Name):
+                if isinstance(e.ctx, ast.Load):
+                    got |= names([e.id])
+            elif isinstance(e, ast.Attribute):
+                got.add("." + e.attr)
+                todo.append(e.value)
+            else:
+                todo.extend(ast.iter_child_nodes(e))
+        return got
+    out = set()
+    for e in exprs:
+        out |= expr(e)
+    return out
+
+
+def _code_map(tree, classes=(), blocks=True):
+    """{name: _Def} for every definition `tree` makes at module level
+    (_module_statements), and the calls in each with what they hand over.
+    `classes` are classes defined elsewhere (a probe's host file)."""
+    entries = []
+    for s in _module_statements(tree.body, blocks):
+        if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            entries.append((s.name, "a function", s, _local_binds(s)))
+        elif isinstance(s, ast.ClassDef):
+            entries.append((s.name, "a class", s, _local_binds(s)))
         else:
-            continue
-        reads = set()
+            pairs = []
+            if isinstance(s, ast.Assign):
+                pairs = [(target, s.value) for target in s.targets]
+            elif isinstance(s, (ast.AnnAssign, ast.AugAssign)) and s.value:
+                pairs = [(s.target, s.value)]
+            elif isinstance(s, (ast.For, ast.AsyncFor)):
+                pairs = [(s.target, s.iter)]
+            elif isinstance(s, (ast.With, ast.AsyncWith)):
+                pairs = [(i.optional_vars, i.context_expr) for i in s.items
+                         if i.optional_vars is not None]
+            for target, value in pairs:
+                kind = ("a function" if isinstance(value, ast.Lambda)
+                        else "data")
+                for name in _stored(target):
+                    entries.append((name, kind, value, {}))
+    classes = set(classes) | {n for n, k, _v, _b in entries if k == "a class"}
+    defs = {}
+    for name, kind, node, binds in entries:
+        d = defs.get(name)
+        if d is None:
+            d = defs[name] = _Def(kind)
+        elif kind != "data":
+            d.kind = kind
+        d.reads.update(_named_in(node))
+        memo = {}
         for n in ast.walk(node):
-            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
-                reads.add(n.id)
-            elif isinstance(n, ast.Attribute):
-                reads.add("." + n.attr)
-        for t in targets:
-            uses.setdefault(t, set()).update(reads)
-    return uses
+            if isinstance(n, ast.Call):
+                f = n.func
+                callee = (f.id if isinstance(f, ast.Name) else
+                          f.attr if isinstance(f, ast.Attribute) else None)
+                if callee:
+                    d.calls.append((callee, frozenset(_handed(
+                        list(n.args) + [k.value for k in n.keywords], binds,
+                        classes, memo))))
+    return defs
 
 
-def _reaching(uses, roots, forbidden):
-    """-> ({forbidden name: the path of names that reaches it}, the set of
-    definitions followed, [root that is not defined]). A forbidden name
-    is found loaded, or read as an attribute (".ode_step")."""
-    missing = [r for r in roots if r not in uses]
-    hits, seen = {}, set()
-    stack = [(r, (r,)) for r in reversed(roots) if r in uses]
-    while stack:
-        name, path = stack.pop()
-        if name in seen:
-            continue
-        seen.add(name)
-        for used in sorted(uses[name], reverse=True):
-            bare = used[1:] if used[:1] == "." else used
-            if bare in forbidden:
-                hits.setdefault(bare, path + (used,))
-            elif used in uses and used not in seen:
-                stack.append((used, path + (used,)))
-    return hits, seen, missing
+def _census(tree):
+    """The functions and classes `tree` defines outside any function,
+    class or lambda - found by a walk of its own, so that a blind spot
+    of _module_statements shows as a difference."""
+    out = set()
+
+    def visit(node, inside):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                  ast.ClassDef)):
+                if not inside:
+                    out.add(child.name)
+                visit(child, True)
+            else:
+                visit(child, inside or isinstance(child, ast.Lambda))
+    visit(tree, False)
+    return out
 
 
-def _tb_independence(uses):
-    """Both rules over `uses` (_defs_and_uses) -> ([roots not defined],
-    {forbidden name: path}, [definitions reached from the verdict AND
-    from the implementations], how many the verdict reaches, the
-    implementations' roots)."""
-    hits, tb_seen, missing = _reaching(uses, _TB_ROOTS, _TB_FORBIDDEN)
-    impl = sorted(n for n in _TB_FORBIDDEN if n in uses)
-    _hits, impl_seen, _missing = _reaching(uses, impl, frozenset())
-    return missing, hits, sorted(tb_seen & impl_seen), len(tb_seen), impl
+def _census_gaps(tree, defs):
+    """What the census finds and `defs` (from _code_map) does not hold as
+    a function or a class."""
+    return sorted(n for n in _census(tree)
+                  if n not in defs or defs[n].kind == "data")
+
+
+def _reach(defs, roots, forbidden):
+    """-> (the reach, {forbidden name: the path to it}, [root not
+    defined]): everything reached from `roots` by name, by attribute, or
+    handed to a call of something reached, from anywhere in `defs`,
+    until nothing more is. A path is a tuple of names; a handing reads
+    "caller hands x to callee"."""
+    missing = [r for r in roots if r not in defs]
+    how = {r: (r,) for r in roots if r in defs}
+    hits, reach, todo = {}, set(), list(how)
+
+    def consider(item, path):
+        if item[:1] == "[":
+            for d in _indexed_defs(defs, item[1:]):
+                for r in sorted(defs[d].reads):
+                    consider(r, path + (r,))
+            return
+        bare = item.lstrip(".")
+        if bare in forbidden:
+            hits.setdefault(bare, path)
+        elif bare in defs and bare not in how:
+            how[bare] = path
+            todo.append(bare)
+    while True:
+        while todo:
+            name = todo.pop()
+            if name in reach:
+                continue
+            reach.add(name)
+            for r in sorted(defs[name].reads):
+                consider(r, how[name] + (r,))
+        for caller in sorted(defs):
+            for callee, handed in defs[caller].calls:
+                if callee in reach:
+                    for item in sorted(handed):
+                        what = (f"what {item.lstrip('[')} holds"
+                                if item[:1] == "[" else item.lstrip("."))
+                        consider(item, (f"{caller} hands {what} to "
+                                        f"{callee}",))
+        if not todo:
+            return reach, hits, missing, how
+
+
+def _indexed_defs(defs, item):
+    """The definitions a handed "[x" stands for: those x names, where x
+    is a definition (or a further "[" - a table of tables)."""
+    if item[:1] == "[":
+        return {r.lstrip(".") for d in _indexed_defs(defs, item[1:])
+                for r in defs[d].reads if r.lstrip(".") in defs}
+    item = item.lstrip(".")
+    return {item} if item in defs else set()
+
+
+def _tb_independence(defs):
+    """Both rules over `defs` (_code_map) -> ([roots not defined],
+    {forbidden name: path}, [definitions in both reaches], how many the
+    verdict reaches, the implementations' roots, how the verdict reached
+    each definition)."""
+    tb, hits, missing, how = _reach(defs, _TB_ROOTS, _TB_FORBIDDEN)
+    impl = sorted(n for n in _TB_FORBIDDEN if n in defs)
+    impl_reach, _h, _m, _how = _reach(defs, impl, frozenset())
+    return missing, hits, sorted(tb & impl_reach), len(tb), impl, how
 
 
 def _golden_unresumed(image, bank, s_in, n, nstate, steps):
@@ -2681,11 +3101,31 @@ def _golden_unresumed(image, bank, s_in, n, nstate, steps):
 
 
 def check_textbook_independence():
-    """The two rules above, over this file's own source, and their
-    controls."""
-    uses = _defs_and_uses(ast.parse(Path(__file__).read_text(
-        encoding="utf-8")))
-    missing, hits, shared, followed, impl = _tb_independence(uses)
+    """The census, the two rules above over this file's own source, and
+    their controls."""
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    defs = _code_map(tree)
+    gaps = _census_gaps(tree, defs)
+    if gaps:
+        bad("textbook arm: independence", f"check.py defines "
+            f"{', '.join(gaps)} where the walk does not look, so neither "
+            f"rule can see into it")
+        return
+    ok(f"textbook arm: the walk records every one of the "
+       f"{len(_census(tree))} functions and classes check.py defines "
+       f"outside a function or class, in its top-level blocks too")
+    probe = ast.parse(_TB_PROBE_N6A)
+    blind = _census_gaps(probe, _code_map(probe, blocks=False))
+    if blind != ["_tb_step"]:
+        bad("textbook arm: NEGATIVE CONTROL FAILED TO FAIL",
+            f"the census, against a walk of the top level alone, did not "
+            f"name the _tb_step a top-level if's try defines (it named "
+            f"{blind})")
+        return
+    ok("textbook arm: NEGATIVE CONTROL - a walk of the top level alone "
+       "misses the _tb_step a top-level if's try defines, and the census "
+       "names it")
+    missing, hits, shared, followed, impl, how = _tb_independence(defs)
     if missing or not impl:
         bad("textbook arm: independence",
             f"check.py defines no {', '.join(missing or ['implementation'])}"
@@ -2695,42 +3135,48 @@ def check_textbook_independence():
         bad("textbook arm: independence", "; ".join(
             [f"the textbook verdict reaches {' -> '.join(p)}"
              for p in hits.values()] +
-            [f"{', '.join(shared)}: reached both from the textbook verdict "
-             f"and from the implementations - code the authority shares "
-             f"with what it judges"] * bool(shared)))
+            [f"{s} ({defs[s].kind}; the verdict reaches it by "
+             f"{' -> '.join(how[s])}) is reached from the implementations "
+             f"too - the authority shares it with what it judges"
+             for s in shared]))
         return
     ok(f"textbook arm: from {', '.join(_TB_ROOTS)}, no path through "
        f"check.py reaches the mirror, the generator or an executor of the "
-       f"program, as a name or an attribute", f"{followed} definitions "
-       f"followed")
+       f"program - by name, by attribute, or handed in by a caller",
+       f"{followed} definitions followed")
     ok(f"textbook arm: none of those {followed} definitions is reached from "
-       f"the implementations' {len(impl)} roots as well - no code shared "
-       f"under any name")
-    for what, rule, want, probe in _TB_PROBES:
-        replaced = _defs_and_uses(ast.parse(probe))
+       f"the implementations' {len(impl)} roots as well, whatever it is "
+       f"called")
+    classes = {n for n, d in defs.items() if d.kind == "a class"}
+    for what, rule, want, source in _TB_PROBES:
+        replaced = _code_map(ast.parse(source), classes)
         stale = [d for d in replaced
-                 if not d.startswith("_tb_probe") and d not in uses]
+                 if not d.startswith("_tb_probe") and d not in defs]
         if stale:
             bad("textbook arm: control", f"{what}: it replaces "
                 f"{', '.join(stale)}, which check.py no longer defines - "
                 f"the probe is stale; rewrite it against the arm as it is")
             return
-        probed = dict(uses)
+        probed = dict(defs)
         probed.update(replaced)
-        _m, hits2, shared2, _n, _i = _tb_independence(probed)
+        _m, hits2, shared2, _n, _i, _how2 = _tb_independence(probed)
         if rule == "named":
             got = hits2.get(want[-1].lstrip("."), ())
             caught = got[-len(want):] == want
             said = " -> ".join(got)
         else:
-            caught = shared2 == list(want)
-            said = f"shared: {', '.join(shared2)}"
+            kinds = [probed[s].kind for s in shared2]
+            caught = (shared2, kinds) == ([want[0]], [want[1]])
+            said = "; ".join(f"{s} ({k}), reached by "
+                             f"{' -> '.join(_how2[s])}"
+                             for s, k in zip(shared2, kinds))
         if not caught:
             bad("textbook arm: NEGATIVE CONTROL FAILED TO FAIL",
-                f"{what} was not refused by the {rule} rule (it found "
-                f"{hits2 or 'no path'} and shared {shared2 or 'nothing'}; "
-                f"if _tb_refs no longer calls _tb_step, the probe is what "
-                f"needs rewriting)")
+                f"{what} was not refused by the {rule} rule as {want} (it "
+                f"found {hits2 or 'no path'} and shared "
+                f"{shared2 or 'nothing'}; if _tb_refs no longer calls "
+                f"_tb_step, or _tb_verdict is no longer one of _TB_ROOTS, "
+                f"the probe is what needs rewriting)")
             return
         ok(f"textbook arm: NEGATIVE CONTROL - {what} is refused by the "
            f"{rule} rule", said)
@@ -2903,17 +3349,46 @@ def check_ode(args, name, image, image_path, tmp):
          "source: its comments do not say"),
         ("generator", gdoc.format(word=words), gdoc.format(word=wrong),
          "generator: its docstring does not say"))
-    moved = dict(texts)
-    for where, was, now, _named in edits:
-        pat = _phrase_re(was)
-        if was == now or len(pat.findall(moved[where])) != 1:
-            bad(f"{name}: control", f"`{was}` is not in the {where} once, "
-                                    f"so the prose control cannot move it")
-            return
-        moved[where] = pat.sub(lambda _m, now=now: now, moved[where], 1)
+    # Every mention is moved - a second, harmless mention of a number is
+    # no reason for the control to fail (verifier-V5's P3).
+    def moved_texts(changes):
+        out = dict(texts)
+        for where, was, now in changes:
+            pat = _phrase_re(was)
+            if was == now or not pat.search(out[where]):
+                return None, f"`{was}` is not in the {where}"
+            out[where] = pat.sub(lambda _m, now=now: now, out[where])
+        return out, ""
+    moved, missing = moved_texts([e[:3] for e in edits])
+    if moved is None:
+        bad(f"{name}: control", f"{missing}, so the prose control cannot "
+                                f"move it")
+        return
     why = _ode_prose_problems(base, name, fmtname, m, moved, n, n_tb)
     unnamed = [was for _w, was, _n, named in edits
                if not any(p.startswith(named) for p in why)]
+    # And the bounds' other edges, a pass each: a hyphen before the row's
+    # ALU count ("20-53 ALU", a range) and one after the end of the first
+    # row phrase that ends in a word and holds no ALU count; then a letter
+    # after that phrase's end. Each phrase must be named.
+    tail = next(t.format(**_prose_fill(base, m, n, n_tb))
+                for t in _ODE_PROSE[base]["row"]
+                if "{alu}" not in t and re.search(r"\w$", t))
+    alu = f"{m['alu']} ALU instructions"
+    edges = ([("readme", alu, f"20-{alu}"), ("readme", tail, tail + "-x")],
+             [("readme", tail, tail + "x")])
+    counts = [len(why)]
+    for changes in edges:
+        moved2, missing = moved_texts(changes)
+        if moved2 is None:
+            bad(f"{name}: control", f"{missing}, so the prose control "
+                                    f"cannot move it")
+            return
+        why2 = _ode_prose_problems(base, name, fmtname, m, moved2, n, n_tb)
+        counts.append(len(why2))
+        unnamed += [f"{now} (a bound)" for _w, was, now in changes
+                    if not any(p.startswith("readme: the row does not say")
+                               and was in p for p in why2)]
     if unnamed:
         bad(f"{name}: NEGATIVE CONTROL FAILED TO FAIL",
             f"with each changed, {'; '.join(unnamed)} went unnamed "
@@ -2922,7 +3397,9 @@ def check_ode(args, name, image, image_path, tmp):
     ok(f"{name}: NEGATIVE CONTROL - the row's instruction count one on "
        f"and its ALU count with a digit before it, and the paragraph's "
        f"state count, the source's ALU count and the generator's state "
-       f"count each one on, are each named", f"{len(why)} problems")
+       f"count each one on, are each named; so are the row's ALU count "
+       f"after a hyphen, and a phrase with a hyphen, then a letter, after "
+       f"its end", " + ".join(str(c) for c in counts) + " problems")
 
     # -- static --------------------------------------------------------------
     feats = set(img.features())
@@ -2941,7 +3418,7 @@ def check_ode(args, name, image, image_path, tmp):
     # them through the golden executor. The census reads that executor's
     # instruction count off the same two runs.
     s_tb = _tb_states(base, fmt, n_tb)
-    runs = _tb_runs(image, base, K, s_tb, n_tb, (1, 2))
+    runs = _tb_runs(image, steps, K, s_tb, n_tb, (1, 2))
 
     # -- census ----------------------------------------------------------------
     alu, ctl = m["alu"], m["ctl"]
@@ -3052,7 +3529,8 @@ def check_ode(args, name, image, image_path, tmp):
         except ValueError as exc:
             bad(f"{name}: control {mutant}", str(exc))
             return
-        mruns = _tb_runs(mimg.to_bytes(), base, mbank, s_tb, n_tb, (1, 2))
+        mruns = _tb_runs(mimg.to_bytes(), steps, mbank, s_tb, n_tb,
+                         (1, 2))
         # Both halves inside: whatever computes them sees ode_step as a
         # mistake written into it would leave it.
         with _mirror_carrying(base, mutant):
@@ -3216,7 +3694,7 @@ def check_ode(args, name, image, image_path, tmp):
             return
         kbytes = kimg.to_bytes()
         kw, _k = _tb_verdict(base, fmt, P, h, nstate, s_tb,
-                             _tb_runs(kbytes, base, K, s_tb, n_tb, (1, 2)))
+                             _tb_runs(kbytes, steps, K, s_tb, n_tb, (1, 2)))
         if not kw <= 1:
             bad(f"{name}: control {mutant}", f"the textbook arm refuses it "
                 f"({float(kw):.3g} x the bound), so it cannot show what "
