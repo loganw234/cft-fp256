@@ -1443,10 +1443,12 @@ static cft_status divsqrt_via_program(cft_device *dev,
  * gated by verify/run.sh) rather than hand-ported into emitter calls
  * like sq_emit above: two hundred instructions kept in sync by eye is
  * the transcription this repo has paid for before. The rounding mode
- * is DATA: the image is BANK_EXT, the header carries the 38 bank words
- * that do not depend on the attribute, and this code appends the five
- * mode words with a 1 in the caller's slot. Nothing per element is
- * computed here: d takes deposit 0 by copy and *acc ORs deposit 1.
+ * is DATA: the image is BANK_EXT, the header carries the bank words
+ * that do not depend on the attribute (37 for the divide, 44 for the
+ * square root: CFT_DIVFULL_NFIXED, CFT_SQRTFULL_NFIXED), and this code
+ * appends the five mode words with a 1 in the caller's slot. Nothing
+ * per element is computed here: d takes deposit 0 by copy and *acc
+ * ORs deposit 1.
  *
  * Route: taken when CFT_DIVSQRT_FULL=1 asks for it (see the switch
  * below for why it is not the default); a tile whose caps lack what

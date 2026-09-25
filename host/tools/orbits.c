@@ -159,8 +159,12 @@
  * loaded into lane registers once, every step executes from the
  * instruction memory, and the sampled states come back through the
  * deposit stream. It is restricted to `--problem kepler --rsqrt
- * newton`, and BOTH restrictions are facts about the program model
- * rather than about this tool:
+ * newton`, and both restrictions were facts about the program model
+ * when this tool was written (2026-09-04). Neither is now; both are
+ * gaps in this tool. Revision 3's scratch (2026-09-08) answers the
+ * first, and the model has had an in-program correctly rounded
+ * divide and square root since 2026-09-14, which answers the second.
+ * This tool uses neither:
  *
  *   (1) THREE INPUT STREAMS. cft_program_run initialises r0, r1 and
  *       r2 from a, b and c; r3..r31 start at +0, normatively (r3..r15
@@ -175,22 +179,31 @@
  *       reachable and no later step is. That is why the program
  *       engine runs the whole integration in one call and cannot
  *       resume into the middle of one, and it is why the outer solar
- *       system has no program engine at all.
+ *       system has no program engine at all. Revision 3's scratch
+ *       block (cft_program_run_ex's scratch_in; docs/SEQUENCER.md,
+ *       "What the workloads asked of the program model") lets a
+ *       program be entered at any state it can spell; this engine
+ *       still calls cft_program_run and has not been moved onto it.
  *
- *   (2) CORRECTLY ROUNDED DIVIDE AND SQUARE ROOT ARE NOT PROGRAMS.
+ *   (2) CORRECTLY ROUNDED DIVIDE AND SQUARE ROOT WERE NOT PROGRAMS.
  *       python/cft_golden/seqprogs.py - which is the library's own
  *       in-program cft_div/cft_sqrt - partitions the route as HOST
  *       prep (operand classification and the prenormalise/centre
  *       surgery), PROGRAM core, HOST finish (round_pack, the
  *       contract's single rounding authority). The core alone uses
- *       r0..r12 of the thirty-two registers a lane owns. So the
- *       composed route
- *       cannot be inlined inside a larger program's loop body: it
- *       needs the host between its halves, and it would not leave
- *       room for the orbit state if it did not. --rsqrt exact is
- *       therefore a loop-engine route, and --rsqrt newton exists so
- *       that the two engines have a step they can BOTH run - which
- *       they must run bit for bit.
+ *       r0..r12 of the thirty-two registers a lane owns. So that
+ *       route cannot be inlined inside a larger program's loop body:
+ *       it needs the host between its halves. Since 2026-09-14
+ *       python/cft_golden/divfull.py (in libcft, divsqrt.c's
+ *       full_via_program over divfull_images.h, opt-in by
+ *       CFT_DIVSQRT_FULL=1) computes each as ONE program, prep and
+ *       round_pack in the instruction stream, no host between. It
+ *       uses r0..r31, and revision 3's scratch is where a live set
+ *       larger than the register file spills, so room for the orbit
+ *       state beside it is not a model limit either. This tool has not
+ *       been moved onto it: --rsqrt exact is a loop-engine route
+ *       here, and --rsqrt newton exists so that the two engines have
+ *       a step they can BOTH run - which they must run bit for bit.
  *
  * Under `--problem kepler --rsqrt newton` the two engines produce
  * byte-identical records, byte-identical checkpoints and the same
@@ -247,8 +260,8 @@
  * from the library, pi comes from cft_acos(-1), 2^(1/3) from
  * cft_rootn, the Gaussian constant is squared rather than copied, the
  * Newton iteration count is derived from p, and SHA-256's round
- * constants are computed from the cube roots of the primes exactly as
- * host/tools/collatz.c computes them.
+ * constants are computed from the cube roots of the primes by
+ * host/src/sha256.c, the one copy this tool shares with collatz.c.
  */
 #if !defined(_WIN32)
 #  define _POSIX_C_SOURCE 200112L   /* 199309L hid snprintf on Darwin (2026-09-09) */

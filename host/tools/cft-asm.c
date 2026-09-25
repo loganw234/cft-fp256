@@ -79,10 +79,11 @@
  * made this file two of the eight places the flag list had been written
  * out by hand - and those eight had drifted to three revisions at once.
  *
- * FLAGS_KNOWN below stays this tool's OWN subset, deliberately smaller
- * than every defined flag: CFT_PROG_FLAG_SCRATCH_STRICT exists and this
- * cannot emit it, so an image asking for it is refused here rather than
- * written out as something no tile will load. */
+ * FLAGS_KNOWN below stays this tool's OWN list rather than every
+ * defined flag: a flag is in it only once this tool can emit it, so an
+ * image asking for one it cannot is refused here rather than written
+ * out as something no tile will load. Since `.scratch strict`
+ * (2026-09-11) it names all three flags cft.h defines. */
 #define FLAG_BANK_EXT       CFT_PROG_FLAG_BANK_EXT
 #define FLAG_SCRATCH_IO     CFT_PROG_FLAG_SCRATCH_IO
 #define FLAG_SCRATCH_STRICT CFT_PROG_FLAG_SCRATCH_STRICT
@@ -151,11 +152,12 @@ static int is_scratch_code(int c)
  * and everything else is binary on (a, b) or unary on (a). cft.h says
  * the same thing in prose beside each enumerator ("b ignored").
  *
- * 24, 25, 28 and 29 are absent on purpose: cft_op_name calls them
- * sum, dot, sumsq and sumabs, they are REDUCTIONS that cft_reduce
- * issues, and the sequencer's ALU does not implement them. They stay
- * reachable through the numeric `opNN` escape so that an image
- * carrying one still disassembles into something that re-assembles.
+ * 24, 25, 28, 29 and 31 are absent on purpose: cft_op_name calls them
+ * sum, dot, sumsq, sumabs and maxall, they are REDUCTIONS that
+ * cft_reduce issues, and the sequencer's ALU does not implement them.
+ * They stay reachable through the numeric `opNN` escape so that an
+ * image carrying one still disassembles into something that
+ * re-assembles.
  */
 typedef struct { int op; const char *fields; } opdef;
 static const opdef OPS[] = {
@@ -1684,7 +1686,8 @@ static void disassemble(const program *P, FILE *out)
 /* The feature bits this image needs a device to publish, in CAPS bit
  * order followed by CAPS2's: kx is CAPS[4], REGS32 [5], BANK_PTR [6],
  * KX9 [7], IMUL [28], and then SCRATCH is CAPS2[4] and SCRATCH_IO
- * CAPS2[5]. */
+ * CAPS2[5]. Not SCRATCH_STRICT (CAPS2[6]), which the loader also
+ * demands of a `.scratch strict` image: that one is not reported here. */
 static void features(const program *P, char *out, size_t cap)
 {
     int kx = 0, regs32 = 0, imul = 0, kx9 = 0, scratch = 0, i;

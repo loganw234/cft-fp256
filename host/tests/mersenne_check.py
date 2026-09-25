@@ -54,8 +54,8 @@ about Mersenne numbers:
                   tool's arithmetic.
 
 And the hash chain is recomputed here with hashlib, which is what
-proves the tool's from-first-principles derivation of SHA-256's round
-constants right.
+proves the from-first-principles derivation of SHA-256's round
+constants the tool calls (host/src/sha256.c, since c0effe9) right.
 """
 
 import argparse

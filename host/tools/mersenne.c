@@ -148,7 +148,7 @@
  * bias follows from p and the format width; the limb width, the limb
  * count and the fold's shift are derived from p and the exponent; and
  * SHA-256's round constants are computed from the cube roots of the
- * primes, exactly as collatz.c computes them.
+ * primes, by host/src/sha256.c, the one copy collatz.c uses too.
  */
 #if !defined(_WIN32)
 #  define _POSIX_C_SOURCE 200112L   /* 199309L hid snprintf on Darwin (2026-09-09) */

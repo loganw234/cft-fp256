@@ -1378,12 +1378,12 @@ static void horner_coeffs(runstate *R)
  * bit 30 as reserved-must-be-zero and refuses it, which is the version
  * guard docs/SEQUENCER.md describes working exactly as designed.
  *
- * Note what this does NOT answer, because it matters on a card: it
- * says the LOADER accepts the encoding, not that a bitstream executes
- * it. When CAPS publishes a bit for the feature that is what this
- * should read instead; until then the honest scope of the probe is
- * the software backend, and a device run should be given --no-indexed
- * -constants until the bitstream is known to carry it.
+ * It answers for a card too. CAPS[4] publishes the feature
+ * (cft_caps.seq_features bit 0, CFT_SEQ_FEAT_WIDE_CONST, set from
+ * 2026-09-07), and cft_program_load refuses a kx instruction by name
+ * on a device that does not publish it - so on a bitstream without
+ * indexed constants this probe fails and the tool takes the chunked
+ * shape by itself, with no --no-indexed-constants needed.
  */
 static int kx_available(const fmt_info *fi)
 {

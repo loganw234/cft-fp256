@@ -42,8 +42,8 @@ rather than about Collatz:
                   same checkpoint as one that was never stopped.
 
 And the hash chain is recomputed here with hashlib, which is what
-proves that the tool's from-first-principles derivation of SHA-256's
-round constants is right.
+proves that the from-first-principles derivation of SHA-256's round
+constants the tool calls (host/src/sha256.c, since c0effe9) is right.
 """
 
 import argparse

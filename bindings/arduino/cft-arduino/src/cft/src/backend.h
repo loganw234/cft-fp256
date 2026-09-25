@@ -265,9 +265,14 @@ int  cftx_reduce_seg(void *hw, int op, int fmt, int rnd, const void *a,
  *              `off` starts at BIT off, which is not a byte boundary at
  *              every format, so a backend repacks rather than points
  *
- * The 0.14 fields are checked and REFUSED in the library until the
- * parcels that build them land; a backend that sees one set before
- * then has found a bug above it, not a request.
+ * The 0.14 fields are live, not refused (docs/SEQUENCER.md revision
+ * 6): program.c holds them to their shapes, and on an XRT device
+ * device.c refuses a table or a mask the device's CAPS2 does not
+ * publish. The XRT backend binds or stages the tables for the tile to
+ * gather and repacks the mask. A remote device is refused neither:
+ * its backend never sees a table, because device.c gathers the blocks
+ * dense on the client before calling it, and it compacts a masked run
+ * to its kept lanes itself.
  */
 typedef struct cft_seq_run_io {
     const void *bank;        size_t bank_bytes;
@@ -307,9 +312,12 @@ typedef struct cft_seq_run_io {
  * a claim about P3 that wants its own fuzz before it ships. */
 /* `bind` names a, b, c and `deposits` when they are resident, in the
  * four role slots - deposits being the D master's buffer, which is
- * what CFT_ROLE_D means here. The image, the constant bank, the
- * counts and the two scratch blocks are staged always: none is
- * operand-shaped, and the image and bank do not grow with n at all. */
+ * what CFT_ROLE_D means here - and the two scratch blocks and the four
+ * index tables in theirs (CFT_ROLE_SI .. CFT_ROLE_ISI). The image, the
+ * constant bank and the counts are staged always: the image and bank
+ * do not grow with n at all, and the counts are four bytes an element
+ * whatever the format. The lane mask is never bound: the backend
+ * repacks it into the tile's own buffer on every launch (device.c). */
 int  cftx_program_run(void *hw, int fmt, const void *image,
                       size_t image_bytes,
                       const cft_seq_run_io *io,

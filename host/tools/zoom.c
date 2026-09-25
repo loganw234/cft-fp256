@@ -1388,7 +1388,7 @@ static void orbit_absorb(runstate *R, uint64_t idx)
  *
  * This is a property of the finished orbit rather than of the
  * iteration, so it is computed ONCE, afterwards, in whole-array calls -
- * three elementwise passes and a MIN tournament, about 2*log2(n) + 4
+ * three elementwise passes and a MIN tournament, ceil(log2 n) + 4
  * library calls for any n. Doing it per iteration instead cost four
  * single-element calls per point, which is half as much work again as
  * the orbit itself and four hundred thousand library calls where the
@@ -1770,8 +1770,9 @@ static void run_pixels(runstate *R)
             uint64_t g = base + i;
             long ix = (long)(g % O->width);
             long iy = (long)(g / O->width);
-            /* (2i + 1 - width) is an odd integer; times one half-pixel
-             * it is exact in every format wide enough to hold it */
+            /* (2i + 1 - width), less 2*ref_offset on the real axis, is
+             * an odd integer; times one half-pixel it is exact in every
+             * format wide enough to hold it */
             P.dcr[i] = (double)(2 * ix + 1 - (long)O->width - 2 *
                                 O->ref_offset) * pixd;
             P.dci[i] = (double)(2 * iy + 1 - (long)O->width) * pixd;
@@ -2264,7 +2265,9 @@ int main(int argc, char **argv)
 
     /* Everything the geometry needs, checked against the PIXEL format's
      * own measured parameters rather than assumed. A pixel offset is an
-     * odd integer below 2^12 times one half-pixel, 2^(-zoom_exp-log2 W),
+     * odd integer below 2^22 in magnitude (the width is at most 2^15 and
+     * twice --ref-offset at most 2^21, both checked below) times one
+     * half-pixel, 2^(-zoom_exp-log2 W),
      * so it is exact if and only if that power of two is a NORMAL
      * binary64 number: a subnormal half-pixel would quietly drop the
      * low bits of the offset, and far enough down every offset becomes

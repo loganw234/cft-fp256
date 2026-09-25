@@ -75,10 +75,10 @@ extern const cft_fmt_desc cft_sf_formats[4];
  * augmented.c is the only caller. */
 #define CFT_SF_RTTZ 16
 
-/* Opcodes. 15 and 31..255 are unassigned and answer with the canonical
+/* Opcodes. 15 and 32..255 are unassigned and answer with the canonical
  * quiet NaN and invalid - a defined result, because a host issuing an
  * opcode its device predates should see that in the flags rather than
- * receive a plausible number. */
+ * receive a plausible number. (31 is CFT_SF_MAXALL, below.) */
 #define CFT_SF_FMA       0
 #define CFT_SF_ADD       1
 #define CFT_SF_SUB       2
