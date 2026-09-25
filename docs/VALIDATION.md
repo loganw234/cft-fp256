@@ -14727,6 +14727,9 @@ lane's whole state entering and leaving through the scratch block
   killed 3 s into a 30,000-step interval left a checkpoint at step 257;
   the old sizing left none), buffers sized by the chunk. Seven mutants
   went through the whole gate and each turned it red on its own leg.
+  The census check, which carries no control of its own, was watched
+  failing under verifier-S0a's two planted miscounts (ENDREP counted as
+  a control code, and the check's derivation off by one).
   orbitstest: 62 checks, 17 s (51, 8 s before).
 
 **Step 0b - three ODE references** (5246ad0). `programs/gen_odes.py`
