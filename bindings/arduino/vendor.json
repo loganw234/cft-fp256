@@ -41,7 +41,7 @@
     {
       "source": "host/src/backend.h",
       "dest": "src/cft/src/backend.h",
-      "sha256": "5ba4deb3c206fb25b0ba5ef5f45c2244aa734f7a1ee2d42d5924e4f6e231ae12"
+      "sha256": "d03b026928bf5c0e0b578c0b3add0aca090c6aff4f1f331e3f975be8a123fe8c"
     },
     {
       "source": "host/src/backend_remote.c",
@@ -92,6 +92,11 @@
       "source": "host/src/formatof.c",
       "dest": "src/cft/src/formatof.c",
       "sha256": "b1e340e503c41f0f279246eb63ebdb37ea7fa8c6f3b3b20c6cbc8d9812eed7f4"
+    },
+    {
+      "source": "host/src/lane_cut.h",
+      "dest": "src/cft/src/lane_cut.h",
+      "sha256": "ebf99a219583bccfb0b32bbd9b196101ded09d508804a8389284f77f89383c1c"
     },
     {
       "source": "host/src/mask_bits.h",

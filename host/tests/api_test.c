@@ -25,6 +25,7 @@
 #include "cft.h"
 #include "../src/slice.h"
 #include "../src/tile_select.h"
+#include "../src/lane_cut.h"
 #include "../src/mask_bits.h"
 
 static int failures;
@@ -227,6 +228,141 @@ static int tile_select_loose(const char *s, int *order, char *why,
         return -1;
     }
     return n;
+}
+
+/* ---- a program run's lanes across tiles: lane_cut.h ---------------- */
+
+typedef void (*lane_windows_fn)(const cft_lane_shape *, size_t, size_t,
+                                cft_lane_win *);
+
+/* The shipped function with one plausible slip: the scratch-in block
+ * cut by the scratch-OUT width. Right whenever the two widths agree -
+ * which is every program that reads and writes the same state - so a
+ * check that only ever tried such programs would pass it. THE NEGATIVE
+ * CONTROL for lane_cut_misreads below. */
+static void lane_windows_slipped(const cft_lane_shape *S, size_t first,
+                                 size_t lanes, cft_lane_win *w)
+{
+    cft_lane_windows(S, first, lanes, w);
+    if (S->has_sin && !S->src_elems[3]) {
+        w[CFT_LANE_SIN].off = first * S->n_sout * S->esz;
+        w[CFT_LANE_SIN].len = lanes * S->n_sout * S->esz;
+    }
+}
+
+static uint64_t lane_rng(uint64_t *s)
+{
+    return cft_lane_mix(s);
+}
+
+/* Over `trials` random shapes and cuts (both planners), count the
+ * windows `fn` gets wrong: a per-lane block must be covered exactly
+ * once, in lane order, by its slices' windows - each the slice's lanes
+ * times the block's width a lane - and an indexed source must reach
+ * every slice whole. With `report`, each first misread of a kind is a
+ * FAIL line. */
+static int lane_cut_misreads(lane_windows_fn fn, int trials, int report,
+                             int *unaligned, int *empty_tiles)
+{
+    uint64_t s = 20260925;
+    int t, misread = 0, said = 0;
+
+    for (t = 0; t < trials; t++) {
+        static const size_t eszs[4] = {4, 8, 16, 32};
+        cft_lane_shape S;
+        cft_slice sl[64];
+        cft_lane_win w[CFT_LANE_ROLES];
+        size_t full[CFT_LANE_ROLES], next[CFT_LANE_ROLES];
+        size_t ntiles = 1 + (size_t)(lane_rng(&s) % 8), k, i;
+        int r, bad = 0, seeded = (int)(lane_rng(&s) & 1);
+
+        memset(&S, 0, sizeof S);
+        S.n = 1 + (size_t)(lane_rng(&s) % 300);
+        S.esz = eszs[lane_rng(&s) % 4];
+        S.max_deposits = (size_t)(lane_rng(&s) % 4);
+        S.has_sin = (int)(lane_rng(&s) & 1);
+        S.has_sout = (int)(lane_rng(&s) & 1);
+        S.n_sin = S.has_sin ? 1 + (size_t)(lane_rng(&s) % 6) : 0;
+        S.n_sout = S.has_sout ? 1 + (size_t)(lane_rng(&s) % 6) : 0;
+        for (r = 0; r < 4; r++)
+            if ((lane_rng(&s) % 3) == 0 && (r < 3 || S.has_sin))
+                S.src_elems[r] = 1 + (size_t)(lane_rng(&s) % 500);
+
+        k = seeded ? cft_plan_lane_cuts(S.n, ntiles, lane_rng(&s), sl)
+                   : cft_plan_slices(S.n, S.esz, ntiles, sl);
+        if (seeded) {
+            for (i = 0; i < k; i++)
+                if (sl[i].first_elem % (32 / S.esz))
+                    (*unaligned)++;
+            if (k < ntiles && k < S.n)
+                (*empty_tiles)++;
+        }
+
+        full[CFT_LANE_A] = S.n * S.esz;
+        full[CFT_LANE_B] = S.n * S.esz;
+        full[CFT_LANE_C] = S.n * S.esz;
+        full[CFT_LANE_DEP] = S.n * S.max_deposits * S.esz;
+        full[CFT_LANE_CNT] = S.n * 4;
+        full[CFT_LANE_SIN] = S.has_sin ? S.n * S.n_sin * S.esz : 0;
+        full[CFT_LANE_SOUT] = S.has_sout ? S.n * S.n_sout * S.esz : 0;
+        full[CFT_LANE_IA] = S.src_elems[0] ? S.n * 4 : 0;
+        full[CFT_LANE_IB] = S.src_elems[1] ? S.n * 4 : 0;
+        full[CFT_LANE_IC] = S.src_elems[2] ? S.n * 4 : 0;
+        full[CFT_LANE_ISI] = (S.has_sin && S.src_elems[3])
+                                 ? S.n * S.n_sin * 4 : 0;
+        for (r = 0; r < 4; r++)
+            if (S.src_elems[r] && (r < 3 || S.has_sin))
+                full[r == 3 ? CFT_LANE_SIN : r] = S.src_elems[r] * S.esz;
+        for (r = 0; r < CFT_LANE_ROLES; r++)
+            next[r] = 0;
+
+        /* the planner: contiguous, in order, all n lanes, none empty */
+        {
+            size_t at = 0, last_tile = 0;
+            for (i = 0; i < k; i++) {
+                if (sl[i].first_elem != at || sl[i].real == 0 ||
+                    (i && sl[i].tile <= last_tile) || sl[i].tile >= ntiles)
+                    bad = 1;
+                at = sl[i].first_elem + sl[i].real;
+                last_tile = sl[i].tile;
+            }
+            if (at != S.n)
+                bad = 1;
+        }
+        for (i = 0; i < k && !bad; i++) {
+            fn(&S, sl[i].first_elem, sl[i].real, w);
+            for (r = 0; r < CFT_LANE_ROLES; r++) {
+                const int whole_src =
+                    (r < 3 && S.src_elems[r]) ||
+                    (r == CFT_LANE_SIN && S.has_sin && S.src_elems[3]);
+                if (whole_src) {
+                    if (!w[r].whole || w[r].off != 0 || w[r].len != full[r])
+                        bad = 1;
+                } else {
+                    if (w[r].whole || w[r].off != next[r])
+                        bad = 1;
+                    next[r] = w[r].off + w[r].len;
+                }
+            }
+        }
+        for (r = 0; r < CFT_LANE_ROLES && !bad; r++) {
+            const int whole_src = (r < 3 && S.src_elems[r]) ||
+                (r == CFT_LANE_SIN && S.has_sin && S.src_elems[3]);
+            if (!whole_src && next[r] != full[r])
+                bad = 1;
+        }
+        if (bad) {
+            misread++;
+            if (report && said++ < 4)
+                CHECK(0, "lane cut: n=%lu esz=%lu tiles=%lu %s planner - a "
+                      "block's windows do not cover it exactly once",
+                      (unsigned long)S.n, (unsigned long)S.esz,
+                      (unsigned long)ntiles, seeded ? "seeded" : "beat");
+            else if (report)
+                failures++;
+        }
+    }
+    return misread;
 }
 
 /* ------------------------------------------------------------------ */
@@ -888,6 +1024,46 @@ int main(void)
                    "at once; an atoi-style parse is caught on %d\n",
                    (int)(sizeof tile_good / sizeof tile_good[0]),
                    (int)(sizeof tile_bad / sizeof tile_bad[0]), caught);
+    }
+
+    /* --- a program run's lanes across tiles: lane_cut.h (2026-09-25) --
+     *
+     * slice.h's reason once more: the XRT backend cuts a program run's
+     * lanes with these two functions, and reaching them there needs a
+     * card. Every block a run has must reach exactly one tile lane for
+     * lane - windows that tile the caller's buffer, in order, once - and
+     * an indexed source must reach every tile whole. The seeded planner
+     * is what CFT_XRT_PROGRAM_CUTS fuzzes the card with, so it is also
+     * held to actually producing the cuts it exists for: some off a beat
+     * boundary, some leaving a tile with nothing. */
+    {
+        int unaligned = 0, empty = 0, u2 = 0, e2 = 0;
+        const int misread = lane_cut_misreads(cft_lane_windows, 4000, 1,
+                                              &unaligned, &empty);
+        const int caught = lane_cut_misreads(lane_windows_slipped, 4000, 0,
+                                             &u2, &e2);
+        cft_slice x[8], y[8], z[8];
+        const size_t kx = cft_plan_lane_cuts(1000, 4, 77, x);
+        const size_t ky = cft_plan_lane_cuts(1000, 4, 77, y);
+        const size_t kz = cft_plan_lane_cuts(1000, 4, 78, z);
+
+        CHECK(unaligned > 0 && empty > 0,
+              "lane cut: the seeded planner cut off a beat boundary %d times "
+              "and left a tile empty %d times - it must do both, or it is not "
+              "fuzzing what it exists for", unaligned, empty);
+        CHECK(kx == ky && !memcmp(x, y, kx * sizeof x[0]),
+              "lane cut: one seed gave two different sets of cuts");
+        CHECK(kz != kx || memcmp(x, z, kx * sizeof x[0]),
+              "lane cut: seeds 77 and 78 gave the same cuts");
+        CHECK(caught > 0,
+              "NEGATIVE CONTROL: a lane cut that sizes the scratch-in block "
+              "by the scratch-out width passed every check");
+        if (!misread && caught > 0 && unaligned > 0 && empty > 0)
+            printf("  lane cut: 4,000 random runs over both planners, every "
+                   "block covered exactly once and every indexed source "
+                   "whole; %d cuts off a beat boundary, %d runs leaving a "
+                   "tile empty; a cut that slips scratch-in's width is caught "
+                   "in %d\n", unaligned, empty, caught);
     }
 
     /* --- a lane mask cut for one tile (ABI 0.14, R17) -------------

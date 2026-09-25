@@ -285,7 +285,10 @@ typedef struct cft_seq_run_io {
     const uint8_t *lane_mask; size_t lane_mask_bytes;
 } cft_seq_run_io;
 
-/* Run a sequencer program (docs/SEQUENCER.md) on ONE compute unit.
+/* Run a sequencer program (docs/SEQUENCER.md). A backend with several
+ * compute units may split the LANES across them - the XRT backend does,
+ * since 2026-09-25, cutting every per-lane block above by lane_cut.h -
+ * and whatever the split, the results are one run's, bit for bit.
  *
  * `image` is the exact byte image cft_program_load validated, DMA'd
  * into the tile whole rather than reassembled from the parsed form -
