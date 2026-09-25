@@ -15,10 +15,11 @@
 #   bash verify/run.sh --require-all   # a skipped stage FAILS the run
 #   SIM_JOBS=12 bash verify/run.sh    # the cocotb targets twelve at a time
 #   bash verify/run.sh --only cpp,node,wasm,lang-rust   # language legs, by name
-#   bash verify/run.sh --budget quick   # ~20 min: every model-vs-C check, the GPU's
-#                                      # photograph, bindings, the language legs, soak,
-#                                      # the five workloads, the browser demos and the
-#                                      # remote backend - after a host build
+#   bash verify/run.sh --budget quick   # ~20 min: the docs, generated, buildargs and
+#                                      # sweepjudge checks, every model-vs-C check, the
+#                                      # GPU's photograph, bindings, the language legs,
+#                                      # soak, the five workloads, the browser demos and
+#                                      # the remote backend - after a host build
 #   bash verify/run.sh --budget gate    # ~2 h quiet, ~4 h loaded: quick + golden,
 #                                      # vectors, libcft, transcend, mpfr, cpp, lint, formal
 #   bash verify/run.sh --budget full    # everything: the census (adds sim, simmc,
@@ -46,8 +47,16 @@
 #   * A stage whose tools are absent is SKIPPED BY NAME with the
 #     reason, never silently passed; --require-all turns those into
 #     failures for machines that claim to be full verification hosts.
+#   * A check INSIDE a stage that did not run is an INNER skip: its
+#     script prints a line whose first word is SKIP or SKIPPED (or the
+#     conformance replay's "<set>: ... skipped, ... on this device"),
+#     and the runner reads a passing stage's log for those lines, with
+#     terminal colour codes removed first. They
+#     are named under the stage's row and in the census, counted in the
+#     JSONL, the VERDICT and the census, and --require-all fails them
+#     like any other skip.
 #   * The exit code is the verdict: nonzero iff any stage FAILED
-#     (or, under --require-all, was skipped).
+#     (or, under --require-all, was skipped or skipped a check inside).
 #   * The report ends with a census block shaped for pasting into
 #     docs/VALIDATION.md.
 #
@@ -136,9 +145,9 @@ BUDGET=""
 # need only a container. `full` is the census. Measured on the
 # Windows desktop (docs/VERIFICATION.md has the table, quiet against
 # loaded): quick ~20 min, gate ~2 h with the box quiet and ~4 h loaded
-# now that the formal gate holds thirty-one proofs, full longer by the
-# simulation suite and the two browser replays; on the WSL distro the
-# replay stages take seconds.
+# now that the formal gate holds thirty proofs and a negative control
+# (thirty-one tasks), full longer by the simulation suite and the two
+# browser replays; on the WSL distro the replay stages take seconds.
 BUDGET_QUICK=docs,generated,buildargs,sweepjudge,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
 BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp
 RESUME=""
@@ -297,9 +306,65 @@ SKIPPED=0
 RAN=0
 CACHED=0
 declare -a ROWS=()
+INNER=0                 # inner skips, summed over the run
+declare -a INNER_BY=()  # "<stage> (<n>)" for each stage that had any
+declare -a INNER_LINES=()  # "<stage>: <its log line>", for the census
 
 
 note() { ROWS+=("$1"); printf '%s\n' "$1"; }
+
+# A JSON string body: the log lines that reach report.jsonl carry
+# Windows paths and quotes. Control characters are gone by then.
+json_esc() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; printf '%s' "${s//$'\t'/\\t}"; }
+
+# ---- inner skips ---------------------------------------------------
+# A stage's exit status says only that nothing it ran failed. On
+# 2026-09-24 `generated` wrote "SKIP  bindings/node/make_seq_corpus.py -
+# cannot run its check here" into its log, exited 0, and the run said
+# "PASS, nothing skipped" - so the summary, report.jsonl and
+# --require-all never saw a check that had not run. The scripts the
+# stages call already name such a check the same way: a line whose
+# FIRST WORD is SKIP or SKIPPED, upper case, followed by a space, a
+# colon or the end of the line (do_generated, reduce_check.py,
+# hw/test-rebuild-argv.sh, bindings/node/test.mjs, host/Makefile's
+# language legs, hw/verify-image.sh, device-test's opcode list, and
+# pytest's -rs summary). That convention is the marker: after a stage
+# passes, its log is read for those lines, and each is an INNER skip.
+# First word only, and case-sensitive, because the logs are full of
+# the word in other places - cocotb's "SKIP=0", pytest's "5 skipped",
+# prose about skipping - and every one of those is a line that names
+# no skipped check. A pytest line folds tests with one reason into
+# "SKIPPED [n]", so it counts n.
+#
+# One other form is read, because the runner cannot change it: the
+# conformance replay (host/src/conformance.c) reports a set or an opcode
+# it could not replay as "<set>: skipped, <what> not on this device" or
+# "<set>: <op> skipped, not on this device", one line each, and none of
+# the 67 runs kept in the main checkout's verify/state on 2026-09-24
+# logged a line of that shape at all. cft-selftest prints that report,
+# so it reaches the libcft stage's log; cpp_api_test and remote_check.py
+# print only the replay's counts, so a set skipped under the cpp or
+# remote stage reaches no log. A check that reports its skip in any
+# third way is invisible here, and should print the SKIP marker.
+#
+# A line is matched as text, not as a terminal paints it. pytest under
+# FORCE_COLOR=1, PY_COLORS=1 or PYTEST_ADDOPTS=--color=yes writes
+# "ESC[33mSKIPPEDESC[0m [n] ...", and when only the ESC byte was removed
+# the first word read "[33mSKIPPED" - so on 2026-09-24 a coloured
+# `--only golden --require-all` said "VERDICT: PASS, nothing skipped"
+# over seven skips, exit 0 (verify-P4, measured). The two pytest stages
+# pass --color=no, which outranks all three settings (measured, pytest
+# 9.1); and every stage's log has its CSI sequences (ESC [ params final)
+# and charset selections (ESC ( B) removed here before anything is
+# matched, for whatever else colours its output. Any other ESC byte goes
+# with the control characters after that.
+ANSI_STRIP=$'s/\033\\[[0-9;:<=>?]*[@-~]//g; s/\033[()][0-9A-Za-z]//g'    # INNER-SKIP-ANSI
+INNER_SKIP_RE='^[[:space:]]*SKIP(PED)?([[:space:]:]|$)'
+REPLAY_SKIP_RE=': ([^[:space:]]+ )?skipped, .*on this device$'    # INNER-SKIP-REPLAY
+inner_scan() {  # <log>  ->  its inner-skip lines, trimmed, one per line
+  LC_ALL=C sed -E "$ANSI_STRIP" < "$1" | tr -d '\000-\010\013-\037' \
+    | grep -E -e "$INNER_SKIP_RE" -e "$REPLAY_SKIP_RE" | sed -E 's/^[[:space:]]+//'
+}
 
 stage() {  # <name> <description> -- command...
   local name=$1 desc=$2; shift 3
@@ -326,7 +391,7 @@ stage() {  # <name> <description> -- command...
   if [ "${verdict:-}" = SKIP ]; then
     SKIPPED=$((SKIPPED+1))
     note "$(printf '%-12s %-7s %s' "$name" "SKIP" "$reason")"
-    echo "{\"stage\":\"$name\",\"verdict\":\"skip\",\"reason\":\"$reason\"}" >> "$JSONL"
+    echo "{\"stage\":\"$name\",\"verdict\":\"skip\",\"reason\":\"$(json_esc "$reason")\"}" >> "$JSONL"
     [ "$REQUIRE_ALL" = 1 ] && FAILED=$((FAILED+1))
     return 0
   fi
@@ -335,11 +400,31 @@ stage() {  # <name> <description> -- command...
   t0=$(date +%s)
   if ( set -o pipefail; "$@" ) > "$RUNDIR/$name.log" 2>&1; then
     t1=$(date +%s); dur=$((t1-t0))
-    : > "$RUNDIR/$name.ok"
+    local inner n=0 k l js=""
+    inner=$(inner_scan "$RUNDIR/$name.log")    # INNER-SKIP-SCAN
+    while IFS= read -r l; do
+      [ -n "$l" ] || continue
+      k=1; [[ $l =~ ^SKIPPED\ \[([0-9]+)\] ]] && k=${BASH_REMATCH[1]}
+      n=$((n+k)); js="$js${js:+,}\"$(json_esc "$l")\""
+    done <<< "$inner"
+    # No .ok for a pass with a gap in it: like a skipped stage, it runs
+    # again on --resume, so a resume can never serve its skips from cache
+    # as a clean pass.
+    [ "$n" -eq 0 ] && : > "$RUNDIR/$name.ok"    # INNER-SKIP-NO-CACHE
     RAN=$((RAN+1))
     rm -f "$RUNDIR/$name.fail"
-    note "$(printf '%-12s %-7s %ss' "$name" "ok" "$dur")"
-    echo "{\"stage\":\"$name\",\"verdict\":\"ok\",\"seconds\":$dur}" >> "$JSONL"
+    if [ "$n" -eq 0 ]; then
+      note "$(printf '%-12s %-7s %ss' "$name" "ok" "$dur")"
+    else
+      INNER=$((INNER+n)); INNER_BY+=("$name ($n)")
+      [ "$REQUIRE_ALL" = 1 ] && FAILED=$((FAILED+1))
+      note "$(printf '%-12s %-7s %ss  + %s inner skip(s) - checks inside it that did not run:' \
+             "$name" "ok" "$dur" "$n")"
+      while IFS= read -r l; do
+        note "$(printf '%-12s %s' "" "$l")"; INNER_LINES+=("$name: $l")
+      done <<< "$inner"
+    fi
+    echo "{\"stage\":\"$name\",\"verdict\":\"ok\",\"seconds\":$dur,\"inner_skips\":$n,\"inner_skip_lines\":[$js]}" >> "$JSONL"
   else
     t1=$(date +%s); dur=$((t1-t0))
     : > "$RUNDIR/$name.fail"
@@ -350,6 +435,13 @@ stage() {  # <name> <description> -- command...
     echo "{\"stage\":\"$name\",\"verdict\":\"fail\",\"seconds\":$dur}" >> "$JSONL"
     tail -12 "$RUNDIR/$name.log" | sed 's/^/     | /'
   fi
+}
+
+# A C compiler HOSTMAKE can use: the one predicate behind `need host-cc`
+# and behind do_generated's decision to build the library itself.
+have_host_cc() {
+  if [ "$WIN" = 1 ]; then [ -x /c/msys64/mingw64/bin/gcc.exe ]
+  else command -v cc >/dev/null 2>&1; fi
 }
 
 # Tool preconditions, expressed as a skip reason for the NEXT stage.
@@ -363,11 +455,9 @@ need() {  # docker|host-cc|xclbinutil ...
       # in 0 s each instead of skipping them by name.
       docker) docker version >/dev/null 2>&1 \
         || STAGE_SKIP_REASON="docker not usable on this host (absent, or present without a reachable engine)";;
-      host-cc) if [ "$WIN" = 1 ]; then
-                 [ -x /c/msys64/mingw64/bin/gcc.exe ] \
-                   || STAGE_SKIP_REASON="mingw64 gcc not found";
-               else command -v cc >/dev/null 2>&1 \
-                   || STAGE_SKIP_REASON="no C compiler"; fi;;
+      host-cc) have_host_cc || if [ "$WIN" = 1 ]; then
+                 STAGE_SKIP_REASON="mingw64 gcc not found"
+               else STAGE_SKIP_REASON="no C compiler"; fi;;
       python) command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1 \
         || STAGE_SKIP_REASON="no python";;
       # A module, not a command: the interpreter PY() picks must import
@@ -426,7 +516,7 @@ if [ "$BUDGET" = quick ]; then
   HOSTMAKE all >/dev/null 2>&1 || HOSTMAKE all || echo "quick budget: host build failed" >&2
 fi
 
-need python pytest
+need python
 stage docs "docs/README.md indexes every document; every document's links and quoted paths resolve; stated counts true; a planted fault per check, each caught by name" -- \
   PY "$ROOT/python/check_docs_index.py" --quiet
 
@@ -465,8 +555,18 @@ need
 stage sweepjudge "hw/sweep_freq.sh judges a sweep point by the kernel clock's own WNS, never the shell's, and a staged image is not a closed one; each with its negative control" -- \
   bash "$ROOT/hw/test-sweep-judge.sh"
 
+# pytest is this stage's precondition. It used to sit on `docs`, which
+# does not import it, while the bare `need` calls above cleared it - so
+# a python without pytest skipped docs for nothing and FAILED golden in
+# a second ("No module named pytest") instead of skipping it by name,
+# measured on 2026-09-24 with a venv that lacks it. -rs has pytest
+# name every test it skipped, one "SKIPPED [n] <file>:<line>: <reason>"
+# line per reason, which is the marker the inner-skip count reads;
+# --color=no keeps a coloured environment from painting that marker
+# (inner_scan, above).
+need python pytest
 stage golden "golden-model pytest suite (the definition of correct)" -- \
-  PY -m pytest "$ROOT/python/tests" -q
+  PY -m pytest "$ROOT/python/tests" -q -rs --color=no
 
 need python
 stage vectors "regenerate the conformance sets from the model, all five attributes" -- \
@@ -535,7 +635,10 @@ stage libcft "host library: build + contract tests + conformance replay" -- do_l
 # earlier (as this did when written) meant the corpus check took its
 # skip path on any clean checkout - including CI, where it would then
 # never have run the one check that had actually caught drift.
-# Every committed file a generator owns, held to that generator.
+# Five generators' committed files, each held to its generator. Not
+# every generated file in the tree: host/include/cft_seq_flags.h is held
+# by `make seqflags` (python/gen_seq_flags.py --check) and
+# rtl/cft_seed_rom.svh by the golden suite's test_seed_rom_sync.py.
 #
 # Each of these scripts already carried a --check mode that exits 1 when
 # the file on disk differs from a fresh generation, and until 2026-09-13
@@ -549,13 +652,35 @@ stage libcft "host library: build + contract tests + conformance replay" -- do_l
 # is checked by nothing is a comment, not a guarantee. This is the gate
 # that makes the comment true.
 #
-# make_seq_corpus.py is the one with prerequisites: it drives libcft
-# through ctypes and imports cft_golden. When those are missing it is
-# skipped BY NAME rather than counted as agreement - the distinction
-# this suite exists to keep - which is why staleness is recognised by
-# the generator's own message rather than by exit status alone.
+# make_seq_corpus.py is the one with a prerequisite beyond python: it
+# drives libcft through ctypes, host/$SHLIB_NAME. So this stage builds
+# that library itself - `make -C host cft.dll` on Windows, libcft.so on
+# Linux, libcft.dylib on Darwin: the Makefile's $(SHLIB) target - on any
+# host with a C compiler, as `reduce` builds reduce-parts. The libcft
+# stage runs first and builds it too, but an --only run without libcft,
+# a --skip libcft run and a clean checkout would otherwise take the skip
+# path, and measured on 2026-09-24 `--only generated` on a clean
+# checkout did, on a desktop whose compiler could have built it in
+# seconds. Only with no compiler AND no library is the check skipped BY
+# NAME rather than counted as agreement - the distinction this suite
+# exists to keep. That SKIP line is an inner skip (stage(), above): it
+# reaches the stage's row, the VERDICT and the census, and fails the run
+# under --require-all.
+#
+# Any other nonzero --check is a FAIL. Staleness is recognised by the
+# generator's own message and printed as STALE; anything else is a check
+# that broke, and until 2026-09-24 that was printed as a SKIP as well -
+# a traceback in any of the five read as "cannot run its check here".
 do_generated() {
-  local rc=0 g out grc
+  local rc=0 g out grc cc=0
+  if have_host_cc; then
+    cc=1
+    HOSTMAKE "$SHLIB_NAME" || {
+      printf '  FAIL  make -C host %s: the library make_seq_corpus.py loads did not build\n' \
+             "$SHLIB_NAME"
+      rc=1
+    }
+  fi
   for g in hw/gen_layouts.py host/tools/gen_2opi.py \
            host/tools/gen_mp_consts.py bindings/node/make_seq_corpus.py \
            python/gen_divfull.py; do
@@ -566,15 +691,20 @@ do_generated() {
       printf '  STALE %s - regenerate with: python %s\n' "$g" "$g"
       printf '%s\n' "$out" | tail -3 | sed 's/^/        /'
       rc=1
+    elif [ "$cc" = 0 ] && [ "$g" = bindings/node/make_seq_corpus.py ] \
+         && [ ! -f "$ROOT/host/$SHLIB_NAME" ]; then
+      printf '  SKIP  %s - no C compiler here to build host/%s, which its check loads: %s\n' \
+             "$g" "$SHLIB_NAME" "$(printf '%s' "$out" | tail -1)"
     else
-      printf '  SKIP  %s - cannot run its check here: %s\n' \
-             "$g" "$(printf '%s' "$out" | tail -1)"
+      printf '  FAIL  %s - its --check exited %s:\n' "$g" "$grc"
+      printf '%s\n' "$out" | tail -3 | sed 's/^/        /'
+      rc=1
     fi
   done
   return $rc
 }
 need python
-stage generated "every committed generated file still matches its generator" -- do_generated
+stage generated "the committed output of five generators still matches a fresh generation, by each one's --check" -- do_generated
 
 do_selfcheck() {
   HOSTMAKE "device-test$EXE" || return 1
@@ -673,9 +803,21 @@ stage seq "the sequencer: C vs model over fuzzed programs, plain and with indexe
   PY "$ROOT/host/tests/seq_check.py" --trials 250 \
      --formats fp32 fp64 fp128 fp256
 
+# reduce_check.py holds the model's partition tree to the C partitioner
+# through host/reduce-parts, and SKIPs that half by name when the binary
+# is absent. `make test` (the libcft stage) builds it; the quick budget's
+# `make all` does not, and nothing else here did - so both quick runs of
+# 2026-09-15 passed `reduce` with the cross-check skipped (their
+# reduce.log), and where a binary was left over it was one linked against
+# whatever libcft.a existed then. Built here, as selfcheck builds
+# device-test, so the cross-check runs against this tree's library.
+do_reduce() {
+  HOSTMAKE "reduce-parts$EXE" || return 1
+  PY "$ROOT/host/tests/reduce_check.py" --trials 1500
+}
 need host-cc python
 stage reduce "all seven clause-9.4 reductions: C vs model, the tree, the two composition identities, the scaled products' invariant" -- \
-  PY "$ROOT/host/tests/reduce_check.py" --trials 1500
+  do_reduce
 
 # The one stage whose expected bits this project did not compute. Every
 # stage above holds the C to the golden model, and the model is ours; a
@@ -706,10 +848,11 @@ stage photograph "a GPU's record of a real workload, bit for bit: atlas-engine's
 #
 # gmpy2 is optional by the test's own design: without it the interop
 # comparisons skip and the refusal and batch-vs-scalar checks still run.
-# So this stage is useful on a bare box and sharper on one with gmpy2.
+# So this stage is useful on a bare box and sharper on one with gmpy2 -
+# and -rs names what the bare box skipped, as inner skips.
 do_bindings() {
   HOSTMAKE "$SHLIB_NAME" >/dev/null 2>&1 || HOSTMAKE all >/dev/null 2>&1 || true
-  CFT_LIB="$ROOT/host/$SHLIB_NAME" PY -m pytest -q \
+  CFT_LIB="$ROOT/host/$SHLIB_NAME" PY -m pytest -q -rs --color=no \
     "$ROOT/bindings/python/test_cftmpfr.py"
 }
 need host-cc python pytest
@@ -858,11 +1001,12 @@ do_remote() {
   # free loopback port, replays a vector subset over WebSocket and over
   # TCP, compares both with the local wasm module and the published
   # answers, and runs the negative controls. Node 22 carries a WebSocket
-  # client of its own; without node the leg is reported, not failed.
+  # client of its own; without node the leg is an inner skip, named on
+  # the stage's row and counted, not failed.
   if command -v node >/dev/null 2>&1; then
     HOSTMAKE wstest
   else
-    echo "remote: no node on PATH - the WebSocket leg (make -C host wstest) was not run"
+    echo "SKIP  remote's WebSocket leg (make -C host wstest): no node on PATH"
   fi
 }
 need host-cc python mpmath
@@ -878,10 +1022,25 @@ stage remote "the remote backend on loopback: cft-serve started and stopped by P
   echo
   printf '%s\n' "${ROWS[@]}"
   echo
+  # The inner skips, named by stage, on the verdict line itself: a
+  # verdict that says "nothing skipped" over a skipped check is the
+  # defect this line exists to prevent.
+  inner_list=""; inner_txt=""
+  if [ "$INNER" -gt 0 ]; then
+    for s in "${INNER_BY[@]}"; do inner_list="$inner_list${inner_list:+, }$s"; done
+    inner_txt="$INNER inner skip(s) in $inner_list"
+  fi
   if [ "$FAILED" -gt 0 ]; then
-    echo "VERDICT: FAIL ($FAILED stage(s))"
-  elif [ "$SKIPPED" -gt 0 ]; then
-    echo "VERDICT: PASS with $SKIPPED skip(s) - see reasons above"
+    if [ -n "$inner_txt" ] && [ "$REQUIRE_ALL" = 1 ]; then
+      echo "VERDICT: FAIL ($FAILED stage(s), including under --require-all $inner_txt)"
+    else
+      echo "VERDICT: FAIL ($FAILED stage(s))${inner_txt:+ - also $inner_txt}"
+    fi
+  elif [ "$SKIPPED" -gt 0 ] || [ -n "$inner_txt" ]; then
+    what=""
+    [ "$SKIPPED" -gt 0 ] && what="$SKIPPED skip(s)"
+    [ -n "$inner_txt" ] && what="$what${what:+ and }$inner_txt"
+    echo "VERDICT: PASS with $what - see reasons above"
   else
     echo "VERDICT: PASS, nothing skipped"
   fi
@@ -891,7 +1050,11 @@ stage remote "the remote backend on loopback: cft-serve started and stopped by P
   echo
   echo "verify/run.sh at $COMMIT: $RAN stage(s) executed," \
        "$CACHED cached from earlier in the run, $FAILED failed," \
-       "$SKIPPED skipped."
+       "$SKIPPED skipped, $INNER inner skip(s)${inner_list:+ ($inner_list)}."
+  if [ "$INNER" -gt 0 ]; then
+    echo "Inner skips - checks inside a stage that passed, which did not run:"
+    for s in "${INNER_LINES[@]}"; do echo "    $s"; done
+  fi
   echo "Run id $RUNID; per-stage logs under verify/state/."
 } | tee "$SUMMARY"
 

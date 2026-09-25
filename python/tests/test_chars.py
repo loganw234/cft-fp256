@@ -224,14 +224,16 @@ def test_exact_ties_are_decided_by_the_attribute(fmt, rnd):
             assert (got, flags) == (want, wflags), (fmt.name, s, rnd)
 
 
-@pytest.mark.parametrize("rnd", RND_MODES)
-def test_from_decimal_fp64_against_cpython(rnd):
+def test_from_decimal_fp64_against_cpython():
     """CPython's float() is a correctly rounded binary64 decimal parse,
     reached through a lineage this model shares nothing with. Only the
     nearest attribute can be compared - CPython has no others - which
-    is exactly why the rational reference above exists."""
-    if rnd != RND_RNE:
-        pytest.skip("CPython parses to nearest only")
+    is exactly why the rational reference above exists: it holds every
+    DECIMALS sequence at binary64 (and the other three formats) to all
+    five attributes. This test was once parametrized over the five and
+    skipped four of them before asserting anything, so those four were
+    never cases, only a skip on every host - and verify/run.sh counts a
+    skip as a check that did not run."""
     for s in DECIMALS + ["1.7976931348623157e308", "5e-324", "2.5e-324",
                          "4.9406564584124654e-324", "1e309", "-1e309"]:
         got, _ = chars.from_decimal(FP64, s, RND_RNE)
