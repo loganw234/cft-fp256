@@ -72,6 +72,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 try:
@@ -449,10 +450,37 @@ def _relay(tool, argv, ckpt, recs, engines, stop, total, env_for=None):
             return rounds, midway
 
 
+def _csv_row(stdout):
+    lines = stdout.strip().splitlines()
+    return dict(zip(lines[0].split(","), lines[-1].split(",")))
+
+
+def _interrupted(tool, tmp, argv, name, env=None, after=3.0):
+    """Start a run, kill it `after` seconds in, and return (whether it
+    was still running when killed, the step its checkpoint holds or
+    None if it wrote none). The checkpoint is written to a temporary
+    and renamed, so a kill cannot leave half of one."""
+    ck = Path(tmp) / name
+    if ck.exists():
+        ck.unlink()
+    proc = subprocess.Popen([tool.exe] + [str(a) for a in argv] +
+                            ["--checkpoint", str(ck)],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL, env=env)
+    time.sleep(after)
+    alive = proc.poll() is None
+    proc.kill()
+    proc.wait()
+    return alive, (_at_of(ck)[0] if ck.exists() else None)
+
+
 def check_segments(tool, tmp):
-    """[6b] --engine segments. Every comparison here has a control that
-    must make it fail, and the control's failure is asserted - a
-    comparison that has never been seen to fail is not a gate."""
+    """[6b] --engine segments. The engine comparisons, stop points,
+    relays, interruption and golden comparison each carry a control
+    that must make them fail, and its failure is asserted - a
+    comparison that has never been seen to fail is not a gate. The
+    census and the batch-size comparison carry none of their own;
+    docs/ORBITS.md says what holds them instead."""
     print("\n[6b] --engine segments: the ensemble state through the "
           "scratch block")
     env_nc = dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="transpose")
@@ -483,7 +511,72 @@ def check_segments(tool, tmp):
               "%s, %s: --engine segments and the host loop disagree"
               % (problem, scheme))
 
-    # --- the census the ledger quotes, derived from the structure ----
+    # --- the other three formats ---------------------------------------
+    # The Newton pass count is the format's, so a segment built with
+    # binary256's passes at every format matches the loop engine at
+    # binary256 and nowhere else - one configuration of each other
+    # format runs here. The arithmetic count the census implies is held
+    # to the loop engine's own count at each, a second statement of the
+    # census that shares none of its derivation.
+    for fmtname, problem, scheme, extra in (
+            ("fp32", "kepler", "yoshida4", ["--periods", 2,
+                                            "--steps-per-period", 96]),
+            ("fp64", "outer", "leapfrog", ["--years", 2, "--days", 10]),
+            ("fp128", "outer", "yoshida4", ["--years", 2, "--days", 10])):
+        argv = ["--problem", problem, "--scheme", scheme, "--format",
+                fmtname, "--members", 5, "--rsqrt", "newton", "--quiet",
+                *extra]
+        got, ops = {}, {}
+        for eng, batch in (("loop", 5), ("segments", 3)):
+            ck = Path(tmp) / ("f-%s-%s.ckpt" % (fmtname, eng))
+            rc = Path(tmp) / ("f-%s-%s.txt" % (fmtname, eng))
+            proc = tool.run(*argv, "--engine", eng, "--batch", batch,
+                            "--checkpoint", ck, "--records", rc, "--csv")
+            got[eng] = (ck.read_bytes(), rc.read_bytes())
+            ops[eng] = int(_csv_row(proc.stdout)["elemops"])
+        nrec = got["loop"][1].count(b"\n")
+        check(got["loop"] == got["segments"] and nrec > 0 and
+              ops["loop"] == ops["segments"] > 0,
+              "%s, %s, %s: segments and the host loop end on byte-identical "
+              "checkpoints and %d records, and issue the same %d operations"
+              % (fmtname, problem, scheme, nrec, ops["loop"]),
+              "%s, %s, %s: segments and the host loop disagree (operations "
+              "%d against %d)" % (fmtname, problem, scheme, ops["segments"],
+                                  ops["loop"]))
+
+    # --- where a stopped run stops --------------------------------------
+    # A relay converges on the same end state however its legs split, so
+    # it cannot see a leg that stopped one step late. A single stopped
+    # run's checkpoint can: it records the step it stopped at. Stride 96,
+    # so 95, 96 and 97 sit either side of a sample boundary.
+    sargv = ["--problem", "kepler", "--scheme", "leapfrog", "--format",
+             "fp256", "--members", 5, "--rsqrt", "newton", "--quiet",
+             "--periods", 2, "--steps-per-period", 96, "--batch", 3]
+    stops, held, blob = (1, 13, 95, 96, 97), [], {}
+    for stop in stops:
+        for eng in ("loop", "segments"):
+            ck = Path(tmp) / ("stop-%d-%s.ckpt" % (stop, eng))
+            tool.run(*sargv, "--engine", eng, "--stop-after-steps", stop,
+                     "--checkpoint", ck)
+            blob[stop, eng] = (ck.read_bytes(), _at_of(ck)[0])
+        if (blob[stop, "loop"][0] == blob[stop, "segments"][0] and
+                blob[stop, "loop"][1] == blob[stop, "segments"][1] == stop):
+            held.append(stop)
+    check(len(held) == len(stops),
+          "stopped after %s steps, segments stop where the host loop does, "
+          "on byte-identical checkpoints" % ", ".join(map(str, stops)),
+          "a stopped segments run is not where the host loop's is (held at "
+          "%s of %s)" % (held, list(stops)))
+    # the control: a run one step late, across a sample boundary and
+    # inside an interval, is a different checkpoint to this comparison
+    late = [(s, s + 1) for s in (95, 96)
+            if blob[s, "loop"][0] == blob[s + 1, "segments"][0]]
+    check(not late,
+          "NEGATIVE CONTROL: the host loop stopped at 95 and 96 against "
+          "segments stopped at 96 and 97 FAILS the same comparison, so a "
+          "segment that stopped a step late would",
+          "NEGATIVE CONTROL FAILED TO FAIL: checkpoints a step apart "
+          "compared equal at %s" % late)
     for problem, scheme, extra in (cases[0], cases[3]):
         common = ["--problem", problem, "--scheme", scheme, "--format",
                   "fp256", "--members", 5, "--rsqrt", "newton", *extra]
@@ -519,14 +612,25 @@ def check_segments(tool, tmp):
     base = ["--problem", "kepler", "--format", "fp256", "--members", 8,
             "--periods", 2, "--steps-per-period", 96, "--rsqrt", "newton",
             "--engine", "segments", "--quiet"]
-    blobs = []
-    for batch in (8, 3, 1):
+    # A --batch far past --members is legal and means one chunk of all of
+    # them; buffers sized by the batch rather than the chunk asked for
+    # ~128 TB at 10^12 and died "out of memory" where the loop ran.
+    blobs, died = [], []
+    for batch in (8, 3, 1, 10 ** 12):
         path = Path(tmp) / ("s-bs-%d.ckpt" % batch)
-        tool.run(*base, "--batch", batch, "--checkpoint", path)
-        blobs.append(path.read_bytes())
-    check(blobs[0] == blobs[1] == blobs[2],
-          "segments at batch 8, 3 and 1 end on byte-identical checkpoints",
-          "the segments engine's checkpoints differ across batch sizes")
+        proc = tool.run(*base, "--batch", batch, "--checkpoint", path,
+                        expect_ok=False)
+        if proc.returncode:
+            died.append("batch %d: exit %d, %s" % (
+                batch, proc.returncode, proc.stderr.strip()[-120:]))
+            blobs.append(None)
+        else:
+            blobs.append(path.read_bytes())
+    check(not died and blobs[0] == blobs[1] == blobs[2] == blobs[3],
+          "segments at batch 8, 3, 1 and 10^12 (past the 8 members) end on "
+          "byte-identical checkpoints",
+          "the segments engine's checkpoints differ across batch sizes%s"
+          % ("" if not died else " - " + "; ".join(died)))
 
     # --- resumed in pieces, alternating engines, the outer system -----
     # The case the old program engine could not run at all: thirty
@@ -585,6 +689,89 @@ def check_segments(tool, tmp):
           "NEGATIVE CONTROL FAILED TO FAIL: the relay matched with a "
           "transposed segment")
 
+    # --- an interruption costs about one --checkpoint-interval --------
+    # A sample interval of 30,000 steps - minutes of work - a one-second
+    # checkpoint interval, and a kill three seconds in. The host loop has
+    # always left a checkpoint part way through such an interval; a
+    # segment is sized to fit one checkpoint interval at the rate the
+    # previous one ran, so segments must too. The control is the engine
+    # before that sizing (uncapped): its first segment is the whole
+    # interval, so the kill finds no checkpoint at all.
+    iargv = ["--problem", "outer", "--scheme", "yoshida4", "--format",
+             "fp256", "--members", 32, "--rsqrt", "newton", "--quiet",
+             "--years", 1000, "--days", 10, "--sample-every", 30000,
+             "--checkpoint-interval", 1, "--engine", "segments"]
+    alive, at = _interrupted(tool, tmp, iargv, "kill.ckpt")
+    check(alive and at is not None and 0 < at < 30000,
+          "killed 3 s into a 30,000-step sample interval with "
+          "--checkpoint-interval 1, segments left a checkpoint at step %s - "
+          "part way through the interval, as the host loop does" % at,
+          "a segments run killed mid interval left %s (still running at "
+          "the kill: %s)" % ("no checkpoint" if at is None
+                             else "a checkpoint at step %d" % at, alive))
+    env_unc = dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="uncapped")
+    alive, at = _interrupted(tool, tmp, iargv, "kill-nc.ckpt", env=env_unc)
+    check(alive and not at,
+          "NEGATIVE CONTROL: the same run with segments uncapped leaves no "
+          "checkpoint by the kill - the whole interval is lost, so the "
+          "check above can see it",
+          "NEGATIVE CONTROL FAILED TO FAIL: uncapped segments left a "
+          "checkpoint at step %s (still running: %s)" % (at, alive))
+
+    # --- a sample interval longer than one segment may run -------------
+    # The loader refuses an image that could execute more than 2^40
+    # instructions, and a trip count is 32 bits; a longer interval runs
+    # as several segments. Each run's FIRST segment is exactly the
+    # longest the tool computes it may be - outer/yoshida4 at the
+    # instruction ceiling, kepler/leapfrog at the trip-count limit - so
+    # a limit computed one too long is refused at load, at once, and one
+    # computed right loads and runs until it is killed. (Until
+    # 2026-09-25 the first was refused, unnamed, and the second by name.)
+    long_runs = (
+        ("outer, yoshida4, a segment at the 2^40-instruction ceiling",
+         ["--problem", "outer", "--scheme", "yoshida4",
+          "--steps", 700000000, "--sample-every", 700000000]),
+        ("kepler, leapfrog, a segment at the 2^32-1 trip count",
+         ["--problem", "kepler", "--scheme", "leapfrog",
+          "--steps", 5000000000, "--sample-every", 5000000000]))
+    procs = []
+    for label, extra in long_runs:
+        argv = ["--format", "fp256", "--members", 2, "--rsqrt", "newton",
+                "--quiet", "--engine", "segments", *extra]
+        procs.append((label, subprocess.Popen(
+            [tool.exe] + [str(a) for a in argv], stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE, text=True)))
+    time.sleep(2.0)
+    for label, p in procs:
+        alive = p.poll() is None
+        p.kill()
+        _, err = p.communicate()
+        check(alive,
+              "%s: an interval longer than one segment may run is split, "
+              "not refused - the first segment, at exactly that limit, "
+              "loaded and ran until killed" % label,
+              "%s: refused or died at once: exit %s, %s"
+              % (label, p.returncode, err.strip()[-200:]))
+
+    # --- a segment's flags reach the certificate -----------------------
+    # A fault only the flag certificate can see: with every r^2 in the
+    # image zeroed, the reciprocal square root meets a zero and the step
+    # goes to NaN. The run must end on the certificate - exit 3, naming
+    # the segment - so a segments engine that dropped its flags_out
+    # (and would finish with exit 0 and a NaN energy) cannot pass.
+    env_z = dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="zero-r2")
+    proc = tool.run("--problem", "kepler", "--scheme", "leapfrog",
+                    "--format", "fp64", "--members", 3, "--rsqrt", "newton",
+                    "--periods", 1, "--steps-per-period", 64, "--quiet",
+                    "--engine", "segments", expect_ok=False, env=env_z)
+    check(proc.returncode == 3 and
+          "a sequencer-program segment raised" in proc.stderr and
+          "NEGATIVE CONTROL ACTIVE" in proc.stderr,
+          "PLANTED FAULT: with every r^2 in the segment zeroed the run stops "
+          "on the flag certificate - exit 3, naming the segment",
+          "PLANTED FAULT MISSED: a zeroed r^2 gave exit %d - %s"
+          % (proc.returncode, proc.stderr.strip()[-200:]))
+
     # --- the golden model on the image this engine writes -------------
     for problem, scheme, fmtname, extra in (
             ("kepler", "leapfrog", "fp64", ["--periods", 1,
@@ -619,13 +806,23 @@ def check_segments(tool, tmp):
                                                          len(prog.insns)),
               "%s: the golden model and the library disagree on the "
               "segment" % label)
-        flipped = list(s_out)
-        flipped[len(flipped) // 2] ^= 1
-        check(res.scratch_out != flipped,
-              "%s: NEGATIVE CONTROL: one flipped bit in the library's "
-              "scratch-out is caught by the same comparison" % label,
-              "%s: NEGATIVE CONTROL FAILED TO FAIL: a flipped bit matched"
-              % label)
+        # The control is a different PROGRAM, not a different answer: a
+        # flipped bit in s_out could never have matched once the check
+        # above passed, so it proved nothing. Constant 2 is the first
+        # drift's h/2 (the bank's order is -1, -1/2, then those), and one
+        # bit of it must move the golden executor off the library.
+        esz = fmt.width // 8
+        other = bytearray(image)
+        other[32 + 2 * esz] ^= 1
+        res_k = seq.run(seq.Program.from_bytes(bytes(other)), a_in,
+                        [0] * n, None, scratch_in=s_in)
+        check(res_k.scratch_out != s_out,
+              "%s: NEGATIVE CONTROL: the same image with one bit of one "
+              "constant changed gives the golden executor a different "
+              "scratch-out, so agreement means the library ran THIS "
+              "program" % label,
+              "%s: NEGATIVE CONTROL FAILED TO FAIL: an altered constant "
+              "left the golden scratch-out unchanged" % label)
         again = asm.assemble(asm.disassemble(image), "segment")
         check(again == image,
               "%s: the reference assembler reads the image back to the same "
@@ -1033,6 +1230,11 @@ def main():
             ("the negative control on an engine it does not sabotage",
              ["--engine", "loop", "--periods", 1], env_nc,
              "sabotages --engine segments"),
+            ("a negative control the tool does not have - a misspelt one "
+             "must not run clean",
+             ["--engine", "segments", "--periods", 1],
+             dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="transposed"),
+             "takes transpose, zero-r2 or uncapped"),
         ):
             proc = tool.run(*argv, expect_ok=False, env=env)
             check(proc.returncode != 0 and needle in proc.stderr,

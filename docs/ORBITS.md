@@ -385,14 +385,30 @@ from whatever state the tool holds. Nothing is deposited.
 The tool drives segments from the loop engine's own control loop - one
 segment to the next sample boundary, or to the `--stop-after-steps`
 point when that comes first - so the checkpoints, the records and the
-chain are the loop engine's by construction. What that buys is
-everything (1) forbade:
+chain are the loop engine's by construction. A segment is shorter than
+that when one of two limits says so, and where segments end reaches no
+result:
+
+- **the loader's.** An image whose worst case could execute more than
+  2^40 instructions is refused (docs/SEQUENCER.md, "What the loader
+  refuses"), and a trip count is 32 bits. The tool multiplies its own
+  image out the way the loader does and runs a longer interval as
+  several segments, each at most that long.
+- **the checkpoint's.** While `--checkpoint` is being written, a segment
+  is sized to fit one `--checkpoint-interval` at the rate the previous
+  one ran - a power of two of steps, so a run settles on a few image
+  lengths; the first segment of a run is one step, which measures the
+  rate. Without it one segment was a whole sample interval, and an
+  interruption lost all of it.
+
+What that buys is everything (1) forbade:
 
 - the outer solar system runs as programs, thirty values a lane;
 - a run resumes from a checkpoint either engine wrote, mid sample
   interval;
 - any number of samples: a segment deposits nothing, so the tile's 64
-  deposit slots bound nothing.
+  deposit slots bound nothing;
+- any sample interval, however long.
 
 The program loads every `q_c` into register `c` on entry and stores it
 back on exit. The velocities stay in their slots and are loaded,
@@ -420,28 +436,61 @@ structure:
 | outer, yoshida4 | 1,833 | 36 | 1,350 | 450 | 30 |
 
 A quarter of the outer solar system's instruction stream is scratch
-traffic, which the card prices at about four times an arithmetic
-instruction (docs/ROADMAP.md, "Control codes do not join the
-instruction overlap", atlas-engine's measurement of 2026-09-17). The
-outer yoshida4 image addresses 36 constants, so it carries the indexed
+traffic. docs/ROADMAP.md ("Control codes do not join the instruction
+overlap", atlas-engine's measurement of 2026-09-17) put a control code
+at about four arithmetic instructions (0.98 against 3.9 ns); in the
+load-then-use pattern this body is made of, the U50 single tile at
+145 MHz measured a scratch access between two arithmetic instructions
+at about five - 5.2 at binary64, 5.1 at binary256 (docs/VALIDATION.md,
+2026-09-25). The outer yoshida4 image carries 36 constants and
+addresses 30 of them, the highest at index 34, so it uses the indexed
 (`kx`) form.
 
 **What holds it**, in `host/tests/orbits_check.py`'s section [6b]:
-byte-identical checkpoints and records against the host loop on both
-problems and both schemes; batch 8, 3 and 1 byte-identical; the outer
-solar system stopped every 37 steps and resumed by segments alone, and
-by the two engines in turn, ending on the uninterrupted loop engine's
-bytes; the census above against the program's structure; and
-`python/cft_golden` on the image the tool writes (`--segment-dump
-DIR`) - its executor returns the library's scratch-out exactly, and its
-assembler reads the image back to the same bytes, `kx` choice
-included. Every comparison has a control that must make it fail:
+
+- byte-identical checkpoints and records against the host loop on both
+  problems and both schemes at binary256, and on one configuration at
+  each of binary32, binary64 and binary128 - the Newton pass count is
+  the format's, so a pass-count error shows nowhere else - where the
+  operation count the census implies must also equal the loop engine's
+  own count, a second statement of the census that shares none of its
+  derivation;
+- the same bytes after `--stop-after-steps` 1, 13, 95, 96 and 97 - 95
+  to 97 straddle a sample boundary - with each checkpoint at the step
+  asked for;
+- batch 8, 3, 1 and 10^12 byte-identical;
+- the outer solar system stopped every 37 steps and resumed by segments
+  alone, and by the two engines in turn, ending on the uninterrupted
+  loop engine's bytes;
+- a run killed three seconds into a 30,000-step sample interval with
+  `--checkpoint-interval 1` has left a checkpoint part way through it;
+- an interval longer than one segment may be runs rather than being
+  refused, each run's first segment at exactly the limit - the
+  instruction ceiling for outer/yoshida4, the trip count for
+  kepler/leapfrog - where one step more would be refused at load;
+- the census above against the program's structure;
+- `python/cft_golden` on the image the tool writes (`--segment-dump
+  DIR`): its executor returns the library's scratch-out exactly, and
+  its assembler reads the image back to the same bytes, `kx` choice
+  included.
+
+The controls, each run every time and each required to fail:
 `CFT_ORBITS_NEGATIVE_CONTROL=transpose` packs `v_0` and `v_1` into each
-other's slots - the lane-major transposition bug the comparison exists
+other's slots - the lane-major transposition bug the comparisons exist
 to catch - and both the engine comparison and the relay fail under it;
-a flipped bit in the scratch-out fails the golden comparison; and a
-reserved bit set in the image is refused by both the golden loader and
-the disassembler.
+the host loop stopped at 95 and 96 against segments stopped at 96 and
+97 fails the stop comparison; `=uncapped` restores the old sizing, and
+the killed run then leaves no checkpoint at all; `=zero-r2` zeroes
+every `r^2` in the image, and the run must end on the flag certificate
+(exit 3), so a segment whose flags were dropped cannot pass; the golden
+executor on the image with one bit of one constant changed must
+disagree with the library's scratch-out; and a reserved bit set in the
+image is refused by both the golden loader and the disassembler. The
+census and the batch comparison carry no control of their own. The
+census was watched failing under two planted miscounts, and every leg
+above under its own planted defect, on 2026-09-25 (docs/VALIDATION.md);
+the batch comparison's chunk boundary is crossed, with the transpose
+control, by the engine comparison at batch 3 of 5.
 
 **What it does not do.** `--rsqrt exact`, for the reason in (2): it is
 refused by name. And `--engine program` stays exactly as it was: the
@@ -513,6 +562,21 @@ Every call's `flags_out` is read and every one of those four stops the
 run with exit 3, naming the operation. They cost nothing, because the
 library computes them anyway.
 
+**Where the Newton route's certificate is thinner.** `--rsqrt newton`
+starts from the reciprocal-square-root seed, which is quiet by design
+(`python/cft_golden/softfloat.py`, `rsqrt_seed`: the INVALID for a
+negative operand belongs to the contract-level square root, not to its
+scaffolding). A NEGATIVE `r^2` - fault B2 below - therefore becomes a
+quiet NaN that the multiplies and fused multiply-adds after it carry
+without raising anything, and the run finishes with exit 0 and a NaN
+state on every engine that takes that route; `--engine segments` takes
+no other. The run's own report then shows `dH=nan`, and of the gates
+the 300-digit agreement and the energy drift fail on it, while the
+angular-momentum certificate does not (a NaN state conserves
+everything, B1). A ZERO `r^2` is still caught: the seed returns +inf,
+the first Newton multiply meets zero times infinity and raises INVALID
+- the planted fault the segments gate uses (`zero-r2`, [6b]).
+
 Beside them the tool uses ABI 0.7's status word (754-2019 7.1) as a
 second, free cross-check. Building the constants and the initial
 condition deliberately rounds; the tool lowers the word once with
@@ -577,8 +641,13 @@ cannot lose a bit.
 The checkpoint is **step-granular, not sample-granular**: the ensemble
 state is complete after every step, so a timed checkpoint may fall
 between any two of them and `--resume` picks up part way through a
-sample interval. That is what makes an interruption cost at most one
-`--checkpoint-interval` of work however coarse the sampling is.
+sample interval. That is what makes an interruption cost about one
+`--checkpoint-interval` of work however coarse the sampling is. The
+loop engine reads the clock after every step. `--engine segments` can
+only write one between segments, so it sizes each segment to fit one
+interval at the rate the one before it ran ("As resumable segments"
+above). "About" is the honest word there: a segment that runs slower
+than the last one did overruns by the difference.
 
 ### The hash chain
 
@@ -632,9 +701,9 @@ same bytes wherever it sits.
 | the chain | recomputed with `hashlib` |
 | batch size | 8, 3 and 1 over the same ensemble must end on byte-identical checkpoints |
 | engines | the whole integration as one sequencer program and the host `cft_run` loop must produce byte-identical records AND checkpoints |
-| segments | `--engine segments` against the host loop on both problems and both schemes; its own batch sizes; the outer solar system resumed in 37-step pieces by segments alone and by the two engines in turn; its census against the program's structure; the golden model's executor and assembler on its image; and a negative control for every one of those comparisons, which must fail |
+| segments | `--engine segments` against the host loop on both problems and both schemes at binary256 and on one configuration at each other format, operation counts included; five stop points; its own batch sizes, 10^12 included; the outer solar system resumed in 37-step pieces by segments alone and by the two engines in turn; a run killed mid interval leaves a checkpoint; intervals past one segment's limits run; its census against the program's structure; the golden model's executor and assembler on its image; the flag certificate on a planted fault; and a control on each comparison but the census and the batch sizes, which must fail ("As resumable segments" names them) |
 | interruption | a run stopped every 37 steps - which does not divide the 96-step sample interval, so most stops land mid-interval - and resumed at a different batch size must end on the same checkpoint and the same records, byte for byte, as one that was never stopped |
-| refusals | the three things `--engine program` must refuse, and the three `--engine segments` must, each with its reason |
+| refusals | the three things `--engine program` must refuse, and the four `--engine segments` must, each with its reason |
 
 ---
 

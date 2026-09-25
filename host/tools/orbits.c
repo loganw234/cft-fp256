@@ -172,9 +172,9 @@
  * same way, so a run is a SEGMENT of steps from any state this tool
  * can hold. That answers (1) below, and it is what lets a program
  * engine run the outer solar system, resume from a checkpoint either
- * engine wrote, stop at any step, and record any number of samples:
- * a segment deposits nothing, so the tile's deposit budget no longer
- * bounds a run. Segments are driven by the loop engine's own control
+ * engine wrote, stop at any step, run any sample interval, and record
+ * any number of samples: a segment deposits nothing, so the tile's
+ * deposit budget no longer bounds a run. Segments are driven by the loop engine's own control
  * loop - the same checkpoints, the same records, the same chain - and
  * their arithmetic is the loop engine's instruction for instruction
  * ("The integration as resumable segments", below).
@@ -231,7 +231,9 @@
  *
  * Under --rsqrt newton the three engines produce byte-identical
  * records, byte-identical checkpoints and the same chain wherever each
- * can run, and host/tests/orbits_check.py tests exactly that.
+ * can run. host/tests/orbits_check.py holds that at all four formats,
+ * on the problems, schemes, batch sizes, stop points and relays it
+ * names - evidence for the claim, not every configuration there is.
  *
  * ---------------------------------------------------------------
  * Flags: which are expected, which are certificates
@@ -728,6 +730,8 @@ typedef struct {
     uint64_t     s_alu_step, s_ctl_step;   /* inside the REPEAT body */
     uint64_t     s_runs;              /* cft_program_run_ex calls */
     int          s_dumped;            /* --segment-dump written */
+    uint64_t     s_kmax;              /* longest segment the loader takes */
+    double       s_sec_per_step;      /* the last segment's, 0 untimed */
 } runstate;
 
 /* ---- chunked library calls ---------------------------------------
@@ -1276,6 +1280,12 @@ static uint8_t *build_program(runstate *R, size_t *bytes_out)
  *
  * The constants ride in the image: this tool builds its images per
  * run, so there is nothing a per-run bank (BANK_EXT) would save.
+ *
+ * How long a segment is - to the sample boundary or the stop point,
+ * and no longer than the loader takes or, while checkpoints are
+ * written, than one --checkpoint-interval at the last segment's rate -
+ * is decided in main()'s run loop; seg_limits and seg_time_cap carry
+ * the two limits, and no result depends on where a segment ends.
  * =================================================================== */
 
 /* Revision 3's scratch pair, beside the six codes above. docs/
@@ -1297,14 +1307,24 @@ enum { SR_X = 19, SR_Y, SR_W, SR_E, SR_Z, SR_G, SR_T1, SR_V };
 #define SEG_SQ(c)     ((uint32_t)(c))                 /* q_c's slot */
 #define SEG_SV(R, c)  ((uint32_t)((R)->ncomp + (c)))  /* v_c's slot */
 
-/* The negative control this engine carries, read once in main(). With
- * CFT_ORBITS_NEGATIVE_CONTROL=transpose the host packs v_0 into v_1's
- * slot and v_1 into v_0's - and unpacks the same way, so its own arrays
- * stay consistent - which is the lane-major transposition bug a gate
- * comparing these engines exists to catch. orbits_check.py runs it and
- * requires the comparison to FAIL. It prints a warning on stderr
- * whenever it is set, and it is never set by anything but that test. */
-static int NEGCTL_TRANSPOSE = 0;
+/* The negative controls this engine carries, read once in main() from
+ * CFT_ORBITS_NEGATIVE_CONTROL. Each makes --engine segments wrong in
+ * one named way; orbits_check.py runs each and requires the check it
+ * exists for to FAIL. Each prints a warning on stderr whenever it is
+ * set, and nothing but that test sets them.
+ *
+ *   transpose  the host packs v_0 into v_1's slot and v_1 into v_0's -
+ *              and unpacks the same way, so its own arrays stay
+ *              consistent - the lane-major transposition bug the engine
+ *              comparisons exist to catch;
+ *   zero-r2    every r^2 the image forms becomes r^2 - r^2 = +0, so the
+ *              reciprocal square root meets a zero and the step goes to
+ *              NaN: a fault only the flag certificate can see, which is
+ *              what shows a segment's flags reach note_flags();
+ *   uncapped   segments ignore --checkpoint-interval and run to the
+ *              sample boundary, as this engine did before 2026-09-25,
+ *              which the interruption test must see as a lost interval. */
+static int NEGCTL_TRANSPOSE = 0, NEGCTL_ZERO_R2 = 0, NEGCTL_UNCAPPED = 0;
 
 static int seg_vperm(int c)
 {
@@ -1415,6 +1435,8 @@ static void seg_inv_r3(seg_ibuf *B, const fmt_info *fi, int kmone,
                        int kmhalf, int kscale, int dst)
 {
     int k;
+    if (NEGCTL_ZERO_R2)
+        seg_put(B, seg_alu(CFT_SUB, SR_X, SR_X, 0, SR_X));
     seg_put(B, seg_alu(CFT_RSQRT_SEED, SR_Y, SR_X, 0, 0));
     for (k = 0; k < fi->newton; k++) {
         seg_put(B, seg_alu(CFT_MUL, SR_W, SR_X, SR_Y, 0));
@@ -1642,8 +1664,11 @@ static void seg_run(runstate *R, uint64_t k)
         R->sprog_k = k;
     }
     if (!R->sin) {
-        R->sin = (uint8_t *)xcalloc(O->batch * ns, esz);
-        R->sout = (uint8_t *)xcalloc(O->batch * ns, esz);
+        /* one chunk's worth: --batch past --members is legal and means
+         * one chunk of all of them, so it must not size the buffers */
+        size_t lanes = O->batch < M ? O->batch : M;
+        R->sin = (uint8_t *)xcalloc(lanes * ns, esz);
+        R->sout = (uint8_t *)xcalloc(lanes * ns, esz);
     }
 
     for (chunk = 0; chunk < M; chunk += O->batch) {
@@ -1709,6 +1734,51 @@ static void seg_run(runstate *R, uint64_t k)
         N_ELEMOPS += (uint64_t)n * k * R->s_alu_step;
         R->s_runs++;
     }
+}
+
+/* The loader refuses an image whose worst case could execute more than
+ * 2^40 instructions (docs/SEQUENCER.md, "What the loader refuses"), and
+ * a REPEAT's trip count is 32 bits. It multiplies the nest out as
+ * src/program.c's seq_validate does: the REPEAT, the loads before it
+ * and the stores and HALT after it once each, and the body with its
+ * ENDREP - which the census does not count - once a pass. So the
+ * longest segment is read off a one-step image's census, exactly: one
+ * step more and the loader would refuse it. A sample interval longer
+ * than that is run as several segments - this engine resumes between
+ * any two steps, so nothing is refused that the loop engine runs. */
+#define SEG_MAX_EXEC (1ull << 40)
+
+static void seg_limits(runstate *R)
+{
+    size_t bytes = 0;
+    uint8_t *img = seg_build(R, 1, &bytes);
+    uint64_t body, outside, k;
+
+    seg_census(R, img, bytes);
+    free(img);
+    body = R->s_alu_step + R->s_ctl_step + 1;      /* ENDREP included */
+    outside = R->s_insns - body;
+    k = (SEG_MAX_EXEC - outside) / body;
+    R->s_kmax = k < 0xffffffffull ? k : 0xffffffffull;
+    if (!R->s_kmax)
+        die("internal: a one-step segment exceeds the loader's ceiling");
+}
+
+/* How many steps fit in `secs` at the rate the last segment ran: the
+ * largest power of two that does, so a run settles on a few image
+ * lengths instead of rebuilding for every segment; and 1 before any
+ * segment has been timed, which is how the rate is first measured. */
+static uint64_t seg_time_cap(const runstate *R, double secs)
+{
+    uint64_t cap = 1;
+    double fit;
+
+    if (R->s_sec_per_step <= 0)
+        return 1;
+    fit = secs / R->s_sec_per_step;
+    while (cap < (1ull << 62) && (double)(cap * 2) <= fit)
+        cap *= 2;
+    return cap;
 }
 
 /* ===================================================================
@@ -2591,16 +2661,29 @@ int main(int argc, char **argv)
     {
         const char *nc = getenv("CFT_ORBITS_NEGATIVE_CONTROL");
         if (nc && *nc) {
-            if (strcmp(nc, "transpose"))
-                die("CFT_ORBITS_NEGATIVE_CONTROL takes transpose");
+            const char *what;
+            if (!strcmp(nc, "transpose")) {
+                NEGCTL_TRANSPOSE = 1;
+                what = "v_0 and v_1 are packed into each other's scratch "
+                       "slots - every result of this run is deliberately "
+                       "wrong";
+            } else if (!strcmp(nc, "zero-r2")) {
+                NEGCTL_ZERO_R2 = 1;
+                what = "every r^2 in the segment image is zeroed - the run "
+                       "must end on the flag certificate";
+            } else if (!strcmp(nc, "uncapped")) {
+                NEGCTL_UNCAPPED = 1;
+                what = "segments ignore --checkpoint-interval - an "
+                       "interruption loses up to a whole sample interval";
+            } else {
+                die("CFT_ORBITS_NEGATIVE_CONTROL takes transpose, zero-r2 "
+                    "or uncapped");
+            }
             if (O.engine != ENG_SEGMENTS)
-                die("CFT_ORBITS_NEGATIVE_CONTROL=transpose sabotages "
-                    "--engine segments and nothing else");
-            NEGCTL_TRANSPOSE = 1;
+                die("CFT_ORBITS_NEGATIVE_CONTROL sabotages --engine "
+                    "segments and nothing else");
             fprintf(stderr, "cft-orbits: NEGATIVE CONTROL ACTIVE "
-                    "(CFT_ORBITS_NEGATIVE_CONTROL=transpose): v_0 and v_1 "
-                    "are packed into each other's scratch slots - every "
-                    "result of this run is deliberately wrong\n");
+                    "(CFT_ORBITS_NEGATIVE_CONTROL=%s): %s\n", nc, what);
         }
     }
 
@@ -2656,17 +2739,15 @@ int main(int argc, char **argv)
                 "rounded divide and square root exist as WHOLE programs "
                 "(programs/divfull-*, sqrtfull-*), and splicing one into "
                 "this program's loop body needs a fragment inliner that "
-                "does not exist yet (docs/ORBITS.md, \"Where the step "
-                "runs\")");
-        if (R.stride > 0xffffffffull)
-            die("a sample interval past 2^32-1 steps does not fit the "
-                "sequencer's 32-bit trip count");
+                "does not exist yet (docs/ORBITS.md, \"The step, and "
+                "where it runs\")");
     }
     if (O.engine == ENG_PROGRAM) {
         if (O.problem != PROB_KEPLER)
             die("--engine program cannot run --problem outer: a lane's "
                 "state is 30 values and cft_program_run initialises three "
-                "registers (docs/ORBITS.md, \"Where the step runs\"); "
+                "registers (docs/ORBITS.md, \"The step, and where it "
+                "runs\"); "
                 "--engine segments runs it");
         if (O.rsqrt != RSQRT_NEWTON)
             die("--engine program needs --rsqrt newton: the correctly "
@@ -2830,17 +2911,27 @@ int main(int argc, char **argv)
              * the ensemble state is complete after every step, so a
              * checkpoint may be taken between any two of them and a
              * resume picks up part way through a sample interval.
-             * That is what makes an interruption cost at most one
+             * That is what makes an interruption cost about one
              * --checkpoint-interval of work however coarse the
-             * sampling is, and it is what the resume test in
-             * host/tests/orbits_check.py exercises. */
+             * sampling is - on the loop engine because the clock is
+             * read after every step, on segments because a segment is
+             * sized to fit one interval - and it is what the resume
+             * and interruption tests in host/tests/orbits_check.py
+             * exercise. */
             uint64_t upto = (R.sample + 1) * R.stride;
             while (R.step < upto) {
                 if (O.engine == ENG_SEGMENTS) {
                     /* One segment to the sample boundary, or to the stop
                      * point if that comes first - the same step at
-                     * which the loop below would stop. */
+                     * which the loop below would stop - and no longer
+                     * than the loader takes (seg_limits) or, while
+                     * checkpoints are written, than fits one interval
+                     * at the last segment's rate (seg_time_cap). The
+                     * results do not depend on where segments end;
+                     * orbits_check.py holds that at every batch, stop
+                     * and relay it runs. */
                     uint64_t kseg = upto - R.step;
+                    double tseg;
                     if (O.stop_after_steps >= 0) {
                         uint64_t want = (uint64_t)O.stop_after_steps;
                         uint64_t left = want > steps_this_run
@@ -2848,7 +2939,18 @@ int main(int argc, char **argv)
                         if (kseg > left)
                             kseg = left;
                     }
+                    if (!R.s_kmax)
+                        seg_limits(&R);
+                    if (kseg > R.s_kmax)
+                        kseg = R.s_kmax;
+                    if (O.ckpt && !NEGCTL_UNCAPPED) {
+                        uint64_t cap = seg_time_cap(&R, O.ckpt_interval);
+                        if (kseg > cap)
+                            kseg = cap;
+                    }
+                    tseg = now_s();
                     seg_run(&R, kseg);
+                    R.s_sec_per_step = (now_s() - tseg) / (double)kseg;
                     R.step += kseg;
                     steps_this_run += kseg;
                 } else {
