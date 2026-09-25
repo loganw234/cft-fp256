@@ -938,9 +938,9 @@ the run's and no longer hashed to its chain, on either engine
   records file is open for writing - on Windows asking a path opens it,
   and for a named pipe that is a connection (above) - so the refusal
   comes after the open has emptied the file, and with it the checkpoint
-  it also is (measured on Windows: a 1,224-byte checkpoint left at 0),
-  or has created an empty one. Before, it was not refused: the
-  checkpoint is written beside its path and renamed over it at every
+  it also is (measured on Windows and on Linux: a 1,224-byte checkpoint
+  left at 0), or has created an empty one. Before, it was not refused:
+  the checkpoint is written beside its path and renamed over it at every
   interval, so on POSIX the records went on into an unlinked file and
   were lost with exit 0, and on Windows the run died 1.7 s in blaming
   "another process" (verifier-V6; pre-existing).
@@ -975,12 +975,13 @@ of 8 under a tight `os.stat` poll, and here 6 of 6 within about 200
 `stat` calls). The rename is now retried ten times at once and then
 fifty times 20 ms apart - about 1.5 s on this desktop, where a 20 ms
 sleep takes two ticks of the 15.6 ms timer (a run whose checkpoint was
-held gave up 1.55 to 1.57 s into the hold, verifier-V6; 1.55 to 1.56 s
-in the gate here) - before the run gives up by name, leaving the last
-checkpoint and a resumable run. A run checkpointing after every step
-(1,500 steps), polled by a Python thread as fast as it can (11,000 to
-18,000 `stat` calls), finished 6 of 6 on the unpolled run's
-checkpoint, in 1.7 to 2.5 s against 1.5 to 1.9 s unpolled.
+held gave up 1.55 to 1.57 s into the hold, verifier-V6; 1.55 to 2.02 s
+in 18 gate runs here, past 1.6 s only on a loaded desktop) - before the
+run gives up by name, leaving the last checkpoint and a resumable run.
+A run checkpointing after every step (1,500 steps), polled by a Python
+thread as fast as it can (11,000 to 18,000 `stat` calls), finished 6
+of 6 on the unpolled run's checkpoint, in 1.7 to 2.5 s against 1.5 to
+1.9 s unpolled.
 
 What that covers is the process ending - killed, crashed, stopped. A
 machine that loses power can lose what the operating system had not yet
