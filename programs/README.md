@@ -68,6 +68,12 @@ so in the open.
 | `conv-fp64` | fp64 | 19 | 6 | 14 | `SCRATCH` | a sixteen-sample local array written and read under loop counters through `stx`/`ldx`, and a three-tap convolution over it | the six constants against their derivation and no static slot at all; then 24 lanes x 14 outputs against a softfloat three-tap convolution |
 | `resume-fp64` | fp64 | 11 | 3 | 16 | `SCRATCH`, `SCRATCH_IO` | eight steps of `v <- 1.5v + 0.25` with a step count, entered and left through the per-run scratch block | `scratch_io` 0x00020002 behind `flags` bit 1; then two runs whose deposits are the two halves of a single sixteen-step run's |
 | `horner-wide-fp64` | fp64 | 302 | 300 | 1 | `kx`, `BANK_PTR`, `KX9` | a degree-299 Horner over a 300-entry external bank - 44 coefficients past the 256 a byte of `imm` reaches | 44 ninth index bits in `imm[30:28]`, the bank file against `C[k] = (-1)^k/(k+1)`; then 16 points against a softfloat Horner |
+| `lorenz63-rk4-fp64` | fp64 | 62 | 7 | 0 | `REGS32`, `BANK_PTR`, `SCRATCH`, `SCRATCH_IO` | a segment of 100 classic Runge-Kutta steps of Lorenz 1963, the state in and out through the scratch, the parameters as the bank; 53 ALU instructions a step and no control codes | gen_odes.py's output; the bank against its exact definitions; the census; the library's executor, the golden model's and a reference written from the equations bit for bit over 8 lanes; the same scheme at 300 digits within round-off; two segments chained are one; a control for each |
+| `lorenz63-rk4-fp256` | fp256 | 62 | 7 | 0 | as above | as above | as above |
+| `lorenz96-rk4-fp64` | fp64 | 1,455 | 5 | 0 | `BANK_PTR`, `SCRATCH`, `SCRATCH_IO` | 20 Runge-Kutta steps of Lorenz 1996 on a ring of 40: every stage vector in the scratch (200 slots), a four-register window round the ring; 760 ALU and 692 control codes a step | as above, over 4 lanes |
+| `lorenz96-rk4-fp256` | fp256 | 1,455 | 5 | 0 | as above | as above | as above |
+| `henonheiles-lf-fp64` | fp64 | 23 | 5 | 0 | `BANK_PTR`, `SCRATCH`, `SCRATCH_IO` | 100 Stormer-Verlet steps of Henon-Heiles, drift-kick-drift; 12 ALU instructions a step | as `lorenz63-rk4` |
+| `henonheiles-lf-fp256` | fp256 | 23 | 5 | 0 | as above | as above | as above |
 
 `needs` is what a device must publish before the image will load:
 `kx` is CAPS[4], `REGS32` CAPS[5], `BANK_PTR` CAPS[6], `KX9` CAPS[7],
@@ -185,6 +191,24 @@ that derivation. The source says nothing about `kx` or the ninth bit:
 the assembler picks the plain form below sixteen, the indexed form
 from sixteen and the ninth bit from 256, and `cft-asm -i` names KX9
 among the features the image needs.
+
+**`lorenz63-rk4-*`, `lorenz96-rk4-*` and `henonheiles-lf-*`**
+(2026-09-25) are `gen_odes.py`'s output, and the first programs in the
+library written as SEGMENTS: the state enters through the scratch block
+and leaves it, the step and the parameters are the run's bank, nothing
+is deposited, and a run of any length is the same image with its one
+`REPEAT` changed - which is how the check proves that two chained runs
+are one run of twice the steps. They are the references an equations-in
+ensemble solver is measured against (docs/VALIDATION.md, that date), and
+they were written to find out what such programs cost before anything is
+built to emit them: three state values or four fit the registers and a
+step is all arithmetic; forty do not, and nearly half of Lorenz-96's
+instruction stream is scratch traffic, which is the census the next
+program-model revision is priced on. The generator is the one definition
+of each instruction stream, so the check compares the committed source
+with it byte for byte, and holds the ARITHMETIC to a reference written in
+`check.py` from the equations rather than from the generator. The
+300-digit arm needs mpmath; without it that arm says SKIP and why.
 
 **`horner-bank-fp64`** is the `BANK_EXT` worked example. One image,
 many polynomials: the image is 240 bytes of pure schedule and the

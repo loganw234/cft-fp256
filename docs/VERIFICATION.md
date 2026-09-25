@@ -49,11 +49,12 @@ authority:
    a divergence - and a C-versus-Python identity check through ctypes.
    The model-versus-C stages of the runner (`selfcheck`, `divsqrt`,
    `clause5`, `character`, `transcend`, `augmented`, `status96`,
-   `formatof`, `diff`, `seq`, `reduce`) then sweep the entry points the
-   vectors do not reach: composed divide and square root, the
-   conversions, the thirty-nine transcendentals, the augmented
+   `formatof`, `diff`, `seq`, `programs`, `reduce`) then sweep the entry
+   points the vectors do not reach: composed divide and square root,
+   the conversions, the thirty-nine transcendentals, the augmented
    operations, the status word, the cross-format arithmetic, the
-   alignment boundary, the sequencer's fuzzed programs, the reductions.
+   alignment boundary, the sequencer's fuzzed programs, the program
+   library's rows, the reductions.
    One stage in this layer holds the library to something this project
    did not compute (`photograph`): atlas-engine's deterministic camera
    around a plate as a sequencer program, each pass's deposit buffer
@@ -174,7 +175,7 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | `sim` (25 cocotb targets, `cft-sim` image) | 10 min at the runner's job count; about 40 min serial | **55 min at four jobs** | 3 min at twelve jobs on a 36-core box; almost all compilation |
 | `simmc MC=10` (13 multi-cycle + 4 board targets) | not measured quiet | about 50 min at four jobs for sixteen of the seventeen | the seventeenth, the engine-driven board kernel, **does not finish under Icarus** in this configuration: 2.5 ns of simulated time a second through the small operations and about 0.03 ns a second inside the 1,104-element stream, 57 of 71 operations after four hours, on the tree before the cone change and after it alike; under Verilator, which its target selects, the bench is **16 s of simulation after an eleven-minute compile** (44,920 ns, both tests, parameters applied - until the evening of 2026-09-07 a Verilator build received none of a target's parameters and simulated the default, docs/VALIDATION.md) |
 | `lint` (Yosys, every RTL file) | 1 min | 1.5 to 2 min | |
-| `make programs-check` (the .cfta library: both assemblers, twenty-nine images (seventeen when timed), a check each, generated revision-2 and revision-3 corpora) | 10 to 60 s | | not a runner stage yet; `make programs` rebuilds the manifest it checks, so the two are separate on purpose; four of the checks waited on the revision-3 model and host by name (SKIP, not PASS) until both merged on 2026-09-08 |
+| `programs` / `make programs-check` (the .cfta library: both assemblers, thirty-five images since 2026-09-25 (seventeen when first timed), a check each, generated revision-2 and revision-3 corpora, the three ODE rows' 300-digit arm) | 10 to 60 s; 21 s through the runner on 2026-09-25 | | a runner stage, quick budget, since 2026-09-25 - before that it ran only by hand, so a library row was gated only when someone remembered; the stage was watched failing (one MANIFEST digest altered: `programs FAIL`, the row named). `make programs` rebuilds the manifest it checks, so the two are separate on purpose; four of the checks waited on the revision-3 model and host by name (SKIP, not PASS) until both merged on 2026-09-08 |
 | on the card: `hw/run-device-test.sh <xclbin> -q -n 8`, `-n 4096`, `-r` (docs/CARDDAY.md steps 2-3) | seconds each | | measured 2026-09-08 on the U50: 4 to 8 s, 2 s, 1 s |
 | on the card: `cft-selftest vectors/out <xclbin>`, the published sets through the tile (step 4) | **about 10 min an image** | 11 min beside a Vivado run | one element a call for exact flags, so latency-bound; the same 584-642 s on one tile and on four |
 | on the card: the soak (five matrices, the sets again, ten orbit checkpoints per image; step 7) | about 20 min an image | | a tool that talks to the card must be built with `XRT=1`, or it says "no such device" |
@@ -220,7 +221,7 @@ is the only thing that skips work. (cft-rebound is the sibling repo with
 a content-addressed gate cache and a warm five-second check; this runner
 does not have one.)
 
-`bash verify/run.sh --list` prints all forty stages with a marker
+`bash verify/run.sh --list` prints all forty-one stages with a marker
 against the ones the given `--budget` or `--only` would actually run, so
 the list cannot imply a budget covers more than it does. The stage names
 are derived from the `stage` calls themselves rather than kept in a second

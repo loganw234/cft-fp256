@@ -148,7 +148,7 @@ BUDGET=""
 # now that the formal gate holds thirty proofs and a negative control
 # (thirty-one tasks), full longer by the simulation suite and the two
 # browser replays; on the WSL distro the replay stages take seconds.
-BUDGET_QUICK=docs,generated,buildargs,sweepjudge,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
+BUDGET_QUICK=docs,generated,buildargs,sweepjudge,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,programs,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
 BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp
 RESUME=""
 FRESH=0
@@ -836,6 +836,22 @@ need host-cc python
 stage seq "the sequencer: C vs model over fuzzed programs, plain and with indexed constants and IMUL" -- \
   PY "$ROOT/host/tests/seq_check.py" --trials 250 \
      --formats fp32 fp64 fp128 fp256
+
+# The program library (programs/, docs/PROGRAMS.md): every .cfta assembled
+# by cft-asm and by python/cft_golden/asm.py and held to the committed
+# MANIFEST, both disassemblers and the re-assembly round trip, the
+# generated revision-2 and revision-3 corpora, and each row's own check -
+# the three ODE rows' 300-digit arm among them, which is why it needs
+# mpmath. It is host/Makefile's asmtest, which is programs/check.py; the
+# Collatz row's check reads cft-collatz's own records, so that tool is
+# built first. Until 2026-09-25 this ran only by hand (`make
+# programs-check`, docs/VERIFICATION.md said so): a library row whose
+# check no stage runs was not gated.
+do_programs() {
+  HOSTMAKE collatz asmtest PYTHON="$PYBIN"
+}
+need host-cc python mpmath
+stage programs "the program library: both assemblers against the MANIFEST, the readback, the generated corpora, and every row's own check" -- do_programs
 
 # reduce_check.py holds the model's partition tree to the C partitioner
 # through host/reduce-parts, and SKIPs that half by name when the binary

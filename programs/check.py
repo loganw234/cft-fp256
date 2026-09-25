@@ -21,10 +21,14 @@ things, in this order, and stops at the first failure:
    the composed div and sqrt, the tool's own records for the Collatz
    kernel, the golden model's executor for the escape map, the hash's
    definition for the draw stream, a model computation with two
-   different banks for the BANK_EXT worked example, and - for
+   different banks for the BANK_EXT worked example, - for
    revision 3's four scratch rows - the same arithmetic without the
    spill, a softfloat convolution, a longer run's second half, and a
-   softfloat Horner over three hundred coefficients.
+   softfloat Horner over three hundred coefficients, and - for the
+   three ODE rows gen_odes.py writes (2026-09-25) - the generator,
+   the bank's derivation, the census, three executors against a
+   reference written from the equations, the 300-digit scheme, and
+   resumption, each with a control that must fail.
 
 Revision 3's rows have two arms and they are not the same claim. The
 STATIC arm - constants against their derivation, the header against
@@ -58,6 +62,11 @@ sys.path.insert(0, str(ROOT / "python"))
 from cft_golden import FORMATS, asm, chars, seq, seqprogs   # noqa: E402
 from cft_golden import divfull                              # noqa: E402
 from cft_golden import softfloat as sf                      # noqa: E402
+import gen_odes                                             # noqa: E402
+try:                                    # the ODE rows' 300-digit arm only
+    import mpmath                                           # noqa: E402
+except ImportError:                     # pragma: no cover
+    mpmath = None
 
 PASS, FAIL, SKIP = [], [], []
 T0 = time.time()
@@ -1431,6 +1440,434 @@ def check_revision3_corpus(args, tmp, trials=120):
 
 # ================= main =================================================
 
+# ================= the ODE rows (programs/gen_odes.py) ===================
+#
+# Three dynamical systems as segment programs. What each row's check
+# establishes, in order, and what it holds each claim to:
+#
+#   generated    the committed .cfta and its bank are gen_odes.py's
+#                output, byte for byte - the generator is the one
+#                definition of the instruction stream
+#   bank         every default value is the correctly rounded value of
+#                its exact definition, shown with exact rationals and
+#                the value's two neighbours, not by rounding again
+#   static       the header: BANK_EXT, SCRATCH_IO, no deposits, the
+#                slot counts and the bank size the source declares
+#   census       ALU and control codes a lane-step, read off the image,
+#                against the counts the program's structure implies
+#   identity     the library's executor (positive-run), the golden
+#                model's (seq.run) and a reference written HERE from the
+#                equations - not from gen_odes.py - agree bit for bit
+#   scheme       the same discrete scheme at 300 digits from the same
+#                encodings: the program is within round-off of it, and
+#                not equal to it (the round-off is really there)
+#   resume       two segments chained through the scratch block are one
+#                segment of twice the steps
+#
+# and three controls, each of which must FAIL its comparison: a source
+# with one instruction's operands swapped against the reference; the
+# 300-digit scheme with a wrong weight or kick against the program; and
+# one flipped bit against the chained resume.
+
+ODE_ROWS = ("lorenz63-rk4", "lorenz96-rk4", "henonheiles-lf")
+
+
+def _ode_base(name):
+    for base in ODE_ROWS:
+        if name.startswith(base + "-"):
+            return base, name[len(base) + 1:]
+    return None, None
+
+
+class _SfOps:
+    """The five operations these programs use, as the golden model
+    defines them, returning bits. The flags are not part of these
+    checks - an ODE step is inexact everywhere, as docs/ORBITS.md says
+    of its own."""
+
+    def __init__(self, fmt):
+        self.fmt = fmt
+
+    def fma(self, a, b, c):
+        return sf.fma(self.fmt, a, b, c)[0]
+
+    def add(self, a, b):
+        return sf.add(self.fmt, a, b)[0]
+
+    def sub(self, a, b):
+        return sf.sub(self.fmt, a, b)[0]
+
+    def mul(self, a, b):
+        return sf.mul(self.fmt, a, b)[0]
+
+    def neg(self, a):
+        return sf.neg(self.fmt, a)[0]
+
+
+class _MpOps:
+    """The same five, in mpmath at the context's precision: the scheme
+    with its roundings taken out, from the same starting values."""
+
+    @staticmethod
+    def fma(a, b, c):
+        return a * b + c
+
+    @staticmethod
+    def add(a, b):
+        return a + b
+
+    @staticmethod
+    def sub(a, b):
+        return a - b
+
+    @staticmethod
+    def mul(a, b):
+        return a * b
+
+    @staticmethod
+    def neg(a):
+        return -a
+
+
+def ode_step(base, o, K, s, steps, mutant=False):
+    """The scheme, written from the equations - a reference independent
+    of gen_odes.py's text. `o` is _SfOps (bits) or _MpOps (values); `K`
+    the bank in declaration order; `s` one lane's state. `mutant` is the
+    negative control: a wrong weight (Runge-Kutta) or a half kick
+    (Stormer-Verlet), which the 300-digit comparison must catch."""
+    if base == "lorenz63-rk4":
+        H, H2, H6, TWO, SIG, RHO, BETA = K
+        x, y, z = s
+
+        def f(x, y, z):
+            return (o.mul(SIG, o.sub(y, x)),
+                    o.fma(x, o.sub(RHO, z), o.neg(y)),
+                    o.fma(x, y, o.neg(o.mul(BETA, z))))
+        Y = [x, y, z]
+        for _ in range(steps):
+            k1 = f(*Y)
+            T = [o.fma(H2, k, v) for k, v in zip(k1, Y)]
+            k2 = f(*T)
+            A = [(o.add(k, a) if mutant else o.fma(TWO, k, a))
+                 for k, a in zip(k2, k1)]
+            T = [o.fma(H2, k, v) for k, v in zip(k2, Y)]
+            k3 = f(*T)
+            A = [o.fma(TWO, k, a) for k, a in zip(k3, A)]
+            T = [o.fma(H, k, v) for k, v in zip(k3, Y)]
+            k4 = f(*T)
+            A = [o.add(a, k) for a, k in zip(A, k4)]
+            Y = [o.fma(H6, a, v) for a, v in zip(A, Y)]
+        return Y
+    if base == "lorenz96-rk4":
+        H, H2, H6, TWO, F = K
+        Y = list(s)
+        N = len(Y)
+
+        def f(X):
+            return [o.fma(o.sub(X[(i + 1) % N], X[(i - 2) % N]),
+                          X[(i - 1) % N], o.sub(F, X[i]))
+                    for i in range(N)]
+        for _ in range(steps):
+            k1 = f(Y)
+            T = [o.fma(H2, k, v) for k, v in zip(k1, Y)]
+            k2 = f(T)
+            A = [(o.add(k, a) if mutant else o.fma(TWO, k, a))
+                 for k, a in zip(k2, k1)]
+            T = [o.fma(H2, k, v) for k, v in zip(k2, Y)]
+            k3 = f(T)
+            A = [o.fma(TWO, k, a) for k, a in zip(k3, A)]
+            T = [o.fma(H, k, v) for k, v in zip(k3, Y)]
+            k4 = f(T)
+            A = [o.add(a, k) for a, k in zip(A, k4)]
+            Y = [o.fma(H6, a, v) for a, v in zip(A, Y)]
+        return Y
+    if base == "henonheiles-lf":
+        H, H2, MH, ONE, TWO = K
+        x, y, px, py = s
+        kick = H2 if mutant else H
+        mkick = o.neg(H2) if mutant else MH
+        for _ in range(steps):
+            x = o.fma(H2, px, x)
+            y = o.fma(H2, py, y)
+            px = o.fma(mkick, o.mul(x, o.fma(TWO, y, ONE)), px)
+            py = o.fma(kick, o.fma(y, o.sub(y, ONE), o.neg(o.mul(x, x))),
+                       py)
+            x = o.fma(H2, px, x)
+            y = o.fma(H2, py, y)
+        return [x, y, px, py]
+    raise KeyError(base)
+
+
+def ode_initial(base, fmt, n):
+    """n lanes' starting states, lane-major bits: a small ensemble each
+    member of which is displaced by an exact dyadic amount - which is
+    also what a controlled-divergence run looks like."""
+    def d(text):
+        return chars.from_decimal(fmt, text, sf.RND_RNE)[0]
+    out = []
+    for i in range(n):
+        if base == "lorenz63-rk4":
+            out += [d(repr(1 + i / 64)), d("1"), d("1")]
+        elif base == "lorenz96-rk4":
+            out += [d(repr(8 + (i + 1) / 1024))] + \
+                   [d("8")] * (gen_odes.L96_N - 1)
+        else:
+            out += [d("0"), d(repr(0.1 + i / 1024)), d("0.5"), d("0")]
+    return out
+
+
+def _frac(fmt, bits):
+    """An encoding's exact value, as a Fraction. Finite only."""
+    from fractions import Fraction
+    u = sf.unpack(fmt, bits)
+    if u.kind == sf.ZERO:
+        return Fraction(0)
+    if u.kind not in (sf.NORM, sf.SUB):
+        raise ValueError(f"{bits:#x} is not finite")
+    v = Fraction(u.m) * (Fraction(2) ** u.e)
+    return -v if u.sign else v
+
+
+def _nearest(fmt, bits, target):
+    """Is `bits` the correctly rounded (to nearest, ties to even)
+    encoding of the exact rational `target`? Decided against the two
+    neighbouring encodings, for a positive normal value - which every
+    bank value these programs use is, their negations aside."""
+    v = _frac(fmt, bits)
+    lo, hi = _frac(fmt, bits - 1), _frac(fmt, bits + 1)
+    dv, dl, dh = abs(v - target), abs(lo - target), abs(hi - target)
+    if dv > dl or dv > dh:
+        return False
+    if dv == dl or dv == dh:            # a tie: the even one wins
+        return (bits & 1) == 0
+    return True
+
+
+def _bank_derivations(base):
+    """name -> the exact rational each default bank value rounds, or a
+    function of the values already checked (exact operations)."""
+    from fractions import Fraction as Fr
+    common = {"H": Fr(1, 100), "TWO": Fr(2), "ONE": Fr(1)}
+    if base == "lorenz63-rk4":
+        common.update({"SIGMA": Fr(10), "RHO": Fr(28), "BETA": Fr(8, 3)})
+    if base == "lorenz96-rk4":
+        common.update({"F": Fr(8)})
+    return common
+
+
+def check_ode(args, name, image, image_path, tmp):
+    base, fmtname = _ode_base(name)
+    fmt = FORMATS[fmtname]
+    esz = fmt.width // 8
+    src = (HERE / (name + ".cfta")).read_text(encoding="utf-8")
+    bank_path = HERE / (name + ".classic.bank")
+
+    # -- generated ---------------------------------------------------------
+    want_src = gen_odes.GENERATORS[base](fmtname)
+    want_bank = gen_odes.bank_bytes(base, fmt)
+    if src != want_src or not bank_path.exists() or \
+            bank_path.read_bytes() != want_bank:
+        bad(f"{name}: generated", "the committed source or bank is not "
+                                  "gen_odes.py's output - run it")
+        return
+    ok(f"{name}: source and bank are gen_odes.py's output, byte for byte")
+
+    # -- bank ---------------------------------------------------------------
+    names = [n for n, _v in gen_odes.bank_values(base, fmt)]
+    K = values(bank_path.read_bytes(), fmt)
+    byname = dict(zip(names, K))
+    exact = _bank_derivations(base)
+    from fractions import Fraction as Fr
+    problems = []
+    for cname, bits in zip(names, K):
+        if cname in exact:
+            if not _nearest(fmt, bits, exact[cname]):
+                problems.append(f"{cname} is not RN({exact[cname]})")
+        elif cname == "H2":
+            if _frac(fmt, bits) != _frac(fmt, byname["H"]) / 2:
+                problems.append("H2 is not exactly H / 2")
+        elif cname == "H6":
+            if not _nearest(fmt, bits, _frac(fmt, byname["H"]) / 6):
+                problems.append("H6 is not RN(H / 6)")
+        elif cname == "MH":
+            if _frac(fmt, bits) != -_frac(fmt, byname["H"]):
+                problems.append("MH is not exactly -H")
+        else:
+            problems.append(f"{cname} has no derivation here")
+    if problems:
+        bad(f"{name}: bank", "; ".join(problems))
+        return
+    ok(f"{name}: the {len(K)} bank values are the correctly rounded values "
+       f"of their definitions", ", ".join(names))
+
+    # -- static --------------------------------------------------------------
+    img = asm.Image.from_bytes(image)
+    nstate = gen_odes.L96_N if base == "lorenz96-rk4" else \
+        (3 if base == "lorenz63-rk4" else 4)
+    feats = set(img.features())
+    if (img.flags != (asm.FLAG_BANK_EXT | asm.FLAG_SCRATCH_IO) or
+            img.max_deposits != 0 or img.n_consts != len(K) or
+            (img.n_scratch_in, img.n_scratch_out) != (nstate, nstate) or
+            not {"BANK_PTR", "SCRATCH", "SCRATCH_IO"} <= feats):
+        bad(f"{name}: header", f"flags {img.flags:#x}, deposits "
+            f"{img.max_deposits}, consts {img.n_consts}, io "
+            f"{img.n_scratch_in}/{img.n_scratch_out}, {sorted(feats)}")
+        return
+    ok(f"{name}: BANK_EXT and SCRATCH_IO, no deposits, {nstate} slots in "
+       f"and out, {len(K)} bank values", " ".join(img.features()))
+
+    # -- census ----------------------------------------------------------------
+    alu = ctl = depth = 0
+    for word in img.insns:
+        dd = asm.decode(word)
+        if dd["ctrl"] and dd["op"] == asm.REPEAT:
+            depth += 1
+            continue
+        if dd["ctrl"] and dd["op"] == asm.ENDREP:
+            depth -= 1
+            continue
+        if depth:
+            if dd["ctrl"]:
+                ctl += 1
+            else:
+                alu += 1
+    N = gen_odes.L96_N
+    want = {"lorenz63-rk4": (4 * 8 + 21, 0),
+            # a component: 3 for f, and 1 + 2 + 2 + 2 for the stages;
+            # control: the window's N + 3 loads a stage, and 2 + 4 + 4 + 3
+            # stores and loads a component over the four stages
+            "lorenz96-rk4": (19 * N, 4 * (N + 3) + 13 * N),
+            "henonheiles-lf": (12, 0)}[base]
+    if (alu, ctl) != want:
+        bad(f"{name}: census", f"{alu} ALU and {ctl} control codes a step; "
+                               f"the structure says {want[0]} and {want[1]}")
+        return
+    ok(f"{name}: census - a lane-step is {alu} ALU instructions and {ctl} "
+       f"control codes ({100.0 * ctl / (alu + ctl):.1f}% control), "
+       f"{len(img.insns)} instructions in all")
+
+    # -- identity -----------------------------------------------------------------
+    steps = gen_odes.STEPS[base]
+    n = 4 if base == "lorenz96-rk4" else 8
+    s_in = ode_initial(base, fmt, n)
+    ap, bp = tmp / (name + ".a.bin"), tmp / (name + ".bank")
+    sip, sop = tmp / (name + ".s0.bin"), tmp / (name + ".s1.bin")
+    ap.write_bytes(pack([0] * n, fmt))
+    bp.write_bytes(bank_path.read_bytes())
+    sip.write_bytes(pack(s_in, fmt))
+    dep, rep = run_image(args, image_path, tmp, name, a=ap, bank=bp,
+                         scratch_in=sip, scratch_out=sop)
+    if dep is None:
+        bad(f"{name}: library run", rep)
+        return
+    lib = values(sop.read_bytes(), fmt)
+    prog = seq.Program.from_bytes(image)
+    gold = seq.run(prog, [0] * n, [0] * n, None, bank=K, scratch_in=s_in)
+    o = _SfOps(fmt)
+    ref = []
+    for i in range(n):
+        ref += ode_step(base, o, K, s_in[i * nstate:(i + 1) * nstate], steps)
+    if not (len(lib) == n * nstate and lib == gold.scratch_out == ref and
+            gold.status == 0 and ref != s_in):
+        which = ("library != golden" if lib != gold.scratch_out else
+                 "golden != reference" if gold.scratch_out != ref else
+                 "the state did not move" if ref == s_in else
+                 f"status {gold.status}")
+        bad(f"{name}: identity", which)
+        return
+    ok(f"{name}: the library's executor, the golden model's and a reference "
+       f"written from the equations agree bit for bit",
+       f"{n} lanes x {steps} steps, scratch-out "
+       f"{hashlib.sha256(sop.read_bytes()).hexdigest()[:16]}")
+
+    # the control: one instruction's operands swapped must be caught
+    swap = {"lorenz63-rk4": ("  sub  t0, y, x", "  sub  t0, x, y"),
+            "lorenz96-rk4": ("  sub  t1, F, w0", "  sub  t1, w0, F"),
+            "henonheiles-lf": ("  sub  t2, y, ONE", "  sub  t2, ONE, y")}
+    old, new = swap[base]
+    if src.count(old) < 1:
+        bad(f"{name}: control", f"the line to mutate, {old.strip()!r}, is "
+                                f"not in the source")
+        return
+    mut = asm.assemble(src.replace(old, new, 1), name + "-mutant")
+    mres = seq.run(seq.Program.from_bytes(mut), [0] * n, [0] * n, None,
+                   bank=K, scratch_in=s_in)
+    if mres.scratch_out == ref:
+        bad(f"{name}: NEGATIVE CONTROL FAILED TO FAIL",
+            f"{old.strip()} -> {new.strip()} still matched the reference")
+        return
+    ok(f"{name}: NEGATIVE CONTROL - `{new.strip()}` in place of "
+       f"`{old.strip()}` is caught by the same comparison")
+
+    # -- scheme ----------------------------------------------------------------------
+    if mpmath is None:
+        skip(f"{name}: the 300-digit scheme", "python has no mpmath module")
+    else:
+        mp = mpmath.mp
+        saved = mp.dps
+        mp.dps = 300
+        try:
+            def mpf_of(bits):
+                fr = _frac(fmt, bits)
+                return mpmath.mpf(fr.numerator) / fr.denominator
+            Km = [mpf_of(b) for b in K]
+            worst = worst_mut = mpmath.mpf(0)
+            for i in range(n):
+                s_mp = [mpf_of(b) for b in s_in[i * nstate:(i + 1) * nstate]]
+                exact = ode_step(base, _MpOps, Km, s_mp, steps)
+                wrong = ode_step(base, _MpOps, Km, s_mp, steps, mutant=True)
+                got = [mpf_of(b) for b in lib[i * nstate:(i + 1) * nstate]]
+                for g, e, w in zip(got, exact, wrong):
+                    scale = max(abs(e), mpmath.mpf(1))
+                    worst = max(worst, abs(g - e) / scale)
+                    worst_mut = max(worst_mut, abs(g - w) / scale)
+            ceiling = mpmath.mpf(steps) ** 2 * \
+                mpmath.mpf(2) ** (-(fmt.prec - 1)) * 64
+            good = 0 < worst < ceiling
+            control = worst_mut > ceiling
+        finally:
+            mp.dps = saved
+        if not good:
+            bad(f"{name}: the 300-digit scheme",
+                f"worst relative deviation {mpmath.nstr(worst, 4)}, ceiling "
+                f"{mpmath.nstr(ceiling, 4)} (it must be above 0 and below)")
+            return
+        ok(f"{name}: within round-off of the same scheme at 300 digits",
+           f"worst relative deviation {mpmath.nstr(worst, 4)} against a "
+           f"{mpmath.nstr(ceiling, 3)} ceiling (steps^2 2^-(p-1) x 64)")
+        if not control:
+            bad(f"{name}: NEGATIVE CONTROL FAILED TO FAIL",
+                f"a wrong scheme is within the ceiling "
+                f"({mpmath.nstr(worst_mut, 4)})")
+            return
+        ok(f"{name}: NEGATIVE CONTROL - the program against a WRONG scheme "
+           f"(a weight or a kick changed) exceeds the ceiling",
+           f"{mpmath.nstr(worst_mut, 4)}")
+
+    # -- resume -------------------------------------------------------------------------
+    long_img = _patch_trip(image, steps, 2 * steps, 0)
+    lp = tmp / (name + ".long.cftp")
+    lp.write_bytes(long_img.to_bytes())
+    s2 = tmp / (name + ".s2.bin")
+    dep2, rep2 = run_image(args, image_path, tmp, name + "-2", a=ap, bank=bp,
+                           scratch_in=sop, scratch_out=s2)
+    sl = tmp / (name + ".sl.bin")
+    depl, repl = run_image(args, lp, tmp, name + "-long", a=ap, bank=bp,
+                           scratch_in=sip, scratch_out=sl)
+    if dep2 is None or depl is None:
+        bad(f"{name}: resume runs", rep2 if dep2 is None else repl)
+        return
+    two, one = s2.read_bytes(), sl.read_bytes()
+    flipped = bytearray(two)
+    flipped[len(flipped) // 2] ^= 1
+    if two != one or bytes(flipped) == one or two == sop.read_bytes():
+        bad(f"{name}: resume", "two chained segments are not one segment of "
+                               "twice the steps")
+        return
+    ok(f"{name}: two segments chained through the scratch block ARE one "
+       f"segment of {2 * steps} steps; one flipped bit is caught")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--asm", required=True)
@@ -1531,6 +1968,8 @@ def main():
             check_resume(args, name, image, image_path, tmp, caps)
         elif name == "horner-wide-fp64":
             check_horner_wide(args, name, image, image_path, tmp, caps)
+        elif _ode_base(name)[0]:
+            check_ode(args, name, image, image_path, tmp)
         else:
             skip(f"{name}: own check", "no row in programs/README.md")
 
