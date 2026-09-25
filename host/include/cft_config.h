@@ -257,9 +257,14 @@ which fit a 16-bit int fifteen times over) - see cft_config.h."
  * replays the fp32 and fp64 sets through the CFT_TINY profile at 9,
  * and the fp128 sets through the fp128 profile at 18.
  * --------------------------------------------------------------- */
+/* The width at the default ceiling. Named, because it is also the
+ * transcendentals' threshold below: the default build's width, and so
+ * the width this repository replays their vector sets at. */
+#define CFT_BN_LIMBS_FULL 64
+
 #ifndef CFT_BN_LIMBS
 #  if CFT_MAX_FORMAT >= 3
-#    define CFT_BN_LIMBS 64
+#    define CFT_BN_LIMBS CFT_BN_LIMBS_FULL
 #  elif CFT_MAX_FORMAT == 2
 #    define CFT_BN_LIMBS 18
 #  else
@@ -273,33 +278,60 @@ which fit a 16-bit int fifteen times over) - see cft_config.h."
  * "Too few limbs is loud", above, is true of bigint.c, which checks
  * every operation's width. It is not true of the transcendentals'
  * evaluator: mpfloat.c's cft_mp_const copies a stored constant - ln 2,
- * pi and four more, 1,088 bits, 34 limbs each (mp_consts.h) - into a
- * cft_bn limb by limb, with no check, so at 18 or 9 limbs it writes
- * past the end of one on the stack, on the first transcendental that
- * asks for a constant. gcc 16.1 at -O2 says so (-Warray-bounds at
- * mpfloat.c's copy loop, and at transcend.c's too at 9 limbs), and
- * nothing else would: every profile this repository builds leaves the
- * transcendentals out when it narrows the ceiling (CFT_TINY defines
- * CFT_NO_TRANSCEND), so no build here compiled the combination until
- * 2026-09-24, when host/Makefile's profiles-check began compiling each
- * switch on its own.
+ * pi and four more, 1,088 bits, 34 limbs each (CFT_MP_CONST_LIMBS,
+ * mp_consts.h) - into a cft_bn limb by limb, with no check, so at 18
+ * or 9 limbs it writes past the end of one on the stack, on the first
+ * transcendental that asks for a constant; transcend.c's self-check of
+ * its 2/pi table copies 16 limbs the same way. gcc 16.1 at -O2 says so
+ * (-Warray-bounds at mpfloat.c's copy loop, and at transcend.c's too at
+ * 9 limbs), and nothing else would: every profile this repository
+ * builds leaves the transcendentals out when it narrows the ceiling
+ * (CFT_TINY defines CFT_NO_TRANSCEND), so no build here compiled the
+ * combination until 2026-09-24, when host/Makefile's profiles-check
+ * began compiling each switch on its own.
  *
- * So the combination is refused here, by name, rather than left to
- * overwrite the stack: a narrowed ceiling, or a CFT_BN_LIMBS below the
- * 64 that is the only width this repository builds the transcendentals
- * at, needs CFT_NO_TRANSCEND. Making them work at a narrower width is
- * a change to mpfloat.c, not to this file.
+ * The cause is the WIDTH of cft_bn, and that is what is refused: the
+ * transcendentals with a CFT_BN_LIMBS below CFT_BN_LIMBS_FULL. A build
+ * reaches one in two ways - by setting CFT_BN_LIMBS, or by a
+ * CFT_MAX_FORMAT below 3, which only narrows it by default (18 limbs at
+ * fp128, 9 below) - and the refusal names both, with both remedies:
+ * CFT_NO_TRANSCEND, or CFT_BN_LIMBS of at least 64. So
+ * -DCFT_MAX_FORMAT=2 -DCFT_BN_LIMBS=64 builds, overwrites nothing, and
+ * replays the fp32, fp64 and fp128 transcendental sets - 15 sets,
+ * 402,345 cases, all matching (measured 2026-09-24) - and
+ * profiles-check compiles it. From 00e4492 until the commit that wrote
+ * this paragraph a CFT_MAX_FORMAT below 3 was refused as such, whatever
+ * CFT_BN_LIMBS said: broader than the cause.
+ *
+ * Why 64 and not 34. 34 limbs is the proven floor: below it the copy
+ * above writes past the struct. 64 is the width the transcendentals
+ * are VALIDATED at - CFT_BN_LIMBS_FULL, the default build's width, and
+ * the only one verify/run.sh replays their sets at. The copy fitting
+ * is not the evaluator fitting: at 34, with this refusal taken out of
+ * a scratch copy, the fp128 transcendental set stops at its 6,616th
+ * case, a sin, on CFT_ERR_INTERNAL - loud, but a refusal of a case the
+ * default build answers (measured 2026-09-24; the cause not traced).
+ * Between 34 and 64 nothing is validated, and a replay that passed
+ * there would be a sample, not a bound. Making the transcendentals
+ * work at a narrower width, and showing it, is a change to mpfloat.c.
  * --------------------------------------------------------------- */
-#if !defined(CFT_NO_TRANSCEND) && CFT_MAX_FORMAT < 3
-#error "CFT_MAX_FORMAT below 3 needs CFT_NO_TRANSCEND: the transcendentals' \
-constants are 1,088 bits (34 limbs) and a narrowed cft_bn (18 or 9 limbs) \
-cannot hold them - define CFT_NO_TRANSCEND, as CFT_TINY does, or leave \
-CFT_MAX_FORMAT at 3 (see cft_config.h)"
-#elif !defined(CFT_NO_TRANSCEND) && CFT_BN_LIMBS < 64
-#error "CFT_BN_LIMBS below 64 needs CFT_NO_TRANSCEND: the transcendentals' \
-constants are 1,088 bits (34 limbs) and 64 limbs is the only cft_bn they \
-are built at here - define CFT_NO_TRANSCEND, or leave CFT_BN_LIMBS at 64 \
-(see cft_config.h)"
+/* #error does not expand a macro, so the refusal below QUOTES
+ * CFT_BN_LIMBS_FULL as 64; this keeps the quotation from outliving the
+ * value. The 34 is CFT_MP_CONST_LIMBS, in src/mp_consts.h, which this
+ * public header cannot see. */
+#if CFT_BN_LIMBS_FULL != 64
+#error "CFT_BN_LIMBS_FULL is no longer 64: change the 64 the refusal \
+below quotes, and REFUSE_BNLIMBS and profiles-check-bnlimbs63-refused in \
+host/Makefile, with it"
+#endif
+
+#if !defined(CFT_NO_TRANSCEND) && CFT_BN_LIMBS < CFT_BN_LIMBS_FULL
+#error "CFT_BN_LIMBS below 64 needs CFT_NO_TRANSCEND: 64 limbs, the fp256 \
+default, is the only cft_bn the transcendentals are validated at, and \
+below 34 their 1,088-bit constants overwrite the stack. A build reaches a \
+narrower one by setting CFT_BN_LIMBS, or by a CFT_MAX_FORMAT below 3, \
+whose default narrows it. Define CFT_NO_TRANSCEND, as CFT_TINY does, or \
+CFT_BN_LIMBS=64 (see cft_config.h)"
 #endif
 
 /* ---------------------------------------------------------------
