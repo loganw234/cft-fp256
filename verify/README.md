@@ -199,6 +199,13 @@ The ones known on 2026-09-24:
 page is not built, and a vector set absent from the directory the
 replay reads, which the replay reports only as a smaller count on its
 `N sets, ... all matching` line (168 when every set is there).
+device-test's and remote-test's `NOT TESTED` and `NOT RUN` lines are
+not counted either, and are not meant to be: an inner skip is a check
+that should run on this host and did not, and those mark a check with
+nothing to test on that device - a capacity the software handle has no
+limit for, a poisoned-operand run a backend does not do. Four kinds of
+them print on every software run (the format refusals, the `max_insns`
+and `max_consts` caps, and the reductions with b and c poisoned).
 device-test's `<format> not on this device, skipped` and
 `buffers, ...: SKIPPED - this device does not publish ...`,
 remote-test's `<format> skipped, not on the server`, cpp-api-test's

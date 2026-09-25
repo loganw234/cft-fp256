@@ -63,10 +63,18 @@ static int checks;
  * the integer group, and every integer opcode was then skipped rather
  * than run. The suite stayed green. So the count is kept, the names
  * are kept, and the final summary refuses to say "the device and the
- * software backend agree on every case" when cases never ran. */
+ * software backend agree on every case" when cases never ran.
+ *
+ * A whole format the device does not carry, and a buffers leg behind
+ * a feature bit it does not publish, are skips of the same kind, each
+ * printed where it happens with SKIPPED first; they are counted here
+ * too. Until 2026-09-24 only the opcode list reached the summary, so
+ * a run that skipped all of fp128 still ended "agree on every case". */
 #define MAX_SKIP 32
 static int  skipped;
 static const char *skip_name[MAX_SKIP];
+static int  skipped_fmts;       /* formats not on the device */
+static int  skipped_buf_legs;   /* -b legs behind an unpublished bit */
 
 /* One environment variable, set or removed, on either platform. */
 static void put_env(const char *name, const char *value)
@@ -5910,6 +5918,7 @@ int main(int argc, char **argv)
              * passed without a word on its row. */
             printf("SKIPPED %s: not on this device\n",
                    cft_format_name(fmt));
+            skipped_fmts++;
             continue;
         }
         printf("%s\n", cft_format_name(fmt));
@@ -5992,10 +6001,12 @@ int main(int argc, char **argv)
                     printf("  SKIPPED buffers, an indexed program: "
                            "this device does not "
                            "publish CFT_SEQ_FEAT_INDEXED\n");
+                    skipped_buf_legs++;
                 }
             } else {
                 printf("  SKIPPED buffers, a program's scratch: this "
                        "device does not publish SCRATCH_IO\n");
+                skipped_buf_legs++;
             }
             fflush(stdout);
 
@@ -6379,11 +6390,19 @@ int main(int argc, char **argv)
                "nothing above tested it.\n");
     }
 
-    if (!failures)
-        printf(skipped
-               ? "the device and the software backend agree on every case "
-                 "that RAN, bits and flags\n"
-               : "the device and the software backend agree on every "
-                 "case, bits and flags\n");
+    /* Any skip - an opcode, a format, a buffers leg - takes the "that
+     * RAN" form, with what did not run counted by kind. Not SKIP first:
+     * each skip already has its own SKIPPED line above, and the runner
+     * counts those. */
+    if (!failures && (skipped || skipped_fmts || skipped_buf_legs))
+        printf("the device and the software backend agree on every case "
+               "that RAN, bits and flags - skipped: %d format%s, %d "
+               "buffers leg%s, %d opcode%s, each named above\n",
+               skipped_fmts, skipped_fmts == 1 ? "" : "s",
+               skipped_buf_legs, skipped_buf_legs == 1 ? "" : "s",
+               skipped, skipped == 1 ? "" : "s");
+    else if (!failures)
+        printf("the device and the software backend agree on every "
+               "case, bits and flags\n");
     return failures ? 1 : 0;
 }

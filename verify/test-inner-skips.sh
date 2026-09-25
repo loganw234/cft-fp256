@@ -73,11 +73,13 @@ stage colour "a pytest run painted by FORCE_COLOR, as pytest 9.1 paints it on Wi
 need
 stage dt-format "device-test: a format the device does not carry" -- \
   printf '%s\n' 'fp32' '  buffers, elementwise: 40 checks, 0 failed' \
-    'SKIPPED fp128: not on this device'
+    'SKIPPED fp128: not on this device' '' '1723 checks, 0 failed' \
+    'the device and the software backend agree on every case that RAN, bits and flags - skipped: 1 format, 0 buffers legs, 0 opcodes, each named above'
 need
 stage dt-format-old "the same, as device-test printed it until 2026-09-24" -- \
   printf '%s\n' 'fp32' '  buffers, elementwise: 40 checks, 0 failed' \
-    'fp128  not on this device, skipped'
+    'fp128  not on this device, skipped' '' '1723 checks, 0 failed' \
+    'the device and the software backend agree on every case, bits and flags'
 need
 stage dt-indexed "device-test -b: no INDEXED, so no indexed program through the buffers" -- \
   printf '%s\n' '  buffers, a program'"'"'s scratch: 90 checks, 0 failed' \
@@ -253,15 +255,19 @@ cases () {  # <runner>  ->  returns the number of checks it got wrong
 }
 NCHECKS=32
 
-# The skip lines the stages' own programs print. On 2026-09-24 four were
-# reprinted with the marker first (device-test's three, remote-test's
-# one, cpp-api-test's and tb/check_results.py's), and the replay's report
-# was printed by the two programs that had kept only its counts
-# (cpp-api-test, host/tests/remote_check.py). Each form has a stage above
-# as its program prints it now, and a stage carrying the same gap as it
-# was printed before. The first must count, and fail --require-all
+# The skip lines the stages' own programs print. On 2026-09-24 four
+# programs' were reprinted with the marker first (device-test's three,
+# remote-test's, cpp-api-test's and tb/check_results.py's), and the
+# replay's report was printed by the two programs that had kept only its
+# counts (cpp-api-test, host/tests/remote_check.py). Each form has a
+# stage above as its program prints it now, and a stage carrying the same
+# gap as it was printed before. The first must count, and fail --require-all
 # alone; the second must count nothing even under --require-all - the
-# proof that the reprint was needed, not merely harmless.
+# proof that the reprint was needed, not merely harmless. dt-format also
+# carries device-test's closing summary, which since the same day counts
+# what did not run by kind ("that RAN ... - skipped: 1 format, ..."),
+# without the marker: each skip has its own line already, so the summary
+# must not add to the count.
 FORMS="dt-format dt-indexed dt-scratch rt-format cpp-nosets cpp-replay rc-replay sim-case"
 nskips () { if [ "$1" = rc-replay ]; then echo 2; else echo 1; fi; }
 named () {  # <stage> <the line as the runner names it under the row>
@@ -324,6 +330,7 @@ pins () {  # -> returns the number of pins that do not hold
 host/tests/device_test.c|printf("SKIPPED %s: not on this device\n",|printf("%-6s not on this device, skipped\n",
 host/tests/device_test.c|printf("  SKIPPED buffers, an indexed program: "|"SKIPPED - this device does not "
 host/tests/device_test.c|printf("  SKIPPED buffers, a program's scratch: this "|printf("  buffers, a program's scratch: SKIPPED - this "
+host/tests/device_test.c|"that RAN, bits and flags - skipped: %d format%s, %d "|"that RAN, bits and flags\n"
 host/tests/remote_test.c|printf("  SKIPPED %s: not on the server\n",|printf("  %-6s skipped, not on the server\n",
 host/tests/cpp_api_test.cpp|std::printf("SKIP  cpp-api-test conformance: no vector sets in "|std::printf("cpp-api-test: SKIP conformance: no vector sets in "
 host/tests/cpp_api_test.cpp|std::fputs(r.report.c_str(), stdout);|
@@ -342,7 +349,7 @@ PINS
   done
   return "$bad"
 }
-NPINS=8
+NPINS=9
 
 echo "== verify/run.sh, as committed"
 cases "$ROOT/verify/run.sh"; n=$?
