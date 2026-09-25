@@ -104,6 +104,23 @@ a failure.
   changes - so the library computes the node boundaries, hands one
   range to each tile, and folds the partials with the same tree. A sum
   over four tiles returns exactly what one tile returns, bit for bit.
+
+  **A program's lanes are cut too** (2026-09-25). One scheduler core
+  (`run_job` in backend_xrt.cpp - docs/ROADMAP.md, "Programs across
+  tiles", the plan of record's step 2) now places every kind of run: it
+  owns the waves (at most one task a tile), the launch discipline
+  (stage all, then start; wait on every started run; the handle finished
+  after a failure while a unit may still run) and the sticky words, and
+  each kind keeps its own cut. A program's lanes are cut at beat
+  boundaries, every per-lane block goes with its lanes - the three
+  streams, the deposit window, the counts, both scratch blocks, the
+  index tables' rows - an indexed SOURCE, the image and the bank go to
+  every tile whole, and the lane mask is repacked from each slice's
+  first lane. Each tile is told its slice's lane count, so its early
+  exit is its own lanes'; SEQUENCER.md's P3 (the early exit is
+  invisible) is what makes the cut unobservable, and the card gate
+  fuzzes the cut points and the tile order rather than assuming it
+  (`CFT_XRT_PROGRAM_CUTS`, `CFT_XRT_TILE_ORDER`, docs/CARDDAY.md).
 - **Buffer staging** *(device backend)*. `cft_run` takes host pointers
   and does the device round trip itself. `cft_alloc` exists for when
   that round trip is the bottleneck: allocate with it, fill through
@@ -267,6 +284,48 @@ engine byte for byte; tile 9, `1;2`, an empty value and a tile another
 process held were each refused with their sentence, while tile 3 opened
 beside the held tile 2. The parse is `host/src/tile_select.h`, held on
 any machine by api-test with an atoi-style parse as its control.
+
+### A tile a run was abandoned on (2026-09-25)
+
+A run is abandoned when its wait outlives `CFT_TIMEOUT_MS` (the handle
+is then finished, as above) or when its process ends mid-run. The tile
+cannot be stopped - the kernel is `ap_ctrl_hs` - so it runs on after XRT
+has aborted the command, and on the card that leaves XRT's scheduler
+(ERT) reporting LATER runs on that tile complete early, in any process,
+until the image is reloaded. Before this date those runs came back wrong
+with `CFT_OK`: rule30 at 1,001 lanes on one tile in 0.38 s with every
+lane wrong, where a healthy run takes 9.5 s, and on the quad the
+program set's slowest slices with their last block unwritten
+(docs/VALIDATION.md). A start that arrives while the tile is still
+busy is dropped by the tile, and XRT then completes it with the
+abandoned run's end.
+
+The library now reads each tile's CTRL register - the completion
+witness, in the scheduler every run goes through - at the two moments
+no command of this handle is outstanding on it, and refuses by name:
+
+- **before a start**, a tile that is not idle is running work this
+  process did not start, and nothing is started: `CFT_ERR_INTERNAL`,
+  "tile N (cft_krnl:{cft_krnl_M}) is running work this process did not
+  start (CTRL 0x..., not idle)". Retry when that run has finished.
+- **after XRT reports a run complete**, a tile still busy was completed
+  early: the call waits until the tile is idle (as long as a run may
+  take, so no write of it lands after the call returns), collects
+  nothing, and returns `CFT_ERR_INTERNAL`, "XRT reported ... complete
+  while tile N (...) was still running it", naming the cure - reload
+  the image: load another xclbin, then this one. Loading the same image
+  again is a no-op to XRT and cures nothing.
+
+The contract has no busy status yet; `CFT_ERR_BUSY` comes with per-tile
+failure in the plan of record's step 3 (docs/ROADMAP.md). An output
+check could not do this job: an early-completed run came back byte for
+byte right on the card when an identical earlier run had left the same
+bytes at the same addresses, while CTRL read busy at once. The witness
+costs two register reads a tile a call - about 2.3 us on a 64-element
+resident call on the quad, nothing measurable at 4,096. device-test holds
+the refusals on every XRT device through `CFT_XRT_WITNESS`
+(docs/CARDDAY.md); the defect itself is a card-day leg, because
+planting it poisons the card for every process after the test.
 
 ### Device-resident buffers, and what a port must do to get the rate
 

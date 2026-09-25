@@ -230,14 +230,21 @@ transfers. Device-resident buffers are the remedy, and since ABI
 `cft_reduce` and `cft_program_run_ex` bind a resident buffer's device
 copy - one per tile and role, holding that tile's window - and stage
 nothing for it (docs/HOSTAPI.md, "Device-resident buffers"; measured
-through the library on the card in docs/BENCHMARKS.md). One thing tile
-count does NOT buy yet: a PROGRAM run, resident or staged, executes on
-one tile - `cftx_program_run` uses the first tile and never partitions
-(docs/ROADMAP.md's debts list, 2026-09-15) - so a four-tile image runs
-a program at one tile's rate. atlas-engine measured exactly that on
-2026-09-17, every program at the single's rate to the hundredth on the
-quad, and the plan for it is docs/ROADMAP.md, "Programs across tiles: a
-partitioner and a scheduler". And what it buys on elementwise work was
+through the library on the card in docs/BENCHMARKS.md). Since
+2026-09-25 tile count buys programs too: the scheduler core
+(`run_job` in backend_xrt.cpp - docs/ROADMAP.md, "Programs across
+tiles", the plan of record's step 2) cuts a program run's lanes across
+every tile, each tile running its own slice's blocks with its own
+early exit, which SEQUENCER.md's P3 makes unobservable. Measured on the
+round-2 quad (docs/VALIDATION.md, 2026-09-25): a 65,536-lane Lorenz-63
+integration at fp256 took 13.68 s on four tiles against 53.94 s on one
+for each 2,000 extra steps - 3.94 times - with the same bytes; and
+atlas-engine's program set, 140 cases, matched on the quad's default
+cut and under fuzzed cuts and tile orders. Before that date a program
+ran on one tile - `cftx_program_run` used the first and never
+partitioned - and atlas-engine measured exactly that on 2026-09-17,
+every program at the single's rate to the hundredth on the quad. And
+what tile count buys on elementwise work was
 measured on the round-2 pair (2026-09-16, docs/VALIDATION.md,
 "saturating the pair"): the engine is exactly four times one at every
 format and size, each unit at the single's 107 M beats a second, and

@@ -2984,6 +2984,9 @@ rediscovering them.
   on 2026-09-17: atlas-engine's programs ran on the quad at the
   single's rate to the hundredth. The sentence now exists as a plan -
   "Programs across tiles: a partitioner and a scheduler", below.
+  **Done 2026-09-25** (4ecaf24, docs/VALIDATION.md): the plan's step 2
+  cuts a program's lanes across every tile, and each tile's mask is
+  repacked from its own slice's first lane.
 - **Control codes do not join the instruction overlap** - a revision-7
   item beside beat skipping. R12's rule is that every control code
   which reads the register file waits for the queue of in-flight
@@ -3093,7 +3096,19 @@ rediscovering them.
   did, with every result matching; what is owed is a completion the
   host can see after a timeout, and a per-tile rather than per-handle
   notion of "finished" - both of which the scheduler below needs
-  anyway.
+  anyway. **Worse than blind, measured 2026-09-25** (docs/VALIDATION.md):
+  when a run is abandoned on a tile - a timeout, or a process that ends
+  mid-run - XRT aborts the command (ERT's `abort_sync`) while the tile
+  runs on, and until the image is reloaded later runs on that tile, in
+  ANY process, can be reported complete early: rule30 at 1,001 lanes
+  came back in 0.38 s, every lane wrong, rc 0. The library now refuses
+  those by name - the completion witness (bc2f3d5): a tile must read
+  idle in CTRL before a start and again after XRT's completion - and
+  names the cure, a reload. Logan's word the same day: the host witness
+  now; a side-effect-free witness in the RTL (a run/done counter, a
+  start that arrives while busy flagged rather than dropped) folded
+  into step 4's one program-model revision; `CFT_ERR_BUSY` and per-tile
+  failure with the plan's step 3.
 - **atlas-engine's program set is not a verify stage yet; one of its
   photographs is** (`photograph`, 2026-09-18). The photograph was the
   cheap one to vendor - the input is the sample index and the expected
@@ -3120,7 +3135,10 @@ rediscovering them.
 Logan's word, 2026-09-18: when this work begins it takes the proper
 approach - a partitioner and a scheduler - rather than a loop over
 tiles inside `cftx_program_run`. This section is what that means, what
-decides whether a cut pays, and the order. Nothing here is built.
+decides whether a cut pays, and the order. **Step 2 was built on
+2026-09-25** (backend_xrt.cpp's `run_job`, 4ecaf24 - rebuilt as this plan
+asks after a first cut, 617b753, put a loop over tiles inside
+`cftx_program_run`; docs/VALIDATION.md); the rest is not.
 
 **What a program is, for this purpose.** One instruction stream
 executed over a block of lanes at once - 128 lanes at fp32, 16 at
@@ -3238,7 +3256,13 @@ last.
    change to the conformance profile. Gate: placement invariance, the
    program set on both images, and close to four times on any run
    longer than a few milliseconds - `threebody` at 65,536 lanes is
-   three and a half minutes on one tile.
+   three and a half minutes on one tile. **Built 2026-09-25**: on the
+   round-2 pair, device-test's matrix under fuzzed tile orders and lane
+   cuts with a planted one-lane slip going red; the program set 140 of
+   140 on both images and on fuzzed cuts; a 65,536-lane fp256 Lorenz-63
+   run 3.94 times as fast on four tiles as on one, byte for byte the
+   same. What it does not do is step 3's: a tile a run was abandoned on
+   is refused by name, not worked around.
 3. *Asynchronous submit, wait and affinity in the API*, and per-tile
    failure. The run cut falls out of it.
 4. *The partitioner in `asm.py`*: the dataflow graph, the legality

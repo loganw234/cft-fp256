@@ -614,6 +614,44 @@ they were handed over. What only a card can still say:
     device-test -r -q <image>`); `zero` is the behaviour before that
     date, for an A/B timing. Under `CFT_XRT_TRACE` each reduction launch
     says which it did.
+  - `CFT_XRT_TILE_ORDER` and `CFT_XRT_PROGRAM_CUTS` (2026-09-25): the
+    scheduler's placement fuzz (backend_xrt.cpp, run_job). `seed:<N>`
+    on the first permutes which tile runs which task, for every kind
+    of run; on the second it re-cuts a program's lanes anywhere - one
+    lane, an odd offset, a slice left out - and `skew:<N>` plants a
+    one-lane slip, the placement tests' negative control. A card day
+    runs device-test's matrix under a few seeds of each and requires
+    every leg green, and `skew` red. Both refuse a malformed value by
+    name; unset is the default placement.
+  - `CFT_XRT_WITNESS` (2026-09-25): the completion witness's planted
+    fault (backend_xrt.cpp, run_job). `busy-before` makes the first
+    task's tile read busy in CTRL before its start, `busy-after` busy
+    once after XRT's completion; each must be refused by name with the
+    caller's output untouched and the handle right straight after -
+    device-test's `check_completion_witness` asks exactly that on every
+    XRT device. The defect the witness exists for cannot be planted
+    from a test without poisoning the card for everyone: see "A tile a
+    run was abandoned on", below.
+- **A tile a run was abandoned on** (found 2026-09-25): a run that
+  outlives `CFT_TIMEOUT_MS`, or a process killed mid-run, leaves its
+  tile running after XRT has aborted the command, and until the image
+  is reloaded XRT can report LATER runs on that tile - any process's -
+  complete early. Before 2026-09-25 those came back wrong with rc 0; the
+  library now refuses them by name ("was still running it", "is running
+  work this process did not start"). Two rules for a card day:
+  - **size a leg's wait to its run.** `CFT_TIMEOUT_MS` is one minute by
+    default; a leg that can run longer sets it (the scheduler gate's
+    one-tile 4,000-step run needed about 110 s and poisoned the next leg
+    - docs/VALIDATION.md).
+  - **after any timeout, reload the image before trusting a result** -
+    load another xclbin, then this one (a load of the same image is a
+    no-op: "xclbin is already downloaded"). `journalctl -k` shows every
+    abandonment as `kds_del_cu_context: 1 outstanding command(s)`.
+  The witness's card leg makes one on purpose (an fp256 run on tile 1
+  with `CFT_TIMEOUT_MS=5000`), requires the refusals while it runs and
+  after it ends and no wrong answer anywhere, requires a witness-off
+  build to hand back wrong bytes with rc 0 on the same poisoned tile,
+  and reloads last.
   - `CFT_XRT_TRACE` (what the tile received, and a pattern in the
   count window's staging pad that the strobes must leave alone),
   `CFT_XRT_MASK_ADDR_OVERRIDE` (does the tile read the mask: a fault

@@ -434,7 +434,8 @@ binary32, timed through libcft with the run alone on the clock and every
 deposit buffer checked (their `atlas-engine/docs/CFT-SILICON.md`; the
 handoff is recorded in docs/VALIDATION.md, 2026-09-18). One tile; the
 quad ran every one of them at the single's rate to the hundredth,
-because a program run is one tile's.
+because a program run was then one tile's (since 2026-09-25 its lanes
+are cut across the tiles - docs/SCALING.md).
 
 | program | instructions | per lane | lanes a second |
 |---|---|---|---|
