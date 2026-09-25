@@ -5903,7 +5903,12 @@ int main(int argc, char **argv)
         if (only_fmt >= 0 && f != only_fmt)
             continue;
         if (!cft_supports(hw, CFT_FMA, fmt)) {
-            printf("%-6s not on this device, skipped\n",
+            /* SKIPPED is the first word because that is the marker
+             * verify/run.sh counts as a check that did not run; it
+             * read "fp128  not on this device, skipped" until
+             * 2026-09-24, and a stage that skipped a whole format
+             * passed without a word on its row. */
+            printf("SKIPPED %s: not on this device\n",
                    cft_format_name(fmt));
             continue;
         }
@@ -5982,12 +5987,14 @@ int main(int argc, char **argv)
                            "checks, %d failed\n", checks,
                            failures);
                 } else {
-                    printf("  buffers, an indexed program: "
-                           "SKIPPED - this device does not "
+                    /* SKIPPED first, as the format skip above, for
+                     * the runner; it was mid-line until 2026-09-24. */
+                    printf("  SKIPPED buffers, an indexed program: "
+                           "this device does not "
                            "publish CFT_SEQ_FEAT_INDEXED\n");
                 }
             } else {
-                printf("  buffers, a program's scratch: SKIPPED - this "
+                printf("  SKIPPED buffers, a program's scratch: this "
                        "device does not publish SCRATCH_IO\n");
             }
             fflush(stdout);

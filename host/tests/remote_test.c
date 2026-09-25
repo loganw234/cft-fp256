@@ -1152,7 +1152,11 @@ static void identity_tests(cft_device *sw, cft_device *rm, size_t n)
         const size_t esz = cft_format_size((cft_format)fmt);
         int bad = 0;
         if (!cft_supports(rm, CFT_FMA, (cft_format)fmt)) {
-            printf("  %-6s skipped, not on the server\n",
+            /* SKIPPED is the first word because that is the marker
+             * verify/run.sh counts as a check that did not run; until
+             * 2026-09-24 this read "fp128  skipped, not on the
+             * server" and the remote stage passed without naming it. */
+            printf("  SKIPPED %s: not on the server\n",
                    cft_format_name((cft_format)fmt));
             continue;
         }

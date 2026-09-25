@@ -1998,11 +1998,21 @@ int main(int argc, char **argv)
     /* Conformance through the wrapper: the published vector sets,
      * replayed by cft_conformance itself rather than by a restatement
      * of it here. A missing set directory is reported by name - a
-     * replay that quietly checked nothing must not read as a pass. */
+     * replay that quietly checked nothing must not read as a pass.
+     *
+     * The replay's report is printed whole, as cft-selftest prints it:
+     * a set it skipped ("<set>: skipped, <op> not on this device") is
+     * a line of that report and nowhere else, and until 2026-09-24
+     * this printed only the case count, so a set skipped here reached
+     * no log. SKIP is the first word of the no-sets line for the same
+     * reason - it is the marker verify/run.sh counts. */
     {
         const cft::device::conformance_result r = dev.conformance(vdir);
+        std::fputs(r.report.c_str(), stdout);
+        if (!r.report.empty() && r.report.back() != '\n')
+            std::fputc('\n', stdout);   /* a report cut at its buffer */
         if (r.status == CFT_ERR_ARTIFACT) {
-            std::printf("cpp-api-test: SKIP conformance: no vector sets in "
+            std::printf("SKIP  cpp-api-test conformance: no vector sets in "
                         "%s (run `make vectors` from the repo root)\n", vdir);
         } else {
             CHECK(r.ok(), "conformance replay: %s", cft_strerror(r.status));

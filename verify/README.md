@@ -189,22 +189,28 @@ before that). One other
 form is read, because the runner cannot change it: the conformance
 replay's `<set>: skipped, <what> not on this device` and
 `<set>: <op> skipped, not on this device`, which reach the libcft
-stage's log through `cft-selftest` (the cpp and remote stages print
-only the replay's counts, so a set skipped there reaches no log). A
-script that reports a skip any other way - lower case, or mid-line -
-is invisible to this, and should print the marker. The ones known on
-2026-09-24: device-test's `<format> not on this device, skipped` and
-`buffers, ...: SKIPPED - this device does not publish ...` lines,
-remote-test's `<format> skipped, not on the server`,
+stage's log through `cft-selftest`, and the cpp and remote stages' logs
+through cpp-api-test and `host/tests/remote_check.py` (which printed
+only the replay's counts until 2026-09-24, so a set skipped there
+reached no log). A script that reports a skip any other way - lower
+case, or mid-line - is invisible to this, and should print the marker.
+The ones known on 2026-09-24:
 `bindings/wasm/verify_demos.mjs`'s `skipped: run ...` when the demos
-page is not built, cpp-api-test's
-`cpp-api-test: SKIP conformance: no vector sets`,
-`tb/check_results.py`'s `(N skipped)` after a bench's case count, and a
-vector set absent from the directory the replay reads, which the replay
-reports only as a smaller count on its `N sets, ... all matching` line
-(168 when every set is there).
+page is not built, and a vector set absent from the directory the
+replay reads, which the replay reports only as a smaller count on its
+`N sets, ... all matching` line (168 when every set is there).
+device-test's `<format> not on this device, skipped` and
+`buffers, ...: SKIPPED - this device does not publish ...`,
+remote-test's `<format> skipped, not on the server`, cpp-api-test's
+`cpp-api-test: SKIP conformance: no vector sets` and
+`tb/check_results.py`'s bare `(N skipped)` were on that list until they
+were reprinted with the marker first the same day (check_results.py
+keeps the count, and adds a `SKIP` line per skipped case).
 `bash verify/test-inner-skips.sh` holds the accounting to synthetic
-stages, with four negative controls.
+stages, with four negative controls; then each of those programs' lines
+as printed now, which must count and fail `--require-all` alone, beside
+the same gap as printed before, which must count nothing; and pins each
+source to the line it prints.
 
 ## What is deliberately not here
 
