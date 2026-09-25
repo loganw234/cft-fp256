@@ -326,7 +326,7 @@ already far more than a 6-value state needs, and since revision 3
 (2026-09-08) the scratch block is that loading; this tool does not use
 it.
 
-**(2) Correctly rounded divide and square root are not programs.**
+**(2) A correctly rounded divide or square root cannot sit inside this loop.**
 `python/cft_golden/seqprogs.py` is the library's own in-program
 `cft_div`/`cft_sqrt`, and its docstring states the partition: **host**
 prep (operand classification, the exact prenormalise/centre surgery),
@@ -336,8 +336,11 @@ rounding authority). The core alone occupies `r0..r12` of the
 thirty-two registers a lane owns.
 
 So the composed route cannot be inlined into a larger program's loop
-body: it needs the host between its halves, and it would not leave
-room for the orbit state even if it did not. `--rsqrt exact` is
+body: it needs the host between its halves. The whole-program route
+that has existed since 2026-09-14 (`python/cft_golden/divfull.py`,
+opt-in in libcft behind `CFT_DIVSQRT_FULL=1`) does not, but it uses
+registers up to `r31` and the ISA has no call, so it leaves no room for
+the orbit state either. `--rsqrt exact` is
 therefore a loop-engine route, and `--rsqrt newton` exists so that the
 two engines have a step they can **both** run - which they then have
 to run bit for bit.

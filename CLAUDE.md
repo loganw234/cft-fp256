@@ -28,7 +28,9 @@ repo with the content-addressed cache and the 5-second warm
 
 A stage whose tools are missing is **skipped by name with a reason**, never
 silently passed - so read the skip list, and use `--require-all` on a host
-that claims to be a full verification host.
+that claims to be a full verification host. Since 2026-09-24 a check
+skipped *inside* a stage that passed is counted and named on the VERDICT
+line too, and `--require-all` fails it.
 
 ## The machines, and the one that gets confused
 

@@ -75,7 +75,7 @@ authority:
    were reported as a pass. The files checked are derived from the bench
    list rather than written beside it, so a bench cannot be run and left
    unchecked. The benches:
-   the four rung benches replay 111,278 published vectors through
+   the four rung benches replay 111,278 cases the golden model generates for them (`vectors.testset`, at smaller budgets than the published sets) through
    `cft_fpfma_pipe` bit for bit, flags included; the kernel is driven
    through its CSR and AXI interfaces, by the streaming engine and by
    the sequencer; the shared normalise and alignment ladders are held
@@ -167,7 +167,7 @@ suite - so a Linux host lands nearer the quiet column or below it.
 
 | gate | quiet | loaded | notes |
 |---|---|---|---|
-| `golden` (pytest, 2,264 tests since revision 3's model and assembler cases joined on 2026-09-08 evening; 2,075 before it) | 2.6 min at four workers | 8 to 13 min | 5 skip by their own conditions; one revision-3 assembler test ran for the first time on the merged tree and had its expectation corrected |
+| `golden` (pytest, 2,260 tests since 2026-09-24, when four parse cases that only ever skipped were dropped; 2,264 from revision 3's model and assembler cases on 2026-09-08 evening; 2,075 before it) | 2.6 min at four workers | 8 to 13 min | on the desktop 3 skip by their own conditions (two need the Arduino loopback binary, one `math.fma`, Python 3.13+), and the runner now counts them; one revision-3 assembler test ran for the first time on the merged tree and had its expectation corrected |
 | `vectors` (`vectors/gen_vectors.py` at the generator's default counts, not `make vectors`' smaller ones; 168 sets) | 5 min | 7 to 8.5 min | |
 | `libcft` / `make -C host test` (build + the replay: 1,068,915 cases on `make vectors`' sets, about 1.2 million at the runner's generator counts) | 7.5 min | 8.5 to 11 min | the census was 1,071,635 until 2026-09-12, when opcode 31 became `maxall`: a reduction has no elementwise case to inherit, so 4,000 `reserved31` cases left and 1,280 maxall cases arrived. A document recording an earlier RUN still says 1,071,635 and is right to |
 | `make -C host reducetest` (`reduce_check.py --trials 1500`: the tree, the scaling, the bits and the flags against the model) | 2 to 3 min | | listed here from 2026-09-12, having been absent from a page that calls itself the map of everything - found by asking which docs the round had made stale rather than by a gate. 13,516 reductions over four formats and all seven of clause 9.4 plus `maxall`, whose two sides are deliberately DIFFERENT SHAPES: the model folds left, the library halves. Comparing them is what tests 754-2019 `maximum`'s associativity instead of assuming it |

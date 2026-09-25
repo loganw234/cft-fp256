@@ -1,12 +1,12 @@
 # The documents, by what you open them for
 
-Thirty-seven files, 48,985 lines. Flat in one directory they look like one
+Thirty-seven files, 49,081 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **16,437 lines you consult while working** — the three under *Start here*,
+- **16,529 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
-- **5,567 lines of tool manual**, one per shipped program;
-- **1,760 lines of operations**, read when you are about to do something to
+- **5,570 lines of tool manual**, one per shipped program;
+- **1,761 lines of operations**, read when you are about to do something to
   hardware;
 - **25,221 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
@@ -33,7 +33,7 @@ answer is not in here — it is `make verify-quick`, and
 | document | lines | what it is for |
 |---|---|---|
 | [INTEGRATION.md](INTEGRATION.md) | 253 | Choosing a path: which surface to use for which job. The shortest route from "I have a workload" to "I know what to call." |
-| [VERIFICATION.md](VERIFICATION.md) | 364 | Every gate, what it proves, how long it really takes. Twelve tiers, forty runner stages. |
+| [VERIFICATION.md](VERIFICATION.md) | 379 | Every gate, what it proves, how long it really takes. Twelve tiers, forty runner stages. |
 | [COMPLIANCE.md](COMPLIANCE.md) | 172 | IEEE 754-2019 clause by clause: what is implemented, what is refused, and where each is proven. |
 
 ## The contract
@@ -45,17 +45,17 @@ product, not the implementation.
 |---|---|---|
 | [DETERMINISM.md](DETERMINISM.md) | 1,442 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 1,163 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
-| [SEQUENCER.md](SEQUENCER.md) | 1,913 | The orbit sequencer and the program model. |
-| [COMPATIBILITY.md](COMPATIBILITY.md) | 786 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
+| [SEQUENCER.md](SEQUENCER.md) | 1,914 | The orbit sequencer and the program model. |
+| [COMPATIBILITY.md](COMPATIBILITY.md) | 829 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
 
 ## Reference you call into
 
 | document | lines | what it is for |
 |---|---|---|
-| [HOSTAPI.md](HOSTAPI.md) | 2,595 | The host API, function by function. The largest reference here and the one most often wanted. |
+| [HOSTAPI.md](HOSTAPI.md) | 2,616 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,669 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
-| [REMOTE.md](REMOTE.md) | 1,393 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
+| [REMOTE.md](REMOTE.md) | 1,405 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 477 | Programs as files: the assembler, the program library, the runner. |
 | [EMBEDDED.md](EMBEDDED.md) | 677 | libcft on microcontrollers, and the profiles the embedded gate runs. |
 | [PLATFORMS.md](PLATFORMS.md) | 2,928 | Which FPGA to buy, borrow or rent next, measured against the tile this project builds; every figure carries a source and every price the date it was seen. |
@@ -70,7 +70,7 @@ running.
 | document | lines | tool |
 |---|---|---|
 | [ZOOM.md](ZOOM.md) | 854 | `cft-zoom` — deep-zoom Mandelbrot reference orbits |
-| [ORBITS.md](ORBITS.md) | 961 | `cft-orbits` — symplectic few-body integration |
+| [ORBITS.md](ORBITS.md) | 964 | `cft-orbits` — symplectic few-body integration |
 | [MERSENNE.md](MERSENNE.md) | 882 | `cft-mersenne` — Lucas-Lehmer |
 | [ENCLOSE.md](ENCLOSE.md) | 845 | `cft-enclose` — directed-rounding interval enclosure |
 | [COLLATZ.md](COLLATZ.md) | 648 | `cft-collatz` — Collatz trajectories |
@@ -81,7 +81,7 @@ running.
 
 | document | lines | what it is for |
 |---|---|---|
-| [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 244 | Building a bitstream, and the five traps — three of which exit 0, and two that look like a design failure. `hw/build-pair.sh` is this document as an executable. |
+| [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 245 | Building a bitstream, and the five traps — three of which exit 0, and two that look like a design failure. `hw/build-pair.sh` is this document as an executable. |
 | [CARDDAY.md](CARDDAY.md) | 736 | Card day: the runbook as it was actually run, the staged pairs, and the forensics kept when build trees are reclaimed. |
 | [BRINGUP.md](BRINGUP.md) | 780 | Hardware bring-up, and the gates CI's green tick does not cover. |
 

@@ -998,10 +998,11 @@ them.
   without hardware: two input streams on the same array at different
   offsets let a lane see its neighbour's input.
 - **A callable composed operation** (orbits, enclose). `cft_div` and
-  `cft_sqrt` are programs themselves, partitioned host-prep,
-  program-core, host-finish, and the core alone uses thirteen
-  registers, so they cannot be inlined into another program's loop
-  body; any kernel that needs correct rounding inside its loop leaves
+  `cft_sqrt` are programs themselves - partitioned host-prep,
+  program-core, host-finish on the default route, where the core alone
+  uses thirteen registers, and whole on the opt-in divfull route
+  (2026-09-14, `CFT_DIVSQRT_FULL=1`), which uses registers up to
+  `r31` - so neither can be inlined into another program's loop body; any kernel that needs correct rounding inside its loop leaves
   the program for it. The same is true of `cft_reduce`, whose tree is
   not in the ISA.
 

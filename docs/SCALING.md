@@ -119,8 +119,8 @@ against 4 x 288,764 = 1,155,056 in the kernels) puts the quad's own
 fixed cost near 161,775 LUT, sixteen masters' worth of crossbar rather
 than four. Carry that instead and a quad is 719,391 (82.5%) with the
 ladders off and 656,171 (75.3%) with them on, which is where
-ROADMAP.md's 82.5% / 75.3% come from; the ~80% `rtl/cft_krnl.sv` still
-quotes matches neither this nor the table's 78%, as ROADMAP.md says. And
+ROADMAP.md's 82.5% / 75.3% come from, and the 82.5% and 75% that
+`rtl/cft_krnl.sv` quotes. And
 all of it is **out of context**: a single tile linked at 135 MHz with
 the ladders on missed timing at -0.577 ns where OOC had read +0.097, so
 these are area figures and nothing more. A single and a quad are

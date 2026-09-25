@@ -270,7 +270,7 @@ does not work yet.
 | 0x78 | SCRATCH_OUT_PTR | RW | 64-bit HBM byte address of the block the run hands back: `n * n_scratch_out` values in the same layout, written after the last deposit of each lane block. Kernel argument 10 on `m_axi_d`, beside `d` and `cnt`, because it is WRITTEN - which is what puts it in the HBM group the write master can reach. Together with SCRATCH_IN_PTR this is the resumable-run mechanism docs/SEQUENCER.md's R5 records: a program whose state leaves through one and returns through the other computes in two calls what one call computes |
 | 0x80 | SEG | RW | a reduction's SEGMENT LENGTH (2026-09-14, ask 7; VERSION 0x900, CAPS2[8]). Zero, the decode default, is the whole array and one result - every reduction before this register. Non-zero, the engine's accumulator restarts every SEG elements and the results land contiguously at D_PTR: `d[s]` is the same tree over `a[s*SEG .. (s+1)*SEG)` that a whole-array reduction of those elements gives (docs/HOSTAPI.md, `cft_reduce_seg`). Ignored by an elementwise run and by a program. Kernel argument 11 with NRES, one 64-bit scalar, SEG in the low word |
 | 0x84 | NRES | RW | how many results that is, `n / SEG`, which the host computes and guarantees exact (`n == NRES * SEG`): the writer needs its beat count before the first result lands, and a divider in the tile would be a second opinion on the host's arithmetic. libcft writes the pair before EVERY reduction on a 0x900 tile, zero included, because the register keeps its last value and a whole-array reduction after a segmented one must not inherit a segment |
-| 0x88 | IDX_A_PTR | RW | 64-bit HBM byte address of the INDEX TABLE of a program run's `a` stream (ABI 0.14, 2026-09-15, docs/ROUND2.md; VERSION 0xA00): `n` uint32 entries, beat-padded, element *i* of the stream being `a[idx[i]]` and 0xFFFFFFFF reading as +0. Read by the sequencer through `m_axi_a` only when MODE[19] is set, which CAPS2[9] announces and the guard on MODE[31:19] refuses without it. Kernel argument 12. Appended at the SEAM of the round that reads it, so the parcel building the fetch and the parcel building the mask share one map and one version; P1 (2026-09-15) is the parcel that reads it |
+| 0x88 | IDX_A_PTR | RW | 64-bit HBM byte address of the INDEX TABLE of a program run's `a` stream (ABI 0.14, 2026-09-15, docs/ROUND2.md; VERSION 0xA00): `n` uint32 entries, beat-padded, element *i* of the stream being `a[idx[i]]` and 0xFFFFFFFF reading as +0. Read by the sequencer through `m_axi_a` only when MODE[19] is set, which CAPS2[9] announces and the MODE guard refuses without it (`rtl/cft_csr.sv`: [31:24] reserved, and each of [23:16] refused where its feature is absent). Kernel argument 12. Appended at the SEAM of the round that reads it, so the parcel building the fetch and the parcel building the mask share one map and one version; P1 (2026-09-15) is the parcel that reads it |
 | 0x90 | IDX_B_PTR | RW | the `b` stream's table, MODE[20], argument 13 |
 | 0x98 | IDX_C_PTR | RW | the `c` stream's table, MODE[21], argument 14 |
 | 0xA0 | IDX_SI_PTR | RW | the scratch block's table, `n * n_scratch_in` entries lane-major into the pool at SCRATCH_IN_PTR, MODE[22], argument 15 |
@@ -327,8 +327,8 @@ record.
 Opcode 15 and everything above 31 are unassigned, and return the
 canonical quiet NaN with invalid raised - in hardware and in the golden
 model alike (`rtl/cft_simpleops.sv`'s `is_reserved`, and
-`python/cft_golden/softfloat.py`'s own note that "15, 31 and above are
-unassigned"). Codes 24, 25, 28, 29 and 31 are reserved in
+`python/cft_golden/softfloat.py`'s own note that "15 and everything
+above 31 are unassigned"). Codes 24, 25, 28, 29 and 31 are reserved in
 `cft_simpleops` too, because they are reductions and belong to the
 accumulator rather than to the ALU. The field was four bits until the
 integer group needed a fifteenth opcode; it is a byte now so that
