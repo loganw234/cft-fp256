@@ -810,10 +810,16 @@ def check_segments(tool, tmp):
         # flipped bit in s_out could never have matched once the check
         # above passed, so it proved nothing. Constant 2 is the first
         # drift's h/2 (the bank's order is -1, -1/2, then those), and one
-        # bit of it must move the golden executor off the library.
+        # bit of it must move the golden executor off the library - the
+        # bit in the MIDDLE of the significand, a change of about
+        # 2^(p/2) ulps. Not bit 0: the step map is many-to-one at the ulp
+        # scale, and a one-ulp change can merge back bit for bit within
+        # a segment (F0b, 2026-09-25), which would fail this control on
+        # a program that did differ.
         esz = fmt.width // 8
-        other = bytearray(image)
-        other[32 + 2 * esz] ^= 1
+        mid = fmt.man_w // 2                 # a significand bit, not the
+        other = bytearray(image)             # exponent's, in any format
+        other[32 + 2 * esz + mid // 8] ^= 1 << (mid % 8)
         res_k = seq.run(seq.Program.from_bytes(bytes(other)), a_in,
                         [0] * n, None, scratch_in=s_in)
         check(res_k.scratch_out != s_out,
