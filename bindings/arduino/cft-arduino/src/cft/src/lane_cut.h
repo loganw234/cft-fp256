@@ -155,4 +155,29 @@ static size_t cft_plan_lane_cuts(size_t n, size_t ntiles, uint64_t seed,
     return k;
 }
 
+/* Which tile runs which task of one wave: out[j] is the tile for the
+ * wave's j-th task. The identity when `seed` is zero - the scheduler's
+ * default - and otherwise a permutation of [0, ntiles) drawn from
+ * (seed, wave), which is what CFT_XRT_TILE_ORDER asks for: a job's bits
+ * may not depend on which tile ran which of its tasks, and the card gate
+ * holds that by moving the tasks around. Every kind of run is placed
+ * through this, so it lives beside the cut rather than inside one
+ * kind's path. */
+static void cft_tile_order(size_t ntiles, uint64_t seed, size_t wave,
+                           size_t *out)
+{
+    uint64_t s = seed ^ ((uint64_t)(wave + 1) * 0xA0761D6478BD642Full);
+    size_t i;
+
+    for (i = 0; i < ntiles; i++)
+        out[i] = i;
+    if (!seed)
+        return;
+    for (i = ntiles; i > 1; i--) {               /* Fisher-Yates */
+        size_t j = (size_t)(cft_lane_mix(&s) % (uint64_t)i), x = out[i - 1];
+        out[i - 1] = out[j];
+        out[j] = x;
+    }
+}
+
 #endif /* CFT_LANE_CUT_H */

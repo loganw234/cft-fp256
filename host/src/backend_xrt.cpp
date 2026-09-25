@@ -84,6 +84,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <functional>
 #include <new>
 #include <stdexcept>
 #include <string>
@@ -742,6 +743,30 @@ xrt::bo *buf_bind(Buf &B, size_t tile, int role, size_t off,
 
     BufCopy &c =
         B.copies[tile * CFT_ROLE_COUNT + static_cast<size_t>(role)];
+
+    /* Before a run is handed an OUTPUT window, every OTHER copy of this
+     * buffer holding unflushed bytes that overlap it goes home first.
+     * Two copies can only overlap when a window moved to another tile -
+     * a different cut, or a different placement, from one call to the
+     * next - and cftx_buffer_from_device flushes copies in table order,
+     * not write order, so the older bytes could otherwise land last and
+     * silently replace the newer run's. The mirror changed, so the
+     * generation moves too: an input copy filled before this flush must
+     * not be reused as current. (Found reading this file for the
+     * scheduler, 2026-09-25. Under fixed placement the unused tiles are
+     * always the high ones and their old windows sit above the new, so
+     * it could not happen; CFT_XRT_TILE_ORDER makes it possible.) */
+    if (output) {
+        bool moved = false;
+        for (auto &o : B.copies)
+            if (&o != &c && o.dirty && o.off < off + real &&
+                off < o.off + o.real) {
+                buf_flush(B, o);
+                moved = true;
+            }
+        if (moved)
+            B.gen++;
+    }
     const bool same_window =
         c.live && c.off == off && c.real == real && c.padded == padded;
 
@@ -824,6 +849,239 @@ void buf_mark_written(Buf &B, size_t tile, int role)
         B.copies[tile * CFT_ROLE_COUNT + static_cast<size_t>(role)];
     if (c.live)
         c.dirty = true;
+}
+
+/* ====================================================================
+ * The scheduler (docs/ROADMAP.md, "Programs across tiles: a partitioner
+ * and a scheduler" - Logan's plan of record of 2026-09-18, its step 2)
+ *
+ * Every kind of run - elementwise, reduction, segmented reduction,
+ * program - reaches the tiles through this one piece of code. A call
+ * builds a JOB: its TASKS, each one tile's share of the run (a slice of
+ * elements, a range of a reduction's tree, a run of segments, a range of
+ * lanes), with the steps only that kind knows - stage, start, collect -
+ * each taking the tile the scheduler places it on. The scheduler owns
+ * everything the kinds used to do four times over, each its own way:
+ *
+ *   - PLACEMENT. Tasks go out in waves of at most one a tile, because
+ *     the RTL silently drops a start issued to a busy compute unit, and
+ *     each wave is staged just before it starts: staging every task up
+ *     front once let a reduction's fifth range overwrite its first
+ *     range's operands before the first had been launched. Within a
+ *     wave the tiles are taken in order, or in the order
+ *     CFT_XRT_TILE_ORDER=seed:<N> draws (lane_cut.h's cft_tile_order):
+ *     a job's bits may not depend on which tile ran which task, and the
+ *     card gate holds that by moving the tasks around.
+ *   - THE LAUNCH DISCIPLINE. Every task of a wave is staged before any
+ *     starts, so a staging failure leaves every unit idle and the handle
+ *     reusable. Every started run is waited on, even after a failure -
+ *     abandoning one leaves a unit writing into this process's buffers -
+ *     and any failure once a unit may be running poisons the handle,
+ *     after a best-effort STATUS read, because the timeout is how a
+ *     fabric fault becomes readable at all.
+ *   - THE STICKY WORDS. STATUS and FLAGS are ORed over the tiles that
+ *     RAN, never an idle one, whose words are its previous run's - OR is
+ *     associative, which is why placement cannot reach them - and the
+ *     job's own test of STATUS decides, wave by wave, whether results
+ *     are collected at all: faults before results.
+ *
+ * What the scheduler does not decide is the CUT, which is each kind's
+ * strategy (slice.h's beats for elementwise work, the caller's
+ * canonical tree nodes for a reduction, whole segments for a segmented
+ * one, lane_cut.h's lanes for a program), nor what STATUS means, which
+ * differs by kind - a program's carries reports beside its faults. The
+ * plan's later steps - asynchronous submit and wait, per-tile failure,
+ * cuts through a program - build on this and are not here.
+ * ==================================================================== */
+
+struct Task {
+    std::function<void(size_t)> stage;      /* may throw; nothing started */
+    std::function<xrt::run(size_t)> start;  /* launch on this tile */
+    std::function<void(size_t)> collect;    /* after a clean wave */
+    std::function<void(size_t)> after;      /* optional: every task, before
+                                             * the fault test (traces) */
+};
+
+struct Job {
+    std::string what;        /* "a run", "a program", "a reduction", ... */
+    std::string oom_words;   /* why this kind's staging runs out */
+    std::vector<Task> tasks;
+    bool (*faulty)(uint32_t);
+};
+
+/* CFT_XRT_TILE_ORDER and CFT_XRT_PROGRAM_CUTS take "seed:<N>", and the
+ * second also "skew:<N>"; N decimal, nothing else. Read per call, so a
+ * test can switch it between two runs. Unset or empty is the default
+ * (seed 0). A malformed value is refused by name - an instrument that
+ * quietly read a typo as "off" would be a gate that could not fail. */
+int instrument_seed(const char *name, bool allow_skew, uint64_t *seed,
+                    bool *skew)
+{
+    *seed = 0;
+    if (skew)
+        *skew = false;
+    const char *const v = std::getenv(name);
+    if (!v || !*v)
+        return ST_OK;
+    const bool is_seed = !std::strncmp(v, "seed:", 5);
+    const bool is_skew = allow_skew && !std::strncmp(v, "skew:", 5);
+    char *end = nullptr;
+    unsigned long long n = 0;
+    bool ok = (is_seed || is_skew) && v[5] >= '0' && v[5] <= '9';
+    if (ok) {
+        errno = 0;
+        n = std::strtoull(v + 5, &end, 10);
+        ok = end && !*end && !errno && n != 0;
+    }
+    if (!ok) {
+        set_err(std::string(name) + "=\"" + v + "\": expected seed:<N>" +
+                (allow_skew ? " or skew:<N>" : "") + ", N a decimal seed "
+                "above zero; unset it for the default");
+        return ST_INVALID_ARGUMENT;
+    }
+    *seed = n;
+    if (skew)
+        *skew = is_skew;
+    return ST_OK;
+}
+
+/* Run a job. ST_OK means every wave ran: *status and *flags are the
+ * words ORed over the tiles that ran, and *faulted says whether the
+ * job's test stopped it before a wave's results were collected (the
+ * caller then names the fault; nothing it collected is to be trusted).
+ * Anything else is a failure with g_err set; *fail_status is then a
+ * best-effort STATUS read, for the caller's message, and the handle is
+ * poisoned when a unit may still be running. */
+int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
+            bool *faulted, uint32_t *fail_status)
+{
+    *status = 0;
+    *flags = 0;
+    *faulted = false;
+    *fail_status = 0;
+
+    uint64_t seed = 0;
+    const int ist = instrument_seed("CFT_XRT_TILE_ORDER", false, &seed,
+                                    nullptr);
+    if (ist != ST_OK)
+        return ist;
+
+    const size_t ntiles = D.tiles.size();
+    std::vector<size_t> order(ntiles);
+    for (size_t base = 0, wave = 0; base < J.tasks.size();
+         base += ntiles, wave++) {
+        const size_t count = std::min(ntiles, J.tasks.size() - base);
+        cft_tile_order(ntiles, seed, wave, order.data());
+
+        /* Stage the wave. Nothing of it has started, so a failure
+         * leaves its units idle; an earlier wave's results are the
+         * caller's to discard with the error. */
+        try {
+            for (size_t j = 0; j < count; j++)
+                J.tasks[base + j].stage(order[j]);
+        } catch (const std::bad_alloc &) {
+            set_err("out of memory staging " + J.what);
+            return ST_OUT_OF_MEMORY;
+        } catch (const std::exception &e) {
+            const std::string w = e.what();
+            if (w.find("alloc") != std::string::npos ||
+                w.find("memory") != std::string::npos ||
+                w.find("Memory") != std::string::npos) {
+                set_err("device buffer allocation failed (" + J.oom_words +
+                        "): " + w);
+                return ST_OUT_OF_MEMORY;
+            }
+            set_err("staging " + J.what + ": " + w);
+            return ST_INTERNAL;
+        }
+
+        /* From here a compute unit may be running. */
+        std::vector<xrt::run> runs;
+        runs.reserve(count);
+        int st = ST_OK;
+        std::string err;
+        for (size_t j = 0; j < count; j++) {
+            try {
+                runs.push_back(J.tasks[base + j].start(order[j]));
+            } catch (const std::exception &e) {
+                err = "starting " + J.what + " on tile " +
+                      std::to_string(order[j]) + ": " + e.what();
+                st = ST_INTERNAL;
+                break;      /* stop launching, but wait on the started */
+            }
+        }
+        for (auto &r : runs) {
+            try {
+                const ert_cmd_state s =
+                    r.wait(std::chrono::milliseconds(D.wait_ms));
+                if (s != ERT_CMD_STATE_COMPLETED && st == ST_OK) {
+                    st = (s == ERT_CMD_STATE_TIMEOUT) ? ST_TIMEOUT
+                                                      : ST_INTERNAL;
+                    err = "a compute unit did not complete " + J.what +
+                          " (state " + std::to_string(static_cast<int>(s)) +
+                          ")";
+                }
+            } catch (const std::exception &e) {
+                if (st == ST_OK) {
+                    st = ST_INTERNAL;
+                    err = "waiting on " + J.what + ": " + e.what();
+                }
+            }
+        }
+        if (st != ST_OK) {
+            D.poisoned = true;
+            uint32_t acc = 0;
+            try {
+                for (size_t j = 0; j < runs.size(); j++)
+                    acc |= D.tiles[order[j]].k.read_register(CSR_STATUS);
+            } catch (const std::exception &) {
+                acc = 0;          /* the handle is going away regardless */
+            }
+            *fail_status = acc;
+            set_err(err + " - compute units may still be active, so this "
+                          "handle is finished; close and reopen it" +
+                    (acc == 0x8u
+                         ? " (STATUS 0x8 - only a REFUSAL is latched; the "
+                           "units never started this work, so this is a "
+                           "hang or a slow run, not a memory fault)"
+                     : acc ? " (STATUS 0x" + hex32(acc) + " - the memory "
+                             "system or the tile reported something, so "
+                             "this is more than a slow run)"
+                           : " (STATUS clean on every unit that ran, so "
+                             "this is a hang or a genuinely slow run "
+                             "rather than a bus fault)"));
+            return st;
+        }
+
+        uint32_t ws = 0, wf = 0;
+        try {
+            for (size_t j = 0; j < count; j++) {
+                ws |= D.tiles[order[j]].k.read_register(CSR_STATUS);
+                wf |= D.tiles[order[j]].k.read_register(CSR_FLAGS);
+            }
+        } catch (const std::exception &e) {
+            D.poisoned = true;
+            set_err("reading status after " + J.what + ": " + e.what());
+            return ST_INTERNAL;
+        }
+        *status |= ws;
+        *flags |= wf;
+        for (size_t j = 0; j < count; j++)
+            if (J.tasks[base + j].after)
+                J.tasks[base + j].after(order[j]);
+        if (J.faulty(*status)) {
+            *faulted = true;
+            return ST_OK;
+        }
+        try {
+            for (size_t j = 0; j < count; j++)
+                J.tasks[base + j].collect(order[j]);
+        } catch (const std::exception &e) {
+            set_err("reading the results of " + J.what + ": " + e.what());
+            return ST_INTERNAL;
+        }
+    }
+    return ST_OK;
 }
 
 }  // namespace
@@ -1338,13 +1596,14 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
      * count without a card - which is where the arithmetic that
      * decides whether every element is computed exactly once belongs.
      *
-     * A SEQUENCER run does not come through here: cftx_program_run
-     * below splits its LANES across the tiles with the same planner
-     * (lane_cut.h cuts every per-lane block to match). An elementwise
-     * element depends on its own index and nothing else, which is what
-     * makes this partitioning unobservable; a sequencer lane depends on
-     * its own index too, but the early exit is a CROSS-LANE condition,
-     * so "four tiles give the same bits as one" is a claim about P3
+     * Each slice is one task, and the scheduler (run_job, above)
+     * places it: CFT_XRT_TILE_ORDER moves them between the tiles. A
+     * SEQUENCER run's lanes are cut by the same planner, with every
+     * per-lane block to match (lane_cut.h). An elementwise element
+     * depends on its own index and nothing else, which is what makes
+     * this partitioning unobservable; a sequencer lane depends on its
+     * own index too, but the early exit is a CROSS-LANE condition, so
+     * "four tiles give the same bits as one" is a claim about P3
      * (docs/SEQUENCER.md) rather than a corollary of the dataflow -
      * which is why that path carries CFT_XRT_PROGRAM_CUTS, to fuzz the
      * cut on a card. Until 2026-09-25 a program ran on tile 0 alone.
@@ -1352,38 +1611,48 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
     std::vector<cft_slice> slices(ntiles);
     slices.resize(cft_plan_slices(n, esz, ntiles, slices.data()));
 
-    /* Which buffer object each of this slice's four operands is bound
-     * to. A null entry means "the tile's own staging buffer", which is
-     * what every operand was before resident buffers existed - so a
-     * run with no bindings at all walks exactly the old path. */
+    /* Which buffer object each of a slice's four operands is bound to,
+     * on the tile the scheduler put it on. A null entry means "the
+     * tile's own staging buffer", which is what every operand was
+     * before resident buffers existed - so a run with no bindings at
+     * all walks exactly the old path. */
     struct SliceBind { xrt::bo *bo[4]; };
     std::vector<SliceBind> sb(slices.size());
     for (auto &e : sb) { e.bo[0] = e.bo[1] = e.bo[2] = e.bo[3] = nullptr; }
 
-    /* Staging touches only host-visible buffers and starts nothing, so
-     * a failure here leaves every compute unit idle and the device
-     * perfectly reusable. Binding a resident buffer allocates and may
-     * fill, which is the same kind of work and the same guarantee. */
-    try {
-        const uint8_t *src[4] = {pa, pb, pc, nullptr};
-        for (size_t i = 0; i < slices.size(); i++) {
+    Job J;
+    J.what = "a run";
+    J.oom_words = "each tile's HBM group is finite; try a smaller n or "
+                  "cft_alloc";
+    J.faulty = [](uint32_t s) { return s != 0; };
+    for (size_t i = 0; i < slices.size(); i++) {
+        Task t;
+        /* Staging touches only host-visible buffers and starts nothing,
+         * so a failure here leaves every compute unit idle and the
+         * device perfectly reusable. Binding a resident buffer
+         * allocates and may fill, which is the same kind of work and
+         * the same guarantee. */
+        t.stage = [&, i](size_t tl) {
             const cft_slice &s = slices[i];
-            Tile &tile = D.tiles[s.tile];
+            Tile &tile = D.tiles[tl];
+            const uint8_t *src[4] = {pa, pb, pc, nullptr};
             size_t staged_need = 0;
 
             /* A SCALAR operand is not partitioned. Every tile reads
-             * element 0 of the same one-element buffer, so its offset is
-             * not advanced by first_elem and its length is one element
-             * rather than the slice's - get this wrong and tile 2 reads
-             * element first_elem, which is a plausible number and
-             * therefore the worst kind of wrong. CFT_ROLE_D is never
+             * element 0 of the same one-element buffer, so its offset
+             * is not advanced by first_elem and its length is one
+             * element rather than the slice's - get this wrong and tile
+             * 2 reads element first_elem, which is a plausible number
+             * and therefore the worst kind of wrong. CFT_ROLE_D is never
              * scalar: a run writes every element it was asked for. */
             for (int r = 0; r < 4; r++) {
+                sb[i].bo[r] = nullptr;
                 if (!bind || !bind->buf[r])
                     continue;
-                const bool scal = (r < 3) && (((scalar_mask >> r) & 1u) != 0);
+                const bool scal = (r < 3) &&
+                                  (((scalar_mask >> r) & 1u) != 0);
                 Buf &B = *static_cast<Buf *>(bind->buf[r]);
-                sb[i].bo[r] = buf_bind(B, s.tile, r,
+                sb[i].bo[r] = buf_bind(B, tl, r,
                                        bind->off[r] +
                                            (scal ? 0u : s.first_elem * esz),
                                        scal ? esz : s.real * esz,
@@ -1403,153 +1672,69 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
             for (int r = 0; r < CFT_ROLE_D; r++) {
                 if (sb[i].bo[r])
                     continue;                     /* already on the device */
-                {
-                    const bool scal = ((scalar_mask >> r) & 1u) != 0;
-                    stage(*tb[r],
-                          src[r] ? src[r] + (scal ? 0u : s.first_elem * esz)
-                                 : nullptr,
-                          scal ? esz : s.real * esz,
-                          scal ? esz : s.padded * esz);
-                }
+                const bool scal = ((scalar_mask >> r) & 1u) != 0;
+                stage(*tb[r],
+                      src[r] ? src[r] + (scal ? 0u : s.first_elem * esz)
+                             : nullptr,
+                      scal ? esz : s.real * esz,
+                      scal ? esz : s.padded * esz);
             }
             for (int r = 0; r < 4; r++)
                 if (!sb[i].bo[r])
                     sb[i].bo[r] = tb[r];
-        }
-    } catch (const std::bad_alloc &) {
-        set_err("out of memory staging operands");
-        return ST_OUT_OF_MEMORY;
-    } catch (const std::exception &e) {
-        /* An HBM group is finite - under hw/link_quad.cfg each tile
-         * owns four pseudo-channels - so "could not allocate" is a
-         * routine capacity limit and should not read as a library
-         * bug. */
-        const std::string what = e.what();
-        if (what.find("alloc") != std::string::npos ||
-            what.find("memory") != std::string::npos ||
-            what.find("Memory") != std::string::npos) {
-            set_err("device buffer allocation failed (each tile's HBM "
-                    "group is finite; try a smaller n or cft_alloc): " +
-                    what);
-            return ST_OUT_OF_MEMORY;
-        }
-        set_err("staging operands: " + what);
-        return ST_INTERNAL;
-    }
-
-    /* From here a compute unit may be running, so every failure
-     * poisons the handle rather than returning to a caller who would
-     * reasonably retry. */
-    std::vector<xrt::run> runs;
-    runs.reserve(slices.size());
-    int status = ST_OK;
-    std::string err;
-
-    for (size_t i = 0; i < slices.size(); i++) {
-        const cft_slice &s = slices[i];
-        try {
-            Tile &tile = D.tiles[s.tile];
-            runs.push_back(tile.k(mode, static_cast<uint64_t>(s.padded),
-                                  *sb[i].bo[0], *sb[i].bo[1],
-                                  *sb[i].bo[2], *sb[i].bo[3]));
-        } catch (const std::exception &e) {
-            err = std::string("starting tile ") + std::to_string(s.tile) +
-                  ": " + e.what();
-            status = ST_INTERNAL;
-            break;      /* stop launching, but still wait on the started */
-        }
-    }
-
-    /* Wait on EVERY run that was started, including after a failure -
-     * abandoning one leaves a compute unit writing into a buffer this
-     * process still owns. */
-    for (auto &r : runs) {
-        try {
-            ert_cmd_state st = r.wait(std::chrono::milliseconds(D.wait_ms));
-            if (st != ERT_CMD_STATE_COMPLETED && status == ST_OK) {
-                status = (st == ERT_CMD_STATE_TIMEOUT) ? ST_TIMEOUT
-                                                       : ST_INTERNAL;
-                err = "a compute unit did not complete (state " +
-                      std::to_string(static_cast<int>(st)) + ")";
+        };
+        t.start = [&, i](size_t tl) {
+            return D.tiles[tl].k(mode, static_cast<uint64_t>(slices[i].padded),
+                                 *sb[i].bo[0], *sb[i].bo[1], *sb[i].bo[2],
+                                 *sb[i].bo[3]);
+        };
+        t.collect = [&, i](size_t tl) {
+            const cft_slice &s = slices[i];
+            Tile &tile = D.tiles[tl];
+            /* A RESIDENT output does not come back. The bytes are on the
+             * device, that copy is now the authority, and the caller
+             * collects them with cft_buffer_from_device when it wants
+             * them - which is the whole saving on this side of the call,
+             * and the reason the rule in cft.h exists. */
+            if (bind && bind->buf[CFT_ROLE_D] && sb[i].bo[3] != &tile.d) {
+                buf_mark_written(*static_cast<Buf *>(bind->buf[CFT_ROLE_D]),
+                                 tl, CFT_ROLE_D);
+                return;
             }
-        } catch (const std::exception &e) {
-            if (status == ST_OK) {
-                status = ST_INTERNAL;
-                err = std::string("waiting for a compute unit: ") + e.what();
-            }
-        }
+            tile.d.sync(XCL_BO_SYNC_BO_FROM_DEVICE, s.padded * esz, 0);
+            std::memcpy(pd + s.first_elem * esz, tile.d.map<uint8_t *>(),
+                        s.real * esz);
+        };
+        J.tasks.push_back(std::move(t));
     }
 
-    if (status != ST_OK) {
-        D.poisoned = true;
-        /* Read STATUS anyway, best effort.
-         *
-         * This is the whole reason the timeout exists rather than an
-         * indefinite wait: the engine records a short or long read
-         * burst in err_acc and then never completes, and err_acc can
-         * only be read once the wait has returned. Returning here
-         * without reading it throws away the one diagnosis the timeout
-         * was introduced to obtain, and leaves "a compute unit did not
-         * complete" as the entire explanation of a bus fault.
-         *
-         * Reading a status register of a CU that may still be running
-         * is safe - it is an AXI-Lite read of a sticky word, and the
-         * value is what it is. The DATA buffers stay untouched. */
-        uint32_t st_acc = 0;
-        try {
-            for (const auto &s : slices)
-                st_acc |= D.tiles[s.tile].k.read_register(CSR_STATUS);
-        } catch (const std::exception &) {
-            st_acc = 0;           /* the handle is going away regardless */
-        }
-        if (bus)
-            *bus = st_acc;
-        set_err(err + " - compute units may still be active, so this "
-                      "handle is finished; close and reopen it" +
-                (st_acc == 0x8u
-                     ? " (STATUS 0x8 - only a REFUSAL is latched; the "
-                       "units never started this run's work, so this is "
-                       "a hang or a slow run, not a memory fault)"
-                 : st_acc ? " (STATUS 0x" + hex32(st_acc) +
-                          " - the memory system reported a fault, so this "
-                          "is a bus problem rather than a slow run)"
-                        : " (STATUS clean on every unit that ran, so this "
-                          "is a hang or a genuinely slow run rather than "
-                          "a bus fault)"));
-        return status;
+    uint32_t status_acc = 0, flag_acc = 0, fail = 0;
+    bool faulted = false;
+    const int st = run_job(D, J, &status_acc, &flag_acc, &faulted, &fail);
+    if (st != ST_OK) {
+        /* After a start, *bus carries the best-effort STATUS read that
+         * the message already names, as this path always has. */
+        if (D.poisoned && bus)
+            *bus = fail;
+        return st;
     }
 
-    /* Faults before results. If the memory system did not vouch for
-     * the data then comparing the output against anything is
-     * meaningless, because the bits under test were never delivered.
-     *
-     * Only the tiles that actually ran are read. A tile left idle
-     * still holds its previous run's sticky words - the engine clears
-     * them at start, not at completion - so OR-ing over all tiles
-     * would make this run's flags depend on the call history. */
-    uint32_t status_acc = 0, flag_acc = 0;
-    try {
-        for (const auto &s : slices) {
-            status_acc |= D.tiles[s.tile].k.read_register(CSR_STATUS);
-            flag_acc   |= D.tiles[s.tile].k.read_register(CSR_FLAGS);
-        }
-    } catch (const std::exception &e) {
-        D.poisoned = true;
-        set_err(std::string("reading status after a run: ") + e.what());
-        return ST_INTERNAL;
-    }
-    if (status_acc) {
+    /* Faults before results. If the memory system did not vouch for the
+     * data then comparing the output against anything is meaningless,
+     * because the bits under test were never delivered - and the
+     * scheduler collected nothing once STATUS said so. */
+    if (faulted) {
         /* STATUS[3] is the precision refusal, not a bus fault: the run
-         * never started and no memory moved. Reaching it through
-         * libcft means the device's CAPS and its refusal logic
-         * disagree with each other - the library checks CAPS before
-         * issuing - so name that loudly rather than folding it into
-         * "the memory system misbehaved". A single tile can never
-         * report both (the kernel masks the engine's stale sticky
-         * while its last start was refused - the adversarial review
-         * caught the ORed-truths version); bits 2:0 beside bit 3 can
-         * only mean DIFFERENT tiles refused and faulted, and the
-         * faulting tile's invalid data is the worse fact. */
+         * never started and no memory moved. Reaching it through libcft
+         * means the device's CAPS and its refusal logic disagree with
+         * each other - the library checks CAPS before issuing - so name
+         * that loudly rather than folding it into "the memory system
+         * misbehaved". A single tile can never report both (the kernel
+         * masks the engine's stale sticky while its last start was
+         * refused - the adversarial review caught the ORed-truths
+         * version); bits 2:0 beside bit 3 can only mean DIFFERENT tiles
+         * refused and faulted, and the faulting tile's invalid data is
+         * the worse fact. */
         if ((status_acc & 0x8u) && !(status_acc & 0x7u)) {
             /* the contract scopes *bus to CFT_ERR_BUS_FAULT, so the
              * refusal keeps its detail in the message alone */
@@ -1566,29 +1751,6 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
         return ST_BUS_FAULT;
     }
 
-    try {
-        for (size_t i = 0; i < slices.size(); i++) {
-            const cft_slice &s = slices[i];
-            Tile &tile = D.tiles[s.tile];
-            /* A RESIDENT output does not come back. The bytes are on
-             * the device, that copy is now the authority, and the
-             * caller collects them with cft_buffer_from_device when it
-             * wants them - which is the whole saving on this side of
-             * the call, and the reason the rule in cft.h exists. */
-            if (bind && bind->buf[CFT_ROLE_D] && sb[i].bo[3] != &tile.d) {
-                buf_mark_written(*static_cast<Buf *>(bind->buf[CFT_ROLE_D]),
-                                 s.tile, CFT_ROLE_D);
-                continue;
-            }
-            tile.d.sync(XCL_BO_SYNC_BO_FROM_DEVICE, s.padded * esz, 0);
-            std::memcpy(pd + s.first_elem * esz, tile.d.map<uint8_t *>(),
-                        s.real * esz);
-        }
-    } catch (const std::exception &e) {
-        set_err(std::string("reading results: ") + e.what());
-        return ST_INTERNAL;
-    }
-
     if (flags)
         *flags = flag_acc;
     return ST_OK;
@@ -1597,12 +1759,14 @@ extern "C" int cftx_run(void *hw, int op, int fmt, int rnd,
 /* ---- sequencer programs -------------------------------------------
  *
  * Every tile the device has, since 2026-09-25: the run's lanes are
- * cut the way an elementwise run's elements are, and every per-lane
- * block with them (lane_cut.h). The comment beside cftx_run's
- * partitioning says why that is a claim about P3 rather than a
- * corollary of the dataflow - the early exit is a cross-lane
- * condition - so the cut is fuzzed on a card (CFT_XRT_PROGRAM_CUTS,
- * below) rather than assumed. Until then a program ran on tile 0.
+ * cut the way an elementwise run's elements are, every per-lane block
+ * with them (lane_cut.h), and each slice is a task the scheduler
+ * places (run_job) - the plan of record's step 2, docs/ROADMAP.md
+ * "Programs across tiles". The comment beside cftx_run's partitioning
+ * says why that is a claim about P3 rather than a corollary of the
+ * dataflow - the early exit is a cross-lane condition - so the cut is
+ * fuzzed on a card (CFT_XRT_PROGRAM_CUTS, below) rather than assumed.
+ * Until then a program ran on tile 0.
  *
  * Six buffers rather than four. The program image rides the A master
  * (the sequencer borrows it for the image AND the three input
@@ -1752,62 +1916,46 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
     if (max_deposits && n > (static_cast<size_t>(-1) / max_deposits / esz))
         return ST_INVALID_ARGUMENT;
 
-    /* ---- the lane cut (2026-09-25) -----------------------------------
+    /* ---- the lane cut: the scheduler's first strategy for programs ----
      *
-     * A program's lanes are split across the device's tiles the way an
-     * elementwise run's elements are - cft_plan_slices' beat boundaries
-     * - and every per-lane block goes with its lanes, by lane_cut.h's
-     * windows: the dense streams' elements, and [first * w,
-     * (first + lanes) * w) of the deposit window, the counts, the two
-     * scratch blocks and the index tables. An indexed stream's SOURCE,
-     * and an indexed scratch-in's, go to every tile whole, because a
-     * lane's index can reach anywhere in them; so do the image and the
-     * bank. The mask is repacked per tile from its first lane. Each tile
-     * is told ITS lane count as N, so its early exit is its own lanes'
-     * - docs/SEQUENCER.md's P3 says that exit is invisible, which is
-     * what makes the split unobservable, and CFT_XRT_PROGRAM_CUTS is how
-     * that is fuzzed on a card rather than assumed. FLAGS and STATUS are
-     * ORed over the tiles that ran and never over an idle one, whose
-     * sticky words are its previous run's.
+     * (docs/ROADMAP.md, "Programs across tiles", the plan of record's
+     * step 2.) A program's lanes are cut the way an elementwise run's
+     * elements are - cft_plan_slices' beat boundaries - and every
+     * per-lane block goes with its lanes, by lane_cut.h's windows: the
+     * dense streams' elements, and [first * w, (first + lanes) * w) of
+     * the deposit window, the counts, the two scratch blocks and the
+     * index tables. An indexed stream's SOURCE, and an indexed
+     * scratch-in's, go to every tile whole, because a lane's index can
+     * reach anywhere in them; so do the image and the bank. The mask is
+     * repacked per tile from its slice's first lane. Each slice is one
+     * task, and the scheduler places it; each tile is told its slice's
+     * lane count as N, so its early exit is its own lanes' - SEQUENCER.md's
+     * P3 says that exit is invisible, which is what makes the cut
+     * unobservable, and the card gate fuzzes it rather than assuming it.
      *
      * CFT_XRT_PROGRAM_CUTS, a card instrument read per call:
      *   unset       cft_plan_slices, the default
-     *   seed:<N>    cuts anywhere - one lane, an odd offset, a tile left
-     *               with nothing - from lane_cut.h's seeded planner
+     *   seed:<N>    cuts anywhere - one lane, an odd offset, a slice left
+     *               out - from lane_cut.h's seeded planner
      *   skew:<N>    the same cuts, and every slice after the first stages
      *               a dense `a` from one lane EARLY: a planted fault, the
      *               placement tests' negative control (device-test's
      *               program legs must go red under it). Early, never
      *               late, so it cannot read past the caller's buffer.
-     * Until this date a program ran on the first tile alone. */
+     * CFT_XRT_TILE_ORDER, the scheduler's, moves the slices between the
+     * tiles. Until 2026-09-25 a program ran on tile 0 alone. */
     std::vector<cft_slice> slices(D.tiles.size());
     bool skew = false;
     {
-        const char *const pc = std::getenv("CFT_XRT_PROGRAM_CUTS");
-        if (pc && *pc) {
-            const bool is_seed = !std::strncmp(pc, "seed:", 5);
-            const bool is_skew = !std::strncmp(pc, "skew:", 5);
-            char *end = nullptr;
-            unsigned long long seed = 0;
-            bool digits = false;
-            if (is_seed || is_skew) {
-                digits = pc[5] >= '0' && pc[5] <= '9';
-                errno = 0;
-                seed = std::strtoull(pc + 5, &end, 10);
-            }
-            if (!digits || !end || *end || errno) {
-                set_err(std::string("CFT_XRT_PROGRAM_CUTS=\"") + pc +
-                        "\": expected seed:<N> or skew:<N>, N a decimal "
-                        "seed; unset it for the default cut");
-                return ST_INVALID_ARGUMENT;
-            }
-            slices.resize(cft_plan_lane_cuts(n, D.tiles.size(), seed,
+        uint64_t seed = 0;
+        const int ist = instrument_seed("CFT_XRT_PROGRAM_CUTS", true, &seed,
+                                        &skew);
+        if (ist != ST_OK)
+            return ist;
+        slices.resize(seed ? cft_plan_lane_cuts(n, D.tiles.size(), seed,
+                                                slices.data())
+                           : cft_plan_slices(n, esz, D.tiles.size(),
                                              slices.data()));
-            skew = is_skew;
-        } else {
-            slices.resize(cft_plan_slices(n, esz, D.tiles.size(),
-                                          slices.data()));
-        }
     }
 
     /* The run's shape, which lane_cut.h cuts by. program.c held every
@@ -1863,20 +2011,30 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
     if (lane_mask)
         idx_mode |= 1u << 23;
 
+    /* MODE[7:0] is not written because it is ignored: the program says
+     * what to compute. So is the rounding field - every instruction
+     * carries its own attribute. N is the SLICE's lane count and NOT a
+     * padded one: lanes at or beyond it start inactive, which is how
+     * beat padding is made harmless for a program whose map nobody has
+     * read. */
+    const uint32_t mode = MODE_SEQ | idx_mode |
+                          (static_cast<uint32_t>(fmt & 0xF) << 8);
+
     const size_t img_bytes = beat_round(image_bytes);
     /* One beat when there is no bank, so a 0x700 tile's ninth argument
      * is always a real, addressable buffer. beat_round(0) is 0 and a
      * zero-length xrt::bo is not something to rely on. */
     const size_t bnk_bytes = bank_bytes ? beat_round(bank_bytes) : 32u;
 
-    /* One slice's windows, and the buffer sizes its tile needs. The
-     * streams' pads are what beat_round has always made of them - a
-     * dense slice's lanes * esz, an indexed stream's whole source - and
-     * a block the run does not have is one beat, because the kernel has
-     * the argument either way and XRT will not submit a run with one
-     * unbound. */
+    /* One slice's windows, the buffer sizes a tile needs for it, and -
+     * once the scheduler has placed and staged it - the buffer object
+     * each role is bound to on that tile. The streams' pads are what
+     * beat_round has always made of them - a dense slice's lanes * esz,
+     * an indexed stream's whole source - and a block the run does not
+     * have is one beat, because the kernel has the argument either way
+     * and XRT will not submit a run with one unbound. */
     struct PSlice {
-        size_t tile, first, lanes;
+        size_t first, lanes;
         cft_lane_win w[CFT_LANE_ROLES];
         size_t spad[3], dep_pad, cnt_pad, sin_pad, sout_pad, itab_pad[4];
         size_t mask_pad;
@@ -1885,7 +2043,6 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
     std::vector<PSlice> ps(slices.size());
     for (size_t i = 0; i < slices.size(); i++) {
         PSlice &p = ps[i];
-        p.tile = slices[i].tile;
         p.first = slices[i].first_elem;
         p.lanes = slices[i].real;
         cft_lane_windows(&shape, p.first, p.lanes, p.w);
@@ -1916,34 +2073,46 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
     const auto *psin = static_cast<const uint8_t *>(scratch_in);
     auto *psout = static_cast<uint8_t *>(scratch_out);
     const bool trace = std::getenv("CFT_XRT_TRACE") != nullptr;
+    const char *const mask_ov = std::getenv("CFT_XRT_MASK_ADDR_OVERRIDE");
 
-    /* Staging touches only host-visible buffers and starts nothing, so
-     * a failure here leaves every compute unit idle and the device
-     * reusable. Every slice is staged before any tile starts.
-     *
-     * Which of the operand-shaped buffers came from cft_alloc: the three
-     * streams, the deposit window, the two scratch blocks and the four
-     * tables, each bound at its slice's window of the caller's buffer on
-     * its slice's tile. The image, the bank and the counts are staged
-     * always: the image and the bank do not grow with n at all, and the
-     * counts are four bytes a lane whatever the format. */
-    try {
-        for (size_t i = 0; i < ps.size(); i++) {
+    Job J;
+    J.what = "a program";
+    J.oom_words = "a program's deposit window is n * max_deposits "
+                  "elements, so it outgrows an HBM group sooner than an "
+                  "elementwise run does";
+    /* A program's STATUS carries REPORTS as well as faults - the deposit
+     * overflow and the range report are the lanes' news, not the
+     * memory's - so only the refusal and the bus bits stop a job. */
+    J.faulty = [](uint32_t s) {
+        return (s & (ST_REFUSED | ST_BUS_BITS)) != 0;
+    };
+    for (size_t i = 0; i < ps.size(); i++) {
+        Task t;
+        /* Which of the operand-shaped buffers came from cft_alloc: the
+         * three streams, the deposit window, the two scratch blocks and
+         * the four tables, each bound at its slice's window of the
+         * caller's buffer on the tile the scheduler chose. The image,
+         * the bank and the counts are staged always: the image and the
+         * bank do not grow with n at all, and the counts are four bytes
+         * a lane whatever the format. */
+        t.stage = [&, i](size_t tl) {
             PSlice &p = ps[i];
-            Tile &tile = D.tiles[p.tile];
+            Tile &tile = D.tiles[tl];
             xrt::bo **const ob = p.ob;
             const cft_lane_win *const w = p.w;
+            for (int r = 0; r < CFT_ROLE_COUNT; r++)
+                ob[r] = nullptr;
 
             if (bind) {
                 const void *src[3] = {a, b, c};
                 for (int r = 0; r < 3; r++)
                     if (bind->buf[r] && src[r])
                         ob[r] = buf_bind(*static_cast<Buf *>(bind->buf[r]),
-                                         p.tile, r, bind->off[r] + w[r].off,
+                                         tl, r, bind->off[r] + w[r].off,
                                          w[r].len, p.spad[r], false);
                 if (bind->buf[CFT_ROLE_D] && deposits && max_deposits)
                     ob[3] = buf_bind(
-                        *static_cast<Buf *>(bind->buf[CFT_ROLE_D]), p.tile,
+                        *static_cast<Buf *>(bind->buf[CFT_ROLE_D]), tl,
                         CFT_ROLE_D,
                         bind->off[CFT_ROLE_D] + w[CFT_LANE_DEP].off,
                         w[CFT_LANE_DEP].len, p.dep_pad, true);
@@ -1955,13 +2124,13 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                  * window no run has. */
                 if (bind->buf[CFT_ROLE_SI] && scratch_in && sin_bytes)
                     ob[CFT_ROLE_SI] = buf_bind(
-                        *static_cast<Buf *>(bind->buf[CFT_ROLE_SI]), p.tile,
+                        *static_cast<Buf *>(bind->buf[CFT_ROLE_SI]), tl,
                         CFT_ROLE_SI,
                         bind->off[CFT_ROLE_SI] + w[CFT_LANE_SIN].off,
                         w[CFT_LANE_SIN].len, p.sin_pad, false);
                 if (bind->buf[CFT_ROLE_SO] && scratch_out && sout_bytes)
                     ob[CFT_ROLE_SO] = buf_bind(
-                        *static_cast<Buf *>(bind->buf[CFT_ROLE_SO]), p.tile,
+                        *static_cast<Buf *>(bind->buf[CFT_ROLE_SO]), tl,
                         CFT_ROLE_SO,
                         bind->off[CFT_ROLE_SO] + w[CFT_LANE_SOUT].off,
                         w[CFT_LANE_SOUT].len, p.sout_pad, true);
@@ -1972,9 +2141,9 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                     const cft_lane_win &tw = w[CFT_LANE_IA + r];
                     if (bind->buf[role] && itab[r] && tw.len)
                         ob[role] = buf_bind(
-                            *static_cast<Buf *>(bind->buf[role]), p.tile,
-                            role, bind->off[role] + tw.off, tw.len,
-                            p.itab_pad[r], false);
+                            *static_cast<Buf *>(bind->buf[role]), tl, role,
+                            bind->off[role] + tw.off, tw.len, p.itab_pad[r],
+                            false);
                 }
             }
 
@@ -2040,8 +2209,8 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
              * 2026-09-15). The tile does not write a masked lane's slots
              * or its count - the drains strobe them off - so what the
              * caller's buffer "keeps" is whatever the DEVICE copy held
-             * when the run began, because the readback below brings the
-             * device copy home whole. For a resident window that is the
+             * when the run began, because the readback brings the device
+             * copy home whole. For a resident window that is the
              * contract. For a staged one the device copy was the
              * previous run's output, so under a mask the caller's
              * deposit window, counts and scratch-out go to the device
@@ -2061,18 +2230,18 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
             }
             if (trace && p.cnt_pad > p.lanes * 4) {
                 /* The count window's staging pad - the last beat's lanes
-                 * past this tile's N, which the tile strobes off -
-                 * filled with a pattern and read back after the run: a
-                 * WSTRB test that owes nothing to the lane mask (card
-                 * day, 2026-09-15). */
+                 * past this tile's N, which the tile strobes off - filled
+                 * with a pattern and read back after the run: a WSTRB
+                 * test that owes nothing to the lane mask (card day,
+                 * 2026-09-15). */
                 std::memset(tile.cn.map<uint8_t *>() + p.lanes * 4, 0xCC,
                             p.cnt_pad - p.lanes * 4);
                 tile.cn.sync(XCL_BO_SYNC_BO_TO_DEVICE, p.cnt_pad, 0);
             }
             {
                 /* tile.si and tile.so are only created on an 0x800
-                 * device, and the kernel calls below only pass them
-                 * there, so an older contract never dereferences them. */
+                 * device, and the launch only passes them there, so an
+                 * older contract never dereferences them. */
                 xrt::bo *tb[CFT_ROLE_COUNT] = {&tile.a, &tile.b, &tile.c,
                                                &tile.d, &tile.si, &tile.so,
                                                &tile.ia, &tile.ib, &tile.ic,
@@ -2120,53 +2289,19 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                  * which is a bit offset and not a byte one. */
                 stage_mask(tile.mk, lane_mask, p.first, p.lanes, p.mask_pad);
             }
-        }
-    } catch (const std::bad_alloc &) {
-        set_err("out of memory staging a program");
-        return ST_OUT_OF_MEMORY;
-    } catch (const std::exception &e) {
-        const std::string what = e.what();
-        if (what.find("alloc") != std::string::npos ||
-            what.find("memory") != std::string::npos ||
-            what.find("Memory") != std::string::npos) {
-            set_err("device buffer allocation failed (a program's deposit "
-                    "window is n * max_deposits elements, so it outgrows an "
-                    "HBM group sooner than an elementwise run does): " + what);
-            return ST_OUT_OF_MEMORY;
-        }
-        set_err("staging a program: " + what);
-        return ST_INTERNAL;
-    }
+        };
 
-    /* MODE[7:0] is not written because it is ignored: the program says
-     * what to compute. So is the rounding field - every instruction
-     * carries its own attribute. N is the SLICE's lane count and NOT the
-     * padded one: lanes at or beyond it start inactive, which is how
-     * beat padding is made harmless for a program whose map nobody has
-     * read. */
-    const uint32_t mode = MODE_SEQ | idx_mode |
-                          (static_cast<uint32_t>(fmt & 0xF) << 8);
-
-    /* From here a compute unit may be running, so every failure poisons
-     * the handle rather than returning to a caller who would reasonably
-     * retry. */
-    std::vector<xrt::run> runs;
-    runs.reserve(ps.size());
-    int status = ST_OK;
-    std::string err;
-    const char *const mask_ov = std::getenv("CFT_XRT_MASK_ADDR_OVERRIDE");
-    for (size_t i = 0; i < ps.size(); i++) {
-        PSlice &p = ps[i];
-        Tile &tile = D.tiles[p.tile];
-        xrt::bo **const ob = p.ob;
-        const uint64_t lanes = static_cast<uint64_t>(p.lanes);
-        try {
-            /* Three shapes, because the ARGUMENT COUNT is what the
-             * contract version guards, and XRT throws rather than
-             * adapts. Every buffer the map has is bound on every run of
-             * that contract whether or not this program uses it; an
-             * 0xA00 launch passes all seventeen, because XRT's start
-             * sends the whole argument register image (2026-09-14). */
+        /* Three shapes, because the ARGUMENT COUNT is what the contract
+         * version guards, and XRT throws rather than adapts. Every buffer
+         * the map has is bound on every run of that contract whether or
+         * not this program uses it; an 0xA00 launch passes all
+         * seventeen, because XRT's start sends the whole argument
+         * register image (2026-09-14). */
+        t.start = [&, i](size_t tl) -> xrt::run {
+            PSlice &p = ps[i];
+            Tile &tile = D.tiles[tl];
+            xrt::bo **const ob = p.ob;
+            const uint64_t lanes = static_cast<uint64_t>(p.lanes);
             if (mask_ov && D.version >= IDX_VERSION) {
                 /* A card-day instrument (2026-09-15): argument 16
                  * replaced by a raw address, so that a read of it faults
@@ -2188,178 +2323,108 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                 rr.set_arg(15, *ob[CFT_ROLE_ISI]);
                 rr.set_arg(16, addr);
                 std::fprintf(stderr, "[xrt trace] tile %zu: argument 16 "
-                             "overridden with 0x%016llx\n", p.tile,
+                             "overridden with 0x%016llx\n", tl,
                              static_cast<unsigned long long>(addr));
                 rr.start();
-                runs.push_back(rr);
-            } else if (D.version >= IDX_VERSION) {
-                runs.push_back(tile.k(mode, lanes, *ob[0], *ob[1], *ob[2],
-                                      *ob[3], tile.pg, tile.cn, tile.bk,
-                                      *ob[CFT_ROLE_SI], *ob[CFT_ROLE_SO],
-                                      static_cast<uint64_t>(0),
-                                      *ob[CFT_ROLE_IA], *ob[CFT_ROLE_IB],
-                                      *ob[CFT_ROLE_IC], *ob[CFT_ROLE_ISI],
-                                      tile.mk));
-            } else if (D.version >= SCRATCH_VERSION) {
-                runs.push_back(tile.k(mode, lanes, *ob[0], *ob[1], *ob[2],
-                                      *ob[3], tile.pg, tile.cn, tile.bk,
-                                      *ob[CFT_ROLE_SI], *ob[CFT_ROLE_SO]));
-            } else if (D.version >= BANK_VERSION) {
-                runs.push_back(tile.k(mode, lanes, *ob[0], *ob[1], *ob[2],
-                                      *ob[3], tile.pg, tile.cn, tile.bk));
-            } else {
-                runs.push_back(tile.k(mode, lanes, *ob[0], *ob[1], *ob[2],
-                                      *ob[3], tile.pg, tile.cn));
+                return rr;
             }
-        } catch (const std::exception &e) {
-            err = std::string("starting a program on tile ") +
-                  std::to_string(p.tile) + ": " + e.what();
-            status = ST_INTERNAL;
-            break;      /* stop launching, but still wait on the started */
-        }
-    }
+            if (D.version >= IDX_VERSION)
+                return tile.k(mode, lanes, *ob[0], *ob[1], *ob[2], *ob[3],
+                              tile.pg, tile.cn, tile.bk, *ob[CFT_ROLE_SI],
+                              *ob[CFT_ROLE_SO], static_cast<uint64_t>(0),
+                              *ob[CFT_ROLE_IA], *ob[CFT_ROLE_IB],
+                              *ob[CFT_ROLE_IC], *ob[CFT_ROLE_ISI], tile.mk);
+            if (D.version >= SCRATCH_VERSION)
+                return tile.k(mode, lanes, *ob[0], *ob[1], *ob[2], *ob[3],
+                              tile.pg, tile.cn, tile.bk, *ob[CFT_ROLE_SI],
+                              *ob[CFT_ROLE_SO]);
+            if (D.version >= BANK_VERSION)
+                return tile.k(mode, lanes, *ob[0], *ob[1], *ob[2], *ob[3],
+                              tile.pg, tile.cn, tile.bk);
+            return tile.k(mode, lanes, *ob[0], *ob[1], *ob[2], *ob[3],
+                          tile.pg, tile.cn);
+        };
 
-    /* Wait on EVERY run that was started, including after a failure -
-     * abandoning one leaves a compute unit writing into a buffer this
-     * process still owns. */
-    for (auto &r : runs) {
-        try {
-            ert_cmd_state st = r.wait(std::chrono::milliseconds(D.wait_ms));
-            if (st != ERT_CMD_STATE_COMPLETED && status == ST_OK) {
-                status = (st == ERT_CMD_STATE_TIMEOUT) ? ST_TIMEOUT
-                                                       : ST_INTERNAL;
-                err = "a compute unit did not complete a program (state " +
-                      std::to_string(static_cast<int>(st)) + ")";
-            }
-        } catch (const std::exception &e) {
-            if (status == ST_OK) {
-                status = ST_INTERNAL;
-                err = std::string("running a program: ") + e.what();
-            }
-        }
-    }
-
-    if (status != ST_OK) {
-        D.poisoned = true;
-        /* The fault register can only be read once the wait has
-         * returned, so breaking out before reading it throws away the
-         * diagnosis the timeout exists to obtain. Best effort, over the
-         * tiles this run started. */
-        uint32_t st_acc = 0;
-        try {
-            for (size_t i = 0; i < runs.size(); i++)
-                st_acc |= D.tiles[ps[i].tile].k.read_register(CSR_STATUS);
-        } catch (const std::exception &) {
-            st_acc = 0;
-        }
-        if (bus)
-            *bus = st_acc & ST_REPORTS;
-        set_err(err + " - the compute unit may still be active, so this "
-                      "handle is finished; close and reopen it" +
-                (st_acc ? " (STATUS 0x" + hex32(st_acc) + ")"
-                        : " (STATUS clean, so this is a hang or a genuinely "
-                          "long program rather than a bus fault)"));
-        return status;
-    }
-
-    uint32_t status_acc = 0, flag_acc = 0;
-    try {
-        for (const PSlice &p : ps) {
-            status_acc |= D.tiles[p.tile].k.read_register(CSR_STATUS);
-            flag_acc   |= D.tiles[p.tile].k.read_register(CSR_FLAGS);
-        }
-    } catch (const std::exception &e) {
-        D.poisoned = true;
-        set_err(std::string("reading status after a program: ") + e.what());
-        return ST_INTERNAL;
-    }
-    /* CFT_XRT_TRACE: what each tile received against what the host
-     * sent, read back through the same register path CAPS uses. A
-     * card-day instrument (2026-09-15: the tile wrote every masked lane
-     * while every host-side value looked right on paper). */
-    if (trace) {
-        for (const PSlice &p : ps) {
-            Tile &tile = D.tiles[p.tile];
-            try {
-                const uint32_t r_mode = tile.k.read_register(0x10);
-                const uint32_t r_n_lo = tile.k.read_register(0x18);
-                const uint32_t r_n_hi = tile.k.read_register(0x1C);
-                std::fprintf(stderr, "[xrt trace] tile %zu lanes [%zu, %zu): "
-                             "host mode=0x%08x n=%zu | tile MODE=0x%08x "
-                             "N=0x%08x%08x STATUS=0x%08x FLAGS=0x%08x\n",
-                             p.tile, p.first, p.first + p.lanes, mode,
-                             p.lanes, r_mode, r_n_hi, r_n_lo,
-                             tile.k.read_register(CSR_STATUS),
-                             tile.k.read_register(CSR_FLAGS));
-                static const char *const pname[5] = {"IDX_A", "IDX_B",
-                                                     "IDX_C", "IDX_SI",
-                                                     "MASK"};
-                for (int k = 0; k < 5; k++) {
-                    const uint32_t lo = tile.k.read_register(0x88u + 8u * k);
-                    const uint32_t hi = tile.k.read_register(0x8Cu + 8u * k);
-                    std::fprintf(stderr, "[xrt trace]   %-6s = 0x%08x%08x\n",
-                                 pname[k], hi, lo);
+        /* CFT_XRT_TRACE: what each tile received against what the host
+         * sent, read back through the same register path CAPS uses. A
+         * card-day instrument (2026-09-15: the tile wrote every masked
+         * lane while every host-side value looked right on paper). Run
+         * for every task before the fault test, which is when it helps. */
+        if (trace)
+            t.after = [&, i](size_t tl) {
+                PSlice &p = ps[i];
+                Tile &tile = D.tiles[tl];
+                try {
+                    const uint32_t r_mode = tile.k.read_register(0x10);
+                    const uint32_t r_n_lo = tile.k.read_register(0x18);
+                    const uint32_t r_n_hi = tile.k.read_register(0x1C);
+                    std::fprintf(stderr, "[xrt trace] tile %zu lanes [%zu, "
+                                 "%zu): host mode=0x%08x n=%zu | tile "
+                                 "MODE=0x%08x N=0x%08x%08x STATUS=0x%08x "
+                                 "FLAGS=0x%08x\n", tl, p.first,
+                                 p.first + p.lanes, mode, p.lanes, r_mode,
+                                 r_n_hi, r_n_lo,
+                                 tile.k.read_register(CSR_STATUS),
+                                 tile.k.read_register(CSR_FLAGS));
+                    static const char *const pname[5] = {"IDX_A", "IDX_B",
+                                                         "IDX_C", "IDX_SI",
+                                                         "MASK"};
+                    for (int k = 0; k < 5; k++) {
+                        const uint32_t lo =
+                            tile.k.read_register(0x88u + 8u * k);
+                        const uint32_t hi =
+                            tile.k.read_register(0x8Cu + 8u * k);
+                        std::fprintf(stderr, "[xrt trace]   %-6s = "
+                                     "0x%08x%08x\n", pname[k], hi, lo);
+                    }
+                    if (D.version >= IDX_VERSION) {
+                        std::fprintf(stderr, "[xrt trace]   mask bo address "
+                                     "0x%016llx, %zu bytes staged (real "
+                                     "%zu); device bytes:",
+                                     static_cast<unsigned long long>(
+                                         tile.mk.address()),
+                                     p.mask_pad, cft_mask_bytes(p.lanes));
+                        tile.mk.sync(XCL_BO_SYNC_BO_FROM_DEVICE, p.mask_pad,
+                                     0);
+                        auto *mp = tile.mk.map<const uint8_t *>();
+                        for (size_t k = 0; k < p.mask_pad && k < 32; k++)
+                            std::fprintf(stderr, " %02x", mp[k]);
+                        std::fprintf(stderr, "\n");
+                    }
+                    if (p.cnt_pad > p.lanes * 4) {
+                        tile.cn.sync(XCL_BO_SYNC_BO_FROM_DEVICE, p.cnt_pad,
+                                     0);
+                        const uint8_t *cp = tile.cn.map<const uint8_t *>();
+                        std::fprintf(stderr, "[xrt trace] tile %zu count pad "
+                                     "bytes [%zu, %zu) after the run:", tl,
+                                     p.lanes * 4, p.cnt_pad);
+                        for (size_t k = p.lanes * 4; k < p.cnt_pad; k++)
+                            std::fprintf(stderr, " %02x", cp[k]);
+                        std::fprintf(stderr, "\n[xrt trace]   (cc = "
+                                     "untouched, the strobes held; anything "
+                                     "else the tile wrote through a strobe "
+                                     "that was off)\n");
+                    }
+                } catch (const std::exception &e) {
+                    std::fprintf(stderr, "[xrt trace] tile %zu register read "
+                                 "failed: %s\n", tl, e.what());
                 }
-                if (D.version >= IDX_VERSION) {
-                    std::fprintf(stderr, "[xrt trace]   mask bo address "
-                                 "0x%016llx, %zu bytes staged (real %zu); "
-                                 "device bytes:",
-                                 static_cast<unsigned long long>(
-                                     tile.mk.address()),
-                                 p.mask_pad, cft_mask_bytes(p.lanes));
-                    tile.mk.sync(XCL_BO_SYNC_BO_FROM_DEVICE, p.mask_pad, 0);
-                    auto *mp = tile.mk.map<const uint8_t *>();
-                    for (size_t k = 0; k < p.mask_pad && k < 32; k++)
-                        std::fprintf(stderr, " %02x", mp[k]);
-                    std::fprintf(stderr, "\n");
-                }
-            } catch (const std::exception &e) {
-                std::fprintf(stderr, "[xrt trace] tile %zu register read "
-                             "failed: %s\n", p.tile, e.what());
-            }
-        }
-    }
+            };
 
-    /* Faults before results, as everywhere in this file. Three outcomes
-     * rather than the elementwise path's two, because a sequencer adds a
-     * bit that is a REPORT and not a failure. */
-    if ((status_acc & ST_REFUSED) && !(status_acc & ST_BUS_BITS)) {
-        /* Two things reach this bit: a precision the bitstream does not
-         * carry, and a program image the tile threw back. The library
-         * checked CAPS before loading the program, and cft_program_load
-         * validated the image, so either one means the device and this
-         * code disagree about something both thought was settled. The
-         * run did not happen. */
-        set_err("kernel REFUSED the program (STATUS 0x" + hex32(status_acc) +
-                "): either MODE selected a precision this bitstream does "
-                "not implement, or the tile rejected the program image - "
-                "too many instructions, constants or deposit slots for its "
-                "on-chip memories, or a header it did not recognise. "
-                "Nothing was computed and nothing was written.");
-        return ST_UNSUPPORTED;
-    }
-    if (status_acc & ST_BUS_BITS) {
-        if (bus)
-            *bus = status_acc;
-        set_err("kernel reported bus faults during a program; the deposits "
-                "are not valid");
-        return ST_BUS_FAULT;
-    }
-
-    try {
-        for (const PSlice &p : ps) {
-            Tile &tile = D.tiles[p.tile];
+        t.collect = [&, i](size_t tl) {
+            PSlice &p = ps[i];
+            Tile &tile = D.tiles[tl];
             const cft_lane_win *const w = p.w;
             /* A RESIDENT deposit window does not come back: the tile
              * wrote it, that copy is the authority now, and the caller
              * collects it with cft_buffer_from_device. Every slot is
              * still written - the untouched ones as +0, which
              * SEQUENCER.md makes normative. A deposit window of zero
-             * bytes (max_deposits of zero is a legal program) is
-             * skipped rather than transferred for nothing. */
+             * bytes (max_deposits of zero is a legal program) is skipped
+             * rather than transferred for nothing. */
             if (p.ob[3] != &tile.d) {
                 buf_mark_written(*static_cast<Buf *>(bind->buf[CFT_ROLE_D]),
-                                 p.tile, CFT_ROLE_D);
+                                 tl, CFT_ROLE_D);
             } else {
                 if (p.dep_pad)
                     tile.d.sync(XCL_BO_SYNC_BO_FROM_DEVICE, p.dep_pad, 0);
@@ -2368,17 +2433,6 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                                 tile.d.map<uint8_t *>(), w[CFT_LANE_DEP].len);
             }
             tile.cn.sync(XCL_BO_SYNC_BO_FROM_DEVICE, p.cnt_pad, 0);
-            if (trace && p.cnt_pad > p.lanes * 4) {
-                const uint8_t *cp = tile.cn.map<const uint8_t *>();
-                std::fprintf(stderr, "[xrt trace] tile %zu count pad bytes "
-                             "[%zu, %zu) after the run:", p.tile,
-                             p.lanes * 4, p.cnt_pad);
-                for (size_t k = p.lanes * 4; k < p.cnt_pad; k++)
-                    std::fprintf(stderr, " %02x", cp[k]);
-                std::fprintf(stderr, "\n[xrt trace]   (cc = untouched, the "
-                             "strobes held; anything else the tile wrote "
-                             "through a strobe that was off)\n");
-            }
             if (counts)
                 std::memcpy(pcnt + w[CFT_LANE_CNT].off,
                             tile.cn.map<uint8_t *>(), w[CFT_LANE_CNT].len);
@@ -2389,7 +2443,7 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
             if (sout_bytes) {
                 if (p.ob[CFT_ROLE_SO] != &tile.so) {
                     buf_mark_written(
-                        *static_cast<Buf *>(bind->buf[CFT_ROLE_SO]), p.tile,
+                        *static_cast<Buf *>(bind->buf[CFT_ROLE_SO]), tl,
                         CFT_ROLE_SO);
                 } else {
                     tile.so.sync(XCL_BO_SYNC_BO_FROM_DEVICE, p.sout_pad, 0);
@@ -2398,10 +2452,45 @@ extern "C" int cftx_program_run(void *hw, int fmt, const void *image,
                                 w[CFT_LANE_SOUT].len);
                 }
             }
-        }
-    } catch (const std::exception &e) {
-        set_err(std::string("reading program results: ") + e.what());
-        return ST_INTERNAL;
+        };
+        J.tasks.push_back(std::move(t));
+    }
+
+    uint32_t status_acc = 0, flag_acc = 0, fail = 0;
+    bool faulted = false;
+    const int st = run_job(D, J, &status_acc, &flag_acc, &faulted, &fail);
+    if (st != ST_OK) {
+        /* After a start, *bus carries the report bits of the best-effort
+         * STATUS read, as this path always has. */
+        if (D.poisoned && bus)
+            *bus = fail & ST_REPORTS;
+        return st;
+    }
+
+    /* Faults before results, as everywhere in this file. Three outcomes
+     * rather than the elementwise path's two, because a sequencer adds a
+     * bit that is a REPORT and not a failure. */
+    if (faulted && !(status_acc & ST_BUS_BITS)) {
+        /* Two things reach the refusal bit: a precision the bitstream
+         * does not carry, and a program image the tile threw back. The
+         * library checked CAPS before loading the program, and
+         * cft_program_load validated the image, so either one means the
+         * device and this code disagree about something both thought was
+         * settled. The run did not happen. */
+        set_err("kernel REFUSED the program (STATUS 0x" + hex32(status_acc) +
+                "): either MODE selected a precision this bitstream does "
+                "not implement, or the tile rejected the program image - "
+                "too many instructions, constants or deposit slots for its "
+                "on-chip memories, or a header it did not recognise. "
+                "Nothing was computed and nothing was written.");
+        return ST_UNSUPPORTED;
+    }
+    if (faulted) {
+        if (bus)
+            *bus = status_acc;
+        set_err("kernel reported bus faults during a program; the deposits "
+                "are not valid");
+        return ST_BUS_FAULT;
     }
 
     if (flags)
@@ -2447,7 +2536,6 @@ extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
         return ST_INVALID_ARGUMENT;
     const size_t epb = 32u / esz;              /* elements per 256-bit beat */
 
-    const size_t ntiles = D.tiles.size();
     const uint32_t mode = static_cast<uint32_t>(op & 0xFF) |
                           (static_cast<uint32_t>(fmt & 0xF) << 8) |
                           (static_cast<uint32_t>(rnd & 0x7) << 12);
@@ -2455,182 +2543,111 @@ extern "C" int cftx_reduce(void *hw, int op, int fmt, int rnd,
     const auto *pa = static_cast<const uint8_t *>(a);
     auto *pp = static_cast<uint8_t *>(partials);
 
-    /* Ranges beyond the tile count reuse a tile, so they cannot all be
-     * in flight at once. Launch a wave per tile-sized group and wait
-     * before reusing a unit - the RTL silently drops a start issued to
-     * a busy CU, which would return the previous range's answer.
+    /* One task per range, and the scheduler's waves of at most one task
+     * a tile do what this path once did by hand - the RTL silently
+     * drops a start issued to a busy compute unit, which would return
+     * the previous range's answer.
      *
-     * THERE ARE ROUTINELY MORE RANGES THAN TILES. It is not an edge
-     * case and it is not only about huge n: the tree's canonical cut
-     * of [0, n) into at most `parts` NODES needs one extra range
-     * whenever n is a power of two plus a remainder, so four tiles get
-     * five ranges at n = 5, 9, 17, 33, 65, ... and eight tiles get
-     * more than eight for 49 of the first thousand n.
+     * THERE ARE ROUTINELY MORE RANGES THAN TILES. It is not an edge case
+     * and it is not only about huge n: the tree's canonical cut of
+     * [0, n) into at most `parts` NODES needs one extra range whenever n
+     * is a power of two plus a remainder, so four tiles get five ranges
+     * at n = 5, 9, 17, 33, 65, ... and eight tiles get more than eight
+     * for 49 of the first thousand n.
      *
-     * Which is why staging happens HERE, per wave, and not once up
-     * front for every range. Staging all of them first wrote range k
-     * into tile k % ntiles, so with five ranges and four tiles range 4
-     * overwrote range 0's operands before range 0 had ever been
+     * Which is why staging happens per WAVE, just before it starts, and
+     * not once up front for every range. Staging all of them first wrote
+     * range k into tile k % ntiles, so with five ranges and four tiles
+     * range 4 overwrote range 0's operands before range 0 had ever been
      * launched - and wave 0 then reduced the wrong data with the right
-     * length, giving a wrong sum with clean STATUS and plausible
-     * flags. Nothing reported an error.
+     * length, giving a wrong sum with clean STATUS and plausible flags.
+     * Nothing reported an error. The scheduler stages each wave on its
+     * own for exactly that reason.
      *
      * The cost is that a staging failure in a later wave happens after
      * earlier waves have already run. That is harmless: a reduction
      * leaves nothing behind on the device but the tiles' own buffers,
-     * and the host discards every partial on any error. */
-    int status = ST_OK;
-    std::string err;
-    uint32_t fl = 0, bs = 0;
-
-    for (size_t base = 0; base < nranges && status == ST_OK; base += ntiles) {
-        const size_t wave = std::min(ntiles, nranges - base);
-        std::vector<xrt::run> runs;
-        runs.reserve(wave);
-
-        /* Which object carries this wave's `a` for each tile: the
-         * resident buffer's own copy of that range, or the tile's
-         * staging buffer. b, c and d are the tile's either way - b and
-         * c are zeros this file makes up, and one element of d is the
-         * answer - so `a` is the only operand a reduction can save,
-         * which is also the only one that carries the whole vector. */
-        std::vector<xrt::bo *> wa(wave, nullptr);
-
-        try {
-            for (size_t j = 0; j < wave; j++) {
-                const size_t k = base + j;
-                const size_t m = hi[k] - lo[k];
-                const size_t padded = ((m + epb - 1) / epb) * epb;
-                Tile &tile = D.tiles[j];
-                if (bind && bind->buf[CFT_ROLE_A])
-                    wa[j] = buf_bind(*static_cast<Buf *>(bind->buf[CFT_ROLE_A]),
-                                     j, CFT_ROLE_A,
-                                     bind->off[CFT_ROLE_A] + lo[k] * esz,
-                                     m * esz, padded * esz, false);
-                ensure_capacity(D, tile, padded * esz);
-                if (!wa[j]) {
-                    stage(tile.a, pa + lo[k] * esz, m * esz, padded * esz);
-                    wa[j] = &tile.a;
-                }
-                /* b and c are unread by a sum, but the engine streams
-                 * all three - one read enable feeds all three FIFOs -
-                 * so they must be real, readable memory of the same
-                 * length. ensure_capacity above made them that; their
-                 * CONTENTS are nothing's business (reduce_unread). */
-                reduce_unread(tile.b, tile.c, m * esz, padded * esz);
-            }
-        } catch (const std::bad_alloc &) {
-            set_err("out of memory staging a reduction");
-            return ST_OUT_OF_MEMORY;
-        } catch (const std::exception &e) {
-            set_err(std::string("staging a reduction: ") + e.what());
-            return ST_INTERNAL;
-        }
-
-        for (size_t j = 0; j < wave; j++) {
-            const size_t k = base + j;
+     * and the host discards every partial on any error.
+     *
+     * Which object carries a range's `a`: the resident buffer's own
+     * copy of that range on the task's tile, or the tile's staging
+     * buffer. b, c and d are the tile's either way - b and c are
+     * buffers nothing reads, and one element of d is the answer - so `a`
+     * is the only operand a reduction can save, which is also the only
+     * one that carries the whole vector. */
+    std::vector<xrt::bo *> wa(nranges, nullptr);
+    Job J;
+    J.what = "a reduction";
+    J.oom_words = "each tile's HBM group is finite; try a smaller n or "
+                  "cft_alloc";
+    J.faulty = [](uint32_t s) { return s != 0; };
+    for (size_t k = 0; k < nranges; k++) {
+        Task t;
+        t.stage = [&, k](size_t tl) {
             const size_t m = hi[k] - lo[k];
-            try {
-                Tile &tile = D.tiles[j];
-                /* every buffer the twelve-argument launch binds must
-                 * exist, one beat at least; the program path creates
-                 * them on first use and a device that only ever reduces
-                 * would never have */
-                if (D.version >= SEG_VERSION) {
-                    ensure_one(D, tile, tile.pg, tile.pg_cap, ARG_PROG, 32);
-                    ensure_one(D, tile, tile.cn, tile.cn_cap, ARG_CNT, 32);
-                    ensure_one(D, tile, tile.bk, tile.bk_cap, ARG_BANK, 32);
-                    ensure_one(D, tile, tile.si, tile.si_cap, ARG_SCRATCH_IN, 32);
-                    ensure_one(D, tile, tile.so, tile.so_cap, ARG_SCRATCH_OUT, 32);
-                }
-                /* the whole range, one result: SEG 0, as the twelfth
-                 * argument on a map that has it (see SEG_VERSION) */
-                runs.push_back(D.version >= SEG_VERSION
-                    ? tile.k(mode, static_cast<uint64_t>(m),
-                             *wa[j], tile.b, tile.c, tile.d,
-                             tile.pg, tile.cn, tile.bk, tile.si, tile.so,
-                             static_cast<uint64_t>(0))
-                    : tile.k(mode, static_cast<uint64_t>(m),
-                             *wa[j], tile.b, tile.c, tile.d));
-            } catch (const std::exception &e) {
-                err = std::string("starting tile ") + std::to_string(j) +
-                      " for a reduction: " + e.what();
-                status = ST_INTERNAL;
-                break;
+            const size_t padded = ((m + epb - 1) / epb) * epb;
+            Tile &tile = D.tiles[tl];
+            wa[k] = nullptr;
+            if (bind && bind->buf[CFT_ROLE_A])
+                wa[k] = buf_bind(*static_cast<Buf *>(bind->buf[CFT_ROLE_A]),
+                                 tl, CFT_ROLE_A,
+                                 bind->off[CFT_ROLE_A] + lo[k] * esz,
+                                 m * esz, padded * esz, false);
+            ensure_capacity(D, tile, padded * esz);
+            if (!wa[k]) {
+                stage(tile.a, pa + lo[k] * esz, m * esz, padded * esz);
+                wa[k] = &tile.a;
             }
-        }
-
-        for (auto &r : runs) {
-            try {
-                ert_cmd_state st = r.wait(std::chrono::milliseconds(D.wait_ms));
-                if (st != ERT_CMD_STATE_COMPLETED && status == ST_OK) {
-                    status = (st == ERT_CMD_STATE_TIMEOUT) ? ST_TIMEOUT
-                                                           : ST_INTERNAL;
-                    err = "a compute unit did not complete a reduction "
-                          "(state " + std::to_string(static_cast<int>(st)) +
-                          ")";
-                }
-            } catch (const std::exception &e) {
-                if (status == ST_OK) {
-                    status = ST_INTERNAL;
-                    err = std::string("waiting on a reduction: ") + e.what();
-                }
+            /* b and c are unread by a sum, but the engine streams all
+             * three - one read enable feeds all three FIFOs - so they
+             * must be real, readable memory of the same length.
+             * ensure_capacity above made them that; their CONTENTS are
+             * nothing's business (reduce_unread). */
+            reduce_unread(tile.b, tile.c, m * esz, padded * esz);
+            /* every buffer the twelve-argument launch binds must exist,
+             * one beat at least; the program path creates them on first
+             * use and a device that only ever reduces would never have */
+            if (D.version >= SEG_VERSION) {
+                ensure_one(D, tile, tile.pg, tile.pg_cap, ARG_PROG, 32);
+                ensure_one(D, tile, tile.cn, tile.cn_cap, ARG_CNT, 32);
+                ensure_one(D, tile, tile.bk, tile.bk_cap, ARG_BANK, 32);
+                ensure_one(D, tile, tile.si, tile.si_cap, ARG_SCRATCH_IN, 32);
+                ensure_one(D, tile, tile.so, tile.so_cap, ARG_SCRATCH_OUT,
+                           32);
             }
-        }
-        if (status != ST_OK) {
-            D.poisoned = true;
-            /* Same best-effort STATUS read as cftx_run: the timeout is
-             * how a fabric fault becomes readable at all, so breaking
-             * out before reading it discards the diagnosis. */
-            try {
-                for (size_t j = 0; j < wave; j++)
-                    bs |= D.tiles[j].k.read_register(CSR_STATUS);
-            } catch (const std::exception &) {
-                /* handle is finished either way */
-            }
-            err += bs ? " (STATUS 0x" + hex32(bs) + " - a memory fault, "
-                        "not merely a slow run)"
-                      : " (STATUS clean on every unit in this wave)";
-            break;
-        }
-
-        /* Collect this wave before the next one reuses the tiles.
-         * Faults before results, for the reason cftx_run gives: if the
-         * memory system did not vouch for the data then the partial is
-         * meaningless, and only the tiles that ran are read, because an
-         * idle tile still holds its previous run's sticky words. */
-        for (size_t j = 0; j < wave; j++) {
-            const size_t k = base + j;
-            try {
-                Tile &tile = D.tiles[j];
-                bs |= tile.k.read_register(CSR_STATUS);
-                fl |= tile.k.read_register(CSR_FLAGS);
-                /* One beat comes back; one element of it is the answer,
-                 * and the engine zeroed the rest. */
-                tile.d.sync(XCL_BO_SYNC_BO_FROM_DEVICE, 32, 0);
-                std::memcpy(pp + k * esz, tile.d.map<uint8_t *>(), esz);
-            } catch (const std::exception &e) {
-                D.poisoned = true;
-                set_err(std::string("reading a reduction result: ") + e.what());
-                return ST_INTERNAL;
-            }
-        }
+        };
+        t.start = [&, k](size_t tl) -> xrt::run {
+            const uint64_t m = static_cast<uint64_t>(hi[k] - lo[k]);
+            Tile &tile = D.tiles[tl];
+            /* the whole range, one result: SEG 0, as the twelfth
+             * argument on a map that has it (see SEG_VERSION) */
+            if (D.version >= SEG_VERSION)
+                return tile.k(mode, m, *wa[k], tile.b, tile.c, tile.d,
+                              tile.pg, tile.cn, tile.bk, tile.si, tile.so,
+                              static_cast<uint64_t>(0));
+            return tile.k(mode, m, *wa[k], tile.b, tile.c, tile.d);
+        };
+        /* One beat comes back; one element of it is the answer, and the
+         * engine zeroed the rest. */
+        t.collect = [&, k](size_t tl) {
+            Tile &tile = D.tiles[tl];
+            tile.d.sync(XCL_BO_SYNC_BO_FROM_DEVICE, 32, 0);
+            std::memcpy(pp + k * esz, tile.d.map<uint8_t *>(), esz);
+        };
+        J.tasks.push_back(std::move(t));
     }
 
-
-    /* The run's own failure is reported BEFORE the status word, which
-     * is the opposite order to the success path and deliberate. A
-     * reduction that timed out has a STATUS read taken from a unit
-     * that may still be running, so letting a non-zero bs turn a
-     * ST_TIMEOUT into a ST_BUS_FAULT would relabel the failure on the
-     * strength of a register sampled mid-flight. The status word is
-     * still delivered through *bus and named in the message, which is
-     * the part that helps. */
-    if (status != ST_OK) {
-        set_err(err);
-        return status;
-    }
-    if (bs != 0) {
+    uint32_t bs = 0, fl = 0, fail = 0;
+    bool faulted = false;
+    /* The run's own failure is reported BEFORE the status word, which is
+     * the opposite order to the success path and deliberate: a STATUS
+     * read taken from a unit that may still be running must not turn a
+     * ST_TIMEOUT into a ST_BUS_FAULT. The scheduler's message names the
+     * word, which is the part that helps. */
+    const int st = run_job(D, J, &bs, &fl, &faulted, &fail);
+    if (st != ST_OK)
+        return st;
+    if (faulted) {
         /* Same split as the elementwise path: STATUS[3] alone is the
          * precision refusal - no run, no data - and a device refusing
          * what its CAPS advertised is its own report, not a bus story. */
@@ -2693,27 +2710,30 @@ extern "C" int cftx_reduce_seg(void *hw, int op, int fmt, int rnd,
     const auto *pa = static_cast<const uint8_t *>(a);
     auto *pd = static_cast<uint8_t *>(d);
 
-    /* segment s0..s1 per tile: nres / use each, the remainder to the
-     * first ones, so the slices are contiguous and every tile has work */
+    /* segments s0..s1 per task: nres / use each, the remainder to the
+     * first ones, so the slices are contiguous and every task has work.
+     * One wave: there are no more tasks than tiles. */
     std::vector<size_t> s0(use + 1, 0);
     for (size_t j = 0; j < use; j++)
         s0[j + 1] = s0[j] + nres / use + (j < nres % use ? 1u : 0u);
 
-    int status = ST_OK;
-    std::string err;
-    uint32_t fl = 0, bs = 0;
-    std::vector<xrt::run> runs;
-    runs.reserve(use);
     std::vector<xrt::bo *> wa(use, nullptr);
-    try {
-        for (size_t j = 0; j < use; j++) {
+    Job J;
+    J.what = "a segmented reduction";
+    J.oom_words = "each tile's HBM group is finite; try a smaller n or "
+                  "cft_alloc";
+    J.faulty = [](uint32_t s) { return s != 0; };
+    for (size_t j = 0; j < use; j++) {
+        Task t;
+        t.stage = [&, j](size_t tl) {
             const size_t lo = s0[j] * seg, m = (s0[j + 1] - s0[j]) * seg;
             const size_t padded = ((m + epb - 1) / epb) * epb;
             const size_t rpad = (((s0[j + 1] - s0[j]) + epb - 1) / epb) * epb;
-            Tile &tile = D.tiles[j];
+            Tile &tile = D.tiles[tl];
+            wa[j] = nullptr;
             if (bind && bind->buf[CFT_ROLE_A])
                 wa[j] = buf_bind(*static_cast<Buf *>(bind->buf[CFT_ROLE_A]),
-                                 j, CFT_ROLE_A,
+                                 tl, CFT_ROLE_A,
                                  bind->off[CFT_ROLE_A] + lo * esz,
                                  m * esz, padded * esz, false);
             ensure_capacity(D, tile, std::max(padded, rpad) * esz);
@@ -2722,91 +2742,41 @@ extern "C" int cftx_reduce_seg(void *hw, int op, int fmt, int rnd,
                 wa[j] = &tile.a;
             }
             reduce_unread(tile.b, tile.c, m * esz, padded * esz);
-        }
-    } catch (const std::bad_alloc &) {
-        set_err("out of memory staging a segmented reduction");
-        return ST_OUT_OF_MEMORY;
-    } catch (const std::exception &e) {
-        set_err(std::string("staging a segmented reduction: ") + e.what());
-        return ST_INTERNAL;
-    }
-    for (size_t j = 0; j < use; j++) {
-        const size_t m = (s0[j + 1] - s0[j]) * seg;
-        try {
-            Tile &tile = D.tiles[j];
-            /* every buffer the twelve-argument launch binds must
-             * exist, one beat at least; the program path creates
-             * them on first use and a device that only ever reduces
-             * would never have */
-            if (D.version >= SEG_VERSION) {
-                ensure_one(D, tile, tile.pg, tile.pg_cap, ARG_PROG, 32);
-                ensure_one(D, tile, tile.cn, tile.cn_cap, ARG_CNT, 32);
-                ensure_one(D, tile, tile.bk, tile.bk_cap, ARG_BANK, 32);
-                ensure_one(D, tile, tile.si, tile.si_cap, ARG_SCRATCH_IN, 32);
-                ensure_one(D, tile, tile.so, tile.so_cap, ARG_SCRATCH_OUT, 32);
-            }
+            /* every buffer the twelve-argument launch binds must exist,
+             * one beat at least; the program path creates them on first
+             * use and a device that only ever reduces would never have */
+            ensure_one(D, tile, tile.pg, tile.pg_cap, ARG_PROG, 32);
+            ensure_one(D, tile, tile.cn, tile.cn_cap, ARG_CNT, 32);
+            ensure_one(D, tile, tile.bk, tile.bk_cap, ARG_BANK, 32);
+            ensure_one(D, tile, tile.si, tile.si_cap, ARG_SCRATCH_IN, 32);
+            ensure_one(D, tile, tile.so, tile.so_cap, ARG_SCRATCH_OUT, 32);
+        };
+        t.start = [&, j](size_t tl) -> xrt::run {
+            const size_t m = (s0[j + 1] - s0[j]) * seg;
+            Tile &tile = D.tiles[tl];
             const uint64_t seg_word =
                 (static_cast<uint64_t>(s0[j + 1] - s0[j]) << 32) |
                 static_cast<uint64_t>(seg);
-            runs.push_back(tile.k(mode, static_cast<uint64_t>(m),
-                                  *wa[j], tile.b, tile.c, tile.d,
-                                  tile.pg, tile.cn, tile.bk, tile.si, tile.so,
-                                  seg_word));
-        } catch (const std::exception &e) {
-            err = std::string("starting tile ") + std::to_string(j) +
-                  " for a segmented reduction: " + e.what();
-            status = ST_INTERNAL;
-            break;
-        }
-    }
-    for (auto &r : runs) {
-        try {
-            ert_cmd_state st = r.wait(std::chrono::milliseconds(D.wait_ms));
-            if (st != ERT_CMD_STATE_COMPLETED && status == ST_OK) {
-                status = (st == ERT_CMD_STATE_TIMEOUT) ? ST_TIMEOUT
-                                                       : ST_INTERNAL;
-                err = "a compute unit did not complete a segmented "
-                      "reduction (state " +
-                      std::to_string(static_cast<int>(st)) + ")";
-            }
-        } catch (const std::exception &e) {
-            if (status == ST_OK) {
-                status = ST_INTERNAL;
-                err = std::string("waiting on a segmented reduction: ") +
-                      e.what();
-            }
-        }
-    }
-    if (status != ST_OK) {
-        D.poisoned = true;
-        try {
-            for (size_t j = 0; j < use; j++)
-                bs |= D.tiles[j].k.read_register(CSR_STATUS);
-        } catch (const std::exception &) {
-        }
-        err += bs ? " (STATUS 0x" + hex32(bs) + " - a memory fault, "
-                    "not merely a slow run)"
-                  : " (STATUS clean on every unit)";
-        set_err(err);
-        return status;
-    }
-    for (size_t j = 0; j < use; j++) {
-        const size_t r0 = s0[j], rn = s0[j + 1] - s0[j];
-        try {
-            Tile &tile = D.tiles[j];
-            bs |= tile.k.read_register(CSR_STATUS);
-            fl |= tile.k.read_register(CSR_FLAGS);
+            return tile.k(mode, static_cast<uint64_t>(m), *wa[j], tile.b,
+                          tile.c, tile.d, tile.pg, tile.cn, tile.bk, tile.si,
+                          tile.so, seg_word);
+        };
+        t.collect = [&, j](size_t tl) {
+            const size_t r0 = s0[j], rn = s0[j + 1] - s0[j];
+            Tile &tile = D.tiles[tl];
             const size_t rbytes = ((rn * esz + 31u) / 32u) * 32u;
             tile.d.sync(XCL_BO_SYNC_BO_FROM_DEVICE, rbytes, 0);
             std::memcpy(pd + r0 * esz, tile.d.map<uint8_t *>(), rn * esz);
-        } catch (const std::exception &e) {
-            D.poisoned = true;
-            set_err(std::string("reading a segmented reduction's results: ")
-                    + e.what());
-            return ST_INTERNAL;
-        }
+        };
+        J.tasks.push_back(std::move(t));
     }
-    if (bs != 0) {
+
+    uint32_t bs = 0, fl = 0, fail = 0;
+    bool faulted = false;
+    const int st = run_job(D, J, &bs, &fl, &faulted, &fail);
+    if (st != ST_OK)
+        return st;
+    if (faulted) {
         if ((bs & 0x8u) && !(bs & 0x7u)) {
             set_err("kernel REFUSED the reduction: MODE selected a "
                     "precision this bitstream does not implement "

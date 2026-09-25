@@ -4842,6 +4842,106 @@ static void note_binds(struct rbuf *r)
 }
 
 /* One (format, op, attribute) at n elements, three ways. */
+/* ---------------------------------------------------------------
+ * An OUTPUT window moved onto another tile's unflushed one
+ * (2026-09-25).
+ *
+ * A resident buffer written by a run on every tile, and not yet
+ * brought home, holds its last slice in the LAST tile's copy. A second,
+ * short run then writes the buffer's final elements through a pointer
+ * into it: one slice, on the first tile. Two copies now hold bytes for
+ * the same elements - the last tile's older ones and the first tile's
+ * newer ones - and until 2026-09-25 the library brought copies home in
+ * table order, so the older bytes landed LAST and replaced the second
+ * run's results with the first's. It now sends overlapping older bytes
+ * home before a run is handed the window. The buffer read back must hold
+ * the second run's results where it wrote and the first run's
+ * everywhere else, element for element against the software backend.
+ * One tile cannot hold two copies on two tiles: there the leg runs, and
+ * says the overlap it exists for was not reachable.
+ * --------------------------------------------------------------- */
+static void check_moved_output_window(cft_device *sw, cft_device *hw,
+                                      cft_format fmt, unsigned tiles)
+{
+    const size_t esz = cft_format_size(fmt), epb = 32 / esz;
+    const size_t n = 64 * epb;          /* 64 beats: 16 a tile on a quad */
+    const size_t n2 = epb;              /* one beat: one slice, one tile */
+    const size_t tail = n - n2;
+    uint8_t *a1 = (uint8_t *)malloc(n * esz), *b1 = (uint8_t *)malloc(n * esz);
+    uint8_t *c1 = (uint8_t *)calloc(n, esz), *want = (uint8_t *)malloc(n * esz);
+    uint8_t *a2 = (uint8_t *)malloc(n2 * esz), *b2 = (uint8_t *)malloc(n2 * esz);
+    uint8_t *c2 = (uint8_t *)calloc(n2, esz);
+    struct rbuf x;
+    cft_status w1 = CFT_ERR_INTERNAL, w2 = CFT_ERR_INTERNAL;
+    cft_status s1 = CFT_ERR_INTERNAL, s2 = CFT_ERR_INTERNAL;
+    uint32_t f = 0, bus = 0;
+    size_t i, bad = 0;
+
+    x.b = NULL;
+    x.p = NULL;
+    if (!a1 || !b1 || !c1 || !want || !a2 || !b2 || !c2 ||
+        !rbuf_alloc(hw, &x, n * esz)) {
+        printf("  FAIL: out of memory for the moved-window leg\n");
+        failures++;
+        goto out;
+    }
+    rs = 0x5eed0925u;
+    fill(a1, n, esz);
+    fill(b1, n, esz);
+    fill(a2, n2, esz);
+    fill(b2, n2, esz);
+
+    /* software: the first run over all of it, the second over its tail */
+    w1 = cft_run(sw, CFT_ADD, fmt, CFT_RNE, a1, b1, c1, want, n, &f, NULL);
+    w2 = cft_run(sw, CFT_ADD, fmt, CFT_RNE, a2, b2, c2, want + tail * esz,
+                 n2, &f, NULL);
+    /* the device: the same two runs into the resident buffer, and
+     * nothing brought home between them */
+    s1 = cft_run(hw, CFT_ADD, fmt, CFT_RNE, a1, b1, c1, x.p, n, &f, &bus);
+    s2 = cft_run(hw, CFT_ADD, fmt, CFT_RNE, a2, b2, c2, x.p + tail * esz, n2,
+                 &f, &bus);
+    CHECK(w1 == CFT_OK && w2 == CFT_OK,
+          "software ADD for the moved-window leg (%s)", cft_format_name(fmt));
+    CHECK(s1 == CFT_OK && s2 == CFT_OK,
+          "device ADD into a resident buffer, then into its last beat "
+          "(%s): %s / %s (%s)", cft_format_name(fmt), cft_strerror(s1),
+          cft_strerror(s2), cft_last_error());
+    CHECK(cft_buffer_from_device(x.b) == CFT_OK,
+          "reading the moved-window buffer back");
+    if (w1 == CFT_OK && w2 == CFT_OK && s1 == CFT_OK && s2 == CFT_OK) {
+        for (i = 0; i < n; i++)
+            if (memcmp(want + i * esz, x.p + i * esz, esz) != 0) {
+                if (bad < 3) {
+                    char h1[2 * MAXE + 1], h2[2 * MAXE + 1];
+                    hex(want + i * esz, esz, h1);
+                    hex(x.p + i * esz, esz, h2);
+                    printf("  FAIL: %s moved-window element %lu (%s run's): "
+                           "software %s, device %s\n", cft_format_name(fmt),
+                           (unsigned long)i, i >= tail ? "the second" : "the "
+                           "first", h1, h2);
+                }
+                bad++;
+            }
+        checks++;
+        if (bad) {
+            failures++;
+            printf("  FAIL: %lu of %lu elements of the moved-window buffer "
+                   "are not what the two runs wrote\n", (unsigned long)bad,
+                   (unsigned long)n);
+        }
+    }
+    printf("  buffers, an output window moved onto another tile's unflushed "
+           "one (%s): %s\n", cft_format_name(fmt),
+           bad ? "FAILED"
+           : tiles > 1 ? "the second run's results survived"
+                       : "passed - one tile, so the overlap across tiles it "
+                         "exists for was not reachable");
+out:
+    if (x.b)
+        rbuf_free(&x);
+    free(a1); free(b1); free(c1); free(want); free(a2); free(b2); free(c2);
+}
+
 static void compare_buffers(cft_device *sw, cft_device *hw, cft_format fmt,
                             cft_op op, cft_round rnd, size_t n,
                             uint32_t seed)
@@ -6019,6 +6119,10 @@ int main(int argc, char **argv)
             printf("  buffers, elementwise: %d checks, %d failed\n",
                    checks, failures);
             fflush(stdout);
+
+            if (cft_supports(hw, CFT_ADD, fmt))
+                check_moved_output_window(sw, hw, (cft_format)fmt,
+                                          (unsigned)caps.tiles);
 
             /* The sizes that straddle a beat and a tile boundary, which
              * are where a window that is a whole number of beats stops

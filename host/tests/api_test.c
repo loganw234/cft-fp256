@@ -250,6 +250,19 @@ static void lane_windows_slipped(const cft_lane_shape *S, size_t first,
     }
 }
 
+/* Whether o[0..nt) names every tile of [0, nt) exactly once. */
+static int tile_order_is_perm(const size_t *o, size_t nt)
+{
+    uint64_t seen = 0;
+    size_t j;
+    for (j = 0; j < nt; j++) {
+        if (o[j] >= nt || ((seen >> o[j]) & 1u))
+            return 0;
+        seen |= (uint64_t)1 << o[j];
+    }
+    return 1;
+}
+
 static uint64_t lane_rng(uint64_t *s)
 {
     return cft_lane_mix(s);
@@ -1058,6 +1071,45 @@ int main(void)
         CHECK(caught > 0,
               "NEGATIVE CONTROL: a lane cut that sizes the scratch-in block "
               "by the scratch-out width passed every check");
+        /* cft_tile_order, the scheduler's placement: seed 0 is the
+         * identity, any seed is a permutation of the tiles, one (seed,
+         * wave) is one order, and the fuzz does move tasks - over many
+         * waves some order must differ from the identity, or
+         * CFT_XRT_TILE_ORDER tests nothing. The permutation test is held
+         * to an order with a repeated tile, which it must reject. */
+        {
+            static const size_t dup[4] = {0, 2, 2, 3};
+            size_t ord[64], ord2[64], nt, w, j, moved = 0, bad = 0;
+            for (nt = 1; nt <= 64; nt++)
+                for (w = 0; w < 8; w++) {
+                    cft_tile_order(nt, 0, w, ord);
+                    for (j = 0; j < nt; j++)
+                        if (ord[j] != j)
+                            bad++;
+                    cft_tile_order(nt, 12345, w, ord);
+                    cft_tile_order(nt, 12345, w, ord2);
+                    if (!tile_order_is_perm(ord, nt) ||
+                        memcmp(ord, ord2, nt * sizeof ord[0]))
+                        bad++;
+                    for (j = 0; j < nt; j++)
+                        if (ord[j] != j)
+                            moved++;
+                }
+            CHECK(!bad, "cft_tile_order: %lu orders not a permutation, not "
+                  "the identity at seed 0, or not repeatable",
+                  (unsigned long)bad);
+            CHECK(moved > 0, "cft_tile_order: a seed never moved a task "
+                  "off its tile - the placement fuzz would test nothing");
+            CHECK(!tile_order_is_perm(dup, 4),
+                  "NEGATIVE CONTROL: an order naming tile 2 twice passed the "
+                  "permutation test");
+            if (!bad && moved)
+                printf("  tile order: 64 tile counts x 8 waves, seed 0 the "
+                       "identity, every seeded order a permutation and "
+                       "repeatable, %lu tasks moved off their tile; an order "
+                       "naming a tile twice is refused\n",
+                       (unsigned long)moved);
+        }
         if (!misread && caught > 0 && unaligned > 0 && empty > 0)
             printf("  lane cut: 4,000 random runs over both planners, every "
                    "block covered exactly once and every indexed source "
