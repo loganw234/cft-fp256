@@ -2005,17 +2005,36 @@ int main(int argc, char **argv)
      * a line of that report and nowhere else, and until 2026-09-24
      * this printed only the case count, so a set skipped here reached
      * no log. SKIP is the first word of the no-sets line for the same
-     * reason - it is the marker verify/run.sh counts. */
+     * reason - it is the marker verify/run.sh counts.
+     *
+     * Only an EMPTY directory is a skip. cft_conformance answers
+     * CFT_ERR_ARTIFACT both for that ("no vector sets found under
+     * ...") and for a set it cannot parse, and until 2026-09-24 this
+     * read every CFT_ERR_ARTIFACT as "no vector sets" - so a malformed
+     * set passed here while cft-selftest failed the same directory.
+     * The empty case is told apart by the replay's own sentence and a
+     * count of zero; anything else is a FAIL naming the report's last
+     * line, which is the one that stopped the replay. */
     {
         const cft::device::conformance_result r = dev.conformance(vdir);
         std::fputs(r.report.c_str(), stdout);
         if (!r.report.empty() && r.report.back() != '\n')
             std::fputc('\n', stdout);   /* a report cut at its buffer */
-        if (r.status == CFT_ERR_ARTIFACT) {
+        const bool no_sets =
+            r.status == CFT_ERR_ARTIFACT && r.cases == 0 &&
+            r.report.find("no vector sets found under ") != std::string::npos;
+        std::string stop_line = r.report;
+        while (!stop_line.empty() && stop_line.back() == '\n')
+            stop_line.pop_back();
+        if (stop_line.rfind('\n') != std::string::npos)
+            stop_line.erase(0, stop_line.rfind('\n') + 1);
+        if (no_sets) {
             std::printf("SKIP  cpp-api-test conformance: no vector sets in "
                         "%s (run `make vectors` from the repo root)\n", vdir);
         } else {
-            CHECK(r.ok(), "conformance replay: %s", cft_strerror(r.status));
+            CHECK(r.ok(), "conformance replay: %s%s%s",
+                  cft_strerror(r.status), r.ok() ? "" : " - ",
+                  r.ok() ? "" : stop_line.c_str());
             CHECK(r.cases > 0 && !r.report.empty(),
                   "conformance reports its summary even on success");
             std::printf("cpp-api-test: conformance replayed %llu cases from "

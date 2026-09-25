@@ -323,7 +323,10 @@ NFORMS=45
 # ...and the sources still print them so. A fixture line is a claim
 # about a program's output; these hold each claim to the line of source
 # that makes it, and refuse the form it replaced. A form that was never
-# printed before has no old line to refuse.
+# printed before has no old line to refuse. cpp-api-test's SKIP is also
+# held to the condition that prints it: an empty directory only, told
+# apart by the replay's own sentence - until 2026-09-24 any
+# CFT_ERR_ARTIFACT printed it, a malformed set included.
 pins () {  # -> returns the number of pins that do not hold
   local row f new old bad=0 rows
   mapfile -t rows << 'PINS'
@@ -334,6 +337,7 @@ host/tests/device_test.c|"that RAN, bits and flags - skipped: %d format%s, %d "|
 host/tests/remote_test.c|printf("  SKIPPED %s: not on the server\n",|printf("  %-6s skipped, not on the server\n",
 host/tests/cpp_api_test.cpp|std::printf("SKIP  cpp-api-test conformance: no vector sets in "|std::printf("cpp-api-test: SKIP conformance: no vector sets in "
 host/tests/cpp_api_test.cpp|std::fputs(r.report.c_str(), stdout);|
+host/tests/cpp_api_test.cpp|r.report.find("no vector sets found under ")|if (r.status == CFT_ERR_ARTIFACT) {
 host/tests/remote_check.py|print(tag + rep_line)|
 tb/check_results.py|print("  SKIP  %s: %s" % (bench, line))|
 PINS
@@ -349,7 +353,7 @@ PINS
   done
   return "$bad"
 }
-NPINS=9
+NPINS=10
 
 echo "== verify/run.sh, as committed"
 cases "$ROOT/verify/run.sh"; n=$?
