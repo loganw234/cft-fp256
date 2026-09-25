@@ -55,18 +55,21 @@ Seven groups of checks:
                   byte comparisons of checkpoints and records.
  6b. Segments.    --engine segments against the host loop on both
                   problems, both schemes and all four formats, at the
-                  segment lengths real runs use (1,024 steps, 100,000,
+                  segment lengths real runs use (1,024 steps, 1 + 99,999,
                   intervals split at the loader's limit) as well as
                   short ones; stop points; its own batch independence; a
                   run resumed ALTERNATELY by the two engines; where its
                   checkpoints fall, against the host loop's under a
                   steady clock, and a real interruption; a killed run's
                   records, resumed by either engine, against the
-                  uninterrupted run's; the census it reports, derived
-                  here from the program's structure; the golden model's
-                  executor and assembler on the image it writes. Most
-                  legs carry a control that must fail, run every time;
-                  check_segments names the three that do not.
+                  uninterrupted run's, and a run ended the instant a
+                  checkpoint appears; records files and paths a resume
+                  must refuse, pipes included, in bounded time; the
+                  census it reports, derived here from the program's
+                  structure; the golden model's executor and assembler
+                  on the image it writes. Most legs carry a control that
+                  must fail, run every time; check_segments names the
+                  seven that do not.
  7. Refusals.     What the two program engines must refuse, and the
                   precise reason each is refused.
 """
@@ -79,6 +82,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -526,13 +530,17 @@ def env_with(**kv):
 def check_segments(tool, tmp):
     """[6b] --engine segments. The engine comparisons, the long
     segments, the stop points, the relays, where checkpoints fall, the
-    interruption, a killed run's records, the loader's limit and the
-    golden comparison each carry a control that must make them fail,
-    run every time, and its failure is asserted - a comparison that has
-    never been seen to fail is not a gate. Three checks carry none of
-    their own - the census, the batch-size comparison and the
-    comparisons at the three narrower formats; docs/ORBITS.md says what
-    holds them instead."""
+    interruption, a killed run's records, the records file laid out by
+    hand, the order of a checkpoint and its records, the loader's limit
+    and the golden comparison each carry a control that must make them
+    fail, run every time, and its failure is asserted - a comparison
+    that has never been seen to fail is not a gate. Seven carry none of
+    their own - the census, the batch-size comparison, the comparisons
+    at the three narrower formats, the relay without --records, the run
+    with no instrument set, the rename under a stat() poll and the fresh
+    run into a pipe - and were watched failing only under one-off
+    planted defects; the refusals are their own kind, a case each that
+    must be refused by name. docs/ORBITS.md says what holds each."""
     print("\n[6b] --engine segments: the ensemble state through the "
           "scratch block")
     env_nc = env_with(CFT_ORBITS_NEGATIVE_CONTROL="transpose")
@@ -872,7 +880,12 @@ def check_segments(tool, tmp):
     # sized to a whole interval rather than to the time left wrote theirs
     # about two intervals apart (verifier-V1, 2026-09-25). The run count
     # bounds the pieces: a binary decomposition of each interval, eight
-    # at most for 100 steps, and one more a sample boundary.
+    # at most for 100 steps, and one more a sample boundary. The pieces
+    # recur from one interval to the next, and each length's image is
+    # built and loaded once (seg_run keeps eight): with no sample
+    # boundary to cut them, the lengths are 1 (the first step, which
+    # times the rate) and the binary decompositions of the first
+    # interval's other 99 steps and of 100 - five, so five loads.
     vargv = ["--problem", "kepler", "--format", "fp64", "--members", 2,
              "--rsqrt", "newton", "--csv", "--quiet",
              "--checkpoint-interval", "0.09765625"]
@@ -882,8 +895,12 @@ def check_segments(tool, tmp):
     regimes = (("a 1,000-step sample interval", 1000, 1000),
                ("127-step sample intervals", 1016, 127),
                ("10-step sample intervals", 1000, 10))
+
+    def pieces(n):
+        return {1 << b for b in range(n.bit_length()) if n >> b & 1}
+
     for label, nsteps, every in regimes:
-        logs, runs, bad = {}, None, []
+        logs, runs, loads, bad = {}, None, None, []
         for key, eng, env in (("loop", "loop", env_vc),
                               ("segments", "segments", env_vc),
                               ("control", "segments", env_vcu)):
@@ -898,20 +915,29 @@ def check_segments(tool, tmp):
                                                  proc.stderr.strip()[-120:]))
             logs[key] = _clock_log(proc.stderr)
             if key == "segments" and not proc.returncode:
-                runs = int(_csv_row(proc.stdout)["seg_runs"])
+                row = _csv_row(proc.stdout)
+                runs, loads = int(row["seg_runs"]), int(row["seg_loads"])
         L = logs["loop"]
         steps = [s for s, _ in L[:-1]]       # the last is the end of run
         bound = 8 * (nsteps // 100) + nsteps // every + 1
+        want_loads = (len({1} | pieces(99) | pieces(100))
+                      if every == nsteps else None)
         check(not bad and L and logs["segments"] == L and
               steps == list(range(100, nsteps + 1, 100)) and
-              runs is not None and runs <= bound,
+              runs is not None and runs <= bound and
+              loads < runs and (want_loads is None or loads == want_loads),
               "%s, under a steady clock: segments checkpoint at exactly the "
               "host loop's steps - every 100, one interval - in %d runs "
-              "(at most %d)" % (label, runs or 0, bound),
+              "(at most %d) of %d images%s"
+              % (label, runs or 0, bound, loads or 0,
+                 "" if want_loads is None else
+                 ", one a length (%d lengths)" % want_loads),
               "%s, under a steady clock: segments checkpoint at %s, the host "
-              "loop at %s, in %s runs (at most %d) %s"
-              % (label, [s for s, _ in logs["segments"]][:8], steps[:8],
-                 runs, bound, "; ".join(bad)))
+              "loop at %s, in %s runs (at most %d) of %s images (%s wanted) "
+              "%s" % (label, [s for s, _ in logs["segments"]][:8], steps[:8],
+                      runs, bound, loads,
+                      want_loads if want_loads else "fewer than the runs",
+                      "; ".join(bad)))
         if "control" in logs:
             check(logs["control"] != L,
                   "%s: NEGATIVE CONTROL: uncapped, segments checkpoint at "
@@ -1109,26 +1135,48 @@ def check_segments(tool, tmp):
           "FAILS - its records are not the run's",
           "NEGATIVE CONTROL FAILED TO FAIL: an appending resume matched the "
           "uninterrupted records (exit %d)" % proc.returncode)
-    flip = bytearray(stop_rc)
-    flip[len(flip) // 2] = ord("7") if flip[len(flip) // 2] != ord("7") \
-        else ord("3")
+    def flipped(data, at):
+        out = bytearray(data)
+        out[at] = ord("7") if out[at] != ord("7") else ord("3")
+        return bytes(out)
+
     old = stop_ck.replace(b"cft-orbits-checkpoint 2\n",
                           b"cft-orbits-checkpoint 1\n", 1)
     norec = b"".join(l for l in stop_ck.splitlines(True)
                      if not l.startswith(b"recbytes "))
+    # another run of the same shape - its checkpoint would be accepted -
+    # whose ensemble differs (a ladder of 2 ulps), so even its sample 0
+    # is not this run's
+    tool.run(*rargv5, "--engine", "loop", "--spread", 2, "--records",
+             Path(tmp) / "r-other.txt")
+    other = (Path(tmp) / "r-other.txt").read_bytes()
+    hash_msg = "do not hash to the checkpoint's chain"
     refused, why = [], []
+    # Files LONGER than the checkpoint's records whose first recbytes
+    # bytes are wrong must be refused as surely as ones exactly that
+    # long: the prefix is what is checked, whatever follows it.
     for what, rec, ckb, needle in (
             ("the file cut one byte short", stop_rc[:-1], stop_ck,
              "holds %d bytes and the checkpoint's records run to %d"
              % (nb - 1, nb)),
-            ("one byte of the file changed", bytes(flip), stop_ck,
-             "do not hash to the checkpoint's chain"),
+            ("one byte of the file changed", flipped(stop_rc, nb // 2),
+             stop_ck, hash_msg),
+            ("the whole run's records with a byte changed before recbytes",
+             flipped(full[1], nb // 2), stop_ck, hash_msg),
+            ("the whole run's records with CRLF line ends",
+             full[1].replace(b"\n", b"\r\n"), stop_ck, hash_msg),
+            ("another run's longer records (--spread 2, %d bytes)"
+             % len(other), other, stop_ck, hash_msg),
             ("no records file at all", None, stop_ck,
              "holds 0 bytes and the checkpoint's records run to %d" % nb),
             ("a version-1 checkpoint", stop_rc, old,
              "not a cft-orbits checkpoint of this version"),
             ("a checkpoint without its recbytes line", stop_rc, norec,
              "does not say how long its records are")):
+        if rec is not None and rec is not stop_rc and len(rec) > nb and \
+                rec[:nb] == stop_rc:
+            why.append("%s: the case is not what it says" % what)
+            continue
         proc, got_ck, got_rc = resume_with(rec, ckb)
         if (proc.returncode == 2 and needle in proc.stderr and
                 got_ck == ckb and got_rc == rec):
@@ -1141,6 +1189,279 @@ def check_segments(tool, tmp):
           % "; ".join(refused),
           "--resume did not refuse by name, or touched a file: %s"
           % "; ".join(why))
+
+    # --- records that are not a file -------------------------------------
+    # A resume reads the records back and cuts them, which only a regular
+    # file allows. Handed a pipe, a FIFO or a device, c8a7d97 read it -
+    # and waited for ever on a pipe that nothing wrote, with no message
+    # (verifier-V6). Each must be refused by name at once, the checkpoint
+    # untouched. Every run here has 60 s, so a regression is a FAIL and
+    # not a gate that never ends. A FRESH run into a pipe was never the
+    # problem, and must still stream the run's records.
+    def bounded(argv, **kw):
+        try:
+            return subprocess.run([tool.exe] + [str(a) for a in argv],
+                                  capture_output=True, text=True,
+                                  timeout=60, **kw)
+        except subprocess.TimeoutExpired:
+            return None
+
+    pipes = []                  # (what, path) to refuse
+    pipe_close = []
+    if os.name == "nt":
+        import _winapi
+        pname = r"\\.\pipe\cft-orbits-check-%d" % os.getpid()
+        ph = _winapi.CreateNamedPipe(pname, _winapi.PIPE_ACCESS_DUPLEX, 0,
+                                     _winapi.PIPE_UNLIMITED_INSTANCES,
+                                     65536, 65536, 0, _winapi.NULL)
+        pipe_close.append(lambda: _winapi.CloseHandle(ph))
+        pipes += [("a named pipe nothing writes (%s)" % pname, pname),
+                  ("the NUL device", "NUL")]
+    else:
+        fifo = Path(tmp) / "records.fifo"
+        os.mkfifo(fifo)
+        pipes += [("a FIFO nothing writes", str(fifo)),
+                  ("/dev/stdout, a pipe to this check", "/dev/stdout"),
+                  ("/dev/null", "/dev/null")]
+    refused, why = [], []
+    for what, path in pipes:
+        ck = Path(tmp) / "p-case.ckpt"
+        ck.write_bytes(stop_ck)
+        t0 = time.monotonic()
+        proc = bounded(rargv5 + ["--engine", "segments", "--batch", 3,
+                                 "--checkpoint", ck, "--records", path,
+                                 "--resume"])
+        if proc is None:
+            why.append("%s: still running after 60 s - HUNG, killed" % what)
+        elif (proc.returncode == 2 and "is not a regular file" in
+              proc.stderr and ck.read_bytes() == stop_ck):
+            refused.append("%s (%.2f s)" % (what, time.monotonic() - t0))
+        else:
+            why.append("%s: exit %d, %s" % (what, proc.returncode,
+                                           proc.stderr.strip()[-120:]))
+    for close in pipe_close:
+        close()
+    check(not why,
+          "--resume --records refuses, by name, at once and with the "
+          "checkpoint untouched: %s" % "; ".join(refused),
+          "--resume --records into a pipe or a device: %s" % "; ".join(why))
+    # the same kind of path on a fresh run: the records stream through it
+    got, rdr = [], None
+    if os.name == "nt":
+        pname = r"\\.\pipe\cft-orbits-check-in-%d" % os.getpid()
+        ph = _winapi.CreateNamedPipe(pname, _winapi.PIPE_ACCESS_INBOUND, 0,
+                                     1, 65536, 65536, 0, _winapi.NULL)
+
+        def drain():
+            try:
+                _winapi.ConnectNamedPipe(ph, False)
+            except OSError:
+                pass
+            while True:
+                try:
+                    data, _err = _winapi.ReadFile(ph, 65536)
+                except OSError:
+                    break
+                if not data:
+                    break
+                got.append(data)
+        ppath = pname
+    else:
+        ppath = str(Path(tmp) / "records-in.fifo")
+        os.mkfifo(ppath)
+
+        def drain():
+            with open(ppath, "rb") as f:
+                got.append(f.read())
+    rdr = threading.Thread(target=drain, daemon=True)
+    rdr.start()
+    proc = bounded(rargv5 + ["--engine", "segments", "--batch", 3,
+                             "--checkpoint", Path(tmp) / "p-fresh.ckpt",
+                             "--checkpoint-interval", 0, "--records", ppath])
+    rdr.join(30)
+    if os.name == "nt":
+        _winapi.CloseHandle(ph)
+    streamed = b"".join(got)
+    check(proc is not None and proc.returncode == 0 and
+          streamed == full[1],
+          "a fresh run with --records %s and a checkpoint every step "
+          "streams the run's %d bytes of records through it, as before"
+          % ("a named pipe" if os.name == "nt" else "a FIFO", len(streamed)),
+          "a fresh run into a pipe: %s, %d bytes through it where the run "
+          "has %d" % ("HUNG" if proc is None else "exit %d" % proc.returncode,
+                      len(streamed), len(full[1])))
+
+    # --- the records beside a checkpoint, at the instant it appears ------
+    # A checkpoint promises the records file holds at least recbytes
+    # bytes, so the records must reach the system BEFORE the checkpoint
+    # is renamed into place. A kill lands between the two by chance once
+    # in thousands of tries, so the gate places one there:
+    # CFT_ORBITS_DIE_AFTER_CHECKPOINT=N ends the process, as a kill
+    # would, the moment its N-th checkpoint is in place. With a sample a
+    # step and a checkpoint after every step, records are waiting in the
+    # stdio buffer at checkpoints 1 and 4 (sample 0's, sample 2's). The
+    # file must then be exactly as long as the checkpoint says, and the
+    # other engine must resume it to the uninterrupted run. The control,
+    # =flush-late, hands the records over just after the rename: the
+    # file is then behind the checkpoint and the resume must refuse it.
+    dargv = ["--problem", "kepler", "--format", "fp64", "--members", 2,
+             "--rsqrt", "newton", "--steps", 12, "--sample-every", 1,
+             "--checkpoint-interval", 0, "--quiet"]
+    dw_ck, dw_rc = Path(tmp) / "d-whole.ckpt", Path(tmp) / "d-whole.txt"
+    tool.run(*dargv, "--engine", "loop", "--checkpoint", dw_ck,
+             "--records", dw_rc)
+    dwhole = (dw_ck.read_bytes(), dw_rc.read_bytes())
+    for kill_eng, res_eng in (("loop", "segments"), ("segments", "loop")):
+        seen, ctl, bad = [], [], []
+        ck, rc = Path(tmp) / "d-case.ckpt", Path(tmp) / "d-case.txt"
+        for n in (1, 4):
+            for label, extra_env in (("ordered", {}),
+                                     ("control", {"CFT_ORBITS_NEGATIVE_"
+                                                  "CONTROL": "flush-late"})):
+                for p in (ck, rc):
+                    if p.exists():
+                        p.unlink()
+                proc = tool.run(*dargv, "--engine", kill_eng, "--checkpoint",
+                                ck, "--records", rc, expect_ok=False,
+                                env=env_with(
+                                    CFT_ORBITS_DIE_AFTER_CHECKPOINT=str(n),
+                                    **extra_env))
+                k = len(rc.read_bytes()) if rc.exists() else -1
+                nck = _field_of(ck, "recbytes") if ck.exists() else None
+                if proc.returncode != 9 or nck is None or \
+                        "TEST INSTRUMENT ACTIVE" not in proc.stderr:
+                    bad.append("%s after %d: exit %d, %s" % (
+                        label, n, proc.returncode,
+                        proc.stderr.strip()[-100:]))
+                    continue
+                res = tool.run(*dargv, "--engine", res_eng, "--checkpoint",
+                               ck, "--records", rc, "--resume",
+                               expect_ok=False)
+                if label == "ordered":
+                    seen.append("%d/%d" % (k, nck))
+                    if not (k == nck and res.returncode == 0 and
+                            (ck.read_bytes(), rc.read_bytes()) == dwhole):
+                        bad.append("after checkpoint %d the file held %d "
+                                   "of %d bytes; the resume: exit %d"
+                                   % (n, k, nck, res.returncode))
+                else:
+                    ctl.append("%d/%d" % (k, nck))
+                    if not (k < nck and res.returncode == 2 and
+                            "holds %d bytes and the checkpoint's records "
+                            "run to %d" % (k, nck) in res.stderr):
+                        bad.append("NEGATIVE CONTROL FAILED TO FAIL after "
+                                   "checkpoint %d: the file held %d of %d "
+                                   "bytes, the resume exit %d"
+                                   % (n, k, nck, res.returncode))
+        check(not bad,
+              "%s ended as a kill would the moment checkpoints 1 and 4 were "
+              "in place: the records file exactly as long as each said "
+              "(%s bytes), and %s resumed each to the uninterrupted run; "
+              "NEGATIVE CONTROL: with the records handed over after the "
+              "rename (=flush-late) the file was BEHIND (%s) and the resume "
+              "refused it" % (kill_eng, ", ".join(seen), res_eng,
+                              ", ".join(ctl)),
+              "%s ended at a checkpoint's rename: %s" % (kill_eng,
+                                                        "; ".join(bad)))
+
+    # --- a resume without --records ---------------------------------------
+    # The checkpoint counts the records whether or not --records writes
+    # them, so a run stopped and resumed WITHOUT --records ends on the
+    # same checkpoint as one that wrote them all: a relay of 37-step legs,
+    # the engines in turn, none with --records, against the loop engine's
+    # uninterrupted run with them.
+    nck = Path(tmp) / "nr.ckpt"
+    rounds = 0
+    while rounds < 20:
+        tool.run(*rargv5, "--engine", ("segments", "loop")[rounds % 2],
+                 "--stop-after-steps", 37, "--checkpoint", nck,
+                 *(["--resume"] if rounds else []))
+        rounds += 1
+        if _at_of(nck)[0] >= 192:
+            break
+    check(nck.read_bytes() == full[0],
+          "stopped and resumed %d times by the two engines in turn, none "
+          "with --records, the run ends on the checkpoint of the "
+          "uninterrupted run that wrote them (recbytes %s)"
+          % (rounds, _field_of(nck, "recbytes")),
+          "a relay without --records ends on recbytes %s where the run with "
+          "them says %s" % (_field_of(nck, "recbytes"),
+                            _field_of(Path(tmp) /
+                                      "s-kepler-leapfrog-loop.ckpt",
+                                      "recbytes")))
+
+    # --- a run with no instrument set -------------------------------------
+    # The instruments must be off unless named: a run with none set says
+    # nothing on stderr (no announcement, no checkpoint log), and its
+    # clock is the wall's. A clock that counts steps - the test clock left
+    # on, logging or not - reports the same time for the same steps
+    # whatever each step costs; the wall does not. So the same 1,024 steps
+    # at 1 member and at 16 must report times at least 4 apart (measured
+    # about 15), each within its own process's lifetime. (The real loader
+    # limit by default is held above: the 100,000-step interval runs as
+    # 1 + 99,999, and =overlong is refused at the real ceiling.)
+    targv = ["--problem", "kepler", "--format", "fp256", "--rsqrt",
+             "newton", "--steps", 1024, "--sample-every", 256, "--quiet"]
+    for eng in ("loop", "segments"):
+        secs, walls, said = {}, {}, []
+        for m in (1, 16):
+            t0 = time.monotonic()
+            proc = tool.run(*targv, "--members", m, "--engine", eng, "--csv",
+                            "--checkpoint", Path(tmp) / "t.ckpt", "--records",
+                            Path(tmp) / "t.txt")
+            walls[m] = time.monotonic() - t0
+            secs[m] = float(_csv_row(proc.stdout)["seconds"])
+            if proc.stderr:
+                said.append(proc.stderr[:100])
+        check(not said and secs[16] >= 4 * secs[1] and
+              all(0 < secs[m] <= walls[m] for m in secs),
+              "with no instrument set, %s says nothing on stderr and its "
+              "clock is the wall's: the same 1,024 steps took %.3f s at 16 "
+              "members and %.3f s at 1, each inside its process's %.3f and "
+              "%.3f s" % (eng, secs[16], secs[1], walls[16], walls[1]),
+              "with no instrument set, %s wrote %r on stderr, or reported "
+              "%.3f s at 16 members and %.3f s at 1 (processes of %.3f and "
+              "%.3f s)" % (eng, said, secs[16], secs[1], walls[16], walls[1]))
+
+    # --- a checkpoint renamed while something else looks at it ----------
+    # On Windows another process that holds the checkpoint open for a
+    # moment - a scanner, a sync agent, anything that stat()s it - makes
+    # the rename over it fail; c8a7d97 died of it (verifier-V6: 8 runs
+    # of 8 under a tight os.stat poll). The rename is now retried. A run
+    # checkpointing after every step, polled by os.stat() as fast as this
+    # process can, must finish on the unpolled run's checkpoint. (POSIX
+    # renames over an open file, so there it holds by construction.)
+    pargv = ["--problem", "kepler", "--format", "fp64", "--members", 2,
+             "--rsqrt", "newton", "--steps", 400, "--sample-every", 50,
+             "--checkpoint-interval", 0, "--quiet"]
+    pref = Path(tmp) / "poll-ref.ckpt"
+    tool.run(*pargv, "--engine", "loop", "--checkpoint", pref)
+    for eng in ("loop", "segments"):
+        pck = Path(tmp) / ("poll-%s.ckpt" % eng)
+        halt, polls = [False], [0]
+
+        def poll():
+            while not halt[0]:
+                try:
+                    os.stat(pck)
+                except OSError:
+                    pass
+                polls[0] += 1
+
+        th = threading.Thread(target=poll, daemon=True)
+        th.start()
+        proc = bounded(pargv + ["--engine", eng, "--checkpoint", pck])
+        halt[0] = True
+        th.join(10)
+        check(proc is not None and proc.returncode == 0 and
+              pck.read_bytes() == pref.read_bytes(),
+              "%s, a checkpoint every step, os.stat() on it %d times as it "
+              "ran (%s): exit 0, on the unpolled run's checkpoint"
+              % (eng, polls[0], "Windows, where that can refuse a rename"
+                 if os.name == "nt" else "a POSIX rename is not refused so"),
+              "%s under an os.stat() poll: %s" % (
+                  eng, "HUNG" if proc is None else "exit %d, %s" % (
+                      proc.returncode, proc.stderr.strip()[-120:])))
 
     # --- a sample interval longer than one segment may run -------------
     # The loader refuses an image that could execute more than 2^40
@@ -1336,8 +1657,18 @@ def main():
     periods = 2 if args.quick else 4
     sps = 256 if args.quick else 512
 
+    # Every leg runs the tool as a user would unless it names a control
+    # or an instrument itself, so none may leak in from the caller's
+    # environment - [6b] holds that a run with none set behaves normally.
+    stray = sorted(k for k in os.environ if k.startswith("CFT_ORBITS_"))
+    for k in stray:
+        del os.environ[k]
+
     try:
         print("cft-orbits cross-check, tool: %s" % exe)
+        if stray:
+            print("(removed from this check's environment: %s)"
+                  % ", ".join(stray))
         print("mpmath at %d digits is the oracle; the library is the "
               "authority on arithmetic" % mp.dps)
 
@@ -1711,8 +2042,17 @@ def main():
              "must not run clean",
              ["--engine", "segments", "--periods", 1],
              dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="transposed"),
-             "takes transpose, zero-r2, uncapped, late-stop, overlong or "
-             "append"),
+             "takes transpose, zero-r2, uncapped, late-stop, overlong, "
+             "append or flush-late"),
+            ("=flush-late on --engine program, which cannot resume",
+             ["--engine", "program", "--rsqrt", "newton", "--periods", 1],
+             dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="flush-late"),
+             "--engine program cannot resume"),
+            ("CFT_ORBITS_DIE_AFTER_CHECKPOINT on --engine program, which "
+             "cannot resume",
+             ["--engine", "program", "--rsqrt", "newton", "--periods", 1],
+             dict(os.environ, CFT_ORBITS_DIE_AFTER_CHECKPOINT="1"),
+             "--engine program cannot resume"),
             ("=append on --engine program, which cannot resume",
              ["--engine", "program", "--rsqrt", "newton", "--periods", 1],
              dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="append"),
@@ -1733,8 +2073,8 @@ def main():
                   % (why, proc.stderr.strip().splitlines()[-1][:110]),
                   "not refused, or refused for another reason: %s (%s)"
                   % (why, proc.stderr.strip()[-160:]))
-        # The two test instruments take a number, and anything else must
-        # be refused by name rather than read as some number or as unset.
+        # The test instruments take a number, and anything else must be
+        # refused by name rather than read as some number or as unset.
         for var, bad, needle in (
                 ("CFT_ORBITS_SEGMENT_LIMIT",
                  ("0", "-7", "7x", " 7", "7.0", "0x10", "4294967296",
@@ -1742,7 +2082,10 @@ def main():
                  "takes a whole number of steps, 1 to 4294967295"),
                 ("CFT_ORBITS_VIRTUAL_CLOCK",
                  ("0", "-0.5", "abc", " 0.5", "0.5s", "nan", "inf", "1e7"),
-                 "takes a positive number of seconds a step")):
+                 "takes a positive number of seconds a step"),
+                ("CFT_ORBITS_DIE_AFTER_CHECKPOINT",
+                 ("0", "-1", "1x", " 1", "1.0", "4294967296"),
+                 "takes a whole number of checkpoints, 1 to 4294967295")):
             ran = []
             for val in bad:
                 proc = tool.run("--engine", "segments", "--rsqrt", "newton",
@@ -1755,6 +2098,29 @@ def main():
                   % (var, len(bad), ", ".join(repr(v) for v in bad)),
                   "%s: a malformed value was not refused by name - %s"
                   % (var, "; ".join(ran)))
+        # --checkpoint-interval is a number of seconds, 0 or more. strtod
+        # alone read "nan" as a clock that never came due (every segment
+        # one step, no checkpoint until the end, on both engines), "abc"
+        # as 0 and "1s" as 1 (verifier-V6, pre-existing).
+        bad = ("nan", "inf", "-1", "-0.5", "abc", "1s", "", " 1", "+1",
+               "1e999")
+        ran = []
+        for val in bad:
+            for eng in ("loop", "segments"):
+                proc = tool.run("--engine", eng, "--rsqrt", "newton",
+                                "--periods", 1, "--quiet",
+                                "--checkpoint-interval", val,
+                                expect_ok=False)
+                if not (proc.returncode == 2 and "--checkpoint-interval "
+                        "takes a number of seconds, 0 or more" in
+                        proc.stderr):
+                    ran.append("%r on %s: exit %d" % (val, eng,
+                                                     proc.returncode))
+        check(not ran,
+              "refused, on both engines: --checkpoint-interval %s"
+              % ", ".join(repr(v) for v in bad),
+              "--checkpoint-interval accepted a value that is not a number "
+              "of seconds: %s" % "; ".join(ran))
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

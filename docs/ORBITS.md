@@ -403,16 +403,26 @@ result:
   the interval, which is where the loop engine, reading the clock after
   every step, writes its own. An interval is therefore covered by a few
   segments of decreasing powers of two (a binary decomposition of it,
-  at most `log2` of its steps plus one), and a run settles on a few
-  image lengths.
+  at most `log2` of its steps plus one), the same few from one interval
+  to the next. The image for a length is built and loaded once: the
+  engine keeps the last eight it used (a program handle carries its own
+  image and every run takes it from there, so several may be live; a
+  remote device's server keeps one, and reloads it when the lengths
+  alternate).
+  With one kept (c8a7d97, 2026-09-25), every segment inside a sample
+  interval rebuilt and reloaded its image - 32 loads for 32 runs in the
+  gate's steady-clock run, 58 for 58 in a real-clock one (verifier-V6);
+  with eight, that steady-clock run loads 5, and a real-clock outer
+  yoshida4 run of 55 segments here loaded 8. The report says `N runs
+  of M images` (and the CSV, `seg_loads`).
 
   Two earlier sizings were wrong. Before 2026-09-25 one segment was a
   whole sample interval, and an interruption lost all of it. Earlier on
   2026-09-25 a segment was sized to fit a WHOLE interval at the last
   rate: it ran half to all of one, so the interval had usually passed
-  only after the second, and checkpoints came about two intervals apart
-  - 1.87 to 1.94 s at `--checkpoint-interval 1`, where the loop engine
-  wrote them 1.01 to 1.03 s apart (verifier-V1, 2026-09-25).
+  only after the second, and checkpoints came about two intervals
+  apart: 1.87 to 1.94 s at `--checkpoint-interval 1`, where the loop
+  engine wrote them 1.01 to 1.03 s apart (verifier-V1, 2026-09-25).
 
   `--checkpoint-interval 0` asks for a checkpoint after every step, and
   so makes every segment one step: a program run per step per batch
@@ -422,8 +432,14 @@ result:
   1,000, on this desktop on 2026-09-25: 7.49 s and 6,000 runs, against
   0.31 s and 6 runs with no checkpoint and 0.32 s and 7 runs at the
   default interval (the first one step); the loop engine at 0, 6.74 s;
-  one chain throughout. verifier-V1 measured 11.9 s against 0.42 s on
-  the sizing before this one.
+  one chain throughout. The times move with the machine's load:
+  verifier-V6, the same afternoon, measured 12.9 to 14.4 s for segments
+  at 0 and 12.7 to 13.0 s for the loop engine, the same run counts and
+  chain; verifier-V1 measured 11.9 s against 0.42 s on the sizing before
+  this one. `--checkpoint-interval` takes a number of seconds, 0 or
+  more, and nothing else: until 2026-09-25 "nan" was read as a clock
+  that never came due (one-step segments, no checkpoint until the end,
+  on both engines), "abc" as 0 and "1s" as 1.
 
 What that buys is everything (1) forbade:
 
@@ -481,13 +497,14 @@ addresses 30 of them, the highest at index 34, so it uses the indexed
   derivation;
 - the lengths real runs use, not only the short segments above: the
   tool's default kepler run (binary256, a segment a period, 1,024
-  steps), one 100,000-step sample interval at binary64 run as a single
-  segment - past 2^16 steps, where a trip count kept to 16 bits would
-  wrap - and each binary256 configuration with its intervals split at
-  a loader limit lowered to 13 steps (`CFT_ORBITS_SEGMENT_LIMIT`,
-  below), since the real limit is hours of work away; each against the
-  host loop byte for byte, the run count showing the segments were
-  that long, or split that way;
+  steps), one 100,000-step sample interval at binary64 run as two
+  segments, the first step (which times the rate) and 99,999 - past
+  2^16 steps, where a trip count kept to 16 bits would wrap - and each
+  binary256 configuration with its intervals split at a loader limit
+  lowered to 13 steps (`CFT_ORBITS_SEGMENT_LIMIT`, below), since the
+  real limit is hours of work away; each against the host loop byte
+  for byte, the run count showing the segments were that long, or
+  split that way;
 - the same bytes after `--stop-after-steps` 1, 13, 95, 96 and 97 - 95
   to 97 straddle a sample boundary - with each checkpoint at the step
   asked for;
@@ -499,7 +516,8 @@ addresses 30 of them, the highest at index 34, so it uses the indexed
   (`CFT_ORBITS_VIRTUAL_CLOCK`, below), segments write theirs at exactly
   the host loop's steps - one interval apart - with sample intervals
   of ten checkpoint intervals, of 1.27 and of 0.1, in at most eight
-  segments an interval and one more a sample;
+  segments an interval and one more a sample, and fewer images than
+  runs - with no sample boundary between, exactly one image a length;
 - on the real clock, a run with a 30,000-step sample interval and
   `--checkpoint-interval 1`, watched until its first checkpoint appears
   (a minute at most, however busy the machine), holds a step part way
@@ -511,10 +529,35 @@ addresses 30 of them, the highest at index 34, so it uses the indexed
   finish on the uninterrupted run's checkpoint and records, byte for
   byte; and, laid out exactly rather than by a kill, a file ahead of its
   checkpoint resumes to the same bytes, while one cut a byte short, one
-  with a byte changed, none at all, a version-1 checkpoint and one
+  with a byte changed, a LONGER file whose first `recbytes` bytes are
+  wrong (the whole run's with a byte changed before `recbytes`, a CRLF
+  copy, another run's), none at all, a version-1 checkpoint and one
   without `recbytes` are each refused by name with both files left as
   they were ("The checkpoint format", below); a checkpoint is the same
-  file with `--records` and without;
+  file with `--records` and without, and a relay that never passes
+  `--records` ends on the checkpoint of the run that did;
+- the order a checkpoint and its records reach the disk: a run that
+  ends as a kill would the instant its first, or its fourth, checkpoint
+  is renamed into place (`CFT_ORBITS_DIE_AFTER_CHECKPOINT`, below -
+  both checkpoints with records waiting in the stdio buffer) leaves the
+  records file exactly as long as that checkpoint says, and the other
+  engine resumes it to the uninterrupted run - a kill could land there
+  only by chance;
+- records that are not a file: `--resume --records` naming a pipe, a
+  FIFO or a device is refused by name at once, the checkpoint
+  untouched - on Windows a named pipe and NUL, on POSIX a FIFO,
+  `/dev/stdout` into a pipe and `/dev/null`, each given 60 s so that a
+  regression reads as a failure rather than a gate that never ends -
+  and a fresh run into a pipe still streams the run's records;
+- with no instrument set, a run says nothing on stderr and its clock is
+  the wall's: the same 1,024 steps at 1 member and at 16 report times
+  at least 4 apart (about 15 measured), where a clock that counted steps
+  would report one number for both, logging or not (the real loader
+  limit by default is held by the 100,000-step leg's run count and by
+  `=overlong`);
+- a checkpoint renamed while another process polls it with `stat()` as
+  fast as it can: the run finishes on the unpolled run's checkpoint
+  ("The checkpoint format", below);
 - a sample interval longer than the longest segment the loader takes
   is run as several segments rather than being refused, each run's
   first segment at exactly that limit: the 2^40-instruction ceiling for
@@ -555,6 +598,11 @@ The controls, each run every time and each required to fail.
   `--records` without checking or cutting it, and the resumed records
   then differ from the uninterrupted run's - after each kill that left
   the file ahead of its checkpoint, and on the file laid out exactly;
+- `flush-late` hands the records to the system just after the
+  checkpoint that counts them is renamed into place instead of before,
+  and a run that ends at that rename then leaves the file BEHIND the
+  checkpoint (0 of 427 bytes, 1,143 of 1,858), which the resume must
+  refuse;
 - `overlong` takes the loader's limit one step too long, and both runs
   at the limit are then refused at once;
 - `zero-r2` zeroes every `r^2` in the image, and the run must end on
@@ -566,14 +614,17 @@ constant changed must disagree with the library's scratch-out, and a
 reserved bit set in the image must be refused by both the golden loader
 and the disassembler.
 
-Three checks carry no control of their own: the census, the batch
-comparison and the engine comparisons at binary32, binary64 and
-binary128. The census was watched failing under two planted miscounts
-(docs/VALIDATION.md, 2026-09-25); the batch comparison's chunk boundary
-is crossed, with the transpose control, by the engine comparison at
-batch 3 of 5; the three narrower formats were watched failing under a
-Newton pass count fixed at binary256's (the same entry), and binary64
-carries the transpose control in the 100,000-step leg.
+Seven checks carry no control of their own. The census was watched
+failing under two planted miscounts (docs/VALIDATION.md, 2026-09-25);
+the batch comparison's chunk boundary is crossed, with the transpose
+control, by the engine comparison at batch 3 of 5; the three narrower
+formats were watched failing under a Newton pass count fixed at
+binary256's (the same entry), and binary64 carries the transpose
+control in the 100,000-step leg. The relay without `--records`, the run
+with no instrument set, the rename under a `stat()` poll (Windows) and
+the fresh run into a pipe were watched failing under planted defects of
+their own (below). The refusals are their own kind: each is a case that
+must be refused by name, which a tool that accepted it would fail.
 
 Every leg above but one was also watched failing under a planted
 defect of its own, each built into a copy of this tool and run through
@@ -587,16 +638,23 @@ interval, to two and to four, the rate never measured, an encoder that
 chooses `kx` for every constant; and, for the records, a resume that
 does not check, cut or hash-check the file, records not handed over
 before a checkpoint, and the stream miscounted or counted only when
-written. The exception is the golden comparison's executor half. It
+written. After verifier-V6 (the same day) also: the records handed over
+after the rename instead of before, the prefix hash checked only for a
+file exactly `recbytes` long, the test clock left on, `recbytes` lost on
+a resume without `--records`, a pipe read on resume (which hangs, and
+the leg's 60 s turns into a failure), one image cached instead of
+eight, the rename not retried (on Windows), and "nan" read as an
+interval. The exception is the golden comparison's executor half. It
 runs the golden executor and the library on the same image by design,
 so what it can see is a library that runs an image differently from
 the reference; a wrong image is the engine comparisons' to catch, and
 no planted defect of this tool has been seen to fail it.
 
-**Two test instruments** make reachable what otherwise is not. Unlike
+**Three test instruments** make reachable what otherwise is not. Unlike
 the controls they must change no result - which the checks that use
-them hold - and each is off unless set, refused by name when malformed
-or set for an engine it does not instrument, and announced on stderr:
+them hold - and each is off unless set (a leg holds that too), refused
+by name when malformed or set for an engine it does not instrument,
+and announced on stderr:
 
 - `CFT_ORBITS_SEGMENT_LIMIT=N` (segments): the loader is taken to accept
   at most N steps a segment, so the split its real limit makes - at
@@ -605,7 +663,15 @@ or set for an engine it does not instrument, and announced on stderr:
   reads advances S seconds for every step and for nothing else, and
   each checkpoint is logged on stderr as it is written - a perfectly
   steady rate, so where checkpoints fall is a fact the check predicts
-  rather than a measurement of the machine's load.
+  rather than a measurement of the machine's load. The run's own
+  report then gives that clock's time and throughput, not the wall's;
+- `CFT_ORBITS_DIE_AFTER_CHECKPOINT=N` (loop and segments): the process
+  ends as a kill would - exit 9, no buffered output flushed - the
+  moment its N-th checkpoint is renamed into place, before another
+  statement runs. On Windows that is TerminateProcess: `_exit()` goes
+  through ExitProcess, and msvcrt flushes every stream as it unloads,
+  which a kill does not (measured: under `flush-late` the records still
+  reached the file).
 
 **What it does not do.** `--rsqrt exact`, for the reason in (2): it is
 refused by name. And `--engine program` stays exactly as it was: the
@@ -760,6 +826,12 @@ is counted whether or not `--records` is open, so a run with it and a
 run without end on the same file - an option is not a result, and the
 gate checks it. A version-1 file is refused by its first line, as any
 other version is, and so is a version-2 file without `recbytes`.
+Holding a version-1 checkpoint of a run you want to finish: finish it
+with a build from before this change (4ecaf24 or earlier, whose
+checkpoints are version 1), or start the run again with this one. The
+old build's resume appends to `--records` as it always did, so if that
+run was ever killed, its records file is not to be trusted past the
+kill - its checkpoint and its chain are.
 
 The checkpoint is **step-granular, not sample-granular**: the ensemble
 state is complete after every step, so a timed checkpoint may fall
@@ -795,9 +867,40 @@ the run's and no longer hashed to its chain, on either engine
   them, and then appends - so a killed and resumed run's records are the
   uninterrupted run's, byte for byte, on either engine;
 - a file shorter than `recbytes`, one whose first `recbytes` bytes do
-  not hash to the chain, or none at all, is refused by name, and
-  neither file is touched: it is not this run's records - resume with
-  the file the run wrote, or without `--records`.
+  not hash to the chain - however long it is - or none at all, is
+  refused by name, and neither file is touched: it is not this run's
+  records - resume with the file the run wrote, or without `--records`;
+- so is a `--records` path that is not a regular file - a pipe, a
+  FIFO, a device, a directory - before anything is read or written: a
+  resume reads the records back and cuts them, which a stream cannot
+  do. c8a7d97 (2026-09-25) read it, and on a pipe nothing wrote it
+  waited for ever with no message (verifier-V6: `--records >(gzip >
+  part2.gz)`, `/dev/stdout` into a pipe, a FIFO; on Windows a named
+  pipe, killed after 20 s here). Resume into a regular file and pass it
+  on from there. POSIX asks `stat()`, which does not open a FIFO; Windows'
+  `_stat64` calls NUL, CON and a named pipe regular files, so the path
+  is opened and its type asked, which for a named pipe connects to an
+  instance and hangs up - a server sees a client come and go. A fresh
+  run into a pipe streams its records as it always has.
+
+The length check at each checkpoint catches a flush left out and a
+record miscounted, and a second process writing the same file only
+while that process lags this one. It does not catch a file another
+process cuts short: the next flush writes past the cut, leaving a hole
+of zeros exactly as long as the count says (verifier-V6). A failed
+write is `ferror()`'s to catch, before the length is looked at.
+
+On Windows another process that holds the checkpoint open for a
+moment (a virus scanner, a sync agent, anything that `stat()`s it)
+makes the rename over it fail with a sharing violation. Until
+2026-09-25 that ended the run ("the checkpoint could not be renamed
+into place": verifier-V6, 8 runs of 8 under a tight `os.stat` poll,
+and here 6 of 6 within about 200 `stat` calls). The rename is now
+retried, ten times at once and then every 20 ms, for about a second
+before the run gives up by name. A run checkpointing after every step
+(1,500 steps), polled by a Python thread as fast as it can (11,000 to
+18,000 `stat` calls), finished 6 of 6 on the unpolled run's
+checkpoint, in 1.7 to 2.5 s against 1.5 to 1.9 s unpolled.
 
 What that covers is the process ending - killed, crashed, stopped. A
 machine that loses power can lose what the operating system had not yet
@@ -855,9 +958,9 @@ same bytes wherever it sits.
 | the chain | recomputed with `hashlib` |
 | batch size | 8, 3 and 1 over the same ensemble must end on byte-identical checkpoints, and a run with `--records` on the same checkpoint as one without |
 | engines | the whole integration as one sequencer program and the host `cft_run` loop must produce byte-identical records AND checkpoints |
-| segments | `--engine segments` against the host loop on both problems and both schemes at binary256 and on one configuration at each other format, operation counts included, and at the segment lengths real runs use (1,024 steps, 100,000 in one, and intervals split at a lowered loader limit); five stop points; its own batch sizes, 10^12 included; the outer solar system resumed in 37-step pieces by segments alone and by the two engines in turn; where its checkpoints fall, against the host loop's under a steady clock, and a real run's first checkpoint part way through a long interval; intervals past one segment's limits run; its census against the program's structure; the golden model's executor and assembler on its image; the flag certificate on a planted fault; and a control on each comparison but the census, the batch sizes and the three narrower formats, which must fail ("As resumable segments" names them) |
-| interruption | a run stopped every 37 steps - which does not divide the 96-step sample interval, so most stops land mid-interval - and resumed at a different batch size must end on the same checkpoint and the same records, byte for byte, as one that was never stopped; and runs KILLED, on both engines - at their first checkpoint, and with their records ahead of it - and each resumed by the other engine, must end on the uninterrupted run's checkpoint and records too, with a control that resumes without cutting the records back and must fail |
-| refusals | the three things `--engine program` must refuse, the four `--engine segments` must, the negative controls and test instruments set where they do not apply or to a malformed value, and the records files `--resume` must refuse, each with its reason |
+| segments | `--engine segments` against the host loop on both problems and both schemes at binary256 and on one configuration at each other format, operation counts included, and at the segment lengths real runs use (1,024 steps; 1 + 99,999; intervals split at a lowered loader limit); five stop points; its own batch sizes, 10^12 included; the outer solar system resumed in 37-step pieces by segments alone and by the two engines in turn; where its checkpoints fall, against the host loop's under a steady clock, and a real run's first checkpoint part way through a long interval; intervals past one segment's limits run; its census against the program's structure; the golden model's executor and assembler on its image; the flag certificate on a planted fault; and a control on each comparison but the census, the batch sizes and the three narrower formats, which must fail ("As resumable segments" names them) |
+| interruption | a run stopped every 37 steps - which does not divide the 96-step sample interval, so most stops land mid-interval - and resumed at a different batch size must end on the same checkpoint and the same records, byte for byte, as one that was never stopped; and runs KILLED, on both engines - at their first checkpoint, and with their records ahead of it - and each resumed by the other engine, must end on the uninterrupted run's checkpoint and records too, with a control that resumes without cutting the records back and must fail; runs ended the instant a checkpoint is in place leave the records exactly that long, with a control that hands them over after the rename and must fail; a relay without `--records` ends on the same checkpoint |
+| refusals | the three things `--engine program` must refuse, the four `--engine segments` must, the negative controls and test instruments set where they do not apply or to a malformed value, `--checkpoint-interval` values that are not a number of seconds, and the records files and records paths (pipes, devices) `--resume` must refuse, each with its reason and in bounded time |
 
 ---
 

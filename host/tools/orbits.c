@@ -305,11 +305,20 @@
 #include "cft.h"
 #include "../src/sha256.h"
 
-/* The clock, and the two things the records file needs from the
- * system: how long an open file is, and cutting a file back to a
- * length (--resume, "The checkpoint format" in docs/ORBITS.md). A
- * length of -1 means "not a regular file" - a pipe or a device, which
- * has none to check. */
+/* The clock, and what the checkpoint and the records file need from
+ * the system: how long an open file is, whether a path names a regular
+ * file, cutting a file back to a length (--resume, "The checkpoint
+ * format" in docs/ORBITS.md), renaming a file over another, and ending
+ * the process as a kill would. A length of -1 means "not a regular
+ * file" - a pipe or a device, which has none to check.
+ *
+ * path_kind is 1 for a regular file, 0 for anything else that is there
+ * (a pipe, a FIFO, a device, a directory) and -1 when nothing can be
+ * asked of the path (it does not exist, or may not be opened). It
+ * never reads: POSIX asks stat(), which does not open a FIFO. Windows'
+ * _stat64 calls NUL, CON and a named pipe regular files, so the path is
+ * opened and GetFileType asked - which, for a named pipe, connects to
+ * an instance and hangs up (a server sees a client come and go). */
 #if defined(_WIN32)
 #  include <windows.h>
 #  include <sys/stat.h>
@@ -330,6 +339,30 @@ static int64_t file_length(FILE *f)
     return (int64_t)st.st_size;
 }
 
+static int path_kind(const char *path)
+{
+    const DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE |
+                        FILE_SHARE_DELETE;
+    BY_HANDLE_FILE_INFORMATION bi;
+    HANDLE h;
+    int regular;
+
+    /* attributes alone first; a console will not open without access */
+    h = CreateFileA(path, FILE_READ_ATTRIBUTES, share, NULL, OPEN_EXISTING,
+                    FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (h == INVALID_HANDLE_VALUE &&
+        GetLastError() == ERROR_INVALID_PARAMETER)
+        h = CreateFileA(path, GENERIC_READ, share, NULL, OPEN_EXISTING,
+                        FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return GetLastError() == ERROR_PIPE_BUSY ? 0 : -1;
+    regular = GetFileType(h) == FILE_TYPE_DISK &&
+              GetFileInformationByHandle(h, &bi) &&
+              !(bi.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
+    CloseHandle(h);
+    return regular;
+}
+
 static int file_cut(const char *path, uint64_t len)
 {
     HANDLE h = CreateFileA(path, GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
@@ -341,6 +374,27 @@ static int file_cut(const char *path, uint64_t len)
     at.QuadPart = (LONGLONG)len;
     ok = SetFilePointerEx(h, at, NULL, FILE_BEGIN) && SetEndOfFile(h);
     return CloseHandle(h) && ok ? 0 : -1;
+}
+
+/* Another process that holds the target open for a moment - a virus
+ * scanner, a sync agent, anything that stat()s it - fails the rename
+ * with a sharing or access error (verifier-V6, 2026-09-25: 8 runs of 8
+ * killed so under a tight os.stat poll). It is retried, at once a few
+ * times and then twenty milliseconds apart, for about a second before
+ * the run gives up by name. */
+static int file_replace(const char *tmp, const char *path)
+{
+    int tries;
+    for (tries = 0; tries < 60; tries++) {
+        DWORD e;
+        if (MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING))
+            return 0;
+        e = GetLastError();
+        if (e != ERROR_SHARING_VIOLATION && e != ERROR_ACCESS_DENIED)
+            return -1;
+        Sleep(tries < 10 ? 0 : 20);
+    }
+    return -1;
 }
 #else
 #  include <time.h>
@@ -361,6 +415,14 @@ static int64_t file_length(FILE *f)
     return (int64_t)st.st_size;
 }
 
+static int path_kind(const char *path)
+{
+    struct stat st;
+    if (stat(path, &st) != 0)
+        return -1;
+    return S_ISREG(st.st_mode) ? 1 : 0;
+}
+
 static int file_cut(const char *path, uint64_t len)
 {
     FILE *f = fopen(path, "r+b");
@@ -373,7 +435,27 @@ static int file_cut(const char *path, uint64_t len)
         rc = -1;
     return rc;
 }
+
+/* rename() over a file other processes hold open succeeds here */
+static int file_replace(const char *tmp, const char *path)
+{
+    return rename(tmp, path);
+}
 #endif
+
+/* The process ends at once, as a kill would leave it: no buffered
+ * output flushed, no exit handler run. Only CFT_ORBITS_DIE_AFTER_
+ * CHECKPOINT (below) asks for it. Not _exit() on Windows: it goes
+ * through ExitProcess, and msvcrt flushes every stream as it unloads -
+ * which a kill does not do (measured: the records reached the file).
+ * TerminateProcess is what taskkill and Python's kill() call. */
+static void end_as_killed(void)
+{
+#if defined(_WIN32)
+    TerminateProcess(GetCurrentProcess(), 9);
+#endif
+    _exit(9);
+}
 
 #define MAX_ESZ    32     /* bytes in the widest element, binary256 */
 #define MAX_BODIES  8
@@ -777,16 +859,20 @@ typedef struct {
     uint32_t     n_insns, max_deposits;
     uint64_t     alu_per_step;   /* ALU issues one step costs a lane */
 
-    /* the segments engine: the loaded image is for segments of
-     * `sprog_k` steps, and is rebuilt only when a run needs another
-     * length. What the census reports is read off the image itself
-     * (seg_census), not counted while building it. */
-    cft_program *sprog;
-    uint64_t     sprog_k;
+    /* the segments engine: the loaded images, one per segment length
+     * a run has needed lately (SEG_CACHE of them, the least recently
+     * used replaced), so a length is built and loaded once however
+     * often it recurs. What the census reports is read off an image
+     * itself (seg_census), not counted while building it. */
+#define SEG_CACHE 8
+    cft_program *sprog[SEG_CACHE];
+    uint64_t     sprog_k[SEG_CACHE], sprog_used[SEG_CACHE];
     uint8_t     *sin, *sout;          /* one batch of scratch blocks */
     uint32_t     s_insns, s_consts, s_slots, s_regs;
     uint64_t     s_alu_step, s_ctl_step;   /* inside the REPEAT body */
     uint64_t     s_runs;              /* cft_program_run_ex calls */
+    uint64_t     s_loads;             /* images built and loaded */
+    uint64_t     s_segments;          /* segments run, the cache's clock */
     int          s_dumped;            /* --segment-dump written */
     uint64_t     s_kmax;              /* longest segment the loader takes */
     double       s_sec_per_step;      /* the last segment's, 0 untimed */
@@ -1375,8 +1461,9 @@ enum { SR_X = 19, SR_Y, SR_W, SR_E, SR_Z, SR_G, SR_T1, SR_V };
  * way; orbits_check.py runs each and requires the check it exists for
  * to FAIL. Each prints a warning on stderr whenever it is set, and
  * nothing but that test sets them. The first five sabotage --engine
- * segments and are refused on the other two engines; `append`
- * sabotages the resume, which the loop and segments engines share.
+ * segments and are refused on the other two engines; `append` and
+ * `flush-late` sabotage the records beside the checkpoint, which the
+ * loop and segments engines share, and are refused on --engine program.
  *
  *   transpose  the host packs v_0 into v_1's slot and v_1 into v_0's -
  *              and unpacks the same way, so its own arrays stay
@@ -1398,9 +1485,14 @@ enum { SR_X = 19, SR_Y, SR_W, SR_E, SR_Z, SR_G, SR_T1, SR_V };
  *   append     --resume appends to --records without checking it or
  *              cutting it back to the checkpoint, as this tool did
  *              before 2026-09-25, so after a kill the resumed records
- *              are not the run's. */
+ *              are not the run's;
+ *   flush-late the records are handed to the system just AFTER the
+ *              checkpoint that counts them is renamed into place rather
+ *              than before, so a process that ends between the two leaves
+ *              the file behind the checkpoint on disk. */
 static int NEGCTL_TRANSPOSE = 0, NEGCTL_ZERO_R2 = 0, NEGCTL_UNCAPPED = 0;
 static int NEGCTL_LATE_STOP = 0, NEGCTL_OVERLONG = 0, NEGCTL_APPEND = 0;
+static int NEGCTL_FLUSH_LATE = 0;
 
 /* The test instruments, read once in main() from the environment. A
  * negative control makes a result wrong; an instrument must change no
@@ -1419,9 +1511,18 @@ static int NEGCTL_LATE_STOP = 0, NEGCTL_OVERLONG = 0, NEGCTL_APPEND = 0;
  *       ensemble takes and for nothing else, and each checkpoint is
  *       logged on stderr as it is written - a perfectly steady rate,
  *       so where checkpoints fall is a fact a test can predict rather
- *       than a measurement of this machine's load. */
+ *       than a measurement of this machine's load. The run's own report
+ *       then gives that clock's time and throughput, not the wall's;
+ *   CFT_ORBITS_DIE_AFTER_CHECKPOINT=N   (--engine loop and segments)
+ *       the process ends as a kill would - exit 9, no buffered output
+ *       flushed - the moment its N-th checkpoint is renamed into place,
+ *       before another statement runs. A kill lands there by chance
+ *       once in thousands of tries; this lands there every time, so
+ *       what a checkpoint promises about the records beside it at the
+ *       instant it appears is a fact a test can check. */
 static uint64_t SEG_LIMIT = 0;
 static double   VCLOCK = 0;
+static uint64_t DIE_AFTER = 0;
 
 static double clock_s(void)
 {
@@ -1743,19 +1844,43 @@ static void seg_run(runstate *R, uint64_t k)
     options *O = R->O;
     size_t esz = fi->esz, M = O->members, ns = (size_t)(2 * R->ncomp);
     size_t chunk, i;
-    int c;
+    int c, slot = -1;
     cft_status st;
+    cft_program *prog;
 
-    if (!R->sprog || R->sprog_k != k) {
+    /* The image for k steps: cached, or built and loaded into the slot
+     * that is free or least recently used. A program handle holds its
+     * own image and every run takes it from there - the software
+     * backend runs it, the XRT backend stages it whole on every run,
+     * and the remote backend sends it, reloading the one image its
+     * server keeps when the image changes - so several may be live at
+     * once. What the cache saves is this process's build and load; on
+     * a remote device the server still reloads when lengths alternate. */
+    R->s_segments++;
+    for (c = 0; c < SEG_CACHE; c++)
+        if (R->sprog[c] && R->sprog_k[c] == k) {
+            slot = c;
+            break;
+        }
+    if (slot < 0) {
         size_t bytes = 0;
         uint8_t *img;
-        if (R->sprog) {
-            cft_program_free(R->sprog);
-            R->sprog = NULL;
+        slot = 0;
+        for (c = 0; c < SEG_CACHE; c++) {
+            if (!R->sprog[c]) {
+                slot = c;
+                break;
+            }
+            if (R->sprog_used[c] < R->sprog_used[slot])
+                slot = c;
+        }
+        if (R->sprog[slot]) {
+            cft_program_free(R->sprog[slot]);
+            R->sprog[slot] = NULL;
         }
         img = seg_build(R, k, &bytes);
         seg_census(R, img, bytes);
-        st = cft_program_load(DEV, img, bytes, &R->sprog);
+        st = cft_program_load(DEV, img, bytes, &R->sprog[slot]);
         if (st != CFT_OK) {
             free(img);
             die_st("cft_program_load (a segment)", st);
@@ -1763,8 +1888,11 @@ static void seg_run(runstate *R, uint64_t k)
         if (O->segment_dump && !R->s_dumped)
             seg_write(O->segment_dump, "segment.cftp", img, bytes);
         free(img);
-        R->sprog_k = k;
+        R->sprog_k[slot] = k;
+        R->s_loads++;
     }
+    R->sprog_used[slot] = R->s_segments;
+    prog = R->sprog[slot];
     if (!R->sin) {
         /* one chunk's worth: --batch past --members is legal and means
          * one chunk of all of them, so it must not size the buffers */
@@ -1795,7 +1923,7 @@ static void seg_run(runstate *R, uint64_t k)
         A.scratch_out_bytes = n * ns * esz;
         A.flags_out = &fl;
         A.bus_out = &bus;
-        st = cft_program_run_ex(R->sprog, &A);
+        st = cft_program_run_ex(prog, &A);
         if (st != CFT_OK)
             die_st("cft_program_run_ex (a segment)", st);
         if (bus) {
@@ -1872,13 +2000,15 @@ static void seg_limits(runstate *R)
 }
 
 /* How many steps fit in `secs` at the rate the last segment ran: the
- * largest power of two that does, so a run settles on a few image
- * lengths instead of rebuilding for every segment; 1 when nothing
- * does, or when `secs` is not positive; and 1 before any segment has
- * been timed, which is how the rate is first measured. main() hands it
- * the time LEFT before the next checkpoint is due, so a segment ends at
- * or just short of that moment and the run is between segments when it
- * comes. */
+ * largest power of two that does; 1 when nothing does, or when `secs`
+ * is not positive; and 1 before any segment has been timed, which is
+ * how the rate is first measured. main() hands it the time LEFT before
+ * the next checkpoint is due, so a segment ends at or just short of
+ * that moment and the run is between segments when it comes - which
+ * cuts each checkpoint interval into a binary decomposition of its
+ * steps, a few powers of two, recurring from one interval to the next.
+ * Powers of two keep those lengths few; seg_run's cache keeps each one
+ * built and loaded once rather than for every segment. */
 static uint64_t seg_time_cap(const runstate *R, double secs)
 {
     uint64_t cap = 1;
@@ -1910,13 +2040,24 @@ static uint64_t seg_time_cap(const runstate *R, double secs)
  * =================================================================== */
 #define CKPT_MAGIC "cft-orbits-checkpoint 2"
 
+/* The rename that makes a checkpoint the one on disk (file_replace,
+ * above, retries a Windows sharing violation). Under
+ * CFT_ORBITS_DIE_AFTER_CHECKPOINT the process ends here, the instant
+ * the N-th checkpoint is in place: whatever the checkpoint promises
+ * about the records file must already be true on disk, because nothing
+ * after this line runs. */
 static int ckpt_replace(const char *tmp, const char *path)
 {
-#if defined(_WIN32)
-    return MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING) ? 0 : -1;
-#else
-    return rename(tmp, path);
-#endif
+    static uint64_t renamed = 0;
+    if (file_replace(tmp, path) != 0)
+        return -1;
+    if (DIE_AFTER && ++renamed == DIE_AFTER) {
+        fprintf(stderr, "cft-orbits: ending as a kill would, after "
+                "checkpoint %" PRIu64 " (CFT_ORBITS_DIE_AFTER_CHECKPOINT)\n",
+                renamed);
+        end_as_killed();
+    }
+    return 0;
 }
 
 static const char *problem_name(int p)
@@ -1939,9 +2080,13 @@ static const char *rsqrt_name(int r)
  * BEFORE that checkpoint is written: it promises the file holds at
  * least `recbytes` bytes, so a kill between the two leaves the file
  * ahead of the checkpoint on disk and never behind it - and --resume
- * cuts it back (records_resume). The length check catches the flush
- * forgotten, a failed write, and another process writing or cutting
- * the file; a pipe or a device has no length and is not checked. */
+ * cuts it back (records_resume). A failed write is ferror()'s to
+ * catch. The length check catches a flush left out or a record
+ * miscounted, and a second process writing the same file only while
+ * that process lags this one; a file another process cuts short is NOT
+ * caught - the next flush writes past the cut and leaves a hole of
+ * zeros exactly as long as the count says (verifier-V6, 2026-09-25). A
+ * pipe or a device has no length and is not checked. */
 static void records_sync(runstate *R)
 {
     int64_t have;
@@ -1973,7 +2118,7 @@ static void ckpt_write(runstate *R)
 
     if (!O->ckpt)
         return;
-    if (R->recf)
+    if (R->recf && !NEGCTL_FLUSH_LATE)
         records_sync(R);
     if ((size_t)snprintf(tmp, sizeof tmp, "%s.tmp", O->ckpt) >= sizeof tmp)
         die("checkpoint path too long");
@@ -2029,7 +2174,11 @@ static void ckpt_write(runstate *R)
     if (fflush(f) != 0 || fclose(f) != 0)
         die("the checkpoint did not write cleanly");
     if (ckpt_replace(tmp, O->ckpt) != 0)
-        die("the checkpoint could not be renamed into place");
+        die("the checkpoint could not be renamed into place (another "
+            "process held it or its temporary for more than a second, or "
+            "the directory refused the rename)");
+    if (R->recf && NEGCTL_FLUSH_LATE)
+        records_sync(R);
     if (VCLOCK > 0)
         fprintf(stderr, "cft-orbits: checkpoint at step %" PRIu64
                 ", sample %" PRIu64 "\n", R->step, R->sample);
@@ -2213,8 +2362,24 @@ static void records_resume(runstate *R)
     int in_line = 0;
     sha256 h;
     char msg[1400];
-    FILE *f = fopen(path, "rb");
+    FILE *f;
 
+    /* Only a regular file can be read back and cut. A pipe or a FIFO
+     * would be read by a process that holds its write end, or that no
+     * one writes - and wait for ever (c8a7d97 did, verifier-V6) - and a
+     * device or a directory holds no records; so each is refused here,
+     * before anything is read or written. */
+    if (path_kind(path) == 0) {
+        free(buf);
+        snprintf(msg, sizeof msg,
+                 "--resume: --records names %s, which is not a regular file "
+                 "(a pipe, a FIFO, a device or a directory) - a resume "
+                 "reads the records back and cuts them to the checkpoint, "
+                 "which only a regular file allows; resume into a file and "
+                 "pass it on from there, or resume without --records", path);
+        die(msg);
+    }
+    f = fopen(path, "rb");
     memset(chain, 0, sizeof chain);
     sha256_start(&h);
     while (f && have < R->rec_bytes) {
@@ -2648,20 +2813,21 @@ static void report(runstate *R, double elapsed, const char *backend)
     separations(R, R->q, R->v, sep1);
 
     if (O->csv) {
-        /* The last six columns are the segments engine's census and are
-         * zero on the other two; they are APPENDED, so a reader that
+        /* The last seven columns are the segments engine's census and
+         * are zero on the other two; they are APPENDED, so a reader that
          * takes columns by name (host/tests/orbits_check.py) or reads
          * the human report (bindings/wasm/verify_demos.mjs) is
-         * untouched. */
+         * untouched. seg_loads, the images built and loaded, came last
+         * (2026-09-25). */
         printf("backend,format,problem,scheme,rsqrt,engine,members,batch,"
                "spread,h,steps,samples,seconds,steps_per_s,elem_steps_per_s,"
                "libops_per_s,calls,elemops,composed,energy_drift,"
                "angmom_drift,flags,chain,seg_insns,seg_consts,seg_alu_step,"
-               "seg_ctl_step,seg_slots,seg_runs\n");
+               "seg_ctl_step,seg_slots,seg_runs,seg_loads\n");
         printf("%s,%s,%s,%s,%s,%s,%" PRIu64 ",%" PRIu64 ",%" PRIu64
                ",%s,%" PRIu64 ",%" PRIu64 ",%.6f,%.1f,%.1f,%.1f,%" PRIu64
                ",%" PRIu64 ",%" PRIu64 ",%s,%s,0x%02x,%s,%u,%u,%" PRIu64
-               ",%" PRIu64 ",%u,%" PRIu64 "\n",
+               ",%" PRIu64 ",%u,%" PRIu64 ",%" PRIu64 "\n",
                backend, cft_format_name(fi->fmt), problem_name(O->problem),
                scheme_name(O->scheme), rsqrt_name(O->rsqrt),
                O->engine == ENG_PROGRAM ? "program" :
@@ -2671,7 +2837,7 @@ static void report(runstate *R, double elapsed, const char *backend)
                N_CALLS, N_ELEMOPS, N_COMPOSED, sdh, sdl,
                (unsigned)flags_run, chain, (unsigned)R->s_insns,
                (unsigned)R->s_consts, R->s_alu_step, R->s_ctl_step,
-               (unsigned)R->s_slots, R->s_runs);
+               (unsigned)R->s_slots, R->s_runs, R->s_loads);
         free(sep0); free(sep1);
         return;
     }
@@ -2697,10 +2863,11 @@ static void report(runstate *R, double elapsed, const char *backend)
     if (O->engine == ENG_SEGMENTS)
         printf("  segments      %u instructions, %u constants; a lane-step is "
                "%" PRIu64 " ALU and %" PRIu64 " control codes; %u scratch "
-               "slots, %u registers; %" PRIu64 " runs\n",
+               "slots, %u registers; %" PRIu64 " runs of %" PRIu64
+               " image%s\n",
                (unsigned)R->s_insns, (unsigned)R->s_consts, R->s_alu_step,
                R->s_ctl_step, (unsigned)R->s_slots, (unsigned)R->s_regs,
-               R->s_runs);
+               R->s_runs, R->s_loads, R->s_loads == 1 ? "" : "s");
     printf("  step size     %s\n", sh);
     printf("  steps done    %" PRIu64 " of %" PRIu64 ", %" PRIu64
            " samples of %" PRIu64 "\n",
@@ -2788,8 +2955,9 @@ static void usage(void)
 "                           --engine segments makes every segment one\n"
 "                           step - about the loop engine's own speed\n"
 "  --resume                 continue from --checkpoint; with --records,\n"
-"                           the file must hold the records the checkpoint\n"
-"                           accounts for, and is cut back to them\n"
+"                           a regular file holding the records the\n"
+"                           checkpoint accounts for, cut back to them\n"
+"                           (a pipe or a device is refused)\n"
 "  --stop-after-samples N   stop cleanly after N samples this run\n"
 "  --stop-after-steps N     stop cleanly after N steps this run\n"
 "  --records PATH           one line per (sample, member), exact decimal\n"
@@ -2890,8 +3058,20 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--sample-every"))
             O.sample_every = strtoull(need(argc, argv, &i), NULL, 10);
         else if (!strcmp(a, "--checkpoint")) O.ckpt = need(argc, argv, &i);
-        else if (!strcmp(a, "--checkpoint-interval"))
-            O.ckpt_interval = strtod(need(argc, argv, &i), NULL);
+        else if (!strcmp(a, "--checkpoint-interval")) {
+            /* A number of seconds and nothing else. strtod alone read
+             * "nan" as a clock that never came due - one-step segments
+             * and no checkpoint until the end, on both engines - "abc"
+             * as 0, a checkpoint every step, and "1s" as 1. */
+            const char *val = need(argc, argv, &i);
+            char *end = NULL;
+            double s = (*val >= '0' && *val <= '9') || *val == '.'
+                       ? strtod(val, &end) : -1;
+            if (!end || *end || !(s >= 0) || s > 1e15)
+                die("--checkpoint-interval takes a number of seconds, 0 or "
+                    "more (0 writes a checkpoint after every step)");
+            O.ckpt_interval = s;
+        }
         else if (!strcmp(a, "--resume")) O.resume = 1;
         else if (!strcmp(a, "--stop-after-samples"))
             O.stop_after_samples = strtol(need(argc, argv, &i), NULL, 10);
@@ -2947,15 +3127,21 @@ int main(int argc, char **argv)
                 what = "--resume appends to --records without checking it "
                        "or cutting it back to the checkpoint - after a kill "
                        "the resumed records are deliberately wrong";
+            } else if (!strcmp(nc, "flush-late")) {
+                NEGCTL_FLUSH_LATE = 1;
+                what = "the records are handed to the system after the "
+                       "checkpoint that counts them is in place - a process "
+                       "ending between the two leaves them behind it";
             } else {
                 die("CFT_ORBITS_NEGATIVE_CONTROL takes transpose, zero-r2, "
-                    "uncapped, late-stop, overlong or append");
+                    "uncapped, late-stop, overlong, append or flush-late");
             }
-            if (NEGCTL_APPEND ? O.engine == ENG_PROGRAM
-                              : O.engine != ENG_SEGMENTS)
-                die(NEGCTL_APPEND
-                    ? "CFT_ORBITS_NEGATIVE_CONTROL=append sabotages a "
-                      "resume, and --engine program cannot resume"
+            if (NEGCTL_APPEND || NEGCTL_FLUSH_LATE
+                ? O.engine == ENG_PROGRAM : O.engine != ENG_SEGMENTS)
+                die(NEGCTL_APPEND || NEGCTL_FLUSH_LATE
+                    ? "CFT_ORBITS_NEGATIVE_CONTROL=append and =flush-late "
+                      "sabotage the records beside a resumable run's "
+                      "checkpoints, and --engine program cannot resume"
                     : "CFT_ORBITS_NEGATIVE_CONTROL sabotages --engine "
                       "segments and nothing else");
             fprintf(stderr, "cft-orbits: NEGATIVE CONTROL ACTIVE "
@@ -2994,6 +3180,21 @@ int main(int argc, char **argv)
                     "(CFT_ORBITS_VIRTUAL_CLOCK=%s): the clock advances %s s "
                     "a step and nothing else moves it, and each checkpoint "
                     "is logged here - no result may change\n", vc, vc);
+        }
+        {
+            const char *da = getenv("CFT_ORBITS_DIE_AFTER_CHECKPOINT");
+            if (da && *da) {
+                if (!dec_u64(da, 0xffffffffull, &DIE_AFTER) || !DIE_AFTER)
+                    die("CFT_ORBITS_DIE_AFTER_CHECKPOINT takes a whole "
+                        "number of checkpoints, 1 to 4294967295");
+                if (O.engine == ENG_PROGRAM)
+                    die("CFT_ORBITS_DIE_AFTER_CHECKPOINT instruments a "
+                        "resumable run, and --engine program cannot resume");
+                fprintf(stderr, "cft-orbits: TEST INSTRUMENT ACTIVE "
+                        "(CFT_ORBITS_DIE_AFTER_CHECKPOINT=%s): the process "
+                        "ends as a kill would, exit 9, the moment checkpoint "
+                        "%s is in place\n", da, da);
+            }
         }
     }
 
@@ -3325,8 +3526,9 @@ int main(int argc, char **argv)
     free(R.sout);
     if (R.prog)
         cft_program_free(R.prog);
-    if (R.sprog)
-        cft_program_free(R.sprog);
+    for (k = 0; k < SEG_CACHE; k++)
+        if (R.sprog[k])
+            cft_program_free(R.sprog[k]);
     cft_close(DEV);
     return 0;
 }
