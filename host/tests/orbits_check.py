@@ -54,13 +54,19 @@ Seven groups of checks:
                   identity, and interrupt/resume equivalence - all as
                   byte comparisons of checkpoints and records.
  6b. Segments.    --engine segments against the host loop on both
-                  problems and both schemes; its own batch and
-                  interrupt/resume independence; a run resumed
-                  ALTERNATELY by the two engines; the census it reports,
-                  derived here from the program's structure; the golden
-                  model's executor and assembler on the image it writes;
-                  and a negative control for each comparison, which must
-                  fail.
+                  problems, both schemes and all four formats, at the
+                  segment lengths real runs use (1,024 steps, 100,000,
+                  intervals split at the loader's limit) as well as
+                  short ones; stop points; its own batch independence; a
+                  run resumed ALTERNATELY by the two engines; where its
+                  checkpoints fall, against the host loop's under a
+                  steady clock, and a real interruption; a killed run's
+                  records, resumed by either engine, against the
+                  uninterrupted run's; the census it reports, derived
+                  here from the program's structure; the golden model's
+                  executor and assembler on the image it writes. Most
+                  legs carry a control that must fail, run every time;
+                  check_segments names the three that do not.
  7. Refusals.     What the two program engines must refuse, and the
                   precise reason each is refused.
 """
@@ -68,6 +74,7 @@ Seven groups of checks:
 import argparse
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -455,43 +462,96 @@ def _csv_row(stdout):
     return dict(zip(lines[0].split(","), lines[-1].split(",")))
 
 
-def _interrupted(tool, tmp, argv, name, env=None, after=3.0):
-    """Start a run, kill it `after` seconds in, and return (whether it
-    was still running when killed, the step its checkpoint holds or
-    None if it wrote none). The checkpoint is written to a temporary
-    and renamed, so a kill cannot leave half of one."""
-    ck = Path(tmp) / name
-    if ck.exists():
-        ck.unlink()
+def _field_of(path, key):
+    """The integer after `key` on a checkpoint line, or None."""
+    for line in Path(path).read_text().splitlines():
+        if line.startswith(key + " "):
+            return int(line.split()[1])
+    return None
+
+
+def _run_until(tool, argv, ck, env=None, bound=60.0, wait=None,
+               records=None, grown=0):
+    """Start a run writing checkpoint `ck`, and kill it at the first of:
+    `bound` seconds; `wait` seconds (when given); or - when `wait` is
+    None - once `ck` exists and, when `records` is given, that file has
+    grown by more than `grown` bytes since `ck` first appeared. Only the
+    files' existence and size are read while the tool runs, never their
+    contents: the tool renames each checkpoint over the last one.
+    Returns (seconds until the kill, whether it was still running, the
+    step the checkpoint holds or None if there is none)."""
+    ck = Path(ck)
+    for p in (ck, records):
+        if p is not None and Path(p).exists():
+            Path(p).unlink()
+    t0 = time.monotonic()
     proc = subprocess.Popen([tool.exe] + [str(a) for a in argv] +
                             ["--checkpoint", str(ck)],
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL, env=env)
-    time.sleep(after)
+    base = None
+    while proc.poll() is None:
+        t = time.monotonic() - t0
+        if t >= bound or (wait is not None and t >= wait):
+            break
+        if wait is None and ck.exists():
+            if records is None:
+                break
+            size = Path(records).stat().st_size
+            if base is None:
+                base = size
+            elif size > base + grown:
+                break
+        time.sleep(0.01)
+    elapsed = time.monotonic() - t0
     alive = proc.poll() is None
     proc.kill()
     proc.wait()
-    return alive, (_at_of(ck)[0] if ck.exists() else None)
+    return elapsed, alive, (_at_of(ck)[0] if ck.exists() else None)
+
+
+_CKPT_LOG = re.compile(r"cft-orbits: checkpoint at step (\d+), sample (\d+)")
+
+
+def _clock_log(stderr):
+    """The (step, sample) of every checkpoint a run under
+    CFT_ORBITS_VIRTUAL_CLOCK logged, in order."""
+    return [(int(a), int(b)) for a, b in _CKPT_LOG.findall(stderr)]
+
+
+def env_with(**kv):
+    return dict(os.environ, **kv)
 
 
 def check_segments(tool, tmp):
-    """[6b] --engine segments. The engine comparisons, stop points,
-    relays, interruption and golden comparison each carry a control
-    that must make them fail, and its failure is asserted - a
-    comparison that has never been seen to fail is not a gate. The
-    census and the batch-size comparison carry none of their own;
-    docs/ORBITS.md says what holds them instead."""
+    """[6b] --engine segments. The engine comparisons, the long
+    segments, the stop points, the relays, where checkpoints fall, the
+    interruption, a killed run's records, the loader's limit and the
+    golden comparison each carry a control that must make them fail,
+    run every time, and its failure is asserted - a comparison that has
+    never been seen to fail is not a gate. Three checks carry none of
+    their own - the census, the batch-size comparison and the
+    comparisons at the three narrower formats; docs/ORBITS.md says what
+    holds them instead."""
     print("\n[6b] --engine segments: the ensemble state through the "
           "scratch block")
-    env_nc = dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="transpose")
+    env_nc = env_with(CFT_ORBITS_NEGATIVE_CONTROL="transpose")
 
     # --- the two engines, on both problems and both schemes ----------
+    # Each is also run with the loader's limit lowered to 13 steps
+    # (CFT_ORBITS_SEGMENT_LIMIT, a test instrument): the real limit is
+    # 2^32-1 steps or 2^40 instructions - hours - so the split it makes
+    # is otherwise never reached. 13 divides neither interval (96, 36),
+    # so every interval ends on a short piece; the run count shows the
+    # split happened.
     cases = (("kepler", "leapfrog", ["--periods", 2,
                                      "--steps-per-period", 96]),
              ("kepler", "yoshida4", ["--periods", 2,
                                      "--steps-per-period", 96]),
              ("outer", "leapfrog", ["--years", 4, "--days", 10]),
              ("outer", "yoshida4", ["--years", 4, "--days", 10]))
+    limit = 13
+    env_lim = env_with(CFT_ORBITS_SEGMENT_LIMIT=str(limit))
     for problem, scheme, extra in cases:
         argv = ["--problem", problem, "--scheme", scheme, "--format",
                 "fp256", "--members", 5, "--rsqrt", "newton", "--quiet",
@@ -510,6 +570,43 @@ def check_segments(tool, tmp):
               % (problem, scheme, nrec),
               "%s, %s: --engine segments and the host loop disagree"
               % (problem, scheme))
+        # the loader's limit, lowered: no --checkpoint, so nothing but
+        # the sample boundary and the limit sizes a segment
+        rs = Path(tmp) / ("s-%s-%s-split.txt" % (problem, scheme))
+        proc = tool.run(*argv, "--engine", "segments", "--batch", 3,
+                        "--records", rs, "--csv", env=env_lim,
+                        expect_ok=False)
+        row = _csv_row(proc.stdout) if proc.returncode == 0 else {}
+        st = tool.setup(*argv)
+        want_runs = 2 * st["samples"] * -(-st["stride"] // limit)
+        check(proc.returncode == 0 and
+              "TEST INSTRUMENT ACTIVE" in proc.stderr and
+              rs.exists() and rs.read_bytes() == got["loop"][1] and
+              int(row.get("seg_runs", -1)) == want_runs,
+              "%s, %s: split at a loader limit of %d steps - %d runs, "
+              "every %d-step interval in %d pieces - and the records are "
+              "the host loop's, byte for byte"
+              % (problem, scheme, limit, want_runs, st["stride"],
+                 -(-st["stride"] // limit)),
+              "%s, %s: split at a loader limit of %d steps, segments "
+              "disagree with the host loop or did not split (exit %d, %s "
+              "runs where the split makes %d) %s"
+              % (problem, scheme, limit, proc.returncode,
+                 row.get("seg_runs"), want_runs, proc.stderr.strip()[-160:]))
+        if (problem, scheme) == ("outer", "yoshida4"):
+            # the same split, transposed: the comparison must see it
+            proc = tool.run(*argv, "--engine", "segments", "--batch", 3,
+                            "--records", rs,
+                            env=env_with(CFT_ORBITS_SEGMENT_LIMIT=str(limit),
+                                         CFT_ORBITS_NEGATIVE_CONTROL=
+                                         "transpose"), expect_ok=False)
+            check(proc.returncode == 0 and rs.exists() and
+                  rs.read_bytes() != got["loop"][1],
+                  "%s, %s: NEGATIVE CONTROL: split and transposed "
+                  "(=transpose), the same comparison FAILS" % (problem, scheme),
+                  "%s, %s: NEGATIVE CONTROL FAILED TO FAIL: a transposed "
+                  "split run matched the host loop (exit %d)"
+                  % (problem, scheme, proc.returncode))
 
     # --- the other three formats ---------------------------------------
     # The Newton pass count is the format's, so a segment built with
@@ -552,31 +649,48 @@ def check_segments(tool, tmp):
     sargv = ["--problem", "kepler", "--scheme", "leapfrog", "--format",
              "fp256", "--members", 5, "--rsqrt", "newton", "--quiet",
              "--periods", 2, "--steps-per-period", 96, "--batch", 3]
-    stops, held, blob = (1, 13, 95, 96, 97), [], {}
+    stops, blob = (1, 13, 95, 96, 97), {}
+    env_late = env_with(CFT_ORBITS_NEGATIVE_CONTROL="late-stop")
+
+    def stops_held(eng_env):
+        held = []
+        for stop in stops:
+            ck = Path(tmp) / ("stop-%d-seg.ckpt" % stop)
+            if ck.exists():
+                ck.unlink()
+            proc = tool.run(*sargv, "--engine", "segments",
+                            "--stop-after-steps", stop, "--checkpoint", ck,
+                            env=eng_env, expect_ok=False)
+            if (proc.returncode == 0 and ck.exists() and
+                    ck.read_bytes() == blob[stop] and _at_of(ck)[0] == stop):
+                held.append(stop)
+        return held
+
     for stop in stops:
-        for eng in ("loop", "segments"):
-            ck = Path(tmp) / ("stop-%d-%s.ckpt" % (stop, eng))
-            tool.run(*sargv, "--engine", eng, "--stop-after-steps", stop,
-                     "--checkpoint", ck)
-            blob[stop, eng] = (ck.read_bytes(), _at_of(ck)[0])
-        if (blob[stop, "loop"][0] == blob[stop, "segments"][0] and
-                blob[stop, "loop"][1] == blob[stop, "segments"][1] == stop):
-            held.append(stop)
-    check(len(held) == len(stops),
+        ck = Path(tmp) / ("stop-%d-loop.ckpt" % stop)
+        tool.run(*sargv, "--engine", "loop", "--stop-after-steps", stop,
+                 "--checkpoint", ck)
+        blob[stop] = ck.read_bytes()
+    held = stops_held(None)
+    check(held == list(stops),
           "stopped after %s steps, segments stop where the host loop does, "
-          "on byte-identical checkpoints" % ", ".join(map(str, stops)),
+          "on byte-identical checkpoints at the step asked for"
+          % ", ".join(map(str, stops)),
           "a stopped segments run is not where the host loop's is (held at "
           "%s of %s)" % (held, list(stops)))
-    # the control: a run one step late, across a sample boundary and
-    # inside an interval, is a different checkpoint to this comparison
-    late = [(s, s + 1) for s in (95, 96)
-            if blob[s, "loop"][0] == blob[s + 1, "segments"][0]]
-    check(not late,
-          "NEGATIVE CONTROL: the host loop stopped at 95 and 96 against "
-          "segments stopped at 96 and 97 FAILS the same comparison, so a "
-          "segment that stopped a step late would",
-          "NEGATIVE CONTROL FAILED TO FAIL: checkpoints a step apart "
-          "compared equal at %s" % late)
+    # The control: segments that run one step past the stop. A run at 1
+    # stops on time anyway - with a checkpoint named, a run's first
+    # segment is one step, which times the rate - and so does one at 96,
+    # the sample boundary, which ends a segment of its own accord; at 13,
+    # 95 and 97 a segment runs past the stop, and the checkpoint's step
+    # clause and its bytes must both see it.
+    late = stops_held(env_late)
+    check(late == [1, 96],
+          "NEGATIVE CONTROL: with segments running a step past the stop "
+          "(=late-stop), the comparison FAILS at 13, 95 and 97 - where a "
+          "segment, not the first step or a sample boundary, ends the run",
+          "NEGATIVE CONTROL: with segments running a step past the stop, "
+          "the comparison held at %s, not only at [1, 96]" % late)
     for problem, scheme, extra in (cases[0], cases[3]):
         common = ["--problem", problem, "--scheme", scheme, "--format",
                   "fp256", "--members", 5, "--rsqrt", "newton", *extra]
@@ -689,69 +803,400 @@ def check_segments(tool, tmp):
           "NEGATIVE CONTROL FAILED TO FAIL: the relay matched with a "
           "transposed segment")
 
-    # --- an interruption costs about one --checkpoint-interval --------
-    # A sample interval of 30,000 steps - minutes of work - a one-second
-    # checkpoint interval, and a kill three seconds in. The host loop has
-    # always left a checkpoint part way through such an interval; a
-    # segment is sized to fit one checkpoint interval at the rate the
-    # previous one ran, so segments must too. The control is the engine
-    # before that sizing (uncapped): its first segment is the whole
-    # interval, so the kill finds no checkpoint at all.
+    # --- long segments ---------------------------------------------------
+    # Every comparison above runs segments of at most 96 steps. Real runs
+    # do not: the tool's DEFAULT kepler run is a segment a period, 1,024
+    # steps, and a long sample interval that no checkpoint cuts is one
+    # segment of all of it. Two of those against the host loop, byte for
+    # byte - the second past 2^16 steps in ONE segment, which a trip
+    # count kept to 16 bits would wrap - and each with the transpose
+    # control, which must fail. With a checkpoint named, a run's first
+    # segment is one step, which times the rate, so the run counts are
+    # (samples + 1) and 2 a chunk: they show the segments were that long.
+    for label, argv, batch, chunks, runs in (
+            ("the default kepler run (fp256, a sample a period): "
+             "1,024-step segments",
+             ["--problem", "kepler", "--members", 4, "--periods", 2,
+              "--rsqrt", "newton", "--quiet"], 3, 2, 3),
+            ("fp64, one 100,000-step sample interval: a 99,999-step "
+             "segment after the first",
+             ["--problem", "kepler", "--format", "fp64", "--members", 2,
+              "--steps", 100000, "--sample-every", 100000, "--rsqrt",
+              "newton", "--quiet", "--checkpoint-interval", 1000000000],
+             1, 2, 2)):
+        got, rows, errs = {}, {}, []
+        for key, eng, env in (("loop", "loop", None),
+                              ("segments", "segments", None),
+                              ("control", "segments", env_nc)):
+            ck = Path(tmp) / ("long-%s.ckpt" % key)
+            rc = Path(tmp) / ("long-%s.txt" % key)
+            extra = [] if eng == "loop" else ["--batch", batch]
+            proc = tool.run(*argv, "--engine", eng, *extra, "--checkpoint",
+                            ck, "--records", rc, "--csv", env=env,
+                            expect_ok=False)
+            if proc.returncode:
+                errs.append("%s: exit %d, %s" % (key, proc.returncode,
+                                                  proc.stderr.strip()[-120:]))
+                got[key], rows[key] = None, {}
+            else:
+                got[key] = (ck.read_bytes(), rc.read_bytes())
+                rows[key] = _csv_row(proc.stdout)
+        nrec = got["loop"][1].count(b"\n") if got["loop"] else 0
+        want = chunks * runs
+        check(not errs and got["loop"] == got["segments"] and nrec > 0 and
+              int(rows["segments"].get("seg_runs", -1)) == want,
+              "%s: %d runs, and the host loop's checkpoint and %d records, "
+              "byte for byte" % (label, want, nrec),
+              "%s: segments and the host loop disagree, or the segments "
+              "were not that long (%s runs, %d expected) %s"
+              % (label, rows["segments"].get("seg_runs"), want,
+                 "; ".join(errs)))
+        check(got["control"] is not None and got["control"] != got["loop"],
+              "%s: NEGATIVE CONTROL: transposed (=transpose), the same "
+              "comparison FAILS" % label.split(":")[0],
+              "%s: NEGATIVE CONTROL FAILED TO FAIL: a transposed segments "
+              "run matched the host loop" % label.split(":")[0])
+
+    # --- where checkpoints fall -----------------------------------------
+    # An interruption costs about one --checkpoint-interval only if a
+    # checkpoint is written about one interval after the last. The loop
+    # engine reads the clock after every step, so it writes one at the
+    # step an interval has passed. A segment is sized to END when the
+    # next checkpoint is due, so at a steady rate segments must write
+    # theirs at the SAME steps. A real clock cannot show that - it
+    # measures this machine's load - so these run under
+    # CFT_ORBITS_VIRTUAL_CLOCK (2^-10 s a step, an interval of exactly
+    # 100 steps, every checkpoint logged), in three regimes: a sample
+    # interval of many checkpoint intervals, sample intervals a little
+    # longer than one (127 steps), and much shorter ones (10). Segments
+    # sized to a whole interval rather than to the time left wrote theirs
+    # about two intervals apart (verifier-V1, 2026-09-25). The run count
+    # bounds the pieces: a binary decomposition of each interval, eight
+    # at most for 100 steps, and one more a sample boundary.
+    vargv = ["--problem", "kepler", "--format", "fp64", "--members", 2,
+             "--rsqrt", "newton", "--csv", "--quiet",
+             "--checkpoint-interval", "0.09765625"]
+    env_vc = env_with(CFT_ORBITS_VIRTUAL_CLOCK="0.0009765625")
+    env_vcu = env_with(CFT_ORBITS_VIRTUAL_CLOCK="0.0009765625",
+                       CFT_ORBITS_NEGATIVE_CONTROL="uncapped")
+    regimes = (("a 1,000-step sample interval", 1000, 1000),
+               ("127-step sample intervals", 1016, 127),
+               ("10-step sample intervals", 1000, 10))
+    for label, nsteps, every in regimes:
+        logs, runs, bad = {}, None, []
+        for key, eng, env in (("loop", "loop", env_vc),
+                              ("segments", "segments", env_vc),
+                              ("control", "segments", env_vcu)):
+            if key == "control" and every < 100:
+                continue            # sample-bounded already: nothing to cut
+            ck = Path(tmp) / ("vc-%s.ckpt" % key)
+            proc = tool.run(*vargv, "--steps", nsteps, "--sample-every",
+                            every, "--engine", eng, "--checkpoint", ck,
+                            env=env, expect_ok=False)
+            if proc.returncode or "TEST INSTRUMENT ACTIVE" not in proc.stderr:
+                bad.append("%s: exit %d, %s" % (key, proc.returncode,
+                                                 proc.stderr.strip()[-120:]))
+            logs[key] = _clock_log(proc.stderr)
+            if key == "segments" and not proc.returncode:
+                runs = int(_csv_row(proc.stdout)["seg_runs"])
+        L = logs["loop"]
+        steps = [s for s, _ in L[:-1]]       # the last is the end of run
+        bound = 8 * (nsteps // 100) + nsteps // every + 1
+        check(not bad and L and logs["segments"] == L and
+              steps == list(range(100, nsteps + 1, 100)) and
+              runs is not None and runs <= bound,
+              "%s, under a steady clock: segments checkpoint at exactly the "
+              "host loop's steps - every 100, one interval - in %d runs "
+              "(at most %d)" % (label, runs or 0, bound),
+              "%s, under a steady clock: segments checkpoint at %s, the host "
+              "loop at %s, in %s runs (at most %d) %s"
+              % (label, [s for s, _ in logs["segments"]][:8], steps[:8],
+                 runs, bound, "; ".join(bad)))
+        if "control" in logs:
+            check(logs["control"] != L,
+                  "%s: NEGATIVE CONTROL: uncapped, segments checkpoint at "
+                  "%s instead - the comparison FAILS"
+                  % (label, [s for s, _ in logs["control"]][:4]),
+                  "%s: NEGATIVE CONTROL FAILED TO FAIL: uncapped segments "
+                  "checkpointed where the host loop does" % label)
+
+    # --- an interruption, on the real clock -----------------------------
+    # A sample interval of 30,000 steps - minutes of work - and a
+    # one-second checkpoint interval: the run is watched until its first
+    # checkpoint appears (60 s at most, however busy the machine) and
+    # then killed. It must hold a step part way through the interval, as
+    # the host loop's would. The control (uncapped: the first segment is
+    # the whole interval) is given three times as long, and at least 3 s,
+    # and must have written none.
     iargv = ["--problem", "outer", "--scheme", "yoshida4", "--format",
              "fp256", "--members", 32, "--rsqrt", "newton", "--quiet",
              "--years", 1000, "--days", 10, "--sample-every", 30000,
              "--checkpoint-interval", 1, "--engine", "segments"]
-    alive, at = _interrupted(tool, tmp, iargv, "kill.ckpt")
+    t_ck, alive, at = _run_until(tool, iargv, Path(tmp) / "kill.ckpt")
     check(alive and at is not None and 0 < at < 30000,
-          "killed 3 s into a 30,000-step sample interval with "
-          "--checkpoint-interval 1, segments left a checkpoint at step %s - "
-          "part way through the interval, as the host loop does" % at,
-          "a segments run killed mid interval left %s (still running at "
-          "the kill: %s)" % ("no checkpoint" if at is None
-                             else "a checkpoint at step %d" % at, alive))
-    env_unc = dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="uncapped")
-    alive, at = _interrupted(tool, tmp, iargv, "kill-nc.ckpt", env=env_unc)
-    check(alive and not at,
-          "NEGATIVE CONTROL: the same run with segments uncapped leaves no "
-          "checkpoint by the kill - the whole interval is lost, so the "
-          "check above can see it",
-          "NEGATIVE CONTROL FAILED TO FAIL: uncapped segments left a "
-          "checkpoint at step %s (still running: %s)" % (at, alive))
+          "with --checkpoint-interval 1 and a 30,000-step sample interval, "
+          "segments had written a checkpoint %.1f s in, at step %s - part "
+          "way through the interval, as the host loop does" % (t_ck, at),
+          "a segments run in a 30,000-step interval had %s after %.1f s "
+          "(still running: %s)" % ("no checkpoint" if at is None else
+                                   "a checkpoint at step %d" % at, t_ck,
+                                   alive))
+    env_unc = env_with(CFT_ORBITS_NEGATIVE_CONTROL="uncapped")
+    t_nc, alive, at = _run_until(tool, iargv, Path(tmp) / "kill-nc.ckpt",
+                                 env=env_unc, wait=max(3.0, 3 * t_ck))
+    check(alive and at is None,
+          "NEGATIVE CONTROL: uncapped, the same run had written no "
+          "checkpoint %.1f s in - the whole interval would be lost, so the "
+          "check above can see it" % t_nc,
+          "NEGATIVE CONTROL FAILED TO FAIL: uncapped segments had a "
+          "checkpoint at step %s after %.1f s (still running: %s)"
+          % (at, t_nc, alive))
+
+    # --- a killed run's records -----------------------------------------
+    # Records go through stdio and a checkpoint is written between
+    # samples, so a kill leaves the records file out of step with the
+    # checkpoint on disk. Two ways, each on both engines, each resumed by
+    # the other engine and required to finish on the uninterrupted run's
+    # checkpoint and records:
+    #  - killed the moment the first checkpoint appears, with the next
+    #    sample far off (1,500-step intervals, 0.1 s checkpoints): the
+    #    tail of sample 0's records is still in the stdio buffer then,
+    #    so unless it was handed over before the checkpoint was written
+    #    the file is BEHIND the checkpoint and cannot be resumed. The
+    #    kill must find the file exactly at the checkpoint - landing
+    #    before the next sample is what makes that window the one tested
+    #    - and is repeated until it does, five times at most;
+    #  - killed once the file has grown 8 KB past the first checkpoint
+    #    (150-step intervals, 0.2 s checkpoints): the file is AHEAD of
+    #    the checkpoint, usually ending in half a line, and --resume must
+    #    cut it back. The killed state, copied, is resumed again under
+    #    =append (the resume before 2026-09-25), which must FAIL. A kill
+    #    that left the file exactly at the checkpoint cannot show that,
+    #    so that kill is repeated until one does not - five at most.
+    env_app = env_with(CFT_ORBITS_NEGATIVE_CONTROL="append")
+    kstyles = (
+        ("at its first checkpoint", None, False,
+         ["--problem", "kepler", "--format", "fp256", "--members", 20,
+          "--rsqrt", "newton", "--steps", 3000, "--sample-every", 1500,
+          "--checkpoint-interval", 0.1, "--quiet"]),
+        ("8 KB past its first checkpoint", 8192, True,
+         ["--problem", "kepler", "--format", "fp256", "--members", 20,
+          "--rsqrt", "newton", "--steps", 3000, "--sample-every", 150,
+          "--checkpoint-interval", 0.2, "--quiet"]))
+    for style, grown, wants_ahead, kargv in kstyles:
+        kw_ck, kw_rc = Path(tmp) / "k-whole.ckpt", Path(tmp) / "k-whole.txt"
+        tool.run(*kargv, "--engine", "loop", "--checkpoint", kw_ck,
+                 "--records", kw_rc)
+        whole = (kw_ck.read_bytes(), kw_rc.read_bytes())
+        for kill_eng, res_eng in (("loop", "segments"),
+                                  ("segments", "loop")):
+            ck = Path(tmp) / ("k-%s.ckpt" % kill_eng)
+            rc = Path(tmp) / ("k-%s.txt" % kill_eng)
+            cck, crc = Path(tmp) / "k-ctl.ckpt", Path(tmp) / "k-ctl.txt"
+            seen, resumed, control, landed = [], [], None, False
+            for _attempt in range(5):
+                _t, alive, at = _run_until(
+                    tool, kargv + ["--engine", kill_eng, "--records", rc],
+                    ck, records=rc if grown else None, grown=grown or 0)
+                n_ck = _field_of(ck, "recbytes") if at is not None else None
+                killed = rc.read_bytes()
+                seen.append("%d/%s" % (len(killed), n_ck))
+                if not alive or n_ck is None:
+                    resumed.append(False)
+                    break
+                shutil.copyfile(ck, cck)
+                shutil.copyfile(rc, crc)
+                proc = tool.run(*kargv, "--engine", res_eng, "--checkpoint",
+                                ck, "--records", rc, "--resume",
+                                expect_ok=False)
+                resumed.append(proc.returncode == 0 and
+                               (ck.read_bytes(), rc.read_bytes()) == whole)
+                if not resumed[-1]:
+                    seen[-1] += " (%s)" % proc.stderr.strip()[-100:]
+                if not wants_ahead and len(killed) == n_ck:
+                    landed = True
+                    break
+                if wants_ahead and len(killed) > n_ck:
+                    landed = True
+                    proc = tool.run(*kargv, "--engine", res_eng,
+                                    "--checkpoint", cck, "--records", crc,
+                                    "--resume", env=env_app,
+                                    expect_ok=False)
+                    control = (proc.returncode == 0 and
+                               "NEGATIVE CONTROL ACTIVE" in proc.stderr and
+                               crc.read_bytes() != whole[1])
+                    break
+            check(resumed and all(resumed) and landed,
+                  "killed on %s %s (file/checkpoint bytes %s), resumed by "
+                  "%s: the checkpoint and all %d records are the "
+                  "uninterrupted run's, byte for byte"
+                  % (kill_eng, style, ", ".join(seen), res_eng,
+                     whole[1].count(b"\n")),
+                  "killed on %s %s (file/checkpoint bytes %s), resumed by "
+                  "%s: not the uninterrupted run's checkpoint and records, "
+                  "or no kill landed %s"
+                  % (kill_eng, style, ", ".join(seen), res_eng,
+                     "ahead of the checkpoint" if wants_ahead else
+                     "with the file at the checkpoint"))
+            if not wants_ahead:
+                continue
+            check(control is True,
+                  "killed on %s: NEGATIVE CONTROL: the same killed state "
+                  "resumed without cutting the file back (=append) FAILS - "
+                  "its records are not the run's" % kill_eng,
+                  "killed on %s: NEGATIVE CONTROL %s (file/checkpoint bytes "
+                  "%s)" % (kill_eng, "FAILED TO FAIL: an appending resume "
+                           "matched the uninterrupted records"
+                           if control is False else "not judged: no kill "
+                           "left the file ahead of its checkpoint",
+                           ", ".join(seen)))
+
+    # --- the records file a resume is handed ----------------------------
+    # The same, laid out exactly rather than by a kill: a run stopped at
+    # step 37 closes its records at the checkpoint's length, and the
+    # files are then given what a kill leaves - the next sample's records
+    # and half a line - or what no kill can: a file cut short, one byte
+    # changed, none at all, a checkpoint of the old version or without its
+    # recbytes line. The first must resume to the uninterrupted run (and
+    # fail under =append); every other must be refused by name with both
+    # files left as they were.
+    rargv5 = ["--problem", "kepler", "--scheme", "leapfrog", "--format",
+              "fp256", "--members", 5, "--rsqrt", "newton", "--quiet",
+              "--periods", 2, "--steps-per-period", 96]
+    full = (Path(tmp) / "s-kepler-leapfrog-loop.ckpt").read_bytes(), \
+        (Path(tmp) / "s-kepler-leapfrog-loop.txt").read_bytes()
+    sck, src = Path(tmp) / "r-stop.ckpt", Path(tmp) / "r-stop.txt"
+    tool.run(*rargv5, "--engine", "loop", "--stop-after-steps", 37,
+             "--checkpoint", sck, "--records", src)
+    stop_ck, stop_rc = sck.read_bytes(), src.read_bytes()
+    nb = _field_of(sck, "recbytes")
+    check(nb == len(stop_rc) and full[1].startswith(stop_rc) and
+          _field_of(sck, "at") == 37,
+          "a run stopped at step 37 leaves its records exactly as long as "
+          "its checkpoint's recbytes (%d bytes), and they begin the "
+          "uninterrupted run's" % len(stop_rc),
+          "a run stopped at step 37: recbytes %s, records %d bytes, a prefix "
+          "of the whole run's: %s" % (nb, len(stop_rc),
+                                      full[1].startswith(stop_rc)))
+    nxt = full[1][len(stop_rc):]
+    cut = nxt.index(b"\n") + 1
+    torn = stop_rc + nxt[:cut] + nxt[cut:cut + (nxt[cut:].index(b"\n") // 2)]
+
+    def resume_with(records_bytes, ckpt_bytes=stop_ck, env=None):
+        ck, rc = Path(tmp) / "r-case.ckpt", Path(tmp) / "r-case.txt"
+        ck.write_bytes(ckpt_bytes)
+        if rc.exists():
+            rc.unlink()
+        if records_bytes is not None:
+            rc.write_bytes(records_bytes)
+        proc = tool.run(*rargv5, "--engine", "segments", "--batch", 3,
+                        "--checkpoint", ck, "--records", rc, "--resume",
+                        env=env, expect_ok=False)
+        return (proc, ck.read_bytes(),
+                rc.read_bytes() if rc.exists() else None)
+
+    proc, got_ck, got_rc = resume_with(torn)
+    check(proc.returncode == 0 and (got_ck, got_rc) == full,
+          "handed %d bytes more than its checkpoint accounts for, ending in "
+          "half a line, --resume cuts the file back and finishes on the "
+          "uninterrupted run's checkpoint and records" % (len(torn) - nb),
+          "handed a records file ahead of its checkpoint, --resume ended "
+          "elsewhere (exit %d) %s" % (proc.returncode,
+                                      proc.stderr.strip()[-160:]))
+    proc, _, got_rc = resume_with(torn, env=env_app)
+    check(proc.returncode == 0 and got_rc != full[1],
+          "NEGATIVE CONTROL: the same resume without the cut (=append) "
+          "FAILS - its records are not the run's",
+          "NEGATIVE CONTROL FAILED TO FAIL: an appending resume matched the "
+          "uninterrupted records (exit %d)" % proc.returncode)
+    flip = bytearray(stop_rc)
+    flip[len(flip) // 2] = ord("7") if flip[len(flip) // 2] != ord("7") \
+        else ord("3")
+    old = stop_ck.replace(b"cft-orbits-checkpoint 2\n",
+                          b"cft-orbits-checkpoint 1\n", 1)
+    norec = b"".join(l for l in stop_ck.splitlines(True)
+                     if not l.startswith(b"recbytes "))
+    refused, why = [], []
+    for what, rec, ckb, needle in (
+            ("the file cut one byte short", stop_rc[:-1], stop_ck,
+             "holds %d bytes and the checkpoint's records run to %d"
+             % (nb - 1, nb)),
+            ("one byte of the file changed", bytes(flip), stop_ck,
+             "do not hash to the checkpoint's chain"),
+            ("no records file at all", None, stop_ck,
+             "holds 0 bytes and the checkpoint's records run to %d" % nb),
+            ("a version-1 checkpoint", stop_rc, old,
+             "not a cft-orbits checkpoint of this version"),
+            ("a checkpoint without its recbytes line", stop_rc, norec,
+             "does not say how long its records are")):
+        proc, got_ck, got_rc = resume_with(rec, ckb)
+        if (proc.returncode == 2 and needle in proc.stderr and
+                got_ck == ckb and got_rc == rec):
+            refused.append(what)
+        else:
+            why.append("%s: exit %d, %s" % (what, proc.returncode,
+                                           proc.stderr.strip()[-120:]))
+    check(not why,
+          "--resume refuses, by name and touching neither file: %s"
+          % "; ".join(refused),
+          "--resume did not refuse by name, or touched a file: %s"
+          % "; ".join(why))
 
     # --- a sample interval longer than one segment may run -------------
     # The loader refuses an image that could execute more than 2^40
     # instructions, and a trip count is 32 bits; a longer interval runs
     # as several segments. Each run's FIRST segment is exactly the
     # longest the tool computes it may be - outer/yoshida4 at the
-    # instruction ceiling, kepler/leapfrog at the trip-count limit - so
-    # a limit computed one too long is refused at load, at once, and one
-    # computed right loads and runs until it is killed. (Until
-    # 2026-09-25 the first was refused, unnamed, and the second by name.)
+    # instruction ceiling, kepler/leapfrog at the 2^32-1 trip count - so
+    # one step more is refused at once (by the loader for the first, by
+    # this tool's own trip-count check for the second), and a limit
+    # computed right loads and runs until it is killed. The control
+    # (=overlong) takes each limit one step too long, and both runs must
+    # then be refused. (Until 2026-09-25 the first was refused, unnamed,
+    # and the second by name.)
     long_runs = (
         ("outer, yoshida4, a segment at the 2^40-instruction ceiling",
          ["--problem", "outer", "--scheme", "yoshida4",
-          "--steps", 700000000, "--sample-every", 700000000]),
+          "--steps", 700000000, "--sample-every", 700000000],
+         "cft_program_load (a segment)"),
         ("kepler, leapfrog, a segment at the 2^32-1 trip count",
          ["--problem", "kepler", "--scheme", "leapfrog",
-          "--steps", 5000000000, "--sample-every", 5000000000]))
+          "--steps", 5000000000, "--sample-every", 5000000000],
+         "a segment's trip count must be 1..2^32-1"))
+    env_ovl = env_with(CFT_ORBITS_NEGATIVE_CONTROL="overlong")
     procs = []
-    for label, extra in long_runs:
+    for label, extra, needle in long_runs:
         argv = ["--format", "fp256", "--members", 2, "--rsqrt", "newton",
                 "--quiet", "--engine", "segments", *extra]
-        procs.append((label, subprocess.Popen(
-            [tool.exe] + [str(a) for a in argv], stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE, text=True)))
+        for env in (None, env_ovl):
+            procs.append((label, needle, env, subprocess.Popen(
+                [tool.exe] + [str(a) for a in argv],
+                stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                env=env)))
     time.sleep(2.0)
-    for label, p in procs:
-        alive = p.poll() is None
-        p.kill()
-        _, err = p.communicate()
-        check(alive,
-              "%s: an interval longer than one segment may run is split, "
-              "not refused - the first segment, at exactly that limit, "
-              "loaded and ran until killed" % label,
-              "%s: refused or died at once: exit %s, %s"
-              % (label, p.returncode, err.strip()[-200:]))
+    for label, needle, env, p in procs:
+        if env is None:
+            alive = p.poll() is None
+            p.kill()
+            _, err = p.communicate()
+            check(alive,
+                  "%s: an interval longer than one segment may run is "
+                  "split, not refused - the first segment, at exactly that "
+                  "limit, loaded and ran until killed" % label,
+                  "%s: refused or died at once: exit %s, %s"
+                  % (label, p.returncode, err.strip()[-200:]))
+        else:
+            try:
+                _, err = p.communicate(timeout=60)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                _, err = p.communicate()
+            check(p.returncode == 2 and needle in err,
+                  "%s: NEGATIVE CONTROL: one step longer (=overlong), the "
+                  "first segment is refused - \"%s\"" % (label, needle),
+                  "%s: NEGATIVE CONTROL FAILED TO FAIL: a segment one step "
+                  "past the limit gave exit %s, %s"
+                  % (label, p.returncode, err.strip()[-200:]))
 
     # --- a segment's flags reach the certificate -----------------------
     # A fault only the flag certificate can see: with every r^2 in the
@@ -809,13 +1254,14 @@ def check_segments(tool, tmp):
         # The control is a different PROGRAM, not a different answer: a
         # flipped bit in s_out could never have matched once the check
         # above passed, so it proved nothing. Constant 2 is the first
-        # drift's h/2 (the bank's order is -1, -1/2, then those), and one
-        # bit of it must move the golden executor off the library - the
-        # bit in the MIDDLE of the significand, a change of about
-        # 2^(p/2) ulps. Not bit 0: the step map is many-to-one at the ulp
-        # scale, and a one-ulp change can merge back bit for bit within
-        # a segment (F0b, 2026-09-25), which would fail this control on
-        # a program that did differ.
+        # drift's scale - h/2 under leapfrog, w1 h/2 under yoshida4 (the
+        # bank's order is -1, -1/2, then the drift scales) - and one bit
+        # of it must move the golden executor off the library: the bit
+        # in the MIDDLE of the significand, a change of about 2^(p/2)
+        # ulps. Not bit 0: the step map is many-to-one at the ulp scale,
+        # and a one-ulp change can merge back bit for bit within a
+        # segment (F0b, 2026-09-25), which would fail this control on a
+        # program that did differ.
         esz = fmt.width // 8
         mid = fmt.man_w // 2                 # a significand bit, not the
         other = bytearray(image)             # exponent's, in any format
@@ -829,13 +1275,25 @@ def check_segments(tool, tmp):
               "program" % label,
               "%s: NEGATIVE CONTROL FAILED TO FAIL: an altered constant "
               "left the golden scratch-out unchanged" % label)
-        again = asm.assemble(asm.disassemble(image), "segment")
-        check(again == image,
+        # The round trip reproduces any legal encoding, a kx the
+        # assembler would not have chosen included - the disassembler
+        # writes that one as `.kx` and the assembler honours it - so the
+        # CHOICE is held by requiring no `.kx` in the text: the tool
+        # must pick the indexed form exactly where the assembler's own
+        # rule does (docs/PROGRAMS.md), and only the outer yoshida4
+        # image, whose bank runs past 16, needs it at all.
+        text = asm.disassemble(image)
+        again = asm.assemble(text, "segment")
+        forced = [ln.strip() for ln in text.splitlines() if ".kx " in ln]
+        check(again == image and not forced,
               "%s: the reference assembler reads the image back to the same "
-              "%d bytes - the tool's encoder, kx choice included, is the "
+              "%d bytes, and no instruction is marked .kx - the tool's "
+              "encoder, its choice of the indexed form included, is the "
               "assembler's" % (label, len(image)),
-              "%s: disassemble/re-assemble does not return the tool's image "
-              "- its encoder and asm.py disagree" % label)
+              "%s: disassemble/re-assemble does not return the tool's image, "
+              "or the tool chose kx where the assembler would not (%d "
+              "marked, e.g. %s)" % (label, len(forced),
+                                    forced[0] if forced else "-"))
         bad = bytearray(image)
         bad[-1] |= 0x80          # imm[31] of the last word: HALT's, reserved
         refused = 0
@@ -1162,6 +1620,19 @@ def main():
         whole = Path(tmp) / "whole.ckpt"
         wrec = Path(tmp) / "whole.txt"
         tool.run(*base, "--checkpoint", whole, "--records", wrec)
+        # The checkpoint's recbytes counts the record stream whether or
+        # not --records writes it, so the file is the same either way -
+        # an option is not a result - and it is the file's length.
+        check(whole.read_bytes() == blobs[0] and
+              _field_of(whole, "recbytes") == len(wrec.read_bytes()),
+              "a run with --records ends on the same checkpoint as one "
+              "without, and its recbytes (%s) is the records file's length"
+              % _field_of(whole, "recbytes"),
+              "with --records the checkpoint says recbytes %s and the file "
+              "is %d bytes; without, recbytes %s - the checkpoints %s"
+              % (_field_of(whole, "recbytes"), len(wrec.read_bytes()),
+                 _field_of(Path(tmp) / "bs-8.ckpt", "recbytes"),
+                 "match" if whole.read_bytes() == blobs[0] else "differ"))
         piece = Path(tmp) / "piece.ckpt"
         prec = Path(tmp) / "piece.txt"
         common = ["--problem", "kepler", "--format", "fp256", "--members", 8,
@@ -1240,7 +1711,21 @@ def main():
              "must not run clean",
              ["--engine", "segments", "--periods", 1],
              dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="transposed"),
-             "takes transpose, zero-r2 or uncapped"),
+             "takes transpose, zero-r2, uncapped, late-stop, overlong or "
+             "append"),
+            ("=append on --engine program, which cannot resume",
+             ["--engine", "program", "--rsqrt", "newton", "--periods", 1],
+             dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="append"),
+             "--engine program cannot resume"),
+            ("CFT_ORBITS_SEGMENT_LIMIT on an engine it does not instrument",
+             ["--engine", "loop", "--periods", 1],
+             dict(os.environ, CFT_ORBITS_SEGMENT_LIMIT="7"),
+             "instruments --engine segments and nothing else"),
+            ("CFT_ORBITS_VIRTUAL_CLOCK on --engine program, which writes "
+             "one checkpoint",
+             ["--engine", "program", "--rsqrt", "newton", "--periods", 1],
+             dict(os.environ, CFT_ORBITS_VIRTUAL_CLOCK="0.5"),
+             "writes one, at the end"),
         ):
             proc = tool.run(*argv, expect_ok=False, env=env)
             check(proc.returncode != 0 and needle in proc.stderr,
@@ -1248,6 +1733,28 @@ def main():
                   % (why, proc.stderr.strip().splitlines()[-1][:110]),
                   "not refused, or refused for another reason: %s (%s)"
                   % (why, proc.stderr.strip()[-160:]))
+        # The two test instruments take a number, and anything else must
+        # be refused by name rather than read as some number or as unset.
+        for var, bad, needle in (
+                ("CFT_ORBITS_SEGMENT_LIMIT",
+                 ("0", "-7", "7x", " 7", "7.0", "0x10", "4294967296",
+                  "99999999999999999999999"),
+                 "takes a whole number of steps, 1 to 4294967295"),
+                ("CFT_ORBITS_VIRTUAL_CLOCK",
+                 ("0", "-0.5", "abc", " 0.5", "0.5s", "nan", "inf", "1e7"),
+                 "takes a positive number of seconds a step")):
+            ran = []
+            for val in bad:
+                proc = tool.run("--engine", "segments", "--rsqrt", "newton",
+                                "--periods", 1, "--quiet", expect_ok=False,
+                                env=dict(os.environ, **{var: val}))
+                if not (proc.returncode == 2 and needle in proc.stderr):
+                    ran.append("%r: exit %d" % (val, proc.returncode))
+            check(not ran,
+                  "refused: %s set to any of %d malformed values (%s)"
+                  % (var, len(bad), ", ".join(repr(v) for v in bad)),
+                  "%s: a malformed value was not refused by name - %s"
+                  % (var, "; ".join(ran)))
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

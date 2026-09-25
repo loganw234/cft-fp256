@@ -174,10 +174,11 @@
  * engine run the outer solar system, resume from a checkpoint either
  * engine wrote, stop at any step, run any sample interval, and record
  * any number of samples: a segment deposits nothing, so the tile's
- * deposit budget no longer bounds a run. Segments are driven by the loop engine's own control
- * loop - the same checkpoints, the same records, the same chain - and
- * their arithmetic is the loop engine's instruction for instruction
- * ("The integration as resumable segments", below).
+ * deposit budget no longer bounds a run. Segments are driven by the
+ * loop engine's own control loop - the same checkpoints, the same
+ * records, the same chain - and their arithmetic is the loop engine's
+ * instruction for instruction ("The integration as resumable
+ * segments", below).
  *
  * The two facts that restricted the program engine when it was
  * written (2026-09-04), and where each stands:
@@ -231,9 +232,11 @@
  *
  * Under --rsqrt newton the three engines produce byte-identical
  * records, byte-identical checkpoints and the same chain wherever each
- * can run. host/tests/orbits_check.py holds that at all four formats,
- * on the problems, schemes, batch sizes, stop points and relays it
- * names - evidence for the claim, not every configuration there is.
+ * can run. host/tests/orbits_check.py holds segments against the loop
+ * engine at all four formats, and the program engine against it at
+ * binary256, on the problems, schemes, batch sizes, segment lengths,
+ * stop points, relays and interruptions it names - evidence for the
+ * claim, not every configuration there is.
  *
  * ---------------------------------------------------------------
  * Flags: which are expected, which are certificates
@@ -302,8 +305,14 @@
 #include "cft.h"
 #include "../src/sha256.h"
 
+/* The clock, and the two things the records file needs from the
+ * system: how long an open file is, and cutting a file back to a
+ * length (--resume, "The checkpoint format" in docs/ORBITS.md). A
+ * length of -1 means "not a regular file" - a pipe or a device, which
+ * has none to check. */
 #if defined(_WIN32)
 #  include <windows.h>
+#  include <sys/stat.h>
 static double now_s(void)
 {
     LARGE_INTEGER f, t;
@@ -311,13 +320,58 @@ static double now_s(void)
     QueryPerformanceCounter(&t);
     return (double)t.QuadPart / (double)f.QuadPart;
 }
+
+static int64_t file_length(FILE *f)
+{
+    struct _stat64 st;
+    if (_fstat64(_fileno(f), &st) != 0 ||
+        (st.st_mode & _S_IFMT) != _S_IFREG)
+        return -1;
+    return (int64_t)st.st_size;
+}
+
+static int file_cut(const char *path, uint64_t len)
+{
+    HANDLE h = CreateFileA(path, GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
+                           FILE_ATTRIBUTE_NORMAL, NULL);
+    LARGE_INTEGER at;
+    int ok;
+    if (h == INVALID_HANDLE_VALUE)
+        return -1;
+    at.QuadPart = (LONGLONG)len;
+    ok = SetFilePointerEx(h, at, NULL, FILE_BEGIN) && SetEndOfFile(h);
+    return CloseHandle(h) && ok ? 0 : -1;
+}
 #else
 #  include <time.h>
+#  include <sys/stat.h>
+#  include <unistd.h>
 static double now_s(void)
 {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
+}
+
+static int64_t file_length(FILE *f)
+{
+    struct stat st;
+    if (fstat(fileno(f), &st) != 0 || !S_ISREG(st.st_mode))
+        return -1;
+    return (int64_t)st.st_size;
+}
+
+static int file_cut(const char *path, uint64_t len)
+{
+    FILE *f = fopen(path, "r+b");
+    int rc;
+    if (!f)
+        return -1;
+    rc = (uint64_t)(off_t)len == len ? ftruncate(fileno(f), (off_t)len)
+                                     : -1;
+    if (fclose(f) != 0)
+        rc = -1;
+    return rc;
 }
 #endif
 
@@ -415,6 +469,8 @@ static int         FLAGS_TRUSTED = 1;
 static uint64_t    N_CALLS = 0;      /* library calls issued */
 static uint64_t    N_ELEMOPS = 0;    /* elementwise opcode issues */
 static uint64_t    N_COMPOSED = 0;   /* cft_div / cft_sqrt element calls */
+static uint64_t    STEPS_DONE = 0;   /* steps taken in this process - the
+                                        test clock's time (VCLOCK below) */
 
 /* Every arithmetic instruction in this workload rounds, so INEXACT is
  * EXPECTED and says nothing. The other four are certificates: none of
@@ -710,6 +766,8 @@ typedef struct {
     /* progress */
     uint64_t step, sample;
     uint8_t  chain[32];
+    uint64_t rec_bytes;         /* the record stream so far, in bytes -
+                                   what --records holds, or would */
     FILE    *recf;
 
     /* the program engine */
@@ -923,6 +981,7 @@ static void one_step(runstate *R)
     int s;
     for (s = 0; s < R->nsub; s++)
         substep(R, s);
+    STEPS_DONE++;
 }
 
 /* ===================================================================
@@ -1098,6 +1157,9 @@ static void emit_sample(runstate *R, uint64_t sample, uint64_t step,
         record_line(R, sample, step, m, qq, vv, R->Hd, R->Ld, line,
                     (size_t)(2 * R->ncomp + 8) * DECMAX);
         chain_absorb(R, line);
+        /* counted whether or not --records is open, so a checkpoint is
+         * the same file either way (docs/ORBITS.md, "recbytes") */
+        R->rec_bytes += (uint64_t)strlen(line) + 1;
         if (R->recf)
             fprintf(R->recf, "%s\n", line);
     }
@@ -1283,9 +1345,10 @@ static uint8_t *build_program(runstate *R, size_t *bytes_out)
  *
  * How long a segment is - to the sample boundary or the stop point,
  * and no longer than the loader takes or, while checkpoints are
- * written, than one --checkpoint-interval at the last segment's rate -
- * is decided in main()'s run loop; seg_limits and seg_time_cap carry
- * the two limits, and no result depends on where a segment ends.
+ * written, than fits the time left before the next one is due at the
+ * last segment's rate - is decided in main()'s run loop; seg_limits
+ * and seg_time_cap carry the two limits, and no result depends on
+ * where a segment ends.
  * =================================================================== */
 
 /* Revision 3's scratch pair, beside the six codes above. docs/
@@ -1307,11 +1370,13 @@ enum { SR_X = 19, SR_Y, SR_W, SR_E, SR_Z, SR_G, SR_T1, SR_V };
 #define SEG_SQ(c)     ((uint32_t)(c))                 /* q_c's slot */
 #define SEG_SV(R, c)  ((uint32_t)((R)->ncomp + (c)))  /* v_c's slot */
 
-/* The negative controls this engine carries, read once in main() from
- * CFT_ORBITS_NEGATIVE_CONTROL. Each makes --engine segments wrong in
- * one named way; orbits_check.py runs each and requires the check it
- * exists for to FAIL. Each prints a warning on stderr whenever it is
- * set, and nothing but that test sets them.
+/* The negative controls this tool carries, read once in main() from
+ * CFT_ORBITS_NEGATIVE_CONTROL. Each makes the tool wrong in one named
+ * way; orbits_check.py runs each and requires the check it exists for
+ * to FAIL. Each prints a warning on stderr whenever it is set, and
+ * nothing but that test sets them. The first five sabotage --engine
+ * segments and are refused on the other two engines; `append`
+ * sabotages the resume, which the loop and segments engines share.
  *
  *   transpose  the host packs v_0 into v_1's slot and v_1 into v_0's -
  *              and unpacks the same way, so its own arrays stay
@@ -1323,8 +1388,45 @@ enum { SR_X = 19, SR_Y, SR_W, SR_E, SR_Z, SR_G, SR_T1, SR_V };
  *              what shows a segment's flags reach note_flags();
  *   uncapped   segments ignore --checkpoint-interval and run to the
  *              sample boundary, as this engine did before 2026-09-25,
- *              which the interruption test must see as a lost interval. */
+ *              which the interruption tests must see as a lost interval;
+ *   late-stop  a segment runs one step past --stop-after-steps, so a
+ *              stopped run is a step late wherever a segment, rather
+ *              than a sample boundary, ends it;
+ *   overlong   the longest segment is taken one step past what the
+ *              loader accepts (seg_limits), so the first segment of an
+ *              interval that long must be refused;
+ *   append     --resume appends to --records without checking it or
+ *              cutting it back to the checkpoint, as this tool did
+ *              before 2026-09-25, so after a kill the resumed records
+ *              are not the run's. */
 static int NEGCTL_TRANSPOSE = 0, NEGCTL_ZERO_R2 = 0, NEGCTL_UNCAPPED = 0;
+static int NEGCTL_LATE_STOP = 0, NEGCTL_OVERLONG = 0, NEGCTL_APPEND = 0;
+
+/* The test instruments, read once in main() from the environment. A
+ * negative control makes a result wrong; an instrument must change no
+ * result - which is what the checks that use one hold - and makes
+ * something reachable in a test that otherwise is not. Each is off
+ * unless set, refused by name when malformed or set for an engine it
+ * does not instrument, and announced on stderr.
+ *
+ *   CFT_ORBITS_SEGMENT_LIMIT=N   (--engine segments) the loader is
+ *       taken to accept at most N steps a segment, so an interval
+ *       longer than N is split where the real limit would split it -
+ *       and the real one (seg_limits: 2^32-1 steps, or 2^40
+ *       instructions) is hours of work away;
+ *   CFT_ORBITS_VIRTUAL_CLOCK=S   (--engine loop and segments) the
+ *       clock this tool reads advances S seconds for every step the
+ *       ensemble takes and for nothing else, and each checkpoint is
+ *       logged on stderr as it is written - a perfectly steady rate,
+ *       so where checkpoints fall is a fact a test can predict rather
+ *       than a measurement of this machine's load. */
+static uint64_t SEG_LIMIT = 0;
+static double   VCLOCK = 0;
+
+static double clock_s(void)
+{
+    return VCLOCK > 0 ? (double)STEPS_DONE * VCLOCK : now_s();
+}
 
 static int seg_vperm(int c)
 {
@@ -1734,6 +1836,7 @@ static void seg_run(runstate *R, uint64_t k)
         N_ELEMOPS += (uint64_t)n * k * R->s_alu_step;
         R->s_runs++;
     }
+    STEPS_DONE += k;
 }
 
 /* The loader refuses an image whose worst case could execute more than
@@ -1762,12 +1865,20 @@ static void seg_limits(runstate *R)
     R->s_kmax = k < 0xffffffffull ? k : 0xffffffffull;
     if (!R->s_kmax)
         die("internal: a one-step segment exceeds the loader's ceiling");
+    if (NEGCTL_OVERLONG)
+        R->s_kmax++;
+    if (SEG_LIMIT && R->s_kmax > SEG_LIMIT)
+        R->s_kmax = SEG_LIMIT;
 }
 
 /* How many steps fit in `secs` at the rate the last segment ran: the
  * largest power of two that does, so a run settles on a few image
- * lengths instead of rebuilding for every segment; and 1 before any
- * segment has been timed, which is how the rate is first measured. */
+ * lengths instead of rebuilding for every segment; 1 when nothing
+ * does, or when `secs` is not positive; and 1 before any segment has
+ * been timed, which is how the rate is first measured. main() hands it
+ * the time LEFT before the next checkpoint is due, so a segment ends at
+ * or just short of that moment and the run is between segments when it
+ * comes. */
 static uint64_t seg_time_cap(const runstate *R, double secs)
 {
     uint64_t cap = 1;
@@ -1790,8 +1901,14 @@ static uint64_t seg_time_cap(const runstate *R, double secs)
  * and nothing that describes the MACHINE - no batch size, no engine,
  * no timing - which is what lets two runs with different batch sizes
  * end on byte-identical files.
+ *
+ * Version 2 (2026-09-25) added `recbytes`, the length of the record
+ * stream the checkpoint's chain covers - the bytes --records has
+ * written by then, counted whether or not it is open, so the file is
+ * the same either way. A version-1 file does not say it, and is
+ * refused by the magic line like any other version.
  * =================================================================== */
-#define CKPT_MAGIC "cft-orbits-checkpoint 1"
+#define CKPT_MAGIC "cft-orbits-checkpoint 2"
 
 static int ckpt_replace(const char *tmp, const char *path)
 {
@@ -1817,6 +1934,34 @@ static const char *rsqrt_name(int r)
     return r == RSQRT_EXACT ? "exact" : "newton";
 }
 
+/* Hand every record so far to the system, and check the file holds
+ * exactly the stream the next checkpoint will account for. Called
+ * BEFORE that checkpoint is written: it promises the file holds at
+ * least `recbytes` bytes, so a kill between the two leaves the file
+ * ahead of the checkpoint on disk and never behind it - and --resume
+ * cuts it back (records_resume). The length check catches the flush
+ * forgotten, a failed write, and another process writing or cutting
+ * the file; a pipe or a device has no length and is not checked. */
+static void records_sync(runstate *R)
+{
+    int64_t have;
+    char msg[320];
+
+    if (fflush(R->recf) != 0 || ferror(R->recf))
+        die("the records file could not be written");
+    if (NEGCTL_APPEND)
+        return;                 /* the old resume: nothing to hold it to */
+    have = file_length(R->recf);
+    if (have >= 0 && (uint64_t)have != R->rec_bytes) {
+        snprintf(msg, sizeof msg,
+                 "the records file holds %" PRId64 " bytes and the records "
+                 "so far are %" PRIu64 " - something else wrote to it or "
+                 "cut it",
+                 have, R->rec_bytes);
+        die(msg);
+    }
+}
+
 static void ckpt_write(runstate *R)
 {
     const fmt_info *fi = R->fi;
@@ -1828,6 +1973,8 @@ static void ckpt_write(runstate *R)
 
     if (!O->ckpt)
         return;
+    if (R->recf)
+        records_sync(R);
     if ((size_t)snprintf(tmp, sizeof tmp, "%s.tmp", O->ckpt) >= sizeof tmp)
         die("checkpoint path too long");
     f = fopen(tmp, "wb");
@@ -1851,6 +1998,7 @@ static void ckpt_write(runstate *R)
     fprintf(f, "samples %" PRIu64 "\n", R->nsamples);
     fprintf(f, "at %" PRIu64 " %" PRIu64 "\n", R->step, R->sample);
     fprintf(f, "chain %s\n", chain);
+    fprintf(f, "recbytes %" PRIu64 "\n", R->rec_bytes);
     for (m = 0; m < M; m++) {
         fprintf(f, "state %" PRIu64, (uint64_t)m);
         for (c = 0; c < R->ncomp; c++) {
@@ -1882,6 +2030,9 @@ static void ckpt_write(runstate *R)
         die("the checkpoint did not write cleanly");
     if (ckpt_replace(tmp, O->ckpt) != 0)
         die("the checkpoint could not be renamed into place");
+    if (VCLOCK > 0)
+        fprintf(stderr, "cft-orbits: checkpoint at step %" PRIu64
+                ", sample %" PRIu64 "\n", R->step, R->sample);
 }
 
 static char *trim_nl(char *s)
@@ -1911,6 +2062,22 @@ static int next_tok(char **pp, char *out, size_t cap)
     return 1;
 }
 
+/* A whole decimal number, digits only, at most `max`: 1 if `s` is one. */
+static int dec_u64(const char *s, uint64_t max, uint64_t *out)
+{
+    uint64_t v = 0;
+    if (!*s)
+        return 0;
+    for (; *s; s++) {
+        unsigned d = (unsigned)(unsigned char)*s - '0';
+        if (d > 9 || v > (max - d) / 10)
+            return 0;
+        v = v * 10 + d;
+    }
+    *out = v;
+    return 1;
+}
+
 static void ckpt_read(runstate *R)
 {
     const fmt_info *fi = R->fi;
@@ -1919,7 +2086,7 @@ static void ckpt_read(runstate *R)
     size_t esz = fi->esz, linecap = (size_t)(2 * R->ncomp + 8) * DECMAX;
     char *line = (char *)xcalloc(1, linecap);
     char tok[DECMAX];
-    int c, k;
+    int c, k, have_recbytes = 0;
 
     if (!f)
         die("cannot read the checkpoint named by --resume");
@@ -1977,6 +2144,11 @@ static void ckpt_read(runstate *R)
         } else if (!strcmp(tok, "chain")) {
             if (!next_tok(&p, tok, sizeof tok) || !unhex32(tok, R->chain))
                 die("bad checkpoint chain");
+        } else if (!strcmp(tok, "recbytes")) {
+            if (!next_tok(&p, tok, sizeof tok) ||
+                !dec_u64(tok, UINT64_MAX, &R->rec_bytes))
+                die("bad checkpoint recbytes line");
+            have_recbytes = 1;
         } else if (!strcmp(tok, "state")) {
             size_t m;
             if (!next_tok(&p, tok, sizeof tok))
@@ -2016,6 +2188,86 @@ static void ckpt_read(runstate *R)
     }
     fclose(f);
     free(line);
+    if (!have_recbytes)
+        die("the checkpoint does not say how long its records are (no "
+            "recbytes line)");
+}
+
+/* --resume with --records. The checkpoint says how long the record
+ * stream was when it was written (recbytes) and what those records hash
+ * to (chain). The file must hold at least that many bytes, and those
+ * bytes must hash to that chain; otherwise it is not this run's records
+ * - cut short, another run's, or edited - and the resume is refused by
+ * name, with nothing touched. Whatever lies past them was written after
+ * the checkpoint: records the resumed run writes again, and usually a
+ * line a kill cut in half. It is cut away before a byte is appended, so
+ * a killed and resumed run's records are the uninterrupted run's, byte
+ * for byte, and still hash to its chain. */
+static void records_resume(runstate *R)
+{
+    const char *path = R->O->records_path;
+    const size_t chunk = (size_t)1 << 16;
+    unsigned char *buf = (unsigned char *)xcalloc(1, chunk);
+    uint8_t chain[32];
+    uint64_t have = 0;
+    int in_line = 0;
+    sha256 h;
+    char msg[1400];
+    FILE *f = fopen(path, "rb");
+
+    memset(chain, 0, sizeof chain);
+    sha256_start(&h);
+    while (f && have < R->rec_bytes) {
+        uint64_t left = R->rec_bytes - have;
+        size_t got = fread(buf, 1, left < chunk ? (size_t)left : chunk, f);
+        size_t i, from = 0;
+        if (!got)
+            break;
+        for (i = 0; i < got; i++) {
+            if (buf[i] != '\n')
+                continue;
+            if (!in_line) {
+                sha256_start(&h);
+                sha256_push(&h, chain, sizeof chain);
+            }
+            sha256_push(&h, buf + from, i - from);
+            sha256_push(&h, "\n", 1);
+            sha256_end(&h, chain);
+            in_line = 0;
+            from = i + 1;
+        }
+        if (from < got) {
+            if (!in_line) {
+                sha256_start(&h);
+                sha256_push(&h, chain, sizeof chain);
+                in_line = 1;
+            }
+            sha256_push(&h, buf + from, got - from);
+        }
+        have += got;
+    }
+    if (f)
+        fclose(f);
+    free(buf);
+    if (have < R->rec_bytes) {
+        snprintf(msg, sizeof msg,
+                 "--resume: the records file %s holds %" PRIu64 " bytes and "
+                 "the checkpoint's records run to %" PRIu64 " - it was cut "
+                 "short, or it is not this run's; resume with the file the "
+                 "run wrote, or without --records", path, have,
+                 R->rec_bytes);
+        die(msg);
+    }
+    if (in_line || memcmp(chain, R->chain, sizeof chain) != 0) {
+        snprintf(msg, sizeof msg,
+                 "--resume: the first %" PRIu64 " bytes of the records file "
+                 "%s do not hash to the checkpoint's chain - it is not the "
+                 "records this run wrote", R->rec_bytes, path);
+        die(msg);
+    }
+    if (file_cut(path, R->rec_bytes) != 0)
+        die("--resume could not cut the records file back to the "
+            "checkpoint");
 }
 
 /* ===================================================================
@@ -2531,9 +2783,15 @@ static void usage(void)
 "                           nothing and are not bounded by it)\n"
 "  --batch N                ensemble members per library call\n"
 "  --checkpoint PATH        write a resumable checkpoint\n"
-"  --checkpoint-interval S  seconds between checkpoints (default 10)\n"
-"  --resume                 continue from --checkpoint\n"
+"  --checkpoint-interval S  seconds between checkpoints (default 10); 0\n"
+"                           writes one after every step, and under\n"
+"                           --engine segments makes every segment one\n"
+"                           step - about the loop engine's own speed\n"
+"  --resume                 continue from --checkpoint; with --records,\n"
+"                           the file must hold the records the checkpoint\n"
+"                           accounts for, and is cut back to them\n"
 "  --stop-after-samples N   stop cleanly after N samples this run\n"
+"  --stop-after-steps N     stop cleanly after N steps this run\n"
 "  --records PATH           one line per (sample, member), exact decimal\n"
 "  --artifact PATH          an .xclbin; omit for the software backend\n"
 "  --csv                    machine-readable summary\n"
@@ -2675,15 +2933,67 @@ int main(int argc, char **argv)
                 NEGCTL_UNCAPPED = 1;
                 what = "segments ignore --checkpoint-interval - an "
                        "interruption loses up to a whole sample interval";
+            } else if (!strcmp(nc, "late-stop")) {
+                NEGCTL_LATE_STOP = 1;
+                what = "segments run one step past --stop-after-steps - a "
+                       "stopped run is deliberately a step late";
+            } else if (!strcmp(nc, "overlong")) {
+                NEGCTL_OVERLONG = 1;
+                what = "the longest segment is one step past what the "
+                       "loader accepts - the first one that long must be "
+                       "refused";
+            } else if (!strcmp(nc, "append")) {
+                NEGCTL_APPEND = 1;
+                what = "--resume appends to --records without checking it "
+                       "or cutting it back to the checkpoint - after a kill "
+                       "the resumed records are deliberately wrong";
             } else {
-                die("CFT_ORBITS_NEGATIVE_CONTROL takes transpose, zero-r2 "
-                    "or uncapped");
+                die("CFT_ORBITS_NEGATIVE_CONTROL takes transpose, zero-r2, "
+                    "uncapped, late-stop, overlong or append");
             }
-            if (O.engine != ENG_SEGMENTS)
-                die("CFT_ORBITS_NEGATIVE_CONTROL sabotages --engine "
-                    "segments and nothing else");
+            if (NEGCTL_APPEND ? O.engine == ENG_PROGRAM
+                              : O.engine != ENG_SEGMENTS)
+                die(NEGCTL_APPEND
+                    ? "CFT_ORBITS_NEGATIVE_CONTROL=append sabotages a "
+                      "resume, and --engine program cannot resume"
+                    : "CFT_ORBITS_NEGATIVE_CONTROL sabotages --engine "
+                      "segments and nothing else");
             fprintf(stderr, "cft-orbits: NEGATIVE CONTROL ACTIVE "
                     "(CFT_ORBITS_NEGATIVE_CONTROL=%s): %s\n", nc, what);
+        }
+    }
+    {
+        const char *lim = getenv("CFT_ORBITS_SEGMENT_LIMIT");
+        const char *vc = getenv("CFT_ORBITS_VIRTUAL_CLOCK");
+        if (lim && *lim) {
+            if (!dec_u64(lim, 0xffffffffull, &SEG_LIMIT) || !SEG_LIMIT)
+                die("CFT_ORBITS_SEGMENT_LIMIT takes a whole number of "
+                    "steps, 1 to 4294967295");
+            if (O.engine != ENG_SEGMENTS)
+                die("CFT_ORBITS_SEGMENT_LIMIT instruments --engine "
+                    "segments and nothing else");
+            fprintf(stderr, "cft-orbits: TEST INSTRUMENT ACTIVE "
+                    "(CFT_ORBITS_SEGMENT_LIMIT=%s): the loader is taken to "
+                    "accept at most %s steps a segment, so longer intervals "
+                    "are split where its real limit would split them - no "
+                    "result may change\n", lim, lim);
+        }
+        if (vc && *vc) {
+            char *end = NULL;
+            double s = (*vc >= '0' && *vc <= '9') || *vc == '.'
+                       ? strtod(vc, &end) : 0;
+            if (!end || *end || !(s > 0) || s > 1e6)
+                die("CFT_ORBITS_VIRTUAL_CLOCK takes a positive number of "
+                    "seconds a step, at most 1e6");
+            if (O.engine == ENG_PROGRAM)
+                die("CFT_ORBITS_VIRTUAL_CLOCK instruments the loop and "
+                    "segments engines' checkpoints, and --engine program "
+                    "writes one, at the end");
+            VCLOCK = s;
+            fprintf(stderr, "cft-orbits: TEST INSTRUMENT ACTIVE "
+                    "(CFT_ORBITS_VIRTUAL_CLOCK=%s): the clock advances %s s "
+                    "a step and nothing else moves it, and each checkpoint "
+                    "is logged here - no result may change\n", vc, vc);
         }
     }
 
@@ -2830,6 +3140,8 @@ int main(int argc, char **argv)
         ckpt_read(&R);
     }
     if (O.records_path) {
+        if (O.resume && !NEGCTL_APPEND)
+            records_resume(&R);
         R.recf = fopen(O.records_path, O.resume ? "ab" : "wb");
         if (!R.recf)
             die("cannot write the records file");
@@ -2842,7 +3154,7 @@ int main(int argc, char **argv)
                O.engine == ENG_PROGRAM ? "sequencer-program" :
                O.engine == ENG_SEGMENTS ? "sequencer-segments" : "host-loop");
 
-    t0 = now_s();
+    t0 = clock_s();
     tckpt = t0;
 
     if (O.engine == ENG_PROGRAM) {
@@ -2913,11 +3225,12 @@ int main(int argc, char **argv)
              * resume picks up part way through a sample interval.
              * That is what makes an interruption cost about one
              * --checkpoint-interval of work however coarse the
-             * sampling is - on the loop engine because the clock is
-             * read after every step, on segments because a segment is
-             * sized to fit one interval - and it is what the resume
-             * and interruption tests in host/tests/orbits_check.py
-             * exercise. */
+             * sampling is: the loop engine reads the clock after every
+             * step, and a segment is sized to END when the next
+             * checkpoint is due, so both write one as soon as an
+             * interval has passed - the interval plus at most a step,
+             * at a steady rate. It is what the resume and interruption
+             * tests in host/tests/orbits_check.py exercise. */
             uint64_t upto = (R.sample + 1) * R.stride;
             while (R.step < upto) {
                 if (O.engine == ENG_SEGMENTS) {
@@ -2925,17 +3238,23 @@ int main(int argc, char **argv)
                      * point if that comes first - the same step at
                      * which the loop below would stop - and no longer
                      * than the loader takes (seg_limits) or, while
-                     * checkpoints are written, than fits one interval
-                     * at the last segment's rate (seg_time_cap). The
-                     * results do not depend on where segments end;
-                     * orbits_check.py holds that at every batch, stop
+                     * checkpoints are written, than fits the time left
+                     * before the next one is due, at the last segment's
+                     * rate (seg_time_cap). Sized to one whole interval
+                     * instead, a segment ran half to all of one and the
+                     * checkpoint came after the second - two intervals
+                     * apart (verifier-V1, 2026-09-25). The results do
+                     * not depend on where segments end; orbits_check.py
+                     * holds that at every batch, stop, segment length
                      * and relay it runs. */
                     uint64_t kseg = upto - R.step;
-                    double tseg;
+                    double tseg, dt;
                     if (O.stop_after_steps >= 0) {
                         uint64_t want = (uint64_t)O.stop_after_steps;
                         uint64_t left = want > steps_this_run
                                         ? want - steps_this_run : 1;
+                        if (NEGCTL_LATE_STOP)
+                            left++;
                         if (kseg > left)
                             kseg = left;
                     }
@@ -2944,13 +3263,17 @@ int main(int argc, char **argv)
                     if (kseg > R.s_kmax)
                         kseg = R.s_kmax;
                     if (O.ckpt && !NEGCTL_UNCAPPED) {
-                        uint64_t cap = seg_time_cap(&R, O.ckpt_interval);
+                        uint64_t cap = seg_time_cap(&R, O.ckpt_interval -
+                                                   (clock_s() - tckpt));
                         if (kseg > cap)
                             kseg = cap;
                     }
-                    tseg = now_s();
+                    tseg = clock_s();
                     seg_run(&R, kseg);
-                    R.s_sec_per_step = (now_s() - tseg) / (double)kseg;
+                    dt = clock_s() - tseg;
+                    if (dt > 0)     /* a clock that did not move measured
+                                       nothing; keep the last rate */
+                        R.s_sec_per_step = dt / (double)kseg;
                     R.step += kseg;
                     steps_this_run += kseg;
                 } else {
@@ -2958,9 +3281,9 @@ int main(int argc, char **argv)
                     R.step++;
                     steps_this_run++;
                 }
-                if (O.ckpt && now_s() - tckpt >= O.ckpt_interval) {
+                if (O.ckpt && clock_s() - tckpt >= O.ckpt_interval) {
                     ckpt_write(&R);
-                    tckpt = now_s();
+                    tckpt = clock_s();
                 }
                 if (O.stop_after_steps >= 0 &&
                     steps_this_run >= (uint64_t)O.stop_after_steps) {
@@ -2973,19 +3296,19 @@ int main(int argc, char **argv)
             R.sample++;
             emit_sample(&R, R.sample, R.step, R.q, R.v);
             emitted++;
-            if (O.ckpt && now_s() - tckpt >= O.ckpt_interval) {
+            if (O.ckpt && clock_s() - tckpt >= O.ckpt_interval) {
                 ckpt_write(&R);
-                tckpt = now_s();
+                tckpt = clock_s();
             }
             if (O.stop_after_samples >= 0 && emitted >= O.stop_after_samples)
                 break;
         }
     }
-    elapsed = now_s() - t0;
+    elapsed = clock_s() - t0;
     if (O.ckpt)
         ckpt_write(&R);
-    if (R.recf)
-        fclose(R.recf);
+    if (R.recf && fclose(R.recf) != 0)
+        die("the records file could not be written");
 
     report(&R, elapsed, caps.backend);
 

@@ -395,11 +395,35 @@ result:
   image out the way the loader does and runs a longer interval as
   several segments, each at most that long.
 - **the checkpoint's.** While `--checkpoint` is being written, a segment
-  is sized to fit one `--checkpoint-interval` at the rate the previous
-  one ran - a power of two of steps, so a run settles on a few image
-  lengths; the first segment of a run is one step, which measures the
-  rate. Without it one segment was a whole sample interval, and an
-  interruption lost all of it.
+  is sized to END when the next checkpoint is due: the largest power of
+  two of steps that fits the time left before then, at the rate the
+  previous segment ran. The first segment of a run is one step, which
+  measures the rate. A checkpoint is written at the first segment end
+  after an interval has passed - so at a steady rate within a step of
+  the interval, which is where the loop engine, reading the clock after
+  every step, writes its own. An interval is therefore covered by a few
+  segments of decreasing powers of two (a binary decomposition of it,
+  at most `log2` of its steps plus one), and a run settles on a few
+  image lengths.
+
+  Two earlier sizings were wrong. Before 2026-09-25 one segment was a
+  whole sample interval, and an interruption lost all of it. Earlier on
+  2026-09-25 a segment was sized to fit a WHOLE interval at the last
+  rate: it ran half to all of one, so the interval had usually passed
+  only after the second, and checkpoints came about two intervals apart
+  - 1.87 to 1.94 s at `--checkpoint-interval 1`, where the loop engine
+  wrote them 1.01 to 1.03 s apart (verifier-V1, 2026-09-25).
+
+  `--checkpoint-interval 0` asks for a checkpoint after every step, and
+  so makes every segment one step: a program run per step per batch
+  chunk. That costs about what the loop engine costs at 0, some 25
+  times a run of whole sample intervals on the software backend, and
+  changes no result. Kepler, fp256, 6 members, 6,000 steps sampled every
+  1,000, on this desktop on 2026-09-25: 7.49 s and 6,000 runs, against
+  0.31 s and 6 runs with no checkpoint and 0.32 s and 7 runs at the
+  default interval (the first one step); the loop engine at 0, 6.74 s;
+  one chain throughout. verifier-V1 measured 11.9 s against 0.42 s on
+  the sizing before this one.
 
 What that buys is everything (1) forbade:
 
@@ -455,6 +479,15 @@ addresses 30 of them, the highest at index 34, so it uses the indexed
   operation count the census implies must also equal the loop engine's
   own count, a second statement of the census that shares none of its
   derivation;
+- the lengths real runs use, not only the short segments above: the
+  tool's default kepler run (binary256, a segment a period, 1,024
+  steps), one 100,000-step sample interval at binary64 run as a single
+  segment - past 2^16 steps, where a trip count kept to 16 bits would
+  wrap - and each binary256 configuration with its intervals split at
+  a loader limit lowered to 13 steps (`CFT_ORBITS_SEGMENT_LIMIT`,
+  below), since the real limit is hours of work away; each against the
+  host loop byte for byte, the run count showing the segments were
+  that long, or split that way;
 - the same bytes after `--stop-after-steps` 1, 13, 95, 96 and 97 - 95
   to 97 straddle a sample boundary - with each checkpoint at the step
   asked for;
@@ -462,35 +495,117 @@ addresses 30 of them, the highest at index 34, so it uses the indexed
 - the outer solar system stopped every 37 steps and resumed by segments
   alone, and by the two engines in turn, ending on the uninterrupted
   loop engine's bytes;
-- a run killed three seconds into a 30,000-step sample interval with
-  `--checkpoint-interval 1` has left a checkpoint part way through it;
-- an interval longer than one segment may be runs rather than being
-  refused, each run's first segment at exactly the limit - the
-  instruction ceiling for outer/yoshida4, the trip count for
-  kepler/leapfrog - where one step more would be refused at load;
+- where checkpoints fall: under a steady clock
+  (`CFT_ORBITS_VIRTUAL_CLOCK`, below), segments write theirs at exactly
+  the host loop's steps - one interval apart - with sample intervals
+  of ten checkpoint intervals, of 1.27 and of 0.1, in at most eight
+  segments an interval and one more a sample;
+- on the real clock, a run with a 30,000-step sample interval and
+  `--checkpoint-interval 1`, watched until its first checkpoint appears
+  (a minute at most, however busy the machine), holds a step part way
+  through the interval;
+- a killed run's records, on both engines, each resumed by the other:
+  killed as its first checkpoint appears, with the file exactly as long
+  as the checkpoint says, and killed once the file has grown 8 KB past
+  it, ahead of the checkpoint and usually in half a line - each must
+  finish on the uninterrupted run's checkpoint and records, byte for
+  byte; and, laid out exactly rather than by a kill, a file ahead of its
+  checkpoint resumes to the same bytes, while one cut a byte short, one
+  with a byte changed, none at all, a version-1 checkpoint and one
+  without `recbytes` are each refused by name with both files left as
+  they were ("The checkpoint format", below); a checkpoint is the same
+  file with `--records` and without;
+- a sample interval longer than the longest segment the loader takes
+  is run as several segments rather than being refused, each run's
+  first segment at exactly that limit: the 2^40-instruction ceiling for
+  outer/yoshida4, where one step more is refused by the loader, and the
+  2^32-1 trip count for kepler/leapfrog, where one step more is refused
+  by this tool's own trip-count check;
 - the census above against the program's structure;
 - `python/cft_golden` on the image the tool writes (`--segment-dump
   DIR`): its executor returns the library's scratch-out exactly, and
-  its assembler reads the image back to the same bytes, `kx` choice
-  included.
+  its assembler reads the image back to the same bytes with no
+  instruction marked `.kx`. The round trip alone would pass any legal
+  choice of the indexed form - the disassembler writes a `kx` the
+  assembler would not have chosen as `.kx`, and the assembler honours
+  it - so it is the absence of the marker that holds the tool to the
+  assembler's rule (docs/PROGRAMS.md): indexed exactly where a constant
+  index is 16 or more.
 
-The controls, each run every time and each required to fail:
-`CFT_ORBITS_NEGATIVE_CONTROL=transpose` packs `v_0` and `v_1` into each
-other's slots - the lane-major transposition bug the comparisons exist
-to catch - and both the engine comparison and the relay fail under it;
-the host loop stopped at 95 and 96 against segments stopped at 96 and
-97 fails the stop comparison; `=uncapped` restores the old sizing, and
-the killed run then leaves no checkpoint at all; `=zero-r2` zeroes
-every `r^2` in the image, and the run must end on the flag certificate
-(exit 3), so a segment whose flags were dropped cannot pass; the golden
-executor on the image with one bit of one constant changed must
-disagree with the library's scratch-out; and a reserved bit set in the
-image is refused by both the golden loader and the disassembler. The
-census and the batch comparison carry no control of their own. The
-census was watched failing under two planted miscounts, and every leg
-above under its own planted defect, on 2026-09-25 (docs/VALIDATION.md);
-the batch comparison's chunk boundary is crossed, with the transpose
-control, by the engine comparison at batch 3 of 5.
+The controls, each run every time and each required to fail.
+`CFT_ORBITS_NEGATIVE_CONTROL` makes the tool wrong in one named way:
+
+- `transpose` packs `v_0` and `v_1` into each other's slots - the
+  lane-major transposition bug the comparisons exist to catch - and
+  the engine comparison (kepler, leapfrog), the outer yoshida4 run
+  split at 13 steps, the relay, the default kepler run and the
+  100,000-step interval each fail under it;
+- `late-stop` runs a segment one step past `--stop-after-steps`, and
+  the stop comparison fails at 13, 95 and 97 - at 1 the run's first
+  segment is one step anyway, and 96 is a sample boundary, which ends a
+  segment of its own accord. What catches a late stop is the clause
+  that each checkpoint is at the step asked for, which the stop
+  comparison carries beside the bytes;
+- `uncapped` restores the sizing before 2026-09-25, a segment a sample
+  interval: under the steady clock segments then checkpoint elsewhere
+  than the host loop, and on the real clock the run has written no
+  checkpoint in three times as long as the real one took (and at least
+  3 s);
+- `append` resumes as the tool did before 2026-09-25, appending to
+  `--records` without checking or cutting it, and the resumed records
+  then differ from the uninterrupted run's - after each kill that left
+  the file ahead of its checkpoint, and on the file laid out exactly;
+- `overlong` takes the loader's limit one step too long, and both runs
+  at the limit are then refused at once;
+- `zero-r2` zeroes every `r^2` in the image, and the run must end on
+  the flag certificate (exit 3), so a segment whose flags were dropped
+  cannot pass.
+
+Beside them, the golden executor on the image with one bit of one
+constant changed must disagree with the library's scratch-out, and a
+reserved bit set in the image must be refused by both the golden loader
+and the disassembler.
+
+Three checks carry no control of their own: the census, the batch
+comparison and the engine comparisons at binary32, binary64 and
+binary128. The census was watched failing under two planted miscounts
+(docs/VALIDATION.md, 2026-09-25); the batch comparison's chunk boundary
+is crossed, with the transpose control, by the engine comparison at
+batch 3 of 5; the three narrower formats were watched failing under a
+Newton pass count fixed at binary256's (the same entry), and binary64
+carries the transpose control in the 100,000-step leg.
+
+Every leg above but one was also watched failing under a planted
+defect of its own, each built into a copy of this tool and run through
+the whole gate, on 2026-09-25 (docs/VALIDATION.md has the tables): a
+stale image, a transposed or misread operand, a Newton pass count, a
+late stop, a dropped flag word, buffers sized by the batch, the
+loader's limit a step long and its 32-bit cap removed, the time cap
+off; a trip count kept to 16 bits, a segment over 128 steps one step
+short, the loader-limit split a step behind, segments sized to a whole
+interval, to two and to four, the rate never measured, an encoder that
+chooses `kx` for every constant; and, for the records, a resume that
+does not check, cut or hash-check the file, records not handed over
+before a checkpoint, and the stream miscounted or counted only when
+written. The exception is the golden comparison's executor half. It
+runs the golden executor and the library on the same image by design,
+so what it can see is a library that runs an image differently from
+the reference; a wrong image is the engine comparisons' to catch, and
+no planted defect of this tool has been seen to fail it.
+
+**Two test instruments** make reachable what otherwise is not. Unlike
+the controls they must change no result - which the checks that use
+them hold - and each is off unless set, refused by name when malformed
+or set for an engine it does not instrument, and announced on stderr:
+
+- `CFT_ORBITS_SEGMENT_LIMIT=N` (segments): the loader is taken to accept
+  at most N steps a segment, so the split its real limit makes - at
+  2^32-1 steps or 2^40 instructions - is reached in seconds;
+- `CFT_ORBITS_VIRTUAL_CLOCK=S` (loop and segments): the clock the tool
+  reads advances S seconds for every step and for nothing else, and
+  each checkpoint is logged on stderr as it is written - a perfectly
+  steady rate, so where checkpoints fall is a fact the check predicts
+  rather than a measurement of the machine's load.
 
 **What it does not do.** `--rsqrt exact`, for the reason in (2): it is
 refused by name. And `--engine program` stays exactly as it was: the
@@ -610,7 +725,7 @@ is the whole design rule and it is what lets two runs with different
 batch sizes end on byte-identical files.
 
 ```
-cft-orbits-checkpoint 1
+cft-orbits-checkpoint 2
 format fp256
 problem kepler                the run's identity - a checkpoint from a
 scheme leapfrog               different problem, scheme, format, route,
@@ -625,6 +740,7 @@ stride 96
 samples 2
 at 37 0                       steps done, samples emitted
 chain 3f0e...                 SHA-256 chain over the records so far
+recbytes 6857                 the bytes of those records, as --records writes them
 state 0 <q...> <v...>         one line per ensemble member, exact decimal
 state 1 ...
 inv 0 <H0> <dHmax> <L0> <dLmax>     the invariants and their extremes
@@ -638,16 +754,54 @@ Every value is an exact decimal from `cft_to_decimal_char` with
 library writes, the library reads back, so a checkpoint round trip
 cannot lose a bit.
 
+**Version 2** (2026-09-25) added `recbytes`, the length of the record
+stream the chain covers: the bytes `--records` has written by then. It
+is counted whether or not `--records` is open, so a run with it and a
+run without end on the same file - an option is not a result, and the
+gate checks it. A version-1 file is refused by its first line, as any
+other version is, and so is a version-2 file without `recbytes`.
+
 The checkpoint is **step-granular, not sample-granular**: the ensemble
 state is complete after every step, so a timed checkpoint may fall
 between any two of them and `--resume` picks up part way through a
 sample interval. That is what makes an interruption cost about one
 `--checkpoint-interval` of work however coarse the sampling is. The
-loop engine reads the clock after every step. `--engine segments` can
-only write one between segments, so it sizes each segment to fit one
-interval at the rate the one before it ran ("As resumable segments"
-above). "About" is the honest word there: a segment that runs slower
-than the last one did overruns by the difference.
+loop engine reads the clock after every step, so it writes a checkpoint
+at the step an interval has passed. `--engine segments` can only write
+one between segments, so it sizes each segment to end when the next
+checkpoint is due, at the rate the one before it ran ("As resumable
+segments" above): at a steady rate it writes its checkpoints at the
+loop engine's steps, which the gate holds step for step under a steady
+test clock. "About" is still the honest word on a real clock: a
+segment that runs slower than the one before it overruns the interval
+by the difference.
+
+**Records after an interruption.** Records go through stdio and a
+checkpoint is written between samples, so a killed run leaves the
+records file out of step with the checkpoint on disk. Before 2026-09-25
+nothing reconciled the two: the file could be behind the checkpoint
+(records it accounted for still in the stdio buffer) or ahead of it
+(records written since), usually ending in half a line, and `--resume`
+appended from the checkpoint's sample - so the resumed file was not
+the run's and no longer hashed to its chain, on either engine
+(verifier-V1: 7 kills of 7). Now:
+
+- every record written so far is handed to the system, and the file's
+  length checked against `recbytes`, **before** the checkpoint that
+  counts them is written - so a kill leaves the file at or ahead of the
+  checkpoint on disk, never behind it;
+- `--resume` with `--records` requires the file's first `recbytes`
+  bytes to hash to the checkpoint's `chain`, cuts away everything after
+  them, and then appends - so a killed and resumed run's records are the
+  uninterrupted run's, byte for byte, on either engine;
+- a file shorter than `recbytes`, one whose first `recbytes` bytes do
+  not hash to the chain, or none at all, is refused by name, and
+  neither file is touched: it is not this run's records - resume with
+  the file the run wrote, or without `--records`.
+
+What that covers is the process ending - killed, crashed, stopped. A
+machine that loses power can lose what the operating system had not yet
+written to the disk; nothing here asks it to (no `fsync`).
 
 ### The hash chain
 
@@ -699,11 +853,11 @@ same bytes wherever it sits.
 | the invariants | `H0` and `L0` against 300-digit values from the same starting bits; the angular-momentum drift against a `steps^2 2^-p 10^6` bound for both problems and both schemes |
 | the transcribed table | osculating elements against published sidereal periods |
 | the chain | recomputed with `hashlib` |
-| batch size | 8, 3 and 1 over the same ensemble must end on byte-identical checkpoints |
+| batch size | 8, 3 and 1 over the same ensemble must end on byte-identical checkpoints, and a run with `--records` on the same checkpoint as one without |
 | engines | the whole integration as one sequencer program and the host `cft_run` loop must produce byte-identical records AND checkpoints |
-| segments | `--engine segments` against the host loop on both problems and both schemes at binary256 and on one configuration at each other format, operation counts included; five stop points; its own batch sizes, 10^12 included; the outer solar system resumed in 37-step pieces by segments alone and by the two engines in turn; a run killed mid interval leaves a checkpoint; intervals past one segment's limits run; its census against the program's structure; the golden model's executor and assembler on its image; the flag certificate on a planted fault; and a control on each comparison but the census and the batch sizes, which must fail ("As resumable segments" names them) |
-| interruption | a run stopped every 37 steps - which does not divide the 96-step sample interval, so most stops land mid-interval - and resumed at a different batch size must end on the same checkpoint and the same records, byte for byte, as one that was never stopped |
-| refusals | the three things `--engine program` must refuse, and the four `--engine segments` must, each with its reason |
+| segments | `--engine segments` against the host loop on both problems and both schemes at binary256 and on one configuration at each other format, operation counts included, and at the segment lengths real runs use (1,024 steps, 100,000 in one, and intervals split at a lowered loader limit); five stop points; its own batch sizes, 10^12 included; the outer solar system resumed in 37-step pieces by segments alone and by the two engines in turn; where its checkpoints fall, against the host loop's under a steady clock, and a real run's first checkpoint part way through a long interval; intervals past one segment's limits run; its census against the program's structure; the golden model's executor and assembler on its image; the flag certificate on a planted fault; and a control on each comparison but the census, the batch sizes and the three narrower formats, which must fail ("As resumable segments" names them) |
+| interruption | a run stopped every 37 steps - which does not divide the 96-step sample interval, so most stops land mid-interval - and resumed at a different batch size must end on the same checkpoint and the same records, byte for byte, as one that was never stopped; and runs KILLED, on both engines - at their first checkpoint, and with their records ahead of it - and each resumed by the other engine, must end on the uninterrupted run's checkpoint and records too, with a control that resumes without cutting the records back and must fail |
+| refusals | the three things `--engine program` must refuse, the four `--engine segments` must, the negative controls and test instruments set where they do not apply or to a malformed value, and the records files `--resume` must refuse, each with its reason |
 
 ---
 
@@ -948,8 +1102,9 @@ Three deliberate faults, each rebuilt and run through
 `make -C host orbitstest`. They are chosen to be caught by three
 *different* gates, and the third one is caught by only one.
 
-`orbits_check.py` scores 26 checks in 8 groups; the tables below say
-which of them fired.
+`orbits_check.py` scored 26 checks in 8 groups when these were run
+(2026-09-04; it has grown since, and [6b]'s own planted defects are in
+"As resumable segments"); the tables below say which of them fired.
 
 ### A: Newton's third law broken
 
