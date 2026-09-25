@@ -14368,3 +14368,196 @@ The sweep, every point on 307872e, kernel WNS from the post-route summary:
 | 170 | standard | +0.029 | pass |
 | 175 | standard | -0.102 | - |
 | 175 | ExtraTimingOpt / AggressiveExplore | **+0.001** | pass |
+
+## 2026-09-24 - the sweep's four follow-ups: capability words made true, a skip inside a stage reaches the verdict, the module and pages rebuilt, and the stale comments made true
+
+**Why.** The sweep's entry above left four things open, and Logan asked
+for all four: the code comments its auditors found stale (179 notes), the
+published wasm pages' prose with the pages and module regenerated, the
+two `seq_features` inconsistencies a verifier noted, and the runner
+saying "nothing skipped" over a check that skipped inside a passing
+stage. Run on the desktop, which was free this time, from 12:29 to 00:20
+the next morning; nothing ran on amd-arc-box. Docker Desktop carried the
+pinned emscripten image and a gcc 13 check. The merges, in order:
+8948ab8, e8ab0c3, 513862a, 8a8f492, cf8f00f (the lead's seam), 8464534,
+a40be41, 3da57a2, 92ae6e9, 1ab44ad (the lead's seam), and this entry.
+
+**How it ran.** ParcelRound's method again: seven parcels in two waves,
+each in its own worktree with a brief naming its files; a verifier per
+parcel, told to report and never fix; a send-back went to a fresh fixer
+with a re-check scoped to the verifier's defects. The lead merged
+serially on a staging branch, did the seam work no parcel owned, and ran
+the runner and CI on the merged commit before main moved. 28 agents.
+
+    wave 1 (on 3b15d52)
+      P1-rtl   comments in 13 files: rtl, hw, formal, tb, python    MERGE
+      P1-host  comments across host/ (29 of 44 notes, 6 adjacent)   SEND-BACK 2 -> MERGE
+      P3       the software handle's capability word                 SEND-BACK 1 -> MERGE
+      P4       the runner counts inner skips                         SEND-BACK 2 -> MERGE
+      lead     the documents that quoted what wave 1 changed (cf8f00f)
+    wave 2 (on cf8f00f)
+      P1b      comments in the files P3 changed; two generators LF   MERGE
+      P6       reduced profiles compile again, and are compiled      SEND-BACK 2 -> MERGE
+      P2       the module and the pages rebuilt                      SEND-BACK 2 -> MERGE
+      P7       the replays' reports printed; one skip accounting     SEND-BACK 2 -> MERGE
+      lead     four claims no parcel owned, and one silent drop (1ab44ad)
+
+Eleven defects in six send-backs, every one real when checked; each
+re-check found nothing further. Two of the eleven were in the lead's own
+grant or rule (below).
+
+**What changed that a caller sees.**
+
+- *The software handle's word is the truth.* It computed a scalar
+  operand and a segmented reduction without publishing
+  `CFT_SEQ_FEAT_SCALAR` or `CFT_FEAT_REDUCE_SEG`, and
+  `cft_supports(dev, CFT_IMUL, f)` read a CAPS bit the software open
+  never set. `seq_features` goes 0x671f to 0x7f1f; the open publishes both
+  bits at every profile (not from `cft_sw_seq_caps`, which
+  `CFT_NO_PROGRAM` compiles out); the software path reads the bits it
+  publishes before computing, so each is load-bearing; IMUL answers from
+  CAPS[28]; a NULL second operand to IMUL is refused. A remote handle
+  still expands a scalar operand on the client whatever its server
+  publishes, and under-promises there, as for INDEXED.
+- *The Node module and the published pages.* The committed
+  `bindings/node/cft_node.wasm`, built at b558a56, answered 0x271f and
+  `supports(30) = 0`: it computed SCALAR, REDUCE_SEG and IMUL without
+  publishing them, and reported LANE_MASK clear truthfully, since b558a56
+  refused every lane mask by name. Rebuilt in the pinned image by
+  `build.sh` and `build_demos.sh`, never by hand, it answers 0x7f1f and 1
+  at all four formats; two clean container builds gave identical bytes
+  (module 257,252 bytes, sha256 3737534d...; conformance.html
+  87294879...; demos.html 5ce2fc2b...). The pages' prose was checked
+  against the tree and fixed in the templates (the family counts, three
+  false "base64" claims, a footer saying the sequencer is not exported).
+  `verify.mjs` now replays the page's own embedded sample (4,015 cases
+  over 20 sets) and fails the negative-control page, which no gate had
+  read. The live site is deployed from main by the Pages workflow, so it
+  changes with this push.
+- *The runner.* A stage that passes has its log read: a line starting
+  `SKIP` or `SKIPPED`, pytest's `-rs` lines (colour stripped) and the
+  conformance replay's "skipped, ... not on this device" are counted,
+  named on the stage's row, in the census and on the VERDICT line, and
+  `--require-all` fails them. `generated` builds the library
+  `make_seq_corpus.py` loads, and a generator's `--check` that crashes is
+  a FAIL, not a skip. The cpp and remote replays print their reports, and
+  `cpp-api-test` fails a malformed vector set it used to pass as "no
+  vector sets". What is counted is settled once, in verify/README.md: a
+  check that did not run for a host reason (a missing tool, build product
+  or input) or a published conformance case the device cannot run is a
+  skip, and counts; a device-test or remote-test leg for something the
+  device under test does not publish is named in one form (`<what>: NOT
+  COMPARED | NOT TESTED | NOT RUN - <why>`) and counted by device-test's
+  own closing line, never as a skip. For part of the day one device-test
+  run counted the same missing capability both ways. A software run now
+  ends "agree on every case that RAN", after "NOT TESTED 5; NOT RUN 4".
+  `bash verify/test-inner-skips.sh` plants every form, both ways.
+- *Reduced profiles compile again.* Since e0aa96b (2026-09-14)
+  `divsqrt.c` called `cft_composed_refusal` outside the guard that
+  declares it, which gcc 14 and later reject: `CFT_NO_PROGRAM`,
+  `CFT_TINY` and the tiny128 board profile did not build, and nothing
+  built them. `make -C host profiles-check`, run by the `libcft` stage,
+  compiles the library at 20 settings (every documented profile and each
+  of the 11 `CFT_NO_` switches alone, the list read from `cft_config.h`)
+  with implicit declarations, array bounds and aggressive loop
+  optimisation as errors, and requires 5 combinations refused by name.
+  It found a real overwrite: a narrowed `cft_bn` with the
+  transcendentals on copies 34-limb constants into it. `cft_config.h`
+  refuses that below the width it is validated at, 64 limbs.
+- *Comments.* The 179 notes were split by directory across P1-rtl,
+  P1-host, P1b and P2, and each parcel disposed of every note it was
+  given; notes already true, in another parcel's file, or about code
+  rather than a comment went to the lead. Among the fixes: `cft_csr.sv`'s
+  CAPS[14], CAPS[7] (KX9), STATUS[5] and the CAPS2 map through [10];
+  `orbits.c` saying a correctly rounded divide cannot be one program
+  (it has been, opt-in, since 7b3c10c); `cft.h`'s ABI 0.14 entry calling
+  its fields refused. Each comment parcel's diff was proved comment-only
+  by a checker with 32 planted cases. Its first version read `'` as a
+  quote in SystemVerilog, and its second dropped every statement-leading
+  string in Python; the parcels found both. Where a generator emits the
+  text (`mp_2opi.h`), the generator changed and its `--check` holds it;
+  `gen_2opi.py` and `gen_mp_consts.py` also wrote CRLF on Windows, which
+  their `--check` could not see, and now write LF.
+- *A silent drop, found at the seam.* `bindings/node/remote_test.mjs`
+  dropped any published case whose op name it could not send. Until P2
+  gave `OPS_BY_NAME` its IMUL entry, that was every imul case in the
+  WebSocket replay's sample (66 of 3,200). It is counted now and fails
+  section D by name, watched on the tree before P2's merge: `FAIL every op
+  the chosen sets name is one this client sends - not sent: imul (66
+  cases)`. The same test's "vectors/out is not generated ... NOT RUN" and
+  `verify_demos.mjs`'s "skipped: run build_demos.sh" are host reasons,
+  now printed with the marker; the remote stage generates the vectors its
+  node leg replays.
+
+**What the method caught in the lead's own work.**
+
+- the briefs' Windows build line lacked `TMP`/`TEMP` and the test
+  targets' `.exe`, and gave `host/tests` to two parcels (all three
+  corrected in the urgent channel within minutes);
+- the comment checker the lead wrote was wrong twice (above);
+- P4's brief said `generated` runs before `libcft` and so skipped on
+  every CI push; stages run in file order and it does not. The fix it
+  asked for was still right for an `--only` run;
+- P7's brief put the swallowed replay reports in `run.sh`; they were
+  dropped inside `cpp_api_test.cpp` and `remote_check.py`;
+- P2's brief took the page's negative control to be gated; nothing read
+  it;
+- P6's grant keyed the new refusal on `CFT_MAX_FORMAT` and so refused a
+  working build (MAX_FORMAT 2 with 64 limbs replays exactly); the
+  verifier measured it;
+- the lead's skip rule did not separate a counted skip from a named
+  capability gap (P7's verifier, above);
+- the lead created the staging branch in the checkout another session
+  was committing in, and moved it to a worktree.
+
+**Measurements on the merged commit, 1ab44ad.**
+
+    bash verify/run.sh --budget gate    34 of 35 ok; lang-rust FAIL, as at 3b15d52
+      (the desktop, 22:18-00:20)        (MSVC link.exe cannot resolve __mingw_snprintf
+                                        or ___chkstk_ms in the mingw-built libcft.a);
+                                        golden ok + 3 inner skips, now on the VERDICT:
+                                        two need the Arduino loopback binary, one
+                                        Python 3.13's math.fma
+    bash verify/run.sh --only node,wasm PASS, nothing skipped
+    CI run 36097981959                  host, portability, golden, rtl: success; the
+                                        host job's 22 stages under --require-all:
+                                        PASS, nothing skipped, 0 inner skip(s)
+    the libcft stage                    1,224,915 cases, all matching; profiles-check:
+                                        20 settings compile, 5 refused by name
+    the remote stage                    184,736 cases local and remote, all matching;
+                                        remote_test.mjs 68 checks, 0 failures
+    bash verify/test-inner-skips.sh     PASS: 32 checks and four controls; 25 program
+                                        lines; 14 not-here lines; 15 pins
+    profiles-check under gcc 13         pass: CI's libcft stage runs it (ubuntu-24.04,
+                                        ok 483 s), and on P6's branch in ubuntu:24.04
+    python python/check_docs_index.py   rc 0; sync.py --check: 30 files identical
+
+**Not done, and the owner's to decide.**
+
+- `cft_last_error()` is empty for every refusal on `CFT_TINY` (a
+  one-byte `CFT_ERRMSG_MAX`); HOSTAPI.md now says so. Whether a tiny
+  build should carry a short name per refusal is a size decision.
+- The Node module's word publishes bits its exports cannot reach: no
+  `cftw_*` call takes a lane mask or an index table, and `wasm_api.c`
+  projects seven of the twelve `seq_features` bits (not SCRATCH_STRICT,
+  SCALAR, REDUCE_SEG, INDEXED or LANE_MASK), so `audit()` cannot hold
+  those five to the module; `test.mjs` holds them to `cft.h` instead.
+- A narrowed `cft_bn` with the transcendentals is refused below 64 limbs.
+  34 is the overwrite floor, but 34 fails fp128 sin case 6616 with an
+  internal error, cause untraced, and 35 to 63 are unmeasured; a guard at
+  `mpfloat.c`'s copy site, or a per-format width, needs that work first.
+- `make embedded` (the tiny and tiny128 replays on the loopback) is no
+  runner stage, and its last recorded run predates e0aa96b;
+  profiles-check now compiles those profiles, but nothing replays them.
+  `verify/test-inner-skips.sh` is run by no stage and no CI job.
+- `conformance.c` passes a partly filled vectors directory with a
+  smaller set count and no skip line - the one invisible form left.
+- The generators' `--check` compares universal newlines, not bytes;
+  `pyproject.toml` declares no dependencies though the model needs
+  mpmath; `orbits.c`'s refusal messages still give the old program model
+  as their reason (they are strings, not comments).
+- On this desktop `--require-all` fails golden's three skips, lang-rust
+  fails to link, and the runner cannot build a checkout reached through
+  Git Bash's `/tmp` mount (enter it by its `/c/` path).
+- `hw/gen_layouts.py` still builds the single at 135, though 175 closed
+  with the second recipe.
