@@ -850,7 +850,12 @@ stage seq "the sequencer: C vs model over fuzzed programs, plain and with indexe
 do_programs() {
   HOSTMAKE collatz asmtest PYTHON="$PYBIN"
 }
-need host-cc python mpmath
+# Not mpmath: programs/check.py needs it only for the ODE rows' 300-digit
+# arm, which it skips by name - an inner skip this runner counts on the
+# VERDICT line and --require-all fails. Requiring it here skipped every
+# other check with it, the stdlib-only textbook arm included
+# (verifier-V3, 2026-09-25).
+need host-cc python
 stage programs "the program library: both assemblers against the MANIFEST, the readback, the generated corpora, and every row's own check" -- do_programs
 
 # reduce_check.py holds the model's partition tree to the C partitioner
