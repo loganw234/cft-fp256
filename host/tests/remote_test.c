@@ -635,8 +635,15 @@ static void caps_block_tests(cft_device *rm, cft_device *sw)
                   (unsigned long)f_rm, (unsigned long)f_sw);
         }
     } else {
-        printf("  server backend is '%s', not compared with the local "
-               "software backend\n", cftr_server_backend(hw));
+        /* One form for a check with nothing to test on the server's
+         * device, here and below: "<what>: NOT COMPARED - <why>", as
+         * device-test prints its own (host/tests/device_test.c,
+         * not_here). Never SKIP first: verify/run.sh counts that as a
+         * check a HOST reason stopped, and these are about the device
+         * under test (verify/README.md). */
+        printf("  caps and a scalar operand against the local software "
+               "backend: NOT COMPARED - the server's backend is '%s'\n",
+               cftr_server_backend(hw));
     }
 
     /* And the client ENFORCES what it was told: a program past the
@@ -1055,8 +1062,8 @@ static int indexed_wire(cft_device *sw, cft_device *rm, int fmt, size_t n)
     rc.struct_size = sizeof rc;
     if (cft_get_caps(rm, &rc) != CFT_OK ||
         !(rc.seq_features & CFT_SEQ_FEAT_SCRATCH_IO)) {
-        printf("  %s: the server does not publish SCRATCH_IO, the "
-               "indexed scratch block NOT TESTED\n",
+        printf("  %s, the indexed scratch block: NOT COMPARED - the "
+               "server does not publish SCRATCH_IO\n",
                cft_format_name((cft_format)fmt));
         goto out;
     }
@@ -1152,11 +1159,11 @@ static void identity_tests(cft_device *sw, cft_device *rm, size_t n)
         const size_t esz = cft_format_size((cft_format)fmt);
         int bad = 0;
         if (!cft_supports(rm, CFT_FMA, (cft_format)fmt)) {
-            /* SKIPPED is the first word because that is the marker
-             * verify/run.sh counts as a check that did not run; until
-             * 2026-09-24 this read "fp128  skipped, not on the
-             * server" and the remote stage passed without naming it. */
-            printf("  SKIPPED %s: not on the server\n",
+            /* Not a skip: a format the server's device does not carry
+             * (the form above, at the caps block). It read "fp128
+             * skipped, not on the server" until 2026-09-24, then
+             * SKIPPED first for part of that day. */
+            printf("  %s: NOT COMPARED - not on the server\n",
                    cft_format_name((cft_format)fmt));
             continue;
         }
@@ -1373,8 +1380,8 @@ static void program_bank_tests(cft_device *sw, cft_device *rm)
 
     printf("the constant bank over the wire:\n");
     if (!(c.seq_features & CFT_SEQ_FEAT_BANK_PTR)) {
-        printf("  the server's device does not publish BANK_PTR "
-               "(seq_features 0x%lx), NOT TESTED\n",
+        printf("  the constant bank: NOT COMPARED - the server's device "
+               "does not publish BANK_PTR (seq_features 0x%lx)\n",
                (unsigned long)c.seq_features);
         return;
     }
@@ -1504,8 +1511,8 @@ static void program_scratch_tests(cft_device *sw, cft_device *rm)
 
     printf("the per-run scratch block over the wire:\n");
     if (!(c.seq_features & CFT_SEQ_FEAT_SCRATCH_IO)) {
-        printf("  the server's device does not publish SCRATCH_IO "
-               "(seq_features 0x%lx), NOT TESTED\n",
+        printf("  the per-run scratch block: NOT COMPARED - the server's "
+               "device does not publish SCRATCH_IO (seq_features 0x%lx)\n",
                (unsigned long)c.seq_features);
         return;
     }

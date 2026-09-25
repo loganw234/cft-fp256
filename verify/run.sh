@@ -327,9 +327,15 @@ json_esc() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; printf '%s' "${s//$'\t'/\\t
 # FIRST WORD is SKIP or SKIPPED, upper case, followed by a space, a
 # colon or the end of the line (do_generated, reduce_check.py,
 # hw/test-rebuild-argv.sh, bindings/node/test.mjs, host/Makefile's
-# language legs, hw/verify-image.sh, device-test's opcode list, and
-# pytest's -rs summary). That convention is the marker: after a stage
-# passes, its log is read for those lines, and each is an INNER skip.
+# language legs, hw/verify-image.sh, and pytest's -rs summary). That
+# convention is the marker: after a stage passes, its log is read for
+# those lines, and each is an INNER skip - a check a HOST reason stopped.
+# device-test and remote-test name what the DEVICE under test does not
+# publish as "<what>: NOT COMPARED|NOT TESTED|NOT RUN - <why>" instead,
+# never SKIP first, so those are not read here: their matrices adapt to
+# the device by design (verify/README.md, "Skips are named, never
+# silent", has the rule and every such form; device-test's opcode list
+# was SKIP first until 2026-09-24).
 # First word only, and case-sensitive, because the logs are full of
 # the word in other places - cocotb's "SKIP=0", pytest's "5 skipped",
 # prose about skipping - and every one of those is a line that names

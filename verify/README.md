@@ -199,25 +199,94 @@ The ones known on 2026-09-24:
 page is not built, and a vector set absent from the directory the
 replay reads, which the replay reports only as a smaller count on its
 `N sets, ... all matching` line (168 when every set is there).
-device-test's and remote-test's `NOT TESTED` and `NOT RUN` lines are
-not counted either, and are not meant to be: an inner skip is a check
-that should run on this host and did not, and those mark a check with
-nothing to test on that device - a capacity the software handle has no
-limit for, a poisoned-operand run a backend does not do. Four kinds of
-them print on every software run (the format refusals, the `max_insns`
-and `max_consts` caps, and the reductions with b and c poisoned).
-device-test's `<format> not on this device, skipped` and
-`buffers, ...: SKIPPED - this device does not publish ...`,
-remote-test's `<format> skipped, not on the server`, cpp-api-test's
-`cpp-api-test: SKIP conformance: no vector sets` and
+cpp-api-test's `cpp-api-test: SKIP conformance: no vector sets` and
 `tb/check_results.py`'s bare `(N skipped)` were on that list until they
 were reprinted with the marker first the same day (check_results.py
 keeps the count, and adds a `SKIP` line per skipped case).
+
+**What is counted, and what is only named.** The rule, once: an inner
+skip is a check that exists for this host and did not run for a HOST
+reason - a missing tool, build product or input file - or a published
+conformance case the device cannot run, because the replay claims the
+whole published set (its `skipped, ... not on this device` lines above).
+Those print the marker, count, and fail `--require-all`. device-test and
+remote-test are the other kind: their matrices adapt to the device under
+test by design, so a check for a format, opcode or feature bit that
+device does not publish - or a limit it has none of, or a leg its backend
+has nothing for - has nothing to test there. Those are named in every
+log but not counted, in one form that never starts with `SKIP`:
+`<what>: NOT COMPARED - <why>` for a comparison with the software backend
+the device cannot take, `<what>: NOT TESTED - <why>` for a limit or
+refusal of the device's own with nothing to hold it to, and
+`<what>: NOT RUN - <why>` for a leg the device's backend or mode has
+nothing for. device-test counts them itself, by kind and by word, on a
+line after its check count -
+`not on this device, each named above: NOT COMPARED <n> formats, <n> buffers legs, <n> opcodes and <n> other legs; NOT TESTED <n>; NOT RUN <n>` -
+and then says "agree on every case that RAN" rather than "every case".
+It has no counted skip beside them: its one input is the artifact it
+opens, which it fails without. A software run prints five `NOT TESTED`
+(the format refusals, and `max_insns` and `max_consts` on both handles)
+and, outside `-b`, four `NOT RUN` (the poisoned reductions, one per
+format). An image whose CAPS drops a whole group - how the integer
+opcodes once went unrun under a green suite - is still counted, by the
+conformance replay run against it. For part of 2026-09-24 device-test's
+format, buffers-leg and opcode lines, and remote-test's format line,
+were printed `SKIPPED` first and counted, while seven `NOT COMPARED`
+lines for the same kind of absence were not - one device, one
+capability, opposite accounting; that is what the rule settles. Every
+uncounted form, by name:
+
+- device-test (`host/tests/device_test.c`), `NOT COMPARED`:
+  `<format>: NOT COMPARED - not on this device`;
+  `buffers, an indexed program: NOT COMPARED - this device does not publish CFT_SEQ_FEAT_INDEXED`;
+  `buffers, a program's scratch: NOT COMPARED - this device does not publish SCRATCH_IO`;
+  `opcode(s) <names>: NOT COMPARED - this device says it does not implement it` (or `them`), once, after the check count;
+  `reductions: NOT COMPARED - no reduction opcode group on this device (CAPS says so)`;
+  `seq indexed inputs: NOT COMPARED - this device does not publish CFT_SEQ_FEAT_INDEXED`;
+  `seq lane mask: NOT COMPARED - this device does not publish CFT_SEQ_FEAT_LANE_MASK`;
+  `seq lane mask, scratch-out: NOT COMPARED - this device does not publish <CFT_SEQ_FEAT_LANE_MASK or CFT_SEQ_FEAT_SCRATCH_IO>`;
+  `seq indexed and masked: NOT COMPARED - this device does not publish both CFT_SEQ_FEAT_INDEXED and CFT_SEQ_FEAT_LANE_MASK`;
+  `idx elem: NOT COMPARED - this device does not publish CFT_SEQ_FEAT_INDEXED (the refusal by name is scored above)`;
+  `seq r16..r31: NOT COMPARED - this device does not publish REGS32 (the refusal is scored above)`;
+  `seq BANK_EXT: NOT COMPARED - this device does not publish BANK_PTR (the refusal is scored above)`.
+- device-test, `NOT TESTED`:
+  `capacity checks: NOT TESTED - no fp32 on the <software or device> handle, and every probe is an fp32 program`;
+  `max_insns: NOT TESTED - reported as 0 (unknown), so nothing is enforced`;
+  `max_insns: NOT TESTED - <cap>, and an image past it is <n> bytes`;
+  `max_consts: NOT TESTED - reported as 0 (unknown), so nothing is enforced`;
+  `max_consts, one past it: NOT TESTED - <cap>, and an index past it does not fit the <field>`;
+  `max_scratch: NOT TESTED - no scratch published (max_scratch <n>)`;
+  `max_scratch: NOT TESTED - SCRATCH published with max_scratch 0 (unknown), so nothing is enforced`;
+  `KX9: NOT TESTED - kx absent, so KX9 has no encoding to test with`;
+  `seq scratch, R4/R5: NOT TESTED - no scratch published on this device`;
+  `R8's range report: NOT TESTED - this device does not publish SCRATCH_STRICT`;
+  `format refusals: NOT TESTED - this image carries all four formats, so there is nothing to refuse`.
+- device-test, `NOT RUN`:
+  `a program run past one page of mask bits: NOT RUN - under emulation (XCL_EMULATION_MODE is set); a card and the software backend run it`;
+  `reductions with b and c poisoned: NOT RUN - the <backend> backend has no b and c of its own to poison`.
+- remote-test (`host/tests/remote_test.c`), `NOT COMPARED`:
+  `<format>: NOT COMPARED - not on the server`;
+  `<format>, the indexed scratch block: NOT COMPARED - the server does not publish SCRATCH_IO`;
+  `the constant bank: NOT COMPARED - the server's device does not publish BANK_PTR (seq_features <hex>)`;
+  `the per-run scratch block: NOT COMPARED - the server's device does not publish SCRATCH_IO (seq_features <hex>)`;
+  `caps and a scalar operand against the local software backend: NOT COMPARED - the server's backend is '<name>'`.
+
+Until that day the same absences read in lower case or with the word
+last - `fp128  not on this device, skipped`, `no fp32 here, capacity check
+not run`, `nothing enforced, nothing tested`, `R4/R5 not run`,
+`..., NOT COMPARED`, `server backend is '...', not compared with the
+local software backend` - and those shapes are now refused in both
+programs' sources.
+
 `bash verify/test-inner-skips.sh` holds the accounting to synthetic
-stages, with four negative controls; then each of those programs' lines
-as printed now, which must count and fail `--require-all` alone, beside
-the same gap as printed before, which must count nothing; and pins each
-source to the line it prints.
+stages, with four negative controls; then each counted program line
+(cpp-api-test's, `host/tests/remote_check.py`'s, check_results.py's) as
+printed now, which must count and fail `--require-all` alone, beside the
+same gap as printed before, which must count nothing; then the
+uncounted forms above as printed now, which must count nothing even
+under `--require-all`, beside the same absences printed `SKIPPED` first,
+which must count; and pins each source to the line it prints, with a
+control for the check that refuses the old shapes.
 
 ## What is deliberately not here
 
