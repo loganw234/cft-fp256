@@ -361,7 +361,7 @@ workloads asked":
   and `r2` and the rest start at `+0`. Step 0 of a planar Kepler orbit
   is such a state and no later step is. Revision 3's scratch block lets
   a program be entered at any state it can spell (docs/SEQUENCER.md,
-  R5); neither the tool nor this port uses it.
+  R5); the tool's `--engine segments` uses it, its ported path and this port do not.
 - **260 deposit slots a lane is a software-backend number.** A tile
   holds 64 (`MAXD`, `rtl/cft_krnl.sv`), which is 15 samples; the page
   is the software backend, which holds 2^20, and the core refuses at

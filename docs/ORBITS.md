@@ -47,13 +47,16 @@ Three things this says that a microbenchmark cannot:
    below the truncation error** - `5.5e64` for leapfrog and `8.7e61`
    for Yoshida on the check's own runs - which is the condition a
    step-size study needs and binary64 does not have.
-3. **The sequencer cannot hold this workload, and the reason is
+3. **The sequencer could not hold this workload, and the reason was
    precise.** Two independent obstacles, each fatal on its own, and
    both of them were facts about the program model rather than about
-   this tool when it was written; revision 3's scratch block
-   (2026-09-08) has since answered the first, and this tool does not
-   use it. That observation is the deliverable for the sequencer's
-   designers; it is written out in full below.
+   this tool when it was written. Revision 3's scratch block
+   (2026-09-08) answered the first, and since 2026-09-25 `--engine
+   segments` uses it: the outer solar system runs as programs, resumes
+   from a checkpoint either engine wrote, and is not bounded by the
+   tile's deposit budget. The second - a correctly rounded divide and
+   square root inside the loop - is still open. Both are written out
+   in full below.
 
 ---
 
@@ -293,9 +296,11 @@ and it is **forced**, which is the whole point of the next section.
 `--engine program` refuses `--problem outer`, refuses `--rsqrt exact`
 and refuses `--resume`. All three refusals are one of two facts about
 the program model as it stood when this tool was written. Since
-revision 3 (2026-09-08) the first is a gap in this tool - the scratch
-block answers it, and this tool does not use it; the second still
-cannot be worked around by writing the program differently.
+revision 3 (2026-09-08) the first is answered by the scratch block,
+and `--engine segments` (below) is the engine that uses it; `--engine
+program` itself is kept as it was, for the reason that section gives.
+The second still cannot be worked around by writing the program
+differently, and both program engines refuse `--rsqrt exact` by name.
 
 **(1) Three input streams against 2d state values.**
 `cft_program_run` initialises `r0`, `r1` and `r2` from `a`, `b` and
@@ -323,8 +328,8 @@ output that always starts at +0". This one shows the limit binding.
 mode, would make every 2-degree-of-freedom system resumable and every
 3-degree-of-freedom one expressible.** Thirty-two registers are
 already far more than a 6-value state needs, and since revision 3
-(2026-09-08) the scratch block is that loading; this tool does not use
-it.
+(2026-09-08) the scratch block is that loading; `--engine segments`
+uses it.
 
 **(2) A correctly rounded divide or square root cannot sit inside this loop.**
 `python/cft_golden/seqprogs.py` is the library's own in-program
@@ -338,25 +343,112 @@ thirty-two registers a lane owns.
 So the composed route cannot be inlined into a larger program's loop
 body: it needs the host between its halves. The whole-program route
 that has existed since 2026-09-14 (`python/cft_golden/divfull.py`,
-opt-in in libcft behind `CFT_DIVSQRT_FULL=1`) does not, but it uses
-registers up to `r31` and the ISA has no call, so it leaves no room for
-the orbit state either. `--rsqrt exact` is
-therefore a loop-engine route, and `--rsqrt newton` exists so that the
-two engines have a step they can **both** run - which they then have
-to run bit for bit.
+opt-in in libcft behind `CFT_DIVSQRT_FULL=1`) does not, but it is a
+WHOLE program - operands from the streams, the result and its flags as
+deposits, registers up to `r31` and its own constants - and the ISA has
+no call. Room is not the obstacle any more: under `--engine segments`
+the orbit state lives in the scratch block between the instructions
+that use it. The splice is: putting one inside another program's loop
+body needs a fragment inliner that relocates its registers and
+constants and turns its deposits into moves, and nothing in the tree
+does that yet. `--rsqrt exact` is therefore a loop-engine route, and
+`--rsqrt newton` exists so that all three engines have a step they can
+run - which they then have to run bit for bit.
 
 The obvious way round (2) - leave `1/r^3` as a host-side composed call
 *between* program passes, so that each pass is drift-and-`r^2` or
-kick-and-drift - dies on (1) instead: a pass that resumed at the force
-evaluation would need four inputs, because every point inside a
-leapfrog step has all four state values live. The two obstacles are
-independent and either is fatal alone.
+kick-and-drift - died on (1): a pass that resumed at the force
+evaluation needed four inputs, because every point inside a leapfrog
+step has all four state values live. Segments remove that objection -
+a pass can now be entered at any state - so the split would work
+today, at the price of two program runs and three library calls a
+substep, which is the call-bound shape the program model exists to
+avoid. It is not built.
 
 **What the sequencer would need to run this workload as one program:**
 a way to load more than three registers (revision 3's scratch block,
-since built, which this tool does not use), and either a callable
-composed operation or an in-program correctly-rounded divide. Neither
-is proposed here as a change; both are what this workload found.
+which `--engine segments` uses), and either a callable composed
+operation or an in-program correctly rounded divide that can be
+spliced into a loop body. Neither is proposed here as an ISA change;
+both are what this workload found.
+
+### As resumable segments (`--engine segments`, 2026-09-25)
+
+`--engine segments` is the program engine rebuilt on the scratch
+block. One lane is one ensemble member, and its scratch holds the
+member's whole state in `2 * ncomp` slots - slot `c` is `q_c` and slot
+`ncomp + c` is `v_c`, the checkpoint's order - which
+`cft_program_run_ex` preloads before the run and reads back after it
+(docs/SEQUENCER.md R5). A run is therefore a **segment**: `k` steps
+from whatever state the tool holds. Nothing is deposited.
+
+The tool drives segments from the loop engine's own control loop - one
+segment to the next sample boundary, or to the `--stop-after-steps`
+point when that comes first - so the checkpoints, the records and the
+chain are the loop engine's by construction. What that buys is
+everything (1) forbade:
+
+- the outer solar system runs as programs, thirty values a lane;
+- a run resumes from a checkpoint either engine wrote, mid sample
+  interval;
+- any number of samples: a segment deposits nothing, so the tile's 64
+  deposit slots bound nothing.
+
+The program loads every `q_c` into register `c` on entry and stores it
+back on exit. The velocities stay in their slots and are loaded,
+updated and stored where the kick touches them, because thirty values
+and the kick's temporaries do not fit thirty-two registers together:
+
+    r0 .. r(ncomp-1)   q, one register per component (at most 15)
+    r16, r17, r18      d, a pair's separation (outer)
+    r19 x = r^2   r20 y   r21 w   r22 e   r23 z   r24 g   r25 t1
+    r26                the velocity component being updated
+
+The arithmetic is the loop engine's, instruction for instruction and
+operand for operand. The loads and stores are not arithmetic (R4: no
+rounding, no flags), so where a value lives cannot reach a result.
+
+**The census**, at binary256 (six Newton passes), read off the image by
+the tool and derived independently by the check from the program's
+structure:
+
+| problem, scheme | instructions | constants | ALU a lane-step | control codes a lane-step | scratch slots |
+|---|---|---|---|---|---|
+| kepler, leapfrog | 51 | 4 | 36 | 8 | 4 |
+| kepler, yoshida4 | 139 | 8 | 108 | 24 | 4 |
+| outer, leapfrog | 633 | 14 | 450 | 150 | 30 |
+| outer, yoshida4 | 1,833 | 36 | 1,350 | 450 | 30 |
+
+A quarter of the outer solar system's instruction stream is scratch
+traffic, which the card prices at about four times an arithmetic
+instruction (docs/ROADMAP.md, "Control codes do not join the
+instruction overlap", atlas-engine's measurement of 2026-09-17). The
+outer yoshida4 image addresses 36 constants, so it carries the indexed
+(`kx`) form.
+
+**What holds it**, in `host/tests/orbits_check.py`'s section [6b]:
+byte-identical checkpoints and records against the host loop on both
+problems and both schemes; batch 8, 3 and 1 byte-identical; the outer
+solar system stopped every 37 steps and resumed by segments alone, and
+by the two engines in turn, ending on the uninterrupted loop engine's
+bytes; the census above against the program's structure; and
+`python/cft_golden` on the image the tool writes (`--segment-dump
+DIR`) - its executor returns the library's scratch-out exactly, and its
+assembler reads the image back to the same bytes, `kx` choice
+included. Every comparison has a control that must make it fail:
+`CFT_ORBITS_NEGATIVE_CONTROL=transpose` packs `v_0` and `v_1` into each
+other's slots - the lane-major transposition bug the comparison exists
+to catch - and both the engine comparison and the relay fail under it;
+a flipped bit in the scratch-out fails the golden comparison; and a
+reserved bit set in the image is refused by both the golden loader and
+the disassembler.
+
+**What it does not do.** `--rsqrt exact`, for the reason in (2): it is
+refused by name. And `--engine program` stays exactly as it was: the
+browser demos rebuild its image instruction for instruction and
+`bindings/wasm/verify_demos.mjs` records that image's digest as taken
+from this tool (docs/DEMOS.md), so the new engine is an addition rather
+than a replacement.
 
 ### As a host loop
 
@@ -540,8 +632,9 @@ same bytes wherever it sits.
 | the chain | recomputed with `hashlib` |
 | batch size | 8, 3 and 1 over the same ensemble must end on byte-identical checkpoints |
 | engines | the whole integration as one sequencer program and the host `cft_run` loop must produce byte-identical records AND checkpoints |
+| segments | `--engine segments` against the host loop on both problems and both schemes; its own batch sizes; the outer solar system resumed in 37-step pieces by segments alone and by the two engines in turn; its census against the program's structure; the golden model's executor and assembler on its image; and a negative control for every one of those comparisons, which must fail |
 | interruption | a run stopped every 37 steps - which does not divide the 96-step sample interval, so most stops land mid-interval - and resumed at a different batch size must end on the same checkpoint and the same records, byte for byte, as one that was never stopped |
-| refusals | the three things `--engine program` must refuse, each with its reason |
+| refusals | the three things `--engine program` must refuse, and the three `--engine segments` must, each with its reason |
 
 ---
 

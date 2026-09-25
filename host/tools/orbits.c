@@ -146,25 +146,41 @@
  * this file.
  *
  * ---------------------------------------------------------------
- * Where the step runs, and the two things that stop it
+ * Where the step runs: three engines, one arithmetic
  * ---------------------------------------------------------------
  *
  * --engine loop issues every operation as a cft_run / cft_sqrt /
  * cft_div pass over the ensemble. It runs both problems, both
- * schemes, both routes, and it is the reference the program engine
- * is held to.
+ * schemes, both routes, and it is the reference the two program
+ * engines are held to.
  *
  * --engine program compiles the whole integration into ONE orbit
  * sequencer program (docs/SEQUENCER.md) per batch: the ensemble is
  * loaded into lane registers once, every step executes from the
  * instruction memory, and the sampled states come back through the
  * deposit stream. It is restricted to `--problem kepler --rsqrt
- * newton`, and both restrictions were facts about the program model
- * when this tool was written (2026-09-04). Neither is now; both are
- * gaps in this tool. Revision 3's scratch (2026-09-08) answers the
- * first, and the model has had an in-program correctly rounded
- * divide and square root since 2026-09-14, which answers the second.
- * This tool uses neither:
+ * newton` without --resume, and it stays that way on purpose: its
+ * image is the one the browser demos rebuild instruction for
+ * instruction and whose digest bindings/wasm/verify_demos.mjs records
+ * as taken from this tool (docs/DEMOS.md), so it is kept exactly as
+ * it was written (2026-09-04).
+ *
+ * --engine segments (2026-09-25) is the program engine rebuilt on
+ * revision 3's per-lane scratch block (cft_program_run_ex's
+ * scratch_in and scratch_out, docs/SEQUENCER.md R5): the ensemble
+ * STATE enters every run through the scratch block and leaves the
+ * same way, so a run is a SEGMENT of steps from any state this tool
+ * can hold. That answers (1) below, and it is what lets a program
+ * engine run the outer solar system, resume from a checkpoint either
+ * engine wrote, stop at any step, and record any number of samples:
+ * a segment deposits nothing, so the tile's deposit budget no longer
+ * bounds a run. Segments are driven by the loop engine's own control
+ * loop - the same checkpoints, the same records, the same chain - and
+ * their arithmetic is the loop engine's instruction for instruction
+ * ("The integration as resumable segments", below).
+ *
+ * The two facts that restricted the program engine when it was
+ * written (2026-09-04), and where each stands:
  *
  *   (1) THREE INPUT STREAMS. cft_program_run initialises r0, r1 and
  *       r2 from a, b and c; r3..r31 start at +0, normatively (r3..r15
@@ -182,8 +198,9 @@
  *       system has no program engine at all. Revision 3's scratch
  *       block (cft_program_run_ex's scratch_in; docs/SEQUENCER.md,
  *       "What the workloads asked of the program model") lets a
- *       program be entered at any state it can spell; this engine
- *       still calls cft_program_run and has not been moved onto it.
+ *       program be entered at any state it can spell. --engine
+ *       program still calls cft_program_run, for the reason above;
+ *       --engine segments is the engine that uses the block.
  *
  *   (2) CORRECTLY ROUNDED DIVIDE AND SQUARE ROOT WERE NOT PROGRAMS.
  *       python/cft_golden/seqprogs.py - which is the library's own
@@ -200,14 +217,21 @@
  *       round_pack in the instruction stream, no host between. It
  *       uses r0..r31, and revision 3's scratch is where a live set
  *       larger than the register file spills, so room for the orbit
- *       state beside it is not a model limit either. This tool has not
- *       been moved onto it: --rsqrt exact is a loop-engine route
- *       here, and --rsqrt newton exists so that the two engines have
- *       a step they can BOTH run - which they must run bit for bit.
+ *       state beside it is not a model limit either. What is missing
+ *       is the splice: those two are WHOLE programs - operands from
+ *       the streams, results and flags as deposits, all thirty-two
+ *       registers and their own constants - and putting one inside
+ *       another program's loop body needs a fragment inliner that
+ *       relocates their registers and constants and turns their
+ *       deposits into moves. That does not exist yet, in this tool or
+ *       anywhere in the tree, so --rsqrt exact is still a loop-engine
+ *       route and both program engines refuse it by name. --rsqrt
+ *       newton exists so that all three engines have a step they can
+ *       run - which they must run bit for bit.
  *
- * Under `--problem kepler --rsqrt newton` the two engines produce
- * byte-identical records, byte-identical checkpoints and the same
- * chain, and host/tests/orbits_check.py tests exactly that.
+ * Under --rsqrt newton the three engines produce byte-identical
+ * records, byte-identical checkpoints and the same chain wherever each
+ * can run, and host/tests/orbits_check.py tests exactly that.
  *
  * ---------------------------------------------------------------
  * Flags: which are expected, which are certificates
@@ -628,7 +652,7 @@ static const body_row OUTER[] = {
  * =================================================================== */
 enum { SCHEME_LEAPFROG = 0, SCHEME_YOSHIDA4 = 1 };
 enum { RSQRT_EXACT = 0, RSQRT_NEWTON = 1 };
-enum { ENG_LOOP = 0, ENG_PROGRAM = 1 };
+enum { ENG_LOOP = 0, ENG_PROGRAM = 1, ENG_SEGMENTS = 2 };
 #define MAX_SUB 3
 
 typedef struct {
@@ -646,6 +670,7 @@ typedef struct {
     long        stop_after_samples, stop_after_steps;
     const char *records_path;
     const char *artifact;
+    const char *segment_dump;                /* --segment-dump DIR */
     int         csv, quiet, dump_setup;
 } options;
 
@@ -691,6 +716,18 @@ typedef struct {
     uint32_t    *depcount;
     uint32_t     n_insns, max_deposits;
     uint64_t     alu_per_step;   /* ALU issues one step costs a lane */
+
+    /* the segments engine: the loaded image is for segments of
+     * `sprog_k` steps, and is rebuilt only when a run needs another
+     * length. What the census reports is read off the image itself
+     * (seg_census), not counted while building it. */
+    cft_program *sprog;
+    uint64_t     sprog_k;
+    uint8_t     *sin, *sout;          /* one batch of scratch blocks */
+    uint32_t     s_insns, s_consts, s_slots, s_regs;
+    uint64_t     s_alu_step, s_ctl_step;   /* inside the REPEAT body */
+    uint64_t     s_runs;              /* cft_program_run_ex calls */
+    int          s_dumped;            /* --segment-dump written */
 } runstate;
 
 /* ---- chunked library calls ---------------------------------------
@@ -1207,6 +1244,471 @@ static uint8_t *build_program(runstate *R, size_t *bytes_out)
     }
     free(ins);
     return img;
+}
+
+/* ===================================================================
+ * The integration as resumable segments (--engine segments)
+ *
+ * One lane is one ensemble member. Its scratch holds the member's
+ * whole state in 2 * ncomp slots - slot c is q_c and slot ncomp + c is
+ * v_c, the order the checkpoint writes them - and that block is the
+ * run's input and its output (R5), so a run advances the ensemble by
+ * k steps from wherever it stands and hands the state back. Nothing is
+ * deposited.
+ *
+ * The program loads every q_c into register c on entry and stores it
+ * back on exit. The velocities stay in their slots and are loaded,
+ * updated and stored where the arithmetic touches them, because the
+ * outer solar system's thirty values and the kick's temporaries do not
+ * fit thirty-two registers together:
+ *
+ *   r0 .. r(ncomp-1)   q, one register per component (at most 15)
+ *   r16, r17, r18      d, a pair's separation (outer)
+ *   r19 x = r^2   r20 y   r21 w   r22 e   r23 z   r24 g   r25 t1
+ *   r26                the velocity component being updated
+ *
+ * The arithmetic is the loop engine's, instruction for instruction and
+ * operand for operand - drift, kick_kepler, kick_outer and the Newton
+ * route of inv_r3_scaled - so the engines produce the same bits, and
+ * host/tests/orbits_check.py compares them byte for byte. The loads
+ * and stores are not arithmetic (docs/SEQUENCER.md R4: no rounding, no
+ * flags), so where a value lives cannot reach a result.
+ *
+ * The constants ride in the image: this tool builds its images per
+ * run, so there is nothing a per-run bank (BANK_EXT) would save.
+ * =================================================================== */
+
+/* Revision 3's scratch pair, beside the six codes above. docs/
+ * SEQUENCER.md's numbering, which host/src/program.c keeps in a
+ * private enum and this tool copies, as cft-zoom copies the six. What
+ * holds a copied number to the contract is the gate, not this comment:
+ * orbits_check.py hands the image this engine writes (--segment-dump)
+ * to python/cft_golden's assembler, which must read it back to the
+ * same bytes, and to its executor, which must compute the same scratch
+ * block the library did. */
+enum { C_STL = 6, C_LDL = 7 };
+
+#define KOP        0x10000            /* an operand naming a constant */
+#define KONST(i)   (KOP | (i))
+#define SEG_RQ(c)  (c)                /* q_c's register */
+#define SEG_RD(k)  (16 + (k))         /* d_k's register */
+enum { SR_X = 19, SR_Y, SR_W, SR_E, SR_Z, SR_G, SR_T1, SR_V };
+#define SEG_REGS   (SR_V + 1)
+#define SEG_SQ(c)     ((uint32_t)(c))                 /* q_c's slot */
+#define SEG_SV(R, c)  ((uint32_t)((R)->ncomp + (c)))  /* v_c's slot */
+
+/* The negative control this engine carries, read once in main(). With
+ * CFT_ORBITS_NEGATIVE_CONTROL=transpose the host packs v_0 into v_1's
+ * slot and v_1 into v_0's - and unpacks the same way, so its own arrays
+ * stay consistent - which is the lane-major transposition bug a gate
+ * comparing these engines exists to catch. orbits_check.py runs it and
+ * requires the comparison to FAIL. It prints a warning on stderr
+ * whenever it is set, and it is never set by anything but that test. */
+static int NEGCTL_TRANSPOSE = 0;
+
+static int seg_vperm(int c)
+{
+    return NEGCTL_TRANSPOSE && c < 2 ? c ^ 1 : c;
+}
+
+/* One 64-bit instruction word, revision 3: python/cft_golden/asm.py's
+ * encode(), which is the reference this is held to. f[] are the rd,
+ * ra, rb, rc fields; isk[] says which of them name a constant. A
+ * register's fifth bit rides in imm[27:24]; under kx a constant's index
+ * rides in imm's bytes and the field is zero. */
+static uint64_t seq_word(int op, const int f[4], const int isk[4],
+                         int ctrl, uint32_t imm, int kx)
+{
+    static const int shift[4] = { 8, 12, 16, 20 };     /* rd ra rb rc */
+    static const int hibit[4] = { 24, 25, 26, 27 };    /* R1 */
+    uint64_t w;
+    int i;
+
+    if (op < 0 || op > 255)
+        die("internal: an opcode outside a byte");
+    w = (uint64_t)(uint32_t)op;
+    w |= (uint64_t)(isk[1] ? 1u : 0u) << 27;
+    w |= (uint64_t)(isk[2] ? 1u : 0u) << 28;
+    w |= (uint64_t)(isk[3] ? 1u : 0u) << 29;
+    w |= (uint64_t)(kx ? 1u : 0u) << 30;
+    w |= (uint64_t)(ctrl ? 1u : 0u) << 31;
+    for (i = 0; i < 4; i++) {
+        if (f[i] < 0 || f[i] > (isk[i] ? 511 : 31))
+            die("internal: an operand field out of range");
+        if (isk[i] && kx)
+            continue;
+        w |= (uint64_t)(uint32_t)(f[i] & 0xf) << shift[i];
+        if (f[i] >> 4) {
+            if (isk[i])
+                die("internal: a constant index past 15 without kx");
+            imm |= 1u << hibit[i];
+        }
+    }
+    return w | ((uint64_t)imm << 32);
+}
+
+/* An ALU instruction. An operand is a register number or KONST(i); kx
+ * is chosen the way the assembler chooses it (docs/PROGRAMS.md):
+ * indexed when any constant index is 16 or more. An operand the opcode
+ * does not read is passed as 0, register r0, and the field is zero. */
+static uint64_t seg_alu(int op, int rd, int a, int b, int c)
+{
+    static const int kxs[3] = { 0, 8, 16 };     /* KX_SHIFT */
+    static const int kx9[3] = { 28, 29, 30 };   /* KX9_SHIFT, R7 */
+    int f[4], isk[4], x[3], i, kx = 0;
+    uint32_t imm = 0;
+
+    x[0] = a; x[1] = b; x[2] = c;
+    f[0] = rd;
+    isk[0] = 0;
+    for (i = 0; i < 3; i++) {
+        isk[i + 1] = (x[i] & KOP) != 0;
+        f[i + 1] = x[i] & ~KOP;
+        if (isk[i + 1] && f[i + 1] >= 16)
+            kx = 1;
+    }
+    if (kx)
+        for (i = 0; i < 3; i++)
+            if (isk[i + 1]) {
+                imm |= (uint32_t)(f[i + 1] & 0xff) << kxs[i];
+                imm |= (uint32_t)(f[i + 1] >> 8) << kx9[i];
+            }
+    return seq_word(op, f, isk, 0, imm, kx);
+}
+
+/* A control code: HALT, REPEAT, ENDREP (rd = ra = 0), LDL (rd, slot),
+ * STL (ra, slot). */
+static uint64_t seg_ctl(int code, int rd, int ra, uint32_t imm)
+{
+    int f[4], isk[4] = { 0, 0, 0, 0 };
+    f[0] = rd; f[1] = ra; f[2] = 0; f[3] = 0;
+    return seq_word(code, f, isk, 1, imm, 0);
+}
+
+typedef struct { uint64_t *w; size_t n, cap; } seg_ibuf;
+
+static void seg_put(seg_ibuf *B, uint64_t w)
+{
+    if (B->n == B->cap) {
+        size_t cap = B->cap ? 2 * B->cap : 256;
+        uint64_t *nw = (uint64_t *)realloc(B->w, cap * sizeof *nw);
+        if (!nw)
+            die("out of memory building a segment");
+        B->w = nw;
+        B->cap = cap;
+    }
+    B->w[B->n++] = w;
+}
+
+typedef struct { const uint8_t *v[512]; int n; } seg_bank;
+
+static int seg_k(seg_bank *K, const uint8_t *v)
+{
+    if (K->n >= 512)
+        die("a segment needs more than 512 constants");
+    K->v[K->n] = v;
+    return K->n++;
+}
+
+/* inv_r3_scaled's Newton route, the loop engine's four opcodes a pass */
+static void seg_inv_r3(seg_ibuf *B, const fmt_info *fi, int kmone,
+                       int kmhalf, int kscale, int dst)
+{
+    int k;
+    seg_put(B, seg_alu(CFT_RSQRT_SEED, SR_Y, SR_X, 0, 0));
+    for (k = 0; k < fi->newton; k++) {
+        seg_put(B, seg_alu(CFT_MUL, SR_W, SR_X, SR_Y, 0));
+        seg_put(B, seg_alu(CFT_FMA, SR_E, SR_W, SR_Y, KONST(kmone)));
+        seg_put(B, seg_alu(CFT_MUL, SR_Z, SR_Y, KONST(kmhalf), 0));
+        seg_put(B, seg_alu(CFT_FMA, SR_Y, SR_Z, SR_E, SR_Y));
+    }
+    seg_put(B, seg_alu(CFT_MUL, SR_W, SR_Y, SR_Y, 0));
+    seg_put(B, seg_alu(CFT_MUL, SR_W, SR_W, SR_Y, 0));
+    seg_put(B, seg_alu(CFT_MUL, dst, SR_W, KONST(kscale), 0));
+}
+
+/* drift(): q_c += hd * v_c, every component in index order */
+static void seg_drift(seg_ibuf *B, runstate *R, int khd)
+{
+    int c;
+    for (c = 0; c < R->ncomp; c++) {
+        seg_put(B, seg_ctl(C_LDL, SR_V, 0, SEG_SV(R, c)));
+        seg_put(B, seg_alu(CFT_FMA, SEG_RQ(c), KONST(khd), SR_V,
+                           SEG_RQ(c)));
+    }
+}
+
+/* v_c += g * x_c, one velocity component through the scratch */
+static void seg_kick_one(seg_ibuf *B, runstate *R, int c, int g, int x)
+{
+    seg_put(B, seg_ctl(C_LDL, SR_V, 0, SEG_SV(R, c)));
+    seg_put(B, seg_alu(CFT_FMA, SR_V, g, x, SR_V));
+    seg_put(B, seg_ctl(C_STL, 0, SR_V, SEG_SV(R, c)));
+}
+
+static uint8_t *seg_build(runstate *R, uint64_t k, size_t *bytes_out)
+{
+    const fmt_info *fi = R->fi;
+    seg_ibuf B;
+    seg_bank *KB;
+    int kmone, kmhalf, kG = -1, s, c, i, j, kk;
+    int khd[MAX_SUB], kmg[MAX_SUB];
+    int khm[MAX_SUB][MAX_BODIES], kmhm[MAX_SUB][MAX_BODIES];
+    uint32_t nslots = (uint32_t)(2 * R->ncomp);
+    size_t esz = fi->esz, off, n;
+    uint8_t *img;
+
+    if (R->ncomp > 16 || SEG_REGS > 32)
+        die("internal: the segment register map does not fit");
+    if (k == 0 || k > 0xffffffffull)
+        die("internal: a segment's trip count must be 1..2^32-1");
+    memset(&B, 0, sizeof B);
+    KB = (seg_bank *)xcalloc(1, sizeof *KB);
+
+    /* the bank, in a fixed order */
+    kmone = seg_k(KB, R->c_mone);
+    kmhalf = seg_k(KB, R->c_mhalf);
+    for (s = 0; s < R->nsub; s++)
+        khd[s] = seg_k(KB, R->c_hd[s]);
+    if (R->O->problem == PROB_KEPLER) {
+        for (s = 0; s < R->nsub; s++)
+            kmg[s] = seg_k(KB, R->c_mg[s]);
+    } else {
+        kG = seg_k(KB, R->c_G);
+        for (s = 0; s < R->nsub; s++)
+            for (i = 0; i < R->nb; i++) {
+                khm[s][i] = seg_k(KB, R->c_hm[s][i]);
+                kmhm[s][i] = seg_k(KB, R->c_mhm[s][i]);
+            }
+    }
+
+    for (c = 0; c < R->ncomp; c++)
+        seg_put(&B, seg_ctl(C_LDL, SEG_RQ(c), 0, SEG_SQ(c)));
+    seg_put(&B, seg_ctl(C_REPEAT, 0, 0, (uint32_t)k));
+    for (s = 0; s < R->nsub; s++) {
+        seg_drift(&B, R, khd[s]);
+        if (R->O->problem == PROB_KEPLER) {
+            /* kick_kepler: r^2 = q1*q1 then q0*q0 + that */
+            seg_put(&B, seg_alu(CFT_MUL, SR_W, SEG_RQ(1), SEG_RQ(1), 0));
+            seg_put(&B, seg_alu(CFT_FMA, SR_X, SEG_RQ(0), SEG_RQ(0), SR_W));
+            seg_inv_r3(&B, fi, kmone, kmhalf, kmg[s], SR_G);
+            seg_kick_one(&B, R, 0, SR_G, SEG_RQ(0));
+            seg_kick_one(&B, R, 1, SR_G, SEG_RQ(1));
+        } else {
+            /* kick_outer: pairs in lexicographic (i, j) order */
+            for (i = 0; i < R->nb; i++) {
+                for (j = i + 1; j < R->nb; j++) {
+                    for (kk = 0; kk < R->nd; kk++)
+                        seg_put(&B, seg_alu(CFT_SUB, SEG_RD(kk),
+                                            SEG_RQ(COMP(R, j, kk)), 0,
+                                            SEG_RQ(COMP(R, i, kk))));
+                    seg_put(&B, seg_alu(CFT_MUL, SR_W, SEG_RD(R->nd - 1),
+                                        SEG_RD(R->nd - 1), 0));
+                    for (kk = R->nd - 2; kk > 0; kk--)
+                        seg_put(&B, seg_alu(CFT_FMA, SR_W, SEG_RD(kk),
+                                            SEG_RD(kk), SR_W));
+                    seg_put(&B, seg_alu(CFT_FMA, SR_X, SEG_RD(0), SEG_RD(0),
+                                        SR_W));
+                    seg_inv_r3(&B, fi, kmone, kmhalf, kG, SR_T1);
+                    seg_put(&B, seg_alu(CFT_MUL, SR_G, SR_T1,
+                                        KONST(khm[s][j]), 0));
+                    for (kk = 0; kk < R->nd; kk++)
+                        seg_kick_one(&B, R, COMP(R, i, kk), SR_G,
+                                     SEG_RD(kk));
+                    seg_put(&B, seg_alu(CFT_MUL, SR_G, SR_T1,
+                                        KONST(kmhm[s][i]), 0));
+                    for (kk = 0; kk < R->nd; kk++)
+                        seg_kick_one(&B, R, COMP(R, j, kk), SR_G,
+                                     SEG_RD(kk));
+                }
+            }
+        }
+        seg_drift(&B, R, khd[s]);
+    }
+    seg_put(&B, seg_ctl(C_ENDREP, 0, 0, 0));
+    for (c = 0; c < R->ncomp; c++)
+        seg_put(&B, seg_ctl(C_STL, 0, SEG_RQ(c), SEG_SQ(c)));
+    seg_put(&B, seg_ctl(C_HALT, 0, 0, 0));
+
+    n = B.n;
+    *bytes_out = 32 + (size_t)KB->n * esz + n * 8;
+    img = (uint8_t *)xcalloc(*bytes_out, 1);
+    img[0] = 'C'; img[1] = 'F'; img[2] = 'T'; img[3] = 'P';
+    put_le32(img + 4, 1);
+    put_le32(img + 8, (uint32_t)n);
+    put_le32(img + 12, (uint32_t)KB->n);
+    put_le32(img + 16, 0);                        /* max_deposits */
+    put_le32(img + 20, (uint32_t)fi->fmt);
+    put_le32(img + 24, CFT_PROG_FLAG_SCRATCH_IO);
+    put_le32(img + 28, nslots | (nslots << 16));  /* scratch in, out */
+    off = 32;
+    for (i = 0; i < KB->n; i++) {
+        memcpy(img + off, KB->v[i], esz);
+        off += esz;
+    }
+    for (i = 0; (size_t)i < n; i++) {
+        put_le64(img + off, B.w[i]);
+        off += 8;
+    }
+    free(B.w);
+    free(KB);
+    return img;
+}
+
+/* The census, read off an image rather than counted while building it:
+ * instructions, constants, and the ALU and control codes a lane issues
+ * per step - the REPEAT body. */
+static void seg_census(runstate *R, const uint8_t *img, size_t bytes)
+{
+    const uint8_t *p;
+    uint32_t n, nk, i;
+    int depth = 0;
+    uint64_t alu = 0, ctl = 0;
+
+    n = (uint32_t)img[8] | ((uint32_t)img[9] << 8) |
+        ((uint32_t)img[10] << 16) | ((uint32_t)img[11] << 24);
+    nk = (uint32_t)img[12] | ((uint32_t)img[13] << 8) |
+         ((uint32_t)img[14] << 16) | ((uint32_t)img[15] << 24);
+    if (32 + (size_t)nk * R->fi->esz + (size_t)n * 8 != bytes)
+        die("internal: a segment image's size does not match its header");
+    p = img + 32 + (size_t)nk * R->fi->esz;
+    for (i = 0; i < n; i++, p += 8) {
+        uint64_t w = 0;
+        int b, is_ctl, op;
+        for (b = 7; b >= 0; b--)
+            w = (w << 8) | p[b];
+        is_ctl = (int)((w >> 31) & 1);
+        op = (int)(w & 0xff);
+        if (is_ctl && op == C_REPEAT) { depth++; continue; }
+        if (is_ctl && op == C_ENDREP) { depth--; continue; }
+        if (depth > 0) {
+            if (is_ctl)
+                ctl++;
+            else
+                alu++;
+        }
+    }
+    R->s_insns = n;
+    R->s_consts = nk;
+    R->s_slots = (uint32_t)(2 * R->ncomp);
+    R->s_regs = SEG_REGS;
+    R->s_alu_step = alu;
+    R->s_ctl_step = ctl;
+}
+
+static const char *problem_name(int p);
+
+static void seg_write(const char *dir, const char *name, const void *p,
+                      size_t bytes)
+{
+    char path[1024];
+    FILE *f;
+    if ((size_t)snprintf(path, sizeof path, "%s/%s", dir, name) >=
+        sizeof path)
+        die("--segment-dump path too long");
+    f = fopen(path, "wb");
+    if (!f || fwrite(p, 1, bytes, f) != bytes || fclose(f) != 0)
+        die("--segment-dump could not write a file");
+}
+
+/* Advance every member by k steps: one cft_program_run_ex per batch
+ * chunk, the state through the scratch block in and out. */
+static void seg_run(runstate *R, uint64_t k)
+{
+    const fmt_info *fi = R->fi;
+    options *O = R->O;
+    size_t esz = fi->esz, M = O->members, ns = (size_t)(2 * R->ncomp);
+    size_t chunk, i;
+    int c;
+    cft_status st;
+
+    if (!R->sprog || R->sprog_k != k) {
+        size_t bytes = 0;
+        uint8_t *img;
+        if (R->sprog) {
+            cft_program_free(R->sprog);
+            R->sprog = NULL;
+        }
+        img = seg_build(R, k, &bytes);
+        seg_census(R, img, bytes);
+        st = cft_program_load(DEV, img, bytes, &R->sprog);
+        if (st != CFT_OK) {
+            free(img);
+            die_st("cft_program_load (a segment)", st);
+        }
+        if (O->segment_dump && !R->s_dumped)
+            seg_write(O->segment_dump, "segment.cftp", img, bytes);
+        free(img);
+        R->sprog_k = k;
+    }
+    if (!R->sin) {
+        R->sin = (uint8_t *)xcalloc(O->batch * ns, esz);
+        R->sout = (uint8_t *)xcalloc(O->batch * ns, esz);
+    }
+
+    for (chunk = 0; chunk < M; chunk += O->batch) {
+        size_t n = M - chunk < O->batch ? M - chunk : O->batch;
+        uint32_t fl = 0, bus = 0;
+        cft_run_args A;
+
+        for (i = 0; i < n; i++)
+            for (c = 0; c < R->ncomp; c++) {
+                memcpy(R->sin + (i * ns + SEG_SQ(c)) * esz,
+                       CQ(R, c) + (chunk + i) * esz, esz);
+                memcpy(R->sin + (i * ns + SEG_SV(R, seg_vperm(c))) * esz,
+                       CV(R, c) + (chunk + i) * esz, esz);
+            }
+        memset(&A, 0, sizeof A);
+        A.struct_size = sizeof A;
+        A.a = CQ(R, 0) + chunk * esz;     /* r0 is overwritten by LDL */
+        A.n = n;
+        A.scratch_in = R->sin;
+        A.scratch_in_bytes = n * ns * esz;
+        A.scratch_out = R->sout;
+        A.scratch_out_bytes = n * ns * esz;
+        A.flags_out = &fl;
+        A.bus_out = &bus;
+        st = cft_program_run_ex(R->sprog, &A);
+        if (st != CFT_OK)
+            die_st("cft_program_run_ex (a segment)", st);
+        if (bus) {
+            char msg[200];
+            snprintf(msg, sizeof msg,
+                     "a segment returned STATUS 0x%02x - it deposits nothing "
+                     "and names only static scratch slots, so any status "
+                     "bit means the tool or the device is wrong",
+                     (unsigned)bus);
+            die(msg);
+        }
+        if (O->segment_dump && !R->s_dumped && chunk == 0) {
+            char meta[512];
+            seg_write(O->segment_dump, "segment.in.bin", R->sin,
+                      n * ns * esz);
+            seg_write(O->segment_dump, "segment.out.bin", R->sout,
+                      n * ns * esz);
+            seg_write(O->segment_dump, "segment.a.bin", CQ(R, 0), n * esz);
+            snprintf(meta, sizeof meta,
+                     "format %s\nlanes %lu\nsteps %llu\nslots %lu\n"
+                     "ncomp %d\nproblem %s\n",
+                     cft_format_name(fi->fmt), (unsigned long)n,
+                     (unsigned long long)k, (unsigned long)ns, R->ncomp,
+                     problem_name(O->problem));
+            seg_write(O->segment_dump, "segment.txt", meta, strlen(meta));
+            R->s_dumped = 1;
+        }
+        for (i = 0; i < n; i++)
+            for (c = 0; c < R->ncomp; c++) {
+                memcpy(CQ(R, c) + (chunk + i) * esz,
+                       R->sout + (i * ns + SEG_SQ(c)) * esz, esz);
+                memcpy(CV(R, c) + (chunk + i) * esz,
+                       R->sout + (i * ns + SEG_SV(R, seg_vperm(c))) * esz,
+                       esz);
+            }
+        note_flags(fl, "a sequencer-program segment");
+        N_CALLS++;
+        N_ELEMOPS += (uint64_t)n * k * R->s_alu_step;
+        R->s_runs++;
+    }
 }
 
 /* ===================================================================
@@ -1824,20 +2326,30 @@ static void report(runstate *R, double elapsed, const char *backend)
     separations(R, R->q, R->v, sep1);
 
     if (O->csv) {
+        /* The last six columns are the segments engine's census and are
+         * zero on the other two; they are APPENDED, so a reader that
+         * takes columns by name (host/tests/orbits_check.py) or reads
+         * the human report (bindings/wasm/verify_demos.mjs) is
+         * untouched. */
         printf("backend,format,problem,scheme,rsqrt,engine,members,batch,"
                "spread,h,steps,samples,seconds,steps_per_s,elem_steps_per_s,"
                "libops_per_s,calls,elemops,composed,energy_drift,"
-               "angmom_drift,flags,chain\n");
+               "angmom_drift,flags,chain,seg_insns,seg_consts,seg_alu_step,"
+               "seg_ctl_step,seg_slots,seg_runs\n");
         printf("%s,%s,%s,%s,%s,%s,%" PRIu64 ",%" PRIu64 ",%" PRIu64
                ",%s,%" PRIu64 ",%" PRIu64 ",%.6f,%.1f,%.1f,%.1f,%" PRIu64
-               ",%" PRIu64 ",%" PRIu64 ",%s,%s,0x%02x,%s\n",
+               ",%" PRIu64 ",%" PRIu64 ",%s,%s,0x%02x,%s,%u,%u,%" PRIu64
+               ",%" PRIu64 ",%u,%" PRIu64 "\n",
                backend, cft_format_name(fi->fmt), problem_name(O->problem),
                scheme_name(O->scheme), rsqrt_name(O->rsqrt),
-               O->engine == ENG_PROGRAM ? "program" : "loop",
+               O->engine == ENG_PROGRAM ? "program" :
+               O->engine == ENG_SEGMENTS ? "segments" : "loop",
                (uint64_t)M, (uint64_t)O->batch, O->spread, sh,
                R->step, R->sample, elapsed, steps_s, elem_s, ops_s,
                N_CALLS, N_ELEMOPS, N_COMPOSED, sdh, sdl,
-               (unsigned)flags_run, chain);
+               (unsigned)flags_run, chain, (unsigned)R->s_insns,
+               (unsigned)R->s_consts, R->s_alu_step, R->s_ctl_step,
+               (unsigned)R->s_slots, R->s_runs);
         free(sep0); free(sep1);
         return;
     }
@@ -1853,11 +2365,20 @@ static void report(runstate *R, double elapsed, const char *backend)
            scheme_name(O->scheme), R->nsub, R->nsub == 1 ? "" : "s",
            rsqrt_name(O->rsqrt));
     printf("  engine        %s, batch %" PRIu64 "\n",
-           O->engine == ENG_PROGRAM ? "sequencer program" : "host cft_run loop",
+           O->engine == ENG_PROGRAM ? "sequencer program" :
+           O->engine == ENG_SEGMENTS ? "sequencer-program segments" :
+           "host cft_run loop",
            (uint64_t)O->batch);
     if (O->engine == ENG_PROGRAM)
         printf("  program       %u instructions, %u deposit slots per lane\n",
                R->n_insns, R->max_deposits);
+    if (O->engine == ENG_SEGMENTS)
+        printf("  segments      %u instructions, %u constants; a lane-step is "
+               "%" PRIu64 " ALU and %" PRIu64 " control codes; %u scratch "
+               "slots, %u registers; %" PRIu64 " runs\n",
+               (unsigned)R->s_insns, (unsigned)R->s_consts, R->s_alu_step,
+               R->s_ctl_step, (unsigned)R->s_slots, (unsigned)R->s_regs,
+               R->s_runs);
     printf("  step size     %s\n", sh);
     printf("  steps done    %" PRIu64 " of %" PRIu64 ", %" PRIu64
            " samples of %" PRIu64 "\n",
@@ -1914,10 +2435,15 @@ static void usage(void)
 "  --scheme leapfrog|yoshida4   Stormer-Verlet (default), or Yoshida's\n"
 "                           fourth-order composition of it\n"
 "  --format fp32|fp64|fp128|fp256   default fp256\n"
-"  --engine loop|program    host cft_run loop (default), or the whole\n"
+"  --engine loop|program|segments\n"
+"                           host cft_run loop (default); the whole\n"
 "                           integration as one sequencer program\n"
-"                           (kepler + --rsqrt newton only; see the\n"
-"                           header for the two reasons)\n"
+"                           (kepler + --rsqrt newton only, no resume);\n"
+"                           or resumable sequencer-program segments with\n"
+"                           the state in the scratch block (both\n"
+"                           problems, --rsqrt newton; see the header)\n"
+"  --segment-dump DIR       write the first segment's image and scratch\n"
+"                           blocks to DIR (the golden model's cross-check)\n"
 "  --rsqrt exact|newton     1/r^3 from cft_sqrt and cft_div, correctly\n"
 "                           rounded (default), or from the tile's seed\n"
 "                           opcode and a derived Newton refinement\n"
@@ -1931,7 +2457,8 @@ static void usage(void)
 "  --steps N                override the step count directly\n"
 "  --sample-every N         steps between recorded samples (a tile holds\n"
 "                           64 deposits a lane: at most 15 samples a run\n"
-"                           under --engine program there)\n"
+"                           under --engine program there; segments deposit\n"
+"                           nothing and are not bounded by it)\n"
 "  --batch N                ensemble members per library call\n"
 "  --checkpoint PATH        write a resumable checkpoint\n"
 "  --checkpoint-interval S  seconds between checkpoints (default 10)\n"
@@ -2006,7 +2533,8 @@ int main(int argc, char **argv)
             const char *val = need(argc, argv, &i);
             if (!strcmp(val, "loop")) O.engine = ENG_LOOP;
             else if (!strcmp(val, "program")) O.engine = ENG_PROGRAM;
-            else die("--engine takes loop or program");
+            else if (!strcmp(val, "segments")) O.engine = ENG_SEGMENTS;
+            else die("--engine takes loop, program or segments");
         } else if (!strcmp(a, "--format")) {
             const char *val = need(argc, argv, &i);
             if (!strcmp(val, "fp32")) O.fmt = CFT_FP32;
@@ -2044,6 +2572,8 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--records"))
             O.records_path = need(argc, argv, &i);
         else if (!strcmp(a, "--artifact")) O.artifact = need(argc, argv, &i);
+        else if (!strcmp(a, "--segment-dump"))
+            O.segment_dump = need(argc, argv, &i);
         else if (!strcmp(a, "--dump-setup")) O.dump_setup = 1;
         else if (!strcmp(a, "--csv")) O.csv = 1;
         else if (!strcmp(a, "--quiet")) O.quiet = 1;
@@ -2056,6 +2586,23 @@ int main(int argc, char **argv)
         die("--members must be positive");
     if (!O.batch)
         O.batch = O.members;
+    if (O.segment_dump && O.engine != ENG_SEGMENTS)
+        die("--segment-dump writes a segment, so it needs --engine segments");
+    {
+        const char *nc = getenv("CFT_ORBITS_NEGATIVE_CONTROL");
+        if (nc && *nc) {
+            if (strcmp(nc, "transpose"))
+                die("CFT_ORBITS_NEGATIVE_CONTROL takes transpose");
+            if (O.engine != ENG_SEGMENTS)
+                die("CFT_ORBITS_NEGATIVE_CONTROL=transpose sabotages "
+                    "--engine segments and nothing else");
+            NEGCTL_TRANSPOSE = 1;
+            fprintf(stderr, "cft-orbits: NEGATIVE CONTROL ACTIVE "
+                    "(CFT_ORBITS_NEGATIVE_CONTROL=transpose): v_0 and v_1 "
+                    "are packed into each other's scratch slots - every "
+                    "result of this run is deliberately wrong\n");
+        }
+    }
 
     st = cft_open(O.artifact, 0, &DEV);
     if (st != CFT_OK)
@@ -2103,11 +2650,24 @@ int main(int argc, char **argv)
         die("--sample-every is larger than the run");
     R.nsteps = R.nsamples * R.stride;   /* an exact number of samples */
 
+    if (O.engine == ENG_SEGMENTS) {
+        if (O.rsqrt != RSQRT_NEWTON)
+            die("--engine segments needs --rsqrt newton: the correctly "
+                "rounded divide and square root exist as WHOLE programs "
+                "(programs/divfull-*, sqrtfull-*), and splicing one into "
+                "this program's loop body needs a fragment inliner that "
+                "does not exist yet (docs/ORBITS.md, \"Where the step "
+                "runs\")");
+        if (R.stride > 0xffffffffull)
+            die("a sample interval past 2^32-1 steps does not fit the "
+                "sequencer's 32-bit trip count");
+    }
     if (O.engine == ENG_PROGRAM) {
         if (O.problem != PROB_KEPLER)
             die("--engine program cannot run --problem outer: a lane's "
                 "state is 30 values and cft_program_run initialises three "
-                "registers (docs/ORBITS.md, \"Where the step runs\")");
+                "registers (docs/ORBITS.md, \"Where the step runs\"); "
+                "--engine segments runs it");
         if (O.rsqrt != RSQRT_NEWTON)
             die("--engine program needs --rsqrt newton: the correctly "
                 "rounded route is host-prep, program core, host finish "
@@ -2116,7 +2676,7 @@ int main(int argc, char **argv)
         if (O.resume)
             die("--engine program cannot resume into the middle of a run: "
                 "a restart state has four non-zero components and only "
-                "three registers can be loaded");
+                "three registers can be loaded; --engine segments can");
         if (R.nsamples > 0xffffffffull || R.stride > 0xffffffffull)
             die("that run does not fit the sequencer's 32-bit trip counts");
         /* This program deposits four values a sample plus four at the
@@ -2198,7 +2758,8 @@ int main(int argc, char **argv)
         printf("cft-orbits: %s backend, %s, p = %d, %s, %s, %s engine\n",
                caps.backend, cft_format_name(fi.fmt), fi.prec,
                problem_name(O.problem), scheme_name(O.scheme),
-               O.engine == ENG_PROGRAM ? "sequencer-program" : "host-loop");
+               O.engine == ENG_PROGRAM ? "sequencer-program" :
+               O.engine == ENG_SEGMENTS ? "sequencer-segments" : "host-loop");
 
     t0 = now_s();
     tckpt = t0;
@@ -2275,9 +2836,26 @@ int main(int argc, char **argv)
              * host/tests/orbits_check.py exercises. */
             uint64_t upto = (R.sample + 1) * R.stride;
             while (R.step < upto) {
-                one_step(&R);
-                R.step++;
-                steps_this_run++;
+                if (O.engine == ENG_SEGMENTS) {
+                    /* One segment to the sample boundary, or to the stop
+                     * point if that comes first - the same step at
+                     * which the loop below would stop. */
+                    uint64_t kseg = upto - R.step;
+                    if (O.stop_after_steps >= 0) {
+                        uint64_t want = (uint64_t)O.stop_after_steps;
+                        uint64_t left = want > steps_this_run
+                                        ? want - steps_this_run : 1;
+                        if (kseg > left)
+                            kseg = left;
+                    }
+                    seg_run(&R, kseg);
+                    R.step += kseg;
+                    steps_this_run += kseg;
+                } else {
+                    one_step(&R);
+                    R.step++;
+                    steps_this_run++;
+                }
                 if (O.ckpt && now_s() - tckpt >= O.ckpt_interval) {
                     ckpt_write(&R);
                     tckpt = now_s();
@@ -2318,8 +2896,12 @@ int main(int argc, char **argv)
     for (k = 0; k < 3; k++) { free(R.L0[k]); free(R.Ld[k]); free(R.dLmax[k]); }
     free(R.dep);
     free(R.depcount);
+    free(R.sin);
+    free(R.sout);
     if (R.prog)
         cft_program_free(R.prog);
+    if (R.sprog)
+        cft_program_free(R.sprog);
     cft_close(DEV);
     return 0;
 }

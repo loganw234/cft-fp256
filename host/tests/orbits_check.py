@@ -53,12 +53,21 @@ Seven groups of checks:
  6. Determinism.  Batch-size independence, program-versus-loop bit
                   identity, and interrupt/resume equivalence - all as
                   byte comparisons of checkpoints and records.
- 7. Refusals.     The three things --engine program must refuse, and
-                  the precise reason each is refused.
+ 6b. Segments.    --engine segments against the host loop on both
+                  problems and both schemes; its own batch and
+                  interrupt/resume independence; a run resumed
+                  ALTERNATELY by the two engines; the census it reports,
+                  derived here from the program's structure; the golden
+                  model's executor and assembler on the image it writes;
+                  and a negative control for each comparison, which must
+                  fail.
+ 7. Refusals.     What the two program engines must refuse, and the
+                  precise reason each is refused.
 """
 
 import argparse
 import hashlib
+import os
 import shutil
 import subprocess
 import sys
@@ -81,6 +90,12 @@ except ImportError:                                   # pragma: no cover
 mp.dps = 300
 
 ROOT = Path(__file__).resolve().parents[2]
+# The golden model: its sequencer executor and its assembler are the
+# definition the segments engine's image is held to in [6b]. Standard
+# library only, so this adds no dependency beside mpmath.
+sys.path.insert(0, str(ROOT / "python"))
+from cft_golden import FORMATS, asm, seq                 # noqa: E402
+
 FAILURES = []
 CHECKS = 0
 
@@ -111,9 +126,9 @@ class Tool:
     def __init__(self, exe):
         self.exe = str(exe)
 
-    def run(self, *args, expect_ok=True):
+    def run(self, *args, expect_ok=True, env=None):
         proc = subprocess.run([self.exe] + [str(a) for a in args],
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, env=env)
         if expect_ok and proc.returncode != 0:
             raise RuntimeError("cft-orbits %s failed (%d)\n%s\n%s"
                                % (" ".join(str(a) for a in args),
@@ -395,6 +410,247 @@ def check_roundoff(tool, tmp, fmt, p, periods, sps, scheme="leapfrog"):
     sch = Scheme(setup)
     qo, vo = sch.run(q0, v0, setup["steps"])
     return rel_diff(qT + vT, qo + vo), (qT + vT), (qo + vo), setup
+
+
+def _values(data, fmt):
+    esz = fmt.width // 8
+    return [int.from_bytes(data[i:i + esz], "little")
+            for i in range(0, len(data), esz)]
+
+
+def _at_of(path):
+    for line in Path(path).read_text().splitlines():
+        if line.startswith("at "):
+            return [int(x) for x in line.split()[1:]]
+    return [0, 0]
+
+
+def _relay(tool, argv, ckpt, recs, engines, stop, total, env_for=None):
+    """Run in pieces of `stop` steps, resuming each time with the next
+    engine of `engines` in turn, until the checkpoint reaches `total`
+    steps. Returns (rounds, rounds that stopped mid sample interval).
+    `env_for` maps an engine to the environment its legs run under."""
+    rounds, midway, stride = 0, 0, None
+    while True:
+        eng = engines[rounds % len(engines)]
+        extra = ["--resume"] if rounds else []
+        tool.run(*argv, "--engine", eng, "--stop-after-steps", stop,
+                 "--checkpoint", ckpt, "--records", recs, *extra,
+                 env=(env_for or {}).get(eng))
+        rounds += 1
+        st, _sm = _at_of(ckpt)
+        if stride is None:
+            for line in Path(ckpt).read_text().splitlines():
+                if line.startswith("stride "):
+                    stride = int(line.split()[1])
+        if stride and st % stride:
+            midway += 1
+        if st >= total or rounds > 400:
+            return rounds, midway
+
+
+def check_segments(tool, tmp):
+    """[6b] --engine segments. Every comparison here has a control that
+    must make it fail, and the control's failure is asserted - a
+    comparison that has never been seen to fail is not a gate."""
+    print("\n[6b] --engine segments: the ensemble state through the "
+          "scratch block")
+    env_nc = dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="transpose")
+
+    # --- the two engines, on both problems and both schemes ----------
+    cases = (("kepler", "leapfrog", ["--periods", 2,
+                                     "--steps-per-period", 96]),
+             ("kepler", "yoshida4", ["--periods", 2,
+                                     "--steps-per-period", 96]),
+             ("outer", "leapfrog", ["--years", 4, "--days", 10]),
+             ("outer", "yoshida4", ["--years", 4, "--days", 10]))
+    for problem, scheme, extra in cases:
+        argv = ["--problem", problem, "--scheme", scheme, "--format",
+                "fp256", "--members", 5, "--rsqrt", "newton", "--quiet",
+                *extra]
+        got = {}
+        for eng, batch in (("loop", 5), ("segments", 3)):
+            ck = Path(tmp) / ("s-%s-%s-%s.ckpt" % (problem, scheme, eng))
+            rc = Path(tmp) / ("s-%s-%s-%s.txt" % (problem, scheme, eng))
+            tool.run(*argv, "--engine", eng, "--batch", batch,
+                     "--checkpoint", ck, "--records", rc)
+            got[eng] = (ck.read_bytes(), rc.read_bytes())
+        nrec = got["loop"][1].count(b"\n")
+        check(got["loop"] == got["segments"] and nrec > 0,
+              "%s, %s: segments (batch 3 of 5) and the host loop end on "
+              "byte-identical checkpoints and %d byte-identical records"
+              % (problem, scheme, nrec),
+              "%s, %s: --engine segments and the host loop disagree"
+              % (problem, scheme))
+
+    # --- the census the ledger quotes, derived from the structure ----
+    for problem, scheme, extra in (cases[0], cases[3]):
+        common = ["--problem", problem, "--scheme", scheme, "--format",
+                  "fp256", "--members", 5, "--rsqrt", "newton", *extra]
+        st = tool.setup(*common)
+        row = tool.csv(*common, "--engine", "segments", "--batch", 3)
+        nw, nb, nd, nsub = st["newton"], st["bodies"], st["dims"], st["nsub"]
+        ncomp, inv = nb * nd, 1 + 4 * nw + 3      # seed, passes, y^3 * K
+        if problem == "kepler":
+            alu = nsub * (2 * ncomp + 2 + inv + 2)
+            ctl = nsub * (2 * ncomp + 2 * 2)
+        else:
+            pairs = nb * (nb - 1) // 2
+            per_pair = nd + 1 + (nd - 2) + 1 + inv + 1 + nd + 1 + nd
+            alu = nsub * (2 * ncomp + pairs * per_pair)
+            ctl = nsub * (2 * ncomp + pairs * 4 * nd)
+        runs = st["samples"] * 2                  # 5 members, batch 3
+        good = (int(row["seg_alu_step"]) == alu and
+                int(row["seg_ctl_step"]) == ctl and
+                int(row["seg_slots"]) == 2 * ncomp and
+                int(row["seg_runs"]) == runs)
+        check(good,
+              "%s, %s: the census is the structure's - %d ALU and %d control "
+              "codes a lane-step, %d scratch slots, %d runs (%d samples x 2 "
+              "chunks), derived here from %d Newton passes"
+              % (problem, scheme, alu, ctl, 2 * ncomp, runs, st["samples"],
+                 nw),
+              "%s, %s: the tool reports %s ALU / %s control / %s slots / %s "
+              "runs; the structure says %d / %d / %d / %d"
+              % (problem, scheme, row["seg_alu_step"], row["seg_ctl_step"],
+                 row["seg_slots"], row["seg_runs"], alu, ctl, 2 * ncomp, runs))
+
+    # --- its own batch independence ------------------------------------
+    base = ["--problem", "kepler", "--format", "fp256", "--members", 8,
+            "--periods", 2, "--steps-per-period", 96, "--rsqrt", "newton",
+            "--engine", "segments", "--quiet"]
+    blobs = []
+    for batch in (8, 3, 1):
+        path = Path(tmp) / ("s-bs-%d.ckpt" % batch)
+        tool.run(*base, "--batch", batch, "--checkpoint", path)
+        blobs.append(path.read_bytes())
+    check(blobs[0] == blobs[1] == blobs[2],
+          "segments at batch 8, 3 and 1 end on byte-identical checkpoints",
+          "the segments engine's checkpoints differ across batch sizes")
+
+    # --- resumed in pieces, alternating engines, the outer system -----
+    # The case the old program engine could not run at all: thirty
+    # values a lane, entered from a checkpoint either engine wrote. 37
+    # does not divide the 36-step sample interval, so most pieces stop
+    # part way through one.
+    rargv = ["--problem", "outer", "--format", "fp256", "--members", 4,
+             "--years", 4, "--days", 10, "--rsqrt", "newton", "--quiet",
+             "--batch", 3]
+    whole_ck, whole_rc = Path(tmp) / "s-whole.ckpt", Path(tmp) / "s-whole.txt"
+    tool.run(*rargv, "--engine", "loop", "--checkpoint", whole_ck,
+             "--records", whole_rc)
+    total = _at_of(whole_ck)[0]
+    for label, engines in (("segments alone", ("segments",)),
+                           ("loop and segments in turn",
+                            ("segments", "loop"))):
+        ck = Path(tmp) / ("s-piece-%d.ckpt" % len(engines))
+        rc = Path(tmp) / ("s-piece-%d.txt" % len(engines))
+        rounds, midway = _relay(tool, rargv, ck, rc, engines, 37, total)
+        check(midway > 0 and rounds > 1 and
+              ck.read_bytes() == whole_ck.read_bytes() and
+              rc.read_bytes() == whole_rc.read_bytes(),
+              "outer solar system, %s: stopped and resumed %d times (%d of "
+              "them mid interval) and ends on the uninterrupted loop "
+              "engine's checkpoint and records, byte for byte"
+              % (label, rounds, midway),
+              "outer solar system, %s: the resumed run differs from the "
+              "uninterrupted one (%d rounds, %d mid interval)"
+              % (label, rounds, midway))
+
+    # --- the negative control: the comparisons above can fail ----------
+    argv = ["--problem", "kepler", "--scheme", "leapfrog", "--format",
+            "fp256", "--members", 5, "--rsqrt", "newton", "--quiet",
+            "--periods", 2, "--steps-per-period", 96]
+    lp, lr = Path(tmp) / "nc-loop.ckpt", Path(tmp) / "nc-loop.txt"
+    sp, sr = Path(tmp) / "nc-seg.ckpt", Path(tmp) / "nc-seg.txt"
+    tool.run(*argv, "--engine", "loop", "--checkpoint", lp, "--records", lr)
+    proc = tool.run(*argv, "--engine", "segments", "--batch", 3,
+                    "--checkpoint", sp, "--records", sr, env=env_nc)
+    check("NEGATIVE CONTROL ACTIVE" in proc.stderr,
+          "the control announces itself on stderr",
+          "the negative control ran silently")
+    check(lp.read_bytes() != sp.read_bytes() and
+          lr.read_bytes() != sr.read_bytes(),
+          "NEGATIVE CONTROL: with v_0 and v_1 packed into each other's "
+          "scratch slots the engine comparison FAILS, so it can see a "
+          "layout bug",
+          "NEGATIVE CONTROL FAILED TO FAIL: a transposed scratch layout "
+          "still matched the host loop")
+    ck, rc = Path(tmp) / "nc-relay.ckpt", Path(tmp) / "nc-relay.txt"
+    _relay(tool, rargv, ck, rc, ("segments", "loop"), 37, total,
+           env_for={"segments": env_nc})
+    check(ck.read_bytes() != whole_ck.read_bytes(),
+          "NEGATIVE CONTROL: the alternating relay under the same control "
+          "FAILS its comparison too",
+          "NEGATIVE CONTROL FAILED TO FAIL: the relay matched with a "
+          "transposed segment")
+
+    # --- the golden model on the image this engine writes -------------
+    for problem, scheme, fmtname, extra in (
+            ("kepler", "leapfrog", "fp64", ["--periods", 1,
+                                            "--steps-per-period", 64]),
+            ("outer", "yoshida4", "fp256", ["--years", 1, "--days", 10])):
+        d = Path(tmp) / ("dump-%s-%s" % (problem, fmtname))
+        d.mkdir()
+        tool.run("--problem", problem, "--scheme", scheme, "--format",
+                 fmtname, "--members", 3, "--rsqrt", "newton", "--engine",
+                 "segments", "--sample-every", 2, "--quiet", *extra,
+                 "--segment-dump", d)
+        fmt = FORMATS[fmtname]
+        image = (d / "segment.cftp").read_bytes()
+        a_in = _values((d / "segment.a.bin").read_bytes(), fmt)
+        s_in = _values((d / "segment.in.bin").read_bytes(), fmt)
+        s_out = _values((d / "segment.out.bin").read_bytes(), fmt)
+        n = len(a_in)
+        prog = seq.Program.from_bytes(image)
+        res = seq.run(prog, a_in, [0] * n, None, scratch_in=s_in)
+        label = "%s, %s, %s" % (problem, scheme, fmtname)
+        check(len(s_out) == len(s_in) == n * prog.n_scratch_out and
+              s_out != s_in,
+              "%s: the dumped segment moved the state (%d lanes x %d slots) - "
+              "the comparison below is not of a no-op" % (label, n,
+                                                          prog.n_scratch_out),
+              "%s: the dump is empty, mis-sized or unchanged by the run"
+              % label)
+        check(res.scratch_out == s_out and res.status == 0,
+              "%s: python/cft_golden's executor, on the image this tool "
+              "built and the scratch block it sent, returns the library's "
+              "scratch-out exactly (%d instructions)" % (label,
+                                                         len(prog.insns)),
+              "%s: the golden model and the library disagree on the "
+              "segment" % label)
+        flipped = list(s_out)
+        flipped[len(flipped) // 2] ^= 1
+        check(res.scratch_out != flipped,
+              "%s: NEGATIVE CONTROL: one flipped bit in the library's "
+              "scratch-out is caught by the same comparison" % label,
+              "%s: NEGATIVE CONTROL FAILED TO FAIL: a flipped bit matched"
+              % label)
+        again = asm.assemble(asm.disassemble(image), "segment")
+        check(again == image,
+              "%s: the reference assembler reads the image back to the same "
+              "%d bytes - the tool's encoder, kx choice included, is the "
+              "assembler's" % (label, len(image)),
+              "%s: disassemble/re-assemble does not return the tool's image "
+              "- its encoder and asm.py disagree" % label)
+        bad = bytearray(image)
+        bad[-1] |= 0x80          # imm[31] of the last word: HALT's, reserved
+        refused = 0
+        try:
+            seq.Program.from_bytes(bytes(bad))
+        except seq.ProgramError:
+            refused += 1
+        try:
+            asm.disassemble(bytes(bad))
+        except asm.AsmError:
+            refused += 1
+        check(refused == 2,
+              "%s: NEGATIVE CONTROL: the same image with one reserved bit "
+              "set is refused by both the golden loader and the "
+              "disassembler, so their acceptance of the real one means "
+              "something" % label,
+              "%s: NEGATIVE CONTROL FAILED TO FAIL: a reserved bit was "
+              "accepted (%d of 2 refused)" % (label, refused))
 
 
 def main():
@@ -744,6 +1000,9 @@ def main():
               "uninterrupted one")
 
         # -------------------------------------------------------------
+        check_segments(tool, tmp)
+
+        # -------------------------------------------------------------
         print("\n[7] what --engine program must refuse")
         for why, argv in (
             ("the outer solar system (30 state values, 3 input streams)",
@@ -760,6 +1019,27 @@ def main():
                   "refused: %s\n         (%s)"
                   % (why, proc.stderr.strip().splitlines()[0][:110]),
                   "not refused: %s" % why)
+
+        print("\n[7b] what --engine segments must refuse")
+        env_nc = dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="transpose")
+        for why, argv, env, needle in (
+            ("--rsqrt exact (whole-program divide and square root, no "
+             "inliner to splice them)",
+             ["--engine", "segments", "--rsqrt", "exact", "--periods", 1],
+             None, "fragment inliner"),
+            ("--segment-dump without --engine segments",
+             ["--engine", "loop", "--periods", 1, "--segment-dump", tmp],
+             None, "needs --engine segments"),
+            ("the negative control on an engine it does not sabotage",
+             ["--engine", "loop", "--periods", 1], env_nc,
+             "sabotages --engine segments"),
+        ):
+            proc = tool.run(*argv, expect_ok=False, env=env)
+            check(proc.returncode != 0 and needle in proc.stderr,
+                  "refused: %s\n         (%s)"
+                  % (why, proc.stderr.strip().splitlines()[-1][:110]),
+                  "not refused, or refused for another reason: %s (%s)"
+                  % (why, proc.stderr.strip()[-160:]))
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
