@@ -4775,11 +4775,15 @@ static void check_program_capacity(cft_device *dev, cft_format fmt)
            tiles == 1 ? "" : "s", passed, ran);
     cft_program_free(prog);
 
-    /* An HBM channel: 1M lanes a tile at 80 deposit slots of fp32 is
-     * 320 MB of deposit window a tile against a 256 MB channel - it must
-     * be refused as out of memory, by name; 16 slots (64 MB, a quarter
-     * of the channel) must run right. Only where there is a channel:
-     * the software backend has none. */
+    /* An HBM channel: a deposit window 16 MiB past one tile's 256 MiB
+     * channel must be refused as out of memory, by name; 16 slots of 1M
+     * lanes a tile (64 MiB, a quarter of the channel) must run right. The
+     * slots are the device's own max_deposits (64 on the round-2 tiles),
+     * never more: an image past that is refused at load, which is a
+     * different refusal - the first card run of this leg (2026-09-25)
+     * asked for 80 and got exactly that. The lanes are what overflows the
+     * channel at those slots. Only where there is a channel: the software
+     * backend has none. */
     if (strcmp(caps.backend, "xrt") != 0) {
         not_here(NH_OTHER, "TESTED", "    a program past one tile's HBM "
                  "channel", "this backend has no HBM channel to run past");
@@ -4788,20 +4792,26 @@ static void check_program_capacity(cft_device *dev, cft_format fmt)
     if (fmt != CFT_FP32)
         return;
     {
-        const size_t per = (size_t)1 << 20, n = tiles * per;
+        const size_t chan = (size_t)256 << 20;
+        const uint32_t slots = caps.max_deposits && caps.max_deposits < 80u
+                                   ? caps.max_deposits
+                                   : 80u;
+        const size_t per = chan / ((size_t)slots * esz) +
+                           ((size_t)16 << 20) / ((size_t)slots * esz);
+        const size_t n = tiles * per;
         cft_status st;
         uint8_t *a = (uint8_t *)malloc(n * esz);
-        uint8_t *dep = (uint8_t *)malloc(n * 80u * esz);
+        uint8_t *dep = (uint8_t *)malloc(n * slots * esz);
         uint32_t *cnt = (uint32_t *)malloc(n * 4);
         cft_run_args A;
         uint32_t fl = 0, bus = 0;
 
         checks++;
-        bytes = seq_image(img, fmt, ins, 2, NULL, 0, 80);
+        bytes = seq_image(img, fmt, ins, 2, NULL, 0, slots);
         if (!a || !dep || !cnt ||
             cft_program_load(dev, img, bytes, &big) != CFT_OK) {
-            printf("  FAIL seq capacity: could not set up the HBM leg (%s)\n",
-                   cft_last_error());
+            printf("  FAIL seq capacity: could not set up the HBM leg at %lu "
+                   "slots (%s)\n", (unsigned long)slots, cft_last_error());
             failures++;
         } else {
             fill_finite(a, fmt, n);
@@ -4817,8 +4827,11 @@ static void check_program_capacity(cft_device *dev, cft_format fmt)
             if (st == CFT_ERR_OUT_OF_MEMORY &&
                 strstr(cft_last_error(), "device buffer allocation failed")) {
                 printf("    a program past one tile's HBM channel (%lu lanes a "
-                       "tile, 320 MB of deposits each): refused by name - %s\n",
-                       (unsigned long)per, cft_last_error());
+                       "tile at %lu slots, %lu MiB of deposits each): refused "
+                       "by name - %s\n", (unsigned long)per,
+                       (unsigned long)slots,
+                       (unsigned long)((per * slots * esz) >> 20),
+                       cft_last_error());
             } else {
                 printf("  FAIL seq capacity: a deposit window past one tile's "
                        "channel gave %s (%s), not a named out-of-memory "
@@ -4848,6 +4861,158 @@ static void check_program_capacity(cft_device *dev, cft_format fmt)
         }
         cft_program_free(big);
     }
+}
+
+/* The completion witness (backend_xrt.cpp, run_job, 2026-09-25): a tile
+ * that is busy before a start, or still busy after XRT has reported its
+ * run complete, is refused by name and nothing of the run is collected.
+ * The defect it exists for - a run abandoned on a tile, after which
+ * XRT's scheduler completes later runs on that tile early, in any
+ * process, until the image is reloaded - cannot be planted from here
+ * without poisoning the card for everyone after this process, so it is
+ * a card-day leg (docs/CARDDAY.md). What this holds on every XRT device
+ * is the refusal itself, through CFT_XRT_WITNESS's planted busy reading:
+ * the status and the sentence, the caller's output untouched, and the
+ * handle giving the unplanted run's bytes straight after - for an
+ * elementwise run and a program, which reach run_job from two entry
+ * points. A malformed value is refused by name. ONCE A DEVICE. */
+static void check_completion_witness(cft_device *hw, cft_format fmt)
+{
+    static int done;
+    static const struct {
+        const char *plant, *words;
+    } legs[] = {
+        {"busy-before", "is running work this process did not start"},
+        {"busy-after", "was still running it"},
+    };
+    const size_t esz = cft_format_size(fmt), n = 64;
+    uint8_t *a = (uint8_t *)malloc(n * esz), *b = (uint8_t *)malloc(n * esz);
+    uint8_t *c = (uint8_t *)calloc(n, esz), *base = (uint8_t *)malloc(n * esz);
+    uint8_t *got = (uint8_t *)malloc(n * esz);
+    uint8_t *dbase = (uint8_t *)malloc(n * esz), *dgot = (uint8_t *)malloc(n * esz);
+    uint32_t cnt[64], f = 0, bus = 0;
+    uint8_t img[64];
+    uint64_t ins[2];
+    cft_program *prog = NULL;
+    cft_run_args A;
+    cft_caps caps;
+    cft_status st;
+    size_t l, i;
+    int right = 0, asked = 0, untouched;
+
+    if (done)
+        goto out;
+    done = 1;
+    memset(&caps, 0, sizeof caps);
+    caps.struct_size = sizeof caps;
+    if (cft_get_caps(hw, &caps) != CFT_OK || strcmp(caps.backend, "xrt") != 0) {
+        not_here(NH_OTHER, "TESTED", "    the completion witness's refusals",
+                 "the %s backend has no tile whose CTRL it reads",
+                 caps.backend[0] ? caps.backend : "this");
+        goto out;
+    }
+    if (!a || !b || !c || !base || !got || !dbase || !dgot) {
+        printf("  FAIL: out of memory for the completion-witness leg\n");
+        failures++;
+        goto out;
+    }
+    rs = 0x77175e55u;
+    fill(a, n, esz);
+    fill(b, n, esz);
+    ins[0] = seq_ctrl(3, 0, 0);                  /* deposit r0 = a */
+    ins[1] = seq_ctrl(0, 0, 0);                  /* halt */
+    memset(&A, 0, sizeof A);
+    A.struct_size = sizeof A;
+    A.a = a;
+    A.n = n;
+    A.counts = cnt;
+    A.flags_out = &f;
+    A.bus_out = &bus;
+
+    /* the unplanted runs: what the handle must still give afterwards */
+    st = cft_run(hw, CFT_ADD, fmt, CFT_RNE, a, b, c, base, n, &f, &bus);
+    CHECK(st == CFT_OK, "the witness leg's unplanted ADD (%s): %s (%s)",
+          cft_format_name(fmt), cft_strerror(st), cft_last_error());
+    st = cft_program_load(hw, img, seq_image(img, fmt, ins, 2, NULL, 0, 1),
+                          &prog);
+    CHECK(st == CFT_OK, "the witness leg's one-deposit image (%s): %s",
+          cft_format_name(fmt), cft_last_error());
+    if (st != CFT_OK)
+        goto out;
+    A.deposits = dbase;
+    st = cft_program_run_ex(prog, &A);
+    CHECK(st == CFT_OK, "the witness leg's unplanted program (%s): %s (%s)",
+          cft_format_name(fmt), cft_strerror(st), cft_last_error());
+
+    for (l = 0; l < sizeof legs / sizeof legs[0]; l++) {
+        /* an elementwise run, refused */
+        memset(got, 0x5a, n * esz);
+        put_env("CFT_XRT_WITNESS", legs[l].plant);
+        st = cft_run(hw, CFT_ADD, fmt, CFT_RNE, a, b, c, got, n, &f, &bus);
+        put_env("CFT_XRT_WITNESS", NULL);
+        for (untouched = 1, i = 0; i < n * esz; i++)
+            untouched &= got[i] == 0x5a;
+        asked++;
+        CHECK(st == CFT_ERR_INTERNAL && strstr(cft_last_error(), legs[l].words),
+              "CFT_XRT_WITNESS=%s, an ADD (%s): %s (%s) - a busy tile must be "
+              "refused by name", legs[l].plant, cft_format_name(fmt),
+              cft_strerror(st), cft_last_error());
+        CHECK(untouched, "CFT_XRT_WITNESS=%s: a refused ADD wrote the caller's "
+              "output (%s)", legs[l].plant, cft_format_name(fmt));
+        right += st == CFT_ERR_INTERNAL &&
+                 strstr(cft_last_error(), legs[l].words) && untouched;
+        /* ...and the handle still gives the unplanted bytes */
+        st = cft_run(hw, CFT_ADD, fmt, CFT_RNE, a, b, c, got, n, &f, &bus);
+        asked++;
+        CHECK(st == CFT_OK && !memcmp(got, base, n * esz),
+              "the ADD after the %s refusal (%s): %s (%s)%s", legs[l].plant,
+              cft_format_name(fmt), cft_strerror(st), cft_last_error(),
+              st == CFT_OK ? " - bytes differ from the unplanted run" : "");
+        right += st == CFT_OK && !memcmp(got, base, n * esz);
+
+        /* a program, refused */
+        memset(dgot, 0x5a, n * esz);
+        A.deposits = dgot;
+        put_env("CFT_XRT_WITNESS", legs[l].plant);
+        st = cft_program_run_ex(prog, &A);
+        put_env("CFT_XRT_WITNESS", NULL);
+        for (untouched = 1, i = 0; i < n * esz; i++)
+            untouched &= dgot[i] == 0x5a;
+        asked++;
+        CHECK(st == CFT_ERR_INTERNAL && strstr(cft_last_error(), legs[l].words)
+                  && untouched,
+              "CFT_XRT_WITNESS=%s, a program (%s): %s (%s)%s", legs[l].plant,
+              cft_format_name(fmt), cft_strerror(st), cft_last_error(),
+              untouched ? "" : " - and it wrote the caller's deposits");
+        right += st == CFT_ERR_INTERNAL &&
+                 strstr(cft_last_error(), legs[l].words) && untouched;
+        st = cft_program_run_ex(prog, &A);
+        asked++;
+        CHECK(st == CFT_OK && !memcmp(dgot, dbase, n * esz),
+              "the program after the %s refusal (%s): %s (%s)", legs[l].plant,
+              cft_format_name(fmt), cft_strerror(st), cft_last_error());
+        right += st == CFT_OK && !memcmp(dgot, dbase, n * esz);
+    }
+
+    /* an instrument that quietly read a typo as "off" would be a gate
+     * that could not fail */
+    put_env("CFT_XRT_WITNESS", "busy");
+    st = cft_run(hw, CFT_ADD, fmt, CFT_RNE, a, b, c, got, n, &f, &bus);
+    put_env("CFT_XRT_WITNESS", NULL);
+    asked++;
+    CHECK(st == CFT_ERR_INVALID_ARGUMENT &&
+              strstr(cft_last_error(), "CFT_XRT_WITNESS"),
+          "CFT_XRT_WITNESS=busy: %s (%s) - a malformed value must be refused "
+          "by name", cft_strerror(st), cft_last_error());
+    right += st == CFT_ERR_INVALID_ARGUMENT &&
+             strstr(cft_last_error(), "CFT_XRT_WITNESS") != NULL;
+    printf("    the completion witness (%s): a tile read as busy before a start "
+           "and after a wait refused by name, nothing collected, the handle "
+           "right straight after; a malformed instrument refused - %d of %d "
+           "right\n", cft_format_name(fmt), right, asked);
+out:
+    cft_program_free(prog);
+    free(a); free(b); free(c); free(base); free(got); free(dbase); free(dgot);
 }
 
 static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
@@ -5002,6 +5167,7 @@ static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
     check_scratch(hw, fmt, n);
     check_program_past_a_page(hw, fmt);
     check_program_capacity(hw, fmt);
+    check_completion_witness(hw, fmt);
 
     /* 7b. ABI 0.14's index tables (R16), gated on the feature bit the
      *     same way and named NOT COMPARED where the device does not

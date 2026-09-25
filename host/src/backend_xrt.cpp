@@ -88,6 +88,7 @@
 #include <new>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <xrt/xrt_bo.h>
@@ -148,6 +149,14 @@ enum {
 namespace {
 
 /* rtl/cft_csr.sv is the normative map; these must move together. */
+/* CTRL, read only as the completion witness in run_job: [0] ap_start,
+ * [1] ap_done - which CLEARS ON READ, and which XRT's scheduler polls -
+ * [2] ap_idle, [3] ap_ready. The witness reads it at the two moments
+ * no command of this process is outstanding on the tile: before a start
+ * and after XRT has reported the run complete. */
+constexpr uint32_t CSR_CTRL    = 0x00;
+constexpr uint32_t CTRL_START  = 0x1u;
+constexpr uint32_t CTRL_IDLE   = 0x4u;
 constexpr uint32_t CSR_FLAGS   = 0x40;
 constexpr uint32_t CSR_MAGIC   = 0x44;
 constexpr uint32_t CSR_VERSION = 0x48;
@@ -469,6 +478,10 @@ struct Tile {
      * passes every one of them. */
     xrt::bo     ia, ib, ic, isi, mk;
     size_t      ia_cap = 0, ib_cap = 0, ic_cap = 0, isi_cap = 0, mk_cap = 0;
+    /* The compute unit's name as XRT knows it ("cft_krnl:{cft_krnl_2}"),
+     * so a refusal names the unit an operator can find in xbutil and in
+     * CFT_XRT_TILES, not only this handle's index for it. */
+    std::string cu;
 };
 
 struct Dev {
@@ -977,6 +990,27 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
     if (ist != ST_OK)
         return ist;
 
+    /* CFT_XRT_WITNESS, a card instrument read per call: the completion
+     * witness's planted fault. "busy-before" makes the first task's
+     * tile read as busy before its start; "busy-after" makes its first
+     * read after the wait busy, the next one real. Either must be
+     * refused by name and leave the handle usable - device-test holds
+     * that on every XRT device. What it cannot plant is the defect the
+     * witness exists for, an abandoned run; that is a card-day leg
+     * (docs/CARDDAY.md). Anything else set is refused by name. */
+    int plant = 0;
+    if (const char *w = std::getenv("CFT_XRT_WITNESS")) {
+        if (!std::strcmp(w, "busy-before"))
+            plant = 1;
+        else if (!std::strcmp(w, "busy-after"))
+            plant = 2;
+        else if (*w) {
+            set_err(std::string("CFT_XRT_WITNESS=\"") + w + "\": expected "
+                    "busy-before or busy-after; unset it for none");
+            return ST_INVALID_ARGUMENT;
+        }
+    }
+
     const size_t ntiles = D.tiles.size();
     std::vector<size_t> order(ntiles);
     for (size_t base = 0, wave = 0; base < J.tasks.size();
@@ -1003,6 +1037,42 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
                 return ST_OUT_OF_MEMORY;
             }
             set_err("staging " + J.what + ": " + w);
+            return ST_INTERNAL;
+        }
+
+        /* The completion witness, before (2026-09-25). A tile this wave
+         * will start must be IDLE: a busy one is running work this
+         * process did not start - a run abandoned on it by a timeout or
+         * by a process that ended mid-run - and the tile drops a start
+         * while busy (rtl/cft_csr.sv), so XRT would report this task
+         * complete when THAT run ends and hand back bytes this job never
+         * wrote. Nothing of the wave has started, so a refusal leaves
+         * every unit as it was. CFT_ERR_BUSY takes this over with
+         * per-tile failure (docs/ROADMAP.md, plan step 3). */
+        for (size_t j = 0; j < count; j++) {
+            const Tile &t = D.tiles[order[j]];
+            uint32_t c = 0;
+            try {
+                c = t.k.read_register(CSR_CTRL);
+            } catch (const std::exception &e) {
+                set_err("reading tile " + std::to_string(order[j]) + " (" +
+                        t.cu + ")'s CTRL before " + J.what + ": " + e.what());
+                return ST_INTERNAL;
+            }
+            if (plant == 1 && base == 0 && j == 0)
+                c = CTRL_START;                  /* CFT_XRT_WITNESS */
+            if ((c & CTRL_IDLE) && !(c & CTRL_START))
+                continue;
+            set_err("tile " + std::to_string(order[j]) + " (" + t.cu +
+                    ") is running work this process did not start (CTRL 0x" +
+                    hex32(c) + ", not idle): a run abandoned on it - by a "
+                    "timeout, or by a process that ended mid-run - is still "
+                    "going. The tile would drop this start and XRT would "
+                    "report " + J.what + " complete when that run ends, so "
+                    "nothing was started. Retry when it has finished; until "
+                    "the image is reloaded XRT may also complete later runs "
+                    "on this tile early, which is refused by name when it "
+                    "happens");
             return ST_INTERNAL;
         }
 
@@ -1062,6 +1132,72 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
                              "this is a hang or a genuinely slow run "
                              "rather than a bus fault)"));
             return st;
+        }
+
+        /* The completion witness, after. XRT reported every run of the
+         * wave complete; each tile must now BE idle. On the card on
+         * 2026-09-25, after a run was abandoned on a tile, XRT's
+         * scheduler (ERT) completed later runs on it early - in any
+         * process, until the image was reloaded - and a slice slower
+         * than the others came back with its last block unwritten and
+         * rc 0 (docs/VALIDATION.md). An output check cannot see that
+         * when an identical earlier run left the same bytes at the same
+         * addresses; this can: the tile is still busy. STATUS and FLAGS
+         * are read below this, never from a run still going. A busy tile
+         * is waited on until idle (as long as a run may take), so no
+         * write of this job lands after the call returns, and then the
+         * job is refused - nothing of the wave is collected. */
+        {
+            std::string early;
+            bool still = false;
+            for (size_t j = 0; j < count; j++) {
+                const Tile &t = D.tiles[order[j]];
+                uint32_t c = 0;
+                try {
+                    c = t.k.read_register(CSR_CTRL);
+                    if (plant == 2 && base == 0 && j == 0)
+                        c = CTRL_START;              /* CFT_XRT_WITNESS */
+                    if (c & CTRL_IDLE)
+                        continue;
+                    const auto t0 = std::chrono::steady_clock::now();
+                    while (!(c & CTRL_IDLE) &&
+                           std::chrono::steady_clock::now() - t0 <
+                               std::chrono::milliseconds(D.wait_ms)) {
+                        std::this_thread::sleep_for(
+                            std::chrono::milliseconds(1));
+                        c = t.k.read_register(CSR_CTRL);
+                    }
+                } catch (const std::exception &e) {
+                    D.poisoned = true;
+                    set_err("reading tile " + std::to_string(order[j]) +
+                            " (" + t.cu + ")'s CTRL after " + J.what + ": " +
+                            e.what());
+                    return ST_INTERNAL;
+                }
+                if (!(c & CTRL_IDLE))
+                    still = true;
+                early += (early.empty() ? "" : ", ") + std::string("tile ") +
+                         std::to_string(order[j]) + " (" + t.cu + ")";
+            }
+            if (!early.empty()) {
+                if (still)
+                    D.poisoned = true;
+                set_err("XRT reported " + J.what + " complete while " +
+                        early + " was still running it: its scheduler "
+                        "completed the run early, which it does on a tile "
+                        "after a run there was abandoned (a timeout, or a "
+                        "process that ended mid-run, in this process or "
+                        "any other) until the image is reloaded. Nothing of "
+                        "this wave was collected" +
+                        (still ? std::string("; a tile was still running "
+                                             "after the run's whole wait, "
+                                             "so this handle is finished")
+                               : std::string("; each such tile has since "
+                                             "finished it")) +
+                        ". Reload the image - load another xclbin and then "
+                        "this one - before trusting this tile again");
+                return ST_INTERNAL;
+            }
         }
 
         uint32_t ws = 0, wf = 0;
@@ -1303,6 +1439,7 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
             }
             D->tiles.emplace_back();
             D->tiles.back().k = std::move(k);
+            D->tiles.back().cu = nm;
         } catch (const std::exception &e) {
             if (selecting) {
                 /* Say which tile, and what XRT said. With the listing
