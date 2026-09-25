@@ -96,8 +96,13 @@
 /* The xclbin listing API, where this XRT has it. The discriminator is
  * the NEWER header path: XRT 2.19 (amd-arc-box) ships it at
  * xrt/experimental/xrt_xclbin.h; XRT 2.14 (the cft2204 WSL distro) has
- * no xrt/experimental/ at all and its experimental/xrt_xclbin.h is an
- * EMPTY file, so testing for that one would say yes and deliver nothing.
+ * no xrt/experimental/ at all, so a 2.14 build takes the probe below.
+ * That is the detection's choice, not a missing API: 2.14's
+ * experimental/xrt_xclbin.h is 21,405 bytes and declares get_kernels()
+ * and get_cus() (measured 2026-09-25; this comment called it an EMPTY
+ * file until then, which verifier-V2 found false), and the backend
+ * compiles with CFT_XRT_XCLBIN_API forced on against it - but whether
+ * 2.14's listing works at run time has never been seen on a card.
  * Without the API, compute units are found the way they always were,
  * by probing cft_krnl_1.. by name. */
 #if defined(__has_include)
@@ -339,8 +344,11 @@ constexpr int MAX_TILES = 64;
 
 /* The number a compute-unit name ends in - "cft_krnl:{cft_krnl_12}" is
  * 12 - or -1 if it ends in none. Used to put tiles in a stable order
- * and to find the one CFT_XRT_TILES names; nothing decides what a
- * compute unit IS from its name - MAGIC does that once it is open. */
+ * and to find the one CFT_XRT_TILES names. Where the image's units are
+ * listed, or a selection names them, MAGIC decides what each one IS
+ * once it is open; the probe fallback's default open reads MAGIC from
+ * the first tile only and keeps cft_krnl_2 and on by name, as it always
+ * has. */
 static long cu_ordinal(const std::string &nm)
 {
     size_t end = nm.size();
@@ -357,6 +365,9 @@ static long cu_ordinal(const std::string &nm)
 std::string g_err;
 
 void set_err(const std::string &s) { g_err = s; }
+/* The same, for a message built before something it depended on was
+ * freed: moved in, so nothing is allocated after the free. */
+void set_err(std::string &&s) { g_err = std::move(s); }
 
 /* A status word as eight hex digits. STATUS is a bit field and the
  * bits are what the reader needs; decimal would have to be converted
@@ -1210,8 +1221,9 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
         char why[320];
         const int k = cft_tile_select_parse(sel_env, order, why, sizeof why);
         if (k < 0) {
+            std::string msg(why);
             delete D;
-            set_err(why);
+            set_err(std::move(msg));
             return ST_INVALID_ARGUMENT;
         }
         std::vector<std::string> picked;
@@ -1225,23 +1237,32 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
                         also += " " + nm;
                 }
             if (hit.empty()) {
+                /* The caller's selection names a tile the image does not
+                 * have: the argument is wrong, not the artifact, so the
+                 * status is the one a malformed list gets (Logan's word,
+                 * 2026-09-25, after verifier-V2 found ARTIFACT's "missing,
+                 * unreadable, or not a tile" misdescribing a valid quad). */
+                std::string msg = std::string("CFT_XRT_TILES names tile ") +
+                                  std::to_string(order[i]) + ", and " +
+                                  artifact +
+                                  (declared.empty()
+                                       ? std::string(" declares no such "
+                                                     "compute unit")
+                                       : " declares " + declared);
                 delete D;
-                set_err(std::string("CFT_XRT_TILES names tile ") +
-                        std::to_string(order[i]) + ", and " + artifact +
-                        (declared.empty() ? std::string(" declares no such "
-                                                        "compute unit")
-                                          : " declares " + declared));
-                return ST_ARTIFACT;
+                set_err(std::move(msg));
+                return ST_INVALID_ARGUMENT;
             }
             if (!also.empty()) {
                 /* A foreign kernel numbered like a tile: which one is
                  * the tile is MAGIC's call after an open, and a
                  * selection must not open the wrong one to find out. */
+                std::string msg = std::string("CFT_XRT_TILES names tile ") +
+                                  std::to_string(order[i]) + ", and more "
+                                  "than one compute unit in " + artifact +
+                                  " ends in that number: " + hit + also;
                 delete D;
-                set_err(std::string("CFT_XRT_TILES names tile ") +
-                        std::to_string(order[i]) + ", and more than one "
-                        "compute unit in " + artifact + " ends in that "
-                        "number: " + hit + also);
+                set_err(std::move(msg));
                 return ST_ARTIFACT;
             }
             picked.push_back(hit);
@@ -1250,6 +1271,13 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
     }
 
     std::string first_failure, not_tiles;
+    /* A selection's refusal is decided inside the loop and carried out
+     * after it: the message is built while D is alive and D is deleted
+     * once, outside every try. Deleting inside the try and then
+     * building the message let a bad_alloc reach the catch below and
+     * delete D a second time (verifier-V2, 2026-09-25, under ASan). */
+    int refused = ST_OK;
+    std::string refusal;
     for (const std::string &nm : names) {
         try {
             xrt::kernel k(D->dev, D->uuid, nm,
@@ -1263,11 +1291,11 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
                 }
                 if (m != TILE_MAGIC) {
                     if (selecting) {
-                        delete D;
-                        set_err("CFT_XRT_TILES names " + nm + ", which "
-                                "opened but did not answer MAGIC as a cft "
-                                "tile");
-                        return ST_ARTIFACT;
+                        refusal = "CFT_XRT_TILES names " + nm + ", which "
+                                  "opened but did not answer MAGIC as a cft "
+                                  "tile";
+                        refused = ST_ARTIFACT;
+                        break;
                     }
                     not_tiles += (not_tiles.empty() ? "" : " ") + nm;
                     continue;      /* opened, answered, not ours; released */
@@ -1277,20 +1305,37 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
             D->tiles.back().k = std::move(k);
         } catch (const std::exception &e) {
             if (selecting) {
-                /* The commonest reason is that another process holds
-                 * it, which is exactly the case a selection exists for:
-                 * say which tile, and say that. */
-                delete D;
-                set_err("CFT_XRT_TILES names " + nm + ", which could not be "
-                        "opened: " + e.what() + " (a compute unit another "
-                        "process holds fails exactly this way)");
-                return ST_ARTIFACT;
+                /* Say which tile, and what XRT said. With the listing
+                 * API the unit is one the image declares, and the
+                 * commonest reason it will not open is that another
+                 * process holds it - XRT 2.19 says "failed to open cu
+                 * context: Invalid argument" (the card, 2026-09-25).
+                 * Without it every ordinal is a guessed name, and one the
+                 * image lacks fails too ("No compute units matching",
+                 * the card on 2026-09-14), so the sentence does not
+                 * guess which. */
+                refusal = "CFT_XRT_TILES names " + nm + ", which could not "
+                          "be opened: " + e.what() +
+                          (probing ? " (this XRT cannot list an image's "
+                                     "compute units, so one the image does "
+                                     "not have and one another process "
+                                     "holds are not told apart here)"
+                                   : " (the image declares it, and a compute "
+                                     "unit another process holds fails "
+                                     "exactly this way)");
+                refused = ST_ARTIFACT;
+                break;
             }
             if (first_failure.empty())
                 first_failure = e.what();
             if (probing)
                 break;             /* the probe stops at the first gap */
         }
+    }
+    if (refused != ST_OK) {
+        delete D;
+        set_err(std::move(refusal));
+        return refused;
     }
     if (D->tiles.empty()) {
         delete D;
@@ -1300,8 +1345,10 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
                    (not_tiles.empty() ? "" : "; opened but not a cft tile by MAGIC: " + not_tiles);
         if (!first_failure.empty())
             msg += "; first failure: " + first_failure +
-                   " (a compute unit already held by another process reports"
-                   " the same way as one that is not there)";
+                   " (XRT says \"failed to open cu context\" for a compute "
+                   "unit another process holds and \"No compute units "
+                   "matching\" for one the image lacks - the card, 2026-09-14 "
+                   "and 2026-09-25)";
         set_err(msg);
         return ST_ARTIFACT;
     }

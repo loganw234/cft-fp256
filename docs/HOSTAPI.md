@@ -229,28 +229,38 @@ ordinals their compute units end in (`cft_krnl_1` is 1):
     CFT_XRT_TILES=3,1    tiles 3 and 1, in that order, as a two-tile device
 
 It **refuses rather than shrinks**, naming the tile each time: a
-malformed list is `CFT_ERR_INVALID_ARGUMENT` with a sentence (digits
-only, 1..64, no empty item, no duplicate, and an empty variable is not
-"every tile"); a tile the image does not declare, two compute units
-ending in the same number, a tile that will not open and one that opens
-without answering MAGIC are `CFT_ERR_ARTIFACT`. The commonest reason a
-declared tile will not open is that another process holds it. XRT
-reports that as `failed to open cu context: Invalid argument`, the same
-words it uses for a unit that is broken, so the sentence says which tile
-and that holding is the likely cause. The status code is still the
-generic `CFT_ERR_ARTIFACT` ("artifact missing, unreadable, or not a
-tile"), because the contract has no "busy" status. That is a gap in the
-contract, not a detail.
+malformed list, and a tile the image does not declare, are
+`CFT_ERR_INVALID_ARGUMENT` with a sentence - the selection is the
+caller's (digits only, 1..64, no empty item, no duplicate, and an empty
+variable is not "every tile"); two compute units ending in the same
+number, a tile that will not open and one that opens without answering
+MAGIC are `CFT_ERR_ARTIFACT`. The commonest reason a
+declared tile will not open is that another process holds it. XRT 2.19
+reports that as `failed to open cu context: Invalid argument`, and a
+unit the image lacks as `No compute units matching` (both on the card),
+so the sentence names the tile and says what XRT said. An XRT without
+the listing API (2.14's build takes that path) cannot tell the two
+apart for a selection, and the sentence says so rather than guessing.
+The status code is still the generic `CFT_ERR_ARTIFACT` ("artifact
+missing, unreadable, or not a tile"), because the contract has no
+"busy" status. That is a gap in the contract, not a detail; Logan's
+word (2026-09-25) puts a busy status with per-tile failure, in the
+plan of record's step 3.
 
 **Without it, a held tile is skipped and the device is smaller.**
 Measured on round 2's quad with tile 2 held by another process: the
 default open succeeded with three tiles and passed device-test. Nothing
 is wrong in the answers - partition invariance holds at any tile count -
 but a caller who assumed four has three, and only `cft_get_caps`'s
-`tiles` says so. A caller that needs a particular shape names it.
+`tiles` says so. On an XRT without the listing API the default open
+probes `cft_krnl_1`, `cft_krnl_2`, ... and stops at the first that will
+not open, so the same held tile 2 leaves ONE tile (verifier-V2's model
+of that path, 2026-09-25; not seen on a card, whose XRT lists). A caller
+that needs a particular shape names it.
 
 On the card (docs/VALIDATION.md, 2026-09-25): each selection opened
-exactly what it named and passed device-test's quick matrix; four
+as many tiles as it named and passed device-test's quick matrix (the
+order written is kept - shown by verifier-V2's model, not the card); four
 processes on tiles 1-4 at once all passed; four independent orbit
 integrations, one per tile at once, each matched the software loop
 engine byte for byte; tile 9, `1;2`, an empty value and a tile another

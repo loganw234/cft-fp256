@@ -21,7 +21,8 @@
  * is a claim about hardware: decimal digits only, no sign, no spaces,
  * no empty item, no ordinal outside 1..64, no ordinal named twice. A
  * list that breaks one is refused with a sentence, never read as the
- * nearest thing it resembles.
+ * nearest thing it resembles - and the sentence quotes what was
+ * written, not what the parse made of it.
  */
 
 #ifndef CFT_TILE_SELECT_H
@@ -30,8 +31,15 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #define CFT_TILE_SELECT_MAX 64
+
+/* How much of the input a sentence echoes: all of it up to 48
+ * characters, then its first 48 and "...", so the reason that follows
+ * always fits the caller's buffer. (A 300-character value once cut the
+ * reason itself off mid-number - verifier-V2, 2026-09-25.) */
+#define CFT_TS_ECHO_MAX 48
 
 /* Parse `s` into `order` (the ordinals in the order written, at most
  * CFT_TILE_SELECT_MAX) and return how many; or return -1 and write why
@@ -44,6 +52,8 @@ static int cft_tile_select_parse(const char *s, int *order, char *why,
     uint64_t seen = 0;
     int n = 0;
     const char *p = s;
+    int echo;
+    const char *more;
 
     if (!s || !*s) {
         snprintf(why, whylen, "CFT_XRT_TILES is empty; unset it to open "
@@ -51,28 +61,38 @@ static int cft_tile_select_parse(const char *s, int *order, char *why,
                  "\"1,3\")");
         return -1;
     }
+    echo = (int)(strlen(s) > CFT_TS_ECHO_MAX ? CFT_TS_ECHO_MAX : strlen(s));
+    more = strlen(s) > CFT_TS_ECHO_MAX ? "..." : "";
     for (;;) {
+        const char *item = p;
         long v = 0;
         int digits = 0;
         while (*p >= '0' && *p <= '9') {
+            /* Accumulate only while the value can still be in range:
+             * past 64 it is refused whatever follows, so the running
+             * value never exceeds 649 and cannot overflow at any
+             * length. The sentence quotes the digits, not this value. */
             if (v <= CFT_TILE_SELECT_MAX)
                 v = v * 10 + (*p - '0');
             digits++;
             p++;
         }
         if (!digits) {
-            snprintf(why, whylen, "CFT_XRT_TILES=\"%s\": expected a 1-based "
-                     "tile ordinal at offset %d", s, (int)(p - s));
+            snprintf(why, whylen, "CFT_XRT_TILES=\"%.*s%s\": expected a "
+                     "1-based tile ordinal at offset %d", echo, s, more,
+                     (int)(p - s));
             return -1;
         }
         if (v < 1 || v > CFT_TILE_SELECT_MAX) {
-            snprintf(why, whylen, "CFT_XRT_TILES=\"%s\": tile %ld is outside "
-                     "1..%d", s, v, CFT_TILE_SELECT_MAX);
+            snprintf(why, whylen, "CFT_XRT_TILES=\"%.*s%s\": tile %.*s%s is "
+                     "outside 1..%d", echo, s, more,
+                     digits > 20 ? 20 : digits, item,
+                     digits > 20 ? "..." : "", CFT_TILE_SELECT_MAX);
             return -1;
         }
         if (seen & ((uint64_t)1 << (v - 1))) {
-            snprintf(why, whylen, "CFT_XRT_TILES=\"%s\": tile %ld is named "
-                     "twice", s, v);
+            snprintf(why, whylen, "CFT_XRT_TILES=\"%.*s%s\": tile %ld is "
+                     "named twice", echo, s, more, v);
             return -1;
         }
         seen |= (uint64_t)1 << (v - 1);
@@ -80,9 +100,17 @@ static int cft_tile_select_parse(const char *s, int *order, char *why,
         if (*p == 0)
             return n;
         if (*p != ',') {
-            snprintf(why, whylen, "CFT_XRT_TILES=\"%s\": unexpected '%c' at "
-                     "offset %d (ordinals are separated by commas, nothing "
-                     "else)", s, *p, (int)(p - s));
+            const unsigned char c = (unsigned char)*p;
+            if (c >= 0x20 && c < 0x7f)
+                snprintf(why, whylen, "CFT_XRT_TILES=\"%.*s%s\": unexpected "
+                         "'%c' at offset %d (ordinals are separated by "
+                         "commas, nothing else)", echo, s, more, (char)c,
+                         (int)(p - s));
+            else
+                snprintf(why, whylen, "CFT_XRT_TILES=\"%.*s%s\": unexpected "
+                         "byte 0x%02x at offset %d (ordinals are separated "
+                         "by commas, nothing else)", echo, s, more,
+                         (unsigned)c, (int)(p - s));
             return -1;
         }
         p++;

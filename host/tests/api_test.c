@@ -141,11 +141,16 @@ static void expect256(cft_device *dev, const char *what, cft_op op,
 static const struct { const char *s; int n; int o[3]; } tile_good[] = {
     {"1", 1, {1}}, {"2", 1, {2}}, {"64", 1, {64}},
     {"1,3", 2, {1, 3}}, {"3,1", 2, {3, 1}}, {"4,2,1", 3, {4, 2, 1}},
-    {"007", 1, {7}},
+    {"007", 1, {7}}, {"010", 1, {10}}, {"064", 1, {64}},
 };
 static const char *const tile_bad[] = {
     "", "0", "65", "99999999999999999999", "-1", "+1", " 1", "1 ",
     "1,", ",1", "1,,2", "1;2", "1.5", "a", "1,1", "2,1,2", "1 ,3",
+    /* verifier-V2's five loose parses, each read by a mutant that passed
+     * the list above: a cap off by one or at 9, no cap (a 32- or 64-bit
+     * wrap), strtol's octal and hex, and a tolerated line ending */
+    "640", "100", "4294967297", "18446744073709551617", "0x3", "1\n",
+    "1\r",
 };
 
 typedef int (*tile_parse_fn)(const char *, int *, char *, size_t);
@@ -1031,6 +1036,16 @@ int main(void)
         CHECK(caught > 0, "NEGATIVE CONTROL: an atoi-style parse of "
               "CFT_XRT_TILES passed every check, so they cannot tell a "
               "strict parse from a loose one");
+        /* The sentence quotes what was written: "650" is refused as tile
+         * 650, not as the 65 the capped accumulator stopped at. */
+        {
+            int o[CFT_TILE_SELECT_MAX];
+            char w[320];
+            w[0] = 0;
+            CHECK(cft_tile_select_parse("650", o, w, sizeof w) == -1 &&
+                  strstr(w, "tile 650 is outside") != NULL,
+                  "CFT_XRT_TILES=\"650\" refused as: %s", w);
+        }
         if (!misread && caught > 0)
             printf("  CFT_XRT_TILES: %d selections read as written, %d "
                    "malformed ones refused with a sentence, and all 64 "
