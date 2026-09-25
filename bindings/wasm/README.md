@@ -981,12 +981,20 @@ Still ABI 0.14 on both sides, which is why nothing refused the old
 module: the three capability answers made true that day
 (docs/COMPATIBILITY.md) changed what the library ANSWERS, not an entry
 point or the version word. The committed module had last been rebuilt
-on 2026-09-15 (`b558a56`), before the software backend published
-`CFT_SEQ_FEAT_LANE_MASK`, so its software handle reported
+on 2026-09-15 (`b558a56`), and its software handle reported
 `seq_features` 0x271f and `cftw_supports(dev, 30, fmt)` = 0 at every
-format (measured in node 22) while computing all of it. Rebuilt with
-`build.sh`, it reports **0x7f1f** and 1, and `bindings/node/test.mjs`
-now holds both: against the old module that test fails by name,
+format (measured in node 22). It computed SCALAR, REDUCE_SEG and IMUL
+without publishing them: a scalar operand of `mapEx`, `reduceSeg` and
+opcode 30 return the rebuilt module's bits at all four formats
+(IMUL's CAPS[28] bit, `0x10`, was in its word; `cftw_supports`
+answered 0). It reported LANE_MASK clear truthfully because it did not
+yet implement it: at `b558a56` `cft_program_run_ex` refused every
+well-formed lane mask by name on every backend (`CFT_ERR_UNSUPPORTED`,
+"not yet built on any backend", which that tree's own api-test
+asserts), and the mask arrived later that day with `69f3df2`, which is
+not an ancestor of `b558a56`. Rebuilt with `build.sh`, it reports
+**0x7f1f** and 1, and `bindings/node/test.mjs` now holds both:
+against the old module that test fails by name,
 `missing [SCALAR REDUCE_SEG LANE_MASK]` and `cftw_supports(dev, 30
 imul) = 0` at all four formats.
 
@@ -1008,10 +1016,14 @@ families the sample leaves out, the sequencer's export, and the
 provenance line, which said the module was "embedded as base64" where
 emcc 6.0.9 embeds it as a string literal. `demos_chains.json` was
 re-recorded with `verify_demos.mjs --record`: of its seventeen
-sha256-shaped values fifteen came back identical - every chain and every
-program image - and the two that moved are the module stamp and the
-compute core's, the core's because three of its comments were
-corrected. `verify.mjs` gained step 3b, the embedded sample, above.
+sha256-shaped values fifteen came back identical - the fifteen chains,
+which are every chain it holds - and the two that moved are the module
+stamp and the compute core's, the core's because three of its comments
+were corrected. The program images are not in that file: they are
+`verify_demos.mjs`'s `PROGRAM_IMAGES` constants, unchanged, which its
+fourth check (the demos stage) holds every program-engine run's loaded
+images to byte for byte. `verify.mjs` gained step 3b, the embedded
+sample, above.
 
 ## A second page: the five workloads, measured (2026-09-04)
 

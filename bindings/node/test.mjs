@@ -119,12 +119,16 @@ test("the module is the tree's own ABI, on the software backend", () => {
  *  2026-09-24 - host/tests/api_test.c holds the C library to all of it.
  *  None of that reaches JavaScript until the module is rebuilt: the
  *  ABI did not move, so the test above is green over a module that
- *  still answers the old way, and the one committed until the
- *  2026-09-24 rebuild reported 0x271f and supports(30) = 0 while
- *  computing all four. This is the line that says which module is in
- *  the package. 0x7f1f is every seq_features bit cft.h defines today,
- *  and a missing bit is named, not just counted. 30 is asked of the
- *  module's own name table first, so the number is not a transcription. */
+ *  still answers the old way. The one committed until the 2026-09-24
+ *  rebuild (b558a56) reported 0x271f and supports(30) = 0: it computed
+ *  SCALAR, REDUCE_SEG and IMUL without publishing them, and reported
+ *  LANE_MASK clear truthfully because it did not yet implement it -
+ *  that library refused every well-formed lane mask by name, and the
+ *  mask arrived later that day (69f3df2). This is the line that says
+ *  which module is in the package. 0x7f1f is every seq_features bit
+ *  cft.h defines today, and a missing bit is named, not just counted.
+ *  30 is asked of the module's own name table first, so the number is
+ *  not a transcription. */
 const SW_SEQ_FEATURES = 0x7f1f;
 test("the module's software handle publishes seq_features 0x7f1f and supports imul", () => {
   eq(c64._C.opName(30), "imul", "the module's name for opcode 30: ");

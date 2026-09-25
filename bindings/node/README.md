@@ -418,9 +418,16 @@ saves anything, which only a tile does. libcft's software backend
 publishes both since 2026-09-24, and the module committed beside this
 file was rebuilt that day: its software handle reports `seqFeatures`
 **0x7f1f** and `cftw_supports(dev, 30, fmt)` = 1 for IMUL, which
-`test.mjs` holds. The module committed before it (built 2026-09-15)
-reported 0x271f - SCALAR, REDUCE_SEG and LANE_MASK clear - and 0 for
-IMUL, while computing all four.
+`test.mjs` holds. The module committed before it (built 2026-09-15,
+`b558a56`) reported 0x271f - SCALAR, REDUCE_SEG and LANE_MASK clear -
+and 0 for IMUL. It computed SCALAR, REDUCE_SEG and IMUL without
+publishing them: a scalar `mapEx`, `reduceSeg` and opcode 30 return
+the rebuilt module's bits at all four formats (IMUL's CAPS[28] bit,
+`0x10`, was in its word; `cftw_supports` answered 0). It reported
+LANE_MASK clear truthfully because it did not yet implement it: the
+library it was built from refused every well-formed lane mask by name
+on every backend, `CFT_ERR_UNSUPPORTED` and "not yet built on any
+backend", and the mask arrived later that day (`69f3df2`).
 
 `SEQ_FEAT_SCRATCH` is `0x100` and `SEQ_FEAT_SCRATCH_IO` `0x200`, not
 the next two bits after `BANK_PTR`: revision 3 opened a SECOND feature
