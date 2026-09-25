@@ -64,12 +64,15 @@ Seven groups of checks:
                   records, resumed by either engine, against the
                   uninterrupted run's, and a run ended the instant a
                   checkpoint appears; records files and paths a resume
-                  must refuse, pipes included, in bounded time; the
-                  census it reports, derived here from the program's
-                  structure; the golden model's executor and assembler
-                  on the image it writes. Most legs carry a control that
-                  must fail, run every time; check_segments names the
-                  seven that do not.
+                  must refuse, pipes and locked files included, in
+                  bounded time, and --records and --checkpoint as one
+                  file; the image cache's key; the checkpoint's rename
+                  held open, and how long it is retried; the census it
+                  reports, derived here from the program's structure;
+                  the golden model's executor and assembler on the
+                  image it writes. Most legs carry a control that must
+                  fail, run every time; check_segments names the nine
+                  that do not.
  7. Refusals.     What the two program engines must refuse, and the
                   precise reason each is refused.
 """
@@ -534,13 +537,14 @@ def check_segments(tool, tmp):
     hand, the order of a checkpoint and its records, the loader's limit
     and the golden comparison each carry a control that must make them
     fail, run every time, and its failure is asserted - a comparison
-    that has never been seen to fail is not a gate. Seven carry none of
+    that has never been seen to fail is not a gate. Nine carry none of
     their own - the census, the batch-size comparison, the comparisons
     at the three narrower formats, the relay without --records, the run
-    with no instrument set, the rename under a stat() poll and the fresh
-    run into a pipe - and were watched failing only under one-off
-    planted defects; the refusals are their own kind, a case each that
-    must be refused by name. docs/ORBITS.md says what holds each."""
+    with no instrument set, the image cache's key, the rename under a
+    stat() poll, the rename held open, and the fresh run into a pipe -
+    and were watched failing only under one-off planted defects; the
+    refusals are their own kind, a case each that must be refused by
+    name. docs/ORBITS.md says what holds each."""
     print("\n[6b] --engine segments: the ensemble state through the "
           "scratch block")
     env_nc = env_with(CFT_ORBITS_NEGATIVE_CONTROL="transpose")
@@ -865,6 +869,39 @@ def check_segments(tool, tmp):
               "%s: NEGATIVE CONTROL FAILED TO FAIL: a transposed segments "
               "run matched the host loop" % label.split(":")[0])
 
+    # --- the image cache, keyed by the whole length ----------------------
+    # seg_run keeps the last eight images by segment length. A key that
+    # kept only some bits of the length would hand one length another's
+    # image: cut to 8 bits, a run's 257-step segment ran the 1-step image
+    # and ended on the wrong checkpoint and records - with the whole gate
+    # green (verifier-V6's V6G). So a run whose two segment lengths share
+    # their low sixteen bits, and so collide in any key cut to 16 bits or
+    # fewer: 65,538 steps in one sample interval, a checkpoint named (the
+    # first segment is one step, which times the rate) and an interval too
+    # long to cut the rest - segments of 1 and 65,537 steps, two images.
+    cargv = ["--problem", "kepler", "--format", "fp64", "--members", 1,
+             "--steps", 65538, "--sample-every", 65538, "--rsqrt", "newton",
+             "--quiet", "--checkpoint-interval", 1000000000]
+    got, row = {}, {}
+    for eng in ("loop", "segments"):
+        ck = Path(tmp) / ("key-%s.ckpt" % eng)
+        rc = Path(tmp) / ("key-%s.txt" % eng)
+        proc = tool.run(*cargv, "--engine", eng, "--checkpoint", ck,
+                        "--records", rc, "--csv", expect_ok=False)
+        got[eng] = ((ck.read_bytes(), rc.read_bytes())
+                    if proc.returncode == 0 else None)
+        if eng == "segments" and proc.returncode == 0:
+            row = _csv_row(proc.stdout)
+    check(got["loop"] is not None and got["segments"] == got["loop"] and
+          row.get("seg_runs") == "2" and row.get("seg_loads") == "2",
+          "segments of 1 and 65,537 steps - one length in any key cut to 16 "
+          "bits - run two images, and end on the host loop's checkpoint and "
+          "records, byte for byte",
+          "segments of 1 and 65,537 steps: %s runs of %s images (2 of 2 "
+          "wanted), and %s the host loop's bytes"
+          % (row.get("seg_runs"), row.get("seg_loads"),
+             "equal to" if got["segments"] == got["loop"] else "NOT"))
+
     # --- where checkpoints fall -----------------------------------------
     # An interruption costs about one --checkpoint-interval only if a
     # checkpoint is written about one interval after the last. The loop
@@ -1168,7 +1205,7 @@ def check_segments(tool, tmp):
             ("another run's longer records (--spread 2, %d bytes)"
              % len(other), other, stop_ck, hash_msg),
             ("no records file at all", None, stop_ck,
-             "holds 0 bytes and the checkpoint's records run to %d" % nb),
+             "there is no records file"),
             ("a version-1 checkpoint", stop_rc, old,
              "not a cft-orbits checkpoint of this version"),
             ("a checkpoint without its recbytes line", stop_rc, norec,
@@ -1188,6 +1225,92 @@ def check_segments(tool, tmp):
           "--resume refuses, by name and touching neither file: %s"
           % "; ".join(refused),
           "--resume did not refuse by name, or touched a file: %s"
+          % "; ".join(why))
+
+    # --- the right records, which this process may not read -------------
+    # A records file another process holds open with no sharing (Windows)
+    # or that this user may not read (POSIX: its permissions taken away)
+    # is not short and not another run's - c8a7d97 and 589cbc1 called it
+    # "0 bytes ... cut short" all the same (verifier-V6). The refusal must
+    # name what is wrong, touch neither file, and the resume must go
+    # through once the file can be read again.
+    lk_ck, lk_rc = Path(tmp) / "lk.ckpt", Path(tmp) / "lk.txt"
+    lk_ck.write_bytes(stop_ck)
+    lk_rc.write_bytes(stop_rc)
+    blocked, release = None, None
+    if os.name == "nt":
+        import _winapi
+        lk_h = _winapi.CreateFile(str(lk_rc), 0x80000000, 0, _winapi.NULL,
+                                  _winapi.OPEN_EXISTING, 0, _winapi.NULL)
+        blocked = "held open by another process with no sharing"
+        release = lambda: _winapi.CloseHandle(lk_h)
+    elif os.geteuid() != 0:
+        os.chmod(lk_rc, 0)
+        blocked = "with its read permission taken away"
+        release = lambda: os.chmod(lk_rc, 0o644)
+    if blocked is None:
+        print("SKIP  --resume on a records file it may not read: this check "
+              "runs as root, which no permission stops from reading a file")
+    else:
+        proc = tool.run(*rargv5, "--engine", "segments", "--batch", 3,
+                        "--checkpoint", lk_ck, "--records", lk_rc,
+                        "--resume", expect_ok=False)
+        release()
+        untouched = (lk_ck.read_bytes() == stop_ck and
+                     lk_rc.read_bytes() == stop_rc)
+        again = tool.run(*rargv5, "--engine", "segments", "--batch", 3,
+                         "--checkpoint", lk_ck, "--records", lk_rc,
+                         "--resume", expect_ok=False)
+        check(proc.returncode == 2 and "could not be opened to be read back"
+              in proc.stderr and "holds 0 bytes" not in proc.stderr and
+              untouched and again.returncode == 0 and
+              (lk_ck.read_bytes(), lk_rc.read_bytes()) == full,
+              "the right records %s: --resume refused by name (\"could not "
+              "be opened to be read back\"), both files untouched, and once "
+              "it could be read the resume ended on the uninterrupted run"
+              % blocked,
+              "the right records %s: exit %d, %s; files untouched %s; the "
+              "resume after, exit %d" % (blocked, proc.returncode,
+                                         proc.stderr.strip()[-160:],
+                                         untouched, again.returncode))
+
+    # --- --records and --checkpoint naming one file ------------------------
+    # The checkpoint is written beside its path and renamed over it at
+    # every interval: on POSIX the records then went on into an unlinked
+    # file and were lost, with exit 0; on Windows the run died 1.7 s in
+    # blaming "another process" (verifier-V6, pre-existing). Refused by
+    # name: the same path, one file under two spellings on a fresh run
+    # and on a resume, and the checkpoint's temporary as the records.
+    same = Path(tmp) / "same.ckpt"
+    alias = str(Path(tmp)) + os.sep + "." + os.sep + "same.ckpt"  # not
+    # through pathlib, which would fold the "." away
+    why, refused = [], []
+    for what, ckp, rcp, resume in (
+            ("the same path, fresh", same, same, False),
+            ("the checkpoint's .tmp as the records, fresh", same,
+             Path(str(same) + ".tmp"), False),
+            ("one file under two names, fresh", same, alias, False),
+            ("one file under two names, on --resume", same, alias, True)):
+        for p in (same, Path(str(same) + ".tmp")):
+            if p.exists():
+                p.unlink()
+        if resume:
+            same.write_bytes(stop_ck)
+        proc = tool.run(*rargv5, "--engine", "segments", "--checkpoint",
+                        ckp, "--records", rcp,
+                        *(["--resume"] if resume else []), expect_ok=False)
+        if (proc.returncode == 2 and "--checkpoint" in proc.stderr and
+                ("are the same path" in proc.stderr or
+                 "one file under two names" in proc.stderr) and
+                (not resume or same.read_bytes() == stop_ck)):
+            refused.append(what)
+        else:
+            why.append("%s: exit %d, %s" % (what, proc.returncode,
+                                           proc.stderr.strip()[-120:]))
+    check(not why,
+          "refused by name, --records and --checkpoint as one file: %s (the "
+          "checkpoint on --resume untouched)" % "; ".join(refused),
+          "--records and --checkpoint as one file not refused by name: %s"
           % "; ".join(why))
 
     # --- records that are not a file -------------------------------------
@@ -1397,19 +1520,24 @@ def check_segments(tool, tmp):
     # on, logging or not - reports the same time for the same steps
     # whatever each step costs; the wall does not. So the same 1,024 steps
     # at 1 member and at 16 must report times at least 4 apart (measured
-    # about 15), each within its own process's lifetime. (The real loader
-    # limit by default is held above: the 100,000-step interval runs as
-    # 1 + 99,999, and =overlong is refused at the real ceiling.)
+    # about 15), each within its own process's lifetime. That lifetime is
+    # taken with perf_counter, the clock the tool itself reads: Python's
+    # monotonic() is GetTickCount64 on Windows, 15.6 ms a tick, and the
+    # 1-member run is about that long - measured with it, the check failed
+    # 12 of 280 times on a correct tool (verifier-V6, 2026-09-25). (The
+    # real loader limit by default is held above: the 100,000-step
+    # interval runs as 1 + 99,999, and =overlong is refused at the real
+    # ceiling.)
     targv = ["--problem", "kepler", "--format", "fp256", "--rsqrt",
              "newton", "--steps", 1024, "--sample-every", 256, "--quiet"]
     for eng in ("loop", "segments"):
         secs, walls, said = {}, {}, []
         for m in (1, 16):
-            t0 = time.monotonic()
+            t0 = time.perf_counter()
             proc = tool.run(*targv, "--members", m, "--engine", eng, "--csv",
                             "--checkpoint", Path(tmp) / "t.ckpt", "--records",
                             Path(tmp) / "t.txt")
-            walls[m] = time.monotonic() - t0
+            walls[m] = time.perf_counter() - t0
             secs[m] = float(_csv_row(proc.stdout)["seconds"])
             if proc.stderr:
                 said.append(proc.stderr[:100])
@@ -1462,6 +1590,104 @@ def check_segments(tool, tmp):
               "%s under an os.stat() poll: %s" % (
                   eng, "HUNG" if proc is None else "exit %d, %s" % (
                       proc.returncode, proc.stderr.strip()[-120:])))
+
+    # --- how long the rename is retried --------------------------------
+    # The poll above shows a retry happens; not how long it lasts, and a
+    # retry of about 60 ms passed it (verifier-V6's V6K). So the
+    # checkpoint is held open, as a reader holds it, while a run renames
+    # it after every step: for 0.5 s, which the run must outlast and end
+    # on the unheld run's bytes; and for 5 s, longer than the retry (ten
+    # tries at once, then fifty 20 ms sleeps - about 1.5 s here), which on
+    # Windows must end the run BY NAME between 1 and 5 s after the hold
+    # began - and the run so ended must resume, on the other engine, to
+    # the unheld run's checkpoint and records. A POSIX rename over an open
+    # file is not refused, so there both holds must leave the run as if
+    # nothing held it.
+    hargv = ["--problem", "kepler", "--format", "fp64", "--members", 2,
+             "--rsqrt", "newton", "--steps", 1000, "--sample-every", 50,
+             "--checkpoint-interval", 0, "--quiet"]
+    href_ck, href_rc = Path(tmp) / "h-ref.ckpt", Path(tmp) / "h-ref.txt"
+    tool.run(*hargv, "--engine", "loop", "--checkpoint", href_ck,
+             "--records", href_rc)
+    href = (href_ck.read_bytes(), href_rc.read_bytes())
+
+    def held_run(eng, seconds, ck, rc):
+        """A run holding its checkpoint open for `seconds` once the first
+        exists, or until the run ends if that is sooner. Returns (exit
+        code or None if it outlived 60 s, stderr, seconds from the hold's
+        start to the run's end or None if it was still running at the
+        release, whether the hold was taken)."""
+        for p in (ck, rc, Path(str(ck) + ".tmp")):
+            if p.exists():
+                p.unlink()
+        pr = subprocess.Popen([tool.exe] + [str(a) for a in hargv] +
+                              ["--engine", eng, "--checkpoint", str(ck),
+                               "--records", str(rc)],
+                              stdout=subprocess.DEVNULL,
+                              stderr=subprocess.PIPE, text=True)
+        limit = time.monotonic() + 60
+        while not ck.exists() and pr.poll() is None and \
+                time.monotonic() < limit:
+            time.sleep(0.002)
+        fh = None
+        for _ in range(500):            # it may be mid-rename
+            try:
+                fh = open(ck, "rb")
+                break
+            except OSError:
+                time.sleep(0.002)
+        t_hold, ended = time.perf_counter(), None
+        while time.perf_counter() - t_hold < seconds:
+            if pr.poll() is not None:
+                ended = time.perf_counter() - t_hold
+                break
+            time.sleep(0.005)
+        if fh:
+            fh.close()
+        try:
+            _out, err = pr.communicate(timeout=60)
+        except subprocess.TimeoutExpired:
+            pr.kill()
+            pr.communicate()
+            return None, "", ended, fh is not None
+        return pr.returncode, err, ended, fh is not None
+
+    for eng, other in (("loop", "segments"), ("segments", "loop")):
+        ck, rc = Path(tmp) / "h.ckpt", Path(tmp) / "h.txt"
+        code, err, ended, took = held_run(eng, 0.5, ck, rc)
+        # On Windows the run is held in its retry through the whole 0.5 s,
+        # so it is still running at the release - which is what shows the
+        # hold met a rename and the retry outlasted it.
+        short_ok = (took and code == 0 and
+                    (ended is None or os.name != "nt") and
+                    (ck.read_bytes(), rc.read_bytes()) == href)
+        code2, err2, ended2, took2 = held_run(eng, 5.0, ck, rc)
+        if os.name == "nt":
+            gave_up = (took2 and code2 == 2 and ended2 is not None and
+                       1.0 <= ended2 <= 5.0 and
+                       "could not be renamed into place" in err2)
+            res = tool.run(*hargv, "--engine", other, "--checkpoint", ck,
+                           "--records", rc, "--resume", expect_ok=False)
+            long_ok = (gave_up and res.returncode == 0 and
+                       (ck.read_bytes(), rc.read_bytes()) == href)
+            long_says = ("ended BY NAME %.2f s into it, and %s resumed it "
+                         "to the unheld run's checkpoint and records"
+                         % (ended2 or -1, other))
+        else:
+            long_ok = (took2 and code2 == 0 and
+                       (ck.read_bytes(), rc.read_bytes()) == href)
+            long_says = "went on untroubled (a POSIX rename is not refused)"
+        check(short_ok and long_ok,
+              "%s, renaming its checkpoint after every step while it was "
+              "held open: 0.5 s - outlasted, ending on the unheld run's "
+              "bytes; 5 s - %s" % (eng, long_says),
+              "%s under a held checkpoint: 0.5 s hold taken %s, still "
+              "running at the release %s, exit %s, bytes %s; 5 s hold: exit "
+              "%s after %s s, %s" % (
+                  eng, took, ended is None, code,
+                  "right" if short_ok else "WRONG", code2,
+                  "%.2f" % ended2 if ended2 is not None else "-",
+                  err2.strip()[-100:]))
 
     # --- a sample interval longer than one segment may run -------------
     # The loader refuses an image that could execute more than 2^40

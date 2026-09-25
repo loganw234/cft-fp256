@@ -301,16 +301,18 @@
 #include <string.h>
 #include <stdint.h>
 #include <inttypes.h>
+#include <errno.h>
 
 #include "cft.h"
 #include "../src/sha256.h"
 
 /* The clock, and what the checkpoint and the records file need from
  * the system: how long an open file is, whether a path names a regular
- * file, cutting a file back to a length (--resume, "The checkpoint
- * format" in docs/ORBITS.md), renaming a file over another, and ending
- * the process as a kill would. A length of -1 means "not a regular
- * file" - a pipe or a device, which has none to check.
+ * file, which file a path or a stream is, cutting a file back to a
+ * length (--resume, "The checkpoint format" in docs/ORBITS.md),
+ * renaming a file over another, and ending the process as a kill
+ * would. A length of -1 means "not a regular file" - a pipe or a
+ * device, which has none to check.
  *
  * path_kind is 1 for a regular file, 0 for anything else that is there
  * (a pipe, a FIFO, a device, a directory) and -1 when nothing can be
@@ -322,6 +324,7 @@
 #if defined(_WIN32)
 #  include <windows.h>
 #  include <sys/stat.h>
+#  include <io.h>
 static double now_s(void)
 {
     LARGE_INTEGER f, t;
@@ -363,6 +366,35 @@ static int path_kind(const char *path)
     return regular;
 }
 
+/* Which file a path or an open stream is - the volume and the file's
+ * index on it - so two spellings of one file are seen to be one.
+ * `path` is only opened for its attributes, and only a path that must
+ * be a regular file or nothing is handed here (never a pipe's name). */
+static int handle_id(HANDLE h, uint64_t id[2])
+{
+    BY_HANDLE_FILE_INFORMATION bi;
+    if (h == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(h, &bi))
+        return 0;
+    id[0] = bi.dwVolumeSerialNumber;
+    id[1] = ((uint64_t)bi.nFileIndexHigh << 32) | bi.nFileIndexLow;
+    return 1;
+}
+
+static int file_id(const char *path, FILE *open_file, uint64_t id[2])
+{
+    HANDLE h;
+    int ok;
+    if (open_file)
+        return handle_id((HANDLE)_get_osfhandle(_fileno(open_file)), id);
+    h = CreateFileA(path, FILE_READ_ATTRIBUTES, FILE_SHARE_READ |
+                    FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+                    OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    ok = handle_id(h, id);
+    if (h != INVALID_HANDLE_VALUE)
+        CloseHandle(h);
+    return ok;
+}
+
 static int file_cut(const char *path, uint64_t len)
 {
     HANDLE h = CreateFileA(path, GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
@@ -377,11 +409,15 @@ static int file_cut(const char *path, uint64_t len)
 }
 
 /* Another process that holds the target open for a moment - a virus
- * scanner, a sync agent, anything that stat()s it - fails the rename
- * with a sharing or access error (verifier-V6, 2026-09-25: 8 runs of 8
- * killed so under a tight os.stat poll). It is retried, at once a few
- * times and then twenty milliseconds apart, for about a second before
- * the run gives up by name. */
+ * scanner, a sync agent, anything that stat()s it - fails the rename.
+ * What MoveFileEx returns then is ERROR_ACCESS_DENIED (measured, for a
+ * stat()-style open and for readers, delete-sharing or not);
+ * ERROR_SHARING_VIOLATION is retried too. Verifier-V6, 2026-09-25: 8
+ * runs of 8 killed so under a tight os.stat poll. The rename is tried
+ * ten times at once and then fifty times twenty milliseconds apart -
+ * about 1.5 s on this desktop, where a Sleep(20) takes two ticks of
+ * the 15.6 ms timer (verifier-V6: a 3 s hold ended the run by name
+ * 1.55-1.57 s after it began) - before the run gives up by name. */
 static int file_replace(const char *tmp, const char *path)
 {
     int tries;
@@ -421,6 +457,17 @@ static int path_kind(const char *path)
     if (stat(path, &st) != 0)
         return -1;
     return S_ISREG(st.st_mode) ? 1 : 0;
+}
+
+static int file_id(const char *path, FILE *open_file, uint64_t id[2])
+{
+    struct stat st;
+    if (open_file ? fstat(fileno(open_file), &st) != 0
+                  : stat(path, &st) != 0)
+        return 0;
+    id[0] = (uint64_t)st.st_dev;
+    id[1] = (uint64_t)st.st_ino;
+    return 1;
 }
 
 static int file_cut(const char *path, uint64_t len)
@@ -1515,11 +1562,12 @@ static int NEGCTL_FLUSH_LATE = 0;
  *       then gives that clock's time and throughput, not the wall's;
  *   CFT_ORBITS_DIE_AFTER_CHECKPOINT=N   (--engine loop and segments)
  *       the process ends as a kill would - exit 9, no buffered output
- *       flushed - the moment its N-th checkpoint is renamed into place,
- *       before another statement runs. A kill lands there by chance
- *       once in thousands of tries; this lands there every time, so
- *       what a checkpoint promises about the records beside it at the
- *       instant it appears is a fact a test can check. */
+ *       flushed - the moment its N-th checkpoint is renamed into place:
+ *       one line to stderr saying so, and nothing else the run does
+ *       comes after the rename. A kill lands there by chance once in
+ *       thousands of tries; this lands there every time, so what a
+ *       checkpoint promises about the records beside it at the instant
+ *       it appears is a fact a test can check. */
 static uint64_t SEG_LIMIT = 0;
 static double   VCLOCK = 0;
 static uint64_t DIE_AFTER = 0;
@@ -2041,11 +2089,11 @@ static uint64_t seg_time_cap(const runstate *R, double secs)
 #define CKPT_MAGIC "cft-orbits-checkpoint 2"
 
 /* The rename that makes a checkpoint the one on disk (file_replace,
- * above, retries a Windows sharing violation). Under
- * CFT_ORBITS_DIE_AFTER_CHECKPOINT the process ends here, the instant
- * the N-th checkpoint is in place: whatever the checkpoint promises
- * about the records file must already be true on disk, because nothing
- * after this line runs. */
+ * above, retries it on Windows while another process holds the file).
+ * Under CFT_ORBITS_DIE_AFTER_CHECKPOINT the process ends here, the
+ * instant the N-th checkpoint is in place: whatever the checkpoint
+ * promises about the records file must already be true on disk,
+ * because after the one line to stderr nothing of the run is done. */
 static int ckpt_replace(const char *tmp, const char *path)
 {
     static uint64_t renamed = 0;
@@ -2082,11 +2130,12 @@ static const char *rsqrt_name(int r)
  * ahead of the checkpoint on disk and never behind it - and --resume
  * cuts it back (records_resume). A failed write is ferror()'s to
  * catch. The length check catches a flush left out or a record
- * miscounted, and a second process writing the same file only while
- * that process lags this one; a file another process cuts short is NOT
- * caught - the next flush writes past the cut and leaves a hole of
- * zeros exactly as long as the count says (verifier-V6, 2026-09-25). A
- * pipe or a device has no length and is not checked. */
+ * miscounted. Of two processes writing the same file it stops only the
+ * one that LAGS - the file is as long as the leader has written - and
+ * the one ahead finishes unaware (verifier-V6, 2026-09-25: 3 of 3). A
+ * file another process cuts short is not caught at all: the next flush
+ * writes past the cut and leaves a hole of zeros exactly as long as the
+ * count says. A pipe or a device has no length and is not checked. */
 static void records_sync(runstate *R)
 {
     int64_t have;
@@ -2174,9 +2223,9 @@ static void ckpt_write(runstate *R)
     if (fflush(f) != 0 || fclose(f) != 0)
         die("the checkpoint did not write cleanly");
     if (ckpt_replace(tmp, O->ckpt) != 0)
-        die("the checkpoint could not be renamed into place (another "
-            "process held it or its temporary for more than a second, or "
-            "the directory refused the rename)");
+        die("the checkpoint could not be renamed into place (on Windows, "
+            "another process held it or its temporary through every "
+            "retry, about 1.5 s; or the directory refused the rename)");
     if (R->recf && NEGCTL_FLUSH_LATE)
         records_sync(R);
     if (VCLOCK > 0)
@@ -2352,13 +2401,49 @@ static void ckpt_read(runstate *R)
  * line a kill cut in half. It is cut away before a byte is appended, so
  * a killed and resumed run's records are the uninterrupted run's, byte
  * for byte, and still hash to its chain. */
+/* --records and --checkpoint naming one file: the checkpoint is written
+ * to <path>.tmp and renamed over <path> at every interval, so on POSIX
+ * the records go on into an unlinked file and are lost with exit 0,
+ * and on Windows the rename is refused while the records hold the file
+ * and the run dies blaming another process (verifier-V6, 2026-09-25,
+ * both measured). Refused by name: as the paths are written, before
+ * anything is opened; and as files - two spellings of one file - once
+ * the records file is open, or on --resume once it is known to be a
+ * regular file (a named pipe's path is never opened here, since opening
+ * one connects to it). */
+static void records_apart(const options *O, FILE *open_records,
+                          int by_path)
+{
+    char tmp[1100], msg[2400];
+    uint64_t r[2], c[2];
+    const char *how = NULL;
+
+    snprintf(tmp, sizeof tmp, "%s.tmp", O->ckpt);
+    if (!strcmp(O->records_path, O->ckpt) || !strcmp(O->records_path, tmp))
+        how = "the same path";
+    else if ((open_records || by_path) &&
+             file_id(O->records_path, open_records, r) &&
+             ((file_id(O->ckpt, NULL, c) && c[0] == r[0] && c[1] == r[1]) ||
+              (file_id(tmp, NULL, c) && c[0] == r[0] && c[1] == r[1])))
+        how = "one file under two names";
+    if (how) {
+        snprintf(msg, sizeof msg,
+                 "--records %s and --checkpoint %s are %s - the checkpoint "
+                 "is written beside its path and renamed over it at every "
+                 "interval, which would lose the records; give each its "
+                 "own file", O->records_path, O->ckpt, how);
+        die(msg);
+    }
+}
+
 static void records_resume(runstate *R)
 {
     const char *path = R->O->records_path;
     const size_t chunk = (size_t)1 << 16;
-    unsigned char *buf = (unsigned char *)xcalloc(1, chunk);
+    unsigned char *buf;
     uint8_t chain[32];
     uint64_t have = 0;
+    int64_t size;
     int in_line = 0;
     sha256 h;
     char msg[1400];
@@ -2370,7 +2455,6 @@ static void records_resume(runstate *R)
      * device or a directory holds no records; so each is refused here,
      * before anything is read or written. */
     if (path_kind(path) == 0) {
-        free(buf);
         snprintf(msg, sizeof msg,
                  "--resume: --records names %s, which is not a regular file "
                  "(a pipe, a FIFO, a device or a directory) - a resume "
@@ -2379,15 +2463,67 @@ static void records_resume(runstate *R)
                  "pass it on from there, or resume without --records", path);
         die(msg);
     }
+    if (R->O->ckpt)
+        records_apart(R->O, NULL, 1);
+    /* The file must open, and say how long it is, before a byte is read:
+     * a file that cannot be opened is named for that - locked or held by
+     * another process, say - not for being short (c8a7d97 called it
+     * "0 bytes ... cut short"), and nothing is read past the length the
+     * file itself gives. That bound is what keeps a Linux FIFO seen
+     * through the WSL share, which Windows takes for an empty regular
+     * file, from being read and waited on (verifier-V6). */
+    errno = 0;
     f = fopen(path, "rb");
+    if (!f) {
+        int e = errno;
+        if (e == ENOENT)
+            snprintf(msg, sizeof msg,
+                     "--resume: there is no records file %s, and the "
+                     "checkpoint's records run to %" PRIu64 " bytes - resume "
+                     "with the file the run wrote, or without --records",
+                     path, R->rec_bytes);
+        else
+            snprintf(msg, sizeof msg,
+                     "--resume: the records file %s could not be opened to "
+                     "be read back (%s) - another process may hold it open "
+                     "or locked, or this one may not read it; nothing was "
+                     "changed: resume once it can be read, or without "
+                     "--records", path, e ? strerror(e) : "no reason given");
+        die(msg);
+    }
+    size = file_length(f);
+    if (size < 0 || (uint64_t)size < R->rec_bytes) {
+        fclose(f);
+        snprintf(msg, sizeof msg,
+                 "--resume: the records file %s holds %" PRId64 " bytes and "
+                 "the checkpoint's records run to %" PRIu64 " - it was cut "
+                 "short, or it is not this run's; resume with the file the "
+                 "run wrote, or without --records", path,
+                 size < 0 ? (int64_t)0 : size, R->rec_bytes);
+        die(msg);
+    }
+    buf = (unsigned char *)xcalloc(1, chunk);
     memset(chain, 0, sizeof chain);
     sha256_start(&h);
-    while (f && have < R->rec_bytes) {
+    while (have < R->rec_bytes) {
         uint64_t left = R->rec_bytes - have;
         size_t got = fread(buf, 1, left < chunk ? (size_t)left : chunk, f);
         size_t i, from = 0;
-        if (!got)
+        if (!got) {
+            if (ferror(f)) {
+                int e = errno;
+                fclose(f);
+                free(buf);
+                snprintf(msg, sizeof msg,
+                         "--resume: the records file %s could not be read "
+                         "back (%s) after %" PRIu64 " bytes - another "
+                         "process may hold part of it locked; nothing was "
+                         "changed", path, e ? strerror(e) : "a read error",
+                         have);
+                die(msg);
+            }
             break;
+        }
         for (i = 0; i < got; i++) {
             if (buf[i] != '\n')
                 continue;
@@ -2411,10 +2547,9 @@ static void records_resume(runstate *R)
         }
         have += got;
     }
-    if (f)
-        fclose(f);
+    fclose(f);
     free(buf);
-    if (have < R->rec_bytes) {
+    if (have < R->rec_bytes) {           /* it shrank while being read */
         snprintf(msg, sizeof msg,
                  "--resume: the records file %s holds %" PRIu64 " bytes and "
                  "the checkpoint's records run to %" PRIu64 " - it was cut "
@@ -3341,11 +3476,15 @@ int main(int argc, char **argv)
         ckpt_read(&R);
     }
     if (O.records_path) {
+        if (O.ckpt)
+            records_apart(&O, NULL, 0);     /* the paths as written */
         if (O.resume && !NEGCTL_APPEND)
             records_resume(&R);
         R.recf = fopen(O.records_path, O.resume ? "ab" : "wb");
         if (!R.recf)
             die("cannot write the records file");
+        if (O.ckpt)
+            records_apart(&O, R.recf, 0);   /* the files, now one is open */
     }
 
     if (!O.quiet && !O.csv)
