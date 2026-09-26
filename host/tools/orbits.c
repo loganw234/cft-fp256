@@ -308,11 +308,12 @@
 
 /* The clock, and what the checkpoint and the records file need from
  * the system: how long an open file is, whether a path names a regular
- * file, which file a path or a stream is, cutting a file back to a
- * length (--resume, "The checkpoint format" in docs/ORBITS.md),
- * renaming a file over another, and ending the process as a kill
- * would. A length of -1 means "not a regular file" - a pipe or a
- * device, which has none to check.
+ * file, which file a path or a stream is, opening a file for writing
+ * without cutting it and then cutting it to nothing, cutting a file
+ * back to a length (--resume, "The checkpoint format" in
+ * docs/ORBITS.md), renaming a file over another, and ending the
+ * process as a kill would. A length of -1 means "not a regular file" -
+ * a pipe or a device, which has none to check.
  *
  * path_kind is 1 for a regular file, 0 for anything else that is there
  * (a pipe, a FIFO, a device, a directory) and -1 when nothing can be
@@ -395,6 +396,45 @@ static int file_id(const char *path, FILE *open_file, uint64_t id[2])
     return ok;
 }
 
+/* A file opened for writing WITHOUT being cut, and created if it is not
+ * there, so that which file it is can be asked of the open handle
+ * before a byte of it is lost (main, where --records is opened). The
+ * access and the sharing are fopen's "wb"; OPEN_ALWAYS, not
+ * CREATE_ALWAYS, is the only difference - and a named pipe or a device
+ * is opened as "wb" opened it, once. */
+static FILE *open_uncut(const char *path)
+{
+    HANDLE h = CreateFileA(path, GENERIC_WRITE,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                           OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    FILE *f;
+    int fd;
+    if (h == INVALID_HANDLE_VALUE)
+        return NULL;
+    fd = _open_osfhandle((intptr_t)h, 0);
+    if (fd < 0) {
+        CloseHandle(h);
+        return NULL;
+    }
+    f = _fdopen(fd, "wb");
+    if (!f)
+        _close(fd);
+    return f;
+}
+
+/* A regular file cut to nothing, as "wb" would have cut it; a pipe or a
+ * device has nothing to cut. */
+static int file_empty(FILE *f)
+{
+    HANDLE h = (HANDLE)_get_osfhandle(_fileno(f));
+    LARGE_INTEGER zero;
+    if (GetFileType(h) != FILE_TYPE_DISK)
+        return 0;
+    zero.QuadPart = 0;
+    return SetFilePointerEx(h, zero, NULL, FILE_BEGIN) && SetEndOfFile(h)
+           ? 0 : -1;
+}
+
 static int file_cut(const char *path, uint64_t len)
 {
     HANDLE h = CreateFileA(path, GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
@@ -414,27 +454,37 @@ static int file_cut(const char *path, uint64_t len)
  * stat()-style open and for readers, delete-sharing or not);
  * ERROR_SHARING_VIOLATION is retried too. Verifier-V6, 2026-09-25: 8
  * runs of 8 killed so under a tight os.stat poll. The rename is tried
- * ten times at once and then fifty times twenty milliseconds apart -
- * about 1.5 s on this desktop, where a Sleep(20) takes two ticks of
- * the 15.6 ms timer (verifier-V6: a 3 s hold ended the run by name
- * 1.55-1.57 s after it began) - before the run gives up by name. */
+ * again - ten times at once, then twenty milliseconds apart - until
+ * RENAME_RETRY_S seconds have passed on the clock since it first
+ * failed, and then the run gives up by name. A deadline, not a count:
+ * d56ecbe's sixty tries lasted as long as the scheduler made each
+ * sleep - 1.55 s on a quiet desktop, up to 4.88 s with a game holding
+ * the CPU at 100%, and once past a 5 s hold (verifier-V6, 2026-09-25).
+ * Past the deadline the retry costs at most one more sleep and one
+ * more try. now_s() is the wall's clock under every test instrument. */
+#define RENAME_RETRY_S 1.5
 static int file_replace(const char *tmp, const char *path)
 {
+    double until = 0;
     int tries;
-    for (tries = 0; tries < 60; tries++) {
+    for (tries = 0;; tries++) {
         DWORD e;
         if (MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING))
             return 0;
         e = GetLastError();
         if (e != ERROR_SHARING_VIOLATION && e != ERROR_ACCESS_DENIED)
             return -1;
+        if (!tries)
+            until = now_s() + RENAME_RETRY_S;
+        else if (now_s() >= until)
+            return -1;
         Sleep(tries < 10 ? 0 : 20);
     }
-    return -1;
 }
 #else
 #  include <time.h>
 #  include <sys/stat.h>
+#  include <fcntl.h>
 #  include <unistd.h>
 static double now_s(void)
 {
@@ -468,6 +518,29 @@ static int file_id(const char *path, FILE *open_file, uint64_t id[2])
     id[0] = (uint64_t)st.st_dev;
     id[1] = (uint64_t)st.st_ino;
     return 1;
+}
+
+/* fopen's "wb" without O_TRUNC: which file it is can be asked before a
+ * byte is lost (main, where --records is opened). A FIFO blocks here
+ * until it has a reader, as "wb" did. */
+static FILE *open_uncut(const char *path)
+{
+    int fd = open(path, O_WRONLY | O_CREAT, 0666);
+    FILE *f;
+    if (fd < 0)
+        return NULL;
+    f = fdopen(fd, "wb");
+    if (!f)
+        close(fd);
+    return f;
+}
+
+static int file_empty(FILE *f)
+{
+    struct stat st;
+    if (fstat(fileno(f), &st) != 0)
+        return -1;
+    return S_ISREG(st.st_mode) ? ftruncate(fileno(f), 0) : 0;
 }
 
 static int file_cut(const char *path, uint64_t len)
@@ -2224,8 +2297,8 @@ static void ckpt_write(runstate *R)
         die("the checkpoint did not write cleanly");
     if (ckpt_replace(tmp, O->ckpt) != 0)
         die("the checkpoint could not be renamed into place (on Windows, "
-            "another process held it or its temporary through every "
-            "retry, about 1.5 s; or the directory refused the rename)");
+            "another process held it or its temporary through 1.5 s of "
+            "retries; or the directory refused the rename)");
     if (R->recf && NEGCTL_FLUSH_LATE)
         records_sync(R);
     if (VCLOCK > 0)
@@ -2391,26 +2464,18 @@ static void ckpt_read(runstate *R)
             "recbytes line)");
 }
 
-/* --resume with --records. The checkpoint says how long the record
- * stream was when it was written (recbytes) and what those records hash
- * to (chain). The file must hold at least that many bytes, and those
- * bytes must hash to that chain; otherwise it is not this run's records
- * - cut short, another run's, or edited - and the resume is refused by
- * name, with nothing touched. Whatever lies past them was written after
- * the checkpoint: records the resumed run writes again, and usually a
- * line a kill cut in half. It is cut away before a byte is appended, so
- * a killed and resumed run's records are the uninterrupted run's, byte
- * for byte, and still hash to its chain. */
 /* --records and --checkpoint naming one file: the checkpoint is written
  * to <path>.tmp and renamed over <path> at every interval, so on POSIX
  * the records go on into an unlinked file and are lost with exit 0,
  * and on Windows the rename is refused while the records hold the file
  * and the run dies blaming another process (verifier-V6, 2026-09-25,
- * both measured). Refused by name: as the paths are written, before
- * anything is opened; and as files - two spellings of one file - once
- * the records file is open, or on --resume once it is known to be a
- * regular file (a named pipe's path is never opened here, since opening
- * one connects to it). */
+ * both measured). Refused by name, and before a byte of either file is
+ * cut: as the paths are written, before anything is opened; and as
+ * files - two spellings of one file - on --resume once the records
+ * path is known to be a regular file, and on a fresh run on the records
+ * file opened but not yet cut (open_uncut). A records path that may be
+ * a named pipe is never opened a second time to ask, since opening one
+ * connects to it. */
 static void records_apart(const options *O, FILE *open_records,
                           int by_path)
 {
@@ -2436,6 +2501,16 @@ static void records_apart(const options *O, FILE *open_records,
     }
 }
 
+/* --resume with --records. The checkpoint says how long the record
+ * stream was when it was written (recbytes) and what those records hash
+ * to (chain). The file must hold at least that many bytes, and those
+ * bytes must hash to that chain; otherwise it is not this run's records
+ * - cut short, another run's, or edited - and the resume is refused by
+ * name, with nothing touched. Whatever lies past them was written after
+ * the checkpoint: records the resumed run writes again, and usually a
+ * line a kill cut in half. It is cut away before a byte is appended, so
+ * a killed and resumed run's records are the uninterrupted run's, byte
+ * for byte, and still hash to its chain. */
 static void records_resume(runstate *R)
 {
     const char *path = R->O->records_path;
@@ -3480,11 +3555,16 @@ int main(int argc, char **argv)
             records_apart(&O, NULL, 0);     /* the paths as written */
         if (O.resume && !NEGCTL_APPEND)
             records_resume(&R);
-        R.recf = fopen(O.records_path, O.resume ? "ab" : "wb");
+        /* A fresh run's file is opened uncut, asked which file it is,
+         * and only then cut to nothing: a refusal loses no byte. */
+        R.recf = O.resume ? fopen(O.records_path, "ab")
+                          : open_uncut(O.records_path);
         if (!R.recf)
             die("cannot write the records file");
         if (O.ckpt)
             records_apart(&O, R.recf, 0);   /* the files, now one is open */
+        if (!O.resume && file_empty(R.recf) != 0)
+            die("cannot write the records file");
     }
 
     if (!O.quiet && !O.csv)

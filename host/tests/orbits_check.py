@@ -67,12 +67,12 @@ Seven groups of checks:
                   must refuse, pipes and locked files included, in
                   bounded time, and --records and --checkpoint as one
                   file; the image cache's key; the checkpoint's rename
-                  held open, and how long it is retried; the census it
-                  reports, derived here from the program's structure;
-                  the golden model's executor and assembler on the
-                  image it writes. Most legs carry a control that must
-                  fail, run every time; check_segments names the nine
-                  that do not.
+                  held open, and how long it is retried; a second
+                  writer; the census it reports, derived here from the
+                  program's structure; the golden model's executor and
+                  assembler on the image it writes. Most legs carry a
+                  control that must fail, run every time;
+                  check_segments names the ten that do not.
  7. Refusals.     What the two program engines must refuse, and the
                   precise reason each is refused.
 """
@@ -537,14 +537,14 @@ def check_segments(tool, tmp):
     hand, the order of a checkpoint and its records, the loader's limit
     and the golden comparison each carry a control that must make them
     fail, run every time, and its failure is asserted - a comparison
-    that has never been seen to fail is not a gate. Nine carry none of
+    that has never been seen to fail is not a gate. Ten carry none of
     their own - the census, the batch-size comparison, the comparisons
     at the three narrower formats, the relay without --records, the run
     with no instrument set, the image cache's key, the rename under a
-    stat() poll, the rename held open, and the fresh run into a pipe -
-    and were watched failing only under one-off planted defects; the
-    refusals are their own kind, a case each that must be refused by
-    name. docs/ORBITS.md says what holds each."""
+    stat() poll, the rename held open, the second writer, and the fresh
+    run into a pipe - and were watched failing only under one-off
+    planted defects; the refusals are their own kind, a case each that
+    must be refused by name. docs/ORBITS.md says what holds each."""
     print("\n[6b] --engine segments: the ensemble state through the "
           "scratch block")
     env_nc = env_with(CFT_ORBITS_NEGATIVE_CONTROL="transpose")
@@ -922,7 +922,14 @@ def check_segments(tool, tmp):
     # built and loaded once (seg_run keeps eight): with no sample
     # boundary to cut them, the lengths are 1 (the first step, which
     # times the rate) and the binary decompositions of the first
-    # interval's other 99 steps and of 100 - five, so five loads.
+    # interval's other 99 steps and of 100 - five, so five loads. The
+    # 127-step regime needs more images than the eight slots (17 loads
+    # for 43 runs), so it evicts, and each regime's last checkpoint is
+    # also held to the host loop's byte for byte: an image run for the
+    # wrong length ends elsewhere, whether or not a checkpoint falls
+    # where it shows (verifier-V6's V6E, a slot keeping its old key over
+    # a new image, was caught before only where a real-clock run happened
+    # to meet it).
     vargv = ["--problem", "kepler", "--format", "fp64", "--members", 2,
              "--rsqrt", "newton", "--csv", "--quiet",
              "--checkpoint-interval", "0.09765625"]
@@ -937,13 +944,15 @@ def check_segments(tool, tmp):
         return {1 << b for b in range(n.bit_length()) if n >> b & 1}
 
     for label, nsteps, every in regimes:
-        logs, runs, loads, bad = {}, None, None, []
+        logs, ends, runs, loads, bad = {}, {}, None, None, []
         for key, eng, env in (("loop", "loop", env_vc),
                               ("segments", "segments", env_vc),
                               ("control", "segments", env_vcu)):
             if key == "control" and every < 100:
                 continue            # sample-bounded already: nothing to cut
             ck = Path(tmp) / ("vc-%s.ckpt" % key)
+            if ck.exists():
+                ck.unlink()
             proc = tool.run(*vargv, "--steps", nsteps, "--sample-every",
                             every, "--engine", eng, "--checkpoint", ck,
                             env=env, expect_ok=False)
@@ -951,6 +960,7 @@ def check_segments(tool, tmp):
                 bad.append("%s: exit %d, %s" % (key, proc.returncode,
                                                  proc.stderr.strip()[-120:]))
             logs[key] = _clock_log(proc.stderr)
+            ends[key] = ck.read_bytes() if ck.exists() else None
             if key == "segments" and not proc.returncode:
                 row = _csv_row(proc.stdout)
                 runs, loads = int(row["seg_runs"]), int(row["seg_loads"])
@@ -959,22 +969,25 @@ def check_segments(tool, tmp):
         bound = 8 * (nsteps // 100) + nsteps // every + 1
         want_loads = (len({1} | pieces(99) | pieces(100))
                       if every == nsteps else None)
-        check(not bad and L and logs["segments"] == L and
+        same_end = ends["loop"] is not None and ends["segments"] == ends["loop"]
+        check(not bad and L and logs["segments"] == L and same_end and
               steps == list(range(100, nsteps + 1, 100)) and
               runs is not None and runs <= bound and
               loads < runs and (want_loads is None or loads == want_loads),
               "%s, under a steady clock: segments checkpoint at exactly the "
-              "host loop's steps - every 100, one interval - in %d runs "
-              "(at most %d) of %d images%s"
+              "host loop's steps - every 100, one interval - and end on its "
+              "checkpoint byte for byte, in %d runs (at most %d) of %d "
+              "images%s"
               % (label, runs or 0, bound, loads or 0,
                  "" if want_loads is None else
                  ", one a length (%d lengths)" % want_loads),
               "%s, under a steady clock: segments checkpoint at %s, the host "
-              "loop at %s, in %s runs (at most %d) of %s images (%s wanted) "
-              "%s" % (label, [s for s, _ in logs["segments"]][:8], steps[:8],
-                      runs, bound, loads,
-                      want_loads if want_loads else "fewer than the runs",
-                      "; ".join(bad)))
+              "loop at %s, in %s runs (at most %d) of %s images (%s wanted); "
+              "the last checkpoint %s the host loop's %s" % (
+                  label, [s for s, _ in logs["segments"]][:8], steps[:8],
+                  runs, bound, loads,
+                  want_loads if want_loads else "fewer than the runs",
+                  "IS" if same_end else "is NOT", "; ".join(bad)))
         if "control" in logs:
             check(logs["control"] != L,
                   "%s: NEGATIVE CONTROL: uncapped, segments checkpoint at "
@@ -1279,39 +1292,57 @@ def check_segments(tool, tmp):
     # every interval: on POSIX the records then went on into an unlinked
     # file and were lost, with exit 0; on Windows the run died 1.7 s in
     # blaming "another process" (verifier-V6, pre-existing). Refused by
-    # name: the same path, one file under two spellings on a fresh run
-    # and on a resume, and the checkpoint's temporary as the records.
+    # name, before a byte of either file is cut. The same path, and the
+    # checkpoint's .tmp as written, are told from the strings, before
+    # anything is opened - so nothing may be created there. Two spellings
+    # of one file are told by the file itself, on a fresh run from the
+    # records file opened but not yet cut - so a checkpoint already there
+    # must be left as it was (d56ecbe emptied it, and a leg that began
+    # with no checkpoint could not see that: verifier-V6) - and that
+    # holds for the .tmp under another spelling as for the checkpoint.
     same = Path(tmp) / "same.ckpt"
-    alias = str(Path(tmp)) + os.sep + "." + os.sep + "same.ckpt"  # not
-    # through pathlib, which would fold the "." away
+    stmp = Path(str(same) + ".tmp")
+    dot = str(Path(tmp)) + os.sep + "." + os.sep  # not through pathlib,
+    # which would fold the "." away
     why, refused = [], []
-    for what, ckp, rcp, resume in (
-            ("the same path, fresh", same, same, False),
-            ("the checkpoint's .tmp as the records, fresh", same,
-             Path(str(same) + ".tmp"), False),
-            ("one file under two names, fresh", same, alias, False),
-            ("one file under two names, on --resume", same, alias, True)):
-        for p in (same, Path(str(same) + ".tmp")):
+    for what, rcp, there, resume, says in (
+            ("the same path, fresh", same, False, False, "same path"),
+            ("the same path, fresh, a checkpoint there", same, True, False,
+             "same path"),
+            ("the .tmp, fresh", stmp, False, False, "same path"),
+            ("one file under two names, fresh, a checkpoint there",
+             dot + "same.ckpt", True, False, "two names"),
+            ("the .tmp under another name, fresh, a checkpoint there",
+             dot + "same.ckpt.tmp", True, False, "two names"),
+            ("one file under two names, on --resume", dot + "same.ckpt",
+             True, True, "two names")):
+        for p in (same, stmp):
             if p.exists():
                 p.unlink()
-        if resume:
+        if there:
             same.write_bytes(stop_ck)
         proc = tool.run(*rargv5, "--engine", "segments", "--checkpoint",
-                        ckp, "--records", rcp,
+                        same, "--records", rcp,
                         *(["--resume"] if resume else []), expect_ok=False)
-        if (proc.returncode == 2 and "--checkpoint" in proc.stderr and
-                ("are the same path" in proc.stderr or
-                 "one file under two names" in proc.stderr) and
-                (not resume or same.read_bytes() == stop_ck)):
-            refused.append(what)
+        if there:
+            left = same.read_bytes() == stop_ck
+            said_left = "the checkpoint %s" % ("untouched" if left else
+                                               "CHANGED")
         else:
-            why.append("%s: exit %d, %s" % (what, proc.returncode,
-                                           proc.stderr.strip()[-120:]))
+            left = not same.exists() and not stmp.exists()
+            said_left = "nothing created" if left else "a file CREATED"
+        if (proc.returncode == 2 and "--checkpoint" in proc.stderr and
+                ("are the " + says if says == "same path" else
+                 "one file under " + says) in proc.stderr and left):
+            refused.append("%s (%s)" % (what, said_left))
+        else:
+            why.append("%s: exit %d, %s; %s" % (
+                what, proc.returncode, proc.stderr.strip()[-110:], said_left))
     check(not why,
-          "refused by name, --records and --checkpoint as one file: %s (the "
-          "checkpoint on --resume untouched)" % "; ".join(refused),
-          "--records and --checkpoint as one file not refused by name: %s"
-          % "; ".join(why))
+          "refused by name, --records and --checkpoint as one file: %s"
+          % "; ".join(refused),
+          "--records and --checkpoint as one file not refused by name, or "
+          "a file changed: %s" % "; ".join(why))
 
     # --- records that are not a file -------------------------------------
     # A resume reads the records back and cuts them, which only a regular
@@ -1524,32 +1555,40 @@ def check_segments(tool, tmp):
     # taken with perf_counter, the clock the tool itself reads: Python's
     # monotonic() is GetTickCount64 on Windows, 15.6 ms a tick, and the
     # 1-member run is about that long - measured with it, the check failed
-    # 12 of 280 times on a correct tool (verifier-V6, 2026-09-25). (The
-    # real loader limit by default is held above: the 100,000-step
-    # interval runs as 1 + 99,999, and =overlong is refused at the real
-    # ceiling.)
+    # 12 of 280 times on a correct tool (verifier-V6, 2026-09-25). The
+    # 1-member time is the least of three runs: a busy moment only makes a
+    # run longer, and one 1-member run of 0.175 s against about 0.015 s
+    # failed the ratio once in about 340 (verifier-V6). (The real loader
+    # limit by default is held above: the 100,000-step interval runs as
+    # 1 + 99,999, and =overlong is refused at the real ceiling.)
     targv = ["--problem", "kepler", "--format", "fp256", "--rsqrt",
              "newton", "--steps", 1024, "--sample-every", 256, "--quiet"]
     for eng in ("loop", "segments"):
-        secs, walls, said = {}, {}, []
-        for m in (1, 16):
+        runs, said = [], []
+        for m in (16, 1, 1, 1):
             t0 = time.perf_counter()
             proc = tool.run(*targv, "--members", m, "--engine", eng, "--csv",
                             "--checkpoint", Path(tmp) / "t.ckpt", "--records",
                             Path(tmp) / "t.txt")
-            walls[m] = time.perf_counter() - t0
-            secs[m] = float(_csv_row(proc.stdout)["seconds"])
+            wall = time.perf_counter() - t0
+            runs.append((m, float(_csv_row(proc.stdout)["seconds"]), wall))
             if proc.stderr:
                 said.append(proc.stderr[:100])
-        check(not said and secs[16] >= 4 * secs[1] and
-              all(0 < secs[m] <= walls[m] for m in secs),
+        s16 = runs[0][1]
+        s1 = min(s for m, s, _ in runs if m == 1)
+        check(not said and s16 >= 4 * s1 and
+              all(0 < s <= w for _, s, w in runs),
               "with no instrument set, %s says nothing on stderr and its "
               "clock is the wall's: the same 1,024 steps took %.3f s at 16 "
-              "members and %.3f s at 1, each inside its process's %.3f and "
-              "%.3f s" % (eng, secs[16], secs[1], walls[16], walls[1]),
+              "members and %.3f s at 1 (the least of %s), each run inside "
+              "its process's lifetime" % (
+                  eng, s16, s1,
+                  ", ".join("%.3f" % s for m, s, _ in runs if m == 1)),
               "with no instrument set, %s wrote %r on stderr, or reported "
-              "%.3f s at 16 members and %.3f s at 1 (processes of %.3f and "
-              "%.3f s)" % (eng, said, secs[16], secs[1], walls[16], walls[1]))
+              "%.3f s at 16 members and %.3f s at 1 (runs of %s)" % (
+                  eng, said, s16, s1,
+                  ", ".join("%d members %.3f s in a %.3f s process" % r
+                            for r in runs)))
 
     # --- a checkpoint renamed while something else looks at it ----------
     # On Windows another process that holds the checkpoint open for a
@@ -1596,13 +1635,16 @@ def check_segments(tool, tmp):
     # retry of about 60 ms passed it (verifier-V6's V6K). So the
     # checkpoint is held open, as a reader holds it, while a run renames
     # it after every step: for 0.5 s, which the run must outlast and end
-    # on the unheld run's bytes; and for 5 s, longer than the retry (ten
-    # tries at once, then fifty 20 ms sleeps - about 1.5 s here), which on
-    # Windows must end the run BY NAME between 1 and 5 s after the hold
-    # began - and the run so ended must resume, on the other engine, to
-    # the unheld run's checkpoint and records. A POSIX rename over an open
-    # file is not refused, so there both holds must leave the run as if
-    # nothing held it.
+    # on the unheld run's bytes; and for 5 s, longer than the retry (until
+    # 1.5 s on the clock after the rename first fails), which on Windows
+    # must end the run BY NAME between 1 and 5 s after the hold began -
+    # and the run so ended must resume, on the other engine, to the unheld
+    # run's checkpoint and records. The retry is bounded by the clock, not
+    # by a count of sleeps, so a busy scheduler adds one sleep to it, not
+    # sixty (d56ecbe's count gave up as late as 4.88 s, and once not
+    # within the 5 s, with a game holding the CPU: verifier-V6). A POSIX
+    # rename over an open file is not refused, so there both holds must
+    # leave the run as if nothing held it.
     hargv = ["--problem", "kepler", "--format", "fp64", "--members", 2,
              "--rsqrt", "newton", "--steps", 1000, "--sample-every", 50,
              "--checkpoint-interval", 0, "--quiet"]
@@ -1688,6 +1730,53 @@ def check_segments(tool, tmp):
                   "right" if short_ok else "WRONG", code2,
                   "%.2f" % ended2 if ended2 is not None else "-",
                   err2.strip()[-100:]))
+
+    # --- a second writer ------------------------------------------------
+    # The length check before each checkpoint: another process that
+    # writes to the records while the run does - here 1 MiB appended as
+    # the first checkpoint appears - leaves the file longer than the
+    # records the run has counted, and the run must stop BY NAME at its
+    # next checkpoint, leaving the one before; the other engine resumes
+    # that to the unheld run's checkpoint and records, cutting the
+    # stranger's bytes away. With the check removed the run finished, exit
+    # 0, on a file that was not its records (verifier-V6's R7, 3 of 3).
+    wck, wrc = Path(tmp) / "w2.ckpt", Path(tmp) / "w2.txt"
+    for p in (wck, wrc, Path(str(wck) + ".tmp")):
+        if p.exists():
+            p.unlink()
+    pr = subprocess.Popen([tool.exe] + [str(a) for a in hargv] +
+                          ["--engine", "segments", "--checkpoint", str(wck),
+                           "--records", str(wrc)],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                          text=True)
+    limit = time.monotonic() + 60
+    while not wck.exists() and pr.poll() is None and \
+            time.monotonic() < limit:
+        time.sleep(0.002)
+    appended = pr.poll() is None and wck.exists()
+    if appended:
+        with open(wrc, "ab") as fh:
+            fh.write(b"another writer's line\n" * 47663)     # 1 MiB and more
+    try:
+        _out, werr = pr.communicate(timeout=60)
+    except subprocess.TimeoutExpired:
+        pr.kill()
+        _out, werr = pr.communicate()
+    wres = tool.run(*hargv, "--engine", "loop", "--checkpoint", wck,
+                    "--records", wrc, "--resume", expect_ok=False)
+    wend = tuple(p.read_bytes() if p.exists() else None for p in (wck, wrc))
+    check(appended and pr.returncode == 2 and
+          "something else wrote to it or cut it" in werr and
+          wres.returncode == 0 and wend == href,
+          "a second writer: 1 MiB appended to the records as the run's first "
+          "checkpoint appeared stopped the run BY NAME at its next (\"%s\"), "
+          "and loop resumed the checkpoint left to the unheld run's "
+          "checkpoint and records" % werr.strip()[-80:],
+          "a second writer appending 1 MiB (%s): exit %s, %s; the resume "
+          "after: exit %d, bytes %s" % (
+              "appended" if appended else "NOT appended - the run had ended",
+              pr.returncode, werr.strip()[-120:], wres.returncode,
+              "right" if wend == href else "WRONG"))
 
     # --- a sample interval longer than one segment may run -------------
     # The loader refuses an image that could execute more than 2^40
