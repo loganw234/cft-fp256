@@ -503,6 +503,12 @@ struct Dev {
      * may have written part of a window whose earlier contents had not
      * come home yet, so no copy of it can be vouched for. */
     std::vector<Buf *> job_outs;
+    /* CFT_XRT_BIND=decline-outputs, read by run_job at the start of each
+     * job: every resident OUTPUT bind declines, as one too large for its
+     * channel does, so the staged collects that write a resident
+     * buffer's mirror can be reached on a card (verifier-V8: no leg
+     * could, and removing their marks passed the gate). */
+    bool              decline_outputs = false;
 };
 
 /* Grow a tile's buffers to hold `bytes`.
@@ -942,6 +948,12 @@ xrt::bo *buf_bind(Buf &B, size_t tile, int role, size_t off,
      * the next cft_buffer_from_device. */
     (void)buf_flush(B, c);   /* stales the copies over its old window */
 
+    if (output && B.D->decline_outputs) {
+        B.why = "declined by CFT_XRT_BIND=decline-outputs";
+        B.staged_binds++;
+        return nullptr;
+    }
+
     if (off > B.bytes || real > B.bytes - off) {
         /* device.c's registry already refuses a window that overruns,
          * so reaching this means the slice arithmetic and the lookup
@@ -973,7 +985,13 @@ xrt::bo *buf_bind(Buf &B, size_t tile, int role, size_t off,
     }
     c.off = off; c.real = real; c.padded = padded; c.live = true;
     c.dirty = false;
-    c.gen = B.gen;
+    /* Current only once its bytes ARE the mirror's. Marked before the
+     * fill until 2026-09-26, so a fill whose upload threw left the copy
+     * "current" with the bytes it held before, and the retry that a
+     * staging failure allows bound it resident - 64 of 64 wrong with
+     * CFT_OK, pre-existing (verifier-V8, N1). */
+    c.gen = 0;
+    c.filled = false;
 
     if (!output || preserve) {
         auto *p = c.bo.map<uint8_t *>();
@@ -981,6 +999,7 @@ xrt::bo *buf_bind(Buf &B, size_t tile, int role, size_t off,
         if (padded > real)
             std::memset(p + real, 0, padded - real);
         c.bo.sync(XCL_BO_SYNC_BO_TO_DEVICE, padded, 0);
+        c.gen = B.gen;
         c.filled = true;
         B.staged_binds++;
         B.why = preserve
@@ -991,8 +1010,8 @@ xrt::bo *buf_bind(Buf &B, size_t tile, int role, size_t off,
                     : "first use of this window on this tile and role";
     } else {
         /* Nothing crossed the bus: an output copy is written by the
-         * tile, and allocating one is not a transfer. */
-        c.filled = false;
+         * tile whole, and allocating one is not a transfer. */
+        c.gen = B.gen;
         B.resident_binds++;
     }
     /* An output bound to a device copy is this job's to lose if it
@@ -1237,9 +1256,22 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
             plant = 1;
         else if (!std::strcmp(w, "busy-after"))
             plant = 2;
+        else if (!std::strcmp(w, "busy-open"))
+            plant = 0;           /* cftx_open's plant; nothing for a run */
         else if (*w) {
             set_err(std::string("CFT_XRT_WITNESS=\"") + w + "\": expected "
-                    "busy-before or busy-after; unset it for none");
+                    "busy-before, busy-after or busy-open; unset it for "
+                    "none");
+            return ST_INVALID_ARGUMENT;
+        }
+    }
+    D.decline_outputs = false;
+    if (const char *b = std::getenv("CFT_XRT_BIND")) {
+        if (!std::strcmp(b, "decline-outputs"))
+            D.decline_outputs = true;
+        else if (*b) {
+            set_err(std::string("CFT_XRT_BIND=\"") + b + "\": expected "
+                    "decline-outputs; unset it for none");
             return ST_INVALID_ARGUMENT;
         }
     }
@@ -1250,6 +1282,47 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
          base += ntiles, wave++) {
         const size_t count = std::min(ntiles, J.tasks.size() - base);
         cft_tile_order(ntiles, seed, wave, order.data());
+
+        /* The completion witness, before (2026-09-25) - and before the
+         * wave is STAGED (2026-09-26): staging fills this wave's copies on
+         * the tile, and a busy tile's memory may be written by the run
+         * that is going there, so a refusal after staging left copies
+         * "current" that the abandoned run could have written over
+         * (verifier-V8). A tile this wave will start must be IDLE: a busy one is running work this
+         * process did not start - a run abandoned on it by a timeout or
+         * by a process that ended mid-run - and the tile drops a start
+         * while busy (rtl/cft_csr.sv), so XRT would report this task
+         * complete when THAT run ends and hand back bytes this job never
+         * wrote. Nothing of the wave has started, so a refusal leaves
+         * every unit as it was. CFT_ERR_BUSY takes this over with
+         * per-tile failure (docs/ROADMAP.md, plan step 3). */
+        for (size_t j = 0; j < count; j++) {
+            const Tile &t = D.tiles[order[j]];
+            uint32_t c = 0;
+            try {
+                c = t.k.read_register(CSR_CTRL);
+            } catch (const std::exception &e) {
+                set_err("reading " + tile_name(D, order[j]) + "'s CTRL "
+                        "before " + J.what + ": " + e.what());
+                return ST_INTERNAL;
+            }
+            if (plant == 1 && base == 0 && j == 0)
+                c = CTRL_START;                  /* CFT_XRT_WITNESS */
+            if ((c & CTRL_IDLE) && !(c & CTRL_START))
+                continue;
+            set_err(tile_name(D, order[j]) + " is running work this "
+                    "process did not start (CTRL 0x" + hex32(c) + ", not "
+                    "idle): a run abandoned on it - by a timeout, or by a "
+                    "process that ended mid-run - is still going. The tile "
+                    "would drop this start and XRT would report " + J.what +
+                    " complete when that run ends, so it is refused and "
+                    "nothing was started or staged. Reload the image - load "
+                    "another xclbin, then this one - before trusting this "
+                    "tile: until then XRT may complete later runs on it "
+                    "early, and the abandoned run may write into memory "
+                    "this handle's buffers use");
+            return ST_INTERNAL;
+        }
 
         /* Stage the wave. Nothing of it has started, so a failure
          * leaves its units idle; an earlier wave's results are the
@@ -1280,42 +1353,6 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
             }
             set_err("staging " + J.what + " for " + tile_name(D, at) + ": " +
                     w);
-            return ST_INTERNAL;
-        }
-
-        /* The completion witness, before (2026-09-25). A tile this wave
-         * will start must be IDLE: a busy one is running work this
-         * process did not start - a run abandoned on it by a timeout or
-         * by a process that ended mid-run - and the tile drops a start
-         * while busy (rtl/cft_csr.sv), so XRT would report this task
-         * complete when THAT run ends and hand back bytes this job never
-         * wrote. Nothing of the wave has started, so a refusal leaves
-         * every unit as it was. CFT_ERR_BUSY takes this over with
-         * per-tile failure (docs/ROADMAP.md, plan step 3). */
-        for (size_t j = 0; j < count; j++) {
-            const Tile &t = D.tiles[order[j]];
-            uint32_t c = 0;
-            try {
-                c = t.k.read_register(CSR_CTRL);
-            } catch (const std::exception &e) {
-                set_err("reading " + tile_name(D, order[j]) + "'s CTRL "
-                        "before " + J.what + ": " + e.what());
-                return ST_INTERNAL;
-            }
-            if (plant == 1 && base == 0 && j == 0)
-                c = CTRL_START;                  /* CFT_XRT_WITNESS */
-            if ((c & CTRL_IDLE) && !(c & CTRL_START))
-                continue;
-            set_err(tile_name(D, order[j]) + " is running work this "
-                    "process did not start (CTRL 0x" + hex32(c) + ", not "
-                    "idle): a run abandoned on it - by a timeout, or by a "
-                    "process that ended mid-run - is still going. The tile "
-                    "would drop this start and XRT would report " + J.what +
-                    " complete when that run ends, so it is refused and "
-                    "nothing was started. Retry when that run has finished; "
-                    "until the image is reloaded XRT may also complete "
-                    "later runs on this tile early, which is refused by "
-                    "name when it happens");
             return ST_INTERNAL;
         }
 
@@ -1427,12 +1464,15 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
                         m += " (STATUS 0x" + hex32(acc) + " - the memory "
                              "system or the tile reported something, so "
                              "this is more than a slow run)";
-                    else if (kind == 1)
-                        m += " (STATUS clean on every unit that ran)";
-                    else
+                    else if (st == ST_TIMEOUT)
                         m += " (STATUS clean on every unit that ran, so "
                              "this is a hang or a genuinely slow run rather "
                              "than a bus fault)";
+                    else
+                        /* a thrown wait, an ERROR state, a start that
+                         * threw: none is shown to be a hang or slow
+                         * (verifier-V8) */
+                        m += " (STATUS clean on every unit that ran)";
                 }
                 return m;
             }, "run failed");
@@ -1483,7 +1523,11 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
                         return "reading " + tile_name(D, order[j]) +
                                "'s CTRL after " + J.what + " failed, so "
                                "whether it finished is not known; this "
-                               "handle is finished";
+                               "handle is finished. A run left running on a "
+                               "tile can make XRT complete later runs there "
+                               "early, in any process, until the image is "
+                               "reloaded: reload it before trusting " +
+                               tile_name(D, order[j]) + " (docs/HOSTAPI.md)";
                     }, "run failed");
                     return ST_INTERNAL;
                 }
@@ -1910,6 +1954,43 @@ static int cftx_open_impl(const char *artifact, int index, void **out,
         }
     }
 
+    /* The completion witness at OPEN (2026-09-26, verifier-V8). Access
+     * to a compute unit is exclusive, so no live handle can be running
+     * work on a tile this one has just opened: one that is not idle is
+     * running a run a process that ENDED abandoned there. Its writes may
+     * land in the device memory this handle's buffers are about to be
+     * given - probe 4 saw an abandoned run's output land in a later
+     * process's buffers at the same addresses - and once it ends no
+     * later reading of CTRL can see that it happened. So the open is
+     * refused by name. CFT_XRT_WITNESS=busy-open plants a busy reading
+     * on the first tile, so that device-test can hold the refusal. */
+    {
+        const char *w = std::getenv("CFT_XRT_WITNESS");
+        const bool plant_open = w && !std::strcmp(w, "busy-open");
+        for (size_t tt = 0; tt < D->tiles.size(); tt++) {
+            uint32_t c = 0;
+            try {
+                c = D->tiles[tt].k.read_register(CSR_CTRL);
+            } catch (const std::exception &e) {
+                set_err("reading " + tile_name(*D, tt) + "'s CTRL at open: " +
+                        e.what());
+                return ST_INTERNAL;
+            }
+            if (plant_open && tt == 0)
+                c = CTRL_START;                  /* CFT_XRT_WITNESS */
+            if ((c & CTRL_IDLE) && !(c & CTRL_START))
+                continue;
+            set_err(tile_name(*D, tt) + " is already running when this "
+                    "handle opens it (CTRL 0x" + hex32(c) + ", not idle): a "
+                    "run abandoned there by a process that ended is still "
+                    "going, and its writes may land in the memory this "
+                    "handle's buffers would be given. Reload the image - "
+                    "load another xclbin, then this one - before opening "
+                    "this tile, or leave it out with CFT_XRT_TILES");
+            return ST_INTERNAL;
+        }
+    }
+
     D->version      = ver;
     *format_mask    = caps & 0xFu;
     *op_groups      = (caps >> 8) & 0xFFu;
@@ -2066,28 +2147,46 @@ extern "C" int cftx_buffer_to_device(void *buf)
         return ST_INVALID_ARGUMENT;
     Buf &B = *static_cast<Buf *>(buf);
     return at_boundary("publishing a resident buffer", [&]() -> int {
-        /* The mirror is the truth from here, and the caller may have
-         * written any of it: every copy is stale, which is what moving
-         * the generation says. A run's bytes still on the device come
-         * home FIRST, so that publishing a buffer a run left
-         * device-authoritative keeps what the run wrote, exactly as on
-         * the software backend, where the mirror IS the buffer
-         * (verifier-V7, 2026-09-25: the dirty flags were dropped
-         * unflushed, and a bare cft_buffer_to_device discarded the run);
-         * what comes home is current at the new generation. A buffer a
-         * failed run LOST is the exception: the caller is supplying its
-         * contents, so the device's are dropped, not brought home over
-         * them. */
-        B.gen++;
+        /* A buffer a failed run LOST: the caller is supplying its
+         * contents, so what the device holds is dropped and the loss is
+         * cleared. */
         if (B.lost) {
             for (auto &c : B.copies)
                 c.dirty = false;
             B.lost = false;
             B.lost_why.clear();
+            B.gen++;
             return ST_OK;
         }
-        for (auto &c : B.copies)
-            (void)buf_flush(B, c);
+        /* A run's results still on the device and never read back:
+         * REFUSED (Logan's rule, 2026-09-26). The library cannot tell
+         * whether the host copy was written since the run - a store of
+         * the same bytes looks like none, so no test of the contents can
+         * tell - and each way of guessing returns wrong bytes with CFT_OK
+         * for one of the two ways of calling this: dropping the device's
+         * bytes loses the run's results from a publish nobody wrote
+         * before (verifier-V7), bringing them home first puts them over a
+         * caller's rewrite (verifier-V8, N6). Nothing is changed; the
+         * caller reads the buffer back first, which keeps the run's
+         * results, then writes and publishes. */
+        for (const auto &c : B.copies)
+            if (c.dirty) {
+                set_err_or([] {
+                    return std::string(
+                        "cft_buffer_to_device: a run's results in this "
+                        "buffer are still on the device and were never read "
+                        "back, so whether the host copy was written since "
+                        "cannot be known and publishing could keep the "
+                        "wrong bytes - read it back first "
+                        "(cft_buffer_from_device keeps the run's results), "
+                        "then write and publish; nothing was changed "
+                        "(docs/HOSTAPI.md)");
+                }, "publish refused: read the buffer back first");
+                return ST_INVALID_ARGUMENT;
+            }
+        /* The mirror is the truth from here: every copy is stale and
+         * refills at its next binding. Nothing moves. */
+        B.gen++;
         return ST_OK;
     });
 }

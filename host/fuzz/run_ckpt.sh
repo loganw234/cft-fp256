@@ -40,7 +40,20 @@ fi
 
 for t in collatz enclose mersenne orbits zoom; do
     out="fuzz/bin/cft-$t"
-    if [ ! -x "$out" ] || [ "tools/$t.c" -nt "$out" ]; then
+    # Rebuilt when ANYTHING it is built from is newer - its own source, the
+    # library's, a header. Until 2026-09-26 only tools/$t.c was compared,
+    # so after a library change the lane went on fuzzing the library the
+    # tools were first built from (verifier-V8).
+    stale=0
+    if [ ! -x "$out" ]; then
+        stale=1
+    fi
+    for f in "tools/$t.c" $SRC include/*.h src/*.h; do
+        if [ "$f" -nt "$out" ]; then
+            stale=1
+        fi
+    done
+    if [ "$stale" = 1 ]; then
         echo "building $out with -fsanitize=address,undefined"
         # shellcheck disable=SC2086
         $CC $CFLAGS_SAN -Wall -Iinclude "tools/$t.c" $SRC -o "$out"

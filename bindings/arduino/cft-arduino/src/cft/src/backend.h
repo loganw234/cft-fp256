@@ -142,13 +142,14 @@ void cftx_buffer_destroy(void *buf);
 
 /* The mirror is the truth from here: the caller may have written any
  * of it, so every device copy is stale and refills from the mirror the
- * next time it is bound. What a run wrote into a copy and nobody has
- * read back comes home FIRST, so publishing a buffer a run left
- * device-authoritative keeps the run's bytes, as the software backend
- * does - which means this call can fail on that transfer. A buffer a
- * failed run LOST is the exception: the caller is supplying its
- * contents, so the device's are dropped and the loss cleared. (Until
- * 2026-09-25 the device's were dropped always - verifier-V7.) */
+ * next time it is bound; nothing moves. REFUSED (ST_INVALID_ARGUMENT,
+ * changing nothing) while a copy holds a run's results nobody has read
+ * back: whether the mirror was written since cannot be known, and both
+ * guesses have returned wrong bytes with CFT_OK (dropping them -
+ * verifier-V7; bringing them home over a rewrite - verifier-V8; Logan's
+ * rule of 2026-09-26). A buffer a failed run LOST is accepted: the
+ * caller is supplying its contents, so the device's are dropped and the
+ * loss cleared. */
 int  cftx_buffer_to_device(void *buf);
 
 /* The device is the truth: copy back everything a run wrote into this

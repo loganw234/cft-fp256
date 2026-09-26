@@ -1500,10 +1500,18 @@ static cft_status from_char_batch(cft_device *dev, cft_format fmt,
     f = &cft_sf_formats[(int)fmt];
     if (size_overflows(f, n))
         return CFT_ERR_INVALID_ARGUMENT;
-    /* d is written on the host (softfloat.h's cft_host_out). The strings
-     * are text, which no run writes. */
+    /* d is written on the host, and the strings and the array of them
+     * are read there, so a resident buffer's device bytes come home
+     * first (softfloat.h). They were taken to be text no run writes
+     * until 2026-09-26 - but a run can write any buffer, and a string
+     * in one came back stale (verifier-V8, N3). */
     {
-        const int hs = cft_host_out(dev, d, n * (size_t)(f->width / 8));
+        size_t k;
+        int hs = cft_host_in(dev, in, n * sizeof *in);
+        for (k = 0; hs == CFT_OK && k < n; k++)
+            hs = cft_host_in(dev, in[k], 1);
+        if (hs == CFT_OK)
+            hs = cft_host_out(dev, d, n * (size_t)(f->width / 8));
         if (hs != CFT_OK)
             return (cft_status)hs;
     }

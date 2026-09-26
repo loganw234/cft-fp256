@@ -2151,48 +2151,62 @@ CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
  *     DEVICE COPY is authoritative and the mirror is stale, until
  *     cft_buffer_from_device brings it back.
  *
- * A CALLER WHO BREAKS THE RULE GETS CORRECT BITS, SLOWLY - never
- * wrong ones. Specifically:
+ * A CALLER WHO BREAKS THE READ RULE GETS CORRECT BITS, SLOWLY - never
+ * wrong ones. Two STORES are where it can go wrong, and one of those is
+ * now refused by name. Specifically:
  *
  *   - Using a device-authoritative buffer as an INPUT without calling
  *     cft_buffer_from_device first is honoured: the library reads the
  *     device copy back itself, then feeds it in. The answer is the
  *     one the rule would have given; what it costs is the round trip
- *     the rule exists to avoid. That holds for EVERY entry point,
+ *     the rule exists to avoid. That holds for every entry point,
  *     those computed on the host included - the transcendentals, the
  *     clause-5 operations, the conversions, the augmented and formatOf
- *     arithmetic, the payload and character operations, the scaled
- *     products - which until 2026-09-25 read the stale mirror.
- *   - An entry point that WRITES a resident buffer on the host keeps
- *     the rule itself: a run's bytes over what it writes come home
- *     first, and every device copy over it is made stale, so the next
- *     run reads the new bytes. That covers the entry points above,
- *     cft_reduce's and cft_reduce_seg's results, and a program run's
- *     counts. (Until 2026-09-25 a copy filled before such a write was
- *     served as current, and the run after it read the bytes from
- *     before - verifier-V7.)
- *   - cft_buffer_from_device on a buffer no run has written is a
- *     no-op. cft_buffer_to_device on a buffer a run has written brings
- *     the run's bytes home FIRST and then publishes the mirror, so a
- *     publish after a run keeps the run's results, exactly as the
- *     software backend does (until 2026-09-25 it discarded them). Both
- *     are always safe to call.
- *   - Writing the MIRROR of a buffer a run has written, before
- *     cft_buffer_from_device, is the second thing the library cannot
- *     see: the run's bytes are still on the device, and whichever of
- *     cft_buffer_from_device and cft_buffer_to_device comes next brings
- *     them home over what was written - where on the software backend
- *     the write would stand. Read a buffer back before writing into it.
+ *     arithmetic, the payload and character operations (the strings
+ *     too), the scaled products - and for a program's image at
+ *     cft_program_load and its constant bank at a run or a digest.
+ *     (Until 2026-09-25 the entry points computed on the host read the
+ *     stale mirror; until 2026-09-26 the image, the bank and the
+ *     strings did - verifier-V7, verifier-V8.)
+ *   - An entry point that WRITES a resident buffer's ELEMENTS on the
+ *     host keeps the rule itself: a run's bytes over what it writes come
+ *     home first, and every device copy over it is made stale, so the
+ *     next run reads the new bytes. That covers the entry points above,
+ *     cft_reduce's and cft_reduce_seg's results, a program run's
+ *     counts, and an output the device declined to keep resident. (Until
+ *     2026-09-25 a copy filled before such a write was served as
+ *     current - verifier-V7.)
+ *   - OUT-PARAMETERS - a flags word, a bus word, a string's length, a
+ *     bad index - are stores the library makes FOR the caller, like any
+ *     variable of the caller's: one that lies in a resident buffer is
+ *     the caller's own store into its mirror, under the two rules for
+ *     those below (read the buffer back before, publish it after).
+ *   - cft_buffer_from_device on a buffer no run has written is a no-op.
+ *     cft_buffer_to_device never transfers anything, and is REFUSED -
+ *     CFT_ERR_INVALID_ARGUMENT, with a sentence, nothing changed - on a
+ *     device backend while the buffer holds a run's results nobody has
+ *     read back. Whether the mirror was written since the run cannot be
+ *     known (a store of the same bytes looks like none), and either
+ *     guess returns wrong bytes with CFT_OK for one way of calling it:
+ *     keeping the device's bytes lost a caller's rewrite, dropping them
+ *     lost the run's results. Read it back, which keeps the run's
+ *     results; then write and publish. The software backend has no
+ *     device copy to disagree with its mirror, and accepts every
+ *     publish. (Logan's rule, 2026-09-26.)
+ *   - Writing the mirror of a buffer a run has written, BEFORE reading
+ *     it back, is the first store that can go wrong: the publish after
+ *     it is refused, as above, and cft_buffer_from_device then brings
+ *     the run's bytes home over what was written - where on the software
+ *     backend the store would stand. Read a buffer back before writing
+ *     into it.
  *   - Writing the mirror through cft_buffer_data and NOT calling
- *     cft_buffer_to_device is the one thing the library cannot see,
- *     because a plain store leaves no trace. The run then uses the
- *     bytes the buffer last published. On the software backend the
- *     mirror IS the buffer, so the same code sees the new bytes - so
- *     this is the one place where forgetting a sync call changes an
- *     answer, and it is why the sync calls exist at all. Call
- *     cft_buffer_to_device after every write to the mirror; it costs
- *     no transfer when no run has written the buffer since it was last
- *     read back.
+ *     cft_buffer_to_device is the second, and the one thing the library
+ *     cannot see, because a plain store leaves no trace. The run then
+ *     uses the bytes the buffer last published. On the software backend
+ *     the mirror IS the buffer, so the same code sees the new bytes - so
+ *     this is where forgetting a sync call changes an answer, and it is
+ *     why the sync calls exist at all. Call cft_buffer_to_device after
+ *     every write to the mirror.
  *   - A LANE MASK on a program run whose deposit window or scratch-out
  *     block is resident leaves a masked lane's slots holding the
  *     buffer's current contents, exactly as it does for a plain host
@@ -2204,13 +2218,15 @@ CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
  *     the resident buffers it writes LOST: the tile may have written
  *     part of a window over bytes that had not come home, so nothing
  *     can vouch for what either copy holds. cft_buffer_from_device on a
- *     lost buffer, and any call that reads or writes it - a run, an
- *     entry point computed on the host, a lane mask read from it - is
- *     CFT_ERR_INTERNAL with a sentence saying so, until
- *     cft_buffer_to_device publishes the mirror as the truth again;
+ *     lost buffer, and any call that reads or writes its elements - a
+ *     run, an entry point computed on the host, a lane mask, a bank or
+ *     an image read from it - is CFT_ERR_INTERNAL with a sentence saying
+ *     so, until cft_buffer_to_device publishes the mirror as the truth
+ *     again (the publish is accepted, and drops what the device held);
  *     cft_buffer_get_info reports device_authority 0 and a staged_why
- *     beginning "LOST:". (Until 2026-09-25 the failed run's bytes could
- *     come back with CFT_OK.)
+ *     beginning "LOST:". Out-parameters are the caller's stores, as
+ *     above, and are not refused. (Until 2026-09-25 the failed run's
+ *     bytes could come back with CFT_OK.)
  *
  * cft_buffer_free releases the device copies with the mirror. Closing
  * the device first is allowed and releases them too: the buffer stays

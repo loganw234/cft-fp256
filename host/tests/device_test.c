@@ -4883,6 +4883,13 @@ static void check_program_capacity(cft_device *dev, cft_format fmt)
     }
 }
 
+/* The resident-buffer helpers are defined with the -b legs further down;
+ * the witness leg and the two after it use them too, so the struct lives here and the two
+ * functions are declared. */
+struct rbuf { cft_buffer *b; uint8_t *p; };
+static int rbuf_alloc(cft_device *dev, struct rbuf *r, size_t bytes);
+static void rbuf_free(struct rbuf *r);
+
 /* The completion witness (backend_xrt.cpp, run_job, 2026-09-25): a tile
  * that is busy before a start, or still busy after XRT has reported its
  * run complete, is refused by name and nothing of the run is collected.
@@ -4964,6 +4971,34 @@ static void check_completion_witness(cft_device *hw, cft_format fmt)
     CHECK(st == CFT_OK, "the witness leg's unplanted program (%s): %s (%s)",
           cft_format_name(fmt), cft_strerror(st), cft_last_error());
 
+    /* A wave refused BEFORE it is staged (2026-09-26, verifier-V8):
+     * a resident input the refused run names must be bound nowhere -
+     * staging would have filled its copy on the busy tile. */
+    {
+        struct rbuf R;
+        cft_buffer_info bi;
+        int unbound = 0;
+        if (rbuf_alloc(hw, &R, n * esz)) {
+            memcpy(R.p, a, n * esz);
+            if (cft_buffer_to_device(R.b) == CFT_OK) {
+                put_env("CFT_XRT_WITNESS", "busy-before");
+                st = cft_run(hw, CFT_ADD, fmt, CFT_RNE, R.p, b, c, got, n, &f,
+                             &bus);
+                put_env("CFT_XRT_WITNESS", NULL);
+                memset(&bi, 0, sizeof bi);
+                bi.struct_size = sizeof bi;
+                unbound = st != CFT_OK &&
+                          cft_buffer_get_info(R.b, &bi) == CFT_OK &&
+                          bi.staged_binds == 0 && bi.resident_binds == 0;
+            }
+            rbuf_free(&R);
+        }
+        asked++;
+        CHECK(unbound, "CFT_XRT_WITNESS=busy-before (%s): the refused wave "
+              "bound a resident input - it must be refused before it is "
+              "staged", cft_format_name(fmt));
+        right += unbound;
+    }
     for (l = 0; l < sizeof legs / sizeof legs[0]; l++) {
         /* an elementwise run, refused */
 #ifndef _WIN32
@@ -5059,13 +5094,6 @@ out:
     cft_program_free(prog);
     free(a); free(b); free(c); free(base); free(got); free(dbase); free(dgot);
 }
-
-/* The resident-buffer helpers are defined with the -b legs further down;
- * the two legs below use them too, so the struct lives here and the two
- * functions are declared. */
-struct rbuf { cft_buffer *b; uint8_t *p; };
-static int rbuf_alloc(cft_device *dev, struct rbuf *r, size_t bytes);
-static void rbuf_free(struct rbuf *r);
 
 /* A lane mask on a program whose deposit window and scratch-out block
  * are RESIDENT (cft_alloc): a masked lane's slots must come back holding
@@ -5364,9 +5392,22 @@ static void check_lost_after_refusal(cft_device *hw, cft_format fmt)
                 (!(caps.seq_features & CFT_SEQ_FEAT_LANE_MASK) ||
                  s_mask != CFT_OK) && info_ok;
     }
-    /* published again, it is the caller's */
+    /* published again, it is the caller's - read back BEFORE anything
+     * runs over it, or a publish that brought the failed run's bytes home
+     * would be hidden by the next run's (verifier-V8) */
     memset(dep.p, 0x77, n * esz);
     s_repub = cft_buffer_to_device(dep.b);
+    {
+        size_t k;
+        int kept = cft_buffer_from_device(dep.b) == CFT_OK;
+        for (k = 0; kept && k < n * esz; k++)
+            kept = dep.p[k] == 0x77;
+        CHECK(s_repub == CFT_OK && kept, "a lost buffer published again "
+              "(%s): %s, and read back %s - the caller's bytes must stand, "
+              "not the failed run's", cft_format_name(fmt),
+              cft_strerror(s_repub), kept ? "the caller's" : "OTHER bytes");
+        right = right && kept;
+    }
     s_after = cft_program_run_ex(prog, &A);
     s_back2 = cft_buffer_from_device(dep.b);
     CHECK(s_repub == CFT_OK && s_after == CFT_OK && s_back2 == CFT_OK &&
@@ -6697,7 +6738,7 @@ enum {
     SH_TORDER, SH_MINMAG, SH_CMPSIG, SH_AUG_R, SH_AUG_E, SH_AUG_SUB,
     SH_FO_NARROW, SH_FO_WIDE, SH_DIV, SH_SQRT, SH_PAYLOAD, SH_SETPAY,
     SH_TODEC, SH_FROMDEC, SH_SCALED, SH_REDUCE, SH_REDUCE_SEG,
-    SH_DIV_FULL, SH_SQRT_FULL, SH_COUNT
+    SH_DIV_FULL, SH_SQRT_FULL, SH_NEXTDOWN, SH_TOHEX, SH_COUNT
 };
 static const char *const sh_name[SH_COUNT] = {
     "cft_exp", "cft_pow", "cft_pown", "cft_rint", "cft_next_up",
@@ -6709,14 +6750,15 @@ static const char *const sh_name[SH_COUNT] = {
     "cft_sqrt", "cft_get_payload", "cft_set_payload", "cft_to_decimal_char",
     "cft_from_decimal_char", "cft_scaled_prod", "cft_reduce",
     "cft_reduce_seg", "cft_div, CFT_DIVSQRT_FULL=1",
-    "cft_sqrt, CFT_DIVSQRT_FULL=1"
+    "cft_sqrt, CFT_DIVSQRT_FULL=1", "cft_next_down", "cft_to_hex_char"
 };
 enum { SD_IN, SD_OUT, SD_INPLACE };
 static const char *const sd_name[3] = {"IN", "OUT", "in place"};
 enum {
     SV_RSEG, SV_RSEG_BACK, SV_RED, SV_COUNTS, SV_WITNESS, SV_RSEG_DIRTY,
     SV_MASKED, SV_PUBLISH, SV_RWR, SV_RED_TWICE, SV_RSEG_TWICE,
-    SV_COUNTS_TWICE, SV_COUNT
+    SV_COUNTS_TWICE, SV_N6, SV_RED_DIRTY, SV_COUNTS_DIRTY, SV_DEP_OUT,
+    SV_SO_OUT, SV_BANK, SV_DIGEST, SV_IMAGE, SV_STRINGS, SV_COUNT
 };
 static const char *const sv_name[SV_COUNT] = {
     "S1: a read, cft_reduce_seg into B, a read",
@@ -6728,11 +6770,24 @@ static const char *const sv_name[SV_COUNT] = {
     "S6: a run into B, cft_reduce_seg into it, the read-back",
     "S7: a masked program into B refused after its fill, cft_reduce_seg "
     "into it, the masked program again",
-    "a run into B, a bare cft_buffer_to_device, a read",
+    "a run into B, a publish before any read-back (refused on a card), a "
+    "read",
     "a read, a run into B, a read",
     "cft_reduce of B into an element of B, then of B again",
     "cft_reduce_seg of B into B, then of B again",
-    "a program reading B with its counts into B, then again"
+    "a program reading B with its counts into B, then again",
+    "N6: a run into B, the caller's rewrite, a publish (refused on a card), "
+    "a read-back, the rewrite again, a publish, a read",
+    "a run into B, cft_reduce into an element of it, the read-back",
+    "a run into B, a program's counts into it, the read-back",
+    "a read, a program's deposits into B, a read",
+    "a read, a program's scratch-out into B, a read",
+    "N2: a run writes a program's constant bank into B, the program run "
+    "with it",
+    "N2: a run writes a constant bank into B, cft_program_digest over it",
+    "N2: a run writes a program image into B, cft_program_load from it, "
+    "the program run",
+    "N3: a run writes decimal strings into B, cft_from_decimal_char on them"
 };
 static const char *const stale_texts[8] = {
     "1.5", "-2.25e3", "7e-3", "0", "-0", "3.14159", "1e10", "-9.5e-7"
@@ -6743,13 +6798,18 @@ struct stale {
     cft_format fmt;
     size_t n, esz;
     int plants;                 /* CFT_XRT_WITNESS plants take effect */
+    int card_refuses;           /* the reference records the refusal a
+                                 * card gives a publish over unread run
+                                 * results (Logan's rule, 2026-09-26) */
     struct rbuf B;
     const uint8_t *x, *y, *z, *init, *mask;
     const int64_t *i64;
     const int32_t *i32;
     uint8_t *out, *dep, *e;     /* this device's plain outputs */
     uint32_t *cnt;
-    cft_program *prog;
+    cft_program *prog, *prog_so, *prog_bank;
+    uint8_t *img1;              /* the one-deposit program's image */
+    size_t img1_bytes;
     uint8_t *tr;
     size_t trn, trcap;
     int oom;
@@ -6836,6 +6896,64 @@ static void st_program(struct stale *s, int masked, uint8_t *deposits,
             put_env("CFT_XRT_WITNESS", NULL);
     }
     st_status(s, st);
+}
+
+/* A publish of B that a card REFUSES when a run's results in B are
+ * unread (`over_unread`; Logan's rule, 2026-09-26). The software backend
+ * accepts every publish, so the reference records the refusal the card
+ * must give; the call changes nothing where it is refused. */
+static void st_publish(struct stale *s, int over_unread)
+{
+    cft_status st = cft_buffer_to_device(s->B.b);
+    if (over_unread && s->card_refuses && st == CFT_OK)
+        st = CFT_ERR_INVALID_ARGUMENT;
+    st_status(s, st);
+}
+
+/* A DEVICE run writes `bytes` of payload into B: the one-deposit
+ * program over a lane-sized copy of it, deposits into B, so every byte
+ * lands exactly as given. The host reads it next - which is the case a
+ * stale mirror would get wrong. */
+static void st_devcopy(struct stale *s, const uint8_t *payload, size_t bytes)
+{
+    uint8_t *lanes = (uint8_t *)calloc(s->n, s->esz);
+    cft_run_args A;
+    uint32_t fl = 0, bus = 0;
+    if (!lanes) {
+        s->oom = 1;
+        return;
+    }
+    memcpy(lanes, payload, bytes < s->n * s->esz ? bytes : s->n * s->esz);
+    memset(&A, 0, sizeof A);
+    A.struct_size = sizeof A;
+    A.a = lanes;
+    A.n = s->n;
+    A.deposits = s->B.p;
+    A.counts = s->cnt;
+    A.flags_out = &fl;
+    A.bus_out = &bus;
+    st_status(s, cft_program_run_ex(s->prog, &A));
+    free(lanes);
+}
+
+/* The scratch-out program: deposits a and stores it to slot 0 of its
+ * scratch-out block, which is B. */
+static void st_program_so(struct stale *s)
+{
+    cft_run_args A;
+    uint32_t fl = 0, bus = 0;
+    memset(&A, 0, sizeof A);
+    A.struct_size = sizeof A;
+    A.a = s->x;
+    A.n = s->n;
+    A.deposits = s->dep;
+    A.counts = s->cnt;
+    A.scratch_out = s->B.p;
+    A.scratch_out_bytes = s->n * s->esz;
+    A.flags_out = &fl;
+    A.bus_out = &bus;
+    st_status(s, cft_program_run_ex(s->prog_so, &A));
+    st_rec(s, s->dep, s->n * s->esz);
 }
 
 /* One call of entry point `fn`: reading B (IN, in place) or x, writing B
@@ -6972,6 +7090,12 @@ static void st_host(struct stale *s, int fn, int dir)
         st = cft_reduce_seg(s->dev, CFT_SUM, fmt, CFT_RNE, a, NULL, d, n, 8,
                             &fl, &bus);
         break;
+    case SH_NEXTDOWN:
+        st = cft_next_down(s->dev, fmt, a, d, n, &fl);
+        break;
+    case SH_TOHEX:
+        st = cft_to_hex_char(s->dev, fmt, a, (char *)d, n * esz, &len);
+        break;
     default:                /* SH_DIV_FULL, SH_SQRT_FULL */
         put_env("CFT_DIVSQRT_FULL", "1");
         st = fn == SH_DIV_FULL
@@ -7042,11 +7166,107 @@ static void st_seq(struct stale *s, int which)
         st_program(s, 1, s->B.p, s->cnt, 0);
         st_rec(s, s->cnt, s->n * sizeof *s->cnt);
         break;
-    case SV_PUBLISH:
+    case SV_PUBLISH:        /* refused on a card, and changes nothing */
         st_write(s);
-        st_status(s, cft_buffer_to_device(s->B.b));
+        st_publish(s, 1);
         st_read(s);
         break;
+    case SV_N6:             /* verifier-V8: the caller rewrites what a run
+                             * wrote - the publish that would have kept one
+                             * side's bytes by guessing is refused; read back,
+                             * the rewrite stands */
+        st_write(s);
+        memcpy(s->B.p, s->y, s->n * esz);
+        st_publish(s, 1);
+        st_status(s, cft_buffer_from_device(s->B.b));
+        memcpy(s->B.p, s->y, s->n * esz);
+        st_publish(s, 0);
+        st_read(s);
+        break;
+    case SV_RED_DIRTY:      /* the host writes into a window a run left dirty */
+        st_write(s);
+        st_status(s, cft_reduce(s->dev, CFT_SUM, s->fmt, CFT_RNE, s->x, NULL,
+                                s->B.p + 5 * esz, s->n, &fl, &bus));
+        break;
+    case SV_COUNTS_DIRTY:
+        st_write(s);
+        st_program(s, 0, s->dep, (uint32_t *)(void *)s->B.p, 0);
+        st_rec(s, s->dep, s->n * esz);
+        break;
+    case SV_DEP_OUT:        /* B as a program's deposit window */
+        st_read(s);
+        st_program(s, 0, s->B.p, s->cnt, 0);
+        st_rec(s, s->cnt, s->n * sizeof *s->cnt);
+        st_read(s);
+        break;
+    case SV_SO_OUT:         /* B as a program's scratch-out block */
+        st_read(s);
+        st_program_so(s);
+        st_read(s);
+        break;
+    case SV_BANK: {         /* r4 = r0 * k0 + k1, both from B */
+        uint32_t f2 = 0;
+        st_devcopy(s, s->x + 7 * esz, 2 * esz);
+        st_status(s, cft_program_run_bank(s->prog_bank, s->B.p, 2 * esz,
+                                          s->x, NULL, NULL, s->dep, s->cnt,
+                                          s->n, &f2, NULL));
+        st_rec(s, s->dep, s->n * esz);
+        break;
+    }
+    case SV_DIGEST: {
+        uint8_t dg[32];
+        memset(dg, 0, sizeof dg);
+        st_devcopy(s, s->y + 3 * esz, 2 * esz);
+        st_status(s, cft_program_digest(s->prog_bank, s->B.p, 2 * esz, dg));
+        st_rec(s, dg, sizeof dg);
+        break;
+    }
+    case SV_IMAGE: {
+        cft_program *p2 = NULL;
+        cft_status st;
+        st_devcopy(s, s->img1, s->img1_bytes);
+        st = cft_program_load(s->dev, s->B.p, s->img1_bytes, &p2);
+        st_status(s, st);
+        if (st == CFT_OK) {
+            cft_run_args A;
+            uint32_t f2 = 0, b2 = 0;
+            memset(&A, 0, sizeof A);
+            A.struct_size = sizeof A;
+            A.a = s->y;
+            A.n = s->n;
+            A.deposits = s->dep;
+            A.counts = s->cnt;
+            A.flags_out = &f2;
+            A.bus_out = &b2;
+            st_status(s, cft_program_run_ex(p2, &A));
+            st_rec(s, s->dep, s->n * esz);
+        }
+        cft_program_free(p2);
+        break;
+    }
+    default: {              /* SV_STRINGS */
+        char text[256];
+        const char *in[8];
+        size_t pos = 0, k2, bad = 0;
+        uint32_t f2 = 0;
+        memset(text, 0, sizeof text);
+        for (k2 = 0; k2 < 8; k2++) {
+            size_t len = strlen(stale_texts[k2]) + 1;
+            memcpy(text + pos, stale_texts[k2], len);
+            pos += len;
+        }
+        st_devcopy(s, (const uint8_t *)text, pos);
+        for (k2 = 0, pos = 0; k2 < 8; k2++) {
+            in[k2] = (const char *)s->B.p + pos;
+            pos += strlen(stale_texts[k2]) + 1;
+        }
+        memset(s->out, 0, s->n * esz);
+        st_status(s, cft_from_decimal_char(s->dev, s->fmt, CFT_RNE, in,
+                                           s->out, 8, &bad, &f2));
+        st_rec(s, s->out, 8 * esz);
+        st_rec(s, &bad, sizeof bad);
+        break;
+    }
     case SV_RWR:            /* a flush must stale the copies it moves under */
         st_read(s);
         st_write(s);
@@ -7070,7 +7290,7 @@ static void st_seq(struct stale *s, int which)
                                     NULL, s->out, s->n, 8, &fl, &bus));
         st_rec(s, s->out, (s->n / 8) * esz);
         break;
-    default: {              /* SV_COUNTS_TWICE */
+    case SV_COUNTS_TWICE: {
         const uint8_t *keep = s->x;
         s->x = s->B.p;      /* the program's stream a is B */
         st_program(s, 0, s->dep, (uint32_t *)(void *)s->B.p, 0);
@@ -7086,10 +7306,15 @@ static void st_seq(struct stale *s, int which)
 /* One scenario on both devices, into a fresh B each; 1 if the
  * transcripts agree. B brought home ends every transcript. */
 static int stale_one(struct stale *S, int is_host, int which, int dir,
-                     const char *label)
+                     const char *label, int decline)
 {
     size_t i;
     int k;
+    /* CFT_XRT_BIND=decline-outputs: every resident OUTPUT bind of the card
+     * declines and is staged, so the staged collects that write B's
+     * mirror are exercised; the software backend never reads it. */
+    if (decline)
+        put_env("CFT_XRT_BIND", "decline-outputs");
     for (k = 0; k < 2; k++) {
         struct stale *s = &S[k];
         s->trn = 0;
@@ -7121,6 +7346,8 @@ static int stale_one(struct stale *S, int is_host, int which, int dir,
         st_rec(s, s->B.p, s->n * s->esz);
         rbuf_free(&s->B);
     }
+    if (decline)
+        put_env("CFT_XRT_BIND", NULL);
     checks++;
     if (S[0].oom || S[1].oom) {
         printf("  FAIL stale copies (%s), %s: out of memory\n",
@@ -7194,12 +7421,18 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
     uint8_t mask[(64 + 7) / 8];
     int64_t i64[64];
     int32_t i32[64];
-    uint8_t img[64];
-    uint64_t ins[2];
+    uint8_t img[64], img2[64], img3[64];
+    uint64_t ins[2], ins3[3], insb[3];
     struct stale S[2];
-    char label[160];
+    char label[200];
     size_t i;
-    int k, fn, dir, which, runs = 0, agreed = 0, progs = 1;
+    int k, fn, dir, which, runs = 0, agreed = 0, progs = 1, progs_so = 1,
+        progs_bank = 1;
+    /* a card that keeps B resident refuses a publish over unread results */
+    const int card_refuses = xrt && hc->buffers_resident;
+    static const int declined[] = {SV_RWR, SV_DEP_OUT, SV_SO_OUT,
+                                   SV_PUBLISH, SV_N6, SV_RED_DIRTY,
+                                   SV_COUNTS_DIRTY};
 
     memset(S, 0, sizeof S);
     memset(mask, 0, sizeof mask);
@@ -7225,6 +7458,12 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
     }
     ins[0] = seq_ctrl(3, 0, 0);                  /* deposit r0 = a */
     ins[1] = seq_ctrl(0, 0, 0);                  /* halt */
+    ins3[0] = seq_ctrl(3, 0, 0);                 /* deposit r0 = a */
+    ins3[1] = seq_stl(0, 0);                     /* scratch slot 0 := r0 */
+    ins3[2] = seq_ctrl(0, 0, 0);                 /* halt */
+    insb[0] = seq_alu(0, 4, 0, 0, 1, 0, 1, 1);   /* r4 = r0 * k0 + k1 */
+    insb[1] = seq_ctrl(3, 4, 0);                 /* deposit r4 */
+    insb[2] = seq_ctrl(0, 0, 0);                 /* halt */
     for (k = 0; k < 2; k++) {
         struct stale *s = &S[k];
         s->dev = k ? hw : sw;
@@ -7232,6 +7471,7 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
         s->n = n;
         s->esz = esz;
         s->plants = k && xrt;
+        s->card_refuses = !k && card_refuses;
         s->x = x; s->y = y; s->z = z; s->init = init; s->mask = mask;
         s->i64 = i64;
         s->i32 = i32;
@@ -7244,10 +7484,23 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
             failures++;
             goto out;
         }
-        if (cft_program_load(s->dev, img,
-                             seq_image(img, fmt, ins, 2, NULL, 0, 1),
-                             &s->prog) != CFT_OK)
+        s->img1_bytes = seq_image(img, fmt, ins, 2, NULL, 0, 1);
+        s->img1 = img;
+        if (cft_program_load(s->dev, img, s->img1_bytes, &s->prog) != CFT_OK)
             progs = 0;
+        if (!(hc->seq_features & CFT_SEQ_FEAT_BANK_PTR) ||
+            cft_program_load(s->dev, img3,
+                             seq_image_flags(img3, fmt, insb, 3, NULL, 2, 1,
+                                             CFT_PROG_FLAG_BANK_EXT),
+                             &s->prog_bank) != CFT_OK)
+            progs_bank = 0;
+        if (!(hc->seq_features & CFT_SEQ_FEAT_SCRATCH_IO) ||
+            cft_program_load(s->dev, img2,
+                             seq_image_scratch(img2, fmt, ins3, 3, NULL, 0, 1,
+                                               CFT_PROG_FLAG_SCRATCH_IO, 0,
+                                               1),
+                             &s->prog_so) != CFT_OK)
+            progs_so = 0;
     }
 
     for (which = 0; which < SV_COUNT; which++) {
@@ -7255,8 +7508,15 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
                               which == SV_RSEG_DIRTY || which == SV_MASKED ||
                               which == SV_RSEG_TWICE;
         const int needs_prog = which == SV_COUNTS || which == SV_MASKED ||
-                               which == SV_COUNTS_TWICE;
+                               which == SV_COUNTS_TWICE ||
+                               which == SV_COUNTS_DIRTY ||
+                               which == SV_DEP_OUT || which == SV_IMAGE ||
+                               which == SV_STRINGS || which == SV_BANK ||
+                               which == SV_DIGEST;
         if ((needs_seg && !seg) || (needs_prog && !progs) ||
+            (which == SV_SO_OUT && !progs_so) ||
+            ((which == SV_BANK || which == SV_DIGEST) && !progs_bank) ||
+            (which == SV_RED_DIRTY && !cft_supports(hw, CFT_SUM, fmt)) ||
             (which == SV_MASKED &&
              !(hc->seq_features & CFT_SEQ_FEAT_LANE_MASK)) ||
             (which == SV_RED_TWICE && !cft_supports(hw, CFT_SUM, fmt))) {
@@ -7274,7 +7534,7 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
                      hc->backend);
         }
         runs++;
-        agreed += stale_one(S, 0, which, 0, sv_name[which]);
+        agreed += stale_one(S, 0, which, 0, sv_name[which], 0);
     }
     for (fn = 0; fn < SH_COUNT; fn++) {
         const int ok = stale_host_ok(hw, hc, fn, fmt);
@@ -7296,12 +7556,63 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
                 !(fn == SH_EXP || fn == SH_RINT || fn == SH_NEXTUP ||
                   fn == SH_SCALEB_DEV || fn == SH_DIV || fn == SH_SQRT ||
                   fn == SH_MINMAG || fn == SH_AUG_R || fn == SH_DIV_FULL ||
-                  fn == SH_SQRT_FULL))
+                  fn == SH_SQRT_FULL || fn == SH_NEXTDOWN))
                 continue;
             snprintf(label, sizeof label, "%s, %s", sh_name[fn], sd_name[dir]);
             runs++;
-            agreed += stale_one(S, 1, fn, dir, label);
+            agreed += stale_one(S, 1, fn, dir, label, 0);
         }
+    }
+    /* The same sequences with every output bind of the card DECLINED
+     * (CFT_XRT_BIND), so the staged collects' marks are what keeps them
+     * right - verifier-V8 removed those marks and the leg stayed green.
+     * A card only: the software backend has no binds to decline. */
+    if (xrt) {
+        size_t d;
+        /* ...and first, that the instrument declines at all - a pass
+         * under an instrument that did nothing would agree vacuously */
+        {
+            struct rbuf R;
+            cft_buffer_info bi;
+            uint32_t f2 = 0, b2 = 0;
+            int declined_ok = 0;
+            if (rbuf_alloc(hw, &R, n * esz)) {
+                put_env("CFT_XRT_BIND", "decline-outputs");
+                if (cft_run(hw, CFT_ADD, fmt, CFT_RNE, x, NULL, y, R.p, n,
+                            &f2, &b2) == CFT_OK) {
+                    memset(&bi, 0, sizeof bi);
+                    bi.struct_size = sizeof bi;
+                    declined_ok =
+                        cft_buffer_get_info(R.b, &bi) == CFT_OK &&
+                        bi.resident_binds == 0 && bi.staged_binds > 0 &&
+                        strstr(bi.staged_why, "CFT_XRT_BIND") != NULL;
+                }
+                put_env("CFT_XRT_BIND", NULL);
+                rbuf_free(&R);
+            }
+            CHECK(declined_ok, "stale copies (%s): CFT_XRT_BIND=decline-"
+                  "outputs declined nothing - the pass below would agree "
+                  "vacuously", cft_format_name(fmt));
+        }
+        for (d = 0; d < sizeof declined / sizeof declined[0]; d++) {
+            which = declined[d];
+            if ((which == SV_SO_OUT && !progs_so) ||
+                ((which == SV_DEP_OUT || which == SV_COUNTS_DIRTY) &&
+                 !progs) ||
+                (which == SV_RED_DIRTY && !cft_supports(hw, CFT_SUM, fmt)))
+                continue;
+            snprintf(label, sizeof label, "outputs declined, %s",
+                     sv_name[which]);
+            S[0].card_refuses = 0;   /* nothing resident to refuse over */
+            runs++;
+            agreed += stale_one(S, 0, which, 0, label, 1);
+            S[0].card_refuses = card_refuses;
+        }
+    } else {
+        snprintf(label, sizeof label, "    stale copies (%s), outputs declined",
+                 cft_format_name(fmt));
+        not_here(NH_OTHER, "TESTED", label, "the %s backend has no bind to "
+                 "decline", hc->backend);
     }
     printf("    stale copies (%s): %d of %d scenarios agree with the software "
            "backend, transcript for transcript - V7's sequences and every "
@@ -7310,10 +7621,174 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
 out:
     for (k = 0; k < 2; k++) {
         cft_program_free(S[k].prog);
+        cft_program_free(S[k].prog_so);
+        cft_program_free(S[k].prog_bank);
         free(S[k].out); free(S[k].dep); free(S[k].e); free(S[k].cnt);
         free(S[k].tr);
     }
     free(x); free(y); free(z); free(init);
+}
+
+/* Resident windows STAY resident (verifier-V8: residency undone passed
+ * every correctness leg). Two shapes, bytes checked in each:
+ *   - a buffer carved [a | counts | deposits]: the program's stream binds
+ *     resident on its second and third runs, although the counts are
+ *     written on the host beside it every run - which a whole-buffer
+ *     staleness would refill;
+ *   - a masked program into a resident deposit window: after a read-back
+ *     the next masked run binds it resident (the flush left the copy
+ *     current); after a publish it refills (the control).
+ * Counted from cft_buffer_get_info's staged_binds. On a backend with no
+ * device copies there is nothing to count: NOT TESTED. */
+static void check_resident_stays(cft_device *hw, cft_format fmt,
+                                 const cft_caps *hc)
+{
+    const size_t esz = cft_format_size(fmt), n = 64;
+    const size_t off_cnt = n * esz, off_dep = n * esz + n * 4;
+    uint8_t img[64], *x = (uint8_t *)malloc(n * esz);
+    uint8_t *mask = (uint8_t *)calloc((n + 7) / 8, 1);
+    uint64_t ins[2];
+    uint32_t cnt[64], fl = 0, bus = 0;
+    struct rbuf C, D;
+    cft_program *prog = NULL;
+    cft_run_args A;
+    cft_buffer_info bi;
+    uint64_t st_prev = 0, carved_extra = 0, masked_after_read = 0,
+             masked_after_pub = 0;
+    size_t i;
+    int run, bad = 0, ok = 1;
+
+    C.b = D.b = NULL;
+    if (!hc->buffers_resident || !(hc->seq_features & CFT_SEQ_FEAT_LANE_MASK)) {
+        not_here(NH_OTHER, "TESTED", "    resident windows stay resident",
+                 "%s", hc->buffers_resident
+                 ? "this device has no lane mask"
+                 : "this device keeps no device copies to count");
+        goto out;
+    }
+    if (!x || !mask || !rbuf_alloc(hw, &C, off_dep + n * esz) ||
+        !rbuf_alloc(hw, &D, n * esz)) {
+        printf("  FAIL resident windows: out of memory\n");
+        failures++;
+        goto out;
+    }
+    rs = 0x2E51D000u + (uint32_t)fmt;
+    fill_finite(x, fmt, n);
+    for (i = 0; i < n; i++)
+        if (i % 3)
+            mask[i >> 3] |= (uint8_t)(1u << (i & 7u));
+    ins[0] = seq_ctrl(3, 0, 0);
+    ins[1] = seq_ctrl(0, 0, 0);
+    if (cft_program_load(hw, img, seq_image(img, fmt, ins, 2, NULL, 0, 1),
+                         &prog) != CFT_OK) {
+        printf("  FAIL resident windows (%s): the image did not load (%s)\n",
+               cft_format_name(fmt), cft_last_error());
+        failures++;
+        goto out;
+    }
+    /* the carved buffer */
+    memcpy(C.p, x, n * esz);
+    CHECK(cft_buffer_to_device(C.b) == CFT_OK, "publishing the carved buffer");
+    for (run = 1; run <= 3; run++) {
+        memset(&A, 0, sizeof A);
+        A.struct_size = sizeof A;
+        A.a = C.p;
+        A.n = n;
+        A.counts = (uint32_t *)(void *)(C.p + off_cnt);
+        A.deposits = C.p + off_dep;
+        A.flags_out = &fl;
+        A.bus_out = &bus;
+        if (cft_program_run_ex(prog, &A) != CFT_OK ||
+            cft_buffer_from_device(C.b) != CFT_OK) {
+            ok = 0;
+            break;
+        }
+        for (i = 0; i < n; i++) {
+            uint32_t c;
+            memcpy(&c, C.p + off_cnt + i * 4, 4);
+            bad += memcmp(C.p + off_dep + i * esz, x + i * esz, esz) != 0 ||
+                   c != 1;
+        }
+        memset(&bi, 0, sizeof bi);
+        bi.struct_size = sizeof bi;
+        if (cft_buffer_get_info(C.b, &bi) != CFT_OK) {
+            ok = 0;
+            break;
+        }
+        if (run > 1)
+            carved_extra += bi.staged_binds - st_prev;
+        st_prev = bi.staged_binds;
+    }
+    /* the masked window */
+    memset(D.p, 0x5a, n * esz);
+    CHECK(cft_buffer_to_device(D.b) == CFT_OK, "publishing the masked window");
+    for (run = 1; ok && run <= 3; run++) {
+        if (run == 3)
+            ok = cft_buffer_to_device(D.b) == CFT_OK;
+        memset(&A, 0, sizeof A);
+        A.struct_size = sizeof A;
+        A.a = x;
+        A.n = n;
+        A.counts = cnt;
+        A.deposits = D.p;
+        A.lane_mask = mask;
+        A.lane_mask_bytes = (n + 7) / 8;
+        A.flags_out = &fl;
+        A.bus_out = &bus;
+        if (!ok || cft_program_run_ex(prog, &A) != CFT_OK ||
+            cft_buffer_from_device(D.b) != CFT_OK) {
+            ok = 0;
+            break;
+        }
+        for (i = 0; i < n; i++) {
+            size_t k;
+            if (i % 3)
+                bad += memcmp(D.p + i * esz, x + i * esz, esz) != 0;
+            else
+                for (k = 0; k < esz; k++)
+                    bad += D.p[i * esz + k] != 0x5a;
+        }
+        memset(&bi, 0, sizeof bi);
+        bi.struct_size = sizeof bi;
+        if (cft_buffer_get_info(D.b, &bi) != CFT_OK) {
+            ok = 0;
+            break;
+        }
+        if (run == 2)
+            masked_after_read = bi.staged_binds - st_prev;
+        if (run == 3)
+            masked_after_pub = bi.staged_binds - st_prev;
+        st_prev = bi.staged_binds;
+    }
+    CHECK(ok && !bad, "resident windows (%s): a run or a read-back failed, "
+          "or %d lanes wrong (%s)", cft_format_name(fmt), bad,
+          cft_last_error());
+    CHECK(ok && carved_extra == 0, "resident windows (%s): the carved "
+          "buffer's stream was refilled %lu times on its 2nd and 3rd runs - "
+          "a write beside a window staled it", cft_format_name(fmt),
+          (unsigned long)carved_extra);
+    CHECK(ok && masked_after_read == 0, "resident windows (%s): a masked "
+          "run after a read-back refilled %lu windows - the copy the "
+          "read-back flushed was not left current", cft_format_name(fmt),
+          (unsigned long)masked_after_read);
+    CHECK(ok && masked_after_pub > 0, "resident windows (%s): a masked run "
+          "after a publish refilled nothing - staleness does not work",
+          cft_format_name(fmt));
+    if (ok && !bad && carved_extra == 0 && masked_after_read == 0 &&
+        masked_after_pub > 0)
+        printf("    resident windows stay resident (%s): a carved buffer's "
+               "stream resident on its 2nd and 3rd runs; a masked window "
+               "resident after a read-back, refilled after a publish (%lu); "
+               "every lane right\n", cft_format_name(fmt),
+               (unsigned long)masked_after_pub);
+out:
+    cft_program_free(prog);
+    if (C.b)
+        rbuf_free(&C);
+    if (D.b)
+        rbuf_free(&D);
+    free(x);
+    free(mask);
 }
 
 int main(int argc, char **argv)
@@ -7401,12 +7876,47 @@ int main(int argc, char **argv)
      * is found before an hour of emulation is spent finding it. Inject
      * a fault into the library and this mode is what shows the checks
      * can fail at all. */
-    st = cft_open(strcmp(argv[1], "sw") ? argv[1] : NULL, 0, &hw);
-    if (st != CFT_OK) {
-        fprintf(stderr, "device %s: %s\n  %s\n", argv[1], cft_strerror(st),
-                cft_last_error());
-        cft_close(sw);
-        return 2;
+    /* The completion witness at OPEN (2026-09-26): a tile already
+     * running when a handle opens it is refused by name, and the open
+     * with it. Planted with CFT_XRT_WITNESS=busy-open BEFORE the handle
+     * under test exists, since a second open would find its tiles held;
+     * only an xclbin opens tiles. */
+    {
+        int open_witness = -1;
+        char open_why[240] = "";
+        if (strcmp(argv[1], "sw") && strncmp(argv[1], "cft://", 6)) {
+            cft_device *probe = NULL;
+            cft_status ps;
+            put_env("CFT_XRT_WITNESS", "busy-open");
+            ps = cft_open(argv[1], 0, &probe);
+            put_env("CFT_XRT_WITNESS", NULL);
+            snprintf(open_why, sizeof open_why, "%s (%s)", cft_strerror(ps),
+                     cft_last_error());
+            open_witness = ps != CFT_OK &&
+                           strstr(cft_last_error(), "is already running when "
+                                  "this handle opens it") != NULL;
+            if (ps == CFT_OK)
+                cft_close(probe);
+        }
+        st = cft_open(strcmp(argv[1], "sw") ? argv[1] : NULL, 0, &hw);
+        if (st != CFT_OK) {
+            fprintf(stderr, "device %s: %s\n  %s\n", argv[1],
+                    cft_strerror(st), cft_last_error());
+            cft_close(sw);
+            return 2;
+        }
+        if (open_witness < 0) {
+            not_here(NH_OTHER, "TESTED", "    the completion witness at open",
+                     "only an xclbin opens tiles");
+        } else {
+            CHECK(open_witness, "CFT_XRT_WITNESS=busy-open: %s - a tile busy "
+                  "when a handle opens it must be refused by name, the open "
+                  "with it", open_why);
+            if (open_witness)
+                printf("    the completion witness at open: a tile read as "
+                       "busy when a handle opened it refused the open by "
+                       "name, and the next open went ahead\n");
+        }
     }
 
     memset(&caps, 0, sizeof caps);
@@ -7595,6 +8105,7 @@ int main(int argc, char **argv)
              * that reads or writes a resident buffer's mirror on the
              * host, held to the software backend both ways. */
             check_stale_copies(sw, hw, fmt, &caps);
+            check_resident_stays(hw, fmt, &caps);
             printf("  buffers, stale copies: %d checks, %d failed\n",
                    checks, failures);
             fflush(stdout);

@@ -624,14 +624,22 @@ they were handed over. What only a card can still say:
     every leg green, and `skew` red. Both refuse a malformed value by
     name; unset is the default placement.
   - `CFT_XRT_WITNESS` (2026-09-25): the completion witness's planted
-    fault (backend_xrt.cpp, run_job). `busy-before` makes the first
-    task's tile read busy in CTRL before its start, `busy-after` busy
-    once after XRT's completion; each must be refused by name with the
-    caller's output untouched and the handle right straight after -
-    device-test's `check_completion_witness` asks exactly that on every
-    XRT device. The defect the witness exists for cannot be planted
+    fault (backend_xrt.cpp). `busy-before` makes the first task's tile
+    read busy in CTRL before its wave is staged, `busy-after` busy for
+    50 ms after XRT's completion (so a witness that did not wait is
+    seen not to), `busy-open` (2026-09-26) busy when a handle opens the
+    tile; each must be refused by name, with the caller's output
+    untouched and the handle - or, for an open, the next open - right
+    straight after. device-test asks exactly that on every XRT device
+    (`check_completion_witness`, and the open before the handle under
+    test exists). The defect the witness exists for cannot be planted
     from a test without poisoning the card for everyone: see "A tile a
     run was abandoned on", below.
+  - `CFT_XRT_BIND` (2026-09-26): `decline-outputs` makes every
+    resident OUTPUT bind decline and be staged, as one too large for its
+    channel does, so the staged collects that write a resident buffer's
+    mirror are reachable on a card - device-test's "stale copies" runs
+    its sequences again under it. A malformed value is refused by name.
 - **A tile a run was abandoned on** (found 2026-09-25): a run that
   outlives `CFT_TIMEOUT_MS`, or a process killed mid-run, leaves its
   tile running after XRT has aborted the command, and until the image

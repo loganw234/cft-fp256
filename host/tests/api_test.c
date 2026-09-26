@@ -286,6 +286,33 @@ static void order_one_wave(size_t nt, uint64_t seed, size_t wave, size_t *o)
     cft_tile_order(nt, seed, 0, o);
 }
 
+/* ...and the four verifier-V8 found passing the judge that caught those
+ * three (2026-09-26): it never compared two seeds, and it let two orders
+ * alternate. */
+static void order_all_seed1(size_t nt, uint64_t seed, size_t wave, size_t *o)
+{
+    /* every non-zero seed one placement */
+    cft_tile_order(nt, seed ? 1u : 0u, wave, o);
+}
+
+static void order_first_wave(size_t nt, uint64_t seed, size_t wave, size_t *o)
+{
+    /* only a job's first wave shuffled */
+    cft_tile_order(nt, wave ? 0u : seed, wave, o);
+}
+
+static void order_two_waves(size_t nt, uint64_t seed, size_t wave, size_t *o)
+{
+    /* two orders, alternating */
+    cft_tile_order(nt, seed, wave & 1u, o);
+}
+
+static void order_low16(size_t nt, uint64_t seed, size_t wave, size_t *o)
+{
+    /* a seed read through its low 16 bits */
+    cft_tile_order(nt, seed & 0xFFFFull, wave, o);
+}
+
 static void order_last_stays(size_t nt, uint64_t seed, size_t wave, size_t *o)
 {
     /* a shuffle that never moves the last tile - the Fisher-Yates loop
@@ -302,41 +329,65 @@ static void order_last_stays(size_t nt, uint64_t seed, size_t wave, size_t *o)
 
 /* What a placement order must do beyond being a permutation. Under EVERY
  * seed, at every tile count from 4 up, some wave must move a task and
- * the eight waves must not all be one order; across the seeds, every
- * position must move off its tile at every tile count from 2 up. A bit
- * of the result for each that failed: 1 a seed that moved nothing, 2 a
- * seed whose waves were one order, 4 a position that never moved. The
+ * the eight waves must not all be one order - and from 5 up they must
+ * hold at least three different orders; no two seeds may give the same
+ * eight waves at any count from 4 up; and across the seeds every
+ * position must move off its tile at every count from 2 up. A bit of the
+ * result for each that failed: 1 a seed that moved nothing, 2 a seed
+ * whose waves were one order, 4 a position that never moved, 8 two
+ * seeds one placement, 16 a seed's waves fewer than three orders. The
  * bounds are where a correct shuffle cannot fail by chance: eight
  * identity waves, or eight identical ones, at 4 tiles have probability
- * 24^-7 or less, and a position fixed through all forty draws at 2
- * tiles 2^-40. */
+ * 24^-7 or less; two seeds' eight waves equal at 4 tiles, 24^-8; eight
+ * waves within two orders at 5 tiles, under C(120,2) x (2/120)^8 = 5e-11;
+ * a position fixed through every draw at 2 tiles, 2^-56. */
 static unsigned judge_tile_order(tile_order_fn f, const uint64_t *seeds,
                                  size_t nseeds)
 {
-    size_t ord[64], first[64], nt, w, j, s;
+    static size_t waves[8][8][64];     /* [seed][wave][position] */
+    size_t ord[64], nt, w, j, s, s2;
     unsigned bad = 0;
+    if (nseeds > 8)
+        return 0x80u;                  /* the judge's own limit, refused */
     for (nt = 2; nt <= 64; nt++) {
         uint64_t ever = 0;
         const uint64_t all =
             nt == 64 ? ~(uint64_t)0 : (((uint64_t)1 << nt) - 1);
         for (s = 0; s < nseeds; s++) {
-            int moved = 0, differs = 0;
+            int moved = 0, differs = 0, distinct = 0;
             for (w = 0; w < 8; w++) {
+                size_t v;
+                int seen = 0;
                 f(nt, seeds[s], w, ord);
+                memcpy(waves[s][w], ord, nt * sizeof ord[0]);
                 for (j = 0; j < nt; j++)
                     if (ord[j] != j) {
                         moved = 1;
                         ever |= (uint64_t)1 << j;
                     }
-                if (w == 0)
-                    memcpy(first, ord, nt * sizeof ord[0]);
-                else if (memcmp(first, ord, nt * sizeof ord[0]))
+                if (w && memcmp(waves[s][0], ord, nt * sizeof ord[0]))
                     differs = 1;
+                for (v = 0; v < w; v++)
+                    if (!memcmp(waves[s][v], ord, nt * sizeof ord[0]))
+                        seen = 1;
+                distinct += !seen;
             }
             if (nt >= 4 && !moved)
                 bad |= 1u;
             if (nt >= 4 && !differs)
                 bad |= 2u;
+            if (nt >= 5 && distinct < 3)
+                bad |= 16u;
+            /* the first nt entries of each wave only: the rest hold an
+             * earlier count's or an earlier call's orders */
+            for (s2 = 0; nt >= 4 && s2 < s; s2++) {
+                int same = 1;
+                for (w = 0; same && w < 8; w++)
+                    same = !memcmp(waves[s][w], waves[s2][w],
+                                   nt * sizeof ord[0]);
+                if (same)
+                    bad |= 8u;
+            }
         }
         if (ever != all)
             bad |= 4u;
@@ -1176,6 +1227,12 @@ int main(void)
             static const uint64_t seeds[5] = {1u, 7u, 12345u,
                                               0x8000000000000000ull,
                                               0xFFFFFFFFFFFFFFFFull};
+            /* ...and two that share low bits with them, so a seed read
+             * through too few of its bits gives two seeds one placement */
+            static const uint64_t seeds7[7] = {1u, 7u, 12345u,
+                                               0x8000000000000000ull,
+                                               0xFFFFFFFFFFFFFFFFull,
+                                               0x10001u, 0x700000007ull};
             size_t ord[64], ord2[64], nt, w, j, s, moved = 0, bad = 0;
             for (nt = 1; nt <= 64; nt++)
                 for (w = 0; w < 8; w++) {
@@ -1208,30 +1265,45 @@ int main(void)
              * moved all pass). */
             {
                 const unsigned judged = judge_tile_order(cft_tile_order,
-                                                         seeds, 5);
-                CHECK(!judged, "cft_tile_order under the five seeds:%s%s%s",
+                                                         seeds7, 7);
+                CHECK(!judged, "cft_tile_order under the seven seeds:%s%s%s%s%s",
                       (judged & 1u) ? " a seed moved no task at some tile "
                                       "count;" : "",
                       (judged & 2u) ? " a seed gave all eight waves one "
                                       "order;" : "",
                       (judged & 4u) ? " a position never moved off its "
-                                      "tile" : "");
-                CHECK(judge_tile_order(order_low32, seeds, 5) & 1u,
+                                      "tile;" : "",
+                      (judged & 8u) ? " two seeds gave one placement;" : "",
+                      (judged & 16u) ? " a seed's waves held fewer than "
+                                       "three orders" : "");
+                CHECK(judge_tile_order(order_low32, seeds7, 7) & 1u,
                       "NEGATIVE CONTROL: a seed read through its low 32 bits "
                       "(2^63 the identity) passed");
-                CHECK(judge_tile_order(order_one_wave, seeds, 5) & 2u,
+                CHECK(judge_tile_order(order_one_wave, seeds7, 7) & 2u,
                       "NEGATIVE CONTROL: every wave one order passed");
-                CHECK(judge_tile_order(order_last_stays, seeds, 5) & 4u,
+                CHECK(judge_tile_order(order_last_stays, seeds7, 7) & 4u,
                       "NEGATIVE CONTROL: a shuffle that never moves the last "
                       "tile passed");
+                CHECK(judge_tile_order(order_all_seed1, seeds7, 7) & 8u,
+                      "NEGATIVE CONTROL: every non-zero seed one placement "
+                      "passed");
+                CHECK(judge_tile_order(order_first_wave, seeds7, 7) & 16u,
+                      "NEGATIVE CONTROL: only the first wave shuffled "
+                      "passed");
+                CHECK(judge_tile_order(order_two_waves, seeds7, 7) & 16u,
+                      "NEGATIVE CONTROL: two orders alternating passed");
+                CHECK(judge_tile_order(order_low16, seeds7, 7) & 8u,
+                      "NEGATIVE CONTROL: a seed read through its low 16 bits "
+                      "passed");
                 if (!bad && moved && !judged)
                     printf("  tile order: 64 tile counts x 8 waves, seed 0 "
                            "the identity, five seeds' orders each a "
                            "permutation and repeatable, %lu tasks moved; "
-                           "every seed moves tasks and varies its waves, "
-                           "every position moves; an order naming a tile "
-                           "twice, a 32-bit seed, one order for every wave "
-                           "and a last tile that never moves are refused\n",
+                           "under seven seeds every seed moves tasks and "
+                           "varies its waves over three orders or more, no "
+                           "two seeds share a placement, every position "
+                           "moves; an order naming a tile twice and seven "
+                           "wrong shuffles are refused\n",
                            (unsigned long)moved);
             }
         }

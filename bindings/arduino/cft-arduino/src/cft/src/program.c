@@ -829,6 +829,12 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
     if (!dev || !image || !out)
         return CFT_ERR_INVALID_ARGUMENT;
     *out = NULL;
+    /* The image is read here, on the host: a resident buffer's device
+     * bytes come home first (softfloat.h). Until 2026-09-26 nothing in
+     * this file brought anything home (verifier-V8, N2). */
+    st = (cft_status)cft_host_in(dev, image, bytes);
+    if (st != CFT_OK)
+        return st;
     if (bytes < SEQ_HEADER_BYTES)
         return CFT_ERR_ARTIFACT;
 
@@ -1647,6 +1653,19 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
         return CFT_ERR_INVALID_ARGUMENT;
     }
 
+    /* The bank is read on the host - staged to the tile below, or
+     * decoded by the software executor - so a resident buffer's device
+     * bytes come home first (softfloat.h). Until 2026-09-26 a bank a run
+     * had computed on the device was staged from the stale mirror, with
+     * CFT_OK (verifier-V8, N2). The streams, the scratch block, the
+     * tables and the mask are the backend's to bind or bring home. */
+    {
+        const cft_status hs =
+            (cft_status)cft_host_in(prog->dev, bank, bank_bytes);
+        if (hs != CFT_OK)
+            return hs;
+    }
+
 #if defined(CFT_ENABLE_XRT) || !defined(CFT_NO_REMOTE)
     /* The device runs the program if the device is where it was
      * loaded. Everything above this line is argument checking that
@@ -2223,6 +2242,10 @@ CFT_API cft_status cft_program_digest(cft_program *prog,
      * bank the program could not have run is a name for nothing, and a
      * program that has two ways to be digested has no name at all. */
     st = seq_check_bank(prog, bank, bank_bytes, "cft_program_digest");
+    if (st != CFT_OK)
+        return st;
+    /* read on the host, as the run's is (seq_program_run) */
+    st = (cft_status)cft_host_in(prog->dev, bank, bank_bytes);
     if (st != CFT_OK)
         return st;
     /* The IMAGE bytes, not the parsed form - the same reason the image

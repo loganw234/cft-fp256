@@ -3035,7 +3035,13 @@ CFT_API void *cft_buffer_data(cft_buffer *buf)
  * cannot read another tile's memory, so "publish" would be four
  * transfers of everything - and then pushing the right windows again
  * at the first run. So the transfer happens once, at the first use,
- * and this call is free and always safe to make. */
+ * and this call costs nothing.
+ *
+ * It is REFUSED, by name and changing nothing, on a buffer holding a
+ * run's results the caller has not read back (Logan's rule, 2026-09-26;
+ * backend_xrt.cpp says why no guess is safe): read it back first. The
+ * software backend has no device copy to disagree with its mirror, and
+ * accepts. */
 CFT_API cft_status cft_buffer_to_device(cft_buffer *buf)
 {
     if (!buf)
