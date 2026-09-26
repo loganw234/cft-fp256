@@ -133,10 +133,12 @@ divergence.
 
 **The XRT=1 host build carries exactly two warnings, both known
 (2026-09-23).** A clean `make -C host XRT=1 all` on amd-arc-box (XRT
-2.19.194) gives `tools/cft_resident.cpp:255` and `:256`,
+2.19.194) gives `tools/cft_resident.cpp:264` and `:265`,
 `-Wdeprecated-declarations` on `xrt::kernel::read_register()` for a kernel
-XRT manages. The "warning-free as of 2026-09-12" this entry used to claim
-was measured at `f636cf3`, three hours before `f192bf0` put
+XRT manages (they were :255 and :256 until 3344e68 put a nine-line note
+above them; measured at 3344e68 on 2026-09-25). The "warning-free as of
+2026-09-12" this entry used to claim was measured at `f636cf3`, three
+hours before `f192bf0` put
 `cft-resident` into `all`. The `cft-serve.c` truncation fixed that day
 stays fixed. Treat a third warning as new.
 
