@@ -231,21 +231,27 @@ behaviour, so that only a nonlinear state tells the two apart; from the
 arm's states it landed at least 3 x 10^7 times outside the bound at fp64
 and 9 x 10^62 at fp256 (2026-09-25), and the gate prints each ratio. The
 arm's code is held apart from the mirror's, the generator's and the
-executors' in `check.py` itself - its top level and its top-level blocks.
+executors' in `check.py` itself - its top level and its top-level blocks,
+with a census, by a walk of its own, that every def, class and
+assignment the file makes there is one the rules' walk records.
 Following what its verdict reaches by name, by an attribute of the same
-name, or handed to it as a value by the code that calls it, it may reach
-none of them, and no definition may be reached both by it and by them
-that way, whatever it is called: a helper shared under a new name once
-passed a wrong Lorenz-63 through the whole gate, and so did the same
-helper handed to the arm by its caller. Both rules read `check.py` only,
-without running it: a helper in another module, a name built at run
-time, a copy of the mirror's code, or a value that reaches the call
-through the calling function's own parameters or through a local a call
-computed passes them. The bank is held the same way round: the
-value in each slot against the definition of the name the SOURCE gives
-that slot, so the parameters cannot be transposed inside the generator's
-bank list, or the source's `.const` lines moved, without a failure. The
-300-digit arm needs mpmath; without it its claim and its control each
+name, or handed to it as a value by the code that calls it - through
+locals, aliases, conditionals, containers and tables, and what the file
+puts into a table - it may reach none of them, and no definition may be
+reached both by it and by them that way, whatever it is called: a
+helper shared under a new name once passed a wrong Lorenz-63 through
+the whole gate, and so, later, did the same helper handed to the arm by
+its caller, directly and then through a conditional, a table, an alias
+or a registry. Both rules read `check.py` only, without running it;
+what their walk does not follow passes them, and `check.py` names the
+shapes known to pass - among them a helper in another module, a name
+built at run time, a copy of the mirror's code, a value the calling
+function is itself handed by its own caller, and a local a call
+computed. The bank is held the same way round: the value in each slot
+against the definition of the name the SOURCE gives that slot, so the
+parameters cannot be transposed inside the generator's bank list, or
+the source's `.const` lines moved, without a failure. The 300-digit arm
+needs mpmath; without it its claim and its control each
 say SKIP and why. The textbook arm needs only the standard library.
 
 Each row's numbers - the state size, the steps a segment, the census,

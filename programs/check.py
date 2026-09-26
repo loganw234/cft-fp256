@@ -47,14 +47,16 @@ things, in this order, and stops at the first failure:
    watches. The textbook arm's code is held apart from what it judges
    as well (check_textbook_independence). Within this file - its top
    level and the blocks of its top-level if, try, with, for, while and
-   match statements - nothing its verdict reaches is the mirror, the
-   generator or an executor, and no definition is reached both by its
-   verdict and by them, whether by name, by an attribute of the same
-   name, or handed as a value to a call of either side's code. What
-   those rules cannot see - code in another module, a name built at run
-   time, a copy, a value handed through the calling function's own
-   parameters or a local computed by a call - the comment above them
-   says.
+   match statements, a census holding the walk to every def, class,
+   assignment and match capture the file makes there - nothing its
+   verdict reaches is the mirror, the generator or an executor, and no
+   definition is reached both by its verdict and by them: reached by
+   name, by an attribute of the same name, or handed as a value to a
+   call of either side's code, through the locals, aliases,
+   conditionals, containers and tables the comment above those rules
+   defines. That comment also names the shapes known to pass them - code
+   in another module, a name built at run time and a copy of the
+   mirror's code among them.
 
 Revision 3's rows have two arms and they are not the same claim. The
 STATIC arm - constants against their derivation, the header against
@@ -2556,36 +2558,52 @@ def _tb_verdict(base, fmt, P, h, nstate, s_tb, runs):
 # executors. Two rules, over this file's own source read as a syntax
 # tree. A DEFINITION is a function, a class or an assignment this file
 # makes at module level - at its top level, or inside a top-level if,
-# try, with, for, while or match block at any depth. (verifier-V5 hid a
+# try, with, for, while or match block at any depth (verifier-V5 hid a
 # helper in such a block, N6a, and bound a second instance of this
-# module's ode_step in another, N6c, where the walk did not look: it
-# followed 12 definitions of 19 without a word.) An import is not one -
-# what it brings in is code outside this file. A side's REACH is every
-# definition reached from its roots, and from what it reaches in turn:
+# module's ode_step in another, N6c). An import is not one: what it
+# brings in is code outside this file. A module-level table also holds
+# what the file puts into it - `X[k] = v`, `X.a = v`, or a statement
+# `X.m(v)` such as X.update(v) - at module level, or inside a function or
+# class that binds no X of its own (verifier-V5's M5). A side's REACH is
+# every definition reached from its roots, and from what it reaches in
+# turn:
 #
 #   by name       a definition loads the name;
 #   by attribute  a definition reads an attribute of the same name, so
 #                 sys.modules[__name__].x and a second instance's .x are
 #                 x (verifier-V5's N6b, O1);
 #   handed        it is handed as a value to a call of the side's code,
-#                 from anywhere in this file: a function or a table
-#                 handed whole, a class or an instance of one, a lambda
+#                 from anywhere in this file (verifier-V5's N7): what a
+#                 call's arguments hold - a function or table handed
+#                 whole, a class or an instance of one (a class the
+#                 calling function defines among them), a lambda
 #                 (everything it names), what a wrapper such as
-#                 functools.partial is given, a table indexed (what the
-#                 table names), or a local bound to one of these by an
-#                 alias, a lambda, a nested def or class, an instance or
-#                 a table entry. What a call computes before it hands
-#                 anything over - a function's result, a number read
-#                 from a table - is data, not a definition handed; and a
-#                 local a call computed is followed no further, for the
-#                 same reason (verifier-V5's N7: check_ode handing a
-#                 generic textbook arm the helper ode_step calls).
+#                 functools.partial is given, every part of a
+#                 conditional (`a if c else b`, `a or b`) and every
+#                 member of a container, and a table's entry when it is
+#                 indexed: for a module-level table, what the table
+#                 names; for a local or literal one, the entry itself,
+#                 and an entry that names a function or class is that
+#                 function or class (verifier-V5's M1-M3). A local is
+#                 what it is bound to - a parameter's default among that
+#                 - and what its function puts into it (a subscript, an
+#                 attribute, a method-call statement), when that can
+#                 hold code: a name, an attribute, a lambda, a def or
+#                 class, an instance, a table's entry, or a conditional
+#                 or container any part of which can. A call is a call
+#                 of what its callee holds: through a local, a
+#                 module-level alias or a table's entry, the definition
+#                 it names (verifier-V5's M4). What a call computes
+#                 before it hands anything over - a function's result, a
+#                 number read from a table - is data, not a definition
+#                 handed, and so is a local a call computed: it is
+#                 followed no further.
 #
 # The verdict's roots are _TB_ROOTS; the implementations' are the
 # _TB_FORBIDDEN names this file defines.
 #
 #   named   no forbidden name may be in the verdict's reach - loaded,
-#           read as an attribute, or handed to it.
+#           read as an attribute, or handed to it, whole or indexed.
 #   shared  no definition may be in both reaches, whatever it is called:
 #           a function, a class, or data such as a coefficient table. A
 #           helper shared under a new name passed a wrong Lorenz-63
@@ -2597,26 +2615,34 @@ def _tb_verdict(base, fmt, P, h, nstate, s_tb, runs):
 #           number read from a table is data), and by no implementation,
 #           so the verdict may read it as well.
 #
-# A census comes first: every function and class this file defines
-# outside a function or class - found by a walk of its own - must be one
-# the recorder holds, so that a place the recorder does not look is
-# named rather than passed over. It counts functions and classes, not
-# assignments.
+# A census comes first: every name this file binds at module level - by
+# a def, a class, an assignment, a for, a with, a walrus or a match
+# pattern, outside any function, class or lambda, found by a walk of its
+# own that shares no code with the rules' walk - must be a definition the
+# rules' walk records, a def or a class as one, so that a place the walk
+# does not look is named rather than passed over (verifier-V5's B3b: the
+# rules' walk narrowed to the top level passed the whole gate, with N6c's
+# second instance bound in a top-level try beside it). The walk never
+# records a walrus or a match capture, so the census refuses any at
+# module level.
 #
 # The shared-error controls in check_ode catch the arm computing through
 # the mirror by what it computes; these name it by the code's shape, and
 # see what those cannot - a helper that carries an error the controls do
 # not, a second instance of this module whose switch no control sets, or
-# the generator's own default output taken as the reference. What neither
-# rule sees: code outside this file (a helper in another module both
-# import, the generator's source, the golden model's); a name built at
-# run time (globals()[...], getattr with a string); a COPY of the
-# mirror's code under new names; a value handed through a parameter of
-# the calling function, from its own caller; a local a call computed,
-# such as functools.partial(helper) put in a variable first, or a
-# factory function's result; an instance made through a table or an
-# attribute rather than by a class's name; a definition made from inside
-# a function (global) or by exec, setattr or a walrus; and whether
+# the generator's own default output taken as the reference. What the
+# walk does not follow, neither rule sees. The shapes known to pass:
+# code outside this file (a helper in another module both import, the
+# generator's source, the golden model's); a name built at run time
+# (globals()[...], getattr with a string); a COPY of the mirror's code
+# under new names; a value handed through a parameter of the calling
+# function by its own caller (verifier-V5's S4; a default is followed);
+# a local a call computed, such as functools.partial(helper) put in a
+# variable first, or a factory function's result; an instance made
+# through a table or an attribute rather than by a class's name; a
+# definition made from inside a function (global) or by exec or setattr;
+# a call made through an attribute whose name is not the callee's own,
+# such as a class attribute holding it (obj.alias(...)); and whether
 # check_ode's claim calls _tb_verdict at all (verifier-V5's O16).
 # Only review guards against those. The attribute rule is broad on
 # purpose: an attribute read that merely shares a definition's name is
@@ -2634,14 +2660,14 @@ _TB_FORBIDDEN = frozenset((
     "mpmath"))
 
 # The rules' controls: each a small module whose definitions replace this
-# file's own before the same walk, the rule that must refuse it, and what
-# the walk must then report - for "named", the tail of the path to the
-# forbidden name; for "shared", the definitions in both reaches, and the
-# kind the message gives them. Each replaces _tb_step, which _tb_refs
-# calls, or hands a value to _tb_verdict, rather than touching anything
-# deeper in the arm, so that a control still applies when the arm's
-# insides change. A probe that replaces a definition this file no longer
-# has is named stale, not run.
+# file's own before the same walk (_walk), the rule that must refuse it,
+# and what the walk must then report - for "named", the forbidden name
+# and the tail of the path to it; for "shared", the one definition in
+# both reaches and the kind the message gives it. Each replaces _tb_step,
+# which _tb_refs calls, or hands a value to _tb_verdict, rather than
+# touching anything deeper in the arm, so that a control still applies
+# when the arm's insides change. A probe that replaces a definition this
+# file no longer has is named stale, not run.
 _TB_PROBE_SHARED = """
 def ode_step(base, o, K, s, steps, detuned=False):
     return _tb_probe_rhs(o, K, s)
@@ -2658,9 +2684,60 @@ if True:
     except NameError:
         pass
 """ + _TB_PROBE_SHARED
+# The census's control: a def and every kind of assignment the walk
+# records, in top-level blocks - plain, unpacked with a star, annotated, a
+# for's and a with's - and a walrus and a match capture at the top level,
+# which the walk never records.
+_TB_PROBE_CENSUS = """
+if True:
+    try:
+        def _tb_probe_def():
+            pass
+    except NameError:
+        _tb_probe_data = None
+        _tb_probe_a, *_tb_probe_b = 1, 2
+        _tb_probe_ann: int = 1
+        for _tb_probe_i in ():
+            pass
+        with open(__file__) as _tb_probe_w:
+            pass
+(_tb_probe_walrus := 1)
+match 1:
+    case _tb_probe_case:
+        pass
+"""
+_TB_CENSUS_BLIND = ["_tb_probe_a", "_tb_probe_ann", "_tb_probe_b",
+                    "_tb_probe_case", "_tb_probe_data", "_tb_probe_def",
+                    "_tb_probe_i", "_tb_probe_w", "_tb_probe_walrus"]
+_TB_CENSUS_SEEN = ["_tb_probe_case", "_tb_probe_walrus"]
+# A coefficient table the mirror's step reads, for a probe that shares
+# data rather than a function.
+_TB_PROBE_COEFFS = """
+_tb_probe_coeffs = (1, 2, 2, 1)
+
+
+def ode_step(base, o, K, s, steps, detuned=False):
+    return _tb_probe_coeffs
+"""
+
+
+def _tb_handing(body, rhs, callee="_tb_verdict", params="",
+                shared=_TB_PROBE_SHARED):
+    """A probe's source: the textbook step generic over its right-hand
+    side, what ode_step shares (`shared`), and a caller with `params`
+    beside the verdict's own that runs `body` (lines of a function) and
+    hands `rhs` to `callee`."""
+    return ("\ndef _tb_step(base, P, h, Y, rhs=None):\n    return rhs(Y)\n"
+            "\n\ndef _tb_probe_caller(base, fmt, P, h, nstate, s_tb, "
+            f"runs{params}):\n" + "".join(f"    {line}\n" for line in body) +
+            f"    return {callee}(base, fmt, P, h, nstate, s_tb, runs,\n"
+            f"        rhs={rhs})\n" + shared)
+
+
+_TB_SHARED_RHS = ("_tb_probe_rhs", "a function")
 _TB_PROBES = (
     ("_tb_step re-pointed at ode_step through a helper", "named",
-     ("_tb_step", "_tb_probe_hop", "ode_step"), """
+     ("ode_step", ("_tb_step", "_tb_probe_hop", "ode_step")), """
 def _tb_step(base, P, h, Y):
     return _tb_probe_hop(base, Y)
 
@@ -2669,52 +2746,122 @@ def _tb_probe_hop(base, Y):
     return ode_step(base, None, None, Y, 1)
 """),
     ("_tb_step computing through a second instance of this module "
-     "(verifier-V5's O1)", "named", ("_tb_step", ".ode_step"), """
+     "(verifier-V5's O1)", "named", ("ode_step", ("_tb_step", ".ode_step")),
+     """
 def _tb_step(base, P, h, Y):
     import importlib
     return importlib.import_module("check").ode_step(base, None, None, Y,
                                                      1)
 """),
     ("one helper for the textbook step and ode_step alike (verifier-V5's "
-     "O2a)", "shared", ("_tb_probe_rhs", "a function"), """
+     "O2a)", "shared", _TB_SHARED_RHS, """
 def _tb_step(base, P, h, Y):
     return _tb_probe_rhs(None, P, Y)
 """ + _TB_PROBE_SHARED),
     ("that helper handed to a generic textbook arm by its caller "
-     "(verifier-V5's N7)", "shared", ("_tb_probe_rhs", "a function"), """
-def _tb_step(base, P, h, Y, rhs=None):
-    return rhs(Y)
-
-
-def _tb_probe_caller(base, fmt, P, h, nstate, s_tb, runs):
-    return _tb_verdict(base, fmt, P, h, nstate, s_tb, runs,
-                       rhs=_tb_probe_rhs)
-""" + _TB_PROBE_SHARED),
+     "(verifier-V5's N7)", "shared", _TB_SHARED_RHS,
+     _tb_handing([], "_tb_probe_rhs")),
     ("that helper handed inside a lambda, through a local lambda and a "
-     "local alias", "shared", ("_tb_probe_rhs", "a function"), """
-def _tb_step(base, P, h, Y, rhs=None):
-    return rhs(Y)
-
-
-def _tb_probe_caller(base, fmt, P, h, nstate, s_tb, runs):
-    f = _tb_probe_rhs
-    g = lambda Y: f(None, P, Y)
-    return _tb_verdict(base, fmt, P, h, nstate, s_tb, runs,
-                       rhs=lambda Y: g(Y))
-""" + _TB_PROBE_SHARED),
-    ("that helper handed out of a table, indexed", "shared",
-     ("_tb_probe_rhs", "a function"), """
+     "local alias", "shared", _TB_SHARED_RHS,
+     _tb_handing(["f = _tb_probe_rhs", "g = lambda Y: f(None, P, Y)"],
+                 "lambda Y: g(Y)")),
+    ("that helper handed through a local conditional with a None branch "
+     "(verifier-V5's M1)", "shared", _TB_SHARED_RHS,
+     _tb_handing(['tb_rhs = _tb_probe_rhs if base == "l63" else None'],
+                 "tb_rhs")),
+    ("that helper handed through a local `or` (a default)", "shared",
+     _TB_SHARED_RHS,
+     _tb_handing(['tb_rhs = P.get("rhs") or _tb_probe_rhs'], "tb_rhs")),
+    ("that helper handed out of a local container beside a number, "
+     "indexed (verifier-V5's M2)", "shared", _TB_SHARED_RHS,
+     _tb_handing(['tb_cfg = {"rhs": _tb_probe_rhs, "digits": 17}'],
+                 'tb_cfg["rhs"]')),
+    ("that helper handed out of a local table, indexed (verifier-V5's "
+     "M3)", "shared", _TB_SHARED_RHS,
+     _tb_handing(['tb_table = {"l63": _tb_probe_rhs, "l96": '
+                  '_tb_probe_rhs}'], "tb_table[base]")),
+    ("that helper handed out of a literal table of tables, indexed twice",
+     "shared", _TB_SHARED_RHS,
+     _tb_handing([], '{"l63": {"rhs": _tb_probe_rhs}}[base]["rhs"]')),
+    ("that helper put into a local table by subscript, then handed out of "
+     "it", "shared", _TB_SHARED_RHS,
+     _tb_handing(["tb_table = {}", "tb_table[base] = _tb_probe_rhs"],
+                 "tb_table[base]")),
+    ("that helper put into a local table by a method call's keyword, then "
+     "handed out of it", "shared", _TB_SHARED_RHS,
+     _tb_handing(["tb_table = {}", "tb_table.update(l63=_tb_probe_rhs)"],
+                 "tb_table[base]")),
+    ("that helper handed through a local alias of _tb_verdict "
+     "(verifier-V5's M4)", "shared", _TB_SHARED_RHS,
+     _tb_handing(["verdict = _tb_verdict"], "_tb_probe_rhs",
+                 callee="verdict")),
+    ("that helper handed through a parameter's default", "shared",
+     _TB_SHARED_RHS,
+     _tb_handing([], "tb_rhs", params=", tb_rhs=_tb_probe_rhs")),
+    ("that helper handed through a keyword-only parameter's default",
+     "shared", _TB_SHARED_RHS,
+     _tb_handing([], "tb_rhs", params=", *, tb_rhs=_tb_probe_rhs")),
+    ("a coefficient table the mirror reads, handed out of a local table "
+     "through a conditional and an `or`, indexed", "shared",
+     ("_tb_probe_coeffs", "data"),
+     _tb_handing(['tb_t = {"c": _tb_probe_coeffs}', "tb_u = {}"],
+                 '((tb_t if base else None) or tb_u)["c"]',
+                 shared=_TB_PROBE_COEFFS)),
+    ("that helper handed through a local alias of _tb_verdict read as an "
+     "attribute of this module", "shared", _TB_SHARED_RHS,
+     _tb_handing(["import sys",
+                  "verdict = sys.modules[__name__]._tb_verdict"],
+                 "_tb_probe_rhs", callee="verdict")),
+    ("that helper handed through a module-level alias of _tb_verdict",
+     "shared", _TB_SHARED_RHS, """
+_tb_probe_verdict = _tb_verdict
+""" + _tb_handing([], "_tb_probe_rhs", callee="_tb_probe_verdict")),
+    ("that helper handed to _tb_verdict called out of a module-level "
+     "table", "shared", _TB_SHARED_RHS, """
+_tb_probe_calls = {"verdict": _tb_verdict}
+""" + _tb_handing([], "_tb_probe_rhs", callee='_tb_probe_calls["verdict"]')),
+    ("that helper inside an instance of a class the caller defines",
+     "shared", _TB_SHARED_RHS,
+     _tb_handing(["class Rhs:", "    def __call__(self, Y):",
+                  "        return _tb_probe_rhs(None, None, Y)"], "Rhs()")),
+    ("that helper handed out of a module-level table, indexed", "shared",
+     _TB_SHARED_RHS, """
 _tb_probe_table = {"lorenz63-rk4": _tb_probe_rhs}
+""" + _tb_handing([], "_tb_probe_table[base]")),
+    ("that helper put into a module-level registry by .update() "
+     "(verifier-V5's M5)", "shared", _TB_SHARED_RHS, """
+_tb_probe_reg = {}
+_tb_probe_reg.update({"lorenz63-rk4": _tb_probe_rhs})
 
 
-def _tb_step(base, P, h, Y, rhs=None):
-    return rhs(Y)
-
-
-def _tb_probe_caller(base, fmt, P, h, nstate, s_tb, runs):
-    return _tb_verdict(base, fmt, P, h, nstate, s_tb, runs,
-                       rhs=_tb_probe_table[base])
+def _tb_step(base, P, h, Y):
+    return _tb_probe_reg[base](None, P, Y)
 """ + _TB_PROBE_SHARED),
+    ("that helper put into a module-level registry by subscript "
+     "(verifier-V5's M5a)", "shared", _TB_SHARED_RHS, """
+_tb_probe_reg = {}
+_tb_probe_reg["lorenz63-rk4"] = _tb_probe_rhs
+
+
+def _tb_step(base, P, h, Y):
+    return _tb_probe_reg[base](None, P, Y)
+""" + _TB_PROBE_SHARED),
+    ("that helper put into a module-level registry from inside a function "
+     "neither side reaches", "shared", _TB_SHARED_RHS, """
+_tb_probe_reg = {}
+
+
+def _tb_probe_install():
+    _tb_probe_reg["lorenz63-rk4"] = _tb_probe_rhs
+
+
+def _tb_step(base, P, h, Y):
+    return _tb_probe_reg[base](None, P, Y)
+""" + _TB_PROBE_SHARED),
+    ("an entry of the generator's table handed to the verdict", "named",
+     ("gen_odes", ("_tb_probe_caller hands what gen_odes holds to "
+                   "_tb_verdict",)),
+     _tb_handing([], "gen_odes.GENERATORS[base]")),
     ("an instance of a class ode_step also uses, handed to the textbook "
      "arm", "shared", ("_tb_probe_ops", "a class"), """
 class _tb_probe_ops:
@@ -2735,10 +2882,10 @@ def _tb_probe_caller(base, fmt, P, h, nstate, s_tb, runs):
                        ops=_tb_probe_ops())
 """),
     ("the shared helper's user defined in a try inside a top-level if "
-     "(verifier-V5's N6a, a level deeper)", "shared",
-     ("_tb_probe_rhs", "a function"), _TB_PROBE_N6A),
+     "(verifier-V5's N6a, a level deeper)", "shared", _TB_SHARED_RHS,
+     _TB_PROBE_N6A),
     ("the second instance used inside a top-level try (verifier-V5's "
-     "N6c)", "named", ("_tb_step", ".ode_step"), """
+     "N6c)", "named", ("ode_step", ("_tb_step", ".ode_step")), """
 try:
     import importlib as _tb_probe_il
 
@@ -2749,7 +2896,7 @@ except ImportError:
     _tb_probe_il = None
 """),
     ("the shared helper read as an attribute of this module "
-     "(verifier-V5's N6b)", "shared", ("_tb_probe_rhs", "a function"), """
+     "(verifier-V5's N6b)", "shared", _TB_SHARED_RHS, """
 def _tb_step(base, P, h, Y):
     import sys
     return sys.modules[__name__]._tb_probe_rhs(None, P, Y)
@@ -2799,28 +2946,83 @@ def _module_statements(body, blocks):
             yield from _module_statements(c.body, blocks)
 
 
+def _owner(e):
+    """The name under a chain of subscripts and attributes - the
+    container `x[k].a` or `x.m` belongs to - or None."""
+    while isinstance(e, (ast.Subscript, ast.Attribute)):
+        e = e.value
+    return e.id if isinstance(e, ast.Name) else None
+
+
 def _stored(target):
-    """The names an assignment target binds."""
-    return [n.id for n in ast.walk(target) if isinstance(n, ast.Name)]
+    """-> ([names an assignment target binds], [containers it fills]):
+    `x = v` binds x; `x[k] = v` and `x.a = v` fill the container x, which
+    then holds v. The names in an index are read, not bound."""
+    bound, filled = [], []
+
+    def walk(t):
+        if isinstance(t, ast.Name):
+            bound.append(t.id)
+        elif isinstance(t, (ast.Tuple, ast.List)):
+            for e in t.elts:
+                walk(e)
+        elif isinstance(t, ast.Starred):
+            walk(t.value)
+        elif isinstance(t, (ast.Subscript, ast.Attribute)):
+            owner = _owner(t)
+            if owner:
+                filled.append(owner)
+    walk(target)
+    return bound, filled
+
+
+def _call_fill(stmt):
+    """(the container, what is put into it) for a statement that is a
+    method call on a container - `x.update(v)`, `x.append(v)` - or
+    None: the call's arguments, as one expression."""
+    if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)
+            and isinstance(stmt.value.func, ast.Attribute)):
+        return None
+    owner = _owner(stmt.value.func.value)
+    if owner is None:
+        return None
+    return owner, ast.Tuple(elts=list(stmt.value.args) +
+                            [k.value for k in stmt.value.keywords],
+                            ctx=ast.Load())
 
 
 def _local_binds(node):
-    """{name: [what it is bound to]} inside a function or class, nested
-    ones included: an expression, a nested function, class or lambda, or
-    None for a parameter or an import, whose value this file does not
-    show."""
-    binds = {}
+    """({name: [what it is bound to]}, {name: [what is put into it]})
+    for a function or class, nested ones included. A binding is an
+    expression, a nested function, class or lambda, a parameter's
+    default, or None for a value a caller passes, an import or an
+    exception, which this file does not show; what is put into a name
+    comes from `x[k] = v`, `x.a = v` or a statement `x.m(v)`. A name
+    filled here and bound nowhere in it is not a local: it is the
+    module's, and _code_map gives the module's definition what is put
+    into it."""
+    binds, fills = {}, {}
 
     def bind(target, value):
-        for n in _stored(target):
+        bound, filled = _stored(target)
+        for n in bound:
             binds.setdefault(n, []).append(value)
+        for n in filled:
+            fills.setdefault(n, []).append(value)
     for n in ast.walk(node):
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef,
                           ast.Lambda)):
-            for arg in (n.args.posonlyargs + n.args.args +
-                        n.args.kwonlyargs + [n.args.vararg, n.args.kwarg]):
+            a = n.args
+            positional = a.posonlyargs + a.args
+            defaults = ([None] * (len(positional) - len(a.defaults)) +
+                        list(a.defaults))
+            for arg, default in (list(zip(positional, defaults)) +
+                                 list(zip(a.kwonlyargs, a.kw_defaults)) +
+                                 [(a.vararg, None), (a.kwarg, None)]):
                 if arg is not None:
                     binds.setdefault(arg.arg, []).append(None)
+                    if default is not None:     # what a call may omit
+                        binds[arg.arg].append(default)
             if n is not node and not isinstance(n, ast.Lambda):
                 binds.setdefault(n.name, []).append(n)
         elif isinstance(n, ast.ClassDef) and n is not node:
@@ -2844,7 +3046,11 @@ def _local_binds(node):
             for alias in n.names:
                 binds.setdefault((alias.asname or alias.name)
                                  .split(".")[0], []).append(None)
-    return binds
+        else:
+            fill = _call_fill(n)
+            if fill:
+                fills.setdefault(fill[0], []).append(fill[1])
+    return binds, fills
 
 
 def _named_in(node):
@@ -2859,14 +3065,25 @@ def _named_in(node):
     return out
 
 
+_CONTAINERS = (ast.Tuple, ast.List, ast.Set, ast.Dict)
+
+
+def _members(v):
+    """What indexing a literal container may yield: a dict's values, the
+    others' elements."""
+    return v.values if isinstance(v, ast.Dict) else v.elts
+
+
 def _code_shaped(v, classes):
     """Can a local bound to `v` hold code - a name, an attribute, a
     lambda, a nested function or class, an instance of one of `classes`,
-    an entry of a table, or a container of these? A value a call computes,
-    or arithmetic, a comprehension or a literal makes, is data: a local
-    bound to one is not followed (in check_ode, whose locals are reused
-    for many things, following those tied every table the function reads
-    to the verdict)."""
+    an entry of a table, or a conditional or container ANY part of which
+    can (a None branch or a number beside the code is no reason to stop:
+    verifier-V5's M1, M2)? A value a call computes, or arithmetic, a
+    comprehension or a literal makes, is data: a local bound to one is
+    not followed (in check_ode, whose locals are reused for many things,
+    following those tied every table the function reads to the
+    verdict)."""
     if isinstance(v, (ast.Name, ast.Attribute, ast.Lambda, ast.FunctionDef,
                       ast.AsyncFunctionDef, ast.ClassDef)):
         return True
@@ -2874,48 +3091,85 @@ def _code_shaped(v, classes):
         return isinstance(v.func, ast.Name) and v.func.id in classes
     if isinstance(v, (ast.Subscript, ast.Starred)):
         return _code_shaped(v.value, classes)
-    if isinstance(v, (ast.Tuple, ast.List, ast.Set)):
-        return all(_code_shaped(e, classes) for e in v.elts)
-    if isinstance(v, ast.Dict):
-        return all(_code_shaped(e, classes) for e in v.values)
+    if isinstance(v, _CONTAINERS):
+        return any(_code_shaped(e, classes) for e in _members(v))
     if isinstance(v, ast.IfExp):
-        return (_code_shaped(v.body, classes) and
+        return (_code_shaped(v.body, classes) or
                 _code_shaped(v.orelse, classes))
+    if isinstance(v, ast.BoolOp):
+        return any(_code_shaped(e, classes) for e in v.values)
     return False
 
 
-def _handed(exprs, binds, classes, memo):
+def _handed(exprs, local, classes, memo):
     """What the expressions `exprs` hand over when a call is given them:
-    module-level names, ".attr" for an attribute, and "[" + x for what
-    the table x names when it is indexed. A local resolves through those
-    of its bindings in `binds` that can hold code (_code_shaped), each
-    once (`memo`, one per definition; a local that depends on itself adds
-    nothing more). A call made on the way hands over its result, not its
-    callee, unless the callee is one of `classes` (an instance carries
+    module-level names, ".attr" for an attribute, and "[" + x for an
+    entry of the module-level table x (resolved by _entries_of, once the
+    whole file is known). `local` is _local_binds' (binds, fills) of the
+    definition the call is in: a local resolves through what it is bound
+    to and what is put into it, where that can hold code (_code_shaped),
+    each once (`memo`, one per definition; a local that depends on itself
+    adds nothing more). A local or literal table indexed hands its
+    entries themselves. A call made on the way hands over its result, not
+    its callee, unless the callee is one of `classes` (an instance carries
     its class) - but its arguments go on being read, since a wrapper
     (functools.partial) keeps what it is given."""
-    def local(name):
-        if name not in memo:
-            memo[name] = set()
+    binds, fills = local
+
+    def follow(name, how):
+        """The local `name` as a whole ("whole") or indexed ("entry")."""
+        key = (how, name)
+        if key not in memo:
+            memo[key] = set()
             got = set()
-            for v in binds[name]:
-                if v is None or not _code_shaped(v, classes):
-                    continue
-                if isinstance(v, (ast.FunctionDef, ast.AsyncFunctionDef,
-                                  ast.ClassDef, ast.Lambda)):
-                    got |= names(_named_in(v))
-                else:
-                    got |= expr(v)
-            memo[name] = got
-        return memo[name]
+            for v in binds.get(name, ()):
+                if v is not None and _code_shaped(v, classes):
+                    got |= whole(v) if how == "whole" else entries(v)
+            for v in fills.get(name, ()):
+                if _code_shaped(v, classes):
+                    got |= whole(v)
+            memo[key] = got
+        return memo[key]
+
+    def whole(v):
+        if isinstance(v, (ast.FunctionDef, ast.AsyncFunctionDef,
+                          ast.ClassDef, ast.Lambda)):
+            return names(_named_in(v))
+        return expr(v)
 
     def names(items):
         got = set()
         for s in items:
             if s[:1] != "." and s in binds:
-                got |= local(s)
+                got |= follow(s, "whole")
             else:
                 got.add(s)
+        return got
+
+    def entries(e):
+        """What indexing `e` yields: a local's entries, a module-level
+        table's as "[" + its name, a literal's members themselves, both
+        branches' of a conditional; anything else's as "[" + what it
+        hands (a table of tables indexed twice among that)."""
+        if isinstance(e, ast.Name):
+            if e.id in binds:
+                return follow(e.id, "entry")
+            return {"[" + e.id}
+        if isinstance(e, _CONTAINERS):
+            return exprs_of(_members(e))
+        if isinstance(e, ast.IfExp):
+            return entries(e.body) | entries(e.orelse)
+        if isinstance(e, ast.BoolOp):
+            got = set()
+            for v in e.values:
+                got |= entries(v)
+            return got
+        return {"[" + x for x in expr(e)}
+
+    def exprs_of(es):
+        got = set()
+        for e in es:
+            got |= expr(e)
         return got
 
     def expr(e):
@@ -2930,7 +3184,7 @@ def _handed(exprs, binds, classes, memo):
                 todo.extend(e.args)
                 todo.extend(k.value for k in e.keywords)
             elif isinstance(e, ast.Subscript):
-                got |= {"[" + x for x in expr(e.value)}
+                got |= entries(e.value)
             elif isinstance(e, ast.Name):
                 if isinstance(e.ctx, ast.Load):
                     got |= names([e.id])
@@ -2940,22 +3194,60 @@ def _handed(exprs, binds, classes, memo):
             else:
                 todo.extend(ast.iter_child_nodes(e))
         return got
-    out = set()
-    for e in exprs:
-        out |= expr(e)
-    return out
+    return exprs_of(exprs)
 
 
-def _code_map(tree, classes=(), blocks=True):
+def _callees(f, local, classes, memo):
+    """What a call's function may be: a name or an attribute's name as
+    written; through a local, or any other expression (a lambda, a table's
+    entry), what it holds - an attribute by its name, as when called
+    directly, and an entry of a module-level table x as "[x". _reach
+    resolves those tables, and a module-level alias, to what they name
+    (verifier-V5's M4: a local alias of _tb_verdict)."""
+    if isinstance(f, ast.Attribute):
+        return {f.attr}
+    if isinstance(f, ast.Name) and f.id not in local[0]:
+        return {f.id}
+    return {x.lstrip(".") for x in _handed([f], local, classes, memo)}
+
+
+def _record(d, node, local, classes):
+    """Add what `node` reads and the calls in it to the definition d. A
+    class `node` defines inside itself is a class there, as the module's
+    are everywhere."""
+    d.reads.update(_named_in(node))
+    classes = set(classes) | {n for n, vs in local[0].items()
+                              if any(isinstance(v, ast.ClassDef)
+                                     for v in vs)}
+    memo = {}
+    for n in ast.walk(node):
+        if isinstance(n, ast.Call):
+            handed = frozenset(_handed(
+                list(n.args) + [k.value for k in n.keywords], local,
+                classes, memo))
+            for callee in _callees(n.func, local, classes, memo):
+                d.calls.append((callee, handed))
+
+
+def _code_map(tree, classes, blocks):
     """{name: _Def} for every definition `tree` makes at module level
-    (_module_statements), and the calls in each with what they hand over.
-    `classes` are classes defined elsewhere (a probe's host file)."""
-    entries = []
+    (_module_statements, into top-level blocks when `blocks`), with what
+    each reads and the calls in it; and what the file puts into a
+    module-level table - `X[k] = v`, `X.a = v`, a statement `X.m(v)`, at
+    module level or inside a function or class that does not bind X -
+    joins X's reads. `classes` are classes defined elsewhere (a probe's
+    host file)."""
+    entries, fills = [], []
     for s in _module_statements(tree.body, blocks):
-        if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            entries.append((s.name, "a function", s, _local_binds(s)))
-        elif isinstance(s, ast.ClassDef):
-            entries.append((s.name, "a class", s, _local_binds(s)))
+        if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef,
+                          ast.ClassDef)):
+            local = _local_binds(s)
+            entries.append((s.name, "a class" if isinstance(s, ast.ClassDef)
+                            else "a function", s, local))
+            fills.extend((name, v) for name, vs in local[1].items()
+                         if name not in local[0] for v in vs)
+        elif _call_fill(s):
+            fills.append(_call_fill(s))
         else:
             pairs = []
             if isinstance(s, ast.Assign):
@@ -2970,71 +3262,134 @@ def _code_map(tree, classes=(), blocks=True):
             for target, value in pairs:
                 kind = ("a function" if isinstance(value, ast.Lambda)
                         else "data")
-                for name in _stored(target):
-                    entries.append((name, kind, value, {}))
+                bound, filled = _stored(target)
+                for name in bound:
+                    entries.append((name, kind, value, ({}, {})))
+                fills.extend((name, value) for name in filled)
     classes = set(classes) | {n for n, k, _v, _b in entries if k == "a class"}
     defs = {}
-    for name, kind, node, binds in entries:
+    for name, kind, node, local in entries:
         d = defs.get(name)
         if d is None:
             d = defs[name] = _Def(kind)
         elif kind != "data":
             d.kind = kind
-        d.reads.update(_named_in(node))
-        memo = {}
-        for n in ast.walk(node):
-            if isinstance(n, ast.Call):
-                f = n.func
-                callee = (f.id if isinstance(f, ast.Name) else
-                          f.attr if isinstance(f, ast.Attribute) else None)
-                if callee:
-                    d.calls.append((callee, frozenset(_handed(
-                        list(n.args) + [k.value for k in n.keywords], binds,
-                        classes, memo))))
+        _record(d, node, local, classes)
+    for name, node in fills:
+        if name in defs:
+            _record(defs[name], node, ({}, {}), classes)
     return defs
 
 
+def _walk(tree, classes=()):
+    """The one walk the rules use - for this file, for the census's
+    control and for every probe - so that where it looks cannot change
+    for one of them alone."""
+    return _code_map(tree, classes, True)
+
+
+# The nodes a match pattern binds a name with (Python 3.10 on).
+_MATCH_CAPTURES = tuple(getattr(ast, n) for n in
+                        ("MatchAs", "MatchStar", "MatchMapping")
+                        if hasattr(ast, n))
+
+
 def _census(tree):
-    """The functions and classes `tree` defines outside any function,
-    class or lambda - found by a walk of its own, so that a blind spot
-    of _module_statements shows as a difference."""
-    out = set()
+    """{name: kind} for every name `tree` binds outside any function,
+    class or lambda - "a function" or "a class" for a def or class
+    statement, "data" for a name an assignment, a for, a with or a walrus
+    stores, or a match pattern captures - found by a walk of its own that
+    shares no code with the rules' walk (_module_statements, _code_map,
+    _stored), so that a place that walk does not look shows as a
+    difference. An import binds no definition: what it brings in is code
+    outside this file."""
+    out = {}
 
     def visit(node, inside):
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
                                   ast.ClassDef)):
                 if not inside:
-                    out.add(child.name)
+                    out[child.name] = ("a class" if isinstance(
+                        child, ast.ClassDef) else "a function")
                 visit(child, True)
-            else:
-                visit(child, inside or isinstance(child, ast.Lambda))
+                continue
+            if not inside:
+                targets = []
+                if isinstance(child, ast.Assign):
+                    targets = child.targets
+                elif isinstance(child, (ast.AnnAssign, ast.AugAssign)):
+                    targets = [child.target] if child.value else []
+                elif isinstance(child, (ast.For, ast.AsyncFor)):
+                    targets = [child.target]
+                elif isinstance(child, (ast.With, ast.AsyncWith)):
+                    targets = [i.optional_vars for i in child.items
+                               if i.optional_vars is not None]
+                elif isinstance(child, ast.NamedExpr):
+                    targets = [child.target]
+                for target in targets:
+                    for n in ast.walk(target):
+                        if (isinstance(n, ast.Name) and
+                                isinstance(n.ctx, ast.Store)):
+                            out.setdefault(n.id, "data")
+                if isinstance(child, _MATCH_CAPTURES):
+                    name = (getattr(child, "name", None) or
+                            getattr(child, "rest", None))
+                    if name:
+                        out.setdefault(name, "data")
+            visit(child, inside or isinstance(child, ast.Lambda))
     visit(tree, False)
     return out
 
 
 def _census_gaps(tree, defs):
-    """What the census finds and `defs` (from _code_map) does not hold as
-    a function or a class."""
-    return sorted(n for n in _census(tree)
-                  if n not in defs or defs[n].kind == "data")
+    """What the census finds and `defs` (from a walk) does not hold -
+    at all, or, for a def or class, as one."""
+    return sorted(n for n, k in _census(tree).items()
+                  if n not in defs or (k != "data" and
+                                       defs[n].kind == "data"))
+
+
+def _entries_of(defs, item):
+    """What an entry of `item` may be, as items: for a module-level table
+    (data), what it names; for a function or class, itself - a local or
+    literal table reaches the walk already flattened to its entries, so
+    an entry that names a function is that function (verifier-V5's M3b,
+    a table of tables); for "[x", the entries of x's entries; for a name
+    this file does not define, itself."""
+    if item[:1] == "[":
+        out = set()
+        for e in _entries_of(defs, item[1:]):
+            out |= _entries_of(defs, e)
+        return out
+    bare = item.lstrip(".")
+    d = defs.get(bare)
+    if d is None or d.kind != "data":
+        return {bare}
+    return set(d.reads)
 
 
 def _reach(defs, roots, forbidden):
     """-> (the reach, {forbidden name: the path to it}, [root not
-    defined]): everything reached from `roots` by name, by attribute, or
-    handed to a call of something reached, from anywhere in `defs`,
-    until nothing more is. A path is a tuple of names; a handing reads
-    "caller hands x to callee"."""
+    defined], how each definition was reached): everything reached from
+    `roots` by name, by attribute, or handed to a call of something
+    reached - called by its own name, or through a module-level alias or
+    table that names it - from anywhere in `defs`, until nothing more is.
+    A path is a tuple of names; a handing reads "caller hands x to
+    callee". An indexed item whose innermost name is forbidden is a
+    hit."""
     missing = [r for r in roots if r not in defs]
     how = {r: (r,) for r in roots if r in defs}
-    hits, reach, todo = {}, set(), list(how)
+    hits, reach, todo, names = {}, set(), list(how), {}
 
     def consider(item, path):
         if item[:1] == "[":
-            for d in _indexed_defs(defs, item[1:]):
-                for r in sorted(defs[d].reads):
-                    consider(r, path + (r,))
+            base = item.lstrip("[.")
+            if base in forbidden:
+                hits.setdefault(base, path)
+                return
+            for e in sorted(_entries_of(defs, item[1:])):
+                consider(e, path + (e,))
             return
         bare = item.lstrip(".")
         if bare in forbidden:
@@ -3052,28 +3407,28 @@ def _reach(defs, roots, forbidden):
                 consider(r, how[name] + (r,))
         for caller in sorted(defs):
             for callee, handed in defs[caller].calls:
-                if callee in reach:
+                # What is called: the definition itself, and what a
+                # module-level alias or table ("[x") names.
+                if callee not in names:
+                    names[callee] = {callee} | {e.lstrip(".") for e in (
+                        _entries_of(defs, callee[1:] if callee[:1] == "["
+                                    else callee))}
+                called = sorted(names[callee] & reach)
+                shown = (callee if called == [callee] else
+                         f"{' or '.join(called)}, through "
+                         f"{callee.lstrip('[.')}")
+                if called:
                     for item in sorted(handed):
                         what = (f"what {item.lstrip('[')} holds"
                                 if item[:1] == "[" else item.lstrip("."))
                         consider(item, (f"{caller} hands {what} to "
-                                        f"{callee}",))
+                                        f"{shown}",))
         if not todo:
             return reach, hits, missing, how
 
 
-def _indexed_defs(defs, item):
-    """The definitions a handed "[x" stands for: those x names, where x
-    is a definition (or a further "[" - a table of tables)."""
-    if item[:1] == "[":
-        return {r.lstrip(".") for d in _indexed_defs(defs, item[1:])
-                for r in defs[d].reads if r.lstrip(".") in defs}
-    item = item.lstrip(".")
-    return {item} if item in defs else set()
-
-
 def _tb_independence(defs):
-    """Both rules over `defs` (_code_map) -> ([roots not defined],
+    """Both rules over `defs` (_walk) -> ([roots not defined],
     {forbidden name: path}, [definitions in both reaches], how many the
     verdict reaches, the implementations' roots, how the verdict reached
     each definition)."""
@@ -3104,27 +3459,32 @@ def check_textbook_independence():
     """The census, the two rules above over this file's own source, and
     their controls."""
     tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
-    defs = _code_map(tree)
+    defs = _walk(tree)
     gaps = _census_gaps(tree, defs)
     if gaps:
-        bad("textbook arm: independence", f"check.py defines "
-            f"{', '.join(gaps)} where the walk does not look, so neither "
-            f"rule can see into it")
+        bad("textbook arm: independence", f"check.py binds "
+            f"{', '.join(gaps)} at module level where the walk does not "
+            f"record it, so neither rule can see into it")
         return
     ok(f"textbook arm: the walk records every one of the "
-       f"{len(_census(tree))} functions and classes check.py defines "
-       f"outside a function or class, in its top-level blocks too")
-    probe = ast.parse(_TB_PROBE_N6A)
-    blind = _census_gaps(probe, _code_map(probe, blocks=False))
-    if blind != ["_tb_step"]:
+       f"{len(_census(tree))} names check.py binds at module level - defs, "
+       f"classes and assignments, in its top-level blocks too")
+    probe = ast.parse(_TB_PROBE_CENSUS)
+    blind = _census_gaps(probe, _code_map(probe, (), False))
+    seen = _census_gaps(probe, _walk(probe))
+    if (blind, seen) != (_TB_CENSUS_BLIND, _TB_CENSUS_SEEN):
         bad("textbook arm: NEGATIVE CONTROL FAILED TO FAIL",
-            f"the census, against a walk of the top level alone, did not "
-            f"name the _tb_step a top-level if's try defines (it named "
-            f"{blind})")
+            f"the census named {blind} against a walk of the top level "
+            f"alone and {seen} against the rules' walk; it must name "
+            f"{_TB_CENSUS_BLIND} - a def and every kind of assignment in "
+            f"top-level blocks, a walrus and a match capture - against the "
+            f"first, and {_TB_CENSUS_SEEN} against the second")
         return
-    ok("textbook arm: NEGATIVE CONTROL - a walk of the top level alone "
-       "misses the _tb_step a top-level if's try defines, and the census "
-       "names it")
+    ok("textbook arm: NEGATIVE CONTROL - against a walk of the top level "
+       "alone the census names a def and every kind of assignment in "
+       "top-level blocks (plain, starred, annotated, a for's, a with's), a "
+       "walrus and a match capture; against the rules' walk, the walrus and "
+       "the match capture alone", f"{len(_TB_CENSUS_BLIND)} names")
     missing, hits, shared, followed, impl, how = _tb_independence(defs)
     if missing or not impl:
         bad("textbook arm: independence",
@@ -3149,7 +3509,7 @@ def check_textbook_independence():
        f"called")
     classes = {n for n, d in defs.items() if d.kind == "a class"}
     for what, rule, want, source in _TB_PROBES:
-        replaced = _code_map(ast.parse(source), classes)
+        replaced = _walk(ast.parse(source), classes)
         stale = [d for d in replaced
                  if not d.startswith("_tb_probe") and d not in defs]
         if stale:
@@ -3161,8 +3521,9 @@ def check_textbook_independence():
         probed.update(replaced)
         _m, hits2, shared2, _n, _i, _how2 = _tb_independence(probed)
         if rule == "named":
-            got = hits2.get(want[-1].lstrip("."), ())
-            caught = got[-len(want):] == want
+            key, tail = want
+            got = hits2.get(key, ())
+            caught = got[-len(tail):] == tail
             said = " -> ".join(got)
         else:
             kinds = [probed[s].kind for s in shared2]
@@ -3350,9 +3711,10 @@ def check_ode(args, name, image, image_path, tmp):
         ("generator", gdoc.format(word=words), gdoc.format(word=wrong),
          "generator: its docstring does not say"))
     # Every mention is moved - a second, harmless mention of a number is
-    # no reason for the control to fail (verifier-V5's P3).
-    def moved_texts(changes):
-        out = dict(texts)
+    # no reason for the control to fail (verifier-V5's P3), and that is
+    # watched below.
+    def moved_texts(changes, start=None):
+        out = dict(texts if start is None else start)
         for where, was, now in changes:
             pat = _phrase_re(was)
             if was == now or not pat.search(out[where]):
@@ -3400,6 +3762,22 @@ def check_ode(args, name, image, image_path, tmp):
        f"count each one on, are each named; so are the row's ALU count "
        f"after a hyphen, and a phrase with a hyphen, then a letter, after "
        f"its end", " + ".join(str(c) for c in counts) + " problems")
+    # The move itself: the source's ALU phrase said a second time must be
+    # moved both times, or a page that says a number twice would turn the
+    # control red on a sound arm (verifier-V5's P3; at 98d7b05 a
+    # once-only move passed the gate, the texts saying each number once).
+    said = f"is {m['alu']} ALU"
+    twice = dict(texts, source=f"{texts['source']} So a step {said} "
+                               f"instructions long.")
+    moved3, missing = moved_texts([("source", said,
+                                    f"is {m['alu'] + 1} ALU")], twice)
+    if moved3 is None or _phrase_re(said).search(moved3["source"]):
+        bad(f"{name}: control", f"`{said}` said twice in the source was "
+            f"not moved both times ({missing or 'one left'}), so a page "
+            f"that says a number twice would fail the prose control")
+        return
+    ok(f"{name}: the prose control moves every mention - `{said}` said "
+       f"twice in the source is moved twice")
 
     # -- static --------------------------------------------------------------
     feats = set(img.features())
