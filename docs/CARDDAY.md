@@ -644,9 +644,15 @@ they were handed over. What only a card can still say:
     one-tile 4,000-step run needed about 110 s and poisoned the next leg
     - docs/VALIDATION.md).
   - **after any timeout, reload the image before trusting a result** -
-    load another xclbin, then this one (a load of the same image is a
-    no-op: "xclbin is already downloaded"). `journalctl -k` shows every
-    abandonment as `kds_del_cu_context: 1 outstanding command(s)`.
+    load another xclbin, then this one. A load of the same image is a
+    no-op, and it cures nothing: after the round's orphan every load was
+    logged "xclbin is already downloaded" until the reload at 12:05:26,
+    and the program set run through those loads was still wrong in the
+    same lanes (docs/VALIDATION.md, 2026-09-25; the journal excerpt is
+    `Data/runs/2026-09-25-ode-round/card-witness/journal-probe3-probe4.txt`,
+    gitignored).
+    `journalctl -k` shows every abandonment as `kds_del_cu_context: 1
+    outstanding command(s)`, and a real load as `Config end completed`.
   The witness's card leg makes one on purpose (an fp256 run on tile 1
   with `CFT_TIMEOUT_MS=5000`), requires the refusals while it runs and
   after it ends and no wrong answer anywhere, requires a witness-off

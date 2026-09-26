@@ -23,9 +23,20 @@ CFLAGS_SAN="-std=c99 -O1 -g -fno-omit-frame-pointer $SAN"
 mkdir -p bin
 cd ..
 
-SRC="src/bigint.c src/softfloat.c src/device.c src/divsqrt.c src/clause5.c \
-src/chars.c src/augmented.c src/mpfloat.c src/transcend.c src/program.c \
-src/reduce.c src/formatof.c src/conformance.c src/backend_remote.c"
+# The library's sources, asked of host/Makefile rather than copied here:
+# a hand list in this file missed src/sha256.c from 2026-09-08 until
+# 2026-09-25, so the tools could not link and nothing ran the lane to
+# notice (verifier-V7 - and f953f4c's message said this edit was made
+# when it was not).
+SRC=$(make -s --no-print-directory print-src) || {
+    echo "run_ckpt.sh: 'make print-src' failed; the library's source" \
+         "list comes from host/Makefile" >&2
+    exit 1
+}
+if [ -z "$SRC" ]; then
+    echo "run_ckpt.sh: 'make print-src' printed no sources" >&2
+    exit 1
+fi
 
 for t in collatz enclose mersenne orbits zoom; do
     out="fuzz/bin/cft-$t"

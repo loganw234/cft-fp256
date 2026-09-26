@@ -725,7 +725,12 @@ struct BufCopy {
     size_t   off    = 0;      /* first byte of the buffer this holds */
     size_t   real   = 0;      /* bytes of the caller's data in it */
     size_t   padded = 0;      /* bytes allocated: whole beats */
-    uint64_t gen    = 0;      /* the buffer generation it was filled at */
+    uint64_t gen    = 0;      /* CURRENT when it equals Buf::gen: its
+                               * bytes are the mirror's over its window -
+                               * filled from it, or flushed into it - and
+                               * nothing has changed the mirror under the
+                               * window since (buf_touched sets 0, which
+                               * is never current) */
     bool     live   = false;  /* the bo exists and the window means
                                * something */
     bool     dirty  = false;  /* a run wrote this window and the mirror
@@ -741,8 +746,11 @@ struct Buf {
     Dev                 *D = nullptr;
     uint8_t             *host = nullptr;   /* device.c owns this */
     size_t               bytes = 0;
-    /* Bumped every time the mirror becomes the truth. Starts at 1 so
-     * that a copy's zero-initialised `gen` can never be mistaken for
+    /* Moved only when the CALLER publishes the mirror
+     * (cftx_buffer_to_device), who may have written any of it. The
+     * library's own changes to the mirror - a flush, a host write - stale
+     * only the copies over the bytes they changed (buf_touched). Starts at
+     * 1 so that a copy's zero-initialised `gen` can never be mistaken for
      * current. */
     uint64_t             gen = 1;
     std::vector<BufCopy> copies;  /* tiles * CFT_ROLE_COUNT,
@@ -764,16 +772,91 @@ struct Buf {
     std::string          lost_why;
 };
 
+/* The mirror's bytes [lo, hi) no longer match what a device copy over
+ * them holds: a flush has just written one copy's bytes over them, or the
+ * host is about to write them or has just written them. Every copy whose
+ * window overlaps the range, other than `now`, stops being current (gen 0
+ * is never current: Buf::gen starts at 1). Copies elsewhere in the buffer
+ * keep their standing, because the bytes under their windows did not move
+ * - which is what lets one resident buffer carved into windows (streams,
+ * a deposit window, the counts beside them) keep its input copies across
+ * a run whose counts land on the host.
+ *
+ * Until 2026-09-25 three paths changed the mirror and told no copy -
+ * buf_bind's flush of a copy it was about to re-window, a collect writing
+ * a staged output into a resident buffer's mirror, and every entry point
+ * computed on the host - and a copy filled before was served as current:
+ * wrong answers with CFT_OK (verifier-V7). */
+void buf_touched(Buf &B, size_t lo, size_t hi, const BufCopy *now) noexcept
+{
+    for (auto &o : B.copies)
+        if (&o != now && o.off < hi && lo < o.off + o.real)
+            o.gen = 0;
+}
+
 /* Carry one copy's window home. The whole copy is synced and only the
  * real bytes are written into the mirror: the pad is beat padding this
- * file put there and is nobody's data. */
-void buf_flush(Buf &B, BufCopy &c)
+ * file put there and is nobody's data. Afterwards the mirror under the
+ * window holds exactly this copy's bytes, so this copy is current - a
+ * masked run into the same window next needs no refill - and every other
+ * copy over those bytes is not. One step: a sync that throws leaves the
+ * copy dirty and nothing else changed. */
+bool buf_flush(Buf &B, BufCopy &c)
 {
     if (!c.dirty)
-        return;
+        return false;
     c.bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE, c.padded, 0);
     std::memcpy(B.host + c.off, c.bo.map<uint8_t *>(), c.real);
     c.dirty = false;
+    buf_touched(B, c.off, c.off + c.real, &c);
+    c.gen = B.gen;
+    c.filled = true;
+    return true;
+}
+
+/* The library has written [lo, hi) of the mirror ON THE HOST: a staged
+ * output collected into a resident buffer (a bind this file declined), a
+ * program's counts, a reduction's result, an entry point computed on the
+ * host. Every copy over those bytes is stale.
+ *
+ * A copy still DIRTY over them held bytes the write superseded. Wholly
+ * inside the range, nothing of it is left to keep, and its claim is
+ * dropped. Reaching past the range, the rest of it would have to come
+ * home through a sync that can fail - which this cannot, being called
+ * from inside run_job's collects - so it is not attempted: the claim is
+ * dropped and the buffer is LOST, refused by name until it is published
+ * again. That needs outputs that alias one another or a host result,
+ * because every path that writes the mirror first brings home the copies
+ * over it (buf_bind before it declines, cftx_buffer_will_write before the
+ * host writes); it is a refusal, never a wrong answer. */
+void buf_host_wrote(Buf &B, size_t lo, size_t hi) noexcept
+{
+    if (lo > B.bytes)
+        lo = B.bytes;
+    if (hi > B.bytes)
+        hi = B.bytes;
+    if (hi < lo)
+        hi = lo;
+    for (auto &c : B.copies) {
+        if (!c.dirty || !(c.off < hi && lo < c.off + c.real))
+            continue;
+        c.dirty = false;
+        if (lo <= c.off && c.off + c.real <= hi)
+            continue;
+        if (!B.lost) {
+            B.lost = true;
+            try {
+                B.lost_why = "a run's output still on the device overlapped "
+                             "bytes the library wrote on the host, and "
+                             "reached past them (outputs that alias), so "
+                             "this buffer's contents cannot be vouched for; "
+                             "publish them again with cft_buffer_to_device";
+            } catch (...) {
+                /* the flag stands without its sentence */
+            }
+        }
+    }
+    buf_touched(B, lo, hi, nullptr);
 }
 
 /* Bind one operand of one slice, or decline.
@@ -823,23 +906,18 @@ xrt::bo *buf_bind(Buf &B, size_t tile, int role, size_t off,
      * an offset into the buffer - and cftx_buffer_from_device flushes
      * copies in table order, not write order, so the older bytes could
      * otherwise land last and silently replace the newer run's. The
-     * mirror changed, so the generation moves too: an input copy filled
-     * before this flush must not be reused as current. (Found reading
+     * mirror changed under them, so buf_flush stales every copy over
+     * those bytes: an input copy filled before must not be reused as
+     * current. (Found reading
      * this file for the scheduler, 2026-09-25. It was reachable under
      * fixed placement too: verifier-V4's random-window property test
      * found 32 of 300 trials wrong at 617b753 on four tiles and 16 of 300
      * on three, with no placement instrument; 0 of 1,200 since.) */
-    if (output) {
-        bool moved = false;
+    if (output)
         for (auto &o : B.copies)
             if (&o != &c && o.dirty && o.off < off + real &&
-                off < o.off + o.real) {
-                buf_flush(B, o);
-                moved = true;
-            }
-        if (moved)
-            B.gen++;
-    }
+                off < o.off + o.real)
+                (void)buf_flush(B, o);
     const bool same_window =
         c.live && c.off == off && c.real == real && c.padded == padded;
 
@@ -862,8 +940,7 @@ xrt::bo *buf_bind(Buf &B, size_t tile, int role, size_t off,
      * the mirror itself when the run finishes, so this copy's older
      * window must land first or it would overwrite the newer bytes on
      * the next cft_buffer_from_device. */
-    if (c.dirty)
-        buf_flush(B, c);
+    (void)buf_flush(B, c);   /* stales the copies over its old window */
 
     if (off > B.bytes || real > B.bytes - off) {
         /* device.c's registry already refuses a window that overruns,
@@ -1145,8 +1222,11 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
 
     /* CFT_XRT_WITNESS, a card instrument read per call: the completion
      * witness's planted fault. "busy-before" makes the first task's
-     * tile read as busy before its start; "busy-after" makes its first
-     * read after the wait busy, the next one real. Either must be
+     * tile read as busy before its start; "busy-after" makes its reads
+     * after the wait busy for 50 ms and then real, so that a witness
+     * which refused without waiting for the tile to go idle is seen not
+     * to have waited (device-test times it: verifier-V7 found a one-read
+     * plant let that mutant pass, 2026-09-25). Either must be
      * refused by name and leave the handle usable - device-test holds
      * that on every XRT device. What it cannot plant is the defect the
      * witness exists for, an abandoned run; that is a card-day leg
@@ -1174,12 +1254,20 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
         /* Stage the wave. Nothing of it has started, so a failure
          * leaves its units idle; an earlier wave's results are the
          * caller's to discard with the error. */
+        /* Every failure sentence below names its tile (verifier-V7,
+         * 2026-09-25: staging, STATUS/FLAGS and collect failures named
+         * none). */
+        size_t at = 0;
         try {
-            for (size_t j = 0; j < count; j++)
+            for (size_t j = 0; j < count; j++) {
+                at = order[j];
                 J.tasks[base + j].stage(order[j]);
+            }
         } catch (const std::bad_alloc &) {
-            set_err_or([&] { return "out of memory staging " + J.what; },
-                       "out of memory");
+            set_err_or([&] {
+                return "out of memory staging " + J.what + " for " +
+                       tile_name(D, at);
+            }, "out of memory");
             return ST_OUT_OF_MEMORY;
         } catch (const std::exception &e) {
             const std::string w = e.what();
@@ -1187,10 +1275,11 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
                 w.find("memory") != std::string::npos ||
                 w.find("Memory") != std::string::npos) {
                 set_err("device buffer allocation failed (" + J.oom_words +
-                        "): " + w);
+                        ") on " + tile_name(D, at) + ": " + w);
                 return ST_OUT_OF_MEMORY;
             }
-            set_err("staging " + J.what + ": " + w);
+            set_err("staging " + J.what + " for " + tile_name(D, at) + ": " +
+                    w);
             return ST_INTERNAL;
         }
 
@@ -1307,10 +1396,7 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
                         " within CFT_TIMEOUT_MS (" +
                         std::to_string(D.wait_ms) + " ms) and may still be "
                         "running it, so this handle is finished; close and "
-                        "reopen it. A run left running on a tile can make "
-                        "XRT complete later runs there early, in any "
-                        "process, until the image is reloaded: reload it "
-                        "before trusting that tile (docs/HOSTAPI.md)";
+                        "reopen it";
                 else if (kind == 2)
                     m = tile_name(D, bad) + " did not complete " + J.what +
                         " (state " + std::to_string(bad_state) + ") - "
@@ -1321,11 +1407,22 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
                         ": " + what + " - compute units may still be "
                         "active, so this handle is finished; close and "
                         "reopen it";
+                /* Every one of these can leave a unit running, and what
+                 * the timeout's sentence alone said is true of all four
+                 * (verifier-V7, 2026-09-25). */
+                m += ". A run left running on a tile can make XRT complete "
+                     "later runs there early, in any process, until the "
+                     "image is reloaded: reload it before trusting " +
+                     tile_name(D, bad) + " (docs/HOSTAPI.md)";
                 if (ran) {
+                    /* Only what STATUS shows: until 2026-09-25 this said
+                     * the units "never started this work, so this is a
+                     * hang", which a latched refusal does not establish
+                     * (verifier-V7). */
                     if (acc == 0x8u)
-                        m += " (STATUS 0x8 - only a REFUSAL is latched; the "
-                             "units never started this work, so this is a "
-                             "hang or a slow run, not a memory fault)";
+                        m += " (STATUS 0x8 - only the REFUSAL bit is latched: "
+                             "a unit refused a request, and no memory fault "
+                             "is recorded, so this is not a bus fault)";
                     else if (acc)
                         m += " (STATUS 0x" + hex32(acc) + " - the memory "
                              "system or the tile reported something, so "
@@ -1362,8 +1459,9 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
                 const Tile &t = D.tiles[order[j]];
                 uint32_t c = 0;
                 try {
+                    const bool planted = plant == 2 && base == 0 && j == 0;
                     c = t.k.read_register(CSR_CTRL);
-                    if (plant == 2 && base == 0 && j == 0)
+                    if (planted)
                         c = CTRL_START;              /* CFT_XRT_WITNESS */
                     if (c & CTRL_IDLE)
                         continue;
@@ -1374,6 +1472,9 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
                         std::this_thread::sleep_for(
                             std::chrono::milliseconds(1));
                         c = t.k.read_register(CSR_CTRL);
+                        if (planted && std::chrono::steady_clock::now() - t0 <
+                                           std::chrono::milliseconds(50))
+                            c = CTRL_START;      /* the plant holds 50 ms */
                     }
                 } catch (...) {
                     D.poisoned = true;
@@ -1420,22 +1521,28 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
 
         uint32_t ws = 0, wf = 0;
         uint32_t per[64] = {0};   /* a device has at most 64 tiles */
+        bool flags_reg = false;   /* which read failed, for the sentence */
         try {
             for (size_t j = 0; j < count; j++) {
+                at = order[j];
+                flags_reg = false;
                 const uint32_t sj =
                     D.tiles[order[j]].k.read_register(CSR_STATUS);
                 if (j < 64)
                     per[j] = sj;
                 ws |= sj;
+                flags_reg = true;
                 wf |= D.tiles[order[j]].k.read_register(CSR_FLAGS);
             }
         } catch (...) {
             D.poisoned = true;
-            lose_outputs(D, "an unreadable STATUS");
+            lose_outputs(D, flags_reg ? "an unreadable FLAGS register"
+                                      : "an unreadable STATUS register");
             set_err_or([&] {
-                return "reading STATUS and FLAGS after " + J.what +
-                       " failed, so whether its results are valid is not "
-                       "known; this handle is finished";
+                return "reading " + tile_name(D, at) + "'s " +
+                       (flags_reg ? "FLAGS" : "STATUS") + " after " +
+                       J.what + " failed, so whether its results are "
+                       "valid is not known; this handle is finished";
             }, "run failed");
             return ST_INTERNAL;
         }
@@ -1458,13 +1565,15 @@ int run_job(Dev &D, Job &J, uint32_t *status, uint32_t *flags,
             return ST_OK;
         }
         try {
-            for (size_t j = 0; j < count; j++)
+            for (size_t j = 0; j < count; j++) {
+                at = order[j];
                 J.tasks[base + j].collect(order[j]);
+            }
         } catch (const std::exception &e) {
             lose_outputs(D, "a result that could not be read back");
             set_err_or([&] {
-                return "reading the results of " + J.what + ": " +
-                       std::string(e.what());
+                return "reading the results of " + J.what + " from " +
+                       tile_name(D, at) + ": " + std::string(e.what());
             }, "run failed");
             return ST_INTERNAL;
         }
@@ -1931,22 +2040,56 @@ extern "C" void cftx_buffer_destroy(void *buf)
     delete static_cast<Buf *>(buf);
 }
 
+/* A LOST buffer's refusal, in the words its loss left (Buf::lost). */
+int buf_refuse_lost(const Buf &B) noexcept
+{
+    set_err_or([&] {
+        return B.lost_why.empty()
+                   ? std::string("a failed run lost this resident buffer's "
+                                 "contents; publish them again with "
+                                 "cft_buffer_to_device")
+                   : B.lost_why;
+    }, "buffer lost");
+    return ST_INTERNAL;
+}
+
+/* [off, off + len) of a buffer, clamped to it. */
+void buf_range(const Buf &B, size_t off, size_t len, size_t *lo, size_t *hi)
+{
+    *lo = off < B.bytes ? off : B.bytes;
+    *hi = len < B.bytes - *lo ? *lo + len : B.bytes;
+}
+
 extern "C" int cftx_buffer_to_device(void *buf)
 {
     if (!buf)
         return ST_INVALID_ARGUMENT;
     Buf &B = *static_cast<Buf *>(buf);
-    /* The mirror is the truth: every copy is stale and every claim a
-     * run had on the contents is dropped. Nothing moves - each copy
-     * refills at its next binding, for the window that binding needs,
-     * rather than for a window nobody may ask for again. */
-    B.gen++;
-    for (auto &c : B.copies)
-        c.dirty = false;
-    /* ...and a buffer a failed run lost is the caller's again. */
-    B.lost = false;
-    B.lost_why.clear();
-    return ST_OK;
+    return at_boundary("publishing a resident buffer", [&]() -> int {
+        /* The mirror is the truth from here, and the caller may have
+         * written any of it: every copy is stale, which is what moving
+         * the generation says. A run's bytes still on the device come
+         * home FIRST, so that publishing a buffer a run left
+         * device-authoritative keeps what the run wrote, exactly as on
+         * the software backend, where the mirror IS the buffer
+         * (verifier-V7, 2026-09-25: the dirty flags were dropped
+         * unflushed, and a bare cft_buffer_to_device discarded the run);
+         * what comes home is current at the new generation. A buffer a
+         * failed run LOST is the exception: the caller is supplying its
+         * contents, so the device's are dropped, not brought home over
+         * them. */
+        B.gen++;
+        if (B.lost) {
+            for (auto &c : B.copies)
+                c.dirty = false;
+            B.lost = false;
+            B.lost_why.clear();
+            return ST_OK;
+        }
+        for (auto &c : B.copies)
+            (void)buf_flush(B, c);
+        return ST_OK;
+    });
 }
 
 extern "C" int cftx_buffer_from_device(void *buf)
@@ -1954,37 +2097,58 @@ extern "C" int cftx_buffer_from_device(void *buf)
     if (!buf)
         return ST_INVALID_ARGUMENT;
     Buf &B = *static_cast<Buf *>(buf);
-    /* A failed run may have written part of a window over bytes that
-     * never came home: nothing on the device, and nothing in the mirror,
-     * is this buffer's contents any more (Buf::lost). */
-    if (B.lost) {
-        set_err_or([&] {
-            return B.lost_why.empty()
-                       ? std::string("a failed run lost this resident "
-                                     "buffer's contents; publish them "
-                                     "again with cft_buffer_to_device")
-                       : B.lost_why;
-        }, "buffer lost");
-        return ST_INTERNAL;
-    }
-    bool moved = false;
-    try {
-        for (auto &c : B.copies) {
-            if (!c.dirty)
-                continue;
-            buf_flush(B, c);
-            moved = true;
-        }
-    } catch (const std::exception &e) {
-        set_err(std::string("reading a resident buffer back: ") + e.what());
-        return ST_INTERNAL;
-    }
-    /* Only when something actually came back. A no-op read must not
-     * invalidate the input copies, or a caller who calls this after
-     * every run - which is the correct thing to do - would refill them
-     * every time and never see the rate this exists for. */
-    if (moved)
-        B.gen++;
+    /* Behind the boundary like every other entry point: its error path
+     * builds a sentence, and a bad_alloc there reached C (verifier-V7,
+     * 2026-09-25). */
+    return at_boundary("reading a resident buffer back", [&]() -> int {
+        /* A failed run may have written part of a window over bytes that
+         * never came home: nothing on the device, and nothing in the
+         * mirror, is this buffer's contents any more (Buf::lost). */
+        if (B.lost)
+            return buf_refuse_lost(B);
+        /* Each flush stales the copies over the bytes it moved and marks
+         * its own copy current; a read-back with nothing dirty changes
+         * nothing at all, so a caller who calls this after every run -
+         * the correct thing to do - pays no refills for it. */
+        for (auto &c : B.copies)
+            (void)buf_flush(B, c);
+        return ST_OK;
+    });
+}
+
+extern "C" int cftx_buffer_will_write(void *buf, size_t off, size_t len)
+{
+    if (!buf)
+        return ST_INVALID_ARGUMENT;
+    Buf &B = *static_cast<Buf *>(buf);
+    return at_boundary("preparing a resident buffer for a host write",
+                       [&]() -> int {
+        /* Writing into a lost buffer is refused like reading it: its
+         * bytes outside the write would still be nobody's. */
+        if (B.lost)
+            return buf_refuse_lost(B);
+        size_t lo, hi;
+        buf_range(B, off, len, &lo, &hi);
+        /* A run's bytes over the range come home first, WHOLE: the write
+         * may not cover all of them - an entry point that fails part way,
+         * a copy whose window reaches past the range - and what it does
+         * not cover has to be the run's. */
+        for (auto &c : B.copies)
+            if (c.dirty && c.off < hi && lo < c.off + c.real)
+                (void)buf_flush(B, c);
+        buf_touched(B, lo, hi, nullptr);
+        return ST_OK;
+    });
+}
+
+extern "C" int cftx_buffer_host_wrote(void *buf, size_t off, size_t len)
+{
+    if (!buf)
+        return ST_INVALID_ARGUMENT;
+    Buf &B = *static_cast<Buf *>(buf);
+    size_t lo, hi;
+    buf_range(B, off, len, &lo, &hi);
+    buf_host_wrote(B, lo, hi);
     return ST_OK;
 }
 
@@ -2003,11 +2167,16 @@ extern "C" void cftx_buffer_stat(void *buf, int *resident,
         if (c.dirty)  dirty = 1;
     }
     if (resident)         *resident = live;
-    if (device_authority) *device_authority = dirty;
+    /* A LOST buffer has no authority anywhere (docs/HOSTAPI.md's table);
+     * its `why` says so, first. */
+    if (device_authority) *device_authority = B.lost ? 0 : dirty;
     if (resident_binds)   *resident_binds = B.resident_binds;
     if (staged_binds)     *staged_binds = B.staged_binds;
     if (why && why_bytes) {
-        std::snprintf(why, why_bytes, "%s", B.why.c_str());
+        if (B.lost)
+            std::snprintf(why, why_bytes, "LOST: %s", B.lost_why.c_str());
+        else
+            std::snprintf(why, why_bytes, "%s", B.why.c_str());
     }
 }
 
@@ -2159,6 +2328,14 @@ static int cftx_run_impl(void *hw, int op, int fmt, int rnd,
             tile.d.sync(XCL_BO_SYNC_BO_FROM_DEVICE, s.padded * esz, 0);
             std::memcpy(pd + s.first_elem * esz, tile.d.map<uint8_t *>(),
                         s.real * esz);
+            /* A resident output whose bind was DECLINED was staged, and
+             * its bytes just landed in the buffer's mirror on the host. */
+            if (bind && bind->buf[CFT_ROLE_D]) {
+                const size_t lo =
+                    bind->off[CFT_ROLE_D] + s.first_elem * esz;
+                buf_host_wrote(*static_cast<Buf *>(bind->buf[CFT_ROLE_D]),
+                               lo, lo + s.real * esz);
+            }
         };
         J.tasks.push_back(std::move(t));
     }
@@ -2904,6 +3081,16 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
                 if (deposits && max_deposits)
                     std::memcpy(pdep + w[CFT_LANE_DEP].off,
                                 tile.d.map<uint8_t *>(), w[CFT_LANE_DEP].len);
+                /* a resident window whose bind was declined: its mirror
+                 * was just written on the host */
+                if (bind && bind->buf[CFT_ROLE_D] && deposits &&
+                    max_deposits) {
+                    const size_t lo =
+                        bind->off[CFT_ROLE_D] + w[CFT_LANE_DEP].off;
+                    buf_host_wrote(
+                        *static_cast<Buf *>(bind->buf[CFT_ROLE_D]), lo,
+                        lo + w[CFT_LANE_DEP].len);
+                }
             }
             tile.cn.sync(XCL_BO_SYNC_BO_FROM_DEVICE, p.cnt_pad, 0);
             if (counts)
@@ -2923,6 +3110,13 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
                     std::memcpy(psout + w[CFT_LANE_SOUT].off,
                                 tile.so.map<uint8_t *>(),
                                 w[CFT_LANE_SOUT].len);
+                    if (bind && bind->buf[CFT_ROLE_SO]) {
+                        const size_t lo =
+                            bind->off[CFT_ROLE_SO] + w[CFT_LANE_SOUT].off;
+                        buf_host_wrote(
+                            *static_cast<Buf *>(bind->buf[CFT_ROLE_SO]), lo,
+                            lo + w[CFT_LANE_SOUT].len);
+                    }
                 }
             }
         };

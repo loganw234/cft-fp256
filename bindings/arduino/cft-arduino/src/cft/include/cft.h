@@ -2158,10 +2158,31 @@ CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
  *     cft_buffer_from_device first is honoured: the library reads the
  *     device copy back itself, then feeds it in. The answer is the
  *     one the rule would have given; what it costs is the round trip
- *     the rule exists to avoid.
+ *     the rule exists to avoid. That holds for EVERY entry point,
+ *     those computed on the host included - the transcendentals, the
+ *     clause-5 operations, the conversions, the augmented and formatOf
+ *     arithmetic, the payload and character operations, the scaled
+ *     products - which until 2026-09-25 read the stale mirror.
+ *   - An entry point that WRITES a resident buffer on the host keeps
+ *     the rule itself: a run's bytes over what it writes come home
+ *     first, and every device copy over it is made stale, so the next
+ *     run reads the new bytes. That covers the entry points above,
+ *     cft_reduce's and cft_reduce_seg's results, and a program run's
+ *     counts. (Until 2026-09-25 a copy filled before such a write was
+ *     served as current, and the run after it read the bytes from
+ *     before - verifier-V7.)
  *   - cft_buffer_from_device on a buffer no run has written is a
- *     no-op, as is cft_buffer_to_device on one whose copies are
- *     already current. Both are always safe to call.
+ *     no-op. cft_buffer_to_device on a buffer a run has written brings
+ *     the run's bytes home FIRST and then publishes the mirror, so a
+ *     publish after a run keeps the run's results, exactly as the
+ *     software backend does (until 2026-09-25 it discarded them). Both
+ *     are always safe to call.
+ *   - Writing the MIRROR of a buffer a run has written, before
+ *     cft_buffer_from_device, is the second thing the library cannot
+ *     see: the run's bytes are still on the device, and whichever of
+ *     cft_buffer_from_device and cft_buffer_to_device comes next brings
+ *     them home over what was written - where on the software backend
+ *     the write would stand. Read a buffer back before writing into it.
  *   - Writing the mirror through cft_buffer_data and NOT calling
  *     cft_buffer_to_device is the one thing the library cannot see,
  *     because a plain store leaves no trace. The run then uses the
@@ -2170,7 +2191,8 @@ CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
  *     this is the one place where forgetting a sync call changes an
  *     answer, and it is why the sync calls exist at all. Call
  *     cft_buffer_to_device after every write to the mirror; it costs
- *     nothing when nothing changed hands.
+ *     no transfer when no run has written the buffer since it was last
+ *     read back.
  *   - A LANE MASK on a program run whose deposit window or scratch-out
  *     block is resident leaves a masked lane's slots holding the
  *     buffer's current contents, exactly as it does for a plain host
@@ -2182,10 +2204,13 @@ CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
  *     the resident buffers it writes LOST: the tile may have written
  *     part of a window over bytes that had not come home, so nothing
  *     can vouch for what either copy holds. cft_buffer_from_device on a
- *     lost buffer, and any run that reads it, is CFT_ERR_INTERNAL with
- *     a sentence saying so, until cft_buffer_to_device publishes the
- *     mirror as the truth again. (Until 2026-09-25 the failed run's
- *     bytes could come back with CFT_OK.)
+ *     lost buffer, and any call that reads or writes it - a run, an
+ *     entry point computed on the host, a lane mask read from it - is
+ *     CFT_ERR_INTERNAL with a sentence saying so, until
+ *     cft_buffer_to_device publishes the mirror as the truth again;
+ *     cft_buffer_get_info reports device_authority 0 and a staged_why
+ *     beginning "LOST:". (Until 2026-09-25 the failed run's bytes could
+ *     come back with CFT_OK.)
  *
  * cft_buffer_free releases the device copies with the mirror. Closing
  * the device first is allowed and releases them too: the buffer stays
@@ -2215,10 +2240,14 @@ CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
  * away (a sub-buffer's is 4096 bytes on XRT 2.14, and this library's
  * slices are cut at 256-bit beats; docs/HOSTAPI.md has the choice). A
  * copy is reused when the window is the same one again, which the same
- * call in a loop always asks for, and refilled otherwise, at exactly
- * the cost of the staging it replaces - the answer is identical either
- * way. cft_buffer_get_info's counters say which you got, and its
- * `staged_why` says why.
+ * call in a loop always asks for, and nothing has changed the mirror
+ * under that window since the copy was filled - a publish, a read-back
+ * of another copy over it, a write the library made on the host - and
+ * refilled otherwise, at exactly the cost of the staging it replaces;
+ * the answer is identical either way. A change to one part of a buffer
+ * stales only the copies over that part, so a buffer carved into
+ * windows keeps the rest resident. cft_buffer_get_info's counters say
+ * which you got, and its `staged_why` says why.
  *
  * cft_reduce binds its input the same way. Its `partials` are the
  * library's own and never resident, and the composed reductions
@@ -2227,8 +2256,10 @@ CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
  * pass whatever their operands are. cft_program_run_ex binds a, b, c,
  * `deposits`, its two scratch blocks and its four index tables; its
  * image, constant bank and counts are staged always, being neither
- * operand-shaped nor large, and its lane mask is repacked for each
- * tile on every launch.
+ * operand-shaped nor large - the counts land in the caller's memory on
+ * the host, and where that is a resident buffer's its copies over them
+ * are made stale - and its lane mask is repacked for each tile on
+ * every launch.
  * --------------------------------------------------------------- */
 typedef struct cft_buffer cft_buffer;
 
@@ -2270,7 +2301,9 @@ typedef struct cft_buffer_info {
                                 * its `d` output and cft_buffer_from_
                                 * device has not been called since - so
                                 * the mirror is stale and reading it
-                                * would read the run before last */
+                                * would read the run before last. 0 for
+                                * a LOST buffer, whose staged_why then
+                                * begins "LOST:" and says why */
     uint64_t resident_binds;   /* operand bindings served from a device
                                 * copy, with no transfer */
     uint64_t staged_binds;     /* operand bindings that were copied

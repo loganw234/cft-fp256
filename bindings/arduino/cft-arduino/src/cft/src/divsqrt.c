@@ -1526,6 +1526,13 @@ static cft_status full_via_program(cft_device *dev,
                                   a + off * esz,
                                   is_sqrt ? NULL : b + off * esz, NULL,
                                   deps, cnt, c, NULL, bus_out);
+        /* The run read the caller's a and b through the device, and so
+         * may have filled a copy of them since cft_div announced d: when
+         * d is one of them, that copy is about to go stale under the
+         * memcpy below. So this chunk of d is announced again, after the
+         * run and before the write (softfloat.h). */
+        if (st == CFT_OK)
+            st = (cft_status)cft_host_out(dev, d + off * esz, c * esz);
         if (st == CFT_OK) {
             for (i = 0; i < c; i++) {
                 if (cnt[i] != CFT_DIVFULL_NDEPOSITS) {
@@ -1622,6 +1629,13 @@ CFT_API cft_status cft_div(cft_device *dev, cft_format fmt, cft_round rnd,
     esz = (size_t)(f->width / 8);
     if (n > ((size_t)-1) / esz)
         return CFT_ERR_INVALID_ARGUMENT;
+    /* Every route reads a and b and writes d on the host at least in
+     * part, so they are announced before any route starts
+     * (softfloat.h's cft_host_io; full_via_program announces each chunk
+     * of d again, after its program run has read a and b). */
+    st = (cft_status)cft_host_io(dev, a, b, NULL, n * esz, d, n * esz);
+    if (st != CFT_OK)
+        return st;
 
 #ifndef CFT_NO_PROGRAM
     if (divsqrt_route_program(dev)) {
@@ -1691,6 +1705,10 @@ CFT_API cft_status cft_sqrt(cft_device *dev, cft_format fmt, cft_round rnd,
     esz = (size_t)(f->width / 8);
     if (n > ((size_t)-1) / esz)
         return CFT_ERR_INVALID_ARGUMENT;
+    /* as cft_div's */
+    st = (cft_status)cft_host_io(dev, a, NULL, NULL, n * esz, d, n * esz);
+    if (st != CFT_OK)
+        return st;
 
 #ifndef CFT_NO_PROGRAM
     if (divsqrt_route_program(dev)) {

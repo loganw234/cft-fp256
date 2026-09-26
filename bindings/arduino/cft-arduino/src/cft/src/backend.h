@@ -140,10 +140,15 @@ typedef struct cft_bindings {
 int  cftx_buffer_create(void *hw, void *host, size_t bytes, void **out);
 void cftx_buffer_destroy(void *buf);
 
-/* The mirror is the truth: drop every device copy's claim on the
- * contents, including one a run wrote and nobody has read back. The
- * copies refill from the mirror the next time they are bound, so this
- * call moves nothing and cannot fail on a transfer. */
+/* The mirror is the truth from here: the caller may have written any
+ * of it, so every device copy is stale and refills from the mirror the
+ * next time it is bound. What a run wrote into a copy and nobody has
+ * read back comes home FIRST, so publishing a buffer a run left
+ * device-authoritative keeps the run's bytes, as the software backend
+ * does - which means this call can fail on that transfer. A buffer a
+ * failed run LOST is the exception: the caller is supplying its
+ * contents, so the device's are dropped and the loss cleared. (Until
+ * 2026-09-25 the device's were dropped always - verifier-V7.) */
 int  cftx_buffer_to_device(void *buf);
 
 /* The device is the truth: copy back everything a run wrote into this
@@ -155,6 +160,22 @@ int  cftx_buffer_to_device(void *buf);
  * skips it gets the round trip rather than the previous run's bytes.
  * See cft.h: breaking the rule costs time, never correctness. */
 int  cftx_buffer_from_device(void *buf);
+
+/* The library is about to write [off, off + len) of this buffer's
+ * mirror ON THE HOST - an entry point computed on the host, a
+ * reduction's result, a program's counts. A run's bytes over the range
+ * come home first, whole, and every copy over it stops being current. A
+ * LOST buffer is refused by name, as it is for a read. device.c calls
+ * this through softfloat.h's cft_host_out. */
+int  cftx_buffer_will_write(void *buf, size_t off, size_t len);
+
+/* The library HAS written [off, off + len) of the mirror on the host,
+ * inside a call that may have filled a copy over it since
+ * cftx_buffer_will_write: every copy over the range stops being
+ * current. Cannot fail. (A copy a run left dirty over the range is
+ * dropped, and the buffer is LOST if that copy reached past the range -
+ * only outputs that alias get there.) */
+int  cftx_buffer_host_wrote(void *buf, size_t off, size_t len);
 
 /* What happened to this buffer, for cft_buffer_get_info. `why` takes
  * the reason the most recent staged binding staged, truncated to

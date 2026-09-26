@@ -192,6 +192,16 @@ static int rnd_ok(cft_round rnd)
     return (int)rnd >= 0 && (int)rnd <= 4;
 }
 
+/* Every entry point below that reads or writes the caller's arrays ON
+ * THE HOST announces them first, after its size checks and before its
+ * first access: softfloat.h's cft_host_io brings a resident operand's
+ * device bytes home and stales a resident result's device copies, and
+ * refuses a buffer a failed run lost. The passes these compositions
+ * issue run over this file's own scratch, never the caller's arrays,
+ * so one call at the top covers every write - except scaleB's
+ * composed route, which is all device passes over a and d, and so
+ * needs none (verifier-V7, 2026-09-25). */
+
 static int size_overflows(const cft_fmt_desc *f, size_t n)
 {
     return n > ((size_t)-1) / (size_t)(f->width / 8);
@@ -246,6 +256,11 @@ CFT_API cft_status cft_rint(cft_device *dev, cft_format fmt, cft_round rnd,
     esz = (size_t)(f->width / 8);
     if (size_overflows(f, n))
         return CFT_ERR_INVALID_ARGUMENT;
+    /* on the host: softfloat.h's cft_host_io */
+    st = (cft_status)cft_host_io(dev, a, NULL, NULL, n * esz,
+                                    d, n * esz);
+    if (st != CFT_OK)
+        return st;
     aw = (uint8_t *)malloc(CHUNK * esz);
     mb = (uint8_t *)malloc(CHUNK * esz);
     t  = (uint8_t *)malloc(CHUNK * esz);
@@ -454,6 +469,11 @@ CFT_API cft_status cft_scaleb(cft_device *dev, cft_format fmt, cft_round rnd,
         size_t i;
         if (nc < floor_n)
             nc = floor_n;
+        /* on the host: softfloat.h's cft_host_io */
+        st = (cft_status)cft_host_io(dev, a, NULL, NULL, n * esz,
+                                        d, n * esz);
+        if (st != CFT_OK)
+            return st;
         for (i = 0; i < n; i++) {
             lane_cls k;
             cft_bn xa, m, v;
@@ -513,6 +533,11 @@ CFT_API cft_status cft_cmp_sig(cft_device *dev, cft_op cmp, cft_format fmt,
     f = &cft_sf_formats[(int)fmt];
     if (size_overflows(f, n))
         return CFT_ERR_INVALID_ARGUMENT;
+    /* on the host: softfloat.h's cft_host_io */
+    st = (cft_status)cft_host_io(dev, a, b, NULL, n * (size_t)(f->width / 8),
+                                    NULL, 0);
+    if (st != CFT_OK)
+        return st;
 
     /* The VALUE is the quiet predicate's value - unordered is false
      * either way. Only the flag differs: invalid for ANY NaN operand,
@@ -567,6 +592,11 @@ CFT_API cft_status cft_convert(cft_device *dev, cft_format sfmt,
     fd = &cft_sf_formats[(int)dfmt];
     if (size_overflows(fs, n) || size_overflows(fd, n))
         return CFT_ERR_INVALID_ARGUMENT;
+    /* on the host: softfloat.h's cft_host_io */
+    st = (cft_status)cft_host_io(dev, a, NULL, NULL, n * (size_t)(fs->width / 8),
+                                    d, n * (size_t)(fd->width / 8));
+    if (st != CFT_OK)
+        return st;
 
     /* Elements change size, so unlike every same-format entry point d
      * MUST NOT overlap a (documented in cft.h): an in-place widening
@@ -639,6 +669,11 @@ static cft_status cvt_from_core(cft_device *dev, cft_format fmt,
     f = &cft_sf_formats[(int)fmt];
     if (size_overflows(f, n) || n > ((size_t)-1) / (size_t)elem_sz)
         return CFT_ERR_INVALID_ARGUMENT;
+    /* on the host: softfloat.h's cft_host_io */
+    st = (cft_status)cft_host_io(dev, src, NULL, NULL, n * (size_t)elem_sz,
+                                    d, n * (size_t)(f->width / 8));
+    if (st != CFT_OK)
+        return st;
 
     for (i = 0; i < n; i++) {
         uint64_t raw, mag;
@@ -827,6 +862,11 @@ static cft_status cvt_to_core(cft_device *dev, cft_format fmt, cft_round rnd,
     f = &cft_sf_formats[(int)fmt];
     if (size_overflows(f, n) || n > ((size_t)-1) / (size_t)elem_sz)
         return CFT_ERR_INVALID_ARGUMENT;
+    /* on the host: softfloat.h's cft_host_io */
+    st = (cft_status)cft_host_io(dev, a, NULL, NULL, n * (size_t)(f->width / 8),
+                                    dst, n * (size_t)elem_sz);
+    if (st != CFT_OK)
+        return st;
 
     for (i = 0; i < n; i++) {
         cft_bn xa;
@@ -900,6 +940,11 @@ CFT_API cft_status cft_logb(cft_device *dev, cft_format fmt, const void *a,
     f = &cft_sf_formats[(int)fmt];
     if (size_overflows(f, n))
         return CFT_ERR_INVALID_ARGUMENT;
+    /* on the host: softfloat.h's cft_host_io */
+    st = (cft_status)cft_host_io(dev, a, NULL, NULL, n * (size_t)(f->width / 8),
+                                    d, n * (size_t)(f->width / 8));
+    if (st != CFT_OK)
+        return st;
 
     for (i = 0; i < n; i++) {
         lane_cls k;
@@ -996,6 +1041,11 @@ CFT_API cft_status cft_next_up(cft_device *dev, cft_format fmt,
     f = &cft_sf_formats[(int)fmt];
     if (size_overflows(f, n))
         return CFT_ERR_INVALID_ARGUMENT;
+    /* on the host: softfloat.h's cft_host_io */
+    st = (cft_status)cft_host_io(dev, a, NULL, NULL, n * (size_t)(f->width / 8),
+                                    d, n * (size_t)(f->width / 8));
+    if (st != CFT_OK)
+        return st;
     for (i = 0; i < n; i++) {
         cft_bn xa, v;
         lane_load(f, (const uint8_t *)a, i, &xa);
@@ -1025,6 +1075,11 @@ CFT_API cft_status cft_next_down(cft_device *dev, cft_format fmt,
     f = &cft_sf_formats[(int)fmt];
     if (size_overflows(f, n))
         return CFT_ERR_INVALID_ARGUMENT;
+    /* on the host: softfloat.h's cft_host_io */
+    st = (cft_status)cft_host_io(dev, a, NULL, NULL, n * (size_t)(f->width / 8),
+                                    d, n * (size_t)(f->width / 8));
+    if (st != CFT_OK)
+        return st;
     for (i = 0; i < n; i++) {
         lane_cls k;
         cft_bn xa, v;
@@ -1070,6 +1125,11 @@ CFT_API cft_status cft_class(cft_device *dev, cft_format fmt, const void *a,
     f = &cft_sf_formats[(int)fmt];
     if (size_overflows(f, n))
         return CFT_ERR_INVALID_ARGUMENT;
+    /* on the host: softfloat.h's cft_host_io */
+    st = (cft_status)cft_host_io(dev, a, NULL, NULL, n * (size_t)(f->width / 8),
+                                    cls, n);
+    if (st != CFT_OK)
+        return st;
     for (i = 0; i < n; i++) {
         lane_cls k;
         cft_bn xa;
@@ -1128,6 +1188,11 @@ static cft_status torder_run(cft_device *dev, cft_format fmt, const void *a,
     f = &cft_sf_formats[(int)fmt];
     if (size_overflows(f, n))
         return CFT_ERR_INVALID_ARGUMENT;
+    /* on the host: softfloat.h's cft_host_io */
+    st = (cft_status)cft_host_io(dev, a, b, NULL, n * (size_t)(f->width / 8),
+                                    d, n * (size_t)(f->width / 8));
+    if (st != CFT_OK)
+        return st;
     for (i = 0; i < n; i++) {
         cft_bn xa, xb, ka, kb, v;
         lane_load(f, (const uint8_t *)a, i, &xa);
@@ -1307,6 +1372,11 @@ CFT_API cft_status cft_rem(cft_device *dev, cft_format fmt, const void *a,
     f = &cft_sf_formats[(int)fmt];
     if (size_overflows(f, n))
         return CFT_ERR_INVALID_ARGUMENT;
+    /* on the host: softfloat.h's cft_host_io */
+    st = (cft_status)cft_host_io(dev, a, b, NULL, n * (size_t)(f->width / 8),
+                                    d, n * (size_t)(f->width / 8));
+    if (st != CFT_OK)
+        return st;
     for (i = 0; i < n; i++) {
         cft_bn xa, xb, v;
         lane_load(f, (const uint8_t *)a, i, &xa);
@@ -1458,6 +1528,11 @@ static cft_status minmax_mag_batch(cft_device *dev, cft_format fmt,
     f = &cft_sf_formats[(int)fmt];
     if (size_overflows(f, n))
         return CFT_ERR_INVALID_ARGUMENT;
+    /* on the host: softfloat.h's cft_host_io */
+    st = (cft_status)cft_host_io(dev, a, b, NULL, n * (size_t)(f->width / 8),
+                                    d, n * (size_t)(f->width / 8));
+    if (st != CFT_OK)
+        return st;
 
     for (i = 0; i < n; i++) {
         cft_bn xa, xb, v;

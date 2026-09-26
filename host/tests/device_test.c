@@ -48,6 +48,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <time.h>
+#endif
 
 #include "cft.h"
 
@@ -161,6 +164,19 @@ static void note_op_absent(const char *what)
         op_absent_name[ops_absent] = what;
     ops_absent++;
 }
+
+#ifndef _WIN32
+/* Monotonic milliseconds, for the one leg that asserts a wait happened -
+ * the completion witness's, which runs only on the XRT backend, and that
+ * is Linux-only. */
+static double wall_ms(void)
+{
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts))
+        return 0.0;
+    return (double)ts.tv_sec * 1e3 + (double)ts.tv_nsec / 1e6;
+}
+#endif
 
 #define CHECK(cond, ...)                                                 \
     do {                                                                 \
@@ -915,7 +931,9 @@ static size_t seq_image_scratch(uint8_t *out, cft_format fmt,
      * n_scratch_in in [15:0] and n_scratch_out in [31:16], meaningful
      * only under CFT_PROG_FLAG_SCRATCH_IO and zero without it. */
     put_le32(out + 28, (n_sin & 0xFFFFu) | ((n_sout & 0xFFFFu) << 16));
-    if (!(flags & CFT_PROG_FLAG_BANK_EXT)) {
+    /* An image without constants passes NULL, and memcpy from NULL is
+     * undefined whatever the length (verifier-V7 under UBSan). */
+    if (!(flags & CFT_PROG_FLAG_BANK_EXT) && n_consts) {
         memcpy(out + off, consts, n_consts * esz);
         off += n_consts * esz;
     }
@@ -4948,10 +4966,35 @@ static void check_completion_witness(cft_device *hw, cft_format fmt)
 
     for (l = 0; l < sizeof legs / sizeof legs[0]; l++) {
         /* an elementwise run, refused */
+#ifndef _WIN32
+        double t0, took;
+#endif
         memset(got, 0x5a, n * esz);
         put_env("CFT_XRT_WITNESS", legs[l].plant);
+#ifndef _WIN32
+        t0 = wall_ms();
+#endif
         st = cft_run(hw, CFT_ADD, fmt, CFT_RNE, a, b, c, got, n, &f, &bus);
+#ifndef _WIN32
+        took = wall_ms() - t0;
+#endif
         put_env("CFT_XRT_WITNESS", NULL);
+#ifndef _WIN32
+        /* busy-after's plant holds the tile busy for 50 ms: a witness
+         * that refuses without waiting for it to go idle returns sooner,
+         * and one that waited must say the tile has since finished, not
+         * that the handle is (verifier-V7: a one-read plant let the
+         * no-wait mutant through). */
+        if (l == 1) {
+            asked++;
+            CHECK(took >= 50.0 && strstr(cft_last_error(), "has since finished"),
+                  "CFT_XRT_WITNESS=busy-after (%s): refused in %.1f ms (%s) - it "
+                  "must wait until the tile is idle, 50 ms, and say so",
+                  cft_format_name(fmt), took, cft_last_error());
+            right += took >= 50.0 &&
+                     strstr(cft_last_error(), "has since finished") != NULL;
+        }
+#endif
         for (untouched = 1, i = 0; i < n * esz; i++)
             untouched &= got[i] == 0x5a;
         asked++;
@@ -5265,6 +5308,62 @@ static void check_lost_after_refusal(cft_device *hw, cft_format fmt)
           "a resident buffer a refused run lost was used as an input with %s "
           "(%s) - it must be refused by name", cft_strerror(s_in),
           cft_last_error());
+    /* ...and WRITING it: a run whose output it is, and an entry point
+     * computed on the host reading or writing it, are refused by name
+     * too; a lane mask read from it as well; and cft_buffer_get_info
+     * says nothing about it is authoritative (verifier-V7: the write and
+     * the mask were never tried here, and a mutant accepting them
+     * passed; get_info said device_authority 1). */
+    {
+        cft_buffer_info bi;
+        cft_status s_out, s_hin, s_hout, s_mask = CFT_ERR_INTERNAL;
+        int info_ok;
+        s_out = cft_run(hw, CFT_ADD, fmt, CFT_RNE, b, b, b, dep.p, n, &fl,
+                        &bus);
+        CHECK(s_out != CFT_OK && strstr(cft_last_error(),
+                                        "cft_buffer_to_device"),
+              "a run into a resident buffer a refused run lost: %s (%s) - "
+              "it must be refused by name", cft_strerror(s_out),
+              cft_last_error());
+        s_hin = cft_exp(hw, fmt, CFT_RNE, dep.p, out, n, &fl);
+        CHECK(s_hin != CFT_OK && strstr(cft_last_error(),
+                                        "cft_buffer_to_device"),
+              "cft_exp reading a lost resident buffer: %s (%s) - it must be "
+              "refused by name", cft_strerror(s_hin), cft_last_error());
+        s_hout = cft_exp(hw, fmt, CFT_RNE, b, dep.p, n, &fl);
+        CHECK(s_hout != CFT_OK && strstr(cft_last_error(),
+                                         "cft_buffer_to_device"),
+              "cft_exp writing a lost resident buffer: %s (%s) - it must be "
+              "refused by name", cft_strerror(s_hout), cft_last_error());
+        if (caps.seq_features & CFT_SEQ_FEAT_LANE_MASK) {
+            cft_run_args M = A;
+            uint8_t *dm = (uint8_t *)malloc(n * esz);
+            M.deposits = dm;
+            M.lane_mask = dep.p;
+            M.lane_mask_bytes = (n + 7) / 8;
+            s_mask = dm ? cft_program_run_ex(prog, &M) : CFT_ERR_INTERNAL;
+            CHECK(dm && s_mask != CFT_OK &&
+                      strstr(cft_last_error(), "cft_buffer_to_device"),
+                  "a lane mask read from a lost resident buffer: %s (%s) - "
+                  "it must be refused by name", cft_strerror(s_mask),
+                  cft_last_error());
+            free(dm);
+        } else {
+            not_here(NH_OTHER, "TESTED", "    a lane mask in a lost buffer",
+                     "this device does not publish CFT_SEQ_FEAT_LANE_MASK");
+        }
+        memset(&bi, 0, sizeof bi);
+        bi.struct_size = sizeof bi;
+        info_ok = cft_buffer_get_info(dep.b, &bi) == CFT_OK &&
+                  bi.device_authority == 0 &&
+                  !strncmp(bi.staged_why, "LOST", 4);
+        CHECK(info_ok, "cft_buffer_get_info on a lost buffer: authority %d, "
+              "\"%s\" - nothing is authoritative, and it must say LOST",
+              bi.device_authority, bi.staged_why);
+        right = s_out != CFT_OK && s_hin != CFT_OK && s_hout != CFT_OK &&
+                (!(caps.seq_features & CFT_SEQ_FEAT_LANE_MASK) ||
+                 s_mask != CFT_OK) && info_ok;
+    }
     /* published again, it is the caller's */
     memset(dep.p, 0x77, n * esz);
     s_repub = cft_buffer_to_device(dep.b);
@@ -5276,12 +5375,15 @@ static void check_lost_after_refusal(cft_device *hw, cft_format fmt)
           "(%s): %s / %s / %s (%s)", cft_format_name(fmt),
           cft_strerror(s_repub), cft_strerror(s_after), cft_strerror(s_back2),
           cft_last_error());
-    right = s_back != CFT_OK && s_in != CFT_OK && s_repub == CFT_OK &&
-            s_after == CFT_OK && s_back2 == CFT_OK && !memcmp(dep.p, a, n * esz);
+    right = right && s_back != CFT_OK && s_in != CFT_OK &&
+            s_repub == CFT_OK && s_after == CFT_OK && s_back2 == CFT_OK &&
+            !memcmp(dep.p, a, n * esz);
     if (right)
-        printf("    a resident output a refused run wrote (%s): its read-back "
-               "and its use as an input refused by name, and published "
-               "again it is right\n", cft_format_name(fmt));
+        printf("    a resident output a refused run wrote (%s): its read-back, "
+               "its use as an input, a run into it, a lane mask read from it "
+               "and cft_exp reading or writing it all refused by name, "
+               "get_info says LOST, and published again it is right\n",
+               cft_format_name(fmt));
 out:
     cft_program_free(prog);
     if (dep.b)
@@ -6562,6 +6664,658 @@ static void check_publish_takes_effect(cft_device *sw, cft_device *hw,
     free(a1); free(a2); free(want); free(got);
 }
 
+/* ---------------------------------------------------------------
+ * The stale-copy class (verifier-V7, 2026-09-25).
+ *
+ * A resident buffer's device copy must never be served once the mirror
+ * under it has changed, and a mirror a run has left stale must never be
+ * read. Every path that reads or writes the mirror ON THE HOST keeps
+ * that now - the entry points computed on the host, a reduction's
+ * result, a program's counts, a staged output, a publish - and until
+ * 2026-09-25 none of them did: V7's harness, the same public calls on
+ * the software device and on a mock of XRT, got wrong answers with
+ * CFT_OK from every one.
+ *
+ * Each scenario runs on the software device and on `hw` into a fresh
+ * resident buffer B, and the two TRANSCRIPTS are compared byte for byte:
+ * every status, every flag word, every output a run or an entry point
+ * produced, and B brought home at the end. A "read" of B is a device
+ * run, copysign(B, B) - bit for bit B, NaN payloads included - so a
+ * stale copy shows. Each entry point computed on the host is held both
+ * ways, and in place where that is legal:
+ *   IN       a device run writes B, then the entry point reads it;
+ *   OUT      a device run reads B (filling a copy), the entry point
+ *            writes it, a device run reads it again;
+ *   in place a read, the entry point from B into B, a read;
+ * and V7's own sequences are run as it wrote them. On the software
+ * backend B is plain memory and every scenario agrees by construction,
+ * which proves the harness; the device is the test.
+ * --------------------------------------------------------------- */
+enum {
+    SH_EXP, SH_POW, SH_POWN, SH_RINT, SH_NEXTUP, SH_LOGB, SH_SCALEB_HOST,
+    SH_SCALEB_DEV, SH_REM, SH_CONVERT, SH_CVT_TO, SH_CVT_FROM, SH_CLASS,
+    SH_TORDER, SH_MINMAG, SH_CMPSIG, SH_AUG_R, SH_AUG_E, SH_AUG_SUB,
+    SH_FO_NARROW, SH_FO_WIDE, SH_DIV, SH_SQRT, SH_PAYLOAD, SH_SETPAY,
+    SH_TODEC, SH_FROMDEC, SH_SCALED, SH_REDUCE, SH_REDUCE_SEG,
+    SH_DIV_FULL, SH_SQRT_FULL, SH_COUNT
+};
+static const char *const sh_name[SH_COUNT] = {
+    "cft_exp", "cft_pow", "cft_pown", "cft_rint", "cft_next_up",
+    "cft_logb", "cft_scaleb, the host route", "cft_scaleb, the composed route",
+    "cft_rem", "cft_convert", "cft_cvt_to_i32", "cft_cvt_from_i32",
+    "cft_class", "cft_total_order", "cft_min_mag", "cft_cmp_sig",
+    "cft_augmented_add's r", "cft_augmented_add's e", "cft_augmented_sub",
+    "cft_formatof_add, narrowing", "cft_formatof_add, widening", "cft_div",
+    "cft_sqrt", "cft_get_payload", "cft_set_payload", "cft_to_decimal_char",
+    "cft_from_decimal_char", "cft_scaled_prod", "cft_reduce",
+    "cft_reduce_seg", "cft_div, CFT_DIVSQRT_FULL=1",
+    "cft_sqrt, CFT_DIVSQRT_FULL=1"
+};
+enum { SD_IN, SD_OUT, SD_INPLACE };
+static const char *const sd_name[3] = {"IN", "OUT", "in place"};
+enum {
+    SV_RSEG, SV_RSEG_BACK, SV_RED, SV_COUNTS, SV_WITNESS, SV_RSEG_DIRTY,
+    SV_MASKED, SV_PUBLISH, SV_RWR, SV_RED_TWICE, SV_RSEG_TWICE,
+    SV_COUNTS_TWICE, SV_COUNT
+};
+static const char *const sv_name[SV_COUNT] = {
+    "S1: a read, cft_reduce_seg into B, a read",
+    "S1b: S1 with a read-back before the second read",
+    "S2: a read, cft_reduce into an element of B, a read",
+    "S3: a read, a program's counts into B, a read",
+    "S5: a read, a run into B, a run into half of it refused before its "
+    "start, a read",
+    "S6: a run into B, cft_reduce_seg into it, the read-back",
+    "S7: a masked program into B refused after its fill, cft_reduce_seg "
+    "into it, the masked program again",
+    "a run into B, a bare cft_buffer_to_device, a read",
+    "a read, a run into B, a read",
+    "cft_reduce of B into an element of B, then of B again",
+    "cft_reduce_seg of B into B, then of B again",
+    "a program reading B with its counts into B, then again"
+};
+static const char *const stale_texts[8] = {
+    "1.5", "-2.25e3", "7e-3", "0", "-0", "3.14159", "1e10", "-9.5e-7"
+};
+
+struct stale {
+    cft_device *dev;
+    cft_format fmt;
+    size_t n, esz;
+    int plants;                 /* CFT_XRT_WITNESS plants take effect */
+    struct rbuf B;
+    const uint8_t *x, *y, *z, *init, *mask;
+    const int64_t *i64;
+    const int32_t *i32;
+    uint8_t *out, *dep, *e;     /* this device's plain outputs */
+    uint32_t *cnt;
+    cft_program *prog;
+    uint8_t *tr;
+    size_t trn, trcap;
+    int oom;
+};
+
+static void st_rec(struct stale *s, const void *p, size_t bytes)
+{
+    if (s->trn + bytes > s->trcap) {
+        size_t cap = s->trcap ? s->trcap : 4096;
+        uint8_t *q;
+        while (cap < s->trn + bytes)
+            cap *= 2;
+        q = (uint8_t *)realloc(s->tr, cap);
+        if (!q) {
+            s->oom = 1;
+            return;
+        }
+        s->tr = q;
+        s->trcap = cap;
+    }
+    memcpy(s->tr + s->trn, p, bytes);
+    s->trn += bytes;
+}
+
+static void st_status(struct stale *s, cft_status st)
+{
+    const int32_t v = (int32_t)st;
+    st_rec(s, &v, sizeof v);
+}
+
+/* A device run READS B - copysign(B, B), which is B bit for bit. */
+static void st_read(struct stale *s)
+{
+    uint32_t fl = 0, bus = 0;
+    memset(s->out, 0, s->n * s->esz);
+    st_status(s, cft_run(s->dev, CFT_COPYSIGN, s->fmt, CFT_RNE, s->B.p,
+                         s->B.p, NULL, s->out, s->n, &fl, &bus));
+    st_rec(s, s->out, s->n * s->esz);
+}
+
+/* A device run WRITES B - x + y, left on the device. */
+static void st_write(struct stale *s)
+{
+    uint32_t fl = 0, bus = 0;
+    st_status(s, cft_run(s->dev, CFT_ADD, s->fmt, CFT_RNE, s->x, NULL, s->y,
+                         s->B.p, s->n, &fl, &bus));
+}
+
+static void st_reduce_seg(struct stale *s)
+{
+    uint32_t fl = 0, bus = 0;
+    st_status(s, cft_reduce_seg(s->dev, CFT_SUM, s->fmt, CFT_RNE, s->x, NULL,
+                                s->B.p, s->n, 8, &fl, &bus));
+    st_rec(s, &fl, sizeof fl);
+}
+
+/* The one-deposit program: deposits a, so a kept lane's slot is x. */
+static void st_program(struct stale *s, int masked, uint8_t *deposits,
+                       uint32_t *counts, int planted)
+{
+    cft_run_args A;
+    uint32_t fl = 0, bus = 0;
+    cft_status st = CFT_ERR_INTERNAL;
+    memset(&A, 0, sizeof A);
+    A.struct_size = sizeof A;
+    A.a = s->x;
+    A.n = s->n;
+    A.deposits = deposits;
+    A.counts = counts;
+    if (masked) {
+        A.lane_mask = s->mask;
+        A.lane_mask_bytes = (s->n + 7) / 8;
+    }
+    A.flags_out = &fl;
+    A.bus_out = &bus;
+    /* A planted refusal happens on the device only: the software backend
+     * has no tile, and its transcript records the refusal the device
+     * must give. */
+    if (!planted || s->plants) {
+        if (planted)
+            put_env("CFT_XRT_WITNESS", "busy-before");
+        st = cft_program_run_ex(s->prog, &A);
+        if (planted)
+            put_env("CFT_XRT_WITNESS", NULL);
+    }
+    st_status(s, st);
+}
+
+/* One call of entry point `fn`: reading B (IN, in place) or x, writing B
+ * (OUT, in place) or this device's plain `out`. What it wrote to plain
+ * memory is recorded; what it wrote to B is seen by the read after. */
+static void st_host(struct stale *s, int fn, int dir)
+{
+    const size_t n = s->n, esz = s->esz;
+    const cft_format fmt = s->fmt;
+    const uint8_t *a = dir == SD_OUT ? s->x : s->B.p;
+    uint8_t *d = dir == SD_IN ? s->out : s->B.p;
+    uint32_t fl = 0, bus = 0;
+    int64_t sc = 0;
+    size_t len = 0, bad = 0;
+    cft_status st;
+
+    memset(s->out, 0, n * esz);
+    memset(s->e, 0, n * esz);
+    switch (fn) {
+    case SH_EXP:
+        st = cft_exp(s->dev, fmt, CFT_RNE, a, d, n, &fl);
+        break;
+    case SH_POW:
+        st = cft_pow(s->dev, fmt, CFT_RNE, a, s->y, d, n, &fl);
+        break;
+    case SH_POWN:           /* here the integer operand is the one in B */
+        st = dir == SD_OUT
+                 ? cft_pown(s->dev, fmt, CFT_RNE, s->x, s->i64, d, n, &fl)
+                 : cft_pown(s->dev, fmt, CFT_RNE, s->x,
+                            (const int64_t *)(const void *)s->B.p, d,
+                            n * esz / 8 < n ? n * esz / 8 : n, &fl);
+        break;
+    case SH_RINT:
+        st = cft_rint(s->dev, fmt, CFT_RNE, 1, a, d, n, &fl, &bus);
+        break;
+    case SH_NEXTUP:
+        st = cft_next_up(s->dev, fmt, a, d, n, &fl);
+        break;
+    case SH_LOGB:
+        st = cft_logb(s->dev, fmt, a, d, n, &fl);
+        break;
+    case SH_SCALEB_HOST:    /* below every subnormal: packed on the host */
+        st = cft_scaleb(s->dev, fmt, CFT_RNE, a, -((int64_t)1 << 40), d, n,
+                        &fl, &bus);
+        break;
+    case SH_SCALEB_DEV:     /* multiplies by 2^3 on the device */
+        st = cft_scaleb(s->dev, fmt, CFT_RNE, a, 3, d, n, &fl, &bus);
+        break;
+    case SH_REM:
+        st = cft_rem(s->dev, fmt, a, s->y, d, n, &fl);
+        break;
+    case SH_CONVERT:
+        st = cft_convert(s->dev, fmt, fmt, CFT_RNE, a, d, n, &fl);
+        break;
+    case SH_CVT_TO:
+        st = cft_cvt_to_i32(s->dev, fmt, CFT_RNE, 0, a,
+                            (int32_t *)(void *)d, n, &fl);
+        break;
+    case SH_CVT_FROM:       /* here the integers are the ones in B */
+        st = cft_cvt_from_i32(s->dev, fmt, CFT_RNE,
+                              dir == SD_OUT
+                                  ? s->i32
+                                  : (const int32_t *)(const void *)s->B.p,
+                              d, n, &fl);
+        break;
+    case SH_CLASS:
+        st = cft_class(s->dev, fmt, a, d, n);
+        break;
+    case SH_TORDER:
+        st = cft_total_order(s->dev, fmt, a, s->y, d, n);
+        break;
+    case SH_MINMAG:
+        st = cft_min_mag(s->dev, fmt, a, s->y, d, n, &fl);
+        break;
+    case SH_CMPSIG:
+        st = cft_cmp_sig(s->dev, CFT_CMPLT, fmt, a, s->y, d, n, &fl, &bus);
+        break;
+    case SH_AUG_R:
+        st = cft_augmented_add(s->dev, fmt, a, s->y, d, s->e, n, &fl);
+        break;
+    case SH_AUG_E:
+        st = cft_augmented_add(s->dev, fmt, a, s->y, s->e, d, n, &fl);
+        break;
+    case SH_AUG_SUB:
+        st = cft_augmented_sub(s->dev, fmt, a, s->y, d, s->e, n, &fl);
+        break;
+    case SH_FO_NARROW:
+        st = cft_formatof_add(s->dev, fmt, (cft_format)(fmt - 1), CFT_RNE, a,
+                              s->y, d, n, &fl, &bus);
+        break;
+    case SH_FO_WIDE:        /* half the elements: the results are twice as wide */
+        st = cft_formatof_add(s->dev, fmt, (cft_format)(fmt + 1), CFT_RNE, a,
+                              s->y, d, n / 2, &fl, &bus);
+        break;
+    case SH_DIV:
+        st = cft_div(s->dev, fmt, CFT_RNE, a, s->y, d, n, &fl, &bus);
+        break;
+    case SH_SQRT:
+        st = cft_sqrt(s->dev, fmt, CFT_RNE, a, d, n, &fl, &bus);
+        break;
+    case SH_PAYLOAD:
+        st = cft_get_payload(s->dev, fmt, a, d, n);
+        break;
+    case SH_SETPAY:
+        st = cft_set_payload(s->dev, fmt, a, d, n);
+        break;
+    case SH_TODEC:
+        st = cft_to_decimal_char(s->dev, fmt, CFT_RNE, a, 17, (char *)d,
+                                 n * esz, &len, &fl);
+        break;
+    case SH_FROMDEC: {
+        const char *in[64];
+        size_t i;
+        for (i = 0; i < n && i < 64; i++)
+            in[i] = stale_texts[i % 8];
+        st = cft_from_decimal_char(s->dev, fmt, CFT_RNE, in, d,
+                                   n < 64 ? n : 64, &bad, &fl);
+        break;
+    }
+    case SH_SCALED:
+        st = cft_scaled_prod(s->dev, fmt, CFT_RNE, a,
+                             dir == SD_IN ? s->out : s->B.p + 3 * esz,
+                             dir == SD_IN
+                                 ? &sc
+                                 : (int64_t *)(void *)(s->B.p + 8 * esz),
+                             n, &fl);
+        break;
+    case SH_REDUCE:
+        st = cft_reduce(s->dev, CFT_SUM, fmt, CFT_RNE, a, NULL,
+                        dir == SD_IN ? s->out : s->B.p + 5 * esz, n, &fl,
+                        &bus);
+        break;
+    case SH_REDUCE_SEG:
+        st = cft_reduce_seg(s->dev, CFT_SUM, fmt, CFT_RNE, a, NULL, d, n, 8,
+                            &fl, &bus);
+        break;
+    default:                /* SH_DIV_FULL, SH_SQRT_FULL */
+        put_env("CFT_DIVSQRT_FULL", "1");
+        st = fn == SH_DIV_FULL
+                 ? cft_div(s->dev, fmt, CFT_RNE, a, s->y, d, n, &fl, &bus)
+                 : cft_sqrt(s->dev, fmt, CFT_RNE, a, d, n, &fl, &bus);
+        put_env("CFT_DIVSQRT_FULL", NULL);
+        break;
+    }
+    st_status(s, st);
+    st_rec(s, &fl, sizeof fl);
+    st_rec(s, &len, sizeof len);
+    st_rec(s, &bad, sizeof bad);
+    st_rec(s, &sc, sizeof sc);
+    st_rec(s, s->out, n * esz);
+    st_rec(s, s->e, n * esz);
+}
+
+static void st_seq(struct stale *s, int which)
+{
+    const size_t esz = s->esz;
+    uint32_t fl = 0, bus = 0;
+
+    switch (which) {
+    case SV_RSEG:
+        st_read(s);
+        st_reduce_seg(s);
+        st_read(s);
+        break;
+    case SV_RSEG_BACK:
+        st_read(s);
+        st_reduce_seg(s);
+        st_status(s, cft_buffer_from_device(s->B.b));
+        st_read(s);
+        break;
+    case SV_RED:
+        st_read(s);
+        st_status(s, cft_reduce(s->dev, CFT_SUM, s->fmt, CFT_RNE, s->x, NULL,
+                                s->B.p + 5 * esz, s->n, &fl, &bus));
+        st_read(s);
+        break;
+    case SV_COUNTS:
+        st_read(s);
+        st_program(s, 0, s->dep, (uint32_t *)(void *)s->B.p, 0);
+        st_rec(s, s->dep, s->n * esz);
+        st_read(s);
+        break;
+    case SV_WITNESS: {
+        cft_status st = CFT_ERR_INTERNAL;
+        st_read(s);
+        st_write(s);
+        if (s->plants) {
+            put_env("CFT_XRT_WITNESS", "busy-before");
+            st = cft_run(s->dev, CFT_ADD, s->fmt, CFT_RNE, s->y, NULL, s->x,
+                         s->B.p, s->n / 2, &fl, &bus);
+            put_env("CFT_XRT_WITNESS", NULL);
+        }
+        st_status(s, st);
+        st_read(s);
+        break;
+    }
+    case SV_RSEG_DIRTY:
+        st_write(s);
+        st_reduce_seg(s);
+        break;
+    case SV_MASKED:
+        st_program(s, 1, s->B.p, s->cnt, 1);
+        st_reduce_seg(s);
+        st_program(s, 1, s->B.p, s->cnt, 0);
+        st_rec(s, s->cnt, s->n * sizeof *s->cnt);
+        break;
+    case SV_PUBLISH:
+        st_write(s);
+        st_status(s, cft_buffer_to_device(s->B.b));
+        st_read(s);
+        break;
+    case SV_RWR:            /* a flush must stale the copies it moves under */
+        st_read(s);
+        st_write(s);
+        st_read(s);
+        break;
+    /* A result written on the host into the very array the call read on
+     * the device - legal, and the case the after-write note exists for:
+     * the call filled a copy over bytes it then wrote, and the second
+     * call binds the same window. */
+    case SV_RED_TWICE:
+        st_status(s, cft_reduce(s->dev, CFT_SUM, s->fmt, CFT_RNE, s->B.p,
+                                NULL, s->B.p + 5 * esz, s->n, &fl, &bus));
+        st_status(s, cft_reduce(s->dev, CFT_SUM, s->fmt, CFT_RNE, s->B.p,
+                                NULL, s->out, s->n, &fl, &bus));
+        st_rec(s, s->out, esz);
+        break;
+    case SV_RSEG_TWICE:
+        st_status(s, cft_reduce_seg(s->dev, CFT_SUM, s->fmt, CFT_RNE, s->B.p,
+                                    NULL, s->B.p, s->n, 8, &fl, &bus));
+        st_status(s, cft_reduce_seg(s->dev, CFT_SUM, s->fmt, CFT_RNE, s->B.p,
+                                    NULL, s->out, s->n, 8, &fl, &bus));
+        st_rec(s, s->out, (s->n / 8) * esz);
+        break;
+    default: {              /* SV_COUNTS_TWICE */
+        const uint8_t *keep = s->x;
+        s->x = s->B.p;      /* the program's stream a is B */
+        st_program(s, 0, s->dep, (uint32_t *)(void *)s->B.p, 0);
+        st_rec(s, s->dep, s->n * esz);
+        st_program(s, 0, s->dep, s->cnt, 0);
+        st_rec(s, s->dep, s->n * esz);
+        s->x = keep;
+        break;
+    }
+    }
+}
+
+/* One scenario on both devices, into a fresh B each; 1 if the
+ * transcripts agree. B brought home ends every transcript. */
+static int stale_one(struct stale *S, int is_host, int which, int dir,
+                     const char *label)
+{
+    size_t i;
+    int k;
+    for (k = 0; k < 2; k++) {
+        struct stale *s = &S[k];
+        s->trn = 0;
+        s->oom = 0;
+        /* the plain outputs start the same on both devices: a masked
+         * lane's count is the caller's, and must be a known one */
+        memset(s->out, 0, s->n * s->esz);
+        memset(s->dep, 0x5c, s->n * s->esz);
+        memset(s->e, 0, s->n * s->esz);
+        memset(s->cnt, 0xa5, s->n * sizeof *s->cnt);
+        if (!rbuf_alloc(s->dev, &s->B, s->n * s->esz)) {
+            s->oom = 1;
+            continue;
+        }
+        memcpy(s->B.p, s->init, s->n * s->esz);
+        st_status(s, cft_buffer_to_device(s->B.b));
+        if (is_host) {
+            if (dir == SD_IN)
+                st_write(s);
+            else
+                st_read(s);
+            st_host(s, which, dir);
+            if (dir != SD_IN)
+                st_read(s);
+        } else {
+            st_seq(s, which);
+        }
+        st_status(s, cft_buffer_from_device(s->B.b));
+        st_rec(s, s->B.p, s->n * s->esz);
+        rbuf_free(&s->B);
+    }
+    checks++;
+    if (S[0].oom || S[1].oom) {
+        printf("  FAIL stale copies (%s), %s: out of memory\n",
+               cft_format_name(S[0].fmt), label);
+        failures++;
+        return 0;
+    }
+    if (S[0].trn == S[1].trn && !memcmp(S[0].tr, S[1].tr, S[0].trn))
+        return 1;
+    for (i = 0; i < S[0].trn && i < S[1].trn && S[0].tr[i] == S[1].tr[i];
+         i++)
+        ;
+    printf("  FAIL stale copies (%s), %s: the device's transcript leaves the "
+           "software backend's at byte %lu of %lu (the device's has %lu)\n",
+           cft_format_name(S[0].fmt), label, (unsigned long)i,
+           (unsigned long)S[0].trn, (unsigned long)S[1].trn);
+    failures++;
+    return 0;
+}
+
+/* Whether `hw` can take entry point `fn` at `fmt` the way the software
+ * backend does - a composed one needs its passes' opcodes, and a
+ * reduction per segment its feature bit. -1 for a case that does not
+ * exist at this format at all (no narrower or wider format), which is
+ * nobody's limit and so is skipped without a line. */
+static int stale_host_ok(cft_device *hw, const cft_caps *hc, int fn,
+                         cft_format fmt)
+{
+    if ((fn == SH_FO_NARROW && fmt == CFT_FP32) ||
+        (fn == SH_FO_WIDE && fmt == CFT_FP256))
+        return -1;
+    switch (fn) {
+    case SH_RINT:
+        return cft_supports(hw, CFT_ADD, fmt) &&
+               cft_supports(hw, CFT_COPYSIGN, fmt);
+    case SH_SCALEB_DEV:
+        return cft_supports(hw, CFT_MUL, fmt);
+    case SH_CMPSIG:
+        return cft_supports(hw, CFT_CMPLT, fmt);
+    case SH_FO_WIDE:
+        return cft_supports(hw, CFT_ADD, (cft_format)(fmt + 1));
+    case SH_DIV:
+    case SH_DIV_FULL:
+        return cft_supports(hw, CFT_FMA, fmt) &&
+               cft_supports(hw, CFT_NEG, fmt) &&
+               cft_supports(hw, CFT_RECIP_SEED, fmt);
+    case SH_SQRT:
+    case SH_SQRT_FULL:
+        return cft_supports(hw, CFT_FMA, fmt) &&
+               cft_supports(hw, CFT_NEG, fmt) &&
+               cft_supports(hw, CFT_RSQRT_SEED, fmt);
+    case SH_REDUCE:
+        return cft_supports(hw, CFT_SUM, fmt);
+    case SH_REDUCE_SEG:
+        return cft_supports(hw, CFT_SUM, fmt) &&
+               (hc->seq_features & CFT_FEAT_REDUCE_SEG) != 0;
+    default:
+        return 1;
+    }
+}
+
+static void check_stale_copies(cft_device *sw, cft_device *hw,
+                               cft_format fmt, const cft_caps *hc)
+{
+    const size_t esz = cft_format_size(fmt), n = 64;
+    const int seg = cft_supports(hw, CFT_SUM, fmt) &&
+                    (hc->seq_features & CFT_FEAT_REDUCE_SEG) != 0;
+    const int xrt = !strcmp(hc->backend, "xrt");
+    uint8_t *x = (uint8_t *)malloc(n * esz), *y = (uint8_t *)malloc(n * esz);
+    uint8_t *z = (uint8_t *)calloc(n, esz), *init = (uint8_t *)malloc(n * esz);
+    uint8_t mask[(64 + 7) / 8];
+    int64_t i64[64];
+    int32_t i32[64];
+    uint8_t img[64];
+    uint64_t ins[2];
+    struct stale S[2];
+    char label[160];
+    size_t i;
+    int k, fn, dir, which, runs = 0, agreed = 0, progs = 1;
+
+    memset(S, 0, sizeof S);
+    memset(mask, 0, sizeof mask);
+    if (!cft_supports(hw, CFT_COPYSIGN, fmt) || !cft_supports(hw, CFT_ADD, fmt)) {
+        not_here(NH_BUFFERS, "COMPARED", "  buffers, stale copies",
+                 "its reads and writes need CFT_COPYSIGN and CFT_ADD");
+        goto out;
+    }
+    if (!x || !y || !z || !init) {
+        printf("  FAIL stale copies: out of memory\n");
+        failures++;
+        goto out;
+    }
+    rs = 0x57A1E000u + (uint32_t)fmt;
+    fill_finite(x, fmt, n);
+    fill_finite(y, fmt, n);
+    fill_finite(init, fmt, n);
+    for (i = 0; i < n; i++) {
+        i64[i] = (int64_t)(rbyte() % 21) - 10;
+        i32[i] = (int32_t)((uint32_t)rbyte() << 24 | (uint32_t)rbyte() << 8);
+        if (i % 3)
+            mask[i >> 3] |= (uint8_t)(1u << (i & 7u));
+    }
+    ins[0] = seq_ctrl(3, 0, 0);                  /* deposit r0 = a */
+    ins[1] = seq_ctrl(0, 0, 0);                  /* halt */
+    for (k = 0; k < 2; k++) {
+        struct stale *s = &S[k];
+        s->dev = k ? hw : sw;
+        s->fmt = fmt;
+        s->n = n;
+        s->esz = esz;
+        s->plants = k && xrt;
+        s->x = x; s->y = y; s->z = z; s->init = init; s->mask = mask;
+        s->i64 = i64;
+        s->i32 = i32;
+        s->out = (uint8_t *)malloc(n * esz);
+        s->dep = (uint8_t *)malloc(n * esz);
+        s->e = (uint8_t *)malloc(n * esz);
+        s->cnt = (uint32_t *)malloc(n * sizeof *s->cnt);
+        if (!s->out || !s->dep || !s->e || !s->cnt) {
+            printf("  FAIL stale copies: out of memory\n");
+            failures++;
+            goto out;
+        }
+        if (cft_program_load(s->dev, img,
+                             seq_image(img, fmt, ins, 2, NULL, 0, 1),
+                             &s->prog) != CFT_OK)
+            progs = 0;
+    }
+
+    for (which = 0; which < SV_COUNT; which++) {
+        const int needs_seg = which == SV_RSEG || which == SV_RSEG_BACK ||
+                              which == SV_RSEG_DIRTY || which == SV_MASKED ||
+                              which == SV_RSEG_TWICE;
+        const int needs_prog = which == SV_COUNTS || which == SV_MASKED ||
+                               which == SV_COUNTS_TWICE;
+        if ((needs_seg && !seg) || (needs_prog && !progs) ||
+            (which == SV_MASKED &&
+             !(hc->seq_features & CFT_SEQ_FEAT_LANE_MASK)) ||
+            (which == SV_RED_TWICE && !cft_supports(hw, CFT_SUM, fmt))) {
+            snprintf(label, sizeof label, "  stale copies (%s), %s",
+                     cft_format_name(fmt), sv_name[which]);
+            not_here(NH_BUFFERS, "COMPARED", label,
+                     "this device does not publish what it needs");
+            continue;
+        }
+        if ((which == SV_WITNESS || which == SV_MASKED) && !xrt) {
+            snprintf(label, sizeof label, "    stale copies (%s), %s",
+                     cft_format_name(fmt), sv_name[which]);
+            not_here(NH_OTHER, "TESTED", label, "the %s backend has no tile "
+                     "to plant a refusal on, so it runs without one",
+                     hc->backend);
+        }
+        runs++;
+        agreed += stale_one(S, 0, which, 0, sv_name[which]);
+    }
+    for (fn = 0; fn < SH_COUNT; fn++) {
+        const int ok = stale_host_ok(hw, hc, fn, fmt);
+        if (ok < 0)
+            continue;
+        if (!ok) {
+            snprintf(label, sizeof label, "  stale copies (%s), %s",
+                     cft_format_name(fmt), sh_name[fn]);
+            not_here(NH_BUFFERS, "COMPARED", label,
+                     "this device cannot run it as the software backend does");
+            continue;
+        }
+        for (dir = SD_IN; dir <= SD_INPLACE; dir++) {
+            /* the text is the caller's, never B's; and in place is legal
+             * only where d may alias a */
+            if (dir == SD_IN && fn == SH_FROMDEC)
+                continue;
+            if (dir == SD_INPLACE &&
+                !(fn == SH_EXP || fn == SH_RINT || fn == SH_NEXTUP ||
+                  fn == SH_SCALEB_DEV || fn == SH_DIV || fn == SH_SQRT ||
+                  fn == SH_MINMAG || fn == SH_AUG_R || fn == SH_DIV_FULL ||
+                  fn == SH_SQRT_FULL))
+                continue;
+            snprintf(label, sizeof label, "%s, %s", sh_name[fn], sd_name[dir]);
+            runs++;
+            agreed += stale_one(S, 1, fn, dir, label);
+        }
+    }
+    printf("    stale copies (%s): %d of %d scenarios agree with the software "
+           "backend, transcript for transcript - V7's sequences and every "
+           "entry point computed on the host, both ways\n",
+           cft_format_name(fmt), agreed, runs);
+out:
+    for (k = 0; k < 2; k++) {
+        cft_program_free(S[k].prog);
+        free(S[k].out); free(S[k].dep); free(S[k].e); free(S[k].cnt);
+        free(S[k].tr);
+    }
+    free(x); free(y); free(z); free(init);
+}
+
 int main(int argc, char **argv)
 {
     static const cft_op ops[] = {CFT_FMA, CFT_ADD, CFT_SUB, CFT_MUL,
@@ -6835,6 +7589,14 @@ int main(int argc, char **argv)
                                        (uint32_t)f);
             printf("  buffers, publish takes effect: %d checks, %d "
                    "failed\n", checks, failures);
+            fflush(stdout);
+
+            /* The stale-copy class (verifier-V7, 2026-09-25): every path
+             * that reads or writes a resident buffer's mirror on the
+             * host, held to the software backend both ways. */
+            check_stale_copies(sw, hw, fmt, &caps);
+            printf("  buffers, stale copies: %d checks, %d failed\n",
+                   checks, failures);
             fflush(stdout);
 
             /* A program's scratch blocks, which bind as the deposit

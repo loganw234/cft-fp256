@@ -39,6 +39,15 @@
 // `make -C host XRT=1 cft-resident`. Runs on one compute unit or all
 // of them at once; the aggregate is what a four-tile image gives when
 // each tile has its own HBM group, which hw/link_quad.cfg arranges.
+//
+// It drives the kernel ITSELF - xrt::run and its own 60 s wait - and
+// not through libcft's scheduler, so the completion witness
+// (docs/HOSTAPI.md, "A tile a run was abandoned on") does not guard it.
+// On a tile a run was abandoned on, XRT can complete this tool's runs
+// early; its byte checks cannot see that, since every run writes the
+// same bytes to the same buffers, and the rate it prints would be too
+// high. Reload the image before measuring after any timeout, this
+// tool's own included (docs/CARDDAY.md).
 
 #include <algorithm>
 #include <chrono>

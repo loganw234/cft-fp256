@@ -314,12 +314,27 @@ no command of this handle is outstanding on it, and refuses by name:
   "tile N (cft_krnl:{cft_krnl_M}) is running work this process did not
   start (CTRL 0x..., not idle)". Retry when that run has finished.
 - **after XRT reports a run complete**, a tile still busy was completed
-  early: the call waits until the tile is idle (as long as a run may
-  take, so no write of it lands after the call returns), collects
-  nothing, and returns `CFT_ERR_INTERNAL`, "XRT reported ... complete
-  while tile N (...) was still running it", naming the cure - reload
-  the image: load another xclbin, then this one. Loading the same image
-  again is a no-op to XRT and cures nothing.
+  early: the call waits until the tile is idle, for as long as a run may
+  take (`CFT_TIMEOUT_MS`), collects nothing, and returns
+  `CFT_ERR_INTERNAL`, "XRT reported ... complete while tile N (...) was
+  still running it", naming the cure - reload the image: load another
+  xclbin, then this one. When the tile went idle within the wait the
+  sentence says each such tile "has since finished it", and no write of
+  the run lands after the call returns; when it did NOT, the handle is
+  finished as a timeout's is - the sentence says so - and the tile may
+  still write its windows after the call returns. Loading the same
+  image again is a no-op to XRT and cures nothing: on the card after
+  the orphan of 2026-09-25, every load until the reload was logged by
+  the driver as "xclbin is already downloaded", and the program set run
+  through those loads was still wrong in the same lanes
+  (docs/VALIDATION.md, 2026-09-25; the journal excerpt is
+  `Data/runs/2026-09-25-ode-round/card-witness/journal-probe3-probe4.txt`,
+  gitignored).
+
+What the witness reads, and so what it can say, is CTRL's `ap_start`
+and `ap_idle` as `rtl/cft_csr.sv` defines them; it was measured with
+XRT 2.19 on the card. XRT 2.14 at run time and hardware emulation have
+not been run with it.
 
 The contract has no busy status yet; `CFT_ERR_BUSY` comes with per-tile
 failure in the plan of record's step 3 (docs/ROADMAP.md). An output
@@ -421,9 +436,16 @@ its quarter rather than the whole array.
 
 A copy is reused only when the window is the same one again - which is
 the common case by construction, since the same call in a loop asks
-for the same `n`, format and tile count - and otherwise it refills,
-which costs exactly what staging costs and never more. **There is no
-case in which residency is slower than the staged path it replaces.**
+for the same `n`, format and tile count - and nothing has changed the
+mirror under that window since the copy was filled; otherwise it
+refills, which costs exactly what staging costs and never more. **There
+is no case in which residency is slower than the staged path it
+replaces.** A change to the mirror stales only the copies over the
+bytes it changed - a copy brought home, a result the library wrote on
+the host (below) - so a buffer carved into windows (streams, a deposit
+window, a program's counts) keeps the rest resident; only
+`cft_buffer_to_device`, after which the caller may have written any of
+it, stales every copy.
 
 **Authority.** One mirror, several copies, and exactly one of them is
 authoritative:
@@ -435,20 +457,46 @@ authoritative:
 | `cft_buffer_from_device` | the host mirror again | the mirror |
 | a run that FAILED once the device may have started it | nothing: the buffer is lost | nothing - refused by name until `cft_buffer_to_device` |
 
-`cft_buffer_to_device` moves nothing: it marks every copy stale, and
-each refills at its next binding for the window that binding needs.
-Pushing eagerly would mean pushing the whole buffer into every tile's
-channel and then pushing the right windows again at the first run.
+`cft_buffer_to_device` pushes nothing: a run's bytes still on the
+device come home FIRST - so a publish after a run keeps the run's
+results, as the software backend does, where until 2026-09-25 it
+discarded them (verifier-V7) - and then every copy is marked stale and
+refills at its next binding for the window that binding needs. Pushing
+eagerly would mean pushing the whole buffer into every tile's channel
+and then pushing the right windows again at the first run.
 
-**Breaking the rule costs time, never correctness.** A buffer that is
-device-authoritative and is fed in as an input is read back by the
+**Breaking the read rule costs time, never correctness.** A buffer that
+is device-authoritative and is fed in as an input is read back by the
 library first, before the tile or the host layer can see the stale
-mirror - so 9.4's infinity scan in `cft_reduce`, the software
-backend's own loop and the next run all see the bytes the last run
-wrote. The one case the library cannot see is a store into the mirror
-with no `cft_buffer_to_device` after it, because a plain store leaves
-no trace; that is why the sync calls exist, and `device-test -b`'s
-publish check is what proves publishing takes effect.
+mirror - so 9.4's infinity scan in `cft_reduce`, the software backend's
+own loop, the entry points computed on the host (the transcendentals,
+clause 5, the conversions, the augmented and formatOf arithmetic, the
+payload and character operations, the scaled products) and the next run
+all see the bytes the last run wrote. Until 2026-09-25 the entry points
+computed on the host read the stale mirror (verifier-V7: `cft_exp` after
+a device ADD into the same buffer, 64 of 64 wrong with `CFT_OK`).
+
+**The library's own writes keep the rule too.** An entry point that
+writes a resident buffer on the host - those above, `cft_reduce`'s and
+`cft_reduce_seg`'s results, a program run's counts, an output whose
+binding was declined and staged - first brings home a run's bytes over
+what it writes, and stales every device copy over it, so the next run
+reads the new bytes. Until 2026-09-25 none did, and a run after such a
+write read the bytes from before it, with `CFT_OK` (verifier-V7: nine
+sequences, one to four tiles). `device-test -b`'s "stale copies" holds
+every such entry point both ways - a run's bytes read on the host, the
+host's bytes read by a run, and in place - against the software backend,
+transcript for transcript.
+
+**Two things the library cannot see**, both a store the caller makes
+into the mirror: one with no `cft_buffer_to_device` after it, because a
+plain store leaves no trace - the run then uses the bytes the buffer last
+published, which is why the sync calls exist, and `device-test -b`'s
+publish check is what proves publishing takes effect; and one into a
+buffer a run has written and nobody has read back, because the run's
+bytes are still on the device and whichever sync call comes next brings
+them home over the store, where on the software backend the store would
+stand. Read a buffer back before writing into it.
 
 **A lane mask reads the output it writes.** Under a lane mask a program
 leaves a masked lane's deposit slots and scratch-out slots as they
@@ -466,13 +514,17 @@ the device may have started it - a timeout, a fault the tile reported,
 a run refused after it ran (the completion witness, above) - may have
 written part of a resident window over bytes an earlier run left there
 that never came home. Nothing can vouch for that buffer any more, so
-`cft_buffer_from_device` on it, and any run that reads it, is refused
-with `CFT_ERR_INTERNAL` and a sentence, until `cft_buffer_to_device`
-publishes the mirror as the truth again. Until 2026-09-25 the device
-copy kept the earlier run's "written" mark and the failed run's bytes
-came back with `CFT_OK` (verifier-V4). device-test plants the refusal
-with `CFT_XRT_WITNESS=busy-after` over a window an earlier run left
-unflushed and holds both refusals and the recovery.
+`cft_buffer_from_device` on it, and any call that reads or writes it -
+a run, an entry point computed on the host, a lane mask read from it -
+is refused with `CFT_ERR_INTERNAL` and a sentence, until
+`cft_buffer_to_device` publishes the mirror as the truth again (which
+drops what the device held rather than bringing it home).
+`cft_buffer_get_info` reports it with `device_authority` 0 and a
+`staged_why` beginning "LOST:". Until 2026-09-25 the device copy kept
+the earlier run's "written" mark and the failed run's bytes came back
+with `CFT_OK` (verifier-V4). device-test plants the refusal with
+`CFT_XRT_WITNESS=busy-after` over a window an earlier run left unflushed
+and holds every one of those refusals, the report and the recovery.
 
 **What is not resident.** `cft_reduce`'s partials are the library's
 own array; the composed reductions (`CFT_DOT`, `CFT_SUMSQ`,

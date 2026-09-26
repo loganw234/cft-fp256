@@ -798,6 +798,16 @@ static cft_status fo_batch(cft_device *dev, int op, cft_format sfmt,
         }
     } else {
         size_t i;
+        /* Computed on the host, so announced (softfloat.h's cft_host_io).
+         * The widening route above needs nothing: its reads go through
+         * cft_convert and its writes through cft_run, cft_div and
+         * cft_sqrt, which announce their own. */
+        st = (cft_status)cft_host_io(dev, a, op != FO_SQRT ? b : NULL,
+                                     op == FO_FMA ? c : NULL,
+                                     n * (size_t)(f->width / 8), d,
+                                     n * (size_t)(g->width / 8));
+        if (st != CFT_OK)
+            return st;
         for (i = 0; i < n; i++) {
             cft_bn xa, xb, xc, v;
             uint32_t fl = 0;

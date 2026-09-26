@@ -279,6 +279,39 @@ struct cft_device;              /* cft.h's opaque handle; device.c owns it */
 void cft_flags_emit(struct cft_device *dev, uint32_t acc,
                     uint32_t *flags_out);
 
+/* Resident buffers and the entry points computed ON THE HOST.
+ *
+ * On a device handle a cft_alloc'd buffer has a mirror - the pointer the
+ * caller holds - and device copies, and cft.h's authority rule says
+ * which is the truth. An entry point that reads or writes the caller's
+ * arrays on the host (a transcendental, a clause-5 operation, a
+ * conversion, a reduction's result) keeps that rule too, or it reads a
+ * mirror a run has left stale, and writes one whose device copies go on
+ * being served as current (verifier-V7, 2026-09-25: cft_exp reading a
+ * buffer a device ADD had just written, and a device run reading one
+ * cft_exp had just written - 64 of 64 wrong, with CFT_OK). So:
+ *
+ *   cft_host_in   before the host READS p: a resident buffer's device
+ *                 bytes come home first;
+ *   cft_host_out  before the host WRITES p: a run's bytes over the range
+ *                 come home first and every copy over it goes stale.
+ *
+ * Both refuse a buffer a failed run left LOST, by name, and are CFT_OK
+ * for memory that is not a resident buffer's and on a handle with no
+ * device copies at all (the software backend, a remote handle). Call
+ * cft_host_out with no device pass between it and the write it
+ * announces: a pass reading the caller's array in between would fill a
+ * copy the write then leaves stale - so a composition that runs passes
+ * over the caller's arrays between its host writes calls it again
+ * before each write. Idempotent. */
+int cft_host_in(struct cft_device *dev, const void *p, size_t bytes);
+int cft_host_out(struct cft_device *dev, void *p, size_t bytes);
+
+/* The common shape in one call: a, b and c READ, `bytes` each, then d
+ * WRITTEN, `dbytes` - any of the four may be NULL. */
+int cft_host_io(struct cft_device *dev, const void *a, const void *b,
+                const void *c, size_t bytes, void *d, size_t dbytes);
+
 /* The composition discipline's half of the same seam.
  *
  * A composed operation - cft_div, cft_sqrt, cft_rint, cft_scaleb,

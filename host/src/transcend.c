@@ -4838,6 +4838,18 @@ static cft_status tr_batch(cft_device *dev, int fn, cft_format fmt,
         return CFT_ERR_INTERNAL;
     if (fn >= CFT_TR_SIN && fn <= CFT_TR_TAN && tr_2opi_ok())
         return CFT_ERR_INTERNAL;         /* only these three read 2/pi */
+    /* Computed on the host, so a resident operand's device bytes come
+     * home first and a resident d is announced before it is written
+     * (softfloat.h). Until 2026-09-25 neither: cft_exp read a buffer a
+     * device ADD had just written from its stale mirror, 64 of 64
+     * wrong with CFT_OK (verifier-V7). */
+    st = (cft_status)cft_host_in(dev, nn, n * sizeof *nn);
+    if (st == CFT_OK)
+        st = (cft_status)cft_host_io(dev, a, b, NULL,
+                                     n * (size_t)(f->width / 8), d,
+                                     n * (size_t)(f->width / 8));
+    if (st != CFT_OK)
+        return st;
 
     for (i = 0; i < n; i++) {
         lane la, lb;

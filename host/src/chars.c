@@ -1500,6 +1500,13 @@ static cft_status from_char_batch(cft_device *dev, cft_format fmt,
     f = &cft_sf_formats[(int)fmt];
     if (size_overflows(f, n))
         return CFT_ERR_INVALID_ARGUMENT;
+    /* d is written on the host (softfloat.h's cft_host_out). The strings
+     * are text, which no run writes. */
+    {
+        const int hs = cft_host_out(dev, d, n * (size_t)(f->width / 8));
+        if (hs != CFT_OK)
+            return (cft_status)hs;
+    }
 
     for (i = 0; i < n; i++) {
         cft_bn v;
@@ -1564,6 +1571,11 @@ CFT_API cft_status cft_to_decimal_char(cft_device *dev, cft_format fmt,
     if (!a || (cap && !out))
         return CFT_ERR_INVALID_ARGUMENT;
     f = &cft_sf_formats[(int)fmt];
+    /* on the host: softfloat.h's cft_host_io */
+    st = (cft_status)cft_host_io(dev, a, NULL, NULL, (size_t)(f->width / 8),
+                                    out, cap);
+    if (st != CFT_OK)
+        return st;
     cft_bn_load(&x, (const uint8_t *)a, f->width / 8);
 
     sb_init(&b);
@@ -1597,6 +1609,11 @@ CFT_API cft_status cft_to_hex_char(cft_device *dev, cft_format fmt,
     if (!a || (cap && !out))
         return CFT_ERR_INVALID_ARGUMENT;
     f = &cft_sf_formats[(int)fmt];
+    /* on the host: softfloat.h's cft_host_io */
+    st = (cft_status)cft_host_io(dev, a, NULL, NULL, (size_t)(f->width / 8),
+                                    out, cap);
+    if (st != CFT_OK)
+        return st;
     cft_bn_load(&x, (const uint8_t *)a, f->width / 8);
 
     sb_init(&b);
@@ -1647,6 +1664,11 @@ CFT_API cft_status cft_get_payload(cft_device *dev, cft_format fmt,
     if (st != CFT_OK || n == 0)
         return st;
     f = &cft_sf_formats[(int)fmt];
+    /* on the host: softfloat.h's cft_host_io */
+    st = (cft_status)cft_host_io(dev, a, NULL, NULL, n * (size_t)(f->width / 8),
+                                    d, n * (size_t)(f->width / 8));
+    if (st != CFT_OK)
+        return st;
     for (i = 0; i < n; i++) {
         lane_cls c;
         cft_bn xa, pay, v;
@@ -1726,6 +1748,11 @@ static cft_status set_payload_core(cft_device *dev, cft_format fmt,
     if (st != CFT_OK || n == 0)
         return st;
     f = &cft_sf_formats[(int)fmt];
+    /* on the host: softfloat.h's cft_host_io */
+    st = (cft_status)cft_host_io(dev, a, NULL, NULL, n * (size_t)(f->width / 8),
+                                    d, n * (size_t)(f->width / 8));
+    if (st != CFT_OK)
+        return st;
     for (i = 0; i < n; i++) {
         cft_bn xa, pay, v;
         lane_load(f, (const uint8_t *)a, i, &xa);

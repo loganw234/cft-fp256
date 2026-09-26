@@ -228,6 +228,16 @@ static cft_status scaled_prod_impl(cft_device *dev, cft_format fmt,
 
     f = &cft_sf_formats[(int)fmt];
     esz = (size_t)f->width / 8;
+    /* Computed on the host: both results are announced before either is
+     * stored, the empty product's included, and the operands below once
+     * they are known to be there (softfloat.h). */
+    {
+        int hs = cft_host_out(dev, pr, esz);
+        if (hs == CFT_OK)
+            hs = cft_host_out(dev, scale_out, sizeof *scale_out);
+        if (hs != CFT_OK)
+            return (cft_status)hs;
+    }
 
     /* 9.4: "When the vector length operand is zero, pr is 1 and sf is
      * +0 without exception." The multiplicative identity, and the only
@@ -249,6 +259,12 @@ static cft_status scaled_prod_impl(cft_device *dev, cft_format fmt,
         return CFT_ERR_INVALID_ARGUMENT;
     if (n > ((size_t)-1) / esz)
         return CFT_ERR_INVALID_ARGUMENT;
+    {
+        const int hs = cft_host_io(dev, a, kind != 0 ? b : NULL, NULL,
+                                   n * esz, NULL, 0);
+        if (hs != CFT_OK)
+            return (cft_status)hs;
+    }
 
     /* The factors. For scaledProd they are the elements themselves and
      * nothing is allocated; for the other two they are the ROUNDED

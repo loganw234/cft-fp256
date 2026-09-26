@@ -203,6 +203,27 @@ static cft_buffer *buf_find(cft_device *dev, const void *p, size_t bytes,
 }
 #endif /* CFT_ENABLE_XRT */
 
+/* The live resident buffer p points into, or NULL. It asks only where p
+ * STARTS - see buf_sync_in for why that, and not buf_find's whole-window
+ * test, is the question for keeping a mirror honest. */
+static cft_buffer *buf_holding(cft_device *dev, const void *p)
+{
+    cft_buffer *b;
+    if (!dev || !p)
+        return NULL;
+    for (b = dev->bufs; b; b = b->next) {
+        uintptr_t bi, qi;
+        if (!b->dbuf || !b->data)
+            continue;
+        bi = (uintptr_t)b->data;
+        qi = (uintptr_t)p;
+        if (qi < bi || qi - bi > b->bytes)
+            continue;
+        return b;
+    }
+    return NULL;
+}
+
 /* Bring a buffer's mirror up to date before anything READS it.
  *
  * The authority rule in cft.h says a caller should call
@@ -220,10 +241,6 @@ static cft_buffer *buf_find(cft_device *dev, const void *p, size_t bytes,
  * until the caller publishes it again (verifier-V4, 2026-09-25). */
 static cft_status buf_sync_in(cft_device *dev, const void *p, size_t bytes)
 {
-    cft_buffer *b;
-    (void)bytes;
-    if (!dev || !p)
-        return CFT_OK;
     /* Deliberately NOT buf_find. That one demands the whole window fit,
      * because a window that overruns must not be BOUND; this one only
      * has to decide whether the mirror about to be read is stale, and
@@ -232,23 +249,73 @@ static cft_status buf_sync_in(cft_device *dev, const void *p, size_t bytes)
      * brought home, and an overrunning run then reads a current mirror
      * and whatever is past it - which is the caller's own bug, not a
      * stale answer this library handed back. */
-    for (b = dev->bufs; b; b = b->next) {
-        uintptr_t bi, qi;
-        if (!b->dbuf || !b->data)
-            continue;
-        bi = (uintptr_t)b->data;
-        qi = (uintptr_t)p;
-        if (qi < bi || qi - bi > b->bytes)
-            continue;
-#ifdef CFT_ENABLE_XRT
-        backend_call();
-        return (cft_status)cftx_buffer_from_device(b->dbuf);
-#else
+    cft_buffer *b = buf_holding(dev, p);
+    (void)bytes;
+    if (!b)
         return CFT_OK;
+#ifdef CFT_ENABLE_XRT
+    backend_call();
+    return (cft_status)cftx_buffer_from_device(b->dbuf);
+#else
+    return CFT_OK;
 #endif
+}
+
+/* softfloat.h's pair, for everything that reads or writes the caller's
+ * arrays on the host. */
+int cft_host_in(struct cft_device *dev, const void *p, size_t bytes)
+{
+    return (int)buf_sync_in(dev, p, bytes);
+}
+
+int cft_host_out(struct cft_device *dev, void *p, size_t bytes)
+{
+#ifdef CFT_ENABLE_XRT
+    cft_buffer *b = buf_holding(dev, p);
+    if (b) {
+        backend_call();
+        return cftx_buffer_will_write(
+            b->dbuf, (size_t)((uintptr_t)p - (uintptr_t)b->data), bytes);
     }
+#else
+    (void)dev;
+    (void)p;
+#endif
+    (void)bytes;
     return CFT_OK;
 }
+
+int cft_host_io(struct cft_device *dev, const void *a, const void *b,
+                const void *c, size_t bytes, void *d, size_t dbytes)
+{
+    /* Every read first, then the write: a flush the reads cause can
+     * only mark current a copy that does not reach d's range, because
+     * the write's own call brings home and stales everything that does. */
+    int st = cft_host_in(dev, a, bytes);
+    if (st == CFT_OK)
+        st = cft_host_in(dev, b, bytes);
+    if (st == CFT_OK)
+        st = cft_host_in(dev, c, bytes);
+    if (st == CFT_OK)
+        st = cft_host_out(dev, d, dbytes);
+    return st;
+}
+
+#ifdef CFT_ENABLE_XRT
+/* The other half, for a call that wrote [p, p + bytes) on the host and
+ * may have filled a copy over it in between: a backend call's collect of
+ * a program's counts, or a reduction that bound the caller's `a` before
+ * storing into a `d` beside it. No backend_call(): this cannot fail, and
+ * clearing the slot here would erase the refusal a failed body just
+ * wrote into it. */
+static void buf_note_host_write(cft_device *dev, const void *p, size_t bytes)
+{
+    cft_buffer *b = buf_holding(dev, p);
+    if (b)
+        (void)cftx_buffer_host_wrote(
+            b->dbuf, (size_t)((uintptr_t)p - (uintptr_t)b->data), bytes);
+}
+#endif
 
 #ifdef CFT_ENABLE_XRT
 static void bind_clear(cft_bindings *bd)
@@ -764,10 +831,26 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
                         return sync_st;
                 }
         }
-        backend_call();
-        return cftx_program_run(dev->hw, fmt, image, image_bytes, io,
-                                max_deposits, a, b, c, deposits, counts, n,
-                                &bd, flags, bus);
+        /* The counts land in the caller's memory ON THE HOST - the
+         * collect copies them there, four bytes a lane at every format
+         * and never worth a device copy - so a resident buffer they land
+         * in is told so on both sides of the run: its copies over them
+         * brought home and staled before, and staled again after,
+         * because the run may have filled one of them in between (the
+         * streams and the counts carved from one buffer). Until
+         * 2026-09-25 neither happened (verifier-V7). */
+        {
+            const size_t cb = n > ((size_t)-1) / 4u ? (size_t)-1 : n * 4u;
+            int rc = cft_host_out(dev, counts, cb);
+            if (rc != CFT_OK)
+                return rc;
+            backend_call();
+            rc = cftx_program_run(dev->hw, fmt, image, image_bytes, io,
+                                  max_deposits, a, b, c, deposits, counts,
+                                  n, &bd, flags, bus);
+            buf_note_host_write(dev, counts, cb);
+            return rc;
+        }
     }
 #endif
 #ifndef CFT_NO_REMOTE
@@ -2196,6 +2279,21 @@ static int result_is_nan(const cft_fmt_desc *f, const void *d)
     return !cft_bn_is_zero(&frac);
 }
 
+static cft_status reduce_body(cft_device *dev, cft_op op, cft_format fmt,
+                              cft_round rnd, const void *a, const void *b,
+                              void *d, size_t n, uint32_t *flags_out,
+                              uint32_t *bus_out);
+
+/* The result is stored ON THE HOST on every path - the identity at
+ * n == 0, the fold of the tiles' partials, maxall's halving, the
+ * override 9.4 asks of sumSquare and sumAbs, the software tree - and on
+ * the XRT paths after the run has bound the caller's `a`. So a resident
+ * `d` is announced before (softfloat.h's cft_host_out: a run's bytes
+ * over it come home, its copies go stale) and marked written after (a
+ * copy of `a` filled during the call over the bytes `d` now holds would
+ * otherwise be served as current). Until 2026-09-25 neither happened,
+ * and a device run reading the buffer after cft_reduce wrote into it got
+ * the bytes from before (verifier-V7). */
 CFT_API cft_status cft_reduce(cft_device *dev,
                               cft_op      op,
                               cft_format  fmt,
@@ -2206,6 +2304,26 @@ CFT_API cft_status cft_reduce(cft_device *dev,
                               size_t      n,
                               uint32_t   *flags_out,
                               uint32_t   *bus_out)
+{
+    const size_t dbytes = cft_format_size(fmt);
+    cft_status st;
+
+    if (bus_out)
+        *bus_out = 0;
+    st = (cft_status)cft_host_out(dev, d, dbytes);
+    if (st != CFT_OK)
+        return st;
+    st = reduce_body(dev, op, fmt, rnd, a, b, d, n, flags_out, bus_out);
+#ifdef CFT_ENABLE_XRT
+    buf_note_host_write(dev, d, dbytes);
+#endif
+    return st;
+}
+
+static cft_status reduce_body(cft_device *dev, cft_op op, cft_format fmt,
+                              cft_round rnd, const void *a, const void *b,
+                              void *d, size_t n, uint32_t *flags_out,
+                              uint32_t *bus_out)
 {
     const cft_fmt_desc *f;
     size_t esz;
@@ -2599,6 +2717,15 @@ CFT_API cft_status cft_reduce(cft_device *dev,
  * device backends are where the entry point earns its existence - one
  * run or one frame for the whole array - and where a device that cannot
  * do that is told so by name rather than handed a loop. */
+static cft_status reduce_seg_body(cft_device *dev, cft_op op,
+                                  cft_format fmt, cft_round rnd,
+                                  const void *a, const void *b, void *d,
+                                  size_t n, size_t seg, uint32_t *flags_out,
+                                  uint32_t *bus_out);
+
+/* cft_reduce's wrapper, for n / seg results: the XRT route's collect
+ * writes them into the caller's `d` on the host, as do the composed
+ * route's override and the software route. */
 CFT_API cft_status cft_reduce_seg(cft_device *dev,
                                   cft_op      op,
                                   cft_format  fmt,
@@ -2610,6 +2737,32 @@ CFT_API cft_status cft_reduce_seg(cft_device *dev,
                                   size_t      seg,
                                   uint32_t   *flags_out,
                                   uint32_t   *bus_out)
+{
+    const size_t esz = cft_format_size(fmt);
+    size_t dbytes = 0;
+    cft_status st;
+
+    if (bus_out)
+        *bus_out = 0;
+    if (seg && esz)
+        dbytes = n / seg > ((size_t)-1) / esz ? (size_t)-1
+                                              : (n / seg) * esz;
+    st = (cft_status)cft_host_out(dev, d, dbytes);
+    if (st != CFT_OK)
+        return st;
+    st = reduce_seg_body(dev, op, fmt, rnd, a, b, d, n, seg, flags_out,
+                         bus_out);
+#ifdef CFT_ENABLE_XRT
+    buf_note_host_write(dev, d, dbytes);
+#endif
+    return st;
+}
+
+static cft_status reduce_seg_body(cft_device *dev, cft_op op,
+                                  cft_format fmt, cft_round rnd,
+                                  const void *a, const void *b, void *d,
+                                  size_t n, size_t seg, uint32_t *flags_out,
+                                  uint32_t *bus_out)
 {
     const cft_fmt_desc *f;
     size_t esz, nres;

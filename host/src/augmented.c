@@ -415,6 +415,12 @@ static cft_status aug_batch(cft_device *dev, cft_format fmt, int is_mul,
     esz = (size_t)(f->width / 8);
     if (n > ((size_t)-1) / esz)
         return CFT_ERR_INVALID_ARGUMENT;
+    /* on the host: softfloat.h's cft_host_io, and e's own announcement */
+    st = (cft_status)cft_host_io(dev, a, b, NULL, n * esz, r, n * esz);
+    if (st == CFT_OK)
+        st = (cft_status)cft_host_out(dev, e, n * esz);
+    if (st != CFT_OK)
+        return st;
 
     for (i = 0; i < n; i++) {
         cft_bn xa, xb, vr, ve;
@@ -466,6 +472,12 @@ CFT_API cft_status cft_augmented_sub(cft_device *dev, cft_format fmt,
     esz = (size_t)(f->width / 8);
     if (n > ((size_t)-1) / esz)
         return CFT_ERR_INVALID_ARGUMENT;
+    /* on the host: softfloat.h's cft_host_io, and e's own announcement */
+    st = (cft_status)cft_host_io(dev, a, b, NULL, n * esz, r, n * esz);
+    if (st == CFT_OK)
+        st = (cft_status)cft_host_out(dev, e, n * esz);
+    if (st != CFT_OK)
+        return st;
 
     for (i = 0; i < n; i++) {
         cft_bn xa, xb, vr, ve;
