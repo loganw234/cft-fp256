@@ -623,8 +623,10 @@ difference - is held to the width rule (refused `width`):
   tightest pair in the format, the value rounded down and rounded up,
   and refuses it `width` when a finite end of it is past the rule,
   which can happen to a value within the rule: 1/(3 x 2^900), enclosed
-  in fp256, has a lower end whose denominator has 1,139 bits. It does
-  not widen the pair. Any pair that holds the value is accepted.
+  in fp256, has a lower end whose denominator has 1,139 bits. Either
+  end can be the one: 1/(2^900 - 1) has a lower end of 901 bits and an
+  upper end of 1,137, and 1/(2^900 + 1) the other way round. It widens
+  neither end. Any pair that holds the value is accepted.
 
 **What re-deriving proves.** Each value IS the stated function of states
 whose hashes the certificate carries, and those states are the ones the
@@ -655,7 +657,8 @@ statement of what it ran on.
   the raw CAPS words, one below VERSION 0x800 and two from it. The
   reader holds each identity line to its own spelling and nothing
   more: not the number of CAPS words to `device-version`, and not the
-  device lines to one another or to `backend`.
+  device lines - `device-tiles` among them - to one another or to
+  `backend`.
 - Each may be `unknown`: the producer did not record it. A reader
   reports it as such.
 - The device lines may be `none`: the field does not exist for this
@@ -911,7 +914,7 @@ accuracy 7, the auditor's own usage 64. The name is the report.
 | `line-order` | 2 | lines are out of their order |
 | `line-unexpected` | 2 | a line has no place where it stands: a repeat, or a line of a block already read |
 | `count` | 2 | a count disagrees with the lines or tokens it counts |
-| `malformed` | 2 | a value breaks its one spelling, its range or its token count, or a line breaks the byte rules; a count out of its own range; a writer asked to certify a run of no segments, handed a certificate object it cannot spell, or handed a field that does not read back as itself (a value of the wrong type) |
+| `malformed` | 2 | a value breaks its one spelling, its range or its token count, or a line breaks the byte rules; a count out of its own range; a writer asked to certify a run of no segments, handed a certificate object it cannot spell, or handed a field that does not read back as itself (a value of the wrong type); asked to write a value it cannot spell (not a rational, or a form, format or direction the page does not name) |
 | `decimal` | 2 | an element's decimal is not the exact decimal of its hex |
 | `accuracy-kind` | 2 | an entry's kind is not its method's; every `bound` in version 1 |
 | `width` | 3 | an exact value past 1,023 bits in numerator or denominator: written, computed (an element's, a product, a partial sum, a difference), an enclosure's finite end, or one a writer was asked to round or enclose |

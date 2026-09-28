@@ -613,6 +613,17 @@ def test_a_malformed_number_or_word(lor):
         e = refused("malformed", cert.parse, rebuilt(
             L[:t] + [f"term {tok} s0 s0"] + L[t + 1:]))
         assert why in e.message, (tok, e.message)
+    # an element's own order: its hex, then NaN, then its decimal
+    # (verifier-C4 found NaN and decimal read the other way round green)
+    r = find(L, "value rounded")
+    rnd = L[r].split(" ")
+    for hx, dec, name, why in (
+            ("7ff8000000000000", "1", "malformed", "is a NaN"),
+            ("7FF8000000000000", "nan", "malformed", "lowercase hex"),
+            (rnd[4].upper(), "2", "malformed", "lowercase hex")):
+        e = refused(name, cert.parse, rebuilt(
+            L[:r] + [" ".join(rnd[:4] + [hx, dec])] + L[r + 1:]))
+        assert why in e.message, (hx, dec, e.message)
     # an identity word's refusal names what the line may hold, the word
     # among them (a decimal line's own spelling check would not)
     i = find(L, "device-tiles ")
@@ -2289,6 +2300,11 @@ def test_an_enclosures_line_is_read_in_the_pages_order(lor):
             # the upper end's hex, before the lower end's width
             (el(-1100), f"{one_hex[1:]} {one_dec}", "malformed",
              "upper end"),
+            # the lower end's spelling before the upper end's: its
+            # decimal wrong and the upper end's hex misspelt (verifier-C4
+            # found the two read the other way round green)
+            (f"{one_hex} 2", f"{one_hex[1:]} {one_dec}", "decimal",
+             "lower end"),
             # both ends past the rule: the lower end first
             (el(-1100), el(1100), "width", "lower end"),
             # the width rule before the comparison of the ends
@@ -2309,16 +2325,34 @@ def test_the_tightest_pair_past_the_rule_is_refused_not_widened(lor):
     """An in-rule value whose tightest enclosure has an end past the rule
     (verifier-C2): 1/(3 x 2^900), 902 bits, rounded down into fp256 has
     a 1,139-bit denominator, and 1/(3 x 2^1010) in fp64 likewise. The
-    writer refuses `width`, by name, and does not widen the pair."""
-    for fmt, q, lo_bits in (("fp256", Fraction(1, 3 << 900), 1139),
-                            ("fp64", Fraction(1, 3 << 1010), 1065)):
+    writer refuses `width`, by name, and does not widen the pair. Each
+    end's bits are held, and each end alone past the rule (verifier-C4):
+    1/(2^900 - 1) in fp256 has an in-rule lower end (901 bits) and an
+    upper end of 1,137, and 1/(2^900 + 1) the other way round, so a
+    writer that widened one end only would be seen at either."""
+    for fmt, q, lo_bits, hi_bits, past in (
+            ("fp256", Fraction(1, 3 << 900), 1139, 1138, "lower end"),
+            ("fp64", Fraction(1, 3 << 1010), 1065, 1064, "lower end"),
+            ("fp256", Fraction(1, (1 << 900) - 1), 901, 1137, "upper end"),
+            ("fp256", Fraction(1, (1 << 900) + 1), 1138, 901, "lower end"),
+            ("fp64", Fraction(1, (1 << 1000) - 1), 1001, 1053, "upper end"),
+            ("fp64", Fraction(1, (1 << 1000) + 1), 1054, 1001,
+             "lower end")):
         assert q.denominator.bit_length() <= 1023
         v = cert.make_value(q, "enclosed", fmt)
-        kind, lo = cert.element_fraction(FORMATS[fmt], v.lo)
-        assert kind == "finite" and lo.denominator.bit_length() == lo_bits
+        (klo, lo), (khi, hi) = (cert.element_fraction(FORMATS[fmt], b)
+                                for b in (v.lo, v.hi))
+        assert (klo, khi) == ("finite", "finite")
+        assert (lo.denominator.bit_length(),
+                hi.denominator.bit_length()) == (lo_bits, hi_bits)
+        assert lo <= q <= hi
         e2 = dataclasses.replace(lor.entries[2], value=v)
-        refused("width", cert.encode,
-                keyed(lor.runs, lor.entries[:2] + (e2,) + lor.entries[3:]))
+        e = refused("width", cert.encode,
+                    keyed(lor.runs, lor.entries[:2] + (e2,)
+                          + lor.entries[3:]))
+        bits = lo_bits if past == "lower end" else hi_bits
+        assert (f"the {past}'s exact value" in e.message
+                and f"{bits}-bit denominator" in e.message), e.message
     assert ("in fp256, has a lower end whose denominator has 1,139 bits"
             in " ".join(_doc().split()))
 
@@ -2329,20 +2363,25 @@ def test_the_identity_lines_are_held_to_their_spelling_alone(lor):
     (verifier-C2 measured the four mismatches accepted). Held here so a
     reader that starts to check them changes the page with it."""
     L = lines_of(lor.data)
-    for backend, xclbin, version, caps in (
-            ("xrt", "a" * 64, "00000a00", "0000000f"),
-            ("xrt", "a" * 64, "00000600", "0000000f 00000000"),
-            ("xrt", "a" * 64, "none", "0000000f"),
-            ("xrt", "a" * 64, "00000a00", "none"),
-            ("software", "a" * 64, "unknown", "none")):
+    for backend, xclbin, version, caps, tiles in (
+            ("xrt", "a" * 64, "00000a00", "0000000f", "1"),
+            ("xrt", "a" * 64, "00000600", "0000000f 00000000", "1"),
+            ("xrt", "a" * 64, "none", "0000000f", "1"),
+            ("xrt", "a" * 64, "00000a00", "none", "1"),
+            ("software", "a" * 64, "unknown", "none", "1"),
+            # device-tiles is a device line too, held to nothing but its
+            # spelling (verifier-C4 found it unpinned against backend)
+            ("software", "none", "none", "none", "4"),
+            ("remote", "unknown", "unknown", "unknown", "7"),
+            ("xrt", "a" * 64, "00000a00", "0000000f 00000000", "unknown")):
         M = list(L)
         for key, val in (("backend", backend), ("device-xclbin", xclbin),
                          ("device-version", version),
-                         ("device-caps", caps)):
+                         ("device-caps", caps), ("device-tiles", tiles)):
             M[find(M, key + " ")] = f"{key} {val}"
         c = cert.parse(rebuilt(M))
-        assert (c.identity.backend, c.identity.device_version) == (
-            backend, version)
+        assert (c.identity.backend, c.identity.device_version,
+                str(c.identity.device_tiles)) == (backend, version, tiles)
 
 
 def test_every_word_the_page_allows_is_read(lor):
@@ -2469,6 +2508,15 @@ def test_the_writer_refuses_a_field_it_cannot_spell_by_name(lor):
                 dataclasses.replace(c, accuracy=(None,))):
         e = refused("malformed", cert.encode, bad)
         assert "cannot spell" in e.message, e.message
+    # and make_value, the writer's value, what it cannot spell: a value
+    # that is not a rational, a form, format or direction the page does
+    # not name (it raised ValueError, or crashed inside the rounding)
+    for a in ((0.5,), (True,), (Fraction(1), "approximate"),
+              (Fraction(1), "rounded", "fp80", "rne"),
+              (Fraction(1), "rounded", "fp64", "nearest"),
+              (Fraction(1), "rounded", "fp64", None),
+              (Fraction(1), "enclosed", None)):
+        refused("malformed", cert.make_value, *a)
     # the right types are what they always were
     ok = dataclasses.replace(c, identity=dataclasses.replace(
         idn, device_caps=["0000000f"]))

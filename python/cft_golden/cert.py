@@ -1414,17 +1414,32 @@ def make_value(q, form="exact", fmt=None, rnd=None):
     rounded or enclosed value is still a statement about q, which an
     auditor must compute exactly to check, so a value past the rule is
     refused here rather than rounded into something that looks
-    checkable (the page: "nothing past it is ever approximated")."""
+    checkable (the page: "nothing past it is ever approximated").
+
+    What it cannot spell - a value that is not a rational, a form, a
+    format or a direction the page does not name - is refused
+    `malformed`, by name, like everything else the writer is handed."""
+    if not isinstance(q, (Fraction, int)) or isinstance(q, bool):
+        raise Refusal("malformed", f"a value is an exact rational (a "
+                                   f"Fraction or an int), not a "
+                                   f"{type(q).__name__}")
     _checked(q, "the value")
     if form == "exact":
         return Value("exact", exact=q)
+    if form not in ("rounded", "enclosed"):
+        raise Refusal("malformed", f"a value's form is exact, rounded or "
+                                   f"enclosed, not {form!r}")
+    if not isinstance(fmt, str) or fmt not in LADDER:
+        raise Refusal("malformed", f"a {form} value's format is one of "
+                                   f"{', '.join(LADDER)}, not {fmt!r}")
     if form == "rounded":
+        if not isinstance(rnd, str) or rnd not in RND:
+            raise Refusal("malformed", f"a rounded value's direction is one "
+                                       f"of {', '.join(RND)}, not {rnd!r}")
         return Value("rounded", fmt=fmt, rnd=rnd,
                      bits=round_rational(fmt, q, rnd))
-    if form == "enclosed":
-        return Value("enclosed", fmt=fmt, lo=round_rational(fmt, q, "rdn"),
-                     hi=round_rational(fmt, q, "rup"))
-    raise ValueError(form)
+    return Value("enclosed", fmt=fmt, lo=round_rational(fmt, q, "rdn"),
+                 hi=round_rational(fmt, q, "rup"))
 
 
 def value_holds(value, q):
