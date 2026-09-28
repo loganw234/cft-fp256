@@ -643,6 +643,19 @@ they were handed over. What only a card can still say:
     under it, each into a fresh buffer. An output copy already live at
     the same window is reused, not declined (verifier-V9). A malformed
     value is refused by name.
+  - `CFT_XRT_CAPS` (2026-09-28): the image identity's two refusals,
+    planted at open (backend_xrt.cpp). `plant-differ` gives tile 1 a
+    CAPS word one bit off tile 0's, so `cft_get_image_id` refuses the
+    image as mixed; `plant-unreadable` makes tile 1's CAPS read throw,
+    so it refuses it as unreadable. Each refusal's sentence names the
+    plant. Only the identity's record sees the planted word: a planted
+    handle computes exactly as an unplanted one, and `device-test -i`
+    holds its decode equal. It needs two tiles; on one it does nothing.
+    `device-test -i` plants both on handles of its own, and a value set
+    from outside reaches the handle under test, whose identity leg must
+    then FAIL, unless the run was told to expect that refusal
+    (`--expect-refusal mixed|unreadable`). A malformed value is refused
+    by name at open, before anything is loaded.
 - **A tile a run was abandoned on** (found 2026-09-25): a run that
   outlives `CFT_TIMEOUT_MS`, or a process killed mid-run, leaves its
   tile running after XRT has aborted the command, and until the image
@@ -687,8 +700,11 @@ tracked. What came after it - step 2's two planted refusals, new with
 verifier-C3's send-back - was paid at 11:26 the same day, at 4d5d8e4:
 seventeen checks, 0 failed, the quad image refusing both plants by name
 on its four tiles, and the single image, with one tile, NOT TESTED by
-name (`card-p2b/`, beside `card-p2/`). Left as written below, because
-the list is also the recipe.*
+name (`card-p2b/`, beside `card-p2/`). OWED again after P2c, later the
+same day: step 2's two new per-image lines (the malformed CFT_XRT_CAPS
+values, the planted handles' decode) and step 3's controls c and d (an
+unexpected refusal failed, an expected one passed). Left as written
+below, because the list is also the recipe.*
 
 The certificate round's step 2 (docs/ROADMAP.md) gave the library two
 identity calls: `cft_build_id()` names the source tree a library was
@@ -722,17 +738,28 @@ runs. In order, each step an `ok` or a `FAIL` line:
      and the raw words decoding to the handle's caps and opcode groups;
    - on an image with two tiles or more, both refusals planted through
      `CFT_XRT_CAPS` - a tile whose CAPS differs from tile 0's, and one
-     whose CAPS cannot be read - each refused by its own sentence
-     (NOT TESTED, by name, on a single tile). The script counts those
-     lines.
+     whose CAPS cannot be read - each refused by its own sentence, which
+     names the plant (NOT TESTED, by name, on a single tile). The script
+     counts those lines;
+   - five malformed `CFT_XRT_CAPS` values refused by name at open, and
+     each planted handle decoding exactly as the unplanted one. The
+     script requires both lines to be shown.
    The digest it prints must also equal `sha256sum` of the file, and its
    bytes `stat`'s, and a manifest beside the image, where there is one,
    must say the same sha256.
-3. **The negative controls**, each required to FAIL by name.
-   - `CFT_DEVICE_TEST_HASH_FILE` makes device-test hash itself in place
-     of the image, and its digest check must fail naming both digests.
-   - The script's own comparison, fed another file's digest and two
+3. **The negative controls**, a to c each required to FAIL by name.
+   - a. `CFT_DEVICE_TEST_HASH_FILE` makes device-test hash itself in
+     place of the image, and its digest check must fail naming both
+     digests.
+   - b. The script's own comparison, fed another file's digest and two
      empty strings, must refuse both.
+   - c. On the first image with two tiles or more, `CFT_XRT_CAPS=
+     plant-unreadable` set from outside device-test imitates a CAPS read
+     that failed at open, and the identity leg must FAIL it: a refusal
+     nobody asked for is a fault, not an answer.
+   - d, which must PASS by name: the same kind of refusal told to
+     expect - `CFT_XRT_CAPS=plant-differ` from outside, with
+     `--expect-refusal mixed`, as a genuinely mixed layout is run.
 4. **Two images**, when given: two digests, each its own file's. So the
    digest follows the image loaded.
 5. **The open the digest changed still runs**: `device-test <image> -q

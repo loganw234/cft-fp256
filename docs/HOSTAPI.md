@@ -3068,7 +3068,7 @@ that needs either call asks for 0.15.
 * **`make -C host buildidtest`**, run by `make test`. The Makefile, the
   generator, `src/build_id.c`, `cft.h` and `.gitignore` are copied into
   scratch repositories and built there with make's own recipe, and both
-  objects are linked into a program that prints the id. Twenty-five
+  objects are linked into a program that prints the id. Twenty-nine
   checks:
   - a clean commit, then the same tree again (nothing rewritten or
     recompiled), and the build's own output ignored;
@@ -3080,6 +3080,10 @@ that needs either call asks for 0.15.
     against the generator as first committed (e598b8f, 2026-09-28), the
     one that lost stderr;
   - a git whose status fails and says nothing;
+  - a warning on either rev-parse call, exit 0: `unknown`, with git's
+    words in the reason. Without this step, the two calls taken out of
+    `git_run` with their stderr thrown away passed every other step, on
+    both hosts (verifier-C3); with it that plant is red on both;
   - a linked worktree at one commit beside the main worktree at
     another: its own commit and its own status;
   - no repository, a copy inside another repository, and no git.
@@ -3092,17 +3096,37 @@ that needs either call asks for 0.15.
     and `n_caps` to VERSION. The raw words must decode to the handle's
     format mask, opcode groups (`cft_supports`, one opcode a group),
     feature nibbles and scratch depth.
-  - An image the library refuses by design - tiles that publish
+  - A refusal the library gives by design - tiles that publish
     different words, or a tile whose words could not be read at open -
-    passes by that refusal, held to its sentence and `struct_size` 0,
-    and its digest and words are NOT TESTED, by name.
-  - `device-test <image> -i` runs that leg alone, and on an xclbin also
-    plants both refusals, through `CFT_XRT_CAPS` (`plant-differ` gives
-    tile 1 a word one bit off tile 0's, `plant-unreadable` makes its
-    read throw). The plant acts on the backend's comparison, so a
-    backend that stopped comparing, or named the wrong failure, fails
-    this leg. It needs two tiles; with one it is NOT TESTED, by name.
-    The planted handle computes exactly as an unplanted one.
+    FAILS this leg, in every mode, unless the run was told to expect
+    it: `--expect-refusal mixed` or `--expect-refusal unreadable`, for
+    an image that genuinely is so (a mixed layout, docs/LAYOUTS.md).
+    Expected, it is held to its sentence and `struct_size` 0, and the
+    digest and words are NOT TESTED, by name; an expectation the image
+    does not meet fails too. (4d5d8e4 passed any such refusal, and
+    verifier-C3 showed a real read failure, a comparison that refuses
+    everything and a tile read from CAPS2 all going through; each is
+    red since.)
+  - `device-test <image> -i` runs that leg alone, and on an xclbin, on
+    handles of its own opened before the handle under test, it also
+    holds `CFT_XRT_CAPS` from both sides:
+    - five malformed values (`plant-diff`, `PLANT-DIFFER`, a trailing
+      space, `1`, `yes`), each refused by name at open, before anything
+      is loaded; until 2026-09-28 each was quietly read as no plant;
+    - both refusals planted (`plant-differ` gives tile 1 a word one bit
+      off tile 0's, `plant-unreadable` makes its read throw), each by
+      its own sentence, and each sentence naming the plant, so a plant
+      set by accident cannot tell anyone their image is mixed. The
+      plant acts on the backend's comparison, so a backend that stopped
+      comparing, or named the wrong failure, fails. It needs two tiles;
+      with one it is NOT TESTED, by name;
+    - each planted handle's decode - every `cft_caps` field, and
+      `cft_supports` for one opcode of each of the seven groups at every
+      format - held equal to the unplanted handle under test: a plant
+      changes the identity and nothing the library computes with.
+  - A `CFT_XRT_CAPS` set from outside device-test reaches the handle
+    under test: that is how a CAPS read failure at open is imitated
+    from outside, and the leg must fail it.
 * **`sync.py --check`**, with a built tree: 33 vendored files, the new
   `src/build_id.c` among them, and the generated header in none.
 * **On the card**: `hw/card-identity.sh`, for whoever holds the card,
@@ -3120,7 +3144,12 @@ that needs either call asks for 0.15.
   - the planted refusals came after that card run, and were paid by
     the next, at 11:26 the same day at 4d5d8e4: 17 of 17, the quad image
     refusing both by name on its four tiles, and the single image, with
-    one tile, NOT TESTED by name (`card-p2b/`, beside `card-p2/`).
+    one tile, NOT TESTED by name (`card-p2b/`, beside `card-p2/`);
+  - the unexpected-refusal rule, `--expect-refusal`, the malformed
+    values and the planted handles' decode came after both card runs.
+    They ran in hw_emu on the 0907 quad image, green, and each of their
+    plants red there; on the card they are owed, as the script's
+    controls c and d and its per-image lines.
 * **Held by reading alone**: that the file is read ONCE, so the bytes
   hashed are the bytes loaded. A second read that returned other bytes
   would pass every gate here; verifier-C3 showed it on a mock of XRT,

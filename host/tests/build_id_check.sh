@@ -43,6 +43,10 @@
 #               the same day)
 #   a quiet failure
 #               a git status that fails and says nothing
+#   a rev-parse warning
+#               a warning on either rev-parse call, exit 0, read past: the
+#               two calls taken out of git_run with their stderr thrown
+#               away, which no other step can see
 #   a linked worktree
 #               the commit or the status read from the MAIN worktree -
 #               every agent here builds in a linked one
@@ -265,7 +269,24 @@ case " \$* " in
 esac
 exec "$realgit" "\$@"
 EOF
-chmod +x "$T/git-warn" "$T/git-fail"
+# And two that warn - exit 0, git's own answer unchanged - on one of the
+# generator's two rev-parse calls each: the top-of-tree question and the
+# commit.
+for rp in show-cdup verify; do
+    cat > "$T/git-warn-$rp" <<EOF
+#!/bin/sh
+# git, with a warning on rev-parse --$rp (exit 0, the answer unchanged)
+case " \$* " in
+*" rev-parse --$rp "*)
+    "$realgit" "\$@"; rc=\$?
+    echo "warning: planted on rev-parse --$rp by buildidtest" >&2
+    exit \$rc ;;
+esac
+exec "$realgit" "\$@"
+EOF
+done
+chmod +x "$T/git-warn" "$T/git-fail" "$T/git-warn-show-cdup" \
+         "$T/git-warn-verify"
 
 # 9. git status warns and exits 0: "unknown", through make's own recipe -
 #    the header, whose comment must carry git's own words (so the stderr
@@ -285,6 +306,19 @@ pb=$(cd "$A/host" && "$MAKE" -s --no-print-directory GIT="$GIT" \
 # 10. git status fails and says nothing.
 GIT="$T/git-fail"
 expect "$A" "unknown" "git status failing with nothing said"
+
+# 10b. A warning on either rev-parse call, exit 0: "unknown", with git's
+#      words in the reason. The generator sends both calls through
+#      git_run, as it does status; taking them out of it, their stderr to
+#      /dev/null, passed every other step on both hosts (verifier-C3,
+#      2026-09-28).
+for rp in show-cdup verify; do
+    GIT="$T/git-warn-$rp"
+    expect "$A" "unknown" "a warning on rev-parse --$rp, exit 0"
+    grep -q "planted on rev-parse --$rp" "$A/host/gen/cft_build_id.h" &&
+        ok "a warning on rev-parse --$rp: the header's reason carries git's words" ||
+        bad "a warning on rev-parse --$rp: the reason does not carry git's words: $(grep 'unknown because' "$A/host/gen/cft_build_id.h")"
+done
 GIT=$GIT_KEEP
 expect "$A" "commit=$head2 tracked=clean untracked=none" "git back"
 
