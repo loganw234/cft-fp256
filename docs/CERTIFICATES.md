@@ -1103,8 +1103,10 @@ the desktop fails that way:
   `cft_sha256` or a segment's `cft_program_run_ex` returning an error;
 - the library reading an image's header differently from the tool, or
   `cft_build_id()` answering outside its grammar;
-- once the run has begun, a state file or the certificate that cannot be
-  opened, written or closed, or a line that cannot be formatted;
+- once the run has begun, a state file that cannot be opened, written or
+  closed, a certificate that cannot be written or closed (it is opened
+  before the run, and that refusal has a test), or a line that cannot be
+  formatted;
 - more boundaries than the process can hold.
 Every other condition the lists above name has a test, and so does
 every refusal name; not every branch of `usage` has one.

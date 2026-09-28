@@ -123,8 +123,8 @@ mul    r4, r4, r3
 stl    r3, 0
 stl    r4, 1
 ; STATUS: an indexed load at c's bit pattern is past the scratch in a
-; strict image unless c = +0 (bit 5), and every lane still active after
-; c = 0 is dropped deposits into none (max_deposits 0, bit 4)
+; strict image unless c = +0 (bit 5); setact leaves active every lane
+; whose c is not 0, and each deposits past max_deposits 0 (bit 4)
 ldx    r8, r3
 setact r3
 deposit r4

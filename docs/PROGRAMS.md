@@ -286,7 +286,7 @@ and on the card, which is what lets a plate's hash be compared across
 all three.
 
 **A program run as segments, and its certificate.** `cft-segrun` runs
-one image as consecutive segments, each entered with the last one's
+a program as consecutive segments, each entered with the last one's
 scratch-out. It keeps the state at every boundary and writes a
 version-1 certificate. Its initial state is the block `--scratch-in`
 takes here. [CERTIFICATES.md](CERTIFICATES.md), "The segment runner",
