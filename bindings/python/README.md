@@ -223,7 +223,7 @@ delivers rounded with underflow and inexact raised.
 
 The two sections above are the first two steps; the package kept pace
 with every step after them through ABI 0.7, and the steps from 0.8 on
-left it unchanged - the library is at ABI 0.14 now (2026-09-15;
+left it unchanged - the library is at ABI 0.15 now (2026-09-28;
 docs/COMPATIBILITY.md says what each step added and which surfaces carry
 it) - and this is the map. Every method is on `Context` and, where the C
 has a batch shape, in `batch` too; the semantics are the library's,

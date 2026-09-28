@@ -3374,15 +3374,26 @@ contract does not fix"), that asks different things of the four:
   published as a log2 in `CAPS[23:20]`, whose four bits stop at 2^15;
   past that is a CAPS change.
 - `KMEM_D` (constants) is a capacity only as far as an instruction can
-  address. Revision 3's nine index bits reach 512, and `imm[31]` is the
-  one reserved bit left in the 64-bit instruction word, where a tenth
-  bit for each of three indices needs three. A deeper bank is an
-  instruction-format change, a program-model change like the next.
-- `SCRATCH_D` is not a pure capacity: `LDX`/`STX` reduce their index
-  modulo it (ask 2). To make it a build parameter, a program must
-  declare the scratch it uses, and an index past that must be refused
-  rather than wrapped, so that no answer depends on the build's depth.
-  That belongs in step 4's one revision.
+  address. Revision 3's nine index bits reach 512. A tenth bit for each
+  of three indices needs three bits the encoding does not give it:
+  `imm[31]` is the word's one reserved bit, and under `kx` a constant
+  operand's own register field is unread and must be zero (verifier-C4),
+  but taking a bit from either changes what every loader and assembler
+  reads. A deeper bank is an instruction-format change either way.
+- `SCRATCH_D` is not a pure capacity for an ordinary image: `LDX`/`STX`
+  reduce their index modulo it (ask 2), so a deeper tile computes other
+  answers. Revision 4's `SCRATCH_STRICT` (docs/SEQUENCER.md, R8) already
+  does most of what a per-build depth needs: in a strict image an index
+  at or past the depth is suppressed and raises `STATUS[5]` rather than
+  wrapping, so a strict run that raises no `STATUS[5]` computes the same
+  on any tile deep enough for it. What a deeper build still needs is on
+  the model's side, not the instruction format's:
+  - the golden model's depth, fixed at 256 in `seq.py`, made a
+    parameter;
+  - a certificate that records the depth its run had, since a strict
+    run clean at 2,048 slots is flagged at 256;
+  - the service's rule: strict images only, and a run that reports
+    `STATUS[5]` refused.
 - Certificates notice. Version 1's `h-slots` limit of 512 is the golden
   model's `seq.KADDR_KX`, and python/tests/test_cert.py holds 511 read
   and 512 refused, so a deeper bank turns that test red instead of
@@ -3401,12 +3412,16 @@ findings), then re-checked the second (six more gaps and six notes).
 This is the draft after both, amended where the work that followed
 decided or measured otherwise (each amendment says so).
 
-**What exists (2026-09-28).** Step 1, below, exists:
-docs/CERTIFICATES.md is version 1's specification, and
-python/cft_golden/cert.py its golden implementation, held by
-python/tests/test_cert.py (parcel P1 and its follow-up P1b, verified
-by verifier-C2; the round's ledger, Data/runs/2026-09-28-cert-round/).
-Where the page and this plan differ, the page is the format.
+**What exists (2026-09-28).** Steps 1 and 2, below, exist:
+- step 1: docs/CERTIFICATES.md is version 1's specification, and
+  python/cft_golden/cert.py its golden implementation, held by
+  python/tests/test_cert.py (parcel P1 and its follow-up P1b, verified
+  by verifier-C2);
+- step 2: `cft_build_id()` and `cft_get_image_id()` at ABI 0.15
+  (docs/HOSTAPI.md, "Identity at ABI 0.15"; parcel P2, verified by
+  verifier-C3, and measured on the card).
+The round's ledger is Data/runs/2026-09-28-cert-round/. Where the page
+and this plan differ, the page is the format.
 
 **What a certificate says.** "These bits came from this program, these
 inputs and these parameters; any conforming implementation reproduces
