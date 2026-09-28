@@ -20,17 +20,22 @@
 #
 # What it holds, in order, each an "ok" or a "FAIL" line:
 #   1. the build: device-test links XRT; the build id device-test carries
-#      is the tree's (make print-build-id), so the binary is not stale;
-#      and that id names HEAD. A dirty tree is said, not refused: the
-#      leg still measures the mechanism, and the note says the run is
-#      not reproducible from the commit.
+#      is the tree's (make print-build-id); and that id names HEAD. On a
+#      CLEAN tree equal ids mean the binary is not stale. On a dirty one
+#      they cannot: two different edits of one commit carry one id, so a
+#      binary built from the first edit matches a tree at the second
+#      (verifier-C3). A dirty tree is therefore said on NOTE lines, not
+#      refused and not passed as "not stale": the leg still measures the
+#      mechanism, and the run is not reproducible from the commit.
 #   2. per image: `device-test <image> -i` exits 0 (device-test's own
 #      checks: the digest against its own SHA-256 of the file, the bytes,
-#      VERSION, and the raw CAPS words decoding to the handle's caps);
-#      the digest it prints equals `sha256sum` of the file - an
-#      implementation that is not libcft's - and the bytes `stat`; and,
-#      where rebuild-2022.sh left a manifest beside it, the manifest's
-#      sha256 line too.
+#      VERSION, and the raw CAPS words decoding to the handle's caps; and
+#      on an image with two tiles or more, the two refusals planted
+#      through CFT_XRT_CAPS, each by its own sentence, which this script
+#      counts - NOT TESTED, by name, on a single tile); the digest it
+#      prints equals `sha256sum` of the file - an implementation that is
+#      not libcft's - and the bytes `stat`; and, where rebuild-2022.sh
+#      left a manifest beside it, the manifest's sha256 line too.
 #   3. the negative controls, each required to FAIL by name:
 #      a. device-test's digest check, planted: CFT_DEVICE_TEST_HASH_FILE
 #         makes it hash host/device-test in place of the image;
@@ -45,9 +50,11 @@
 #      an image. The server is stopped by PID.
 #
 # It loads each image it is given; a load of the image already loaded is
-# a no-op (docs/CARDDAY.md). It starts no run that can time out, so it
-# leaves no tile to reload - but if a step reports a timeout anyway,
-# reload the image before trusting anything after it.
+# a no-op (docs/CARDDAY.md). Steps 1 to 4 and 6 open images and read
+# registers and start no run on a tile. Step 5 is the quick matrix, 2,456
+# runs on the quad image (the card, 2026-09-28), and a run there can time
+# out like any other: if a step reports a timeout, reload the image -
+# load another xclbin, then this one - before trusting anything after it.
 #
 # Exit 0 when every check held, 1 otherwise. The log is stdout; keep it
 # beside the card day's record.
@@ -98,10 +105,16 @@ tree_id=$(make -s -C "$ROOT/host" print-build-id 2>/dev/null)
 bin_id=$("$DT" --build-id 2>/dev/null)
 echo "   the tree's build id:        $tree_id"
 echo "   device-test's build id:     $bin_id"
-if [ -n "$bin_id" ] && [ "$bin_id" = "$tree_id" ]; then
-    ok "device-test carries the tree's build id: it is not stale"
-else
+if [ -z "$bin_id" ] || [ "$bin_id" != "$tree_id" ]; then
     bad "device-test carries '$bin_id' and the tree is '$tree_id' - relink it: make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt device-test"
+else
+    case $tree_id in
+        *" tracked=clean untracked=none")
+            ok "device-test carries the tree's build id, and the tree is clean: it is not stale" ;;
+        *)
+            echo "   NOTE: device-test carries the tree's build id, but the tree is not clean ($tree_id), so equal ids do not show it is current: two edits of one commit carry one id"
+            echo "   NOTE: rebuild it from this tree state to be sure - make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt all device-test" ;;
+    esac
 fi
 head=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || true)
 case $tree_id in
@@ -132,6 +145,18 @@ for img in "${imgs[@]}"; do
     gotb=$(printf '%s' "$line" | sed -n 's/^image: sha256 \([0-9a-f]*\), \([0-9]*\) bytes.*/\2/p')
     [ $rc -eq 0 ] && ok "device-test -i exits 0: its own digest, bytes, VERSION and CAPS checks held" ||
         bad "device-test -i exited $rc"
+    # The two planted refusals (CFT_XRT_CAPS): both refused by name on an
+    # image with two tiles or more, both NOT TESTED by name on one tile.
+    tiles=$(sed -n 's/^device: backend xrt, \([0-9]*\) tiles\{0,1\},.*/\1/p' "$log" | head -1)
+    refused=$(grep -c '^  planted CFT_XRT_CAPS=plant-[a-z]*: refused by name' "$log")
+    untested=$(grep -c '^  planted CFT_XRT_CAPS=plant-[a-z]*: NOT TESTED' "$log")
+    if [ "${tiles:-0}" -ge 2 ] && [ "$refused" -eq 2 ]; then
+        ok "both planted refusals (tiles that differ, a tile unread) refused by name on $tiles tiles"
+    elif [ "${tiles:-0}" -eq 1 ] && [ "$untested" -eq 2 ]; then
+        echo "   NOTE: the planted refusals are NOT TESTED on a single tile - no tile 1 to plant in"
+    else
+        bad "the planted refusals: ${tiles:-no} tiles, $refused refused by name, $untested NOT TESTED - wanted both refused on two tiles or more"
+    fi
     if same_digest "$got" "$want"; then
         ok "the library's digest is sha256sum's: $got"
     else

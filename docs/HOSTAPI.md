@@ -2929,16 +2929,43 @@ reproduced from one. It does not tell two such builds apart: two trees
 modified differently at one commit carry the same id. It names the
 source, not the compiler, the flags or the build profile.
 
-The id is `unknown`, whole, wherever it was not measured:
-- every build not made by `host/Makefile`: the Arduino library's
-  vendored copy, the WebAssembly module, the fuzz harnesses,
-  `profiles-check`, anything compiled by hand;
-- a Makefile build with no git;
-- a directory above `host/` that is not the top of its repository: a
-  copy vendored inside another project, whose commit is not this tree's;
-- git answering with an error or a warning.
+The id is `unknown`, whole, wherever it was not measured.
+`host/Makefile`'s own rule for `src/build_id.o` and `.lo` is the one
+build that computes it:
+- every other build of that file compiles `unknown`: the Arduino
+  library's vendored copy, anything compiled by hand, and two of
+  `host/Makefile`'s own targets, `profiles-check` and the fuzz
+  harnesses, which compile the sources without the id. (The WebAssembly
+  module compiles it too, and exports no call that reaches it: there it
+  answers nothing at all.)
+- the rule itself says `unknown` with no repository (a source tarball,
+  a copy), with no git, and with a directory above `host/` that is not
+  the top of its repository: a copy vendored inside another project,
+  whose commit is not this tree's;
+- and it says `unknown` when any git call answers with an error or a
+  warning. git says "could not open directory" with exit 0 about a
+  directory whose untracked files it then leaves out of its answer, so a
+  warning means a count nobody can vouch for.
 
-Never a guess, and never partly known.
+Never a guess, and never partly known. The commit is that of the
+repository the tree is in, whichever it is: a copy of this tree
+committed at the top of another project's repository carries that
+project's commit - a true name for the source it was built from, and
+not a commit of this project's.
+
+**git's stderr is kept inside the generator's own shell** (2026-09-28).
+The first version wrote git status's stderr to
+`${TMPDIR:-/tmp}/gen_build_id.<pid>.err`. On the Windows desktop that
+was blind under make: MSYS2's make hands a recipe no TMPDIR, the shell
+running the generator (make's `/bin/sh`, MSYS2's) wrote the file into
+its `/tmp`, `C:/msys64/tmp`, and the `cat` and `rm` it found on PATH -
+Git for Windows' - looked in theirs. A warning was never read; the id
+came out whole where it had to be `unknown`, `make test` passed it, and
+one empty file leaked per build (verifier-C3 found it; 143 were removed,
+the last 16 of them left by the runs that reproduced it and watched its
+gate fail). Now git's stdout, stderr and status are taken apart with
+the shell's own redirections and parameter expansions, and no second
+runtime can look somewhere else.
 
 **How it is made.** `host/tools/gen_build_id.sh` asks git on every make
 that builds the library or anything linking it: the header's only
@@ -3041,12 +3068,20 @@ caller that needs either asks for 0.15.
     and no other byte written - after the argument refusals.
 * **`make -C host buildidtest`**, run by `make test`. The Makefile, the
   generator, `src/build_id.c`, `cft.h` and `.gitignore` are copied into
-  scratch repositories and built there, and both objects are linked
-  into a program that prints the id. Seventeen checks:
+  scratch repositories and built there with make's own recipe, and both
+  objects are linked into a program that prints the id. Twenty-five
+  checks:
   - a clean commit, then the same tree again (nothing rewritten or
     recompiled), and the build's own output ignored;
   - a tracked edit (the header rewritten, both objects recompiled), the
     edit reverted, an untracked source, both at once, a new commit;
+  - a git whose status warns "could not open directory" and exits 0:
+    `unknown` from the header and from `print-build-id`, with git's own
+    words in the header's reason. It is red on the Windows desktop
+    against the generator before 2026-09-28, the one that lost stderr;
+  - a git whose status fails and says nothing;
+  - a linked worktree at one commit beside the main worktree at
+    another: its own commit and its own status;
   - no repository, a copy inside another repository, and no git.
 * **device-test**, every run and every mode: the software handle's
   refusal, and the handle under test answering for what it is.
@@ -3057,15 +3092,34 @@ caller that needs either asks for 0.15.
     and `n_caps` to VERSION. The raw words must decode to the handle's
     format mask, opcode groups (`cft_supports`, one opcode a group),
     feature nibbles and scratch depth.
-  - `device-test <image> -i` runs that leg alone.
+  - An image the library refuses by design - tiles that publish
+    different words, or a tile whose words could not be read at open -
+    passes by that refusal, held to its sentence and `struct_size` 0,
+    and its digest and words are NOT TESTED, by name.
+  - `device-test <image> -i` runs that leg alone, and on an xclbin also
+    plants both refusals, through `CFT_XRT_CAPS` (`plant-differ` gives
+    tile 1 a word one bit off tile 0's, `plant-unreadable` makes its
+    read throw). The plant acts on the backend's comparison, so a
+    backend that stopped comparing, or named the wrong failure, fails
+    this leg. It needs two tiles; with one it is NOT TESTED, by name.
+    The planted handle computes exactly as an unplanted one.
 * **`sync.py --check`**, with a built tree: 33 vendored files, the new
   `src/build_id.c` among them, and the generated header in none.
 * **On the card**: `hw/card-identity.sh`, for whoever holds the card,
   with its own negative controls (docs/CARDDAY.md, "Owed to the next
-  card day (added 2026-09-28)"). The XRT half of this section - the
-  read, the hash, the load from bytes and the per-tile words - is
-  compiled against XRT 2.14 and has run once, in hw_emu on the 0907
-  quad image. `device-test -i` there reported the digest `sha256sum`
-  and the image's manifest give, the four tiles' CAPS equal, and 15
-  checks held. With the hash file planted, its digest check FAILED by
-  name. It has not run on a card, or against XRT 2.19.
+  card day (added 2026-09-28)"). Measured so far:
+  - in hw_emu on the 0907 quad image (XRT 2.14): `device-test -i` gave
+    the digest `sha256sum` and the image's manifest give, the four
+    tiles' CAPS equal, 15 checks; with the hash file planted, its
+    digest check FAILED by name;
+  - on the U50 at 09:59 on 2026-09-28 (XRT 2.19, both round-2 images,
+    at 082400d): 16 of 16, the quick matrix 2,456 of 2,456 after the
+    new load path, and both negative controls red by name. The records
+    are `Data/runs/2026-09-28-cert-round/card-p2/`, which is not
+    tracked;
+  - the planted refusals came after that card run, and are owed to the
+    next one.
+* **Held by reading alone**: that the file is read ONCE, so the bytes
+  hashed are the bytes loaded. A second read that returned other bytes
+  would pass every gate here; verifier-C3 showed it on a mock of XRT,
+  and no cheap instrument can see a read that XRT would make itself.

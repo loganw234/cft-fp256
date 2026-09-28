@@ -570,14 +570,17 @@ struct Dev {
     /* The image's identity, for cftx_image_id (cft.h, cft_get_image_id):
      * the SHA-256 of the bytes cftx_open read and then loaded, how many
      * there were, and the raw capability words - n_caps of them, CAPS2
-     * only from SCRATCH_VERSION. caps_disagree is empty unless a tile
-     * published words other than tile 0's, or could not be read, and
-     * then it says which; the identity is refused with it. */
+     * only from SCRATCH_VERSION. caps_refusal is empty unless the
+     * identity cannot be answered, and then it is the whole sentence the
+     * refusal gives: a tile whose words differ from tile 0's, or a tile
+     * whose words could not be read at open - two different things, said
+     * as two different sentences (verifier-C3 found the second reported
+     * as the first). */
     uint8_t           image_sha256[32] = {};
     uint64_t          image_bytes = 0;
     uint32_t          n_caps = 0;
     uint32_t          caps_words[4] = {};
-    std::string       caps_disagree;
+    std::string       caps_refusal;
 };
 
 /* Grow a tile's buffers to hold `bytes`.
@@ -1747,11 +1750,14 @@ static int cftx_open_impl(const char *artifact, int index, void **out,
      * it; load_xclbin(path) is xrt::xclbin(path) and a load of that
      * object, and xrt::xclbin(path) reads the file into exactly the
      * vector handed over here (believed from XRT's API and its 2.14
-     * headers, which declare both). It opened the 0907 quad image in
-     * hw_emu on XRT 2.14 (2026-09-28); hw/card-identity.sh is what shows
-     * it on a card and on XRT 2.19. The same object also answers the
-     * compute-unit listing below, which read the file a second time
-     * before. */
+     * headers, which declare both). Measured since: it opened the 0907
+     * quad image in hw_emu on XRT 2.14, and both round-2 images on the
+     * U50 on XRT 2.19 (hw/card-identity.sh, 16 of 16, and the quick
+     * matrix 2,456 of 2,456 after it; 2026-09-28). That the file is read
+     * ONCE is held by reading this code: no gate can fail for a second
+     * read that returns other bytes (verifier-C3, on a mock). The same
+     * object also answers the compute-unit listing below, which read the
+     * file a second time before. */
     std::vector<char> image;
     {
         std::string why;
@@ -2114,31 +2120,62 @@ static int cftx_open_impl(const char *artifact, int index, void **out,
      * (docs/LAYOUTS.md: CAPS is per compute unit). A tile that differs,
      * or whose words cannot be read, leaves the open exactly as it was -
      * refusing a mixed image here is not this record's call - and makes
-     * cftx_image_id refuse by name, naming both tiles' words. */
+     * cftx_image_id refuse, with a sentence that says which of the two
+     * happened and names the tile.
+     *
+     * CFT_XRT_CAPS plants either one for device-test -i, in the manner of
+     * CFT_XRT_WITNESS, so that both refusals have a gate that can fail on
+     * an image with more than one tile: "plant-differ" takes tile 1's
+     * CAPS with bit 0 flipped, and "plant-unreadable" makes its read
+     * throw. Only this record sees the planted word - everything the
+     * library DOES is decoded from tile 0's, above and below - so a
+     * planted handle computes exactly as an unplanted one, and only
+     * cft_get_image_id changes, from an answer to a refusal. The plant
+     * acts on the comparison's input, not on its verdict, so the
+     * comparison itself is what the gate holds. */
+    const char *const plant_env = std::getenv("CFT_XRT_CAPS");
+    const bool plant_differ =
+        plant_env && !std::strcmp(plant_env, "plant-differ");
+    const bool plant_unread =
+        plant_env && !std::strcmp(plant_env, "plant-unreadable");
     D->n_caps        = ver >= SCRATCH_VERSION ? 2u : 1u;
     D->caps_words[0] = caps;
     D->caps_words[1] = D->n_caps > 1 ? caps2 : 0u;
     for (size_t tt = 1; tt < D->tiles.size(); tt++) {
         uint32_t c = 0, c2 = 0;
         try {
+            if (plant_unread && tt == 1)
+                throw std::runtime_error("planted by CFT_XRT_CAPS="
+                                         "plant-unreadable");
             c = D->tiles[tt].k.read_register(CSR_CAPS);
             if (D->n_caps > 1)
                 c2 = D->tiles[tt].k.read_register(CSR_CAPS2);
         } catch (const std::exception &e) {
-            D->caps_disagree = "reading " + tile_name(*D, tt) +
-                               "'s CAPS at open failed: " + e.what();
+            D->caps_refusal = "cft_get_image_id: " + tile_name(*D, tt) +
+                              "'s CAPS could not be read at open (" +
+                              e.what() + "), so nothing says this image's "
+                              "tiles publish one set of words, and tile "
+                              "0's are not reported as the image's";
             break;
         }
+        if (plant_differ && tt == 1)
+            c ^= 0x1u;
         if (c != D->caps_words[0] || c2 != D->caps_words[1]) {
             const auto words = [&](uint32_t w, uint32_t w2) {
                 return "CAPS 0x" + hex32(w) +
                        (D->n_caps > 1 ? " CAPS2 0x" + hex32(w2)
                                       : std::string());
             };
-            D->caps_disagree = tile_name(*D, tt) + " publishes " +
-                               words(c, c2) + " and " + tile_name(*D, 0) +
-                               " " + words(D->caps_words[0],
-                                           D->caps_words[1]);
+            D->caps_refusal = "cft_get_image_id: the tiles of this image "
+                              "publish different CAPS words, so no one set "
+                              "of them names it - " + tile_name(*D, tt) +
+                              " publishes " + words(c, c2) + " and " +
+                              tile_name(*D, 0) + " " +
+                              words(D->caps_words[0], D->caps_words[1]) +
+                              ". A mixed layout (docs/LAYOUTS.md) needs a "
+                              "word pair per tile, which this call does not "
+                              "carry, and this library opens it as if every "
+                              "tile were tile 0";
             break;
         }
     }
@@ -2247,13 +2284,8 @@ extern "C" int cftx_image_id(void *hw, cft_image_raw *out)
         const Dev *D = static_cast<const Dev *>(hw);
         if (!D || !out)
             return ST_INVALID_ARGUMENT;
-        if (!D->caps_disagree.empty()) {
-            set_err("cft_get_image_id: the tiles of this image publish "
-                    "different CAPS words, so no one set of them names it - " +
-                    D->caps_disagree + ". A mixed layout (docs/LAYOUTS.md) "
-                    "needs a word pair per tile, which this call does not "
-                    "carry, and this library opens it as if every tile were "
-                    "tile 0");
+        if (!D->caps_refusal.empty()) {
+            set_err(D->caps_refusal);
             return ST_UNSUPPORTED;
         }
         std::memcpy(out->sha256, D->image_sha256, sizeof out->sha256);

@@ -155,14 +155,25 @@ CFT_API uint32_t cft_abi_version(void);
  * cannot be reproduced from one. It does not tell two such builds apart:
  * two trees modified differently at the same commit carry the same id.
  *
- * `unknown` where no repository was at hand when the library was
- * compiled - a source tarball, the Arduino library's vendored copy, the
- * WebAssembly module, any build not made by host/Makefile, which is the
- * one build that computes the id - and wherever it could not be
- * measured: no git, a directory above host/ that is not the top of its
- * repository (a copy vendored inside another project, whose commit is
- * not this tree's), or git answering with an error or a warning. Never a
- * guess, and never partly known.
+ * `unknown` wherever the id was not measured. host/Makefile's own rule
+ * for src/build_id.o and .lo is the one build that computes it. Every
+ * other build of that file compiles `unknown`: the Arduino library's
+ * vendored copy, anything compiled by hand, and two of host/Makefile's
+ * own targets, profiles-check and the fuzz harnesses, which compile the
+ * sources without the id. (The WebAssembly module compiles it too and
+ * exports no call that reaches it, so there it answers nothing at all.)
+ * The rule itself says `unknown` where it cannot measure: no repository
+ * (a source tarball, a copy), no git, a directory above host/ that is
+ * not the top of its repository (a copy vendored inside another project,
+ * whose commit is not this tree's), or any git call answering with an
+ * error or a warning - "could not open directory" among them, which git
+ * gives with exit 0 while leaving that directory's untracked files out
+ * of its answer. Never a guess, and never partly known.
+ *
+ * The commit is that of the repository the tree is in, whichever it is:
+ * a copy of this tree committed at the TOP of another project's
+ * repository carries that project's commit - a true name for the source
+ * it was built from, and not a commit of this project's.
  *
  * host/Makefile computes it on every make that builds the library or
  * anything linking it (host/tools/gen_build_id.sh), and rewrites the

@@ -79,8 +79,10 @@ void cftx_close(void *hw);
  *
  * Returns ST_OK, or ST_UNSUPPORTED with the backend's sentence when the
  * tiles disagree - a single set of words would then name tile 0 and call
- * it the image. Recorded at open, so it touches no device and answers on
- * a poisoned handle. */
+ * it the image - or when a tile's words could not be read at open; the
+ * sentence says which, and names the tile. CFT_XRT_CAPS plants either
+ * for device-test (backend_xrt.cpp). Recorded at open, so it touches no
+ * device and answers on a poisoned handle. */
 typedef struct cft_image_raw {
     uint8_t  sha256[32];
     uint64_t bytes;

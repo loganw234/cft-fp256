@@ -679,14 +679,21 @@ they were handed over. What only a card can still say:
 
 ## Owed to the next card day (added 2026-09-28): identity in libcft
 
+*Paid the same day at 09:59, on the U50 (XRT 2.19), at 082400d: the
+script's sixteen checks over both round-2 images, the quick matrix 2,456 of
+2,456 after the new load path, and both negative controls red by name.
+The records are `Data/runs/2026-09-28-cert-round/card-p2/`, which is not
+tracked. What came after it, and is owed: step 2's two planted refusals,
+new with verifier-C3's send-back. Left as written below, because the
+list is also the recipe.*
+
 The certificate round's step 2 (docs/ROADMAP.md) gave the library two
 identity calls: `cft_build_id()` names the source tree a library was
 built from, and `cft_get_image_id()` names the device image by the
 SHA-256 of the bytes the XRT backend loaded and by its raw CAPS words
 (docs/HOSTAPI.md, "Identity at ABI 0.15"). Everything but the XRT half
-is held on the desktop. The XRT half is compiled against XRT 2.14, has
-run once in hw_emu there (the 0907 quad image), and has never run on a
-card or against XRT 2.19:
+is held on the desktop. The XRT half is compiled against XRT 2.14, ran
+in hw_emu there (the 0907 quad image), and ran on the card at 09:59:
 - the file read once, hashed, and loaded from those bytes, where XRT
   used to read it by path;
 - the per-tile CAPS words.
@@ -702,14 +709,22 @@ runs. In order, each step an `ok` or a `FAIL` line:
 
 1. **The build.** device-test links XRT (CLAUDE.md's trap 2). Its build
    id - `device-test --build-id` - equals the tree's
-   (`make -C host print-build-id`), so the binary is not stale, and that
-   id names HEAD. A dirty tree is said, not refused.
+   (`make -C host print-build-id`), and that id names HEAD. On a clean
+   tree, equal ids mean the binary is not stale. On a dirty one they
+   cannot mean that - two edits of one commit carry one id - so the
+   script says so on a NOTE line rather than an `ok`.
 2. **Each image.** `device-test <image> -i` exits 0. That is
-   device-test's own checks: the digest against its own SHA-256 of the
-   file, the bytes, VERSION, and the raw words decoding to the handle's
-   caps and opcode groups. The digest it prints must also equal
-   `sha256sum` of the file, and its bytes `stat`'s, and a manifest
-   beside the image, where there is one, must say the same sha256.
+   device-test's own checks:
+   - the digest against its own SHA-256 of the file, the bytes, VERSION,
+     and the raw words decoding to the handle's caps and opcode groups;
+   - on an image with two tiles or more, both refusals planted through
+     `CFT_XRT_CAPS` - a tile whose CAPS differs from tile 0's, and one
+     whose CAPS cannot be read - each refused by its own sentence
+     (NOT TESTED, by name, on a single tile). The script counts those
+     lines.
+   The digest it prints must also equal `sha256sum` of the file, and its
+   bytes `stat`'s, and a manifest beside the image, where there is one,
+   must say the same sha256.
 3. **The negative controls**, each required to FAIL by name.
    - `CFT_DEVICE_TEST_HASH_FILE` makes device-test hash itself in place
      of the image, and its digest check must fail naming both digests.
@@ -724,9 +739,13 @@ runs. In order, each step an `ok` or a `FAIL` line:
    remote handle refuse by name, even though the server holds an image.
    The server is stopped by PID.
 
-It starts no run that can time out, and a load of the image already
-loaded is a no-op. Keep its output with the day's record: the digest it
-prints is the "xclbin sha256" below, measured by the library itself.
+Steps 1 to 4 and 6 open images and read registers, and start no run on
+a tile. Step 5 is the quick matrix, 2,456 runs on the quad image, and a
+run there can time out like any other: if one does, reload the image
+before trusting anything after it (a load of the image already loaded
+is a no-op, and cures nothing). Keep the script's output with the day's
+record: the digest it prints is the "xclbin sha256" below, measured by
+the library itself.
 
 ## What to record
 
