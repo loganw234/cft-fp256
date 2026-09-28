@@ -21,7 +21,9 @@ the image, device-test -i): each certificate is made on the card, held to
 everything below, and made again on the software backend, its run blocks
 compared byte for byte.
 
-For each program below, keyed and then open, on the software backend:
+First, git ignores the binary in both its forms, so a build of it leaves
+the next build id clean. Then, for each program below, keyed and then
+open, on the software backend:
   1. cft-segrun runs it as consecutive segments and writes the
      certificate and every boundary state;
   2. the golden reader (cert.parse) accepts the certificate - with the
@@ -457,6 +459,29 @@ def rfc2104(key, msg):
     key = key.ljust(64, b"\x00")
     inner = hashlib.sha256(bytes(x ^ 0x36 for x in key) + msg).digest()
     return hashlib.sha256(bytes(x ^ 0x5C for x in key) + inner).hexdigest()
+
+
+def hold_ignored():
+    """The binary, in both its forms, is ignored by git, so building it
+    never makes the next build id untracked=present. .gitignore says
+    adding a tool needs a line there as well as in host/Makefile; this
+    tool went without it until its own Linux build showed `?? host/
+    cft-segrun` (2026-09-28)."""
+    try:
+        r = subprocess.run(["git", "-C", str(ROOT), "rev-parse",
+                            "--is-inside-work-tree"], capture_output=True,
+                           text=True)
+    except OSError:
+        r = None
+    if r is None or r.returncode != 0 or r.stdout.strip() != "true":
+        skip("git ignores host/cft-segrun", "this tree is in no git "
+             "repository")
+        return
+    for p in ("host/cft-segrun", "host/cft-segrun.exe"):
+        r = subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", p])
+        check(r.returncode == 0, f"git ignores {p}, so a build of it leaves "
+              f"the next build id clean", f"git check-ignore exits "
+              f"{r.returncode}")
 
 
 def hold_hashes(work):
@@ -899,6 +924,8 @@ def main():
              "CFT_EXPECT_BUILD_ID is not set (make -C host segruntest sets "
              "it)")
 
+    print("== the binary, ignored by git", flush=True)
+    hold_ignored()
     print("== the programs", flush=True)
     man = manifest()
     programs = [ode_program(b, f, man) for b in SIZES for f in

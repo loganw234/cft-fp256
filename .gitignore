@@ -127,6 +127,11 @@ host/positive-run
 # the remote backend's server and its protocol test (docs/REMOTE.md)
 host/cft-serve
 host/remote-test
+# the segment runner (docs/CERTIFICATES.md, "The segment runner"). Missed
+# when the tool was added, and found by its own Linux build on 2026-09-28:
+# `?? host/cft-segrun`, which made every later build id untracked=present.
+# host/tests/segrun_check.py now holds git to ignoring both forms.
+host/cft-segrun
 # host/fuzz: the harness binaries, the sanitised copies of the workload
 # tools, the scratch a resume run writes, and the corpus entries the
 # engine grew. The SEEDS in corpus/*/ are checked in (make_seeds.py

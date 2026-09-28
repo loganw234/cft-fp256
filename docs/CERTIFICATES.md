@@ -1133,9 +1133,9 @@ HMAC written from RFC 2104 in the gate. It holds every refusal by its
 name and code, and the golden writer's name for the same defect where
 it has one. Last, it makes one certificate through a loopback cft-serve,
 stopped by its PID. That certificate's device lines must be the remote
-rule's, and its run blocks byte for byte the software backend's. 283
-checks, 45 to 55 s on the Windows desktop at about half load
-(2026-09-28).
+rule's, and its run blocks byte for byte the software backend's. It
+also holds git to ignoring the tool's binary. 285 checks, 45 to 55 s on
+the Windows desktop at about half load, and 43 s in WSL (2026-09-28).
 
 **On the card**, `hw/card-segrun.sh <image.xclbin>` runs the same gate
 with the certificates made on the tile. It holds the device lines to
