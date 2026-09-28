@@ -14819,3 +14819,757 @@ left the tile running with no abort, for the next opener to read.
   the lane cut lands.
 - 34349b1's message calls its 25 new checks "[6b]"; 22 are [6b] and 3
   [7b].
+
+## 2026-09-28 - controlled divergence, steps 1b and 1c: one scheduler for every run, a program's lanes cut across the tiles; a run abandoned on a tile poisoned it for every later process until a reload, and is refused by name; a resident buffer's device copy was served stale after the library's own host reads and writes, and is not; the round's verifiers, and its known limits
+
+**Why.** Step 1 of the controlled-divergence work (the entry above) is
+per-tile distribution: a fan-out of runs wants every tile of a card, and
+one long program run wants all of them at once. Step 1a - one process
+per tile - is above. This entry is step 1b, one program run's lanes cut
+across a device's tiles; step 1c, a program at each tile's capacity
+boundaries; the defect the card gate for 1b found, which reaches every
+run kind and every process on the card; and what the round's verifiers,
+V1 to V9, found in the lead's code and in three parcels', from
+2026-09-25 to 2026-09-28. The round's records -
+its ledger, briefs and card logs - are kept in
+`Data/runs/2026-09-25-ode-round/` (gitignored).
+
+**Step 1b, as the plan of record asks.** It was first built (617b753)
+as a loop over tiles inside `cftx_program_run` - the shape
+docs/ROADMAP.md's plan of record ("Programs across tiles: a partitioner
+and a scheduler", Logan's word of 2026-09-18) rules out; the lead had
+not read that plan. It passed its 26 card legs. Asked, Logan chose on
+2026-09-25 to rebuild it as the plan's step 2, and 4ecaf24 does:
+`run_job` (backend_xrt.cpp) owns, for elementwise runs, reductions,
+segmented reductions and programs alike, the placement (waves of at
+most one task a tile, each staged just before it starts; the tiles in
+order, or as `CFT_XRT_TILE_ORDER=seed:<N>` draws them), the launch
+discipline (stage all before any start; wait on every started run; the
+handle finished after a failure while a unit may still run) and the
+sticky words (STATUS and FLAGS ORed over the tiles that ran; the kind's
+own test of STATUS deciding, wave by wave, whether results are
+collected). Each kind keeps its cut: slice.h's beats for elementwise
+work, the canonical tree ranges for a reduction, whole segments for a
+segmented one, and for a program lane_cut.h's windows - every per-lane
+block with its lanes, an indexed source, the image and the bank whole on
+every tile, the mask repacked from each slice's first lane.
+`CFT_XRT_PROGRAM_CUTS=seed:<N>` re-cuts a program anywhere, `skew:<N>`
+plants a one-lane slip. Reading the code for it found a resident-buffer
+defect reachable before that day: two copies of one buffer could hold
+overlapping unflushed OUTPUT windows, and the older could land last;
+`buf_bind` now sends every other copy's overlapping dirty bytes home
+before an output window is bound.
+
+**On the card** (round 2's quad and single, 5b7aa19, 135 MHz; 4ecaf24
+built on amd-arc-box, 0 warnings; `card-sched/`):
+
+    S1  device-test, full matrix -n 64    quad 10,007 checks 0 failed; single 10,007 / 0
+    S2  CFT_XRT_TILE_ORDER seeds 1-3      quick 2,367 / 0, reduce 2,396 / 0, buffers 745 / 0, each seed
+    S3  CFT_XRT_PROGRAM_CUTS, 8 seeds     711 / 0 each (two at 257 lanes)
+    S4  skew:1 (the planted slip)         711 checks, 82 failed - red, as planted; the same under a tile order
+    S5  the moved output window           4 formats right; under the flush mutant 4 failed
+    S6  malformed instruments             4 of 4 refused by name
+    S7  ODE programs                      12 of 12: four tiles == fuzzed placement == one tile == software
+    S8  lorenz63 fp256, 65,536 lanes      FAIL as run: the one-tile 4,000-step run outlived CFT_TIMEOUT_MS's
+                                          60 s default. Rerun with the wait raised: per 2,000 extra steps
+                                          13.678 s on four tiles, 53.943 s on one - x3.944 - and four == one
+                                          at 2,000 and 4,000 steps
+    S9  atlas-engine's program set        quad default 136 of 140 (below); single 140 of 140; quad under
+                                          seed:7 cuts and order 140 of 140. Quiet reruns of the quad's
+                                          default: 140 of 140, three times
+    S10 conformance replay, vectors/out   software, quad and single: 168 sets, 1,224,915 cases, all matching
+
+The gate script printed S9 and S10 without judging them: its tally,
+"PASS 30 FAIL 1", counted S1-S8 only. S9's four quad mismatches were
+this entry's next section.
+
+**A run abandoned on a tile.** S8's timed-out run was left going on
+tile 1 (the handle is finished after a timeout - docs/HOSTAPI.md), and
+S9 began at once. The mismatches, read lane by lane from S9's own kept
+outputs: allpaths lost all 256 of tile 0's lanes (it had waited 42.8 s
+where the single took 3.9); then flows.levers-7 and rule30 lost exactly
+lanes 128-255 - tile 0's second block - and rulespace 40 lanes of it,
+13 to 39 s AFTER the abandoned run had ended; the cases between matched.
+None of it reproduced on a quiet card, and no lane count reproduced it
+(one tile, no split, N from 127 to 1,001 around every multiple of 128:
+right). Made on purpose - an fp256 run on tile 1 with
+`CFT_TIMEOUT_MS=5000` - the same four cases failed on the same lanes;
+the set run again after the abandoned run had certainly ended failed the
+same three again; and loading another image and then the quad cured it.
+rule30 at 1,001 lanes on the orphaned tile alone came back in 0.38 s,
+every lane wrong, rc 0 (healthy: 9.5 s); device-test on that tile, 571 of
+2,349 checks. What happens, from XRT's own log and source: when a
+process closes a context with a command still running,
+`kds_del_cu_context` waits five seconds ("1 outstanding command(s) on
+Domain(0) CU(0)", ten times at 0.5 s, at 11:07:25 and at 11:59:29) and
+then calls ERT's `abort_sync` (the device runs ERT over XGQ); the tile,
+`ap_ctrl_hs`, cannot be stopped and runs on; and after that ERT reported
+later runs on that tile complete early until a load rebuilt its CU table.
+A start that arrives while the tile is busy is dropped by the tile
+(rtl/cft_csr.sv), and XRT then completes it with the other run's end.
+The tile's CTRL register, read through `xrt::kernel::read_register`,
+shows it: 0x1 (busy) while the abandoned run went, 0x4 after, and 0x1
+again at once after an early-completed run - one of which came back
+byte for byte RIGHT, because an identical earlier run had left the same
+bytes at the same addresses. An output check cannot see this; CTRL can.
+It is not the scheduler's: an abandoned run could do it to a one-tile
+run since timeouts existed. The scheduler's per-tile collection is only
+where it first showed - a slice slower than the others lost the race.
+
+A load of the SAME image cures nothing. The kernel log from the orphan
+at 11:59:29 to the first real download at 12:05:26 holds 1,604 image
+loads, every one "xclbin_downloaded: xclbin is already downloaded", and
+the program set run through those loads (12:01-12:02) matched 137 of 140,
+the same three cases still wrong in the same lanes; the download of the
+single image and then the quad at 12:05 ("Config end completed") is what
+cured it (`card-witness/journal-probe3-probe4.txt`).
+
+**The completion witness** (bc2f3d5, wording b8f41a2; Logan's word: the
+host witness now, a side-effect-free one in the RTL - a run/done counter
+and a start that arrives while busy flagged rather than dropped - in
+step 4's revision; `CFT_ERR_BUSY` with per-tile failure in plan step 3).
+`run_job` reads each tile's CTRL at the two moments no command of this
+handle is outstanding on it: before a wave's starts, a tile that is not
+idle is refused before anything starts ("is running work this process
+did not start"); after XRT reports the wave complete and before STATUS,
+FLAGS or any result is read, a tile still busy is waited on until idle
+and the job refused, nothing collected ("was still running it"), with
+the cure named. `CFT_XRT_WITNESS=busy-before|busy-after` plants the busy
+reading, and device-test's new leg holds both refusals on every XRT
+device. On the card (bc2f3d5; `card-witness/`):
+
+    the sequencer legs -s -n 64        quad 734 / 0, single 734 / 0; the witness leg 9 of 9 right on both
+    the program set                    quad 140 / 140, single 140 / 140
+    full matrix -n 64                  quad 10,030 / 0, single 10,030 / 0; -b 745 / 0; -r 1,256 / 0, both
+    cost, cft-bench --resident fp32    n=64: 1,351.7 -> 1,387.5 ns an element (+2.6%, ~2.3 us a call);
+                                       n=4,096: 21.36 -> 21.26 (none measurable)
+    an abandoned run, on purpose       while it ran: refused before any start in 0.34 s (tile 1) and
+                                       0.23 s (the quad); after it: 4 of 4 runs on tile 1 completed
+                                       early and refused by name, 0 wrong; the program set 137 matched,
+                                       3 refused by the witness, 0 wrong
+    the witness OFF (a mutant)         the same, on a second abandoned run: 1 of 3 runs wrong with rc 0
+                                       in 0.38 s - the failure the witness exists to stop
+    after a reload                     right, at full length
+
+One verdict of that session failed, and it was the lead's: a decoy run
+meant to leave bytes other than rule30's answer at its addresses
+(rule30 with its a-stream's lanes reversed) produced rule30's answer -
+its deposits do not depend on q.x at these levers - so it decoyed
+nothing. The mutant's wrong run stood without it.
+
+**Step 1c - a program at each tile's capacity boundaries** (efcb2a6,
+fixed in bc2f3d5). docs/ROADMAP.md's debt from the round of 2026-09-17:
+a program leg at every capacity boundary the backend has, now that a
+boundary is a tile's. A page of counts (1,024 lanes a tile) and a page
+of mask bits (32,768 lanes a tile, with and without a mask), each
+exactly and one beat past: 6 of 6 right on quad and single; a quarter of
+a tile's HBM channel (1M lanes a tile, 64 MiB of deposits each): right.
+The channel itself: the first card run asked for 80 deposit slots
+against the tiles' 64 and was refused at LOAD, never reaching the
+allocation it meant to test (V1 and C on both images, 12:32); fixed to
+the device's own max_deposits with the lanes sized 16 MiB past the
+channel - 1,114,112 lanes a tile at 64 slots, 272 MiB each: refused by
+name, "device buffer allocation failed". The software backend names
+the leg NOT TESTED. A limit, found by verifier-V7: the HBM half runs once
+a process, at the first format the matrix reaches, so on the card it has
+only ever run at fp32; V7 measured it refused by name at all four
+formats on its mock (272 MiB at each) and the quarter-channel run right
+at each.
+
+**Verifier-V2's refusals on silicon** (5d07c60): tile 9 of a quad is
+INVALID_ARGUMENT; "650" is quoted as written, "tile 650 is outside
+1..64"; a tile another process holds is refused with the listing path's
+sentence.
+
+**Verifier-V4 on the lead's code** (617b753, 4ecaf24, 5d07c60, efcb2a6,
+f97a456). Its instrument was a mock of the XRT library linked with the
+shipped backend, each launch executed by libcft's own software device
+over the device side of the tile's buffers, under ASan and UBSan. Under
+default placement the XRT calls of elementwise runs and programs are the
+same at 4ecaf24 as before it, and reductions make the same calls
+reordered, as the commit says; the launch discipline held under every
+single injected failure (a start that throws, a wait that times out or
+throws, a STATUS fault on one tile, every allocation of a first call); a
+tile order naming a tile twice turns api-test red and, on the mock,
+starts runs on a busy tile; V2's loose parses and its double delete are
+gone. None of the five commits weakens same-bits for an unmasked run.
+What it found, and what db20542 and 2ecc382 did about it:
+
+- pre-existing (bc84e99 and later): a lane mask on a program whose
+  deposit window or scratch-out block is RESIDENT returned the masked
+  lanes' slots with the device copy's bytes - after an unmasked run and
+  a republish, the unmasked run's deposit in all 334 masked lanes.
+  Fixed: an output bound under a mask is made current first, like an
+  input.
+- pre-existing: a failed run into a resident window still dirty from an
+  earlier good run left the failed run's bytes to come back with
+  CFT_OK. Fixed: a failed job's resident outputs are LOST, refused by
+  name by cft_buffer_from_device, by the bind, and by device.c's read
+  of a buffer before a run (which had discarded that call's result),
+  until cft_buffer_to_device.
+- pre-existing: a bad_alloc while run_job built its message escaped
+  with started runs unwaited and the handle not poisoned; most
+  allocation failures in cftx_open leaked the device. Fixed: the
+  handlers are allocation-free, the sentence is built after every
+  wait, every heavy entry point is a thin wrapper that no exception
+  crosses, and cftx_open owns its device through a unique_ptr.
+- the lead's: the capacity leg's HBM half ran at fp32 only and asked
+  for more deposit slots than the tiles have (found on the card the
+  same hour); failure sentences that did not name the tile; "a hang"
+  said of a start that never happened; buf_bind's "under fixed
+  placement it could not happen" - V4 found 32 of 300 random-window
+  trials wrong at 617b753 on four tiles WITH fixed placement, 0 of 1,200
+  since 4ecaf24; backend.h's "ONE compute unit"; api-test drawing every
+  order from one seed while saying "every seeded order"; the moved-window
+  leg counting a pass on one tile; HOSTAPI's unqualified
+  INVALID_ARGUMENT for an undeclared tile, which is ARTIFACT on XRT
+  2.14's probe path.
+
+On the card (2ecc382; `card-v4fix/`): the full matrix on quad and single,
+10,068 checks, 0 failed each, the new "seq lane mask into resident
+outputs" leg right at every format and the lost leg right; -b and -r
+green; the preserving bind turned off - red, 24 lines; the lost marking
+turned off - red, the read-back and the input use both returned ok; the
+program set 140 of 140; an abandoned run refused before and after with
+the tile named; the conformance set on the quad, 1,224,915 cases, all
+matching.
+
+**Verifier-V7 on the lead's code** (bc2f3d5 to 2ecc382), on its own
+rebuild of V4's mock with CTRL modelled on rtl/cft_csr.sv and ERT's early
+completion modelled. The witness held: 345 failure scenarios over one
+to four tiles, every refusal by name, nothing collected, no start on a
+busy tile, every started run waited on, and no CTRL read while a command
+of the reading handle was outstanding; the operator-new sweep found 0
+crashes at 2ecc382 where f97a456 gave 729 exceptions crossing into C.
+What it found, and what 3344e68 did:
+
+- **A resident buffer's device copy served stale** - wrong answers with
+  CFT_OK in nine sequences at one to four tiles, seven pre-existing. A
+  copy was trusted while three paths changed the mirror under it
+  without telling it: buf_bind's flush of a copy it was about to
+  re-window; a staged output written into a resident buffer's mirror (a
+  declined bind, a program's counts, cft_reduce's and cft_reduce_seg's
+  results); and every entry point computed on the host - `cft_exp` after
+  a device ADD into the same buffer read the stale mirror, 64 of 64
+  wrong, and a device run after `cft_exp` wrote the buffer read the
+  copy from before. A bare cft_buffer_to_device after a run discarded
+  the run on a device and kept it on the software backend. The
+  witness's refusal after staging was a new way in.
+  3344e68: staleness is by WINDOW - a flush marks its own copy current
+  and stales every copy over the bytes it moved, in one step; a host
+  write stales the copies over what it writes; only a publish, after
+  which the caller may have written anything, stales every copy, and it
+  brings a run's bytes home first. Every entry point that reads or
+  writes a caller's array on the host announces it (softfloat.h's
+  cft_host_in, cft_host_out, cft_host_io): the transcendentals, clause
+  5, augmented and formatOf arithmetic, division and square root (the
+  whole-call program route re-announcing each chunk it writes after its
+  run read the operands), the payload and character operations, the
+  scaled products; cft_reduce and cft_reduce_seg mark their result
+  before and after; a program's counts likewise. Why by window: a
+  program's counts land beside its streams in one carved buffer, and a
+  whole-buffer mark after every run would refill every input window.
+- `cft_buffer_from_device`'s error path could throw into C under memory
+  exhaustion and a failing sync; it is behind the boundary now.
+- Messages: staging, STATUS/FLAGS and collect failures named no tile; a
+  thrown wait, an ERROR wait and a start that threw said "close and
+  reopen" without the reload a timeout's sentence gives; an unreadable
+  FLAGS was called "an unreadable STATUS"; the 0x8 branch said the units
+  "never started this work, so this is a hang", which a latched refusal
+  does not establish. All four fixed.
+- Gates that could not fail: device-test's lost leg never wrote into a
+  lost buffer or used one as a lane mask, and a mutant accepting either
+  passed; the witness plant was one busy read, so a witness that neither
+  waited nor poisoned passed (the plant now holds 50 ms and the leg
+  times the refusal); api-test's tile-order check passed a 32-bit seed,
+  one order for every wave, and a last tile never moved (a judge now
+  holds each seed, the waves and every position, with the three as
+  permanent negative controls); `seq_image` copied from NULL.
+- f953f4c's message said `host/fuzz/run_ckpt.sh` now asks the Makefile
+  for its sources; the commit held only the Makefile's `print-src`, and
+  the lead's measurement had run `make print-src` itself, not the
+  script. 3344e68 makes the edit, measured by running the script in a
+  WSL copy: HEAD's fails to link (`cft_sha256_init`); the edit builds the
+  five sanitised tools and fuzzes cft-orbits (122 resumes) and
+  cft-collatz (734), rc 0; a make that fails, or prints nothing, is
+  refused by name with nothing built.
+- Docs the records did not hold: "cures nothing" (now the journal
+  above); HOSTAPI's "waits until the tile is idle ... so no write of it
+  lands after the call returns" (the tile that never goes idle finishes
+  the handle, and may still write); "a device copy is kept only if it
+  already holds the newest bytes" and "costs time, never correctness"
+  (true since 3344e68 for reads; two stores the library cannot see are
+  now named); and every citation of this entry, which did not exist yet.
+
+device-test -b's new "stale copies" leg runs each scenario on the
+software device and on the device under test, into a fresh resident
+buffer, and compares the TRANSCRIPTS byte for byte - every status, flag
+word and output, and the buffer brought home: V7's sequences,
+read-write-read, three calls writing a result into the array they read
+and then running again, and every host-computed entry point both ways
+(a run's bytes read on the host; the host's bytes read by a run) and in
+place where legal - 336 scenarios over the four formats, agreeing by
+construction on the software backend. On the card (3344e68; built on
+amd-arc-box 21:04, exactly the two known warnings, now at
+cft_resident.cpp:264 and :265; `card-v7fix/`):
+
+    F1 full matrix -n 64                  quad 10,074 / 0, single 10,074 / 0; witness 10 of 10, the lost
+                                          leg's new refusals, masked-resident 4 of 4, both
+       -b                                 4,745 / 0 both; stale copies 83, 85, 85, 83 of as many agreeing,
+                                          the refusal plants real
+       -r                                 1,256 / 0 both
+    F2 the ten mutants, the quad          hostio 237 failed, touch 206, flushtouch 23, todev 4 (the bare
+                                          publish at every format), note 12 (the three re-runs), fullchunk 8
+                                          (div and sqrt in place, the whole-call route), nowait 1 (refused in
+                                          0.2 ms), lostwrite 1, lostmask 1, hostlost 1 - each on its own leg
+    F3 a masked run after a read-back     staged +0, resident +4 (quad) / +1 (single): bound resident; after
+       (a scratch probe)                  a publish staged +4 / +1: refilled; 0 lanes wrong; fp64, fp256
+    F4 the program set                    140 of 140, the quad
+    F5 the conformance replay             168 sets, 1,224,915 cases, all matching, the quad, 772 s
+    F6 an abandoned run                   the timeout names tile 0 and says to reload it; a run meanwhile
+                                          refused before any start; the run after refused early by name,
+                                          never wrong; after a reload, right
+
+26 of 26 verdicts.
+
+**verifier-V8 on 3344e68** found the class closed as V7 had posed it:
+- V7's thirteen sequences were right in 208 of 208 on a rebuilt mock
+  (2ecc382 wrong).
+- 38,400 random calls a device gave 0 mismatching sequences (2ecc382:
+  181 and 152 of 240).
+- The new seam was exception-safe at 80 + 47 forked failure points, with
+  0 crashes (2ecc382 terminated 8 times).
+- Window staleness kept carved buffers resident.
+- The ten card mutants were red on the mock with the card's exact counts.
+
+It also found:
+- **N1, pre-existing.** A fill whose upload threw left its copy marked
+  current, so a retry bound the old bytes: wrong with CFT_OK.
+- **N2 and N3.** Several things were read from a mirror a device run
+  could have left stale, because program.c and the character parsers
+  brought nothing home:
+  - a program's bank, both at staging and in cft_program_digest;
+  - the image at cft_program_load;
+  - cft_from_*_char's strings.
+- **N4, N5 and N8.** Out-parameters (flags, bus, a bad index, a length)
+  were written on the host unannounced.
+- **N6, new at 3344e68.** A run writes B, the caller rewrites all of B's
+  mirror and publishes. The flush-first publish brought the run's bytes
+  over the caller's: wrong with CFT_OK, and right at 2ecc382. N7, a
+  partial rewrite, was wrong at both, differently.
+  - Whether the mirror was written since a run cannot be known: a store
+    of the same bytes looks like none (re-zeroing a zeroed buffer).
+  - V8's suggested hash of the mirror fails there too.
+- **Gates that passed its mutants:**
+  - the three declined-bind collect marks removed;
+  - cft_reduce's and the counts' announcements before the write removed
+    (a false LOST refusal);
+  - a lost buffer's publish bringing the failed run's bytes home;
+  - residency undone in two ways;
+  - cft_next_down and cft_to_hex_char never reached;
+  - four more wrong shuffles passed by api-test's judge, which never
+    compared two seeds.
+- **Messages.** A thrown wait and an ERROR state were called "a hang or
+  a genuinely slow run". An unreadable CTRL after the wait lacked the
+  reload advice.
+- **Scripts.** run_ckpt.sh rebuilt nothing after a library change
+  (pre-existing).
+- **Docs.** Seven places claimed more than the code or the gate.
+- **The witness's timing.** Its before-start refusal came AFTER staging.
+  A busy tile's copies, filled by the refused wave, were then current
+  and exposed to the abandoned run's writes, and the refusal's sentence
+  advised a retry.
+
+**Logan's rule** (2026-09-26): on a device backend, a publish of a
+buffer holding a run's results nobody has read back is refused by name.
+Read the buffer back (which keeps the results), then write and publish.
+The software backend accepts every publish.
+
+cd35c48 implements the rule and fixes the rest:
+- A fill is marked current only after its upload.
+- The witness reads CTRL before a wave is staged, and again when a
+  handle opens a tile. Access is exclusive, so a tile busy at open is
+  running a run that an ended process abandoned, and the open is refused
+  by name.
+- program.c brings home the image, and the bank at a run and at a
+  digest. The character parsers bring home their strings.
+- The out-parameters are documented as stores made for the caller.
+- The messages.
+- run_ckpt.sh rebuilds when a tool's source, a library source or a
+  header is newer. Running the script itself built 5 tools, then 0, then
+  5 after a touch.
+
+Each gate V8 walked past was given something that fails:
+- `CFT_XRT_BIND=decline-outputs`, a card instrument that declines every
+  resident output bind, so the stale-copies leg runs again through the
+  staged collects' marks. It first checks that it declines at all.
+- New sequences:
+  - N6 and the refused publish;
+  - a reduce and a program's counts into a window a run left dirty;
+  - deposits and scratch-out;
+  - the bank, digest, image and strings;
+  - the two entry points never reached.
+- "Resident windows stay resident".
+- The lost leg's read-back.
+- The witness leg: a refused wave binds nothing, and an open refusal is
+  planted before the handle under test exists.
+- The judge compares seeds, and V8's four shuffles are permanent
+  negative controls.
+
+On the card, cd35c48 was built on amd-arc-box with exactly the two known
+warnings (records in `card-v8fix/`):
+
+    F1 full matrix -n 64                  quad 10,077 / 0, single 10,077 / 0; witness 11 of 11 (the refused
+                                          wave binding nothing), the witness at open, the lost leg,
+                                          masked-resident 4 of 4
+       -b                                 4,858 / 0 both; stale copies agreeing at all four formats, the
+                                          refusal plants and the declined pass real; resident windows resident
+       -r                                 1,257 / 0 both
+    F2 the 26 mutants, the quad           each red on its own leg: hostio 278 failed, touch 234, flushtouch
+                                          31, note 12, fullchunk 8, nowait 1, lostwrite 1, lostmask 1,
+                                          hostlost 1, pubflush 8, pubdrop 8 (the refused publish and N6 at
+                                          every format), openwit 1, latewit 1, declinst 12, declnotes 12,
+                                          redbefore 4, cntbefore 1, todevlost 1, wholebump 8, flushnocur 4,
+                                          bank 4, digest 4, image 4, strings 4, nextdown 12, tohex 8
+    F3 a masked run after a read-back     staged +0: bound resident (quad and single, fp64)
+    F4 the program set                    140 of 140, the quad
+    F5 the conformance replay             168 sets, 1,224,915 cases, all matching, the quad, 688 s
+    F6 a run abandoned on tile 0          the timeout names tile 0 and says to reload it; while it ran, a
+                                          new process's open refused by name; after it, the run refused
+                                          early by name, never wrong; after a reload, right
+
+40 of 40 verdicts. N1 cannot be planted on a card, because it needs a
+failing upload.
+
+**verifier-V9 on cd35c48**, with a rebuilt mock that gives the card's counts.
+- **N1 is closed** at every failure point: 4,589 cases and 0 wrong
+  bytes. 3344e68 and an N1-reverted build give 120 wrong each.
+- **Confirmed as claimed:** the publish rule, the witness at open and
+  before staging, and the messages. The 26 card mutants gave the card's
+  exact counts.
+- **No regression.**
+
+It found five wrong answers in the shipped tree. None was introduced by
+cd35c48: four give the same bytes at 3344e68, and the fifth has been
+there since 613f3f88 (2026-09-03).
+- `cft_run_ex` and `cft_program_run_ex` checked an index table's bound
+  on the stale mirror. An out-of-range index a device run had written
+  was accepted with CFT_OK, and the tile read past its source; a valid
+  table over a bad mirror was refused.
+- The composed route's scalar was read from the stale mirror (x + 1 for
+  x + 5, CFT_OK). One in a LOST buffer was not refused.
+- `cft_program_digest`'s digest and `cft_conformance`'s report were
+  written unannounced.
+- `cft_reduce(CFT_SUMABS)`'s out-of-memory return left the handle's
+  flags muted, so `cft_test_flags` answered 0 after an overflow.
+
+Under Logan's rule of 2026-09-27 (only a regression or a wrong answer
+sends work back; anything else is recorded as a known limit), the lead
+fixed them in 03963fb:
+- each table and the scalar brought home first;
+- the digest and the report announced;
+- the flags unmuted;
+- two misattributed refusals made to name their own cause.
+
+Its other notes are either made true in the docs or listed below as
+known limits.
+
+Each fix got a gate that fails without it:
+- seven stale-copies sequences;
+- four refusals in the lost leg;
+- a refused publish, and a read-back, each naming itself straight after
+  a refusal of the library's own;
+- api-test's sumAbs check.
+
+On the card, 03963fb was built on amd-arc-box with the two known
+warnings; records in `card-v9fix/`:
+
+    F1 full matrix -n 64                  quad 10,082 / 0, single 10,082 / 0; the witness 11 of 11, at open,
+                                          the lost leg with V9's four refusals, masked-resident 4 of 4
+       -b                                 4,890 / 0 both; stale copies 111, 113, 113, 111 of as many
+                                          agreeing, V9's seven sequences run at every format
+       -r                                 1,257 / 0 both
+    F2 the nine mutants                   each red on its own leg: idxrun 4, idxprog 4, idxsi 4, scalar 4
+                                          (+1 lost), digestout 4 (+1), confrep 4 (+1), gmsgto 4, gmsgfrom 1;
+                                          sumabs through api-test
+    F4 the program set                    140 of 140, the quad
+    F5 the conformance replay             168 sets, 1,224,915 cases, all matching, the quad, 663 s
+
+21 of 21 verdicts.
+
+**V9's second pass on 03963fb:** no regression and no wrong answer. All
+five are right on the rebuilt mock, with cd35c48 wrong beside each, and
+the mock's counts match the card's number for number.
+
+Its other notes and the lead's own finding were cheap to act on. f16458f
+takes them:
+- **A check that could not fail.** The lost leg's table check read an
+  all-zero mirror, so it passed with the fix removed. It now seeds an
+  entry past the source.
+- **Both ways.** The digest and the report are now held in the other
+  direction too: written over a buffer a run left dirty.
+- **A silent skip.** The named-publish check says NOT TESTED where no
+  buffer is resident.
+- **Sentences made true:**
+  - `cft_last_error`'s contract (see the known limits);
+  - the conformance report in a lost buffer;
+  - the out-parameters, which are also zeroed at the start and must
+    share no bytes with an array the call reads, not only one it writes;
+  - the open refusal, which now names a handle closed after any failed run.
+
+On the card, f16458f passed 9 of 9 (`card-v9b/`):
+- both images: 10,082 / 0, `-b` 4,898 / 0 (113, 115, 115 and 113
+  agreeing), `-r` 1,257 / 0;
+- the seeded check red under idxrun, with the bound check's INVALID
+  where the LOST refusal is required;
+- the two new sequences red under digestout and confrep.
+
+**The ODE rows' check** (F0b and F0c, programs/check.py). verifier-S0b
+found the first form passed a wrong equation or scheme shared by
+gen_odes.py and ode_step, and a transposed bank; F0b's 15be186 (merged
+d8d8c0d, verified by verifier-V3) made each red. V3's gate limits went to
+F0c: 7901584 (merged 7e55827, verifier-V5: MERGE with notes), its
+follow-up d2ed6a6 (merged 148819c, V5: MERGE with notes), and a second
+follow-up 98d7b05, which V5 sent back: its four earlier shapes of a
+helper handed to the textbook arm were red for the named reason, but
+five natural ones passed the whole gate carrying a wrong Lorenz-63 (a
+conditional with a None branch, a mixed local container, a local or
+literal table - against the rules' own sentence - a call through a
+local alias, a registry filled by `.update(...)`), and narrowing the
+main walk's own block setting regressed silently.
+
+F0c's third follow-up, 59e5c28:
+- made all five shapes red for the named reason;
+- held the main walk with a census of every module-level binding;
+- watched each mechanism of its walk failing.
+
+V5 judged it MERGE with notes. 30 mechanisms were turned off, and each
+went red except one equivalent; the gate was 319/0/0, and nothing
+shipped moved. The notes:
+- A call through a module-level class's attribute (X3) was listed as
+  passing, for a reason that fits only an instance's attribute.
+- Four more shapes passed unlisted: a thread pool's submit, an inline
+  functools.partial, and a registry filled through a local alias or
+  through a chained module-level alias.
+
+The lead sent it back for those (2026-09-27).
+
+F0c's fourth follow-up, 29ee82a, closed the three unlisted shapes and X3:
+- a call through a class's attribute now resolves through what the
+  class's body binds;
+- a function passed as a call's first argument receives the call's other
+  arguments;
+- aliases of a module-level table share its fills;
+- the census counts, and refuses, a walrus wherever it binds at module level.
+
+It gave 331 checks, 0 failed.
+
+V5 ran 243 mutants of its own through the whole gate:
+- every closed shape was green at 59e5c28 and is red now for the named reason;
+- the listed limits pass;
+- 37 of 40 mechanisms turned off went red, and the three green are named;
+- there is no false alarm on the shipped tree.
+
+Its verdict: MERGE with notes. None of the notes is a regression or a
+wrong answer:
+- a class the calling function defines is not followed, though the
+  comment said classes are;
+- seven more shapes pass unlisted;
+- two right trees now fail loudly;
+- three sentences claimed too much.
+
+Merged as 44fc132. The lead's 9d7c349 made the sentences true and listed
+the shapes; the programs gate stays at 331/0/0.
+
+**cft-orbits' resume** (F1). verifier-V1 found, among others, a killed
+run's records out of step with its checkpoint on both engines since
+2026-09-04. F1's c8a7d97, its revision 589cbc1 and its third pass
+d56ecbe answered V1 and then verifier-V6 twice; V6 judged d56ecbe MERGE
+with notes: no defect in the tool, the flaky leg fixed by perf_counter
+(280 paired evaluations, 0 failures against monotonic's 6), but the
+held-checkpoint leg's rename retry is bounded by a count, and with the
+desktop saturated (a game at 100% CPU) it gave up as late as 4.88 s
+against a 5 s hold and once outlived it; two holes in the new legs;
+eviction held only by timing; and a one-file refusal that truncates
+first where it need not. The lead sent it back for those.
+
+F1's fourth pass, bc00d8d:
+- bounded the retry by the clock. At natural load it gave up 1.50-1.54 s
+  into the hold, in 48 of 48 runs.
+- refuses the one file before a byte is cut. d56ecbe had emptied a
+  checkpoint under 11 of 13 Windows spellings and 8 of 10 Linux ones;
+  bc00d8d empties none.
+- added a second-writer leg.
+
+V6 judged it MERGE with notes. The first note is a regression: a fresh
+run from Windows with --records pointed at a Linux FIFO through the
+share used to stream and is now refused. The share presents the FIFO as
+an empty regular file, and the new truncation step fails on it. The lead
+sent it back (2026-09-27).
+
+F1's fifth pass, 66a4bab and 171c1bb:
+- **An empty file is not cut.** A file the open handle says is empty is
+  left alone, so a fresh run into a Linux FIFO through the share streams
+  again. verifier-V6 measured all 11,798 bytes arrive.
+  - With `--checkpoint`, the run streams, then is refused by name with
+    exit 2, and the refusal counts exactly the bytes that were written.
+- **Refusals name their cause.** A failed cut or open names its step and
+  the operating system's reason.
+- **ORBITS.md says exactly when a pipe streams.**
+- **A hidden records file**, refused before, is now written; the change
+  is named.
+
+Measured:
+- 63 mutants, 61 red.
+- The gate: 119/0 on Windows. On Linux, 118 plus a named SKIP as root,
+  and 119 as `nobody`.
+- 464 runs (F1) and 412 runs (V6) against bc00d8d: 0 differ.
+
+V6's verdict: MERGE, with no regression and no wrong answer. Its four
+other findings are listed below. Merged as cfbdb55.
+
+**Load, and the machine.** Logan, 2026-09-25: no agent loads the machine
+on purpose. Two sets of numbers in this round were taken under load an
+agent made itself, and no verdict here rests on them: F1's first report's
+"3 of 3 whole gates green under 48 busy processes" (its own loadtest.py,
+12:07-12:26), and verifier-V6's loaded evaluations and five loaded gate
+runs (its own busy-loops, 14:48-14:52 and 17:14-17:38). FIFO tests
+through WSL's `\\wsl.localhost` share left twelve of the distro's 9P
+server threads blocked opening FIFOs that had since been deleted, and
+every Windows read through the share hung (over 5 minutes for
+`/etc/hostname`); restarting the distro, with Logan's clearance, freed
+it (3 threads, 0 blocked, a read in 0.05 s). Whoever tests FIFOs through
+the share: open each one from the Linux side before deleting it.
+
+**Corrections to the entry above** (verifier-V1 and verifier-V2):
+- "verify/run.sh --only libcft,generated,docs PASS, nothing skipped (libcft
+  872 s)": that run (20260925-100104-77be921) is headed TREE DIRTY - 64a3f70
+  was committed during its libcft stage. The clean run is verifier-V2's,
+  20260925-102944-bc84e99: docs 9 s, libcft 965 s, generated 2 s, PASS,
+  nothing skipped.
+- "(F0b, 10:24)": 10:14, by F0b's own correction; the lead's ledger
+  headings from 10:01 to 10:58 were typed ahead of the clock (lead.md,
+  11:04:51).
+- "an inert control" is not verifier-S0a's finding: the lead found it
+  (lead.md, 10:01:10).
+- The census's per-step loop cost e (3.07, 2.93 ns) is not resolved by
+  single wall-clock runs - 50 ms on any one moves it between about 0.5 and
+  5.5 ns; the ALU ratio (4.7-5.7 at fp64, 5.0-5.2 at fp256) and the 82%
+  share (81-84%) are robust to the same (verifier-V2).
+- "each selection opened exactly what it named": the card logs carry tile
+  counts; the order written ("3,1") is shown by verifier-V2's model of the
+  open path, not by the card.
+- "an interruption costs about one --checkpoint-interval" (77be921): at a
+  steady rate the gap reached two intervals (verifier-V1: 1.87-1.94 s at an
+  interval of 1). F1's c8a7d97 sizes each segment to the time left before
+  the next checkpoint is due. Under a virtual clock the segments engine then
+  checkpoints every 1.00 interval, where whole-interval sizing gave 1.27
+  and 1.95 (F1, measured on a variant of its own code).
+- A pre-existing defect on both engines since 2026-09-04: after a kill,
+  --resume left a records file out of step with its checkpoint
+  (verifier-V1, 7 of 7 kills). F1's c8a7d97 fixes it:
+  - the checkpoint now carries the records' length (version 2);
+  - the records are flushed, and their length checked, before each
+    checkpoint;
+  - `--resume` verifies the records' prefix against the chain and cuts the
+    rest.
+  Kill legs on both engines, each resumed by the other, equal the
+  uninterrupted run. Merged, with F1's later rounds, as cfbdb55.
+- V2's defects in 64a3f70, fixed in 5d07c60: a double delete under
+  allocation failure; a probe-path message that blamed a holder for a
+  missing unit; five loose parses api-test passed; an undeclared tile
+  refused as ARTIFACT (now INVALID_ARGUMENT, Logan's word).
+
+**Known limits, recorded rather than fixed** (Logan's rule, 2026-09-27).
+Each was found by a verifier, and none gives a wrong answer today:
+- **No permanent gate for N1.** A fill whose upload fails is caught only
+  by a mock of XRT, which the tree does not keep. A build with N1
+  reverted passes every device-test leg (verifier-V9).
+- **No gate for a refused publish's generation.** A refusal that still
+  moved the generation would refill a window it had not touched:
+  residency lost, bytes right. It passes every leg (V9's pubgen).
+- **api-test's tile-order judge** passes three wrong shuffles: a
+  rotation, a seed read through only some of its bits, and waves that
+  repeat every eight. The union of its stated bounds, about 2e-9, is not
+  stated (V9).
+- **The software backend accepts every publish.** Code tested only there
+  never meets the card's refusal; device-test's reference supplies the
+  refusal itself (V9).
+- **An out-parameter that shares bytes with an array the same call
+  writes** is not checked, and the backends then leave different bytes
+  there. cft.h and HOSTAPI now say so (V9).
+- **CFT_XRT_BIND=decline-outputs** reuses an output copy already live at
+  the same window. The docs now say so; device-test's pass uses fresh
+  buffers (V9).
+- **cft-serve's BUF_WRITE** writes the mirror before it publishes. This
+  is unreachable until a by-handle RUN exists (V9).
+- **cft-orbits accepts a checkpoint with `inf` in its state**, and its
+  flag certificate then stops the run with exit 3 rather than a named
+  refusal with exit 2. No wrong answer escapes. Found by the fuzz lane
+  while V9 checked run_ckpt.sh; outside this round's commits.
+- **The capacity legs run once a process, at the first format:** fp32 in
+  the card's full matrix (verifier-V7, item 6).
+- **`cft_last_error()` can give an OLDER sentence.** The library clears
+  its own message only when a call reaches a backend, and the XRT
+  backend never clears its own.
+  - A refusal made without a sentence - `cft_conformance` over a
+    directory with no vector sets, or a bare argument error - leaves the
+    previous failure's sentence standing. The lead found this in
+    03963fb's mutant logs; it predates the round.
+  - Since 03963fb, a successful read-back or publish clears the
+    library's message. After a backend failure, then a library refusal,
+    then a successful read-back, what is left is the older backend
+    sentence (verifier-V9).
+  - The header's promise ("detail on the most recent failure") is
+    restated: read the message straight after the call that failed.
+- **Error precedence moved.** On a device without CAPS2[9], a LOST index
+  table is now refused as LOST, where it was the capability refusal
+  (verifier-V9).
+- **A build combining XRT with `CFT_NO_PROGRAM`** would gather a source
+  on the host without bringing it home (`run_gathered`). Nothing in the
+  tree builds that combination (verifier-V9).
+
+- **cft-orbits trusts a file's own report of its size.** A filesystem
+  that reported a non-empty records file as empty would leave the old
+  tail after a fresh run without `--checkpoint`, and exit 0. No such
+  filesystem was found, on the desktop, through the share or in WSL.
+  ORBITS.md now says so (verifier-V6).
+- **cft-orbits' gate does not hold a failed open's system reason:** a
+  mutant that drops it passes (V6).
+- **Under the test instrument `CFT_ORBITS_SHARE_FIFO`**, an existing
+  longer records file keeps its tail. The gate's leg starts with no file
+  (V6).
+- **Two of F1's claims are F1's measurements only:** mapping an empty
+  file fails on Windows with error 1006, and a sealed empty memfd
+  behaves as F1 says. V6 did not repeat either.
+
+- **The ODE rows' tripwire does not follow everything.** What it does
+  not follow is named in `programs/check.py`'s comment above its rules
+  (verifier-V5):
+  - a class the calling function defines;
+  - an attribute a class inherits, a nested class's, or one bound by a
+    `for` in the class body;
+  - a table aliased as a class attribute, by unpacking, or reached
+    through a return;
+  - a registration helper handed a table at module level;
+  - a 3.12 `type` statement;
+  - a wrapper given the verdict by keyword;
+  - an object whose class is chosen at run time;
+  - V5's S1-S8.
+- **Two of the tripwire's rules are broad, and a right tree can fail
+  loudly on them.** A call with one side's definition first and the
+  other's after it, and `Y = X or Z`, are both taken as handing
+  (verifier-V5).
+- **Two of the tripwire's mechanisms have no control of their own:** the
+  first-argument restriction, and the class table handed to the probes'
+  walk (verifier-V5).
+
+**The lead's own slips this round**, each caught and recorded in its
+ledger: f953f4c's message claimed an edit the commit did not hold (a
+two-part inline patch whose second half did not take, "measured" by a
+stand-in); S9 and S10 printed and never judged; two card legs asking for
+more than the tiles have; a brief naming a runner stage that does not
+exist (`--only orbits`); shell here-documents that ate escapes and ran a
+backquoted word as a command. The rules adopted: check `git show --stat`
+against the message before believing a commit; test the artifact
+itself; write patch scripts as files.
