@@ -3276,6 +3276,89 @@ Per-tile speed multiplies all of it: revision 7's two items above - a
 control code joining the overlap, a masked beat skipped - make each
 tile faster, and the tile count then multiplies that.
 
+### What a side project asks of step 4's revision (2026-09-28)
+
+Logan passed these on from a side project on 2026-09-28, most
+important first. What each ask is for, and what it costs, are that
+project's estimates, not measurements made here. Step 4 of the
+controlled-divergence work order is ONE program-model revision:
+revision 7's two items plus only the asks this project has measured.
+So each ask below is recorded to be measured before it joins, with
+what this tree already says beside it.
+
+**1. Control codes join the instruction overlap** - revision 7's
+first item ("Library debts", above). For: the biggest measured lever,
+Lorenz-96's scratch share; Taylor recurrences are scratch-bound on
+today's pricing too. Here: Lorenz-96's body is 692 scratch accesses
+in 1,452 instructions and 82% of its time on the card, a scratch
+access about five arithmetic instructions (the census,
+docs/VALIDATION.md, controlled divergence steps 0 and 1a).
+
+**2. Deeper scratch: `SCRATCH_D` 1,024 at least, 2,048 preferred.**
+For: a Taylor engine at useful orders - about 260 slots for small
+kinetics at order 64, about 2,000 for five bodies at order 30.
+Cost, theirs: a build parameter, 0.5 to 1 MiB a tile of the U50's
+roughly 22 MB of UltraRAM. Here:
+- Lorenz-96 already uses 200 of 256 (5 x N at N = 40,
+  `programs/gen_odes.py`).
+- docs/SEQUENCER.md's scratch = SCRATCH_D x LATENCY x 32 bytes gives
+  128 KiB a tile today, 512 KiB at 1,024 and 1 MiB at 2,048.
+- It is NOT only a capacity. `LDX`/`STX` reduce `rb` modulo
+  `SCRATCH_D`, so a deeper tile computes different answers for a
+  program that wraps (docs/SEQUENCER.md). A deeper scratch is a
+  program-model change, the golden model's with it.
+
+**3. Auto-stepping scratch addresses** - post-increment and
+post-decrement on `LDX`/`STX`. For: a Taylor coefficient is a Cauchy
+product, the sum of a_j b_(n-j), two indexed reads walking in
+opposite directions. Today that is about 2 loads, 1 FMA and 2 integer
+adds a term; with this and ask 1, about 3 slots. Cost, theirs: a
+small address-generation change. Here: an instruction-set change,
+defined in the golden model first.
+
+**4. An exact-residual add** - TwoSum, the rounding error of a + b as
+its own opcode. For: compensated stepping in 2 instructions instead
+of 4, and double-word arithmetic on the tile (fp256 pairs give about
+470 bits, enough for the 600-bit-class reference runs to happen on
+the card). Cost, theirs: the adder has the exact sum before rounding.
+Here, the project's own caution stands. 754-2019's augmentedAddition
+rounds ties toward zero, an attribute the tile's five do not include,
+and this library computes it on the host that way
+(`host/src/augmented.c`). A round-to-nearest TwoSum differs from it at
+ties, so the golden model must define which one the opcode is before
+any RTL does.
+
+**5. Per-lane sticky flags** - invalid and overflow, delivered with
+each lane's outputs. For: in a design sweep, dropping the one variant
+that diverged instead of rerunning the batch. Cost, theirs: moderate.
+Here: FLAGS is the OR over the whole run, and over the tiles that ran
+it.
+
+**6. Beat skipping** - revision 7's second item ("Library debts",
+above). For: divergent ensembles - adaptive steps, event lanes, Newton
+lanes. It matters less for fixed-step Taylor or extrapolation.
+
+For a later revision, once the compiler exists and has a census of
+its own (the project's list, unranked):
+- **Cross-lane rotate and an in-block reduction**, for "lane =
+  component" in coupled systems instead of "lane = whole system":
+  - N-body with bodies across lanes, GRAPE-style (ten bodies at order
+    30 is about 6,000 values a system, so lane = system does not
+    scale);
+  - series-connected cells summing their voltages for a shared string
+    current;
+  - Lorenz-96's ring living in lanes instead of scratch.
+- **A fused dual-read multiply-add over scratch**: the whole
+  Cauchy-product term as one instruction.
+- **For step 7 (SDEs), two small integer additions.** A rotate opcode
+  makes Threefry-style generators about twice as cheap (add-rotate-xor
+  is possible today), and IMULHI enables Philox. This tree has `IMUL`
+  (opcode 30, CAPS[28], since 2026-09-07) and no IMULHI.
+- **A broadcast input that advances with the loop counter**, for
+  time-varying forcing. The project thinks it probably unnecessary
+  while a segment per hour stays cheap: 104k segments at about 35 us
+  each is about 4 s a 25-year run.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
