@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Certificates, version 1 (docs/CERTIFICATES.md): the golden gate.
 
-Every mechanism of python/cft_golden/cert.py has a negative control
-here, and each control asserts the NAME of the check it exists for -
-never merely that something refused. Every control but the byte flip
+The mechanisms of python/cft_golden/cert.py have negative controls
+here, all but those docs/CERTIFICATES.md's "The controls" names as
+still without one, and each control asserts the NAME of the check it
+exists for - never merely that something refused. Every control but the byte flip
 writes a valid hash line over its defective body (cert.rehash, or
 cert.encode for a structurally sound certificate with a semantic
 defect), so it reaches the check it is for instead of stopping at the
@@ -1416,7 +1417,7 @@ def test_the_width_rule_holds_a_drifts_every_product(zsq):
     assert "product" in e.message
 
 
-# verifier-C2's terms: 1/a + 1/b has a 1,201-bit denominator, and adding
+# verifier-C2's terms: 1/a + 1/b has a 1,202-bit denominator, and adding
 # -1/b brings the sum back to 1/a - so only a check on the partial sum
 # can refuse it, and the same three terms in another order are within
 # the rule at every step.
@@ -1424,6 +1425,11 @@ C2_A, C2_B = (1 << 600) + 1, (1 << 601) - 1
 
 
 def test_the_width_rule_holds_a_drifts_every_partial_sum(zsq):
+    # the page's count (CERTIFICATES.md, "Accuracy entries"), which
+    # verifier-C2 found one short
+    s = Fraction(1, C2_A) + Fraction(1, C2_B)
+    assert s.denominator.bit_length() == 1202
+    assert "whose denominator has 1,202 bits" in " ".join(_doc().split())
     one = dec64("1")
     terms = [(Fraction(1, C2_A), ()), (Fraction(1, C2_B), ()),
              (Fraction(-1, C2_B), ())]
@@ -1713,6 +1719,83 @@ def test_the_width_rule_reaches_an_enclosures_ends_not_a_rounded_value(lor):
     j = find(L, "value rounded")
     cert.parse(rebuilt(L[:j] + [f"value rounded fp256 rup {el(-1100)}"]
                        + L[j + 1:]))
+
+
+def test_an_enclosures_line_is_read_in_the_pages_order(lor):
+    """The page's order for an enclosure's line (verifier-C2 found it
+    open at e484425): each end's hex, NaN and decimal, the lower end
+    first; then each finite end against the width rule, the lower first;
+    last, whether the lower end is above the upper. A lower end past the
+    rule does not decide a line whose upper end is misspelt or has the
+    wrong decimal, and it is refused before the ends are compared."""
+    L = lines_of(lor.data)
+    i = find(L, "value enclosed")
+    f = FORMATS["fp256"]
+
+    def el(k):
+        bits = chars.from_hex(f, f"0x1p{k}", sf.RND_RNE)[0]
+        return f"{bits:064x} {cert.exact_decimal(f, bits)}"
+    one_hex, one_dec = el(0).split(" ")
+    for lo, hi, name, said in (
+            # the upper end's decimal, before the lower end's width
+            (el(-1100), f"{one_hex} 2", "decimal", "upper end"),
+            # the upper end's hex, before the lower end's width
+            (el(-1100), f"{one_hex[1:]} {one_dec}", "malformed",
+             "upper end"),
+            # both ends past the rule: the lower end first
+            (el(-1100), el(1100), "width", "lower end"),
+            # the width rule before the comparison of the ends
+            (el(1100), el(0), "width", "lower end"),
+            (el(1), el(-1100), "width", "upper end")):
+        data = rebuilt(L[:i] + [f"value enclosed fp256 {lo} {hi}"]
+                       + L[i + 1:])
+        e = refused(name, cert.parse, data)
+        assert said in e.message, e.message
+    # and with both ends in the rule, the comparison refuses
+    data = rebuilt(L[:i] + [f"value enclosed fp256 {el(1)} {el(0)}"]
+                   + L[i + 1:])
+    e = refused("malformed", cert.parse, data)
+    assert "above" in e.message
+
+
+def test_the_tightest_pair_past_the_rule_is_refused_not_widened(lor):
+    """An in-rule value whose tightest enclosure has an end past the rule
+    (verifier-C2): 1/(3 x 2^900), 902 bits, rounded down into fp256 has
+    a 1,139-bit denominator, and 1/(3 x 2^1010) in fp64 likewise. The
+    writer refuses `width`, by name, and does not widen the pair."""
+    for fmt, q, lo_bits in (("fp256", Fraction(1, 3 << 900), 1139),
+                            ("fp64", Fraction(1, 3 << 1010), 1065)):
+        assert q.denominator.bit_length() <= 1023
+        v = cert.make_value(q, "enclosed", fmt)
+        kind, lo = cert.element_fraction(FORMATS[fmt], v.lo)
+        assert kind == "finite" and lo.denominator.bit_length() == lo_bits
+        e2 = dataclasses.replace(lor.entries[2], value=v)
+        refused("width", cert.encode,
+                keyed(lor.runs, lor.entries[:2] + (e2,) + lor.entries[3:]))
+    assert ("in fp256, has a lower end whose denominator has 1,139 bits"
+            in " ".join(_doc().split()))
+
+
+def test_the_identity_lines_are_held_to_their_spelling_alone(lor):
+    """The page: the reader does not hold the number of CAPS words to
+    device-version, or the device lines to one another or to backend
+    (verifier-C2 measured the four mismatches accepted). Held here so a
+    reader that starts to check them changes the page with it."""
+    L = lines_of(lor.data)
+    for backend, xclbin, version, caps in (
+            ("xrt", "a" * 64, "00000a00", "0000000f"),
+            ("xrt", "a" * 64, "00000600", "0000000f 00000000"),
+            ("xrt", "a" * 64, "none", "0000000f"),
+            ("xrt", "a" * 64, "00000a00", "none"),
+            ("software", "a" * 64, "unknown", "none")):
+        M = list(L)
+        for key, val in (("backend", backend), ("device-xclbin", xclbin),
+                         ("device-version", version),
+                         ("device-caps", caps)):
+            M[find(M, key + " ")] = f"{key} {val}"
+        c = cert.parse(rebuilt(M))
+        assert (c.identity.backend, c.identity.device_version) == (
+            backend, version)
 
 
 def test_bytes_that_are_not_whole_elements_are_refused_by_name(lor):

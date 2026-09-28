@@ -1363,7 +1363,9 @@ def derive(entry, runs, shapes, states):
 def make_value(q, form="exact", fmt=None, rnd=None):
     """The Value a writer records for the exact value q: exact, rounded
     in `fmt` under `rnd`, or enclosed in `fmt` by its two directed
-    roundings (the tightest enclosure that format holds).
+    roundings (the tightest enclosure that format holds). An end of that
+    pair can be past the width rule when q is not: encode() then refuses
+    it `width`, and the pair is never widened (verifier-C2).
 
     The exact value is held to the width rule whatever the form: a
     rounded or enclosed value is still a statement about q, which an

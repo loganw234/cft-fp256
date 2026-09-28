@@ -14,7 +14,8 @@ Where things stand (2026-09-28):
   strict parse, the hashes, the chain and the audit, which re-runs
   segments with `seq.run`;
 - its gate is `python/tests/test_cert.py`, run by the golden stage,
-  with a negative control for every mechanism;
+  with negative controls, each watched failing, for every mechanism
+  but those "The controls" names as still without one;
 - the C side (a segment runner, the library's build id, a C auditor)
   is later work, in the plan of record: [ROADMAP.md](ROADMAP.md),
   "Segments, certificates and the audit tool".
@@ -206,6 +207,13 @@ as it would refuse the exact value.
   step like the others, so each finite end is held to the rule, and an
   end past it is refused `width` by the reader. An infinite end is
   compared by its sign alone.
+- The reader takes an enclosure's line in this order: the format; the
+  lower end's hex digits, then that it is not a NaN, then its decimal;
+  the same for the upper end (`malformed`, `malformed`, `decimal`);
+  then each finite end against the rule, the lower first (`width`);
+  and last whether the lower end is above the upper (`malformed`). So
+  an end past the rule is refused `width` only when both ends are
+  spelt right, and before the ends are compared.
 - A ROUNDED value's element is not held to it: the audit rounds the
   exact value into the named format and compares the BITS, which needs
   no exact comparison. Rounding an in-rule value, at most 1,023 bits,
@@ -598,7 +606,7 @@ difference - is held to the width rule (refused `width`):
   things, which two auditors must decide alike:
   - whether the width rule refuses at all. The terms 1/a, 1/b, -1/b,
     with a = 2^600 + 1 and b = 2^601 - 1, are refused at the partial
-    sum 1/a + 1/b, whose denominator has 1,201 bits; the same terms
+    sum 1/a + 1/b, whose denominator has 1,202 bits; the same terms
     as 1/b, -1/b, 1/a are within the rule at every step, and their
     value is the same;
   - which refusal comes first when two apply, as when a value past the
@@ -611,9 +619,12 @@ difference - is held to the width rule (refused `width`):
   under the named attribute. Overflow and underflow are as the
   attribute says. An exact zero rounds to +0 under every attribute.
 - `enclosed`: two elements with lo <= value <= hi, both ends inclusive,
-  each finite end within the width rule. The golden writer writes the
+  each finite end within the width rule. The golden writer takes the
   tightest pair in the format, the value rounded down and rounded up,
-  and any pair that holds the value is accepted.
+  and refuses it `width` when a finite end of it is past the rule,
+  which can happen to a value within the rule: 1/(3 x 2^900), enclosed
+  in fp256, has a lower end whose denominator has 1,139 bits. It does
+  not widen the pair. Any pair that holds the value is accepted.
 
 **What re-deriving proves.** Each value IS the stated function of states
 whose hashes the certificate carries, and those states are the ones the
@@ -641,7 +652,10 @@ statement of what it ran on.
   Only `tracked=clean untracked=none` says the library IS that commit.
 - The device lines are what `cft_get_image_id` reports for an XRT
   image: the SHA-256 of the exact xclbin bytes loaded, VERSION, and
-  the raw CAPS words, one below VERSION 0x800 and two from it.
+  the raw CAPS words, one below VERSION 0x800 and two from it. The
+  reader holds each identity line to its own spelling and nothing
+  more: not the number of CAPS words to `device-version`, and not the
+  device lines to one another or to `backend`.
 - Each may be `unknown`: the producer did not record it. A reader
   reports it as such.
 - The device lines may be `none`: the field does not exist for this
@@ -902,16 +916,26 @@ reader's refusals; the run and the segment or boundary, for the audit's.
 
 ## The controls
 
-`python/tests/test_cert.py` holds every mechanism above to a negative
-control, and each control asserts the NAME of the check it exists for,
+`python/tests/test_cert.py` holds the mechanisms above to negative
+controls, and each control asserts the NAME of the check it exists for,
 never merely that something refused. Every control but the byte flip
 writes a valid hash line over its defective body. Otherwise the hash
 check would refuse them all first, and a broken strict-form check would
-pass unseen (verifier-C1). "Every mechanism" is a measured claim, not an
-intention: each was disabled in turn in a copy of the implementation,
-and a test went red for it (the round's ledger, P1.md; verifier-C2 found
-fourteen that could not fail at first, and each has its test now). The
-controls cover:
+pass unseen (verifier-C1). That a control can fail is measured, not
+intended: each mechanism was disabled in turn in a copy of the
+implementation, and a test went red for it (the round's ledger, P1.md;
+verifier-C2 found fourteen that could not fail at first, and each has
+its test now). Some still have no control. Verifier-C2's re-check of
+P1b disabled these and every test stayed green (its ledger,
+2026-09-28 11:43:01):
+- the hex spelling of `device-xclbin` and `device-version`. The audit
+  never reads those lines, so a broken check would pass a malformed
+  one through the reader and the audit alike;
+- the spelling of `stream-a`, `stream-b` and `stream-c`, of `output`,
+  of a segment's start and end hashes, and of `salt-commitment`;
+- in step 8, a run's `aux-image` checked before its `aux-segments`;
+- the reader's key scan, its step 5, ahead of the mode, its step 6.
+The controls cover:
 - a byte flipped, one at a time, in every byte of a certificate that
   holds every key of the grammar;
 - every line dropped;
