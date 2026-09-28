@@ -64,12 +64,23 @@ SRC     := src/bigint.c src/softfloat.c src/device.c src/divsqrt.c \
 OBJ     := $(SRC:.c=.o)
 PICOBJ  := $(SRC:.c=.lo)
 
+# A bare `make` builds everything, whatever rule comes first. Until
+# 2026-09-28 the first rule was print-src, below (f953f4c, 2026-09-25),
+# so `make -C host XRT=1 XRT_ROOT=...` - the command CLAUDE.md gives for
+# any box that will open an artifact - echoed the source list and built
+# nothing, leaving whatever binaries were there. The libcft stage asks
+# print-default-goal, so a rule moved above `all:` again is caught.
+.DEFAULT_GOAL := all
+
 # The library's sources, for a script that builds against them without
 # the objects (fuzz/run_ckpt.sh's sanitised tools): asked, never copied -
 # a hand list there missed src/sha256.c from 2026-09-08 until 2026-09-25,
 # and nothing ran it to notice.
 print-src:
 	@echo $(SRC)
+
+print-default-goal:
+	@echo $(.DEFAULT_GOAL)
 
 # The device backend. Off by default, because the whole point of the
 # software backend is that libcft builds and runs on a machine with no

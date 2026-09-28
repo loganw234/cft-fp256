@@ -656,6 +656,16 @@ ensure_vectors() {
 
 do_libcft() {
   local rc=0
+  # A bare `make -C host` must build: the default goal is `all`, not
+  # whichever rule sits first (f953f4c made it print-src, 2026-09-25 to
+  # 2026-09-28, and no stage noticed, because every stage names its
+  # targets).
+  local goal
+  goal=$(HOSTMAKE -s --no-print-directory print-default-goal 2>/dev/null)
+  if [ "$goal" != "all" ]; then
+    echo "host/Makefile's default goal is \"$goal\", not \"all\": a bare make -C host would not build"
+    rc=1
+  fi
   HOSTMAKE clean >/dev/null 2>&1
   ensure_vectors && HOSTMAKE test PYTHON="$PYBIN" || rc=1
   HOSTMAKE -k profiles-check || rc=1
