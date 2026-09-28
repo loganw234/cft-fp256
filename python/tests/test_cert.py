@@ -2511,10 +2511,11 @@ def test_the_writer_refuses_a_field_it_cannot_spell_by_name(lor):
     # and make_value, the writer's value, what it cannot spell: a value
     # that is not a rational, a form, format or direction the page does
     # not name (it raised ValueError, or crashed inside the rounding)
-    for a in ((0.5,), (True,), (Fraction(1), "approximate"),
+    for a in ((0.5,), (True,), (Fraction(1), "approximate", "fp64", "rne"),
               (Fraction(1), "rounded", "fp80", "rne"),
               (Fraction(1), "rounded", "fp64", "nearest"),
               (Fraction(1), "rounded", "fp64", None),
+              (Fraction(1), "rounded", "fp64", ["rne"]),
               (Fraction(1), "enclosed", None)):
         refused("malformed", cert.make_value, *a)
     # the right types are what they always were

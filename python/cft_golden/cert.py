@@ -1429,7 +1429,7 @@ def make_value(q, form="exact", fmt=None, rnd=None):
     if form not in ("rounded", "enclosed"):
         raise Refusal("malformed", f"a value's form is exact, rounded or "
                                    f"enclosed, not {form!r}")
-    if not isinstance(fmt, str) or fmt not in LADDER:
+    if fmt not in LADDER:
         raise Refusal("malformed", f"a {form} value's format is one of "
                                    f"{', '.join(LADDER)}, not {fmt!r}")
     if form == "rounded":
