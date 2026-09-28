@@ -1961,6 +1961,11 @@ def test_a_counts_own_value_is_read_before_its_lines(lor):
                    (q, "quantity square-norm terms 0"),
                    (q, "quantity square-norm terms 65"),
                    (r1, "run 1 half-step h-slots 0 0 1 2"),
+                   # one past the count's own limit, 512: its range is
+                   # read before the three indices that follow are
+                   # counted (its indices alone could not tell 513 from
+                   # 512 - past 511 an index is refused by its own)
+                   (r1, "run 1 half-step h-slots 513 0 1 2"),
                    (r1, "run 1 half-step h-slots 600 0 1 2")):
         e = refused("malformed", cert.parse, rebuilt(L[:i] + [new]
                                                      + L[i + 1:]))
