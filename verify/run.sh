@@ -857,8 +857,21 @@ stage seq "the sequencer: C vs model over fuzzed programs, plain and with indexe
 # built first. Until 2026-09-25 this ran only by hand (`make
 # programs-check`, docs/VERIFICATION.md said so): a library row whose
 # check no stage runs was not gated.
+#
+# Then the segment runner's differential gate (host/Makefile's
+# segruntest, host/tests/segrun_check.py; docs/CERTIFICATES.md, "The
+# segment runner"): cft-segrun certifies the three ODE rows at fp64 and
+# fp256 - with a half-step run, and a wider fp128 run beside each fp64 row
+# - and a small program whose segments raise several flags and a STATUS,
+# keyed and open; the golden writer, handed each certificate's identity
+# lines, the salt and the initial states, runs every segment itself and
+# must write the same bytes, and the golden audit must accept each, in
+# full and sampled. A stage of its own would have moved the runner's
+# stage count, which CLAUDE.md states; the gate is about the library's
+# programs, so it lives here. -k, so a failing asmtest still lets the
+# certificate gate report.
 do_programs() {
-  HOSTMAKE collatz asmtest PYTHON="$PYBIN"
+  HOSTMAKE -k collatz asmtest segruntest PYTHON="$PYBIN"
 }
 # Not mpmath: programs/check.py needs it only for the ODE rows' 300-digit
 # arm, which it skips by name - an inner skip this runner counts on the
@@ -866,7 +879,7 @@ do_programs() {
 # other check with it, the stdlib-only textbook arm included
 # (verifier-V3, 2026-09-25).
 need host-cc python
-stage programs "the program library: both assemblers against the MANIFEST, the readback, the generated corpora, and every row's own check" -- do_programs
+stage programs "the program library: both assemblers against the MANIFEST, the readback, the generated corpora, and every row's own check; then cft-segrun's certificates of the ODE rows, byte for byte the golden writer's, audited" -- do_programs
 
 # reduce_check.py holds the model's partition tree to the C partitioner
 # through host/reduce-parts, and SKIPs that half by name when the binary

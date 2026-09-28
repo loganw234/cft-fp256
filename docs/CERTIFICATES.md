@@ -16,9 +16,15 @@ Where things stand (2026-09-28):
 - its gate is `python/tests/test_cert.py`, run by the golden stage,
   with negative controls, each watched failing, for every mechanism
   but those "The controls" names as still without one;
-- the C side (a segment runner, the library's build id, a C auditor)
-  is later work, in the plan of record: [ROADMAP.md](ROADMAP.md),
-  "Segments, certificates and the audit tool".
+- libcft names its build and its device image, `cft_build_id` and
+  `cft_get_image_id` ([HOSTAPI.md](HOSTAPI.md), "Identity at ABI
+  0.15");
+- the segment runner, `cft-segrun`, writes version-1 certificates from
+  the library (see "The segment runner"), and the `programs` stage
+  holds them byte for byte to the golden writer;
+- the C auditor is later work, in the plan of record:
+  [ROADMAP.md](ROADMAP.md), "Segments, certificates and the audit
+  tool".
 
 ## What a certificate says, and what an audit proves
 
@@ -975,6 +981,168 @@ bank:
 - red, naming segment 1, when a producer's boundary 2 is one bit wrong
   and it carries on from there.
 
+## The segment runner
+
+`cft-segrun` is the C writer, the plan's step 3. It runs a program as
+consecutive segments on one libcft device handle, keeps the state at
+every boundary, and writes a version-1 certificate. `make -C host all`
+builds it, from `host/tools/segrun.c`.
+
+    cft-segrun --out CERT --states DIR (--salt SALT | --open)
+               [--device sw|<xclbin>|cft://host:port]
+               --run main --image IMG [--bank BANK] --init INIT
+                          --segments S --steps K [--param NAME=N ...]
+               [--run half-step --h-slots I,J,... --image IMG ...]
+               [--run wider --image IMG ...]
+    cft-segrun --hash state|stream-a|stream-b|stream-c FILE (--salt SALT | --open)
+    cft-segrun --hash commitment --salt SALT
+    cft-segrun --build-id
+
+**What it runs.**
+- Each `--run` opens a run block, and the options after it are that
+  run's. Run 0 is `main`. A later run is `half-step`, the same image on
+  a bank whose named h-slots are halved, for twice the segments, or
+  `wider`, the image one format wider.
+- A run is an image, its bank when the image takes one (`BANK_EXT`), an
+  initial state and a segment count. Each segment is one
+  `cft_program_run_ex` over every lane, with no index table and no lane
+  mask, entered with the last segment's scratch-out.
+- The streams a, b and c are +0. The tool takes none, and each stream
+  line is the hash of the +0 stream it ran.
+- `--init` is a state as "Hashes" defines one: the lane-major scratch
+  block, the block `positive-run --scratch-in` takes. Its size fixes the
+  run's lanes.
+- `--salt` names a file of exactly 32 random bytes and makes the
+  certificate keyed. `--open` makes it open.
+- `steps` and each `--param` are stated, not checked. Parameters are
+  written in the order given, and must already be in byte order.
+- It writes `accuracy 0`. Accuracy is the plan's step 5.
+- `--hash` prints one of the hashes above for a file's bytes, and
+  `--build-id` the library's `cft_build_id()`. The gate holds the first
+  to the test vectors above.
+
+**The states.** Each boundary is written as it is reached, to
+
+    DIR/run-<r>-boundary-<b>.bin
+
+where r is the run and b the boundary, 0 the initial state and S the
+output, both in decimal as the certificate numbers them. Each file is
+the state's bytes, lane-major, the bytes its hash covers. The run
+creates DIR, which must not exist before it, so two runs' states never
+share a directory. An auditor is handed the directory with the
+certificate, the images and banks, and a keyed certificate's salt. The
+golden audit takes the files as `states={r: {b: bytes}}`.
+
+**Identity, from the library and nowhere else.**
+- `build-id` is `cft_build_id()` of the library linked into the binary,
+  verbatim. `cft-segrun --build-id` prints the same string.
+- `backend` is `cft_caps.backend`: `software`, `xrt` or `remote`. Any
+  other answer is written `unknown`.
+- `device-xclbin`, `device-version` and `device-caps` are what
+  `cft_get_image_id` reports: the SHA-256 of the xclbin loaded, VERSION,
+  and CAPS alone or CAPS then CAPS2. Where it refuses:
+  - on the software backend all three are `none`;
+  - on an XRT image whose tiles disagree, all three are `unknown`;
+  - through a remote handle the tool follows "Identity": the server's
+    device fields where the protocol carries them. Its HELLO carries
+    VERSION as `cft_caps.device_version`, which is written where it is
+    not 0. A software server's is 0, which names no register map, so it
+    is written `unknown`. The protocol carries no xclbin digest and no
+    raw CAPS word, so those two lines are `unknown`.
+- `device-tiles` is `cft_caps.tiles`, the server's through a remote
+  handle, and `unknown` for 0.
+
+**Refusals.** Before anything runs, the tool refuses what the golden
+writer (`cert.run_chain`, `certify_run`, `encode`) refuses, by the same
+names and codes:
+- `salt-length`, for a salt that is not 32 bytes;
+- `program-image`, for an image whose header does not describe its
+  bytes, a bank that is not the size the image addresses (or any bank
+  for an image that carries its constants), or an image the library's
+  loader refuses;
+- `program-shape`, for a program that is not a segment;
+- `state-shape`, for an initial state that is not a whole number of
+  lanes, at least one;
+- `malformed`, for a count or index out of its spelling or range, a
+  half-step run with no h-slots, run 0 not `main` or a later run that
+  is, and no run at all; and, at a segment, a flag word the library
+  reports past the five sticky flags, which no reader could read;
+- `line-unexpected` and `line-order`, for a parameter named twice, or
+  out of byte order.
+
+For two of these the golden writer has no name. An image that does not
+load, and an empty initial state, each make it raise
+`seq.ProgramError`, and the tool uses the table's `program-image` and
+`state-shape`.
+
+A writer needs three more, which the golden writer, an API rather than
+a command, never meets. They are the tool's, in sysexits' codes, of
+which 64 is already the auditor's usage:
+- `usage`, exit 64: a command line the tool does not take, or a file it
+  names that cannot be read;
+- `device`, exit 69: the device does not open; it cannot read the
+  sticky flags a certificate records (`cft_caps.flags_readable` 0); a
+  digest, or a segment's run, fails; or the library leaves a segment's
+  flag word unwritten;
+- `output`, exit 73: the certificate or a state file cannot be written,
+  or DIR exists already.
+
+Every refusal prints `cft-segrun: refused <name>: <why>` and exits with
+the name's code. None writes a certificate. One made before the first
+segment leaves nothing behind. A run that fails part way leaves the
+boundary files it wrote, and says so. No backend in this tree reports
+flags it cannot read, leaves a flag word unwritten or reports one past
+31, so `CFT_SEGRUN_PLANT` is an instrument for the tests of those three
+refusals: `flags-unreadable`, `flags-unwritten` or `flags-wide`. Each
+only ever causes a refusal, and says so.
+
+**What it certifies, and what it does not.** It certifies what ran:
+which states each segment started and ended on, as hashes, with its
+flag word and STATUS as the library reported them, on the library build
+and device the library names. It does not check an auxiliary run's
+relation to the main run. A half-step bank that is not the main bank
+halved is written as stated, and the audit refuses it (`aux-bank`). It
+computes no accuracy, and it signs nothing.
+
+**Its gate** is `host/tests/segrun_check.py`, `make -C host segruntest`,
+which `verify/run.sh`'s `programs` stage runs. It certifies
+`lorenz63-rk4`, `lorenz96-rk4` and `henonheiles-lf` at fp64 and fp256,
+each image held to `programs/MANIFEST`, with its classic bank:
+- beside each, a half-step run, the bank slots named H, H2, H6 or MH
+  exactly halved, for twice the segments;
+- beside each fp64 one, a wider run: the same source assembled at fp128,
+  with the bank and the initial state exactly widened;
+- and `flagstep`, a small program written in the gate, whose segments
+  raise flags 20, 0, 1, 0 and 20 and STATUS 48, 48, 0, 48 and 48. Every
+  ODE segment raises flags 16 and STATUS 0, so the ODE programs alone
+  cannot tell a writer that drops STATUS, or writes one segment's flags
+  against another, from one that does not.
+
+Each program is certified keyed and open on the software backend. Then:
+- the golden reader must accept each certificate;
+- the golden writer, handed its identity lines, the salt and the initial
+  states, runs every segment itself and must write the same bytes;
+- every boundary file must be the golden chain's state;
+- the golden audit must accept each, in full and sampled, from the
+  states the tool wrote;
+- the build-id line must be what the binary prints and what the tree
+  builds, and the software backend's device lines `none`.
+
+It also holds the test vectors, and each tag keyed and open against an
+HMAC written from RFC 2104 in the gate. It holds every refusal by its
+name and code, and the golden writer's name for the same defect where
+it has one. Last, it makes one certificate through a loopback cft-serve,
+stopped by its PID. That certificate's device lines must be the remote
+rule's, and its run blocks byte for byte the software backend's. 283
+checks, 45 to 55 s on the Windows desktop at about half load
+(2026-09-28).
+
+**On the card**, `hw/card-segrun.sh <image.xclbin>` runs the same gate
+with the certificates made on the tile. It holds the device lines to
+`sha256sum` of the image and to what `device-test -i` prints, and each
+card certificate's run blocks to the software backend's. It has not
+run yet: the card leg is the round lead's.
+
 ## What version 1 does not do
 
 - **Sign.** The detached signature is reserved, and no scheme is
@@ -994,5 +1162,5 @@ bank:
 - **Certify cft-orbits' runs.** The plan's step 6 certifies Newton-route
   intervals, each a program image and bank this format holds. Its
   records carry no flags today (docs/ROADMAP.md).
-- **Run in C.** The segment runner, the build id and the C auditor are
-  the plan's steps 2 to 4.
+- **Audit in C.** The C auditor is the plan's step 4. The build id (step
+  2) and the segment runner (step 3) exist.

@@ -285,6 +285,13 @@ The runner is the same binary on the software backend, in emulation
 and on the card, which is what lets a plate's hash be compared across
 all three.
 
+**A program run as segments, and its certificate.** `cft-segrun` runs
+one image as consecutive segments, each entered with the last one's
+scratch-out. It keeps the state at every boundary and writes a
+version-1 certificate. Its initial state is the block `--scratch-in`
+takes here. [CERTIFICATES.md](CERTIFICATES.md), "The segment runner",
+is its manual.
+
 **The `#ifdef`, and why the digest has a fallback.** `BANK_EXT` needs
 `cft_program_run_bank`, which arrives with the host half of this
 round; without the macro the tool still builds, still runs every
