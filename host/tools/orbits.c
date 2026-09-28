@@ -306,6 +306,20 @@
 #include "cft.h"
 #include "../src/sha256.h"
 
+/* The system's own words for the last failure, kept for a refusal that
+ * names its cause: strerror() here, FormatMessage on Windows (below). */
+static char SYS_ERR[320];
+
+static void note_errno(int e)
+{
+    snprintf(SYS_ERR, sizeof SYS_ERR, "%s",
+             e ? strerror(e) : "no reason given");
+}
+
+/* CFT_ORBITS_SHARE_FIFO (the test instruments, below): the records file
+ * is taken to be what the WSL share makes of a Linux FIFO. */
+static int SHARE_FIFO = 0;
+
 /* The clock, and what the checkpoint and the records file need from
  * the system: how long an open file is, whether a path names a regular
  * file, which file a path or a stream is, opening a file for writing
@@ -396,12 +410,26 @@ static int file_id(const char *path, FILE *open_file, uint64_t id[2])
     return ok;
 }
 
+static void note_win_error(DWORD e)
+{
+    char text[256];
+    DWORD n = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM |
+                             FORMAT_MESSAGE_IGNORE_INSERTS, NULL, e, 0,
+                             text, sizeof text, NULL);
+    while (n && (text[n - 1] == '\r' || text[n - 1] == '\n' ||
+                 text[n - 1] == ' ' || text[n - 1] == '.'))
+        text[--n] = 0;
+    snprintf(SYS_ERR, sizeof SYS_ERR, "%s, Windows error %lu",
+             n ? text : "no text for it", (unsigned long)e);
+}
+
 /* A file opened for writing WITHOUT being cut, and created if it is not
  * there, so that which file it is can be asked of the open handle
  * before a byte of it is lost (main, where --records is opened). The
  * access and the sharing are fopen's "wb"; OPEN_ALWAYS, not
  * CREATE_ALWAYS, is the only difference - and a named pipe or a device
- * is opened as "wb" opened it, once. */
+ * is opened as "wb" opened it, once. One more: CREATE_ALWAYS refuses a
+ * hidden file, which "wb" therefore could not write; this writes it. */
 static FILE *open_uncut(const char *path)
 {
     HANDLE h = CreateFileA(path, GENERIC_WRITE,
@@ -409,30 +437,55 @@ static FILE *open_uncut(const char *path)
                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     FILE *f;
     int fd;
-    if (h == INVALID_HANDLE_VALUE)
+    if (h == INVALID_HANDLE_VALUE) {
+        note_win_error(GetLastError());
         return NULL;
+    }
     fd = _open_osfhandle((intptr_t)h, 0);
     if (fd < 0) {
+        note_errno(errno);
         CloseHandle(h);
         return NULL;
     }
     f = _fdopen(fd, "wb");
-    if (!f)
+    if (!f) {
+        note_errno(errno);
         _close(fd);
+    }
     return f;
 }
 
-/* A regular file cut to nothing, as "wb" would have cut it; a pipe or a
- * device has nothing to cut. */
+/* A regular file cut to nothing, as "wb" would have cut it. A pipe or a
+ * device has nothing to cut, and neither has a file that says it is
+ * empty - which is not a formality: Windows is told a Linux FIFO seen
+ * through the WSL share is an empty regular file, and the share refuses
+ * to cut it ("the parameter is incorrect", measured 2026-09-27), so
+ * bc00d8d, which cut it all the same, refused a fresh run into it that
+ * had streamed until then (verifier-V6, 2026-09-26). Under
+ * CFT_ORBITS_SHARE_FIFO the file says 0 bytes and the cut is refused
+ * with that same error. */
 static int file_empty(FILE *f)
 {
     HANDLE h = (HANDLE)_get_osfhandle(_fileno(f));
-    LARGE_INTEGER zero;
+    LARGE_INTEGER zero, size;
     if (GetFileType(h) != FILE_TYPE_DISK)
         return 0;
+    if (SHARE_FIFO)
+        size.QuadPart = 0;
+    else if (!GetFileSizeEx(h, &size))
+        size.QuadPart = -1;             /* not known: cut it */
+    if (size.QuadPart == 0)
+        return 0;
+    if (SHARE_FIFO) {
+        note_win_error(ERROR_INVALID_PARAMETER);
+        return -1;
+    }
     zero.QuadPart = 0;
-    return SetFilePointerEx(h, zero, NULL, FILE_BEGIN) && SetEndOfFile(h)
-           ? 0 : -1;
+    if (!SetFilePointerEx(h, zero, NULL, FILE_BEGIN) || !SetEndOfFile(h)) {
+        note_win_error(GetLastError());
+        return -1;
+    }
+    return 0;
 }
 
 static int file_cut(const char *path, uint64_t len)
@@ -460,8 +513,9 @@ static int file_cut(const char *path, uint64_t len)
  * d56ecbe's sixty tries lasted as long as the scheduler made each
  * sleep - 1.55 s on a quiet desktop, up to 4.88 s with a game holding
  * the CPU at 100%, and once past a 5 s hold (verifier-V6, 2026-09-25).
- * Past the deadline the retry costs at most one more sleep and one
- * more try. now_s() is the wall's clock under every test instrument. */
+ * Past the deadline the retry costs one more sleep - however long a
+ * busy scheduler makes that one - and one more try, not sixty of each.
+ * now_s() is the wall's clock under every test instrument. */
 #define RENAME_RETRY_S 1.5
 static int file_replace(const char *tmp, const char *path)
 {
@@ -527,20 +581,41 @@ static FILE *open_uncut(const char *path)
 {
     int fd = open(path, O_WRONLY | O_CREAT, 0666);
     FILE *f;
-    if (fd < 0)
+    if (fd < 0) {
+        note_errno(errno);
         return NULL;
+    }
     f = fdopen(fd, "wb");
-    if (!f)
+    if (!f) {
+        note_errno(errno);
         close(fd);
+    }
     return f;
 }
 
+/* As on Windows: a regular file that says it is empty is not cut, and
+ * CFT_ORBITS_SHARE_FIFO makes the file say 0 bytes and refuse the cut
+ * (EINVAL, which is what ftruncate() gives for a file it cannot cut). */
 static int file_empty(FILE *f)
 {
     struct stat st;
-    if (fstat(fileno(f), &st) != 0)
+    if (fstat(fileno(f), &st) != 0) {
+        note_errno(errno);
         return -1;
-    return S_ISREG(st.st_mode) ? ftruncate(fileno(f), 0) : 0;
+    }
+    if (!S_ISREG(st.st_mode))
+        return 0;
+    if ((SHARE_FIFO ? 0 : st.st_size) == 0)
+        return 0;
+    if (SHARE_FIFO) {
+        note_errno(EINVAL);
+        return -1;
+    }
+    if (ftruncate(fileno(f), 0) != 0) {
+        note_errno(errno);
+        return -1;
+    }
+    return 0;
 }
 
 static int file_cut(const char *path, uint64_t len)
@@ -1615,11 +1690,11 @@ static int NEGCTL_LATE_STOP = 0, NEGCTL_OVERLONG = 0, NEGCTL_APPEND = 0;
 static int NEGCTL_FLUSH_LATE = 0;
 
 /* The test instruments, read once in main() from the environment. A
- * negative control makes a result wrong; an instrument must change no
- * result - which is what the checks that use one hold - and makes
- * something reachable in a test that otherwise is not. Each is off
- * unless set, refused by name when malformed or set for an engine it
- * does not instrument, and announced on stderr.
+ * negative control makes the tool wrong; an instrument changes only
+ * what the tool meets - which the checks that use one hold it right
+ * against - and makes something reachable in a test that otherwise is
+ * not. Each is off unless set, refused by name when malformed or set
+ * where it does not apply, and announced on stderr.
  *
  *   CFT_ORBITS_SEGMENT_LIMIT=N   (--engine segments) the loader is
  *       taken to accept at most N steps a segment, so an interval
@@ -1640,7 +1715,18 @@ static int NEGCTL_FLUSH_LATE = 0;
  *       comes after the rename. A kill lands there by chance once in
  *       thousands of tries; this lands there every time, so what a
  *       checkpoint promises about the records beside it at the instant
- *       it appears is a fact a test can check. */
+ *       it appears is a fact a test can check;
+ *   CFT_ORBITS_SHARE_FIFO=1   (any engine, with --records) the records
+ *       file is taken to be what the WSL share makes of a Linux FIFO
+ *       seen from Windows: a regular file that says it holds 0 bytes,
+ *       however much is written to it, and that refuses to be cut
+ *       (Windows error 87; EINVAL on POSIX). The records still go into
+ *       the real file. The share's own FIFO cannot be a gate's: an open
+ *       of one that finds no peer leaves a thread of the distro's 9P
+ *       server blocked, and enough of them hung the share on
+ *       2026-09-25 - so what a fresh run does with such a file (bc00d8d
+ *       refused it) is reachable here without it. SHARE_FIFO is
+ *       declared above, where file_empty() reads it. */
 static uint64_t SEG_LIMIT = 0;
 static double   VCLOCK = 0;
 static uint64_t DIE_AFTER = 0;
@@ -2208,17 +2294,32 @@ static const char *rsqrt_name(int r)
  * the one ahead finishes unaware (verifier-V6, 2026-09-25: 3 of 3). A
  * file another process cuts short is not caught at all: the next flush
  * writes past the cut and leaves a hole of zeros exactly as long as the
- * count says. A pipe or a device has no length and is not checked. */
+ * count says. A pipe or a device has no length and is not checked. A
+ * pipe the system presents as a regular file has one - 0, whatever is
+ * written to it: the WSL share presents a Linux FIFO so (measured,
+ * 2026-09-27). This cannot tell such a pipe from a file something else
+ * cut, so a file that says it holds nothing after this run wrote to it
+ * is refused with both named, and neither claimed. */
 static void records_sync(runstate *R)
 {
     int64_t have;
-    char msg[320];
+    char msg[640];
 
     if (fflush(R->recf) != 0 || ferror(R->recf))
         die("the records file could not be written");
     if (NEGCTL_APPEND)
         return;                 /* the old resume: nothing to hold it to */
-    have = file_length(R->recf);
+    have = SHARE_FIFO ? 0 : file_length(R->recf);
+    if (have == 0 && R->rec_bytes > 0) {
+        snprintf(msg, sizeof msg,
+                 "the records file says it holds 0 bytes, where %" PRIu64
+                 " have been written to it: something else cut it, or it is "
+                 "a pipe the system presents as an empty file (the WSL share "
+                 "presents a Linux FIFO so), which has no length to hold a "
+                 "checkpoint to - with --checkpoint, --records must name a "
+                 "file", R->rec_bytes);
+        die(msg);
+    }
     if (have >= 0 && (uint64_t)have != R->rec_bytes) {
         snprintf(msg, sizeof msg,
                  "the records file holds %" PRId64 " bytes and the records "
@@ -2462,6 +2563,18 @@ static void ckpt_read(runstate *R)
     if (!have_recbytes)
         die("the checkpoint does not say how long its records are (no "
             "recbytes line)");
+}
+
+/* --records that could not be opened for writing, or not emptied for a
+ * fresh run: refused with the step, the path and the system's own words
+ * for why (SYS_ERR, noted where the call failed). */
+static void records_refused(const char *step, const char *path,
+                            const char *after)
+{
+    char msg[1800];
+    snprintf(msg, sizeof msg, "could not %s the records file %s (%s)%s",
+             step, path, SYS_ERR, after);
+    die(msg);
 }
 
 /* --records and --checkpoint naming one file: the checkpoint is written
@@ -3406,6 +3519,23 @@ int main(int argc, char **argv)
                         "%s is in place\n", da, da);
             }
         }
+        {
+            const char *sf = getenv("CFT_ORBITS_SHARE_FIFO");
+            if (sf && *sf) {
+                if (strcmp(sf, "1"))
+                    die("CFT_ORBITS_SHARE_FIFO takes 1");
+                if (!O.records_path)
+                    die("CFT_ORBITS_SHARE_FIFO instruments the records "
+                        "file, and there is no --records");
+                SHARE_FIFO = 1;
+                fprintf(stderr, "cft-orbits: TEST INSTRUMENT ACTIVE "
+                        "(CFT_ORBITS_SHARE_FIFO=1): the records file is "
+                        "taken to be what the WSL share makes of a Linux "
+                        "FIFO - it says it holds 0 bytes, whatever is "
+                        "written to it, and refuses to be cut; the records "
+                        "still go into it\n");
+            }
+        }
     }
 
     st = cft_open(O.artifact, 0, &DEV);
@@ -3559,12 +3689,17 @@ int main(int argc, char **argv)
          * and only then cut to nothing: a refusal loses no byte. */
         R.recf = O.resume ? fopen(O.records_path, "ab")
                           : open_uncut(O.records_path);
-        if (!R.recf)
-            die("cannot write the records file");
+        if (!R.recf) {
+            if (O.resume)
+                note_errno(errno);
+            records_refused("open", O.records_path, "");
+        }
         if (O.ckpt)
             records_apart(&O, R.recf, 0);   /* the files, now one is open */
         if (!O.resume && file_empty(R.recf) != 0)
-            die("cannot write the records file");
+            records_refused("empty", O.records_path,
+                            " - it was left as it was, and nothing written "
+                            "to it");
     }
 
     if (!O.quiet && !O.csv)

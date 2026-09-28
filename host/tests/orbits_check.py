@@ -66,13 +66,15 @@ Seven groups of checks:
                   checkpoint appears; records files and paths a resume
                   must refuse, pipes and locked files included, in
                   bounded time, and --records and --checkpoint as one
-                  file; the image cache's key; the checkpoint's rename
-                  held open, and how long it is retried; a second
-                  writer; the census it reports, derived here from the
-                  program's structure; the golden model's executor and
-                  assembler on the image it writes. Most legs carry a
-                  control that must fail, run every time;
-                  check_segments names the ten that do not.
+                  file; a fresh run into a file that says it holds 0
+                  bytes, and into one the system will not cut; the
+                  image cache's key; the checkpoint's rename held open,
+                  and how long it is retried; a second writer; the
+                  census it reports, derived here from the program's
+                  structure; the golden model's executor and assembler
+                  on the image it writes. Most legs carry a control that
+                  must fail, run every time; check_segments names the
+                  eleven that do not.
  7. Refusals.     What the two program engines must refuse, and the
                   precise reason each is refused.
 """
@@ -537,14 +539,16 @@ def check_segments(tool, tmp):
     hand, the order of a checkpoint and its records, the loader's limit
     and the golden comparison each carry a control that must make them
     fail, run every time, and its failure is asserted - a comparison
-    that has never been seen to fail is not a gate. Ten carry none of
-    their own - the census, the batch-size comparison, the comparisons
-    at the three narrower formats, the relay without --records, the run
-    with no instrument set, the image cache's key, the rename under a
-    stat() poll, the rename held open, the second writer, and the fresh
-    run into a pipe - and were watched failing only under one-off
-    planted defects; the refusals are their own kind, a case each that
-    must be refused by name. docs/ORBITS.md says what holds each."""
+    that has never been seen to fail is not a gate. Eleven carry none
+    of their own - the census, the batch-size comparison, the
+    comparisons at the three narrower formats, the relay without
+    --records, the run with no instrument set, the image cache's key,
+    the rename under a stat() poll, the rename held open, the second
+    writer, the fresh run into a pipe, and the fresh run into a file
+    that says it holds 0 bytes - and were watched failing only under
+    one-off planted defects; the refusals are their own kind, a case
+    each that must be refused by name. docs/ORBITS.md says what holds
+    each."""
     print("\n[6b] --engine segments: the ensemble state through the "
           "scratch block")
     env_nc = env_with(CFT_ORBITS_NEGATIVE_CONTROL="transpose")
@@ -1445,6 +1449,122 @@ def check_segments(tool, tmp):
           "has %d" % ("HUNG" if proc is None else "exit %d" % proc.returncode,
                       len(streamed), len(full[1])))
 
+    # --- a pipe the system calls an empty file ---------------------------
+    # From Windows, the WSL share presents a Linux FIFO as a regular file
+    # that says it holds 0 bytes, whatever is written to it, and refuses
+    # to be cut ("the parameter is incorrect", measured 2026-09-27).
+    # bc00d8d cut a fresh run's records file before writing to it, and so
+    # refused a run into such a FIFO that had streamed until then
+    # (verifier-V6, 2026-09-26). The gate does not open FIFOs through the
+    # share - an open that finds no peer leaves a thread of the distro's
+    # 9P server blocked, and enough of them hung the share on 2026-09-25 -
+    # so CFT_ORBITS_SHARE_FIFO makes the records file what the share
+    # makes of one. Without --checkpoint the run must write its records
+    # as into any file; with a checkpoint every step, the length check
+    # cannot tell such a file from one something else cut, and must stop
+    # the run by name at its first checkpoint saying both and claiming
+    # neither ("something else wrote to it", what c8a7d97 to bc00d8d
+    # said, is a guess there), with no checkpoint written.
+    env_sf = env_with(CFT_ORBITS_SHARE_FIFO="1")
+    sfr, sfc = Path(tmp) / "sf.txt", Path(tmp) / "sf.ckpt"
+    for p in (sfr, sfc):
+        if p.exists():
+            p.unlink()
+    said = "TEST INSTRUMENT ACTIVE (CFT_ORBITS_SHARE_FIFO=1)"
+    proc = tool.run(*rargv5, "--engine", "loop", "--records", sfr,
+                    env=env_sf, expect_ok=False)
+    lines = proc.stderr.strip().splitlines()
+    check(proc.returncode == 0 and len(lines) == 1 and said in lines[0] and
+          sfr.exists() and sfr.read_bytes() == full[1],
+          "a fresh run into a file that says it holds 0 bytes and refuses a "
+          "cut (CFT_ORBITS_SHARE_FIFO, what the WSL share makes of a Linux "
+          "FIFO), no --checkpoint: exit 0 and the run's %d bytes of records, "
+          "the file not cut" % len(full[1]),
+          "a fresh run into a file that says it holds 0 bytes and refuses a "
+          "cut: exit %d, %r; the records %s" % (
+              proc.returncode, proc.stderr.strip()[-200:],
+              "right" if sfr.exists() and sfr.read_bytes() == full[1]
+              else "WRONG or none"))
+    sfr.unlink()
+    proc = tool.run(*rargv5, "--engine", "segments", "--records", sfr,
+                    "--checkpoint", sfc, "--checkpoint-interval", 0,
+                    env=env_sf, expect_ok=False)
+    wrote = sfr.read_bytes() if sfr.exists() else b""
+    check(proc.returncode == 2 and said in proc.stderr and
+          "says it holds 0 bytes" in proc.stderr and
+          "something else cut it, or it is a pipe the system presents as an "
+          "empty file" in proc.stderr and
+          "something else wrote to it" not in proc.stderr and
+          not sfc.exists() and wrote and full[1].startswith(wrote),
+          "the same with a checkpoint every step: stopped by name at the "
+          "first, after %d bytes of records - \"%s\" - and no checkpoint "
+          "written" % (len(wrote), (proc.stderr.strip().splitlines() or
+                                    [""])[-1].replace("cft-orbits: ", "")),
+          "a file that says it holds 0 bytes, with a checkpoint every step: "
+          "exit %d, %r; %d bytes written; a checkpoint %s" % (
+              proc.returncode, proc.stderr.strip()[-240:], len(wrote),
+              "WRITTEN" if sfc.exists() else "not written"))
+
+    # --- a records file the system will not cut -------------------------
+    # A fresh run cuts its records file to nothing before writing; when
+    # the system refuses, the refusal must name the step, the file and
+    # the system's own reason, and leave the file as it was - bc00d8d
+    # said only "cannot write the records file" (verifier-V6). Windows
+    # will not cut a file another process has mapped (the gate maps it);
+    # Linux will not shrink a memfd sealed against shrinking (the gate
+    # makes one and hands it down, named /proc/self/fd/N).
+    body = b"another file's bytes, which must be left as they are\n" * 64
+    cut_proc, cut_left, cut_how = None, None, None
+    if os.name == "nt":
+        import mmap
+        mf = Path(tmp) / "mapped.txt"
+        mf.write_bytes(body)
+        with open(mf, "r+b") as fh:
+            mm = mmap.mmap(fh.fileno(), 0)
+            try:
+                cut_proc = tool.run(*rargv5, "--engine", "loop",
+                                    "--records", mf, expect_ok=False)
+            finally:
+                mm.close()
+        cut_left = mf.read_bytes() == body
+        cut_how, cut_why = "another process has mapped", "Windows error 1224"
+    else:
+        try:
+            import fcntl
+        except ImportError:                             # pragma: no cover
+            fcntl = None
+        if (fcntl is not None and hasattr(os, "memfd_create") and
+                hasattr(fcntl, "F_SEAL_SHRINK")):
+            mfd = os.memfd_create("orbits-check-sealed", os.MFD_ALLOW_SEALING)
+            try:
+                os.write(mfd, body)
+                fcntl.fcntl(mfd, fcntl.F_ADD_SEALS, fcntl.F_SEAL_SHRINK)
+                cut_proc = subprocess.run(
+                    [tool.exe] + [str(a) for a in rargv5] +
+                    ["--engine", "loop", "--records",
+                     "/proc/self/fd/%d" % mfd],
+                    capture_output=True, text=True, pass_fds=(mfd,))
+                cut_left = os.pread(mfd, len(body) + 4096, 0) == body
+            finally:
+                os.close(mfd)
+            cut_how = "that is a memfd sealed against shrinking"
+            cut_why = "Operation not permitted"
+    if cut_proc is None:
+        print("SKIP  a records file the system will not cut: neither a "
+              "Windows mapping nor a Linux sealed memfd is to be had here")
+    else:
+        check(cut_proc.returncode == 2 and
+              "could not empty the records file" in cut_proc.stderr and
+              cut_why in cut_proc.stderr and cut_left,
+              "a records file %s, which the system will not cut: refused by "
+              "name - \"%s\" - and left as it was" % (
+                  cut_how, (cut_proc.stderr.strip().splitlines() or
+                            [""])[-1].replace("cft-orbits: ", "")),
+              "a records file %s: exit %d, %r; the file %s" % (
+                  cut_how, cut_proc.returncode,
+                  cut_proc.stderr.strip()[-200:],
+                  "left as it was" if cut_left else "CHANGED"))
+
     # --- the records beside a checkpoint, at the instant it appears ------
     # A checkpoint promises the records file holds at least recbytes
     # bytes, so the records must reach the system BEFORE the checkpoint
@@ -1640,11 +1760,14 @@ def check_segments(tool, tmp):
     # must end the run BY NAME between 1 and 5 s after the hold began -
     # and the run so ended must resume, on the other engine, to the unheld
     # run's checkpoint and records. The retry is bounded by the clock, not
-    # by a count of sleeps, so a busy scheduler adds one sleep to it, not
-    # sixty (d56ecbe's count gave up as late as 4.88 s, and once not
-    # within the 5 s, with a game holding the CPU: verifier-V6). A POSIX
-    # rename over an open file is not refused, so there both holds must
-    # leave the run as if nothing held it.
+    # by a count of sleeps, so a busy scheduler adds one sleep to it -
+    # stretched as that sleep may be - not sixty (d56ecbe's count gave up
+    # as late as 4.88 s, and once not within the 5 s, with a game holding
+    # the CPU: verifier-V6). The 0.5 s hold asks of this process, too, that
+    # it let go within about 1 s of the tool's first refused rename; that
+    # is stated, not measured - the machine is not loaded to try it. A
+    # POSIX rename over an open file is not refused, so there both holds
+    # must leave the run as if nothing held it.
     hargv = ["--problem", "kepler", "--format", "fp64", "--members", 2,
              "--rsqrt", "newton", "--steps", 1000, "--sample-every", 50,
              "--checkpoint-interval", 0, "--quiet"]
@@ -1771,11 +1894,12 @@ def check_segments(tool, tmp):
           "a second writer: 1 MiB appended to the records as the run's first "
           "checkpoint appeared stopped the run BY NAME at its next (\"%s\"), "
           "and loop resumed the checkpoint left to the unheld run's "
-          "checkpoint and records" % werr.strip()[-80:],
+          "checkpoint and records"
+          % (werr.strip().splitlines() or [""])[-1].replace("cft-orbits: ", ""),
           "a second writer appending 1 MiB (%s): exit %s, %s; the resume "
           "after: exit %d, bytes %s" % (
               "appended" if appended else "NOT appended - the run had ended",
-              pr.returncode, werr.strip()[-120:], wres.returncode,
+              pr.returncode, werr.strip()[-240:], wres.returncode,
               "right" if wend == href else "WRONG"))
 
     # --- a sample interval longer than one segment may run -------------
@@ -2337,7 +2461,8 @@ def main():
             proc = tool.run(*argv, expect_ok=False)
             check(proc.returncode != 0 and "cft-orbits:" in proc.stderr,
                   "refused: %s\n         (%s)"
-                  % (why, proc.stderr.strip().splitlines()[0][:110]),
+                  % (why, (proc.stderr.strip().splitlines() or
+                           [""])[0]),
                   "not refused: %s" % why)
 
         print("\n[7b] what --engine segments must refuse")
@@ -2381,15 +2506,26 @@ def main():
              ["--engine", "program", "--rsqrt", "newton", "--periods", 1],
              dict(os.environ, CFT_ORBITS_VIRTUAL_CLOCK="0.5"),
              "writes one, at the end"),
+            ("CFT_ORBITS_SHARE_FIFO on a run with no records file",
+             ["--engine", "loop", "--periods", 1],
+             dict(os.environ, CFT_ORBITS_SHARE_FIFO="1"),
+             "instruments the records file, and there is no --records"),
+            ("--records in a directory that is not there - the step, the "
+             "file and the system's reason named",
+             ["--engine", "loop", "--periods", 1, "--records",
+              Path(tmp) / "no-such-directory" / "r.txt"],
+             os.environ, "could not open the records file"),
         ):
             proc = tool.run(*argv, expect_ok=False, env=env)
             check(proc.returncode != 0 and needle in proc.stderr,
                   "refused: %s\n         (%s)"
-                  % (why, proc.stderr.strip().splitlines()[-1][:110]),
+                  % (why, (proc.stderr.strip().splitlines() or
+                           [""])[-1]),
                   "not refused, or refused for another reason: %s (%s)"
                   % (why, proc.stderr.strip()[-160:]))
-        # The test instruments take a number, and anything else must be
-        # refused by name rather than read as some number or as unset.
+        # The test instruments take a number (CFT_ORBITS_SHARE_FIFO takes
+        # 1 and nothing else), and anything else must be refused by name
+        # rather than read as some number or as unset.
         for var, bad, needle in (
                 ("CFT_ORBITS_SEGMENT_LIMIT",
                  ("0", "-7", "7x", " 7", "7.0", "0x10", "4294967296",
@@ -2400,7 +2536,10 @@ def main():
                  "takes a positive number of seconds a step"),
                 ("CFT_ORBITS_DIE_AFTER_CHECKPOINT",
                  ("0", "-1", "1x", " 1", "1.0", "4294967296"),
-                 "takes a whole number of checkpoints, 1 to 4294967295")):
+                 "takes a whole number of checkpoints, 1 to 4294967295"),
+                ("CFT_ORBITS_SHARE_FIFO",
+                 ("0", "2", "01", " 1", "1 ", "yes", "true"),
+                 "CFT_ORBITS_SHARE_FIFO takes 1")):
             ran = []
             for val in bad:
                 proc = tool.run("--engine", "segments", "--rsqrt", "newton",

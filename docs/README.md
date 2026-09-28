@@ -1,11 +1,11 @@
 # The documents, by what you open them for
 
-Thirty-seven files, 50,184 lines. Flat in one directory they look like one
+Thirty-seven files, 50,258 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
 - **16,616 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
-- **6,135 lines of tool manual**, one per shipped program;
+- **6,209 lines of tool manual**, one per shipped program;
 - **1,761 lines of operations**, read when you are about to do something to
   hardware;
 - **25,672 lines of record and argument** — the ledger, the roadmap and the
@@ -70,7 +70,7 @@ running.
 | document | lines | tool |
 |---|---|---|
 | [ZOOM.md](ZOOM.md) | 854 | `cft-zoom` — deep-zoom Mandelbrot reference orbits |
-| [ORBITS.md](ORBITS.md) | 1,529 | `cft-orbits` — symplectic few-body integration |
+| [ORBITS.md](ORBITS.md) | 1,603 | `cft-orbits` — symplectic few-body integration |
 | [MERSENNE.md](MERSENNE.md) | 882 | `cft-mersenne` — Lucas-Lehmer |
 | [ENCLOSE.md](ENCLOSE.md) | 845 | `cft-enclose` — directed-rounding interval enclosure |
 | [COLLATZ.md](COLLATZ.md) | 648 | `cft-collatz` — Collatz trajectories |

@@ -564,7 +564,22 @@ addresses 30 of them, the highest at index 34, so it uses the indexed
   untouched - on Windows a named pipe and NUL, on POSIX a FIFO,
   `/dev/stdout` into a pipe and `/dev/null`, each given 60 s so that a
   regression reads as a failure rather than a gate that never ends -
-  and a fresh run into a pipe still streams the run's records;
+  and a fresh run into a pipe, a named pipe on Windows and a FIFO on
+  POSIX, with a checkpoint every step, streams the run's records;
+- a pipe the system calls an empty file: under `CFT_ORBITS_SHARE_FIFO`
+  (below) the records file says it holds 0 bytes, whatever is written
+  to it, and refuses to be cut - what the WSL share makes of a Linux
+  FIFO seen from Windows, which the gate does not open (it hung the
+  share on 2026-09-25). A fresh run without `--checkpoint` must write
+  its records into it as into any file (bc00d8d refused it: the file
+  was cut before a record was written, and the cut failed); with a
+  checkpoint every step it must stop by name at the first, the refusal
+  naming both what the file may be and claiming neither, and write no
+  checkpoint;
+- a records file the system will not cut - on Windows one another
+  process has mapped, on Linux a memfd sealed against shrinking: a
+  fresh run is refused by name, the step, the file and the system's
+  own reason given, and the file left as it was;
 - with no instrument set, a run says nothing on stderr and its clock is
   the wall's: the same 1,024 steps at 1 member and at 16 report times
   at least 4 apart (about 15 measured), where a clock that counted steps
@@ -592,7 +607,10 @@ addresses 30 of them, the highest at index 34, so it uses the indexed
   which on Windows must end the run by name 1 to 5 s into the hold
   (1.50 to 1.54 s in over a hundred held runs, at the desktop's own
   load) and leave it resumable, by the other engine, to the unheld
-  run's checkpoint and records. A POSIX rename over an open file is not
+  run's checkpoint and records. The 0.5 s hold asks of the gate itself
+  that it let go within about 1 s of the tool's first refused rename,
+  or the run gives up first; that is stated, not measured - the machine
+  is not loaded to try it. A POSIX rename over an open file is not
   refused, and there both holds must leave the run untroubled;
 - a second writer: 1 MiB appended to the records by another process as
   a run's first checkpoint appears must stop the run by name at its
@@ -657,7 +675,7 @@ constant changed must disagree with the library's scratch-out, and a
 reserved bit set in the image must be refused by both the golden loader
 and the disassembler.
 
-Ten checks carry no control of their own. The census was watched
+Eleven checks carry no control of their own. The census was watched
 failing under two planted miscounts (docs/VALIDATION.md, 2026-09-25);
 the batch comparison's chunk boundary is crossed, with the transpose
 control, by the engine comparison at batch 3 of 5; the three narrower
@@ -666,10 +684,10 @@ binary256's (the same entry), and binary64 carries the transpose
 control in the 100,000-step leg. The relay without `--records`, the run
 with no instrument set, the image cache's key, the rename under a
 `stat()` poll and the rename held open (Windows), the second writer,
-and the fresh run into a pipe were watched failing under planted
-defects of their own (below). The refusals are their own kind: each is
-a case that must be refused by name, which a tool that accepted it
-would fail.
+the fresh run into a pipe, and the fresh run into a file that says it
+holds 0 bytes were watched failing under planted defects of their own
+(below). The refusals are their own kind: each is a case that must be
+refused by name, which a tool that accepted it would fail.
 
 Every leg above but one was also watched failing under a planted
 defect of its own, each built into a copy of this tool and run through
@@ -699,12 +717,16 @@ before it is asked which file it is, and never cut; the one-file check
 without its strings, without the `.tmp`'s identity, and asked of the
 path before the open (which takes a named pipe's one instance); an
 evicted cache slot that keeps its old key over a new image; and the
-length check at a checkpoint removed. The exception is the golden
-comparison's executor half. It runs the golden executor and the
-library on the same image by design, so what it can see is a library
-that runs an image differently from the reference; a wrong image is
-the engine comparisons' to catch, and no planted defect of this tool
-has been seen to fail it.
+length check at a checkpoint removed. And after its fourth: a file that
+says it is empty cut all the same (bc00d8d's), the refusal for a file
+that says 0 bytes put back to its old words, `CFT_ORBITS_SHARE_FIFO`
+inert and its value unchecked, and a failed cut and a failed open
+named as before ("cannot write the records file"). The exception is
+the golden comparison's executor half. It runs the golden executor and
+the library on the same image by design, so what it can see is a
+library that runs an image differently from the reference; a wrong
+image is the engine comparisons' to catch, and no planted defect of
+this tool has been seen to fail it.
 
 Two planted defects pass the gate. The length bound on a resume's
 read removed: on a regular file the read then finds the same shortness
@@ -724,11 +746,13 @@ while something else holds the CPU, which the gate does not arrange
 ends on success, on an error it does not retry, or on the clock - on no
 count.
 
-**Three test instruments** make reachable what otherwise is not. Unlike
-the controls they must change no result - which the checks that use
-them hold - and each is off unless set (a leg holds that too), refused
-by name when malformed or set for an engine it does not instrument,
-and announced on stderr:
+**Four test instruments** make reachable what otherwise is not. Unlike
+the controls, which make the tool wrong, they change only what the tool
+meets - a lower loader limit, a steady clock, a kill at an instant, a
+file as the WSL share presents a FIFO - and the checks that use them
+hold what it does then. Each is off unless set (a leg holds that too),
+refused by name when malformed or set where it does not apply, and
+announced on stderr:
 
 - `CFT_ORBITS_SEGMENT_LIMIT=N` (segments): the loader is taken to accept
   at most N steps a segment, so the split its real limit makes - at
@@ -745,7 +769,16 @@ and announced on stderr:
   saying so, and nothing else the run does comes after the rename. On
   Windows that is TerminateProcess: `_exit()` goes through ExitProcess,
   and msvcrt flushes every stream as it unloads, which a kill does not
-  (measured: under `flush-late` the records still reached the file).
+  (measured: under `flush-late` the records still reached the file);
+- `CFT_ORBITS_SHARE_FIFO=1` (any engine, with `--records`): the records
+  file is taken to be what the WSL share makes of a Linux FIFO seen
+  from Windows - a regular file that says it holds 0 bytes, however
+  much is written to it, and refuses to be cut (Windows error 87, "the
+  parameter is incorrect", as the share gives it; EINVAL on POSIX). The
+  records still go into the real file. The share's own FIFOs cannot be
+  a gate's: an open of one that finds no peer leaves a thread of the
+  distro's 9P server blocked, and enough of them hung the share on
+  2026-09-25 ("Limits of those refusals", below).
 
 **What it does not do.** `--rsqrt exact`, for the reason in (2): it is
 refused by name. And `--engine program` stays exactly as it was: the
@@ -963,7 +996,20 @@ the run's and no longer hashed to its chain, on either engine
   `_stat64` calls NUL, CON and a named pipe regular files, so the path
   is opened and its type asked, which for a named pipe connects to an
   instance and hangs up - a server sees a client come and go. A fresh
-  run into a pipe streams its records as it always has.
+  run into a pipe - a named pipe, a FIFO, and a Linux FIFO seen from
+  Windows through the WSL share - streams its records (the share's
+  kind: "Limits of those refusals", below).
+- a fresh run's records file is opened for writing, and cut to nothing
+  unless it says it is empty already. One the system will not open, or
+  will not cut, is refused by name with the step and the system's own
+  reason - "could not open the records file ... (The system cannot
+  find the path specified, Windows error 3)", "could not empty the
+  records file ... (The requested operation cannot be performed on a
+  file with a user-mapped section open, Windows error 1224)" - and
+  left as it was; bc00d8d said only "cannot write the records file"
+  (verifier-V6). A hidden file (Windows), which `"wb"`'s CREATE_ALWAYS
+  refuses and which d56ecbe so could not write, is written like any
+  other (verifier-V6, and measured here: the run's records).
 - `--records` and `--checkpoint` naming one file are refused by name at
   the start, fresh or resumed, before a byte of either file is cut: the
   same path, or the checkpoint's `.tmp`, as written, before anything is
@@ -971,8 +1017,8 @@ the run's and no longer hashed to its chain, on either engine
   identity (its volume and index on Windows, its device and inode on
   POSIX). On `--resume` that is asked of the path once it is known to be
   a regular file. On a fresh run it is asked of the records file itself,
-  opened for writing but not yet cut, which is cut to nothing only once
-  it is known to be neither the checkpoint nor its `.tmp` - the path is
+  opened for writing but not yet cut, which is cut only once it is
+  known to be neither the checkpoint nor its `.tmp` - the path is
   never opened a second time to ask, since on Windows that opens it, and
   for a named pipe a fresh run writes into, an open is a connection
   (above). So a checkpoint already there is left as it was, under every
@@ -1014,6 +1060,33 @@ FIFO tests behind this section, whose FIFOs were deleted unopened). So
 whoever tests a FIFO through the share opens it from Linux, both ways,
 before deleting it, and then counts the server's blocked threads.
 
+**A fresh run into a FIFO through the share.** A run started on Windows
+with `--records` naming a Linux FIFO through the share, a Linux reader
+waiting on it, streams its records to the reader: Windows is told the
+FIFO is an empty regular file, and a file that says it is empty is not
+cut. bc00d8d cut it all the same, the share refused the cut ("the
+parameter is incorrect", Windows error 87), and the run was refused at
+once as "cannot write the records file", where d56ecbe had streamed
+(verifier-V6, 2026-09-26; measured again here: the reader got 0 of the
+run's 11,798 bytes, exit 2 - now all 11,798, exit 0). With
+`--checkpoint` the share's length stays 0 however much is written, so
+the length check before the first checkpoint that counts a record
+stops the run, exit 2, with no checkpoint written: "the records file
+says it holds 0 bytes, where 11798 have been written to it: something
+else cut it, or it is a pipe the system presents as an empty file (the
+WSL share presents a Linux FIFO so), which has no length to hold a
+checkpoint to - with --checkpoint, --records must name a file". In a
+run shorter than its interval that checkpoint is the last, and the
+reader has had every record first (measured, at the default interval);
+with one every step it is the first, 427 bytes in. The tool cannot
+tell such a pipe from a file something else cut, and the words claim
+neither - d56ecbe's, "something else wrote to it or cut it", was a
+guess there. The gate reaches all this through `CFT_ORBITS_SHARE_FIFO`
+(above), never through the share; the share itself was measured by
+hand, under the discipline above (a Linux reader waiting, each FIFO
+opened `O_RDWR` from Linux before it was deleted, the server's blocked
+threads counted - none, throughout).
+
 The length check at each checkpoint catches a flush left out and a
 record miscounted. Of two processes writing the same file it stops only
 the one that LAGS - the file is as long as the leader has written - and
@@ -1041,11 +1114,12 @@ is the clock, not a count: d56ecbe tried sixty times - ten, then fifty
 1.55 to 1.57 s on a quiet desktop (verifier-V6), but with a game
 holding the CPU at 100% as late as 4.88 s, and once not within a 5 s
 hold at all (verifier-V6, 2026-09-25). On the clock a busy scheduler
-adds at most the one sleep and the one try after the deadline. A run
-checkpointing after every step (1,500 steps), polled by a Python
-thread as fast as it can (11,000 to 18,000 `stat` calls), finished 6
-of 6 on the unpolled run's checkpoint, in 1.7 to 2.5 s against 1.5 to
-1.9 s unpolled.
+adds one more sleep past the deadline - stretched as it stretches that
+one - and one more try, where it stretched all sixty. A run
+checkpointing after every step (1,500 steps), polled by a Python thread
+as fast as it can (11,000 to 18,000 `stat` calls), finished 6 of 6 on
+the unpolled run's checkpoint, in 1.7 to 2.5 s against 1.5 to 1.9 s
+unpolled.
 
 What that covers is the process ending - killed, crashed, stopped. A
 machine that loses power can lose what the operating system had not yet
@@ -1104,8 +1178,8 @@ same bytes wherever it sits.
 | batch size | 8, 3 and 1 over the same ensemble must end on byte-identical checkpoints, and a run with `--records` on the same checkpoint as one without |
 | engines | the whole integration as one sequencer program and the host `cft_run` loop must produce byte-identical records AND checkpoints |
 | segments | `--engine segments` against the host loop on both problems and both schemes at binary256 and on one configuration at each other format, operation counts included, and at the segment lengths real runs use (1,024 steps; 1 + 99,999; intervals split at a lowered loader limit); five stop points; its own batch sizes, 10^12 included; the outer solar system resumed in 37-step pieces by segments alone and by the two engines in turn; where its checkpoints fall and the checkpoint it ends on, against the host loop's under a steady clock, and a real run's first checkpoint part way through a long interval; the image cache keyed by the whole length; its checkpoint's rename under a `stat()` poll and held open, and how long that rename is retried; intervals past one segment's limits run; its census against the program's structure; the golden model's executor and assembler on its image; the flag certificate on a planted fault; and a control on each comparison but the census, the batch sizes and the three narrower formats, which must fail ("As resumable segments" names them) |
-| interruption | a run stopped every 37 steps - which does not divide the 96-step sample interval, so most stops land mid-interval - and resumed at a different batch size must end on the same checkpoint and the same records, byte for byte, as one that was never stopped; and runs KILLED, on both engines - at their first checkpoint, and with their records ahead of it - and each resumed by the other engine, must end on the uninterrupted run's checkpoint and records too, with a control that resumes without cutting the records back and must fail; runs ended the instant a checkpoint is in place leave the records exactly that long, with a control that hands them over after the rename and must fail; a run whose records another process appends to is stopped by name at its next checkpoint and resumed to the uninterrupted run; a relay without `--records` ends on the same checkpoint |
-| refusals | the three things `--engine program` must refuse, the four `--engine segments` must, the negative controls and test instruments set where they do not apply or to a malformed value, `--checkpoint-interval` values that are not a number of seconds, the records files and records paths (pipes, devices, a file another process holds) `--resume` must refuse, and `--records` and `--checkpoint` as one file, each with its reason and in bounded time |
+| interruption | a run stopped every 37 steps - which does not divide the 96-step sample interval, so most stops land mid-interval - and resumed at a different batch size must end on the same checkpoint and the same records, byte for byte, as one that was never stopped; and runs KILLED, on both engines - at their first checkpoint, and with their records ahead of it - and each resumed by the other engine, must end on the uninterrupted run's checkpoint and records too, with a control that resumes without cutting the records back and must fail; runs ended the instant a checkpoint is in place leave the records exactly that long, with a control that hands them over after the rename and must fail; a run whose records another process appends to is stopped by name at its next checkpoint and resumed to the uninterrupted run; a run into a file that says it holds nothing, whatever is written (as the WSL share presents a Linux FIFO), writes its records without a checkpoint and is stopped by name at its first with one; a relay without `--records` ends on the same checkpoint |
+| refusals | the three things `--engine program` must refuse, the four `--engine segments` must, the negative controls and test instruments set where they do not apply or to a malformed value, `--checkpoint-interval` values that are not a number of seconds, the records files and records paths (pipes, devices, a file another process holds) `--resume` must refuse, `--records` and `--checkpoint` as one file, and a records file that cannot be opened or emptied, each with its reason and in bounded time |
 
 ---
 
