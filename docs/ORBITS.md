@@ -996,9 +996,11 @@ the run's and no longer hashed to its chain, on either engine
   `_stat64` calls NUL, CON and a named pipe regular files, so the path
   is opened and its type asked, which for a named pipe connects to an
   instance and hangs up - a server sees a client come and go. A fresh
-  run into a pipe - a named pipe, a FIFO, and a Linux FIFO seen from
-  Windows through the WSL share - streams its records (the share's
-  kind: "Limits of those refusals", below).
+  run into a pipe streams its records: a named pipe or a FIFO, with
+  `--checkpoint` or without; a Linux FIFO seen from Windows through the
+  WSL share without it - with it, only until the first checkpoint that
+  counts a record, where the run is stopped by name ("A fresh run into
+  a FIFO through the share", below).
 - a fresh run's records file is opened for writing, and cut to nothing
   unless it says it is empty already. One the system will not open, or
   will not cut, is refused by name with the step and the system's own
