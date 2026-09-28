@@ -183,7 +183,8 @@ CFT_API uint32_t cft_abi_version(void);
  * process's library: the server's build is not sent (docs/REMOTE.md).
  *
  * It names the source and nothing else: not the compiler, not CFLAGS,
- * not a build profile (cft_config.h's CFT_MAX_FORMAT and CFT_NO_*).
+ * not a build profile (cft_config.h's format ceiling and its module
+ * switches).
  *
  * The call is additive. CFT_ABI_VERSION_MINOR moves to 15 for it and for
  * cft_get_image_id below when they are merged, with the WebAssembly
