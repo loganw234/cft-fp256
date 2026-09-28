@@ -166,9 +166,11 @@ CFT_API const char *cft_strerror(cft_status s);
  * anybody is going to get. It is overwritten by the next failure that
  * has a sentence, and NOT cleared by one that has none (a bare argument
  * error, cft_conformance over a directory with no sets) or by every
- * call that succeeds - so an older failure's sentence can outlive its
- * call, and it is detail for the call just made when it names that
- * call (verifier-V9, 2026-09-28). Static storage, and not thread-safe -
+ * call that succeeds; and in a process with two device backends, a
+ * remote handle's older sentence comes before an XRT handle's newer
+ * one. So an older failure's sentence can outlive its call, and it is
+ * detail for the call just made when it names that call (verifier-V9
+ * and verifier-V10, 2026-09-28). Static storage, and not thread-safe -
  * consistent with cft_device, which is not either. Never NULL. */
 CFT_API const char *cft_last_error(void);
 
@@ -2191,9 +2193,10 @@ CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
  *     library makes FOR the caller, like any variable of the caller's:
  *     one that lies in a resident buffer is the caller's own store into
  *     its mirror, under the two rules for those below (read the buffer
- *     back before, publish it after). They are status words, set on
- *     every path - most of them zeroed as the call starts, all of them
- *     written as it ends, the device backends' after the run - so the
+ *     back before, publish it after). They are status words - most of
+ *     them zeroed as the call starts, and written as it ends when it
+ *     runs, the device backends' after the run; a call refused before
+ *     it runs may leave them as they were (verifier-V10) - so the
  *     library states the rule for them rather than announce each one.
  *     An out-parameter must share no bytes with any array the same call
  *     reads or writes: nothing checks it, and what the call reads or

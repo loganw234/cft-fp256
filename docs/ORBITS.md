@@ -691,7 +691,9 @@ refused by name, which a tool that accepted it would fail.
 
 Every leg above but one was also watched failing under a planted
 defect of its own, each built into a copy of this tool and run through
-the whole gate, on 2026-09-25 (docs/VALIDATION.md has the tables): a
+the whole gate, on 2026-09-25 (each one's run is in the round's ledger,
+`Data/runs/2026-09-25-ode-round/ledger/`, gitignored; docs/VALIDATION.md
+summarizes them): a
 stale image, a transposed or misread operand, a Newton pass count, a
 late stop, a dropped flag word, buffers sized by the batch, the
 loader's limit a step long and its 32-bit cap removed, the time cap

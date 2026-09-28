@@ -3320,7 +3320,8 @@ defined in the golden model first.
 its own opcode. For: compensated stepping in 2 instructions instead
 of 4, and double-word arithmetic on the tile (fp256 pairs give about
 470 bits, enough for the 600-bit-class reference runs to happen on
-the card). Cost, theirs: the adder has the exact sum before rounding.
+the card - quoted as given: 470 is fewer than 600, verifier-V10).
+Cost, theirs: the adder has the exact sum before rounding.
 Here, the project's own caution stands. 754-2019's augmentedAddition
 rounds ties toward zero, an attribute the tile's five do not include,
 and this library computes it on the host that way
@@ -3357,7 +3358,8 @@ its own (the project's list, unranked):
 - **A broadcast input that advances with the loop counter**, for
   time-varying forcing. The project thinks it probably unnecessary
   while a segment per hour stays cheap: 104k segments at about 35 us
-  each is about 4 s a 25-year run.
+  each is about 4 s a 25-year run. Quoted as given: 25 years of hourly
+  segments is about 219,000 (verifier-V10).
 
 ## The adoption story these serve
 

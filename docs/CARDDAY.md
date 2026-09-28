@@ -659,7 +659,7 @@ they were handed over. What only a card can still say:
     no-op, and it cures nothing: after the round's orphan every load was
     logged "xclbin is already downloaded" until the reload at 12:05:26,
     and the program set run through those loads was still wrong in the
-    same lanes (docs/VALIDATION.md, 2026-09-25; the journal excerpt is
+    same lanes (docs/VALIDATION.md, 2026-09-28; the journal excerpt is
     `Data/runs/2026-09-25-ode-round/card-witness/journal-probe3-probe4.txt`,
     gitignored).
     `journalctl -k` shows every abandonment as `kds_del_cu_context: 1

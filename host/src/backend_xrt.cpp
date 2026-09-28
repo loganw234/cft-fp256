@@ -1969,8 +1969,10 @@ static int cftx_open_impl(const char *artifact, int index, void **out,
      * to a compute unit is exclusive, so no OPEN handle can be running
      * work on a tile this one has just opened: one that is not idle is
      * running a run abandoned there by a handle that is gone - one a
-     * process that ended held, or one closed after a run failed (a
-     * timeout, a thrown wait, an ERROR state), in this process or
+     * process that ended held, or one closed after a run failed in a
+     * way that can leave the tile running (a timeout, a thrown wait, an
+     * ERROR state, a completion refused because the tile was still busy
+     * after the whole wait, an unreadable CTRL), in this process or
      * another (verifier-V9: the sentence blamed an ended process for
      * this process's own closed handle, then named only a timeout). Its
      * writes may land in the device memory this handle's buffers are

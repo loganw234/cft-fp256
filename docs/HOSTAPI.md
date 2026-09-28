@@ -313,8 +313,10 @@ outstanding on it, and refuses by name:
 - **when a handle opens it**, a tile that is not idle is running a run
   abandoned there by a handle that is gone - access is exclusive, so no
   open handle can be running it; the run was left by a process that
-  ended, or by a handle closed after a run failed (a timeout, a thrown
-  wait, an ERROR state), in this process or another (verifier-V9: the
+  ended, or by a handle closed after a run failed in a way that can
+  leave the tile running (a timeout, a thrown wait, an ERROR state, a
+  completion refused because the tile was still busy after the whole
+  wait, an unreadable CTRL), in this process or another (verifier-V9: the
   sentence blamed an ended process for both) -
   and its writes may land in the memory this handle's
   buffers would be given (on the card an abandoned run's output landed
@@ -344,7 +346,7 @@ outstanding on it, and refuses by name:
   the orphan of 2026-09-25, every load until the reload was logged by
   the driver as "xclbin is already downloaded", and the program set run
   through those loads was still wrong in the same lanes
-  (docs/VALIDATION.md, 2026-09-25; the journal excerpt is
+  (docs/VALIDATION.md, 2026-09-28; the journal excerpt is
   `Data/runs/2026-09-25-ode-round/card-witness/journal-probe3-probe4.txt`,
   gitignored).
 
@@ -358,9 +360,13 @@ failure in the plan of record's step 3 (docs/ROADMAP.md). An output
 check could not do this job: an early-completed run came back byte for
 byte right on the card when an identical earlier run had left the same
 bytes at the same addresses, while CTRL read busy at once. The witness
-costs two register reads a tile a call - about 2.3 us on a 64-element
-resident call on the quad, nothing measurable at 4,096 (the open's
-check is one read a tile at open). device-test holds the refusals on
+costs two register reads a tile a call. Measured on the quad with one
+run each before and after (`cft-bench --resident`, fp32, its 23 ops):
+the mean rose 6.2 us a call at 64 elements (+7%, every op slower) and
+8.8 us at 4,096 (+10%, 20 of 23 slower). iadd alone moved +2.3 us and
+-0.4 us, and run-to-run variance was not measured (docs/VALIDATION.md,
+2026-09-28; verifier-V10 found the one-op figure this sentence used to
+quote as if for all). The open's check is one read a tile at open. device-test holds the refusals on
 every XRT device through `CFT_XRT_WITNESS` - `busy-open`, `busy-before`
 and `busy-after`, the last held 50 ms and the refusal timed
 (docs/CARDDAY.md); the defect itself is a card-day leg, because planting
@@ -535,10 +541,11 @@ refill another. **Out-parameters** - a flags word, a bus word, a
 string's length, a bad index, `cft_conformance`'s count of cases - are
 stores made FOR the caller, like any variable of the caller's: one that
 lies in a resident buffer is the caller's own store into its mirror,
-under the rules below. They are status words, set on every path - most
-of them zeroed as the call starts, all of them written as it ends, the
-device backends' after the run - so the library states the rule for
-them rather than announce each one. An out-parameter must share no bytes
+under the rules below. They are status words - most of them zeroed as
+the call starts, and written as it ends when it runs, the device
+backends' after the run; a call refused before it runs may leave them as
+they were (verifier-V10) - so the library states the rule for them
+rather than announce each one. An out-parameter must share no bytes
 with any array the same call reads or writes: nothing checks it, and
 what the call reads or leaves there then differs between backends
 (verifier-V9: `bus_out` on an element of `cft_run`'s input read -2 on
@@ -2296,7 +2303,9 @@ backend, so a refusal libcft made never goes on explaining someone
 else's failure. The other way round it does not hold: a refusal that
 adds no sentence (a bare argument error, `cft_conformance` over a
 directory with no sets) clears nothing, and neither does every call that
-succeeds, so an older failure's sentence can outlive its call. Read
+succeeds; and in a process with two device backends, a remote handle's
+older sentence comes before an XRT handle's newer one (verifier-V10). So
+an older failure's sentence can outlive its call. Read
 `cft_last_error()` straight after the call that failed, and take it as
 detail for that call when it names it (verifier-V9 and the lead,
 2026-09-28).

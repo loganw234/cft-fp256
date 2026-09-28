@@ -14885,13 +14885,16 @@ this entry's next section.
 
 **A run abandoned on a tile.** S8's timed-out run was left going on
 tile 1 (the handle is finished after a timeout - docs/HOSTAPI.md), and
-S9 began at once. The mismatches, read lane by lane from S9's own kept
+S9 began at once. Tiles are numbered from 1 in `CFT_XRT_TILES`, which
+the card scripts use, and from 0 in the library's messages: tile 1 and
+tile 0 in this section are the same tile, the quad's first. The
+mismatches, read lane by lane from S9's own kept
 outputs: allpaths lost all 256 of tile 0's lanes (it had waited 42.8 s
 where the single took 3.9); then flows.levers-7 and rule30 lost exactly
 lanes 128-255 - tile 0's second block - and rulespace 40 lanes of it,
 13 to 39 s AFTER the abandoned run had ended; the cases between matched.
 None of it reproduced on a quiet card, and no lane count reproduced it
-(one tile, no split, N from 127 to 1,001 around every multiple of 128:
+(one tile, no split, N at 127-129, 255-257, 383-385, 512 and 1,001:
 right). Made on purpose - an fp256 run on tile 1 with
 `CFT_TIMEOUT_MS=5000` - the same four cases failed on the same lanes;
 the set run again after the abandoned run had certainly ended failed the
@@ -14917,8 +14920,9 @@ run since timeouts existed. The scheduler's per-tile collection is only
 where it first showed - a slice slower than the others lost the race.
 
 A load of the SAME image cures nothing. The kernel log from the orphan
-at 11:59:29 to the first real download at 12:05:26 holds 1,604 image
-loads, every one "xclbin_downloaded: xclbin is already downloaded", and
+at 11:59:29 to the first real download at 12:05:26.6 holds 1,415 image
+loads (1,604 in the whole excerpt), every one "xclbin_downloaded:
+xclbin is already downloaded", and
 the program set run through those loads (12:01-12:02) matched 137 of 140,
 the same three cases still wrong in the same lanes; the download of the
 single image and then the quad at 12:05 ("Config end completed") is what
@@ -14941,8 +14945,10 @@ device. On the card (bc2f3d5; `card-witness/`):
     the sequencer legs -s -n 64        quad 734 / 0, single 734 / 0; the witness leg 9 of 9 right on both
     the program set                    quad 140 / 140, single 140 / 140
     full matrix -n 64                  quad 10,030 / 0, single 10,030 / 0; -b 745 / 0; -r 1,256 / 0, both
-    cost, cft-bench --resident fp32    n=64: 1,351.7 -> 1,387.5 ns an element (+2.6%, ~2.3 us a call);
-                                       n=4,096: 21.36 -> 21.26 (none measurable)
+    cost, cft-bench --resident fp32    one run each, the mean over its 23 ops: n=64 1,331 -> 1,428 ns an
+                                       element (+7.2%, 6.2 us a call, 23 of 23 slower); n=4,096 21.24 ->
+                                       23.40 (+10.2%, 8.8 us a call, 20 of 23 slower); iadd alone +2.6%
+                                       and -0.4%; run-to-run variance not measured
     an abandoned run, on purpose       while it ran: refused before any start in 0.34 s (tile 1) and
                                        0.23 s (the quad); after it: 4 of 4 runs on tile 1 completed
                                        early and refused by name, 0 wrong; the program set 137 matched,
@@ -15189,8 +15195,10 @@ cd35c48 implements the rule and fixes the rest:
 - A fill is marked current only after its upload.
 - The witness reads CTRL before a wave is staged, and again when a
   handle opens a tile. Access is exclusive, so a tile busy at open is
-  running a run that an ended process abandoned, and the open is refused
-  by name.
+  running a run abandoned by a handle that is gone, and the open is
+  refused by name. (cd35c48 said "an ended process"; verifier-V9 found
+  that untrue of this process's own closed handle, and 03963fb and
+  f16458f restated it.)
 - program.c brings home the image, and the bank at a run and at a
   digest. The character parsers bring home their strings.
 - The out-parameters are documented as stores made for the caller.
@@ -15348,9 +15356,10 @@ went red except one equivalent; the gate was 319/0/0, and nothing
 shipped moved. The notes:
 - A call through a module-level class's attribute (X3) was listed as
   passing, for a reason that fits only an instance's attribute.
-- Four more shapes passed unlisted: a thread pool's submit, an inline
-  functools.partial, and a registry filled through a local alias or
-  through a chained module-level alias.
+- Three more shapes passed unlisted - an inline functools.partial, and a
+  registry filled through a local alias or through a chained
+  module-level alias - and a fourth, a thread pool's submit, was covered
+  only by the general "code outside this file".
 
 The lead sent it back for those (2026-09-27).
 
@@ -15364,7 +15373,7 @@ F0c's fourth follow-up, 29ee82a, closed the three unlisted shapes and X3:
 
 It gave 331 checks, 0 failed.
 
-V5 ran 243 mutants of its own through the whole gate:
+V5 ran 243 mutant runs of its own through the whole gate:
 - every closed shape was green at 59e5c28 and is red now for the named reason;
 - the listed limits pass;
 - 37 of 40 mechanisms turned off went red, and the three green are named;
@@ -15481,7 +15490,8 @@ the share: open each one from the Linux side before deleting it.
   refused as ARTIFACT (now INVALID_ARGUMENT, Logan's word).
 
 **Known limits, recorded rather than fixed** (Logan's rule, 2026-09-27).
-Each was found by a verifier, and none gives a wrong answer today:
+Each was found by a verifier or by the lead, and none gives a wrong
+answer today:
 - **No permanent gate for N1.** A fill whose upload fails is caught only
   by a mock of XRT, which the tree does not keep. A build with N1
   reverted passes every device-test leg (verifier-V9).
@@ -15496,8 +15506,9 @@ Each was found by a verifier, and none gives a wrong answer today:
   never meets the card's refusal; device-test's reference supplies the
   refusal itself (V9).
 - **An out-parameter that shares bytes with an array the same call
-  writes** is not checked, and the backends then leave different bytes
-  there. cft.h and HOSTAPI now say so (V9).
+  reads or writes** is not checked, and what the call reads or leaves
+  there then differs between backends. cft.h and HOSTAPI now say so
+  (V9).
 - **CFT_XRT_BIND=decline-outputs** reuses an output copy already live at
   the same window. The docs now say so; device-test's pass uses fresh
   buffers (V9).
@@ -15511,7 +15522,11 @@ Each was found by a verifier, and none gives a wrong answer today:
   the card's full matrix (verifier-V7, item 6).
 - **`cft_last_error()` can give an OLDER sentence.** The library clears
   its own message only when a call reaches a backend, and the XRT
-  backend never clears its own.
+  backend clears its own at open, at an elementwise run and at a
+  program run - not at a reduction, a read-back or a publish
+  (verifier-V10, and the lead's reading of backend_xrt.cpp).
+  - With two device backends in one process, a remote handle's older
+    sentence comes before an XRT handle's newer one (verifier-V10).
   - A refusal made without a sentence - `cft_conformance` over a
     directory with no vector sets, or a bare argument error - leaves the
     previous failure's sentence standing. The lead found this in
@@ -15572,4 +15587,40 @@ more than the tiles have; a brief naming a runner stage that does not
 exist (`--only orbits`); shell here-documents that ate escapes and ran a
 backquoted word as a command. The rules adopted: check `git show --stat`
 against the message before believing a commit; test the artifact
-itself; write patch scripts as files.
+itself; write patch scripts as files. Later in the round:
+- a branch count typed rather than measured (27 for 29);
+- aa0dea9's message named four card sessions for five fixes, and put
+  F0b's merge at 44fc132, which is F0c's (F0b's is d8d8c0d);
+- f16458f's `-q`, `-s` and WSL lines were read off the console by a loop
+  that reused one log file, so no file holds them;
+- the first reflow of this entry wrapped its own heading, and a
+  conflict-resolving script wrote CRLF endings. Both were caught before
+  the commit.
+Verifier-V10 found the rest of what this entry had wrong: a count of
+image loads, a cost quoted for one op as if for all, and four citations
+that pointed at the wrong entry. They are corrected above and where
+they were cited.
+
+**The front door on the round's last code.**
+- The run: aa0dea9, run 20260928-052419-aa0dea9, `bash verify/run.sh
+  --budget gate --skip lang-rust`, the desktop at its own load with a
+  verifier reading beside it.
+- The verdict: PASS, 35 stages, 0 failed.
+- The one skip, by request: lang-rust. This is the desktop's toolchain
+  limit that this file records under lang-rust: MSVC `rustc` cannot
+  link the MinGW-built libcft.a, and the round's own quick run failed it
+  on the same three symbols.
+- Inside golden, three checks skipped: two that need the Arduino
+  loopback binary, and one that needs Python 3.13's `math.fma`. These
+  are the same three recorded on 2026-09-24.
+
+Verifier-V10 read the round's last seven commits beside it:
+- both merges, byte for byte;
+- 9d7c349's "no logic changed", by syntax tree;
+- every "Here:" of the side project's asks;
+- this entry, against the records.
+It found no regression and no wrong answer. Its sentences are restated
+in the commit that adds this paragraph. That commit changes docs and
+comments only, and was gated by the docs and programs stages, a
+library build, api-test and `sync.py --check`, not by a second front
+door.

@@ -3465,7 +3465,7 @@ def _callees(f, local, classes, memo):
     resolves through what the owner holds at module level (a name or a
     table bound to a class or an instance of one). A class the calling
     function defines is not resolved: _handed has already turned its name
-    into the names its body binds, so a call through its attribute is
+    into the names its body reads, so a call through its attribute is
     followed no further (verifier-V5's O1; the rules' comment lists it
     among the shapes known to pass)."""
     if isinstance(f, ast.Attribute):

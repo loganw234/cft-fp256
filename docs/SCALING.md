@@ -236,7 +236,7 @@ through the library on the card in docs/BENCHMARKS.md). Since
 tiles", the plan of record's step 2) cuts a program run's lanes across
 every tile, each tile running its own slice's blocks with its own
 early exit, which SEQUENCER.md's P3 makes unobservable. Measured on the
-round-2 quad (docs/VALIDATION.md, 2026-09-25): a 65,536-lane Lorenz-63
+round-2 quad (docs/VALIDATION.md, 2026-09-28): a 65,536-lane Lorenz-63
 integration at fp256 took 13.68 s on four tiles against 53.94 s on one
 for each 2,000 extra steps - 3.94 times - with the same bytes; and
 atlas-engine's program set, 140 cases, matched on the quad's default
