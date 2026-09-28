@@ -3370,7 +3370,8 @@ also needs an audit tool that checks that statement by re-running what
 it says on an implementation the service does not control. This
 section is the plan; nothing in it exists yet unless it says so.
 Verifier-C1 reviewed the first draft against the tree (twenty
-findings); this is the draft after them.
+findings), then re-checked the second (six more gaps and six notes).
+This is the draft after both.
 
 **What a certificate says.** "These bits came from this program, these
 inputs and these parameters; any conforming implementation reproduces
@@ -3379,9 +3380,14 @@ library build and this device image; and their accuracy is this, of
 this kind."
 
 **What an audit proves, and what it does not.**
-- It proves the RESULT: segments re-run from their certified start
-  states end on their certified end states, and the program and bank
-  it was handed are the ones certified.
+- It proves the RESULT of every segment it re-runs: each ends on its
+  certified end state, from its certified start state, with the program
+  and bank it was handed being the ones certified.
+  - A full audit re-runs every segment.
+  - A sampled audit of k of S segments misses f wrong ones with
+    probability C(S-f, k) / C(S, k), and says so beside its verdict.
+- It re-derives each accuracy value as the stated function of certified
+  runs. It does not prove that an estimate is a good one.
 - It does not prove the producer's identity claims. The library build
   and the device image are recorded so the run can be reproduced, not
   checked by the audit.
@@ -3461,9 +3467,10 @@ code; the checks are C1's):
   - `hw/rebuild-2022.sh` writes each image's sha256 and commit to a
     manifest, outside the library.
 - **No method-error estimator** exists anywhere in the tree.
-- **Exact arithmetic is limited to 2,048 bits.** libcft's bigint has
-  that fixed width (`host/src/bigint.h`); the golden model can compute
-  exactly with Python's fractions.
+- **Exact arithmetic in C has a width that depends on the build.**
+  libcft's bigint is 2,048 bits when the build's format ceiling is
+  fp256, 576 at fp128 and 288 below (`host/include/cft_config.h`). The
+  golden model can compute exactly with Python's fractions.
 
 **The format** (the lead's proposal, revised after C1).
 - **Text.** One field a line, in a fixed order the specification lists:
@@ -3473,9 +3480,18 @@ code; the checks are C1's):
   - Digests are in hex.
   - An element value is in hex (its bits), with an exact decimal beside
     it where a person reads it.
-  - A rational is a hex numerator and a hex denominator.
-  - A reader refuses by name any line it does not expect, any line
-    missing, any line out of order, and any count that disagrees.
+  - A rational is a hex numerator and a hex denominator, in one
+    canonical spelling: reduced, a positive denominator, no leading
+    zeros.
+  - Exact values have a width limit that is a rule of the format.
+    Every writer and reader, the golden model's included, applies it
+    under one refusal name, so no two conforming auditors can differ on
+    it.
+  - A reader refuses by name:
+    - any line it does not expect, any line missing, any line out of
+      order;
+    - any count that disagrees;
+    - any exact decimal that disagrees with its hex.
 - **Hashes.**
   - The body's hash is SHA-256 over every byte from the magic line to
     `end` and its newline.
@@ -3509,9 +3525,9 @@ code; the checks are C1's):
       client's build, since no server build is sent;
     - the program: `cft_program_digest` over the image and the bank,
       and the format;
-  - **the run:** lanes, segments, steps a segment, the hashes of the
-    input streams a, b and c, and the numeric parameters the bank does
-    not carry;
+  - **the run:** lanes, segments, steps a segment, the input streams a,
+    b and c hashed with the same key as the states, and the numeric
+    parameters the bank does not carry;
   - **the chain:** for each segment, its start and end state hashes,
     its flag word and its STATUS. Segment k's end is segment k+1's
     start;
@@ -3522,7 +3538,14 @@ code; the checks are C1's):
   - **auxiliary runs:** a half-step run or a wider re-run behind an
     estimate is certified as a run of its own, with its own identity,
     digest and chain, so an auditor samples it like the main run rather
-    than re-running all of it;
+    than re-running all of it.
+    - It also carries its relation to the main run: the same image
+      digest; a bank that differs only in the named h-slot indices (an
+      image keeps no constant names), by exact halving or by exact
+      widening; twice the segments for a half-step run; and the same
+      start state, exactly widened for a wider run.
+    - The main run attached as its own half-step run would otherwise
+      pass every check with an estimate of 0 (verifier-C1);
   - **the output:** the final state's hash.
 
 **The audit tool.**
@@ -3530,8 +3553,11 @@ code; the checks are C1's):
   salt, and the states it needs.
 - **What it checks:**
   - the certificate's hash and strict form;
+  - the salt it was handed, against the salt commitment;
   - the digests of the program and bank it was handed;
   - the chain's continuity;
+  - each auxiliary run's relation to the main run;
+  - each accuracy value, re-derived from the certified runs;
   - chosen segments, re-run from their certified start states, each
     ending on its certified end state. The choice is all of them, named
     ones, or a random sample.
@@ -3544,21 +3570,27 @@ code; the checks are C1's):
   software backend. They must agree bit for bit on every re-run. Their
   verdicts agree only if the specification fixes the order of the
   checks and the sampling PRNG.
-- **The C auditor refuses by name** any exact value past its bigint's
-  width, rather than approximate it.
+- **Both auditors apply the format's width rule.** An exact value past
+  it is refused by name, the same way by each, rather than
+  approximated.
 
 **Order of work.** Each step has its own gate, watched failing, and a
 verifier.
 1. **The specification and the golden model's implementation.** A new
    docs/CERTIFICATES.md, plus in the golden model: encode, strict
    parse, hash, HMAC, chain and audit. The format holds rationals and
-   auxiliary runs from the first version. Each negative control must be
-   refused by name:
+   auxiliary runs, with their relation fields and the width rule, from
+   the first version. Each negative control must be refused by name:
    - a byte flipped anywhere, including in fields no other check reads;
    - a line dropped, added or moved;
    - a count changed;
    - a salt commitment that does not match;
-   - a segment whose end state differs.
+   - a segment whose end state differs;
+   - an auxiliary run whose relation to the main run is false.
+   Every control but the byte flip writes a valid `hash` line over its
+   defective body, and asserts the NAME of the check it exists for.
+   Otherwise the hash check would refuse them all first, and a broken
+   strict-form check would pass unseen (verifier-C1).
 2. **Identity in libcft.**
    - A build id, generated outside `host/src` (sync.py vendors all of
      `host/src`), rebuilt on every build, and counting untracked files
@@ -3569,8 +3601,10 @@ verifier.
 3. **A segment runner.** A tool that runs a program as consecutive
    segments, carries state through the scratch block, keeps the states
    at each boundary, and writes the certificate. Its differential gate:
-   the golden writer, given the same identity fields, salt and states,
-   writes the same bytes. First on the three ODE programs.
+   the golden writer, given the same identity fields, salt and INITIAL
+   state, computes every segment itself and writes the same bytes, so
+   the gate holds arithmetic and state carrying as well as encoding.
+   First on the three ODE programs.
 4. **The audit tool in C,** beside the golden one. Both run in the gate
    on certificates with planted defects, and their verdicts are held
    equal.
@@ -3579,8 +3613,10 @@ verifier.
    - A step-halving estimate: the same image, with every slot that
      carries h halved, run for twice as many segments. It is a second
      bank, so a second digest and an auxiliary run. It is scored
-     against a converged reference (the scheme at h/2^k), not against
-     the 300-digit arm, which measures rounding only.
+     against a converged reference - the scheme at h/2^k, computed at a
+     precision below the run format's rounding floor, with that
+     precision stated - not against the 300-digit arm, which measures
+     rounding only.
    - The rounding estimate: a re-run one format wider with the
      constants widened exactly. It is scored against the 300-digit arm.
      An fp64 run needs fp128 images, which gen_odes does not build
@@ -3588,11 +3624,17 @@ verifier.
      wider re-run on the tile, and its rounding estimate is refused by
      name there.
 6. **cft-orbits' runs.**
-   - Its segments are its sample intervals, and its identity is its run
-     parameters, because its engine's segment lengths follow the wall
-     clock while it writes checkpoints.
+   - Its segments are its sample intervals, because its engine's
+     segment lengths follow the wall clock while it writes checkpoints.
    - Its records already hold the states.
-   - Flags per interval are new, since its records carry none.
+   - First, runs on the Newton 1/r^3 route: each interval's image is
+     certified by digest, and the golden executor can already run those
+     images. The default exact route has no image, and the golden model
+     has no orbit integrator. Certifying it needs one ported, which is
+     not planned here.
+   - Flags per interval are new, since its records carry none. Adding
+     them changes every record-chain value and the checkpoint's version,
+     and must be named so.
 
 Not in step 2: signing; per-lane flags (a step-4 hardware ask); and a
 bound for any method that has no rigorous remainder.
