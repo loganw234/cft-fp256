@@ -1135,6 +1135,49 @@ clean-programs:
 	rm -f cft-asm cft-asm.exe positive-run positive-run.exe
 # ==================== end of the cft-asm block =====================
 
+# ===================================================================
+# cft-segrun - a program run as consecutive segments, every boundary
+# state kept, and the certificate written (docs/CERTIFICATES.md, "The
+# segment runner"; the plan of record's step 3, docs/ROADMAP.md)
+#
+# Its own delimited block on the same terms as the blocks above:
+# TOOLS += plus an explicit `all:` prerequisite, and `clean` gains a
+# prerequisite rather than a longer command line.
+#
+#   make segruntest     the differential gate, tests/segrun_check.py:
+#                       the three ODE programs at fp64 and fp256 and a
+#                       small program whose segments raise several flags
+#                       and a STATUS, each certified keyed and open on
+#                       the software backend; the golden writer, handed
+#                       each certificate's identity lines, the salt and
+#                       the initial states, runs every segment itself and
+#                       must write the same bytes; the golden audit
+#                       accepts each, in full and sampled, from the
+#                       states the tool wrote; every refusal by its name
+#                       and exit code; the page's test vectors; and one
+#                       run through a loopback cft-serve, stopped by PID.
+#                       verify/run.sh's `programs` stage runs it.
+#
+# The tree's build id goes in as make test hands api-test its own, so a
+# certificate's build-id line is held to the library this tree builds.
+# ===================================================================
+TOOLS += cft-segrun$(EXE)
+all: cft-segrun$(EXE)
+clean: clean-segrun
+.PHONY: segruntest clean-segrun
+
+cft-segrun$(EXE): tools/segrun.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+
+segruntest: cft-segrun$(EXE) cft-serve$(EXE)
+	CFT_EXPECT_BUILD_ID="$$(GIT="$(GIT)" $(SHELL) tools/gen_build_id.sh --print)" \
+		$(PYTHON) tests/segrun_check.py --tool ./cft-segrun$(EXE) \
+		--serve ./cft-serve$(EXE)
+
+clean-segrun:
+	rm -f cft-segrun cft-segrun.exe
+# ==================== end of the cft-segrun block ==================
+
 # Removes every platform's products, not just this one's. A tree on a
 # shared volume gets built from more than one platform, and a clean
 # that leaves the other platform's shared library behind leaves

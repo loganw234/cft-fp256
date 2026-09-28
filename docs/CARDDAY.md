@@ -750,6 +750,48 @@ is a no-op, and cures nothing). Keep the script's output with the day's
 record: the digest it prints is the "xclbin sha256" below, measured by
 the library itself.
 
+## Owed to the next card day (added 2026-09-28): the segment runner
+
+The certificate round's step 3 (docs/ROADMAP.md) is `cft-segrun`
+(docs/CERTIFICATES.md, "The segment runner"). It is held on the
+desktop's software backend and through a loopback server. It is built
+with XRT=1 against XRT 2.14 in WSL. It has not run on a tile. What only
+a card can say:
+
+    make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt all device-test
+    bash hw/card-segrun.sh <image.xclbin> [<another image.xclbin>]
+
+From the root of the branch's checkout, with python3 on PATH (the golden
+model needs the standard library only). In order, each step an `ok` or a
+`FAIL` line:
+
+1. **The build.** cft-segrun links XRT. Its build id is the tree's, and
+   names HEAD, with a NOTE on a dirty tree for the reason step 1 of the
+   identity leg above gives.
+2. **Each image.** `device-test <image> -i` names the image: VERSION,
+   CAPS, tiles and formats, with `sha256sum` of the file. Then
+   `host/tests/segrun_check.py --device <image>`, with those as what
+   every certificate's device lines must say:
+   - the three ODE programs at fp64 and fp256, certified on the tile,
+     keyed and open, each with a half-step run, and at fp64 a wider fp128
+     run (left out, on a NOTE line, for an image without fp128);
+   - `flagstep`, whose segments raise flags and a STATUS the ODE
+     programs never do (a NOTE, NOT TESTED, if the image refuses it);
+   - each certificate accepted by the golden reader, byte for byte the
+     golden writer's from the initial states, its boundary files the
+     golden chain's, and accepted by the golden audit, in full and
+     sampled;
+   - each made again on the software backend, every run block byte for
+     byte the card's.
+3. **The negative control.** Handed device-test's own SHA-256 as the
+   image's, the gate must fail the device lines by name.
+
+Every segment is a run on a tile. If one times out, reload the image
+before trusting anything after it. `device-tiles` is held here and
+nowhere else: the software backend and a software server have one tile,
+so a writer that wrote 1 without asking the library passes every
+desktop check (P3's plants, 2026-09-28).
+
 ## What to record
 
 The manifest format already exists; the run record should match it in
