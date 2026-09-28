@@ -66,7 +66,8 @@ reproduces the library exactly as it was, and defines one profile
 macro, `CFT_TINY`, that turns on the set an 8-bit part needs.
 
 **What "reproduces it exactly" is worth, measured.** Fourteen of the
-library's fifteen translation units compile at the default profile to
+fifteen translation units the library had then (`src/build_id.c`, the
+sixteenth, came on 2026-09-28) compile at the default profile to
 objects that are byte-identical to the ones the same compiler produced
 before `cft_config.h` existed. The fifteenth is `device.c`: same
 sections, same symbols, same sizes, and the difference is fourteen

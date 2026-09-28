@@ -67,6 +67,30 @@ int  cftx_open(const char *artifact, int index, void **out,
 
 void cftx_close(void *hw);
 
+/* The identity of the image a handle opened, for cft_get_image_id.
+ *
+ * sha256 is over the EXACT bytes cftx_open read from the artifact and
+ * then handed to XRT: read once, hashed, loaded - never the file read a
+ * second time - and bytes is how many there were. version is VERSION;
+ * caps[0] is CAPS and caps[1] CAPS2, raw, and n_caps says how many of
+ * the four slots are registers this image has (CAPS2 exists from
+ * 0x800). Every opened tile's words were read at open and held equal to
+ * tile 0's.
+ *
+ * Returns ST_OK, or ST_UNSUPPORTED with the backend's sentence when the
+ * tiles disagree - a single set of words would then name tile 0 and call
+ * it the image. Recorded at open, so it touches no device and answers on
+ * a poisoned handle. */
+typedef struct cft_image_raw {
+    uint8_t  sha256[32];
+    uint64_t bytes;
+    uint32_t version;
+    uint32_t n_caps;
+    uint32_t caps[4];
+} cft_image_raw;
+
+int cftx_image_id(void *hw, cft_image_raw *out);
+
 /* ====================================================================
  * Device-resident buffers (cft.h's cft_alloc; docs/HOSTAPI.md)
  *

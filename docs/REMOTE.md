@@ -84,6 +84,8 @@ client's own copy of the library, which is bit-identical by contract.
 | `cft_program_digest` | client, over the bytes it holds | nothing |
 | `cft_program_free` | client: its own memory only | nothing - `PROG_FREE` goes out when a different image displaces the cached handle, and the server frees the rest with the connection |
 | `cft_get_caps`, `cft_supports` | client, from the capabilities the handshake returned | nothing after `HELLO` |
+| `cft_build_id` (2026-09-28) | client: the id of the library in THIS process. The server's build is not sent, and a record made through a remote handle says so | nothing |
+| `cft_get_image_id` (2026-09-28) | client: REFUSED by name, `CFT_ERR_UNSUPPORTED`. The caps block carries decoded device fields, not an xclbin's digest, the raw CAPS words or the server's build, so the client cannot know the server's image | nothing |
 | `cft_alloc`, `cft_buffer_to_device`, `cft_buffer_from_device`, `cft_buffer_free` | client: host memory, as on the software backend | nothing (see below) |
 | `cft_get_caps().buffers_resident`, `cft_buffer_get_info` | client, from its own knowledge: 0 and no device copies | nothing |
 | the six status-word operations (5.7.4) | client | nothing (see below) |

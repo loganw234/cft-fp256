@@ -123,7 +123,9 @@ rule, so a stale binary could outlive a `clean`.
 **`bindings/arduino/sync.py --check` passes.** Measured 2026-09-16: 30
 vendored files, all identical to `host/` (28 on 2026-09-12; round 2
 added `mask_bits.h` and its neighbour; 32 from 2026-09-25, when
-`tile_select.h` and `lane_cut.h` joined `host/src`). A NEW `.c` or `.h` in
+`tile_select.h` and `lane_cut.h` joined `host/src`; 33 from 2026-09-28,
+`build_id.c`, whose GENERATED header lives in `host/gen/` because
+`sync.py` would vendor it from `host/src` or `host/include`). A NEW `.c` or `.h` in
 `host/src` fails it too, as unvendored, until `sync.py` is re-run (it
 vendors those two extensions only). Any edit to a vendored host
 source fails it until `sync.py` is re-run - which is the gate doing its

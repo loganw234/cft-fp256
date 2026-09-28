@@ -2894,3 +2894,178 @@ the tile publishing `CFT_SEQ_FEAT_LANE_MASK` and the remote backend
 running only the lanes the mask keeps) are all in, above. The saving is
 the tile's and the call is portable, as with the scalar operand: a
 caller asks `cft_get_caps` to learn which it has.
+
+## Identity at ABI 0.15: which library, which image (2026-09-28)
+
+A certificate (docs/ROADMAP.md, "Segments, certificates and the audit
+tool") records what ran. Until this step nothing in the library could
+say it. `cft_abi_version` names which calls exist, and did not move
+with the 2026-09-25 round's fixes. `cft_caps.device_version` is the
+register map's VERSION, the same for every build of it. And the
+xclbin's UUID stayed inside the XRT backend, where two builds can share
+one. Two calls, both additive:
+
+    const char *cft_build_id(void);
+    cft_status  cft_get_image_id(cft_device *dev, cft_image_id *out);
+
+**`cft_build_id()`: the library.** One line, in exactly one of two forms:
+
+    commit=<40 lowercase hex> tracked=<clean|modified> untracked=<none|present>
+    unknown
+
+- `commit` is the full name of the commit checked out when the library
+  was compiled (64 hex digits in a SHA-256 repository).
+- `tracked` is `modified` when any tracked file differed from it.
+- `untracked` is `present` when any file git does not ignore was
+  untracked. A new source nobody added compiles in as easily as an
+  edited one: the lesson `hw/rebuild-2022.sh` wrote down for
+  bitstreams. It holds here twice over, since
+  `bindings/arduino/sync.py` vendors every file in `host/src` and
+  `host/include`, tracked or not.
+
+Only `tracked=clean untracked=none` says "this library IS that commit".
+Any other id says the build corresponds to no commit and cannot be
+reproduced from one. It does not tell two such builds apart: two trees
+modified differently at one commit carry the same id. It names the
+source, not the compiler, the flags or the build profile.
+
+The id is `unknown`, whole, wherever it was not measured:
+- every build not made by `host/Makefile`: the Arduino library's
+  vendored copy, the WebAssembly module, the fuzz harnesses,
+  `profiles-check`, anything compiled by hand;
+- a Makefile build with no git;
+- a directory above `host/` that is not the top of its repository: a
+  copy vendored inside another project, whose commit is not this tree's;
+- git answering with an error or a warning.
+
+Never a guess, and never partly known.
+
+**How it is made.** `host/tools/gen_build_id.sh` asks git on every make
+that builds the library or anything linking it: the header's only
+prerequisite is phony. It rewrites the header
+`src/build_id.c` includes only when the id changes. make re-reads the
+header's time after the recipe, so an unchanged tree rebuilds nothing.
+A changed one recompiles that one file, re-archives `libcft.a` and
+relinks what links it.
+- The header is `host/gen/cft_build_id.h`, outside `host/src` and
+  `host/include`. `sync.py` vendors both whole, so a generated file in
+  either would fail `sync.py --check` on every commit.
+- `.gitignore` ignores it. The id counts untracked files, so a header
+  git could see would mark the next build dirty.
+- Only `src/build_id.o` and `.lo` are handed it (`-DCFT_BUILD_ID_H`).
+  Every other build of that file compiles the `unknown` it holds.
+- `make -C host print-build-id` prints the tree's id as of now, and
+  writes nothing.
+
+**A static test binary carries the id it was linked with.** The id is
+compiled in. A program that links `libcft.a` - every test binary in
+`host/` does - carries the id of the archive it was linked against,
+which is exactly the library code inside it. A binary not relinked
+after the library was rebuilt runs the OLD library and reports the OLD
+id. That is the stale test binary CLAUDE.md warns of ("`make -C host
+all` does not build the test executables"), made visible:
+- api-test prints its id first;
+- `make -C host test` hands api-test the tree's id in
+  `CFT_EXPECT_BUILD_ID`, and api-test fails if the two differ;
+- device-test prints its id first too, and `device-test --build-id`
+  prints it and exits. That is how `hw/card-identity.sh` holds a card
+  run's binary to the tree before trusting it.
+
+Through a remote handle the id is still the CLIENT's library: HELLO
+does not carry the server's.
+
+**`cft_get_image_id()`: the device.** A struct with the size handshake
+`cft_caps` uses: zero it, set `struct_size`, call. On return
+`struct_size` is how many bytes were filled.
+
+    sha256[32]    SHA-256 over the exact bytes of the xclbin the backend loaded
+    image_bytes   how many
+    version       VERSION (0x48), as cft_caps.device_version
+    n_caps        1 below VERSION 0x800 (CAPS alone), 2 from it (CAPS, CAPS2)
+    caps[4]       CAPS (0x4C) and CAPS2 (0x6C), RAW; zero past n_caps
+
+- **The digest is over what was LOADED.** `cft_open` reads the file
+  once, hashes those bytes, and builds the `xrt::xclbin` it loads from
+  the same bytes. So the digest cannot be of a file replaced after the
+  load, and the compute-unit listing reads that object instead of the
+  file a second time. It is not the xclbin's UUID, which two builds can
+  share. Compare it with `sha256sum` of the file, as the card leg does.
+- **The raw words carry every bit**, CAPS[15:8]'s opcode groups
+  included, which no `cft_caps` field holds. Every opened tile's words
+  are read at open and held equal to tile 0's, the ones the library
+  decodes.
+
+**Refused BY NAME where there is no image to name**, never answered
+with a digest of zeros that reads as one. The refusal is
+`CFT_ERR_UNSUPPORTED`, a sentence in `cft_last_error()`, `struct_size`
+set to 0, and nothing else written.
+
+* **The software backend** has no bitstream to hash and no CAPS
+  register to read. What determines its bits is the library, whose
+  identity is `cft_build_id()`, and the sentence says so.
+* **A remote handle** cannot know its server's image. HELLO carries the
+  server's DECODED device fields, the ones `cft_get_caps` reports. It
+  carries no xclbin digest, no raw CAPS words and no server build
+  (docs/REMOTE.md). A certificate made through one records the server's
+  `cft_caps`, the client's `cft_build_id()`, and the server's image and
+  build as not known.
+* **An XRT image whose tiles publish different CAPS words** - a mixed
+  layout (docs/LAYOUTS.md) - has no single set of words to name. The
+  sentence names the tile and both words. The open itself is unchanged:
+  this library has always decoded tile 0's CAPS for every tile, and
+  whether a mixed image should open at all is not this call's question.
+
+A NULL `dev` or `out`, or a `struct_size` below `sizeof(size_t)`, is
+`CFT_ERR_INVALID_ARGUMENT` first, on every backend. The answer comes
+from what `cft_open` recorded. So it reaches no device, and it answers
+on a handle a failed run has poisoned: the image is still the one
+loaded.
+
+**The ABI version.** Both calls are additive: code written against 0.14
+gets the same bits from the same calls. `CFT_ABI_VERSION_MINOR` moves
+to 15 for them at the merge. The integrator bumps it together with the
+WebAssembly module's rebuild, as every step's is: `verify.mjs` holds the
+committed page's `cftw_abi_version()` to the macro, so a bump without
+the rebuild fails the `wasm` stage. Until then the calls are present
+under 0.14, which the version's floor semantics allow. After it, a
+caller that needs either asks for 0.15.
+
+**How it is held.**
+
+* **api-test.**
+  - The id's grammar, exactly. The check's own fourteen controls run
+    first: four good ids and ten near-misses, among them a short
+    commit, `tracked=dirty` and a trailing space.
+  - The id printed. Under `make test`, the id equal to the tree's.
+  - The software backend's refusal - status, sentence, `struct_size` 0
+    and no other byte written - after the argument refusals.
+* **`make -C host buildidtest`**, run by `make test`. The Makefile, the
+  generator, `src/build_id.c`, `cft.h` and `.gitignore` are copied into
+  scratch repositories and built there, and both objects are linked
+  into a program that prints the id. Seventeen checks:
+  - a clean commit, then the same tree again (nothing rewritten or
+    recompiled), and the build's own output ignored;
+  - a tracked edit (the header rewritten, both objects recompiled), the
+    edit reverted, an untracked source, both at once, a new commit;
+  - no repository, a copy inside another repository, and no git.
+* **device-test**, every run and every mode: the software handle's
+  refusal, and the handle under test answering for what it is.
+  - Through a loopback server (verify/run.sh's `remote` stage), that is
+    the remote refusal.
+  - On an xclbin, the digest is held to device-test's own SHA-256 of
+    the file, `image_bytes` to its length, VERSION to `cft_get_caps`
+    and `n_caps` to VERSION. The raw words must decode to the handle's
+    format mask, opcode groups (`cft_supports`, one opcode a group),
+    feature nibbles and scratch depth.
+  - `device-test <image> -i` runs that leg alone.
+* **`sync.py --check`**, with a built tree: 33 vendored files, the new
+  `src/build_id.c` among them, and the generated header in none.
+* **On the card**: `hw/card-identity.sh`, for whoever holds the card,
+  with its own negative controls (docs/CARDDAY.md, "Owed to the next
+  card day (added 2026-09-28)"). The XRT half of this section - the
+  read, the hash, the load from bytes and the per-tile words - is
+  compiled against XRT 2.14 and has run once, in hw_emu on the 0907
+  quad image. `device-test -i` there reported the digest `sha256sum`
+  and the image's manifest give, the four tiles' CAPS equal, and 15
+  checks held. With the hash file planted, its digest check FAILED by
+  name. It has not run on a card, or against XRT 2.19.

@@ -662,7 +662,7 @@ do_libcft() {
   return $rc
 }
 need host-cc python
-stage libcft "host library: build + contract tests + conformance replay + every build profile compiles" -- do_libcft
+stage libcft "host library: build + contract tests + the build id regenerated + conformance replay + every build profile compiles" -- do_libcft
 
 # Placed after `libcft` on purpose: make_seq_corpus.py's check loads
 # libcft through ctypes, and that stage is what builds it. Sitting

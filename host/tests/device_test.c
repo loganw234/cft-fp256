@@ -8101,6 +8101,215 @@ out:
     free(mask);
 }
 
+/* A file's bytes, whole, or NULL with *len 0. */
+static unsigned char *read_whole(const char *path, size_t *len)
+{
+    FILE *f = fopen(path, "rb");
+    unsigned char *buf = NULL, *grown;
+    size_t have = 0, cap = 0, k;
+    *len = 0;
+    if (!f)
+        return NULL;
+    for (;;) {
+        if (have == cap) {
+            cap = cap ? cap * 2 : (size_t)1 << 20;
+            grown = (unsigned char *)realloc(buf, cap);
+            if (!grown) {
+                free(buf);
+                fclose(f);
+                return NULL;
+            }
+            buf = grown;
+        }
+        k = fread(buf + have, 1, cap - have, f);
+        have += k;
+        if (k == 0)
+            break;
+    }
+    if (ferror(f)) {
+        free(buf);
+        fclose(f);
+        return NULL;
+    }
+    fclose(f);
+    *len = have;
+    return buf;          /* never NULL here: the first pass allocated */
+}
+
+/* The device image's identity (cft.h, cft_get_image_id), held to the
+ * file the handle was opened with - what a certificate will record as
+ * "the device", so a wrong answer here is a certificate that names the
+ * wrong bitstream.
+ *
+ *   xrt       CFT_OK; sha256 equal to THIS program's SHA-256 of the
+ *             artifact's bytes, read here and not by the library, and
+ *             image_bytes their count; version the contract cft_get_caps
+ *             reports; n_caps 1 below VERSION 0x800 and 2 from it; and
+ *             the raw words decoding to what the handle reports - the
+ *             format nibble to format_mask, CAPS[14:8] to cft_supports
+ *             for one opcode of each of the seven groups, the two
+ *             feature nibbles and CAPS2's to seq_features, CAPS2's
+ *             depth to max_scratch. Words read from the wrong register
+ *             would not decode to this device.
+ *   software  refused by name: CFT_ERR_UNSUPPORTED, "software backend",
+ *             struct_size 0
+ *   remote    refused by name: CFT_ERR_UNSUPPORTED, "remote handle"
+ *
+ * The digest check's negative control is for a card, where it can run:
+ * CFT_DEVICE_TEST_HASH_FILE names another file to hash in place of the
+ * artifact, and the check must then FAIL, naming both digests
+ * (hw/card-identity.sh plants it). A comparison that could not fail
+ * would pass that run as well.
+ *
+ * Returns nothing; counts into checks and failures like every leg. */
+static void check_image_identity(cft_device *dev, const char *artifact)
+{
+    cft_caps caps;
+    cft_image_id im;
+    cft_status st;
+    const char *msg;
+
+    memset(&caps, 0, sizeof caps);
+    caps.struct_size = sizeof caps;
+    if (cft_get_caps(dev, &caps) != CFT_OK) {
+        CHECK(0, "the image identity: cft_get_caps failed first");
+        return;
+    }
+    memset(&im, 0, sizeof im);
+    im.struct_size = sizeof im;
+    st = cft_get_image_id(dev, &im);
+    msg = cft_last_error();
+
+    if (!strcmp(caps.backend, "software") || !strcmp(caps.backend, "remote")) {
+        const int sw = !strcmp(caps.backend, "software");
+        const char *name = sw ? "software backend" : "remote handle";
+        CHECK(st == CFT_ERR_UNSUPPORTED && strstr(msg, name) &&
+              im.struct_size == 0,
+              "the %s's image identity: %s with struct_size %lu - it has no "
+              "image, and must be refused by name (CFT_ERR_UNSUPPORTED, "
+              "\"%s\", struct_size 0), not answered: \"%s\"", name,
+              cft_strerror(st), (unsigned long)im.struct_size, name, msg);
+        if (st == CFT_ERR_UNSUPPORTED && strstr(msg, name) &&
+            im.struct_size == 0)
+            printf("  image identity (%s): refused by name - %s\n",
+                   caps.backend, msg);
+        return;
+    }
+    if (strcmp(caps.backend, "xrt")) {
+        CHECK(0, "the image identity: backend \"%s\" is none this test "
+              "knows, so nothing says what its identity should be",
+              caps.backend);
+        return;
+    }
+
+    CHECK(st == CFT_OK && im.struct_size == sizeof im,
+          "the image identity on an xclbin: %s, struct_size %lu: %s",
+          cft_strerror(st), (unsigned long)im.struct_size, msg);
+    if (st != CFT_OK)
+        return;
+    {
+        const char *plant = getenv("CFT_DEVICE_TEST_HASH_FILE");
+        const char *path = plant && *plant ? plant : artifact;
+        unsigned char *bytes;
+        uint8_t want[32];
+        char got_hex[65], want_hex[65];
+        size_t len, i;
+
+        for (i = 0; i < 32; i++)
+            snprintf(got_hex + 2 * i, 3, "%02x", im.sha256[i]);
+        printf("image: sha256 %s, %llu bytes, VERSION 0x%08x, CAPS 0x%08x",
+               got_hex, (unsigned long long)im.image_bytes,
+               (unsigned)im.version, (unsigned)im.caps[0]);
+        if (im.n_caps > 1)
+            printf(", CAPS2 0x%08x", (unsigned)im.caps[1]);
+        printf("\n");
+        if (plant && *plant)
+            printf("  CFT_DEVICE_TEST_HASH_FILE=%s: hashing that file in "
+                   "place of the artifact - the digest check below MUST "
+                   "fail\n", plant);
+
+        bytes = read_whole(path, &len);
+        CHECK(bytes != NULL, "the image identity: %s could not be read "
+              "here to hash", path);
+        if (!bytes)
+            return;
+        st = cft_sha256(bytes, len, want);
+        free(bytes);
+        CHECK(st == CFT_OK, "the image identity: cft_sha256 of %s: %s",
+              path, cft_strerror(st));
+        for (i = 0; i < 32; i++)
+            snprintf(want_hex + 2 * i, 3, "%02x", want[i]);
+        CHECK(!memcmp(im.sha256, want, 32),
+              "the image identity: the handle reports sha256 %s, which is "
+              "not the SHA-256 of %s (%s) - a certificate would name the "
+              "wrong bitstream", got_hex, path, want_hex);
+        CHECK(im.image_bytes == (uint64_t)len,
+              "the image identity: the handle reports %llu bytes and %s has "
+              "%lu", (unsigned long long)im.image_bytes, path,
+              (unsigned long)len);
+        if (!memcmp(im.sha256, want, 32) && im.image_bytes == (uint64_t)len)
+            printf("  image identity: the digest is the SHA-256 of %s, "
+                   "%lu bytes\n", path, (unsigned long)len);
+    }
+    {
+        static const cft_op group_op[7] = {CFT_FMA, CFT_ABS, CFT_MIN,
+                                           CFT_CMPLT, CFT_IADD, CFT_SUM,
+                                           CFT_RECIP_SEED};
+        const uint32_t w = im.caps[0];
+        const uint32_t w2 = im.n_caps > 1 ? im.caps[1] : 0u;
+        const int failed_before = failures;
+        int f, g, fmt = -1, bad = 0;
+        for (f = 0; f < 4 && fmt < 0; f++)
+            if (caps.format_mask & (1u << f))
+                fmt = f;
+        CHECK(im.version == caps.device_version,
+              "the image identity: VERSION 0x%08x, and cft_get_caps says "
+              "0x%08x", (unsigned)im.version, (unsigned)caps.device_version);
+        CHECK(im.n_caps == (im.version >= 0x800u ? 2u : 1u),
+              "the image identity: %u CAPS words at VERSION 0x%08x, where "
+              "CAPS2 exists from 0x800", (unsigned)im.n_caps,
+              (unsigned)im.version);
+        CHECK(im.caps[2] == 0 && im.caps[3] == 0 &&
+              (im.n_caps > 1 || im.caps[1] == 0),
+              "the image identity: a slot past n_caps is not zero");
+        CHECK((w & 0xFu) == caps.format_mask,
+              "the image identity: CAPS[3:0] is 0x%x and format_mask 0x%x",
+              (unsigned)(w & 0xFu), (unsigned)caps.format_mask);
+        for (g = 0; g < 7 && fmt >= 0; g++)
+            if (!!cft_supports(dev, group_op[g], (cft_format)fmt) !=
+                !!(w & (1u << (8 + g)))) {
+                printf("  FAIL: the image identity: CAPS[%d] is %u and "
+                       "cft_supports(%s) says %d\n", 8 + g,
+                       (unsigned)((w >> (8 + g)) & 1u),
+                       cft_op_name(group_op[g]),
+                       cft_supports(dev, group_op[g], (cft_format)fmt));
+                bad++;
+            }
+        checks++;
+        failures += bad != 0;
+        CHECK((caps.seq_features & 0xFFu) ==
+              (((w >> 4) & 0xFu) | (((w >> 28) & 0xFu) << 4)),
+              "the image identity: CAPS[7:4] and CAPS[31:28] are 0x%x and "
+              "0x%x, and seq_features' low byte is 0x%x",
+              (unsigned)((w >> 4) & 0xFu), (unsigned)((w >> 28) & 0xFu),
+              (unsigned)(caps.seq_features & 0xFFu));
+        CHECK(((caps.seq_features >> 8) & 0xFu) == ((w2 >> 4) & 0xFu),
+              "the image identity: CAPS2[7:4] is 0x%x and seq_features' "
+              "bits 11:8 are 0x%x", (unsigned)((w2 >> 4) & 0xFu),
+              (unsigned)((caps.seq_features >> 8) & 0xFu));
+        CHECK(caps.max_scratch ==
+              ((w2 & 0x10u) ? (1u << (w2 & 0xFu)) : 0u),
+              "the image identity: CAPS2 says a scratch depth of %u and "
+              "max_scratch is %u",
+              (unsigned)((w2 & 0x10u) ? (1u << (w2 & 0xFu)) : 0u),
+              (unsigned)caps.max_scratch);
+        if (failures == failed_before)
+            printf("  image identity: the raw CAPS %s to this handle's "
+                   "caps and opcode groups\n",
+                   im.n_caps > 1 ? "words decode" : "word decodes");
+    }
+}
+
 int main(int argc, char **argv)
 {
     static const cft_op ops[] = {CFT_FMA, CFT_ADD, CFT_SUB, CFT_MUL,
@@ -8119,6 +8328,7 @@ int main(int argc, char **argv)
     int only_reduce = 0;    /* skip elementwise; reductions are slow enough */
     int only_seq = 0;       /* sequencer programs only */
     int only_buf = 0;       /* device-resident buffers only */
+    int only_id = 0;        /* the device image's identity only */
     int f, o, r, argi;
 
     /* Emulation is orders of magnitude slower than silicon, so the
@@ -8126,8 +8336,17 @@ int main(int argc, char **argv)
      * The scope is a flag rather than a smaller hard-coded list
      * because the two runs should be the same program. */
     for (argi = 1; argi < argc; argi++) {
-        if (!strcmp(argv[argi], "-q")) {
+        if (!strcmp(argv[argi], "--build-id")) {
+            /* The library this binary carries, and nothing else: it
+             * links libcft.a statically, so this is the id of the
+             * archive it was linked against. hw/card-identity.sh holds
+             * it to the tree's before trusting a card run. */
+            printf("%s\n", cft_build_id());
+            return 0;
+        } else if (!strcmp(argv[argi], "-q")) {
             quick = 1;
+        } else if (!strcmp(argv[argi], "-i")) {
+            only_id = 1;
         } else if (!strcmp(argv[argi], "-s")) {
             only_seq = 1;
         } else if (!strcmp(argv[argi], "-r")) {
@@ -8151,7 +8370,8 @@ int main(int argc, char **argv)
         } else {
             fprintf(stderr,
                     "usage: %s <artifact.xclbin> [-n elements] "
-                    "[-f fp32|fp64|fp128|fp256] [-q] [-r] [-s] [-b]\n"
+                    "[-f fp32|fp64|fp128|fp256] [-q] [-r] [-s] [-b] [-i]\n"
+                    "       %s --build-id\n"
                     "  -q  one opcode and one attribute a format\n"
                     "  -r  reductions only\n"
                     "  -s  sequencer programs only\n"
@@ -8161,18 +8381,27 @@ int main(int argc, char **argv)
                     "compared byte for\n"
                     "      byte and flag for flag with the host-pointer "
                     "path and with\n"
-                    "      the software backend\n",
-                    argv[0]);
+                    "      the software backend\n"
+                    "  -i  the device image's identity only "
+                    "(cft_get_image_id), which every\n"
+                    "      other mode checks too\n"
+                    "  --build-id  print the libcft build this binary "
+                    "carries, and exit\n",
+                    argv[0], argv[0]);
             return 2;
         }
     }
     if (!artifact) {
         fprintf(stderr, "usage: %s <artifact.xclbin> [-n elements] "
-                        "[-f fp32|fp64|fp128|fp256] [-q] [-r] [-s] [-b]\n",
-                argv[0]);
+                        "[-f fp32|fp64|fp128|fp256] [-q] [-r] [-s] [-b] "
+                        "[-i]\n", argv[0]);
         return 2;
     }
     argv[1] = (char *)artifact;
+    /* Which library this run tests, first: this binary links libcft.a
+     * statically, and a run of one not relinked since the library was
+     * rebuilt tests the OLD library (CLAUDE.md). The id says which. */
+    printf("libcft build %s\n", cft_build_id());
 
     st = cft_open(NULL, 0, &sw);
     if (st != CFT_OK) {
@@ -8325,6 +8554,23 @@ int main(int argc, char **argv)
             fflush(stdout);
         }
     }
+
+    /* The device image's identity, on both handles: the software one
+     * refuses by name on every run, the one under test answers for its
+     * xclbin or refuses for what it is. Every mode runs it - it costs
+     * nothing past the open - and -i runs nothing else. */
+    check_image_identity(sw, NULL);
+    check_image_identity(hw, strcmp(argv[1], "sw") ? argv[1] : NULL);
+    fflush(stdout);
+    if (only_id) {
+        cft_close(hw);
+        cft_close(sw);
+        printf("\n%d checks, %d failed\n", checks, failures);
+        if (!failures)
+            printf("the device image's identity holds\n");
+        return failures ? 1 : 0;
+    }
+
     printf("comparing %lu elements per case against the software "
            "backend\n", (unsigned long)n);
 
