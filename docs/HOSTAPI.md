@@ -313,8 +313,9 @@ outstanding on it, and refuses by name:
 - **when a handle opens it**, a tile that is not idle is running a run
   abandoned there by a handle that is gone - access is exclusive, so no
   open handle can be running it; the run was left by a process that
-  ended, or by a handle closed after a timeout, in this process or
-  another (verifier-V9: the sentence blamed an ended process for both) -
+  ended, or by a handle closed after a run failed (a timeout, a thrown
+  wait, an ERROR state), in this process or another (verifier-V9: the
+  sentence blamed an ended process for both) -
   and its writes may land in the memory this handle's
   buffers would be given (on the card an abandoned run's output landed
   in a later process's buffers at the same addresses): the open is
@@ -534,12 +535,14 @@ refill another. **Out-parameters** - a flags word, a bus word, a
 string's length, a bad index, `cft_conformance`'s count of cases - are
 stores made FOR the caller, like any variable of the caller's: one that
 lies in a resident buffer is the caller's own store into its mirror,
-under the rules below. They are status words, written at the end of a
-call on every path - the device backends' among them, after the run -
-so the library states the rule for them rather than announce each one.
-An out-parameter must not share bytes with an array the same call
-writes: nothing checks it, and the bytes left there then differ between
-backends (verifier-V9).
+under the rules below. They are status words, set on every path - most
+of them zeroed as the call starts, all of them written as it ends, the
+device backends' after the run - so the library states the rule for
+them rather than announce each one. An out-parameter must share no bytes
+with any array the same call reads or writes: nothing checks it, and
+what the call reads or leaves there then differs between backends
+(verifier-V9: `bus_out` on an element of `cft_run`'s input read -2 on
+the software backend and 479 on a device, `CFT_OK` both).
 
 **Two stores the caller makes into a mirror.** One into a buffer a run
 has written and nobody has read back: the publish after it is refused,
@@ -2290,7 +2293,13 @@ in advance:
 That message is the library's own, not a backend's: `cft_last_error()`
 now has a third source, cleared the moment anything reaches a device
 backend, so a refusal libcft made never goes on explaining someone
-else's failure.
+else's failure. The other way round it does not hold: a refusal that
+adds no sentence (a bare argument error, `cft_conformance` over a
+directory with no sets) clears nothing, and neither does every call that
+succeeds, so an older failure's sentence can outlive its call. Read
+`cft_last_error()` straight after the call that failed, and take it as
+detail for that call when it names it (verifier-V9 and the lead,
+2026-09-28).
 
 **Every `CFT_ERR_UNSUPPORTED` carries a sentence (2026-09-14)** - on
 every profile but `CFT_TINY`, whose one-byte `CFT_ERRMSG_MAX` keeps

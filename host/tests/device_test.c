@@ -5412,7 +5412,16 @@ static void check_lost_after_refusal(cft_device *hw, cft_format fmt)
         {
             cft_elem_args E;
             uint32_t t0[64];
+            const uint32_t past = (uint32_t)(n + 3);
             memset(t0, 0, sizeof t0);
+            /* The lost buffer's MIRROR is given an entry past the source,
+             * so a bound check made on the mirror - before the table is
+             * brought home - answers INVALID under its own sentence
+             * rather than LOST. Without it the mirror is zeros, in range,
+             * and the check passed with the bring-home removed
+             * (verifier-V9's second pass). A plain store: the library
+             * cannot see it, and the republish below overwrites it. */
+            memcpy(dep.p, &past, sizeof past);
             memset(&E, 0, sizeof E);
             E.struct_size = sizeof E;
             E.a = b;
@@ -6849,7 +6858,7 @@ enum {
     SV_COUNTS_TWICE, SV_N6, SV_RED_DIRTY, SV_COUNTS_DIRTY, SV_DEP_OUT,
     SV_SO_OUT, SV_BANK, SV_DIGEST, SV_IMAGE, SV_STRINGS, SV_IDX_BAD,
     SV_IDX_GOOD, SV_IDX_PROG, SV_IDX_SI, SV_SCALAR, SV_DIGEST_OUT, SV_CONF,
-    SV_COUNT
+    SV_DIGEST_DIRTY, SV_CONF_DIRTY, SV_COUNT
 };
 static const char *const sv_name[SV_COUNT] = {
     "S1: a read, cft_reduce_seg into B, a read",
@@ -6889,7 +6898,9 @@ static const char *const sv_name[SV_COUNT] = {
     "a program run gathers through it",
     "V9: a run writes a scalar into B, cft_run_ex's composed route adds it",
     "V9: a read, cft_program_digest into B, a read",
-    "V9: a read, cft_conformance's report into B, a read"
+    "V9: a read, cft_conformance's report into B, a read",
+    "V9: a run into B, cft_program_digest into it, the read-back",
+    "V9: a run into B, cft_conformance's report into it, the read-back"
 };
 static const char *const stale_texts[8] = {
     "1.5", "-2.25e3", "7e-3", "0", "-0", "3.14159", "1e10", "-9.5e-7"
@@ -7458,6 +7469,23 @@ static void st_seq(struct stale *s, int which)
         st_read(s);
         break;
     }
+    /* ...and the other way (V9's second pass): a run leaves B dirty, then
+     * the host writes over part of it - the run's bytes must come home
+     * first, and the write must stand at the read-back that ends every
+     * transcript */
+    case SV_DIGEST_DIRTY:
+        st_write(s);
+        st_status(s, cft_program_digest(s->prog, NULL, 0, s->B.p + 8));
+        break;
+    case SV_CONF_DIRTY: {
+        uint64_t cases = 0;
+        st_write(s);
+        st_status(s, cft_conformance(s->dev, "device-test: no vector sets "
+                                     "here", (char *)s->B.p, s->n * esz,
+                                     &cases));
+        st_rec(s, &cases, sizeof cases);
+        break;
+    }
     default: {              /* SV_STRINGS */
         char text[256];
         const char *in[8];
@@ -7741,7 +7769,8 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
                                which == SV_DIGEST || which == SV_IDX_BAD ||
                                which == SV_IDX_GOOD || which == SV_IDX_PROG ||
                                which == SV_IDX_SI || which == SV_SCALAR ||
-                               which == SV_DIGEST_OUT;
+                               which == SV_DIGEST_OUT ||
+                               which == SV_DIGEST_DIRTY;
         const int needs_idx = which == SV_IDX_BAD || which == SV_IDX_GOOD ||
                               which == SV_IDX_PROG || which == SV_IDX_SI ||
                               which == SV_SCALAR;
@@ -7868,6 +7897,11 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
                   "unread results, straight after a refusal of the library's "
                   "own (%s), said \"%s\" - it must name itself",
                   cft_format_name(fmt), older ? "made" : "NOT made", said);
+        } else {
+            snprintf(label, sizeof label, "    stale copies (%s), a refused "
+                     "publish naming itself", cft_format_name(fmt));
+            not_here(NH_OTHER, "TESTED", label, "this device keeps no "
+                     "resident buffers, so no publish is refused");
         }
         for (d = 0; d < sizeof declined / sizeof declined[0]; d++) {
             which = declined[d];

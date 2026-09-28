@@ -21,7 +21,7 @@
     {
       "source": "host/include/cft.h",
       "dest": "src/cft/include/cft.h",
-      "sha256": "11f71ee293dfcf86f38861f9632d492d2e4c1e290ea77dc5e780f1eb4ebb050a"
+      "sha256": "694c6286f7dce359ea5cb6d006a9427b7c9e2ccd25b57d644fa3019c3a7f0e97"
     },
     {
       "source": "host/include/cft_config.h",

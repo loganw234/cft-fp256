@@ -1969,15 +1969,17 @@ static int cftx_open_impl(const char *artifact, int index, void **out,
      * to a compute unit is exclusive, so no OPEN handle can be running
      * work on a tile this one has just opened: one that is not idle is
      * running a run abandoned there by a handle that is gone - one a
-     * process that ended held, or one closed after a timeout, in this
-     * process or another (verifier-V9: the sentence blamed an ended
-     * process for this process's own closed handle). Its writes may
-     * land in the device memory this handle's buffers are about to be
-     * given - probe 4 saw an abandoned run's output land in a later
-     * process's buffers at the same addresses - and once it ends no
-     * later reading of CTRL can see that it happened. So the open is
-     * refused by name. CFT_XRT_WITNESS=busy-open plants a busy reading
-     * on the first tile, so that device-test can hold the refusal. */
+     * process that ended held, or one closed after a run failed (a
+     * timeout, a thrown wait, an ERROR state), in this process or
+     * another (verifier-V9: the sentence blamed an ended process for
+     * this process's own closed handle, then named only a timeout). Its
+     * writes may land in the device memory this handle's buffers are
+     * about to be given - probe 4 saw an abandoned run's output land in
+     * a later process's buffers at the same addresses - and once it
+     * ends no later reading of CTRL can see that it happened. So the
+     * open is refused by name. CFT_XRT_WITNESS=busy-open plants a busy
+     * reading on the first tile, so that device-test can hold the
+     * refusal. */
     {
         const char *w = std::getenv("CFT_XRT_WITNESS");
         const bool plant_open = w && !std::strcmp(w, "busy-open");
@@ -1997,8 +1999,8 @@ static int cftx_open_impl(const char *artifact, int index, void **out,
             set_err(tile_name(*D, tt) + " is already running when this "
                     "handle opens it (CTRL 0x" + hex32(c) + ", not idle): a "
                     "run abandoned there - by a process that ended, or a "
-                    "handle closed after a timeout - is still going, and "
-                    "its writes may land in the memory this "
+                    "handle closed after a run failed - is still going, "
+                    "and its writes may land in the memory this "
                     "handle's buffers would be given. Reload the image - "
                     "load another xclbin, then this one - before opening "
                     "this tile, or leave it out with CFT_XRT_TILES");

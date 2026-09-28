@@ -159,12 +159,17 @@ typedef enum cft_status {
 /* Static, human-readable; never NULL, never needs freeing. */
 CFT_API const char *cft_strerror(cft_status s);
 
-/* Detail on the most recent failure, or "" if there is none to add.
- * cft_strerror() says what kind of thing went wrong; this says what
- * the device runtime said about it, which on a bad night at the bench
- * is the only explanation anybody is going to get. Static storage,
- * overwritten by the next failure, and not thread-safe - consistent
- * with cft_device, which is not either. Never NULL. */
+/* Detail on a failure, or "" if there is none to add - read straight
+ * after the call that failed. cft_strerror() says what kind of thing
+ * went wrong; this says what the library or the device runtime said
+ * about it, which on a bad night at the bench is the only explanation
+ * anybody is going to get. It is overwritten by the next failure that
+ * has a sentence, and NOT cleared by one that has none (a bare argument
+ * error, cft_conformance over a directory with no sets) or by every
+ * call that succeeds - so an older failure's sentence can outlive its
+ * call, and it is detail for the call just made when it names that
+ * call (verifier-V9, 2026-09-28). Static storage, and not thread-safe -
+ * consistent with cft_device, which is not either. Never NULL. */
 CFT_API const char *cft_last_error(void);
 
 /* ---------------------------------------------------------------
@@ -2186,12 +2191,13 @@ CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
  *     library makes FOR the caller, like any variable of the caller's:
  *     one that lies in a resident buffer is the caller's own store into
  *     its mirror, under the two rules for those below (read the buffer
- *     back before, publish it after). They are status words, written
- *     at the end of a call on every path - the device backends' among
- *     them, after the run - so the library states the rule for them
- *     rather than announce each one. An out-parameter must not share
- *     bytes with an array the same call writes: nothing checks it, and
- *     the bytes left there then differ between backends (verifier-V9).
+ *     back before, publish it after). They are status words, set on
+ *     every path - most of them zeroed as the call starts, all of them
+ *     written as it ends, the device backends' after the run - so the
+ *     library states the rule for them rather than announce each one.
+ *     An out-parameter must share no bytes with any array the same call
+ *     reads or writes: nothing checks it, and what the call reads or
+ *     leaves there then differs between backends (verifier-V9).
  *   - cft_buffer_from_device on a buffer no run has written is a no-op.
  *     cft_buffer_to_device never transfers anything, and is REFUSED -
  *     CFT_ERR_INVALID_ARGUMENT, with a sentence, nothing changed - on a
@@ -2982,12 +2988,17 @@ CFT_API cft_status cft_maxnum_mag(cft_device *dev, cft_format fmt,
  * NULL). Returns CFT_OK when every case matched, CFT_ERR_INTERNAL on a
  * disagreement - which is a bug in this library, since the vectors are
  * the definition - and CFT_ERR_ARTIFACT if no set could be read.
+ * CFT_ERR_INTERNAL also refuses a report that lies in a resident buffer
+ * a failed run left LOST, before anything is replayed or written;
+ * cft_last_error() says which of the two it is.
  *
- * report (if non-NULL) is filled in every case, not only on failure:
- * on success it names the sets that ran and the ones skipped because
- * this device lacks the format. A conformance pass that quietly
- * checked nothing would be worse than a failing one, so the summary is
- * not optional.
+ * report (if non-NULL) is filled in every case but that one, not only
+ * on failure: on success it names the sets that ran and the ones
+ * skipped because this device lacks the format. A conformance pass
+ * that quietly checked nothing would be worse than a failing one, so
+ * the summary is not optional. A LOST report buffer is left untouched,
+ * not even terminated, because nothing may write a lost buffer's
+ * elements until it is published again.
  * --------------------------------------------------------------- */
 CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
                                    char *report, size_t report_size,
