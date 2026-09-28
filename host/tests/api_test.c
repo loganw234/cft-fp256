@@ -2619,6 +2619,34 @@ int main(void)
         CHECK(st == CFT_OK && get32(d2) == get32(d) && f3 == f2,
               "sumabs == abs pass then sum");
 
+        /* sumAbs whose scratch cannot be had (verifier-V9, 2026-09-27).
+         * The composition mutes the handle's flags for its internal
+         * passes, and from 613f3f88 until that date its out-of-memory
+         * return skipped the unmute: every later call's flags reached
+         * flags_out and none reached the status word. n is the largest
+         * the call accepts - n * 4 bytes is within 3 of SIZE_MAX - which
+         * no allocator can give, and the call returns before it reads a
+         * byte of v. (Under ASan, run with allocator_may_return_null=1,
+         * as host/fuzz/run.sh does.) */
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
+        st = cft_reduce(dev, CFT_SUMABS, CFT_FP32, CFT_RNE, v, NULL, d,
+                        ((size_t)-1) / 4u, &f2, NULL);
+        CHECK(st == CFT_ERR_OUT_OF_MEMORY,
+              "sumabs over SIZE_MAX / 4 elements is out of memory before "
+              "reading one: %s", cft_strerror(st));
+        put32(v, 0x7f7fffffu);          /* the largest finite fp32 */
+        put32(v + 4, 0x7f7fffffu);
+        f3 = 0;
+        st = cft_run(dev, CFT_ADD, CFT_FP32, CFT_RNE, v, NULL, v + 4, w, 1,
+                     &f3, NULL);
+        CHECK(st == CFT_OK && (f3 & CFT_FLAG_OVERFLOW) &&
+              cft_test_flags(dev, CFT_FLAG_OVERFLOW) == 1,
+              "after sumabs ran out of memory, an overflow reaches the "
+              "status word as well as flags_out (0x%02x, the word says %d) "
+              "- the handle's flags were unmuted", (unsigned)f3,
+              cft_test_flags(dev, CFT_FLAG_OVERFLOW));
+        cft_lower_flags(dev, CFT_FLAGS_ALL);
+
         /* 9.4 puts an infinity AHEAD of a NaN for these two, which the
          * tree cannot do - and the NEGATIVE CONTROL is the same vector
          * through the plain dot, which returns the quiet NaN. */

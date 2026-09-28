@@ -504,10 +504,14 @@ struct Dev {
      * come home yet, so no copy of it can be vouched for. */
     std::vector<Buf *> job_outs;
     /* CFT_XRT_BIND=decline-outputs, read by run_job at the start of each
-     * job: every resident OUTPUT bind declines, as one too large for its
-     * channel does, so the staged collects that write a resident
-     * buffer's mirror can be reached on a card (verifier-V8: no leg
-     * could, and removing their marks passed the gate). */
+     * job: a resident OUTPUT bind that would allocate, fill or re-window
+     * a copy declines, as one too large for its channel does, so the
+     * staged collects that write a resident buffer's mirror can be
+     * reached on a card (verifier-V8: no leg could, and removing their
+     * marks passed the gate). An output copy already live at the same
+     * window, and current, is reused before the check is reached
+     * (verifier-V9); device-test's pass runs each sequence into a fresh
+     * buffer, where there is none. */
     bool              decline_outputs = false;
 };
 
@@ -736,7 +740,14 @@ struct BufCopy {
                                * filled from it, or flushed into it - and
                                * nothing has changed the mirror under the
                                * window since (buf_touched sets 0, which
-                               * is never current) */
+                               * is never current). One exception: an
+                               * OUTPUT copy bound without a fill is
+                               * given the generation too, and holds
+                               * bytes nobody wrote until the tile writes
+                               * the window whole. It is never read as an
+                               * input: D and SO are output roles, and a
+                               * preserving bind also asks `filled`
+                               * (verifier-V9, 2026-09-27) */
     bool     live   = false;  /* the bo exists and the window means
                                * something */
     bool     dirty  = false;  /* a run wrote this window and the mirror
@@ -1955,9 +1966,12 @@ static int cftx_open_impl(const char *artifact, int index, void **out,
     }
 
     /* The completion witness at OPEN (2026-09-26, verifier-V8). Access
-     * to a compute unit is exclusive, so no live handle can be running
+     * to a compute unit is exclusive, so no OPEN handle can be running
      * work on a tile this one has just opened: one that is not idle is
-     * running a run a process that ENDED abandoned there. Its writes may
+     * running a run abandoned there by a handle that is gone - one a
+     * process that ended held, or one closed after a timeout, in this
+     * process or another (verifier-V9: the sentence blamed an ended
+     * process for this process's own closed handle). Its writes may
      * land in the device memory this handle's buffers are about to be
      * given - probe 4 saw an abandoned run's output land in a later
      * process's buffers at the same addresses - and once it ends no
@@ -1982,8 +1996,9 @@ static int cftx_open_impl(const char *artifact, int index, void **out,
                 continue;
             set_err(tile_name(*D, tt) + " is already running when this "
                     "handle opens it (CTRL 0x" + hex32(c) + ", not idle): a "
-                    "run abandoned there by a process that ended is still "
-                    "going, and its writes may land in the memory this "
+                    "run abandoned there - by a process that ended, or a "
+                    "handle closed after a timeout - is still going, and "
+                    "its writes may land in the memory this "
                     "handle's buffers would be given. Reload the image - "
                     "load another xclbin, then this one - before opening "
                     "this tile, or leave it out with CFT_XRT_TILES");

@@ -5326,6 +5326,27 @@ static void check_lost_after_refusal(cft_device *hw, cft_format fmt)
     CHECK(st == CFT_ERR_INTERNAL, "the lost-output leg's planted refusal "
           "(%s): %s (%s)", cft_format_name(fmt), cft_strerror(st),
           cft_last_error());
+    /* A refusal of the library's own first - cft_run_ex's, for an indexed
+     * run whose d is its own source - so a read-back that reached the
+     * backend without clearing device.c's slot would be explained by THAT
+     * sentence, as it was until 2026-09-27 (verifier-V9). */
+    {
+        cft_elem_args E;
+        uint32_t t0[64];
+        memset(t0, 0, sizeof t0);
+        memset(&E, 0, sizeof E);
+        E.struct_size = sizeof E;
+        E.a = out;
+        E.d = out;
+        E.n = n;
+        E.idx_a = t0;
+        E.idx_a_src = n;
+        st = cft_run_ex(hw, CFT_ABS, fmt, CFT_RNE, &E);
+        CHECK(st == CFT_ERR_INVALID_ARGUMENT &&
+                  strstr(cft_last_error(), "overlaps") != NULL,
+              "the lost-output leg's own-refusal step (%s): %s (%s)",
+              cft_format_name(fmt), cft_strerror(st), cft_last_error());
+    }
     s_back = cft_buffer_from_device(dep.b);
     CHECK(s_back != CFT_OK && strstr(cft_last_error(), "cft_buffer_to_device"),
           "a resident output written by a refused run was read back with %s "
@@ -5345,6 +5366,8 @@ static void check_lost_after_refusal(cft_device *hw, cft_format fmt)
     {
         cft_buffer_info bi;
         cft_status s_out, s_hin, s_hout, s_mask = CFT_ERR_INTERNAL;
+        cft_status s_tab, s_scal = CFT_ERR_INTERNAL, s_dig, s_conf;
+        const int indexed = (caps.seq_features & CFT_SEQ_FEAT_INDEXED) != 0;
         int info_ok;
         s_out = cft_run(hw, CFT_ADD, fmt, CFT_RNE, b, b, b, dep.p, n, &fl,
                         &bus);
@@ -5380,6 +5403,68 @@ static void check_lost_after_refusal(cft_device *hw, cft_format fmt)
             not_here(NH_OTHER, "TESTED", "    a lane mask in a lost buffer",
                      "this device does not publish CFT_SEQ_FEAT_LANE_MASK");
         }
+        /* ...and the paths verifier-V9 found reading or writing a lost
+         * buffer's elements unrefused until 2026-09-27: a composed run's
+         * scalar read from it, a digest and a report written into it -
+         * and an index table in it, refused by the LOST sentence rather
+         * than the bound check's. The status is asked exactly: a report
+         * with no sets to replay is CFT_ERR_ARTIFACT, not this refusal. */
+        {
+            cft_elem_args E;
+            uint32_t t0[64];
+            memset(t0, 0, sizeof t0);
+            memset(&E, 0, sizeof E);
+            E.struct_size = sizeof E;
+            E.a = b;
+            E.d = out;
+            E.n = n;
+            E.idx_a = (const uint32_t *)(const void *)dep.p;
+            E.idx_a_src = n;
+            E.flags_out = &fl;
+            E.bus_out = &bus;
+            s_tab = cft_run_ex(hw, CFT_ABS, fmt, CFT_RNE, &E);
+            CHECK(s_tab == CFT_ERR_INTERNAL &&
+                      strstr(cft_last_error(), "cft_buffer_to_device"),
+                  "an index table in a lost resident buffer: %s (%s) - it "
+                  "must be refused by the LOST sentence", cft_strerror(s_tab),
+                  cft_last_error());
+            if (indexed) {
+                memset(&E, 0, sizeof E);
+                E.struct_size = sizeof E;
+                E.a = b;
+                E.c = dep.p;
+                E.d = out;
+                E.n = n;
+                E.scalar_mask = 4u;                 /* c */
+                E.idx_a = t0;
+                E.idx_a_src = n;
+                E.flags_out = &fl;
+                E.bus_out = &bus;
+                s_scal = cft_run_ex(hw, CFT_ADD, fmt, CFT_RNE, &E);
+                CHECK(s_scal == CFT_ERR_INTERNAL &&
+                          strstr(cft_last_error(), "cft_buffer_to_device"),
+                      "a composed run's scalar read from a lost resident "
+                      "buffer: %s (%s) - it must be refused by name",
+                      cft_strerror(s_scal), cft_last_error());
+            } else {
+                not_here(NH_OTHER, "TESTED", "    a composed run's scalar in "
+                         "a lost buffer", "this device does not publish "
+                         "CFT_SEQ_FEAT_INDEXED, so there is no composed route");
+            }
+            s_dig = cft_program_digest(prog, NULL, 0, dep.p);
+            CHECK(s_dig == CFT_ERR_INTERNAL &&
+                      strstr(cft_last_error(), "cft_buffer_to_device"),
+                  "cft_program_digest into a lost resident buffer: %s (%s) - "
+                  "it must be refused by name", cft_strerror(s_dig),
+                  cft_last_error());
+            s_conf = cft_conformance(hw, "device-test: no vector sets here",
+                                     (char *)dep.p, n * esz, NULL);
+            CHECK(s_conf == CFT_ERR_INTERNAL &&
+                      strstr(cft_last_error(), "cft_buffer_to_device"),
+                  "cft_conformance's report into a lost resident buffer: %s "
+                  "(%s) - it must be refused by name", cft_strerror(s_conf),
+                  cft_last_error());
+        }
         memset(&bi, 0, sizeof bi);
         bi.struct_size = sizeof bi;
         info_ok = cft_buffer_get_info(dep.b, &bi) == CFT_OK &&
@@ -5390,7 +5475,10 @@ static void check_lost_after_refusal(cft_device *hw, cft_format fmt)
               bi.device_authority, bi.staged_why);
         right = s_out != CFT_OK && s_hin != CFT_OK && s_hout != CFT_OK &&
                 (!(caps.seq_features & CFT_SEQ_FEAT_LANE_MASK) ||
-                 s_mask != CFT_OK) && info_ok;
+                 s_mask != CFT_OK) && info_ok &&
+                s_tab == CFT_ERR_INTERNAL && s_dig == CFT_ERR_INTERNAL &&
+                s_conf == CFT_ERR_INTERNAL &&
+                (!indexed || s_scal == CFT_ERR_INTERNAL);
     }
     /* published again, it is the caller's - read back BEFORE anything
      * runs over it, or a publish that brought the failed run's bytes home
@@ -5421,10 +5509,11 @@ static void check_lost_after_refusal(cft_device *hw, cft_format fmt)
             !memcmp(dep.p, a, n * esz);
     if (right)
         printf("    a resident output a refused run wrote (%s): its read-back, "
-               "its use as an input, a run into it, a lane mask read from it "
-               "and cft_exp reading or writing it all refused by name, "
-               "get_info says LOST, and published again it is right\n",
-               cft_format_name(fmt));
+               "its use as an input, a run into it, a lane mask, an index "
+               "table and a composed run's scalar read from it, cft_exp "
+               "reading or writing it, a digest and a report written into it "
+               "all refused by name, get_info says LOST, and published again "
+               "it is right\n", cft_format_name(fmt));
 out:
     cft_program_free(prog);
     if (dep.b)
@@ -6758,7 +6847,9 @@ enum {
     SV_RSEG, SV_RSEG_BACK, SV_RED, SV_COUNTS, SV_WITNESS, SV_RSEG_DIRTY,
     SV_MASKED, SV_PUBLISH, SV_RWR, SV_RED_TWICE, SV_RSEG_TWICE,
     SV_COUNTS_TWICE, SV_N6, SV_RED_DIRTY, SV_COUNTS_DIRTY, SV_DEP_OUT,
-    SV_SO_OUT, SV_BANK, SV_DIGEST, SV_IMAGE, SV_STRINGS, SV_COUNT
+    SV_SO_OUT, SV_BANK, SV_DIGEST, SV_IMAGE, SV_STRINGS, SV_IDX_BAD,
+    SV_IDX_GOOD, SV_IDX_PROG, SV_IDX_SI, SV_SCALAR, SV_DIGEST_OUT, SV_CONF,
+    SV_COUNT
 };
 static const char *const sv_name[SV_COUNT] = {
     "S1: a read, cft_reduce_seg into B, a read",
@@ -6787,7 +6878,18 @@ static const char *const sv_name[SV_COUNT] = {
     "N2: a run writes a constant bank into B, cft_program_digest over it",
     "N2: a run writes a program image into B, cft_program_load from it, "
     "the program run",
-    "N3: a run writes decimal strings into B, cft_from_decimal_char on them"
+    "N3: a run writes decimal strings into B, cft_from_decimal_char on them",
+    "V9: a run writes an index table with an entry past its source over an "
+    "in-range mirror, cft_run_ex gathers through it",
+    "V9: a run writes an in-range index table over a mirror with an entry "
+    "past its source, cft_run_ex gathers through it",
+    "V9: a run writes an index table with an entry past its source, a "
+    "program run gathers through it",
+    "V9: a run writes a scratch-in index table with an entry past its pool, "
+    "a program run gathers through it",
+    "V9: a run writes a scalar into B, cft_run_ex's composed route adds it",
+    "V9: a read, cft_program_digest into B, a read",
+    "V9: a read, cft_conformance's report into B, a read"
 };
 static const char *const stale_texts[8] = {
     "1.5", "-2.25e3", "7e-3", "0", "-0", "3.14159", "1e10", "-9.5e-7"
@@ -6808,6 +6910,7 @@ struct stale {
     uint8_t *out, *dep, *e;     /* this device's plain outputs */
     uint32_t *cnt;
     cft_program *prog, *prog_so, *prog_bank;
+    cft_program *prog_si;       /* deposits scratch slot 0: a gather */
     uint8_t *img1;              /* the one-deposit program's image */
     size_t img1_bytes;
     uint8_t *tr;
@@ -7113,6 +7216,30 @@ static void st_host(struct stale *s, int fn, int dir)
     st_rec(s, s->e, n * esz);
 }
 
+/* An index table of n entries (n is 64 here), each in range for a source
+ * of n elements - or, with `bad`, entry 5 past its end. */
+static void st_table(uint32_t *t, size_t n, int bad)
+{
+    size_t i;
+    for (i = 0; i < n; i++)
+        t[i] = (uint32_t)((i * 7 + 1) % n);
+    if (bad)
+        t[5] = (uint32_t)(n + 3);
+}
+
+/* Verifier-V9's (b)1: B's MIRROR is published holding one table, then a
+ * device run writes the other into B - so a bound check made on the
+ * mirror judges the wrong table. `mirror_bad` picks which is which. */
+static void st_tables(struct stale *s, int mirror_bad)
+{
+    uint32_t t[64];
+    st_table(t, s->n, mirror_bad);
+    memcpy(s->B.p, t, s->n * 4);
+    st_publish(s, 0);
+    st_table(t, s->n, !mirror_bad);
+    st_devcopy(s, (const uint8_t *)t, s->n * 4);
+}
+
 static void st_seq(struct stale *s, int which)
 {
     const size_t esz = s->esz;
@@ -7242,6 +7369,93 @@ static void st_seq(struct stale *s, int which)
             st_rec(s, s->dep, s->n * esz);
         }
         cft_program_free(p2);
+        break;
+    }
+    case SV_IDX_BAD:        /* the device's table is past its source */
+    case SV_IDX_GOOD: {     /* the mirror's is */
+        cft_elem_args E;
+        uint32_t f2 = 0, b2 = 0;
+        st_tables(s, which == SV_IDX_GOOD);
+        memset(&E, 0, sizeof E);
+        E.struct_size = sizeof E;
+        E.a = s->x;
+        E.c = s->y;
+        E.d = s->out;
+        E.n = s->n;
+        E.idx_a = (const uint32_t *)(const void *)s->B.p;
+        E.idx_a_src = s->n;
+        E.flags_out = &f2;
+        E.bus_out = &b2;
+        memset(s->out, 0, s->n * esz);
+        st_status(s, cft_run_ex(s->dev, CFT_ADD, s->fmt, CFT_RNE, &E));
+        st_rec(s, s->out, s->n * esz);
+        st_rec(s, &f2, sizeof f2);
+        break;
+    }
+    case SV_IDX_PROG:
+    case SV_IDX_SI: {
+        cft_run_args A;
+        uint32_t f2 = 0, b2 = 0;
+        st_tables(s, 0);
+        memset(&A, 0, sizeof A);
+        A.struct_size = sizeof A;
+        A.a = s->x;
+        A.n = s->n;
+        A.deposits = s->dep;
+        A.counts = s->cnt;
+        A.flags_out = &f2;
+        A.bus_out = &b2;
+        if (which == SV_IDX_PROG) {
+            A.idx_a = (const uint32_t *)(const void *)s->B.p;
+            A.idx_a_src = s->n;
+        } else {
+            A.scratch_in = s->y;
+            A.scratch_in_bytes = s->n * esz;
+            A.idx_scratch_in = (const uint32_t *)(const void *)s->B.p;
+            A.idx_scratch_src = s->n;
+        }
+        st_status(s, cft_program_run_ex(which == SV_IDX_PROG ? s->prog
+                                                             : s->prog_si,
+                                        &A));
+        st_rec(s, s->dep, s->n * esz);
+        break;
+    }
+    case SV_SCALAR: {       /* V9's (b)2: B[0] is y[0] on the device */
+        cft_elem_args E;
+        uint32_t t[64], f2 = 0, b2 = 0;
+        st_table(t, s->n, 0);
+        st_devcopy(s, s->y, esz);
+        memset(&E, 0, sizeof E);
+        E.struct_size = sizeof E;
+        E.a = s->x;
+        E.c = s->B.p;
+        E.d = s->out;
+        E.n = s->n;
+        E.scalar_mask = 4u;                         /* c */
+        E.idx_a = t;
+        E.idx_a_src = s->n;
+        E.flags_out = &f2;
+        E.bus_out = &b2;
+        memset(s->out, 0, s->n * esz);
+        st_status(s, cft_run_ex(s->dev, CFT_ADD, s->fmt, CFT_RNE, &E));
+        st_rec(s, s->out, s->n * esz);
+        st_rec(s, &f2, sizeof f2);
+        break;
+    }
+    case SV_DIGEST_OUT:     /* V9's (b)3: 32 bytes written on the host */
+        st_read(s);
+        st_status(s, cft_program_digest(s->prog, NULL, 0, s->B.p + 8));
+        st_read(s);
+        break;
+    case SV_CONF: {         /* V9's (b)4: no sets there, so the report says
+                             * so - the same sentence on both devices */
+        uint64_t cases = 0;
+        st_read(s);
+        st_status(s, cft_conformance(s->dev, "device-test: no vector sets "
+                                     "here", (char *)s->B.p, s->n * esz,
+                                     &cases));
+        st_rec(s, &cases, sizeof cases);
+        st_read(s);
         break;
     }
     default: {              /* SV_STRINGS */
@@ -7421,15 +7635,17 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
     uint8_t mask[(64 + 7) / 8];
     int64_t i64[64];
     int32_t i32[64];
-    uint8_t img[64], img2[64], img3[64];
-    uint64_t ins[2], ins3[3], insb[3];
+    uint8_t img[64], img2[64], img3[64], img4[64];
+    uint64_t ins[2], ins3[3], insb[3], ins4[3];
     struct stale S[2];
     char label[200];
     size_t i;
     int k, fn, dir, which, runs = 0, agreed = 0, progs = 1, progs_so = 1,
-        progs_bank = 1;
+        progs_bank = 1, progs_si = 1;
     /* a card that keeps B resident refuses a publish over unread results */
     const int card_refuses = xrt && hc->buffers_resident;
+    /* an index table on a device: the gather V9's sequences run */
+    const int indexed = (hc->seq_features & CFT_SEQ_FEAT_INDEXED) != 0;
     static const int declined[] = {SV_RWR, SV_DEP_OUT, SV_SO_OUT,
                                    SV_PUBLISH, SV_N6, SV_RED_DIRTY,
                                    SV_COUNTS_DIRTY};
@@ -7464,6 +7680,9 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
     insb[0] = seq_alu(0, 4, 0, 0, 1, 0, 1, 1);   /* r4 = r0 * k0 + k1 */
     insb[1] = seq_ctrl(3, 4, 0);                 /* deposit r4 */
     insb[2] = seq_ctrl(0, 0, 0);                 /* halt */
+    ins4[0] = seq_ldl(4, 0);                     /* r4 <- scratch-in 0 */
+    ins4[1] = seq_ctrl(3, 4, 0);                 /* deposit r4 */
+    ins4[2] = seq_ctrl(0, 0, 0);                 /* halt */
     for (k = 0; k < 2; k++) {
         struct stale *s = &S[k];
         s->dev = k ? hw : sw;
@@ -7501,6 +7720,13 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
                                                1),
                              &s->prog_so) != CFT_OK)
             progs_so = 0;
+        if (!(hc->seq_features & CFT_SEQ_FEAT_SCRATCH_IO) ||
+            cft_program_load(s->dev, img4,
+                             seq_image_scratch(img4, fmt, ins4, 3, NULL, 0, 1,
+                                               CFT_PROG_FLAG_SCRATCH_IO, 1,
+                                               0),
+                             &s->prog_si) != CFT_OK)
+            progs_si = 0;
     }
 
     for (which = 0; which < SV_COUNT; which++) {
@@ -7512,8 +7738,16 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
                                which == SV_COUNTS_DIRTY ||
                                which == SV_DEP_OUT || which == SV_IMAGE ||
                                which == SV_STRINGS || which == SV_BANK ||
-                               which == SV_DIGEST;
+                               which == SV_DIGEST || which == SV_IDX_BAD ||
+                               which == SV_IDX_GOOD || which == SV_IDX_PROG ||
+                               which == SV_IDX_SI || which == SV_SCALAR ||
+                               which == SV_DIGEST_OUT;
+        const int needs_idx = which == SV_IDX_BAD || which == SV_IDX_GOOD ||
+                              which == SV_IDX_PROG || which == SV_IDX_SI ||
+                              which == SV_SCALAR;
         if ((needs_seg && !seg) || (needs_prog && !progs) ||
+            (needs_idx && !indexed) ||
+            (which == SV_IDX_SI && !progs_si) ||
             (which == SV_SO_OUT && !progs_so) ||
             ((which == SV_BANK || which == SV_DIGEST) && !progs_bank) ||
             (which == SV_RED_DIRTY && !cft_supports(hw, CFT_SUM, fmt)) ||
@@ -7594,6 +7828,47 @@ static void check_stale_copies(cft_device *sw, cft_device *hw,
                   "outputs declined nothing - the pass below would agree "
                   "vacuously", cft_format_name(fmt));
         }
+        /* ...and that a publish refused over unread results names itself
+         * straight after a refusal of the library's own, which leaves its
+         * sentence in device.c's slot: until 2026-09-27 the publish reached
+         * the backend without clearing the slot, and cft_last_error() gave
+         * the older sentence (verifier-V9). The older one here is
+         * cft_run_ex's, for an indexed run whose d is its own source. */
+        if (card_refuses) {
+            struct rbuf R;
+            cft_elem_args E;
+            uint32_t f2 = 0, b2 = 0, t0[64];
+            char said[240];
+            int named = 0, older = 0;
+            said[0] = '\0';
+            memset(t0, 0, sizeof t0);
+            if (rbuf_alloc(hw, &R, n * esz)) {
+                if (cft_run(hw, CFT_ADD, fmt, CFT_RNE, x, NULL, y, R.p, n,
+                            &f2, &b2) == CFT_OK) {
+                    memset(&E, 0, sizeof E);
+                    E.struct_size = sizeof E;
+                    E.a = z;
+                    E.d = z;
+                    E.n = n;
+                    E.idx_a = t0;
+                    E.idx_a_src = n;
+                    /* the older sentence must be there, or this proves
+                     * nothing */
+                    older = cft_run_ex(hw, CFT_ABS, fmt, CFT_RNE, &E) ==
+                                CFT_ERR_INVALID_ARGUMENT &&
+                            strstr(cft_last_error(), "overlaps") != NULL;
+                    named = cft_buffer_to_device(R.b) != CFT_OK;
+                    snprintf(said, sizeof said, "%s", cft_last_error());
+                    named = named && strstr(said, "never read back") != NULL;
+                    (void)cft_buffer_from_device(R.b);
+                }
+                rbuf_free(&R);
+            }
+            CHECK(older && named, "stale copies (%s): a publish refused over "
+                  "unread results, straight after a refusal of the library's "
+                  "own (%s), said \"%s\" - it must name itself",
+                  cft_format_name(fmt), older ? "made" : "NOT made", said);
+        }
         for (d = 0; d < sizeof declined / sizeof declined[0]; d++) {
             which = declined[d];
             if ((which == SV_SO_OUT && !progs_so) ||
@@ -7623,6 +7898,7 @@ out:
         cft_program_free(S[k].prog);
         cft_program_free(S[k].prog_so);
         cft_program_free(S[k].prog_bank);
+        cft_program_free(S[k].prog_si);
         free(S[k].out); free(S[k].dep); free(S[k].e); free(S[k].cnt);
         free(S[k].tr);
     }

@@ -1517,6 +1517,22 @@ static cft_status run_impl(cft_device *dev,
                 return CFT_ERR_INVALID_ARGUMENT;
             }
         }
+        /* The bound check below READS each table on the host, so each is
+         * brought home first, as every other host read of a caller's
+         * array is (softfloat.h's cft_host_in). Until 2026-09-27 a table
+         * a device run had written into a resident buffer was checked on
+         * the mirror from before: an out-of-range index the device held
+         * ran with CFT_OK, reading past its source, and a valid table
+         * over a stale bad mirror was refused (verifier-V9). A table in a
+         * LOST buffer is refused here, by the LOST sentence. */
+        for (r = 0; r < 3; r++) {
+            cft_status sync_st;
+            if (!tab->idx[r])
+                continue;
+            sync_st = buf_sync_in(dev, tab->idx[r], n * 4u);
+            if (sync_st != CFT_OK)
+                return sync_st;
+        }
         /* The bound, checked BEFORE the run and on every backend, by
          * name and by value: an index at or past the source's declared
          * length is refused, because a device must never read past a
@@ -1952,7 +1968,14 @@ static cft_status run_composed(cft_device *dev, cft_op op, cft_format fmt,
         if ((scalar_mask >> r) & 1u) {
             /* One element, into the image's own constant section, in
              * operand order - so the index is the count of scalars
-             * before it and nothing has to be looked up later. */
+             * before it and nothing has to be looked up later. Copied on
+             * the host, so brought home first: until 2026-09-27 a scalar
+             * a device run had written was taken from the stale mirror,
+             * with CFT_OK, and one in a LOST buffer was not refused
+             * (verifier-V9). */
+            st = buf_sync_in(dev, opnd[r], esz);
+            if (st != CFT_OK)
+                return st;
             memcpy(img + off, opnd[r], esz);
             off += esz;
             fld[r]  = n_consts++;
@@ -2564,8 +2587,15 @@ static cft_status reduce_body(cft_device *dev, cft_op op, cft_format fmt,
         } else {
             void *tmp = malloc(n * esz);
             uint32_t af = 0;
-            if (!tmp)
+            if (!tmp) {
+                /* The handle's flags back first. From 613f3f88 until
+                 * 2026-09-27 this return left them muted, so every later
+                 * call's flags reached flags_out and none reached the
+                 * status word - cft_test_flags answered 0 after an
+                 * overflow (verifier-V9). */
+                (void)cft_flags_mute(dev, muted);
                 return CFT_ERR_OUT_OF_MEMORY;
+            }
             st = cft_run(dev, CFT_ABS, fmt, rnd, a, NULL, NULL, tmp, n,
                          &af, bus_out);
             if (st == CFT_OK)
@@ -3047,8 +3077,14 @@ CFT_API cft_status cft_buffer_to_device(cft_buffer *buf)
     if (!buf)
         return CFT_ERR_INVALID_ARGUMENT;
 #ifdef CFT_ENABLE_XRT
-    if (buf->dbuf)
+    /* backend_call() first, as before every call into a backend: until
+     * 2026-09-27 neither this nor cft_buffer_from_device cleared this
+     * file's message, so a refusal here was explained by whatever this
+     * library had refused last (verifier-V9). */
+    if (buf->dbuf) {
+        backend_call();
         return (cft_status)cftx_buffer_to_device(buf->dbuf);
+    }
 #endif
     return CFT_OK;
 }
@@ -3061,8 +3097,10 @@ CFT_API cft_status cft_buffer_from_device(cft_buffer *buf)
     if (!buf)
         return CFT_ERR_INVALID_ARGUMENT;
 #ifdef CFT_ENABLE_XRT
-    if (buf->dbuf)
+    if (buf->dbuf) {
+        backend_call();                 /* see cft_buffer_to_device */
         return (cft_status)cftx_buffer_from_device(buf->dbuf);
+    }
 #endif
     return CFT_OK;
 }

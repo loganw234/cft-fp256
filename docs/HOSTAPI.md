@@ -310,9 +310,12 @@ witness - when a handle opens the tile, and in the scheduler every run
 goes through at the two moments no command of this handle is
 outstanding on it, and refuses by name:
 
-- **when a handle opens it**, a tile that is not idle is running a run a
-  process that ENDED abandoned there - access is exclusive, so no live
-  handle can be - and its writes may land in the memory this handle's
+- **when a handle opens it**, a tile that is not idle is running a run
+  abandoned there by a handle that is gone - access is exclusive, so no
+  open handle can be running it; the run was left by a process that
+  ended, or by a handle closed after a timeout, in this process or
+  another (verifier-V9: the sentence blamed an ended process for both) -
+  and its writes may land in the memory this handle's
   buffers would be given (on the card an abandoned run's output landed
   in a later process's buffers at the same addresses): the open is
   refused, `CFT_ERR_INTERNAL`, "tile N (...) is already running when
@@ -499,30 +502,44 @@ own loop, the entry points computed on the host (the transcendentals,
 clause 5, the conversions, the augmented and formatOf arithmetic, the
 payload and character operations and their strings, the scaled
 products), a program's image at `cft_program_load` and its constant bank
-at a run or a digest, and the next run all see the bytes the last run
-wrote. Until 2026-09-25 the entry points computed on the host read the
-stale mirror (verifier-V7: `cft_exp` after a device ADD into the same
-buffer, 64 of 64 wrong with `CFT_OK`); until 2026-09-26 the image, the
-bank and the strings did (verifier-V8).
+at a run or a digest, an index table's bound check (`cft_run_ex`,
+`cft_program_run_ex`), a scalar operand on `cft_run_ex`'s composed route,
+and the next run all see the bytes the last run wrote. Until 2026-09-25
+the entry points computed on the host read the stale mirror
+(verifier-V7: `cft_exp` after a device ADD into the same buffer, 64 of 64
+wrong with `CFT_OK`); until 2026-09-26 the image, the bank and the
+strings did (verifier-V8); until 2026-09-27 the tables and that scalar
+did - an out-of-range index a device run wrote was accepted, and a
+scalar it wrote was taken from before (verifier-V9).
 
 **The library's own writes keep the rule too.** An entry point that
 writes a resident buffer's elements on the host - those above,
 `cft_reduce`'s and `cft_reduce_seg`'s results, a program run's counts,
-an output whose binding was declined and staged - first brings home a
-run's bytes over what it writes, and stales every device copy over it,
-so the next run reads the new bytes. Until 2026-09-25 none did, and a
-run after such a write read the bytes from before it, with `CFT_OK`
-(verifier-V7: nine sequences, one to four tiles). `device-test -b`'s
-"stale copies" holds every such entry point both ways - a run's bytes
-read on the host, the host's bytes read by a run, and in place - against
-the software backend, transcript for transcript, and holds the declined
-outputs by running its sequences again with every output bind declined
-(`CFT_XRT_BIND=decline-outputs`, a card instrument). Its "resident
-windows stay resident" holds the other side: that a change to one window
-does not refill another. **Out-parameters** - a flags word, a bus word, a
-string's length, a bad index - are stores made FOR the caller, like any
-variable of the caller's: one that lies in a resident buffer is the
-caller's own store into its mirror, under the rules below.
+`cft_program_digest`'s digest, `cft_conformance`'s report, an output
+whose binding was declined and staged - first brings home a run's bytes
+over what it writes, and stales every device copy over it, so the next
+run reads the new bytes. Until 2026-09-25 none did, and a run after such
+a write read the bytes from before it, with `CFT_OK` (verifier-V7: nine
+sequences, one to four tiles); the digest and the report were written
+unannounced until 2026-09-27 (verifier-V9). `device-test -b`'s "stale
+copies" holds every such entry point both ways - a run's bytes read on
+the host, the host's bytes read by a run, and in place - against the
+software backend, transcript for transcript, and holds the declined
+outputs by running its sequences again with every output bind of a
+fresh buffer declined (`CFT_XRT_BIND=decline-outputs`, a card
+instrument; an output copy already live at the same window would be
+reused, and a fresh buffer has none). Its "resident windows stay
+resident" holds the other side: that a change to one window does not
+refill another. **Out-parameters** - a flags word, a bus word, a
+string's length, a bad index, `cft_conformance`'s count of cases - are
+stores made FOR the caller, like any variable of the caller's: one that
+lies in a resident buffer is the caller's own store into its mirror,
+under the rules below. They are status words, written at the end of a
+call on every path - the device backends' among them, after the run -
+so the library states the rule for them rather than announce each one.
+An out-parameter must not share bytes with an array the same call
+writes: nothing checks it, and the bytes left there then differ between
+backends (verifier-V9).
 
 **Two stores the caller makes into a mirror.** One into a buffer a run
 has written and nobody has read back: the publish after it is refused,
@@ -553,7 +570,9 @@ written part of a resident window over bytes an earlier run left there
 that never came home. Nothing can vouch for that buffer any more, so
 `cft_buffer_from_device` on it, and any call that reads or writes its
 elements - a run, an entry point computed on the host, a lane mask, a
-bank or an image read from it - is refused with `CFT_ERR_INTERNAL` and a
+bank, an image, an index table or a composed run's scalar read from it,
+a digest or a report written into it - is refused with
+`CFT_ERR_INTERNAL` and a
 sentence, until `cft_buffer_to_device` publishes the mirror as the truth
 again (which drops what the device held rather than bringing it home);
 out-parameters are the caller's stores, above, and are not refused.

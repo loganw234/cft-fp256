@@ -2260,8 +2260,17 @@ CFT_API cft_status cft_conformance(cft_device *dev, const char *dir,
     r.buf = report;
     r.size = report_size;
     r.used = 0;
-    if (report && report_size)
+    if (report && report_size) {
+        /* The report is this call's result, written on the host as the
+         * sets are replayed: announced as every entry point's result is
+         * (softfloat.h's cft_host_out), so a device copy over it is not
+         * served afterwards and a LOST buffer refuses it. Until
+         * 2026-09-27 it was neither (verifier-V9). */
+        const int hs = cft_host_out(dev, report, report_size);
+        if (hs != CFT_OK)
+            return (cft_status)hs;
         report[0] = '\0';
+    }
 
     if (!dev)
         return CFT_ERR_INVALID_ARGUMENT;

@@ -2163,24 +2163,35 @@ CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
  *     those computed on the host included - the transcendentals, the
  *     clause-5 operations, the conversions, the augmented and formatOf
  *     arithmetic, the payload and character operations (the strings
- *     too), the scaled products - and for a program's image at
- *     cft_program_load and its constant bank at a run or a digest.
- *     (Until 2026-09-25 the entry points computed on the host read the
- *     stale mirror; until 2026-09-26 the image, the bank and the
- *     strings did - verifier-V7, verifier-V8.)
+ *     too), the scaled products - for a program's image at
+ *     cft_program_load and its constant bank at a run or a digest, for
+ *     an index table (cft_run_ex and cft_program_run_ex check its
+ *     bound on the host) and for a scalar operand on cft_run_ex's
+ *     composed route. (Until 2026-09-25 the entry points computed on
+ *     the host read the stale mirror; until 2026-09-26 the image, the
+ *     bank and the strings did, and until 2026-09-27 the tables and
+ *     the composed route's scalar - verifier-V7, V8, V9.)
  *   - An entry point that WRITES a resident buffer's ELEMENTS on the
  *     host keeps the rule itself: a run's bytes over what it writes come
  *     home first, and every device copy over it is made stale, so the
  *     next run reads the new bytes. That covers the entry points above,
  *     cft_reduce's and cft_reduce_seg's results, a program run's
- *     counts, and an output the device declined to keep resident. (Until
+ *     counts, cft_program_digest's digest, cft_conformance's report,
+ *     and an output the device declined to keep resident. (Until
  *     2026-09-25 a copy filled before such a write was served as
- *     current - verifier-V7.)
+ *     current - verifier-V7; the digest and the report were written
+ *     unannounced until 2026-09-27 - verifier-V9.)
  *   - OUT-PARAMETERS - a flags word, a bus word, a string's length, a
- *     bad index - are stores the library makes FOR the caller, like any
- *     variable of the caller's: one that lies in a resident buffer is
- *     the caller's own store into its mirror, under the two rules for
- *     those below (read the buffer back before, publish it after).
+ *     bad index, cft_conformance's count of cases - are stores the
+ *     library makes FOR the caller, like any variable of the caller's:
+ *     one that lies in a resident buffer is the caller's own store into
+ *     its mirror, under the two rules for those below (read the buffer
+ *     back before, publish it after). They are status words, written
+ *     at the end of a call on every path - the device backends' among
+ *     them, after the run - so the library states the rule for them
+ *     rather than announce each one. An out-parameter must not share
+ *     bytes with an array the same call writes: nothing checks it, and
+ *     the bytes left there then differ between backends (verifier-V9).
  *   - cft_buffer_from_device on a buffer no run has written is a no-op.
  *     cft_buffer_to_device never transfers anything, and is REFUSED -
  *     CFT_ERR_INVALID_ARGUMENT, with a sentence, nothing changed - on a
@@ -2219,10 +2230,12 @@ CFT_API cft_status cft_augmented_mul(cft_device *dev, cft_format fmt,
  *     part of a window over bytes that had not come home, so nothing
  *     can vouch for what either copy holds. cft_buffer_from_device on a
  *     lost buffer, and any call that reads or writes its elements - a
- *     run, an entry point computed on the host, a lane mask, a bank or
- *     an image read from it - is CFT_ERR_INTERNAL with a sentence saying
- *     so, until cft_buffer_to_device publishes the mirror as the truth
- *     again (the publish is accepted, and drops what the device held);
+ *     run, an entry point computed on the host, a lane mask, a bank, an
+ *     image, an index table or a composed run's scalar read from it, a
+ *     digest or a report written into it - is CFT_ERR_INTERNAL with a
+ *     sentence saying so, until cft_buffer_to_device publishes the
+ *     mirror as the truth again (the publish is accepted, and drops
+ *     what the device held);
  *     cft_buffer_get_info reports device_authority 0 and a staged_why
  *     beginning "LOST:". Out-parameters are the caller's stores, as
  *     above, and are not refused. (Until 2026-09-25 the failed run's

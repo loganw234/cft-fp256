@@ -1998,7 +1998,32 @@ static cft_status seq_check_round2(const cft_program *p,
      * last block is padded up to the tile's lane block and the check
      * has to be the same on both executors, so "the lanes the caller
      * has" is n and nothing else. CFT_IDX_NONE is not an index and is
-     * never out of range. */
+     * never out of range.
+     *
+     * The check READS each table on the host, so each is brought home
+     * first (softfloat.h's cft_host_in), the scratch-in table too. Until
+     * 2026-09-27 a table a device run had written into a resident buffer
+     * was checked on the stale mirror: an out-of-range index the device
+     * held ran with CFT_OK, and a valid one over a bad mirror was refused
+     * (verifier-V9). A table in a LOST buffer is refused by that
+     * sentence. */
+    if (A->n) {
+        for (r = 0; r < 3; r++) {
+            cft_status hs;
+            if (!idx[r])
+                continue;
+            hs = (cft_status)cft_host_in(p->dev, idx[r], A->n * 4u);
+            if (hs != CFT_OK)
+                return hs;
+        }
+        if (A->idx_scratch_in) {
+            const cft_status hs = (cft_status)cft_host_in(
+                p->dev, A->idx_scratch_in,
+                A->n * (size_t)p->n_scratch_in * 4u);
+            if (hs != CFT_OK)
+                return hs;
+        }
+    }
     for (r = 0; r < 3; r++) {
         size_t i;
         if (!idx[r])
@@ -2246,6 +2271,15 @@ CFT_API cft_status cft_program_digest(cft_program *prog,
         return st;
     /* read on the host, as the run's is (seq_program_run) */
     st = (cft_status)cft_host_in(prog->dev, bank, bank_bytes);
+    if (st != CFT_OK)
+        return st;
+    /* ...and the digest WRITTEN on the host: this call's result,
+     * announced as every entry point's is (softfloat.h's cft_host_out),
+     * so a device copy over it is not served afterwards and a LOST
+     * buffer refuses it. Until 2026-09-27 it was neither announced nor
+     * among the out-parameters cft.h lists, and a run after it read
+     * the bytes from before (verifier-V9). */
+    st = (cft_status)cft_host_out(prog->dev, out, 32);
     if (st != CFT_OK)
         return st;
     /* The IMAGE bytes, not the parsed form - the same reason the image

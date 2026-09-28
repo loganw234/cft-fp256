@@ -635,11 +635,14 @@ they were handed over. What only a card can still say:
     test exists). The defect the witness exists for cannot be planted
     from a test without poisoning the card for everyone: see "A tile a
     run was abandoned on", below.
-  - `CFT_XRT_BIND` (2026-09-26): `decline-outputs` makes every
-    resident OUTPUT bind decline and be staged, as one too large for its
-    channel does, so the staged collects that write a resident buffer's
-    mirror are reachable on a card - device-test's "stale copies" runs
-    its sequences again under it. A malformed value is refused by name.
+  - `CFT_XRT_BIND` (2026-09-26): `decline-outputs` makes a resident
+    OUTPUT bind that would allocate, fill or re-window a device copy
+    decline and be staged, as one too large for its channel does, so the
+    staged collects that write a resident buffer's mirror are reachable
+    on a card - device-test's "stale copies" runs its sequences again
+    under it, each into a fresh buffer. An output copy already live at
+    the same window is reused, not declined (verifier-V9). A malformed
+    value is refused by name.
 - **A tile a run was abandoned on** (found 2026-09-25): a run that
   outlives `CFT_TIMEOUT_MS`, or a process killed mid-run, leaves its
   tile running after XRT has aborted the command, and until the image
