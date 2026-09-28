@@ -3361,6 +3361,33 @@ its own (the project's list, unranked):
   each is about 4 s a 25-year run. Quoted as given: 25 years of hourly
   segments is about 219,000 (verifier-V10).
 
+**The program limits: Logan's direction (2026-09-28).** They have
+needed raising several times. When step 4 comes, size them as large as
+the U50 allows, and keep each a build parameter like the others, so
+the card can use resources an open-core build cannot reach. Read
+against docs/SEQUENCER.md ("A tile also has four capacities the
+contract does not fix"), that asks different things of the four:
+- `MAXD` (deposit slots a lane) and `IMEM_D` (instructions) are pure
+  capacities: a larger build runs a smaller build's programs to the
+  same answers. Raise them, measuring the UltraRAM, block RAM and
+  timing each step costs on the U50 build at its clock. `IMEM_D` is
+  published as a log2 in `CAPS[23:20]`, whose four bits stop at 2^15;
+  past that is a CAPS change.
+- `KMEM_D` (constants) is a capacity only as far as an instruction can
+  address. Revision 3's nine index bits reach 512, and `imm[31]` is the
+  one reserved bit left in the 64-bit instruction word, where a tenth
+  bit for each of three indices needs three. A deeper bank is an
+  instruction-format change, a program-model change like the next.
+- `SCRATCH_D` is not a pure capacity: `LDX`/`STX` reduce their index
+  modulo it (ask 2). To make it a build parameter, a program must
+  declare the scratch it uses, and an index past that must be refused
+  rather than wrapped, so that no answer depends on the build's depth.
+  That belongs in step 4's one revision.
+- Certificates notice. Version 1's `h-slots` limit of 512 is the golden
+  model's `seq.KADDR_KX`, and python/tests/test_cert.py holds 511 read
+  and 512 refused, so a deeper bank turns that test red instead of
+  changing the format silently (verifier-C2).
+
 ### Segments, certificates and the audit tool (plan of record, 2026-09-28)
 
 Step 2 of the controlled-divergence work order. A service that sells
@@ -3371,7 +3398,15 @@ it says on an implementation the service does not control. This
 section is the plan; nothing in it exists yet unless it says so.
 Verifier-C1 reviewed the first draft against the tree (twenty
 findings), then re-checked the second (six more gaps and six notes).
-This is the draft after both.
+This is the draft after both, amended where the work that followed
+decided or measured otherwise (each amendment says so).
+
+**What exists (2026-09-28).** Step 1, below, exists:
+docs/CERTIFICATES.md is version 1's specification, and
+python/cft_golden/cert.py its golden implementation, held by
+python/tests/test_cert.py (parcel P1 and its follow-up P1b, verified
+by verifier-C2; the round's ledger, Data/runs/2026-09-28-cert-round/).
+Where the page and this plan differ, the page is the format.
 
 **What a certificate says.** "These bits came from this program, these
 inputs and these parameters; any conforming implementation reproduces
@@ -3401,6 +3436,11 @@ this kind."
   and conserved-quantity drift, beside the model, program and input
   hashes. This is a side project's ask, passed on by Logan: "these
   bits, reproducible, method error <= X".
+- Privacy is the owner's choice, certificate by certificate, and the
+  certificate says which it is. A KEYED certificate hashes its states
+  and streams with the owner's salt (below). An OPEN one hashes them
+  with plain SHA-256 under the same domain tags, has no salt and no
+  commitment, and anyone who holds the states can audit it.
 
 **The lead's rules for accuracy.** Each accuracy field names its kind:
 - a **bound** is proved - a rigorous remainder, or an enclosure such as
@@ -3501,7 +3541,7 @@ code; the checks are C1's):
   the body's hash, and it is never inside the certificate. The
   certificate's bytes are then the same signed or not, and a version-1
   reader never meets a signature.
-- **Salting.**
+- **Salting**, for a keyed certificate (an open one has none):
   - The owner keeps a salt of exactly 32 random bytes.
   - Every state hash is HMAC-SHA-256 with that salt, under a
     domain-separation tag.
@@ -3518,9 +3558,12 @@ code; the checks are C1's):
   - **identity:**
     - the certificate's format;
     - the library's build (new): commit, clean-or-dirty, and whether
-      untracked files were present;
+      untracked files were present. As built, it is `build-id`, the
+      string libcft's `cft_build_id()` returns, copied verbatim;
     - the backend and the device: for XRT, the xclbin's sha256 (new),
-      the tile count and the raw CAPS words (new);
+      the tile count and the raw CAPS words (new). As built, the words
+      are CAPS alone below VERSION 0x800 and CAPS then CAPS2 from it,
+      as `cft_get_image_id` gives them;
     - through a remote handle, the server's device fields and the
       client's build, since no server build is sent;
     - the program: `cft_program_digest` over the image and the bank,
@@ -3544,6 +3587,12 @@ code; the checks are C1's):
       image keeps no constant names), by exact halving or by exact
       widening; twice the segments for a half-step run; and the same
       start state, exactly widened for a wider run.
+    - Amended as built: a wider run cannot have the same image digest,
+      since its image is another format's. It is held instead to the
+      same instructions one format wider: the same instruction words,
+      `max_deposits`, flags, constant count and scratch word, the precision
+      code one rung up, and any constants the image carries exactly
+      widened (docs/CERTIFICATES.md, "Auxiliary runs").
     - The main run attached as its own half-step run would otherwise
       pass every check with an estimate of 0 (verifier-C1);
   - **the output:** the final state's hash.
