@@ -1,9 +1,9 @@
 # The documents, by what you open them for
 
-Thirty-seven files, 51,752 lines. Flat in one directory they look like one
+Thirty-eight files, 52,663 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **16,853 lines you consult while working** — the three under *Start here*,
+- **17,764 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,219 lines of tool manual**, one per shipped program;
 - **1,816 lines of operations**, read when you are about to do something to
@@ -13,7 +13,7 @@ undifferentiated pile; they are not, and the split is close to even:
   and not what you open to get something done.
 
 Half is therefore history. That is deliberate, and it is also why a
-flat listing of thirty-seven names feels heavier than the work actually is.
+flat listing of thirty-eight names feels heavier than the work actually is.
 
 This index exists because the README linked eight of the thirty-four there
 were and nothing linked the other twenty-six. Nothing has moved: a file's
@@ -48,6 +48,7 @@ product, not the implementation.
 | [SEQUENCER.md](SEQUENCER.md) | 1,914 | The orbit sequencer and the program model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 829 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
+| [CERTIFICATES.md](CERTIFICATES.md) | 911 | The certificate, version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Complete enough to write a reader and an auditor from the page. |
 
 ## Reference you call into
 
