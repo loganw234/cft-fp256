@@ -752,11 +752,18 @@ the library itself.
 
 ## Owed to the next card day (added 2026-09-28): the segment runner
 
+*Paid the same day, from 15:21 to 15:23, on the U50 (XRT 2.19), at
+99f1b43: card-segrun.sh 8 checks of 8. The gate gave 295 of 295 with
+the certificates made on the quad's four tiles and 295 of 295 on the
+single, and the negative control failed the device lines by name. The
+records are `Data/runs/2026-09-28-cert-round/card-p3/`, which is not
+tracked. Left as written below, because the list is also the recipe.*
+
 The certificate round's step 3 (docs/ROADMAP.md) is `cft-segrun`
 (docs/CERTIFICATES.md, "The segment runner"). It is held on the
 desktop's software backend and through a loopback server. It is built
-with XRT=1 against XRT 2.14 in WSL. It has not run on a tile. What only
-a card can say:
+with XRT=1 against XRT 2.14 in WSL. It had not run on a tile when this
+was written. What only a card can say:
 
     make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt all device-test
     bash hw/card-segrun.sh <image.xclbin> [<another image.xclbin>]

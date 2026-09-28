@@ -43,7 +43,8 @@ open, on the software backend:
 Then:
   7. the page's test vectors through `cft-segrun --hash`, and every tag,
      keyed and open, against an HMAC written here from RFC 2104;
-  8. every refusal the tool makes, by its name and exit code, a refusal
+  8. every refusal an input or the instrument can cause, by its name and
+     exit code (the page lists those only a failure can reach), a refusal
      before the run leaving nothing behind; and for each of the page's
      names, the golden writer refusing the same defect by the same name;
   9. with --serve: one certificate through a loopback cft-serve, stopped

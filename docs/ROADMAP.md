@@ -3412,14 +3412,20 @@ findings), then re-checked the second (six more gaps and six notes).
 This is the draft after both, amended where the work that followed
 decided or measured otherwise (each amendment says so).
 
-**What exists (2026-09-28).** Steps 1 and 2, below, exist:
+**What exists (2026-09-28).** Steps 1 to 3, below, exist:
 - step 1: docs/CERTIFICATES.md is version 1's specification, and
   python/cft_golden/cert.py its golden implementation, held by
   python/tests/test_cert.py (parcel P1 and its follow-up P1b, verified
   by verifier-C2);
 - step 2: `cft_build_id()` and `cft_get_image_id()` at ABI 0.15
   (docs/HOSTAPI.md, "Identity at ABI 0.15"; parcel P2, verified by
-  verifier-C3, and measured on the card).
+  verifier-C3, and measured on the card);
+- step 3: `cft-segrun`, the segment runner, writing certificates held
+  byte for byte to the golden writer's on the software backend, through
+  a loopback server and on the card's tiles, where the golden audit
+  accepts them (docs/CERTIFICATES.md, "The segment runner"; parcel P3,
+  verified by verifier-C6). It writes no accuracy entries yet; that is
+  step 5.
 The round's ledger is Data/runs/2026-09-28-cert-round/. Where the page
 and this plan differ, the page is the format.
 

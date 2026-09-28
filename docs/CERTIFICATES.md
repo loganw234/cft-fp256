@@ -1091,12 +1091,16 @@ which 64 is already the auditor's usage:
 
 Every refusal prints `cft-segrun: refused <name>: <why>` and exits with
 the name's code. None writes a certificate. One made before the first
-segment leaves nothing behind. A run that fails part way leaves the
+segment leaves nothing of its own behind, and at 99f1b43 it also
+removes a file that was already at `--out` (verifier-C6). A run that fails part way leaves the
 boundary files it wrote, and says so. No backend in this tree reports
 flags it cannot read, leaves a flag word unwritten or reports one past
 31, so `CFT_SEGRUN_PLANT` is an instrument for the tests of those three
 refusals: `flags-unreadable`, `flags-unwritten` or `flags-wide`. Each
-only ever causes a refusal, and says so. The refusals only a failing
+makes a run refuse by that name, and says so. With `--build-id` or
+`--hash`, which run nothing, it only prints that the run is to be
+refused and exits 0 with the right output (verifier-C6). The refusals
+only a failing
 library, device or filesystem can reach have no test, since nothing on
 the desktop fails that way:
 - `cft_get_caps`, `cft_program_get_info`, `cft_program_digest`,
@@ -1106,8 +1110,13 @@ the desktop fails that way:
 - once the run has begun, a state file that cannot be opened, written or
   closed, a certificate that cannot be written or closed (it is opened
   before the run, and that refusal has a test), or a line that cannot be
-  formatted;
-- more boundaries than the process can hold.
+  formatted.
+More boundaries than the process can hold is reached from an input, and
+has no test (verifier-C6):
+- `--segments 9223372036854775807` is refused `output` (73). It is
+  checked run by run, so for run 1 only after run 0 has run.
+- `--segments 1000000000000` exits 70 with "cft-segrun: out of memory",
+  under no refusal name.
 Every other condition the lists above name has a test, and so does
 every refusal name; not every branch of `usage` has one.
 
@@ -1150,15 +1159,19 @@ the golden writer's name for the same defect where it has one. Last, it
 makes one certificate through a loopback cft-serve, stopped by its PID.
 That certificate's device lines must be the remote rule's, and its run
 blocks byte for byte the software backend's. It also holds git to
-ignoring the tool's binary. 293 checks: 42 to 55 s on the Windows
-desktop at about half load, and 40 s in WSL for the 285 of 7f02d6a
+ignoring the tool's binary. 293 checks at 99f1b43: 41 to 42 s on the
+Windows desktop (P3's and verifier-C6's runs), and 40 s in WSL
 (2026-09-28).
 
 **On the card**, `hw/card-segrun.sh <image.xclbin>` runs the same gate
 with the certificates made on the tile. It holds the device lines to
 `sha256sum` of the image and to what `device-test -i` prints, and each
-card certificate's run blocks to the software backend's. It has not
-run yet: the card leg is the round lead's.
+card certificate's run blocks to the software backend's. It ran at
+99f1b43 on 2026-09-28, on the U50 (XRT 2.19) with both round-2 images:
+8 checks of 8, the gate's 295 of 295 on the quad's four tiles and 295
+of 295 on the single, 48 to 50 s each, and its negative control, a
+wrong image digest, failing the device lines by name
+([CARDDAY.md](CARDDAY.md)).
 
 ## What version 1 does not do
 

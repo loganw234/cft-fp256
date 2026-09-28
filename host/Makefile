@@ -1153,9 +1153,10 @@ clean-programs:
 #                       the initial states, runs every segment itself and
 #                       must write the same bytes; the golden audit
 #                       accepts each, in full and sampled, from the
-#                       states the tool wrote; every refusal by its name
-#                       and exit code; the page's test vectors; and one
-#                       run through a loopback cft-serve, stopped by PID.
+#                       states the tool wrote; every refusal an input can
+#                       cause, by its name and exit code; the page's test
+#                       vectors; and one run through a loopback cft-serve,
+#                       stopped by PID.
 #                       verify/run.sh's `programs` stage runs it.
 #
 # The tree's build id goes in as make test hands api-test its own, so a

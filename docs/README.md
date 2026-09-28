@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Thirty-eight files, 53,392 lines. Flat in one directory they look like one
+Thirty-eight files, 53,418 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **18,311 lines you consult while working** — the three under *Start here*,
+- **18,324 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,219 lines of tool manual**, one per shipped program;
-- **1,934 lines of operations**, read when you are about to do something to
+- **1,941 lines of operations**, read when you are about to do something to
   hardware;
-- **26,928 lines of record and argument** — the ledger, the roadmap and the
+- **26,934 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -48,7 +48,7 @@ product, not the implementation.
 | [SEQUENCER.md](SEQUENCER.md) | 1,914 | The orbit sequencer and the program model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 862 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
-| [CERTIFICATES.md](CERTIFICATES.md) | 1,183 | The certificate, version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Complete enough to write a reader and an auditor from the page. And the segment runner, `cft-segrun`, that writes one from the library. |
+| [CERTIFICATES.md](CERTIFICATES.md) | 1,196 | The certificate, version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Complete enough to write a reader and an auditor from the page. And the segment runner, `cft-segrun`, that writes one from the library. |
 
 ## Reference you call into
 
@@ -83,7 +83,7 @@ running.
 | document | lines | what it is for |
 |---|---|---|
 | [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 245 | Building a bitstream, and the five traps — three of which exit 0, and two that look like a design failure. `hw/build-pair.sh` is this document as an executable. |
-| [CARDDAY.md](CARDDAY.md) | 909 | Card day: the runbook as it was actually run, the staged pairs, and the forensics kept when build trees are reclaimed. |
+| [CARDDAY.md](CARDDAY.md) | 916 | Card day: the runbook as it was actually run, the staged pairs, and the forensics kept when build trees are reclaimed. |
 | [BRINGUP.md](BRINGUP.md) | 780 | Hardware bring-up, and the gates CI's green tick does not cover. |
 
 ## The record
@@ -94,7 +94,7 @@ reading material for a working session.
 | document | lines | what it is for |
 |---|---|---|
 | [VALIDATION.md](VALIDATION.md) | 15,626 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
-| [ROADMAP.md](ROADMAP.md) | 3,713 | What is built, what is next, and what was decided against. |
+| [ROADMAP.md](ROADMAP.md) | 3,719 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1,082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
 | [NOVEL.md](NOVEL.md) | 561 | Results for which no prior description was found, with the standard of evidence stated first. |
 | [ATLAS.md](ATLAS.md) | 367 | The atlas-engine integration, assessed before any of it was done. |
