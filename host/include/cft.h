@@ -128,6 +128,82 @@ extern "C" {
  * header it compiled against. */
 CFT_API uint32_t cft_abi_version(void);
 
+/* Which source tree this library was built from   (ABI 0.15, 2026-09-28)
+ *
+ * The version above says which calls exist; it did not move for the
+ * 2026-09-25 round's fixes, and it never says which BUILD is running.
+ * A certificate (docs/ROADMAP.md, "Segments, certificates and the audit
+ * tool") records what ran, and this is its answer for the library. One
+ * line, in exactly one of two forms:
+ *
+ *   commit=<40 lowercase hex> tracked=<clean|modified> untracked=<none|present>
+ *   unknown
+ *
+ *   commit     the full name of the commit checked out when the library
+ *              was compiled (64 hex digits in a repository that uses
+ *              SHA-256 names)
+ *   tracked    `modified` if any tracked file differed from that commit:
+ *              edited, staged, deleted or renamed
+ *   untracked  `present` if any file git does not ignore was untracked.
+ *              A new source nobody added compiles in as easily as an
+ *              edited one - hw/rebuild-2022.sh learned that the hard way
+ *              for bitstreams, and bindings/arduino/sync.py vendors every
+ *              file in host/src and host/include, tracked or not
+ *
+ * `tracked=clean untracked=none` is the only id that says "this library
+ * IS that commit". Any other says the build corresponds to no commit and
+ * cannot be reproduced from one. It does not tell two such builds apart:
+ * two trees modified differently at the same commit carry the same id.
+ *
+ * `unknown` wherever the id was not measured. host/Makefile's own rule
+ * for src/build_id.o and .lo is the one build that computes it. Every
+ * other build of that file compiles `unknown`: the Arduino library's
+ * vendored copy, anything compiled by hand, and two of host/Makefile's
+ * own targets, profiles-check and the fuzz harnesses, which compile the
+ * sources without the id. (The WebAssembly module compiles it too and
+ * exports no call that reaches it, so there it answers nothing at all.)
+ * The rule itself says `unknown` where it cannot measure: no repository
+ * (a source tarball, a copy), no git, a directory above host/ that is
+ * not the top of its repository (a copy vendored inside another project,
+ * whose commit is not this tree's), or any git call answering with an
+ * error or a warning - "could not open directory" among them, which git
+ * gives with exit 0 while leaving that directory's untracked files out
+ * of its answer. Never a guess, and never partly known.
+ *
+ * The commit is that of the repository the tree is in, whichever it is:
+ * a copy of this tree committed at the TOP of another project's
+ * repository carries that project's commit - a true name for the source
+ * it was built from, and not a commit of this project's.
+ *
+ * host/Makefile computes it on every make that builds the library or
+ * anything linking it (host/tools/gen_build_id.sh), and rewrites the
+ * header it compiles in only when it changes, so a library built there
+ * never carries an earlier tree's id and an unchanged tree rebuilds
+ * nothing. `make -C host print-build-id` prints
+ * the tree's id as of now.
+ *
+ * It names the LIBRARY, and it is compiled in. A program that links
+ * libcft.a statically - every test binary in host/ does - carries the id
+ * of the archive it was linked against, which is exactly the library
+ * code inside it; a binary not relinked after the library was rebuilt
+ * runs the OLD library and reports the OLD id. That is the stale test
+ * binary CLAUDE.md warns of ("`make -C host all` does not build the test
+ * executables"), and this is how to see one: api-test and device-test
+ * print the id they carry, and `make -C host test` fails api-test when
+ * it differs from the tree's. Through a remote handle it is still THIS
+ * process's library: the server's build is not sent (docs/REMOTE.md).
+ *
+ * It names the source and nothing else: not the compiler, not CFLAGS,
+ * not a build profile (cft_config.h's format ceiling and its module
+ * switches).
+ *
+ * The call is additive. CFT_ABI_VERSION_MINOR moves to 15 for it and for
+ * cft_get_image_id below when they are merged, with the WebAssembly
+ * module's rebuild, as every step's does (the macro's own comment).
+ *
+ * Static storage; never NULL; never needs freeing. */
+CFT_API const char *cft_build_id(void);
+
 /* ---------------------------------------------------------------
  * Status
  * --------------------------------------------------------------- */
@@ -808,6 +884,76 @@ CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out);
  * device implements, cft_run reports what it does when you ask
  * anyway. */
 CFT_API int cft_supports(cft_device *dev, cft_op op, cft_format fmt);
+
+/* ---------------------------------------------------------------
+ * The device image a handle runs on               (ABI 0.15, 2026-09-28)
+ *
+ * What a certificate records as "the device", beside cft_build_id()'s
+ * "the library". For an xclbin: the SHA-256 of the exact bytes the
+ * backend loaded, and the raw CAPS words its tiles publish. Neither
+ * existed before this call - cft_caps holds DECODED fields, and
+ * CAPS[15:8]'s opcode groups are in none of them - and neither of the
+ * two things that did is an identity: the xclbin's UUID can be shared
+ * by two builds, and VERSION (cft_caps.device_version) is the register
+ * map's, the same for every build of it.
+ *
+ * Zero the struct, set struct_size to sizeof(cft_image_id), then call.
+ * On return struct_size is how many bytes were filled: the size
+ * handshake cft_caps uses, and fields are only ever appended here too.
+ *
+ *   sha256       SHA-256 over the exact bytes of the xclbin file the
+ *                backend loaded. cft_open reads the file ONCE, hashes
+ *                those bytes and hands the same bytes to XRT, so what is
+ *                hashed is what was loaded - not the file read again,
+ *                which could have been replaced in between. Compare it
+ *                with `sha256sum` of the file you opened.
+ *   image_bytes  how many bytes that was
+ *   version      VERSION (0x48), as cft_caps.device_version
+ *   n_caps       how many of caps[] are registers this image has: 1
+ *                below VERSION 0x800 (CAPS alone), 2 from it (CAPS and
+ *                CAPS2)
+ *   caps         caps[0] is CAPS (0x4C) and caps[1] CAPS2 (0x6C), RAW:
+ *                every bit as the tile publishes it. A slot at or past
+ *                n_caps is no register and is left zero. Every opened
+ *                tile's words are read at cft_open and held equal to
+ *                tile 0's; those are the ones the library decoded into
+ *                cft_caps.
+ *
+ * REFUSED BY NAME where there is no image to name, rather than filled
+ * with a digest of zeros that reads as one. CFT_ERR_UNSUPPORTED, a
+ * sentence in cft_last_error(), struct_size set to 0 - nothing filled -
+ * and nothing else written:
+ *   the software backend   no bitstream to hash and no CAPS register to
+ *                          read. What determines its bits is the
+ *                          library, whose identity is cft_build_id()
+ *   a remote handle        its HELLO carries the server's DECODED device
+ *                          fields - the ones cft_get_caps reports - and
+ *                          neither the digest of an xclbin, nor raw CAPS
+ *                          words, nor the server's build (docs/REMOTE.md),
+ *                          so this client cannot know the server's image.
+ *                          A certificate made through one records the
+ *                          server's cft_caps, the CLIENT's cft_build_id(),
+ *                          and the server's image and build as not known
+ *   an XRT image whose tiles publish different CAPS words, which has no
+ *                          single set of words to name; the sentence
+ *                          names the tile and both words
+ * A NULL dev or out, or a struct_size below sizeof(size_t), is
+ * CFT_ERR_INVALID_ARGUMENT first, on every backend.
+ *
+ * Answered from what cft_open recorded: it reaches no device, costs
+ * nothing, and answers on a handle a failed run has poisoned - the image
+ * is still the one that was loaded. Hashing costs cft_open one pass over
+ * the file, which it was reading anyway. */
+typedef struct cft_image_id {
+    size_t   struct_size;      /* in: sizeof(cft_image_id); out: bytes filled */
+    uint8_t  sha256[32];       /* over the exact bytes loaded */
+    uint64_t image_bytes;      /* how many */
+    uint32_t version;          /* VERSION, as cft_caps.device_version */
+    uint32_t n_caps;           /* 1 below VERSION 0x800, 2 from it */
+    uint32_t caps[4];          /* CAPS, CAPS2, raw; zero past n_caps */
+} cft_image_id;
+
+CFT_API cft_status cft_get_image_id(cft_device *dev, cft_image_id *out);
 
 /* ---------------------------------------------------------------
  * The core call

@@ -122,6 +122,15 @@
 #include "mask_bits.h"
 #include "tile_select.h"
 #include "lane_cut.h"
+/* The image digest cft_get_image_id reports is sha256.c's, which
+ * CFT_NO_PROGRAM compiles out (cft_config.h, where CFT_TINY implies it).
+ * The combination is refused here, by name, rather than at the link by
+ * an undefined symbol. */
+#include "sha256.h"
+#include "../include/cft_config.h"
+#ifdef CFT_NO_PROGRAM
+#  error "the XRT backend hashes the image it loads with sha256.c, which CFT_NO_PROGRAM (or CFT_TINY) removes - build XRT=1 without it"
+#endif
 
 /* mirrors cft_status; see backend.h */
 enum {
@@ -389,6 +398,51 @@ std::string hex32(uint32_t v)
     return std::string(b);
 }
 
+/* An artifact's bytes, whole, for cftx_open to hash and then hand to
+ * XRT. ONE read: the digest cft_get_image_id reports is of the bytes
+ * that were loaded, and not of the file read again later, which could
+ * have been replaced in between. A file that cannot be opened or read
+ * is refused with the operating system's reason. The handle is owned,
+ * so a bad_alloc while the buffer grows cannot leak it on its way to the
+ * C boundary, which reports it as out of memory. */
+struct FileCloser {
+    void operator()(std::FILE *f) const noexcept
+    {
+        if (f)
+            std::fclose(f);
+    }
+};
+
+bool read_image(const char *path, std::vector<char> &out, std::string &why)
+{
+    std::unique_ptr<std::FILE, FileCloser> f(std::fopen(path, "rb"));
+    if (!f) {
+        why = std::string("opening ") + path + " to hash and load it: " +
+              std::strerror(errno);
+        return false;
+    }
+    const size_t chunk = size_t(1) << 20;
+    std::vector<char> v;
+    size_t have = 0;
+    for (;;) {
+        v.resize(have + chunk);
+        const size_t k = std::fread(v.data() + have, 1, chunk, f.get());
+        have += k;
+        if (k == chunk)
+            continue;
+        if (std::ferror(f.get())) {
+            const int err = errno;
+            why = std::string("reading ") + path + " to hash and load it: " +
+                  std::strerror(err);
+            return false;
+        }
+        break;                               /* end of file */
+    }
+    v.resize(have);
+    out.swap(v);
+    return true;
+}
+
 int elem_bytes(int fmt)
 {
     switch (fmt) {
@@ -513,6 +567,20 @@ struct Dev {
      * (verifier-V9); device-test's pass runs each sequence into a fresh
      * buffer, where there is none. */
     bool              decline_outputs = false;
+    /* The image's identity, for cftx_image_id (cft.h, cft_get_image_id):
+     * the SHA-256 of the bytes cftx_open read and then loaded, how many
+     * there were, and the raw capability words - n_caps of them, CAPS2
+     * only from SCRATCH_VERSION. caps_refusal is empty unless the
+     * identity cannot be answered, and then it is the whole sentence the
+     * refusal gives: a tile whose words differ from tile 0's, or a tile
+     * whose words could not be read at open - two different things, said
+     * as two different sentences (verifier-C3 found the second reported
+     * as the first). */
+    uint8_t           image_sha256[32] = {};
+    uint64_t          image_bytes = 0;
+    uint32_t          n_caps = 0;
+    uint32_t          caps_words[4] = {};
+    std::string       caps_refusal;
 };
 
 /* Grow a tile's buffers to hold `bytes`.
@@ -1675,8 +1743,42 @@ static int cftx_open_impl(const char *artifact, int index, void **out,
                 ": " + e.what());
         return ST_NO_DEVICE;
     }
+    /* The image is read ONCE, hashed, and those same bytes are loaded
+     * (cft_get_image_id): the digest is then of what was loaded by
+     * construction, and never of the file read a second time. Until
+     * 2026-09-28 XRT read the file itself, by path, and nothing hashed
+     * it; load_xclbin(path) is xrt::xclbin(path) and a load of that
+     * object, and xrt::xclbin(path) reads the file into exactly the
+     * vector handed over here (believed from XRT's API and its 2.14
+     * headers, which declare both). Measured since: it opened the 0907
+     * quad image in hw_emu on XRT 2.14, and both round-2 images on the
+     * U50 on XRT 2.19 (hw/card-identity.sh, 16 of 16, and the quick
+     * matrix 2,456 of 2,456 after it; 2026-09-28). That the file is read
+     * ONCE is held by reading this code: no gate can fail for a second
+     * read that returns other bytes (verifier-C3, on a mock). The same
+     * object also answers the compute-unit listing below, which read the
+     * file a second time before. */
+    std::vector<char> image;
+    {
+        std::string why;
+        if (!read_image(artifact, image, why)) {
+            set_err(std::move(why));
+            return ST_ARTIFACT;
+        }
+    }
+    {
+        cft_sha256_ctx h;
+        cft_sha256_init(&h);
+        cft_sha256_update(&h, image.data(), image.size());
+        cft_sha256_final(&h, D->image_sha256);
+        D->image_bytes = image.size();
+    }
+    std::unique_ptr<xrt::xclbin> xb;
     try {
-        D->uuid = D->dev.load_xclbin(artifact);
+        xb.reset(new xrt::xclbin(image));
+        D->uuid = D->dev.load_xclbin(*xb);
+    } catch (const std::bad_alloc &) {
+        throw;                          /* the boundary's out-of-memory */
     } catch (const std::exception &e) {
         set_err(std::string("loading ") + artifact + ": " + e.what());
         return ST_ARTIFACT;
@@ -1710,14 +1812,14 @@ static int cftx_open_impl(const char *artifact, int index, void **out,
     std::string declared;          /* what the image lists, for the message */
 #if CFT_XRT_XCLBIN_API
     try {
-        /* By std::string, not const char*: XRT 2.19 also has
+        /* The object built above from the bytes that were hashed and
+         * loaded. (It was built here from the PATH until 2026-09-28, as
+         * a std::string and not a const char*: XRT 2.19 also has
          * xclbin(const std::string_view&), which takes the xclbin's
-         * BYTES, and a const char* converts to both - ambiguous at
-         * compile time, and the wrong pick would parse a path as an
-         * image. */
-        const std::string art(artifact);
-        xrt::xclbin xb(art);
-        for (const auto &k : xb.get_kernels())
+         * BYTES, and a const char* converts to both. A std::vector<char>
+         * converts to neither, so the byte constructor above is the one
+         * picked.) */
+        for (const auto &k : xb->get_kernels())
             for (const auto &cu : k.get_cus()) {
                 /* XRT 2.19 answers the QUALIFIED name here -
                  * "cft_krnl:cft_krnl_1" - and the open string wants
@@ -2010,6 +2112,74 @@ static int cftx_open_impl(const char *artifact, int index, void **out,
         }
     }
 
+    /* The raw capability words, for cft_get_image_id: tile 0's, which
+     * the decode below reads, and every other opened tile's held equal
+     * to them. This library has always decoded tile 0's CAPS and applied
+     * it to every tile; a single pair of words called the IMAGE's is true
+     * only if every tile publishes it, and a mixed layout's would not
+     * (docs/LAYOUTS.md: CAPS is per compute unit). A tile that differs,
+     * or whose words cannot be read, leaves the open exactly as it was -
+     * refusing a mixed image here is not this record's call - and makes
+     * cftx_image_id refuse, with a sentence that says which of the two
+     * happened and names the tile.
+     *
+     * CFT_XRT_CAPS plants either one for device-test -i, in the manner of
+     * CFT_XRT_WITNESS, so that both refusals have a gate that can fail on
+     * an image with more than one tile: "plant-differ" takes tile 1's
+     * CAPS with bit 0 flipped, and "plant-unreadable" makes its read
+     * throw. Only this record sees the planted word - everything the
+     * library DOES is decoded from tile 0's, above and below - so a
+     * planted handle computes exactly as an unplanted one, and only
+     * cft_get_image_id changes, from an answer to a refusal. The plant
+     * acts on the comparison's input, not on its verdict, so the
+     * comparison itself is what the gate holds. */
+    const char *const plant_env = std::getenv("CFT_XRT_CAPS");
+    const bool plant_differ =
+        plant_env && !std::strcmp(plant_env, "plant-differ");
+    const bool plant_unread =
+        plant_env && !std::strcmp(plant_env, "plant-unreadable");
+    D->n_caps        = ver >= SCRATCH_VERSION ? 2u : 1u;
+    D->caps_words[0] = caps;
+    D->caps_words[1] = D->n_caps > 1 ? caps2 : 0u;
+    for (size_t tt = 1; tt < D->tiles.size(); tt++) {
+        uint32_t c = 0, c2 = 0;
+        try {
+            if (plant_unread && tt == 1)
+                throw std::runtime_error("planted by CFT_XRT_CAPS="
+                                         "plant-unreadable");
+            c = D->tiles[tt].k.read_register(CSR_CAPS);
+            if (D->n_caps > 1)
+                c2 = D->tiles[tt].k.read_register(CSR_CAPS2);
+        } catch (const std::exception &e) {
+            D->caps_refusal = "cft_get_image_id: " + tile_name(*D, tt) +
+                              "'s CAPS could not be read at open (" +
+                              e.what() + "), so nothing says this image's "
+                              "tiles publish one set of words, and tile "
+                              "0's are not reported as the image's";
+            break;
+        }
+        if (plant_differ && tt == 1)
+            c ^= 0x1u;
+        if (c != D->caps_words[0] || c2 != D->caps_words[1]) {
+            const auto words = [&](uint32_t w, uint32_t w2) {
+                return "CAPS 0x" + hex32(w) +
+                       (D->n_caps > 1 ? " CAPS2 0x" + hex32(w2)
+                                      : std::string());
+            };
+            D->caps_refusal = "cft_get_image_id: the tiles of this image "
+                              "publish different CAPS words, so no one set "
+                              "of them names it - " + tile_name(*D, tt) +
+                              " publishes " + words(c, c2) + " and " +
+                              tile_name(*D, 0) + " " +
+                              words(D->caps_words[0], D->caps_words[1]) +
+                              ". A mixed layout (docs/LAYOUTS.md) needs a "
+                              "word pair per tile, which this call does not "
+                              "carry, and this library opens it as if every "
+                              "tile were tile 0";
+            break;
+        }
+    }
+
     D->version      = ver;
     *format_mask    = caps & 0xFu;
     *op_groups      = (caps >> 8) & 0xFFu;
@@ -2102,6 +2272,30 @@ extern "C" int cftx_open(const char *artifact, int index, void **out,
 extern "C" void cftx_close(void *hw)
 {
     delete static_cast<Dev *>(hw);
+}
+
+/* The image's identity, as cftx_open recorded it (backend.h). Touches no
+ * device, so it answers on a poisoned handle: what was loaded is still
+ * what was loaded. */
+extern "C" int cftx_image_id(void *hw, cft_image_raw *out)
+{
+    return at_boundary("reading the device image's identity", [&]() -> int {
+        g_err.clear();
+        const Dev *D = static_cast<const Dev *>(hw);
+        if (!D || !out)
+            return ST_INVALID_ARGUMENT;
+        if (!D->caps_refusal.empty()) {
+            set_err(D->caps_refusal);
+            return ST_UNSUPPORTED;
+        }
+        std::memcpy(out->sha256, D->image_sha256, sizeof out->sha256);
+        out->bytes   = D->image_bytes;
+        out->version = D->version;
+        out->n_caps  = D->n_caps;
+        for (int i = 0; i < 4; i++)
+            out->caps[i] = D->caps_words[i];
+        return ST_OK;
+    });
 }
 
 /* ---- the buffer seam (backend.h) ---------------------------------- */

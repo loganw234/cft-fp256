@@ -1211,6 +1211,66 @@ CFT_API cft_status cft_get_caps(cft_device *dev, cft_caps *out)
     return CFT_OK;
 }
 
+/* The device image's identity (cft.h). The same size handshake as
+ * cft_get_caps above, for the same reason.
+ *
+ * Only an XRT handle has an image to name. The other two are refused BY
+ * NAME, with struct_size set to 0 so that a caller who reads the struct
+ * without the status still sees that nothing was filled - never a digest
+ * of zeros that reads as one. Both sentences stay well inside the 320
+ * bytes of the default CFT_ERRMSG_MAX. */
+CFT_API cft_status cft_get_image_id(cft_device *dev, cft_image_id *out)
+{
+    size_t want;
+
+    if (!dev || !out)
+        return CFT_ERR_INVALID_ARGUMENT;
+    want = out->struct_size;
+    if (want < sizeof(size_t))
+        return CFT_ERR_INVALID_ARGUMENT;
+
+#ifdef CFT_ENABLE_XRT
+    if (dev->backend == CFT_BACKEND_XRT) {
+        cft_image_id c;
+        cft_image_raw raw;
+        int st;
+        memset(&raw, 0, sizeof raw);
+        backend_call();
+        st = cftx_image_id(dev->hw, &raw);
+        if (st != CFT_OK) {
+            out->struct_size = 0;
+            return (cft_status)st;
+        }
+        memset(&c, 0, sizeof c);
+        memcpy(c.sha256, raw.sha256, sizeof c.sha256);
+        c.image_bytes = raw.bytes;
+        c.version     = raw.version;
+        c.n_caps      = raw.n_caps;
+        memcpy(c.caps, raw.caps, sizeof c.caps);
+        if (want > sizeof c)
+            want = sizeof c;
+        c.struct_size = want;
+        memcpy(out, &c, want);
+        return CFT_OK;
+    }
+#endif
+    out->struct_size = 0;
+    if (dev->backend == CFT_BACKEND_REMOTE) {
+        cft_set_error("cft_get_image_id: a remote handle cannot know its "
+                      "server's device image - HELLO carries the server's "
+                      "decoded device fields, not an xclbin digest, raw CAPS "
+                      "words or the server's build (docs/REMOTE.md). Record "
+                      "the server's cft_caps and this client's "
+                      "cft_build_id()");
+        return CFT_ERR_UNSUPPORTED;
+    }
+    cft_set_error("cft_get_image_id: the software backend loads no device "
+                  "image - no xclbin to hash and no CAPS register to read. "
+                  "What determines its bits is this library, whose identity "
+                  "is cft_build_id()");
+    return CFT_ERR_UNSUPPORTED;
+}
+
 CFT_API int cft_supports(cft_device *dev, cft_op op, cft_format fmt)
 {
     int group;

@@ -341,6 +341,7 @@ BUILD_OUTPUTS = {
     "host/api-test": ("host/Makefile", r"(?m)^api-test\$\(EXE\):"),
     "host/remote-test": ("host/Makefile", r"(?m)^remote-test\$\(EXE\):"),
     "host/libcft.a": ("host/Makefile", r"(?m)^libcft\.a:"),
+    "host/gen": ("host/Makefile", r"(?m)^BUILD_ID_H\s*:=\s*gen/cft_build_id\.h$"),
     "vectors/out": ("Makefile", r"--out vectors/out"),
     "verify/state": ("verify/run.sh", r'STATEROOT="\$ROOT/verify/state"'),
     "verify/_mpfr-prefix": ("verify/run.sh", r'pfx="\$ROOT/verify/_mpfr-prefix"'),

@@ -19,7 +19,9 @@
  * the one place softfloat.c is not a transliteration of the model.
  */
 
+#include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "cft.h"
@@ -510,6 +512,48 @@ static int lane_cut_misreads(lane_windows_fn fn, int trials, int report,
     return misread;
 }
 
+/* cft_build_id()'s grammar, exactly as cft.h gives it: "unknown", or
+ * "commit=" and 40 or 64 lowercase hex digits, " tracked=clean" or
+ * " tracked=modified", " untracked=none" or " untracked=present", and
+ * nothing after. Returns 1, or 0 with the first thing wrong in `why`. A
+ * certificate carries these words and a reader parses them, so a
+ * near-miss - a short commit, "dirty", a trailing space - is a failure
+ * here and not a style point. */
+static int build_id_form(const char *s, char *why, size_t n)
+{
+    size_t h = 0;
+    const char *p;
+    if (!strcmp(s, "unknown"))
+        return 1;
+    if (strncmp(s, "commit=", 7)) {
+        snprintf(why, n, "it is neither \"unknown\" nor \"commit=...\"");
+        return 0;
+    }
+    p = s + 7;
+    while ((p[h] >= '0' && p[h] <= '9') || (p[h] >= 'a' && p[h] <= 'f'))
+        h++;
+    if (h != 40 && h != 64) {
+        snprintf(why, n, "its commit has %lu lowercase hex digits, not 40 "
+                 "or 64", (unsigned long)h);
+        return 0;
+    }
+    p += h;
+    if (!strncmp(p, " tracked=clean", 14)) {
+        p += 14;
+    } else if (!strncmp(p, " tracked=modified", 17)) {
+        p += 17;
+    } else {
+        snprintf(why, n, "\" tracked=clean\" or \" tracked=modified\" does "
+                 "not follow the commit");
+        return 0;
+    }
+    if (!strcmp(p, " untracked=none") || !strcmp(p, " untracked=present"))
+        return 1;
+    snprintf(why, n, "it ends \"%s\", not \" untracked=none\" or "
+             "\" untracked=present\"", p);
+    return 0;
+}
+
 /* ------------------------------------------------------------------ */
 
 int main(void)
@@ -533,6 +577,84 @@ int main(void)
     CHECK(strcmp(cft_op_name((cft_op)15), "reserved") == 0,
           "unassigned op name");
     CHECK(cft_strerror(CFT_ERR_BUS_FAULT) != NULL, "strerror");
+
+    /* --- the build id (cft.h, cft_build_id) ----------------------- *
+     *
+     * Printed first, so every log of this binary says which library it
+     * tested - this binary links libcft.a statically and carries the id
+     * of the archive it was linked against. Its form is held exactly.
+     * `make test` hands it the tree's id as of now in
+     * CFT_EXPECT_BUILD_ID, and a binary that differs is a stale one: it
+     * is testing a library the tree no longer builds (CLAUDE.md). */
+    {
+        static const char *const good[] = {
+            "unknown",
+            "commit=0123456789abcdef0123456789abcdef01234567 tracked=clean "
+            "untracked=none",
+            "commit=0123456789abcdef0123456789abcdef01234567 "
+            "tracked=modified untracked=present",
+            "commit=0123456789abcdef0123456789abcdef0123456789abcdef"
+            "0123456789abcdef tracked=clean untracked=present",
+        };
+        static const char *const bad[] = {
+            "", "Unknown", "unknown ", "d18d3c2",
+            "commit=d18d3c2 tracked=clean untracked=none",
+            "commit=0123456789ABCDEF0123456789abcdef01234567 tracked=clean "
+            "untracked=none",
+            "commit=0123456789abcdef0123456789abcdef01234567 tracked=dirty "
+            "untracked=none",
+            "commit=0123456789abcdef0123456789abcdef01234567 tracked=clean "
+            "untracked=none ",
+            "commit=0123456789abcdef0123456789abcdef01234567 tracked=clean",
+            "commit=0123456789abcdef0123456789abcdef01234567  tracked=clean "
+            "untracked=none",
+        };
+        const char *id = cft_build_id();
+        const char *want = getenv("CFT_EXPECT_BUILD_ID");
+        char why[200];
+        size_t k;
+        int misread = 0;
+
+        /* The form check's own controls, before it is trusted with the
+         * library's answer: a check that accepted everything would pass
+         * every id there is. */
+        for (k = 0; k < sizeof good / sizeof good[0]; k++)
+            if (!build_id_form(good[k], why, sizeof why)) {
+                printf("  the build-id form check refused \"%s\": %s\n",
+                       good[k], why);
+                misread++;
+            }
+        for (k = 0; k < sizeof bad / sizeof bad[0]; k++)
+            if (build_id_form(bad[k], why, sizeof why)) {
+                printf("  the build-id form check accepted \"%s\"\n", bad[k]);
+                misread++;
+            }
+        CHECK(misread == 0, "the build-id form check misread %d of its %lu "
+              "controls", misread,
+              (unsigned long)(sizeof good / sizeof good[0] +
+                              sizeof bad / sizeof bad[0]));
+
+        CHECK(id != NULL, "cft_build_id() returned NULL");
+        if (id) {
+            printf("api-test: libcft build %s\n", id);
+            CHECK(build_id_form(id, why, sizeof why),
+                  "cft_build_id() is \"%s\", which is neither form cft.h "
+                  "gives: %s", id, why);
+            CHECK(strcmp(cft_build_id(), id) == 0,
+                  "cft_build_id() changed between two calls");
+            if (want) {
+                CHECK(strcmp(id, want) == 0,
+                      "this api-test carries libcft build \"%s\" and the "
+                      "tree is \"%s\" now - it is stale: it links libcft.a "
+                      "statically and was not relinked since the library "
+                      "was rebuilt (make -C host api-test)", id, want);
+            } else {
+                printf("api-test: the build id was not held to the tree's "
+                       "(CFT_EXPECT_BUILD_ID is unset; make -C host test "
+                       "sets it)\n");
+            }
+        }
+    }
 
     /* --- open, caps ---------------------------------------------- */
     st = cft_open(NULL, 0, &dev);
@@ -569,6 +691,51 @@ int main(void)
         small.struct_size = 0;
         CHECK(cft_get_caps(dev, &small) == CFT_ERR_INVALID_ARGUMENT,
               "struct_size 0 must be refused");
+    }
+
+    /* The device image's identity (cft.h, cft_get_image_id). The
+     * software backend has no image, so the answer is a refusal BY NAME
+     * - never a digest of zeros that reads as one: CFT_ERR_UNSUPPORTED,
+     * a sentence that names the backend and where its identity is
+     * instead, struct_size set to 0, and not one other byte written
+     * (the struct is filled with 0xA5 first, so a write shows). The
+     * argument refusals come first, as on every backend. The remote
+     * handle's refusal is held by device-test through a loopback server
+     * (verify/run.sh's remote stage), and the XRT digest on a card
+     * (hw/card-identity.sh). */
+    {
+        cft_image_id im;
+        const unsigned char *b = (const unsigned char *)&im;
+        size_t k, wrote = 0;
+        const char *msg;
+
+        memset(&im, 0xA5, sizeof im);
+        im.struct_size = sizeof im;
+        st = cft_get_image_id(dev, &im);
+        msg = cft_last_error();
+        CHECK(st == CFT_ERR_UNSUPPORTED, "cft_get_image_id on the software "
+              "backend: %s, not CFT_ERR_UNSUPPORTED", cft_strerror(st));
+        CHECK(strstr(msg, "software backend") && strstr(msg, "cft_build_id"),
+              "the software backend's image refusal names neither itself "
+              "nor where its identity is: \"%s\"", msg);
+        CHECK(im.struct_size == 0, "a refused cft_get_image_id reports %lu "
+              "bytes filled, not 0", (unsigned long)im.struct_size);
+        for (k = offsetof(cft_image_id, sha256); k < sizeof im; k++)
+            wrote += b[k] != 0xA5;
+        CHECK(wrote == 0, "a refused cft_get_image_id wrote %lu bytes of "
+              "the struct past struct_size", (unsigned long)wrote);
+
+        memset(&im, 0, sizeof im);
+        im.struct_size = sizeof im;
+        CHECK(cft_get_image_id(NULL, &im) == CFT_ERR_INVALID_ARGUMENT,
+              "cft_get_image_id(NULL, ...) must be an argument error");
+        CHECK(cft_get_image_id(dev, NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "cft_get_image_id(dev, NULL) must be an argument error");
+        im.struct_size = sizeof(size_t) - 1;
+        CHECK(cft_get_image_id(dev, &im) == CFT_ERR_INVALID_ARGUMENT &&
+              im.struct_size == sizeof(size_t) - 1,
+              "a struct_size below sizeof(size_t) must be an argument error, "
+              "with the struct untouched");
     }
 
     /* max_scratch, appended at ABI 0.10, and the same sentinel proof

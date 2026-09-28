@@ -60,7 +60,7 @@ INC     := -Iinclude
 SRC     := src/bigint.c src/softfloat.c src/device.c src/divsqrt.c \
            src/clause5.c src/chars.c src/augmented.c src/mpfloat.c src/transcend.c \
            src/program.c src/reduce.c src/formatof.c src/conformance.c \
-           src/sha256.c src/backend_remote.c
+           src/sha256.c src/backend_remote.c src/build_id.c
 OBJ     := $(SRC:.c=.o)
 PICOBJ  := $(SRC:.c=.lo)
 
@@ -207,11 +207,70 @@ HDRS := $(wildcard include/*.h) $(wildcard src/*.h)
 $(OBJ) $(PICOBJ): $(HDRS)
 
 %.o: %.c
-	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $(XRTDEF) -c $< -o $@
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $(XRTDEF) $(IDDEF) -c $< -o $@
 
 %.lo: %.c
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $(XRTDEF) $(PIC) $(SHDEF) \
-		-c $< -o $@
+		$(IDDEF) -c $< -o $@
+
+# ====================================================================
+# The build id (cft.h, cft_build_id): which source tree this build came
+# from - the commit, whether tracked files were modified, and whether
+# untracked files were present.
+#
+# tools/gen_build_id.sh asks git on every make that builds libcft or
+# anything linking it - the header's only prerequisite is phony - and
+# rewrites the header only when the id changes. make re-reads a target's time after its recipe runs, so an
+# unchanged tree rebuilds nothing, and a changed one recompiles
+# src/build_id.o, re-archives libcft.a and relinks whatever links it:
+# a binary made here never carries an earlier tree's id.
+#
+# The header lives in gen/, OUTSIDE src/ and include/: bindings/arduino/
+# sync.py vendors both whole, from disk, so a generated file in either
+# fails `sync.py --check` on every commit. And .gitignore ignores
+# host/gen/, or the build's own output would be the untracked file that
+# marks its next build dirty.
+#
+# Only src/build_id.o and .lo are handed the header, through IDDEF.
+# Every other build of that file - profiles-check, the fuzz harnesses,
+# the WebAssembly module, the Arduino copy, anything outside this
+# Makefile - compiles the "unknown" it holds without one, because none
+# of them ran the generator.
+#
+#   make print-build-id   the tree's id as of now; writes nothing
+#   make buildidtest      the id regenerated, watched: tests/build_id_check.sh
+#
+# GIT names the git to ask; an absent one makes the id "unknown".
+# ====================================================================
+GIT        ?= git
+BUILD_ID_H := gen/cft_build_id.h
+IDDEF      :=
+.PHONY: build-id-force print-build-id buildidtest clean-build-id
+
+$(BUILD_ID_H): build-id-force
+	@GIT="$(GIT)" $(SHELL) tools/gen_build_id.sh $@
+build-id-force:
+
+src/build_id.o src/build_id.lo: $(BUILD_ID_H)
+src/build_id.o src/build_id.lo: IDDEF := -DCFT_BUILD_ID_H='"../$(BUILD_ID_H)"'
+
+print-build-id:
+	@GIT="$(GIT)" $(SHELL) tools/gen_build_id.sh --print
+
+# In a scratch repository of its own, never this tree: a clean commit, a
+# tracked file edited, an untracked file added, a new commit, a git whose
+# status warns and exits 0, one whose status fails quietly, a linked
+# worktree beside the main one, no repository at all, a copy inside
+# another repository and no git - each built with this Makefile's own
+# recipe and held to its id - and an unchanged tree rebuilding nothing.
+# The script says what each step proves.
+buildidtest:
+	@CC="$(CC)" MAKE="$(MAKE)" GIT="$(GIT)" EXE="$(EXE)" OS="$(OS)" \
+		$(SHELL) tests/build_id_check.sh
+
+clean: clean-build-id
+clean-build-id:
+	rm -rf gen
 
 %.o: %.cpp
 	$(CXX) $(CXXSTD) $(CFLAGS) $(WARN) $(INC) $(XRTINC) -c $< -o $@
@@ -369,8 +428,16 @@ device-test$(EXE): tests/device_test.c libcft.a
 #                   over the far/near alignment boundary that neither
 #                   of the first two reaches. Needs Python and takes a
 #                   few minutes, so it is its own target.
-test: all $(TESTS)
-	./api-test$(EXE)
+#
+# api-test is handed the tree's build id as of now, and fails if the one
+# compiled into it differs: a test binary links libcft.a statically, so
+# one left from an earlier library tests that library (CLAUDE.md). Here
+# it cannot be, since $(TESTS) are prerequisites; the check is what
+# fails if that ever stops being true. buildidtest is the id itself,
+# regenerated and watched, in a scratch repository.
+test: all $(TESTS) buildidtest
+	CFT_EXPECT_BUILD_ID="$$(GIT="$(GIT)" $(SHELL) tools/gen_build_id.sh --print)" \
+		./api-test$(EXE)
 	./reduce-parts$(EXE)
 	./cft-selftest$(EXE) ../vectors/out
 	./vector-fma$(EXE) > .out-c.txt
@@ -398,7 +465,8 @@ test: all $(TESTS)
 # out to overwrite the stack (cft_config.h, where a cft_bn that narrow
 # is now refused with them, however it was reached).
 #
-# What it compiles, the fifteen sources each, with the library's flags:
+# What it compiles, the sixteen sources each (fifteen until src/build_id.c
+# joined on 2026-09-28; $(SRC) is the list), with the library's flags:
 #
 #   the profiles docs/EMBEDDED.md names - CFT_TINY, CFT_TINY at fp128,
 #     the 32-bit boards' - and the default;

@@ -66,7 +66,8 @@ reproduces the library exactly as it was, and defines one profile
 macro, `CFT_TINY`, that turns on the set an 8-bit part needs.
 
 **What "reproduces it exactly" is worth, measured.** Fourteen of the
-library's fifteen translation units compile at the default profile to
+fifteen translation units the library had then (`src/build_id.c`, the
+sixteenth, came on 2026-09-28) compile at the default profile to
 objects that are byte-identical to the ones the same compiler produced
 before `cft_config.h` existed. The fifteenth is `device.c`: same
 sections, same symbols, same sizes, and the difference is fourteen
@@ -99,8 +100,9 @@ table reachable from one live function is not collected.
 
 **That every profile, and every switch, still compiles is checked in
 the runner.** `make -C host profiles-check`, which runs in
-`verify/run.sh`'s `libcft` stage, compiles the library's fifteen
-sources at the default, at `CFT_TINY`, at `CFT_TINY CFT_MAX_FORMAT=2`,
+`verify/run.sh`'s `libcft` stage, compiles the library's sixteen
+sources (fifteen until `src/build_id.c`, 2026-09-28) at the default, at
+`CFT_TINY`, at `CFT_TINY CFT_MAX_FORMAT=2`,
 at the boards' `CFT_NO_REMOTE CFT_NO_CONFORMANCE`, at the `ARDUINO`
 auto-profile, at each `CFT_NO_` switch in the table above on its own,
 at `CFT_CHUNK` and `CFT_ERRMSG_MAX` on their own at their tiny values,

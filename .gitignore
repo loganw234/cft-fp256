@@ -67,6 +67,11 @@ host/vector-fma-rs
 host/*.pdb
 host/.out-*.txt
 host/.out-*.err
+# The build id's header, written by host/tools/gen_build_id.sh on every
+# make (cft.h, cft_build_id). Ignored for a reason beyond tidiness: the
+# id counts untracked files, so a header left visible to git would be
+# the untracked file that marks the NEXT build dirty.
+host/gen/
 
 # downloaded reference material, kept locally and never redistributed.
 # This repo is Apache-2.0 and public; third-party pages carry their own
