@@ -3361,6 +3361,169 @@ its own (the project's list, unranked):
   each is about 4 s a 25-year run. Quoted as given: 25 years of hourly
   segments is about 219,000 (verifier-V10).
 
+### Segments, certificates and the audit tool (plan of record, 2026-09-28)
+
+Step 2 of the controlled-divergence work order. A service that sells
+deterministic runs has to hand over, with the bits, a statement anyone
+can check: what ran, on what, from what, and how accurate it is. It
+also needs an audit tool that checks that statement on an
+implementation the service does not control. This section is the plan;
+nothing in it exists yet unless it says so.
+
+**What a certificate says.** "These bits came from this program, these
+inputs and these parameters, on this library and this device image;
+any conforming implementation reproduces them from the same inputs;
+and their accuracy is this, of this kind."
+
+**Decided (Logan, 2026-09-28).**
+- The certificate is designed so that a signature can be added later,
+  and it is not signed now.
+- It carries accuracy beside identity: the method's own error estimate
+  and conserved-quantity drift, beside the model, program and input
+  hashes. This is a side project's ask, passed on by Logan: "these
+  bits, reproducible, method error <= X".
+
+**The lead's rules for it.**
+- **Every accuracy field names its kind.**
+  - A *bound* is proved: a rigorous remainder, or an enclosure such as
+    cft-enclose's intervals.
+  - An *estimate*: a Taylor tail, the difference between two
+    extrapolation levels, a step-halving difference.
+  - A *measurement* is exact for these bits: conserved-quantity drift.
+  - "Method error <= X" is written only as a bound. An estimate says
+    "estimated at X".
+- **Rounding error is estimated separately.** A segment is re-run with
+  the same scheme and the same constants, exactly widened, one format
+  wider. A run that derives its constants in each format, as cft-orbits'
+  setup does, is a different discrete scheme at a wider format; the same
+  constants, widened, isolate the rounding.
+- **The certificate is strict.** A reader refuses by name any line it
+  does not expect, any line missing, and any count that disagrees.
+  cft-orbits' checkpoint reader is lenient today: it ignores unknown
+  keys and does not notice a missing line (read from the code by the
+  round's survey, 2026-09-28).
+
+**What the tree already has** (the survey of 2026-09-28, read from the
+code):
+- **Segments.** A sequencer program whose whole state enters through
+  `scratch_in` and leaves through `scratch_out` is a segment
+  (docs/SEQUENCER.md: scratch-out "is what lets a run be resumed by the
+  next one").
+  - The three ODE programs (`programs/gen_odes.py`) are written that
+    way, with the step and the parameters in an external bank.
+  - cft-orbits' `--engine segments` runs its integration so.
+  - Chaining ODE segments exists only inside `programs/check.py`'s
+    resume arm.
+- **Digests.**
+  - `cft_program_digest` is SHA-256 of the image bytes loaded and the
+    bank, with twins in the golden model (`seq.Program.digest`,
+    `asm.Image.digest`); `cft_sha256` exposes the hash itself.
+  - cft-orbits' record chain is `chain_(i+1) = SHA-256(chain_i ||
+    record_i || "\n")`, and its records hold every member's exact state
+    at every sample.
+- **An independent executor.** The golden model's `seq.run` runs one
+  segment from any given state. `programs/check.py` and
+  `host/tests/orbits_check.py` already compare it with the library, bit
+  for bit, on a few segments.
+- **No identity for a build or a bitstream.**
+  - Nothing identifies a BUILD of the library: `cft_abi_version` is
+    0.14 and did not move with the 2026-09-25 round's fixes.
+  - Nothing identifies a BITSTREAM: `device_version` is the register
+    map's VERSION, the same for two builds, and the xclbin's UUID stays
+    inside the XRT backend.
+  - `hw/rebuild-2022.sh` writes each image's sha256 and commit to a
+    manifest, outside the library.
+- **No method-error estimator** exists anywhere in the tree.
+
+**The format** (the lead's proposal):
+- **Text.** One field a line, in a fixed order the specification lists:
+  the checkpoint's style, which this project already reads and writes,
+  and which an auditor can reimplement from the page. A magic line
+  (`cft-certificate 1`), then the body, then `end`.
+  - Integers are in decimal.
+  - Digests and element values are in hex, and an element is also given
+    in exact decimal where a person reads it.
+- **The body's hash** is SHA-256 over every byte from the magic line to
+  `end` and its newline.
+- **A signature, later,** is a block after `end` that signs that hash,
+  so adding one changes no byte the hash covers. A version-1 reader
+  accepts a certificate with no signature, and refuses by name one
+  whose signature scheme it does not know, rather than skip it.
+- **Salting.** State hashes are keyed: HMAC-SHA-256 with a salt the
+  certificate's owner keeps, so a published certificate says nothing
+  about the states.
+  - The owner hands the salt and the states to an auditor.
+  - The certificate carries the salt's own hash, so the auditor knows
+    it is the one that was used.
+- **The fields, in order:**
+  - **identity:**
+    - the certificate format;
+    - the library's build: commit and a clean-or-dirty mark (new);
+    - the backend and the device: for XRT, the xclbin's sha256 (new),
+      the tile count and the caps words;
+    - the program: `cft_program_digest`'s image-and-bank digest, and
+      the format;
+  - **the run:** lanes, segments, steps a segment, and the numeric
+    parameters the bank does not carry;
+  - **the chain:** for each segment, its start and end state hashes, its
+    flag word and its STATUS. Segment k's end is segment k+1's start;
+  - **accuracy:** typed entries, each giving the quantity, its kind, the
+    method, the exact value, its scope (per lane, or the maximum over
+    lanes) and how it was computed;
+  - **the output:** the final state's hash.
+
+**The audit tool.**
+- **What it checks.** It is given a certificate, the program image and
+  bank, the salt, and the states it needs. It checks:
+  - the certificate's own hash and strict form;
+  - the digests of the program and bank it was handed;
+  - the chain's continuity;
+  - chosen segments, re-run from their certified start states (all of
+    them, a seeded random sample, or named ones), each ending on its
+    certified end state.
+  Every mismatch is a refusal by name.
+- **Two auditors,** because an audit needs an implementation the
+  service does not control: the golden model (Python, independent of
+  libcft) and libcft's software backend (independent of the card).
+  Their verdicts must agree.
+- **Accuracy is re-derived too.** An estimate comes from a
+  deterministic procedure, so the auditor re-derives it bit for bit; a
+  measurement likewise.
+
+**Order of work.** Each piece has its own gate, watched failing, and a
+verifier.
+1. **The specification and the golden model's implementation.** A new
+   docs/CERTIFICATES.md, plus encode, strict parse, hash, chain and
+   audit in the golden model. Its negative controls must each be
+   refused by name: a byte flipped; a line dropped, added or moved; a
+   count changed; an unknown signature scheme.
+2. **Identity in libcft.**
+   - A build id compiled in: commit and clean-or-dirty. Where no
+     repository is at hand it is "unknown", recorded as such, and an
+     auditor reports it as unverifiable.
+   - The xclbin's sha256, from the XRT backend.
+   Both are measured on the card.
+3. **A segment runner.** A tool that runs a program as consecutive
+   segments, carries state through the scratch block, keeps the states
+   at each boundary, and writes the certificate. Its differential gate:
+   the certificate is byte for byte what the golden model writes for
+   the same run. First on the three ODE programs.
+4. **The audit tool in C,** beside the golden one. Both run in the gate
+   on certificates with planted defects.
+5. **Accuracy.**
+   - Conserved-quantity drift where the model has one (Hénon-Heiles'
+     energy).
+   - A step-halving estimate for the fixed-step programs: the same image
+     with the bank's step halved and the steps doubled, measured against
+     the ODE rows' 300-digit arm.
+   - The rounding estimate: a re-run one format wider with the constants
+     widened exactly.
+6. **cft-orbits' runs,** certified from its records and chain, which
+   already hold the states.
+
+Not in step 2: signing; per-lane flags (a step-4 hardware ask); and a
+bound for any method that has no rigorous remainder.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
