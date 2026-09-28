@@ -218,7 +218,8 @@ def ensemble(base, fmt, lanes):
 
 def manifest():
     m = {}
-    for line in (PROGRAMS / "MANIFEST").read_text(encoding="utf-8").splitlines():
+    text = (PROGRAMS / "MANIFEST").read_text(encoding="utf-8")
+    for line in text.splitlines():
         if line.strip() and not line.startswith("#"):
             h, name = line.split()
             m[name] = h
@@ -414,7 +415,8 @@ def certify_and_hold(prog, chains, mode, work, device="sw", tag="",
     check(not wrong, f"{what}: every boundary file is the golden chain's "
           f"state there, lane-major", f"(run, boundary) {wrong[:4]} differ")
     states = {r: {b: boundary_file(sdir, r, b).read_bytes()
-                  for b in range(len(st)) if boundary_file(sdir, r, b).is_file()}
+                  for b in range(len(st))
+                  if boundary_file(sdir, r, b).is_file()}
               for r, (st, _) in enumerate(chains)}
     progs = {r: (spec.image, spec.bank) for r, spec in enumerate(prog.runs)}
     try:
@@ -761,6 +763,16 @@ def hold_refusals(work, l63, flag):
          lambda o, s: base(o, s, extra=["--h-slots", "0"]), None, None),
         ("CFT_SEGRUN_PLANT=bogus", "usage", lambda o, s: base(o, s),
          {"CFT_SEGRUN_PLANT": "bogus"}, None),
+        # the two small modes' own
+        ("--hash with a kind there is not", "usage",
+         lambda o, s: ["--hash", "sideways", P["init"], "--open"], None,
+         None),
+        ("--hash state with neither --salt nor --open", "usage",
+         lambda o, s: ["--hash", "state", P["init"]], None, None),
+        ("--hash commitment with no salt", "usage",
+         lambda o, s: ["--hash", "commitment", "--open"], None, None),
+        ("--build-id with anything else", "usage",
+         lambda o, s: ["--build-id", "--open"], None, None),
         ("a device that does not open", "device",
          lambda o, s: base(o, s, extra=["--device", d / "absent.xclbin"]),
          None, None),
@@ -944,7 +956,8 @@ def main():
         chains[prog.name] = [cert.run_chain(s.image, s.bank, s.init,
                                             s.segments) for s in prog.runs]
         shape = ", ".join(
-            f"{s.kind} {s.fmt} {len(st[0]) // seq.Program.from_bytes(s.image).n_scratch_in}"
+            f"{s.kind} {s.fmt} "
+            f"{len(st[0]) // seq.Program.from_bytes(s.image).n_scratch_in}"
             f" lanes x {s.segments}"
             for s, (st, _) in zip(prog.runs, chains[prog.name]))
         print(f"  {prog.name}: {shape}; the golden chains in "
@@ -967,8 +980,8 @@ def main():
             continue
         made = {}
         for mode in ("keyed", "open"):
-            print(f"== {prog.name}, {mode}{' on ' + args.device if card else ''}",
-                  flush=True)
+            where = f" on {args.device}" if card else ""
+            print(f"== {prog.name}, {mode}{where}", flush=True)
             res = certify_and_hold(prog, chains[prog.name], mode, work,
                                    device=args.device,
                                    tag=" card" if card else "",

@@ -994,7 +994,8 @@ builds it, from `host/tools/segrun.c`.
                           --segments S --steps K [--param NAME=N ...]
                [--run half-step --h-slots I,J,... --image IMG ...]
                [--run wider --image IMG ...]
-    cft-segrun --hash state|stream-a|stream-b|stream-c FILE (--salt SALT | --open)
+    cft-segrun --hash state|stream-a|stream-b|stream-c FILE
+               (--salt SALT | --open)
     cft-segrun --hash commitment --salt SALT
     cft-segrun --build-id
 
@@ -1052,9 +1053,9 @@ golden audit takes the files as `states={r: {b: bytes}}`.
 - `device-tiles` is `cft_caps.tiles`, the server's through a remote
   handle, and `unknown` for 0.
 
-**Refusals.** Before anything runs, the tool refuses what the golden
-writer (`cert.run_chain`, `certify_run`, `encode`) refuses, by the same
-names and codes:
+**Refusals.** Before anything runs, the tool refuses a defective input by
+the page's name and code for it, the name the golden writer
+(`cert.run_chain`, `certify_run`, `encode`) gives the same defect:
 - `salt-length`, for a salt that is not 32 bytes;
 - `program-image`, for an image whose header does not describe its
   bytes, a bank that is not the size the image addresses (or any bank
@@ -1065,15 +1066,16 @@ names and codes:
   lanes, at least one;
 - `malformed`, for a count or index out of its spelling or range, a
   half-step run with no h-slots, run 0 not `main` or a later run that
-  is, and no run at all; and, at a segment, a flag word the library
-  reports past the five sticky flags, which no reader could read;
+  is, and no run at all;
 - `line-unexpected` and `line-order`, for a parameter named twice, or
   out of byte order.
 
 For two of these the golden writer has no name. An image that does not
 load, and an empty initial state, each make it raise
 `seq.ProgramError`, and the tool uses the table's `program-image` and
-`state-shape`.
+`state-shape`. At a segment, a flag word the library reports past the
+five sticky flags, which no reader could read, is `malformed`, as the
+golden writer's `encode` refuses it.
 
 A writer needs three more, which the golden writer, an API rather than
 a command, never meets. They are the tool's, in sysexits' codes, of
@@ -1094,7 +1096,12 @@ boundary files it wrote, and says so. No backend in this tree reports
 flags it cannot read, leaves a flag word unwritten or reports one past
 31, so `CFT_SEGRUN_PLANT` is an instrument for the tests of those three
 refusals: `flags-unreadable`, `flags-unwritten` or `flags-wide`. Each
-only ever causes a refusal, and says so.
+only ever causes a refusal, and says so. The refusals only a failing
+library or device can reach have no test, since nothing on the desktop
+fails that way: `cft_get_caps`, `cft_program_get_info`,
+`cft_program_digest` or a segment's `cft_program_run_ex` returning an
+error; the library reading an image's header differently from the tool;
+`cft_build_id()` outside its grammar; and a short write.
 
 **What it certifies, and what it does not.** It certifies what ran:
 which states each segment started and ended on, as hashes, with its
@@ -1129,13 +1136,15 @@ Each program is certified keyed and open on the software backend. Then:
   builds, and the software backend's device lines `none`.
 
 It also holds the test vectors, and each tag keyed and open against an
-HMAC written from RFC 2104 in the gate. It holds every refusal by its
-name and code, and the golden writer's name for the same defect where
-it has one. Last, it makes one certificate through a loopback cft-serve,
-stopped by its PID. That certificate's device lines must be the remote
-rule's, and its run blocks byte for byte the software backend's. It
-also holds git to ignoring the tool's binary. 285 checks, 45 to 55 s on
-the Windows desktop at about half load, and 43 s in WSL (2026-09-28).
+HMAC written from RFC 2104 in the gate. It holds every refusal above
+that an input or the instrument can cause, by its name and code, and
+the golden writer's name for the same defect where it has one. Last, it
+makes one certificate through a loopback cft-serve, stopped by its PID.
+That certificate's device lines must be the remote rule's, and its run
+blocks byte for byte the software backend's. It also holds git to
+ignoring the tool's binary. 293 checks: 42 to 55 s on the Windows
+desktop at about half load, and 40 s in WSL for the 285 of 7f02d6a
+(2026-09-28).
 
 **On the card**, `hw/card-segrun.sh <image.xclbin>` runs the same gate
 with the certificates made on the tile. It holds the device lines to

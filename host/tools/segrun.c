@@ -13,7 +13,8 @@
  *                         --segments S --steps K [--param NAME=N ...]
  *              [--run half-step --h-slots I,J,... --image IMG ...]
  *              [--run wider --image IMG ...]
- *   cft-segrun --hash state|stream-a|stream-b|stream-c FILE (--salt SALT | --open)
+ *   cft-segrun --hash state|stream-a|stream-b|stream-c FILE
+ *              (--salt SALT | --open)
  *   cft-segrun --hash commitment --salt SALT
  *   cft-segrun --build-id
  *
@@ -188,7 +189,8 @@
 #if defined(__GNUC__)
 #  define NORETURN __attribute__((noreturn))
 #  if defined(__MINGW_PRINTF_FORMAT)
-#    define PRINTF_LIKE(f, a) __attribute__((format(__MINGW_PRINTF_FORMAT, f, a)))
+#    define PRINTF_LIKE(f, a) \
+         __attribute__((format(__MINGW_PRINTF_FORMAT, f, a)))
 #  else
 #    define PRINTF_LIKE(f, a) __attribute__((format(printf, f, a)))
 #  endif
@@ -199,7 +201,7 @@
 
 #define HEADER_BYTES  32
 #define SALT_BYTES    32
-#define MAX_HSLOTS    512      /* the page's h-slot count, and each slot below it */
+#define MAX_HSLOTS    512      /* h-slots at most, and each below it */
 #define MAX_NAME      64       /* a parameter's name, at most */
 #define FLAGS_KNOWN   (CFT_PROG_FLAG_BANK_EXT | CFT_PROG_FLAG_SCRATCH_IO | \
                        CFT_PROG_FLAG_SCRATCH_STRICT)
@@ -911,7 +913,8 @@ static void usage_text(FILE *f)
 "                        --segments S --steps K [--param NAME=N ...]\n"
 "             [--run half-step --h-slots I,J,... --image IMG ...]\n"
 "             [--run wider --image IMG ...]\n"
-"  cft-segrun --hash state|stream-a|stream-b|stream-c FILE (--salt SALT | --open)\n"
+"  cft-segrun --hash state|stream-a|stream-b|stream-c FILE\n"
+"             (--salt SALT | --open)\n"
 "  cft-segrun --hash commitment --salt SALT\n"
 "  cft-segrun --build-id\n"
 "\n"
@@ -954,7 +957,7 @@ static void once(const char **slot, const char *opt, const char *v)
     *slot = v;
 }
 
-/* ---- --hash ---------------------------------------------------------------- */
+/* ---- --hash ------------------------------------------------------------ */
 
 static int do_hash(const char *kind, const char *file, const uint8_t *salt)
 {
@@ -994,7 +997,7 @@ static int do_hash(const char *kind, const char *file, const uint8_t *salt)
     return 0;
 }
 
-/* ---- main ------------------------------------------------------------------ */
+/* ---- main -------------------------------------------------------------- */
 
 int main(int argc, char **argv)
 {
