@@ -1,11 +1,11 @@
 # The documents, by what you open them for
 
-Thirty-seven files, 50,566 lines. Flat in one directory they look like one
+Thirty-seven files, 50,573 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **16,842 lines you consult while working** — the three under *Start here*,
+- **16,844 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
-- **6,212 lines of tool manual**, one per shipped program;
+- **6,217 lines of tool manual**, one per shipped program;
 - **1,816 lines of operations**, read when you are about to do something to
   hardware;
 - **25,696 lines of record and argument** — the ledger, the roadmap and the
@@ -33,7 +33,7 @@ answer is not in here — it is `make verify-quick`, and
 | document | lines | what it is for |
 |---|---|---|
 | [INTEGRATION.md](INTEGRATION.md) | 253 | Choosing a path: which surface to use for which job. The shortest route from "I have a workload" to "I know what to call." |
-| [VERIFICATION.md](VERIFICATION.md) | 380 | Every gate, what it proves, how long it really takes. Twelve tiers, forty-one runner stages. |
+| [VERIFICATION.md](VERIFICATION.md) | 382 | Every gate, what it proves, how long it really takes. Twelve tiers, forty-one runner stages. |
 | [COMPLIANCE.md](COMPLIANCE.md) | 172 | IEEE 754-2019 clause by clause: what is implemented, what is refused, and where each is proven. |
 
 ## The contract
@@ -70,7 +70,7 @@ running.
 | document | lines | tool |
 |---|---|---|
 | [ZOOM.md](ZOOM.md) | 854 | `cft-zoom` — deep-zoom Mandelbrot reference orbits |
-| [ORBITS.md](ORBITS.md) | 1,605 | `cft-orbits` — symplectic few-body integration |
+| [ORBITS.md](ORBITS.md) | 1,610 | `cft-orbits` — symplectic few-body integration |
 | [MERSENNE.md](MERSENNE.md) | 882 | `cft-mersenne` — Lucas-Lehmer |
 | [ENCLOSE.md](ENCLOSE.md) | 845 | `cft-enclose` — directed-rounding interval enclosure |
 | [COLLATZ.md](COLLATZ.md) | 648 | `cft-collatz` — Collatz trajectories |

@@ -1011,7 +1011,12 @@ the run's and no longer hashed to its chain, on either engine
   left as it was; bc00d8d said only "cannot write the records file"
   (verifier-V6). A hidden file (Windows), which `"wb"`'s CREATE_ALWAYS
   refuses and which d56ecbe so could not write, is written like any
-  other (verifier-V6, and measured here: the run's records).
+  other (verifier-V6, and measured here: the run's records). The file's
+  own report of its size is trusted: on a filesystem that reported a
+  non-empty file as empty, a fresh run without `--checkpoint` would
+  leave the old tail after its records and exit 0. None has been found -
+  on this desktop, through the WSL share or in WSL (verifier-V6,
+  2026-09-28).
 - `--records` and `--checkpoint` naming one file are refused by name at
   the start, fresh or resumed, before a byte of either file is cut: the
   same path, or the checkpoint's `.tmp`, as written, before anything is

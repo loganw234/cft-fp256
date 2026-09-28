@@ -116,7 +116,9 @@ authority:
    interval enclosure, Mersenne, orbits, deep zoom - each against an
    independent oracle (big integers, mpmath, a 300-digit integration)
    and each proving its own determinism properties: same bits at every
-   batch size, from either engine, interrupted and resumed. Then the
+   batch size, from either engine, interrupted and resumed - and
+   cft-orbits killed mid-run on either engine and resumed by the other,
+   its records byte for byte (since 2026-09-25). Then the
    browser demos' compute core reproducing the C tools' chains over the
    module the page embeds.
 9. **The network** (`remote` stage, `make -C host remotetest` and
