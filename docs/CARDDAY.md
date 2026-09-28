@@ -683,9 +683,12 @@ they were handed over. What only a card can still say:
 script's sixteen checks over both round-2 images, the quick matrix 2,456 of
 2,456 after the new load path, and both negative controls red by name.
 The records are `Data/runs/2026-09-28-cert-round/card-p2/`, which is not
-tracked. What came after it, and is owed: step 2's two planted refusals,
-new with verifier-C3's send-back. Left as written below, because the
-list is also the recipe.*
+tracked. What came after it - step 2's two planted refusals, new with
+verifier-C3's send-back - was paid at 11:26 the same day, at 4d5d8e4:
+seventeen checks, 0 failed, the quad image refusing both plants by name
+on its four tiles, and the single image, with one tile, NOT TESTED by
+name (`card-p2b/`, beside `card-p2/`). Left as written below, because
+the list is also the recipe.*
 
 The certificate round's step 2 (docs/ROADMAP.md) gave the library two
 identity calls: `cft_build_id()` names the source tree a library was
@@ -740,7 +743,7 @@ runs. In order, each step an `ok` or a `FAIL` line:
    The server is stopped by PID.
 
 Steps 1 to 4 and 6 open images and read registers, and start no run on
-a tile. Step 5 is the quick matrix, 2,456 runs on the quad image, and a
+a tile. Step 5 is the quick matrix, 2,456 checks on the quad image, and a
 run there can time out like any other: if one does, reload the image
 before trusting anything after it (a load of the image already loaded
 is a no-op, and cures nothing). Keep the script's output with the day's

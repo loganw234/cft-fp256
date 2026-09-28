@@ -3078,7 +3078,8 @@ caller that needs either asks for 0.15.
   - a git whose status warns "could not open directory" and exits 0:
     `unknown` from the header and from `print-build-id`, with git's own
     words in the header's reason. It is red on the Windows desktop
-    against the generator before 2026-09-28, the one that lost stderr;
+    against the generator as first committed (e598b8f, 2026-09-28), the
+    one that lost stderr;
   - a git whose status fails and says nothing;
   - a linked worktree at one commit beside the main worktree at
     another: its own commit and its own status;
@@ -3117,8 +3118,10 @@ caller that needs either asks for 0.15.
     new load path, and both negative controls red by name. The records
     are `Data/runs/2026-09-28-cert-round/card-p2/`, which is not
     tracked;
-  - the planted refusals came after that card run, and are owed to the
-    next one.
+  - the planted refusals came after that card run, and were paid by
+    the next, at 11:26 the same day at 4d5d8e4: 17 of 17, the quad image
+    refusing both by name on its four tiles, and the single image, with
+    one tile, NOT TESTED by name (`card-p2b/`, beside `card-p2/`).
 * **Held by reading alone**: that the file is read ONCE, so the bytes
   hashed are the bytes loaded. A second read that returned other bytes
   would pass every gate here; verifier-C3 showed it on a mock of XRT,

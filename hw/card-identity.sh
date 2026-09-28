@@ -52,7 +52,7 @@
 # It loads each image it is given; a load of the image already loaded is
 # a no-op (docs/CARDDAY.md). Steps 1 to 4 and 6 open images and read
 # registers and start no run on a tile. Step 5 is the quick matrix, 2,456
-# runs on the quad image (the card, 2026-09-28), and a run there can time
+# checks on the quad image (the card, 2026-09-28), and a run there can time
 # out like any other: if a step reports a timeout, reload the image -
 # load another xclbin, then this one - before trusting anything after it.
 #

@@ -34,12 +34,13 @@
 #               0, as it does about a directory whose untracked files it
 #               then leaves out, answered with a whole id where it must
 #               be "unknown" - through make's own recipe, both for the
-#               header and for print-build-id. Until 2026-09-28 the
-#               generator kept git's stderr in a temporary file that
-#               make's shell and the cat it ran looked for in two
-#               different /tmp directories on the Windows desktop, and
-#               this step is red there against that generator
-#               (verifier-C3 found it)
+#               header and for print-build-id. The generator as first
+#               committed (e598b8f, 2026-09-28) kept git's stderr in a
+#               temporary file that make's shell and the cat it ran
+#               looked for in two different /tmp directories on the
+#               Windows desktop, and this step is red there against
+#               that generator (verifier-C3 found it; 7bfef09 fixed it
+#               the same day)
 #   a quiet failure
 #               a git status that fails and says nothing
 #   a linked worktree
