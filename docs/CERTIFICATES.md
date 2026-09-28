@@ -1097,11 +1097,17 @@ flags it cannot read, leaves a flag word unwritten or reports one past
 31, so `CFT_SEGRUN_PLANT` is an instrument for the tests of those three
 refusals: `flags-unreadable`, `flags-unwritten` or `flags-wide`. Each
 only ever causes a refusal, and says so. The refusals only a failing
-library or device can reach have no test, since nothing on the desktop
-fails that way: `cft_get_caps`, `cft_program_get_info`,
-`cft_program_digest` or a segment's `cft_program_run_ex` returning an
-error; the library reading an image's header differently from the tool;
-`cft_build_id()` outside its grammar; and a short write.
+library, device or filesystem can reach have no test, since nothing on
+the desktop fails that way:
+- `cft_get_caps`, `cft_program_get_info`, `cft_program_digest`,
+  `cft_sha256` or a segment's `cft_program_run_ex` returning an error;
+- the library reading an image's header differently from the tool, or
+  `cft_build_id()` answering outside its grammar;
+- once the run has begun, a state file or the certificate that cannot be
+  opened, written or closed, or a line that cannot be formatted;
+- more boundaries than the process can hold.
+Every other condition the lists above name has a test, and so does
+every refusal name; not every branch of `usage` has one.
 
 **What it certifies, and what it does not.** It certifies what ran:
 which states each segment started and ended on, as hashes, with its
