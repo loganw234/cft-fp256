@@ -767,6 +767,35 @@ before it was re-run in the same audit and matched: its end state is
 then the certified start. So a full audit handed only each run's
 initial state is possible, and is the most independent audit there is.
 
+**The shape of what it is handed.** Each argument is held to its shape
+by the step that reads it, before the step uses it, and an argument in
+another shape is refused by that step's name. In the golden model's
+terms (`cert.audit`), where a run index is an integer (never a bool)
+naming a run of this certificate:
+- `programs`: a mapping from every run index to (image, bank), the
+  image as bytes and the bank as bytes, or None for an image that
+  carries its own constants; a run missing, a key that is no run, or a
+  value of another shape is refused `program-image`;
+- `streams`: absent, or a mapping from run indices to (a, b, c), three,
+  each None for +0 or the run's lanes of elements, as integers (each
+  an element's bits) or as the bytes the library stores; a key that is
+  no run, or a value of another shape, is refused `stream`;
+- `states`: absent, or a mapping from run indices to a mapping from
+  boundary indices to states, each the run's elements as integers or
+  as bytes; a key that is no run or no boundary, or a state of another
+  shape, is refused `state-shape`;
+- `choose`: absent, or a mapping from run indices to `all`, a list or
+  tuple of distinct segment indices, at least one, or the pair
+  ("sample", k) with k an integer in 1..S; any other key or value is
+  refused `choice`;
+- `seed`: absent, or exactly 32 bytes, whether or not a sample is
+  asked; anything else is refused `choice`;
+- `salt`: see step 3 (`salt-missing`, `salt-length`, `salt-unexpected`,
+  `salt-commitment`).
+The certificate itself is bytes, and anything else is a TypeError of the
+golden model's Python interface rather than a refusal: a reader in any
+other language reads a file.
+
 **The order of the checks.** An auditor refuses at the first failure,
 and exits with that refusal's code (the table below), or 0 when every
 check passes.
@@ -795,7 +824,8 @@ check passes.
    - the bank is exactly the constants the image addresses, or empty for
      an image that carries its own (else `program-image`).
 5. **Streams**, run by run: each of a, b and c, as handed or +0, is n
-   values whose hash is the certified one (`stream`).
+   elements of the run's format whose hash is the certified one
+   (`stream`).
 6. **Continuity**, run by run (`continuity`).
 7. **States handed**, run by run and boundary by boundary: each is
    lanes x slots elements of a boundary that exists (`state-shape`),
@@ -808,6 +838,8 @@ check passes.
 9. **Re-runs**, run by run, the chosen segments in ascending order.
    - Each starts from its start state, handed or re-run into
      (`state-missing` when neither).
+   - One the executor refuses to run is refused `program-image`, at its
+     run and segment.
    - It must end on its certified end state (`segment-end`), with its
      certified flag word (`segment-flags`) and STATUS
      (`segment-status`).
@@ -843,6 +875,10 @@ none is given. For run r, with S segments and a sample of k:
   k-1, exchange position j with position j + (a uniform integer below
   S - j). The sample is the first k positions, sorted ascending.
 - The test vectors above include one sample.
+- The golden model's `cert.sample(seed, r, S, k)` holds its arguments
+  to this: a seed of exactly 32 bytes, r an integer in 0..2^32-1 (its
+  four bytes), and S and k integers with 1 <= k <= S, never a bool;
+  anything else is refused `choice`.
 
 **The verdict** of an accepted audit says:
 - ACCEPTED;
@@ -875,7 +911,7 @@ accuracy 7, the auditor's own usage 64. The name is the report.
 | `line-order` | 2 | lines are out of their order |
 | `line-unexpected` | 2 | a line has no place where it stands: a repeat, or a line of a block already read |
 | `count` | 2 | a count disagrees with the lines or tokens it counts |
-| `malformed` | 2 | a value breaks its one spelling, its range or its token count, or a line breaks the byte rules; a count out of its own range; a writer asked to certify a run of no segments |
+| `malformed` | 2 | a value breaks its one spelling, its range or its token count, or a line breaks the byte rules; a count out of its own range; a writer asked to certify a run of no segments, handed a certificate object it cannot spell, or handed a field that does not read back as itself (a value of the wrong type) |
 | `decimal` | 2 | an element's decimal is not the exact decimal of its hex |
 | `accuracy-kind` | 2 | an entry's kind is not its method's; every `bound` in version 1 |
 | `width` | 3 | an exact value past 1,023 bits in numerator or denominator: written, computed (an element's, a product, a partial sum, a difference), an enclosure's finite end, or one a writer was asked to round or enclose |
@@ -885,11 +921,11 @@ accuracy 7, the auditor's own usage 64. The name is the report.
 | `salt-commitment` | 4 | the salt handed is not the one the certificate commits to |
 | `image-digest` | 4 | the image handed is not the one certified |
 | `program-digest` | 4 | the image and bank handed are not the ones certified |
-| `program-image` | 4 | no image was handed, the image does not load, or the bank is not the size it addresses |
+| `program-image` | 4 | no image was handed, the image does not load, the bank is not the size it addresses, or the executor refuses a re-run; `programs` not in its shape |
 | `program-format` | 4 | the image's format is not the run's |
 | `program-shape` | 4 | the program is not a segment |
-| `stream` | 4 | a stream handed (or +0) is not the one certified, or is bytes that are not whole elements |
-| `state-shape` | 4 | a state handed is the wrong size, bytes that are not whole elements, or for a run or boundary that does not exist; a writer handed states and segment results that disagree in number |
+| `stream` | 4 | a stream handed (or +0) is not the one certified, is not the run's lanes long, holds a value that is not an element, or is bytes that are not whole elements; `streams` not in its shape |
+| `state-shape` | 4 | a state handed is the wrong size, holds a value that is not an element, is bytes that are not whole elements, or is for a run or boundary that does not exist; `states` not in its shape; a writer handed states and segment results that disagree in number, or a start that is not whole lanes |
 | `state-hash` | 4 | a state handed is not the one certified at its boundary |
 | `state-missing` | 4 | a state the audit needs was neither handed nor re-run into |
 | `continuity` | 5 | a segment does not start where the one before it ended, or the output is not the last end |
@@ -909,10 +945,14 @@ accuracy 7, the auditor's own usage 64. The name is the report.
 | `accuracy-slot` | 7 | a term names a slot the state does not have |
 | `accuracy-finite` | 7 | an exact value needs an element that is not finite |
 | `accuracy-value` | 7 | the value written is not the stated function of the certified runs |
-| `choice` | 64 | the auditor asked for a sample, segment or run the certificate cannot give it, or handed a seed that is not 32 bytes |
+| `choice` | 64 | the auditor's own arguments: a sample, segment or run the certificate cannot give it, `choose` not in its shape, or a seed that is not 32 bytes |
 
-A refusal locates itself where that means something: the line, for the
-reader's refusals; the run and the segment or boundary, for the audit's.
+A refusal locates itself in fields, each empty where it does not apply:
+the line, for the reader's refusals; for the audit's, the run where it
+concerns one run (a run index the certificate has), the segment or
+boundary where it concerns one of that run's, and the accuracy entry
+where it concerns one entry (in the golden model, `.line`, `.run`,
+`.segment` and `.entry`).
 
 ## The controls
 

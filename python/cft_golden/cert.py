@@ -124,10 +124,14 @@ REFUSALS = {
 
 
 class Refusal(ValueError):
-    """A refusal by name. `name` is a key of REFUSALS; `run`, `segment`
-    and `line` locate it where that means something."""
+    """A refusal by name. `name` is a key of REFUSALS. Its location is in
+    fields, each None where it does not apply: `line` for the reader's
+    refusals; for the audit's, `run` where it concerns one run, `segment`
+    where it concerns one segment or boundary of it, and `entry` where it
+    concerns one accuracy entry."""
 
-    def __init__(self, name, message, *, line=None, run=None, segment=None):
+    def __init__(self, name, message, *, line=None, run=None, segment=None,
+                 entry=None):
         if name not in REFUSALS:
             raise AssertionError(f"unnamed refusal {name!r}")
         self.name = name
@@ -135,8 +139,14 @@ class Refusal(ValueError):
         self.line = line
         self.run = run
         self.segment = segment
+        self.entry = entry
         self.exit_code = REFUSALS[name]
         super().__init__(f"{name}: {message}")
+
+
+def _is_int(v):
+    """An integer that is not a bool (True is an int in Python)."""
+    return isinstance(v, int) and not isinstance(v, bool)
 
 
 # ---- the structure ----------------------------------------------------
@@ -485,14 +495,49 @@ def encode(cert):
     non-canonical spelling or a bound in version 1 is refused here by
     the name the reader would use - and the read-back must equal the
     object, so nothing the encoder wrote can mean something else."""
-    cert = _normalized(cert)
-    body = ("\n".join(_body_lines(cert)) + "\n").encode("ascii")
+    try:
+        cert = _normalized(cert)
+        body = ("\n".join(_body_lines(cert)) + "\n").encode("ascii")
+    except (AttributeError, IndexError, KeyError, TypeError,
+            UnicodeEncodeError, ValueError) as e:
+        raise Refusal("malformed",
+                      f"the writer was handed a certificate object it cannot "
+                      f"spell ({type(e).__name__}: {e})") from None
     data = body + f"hash {sha256(body)}\n".encode("ascii")
     back = parse(data)
     if back != cert:
-        raise AssertionError("the encoded certificate reads back as a "
-                             "different one")
+        where = _first_difference(cert, back) or "the certificate"
+        raise Refusal("malformed",
+                      f"the writer was handed {where}, which reads back as "
+                      f"something else: a value of the wrong type or "
+                      f"spelling (device_caps a bare string where a tuple of "
+                      f"words belongs, a count or index that is not an "
+                      f"integer)")
     return data
+
+
+def _first_difference(a, b, path="certificate"):
+    """Where two certificate objects first differ, as 'path = a (read back
+    as b)', or None. For the writer's refusal message only."""
+    if type(a) is not type(b) and not (isinstance(a, (tuple, list))
+                                       and isinstance(b, (tuple, list))):
+        return f"{path} = {a!r} (read back as {b!r})"
+    if hasattr(a, "__dataclass_fields__"):
+        for f in a.__dataclass_fields__:
+            d = _first_difference(getattr(a, f), getattr(b, f),
+                                  f"{path}.{f}")
+            if d:
+                return d
+        return None
+    if isinstance(a, (tuple, list)):
+        if len(a) != len(b):
+            return f"{path} = {a!r} (read back as {b!r})"
+        for i, (x, y) in enumerate(zip(a, b)):
+            d = _first_difference(x, y, f"{path}[{i}]")
+            if d:
+                return d
+        return None
+    return None if a == b else f"{path} = {a!r} (read back as {b!r})"
 
 
 def rehash(body_text):
@@ -613,18 +658,17 @@ class _Reader:
 
     def classify(self, expected):
         """The name for 'expected a line with key `expected`, found
-        something else': an unknown key; a key that starts a later
-        block (so `expected` is missing); a key whose place is earlier
-        (a line with no place here); `expected` present further on in
-        this block (out of order); or else `expected` missing."""
+        something else': a key that starts a later block (so `expected`
+        is missing); a key whose place is earlier (a line with no place
+        here); `expected` present further on in this block (out of
+        order); or else `expected` missing. (Every key here is a known
+        one: the certificate's key scan refused any other before this
+        can be asked.)"""
         k = self.key()
         if k is None:
             return Refusal("line-missing",
                            f"'{expected}' is missing: the body ends first",
                            line=self.ln())
-        if k not in RANK:
-            return self.fail("unknown-line",
-                             f"'{k}' is not a line of version 1")
         t = BLOCK_TYPE[k]
         if k in STARTERS:
             if t > self.block or (t == self.block and k in REPEATING):
@@ -853,12 +897,11 @@ class _Reader:
         self.expect("end", 1)
         self.block = BLOCK_OF["end"]
         if self.pos != len(self.lines):
-            k = self.key()
-            if k not in RANK:
-                raise self.fail("unknown-line",
-                                f"'{k}' is not a line of version 1")
+            # (a key there is a known one: the scan above refused any
+            # other, wherever it stood)
             raise self.fail("line-unexpected",
-                            f"'{k}' after 'end'; the body ends at 'end'")
+                            f"'{self.key()}' after 'end'; the body ends at "
+                            f"'end'")
         return Certificate(mode, sc, idn, runs, acc)
 
     def identity(self):
@@ -1426,8 +1469,12 @@ def sample(seed, run, S, k):
     if not isinstance(seed, (bytes, bytearray)) or len(seed) != SEED_BYTES:
         raise Refusal("choice", f"a sampling seed is exactly {SEED_BYTES} "
                                 f"bytes")
-    if not 1 <= k <= S:
-        raise Refusal("choice", f"a sample of {k} from {S} segments")
+    if not _is_int(run) or not 0 <= run < (1 << 32):
+        raise Refusal("choice", f"run {run!r}: a run index is an integer in "
+                                f"0..2^32 - 1, the PRNG's four bytes")
+    if not _is_int(S) or not _is_int(k) or not 1 <= k <= S:
+        raise Refusal("choice", f"a sample of {k!r} from {S!r} segments; "
+                                f"both are integers, 1 <= k <= S")
     words = _words(bytes(seed), run)
     idx = list(range(S))
     for j in range(k):
@@ -1499,17 +1546,24 @@ def identity_report(cert):
             else f"{k}: {v} - stated, not checked" for k, v in rows]
 
 
-def _as_values(fmt, s, name, where):
+def _as_values(fmt, s, name, where, run=None, segment=None):
     """A state or stream handed as values or as the bytes the library
-    stores. Bytes that are not whole elements are refused by `name`
-    (state-shape or stream), not left to raise."""
-    if not isinstance(s, (bytes, bytearray)):
-        return list(s)
-    esz = fmt.width // 8
-    if len(s) % esz:
-        raise Refusal(name, f"{where}: {len(s)} bytes is not a whole number "
-                            f"of {fmt.name} elements ({esz} bytes each)")
-    return state_values(fmt, s)
+    stores. Anything else, and bytes that are not whole elements, are
+    refused by `name` (state-shape or stream), located by `run` and
+    `segment`, not left to raise."""
+    if isinstance(s, (bytes, bytearray)):
+        esz = fmt.width // 8
+        if len(s) % esz:
+            raise Refusal(name, f"{where}: {len(s)} bytes is not a whole "
+                                f"number of {fmt.name} elements ({esz} "
+                                f"bytes each)", run=run, segment=segment)
+        return state_values(fmt, s)
+    if not isinstance(s, (tuple, list)) or not all(_is_int(v) for v in s):
+        raise Refusal(name, f"{where}: handed as a {type(s).__name__}; it "
+                            f"is the elements' bits as integers, or the "
+                            f"bytes the library stores", run=run,
+                      segment=segment)
+    return list(s)
 
 
 def audit(data, salt, programs, states=None, streams=None, choose=None,
@@ -1559,24 +1613,54 @@ def audit(data, salt, programs, states=None, streams=None, choose=None,
             q = derive(e, cert.runs, shapes, known)
         except Refusal as r:
             raise Refusal(r.name, f"entry {j}: {r.message}", run=r.run,
-                          segment=r.segment)
+                          segment=r.segment, entry=j)
         if not value_holds(e.value, q):
             raise Refusal("accuracy-value",
                           f"entry {j}: the value recorded is not the "
                           f"{e.method} of the certified runs, which is "
-                          f"{rational_text(q)}")
+                          f"{rational_text(q)}", entry=j)
         values.append(q)
     return Verdict(plan, values, identity_report(cert), cert.mode)
 
 
+def _run_mapping(cert, arg, what, name):
+    """An argument that maps run indices to something - programs,
+    streams, states, the choice - held to that shape before it is read:
+    a dict whose every key is a run of this certificate. None is the
+    empty mapping. Refused by the argument's own name."""
+    if arg is None:
+        return {}
+    if not isinstance(arg, dict):
+        raise Refusal(name, f"{what} is handed as a {type(arg).__name__}; it "
+                            f"is a mapping from run index to its value")
+    for r in arg:
+        if not _is_int(r) or not 0 <= r < len(cert.runs):
+            raise Refusal(name, f"{what} names run {r!r}, and the "
+                                f"certificate's runs are 0.."
+                                f"{len(cert.runs) - 1}")
+    return arg
+
+
+def _is_bytes(v):
+    return isinstance(v, (bytes, bytearray))
+
+
 def _check_programs(cert, programs):
+    programs = _run_mapping(cert, programs, "programs", "program-image")
     out = []
     for r, run in enumerate(cert.runs):
-        if not programs or r not in programs:
+        if r not in programs:
             raise Refusal("program-image", f"run {r}: no program image was "
                                            f"handed to the audit", run=r)
-        image, bank = programs[r]
-        image, bank = bytes(image), bytes(bank or b"")
+        pair = programs[r]
+        if not (isinstance(pair, (tuple, list)) and len(pair) == 2
+                and _is_bytes(pair[0])
+                and (pair[1] is None or _is_bytes(pair[1]))):
+            raise Refusal("program-image",
+                          f"run {r}: a program is handed as (image, bank), "
+                          f"the image bytes and the bank bytes or None; this "
+                          f"is a {type(pair).__name__}", run=r)
+        image, bank = bytes(pair[0]), bytes(pair[1] or b"")
         if sha256(image) != run.image:
             raise Refusal("image-digest",
                           f"run {r}: the image handed is not the one "
@@ -1610,23 +1694,34 @@ def _check_programs(cert, programs):
 
 
 def _check_streams(cert, salt, progs, streams):
+    streams = _run_mapping(cert, streams, "streams", "stream")
     out = []
     for r, run in enumerate(cert.runs):
         fmt = progs[r]["prog"].fmt
-        given = (streams or {}).get(r)
+        given = streams.get(r)
         if given is not None:
+            if not isinstance(given, (tuple, list)) or len(given) != 3:
+                raise Refusal("stream",
+                              f"run {r}: its streams are handed as (a, b, "
+                              f"c), three, each None for +0; this is "
+                              + (f"{len(given)} of them"
+                                 if isinstance(given, (tuple, list))
+                                 else f"a {type(given).__name__}"), run=r)
             given = tuple(None if s is None else
                           _as_values(fmt, s, "stream",
-                                     f"run {r} stream {nm}")
+                                     f"run {r} stream {nm}", run=r)
                           for nm, s in zip("abc", given))
         try:
             abc = _streams_or_zero(fmt, run.lanes, given)
         except Refusal as e:
             raise Refusal("stream", f"run {r}: {e.message}", run=r)
         for i, (nm, s) in enumerate(zip("abc", abc)):
-            if not all(0 <= v < (1 << fmt.width) for v in s) or \
-                    stream_hash(salt, nm, state_bytes(fmt, s)) \
-                    != run.streams[i]:
+            if not all(0 <= v < (1 << fmt.width) for v in s):
+                raise Refusal("stream", f"run {r}: stream {nm} holds a value "
+                                        f"that is not the bits of a "
+                                        f"{fmt.name} element (an integer in "
+                                        f"0..2^{fmt.width} - 1)", run=r)
+            if stream_hash(salt, nm, state_bytes(fmt, s)) != run.streams[i]:
                 raise Refusal("stream", f"run {r}: stream {nm} is not the "
                                         f"one certified", run=r)
         out.append(abc)
@@ -1652,29 +1747,37 @@ def _boundary_hash(run, b):
 
 
 def _check_states(cert, salt, progs, states):
+    states = _run_mapping(cert, states, "states", "state-shape")
     known = {}
-    for r in sorted((states or {})):
-        if not isinstance(r, int) or not 0 <= r < len(cert.runs):
-            raise Refusal("state-shape", f"a state was handed for run {r}, "
-                                         f"and the certificate has "
-                                         f"{len(cert.runs)}")
+    for r in sorted(states):
         run = cert.runs[r]
         fmt = progs[r]["prog"].fmt
         want = run.lanes * progs[r]["nslots"]
-        for b in sorted(states[r]):
-            if not isinstance(b, int) or not 0 <= b <= len(run.chain):
+        per = states[r]
+        if not isinstance(per, dict):
+            raise Refusal("state-shape",
+                          f"run {r}: its states are handed as a "
+                          f"{type(per).__name__}; they are a mapping from "
+                          f"boundary to state", run=r)
+        for b in per:
+            if not _is_int(b) or not 0 <= b <= len(run.chain):
                 raise Refusal("state-shape",
                               f"run {r} has boundaries 0..{len(run.chain)}; "
-                              f"a state was handed for {b}", run=r)
-            vals = _as_values(fmt, states[r][b], "state-shape",
-                              f"run {r} boundary {b}")
-            if len(vals) != want or not all(0 <= v < (1 << fmt.width)
-                                            for v in vals):
+                              f"a state was handed for {b!r}", run=r)
+        for b in sorted(per):
+            vals = _as_values(fmt, per[b], "state-shape",
+                              f"run {r} boundary {b}", run=r, segment=b)
+            if len(vals) != want:
                 raise Refusal("state-shape",
                               f"run {r} boundary {b}: {len(vals)} values; "
                               f"the state is {run.lanes} lanes of "
                               f"{progs[r]['nslots']} {fmt.name} slots",
                               run=r, segment=b)
+            if not all(0 <= v < (1 << fmt.width) for v in vals):
+                raise Refusal("state-shape",
+                              f"run {r} boundary {b}: a value is not the "
+                              f"bits of a {fmt.name} element (an integer "
+                              f"in 0..2^{fmt.width} - 1)", run=r, segment=b)
             if state_hash(salt, state_bytes(fmt, vals)) \
                     != _boundary_hash(run, b):
                 raise Refusal("state-hash",
@@ -1759,8 +1862,10 @@ def _check_relations(cert, salt, progs, strm, known):
                                   f"unchanged or undefined", run=r)
             for s in range(len(b0)):
                 if s in A.h_slots:
-                    kind, v = element_fraction(fmt0, bA[s])
-                    if kind != "finite" or v != \
+                    # b0[s] is finite and not zero (above), so its half is
+                    # a Fraction; a NaN or an infinity in bA[s] has none
+                    # (None), and differs from it like any wrong value
+                    if element_fraction(fmt0, bA[s])[1] != \
                             element_fraction(fmt0, b0[s])[1] / 2:
                         raise Refusal("aux-bank",
                                       f"{where}: bank slot {s} is not the "
@@ -1771,9 +1876,11 @@ def _check_relations(cert, salt, progs, strm, known):
                                   f"main bank's, and it is not a named "
                                   f"h-slot", run=r)
         else:
-            if (b0 is None) != (bA is None) or (
-                    b0 is not None and (len(b0) != len(bA) or any(
-                        widen(main.fmt, x) != y for x, y in zip(b0, bA)))):
+            # The two banks have one shape here: the images' flags
+            # (BANK_EXT among them) and n_consts were held equal above,
+            # and step 4 held each bank to its image's n_consts.
+            if b0 is not None and any(widen(main.fmt, x) != y
+                                      for x, y in zip(b0, bA)):
                 raise Refusal("aux-bank", f"{where}: the bank is not the main "
                                           f"bank exactly widened", run=r)
         # streams
@@ -1814,14 +1921,12 @@ def _check_relations(cert, salt, progs, strm, known):
 
 def _wider_image(p0, pa):
     """Why `pa` is not `p0` one format wider, or None: the same
-    instruction words and header fields, the precision code one rung up,
-    and any constants the image carries exactly widened. (Not the same
-    image digest: the header carries the format's precision code, so an
-    image one format wider cannot be the same bytes.)"""
-    if p0.fmt.name == LADDER[-1]:
-        return "the main image is already fp256, the top of the ladder"
-    if pa.fmt.name != LADDER[LADDER.index(p0.fmt.name) + 1]:
-        return f"its format is {pa.fmt.name}"
+    instruction words and header fields, and any constants the image
+    carries exactly widened. (Not the same image digest: the header
+    carries the format's precision code, so an image one format wider
+    cannot be the same bytes. The formats themselves are one rung apart
+    already: step 4 held each image to its run's format, and the
+    relation's format check, first in its order, held the runs'.)"""
     if pa.insns != p0.insns:
         return "its instruction words differ"
     for f in ("max_deposits", "flags", "n_consts", "scratch_io_word"):
@@ -1839,12 +1944,7 @@ def _plan(cert, choose, seed):
                              or len(seed) != SEED_BYTES):
         raise Refusal("choice", f"a sampling seed is exactly {SEED_BYTES} "
                                 f"bytes")
-    choose = choose or {}
-    for r in choose:
-        if not isinstance(r, int) or not 0 <= r < len(cert.runs):
-            raise Refusal("choice", f"a choice was given for run {r}, and "
-                                    f"the certificate has "
-                                    f"{len(cert.runs)}")
+    choose = _run_mapping(cert, choose, "the choice", "choice")
     plan = []
     drew = None
     for r, run in enumerate(cert.runs):
@@ -1855,6 +1955,10 @@ def _plan(cert, choose, seed):
         if c == "all":
             entry.update(how="all", rerun=list(range(S)))
         elif isinstance(c, tuple) and len(c) == 2 and c[0] == "sample":
+            if not _is_int(c[1]) or not 1 <= c[1] <= S:
+                raise Refusal("choice", f"run {r}: a sample of {c[1]!r} from "
+                                        f"{S} segments; a sample's size is "
+                                        f"an integer in 1..{S}", run=r)
             if seed is None:
                 drew = drew or os.urandom(SEED_BYTES)
                 use = drew
@@ -1864,14 +1968,15 @@ def _plan(cert, choose, seed):
                          seed=bytes(use).hex())
         elif isinstance(c, (list, tuple)):
             segs = list(c)
-            if not segs or any(not isinstance(k, int) or not 0 <= k < S
+            if not segs or any(not _is_int(k) or not 0 <= k < S
                                for k in segs) or len(set(segs)) != len(segs):
-                raise Refusal("choice", f"run {r}: segments {segs} are not "
-                                        f"distinct indices in 0..{S - 1}")
+                raise Refusal("choice", f"run {r}: segments {segs!r} are not "
+                                        f"distinct indices in 0..{S - 1}, "
+                                        f"at least one", run=r)
             entry.update(how="named", rerun=sorted(segs))
         else:
             raise Refusal("choice", f"run {r}: {c!r} is not 'all', a list of "
-                                    f"segments or ('sample', k)")
+                                    f"segments or ('sample', k)", run=r)
         plan.append(entry)
     return plan
 
