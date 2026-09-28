@@ -461,6 +461,8 @@ def _malformed_cases(L):
         ("segment 0 ", " ".join(seg[:2] + ["begin"] + seg[3:])),
         ("program-image ", "program-image " + "A" * 64),
         ("program-image ", "program-image " + "a" * 63),
+        ("program-digest ", "program-digest " + "A" * 64),
+        ("program-digest ", "program-digest " + "a" * 65),
         ("program-format ", "program-format fp80"),
         # cft_build_id()'s string and nothing near it
         ("build-id ", "build-id commit=" + "a" * 39
@@ -530,6 +532,8 @@ def _malformed_cases(L):
         ("value rounded", " ".join(rnd[:4] + [rnd[4].upper()] + rnd[5:])),
         ("value rounded", " ".join(rnd[:4] + [rnd[4][1:]] + rnd[5:])),
         ("value rounded", " ".join(rnd[:3] + ["rnd"] + rnd[4:])),
+        ("value rounded", " ".join(rnd[:2] + ["fp80"] + rnd[3:])),
+        ("value enclosed", " ".join(enc[:2] + ["fp80"] + enc[3:])),
         ("value rounded", " ".join(rnd[:4] + ["7ff8000000000000", "nan"])),
         ("value enclosed", " ".join(enc[:3] + enc[5:7] + enc[3:5])),
         ("value exact", "value exact"),
@@ -553,6 +557,8 @@ def _malformed_cases(L):
         ("entry 0 ", "entry 0 extrapolation"),
         ("kind ", "kind guess"),
         ("parameter ", "parameter Spread 64"),
+        ("parameter ", "parameter ensemble-spread 064"),
+        ("uses ", "uses 01"),
         ("run 0 ", "run 0 wider"),
         ("run 0 ", "run 0"),
         ("run 0 ", "run 0 main main"),
