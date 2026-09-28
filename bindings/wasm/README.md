@@ -1025,6 +1025,31 @@ fourth check (the demos stage) holds every program-engine run's loaded
 images to byte for byte. `verify.mjs` gained step 3b, the embedded
 sample, above.
 
+### Rebuilt at ABI 0.15, 2026-09-28 - identity for a certificate
+
+The bump for `cft_build_id` and `cft_get_image_id` (docs/HOSTAPI.md,
+"Identity at ABI 0.15"). Neither reaches the module: `wasm_api.c`
+exports no call to either, so the page says nothing about its build or
+its image. `src/build_id.c` is compiled in all the same - one of the
+sixteen sources the build derives from `host/Makefile` - and compiles
+`unknown`, as every build of it but `host/Makefile`'s own does. The
+module is `82f2f21c...`, 258,255 bytes from 257,252, still **141
+`cftw_*` exports** (149 in all). `verify.mjs` OK: abi 15 on both
+sides, 110 named entry points present, the page's 4,015 embedded
+cases, 1,224,915 cases over 168 sets through the page's bytes (the
+runner's generator counts) and 832,915 through the wrappers
+themselves. `demos_chains.json` was re-recorded with
+`verify_demos.mjs --record` against the new module:
+every chain came back unchanged, and only the module stamp, the date
+and the timings moved. Two clean container builds, with
+`bindings/wasm/build/` removed between them, produced all four files
+byte for byte, and both negative-control pages as well:
+
+    bindings/node/cft_node.wasm      258,255 bytes  sha256 82f2f21cb2df6d24...
+    bindings/node/cft_node.js         74,146 bytes  sha256 dc845833acf075cb...  (unchanged)
+    bindings/wasm/conformance.html 1,390,705 bytes  sha256 5251d85896793f1a...
+    bindings/wasm/demos.html         576,771 bytes  sha256 1ca464eb18aa3160...
+
 ## A second page: the five workloads, measured (2026-09-04)
 
 `demos.html` is the other deliverable of this directory. Same

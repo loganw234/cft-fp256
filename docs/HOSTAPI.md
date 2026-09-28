@@ -3049,13 +3049,12 @@ on a handle a failed run has poisoned: the image is still the one
 loaded.
 
 **The ABI version.** Both calls are additive: code written against 0.14
-gets the same bits from the same calls. `CFT_ABI_VERSION_MINOR` moves
-to 15 for them at the merge. The integrator bumps it together with the
-WebAssembly module's rebuild, as every step's is: `verify.mjs` holds the
-committed page's `cftw_abi_version()` to the macro, so a bump without
-the rebuild fails the `wasm` stage. Until then the calls are present
-under 0.14, which the version's floor semantics allow. After it, a
-caller that needs either asks for 0.15.
+gets the same bits from the same calls. `CFT_ABI_VERSION_MINOR` moved
+to 15 for them at the merge (2026-09-28). The integrator bumped it
+together with the WebAssembly module's rebuild, as every step's is:
+`verify.mjs` holds the committed page's `cftw_abi_version()` to the
+macro, so a bump without the rebuild fails the `wasm` stage. A caller
+that needs either call asks for 0.15.
 
 **How it is held.**
 

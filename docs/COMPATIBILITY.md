@@ -764,6 +764,39 @@ device lacks CAPS2[8] (`cft.h` has the three backends beside each bit).
 | Node / Browser | `FEAT_REDUCE_SEG` named (`REDUCE_SEG`; it printed as `bit12`), `test.mjs` reading `CFT_FEAT_*` from the header too. The module committed until then had last been rebuilt on 2026-09-15 (`b558a56`), before the software backend published `CFT_SEQ_FEAT_LANE_MASK` (merged at `69f3df2` later that day), and its software handle reported **0x271f** - SCALAR, REDUCE_SEG and LANE_MASK all clear - with `cftw_supports(dev, 30, fmt)`, IMUL, 0 at all four formats (measured in node 22). Rebuilt the same day through `bindings/wasm/build.sh` (`3737534db4d44304...`, 257,252 bytes, still 141 `cftw_*` exports): **0x7f1f** and 1 at all four formats, which `test.mjs` now holds and which fails by name against the old module. `lib.mjs` names opcode 30 `imul`, and a test holds its opcode table to `cft.h`'s `cft_op` in both directions. `conformance.html` and `demos.html` rebuilt on it, byte-identical over two clean builds; the demos chains re-recorded, every chain unchanged |
 | Arduino | the vendored copy re-synced |
 
+### ABI 0.15 (2026-09-28): identity for a certificate
+
+A certificate records what ran (docs/CERTIFICATES.md; docs/HOSTAPI.md,
+"Identity at ABI 0.15"), and until this step nothing in the library
+could say it:
+`cft_abi_version` names which calls exist, VERSION is the register
+map's and the same for every build of it, and the xclbin's UUID stayed
+inside the XRT backend. Two calls, both ADDITIVE: code written against
+0.14 gets the same bits from the same calls.
+- `cft_build_id()` names the library build: `commit=<40 or 64
+  lowercase hex> tracked=<clean|modified> untracked=<none|present>`, or
+  `unknown`, whole, wherever it was not measured. `host/Makefile`'s own
+  rule for `src/build_id.o` and `.lo` is the one build that measures
+  it; every other build of that file compiles `unknown`.
+- `cft_get_image_id()` names the device image: the SHA-256 of the exact
+  xclbin bytes `cft_open` loaded, their count, VERSION and the raw CAPS
+  words, CAPS alone below VERSION 0x800 and CAPS then CAPS2 from it.
+  It is REFUSED by name - `CFT_ERR_UNSUPPORTED`, `struct_size` 0 and
+  nothing else written - on the software backend, on a remote handle,
+  and on an image whose tiles publish different words or whose words
+  could not be read at open.
+
+| surface | status at ABI 0.15 |
+|---|---|
+| C (`cft.h`) | complete, both calls on every backend. `api-test` holds the id's grammar behind fourteen controls of its own, the id equal to the tree's under `make test`, and the software backend's refusal; `make -C host buildidtest` builds the generator in scratch repositories of its own, 25 checks, among them a git that warns and a linked worktree |
+| hardware | no change: no RTL moved. The image id is the bytes loaded and the CAPS registers already there |
+| XRT | `cft_open` reads the xclbin once, hashes those bytes and loads the same bytes. On the U50 (XRT 2.19, both round-2 images, 2026-09-28): `hw/card-identity.sh` 16 of 16 at 082400d, then 17 of 17 at 4d5d8e4, the digests equal to `sha256sum` and to the manifests, and the quad image refusing both planted refusals by name on its four tiles (docs/CARDDAY.md) |
+| remote | no frame change: `cft_build_id` is the client's own; `cft_get_image_id` is refused by name on the client, since HELLO carries decoded device fields only (docs/REMOTE.md) |
+| Node / Browser | the module rebuilt at 0.15 as every step requires: `82f2f21c...`, 258,255 bytes, still 141 `cftw_*` exports. No export reaches either new call, so the module says nothing about its build or its image. `verify.mjs` holds its `cftw_abi_version()` to 15 and passed 1,224,915 cases through the page's bytes; `conformance.html` and `demos.html` rebuilt on it are byte-identical over two clean container builds, and the demos chains were re-recorded with every chain unchanged (bindings/wasm/README.md) |
+| C++ (`cft.hpp`) | no wrappers for the two calls; a C++ caller reaches them through `cft.h`, which `cft.hpp` includes |
+| Arduino | the vendored copy re-synced, `src/build_id.c` among its 33 files; the id there is `unknown`, as for any build but `host/Makefile`'s own |
+| certificates | `build-id` is `cft_build_id()`'s string verbatim, and a certificate's device lines are what `cft_get_image_id` gives (docs/CERTIFICATES.md, "Identity") |
+
 
 ## Hosts and boards
 
