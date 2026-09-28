@@ -2599,9 +2599,10 @@ def _tb_verdict(base, fmt, P, h, nstate, s_tb, runs):
 #                 of what its callee holds: through a local, a
 #                 module-level alias or a table's entry, the definition
 #                 it names (verifier-V5's M4); through an attribute of a
-#                 class - the class named, a name or table this file
-#                 binds at module level to it or to an instance of it,
-#                 or an instance the calling code makes - what the
+#                 class this file defines at module level - the class
+#                 named, a name or table this file binds at module level
+#                 to it or to an instance of it, or an instance the
+#                 calling code makes - what the
 #                 class's body binds under that name (a def there:
 #                 everything it names) and what the file puts into the
 #                 class from outside its body (verifier-V5's X3). A call
@@ -2659,6 +2660,15 @@ def _tb_verdict(base, fmt, P, h, nstate, s_tb, runs):
 # variable first, or a factory function's result; an instance made
 # through a table or an attribute rather than by a class's name; a
 # definition made from inside a function (global) or by exec or setattr;
+# a call through an attribute of a class the calling function defines
+# (verifier-V5's O1); an attribute a class inherits from a base, a nested
+# class's attribute (`_Outer.Inner.verdict`), or one its body binds by a
+# for; a table aliased as a class attribute (`reg = _TB_RHS` in a class
+# body) or reached through a function's return (`_tb_reg()[k] = v`); a
+# registration helper handed a table by a bare statement at module level
+# (`_register(_TB_RHS, k, v)`; inside a function the same call is
+# followed); a `type X = v` statement (Python 3.12 on), which the census
+# does not count (those seven, verifier-V5's O2);
 # a table aliased by unpacking (`Y, Z = X, W`); a wrapper given the
 # side's code other than as its first argument (fn=_tb_verdict,
 # run_in_executor(None, f, ...)) - the first is taken as what the
@@ -2677,7 +2687,11 @@ def _tb_verdict(base, fmt, P, h, nstate, s_tb, runs):
 # Only review guards against those. The attribute rule is broad on
 # purpose: an attribute read that merely shares a definition's name is
 # taken to be it, and the message names the attribute - a loud false
-# alarm, never a quiet pass.
+# alarm, never a quiet pass. So are two more: a call that puts one side's
+# definition first and the other side's after it - `_side_by_side(
+# _tb_step, ode_step)` reading only their names - is taken to hand the
+# one to the other (the first-argument rule), and `Y = X or Z` makes two
+# tables one (verifier-V5's O3).
 _TB_ROOTS = ("_tb_verdict", "_tb_refs", "_tb_worst", "_tb_params")
 _TB_FORBIDDEN = frozenset((
     # the mirror of the program's rounding order, and its switches
@@ -3444,12 +3458,16 @@ def _callees(f, local, classes, memo):
     directly, and an entry of a module-level table x as "[x". _reach
     resolves those tables, and a module-level alias, to what they name
     (verifier-V5's M4: a local alias of _tb_verdict). An attribute of a
-    class - named, or an instance of one the call's own code makes - is
-    also what the class binds under it, or has set on it from outside its
-    body (verifier-V5's X3); of anything else the call's code names,
-    "owner::attr", which _reach resolves through what the owner holds at
-    module level (a name or a table bound to a class or an instance of
-    one)."""
+    class this file defines at module level - named, or an instance of
+    one the call's own code makes - is also what the class binds under
+    it, or has set on it from outside its body (verifier-V5's X3); of
+    anything else the call's code names, "owner::attr", which _reach
+    resolves through what the owner holds at module level (a name or a
+    table bound to a class or an instance of one). A class the calling
+    function defines is not resolved: _handed has already turned its name
+    into the names its body binds, so a call through its attribute is
+    followed no further (verifier-V5's O1; the rules' comment lists it
+    among the shapes known to pass)."""
     if isinstance(f, ast.Attribute):
         got = {f.attr}
         for owner in _handed([f.value], local, classes, memo):

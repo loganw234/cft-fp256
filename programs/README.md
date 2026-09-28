@@ -239,15 +239,18 @@ what its verdict reaches by name, by an attribute of the same name, or
 handed to it as a value by the code that calls it - through locals,
 aliases, conditionals, containers, tables, wrappers such as
 `functools.partial` and a class's attributes, and what the file puts
-into a table under any of its names - it may reach none of them, and no
+into a table under the names the walk follows (a plain, chained or local
+alias; not one made by unpacking, a class attribute or a function's
+return) - it may reach none of them, and no
 definition may be reached both by it and by them that way, whatever it
 is called: a helper shared under a new name once passed a wrong
 Lorenz-63 through the whole gate, and so, later, did the same helper
 handed to the arm by its caller, directly and then through a
 conditional, a table, an alias, a registry, a wrapper or a class's
 attribute. Both rules read `check.py` only, without running it; what
-their walk does not follow passes them, and `check.py` names the shapes
-known to pass - among them a helper in another module, a name built at
+their walk does not follow passes them, and the comment above those
+rules in `check.py` names every shape known to pass - among them a
+helper in another module, a name built at
 run time, a copy of the mirror's code, a value the calling function is
 itself handed by its own caller, a local a call computed, and a call
 through an attribute of an object whose class comes from a caller, a
