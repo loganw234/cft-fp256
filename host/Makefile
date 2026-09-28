@@ -258,10 +258,12 @@ print-build-id:
 	@GIT="$(GIT)" $(SHELL) tools/gen_build_id.sh --print
 
 # In a scratch repository of its own, never this tree: a clean commit, a
-# tracked file edited, an untracked file added, a new commit, no
-# repository at all, a copy inside another repository and no git - each
-# built with this Makefile and held to its id - and an unchanged tree
-# rebuilding nothing. The script says what each step proves.
+# tracked file edited, an untracked file added, a new commit, a git whose
+# status warns and exits 0, one whose status fails quietly, a linked
+# worktree beside the main one, no repository at all, a copy inside
+# another repository and no git - each built with this Makefile's own
+# recipe and held to its id - and an unchanged tree rebuilding nothing.
+# The script says what each step proves.
 buildidtest:
 	@CC="$(CC)" MAKE="$(MAKE)" GIT="$(GIT)" EXE="$(EXE)" OS="$(OS)" \
 		$(SHELL) tests/build_id_check.sh

@@ -30,6 +30,21 @@
 #   untracked   `git diff` in place of `git status --untracked-files`
 #   reverted, a new commit
 #               an id that sticks after the tree moves on
+#   a warning   git status saying "could not open directory" and exiting
+#               0, as it does about a directory whose untracked files it
+#               then leaves out, answered with a whole id where it must
+#               be "unknown" - through make's own recipe, both for the
+#               header and for print-build-id. Until 2026-09-28 the
+#               generator kept git's stderr in a temporary file that
+#               make's shell and the cat it ran looked for in two
+#               different /tmp directories on the Windows desktop, and
+#               this step is red there against that generator
+#               (verifier-C3 found it)
+#   a quiet failure
+#               a git status that fails and says nothing
+#   a linked worktree
+#               the commit or the status read from the MAIN worktree -
+#               every agent here builds in a linked one
 #   no repository, inside another repository, no git
 #               "unknown", and never a guess: a copy vendored inside
 #               another project must not take that project's commit
@@ -221,7 +236,68 @@ g -C "$A" commit -q -a -m "a second commit"
 head2=$(g -C "$A" rev-parse HEAD)
 expect "$A" "commit=$head2 tracked=clean untracked=none" "a new commit"
 
-# 9. No repository: the same files, no .git.
+# Two stand-ins for git, each the real one but for `status`. Written with
+# the real git's path spelled out, because MSYS2's make hands a recipe no
+# variable exported from outside it; on Windows in its drive form, which
+# both MSYS runtimes and the native loader read alike.
+GIT_KEEP=$GIT
+realgit=$(command -v "$GIT")
+if command -v cygpath >/dev/null 2>&1; then
+    realgit=$(cygpath -m "$realgit")
+fi
+cat > "$T/git-warn" <<EOF
+#!/bin/sh
+# git, with the warning a directory git cannot open gives on status (exit 0)
+case " \$* " in
+*" status "*)
+    "$realgit" "\$@"; rc=\$?
+    echo "warning: could not open directory 'secret/': Permission denied" >&2
+    exit \$rc ;;
+esac
+exec "$realgit" "\$@"
+EOF
+cat > "$T/git-fail" <<EOF
+#!/bin/sh
+# git, with a status that fails and says nothing
+case " \$* " in
+*" status "*) "$realgit" "\$@" > /dev/null 2>&1; exit 1 ;;
+esac
+exec "$realgit" "\$@"
+EOF
+chmod +x "$T/git-warn" "$T/git-fail"
+
+# 9. git status warns and exits 0: "unknown", through make's own recipe -
+#    the header, whose comment must carry git's own words (so the stderr
+#    reached the generator, not only a status), and print-build-id, which
+#    is what `make test` hands api-test.
+GIT="$T/git-warn"
+expect "$A" "unknown" "git status warning with exit 0, through make's recipe"
+grep -q "could not open directory 'secret/'" "$A/host/gen/cft_build_id.h" &&
+    ok "a git status warning: the header's reason carries git's own words" ||
+    bad "a git status warning: the header's reason does not carry git's words: $(grep 'unknown because' "$A/host/gen/cft_build_id.h")"
+pb=$(cd "$A/host" && "$MAKE" -s --no-print-directory GIT="$GIT" \
+         ${OS:+OS="$OS"} print-build-id 2>&1 | tr -d '\r')
+[ "$pb" = unknown ] &&
+    ok "a git status warning: make print-build-id says unknown" ||
+    bad "a git status warning: make print-build-id says: $pb"
+
+# 10. git status fails and says nothing.
+GIT="$T/git-fail"
+expect "$A" "unknown" "git status failing with nothing said"
+GIT=$GIT_KEEP
+expect "$A" "commit=$head2 tracked=clean untracked=none" "git back"
+
+# 11. A LINKED worktree - where every agent here builds - at the first
+#     commit while the main worktree is at the second: its own HEAD and
+#     its own status, never the main worktree's.
+g -C "$A" worktree add --detach "$T/wt" "$head" > /dev/null 2>&1 ||
+    bad "could not add a linked worktree"
+expect "$T/wt" "commit=$head tracked=clean untracked=none" "a linked worktree at the first commit, the main one at the second"
+printf 'an edit in the linked worktree\n' >> "$T/wt/README.md"
+expect "$T/wt" "commit=$head tracked=modified untracked=none" "an edit in the linked worktree"
+expect "$A" "commit=$head2 tracked=clean untracked=none" "the main worktree, beside the linked one's edit"
+
+# 12. No repository: the same files, no .git.
 B="$T/b"
 mk_tree "$B"
 expect "$B" "unknown" "no repository at all"
@@ -229,7 +305,7 @@ grep -q '^/\* unknown because: ' "$B/host/gen/cft_build_id.h" &&
     ok "no repository: the header says why" ||
     bad "no repository: the header does not say why"
 
-# 10. Inside another project's repository, which must not lend its commit.
+# 13. Inside another project's repository, which must not lend its commit.
 C="$T/outer"
 mkdir -p "$C/vendor/cft" && mk_tree "$C/vendor/cft" && g init -q "$C" &&
     g -C "$C" add -A && g -C "$C" commit -q -m "another project"
@@ -238,12 +314,11 @@ grep -q 'not the top of its repository' "$C/vendor/cft/host/gen/cft_build_id.h" 
     ok "inside another repository: the header says so" ||
     bad "inside another repository: the header does not say so"
 
-# 11. No git.
-GIT_KEEP=$GIT
+# 14. No git.
 GIT=cft-no-such-git
 expect "$A" "unknown" "no git"
 GIT=$GIT_KEEP
-expect "$A" "commit=$head2 tracked=clean untracked=none" "git back"
+expect "$A" "commit=$head2 tracked=clean untracked=none" "git back again"
 
 echo "buildidtest: $checks checks, $failed failed"
 [ "$failed" -eq 0 ]

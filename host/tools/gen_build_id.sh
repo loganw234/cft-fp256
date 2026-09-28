@@ -45,13 +45,28 @@
 #     tree and not this one;
 #   - git answers with an error, or with a commit name that is not 40 or
 #     64 lowercase hex digits;
-#   - git status writes ANYTHING to stderr, even with a zero exit: a
-#     directory it could not open is a directory whose untracked files
-#     it did not count, and a warning parsed as porcelain would have
-#     read as a modification.
+#   - any git call here writes ANYTHING to stderr, even with a zero exit.
+#     git status says "warning: could not open directory" and exits 0
+#     about a directory whose untracked files it then leaves out of its
+#     answer (measured with git 2.34.1 by verifier-C3, 2026-09-28), so a
+#     warning means a count that cannot be vouched for; and a warning
+#     parsed as porcelain would have read as a modification.
 # The reason goes into the header as a comment and onto make's output,
 # never into the id: the id is a value a certificate carries, and the
 # reason is for the person reading a build log.
+#
+# git's stderr is kept apart from its stdout INSIDE this shell, with no
+# temporary file (git_run, below). The first version wrote it to
+# ${TMPDIR:-/tmp}/gen_build_id.<pid>.err, and on the Windows desktop that
+# was blind: under MSYS2's make the recipe has no TMPDIR, the shell
+# running this (make's /bin/sh, MSYS2's) wrote the file into its /tmp,
+# C:/msys64/tmp, and the cat and rm found on PATH - Git for Windows' -
+# looked in theirs. The warning was never read, the id came out whole
+# where it had to be unknown, and one empty file leaked per build: 127 by
+# 10:49 that day (verifier-C3 found it). Only shell built-ins and pipes
+# touch git's output now, so no second runtime can mean another place.
+# make passes <out.h> as a relative path, which every runtime and the
+# native tools resolve alike.
 #
 # git runs with --no-optional-locks, so a make never takes the index lock
 # from a git command someone else is running, and with the environment's
@@ -87,31 +102,42 @@ tidy() {
         cut -c 1-${2:-200}
 }
 
-# git status's stderr goes to a file of its own: it must be SEEN (a
-# warning makes the id unknown) and never read as porcelain.
-errf="${TMPDIR:-/tmp}/gen_build_id.$$.err"
-status=
-serr=
-srun() {
-    status=$("$GIT" -C "$root" --no-optional-locks status --porcelain \
-             --untracked-files=all 2>"$errf")
-    s_rc=$?
-    serr=$(cat "$errf" 2>/dev/null)
-    rm -f "$errf"
-    [ "$s_rc" -eq 0 ] && [ -z "$serr" ]
+# Runs git with the arguments given, and keeps what it wrote to stdout,
+# what it wrote to stderr and its exit status apart - git_out, git_err,
+# git_rc - all three in THIS shell and with no temporary file. Inside the
+# command substitution, git's stderr goes to fd 3, which is the
+# substitution's own output; git's stdout is captured on its own; and
+# once git has exited, its status and its stdout follow, each after a
+# byte no git message carries. So the capture reads
+#   <stderr> \001 <status> \001 <stdout>
+# and is taken apart with the shell's own parameter expansions. True when
+# git exited 0 AND wrote nothing to stderr.
+SEP=$(printf '\001')
+git_run() {
+    git_all=$( { git_o=$("$GIT" "$@" 2>&3); git_s=$?
+                 printf '%s%s%s%s' "$SEP" "$git_s" "$SEP" "$git_o"; } 3>&1 )
+    git_err=${git_all%%"$SEP"*}
+    git_all=${git_all#*"$SEP"}
+    git_rc=${git_all%%"$SEP"*}
+    git_out=${git_all#*"$SEP"}
+    [ "$git_rc" = 0 ] && [ -z "$git_err" ]
+}
+# What git said, for a reason: its stderr, or its status when it said
+# nothing.
+git_said() {
+    tidy "${git_err:-exit status $git_rc}"
 }
 
 if ! command -v "$GIT" >/dev/null 2>&1; then
     why="no git on PATH ($GIT)"
-elif ! cdup=$("$GIT" -C "$root" rev-parse --show-cdup 2>&1); then
-    why="git cannot place $root in a work tree: $(tidy "$cdup")"
-elif [ -n "$cdup" ]; then
-    why="$root is not the top of its repository (git says the top is $(tidy "$cdup") above it): a copy inside another project's repository, whose commit is not this tree's"
-elif ! commit=$("$GIT" -C "$root" rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null); then
-    why="$root has no commit checked out"
-elif ! srun; then
-    why="git status in $root did not answer cleanly: $(tidy "${serr:-exit status $s_rc}")"
+elif ! git_run -C "$root" rev-parse --show-cdup; then
+    why="git cannot place $root in a work tree: $(git_said)"
+elif [ -n "$git_out" ]; then
+    why="$root is not the top of its repository (git says the top is $(tidy "$git_out") above it): a copy inside another project's repository, whose commit is not this tree's"
+elif ! git_run -C "$root" rev-parse --verify --quiet 'HEAD^{commit}'; then
+    why="$root has no commit checked out${git_err:+: $(git_said)}"
 else
+    commit=$git_out
     case ${#commit} in
         40|64) ;;
         *) commit= ;;
@@ -120,18 +146,23 @@ else
         ''|*[!0-9a-f]*)
             why="git named the commit in a form that is not 40 or 64 lowercase hex digits" ;;
         *)
-            tracked=clean
-            untracked=none
-            # Two passes over the same text rather than one clever one:
-            # `??` is untracked, anything else is a tracked change.
-            if printf '%s\n' "$status" | grep -q '^??'; then
-                untracked=present
-            fi
-            if printf '%s\n' "$status" | grep -v '^??' | grep -q .; then
-                tracked=modified
-            fi
-            id="commit=$commit tracked=$tracked untracked=$untracked"
-            why= ;;
+            if ! git_run -C "$root" --no-optional-locks status --porcelain \
+                    --untracked-files=all; then
+                why="git status in $root did not answer cleanly: $(git_said)"
+            else
+                status=$git_out
+                tracked=clean
+                untracked=none
+                # Two passes over the same text rather than one clever
+                # one: `??` is untracked, anything else a tracked change.
+                if printf '%s\n' "$status" | grep -q '^??'; then
+                    untracked=present
+                fi
+                if printf '%s\n' "$status" | grep -v '^??' | grep -q .; then
+                    tracked=modified
+                fi
+                id="commit=$commit tracked=$tracked untracked=$untracked"
+            fi ;;
     esac
 fi
 
