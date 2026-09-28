@@ -3514,10 +3514,15 @@ verifier.
    - Conserved-quantity drift where the model has one (Hénon-Heiles'
      energy).
    - A step-halving estimate for the fixed-step programs: the same image
-     with the bank's step halved and the steps doubled, measured against
-     the ODE rows' 300-digit arm.
+     with the bank's step halved, run for twice as many segments (a
+     segment's step count is fixed inside its image, so its digest
+     stays the same). It is measured against the ODE rows' 300-digit
+     arm.
    - The rounding estimate: a re-run one format wider with the constants
-     widened exactly.
+     widened exactly. A program image is at most fp256, so a run at
+     fp256 has no wider re-run on the tile. There the estimate is
+     refused by name, unless the golden model's wider arithmetic is
+     given a way in (to be designed, not assumed).
 6. **cft-orbits' runs,** certified from its records and chain, which
    already hold the states.
 
