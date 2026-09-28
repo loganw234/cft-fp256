@@ -56,8 +56,9 @@ VERSION = 1
 # way to a value, has a numerator of at most WIDTH bits in magnitude and
 # a denominator of at most WIDTH bits, in reduced form. 1,023 because one
 # exact step on two such values - a/b + c/d = (ad + cb) / bd - needs
-# 2 * 1023 + 1 = 2,047 bits of magnitude, which is what libcft's default
-# bigint (2,048 bits, host/src/bigint.h) holds with nothing to spare.
+# 2 * 1023 + 1 = 2,047 bits of magnitude, which libcft's default unsigned
+# bigint (2,048 bits, host/src/bigint.h) holds with one bit to spare:
+# 1,024 would need 2,049, which it does not.
 WIDTH = 1023
 
 SALT_BYTES = 32
@@ -144,13 +145,16 @@ class Refusal(ValueError):
 class Identity:
     """What the producer says it ran on. Recorded for reproduction and
     reported; never checked (docs/CERTIFICATES.md, "Identity")."""
-    build_commit: str = "unknown"       # 40 hex, or unknown
-    build_tree: str = "unknown"         # clean, dirty or unknown
-    build_untracked: str = "unknown"    # none, present or unknown
+    # libcft's cft_build_id() string, verbatim (parcel P2, 2026-09-28):
+    # "commit=<40 or 64 lowercase hex> tracked=<clean|modified>
+    # untracked=<none|present>", or "unknown" whole
+    build_id: str = "unknown"
     backend: str = "unknown"            # software, xrt, remote or unknown
     device_xclbin: str = "unknown"      # 64 hex, none or unknown
     device_version: str = "unknown"     # 8 hex, none or unknown
-    device_caps: object = "unknown"     # (8 hex, 8 hex), none or unknown
+    # cft_image_id's raw words: (CAPS,) below VERSION 0x800 and
+    # (CAPS, CAPS2) from it, each 8 hex; or none or unknown
+    device_caps: object = "unknown"
     device_tiles: object = "unknown"    # an integer >= 1, or unknown
 
 
@@ -361,6 +365,9 @@ _DEC = re.compile(r"0|[1-9][0-9]*")
 _NAME = re.compile(r"[a-z][a-z0-9-]{0,63}")
 _RAT = re.compile(r"(0|-?[1-9a-f][0-9a-f]*)/([1-9a-f][0-9a-f]*)")
 _SLOT = re.compile(r"s(0|[1-9][0-9]*)")
+# cft_build_id's commit field: 40 lowercase hex digits, or 64 in a
+# repository that names objects by SHA-256 (P2's generator writes either)
+_BUILD_COMMIT = re.compile(r"commit=(?:[0-9a-f]{40}|[0-9a-f]{64})")
 DEC_MAX = (1 << 63) - 1
 
 
@@ -407,9 +414,7 @@ def _body_lines(cert):
     L = [f"{MAGIC} {VERSION}", f"mode {cert.mode}"]
     if cert.mode == "keyed":
         L.append(f"salt-commitment {cert.salt_commitment}")
-    L += [f"build-commit {idn.build_commit}",
-         f"build-tree {idn.build_tree}",
-         f"build-untracked {idn.build_untracked}",
+    L += [f"build-id {idn.build_id}",
          f"backend {idn.backend}",
          f"device-xclbin {idn.device_xclbin}",
          f"device-version {idn.device_version}",
@@ -466,9 +471,9 @@ def _normalized(cert):
                 for e in cert.accuracy)
     idn = cert.identity
     if isinstance(idn.device_caps, list):
-        idn = Identity(idn.build_commit, idn.build_tree, idn.build_untracked,
-                       idn.backend, idn.device_xclbin, idn.device_version,
-                       tuple(idn.device_caps), idn.device_tiles)
+        idn = Identity(idn.build_id, idn.backend, idn.device_xclbin,
+                       idn.device_version, tuple(idn.device_caps),
+                       idn.device_tiles)
     return Certificate(cert.mode, cert.salt_commitment, idn, runs, acc)
 
 
@@ -513,8 +518,8 @@ def body_of(data):
 # Every line's key is its first token, and every key has one place: a
 # rank in the order the specification lists them. The four STARTERS
 # open a block.
-_ORDER = ("cft-certificate", "mode", "salt-commitment", "build-commit",
-          "build-tree", "build-untracked", "backend", "device-xclbin",
+_ORDER = ("cft-certificate", "mode", "salt-commitment", "build-id",
+          "backend", "device-xclbin",
           "device-version", "device-caps", "device-tiles", "runs",
           "run", "program-format", "program-image", "program-digest",
           "lanes", "steps", "stream-a", "stream-b", "stream-c",
@@ -874,24 +879,39 @@ class _Reader:
                                      + [repr(w) for w in words]),
                                  self.pos - 1)
 
-        commit = one("build-commit", ("unknown",), hexn=40)
-        tree = one("build-tree", ("clean", "dirty", "unknown"))
-        untracked = one("build-untracked", ("none", "present", "unknown"))
+        # cft_build_id()'s string, verbatim, in its own grammar:
+        # `unknown` whole, or its three fields in their order, each
+        # spelt as the library spells it.
+        toks = self.expect("build-id")
+        if toks[1:] == ["unknown"]:
+            build = "unknown"
+        elif (len(toks) == 4 and _BUILD_COMMIT.fullmatch(toks[1])
+              and toks[2] in ("tracked=clean", "tracked=modified")
+              and toks[3] in ("untracked=none", "untracked=present")):
+            build = " ".join(toks[1:])
+        else:
+            raise self.malformed("'build-id' is cft_build_id()'s string "
+                                 "verbatim: 'commit=<40 or 64 lowercase "
+                                 "hex> tracked=<clean|modified> "
+                                 "untracked=<none|present>', or 'unknown'",
+                                 self.pos - 1)
         backend = one("backend", ("software", "xrt", "remote", "unknown"))
         xclbin = one("device-xclbin", ("none", "unknown"), hexn=64)
         version = one("device-version", ("none", "unknown"), hexn=8)
         toks = self.expect("device-caps")
         if toks[1:] in (["none"], ["unknown"]):
             caps = toks[1]
-        elif len(toks) == 3 and all(_HEX[8].fullmatch(t) for t in toks[1:]):
-            caps = (toks[1], toks[2])
+        elif len(toks) in (2, 3) and all(_HEX[8].fullmatch(t)
+                                         for t in toks[1:]):
+            caps = tuple(toks[1:])
         else:
-            raise self.malformed("'device-caps' is two 8-digit lowercase hex "
-                                 "words (CAPS, CAPS2), 'none' or 'unknown'",
+            raise self.malformed("'device-caps' is the raw words "
+                                 "cft_get_image_id gives - CAPS alone, or "
+                                 "CAPS then CAPS2, each 8 lowercase hex "
+                                 "digits - or 'none' or 'unknown'",
                                  self.pos - 1)
         tiles = one("device-tiles", ("unknown",), dec=True)
-        return Identity(commit, tree, untracked, backend, xclbin, version,
-                        caps, tiles)
+        return Identity(build, backend, xclbin, version, caps, tiles)
 
     def run(self, i):
         self.member_index("run", i, stop=("accuracy", "end"),
@@ -1076,6 +1096,18 @@ class _Reader:
             fmt = self.word(toks[2], LADDER, "the value's format")
             lo = self.element(fmt, toks[3], toks[4], "the lower end")
             hi = self.element(fmt, toks[5], toks[6], "the upper end")
+            # The audit compares each end with the exact value, an exact
+            # step like any other, so a finite end is held to the width
+            # rule; an infinite end compares by its sign alone. (A
+            # rounded value's element is not: the audit rounds the exact
+            # value and compares BITS, which needs no exact comparison.)
+            for end, what in ((lo, "the lower end"), (hi, "the upper end")):
+                kind, v = element_fraction(fmt, end)
+                if kind == "finite":
+                    try:
+                        _checked(v, f"{what}'s exact value")
+                    except Refusal as r:
+                        raise self.fail("width", r.message, at)
             if _order_key(fmt, lo) > _order_key(fmt, hi):
                 raise self.malformed("an enclosure's lower end is above its "
                                      "upper end", at)
@@ -1224,9 +1256,14 @@ def certify_run(kind, image, bank, salt, states, results, *, steps,
     if why:
         raise Refusal("program-shape", f"this program is not a segment: "
                                        f"{why}")
-    if len(states) != len(results) + 1 or not results:
-        raise ValueError(f"{len(results)} segments have {len(results) + 1} "
-                         f"boundary states, not {len(states)}")
+    if not results:
+        raise Refusal("malformed", "a run has at least one segment, and this "
+                                   "one has none: the format has no "
+                                   "spelling for an empty run")
+    if len(states) != len(results) + 1:
+        raise Refusal("state-shape",
+                      f"{len(results)} segments have {len(results) + 1} "
+                      f"boundary states, and {len(states)} were given")
     fmt = prog.fmt
     nslots = prog.n_scratch_in
     n = len(states[0]) // nslots
@@ -1326,9 +1363,16 @@ def derive(entry, runs, shapes, states):
 def make_value(q, form="exact", fmt=None, rnd=None):
     """The Value a writer records for the exact value q: exact, rounded
     in `fmt` under `rnd`, or enclosed in `fmt` by its two directed
-    roundings (the tightest enclosure that format holds)."""
+    roundings (the tightest enclosure that format holds).
+
+    The exact value is held to the width rule whatever the form: a
+    rounded or enclosed value is still a statement about q, which an
+    auditor must compute exactly to check, so a value past the rule is
+    refused here rather than rounded into something that looks
+    checkable (the page: "nothing past it is ever approximated")."""
+    _checked(q, "the value")
     if form == "exact":
-        return Value("exact", exact=_checked(q, "the value"))
+        return Value("exact", exact=q)
     if form == "rounded":
         return Value("rounded", fmt=fmt, rnd=rnd,
                      bits=round_rational(fmt, q, rnd))
@@ -1443,8 +1487,7 @@ class Verdict:
 
 def identity_report(cert):
     idn = cert.identity
-    rows = [("build-commit", idn.build_commit), ("build-tree", idn.build_tree),
-            ("build-untracked", idn.build_untracked),
+    rows = [("build-id", idn.build_id),
             ("backend", idn.backend), ("device-xclbin", idn.device_xclbin),
             ("device-version", idn.device_version),
             ("device-caps", " ".join(idn.device_caps)
@@ -1454,9 +1497,17 @@ def identity_report(cert):
             else f"{k}: {v} - stated, not checked" for k, v in rows]
 
 
-def _as_values(fmt, s):
-    return state_values(fmt, s) if isinstance(s, (bytes, bytearray)) \
-        else list(s)
+def _as_values(fmt, s, name, where):
+    """A state or stream handed as values or as the bytes the library
+    stores. Bytes that are not whole elements are refused by `name`
+    (state-shape or stream), not left to raise."""
+    if not isinstance(s, (bytes, bytearray)):
+        return list(s)
+    esz = fmt.width // 8
+    if len(s) % esz:
+        raise Refusal(name, f"{where}: {len(s)} bytes is not a whole number "
+                            f"of {fmt.name} elements ({esz} bytes each)")
+    return state_values(fmt, s)
 
 
 def audit(data, salt, programs, states=None, streams=None, choose=None,
@@ -1562,8 +1613,10 @@ def _check_streams(cert, salt, progs, streams):
         fmt = progs[r]["prog"].fmt
         given = (streams or {}).get(r)
         if given is not None:
-            given = tuple(None if s is None else _as_values(fmt, s)
-                          for s in given)
+            given = tuple(None if s is None else
+                          _as_values(fmt, s, "stream",
+                                     f"run {r} stream {nm}")
+                          for nm, s in zip("abc", given))
         try:
             abc = _streams_or_zero(fmt, run.lanes, given)
         except Refusal as e:
@@ -1611,7 +1664,8 @@ def _check_states(cert, salt, progs, states):
                 raise Refusal("state-shape",
                               f"run {r} has boundaries 0..{len(run.chain)}; "
                               f"a state was handed for {b}", run=r)
-            vals = _as_values(fmt, states[r][b])
+            vals = _as_values(fmt, states[r][b], "state-shape",
+                              f"run {r} boundary {b}")
             if len(vals) != want or not all(0 <= v < (1 << fmt.width)
                                             for v in vals):
                 raise Refusal("state-shape",
@@ -1777,6 +1831,12 @@ def _wider_image(p0, pa):
 
 
 def _plan(cert, choose, seed):
+    # A seed handed is the auditor's statement of its sample, so it is
+    # held to its size whether or not this audit draws one.
+    if seed is not None and (not isinstance(seed, (bytes, bytearray))
+                             or len(seed) != SEED_BYTES):
+        raise Refusal("choice", f"a sampling seed is exactly {SEED_BYTES} "
+                                f"bytes")
     choose = choose or {}
     for r in choose:
         if not isinstance(r, int) or not 0 <= r < len(cert.runs):

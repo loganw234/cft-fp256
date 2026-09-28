@@ -92,6 +92,9 @@ Every certificate is KEYED or OPEN. The owner chooses, per certificate
     have equal hashes);
   - the program: its digests are unkeyed, and the classic banks are
     files in this repository;
+  - the run lines: each run's format, lanes, steps, segment count and
+    kind, and a half-step run's h-slots;
+  - the parameters, in the clear by definition;
   - the identity fields.
   And it gives no integrity: the owner holds the key, and nothing is
   signed.
@@ -189,21 +192,35 @@ for machines too; the golden model's `Fraction` or any bignum reads it.
 
 Every exact rational the format carries - each coefficient, each exact
 value - has a numerator of at most 1,023 bits in magnitude and a
-denominator of at most 1,023 bits, in lowest terms. So does every
-intermediate value an audit computes on the way to an accuracy value,
-in the order this page fixes (see "Accuracy entries"). A value past it
-is refused, `width`, by every writer and every reader, the golden
-model's included, and nothing past it is ever approximated.
+denominator of at most 1,023 bits, in lowest terms. So does every value
+an audit computes on the way to an accuracy value - each element's exact
+value, each product, each partial sum and each difference - in the
+order this page fixes (see "Accuracy entries"). A value past it is
+refused, `width`, by every writer and every reader, the golden model's
+included, and nothing past it is ever approximated: a writer asked for a
+rounded or enclosed value of an exact value past the rule refuses it,
+as it would refuse the exact value.
+
+**Its reach over a value's elements.**
+- An ENCLOSURE's two ends are compared with the exact value, an exact
+  step like the others, so each finite end is held to the rule, and an
+  end past it is refused `width` by the reader. An infinite end is
+  compared by its sign alone.
+- A ROUNDED value's element is not held to it: the audit rounds the
+  exact value into the named format and compares the BITS, which needs
+  no exact comparison. Rounding an in-rule value, at most 1,023 bits,
+  into fp256 takes an integer division of about 1,023 + 240 bits.
 
 Why 1,023: one exact step on two such values, a/b + c/d = (ad + cb)/bd,
-needs 2 x 1,023 + 1 = 2,047 bits of magnitude. That is what libcft's
-unsigned bigint holds at its default width, 2,048 bits
-(`host/src/bigint.h`), with nothing to spare. A product needs 2,046,
-and a comparison of a/b with c/d compares two such products. So a C
-auditor built at the default width can compute every in-rule step
-without overflow, and, applying the same rule to the same values in the
-same order, cannot differ from the golden auditor on width. That is the
-design's argument; no C auditor exists yet to measure it against.
+needs 2 x 1,023 + 1 = 2,047 bits of magnitude. libcft's unsigned bigint
+holds 2,048 at its default width (`host/src/bigint.h`), so that fits
+with one bit to spare; a rule of 1,024 bits would need 2,049, which does
+not. A product needs 2,046, and a comparison of a/b with c/d compares
+two such products. So a C auditor built at the default width can compute
+every in-rule step without overflow, and, applying the same rule to the
+same values in the same order, cannot differ from the golden auditor on
+width. That is the design's argument; no C auditor exists yet to measure
+it against.
 
 A narrower build is not a conforming auditor of exact values. The
 bigint is 576 bits at an fp128 ceiling and 288 below
@@ -231,13 +248,11 @@ certificate only. Groups repeat as their count says.
 | `cft-certificate 1` | the magic line: the format and its version |
 | `mode <m>` | `keyed` or `open` |
 | `salt-commitment <digest>` (K) | HMAC(salt, "cft-certificate 1 salt") |
-| `build-commit <commit>` | the library's git commit, or `unknown` |
-| `build-tree <w>` | `clean`, `dirty` or `unknown`: tracked files modified |
-| `build-untracked <w>` | `none`, `present` or `unknown`: untracked files present |
+| `build-id <id>` | the library's `cft_build_id()` string, verbatim: `commit=<40 or 64 lowercase hex> tracked=<clean\|modified> untracked=<none\|present>`, its three fields in that order, or `unknown` whole |
 | `backend <w>` | `software`, `xrt`, `remote` or `unknown` |
 | `device-xclbin <digest>` | SHA-256 of the xclbin loaded, `none` or `unknown` |
 | `device-version <word>` | the register map's VERSION, `none` or `unknown` |
-| `device-caps <word> <word>` | CAPS then CAPS2, raw; or `none` or `unknown` alone |
+| `device-caps <word> [<word>]` | the raw words `cft_get_image_id` gives: CAPS alone for an image below VERSION 0x800, CAPS then CAPS2 from it; or `none` or `unknown` alone |
 | `device-tiles <n>` | compute units, at least 1, or `unknown` |
 | `runs <R>` | how many run blocks follow; at least 1 |
 
@@ -258,7 +273,7 @@ auxiliary.
 | `stream-b <digest>` | stream b |
 | `stream-c <digest>` | stream c |
 | `parameters <p>` | how many parameter lines follow; 0 or more |
-| `parameter <name> <n>` | a non-negative integer parameter the bank does not carry: stated, not checked. Names strictly increasing. A real-valued parameter belongs in the bank, where the program digest covers it |
+| `parameter <name> <n>` | a non-negative integer parameter the bank does not carry: stated, not checked. Names strictly increasing in byte order. A real-valued parameter belongs in the bank, where the program digest covers it |
 | `segments <S>` | how many segment lines follow; at least 1 |
 | `segment <k> start <digest> end <digest> flags <n> status <n>` | segment k: the hashes of its start and end states, its sticky IEEE flag word (0..31) and its STATUS (0..2^32-1) |
 | `output <digest>` | the hash of the run's final state |
@@ -310,7 +325,7 @@ this block to it byte for byte, and audits it.
 - Keyed, under the example salt: the bytes 00 01 02 ... 1f. It is
   printed here, so it must never be used.
 - Two entries:
-  - lane 1's energy drift, exact. Its denominator is 3 x 2^159: the
+  - lane 1's energy drift, exact. Its denominator is 3 x 2^163: the
     y^3/3 in the energy leaves a 3 that neither hex nor a finite decimal
     can write, which is why rationals exist;
   - the step-halving estimate over both lanes, rounded upward to fp64.
@@ -320,9 +335,7 @@ this block to it byte for byte, and audits it.
 cft-certificate 1
 mode keyed
 salt-commitment 14599c5e32d506724573517b8c32df264cbc4e6b6ad7198cce440fe26d84e1ff
-build-commit unknown
-build-tree unknown
-build-untracked unknown
+build-id unknown
 backend software
 device-xclbin none
 device-version none
@@ -378,7 +391,7 @@ uses 1
 scope max-lanes
 value rounded fp64 rup 3ed9a053ec030000 6.109781395646773916041638585738837718963623046875e-6
 end
-hash e64c75b1893079461fdaf6750b33347aee4b742f8d4a413c01f050d692256a13
+hash 6e6f7de25934d892382ede1ef4213dc9b64813c43fa3cbd639f4efb3919dd434
 ```
 
 Reading it: every segment raised inexact (flag word 16) and nothing
@@ -555,11 +568,14 @@ the slots it lists. `term -1/3 s1 s1 s1` is -y^3/3 when slot 1 holds y.
 The label names it for a person. A term's factors list their slots in
 non-decreasing order, so one monomial has one spelling. The ORDER of
 the terms is the producer's statement: two certificates that list the
-same terms in two orders are two valid certificates.
+same terms in two orders are two certificates, stating the same
+function. The order fixes the partial sums, though, so the width rule
+can refuse one of the two and accept the other (below).
 
 **The functions, exactly.** Each value is computed in exact rational
-arithmetic, in this order, and every value computed is held to the
-width rule (refused `width`):
+arithmetic, in this order, and every value computed - each element's
+exact value as it is reached, each product, each partial sum, each
+difference - is held to the width rule (refused `width`):
 - An element's exact value is m x 2^e for its integer significand m
   and exponent e (zero for a zero). A non-finite element has none:
   refused, `accuracy-finite`.
@@ -578,18 +594,26 @@ width rule (refused `width`):
   - F0 is run 0's final state and Fr is run r's.
 - The value is D_i or E_i for one lane, or the maximum over the lanes
   of |D_i| or E_i.
-- The order matters for which refusal comes first, and so for two
-  auditors' verdicts agreeing, when a value is both past the width rule
-  and next to a non-finite one. It cannot change a value.
+- The order fixes every intermediate value, and so it decides two
+  things, which two auditors must decide alike:
+  - whether the width rule refuses at all. The terms 1/a, 1/b, -1/b,
+    with a = 2^600 + 1 and b = 2^601 - 1, are refused at the partial
+    sum 1/a + 1/b, whose denominator has 1,201 bits; the same terms
+    as 1/b, -1/b, 1/a are within the rule at every step, and their
+    value is the same;
+  - which refusal comes first when two apply, as when a value past the
+    rule stands next to a non-finite one.
+  It cannot change a value that is computed.
 
 **The value's form.**
 - `exact`: the rational itself, in its one spelling.
 - `rounded`: the exact value correctly rounded to the named format
   under the named attribute. Overflow and underflow are as the
   attribute says. An exact zero rounds to +0 under every attribute.
-- `enclosed`: two elements with lo <= value <= hi. The golden writer
-  writes the tightest pair in the format, the value rounded down and
-  rounded up, and any pair that holds the value is accepted.
+- `enclosed`: two elements with lo <= value <= hi, both ends inclusive,
+  each finite end within the width rule. The golden writer writes the
+  tightest pair in the format, the value rounded down and rounded up,
+  and any pair that holds the value is accepted.
 
 **What re-deriving proves.** Each value IS the stated function of states
 whose hashes the certificate carries, and those states are the ones the
@@ -601,6 +625,23 @@ model's energy.
 
 The header's build, backend and device lines are the producer's
 statement of what it ran on.
+- `build-id` is the string libcft's `cft_build_id()` returns, copied
+  byte for byte, so that a certificate names the library build in the
+  library's own words. The library computes it, and this page only
+  spells it (step 2's identity parcel, P2, defines it):
+  - `commit=` and the commit checked out when the library was built,
+    40 lowercase hex digits, or 64 in a repository that names objects
+    by SHA-256;
+  - `tracked=modified` if any tracked file differed from that commit,
+    else `tracked=clean`;
+  - `untracked=present` if any file git does not ignore was untracked,
+    else `untracked=none`;
+  - or `unknown`, whole, never partly known, where the build was not
+    measured.
+  Only `tracked=clean untracked=none` says the library IS that commit.
+- The device lines are what `cft_get_image_id` reports for an XRT
+  image: the SHA-256 of the exact xclbin bytes loaded, VERSION, and
+  the raw CAPS words, one below VERSION 0x800 and two from it.
 - Each may be `unknown`: the producer did not record it. A reader
   reports it as such.
 - The device lines may be `none`: the field does not exist for this
@@ -633,8 +674,10 @@ A reader decides, in this order, and refuses at the first failure:
 3. **The bytes.** Each body line is printable ASCII, not empty, with
    single spaces and none at either end. Otherwise `malformed`.
 4. **The magic line.** The first line's key is `cft-certificate`
-   (otherwise `magic`), and the line is `cft-certificate 1` exactly: a
-   decimal other than 1 is `version`, anything else `malformed`.
+   (otherwise `magic`), and the line is `cft-certificate 1` exactly. A
+   second and last token spelt as a decimal integer other than 1 is
+   `version`, whatever its size - past 2^63 - 1 too, since a version is
+   a name here and not a count; anything else is `malformed`.
 5. **The keys.** Every line's key is a key of version 1. Otherwise
    `unknown-line`, wherever the line stands.
 6. **The mode.** The second line is the mode line (when it is not, the
@@ -644,10 +687,13 @@ A reader decides, in this order, and refuses at the first failure:
    one with none is `commitment-missing`.
 7. **The lines, in order**, as "The lines, in order" gives them.
 
-**Counts first.** When the reader meets a count line, it counts the
-group's lines before it reads any of them. A disagreement is `count`,
-whatever else is wrong with them. So a group member dropped, added or
-moved out of its group is a count that disagrees.
+**Counts first.** When the reader meets a count line, it reads the
+count's own value first, in its range: runs and segments at least 1, a
+drift's terms 1 to 64, h-slots 1 to 512. A count out of its range is
+`malformed`, even where it also disagrees with its lines. Then it
+counts the group's lines, before it reads any of them. A disagreement
+is `count`, whatever else is wrong with them. So a group member
+dropped, added or moved out of its group is a count that disagrees.
 - `parameters`, `segments` and a drift's `terms` count the member lines
   that directly follow the count line.
 - `runs` counts the `run` lines before the `accuracy` line (or `end`);
@@ -659,8 +705,9 @@ from 0. When the index is wrong:
 - an index already passed is `line-unexpected`;
 - the right index appearing later in the group is `line-order`;
 - otherwise `line-missing`.
-Parameter names increase strictly: a repeated name is
-`line-unexpected`, a smaller one `line-order`.
+Parameter names increase strictly in byte order - ASCII's, so `a-b`
+(0x2d) comes before `a0` (0x30): a repeated name is `line-unexpected`,
+a smaller one `line-order`.
 
 **A line that is not the one expected.** When the reader expects a line
 with key K and finds a line with key k, the refusal is decided like
@@ -714,9 +761,10 @@ check passes.
    `body-hash`).
 2. **Form:** the strict reader (all of "The strict reader").
    - Then the auditor's own **choice** of segments is held to the
-     certificate: sample sizes 1..S, named segments distinct and in
-     0..S-1, runs that exist, a 32-byte seed (`choice`, exit 64, a
-     usage error).
+     certificate: sample sizes 1..S; a named list not empty, its
+     segments distinct and in 0..S-1; runs that exist; and a seed, when
+     one is handed, of exactly 32 bytes, whether or not a sample is
+     asked (`choice`, exit 64, a usage error).
 3. **Salt.**
    - Keyed: a salt is handed (`salt-missing`), it is 32 bytes
      (`salt-length`), and its commitment is the certificate's
@@ -738,10 +786,11 @@ check passes.
 7. **States handed**, run by run and boundary by boundary: each is
    lanes x slots elements of a boundary that exists (`state-shape`),
    and its hash is that boundary's (`state-hash`).
-8. **Relations** of each auxiliary run, in the order of the table under
-   "Auxiliary runs" (`aux-format` through `aux-start`, and
-   `state-missing` when a wider run's check needs run 0's initial
-   state).
+8. **Relations**, run by run: all of run 1's checks in the order of the
+   table under "Auxiliary runs", then all of run 2's, and so on
+   (`aux-format` through `aux-start`, and `state-missing` when a wider
+   run's check needs run 0's initial state). So run 1's `aux-start`
+   comes before run 2's `aux-segments`.
 9. **Re-runs**, run by run, the chosen segments in ascending order.
    - Each starts from its start state, handed or re-run into
      (`state-missing` when neither).
@@ -812,10 +861,10 @@ accuracy 7, the auditor's own usage 64. The name is the report.
 | `line-order` | 2 | lines are out of their order |
 | `line-unexpected` | 2 | a line has no place where it stands: a repeat, or a line of a block already read |
 | `count` | 2 | a count disagrees with the lines or tokens it counts |
-| `malformed` | 2 | a value breaks its one spelling, its range or its token count, or a line breaks the byte rules |
+| `malformed` | 2 | a value breaks its one spelling, its range or its token count, or a line breaks the byte rules; a count out of its own range; a writer asked to certify a run of no segments |
 | `decimal` | 2 | an element's decimal is not the exact decimal of its hex |
 | `accuracy-kind` | 2 | an entry's kind is not its method's; every `bound` in version 1 |
-| `width` | 3 | an exact value, written or computed, past 1,023 bits in numerator or denominator |
+| `width` | 3 | an exact value past 1,023 bits in numerator or denominator: written, computed (an element's, a product, a partial sum, a difference), an enclosure's finite end, or one a writer was asked to round or enclose |
 | `salt-missing` | 4 | the audit of a keyed certificate was handed no salt |
 | `salt-unexpected` | 4 | the audit of an open certificate was handed a salt |
 | `salt-length` | 4 | a salt that is not 32 bytes |
@@ -825,8 +874,8 @@ accuracy 7, the auditor's own usage 64. The name is the report.
 | `program-image` | 4 | no image was handed, the image does not load, or the bank is not the size it addresses |
 | `program-format` | 4 | the image's format is not the run's |
 | `program-shape` | 4 | the program is not a segment |
-| `stream` | 4 | a stream handed (or +0) is not the one certified |
-| `state-shape` | 4 | a state handed is the wrong size, or for a run or boundary that does not exist |
+| `stream` | 4 | a stream handed (or +0) is not the one certified, or is bytes that are not whole elements |
+| `state-shape` | 4 | a state handed is the wrong size, bytes that are not whole elements, or for a run or boundary that does not exist; a writer handed states and segment results that disagree in number |
 | `state-hash` | 4 | a state handed is not the one certified at its boundary |
 | `state-missing` | 4 | a state the audit needs was neither handed nor re-run into |
 | `continuity` | 5 | a segment does not start where the one before it ended, or the output is not the last end |
@@ -846,7 +895,7 @@ accuracy 7, the auditor's own usage 64. The name is the report.
 | `accuracy-slot` | 7 | a term names a slot the state does not have |
 | `accuracy-finite` | 7 | an exact value needs an element that is not finite |
 | `accuracy-value` | 7 | the value written is not the stated function of the certified runs |
-| `choice` | 64 | the auditor asked for a sample, segment, run or seed the certificate cannot give it |
+| `choice` | 64 | the auditor asked for a sample, segment or run the certificate cannot give it, or handed a seed that is not 32 bytes |
 
 A refusal locates itself where that means something: the line, for the
 reader's refusals; the run and the segment or boundary, for the audit's.
@@ -858,7 +907,11 @@ control, and each control asserts the NAME of the check it exists for,
 never merely that something refused. Every control but the byte flip
 writes a valid hash line over its defective body. Otherwise the hash
 check would refuse them all first, and a broken strict-form check would
-pass unseen (verifier-C1). The controls cover:
+pass unseen (verifier-C1). "Every mechanism" is a measured claim, not an
+intention: each was disabled in turn in a copy of the implementation,
+and a test went red for it (the round's ledger, P1.md; verifier-C2 found
+fourteen that could not fail at first, and each has its test now). The
+controls cover:
 - a byte flipped, one at a time, in every byte of a certificate that
   holds every key of the grammar;
 - every line dropped;
@@ -866,19 +919,29 @@ pass unseen (verifier-C1). The controls cover:
 - every line repeated in place;
 - every adjacent pair of lines in a block exchanged, and whole blocks
   moved;
-- every count, one more and one less;
-- each encoding's non-canonical spellings;
-- the width rule, at the reader, at the writer and at the audit;
-- a decimal that disagrees with its hex;
+- every count, one more and one less, and each count out of its own
+  range;
+- each encoding's non-canonical spellings, and each range limit at its
+  edge: 64 terms, h-slot 511 and term slot 65,535 read, one more not;
+- the width rule, at the reader, at the writer, and at the audit on an
+  element's own value, a product and a partial sum, and at an
+  enclosure's ends;
+- a decimal that disagrees with its hex, and a version of any size;
 - each kind that is not its method's;
 - the mode: an unknown mode, a missing or unexpected commitment, and a
   salt missing, unexpected or wrong;
-- a wrong image or bank, stream, or state;
+- a wrong image or bank, stream, or state, and bytes that are not whole
+  elements;
 - a broken chain;
 - a segment whose certified end, flags or STATUS differ;
 - every auxiliary relation, including the main run attached as its own
-  half-step run;
-- every accuracy check.
+  half-step run, a wider image's constants and header, and the
+  relations checked run by run;
+- every accuracy check, the values derived again from the states with
+  none of the implementation's code, an estimate's last slot, and an
+  enclosure's ends held inclusive;
+- the audit's order, every adjacent pair of its steps from the choice
+  to accuracy, and an auditor's seed never the certificate's.
 
 The real audit is `programs/lorenz63-rk4-fp64.cfta` with its classic
 bank:
