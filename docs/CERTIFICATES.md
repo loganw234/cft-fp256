@@ -14,8 +14,9 @@ Where things stand (2026-09-28):
   strict parse, the hashes, the chain and the audit, which re-runs
   segments with `seq.run`;
 - its gate is `python/tests/test_cert.py`, run by the golden stage,
-  with negative controls, each watched failing, for every mechanism
-  but those "The controls" names as still without one;
+  with a negative control, watched failing, for each mechanism "The
+  controls" counts, and none yet for those it names as found without
+  one;
 - libcft names its build and its device image, `cft_build_id` and
   `cft_get_image_id` ([HOSTAPI.md](HOSTAPI.md), "Identity at ABI
   0.15");
@@ -629,8 +630,10 @@ difference - is held to the width rule (refused `width`):
   tightest pair in the format, the value rounded down and rounded up,
   and refuses it `width` when a finite end of it is past the rule,
   which can happen to a value within the rule: 1/(3 x 2^900), enclosed
-  in fp256, has a lower end whose denominator has 1,139 bits. It does
-  not widen the pair. Any pair that holds the value is accepted.
+  in fp256, has a lower end whose denominator has 1,139 bits. Either
+  end can be the one: 1/(2^900 - 1) has a lower end of 901 bits and an
+  upper end of 1,137, and 1/(2^900 + 1) a lower end of 1,138 and an
+  upper end of 901. It widens neither end. Any pair that holds the value is accepted.
 
 **What re-deriving proves.** Each value IS the stated function of states
 whose hashes the certificate carries, and those states are the ones the
@@ -661,7 +664,8 @@ statement of what it ran on.
   the raw CAPS words, one below VERSION 0x800 and two from it. The
   reader holds each identity line to its own spelling and nothing
   more: not the number of CAPS words to `device-version`, and not the
-  device lines to one another or to `backend`.
+  device lines - `device-tiles` among them - to one another or to
+  `backend`.
 - Each may be `unknown`: the producer did not record it. A reader
   reports it as such.
 - The device lines may be `none`: the field does not exist for this
@@ -773,6 +777,35 @@ before it was re-run in the same audit and matched: its end state is
 then the certified start. So a full audit handed only each run's
 initial state is possible, and is the most independent audit there is.
 
+**The shape of what it is handed.** Each argument is held to its shape
+by the step that reads it, before the step uses it, and an argument in
+another shape is refused by that step's name. In the golden model's
+terms (`cert.audit`), where a run index is an integer (never a bool)
+naming a run of this certificate:
+- `programs`: a mapping from every run index to (image, bank), the
+  image as bytes and the bank as bytes, or None for an image that
+  carries its own constants; a run missing, a key that is no run, or a
+  value of another shape is refused `program-image`;
+- `streams`: absent, or a mapping from run indices to (a, b, c), three,
+  each None for +0 or the run's lanes of elements, as integers (each
+  an element's bits) or as the bytes the library stores; a key that is
+  no run, or a value of another shape, is refused `stream`;
+- `states`: absent, or a mapping from run indices to a mapping from
+  boundary indices to states, each the run's elements as integers or
+  as bytes; a key that is no run or no boundary, or a state of another
+  shape, is refused `state-shape`;
+- `choose`: absent, or a mapping from run indices to `all`, a list or
+  tuple of distinct segment indices, at least one, or the pair
+  ("sample", k) with k an integer in 1..S; any other key or value is
+  refused `choice`;
+- `seed`: absent, or exactly 32 bytes, whether or not a sample is
+  asked; anything else is refused `choice`;
+- `salt`: see step 3 (`salt-missing`, `salt-length`, `salt-unexpected`,
+  `salt-commitment`).
+The certificate itself is bytes, and anything else is a TypeError of the
+golden model's Python interface rather than a refusal: a reader in any
+other language reads a file.
+
 **The order of the checks.** An auditor refuses at the first failure,
 and exits with that refusal's code (the table below), or 0 when every
 check passes.
@@ -801,7 +834,8 @@ check passes.
    - the bank is exactly the constants the image addresses, or empty for
      an image that carries its own (else `program-image`).
 5. **Streams**, run by run: each of a, b and c, as handed or +0, is n
-   values whose hash is the certified one (`stream`).
+   elements of the run's format whose hash is the certified one
+   (`stream`).
 6. **Continuity**, run by run (`continuity`).
 7. **States handed**, run by run and boundary by boundary: each is
    lanes x slots elements of a boundary that exists (`state-shape`),
@@ -814,6 +848,8 @@ check passes.
 9. **Re-runs**, run by run, the chosen segments in ascending order.
    - Each starts from its start state, handed or re-run into
      (`state-missing` when neither).
+   - One the executor refuses to run is refused `program-image`, at its
+     run and segment.
    - It must end on its certified end state (`segment-end`), with its
      certified flag word (`segment-flags`) and STATUS
      (`segment-status`).
@@ -849,6 +885,10 @@ none is given. For run r, with S segments and a sample of k:
   k-1, exchange position j with position j + (a uniform integer below
   S - j). The sample is the first k positions, sorted ascending.
 - The test vectors above include one sample.
+- The golden model's `cert.sample(seed, r, S, k)` holds its arguments
+  to this: a seed of exactly 32 bytes, r an integer in 0..2^32-1 (its
+  four bytes), and S and k integers with 1 <= k <= S, never a bool;
+  anything else is refused `choice`.
 
 **The verdict** of an accepted audit says:
 - ACCEPTED;
@@ -881,7 +921,7 @@ accuracy 7, the auditor's own usage 64. The name is the report.
 | `line-order` | 2 | lines are out of their order |
 | `line-unexpected` | 2 | a line has no place where it stands: a repeat, or a line of a block already read |
 | `count` | 2 | a count disagrees with the lines or tokens it counts |
-| `malformed` | 2 | a value breaks its one spelling, its range or its token count, or a line breaks the byte rules; a count out of its own range; a writer asked to certify a run of no segments |
+| `malformed` | 2 | a value breaks its one spelling, its range or its token count, or a line breaks the byte rules; a count out of its own range; a writer asked to certify a run of no segments, handed a certificate object it cannot spell, or handed a field that does not read back as itself (a value of the wrong type); asked to write a value it cannot spell (not a rational, or a form, format or direction the page does not name) |
 | `decimal` | 2 | an element's decimal is not the exact decimal of its hex |
 | `accuracy-kind` | 2 | an entry's kind is not its method's; every `bound` in version 1 |
 | `width` | 3 | an exact value past 1,023 bits in numerator or denominator: written, computed (an element's, a product, a partial sum, a difference), an enclosure's finite end, or one a writer was asked to round or enclose |
@@ -891,11 +931,11 @@ accuracy 7, the auditor's own usage 64. The name is the report.
 | `salt-commitment` | 4 | the salt handed is not the one the certificate commits to |
 | `image-digest` | 4 | the image handed is not the one certified |
 | `program-digest` | 4 | the image and bank handed are not the ones certified |
-| `program-image` | 4 | no image was handed, the image does not load, or the bank is not the size it addresses |
+| `program-image` | 4 | no image was handed, the image does not load, the bank is not the size it addresses, or the executor refuses a re-run; `programs` not in its shape |
 | `program-format` | 4 | the image's format is not the run's |
 | `program-shape` | 4 | the program is not a segment |
-| `stream` | 4 | a stream handed (or +0) is not the one certified, or is bytes that are not whole elements |
-| `state-shape` | 4 | a state handed is the wrong size, bytes that are not whole elements, or for a run or boundary that does not exist; a writer handed states and segment results that disagree in number |
+| `stream` | 4 | a stream handed (or +0) is not the one certified, is not the run's lanes long, holds a value that is not an element, or is bytes that are not whole elements; `streams` not in its shape |
+| `state-shape` | 4 | a state handed is the wrong size, holds a value that is not an element, is bytes that are not whole elements, or is for a run or boundary that does not exist; `states` not in its shape; a writer handed states and segment results that disagree in number, or a start that is not whole lanes |
 | `state-hash` | 4 | a state handed is not the one certified at its boundary |
 | `state-missing` | 4 | a state the audit needs was neither handed nor re-run into |
 | `continuity` | 5 | a segment does not start where the one before it ended, or the output is not the last end |
@@ -915,10 +955,14 @@ accuracy 7, the auditor's own usage 64. The name is the report.
 | `accuracy-slot` | 7 | a term names a slot the state does not have |
 | `accuracy-finite` | 7 | an exact value needs an element that is not finite |
 | `accuracy-value` | 7 | the value written is not the stated function of the certified runs |
-| `choice` | 64 | the auditor asked for a sample, segment or run the certificate cannot give it, or handed a seed that is not 32 bytes |
+| `choice` | 64 | the auditor's own arguments: a sample, segment or run the certificate cannot give it, `choose` not in its shape, or a seed that is not 32 bytes |
 
-A refusal locates itself where that means something: the line, for the
-reader's refusals; the run and the segment or boundary, for the audit's.
+A refusal locates itself in fields, each empty where it does not apply:
+the line, for the reader's refusals; for the audit's, the run where it
+concerns one run (a run index the certificate has), the segment or
+boundary where it concerns one of that run's, and the accuracy entry
+where it concerns one entry (in the golden model, `.line`, `.run`,
+`.segment` and `.entry`).
 
 ## The controls
 
@@ -927,20 +971,55 @@ controls, and each control asserts the NAME of the check it exists for,
 never merely that something refused. Every control but the byte flip
 writes a valid hash line over its defective body. Otherwise the hash
 check would refuse them all first, and a broken strict-form check would
-pass unseen (verifier-C1). That a control can fail is measured, not
-intended: each mechanism was disabled in turn in a copy of the
-implementation, and a test went red for it (the round's ledger, P1.md;
-verifier-C2 found fourteen that could not fail at first, and each has
-its test now). Some still have no control. Verifier-C2's re-check of
-P1b disabled these and every test stayed green (its ledger,
-2026-09-28 11:43:01):
-- the hex spelling of `device-xclbin` and `device-version`. The audit
-  never reads those lines, so a broken check would pass a malformed
-  one through the reader and the audit alike;
-- the spelling of `stream-a`, `stream-b` and `stream-c`, of `output`,
-  of a segment's start and end hashes, and of `salt-commitment`;
-- in step 8, a run's `aux-image` checked before its `aux-segments`;
-- the reader's key scan, its step 5, ahead of the mode, its step 6.
+pass unseen (verifier-C1). What was measured is a census, not every
+mechanism. Each of the following was disabled alone in a fresh copy of
+the implementation, and a test went red for every one but the two named
+after the list (the round's ledger, P1.md, 2026-09-28):
+- each of the 144 refusals the golden model raises, disabled;
+- each of the 35 spelling checks the reader makes through a helper, let
+  through for that one line;
+- each of the 41 orders the page states, reversed;
+- each of the 42 moves of a limit the page states, one lower and one
+  higher;
+- each of the 106 parts of a condition on the way to a refusal, made
+  neutral alone, and each of the 16 branches of the three functions
+  that return a reason instead of raising one;
+- each of the 47 words the reader allows, removed from it;
+- each end of the writer's enclosure widened alone, and each of four
+  checks the page says the reader does not make among the identity
+  lines, added.
+The two cannot change any answer, and are named rather than counted:
+an index's length bound moved from 19 digits to 20 (a 20-digit decimal
+is past 2^63 - 1, refused by its value either way), and a wider image's
+`max_deposits` left out of the header fields compared (step 4 refuses a
+program that deposits before step 8 compares two images). Verifier-C2
+found twenty-two checks that no test could fail for (fourteen, then
+eight), verifier-C4 four, and these plants 41 more. Each of those has a control now, except two
+that no answer could see - a branch no input reached and a test that
+another decided - which were removed. A computation - a hash, the
+PRNG, an accuracy value's derivation - is held by the test vectors and
+by values derived again with none of the implementation's code; it was
+planted where P1's and verifier-C2's ledger entries say, not
+exhaustively.
+
+The census is not every mechanism. Verifier-C5's plants on ed66890
+found these with no control; each change leaves every test green (its
+ledger, 2026-09-28):
+- five one-rule relaxations of a digest's spelling: `stream-a` of any
+  length, `stream-b` or `stream-c` in upper case, a segment's start hash
+  of any length, and its end hash in upper case. The malformed table
+  holds one departure for each field, so a check that lets through a
+  different one is not seen;
+- `aux-image`'s half-step digest part, and separately its wider part,
+  moved after `aux-segments`;
+- seven orders the page states: steps 4, 5 and 7 run by run; a drift's
+  lanes in order, and Q(final) before Q(initial); an estimate's slots
+  in order, and F0's value before Fr's;
+- two locations: the stream-hash refusal's run, and a count refusal's
+  line;
+- a fresh sampling seed drawn for each run, where the page draws one
+  for the audit.
+
 The controls cover:
 - a byte flipped, one at a time, in every byte of a certificate that
   holds every key of the grammar;
@@ -951,22 +1030,31 @@ The controls cover:
   moved;
 - every count, one more and one less, and each count out of its own
   range;
-- each encoding's non-canonical spellings, and each range limit at its
-  edge: 64 terms, h-slot 511 and term slot 65,535 read, one more not;
-- the width rule, at the reader, at the writer, and at the audit on an
+- each encoding's non-canonical spellings, each limit the page states
+  read at its last value and refused one past it, and every word the
+  page allows read and written back as itself;
+- the width rule, at the reader, at the writer (each end of an
+  enclosure alone past it, never widened), and at the audit on an
   element's own value, a product and a partial sum, and at an
   enclosure's ends;
-- a decimal that disagrees with its hex, and a version of any size;
+- a decimal that disagrees with its hex; an element read hex, then NaN,
+  then decimal, and an enclosure's lower end before its upper; and a
+  version of any size;
+- the identity lines held to their spelling alone, `device-tiles`
+  among them;
 - each kind that is not its method's;
 - the mode: an unknown mode, a missing or unexpected commitment, and a
-  salt missing, unexpected or wrong;
-- a wrong image or bank, stream, or state, and bytes that are not whole
-  elements;
+  salt missing, unexpected, wrong or not bytes;
+- a wrong image or bank, stream, or state; bytes that are not whole
+  elements; and each argument of the audit in a shape it does not take;
+- the writer: a field it cannot spell, and a run it cannot certify;
 - a broken chain;
-- a segment whose certified end, flags or STATUS differ;
+- a segment whose certified end, flags or STATUS differ, and one the
+  executor refuses to run;
 - every auxiliary relation, including the main run attached as its own
-  half-step run, a wider image's constants and header, and the
-  relations checked run by run;
+  half-step run, a wider image's constants and each header field, an
+  h-slot that halving cannot change, and the relations checked run by
+  run;
 - every accuracy check, the values derived again from the states with
   none of the implementation's code, an estimate's last slot, and an
   enclosure's ends held inclusive;

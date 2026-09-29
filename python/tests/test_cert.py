@@ -3,9 +3,13 @@
 """Certificates, version 1 (docs/CERTIFICATES.md): the golden gate.
 
 The mechanisms of python/cft_golden/cert.py have negative controls
-here, all but those docs/CERTIFICATES.md's "The controls" names as
-still without one, and each control asserts the NAME of the check it
-exists for - never merely that something refused. Every control but the byte flip
+here, as far as docs/CERTIFICATES.md's "The controls" counts them: each
+refusal, spelling check, stated order and limit, part of a condition
+and allowed word of P1c's census, disabled alone in a copy, and each
+widening or cross-check the page rules out, added alone, turned a test
+red. That census is not every mechanism; the page lists those
+verifier-C5 found with no control. Each control asserts the NAME of the
+check it exists for - never merely that something refused. Every control but the byte flip
 writes a valid hash line over its defective body (cert.rehash, or
 cert.encode for a structurally sound certificate with a semantic
 defect), so it reaches the check it is for instead of stopping at the
@@ -351,6 +355,57 @@ def test_a_line_moved(lor):
             rebuilt(L[:sc] + L[sc + 1:t + 1] + [L[sc]] + L[t + 1:]))
 
 
+def test_a_line_not_the_one_expected_by_the_pages_rules(lor):
+    """"A line that is not the one expected", rule by rule, each with a
+    line the other rules would name differently (the census found the
+    first two and the third's name with no control): a line of a block
+    already behind, in a later block; a run line, whose block is behind,
+    where an entry's line belongs; and a line of a later block where a
+    block-starting line is expected. (A line dropped, repeated or
+    exchanged, above, reaches the other rules.)"""
+    L = lines_of(lor.data)
+    kind = find(L, "kind ")                 # entry 0's second line
+    acc = find(L, "accuracy ")
+    for at, line, name, why in (
+            # a header line, its block behind, where `kind` belongs
+            (kind, "backend software", "line-unexpected",
+             "its place is earlier"),
+            # a block-starting line whose block is behind
+            (kind, "run 3 wider", "line-unexpected",
+             "its block is already read"),
+            # an entry's line where the block-starting `accuracy` belongs:
+            # it belongs to a LATER block, so `accuracy` is missing
+            (acc, "kind estimate", "line-missing", "is here instead")):
+        e = refused(name, cert.parse, rebuilt(L[:at] + [line] + L[at + 1:]))
+        assert e.line == at + 1 and why in e.message, (line, e.message)
+
+
+def test_a_groups_indices_by_the_pages_three_rules(lor):
+    """Indices with the count right: an index already passed is
+    `line-unexpected`, the right index further on is `line-order`, and
+    otherwise the index is `line-missing` - for segments, runs and
+    entries, each at the line where it goes wrong (the census found the
+    first and third with no control)."""
+    L = lines_of(lor.data)
+
+    def reindex(prefix, old_to_new, nth_block=0):
+        """L with the group's member lines renumbered: {position: index}."""
+        M = list(L)
+        at = [i for i, ln in enumerate(L) if ln.startswith(prefix)]
+        for pos, new in old_to_new.items():
+            toks = M[at[pos]].split(" ")
+            toks[1] = str(new)
+            M[at[pos]] = " ".join(toks)
+        return M, at
+    for prefix in ("segment ", "run ", "entry "):
+        for mapping, name, where in (({2: 1}, "line-unexpected", 2),
+                                     ({1: 2, 2: 1}, "line-order", 1),
+                                     ({2: 3}, "line-missing", 2)):
+            M, at = reindex(prefix, mapping)
+            e = refused(name, cert.parse, rebuilt(M))
+            assert e.line == at[where] + 1, (prefix, mapping, e.message)
+
+
 def test_a_count_changed(lor):
     """Every count, one more and one less, re-hashed: 'count'."""
     L = lines_of(lor.data)
@@ -410,6 +465,8 @@ def _malformed_cases(L):
         ("segment 0 ", " ".join(seg[:2] + ["begin"] + seg[3:])),
         ("program-image ", "program-image " + "A" * 64),
         ("program-image ", "program-image " + "a" * 63),
+        ("program-digest ", "program-digest " + "A" * 64),
+        ("program-digest ", "program-digest " + "a" * 65),
         ("program-format ", "program-format fp80"),
         # cft_build_id()'s string and nothing near it
         ("build-id ", "build-id commit=" + "a" * 39
@@ -423,11 +480,40 @@ def _malformed_cases(L):
         ("build-id ", "build-id commit=" + "a" * 40
          + " untracked=none tracked=clean"),
         ("build-id ", "build-id commit=" + "a" * 40 + " tracked=clean"),
+        ("build-id ", "build-id commit=" + "a" * 40
+         + " tracked=clean untracked=some"),
         ("build-id ", "build-id " + "a" * 40
          + " tracked=clean untracked=none"),
         ("build-id ", "build-id unknown tracked=clean"),
         ("build-id ", "build-id Unknown"),
         ("backend ", "backend fpga"),
+        # The hex spelling of lines the audit never reads (P1c, after
+        # verifier-C2): only the reader stands between these and an
+        # accepted certificate.
+        ("device-xclbin ", "device-xclbin " + "a" * 63),
+        ("device-xclbin ", "device-xclbin " + "a" * 65),
+        ("device-xclbin ", "device-xclbin " + "A" * 64),
+        ("device-xclbin ", "device-xclbin 0x" + "a" * 62),
+        ("device-version ", "device-version 0000a00"),
+        ("device-version ", "device-version 000000a00"),
+        ("device-version ", "device-version 00000A00"),
+        ("device-version ", "device-version 0x000a00"),
+        # a decimal of another length is not hex digits (the tiles line's
+        # decimal is not the others')
+        ("device-version ", "device-version 1234567"),
+        ("device-xclbin ", "device-xclbin 1234"),
+        # and of the hashes the audit compares, which the reader holds to
+        # their spelling first, so a misspelt one is `malformed` rather
+        # than a mismatch found later under another name
+        ("stream-a ", "stream-a " + seg[3].upper()),
+        ("stream-b ", "stream-b " + seg[3][1:]),
+        ("stream-c ", "stream-c " + seg[3] + "0"),
+        ("output ", "output " + seg[3].upper()),
+        ("output ", "output " + seg[3][1:]),
+        ("segment 0 ", " ".join(seg[:3] + [seg[3].upper()] + seg[4:])),
+        ("segment 0 ", " ".join(seg[:5] + [seg[5][1:]] + seg[6:])),
+        ("salt-commitment ", "salt-commitment " + "F" * 64),
+        ("salt-commitment ", "salt-commitment " + "f" * 63),
         ("device-caps ", "device-caps 0000000f 00000000 00000000"),
         ("device-caps ", "device-caps 0000000F 00000000"),
         ("device-caps ", "device-caps 0000000f none"),
@@ -445,21 +531,48 @@ def _malformed_cases(L):
         ("term 1/1 s0 s0", "term 1/1 s0 s00"),
         ("term 1/1 s1 s1", "term 1/1 s1 s0"),
         ("term 1/1 s0 s0", "term 1/1 " + " ".join(["s0"] * 9)),
+        ("term 1/1 s0 s0", "term"),
         ("value exact", f"value exact {2 * num:x}/{2 * den:x}"),
         ("value rounded", " ".join(rnd[:4] + [rnd[4].upper()] + rnd[5:])),
         ("value rounded", " ".join(rnd[:4] + [rnd[4][1:]] + rnd[5:])),
         ("value rounded", " ".join(rnd[:3] + ["rnd"] + rnd[4:])),
+        ("value rounded", " ".join(rnd[:2] + ["fp80"] + rnd[3:])),
+        ("value enclosed", " ".join(enc[:2] + ["fp80"] + enc[3:])),
         ("value rounded", " ".join(rnd[:4] + ["7ff8000000000000", "nan"])),
         ("value enclosed", " ".join(enc[:3] + enc[5:7] + enc[3:5])),
+        ("value exact", "value exact"),
+        ("value rounded", " ".join(rnd[:5])),
+        ("value enclosed", " ".join(enc[:6])),
+        ("value exact", "value approximate 1/3"),
+        # each form with one token more, and a form's payload under
+        # another form's word
+        ("value exact", L[find(L, "value exact")] + " 0"),
+        ("value rounded", " ".join(rnd + ["0"])),
+        ("value enclosed", " ".join(enc + ["0"])),
+        ("value enclosed", " ".join(["value", "exact"] + enc[2:])),
+        ("value rounded", " ".join(["value", "exact"] + rnd[2:])),
+        ("value exact", " ".join(["value", "rounded"]
+                                 + L[find(L, "value exact")].split(" ")[2:])),
         ("scope lane", "scope lane 00"), ("scope lane", "scope lanes 0"),
+        ("scope lane", "scope lane 0 0"), ("scope lane", "scope lane"),
         ("quantity ", "quantity Square terms 3"),
+        ("quantity ", "quantity square-norm terms"),
+        ("quantity ", "quantity square-norm factors 3"),
         ("entry 0 ", "entry 0 extrapolation"),
         ("kind ", "kind guess"),
         ("parameter ", "parameter Spread 64"),
+        ("parameter ", "parameter ensemble-spread 064"),
+        ("uses ", "uses 01"),
         ("run 0 ", "run 0 wider"),
+        ("run 0 ", "run 0"),
+        ("run 0 ", "run 0 main main"),
+        ("run 0 ", "run 0 half-step h-slots 3 0 1 2"),
+        ("run 1 ", "run 1 quarter-step"),
         ("run 1 ", "run 1 main"),
         ("run 1 ", "run 1 half-step h-slots 3 0 2 1"),
         ("run 1 ", "run 1 half-step h-slots 0"),
+        ("run 1 ", "run 1 half-step h-slots"),
+        ("run 1 ", "run 1 half-step"),
         ("run 1 ", "run 1 half-step slots 3 0 1 2"),
         ("run 2 ", "run 2 wider h-slots 1 0"),
         ("end", "end now"),
@@ -479,14 +592,60 @@ def test_a_malformed_number_or_word(lor):
     digests and words among them."""
     L = lines_of(lor.data)
     for i, new, M in _malformed_cases(L):
-        e = refused("malformed", cert.parse, rebuilt(M))
+        try:
+            e = refused("malformed", cert.parse, rebuilt(M))
+        except (Exception, pytest.fail.Exception) as x:
+            # name the case, so a red run says which spelling got through
+            raise AssertionError(f"{new[:70]!r}: {str(x)[:200]}") from None
         assert e.line == i + 1, (new[:60], e.message)
+    # and each for its own reason where two checks could both refuse it:
+    # a decimal's spelling, then its size, then its range
+    lanes = find(L, "lanes ")
+    for tok, why in (("03", "one spelling"), ("+3", "one spelling"),
+                     ("3.0", "one spelling"),
+                     ("9223372036854775808", "past 2^63 - 1"),
+                     ("0", "it must be in 1..")):
+        e = refused("malformed", cert.parse, rebuilt(
+            L[:lanes] + [f"lanes {tok}"] + L[lanes + 1:]))
+        assert why in e.message, (tok, e.message)
+    # a rational's: its spelling, then zero's one spelling, then lowest
+    # terms (0/3 is both a zero misspelt and not in lowest terms)
+    t = find(L, "term 1/1 s0 s0")
+    for tok, why in (("01/1", "one spelling"), ("1/0", "zero denominator"),
+                     ("0/3", "zero is spelled 0/1"),
+                     ("2/2", "not in lowest terms")):
+        e = refused("malformed", cert.parse, rebuilt(
+            L[:t] + [f"term {tok} s0 s0"] + L[t + 1:]))
+        assert why in e.message, (tok, e.message)
+    # an element's own order: its hex, then NaN, then its decimal
+    # (verifier-C4 found NaN and decimal read the other way round green)
+    r = find(L, "value rounded")
+    rnd = L[r].split(" ")
+    for hx, dec, name, why in (
+            ("7ff8000000000000", "1", "malformed", "is a NaN"),
+            ("7FF8000000000000", "nan", "malformed", "lowercase hex"),
+            (rnd[4].upper(), "2", "malformed", "lowercase hex")):
+        e = refused(name, cert.parse, rebuilt(
+            L[:r] + [" ".join(rnd[:4] + [hx, dec])] + L[r + 1:]))
+        assert why in e.message, (hx, dec, e.message)
+    # an identity word's refusal names what the line may hold, the word
+    # among them (a decimal line's own spelling check would not)
+    i = find(L, "device-tiles ")
+    e = refused("malformed", cert.parse, rebuilt(
+        L[:i] + ["device-tiles x"] + L[i + 1:]))
+    assert "or 'unknown'" in e.message, e.message
     # and bytes a line may not hold
     i = find(L, "lanes ")
-    for bad in ("lanes  3", "lanes 3 ", " lanes 3", "lanes\t3", "lanes 3\r"):
+    # each for its own reason: a line's spaces are checked as spaces, not
+    # left to a token count that a trailing space would also upset
+    for bad, why in (("lanes  3", "exactly one space"),
+                     ("lanes 3 ", "exactly one space"),
+                     (" lanes 3", "exactly one space"),
+                     ("lanes\t3", "printable ASCII"),
+                     ("lanes 3\r", "printable ASCII")):
         e = refused("malformed", cert.parse,
                     rebuilt(L[:i] + [bad] + L[i + 1:]))
-        assert e.line == i + 1
+        assert e.line == i + 1 and why in e.message, (bad, e.message)
     e = refused("malformed", cert.parse, rebuilt(L[:i] + [""] + L[i:]))
     assert e.line == i + 1
 
@@ -595,7 +754,10 @@ def test_the_salt_commitment(lor):
     refused("salt-commitment", cert.parse, data, salt=SALT)  # ... not ours
     refused("salt-commitment", cert.audit, data, SALT, lor.progs,
             states=lor.states)
-    for bad in (SALT[:31], SALT + b"\x00", bytes(64), "salt"):
+    # 32 of something that is not bytes is not a salt, even the salt's
+    # own 32 values in a list
+    for bad in (SALT[:31], SALT + b"\x00", bytes(64), "salt", "s" * 32,
+                list(SALT)):
         refused("salt-length", cert.audit, lor.data, bad, lor.progs)
         refused("salt-length", cert.state_hash, bad, b"")
 
@@ -616,6 +778,9 @@ def test_keyed_or_open(lor):
     s0 = cert.state_bytes("fp64", lor.init)
     assert lor.open_runs[0].chain[0].start == hashlib.sha256(
         b"cft-certificate 1 state\x00" + s0).hexdigest()
+    # a commitment is to a salt: an open certificate's writer has none to
+    # commit to, and asking for one is refused rather than hashed open
+    refused("salt-missing", cert.salt_commitment, None)
     # the salt's presence, against the mode
     refused("salt-unexpected", cert.audit, lor.open_data, SALT, lor.progs,
             states=lor.states)
@@ -730,18 +895,52 @@ def test_a_program_that_is_not_a_segment(lor):
         encoding="utf-8"), "horner")
     bank = (PROGRAMS / "horner-bank-fp64.exp.bank").read_bytes()
     refused("program-shape", cert.run_chain, horner, bank, [0], 1)
+    # and certify_run, handed a producer's own chain for it
+    refused("program-shape", cert.certify_run, "main", horner, bank, SALT,
+            [[0], [0]], [(16, 0)], steps=1)
     # a run whose certificate says fp128 while the image it names is fp64
     r0 = dataclasses.replace(lor.runs[0], fmt="fp128")
     data = with_runs(lor, [r0])
-    refused("program-format", cert.audit, data, SALT, lor.progs)
+    refused("program-format", cert.audit, data, SALT, {0: lor.progs[0]})
+
+
+SHAPE = """.format   fp64
+.deposits {d}
+{scratch}
+.const    K = 0x3fd5555555555555
+ldl  r3, 0
+add  r3, r3, K
+stl  r3, 0
+halt
+"""
+
+
+def test_each_reason_a_program_is_not_a_segment():
+    """The page's three reasons, each alone and each named in the
+    refusal: no scratch block; a block that goes in and out at different
+    widths, or at none; and a program that deposits (the census found
+    only the last reached by a test)."""
+    for d, (n_in, n_out), why in (
+            (0, (None, None), "declares no scratch block"),
+            (0, (2, 1), "goes in as 2 and out as 1"),
+            (0, (0, 0), "goes in as 0 and out as 0"),
+            (1, (1, 1), "it deposits")):
+        scratch = "" if n_in is None else (f".scratch  in {n_in}\n"
+                                           f".scratch  out {n_out}")
+        img = asm.assemble(SHAPE.format(d=d, scratch=scratch), "shape")
+        e = refused("program-shape", cert.run_chain, img, b"", [0], 1)
+        assert why in e.message, (scratch, e.message)
 
 
 def test_a_stream_that_is_not_the_one_certified(lor):
     one = [dec64("1")] * LANES
     refused("stream", cert.audit, lor.data, SALT, lor.progs,
             streams={0: (one, None, None)})
-    refused("stream", cert.audit, lor.data, SALT, lor.progs,
-            streams={0: ([0] * 2, None, None)})
+    e = refused("stream", cert.audit, lor.data, SALT, lor.progs,
+                streams={0: ([0] * 2, None, None)})
+    # its length is found as its length, before the hash that would
+    # differ anyway (the census found the length check masked by it)
+    assert "holds 2 values" in e.message and e.run == 0, e.message
 
 
 def test_a_state_handed_that_is_not_the_one_certified(lor):
@@ -771,10 +970,12 @@ def test_continuity(lor):
     chain = list(r0.chain)
     chain[2] = dataclasses.replace(chain[2], start=chain[1].start)
     e = refused("continuity", cert.audit, with_runs(lor, [
-        dataclasses.replace(r0, chain=tuple(chain))]), SALT, lor.progs)
+        dataclasses.replace(r0, chain=tuple(chain))]), SALT,
+        {0: lor.progs[0]})
     assert (e.run, e.segment) == (0, 2)
     e = refused("continuity", cert.audit, with_runs(lor, [
-        dataclasses.replace(r0, output=chain[0].start)]), SALT, lor.progs)
+        dataclasses.replace(r0, output=chain[0].start)]), SALT,
+        {0: lor.progs[0]})
     assert (e.run, e.segment) == (0, S - 1)
 
 
@@ -793,10 +994,28 @@ def test_a_segment_whose_certified_end_differs(lor):
                                                output=h)])
     states = {0: dict(lor.states[0])}
     states[0][S] = bad
-    e = refused("segment-end", cert.audit, data, SALT, lor.progs,
+    e = refused("segment-end", cert.audit, data, SALT, {0: lor.progs[0]},
                 states=states)
     assert (e.run, e.segment) == (0, S - 1)
     assert f"run 0 segment {S - 1}" in e.message
+
+
+def test_a_segment_the_executor_refuses_is_refused_by_name(lor,
+                                                          monkeypatch):
+    """The checks before the re-run leave the executor nothing it refuses
+    today: each image loaded, and its bank, its streams and every state
+    handed were held to their shapes. The audit still names a refusal
+    the executor makes at a re-run - `program-image`, at its run and
+    segment - so that one a later executor adds is a refusal and not a
+    crash. Shown with an executor made to refuse (the census found this
+    refusal unreached, and it can only be reached so)."""
+    def refuse(*a, **k):
+        raise cert.seq.ProgramError("an executor made to refuse")
+    monkeypatch.setattr(cert.seq, "run", refuse)
+    e = refused("program-image", cert.audit, lor.data, SALT, lor.progs,
+                states=lor.states, choose=QUICK)
+    assert (e.run, e.segment) == (0, 0), e.message
+    assert "made to refuse" in e.message
 
 
 def test_a_segments_flags_or_status(lor):
@@ -1022,6 +1241,7 @@ def test_each_accuracy_value_is_re_derived(lor):
         e = refused("accuracy-value", cert.audit, _with_entries(lor, entries),
                     SALT, lor.progs, states=lor.states, choose=QUICK)
         assert e.message.startswith(f"entry {j}: ")
+        assert e.entry == j
 
 
 def test_an_accuracy_entry_refers_to_what_exists(lor):
@@ -1036,13 +1256,20 @@ def test_an_accuracy_entry_refers_to_what_exists(lor):
             e3, terms=((Fraction(1), (0, 3)),))),
     ]
     for name, bad in cases:
-        refused(name, cert.audit, _with_entries(lor, [bad]), SALT,
-                lor.progs, states=lor.states, choose=QUICK)
+        e = refused(name, cert.audit, _with_entries(lor, [bad]), SALT,
+                    lor.progs, states=lor.states, choose=QUICK)
+        assert e.entry == 0
+    # an estimate compares run 0 with ANOTHER run: derive() refuses run 0
+    # whatever the run objects it is handed call it
+    odd = ((dataclasses.replace(lor.runs[0], kind="half-step"),)
+           + tuple(lor.runs[1:]))
+    refused("accuracy-run", cert.derive, dataclasses.replace(e0, uses=0),
+            odd, lor.shapes, lor.ends)
     # the final state an entry needs, neither handed nor re-run into
     e = refused("state-missing", cert.audit, lor.data, SALT, lor.progs,
                 states={r: {0: lor.st[r][0]} for r in range(3)},
                 choose=QUICK)
-    assert (e.run, e.segment) == (0, S)
+    assert (e.run, e.segment, e.entry) == (0, S, 0)
 
 
 def test_an_exact_value_needs_a_finite_state(lor):
@@ -1186,7 +1413,12 @@ def test_the_sampling_prng():
     words = iter([(1 << 64) - 1, 5])
     assert cert._uniform(words, 3) == 2
     for bad in ((bytes(31), 0, 4, 2), (bytes(32), 0, 4, 0),
-                (bytes(32), 0, 4, 5)):
+                (bytes(32), 0, 4, 5),
+                # each argument held to its type, bool not an integer
+                (list(bytes(32)), 0, 4, 2), (bytes(32), True, 4, 2),
+                (bytes(32), -1, 4, 2), (bytes(32), 0, True, 1),
+                (bytes(32), 0, 4, True), (bytes(32), 0, 4.0, 2),
+                (bytes(32), 0, 4, 2.0)):
         refused("choice", cert.sample, *bad)
 
 
@@ -1219,9 +1451,19 @@ def test_a_sampled_audit_states_what_it_missed(lor):
     assert len(drawn) == 32
     assert v1.runs[0]["rerun"] == cert.sample(drawn, 0, S, 1)
     for bad in ({0: ("sample", 0)}, {0: ("sample", S + 1)}, {0: [S]},
-                {0: [1, 1]}, {0: []}, {3: "all"}, {0: "most"}):
-        refused("choice", cert.audit, lor.data, SALT, lor.progs,
-                states=lor.states, choose=bad, seed=seed)
+                {0: [1, 1]}, {0: []}, {3: "all"}, {0: "most"},
+                # a sample is the pair ("sample", k) and nothing like it
+                {0: ["sample", 2]}, {0: ("sample", 2, 3)}):
+        e = refused("choice", cert.audit, lor.data, SALT, lor.progs,
+                    states=lor.states, choose=bad, seed=seed)
+        # a size the run cannot give is found as the choice's, at its
+        # run, before the sampler is asked for it
+        if bad in ({0: ("sample", 0)}, {0: ("sample", S + 1)}):
+            assert e.run == 0 and "a sample's size" in e.message, e.message
+    # and two indices in a tuple are those two segments, not a sample
+    v2 = cert.audit(lor.data, SALT, lor.progs, states=lor.states,
+                    choose={2: (1, 3)}, seed=seed)
+    assert (v2.runs[2]["how"], v2.runs[2]["rerun"]) == ("named", [1, 3])
 
 
 # ---- identity ---------------------------------------------------------------
@@ -1348,6 +1590,24 @@ def zsq_cert(z, init, entries, segments=2):
             {0: {0: init}, 1: {0: init}}, (st0, st1))
 
 
+def test_an_h_slot_that_halving_cannot_change_is_refused(zsq):
+    """An h-slot names a bank constant the half-step run halves. One
+    holding zero, or an infinity, halves to itself, and a NaN has no
+    half: the half-step run would be the main run again, so each is
+    refused `aux-h-slots` - before the bank is compared, where the
+    zero and the infinity would pass (the census found this check with
+    no control)."""
+    for text, what in (("0", "zero"), ("inf", "inf"), ("-inf", "-inf"),
+                       ("nan", "nan")):
+        z = types.SimpleNamespace(
+            img=zsq.img, bank=cert.state_bytes("fp64", [dec64(text)]))
+        z.half = z.bank                    # halved, it is itself
+        data, progs, states, _ = zsq_cert(z, [dec64("1")] * 3, ())
+        e = refused("aux-h-slots", cert.audit, data, SALT, progs,
+                    states=states)
+        assert f"holds {what}" in e.message and e.run == 1, e.message
+
+
 def estimate(value, lane=None):
     return cert.Entry("step-halving", "estimate", 1, lane, value)
 
@@ -1469,10 +1729,11 @@ def test_an_enclosure_holds_a_value_at_its_ends(zsq):
 
 SELF_K = """.format   {fmt}
 .deposits 0
-.scratch  in 1
-.scratch  out 1
+.scratch  in {n}
+.scratch  out {n}
 {strict}
 .const    K = 0x{k:0{w}x}
+{extra}
 ldl  r3, 0
 add  r3, r3, K
 stl  r3, 0
@@ -1485,34 +1746,64 @@ def test_a_wider_image_is_held_to_its_constants_and_header():
     for two segments. One format wider, K exactly widened is the same
     program; K re-derived at fp128 - the different discrete scheme the
     plan warns of - is not, and neither is the same program with a
-    header flag (SCRATCH_STRICT) of its own."""
+    header field of its own: a flag (SCRATCH_STRICT), a second constant
+    (n_consts) or a wider scratch block (scratch_io). (The fourth,
+    max_deposits, cannot differ between two images that both passed step
+    4: neither deposits.)"""
     k64 = sf.div(F64, dec64("1"), dec64("3"))[0]
     k128 = sf.div(F128, chars.from_decimal(F128, "1", sf.RND_RNE)[0],
                   chars.from_decimal(F128, "3", sf.RND_RNE)[0])[0]
     assert k128 != cert.widen("fp64", k64)
 
-    def image(fmt, k, strict=""):
+    def image(fmt, k, strict="", n=1, extra=""):
         w = FORMATS[fmt].width // 4
-        return asm.assemble(SELF_K.format(fmt=fmt, k=k, w=w, strict=strict),
-                            f"k-{fmt}")
+        return asm.assemble(SELF_K.format(fmt=fmt, k=k, w=w, strict=strict,
+                                          n=n, extra=extra), f"k-{fmt}")
     main_img = image("fp64", k64)
     st0, rs0 = cert.run_chain(main_img, b"", [dec64("1")], 2)
     r0 = cert.certify_run("main", main_img, b"", SALT, st0, rs0, steps=1)
     init_w = [cert.widen("fp64", dec64("1"))]
+    kw128 = cert.widen("fp64", k64)
     for img, name, why in (
-            (image("fp128", cert.widen("fp64", k64)), None, None),
+            (image("fp128", kw128), None, None),
             (image("fp128", k128), "aux-image", "constants"),
-            (image("fp128", cert.widen("fp64", k64), ".scratch  strict"),
-             "aux-image", "header's flags")):
-        st1, rs1 = cert.run_chain(img, b"", init_w, 2)
+            (image("fp128", kw128, ".scratch  strict"),
+             "aux-image", "header's flags"),
+            (image("fp128", kw128, extra=f".const    K2 = 0x{kw128:032x}"),
+             "aux-image", "header's n_consts"),
+            (image("fp128", kw128, n=2), "aux-image",
+             "header's scratch_io_word")):
+        init = init_w * (2 if "scratch_io" in (why or "") else 1)
+        st1, rs1 = cert.run_chain(img, b"", init, 2)
         r1 = cert.certify_run("wider", img, b"", SALT, st1, rs1, steps=1)
         data = cert.encode(keyed((r0, r1), ()))
-        args = (data, SALT, {0: (main_img, b""), 1: (img, b"")})
-        kw = {"states": {0: {0: [dec64("1")]}, 1: {0: init_w}}}
+        # None for the bank of an image that carries its constants
+        args = (data, SALT, {0: (main_img, None), 1: (img, None)})
+        kw = {"states": {0: {0: [dec64("1")]}, 1: {0: init}}}
         if name is None:
             cert.audit(*args, **kw)
         else:
             assert why in refused(name, cert.audit, *args, **kw).message
+
+
+def test_a_half_step_run_needs_a_bank_to_halve():
+    """A half-step run is the main image with named bank slots halved. A
+    main image that carries its own constants has no bank, so no slot of
+    it can be named: refused `aux-h-slots`, not a crash (the census found
+    this check with no control)."""
+    k64 = sf.div(F64, dec64("1"), dec64("3"))[0]
+    img = asm.assemble(SELF_K.format(fmt="fp64", k=k64, w=16, strict="",
+                                     n=1, extra=""), "k-fp64")
+    start = [dec64("1")]
+    st0, rs0 = cert.run_chain(img, b"", start, 2)
+    st1, rs1 = cert.run_chain(img, b"", start, 4)
+    r0 = cert.certify_run("main", img, b"", SALT, st0, rs0, steps=1)
+    r1 = cert.certify_run("half-step", img, b"", SALT, st1, rs1, steps=1,
+                          h_slots=(0,))
+    e = refused("aux-h-slots", cert.audit, cert.encode(keyed((r0, r1), ())),
+                SALT, {0: (img, b""), 1: (img, b"")},
+                states={0: {0: start}, 1: {0: start}})
+    assert "carries its constants" in e.message and e.run == 1
 
 
 def test_the_auditors_seed_is_never_the_certificates(lor):
@@ -1632,6 +1923,47 @@ def test_the_range_limits(lor):
             refused("malformed", cert.parse, rebuilt(M))
 
 
+def test_every_stated_limit_at_both_edges(lor):
+    """Each limit the page states, read at its last value (accepted) and
+    one past it (refused `malformed`), so a limit moved by one either way
+    turns this red: flags 31, STATUS 2^32 - 1, a decimal integer 2^63 -
+    1, a term's 8 factors, a name's 64 characters, 512 h-slots. (The
+    width rule, the term count, the h-slot and term-slot indices, the
+    lanes and the other counts at 1 have tests of their own.)"""
+    L = lines_of(lor.data)
+    seg = L[find(L, "segment 0 ")].split(" ")
+    q = find(L, "quantity ")
+    t = find(L, "term 1/1 s0 s0")
+    p = find(L, "parameter ensemble-spread")
+    r1 = find(L, "run 1 ")
+    name64, name65 = "a" + "b" * 63, "a" + "b" * 64
+    cases = [
+        # (line index, accepted at the edge, refused one past it)
+        (find(L, "segment 0 "), " ".join(seg[:7] + ["31"] + seg[8:]),
+         " ".join(seg[:7] + ["32"] + seg[8:])),
+        (find(L, "segment 0 "), " ".join(seg[:9] + ["4294967295"]),
+         " ".join(seg[:9] + ["4294967296"])),
+        (find(L, "lanes "), "lanes 9223372036854775807",
+         "lanes 9223372036854775808"),
+        (t, "term 1/1 " + " ".join(["s0"] * 8),
+         "term 1/1 " + " ".join(["s0"] * 9)),
+        (q, f"quantity {name64} terms 3", f"quantity {name65} terms 3"),
+        (p, f"parameter {name64} 64", f"parameter {name65} 64"),
+        (r1, "run 1 half-step h-slots 512 "
+         + " ".join(str(i) for i in range(512)),
+         "run 1 half-step h-slots 513 "
+         + " ".join(str(i) for i in range(513))),
+    ]
+    for i, ok, bad in cases:
+        cert.parse(rebuilt(L[:i] + [ok] + L[i + 1:]))
+        e = refused("malformed", cert.parse, rebuilt(L[:i] + [bad]
+                                                     + L[i + 1:]))
+        assert e.line == i + 1
+    # the sampling PRNG's run index is four bytes
+    cert.sample(bytes(32), (1 << 32) - 1, 4, 2)
+    refused("choice", cert.sample, bytes(32), 1 << 32, 4, 2)
+
+
 def test_a_counts_own_value_is_read_before_its_lines(lor):
     """A count out of its own range is `malformed`, even where it also
     disagrees with its lines: the value is read before the lines are
@@ -1644,6 +1976,11 @@ def test_a_counts_own_value_is_read_before_its_lines(lor):
                    (q, "quantity square-norm terms 0"),
                    (q, "quantity square-norm terms 65"),
                    (r1, "run 1 half-step h-slots 0 0 1 2"),
+                   # one past the count's own limit, 512: its range is
+                   # read before the three indices that follow are
+                   # counted (its indices alone could not tell 513 from
+                   # 512 - past 511 an index is refused by its own)
+                   (r1, "run 1 half-step h-slots 513 0 1 2"),
                    (r1, "run 1 half-step h-slots 600 0 1 2")):
         e = refused("malformed", cert.parse, rebuilt(L[:i] + [new]
                                                      + L[i + 1:]))
@@ -1673,6 +2010,12 @@ def test_parameter_names_increase_in_byte_order(lor):
     refused("line-order", cert.parse, rebuilt(
         L[:p] + ["parameters 2", "parameter a0 2", "parameter a-b 1"]
         + rest))
+    # and a name twice is a line that should not be there at all, not one
+    # out of order (the census found this with no control)
+    e = refused("line-unexpected", cert.parse, rebuilt(
+        L[:p] + ["parameters 2", "parameter a0 2", "parameter a0 2"]
+        + rest))
+    assert e.line == p + 3 and "again" in e.message
 
 
 def test_relations_are_checked_run_by_run(lor):
@@ -1689,6 +2032,225 @@ def test_relations_are_checked_run_by_run(lor):
         (r0, bad1, bad2), ())), SALT, lor.progs,
         states={0: {0: lor.init}})
     assert e.run == 1
+
+
+def test_a_runs_relations_are_checked_in_the_tables_order(lor):
+    """Within one auxiliary run, step 8's checks in the order of the
+    page's table - format, lanes, image, segments, h-slots, bank,
+    streams, start. Each adjacent pair, both defects in one run: the
+    earlier check's name. And each defect alone is refused by its own,
+    so both are live (verifier-C2 found aux-segments-before-aux-image
+    green at e484425)."""
+    r0, r1, r2 = lor.runs
+    P = lor.progs
+
+    def zero_hashes(fmt, n):
+        return tuple(cert.stream_hash(SALT, nm, cert.state_bytes(
+            fmt, [0] * n)) for nm in "abc")
+    one = [dec64("1")] * LANES
+    one_hash = cert.stream_hash(SALT, "a", cert.state_bytes("fp64", one))
+    only_h = halved("fp64", lor.bank, (0,))
+    ch3 = _fake_chain(r1.chain[0].start, 3)
+    other = hashlib.sha256(b"another start").hexdigest()
+    # each defect of run 1, as a change to the run and what it needs
+    # handed: (run fields, programs for run 1, streams)
+    D = {
+        "aux-format": ({"fmt": "fp128"}, None, None),
+        "aux-lanes": ({"lanes": 2, "streams": zero_hashes("fp64", 2)},
+                      None, None),
+        "aux-image": ({"steps": 50}, None, None),
+        "aux-segments": ({"chain": ch3, "output": ch3[-1].end}, None, None),
+        "aux-h-slots": ({"h_slots": (0, 1, 9)}, None, None),
+        "aux-bank": ({"digest": cert.sha256(lor.img + only_h)},
+                     (lor.img, only_h), None),
+        "aux-streams": ({"streams": (one_hash,) + r1.streams[1:]}, None,
+                        {1: (one, None, None)}),
+        "aux-start": ({"chain": (dataclasses.replace(
+            r1.chain[0], start=other),) + r1.chain[1:]}, None, None),
+    }
+    order = list(D)
+
+    def audit_with(names):
+        fields, prog1, streams = {}, P[1], None
+        for n in names:
+            f, p, s = D[n]
+            fields.update(f)
+            prog1 = p or prog1
+            streams = s or streams
+        if "aux-format" in names:
+            # run 1 at fp128 is run 2's image and bank; the certificate
+            # still says half-step
+            fields.update(image=r2.image, digest=r2.digest,
+                          streams=fields.get("streams", r2.streams))
+            prog1 = P[2]
+            if "aux-lanes" in names:
+                fields["streams"] = zero_hashes("fp128", 2)
+        run1 = dataclasses.replace(r1, **fields)
+        data = cert.encode(keyed((r0, run1, r2), ()))
+        return cert.audit(data, SALT, {0: P[0], 1: prog1, 2: P[2]},
+                          states={0: {0: lor.init}}, streams=streams)
+    for a, b in zip(order, order[1:]):
+        e = refused(a, audit_with, [a, b])
+        assert e.run == 1, (a, b)
+        refused(b, audit_with, [b])
+    refused(order[0], audit_with, [order[0]])
+
+
+def test_the_readers_key_scan_comes_before_its_mode(lor):
+    """Step 5 before step 6: a certificate with a line no key names AND a
+    mode no reader knows is `unknown-line`, and so is one with such a
+    line that is keyed with no commitment. Each defect alone is its own
+    refusal (verifier-C2 found the order green at e484425)."""
+    L = lines_of(lor.data)
+    extra = L[:12] + ["note this line is not in version 1"] + L[12:]
+    refused("unknown-line", cert.parse,
+            rebuilt([extra[0], "mode signed"] + extra[2:]))
+    refused("mode-unknown", cert.parse, rebuilt([L[0], "mode signed"]
+                                                + L[2:]))
+    sc = find(extra, "salt-commitment")
+    refused("unknown-line", cert.parse, rebuilt(extra[:sc]
+                                                + extra[sc + 1:]))
+    refused("commitment-missing", cert.parse,
+            rebuilt(L[:find(L, "salt-commitment")]
+                    + L[find(L, "salt-commitment") + 1:]))
+
+
+def test_the_readers_steps_in_order(lor):
+    """The page's reader order where no other test holds it: the bytes
+    (step 3) before the magic line (step 4), and the mode (step 6)
+    before the lines that follow it (step 7). Each pair with both
+    defects, and each defect alone."""
+    L = lines_of(lor.data)
+    i = find(L, "lanes ")
+    bad_bytes = L[:i] + ["lanes  3"] + L[i + 1:]
+    refused("malformed", cert.parse, rebuilt(["cft-certificat 1"]
+                                             + bad_bytes[1:]))
+    refused("malformed", cert.parse, rebuilt(bad_bytes))
+    refused("magic", cert.parse, rebuilt(["cft-certificat 1"] + L[1:]))
+    j = find(L, "backend ")
+    dropped = L[:j] + L[j + 1:]
+    refused("mode-unknown", cert.parse,
+            rebuilt([dropped[0], "mode signed"] + dropped[2:]))
+    refused("line-missing", cert.parse, rebuilt(dropped))
+
+
+def test_a_programs_checks_in_order(lor):
+    """Step 4 for one run, in the page's order: the image's digest, then
+    the program digest, then that the image loads, its format, that it
+    is a segment, and last the bank's size. Each adjacent pair that can
+    both be wrong at once, with both defects, and each defect alone."""
+    r0 = lor.runs[0]
+    horner = asm.assemble((PROGRAMS / "horner-bank-fp64.cfta").read_text(
+        encoding="utf-8"), "horner")
+    hbank = (PROGRAMS / "horner-bank-fp64.exp.bank").read_bytes()
+    junk = b"not a program image"
+
+    def run_for(image, bank, fmt="fp64"):
+        return dataclasses.replace(r0, image=cert.sha256(image),
+                                   digest=cert.sha256(image + bank), fmt=fmt)
+
+    def audit1(run, image, bank):
+        return cert.audit(cert.encode(keyed((run,), ())), SALT,
+                          {0: (image, bank)})
+    # the program digest before the image loads: a junk image certified
+    # with one bank and handed with another
+    refused("program-digest", audit1, run_for(junk, b"x"), junk, b"y")
+    refused("program-image", audit1, run_for(junk, b"x"), junk, b"x")
+    refused("program-digest", audit1, run_for(lor.img, lor.bank), lor.img,
+            lor.bank_half)
+    # the format before the segment's shape: horner (it deposits)
+    # certified as fp128
+    refused("program-format", audit1, run_for(horner, hbank, "fp128"),
+            horner, hbank)
+    refused("program-format", audit1, run_for(lor.img, lor.bank, "fp128"),
+            lor.img, lor.bank)
+    # the shape before the bank's size: horner with a bank one short
+    short = hbank[:-8]
+    refused("program-shape", audit1, run_for(horner, short), horner, short)
+    refused("program-shape", audit1, run_for(horner, hbank), horner, hbank)
+    short = lor.bank[:-8]
+    refused("program-image", audit1, run_for(lor.img, short), lor.img,
+            short)
+
+
+def test_a_reruns_checks_in_order(lor):
+    """Step 9 for one segment: its end state, then its flags, then its
+    STATUS."""
+    r0 = lor.runs[0]
+    bad = list(lor.st[0][1])
+    bad[0] ^= 1
+    h = cert.state_hash(SALT, cert.state_bytes("fp64", bad))
+
+    def with_seg0(**kw):
+        chain = (dataclasses.replace(r0.chain[0], **kw),) + r0.chain[1:]
+        if "end" in kw:
+            chain = chain[:1] + (dataclasses.replace(
+                chain[1], start=kw["end"]),) + chain[2:]
+        data = cert.encode(keyed((dataclasses.replace(r0, chain=chain),),
+                                 ()))
+        return cert.audit(data, SALT, {0: lor.progs[0]},
+                          states={0: {0: lor.init}}, choose={0: [0]})
+    for kw, name in (({"end": h, "flags": 0}, "segment-end"),
+                     ({"end": h}, "segment-end"),
+                     ({"flags": 0, "status": 16}, "segment-flags"),
+                     ({"flags": 0}, "segment-flags"),
+                     ({"status": 16}, "segment-status")):
+        e = refused(name, with_seg0, **kw)
+        assert (e.run, e.segment) == (0, 0)
+
+
+def test_an_entrys_checks_in_order(lor):
+    """Step 10 for one entry: the run it uses, its lane, its terms'
+    slots, then the states it reads."""
+    e0, e1, e2, e3 = lor.entries
+    far = ((Fraction(1), (0, 3)),)
+    for bad, name in (
+            (dataclasses.replace(e2, uses=7, lane=LANES), "accuracy-run"),
+            # a run that exists, of the wrong kind, before the lane
+            (dataclasses.replace(e0, uses=2, lane=LANES), "accuracy-run"),
+            (dataclasses.replace(e2, lane=LANES), "accuracy-scope"),
+            (dataclasses.replace(e3, lane=LANES, terms=far),
+             "accuracy-scope"),
+            (dataclasses.replace(e3, terms=far), "accuracy-slot")):
+        e = refused(name, cert.audit, _with_entries(lor, [bad]), SALT,
+                    lor.progs, states=lor.states, choose=QUICK)
+        assert e.entry == 0
+    # a term's slot before the states it reads: neither final state was
+    # handed or re-run into
+    only0 = {r: {0: lor.st[r][0]} for r in range(3)}
+    e = refused("accuracy-slot", cert.audit, _with_entries(
+        lor, [dataclasses.replace(e3, terms=far)]), SALT, lor.progs,
+        states=only0, choose=QUICK)
+    e = refused("state-missing", cert.audit, _with_entries(lor, [e3]),
+                SALT, lor.progs, states=only0, choose=QUICK)
+    assert (e.run, e.segment, e.entry) == (0, S, 0)
+
+
+def test_states_and_the_chain_are_checked_in_order_of_place(lor):
+    """Steps 6 and 7 name the first place in order: run by run, and in a
+    run segment by segment (then the output) or boundary by boundary."""
+    r0, r1, r2 = lor.runs
+    # states: boundary 1 wrong by its hash, boundary 3 by its shape
+    states = {r: dict(s) for r, s in lor.states.items()}
+    x = list(states[0][1])
+    x[0] ^= 1
+    states[0][1] = x
+    states[0][3] = lor.init[:-1]
+    e = refused("state-hash", cert.audit, lor.data, SALT, lor.progs,
+                states=states)
+    assert (e.run, e.segment) == (0, 1)
+    # continuity: segments 1 and 3 both broken; runs 1 and 2 both broken
+    ch = list(r0.chain)
+    ch[1] = dataclasses.replace(ch[1], start=ch[2].start)
+    ch[3] = dataclasses.replace(ch[3], start=ch[0].start)
+    e = refused("continuity", cert.audit, with_runs(lor, [
+        dataclasses.replace(r0, chain=tuple(ch))]), SALT, {0: lor.progs[0]})
+    assert (e.run, e.segment) == (0, 1)
+    bad1 = dataclasses.replace(r1, output=r1.chain[0].start)
+    bad2 = dataclasses.replace(r2, output=r2.chain[0].start)
+    e = refused("continuity", cert.audit, with_runs(lor, [r0, bad1, bad2]),
+                SALT, lor.progs)
+    assert (e.run, e.segment) == (1, 2 * S - 1)
 
 
 def test_the_width_rule_reaches_an_enclosures_ends_not_a_rounded_value(lor):
@@ -1742,6 +2304,11 @@ def test_an_enclosures_line_is_read_in_the_pages_order(lor):
             # the upper end's hex, before the lower end's width
             (el(-1100), f"{one_hex[1:]} {one_dec}", "malformed",
              "upper end"),
+            # the lower end's spelling before the upper end's: its
+            # decimal wrong and the upper end's hex misspelt (verifier-C4
+            # found the two read the other way round green)
+            (f"{one_hex} 2", f"{one_hex[1:]} {one_dec}", "decimal",
+             "lower end"),
             # both ends past the rule: the lower end first
             (el(-1100), el(1100), "width", "lower end"),
             # the width rule before the comparison of the ends
@@ -1762,16 +2329,35 @@ def test_the_tightest_pair_past_the_rule_is_refused_not_widened(lor):
     """An in-rule value whose tightest enclosure has an end past the rule
     (verifier-C2): 1/(3 x 2^900), 902 bits, rounded down into fp256 has
     a 1,139-bit denominator, and 1/(3 x 2^1010) in fp64 likewise. The
-    writer refuses `width`, by name, and does not widen the pair."""
-    for fmt, q, lo_bits in (("fp256", Fraction(1, 3 << 900), 1139),
-                            ("fp64", Fraction(1, 3 << 1010), 1065)):
+    writer refuses `width`, by name, and does not widen the pair. Each
+    end's bits are held, and each end alone past the rule (verifier-C4):
+    1/(2^900 - 1) in fp256 has an in-rule lower end (901 bits) and an
+    upper end of 1,137, and 1/(2^900 + 1) a lower end of 1,138 and an
+    upper end of 901, so a
+    writer that widened one end only would be seen at either."""
+    for fmt, q, lo_bits, hi_bits, past in (
+            ("fp256", Fraction(1, 3 << 900), 1139, 1138, "lower end"),
+            ("fp64", Fraction(1, 3 << 1010), 1065, 1064, "lower end"),
+            ("fp256", Fraction(1, (1 << 900) - 1), 901, 1137, "upper end"),
+            ("fp256", Fraction(1, (1 << 900) + 1), 1138, 901, "lower end"),
+            ("fp64", Fraction(1, (1 << 1000) - 1), 1001, 1053, "upper end"),
+            ("fp64", Fraction(1, (1 << 1000) + 1), 1054, 1001,
+             "lower end")):
         assert q.denominator.bit_length() <= 1023
         v = cert.make_value(q, "enclosed", fmt)
-        kind, lo = cert.element_fraction(FORMATS[fmt], v.lo)
-        assert kind == "finite" and lo.denominator.bit_length() == lo_bits
+        (klo, lo), (khi, hi) = (cert.element_fraction(FORMATS[fmt], b)
+                                for b in (v.lo, v.hi))
+        assert (klo, khi) == ("finite", "finite")
+        assert (lo.denominator.bit_length(),
+                hi.denominator.bit_length()) == (lo_bits, hi_bits)
+        assert lo <= q <= hi
         e2 = dataclasses.replace(lor.entries[2], value=v)
-        refused("width", cert.encode,
-                keyed(lor.runs, lor.entries[:2] + (e2,) + lor.entries[3:]))
+        e = refused("width", cert.encode,
+                    keyed(lor.runs, lor.entries[:2] + (e2,)
+                          + lor.entries[3:]))
+        bits = lo_bits if past == "lower end" else hi_bits
+        assert (f"the {past}'s exact value" in e.message
+                and f"{bits}-bit denominator" in e.message), e.message
     assert ("in fp256, has a lower end whose denominator has 1,139 bits"
             in " ".join(_doc().split()))
 
@@ -1782,20 +2368,60 @@ def test_the_identity_lines_are_held_to_their_spelling_alone(lor):
     (verifier-C2 measured the four mismatches accepted). Held here so a
     reader that starts to check them changes the page with it."""
     L = lines_of(lor.data)
-    for backend, xclbin, version, caps in (
-            ("xrt", "a" * 64, "00000a00", "0000000f"),
-            ("xrt", "a" * 64, "00000600", "0000000f 00000000"),
-            ("xrt", "a" * 64, "none", "0000000f"),
-            ("xrt", "a" * 64, "00000a00", "none"),
-            ("software", "a" * 64, "unknown", "none")):
+    for backend, xclbin, version, caps, tiles in (
+            ("xrt", "a" * 64, "00000a00", "0000000f", "1"),
+            ("xrt", "a" * 64, "00000600", "0000000f 00000000", "1"),
+            ("xrt", "a" * 64, "none", "0000000f", "1"),
+            ("xrt", "a" * 64, "00000a00", "none", "1"),
+            ("software", "a" * 64, "unknown", "none", "1"),
+            # device-tiles is a device line too, held to nothing but its
+            # spelling (verifier-C4 found it unpinned against backend)
+            ("software", "none", "none", "none", "4"),
+            ("remote", "unknown", "unknown", "unknown", "7"),
+            ("xrt", "a" * 64, "00000a00", "0000000f 00000000", "unknown")):
         M = list(L)
         for key, val in (("backend", backend), ("device-xclbin", xclbin),
                          ("device-version", version),
-                         ("device-caps", caps)):
+                         ("device-caps", caps), ("device-tiles", tiles)):
             M[find(M, key + " ")] = f"{key} {val}"
         c = cert.parse(rebuilt(M))
-        assert (c.identity.backend, c.identity.device_version) == (
-            backend, version)
+        assert (c.identity.backend, c.identity.device_version,
+                str(c.identity.device_tiles)) == (backend, version, tiles)
+
+
+def test_every_word_the_page_allows_is_read(lor):
+    """The other side of the strict reader: each word the page allows on
+    a line reads, and writes back as the same bytes. Each identity word,
+    each program format, each rounding direction at each format, and each
+    format of an enclosure; the build id's forms, the mode, the methods,
+    kinds, run kinds, value forms and scopes are read by the fixture and
+    the tests above. A reader that lost one would refuse a certificate
+    the page calls valid - found by removing each word from the reader,
+    one at a time, in a copy (the round's ledger, P1.md)."""
+    L = lines_of(lor.data)
+
+    def reads(prefix, line):
+        i = find(L, prefix)
+        data = rebuilt(L[:i] + [line] + L[i + 1:])
+        assert cert.encode(cert.parse(data)) == data, line
+    for key, words in (
+            ("backend", ("software", "xrt", "remote", "unknown")),
+            ("device-xclbin", ("none", "unknown", "0123abcd" * 8)),
+            ("device-version", ("none", "unknown", "00000a00")),
+            ("device-caps", ("none", "unknown", "0000000f",
+                             "0000000f 00000001")),
+            ("device-tiles", ("unknown", "1", "4"))):
+        for w in words:
+            reads(key + " ", f"{key} {w}")
+    for fmt in cert.LADDER:
+        reads("program-format ", f"program-format {fmt}")
+        one = chars.from_decimal(FORMATS[fmt], "1", sf.RND_RNE)[0]
+        for rnd in ("rne", "rtz", "rdn", "rup", "rmm"):
+            reads("value rounded", cert._value_text(cert.Value(
+                "rounded", fmt=fmt, rnd=rnd, bits=one)))
+        reads("value enclosed", cert._value_text(cert.Value(
+            "enclosed", fmt=fmt, lo=one, hi=one)))
+    assert cert.LADDER == ("fp32", "fp64", "fp128", "fp256")
 
 
 def test_bytes_that_are_not_whole_elements_are_refused_by_name(lor):
@@ -1804,9 +2430,12 @@ def test_bytes_that_are_not_whole_elements_are_refused_by_name(lor):
     e = refused("state-shape", cert.audit, lor.data, SALT, lor.progs,
                 states={0: {0: whole[:-1]}})
     assert "71 bytes" in e.message
+    # located in its fields, not only in its message (verifier-C2)
+    assert (e.run, e.segment, e.entry) == (0, 0, None)
     e = refused("stream", cert.audit, lor.data, SALT, lor.progs,
                 streams={0: (bytes(23), None, None)})
     assert "23 bytes" in e.message
+    assert (e.run, e.segment, e.entry) == (0, None, None)
     # whole elements, handed as bytes, are read as the values they are
     states = {r: dict(s) for r, s in lor.states.items()}
     states[0][0] = whole
@@ -1818,6 +2447,172 @@ def test_the_writer_refuses_an_empty_or_ragged_run(lor):
             [lor.init], [], steps=100)
     refused("state-shape", cert.certify_run, "main", lor.img, lor.bank, SALT,
             [lor.init] * 2, [(16, 0)] * 2, steps=100)
+
+
+def test_the_writer_refuses_what_the_executor_would(lor):
+    """run_chain and certify_run refuse by name what seq.run would not
+    run as a segment: a bank handed to an image that carries its own
+    constants, a start that is not whole lanes, a stream of the wrong
+    length. And the audit's step 4 refuses the first, for a run
+    certified with a bank its image cannot take (certify_run hashes what
+    it is handed; it does not load the bank)."""
+    k64 = sf.div(F64, dec64("1"), dec64("3"))[0]
+    img = asm.assemble(SELF_K.format(fmt="fp64", k=k64, w=16, strict="",
+                                     n=1, extra=""), "k-fp64")
+    junk = bytes(8)
+    e = refused("program-image", cert.run_chain, img, junk, [dec64("1")], 1)
+    assert "must be empty" in e.message
+    st, rs = cert.run_chain(img, b"", [dec64("1")], 2)
+    r0 = cert.certify_run("main", img, junk, SALT, st, rs, steps=1)
+    e = refused("program-image", cert.audit, cert.encode(keyed((r0,), ())),
+                SALT, {0: (img, junk)})
+    assert "must be empty" in e.message and e.run == 0
+    e = refused("state-shape", cert.run_chain, lor.img, lor.bank,
+                lor.init[:-1], 1)
+    assert "whole number of lanes" in e.message
+    short = ([0] * 2, None, None)
+    for fn, a in ((cert.run_chain, (lor.img, lor.bank, lor.init, 1)),
+                  (cert.certify_run, ("main", lor.img, lor.bank, SALT,
+                                      lor.st[0], lor.rs[0]))):
+        kw = {"streams": short}
+        if fn is cert.certify_run:
+            kw["steps"] = 100
+        e = refused("stream", fn, *a, **kw)
+        assert "holds 2 values" in e.message
+
+
+def test_the_writer_refuses_a_field_it_cannot_spell_by_name(lor):
+    """A certificate object whose field is of the wrong type - device_caps
+    a bare string, device_tiles or a count a string - or of a shape the
+    writer cannot spell is refused `malformed`, naming the field, where
+    P1b's writer raised AssertionError (verifier-C2; c6d92ac refused the
+    bare string `malformed`)."""
+    c = lor.cert
+    idn = c.identity
+    r0 = lor.runs[0]
+    for bad, field in (
+            (dataclasses.replace(c, identity=dataclasses.replace(
+                idn, device_caps="0000000f")), "identity.device_caps"),
+            (dataclasses.replace(c, identity=dataclasses.replace(
+                idn, device_caps="0000000f 00000000")),
+             "identity.device_caps"),
+            (dataclasses.replace(c, identity=dataclasses.replace(
+                idn, device_tiles="1")), "identity.device_tiles"),
+            (dataclasses.replace(c, runs=(dataclasses.replace(
+                r0, lanes="3"),) + c.runs[1:]), "runs[0].lanes"),
+            (dataclasses.replace(c, runs=(dataclasses.replace(
+                r0, chain=(dataclasses.replace(r0.chain[0], flags="16"),)
+                + r0.chain[1:]),) + c.runs[1:]),
+             "runs[0].chain[0].flags")):
+        e = refused("malformed", cert.encode, bad)
+        assert field in e.message, e.message
+    # shapes the writer cannot spell at all
+    for bad in (dataclasses.replace(c, runs=(dataclasses.replace(
+                    r0, streams=r0.streams[:2]),) + c.runs[1:]),
+                dataclasses.replace(c, identity=None),
+                dataclasses.replace(c, accuracy=(None,))):
+        e = refused("malformed", cert.encode, bad)
+        assert "cannot spell" in e.message, e.message
+    # and make_value, the writer's value, what it cannot spell: a value
+    # that is not a rational, a form, format or direction the page does
+    # not name (it raised ValueError, or crashed inside the rounding)
+    for a in ((0.5,), (True,), (Fraction(1), "approximate", "fp64", "rne"),
+              (Fraction(1), "rounded", "fp80", "rne"),
+              (Fraction(1), "rounded", "fp64", "nearest"),
+              (Fraction(1), "rounded", "fp64", None),
+              (Fraction(1), "rounded", "fp64", ["rne"]),
+              (Fraction(1), "enclosed", None)):
+        refused("malformed", cert.make_value, *a)
+    # the right types are what they always were
+    ok = dataclasses.replace(c, identity=dataclasses.replace(
+        idn, device_caps=["0000000f"]))
+    assert cert.parse(cert.encode(ok)).identity.device_caps == ("0000000f",)
+
+
+def test_the_audits_arguments_are_held_to_their_shape_by_name(lor):
+    """Each argument of audit() in a shape it does not take is refused by
+    the name of the step that reads it - programs `program-image`,
+    streams `stream`, states `state-shape`, the choice and the seed
+    `choice` - with its location in the refusal's fields, where P1b's
+    audit crashed (IndexError, TypeError, AttributeError) or ignored
+    the argument (a stream or a program for a run that does not
+    exist)."""
+    d, P, st = lor.data, lor.progs, lor.states
+    img, bank = P[0]
+    cases = [
+        # (name, (run, segment), keyword arguments to audit)
+        ("program-image", (None, None), {"programs": [P[0]]}),
+        ("program-image", (None, None), {"programs": {**P, 3: P[0]}}),
+        ("program-image", (None, None), {"programs": {**P, "0": P[0]}}),
+        ("program-image", (0, None), {"programs": {**P, 0: img}}),
+        ("program-image", (0, None), {"programs": {**P, 0: (img, bank,
+                                                           bank)}}),
+        ("program-image", (0, None), {"programs": {**P, 0: (list(img),
+                                                           bank)}}),
+        ("program-image", (0, None), {"programs": {**P, 0: (img,
+                                                           list(bank))}}),
+        # two items, but not a pair
+        ("program-image", (0, None), {"programs": {**P, 0: {0: img,
+                                                           1: bank}}}),
+        ("stream", (None, None), {"streams": [None]}),
+        ("stream", (None, None), {"streams": {3: None}}),
+        ("stream", (None, None), {"streams": {"0": None}}),
+        ("stream", (0, None), {"streams": {0: ([0] * LANES, [0] * LANES)}}),
+        ("stream", (0, None), {"streams": {0: 5}}),
+        ("stream", (0, None), {"streams": {0: (5, None, None)}}),
+        ("stream", (0, None), {"streams": {0: (["0"] * LANES, None,
+                                               None)}}),
+        ("state-shape", (None, None), {"states": [st[0]]}),
+        ("state-shape", (None, None), {"states": {**st, "1": st[1]}}),
+        # True is not run 1, though a dict would merge the two keys
+        ("state-shape", (None, None), {"states": {True: st[1]}}),
+        ("state-shape", (0, None), {"states": {**st, 0: [lor.init]}}),
+        ("state-shape", (0, None), {"states": {**st, 0: {**st[0],
+                                                         "1": lor.init}}}),
+        ("state-shape", (0, 0), {"states": {**st, 0: {**st[0],
+                                                      0: 1.5}}}),
+        ("choice", (None, None), {"choose": [0]}),
+        ("choice", (None, None), {"choose": {"0": "all"}}),
+        ("choice", (0, None), {"choose": {0: ("sample", "1")},
+                               "seed": bytes(32)}),
+        ("choice", (0, None), {"choose": {0: ("sample", 1.0)},
+                               "seed": bytes(32)}),
+        ("choice", (0, None), {"choose": {0: ("sample", True)},
+                               "seed": bytes(32)}),
+        ("choice", (0, None), {"choose": {0: ["1"]}}),
+        ("choice", (None, None), {"seed": "0" * 64}),
+        # 32 of something that is not bytes is not a seed
+        ("choice", (None, None), {"seed": "0" * 32}),
+        ("choice", (None, None), {"seed": list(bytes(32))}),
+    ]
+    for name, where, kw in cases:
+        kw = dict(kw)
+        progs = kw.pop("programs", P)
+        kw.setdefault("states", st)
+        e = refused(name, cert.audit, d, SALT, progs, **kw)
+        assert (e.run, e.segment) == where, (kw, e.message)
+    # integers, the right number of them, that are not an element's bits:
+    # found as that, where a value past the format would otherwise reach
+    # the hash as bytes it cannot be
+    e = refused("stream", cert.audit, d, SALT, P, states=st,
+                streams={0: ([1 << 64] * LANES, None, None)})
+    assert e.run == 0 and "not the bits of a fp64 element" in e.message
+    e = refused("state-shape", cert.audit, d, SALT, P,
+                states={**st, 0: {**st[0], 0: [1 << 64] * len(lor.init)}})
+    assert (e.run, e.segment) == (0, 0) and "not the bits" in e.message
+    # a run's states in a list are found as that, before the list's items
+    # would be read as boundaries and refused by the same name (the
+    # census found the first check masked by the second)
+    e = refused("state-shape", cert.audit, d, SALT, P,
+                states={**st, 0: [lor.init]})
+    assert "a mapping from boundary to state" in e.message, e.message
+    # and the page says which name each argument gets
+    doc = " ".join(_doc().split())
+    for arg, name in (("programs", "program-image"), ("streams", "stream"),
+                      ("states", "state-shape"), ("choose", "choice"),
+                      ("seed", "choice")):
+        assert re.search(rf"- `{arg}`: [^;]*;[^;]* refused `{name}`;",
+                         doc), (arg, name)
 
 
 def test_a_seed_handed_is_a_seed_whatever_is_asked(lor):
