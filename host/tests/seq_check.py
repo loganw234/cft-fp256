@@ -67,22 +67,41 @@ and the identity table, which must give BIT-IDENTICAL output to the
 dense run the same program makes over the same values - the control
 that a table which was quietly ignored would also pass, and which the
 permuted half beside it is there to fail.
+
+Since 2026-09-29 a SIXTH corpus runs after the five, from its own seed:
+revision 8 (proposed; docs/SEQUENCER.md) - `augadd`/`augerr`, the two
+halves of 754-2019 9.5's augmentedAddition, and STX/LDX with a signed
+post-step. Besides the generator's arm it runs the recommended pair over
+augmented.py's own stress families (ties, cancellations, subnormal
+residuals, the overflow threshold), and a directed walk whose indices
+start at the depth's edge and near zero, so a strict program crosses the
+depth and a decrement wraps at the register's width. Its refusals - an
+LDX that loads into its own stepped index, imm[23:12], every field the
+pair does not read, control code 12 - are corrupted in. And one leg that
+needs no corpus: a remote handle to a server whose HELLO publishes the
+round-2 tile's word, where every revision-8 form must be refused BY NAME
+on the client, and loads when the word publishes the bit.
 """
 
 import argparse
 import ctypes
 import os
 import random
+import socket
+import struct
 import sys
+import threading
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
-from cft_golden import FORMATS  # noqa: E402
+from cft_golden import FORMATS, vectors  # noqa: E402
 from cft_golden import seq  # noqa: E402
 
 CFT_OK = 0
+CFT_ERR_UNSUPPORTED = 2
 
 
 def load_library():
@@ -116,6 +135,8 @@ def load_library():
     lib.cft_program_run_ex.restype = ctypes.c_int
     lib.cft_strerror.argtypes = [ctypes.c_int]
     lib.cft_strerror.restype = ctypes.c_char_p
+    lib.cft_last_error.argtypes = []
+    lib.cft_last_error.restype = ctypes.c_char_p
     return lib
 
 
@@ -794,8 +815,12 @@ def corrupt_scratch(insns, rng):
     elif what == "ldl_past_depth":
         out.insert(0, seq.encode(seq.LDL, rd=3, ctrl=True, imm=D))
     elif what == "stx_with_imm":
-        # STX takes its slot from rb; imm[23:0] is read by nothing
-        out.insert(0, seq.encode(seq.STX, ra=0, rb=1, ctrl=True, imm=1))
+        # STX takes its slot from rb; imm[23:12] is read by nothing. It
+        # was imm = 1 - all of imm[23:0] unread - until revision 8
+        # (proposed 2026-09-29) made imm[11:0] the post-step, so the bit
+        # moved to imm[12], the lowest that stays reserved.
+        out.insert(0, seq.encode(seq.STX, ra=0, rb=1, ctrl=True,
+                                 imm=1 << 12))
     elif what == "ldx_stray_kx":
         out.insert(0, seq.encode(seq.LDX, rd=3, rb=1, ctrl=True, kx=True))
     elif what == "stl_stray_rd":
@@ -1063,6 +1088,355 @@ def corrupt(insns, rng):
     return out, what
 
 
+# ---- the sixth corpus: revision 8 (proposed, 2026-09-29) ----------------
+
+# Scratch slots 0 and 1 of every lane carry the two indices the directed
+# walk below starts from: near the depth's edge, so a +1 walk crosses it
+# and a strict program reports, and near zero, so a -1 walk wraps.
+_WALK_STARTS = (0, 1, 2, 250, 253, 255, 256, 300)
+
+
+def corrupt_rev8(insns, rng):
+    """The refusals revision 8 adds, one per program: an LDX that loads
+    into its own stepped index, a set bit in imm[23:12] of a stepped
+    access, and every field augadd/augerr do not read - rc and its high
+    bit, rnd, a k flag, kx, imm[23:0] and imm[31:28] - and the next
+    control code, 12, which is still unknown. Each is refused by the
+    model and must be by libcft."""
+    out = list(insns)
+    what = rng.choice(["ldx_dead_step", "step_reserved_bit", "aug_rc",
+                       "aug_rnd", "aug_kx", "aug_kb", "aug_imm_low",
+                       "aug_imm_high", "code_12"])
+    code = rng.choice([seq.AUGADD, seq.AUGERR])
+    regs = dict(rd=1, ra=2, rb=3, ctrl=True)
+    if what == "ldx_dead_step":
+        r = rng.randrange(32)
+        word = seq.encode(seq.LDX, rd=r, rb=r, ctrl=True,
+                          imm=rng.choice([1, 7, 0x800, 0xFFF]))
+    elif what == "step_reserved_bit":
+        op = rng.choice([seq.STX, seq.LDX])
+        fields = dict(ra=1, rb=2) if op == seq.STX else dict(rd=1, rb=2)
+        word = seq.encode(op, ctrl=True,
+                          imm=(1 << rng.randrange(12, 24))
+                          | rng.randrange(1 << 12), **fields)
+    elif what == "aug_rc":
+        word = seq.encode(code, rc=rng.randrange(1, 32), **regs)
+    elif what == "aug_rnd":
+        word = seq.encode(code, rnd=rng.randrange(1, 5), **regs)
+    elif what == "aug_kx":
+        word = seq.encode(code, kx=True, **regs)
+    elif what == "aug_kb":
+        word = seq.encode(code, kb=True, **regs)
+    elif what == "aug_imm_low":
+        word = seq.encode(code, imm=1 << rng.randrange(0, 24), **regs)
+    elif what == "aug_imm_high":
+        word = seq.encode(code, imm=1 << rng.randrange(27, 32), **regs)
+    else:
+        word = seq.encode(12, ctrl=True)
+    out.insert(rng.randrange(len(out)), word)
+    return out, what
+
+
+def rev8_corpus(lib, dev, fmt, name, args, R):
+    """The sixth corpus, for one format. Mutates the counters in R.
+
+    Three kinds of program, from their own seed so the five corpora above
+    draw what they always drew:
+    * the generator with its revision-8 arm - augadd, augerr, their
+      recommended pair and stepped STX/LDX - over random operands;
+    * the same behind a directed prefix that runs the recommended pair on
+      r0 and r1 and deposits both halves, with the lanes' operands drawn
+      from augmented.py's stress families (ties from odd significands,
+      cancellations in every sign, subnormal residuals, the overflow
+      threshold), so the pair meets what 9.5 is about;
+    * the same behind a directed WALK: two indices loaded from the
+      scratch block near the depth's edge and near zero, stepped by
+      loads and stores in a loop - so a strict program crosses the depth
+      (and reports) and a -1 walk wraps at the register's width."""
+    rng = random.Random(args.seed ^ (fmt.width * 7919) ^ 0x8E7D)
+    checked = 0
+    stress = vectors.augmented_pairs(fmt, 0)
+    for trial in range(max(1, args.trials // 2)):
+        insns, consts = seq.random_program(fmt, rng, extended=True,
+                                           wide_regs=True, scratch=True,
+                                           rev8=True)
+        shape = rng.choice(["plain", "pair", "walk"])
+        maxdep = rng.choice([0, 1, 2, 4])
+        nsin = nsout = 0
+        io = rng.random() < 0.5 or shape == "walk"
+        if shape == "pair":
+            insns = [seq.augerr(5, 0, 1), seq.augadd(6, 0, 1),
+                     seq.deposit(6), seq.deposit(5)] + insns
+            maxdep = max(maxdep, 2)
+        elif shape == "walk":
+            k = rng.randint(4, 12)
+            insns = [seq.ldl(7, 0), seq.ldl(9, 1), seq.repeat(k),
+                     seq.ldx(8, 7, rng.choice([1, 1, -1, 3])),
+                     seq.stx(8, 9, rng.choice([1, -1, -1, 5])),
+                     seq.deposit(8), seq.endrep()] + insns
+            maxdep = max(maxdep, k)
+            R["walks"] += 1
+        if io:
+            nsin = max(2 if shape == "walk" else 0, rng.choice([0, 1, 3]))
+            nsout = rng.choice([0, 1, 4])
+        strict = rng.random() < 0.4
+        flags = ((seq.FLAG_SCRATCH_IO if io else 0)
+                 | (seq.FLAG_SCRATCH_STRICT if strict else 0))
+        kind = None
+        if rng.random() < 0.25:
+            insns, kind = corrupt_rev8(insns, rng)
+        try:
+            prog = seq.Program(fmt, insns, consts, maxdep, flags=flags,
+                               n_scratch_in=nsin, n_scratch_out=nsout)
+        except seq.ProgramError:
+            bogus = seq.Program.__new__(seq.Program)
+            bogus.fmt, bogus.insns = fmt, insns
+            bogus.consts, bogus.max_deposits = consts, maxdep
+            bogus.flags = flags
+            bogus.n_scratch_in, bogus.n_scratch_out = nsin, nsout
+            bogus._n_consts = len(consts)
+            handle = ctypes.c_void_p()
+            image = bogus.to_bytes()
+            rc = lib.cft_program_load(dev, image, len(image),
+                                      ctypes.byref(handle))
+            if rc == CFT_OK:
+                lib.cft_program_free(handle)
+                print(f"  MISMATCH {name} (revision-8 corpus, {kind}): the "
+                      f"model refuses this program and libcft loads it")
+                R["bad"] += 1
+            else:
+                R["refused"] += 1
+            continue
+        if kind is not None:
+            print(f"  NOTE {name} (revision-8 corpus): the model ACCEPTED a "
+                  f"program corrupted as {kind}")
+        prev = None
+        for w in insns:
+            d = seq.decode(w)
+            if d["ctrl"] and d["op"] == seq.AUGADD:
+                R["augadd"] += 1
+                if prev is not None and prev["op"] == seq.AUGERR and \
+                        (prev["ra"], prev["rb"]) == (d["ra"], d["rb"]):
+                    R["pair"] += 1
+            elif d["ctrl"] and d["op"] == seq.AUGERR:
+                R["augerr"] += 1
+            elif seq.index_step(d):
+                R["ldx_step" if d["op"] == seq.LDX else "stx_step"] += 1
+            prev = d if d["ctrl"] else None
+        n = rng.choice([1, 2, 63, 64, 65, 100, 129])
+        if n > 64:
+            R["blocked"] += 1
+        if shape == "pair":
+            picks = [rng.choice(stress) for _ in range(n)]
+            a = [x for x, _ in picks]
+            b = [y for _, y in picks]
+        else:
+            a = seq.random_inputs(fmt, rng, n)
+            b = seq.random_inputs(fmt, rng, n)
+        c = seq.random_inputs(fmt, rng, n)
+        sin = None
+        if nsin:
+            sin = seq.random_inputs(fmt, rng, n * nsin)
+            if shape == "walk":
+                for i in range(n):
+                    sin[i * nsin] = rng.choice(_WALK_STARTS)
+                    sin[i * nsin + 1] = rng.choice(_WALK_STARTS)
+        want = seq.run(prog, a, b, c, scratch_in=sin)
+        if strict:
+            R["strict"] += 1
+            if want.status & seq.STATUS_SCRATCH_RANGE:
+                R["range"] += 1
+        for bit, key in ((0x01, "inv"), (0x04, "ovf"), (0x08, "unf")):
+            if want.flags & bit:
+                R[key] += 1
+        try:
+            got_dep, got_counts, got_flags, got_status, got_so = \
+                run_in_c_ex(lib, dev, prog, a, b, c, sin)
+        except RuntimeError as e:
+            print(f"  MISMATCH {name} (revision-8 corpus): the model runs "
+                  f"this program and libcft refuses it: {e}")
+            R["bad"] += 1
+            continue
+        if (got_dep != want.deposits or got_counts != want.counts
+                or got_flags != want.flags or got_status != want.status
+                or got_so != want.scratch_out):
+            R["bad"] += 1
+            if R["bad"] <= 3:
+                print(f"  MISMATCH {name} (revision-8 corpus, {shape}) n={n} "
+                      f"max_deposits={maxdep} in={nsin} out={nsout} "
+                      f"strict={strict}")
+                print(f"    program  {[hex(i) for i in insns]}")
+                print(f"    flags    model 0x{want.flags:02x}  "
+                      f"libcft 0x{got_flags:02x}")
+                print(f"    status   model 0x{want.status:02x}  "
+                      f"libcft 0x{got_status:02x}")
+                for i, (w, g) in enumerate(zip(want.deposits, got_dep)):
+                    if w != g:
+                        print(f"    deposit[{i}] model 0x{w:x} "
+                              f"libcft 0x{g:x}")
+                        break
+        checked += 1
+        R["total"] += 1
+    print(f"{name}: {checked} revision-8-corpus programs compared")
+
+
+class _FakeServer:
+    """A cft:// server that answers HELLO with a caps block whose
+    seq_features word is the one it was given, answers BYE, and speaks
+    nothing else.
+
+    That is enough to hold cft_program_load on a remote handle: the
+    client checks a program against the HELLO caps and sends no frame
+    for a load (program.c keeps the image and ships it at the first run),
+    so a refusal there is the client's own, made from the word alone -
+    the path a remote handle to a tile takes. Any other frame means the
+    load reached the wire, and is recorded so the check can say so."""
+
+    CAPS_V3 = 76
+
+    def __init__(self, features, backend=b"xrt"):
+        self.features = features
+        self.backend = backend
+        self.other_ops = []
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(8)
+        self.port = self.sock.getsockname()[1]
+        self.thread = threading.Thread(target=self._serve, daemon=True)
+        self.thread.start()
+
+    @staticmethod
+    def _recv(conn, k):
+        buf = b""
+        while len(buf) < k:
+            part = conn.recv(k - len(buf))
+            if not part:
+                return None
+            buf += part
+        return buf
+
+    @staticmethod
+    def _frame(abi, fid, op, payload):
+        hdr = bytearray(struct.pack("<IHHIIHHIII", 0x52544643, 1, 1, abi,
+                                    fid, op, 0, len(payload), 0, 0))
+        crc = zlib.crc32(bytes(hdr) + payload) & 0xFFFFFFFF
+        struct.pack_into("<I", hdr, 24, crc)
+        return bytes(hdr) + payload
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            with conn:
+                while True:
+                    hdr = self._recv(conn, 32)
+                    if hdr is None:
+                        break
+                    (_m, _p, _k, abi, fid, op, _s, length, _c,
+                     _r) = struct.unpack("<IHHIIHHIII", hdr)
+                    if length and self._recv(conn, length) is None:
+                        break
+                    if op == 0x0001:                         # HELLO
+                        caps = (struct.pack("<6I", 0xF, 0xFF, 1, 0xA00, 1,
+                                            abi)
+                                + self.backend.ljust(32, b"\0")
+                                + struct.pack("<5I", 64, 16384, 512,
+                                              self.features, 256))
+                        assert len(caps) == self.CAPS_V3
+                        conn.sendall(self._frame(abi, fid, op, caps))
+                    elif op == 0x00FF:                       # BYE
+                        conn.sendall(self._frame(abi, fid, op, b""))
+                        break
+                    else:
+                        self.other_ops.append(op)
+                        break
+
+    def close(self):
+        self.sock.close()
+
+
+def rev8_remote_refusals(lib, R):
+    """A device without the revision-8 bits refuses both forms BY NAME.
+
+    The tile today publishes neither (CAPS2[11] and [12] read zero), and
+    this desktop has no tile - so the device here is a remote handle to a
+    fake server whose HELLO says what a round-2 tile's word says,
+    0x7f1f: the refusal is made on the client, from the word, by the
+    same check that refuses on an xclbin handle. Held both ways: each
+    program is refused where the bit is clear, naming the instruction
+    and the bit, and loads where the fake publishes it; a program that
+    needs neither loads either way; no load reaches the wire."""
+    tile_word = 0x7F1F
+    cases = [
+        ("augadd", [seq.augadd(3, 0, 1)], "CFT_SEQ_FEAT_AUGADD", "AUGADD",
+         seq.FEAT_AUGADD),
+        ("augerr", [seq.augerr(3, 0, 1)], "CFT_SEQ_FEAT_AUGADD", "AUGERR",
+         seq.FEAT_AUGADD),
+        ("stepped ldx", [seq.ldx(3, 4, -1)], "CFT_SEQ_FEAT_SCRATCH_STEP",
+         "LDX with a post-step of -1", seq.FEAT_SCRATCH_STEP),
+        ("stepped stx", [seq.stx(3, 4, 7)], "CFT_SEQ_FEAT_SCRATCH_STEP",
+         "STX with a post-step of +7", seq.FEAT_SCRATCH_STEP),
+        ("an unstepped ldx", [seq.ldx(3, 4, 0)], None, None, 0),
+    ]
+    for word, published in ((tile_word, False),
+                            (tile_word | seq.FEAT_AUGADD
+                             | seq.FEAT_SCRATCH_STEP, True)):
+        srv = _FakeServer(word)
+        dev = ctypes.c_void_p()
+        url = f"cft://127.0.0.1:{srv.port}".encode()
+        st = lib.cft_open(url, 0, ctypes.byref(dev))
+        if st != CFT_OK:
+            print(f"  MISMATCH (revision-8 remote leg): cft_open of the fake "
+                  f"server failed: {lib.cft_last_error().decode()}")
+            R["bad"] += 1
+            srv.close()
+            continue
+        try:
+            for label, body, macro, instr, bit in cases:
+                prog = seq.Program(FORMATS["fp64"], body + [seq.halt()],
+                                   max_deposits=0)
+                assert seq.features_rev8(prog.insns) == bit
+                image = prog.to_bytes()
+                handle = ctypes.c_void_p()
+                rc = lib.cft_program_load(dev, image, len(image),
+                                          ctypes.byref(handle))
+                msg = lib.cft_last_error().decode()
+                if rc == CFT_OK:
+                    lib.cft_program_free(handle)
+                must_refuse = bool(bit) and not published
+                if must_refuse:
+                    named = (rc == CFT_ERR_UNSUPPORTED and macro in msg
+                             and instr in msg)
+                    if not named:
+                        print(f"  MISMATCH (revision-8 remote leg): {label} "
+                              f"on a server publishing 0x{word:x} gave rc "
+                              f"{rc} and {msg!r} - wanted "
+                              f"CFT_ERR_UNSUPPORTED naming {instr} and "
+                              f"{macro}")
+                        R["bad"] += 1
+                    else:
+                        R["remote_refused"] += 1
+                elif rc != CFT_OK:
+                    print(f"  MISMATCH (revision-8 remote leg): {label} on a "
+                          f"server publishing 0x{word:x} was refused: rc "
+                          f"{rc}, {msg!r}")
+                    R["bad"] += 1
+                else:
+                    R["remote_loaded"] += 1
+        finally:
+            lib.cft_close(dev)
+            srv.close()
+        if srv.other_ops:
+            print(f"  MISMATCH (revision-8 remote leg): a load reached the "
+                  f"wire, ops {[hex(o) for o in srv.other_ops]}")
+            R["bad"] += 1
+    print(f"revision-8 remote leg: {R['remote_refused']} refused by name on a "
+          f"server without the bits, {R['remote_loaded']} loaded where "
+          f"published or not needed")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--formats", nargs="+", default=["fp32", "fp64"],
@@ -1092,6 +1466,10 @@ def main():
     # total (R17, 2026-09-15).
     M = dict(total=0, bad=0, blocked=0, kept=0, masked_lanes=0,
              ones=0, zeros=0, sparse=0, dense=0, allones=0, holed=0)
+    # ...and the sixth's (revision 8, proposed 2026-09-29).
+    R = dict(total=0, refused=0, bad=0, blocked=0, augadd=0, augerr=0,
+             pair=0, ldx_step=0, stx_step=0, walks=0, strict=0, range=0,
+             inv=0, ovf=0, unf=0, remote_refused=0, remote_loaded=0)
     try:
         for name in args.formats:
             fmt = FORMATS[name]
@@ -1197,8 +1575,10 @@ def main():
             scratch_corpus(lib, dev, fmt, name, args, S)
             indexed_corpus(lib, dev, fmt, name, args, X)
             masked_corpus(lib, dev, fmt, name, args, M)
+            rev8_corpus(lib, dev, fmt, name, args, R)
     finally:
         lib.cft_close(dev)
+    rev8_remote_refusals(lib, R)
 
     print(f"\n{total} programs run through both implementations, "
           f"{refused_both} refused by both")
@@ -1226,7 +1606,23 @@ def main():
           f"{M['ones']} all-ones masks, {M['zeros']} all-zero, "
           f"{M['sparse']} sparse and {M['dense']} dense, "
           f"{M['allones']} all-ones controls and {M['holed']} holed ones")
-    bad += S["bad"] + X["bad"] + M["bad"]
+    print(f"{R['total']} programs from the revision-8 corpus run through "
+          f"both, {R['refused']} refused by both, {R['blocked']} across the "
+          f"block boundary: {R['augadd']} augadd, {R['augerr']} augerr, "
+          f"{R['pair']} recommended pairs, {R['ldx_step']} stepped LDX, "
+          f"{R['stx_step']} stepped STX, {R['walks']} directed walks, "
+          f"{R['strict']} strict of which {R['range']} reported an "
+          f"out-of-range index; runs raising invalid {R['inv']}, overflow "
+          f"{R['ovf']}, underflow {R['unf']}")
+    bad += S["bad"] + X["bad"] + M["bad"] + R["bad"]
+    if R["total"] and not all(R[k] for k in (
+            "refused", "blocked", "augadd", "augerr", "pair", "ldx_step",
+            "stx_step", "walks", "strict", "range", "inv", "ovf", "unf",
+            "remote_refused", "remote_loaded")):
+        print("THE REVISION-8 CORPUS DID NOT REACH EVERY FORM - a counter "
+              "above is zero, so a form, a flag class, the strict report "
+              "or the remote refusal went uncompared")
+        return 1
     if M["total"] and not (M["kept"] and M["masked_lanes"] and M["zeros"]
                            and M["allones"] and M["holed"]):
         print("THE MASKED CORPUS DID NOT REACH EVERY FORM - no lane was "

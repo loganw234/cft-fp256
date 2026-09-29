@@ -606,7 +606,7 @@ typedef struct cft_caps {
                                 * the ALU extensions beyond the group
                                 * bits; bits 11:8 = CAPS2[7:4], the
                                 * second feature nibble revision 3
-                                * opened; bits 14:12 = CAPS2[10:8]. The
+                                * opened; bits 16:12 = CAPS2[12:8]. The
                                 * assigned bits are the macros below -
                                 * CFT_SEQ_FEAT_*, CFT_ALU_EXT_* and
                                 * CFT_FEAT_REDUCE_SEG; do not keep a
@@ -870,6 +870,32 @@ typedef struct cft_caps {
  * (P3's measurement, four cycles and one read a block). */
 #define CFT_SEQ_FEAT_INDEXED   0x2000u     /* CAPS2[9]  */
 #define CFT_SEQ_FEAT_LANE_MASK 0x4000u     /* CAPS2[10] */
+/* Revision 8 of the program model (proposed 2026-09-29, docs/SEQUENCER.md
+ * "Revision 8"), defined golden-first: python/cft_golden/seq.py is the
+ * definition and this library's software backend computes it. No tile
+ * built so far carries either, and CAPS2[11] and [12] read as zero on
+ * every one - so cft_program_load refuses a program that needs one BY
+ * NAME, naming the instruction, on a tile and on a remote handle whose
+ * server does not publish the bit.
+ *
+ *   AUGADD        control codes 10 and 11, `augadd rD, rA, rB` and
+ *                 `augerr rD, rA, rB`: the sum rounded roundTiesTowardZero
+ *                 and its exact error - the two results of IEEE 754-2019
+ *                 9.5's augmentedAddition, one instruction each, as RISC-V
+ *                 delivers DIV and REM - each raising that operation's
+ *                 flags (invalid; overflow with inexact; underflow
+ *                 without inexact, when the error is non-zero and tiny).
+ *                 An old tile decodes code 10 as HALT. Published by the
+ *                 software backend unless it was built -DCFT_NO_AUGMENTED,
+ *                 which has no augmentedAddition to compute.
+ *   SCRATCH_STEP  STX and LDX read a signed twelve-bit post-step in
+ *                 imm[11:0]: after the access, rb := rb + step modulo
+ *                 2^width, whatever SCRATCH_STRICT decided about the
+ *                 access. A zero step is the instruction as it always was
+ *                 and needs no bit. An old tile never reads imm on the
+ *                 indexed pair, so it would access without stepping. */
+#define CFT_SEQ_FEAT_AUGADD       0x8000u  /* CAPS2[11] */
+#define CFT_SEQ_FEAT_SCRATCH_STEP 0x10000u /* CAPS2[12] */
 /* The index that reads as +0 (the format's positive zero) in an index
  * table, so a lane whose row has run out contributes nothing to a fold
  * and a row of unequal lengths needs no second table. Not an index:
