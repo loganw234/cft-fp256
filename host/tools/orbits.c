@@ -3616,8 +3616,9 @@ int main(int argc, char **argv)
         /* This program deposits four values a sample plus four at the
          * start, for a whole run in ONE call, so the sample count is
          * bounded by the device's deposit budget: 64 slots a lane on
-         * the tile of rtl/cft_krnl.sv is fifteen samples, 2^20 in this
-         * library's software backend is a quarter of a million.
+         * the round-2 tile is fifteen samples, 1,024 on the U50's
+         * revision-7 tile 255, 2^20 in this library's software backend
+         * a quarter of a million.
          *
          * Unlike the zoom's trip count, the sample count is part of
          * WHAT IS COMPUTED - fewer samples is a different record - so

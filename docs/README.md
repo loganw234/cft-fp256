@@ -1,9 +1,9 @@
 # The documents, by what you open them for
 
-Thirty-eight files, 54,395 lines. Flat in one directory they look like one
+Thirty-eight files, 54,399 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **18,979 lines you consult while working** — the three under *Start here*,
+- **18,983 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,219 lines of tool manual**, one per shipped program;
 - **1,984 lines of operations**, read when you are about to do something to
@@ -44,7 +44,7 @@ product, not the implementation.
 | document | lines | what it is for |
 |---|---|---|
 | [DETERMINISM.md](DETERMINISM.md) | 1,442 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 1,163 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 1,167 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
 | [SEQUENCER.md](SEQUENCER.md) | 2,172 | The orbit sequencer and the program model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 862 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |

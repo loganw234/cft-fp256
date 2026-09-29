@@ -76,9 +76,11 @@
  * cft_get_caps publishes these three for a software device and
  * cft_program_load holds it to exactly them, which is the invariant
  * host/tests/device_test.c checks: the caps a backend reports are the
- * caps it enforces. They are NOT the tile's - a tile holds 64 deposit
- * slots a lane, 1024 instructions - and they are deliberately not
- * narrowed to match one, because the software backend is the
+ * caps it enforces. They are NOT a tile's - a tile publishes its own
+ * in CAPS, 1,024 deposit slots a lane and 32,768 instructions on the
+ * U50's revision-7 images, 64 and 16,384 on the round-2 images and
+ * the open-core builds - and they are deliberately not narrowed to
+ * match one, because the software backend is the
  * CONTRACT rather than an implementation of it, and every recorded
  * workload chain (docs/REMOTE.md, bindings/wasm/demos_chains.json)
  * was produced through this accepted set. What used to be missing was
