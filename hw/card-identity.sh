@@ -32,15 +32,25 @@
 #      VERSION, and the raw CAPS words decoding to the handle's caps; and
 #      on an image with two tiles or more, the two refusals planted
 #      through CFT_XRT_CAPS, each by its own sentence, which this script
-#      counts - NOT TESTED, by name, on a single tile); the digest it
-#      prints equals `sha256sum` of the file - an implementation that is
-#      not libcft's - and the bytes `stat`; and, where rebuild-2022.sh
+#      counts - NOT TESTED, by name, on a single tile; five malformed
+#      CFT_XRT_CAPS values refused by name at open; and each planted
+#      handle decoding exactly as the unplanted one, both of which this
+#      script requires to be SHOWN, not only to have passed); the digest
+#      it prints equals `sha256sum` of the file - an implementation that
+#      is not libcft's - and the bytes `stat`; and, where rebuild-2022.sh
 #      left a manifest beside it, the manifest's sha256 line too.
-#   3. the negative controls, each required to FAIL by name:
+#   3. the negative controls, a to c each required to FAIL by name:
 #      a. device-test's digest check, planted: CFT_DEVICE_TEST_HASH_FILE
 #         makes it hash host/device-test in place of the image;
 #      b. this script's comparison, fed the digest of another file, and
-#         fed two empty strings.
+#         fed two empty strings;
+#      c. an identity refusal nobody asked for: CFT_XRT_CAPS=
+#         plant-unreadable set from OUTSIDE device-test imitates a CAPS
+#         read that failed at open, and its identity leg must fail it
+#         (on the first image with two tiles or more);
+#      and d, which must PASS by name: the same kind of refusal told to
+#      expect - CFT_XRT_CAPS=plant-differ from outside, with
+#      --expect-refusal mixed, as a genuinely mixed layout is run.
 #   4. with two images: two different digests, each its own file's.
 #   5. the open the digest changed still runs the matrix:
 #      `device-test <image> -q -n 8` exits 0.
@@ -129,6 +139,7 @@ esac
 
 # ---- 2. each image ---------------------------------------------------
 declare -A digest_of
+declare -A tiles_of
 n=0
 for img in "${imgs[@]}"; do
     n=$((n + 1))
@@ -157,6 +168,17 @@ for img in "${imgs[@]}"; do
     else
         bad "the planted refusals: ${tiles:-no} tiles, $refused refused by name, $untested NOT TESTED - wanted both refused on two tiles or more"
     fi
+    tiles_of[$img]=${tiles:-0}
+    # The instrument's own edges (2026-09-28, P2c): a malformed
+    # CFT_XRT_CAPS refused by name at open, and each planted handle
+    # decoding exactly as the unplanted one. device-test prints each line
+    # only when its checks held; the line's absence is a check not run.
+    grep -q '^  CFT_XRT_CAPS: all 5 malformed values refused by name at open' "$log" &&
+        ok "five malformed CFT_XRT_CAPS values refused by name at open" ||
+        bad "device-test did not show the five malformed CFT_XRT_CAPS values refused by name"
+    grep -q '^  the planted handles decode as the unplanted one' "$log" &&
+        ok "the planted handles decode as the unplanted one: formats, features, capacities, the seven groups" ||
+        bad "device-test did not show the planted handles decoding as the unplanted one"
     if same_digest "$got" "$want"; then
         ok "the library's digest is sha256sum's: $got"
     else
@@ -198,6 +220,38 @@ if ! same_digest "${digest_of[$img]}" "$other" && ! same_digest "" ""; then
     ok "control b: this script's comparison tells the image from host/device-test, and refuses two empty strings"
 else
     bad "control b: this script's comparison cannot fail"
+fi
+# c and d need an image with two tiles or more: the plant acts on tile 1.
+multi=
+for i in "${imgs[@]}"; do
+    [ "${tiles_of[$i]:-0}" -ge 2 ] && { multi=$i; break; }
+done
+if [ -n "$multi" ]; then
+    # c. A CAPS read failure at open that nobody asked for, imitated from
+    #    OUTSIDE device-test: its identity leg must FAIL it by name.
+    log="$LOGDIR/unexpected.log"
+    CFT_XRT_CAPS=plant-unreadable bash "$ROOT/hw/run-device-test.sh" "$multi" -i > "$log" 2>&1
+    rc=$?
+    sed 's/^/   | /' "$log"
+    if [ $rc -ne 0 ] && grep -q 'and nothing told this run to expect it' "$log"; then
+        ok "control c: a CAPS read failure nobody asked for (CFT_XRT_CAPS=plant-unreadable from outside) FAILED the identity leg by name (rc $rc)"
+    else
+        bad "control c: with CFT_XRT_CAPS=plant-unreadable set from outside, device-test exited $rc without failing the refusal by name - an unexpected refusal passes"
+    fi
+    # d. The same kind of refusal, EXPECTED: tiles that differ, planted
+    #    from outside, with --expect-refusal mixed, as a mixed layout
+    #    would be run. It must pass, by name.
+    log="$LOGDIR/expected.log"
+    CFT_XRT_CAPS=plant-differ bash "$ROOT/hw/run-device-test.sh" "$multi" -i --expect-refusal mixed > "$log" 2>&1
+    rc=$?
+    sed 's/^/   | /' "$log"
+    if [ $rc -eq 0 ] && grep -q 'as this run was told to expect (--expect-refusal mixed)' "$log"; then
+        ok "control d: the same refusal, expected (--expect-refusal mixed, CFT_XRT_CAPS=plant-differ from outside), passed by name"
+    else
+        bad "control d: an expected refusal did not pass by name (rc $rc)"
+    fi
+else
+    echo "   controls c and d: NOT RUN - no image given has two tiles or more"
 fi
 
 # ---- 4. two images ---------------------------------------------------

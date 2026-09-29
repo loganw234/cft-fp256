@@ -8101,6 +8101,28 @@ out:
     free(mask);
 }
 
+/* --expect-refusal: the identity refusal this run is TOLD to expect of
+ * the handle under test - "mixed" for an image whose tiles publish
+ * different CAPS words (a mixed layout, docs/LAYOUTS.md), "unreadable"
+ * for one with a tile whose CAPS cannot be read. Without it, either
+ * refusal FAILS the identity leg, in every mode: it is by design only for
+ * an image that IS so, and on any other it is a fault (a CAPS read that
+ * failed at open) or a defect (a comparison that refuses everything, a
+ * tile's words read from the wrong register). verifier-C3 showed all
+ * three passing a leg that accepted any such refusal (4d5d8e4, item 4).
+ * 0 none, 1 mixed, 2 unreadable. */
+static int expect_refusal;
+static const char *const refusal_kind[3] = {"none", "mixed", "unreadable"};
+
+/* The two plants' decoded caps and supports, kept by check_image_plants
+ * to be held to the unplanted handle under test once it is open. */
+#define PLANT_PROBES 2
+static cft_caps plant_caps[PLANT_PROBES];
+static unsigned char plant_supports[PLANT_PROBES][4][7];
+static int plant_opened[PLANT_PROBES];
+static const cft_op group_ops[7] = {CFT_FMA, CFT_ABS, CFT_MIN, CFT_CMPLT,
+                                    CFT_IADD, CFT_SUM, CFT_RECIP_SEED};
+
 /* A file's bytes, whole, or NULL with *len 0. */
 static unsigned char *read_whole(const char *path, size_t *len)
 {
@@ -8153,9 +8175,12 @@ static unsigned char *read_whole(const char *path, size_t *len)
  *             would not decode to this device.
  *   xrt, refused by design
  *             an image whose tiles publish different CAPS words, or one
- *             whose tile's words could not be read at open: the refusal
- *             by its own sentence and struct_size 0 is the correct
- *             answer, and the digest and words are NOT TESTED, by name
+ *             whose tile's words could not be read at open: correct ONLY
+ *             when the run was told to expect it (--expect-refusal
+ *             mixed|unreadable), and then held to its sentence and
+ *             struct_size 0, with the digest and words NOT TESTED, by
+ *             name. Unexpected, it FAILS, in every mode: on an image that
+ *             should have one identity it is a fault or a defect
  *   software  refused by name: CFT_ERR_UNSUPPORTED, "software backend",
  *             struct_size 0
  *   remote    refused by name: CFT_ERR_UNSUPPORTED, "remote handle"
@@ -8210,26 +8235,53 @@ static void check_image_identity(cft_device *dev, const char *artifact)
         return;
     }
 
-    /* An image the library refuses BY DESIGN - its tiles publish
-     * different CAPS words, or one tile's could not be read at open - is
-     * answered correctly by that refusal, so it is held to the refusal's
-     * form: CFT_ERR_UNSUPPORTED, a sentence naming which of the two,
-     * struct_size 0. The digest and the words are then NOT TESTED, by
-     * name, since there is none to hold to the file: that image has no
-     * single identity to give. (Until 2026-09-28 this leg FAILED such an
-     * image; verifier-C3 saw it on a mock of a mixed layout.) */
-    if (st == CFT_ERR_UNSUPPORTED &&
-        (strstr(msg, "publish different CAPS words") ||
-         strstr(msg, "could not be read at open"))) {
-        CHECK(im.struct_size == 0, "the image identity: refused by design, "
-              "but struct_size came back %lu, not 0",
-              (unsigned long)im.struct_size);
-        printf("  image identity (xrt): refused by name, as this image "
-               "must be - %s\n", msg);
-        not_here(NH_OTHER, "TESTED", "  the image's digest and CAPS words",
-                 "this image is refused by design, so there is no digest "
-                 "to hold to %s", artifact ? artifact : "the file");
-        return;
+    /* The two refusals an image earns by design - its tiles publish
+     * different CAPS words ("mixed"), or one tile's could not be read at
+     * open ("unreadable") - pass this leg ONLY when the run was told to
+     * expect that one, with --expect-refusal; device-test's own plants
+     * are held in check_image_plants, on handles of their own. Any other
+     * such refusal FAILS, in every mode, as it did at 082400d (4d5d8e4
+     * passed it, and verifier-C3 showed a real read failure, a
+     * comparison that refuses everything and a tile read from CAPS2 all
+     * going through). An expected refusal is held to its form - its
+     * sentence, struct_size 0 - and the digest and words are then NOT
+     * TESTED, by name: that image has no single identity to hold to the
+     * file. An expectation the identity does not meet fails as well. */
+    {
+        const int kind = st != CFT_ERR_UNSUPPORTED ? 0
+                       : strstr(msg, "publish different CAPS words") ? 1
+                       : strstr(msg, "could not be read at open") ? 2 : 0;
+        if (kind && kind == expect_refusal) {
+            CHECK(im.struct_size == 0, "the image identity: refused as "
+                  "expected (%s), but struct_size came back %lu, not 0",
+                  refusal_kind[kind], (unsigned long)im.struct_size);
+            printf("  image identity (xrt): refused by name, as this run was "
+                   "told to expect (--expect-refusal %s) - %s\n",
+                   refusal_kind[kind], msg);
+            not_here(NH_OTHER, "TESTED", "  the image's digest and CAPS words",
+                     "this image is refused by design (--expect-refusal %s), "
+                     "so there is no digest to hold to %s",
+                     refusal_kind[kind], artifact ? artifact : "the file");
+            return;
+        }
+        if (kind) {
+            CHECK(0, "the image identity: refused as %s, and nothing told this "
+                  "run to expect it - \"%s\". On an image that should have "
+                  "one identity that is a fault or a defect, not an answer; "
+                  "an image that IS %s is run with --expect-refusal %s",
+                  refusal_kind[kind], msg,
+                  kind == 1 ? "a mixed layout" : "unreadable on a tile",
+                  refusal_kind[kind]);
+            return;
+        }
+        if (expect_refusal) {
+            CHECK(0, "the image identity: this run was told to expect a "
+                  "refusal (--expect-refusal %s), and the image %s",
+                  refusal_kind[expect_refusal],
+                  st == CFT_OK ? "answered" : "was refused otherwise");
+            if (st != CFT_OK)
+                return;
+        }
     }
     CHECK(st == CFT_OK && im.struct_size == sizeof im,
           "the image identity on an xclbin: %s, struct_size %lu: %s",
@@ -8339,31 +8391,80 @@ static void check_image_identity(cft_device *dev, const char *artifact)
     }
 }
 
-/* The two refusals an image earns by design, PLANTED, so that each has a
- * gate that can fail (-i, an xclbin only): CFT_XRT_CAPS=plant-differ
- * gives tile 1 a CAPS word one bit off tile 0's, and plant-unreadable
- * makes tile 1's CAPS read throw at open (backend_xrt.cpp). Both act on
- * the backend's comparison's INPUT, so a backend that stopped comparing,
- * or that said "different words" for a read that failed, fails here.
- * Until 2026-09-28 both refusals were held by reading the code alone,
- * and removing the comparison passed every gate (verifier-C3).
+/* CFT_XRT_CAPS, device-test's instrument (backend_xrt.cpp), held from
+ * both sides under -i on an xclbin, BEFORE the handle under test exists -
+ * a second open would find its tiles held.
  *
- * Each probe opens the image with the plant set, BEFORE the handle under
- * test exists - a second open would find its tiles held - and requires
- * the refusal by its own sentence, struct_size 0, and not one byte
- * written past it (0xA5 fill). The planted handle computes exactly as an
- * unplanted one; only its identity changes. An image with one tile has
- * no tile 1 to plant in: NOT TESTED, by name. */
+ * 1. A malformed value is refused by name at open, before anything is
+ *    loaded: the five verifier-C3 found quietly ignored until 2026-09-28
+ *    (plant-diff, PLANT-DIFFER, a trailing space, 1, yes). An instrument
+ *    that read a typo as "no plant" would be a gate that could not fail.
+ * 2. The two refusals an image earns by design, PLANTED, so that each has
+ *    a gate that can fail: plant-differ gives tile 1 a CAPS word one bit
+ *    off tile 0's, and plant-unreadable makes tile 1's CAPS read throw.
+ *    Both act on the backend's comparison's INPUT, so a backend that
+ *    stopped comparing, or said "different words" for a read that
+ *    failed, fails here. Each must be refused by its own sentence, and
+ *    the sentence must name the plant: set by accident, a plant must not
+ *    tell anyone their image is mixed or their tile unreadable. Then
+ *    struct_size 0, and not one byte written past it (0xA5 fill). An
+ *    image with one tile has no tile 1 to plant in: NOT TESTED, by name.
+ * 3. Each planted handle's decoded caps and opcode groups are kept, and
+ *    held to the UNPLANTED handle under test once it is open
+ *    (check_plant_caps): a plant changes the identity and nothing the
+ *    library computes with. Until 2026-09-28 that was true of the code
+ *    and held by no gate - verifier-C3 showed a plant that also dropped
+ *    fp32 from the handle passing 17 of 17.
+ *
+ * A CFT_XRT_CAPS set from OUTSIDE device-test is put back after the
+ * probes, so that it reaches the handle under test. That is how a real
+ * CAPS read failure at open is imitated, and the identity leg must fail
+ * it unless the run was told to expect it (--expect-refusal). */
 static void check_image_plants(const char *artifact)
 {
+    static const char *const bad[] = {"plant-diff", "PLANT-DIFFER",
+                                      "plant-differ ", "1", "yes"};
     static const struct {
         const char *plant, *says;
-    } p[2] = {
+    } p[PLANT_PROBES] = {
         {"plant-differ", "publish different CAPS words"},
         {"plant-unreadable", "could not be read at open"},
     };
+    const char *outside_env = getenv("CFT_XRT_CAPS");
+    char outside[64] = "";
+    const int had_outside = outside_env != NULL;
+    const int failed_before = failures;
+    size_t j;
     int i;
-    for (i = 0; i < 2; i++) {
+
+    if (had_outside)
+        snprintf(outside, sizeof outside, "%s", outside_env);
+
+    for (j = 0; j < sizeof bad / sizeof bad[0]; j++) {
+        cft_device *dev = (cft_device *)(void *)0x1;
+        char want[64];
+        cft_status st;
+        const char *msg;
+        snprintf(want, sizeof want, "CFT_XRT_CAPS=\"%s\"", bad[j]);
+        put_env("CFT_XRT_CAPS", bad[j]);
+        st = cft_open(artifact, 0, &dev);
+        put_env("CFT_XRT_CAPS", NULL);
+        msg = cft_last_error();
+        CHECK(st == CFT_ERR_INVALID_ARGUMENT && dev == NULL &&
+              strstr(msg, want) != NULL,
+              "CFT_XRT_CAPS=\"%s\", a malformed value, must be refused by "
+              "name at open (CFT_ERR_INVALID_ARGUMENT, a sentence naming %s, "
+              "no handle); it gave %s and \"%s\"", bad[j], want,
+              cft_strerror(st), msg);
+        if (st == CFT_OK && dev)
+            cft_close(dev);
+    }
+    if (failures == failed_before)
+        printf("  CFT_XRT_CAPS: all %lu malformed values refused by name at "
+               "open, before anything was loaded\n",
+               (unsigned long)(sizeof bad / sizeof bad[0]));
+
+    for (i = 0; i < PLANT_PROBES; i++) {
         cft_device *dev = NULL;
         cft_caps caps;
         cft_image_id im;
@@ -8371,10 +8472,13 @@ static void check_image_plants(const char *artifact)
         size_t k, wrote = 0;
         cft_status st;
         const char *msg;
-        char what[96];
+        char what[96], named[64];
+        int f, g, ok;
 
+        plant_opened[i] = 0;
         snprintf(what, sizeof what, "  planted CFT_XRT_CAPS=%s",
                  p[i].plant);
+        snprintf(named, sizeof named, "CFT_XRT_CAPS=%s", p[i].plant);
         put_env("CFT_XRT_CAPS", p[i].plant);
         st = cft_open(artifact, 0, &dev);
         put_env("CFT_XRT_CAPS", NULL);
@@ -8385,7 +8489,21 @@ static void check_image_plants(const char *artifact)
         }
         memset(&caps, 0, sizeof caps);
         caps.struct_size = sizeof caps;
-        if (cft_get_caps(dev, &caps) != CFT_OK || caps.tiles < 2) {
+        if (cft_get_caps(dev, &caps) != CFT_OK) {
+            CHECK(0, "%s: cft_get_caps failed on the planted handle",
+                  what + 2);
+            cft_close(dev);
+            continue;
+        }
+        /* Kept for check_plant_caps whatever the tile count: a plant that
+         * reached tile 0's decode would show on one tile as well. */
+        plant_caps[i] = caps;
+        for (f = 0; f < 4; f++)
+            for (g = 0; g < 7; g++)
+                plant_supports[i][f][g] = (unsigned char)
+                    cft_supports(dev, group_ops[g], (cft_format)f);
+        plant_opened[i] = 1;
+        if (caps.tiles < 2) {
             not_here(NH_OTHER, "TESTED", what, "this image opens %u tile%s, "
                      "so there is no tile 1 to plant in",
                      (unsigned)caps.tiles, caps.tiles == 1 ? "" : "s");
@@ -8398,18 +8516,108 @@ static void check_image_plants(const char *artifact)
         msg = cft_last_error();
         for (k = offsetof(cft_image_id, sha256); k < sizeof im; k++)
             wrote += b[k] != 0xA5;
-        CHECK(st == CFT_ERR_UNSUPPORTED && strstr(msg, p[i].says) &&
-              im.struct_size == 0 && wrote == 0,
-              "%s: a tile planted this way must be refused by its own "
-              "sentence (\"%s\"), struct_size 0 and no field written; it "
-              "gave %s, struct_size %lu, %lu bytes of the answer's fields "
-              "written, and \"%s\"", what + 2, p[i].says, cft_strerror(st),
+        ok = st == CFT_ERR_UNSUPPORTED && strstr(msg, p[i].says) &&
+             strstr(msg, named) && im.struct_size == 0 && wrote == 0;
+        CHECK(ok, "%s: a tile planted this way must be refused by its own "
+              "sentence (\"%s\"), naming the plant (\"%s\"), with "
+              "struct_size 0 and no field written; it gave %s, struct_size "
+              "%lu, %lu bytes of the answer's fields written, and \"%s\"",
+              what + 2, p[i].says, named, cft_strerror(st),
               (unsigned long)im.struct_size, (unsigned long)wrote, msg);
-        if (st == CFT_ERR_UNSUPPORTED && strstr(msg, p[i].says) &&
-            im.struct_size == 0 && wrote == 0)
+        if (ok)
             printf("%s: refused by name - %s\n", what, msg);
         cft_close(dev);
     }
+
+    /* The outside value, back for the handle under test. */
+    put_env("CFT_XRT_CAPS", had_outside ? outside : NULL);
+}
+
+/* One field's difference, appended to `buf`: " <name> 0x<got> against
+ * 0x<want>;". Nothing when they are equal. */
+static void caps_diff(char *buf, size_t n, const char *name,
+                      unsigned long got, unsigned long want)
+{
+    size_t at = strlen(buf);
+    if (got != want && at + 1 < n)
+        snprintf(buf + at, n - at, " %s 0x%lx against 0x%lx;", name, got,
+                 want);
+}
+
+/* Each planted handle's decoded caps and opcode groups, held to the
+ * unplanted handle under test (check_image_plants says why): every
+ * cft_caps field, and cft_supports for one opcode of each of the seven
+ * groups at each of the four formats. */
+static void check_plant_caps(cft_device *hw)
+{
+    static const char *const fmt_name[4] = {"fp32", "fp64", "fp128",
+                                            "fp256"};
+    cft_caps c;
+    int i, f, g, compared = 0;
+    const int failed_before = failures;
+
+    memset(&c, 0, sizeof c);
+    c.struct_size = sizeof c;
+    if (cft_get_caps(hw, &c) != CFT_OK) {
+        CHECK(0, "the planted handles' decode: cft_get_caps failed on the "
+              "handle under test");
+        return;
+    }
+    for (i = 0; i < PLANT_PROBES; i++) {
+        const cft_caps *p = &plant_caps[i];
+        char diff[512] = "";
+        if (!plant_opened[i])
+            continue;
+        compared++;
+        caps_diff(diff, sizeof diff, "format_mask", p->format_mask,
+                  c.format_mask);
+        caps_diff(diff, sizeof diff, "tiles", p->tiles, c.tiles);
+        caps_diff(diff, sizeof diff, "device_version", p->device_version,
+                  c.device_version);
+        caps_diff(diff, sizeof diff, "flags_readable",
+                  (unsigned long)p->flags_readable,
+                  (unsigned long)c.flags_readable);
+        caps_diff(diff, sizeof diff, "max_deposits", p->max_deposits,
+                  c.max_deposits);
+        caps_diff(diff, sizeof diff, "max_insns", p->max_insns, c.max_insns);
+        caps_diff(diff, sizeof diff, "max_consts", p->max_consts,
+                  c.max_consts);
+        caps_diff(diff, sizeof diff, "seq_features", p->seq_features,
+                  c.seq_features);
+        caps_diff(diff, sizeof diff, "max_scratch", p->max_scratch,
+                  c.max_scratch);
+        caps_diff(diff, sizeof diff, "buffers_resident",
+                  (unsigned long)p->buffers_resident,
+                  (unsigned long)c.buffers_resident);
+        if (strcmp(p->backend, c.backend)) {
+            size_t at = strlen(diff);
+            snprintf(diff + at, sizeof diff - at, " backend %s against %s;",
+                     p->backend, c.backend);
+        }
+        for (f = 0; f < 4; f++)
+            for (g = 0; g < 7; g++) {
+                const int u = cft_supports(hw, group_ops[g], (cft_format)f);
+                if (plant_supports[i][f][g] != (unsigned char)u) {
+                    size_t at = strlen(diff);
+                    if (at + 1 < sizeof diff)
+                        snprintf(diff + at, sizeof diff - at,
+                                 " cft_supports(%s, %s) %d against %d;",
+                                 cft_op_name(group_ops[g]), fmt_name[f],
+                                 plant_supports[i][f][g], u);
+                }
+            }
+        CHECK(!diff[0], "planted CFT_XRT_CAPS=%s: that handle decodes "
+              "differently from the unplanted one -%s a plant must change "
+              "the identity and nothing the library computes with",
+              i == 0 ? "plant-differ" : "plant-unreadable", diff);
+    }
+    if (compared && failures == failed_before)
+        printf("  the planted handles decode as the unplanted one: formats "
+               "0x%x, seq_features 0x%x, capacities %u/%u/%u, max_scratch "
+               "%u, the seven groups at every format\n",
+               (unsigned)c.format_mask, (unsigned)c.seq_features,
+               (unsigned)c.max_deposits, (unsigned)c.max_insns,
+               (unsigned)c.max_consts, (unsigned)c.max_scratch);
 }
 
 int main(int argc, char **argv)
@@ -8449,6 +8657,18 @@ int main(int argc, char **argv)
             quick = 1;
         } else if (!strcmp(argv[argi], "-i")) {
             only_id = 1;
+        } else if (!strcmp(argv[argi], "--expect-refusal") &&
+                   argi + 1 < argc) {
+            const char *want = argv[++argi];
+            if (!strcmp(want, "mixed")) {
+                expect_refusal = 1;
+            } else if (!strcmp(want, "unreadable")) {
+                expect_refusal = 2;
+            } else {
+                fprintf(stderr, "--expect-refusal \"%s\": expected mixed or "
+                        "unreadable\n", want);
+                return 2;
+            }
         } else if (!strcmp(argv[argi], "-s")) {
             only_seq = 1;
         } else if (!strcmp(argv[argi], "-r")) {
@@ -8486,9 +8706,19 @@ int main(int argc, char **argv)
                     "      the software backend\n"
                     "  -i  the device image's identity only "
                     "(cft_get_image_id), which every\n"
-                    "      other mode checks too; on an xclbin, also its "
-                    "two refusals,\n"
-                    "      planted (CFT_XRT_CAPS)\n"
+                    "      other mode checks too; on an xclbin, also "
+                    "CFT_XRT_CAPS's five\n"
+                    "      malformed values refused, its two refusals "
+                    "planted, and each\n"
+                    "      planted handle's decode held to the unplanted "
+                    "one's\n"
+                    "  --expect-refusal mixed|unreadable\n"
+                    "      the identity refusal this image earns by "
+                    "design, for one that\n"
+                    "      genuinely has no single identity (a mixed "
+                    "layout); without it\n"
+                    "      that refusal FAILS the identity leg, in every "
+                    "mode\n"
                     "  --build-id  print the libcft build this binary "
                     "carries, and exit\n",
                     argv[0], argv[0]);
@@ -8498,7 +8728,15 @@ int main(int argc, char **argv)
     if (!artifact) {
         fprintf(stderr, "usage: %s <artifact.xclbin> [-n elements] "
                         "[-f fp32|fp64|fp128|fp256] [-q] [-r] [-s] [-b] "
-                        "[-i]\n", argv[0]);
+                        "[-i] [--expect-refusal mixed|unreadable]\n",
+                argv[0]);
+        return 2;
+    }
+    if (expect_refusal &&
+        (!strcmp(artifact, "sw") || !strncmp(artifact, "cft://", 6))) {
+        fprintf(stderr, "--expect-refusal is for an xclbin: the software "
+                "backend and a remote handle refuse the identity for what "
+                "they are, and every run already requires that\n");
         return 2;
     }
     argv[1] = (char *)artifact;
@@ -8674,6 +8912,9 @@ int main(int argc, char **argv)
      * nothing past the open - and -i runs nothing else. */
     check_image_identity(sw, NULL);
     check_image_identity(hw, strcmp(argv[1], "sw") ? argv[1] : NULL);
+    /* -i on an xclbin: the planted handles' decode, held to this one's. */
+    if (only_id && strcmp(argv[1], "sw") && strncmp(argv[1], "cft://", 6))
+        check_plant_caps(hw);
     fflush(stdout);
     if (only_id) {
         cft_close(hw);

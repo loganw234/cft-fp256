@@ -1722,6 +1722,28 @@ static int cftx_open_impl(const char *artifact, int index, void **out,
     *out = nullptr;
     g_err.clear();
 
+    /* CFT_XRT_CAPS, device-test's instrument for cft_get_image_id's two
+     * refusals, planted where the tiles' words are recorded (below). It
+     * is read HERE, before anything is opened or loaded, so that a
+     * malformed value is refused by name and at once, as the other
+     * instruments docs/CARDDAY.md lists refuse theirs. An instrument that
+     * read a typo as "no plant" would be a gate that could not fail, and
+     * until 2026-09-28 this one did: plant-diff, PLANT-DIFFER, a trailing
+     * space, 1 and yes were each quietly ignored (verifier-C3). Unset or
+     * empty is no plant. */
+    bool plant_differ = false, plant_unread = false;
+    if (const char *cp = std::getenv("CFT_XRT_CAPS")) {
+        if (!std::strcmp(cp, "plant-differ"))
+            plant_differ = true;
+        else if (!std::strcmp(cp, "plant-unreadable"))
+            plant_unread = true;
+        else if (*cp) {
+            set_err(std::string("CFT_XRT_CAPS=\"") + cp + "\": expected "
+                    "plant-differ or plant-unreadable; unset it for none");
+            return ST_INVALID_ARGUMENT;
+        }
+    }
+
     /* Opening the card and loading the bitstream fail for completely
      * different reasons and want completely different responses - "no
      * card visible" is a driver or a slot, "bad xclbin" is a build.
@@ -2127,17 +2149,16 @@ static int cftx_open_impl(const char *artifact, int index, void **out,
      * CFT_XRT_WITNESS, so that both refusals have a gate that can fail on
      * an image with more than one tile: "plant-differ" takes tile 1's
      * CAPS with bit 0 flipped, and "plant-unreadable" makes its read
-     * throw. Only this record sees the planted word - everything the
-     * library DOES is decoded from tile 0's, above and below - so a
-     * planted handle computes exactly as an unplanted one, and only
-     * cft_get_image_id changes, from an answer to a refusal. The plant
-     * acts on the comparison's input, not on its verdict, so the
-     * comparison itself is what the gate holds. */
-    const char *const plant_env = std::getenv("CFT_XRT_CAPS");
-    const bool plant_differ =
-        plant_env && !std::strcmp(plant_env, "plant-differ");
-    const bool plant_unread =
-        plant_env && !std::strcmp(plant_env, "plant-unreadable");
+     * throw (the value was checked at the top of this function). Only
+     * this record sees the planted word - everything the library DOES is
+     * decoded from tile 0's, above and below - so a planted handle
+     * computes exactly as an unplanted one, and only cft_get_image_id
+     * changes, from an answer to a refusal; device-test holds a planted
+     * handle's decoded caps equal to an unplanted one's. The plant acts on
+     * the comparison's input, not on its verdict, so the comparison
+     * itself is what the gate holds. Each refusal's sentence names the
+     * plant when it made the difference, so one set by accident cannot
+     * tell anyone their image is mixed or their tile unreadable. */
     D->n_caps        = ver >= SCRATCH_VERSION ? 2u : 1u;
     D->caps_words[0] = caps;
     D->caps_words[1] = D->n_caps > 1 ? caps2 : 0u;
@@ -2158,7 +2179,8 @@ static int cftx_open_impl(const char *artifact, int index, void **out,
                               "0's are not reported as the image's";
             break;
         }
-        if (plant_differ && tt == 1)
+        const bool planted = plant_differ && tt == 1;
+        if (planted)
             c ^= 0x1u;
         if (c != D->caps_words[0] || c2 != D->caps_words[1]) {
             const auto words = [&](uint32_t w, uint32_t w2) {
@@ -2169,8 +2191,12 @@ static int cftx_open_impl(const char *artifact, int index, void **out,
             D->caps_refusal = "cft_get_image_id: the tiles of this image "
                               "publish different CAPS words, so no one set "
                               "of them names it - " + tile_name(*D, tt) +
-                              " publishes " + words(c, c2) + " and " +
-                              tile_name(*D, 0) + " " +
+                              " publishes " + words(c, c2) +
+                              (planted ? std::string(" (planted by "
+                                         "CFT_XRT_CAPS=plant-differ: its "
+                                         "real word with bit 0 flipped)")
+                                       : std::string()) +
+                              " and " + tile_name(*D, 0) + " " +
                               words(D->caps_words[0], D->caps_words[1]) +
                               ". A mixed layout (docs/LAYOUTS.md) needs a "
                               "word pair per tile, which this call does not "
