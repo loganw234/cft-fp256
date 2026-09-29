@@ -1137,6 +1137,73 @@ def corrupt_rev8(insns, rng):
     return out, what
 
 
+def rev8_refusal_words():
+    """Every revision-8 refusal, once, as (label, word): an LDX loading
+    into its own stepped index at four steps and three registers; each bit
+    of imm[23:12] on a stepped STX and a stepped LDX; and on augadd and
+    augerr each field they do not read - rc, rc's high bit, each rnd, each
+    k flag, kx, each bit of imm[23:0] and of imm[31:27] - and three codes
+    that stay unknown. corrupt_rev8 above DRAWS from the same kinds, which
+    reaches each one only by luck at a small trial count; this reaches each
+    one every run (a C plant that accepted imm[23:12] on LDX went uncaught
+    by the draw at 120 programs, 2026-09-29)."""
+    words = []
+    for r in (0, 5, 31):
+        for step in (1, -1, seq.STEP_MAX, seq.STEP_MIN):
+            words.append((f"ldx r{r}, r{r}, {step:+d}", seq.encode(
+                seq.LDX, rd=r, rb=r, ctrl=True, imm=step & seq.STEP_MASK)))
+    for op, fields in ((seq.STX, dict(ra=1, rb=2)),
+                       (seq.LDX, dict(rd=1, rb=2))):
+        for b in range(12, 24):
+            words.append((f"{seq.CTRL_NAMES[op]} imm[{b}]", seq.encode(
+                op, ctrl=True, imm=(1 << b) | 1, **fields)))
+    for op in (seq.AUGADD, seq.AUGERR):
+        base = dict(rd=1, ra=2, rb=3, ctrl=True)
+        extra = [("rc", dict(rc=4)), ("rc hi", dict(rc=16)),
+                 ("ka", dict(ka=True)), ("kb", dict(kb=True)),
+                 ("kc", dict(kc=True)), ("kx", dict(kx=True))]
+        extra += [(f"rnd {r}", dict(rnd=r)) for r in range(1, 5)]
+        extra += [(f"imm[{b}]", dict(imm=1 << b))
+                  for b in list(range(24)) + [27, 28, 29, 30, 31]]
+        for label, f in extra:
+            words.append((f"{seq.CTRL_NAMES[op]} {label}",
+                          seq.encode(op, **{**base, **f})))
+    for code in (12, 13, 255):
+        words.append((f"control code {code}", seq.encode(code, ctrl=True)))
+    return words
+
+
+def rev8_directed_refusals(lib, dev, fmt, name, R):
+    """rev8_refusal_words(), each in a program of its own: the model must
+    refuse it and libcft must refuse it too."""
+    for label, word in rev8_refusal_words():
+        insns = [word, seq.halt()]
+        try:
+            seq.Program(fmt, insns, max_deposits=0)
+            print(f"  MISMATCH {name} (revision-8 refusals, {label}): the "
+                  f"model ACCEPTS a word this corpus lists as refused")
+            R["bad"] += 1
+            continue
+        except seq.ProgramError:
+            pass
+        bogus = seq.Program.__new__(seq.Program)
+        bogus.fmt, bogus.insns, bogus.consts = fmt, insns, []
+        bogus.max_deposits, bogus.flags = 0, 0
+        bogus.n_scratch_in = bogus.n_scratch_out = 0
+        bogus._n_consts = 0
+        image = bogus.to_bytes()
+        handle = ctypes.c_void_p()
+        rc = lib.cft_program_load(dev, image, len(image),
+                                  ctypes.byref(handle))
+        if rc == CFT_OK:
+            lib.cft_program_free(handle)
+            print(f"  MISMATCH {name} (revision-8 refusals, {label}): the "
+                  f"model refuses this word and libcft loads it")
+            R["bad"] += 1
+        else:
+            R["directed"] += 1
+
+
 def rev8_corpus(lib, dev, fmt, name, args, R):
     """The sixth corpus, for one format. Mutates the counters in R.
 
@@ -1153,6 +1220,7 @@ def rev8_corpus(lib, dev, fmt, name, args, R):
       scratch block near the depth's edge and near zero, stepped by
       loads and stores in a loop - so a strict program crosses the depth
       (and reports) and a -1 walk wraps at the register's width."""
+    rev8_directed_refusals(lib, dev, fmt, name, R)
     rng = random.Random(args.seed ^ (fmt.width * 7919) ^ 0x8E7D)
     checked = 0
     stress = vectors.augmented_pairs(fmt, 0)
@@ -1469,7 +1537,8 @@ def main():
     # ...and the sixth's (revision 8, proposed 2026-09-29).
     R = dict(total=0, refused=0, bad=0, blocked=0, augadd=0, augerr=0,
              pair=0, ldx_step=0, stx_step=0, walks=0, strict=0, range=0,
-             inv=0, ovf=0, unf=0, remote_refused=0, remote_loaded=0)
+             inv=0, ovf=0, unf=0, remote_refused=0, remote_loaded=0,
+             directed=0)
     try:
         for name in args.formats:
             fmt = FORMATS[name]
@@ -1613,12 +1682,13 @@ def main():
           f"{R['stx_step']} stepped STX, {R['walks']} directed walks, "
           f"{R['strict']} strict of which {R['range']} reported an "
           f"out-of-range index; runs raising invalid {R['inv']}, overflow "
-          f"{R['ovf']}, underflow {R['unf']}")
+          f"{R['ovf']}, underflow {R['unf']}; {R['directed']} directed "
+          f"refusals refused by both")
     bad += S["bad"] + X["bad"] + M["bad"] + R["bad"]
     if R["total"] and not all(R[k] for k in (
             "refused", "blocked", "augadd", "augerr", "pair", "ldx_step",
             "stx_step", "walks", "strict", "range", "inv", "ovf", "unf",
-            "remote_refused", "remote_loaded")):
+            "remote_refused", "remote_loaded", "directed")):
         print("THE REVISION-8 CORPUS DID NOT REACH EVERY FORM - a counter "
               "above is zero, so a form, a flag class, the strict report "
               "or the remote refusal went uncompared")
