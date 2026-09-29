@@ -37,6 +37,52 @@ def programs():
     yield "iand r0 only, 1 deposit", [iand, seq.deposit(3), seq.halt()], 1
 
 
+# ---- revision 7, R18: what a control code costs -----------------------
+#
+# Twenty control codes a program, the shapes the card's probes and the
+# ODE census price (docs/SEQUENCER.md R12, "What that wait costs";
+# docs/VALIDATION.md, steps 0 and 1a), beside the twenty-IAND row above
+# as the arithmetic reference. Every row ends in one deposit so that
+# the drain is the same small constant in each. The streams are 1.0 in
+# every lane, so r0 and r1 are non-zero (SETACT keeps every lane) and
+# an indexed slot is the low bits of 1.0's pattern (slot 0).
+
+def control_programs():
+    iand = seq.alu(sf.OP_IAND, 3, 0, 0)
+    yield ("iand x 20 (the reference)",
+           [iand] * 20 + [seq.deposit(3), seq.halt()], 1)
+    yield ("stl x 20, independent",
+           [seq.stl(0, k) for k in range(20)]
+           + [seq.deposit(0), seq.halt()], 1)
+    yield ("ldl x 20, independent",
+           [seq.ldl(3 + k, k) for k in range(20)]
+           + [seq.deposit(22), seq.halt()], 1)
+    pair = []
+    for k in range(10):
+        pair += [seq.stl(3, k), seq.ldl(3, k)]
+    yield ("stl/ldl x 10, one register", pair + [seq.deposit(3), seq.halt()], 1)
+    pair = []
+    for k in range(10):
+        pair += [seq.stx(0, 1), seq.ldx(3 + k, 1)]
+    yield ("stx/ldx x 10", pair + [seq.deposit(12), seq.halt()], 1)
+    yield ("setact x 20", [seq.setact(0)] * 20
+           + [seq.deposit(0), seq.halt()], 1)
+    pair = []
+    for k in range(10):
+        pair += [iand, seq.setact(1)]
+    yield ("iand, setact (not dependent) x 10",
+           pair + [seq.deposit(3), seq.halt()], 1)
+    pair = []
+    for k in range(10):
+        pair += [seq.alu(sf.OP_IAND, 3 + k, 0, 0), seq.stl(3 + k, k)]
+    yield ("iand, stl of it x 10", pair + [seq.deposit(3), seq.halt()], 1)
+    pair = []
+    for k in range(10):
+        pair += [seq.ldl(3 + k, k), seq.alu(sf.OP_IAND, 13 + k, 3 + k, 3 + k)]
+    yield ("ldl, iand of it x 10", pair + [seq.deposit(13), seq.halt()], 1)
+    yield ("deposit x 16", [seq.deposit(0)] * 16 + [seq.halt()], 16)
+
+
 @cocotb.test()
 async def cycles_per_block(dut):
     b = Bench(dut)
@@ -49,6 +95,34 @@ async def cycles_per_block(dut):
         pool = [one] * n
         dut._log.info(f"== {fmt.name}: {n} lanes = {blocks} blocks of {lpb}")
         for label, insns, maxdep in programs():
+            prog = seq.Program(fmt, insns, consts=(), max_deposits=maxdep)
+            esz = fmt.width // 8
+            b._stage(fmt, prog.to_bytes(), pool, pool, pool, n,
+                     n * maxdep * esz, 4 * n)
+            b._drive_cfg(fmt, n)
+            t0 = get_sim_time("ns")
+            refused, flags, err = await b._go(4_000_000, label)
+            cyc = (get_sim_time("ns") - t0) / CLK_NS
+            assert refused == 0 and err == 0, (label, refused, err)
+            dut._log.info(f"  {label:<34} {cyc:9.0f} cycles  "
+                          f"{cyc / blocks:8.1f} /block  {cyc / n:6.2f} /lane")
+
+
+@cocotb.test()
+async def control_codes_per_block(dut):
+    """R18's before- and after-side: the rows above, for the control
+    codes. Four blocks at each of fp32, fp64 and fp128; the answers are
+    not compared here (test_seq_core.py does that), only the cost."""
+    b = Bench(dut)
+    await b.start()
+    for fmt in (FP32, FP64, FP128):
+        lpb = lanes_per_block(fmt)
+        blocks = 4
+        n = lpb * blocks
+        one = sf.one_bits(fmt)
+        pool = [one] * n
+        dut._log.info(f"== R18 {fmt.name}: {n} lanes = {blocks} blocks of {lpb}")
+        for label, insns, maxdep in control_programs():
             prog = seq.Program(fmt, insns, consts=(), max_deposits=maxdep)
             esz = fmt.width // 8
             b._stage(fmt, prog.to_bytes(), pool, pool, pool, n,
@@ -234,3 +308,69 @@ async def block_setup_dense_against_masked(dut):
             f"masked {mc:7.0f} cyc ({mc / blocks:6.1f}/block, {mr:3d} "
             f"reads)   {(mc - dc) / blocks:+6.1f} cycles and "
             f"{(mr - dr) / blocks:+4.1f} reads a block")
+
+
+# ---- revision 7, R19: a beat with no active lane -----------------------
+#
+# The R17 rows above mask every other lane, so every beat keeps a live
+# lane and no beat can ever be skipped: they are R19's before-side only
+# for "all masked". These masks kill WHOLE BEATS - the low half of every
+# block, all but one lane of every block, every lane - on a program
+# with twenty instructions to skip (twenty IANDs and a deposit), and on
+# a program of control codes (twenty stores and a deposit). What is
+# printed is the cost; the answers are test_seq_core.py's.
+
+def _mask_bits(n, lpb, pattern):
+    raw = bytearray((n + 7) // 8)
+    for i in range(n):
+        j = i % lpb
+        keep = {"dense": True,
+                "every other lane": (j % 2) == 0,
+                "low half of each block masked": j >= lpb // 2,
+                "one lane a block": j == lpb - 1,
+                "all masked": False}[pattern]
+        if keep:
+            raw[i >> 3] |= 1 << (i & 7)
+    return bytes(raw)
+
+
+@cocotb.test()
+async def masked_beats_against_dense(dut):
+    b = Bench(dut)
+    await b.start()
+    iand = seq.alu(sf.OP_IAND, 3, 0, 0)
+    progs = (("iand x 20, 1 deposit",
+              [iand] * 20 + [seq.deposit(3), seq.halt()]),
+             ("stl x 20, 1 deposit",
+              [seq.stl(0, k) for k in range(20)]
+              + [seq.deposit(0), seq.halt()]))
+    pats = ("dense", "every other lane", "low half of each block masked",
+            "one lane a block", "all masked")
+    dut._log.info("== R19: whole beats masked (four blocks)")
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb = lanes_per_block(fmt)
+        blocks = 4
+        n = lpb * blocks
+        pool = [sf.one_bits(fmt)] * n
+        esz = fmt.width // 8
+        for plabel, insns in progs:
+            prog = seq.Program(fmt, insns, consts=(), max_deposits=1)
+            row = []
+            for pat in pats:
+                b._stage(fmt, prog.to_bytes(), pool, pool, pool, n,
+                         n * esz, 4 * n)
+                masked = pat != "dense"
+                if masked:
+                    raw = _mask_bits(n, lpb, pat)
+                    pad = -len(raw) % BEAT_BYTES
+                    b.ram.stage(MASK_BASE, raw + bytes([POISON]) * pad)
+                b._drive_cfg(fmt, n, lane_mask=masked)
+                t0 = get_sim_time("ns")
+                refused, _flags, err = await b._go(8_000_000, pat)
+                assert refused == 0 and err == 0, (pat, refused, err)
+                row.append(((get_sim_time("ns") - t0) / CLK_NS,
+                            b.ram.ar_count))
+            dut._log.info(
+                f"  {fmt.name:<6} {plabel:<22} " + "  ".join(
+                    f"{p}: {c:6.0f} cyc {r:3d} rd"
+                    for p, (c, r) in zip(pats, row)))
