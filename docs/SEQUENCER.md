@@ -1912,3 +1912,369 @@ guard, the two CAPS2 bits at zero, the struct fields and the feature
 bits in `cft.h`, the model's signature, and a refusal by name on every
 backend for every new field. The parcels replace the refusals; the
 lead's seam tests hold the two together once both exist.
+
+
+## Revision 8 (proposed, 2026-09-29): an exact-residual add, a stepped index, and per-lane flags designed
+
+Three of the side project's asks (docs/ROADMAP.md, "What a side
+project asks of step 4's revision", asks 3, 4 and 5), defined
+golden-first beside revision 7 and counted for what they are worth.
+Revision 7's tile has none of them in its RTL, and nothing here changes
+what a program that runs today computes: each new form takes an
+encoding every loader refuses today, and each sits behind a capability
+bit of its own, refused BY NAME wherever it is not built.
+`python/cft_golden/seq.py` is the definition, `host/src/program.c`
+computes it on the software backend and `host/tests/seq_check.py` holds
+the two together; a tile carries it only once an RTL revision builds it.
+
+Each choice below took the first rung of Logan's rule (2026-09-29) that
+had an answer - "adhere to IEEE 754 when an option, RISC V approaches if
+nothing is in IEEE 754, and if neither state a way to handle it,
+whatever approach aligns best with the current systems" - and says
+which rung it was.
+
+This section is the CONTRACT for R21 and R22 and the DESIGN for R23.
+R20 is left to revision 7's third item, the program limits, should it
+take a number.
+
+### R21. `augadd` and `augerr`: 754-2019's augmentedAddition, one result an instruction
+
+*Control codes 10 and 11. Feature bit CAPS2[11] = `cft_caps.seq_features`
+bit 15 = `CFT_SEQ_FEAT_AUGADD 0x8000u`. Assembler `augadd rD, rA, rB`
+and `augerr rD, rA, rB`.*
+
+| code | name | effect |
+|---|---|---|
+| 10 | `AUGADD rd, ra, rb` | `rd := r`, augmentedAddition(ra, rb)'s first result |
+| 11 | `AUGERR rd, ra, rb` | `rd := e`, its second |
+
+**The operation: rung 1, IEEE 754-2019 clause 9.5.** augmentedAddition(x,
+y) is the pair r = roundTiesTowardZero(x + y) and e = x + y - r, with 9.5's
+own rules for specials, signs of zero and exceptions. This library has
+computed it on the host since the 0.6 step (`cft_augmented_add`), and
+`python/cft_golden/augmented.py` is its definition: `seq.py` calls that
+module's `augmented_add` and keeps one half, and `program.c` calls
+`host/src/augmented.c`'s own lane function - one definition, reused, not
+a second copy. So the tie rule is 9.5's, which none of the tile's five
+attributes has: 1 + 1.5 ulp gives r = 1 + ulp, where ADD gives 1 + 2 ulp.
+
+**Two instructions, one result each: rung 2.** 754 defines the pair and
+not how an instruction set delivers it. RISC-V's answer for an operation
+with two results is two single-destination instructions in a recommended
+order an implementation may fuse ("M" extension v2.0, 11.1.2):
+"DIV[U] rdq, rs1, rs2; REM[U] rdr, rs1, rs2" where "rdq cannot be the
+same as rs1 or rs2", and "Microarchitectures can then fuse these into a
+single divide operation" - MULH and MUL likewise, 11.1.1. DIV and REM
+have this operation's shape: a rounded result and its exact remainder.
+The recommended sequence here is
+
+    augerr rE, rA, rB
+    augadd rS, rA, rB          ; rE is neither rA nor rB
+
+so the sum may overwrite its own operand: `augadd rA, rA, rB` is a
+compensated step's x := x + y with the error already beside it, and no
+temporary. Any order is legal and computes by the definition; the
+recommended one is what a tile may fuse, and a fused pair must equal the
+unfused pair bit for bit. It is also what this machine has (rung 3): one
+register-file write port and one destination a queue entry (R12 to R15),
+so an instruction with two destinations would retire in the write cycles
+of two and save one instruction word.
+
+**Control codes, not two ALU opcodes.** An unassigned ALU opcode is a
+LEGAL program today with a defined answer - the canonical quiet NaN and
+invalid, in a program and through `cft_run` alike (`host/include/cft.h`
+names "15, and 32 upward") - and taking two would change those answers.
+An unknown control code is refused by every loader, so codes 10 and 11
+change nothing that runs, which is also RISC-V's practice: an extension
+claims encodings that were illegal. They are arithmetic all the same,
+and that is the one way they differ from the other control codes: they
+compute and they raise flags, and a tile should compute them in the
+array (below).
+
+**Fields.** `ra` and `rb` are read and `rd` is written, five bits each
+(imm[24], imm[25] and imm[26] their high bits). Every other field is
+unread and must be zero, by the rule that has settled every field since
+revision 2: `rc` and imm[27], imm[23:0], imm[31:28], `rnd` - 9.5 fixes the
+rounding, so no attribute can be spelled (rung 1) - and `ka`, `kb`, `kc`
+and `kx`, because no control code reads the bank (rung 3). A constant is
+moved into a register once.
+
+**Flags: rung 1.** Each of the two raises exactly the flags
+augmentedAddition(ra, rb) raises under 9.5's default handling:
+- invalid, for a signaling NaN operand or inf + (-inf), both halves then
+  the canonical quiet NaN;
+- overflow and inexact, when roundTiesTowardZero(x + y) overflows, both
+  halves then that infinity;
+- underflow WITHOUT inexact, when e is non-zero and below 2^emin in
+  magnitude - the combination nothing else in this contract produces
+  (docs/DETERMINISM.md's tininess section records the exception);
+- nothing else: a rounded r raises no inexact.
+
+FLAGS is the run's sticky OR, so the recommended pair raises exactly what
+one augmentedAddition raises, fused or not.
+
+**Every format the tile runs** - fp32, fp64, fp128 and fp256 - with the
+one definition in the program's format. The residual is representable in
+all four, which augmented.py proves and asserts; the C twin bounds its
+alignment at 2p + 1 bits, 475 at fp256.
+
+**A lane mask, and every inactive lane: nothing new.** A lane R17 masks,
+a padding lane and a lane SETACT dropped run no instruction, so they write
+no `rd` and raise no flag - P3's rule, which
+`python/tests/test_seq_rev8.py` holds with a signaling NaN in each.
+
+**What a tile would need** (revision 8's RTL: believed, not built). Both
+codes go through the issue pipe into the array as an ALU instruction
+does - one array pass and one register write each, under R13 to R15's
+hazards and forwarding - rather than through the control path, and R10's
+stream-need parse names their `ra` and `rb`. In the lanes, the adder's
+rounding gains ties-toward-zero (a nearest mode whose tie goes down: round
+up on guard AND sticky), and a second output selects e, the exact sum
+less the rounded one; in the far case e is the smaller operand unchanged.
+Every tile built so far reads CAPS2[11] as zero and would decode code 10
+as HALT (`rtl/cft_seq.sv`'s `default` arm), so the loader refuses both
+codes there by name, naming the instruction.
+
+### R22. A post-step on `STX` and `LDX`
+
+*imm[11:0] of STX (8) and LDX (9), a signed twelve-bit step. Feature bit
+CAPS2[12] = `cft_caps.seq_features` bit 16 =
+`CFT_SEQ_FEAT_SCRATCH_STEP 0x10000u`. Assembler `stx rA, rB, STEP` and
+`ldx rD, rB, STEP`.*
+
+| form | effect |
+|---|---|
+| `STX ra, rb, step` | `scratch[rb] := ra`, then `rb := rb + step` |
+| `LDX rd, rb, step` | `rd := scratch[rb]`, then `rb := rb + step` |
+
+`scratch[rb]` is R4's and R8's: rb's bit pattern reduced modulo the depth,
+or reported under SCRATCH_STRICT.
+
+**The encoding: bits no program may set today.** imm[23:0] of the indexed
+pair has been read by nothing since revision 3 and must be zero, so every
+STX and LDX a loader accepts has imm[11:0] = 0 - and a zero step is the
+instruction exactly as it was, the same bytes and the same meaning.
+imm[23:12] stays read by nothing. The assembler writes a step back only
+when it is not zero, so an image from before this revision disassembles
+as it did.
+
+**Post, by a sign-extended twelve-bit immediate: rung 2.** 754 has nothing
+to say about addresses, and ratified RISC-V has no auto-stepping address
+either. The RISC-V ecosystem's is exactly this shape - OpenHW's CORE-V
+XCVmem, the CV32E40P's post-incrementing loads and stores: "rD =
+Mem32(rs1) rs1 += Sext(Imm[11:0])", the store likewise - and twelve bits
+is RISC-V's I-type immediate. So the access uses the index as it stood, a
+store stores `ra` as it stood (the index itself, when `ra` is `rb`), and
+then the index steps.
+
+**Width and wrap: rung 3.** rb := (rb + step) modulo 2^W, W the format's
+width: IADD's arithmetic on the encoding, which the software backend
+computes with its own IADD, or ISUB by the magnitude - the same residue.
+So the index register after any number of steps is a function of the
+program alone, the same on a tile of any depth. A decrement past 0 gives
+2^W - 1: without SCRATCH_STRICT the next access reduces it modulo the
+depth, a ring; with it, the next access is suppressed and reports
+STATUS[5]. A step is a register write, masked by the active bit as every
+write is (P3): a masked, padding or dropped lane neither accesses nor
+steps.
+
+**Under SCRATCH_STRICT (R8)** the access is judged on the index as it
+stood, exactly as today, and the step is never suppressed: R8 suppresses
+an access and the step is not one. A strict run and a non-strict run
+therefore leave `rb` the same and differ only in the accesses STATUS[5]
+reports, which keeps R8's promise that a strict run reporting nothing
+computes the same at every depth. A step that walks past the depth
+reports nothing by itself; the first access past it does.
+
+**`LDX rd, rb, step` with `rd` = `rb` and a non-zero step is refused at
+load.** Both writes would land in one register, and CORE-V says which
+wins: "When same register is used as address and destination (rD == rs1)
+for post-incremented loads, loaded data has highest priority over
+incremented address" (rung 2). The step would select nothing - a second
+spelling of the unstepped LDX - and a field that selects nothing is
+refused, as `kx` with no constant operand is (rung 3). A step of zero, and
+STX with `ra` = `rb`, stay legal.
+
+**What a tile would need** (believed, not built). A stepped STX writes one
+register, rb, and a stepped LDX two, rd and then rb; the register file has
+one write port. In today's scratch states the port is idle in the cycle
+the index is on the bus (`S_SCR_AD`), so a step could ride it there. Under
+R18, where a load retires through the array's queue (P1's rule), the step
+is a second producer and needs a write cycle a beat unless revision 8
+gives it another path - which is what decides this item's worth, below.
+Every tile built so far reads CAPS2[12] as zero and never reads imm on the
+indexed pair, so it would access without stepping; the loader refuses a
+non-zero step there by name.
+
+### What each is worth, counted
+
+`python/rev8_worth.py` writes the kernels the asks are for, each with and
+without the new instructions, runs them through the model, holds every
+variant bit for bit to a direct computation of the same arithmetic in the
+same order and its instruction counts to `seq.run`'s own, and prices them
+in the census's terms (docs/VALIDATION.md, 2026-09-25): an arithmetic
+instruction 1, a scratch access s - 5.21 at fp64 and 5.08 at fp256 on the
+card today, which R18 changes and P1 measures - a loop iteration's
+ENDREP e, 1.78 at fp64 and 0.41 at fp256, and a post-step p. The census
+cannot price p, because no tile has one: 0 if the step's write rides an
+idle port cycle, 1 if it needs its own.
+
+**A Taylor coefficient as a Cauchy product.** Every c_n = sum over j of
+a_j b_(n-j), n = 0..N, the two series in the scratch, one lane, three
+forms: looped with today's LDX and an IADD and an ISUB a term; looped
+with the post-step; and unrolled with static LDL slots, which is today's
+ISA too. REPEAT takes an immediate trip count, so both loops unroll the
+outer n and loop over j. All three compute the same bits. Prices to the
+unit:
+
+| N (terms) | form | words | ALU | SCR | steps | loops | fp64, p = 0 | fp64, p = 1 | fp256, p = 0 | fp256, p = 1 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 30 (496) | looped | 342 | 1,581 | 1,023 | 0 | 496 | 7,796 | 7,796 | 6,980 | 6,980 |
+| | stepped | 280 | 589 | 1,023 | 992 | 496 | 6,804 | 7,796 | 5,988 | 6,980 |
+| | unrolled | 1,551 | 527 | 1,023 | 0 | 0 | 5,857 | 5,857 | 5,724 | 5,724 |
+| 64 (2,145) | looped | 716 | 6,630 | 4,355 | 0 | 2,145 | 33,148 | 33,148 | 29,629 | 29,629 |
+| | stepped | 586 | 2,340 | 4,355 | 4,290 | 2,145 | 28,858 | 33,148 | 25,339 | 29,629 |
+| | unrolled | 6,566 | 2,210 | 4,355 | 0 | 0 | 24,900 | 24,900 | 24,333 | 24,333 |
+
+Per term: looped 3 + 2s + e, stepped 1 + 2s + e + 2p, unrolled 1 + 2s.
+What that says, and no more:
+- The step saves exactly the two integer adds a term, 2 ALU - 12.7 to
+  12.9% of a looped term at fp64 and 14.2 to 14.5% at fp256 at today's
+  s - when its write is free (p = 0), and nothing when it takes a write
+  cycle of its own (p = 1), which is where one register-file write port
+  puts it under R18 unless revision 8 gives it another path.
+- The unrolled form is the cheapest in time, because it has no loop:
+  5,857 against the looped 7,796 and the stepped 6,804 at fp64, N = 30.
+  It pays in words - O(N^2): 1,551 at N = 30 and 6,566 at N = 64 for one
+  product, where the stepped loop takes 280 and 586.
+- So what the step buys is a looped product at 2 ALU a term less than
+  today's loop, in O(N) words. That is worth having where a program's
+  unrolled products do not fit the instruction memory (16,384 words, or
+  32,768 after revision 7's limits): three order-64 products take 19,698
+  words unrolled.
+- The ask's "about 3 slots" a term - two loads and an FMA - is the count;
+  the time is 1 + 2s + e + 2p. Under R18 as P1 posted it before building
+  (the round's ledger), an LDX leaves two bubbles behind it and an LDL
+  none, which favours the unrolled static form further; P1's measurement
+  says by how much.
+
+**A compensated step.** K steps of x := x + h*f(x) with each addition's
+rounding error carried into the next, on f(x) = x, so that the increment
+is one FMA and the rest is compensation. The state lives in registers:
+
+| form | words | instructions a step | unrolled by two | the error is exact |
+|---|---|---|---|---|
+| Fast2Sum (Kahan) | 10 | 5 | 4 | only when x's exponent is at least y's |
+| TwoSum (Knuth) | 13 | 8 | 7 | always |
+| `augerr` + `augadd` | 8 | 3 | 3 | always |
+
+Each step also costs a loop iteration, e. The first two pay a copy (an
+IOR) to keep x in one register in a REPEAT body, or unroll by two to
+rename it; the pair works in place. So a compensated step is 3
+instructions against the always-exact TwoSum's 7 or 8 - 57 to 62% fewer -
+and against Fast2Sum's 4 or 5 - 25 to 40% fewer - without Fast2Sum's
+precondition. None of it touches the scratch, so R18 does not move these
+figures. The ask's "2 instructions instead of 4" counted one instruction
+delivering both halves; on this tile that is two register writes a beat
+either way (R21), so the pair's 3 is what a step costs. The three forms
+do not compute the same bits - roundTiesTowardZero and roundTiesToEven
+part at ties, and Fast2Sum is exact only under its precondition - so a
+program ported from an RNE TwoSum changes its bits at ties, and each form
+is held to its own reference.
+
+What the counts leave out: that the FMA chain is dependent (R13 to R15
+price a dependent link at about LATENCY + 1 cycles on a single-pass
+tile, which the census's average a does not see); the load-then-use
+stall, which the census's s already folds in for its own pattern; the
+loop setup and the stores of results, which are the same across a
+kernel's forms; and anything a tile adds to build either item.
+
+### R23. Per-lane sticky flags (design only, not built)
+
+*Nothing here is built, in the model or anywhere else. It changes how a
+run reports, so it is written down before any code.*
+
+**The ask** (docs/ROADMAP.md, ask 5): invalid and overflow delivered with
+each lane's outputs, so that a design sweep can drop the one variant that
+diverged instead of rerunning the batch. Today FLAGS is the OR over the
+whole run and over every tile that ran it, so a sweep learns that some
+lane raised invalid and not which.
+
+**Which rung.** 754's clause 7 defines what raises each of the five
+status flags, and nothing here would change that; what the ask changes is
+how many sets of flags a run keeps. RISC-V keeps one: its vector
+floating-point instructions OR every active element's exceptions into
+the one `fflags` word - "Inactive elements do not set FP exception flags"
+(the "V" extension) - which is exactly FLAGS here. Neither has a flag
+word per element, so the shape is rung 3's: the machine's existing
+per-lane output, the counts.
+
+**Which flags.** A byte a lane:
+
+| bit | meaning |
+|---|---|
+| [4:0] | the five IEEE flags, in FLAGS's order, as this lane raised them |
+| [5] | this lane's deposit overflowed (the lane's share of STATUS[4]) |
+| [6] | this lane's indexed access fell past the depth under SCRATCH_STRICT (STATUS[5]) |
+| [7] | reserved, zero |
+
+The ask names two flags; the other three and the two per-lane STATUS
+conditions cost nothing more in the byte, and they keep two identities
+every backend can check: the OR of every lane's [4:0] IS the run's
+FLAGS, and the OR of every lane's [6:5] IS STATUS[5:4]. Sticky, as FLAGS
+is: raised by the first operation that raises it, never lowered within a
+run.
+
+**Delivered how.** An output block beside the counts, n bytes, lane i's
+at byte i, asked for per run:
+- the host: one field appended to `cft_run_args` (`lane_flags`, n bytes,
+  NULL for none), an ABI step; the remote protocol's PROG_RUN_EX carries
+  the block back; the model's `Result` gains `lane_flags`;
+- a tile: a pointer register and kernel argument beside `cnt`'s, a MODE
+  bit that asks for the block (a run that does not ask writes nothing and
+  costs nothing), and a CAPS2 bit that says it is honoured - CAPS2[13],
+  under the rule every bit above MODE[15] has kept since R17;
+- not packed into the counts' top byte, which is free today (a count is
+  at most 2^20): the counts' values are the ABI, and every caller reading
+  them would change.
+
+**What a masked lane reads.** R17's rule for every output: a masked
+lane's byte is NOT written - the caller keeps what it put there, as for
+its count and its scratch-out. A padding lane is not the caller's and has
+no byte. A lane SETACT dropped IS the caller's: its byte is written, with
+what it raised while it was active - and, if ACTALL revives it, with what
+it raises after, as FLAGS would be. A lane's byte is a function of its
+own inputs and the program alone, so a run split across tiles places
+each tile's block at its lanes' offsets, as the counts are placed, and
+needs no merge (P2). A
+run split into segments (`cft-segrun`) yields a block a segment; a
+sweep's "did this variant ever raise invalid" is the OR over its
+segments, which is the caller's.
+
+**What it costs** (believed, from the RTL's shape; not synthesised):
+- flops: seven a lane of a block, 7 x 128 = 896 at fp32's 128 lanes. The
+  retire path already holds each lane's flags (`lane_flags`) before
+  `wb_flags_or` reduces them under the active row (R17), so the change
+  is a register a lane where there is one OR today;
+- the drain: one more stream after the counts, 32 lanes a beat, so at
+  most four beats a block where the counts take sixteen;
+- the host: a byte array in the software executor's block, the protocol
+  field, and device-test legs holding both identities.
+
+**What it changes, which is why it is designed before it is built.** A
+run's report grows from one FLAGS word to a byte a lane. A certificate
+(docs/CERTIFICATES.md) records FLAGS; a run that asked for the block has
+an output its certificate must cover, as it covers the counts, or name as
+absent. And "OR over lanes = FLAGS" becomes a check the audit can make.
+
+**What a program can do without it.** Deposit a health value a lane -
+the state itself, checked on the host for a NaN or an infinity. That
+catches an invalid or an overflow whose NaN or infinity survives to the
+output; it misses one a MIN, a MAXNUM or a SELECT dropped on the way, and
+it cannot see underflow or inexact at all. How much of the difference a
+sweep needs is the side project's to measure.
+
+**Not proposed:** lowering a lane's flags within a run (754 lowers a
+flag only at the user's request, and a lane has no way to make one), and
+a per-element block for the elementwise `cft_run`, which the ask does not
+reach.
