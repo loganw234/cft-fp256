@@ -1454,3 +1454,109 @@ async def krnl_lane_mask(dut):
     dut._log.info("lane mask through the CSR: masked == model, all-ones "
                   "== dense, holed != dense, and a masked lane's flag "
                   "does not reach the run after it")
+
+
+# ---- revision 7, R18: the real programs ---------------------------------
+#
+# The three ODE segment programs programs/gen_odes.py writes, assembled
+# from their committed sources and run with their committed banks,
+# through the kernel - here and not in the unit bench because Lorenz-96
+# is 1,500 instructions and the unit bench's cft_seq holds 1,024. They
+# are the census's programs (docs/VALIDATION.md, steps 0 and 1a): a
+# Lorenz-96 step is 760 ALU instructions and 692 scratch accesses, the
+# pattern R18 exists for - a store of what the instruction before it
+# computed, a load used by the instruction after it. The segment's trip
+# count is cut (the loop body is the program's own) so that a run
+# finishes in seconds, and each run is TIMED, start to done, so the same
+# case is the before-side on an older tile and the after-side on this
+# one.
+
+PROGRAMS = Path(__file__).resolve().parents[1] / "programs"
+
+
+def _ode_case(name, steps):
+    """(Program with its segment cut to `steps` trips, bank values)."""
+    from cft_golden import asm
+    img = asm.assemble_image((PROGRAMS / f"{name}.cfta").read_text(),
+                             f"{name}.cfta")
+    prog = seq.Program.from_bytes(img.to_bytes())
+    for i, w in enumerate(prog.insns):
+        d = seq.decode(w)
+        if d["ctrl"] and d["op"] == seq.REPEAT:
+            prog.insns[i] = seq.repeat(steps)
+            break
+    else:
+        raise AssertionError(f"{name}: no segment loop to cut")
+    raw = (PROGRAMS / f"{name}.classic.bank").read_bytes()
+    e = prog.fmt.width // 8
+    bank = [int.from_bytes(raw[i:i + e], "little")
+            for i in range(0, len(raw), e)]
+    return prog, bank
+
+
+def _ode_start(name, fmt, n, nstate):
+    """A small ensemble near each system's usual start, every member
+    displaced by an exact dyadic amount: lane-major, nstate a lane."""
+    from cft_golden import chars, RND_RNE
+
+    def d(text):
+        return chars.from_decimal(fmt, text, RND_RNE)[0]
+    out = []
+    for i in range(n):
+        if name.startswith("lorenz63"):
+            out += [d(repr(1 + i / 64)), d("1"), d("1")]
+        elif name.startswith("lorenz96"):
+            out += [d(repr(8 + (i + 1) / 1024))] + [d("8")] * (nstate - 1)
+        else:
+            out += [d("0"), d(repr(0.1 + i / 1024)), d("0.5"), d("0")]
+    assert len(out) == n * nstate
+    return out
+
+
+@cocotb.test()
+async def krnl_ode_programs(dut):
+    """The ODE programs against the model through the whole kernel, at a
+    full block and a short ragged one, fp64 and fp256; each timed."""
+    from cocotb.utils import get_sim_time
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n,
+                         reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n,
+                       reset_active_level=False, size=2 ** 21)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"), dut.ap_clk,
+                dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+                mem=ram_a.mem)
+    ram = ram_a
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+
+    for name, steps, ns in (
+            ("lorenz63-rk4-fp64", 10, (64, 5)),
+            ("henonheiles-lf-fp64", 10, (64, 5)),
+            ("lorenz96-rk4-fp64", 2, (64, 5)),
+            ("lorenz63-rk4-fp256", 4, (16, 3)),
+            ("henonheiles-lf-fp256", 4, (16, 3)),
+            ("lorenz96-rk4-fp256", 1, (16, 3))):
+        prog, bank = _ode_case(name, steps)
+        fmt = prog.fmt
+        for n in ns:
+            s_in = _ode_start(name, fmt, n, prog.n_scratch_in)
+            zeros = [0] * n
+            t0 = get_sim_time("ns")
+            res = await run_prog(dut, axil, ram, prog, zeros, zeros, zeros,
+                                 f"{name} x{steps} n={n}", bank=bank,
+                                 scratch_in=s_in, tries=200000)
+            cyc = (get_sim_time("ns") - t0) / 4
+            assert res.scratch_out != s_in, f"{name}: the state did not move"
+            dut._log.info(f"{name} x{steps} steps, n={n}: about {cyc:.0f} "
+                          f"cycles start to done (the CSR writes included)")

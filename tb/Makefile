@@ -587,7 +587,14 @@ faults:
 # pointed at it. Without this line the failure mode is a job that runs
 # until someone notices; with it, it is a failure. Raise
 # SEQ_TIMEOUT for a deliberately long run.
-SEQ_TIMEOUT ?= 2400
+#
+# It catches a hang; it is not a budget. 4,800 s since 2026-09-29, about
+# twice what seq_core took under Icarus on revision 7's check tree just
+# before P1's send-back added its holds and cases: 1,923 s for 48 cases
+# (run 20260929-080541-9ff114e, its results.xml), against the 2,400 this
+# line said until then. Measure it again when the suite grows, and keep
+# this at about twice the measurement.
+SEQ_TIMEOUT ?= 4800
 
 seq_core:
 	timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \

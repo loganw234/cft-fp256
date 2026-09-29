@@ -563,10 +563,15 @@ class Bench:
         dut = self.dut
         await RisingEdge(dut.ap_clk)
         dut.start.value = 1
+        # Cycles from the start pulse to `done`, kept for the cases that
+        # hold a cost (revision 7's hold bench): the same count
+        # probe_seq_cycles.py prints, taken the same way.
+        t_start = get_sim_time("ns")
         await RisingEdge(dut.ap_clk)
         dut.start.value = 0
         try:
             await with_timeout(RisingEdge(dut.done), budget * CLK_NS, "ns")
+            self.last_cycles = (get_sim_time("ns") - t_start) / CLK_NS
         except Exception as exc:                     # SimTimeoutError
             if type(exc).__name__ != "SimTimeoutError":
                 raise
@@ -3694,6 +3699,1491 @@ async def the_pipe_at_every_block_length(dut):
                                 operands(fmt, n, 1300 + n),
                                 operands(fmt, n, 1400 + n), n,
                                 f"{name} the pipe at n={n}")
+
+
+# ======================================================================
+# 10d. revision 7, R18: the control codes in the pipe, at every block
+#      length, with every hazard shape the change creates
+# ======================================================================
+#
+# Until R18 every control code that read the file, moved the mask or
+# ended the block waited for the queue of results to EMPTY and then
+# walked the block's beats in states of its own. Now DEPOSIT, SETACT and
+# the four scratch codes go through the issue pipe one beat a cycle and
+# wait, a beat at a time, only for a queued producer of what they read;
+# the loads ride the array (IOR(v, v)) and take a queue slot, so they
+# are producers themselves; the active row is taken when a beat FIRES
+# rather than when its result retires; and ACTALL, and what ends the
+# block, wait for the pipe rather than for nothing or the queue. The
+# rules are docs/SEQUENCER.md's R18. Every case below runs against the
+# model's one-instruction-at-a-time executor, which is the definition.
+
+def _r18_index_stream(fmt, n, seed):
+    """Integers as bit patterns, a third of them in range: what an
+    indexed code reads as rb. The rest are past the depth by whole
+    multiples of it, so the modulo lands them on the same slots the
+    in-range lanes use, and SCRATCH_STRICT suppresses them."""
+    rng = random.Random(seed)
+    return [_int_bits(fmt, rng.randrange(8) + SCRATCH_D * (i % 3))
+            for i in range(n)]
+
+
+def _ctl_program(fmt, strict=False):
+    """Every hazard shape R18 creates, in one program.
+
+    (1) a control code reading a destination still in flight (a deposit
+    and a store of the ADD before them, both forwarded at F), and one
+    reading nothing queued; (2) a store then a load of the same slot at
+    once - which a short block makes the store's write and the load's
+    read adjacent - then the loaded register used at once; (3) a load
+    into a register a queued FMA writes, and the other order; (4) a
+    store reading a register the instruction behind it overwrites;
+    (5) the indexed forms with a COMPUTED index, a store then an indexed
+    load of the same slot, two LDXs back to back, an instruction that
+    does NOT depend on an LDX straight after one (the only shape the
+    LDX gap is for), an LDL straight after an LDX (one scratch read
+    port), a static store and load straight after an LDX, and an index
+    that is a LOADED value;
+    (6) a loop whose body loads, computes, stores and narrows the mask;
+    (7) the mask moving while an FMA's results are still in the array,
+    and SETACT reading a loaded register; then ACTALL, the FMA's
+    destination deposited for every lane - a lane the SETACT dropped
+    shows whether its result was written under the row it FIRED with -
+    and nothing after it that could raise a flag, so a ragged block
+    reads the same whether or not ACTALL wakes the padding (the bench's
+    precondition).
+    """
+    A, M, F = sf.OP_ADD, sf.OP_MUL, sf.OP_FMA
+    IADD, CMPLT = sf.OP_IADD, sf.OP_CMPLT
+    insns = [
+        # (1)
+        seq.alu(A, 3, 0, rc=1),              # r3 = a + b
+        seq.deposit(3),                      # r3 in flight
+        seq.stl(3, 0),                       # slot 0 := r3, in flight
+        seq.deposit(1),                      # nothing queued writes r1
+        # (2)
+        seq.ldl(4, 0),                       # r4 = slot 0, just stored
+        seq.alu(M, 5, 4, 1),                 # r5 = r4 * b: reads the load
+        seq.deposit(5),
+        # (3)
+        seq.alu(F, 6, 0, 1, 3),              # r6 = a*b + r3, in flight...
+        seq.ldl(6, 0),                       # ...when the load writes r6
+        seq.deposit(6),                      # the load's value, not the FMA's
+        seq.ldl(7, 0),
+        seq.alu(A, 7, 0, rc=2),              # r7 = a + c, after the load
+        seq.deposit(7),
+        # (4)
+        seq.alu(A, 8, 1, rc=0),              # r8 = b + a
+        seq.stl(8, 1),                       # slot 1 := r8 (waits on the ADD)
+        seq.alu(M, 8, 0, 0),                 # r8 = a * a, after the store read
+        seq.ldl(9, 1),                       # r9 = slot 1 = the OLD r8
+        seq.deposit(9),
+        # (5)
+        seq.alu(IADD, 10, 2, 0, kb=True),    # r10 = c + 5, an integer
+        seq.stx(3, 10),                      # scratch[r10] := r3
+        seq.ldx(11, 10),                     # r11 = scratch[r10], the same slot
+        seq.deposit(11),                     # an LDX's result, at once
+        seq.ldx(12, 2),                      # two LDXs back to back
+        seq.ldx(13, 10),
+        seq.alu(A, 24, 0, rc=1),             # INDEPENDENT of them: the gap
+        seq.ldx(25, 2),
+        seq.ldl(26, 1),                      # an LDL straight after an LDX:
+                                             # one scratch read port
+        seq.deposit(24),
+        seq.deposit(26),
+        seq.stl(12, 2),                      # a store straight after them
+        seq.ldl(14, 2),                      # and a load straight after it
+        seq.alu(A, 15, 13, rc=14),           # r15 = r13 + r14
+        seq.deposit(15),
+        seq.ldx(16, 11),                     # an index that was LOADED
+        seq.deposit(16),
+        # (6)
+        seq.repeat(3),
+        seq.ldl(21, 4),
+        seq.alu(F, 21, 21, 0, 1),            # r21 = r21 * a + b
+        seq.stl(21, 4),
+        seq.alu(CMPLT, 22, 21, 0),           # r22 = r21 < a
+        seq.setact(22),                      # lanes drop out
+        seq.endrep(),
+        # (7)
+        seq.alu(CMPLT, 17, 0, 1),            # r17 = a < b
+        seq.alu(F, 18, 0, 1, 3),             # r18 = a*b + r3, in flight...
+        seq.setact(17),                      # ...when the mask narrows
+        seq.alu(A, 19, 18, rc=0),            # r19 = r18 + a, narrowed
+        seq.deposit(18),
+        seq.deposit(19),
+        seq.stl(19, 3),                      # a store under the narrowed mask
+        seq.setact(4),                       # SETACT reading a LOADED register
+        seq.ldl(20, 3),
+        seq.deposit(20),
+        seq.actall(),
+        seq.deposit(18),                     # a dropped lane's FMA result:
+                                             # written under the row it FIRED
+                                             # with, before the SETACT
+        seq.deposit(19),                     # a dropped lane's r19: +0
+        seq.deposit(20),
+        seq.ldl(23, 4),
+        seq.deposit(23),
+        seq.halt(),
+    ]
+    flags = seq.FLAG_SCRATCH_IO
+    if strict:
+        flags |= seq.FLAG_SCRATCH_STRICT
+    return seq.Program(fmt, insns, consts=[_int_bits(fmt, 5),
+                                           sf.one_bits(fmt)],
+                       max_deposits=19, flags=flags,
+                       n_scratch_in=0, n_scratch_out=6)
+
+
+@cocotb.test()
+async def control_codes_at_every_block_length(dut):
+    """R18 against the model at every block length a run can have.
+
+    The same block lengths the_pipe_at_every_block_length uses, because
+    the same mechanisms change shape with them: a one-beat block puts a
+    store's write and the next load's read in adjacent steps (the
+    store-then-load wait), a two-beat block has an LDX's value still in
+    G or H when the next instruction's first beat comes up (the LDX
+    gap), five beats fill the queue, and sixteen never hold. Each run
+    twice: the modulo, and SCRATCH_STRICT with two lanes in three
+    indexing past the depth, whose loads fire +0 and whose stores do
+    not land.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for name, ns in (("fp32", (8, 9, 16, 24, 40, 72, 128, 136, 150)),
+                     ("fp64", (4, 5, 8, 20, 64, 66)),
+                     ("fp128", (2, 3, 10, 32, 33))):
+        fmt = FORMATS[name]
+        for strict in (False, True):
+            prog = _ctl_program(fmt, strict)
+            for n in ns:
+                await bench.program(
+                    fmt, prog, operands(fmt, n, 1700 + n),
+                    operands(fmt, n, 1800 + n),
+                    _r18_index_stream(fmt, n, 1900 + n), n,
+                    f"{name} control codes, {'strict' if strict else 'modulo'},"
+                    f" n={n}")
+    dut._log.info(f"R18 hazard shapes: {bench.cases['program']} runs")
+
+
+@cocotb.test()
+async def mask_moves_while_results_are_in_flight(dut):
+    """The smallest program that says WHEN the active bit is sampled.
+
+    An FMA over every lane, then a SETACT that drops half of them while
+    the FMA's results are still in the array, then ACTALL, then the FMA's
+    destination deposited. The model runs one instruction at a time, so
+    every lane was active when the FMA ran and every lane's r3 is the
+    FMA's result. A retire that masked by the mask as it stands when a
+    result COMES BACK - which is what the RTL did until R18, when no
+    code could move the mask before the queue had emptied - would leave
+    the dropped lanes' r3 at +0, and the deposit shows it. At sixteen
+    beats the FMA's beat b lands one cycle after the SETACT's beat b
+    has narrowed its row; at one beat, many cycles after.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for name, ns in (("fp32", (8, 16, 40, 128, 150)),
+                     ("fp64", (4, 20, 64)),
+                     ("fp128", (2, 10, 32))):
+        fmt = FORMATS[name]
+        zero, one = sf.zero_bits(fmt), sf.one_bits(fmt)
+        prog = seq.Program(fmt, [
+            seq.alu(sf.OP_FMA, 3, 0, 1, 2),     # every lane, in flight...
+            seq.setact(1),                      # ...when half drop out
+            seq.alu(sf.OP_ADD, 4, 3, rc=0),     # r4 = r3 + a, the survivors
+            seq.actall(),
+            seq.deposit(3),                     # every lane's FMA result
+            seq.deposit(4),                     # the dropped lanes' +0
+            seq.halt()], max_deposits=2)
+        for n in ns:
+            half = [one if (i % 2) == 0 else zero for i in range(n)]
+            await bench.program(fmt, prog, dense(fmt, n, 2000 + n), half,
+                                dense(fmt, n, 2100 + n), n,
+                                f"{name} FMA in flight under a SETACT, n={n}")
+
+
+def _halt_program(fmt):
+    """HALT with an FMA's results still in the array and a store and a
+    deposit just ahead of them: the FMA's FLAGS, the store's slot (the
+    scratch-out block) and the deposit must all be there - the end of
+    the block waits for the queue AND the pipe."""
+    return seq.Program(fmt, [
+        seq.alu(sf.OP_FMA, 3, 0, 1, 2),
+        seq.stl(3, 0),
+        seq.alu(sf.OP_MUL, 4, 3, 0),
+        seq.deposit(4),
+        seq.stl(4, 1),
+        seq.alu(sf.OP_FMA, 5, 0, 1, 2),
+        seq.halt()], max_deposits=1,
+        flags=seq.FLAG_SCRATCH_IO, n_scratch_in=0, n_scratch_out=2)
+
+
+@cocotb.test()
+async def halt_right_after_arithmetic(dut):
+    """HALT (and, in the second program, the implicit halt) straight
+    after arithmetic, a store and a deposit, at every block length."""
+    bench = Bench(dut)
+    await bench.start()
+    for name, ns in (("fp32", (8, 9, 24, 128, 136)),
+                     ("fp64", (4, 5, 64, 66)),
+                     ("fp128", (2, 3, 32, 33))):
+        fmt = FORMATS[name]
+        explicit = _halt_program(fmt)
+        implicit = seq.Program(fmt, explicit.insns[:-1], max_deposits=1,
+                               flags=seq.FLAG_SCRATCH_IO, n_scratch_in=0,
+                               n_scratch_out=2)
+        for prog, how in ((explicit, "HALT"), (implicit, "the implicit halt")):
+            for n in ns:
+                await bench.program(fmt, prog, operands(fmt, n, 2200 + n),
+                                    operands(fmt, n, 2300 + n),
+                                    operands(fmt, n, 2400 + n), n,
+                                    f"{name} {how} after arithmetic, n={n}")
+
+
+def _r18_random_program(fmt, rng):
+    """A program that is mostly control codes, over FOUR registers and
+    FOUR slots, so nearly every instruction depends on one a step or two
+    before it: the densest hazard traffic the pipe can be given. Loops,
+    SETACT inside them, and an ACTALL at the top level now and then."""
+    regs = (3, 4, 5, 6)
+    slots = (0, 1, 2, 3)
+    arith = (sf.OP_ADD, sf.OP_MUL, sf.OP_FMA, sf.OP_IAND, sf.OP_IXOR,
+             sf.OP_CMPLT, sf.OP_SELECT, sf.OP_MIN)
+    body, depth, deposits = [], 0, 0
+
+    def one():
+        nonlocal deposits
+        r = rng.random()
+        rd = rng.choice(regs)
+        ra, rb, rc = (rng.choice(regs + (0, 1, 2)) for _ in range(3))
+        if r < 0.25:
+            op = rng.choice(arith)
+            return seq.alu(op, rd, ra, rb, rc)
+        if r < 0.40:
+            return seq.stl(ra, rng.choice(slots))
+        if r < 0.55:
+            return seq.ldl(rd, rng.choice(slots))
+        if r < 0.63:
+            return seq.stx(ra, rng.choice((2, 10)))
+        if r < 0.71:
+            return seq.ldx(rd, rng.choice((2, 10)))
+        if r < 0.80 and deposits < 12:
+            deposits += 1
+            return seq.deposit(ra)
+        if r < 0.86:
+            return seq.setact(rng.choice((0, 1, 2) + regs))
+        return seq.alu(sf.OP_IADD, 10, 2, rng.choice(regs))
+
+    for _ in range(rng.randrange(18, 34)):
+        if depth == 0 and rng.random() < 0.08:
+            body.append(seq.repeat(rng.randrange(2, 4)))
+            depth += 1
+            continue
+        if depth and rng.random() < 0.12:
+            body.append(seq.endrep())
+            depth -= 1
+            continue
+        if depth == 0 and rng.random() < 0.05:
+            body.append(seq.actall())
+            continue
+        body.append(one())
+    while depth:
+        body.append(seq.endrep())
+        depth -= 1
+    if rng.random() < 0.5:
+        body.append(seq.halt())
+    strict = rng.random() < 0.5
+    flags = seq.FLAG_SCRATCH_IO | (seq.FLAG_SCRATCH_STRICT if strict else 0)
+    return seq.Program(fmt, body, max_deposits=12, flags=flags,
+                       n_scratch_in=0, n_scratch_out=4)
+
+
+@cocotb.test()
+async def control_code_fuzz_at_short_blocks(dut):
+    """Programs that are mostly control codes, over four registers and
+    four slots, at one, two, three and sixteen beats and across a block
+    boundary - the block lengths where the pipe's holds bind. Every run
+    against the model, whole machine: deposits, counts, the scratch-out
+    block, FLAGS and STATUS. ACTALL can read a ragged block two ways
+    (the module docstring), so a program that has one runs block-
+    aligned."""
+    bench = Bench(dut)
+    await bench.start()
+    rng = random.Random(20260929)
+    runs = 0
+    for name, ns in (("fp32", (8, 16, 24, 128, 136)),
+                     ("fp64", (4, 8, 12, 64, 68)),
+                     ("fp128", (2, 4, 6, 32, 34))):
+        fmt = FORMATS[name]
+        for n in ns:
+            for _ in range(3):
+                while True:
+                    try:
+                        prog = _r18_random_program(fmt, rng)
+                    except seq.ProgramError:
+                        continue           # a shape the loader refuses
+                    break
+                m = n
+                if has_actall(prog.insns):
+                    lpb = lanes_per_block(fmt)
+                    m = -(-n // lpb) * lpb
+                await bench.program(fmt, prog,
+                                    operands(fmt, m, rng.randrange(1 << 20)),
+                                    operands(fmt, m, rng.randrange(1 << 20)),
+                                    _r18_index_stream(fmt, m,
+                                                      rng.randrange(1 << 20)),
+                                    m, f"{name} R18 fuzz n={m} #{runs}")
+                runs += 1
+    dut._log.info(f"R18 control-code fuzz: {runs} programs")
+
+
+def _hold_programs(fmt):
+    """The two control-code-heavy programs R18's cost is held on."""
+    F = sf.OP_FMA
+    indep = []
+    for k in range(8):
+        indep += [seq.stl(0, k), seq.ldl(3 + k, 8 + k), seq.setact(1)]
+    indep += [seq.deposit(10), seq.halt()]
+    chain = []
+    for k in range(8):
+        chain += [seq.ldl(3 + k, k), seq.alu(F, 11 + k, 3 + k, 0, 1),
+                  seq.stl(11 + k, 8 + k)]
+    chain += [seq.deposit(18), seq.halt()]
+    return (("24 control codes, independent", indep),
+            ("8 x (load, FMA of it, store of that)", chain))
+
+
+# Cycles a block at fp32, four blocks of 128 lanes, through this bench's
+# harness (the unit bench's model RAM answers at once). BEFORE is
+# f681dee's tile, where every one of these codes waited for the queue to
+# empty and walked the block at three cycles a beat, five for a load;
+# AFTER is revision 7's. The ceiling sits between the two: a change that
+# took the control codes back out of the pipe lands above it, and one
+# that only moves a cycle or two does not. Measured under Verilator
+# (2026-09-29), cycles a block:
+#
+#   24 control codes, independent    before 2011.2   after 898.2 (898.2 at MC=10)
+#   8 x (load, FMA of it, store)     before 1891.2   after 920.2 (960.2 at MC=10)
+HOLD_CEILING = {
+    "24 control codes, independent": 1400,
+    "8 x (load, FMA of it, store of that)": 1400,
+}
+
+
+@cocotb.test()
+async def control_codes_hold_their_overlap(dut):
+    """R18's gain, HELD: two control-code-heavy programs must cost less
+    a block than the ceiling that sits between the before- and the
+    after-side, and must answer exactly what the model says.
+
+    The first program is twenty-four control codes with no dependence
+    between them (a store, a load and a SETACT, eight times over); the
+    second is the pattern the ODE census priced - a load, an FMA of what
+    it loaded, a store of what the FMA made, eight times over - where
+    every code waits on the one before it. fp32 is single-pass at every
+    MUL_PASSES, so the ceiling holds on the multi-pass tile too; there
+    the dependent program pays R14's rule instead of forwarding, which
+    is still well under it. The measured numbers are in
+    docs/SEQUENCER.md's revision-7 section.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    n = 4 * lanes_per_block(fmt)
+    # Every program measured before any is judged, so a red run still
+    # prints every number.
+    cost = {}
+    for label, insns in _hold_programs(fmt):
+        prog = seq.Program(fmt, insns, max_deposits=1)
+        await bench.program(fmt, prog, operands(fmt, n, 2500),
+                            operands(fmt, n, 2501), operands(fmt, n, 2502),
+                            n, f"hold: {label}")
+        cost[label] = bench.last_cycles / 4
+        dut._log.info(f"hold: {label}: {cost[label]:.1f} cycles a block "
+                      f"(ceiling {HOLD_CEILING[label]})")
+    for label, per_block in cost.items():
+        assert per_block < HOLD_CEILING[label], (
+            f"hold: {label} costs {per_block:.1f} cycles a block, at or above "
+            f"the ceiling of {HOLD_CEILING[label]} - the control codes have "
+            f"left the issue pipe (docs/SEQUENCER.md, revision 7, R18)")
+
+
+def _every_bit_pattern(fmt, n, seed):
+    """The encodings a pass-through could get wrong, then random bits:
+    both zeros, both infinities, quiet and signalling NaNs of both signs
+    with payloads (the smallest, the largest, random), the smallest and
+    largest subnormal and random ones of both signs, the smallest
+    normal, the largest finite of both signs."""
+    rng = random.Random(seed)
+    w, mw = fmt.width, fmt.man_w
+    top = 1 << (w - 1)
+    inf = sf.inf_bits(fmt, 0)
+    quiet = 1 << (mw - 1)
+    pool = [sf.zero_bits(fmt, 0), sf.zero_bits(fmt, 1),
+            inf, inf | top,
+            inf | quiet, inf | quiet | top,              # canonical quiet NaNs
+            inf | quiet | 1, inf | fmt.man_mask | top,   # quiet, payloads
+            inf | 1, inf | 1 | top,                      # signalling, smallest
+            inf | (quiet - 1), inf | (quiet - 1) | top,  # signalling, largest
+            sf.min_subnormal_bits(fmt), sf.min_subnormal_bits(fmt) | top,
+            fmt.man_mask, fmt.man_mask | top,            # largest subnormal
+            sf.min_normal_bits(fmt), sf.max_normal_bits(fmt),
+            sf.max_normal_bits(fmt) | top]
+    for _ in range(4):
+        pool.append(inf | quiet | rng.getrandbits(mw - 1) | (top * rng.getrandbits(1)))
+        pool.append(inf | (rng.getrandbits(mw - 1) | 1) | (top * rng.getrandbits(1)))
+        pool.append(rng.getrandbits(mw) | (top * rng.getrandbits(1)))  # subnormal
+    out = list(pool)
+    rng.shuffle(out)
+    while len(out) < n:
+        out.append(rng.getrandbits(w))
+    return out[:n] if n >= len(pool) else [pool[(i + seed) % len(pool)]
+                                            for i in range(n)]
+
+
+@cocotb.test()
+async def loads_carry_every_bit_pattern(dut):
+    """A load's value comes back BIT FOR BIT, whichever way it takes:
+    written into the file by the retire's port (a FAST load, the queue
+    ahead of it holding only loads), or riding the array as IOR(v, v)
+    (behind an array writer still in flight, on the single-pass tile).
+    Nothing on the way may quieten a signalling NaN, touch a payload,
+    flush a subnormal or raise a flag. Every encoding class a
+    pass-through could get wrong is stored and loaded back through LDL
+    and LDX, by static slot and by index, both ways, at one beat and at
+    a whole block and ragged, at every format; the array writers ahead
+    of the second group are integer codes, and the program does no
+    arithmetic at all - so FLAGS must be the model's zero. IOR raises no
+    flag for any operand, so the flag enable a load's request carries
+    (off) cannot show in any answer: verifier-R4's plant that left it on
+    is green here, as it must be. The multi-pass tile runs it too
+    (seq_coremc), where the second group waits and goes fast."""
+    bench = Bench(dut)
+    await bench.start()
+    prog_for = {}
+    for name in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        prog_for[name] = seq.Program(fmt, [
+            seq.stl(0, 3),              # slot 3 := a
+            seq.stx(1, 2),              # scratch[c] := b
+            seq.ldl(10, 3),             # r10 := slot 3, static
+            seq.ldx(11, 2),             # r11 := scratch[c], indexed
+            seq.ldx(12, 2),             # ...straight after, an LDX
+            seq.ldl(13, 3),             # ...and an LDL straight after that
+            seq.deposit(10), seq.deposit(11),
+            seq.deposit(12), seq.deposit(13),
+            seq.stl(11, 4),             # a loaded value stored again
+            seq.ldl(14, 4),             # and loaded again
+            seq.deposit(14),
+            # behind an array writer, an integer code that raises
+            # nothing: these ride the array as IOR(v, v)
+            seq.alu(sf.OP_IAND, 20, 0, 1), seq.ldl(15, 3),
+            seq.alu(sf.OP_IAND, 21, 0, 1), seq.ldx(16, 2),
+            seq.alu(sf.OP_IAND, 22, 0, 1), seq.ldl(17, 4),
+            seq.deposit(15), seq.deposit(16), seq.deposit(17),
+            seq.halt()], max_deposits=8)
+    for name in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        lpbeat, lpb = lanes_per_beat(fmt), lanes_per_block(fmt)
+        for n in (lpbeat, lpb, lpb + lpbeat + 1):
+            idx = [_int_bits(fmt, (i * 5) % 7) for i in range(n)]
+            want = await bench.program(
+                fmt, prog_for[name], _every_bit_pattern(fmt, n, 4000 + n),
+                _every_bit_pattern(fmt, n, 4100 + n), idx, n,
+                f"{name} every bit pattern through LDL and LDX, n={n}")
+            assert want.flags == 0, (
+                f"{name}: the model raised {want.flags:#07b} for a program "
+                f"with no arithmetic - this case is not testing what it says")
+
+
+# ======================================================================
+# 10e. revision 7, R19: a beat with no active lane is not issued, and a
+#      stream beat no lane can read is not loaded
+# ======================================================================
+#
+# The sequencer issued every beat of a block and let the active bit
+# decide what was written (R17's "all masked costs what half masked
+# costs"). Now the issue skips a beat whose every lane is inactive - a
+# lane the caller masked, a lane past n, a lane a SETACT dropped - and
+# the dense stream loads read only the beats a lane the caller has sits
+# in. Nothing a program can observe moves: a skipped beat's lanes are
+# inactive, so it would have written nothing, deposited nothing and
+# raised nothing. What moves is the retire's bookkeeping, which counted
+# beats: a result now carries the beat it fired from, and an instruction
+# that writes a register always fires its block's LAST beat, so its
+# queue slot is released by a result even when every lane is out.
+
+def _beat_mask(n, lpb, lpbeat, pattern, seed=0):
+    """Masks that kill WHOLE BEATS, which R17's every-third-lane masks
+    never do: a beat is `lpbeat` lanes, a block `lpb`."""
+    rng = random.Random(seed)
+    dead_beats = set()
+    keep = []
+    for i in range(n):
+        j = i % lpb                      # lane within its block
+        b = j // lpbeat                  # beat within its block
+        if pattern == "low half":
+            k = j >= lpb // 2
+        elif pattern == "high half":
+            k = j < lpb // 2
+        elif pattern == "last lane":
+            k = j == lpb - 1
+        elif pattern == "first lane":
+            k = j == 0
+        elif pattern == "none":
+            k = False
+        elif pattern == "beats":
+            # a random set of whole beats, a fresh draw each block
+            if j == 0:
+                dead_beats = {x for x in range(lpb // lpbeat)
+                              if rng.random() < 0.5}
+            k = b not in dead_beats
+        else:
+            raise ValueError(pattern)
+        keep.append(k)
+    return keep
+
+
+@cocotb.test()
+async def masked_beats_at_every_block_length(dut):
+    """R19 against the model: masks that kill whole beats - the low half
+    of every block, the high half, all but the last lane, all but the
+    first, every lane, and random sets of whole beats - over the pipe
+    program, R18's control-code program and R17's own, at every format
+    and at block lengths from one beat to several blocks. Bench.masked
+    holds the lanes the mask keeps to the model and the lanes it clears
+    to the caller's bytes."""
+    bench = Bench(dut)
+    await bench.start()
+    pats = ("low half", "high half", "last lane", "first lane", "none",
+            "beats")
+    for name, ns in (("fp32", (8, 24, 128, 136, 256)),
+                     ("fp64", (4, 20, 64, 68)),
+                     ("fp128", (2, 10, 32, 34)),
+                     ("fp256", (1, 5, 16, 17))):
+        fmt = FORMATS[name]
+        lpb, lpbeat = lanes_per_block(fmt), lanes_per_beat(fmt)
+        progs = ((_mask_prog(fmt), "R17's"),
+                 (_pipe_program(fmt), "the pipe"),
+                 (_ctl_program(fmt), "R18's control codes"))
+        for k, n in enumerate(ns):
+            for prog, what in progs:
+                if fmt is FP256 and what == "the pipe":
+                    continue                   # the pipe program is fp32-128
+                pat = pats[(k + len(what)) % len(pats)]
+                keep = _beat_mask(n, lpb, lpbeat, pat, seed=n)
+                idx = _r18_index_stream(fmt, n, 2600 + n)
+                await bench.masked(
+                    fmt, prog, operands(fmt, n, 2700 + n),
+                    operands(fmt, n, 2800 + n),
+                    idx if what == "R18's control codes"
+                    else operands(fmt, n, 2900 + n),
+                    n, keep, f"{name} {what}, {pat} masked, n={n}")
+    dut._log.info(f"R19 whole beats masked: {bench.cases['masked']} runs")
+
+
+@cocotb.test()
+async def converged_beats_are_skipped(dut):
+    """A beat whose lanes have all CONVERGED is skipped too - the active
+    bit a SETACT cleared is the one the issue reads - and the escape map
+    comes out as the model says. Seeds are grouped by beat, so whole beats
+    converge at different iterations, and some never do."""
+    bench = Bench(dut)
+    await bench.start()
+    for name, n in (("fp32", 128), ("fp32", 40), ("fp64", 64), ("fp64", 9),
+                    ("fp128", 32), ("fp256", 16)):
+        fmt = FORMATS[name]
+        lpbeat = lanes_per_beat(fmt)
+        rng = random.Random(3000 + n)
+        a = []
+        for i in range(n):
+            if (i // lpbeat) % 3 == 0:
+                a.append(sf.zero_bits(fmt))           # stays small: never escapes
+            else:
+                e = fmt.bias + 1 + (i // lpbeat) % 3  # escapes early
+                a.append((e << fmt.man_w) | rng.getrandbits(fmt.man_w))
+        b = [sf.one_bits(fmt)] * n
+        prog = escape_program(fmt, 8, sf.from_int(fmt, 64)[0])
+        await bench.program(fmt, prog, a, b, operands(fmt, n, 3100 + n), n,
+                            f"{name} escape map, whole beats converging, n={n}")
+
+
+@cocotb.test()
+async def a_beat_no_lane_has_is_not_loaded(dut):
+    """The stream loads read only the beats a lane the caller has sits
+    in: one burst a stream a block, from the first such beat to the last,
+    and none at all for a block with no such beat. Asserted as ADDRESSES
+    in the read log, derived from the mask, so a load that still read the
+    whole block shows as a burst that is too long."""
+    bench = Bench(dut)
+    await bench.start()
+    for name, n, pat in (("fp32", 256, "low half"), ("fp32", 256, "high half"),
+                         ("fp64", 128, "last lane"), ("fp128", 64, "none"),
+                         ("fp32", 136, "first lane")):
+        fmt = FORMATS[name]
+        lpb, lpbeat = lanes_per_block(fmt), lanes_per_beat(fmt)
+        keep = _beat_mask(n, lpb, lpbeat, pat)
+        prog = _mask_prog(fmt)          # reads r0 and r1: streams a and b
+        await bench.masked(fmt, prog, operands(fmt, n, 3200 + n),
+                           operands(fmt, n, 3300 + n),
+                           operands(fmt, n, 3400 + n), n, keep,
+                           f"{name} {pat} masked, n={n}: the loads")
+        ebytes = fmt.width // 8
+        for base, stream in ((A_BASE, "a"), (B_BASE, "b")):
+            want = []
+            for blk in range(0, n, lpb):
+                blk_n = min(lpb, n - blk)
+                live = [bt for bt in range(-(-blk_n // lpbeat))
+                        if any(keep[blk + bt * lpbeat + p]
+                               for p in range(lpbeat)
+                               if bt * lpbeat + p < blk_n)]
+                if not live:
+                    continue
+                lo, hi = live[0], live[-1]
+                want.append((base + blk * ebytes + lo * BEAT_BYTES,
+                             hi - lo + 1))
+            got = bench.ram.reads_in(base, base + (1 << 16))
+            assert got == want, (
+                f"{name} {pat} n={n}: stream {stream} read {got}, and the "
+                f"mask says {want} - one burst a block, from the first beat "
+                f"a lane the caller has sits in to the last")
+
+
+# Cycles a block, fp32, four blocks, twenty IANDs and a deposit - R17's
+# probe program with more to skip. BEFORE is revision 7's R18 tile, where
+# every mask cost the dense run plus four cycles a block (the mask's one
+# read); AFTER is R19's. The ceilings sit between the two. Measured under
+# Verilator (2026-09-29), cycles a block:
+#
+#   low half of each block masked   before 561.25 (R18, 1c82d4c)   after 410.0
+#   every lane masked               before 561.25                  after 344.0
+#
+# What is left of the all-masked block is the block's own machinery -
+# setup and the mask's read - about four cycles an instruction (its only
+# issued step is its first, so it cannot take the next by continuation),
+# about seven an arithmetic one (its forced last beat still crosses the
+# array, and three queue slots cover twelve of its seventeen cycles), and
+# the drains, which keep a masked lane's place and lose its strobe (R17).
+# verifier-R4 measured 7.0 and 4.3 (fp32, every lane masked), where this
+# comment said one cycle a writer.
+R19_CEILING = {
+    "low half of each block masked": 485,
+    "every lane masked": 450,
+}
+
+
+@cocotb.test()
+async def masked_beats_hold_their_saving(dut):
+    """R19's gain, HELD: a run whose masked lanes fill whole beats costs
+    less than a ceiling between the before-side (every mask costing the
+    dense run) and the after-side, and answers what the model says."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    lpb, lpbeat = lanes_per_block(fmt), lanes_per_beat(fmt)
+    n = 4 * lpb
+    iand = seq.alu(sf.OP_IAND, 3, 0, 0)
+    prog = seq.Program(fmt, [iand] * 20 + [seq.deposit(3), seq.halt()],
+                       max_deposits=1)
+    cost = {}
+    for label, pat in (("low half of each block masked", "low half"),
+                       ("every lane masked", "none")):
+        keep = _beat_mask(n, lpb, lpbeat, pat)
+        await bench.masked(fmt, prog, operands(fmt, n, 3500),
+                           operands(fmt, n, 3501), operands(fmt, n, 3502), n,
+                           keep, f"hold: {label}")
+        cost[label] = bench.last_cycles / 4
+        dut._log.info(f"hold: {label}: {cost[label]:.1f} cycles a block "
+                      f"(ceiling {R19_CEILING[label]})")
+    for label, per_block in cost.items():
+        assert per_block < R19_CEILING[label], (
+            f"hold: {label} costs {per_block:.1f} cycles a block, at or "
+            f"above the ceiling of {R19_CEILING[label]} - a beat with no "
+            f"active lane is being issued again (docs/SEQUENCER.md, "
+            f"revision 7, R19)")
+
+
+# ======================================================================
+# 10f. fast loads (2026-09-29, verifier-R4's send-back of R18)
+# ======================================================================
+#
+# R18 sent every load's value into the file through the array, as
+# IOR(v, v). At sixteen beats the pipelining hides the array's depth; at
+# ONE beat nothing does, and verifier-R4 measured a program that uses a
+# loaded value at once running slower there than on f681dee's tile, whose
+# LDL wrote the file itself. A load is now FAST when every queued writer
+# ahead of it is a fast load: it keeps its queue slot, but the retire's
+# write port writes its value into the file at F (an LDL) or H (an LDX),
+# and it never enters the array. On a multi-pass tile a load that cannot
+# be fast waits until it can. The rules are docs/SEQUENCER.md's.
+
+def _load_programs(fmt):
+    """verifier-R4's load-heavy programs (verifier-R4.md 08:18:52 and
+    08:39:43), rebuilt from its descriptions - and, after them, three
+    with a load straight behind an array writer still in flight, the one
+    shape where a load cannot be fast and the multi-pass tile's choice
+    (ride the array, or wait for the writer and go fast) shows. R4's
+    seven have none: in each, every load finds the queue holding only
+    loads, or its census chain's store has already waited for the FMA."""
+    F = sf.OP_FMA
+    pairs, use, chain, indep = [], [], [], []
+    b_ldl, b_ldx, b_use = [], [], []
+    for k in range(10):
+        pairs += [seq.stl(3, k), seq.ldl(3, k)]
+        use += [seq.ldl(3, 0), seq.deposit(3)]
+    for k in range(8):
+        chain += [seq.ldl(3 + k, k), seq.alu(F, 11 + k, 3 + k, 0, 1),
+                  seq.stl(11 + k, 8 + k)]
+        indep += [seq.stl(0, k), seq.ldl(3 + k, 8 + k), seq.setact(1)]
+        writer = seq.alu(F, 11 + k, 0, 1, 1)      # an FMA nothing reads
+        b_ldl += [writer, seq.ldl(3 + k, k), seq.deposit(3 + k)]
+        b_ldx += [writer, seq.ldx(3 + k, 2), seq.deposit(3 + k)]
+        b_use += [writer, seq.ldl(3 + k, k), seq.alu(F, 19 + k, 3 + k, 0, 1)]
+    lds = [seq.ldl(3 + k, k) for k in range(20)]
+    ldxs = [seq.ldx(3 + k, 2) for k in range(20)]
+    return (("twenty LDLs, DEPOSIT of the last",
+             lds + [seq.deposit(22), seq.halt()], 1),
+            ("twenty LDLs, no deposit", lds + [seq.halt()], 1),
+            ("ten times LDL, DEPOSIT of it", use + [seq.halt()], 10),
+            ("ten STL/LDL pairs on one register",
+             pairs + [seq.deposit(3), seq.halt()], 1),
+            ("twenty LDXs, DEPOSIT of the last",
+             ldxs + [seq.deposit(22), seq.halt()], 1),
+            ("eight times LDL, FMA of it, STL of that",
+             chain + [seq.deposit(18), seq.halt()], 1),
+            ("eight times STL, LDL, SETACT",
+             indep + [seq.deposit(10), seq.halt()], 1),
+            ("eight times FMA, LDL behind it, DEPOSIT of that",
+             b_ldl + [seq.halt()], 8),
+            ("eight times FMA, LDX behind it, DEPOSIT of that",
+             b_ldx + [seq.halt()], 8),
+            ("eight times FMA, LDL behind it, FMA of that",
+             b_use + [seq.deposit(26), seq.halt()], 1))
+
+
+def _pass_period(fmt):
+    """The array's pass period for fmt at this bench's MUL_PASSES, as
+    rtl/cft_mulgeom.svh derives it: the chunks of the significand's
+    24-bit multiplier columns, the columns a lane builds under the
+    budget, the passes they take. 1 on the single-pass tile, and for
+    fp32 on every tile; 3, 5 and 10 for fp64, fp128 and fp256 at 10."""
+    p = {32: 24, 64: 53, 128: 113, 256: 237}[fmt.width]
+    chunks = -(-p // 24)
+    cols = -(-chunks // MUL_PASSES)
+    return -(-chunks // cols)
+
+
+def _load_sizes(fmt):
+    """One, two and three beats of lanes at every format, and four whole
+    blocks at fp128 and fp256 - the sizes of verifier-R4's tables. Four
+    blocks at fp32 and fp64 are measured in the table below and not run:
+    they cost most of the case's time, and R4 found nothing there."""
+    lpbeat, lpb = lanes_per_beat(fmt), lanes_per_block(fmt)
+    out = [("1 beat", lpbeat), ("2 beats", 2 * lpbeat),
+           ("3 beats", 3 * lpbeat)]
+    if fmt.width >= 128:
+        out.append(("4 blocks", 4 * lpb))
+    return tuple(out)
+
+
+# f681dee's cycles for those programs, start to done, through this
+# bench's harness, measured under Verilator on a copy of this tree with
+# f681dee's rtl/cft_seq.sv (2026-09-29), on the single-pass tile
+# (MUL_PASSES 1) and the multi-pass one (MUL_PASSES 10), at the unit
+# bench's default capacities. Per MUL_PASSES, format and size, the ten
+# programs in _load_programs' order; None where a size was not measured
+# (four blocks at fp32 and fp64 are measured but not run, see
+# _load_sizes). f681dee's loads never entered the array, so at
+# MUL_PASSES 10 only the programs with an FMA cost more than at 1 - and
+# at fp32, single-pass at every MUL_PASSES, not even those.
+_F681DEE_LOADS = {
+    1: {
+        "fp32": {
+            "1 beat": (553, 546, 294, 373, 4332, 620, 500, 541, 4512, 493),
+            "2 beats": (666, 656, 456, 466, 4446, 707, 603, 681, 4653, 543),
+            "3 beats": (779, 766, 618, 559, 4560, 794, 706, 821, 4794, 614),
+            "4 blocks": (8872, 8667, 10779, 6952, 24048, 7565, 8045, None,
+                         None, None),
+        },
+        "fp64": {
+            "1 beat": (549, 542, 254, 369, 4328, 616, 496, 509, 4480, 489),
+            "2 beats": (656, 646, 374, 456, 4436, 697, 593, 615, 4587, 533),
+            "3 beats": (765, 752, 496, 545, 4546, 780, 692, 723, 4696, 600),
+            "4 blocks": (8552, 8347, 8155, 6632, 23728, 7245, 7725, None,
+                         None, None),
+        },
+        "fp128": {
+            "1 beat": (547, 540, 234, 367, 4326, 614, 494, 493, 4464, 487),
+            "2 beats": (652, 642, 334, 452, 4432, 693, 589, 583, 4555, 529),
+            "3 beats": (757, 744, 434, 537, 4538, 772, 684, 673, 4646, 592),
+            "4 blocks": (8392, 8187, 6859, 6472, 23568, 7085, 7565, 7272,
+                         23216, 5533),
+        },
+        "fp256": {
+            "1 beat": (546, 539, 224, 366, 4325, 613, 493, 485, 4456, 486),
+            "2 beats": (650, 640, 314, 450, 4430, 691, 587, 567, 4539, 527),
+            "3 beats": (754, 741, 404, 534, 4535, 769, 681, 649, 4622, 589),
+            "4 blocks": (8312, 8107, 6211, 6392, 23488, 7005, 7485, 6748,
+                         22692, 5453),
+        },
+    },
+    10: {
+        "fp32": {
+            "1 beat": (553, 546, 294, 373, 4332, 620, 500, 541, 4512, 493),
+            "2 beats": (666, 656, 456, 466, 4446, 707, 603, 681, 4653, 543),
+            "3 beats": (779, 766, 618, 559, 4560, 794, 706, 821, 4794, 614),
+            "4 blocks": (8872, 8667, 10779, 6952, 24048, 7565, 8045, 10432,
+                         26376, 6013),
+        },
+        "fp64": {
+            "1 beat": (549, 542, 254, 369, 4328, 887, 496, 779, 4752, 786),
+            "2 beats": (656, 646, 374, 456, 4436, 969, 593, 889, 4860, 867),
+            "3 beats": (765, 752, 496, 545, 4546, 1077, 692, 1018, 4992, 975),
+            "4 blocks": (8552, 8347, 8155, 6632, 23728, 9285, 7725, 10365,
+                         26310, 8889),
+        },
+        "fp128": {
+            "1 beat": (547, 540, 234, 367, 4326, 1135, 494, 1014, 4986, 1089),
+            "2 beats": (652, 642, 334, 452, 4432, 1258, 589, 1150, 5121, 1215),
+            "3 beats": (757, 744, 434, 537, 4538, 1348, 684, 1251, 5226, 1341),
+            "4 blocks": (8392, 8187, 6859, 6472, 23568, 11085, 7565, 11280,
+                         27221, 11862),
+        },
+        "fp256": {
+            "1 beat": (546, 539, 224, 366, 4325, 1780, 493, 1648, 5621, 1886),
+            "2 beats": (650, 640, 314, 450, 4430, 1945, 587, 1813, 5791, 2054),
+            "3 beats": (754, 741, 404, 534, 4535, 2104, 681, 1988, 5961, 2292),
+            "4 blocks": (8312, 8107, 6211, 6392, 23488, 15971, 7485, 15724,
+                         31681, 19603),
+        },
+    },
+}
+F681DEE_LOAD_CYCLES = {
+    (label, size, name, mp): cyc
+    for mp, by_fmt in _F681DEE_LOADS.items()
+    for name, by_size in by_fmt.items()
+    for size, row in by_size.items()
+    for (label, _i, _m), cyc in zip(_load_programs(FP32), row)
+    if cyc is not None
+}
+
+
+@cocotb.test()
+async def loads_cost_no_more_than_before(dut):
+    """The send-back's HOLD: verifier-R4's load-heavy programs and three
+    with a load behind an array writer, at the sizes of R4's tables
+    (_load_sizes), at every format, cost no more than on f681dee's tile
+    - on this tile, single-pass or multi-pass. Every run is held to the
+    model first, and every number is measured before any is judged, so
+    a red run prints them all. The ceilings are the unit bench's default
+    capacities', so elsewhere (seq_coreu50) the case does not run."""
+    if (SCRATCH_D, MAXD) != (256, 64):
+        dut._log.info("loads hold: not at these capacities")
+        return
+    bench = Bench(dut)
+    await bench.start()
+    cost = {}
+    for name in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        for size, n in _load_sizes(fmt):
+            for label, insns, maxdep in _load_programs(fmt):
+                prog = seq.Program(fmt, insns, max_deposits=maxdep)
+                await bench.program(fmt, prog, operands(fmt, n, 5000),
+                                    operands(fmt, n, 5001),
+                                    _r18_index_stream(fmt, n, 5002), n,
+                                    f"{name} {label}, {size}")
+                key = (label, size, name, MUL_PASSES)
+                cost[key] = bench.last_cycles
+                want = F681DEE_LOAD_CYCLES.get(key)
+                dut._log.info(f"LOADROW {key!r}: {cost[key]:.0f}"
+                              + (f"  (f681dee {want})" if want else ""))
+    # On a multi-pass tile the array's enable counts wall cycles from
+    # the reset (rtl/cft_lanes.sv, `ph`), so a run starts at whatever
+    # phase of the pass period the runs before it left, and its count
+    # moves with that phase by up to a period less one: f681dee's
+    # census chain at fp256 measured 1,937 in one run of this case and
+    # 1,945 in another. A row is held to f681dee's plus that much.
+    worse = [(k, c, F681DEE_LOAD_CYCLES[k]) for k, c in cost.items()
+             if k in F681DEE_LOAD_CYCLES and c > F681DEE_LOAD_CYCLES[k]
+             + _pass_period(FORMATS[k[2]]) - 1]
+    assert not worse, (
+        f"{len(worse)} of {len(cost)} load rows cost more than on "
+        f"f681dee's tile (MUL_PASSES {MUL_PASSES}), the first: "
+        + "; ".join(f"{k[2]} {k[1]}, {k[0]}: {c:.0f} against {w}"
+                    for k, c, w in worse[:4])
+        + " (docs/SEQUENCER.md, R18's fast loads)")
+
+
+@cocotb.test()
+async def store_then_load_costs_what_the_sentence_says(dut):
+    """docs/SEQUENCER.md's store-then-LDL sentence, HELD as measured
+    (verifier-R4, 08:18:52): an LDL waits while ANY store beat is in B or
+    F, so at sixteen beats a store straight before a load still costs two
+    cycles - ten such adjacencies, twenty a block - beside the same
+    program with an IAND where the store is. Held as an upper bound: the
+    wait may bind less (the per-beat refinement SEQUENCER.md records as a
+    possible gain), never more."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    n = 4 * lanes_per_block(fmt)
+    iand = seq.alu(sf.OP_IAND, 4, 0, 0)
+    per_block = {}
+    for label, first in (("STL s0, LDL s1", seq.stl(0, 0)),
+                         ("IAND, LDL s1", iand)):
+        insns = []
+        for _ in range(10):
+            insns += [first, seq.ldl(3, 1)]
+        # the same wipe on both sides: slots 0 and 1
+        insns += [seq.stl(0, 0), seq.deposit(3), seq.halt()]
+        prog = seq.Program(fmt, insns, max_deposits=1)
+        await bench.program(fmt, prog, operands(fmt, n, 5100),
+                            operands(fmt, n, 5101), operands(fmt, n, 5102),
+                            n, f"sentence: {label} x10")
+        per_block[label] = bench.last_cycles / 4
+        dut._log.info(f"sentence: {label} x10: {per_block[label]:.2f} "
+                      f"cycles a block")
+    extra = per_block["STL s0, LDL s1"] - per_block["IAND, LDL s1"]
+    dut._log.info(f"sentence: a store straight before a load costs "
+                  f"{extra / 10:.2f} cycles more than an IAND there")
+    assert extra <= 2 * 10, (
+        f"ten store-then-load adjacencies cost {extra:.2f} cycles a block "
+        f"more than the IAND program, past the two an adjacency "
+        f"docs/SEQUENCER.md says")
+
+
+def _fast_program(fmt, strict=False):
+    """Every shape a fast load meets, in one program: loads first in the
+    block (the queue empty), back to back in all four orders of LDL and
+    LDX, each read at once by every kind of reader (a deposit, a store's
+    value, an indexed code's index, an ALU operand, a SETACT); a load into
+    a register an ALU instruction still in flight writes (it must NOT be
+    fast - the ALU's result would land after it); a load behind an ALU
+    instruction that writes something else; loads in a loop that stores
+    what it loads; an indexed load past the depth under SCRATCH_STRICT
+    (+0, through the fast write); and a SETACT that narrows the mask while
+    a fast load's value is written, with ACTALL after."""
+    A, M, F = sf.OP_ADD, sf.OP_MUL, sf.OP_FMA
+    IADD = sf.OP_IADD
+    insns = [
+        seq.stl(0, 0), seq.stl(1, 1),
+        seq.ldl(3, 0),                   # fast: the queue is empty
+        seq.deposit(3),                  # ...read by a deposit at once
+        seq.ldl(4, 1), seq.ldl(5, 0),    # LDL, LDL
+        seq.alu(A, 6, 4, rc=5),          # an ALU reading both
+        seq.ldx(7, 2), seq.ldx(8, 2),    # LDX, LDX (the index stream c)
+        seq.stl(7, 2),                   # a store of a fast LDX's value
+        seq.ldl(9, 2), seq.ldx(10, 2),   # LDL, LDX
+        seq.ldx(11, 2), seq.ldl(12, 0),  # LDX, LDL
+        seq.deposit(9), seq.deposit(10),
+        seq.alu(IADD, 13, 2, 0, kb=True),  # an index, computed
+        seq.stx(12, 13),                 # the store's value a fast load's
+        seq.ldx(14, 13),
+        seq.ldx(15, 14),                 # an index that is a fast LDX's value
+        seq.deposit(15),
+        seq.alu(F, 16, 0, 1, 3),         # r16 in flight...
+        seq.ldl(16, 1),                  # ...when a load writes it: not fast
+        seq.deposit(16),                 # the load's value, not the FMA's
+        seq.alu(M, 17, 0, 0),            # something else in flight...
+        seq.ldl(18, 0),                  # ...a load behind it: not fast
+        seq.alu(A, 19, 18, rc=17),
+        seq.deposit(19),
+        seq.repeat(3),
+        seq.ldl(20, 3),
+        seq.alu(F, 20, 20, 0, 1),
+        seq.stl(20, 3),
+        seq.endrep(),
+        seq.ldl(21, 3), seq.deposit(21),
+        seq.alu(sf.OP_CMPLT, 22, 0, 1),
+        seq.setact(22),                  # the mask narrows...
+        seq.ldl(23, 1),                  # ...before a fast load writes
+        seq.actall(),
+        seq.deposit(23),                 # a dropped lane's r23: +0
+        seq.ldl(24, 0), seq.setact(24),  # SETACT reading a fast load at once
+        seq.deposit(24),
+        seq.halt(),
+    ]
+    flags = seq.FLAG_SCRATCH_IO
+    if strict:
+        flags |= seq.FLAG_SCRATCH_STRICT
+    return seq.Program(fmt, insns, consts=[_int_bits(fmt, 5)],
+                       max_deposits=12, flags=flags,
+                       n_scratch_in=0, n_scratch_out=4)
+
+
+@cocotb.test()
+async def fast_loads_at_every_block_length(dut):
+    """Fast loads against the model at every block length the other
+    shape cases use - one, two, three, five, nine and sixteen beats,
+    ragged, across a block boundary - spread over fp32/64/128 and fp256,
+    modulo, and strict at a short block and a long one."""
+    bench = Bench(dut)
+    await bench.start()
+    for name, modulo, strict_ns in (
+            ("fp32", (8, 9, 24, 40, 72, 136), (16, 150)),
+            ("fp64", (4, 5, 20, 66), (8,)),
+            ("fp128", (2, 3, 10, 33), (32,)),
+            ("fp256", (1, 2, 3, 17), (16,))):
+        fmt = FORMATS[name]
+        for strict, ns in ((False, modulo), (True, strict_ns)):
+            prog = _fast_program(fmt, strict)
+            for n in ns:
+                await bench.program(
+                    fmt, prog, operands(fmt, n, 5200 + n),
+                    operands(fmt, n, 5300 + n),
+                    _r18_index_stream(fmt, n, 5400 + n), n,
+                    f"{name} fast loads, "
+                    f"{'strict' if strict else 'modulo'}, n={n}")
+    dut._log.info(f"fast loads: {bench.cases['program']} runs")
+
+
+def _chain_mask(n, lpb, lpbeat, kind):
+    """verifier-R4's masks (verifier-R4.md 08:42:45), per block of lpb
+    lanes: every lane kept, the low half or the low quarter masked, the
+    last lane only, every other lane (at fp256, where a lane is a beat,
+    every other beat), the high half masked."""
+    keep = []
+    for i in range(n):
+        j = i % lpb
+        keep.append({"every lane kept": True,
+                     "low half masked": j >= lpb // 2,
+                     "low quarter masked": j >= lpb // 4,
+                     "last lane only": j == lpb - 1,
+                     "every other lane": (j % 2) == 0,
+                     "high half masked": j < lpb // 2}[kind])
+    return keep
+
+
+CHAIN_MASKS = ("every lane kept", "low half masked", "low quarter masked",
+               "last lane only", "every other lane", "high half masked")
+
+# f681dee's cycles for verifier-R4's chains, start to done over four
+# blocks, through this bench's harness (Bench.masked), measured under
+# Verilator on a copy of this tree with f681dee's rtl/cft_seq.sv
+# (2026-09-29), MUL_PASSES 1, the unit bench's default capacities. Per
+# link count and format, the masks in CHAIN_MASKS' order. R18's (1c82d4c)
+# on the same bench, the design's own target, for the record:
+#
+#     60: {
+#         "fp32": (4737, 4737, 4737, 4737, 4737, 4737),
+#         "fp64": (4673, 4673, 4673, 4673, 4673, 4673),
+#         "fp128": (4641, 4641, 4641, 4641, 4641, 4641),
+#         "fp256": (4625, 4625, 4625, 4625, 4625, 4625),
+#     },
+#     20: {
+#         "fp32": (1887, 1887, 1887, 1887, 1887, 1887),
+#         "fp64": (1823, 1823, 1823, 1823, 1823, 1823),
+#         "fp128": (1791, 1791, 1791, 1791, 1791, 1791),
+#         "fp256": (1775, 1775, 1775, 1775, 1775, 1775),
+#     },
+_F681DEE_CHAINS = {
+    60: {
+        "fp32": (4741, 4741, 4741, 4741, 4741, 4741),
+        "fp64": (4677, 4677, 4677, 4677, 4677, 4677),
+        "fp128": (4645, 4645, 4645, 4645, 4645, 4645),
+        "fp256": (4629, 4629, 4629, 4629, 4629, 4629),
+    },
+    20: {
+        "fp32": (1891, 1891, 1891, 1891, 1891, 1891),
+        "fp64": (1827, 1827, 1827, 1827, 1827, 1827),
+        "fp128": (1795, 1795, 1795, 1795, 1795, 1795),
+        "fp256": (1779, 1779, 1779, 1779, 1779, 1779),
+    },
+}
+F681DEE_CHAIN_CYCLES = {
+    (links, kind, name): cyc
+    for links, by_fmt in _F681DEE_CHAINS.items()
+    for name, row in by_fmt.items()
+    for kind, cyc in zip(CHAIN_MASKS, row)
+}
+
+
+@cocotb.test()
+async def masked_chains_cost_no_more_than_before(dut):
+    """The send-back's second HOLD (verifier-R4's third (a)): a chain of
+    dependent FMAs and nothing else but HALT, under masks that empty
+    beats, costs no more than on f681dee's tile. Under R19 a producer
+    whose first issued beat is 3 or later, or whose issued beats have a
+    gap, used to lose forwarding's look-ahead at that beat - two cycles a
+    link. Measured on the single-pass tile, where forwarding exists;
+    every run also held to the model (bytes, counts, FLAGS, the mask's
+    reads). The chain that ends in a DEPOSIT is logged beside them. Its
+    ceilings are the single-pass tile's at the default capacities, so
+    elsewhere the case does not run."""
+    if MUL_PASSES != 1 or (SCRATCH_D, MAXD) != (256, 64):
+        dut._log.info("chains hold: not on this tile")
+        return
+    bench = Bench(dut)
+    await bench.start()
+    F = sf.OP_FMA
+    cost = {}
+    for name in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        lpb, lpbeat = lanes_per_block(fmt), lanes_per_beat(fmt)
+        n = 4 * lpb
+        for links in (60, 20):
+            prog = seq.Program(fmt, [seq.alu(F, 3, 0, 1, 3)] * links
+                               + [seq.halt()], max_deposits=0)
+            for kind in CHAIN_MASKS:
+                keep = _chain_mask(n, lpb, lpbeat, kind)
+                if not any(keep):
+                    continue
+                await bench.masked(fmt, prog, dense(fmt, n, 5500),
+                                   dense(fmt, n, 5501),
+                                   dense(fmt, n, 5502), n, keep,
+                                   f"{name} {links} links, {kind}")
+                key = (links, kind, name)
+                cost[key] = bench.last_cycles
+                want = F681DEE_CHAIN_CYCLES.get(key)
+                dut._log.info(f"CHAINROW {key!r}: {cost[key]:.0f}"
+                              + (f"  (f681dee {want})" if want else ""))
+    fmt = FP32
+    n = 4 * lanes_per_block(fmt)
+    prog = seq.Program(fmt, [seq.alu(F, 3, 0, 1, 3)] * 20
+                       + [seq.deposit(3), seq.halt()], max_deposits=1)
+    await bench.masked(fmt, prog, dense(fmt, n, 5600), dense(fmt, n, 5601),
+                       dense(fmt, n, 5602), n,
+                       _chain_mask(n, lanes_per_block(fmt),
+                                   lanes_per_beat(fmt), "low half masked"),
+                       "fp32 20 links and a DEPOSIT, low half masked")
+    dut._log.info(f"CHAINROW (20, 'low half masked, then DEPOSIT', 'fp32'): "
+                  f"{bench.last_cycles:.0f} (logged, not held)")
+    worse = [(k, c, F681DEE_CHAIN_CYCLES[k]) for k, c in cost.items()
+             if k in F681DEE_CHAIN_CYCLES and c > F681DEE_CHAIN_CYCLES[k]]
+    assert not worse, (
+        f"{len(worse)} of {len(cost)} masked chains cost more than on "
+        f"f681dee's tile, the first: "
+        + "; ".join(f"{k[2]} {k[0]} links, {k[1]}: {c:.0f} against {w}"
+                    for k, c, w in worse[:4])
+        + " (docs/SEQUENCER.md, R19's look-ahead by tag)")
+
+
+
+# ======================================================================
+# 10g. verifier-R4's shapes (2026-09-29): what four of its plants needed
+# ======================================================================
+#
+# verifier-R4 planted seven faults in e610b78's sequencer and the lead ran
+# them against every bench (verifier-R4.md 09:18:53). Four passed this
+# file's cases and were caught only by R4's own: an LDX's index dropped
+# from its read set, the mask sampled at issue rather than at fire, the
+# live-beat vector three cycles late, and ACTALL not waiting for an LDX's
+# G and H. Each case below is the shape that sees one of them, adapted
+# from R4's tb/test_r4.py and test_r4b.py (scratch), at every block
+# length, on the single-pass and the multi-pass tile.
+
+def _r4_lengths(fmt):
+    """One, two, three, five, nine and sixteen beats; a block and one
+    beat (across a block boundary); a block and a ragged tail; and a
+    ragged short block of two beats, the second part-empty."""
+    lp, lb = lanes_per_beat(fmt), lanes_per_block(fmt)
+    out = [lp, 2 * lp, 3 * lp, 5 * lp, 9 * lp, lb, lb + lp,
+           lb + 3 * lp - (1 if lp > 1 else 0)]
+    if lp > 1:
+        out.append(lp + 1)
+    return out
+
+
+def _small_index_stream(fmt, n, seed):
+    """Integers 0..7 as bit patterns, every one in range."""
+    rng = random.Random(seed)
+    return [_int_bits(fmt, rng.randrange(8)) for _ in range(n)]
+
+
+def _index_queued_program(fmt):
+    """Every way an indexed code's index can still be in flight when the
+    code reads it: an IADD straight before, one and two instructions
+    before, a chain of three IADDs, a fast LDL, an LDX, and the index
+    register overwritten straight before - and the same for an STX. Each
+    index names a slot filled with a value the stale index's slot does
+    not hold, so an index read before it lands shows in a deposit."""
+    I, IAND, IXOR = sf.OP_IADD, sf.OP_IAND, sf.OP_IXOR
+    K5, K9, K20, K2, K3, K4 = range(6)
+    insns = [
+        seq.alu(I, 10, 2, K5, kb=True),      # r10 = c + 5
+        seq.stx(0, 10),                      # [c + 5] = a
+        seq.alu(I, 11, 2, K9, kb=True),      # r11 = c + 9
+        seq.stx(1, 11),                      # [c + 9] = b
+        # an IADD makes the index, the LDX reads it at once...
+        seq.alu(I, 12, 2, K5, kb=True), seq.ldx(3, 12), seq.deposit(3),
+        # ...one instruction later...
+        seq.alu(I, 13, 2, K9, kb=True), seq.alu(IAND, 20, 0, 1),
+        seq.ldx(4, 13), seq.deposit(4),
+        # ...two later
+        seq.alu(I, 14, 2, K5, kb=True), seq.alu(IAND, 20, 0, 1),
+        seq.alu(IXOR, 21, 0, 1), seq.ldx(5, 14), seq.deposit(5),
+        # three IADDs build it, c + 2, + 3, + 4: every stale step names
+        # another slot
+        seq.alu(I, 15, 2, K2, kb=True), seq.alu(I, 15, 15, K3, kb=True),
+        seq.alu(I, 15, 15, K4, kb=True), seq.ldx(6, 15), seq.deposit(6),
+        # a fast LDL brings it in (slot 30 holds c + 5)...
+        seq.stl(10, 30), seq.ldl(16, 30), seq.ldx(7, 16), seq.deposit(7),
+        # ...and an LDX ([c] holds c + 9)
+        seq.stx(11, 2), seq.ldx(17, 2), seq.ldx(8, 17), seq.deposit(8),
+        # the index register overwritten straight before: c + 9 now
+        seq.alu(I, 10, 2, K9, kb=True), seq.ldx(9, 10), seq.deposit(9),
+        # an STX's index made straight before it, read back
+        seq.alu(I, 18, 2, K20, kb=True), seq.stx(0, 18), seq.ldx(19, 18),
+        seq.deposit(19),
+        seq.halt(),
+    ]
+    consts = [_int_bits(fmt, v) for v in (5, 9, 20, 2, 3, 4)]
+    return seq.Program(fmt, insns, consts=consts, max_deposits=8)
+
+
+@cocotb.test()
+async def an_index_a_queued_instruction_writes(dut):
+    """verifier-R4's ldx_idx_nowait: an LDX's index is a register it
+    must wait for like any operand. An IADD, a load or an LDX that
+    writes it may still be in flight - in the array, or a fast load
+    still in the pipe - when the LDX's first beat is addressed."""
+    bench = Bench(dut)
+    await bench.start()
+    for name in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        prog = _index_queued_program(fmt)
+        lp, lb = lanes_per_beat(fmt), lanes_per_block(fmt)
+        for n in (lp, 2 * lp, 3 * lp, lb):
+            await bench.program(fmt, prog, dense(fmt, n, 7000 + n),
+                                dense(fmt, n, 7100 + n),
+                                _small_index_stream(fmt, n, 7200 + n), n,
+                                f"{name} index in flight, n={n}")
+    dut._log.info(f"indices in flight: {bench.cases['program']} runs")
+
+
+def _drop_inputs(fmt, n, seed):
+    """a = inf and b = +0 on odd lanes (SETACT b drops exactly them, and
+    an FMA of a and b there is inf * 0, INVALID); c indexes past the
+    depth there, in range elsewhere (strict: reported only there)."""
+    rng = random.Random(seed)
+    d, e = dense(fmt, n, seed), dense(fmt, n, seed + 1)
+    a = [sf.inf_bits(fmt, 0) if i % 2 else d[i] for i in range(n)]
+    b = [0 if i % 2 else e[i] for i in range(n)]
+    c = [_int_bits(fmt, (SCRATCH_D if i % 2 else 0) + rng.randrange(8))
+         for i in range(n)]
+    return a, b, c
+
+
+def _drop_programs():
+    """A SETACT that drops lanes, and straight after it, before the drop
+    can have reached a beat the next code addresses at once: codes whose
+    dropped lanes would show - a flag, a strict report, a load's write.
+    And, the other way round, a flag raised by an FMA in flight when the
+    drop comes, which the model counts."""
+    F, M, IAND = sf.OP_FMA, sf.OP_MUL, sf.OP_IAND
+    S = seq.FLAG_SCRATCH_IO | seq.FLAG_SCRATCH_STRICT
+    return (
+        ("an FMA straight after the drop", [
+            seq.setact(1), seq.alu(F, 3, 0, 1, 2), seq.deposit(3),
+            seq.halt()], 1, S, 1),
+        ("a MUL after the drop, an integer code between", [
+            seq.setact(1), seq.alu(IAND, 5, 0, 0), seq.alu(M, 3, 0, 1),
+            seq.deposit(3), seq.halt()], 1, S, 1),
+        ("an FMA in flight when the drop comes", [
+            seq.alu(F, 3, 0, 1, 2), seq.setact(1), seq.deposit(3),
+            seq.halt()], 1, S, 1),
+        ("a strict LDX and STX straight after the drop", [
+            seq.setact(1), seq.ldx(5, 2), seq.stx(0, 2), seq.deposit(5),
+            seq.halt()], 1, S, 1),
+        ("a fast LDL straight after the drop, then ACTALL", [
+            seq.stl(0, 3), seq.setact(1), seq.ldl(4, 3), seq.actall(),
+            seq.deposit(4), seq.halt()], 1, S, 4),
+        ("an LDL behind an FMA straight after the drop, then ACTALL", [
+            seq.stl(0, 3), seq.setact(1), seq.alu(F, 6, 0, 1, 2),
+            seq.ldl(4, 3), seq.actall(), seq.deposit(4), seq.halt()],
+         1, S, 4),
+    )
+
+
+@cocotb.test()
+async def the_mask_is_taken_at_fire_not_at_issue(dut):
+    """verifier-R4's mask_at_issue: a beat takes its row of the mask when
+    it fires (F; an LDX at H), not when it is addressed. Where the next
+    code is addressed by continuation within two steps of a SETACT's
+    beat - a block of two beats, or a long block whose mask leaves one
+    or two beats alive - that beat has not acted yet, so a row taken at
+    issue is the row before the drop: a flag the model does not raise,
+    a write it does not make. (A one-beat block fetches the next code
+    through decode, by when the drop has acted.) Run at one to three
+    beats and ragged, and on a whole block whose lane mask keeps only
+    its last beat."""
+    bench = Bench(dut)
+    await bench.start()
+    for name in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        lp, lb = lanes_per_beat(fmt), lanes_per_block(fmt)
+        for label, insns, maxdep, flags, nsout in _drop_programs():
+            prog = seq.Program(fmt, insns, max_deposits=maxdep,
+                               flags=flags, n_scratch_in=0,
+                               n_scratch_out=nsout)
+            ns = [lp, 2 * lp, 3 * lp] + ([lp + 1] if lp > 1 else [])
+            if "LDX" in label:
+                ns = ns[:2]         # its wipe is the case's cost
+            for n in ns:
+                a, b, c = _drop_inputs(fmt, n, 7300 + n)
+                want = await bench.program(fmt, prog, a, b, c, n,
+                                           f"{name} {label}, n={n}")
+                if n >= 2 and label.startswith("an FMA straight"):
+                    assert not (want.flags & sf.FLAG_INVALID), (
+                        "precondition: the model raises no invalid here")
+                if n >= 2 and label.startswith("an FMA in flight"):
+                    assert want.flags & sf.FLAG_INVALID, (
+                        "precondition: the model raises invalid here")
+            # a whole block whose lane mask keeps only the last beat,
+            # so each instruction issues one beat
+            n = lb
+            a, b, c = _drop_inputs(fmt, n, 7400)
+            keep = [i >= lb - lp for i in range(n)]
+            await bench.masked(fmt, prog, a, b, c, n, keep,
+                               f"{name} {label}, n={n}, last beat alive")
+    dut._log.info(f"mask at fire: {bench.cases['program']} runs")
+
+
+def _dead_beats_c(fmt, n, pattern, seed):
+    """c = +0 on every lane of a dead beat, 1.0 elsewhere, block by
+    block: SETACT c empties whole beats, which R19 then skips."""
+    rng = random.Random(seed)
+    lp, lb = lanes_per_beat(fmt), lanes_per_block(fmt)
+    one = sf.one_bits(fmt)
+    out = []
+    for blk in range(0, n, lb):
+        nb = -(-min(lb, n - blk) // lp)
+        dead = {"low half": {j for j in range(nb) if j < max(1, nb // 2)},
+                "odd beats": {j for j in range(nb) if j % 2},
+                "all but the last": set(range(nb - 1)),
+                "all but the first": set(range(1, nb)),
+                "random": {j for j in range(nb) if rng.random() < 0.5},
+                }[pattern]
+        for j in range(min(lb, n - blk)):
+            out.append(0 if (j // lp) in dead else one)
+    return out
+
+
+def _revive_programs():
+    """A producer that skips the beats a SETACT emptied, ACTALL, and the
+    producer's readers AT ONCE - a DEPOSIT, an ALU code, a SETACT, an
+    STX's index - which must issue the revived beats and read in them
+    what the producer left there (the value from before it, since it
+    skipped them). The indexed pair is a program of its own, run at two
+    lengths: its whole-depth wipe is most of any run's cost."""
+    F, I, IOR = sf.OP_FMA, sf.OP_IADD, sf.OP_IOR
+    S = seq.FLAG_SCRATCH_IO
+    return (
+        ("an FMA and an LDL skip, ACTALL, their readers at once", [
+            seq.alu(IOR, 3, 0, 0),              # r3 = a, the old value
+            seq.alu(IOR, 4, 1, 1),              # r4 = b, the old value
+            seq.stl(1, 4),
+            seq.setact(2),                      # empties whole beats
+            seq.alu(F, 3, 0, 1, 3),             # skips them
+            seq.ldl(4, 4),                      # skips them too
+            seq.actall(),
+            seq.deposit(3), seq.deposit(4),
+            seq.alu(I, 5, 3, 4),
+            seq.deposit(5),
+            seq.setact(3), seq.deposit(0),
+            seq.halt()], 4, S, 5),
+        ("an index and an LDX skip, ACTALL, read at once", [
+            seq.alu(IOR, 4, 1, 1),
+            seq.alu(I, 10, 2, 0, kb=True),      # r10 = c + 5, an index
+            seq.stx(0, 10),
+            seq.setact(2),
+            seq.alu(I, 10, 10, 1, kb=True),     # skips: r10 = c + 14 live
+            seq.ldx(4, 10),                     # skips, fires at H
+            seq.actall(),
+            seq.deposit(4),
+            seq.stx(1, 10), seq.ldx(12, 10), seq.deposit(12),
+            seq.halt()], 2, S, 1),
+        ("a chain through skipped beats, ACTALL, read at once", [
+            seq.alu(IOR, 3, 0, 0),
+            seq.setact(2),
+            seq.alu(F, 3, 3, 1, 0), seq.alu(F, 3, 3, 1, 0),
+            seq.alu(F, 3, 3, 1, 0), seq.stl(3, 0), seq.ldl(4, 0),
+            seq.actall(),
+            seq.alu(I, 5, 3, 4), seq.deposit(5), seq.deposit(3),
+            seq.halt()], 2, S, 1),
+    )
+
+
+@cocotb.test()
+async def beats_revived_by_actall_are_read_at_once(dut):
+    """verifier-R4's live_late3: the vector of beats with a live lane is
+    what the issue skips by, so it must follow the mask at once. After
+    ACTALL the next code must issue every beat again - here the readers
+    straight after it, of producers that skipped the beats a SETACT had
+    emptied - or the revived lanes read nothing and write nothing."""
+    bench = Bench(dut)
+    await bench.start()
+    for name in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        consts = [_int_bits(fmt, 5), _int_bits(fmt, 9)]
+        for label, insns, maxdep, flags, nsout in _revive_programs():
+            prog = seq.Program(fmt, insns, consts=consts,
+                               max_deposits=maxdep, flags=flags,
+                               n_scratch_in=0, n_scratch_out=nsout)
+            lp, lb = lanes_per_beat(fmt), lanes_per_block(fmt)
+            ns = ((2 * lp, lb) if "LDX" in label
+                  else (lp, 2 * lp, 3 * lp, lb, lb + lp))
+            for k, n in enumerate(ns):
+                for pattern in ("low half", "all but the last"):
+                    seed = 7500 + 13 * n + k
+                    await bench.program(
+                        fmt, prog, dense(fmt, n, seed),
+                        dense(fmt, n, seed + 1),
+                        _dead_beats_c(fmt, n, pattern, seed + 2), n,
+                        f"{name} {label}, {pattern}, n={n}")
+    dut._log.info(f"revived beats: {bench.cases['program']} runs")
+
+
+@cocotb.test()
+async def actall_waits_for_an_ldx_in_g_and_h(dut):
+    """ACTALL widens the mask, so every beat before it must have taken
+    its row first - an LDX's at H, two steps after F, whether the LDX
+    rides the array or writes the file itself (fast). Without G and H in
+    the pipe's idle, ACTALL straight after an LDX lands while the LDX's
+    last beat is in G, and at H that beat writes the lanes the mask had
+    dropped. verifier-R4's test_r4b.py (scratch), carried here: every
+    index in range and the value loaded each lane's own non-zero a, so a
+    wrong write shows in the deposit. With the LDX fast (the queue empty
+    of arithmetic) and not (an FMA straight before it), and with the
+    drop on the odd lanes and on the last lane of each block, whose beat
+    is the LDX's last - so a block of one fp256 lane sees it too - at
+    one beat, two, and a whole block."""
+    bench = Bench(dut)
+    await bench.start()
+    F, I, IXOR = sf.OP_FMA, sf.OP_IADD, sf.OP_IXOR
+    for name in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        lb = lanes_per_block(fmt)
+        for behind in (False, True):
+            prog = seq.Program(fmt, [
+                seq.alu(IXOR, 31, 0, 0),              # r31 = 0
+                seq.alu(I, 10, 31, 0, kb=True),       # r10 = 5, in range
+                seq.stx(0, 10),                       # scratch[5] = a
+                seq.setact(1)]                        # b = +0 drops a lane
+                + ([seq.alu(F, 20, 0, 1, 1)] if behind else [])
+                + [seq.ldx(4, 10),                    # survivors load a
+                   seq.actall(),                      # straight after
+                   seq.deposit(4),                    # a dropped lane: +0
+                   seq.halt()], consts=[_int_bits(fmt, 5)], max_deposits=1)
+            lp = lanes_per_beat(fmt)
+            for n in (lp, 2 * lp, lb):
+                a = dense(fmt, n, 9100 + n)
+                e = dense(fmt, n, 9200 + n)
+                # the odd lanes and each block's last lane dropped
+                out = [i % 2 == 1 or i % lb == lb - 1 or i == n - 1
+                       for i in range(n)]
+                b = [0 if out[i] else e[i] for i in range(n)]
+                c = dense(fmt, n, 9300 + n)
+                want = await bench.program(
+                    fmt, prog, a, b, c, n,
+                    f"{name} ACTALL after an LDX"
+                    f"{' behind an FMA' if behind else ''}, n={n}")
+                dropped = [i for i in range(n) if out[i]]
+                assert all(want.deposits[i] == 0 for i in dropped), (
+                    "precondition: a dropped lane deposits +0 in the model")
+    dut._log.info(f"ACTALL after an LDX: {bench.cases['program']} runs")
 
 
 # ======================================================================

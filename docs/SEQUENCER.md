@@ -15,6 +15,14 @@ sections at the end of this file are the record of revisions 2 through
 updated to describe the model as it now is. VERSION 0xA00, CAPS[7:4]
 and CAPS2[10:0].*
 
+*Revision 7 (2026-09-29) changes what a program COSTS and nothing a
+program can observe: **R18**, the control codes that walk the block's
+beats go through the issue pipe one beat a cycle and wait only for what
+they read; **R19**, a beat with no active lane is not issued and a
+stream beat no lane can read is not loaded. It is simulated and benched
+against the model; no image carries it yet. Its section is the last in
+this file, and R12 to R15 carry notes where it changed them.*
+
 *Revision 6 is on silicon. The round-2 single tile (VERSION 0xA00,
 built from 5b7aa19 at 135 MHz) ran its programs, gathers, masks and
 reductions on the U50 on 2026-09-15 - after two HOST defects the card
@@ -916,9 +924,11 @@ rather than `LATENCY` with one ALU busy - a factor of `lanes_per_beat *
 LATENCY` more work per cycle than the naive schedule. Since revision 5
 (R12 to R15 below) the instructions overlap: the next issues while this
 one retires, so an independent instruction costs its beats and, on a
-single-pass tile, a dependent one about `LATENCY + 1`; only a control
-code that reads the file, moves the mask or ends the block still waits
-for the results to land.
+single-pass tile, a dependent one about `LATENCY + 1`. Until revision 7
+a control code that read the file, moved the mask or ended the block
+still waited for the results to land; since R18 the codes that walk the
+beats go through the same pipe and wait only for a result they read,
+and only what ends the block waits for everything.
 
 Two things the state machine does not need, both because the early
 exit is allowed to be late (P3): the `any(active)` reduction can use
@@ -1541,6 +1551,10 @@ entry for a stream nothing read (found by round 2's V1). A program that
 reads r0 alone (a square root, the normal-only mask) loads one stream
 instead of three.
 
+*Since revision 7 (R19)* a stream that IS read loads only the beats a
+lane the caller has sits in - from the first to the last, one burst -
+and nothing for a block whose lanes are all masked.
+
 ### R11. The drains, one element and one beat a cycle
 
 The deposit drain spent three states an element (address, bank read,
@@ -1614,6 +1628,17 @@ these prices. Letting a control code join the overlap when nothing in
 the queue writes what it reads is a revision-7 item in
 docs/ROADMAP.md's debts, beside beat skipping.
 
+*Revision 7 (R18) changed both halves of this section.* The wait is
+gone: a control code that walks the beats waits only for a queued
+result it reads, a beat at a time, and the loads are queued producers
+themselves. And the inference above - "so the cost is the drain ...
+and not the memory" - was half of it. The STL/LDL pair ran in a loop
+with no arithmetic in it, so it had no drain to wait for: its four
+cycles a beat were the states each code walked the block in, three
+cycles a beat for a store, a deposit or a SETACT and five for a load.
+The SETACT row had both, the drain behind the arithmetic beside it and
+its own three a beat. R18 below prices each.
+
 ### R13. The one hazard, a beat at a time
 
 Read-after-write is the hazard that remains: an instruction that reads
@@ -1648,6 +1673,11 @@ apart, written twice in a row, read by a SELECT the previous
 instruction wrote, a masked lane beside an active one in every beat -
 over a block boundary, in two rounding attributes, fp32/64/128, against
 the model's one-at-a-time executor.
+
+*Since revision 7* this "landed" rule is also the one two control-code
+operands wait under: a SETACT's `ra` and an indexed code's `rb` (R18),
+which F reads straight from the bank rather than through R15's
+forwarding.
 
 
 
@@ -1707,6 +1737,18 @@ change mid-program, a register nothing wrote - at one, two, three,
 five, nine and sixteen beats and ragged between, across a block
 boundary, fp32/64/128, against the model.
 
+*What revision 7 changed here* (R18). The state is `S_ISSUE` now, and
+it addresses every instruction that walks the beats, not arithmetic
+alone: DEPOSIT, SETACT and the four scratch codes are admitted the way
+arithmetic is, and the continuation takes any of them. "Up to three in
+flight" still holds, but it counts the instructions that WRITE a
+register - arithmetic and, since R18, the two loads, which fire their
+value into the array and retire through the queue; DEPOSIT, SETACT and
+the stores act at F and take no queue slot. Every register operand of an
+admitted instruction, a control code's included, records its youngest
+queued producer the same way. An LDX adds two stages of its own (G and
+H, R18) and the rule that keeps every other beat two steps behind it.
+
 
 ### R15. Forwarding: a dependent beat takes its operand as it lands
 
@@ -1739,6 +1781,12 @@ Per instruction: 16 independent as before; a dependent one about 18
 - (653 - 18 - 297) / 19 = 17.8 - which is LATENCY + 1 - the fire is a registered request and the landing
 is what it waits for - so a dependent chain now costs what the array's
 depth costs and nothing more.
+
+*Since revision 7* a control code's DATA operand is forwarded the same
+way - the value a DEPOSIT, an STL or an STX moves - and the shadow
+beside `fs` carries more than validity: the row of active lanes each
+request fired with, which is what the retire now writes and forwards
+under (R18).
 
 ### What it measures
 
@@ -1897,8 +1945,9 @@ not one the caller has" the same sentence in the hardware.
 
 Everything else follows from the active bit, which already gates the
 register writes, the deposits and the FLAG contributions per lane
-(`wb_flags_or` ORs `lane_flags` under `wb_act`, the active mask as it
-stands at the edge the result returns). The three DRAINS are the
+(`wb_flags_or` ORs `lane_flags` under `wb_act`, which was the active
+mask as it stood at the edge the result returned, and since revision
+7's R18 is the row the beat FIRED with). The three DRAINS are the
 exception and are the only new arithmetic: they are deliberately not
 masked by the active bit - a lane that converged early still has
 deposits and scratch worth carrying - so each is masked by the
@@ -1944,6 +1993,12 @@ are changes to the machinery R14/R15 and R10 settled, neither is in
 this revision, and the numbers above are what says whether they would
 be worth making.
 
+*Revision 7's R19 made both*: a beat with no active lane is no longer
+issued, and a stream beat no lane the caller has sits in is no longer
+loaded, so a mask that empties whole beats - and a SETACT that does -
+now buys their compute too. Its section at the end of this file has the
+numbers; the table above is its before-side.
+
 On the card the fetch is one HBM round trip a block rather than the
 four cycles model RAM charges (the read side carries ONE burst at a
 time - R16's last paragraph), and the saving is unchanged, so the
@@ -1957,6 +2012,639 @@ bits in `cft.h`, the model's signature, and a refusal by name on every
 backend for every new field. The parcels replace the refusals; the
 lead's seam tests hold the two together once both exist.
 
+
+## Revision 7 (2026-09-29): the control codes in the pipe, and the beats no lane needs
+
+Two changes to `rtl/cft_seq.sv`, parcel P1 of the revision-7 round
+(docs/ROADMAP.md, "Revision 7"), and no change to anything a program, a
+host or a bitstream's caller can observe: the same deposits, counts,
+flags, STATUS and scratch-out as the round-2 images and the model, the
+same CAPS, no new bit - only fewer cycles. The model still runs one
+instruction at a time to completion and is the definition; the machine
+runs them overlapped and is held to it bit for bit by the benches below.
+Revision 7's third item, the program limits raised per build, is a
+capacity rather than a cost and is recorded with the capacities.
+
+### R18. The control codes join the overlap
+
+**What it cost before.** Until this revision every control code that
+read the file, moved the mask or ended the block waited for the queue of
+results to empty (R12), and then walked the block's beats in states of
+its own: DEPOSIT, SETACT and a store three cycles a beat, a load five.
+The card priced the whole at about four cycles a beat (R12's note), and
+the ODE census at 5.1 to 5.2 arithmetic instructions a scratch access
+(docs/VALIDATION.md, steps 0 and 1a). It was both costs: a code after
+arithmetic waited LATENCY and a few cycles for the drain, and every code
+then walked sixteen beats at three or five.
+
+**The rule, per code.** The six codes that walk the beats are admitted
+into R14's pipe exactly as arithmetic is - A addresses a beat, B reads
+it, F uses it, one beat a cycle - and each waits, a beat at a time, only
+for a QUEUED producer of a register it reads (R13 to R15's `dep_v` and
+`dep_pos`, gated by the code's own read set rather than by `ka`/`kb`/`kc`,
+which a control code may not set):
+
+| code | reads | writes | at F | its wait |
+|---|---|---|---|---|
+| `DEPOSIT ra` | `ra` | the deposit banks, its beat's counts | acts | `ra`, forwarded |
+| `SETACT ra` | `ra` | its beat's row of `active` | acts | `ra`, landed |
+| `STL ra, slot` | `ra` | the scratch | acts | `ra`, forwarded |
+| `STX ra, rb` | `ra`, `rb` | the scratch | acts | `ra` forwarded, `rb` landed |
+| `LDL rd, slot` | - | `rd` | writes, or fires | a queue slot |
+| `LDX rd, rb` | `rb` | `rd` | addresses; writes or fires at H | `rb` landed; a queue slot |
+
+- **Forwarded or landed.** A DATA operand - the value a DEPOSIT, an STL
+  or an STX moves - is forwarded at F as an ALU operand is (R15). The two
+  operands that feed deeper logic wait under R14's rule instead, "the
+  producer's beat has landed", and are read straight from the bank: a
+  SETACT's `ra`, which the magnitude test turns into `active`, and an
+  indexed code's `rb`, which becomes the scratch address. Both paths
+  are then the ones the old states had, with no forwarding mux in front,
+  at the three cycles forwarding saves on a dependent link.
+- **The loads are producers.** `LDL` and `LDX` write a register, so they
+  take a queue slot at admission; the queue is in order, so a write after
+  a write lands in order, and a later instruction that reads `rd` waits
+  on the load per beat like on any producer. The value reaches the file
+  through the one retire path there is: the load FIRES it into the array
+  as IOR(v, v), the integer group's bitwise OR, which gives v back bit
+  for bit at every format and raises no flag (`softfloat.ior`,
+  `cft_simpleops`, held to each other at every format by the four pipe
+  benches, whose `SIMPLE_OPS` include it). That is
+  a schedule over a verified operation, not arithmetic of the
+  sequencer's own (P1), and the retire takes no flag from a load in any
+  case (below).
+- **An LDL** knows its slot at A, so A puts the scratch's read address
+  out with the file's, and the value is there at F. **An LDX** takes its
+  slot from `rb`, which reaches the bus only at F: F forms the per-bank
+  address (and R8's suppression), a stage G reads the scratch, and a
+  stage H fires the value - two steps after a beat addressed with it
+  would fire. So a beat that is NOT an LDX waits at A while an LDX beat
+  is in B or F: two bubbles after an LDX, none before one, none between
+  two. That keeps every fire in program order and gives the scratch's
+  read address one owner a cycle.
+- **A store, then a load of the same slot.** A store's bank write lands
+  at the end of step A+3; an LDL reads at A+1 of its own, an LDX at A+3
+  of a later A. So an LDL waits at A while a store beat is in B or F,
+  whatever the slots and whatever the beats - which means at every block
+  length: at sixteen beats a store straight before a load still costs two
+  cycles (verifier-R4 measured ten such adjacencies at twenty cycles a
+  block beside the same program with an IAND where the store is, and
+  `store_then_load_costs_what_the_sentence_says` holds that as an upper
+  bound). Only a store and a load of the SAME beat can meet - the scratch
+  is addressed {slot, beat} - so a rule that compared the beats would bind
+  only on a block of one or two beats, or across skipped beats: a possible
+  gain, not built. An LDX needs no such wait, and a store after a load
+  needs none: the load has read.
+
+**Fast loads: the send-back (2026-09-29).** A load's value first went
+into the file only through the array, as above. At sixteen beats the
+pipelining hides the array's sixteen stages; at ONE beat nothing does,
+and verifier-R4 measured a program that uses a loaded value at once
+running slower there than on f681dee's tile, whose LDL wrote the file
+itself in five cycles - and, on a multi-pass tile, where the array takes
+a beat every pass period, loads and their users slower at every block
+length, up to twice as slow at fp256. So a load is now FAST when, at its
+admission, every queued writer ahead of it is a fast load too (an empty
+queue included):
+
+- It keeps its queue slot, so everything that reads its register tracks
+  it exactly as any producer; but its value never enters the array. The
+  retire's own write port writes it into the file at F (an LDL) or H (an
+  LDX), under the row the beat fires with - the row the array path fires
+  with - the head's reach `wb_bt` moves as a landing moves it, and the
+  slot pops at the block's last beat. A load raises no flag either way.
+- The port is free: every writer ahead of a fast load is fast and writes
+  in program order, one beat a step, popping before the next one's first
+  write; every writer behind it fires after its last F (an LDX's last H,
+  which the gap guarantees) and lands LATENCY + 1 later. So no array
+  result lands while a fast load writes, a fast load is the head whenever
+  it writes, and writes to its register stay in program order - RAW, WAW
+  and WAR as for any producer.
+- Its reader waits for exactly its write, by R14's "landed" rule, on
+  every port (the write moves `wb_bt`); forwarding's look-ahead has no
+  landing to look at. The scratch rules do not move: a fast LDL still
+  reads the scratch between A and F, a fast LDX at G, so the gap and the
+  store-then-LDL wait are what they were.
+- A load that cannot be fast rides the array, as above, on a single-pass
+  tile - a full block hides the depth, and waiting would give the gain
+  back. On a MULTI-PASS tile it waits at decode until it can be fast
+  (every array writer ahead of it has landed): there a load through the
+  array costs sixteen pass periods to issue and sixteen more for its user
+  to wait, where f681dee's load waited for the same drain and then took
+  five cycles a beat. After the wait it takes one.
+
+Measured by `loads_cost_no_more_than_before` (Verilator, the unit
+bench's capacities): verifier-R4's seven load-heavy programs at one, two
+and three beats of lanes and at four whole blocks, every format - 112
+rows at each MUL_PASSES - and, since, three more (below). Cycles from
+start to done, f681dee's tile -> e610b78's (R18 and R19, before the
+send-back) -> now:
+
+| program | size | MUL_PASSES 1 | MUL_PASSES 10 |
+|---|---|---|---|
+| ten times: LDL, DEPOSIT of it | fp32, one beat | 294 -> 336 -> 234 | 294 -> 366 -> 234 |
+| ten times: LDL, DEPOSIT of it | fp256, one beat | 224 -> 266 -> 164 | 224 -> 1,783 -> 164 |
+| ten STL/LDL pairs on one register | fp32, one beat | 373 -> 431 -> 311 | 373 -> 461 -> 311 |
+| eight times: LDL, FMA of it, STL of that | fp32, one beat | 620 -> 632 -> 619 | 620 -> 680 -> 545 |
+| eight times: LDL, FMA of it, STL of that | fp256, one beat | 613 -> 625 -> 612 | 1,780 -> 3,053 -> 1,698 |
+| twenty LDLs, DEPOSIT of the last | fp256, four blocks | 8,312 -> 2,832 -> 2,820 | 8,312 -> 14,916 -> 2,820 |
+| twenty LDXs, DEPOSIT of the last | fp256, four blocks | 23,488 -> 18,016 -> 18,004 | 23,488 -> 30,081 -> 18,004 |
+| eight times: LDL, FMA of it, STL of that | fp256, four blocks | 7,005 -> 3,121 -> 3,113 | 15,969 -> 17,117 -> 12,291 |
+
+At MUL_PASSES 1, e610b78 was slower than f681dee on 12 of R4's 112 rows -
+three programs at one beat, at every format - and at MUL_PASSES 10 on 74:
+fp128 and fp256 at every size, fp64 at one to three beats, fp32 at one and
+two. Now none is, at either: every row is faster than f681dee's. The
+closest is the census chain at one beat on the single-pass tile, 620 ->
+619; at MUL_PASSES 10 every one of the 112 is at least 60 cycles under.
+The bench holds every row it runs to f681dee's cycles at either
+MUL_PASSES. It runs every size but four blocks at fp32 and fp64, where
+e610b78 was faster than f681dee already and which cost most of its time;
+those rows are measured, and recorded in its table. e610b78's own rows
+are red against it at both MUL_PASSES (12 and 74, every one at a size it
+runs).
+
+R4's seven programs are fixed by fast loads alone: with the multi-pass
+policy planted out - a load that cannot be fast rides the array on a
+multi-pass tile too - not one of their rows is slower than f681dee's.
+None of them has a load straight behind an array writer still in
+flight: every load finds the queue holding only loads, or, in the
+census chain, its store has already waited for the FMA. The hold's
+last three programs are that shape - eight times an FMA nothing reads
+and a load behind it, then a deposit of the load, or an FMA of it - and
+there, at MUL_PASSES 10, riding the array is slower than f681dee's
+wait-then-load at fp256 over four blocks: 15,724 -> 16,682 cycles with
+an LDL, 31,681 -> 32,611 with an LDX. The policy makes them 12,523 and
+28,483, so it stays, held by those rows; with it planted out the bench
+is red on them. It is not the faster choice everywhere: behind an FMA
+of the loaded value at fp128 over four blocks riding costs 9,105 and
+the policy 9,427, both under f681dee's 11,862. At MUL_PASSES 10 and one
+beat, at fp64, fp128 and fp256 - the rungs whose pass period is more
+than one - the policy is under f681dee's on all nine rows: by 43 to 87
+cycles on eight, and by 3 on the LDL and its deposit at fp256 (1,645
+against 1,648), less than that rung's pass period of 10. Riding is
+under f681dee's by 40 to 91 cycles at fp64 and fp128, and within two
+cycles of it, either way, at fp256 (1,650, 5,621 and 1,884 against
+1,648, 5,621 and 1,886). Neither is always the faster of the two: the
+policy is faster by 40 to 85 cycles on three rows (the LDX at fp128
+and fp256, the LDL and an FMA of it at fp256), riding by 23 and 35 on
+two (the LDL and its deposit at fp64 and fp128), and the other four
+differ by 5 cycles or less. (Until verifier-R4 measured them, this
+said that at one beat the three were within a pass period of each
+other; one row of the nine is.) On the single-pass tile the same three
+programs ride the array and are well under f681dee at every size (fp32,
+one beat, the LDL and its deposit: 541 -> 439).
+
+**The pass phase: a multi-pass tile's cycle counts are exact to a pass
+period, not to a cycle.** The array's enable counts wall cycles from the
+reset (`ph` in `rtl/cft_lanes.sv`), so a run starts at whatever phase of
+the pass period the runs before it left, and a count with arithmetic in
+it moves with that phase by up to a period less one - measured: f681dee's
+census chain at fp256 cost 1,937 cycles in one run of the hold and 1,945
+in another, with nothing else changed but the runs before it. So a hold
+that compares a count with a before-side measured in another run must
+allow that much at MUL_PASSES above 1, and
+`loads_cost_no_more_than_before` does (up to nine cycles at fp256, none
+at fp32, whose period is one); the older holds' ceilings sit hundreds of
+cycles clear of their counts. On the single-pass tile a count is exact
+and repeats to the cycle (98 of 98 rows, run twice).
+
+On the single-pass tile a load behind an array writer still rides the
+array, which a full block hides and a short one does not. fp32's census
+chain costs 619, 638 and 659 cycles at one, two and three beats there,
+and 545, 564 and 585 on the multi-pass tile - single-pass at fp32 too,
+but it forwards nothing, so each store waits for its FMA to land and the
+next load goes fast. At four blocks riding wins, 3,673 against 3,713. A
+single-pass tile that waited on a short block would take those cycles: a
+possible gain, not taken, since no row is slower than f681dee's without
+it.
+
+**The mask, and when it is sampled.** The active bit decides what a
+result WRITES, and until this revision the retire read it when the
+result came back (`row_act_fn(active, wb_bt)`) - right only because no
+code could move the mask before the queue had emptied. A SETACT now
+narrows the mask at F while earlier results are still in the array, so
+the row is taken when a beat FIRES: it rides beside the request
+(`al_row`) and down a shadow of the array's validity line (`fr`, beside
+`fs`, shifting on the array's own enable, so it is exact on every tile),
+and the retire writes, forwards and ORs flags under it. A second shadow
+bit (`fq`) is off for a load, so "a load raises no flag" does not rest
+on IOR's. `ACTALL` widens the mask, so it waits for the PIPE to empty -
+every earlier beat has taken its row - and not for the queue. REPEAT and
+ENDREP wait for nothing, as before: the mask they test can be stale only
+on the wide side (a SETACT still narrowing it), which runs one more
+iteration with every lane inactive - a no-op by P3, which is what the
+early exit was always allowed.
+
+**What ends the block** - HALT, an unknown code, an unmatched ENDREP,
+the implicit halt, a skip past the end - waits in `S_DRAIN_SETUP` for
+the queue AND the pipe: every result landed, every deposit and store
+written, before a drain reads them. Before, HALT, an unknown code and
+the implicit halt waited for the queue, and an unmatched ENDREP and a
+skip past the end went straight on - only an image that bypassed the
+loader reaches either of those two.
+
+**What it costs now.** `make seqcycles`, four blocks, cycles a block,
+before (f681dee's tile, run on c183e84) and after (1268bc9):
+
+| program | fp32, 128 lanes | fp64, 64 lanes | fp128, 32 lanes |
+|---|---|---|---|
+| twenty IANDs (the reference) | 607 -> 557 | 527 -> 477 | 487 -> 437 |
+| twenty STLs, independent | 1,598 -> 865 | 1,518 -> 785 | 1,478 -> 745 |
+| twenty LDLs, independent | 2,220 -> 850 | 2,140 -> 770 | 2,100 -> 730 |
+| ten STL/LDL pairs on one register | 1,740 -> 717 | 1,660 -> 637 | 1,620 -> 597 |
+| ten STX/LDX pairs | 5,712 -> 4,680 | 5,632 -> 4,600 | 5,592 -> 4,560 |
+| twenty SETACTs | 1,287 -> 554 | 1,207 -> 474 | 1,167 -> 434 |
+| ten IAND, SETACT pairs | 1,155 -> 572 | 1,075 -> 492 | 1,035 -> 452 |
+| ten IANDs, each stored | 1,288 -> 715 | 1,208 -> 635 | 1,168 -> 595 |
+| ten LDLs, each used | 1,590 -> 716 | 1,510 -> 636 | 1,470 -> 596 |
+| sixteen DEPOSITs | 2,951 -> 2,393 | 1,911 -> 1,353 | 1,397 -> 839 |
+| HALT alone | 61 -> 61 | 45 -> 45 | 37 -> 37 |
+
+The first nine programs each end in one deposit, and each gains about 50
+cycles a block from that alone - the deposit no longer waits for the
+drain and walks its beats at one a cycle, which is why the twenty-IAND
+reference moves too. Twenty stores cost what twenty IANDs cost once the
+per-block wipe of the twenty slots they name (320 cycles, the same
+before and after) is taken out; so do twenty loads and twenty SETACTs.
+A static scratch access is about one cycle a beat where it was about
+four. The STX/LDX row is mostly the whole-depth wipe an indexing program
+pays (4,096 cycles a block at 256 slots), which neither item touches.
+Nothing got slower: every row of the table, and every row of R16's and
+R17's, is at or below its before-side. The send-back's fast loads, below,
+then took a little more from the four rows with a load in them, the same
+at each format: twenty LDLs 3 cycles a block (850 -> 847 at fp32), the
+STL/LDL pairs 10 (717 -> 707), the STX/LDX pairs 1 (4,680 -> 4,679) and
+the used LDLs 1 (716 -> 715); every other row is 1268bc9's to the cycle
+(`make seqcycles` at 7f1d56b's RTL).
+
+**Held, and on the real programs.** `control_codes_hold_their_overlap`
+in `tb/test_seq_core.py` runs two control-code-heavy programs at fp32
+over four blocks, scores them against the model, and fails if either
+costs its ceiling or more: 24 independent codes (a store, a load and a
+SETACT, eight times) cost 2,011 cycles a block on f681dee's tile and 898
+now, against a ceiling of 1,400; eight times a load, an FMA of what it
+loaded and a store of what the FMA made - the census's pattern, every
+code waiting on the one before it - cost 1,891 before and 918 now (928
+on the multi-pass tile, which forwards nothing; 920 and 960 until the
+send-back's fast loads, below), against the same ceiling. The bench is
+red on f681dee's tile, which is what a hold is for.
+
+`krnl_ode_programs` in `tb/test_krnl_seq.py` runs `programs/gen_odes.py`'s
+three programs through the whole kernel with their committed banks,
+their segments cut to a few steps, bit-exact against the model on both
+tiles; cycles from start to done, f681dee's tile -> R18's (4b790b4, before
+R19 and before the send-back's fast loads below, which move every row
+with a load in it):
+
+| program, steps | fp64, 64 lanes | fp64, 5 lanes | fp256, 16 lanes | fp256, 3 lanes |
+|---|---|---|---|---|
+| Lorenz-96, 2 at fp64 and 1 at fp256 | 156,589 -> 67,318 | 47,948 -> 39,485 | 78,992 -> 34,363 | 30,359 -> 23,235 |
+| Lorenz-63, 10 and 4 | 10,521 -> 10,196 | 5,243 -> 5,191 | 4,593 -> 4,281 | 2,487 -> 2,422 |
+| Henon-Heiles, 10 and 4 | 4,099 -> 3,670 | 1,915 -> 1,863 | 2,071 -> 1,642 | 1,083 -> 992 |
+
+Lorenz-96, 692 scratch accesses in a 1,452-instruction step, runs 2.3
+times as fast in a full block at either format. In a block of two or
+three beats it gains a quarter: there every instruction waits out the
+array's depth for the one before it, which neither the old machine nor
+this one could hide. The other two programs deposit nothing and touch
+the scratch only on the way in and out of the segment, and gain what
+those few accesses cost. These are simulated cycles with model RAM; the
+card's round trips are the lead's to measure.
+
+**The benches.** In `tb/test_seq_core.py`, all against the model:
+`control_codes_at_every_block_length` (one program with every shape
+above - a code reading a destination in flight and one reading nothing
+queued, a store then a load of the same slot, a load into a register a
+queued FMA writes in both orders, a store reading a register the next
+instruction overwrites, indexed codes with a computed index and with a
+loaded one, two LDXs back to back, a loop that loads, stores and
+narrows, the mask moving while an FMA is in flight, SETACT reading a
+loaded register, ACTALL - at one, two, three, five, nine and sixteen
+beats and ragged, across a block boundary, fp32/64/128, modulo and
+strict); `mask_moves_while_results_are_in_flight`, the smallest program
+that says when the bit is sampled; `halt_right_after_arithmetic`, HALT
+and the implicit halt behind an FMA, a store and a deposit;
+`control_code_fuzz_at_short_blocks`, programs of mostly control codes
+over four registers and four slots; `loads_carry_every_bit_pattern`,
+every encoding a pass-through could get wrong - both zeros, both
+infinities, quiet and signalling NaNs of both signs with payloads,
+subnormals, the largest finite - stored and loaded through all four
+scratch codes at one beat, sixteen and ragged, at every format, in a
+program with no arithmetic, so FLAGS must be the model's zero; and
+`control_codes_hold_their_overlap`, the hold. Since the send-back, too:
+`fast_loads_at_every_block_length` (every shape a fast load meets - first
+in the block, back to back in all four orders of LDL and LDX, read at
+once by every kind of reader, a load into a register a queued FMA
+writes, a loop that loads what it stores, strict past the depth, the
+mask narrowing while a fast load writes); `loads_cost_no_more_than_before`
+and `store_then_load_costs_what_the_sentence_says`, the holds above; and
+four cases from verifier-R4's shapes, each for a fault R4 planted that
+every case before it passed - `an_index_a_queued_instruction_writes`
+(an LDX whose index an IADD, a fast LDL or an LDX still in flight
+writes, at one to three instructions' distance),
+`the_mask_is_taken_at_fire_not_at_issue` (a SETACT that drops lanes
+and, straight after it, codes whose dropped lanes would raise a flag,
+report a strict index or take a load's write - it binds where the next
+code is addressed by continuation within two steps of the SETACT's
+beat: a block of two beats, or a long block whose lane mask leaves one
+or two beats alive), and `actall_waits_for_an_ldx_in_g_and_h` (R4's own
+test_r4b: ACTALL straight after an LDX, fast and not, whose dropped
+lanes load a value they do not hold).
+In `tb/test_krnl_seq.py`,
+`krnl_ode_programs` runs the three ODE programs of `programs/gen_odes.py`
+through the whole kernel at a full block and a short one, fp64 and
+fp256. `the_whole_divide_and_root` and `the_pipe_at_every_block_length`
+run unchanged. The shapes, the mask case and the bit patterns run on the
+multi-pass tile too (`seq_coremc`, MC=10), where no operand is
+forwarded and the array takes a beat every three to ten cycles.
+
+**Timing, which only a bitstream measures.** What R18 adds is registered
+and shallow - the row a request fires with is a 16:1 select of flops into
+a register, the shadow a shift register, the retire's write enables now
+come from a register where they came from a select, and an LDX's two
+stages are registers - with three additions to paths that were already
+long: the issue stage's hold gains the two scratch rules (ANDs of
+registered bits, ORed in), the per-beat wait gains a 2:1 select between
+its two rules, and the request into the array gained two sources. The
+last is written so the forwarded operand still enters at the final 2:1
+level, as it did before; the other two are named in the round's ledger
+for the build.
+
+**The plants**, each in a fresh copy of the tree and each red for its
+reason - two the round asked for and four for this item's own rules:
+
+- DEPOSIT's wait removed (it no longer waits for the producer of `ra`):
+  red in all five cases it was run against, as deposits that differ
+  from the model ("fp32 control codes, modulo, n=8: 66/128 deposit slots
+  differ").
+- The mask taken at RETIRE again: red in the dedicated case ("FMA in
+  flight under a SETACT, n=8: 8/16 deposit slots differ"), the pipe case
+  and the fuzz. It passed the every-shape program, which never looked at
+  a dropped lane's result after an ACTALL; that program now deposits
+  one, and is red under it too ("fp32 control codes, modulo, n=8: 2/152
+  deposit slots differ").
+- No LDX gap: red in the fuzz as a HANG, two fires in one step losing a
+  request and the queue slot it would have released ("no `done` within
+  19696 cycles"). The every-shape program only ever put a beat that
+  DEPENDED on an LDX behind one; it now has an independent one, and is
+  red under it too, as a hang at fp32, n=9.
+- No store-then-LDL wait: red at the one-beat block ("n=8: 1/128 deposit
+  slots differ") and in the fuzz.
+- SETACT on forwarding's look-ahead while still reading the bank: red in
+  three cases, among them a FLAGS word the model does not have (0b00001
+  against 0b11001: the wrong lanes kept running).
+- ACTALL not waiting for the pipe: red in four of five, as deposits that
+  differ.
+
+verifier-R4 planted seven more in e610b78's sequencer, and the lead ran
+them against every bench (verifier-R4.md 09:18:53). Two were red in
+these cases already (an STX's index wait dropped; R19's live vector
+stale on the narrow side), and one can show in no answer (a load's flag
+enable left on: IOR raises no flag, above). Four passed every case here
+and were caught only by R4's own; each now has the case above that sees
+it, run on this revision's RTL with R4's edit ported (every anchor
+unchanged; the mask plant gains one edit, the fast write taking the
+carried row too, or it would not test the fast path):
+
+- An LDX's index dropped from its read set: red, "fp32 index in flight,
+  n=8: 40/64 deposit slots differ from the model".
+- The mask sampled at issue and carried down, not taken at fire: red,
+  "fp32 an FMA straight after the drop, n=16: FLAGS 0b10001, model says
+  0b10000".
+- ACTALL not waiting for an LDX's G and H (the pipe's idle forgetting
+  them): red, "fp32 ACTALL after an LDX, n=8: 4/8 deposit slots differ
+  from the model". R4's first case for it stayed green because its
+  dropped lanes indexed past the depth under SCRATCH_STRICT, so the
+  wrong write wrote the +0 they held; test_r4b loads a value they do
+  not hold. A fast LDX writes at H under the same row, so the answer
+  is the same with fast loads.
+
+### R19. A beat no lane needs is neither issued nor loaded
+
+**What it cost before.** The sequencer issued every beat of a block and
+let the active bit decide what was written, so a lane mask bought the
+bytes, the flags and the early exit and no compute: R17's table, where
+a run with every lane masked cost what a run with half of them masked
+cost, four cycles and one read a block above the dense run. The same
+was true of a lane a SETACT had dropped - an escape-time map whose lanes
+had converged paid for them to the end of the loop.
+
+**The rule.** The A stage walks the beats that have an active lane and
+jumps the rest: at each step it reads which beats of the block have a
+live lane in `active` (a registered copy, a cycle behind), issues the
+current beat if it has one, and moves to the next beat that has one.
+The mask A reads can only be
+WIDER than the one the beat would fire under - a SETACT still in the
+pipe narrows it, and ACTALL, the one code that widens it, waits for the
+pipe to empty (R18) - so a beat skipped at A is dead at F too, and a
+beat issued that has died by F is masked there as it always was.
+Nothing observable moves: a beat with no active lane writes nothing,
+deposits nothing and raises nothing.
+
+**What the retire needs.** The retire counted beats (`wb_bt`) and wrote
+the n-th result to beat n; with beats skipped, a result carries the beat
+it FIRED from, down the shadow beside the row (`ft`), and the retire
+writes, forwards and pops by that. An instruction that writes a
+register always issues the block's LAST beat, live or not - it fires
+under an empty row, writes nothing, and waits for no producer, since
+what it reads is never written anywhere - because its queue slot is
+released by the result on that beat; an instruction every lane had left
+would otherwise hold its slot for ever. `wb_bt` now means "the head's
+next beat not yet landed or skipped", which is what the per-beat wait
+reads.
+
+**The look-ahead, by tag (the send-back, 2026-09-29).** Forwarding lets a
+dependent beat be addressed two cycles before its producer's beat lands
+(R15). That reach was `wb_bt` plus the NUMBER of results landing within
+two cycles - exact while a producer's beats land one after another, and
+short of the mark once beats are skipped: a producer whose first issued
+beat is 3 or later, or whose issued beats have a gap, lands a beat the
+count cannot reach, so the dependent beat waited for the landing itself.
+Safe, and two cycles a link: on a latency-bound chain whose low beats a
+mask empties, verifier-R4 measured R19 about ten per cent slower than
+f681dee and than R18, whose idle beats sat under the array's latency for
+free. The reach is now by TAG - the highest beat + 1 among the results
+landing within two cycles, or `wb_bt` if that is more - formed a cycle
+ahead from the shadow and registered, so the path into the wait is a
+6-bit maximum where it was a 6-bit add. While a producer's beats land one
+after another the two readings are the same number, so no dense row
+moves; with beats skipped, the tag reaches any beat. A landing in the
+window that is not the head's is a younger instruction's, and then every
+beat of the head's has landed or is landing, so the maximum only says
+yes when yes is right.
+
+Measured by `masked_chains_cost_no_more_than_before` (Verilator, the
+single-pass tile, where forwarding exists): verifier-R4's chains of
+dependent FMAs and nothing else but HALT, sixty links and twenty, under
+six masks, at every format - 48 rows. Cycles from start to done over
+four blocks, fp32, sixty links:
+
+| mask | f681dee | R18 (1c82d4c) | e610b78 | now |
+|---|---|---|---|---|
+| every lane kept | 4,741 | 4,737 | 4,737 | 4,737 |
+| every other lane | 4,741 | 4,737 | 4,737 | 4,737 |
+| the high half masked | 4,741 | 4,737 | 4,529 | 4,529 |
+| the low half masked | 4,741 | 4,737 | 5,233 | 4,525 |
+| the low quarter masked | 4,741 | 4,737 | 5,281 | 4,573 |
+| the last lane only | 4,741 | 4,737 | 5,149 | 4,441 |
+| twenty links and a DEPOSIT, the low half masked | 2,620 | 2,416 | 2,520 | 2,280 |
+
+e610b78 was slower than f681dee, and than R18, on 26 of the 48 rows: the
+three masks that leave a block's first issued beat at 3 or later, at every
+format and both lengths, and at fp256, a lane a beat, every other lane,
+whose issued beats have gaps. Now no row is above R18's or f681dee's,
+and the fourteen dense rows - every lane kept, and every other lane below
+fp256, where no beat empties - are R18's to the cycle. The bench holds
+the 48 to f681dee's cycles; the chain that ends in a DEPOSIT is logged
+beside them. With the count-based reach planted back it is red on the
+same 26 rows (the plants, below).
+
+The same reach moved three of the probe's masked rows (`make seqcycles`
+at 7f1d56b's RTL; every other row is f349ca6's to the cycle), each the
+same at every format: in R19's table below, the low half of each block
+masked 4 cycles (1,649 -> 1,645 at fp32) and all but one lane a block 12
+(1,409 -> 1,397); and R17's half-masked fp256 row, 409 -> 405 against a
+dense 421. Each ends in a deposit of an IAND whose issued beats start at
+3 or later or have gaps: beats the count could not reach.
+
+**The loads.** A dense stream load reads from the first beat a lane the
+CALLER HAS sits in to the last, one burst, and nothing when there is
+none: a beat outside them holds no lane that can ever be active (ACTALL
+reactivates the caller's lanes and nothing else), so no issued beat that
+writes anything reads it. A masked beat between two live ones is still
+read - a second burst is a second round trip, which would cost more than
+it saves. The gathered streams (R16) and the scratch preload are
+unchanged.
+
+**What it costs now.** `make seqcycles`, four blocks, cycles for the
+run, twenty IANDs and a deposit (and, last row, twenty STLs), before
+(R18, 1c82d4c) and after (R19, f349ca6):
+
+| program, mask | fp32, 128 lanes a block | fp64, 64 | fp128, 32 | fp256, 16 |
+|---|---|---|---|---|
+| twenty IANDs, dense | 2,229 -> 2,229 | 1,909 -> 1,909 | 1,749 -> 1,749 | 1,669 -> 1,669 |
+| ...every other lane masked | 2,245 -> 2,245 | 1,925 -> 1,925 | 1,765 -> 1,765 | 1,685 -> 1,141 |
+| ...the low half of each block masked | 2,245 -> 1,649 | 1,925 -> 1,329 | 1,765 -> 1,169 | 1,685 -> 1,089 |
+| ...all but one lane a block masked | 2,245 -> 1,409 | 1,925 -> 1,089 | 1,765 -> 929 | 1,685 -> 849 |
+| ...every lane masked | 2,245 -> 1,385 | 1,925 -> 1,065 | 1,765 -> 905 | 1,685 -> 825 |
+| twenty STLs, every lane masked | 3,477 -> 2,389 | 3,157 -> 2,069 | 2,997 -> 1,909 | 2,917 -> 1,829 |
+
+A dense run costs what it did, and so does a mask that leaves a live
+lane in every beat - every other lane, below fp256 - because there is no
+beat to skip. A beat the mask empties costs nothing to issue: the low
+half of each block masked saves half of every instruction's beats, and
+at fp256, a lane a beat, every other lane is every other beat. What is
+left of an all-masked run is the block's own machinery - its setup and
+the mask's read - about four cycles for each instruction, about seven for
+an arithmetic one, and the drains, which R17 made keep a masked lane's
+place and lose its strobe. (This sentence said "one cycle for each
+instruction that writes a register, one bubble for each that does not"
+until verifier-R4 measured it: 7.0 cycles an arithmetic instruction and
+4.3 a store, fp32, every lane masked. An instruction whose only issued
+step is its first cannot take the next one by continuation, so each pays
+the fetch and decode; an arithmetic instruction's forced last beat still
+crosses the array, and the queue's three slots cover twelve of the
+array's seventeen cycles.) The
+stream reads fall from ten to six, the mask's four and the image's two.
+R17's own table moves the same way: one IAND and a deposit, every lane
+masked, 997 -> 865 cycles at fp32 and 437 -> 305 at fp256, where half
+masked is now 409 against a dense 421. Every other row of the probe -
+the dense table, R16's, R18's - is unchanged to the cycle.
+
+**Held.** `masked_beats_hold_their_saving` in `tb/test_seq_core.py`
+runs twenty IANDs and a deposit at fp32 over four blocks, answers held
+to the model, and fails if the low half of each block masked costs 485
+cycles a block or more, or every lane masked 450 or more: on this bench
+R18's tile costs 559.0 for both (verifier-R4 measured it; the 561.25
+this paragraph gave was the probe's figure, for the probe's program),
+and R19's costs 409.0 and 344.0 (410.0 until the send-back's look-ahead
+by tag, above).
+
+**The benches.** In `tb/test_seq_core.py`, against the model:
+`masked_beats_at_every_block_length` (masks that empty whole beats - the
+low half of each block, the high half, all but the last lane, all but
+the first, every lane, random sets of whole beats - over the pipe
+program, R18's control-code program and R17's own, at every format,
+from one beat to several blocks); `converged_beats_are_skipped` (the
+escape map with its seeds grouped by beat, so whole beats CONVERGE at
+different iterations and the SETACT-cleared bit is what the issue
+reads); `a_beat_no_lane_has_is_not_loaded` (the stream reads asserted
+as ADDRESSES - one burst a block from the first live beat to the last,
+none for a block with none); `beats_revived_by_actall_are_read_at_once`
+(verifier-R4's shape: a producer - an FMA, an LDL, an index and an LDX -
+that skips the beats a SETACT emptied, ACTALL, and its readers straight
+after, which must issue the revived beats); and the hold. Every R18 case
+runs on top, unchanged, and the multi-pass tile runs both items' cases.
+
+**The plants**, each in a fresh copy of the tree and each red for its
+reason:
+
+- A skipped beat still counted - the retire writes the n-th result of an
+  instruction to its n-th beat again, not to the beat it fired from: red
+  in all five cases it was run against, as answers that differ ("escape
+  map, whole beats converging, n=128: 280/1024 deposit slots differ").
+- A writer's last beat not forced: red in all five, as HANGS - an
+  instruction every lane had left fires nothing and never leaves the
+  queue. The control-code program hangs at one beat without a mask,
+  once a SETACT has emptied the beat.
+- The dense load back to the whole block: red only where it must be, in
+  the read-traffic case ("stream a read [(65536, 16), (66048, 16)], and
+  the mask says [(65792, 8), (66304, 8)]"); a load of a beat no lane can
+  read is a cost and not an answer, and every answer case passes under
+  it.
+- verifier-R4's live vector three cycles late: it passed every case
+  here, `converged_beats_are_skipped` among them, whose ACTALL is never
+  straight before a reader. Red in
+  `beats_revived_by_actall_are_read_at_once`: "fp32 an FMA and an LDL
+  skip, ACTALL, their readers at once, low half, n=8: 32/32 deposit
+  slots differ from the model".
+- The look-ahead by count again, in place of the tag (the send-back):
+  red in `masked_chains_cost_no_more_than_before`, "26 of 48 masked
+  chains cost more than on f681dee's tile, the first: fp32 60 links,
+  low half masked: 5233 against 4741" - e610b78's figures, to the
+  cycle.
+
+**Timing.** The live vector and the load's bounds are registered. What
+R19 adds to the issue stage's paths is a 16:1 select of a register (the
+current beat's live bit, into the hold and the pipe's valid) and a
+16-bit priority encoder (the next live beat, into `bt` and the
+admission) - both on paths the R18 note above already names as long.
+verifier-R4 read the paths revision 7 grew, from the RTL, and ranked
+them by risk; they are the list the next bitstream's routed report is
+read against:
+
+1. The admission: the instruction memory's read data, the writer
+   decode, the priority encoder, `bt` - about two levels of logic before
+   R19 and nine to eleven after. The lead's out-of-context run of the
+   merged tree at the U50's capacities names it u_seq's worst path,
+   instruction memory to `bt`, eighteen levels with the block-RAM
+   cascade, +1.885 ns at 135 MHz (before the send-back).
+2. `rd_hold`, into the queue's and the dependencies' registers: about
+   three more levels, at high fanout.
+3. The forwarded `op_a` now also drives the scratch's write data and
+   the deposit buffer's (`scr_wdata`, `db_wdata`): two more 256-bit
+   register sets on its load.
+4. The scratch's read into the array: measured in the same run, +4.280
+   ns.
+
+The send-back adds, read from the RTL and not synthesised:
+
+- The file's write data gains a fourth source, the loaded value - the
+  scratch's read register, through a 2:1 a word - and its write address
+  and enables a 2:1 each, the enables between two row selects of
+  registers. Shorter than the array's own path into the same registers.
+- The pop becomes the OR of the array's and a fast write's, the latter a
+  6-bit compare of the beat with the block's last; through the pop, the
+  queue's room and the admission (item 1), which also gains an AND over
+  at most two registered queue flags (`all_fast`). On a multi-pass tile
+  that AND also gates the admission of a load (the policy); on the
+  single-pass tile the gate is a constant and folds away.
+- The per-beat wait's reach (`wb_soon`, into `rd_hold`, item 2): a 6-bit
+  maximum of `wb_bt` and a register (`win_q`) where it was a 6-bit add
+  of `wb_bt` and a two-bit count. The window behind the register is
+  three 6-bit increments and a three-way maximum, off every other
+  path.
 
 ## Revision 7, the program limits per build (2026-09-29)
 
