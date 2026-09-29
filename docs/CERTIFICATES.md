@@ -1187,19 +1187,19 @@ either: a known limit, not a regression.
 
 Measured on verifier-C7's case (flagstep, 1,048,576 lanes, a main and
 two half-step runs), the least `ulimit -v` it writes the certificate
-under in WSL is 164,128 kB at 99f1b43, 250,744 kB at 4eed552, and
-147,744 kB now. Its peak commit on the desktop is 157,936 to 157,984
-KiB at 99f1b43 and 141,532 to 141,568 KiB now. In verifier-C7's sweep
-of 96 small shapes in WSL (flagstep; 1, 16 and 256 lanes; two or three
-runs; a main run of 10 to 500 segments and half-step runs of twice
-that; open and keyed), the tool writes its certificate, the same bytes,
-under the least `ulimit -v` 99f1b43 writes it under, in all 96; eb2d1ae
-fails there in 24. On the desktop, under a job's commit limit of 5,680
-KiB, the smallest of them (1 lane, a main run of 100 segments and a
-half-step run of 200) is written by 99f1b43 and by the tool, 3 times of
-3, and by eb2d1ae 0 of 3; across 72 of the shapes the tool's peak
-commit is 99f1b43's within the several pages that separate identical
-runs there (2026-09-29).
+under in WSL is 164,128 kB at 99f1b43, 250,744 kB at 4eed552, 147,744
+kB at eb2d1ae and 147,748 kB now. Its peak commit on the desktop is
+157,936 to 157,984 KiB at 99f1b43 and 141,504 to 141,572 KiB now. In
+verifier-C7's sweep of 96 small shapes in WSL (flagstep; 1, 16 and 256
+lanes; two or three runs; a main run of 10 to 500 segments and
+half-step runs of twice that; open and keyed), the tool writes its
+certificate, the same bytes, under the least `ulimit -v` 99f1b43 writes
+it under, in all 96; eb2d1ae fails there in 24. On the desktop, under a
+job's commit limit of 5,680 KiB, the smallest of them (1 lane, a main
+run of 100 segments and a half-step run of 200) is written by 99f1b43
+and by the tool, 3 times of 3, and by eb2d1ae 0 of 3; across 72 of the
+shapes the tool's peak commit is 99f1b43's within the several pages
+that separate identical runs there (2026-09-29).
 
 What the trial cannot promise:
 - a hash's buffer or a boundary file's path, or a piece under a page;
