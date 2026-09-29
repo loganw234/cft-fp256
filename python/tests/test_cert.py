@@ -2,10 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Certificates, version 1 (docs/CERTIFICATES.md): the golden gate.
 
-The mechanisms of python/cft_golden/cert.py have negative controls
-here, all but those docs/CERTIFICATES.md's "The controls" names as
-still without one, and each control asserts the NAME of the check it
-exists for - never merely that something refused. Every control but the byte flip
+Every mechanism of python/cft_golden/cert.py has a negative control
+here, in the measured sense docs/CERTIFICATES.md's "The controls" gives:
+each refusal, spelling check, stated order and limit, part of a
+condition and allowed word, disabled alone in a copy, and each widening
+or cross-check the page rules out, added alone, turned a test red. Each
+control asserts the NAME of the check it exists for - never merely that
+something refused. Every control but the byte flip
 writes a valid hash line over its defective body (cert.rehash, or
 cert.encode for a structurally sound certificate with a semantic
 defect), so it reaches the check it is for instead of stopping at the
