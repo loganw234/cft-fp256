@@ -8,7 +8,7 @@
  *   positive-run <image.cftp> (--iota n | --a A [--b B] [--c C])
  *                [--bank bank.bin] [--out deposits.bin]
  *                [--scratch-in in.bin] [--scratch-out out.bin]
- *                [--device sw|<xclbin>]
+ *                [--device sw|<xclbin>] [--scratch-depth N]
  *
  * It is the SAME BINARY on the software backend, in emulation and on
  * the card. That is the whole point: a plate's hash from one is
@@ -57,6 +57,15 @@
  * SHA-256 of each on its own line, because what went in is as much
  * part of what ran as the image is; the `digest` line is unchanged,
  * image then bank, which is what `cft_program_digest` returns.
+ *
+ * `--scratch-depth N` (revision 7, 2026-09-29) opens the SOFTWARE
+ * backend at a tile's depth through cft_open_ex, so a plate made for
+ * a 2,048-slot tile can be made on a laptop: a non-strict STX/LDX
+ * reduces modulo the depth, so the depth is part of what the image
+ * computes. The library refuses it, by name, beside an xclbin, whose
+ * depth is its own. It is reported on a `scratch-depth` line, printed
+ * only when asked for, so every plate made without it prints exactly
+ * the lines it always did.
  *
  * The run itself then goes through `cft_program_run_ex` and the
  * `cft_run_args` struct - ABI 0.10's one entry point that takes
@@ -516,7 +525,7 @@ static void usage(void)
 "  positive-run <image.cftp> (--iota n | --a A [--b B] [--c C])\n"
 "               [--bank bank.bin] [--out deposits.bin]\n"
 "               [--scratch-in in.bin] [--scratch-out out.bin]\n"
-"               [--device sw|<xclbin>]\n"
+"               [--device sw|<xclbin>] [--scratch-depth N]\n"
 "\n"
 "  --iota n        stream a is the element index as a format-width\n"
 "                  integer bit pattern (0, 1, 2, ...); b and c are +0\n"
@@ -531,6 +540,8 @@ static void usage(void)
 "                  n * n_scratch_out elements\n"
 "  --out PATH      write the raw deposit buffer\n"
 "  --device sw     the software backend (default), or an .xclbin\n"
+"  --scratch-depth N   the software backend at N scratch slots a lane,\n"
+"                  a power of two up to 32768 (a tile's is its own)\n"
 "  --capabilities  say which paths THIS BINARY carries, and exit\n"
 "\n"
 "The last line is the SHA-256 of the deposit buffer, and the one above\n"
@@ -550,6 +561,7 @@ int main(int argc, char **argv)
 {
     const char *image_path = NULL, *bank_path = NULL, *out_path = NULL;
     const char *device = NULL;
+    unsigned long long scratch_depth = 0;
     const char *a_path = NULL, *b_path = NULL, *c_path = NULL;
     const char *sin_path = NULL, *sout_path = NULL;
     long long iota = -1;
@@ -605,6 +617,8 @@ int main(int argc, char **argv)
             printf("scratch       absent   "
                    "(cft.h defines no CFT_SEQ_FEAT_SCRATCH)\n");
 #endif
+            /* cft_open_ex arrived with revision 7, in the same cft.h */
+            printf("scratch-depth present\n");
 #ifdef CFT_SEQ_FEAT_SCRATCH_IO
             printf("scratch-io    present\n");
             printf("run-path      cft_program_run_ex\n");
@@ -632,6 +646,15 @@ int main(int argc, char **argv)
             sout_path = need(argc, argv, &i);
         else if (!strcmp(arg, "--out"))  out_path = need(argc, argv, &i);
         else if (!strcmp(arg, "--device")) device = need(argc, argv, &i);
+        else if (!strcmp(arg, "--scratch-depth")) {
+            char *end = NULL;
+            const char *v = need(argc, argv, &i);
+            scratch_depth = strtoull(v, &end, 0);
+            if (!end || *end || !scratch_depth ||
+                scratch_depth > 0xFFFFFFFFull)
+                die("--scratch-depth takes a positive number of slots, "
+                    "not %s", v);
+        }
         else if (arg[0] == '-' && arg[1])
             die("unknown option %s", arg);
         else if (image_path)
@@ -815,12 +838,26 @@ int main(int argc, char **argv)
 #endif
 
     /* ---- the device -------------------------------------------------- */
-    if (device && strcmp(device, "sw") != 0)
-        st = cft_open(device, 0, &dev);
-    else
-        st = cft_open(NULL, 0, &dev);
-    if (st != CFT_OK)
-        die_st("cft_open", st);
+    if (scratch_depth) {
+        /* The library checks the value and refuses it for an xclbin,
+         * by name; this only carries it there. */
+        cft_open_args oa;
+        memset(&oa, 0, sizeof oa);
+        oa.struct_size   = sizeof oa;
+        oa.artifact      = (device && strcmp(device, "sw") != 0) ? device
+                                                                 : NULL;
+        oa.scratch_depth = (uint32_t)scratch_depth;
+        st = cft_open_ex(&oa, &dev);
+        if (st != CFT_OK)
+            die_st("cft_open_ex", st);
+    } else {
+        if (device && strcmp(device, "sw") != 0)
+            st = cft_open(device, 0, &dev);
+        else
+            st = cft_open(NULL, 0, &dev);
+        if (st != CFT_OK)
+            die_st("cft_open", st);
+    }
 
     st = cft_program_load(dev, img, img_bytes, &prog);
     if (st != CFT_OK)
@@ -915,6 +952,9 @@ int main(int argc, char **argv)
     }
     printf("device        %s\n",
            (device && strcmp(device, "sw")) ? device : "software");
+    if (scratch_depth)
+        printf("scratch-depth %lu slots a lane\n",
+               (unsigned long)scratch_depth);
 
     {
         size_t k;

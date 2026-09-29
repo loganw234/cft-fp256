@@ -484,11 +484,21 @@ sample           1 4 9
 ## The chain
 
 A **segment** is one dense run of the program:
-`seq.run(image, a, b, c, bank=bank, scratch_in=start)`, where:
+`seq.run(image, a, b, c, bank=bank, scratch_in=start,
+scratch_depth=depth)`, where:
 - every lane is active;
 - no index table and no lane mask are used;
 - the streams are the run's;
-- the start state is the segment's start.
+- the start state is the segment's start;
+- `depth` is the scratch depth of the device the certificate names
+  (revision 7, 2026-09-29): `1 << CAPS2[3:0]` when `device-caps`
+  carries CAPS2 with CAPS2[4] set - 256 on the round-2 images, 2,048 on
+  the U50's revision-7 ones - and 256, the model's default, otherwise
+  (`none` for the software backend, which cft-segrun opens at its own
+  256; a CAPS word alone; `unknown`). A non-strict `STX`/`LDX` reduces
+  its index modulo the depth, and a state wider than 256 slots only
+  loads on a deeper device, so a run is re-run at the depth it had or
+  it is a different machine. `cert.scratch_depth_of` is the rule.
 
 Its end state is the run's `scratch_out`, its flag word the run's sticky
 IEEE flags (invalid 1, divide-by-zero 2, overflow 4, underflow 8,
@@ -675,6 +685,13 @@ statement of what it ran on.
   the protocol carries them. A field it does not carry is `unknown`.
 - The audit checks none of them and reports every one: stated, not
   checked, or unknown (see "What an audit proves").
+- One of them is READ: CAPS2's scratch depth, which the chain's
+  re-runs take (above, "The chain"; revision 7). Reading is not
+  checking - a certificate that misstated its device's depth would fail
+  its own re-run, as one that misstated any number the arithmetic reads
+  would. A remote handle's certificate records `unknown` and is re-run
+  at 256, whatever its server's depth: the protocol carries no CAPS2, a
+  limit of this version (below, "What version 1 does not do").
 
 ## The detached signature
 
@@ -1448,3 +1465,10 @@ and card-p3b3).
   records carry no flags today (docs/ROADMAP.md).
 - **Audit in C.** The C auditor is the plan's step 4. The build id (step
   2) and the segment runner (step 3) exist.
+- **Record a remote run's scratch depth.** The remote protocol carries
+  no CAPS2, so a certificate made through a remote handle reads
+  `device-caps unknown` and is re-run at 256 (revision 7, "The chain").
+  A run that indexed past 256 on a deeper server, or held a state wider
+  than 256 slots, fails its own audit rather than passing. A certificate
+  made on the software backend is made at 256 too: cft-segrun opens it
+  plainly and takes no depth.

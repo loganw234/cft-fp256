@@ -2216,8 +2216,10 @@ int main(int argc, char **argv)
 
     /* The orbit program deposits two values a trip, so a call of K
      * trips needs 2K deposit slots a lane, and a device holds what
-     * cft_caps.max_deposits says - 64 on the tile of rtl/cft_krnl.sv,
-     * 2^20 in this library's software backend. The trip count changes
+     * cft_caps.max_deposits says - rtl/cft_krnl.sv's SEQ_MAXD, a build's
+     * parameter since revision 7: 64 on the round-2 and open-core images
+     * and 1,024 on the U50's revision-7 ones - and 2^20 in this
+     * library's software backend. The trip count changes
      * NOTHING about the orbit, only how many calls it takes to walk
      * it (that is one of the determinism properties tests/zoom_check.py
      * asserts), so a K that does not fit is a sizing question and not

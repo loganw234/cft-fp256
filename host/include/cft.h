@@ -471,6 +471,59 @@ CFT_API cft_status cft_open(const char *artifact, int index,
                             cft_device **out);
 CFT_API void       cft_close(cft_device *dev);
 
+/* ==== a software handle at a tile's scratch depth (revision 7) ======
+ *
+ * cft_open with its arguments in a struct, so that an open can carry
+ * what cft_open's three cannot. One so far:
+ *
+ *   scratch_depth   0: the backend's own. A tile's is its image's
+ *                   (CAPS2[3:0]), a remote handle's its server's, and
+ *                   the software backend's 256. Otherwise, on the
+ *                   SOFTWARE backend only, the scratch slots a lane: a
+ *                   power of two in 1..32768, the deepest a tile can
+ *                   publish (CAPS2[3:0] is a four-bit log2).
+ *
+ * The depth is part of what a program MEANS, not only how much it may
+ * hold (docs/SEQUENCER.md, revision 7): a non-strict STX or LDX reduces
+ * its index modulo it, so a 2,048-slot tile and a 256-slot software
+ * handle compute different answers for an image that indexes past 256.
+ * A software handle opened at a tile's depth computes what that tile
+ * must - which is what a comparison against a device needs: open the
+ * reference at the device's cft_caps.max_scratch. The handle publishes
+ * its depth in cft_caps.max_scratch and holds every program to it, as
+ * every backend holds a program to what it publishes: a static slot or
+ * a scratch-I/O count past it is refused at load, by name.
+ *
+ * A plain cft_open(NULL, ...) is 256, so every result a software handle
+ * has ever given is the one it still gives.
+ *
+ * Refused: a struct_size other than this library's sizeof, as for
+ * every input struct (CFT_ERR_INVALID_ARGUMENT); a depth that is not a
+ * power of two in range (CFT_ERR_INVALID_ARGUMENT); a non-zero depth
+ * for an xclbin or a cft:// artifact (CFT_ERR_UNSUPPORTED) - a device's
+ * depth is fixed by its image, and opening it at its own would answer a
+ * question nobody asked; and a depth in a build without the sequencer
+ * (-DCFT_NO_PROGRAM, CFT_ERR_UNSUPPORTED), which has no scratch to size.
+ * Each with a sentence in cft_last_error().
+ *
+ * Memory: a run of a program that uses the scratch holds a lane block
+ * of it, 64 lanes x depth x 260 bytes - 4.3 MB at 256, 34 MB at 2,048,
+ * 545 MB at 32,768.
+ *
+ * Appended at revision 7 (2026-09-29) for ABI 0.16; the version macro
+ * above moves when the integrator bumps it, with the WebAssembly
+ * rebuild. The WebAssembly module and the remote protocol carry no
+ * depth: a remote handle's is its server's.
+ * ==================================================================== */
+typedef struct cft_open_args {
+    size_t      struct_size;     /* in: sizeof(cft_open_args) */
+    const char *artifact;        /* as cft_open's: NULL, a path, cft:// */
+    int         index;           /* as cft_open's */
+    uint32_t    scratch_depth;   /* 0, or a software handle's depth */
+} cft_open_args;
+
+CFT_API cft_status cft_open_ex(const cft_open_args *args, cft_device **out);
+
 /* ==== a device behind a socket (docs/REMOTE.md) =====================
  *
  *   artifact == "cft://host:port"   a REMOTE device: a cft-serve

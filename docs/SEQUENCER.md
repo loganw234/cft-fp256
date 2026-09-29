@@ -331,8 +331,10 @@ word it never looks at, and then read constants out of an image that
 has none. The revision-2 tile's refusal of a non-zero SECOND word is
 in turn what guards `SCRATCH_IO`, which is what that word became.
 
-Each lane owns **32 registers** of format width, **256 scratch slots**
-of format width, and one **active** bit. The registers are the working
+Each lane owns **32 registers** of format width, **`SCRATCH_D` scratch
+slots** of format width - 256 on every tile before revision 7 and on
+the open-core builds, 2,048 on the U50's revision-7 images - and one
+**active** bit. The registers are the working
 set and the scratch is where a live set larger than thirty-two spills,
 where a small local array lives, and where the host may hand state in
 and take it out (R4 and R5 below). The constant bank is separate and
@@ -435,7 +437,9 @@ from there, which is the regime an orbit actually wants. The earlier
 claim that the deposit buffer simply dominates was written before the
 lane-block floor was worked out; both numbers are the design, and
 trading pipeline depth against deposit depth is the axis a chiplet
-turns.
+turns. The tile builds it at its cap, `MAXD` - 32 KiB at the 64 of the
+round-2 and open-core images, 512 KiB at the 1,024 of the U50's
+revision-7 ones.
 
 Revision 3's scratch is the same arithmetic with a much larger first
 factor:
@@ -443,13 +447,15 @@ factor:
     scratch  =  SCRATCH_D slots * LATENCY beats * 32 bytes
 
 which at 256 and 16 is **128 KiB a tile**, eight times the register
-file and the largest of the three on today's parameters - and the same
-size, to the byte, as the instruction memory R6 grew, which is not one
-of the three because it is per tile rather than per lane. It is
-precision-independent for the reason the other two are, and it is the
-number a smaller part turns down first: `SCRATCH_D` is a build
-parameter, the tile publishes its log2 in `CAPS2[3:0]`, and a program
-that needs more than a device has is refused where it was built.
+file and the largest of the three on the round-2 parameters - and the
+same size, to the byte, as the instruction memory R6 grew, which is not
+one of the three because it is per tile rather than per lane. At the
+U50's revision-7 depth of 2,048 it is **1 MiB a tile**, 4 MiB on the
+quad. It is precision-independent for the reason the other two are,
+and it is the number a smaller part turns down first: `SCRATCH_D` is a
+build parameter, the tile publishes its log2 in `CAPS2[3:0]`, and a
+program that needs more than a device has is refused where it was
+built.
 
 Two consequences worth stating now, because they constrain the RTL:
 
@@ -602,21 +608,46 @@ top level.
 
 **A tile also has four capacities the contract does not fix.** They
 are build parameters of `cft_seq`, set where rtl/cft_krnl.sv
-instantiates it, and not part of the program model: **`MAXD = 64`
-deposit slots a lane**, `IMEM_D = 16384` instructions (4096 at
-revision 2, 1024 before it, which is what the card-day images hold),
-`KMEM_D = 512` constants (256 until revision 3), and **`SCRATCH_D =
-256` scratch slots a lane**, new at revision 3. A header that asks for
-more than any of them - including a scratch count past the depth - is
-refused by the tile at the header, before the constants and
-instructions stream in, in the same check that refuses a precision
-the tile was not configured for.
+instantiates it, and not part of the program model: **`MAXD`
+deposit slots a lane**, `IMEM_D` instructions, `KMEM_D` constants and
+**`SCRATCH_D` scratch slots a lane**. Since revision 7 (2026-09-29)
+three of them are `cft_krnl`'s own parameters - `SEQ_MAXD`,
+`SEQ_IMEM_D`, `SEQ_SCRATCH_D` - so that each BUILD says what it has,
+the way `BURST_LOG2` and the rest do: their defaults are the U50's and
+a smaller part names its own.
+
+| capacity | U50, revision 7 | round-2 images and open-core builds | history |
+|---|---|---|---|
+| `MAXD` | 1,024 | 64 | 64 from the first tile to revision 6 |
+| `IMEM_D` | 32,768 | 16,384 | 1,024, then 4,096 at revision 2, 16,384 at revision 3 |
+| `KMEM_D` | 512 | 512 | 256 until revision 3; not a build's to set (below) |
+| `SCRATCH_D` | 2,048 | 256 | new at revision 3 |
+
+The open-core configurations in the tree pin the right-hand column:
+`tb/Makefile`'s `OPEN_CAPS_GENERICS` (the board benches and the quarter
+tile) and hw/openxc7's board synthesis and harness. A header that asks
+for more than any of them - including a scratch count past the depth -
+is refused by the tile at the header, before the constants and
+instructions stream in, in the same check that refuses a precision the
+tile was not configured for. Each is a power of two no larger than
+2^15, because each is published as a four-bit log2 (below), and
+`cft_seq` refuses to elaborate any other.
+
+`KMEM_D` stays a localparam at 512: a deeper bank needs index bits the
+instruction format does not have (docs/ROADMAP.md, "The program
+limits").
 
 `SCRATCH_D` is the one of the four that is NOT purely a capacity: the
 indexed forms `STX`/`LDX` reduce `rb` modulo it, so a tile with a
 different depth would compute different answers rather than merely
-accept larger programs. That is why the model fixes it too, and why
-it must be a power of two.
+accept larger programs. That is why it must be a power of two, and why
+the model and the library take it as a parameter rather than fixing
+it: `seq.run(..., scratch_depth=)` (256 by default, so every run is the
+run it always was) is the authority for a tile of any depth, and a
+libcft software handle computes at the depth it publishes - 256, or the
+depth it was opened at with `cft_open_ex` (revision 7, below). A strict
+image (R8) is the portable one: a strict run that reports nothing
+computes the same answer at every depth deep enough for it.
 
 A fifth number is not a memory depth at all but the reach of the
 instruction's own operand field: the `ka`/`kb`/`kc` bits redirect
@@ -645,6 +676,10 @@ between backends and that is the point: the software backend accepts
 2^20 deposit slots a lane, because it models the program model and
 not one tile, so "it ran on software" still does not mean "it fits a
 tile" - what has changed is that a tool can now find out in one call.
+The scratch depth is the exception, because it is part of what a
+program means: a software handle's is 256 - a tile's before revision 7
+- unless it was opened at another with `cft_open_ex`, and a comparison
+against a device opens its reference at the device's `max_scratch`.
 Zero in a field means the device did not say (only a remote server
 older than the fields), and an unknown cap is enforced against
 nothing. The nibble at CAPS[7:4] is now FULL; the next sequencer
@@ -653,10 +688,11 @@ feature takes a bit of CAPS2, which is what that register exists for.
 Programs that deposit once an iteration feel the deposit budget
 first: `cft-zoom` deposits two values a trip and takes
 `--steps-per-call` from `cap / 2` when the device's cap is smaller
-than its default of 1,024 - 32 on today's tile - and refuses a value
-the user typed that does not fit; `cft-orbits` deposits four a sample
-for a whole run in one call, so its sample count is bounded at 15 on
-a tile, and it refuses by name because unlike a trip count the sample
+than its default of 1,024 - 32 on a 64-slot tile, 512 on the U50's
+revision-7 one - and refuses a value the user typed that does not fit;
+`cft-orbits` deposits four a sample for a whole run in one call, so its
+sample count is bounded at `cap / 4 - 1` on a tile - 15 at 64, 255 at
+1,024 - and it refuses by name because unlike a trip count the sample
 count changes what is recorded.
 
 ### What the loader refuses
@@ -858,10 +894,14 @@ Four structures, sized in the section above:
   `+0` where nothing has written) - but only as far as the program can reach into it: every slot if
   the program indexes, otherwise the highest static slot it names and
   the slots the scratch-out drain will read. Wiping all of it every
-  block would cost `SCRATCH_D * NBEATS` cycles - 4,096 at today's
-  parameters, eight times the register file's - whether or not the
-  program owns a slot, and a program that names none must cost nothing
-  for a memory it never touches.
+  block would cost `SCRATCH_D * NBEATS` cycles - 4,096 at 256 slots,
+  eight times the register file's - whether or not the program owns a
+  slot, and a program that names none must cost nothing for a memory it
+  never touches. A program that INDEXES does pay the whole of it every
+  block, and at the U50's revision-7 depth of 2,048 that is 32,768
+  cycles, about 243 us at 135 MHz, eight times what it was: the one
+  cost revision 7's deeper scratch puts on a program that fits the old
+  limits (revision 7, below).
 
 The control began as an issue/drain state machine, and the counts fell
 out of the sizing: issue `LATENCY` beats of one instruction back to
@@ -1912,3 +1952,108 @@ guard, the two CAPS2 bits at zero, the struct fields and the feature
 bits in `cft.h`, the model's signature, and a refusal by name on every
 backend for every new field. The parcels replace the refusals; the
 lead's seam tests hold the two together once both exist.
+
+
+## Revision 7, the program limits per build (2026-09-29)
+
+Revision 7's third item (docs/ROADMAP.md, "Revision 7: step 4's RTL
+revision"). Logan, 2026-09-28: size the program limits "as large as we
+can, ideally adjustable as the other parameters are, so the U50 can
+benefit from its higher resources than an open core design can reach".
+Its first two items, R18 and R19, change cycles and nothing else; this
+one changes room, and - for one kind of image, below - one number a
+program can observe.
+
+### What moved
+
+`SEQ_MAXD`, `SEQ_IMEM_D` and `SEQ_SCRATCH_D` are `cft_krnl`'s
+parameters, declared with the others at the top of rtl/cft_krnl.sv,
+whose defaults are the U50's and the only place its numbers are
+written down - `MAXD` 1,024, `IMEM_D` 32,768, `SCRATCH_D` 2,048 - and a
+build overrides them the way it overrides any parameter
+(`CFT_GENERICS` at packaging, `-P` in a bench, `chparam` in Yosys).
+The open-core configurations keep 64, 16,384 and 256, and say so:
+tb/Makefile's `OPEN_CAPS_GENERICS` (the board benches and the quarter
+tile, handed to the simulator and to the benches' expectations from one
+list) and hw/openxc7's board synthesis and harness. `KMEM_D` stays a
+localparam at 512.
+
+No feature bit and no VERSION step: a host learns each from the field
+it already reads. `CAPS[19:16]` reads 10, `CAPS[23:20]` 15 - the last
+value its four bits hold, so the next instruction capacity is a CAPS
+change - and `CAPS2[3:0]` 11. `cft_seq` refuses to elaborate a capacity
+that is not a power of two or is past 2^15, because each field is a
+four-bit log2 and `$clog2` is the ceiling: any other value would be
+published as a larger capacity than the tile has.
+
+### Two pure capacities, and one that is not
+
+`IMEM_D` and `MAXD` are pure capacities: a program either fits and gets
+the answers it got on a smaller tile, or is refused at the header -
+`n_insns` past `IMEM_D` and `max_deposits` past `MAXD`, STATUS[3],
+nothing written. tb/test_krnl_seq.py holds both at the kernel's own
+values: a program of exactly `IMEM_D` instructions, one of one more,
+`max_deposits` at `MAXD` and at one more.
+
+`SCRATCH_D` is not purely one. A NON-strict `STX`/`LDX` reduces its
+index modulo the depth (R4), so an image that indexes past 256 wraps at
+2,048 on the U50 and at 256 everywhere else, and computes other
+answers; a STRICT one (R8) reports the index past the depth and is
+portable - a strict run that reports nothing computes the same at every
+depth deep enough for it. Every other program - one that indexes below
+256, or names only static slots below 256 - computes exactly what it
+did. So the depth is a parameter of everything that stands for a tile:
+- the golden model: `seq.run(..., scratch_depth=)`, 256 by default, and
+  `Program`, `from_bytes`, `stl` and `ldl` validate against a declared
+  depth, 256 by default; `run()` refuses by name a program whose static
+  slots or scratch-I/O counts exceed its depth;
+- libcft's software backend: a handle computes at the depth it
+  publishes in `cft_caps.max_scratch` - 256 from `cft_open`, any power
+  of two up to 32,768 from `cft_open_ex` (docs/HOSTAPI.md);
+- every comparison against a device takes the device's depth:
+  device-test opens its reference at the device's `max_scratch`,
+  programs/check.py runs `deepwalk-fp64` and `deepwalk-strict-fp64` -
+  a thousand slots walked through a loop counter - on the model and the
+  software backend at 2,048 and at 256, segrun_check.py's golden writer
+  runs at the depth its expected CAPS2 names, and the certificate audit
+  re-runs at the depth a certificate's `device-caps` names
+  (docs/CERTIFICATES.md).
+
+### What it costs
+
+The memories, estimated from the geometry and not synthesised here -
+the bitstream measures them:
+
+| memory | round-2 | U50, revision 7 | a tile, in UltraRAM | a tile, in block RAM |
+|---|---|---|---|---|
+| deposit buffer, `MAXD * NBEATS * 32 B` | 32 KiB | 512 KiB | 32 URAM (four-deep cascades) | 128 RAMB36 |
+| instruction memory, `IMEM_D * 8 B` | 128 KB | 256 KB | - | 64 RAMB36 |
+| scratch, `SCRATCH_D * NBEATS * 32 B` | 128 KiB | 1 MiB | 64 URAM (eight-deep cascades) | 256 RAMB36 |
+
+Revision 3's build put the scratch's 4,096-deep banks in one URAM each
+and moved a four-deep URAM cascade (the instruction memory at 16,384)
+into block RAM "due to insufficient pipeline registers". In block RAM a
+2,048-slot scratch does not fit the quad (about 1,657 tiles of 1,344);
+in UltraRAM it does, with the deposit buffer, at about 388 of 640. Where
+Vivado puts each is the first number the revision-7 build should read.
+
+Two costs in cycles, on programs that fit the old limits and get the
+old answers:
+- **An indexing program's per-block wipe.** Every block of a program
+  that uses `STX`/`LDX` wipes the whole scratch, `SCRATCH_D * NBEATS`
+  cycles: 4,096 at 256, 32,768 at 2,048. A program that names only
+  static slots wipes as far as its highest and pays nothing new.
+- **The block setup's floor.** S_ZERO forms `blk_n * max_deposits` one
+  multiplier bit a cycle over `CW + 1` steps, `CW = clog2(MAXD + 1)`:
+  8 cycles a block at 64 and 12 at 1,024.
+
+### One latent edge, closed on the way
+
+S_ZERO's exit waited for the deposit product's `CW + 1` steps and for
+the wipe, while the two scratch-count products are `SCRSW + 1`
+bits wide - a width that follows the depth. At 16 beats a block whose
+preload anything reads spends at least fifteen steps there, enough up
+to 2^14 slots; at 2^15, `n_scratch_in` = 32,768 beside a single static
+slot would have preloaded nothing. S_ZERO now also waits for both
+products to be complete, which moves no cycle wherever they already
+were.
