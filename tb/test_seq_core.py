@@ -3646,8 +3646,13 @@ async def a_beat_no_lane_has_is_not_loaded(dut):
 #   every lane masked               before 561.25                  after 344.0
 #
 # What is left of the all-masked block is the block's own machinery -
-# setup, the mask's read, one cycle a writer (its forced last beat) - and
+# setup and the mask's read - about four cycles an instruction (its only
+# issued step is its first, so it cannot take the next by continuation),
+# about seven an arithmetic one (its forced last beat still crosses the
+# array, and three queue slots cover twelve of its seventeen cycles), and
 # the drains, which keep a masked lane's place and lose its strobe (R17).
+# verifier-R4 measured 7.0 and 4.3 (fp32, every lane masked), where this
+# comment said one cycle a writer.
 R19_CEILING = {
     "low half of each block masked": 485,
     "every lane masked": 450,
@@ -3683,6 +3688,343 @@ async def masked_beats_hold_their_saving(dut):
             f"above the ceiling of {R19_CEILING[label]} - a beat with no "
             f"active lane is being issued again (docs/SEQUENCER.md, "
             f"revision 7, R19)")
+
+
+# ======================================================================
+# 10f. fast loads (2026-09-29, verifier-R4's send-back of R18)
+# ======================================================================
+#
+# R18 sent every load's value into the file through the array, as
+# IOR(v, v). At sixteen beats the pipelining hides the array's depth; at
+# ONE beat nothing does, and verifier-R4 measured a program that uses a
+# loaded value at once running slower there than on f681dee's tile, whose
+# LDL wrote the file itself. A load is now FAST when every queued writer
+# ahead of it is a fast load: it keeps its queue slot, but the retire's
+# write port writes its value into the file at F (an LDL) or H (an LDX),
+# and it never enters the array. On a multi-pass tile a load that cannot
+# be fast waits until it can. The rules are docs/SEQUENCER.md's.
+
+def _load_programs(fmt):
+    """verifier-R4's load-heavy programs (verifier-R4.md 08:18:52 and
+    08:39:43), rebuilt from its descriptions."""
+    F = sf.OP_FMA
+    pairs, use, chain, indep = [], [], [], []
+    for k in range(10):
+        pairs += [seq.stl(3, k), seq.ldl(3, k)]
+        use += [seq.ldl(3, 0), seq.deposit(3)]
+    for k in range(8):
+        chain += [seq.ldl(3 + k, k), seq.alu(F, 11 + k, 3 + k, 0, 1),
+                  seq.stl(11 + k, 8 + k)]
+        indep += [seq.stl(0, k), seq.ldl(3 + k, 8 + k), seq.setact(1)]
+    lds = [seq.ldl(3 + k, k) for k in range(20)]
+    ldxs = [seq.ldx(3 + k, 2) for k in range(20)]
+    return (("twenty LDLs, DEPOSIT of the last",
+             lds + [seq.deposit(22), seq.halt()], 1),
+            ("twenty LDLs, no deposit", lds + [seq.halt()], 1),
+            ("ten times LDL, DEPOSIT of it", use + [seq.halt()], 10),
+            ("ten STL/LDL pairs on one register",
+             pairs + [seq.deposit(3), seq.halt()], 1),
+            ("twenty LDXs, DEPOSIT of the last",
+             ldxs + [seq.deposit(22), seq.halt()], 1),
+            ("eight times LDL, FMA of it, STL of that",
+             chain + [seq.deposit(18), seq.halt()], 1),
+            ("eight times STL, LDL, SETACT",
+             indep + [seq.deposit(10), seq.halt()], 1))
+
+
+def _load_sizes(fmt):
+    """One, two and three beats of lanes, and four whole blocks."""
+    lpbeat, lpb = lanes_per_beat(fmt), lanes_per_block(fmt)
+    return (("1 beat", lpbeat), ("2 beats", 2 * lpbeat),
+            ("3 beats", 3 * lpbeat), ("4 blocks", 4 * lpb))
+
+
+# f681dee's cycles for those programs, start to done, through this
+# bench's harness, measured under Verilator on a copy of this tree with
+# f681dee's rtl/cft_seq.sv (2026-09-29), on the single-pass tile
+# (MUL_PASSES 1) and the multi-pass one (MUL_PASSES 10), at the unit
+# bench's default capacities. Per MUL_PASSES, format and size, the seven
+# programs in _load_programs' order.
+_F681DEE_LOADS = {
+    1: {
+        "fp32": {
+            "1 beat": (553, 546, 294, 373, 4332, 620, 500),
+            "2 beats": (666, 656, 456, 466, 4446, 707, 603),
+            "3 beats": (779, 766, 618, 559, 4560, 794, 706),
+            "4 blocks": (8872, 8667, 10779, 6952, 24048, 7565, 8045),
+        },
+        "fp64": {
+            "1 beat": (549, 542, 254, 369, 4328, 616, 496),
+            "2 beats": (656, 646, 374, 456, 4436, 697, 593),
+            "3 beats": (765, 752, 496, 545, 4546, 780, 692),
+            "4 blocks": (8552, 8347, 8155, 6632, 23728, 7245, 7725),
+        },
+        "fp128": {
+            "1 beat": (547, 540, 234, 367, 4326, 614, 494),
+            "2 beats": (652, 642, 334, 452, 4432, 693, 589),
+            "3 beats": (757, 744, 434, 537, 4538, 772, 684),
+            "4 blocks": (8392, 8187, 6859, 6472, 23568, 7085, 7565),
+        },
+        "fp256": {
+            "1 beat": (546, 539, 224, 366, 4325, 613, 493),
+            "2 beats": (650, 640, 314, 450, 4430, 691, 587),
+            "3 beats": (754, 741, 404, 534, 4535, 769, 681),
+            "4 blocks": (8312, 8107, 6211, 6392, 23488, 7005, 7485),
+        },
+    },
+}
+F681DEE_LOAD_CYCLES = {
+    (label, size, name, mp): cyc
+    for mp, by_fmt in _F681DEE_LOADS.items()
+    for name, by_size in by_fmt.items()
+    for size, row in by_size.items()
+    for (label, _i, _m), cyc in zip(_load_programs(FP32), row)
+}
+
+
+@cocotb.test()
+async def loads_cost_no_more_than_before(dut):
+    """The send-back's HOLD: verifier-R4's load-heavy programs, at one,
+    two and three beats of lanes and at four whole blocks, at every
+    format, cost no more than on f681dee's tile - on this tile, single-
+    pass or multi-pass. Every run is held to the model first, and every
+    number is measured before any is judged, so a red run prints them
+    all."""
+    bench = Bench(dut)
+    await bench.start()
+    cost = {}
+    for name in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        for size, n in _load_sizes(fmt):
+            for label, insns, maxdep in _load_programs(fmt):
+                prog = seq.Program(fmt, insns, max_deposits=maxdep)
+                await bench.program(fmt, prog, operands(fmt, n, 5000),
+                                    operands(fmt, n, 5001),
+                                    _r18_index_stream(fmt, n, 5002), n,
+                                    f"{name} {label}, {size}")
+                key = (label, size, name, MUL_PASSES)
+                cost[key] = bench.last_cycles
+                want = F681DEE_LOAD_CYCLES.get(key)
+                dut._log.info(f"LOADROW {key!r}: {cost[key]:.0f}"
+                              + (f"  (f681dee {want})" if want else ""))
+    if (SCRATCH_D, MAXD) != (256, 64):
+        # The before-side is f681dee's at the unit bench's defaults; at
+        # other capacities (the U50's MAXD 1,024 lengthens every block's
+        # setup by four cycles, an accepted cost) the rows are logged.
+        return
+    worse = [(k, c, F681DEE_LOAD_CYCLES[k]) for k, c in cost.items()
+             if k in F681DEE_LOAD_CYCLES and c > F681DEE_LOAD_CYCLES[k]]
+    assert not worse, (
+        f"{len(worse)} of {len(cost)} load rows cost more than on "
+        f"f681dee's tile (MUL_PASSES {MUL_PASSES}), the first: "
+        + "; ".join(f"{k[2]} {k[1]}, {k[0]}: {c:.0f} against {w}"
+                    for k, c, w in worse[:4])
+        + " (docs/SEQUENCER.md, R18's fast loads)")
+
+
+@cocotb.test()
+async def store_then_load_costs_what_the_sentence_says(dut):
+    """docs/SEQUENCER.md's store-then-LDL sentence, HELD as measured
+    (verifier-R4, 08:18:52): an LDL waits while ANY store beat is in B or
+    F, so at sixteen beats a store straight before a load still costs two
+    cycles - ten such adjacencies, twenty a block - beside the same
+    program with an IAND where the store is. Held as an upper bound: the
+    wait may bind less (the per-beat refinement SEQUENCER.md records as a
+    possible gain), never more."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    n = 4 * lanes_per_block(fmt)
+    iand = seq.alu(sf.OP_IAND, 4, 0, 0)
+    per_block = {}
+    for label, first in (("STL s0, LDL s1", seq.stl(0, 0)),
+                         ("IAND, LDL s1", iand)):
+        insns = []
+        for _ in range(10):
+            insns += [first, seq.ldl(3, 1)]
+        # the same wipe on both sides: slots 0 and 1
+        insns += [seq.stl(0, 0), seq.deposit(3), seq.halt()]
+        prog = seq.Program(fmt, insns, max_deposits=1)
+        await bench.program(fmt, prog, operands(fmt, n, 5100),
+                            operands(fmt, n, 5101), operands(fmt, n, 5102),
+                            n, f"sentence: {label} x10")
+        per_block[label] = bench.last_cycles / 4
+        dut._log.info(f"sentence: {label} x10: {per_block[label]:.2f} "
+                      f"cycles a block")
+    extra = per_block["STL s0, LDL s1"] - per_block["IAND, LDL s1"]
+    dut._log.info(f"sentence: a store straight before a load costs "
+                  f"{extra / 10:.2f} cycles more than an IAND there")
+    assert extra <= 2 * 10, (
+        f"ten store-then-load adjacencies cost {extra:.2f} cycles a block "
+        f"more than the IAND program, past the two an adjacency "
+        f"docs/SEQUENCER.md says")
+
+
+def _fast_program(fmt, strict=False):
+    """Every shape a fast load meets, in one program: loads first in the
+    block (the queue empty), back to back in all four orders of LDL and
+    LDX, each read at once by every kind of reader (a deposit, a store's
+    value, an indexed code's index, an ALU operand, a SETACT); a load into
+    a register an ALU instruction still in flight writes (it must NOT be
+    fast - the ALU's result would land after it); a load behind an ALU
+    instruction that writes something else; loads in a loop that stores
+    what it loads; an indexed load past the depth under SCRATCH_STRICT
+    (+0, through the fast write); and a SETACT that narrows the mask while
+    a fast load's value is written, with ACTALL after."""
+    A, M, F = sf.OP_ADD, sf.OP_MUL, sf.OP_FMA
+    IADD = sf.OP_IADD
+    insns = [
+        seq.stl(0, 0), seq.stl(1, 1),
+        seq.ldl(3, 0),                   # fast: the queue is empty
+        seq.deposit(3),                  # ...read by a deposit at once
+        seq.ldl(4, 1), seq.ldl(5, 0),    # LDL, LDL
+        seq.alu(A, 6, 4, rc=5),          # an ALU reading both
+        seq.ldx(7, 2), seq.ldx(8, 2),    # LDX, LDX (the index stream c)
+        seq.stl(7, 2),                   # a store of a fast LDX's value
+        seq.ldl(9, 2), seq.ldx(10, 2),   # LDL, LDX
+        seq.ldx(11, 2), seq.ldl(12, 0),  # LDX, LDL
+        seq.deposit(9), seq.deposit(10),
+        seq.alu(IADD, 13, 2, 0, kb=True),  # an index, computed
+        seq.stx(12, 13),                 # the store's value a fast load's
+        seq.ldx(14, 13),
+        seq.ldx(15, 14),                 # an index that is a fast LDX's value
+        seq.deposit(15),
+        seq.alu(F, 16, 0, 1, 3),         # r16 in flight...
+        seq.ldl(16, 1),                  # ...when a load writes it: not fast
+        seq.deposit(16),                 # the load's value, not the FMA's
+        seq.alu(M, 17, 0, 0),            # something else in flight...
+        seq.ldl(18, 0),                  # ...a load behind it: not fast
+        seq.alu(A, 19, 18, rc=17),
+        seq.deposit(19),
+        seq.repeat(3),
+        seq.ldl(20, 3),
+        seq.alu(F, 20, 20, 0, 1),
+        seq.stl(20, 3),
+        seq.endrep(),
+        seq.ldl(21, 3), seq.deposit(21),
+        seq.alu(sf.OP_CMPLT, 22, 0, 1),
+        seq.setact(22),                  # the mask narrows...
+        seq.ldl(23, 1),                  # ...before a fast load writes
+        seq.actall(),
+        seq.deposit(23),                 # a dropped lane's r23: +0
+        seq.ldl(24, 0), seq.setact(24),  # SETACT reading a fast load at once
+        seq.deposit(24),
+        seq.halt(),
+    ]
+    flags = seq.FLAG_SCRATCH_IO
+    if strict:
+        flags |= seq.FLAG_SCRATCH_STRICT
+    return seq.Program(fmt, insns, consts=[_int_bits(fmt, 5)],
+                       max_deposits=12, flags=flags,
+                       n_scratch_in=0, n_scratch_out=4)
+
+
+@cocotb.test()
+async def fast_loads_at_every_block_length(dut):
+    """Fast loads against the model at every block length the other
+    shape cases use, fp32/64/128 and fp256, modulo and strict."""
+    bench = Bench(dut)
+    await bench.start()
+    for name, ns in (("fp32", (8, 9, 16, 24, 40, 128, 136, 150)),
+                     ("fp64", (4, 5, 8, 20, 64, 66)),
+                     ("fp128", (2, 3, 10, 32, 33)),
+                     ("fp256", (1, 2, 3, 16, 17))):
+        fmt = FORMATS[name]
+        for strict in (False, True):
+            prog = _fast_program(fmt, strict)
+            for n in ns:
+                await bench.program(
+                    fmt, prog, operands(fmt, n, 5200 + n),
+                    operands(fmt, n, 5300 + n),
+                    _r18_index_stream(fmt, n, 5400 + n), n,
+                    f"{name} fast loads, "
+                    f"{'strict' if strict else 'modulo'}, n={n}")
+    dut._log.info(f"fast loads: {bench.cases['program']} runs")
+
+
+def _chain_mask(n, lpb, lpbeat, kind):
+    """verifier-R4's masks (verifier-R4.md 08:42:45), per block of lpb
+    lanes: every lane kept, the low half or the low quarter masked, the
+    last lane only, every other lane (at fp256, where a lane is a beat,
+    every other beat), the high half masked."""
+    keep = []
+    for i in range(n):
+        j = i % lpb
+        keep.append({"every lane kept": True,
+                     "low half masked": j >= lpb // 2,
+                     "low quarter masked": j >= lpb // 4,
+                     "last lane only": j == lpb - 1,
+                     "every other lane": (j % 2) == 0,
+                     "high half masked": j < lpb // 2}[kind])
+    return keep
+
+
+CHAIN_MASKS = ("every lane kept", "low half masked", "low quarter masked",
+               "last lane only", "every other lane", "high half masked")
+
+# f681dee's cycles for verifier-R4's chains, start to done over four
+# blocks, through this bench's harness (Bench.masked), measured under
+# Verilator on a copy of this tree with f681dee's rtl/cft_seq.sv
+# (2026-09-29), MUL_PASSES 1. Keyed (links, mask, format).
+F681DEE_CHAIN_CYCLES = {}
+
+
+@cocotb.test()
+async def masked_chains_cost_no_more_than_before(dut):
+    """The send-back's second HOLD (verifier-R4's third (a)): a chain of
+    dependent FMAs and nothing else but HALT, under masks that empty
+    beats, costs no more than on f681dee's tile. Under R19 a producer
+    whose first issued beat is 3 or later, or whose issued beats have a
+    gap, used to lose forwarding's look-ahead at that beat - two cycles a
+    link. Measured on the single-pass tile, where forwarding exists;
+    every run also held to the model (bytes, counts, FLAGS, the mask's
+    reads). The chain that ends in a DEPOSIT is logged beside them."""
+    bench = Bench(dut)
+    await bench.start()
+    F = sf.OP_FMA
+    cost = {}
+    for name in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        lpb, lpbeat = lanes_per_block(fmt), lanes_per_beat(fmt)
+        n = 4 * lpb
+        for links in (60, 20):
+            prog = seq.Program(fmt, [seq.alu(F, 3, 0, 1, 3)] * links
+                               + [seq.halt()], max_deposits=0)
+            for kind in CHAIN_MASKS:
+                keep = _chain_mask(n, lpb, lpbeat, kind)
+                if not any(keep):
+                    continue
+                await bench.masked(fmt, prog, dense(fmt, n, 5500),
+                                   dense(fmt, n, 5501),
+                                   dense(fmt, n, 5502), n, keep,
+                                   f"{name} {links} links, {kind}")
+                key = (links, kind, name)
+                cost[key] = bench.last_cycles
+                want = F681DEE_CHAIN_CYCLES.get(key)
+                dut._log.info(f"CHAINROW {key!r}: {cost[key]:.0f}"
+                              + (f"  (f681dee {want})" if want else ""))
+    fmt = FP32
+    n = 4 * lanes_per_block(fmt)
+    prog = seq.Program(fmt, [seq.alu(F, 3, 0, 1, 3)] * 20
+                       + [seq.deposit(3), seq.halt()], max_deposits=1)
+    await bench.masked(fmt, prog, dense(fmt, n, 5600), dense(fmt, n, 5601),
+                       dense(fmt, n, 5602), n,
+                       _chain_mask(n, lanes_per_block(fmt),
+                                   lanes_per_beat(fmt), "low half masked"),
+                       "fp32 20 links and a DEPOSIT, low half masked")
+    dut._log.info(f"CHAINROW (20, 'low half masked, then DEPOSIT', 'fp32'): "
+                  f"{bench.last_cycles:.0f} (logged, not held)")
+    if MUL_PASSES != 1 or (SCRATCH_D, MAXD) != (256, 64):
+        return          # the before-sides are the single-pass tile's, at
+                        # the unit bench's default capacities
+    worse = [(k, c, F681DEE_CHAIN_CYCLES[k]) for k, c in cost.items()
+             if k in F681DEE_CHAIN_CYCLES and c > F681DEE_CHAIN_CYCLES[k]]
+    assert not worse, (
+        f"{len(worse)} of {len(cost)} masked chains cost more than on "
+        f"f681dee's tile, the first: "
+        + "; ".join(f"{k[2]} {k[0]} links, {k[1]}: {c:.0f} against {w}"
+                    for k, c, w in worse[:4])
+        + " (docs/SEQUENCER.md, R19's look-ahead by tag)")
 
 
 # ======================================================================

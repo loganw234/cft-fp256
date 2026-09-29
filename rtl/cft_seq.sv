@@ -371,7 +371,10 @@ module cft_seq #(
                          C_DEPOSIT = 8'd3, C_SETACT = 8'd4, C_ACTALL = 8'd5,
                          C_STL = 8'd6, C_LDL = 8'd7,
                          C_STX = 8'd8, C_LDX = 8'd9;
-  // The opcode a scratch LOAD rides the array as (revision 7, R18):
+  // The opcode a scratch LOAD rides the array as (revision 7, R18), when
+  // it is not FAST - a fast load's value goes into the file through the
+  // retire's port and never enters the array (the send-back of
+  // 2026-09-29; the rule is with the admission):
   // IOR, the integer group's bitwise OR, fired with both operands the
   // loaded value, gives the value back bit for bit at every format and
   // raises no flag - softfloat.ior returns (a | b, 0), cft_simpleops
@@ -1272,7 +1275,11 @@ module cft_seq #(
   // the block's last beat, so its last result is on that beat whatever
   // the mask, and that is where it leaves the queue.
   assign wb_tag  = ft[LATENCY*6-1 -: 6];
-  assign wb_pop  = al_ov && seq_live && (wb_tag == 6'({1'b0, nb_blk} - 6'd1));
+  // ...or a FAST load's last write (the send-back of 2026-09-29, below
+  // with the load's rule): its value never enters the array, so it
+  // leaves the queue at the write of the block's last beat.
+  assign wb_pop  = (al_ov && seq_live &&
+                    (wb_tag == 6'({1'b0, nb_blk} - 6'd1))) || fw_pop;
   assign q_after = q_n - {1'b0, wb_pop};
   assign q_e0    = wb_pop ? q_rd1 : q_rd0;
   assign q_e1    = wb_pop ? q_rd2 : q_rd1;
@@ -1334,9 +1341,45 @@ module cft_seq #(
   // producer an admitted instruction waits on is at position 0 or 1 of
   // the queue, and a control code waits no longer than it did when it
   // waited for the queue to be EMPTY.
-  assign adm_go  = (st == S_DECODE) ? c_piped :
+  //
+  // FAST LOADS (2026-09-29, verifier-R4's send-back). A load's value used
+  // to reach the file only through the array, as IOR(v, v): at sixteen
+  // beats the pipelining hides the array's depth, and at ONE beat nothing
+  // does, so a program that used a loaded value at once ran slower than
+  // f681dee's, whose LDL wrote the file itself. So a load is FAST when,
+  // at its admission, every queued writer ahead of it (after this
+  // cycle's pop) is a fast load too - an empty queue included. A fast
+  // load keeps its queue slot, so everything that reads its destination
+  // tracks it as it tracks any producer; but its value never enters the
+  // array: the retire's own write port writes it into the file at F (an
+  // LDL) or H (an LDX), under the row the beat fires with, the head's
+  // reach wb_bt advances as a landing would advance it, and the slot pops
+  // at the block's last beat. The port is free: every writer ahead of a
+  // fast load is fast and writes in program order, one beat a step,
+  // popping before the next one's first write; every writer behind it
+  // fires after its last F (an LDX's last H - the gap keeps the next beat
+  // two steps behind) and lands LATENCY + 1 later. So no array result
+  // lands while a fast load writes, a fast load is the head whenever it
+  // writes, and writes to its register stay in program order.
+  //
+  // A load that cannot be fast rides the array on a single-pass tile, as
+  // before - a full block hides the depth. On a MULTI-PASS tile it waits
+  // here until it can be (every array writer ahead of it has landed):
+  // there the array takes a beat every pass period, and a load through it
+  // costs sixteen of them to issue and sixteen more for its user to wait,
+  // where f681dee's load waited for the same drain and then took five
+  // cycles a beat. After the wait it takes one.
+  assign e0_fast   = wb_pop ? q_f1 : q_f0;
+  assign e1_fast   = wb_pop ? q_f2 : q_f1;
+  assign all_fast  = (q_after == 2'd0) ||
+                     (q_after == 2'd1 && e0_fast) ||
+                     (q_after == 2'd2 && e0_fast && e1_fast);
+  assign adm_ld    = adm_w[31] && (adm_w[7:0] == C_LDL || adm_w[7:0] == C_LDX);
+  assign adm_fast  = adm_ld && all_fast;
+  assign adm_ld_ok = FWD || !adm_ld || all_fast;
+  assign adm_go  = (st == S_DECODE) ? (c_piped && adm_ld_ok) :
                    (st == S_ISSUE) && !rd_hold && last_step && nxt_ok &&
-                   (32'(pc) + 32'd1 < h_ninsns) && imq_piped;
+                   (32'(pc) + 32'd1 < h_ninsns) && imq_piped && adm_ld_ok;
   assign adm_take = adm_go && q_room;
   assign adm_w   = (st == S_ISSUE) ? imem_q : cur;
   assign adm_wr  = writer_fn(adm_w);
@@ -1358,10 +1401,20 @@ module cft_seq #(
   assign dep_p_c = (q_after >= 2'd2 && q_e1 == adm_rc) ? 2'd1 : 2'd0;
   // the per-beat wait: the producer is not the head yet, or its beat
   // for the one being addressed has not landed - or, forwarding, will
-  // not have landed by the time F fires (wb_bt + la counts the head's
-  // beats landed two cycles from now; a beat in that window that is
-  // not the head's means the head's are all in it, so overcounting
-  // only ever says yes when yes is right)
+  // not have landed by the time F fires. "Will have landed" is the head's
+  // reach two cycles from now: the highest beat + 1 among the results
+  // landing within two cycles (win_q, below), or wb_bt if that is more.
+  // Until the send-back of 2026-09-29 it was wb_bt + la, the number of
+  // landings in that window added to the reach - the same thing while a
+  // producer's beats land one after another, and short of it once R19
+  // skips beats: a producer whose first issued beat is 3 or later, or
+  // whose issued beats have a gap, lands a beat the count cannot reach,
+  // and the dependent beat waited for the landing itself - two cycles a
+  // link on a masked chain, which verifier-R4 measured slower than
+  // f681dee. By TAG it reaches any beat. A beat in the window that is not
+  // the head's is a younger instruction's, and then every beat of the
+  // head's is in the window or before it, so the maximum only ever says
+  // yes when yes is right.
   //
   // Which of the two rules a port takes (R18). Forwarding's (R15) where
   // the operand is DATA - every ALU operand, and the value DEPOSIT, STL
@@ -1377,7 +1430,7 @@ module cft_seq #(
   assign a_fwd = !(c_ctrl && c_op == C_SETACT);
   assign b_fwd = !c_ctrl;
   logic [5:0] wb_soon;
-  assign wb_soon = FWD ? wb_bt + 6'(la) : wb_bt;
+  assign wb_soon = FWD ? ((win_q > wb_bt) ? win_q : wb_bt) : wb_bt;
   assign dep_hold_a = dep_v_a && (dep_pos_a != 2'd0 ||
                                   (a_fwd ? wb_soon : wb_bt) <= bt);
   assign dep_hold_b = dep_v_b && (dep_pos_b != 2'd0 ||
@@ -1399,9 +1452,13 @@ module cft_seq #(
   // scratch's read address one owner a cycle (an LDL's A and an LDX's F
   // never both write it). And a store's bank write lands at the end of
   // step A+3 while an LDL reads at A+1 of its own: an LDL waits while a
-  // store beat is in B or F, whatever the slot. At sixteen beats a
-  // block that never binds; a short block, and R19's skipped beats, are
-  // what it is for. An LDX needs no such wait - it reads at A+3 of a
+  // store beat is in B or F, whatever the slot and whatever the beat - so
+  // it binds at every block length, two cycles where a store stands
+  // straight before a load (verifier-R4 measured it at sixteen beats,
+  // where this comment said it never bound). Only a store and a load of
+  // the SAME beat can meet, so a rule comparing the beats would bind only
+  // on a block of one or two beats or across skipped beats: a possible
+  // gain, not taken. An LDX needs no such wait - it reads at A+3 of a
   // LATER A - and a store after a load needs none: the load has read.
   logic c_is_ldl, c_is_ldx, pb_ldx, pf_ldx, pb_st, pf_st;
   assign c_is_ldl  = c_ctrl && c_op == C_LDL;
@@ -1513,12 +1570,14 @@ module cft_seq #(
   // SETACT three cycles a beat, a store three, a load five). DEPOSIT,
   // SETACT and the stores ACT at F - the deposit banks and the count
   // row, the active row, the scratch write - and take no queue slot.
-  // The loads are producers: they take a queue slot and fire their
-  // value into the array as IOR(v, v), which is v bit for bit and
-  // raises no flag (softfloat.ior; cft_simpleops), so it retires through
-  // the one retire path, in order, under the row it fired with. An LDL
+  // The loads are producers: they take a queue slot, and their value
+  // reaches the file by the one retire port, in order, under the row the
+  // beat fires with - written there directly when the load is FAST (every
+  // queued writer ahead of it a fast load; the rule is with the
+  // admission), fired into the array as IOR(v, v) otherwise, which is v
+  // bit for bit and raises no flag (softfloat.ior; cft_simpleops). An LDL
   // reads the scratch between A and F; an LDX, whose slot is rb, forms
-  // the address at F, reads at G and fires at H (pg_* and ph_*).
+  // the address at F, reads at G and writes or fires at H (pg_*, ph_*).
   //
   // Read-after-write is the one hazard: in-order, so writes land in
   // order, and an instruction's reads all leave the file before the
@@ -1557,6 +1616,15 @@ module cft_seq #(
   logic          q_room;            // a fourth would not fit
   logic          adm_go;            // this cycle admits, given room
   logic          adm_take;          // ...and it has room: the instruction enters A
+  // Fast loads (the send-back): a flag per queue entry, beside q_rd; the
+  // admitted word's; and the terms that decide it.
+  logic          q_f0, q_f1, q_f2;
+  logic          e0_fast, e1_fast, all_fast;
+  logic          adm_ld, adm_fast, adm_ld_ok;
+  logic          c_fast;            // the instruction in A is a fast load
+  logic          fw, fw_x, fw_pop;  // a fast load's write this step
+  logic [5:0]    fw_bt;
+  logic [WORDS-1:0] fw_wwe;
   logic [63:0]   adm_w;             // the word being admitted
   logic [4:0]    adm_rd, adm_ra, adm_rb, adm_rc;
   logic          dep_v_a, dep_v_b, dep_v_c;        // the operand waits on a producer
@@ -1579,6 +1647,7 @@ module cft_seq #(
   // banks from F, where rb was on the bus, to H, where the value is.
   logic          pg_v, ph_v;
   logic [WORDS-1:0] pg_oor, ph_oor;
+  logic          pb_fast, pf_fast, pg_fast, ph_fast;   // a fast load's beat
   // The row and the flag enable a request fires with (R18), held with
   // it until the array takes it - al_valid's own discipline - and then
   // shifted down fr and fq beside fs: the retire writes the lanes, and
@@ -1606,7 +1675,13 @@ module cft_seq #(
   // multi-pass tile keeps R14's rule and reads only the bank.
   localparam bit FWD = (MUL_PASSES == 1);
   logic [LATENCY-1:0]   fs;
-  logic [1:0]           la;                    // landing within two cycles of now
+  // The look-ahead's window, by tag (the send-back; with wb_soon): the
+  // highest tag + 1 among the results landing within two cycles, 0 if
+  // none. Formed a cycle AHEAD from the shadow's next three positions -
+  // on a single-pass tile, the only one it is read on, the shadow shifts
+  // every cycle - and registered, so the path into the issue's wait is
+  // one 6-bit maximum with wb_bt where it was a 6-bit add.
+  logic [5:0]           win_q, win_c, win_t2, win_t3, win_t4;
   logic                 we1;
   logic [RFAW-1:0]      wa1;
   logic [BEAT_BITS-1:0] wd1;
@@ -1614,7 +1689,16 @@ module cft_seq #(
   logic [RFAW-1:0]      pf_aa, pf_ab, pf_ac;   // where F's beat was read from
   logic                 h1_a, h2_a, h3_a, h1_b, h2_b, h3_b, h1_c, h2_c, h3_c;
   logic [BEAT_BITS-1:0] op_a, op_b, op_c;      // F's register operands, forwarded
-  assign la = {1'b0, fs[LATENCY-1]} + {1'b0, fs[LATENCY-2]} + {1'b0, fs[LATENCY-3]};
+  assign win_t2 = fs[LATENCY-2] ? ft[(LATENCY-2)*6 +: 6] + 6'd1 : 6'd0;
+  assign win_t3 = fs[LATENCY-3] ? ft[(LATENCY-3)*6 +: 6] + 6'd1 : 6'd0;
+  assign win_t4 = fs[LATENCY-4] ? ft[(LATENCY-4)*6 +: 6] + 6'd1 : 6'd0;
+  assign win_c  = (win_t2 > win_t3)
+                ? ((win_t2 > win_t4) ? win_t2 : win_t4)
+                : ((win_t3 > win_t4) ? win_t3 : win_t4);
+  always_ff @(posedge ap_clk) begin
+    if (!ap_rst_n) win_q <= '0;
+    else           win_q <= win_c;
+  end
   always_ff @(posedge ap_clk) begin
     if (!ap_rst_n) begin
       fs <= '0; we1 <= 1'b0;
@@ -1639,8 +1723,8 @@ module cft_seq #(
     end
   end
   generate
-    if (FWD && LATENCY < 3) begin : g_fwd_latency
-      $error("cft_seq: forwarding looks two cycles ahead along the array's validity line - LATENCY must be at least 3");
+    if (FWD && LATENCY < 4) begin : g_fwd_latency
+      $error("cft_seq: forwarding looks two cycles ahead along the array's validity line, formed a cycle before - LATENCY must be at least 4");
     end
   endgenerate
   // The instruction memory's one read register: its address is pc + 1
@@ -1948,10 +2032,25 @@ module cft_seq #(
   logic [BEAT_BITS-1:0] ld_val, alt_a, alt_b, alt_c;
   logic                 use_op_a, use_op_b, use_op_c;
   assign fire_alu = pf_v && !pf_ctrl;
-  assign fire_ldl = pf_v && pf_ctrl && pf_op == C_LDL;
-  assign fire_ldx = ph_v;
+  assign fire_ldl = pf_v && pf_ctrl && pf_op == C_LDL && !pf_fast;
+  assign fire_ldx = ph_v && !ph_fast;
   assign fire_go  = fire_alu || fire_ldl || fire_ldx;
-  assign ld_val   = zero_oor_fn(scr_rdata, fire_ldx ? ph_oor : '0);
+  assign ld_val   = zero_oor_fn(scr_rdata, ph_v ? ph_oor : '0);
+  // A FAST load's beat (the send-back; the rule is with the admission):
+  // its value, the same ld_val the array path would fire, goes into the
+  // file through the retire's write port instead, this step, under the
+  // row the beat fires with - bt_act at F for an LDL, h_act at H for an
+  // LDX, which is exactly the array path's al_row. At most one a step:
+  // an LDL at F and an LDX at H never meet (the gap), as their fires
+  // never do. Gated like every F-stage action; no request can be
+  // standing while a fast load reads or writes, since every array writer
+  // ahead of it has landed and every one behind fires after it.
+  assign fw_x   = !issue_hold && ph_v && ph_fast;
+  assign fw     = fw_x || (!issue_hold && pf_v && pf_ctrl &&
+                           pf_op == C_LDL && pf_fast);
+  assign fw_bt  = fw_x ? ph_bt : pf_bt;
+  assign fw_wwe = fw_x ? wb_wwe_fn(h_act, wpe_sh) : bt_wwe;
+  assign fw_pop = fw && (fw_bt == 6'({1'b0, nb_blk} - 6'd1));
   assign alt_a    = fire_alu ? kq_a : ld_val;
   assign alt_b    = fire_alu ? kq_b : ld_val;
   assign alt_c    = fire_alu ? kq_c : '0;
@@ -2476,6 +2575,8 @@ module cft_seq #(
       pc <= '0; bt <= '0; wb_bt <= '0; lp_sp <= '0; q_n <= '0;
       pb_v <= 1'b0; pf_v <= 1'b0; nxt_ok <= 1'b0;
       pg_v <= 1'b0; ph_v <= 1'b0;
+      pb_fast <= 1'b0; pf_fast <= 1'b0; pg_fast <= 1'b0; ph_fast <= 1'b0;
+      c_fast <= 1'b0; q_f0 <= 1'b0; q_f1 <= 1'b0; q_f2 <= 1'b0;
       al_row <= '0; al_fen <= 1'b0; al_tag <= '0;
       pf_aa <= '0; pf_ab <= '0; pf_ac <= '0;
       dep_v_a <= 1'b0; dep_v_b <= 1'b0; dep_v_c <= 1'b0;
@@ -3303,7 +3404,9 @@ module cft_seq #(
             // with the queue) and issued through the pipe. A code that
             // reads a register waits there, a beat at a time, for a
             // queued producer of it and for nothing else.
-            if (q_room) begin
+            // ...and, a load on a multi-pass tile, with every array
+            // writer ahead of it landed (adm_ld_ok): it then goes fast.
+            if (q_room && adm_ld_ok) begin
               bt <= adm_first;           // R19: its first live beat
               st <= S_ISSUE;
             end
@@ -3430,7 +3533,7 @@ module cft_seq #(
               pc <= pc + 1;
               if (nxt_ok && (32'(pc) + 32'd1 < h_ninsns)) begin
                 cur <= imem_q;
-                if (imq_piped && q_room)
+                if (imq_piped && q_room && adm_ld_ok)
                   bt <= adm_first;       // R19: its first live beat
                 else
                   st <= S_DECODE;
@@ -3696,7 +3799,8 @@ module cft_seq #(
       //
       // Revision 7, R18: a beat at F is now one of three things. An ALU
       // beat or an LDL beat FIRES - the LDL's value as IOR(v, v) with its
-      // flag enable off - with the row of `active` it is firing under.
+      // flag enable off, or, a FAST load's, written into the file by the
+      // retire's port (fw) - with the row of `active` it is firing under.
       // A DEPOSIT, SETACT or store beat ACTS here, on its own beat's row,
       // and never reaches the array. An LDX beat forms its scratch
       // address here and fires two steps on, at H. Everything F does is
@@ -3708,6 +3812,7 @@ module cft_seq #(
         pb_rnd  <= c_rnd;
         pb_ka   <= c_ka; pb_kb <= c_kb; pb_kc <= c_kc;
         pb_ctrl <= c_ctrl;
+        pb_fast <= c_fast;
         pb_bt   <= bt;
         pb_slot <= c_imm[SCRSW-1:0];
         pb_kidx_a <= k_idx_a; pb_kidx_b <= k_idx_b; pb_kidx_c <= k_idx_c;
@@ -3716,6 +3821,7 @@ module cft_seq #(
         pf_rnd  <= pb_rnd;
         pf_ka   <= pb_ka; pf_kb <= pb_kb; pf_kc <= pb_kc;
         pf_ctrl <= pb_ctrl;
+        pf_fast <= pb_fast;
         pf_bt   <= pb_bt;
         pf_slot <= pb_slot;
         pf_aa   <= rf_raddr_a; pf_ab <= rf_raddr_b; pf_ac <= rf_raddr_c;
@@ -3724,13 +3830,16 @@ module cft_seq #(
         pg_v    <= pf_ldx;
         pg_bt   <= pf_bt;
         pg_oor  <= scr_oor_bk;
+        pg_fast <= pf_fast;
         ph_v    <= pg_v;
         ph_bt   <= pg_bt;
         ph_oor  <= pg_oor;
+        ph_fast <= pg_fast;
         // The request (fire_* above): an ALU beat with its operands, a
         // load's value as IOR(v, v) - the scratch's read landed with the
         // file's for an LDL, at G for an LDX - under the row it fires
-        // with, and with its flag enable off.
+        // with, and with its flag enable off. A fast load's beat makes no
+        // request: its write is the retire block's (fw).
         if (fire_go) begin
           al_valid <= 1'b1;
           al_op    <= fire_alu ? pf_op : OP_IOR;
@@ -3823,18 +3932,31 @@ module cft_seq #(
         // the head's next beat not yet landed or skipped: every beat
         // below the one that just landed has landed or was skipped
         wb_bt <= wb_pop ? 6'd0 : wb_tag + 6'd1;
+      end else if (fw) begin
+        // A FAST load's beat: written here, where an array result would
+        // be, and the head's reach moved as a landing moves it - so a
+        // reader of its register waits for exactly this write (R14's
+        // "landed" rule), whatever port it reads by. No flag: a load
+        // raises none, and this branch never touches flags_q.
+        rf_we    <= 1'b1;
+        rf_waddr <= {q_rd0, fw_bt[NBSH-1:0]};
+        rf_wdata <= ld_val;
+        rf_wwe   <= fw_wwe;
+        wb_bt    <= fw_pop ? 6'd0 : fw_bt + 6'd1;
       end
       // the queue: a pop moves everything down, and an admission lands
       // behind whatever is left
       if (wb_pop) begin
         q_rd0 <= q_rd1;
         q_rd1 <= q_rd2;
+        q_f0  <= q_f1;
+        q_f1  <= q_f2;
       end
       if (q_push) begin
         case (q_after)
-          2'd0:    q_rd0 <= adm_rd;
-          2'd1:    q_rd1 <= adm_rd;
-          default: q_rd2 <= adm_rd;
+          2'd0:    begin q_rd0 <= adm_rd; q_f0 <= adm_fast; end
+          2'd1:    begin q_rd1 <= adm_rd; q_f1 <= adm_fast; end
+          default: begin q_rd2 <= adm_rd; q_f2 <= adm_fast; end
         endcase
       end
       // Only when something moves: a `q_n <= q_n` every cycle would
@@ -3846,6 +3968,8 @@ module cft_seq #(
       // a pop moves them down, and the head popping releases the operand.
       // Every admission sets them (R18: a control code has producers too,
       // and most control codes take no queue slot of their own).
+      if (adm_take)
+        c_fast <= adm_fast;
       if (adm_take) begin
         dep_v_a <= dep_n_a; dep_pos_a <= dep_p_a;
         dep_v_b <= dep_n_b; dep_pos_b <= dep_p_b;
