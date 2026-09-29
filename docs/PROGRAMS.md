@@ -482,3 +482,34 @@ since landed (`seq.py`'s `STL, LDL, STX, LDX`, `SCRATCH_D` and
 
 This is the shape the round before used for the `BANK_EXT` path, which
 landed the same way.
+
+## Revision 8 in the text form (proposed, 2026-09-29)   **the reference assembler only**
+
+*docs/SEQUENCER.md's "Revision 8 (proposed, 2026-09-29)" is the
+contract; this is its spelling.*
+
+    augadd rD, rA, rB        rD := r of augmentedAddition(rA, rB)
+    augerr rD, rA, rB        rD := e, its exact error
+    stx rA, rB, STEP         scratch[rB] := rA, then rB := rB + STEP
+    ldx rD, rB, STEP         rD := scratch[rB], then rB := rB + STEP
+
+`STEP` is a signed number - `+1`, `-1`, `-0x10` - in -2048..2047, the
+twelve bits of imm[11:0]; a register there is refused by name, and so is
+`ldx rX, rX, STEP` with a non-zero step, whose loaded value would win the
+register and leave the step selecting nothing. Omitted, the step is zero,
+which is the instruction as it always was: `ldx r3, r4, 0` and `ldx r3,
+r4` are the same bytes, and the disassembler writes a step back only when
+it is not zero, so every image from before this revision reads back as it
+did. The pair takes three registers and nothing else - no rounding suffix,
+because 754-2019 9.5 fixes the rounding, and no constant, because no
+control code reads the bank. asm.py's `info()` - the reference for what
+`cft-asm -i` prints - names the features an image needs: `AUGADD` for
+the pair and `SCRATCH_STEP` for a step that is not zero.
+
+`python/cft_golden/asm.py` reads and writes all four forms, and
+`python/tests/test_seq_rev8.py` holds its validator to `seq.py`'s over
+the new codes' whole field space. `host/tools/cft-asm.c` does NOT read
+them yet: nothing it assembles uses them - the committed `.cfta` files
+and `programs/check.py`'s own generator draw neither - so no gate turns
+red, and teaching it is the follow-up for whoever takes revision 8 to the
+tools.
