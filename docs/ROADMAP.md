@@ -3709,6 +3709,88 @@ verifier.
 Not in step 2: signing; per-lane flags (a step-4 hardware ask); and a
 bound for any method that has no rigorous remainder.
 
+
+### Revision 7: step 4's RTL revision (plan of record, 2026-09-29)
+
+Step 4 of the controlled-divergence work order is the RTL revision.
+Logan cleared it on 2026-09-29 and took the lead's defaults. Nothing in
+it exists yet unless it says so.
+
+**What revision 7 is.** Three items. Each keeps every answer a program
+gets today: the same bits, flags, STATUS, deposits and scratch-out as
+the round-2 images, only in fewer cycles or with more room.
+1. **Control codes join the instruction overlap (R18).**
+   - Today (R12) every control code that reads the register file, moves
+     the mask or ends the block waits for the whole result queue to
+     drain.
+   - After, a control code waits only for a queued result it reads, and
+     a store whose source is settled issues under the overlap, as a read
+     does.
+   - The before-side, measured on the card:
+     - atlas-engine's probes (2026-09-17): arithmetic 0.98 ns a lane;
+       a scratch store or load 3.9, an indexed one 4.0, a `SETACT` 4.0;
+     - the ODE census (docs/VALIDATION.md, steps 0 and 1a): a scratch
+       access costs 5.1 to 5.2 arithmetic instructions, and Lorenz-96
+       spends 82% of its card time on scratch.
+2. **Beat skipping (R19).**
+   - A beat with no active lane is not issued.
+   - A stream beat nobody reads is not loaded.
+   - The before-side is P3's table in R17: dense plus four cycles and
+     one read a block, and all-masked equal to half-masked.
+3. **The program limits, per build** (Logan, 2026-09-28: as large as
+   the U50 allows, adjustable per build):
+   - `IMEM_D` 16,384 to 32,768, the most `CAPS[23:20]` can publish;
+   - `MAXD` raised, as far as its cost allows;
+   - `SCRATCH_D` 256 to 2,048, if the U50's memory allows, measured in
+     the build.
+   A strict image (R8) already keeps its answers independent of the
+   depth when it raises no `STATUS[5]`. What a deeper build still needs
+   is on the model's side: the golden model's depth, fixed at 256 in
+   `seq.py`, made a parameter, and the software backend with it.
+   `KMEM_D` stays 512, since a deeper bank changes the instruction
+   format.
+
+**What it is not.** The side project's program-model asks change what a
+program can say:
+- auto-stepping scratch addresses;
+- an exact-residual add;
+- per-lane sticky flags.
+Each is defined golden-first and measured alongside this revision, as
+revision 8. It joins revision 7 only if its RTL is ready before the
+bitstream builds.
+- The exact-residual add follows Logan's rule of 2026-09-29: IEEE 754
+  first, then RISC-V, then what fits the current systems. So it is
+  754-2019's augmentedAddition (clause 9.5): the sum rounded with
+  roundTiesTowardZero, and the exact error. That is what
+  `host/src/augmented.c` computes on the host today.
+
+**How it is held.**
+- Every bench compares against the golden model, as now.
+- Cycle counts in simulation, and the card's probes, give the
+  after-side of each item. They must beat the before-side where the
+  item claims a gain, and equal it elsewhere.
+- Agents run quick tests only: single benches under Verilator, golden
+  unit tests, and plants. The long runs are the lead's to run and
+  watch (Logan, 2026-09-29): Icarus `make sim`, `simmc`, `lint`,
+  `formal` and the gate.
+
+**Order of work.**
+1. Parcels:
+   - P1, the RTL: R18, then R19, in `rtl/cft_seq.sv`. They share the
+     issue and retire logic, so one author does them in turn;
+   - P2, the program limits;
+   - P3, revision 8's definitions, golden-first.
+2. A verifier for each parcel.
+3. The lead's long runs on the merged tree.
+4. Bitstreams on amd-arc-box at 135 MHz (`KERNEL_FREQ=135000000`,
+   CLAUDE.md), the quad and then the single. They run one at a time,
+   about five hours each.
+5. Card legs:
+   - the full conformance set, the program set, the ODE programs and
+     `cft-segrun`, bit for bit the round-2 images';
+   - the cycle probes, as the after-side;
+   - then the single re-tried at 175 MHz.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
