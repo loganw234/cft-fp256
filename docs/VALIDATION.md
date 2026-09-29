@@ -15624,3 +15624,171 @@ in the commit that adds this paragraph. That commit changes docs and
 comments only, and was gated by the docs and programs stages, a
 library build, api-test and `sync.py --check`, not by a second front
 door.
+
+## 2026-09-29 - controlled divergence, step 2, its first three steps: certificate version 1 and its golden implementation, the library naming its build and its device image at ABI 0.15, and a segment runner whose certificates the golden writer reproduces byte for byte, on the software backend and on the card; the round's verifiers, and its known limits
+
+**Why.** Step 2 of the controlled-divergence work order is segments, a certificate format and an audit tool. A service that sells deterministic runs has to hand over, with the bits, a statement anyone can check: what ran, on what, from what, and how accurate it is. It also needs an audit that re-runs that statement on an implementation the service does not control. This entry covers steps 1 to 3 of the plan of record (docs/ROADMAP.md, "Segments, certificates and the audit tool"):
+1. the format and its golden implementation;
+2. the library's identity;
+3. a segment runner in C.
+
+Steps 4 to 6 (a C auditor, accuracy entries, cft-orbits' runs) are later work. The round's records are in `Data/runs/2026-09-28-cert-round/` (gitignored): its ledger, its briefs, the card logs (`card-p2/`, `card-p2b/`, `card-p2c/`, `card-p3/`, `card-p3b/`) and P1c's plants (`p1c-plants/`).
+
+**Logan's decisions this round** (the ledger, lead.md):
+- **Signing.** "Design it so a signature can be added later." Version 1 reserves a DETACHED signature, a file of its own that signs the body's hash, and defines no scheme. The certificate's bytes are the same signed or not.
+- **Accuracy beside identity.** A side project asked for this and Logan passed it on: the method's own error estimate and the conserved-quantity drift, beside the model, program and input hashes - "these bits, reproducible, method error <= X". The lead's rule for it:
+  - each accuracy value names its kind: bound, estimate or measurement;
+  - "method error <= X" is written only as a bound;
+  - a value that is polynomial in the state is carried exactly, as a rational.
+- **Privacy is the owner's choice, certificate by certificate.**
+  - KEYED: state and stream hashes are HMAC-SHA-256 under a 32-byte salt, committed to by HMAC.
+  - OPEN: plain SHA-256 under the same domain tags.
+- **The program limits for step 4.** Size them as large as the U50 allows, adjustable per build (recorded in ROADMAP, built later).
+- **The send-back rule, carried over** (2026-09-27): only a regression or a wrong answer sends a parcel back. Everything else merges as a recorded limit, and a sentence that claims too much is restated at the merge. The lead's own commits get a verifier like any parcel's.
+
+**The plan** (a39c905 to d18d3c2, amended as built in 440e32f, 61a4414 and 34bcac6).
+- Verifier-C1 reviewed the first draft against the tree and made twenty findings.
+- C1 then re-checked the second draft and found six more gaps and six notes.
+- Before any code, that review turned several claims around:
+  - the step-halving run is the same image for twice the segments;
+  - the salt is committed by HMAC, since a bare SHA-256 of a key longer than 64 bytes would publish the key;
+  - accuracy is re-derived by the audit;
+  - a sampled audit states its miss probability;
+  - the width rule is a rule of the format;
+  - the controls re-hash their defective bodies.
+
+**Step 1: version 1 and its golden implementation.** docs/CERTIFICATES.md is the specification, python/cft_golden/cert.py the golden implementation, and python/tests/test_cert.py its gate.
+- **The format.** A text file with one field a line in a fixed order. A magic line `cft-certificate 1`, then the body, then `end`, then `hash <hex>`: SHA-256 of every byte from the magic line to `end`.
+- **Exact values.**
+  - Rationals are hex N/D in one canonical spelling.
+  - The width rule allows 1,023 bits in a numerator or denominator, for every value written or computed.
+  - Anything past it is refused `width` by every writer and reader, and never approximated.
+- **The strict reader** refuses by name any line it does not expect, any line missing, reordered or repeated, any count that disagrees, and any decimal that disagrees with its hex. The page fixes the order of its checks.
+- **The audit** runs ten steps in a fixed order.
+  - It re-runs segments with `seq.run` from their certified start states.
+  - It holds auxiliary runs to their relation to the main run. A half-step run is the same image with the named h-slots halved and twice the segments. A wider run is the same instructions one format up, bank and start state exactly widened.
+  - It re-derives each accuracy value exactly.
+  - It samples with a fixed PRNG under the auditor's own seed, and states the miss probability beside a sampled verdict.
+- **The parcels.**
+  - **P1 (c6d92ac).** Verifier-C2 found fourteen mechanisms no test could fail, five orders the page left open, and two bare errors; no regression, no wrong answer.
+  - **P1b (e484425)** closed those. C2's re-check found no regression and no wrong answer. It raised a false bit count (1,201 for 1,202), eight more checks with no control, and a new open order in an enclosure's line. The lead made those true and held them with three tests (8fb1af1).
+  - Verifier-C4 then found four statements of the page no test held.
+  - **P1c (fce74c1 to ed66890)** gave every listed check a control and took C4's four, plus 41 more its own plants found. The page's "every mechanism" is now a measured census, written into "The controls":
+    - 144 refusal sites, 35 spelling calls, 41 stated orders, 42 limit moves, 106 condition parts and 16 branches, 47 allowed words, and 6 widenings and cross-checks;
+    - every plant red except two that cannot change an answer, which the page names.
+  - Test counts: 83 certificate tests, and the golden stage collects 2,343.
+  - Verifier-C5 on P1c found no regression and no wrong answer, and 17 of its 53 plants green. The page lists them as without a control, and the census is restated as what it is (the merge, 4f88116).
+
+**Step 2: the library names itself - ABI 0.15.**
+- **`cft_build_id()`** gives `commit=<40 or 64 hex> tracked=<clean|modified> untracked=<none|present>`, or `unknown` whole wherever it was not measured.
+  - host/tools/gen_build_id.sh generates it on every make that builds the library, into host/gen/ (gitignored, outside what sync.py vendors).
+  - `make test` holds api-test's id to the tree's, so a stale static test binary fails by name.
+- **`cft_get_image_id()`** gives the SHA-256 of the exact xclbin bytes `cft_open` loaded: it now reads the file once and loads those bytes. It also gives their count, VERSION and the raw CAPS words, one below VERSION 0x800 and two from it.
+  - It is refused by name on the software backend, on a remote handle, and on an image whose tiles disagree.
+- **The parcels.**
+  - **P2 (e598b8f, 082400d, 7bfef09, 4d5d8e4).** Verifier-C3 found one wrong answer. On the Windows desktop, under make, the generator's temporary file for git's stderr was written in MSYS2's /tmp and read from Git for Windows' /tmp. So a git warning was never seen, and an id came out whole where `unknown` was owed. 7bfef09 keeps stderr inside the generator's own shell. C3's re-check found it fixed on four shells.
+  - C3's item 4: device-test's identity leg accepted a refusal-by-design, so three planted faults passed it. The lead ruled it other, not a wrong answer: the code gave right answers, and the card gate still refused them.
+  - **P2c (45898df)** closed it. An unexpected refusal now fails in every mode, and `--expect-refusal` names an expected one. P2c also:
+    - refuses a malformed `CFT_XRT_CAPS` by name;
+    - names plant-differ's plant in its sentence;
+    - holds a planted handle's decoded caps equal to an unplanted one's;
+    - adds a rev-parse warning case (buildidtest 29 checks).
+- **The card** (U50, XRT 2.19, both round-2 images):
+  - 16 of 16 at 082400d (card-p2/);
+  - 17 of 17 at 4d5d8e4, with the quad refusing both planted refusals by name on its four tiles (card-p2b/);
+  - 23 of 23 at 45898df, where an outside plant-unreadable nobody asked for now fails the identity leg by name (card-p2c/).
+  - Each image's digest equals `sha256sum` and its manifest.
+- **The bump** (4495cb9).
+  - `CFT_ABI_VERSION_MINOR` 15 and the Arduino copy re-synced.
+  - The WebAssembly module rebuilt with the pinned emcc 6.0.9: 258,255 bytes, `82f2f21c...`, 141 `cftw_*` exports as before. `conformance.html` and `demos.html` were rebuilt on it.
+  - Two clean container builds were byte for byte, the negative-control pages included.
+  - build_demos.sh refused the page until `demos_chains.json` was re-recorded against the new module. None of its fifteen chains moved.
+  - Verifier-C4 confirmed all of it:
+    - 720 identical calls through the 0.14 and 0.15 modules;
+    - the rebuild byte for byte from a git archive;
+    - both merges;
+    - its own runner, PASS at 11 stages.
+  - Verifier-C5 on P2c found no regression and no wrong answer. Four of its plants are green under every gate, and are known limits below.
+
+**Step 3: the segment runner.** `cft-segrun` (host/tools/segrun.c) runs a program as consecutive segments on the library.
+- Each segment is one `cft_program_run_ex`, entered with the last one's scratch-out.
+- It keeps every boundary state.
+- It hashes keyed or open, and writes the version-1 certificate: identity only from the library, `accuracy 0`.
+- **Its gate** is host/tests/segrun_check.py, run by the `programs` stage. It certifies the three ODE programs at fp64 and fp256, each with a half-step run, and at fp64 a wider fp128 run. It also certifies `flagstep`, whose segments raise flags and a STATUS no ODE segment does. For every certificate:
+  - the golden reader must accept it;
+  - the golden writer, from its own initial states and salt and handed the identity lines, must write the same bytes;
+  - every boundary file must be the golden chain's;
+  - the golden audit must accept it, in full and sampled.
+- **P3 (b025e6e to 99f1b43).** Verifier-C6 made 57 certificates, and every one was byte-identical to the golden writer's. It held the tool's HMAC to RFC 4231 and FIPS 180-2, and found the gate's golden side independent of the tool's output.
+- **P3b (4eed552, then eb2d1ae, then ff7ff7b and d4abe2a).**
+  - A refusal removes only what the run created. An existing `--out` is refused rather than overwritten, and so is an `--out` inside `--states`.
+  - More boundaries than the process can hold is refused `memory` (71) before anything is made.
+  - It adds C6's two gate cases: a half-step run with its own initial state, and flagstep through a loopback server.
+  - Verifier-C7 found the round's one regression here. To refuse before anything was made, 4eed552 held every run's buffers at once where 99f1b43 held one run's. Under a `ulimit -v` of 207,436 kB, 99f1b43 wrote a certificate that 4eed552 refused `memory`.
+  - The lead ruled it (a) under Logan's rule and sent P3b back. eb2d1ae allocates run by run again, behind a trial (`try_runs`) that still refuses before anything is made. It now writes C7's case under 147,744 kB, less than 99f1b43's 164,128.
+  - A gate section holds the growth from one run to three.
+  - C7's re-check found C7's case and every larger shape fixed, but two narrow issues left. Both went back under the same rule:
+    - (a) in small shapes eb2d1ae still needed 4 to 40 KiB more than 99f1b43. The trial's pieces under 64 KiB came from the C heap and left it bigger. Under a `ulimit -v` of 13,212 KiB, 99f1b43 wrote a certificate that eb2d1ae failed.
+    - (b) the gate's own Linux memory search set a 16 GiB soft limit. For a user whose hard limit was lower, the gate stopped with a traceback, failing a right tool.
+  - ff7ff7b takes every trial piece from the OS. P3 measured all 96 of C7's small shapes writing at 99f1b43's limit.
+    - A Linux gate check holds the trial to costing nothing, to 4 KiB, against the tool with the trial skipped.
+    - The search sets only the soft limit, never past the hard one, and names what it cannot measure NOT TESTED.
+    - Windows cannot measure the check that finely, so on the desktop it is a named NOT TESTED, one inner skip in `programs`.
+  - The gate grew to 389 checks, 391 on Linux.
+- **On the card** (U50, XRT 2.19, both round-2 images, hw/card-segrun.sh), the certificates made on the tiles:
+  - were accepted by the golden reader, the golden writer's bytes, and audited clean;
+  - had every run block equal to the software backend's;
+  - carried device lines equal to `device-test -i` and `sha256sum`.
+  - The runs:
+    - 8 of 8 at 99f1b43, the gate 295 of 295 on the quad's four tiles and on the single (card-p3/);
+    - 8 of 8 at 4eed552, 373 of 373 on each (card-p3b/);
+    - 8 of 8 at eb2d1ae, 382 of 382 on each (card-p3b2/);
+    - 8 of 8 at d4abe2a, 384 of 384 on each, nothing skipped (card-p3b3/).
+  - Verifier-C7's second re-check found no regression and no wrong answer. No small shape was above 99f1b43 in 96. 46 of 46 certificates were the same across 99f1b43, eb2d1ae and d4abe2a. The new check was stable to the KiB and red for a leaked page.
+
+**The front door.**
+- The lead's runs:
+  - `--only wasm,node` (20260928-123647) and `demos` (20260928-122212) on the bump before its commit;
+  - `--only libcft,remote,cpp,selfcheck,programs,golden,generated` on 4495cb9 (20260928-132656): PASS, with only the known three inner skips.
+- Verifier-C4's run on 4495cb9 (20260928-142311): PASS, 11 stages.
+- The round's gate, on 953fe99 (20260928-200207): PASS, 35 stages. `lang-rust` was skipped by request (MSVC rustc cannot link the MinGW library on this desktop). The only inner skips are golden's known three. Golden gave 2,340 passed.
+- After the gate, P3b merged (819755b), with its sentences restated, and this entry was committed. The stages those change (`programs`, `docs`), and the three the gate budget leaves out (`wasm`, `node`) or holds (`demos`), ran on this entry's commit. That run is recorded in the paragraph below, which the commit after this one adds.
+
+**Known limits, recorded rather than fixed** (Logan's rule):
+- **No C auditor, and no accuracy entries written in C.** The plan's steps 4 and 5. `cft-segrun` writes `accuracy 0`.
+- **The identity lines are stated, not checked.** The reader holds each to its own spelling and nothing more: not the CAPS word count to `device-version`, and not the device lines to one another or to `backend`. The page states this and a test pins it.
+- **Certificates of P1's first commit** (c6d92ac, three build lines) are refused `unknown-line` under the same `cft-certificate 1`. This is the intended grammar change; no certificate outside the round was written.
+- **git_run's in-band separator** shares a stream with git's stderr. A stderr beginning with the exact bytes `\001 0 \001`, or a child writing stderr after git exits without holding stdout, reads as `tracked=modified`, and the first can hide a first untracked line. Neither comes from real git (verifier-C3).
+- **Not tested on some hosts.** macOS's /bin/sh is not tested. On a machine that overcommits memory (WSL's `vm.overcommit_memory` 1), a segment count whose allocations fit the address space is not refused, and the kernel must stop it (P3b; the page says so).
+- **cft.hpp** has no wrappers for the two identity calls.
+- **cft-segrun's remote rule** writes a software server's VERSION 0 as `unknown`. HELLO does carry the server's backend name, but only an internal function reads it (verifier-C6). The nonzero-VERSION branch, a server holding an xclbin, has never run.
+- **Flags and STATUS that differ lane to lane across a quad's tiles** are not determined on the card: the card leg's flagstep has two lanes with the same counter.
+- **The golden writer's `cert.run_chain`** raises an unnamed `seq.ProgramError` for an empty initial state and for an image that does not load. The C tool refuses both by name. Verifier-C5 found eleven bare errors in the two writer helpers in all, a bytes initial state run as byte-valued lanes, and a ragged start or zero lanes accepted.
+- **P2c's device-test: four plants green under every gate** (verifier-C5). The committed code does each case right:
+  - any expected kind accepting any refusal;
+  - the unmet-expectation check removed;
+  - only the first two tiles compared;
+  - an outside `CFT_XRT_CAPS` not restored.
+  Two of its printed sentences say more than is so.
+- **The golden audit's allocation, pre-existing since c6d92ac and to be designed out in step 4.** The audit allocates +0 streams of a run's `lanes` count before comparing any hash, so a certificate with `lanes 4294967295` makes it commit about 100 GB rather than refuse `stream` (verifier-C5). No certificate is wrongly accepted. But an auditor meant for certificates nobody trusts must bound what a certificate can make it allocate.
+- **cft-segrun's memory check** (verifier-C7): the trial-skipped run's 30 more bytes of environment add a page to it in a 32-byte window of every 4,096, where a leaked page is not seen; a right tool is never failed. A trial list on the heap costs the runs a page in 2 of 8 many-run shapes, which the check's two small shapes do not see. On Windows the check is NOT TESTED by name.
+- **cft-segrun's trial can refuse what its runs would write**, about 10 MB in C7's `up` shape. 99f1b43 fails there too, so it is not a regression.
+- **Pre-existing, raised as tasks of their own:**
+  - verify/run.sh's `ensure_vectors` takes any non-empty `vectors/out` as complete, so a crashed generation's partial set is reused;
+  - `verify_demos.mjs` has no ABI check;
+  - verify.mjs's comments say it runs the page's bytes where the pinned loader runs `cft_node.wasm`. Step 3's hash equality keeps the verdicts right.
+
+**Load, and the machine.** The round kept Logan's rule that no agent loads the machine on purpose. Builds, gates and plants ran one at a time and niced, and the card legs ran on amd-arc-box at natural load.
+- P1c's and verifier-C5's runs before 19:03 were at NORMAL priority, not the below-normal they stated. Their Windows priority call (SetPriorityClass through ctypes, with no return type) was handed a truncated handle and failed; C5 measured it failing. They still ran one at a time.
+- One of C5's own probes audited a mutant certificate claiming 4,294,967,295 lanes. From 19:06 to 19:12 it committed about 99 GB and took free RAM down to 15.4 GB before C5 stopped it: the audit allocation above, met for real.
+
+**The lead's own slips**, each caught and recorded in the ledger:
+- **Before the round:** f953f4c (2026-09-25) had made `print-src` host/Makefile's default goal, so a bare `make -C host` built nothing. The hotfix 41b15e8 was verified by C3 and pushed at 10:46.
+- **A claim repeated.** An entry repeated P2's "starts no run that can time out" of a card script whose step 5 is the quick matrix.
+- **The PATH slip.** A PATH with MSYS2's mingw64 first made `python` MSYS2's, with no mpmath. The vector generation crashed part way, and the runner reused the partial set. The wasm and node stages failed twice before the cause was found.
+- **Typed, not measured.** A start time was typed as "about 12:57" (it was 13:26:55), and a notice's time was typed; both were corrected.
+- **A truncated SHA.** An ssh meant to print a SHA ran the box script with a truncated one. The script's own SHA assertion refused it after the clone: nothing built, nothing ran on the card.
+- **Sentences that claimed too much.** Verifier-C4 caught them:
+  - ROADMAP's step-4 reading of KMEM_D rested on a weak premise;
+  - its SCRATCH_D item left out revision 4's SCRATCH_STRICT, which already does most of what a per-build depth needs;
+  - two commit messages said more than was measured.
