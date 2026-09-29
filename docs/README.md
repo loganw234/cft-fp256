@@ -1,11 +1,11 @@
 # The documents, by what you open them for
 
-Thirty-eight files, 54,511 lines. Flat in one directory they look like one
+Thirty-eight files, 54,519 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **19,095 lines you consult while working** — the three under *Start here*,
+- **19,101 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
-- **6,219 lines of tool manual**, one per shipped program;
+- **6,221 lines of tool manual**, one per shipped program;
 - **1,984 lines of operations**, read when you are about to do something to
   hardware;
 - **27,213 lines of record and argument** — the ledger, the roadmap and the
@@ -45,7 +45,7 @@ product, not the implementation.
 |---|---|---|
 | [DETERMINISM.md](DETERMINISM.md) | 1,442 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 1,167 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
-| [SEQUENCER.md](SEQUENCER.md) | 2,271 | The orbit sequencer and the program model. |
+| [SEQUENCER.md](SEQUENCER.md) | 2,276 | The orbit sequencer and the program model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 862 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
 | [CERTIFICATES.md](CERTIFICATES.md) | 1,474 | The certificate, version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Complete enough to write a reader and an auditor from the page. And the segment runner, `cft-segrun`, that writes one from the library. |
@@ -54,7 +54,7 @@ product, not the implementation.
 
 | document | lines | what it is for |
 |---|---|---|
-| [HOSTAPI.md](HOSTAPI.md) | 3,246 | The host API, function by function. The largest reference here and the one most often wanted. |
+| [HOSTAPI.md](HOSTAPI.md) | 3,247 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,669 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
 | [REMOTE.md](REMOTE.md) | 1,411 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 497 | Programs as files: the assembler, the program library, the runner. |
@@ -70,7 +70,7 @@ running.
 
 | document | lines | tool |
 |---|---|---|
-| [ZOOM.md](ZOOM.md) | 854 | `cft-zoom` — deep-zoom Mandelbrot reference orbits |
+| [ZOOM.md](ZOOM.md) | 856 | `cft-zoom` — deep-zoom Mandelbrot reference orbits |
 | [ORBITS.md](ORBITS.md) | 1,612 | `cft-orbits` — symplectic few-body integration |
 | [MERSENNE.md](MERSENNE.md) | 882 | `cft-mersenne` — Lucas-Lehmer |
 | [ENCLOSE.md](ENCLOSE.md) | 845 | `cft-enclose` — directed-rounding interval enclosure |

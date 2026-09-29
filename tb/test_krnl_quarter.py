@@ -42,7 +42,7 @@ from cft_golden import (  # noqa: E402
 )
 
 from test_krnl import (run_op, check_op_groups, check_seq_caps,  # noqa: E402
-                       CAPS, MAGIC, VERSION, CTRL)
+                       check_caps2, CAPS, CAPS2, MAGIC, VERSION, CTRL)
 from test_krnl_reduce import run_sum  # noqa: E402
 import busfx  # noqa: E402
 
@@ -90,6 +90,11 @@ async def quarter_tile_end_to_end(dut):
     # program is refused on this tile for the BEAT WIDTH (cft_krnl's
     # SEQ_OK), which is not a capacity and has no CAPS field.
     check_seq_caps(caps)
+    # ...and the scratch depth, in CAPS2[3:0], against the 256 this tile
+    # pins (tb/Makefile's OPEN_CAPS_GENERICS, through the wrapper): a
+    # quarter tile left at cft_krnl's own default would be built at the
+    # U50's 2,048 slots, and CAPS alone cannot say so (revision 7).
+    check_caps2(await axil.read_dword(CAPS2))
 
     status = await axil.read_dword(CTRL)
     assert status & 0x4, "kernel must come up idle"

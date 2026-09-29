@@ -3537,6 +3537,36 @@ async def scratch_marks_are_per_bank(dut):
                   f"wipe at slot {high}")
 
 
+@cocotb.test()
+async def scratch_drain_is_the_preloads_only_reader(dut):
+    """A scratch-in block whose ONLY reader is the scratch-out drain:
+    [halt], n_scratch_in = n_scratch_out = K. No instruction names a
+    slot, but the drain reads K slots a lane, so the span the skip rule
+    reads is K and the block must load whole - the scratch-out block is
+    the preload, element for element, against the model. K is 7 and then
+    256, or 300 at 2,048, where the block reaches past a sub-array.
+    verifier-R5's plant q2 (the skip rule blind to the drain) skips the
+    preload and drains something else."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    n = 48
+    zeros = [0] * n
+    for k in (7, 300 if SCRATCH_D > SUB_SLOTS else SCRATCH_D):
+        block = _nonzero(n * k, 5 + k)
+        prog = seq.Program(fmt, [seq.halt()], max_deposits=0,
+                           flags=seq.FLAG_SCRATCH_IO, n_scratch_in=k,
+                           n_scratch_out=k)
+        want = await bench.program(
+            fmt, prog, zeros, zeros, zeros, n,
+            f"[halt], a {k}-slot block in and drained out, no instruction "
+            f"reading it", scratch_in=block)
+        assert want.scratch_out == block, \
+            "the model drains the preload it was given"
+    dut._log.info("a preload whose only reader is the drain: loaded whole "
+                  "and drained, at 7 slots and past 256")
+
+
 # ======================================================================
 # 10b. the whole divide and square root: two hundred instructions of
 #      real register traffic, with every hazard the overlap can meet

@@ -2337,8 +2337,9 @@ to refuse.
 **The two workload tools size themselves from the answer.** `cft-zoom`
 took `--steps-per-call` from a `#define TILE_MAX_DEPOSITS 64` copied
 out of the RTL; it now reads `cft_caps.max_deposits`, and when the
-device's budget is smaller than its default it uses `cap / 2` (two
-deposits a trip) and says so on stderr, because the trip count changes
+device's budget cannot hold its default - 1,024 trips of two deposits,
+2,048 slots a lane - it uses `cap / 2` and says so on stderr, because
+the trip count changes
 only how many calls a run takes and not what it computes. A value the
 user typed is refused instead, naming the cap - running something
 other than the command line says is how a measurement stops meaning

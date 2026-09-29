@@ -686,10 +686,11 @@ nothing. The nibble at CAPS[7:4] is now FULL; the next sequencer
 feature takes a bit of CAPS2, which is what that register exists for.
 
 Programs that deposit once an iteration feel the deposit budget
-first: `cft-zoom` deposits two values a trip and takes
-`--steps-per-call` from `cap / 2` when the device's cap is smaller
-than its default of 1,024 - 32 on a 64-slot tile, 512 on the U50's
-revision-7 one - and refuses a value the user typed that does not fit;
+first: `cft-zoom` deposits two values a trip, so its default of 1,024
+trips a call needs 2,048 deposit slots a lane; on a device that holds
+fewer it takes `--steps-per-call` from `cap / 2` - 32 on a 64-slot tile,
+512 on the U50's revision-7 one - and refuses a value the user typed
+whose two deposits a trip do not fit;
 `cft-orbits` deposits four a sample for a whole run in one call, so its
 sample count is bounded at `cap / 4 - 1` on a tile - 15 at 64, 255 at
 1,024 - and it refuses by name because unlike a trip count the sample
@@ -2248,13 +2249,17 @@ the software backend (parcel P2's ledger has the runs):
   +0), `scratch_preload_read_with_the_marks_clean` (a 256-slot block in
   and out with the marks clean, whole; the whole depth at 2,048) and
   `scratch_marks_are_per_bank` (each word bank's mark alone keeps the
-  next run's wipe, with a static partial wipe between). Verifier-R5
-  planted the faults the last three hold (P2.md has each plant's red).
+  next run's wipe, with a static partial wipe between); and
+  `scratch_drain_is_the_preloads_only_reader` ([halt] with a block in
+  and drained out, which must load whole - the drain is a reader the
+  skip rule counts). Verifier-R5 planted the faults the last four hold
+  (P2.md has each plant's red).
 - **the kernel.** `krnl` holds CAPS and CAPS2 to the parameters at the
   U50's defaults; `krnlseq` holds `IMEM_D` full and one past it, `MAXD`
   at the cap and one past it, the scratch's top slot, and an index of
   5 + 256k plain and strict against the model at the tile's depth.
-  `quarter` holds the open-core values it pins; the `board` targets
+  `quarter` holds the open-core values it pins - `MAXD` and `IMEM_D`
+  in CAPS, the scratch's 256 in CAPS2 - and the `board` targets
   (`simmc`) do the same for the board configuration.
 - **the software backend and the model.** python/tests/test_seq.py's
   depth tests (the default is every run as it was; a plain index wraps
