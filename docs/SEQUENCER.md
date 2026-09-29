@@ -1507,6 +1507,10 @@ entry for a stream nothing read (found by round 2's V1). A program that
 reads r0 alone (a square root, the normal-only mask) loads one stream
 instead of three.
 
+*Since revision 7 (R19)* a stream that IS read loads only the beats a
+lane the caller has sits in - from the first to the last, one burst -
+and nothing for a block whose lanes are all masked.
+
 ### R11. The drains, one element and one beat a cycle
 
 The deposit drain spent three states an element (address, bank read,
@@ -1945,6 +1949,12 @@ are changes to the machinery R14/R15 and R10 settled, neither is in
 this revision, and the numbers above are what says whether they would
 be worth making.
 
+*Revision 7's R19 made both*: a beat with no active lane is no longer
+issued, and a stream beat no lane the caller has sits in is no longer
+loaded, so a mask that empties whole beats - and a SETACT that does -
+now buys their compute too. Its section at the end of this file has the
+numbers; the table above is its before-side.
+
 On the card the fetch is one HBM round trip a block rather than the
 four cycles model RAM charges (the read side carries ONE burst at a
 time - R16's last paragraph), and the saving is unchanged, so the
@@ -2186,3 +2196,118 @@ reason - two the round asked for and four for this item's own rules:
   against 0b11001: the wrong lanes kept running).
 - ACTALL not waiting for the pipe: red in four of five, as deposits that
   differ.
+
+### R19. A beat no lane needs is neither issued nor loaded
+
+**What it cost before.** The sequencer issued every beat of a block and
+let the active bit decide what was written, so a lane mask bought the
+bytes, the flags and the early exit and no compute: R17's table, where
+a run with every lane masked cost what a run with half of them masked
+cost, four cycles and one read a block above the dense run. The same
+was true of a lane a SETACT had dropped - an escape-time map whose lanes
+had converged paid for them to the end of the loop.
+
+**The rule.** The A stage walks the beats that have an active lane and
+jumps the rest: at each step it reads which beats of the block have a
+live lane in `active` (a registered copy, a cycle behind), issues the
+current beat if it has one, and moves to the next beat that has one.
+The mask A reads can only be
+WIDER than the one the beat would fire under - a SETACT still in the
+pipe narrows it, and ACTALL, the one code that widens it, waits for the
+pipe to empty (R18) - so a beat skipped at A is dead at F too, and a
+beat issued that has died by F is masked there as it always was.
+Nothing observable moves: a beat with no active lane writes nothing,
+deposits nothing and raises nothing.
+
+**What the retire needs.** The retire counted beats (`wb_bt`) and wrote
+the n-th result to beat n; with beats skipped, a result carries the beat
+it FIRED from, down the shadow beside the row (`ft`), and the retire
+writes, forwards and pops by that. An instruction that writes a
+register always issues the block's LAST beat, live or not - it fires
+under an empty row, writes nothing, and waits for no producer, since
+what it reads is never written anywhere - because its queue slot is
+released by the result on that beat; an instruction every lane had left
+would otherwise hold its slot for ever. `wb_bt` now means "the head's
+next beat not yet landed or skipped", which is what the per-beat wait
+reads, and the forwarding look-ahead that counts landings stays on the
+safe side (a landing past a skipped beat moves the head further than
+the count says).
+
+**The loads.** A dense stream load reads from the first beat a lane the
+CALLER HAS sits in to the last, one burst, and nothing when there is
+none: a beat outside them holds no lane that can ever be active (ACTALL
+reactivates the caller's lanes and nothing else), so no issued beat that
+writes anything reads it. A masked beat between two live ones is still
+read - a second burst is a second round trip, which would cost more than
+it saves. The gathered streams (R16) and the scratch preload are
+unchanged.
+
+**What it costs now.** `make seqcycles`, four blocks, cycles for the
+run, twenty IANDs and a deposit (and, last row, twenty STLs), before
+(R18, 1c82d4c) and after (R19, f349ca6):
+
+| program, mask | fp32, 128 lanes a block | fp64, 64 | fp128, 32 | fp256, 16 |
+|---|---|---|---|---|
+| twenty IANDs, dense | 2,229 -> 2,229 | 1,909 -> 1,909 | 1,749 -> 1,749 | 1,669 -> 1,669 |
+| ...every other lane masked | 2,245 -> 2,245 | 1,925 -> 1,925 | 1,765 -> 1,765 | 1,685 -> 1,141 |
+| ...the low half of each block masked | 2,245 -> 1,649 | 1,925 -> 1,329 | 1,765 -> 1,169 | 1,685 -> 1,089 |
+| ...all but one lane a block masked | 2,245 -> 1,409 | 1,925 -> 1,089 | 1,765 -> 929 | 1,685 -> 849 |
+| ...every lane masked | 2,245 -> 1,385 | 1,925 -> 1,065 | 1,765 -> 905 | 1,685 -> 825 |
+| twenty STLs, every lane masked | 3,477 -> 2,389 | 3,157 -> 2,069 | 2,997 -> 1,909 | 2,917 -> 1,829 |
+
+A dense run costs what it did, and so does a mask that leaves a live
+lane in every beat - every other lane, below fp256 - because there is no
+beat to skip. A beat the mask empties costs nothing to issue: the low
+half of each block masked saves half of every instruction's beats, and
+at fp256, a lane a beat, every other lane is every other beat. What is
+left of an all-masked run is the block's own machinery - its setup, the
+mask's read, one cycle for each instruction that writes a register (its
+forced last beat), one bubble for each that does not - and the drains,
+which R17 made keep a masked lane's place and lose its strobe; the
+stream reads fall from ten to six, the mask's four and the image's two.
+R17's own table moves the same way: one IAND and a deposit, every lane
+masked, 997 -> 865 cycles at fp32 and 437 -> 305 at fp256, where half
+masked is now 409 against a dense 421. Every other row of the probe -
+the dense table, R16's, R18's - is unchanged to the cycle.
+
+**Held.** `masked_beats_hold_their_saving` in `tb/test_seq_core.py`
+runs twenty IANDs and a deposit at fp32 over four blocks, answers held
+to the model, and fails if the low half of each block masked costs 485
+cycles a block or more, or every lane masked 450 or more: R18's tile
+cost 561.25 for both, R19's costs 410.0 and 344.0.
+
+**The benches.** In `tb/test_seq_core.py`, against the model:
+`masked_beats_at_every_block_length` (masks that empty whole beats - the
+low half of each block, the high half, all but the last lane, all but
+the first, every lane, random sets of whole beats - over the pipe
+program, R18's control-code program and R17's own, at every format,
+from one beat to several blocks); `converged_beats_are_skipped` (the
+escape map with its seeds grouped by beat, so whole beats CONVERGE at
+different iterations and the SETACT-cleared bit is what the issue
+reads); `a_beat_no_lane_has_is_not_loaded` (the stream reads asserted
+as ADDRESSES - one burst a block from the first live beat to the last,
+none for a block with none); and the hold. Every R18 case runs on top,
+unchanged, and the multi-pass tile runs both items' cases.
+
+**The plants**, each in a fresh copy of the tree and each red for its
+reason:
+
+- A skipped beat still counted - the retire writes the n-th result of an
+  instruction to its n-th beat again, not to the beat it fired from: red
+  in all five cases it was run against, as answers that differ ("escape
+  map, whole beats converging, n=128: 280/1024 deposit slots differ").
+- A writer's last beat not forced: red in all five, as HANGS - an
+  instruction every lane had left fires nothing and never leaves the
+  queue. The control-code program hangs at one beat without a mask,
+  once a SETACT has emptied the beat.
+- The dense load back to the whole block: red only where it must be, in
+  the read-traffic case ("stream a read [(65536, 16), (66048, 16)], and
+  the mask says [(65792, 8), (66304, 8)]"); a load of a beat no lane can
+  read is a cost and not an answer, and every answer case passes under
+  it.
+
+**Timing.** The live vector and the load's bounds are registered. What
+R19 adds to the issue stage's paths is a 16:1 select of a register (the
+current beat's live bit, into the hold and the pipe's valid) and a
+16-bit priority encoder (the next live beat, into `bt` and the
+admission) - both on paths the R18 note above already names as long.
