@@ -3358,11 +3358,14 @@ def _hold_programs(fmt):
 # empty and walked the block at three cycles a beat, five for a load;
 # AFTER is revision 7's. The ceiling sits between the two: a change that
 # took the control codes back out of the pipe lands above it, and one
-# that only moves a cycle or two does not. Measured, not derived - the
-# docstring of control_codes_hold_their_overlap says where.
+# that only moves a cycle or two does not. Measured under Verilator
+# (2026-09-29), cycles a block:
+#
+#   24 control codes, independent    before 2011.2   after 898.2 (898.2 at MC=10)
+#   8 x (load, FMA of it, store)     before 1891.2   after 920.2 (960.2 at MC=10)
 HOLD_CEILING = {
     "24 control codes, independent": 1400,
-    "8 x (load, FMA of it, store of that)": 1100,
+    "8 x (load, FMA of it, store of that)": 1400,
 }
 
 

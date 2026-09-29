@@ -3322,9 +3322,10 @@ module cft_seq #(
           // (the queue empty) and every beat in the pipe to have acted
           // (the deposits written, the stores in the scratch): the drains
           // read what the program left, so the program must have left it.
-          // Revision 7, R18. Before it HALT and the implicit halt waited
-          // for the queue and the other three went straight on - only an
-          // image that bypassed the loader reaches those three - and no
+          // Revision 7, R18. Before it HALT, an unknown code and the
+          // implicit halt waited for the queue, and an unmatched ENDREP
+          // and a skip past the end went straight on - only an image that
+          // bypassed the loader reaches either of those two - and no
           // control code could be in flight when the block ended.
           if (q_n == 2'd0 && pipe_idle) begin
             lane_cursor <= '0;
