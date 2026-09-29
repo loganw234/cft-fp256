@@ -3217,7 +3217,20 @@ What takes it:
   without a card. Its sequencer leg walks a program 300 slots deep,
   plain and strict, and where the device is deeper than 256 holds the
   reference to having been deeper too: a plain 256-slot handle must
-  compute another sum and report the strict walk past slot 255.
+  compute another sum and report the strict walk past slot 255. And it
+  runs a scratch block as deep as the device on the device itself -
+  300 slots in and out, in alone and out alone, and the whole depth both
+  ways - held to its own bytes rather than to the reference, with one
+  slot past the depth refused by name.
+
+The block leg exists because the loader had a defect this section's
+first version did not see (verifier-R5, 2026-09-29): a test of the
+library's own 256-slot ceiling on a scratch block ran whatever depth
+the device published, so every handle - software at 2,048, the U50's
+revision-7 tile, a `cft://` client - refused a block of 257 to 2,048
+slots as `CFT_ERR_INVALID_ARGUMENT`, with no sentence. A block is now
+held to the handle's own `max_scratch` and nothing else; the library's
+ceiling applies only where a device published no depth, and says so.
 - `positive-run --scratch-depth N` makes a plate for a deeper tile on
   the software backend; it prints a `scratch-depth` line only when
   asked, so every other plate prints what it always did.

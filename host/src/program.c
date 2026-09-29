@@ -989,11 +989,31 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
             return (cft_status)cft_seq_cap_refusal(
                 "n_scratch_out", n_sout, sc.max_scratch,
                 "scratch slots a lane", "max_scratch");
-        /* And this library's own ceiling, which is its executor's
-         * default depth. Only reachable when the device published none
-         * - a software handle always publishes its own. */
-        if (n_sin > SEQ_SCRATCH_D || n_sout > SEQ_SCRATCH_D)
+        /* And where the device published NO depth, this library's own
+         * ceiling: its executor's default depth, the depth
+         * seq_scratch_footprint gives such a program too. Only there - a
+         * device that published a depth is held to its own number above
+         * and to nothing else. Zero is unknown; past the feature test
+         * above it takes a device that publishes the block without a
+         * depth, a tile whose CAPS2 sets bit 5 and not bit 4.
+         *
+         * Until 2026-09-29 this test ran whatever the device published,
+         * which held every handle's block to 256: invisible while no
+         * device published more, and a refusal with no sentence of every
+         * block from 257 to 2,048 slots once a 2,048-slot handle
+         * existed (verifier-R5; device-test's deep-block leg holds it
+         * now). */
+        if (!sc.max_scratch &&
+            (n_sin > SEQ_SCRATCH_D || n_sout > SEQ_SCRATCH_D)) {
+            cft_set_error("this image's scratch block preloads %lu slots a "
+                          "lane and reads %lu back, and this device "
+                          "published no scratch depth (cft_caps.max_scratch "
+                          "is 0, unknown), so the block is held to this "
+                          "library's own executor depth, %lu slots a lane",
+                          (unsigned long)n_sin, (unsigned long)n_sout,
+                          (unsigned long)SEQ_SCRATCH_D);
             return CFT_ERR_INVALID_ARGUMENT;
+        }
     }
 
     /* And revision 4's strict scratch range, on exactly the same terms.

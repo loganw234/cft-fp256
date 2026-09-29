@@ -2177,3 +2177,10 @@ the software backend (parcel P2's ledger has the runs):
   footprint is held to the run; static-only and clean strict runs are
   the same at every depth deep enough); device-test at 256 and at
   `--scratch-depth 2048`; programs/check.py's two `deepwalk` rows.
+  device-test also runs a scratch block as deep as the device - 300
+  slots in and out, in alone, out alone, and the whole depth - held to
+  its own bytes, with one past the depth refused by name. It was added
+  when verifier-R5 found libcft's loader refusing every block from 257
+  to 2,048 slots on every handle, with no sentence: a test of the
+  library's own 256-slot ceiling that ran whatever depth the device
+  published (docs/HOSTAPI.md, `cft_open_ex`).
