@@ -861,6 +861,68 @@ def test_the_real_audit_is_green(lor):
     assert "that an estimate estimates well is not shown" in text
 
 
+def test_the_audit_reruns_at_the_certified_devices_scratch_depth():
+    """Revision 7: a tile's scratch depth is its build's - 2,048 slots
+    on the U50's revision-7 images, 256 before and on the open-core ones
+    - and the audit re-runs a certificate at the depth its `device-caps`
+    names (CAPS2[3:0], cert.scratch_depth_of), 256 where it names none.
+    The segment here carries a state of 300 slots a lane, which only a
+    deeper tile can hold: certified as run on a 2,048-slot tile it
+    audits green; the same runs under a software identity, which re-runs
+    at 256, are refused by name because the executor refuses the
+    program; and a CAPS2 that names 256 is refused the same way. A
+    certificate cannot be re-run at a depth it does not record."""
+    seq = cert.seq
+    one = sf.one_bits(F64)
+    top = 299
+    prog = seq.Program(F64, [
+        seq.ldl(3, top, 2048),
+        seq.alu(sf.OP_FMA, rd=3, ra=3, rb=0, rc=0, kb=True, kc=True),
+        seq.stl(3, top, 2048),
+        seq.ldl(4, 0, 2048),
+        seq.alu(sf.OP_FMA, rd=4, ra=4, rb=0, rc=0, kb=True, kc=True),
+        seq.stl(4, 0, 2048),
+        seq.halt()], consts=[one], max_deposits=0,
+        flags=seq.FLAG_SCRATCH_IO, n_scratch_in=top + 1,
+        n_scratch_out=top + 1, scratch_depth=2048)
+    img = prog.to_bytes()
+    lanes, segs = 2, 3
+    init = [dec64(repr(0.5 + i / 8)) for i in range(lanes * (top + 1))]
+    st, rs = cert.run_chain(img, None, init, segs, scratch_depth=2048)
+    # three segments added one to lane 0's slots 0 and 299, exactly
+    assert st[-1][0] == dec64("3.5")
+    assert st[-1][top] == dec64(repr(0.5 + top / 8 + 3))
+    assert st[-1][1:top] == init[1:top]
+    run = cert.certify_run("main", img, None, SALT, st, rs, steps=1,
+                           scratch_depth=2048)
+    u50 = dataclasses.replace(IDENTITY, backend="xrt",
+                              device_xclbin="ab" * 32,
+                              device_version="00000a00",
+                              device_caps=("19faffff", "000007fb"),
+                              device_tiles=1)
+    assert cert.scratch_depth_of(u50) == 2048
+    progs = {0: (img, None)}
+    states = {0: dict(enumerate(st))}
+    v = cert.audit(cert.encode(keyed((run,), (), u50)), SALT, progs,
+                   states=states)
+    assert v.exit_code == 0 and len(v.runs[0]["rerun"]) == segs
+    # the software identity re-runs at 256, where the program cannot load
+    assert cert.scratch_depth_of(IDENTITY) == 256
+    e = refused("program-image", cert.audit,
+                cert.encode(keyed((run,), (), IDENTITY)), SALT, progs,
+                states=states)
+    assert "a lane owns 256" in e.message or "past the 256" in e.message
+    # ...and so does a CAPS2 that names a 256-slot tile (a round-2 image)
+    r2 = dataclasses.replace(u50, device_caps=("19e9ffff", "000007f8"))
+    assert cert.scratch_depth_of(r2) == 256
+    refused("program-image", cert.audit, cert.encode(keyed((run,), (), r2)),
+            SALT, progs, states=states)
+    # a CAPS word alone (below VERSION 0x800) or `unknown` is the default
+    for caps in (("19e9ffff",), "unknown", "none"):
+        assert cert.scratch_depth_of(
+            dataclasses.replace(u50, device_caps=caps)) == 256
+
+
 def test_a_full_audit_handed_only_the_initial_states(lor):
     """Each segment starts from the one before it, re-run in this audit
     and matched: the most independent audit there is, handed nothing

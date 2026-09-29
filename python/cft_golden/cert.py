@@ -1249,13 +1249,38 @@ def _segment_shape(prog):
     return None
 
 
-def run_chain(image, bank, initial, segments, streams=None):
+def scratch_depth_of(identity):
+    """The scratch depth a certificate's runs had, which the audit re-runs
+    them at (revision 7): 1 << CAPS2[3:0] where `device-caps` carries
+    CAPS2 with CAPS2[4] set, which every tile from revision 3 does - 256
+    on the round-2 images, 2,048 on the U50's revision-7 ones. Otherwise
+    the model's default of 256: the software backend's, which cft-segrun
+    opens plainly, and every tile's before revision 7. A REMOTE handle's
+    certificate records `unknown` and is re-run at 256, whatever its
+    server's depth - the protocol carries no CAPS2 (a known limit,
+    docs/CERTIFICATES.md).
+
+    Reading the word is not checking it. The identity is still stated and
+    never checked; a certificate that misstates its device's depth simply
+    fails its own re-run, as one that misstates any number the arithmetic
+    reads does."""
+    caps = identity.device_caps
+    if isinstance(caps, tuple) and len(caps) == 2:
+        word = int(caps[1], 16)
+        if word & 0x10:
+            return 1 << (word & 0xF)
+    return seq.SCRATCH_D
+
+
+def run_chain(image, bank, initial, segments, streams=None,
+              scratch_depth=seq.SCRATCH_D):
     """Run `image` as `segments` consecutive segments from `initial`
     (the lane-major scratch block), each starting where the last ended.
     Returns (states, results): the S + 1 boundary states and each
     segment's (flags, status). The golden writer's arithmetic, by
-    seq.run and nothing else."""
-    prog = seq.Program.from_bytes(bytes(image))
+    seq.run and nothing else, on a tile of `scratch_depth` slots
+    (revision 7; 256 by default)."""
+    prog = seq.Program.from_bytes(bytes(image), scratch_depth=scratch_depth)
     why = _segment_shape(prog)
     if why:
         raise Refusal("program-shape", f"this program is not a segment: "
@@ -1270,7 +1295,8 @@ def run_chain(image, bank, initial, segments, streams=None):
     states = [list(initial)]
     results = []
     for _ in range(segments):
-        res = seq.run(prog, a, b, c, bank=bankv, scratch_in=states[-1])
+        res = seq.run(prog, a, b, c, bank=bankv, scratch_in=states[-1],
+                      scratch_depth=scratch_depth)
         states.append(list(res.scratch_out))
         results.append((res.flags, res.status))
     return states, results
@@ -1289,12 +1315,14 @@ def _streams_or_zero(fmt, n, streams):
 
 
 def certify_run(kind, image, bank, salt, states, results, *, steps,
-                streams=None, parameters=(), h_slots=()):
+                streams=None, parameters=(), h_slots=(),
+                scratch_depth=seq.SCRATCH_D):
     """A Run from a chain of boundary states and segment results (from
     run_chain, or a producer's own): the hashes of every boundary, the
     image and program digests, the streams' hashes - keyed under `salt`,
-    or open when `salt` is None."""
-    prog = seq.Program.from_bytes(bytes(image))
+    or open when `salt` is None. The image is read as written for
+    `scratch_depth` slots, the depth its chain ran at."""
+    prog = seq.Program.from_bytes(bytes(image), scratch_depth=scratch_depth)
     why = _segment_shape(prog)
     if why:
         raise Refusal("program-shape", f"this program is not a segment: "
@@ -1662,6 +1690,10 @@ def _is_bytes(v):
 
 def _check_programs(cert, programs):
     programs = _run_mapping(cert, programs, "programs", "program-image")
+    # The depth every run is re-run at: the certificate's device's
+    # (scratch_depth_of), read once, since a certificate records one
+    # device for all its runs.
+    depth = scratch_depth_of(cert.identity)
     out = []
     for r, run in enumerate(cert.runs):
         if r not in programs:
@@ -1686,7 +1718,7 @@ def _check_programs(cert, programs):
                           f"ones certified (SHA-256 of image then bank "
                           f"differs)", run=r)
         try:
-            prog = seq.Program.from_bytes(image)
+            prog = seq.Program.from_bytes(image, scratch_depth=depth)
         except seq.ProgramError as e:
             raise Refusal("program-image", f"run {r}: the image does not "
                                            f"load: {e}", run=r)
@@ -1704,7 +1736,7 @@ def _check_programs(cert, programs):
         except Refusal as e:
             raise Refusal(e.name, f"run {r}: {e.message}", run=r)
         out.append({"prog": prog, "bank": bank, "bankv": bankv,
-                    "nslots": prog.n_scratch_in})
+                    "nslots": prog.n_scratch_in, "depth": depth})
     return out
 
 
@@ -2012,6 +2044,7 @@ def _rerun(cert, salt, progs, strm, known, plan):
                                       f"to give it"), run=r, segment=k)
             try:
                 res = seq.run(p["prog"], a, b, c, bank=p["bankv"],
+                              scratch_depth=p["depth"],
                               scratch_in=s)
             except seq.ProgramError as e:
                 raise Refusal("program-image", f"run {r} segment {k}: the "
