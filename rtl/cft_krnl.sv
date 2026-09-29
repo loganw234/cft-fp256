@@ -140,7 +140,46 @@ module cft_krnl #(
     parameter int BURST_LOG2 = 4,
     parameter int AR_DEPTH   = 16,
     parameter int AW_DEPTH   = 16,
-    parameter int FIFO_LOG2  = 9
+    parameter int FIFO_LOG2  = 9,
+    // ---- the sequencer's program limits (revision 7, 2026-09-29) ------
+    //
+    // Three of the four capacities docs/SEQUENCER.md says the contract
+    // does not fix, and the three a larger part can simply give more
+    // of. Parameters since revision 7 (localparams before it, and fixed
+    // at 64, 16,384 and 256), so that each build says what it has -
+    // Logan's direction of 2026-09-28: as large as the U50 allows, and
+    // adjustable the way the parameters above are. These defaults are
+    // the U50's and, like the read-ahead's, the only place its numbers
+    // are written down; a bitstream carries them unless CFT_GENERICS
+    // overrides one at packaging. A SMALLER PART CHOOSES SMALLER, and
+    // the open-core configurations in this tree name theirs: tb/Makefile
+    // BOARD_PARAMS, hw/openxc7's board synthesis and harness, and the
+    // quarter tile keep 64, 16,384 and 256.
+    //
+    // Each is published as a four-bit log2 (CAPS[19:16], CAPS[23:20],
+    // CAPS2[3:0]), so each is a power of two and at most 2^15; cft_seq
+    // refuses to elaborate anything else, because a CAPS field that
+    // described some other number would be sized against by every host.
+    //
+    //   SEQ_MAXD       deposit slots a lane. 64 -> 1,024 at revision 7.
+    //                  The deposit buffer is SEQ_MAXD x NBEATS x 32
+    //                  bytes a tile (512 KiB here), eight banks with a
+    //                  write address each.
+    //   SEQ_IMEM_D     instructions. 1,024 -> 4,096 -> 16,384 -> 32,768
+    //                  (revisions 2, 3 and 7), the last value CAPS[23:20]
+    //                  can publish. 256 KB a tile.
+    //   SEQ_SCRATCH_D  scratch slots a lane. 256 -> 2,048 at revision 7,
+    //                  1 MiB a tile. NOT purely a capacity: STX/LDX
+    //                  reduce an index modulo it unless the image is
+    //                  strict (R8), so the golden model and libcft take
+    //                  the depth of the device they stand for.
+    //
+    // KMEM_D is not among them and stays a localparam below: a deeper
+    // constant bank needs index bits the instruction format does not
+    // have (docs/ROADMAP.md, "The program limits").
+    parameter int SEQ_MAXD      = 1024,
+    parameter int SEQ_IMEM_D    = 32768,
+    parameter int SEQ_SCRATCH_D = 2048
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -331,37 +370,38 @@ module cft_krnl #(
 
   // ---- the sequencer's on-chip capacities ----------------------------
   //
-  // Named ONCE, here, and used twice: as the parameters cft_seq
-  // elaborates its memories from, and as the log2 fields CAPS
-  // publishes so a host can size a program before it builds one. Two
-  // copies of a number is how CAPS ends up describing a memory that is
-  // no longer that size, and it is the whole reason 0x4C's top half
-  // was left empty rather than filled in by hand.
+  // Named ONCE, and used twice: as the parameters cft_seq elaborates
+  // its memories from, and as the log2 fields CAPS publishes so a host
+  // can size a program before it builds one. Two copies of a number is
+  // how CAPS ends up describing a memory that is no longer that size,
+  // and it is the whole reason 0x4C's top half was left empty rather
+  // than filled in by hand.
   //
   // A program past any of them is refused by cft_seq at its header
   // check, before a byte is computed (STATUS[3]) - so a host that
   // reads these has done the arithmetic the tile would otherwise do
   // for it on card day. docs/studies/OPT-D-contract.md 0.1 is the
   // failure this retires.
-  localparam int SEQ_MAXD   = 64;     // deposit slots a lane
-  // 1024 -> 4096 at revision 2, 4096 -> 16384 at revision 3
-  // (docs/SEQUENCER.md, R2 and R6). No feature bit either time:
-  // CAPS[23:20] publishes log2 IMEM_D and now reads 14, so a host
-  // learns the new capacity from the field it was already reading.
-  // Cost: 128 KB of instruction memory a tile where revision 2 had 32
-  // and revision 1 had 8 - four UltraRAMs on the U50 part, block RAM
-  // on the open-core one.
-  localparam int SEQ_IMEM_D = 16384;  // instruction capacity
+  //
+  // SEQ_MAXD, SEQ_IMEM_D and SEQ_SCRATCH_D are the module's parameters
+  // since revision 7 (declared with the others at the top, where a
+  // build sets them). Their history: IMEM_D went 1024 -> 4096 at
+  // revision 2, 4096 -> 16384 at revision 3 and 16384 -> 32768 at
+  // revision 7 (docs/SEQUENCER.md, R2, R6 and revision 7), with no
+  // feature bit any time: CAPS[23:20] publishes log2 IMEM_D, so a host
+  // learns the new capacity from the field it was already reading. The
+  // scratch (revision 3, R4) is published in CAPS2[3:0] as log2 with
+  // CAPS2[4] set, because a log2 field of zero would have to mean one
+  // slot rather than none - the same silicon at every precision for
+  // the reason the register file is.
+  //
   // 256 -> 512 at revision 3 (R7), which is 16 KiB at beat width. The
   // ninth index bit is what makes the second half reachable, and it
   // takes CAPS[7] because a revision-2 tile's operand mux reads eight
-  // bits and would silently address the wrong constant.
+  // bits and would silently address the wrong constant. It stays a
+  // localparam at revision 7: a tenth bit is an instruction-format
+  // change, not a capacity (docs/ROADMAP.md).
   localparam int SEQ_KMEM_D = 512;    // constant capacity, image side
-  // Scratch slots a lane (revision 3, R4). Published in CAPS2[3:0] as
-  // log2 with CAPS2[4] set, because a log2 field of zero would have to
-  // mean one slot rather than none. 128 KiB a tile at 256, the same
-  // silicon at every precision for the reason the register file is.
-  localparam int SEQ_SCRATCH_D = 256;
   // Addressable constants. Since 2026-09-07 an instruction with kx set
   // (bit 30) takes three constant indices from its immediate: eight
   // bits each until revision 3, nine since, so the whole 512-entry
@@ -371,12 +411,18 @@ module cft_krnl #(
   // of the RTL and fails if they part company.
   localparam int SEQ_KIDX_W = 9;
   // CAPS carries the EXPONENT of each capacity in four bits, which is
-  // only honest while the capacity is a power of two: a capacity that
-  // was not one would be published rounded DOWN, and a host would
-  // trust it. Not asserted in RTL, because an elaboration-time $error
+  // only honest while the capacity is a power of two no larger than
+  // 2^15: $clog2 is the CEILING, so a capacity that was not a power of
+  // two would be published rounded UP - a cap a host sizes a program
+  // against and is then refused by at the header - and 2^16 would wrap
+  // the field to zero. (This comment said "rounded DOWN" until revision
+  // 7.) Not asserted in this file, because an elaboration-time $error
   // inside a generate block is exactly the construct the open-toolchain
-  // gate (`make yosys-lint`) is here to keep out of this file;
-  // tb/test_krnl.py checks it against the parsed parameters instead.
+  // gate (`make yosys-lint`) is here to keep out of it. Since revision 7
+  // made the three settable, cft_seq asserts it instead, beside its own
+  // power-of-two guard on the scratch - it elaborates from the same
+  // parameters - and tb/test_krnl.py still checks the declared values
+  // and any CFT_GENERICS override against what the register reads.
 
   // Which engine owns the run in flight, and whether the sequencer
   // threw its program image back. The image refusal is not known at
@@ -545,7 +591,7 @@ module cft_krnl #(
       // bit of CAPS2, which is what that register is for.
       .seq_feat(4'b1111),
       // CAPS2 (0x6C): [3:0] log2 SCRATCH_D, [4] a scratch exists,
-      // [5] its per-run block exists. Built from the same localparam
+      // [5] its per-run block exists. Built from the same parameter
       // cft_seq elaborates the memory from, for the reason the three
       // log2 fields of CAPS are: two copies of a number is how a
       // capability register ends up describing a memory that is no
@@ -598,7 +644,7 @@ module cft_krnl #(
       // bit cannot announce it and a host reads this one instead.
       .alu_ext(4'b0001),
       // CAPS[27:16]: the sequencer's capacities as log2, from the same
-      // localparams the cft_seq instantiation below elaborates from.
+      // parameters the cft_seq instantiation below elaborates from.
       // Published unconditionally, including on the narrow-beat tile
       // where SEQ_OK is false: cft_seq is instantiated there too and
       // its memories really are these depths - what that tile cannot
@@ -833,7 +879,7 @@ module cft_krnl #(
   // MAXD, IMEM_D and KMEM_D are the on-chip caps the hardware checks a
   // program image against, and refuses past - a program the tile
   // cannot hold is not a program the tile may half-run. They come from
-  // the localparams above rather than as literals here, because CAPS
+  // the parameters above rather than as literals here, because CAPS
   // publishes their log2 and the two must be the same numbers.
   cft_seq #(.BEAT_BITS(BEAT_BITS), .LATENCY(16), .NBEATS(16),
             .MAXD(SEQ_MAXD), .IMEM_D(SEQ_IMEM_D), .KMEM_D(SEQ_KMEM_D),

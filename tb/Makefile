@@ -195,9 +195,9 @@ seqbanksmc:
 		&& $(PYTHON) check_results.py sim_build/seqbanksmc$(MC)/results.xml
 
 quartermc:
-	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \
+	CFT_GENERICS="$(OPEN_CAPS_GENERICS)" CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \
 		MODULE=test_krnl_quarter SIM_BUILD=sim_build/quartermc$(MC) \
-		KRNL_PARAMS="-Ptb_krnl_quarter.MUL_PASSES=$(MC)" \
+		KRNL_PARAMS="-Ptb_krnl_quarter.MUL_PASSES=$(MC) $(foreach g,$(OPEN_CAPS_GENERICS),-Ptb_krnl_quarter.$(g))" \
 		COCOTB_RESULTS_FILE=sim_build/quartermc$(MC)/results.xml \
 		&& $(PYTHON) check_results.py sim_build/quartermc$(MC)/results.xml
 
@@ -469,7 +469,19 @@ krnlplain:
 # through its CSR and AXI interfaces, the same kernel driven by the
 # sequencer (which is how an open tile actually computes), and the
 # fp256 bank itself. MC defaults to 10, so `make board` is the board.
-BOARD_PARAMS = -Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1                -Pcft_krnl.MUL_PASSES=$(MC)
+# The capacities an open-core configuration keeps (revision 7,
+# 2026-09-29). cft_krnl's SEQ_MAXD, SEQ_IMEM_D and SEQ_SCRATCH_D are
+# parameters since that revision and default to the U50's - 1,024
+# deposit slots, 32,768 instructions, 2,048 scratch slots - while the
+# board was measured through openXC7 with 64, 16,384 and 256
+# (hw/openxc7, 2026-09-22) and the quarter tile has always had them. So
+# both name them. ONE list, handed to the simulator as -P and to the
+# bench as CFT_GENERICS, which is what test_krnl.py derives its
+# expected CAPS and CAPS2 from - KRNLF128_GENERICS's rule, so the build
+# and the expectation cannot be told two different stories.
+OPEN_CAPS_GENERICS = SEQ_MAXD=64 SEQ_IMEM_D=16384 SEQ_SCRATCH_D=256
+BOARD_PARAMS = -Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1                -Pcft_krnl.MUL_PASSES=$(MC) \
+               $(foreach g,$(OPEN_CAPS_GENERICS),-Pcft_krnl.$(g))
 
 board: boardkrnl boardseq boardfp256
 
@@ -493,11 +505,11 @@ board: boardkrnl boardseq boardfp256
 # reason to skip the bench. BOARDKRNL_SIM=icarus puts it back.
 BOARDKRNL_SIM ?= verilator
 boardkrnl:
-	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(BOARDKRNL_SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl SIM_BUILD=sim_build/boardkrnl$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardkrnl$(MC)/results.xml \
+	CFT_GENERICS="$(OPEN_CAPS_GENERICS)" CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(BOARDKRNL_SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl SIM_BUILD=sim_build/boardkrnl$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardkrnl$(MC)/results.xml \
 		&& $(PYTHON) check_results.py sim_build/boardkrnl$(MC)/results.xml
 
 boardseq:
-	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl_seq SIM_BUILD=sim_build/boardseq$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardseq$(MC)/results.xml \
+	CFT_GENERICS="$(OPEN_CAPS_GENERICS)" CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl_seq SIM_BUILD=sim_build/boardseq$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardseq$(MC)/results.xml \
 		&& $(PYTHON) check_results.py sim_build/boardseq$(MC)/results.xml
 
 boardfp256:
@@ -534,8 +546,9 @@ seqbanks:
 		&& $(PYTHON) check_results.py sim_build/seqbanks/results.xml
 
 quarter:
-	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \
+	CFT_GENERICS="$(OPEN_CAPS_GENERICS)" $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \
 		MODULE=test_krnl_quarter SIM_BUILD=sim_build/quarter \
+		KRNL_PARAMS="$(foreach g,$(OPEN_CAPS_GENERICS),-Ptb_krnl_quarter.$(g))" \
 		COCOTB_RESULTS_FILE=sim_build/quarter/results.xml \
 		&& $(PYTHON) check_results.py sim_build/quarter/results.xml
 

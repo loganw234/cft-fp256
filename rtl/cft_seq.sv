@@ -752,6 +752,26 @@ module cft_seq #(
     if ((1 << SCRSW) != SCRATCH_D) begin : g_scratch_pow2
       $error("cft_seq: SCRATCH_D must be a power of two - STX/LDX reduce rb with a mask");
     end
+    // Revision 7 made MAXD, IMEM_D and SCRATCH_D a build's parameters
+    // (rtl/cft_krnl.sv declares them, and a build may set them), and
+    // the kernel publishes each as a FOUR-BIT log2 - CAPS[19:16],
+    // CAPS[23:20], CAPS2[3:0]. So each must be a power of two no larger
+    // than 2^15: $clog2 is the ceiling, so any other value would be
+    // published as a larger capacity than this module has, and 2^16
+    // would wrap its field to "one". The guards live here rather than
+    // in cft_krnl.sv because this is where the three are elaborated,
+    // and because cft_krnl.sv keeps this construct out of itself for
+    // the open-toolchain gate. The scratch's power of two is the guard
+    // above; these add its ceiling and the other two.
+    if ((1 << $clog2(MAXD)) != MAXD || MAXD > 32768) begin : g_maxd_caps
+      $error("cft_seq: MAXD must be a power of two no larger than 2^15 - CAPS[19:16] publishes its log2 in four bits");
+    end
+    if ((1 << PCW) != IMEM_D || IMEM_D > 32768) begin : g_imem_caps
+      $error("cft_seq: IMEM_D must be a power of two no larger than 2^15 - CAPS[23:20] publishes its log2 in four bits");
+    end
+    if (SCRATCH_D > 32768) begin : g_scratch_caps
+      $error("cft_seq: SCRATCH_D must be no larger than 2^15 - CAPS2[3:0] publishes its log2 in four bits");
+    end
   endgenerate
 
   initial begin
@@ -761,6 +781,12 @@ module cft_seq #(
     end
     if ((1 << SCRSW) != SCRATCH_D) begin
       $display("FATAL: cft_seq SCRATCH_D=%0d must be a power of two", SCRATCH_D);
+      $fatal(1);
+    end
+    if ((1 << $clog2(MAXD)) != MAXD || MAXD > 32768 ||
+        (1 << PCW) != IMEM_D || IMEM_D > 32768 || SCRATCH_D > 32768) begin
+      $display("FATAL: cft_seq MAXD=%0d IMEM_D=%0d SCRATCH_D=%0d: each must be a power of two no larger than 2^15, the most a four-bit log2 in CAPS publishes",
+               MAXD, IMEM_D, SCRATCH_D);
       $fatal(1);
     end
   end
@@ -871,7 +897,10 @@ module cft_seq #(
   // The two scratch blocks want the same product against their own
   // counts, so they share the ADDEND - one shifter, three
   // accumulators, three multiplier registers. The longest of the
-  // three is SCRSW+1 steps, still an order of magnitude inside RF_D.
+  // three is SCRSW+1 steps. That was an order of magnitude inside RF_D
+  // while S_ZERO lasted the register-file wipe; since the wipe went
+  // (2026-09-14) S_ZERO waits for the two scratch products explicitly
+  // (revision 7), because SCRSW+1 grows with the depth.
   logic [31:0]    sin_elems, sout_elems;
   logic [SCRSW:0] sin_mult, sout_mult;
 
@@ -2669,7 +2698,22 @@ module cft_seq #(
             sin_mult   <= sin_mult >> 1;
             sout_mult  <= sout_mult >> 1;
           end
-          if (zaddr >= RFAW'(CW + 1) && (szaddr + 1) >= szlimit) begin
+          // ...and the two scratch-count products are COMPLETE: the bit
+          // this cycle adds is the last one either multiplier has
+          // (revision 7). Their width is SCRSW + 1, which follows the
+          // depth, while the window above was sized for the deposit
+          // product alone. At NBEATS 16 a block whose preload is read
+          // at all spends at least 16 cycles here on the wipe, which is
+          // fifteen steps - enough up to 2^14 slots and not at 2^15,
+          // where n_scratch_in = 32,768 beside one static slot would
+          // have preloaded nothing. This moves no cycle wherever the
+          // product was already complete. It was incomplete only past
+          // 2^14 slots, or in a block that wipes nothing - no scratch
+          // instruction, no scratch-out - and preloads 2^(CW+1) slots or
+          // more that nothing then reads, which was silently cut short
+          // and unobservable, and now reads its whole block.
+          if (zaddr >= RFAW'(CW + 1) && (szaddr + 1) >= szlimit &&
+              (sin_mult >> 1) == '0 && (sout_mult >> 1) == '0) begin
             // A lane is active iff its index is below the block's
             // lane count - and blk_n IS min(blk_cap, n_q - blk_base),
             // computed one state ago. The first version asked each of
