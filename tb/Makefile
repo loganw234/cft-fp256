@@ -588,13 +588,19 @@ faults:
 # until someone notices; with it, it is a failure. Raise
 # SEQ_TIMEOUT for a deliberately long run.
 #
-# It catches a hang; it is not a budget. 4,800 s since 2026-09-29, about
-# twice what seq_core took under Icarus on revision 7's check tree just
-# before P1's send-back added its holds and cases: 1,923 s for 48 cases
-# (run 20260929-080541-9ff114e, its results.xml), against the 2,400 this
-# line said until then. Measure it again when the suite grows, and keep
-# this at about twice the measurement.
-SEQ_TIMEOUT ?= 4800
+# It catches a hang; it is not a budget. 14,400 s since 2026-09-29, when
+# revision 7's final tree (9fc9c0d, 63 cases) ran past the 4,800 this
+# line then said. Under Icarus on amd-arc-box, in the runner's sim stage
+# at SIM_JOBS=6 beside a bitstream build, seq_core was terminated at
+# 4,800 s with no wrong answer (run 20260929-114401-9fc9c0d), while the
+# same 63 cases at the U50's capacities took about 5,350 s (seq_coreu50
+# in that stage, seq_coreu50mc at MC=10 beside it). seq_coremc, the same
+# bench at MC=10, runs under this line too. 4,800 had been twice seq_core's
+# 1,923 s on the desktop at 48 cases (run 20260929-080541-9ff114e), and
+# 2,400 before that. Measure it again when the suite grows, on the slower
+# host and loaded as the runner loads it, and keep this at about twice
+# the measurement.
+SEQ_TIMEOUT ?= 14400
 
 seq_core:
 	timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
@@ -611,12 +617,16 @@ seq_core:
 # and a strict one is reported past it. One list: each word reaches the
 # simulator as -Pcft_seq.<word> and the whole line reaches the bench as
 # CFT_GENERICS. The scratch cases build their indices from SCRATCH_D and
-# write near its top, so their blocks wipe up to 32,768 cycles here
-# against 4,096 in seq_core: about three times seq_core's simulation
-# under Verilator (275 s against 93, 2026-09-29), and so, at Icarus's
-# ratio, past SEQ_TIMEOUT - hence a timeout of its own.
+# write near its top. Until P2's broadcast wipe (ffc4195) their blocks
+# wiped up to 32,768 cycles here against 4,096 in seq_core, about three
+# times seq_core's simulation under Verilator (275 s against 93), and so
+# this target got a timeout of its own. Since then no block wipes more
+# than 4,096 cycles at either depth, and the two take about the same
+# time: 754 s here against 857 s for seq_core under Verilator on
+# amd-arc-box (9fc9c0d, 2026-09-29). So the timeout is SEQ_TIMEOUT's,
+# with its reason; the variable stays, so a run can raise one alone.
 SEQ_U50_GENERICS = $(shell $(PYTHON) krnl_caps.py)
-SEQ_U50_TIMEOUT ?= 7200
+SEQ_U50_TIMEOUT ?= $(SEQ_TIMEOUT)
 seq_coreu50:
 	CFT_GENERICS="$(SEQ_U50_GENERICS)" timeout $(SEQ_U50_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
 		MODULE=test_seq_core SIM_BUILD=sim_build/seq_coreu50 \
