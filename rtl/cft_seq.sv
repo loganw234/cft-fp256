@@ -371,6 +371,15 @@ module cft_seq #(
                          C_DEPOSIT = 8'd3, C_SETACT = 8'd4, C_ACTALL = 8'd5,
                          C_STL = 8'd6, C_LDL = 8'd7,
                          C_STX = 8'd8, C_LDX = 8'd9;
+  // The opcode a scratch LOAD rides the array as (revision 7, R18):
+  // IOR, the integer group's bitwise OR, fired with both operands the
+  // loaded value, gives the value back bit for bit at every format and
+  // raises no flag - softfloat.ior returns (a | b, 0), cft_simpleops
+  // selects `a | b` and leaves its flags at zero, and both are held to
+  // each other by the conformance set. That is a schedule over a
+  // verified operation, not arithmetic of the sequencer's own (P1);
+  // and the retire takes no flag from a load whatever the array says.
+  localparam logic [7:0] OP_IOR = 8'd17;
 
   // ---- the scratch's geometry (revision 3, R4) -----------------------
   // SCRSW is the slot field's width and the reduction the indexed
@@ -440,7 +449,6 @@ module cft_seq #(
   logic [SCRSW:0] h_nsin, h_nsout;
   logic           scr_io_q;
   logic           scr_strict_q;   // flags[2], revision 4's R8
-  logic [WORDS-1:0] scr_oor_q;    // banks whose lane indexed past it
   // What the INSTRUCTION STREAM can reach, learned while it is parsed:
   // one past the highest static STL/LDL slot, and whether any STX or
   // LDX appears at all. The per-block wipe is sized from these, which
@@ -514,7 +522,20 @@ module cft_seq #(
   // destinations.
   logic issue_hold;
   logic raw_hold;                   // a dependent beat has not landed yet
-  logic rd_hold;                    // either: the A stage holds
+  // Revision 7, R18: two more reasons the A stage holds, both about the
+  // scratch (the section with the queue has the rules): a beat that is
+  // not an LDX waits while an LDX beat is in B or F (gap_hold), and an
+  // LDL waits while a store beat is in B or F (stld_hold).
+  logic gap_hold, stld_hold;
+  logic a_hold;                     // A holds and B and F drain
+  logic rd_hold;                    // any of them: the A stage holds
+  // Revision 7, R18: the beat each pipe stage is carrying (F acts on
+  // pf_bt's row, an LDX fires at H on ph_bt's), and the rows the
+  // requests in the array fired with - the shadow the retire reads,
+  // LATENCY rows of WORDS bits, shifted beside `fs` on the array's own
+  // enable. Declared here because the row selects below read them.
+  logic [5:0]               pb_bt, pf_bt, pg_bt, ph_bt;
+  logic [LATENCY*WORDS-1:0] fr;
   logic dr_stall;                   // the deposit drain holds (declared here
                                     // for the banks' read register, defined
                                     // with the drain's pipeline)
@@ -664,13 +685,19 @@ module cft_seq #(
       always_ff @(posedge ap_clk) begin
         if (scr_we[gs])
           bank[scr_waddr[gs*SCRAW +: SCRAW]] <= scr_wdata[gs*32 +: 32];
-        // Unconditional, like the deposit buffer's and the constant
-        // bank's: one write port and one unconditional synchronous
-        // read port is the shape an inference engine recognises as a
-        // memory, and the address is stable whenever the answer is
-        // wanted, so a read enable would buy nothing and cost a
-        // condition.
-        rd_q <= bank[scr_raddr[gs*SCRAW +: SCRAW]];
+        // Held with the array's standing request, as the register
+        // file's read registers are (revision 7, R18). It was
+        // unconditional while only the scratch states read it, one
+        // access at a time; the loads now read it INSIDE the issue pipe
+        // - an LDL between A and F, an LDX between F and H - and on a
+        // multi-pass tile the pipe holds between accepts, so a register
+        // that kept sampling would hand the fire the NEXT beat's slot.
+        // issue_hold is zero outside a program's issue, so the preload,
+        // the wipe and the scratch-out drain read it exactly as before.
+        // A read enable is still the shape a block RAM's output
+        // register infers from.
+        if (!issue_hold)
+          rd_q <= bank[scr_raddr[gs*SCRAW +: SCRAW]];
       end
       assign scr_rdata[gs*32 +: 32] = rd_q;
     end
@@ -787,7 +814,7 @@ module cft_seq #(
 
   // A registered request the array has not yet taken. While it stands
   // the issue machine and the register file's read registers hold, so
-  // the two-beats-ahead address pipeline of S_ALU_ISSUE stays two
+  // the two-beats-ahead address pipeline of S_ISSUE stays two
   // beats ahead in ACCEPTED beats. In the shipping tile al_rdy is a
   // constant 1 and this is a constant 0.
   assign issue_hold = al_valid && !al_rdy;
@@ -1200,10 +1227,12 @@ module cft_seq #(
     S_ZERO, S_SIN_GO, S_SIN_PARSE, S_LD_GO, S_LD_STREAM,
     S_GTH_GO, S_GTH_TBL, S_GTH_ELEM, S_GTH_WAIT,
     S_FETCH, S_FETCH2, S_DECODE,
-    S_ALU_ISSUE,
-    S_DEP_RD, S_DEP_W8, S_DEP_WR,
-    S_SET_RD, S_SET_W8, S_SET_AP,
-    S_SCR_RD, S_SCR_W8, S_SCR_AD, S_SCR_W9, S_SCR_WB,
+    // Revision 7, R18: one issue state for every instruction that walks
+    // the block's beats. DEPOSIT, SETACT and the four scratch codes had
+    // states of their own (S_DEP_*, S_SET_*, S_SCR_*) at three to five
+    // cycles a beat; they go through the pipe now, and the state that
+    // was S_ALU_ISSUE issues them all.
+    S_ISSUE,
     S_SKIP_F, S_SKIP_D,
     S_DRAIN_SETUP, S_DRAIN_RUN,
     S_CNT_SETUP, S_CNT_PACK, S_CNT_SEND,
@@ -1236,31 +1265,85 @@ module cft_seq #(
   assign q_e0    = wb_pop ? q_rd1 : q_rd0;
   assign q_e1    = wb_pop ? q_rd2 : q_rd1;
   assign q_room  = (q_after != 2'd3);
-  // Admission: from S_DECODE, the decoded instruction if it is
-  // arithmetic; from the last address cycle of an issue, the word read
-  // under it if that is here, is arithmetic and is not past the end.
-  assign adm_go  = (st == S_DECODE) ? !c_ctrl :
-                   (st == S_ALU_ISSUE) && !rd_hold &&
+  // Revision 7, R18: which instructions go through the issue pipe, which
+  // of those WRITE a register - and so take a queue slot and become a
+  // producer later instructions wait on - and which register ports each
+  // one reads. Until R18 the pipe carried arithmetic alone and every
+  // control code that read the file, moved the mask or ended the block
+  // waited for the queue to empty, then walked the block's beats in
+  // states of its own at three cycles a beat (five for a load).
+  //
+  //   DEPOSIT ra, SETACT ra, STL ra   read port A; write no register
+  //   STX ra, rb                      read ports A and B; write none
+  //   LDL rd                          read nothing from the file; write rd
+  //   LDX rd, rb                      read port B; write rd
+  //
+  // REPEAT, ENDREP, ACTALL and HALT walk no beats and stay in S_DECODE.
+  // A control code's read set is its row above, NOT ka/kb/kc: the loader
+  // refuses those bits on a control code, and a stream that bypassed the
+  // loader still reads the register the scratch states always read.
+  function automatic logic piped_fn(input [63:0] w);
+    begin
+      piped_fn = !w[31] ||
+                 w[7:0] == C_DEPOSIT || w[7:0] == C_SETACT ||
+                 w[7:0] == C_STL || w[7:0] == C_LDL ||
+                 w[7:0] == C_STX || w[7:0] == C_LDX;
+    end
+  endfunction
+  function automatic logic writer_fn(input [63:0] w);
+    begin
+      writer_fn = !w[31] || w[7:0] == C_LDL || w[7:0] == C_LDX;
+    end
+  endfunction
+  // {c, b, a}
+  function automatic [2:0] reads_fn(input [63:0] w);
+    begin
+      if (!w[31])
+        reads_fn = {!w[29], !w[28], !w[27]};
+      else if (w[7:0] == C_DEPOSIT || w[7:0] == C_SETACT ||
+               w[7:0] == C_STL)
+        reads_fn = 3'b001;
+      else if (w[7:0] == C_STX)
+        reads_fn = 3'b011;
+      else if (w[7:0] == C_LDX)
+        reads_fn = 3'b010;
+      else
+        reads_fn = 3'b000;
+    end
+  endfunction
+  logic       c_piped, imq_piped, adm_wr;
+  logic [2:0] adm_reads;
+  assign c_piped   = piped_fn(cur);
+  assign imq_piped = piped_fn(imem_q);
+  // Admission: from S_DECODE, the decoded instruction if it goes through
+  // the pipe; from the last address cycle of an issue, the word read
+  // under it if that is here, goes through the pipe and is not past the
+  // end. Every admission needs queue ROOM, a writer or not: then a
+  // producer an admitted instruction waits on is at position 0 or 1 of
+  // the queue, and a control code waits no longer than it did when it
+  // waited for the queue to be EMPTY.
+  assign adm_go  = (st == S_DECODE) ? c_piped :
+                   (st == S_ISSUE) && !rd_hold &&
                    (bt == 6'({1'b0, nb_blk} - 6'd1)) && nxt_ok &&
-                   (32'(pc) + 32'd1 < h_ninsns) && !imem_q[31];
-  assign q_push  = adm_go && q_room;
-  assign adm_w   = (st == S_ALU_ISSUE) ? imem_q : cur;
+                   (32'(pc) + 32'd1 < h_ninsns) && imq_piped;
+  assign adm_take = adm_go && q_room;
+  assign adm_w   = (st == S_ISSUE) ? imem_q : cur;
+  assign adm_wr  = writer_fn(adm_w);
+  assign q_push  = adm_take && adm_wr;
+  assign adm_reads = reads_fn(adm_w);
   assign adm_rd  = {adm_w[56], adm_w[11:8]};
   assign adm_ra  = {adm_w[57], adm_w[15:12]};
   assign adm_rb  = {adm_w[58], adm_w[19:16]};
   assign adm_rc  = {adm_w[59], adm_w[23:20]};
-  assign adm_ka  = adm_w[27];
-  assign adm_kb  = adm_w[28];
-  assign adm_kc  = adm_w[29];
   // the youngest queued writer of each register operand, if any
-  assign dep_n_a = !adm_ka && ((q_after >= 2'd2 && q_e1 == adm_ra) ||
-                               (q_after >= 2'd1 && q_e0 == adm_ra));
+  assign dep_n_a = adm_reads[0] && ((q_after >= 2'd2 && q_e1 == adm_ra) ||
+                                    (q_after >= 2'd1 && q_e0 == adm_ra));
   assign dep_p_a = (q_after >= 2'd2 && q_e1 == adm_ra) ? 2'd1 : 2'd0;
-  assign dep_n_b = !adm_kb && ((q_after >= 2'd2 && q_e1 == adm_rb) ||
-                               (q_after >= 2'd1 && q_e0 == adm_rb));
+  assign dep_n_b = adm_reads[1] && ((q_after >= 2'd2 && q_e1 == adm_rb) ||
+                                    (q_after >= 2'd1 && q_e0 == adm_rb));
   assign dep_p_b = (q_after >= 2'd2 && q_e1 == adm_rb) ? 2'd1 : 2'd0;
-  assign dep_n_c = !adm_kc && ((q_after >= 2'd2 && q_e1 == adm_rc) ||
-                               (q_after >= 2'd1 && q_e0 == adm_rc));
+  assign dep_n_c = adm_reads[2] && ((q_after >= 2'd2 && q_e1 == adm_rc) ||
+                                    (q_after >= 2'd1 && q_e0 == adm_rc));
   assign dep_p_c = (q_after >= 2'd2 && q_e1 == adm_rc) ? 2'd1 : 2'd0;
   // the per-beat wait: the producer is not the head yet, or its beat
   // for the one being addressed has not landed - or, forwarding, will
@@ -1268,14 +1351,58 @@ module cft_seq #(
   // beats landed two cycles from now; a beat in that window that is
   // not the head's means the head's are all in it, so overcounting
   // only ever says yes when yes is right)
+  //
+  // Which of the two rules a port takes (R18). Forwarding's (R15) where
+  // the operand is DATA - every ALU operand, and the value DEPOSIT, STL
+  // and STX move - because F takes it from the forwarding merge and
+  // puts it straight into a register. R14's, "landed", where the
+  // operand feeds deeper logic: SETACT's ra (the magnitude test that
+  // writes `active`) and the indexed codes' rb (the slot that forms the
+  // scratch address). F reads those straight from the bank, as the
+  // scratch and SETACT states always did, so no forwarding mux is put
+  // in front of either path; a dependent SETACT or indexed access pays
+  // the three cycles forwarding saves an ALU instruction.
+  logic       a_fwd, b_fwd;
+  assign a_fwd = !(c_ctrl && c_op == C_SETACT);
+  assign b_fwd = !c_ctrl;
   logic [5:0] wb_soon;
   assign wb_soon = FWD ? wb_bt + 6'(la) : wb_bt;
-  assign dep_hold_a = dep_v_a && (dep_pos_a != 2'd0 || wb_soon <= bt);
-  assign dep_hold_b = dep_v_b && (dep_pos_b != 2'd0 || wb_soon <= bt);
+  assign dep_hold_a = dep_v_a && (dep_pos_a != 2'd0 ||
+                                  (a_fwd ? wb_soon : wb_bt) <= bt);
+  assign dep_hold_b = dep_v_b && (dep_pos_b != 2'd0 ||
+                                  (b_fwd ? wb_soon : wb_bt) <= bt);
   assign dep_hold_c = dep_v_c && (dep_pos_c != 2'd0 || wb_soon <= bt);
-  assign raw_hold = (st == S_ALU_ISSUE) &&
+  assign raw_hold = (st == S_ISSUE) &&
                     (dep_hold_a || dep_hold_b || dep_hold_c);
-  assign rd_hold  = issue_hold || raw_hold;
+  // The scratch's two holds (R18). An LDX's slot comes from rb, which
+  // reaches the bus only at F, so an LDX reads the scratch at G and
+  // fires into the array at H - two steps after a beat addressed with
+  // it would. A beat that is NOT an LDX therefore waits while an LDX
+  // beat is in B or F: two bubbles after an LDX, none before one or
+  // between two. That keeps every fire in program order and gives the
+  // scratch's read address one owner a cycle (an LDL's A and an LDX's F
+  // never both write it). And a store's bank write lands at the end of
+  // step A+3 while an LDL reads at A+1 of its own: an LDL waits while a
+  // store beat is in B or F, whatever the slot. At sixteen beats a
+  // block that never binds; a short block, and R19's skipped beats, are
+  // what it is for. An LDX needs no such wait - it reads at A+3 of a
+  // LATER A - and a store after a load needs none: the load has read.
+  logic c_is_ldl, c_is_ldx, pb_ldx, pf_ldx, pb_st, pf_st;
+  assign c_is_ldl  = c_ctrl && c_op == C_LDL;
+  assign c_is_ldx  = c_ctrl && c_op == C_LDX;
+  assign pb_ldx    = pb_v && pb_ctrl && pb_op == C_LDX;
+  assign pf_ldx    = pf_v && pf_ctrl && pf_op == C_LDX;
+  assign pb_st     = pb_v && pb_ctrl && (pb_op == C_STL || pb_op == C_STX);
+  assign pf_st     = pf_v && pf_ctrl && (pf_op == C_STL || pf_op == C_STX);
+  assign gap_hold  = (st == S_ISSUE) && !c_is_ldx && (pb_ldx || pf_ldx);
+  assign stld_hold = (st == S_ISSUE) && c_is_ldl && (pb_st || pf_st);
+  assign a_hold    = raw_hold || gap_hold || stld_hold;
+  assign rd_hold   = issue_hold || a_hold;
+  // Nothing is in the pipe: every beat addressed has acted or fired,
+  // and so has captured its row. ACTALL waits for this, and so does the
+  // end of the block (with the queue empty as well).
+  logic pipe_idle;
+  assign pipe_idle = !pb_v && !pf_v && !pg_v && !ph_v;
 
   logic [PCW:0]  pc;
   logic [PCW:0]  skip_depth;
@@ -1283,7 +1410,7 @@ module cft_seq #(
   // Instruction overlap (2026-09-14, in two steps). The issue is a
   // three-stage pipe that runs every unheld cycle whatever state the
   // machine is in: A puts a beat's three register addresses on the
-  // file's bus (the state machine, in S_ALU_ISSUE), B is the file's
+  // file's bus (the state machine, in S_ISSUE), B is the file's
   // read (the bank registers into the slice bus) and the constant
   // bank's, F fires the beat into the array with the data now on the
   // bus and the constants (kq_*). Each stage carries the context of the
@@ -1291,12 +1418,25 @@ module cft_seq #(
   // instruction's first beat while F fires the previous one's last:
   // the next instruction is read under this one's issue (imem_q) and
   // admitted the cycle after this one's last address, and the beats
-  // never stop. Up to three ALU instructions are then in flight -
-  // retiring, in the array, being addressed - and their destinations
-  // sit in q_rd0..2 from admission until their last beat lands; q_rd0
-  // is the one retiring (wb_bt counts its landed beats), and the retire
-  // block below the state machine writes its beats as the array
-  // delivers them and pops it after nb_blk of them.
+  // never stop. Up to three instructions that WRITE a register are then
+  // in flight - retiring, in the array, being addressed - and their
+  // destinations sit in q_rd0..2 from admission until their last beat
+  // lands; q_rd0 is the one retiring (wb_bt counts its landed beats),
+  // and the retire block below the state machine writes its beats as
+  // the array delivers them and pops it after nb_blk of them.
+  //
+  // Revision 7, R18: the beat-walking control codes go through the same
+  // pipe, one beat a cycle, where they used to wait for the queue to
+  // empty and then walk the block in states of their own (DEPOSIT and
+  // SETACT three cycles a beat, a store three, a load five). DEPOSIT,
+  // SETACT and the stores ACT at F - the deposit banks and the count
+  // row, the active row, the scratch write - and take no queue slot.
+  // The loads are producers: they take a queue slot and fire their
+  // value into the array as IOR(v, v), which is v bit for bit and
+  // raises no flag (softfloat.ior; cft_simpleops), so it retires through
+  // the one retire path, in order, under the row it fired with. An LDL
+  // reads the scratch between A and F; an LDX, whose slot is rb, forms
+  // the address at F, reads at G and fires at H (pg_* and ph_*).
   //
   // Read-after-write is the one hazard: in-order, so writes land in
   // order, and an instruction's reads all leave the file before the
@@ -1315,10 +1455,18 @@ module cft_seq #(
   // shorter than the pipe the beat A is waiting on can still be in F,
   // and a hold that froze F waited for a landing it was itself
   // preventing - and the array's standing request is taken as usual.
-  // Nothing fires twice and nothing in the pipe is lost. Every control code
-  // that reads the file, moves the mask or ends the block waits for
-  // the queue to empty; REPEAT and ENDREP read only the mask, which no
-  // result moves.
+  // Nothing fires twice and nothing in the pipe is lost.
+  //
+  // Until revision 7 every control code that read the file, moved the
+  // mask or ended the block waited here for the queue to empty. Now
+  // (R18) a control code waits, a beat at a time, only for a queued
+  // producer of a register it READS, exactly as an ALU operand does;
+  // ACTALL waits for the pipe (not the queue) to empty, because every
+  // result still in the array carries the row it fired with; and what
+  // ends the block waits for both, in S_DRAIN_SETUP. REPEAT and ENDREP
+  // still wait for nothing: the mask they test can only be stale on
+  // the WIDE side (a SETACT still narrowing it), which runs one more
+  // all-inactive iteration - a no-op, by P3.
   logic [4:0]    q_rd0, q_rd1, q_rd2;
   logic [1:0]    q_n;
   logic          q_push, wb_pop;    // this cycle: a destination admitted / retired
@@ -1326,19 +1474,38 @@ module cft_seq #(
   logic [4:0]    q_e0, q_e1;        // the head and the one behind, after that pop
   logic          q_room;            // a fourth would not fit
   logic          adm_go;            // this cycle admits, given room
+  logic          adm_take;          // ...and it has room: the instruction enters A
   logic [63:0]   adm_w;             // the word being admitted
   logic [4:0]    adm_rd, adm_ra, adm_rb, adm_rc;
-  logic          adm_ka, adm_kb, adm_kc;
   logic          dep_v_a, dep_v_b, dep_v_c;        // the operand waits on a producer
   logic [1:0]    dep_pos_a, dep_pos_b, dep_pos_c;  // ...this far from the head
   logic          dep_n_a, dep_n_b, dep_n_c;        // ...as computed at admission
   logic [1:0]    dep_p_a, dep_p_b, dep_p_c;
   logic          dep_hold_a, dep_hold_b, dep_hold_c;
-  // the pipe's B and F stages: a beat is in the stage, and whose
+  // the pipe's B and F stages: a beat is in the stage, and whose. Since
+  // R18 a stage's beat may be a control code's: pX_ctrl says so, pX_op
+  // is then its code, pX_bt the beat it is on, and pX_slot a static
+  // store's slot (the slot `cur` held has moved on by F).
   logic          pb_v, pf_v;
   logic [7:0]    pb_op, pf_op;
   logic [2:0]    pb_rnd, pf_rnd;
   logic          pb_ka, pb_kb, pb_kc, pf_ka, pf_kb, pf_kc;
+  logic          pb_ctrl, pf_ctrl;
+  logic [SCRSW-1:0] pb_slot, pf_slot;
+  // ...and an LDX's two more (R18): G reads the scratch at the address
+  // F formed, H fires what came back. pX_oor carries R8's suppressed
+  // banks from F, where rb was on the bus, to H, where the value is.
+  logic          pg_v, ph_v;
+  logic [WORDS-1:0] pg_oor, ph_oor;
+  // The row and the flag enable a request fires with (R18), held with
+  // it until the array takes it - al_valid's own discipline - and then
+  // shifted down fr and fq beside fs: the retire writes the lanes, and
+  // ORs the flags of the lanes, that were active when the beat FIRED.
+  // A load fires with its flag enable off: it raises no flag in the
+  // model, and that is not left resting on IOR's.
+  logic [WORDS-1:0] al_row;
+  logic          al_fen;
+  logic [LATENCY-1:0] fq;
   // Forwarding (2026-09-14, the second step). On a single-pass tile
   // the array accepts every cycle, so its validity line can be
   // shadowed exactly (fs: fs[LATENCY-1] is al_ov, fs[LATENCY-2] lands
@@ -1368,10 +1535,22 @@ module cft_seq #(
   always_ff @(posedge ap_clk) begin
     if (!ap_rst_n) begin
       fs <= '0; we1 <= 1'b0;
+      fr <= '0; fq <= '0;
     end else begin
       // the array's own line shifts on its enable, which on a
-      // single-pass tile is every cycle; the shadow is only read there
+      // single-pass tile is every cycle; the look-ahead reads the
+      // validity shadow only there
       if (al_rdy) fs <= {fs[LATENCY-2:0], al_valid};
+      // ...and the row and flag enable each request fired with (R18)
+      // shift on exactly that enable, so they are exact on EVERY tile:
+      // cft_lanes' own line is LATENCY stages on in_ready and its
+      // out_valid is the top one, which is what the retire reads them
+      // beside. The retire needs them on a multi-pass tile as much as
+      // on a single-pass one.
+      if (al_rdy) begin
+        fr <= {fr[(LATENCY-1)*WORDS-1:0], al_row};
+        fq <= {fq[LATENCY-2:0], al_fen};
+      end
       we1 <= rf_we; wa1 <= rf_waddr; wd1 <= rf_wdata; wwe1 <= rf_wwe;
     end
   end
@@ -1388,7 +1567,7 @@ module cft_seq #(
   logic [63:0]    imem_q;
   logic [PCW-1:0] imem_a;
   logic           nxt_ok;
-  assign imem_a = (st == S_ALU_ISSUE) ? pc[PCW-1:0] + PCW'(1) : pc[PCW-1:0];
+  assign imem_a = (st == S_ISSUE) ? pc[PCW-1:0] + PCW'(1) : pc[PCW-1:0];
   always_ff @(posedge ap_clk) imem_q <= imem[imem_a];
   logic [1:0]    ld_reg;
   logic [LB:0]   lane_cursor;
@@ -1507,13 +1686,27 @@ module cft_seq #(
     end
   endfunction
 
-  // The row DEPOSIT and SETACT are working on, and the row retiring
-  // into the register file.
-  logic [WORDS-1:0]    bt_act, wb_act;
+  // The row the F stage's beat is working on - DEPOSIT, SETACT, the
+  // stores, an LDX's range report, and the row an ALU or LDL beat fires
+  // with - and the row an LDX beat fires with at H (revision 7, R18:
+  // every one of those is an action of the pipe now, so each takes the
+  // beat the pipe carries rather than the A stage's `bt`).
+  //
+  // The row retiring into the register file is NOT read from `active`
+  // any more. Until R18 it was `row_act_fn(active, wb_bt)` - the mask
+  // as it stood when the result came back - which was right only
+  // because every code that moves the mask waited for the queue to
+  // empty. A SETACT now narrows the mask while earlier results are
+  // still in the array, so a result must write the lanes that were
+  // active when it FIRED: the row rides beside the request (al_row)
+  // and down a shadow of the array's validity line (fr, beside fs),
+  // and the retire takes it from there.
+  logic [WORDS-1:0]    bt_act, h_act, wb_act;
   logic [WORDS*CW-1:0] bt_cnt;
-  assign bt_act = row_act_fn(active, bt);
-  assign wb_act = row_act_fn(active, wb_bt);
-  assign bt_cnt = row_cnt_fn(dcnt, bt);
+  assign bt_act = row_act_fn(active, pf_bt);
+  assign h_act  = row_act_fn(active, ph_bt);
+  assign wb_act = fr[LATENCY*WORDS-1 -: WORDS];
+  assign bt_cnt = row_cnt_fn(dcnt, pf_bt);
 
   // DEPOSIT's whole decision for the row: which positions may append,
   // which have run out of slots, and what their counts become. Eight
@@ -1753,8 +1946,17 @@ module cft_seq #(
     end
   endfunction
 
-  logic c_scr_idx;                       // this instruction is STX/LDX
-  assign c_scr_idx = c_ctrl && (c_op == C_STX || c_op == C_LDX);
+  // The F stage's beat (revision 7, R18): the scratch codes act in the
+  // pipe now, so the slot is the one THAT beat carries - pf_slot for
+  // the static forms, rb as the bank read it for the indexed ones -
+  // and not `cur`'s, which has moved on to the next instruction by the
+  // time a beat reaches F. rb is read from the BANK and not forwarded:
+  // an indexed code's rb waits for its producer under R14's rule (the
+  // beat has landed), which keeps the path from rb to the scratch
+  // address the one it has always been, with no forwarding mux in
+  // front of it.
+  logic c_scr_idx;                       // the F stage's beat is STX/LDX
+  assign c_scr_idx = pf_ctrl && (pf_op == C_STX || pf_op == C_LDX);
   logic [WORDS*SCRSW-1:0] scr_slot;      // the slot each position wants
   logic [WORDS-1:0]       scr_oor;       // ...and whether it exists
   logic [WORDS-1:0]       scr_oor_bk;    // the same, by bank
@@ -1762,7 +1964,7 @@ module cft_seq #(
     for (genvar gsl = 0; gsl < WORDS; gsl = gsl + 1) begin : g_slot
       assign scr_slot[gsl*SCRSW +: SCRSW] =
           c_scr_idx ? lane_slot_fn(rf_rdata_b, 3'(gsl), wpe_sh)
-                    : SCRSW'(c_imm[SCRSW-1:0]);
+                    : pf_slot;
     end
   endgenerate
 
@@ -2130,6 +2332,8 @@ module cft_seq #(
       lane_cursor <= '0; slot_cursor <= '0;
       pc <= '0; bt <= '0; wb_bt <= '0; lp_sp <= '0; q_n <= '0;
       pb_v <= 1'b0; pf_v <= 1'b0; nxt_ok <= 1'b0;
+      pg_v <= 1'b0; ph_v <= 1'b0;
+      al_row <= '0; al_fen <= 1'b0;
       pf_aa <= '0; pf_ab <= '0; pf_ac <= '0;
       dep_v_a <= 1'b0; dep_v_b <= 1'b0; dep_v_c <= 1'b0;
       // The constant bank is read unconditionally on every cycle, so
@@ -2154,7 +2358,7 @@ module cft_seq #(
       bank_q <= '0; sin_q <= '0; sout_q <= '0;
       scr_we <= '0; scr_raddr <= '0;
       scr_io_q <= 1'b0; scr_hi <= '0; scr_all <= 1'b0; rd_need <= '0;
-      scr_strict_q <= 1'b0; scr_oor_q <= '0;
+      scr_strict_q <= 1'b0;
       h_nsin <= '0; h_nsout <= '0;
 
     end else begin
@@ -2930,10 +3134,12 @@ module cft_seq #(
 
         // ---- fetch/decode --------------------------------------------
         S_FETCH: begin
-          if (32'(pc) >= h_ninsns) begin       // implicit halt
-            if (q_n == 2'd0)
-              st <= S_DRAIN_SETUP;             // ...once every result landed
-          end else
+          // The implicit halt goes to the drain, and S_DRAIN_SETUP waits
+          // there for every result to land and the pipe to empty - the
+          // one wait every way a block can end shares (revision 7, R18).
+          if (32'(pc) >= h_ninsns)             // implicit halt
+            st <= S_DRAIN_SETUP;
+          else
             st <= S_FETCH2;                    // imem_q <= imem[pc] this cycle
         end
         S_FETCH2: begin
@@ -2942,17 +3148,17 @@ module cft_seq #(
         end
 
         S_DECODE: begin
-          if (!c_ctrl) begin
-            if (q_room) begin                  // admitted: q_push, below
+          if (c_piped) begin
+            // Arithmetic, and since R18 every control code that walks
+            // the block's beats: admitted with queue room (adm_take,
+            // with the queue) and issued through the pipe. A code that
+            // reads a register waits there, a beat at a time, for a
+            // queued producer of it and for nothing else.
+            if (q_room) begin
               bt <= '0;
-              st <= S_ALU_ISSUE;
+              st <= S_ISSUE;
             end
             // otherwise wait here for a slot to free
-          end else if (q_n != 2'd0 && c_op != C_REPEAT && c_op != C_ENDREP)
-          begin
-            // a control code that reads the file, moves the mask or
-            // ends the block waits for every result to land; the two
-            // loop codes read only the mask, which no result moves
           end else begin
             case (c_op)
               C_REPEAT: begin
@@ -2983,107 +3189,20 @@ module cft_seq #(
                   st <= S_FETCH;
                 end
               end
-              C_DEPOSIT: begin
-                bt <= '0;
-                st <= S_DEP_RD;
-              end
-              C_SETACT: begin
-                bt <= '0;
-                st <= S_SET_RD;
-              end
               C_ACTALL: begin
-                active <= blk_act;
-                pc <= pc + 1;
-                st <= S_FETCH;
-              end
-              // R4's four. All of them walk the block's beats the way
-              // DEPOSIT and SETACT do, because that is what a per-lane
-              // memory needs and none of them is arithmetic: the ALU
-              // array is not asked, no rounding attribute is read and
-              // no flag is raised.
-              C_STL, C_LDL, C_STX, C_LDX: begin
-                bt <= '0;
-                st <= S_SCR_RD;
+                // Widens the mask, so every beat before it must have
+                // taken its row first: the pipe empty (R18). Not the
+                // queue - a result still in the array retires under the
+                // row it fired with, whatever the mask is by then.
+                if (pipe_idle) begin
+                  active <= blk_act;
+                  pc <= pc + 1;
+                  st <= S_FETCH;
+                end
               end
               default: st <= S_DRAIN_SETUP;    // HALT and unknowns
             endcase
           end
-        end
-
-        // ---- the scratch: STL / LDL / STX / LDX ------------------------
-        //
-        // A register's latency discipline, one beat at a time. The
-        // register file costs TWO cycles from address to data - the
-        // address registers into the bank read, the read registers
-        // into the slice bus - which is the S_*_RD / S_*_W8 pair
-        // DEPOSIT and SETACT already carry; the scratch costs the same
-        // two, which is the second pair. A store is therefore three
-        // cycles a beat and a load five.
-        //
-        // Port A carries the value a store writes (ra) and port B the
-        // register an INDEXED access takes its slot from (rb). Both
-        // are presented together, because STX reads both at once.
-        S_SCR_RD: begin
-          rf_raddr_a <= {c_ra, bt[NBSH-1:0]};
-          rf_raddr_b <= {c_rb, bt[NBSH-1:0]};
-          st <= S_SCR_W8;
-        end
-        S_SCR_W8: st <= S_SCR_AD;   // bank read + bus register
-        S_SCR_AD: begin
-          // rf_rdata_a is regs[ra][bt] and rf_rdata_b regs[rb][bt], so
-          // scr_slot now holds the slot every lane position wants -
-          // imm's for the static forms, the low SCRSW bits of the
-          // lane's own rb for the indexed ones, which IS the reduction
-          // modulo the depth the contract states.
-          // R8: a lane whose index is past the depth is REPORTED and
-          // its access suppressed. bt_wwe carries the per-lane activity
-          // mask, so ANDing with it reports only lanes that would have
-          // gone - an inactive lane never reaches the point in the model
-          // where the bit is raised either. Latched for S_SCR_WB rather
-          // than recomputed there: rf_rdata_b would still be valid two
-          // states on, but that is a timing argument and this needs none.
-          scr_oor_q <= scr_oor_bk;
-          if (|(bt_wwe & scr_oor_bk))
-            scr_rng_q <= 1'b1;
-          if (c_op == C_STL || c_op == C_STX) begin
-            // A store is a register write for P3's purposes, so it
-            // takes exactly the register file's per-lane mask - less any
-            // lane R8 suppressed, whose store does not land anywhere
-            // rather than landing on the slot the modulo would name.
-            scr_we    <= bt_wwe & ~scr_oor_bk;
-            scr_waddr <= scr_addr_fn(scr_slot, bt, wpe_sh);
-            scr_wdata <= rf_rdata_a;
-            bt <= bt + 1;
-            if (bt == 6'({1'b0, nb_blk} - 6'd1)) begin
-              pc <= pc + 1;
-              st <= S_FETCH;
-            end else
-              st <= S_SCR_RD;
-          end else begin
-            scr_raddr <= scr_addr_fn(scr_slot, bt, wpe_sh);
-            st <= S_SCR_W9;
-          end
-        end
-        S_SCR_W9: st <= S_SCR_WB;   // the scratch's own read latency
-        S_SCR_WB: begin
-          // ...and a load is a masked register write, which is the
-          // other half of what keeps an all-inactive loop body a
-          // no-op. rf_we is free here: no ALU request is in flight
-          // while a control instruction runs.
-          rf_we <= 1'b1;
-          rf_waddr <= {c_rd, bt[NBSH-1:0]};
-          // A suppressed load still WRITES, and writes +0 - what an
-          // untouched slot reads back as. Not the slot the modulo would
-          // have named, and not the register's old value, which would
-          // make the result depend on what the lane happened to hold.
-          rf_wdata <= zero_oor_fn(scr_rdata, scr_oor_q);
-          rf_wwe <= bt_wwe;
-          bt <= bt + 1;
-          if (bt == 6'({1'b0, nb_blk} - 6'd1)) begin
-            pc <= pc + 1;
-            st <= S_FETCH;
-          end else
-            st <= S_SCR_RD;
         end
 
         // ---- skip to the matching endrep ------------------------------
@@ -3106,8 +3225,8 @@ module cft_seq #(
           end
         end
 
-        // ---- ALU issue: the A stage -----------------------------------
-        S_ALU_ISSUE: begin
+        // ---- issue: the A stage ----------------------------------------
+        S_ISSUE: begin
           // The banked register file costs TWO cycles from address to
           // data (the address registers into the bank read, the read
           // registers into the slice bus), so addresses run two beats
@@ -3124,29 +3243,42 @@ module cft_seq #(
           // acceptances the whole pipe - addresses, the bank read
           // registers, the stage contexts, bt, and the request itself -
           // holds, so the two-ahead relation is unchanged in accepted
-          // beats. A dependent beat's hold (raw_hold) holds THIS stage
-          // only: B and F drain the beats already addressed, and the
-          // request the array has stands until taken. Writeback, in
-          // the retire block below the case, is outside every hold: a
-          // result is a pulse and is taken whenever it arrives.
+          // beats. A dependent beat's hold (raw_hold), and the scratch's
+          // two (gap_hold, stld_hold), hold THIS stage only: B and F
+          // drain the beats already addressed, and the request the array
+          // has stands until taken. Writeback, in the retire block below
+          // the case, is outside every hold: a result is a pulse and is
+          // taken whenever it arrives.
+          //
+          // Revision 7, R18: every beat-walking instruction is addressed
+          // here, arithmetic or not. A control code puts the registers it
+          // reads on the same ports (ra on A, rb on B - the fields it does
+          // not read are zero by the loader's rule and read harmlessly),
+          // and an LDL, whose slot is in the instruction, puts its scratch
+          // address out now, so the scratch's read lands in F with the
+          // file's. The pipe context (below the case) carries what F
+          // needs to act on the beat after `cur` has moved on.
           if (!rd_hold) begin
             rf_raddr_a <= {c_ra, bt[NBSH-1:0]};
             rf_raddr_b <= {c_rb, bt[NBSH-1:0]};
             rf_raddr_c <= {c_rc, bt[NBSH-1:0]};
+            if (c_is_ldl)
+              scr_raddr <= scr_flat_fn(c_imm[SCRSW-1:0], bt);
             bt <= bt + 1;
             if (bt == 6'({1'b0, nb_blk} - 6'd1)) begin
               // The last address. The next instruction, read under this
-              // one, is admitted and addressed from the next cycle if
-              // it is arithmetic and the queue has room (adm_go and
-              // q_push, with the queue); a control code goes to decode
-              // with its word already in hand; past the end, or with
-              // the word not read yet (a one-beat block), the fetch
-              // state takes over and the implicit halt with it. The
-              // pipe fires this instruction's last two beats meanwhile.
+              // one, is admitted and addressed from the next cycle if it
+              // goes through the pipe and the queue has room (adm_go and
+              // adm_take, with the queue); a code that does not - REPEAT,
+              // ENDREP, ACTALL, HALT - goes to decode with its word
+              // already in hand; past the end, or with the word not read
+              // yet (a one-beat block), the fetch state takes over and
+              // the implicit halt with it. The pipe acts on or fires this
+              // instruction's last two beats meanwhile.
               pc <= pc + 1;
               if (nxt_ok && (32'(pc) + 32'd1 < h_ninsns)) begin
                 cur <= imem_q;
-                if (!imem_q[31] && q_room)
+                if (imq_piped && q_room)
                   bt <= '0;
                 else
                   st <= S_DECODE;
@@ -3156,89 +3288,38 @@ module cft_seq #(
           end
         end
 
-        // ---- DEPOSIT ---------------------------------------------------
-        S_DEP_RD: begin
-          rf_raddr_a <= {c_ra, bt[NBSH-1:0]};
-          st <= S_DEP_W8;
-        end
-        S_DEP_W8: st <= S_DEP_WR;    // bank read + bus register
-        S_DEP_WR: begin
-          // regs[ra][bt] is on rf_rdata_a. Each active, in-capacity
-          // lane of this beat writes its own bank set at its own
-          // slot; the banks' independent write addresses are what
-          // makes one beat per cycle possible even after SETACT has
-          // left the beat's lanes with divergent counts.
-          for (int p = 0; p < WORDS; p = p + 1)
-            if (bt_dep_go[32'(p) >> wpe_sh]) begin
-              db_we[p] <= 1'b1;
-              db_waddr[p*DBA +: DBA] <= DBA'(32'(bt) * MAXD +
-                  32'(pick_cnt_fn(bt_cnt, 3'(32'(p) >> wpe_sh))));
-              db_wdata[p*32 +: 32] <= rf_rdata_a[p*32 +: 32];
-            end
-          // The counts advance once per LANE. Only the eight
-          // positions of beat bt can move, and the value each moves
-          // to was formed once above, so this is a selection over
-          // constant indices and not 128 counters with a decoder in
-          // front of them.
-          for (int b = 0; b < NBEATS; b = b + 1)
-            for (int q = 0; q < WORDS; q = q + 1)
-              if (b == 32'(bt[NBSH-1:0]) && bt_dep_go[q])
-                dcnt[(b*WORDS + q)*CW +: CW] <= bt_cnt_inc[q*CW +: CW];
-          if (|bt_dep_ovf)
-            dep_ovf_q <= 1'b1;
-          bt <= bt + 1;
-          if (bt == 6'({1'b0, nb_blk} - 6'd1)) begin
-            pc <= pc + 1;
-            st <= S_FETCH;
-          end else
-            st <= S_DEP_RD;
-        end
-
-        // ---- SETACT ----------------------------------------------------
-        S_SET_RD: begin
-          rf_raddr_a <= {c_ra, bt[NBSH-1:0]};
-          st <= S_SET_W8;
-        end
-        S_SET_W8: st <= S_SET_AP;
-        S_SET_AP: begin
-          // Eight magnitude tests, one per lane position in the beat
-          // on rf_rdata_a - not one per lane in the block. The lane
-          // index only ever entered this through `l & (lpb - 1)`,
-          // which is the position, so 120 of the 128 tests were the
-          // same eight answers reached the expensive way.
-          for (int b = 0; b < NBEATS; b = b + 1)
-            for (int q = 0; q < WORDS; q = q + 1)
-              if (b == 32'(bt[NBSH-1:0]) && 32'(q) < 32'(lpb) &&
-                  bt_act[q])
-                active[b*WORDS + q] <= sa_nz[q];
-          bt <= bt + 1;
-          if (bt == 6'({1'b0, nb_blk} - 6'd1)) begin
-            pc <= pc + 1;
-            st <= S_FETCH;
-          end else
-            st <= S_SET_RD;
-        end
-
         // ---- deposit drain --------------------------------------------
         S_DRAIN_SETUP: begin
-          lane_cursor <= '0;
-          slot_cursor <= '0;
-          as_fill <= '0; as_strb <= '0; as_data <= '0;
-          drain_last <= 1'b0;
-          wr_addr <= d_q + dep_off;
-          wr_beats_left <= ((dep_elems << esz_sh)
-                            + 32'(BEAT_BYTES) - 32'd1) >> 5;
-          wr_stream_on <= 1'b1;
-          wr_bresp_left <= '0;
-          m_wr_bready <= 1'b1;
-          dr_v0 <= 1'b0; dr_v1 <= 1'b0;
-          dr_issued <= 1'b0;
-          dr_ilane <= '0; dr_islot <= '0; dr_ifill <= '0;
-          if (h_maxdep == 0)
-            st <= S_CNT_SETUP;
-          else begin
-            db_raddr <= DBA'(0);
-            st <= S_DRAIN_RUN;
+          // Every way a block ends comes here - HALT, an unknown code,
+          // an unmatched ENDREP, the implicit halt, a skip past the end -
+          // and waits here, whatever the way, for every result to land
+          // (the queue empty) and every beat in the pipe to have acted
+          // (the deposits written, the stores in the scratch): the drains
+          // read what the program left, so the program must have left it.
+          // Revision 7, R18. Before it HALT and the implicit halt waited
+          // for the queue and the other three went straight on - only an
+          // image that bypassed the loader reaches those three - and no
+          // control code could be in flight when the block ended.
+          if (q_n == 2'd0 && pipe_idle) begin
+            lane_cursor <= '0;
+            slot_cursor <= '0;
+            as_fill <= '0; as_strb <= '0; as_data <= '0;
+            drain_last <= 1'b0;
+            wr_addr <= d_q + dep_off;
+            wr_beats_left <= ((dep_elems << esz_sh)
+                              + 32'(BEAT_BYTES) - 32'd1) >> 5;
+            wr_stream_on <= 1'b1;
+            wr_bresp_left <= '0;
+            m_wr_bready <= 1'b1;
+            dr_v0 <= 1'b0; dr_v1 <= 1'b0;
+            dr_issued <= 1'b0;
+            dr_ilane <= '0; dr_islot <= '0; dr_ifill <= '0;
+            if (h_maxdep == 0)
+              st <= S_CNT_SETUP;
+            else begin
+              db_raddr <= DBA'(0);
+              st <= S_DRAIN_RUN;
+            end
           end
         end
 
@@ -3459,29 +3540,141 @@ module cft_seq #(
       // until taken, and is re-made for the next beat the cycle it is.
       // A held on a dependent beat (raw_hold) is simply a cycle A put
       // nothing on the bus: a bubble, drained like any other beat.
+      //
+      // Revision 7, R18: a beat at F is now one of three things. An ALU
+      // beat or an LDL beat FIRES - the LDL's value as IOR(v, v) with its
+      // flag enable off - with the row of `active` it is firing under.
+      // A DEPOSIT, SETACT or store beat ACTS here, on its own beat's row,
+      // and never reaches the array. An LDX beat forms its scratch
+      // address here and fires two steps on, at H. Everything F does is
+      // in program order, one beat a step, which is what makes a
+      // SETACT's narrowing visible to exactly the beats after it.
       if (!issue_hold) begin
-        pb_v   <= (st == S_ALU_ISSUE) && !raw_hold;
-        pb_op  <= c_op;
-        pb_rnd <= c_rnd;
-        pb_ka  <= c_ka; pb_kb <= c_kb; pb_kc <= c_kc;
+        pb_v    <= (st == S_ISSUE) && !a_hold;
+        pb_op   <= c_op;
+        pb_rnd  <= c_rnd;
+        pb_ka   <= c_ka; pb_kb <= c_kb; pb_kc <= c_kc;
+        pb_ctrl <= c_ctrl;
+        pb_bt   <= bt;
+        pb_slot <= c_imm[SCRSW-1:0];
         pb_kidx_a <= k_idx_a; pb_kidx_b <= k_idx_b; pb_kidx_c <= k_idx_c;
-        pf_v   <= pb_v;
-        pf_op  <= pb_op;
-        pf_rnd <= pb_rnd;
-        pf_ka  <= pb_ka; pf_kb <= pb_kb; pf_kc <= pb_kc;
-        pf_aa  <= rf_raddr_a; pf_ab <= rf_raddr_b; pf_ac <= rf_raddr_c;
-        if (pf_v) begin
+        pf_v    <= pb_v;
+        pf_op   <= pb_op;
+        pf_rnd  <= pb_rnd;
+        pf_ka   <= pb_ka; pf_kb <= pb_kb; pf_kc <= pb_kc;
+        pf_ctrl <= pb_ctrl;
+        pf_bt   <= pb_bt;
+        pf_slot <= pb_slot;
+        pf_aa   <= rf_raddr_a; pf_ab <= rf_raddr_b; pf_ac <= rf_raddr_c;
+        // an LDX's G and H: the address F put on the scratch's read
+        // port is read at G, and what came back fires at H
+        pg_v    <= pf_ldx;
+        pg_bt   <= pf_bt;
+        pg_oor  <= scr_oor_bk;
+        ph_v    <= pg_v;
+        ph_bt   <= pg_bt;
+        ph_oor  <= pg_oor;
+        if (pf_v && !pf_ctrl) begin
           al_valid <= 1'b1;
           al_op <= pf_op;
           al_rnd <= pf_rnd;
           al_a <= pf_ka ? kq_a : op_a;
           al_b <= pf_kb ? kq_b : op_b;
           al_c <= pf_kc ? kq_c : op_c;
+          al_row <= bt_act;
+          al_fen <= 1'b1;
+        end
+        if (pf_v && pf_ctrl) begin
+          case (pf_op)
+            // A load: v through the array, bit for bit, as IOR(v, v).
+            // The scratch's read landed with the file's (A put the
+            // address out), so the value is on the bus now.
+            C_LDL: begin
+              al_valid <= 1'b1;
+              al_op <= OP_IOR;
+              al_rnd <= pf_rnd;
+              al_a <= scr_rdata;
+              al_b <= scr_rdata;
+              al_c <= '0;
+              al_row <= bt_act;
+              al_fen <= 1'b0;
+            end
+            // An indexed load's slot is its rb, which is on the bus
+            // now: the address goes to the scratch's read port, and the
+            // value fires at H. R8's report is taken here, where rb is,
+            // under this beat's row - the row it will fire with, since
+            // nothing after it can reach F before it reaches H.
+            C_LDX: begin
+              scr_raddr <= scr_addr_fn(scr_slot, pf_bt, wpe_sh);
+              if (|(bt_wwe & scr_oor_bk))
+                scr_rng_q <= 1'b1;
+            end
+            // A store is a register write for P3's purposes, so it takes
+            // exactly the register file's per-lane mask - less any lane
+            // R8 suppressed, whose store does not land anywhere rather
+            // than landing on the slot the modulo would name. The value
+            // is F's forwarded operand, as an ALU operand's is.
+            C_STL, C_STX: begin
+              scr_we    <= bt_wwe & ~scr_oor_bk;
+              scr_waddr <= scr_addr_fn(scr_slot, pf_bt, wpe_sh);
+              scr_wdata <= op_a;
+              if (|(bt_wwe & scr_oor_bk))
+                scr_rng_q <= 1'b1;
+            end
+            // Each active, in-capacity lane of the beat writes its own
+            // bank set at its own slot; the banks' independent write
+            // addresses are what makes one beat a cycle possible even
+            // after SETACT has left the beat's lanes with divergent
+            // counts. The counts advance once per LANE: only the eight
+            // positions of this beat can move, and the value each moves
+            // to was formed once (bt_cnt_inc), so this is a selection
+            // over constant indices and not 128 counters with a decoder.
+            C_DEPOSIT: begin
+              for (int p = 0; p < WORDS; p = p + 1)
+                if (bt_dep_go[32'(p) >> wpe_sh]) begin
+                  db_we[p] <= 1'b1;
+                  db_waddr[p*DBA +: DBA] <= DBA'(32'(pf_bt) * MAXD +
+                      32'(pick_cnt_fn(bt_cnt, 3'(32'(p) >> wpe_sh))));
+                  db_wdata[p*32 +: 32] <= op_a[p*32 +: 32];
+                end
+              for (int b = 0; b < NBEATS; b = b + 1)
+                for (int q = 0; q < WORDS; q = q + 1)
+                  if (b == 32'(pf_bt[NBSH-1:0]) && bt_dep_go[q])
+                    dcnt[(b*WORDS + q)*CW +: CW] <= bt_cnt_inc[q*CW +: CW];
+              if (|bt_dep_ovf)
+                dep_ovf_q <= 1'b1;
+            end
+            // Eight magnitude tests, one per lane position in the beat,
+            // on the operand as the BANK read it (SETACT's ra waits under
+            // R14's rule, so the bank has it): narrowing only, so a lane
+            // already out stays out.
+            C_SETACT: begin
+              for (int b = 0; b < NBEATS; b = b + 1)
+                for (int q = 0; q < WORDS; q = q + 1)
+                  if (b == 32'(pf_bt[NBSH-1:0]) && 32'(q) < 32'(lpb) &&
+                      bt_act[q])
+                    active[b*WORDS + q] <= sa_nz[q];
+            end
+            default: ;
+          endcase
+        end
+        // An LDX's value, two steps after its F. Never in the same step
+        // as an F fire: gap_hold keeps every other beat two steps behind
+        // an LDX's, and two LDXs follow one another at a step apart.
+        if (ph_v) begin
+          al_valid <= 1'b1;
+          al_op <= OP_IOR;
+          al_rnd <= 3'd0;
+          al_a <= zero_oor_fn(scr_rdata, ph_oor);
+          al_b <= zero_oor_fn(scr_rdata, ph_oor);
+          al_c <= '0;
+          al_row <= h_act;
+          al_fen <= 1'b0;
         end
       end
       // the read register holds imem[pc + 1] from the cycle after an
       // issue begins until the cycle pc moves
-      nxt_ok <= (st == S_ALU_ISSUE) &&
+      nxt_ok <= (st == S_ISSUE) &&
                 !(!rd_hold && bt == 6'({1'b0, nb_blk} - 6'd1));
 
       // ---- retire: the array's results, whatever state the machine is
@@ -3492,7 +3685,10 @@ module cft_seq #(
         rf_waddr <= {q_rd0, wb_bt[NBSH-1:0]};
         rf_wdata <= al_d;
         rf_wwe <= wb_wwe;
-        flags_q <= flags_q | wb_flags_or;
+        // the lanes that were active when this beat FIRED (fr), and its
+        // flags only if it is arithmetic (fq): a load raises none
+        if (fq[LATENCY-1])
+          flags_q <= flags_q | wb_flags_or;
         wb_bt <= wb_pop ? 6'd0 : wb_bt + 6'd1;
       end
       // the queue: a pop moves everything down, and an admission lands
@@ -3514,8 +3710,10 @@ module cft_seq #(
       if (q_push || wb_pop)
         q_n <= q_after + {1'b0, q_push};
       // the admitted instruction's producers, positions from the head;
-      // a pop moves them down, and the head popping releases the operand
-      if (q_push) begin
+      // a pop moves them down, and the head popping releases the operand.
+      // Every admission sets them (R18: a control code has producers too,
+      // and most control codes take no queue slot of their own).
+      if (adm_take) begin
         dep_v_a <= dep_n_a; dep_pos_a <= dep_p_a;
         dep_v_b <= dep_n_b; dep_pos_b <= dep_p_b;
         dep_v_c <= dep_n_c; dep_pos_c <= dep_p_c;
