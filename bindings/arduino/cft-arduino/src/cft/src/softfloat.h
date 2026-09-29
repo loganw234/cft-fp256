@@ -247,6 +247,14 @@ void cft_sf_qnan(const cft_fmt_desc *f, cft_bn *out);
 void cft_sf_inf(const cft_fmt_desc *f, int sign, cft_bn *out);
 void cft_sf_zero(const cft_fmt_desc *f, int sign, cft_bn *out);
 
+/* 754-2019 9.5's augmentedAddition for one lane: r into *vr, e into *ve,
+ * its flags OR-ed into *acc. 0, or 1 on a broken invariant. Defined in
+ * augmented.c, and so absent from a -DCFT_NO_AUGMENTED build - where
+ * program.c neither calls it nor publishes the feature that needs it. */
+int cft_aug_add_lane(const cft_fmt_desc *f, const cft_bn *xa,
+                     const cft_bn *xb, cft_bn *vr, cft_bn *ve,
+                     uint32_t *acc);
+
 /* ---------------------------------------------------------------
  * The status word's one seam (ABI 0.7)
  *

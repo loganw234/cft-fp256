@@ -45,7 +45,9 @@ line is a mnemonic (with an optional rounding suffix) followed by the
 destination and the operands the opcode reads, in `ra, rb, rc` field
 order; the control lines are `repeat N` / `endrep`, `deposit rA`,
 `setact rA`, `actall`, `halt`, `stl rA, SLOT`, `ldl rD, SLOT`,
-`stx rA, rB` and `ldx rD, rB`.
+`stx rA, rB` and `ldx rD, rB`. Revision 8 (proposed, 2026-09-29) adds
+`augadd rD, rA, rB` and `augerr rD, rA, rB`, and an optional signed
+post-step on the indexed pair: `stx rA, rB, STEP`, `ldx rD, rB, STEP`.
 """
 
 import hashlib
@@ -108,11 +110,23 @@ SCRATCH_IO_MAX = 0xFFFF
 
 (HALT, REPEAT, ENDREP, DEPOSIT, SETACT, ACTALL,
  STL, LDL, STX, LDX) = range(10)
+# Revision 8 (proposed, 2026-09-29; docs/SEQUENCER.md): the two halves of
+# 754-2019 9.5's augmentedAddition - `augadd` keeps the sum rounded
+# roundTiesTowardZero, `augerr` the exact error.
+AUGADD, AUGERR = 10, 11
 CTRL_NAMES = {HALT: "halt", REPEAT: "repeat", ENDREP: "endrep",
               DEPOSIT: "deposit", SETACT: "setact", ACTALL: "actall",
-              STL: "stl", LDL: "ldl", STX: "stx", LDX: "ldx"}
+              STL: "stl", LDL: "ldl", STX: "stx", LDX: "ldx",
+              AUGADD: "augadd", AUGERR: "augerr"}
 CTRL_CODES = {v: k for k, v in CTRL_NAMES.items()}
 SCRATCH_CODES = (STL, LDL, STX, LDX)
+
+# Revision 8's post-step on STX and LDX: a signed twelve-bit field in
+# imm[11:0], applied to rb after the access. imm[23:12] stays unread.
+STEP_CODES = (STX, LDX)
+STEP_BITS = 12
+STEP_MASK = (1 << STEP_BITS) - 1
+STEP_MIN, STEP_MAX = -(1 << (STEP_BITS - 1)), (1 << (STEP_BITS - 1)) - 1
 
 # What each control code READS, which is the whole of its encoding
 # rule: the register fields it names, and whether imm[23:0] is a
@@ -135,6 +149,9 @@ CTRL_USE = {
     LDL:     (("rd",),      True),      # rd := scratch[imm]
     STX:     (("ra", "rb"), False),     # scratch[rb mod D] := ra
     LDX:     (("rd", "rb"), False),     # rd := scratch[rb mod D]
+    # revision 8: rd := r or e of augmentedAddition(ra, rb)
+    AUGADD:  (("rd", "ra", "rb"), False),
+    AUGERR:  (("rd", "ra", "rb"), False),
 }
 
 # Which byte of `imm` carries each operand's constant index under `kx`,
@@ -371,14 +388,43 @@ def ldl(rd, slot):
     return encode(LDL, rd=rd, ctrl=True, imm=_slot_imm(slot))
 
 
-def stx(ra, rb):
-    """`scratch[rb mod SCRATCH_D] := ra`. imm[23:0] must be zero."""
-    return encode(STX, ra=ra, rb=rb, ctrl=True)
+def _step_imm(step):
+    if not STEP_MIN <= step <= STEP_MAX:
+        raise AsmError(f"step {step} outside {STEP_MIN}..{STEP_MAX}: a "
+                       f"post-step is a signed {STEP_BITS}-bit field, "
+                       f"imm[{STEP_BITS - 1}:0]")
+    return step & STEP_MASK
 
 
-def ldx(rd, rb):
-    """`rd := scratch[rb mod SCRATCH_D]`. imm[23:0] must be zero."""
-    return encode(LDX, rd=rd, rb=rb, ctrl=True)
+def step_of(d):
+    """The signed post-step of a decoded STX/LDX (revision 8), else 0."""
+    if not d["ctrl"] or d["op"] not in STEP_CODES:
+        return 0
+    s = d["imm"] & STEP_MASK
+    return s - (1 << STEP_BITS) if s >> (STEP_BITS - 1) else s
+
+
+def stx(ra, rb, step=0):
+    """`scratch[rb mod SCRATCH_D] := ra`, then `rb += step` (revision 8)
+    when the step is not zero. imm[23:12] must be zero."""
+    return encode(STX, ra=ra, rb=rb, ctrl=True, imm=_step_imm(step))
+
+
+def ldx(rd, rb, step=0):
+    """`rd := scratch[rb mod SCRATCH_D]`, then `rb += step` (revision 8)
+    - unless rd is rb, where the loaded value wins the register and the
+    step is discarded (CORE-V's rule). imm[23:12] must be zero."""
+    return encode(LDX, rd=rd, rb=rb, ctrl=True, imm=_step_imm(step))
+
+
+def augadd(rd, ra, rb):
+    """`rd := r`, augmentedAddition(ra, rb)'s sum (revision 8)."""
+    return encode(AUGADD, rd=rd, ra=ra, rb=rb, ctrl=True)
+
+
+def augerr(rd, ra, rb):
+    """`rd := e`, augmentedAddition(ra, rb)'s exact error (revision 8)."""
+    return encode(AUGERR, rd=rd, ra=ra, rb=rb, ctrl=True)
 
 
 def infer_scratch_depth(insns, scratch_io=0, flags=0):
@@ -512,6 +558,13 @@ class Image:
                         want.add("REGS32")
                 if d["op"] in SCRATCH_CODES:
                     want.add("SCRATCH")
+                # Revision 8: CAPS2[11] for the augmentedAddition pair,
+                # CAPS2[12] for a step that is not zero (a zero step is
+                # the old instruction and needs nothing new).
+                if d["op"] in (AUGADD, AUGERR):
+                    want.add("AUGADD")
+                if step_of(d):
+                    want.add("SCRATCH_STEP")
                 continue
             if d["kx"]:
                 want.add("kx")
@@ -528,7 +581,8 @@ class Image:
         if self.scratch_io_declared:
             want.add("SCRATCH_IO")
         return [f for f in ("kx", "REGS32", "BANK_PTR", "KX9", "IMUL",
-                            "SCRATCH", "SCRATCH_IO")
+                            "SCRATCH", "SCRATCH_IO", "AUGADD",
+                            "SCRATCH_STEP")
                 if f in want]
 
     # -- validation ----------------------------------------------------
@@ -626,14 +680,17 @@ class Image:
                     f"it must be zero")
         if code != REPEAT:
             allowed = SLOT_MASK if slot else 0
+            if code in STEP_CODES:
+                allowed |= STEP_MASK            # revision 8's post-step
             for field in regs:
                 allowed |= 1 << RHI_SHIFT[field]
             if d["imm"] & ~allowed & 0xFFFFFFFF:
                 raise AsmError(
                     f"[{pc}] {name} does not read imm beyond "
-                    f"{'its slot and ' if slot else ''}its register high "
-                    f"bit(s), so the rest of imm must be zero and imm is "
-                    f"{d['imm']:#010x}")
+                    f"{'its slot and ' if slot else ''}"
+                    f"{'its step and ' if code in STEP_CODES else ''}"
+                    f"its register high bit(s), so the rest of imm must be "
+                    f"zero and imm is {d['imm']:#010x}")
         if slot:
             v = d["imm"] & SLOT_MASK
             if v >= self.scratch_depth:
@@ -906,6 +963,26 @@ class _Asm:
         v = _parse_uint(tok, "a scratch slot")
         return v
 
+    def step(self, tok):
+        """A post-step operand (revision 8) -> a signed int: ONE optional
+        sign, then decimal or 0x hex - `+1`, `-1`, `-0x10`, `3`. Refused
+        by name outside the twelve-bit field, with a second sign (`+-1`,
+        `--1`), and where it names a register, so `ldx r3, r4, r5` is a
+        message rather than a step."""
+        body = tok[1:] if tok[:1] in "+-" else tok
+        if body[:1] in ("+", "-"):
+            self.fail(f"{tok!r} carries two signs; a post-step is one "
+                      f"optional sign and a number")
+        if _REGNAME.match(body) or body.lower() in self.reg_names:
+            self.fail(f"{tok} is a register, and a post-step is a signed "
+                      f"number")
+        v = _parse_uint(body, "a post-step")
+        v = -v if tok.startswith("-") else v
+        if not STEP_MIN <= v <= STEP_MAX:
+            self.fail(f"step {v} outside {STEP_MIN}..{STEP_MAX}: a post-step "
+                      f"is a signed {STEP_BITS}-bit field")
+        return v
+
     def operand(self, tok):
         """-> (value, is_const). A constant NAME sets that operand's k
         bit; anything else is a register."""
@@ -1139,12 +1216,25 @@ class _Asm:
                           f"{SLOT_MASK}")
             self.insns.append(stl(r, s) if code == STL else ldl(r, s))
         elif code in (STX, LDX):
-            if len(args) != 2:
+            if len(args) not in (2, 3):
                 self.fail(f"{CTRL_NAMES[code]} takes two registers - the "
-                          f"value and the index")
+                          f"value and the index - and, since revision 8, "
+                          f"an optional signed post-step")
             r0 = self.reg(args[0])
             r1 = self.reg(args[1])
-            self.insns.append(stx(r0, r1) if code == STX else ldx(r0, r1))
+            step = self.step(args[2]) if len(args) == 3 else 0
+            try:
+                self.insns.append(stx(r0, r1, step) if code == STX
+                                  else ldx(r0, r1, step))
+            except AsmError as exc:
+                self.fail(str(exc))
+        elif code in (AUGADD, AUGERR):
+            if len(args) != 3:
+                self.fail(f"{CTRL_NAMES[code]} takes three registers - the "
+                          f"destination and the two addends")
+            rd, ra, rb = (self.reg(t) for t in args)
+            self.insns.append(augadd(rd, ra, rb) if code == AUGADD
+                              else augerr(rd, ra, rb))
         else:
             if args:
                 self.fail(f"{CTRL_NAMES[code]} takes no operands")
@@ -1152,6 +1242,15 @@ class _Asm:
 
     def do_alu(self, mnemonic, args):
         name, *suffixes = mnemonic.split(".")
+        if name in CTRL_CODES:
+            # `augerr.rtz`, `ldx.kx`: a control mnemonic with a suffix.
+            # Say what it is rather than that it is no opcode.
+            why = (" - 754-2019 9.5 fixes its rounding (roundTiesTowardZero), "
+                   "so no attribute can be written"
+                   if name in ("augadd", "augerr")
+                   and any(s != "kx" for s in suffixes) else "")
+            self.fail(f"{name} is a control instruction and takes no "
+                      f"suffix{why}")
         rnd = sf.RND_RNE
         force_kx = False
         for suffix in suffixes:
@@ -1335,10 +1434,16 @@ def disassemble(image) -> str:
                 out.append(f"{pad}{name} r{d['ra']}, {d['imm'] & SLOT_MASK}")
             elif code == LDL:
                 out.append(f"{pad}{name} r{d['rd']}, {d['imm'] & SLOT_MASK}")
-            elif code == STX:
-                out.append(f"{pad}{name} r{d['ra']}, r{d['rb']}")
-            elif code == LDX:
-                out.append(f"{pad}{name} r{d['rd']}, r{d['rb']}")
+            elif code in (STX, LDX):
+                # A step is written only when it is not zero, so every
+                # image from before revision 8 disassembles as it did.
+                step = step_of(d)
+                first = d["ra"] if code == STX else d["rd"]
+                out.append(f"{pad}{name} r{first}, r{d['rb']}"
+                           + (f", {step:+d}" if step else ""))
+            elif code in (AUGADD, AUGERR):
+                out.append(f"{pad}{name} r{d['rd']}, r{d['ra']}, "
+                           f"r{d['rb']}")
             else:
                 out.append(f"{pad}{name}")
             continue

@@ -1346,11 +1346,16 @@ def test_scratch_refusals():
             seq.Program(fmt, [word, seq.halt()])
     # ...and the highest legal one is not refused
     seq.Program(fmt, [seq.stl(0, seq.SCRATCH_D - 1), seq.halt()])
-    # imm[23:0] is read by nothing on the indexed forms
+    # imm[23:12] is read by nothing on the indexed forms. This was
+    # imm=1 - all of imm[23:0] was unread - until revision 8 (proposed,
+    # 2026-09-29) took imm[11:0] for the post-step, so the example moved
+    # to the lowest bit that stays reserved, as seq_check's
+    # kx_reserved_byte moved when revision 2 took imm[27:24]. That the
+    # step is legal is test_seq_rev8.py's.
     with pytest.raises(seq.ProgramError,
                        match="sets a bit it does not read"):
         seq.Program(fmt, [seq.encode(seq.STX, ra=1, rb=2, ctrl=True,
-                                     imm=1), seq.halt()])
+                                     imm=1 << 12), seq.halt()])
     # fields no scratch code reads
     with pytest.raises(seq.ProgramError, match="does not read rc"):
         seq.Program(fmt, [seq.encode(seq.STL, ra=1, rc=2, ctrl=True),

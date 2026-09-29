@@ -340,7 +340,9 @@ first draft of `resume-fp64.cfta`, whose slots are now `STATE_V` and
 The encoding rule for all four is one sentence, and both
 implementations state it as a table rather than as a condition per
 code: the register fields the code names, plus `imm[23:0]` on the two
-static forms, and every other field zero - the other register fields,
+static forms and, under revision 8's CAPS2[12], `imm[11:0]`'s step on
+the two indexed forms (docs/SEQUENCER.md R22), and every other field
+zero - the other register fields,
 their high bits in `imm[27:24]`, `rnd`, `ka`/`kb`/`kc`, `kx` and the
 rest of `imm`. Neither a load nor a store is arithmetic, so there is
 no rounding attribute and no constant operand on any of them; and none
@@ -482,3 +484,40 @@ since landed (`seq.py`'s `STL, LDL, STX, LDX`, `SCRATCH_D` and
 
 This is the shape the round before used for the `BANK_EXT` path, which
 landed the same way.
+
+## Revision 8 in the text form (proposed, 2026-09-29)   **the reference assembler only**
+
+*docs/SEQUENCER.md's "Revision 8 (proposed, 2026-09-29)" is the
+contract; this is its spelling.*
+
+    augadd rD, rA, rB        rD := r of augmentedAddition(rA, rB)
+    augerr rD, rA, rB        rD := e, its exact error
+    stx rA, rB, STEP         scratch[rB] := rA, then rB := rB + STEP
+    ldx rD, rB, STEP         rD := scratch[rB], then rB := rB + STEP
+                             (unless rD is rB: the loaded value wins)
+
+`STEP` is a signed number - at most one sign, then decimal or `0x` hex:
+`+1`, `-1`, `-0x10`, `3` - in -2048..2047, the twelve bits of imm[11:0].
+A second sign (`+-1`, `--1`) and a register there are each refused by
+name. `ldx rX, rX, STEP` assembles, and keeps what it loads: the step is
+discarded, as CORE-V's post-increment loads define it. Omitted, the step
+is zero, which is the instruction as it always was: `ldx r3, r4, 0` and
+`ldx r3, r4` are the same bytes, and the disassembler writes a step back
+only when it is not zero, so every image from before this revision reads
+back as it did. Operands are separated by commas and white space in any
+run, on every line and in both assemblers, so a trailing comma is an
+empty operand that is dropped: `ldx r3, r4,` is `ldx r3, r4`, step zero,
+as `stx r3, r4,` assembled before this revision. The pair takes three
+registers and nothing else - no rounding suffix, because 754-2019 9.5
+fixes the rounding (`augerr.rtz` is refused saying so), and no constant,
+because no control code reads the bank. asm.py's `info()` - the reference for what
+`cft-asm -i` prints - names the features an image needs: `AUGADD` for
+the pair and `SCRATCH_STEP` for a step that is not zero.
+
+`python/cft_golden/asm.py` reads and writes all four forms, and
+`python/tests/test_seq_rev8.py` holds its validator to `seq.py`'s over
+the new codes' whole field space. `host/tools/cft-asm.c` does NOT read
+them yet: nothing it assembles uses them - the committed `.cfta` files
+and `programs/check.py`'s own generator draw neither - so no gate turns
+red, and teaching it is the follow-up for whoever takes revision 8 to the
+tools.

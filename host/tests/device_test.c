@@ -866,7 +866,9 @@ static uint64_t seq_alu_kx9(unsigned op, unsigned rd, unsigned ia,
 
 /* The four scratch codes. STL reads ra and imm[23:0]; LDL writes rd
  * and reads imm[23:0]; STX reads ra and rb; LDX writes rd and reads
- * rb, and for the indexed pair imm[23:0] must be zero. Registers are
+ * rb. For the indexed pair imm[11:0] is the post-step since revision 8
+ * (proposed 2026-09-29; zero is the unstepped instruction, which is all
+ * these two helpers write) and imm[23:12] must be zero. Registers are
  * five bits, with the fifth of each in its own bit of imm[27:24]. */
 enum { SEQ_C_STL = 6, SEQ_C_LDL = 7, SEQ_C_STX = 8, SEQ_C_LDX = 9 };
 
@@ -1198,6 +1200,39 @@ static cft_status try_load_scratch(cft_device *dev, cft_format fmt,
     return st;
 }
 
+/* Revision 8 (proposed 2026-09-29, docs/SEQUENCER.md): `which` 0 is the
+ * recommended augmentedAddition pair, `augerr r3, r0, r1; augadd r0, r0,
+ * r1` (control codes 11 and 10); `which` 1 is a stepped pair, `stx r0,
+ * r1, +1; ldx r4, r1, -1` (imm[11:0], the post-step). Only the feature
+ * decides whether the loader takes either; the instruction it refuses
+ * FIRST is instruction 0, AUGERR or STX, which is what the refusal must
+ * name beside the bit. */
+static cft_status try_load_rev8(cft_device *dev, cft_format fmt, int which)
+{
+    uint8_t img[64];
+    uint64_t ins[4];
+    cft_program *prog = NULL;
+    cft_status st;
+    size_t bytes;
+
+    if (which == 0) {
+        ins[0] = (uint64_t)11u | ((uint64_t)3u << 8) | ((uint64_t)0u << 12) |
+                 ((uint64_t)1u << 16) | ((uint64_t)1 << 31);
+        ins[1] = (uint64_t)10u | ((uint64_t)0u << 8) | ((uint64_t)0u << 12) |
+                 ((uint64_t)1u << 16) | ((uint64_t)1 << 31);
+    } else {
+        ins[0] = seq_stx(0, 1) | ((uint64_t)0x001u << 32);      /* +1 */
+        ins[1] = seq_ldx(4, 1) | ((uint64_t)0xFFFu << 32);      /* -1 */
+    }
+    ins[2] = seq_ctrl(3, which ? 4 : 0, 0);      /* deposit */
+    ins[3] = seq_ctrl(0, 0, 0);                  /* halt */
+    bytes = seq_image(img, fmt, ins, 4, NULL, 0, 1);
+    st = cft_program_load(dev, img, bytes, &prog);
+    if (st == CFT_OK)
+        cft_program_free(prog);
+    return st;
+}
+
 /* An image asking for revision 4's strict scratch range. Only flags[2]
  * decides whether the loader takes it; the indexed pair is here because
  * that is what the flag is ABOUT, and a test image that did not use the
@@ -1440,20 +1475,22 @@ static void check_caps_enforced(cft_device *dev, const char *who)
     /* seq_features is CAPS[7:4] in its low nibble, CAPS[31:28] - the
      * ALU extensions, IMUL first - in the next one (cft.h, 2026-09-07),
      * CAPS2[7:4] in the third since revision 3, CAPS2[8] on bit 12
-     * since ABI 0.13 (CFT_FEAT_REDUCE_SEG), and CAPS2[10:9] on bits 14
-     * and 13 since ABI 0.14 (INDEXED, LANE_MASK). Anything above those
-     * fifteen bits is a decode fault, not a feature. */
+     * since ABI 0.13 (CFT_FEAT_REDUCE_SEG), CAPS2[10:9] on bits 14
+     * and 13 since ABI 0.14 (INDEXED, LANE_MASK), and CAPS2[12:11] on
+     * bits 16 and 15 since revision 8 (AUGADD, SCRATCH_STEP; proposed
+     * 2026-09-29, published by the software backend). Anything above
+     * those seventeen bits is a decode fault, not a feature. */
     checks++;
-    if (c.seq_features & ~0x7FFFu) {
+    if (c.seq_features & ~0x1FFFFu) {
         printf("  FAIL %s: seq_features 0x%lx has bits outside CAPS[7:4], "
-               "CAPS[31:28] and CAPS2[10:4]\n", who,
+               "CAPS[31:28] and CAPS2[12:4]\n", who,
                (unsigned long)c.seq_features);
         failures++;
     }
     /* Every bit cft.h defines, SCRATCH_STRICT and SCALAR included since
      * 2026-09-24 - the line used to skip both, so a word that carried
      * them printed as though it did not. */
-    printf("    features:%s%s%s%s%s%s%s%s%s%s%s%s   max_scratch %lu\n",
+    printf("    features:%s%s%s%s%s%s%s%s%s%s%s%s%s%s   max_scratch %lu\n",
            (c.seq_features & CFT_SEQ_FEAT_WIDE_CONST) ? " kx" : "",
            (c.seq_features & CFT_SEQ_FEAT_REGS32)     ? " REGS32" : "",
            (c.seq_features & CFT_SEQ_FEAT_BANK_PTR)   ? " BANK_PTR" : "",
@@ -1467,6 +1504,9 @@ static void check_caps_enforced(cft_device *dev, const char *who)
            (c.seq_features & CFT_FEAT_REDUCE_SEG)     ? " REDUCE_SEG" : "",
            (c.seq_features & CFT_SEQ_FEAT_INDEXED)    ? " INDEXED" : "",
            (c.seq_features & CFT_SEQ_FEAT_LANE_MASK)  ? " LANE_MASK" : "",
+           (c.seq_features & CFT_SEQ_FEAT_AUGADD)     ? " AUGADD" : "",
+           (c.seq_features & CFT_SEQ_FEAT_SCRATCH_STEP)
+                                                   ? " SCRATCH_STEP" : "",
            (unsigned long)c.max_scratch);
 
     /* Revision 2's two feature bits, held to the same invariant as
@@ -1630,6 +1670,65 @@ static void check_caps_enforced(cft_device *dev, const char *who)
         }
         printf("    SCRATCH_STRICT absent, a strict image -> %s: %s\n",
                cft_strerror(st), cft_last_error());
+    }
+
+    /* Revision 8's two (proposed 2026-09-29), on exactly those terms:
+     * published means the image loads, absent means it is refused with
+     * CFT_ERR_UNSUPPORTED AND the refusal names the instruction and the
+     * bit. The software backend publishes both; every tile built so far
+     * reads CAPS2[11] and [12] as zero, so a card leg is where the
+     * absent branch fires - a tile that would decode AUGERR as HALT, and
+     * one that would access without stepping. The stepped leg needs a
+     * scratch to step through, and says so where there is none. */
+    {
+        static const struct {
+            int which; uint32_t bit; const char *macro, *instr, *what;
+        } r8[2] = {
+            { 0, CFT_SEQ_FEAT_AUGADD, "CFT_SEQ_FEAT_AUGADD", "AUGERR",
+              "the augmentedAddition pair" },
+            { 1, CFT_SEQ_FEAT_SCRATCH_STEP, "CFT_SEQ_FEAT_SCRATCH_STEP",
+              "STX with a post-step of +1", "a stepped STX/LDX" }
+        };
+        int k;
+        for (k = 0; k < 2; k++) {
+            if (r8[k].which == 1 &&
+                !(c.seq_features & CFT_SEQ_FEAT_SCRATCH)) {
+                not_here(NH_OTHER, "TESTED", "    SCRATCH_STEP",
+                         "no scratch memory, so a step has nothing to walk");
+                continue;
+            }
+            st = try_load_rev8(dev, fmt, r8[k].which);
+            checks++;
+            if (c.seq_features & r8[k].bit) {
+                if (st != CFT_OK) {
+                    printf("  FAIL %s: %s is published and %s was refused: "
+                           "%s (%s)\n", who, r8[k].macro, r8[k].what,
+                           cft_strerror(st), cft_last_error());
+                    failures++;
+                } else {
+                    printf("    %s published, %s loads\n", r8[k].macro,
+                           r8[k].what);
+                }
+            } else if (st == CFT_OK) {
+                printf("  FAIL %s: %s is NOT published and %s was accepted "
+                       "- this device would compute something else\n", who,
+                       r8[k].macro, r8[k].what);
+                failures++;
+            } else {
+                checks++;
+                if (st != CFT_ERR_UNSUPPORTED ||
+                    !strstr(cft_last_error(), r8[k].macro) ||
+                    !strstr(cft_last_error(), r8[k].instr)) {
+                    printf("  FAIL %s: %s without %s was refused (%s) "
+                           "without naming %s and the bit: %s\n", who,
+                           r8[k].what, r8[k].macro, cft_strerror(st),
+                           r8[k].instr, cft_last_error());
+                    failures++;
+                }
+                printf("    %s absent, %s -> %s: %s\n", r8[k].macro,
+                       r8[k].what, cft_strerror(st), cft_last_error());
+            }
+        }
     }
 
     /* KX9 is asked with an index of 256 and a bank of 257, so what
@@ -2763,17 +2862,20 @@ static void check_program_refusals(cft_device *dev, cft_format fmt)
         bytes = seq_image(img, fmt, s, 4, NULL, 0, 1);
         refusal(dev, fmt, "ra on an LDL", img, bytes,
                 CFT_ERR_INVALID_ARGUMENT, NULL);
-        /* the indexed forms take their slot from rb, so imm[23:0] is a
-         * field neither of them reads */
-        s[0] = seq_stx(0, 1) | ((uint64_t)5u << 32);
+        /* the indexed forms take their slot from rb, so imm[23:12] is a
+         * field neither of them reads. It was imm[23:0], and the bit set
+         * here was imm = 5, until revision 8 (proposed 2026-09-29) made
+         * imm[11:0] their post-step - 5 is a legal step now - so it moved
+         * to imm[12], the lowest bit that stays reserved. */
+        s[0] = seq_stx(0, 1) | ((uint64_t)1u << (32 + 12));
         s[1] = seq_ldx(4, 1);
         bytes = seq_image(img, fmt, s, 4, NULL, 0, 1);
-        refusal(dev, fmt, "imm[23:0] on an STX", img, bytes,
+        refusal(dev, fmt, "imm[23:12] on an STX", img, bytes,
                 CFT_ERR_INVALID_ARGUMENT, NULL);
         s[0] = seq_stx(0, 1);
-        s[1] = seq_ldx(4, 1) | ((uint64_t)5u << 32);
+        s[1] = seq_ldx(4, 1) | ((uint64_t)1u << (32 + 12));
         bytes = seq_image(img, fmt, s, 4, NULL, 0, 1);
-        refusal(dev, fmt, "imm[23:0] on an LDX", img, bytes,
+        refusal(dev, fmt, "imm[23:12] on an LDX", img, bytes,
                 CFT_ERR_INVALID_ARGUMENT, NULL);
         /* and no scratch code carries a rounding attribute or a k
          * flag: neither is arithmetic */

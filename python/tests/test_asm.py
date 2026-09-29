@@ -744,10 +744,13 @@ def test_a_scratch_code_is_not_arithmetic(line, bit, what):
 
 @pytest.mark.parametrize("line", ["stx r3, r4", "ldx r3, r4"])
 def test_an_indexed_access_carries_no_slot(line):
-    """STX and LDX take the slot from rb, so imm[23:0] is read by
+    """STX and LDX take the slot from rb, so imm[23:12] is read by
     nothing and a stray bit there would be a second encoding of the
-    same instruction."""
-    _tamper(SCR + line + "\nhalt\n", lambda w: w | (1 << 32),
+    same instruction. (imm[23:0] until revision 8 - proposed,
+    2026-09-29 - made imm[11:0] the post-step; the flipped bit moved from
+    imm[0] to imm[12], the lowest that stays reserved. The step itself is
+    test_seq_rev8.py's.)"""
+    _tamper(SCR + line + "\nhalt\n", lambda w: w | (1 << (32 + 12)),
             "does not read imm")
 
 

@@ -324,6 +324,18 @@ static int aug_add_lane(const cft_fmt_desc *f, const cft_bn *xa,
     }
 }
 
+/* augmentedAddition for ONE lane, for the sequencer's revision-8 pair
+ * (program.c's augadd and augerr, docs/SEQUENCER.md "Revision 8"): the
+ * program executor computes THIS function - the one definition, ported
+ * from augmented.py - rather than a second copy of it. Flags are OR-ed
+ * into *acc; 0, or 1 on a broken invariant, as aug_add_lane returns. */
+int cft_aug_add_lane(const cft_fmt_desc *f, const cft_bn *xa,
+                     const cft_bn *xb, cft_bn *vr, cft_bn *ve,
+                     uint32_t *acc)
+{
+    return aug_add_lane(f, xa, xb, vr, ve, acc);
+}
+
 static int aug_mul_lane(const cft_fmt_desc *f, const cft_bn *xa,
                         const cft_bn *xb, cft_bn *vr, cft_bn *ve,
                         uint32_t *acc)

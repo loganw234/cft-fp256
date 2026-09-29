@@ -119,7 +119,14 @@
 
 /* control codes */
 enum { SEQ_HALT = 0, SEQ_REPEAT, SEQ_ENDREP, SEQ_DEPOSIT, SEQ_SETACT,
-       SEQ_ACTALL, SEQ_STL, SEQ_LDL, SEQ_STX, SEQ_LDX };
+       SEQ_ACTALL, SEQ_STL, SEQ_LDL, SEQ_STX, SEQ_LDX,
+       /* revision 8 (proposed 2026-09-29): augmentedAddition's two
+        * halves - see the block above seq_validate */
+       SEQ_AUGADD, SEQ_AUGERR };
+
+/* Revision 8's post-step: imm[11:0] of an STX or LDX, twelve-bit two's
+ * complement. imm[23:12] stays a field nothing reads. */
+#define SEQ_STEP_MASK    0x00000FFFu
 
 /* Indexed constants (`kx`, instruction bit 30). Which byte of `imm`
  * carries each operand's constant index. */
@@ -379,6 +386,104 @@ static cft_status seq_check_operands(const cft_program *p,
     return CFT_OK;
 }
 
+/* ---- revision 8 (proposed 2026-09-29), docs/SEQUENCER.md -----------
+ *
+ * Defined golden-first in python/cft_golden/seq.py; ported here, and held
+ * to it by host/tests/seq_check.py's sixth corpus. Kept in functions of
+ * their own, so that what the rest of this file does is unchanged for
+ * every program that uses neither:
+ *
+ *   augadd rD, rA, rB  (code 10)  rD := r of 754-2019 9.5's
+ *   augerr rD, rA, rB  (code 11)  augmentedAddition(rA, rB), or e -
+ *                                 computed by augmented.c's own lane
+ *                                 function, raising that operation's
+ *                                 flags;
+ *   stx/ldx ..., step              after the access, rb := rb + step
+ *                                 modulo 2^width, the step a signed
+ *                                 twelve-bit imm[11:0], except an LDX
+ *                                 into rb itself, which keeps what it
+ *                                 loaded (CORE-V XCVmem). Zero is the
+ *                                 instruction as it always was. */
+
+/* The signed post-step an STX or LDX carries, or 0 - and 0 for STL and
+ * LDL, whose imm[23:0] is a slot and not a step. */
+static int seq_step(const seq_insn *d)
+{
+    int s;
+    if (!d->ctrl || (d->op != SEQ_STX && d->op != SEQ_LDX))
+        return 0;
+    s = (int)(d->imm & SEQ_STEP_MASK);
+    return (s & 0x800) ? s - 0x1000 : s;
+}
+
+/* augadd and augerr read ra and rb and write rd, five bits each. Every
+ * other field is unread and must be zero: rc and its high bit, rnd
+ * (9.5 fixes the rounding, so no attribute can be spelled), the k flags
+ * and kx (no control code reads the bank), imm[23:0] and imm[31:28]. */
+static int seq_augadd_fields_ok(const seq_insn *d)
+{
+    const uint32_t hi = (1u << (SEQ_REGHI_SHIFT + 0)) |
+                        (1u << (SEQ_REGHI_SHIFT + 1)) |
+                        (1u << (SEQ_REGHI_SHIFT + 2));
+    return !(d->rc || d->rnd || d->ka || d->kb || d->kc || d->kx ||
+             (d->imm & ~hi));
+}
+
+/* An LDX that loads into its own stepped index: both writes would land in
+ * one register, and RISC-V's post-increment loads say which wins (CORE-V
+ * XCVmem: "When same register is used as address and destination (rD ==
+ * rs1) for post-incremented loads, loaded data has highest priority over
+ * incremented address when writing to this same register"). So the
+ * loaded value is kept and the step discarded - rung 2 of Logan's rule.
+ * STX with ra == rb has one register write, the step's, and keeps it. */
+static int seq_step_discarded(const seq_insn *d)
+{
+    return d->op == SEQ_LDX &&
+           seq_reg(d->rd, d->hd) == seq_reg(d->rb, d->hb);
+}
+
+/* The highest register augadd or augerr names, for the REGS32 check. */
+static int seq_augadd_highest(const seq_insn *d)
+{
+    int r = seq_reg(d->rd, d->hd);
+    if (seq_reg(d->ra, d->ha) > r) r = seq_reg(d->ra, d->ha);
+    if (seq_reg(d->rb, d->hb) > r) r = seq_reg(d->rb, d->hb);
+    return r;
+}
+
+/* Revision 8 against the device, BY NAME. Every tile built so far reads
+ * CAPS2[11] and [12] as zero: it decodes code 10 as HALT, and it never
+ * reads imm on STX/LDX, so it would access without stepping - neither a
+ * fault it could raise. So each is refused here, before the register map
+ * is touched, naming the instruction and the bit. */
+static cft_status seq_rev8_against_device(const cft_seq_caps *c,
+                                          const seq_insn *d, uint32_t pc)
+{
+    int step = seq_step(d);
+    if ((d->op == SEQ_AUGADD || d->op == SEQ_AUGERR) &&
+        !(c->features & CFT_SEQ_FEAT_AUGADD)) {
+        cft_set_error("instruction %lu is %s - 754-2019 9.5's "
+                      "augmentedAddition, revision 8 - and this device does "
+                      "not publish it (CAPS2[11] clear, cft_caps."
+                      "seq_features bit 15 - CFT_SEQ_FEAT_AUGADD); a tile "
+                      "without it decodes the code as HALT",
+                      (unsigned long)pc,
+                      d->op == SEQ_AUGADD ? "AUGADD" : "AUGERR");
+        return CFT_ERR_UNSUPPORTED;
+    }
+    if (step && !(c->features & CFT_SEQ_FEAT_SCRATCH_STEP)) {
+        cft_set_error("instruction %lu is %s with a post-step of %+d "
+                      "(revision 8) and this device does not publish it "
+                      "(CAPS2[12] clear, cft_caps.seq_features bit 16 - "
+                      "CFT_SEQ_FEAT_SCRATCH_STEP); a tile without it would "
+                      "access the slot and never step the index",
+                      (unsigned long)pc,
+                      d->op == SEQ_STX ? "STX" : "LDX", step);
+        return CFT_ERR_UNSUPPORTED;
+    }
+    return CFT_OK;
+}
+
 /* Everything docs/SEQUENCER.md says the loader refuses. A program that
  * a device could execute ambiguously is stopped here, so the hardware
  * never has to decide what an ambiguous one means. */
@@ -455,12 +560,13 @@ static cft_status seq_validate(const cft_program *p)
         /* The four scratch codes of revision 3, R4. The reserved-field
          * rule settles each of them and adds nothing new: STL reads
          * `ra` and imm[23:0]; LDL writes `rd` and reads imm[23:0]; STX
-         * reads `ra` and `rb`; LDX writes `rd` and reads `rb`, and for
-         * those last two imm[23:0] is a field nothing reads. Every
-         * other field - the remaining register fields, `rnd`, the `k`
-         * flags, `kx`, and the parts of imm[31:24] that are not the
-         * high bit of a register this instruction names - must be
-         * zero.
+         * reads `ra` and `rb`; LDX writes `rd` and reads `rb`. For those
+         * last two imm[23:0] was a field nothing read until revision 8
+         * (proposed 2026-09-29) made imm[11:0] their post-step, so now
+         * imm[23:12] is the part nothing reads. Every other field - the
+         * remaining register fields, `rnd`, the `k` flags, `kx`, and the
+         * parts of imm[31:24] that are not the high bit of a register
+         * this instruction names - must be zero.
          *
          * The slot of a static form is checked against the DEVICE's
          * depth rather than here, exactly as a constant index is: what
@@ -480,16 +586,25 @@ static cft_status seq_validate(const cft_program *p)
                            (uint32_t)(1u << (SEQ_REGHI_SHIFT + 0)))))
                 return CFT_ERR_INVALID_ARGUMENT;
             break;
+        /* imm[11:0] is the indexed pair's post-step since revision 8
+         * (SEQ_STEP_MASK); imm[23:12] is still read by nothing. */
         case SEQ_STX:
             if (d.rd || d.rc || d.rnd || d.ka || d.kb || d.kc || d.kx ||
                 (d.imm & ~(uint32_t)((1u << (SEQ_REGHI_SHIFT + 1)) |
-                                     (1u << (SEQ_REGHI_SHIFT + 2)))))
+                                     (1u << (SEQ_REGHI_SHIFT + 2)) |
+                                     SEQ_STEP_MASK)))
                 return CFT_ERR_INVALID_ARGUMENT;
             break;
         case SEQ_LDX:
             if (d.ra || d.rc || d.rnd || d.ka || d.kb || d.kc || d.kx ||
                 (d.imm & ~(uint32_t)((1u << (SEQ_REGHI_SHIFT + 0)) |
-                                     (1u << (SEQ_REGHI_SHIFT + 2)))))
+                                     (1u << (SEQ_REGHI_SHIFT + 2)) |
+                                     SEQ_STEP_MASK)))
+                return CFT_ERR_INVALID_ARGUMENT;
+            break;
+        case SEQ_AUGADD:
+        case SEQ_AUGERR:
+            if (!seq_augadd_fields_ok(&d))
                 return CFT_ERR_INVALID_ARGUMENT;
             break;
         default:
@@ -568,6 +683,15 @@ void cft_sw_seq_caps(cft_seq_caps *out)
                          * handed a run it would compute over every
                          * lane. */
                         CFT_SEQ_FEAT_LANE_MASK;
+    /* Revision 8 (proposed 2026-09-29), on the same terms: this executor
+     * steps an STX/LDX index, and computes augadd/augerr wherever
+     * augmented.c is compiled in - a -DCFT_NO_AUGMENTED build has no
+     * augmentedAddition, so it leaves the bit clear and the loader refuses
+     * the two codes by name there, as a tile without CAPS2[11] is. */
+    out->features |= CFT_SEQ_FEAT_SCRATCH_STEP;
+#ifndef CFT_NO_AUGMENTED
+    out->features |= CFT_SEQ_FEAT_AUGADD;
+#endif
     /* Not here, and not missing: CFT_SEQ_FEAT_SCALAR and
      * CFT_FEAT_REDUCE_SEG. The software backend publishes both (since
      * 2026-09-24), but they are features of device.c's elementwise path
@@ -677,6 +801,16 @@ static cft_status seq_check_against_device(cft_device *dev,
                         (unsigned long)c.max_scratch - 1u,
                         "scratch slots a lane, indexed from 0",
                         "max_scratch");
+            }
+            /* Revision 8: the pair names three registers, and either
+             * form needs its own bit - after the scratch, so a device
+             * with no scratch at all is told that first. */
+            if (d.op == SEQ_AUGADD || d.op == SEQ_AUGERR)
+                reg = seq_augadd_highest(&d);
+            {
+                const cft_status r8 = seq_rev8_against_device(&c, &d, pc);
+                if (r8 != CFT_OK)
+                    return r8;
             }
         } else {
             if (d.kx && !(c.features & CFT_SEQ_FEAT_WIDE_CONST)) {
@@ -1173,6 +1307,74 @@ static uint32_t seq_matching_endrep(const cft_program *p, uint32_t pc)
     return p->n_insns;      /* unreachable for a validated program */
 }
 
+/* Revision 8's augadd / augerr over a lane block: for every ACTIVE lane,
+ * augmentedAddition(ra, rb) through augmented.c's own lane function,
+ * keeping r (augadd) or e (augerr) in rd, and OR-ing the flags that
+ * operation raises. Both operands are read before rd is written, so rd
+ * may name ra or rb. An inactive lane neither writes nor raises. In a
+ * -DCFT_NO_AUGMENTED build there is no such function, the software
+ * backend does not publish CFT_SEQ_FEAT_AUGADD, and the loader has
+ * already refused any program that needs it - so the branch below it is
+ * unreachable and says so. */
+static cft_status seq_exec_augmented(const cft_program *p, seq_block *B,
+                                     int nlane, const seq_insn *d,
+                                     uint32_t *flags)
+{
+#ifndef CFT_NO_AUGMENTED
+    const int rd = seq_reg(d->rd, d->hd);
+    const int ra = seq_reg(d->ra, d->ha);
+    const int rb = seq_reg(d->rb, d->hb);
+    int i;
+    for (i = 0; i < nlane; i++) {
+        cft_bn r, e;
+        uint32_t fl = 0;
+        if (!B->active[i])
+            continue;       /* no write and no flags, as for the ALU */
+        if (cft_aug_add_lane(p->f, &B->regs[i][ra], &B->regs[i][rb],
+                             &r, &e, &fl))
+            return CFT_ERR_INTERNAL;
+        cft_bn_copy(&B->regs[i][rd], d->op == SEQ_AUGERR ? &e : &r);
+        *flags |= fl;
+    }
+    return CFT_OK;
+#else
+    (void)p; (void)B; (void)nlane; (void)d; (void)flags;
+    return CFT_ERR_INTERNAL;
+#endif
+}
+
+/* Revision 8's post-step of a stepped STX/LDX: rb := rb + step modulo
+ * 2^width for every ACTIVE lane, after every lane's access - through this
+ * library's own IADD, or ISUB by the step's magnitude, which is the same
+ * residue. NOT gated by SCRATCH_STRICT: R8 suppresses an access, and the
+ * step is a register write, so a strict and a non-strict run leave rb
+ * the same. A zero step writes nothing: the old instruction. Nor does an
+ * LDX into its own index, which keeps what it loaded - the slot's value,
+ * or R8's +0 - and discards the step (seq_step_discarded). */
+static cft_status seq_post_step(const cft_program *p, seq_block *B,
+                                int nlane, const seq_insn *d)
+{
+    const int step = seq_step(d);
+    const int rb = seq_reg(d->rb, d->hb);
+    cft_bn mag, zero;
+    int i;
+    if (!step || seq_step_discarded(d))
+        return CFT_OK;
+    cft_bn_set_u32(&mag, (uint32_t)(step < 0 ? -step : step));
+    cft_bn_zero(&zero);
+    for (i = 0; i < nlane; i++) {
+        cft_bn out;
+        uint32_t fl = 0;
+        if (!B->active[i])
+            continue;
+        if (cft_sf_compute(p->f, step > 0 ? CFT_SF_IADD : CFT_SF_ISUB, 0,
+                           &B->regs[i][rb], &mag, &zero, &out, &fl))
+            return CFT_ERR_INTERNAL;
+        cft_bn_copy(&B->regs[i][rb], &out);
+    }
+    return CFT_OK;
+}
+
 static cft_status seq_run_block(const cft_program *p, const cft_bn *konst,
                                 seq_block *B,
                                 int nlane, uint8_t *deposits,
@@ -1366,6 +1568,23 @@ static cft_status seq_run_block(const cft_program *p, const cft_bn *konst,
                 else
                     cft_bn_copy(&B->regs[i][seq_reg(d.rd, d.hd)], cell);
             }
+            /* revision 8: the post-step, after every lane's access */
+            {
+                const cft_status sst = seq_post_step(p, B, nlane, &d);
+                if (sst != CFT_OK)
+                    return sst;
+            }
+            pc++;
+            break;
+        }
+
+        /* Revision 8: augmentedAddition's two halves. */
+        case SEQ_AUGADD:
+        case SEQ_AUGERR: {
+            const cft_status ast = seq_exec_augmented(p, B, nlane, &d,
+                                                      flags);
+            if (ast != CFT_OK)
+                return ast;
             pc++;
             break;
         }
