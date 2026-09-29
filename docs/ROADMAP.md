@@ -3705,6 +3705,34 @@ verifier.
    - Flags per interval are new, since its records carry none. Adding
      them changes every record-chain value and the checkpoint's version,
      and must be named so.
+7. **Golden certificates** (Logan, 2026-09-29: "add a series of 'Golden
+   certificates', programs and their certificates utilized as
+   regression tests themselves as well as conformance tests in the
+   future"). Not built yet.
+   - **What it is.** A committed corpus. Each case holds:
+     - a program from the library, its bank and an initial state;
+     - OPEN hashing, segments and steps;
+     - the certificate cft-segrun wrote, and its boundary files' digests.
+   - **As regression tests.**
+     - The gate makes every case again, with the C tool and with the
+       golden writer, and requires the committed bytes.
+     - The identity lines name a build and an image, and change with
+       them by design. So the writer takes them from the committed
+       certificate, and the check holds everything else.
+     - Why a corpus is needed: today's gate (segrun_check) holds the two
+       writers to each other, so a change that moves both at once, a
+       model change among them, passes it. A committed corpus fails it.
+   - **As conformance tests.** Another implementation (a library, the
+     GPU det library, a tile) makes the corpus's bodies again from the
+     same inputs. The corpus says which lines an implementation must
+     reproduce and which name it.
+   - **Cases across what a device publishes**, the scratch depth first.
+     On 2026-09-29 atlas-engine's R8 probes computed other answers on a
+     2,048-slot tile than on a 256-slot one. Such a case carries its
+     depth, and the set covers both depths.
+   - **With the other steps.** It goes with step 4: the C auditor needs
+     fixed certificates to audit, and the corpus is those. Accuracy
+     entries join when step 5 makes them.
 
 Not in step 2: signing; per-lane flags (a step-4 hardware ask); and a
 bound for any method that has no rigorous remainder.
