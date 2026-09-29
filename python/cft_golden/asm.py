@@ -1298,6 +1298,13 @@ def disassemble(image) -> str:
     # before revision 3.
     if img.scratch_depth != SCRATCH_D_DEFAULT:
         out.append(f".scratch  {img.scratch_depth}")
+    # Written back so an image round-trips, where cft-asm -d writes it:
+    # a header carrying R8 that disassembled without it would reassemble
+    # into a program with a different contract, silently. It did, until
+    # revision 7 (2026-09-29): no strict image was in programs/ for
+    # programs/check.py's round trip to catch it until deepwalk-strict.
+    if img.flags & FLAG_SCRATCH_STRICT:
+        out.append(".scratch  strict")
     if img.scratch_io_declared:
         out.append(f".scratch  in {img.n_scratch_in}")
         out.append(f".scratch  out {img.n_scratch_out}")

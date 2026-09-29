@@ -1085,6 +1085,23 @@ def test_the_library_scratch_rows_round_trip():
     assert seen["horner-wide-fp64"] == ["kx", "BANK_PTR", "KX9"]
 
 
+def test_a_strict_image_round_trips():
+    """Revision 7's two rows, and the first strict image in programs/.
+    The disassembler wrote no `.scratch strict` until 2026-09-29, so a
+    strict image re-assembled from its own readback was a plain one - a
+    program with a different contract, and no error. cft-asm -d always
+    wrote it; programs/check.py's two-disassembler comparison is what
+    found the difference, the day a strict row existed."""
+    for stem, flags in (("deepwalk-fp64", 0),
+                        ("deepwalk-strict-fp64", asm.FLAG_SCRATCH_STRICT)):
+        src = PROGRAMS / f"{stem}.cfta"
+        image = asm.assemble(src.read_text(encoding="utf-8"), str(src))
+        text = asm.disassemble(image)
+        assert (".scratch  strict" in text) == bool(flags), stem
+        assert asm.assemble(text, stem) == image, stem
+        assert asm.Image.from_bytes(image).flags == flags, stem
+
+
 # ---- 4. what waits on the model ----------------------------------------
 #
 # `seq.py` reached revision 3 on its own lane - the four control codes,
