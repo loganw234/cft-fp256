@@ -575,10 +575,91 @@ need python pytest
 stage golden "golden-model pytest suite (the definition of correct)" -- \
   PY -m pytest "$ROOT/python/tests" -q -rs --color=no
 
+# The sets every replaying stage reads, and how the runner knows they are
+# whole. VECTOR_ARGS is the generator's command line for them, one copy
+# for this stage and for ensure_vectors below: every format, all five
+# attributes, the generator's own default counts (not `make vectors`'
+# smaller ones; docs/VERIFICATION.md gives both totals).
+#
+# A directory of sets is whole when the generation that wrote it FINISHED
+# and nothing has changed it since, and vectors/gen_vectors.py records
+# that itself: it removes <out>/SHA256SUMS before it writes a set and
+# writes a new one after the last, naming every set with its sha256. So
+# vectors_whole asks three things - is there a record, does it name every
+# set the profile's own record (vectors/SHA256SUMS) names, does
+# `sha256sum -c` hold it - and says by name which one failed. Until
+# 2026-09-29 the test was "is anything in the directory": on 2026-09-28 a
+# generation that died for want of mpmath left five fp256 sets and every
+# later run reused them. cft-selftest, the libcft stage's replay, passes
+# on what that crash leaves: reproduced in scratch on 2026-09-29, it
+# printed "5 sets, 3200 cases, all matching" and exited 0, and so did
+# cpp-api-test and remote's WebSocket leg; only node and wasm refused it.
+VECTOR_ARGS=(--rounding rne rtz rdn rup rmm)
+
+sha256_holds() {  # in the directory: check its SHA256SUMS, every line
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -c --quiet --strict SHA256SUMS 2>&1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -c --quiet --strict SHA256SUMS 2>&1
+  else
+    echo "neither sha256sum nor shasum is on PATH to check it with"
+    return 1
+  fi
+}
+
+vectors_whole() {  # <dir>: prints what it found; returns 1 unless whole
+  local d=$1 lbl=${1#"$ROOT"/} prof="$ROOT/vectors/SHA256SUMS"
+  local want have miss out n nwant nlines
+  if [ ! -f "$prof" ]; then
+    echo "vectors/SHA256SUMS is missing, so which sets the profile names is unknown"
+    return 1
+  fi
+  # sha256sum's two forms of a line, "<hash>  <name>" and, as MSYS
+  # writes it, "<hash> *<name>": `sha256sum -c` reads both, so this does.
+  want=$(tr -d '\r' < "$prof" | sed -n 's#^[0-9a-fA-F]\{64\} [ *]out/##p' | LC_ALL=C sort)
+  nwant=$(printf '%s\n' "$want" | grep -c .)
+  nlines=$(tr -d '\r' < "$prof" | grep -c .)
+  if [ "$nwant" -eq 0 ] || [ "$nwant" -ne "$nlines" ]; then
+    echo "vectors/SHA256SUMS has $nlines lines and $nwant of them read as '<sha256>  out/<set>'"
+    return 1
+  fi
+  if [ ! -d "$d" ]; then
+    if [ -e "$d" ]; then echo "$lbl is not a directory"; else echo "$lbl does not exist"; fi
+    return 1
+  fi
+  if [ ! -f "$d/SHA256SUMS" ]; then
+    echo "$lbl has no SHA256SUMS: no generation of it finished, or the one that wrote it predates the record (2026-09-29)"
+    return 1
+  fi
+  have=$(tr -d '\r' < "$d/SHA256SUMS" | sed -n 's#^[0-9a-fA-F]\{64\} [ *]##p' | LC_ALL=C sort)
+  miss=$(LC_ALL=C comm -23 <(printf '%s\n' "$want") <(printf '%s\n' "$have"))
+  if [ -n "$miss" ]; then    # VECTORS-WHOLE-NAMES
+    n=$(printf '%s\n' "$miss" | grep -c .)
+    echo "$lbl/SHA256SUMS leaves out $n of the $nwant sets vectors/SHA256SUMS names: $(printf '%s\n' "$miss" | sed -n '1,4p' | tr '\n' ' ')$([ "$n" -gt 4 ] && echo "and $((n - 4)) more")"
+    return 1
+  fi
+  if ! out=$(cd "$d" && sha256_holds); then    # VECTORS-WHOLE-DIGESTS
+    echo "$lbl/SHA256SUMS does not hold: $(printf '%s\n' "$out" | sed -n '1,6p' | tr '\n' ';')"
+    return 1
+  fi
+  echo "$lbl/SHA256SUMS names all $nwant sets vectors/SHA256SUMS names, and all $(grep -c . "$d/SHA256SUMS") it names hold"
+}
+
+do_vectors() {
+  local msg
+  if ! PY "$ROOT/vectors/gen_vectors.py" --out "$ROOT/vectors/out" "${VECTOR_ARGS[@]}"; then
+    echo "vectors: FAILED - the generator exited nonzero, so vectors/out is not a whole set"
+    return 1
+  fi
+  if ! msg=$(vectors_whole "$ROOT/vectors/out"); then
+    echo "vectors: FAILED - the generator exited 0, but $msg"
+    return 1
+  fi
+  echo "vectors: $msg"
+}
 need python
-stage vectors "regenerate the conformance sets from the model, all five attributes" -- \
-  PY "$ROOT/vectors/gen_vectors.py" --out "$ROOT/vectors/out" \
-     --rounding rne rtz rdn rup rmm
+stage vectors "regenerate the conformance sets from the model, all five attributes, and hold the generation's own SHA256SUMS to every set the profile names" -- \
+  do_vectors
 
 ensure_sim_image() {
   docker image inspect cft-sim >/dev/null 2>&1 && return 0
@@ -641,17 +722,33 @@ PYBIN=$(if [ "$WIN" = 1 ] && command -v python >/dev/null 2>&1; then
 # failing test.
 #
 # The vectors: `test` replays vectors/out, and so do cpptest, the Node
-# binding and the wasm page below. The `vectors` stage regenerates
-# them earlier in a full run; an --only run may not have them. Absent
-# sets are generated, not skipped past - a replay of nothing is not a
-# replay. Defined here, above the first stage that calls it, because a
-# stage runs where it is declared: until 2026-09-24 this sat beside
-# do_cpp, do_libcft did not call it, and `--only libcft` in a fresh
-# checkout failed with "no vector sets found".
+# binding, the wasm page and remote's WebSocket leg below. The `vectors`
+# stage regenerates them earlier in a full run; an --only run may not
+# have them, or may find what a crashed generation left. A directory
+# that is not whole (vectors_whole, above the `vectors` stage) is
+# regenerated, not replayed and not skipped past: a replay of part of
+# the census is not the census, and a replay of nothing is not a replay.
+# If it cannot be made whole, the stage fails, naming why. Defined here,
+# above the first stage that calls it, because a stage runs where it is
+# declared: until 2026-09-24 this sat beside do_cpp, do_libcft did not
+# call it, and `--only libcft` in a fresh checkout failed with "no
+# vector sets found".
 ensure_vectors() {
-  [ -n "$(ls "$ROOT/vectors/out" 2>/dev/null)" ] && return 0
-  PY "$ROOT/vectors/gen_vectors.py" --out "$ROOT/vectors/out" \
-     --rounding rne rtz rdn rup rmm
+  local d="$ROOT/vectors/out" msg
+  if msg=$(vectors_whole "$d"); then    # ENSURE-VECTORS-WHOLE
+    echo "ensure_vectors: $msg"
+    return 0
+  fi
+  echo "ensure_vectors: not a whole set, so it is regenerated - $msg"
+  if ! PY "$ROOT/vectors/gen_vectors.py" --out "$d" "${VECTOR_ARGS[@]}"; then
+    echo "ensure_vectors: FAILED - the generator exited nonzero, so vectors/out is still not a whole set and nothing here replays it"
+    return 1
+  fi
+  if ! msg=$(vectors_whole "$d"); then
+    echo "ensure_vectors: FAILED - regenerated, and still not a whole set: $msg"
+    return 1
+  fi
+  echo "ensure_vectors: regenerated - $msg"
 }
 
 do_libcft() {

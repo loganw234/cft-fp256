@@ -222,7 +222,12 @@ Conformance is scored, not read.
    1**, each line one case with its inputs, its expected result and its
    expected flags. `vectors/SHA256SUMS` lists the SHA-256 of each set,
    and the generator writes LF line endings on every platform so those
-   hashes mean one thing everywhere.
+   hashes mean one thing everywhere. A generation that finishes also
+   writes its own `SHA256SUMS` beside the sets, last, in the same form
+   with the names relative to that directory: `sha256sum -c SHA256SUMS`
+   there checks that every set is whole, and a comparison with
+   `vectors/SHA256SUMS` says whether it is the profile's. A replayer
+   that walks the directory takes the `.jsonl` files.
 2. **The score.** Every case's result and flags must match exactly. The
    replayers in this repository are `cft-selftest` (from
    `host/tools/cft_selftest.c`; any backend, a device included),

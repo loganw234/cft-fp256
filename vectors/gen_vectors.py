@@ -156,6 +156,25 @@ interpreter's version AND the bytes of the file already on disk are all
 what they were when it was last written; see the block above main() for
 why that cannot go stale, and verify/README.md for why the census
 leaves it off.
+
+A run that finishes writes one more file into the output directory, and
+writes it LAST: `SHA256SUMS`, one `<sha256>  <set>` line per set the run
+wrote or served from --cache, sorted by name, in sha256sum's own format.
+`sha256sum -c SHA256SUMS` in the directory then holds every set to the
+bytes this run wrote, and its lines have the shape of those in
+vectors/SHA256SUMS, the profile's record (whose names carry `out/`), so a
+generation can be compared with the profile line for line. Before it
+writes a single set, a run removes any SHA256SUMS already there. A run
+that stops part way - an exception, a kill - therefore leaves no record,
+whatever it had overwritten, and a record means one thing: a generation
+finished, and these are the sets it wrote. What a power cut leaves
+depends on what the disk had written, and that is what the digests are
+for: a set that is not the bytes its line names fails `sha256sum -c`, by
+name. On 2026-09-28 a generation that died for want of mpmath left five
+sets and no sign that it had stopped, and verify/run.sh reused them as
+though they were the whole census; the runner now replays no directory
+whose record is missing, leaves out a set the profile names, or does not
+hold.
 """
 
 import argparse
@@ -519,6 +538,35 @@ def sha256_file(path):
     return h.hexdigest()
 
 
+#: The completion record, beside the sets it lists (the module docstring
+#: says what it promises). A run removes its temporary name with it, so
+#: what a run killed between writing the one and renaming it leaves does
+#: not outlive the next run.
+RECORD = "SHA256SUMS"
+RECORD_TMP = RECORD + ".tmp"
+
+
+def remove_record(outdir):
+    """Before any set is written: a run that stops part way must not
+    leave an earlier run's record vouching for what it overwrote."""
+    for name in (RECORD, RECORD_TMP):
+        try:
+            os.remove(Path(outdir) / name)
+        except FileNotFoundError:
+            pass
+
+
+def write_record(outdir, digests):
+    """After every set is written and hashed: digests maps each set's
+    file name to its sha256. Written under a temporary name and renamed,
+    so the record is never seen half written."""
+    tmp = Path(outdir) / RECORD_TMP
+    with open(tmp, "w", newline="\n") as f:
+        for name in sorted(digests):
+            f.write(f"{digests[name]}  {name}\n")
+    os.replace(tmp, Path(outdir) / RECORD)
+
+
 def run_group(args):
     """Write every file of one group, in order. The argument is one
     tuple because this is what a worker process is handed. Returns
@@ -558,8 +606,11 @@ def run_group(args):
 # recorded digest and is regenerated.
 #
 # The manifest lives OUTSIDE the output directory (vectors/.gen-cache by
-# default) so that a vector set stays a directory of nothing but vector
-# sets: a consumer that scans it, and the hash walk that proves two runs
+# default), because it is the cache's own: keys and log lines that mean
+# nothing to a consumer. The output directory holds the sets and one
+# record of them, SHA256SUMS (the module docstring), and every reader in
+# this tree takes a set by its file name or by `.jsonl`, so a consumer
+# that scans it, and the hash walk over the sets that proves two runs
 # produced the same bytes, both see exactly what they saw before.
 #
 # It is an edit-and-rerun tool, and it says so in the log - a file it
@@ -778,6 +829,7 @@ def main():
 
     outdir = Path(args.out)
     outdir.mkdir(parents=True, exist_ok=True)
+    remove_record(outdir)
 
     jobs = build_jobs(args)
 
@@ -858,6 +910,21 @@ def main():
 
     if args.cache:
         save_manifest(args.cache, model, pyver, manifest)
+
+    # The record, last of all. Every job has a result by now or was
+    # served from the cache; if one had neither, the lookup below would
+    # raise, and a run that raises writes no record.
+    digests = {}
+    for job in jobs:
+        if job["idx"] in cached:
+            digests[job["file"]] = cached[job["idx"]]["sha256"]
+            continue
+        tail, dig, _size = results[job["idx"]]
+        if tail is not None:
+            digests[job["file"]] = dig
+    write_record(outdir, digests)
+    print(f"{outdir / RECORD}: the record of {len(digests)} sets, "
+          f"written last", flush=True)
 
 
 if __name__ == "__main__":
