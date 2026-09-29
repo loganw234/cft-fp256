@@ -2042,7 +2042,8 @@ is built from 4,096 x 32 sub-arrays - revision 3's shape, one URAM
 apiece, pinned there by `(* ram_style = "ultra" *)` - and read through
 one 8:1 mux selected by the slot's high bits, registered with the read
 and held with it while the issue pipe holds (R18's rule for the read
-register, so a held load keeps its own sub-array).
+register, so a held load keeps its own sub-array). A wipe wider than one
+sub-array is written to all eight at once (below, "The widest wipe").
 Chosen over the attribute on a 32K-deep array for timing at 135 MHz: an
 eight-deep cascade puts up to seven cascade hops between a URAM's output
 and the fabric, where standalone URAMs put one LUT mux (believed, from
@@ -2100,9 +2101,10 @@ so a run's first block wipes what the last run left.
 A block's wipe is therefore what the previous block wrote: an indexing
 program that writes below slot 256 costs the same at 2,048 slots as at
 256 - less than either did, since both wiped the whole depth - and a
-program that really uses a thousand slots pays for a thousand. The wipe
-is never longer than the old rule's, so no program is slower for it.
-Measured after the fix, the same way as the table above:
+program that really uses a thousand slots pays at most one sub-array's
+worth (below, "The widest wipe"). The wipe is never longer than the old
+rule's. Measured after the marks and before the broadcast, the same way
+as the table above:
 
 | program | `MAXD` 64, `SCRATCH_D` 256 | `MAXD` 1,024, `SCRATCH_D` 2,048 |
 |---|---|---|
@@ -2115,8 +2117,10 @@ Measured after the fix, the same way as the table above:
 
 - The `ldx` row is a reset's price, paid once: the marks start all
   dirty, so the first block wipes the whole depth - 4,249 and 32,921
-  cycles, what every block cost before - and the three after it, which
-  nothing wrote, wipe nothing (162 and 166).
+  cycles - and the three after it, which nothing wrote, wipe nothing
+  (162 and 166). At 2,048 that first block was a regression against
+  f681dee, where every indexing block cost 4,249 (verifier-R5); the
+  broadcast removed it, and it is 4,249 at both depths now (below).
 - The `ldl` row is cheaper than before, 144.0 against 199.0: it names
   four slots and writes none, and once they are clean there is nothing
   to wipe, so S_ZERO takes its floor.
@@ -2143,16 +2147,81 @@ slots after a static run between them - 128 of 128); and the RTL
 before the marks (below 32 and below 8 both 4,235.0 cycles a block,
 slots 8 to 31 costing nothing because every block wiped all 256).
 
+### The widest wipe is broadcast
+
+The marks start all dirty at a reset - nothing says what the memory held
+before one - so the first indexing block after a reset wiped the whole
+depth: 32,921 cycles at 2,048 slots, where every indexing block at 256
+had cost 4,249; and the same after any run that wrote up to the top
+(verifier-R5; the second send-back). A bank at more than 256 slots is
+eight standalone sub-arrays sharing one local address, so when a block
+must wipe more than one sub-array's slots, S_ZERO writes +0 at local
+address a in ALL of them at once, for a in [0, 4,096): 4,096 cycles
+clear the whole memory at any depth, and every mark is cleaned after it
+(the clean's bound is `SCRATCH_D`). No block's wipe is ever longer than
+4,096 cycles at `NBEATS` 16 - the widest wipe revision 3 made - so the
+first block after a reset costs what every indexing block cost at 256:
+
+| one block of 128 fp32 lanes | `MAXD` 64, `SCRATCH_D` 256 | `MAXD` 1,024, `SCRATCH_D` 2,048 |
+|---|---|---|
+| `ldl` of slot 255 after a reset (a 256-slot wipe) | 4,249 cycles | 4,249 |
+| `ldx` after a reset (every mark dirty) | 4,267 | 4,267 |
+| `ldx` after a store at the top slot | 4,267 | 4,267 |
+| verifier-R5's row: block 0 of the first four-block `ldx` run after a reset | 4,249.0 | 4,249.0 (32,921 before) |
+
+The `ldx` rows are the `ldl` row plus `LDX`'s own 18. MAXD's +4 is not
+in them: S_ZERO's floor lies under the wipe. Every answer stands: the
+broadcast writes a superset of what the targeted wipe wrote, and after
+it the whole memory is +0, which is what the cleaned marks say; only the
+wipe's own writes are broadcast (`scr_wipe_q`), and nothing else writes
+the scratch while S_ZERO runs. It costs one term on each sub-array's
+write enable. Weighed and not taken: a background clean while the tile
+is idle (a start right after a reset would still pay up to the whole
+depth, and it adds a second writer on the port), and marks kept across
+`ap_rst_n` from a memory zeroed at configuration (true of block RAM,
+believed of UltraRAM, false on an ASIC).
+
+### A block that can read none of its preload loads none
+
+A scratch-in block that no instruction and no drain can read - the
+program names no slot, indexes nothing and drains nothing, so the span
+the wipe is sized by is 0 - is not loaded, dense or gathered: S_ZERO
+does not wait for its product, and the block goes straight to its
+operand streams. Revision 3 did this by accident at `n_scratch_in` 256,
+where an empty wipe cut the product short (80 cycles, verifier-R5's
+harness); the latent edge's wait below - and at `MAXD` 1,024 the longer
+floor alone - made such a block load in full, 36,947 cycles at 256
+slots and 36,950 at 2,048. Now it is the rule, for
+every count: [halt] with an unread 256-slot block costs what [halt]
+alone costs - 78 cycles at 256 slots and 82 at 2,048 by this bench's
+count, dense and gathered - and not one read lands in the block, its pool or its table. The same
+block with slot 255 read still loads whole: 41,300 cycles at both, as at
+f681dee. No preloaded value could reach an output of such a block, and
+the skipped block writes nothing, so the marks stand.
+
+A NAMED COST, not a regression: a block that reads SOME of a longer
+preload - `n_scratch_in` 256 and an `ldl` of slot 3 - still loads all of
+it, where four slots a lane would do. The block is lane-major, so a
+lane's readable slots are a prefix of its `n_scratch_in` elements and
+the rest lie between that prefix and the next lane's; skipping them
+takes per-lane strided bursts on the read master, or a multi-element
+skip in the peel window. f681dee loaded such a block whole as well.
+
 ### One latent edge, closed on the way
 
-S_ZERO's exit waited for the deposit product's `CW + 1` steps and for
-the wipe, while the two scratch-count products are `SCRSW + 1`
-bits wide - a width that follows the depth. At 16 beats a block whose
-preload anything reads spends at least fifteen steps there, enough up
-to 2^14 slots; at 2^15, `n_scratch_in` = 32,768 beside a single static
-slot would have preloaded nothing. S_ZERO now also waits for both
-products to be complete, which moves no cycle wherever they already
-were.
+S_ZERO's exit waits for the deposit product's `CW + 1` steps, for the
+wipe, and - since revision 7 - for the two scratch-count products, which
+are `SCRSW + 1` bits wide and so follow the depth. Before the dirty
+marks, a block whose preload or drain anything could read also wiped at
+least one slot, sixteen cycles at 16 beats, so the products had at least
+fifteen steps and the wait mattered only for a count of 2^15. The marks
+changed that: a block whose scratch is already clean wipes nothing, so
+the window can be `CW + 1` steps - eight at `MAXD` 64, where a count of
+256 is nine bits - and without the wait such a block would preload and
+drain nothing (verifier-R5's plant p6). So on `cft_seq`'s defaults and
+the open-core builds the wait is load-bearing at 256 slots; at `MAXD`
+1,024 twelve steps cover every count to 4,095 and it costs nothing. A
+block that can read no slot skips its preload (above) and does not wait.
 
 ### How it is held
 
@@ -2164,7 +2233,23 @@ the software backend (parcel P2's ledger has the runs):
   model call in the bench is at the DUT's depth. Beside the suite's
   cases, three of revision 7's own: an index of 9 + 256k, whose plain
   deposits and strict STATUS on the deeper build are asserted to differ
-  from a 256-slot model's; and the wipe's two, above.
+  from a 256-slot model's; and the wipe's two, above. And the second
+  send-back's: `scratch_first_block_after_reset_costs_one_sub_array`
+  (the table above, asserted: each `ldx` block within four slots' wipe
+  of the `ldl` block), `scratch_broadcast_just_over_one_sub_array` (a
+  need of 257 slots takes the broadcast and reads +0 at slots over the
+  whole depth; a watch holds every broadcast's clean - bound
+  `SCRATCH_D`, every mark 0 on the next edge - here and in the answer
+  bench), `scratch_preload_nothing_reads_is_not_loaded` (the unread
+  block costs what [halt] costs and is never read; the read one is
+  loaded whole), and three that hold the marks' other writers and the
+  wait: `scratch_preload_and_gather_raise_the_marks` (a preload and a
+  gather, then an indexing read of a preloaded slot from another run,
+  +0), `scratch_preload_read_with_the_marks_clean` (a 256-slot block in
+  and out with the marks clean, whole; the whole depth at 2,048) and
+  `scratch_marks_are_per_bank` (each word bank's mark alone keeps the
+  next run's wipe, with a static partial wipe between). Verifier-R5
+  planted the faults the last three hold (P2.md has each plant's red).
 - **the kernel.** `krnl` holds CAPS and CAPS2 to the parameters at the
   U50's defaults; `krnlseq` holds `IMEM_D` full and one past it, `MAXD`
   at the cap and one past it, the scratch's top slot, and an index of

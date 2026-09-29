@@ -656,6 +656,12 @@ module cft_seq #(
   logic [WORDS*32-1:0]     scr_wdata;
   logic [WORDS*SCRAW-1:0]  scr_raddr;
   logic [WORDS*32-1:0]     scr_rdata;
+  // The wipe's two bits (revision 7), declared here because g_scr reads
+  // them: scr_wipe_q says this cycle's scr_we is the wipe's own write,
+  // and scr_bcast that this block's wipe is BROADCAST - every sub-array
+  // takes it at once (below, and S_BLK_SETUP).
+  logic                    scr_wipe_q;
+  logic                    scr_bcast;
 
   // Sub-banks (revision 7, 2026-09-29). A bank of SCR_D entries is built
   // from SCR_SUB-entry arrays - 4,096 x 32 bits, the shape revision 3
@@ -710,7 +716,12 @@ module cft_seq #(
           (* ram_style = "ultra" *) logic [31:0] sub [0:SCR_SUB-1];
           logic [31:0] rd_q;
           always_ff @(posedge ap_clk) begin
-            if (scr_we[gs] && wa[SCRAW-1 -: SCR_SELW] == SCR_SELW'(gk))
+            // Its own select - or a BROADCAST wipe, which writes +0 at
+            // the same local address in every sub-array at once, so
+            // SCR_SUB cycles clear the whole memory at any depth
+            // (S_BLK_SETUP). Only the wipe's writes are ever broadcast.
+            if (scr_we[gs] && (wa[SCRAW-1 -: SCR_SELW] == SCR_SELW'(gk) ||
+                               (scr_wipe_q && scr_bcast)))
               sub[wa[SCR_SAW-1:0]] <= scr_wdata[gs*32 +: 32];
             // Held as g_one's is, for R18's reason: every sub-array reads
             // the low address whenever the pipe moves, and the select
@@ -1556,12 +1567,39 @@ module cft_seq #(
   logic [WORDS*HWW-1:0] scr_hwm;
   logic [HWPR*HWW-1:0]  scr_hwm_pair;
   logic [HWW-1:0]  scr_dirty_q;
-  logic            scr_wipe_q;       // this cycle's scr_we is the wipe's
   logic            scr_clean_go;     // the wipe just covered scr_wipe_bnd
   logic [HWW-1:0]  scr_wipe_bnd;     // how far this block's wipe goes
   logic [HWW-1:0]  scr_wipe_need;
   assign scr_wipe_need = (scr_dirty_q < scr_wipe_slots) ? scr_dirty_q
                                                         : scr_wipe_slots;
+
+  // A wipe of more than one sub-array's slots is BROADCAST (second
+  // send-back, verifier-R5 08:16:48). The marks start all dirty at a
+  // reset, so the first indexing block after one had to wipe the whole
+  // depth - 32,768 cycles at 2,048 slots, where every indexing block at
+  // 256 had paid 4,096 - and so did the block after a program that
+  // wrote up to the top. But a bank at more than 256 slots is SCR_NSUB
+  // standalone arrays sharing one local address, so writing +0 at local
+  // address a in all of them at once, for a in [0, SCR_SUB), clears the
+  // WHOLE memory in SCR_SUB cycles. No block's wipe is then longer than
+  // SCR_SUB = 4,096 cycles at NBEATS 16, at any depth: the cost of the
+  // widest wipe revision 3 ever made. And after it the whole memory is
+  // +0, so every mark is cleaned, not only those under the need.
+  localparam int SUB_SLOTS = SCR_SUB >> NBSH;  // 256 at 4,096 and NBEATS 16
+  logic scr_wipe_bc;
+  assign scr_wipe_bc = (SCR_NSUB > 1) && (scr_wipe_need > HWW'(SUB_SLOTS));
+
+  // A block that can observe no scratch slot - no STX/LDX, no static
+  // STL/LDL, no scratch-out: scr_wipe_slots is 0 - loads none of its
+  // scratch-in block, dense or gathered (second send-back, verifier-R5
+  // 08:03:27). Nothing it runs reads a slot and the drain reads none, so
+  // no preloaded value could reach an output; revision 3's S_ZERO did
+  // the same by accident at n_scratch_in = 256, where an empty wipe cut
+  // the preload's product short. The skipped block writes nothing, so
+  // the marks stand. A block that observes SOME of a longer block still
+  // loads all of it, as it always has (docs/SEQUENCER.md, revision 7).
+  logic scr_sin_skip;
+  assign scr_sin_skip = (scr_wipe_slots == '0);
 
   function automatic [HWW-1:0] hw_max_fn(input [HWW-1:0] a, input [HWW-1:0] b);
     hw_max_fn = (a > b) ? a : b;
@@ -2345,6 +2383,7 @@ module cft_seq #(
       bank_q <= '0; sin_q <= '0; sout_q <= '0;
       scr_we <= '0; scr_raddr <= '0;
       scr_wipe_q <= 1'b0; scr_clean_go <= 1'b0; scr_wipe_bnd <= '0;
+      scr_bcast <= 1'b0;
       scr_io_q <= 1'b0; scr_hi <= '0; scr_all <= 1'b0; rd_need <= '0;
       scr_strict_q <= 1'b0; scr_oor_q <= '0;
       h_nsin <= '0; h_nsout <= '0;
@@ -2772,8 +2811,10 @@ module cft_seq #(
             // ...and no further than the dirty marks say anything was
             // written since it was last wiped (revision 7): the rest
             // is +0 already.
-            szlimit <= (SCRAW+1)'(scr_wipe_need) << NBSH;
-            scr_wipe_bnd <= scr_wipe_need;
+            szlimit <= scr_wipe_bc ? (SCRAW+1)'(SCR_SUB)
+                                   : (SCRAW+1)'(scr_wipe_need) << NBSH;
+            scr_wipe_bnd <= scr_wipe_bc ? HWW'(SCRATCH_D) : scr_wipe_need;
+            scr_bcast <= scr_wipe_bc;
             // R17: the block's mask bits, one single-beat read, before
             // the wipe rather than under it. Under it would hide the
             // round trip on a fast memory and hide nothing on the card
@@ -2857,7 +2898,7 @@ module cft_seq #(
             sout_elems <= '0;
             dep_addend <= 32'(blk_n);
             dep_mult   <= h_maxdep[CW-1:0];
-            sin_mult   <= h_nsin;
+            sin_mult   <= scr_sin_skip ? '0 : h_nsin;
             sout_mult  <= h_nsout;
           end else begin
             if (dep_mult[0])  dep_elems  <= dep_elems  + dep_addend;
@@ -2872,16 +2913,21 @@ module cft_seq #(
           // this cycle adds is the last one either multiplier has
           // (revision 7). Their width is SCRSW + 1, which follows the
           // depth, while the window above was sized for the deposit
-          // product alone. At NBEATS 16 a block whose preload is read
-          // at all spends at least 16 cycles here on the wipe, which is
-          // fifteen steps - enough up to 2^14 slots and not at 2^15,
-          // where n_scratch_in = 32,768 beside one static slot would
-          // have preloaded nothing. This moves no cycle wherever the
-          // product was already complete. It was incomplete only past
-          // 2^14 slots, or in a block that wipes nothing - no scratch
-          // instruction, no scratch-out - and preloads 2^(CW+1) slots or
-          // more that nothing then reads, which was silently cut short
-          // and unobservable, and now reads its whole block.
+          // product alone: CW + 1 steps, eight at MAXD 64 and twelve at
+          // 1,024. Until the dirty marks, a block whose preload or drain
+          // anything could read also wiped at least one slot - sixteen
+          // cycles at NBEATS 16 - so the window was never shorter than
+          // fifteen steps there, and this wait mattered only for a count
+          // of 2^15. With the marks, a block whose scratch is already clean
+          // wipes NOTHING, so the window can be CW + 1 steps while
+          // n_scratch_in or n_scratch_out needs more: at MAXD 64 a count
+          // of 256 is nine bits, and without this wait it is cut to 0 -
+          // nothing preloaded, nothing drained (verifier-R5's p6;
+          // tb/test_seq_core.py's scratch_preload_read_with_the_marks_
+          // clean holds it). At MAXD 1,024 the twelve steps cover every
+          // count to 4,095, so on the U50's build it costs nothing. A
+          // block that can observe no slot skips its preload
+          // (scr_sin_skip) and starts sin_mult at 0: it does not wait.
           if (zaddr >= RFAW'(CW + 1) && (szaddr + 1) >= szlimit &&
               (sin_mult >> 1) == '0 && (sout_mult >> 1) == '0) begin
             // Every bank the wipe has now covered is clean.
@@ -2912,8 +2958,8 @@ module cft_seq #(
             // An indexed scratch block takes the gather in place of
             // the dense preload; both end at S_LD_GO.
             gt_scr <= idx_en_q[3];
-            st <= (h_nsin == 0) ? S_LD_GO
-                : idx_en_q[3]   ? S_GTH_GO : S_SIN_GO;
+            st <= (h_nsin == 0 || scr_sin_skip) ? S_LD_GO
+                : idx_en_q[3]                   ? S_GTH_GO : S_SIN_GO;
           end
         end
 
