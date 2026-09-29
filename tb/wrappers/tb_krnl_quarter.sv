@@ -20,8 +20,18 @@
 // MUL_PASSES passes through so the quarter tile can also run the
 // multi-cycle multiplier: at BEAT_BITS=64 the fp64 lane is the wide
 // rung, and a budget of 2 or more iterates its three chunk columns.
+//
+// The sequencer's capacities pass through as well (revision 7,
+// 2026-09-29). cft_krnl's defaults are the U50's since that revision,
+// and this tile keeps the ones it has always had - 64 deposit slots,
+// 16,384 instructions, 256 scratch slots - as the open-core board does.
+// tb/Makefile hands the same three to the bench as CFT_GENERICS, from
+// one list, and the bench derives the CAPS words it expects from them.
 module tb_krnl_quarter #(
-    parameter int MUL_PASSES = 1
+    parameter int MUL_PASSES    = 1,
+    parameter int SEQ_MAXD      = 64,
+    parameter int SEQ_IMEM_D    = 16384,
+    parameter int SEQ_SCRATCH_D = 256
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -124,6 +134,8 @@ module tb_krnl_quarter #(
 );
 
   cft_krnl #(.EN_FP64(1'b1), .EN_FP128(1'b0), .EN_FP256(1'b0),
-             .BEAT_BITS(64), .MUL_PASSES(MUL_PASSES)) u_krnl (.*);
+             .BEAT_BITS(64), .MUL_PASSES(MUL_PASSES),
+             .SEQ_MAXD(SEQ_MAXD), .SEQ_IMEM_D(SEQ_IMEM_D),
+             .SEQ_SCRATCH_D(SEQ_SCRATCH_D)) u_krnl (.*);
 
 endmodule

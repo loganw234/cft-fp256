@@ -55,7 +55,7 @@ PYTHON ?= python3
 
 .PHONY: sim simmc fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
         normprobe seedop reduceacc reduce krnl krnlf128 krnlf64f128 krnlseq quarter faults \
-        seq_core seqprobe seqcycles seqtrace seqbp redprog krnlfused krnlplain cycles seqbanks \
+        seq_core seq_coreu50 seq_coreu50mc seqprobe seqcycles seqtrace seqbp redprog krnlfused krnlplain cycles seqbanks \
         mulpass mulcycle mulcycle2 fp32mc fp64mc fp128mc fp256mc reducemc \
         krnlmc krnlseqmc quartermc faultsmc seq_coremc seqbanksmc cyclesmc clean
 
@@ -195,9 +195,9 @@ seqbanksmc:
 		&& $(PYTHON) check_results.py sim_build/seqbanksmc$(MC)/results.xml
 
 quartermc:
-	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \
+	CFT_GENERICS="$(OPEN_CAPS_GENERICS)" CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \
 		MODULE=test_krnl_quarter SIM_BUILD=sim_build/quartermc$(MC) \
-		KRNL_PARAMS="-Ptb_krnl_quarter.MUL_PASSES=$(MC)" \
+		KRNL_PARAMS="-Ptb_krnl_quarter.MUL_PASSES=$(MC) $(foreach g,$(OPEN_CAPS_GENERICS),-Ptb_krnl_quarter.$(g))" \
 		COCOTB_RESULTS_FILE=sim_build/quartermc$(MC)/results.xml \
 		&& $(PYTHON) check_results.py sim_build/quartermc$(MC)/results.xml
 
@@ -469,7 +469,19 @@ krnlplain:
 # through its CSR and AXI interfaces, the same kernel driven by the
 # sequencer (which is how an open tile actually computes), and the
 # fp256 bank itself. MC defaults to 10, so `make board` is the board.
-BOARD_PARAMS = -Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1                -Pcft_krnl.MUL_PASSES=$(MC)
+# The capacities an open-core configuration keeps (revision 7,
+# 2026-09-29). cft_krnl's SEQ_MAXD, SEQ_IMEM_D and SEQ_SCRATCH_D are
+# parameters since that revision and default to the U50's - 1,024
+# deposit slots, 32,768 instructions, 2,048 scratch slots - while the
+# board was measured through openXC7 with 64, 16,384 and 256
+# (hw/openxc7, 2026-09-22) and the quarter tile has always had them. So
+# both name them. ONE list, handed to the simulator as -P and to the
+# bench as CFT_GENERICS, which is what test_krnl.py derives its
+# expected CAPS and CAPS2 from - KRNLF128_GENERICS's rule, so the build
+# and the expectation cannot be told two different stories.
+OPEN_CAPS_GENERICS = SEQ_MAXD=64 SEQ_IMEM_D=16384 SEQ_SCRATCH_D=256
+BOARD_PARAMS = -Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1                -Pcft_krnl.MUL_PASSES=$(MC) \
+               $(foreach g,$(OPEN_CAPS_GENERICS),-Pcft_krnl.$(g))
 
 board: boardkrnl boardseq boardfp256
 
@@ -493,11 +505,11 @@ board: boardkrnl boardseq boardfp256
 # reason to skip the bench. BOARDKRNL_SIM=icarus puts it back.
 BOARDKRNL_SIM ?= verilator
 boardkrnl:
-	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(BOARDKRNL_SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl SIM_BUILD=sim_build/boardkrnl$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardkrnl$(MC)/results.xml \
+	CFT_GENERICS="$(OPEN_CAPS_GENERICS)" CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(BOARDKRNL_SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl SIM_BUILD=sim_build/boardkrnl$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardkrnl$(MC)/results.xml \
 		&& $(PYTHON) check_results.py sim_build/boardkrnl$(MC)/results.xml
 
 boardseq:
-	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl_seq SIM_BUILD=sim_build/boardseq$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardseq$(MC)/results.xml \
+	CFT_GENERICS="$(OPEN_CAPS_GENERICS)" CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl_seq SIM_BUILD=sim_build/boardseq$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardseq$(MC)/results.xml \
 		&& $(PYTHON) check_results.py sim_build/boardseq$(MC)/results.xml
 
 boardfp256:
@@ -534,8 +546,9 @@ seqbanks:
 		&& $(PYTHON) check_results.py sim_build/seqbanks/results.xml
 
 quarter:
-	$(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \
+	CFT_GENERICS="$(OPEN_CAPS_GENERICS)" $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_krnl_quarter \
 		MODULE=test_krnl_quarter SIM_BUILD=sim_build/quarter \
+		KRNL_PARAMS="$(foreach g,$(OPEN_CAPS_GENERICS),-Ptb_krnl_quarter.$(g))" \
 		COCOTB_RESULTS_FILE=sim_build/quarter/results.xml \
 		&& $(PYTHON) check_results.py sim_build/quarter/results.xml
 
@@ -581,6 +594,39 @@ seq_core:
 		MODULE=test_seq_core SIM_BUILD=sim_build/seq_core \
 		COCOTB_RESULTS_FILE=sim_build/seq_core/results.xml \
 		&& $(PYTHON) check_results.py sim_build/seq_core/results.xml
+
+# The same bench with cft_seq built at the U50's capacities (revision 7,
+# 2026-09-29): 1,024 deposit slots, 32,768 instructions, 2,048 scratch
+# slots - rtl/cft_krnl.sv's SEQ_* defaults, which krnl_caps.py reads out
+# of that file so the numbers exist once. seq_core runs cft_seq at its
+# own defaults (64, 1,024, 256); this one is where every model run is at
+# 2,048 slots, the top slot is 2,047, a non-strict index wraps at 2,048
+# and a strict one is reported past it. One list: each word reaches the
+# simulator as -Pcft_seq.<word> and the whole line reaches the bench as
+# CFT_GENERICS. The scratch cases build their indices from SCRATCH_D and
+# write near its top, so their blocks wipe up to 32,768 cycles here
+# against 4,096 in seq_core: about three times seq_core's simulation
+# under Verilator (275 s against 93, 2026-09-29), and so, at Icarus's
+# ratio, past SEQ_TIMEOUT - hence a timeout of its own.
+SEQ_U50_GENERICS = $(shell $(PYTHON) krnl_caps.py)
+SEQ_U50_TIMEOUT ?= 7200
+seq_coreu50:
+	CFT_GENERICS="$(SEQ_U50_GENERICS)" timeout $(SEQ_U50_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
+		MODULE=test_seq_core SIM_BUILD=sim_build/seq_coreu50 \
+		KRNL_PARAMS="$(foreach g,$(SEQ_U50_GENERICS),-Pcft_seq.$(g))" \
+		COCOTB_RESULTS_FILE=sim_build/seq_coreu50/results.xml \
+		&& $(PYTHON) check_results.py sim_build/seq_coreu50/results.xml
+
+# ...and the same machine on the multi-pass tile (MC=10 unless MC= says
+# otherwise): the sub-arrays' read hold under issue_hold and the
+# broadcast wipe where the issue pipe holds. Not in simmc, whose
+# seq_coremc is the 256-slot machine; TESTCASE= runs a subset.
+seq_coreu50mc:
+	CFT_MUL_PASSES=$(MC) CFT_GENERICS="$(SEQ_U50_GENERICS)" timeout $(SEQ_U50_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
+		MODULE=test_seq_core SIM_BUILD=sim_build/seq_coreu50mc$(MC) \
+		KRNL_PARAMS="-Pcft_seq.MUL_PASSES=$(MC) $(foreach g,$(SEQ_U50_GENERICS),-Pcft_seq.$(g))" \
+		COCOTB_RESULTS_FILE=sim_build/seq_coreu50mc$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/seq_coreu50mc$(MC)/results.xml
 
 # Diagnostic probe for seq_core, not part of `make sim`. One trivial
 # program into a quiet cft_seq, printing the state register, both bus

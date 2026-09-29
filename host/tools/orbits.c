@@ -3268,9 +3268,11 @@ static void usage(void)
 "  --days D                 outer: step size in days (default 10)\n"
 "  --steps N                override the step count directly\n"
 "  --sample-every N         steps between recorded samples (a tile holds\n"
-"                           64 deposits a lane: at most 15 samples a run\n"
-"                           under --engine program there; segments deposit\n"
-"                           nothing and are not bounded by it)\n"
+"                           cft_caps.max_deposits a lane: at most\n"
+"                           max_deposits/4 - 1 samples a run under\n"
+"                           --engine program there - 15 at 64, 255 at the\n"
+"                           U50's 1,024; segments deposit nothing and are\n"
+"                           not bounded by it)\n"
 "  --batch N                ensemble members per library call\n"
 "  --checkpoint PATH        write a resumable checkpoint\n"
 "  --checkpoint-interval S  seconds between checkpoints (default 10); 0\n"
@@ -3614,8 +3616,9 @@ int main(int argc, char **argv)
         /* This program deposits four values a sample plus four at the
          * start, for a whole run in ONE call, so the sample count is
          * bounded by the device's deposit budget: 64 slots a lane on
-         * the tile of rtl/cft_krnl.sv is fifteen samples, 2^20 in this
-         * library's software backend is a quarter of a million.
+         * the round-2 tile is fifteen samples, 1,024 on the U50's
+         * revision-7 tile 255, 2^20 in this library's software backend
+         * a quarter of a million.
          *
          * Unlike the zoom's trip count, the sample count is part of
          * WHAT IS COMPUTED - fewer samples is a different record - so

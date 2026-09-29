@@ -231,10 +231,18 @@ def runner_caps(args):
 
 
 def run_image(args, image_path, tmp, tag, iota=None, a=None, b=None,
-              c=None, bank=None, scratch_in=None, scratch_out=None):
-    """-> (deposits bytes, report dict), or (None, stderr)."""
+              c=None, bank=None, scratch_in=None, scratch_out=None,
+              scratch_depth=None):
+    """-> (deposits bytes, report dict), or (None, stderr).
+
+    `scratch_depth` opens the software backend at that many scratch
+    slots a lane (positive-run --scratch-depth, revision 7); None is the
+    backend's own 256, and the command line every other row has always
+    run."""
     dep = tmp / (tag + ".dep.bin")
     cmd = [args.runner, image_path, "--out", dep]
+    if scratch_depth is not None:
+        cmd += ["--scratch-depth", str(scratch_depth)]
     if iota is not None:
         cmd += ["--iota", iota]
     if a is not None:
@@ -260,18 +268,21 @@ def run_image(args, image_path, tmp, tag, iota=None, a=None, b=None,
     return dep.read_bytes(), report
 
 
-def model_run(image, a_vals, b_vals=None, c_vals=None):
+def model_run(image, a_vals, b_vals=None, c_vals=None,
+              scratch_depth=seq.SCRATCH_D):
     """The same image through seq.py's executor - the golden model, and
     the definition of correct. Returns None when the image is outside
     what the model can load today (a BANK_EXT image, or a program that
     names a register above 15), which is a fact worth printing rather
-    than an error."""
+    than an error. `scratch_depth` is the depth of the tile the run
+    stands for (revision 7); the model's default is 256."""
     try:
-        prog = seq.Program.from_bytes(image)
+        prog = seq.Program.from_bytes(image, scratch_depth=scratch_depth)
     except seq.ProgramError:
         return None
     n = len(a_vals)
-    res = seq.run(prog, a_vals, b_vals or [0] * n, c_vals or [0] * n)
+    res = seq.run(prog, a_vals, b_vals or [0] * n, c_vals or [0] * n,
+                  scratch_depth=scratch_depth)
     return res
 
 
@@ -991,6 +1002,138 @@ def check_conv(args, name, image, image_path, tmp, caps):
         return
     ok(f"{name}: {len(xs)} lanes x 14 outputs against a softfloat "
        f"three-tap convolution", f"deposits {report.get('sha256', '')[:16]}")
+
+
+def deepwalk_model(fmt, xs, depth, strict, walk=1000):
+    """deepwalk-fp64 on a tile of `depth` slots, written out from the
+    program's own comment rather than from its image: the thousand
+    samples a[0] = x, a[k+1] = a[k]*GROW + SHIFT, each stored at slot k
+    as that tile stores it - at k mod depth when the program is plain,
+    and not at all past the depth when it is strict - then read back
+    from 999 down to 0, a strict read past the depth giving +0, and
+    summed in that order. Returns (deposits, status): the sum and
+    a[1000] a lane, and STATUS[5] if a strict index was past the depth.
+    """
+    grow, _ = chars.from_decimal(fmt, "1.25", sf.RND_RNE)
+    shift, _ = chars.from_decimal(fmt, "0.5", sf.RND_RNE)
+    one, _ = chars.from_decimal(fmt, "1.0", sf.RND_RNE)
+    zero = sf.zero_bits(fmt)
+    out, status = [], 0
+    for x in xs:
+        slots = {}
+        v = x                       # copysign(x, x) is x, exactly
+        for k in range(walk):
+            if k < depth:
+                slots[k] = v
+            elif strict:
+                status |= seq.STATUS_SCRATCH_RANGE
+            else:
+                slots[k % depth] = v
+            v, _ = sf.compute(fmt, sf.OP_FMA, v, grow, shift, sf.RND_RNE)
+        acc = zero                  # r6 starts a run at +0
+        for k in range(walk - 1, -1, -1):
+            if k >= depth and strict:
+                s_ = zero
+            else:
+                s_ = slots.get(k % depth, zero)
+            acc, _ = sf.compute(fmt, sf.OP_FMA, s_, one, acc, sf.RND_RNE)
+        out += [acc, v]
+    return out, status
+
+
+def check_deepwalk(args, name, image, image_path, tmp, caps):
+    """The two revision-7 rows: a thousand-slot walk, held to the model
+    at 2,048 and at 256, to an independent model of the walk at each, and
+    to the software backend at each (positive-run --scratch-depth)."""
+    fmt = FORMATS["fp64"]
+    strict = name == "deepwalk-strict-fp64"
+    img = asm.Image.from_bytes(image)
+
+    # (a) what the image says it is
+    want = [1] + [chars.from_decimal(fmt, t, sf.RND_RNE)[0]
+                  for t in ("1.0", "1.25", "0.5")]
+    if img.consts != want:
+        bad(f"{name}: constants", "IONE, ONE, GROW and SHIFT, derived")
+        return
+    top, indexed = img.scratch_use()
+    want_flags = seq.FLAG_SCRATCH_STRICT if strict else 0
+    # The depth a program is written for is its SOURCE's `.scratch N`:
+    # it is not in the image, whose reader infers 256 for a program that
+    # names no static slot at all.
+    declared = asm.assemble_image(
+        (HERE / (name + ".cfta")).read_text(encoding="utf-8")).scratch_depth
+    if (top is not None or not indexed or img.max_deposits != 2
+            or img.flags != want_flags or declared != 2048):
+        bad(f"{name}: the image",
+            f"highest static slot {top}, indexed={indexed}, "
+            f"{img.max_deposits} deposits, flags {img.flags:#x}, "
+            f".scratch {declared}; want no static slot, stx/ldx, "
+            f"2, {want_flags:#x}, 2048")
+        return
+    ok(f"{name}: no static slot, stx/ldx only, written for 2,048",
+       f"4 constants derived, 2 deposits a lane"
+       f"{', SCRATCH_STRICT' if strict else ''}")
+
+    # (b) the model at each depth, against the walk written out
+    xs = [chars.from_decimal(fmt, t, sf.RND_RNE)[0]
+          for t in ("0.5", "-1.25", "3.0", "0.001", "-7.5", "1e-300",
+                    "2.0", "-0.0")]
+    n = len(xs)
+    got = {}
+    for depth in (2048, 256):
+        res = model_run(image, xs, scratch_depth=depth)
+        mine, mstat = deepwalk_model(fmt, xs, depth, strict)
+        if res is None or res.deposits != mine or res.status != mstat:
+            bad(f"{name}: seq.run at {depth} slots",
+                "does not equal the walk written out"
+                if res is not None else "the model refused the image")
+            return
+        got[depth] = res
+    if strict:
+        if (got[2048].status
+                or not got[256].status & seq.STATUS_SCRATCH_RANGE):
+            bad(f"{name}: the report",
+                f"STATUS {got[2048].status:#x} at 2,048 and "
+                f"{got[256].status:#x} at 256; want 0 and 0x20")
+            return
+        # R8's portability, stated: a strict run that reports nothing is
+        # the plain program's run, to the bit
+        if got[2048].deposits != deepwalk_model(fmt, xs, 2048, False)[0]:
+            bad(f"{name}: at 2,048 slots",
+                "the strict walk that reports nothing is not the plain "
+                "walk's sum")
+            return
+    elif got[256].deposits == got[2048].deposits or got[256].status:
+        bad(f"{name}: the depth",
+            "the sums at 256 and 2,048 slots are the same, so this row "
+            "cannot tell the depths apart")
+        return
+    ok(f"{name}: seq.run at 2,048 and at 256 slots is the walk written out",
+       "and the two depths differ" + (", 256 reporting STATUS[5]"
+                                      if strict else ""))
+
+    # (c) the software backend at each depth
+    if caps.get("scratch-depth") != "present":
+        skip(f"{name}: the software backend at 2,048 slots",
+             "positive-run reports no --scratch-depth")
+        return
+    ap = tmp / (name + ".a.bin")
+    ap.write_bytes(pack(xs, fmt))
+    for depth, arg in ((2048, 2048), (256, None)):
+        dep, report = run_image(args, image_path, tmp, f"{name}.{depth}",
+                                a=ap, scratch_depth=arg)
+        if dep is None:
+            bad(f"{name}: positive-run at {depth} slots", report)
+            return
+        want_status = f"0x{got[depth].status:08x}"
+        if values(dep, fmt) != got[depth].deposits or \
+                not report.get("status", "").startswith(want_status):
+            bad(f"{name}: positive-run at {depth} slots",
+                f"deposits or status ({report.get('status')}) differ from "
+                f"the model's at {depth}")
+            return
+    ok(f"{name}: the software backend at 2,048 and at 256 slots is the model",
+       f"{n} lanes x 2 deposits each, positive-run --scratch-depth 2048")
 
 
 def _patch_trip(image, was, now, deposits):
@@ -4650,6 +4793,7 @@ def main():
           f"kx9 {caps.get('kx9', '?')}, "
           f"scratch {caps.get('scratch', '?')}, "
           f"scratch-io {caps.get('scratch-io', '?')}, "
+          f"scratch-depth {caps.get('scratch-depth', '?')}, "
           f"run-path {caps.get('run-path', '?')}")
 
     manifest, problems = read_manifest(HERE / "MANIFEST")
@@ -4728,6 +4872,8 @@ def main():
                         ref_deposits)
         elif name == "conv-fp64":
             check_conv(args, name, image, image_path, tmp, caps)
+        elif name in ("deepwalk-fp64", "deepwalk-strict-fp64"):
+            check_deepwalk(args, name, image, image_path, tmp, caps)
         elif name == "resume-fp64":
             check_resume(args, name, image, image_path, tmp, caps)
         elif name == "horner-wide-fp64":

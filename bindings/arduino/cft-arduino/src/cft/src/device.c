@@ -604,6 +604,68 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
     return CFT_OK;
 }
 
+/* The deepest scratch a tile can publish: CAPS2[3:0] is a four-bit log2
+ * (rtl/cft_seq.sv refuses to elaborate a deeper one). */
+#define CFT_OPEN_SCRATCH_MAX 32768u
+
+/* cft.h has the contract. A software handle's depth is one field of the
+ * caps it publishes, and program.c reads every use of the depth - the
+ * static-slot and scratch-I/O refusals at load, the executor's modulus,
+ * range and array - from what the handle publishes, so setting the
+ * field IS opening the handle at that depth: there is no second copy of
+ * the number to keep in step. */
+CFT_API cft_status cft_open_ex(const cft_open_args *args, cft_device **out)
+{
+    uint32_t depth;
+    cft_status st;
+
+    if (!out)
+        return CFT_ERR_INVALID_ARGUMENT;
+    *out = NULL;
+    if (!args)
+        return CFT_ERR_INVALID_ARGUMENT;
+    if (args->struct_size != sizeof(cft_open_args)) {
+        cft_set_error("cft_open_ex was given a %lu-byte cft_open_args and "
+                      "this library's is %lu bytes. Zero the struct and "
+                      "set struct_size to sizeof(cft_open_args)",
+                      (unsigned long)args->struct_size,
+                      (unsigned long)sizeof(cft_open_args));
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    depth = args->scratch_depth;
+    if (depth) {
+        if (depth > CFT_OPEN_SCRATCH_MAX || (depth & (depth - 1u))) {
+            cft_set_error("cft_open_ex: scratch_depth %lu is not a power "
+                          "of two in 1..%lu - a tile publishes its depth "
+                          "as a four-bit log2 in CAPS2[3:0], and STX and "
+                          "LDX reduce modulo it with a mask",
+                          (unsigned long)depth,
+                          (unsigned long)CFT_OPEN_SCRATCH_MAX);
+            return CFT_ERR_INVALID_ARGUMENT;
+        }
+        if (args->artifact) {
+            cft_set_error("cft_open_ex: scratch_depth %lu is a SOFTWARE "
+                          "handle's depth, and %s names a device, whose "
+                          "depth its image fixes (CAPS2[3:0], "
+                          "cft_caps.max_scratch); open it with "
+                          "scratch_depth 0 and read the depth it has",
+                          (unsigned long)depth, args->artifact);
+            return CFT_ERR_UNSUPPORTED;
+        }
+#ifdef CFT_NO_PROGRAM
+        cft_set_error("cft_open_ex: scratch_depth %lu, and this build has "
+                      "no sequencer (-DCFT_NO_PROGRAM), so there is no "
+                      "scratch to size", (unsigned long)depth);
+        return CFT_ERR_UNSUPPORTED;
+#endif
+    }
+    st = cft_open(args->artifact, args->index, out);
+    if (st != CFT_OK || !depth)
+        return st;
+    (*out)->seq.max_scratch = depth;
+    return CFT_OK;
+}
+
 /* ---- the host-side gather (R16, ABI 0.14, docs/ROUND2.md P2) -------
  *
  * The +0 a CFT_IDX_NONE entry reads as, in THIS format's encoding -

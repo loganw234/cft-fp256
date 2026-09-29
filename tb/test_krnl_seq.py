@@ -65,16 +65,33 @@ from cft_golden import (  # noqa: E402
 from cft_golden import seq  # noqa: E402
 
 from test_krnl import (  # noqa: E402
-    run_op, check_seq_caps, check_caps2, _localparam, RTL,
+    run_op, check_seq_caps, check_caps2, krnl_param,
 )
 
 # The tile's instruction capacity, PARSED from the RTL rather than
 # restated: a number in a test that copies a number in the RTL is a
-# defect (docs/VERIFICATION.md), and this one moved at revision 2.
-SEQ_IMEM_D = _localparam(RTL / "cft_krnl.sv", "SEQ_IMEM_D")
-# ...and the scratch's depth, parsed from the same file for the same
-# reason. It moved into existence at revision 3.
-SEQ_SCRATCH_D = _localparam(RTL / "cft_krnl.sv", "SEQ_SCRATCH_D")
+# defect (docs/VERIFICATION.md), and this one moved at revisions 2, 3
+# and 7. Since revision 7 it is a PARAMETER of cft_krnl, and a target
+# that builds another value hands it here as CFT_GENERICS
+# (test_krnl.krnl_param), so this is the number THIS build has.
+SEQ_IMEM_D = krnl_param("SEQ_IMEM_D")
+# ...and the scratch's depth, on the same terms. It moved into existence
+# at revision 3 and to 2,048 at revision 7 - and unlike the other two it
+# is part of what an instruction MEANS (a non-strict STX/LDX reduces
+# modulo it), so every model run below is at this depth
+# (seq.run(..., scratch_depth=SEQ_SCRATCH_D)), never at the model's
+# default.
+SEQ_SCRATCH_D = krnl_param("SEQ_SCRATCH_D")
+# ...and the deposit budget, which the header check holds max_deposits to.
+SEQ_MAXD = krnl_param("SEQ_MAXD")
+# Cycles a block spends wiping a program's WHOLE scratch: SCRATCH_D slots x
+# NBEATS beats, one a cycle (cft_seq's S_ZERO), 4,096 at 256 and 32,768 at
+# 2,048, which is past the default budget below on its own. A block of an
+# indexing program, or of one whose static slots or scratch-out reach the
+# top, can pay it - since revision 7 only as far as something wrote since
+# the last wipe, so this is a bound - and a case that may asks for this
+# much more per block (poll_done counts polls of ten cycles).
+WIPE_TRIES = SEQ_SCRATCH_D * 16 // 10
 
 # CSR map (rtl/cft_csr.sv == hw/kernel.xml == docs/ARCHITECTURE.md)
 CTRL, MODE, NREG = 0x00, 0x10, 0x18
@@ -323,7 +340,8 @@ async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0,
 
     res = seq.run(prog, va, vb, vc, bank=bank, scratch_in=scratch_in,
                   idx_a=idx[0], idx_b=idx[1], idx_c=idx[2],
-                  idx_scratch_in=idx[3], lane_mask=mask)
+                  idx_scratch_in=idx[3], lane_mask=mask,
+                  scratch_depth=SEQ_SCRATCH_D)
     sout_bytes = n * prog.n_scratch_out * ebytes
     # R17: a masked lane's slots are the CALLER'S bytes, which here are
     # the poison written a few lines above. The model's arrays are
@@ -904,9 +922,10 @@ async def krnl_sequencer(dut):
 
     # ---- revision 2 R2: a program that fills the instruction memory --
     #
-    # SEQ_IMEM_D is 4096, so this is the largest program the tile can
-    # hold: 32,800 bytes of image, and four instructions that execute
-    # at PC 4092..4095 where all twelve address bits are needed. The
+    # SEQ_IMEM_D was 4096 when this was written (32,768 at revision 7),
+    # so this is the largest program the tile can hold - 32 + 8 *
+    # SEQ_IMEM_D bytes of image - and four instructions that execute at
+    # the last four PCs, where every address bit is needed. The
     # bulk is skipped rather than executed - see prog_fills_imem - so
     # the case costs about 8,200 cycles of skip rather than the 160,000
     # that executing every instruction would.
@@ -919,12 +938,13 @@ async def krnl_sequencer(dut):
                    gen_stream(FP32, n_imem, rng, tame=True),
                    f"fp32 {SEQ_IMEM_D} instructions, IMEM full",
                    # The default budget is 30,000 cycles and this run
-                   # needs more than twice that at IMEM_D 16384: about
+                   # needed more than twice that at IMEM_D 16384: about
                    # 20,500 to parse a 131 KB image an instruction a
                    # cycle, and about 33,000 more for the skip to walk
                    # every word of it to the matching ENDREP. It was
                    # inside the default at 4,096 and is the one case
-                   # whose cost grew fourfold with R6.
+                   # whose cost grows with IMEM_D: about 107,000 at
+                   # 32,768 (revision 7), inside the 300,000 given.
                    tries=30000)
 
     # ...and one more than the memory holds is refused at the header,
@@ -944,6 +964,36 @@ async def krnl_sequencer(dut):
                       gen_stream(FP32, 8, rng), 8, PREC_CODE["fp32"],
                       f"n_insns {SEQ_IMEM_D + 1} exceeds IMEM_D",
                       flags_now)
+
+    # ---- revision 7: the deposit budget at the cap, and one past it --
+    #
+    # MAXD is a pure capacity, like IMEM_D above: a program that fits
+    # gets the model's answer, and one that asks for a slot more is
+    # refused at the header before a byte is computed. This bench had
+    # never held the KERNEL's value - the unit bench holds cft_seq's
+    # default, 64 - and revision 7 moved it to 1,024 on the U50. At the
+    # cap the window is n * SEQ_MAXD elements and the drain writes every
+    # one, +0 where a lane never reached, so this is also the widest
+    # window a program can ask the tile for.
+    pcap = seq.Program(FP32, [
+        seq.deposit(0),
+        seq.alu(OP_MUL, rd=3, ra=0, rb=1),
+        seq.deposit(3),
+        seq.halt()], max_deposits=SEQ_MAXD)
+    n_cap = 8
+    await run_prog(dut, axil, ram, pcap,
+                   gen_stream(FP32, n_cap, rng), gen_stream(FP32, n_cap, rng),
+                   gen_stream(FP32, n_cap, rng),
+                   f"fp32 max_deposits == MAXD ({SEQ_MAXD})",
+                   tries=3000 + 2 * n_cap * SEQ_MAXD // 10)
+    over = bytearray(pcap.to_bytes())
+    over[16:20] = (SEQ_MAXD + 1).to_bytes(4, "little")
+    flags_now = await axil.read_dword(FLAGS)
+    await run_refused(dut, axil, ram, bytes(over), pcap,
+                      gen_stream(FP32, n_cap, rng),
+                      gen_stream(FP32, n_cap, rng),
+                      gen_stream(FP32, n_cap, rng), n_cap, PREC_CODE["fp32"],
+                      f"max_deposits {SEQ_MAXD + 1} exceeds MAXD", flags_now)
 
     # ---- the deposit overflow ----------------------------------------
     n8 = 8
@@ -1017,17 +1067,52 @@ async def krnl_sequencer(dut):
     n_s = 24
     pscr = seq.Program(FP32, [
         seq.stl(0, 0),                       # slot 0 := a
-        seq.stl(1, SEQ_SCRATCH_D - 1),       # ...and b at the top slot
-        seq.ldl(20, SEQ_SCRATCH_D - 1),
+        seq.stl(1, SEQ_SCRATCH_D - 1,        # ...and b at the top slot
+                SEQ_SCRATCH_D),
+        seq.ldl(20, SEQ_SCRATCH_D - 1, SEQ_SCRATCH_D),
         seq.deposit(20),
         seq.stx(20, 2),                      # scratch[c mod D] := b
         seq.ldx(21, 2),
         seq.deposit(21),
-        seq.halt()], max_deposits=2)
+        seq.halt()], max_deposits=2, scratch_depth=SEQ_SCRATCH_D)
+    # One block, and it indexes, so it may wipe the whole scratch.
     await run_prog(dut, axil, ram, pscr,
                    gen_stream(FP32, n_s, rng), gen_stream(FP32, n_s, rng),
                    [i * 5 + SEQ_SCRATCH_D * (i % 3) for i in range(n_s)],
-                   f"fp32 STL/LDL/STX/LDX, top slot {SEQ_SCRATCH_D - 1}")
+                   f"fp32 STL/LDL/STX/LDX, top slot {SEQ_SCRATCH_D - 1}",
+                   tries=3000 + WIPE_TRIES)
+
+    # ---- revision 7: an index past 256, where the tile's depth decides -
+    #
+    # The case above builds its indices from the tile's own depth, so
+    # they land on the same slots whatever that depth is. These do not:
+    # 5 + 256 * (i % 4) is slot 5 four times over on a 256-slot tile and
+    # four different slots on a deeper one. A lane whose index lands on
+    # 5 reads a and leaves b there (a, b); any other reads an untouched
+    # slot and stores b in it (+0, a). Plain, the index reduces modulo
+    # the depth; strict, one past the depth is reported, suppressed and
+    # reads +0. The model runs at SEQ_SCRATCH_D, so the U50's kernel
+    # (2,048) and the open-core configurations (256, boardseq) are each
+    # held to their own machine - and a bench that ran its model at 256
+    # against a 2,048-slot tile would fail here, on lanes 1..3 of each 4.
+    for flags, tag in ((0, "plain"), (seq.FLAG_SCRATCH_STRICT, "strict")):
+        pdeep = seq.Program(FP32, [
+            seq.stl(0, 5, SEQ_SCRATCH_D),    # slot 5 := a
+            seq.ldx(4, 2),                   # r4 := scratch[c]
+            seq.deposit(4),
+            seq.stx(1, 2),                   # scratch[c] := b
+            seq.ldl(5, 5, SEQ_SCRATCH_D),    # r5 := slot 5
+            seq.deposit(5),
+            seq.halt()], max_deposits=2, flags=flags,
+            scratch_depth=SEQ_SCRATCH_D)
+        n_d = 16
+        await run_prog(dut, axil, ram, pdeep,
+                       gen_stream(FP32, n_d, rng, tame=True),
+                       gen_stream(FP32, n_d, rng, tame=True),
+                       [5 + 256 * (i % 4) for i in range(n_d)],
+                       f"fp32 an index past 256, {tag}, at "
+                       f"{SEQ_SCRATCH_D} slots",
+                       tries=3000 + WIPE_TRIES)
 
     # The block, in and out, through SCRATCH_IN_PTR and
     # SCRATCH_OUT_PTR. run_prog reads the scratch-out region back the
@@ -1124,17 +1209,21 @@ async def krnl_sequencer(dut):
                           f"header {why}", flags_before)
     # SCRATCH_D exactly is the largest legal count, which is what says
     # the comparison is a `>` and not a `>=`.
-    pmax = seq.Program(FP32, [seq.ldl(3, SEQ_SCRATCH_D - 1),
+    pmax = seq.Program(FP32, [seq.ldl(3, SEQ_SCRATCH_D - 1, SEQ_SCRATCH_D),
                               seq.deposit(3), seq.halt()],
                        max_deposits=1, flags=io_flag,
                        n_scratch_in=SEQ_SCRATCH_D,
-                       n_scratch_out=SEQ_SCRATCH_D)
+                       n_scratch_out=SEQ_SCRATCH_D,
+                       scratch_depth=SEQ_SCRATCH_D)
     n_max = 4
+    # At most the whole scratch wiped, then n_max * SCRATCH_D elements
+    # preloaded and as many drained, each one a cycle.
     await run_prog(dut, axil, ram, pmax,
                    gen_stream(FP32, n_max, rng), gen_stream(FP32, n_max, rng),
                    gen_stream(FP32, n_max, rng),
                    f"fp32 scratch in and out at exactly {SEQ_SCRATCH_D}",
-                   scratch_in=gen_stream(FP32, n_max * SEQ_SCRATCH_D, rng))
+                   scratch_in=gen_stream(FP32, n_max * SEQ_SCRATCH_D, rng),
+                   tries=3000 + WIPE_TRIES + 2 * n_max * SEQ_SCRATCH_D // 10)
 
     # ---- revision 3 R7: a constant at index 511 through kx -----------
     #

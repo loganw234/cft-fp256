@@ -1334,6 +1334,222 @@ def test_scratch_strict_is_reported_not_wrapped():
         "an in-range program must not depend on the flag"
 
 
+# ---- revision 7: the scratch depth is a parameter of the run ---------
+#
+# docs/SEQUENCER.md, revision 7. The U50's tiles went to 2,048 slots and
+# the open-core ones stayed at 256, so the model takes the depth of the
+# tile it stands for. The contract these hold: at the default every run
+# is the run it always was; a NON-strict index wraps at the run's depth;
+# a strict one is reported past it; a program's static footprint is held
+# to it by name; and a strict run that reports nothing, or a program
+# that names only static slots, gets the same answer at every depth deep
+# enough for it.
+
+def _depth_prog(fmt, flags=0, depth=seq.SCRATCH_D, top=None):
+    """slot 5 := a; r4 := scratch[c]; scratch[c] := b; r5 := slot 5 -
+    device-test's section-2 shape. Deposits r4 then r5, so a lane shows
+    where its index landed: an index that reduced to 5 deposits a then
+    b, one that landed elsewhere deposits +0 (or what it found) then a.
+    `top` adds a store and load at a high static slot."""
+    insns = [seq.stl(0, 5, depth),
+             seq.encode(seq.LDX, rd=4, rb=2, ctrl=True),
+             seq.encode(seq.STX, ra=1, rb=2, ctrl=True),
+             seq.ldl(5, 5, depth),
+             seq.deposit(4), seq.deposit(5)]
+    if top is not None:
+        insns += [seq.stl(1, top, depth), seq.ldl(6, top, depth),
+                  seq.deposit(6)]
+    return seq.Program(fmt, insns + [seq.halt()],
+                       max_deposits=3 if top is not None else 2,
+                       flags=flags, scratch_depth=depth)
+
+
+def test_scratch_depth_default_is_every_run_as_it_was():
+    """256 is the default of the argument and of the constant, and a run
+    at the default is the same run - over the scratch fuzz corpus the
+    RTL bench draws from, every observable identical with and without
+    the argument spelled out."""
+    assert seq.SCRATCH_D == 256
+    assert seq.SCRATCH_D_MAX == 1 << 15
+    rng = random.Random(0x5D0)
+    compared = 0
+    for _ in range(60):
+        insns, consts = seq.random_program(FP32, rng, scratch=True,
+                                           wide_regs=True)
+        try:
+            prog = seq.Program(FP32, insns, consts, max_deposits=4)
+        except seq.ProgramError:
+            continue
+        a = seq.random_inputs(FP32, rng, 12)
+        b = seq.random_inputs(FP32, rng, 12)
+        c = seq.random_inputs(FP32, rng, 12)
+        assert (seq.run(prog, a, b, c).state()
+                == seq.run(prog, a, b, c,
+                           scratch_depth=seq.SCRATCH_D).state())
+        compared += 1
+    assert compared >= 40, f"only {compared} fuzz programs were valid"
+
+
+def test_scratch_depth_non_strict_wraps_at_the_runs_depth():
+    """The one place a deeper tile computes differently: a NON-strict
+    index reduces modulo the RUN's depth. 5 + 256 lands on slot 5 of a
+    256-slot tile and on slot 261 of a 2,048-slot one; 5 + 2,048 lands
+    on slot 5 of both."""
+    fmt = FP64
+    one, two = sf.one_bits(fmt), sf.max_normal_bits(fmt)
+    zero = sf.zero_bits(fmt)
+    prog = _depth_prog(fmt)
+    idx = [5, 5 + 256, 5 + 3 * 256, 5 + 2048, 5 + 7 * 2048]
+    n = len(idx)
+    a, b = [one] * n, [two] * n
+    at256 = seq.run(prog, a, b, idx)
+    at2048 = seq.run(prog, a, b, idx, scratch_depth=2048)
+    # at 256 every index is slot 5
+    for i in range(n):
+        assert at256.deposits[2 * i:2 * i + 2] == [one, two], i
+    # at 2,048 only the ones that are 5 modulo 2,048 are
+    for i, x in enumerate(idx):
+        want = [one, two] if x % 2048 == 5 else [zero, one]
+        assert at2048.deposits[2 * i:2 * i + 2] == want, (i, x)
+    assert at256.status == at2048.status == 0
+    assert len(at2048.scratch[0]) == 2048 and len(at256.scratch[0]) == 256
+    # the store landed where the index said, at each depth
+    assert at2048.scratch[1][261] == two and at2048.scratch[1][5] == one
+    assert at256.scratch[1][5] == two
+
+
+def test_scratch_depth_strict_is_reported_past_the_runs_depth():
+    """R8 at every depth: an index at or past the RUN's depth is
+    suppressed, reads +0 and raises STATUS_SCRATCH_RANGE; below it, the
+    access happens. 300 is past a 256-slot tile and inside a 2,048-slot
+    one; 2,048 is past both."""
+    fmt = FP32
+    one, zero = sf.one_bits(fmt), sf.zero_bits(fmt)
+    two = sf.max_normal_bits(fmt)
+    prog = _depth_prog(fmt, seq.FLAG_SCRATCH_STRICT)
+    for depth, idx, reported in ((256, 300, True), (2048, 300, False),
+                                 (2048, 2048, True), (2048, 2047, False),
+                                 (256, 255, False), (256, 256, True)):
+        r = seq.run(prog, [one], [two], [idx], scratch_depth=depth)
+        assert bool(r.status & seq.STATUS_SCRATCH_RANGE) == reported, \
+            (depth, idx, r.status)
+        # no index in the table is 5, so a lane's r4 reads +0 either
+        # way - untouched in range, suppressed past it - and slot 5 keeps
+        # a; what differs is where b went, and the report
+        assert r.deposits == [zero, one], (depth, idx, r.deposits)
+        if not reported:
+            assert r.scratch[0][idx] == two, (depth, idx)
+
+
+def test_scratch_depth_static_footprint_is_held_to_the_run():
+    """A static slot, and each half of scratch_io, against the depth a
+    program is WRITTEN for (Program's scratch_depth) and the depth it
+    RUNS at (run's) - both refused by name, both at the boundary."""
+    fmt = FP32
+    one = sf.one_bits(fmt)
+    # written for 256: slot 256 refused where it always was
+    with pytest.raises(seq.ProgramError, match="outside 0..255"):
+        seq.stl(0, 256)
+    with pytest.raises(seq.ProgramError, match="a lane owns 256"):
+        seq.Program(fmt, [seq.encode(seq.STL, ctrl=True, imm=300),
+                          seq.halt()])
+    # written for 2,048: slot 2,047 is legal, 2,048 is not
+    deep = _depth_prog(fmt, depth=2048, top=2047)
+    with pytest.raises(seq.ProgramError, match="outside 0..2047"):
+        seq.stl(0, 2048, 2048)
+    with pytest.raises(seq.ProgramError, match="a lane owns 2048"):
+        seq.Program(fmt, [seq.encode(seq.LDL, rd=1, ctrl=True, imm=2048),
+                          seq.halt()], scratch_depth=2048)
+    # ...and RUN on a 256-slot tile it is refused, naming the depth, as
+    # that tile's loader would refuse it
+    with pytest.raises(seq.ProgramError, match="scratch_depth"):
+        seq.run(deep, [one], [one], [5])
+    r = seq.run(deep, [one], [one], [5], scratch_depth=2048)
+    assert r.deposits[2] == one and r.scratch[0][2047] == one
+    # the header's two counts, at 2,048 exactly and one past
+    io = seq.Program(fmt, [seq.halt()], flags=seq.FLAG_SCRATCH_IO,
+                     n_scratch_in=2048, n_scratch_out=2048,
+                     scratch_depth=2048)
+    with pytest.raises(seq.ProgramError, match="past the 2048"):
+        seq.Program(fmt, [seq.halt()], flags=seq.FLAG_SCRATCH_IO,
+                    n_scratch_out=2049, scratch_depth=2048)
+    with pytest.raises(seq.ProgramError, match="n_scratch_in=2048 past"):
+        seq.run(io, [one], [one], scratch_in=[one] * 2048)
+    out = seq.run(io, [one], [one], scratch_in=list(range(2048)),
+                  scratch_depth=2048)
+    assert out.scratch_out == list(range(2048))
+    # from_bytes reads for the depth it is told, and defaults to 256
+    img = deep.to_bytes()
+    with pytest.raises(seq.ProgramError, match="a lane owns 256"):
+        seq.Program.from_bytes(img)
+    back = seq.Program.from_bytes(img, scratch_depth=2048)
+    assert back.to_bytes() == img and back.scratch_depth == 2048
+
+
+def test_scratch_depth_portability_where_the_contract_promises_it():
+    """What R8 and revision 7 promise between depths, over a fuzz: a
+    program that names only STATIC slots gets the same answer at every
+    depth that holds them, and a STRICT run that reports nothing at a
+    depth gets the same answer at every deeper one. Each arm checks
+    that it reached its case."""
+    rng = random.Random(0x7D)
+    static_seen = strict_seen = 0
+
+    def same(r, base):
+        return (r.deposits, r.flags, r.status, r.counts, r.regs,
+                r.scratch_out) == (base.deposits, base.flags, base.status,
+                                   base.counts, base.regs, base.scratch_out)
+
+    for _ in range(200):
+        insns, consts = seq.random_program(FP32, rng, scratch=True,
+                                           wide_regs=True)
+        indexed = any(seq.decode(w)["ctrl"] and
+                      seq.decode(w)["op"] in (seq.STX, seq.LDX)
+                      for w in insns)
+        for flags in (0, seq.FLAG_SCRATCH_STRICT):
+            try:
+                prog = seq.Program(FP32, insns, consts, max_deposits=4,
+                                   flags=flags)
+            except seq.ProgramError:
+                continue
+            n = 10
+            a = seq.random_inputs(FP32, rng, n)
+            b = seq.random_inputs(FP32, rng, n)
+            # c carries small unsigned indices - inside 256 for the
+            # strict arm, so that some of its runs report nothing there,
+            # and straddling it for the rest
+            pool = (0, 3, 7, 200, 255) if flags else (3, 7, 255, 256, 300)
+            c = [rng.choice(pool) for _ in range(n)]
+            base = seq.run(prog, a, b, c)
+            deeper = [seq.run(prog, a, b, c, scratch_depth=d)
+                      for d in (512, 2048)]
+            if not indexed:
+                static_seen += 1
+                assert all(same(r, base) for r in deeper)
+            elif flags and not (base.status & seq.STATUS_SCRATCH_RANGE):
+                strict_seen += 1
+                assert all(same(r, base) for r in deeper)
+    # Measured at this seed: 32 and 159 (at seeds 1..3, 22..48 and
+    # 154..165). A non-strict indexing run is promised nothing between
+    # depths, and the wrap test above shows one differing; the random
+    # corpus rarely does, because its indices seldom collide.
+    assert static_seen >= 16 and strict_seen >= 80, \
+        (static_seen, strict_seen)
+
+
+def test_scratch_depth_argument_is_checked():
+    """A depth this model cannot stand for is refused: CAPS2[3:0] is a
+    four-bit log2, so a power of two in 1..2^15."""
+    prog = seq.Program(FP32, [seq.halt()])
+    for bad in (0, 3, 300, 1 << 16, -256, 256.0, True):
+        with pytest.raises(ValueError, match="scratch_depth"):
+            seq.run(prog, [0], [0], scratch_depth=bad)
+        with pytest.raises(ValueError, match="scratch_depth"):
+            seq.Program(FP32, [seq.halt()], scratch_depth=bad)
+    for good in (1, 2, 256, 2048, 1 << 15):
+        seq.run(prog, [0], [0], scratch_depth=good)
+
+
 def test_scratch_refusals():
     fmt = FP32
     # a STATIC slot past the depth, refused by name - at the assembler

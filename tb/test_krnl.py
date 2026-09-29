@@ -145,6 +145,32 @@ def _localparam(path, name):
     return int(m2.group(1))
 
 
+def krnl_param(name):
+    """A cft_krnl `parameter int` as THIS build has it: the CFT_GENERICS
+    override the Makefile target built with, or else the value the
+    parameter list declares.
+
+    Revision 7 (2026-09-29) made SEQ_MAXD, SEQ_IMEM_D and SEQ_SCRATCH_D
+    parameters, so the U50's numbers are the declared defaults and an
+    open-core target overrides them - tb/Makefile's OPEN_CAPS_GENERICS
+    reaches the simulator as -P and this bench as CFT_GENERICS, from one
+    list. Reading only the declaration would score the board's CAPS
+    against the U50's, and reading only the environment would score a
+    default build against nothing."""
+    import re
+    for g in os.environ.get("CFT_GENERICS", "").split():
+        gname, _, value = g.partition("=")
+        if gname == name:
+            assert value.isdigit(), (
+                f"CFT_GENERICS {g!r}: {name} is an int parameter")
+            return int(value)
+    src = (RTL / "cft_krnl.sv").read_text(encoding="utf-8")
+    m = re.search(r"^\s*parameter\s+int\s+%s\s*=\s*(\d+)\s*[,)]" % name,
+                  src, re.MULTILINE)
+    assert m, f"cft_krnl.sv has no `parameter int {name}`"
+    return int(m.group(1))
+
+
 def _port_literal(path, port):
     """The value of a constant 4-bit port wired as `.<port>(4'bxxxx)`."""
     import re
@@ -168,9 +194,10 @@ def caps2_expected():
     appear without somebody noticing. Revision 4's did, and this is
     where it was noticed - so ADD the bit here deliberately rather than
     loosening the comparison."""
-    d = _localparam(RTL / "cft_krnl.sv", "SEQ_SCRATCH_D")
-    assert d == 1 << (d.bit_length() - 1), (
-        f"SEQ_SCRATCH_D={d} is not a power of two; CAPS2 publishes log2, "
+    d = krnl_param("SEQ_SCRATCH_D")
+    assert d == 1 << (d.bit_length() - 1) and d <= 1 << 15, (
+        f"SEQ_SCRATCH_D={d} is not a power of two in 1..2^15; CAPS2[3:0] "
+        f"publishes its log2 in four bits, "
         f"and STX/LDX reduce modulo the depth with a mask - and, since "
         f"revision 4, decide `past the depth` by bit length, which is "
         f"the same question only for a power of two")
@@ -220,8 +247,11 @@ def check_caps2(caps2):
 
 def seq_caps_expected():
     """(feat, log2 maxd, log2 imem, log2 kreg) as the RTL declares them."""
-    maxd = _localparam(RTL / "cft_krnl.sv", "SEQ_MAXD")
-    imem = _localparam(RTL / "cft_krnl.sv", "SEQ_IMEM_D")
+    # The two a build sets since revision 7, as this build set them; the
+    # constant bank stays a localparam (a deeper one is an instruction-
+    # format change, not a capacity).
+    maxd = krnl_param("SEQ_MAXD")
+    imem = krnl_param("SEQ_IMEM_D")
     kmem = _localparam(RTL / "cft_krnl.sv", "SEQ_KMEM_D")
     kidx = _localparam(RTL / "cft_krnl.sv", "SEQ_KIDX_W")
     # cft_seq owns the constant bank's depth as its own localparam, and
@@ -233,12 +263,15 @@ def seq_caps_expected():
         f"cft_krnl's SEQ_KIDX_W={kidx} means {1 << kidx} addressable "
         f"constants and cft_seq's KREG is {kreg}")
     # A four-bit field can only carry an exponent, so a capacity that is
-    # not a power of two would be published rounded DOWN - a cap a host
-    # would size a program against and be refused by.
+    # not a power of two would be published rounded UP ($clog2 is the
+    # ceiling; this said DOWN until revision 7) - a cap a host would size
+    # a program against and be refused by - and one past 2^15 would wrap
+    # its field.
     for name, v in (("SEQ_MAXD", maxd), ("SEQ_IMEM_D", imem),
                     ("SEQ_KMEM_D", kmem)):
-        assert v == 1 << (v.bit_length() - 1), (
-            f"{name}={v} is not a power of two; CAPS publishes log2")
+        assert v == 1 << (v.bit_length() - 1) and v <= 1 << 15, (
+            f"{name}={v} is not a power of two in 1..2^15; CAPS publishes "
+            f"its log2 in four bits")
     feat = _port_literal(RTL / "cft_krnl.sv", "seq_feat")
     return feat, maxd.bit_length() - 1, imem.bit_length() - 1, kidx
 

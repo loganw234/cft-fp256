@@ -1,0 +1,54 @@
+; deepwalk-fp64 - a local array of a thousand samples, laid down and read
+; back in reverse through a loop counter: revision 7's deeper scratch
+;
+; docs/SEQUENCER.md revision 7: the U50's tiles have 2,048 scratch slots
+; a lane and the open-core ones 256, so this program is written for
+; 2,048 (`.scratch 2048`) and reaches slot 999 through `stx`/`ldx` alone
+; - no static slot at all, so it LOADS on a 256-slot device as well.
+; There it computes something else, and that is the point of it: without
+; `.scratch strict` an index reduces modulo the device's depth, so on a
+; 256-slot tile write i lands on slot i mod 256 and each read-back finds
+; whichever sample wrote its slot last. deepwalk-strict-fp64 is the same
+; program asking for revision 4's R8, where the index past the depth is
+; reported instead.
+;
+; Phase one: a[0] = x and a[k+1] = a[k]*GROW + SHIFT, for k < 1000, each
+; stored at slot k. Phase two reads them back from 999 down to 0 and sums
+; them in that order, as one `fma` a sample against the constant 1:
+;
+;     acc = (...((a[999] + a[998]) + a[997]) ... + a[0])
+;
+; and deposits the sum, then a[1000] - the sample the write loop left in
+; `v`, which says the recurrence ran its thousand trips. Growing by a
+; quarter a step, a[999] is about x * 7e96: inside binary64, and large
+; enough that every sample's own bits reach the sum.
+
+.format   fp64
+.deposits 2
+.scratch  2048
+
+.const    IONE  = 0x0000000000000001   ; the raw encoding of integer 1
+.const    ONE   = 1.0
+.const    GROW  = 1.25
+.const    SHIFT = 0.5
+
+.reg      i   = r3      ; the index; +0 is the integer 0
+.reg      v   = r4      ; the sample being written
+.reg      s   = r5      ; one sample, read back
+.reg      acc = r6
+
+copysign v, r0, r0            ; a[0] = x, exactly
+repeat 1000
+  stx  v, i                   ; a[i] = v
+  iadd i, i, IONE
+  fma  v, v, GROW, SHIFT      ; the next sample
+endrep
+
+repeat 1000
+  isub i, i, IONE             ; 999 first, 0 last
+  ldx  s, i
+  fma  acc, s, ONE, acc       ; acc + s, rounded once
+endrep
+deposit acc
+deposit v
+halt

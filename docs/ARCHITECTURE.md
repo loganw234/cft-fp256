@@ -115,13 +115,16 @@ kernel flow, XRT host runtime.
   A lane owns **32 registers** of format width since revision 2, so the
   register file is `32 * NBEATS` beats of 32 bytes - 16 KiB a tile at
   `NBEATS` 16, the same silicon at every precision - and since revision
-  3 **256 scratch slots** of the same width, addressed `{slot, beat}`
-  the way the register file is addressed `{reg, beat}`: `256 * NBEATS`
-  beats of 32 bytes, **128 KiB a tile**, eight times the register file.
-  The instruction memory holds **16,384** (4,096 at revision 2, 1,024
-  before it) and the constant bank **512**, which is another 128 KiB and
-  16 KiB - so the module's two largest memories are now the scratch and
-  the instruction stream, at exactly the same size. It borrows all four
+  3 a scratch of the same width, addressed `{slot, beat}` the way the
+  register file is addressed `{reg, beat}`: `SCRATCH_D * NBEATS` beats
+  of 32 bytes. Since revision 7 three of the capacities are `cft_krnl`
+  parameters, each published in CAPS or CAPS2: the U50's revision-7
+  images hold **2,048 scratch slots** (1 MiB a tile), **32,768
+  instructions** (256 KB) and **1,024 deposit slots** a lane (512 KiB),
+  where the round-2 images and the open-core builds hold 256 (128 KiB),
+  16,384 (4,096 at revision 2, 1,024 before it) and 64; the constant
+  bank is **512** (16 KiB) on every one (docs/SEQUENCER.md, revision
+  7). It borrows all four
   masters from the streaming engine - each read steered to A, B or C by
   its buffer, the writes on D - and issues into the same `cft_lanes`.
   docs/SEQUENCER.md is the design and `python/cft_golden/seq.py` the
@@ -390,7 +393,8 @@ hardware far more than it needs a transcendental.
   after the tile has refused one. Four exponents: deposit slots a
   lane, instructions, addressable constants, and scratch slots a lane.
   A host that skips this
-  discovers the tile's 64 deposit slots on card day, as a `STATUS[3]`
+  discovers the tile's deposit slots (64, or 1,024 on the U50's
+  revision-7 images) on card day, as a `STATUS[3]`
   with no explanation attached; a host that reads it sizes its
   program to fit. All of them read zero on a tile from before they
   existed, which means unknown and not zero.

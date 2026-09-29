@@ -1,0 +1,42 @@
+; deepwalk-strict-fp64 - deepwalk-fp64 asking for revision 4's R8
+;
+; The same thousand samples, the same order, the same sum - with
+; `.scratch strict`, so an index at or past the device's depth is
+; REPORTED (STATUS[5]) rather than reduced modulo it: the access is
+; suppressed, and a suppressed `ldx` reads +0. On a device of 2,048
+; slots every index is inside and this computes exactly what
+; deepwalk-fp64 computes, with nothing reported; on one of 256 the
+; writes past slot 255 never happen, the reads past it give +0, the sum
+; is of a[0..255] alone, and STATUS[5] says so. docs/SEQUENCER.md R8 and
+; revision 7.
+
+.format   fp64
+.deposits 2
+.scratch  2048
+.scratch  strict
+
+.const    IONE  = 0x0000000000000001   ; the raw encoding of integer 1
+.const    ONE   = 1.0
+.const    GROW  = 1.25
+.const    SHIFT = 0.5
+
+.reg      i   = r3      ; the index; +0 is the integer 0
+.reg      v   = r4      ; the sample being written
+.reg      s   = r5      ; one sample, read back
+.reg      acc = r6
+
+copysign v, r0, r0            ; a[0] = x, exactly
+repeat 1000
+  stx  v, i                   ; a[i] = v, or nothing past the depth
+  iadd i, i, IONE
+  fma  v, v, GROW, SHIFT      ; the next sample
+endrep
+
+repeat 1000
+  isub i, i, IONE             ; 999 first, 0 last
+  ldx  s, i                   ; +0 past the depth
+  fma  acc, s, ONE, acc       ; acc + s, rounded once
+endrep
+deposit acc
+deposit v
+halt

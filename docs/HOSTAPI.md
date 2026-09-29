@@ -2337,8 +2337,9 @@ to refuse.
 **The two workload tools size themselves from the answer.** `cft-zoom`
 took `--steps-per-call` from a `#define TILE_MAX_DEPOSITS 64` copied
 out of the RTL; it now reads `cft_caps.max_deposits`, and when the
-device's budget is smaller than its default it uses `cap / 2` (two
-deposits a trip) and says so on stderr, because the trip count changes
+device's budget cannot hold its default - 1,024 trips of two deposits,
+2,048 slots a lane - it uses `cap / 2` and says so on stderr, because
+the trip count changes
 only how many calls a run takes and not what it computes. A value the
 user typed is refused instead, naming the cap - running something
 other than the command line says is how a measurement stops meaning
@@ -2555,9 +2556,13 @@ no-op; a load writes `rd` and is masked the same way. Neither is
 arithmetic: no rounding attribute, no flags.
 
 `CFT_SEQ_FEAT_SCRATCH` (bit 8 of `seq_features`, CAPS2[4]) publishes
-the memory and `cft_caps.max_scratch` its depth, 256 here and on the
-tile. The two are asked SEPARATELY and follow different rules: a clear
-feature bit is ABSENT, a zero capacity is UNKNOWN.
+the memory and `cft_caps.max_scratch` its depth - 256 here and on the
+tile when this was written; since revision 7 a tile's is its build's
+(2,048 on the U50's revision-7 images) and a software handle's is 256
+unless it was opened at another with `cft_open_ex` (below, "A software
+handle at a tile's depth"). The two are asked SEPARATELY and follow
+different rules: a clear feature bit is ABSENT, a zero capacity is
+UNKNOWN.
 
 The header's second reserved word becomes `scratch_io` -
 `[15:0] = n_scratch_in`, `[31:16] = n_scratch_out` - meaningful only
@@ -3159,3 +3164,84 @@ that needs either call asks for 0.15.
   hashed are the bytes loaded. A second read that returned other bytes
   would pass every gate here; verifier-C3 showed it on a mock of XRT,
   and no cheap instrument can see a read that XRT would make itself.
+
+## A software handle at a tile's depth: `cft_open_ex` (revision 7, 2026-09-29)
+
+Revision 7 made the tile's program limits a build's parameters
+(docs/SEQUENCER.md, "Revision 7, the program limits per build"): the
+U50's revision-7 images hold 1,024 deposit slots a lane, 32,768
+instructions and 2,048 scratch slots, the round-2 images and the
+open-core builds 64, 16,384 and 256. Two of the three need nothing here:
+`max_deposits` and `max_insns` are capacities, read from CAPS as they
+always were, and a program that fits gets the same answers anywhere.
+The scratch depth is not only a capacity - a non-strict `STX`/`LDX`
+reduces its index modulo it - so a software handle has to be able to
+stand for a deeper tile, and a comparison against one has to be able to
+ask for that:
+
+    typedef struct cft_open_args {
+        size_t      struct_size;     /* in: sizeof(cft_open_args) */
+        const char *artifact;        /* as cft_open's: NULL, a path, cft:// */
+        int         index;           /* as cft_open's */
+        uint32_t    scratch_depth;   /* 0, or a software handle's depth */
+    } cft_open_args;
+
+    cft_status cft_open_ex(const cft_open_args *args, cft_device **out);
+
+- `scratch_depth` 0 is `cft_open` exactly. Otherwise, on the SOFTWARE
+  backend only, the handle has that many scratch slots a lane: a power
+  of two in 1..32,768, the most CAPS2[3:0] can publish. It publishes the
+  depth in `cft_caps.max_scratch` and holds every program to it - a
+  static slot or a scratch-I/O count past it is refused at load, by
+  name, as on any backend - and its executor reduces a non-strict index
+  modulo it and reports a strict one past it, which is what a tile of
+  that depth computes.
+- A plain `cft_open(NULL, ...)` is 256, so every result a software
+  handle has ever given is the one it still gives.
+- Refused, each with a sentence: a `struct_size` other than this
+  library's (`CFT_ERR_INVALID_ARGUMENT`, as for every input struct); a
+  depth that is not a power of two in range (`CFT_ERR_INVALID_ARGUMENT`);
+  a non-zero depth with an xclbin or a `cft://` artifact
+  (`CFT_ERR_UNSUPPORTED` - a device's depth is its image's, and a remote
+  handle's its server's); and a depth in a `-DCFT_NO_PROGRAM` build
+  (`CFT_ERR_UNSUPPORTED`), which has no scratch.
+- Memory: a run of a program that uses the scratch holds a lane block of
+  it, 64 lanes x depth x 260 bytes - 4.3 MB at 256, 34 MB at 2,048, 545
+  MB at 32,768 - and clears per block only the slots the program can
+  reach.
+
+What takes it:
+- `device-test` opens its software reference at the DEVICE's
+  `max_scratch`, so a 2,048-slot tile is compared against a 2,048-slot
+  reference; `--scratch-depth N` opens the software device under test
+  ("sw") at N, which is how the whole matrix runs at the U50's depth
+  without a card. Its sequencer leg walks a program 300 slots deep,
+  plain and strict, and where the device is deeper than 256 holds the
+  reference to having been deeper too: a plain 256-slot handle must
+  compute another sum and report the strict walk past slot 255. And it
+  runs a scratch block as deep as the device on the device itself -
+  300 slots in and out, in alone and out alone, and the whole depth both
+  ways - held to its own bytes rather than to the reference, with one
+  slot past the depth refused by name.
+
+The block leg exists because the loader had a defect this section's
+first version did not see (verifier-R5, 2026-09-29): a test of the
+library's own 256-slot ceiling on a scratch block ran whatever depth
+the device published, so every handle - software at 2,048, the U50's
+revision-7 tile, a `cft://` client - refused a block of 257 to 2,048
+slots as `CFT_ERR_INVALID_ARGUMENT`, with no sentence. A block is now
+held to the handle's own `max_scratch` and nothing else; the library's
+ceiling applies only where a device published no depth, and says so.
+- `positive-run --scratch-depth N` makes a plate for a deeper tile on
+  the software backend; it prints a `scratch-depth` line only when
+  asked, so every other plate prints what it always did.
+
+Not built, and named: `cft-serve` has no flag to serve a deeper software
+device, so a remote handle to a software server is 256; `cft-segrun`
+opens the software backend plainly, so a certificate made on software is
+made at 256 (its `device-caps` reads `none`, and the audit re-runs it
+at 256); the WebAssembly module exports no `cft_open_ex`.
+
+ABI: an additive entry point and struct for 0.16. The version macro,
+the WebAssembly rebuild and the bindings' tables move with the
+integrator's bump at the merge, as every step's do.

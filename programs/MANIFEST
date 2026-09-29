@@ -9,6 +9,8 @@
 # sha256                                                              image
 c135fb3781833fdd2bc2e4330ceec1ec269392607a464fb3b397fb51b67fcf05  collatz-fp256.cftp
 efb35896d8dccfca00b2e939be73da313b122f0de31700da6075121c269352c2  conv-fp64.cftp
+1418dbfb5aab20cfc88bab894fe8eff8d6af00457d97cff8d460f6c405b4ba07  deepwalk-fp64.cftp
+58dcbc32944ec7bad3b77cadbf54d8f05ae200934a75bbd42b8689bd797ab35c  deepwalk-strict-fp64.cftp
 96023d06dc64234f15603dc7652e1ca82cec3dd54129ac7a5b5cca4312c03030  div-fp128.cftp
 7a9a7cfad6b052494211ce3de8aadda906633026a3c2e780651d524e38943d69  div-fp256.cftp
 25052972e3dcf98a33ba4b4e2a06b1bcb0b18116279b275d834771d794a9a2a2  div-fp32.cftp

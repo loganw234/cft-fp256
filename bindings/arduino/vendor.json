@@ -21,7 +21,7 @@
     {
       "source": "host/include/cft.h",
       "dest": "src/cft/include/cft.h",
-      "sha256": "d01c86384675915a737d7113351031dbc37797f3d031733da21b0dd98c7a870e"
+      "sha256": "df32d0ff8bf05243a3452266bd7e4fe5a19a3eff32d0c600bfe0b9ba71b9139a"
     },
     {
       "source": "host/include/cft_config.h",
@@ -81,7 +81,7 @@
     {
       "source": "host/src/device.c",
       "dest": "src/cft/src/device.c",
-      "sha256": "23027829fc635cc7e384c77d21bf8cf8dca3a7d1fa7eb1574acb00b314e77c71"
+      "sha256": "6b4a1c516b1a2777be7efad9fc0edf0146df024788148b071155776debce29a0"
     },
     {
       "source": "host/src/divfull_images.h",
@@ -131,7 +131,7 @@
     {
       "source": "host/src/program.c",
       "dest": "src/cft/src/program.c",
-      "sha256": "77d24807773d149d79e6d4326d2f270c0c417c142503379af48edaabb22a1410"
+      "sha256": "790740dbd61d85f68b1b78510e4b68bcb88d64cadb551944d78aaeef3d94dfb9"
     },
     {
       "source": "host/src/reduce.c",

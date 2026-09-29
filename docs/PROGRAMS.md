@@ -370,6 +370,19 @@ back as `.scratch N` when it is not the default. A reader that simply
 defaulted to 256 would refuse a perfectly legal program written for a
 512-slot tile, which is a readback that is not a readback.
 
+**What a depth can be (revision 7, 2026-09-29).** A tile's depth is its
+build's: 256 on the round-2 images and the open-core builds, 2,048 on
+the U50's revision-7 images, and at most 2^15 on any, because
+`CAPS2[3:0]` is a four-bit log2. The assembler accepts the slot field's
+2^24, but the golden model stands for tiles and takes a depth of at
+most 2^15 (`seq.run(..., scratch_depth=)`), so a program declared deeper
+assembles and runs nowhere. `programs/deepwalk-fp64.cfta` is written for
+2,048 and reaches slot 999 through `stx`/`ldx` alone.
+`.scratch strict` is written back by both disassemblers: asm.py's
+omitted it until revision 7, so a strict image re-assembled from its
+Python readback was a plain one - found on `deepwalk-strict-fp64`, the
+first strict program in the library.
+
 ### The ninth constant-index bit
 
 A constant name whose index is 256 or more is emitted under `kx` with

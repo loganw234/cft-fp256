@@ -67,8 +67,32 @@ MAX_LOOP_DEPTH = 4
 # INSTRUCTION's meaning: STX/LDX reduce modulo it, so a model with a
 # different depth would compute different answers rather than merely
 # accept larger programs.
+#
+# So since revision 7 (2026-09-29), when the U50's tiles went to 2,048
+# slots and the open-core ones stayed at 256, the depth is a PARAMETER
+# of a run - `run(..., scratch_depth=)` - and of the validation a
+# program is held to, and SCRATCH_D is its DEFAULT: the depth of every
+# tile built before revision 7, of every open-core build, and of the
+# software backend unless it is opened at another. A run at the default
+# computes exactly what it computed before the parameter existed, and a
+# run at a device's depth is what that device must compute - which is
+# what lets the model stay the authority for a tile of any depth.
 SCRATCH_D = 256
 SCRATCH_MASK = SCRATCH_D - 1
+# The deepest scratch a tile can publish: CAPS2[3:0] is a FOUR-bit log2.
+SCRATCH_D_MAX = 1 << 15
+
+
+def check_scratch_depth(depth):
+    """A scratch depth this model can stand for: a power of two in
+    1..SCRATCH_D_MAX, because the tile publishes its log2 in four bits
+    and STX/LDX reduce modulo it with a mask. Returns it."""
+    if (not isinstance(depth, int) or isinstance(depth, bool)
+            or not 1 <= depth <= SCRATCH_D_MAX or depth & (depth - 1)):
+        raise ValueError(
+            f"scratch_depth {depth!r} is not a power of two in "
+            f"1..{SCRATCH_D_MAX}")
+    return depth
 
 # The fifth bit of each register field, by position in `imm`. Written
 # as a table rather than four shifts because the RTL decode, the
@@ -462,15 +486,17 @@ def actall():
     return encode(ACTALL, ctrl=True)
 
 
-def stl(ra, slot):
-    """scratch[slot] := ra, for the lane, masked by its active bit."""
-    _check_slot(slot)
+def stl(ra, slot, scratch_depth=SCRATCH_D):
+    """scratch[slot] := ra, for the lane, masked by its active bit.
+    `scratch_depth` is the depth the program is written for (revision
+    7); a slot at or past it is refused."""
+    _check_slot(slot, scratch_depth)
     return encode(STL, ra=ra, ctrl=True, imm=slot)
 
 
-def ldl(rd, slot):
+def ldl(rd, slot, scratch_depth=SCRATCH_D):
     """rd := scratch[slot], a masked register write."""
-    _check_slot(slot)
+    _check_slot(slot, scratch_depth)
     return encode(LDL, rd=rd, ctrl=True, imm=slot)
 
 
@@ -545,15 +571,16 @@ def features_rev8(insns):
     return need
 
 
-def _check_slot(slot):
+def _check_slot(slot, scratch_depth=SCRATCH_D):
     """A STATIC slot past the depth is refused, by name, exactly as a
     constant index past the bank is - the instruction says which slot
     and the answer is knowable before the run. An INDEXED slot is not
     refused, it is reduced: `rb` is data, so refusing it would mean
     refusing a program for a value it might compute."""
-    if not 0 <= slot < SCRATCH_D:
+    check_scratch_depth(scratch_depth)
+    if not 0 <= slot < scratch_depth:
         raise ProgramError(
-            f"scratch slot {slot} outside 0..{SCRATCH_D - 1}")
+            f"scratch slot {slot} outside 0..{scratch_depth - 1}")
     return slot
 
 
@@ -575,10 +602,19 @@ class Program:
     instruction and `[31:16]` slots read back out of it after the last
     deposit. With the bit clear the word must be zero, which is exactly
     what a revision-2 tile enforces and therefore the version guard.
+
+    `scratch_depth` (revision 7) is the depth the program is WRITTEN FOR,
+    and what validation holds its static slots and its two scratch-I/O
+    counts to: 256 by default, which is every refusal as it always was.
+    It is not in the image - SCRATCH_D is a build parameter of the tile,
+    published in CAPS2 - so it is the caller's statement, as `.scratch N`
+    is the assembler's, and `run()` holds the program to the depth of
+    the run it is handed to as well.
     """
 
     def __init__(self, fmt: FpFormat, insns, consts=(), max_deposits=1,
-                 flags=0, n_consts=None, n_scratch_in=0, n_scratch_out=0):
+                 flags=0, n_consts=None, n_scratch_in=0, n_scratch_out=0,
+                 scratch_depth=SCRATCH_D):
         self.fmt = fmt
         self.insns = list(insns)
         self.consts = list(consts)
@@ -586,6 +622,7 @@ class Program:
         self.flags = flags
         self.n_scratch_in = n_scratch_in
         self.n_scratch_out = n_scratch_out
+        self.scratch_depth = check_scratch_depth(scratch_depth)
         if flags & FLAG_BANK_EXT:
             if self.consts:
                 raise ProgramError(
@@ -752,9 +789,10 @@ class Program:
                         f"{name}={v} without flags.SCRATCH_IO: with the "
                         f"bit clear the header's second word is reserved "
                         f"and must be zero")
-            elif v > SCRATCH_D:
+            elif v > self.scratch_depth:
                 raise ProgramError(
-                    f"{name}={v} past the {SCRATCH_D} slots a lane owns")
+                    f"{name}={v} past the {self.scratch_depth} slots a "
+                    f"lane owns")
 
         depth = 0
         # `mult` tracks how many times the instruction at the current
@@ -833,10 +871,10 @@ class Program:
                 # refused - their slot is data, and the reduction
                 # modulo the depth is part of the contract.
                 slot = d["imm"] & SCRATCH_SLOT_MASK
-                if slot >= SCRATCH_D:
+                if slot >= self.scratch_depth:
                     raise ProgramError(
                         f"[{pc}] {CTRL_NAMES[code]} names scratch slot "
-                        f"{slot} but a lane owns {SCRATCH_D}")
+                        f"{slot} but a lane owns {self.scratch_depth}")
 
             if code == REPEAT:
                 if d["imm"] == 0:
@@ -1002,7 +1040,10 @@ class Program:
         return out
 
     @classmethod
-    def from_bytes(cls, data):
+    def from_bytes(cls, data, scratch_depth=SCRATCH_D):
+        """The image back, validated as written for `scratch_depth`
+        slots (revision 7; 256 by default) - the depth is not in the
+        image, so a reader says which device it reads for."""
         if len(data) < HEADER_WORDS * 4:
             raise ProgramError("shorter than a header")
         magic, ver, n_insns, n_consts, maxdep, prec, flags, word7 = \
@@ -1052,7 +1093,8 @@ class Program:
         return cls(fmt, insns, consts, maxdep, flags=flags,
                    n_consts=n_consts,
                    n_scratch_in=word7 & 0xFFFF,
-                   n_scratch_out=(word7 >> 16) & 0xFFFF)
+                   n_scratch_out=(word7 >> 16) & 0xFFFF,
+                   scratch_depth=scratch_depth)
 
 
 # The index that reads as +0, `CFT_IDX_NONE` in host/include/cft.h.
@@ -1185,12 +1227,32 @@ def _post_step(fmt, d, regs, active):
         if on:
             regs[i][rb], _ = sf.iadd(fmt, regs[i][rb], inc)
 
+def static_scratch_reach(insns):
+    """One past the highest STATIC slot any STL or LDL names - 0 for a
+    program that names none. What a device's loader holds to its depth
+    (an indexed slot is data and is never refused)."""
+    reach = 0
+    for word in insns:
+        d = decode(word)
+        if d["ctrl"] and d["op"] in (STL, LDL):
+            reach = max(reach, (d["imm"] & SCRATCH_SLOT_MASK) + 1)
+    return reach
+
 
 def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
         early_exit=True, insn_budget=None, n_active=None,
         idx_a=None, idx_b=None, idx_c=None, idx_scratch_in=None,
-        lane_mask=None):
+        lane_mask=None, scratch_depth=SCRATCH_D):
     """Execute `prog` over len(a) lanes.
+
+    `scratch_depth` is the depth of the tile this run stands for
+    (revision 7): the scratch slots a lane owns, the modulus a NON-strict
+    STX/LDX reduces its index by, and the bound a strict one is reported
+    past. 256 by default, which is what every run computed before the
+    parameter existed; a device's own is 1 << CAPS2[3:0]. A program whose
+    static slots or scratch-I/O counts do not fit it is REFUSED, by
+    name, as that device's loader would refuse it - whatever depth the
+    program was validated for.
 
     The three input streams initialise r0, r1 and r2 - the same three
     the elementwise engine already reads, so a sequencer run needs no
@@ -1271,6 +1333,21 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
     an instruction can raise.
     """
     fmt = prog.fmt
+    depth = check_scratch_depth(scratch_depth)
+    # The program against THIS run's depth, as a device's loader holds it
+    # to its own: the highest static slot, and both scratch-I/O counts.
+    reach = static_scratch_reach(prog.insns)
+    if reach > depth:
+        raise ProgramError(
+            f"a static slot reaches {reach - 1} and this run's tile owns "
+            f"{depth} scratch slots a lane (scratch_depth)")
+    if prog.scratch_io:
+        for name, v in (("n_scratch_in", prog.n_scratch_in),
+                        ("n_scratch_out", prog.n_scratch_out)):
+            if v > depth:
+                raise ProgramError(
+                    f"{name}={v} past the {depth} scratch slots a lane "
+                    f"owns on this run's tile (scratch_depth)")
     prog._check_bank(bank)
     consts = list(bank) if prog.bank_ext else prog.consts
     # R16, resolved first. The run's length is the table's where there
@@ -1352,12 +1429,12 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
         regs[i][0] = a[i] & mask
         regs[i][1] = b[i] & mask
         regs[i][2] = c[i] & mask
-    # The scratch, one array of SCRATCH_D slots per lane, +0 everywhere
+    # The scratch, one array of `depth` slots per lane, +0 everywhere
     # a run begins. Slots start at +0 for the same reason a deposit
     # slot no lane wrote reads +0: a run whose untouched storage kept
     # whatever was there before would not be bit-exact between two
     # machines.
-    scratch = [[zero] * SCRATCH_D for _ in range(n)]
+    scratch = [[zero] * depth for _ in range(n)]
     nsin = prog.n_scratch_in if prog.scratch_io else 0
     if nsin:
         # Lane-major and dense, and PADDING LANES RECEIVE NOTHING: a
@@ -1497,8 +1574,11 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
                     # scratch_used computes the same answer at every
                     # depth, and one outside it is told rather than
                     # quietly given a different number.
+                    # Both against the RUN's depth (revision 7): the
+                    # modulus and the range are the tile's, and 256 is
+                    # only the default one.
                     idx = regs[i][d["rb"]]
-                    if strict and idx >= SCRATCH_D:
+                    if strict and idx >= depth:
                         status |= STATUS_SCRATCH_RANGE
                         if code == LDX:
                             # +0, the same thing an untouched slot reads
@@ -1507,7 +1587,7 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
                             # lane happened to hold.
                             regs[i][d["rd"]] = zero
                         continue
-                    slot = idx & SCRATCH_MASK
+                    slot = idx & (depth - 1)
                 if code in (STL, STX):
                     scratch[i][slot] = regs[i][d["ra"]]
                 else:
@@ -1546,7 +1626,7 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
 
 def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False,
                    extended=False, wide_regs=False, scratch=False,
-                   rev8=False):
+                   rev8=False, scratch_depth=SCRATCH_D):
     """A random program, for fuzzing. Returns (insns, consts).
 
     It lives here rather than in a test file because two different
@@ -1595,8 +1675,11 @@ def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False,
     # actually COLLIDE - a corpus that scattered its slots over 256
     # would spend its time reading +0 out of untouched storage - plus
     # the highest slot, which is the one an off-by-one in the address
-    # decode reaches past.
-    slots = [0, 1, 2, 3, 7, SCRATCH_D - 1]
+    # decode reaches past. `scratch_depth` (revision 7) moves that one
+    # slot and nothing else, and draws nothing, so at the default every
+    # seed's corpus is the one it always was; the programs it builds are
+    # written for that depth and go to Program(..., scratch_depth=).
+    slots = [0, 1, 2, 3, 7, check_scratch_depth(scratch_depth) - 1]
     ops = [OP_FMA_, OP_ADD_, OP_SUB_, OP_MUL_, OP_ABS_,
            OP_MIN_, OP_MAXNUM_, OP_CMPLT_, OP_SELECT_, OP_IXOR_]
     if extended:
@@ -1651,9 +1734,11 @@ def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False,
         if scratch and rng.random() < 0.4:
             kind = rng.randrange(4)
             if kind == 0:
-                insns.append(stl(rng.randrange(nreg), rng.choice(slots)))
+                insns.append(stl(rng.randrange(nreg), rng.choice(slots),
+                                 scratch_depth))
             elif kind == 1:
-                insns.append(ldl(rng.randrange(nreg), rng.choice(slots)))
+                insns.append(ldl(rng.randrange(nreg), rng.choice(slots),
+                                 scratch_depth))
             elif kind == 2:
                 insns.append(stx(rng.randrange(nreg), rng.randrange(nreg)))
             else:

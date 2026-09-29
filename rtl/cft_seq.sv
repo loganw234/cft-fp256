@@ -656,23 +656,90 @@ module cft_seq #(
   logic [WORDS*32-1:0]     scr_wdata;
   logic [WORDS*SCRAW-1:0]  scr_raddr;
   logic [WORDS*32-1:0]     scr_rdata;
+  // The wipe's two bits (revision 7), declared here because g_scr reads
+  // them: scr_wipe_q says this cycle's scr_we is the wipe's own write,
+  // and scr_bcast that this block's wipe is BROADCAST - every sub-array
+  // takes it at once (below, and S_BLK_SETUP).
+  logic                    scr_wipe_q;
+  logic                    scr_bcast;
+
+  // Sub-banks (revision 7, 2026-09-29). A bank of SCR_D entries is built
+  // from SCR_SUB-entry arrays - 4,096 x 32 bits, the shape revision 3
+  // put each bank in, which the U50 build made one UltraRAM apiece and
+  // which cost 0.000 ns at 135 MHz - and never as one deeper array. At
+  // 256 slots a bank IS one such array and nothing here changes. At the
+  // U50's 2,048 a bank is 32,768 deep: as one array it is an eight-deep
+  // URAM cascade, whose read passes up to seven cascade hops before it
+  // reaches the fabric, or a block-RAM fallback the quad cannot hold -
+  // revision 3's instruction memory, a four-deep cascade, was moved to
+  // block RAM "due to insufficient pipeline registers". As eight arrays
+  // it is eight standalone URAMs and one 8:1 mux after them, selected by
+  // the slot's high bits registered with the read: the same one-cycle
+  // read, the same ports, the same bits in every simulator. The
+  // attribute pins each array to UltraRAM, where the quad's scratch
+  // fits and block RAM does not (docs/SEQUENCER.md, revision 7).
+  localparam int SCR_SUB  = (SCR_D > 4096) ? 4096 : SCR_D;
+  localparam int SCR_NSUB = SCR_D / SCR_SUB;
+  localparam int SCR_SAW  = $clog2(SCR_SUB);          // 12 at 4,096
+  localparam int SCR_SELW = (SCR_NSUB > 1) ? $clog2(SCR_NSUB) : 1;
 
   generate
     for (genvar gs = 0; gs < WORDS; gs = gs + 1) begin : g_scr
-      logic [31:0] bank [0:SCR_D-1];
-      logic [31:0] rd_q;
-      always_ff @(posedge ap_clk) begin
-        if (scr_we[gs])
-          bank[scr_waddr[gs*SCRAW +: SCRAW]] <= scr_wdata[gs*32 +: 32];
-        // Unconditional, like the deposit buffer's and the constant
-        // bank's: one write port and one unconditional synchronous
-        // read port is the shape an inference engine recognises as a
-        // memory, and the address is stable whenever the answer is
-        // wanted, so a read enable would buy nothing and cost a
-        // condition.
-        rd_q <= bank[scr_raddr[gs*SCRAW +: SCRAW]];
+      if (SCR_NSUB == 1) begin : g_one
+        logic [31:0] bank [0:SCR_D-1];
+        logic [31:0] rd_q;
+        always_ff @(posedge ap_clk) begin
+          if (scr_we[gs])
+            bank[scr_waddr[gs*SCRAW +: SCRAW]] <= scr_wdata[gs*32 +: 32];
+          // Held with the array's standing request, as the register
+          // file's read registers are (revision 7, R18). It was
+          // unconditional while only the scratch states read it, one
+          // access at a time; the loads now read it INSIDE the issue pipe
+          // - an LDL between A and F, an LDX between F and H - and on a
+          // multi-pass tile the pipe holds between accepts, so a register
+          // that kept sampling would hand the fire the NEXT beat's slot.
+          // issue_hold is zero outside a program's issue, so the preload,
+          // the wipe and the scratch-out drain read it exactly as before.
+          // A read enable is still the shape a block RAM's output
+          // register infers from.
+          if (!issue_hold)
+            rd_q <= bank[scr_raddr[gs*SCRAW +: SCRAW]];
+        end
+        assign scr_rdata[gs*32 +: 32] = rd_q;
+      end else begin : g_sub
+        logic [SCRAW-1:0]         wa, ra;
+        logic [SCR_NSUB*32-1:0]   rd_all;
+        logic [SCR_SELW-1:0]      sel_q;
+        assign wa = scr_waddr[gs*SCRAW +: SCRAW];
+        assign ra = scr_raddr[gs*SCRAW +: SCRAW];
+        for (genvar gk = 0; gk < SCR_NSUB; gk = gk + 1) begin : g_k
+          (* ram_style = "ultra" *) logic [31:0] sub [0:SCR_SUB-1];
+          logic [31:0] rd_q;
+          always_ff @(posedge ap_clk) begin
+            // Its own select - or a BROADCAST wipe, which writes +0 at
+            // the same local address in every sub-array at once, so
+            // SCR_SUB cycles clear the whole memory at any depth
+            // (S_BLK_SETUP). Only the wipe's writes are ever broadcast.
+            if (scr_we[gs] && (wa[SCRAW-1 -: SCR_SELW] == SCR_SELW'(gk) ||
+                               (scr_wipe_q && scr_bcast)))
+              sub[wa[SCR_SAW-1:0]] <= scr_wdata[gs*32 +: 32];
+            // Held as g_one's is, for R18's reason: every sub-array reads
+            // the low address whenever the pipe moves, and the select
+            // picks one.
+            if (!issue_hold)
+              rd_q <= sub[ra[SCR_SAW-1:0]];
+          end
+          assign rd_all[gk*32 +: 32] = rd_q;
+        end
+        // Registered from the same address on the same edge as the
+        // reads, and held with them, so the select and the data it
+        // selects are always one read's - a held read keeps its own
+        // sub-array.
+        always_ff @(posedge ap_clk)
+          if (!issue_hold)
+            sel_q <= ra[SCRAW-1 -: SCR_SELW];
+        assign scr_rdata[gs*32 +: 32] = rd_all[32'(sel_q) * 32 +: 32];
       end
-      assign scr_rdata[gs*32 +: 32] = rd_q;
     end
   endgenerate
 
@@ -752,6 +819,26 @@ module cft_seq #(
     if ((1 << SCRSW) != SCRATCH_D) begin : g_scratch_pow2
       $error("cft_seq: SCRATCH_D must be a power of two - STX/LDX reduce rb with a mask");
     end
+    // Revision 7 made MAXD, IMEM_D and SCRATCH_D a build's parameters
+    // (rtl/cft_krnl.sv declares them, and a build may set them), and
+    // the kernel publishes each as a FOUR-BIT log2 - CAPS[19:16],
+    // CAPS[23:20], CAPS2[3:0]. So each must be a power of two no larger
+    // than 2^15: $clog2 is the ceiling, so any other value would be
+    // published as a larger capacity than this module has, and 2^16
+    // would wrap its field to "one". The guards live here rather than
+    // in cft_krnl.sv because this is where the three are elaborated,
+    // and because cft_krnl.sv keeps this construct out of itself for
+    // the open-toolchain gate. The scratch's power of two is the guard
+    // above; these add its ceiling and the other two.
+    if ((1 << $clog2(MAXD)) != MAXD || MAXD > 32768) begin : g_maxd_caps
+      $error("cft_seq: MAXD must be a power of two no larger than 2^15 - CAPS[19:16] publishes its log2 in four bits");
+    end
+    if ((1 << PCW) != IMEM_D || IMEM_D > 32768) begin : g_imem_caps
+      $error("cft_seq: IMEM_D must be a power of two no larger than 2^15 - CAPS[23:20] publishes its log2 in four bits");
+    end
+    if (SCRATCH_D > 32768) begin : g_scratch_caps
+      $error("cft_seq: SCRATCH_D must be no larger than 2^15 - CAPS2[3:0] publishes its log2 in four bits");
+    end
   endgenerate
 
   initial begin
@@ -761,6 +848,12 @@ module cft_seq #(
     end
     if ((1 << SCRSW) != SCRATCH_D) begin
       $display("FATAL: cft_seq SCRATCH_D=%0d must be a power of two", SCRATCH_D);
+      $fatal(1);
+    end
+    if ((1 << $clog2(MAXD)) != MAXD || MAXD > 32768 ||
+        (1 << PCW) != IMEM_D || IMEM_D > 32768 || SCRATCH_D > 32768) begin
+      $display("FATAL: cft_seq MAXD=%0d IMEM_D=%0d SCRATCH_D=%0d: each must be a power of two no larger than 2^15, the most a four-bit log2 in CAPS publishes",
+               MAXD, IMEM_D, SCRATCH_D);
       $fatal(1);
     end
   end
@@ -871,7 +964,10 @@ module cft_seq #(
   // The two scratch blocks want the same product against their own
   // counts, so they share the ADDEND - one shifter, three
   // accumulators, three multiplier registers. The longest of the
-  // three is SCRSW+1 steps, still an order of magnitude inside RF_D.
+  // three is SCRSW+1 steps. That was an order of magnitude inside RF_D
+  // while S_ZERO lasted the register-file wipe; since the wipe went
+  // (2026-09-14) S_ZERO waits for the two scratch products explicitly
+  // (revision 7), because SCRSW+1 grows with the depth.
   logic [31:0]    sin_elems, sout_elems;
   logic [SCRSW:0] sin_mult, sout_mult;
 
@@ -1430,6 +1526,139 @@ module cft_seq #(
   logic [SCRSW:0]  scr_wipe_slots;
   assign scr_wipe_slots = scr_all ? (SCRSW+1)'(SCRATCH_D)
                         : (scr_hi > h_nsout) ? scr_hi : h_nsout;
+
+  // ---- revision 7: the wipe follows what was written -----------------
+  //
+  // An indexing program can reach every slot, so the rule above wipes
+  // all SCRATCH_D of them every block: 4,096 cycles at 256 slots and
+  // 32,768 at the U50's 2,048, whatever the program actually wrote. But
+  // a slot nothing has written since it was last wiped is +0 already.
+  // So each word bank keeps a DIRTY HIGH-WATER MARK, with the invariant
+  //
+  //     in bank b, every slot at or above scr_hwm[b] holds +0,
+  //
+  // for every beat, and a block wipes only as far as the highest mark:
+  // what the previous block (or the previous run) wrote, and never more
+  // than the rule above asks. An indexing program that writes below slot
+  // 256 then pays at 2,048 slots what it pays at 256, or less.
+  //
+  // The marks OBSERVE the memory's write port - scr_we and scr_waddr,
+  // whoever drives them: a store, the scratch-in preload, the gather -
+  // and ignore the wipe's own writes (scr_wipe_q, set with them). A
+  // write at slot s raises its bank's mark to s + 1 if it was below;
+  // one comparator a bank, beside the write and never in front of it.
+  // At reset every mark is SCRATCH_D, all dirty, so the first block
+  // wipes what it can observe, as it always did; after that the marks
+  // persist ACROSS runs, so a run's first block wipes what the last run
+  // left. When a block's wipe has covered a bank's mark, that bank is
+  // clean (scr_clean_go); a static program's shorter wipe can leave a
+  // bank dirty above it, and then its mark stands.
+  //
+  // scr_dirty_q, the highest mark, is read only at S_BLK_SETUP, and is
+  // formed as a two-stage tree - pairs of banks, then the pairs - so no
+  // cycle carries more than two compares; a for-loop maximum would be
+  // synthesised as a chain of seven. It settles three edges after a
+  // write, and a block's last store is at least five cycles before the
+  // next block's setup: HALT drains every store, then the count drain,
+  // S_WAIT_B and S_NEXT_BLK all come first. A run's first block is
+  // further still from the last run's.
+  localparam int HWW   = SCRSW + 1;
+  localparam int HWPR  = (WORDS > 1) ? WORDS / 2 : 1;
+  logic [WORDS*HWW-1:0] scr_hwm;
+  logic [HWPR*HWW-1:0]  scr_hwm_pair;
+  logic [HWW-1:0]  scr_dirty_q;
+  logic            scr_clean_go;     // the wipe just covered scr_wipe_bnd
+  logic [HWW-1:0]  scr_wipe_bnd;     // how far this block's wipe goes
+  logic [HWW-1:0]  scr_wipe_need;
+  assign scr_wipe_need = (scr_dirty_q < scr_wipe_slots) ? scr_dirty_q
+                                                        : scr_wipe_slots;
+
+  // A wipe of more than one sub-array's slots is BROADCAST (second
+  // send-back, verifier-R5 08:16:48). The marks start all dirty at a
+  // reset, so the first indexing block after one had to wipe the whole
+  // depth - 32,768 cycles at 2,048 slots, where every indexing block at
+  // 256 had paid 4,096 - and so did the block after a program that
+  // wrote up to the top. But a bank at more than 256 slots is SCR_NSUB
+  // standalone arrays sharing one local address, so writing +0 at local
+  // address a in all of them at once, for a in [0, SCR_SUB), clears the
+  // WHOLE memory in SCR_SUB cycles. No block's wipe is then longer than
+  // SCR_SUB = 4,096 cycles at NBEATS 16, at any depth: the cost of the
+  // widest wipe revision 3 ever made. And after it the whole memory is
+  // +0, so every mark is cleaned, not only those under the need.
+  localparam int SUB_SLOTS = SCR_SUB >> NBSH;  // 256 at 4,096 and NBEATS 16
+  logic scr_wipe_bc;
+  assign scr_wipe_bc = (SCR_NSUB > 1) && (scr_wipe_need > HWW'(SUB_SLOTS));
+
+  // A block that can observe no scratch slot - no STX/LDX, no static
+  // STL/LDL, no scratch-out: scr_wipe_slots is 0 - loads none of its
+  // scratch-in block, dense or gathered (second send-back, verifier-R5
+  // 08:03:27). Nothing it runs reads a slot and the drain reads none, so
+  // no preloaded value could reach an output; revision 3's S_ZERO did
+  // the same by accident at n_scratch_in = 256, where an empty wipe cut
+  // the preload's product short. The skipped block writes nothing, so
+  // the marks stand. A block that observes SOME of a longer block still
+  // loads all of it, as it always has (docs/SEQUENCER.md, revision 7).
+  logic scr_sin_skip;
+  assign scr_sin_skip = (scr_wipe_slots == '0);
+
+  function automatic [HWW-1:0] hw_max_fn(input [HWW-1:0] a, input [HWW-1:0] b);
+    hw_max_fn = (a > b) ? a : b;
+  endfunction
+
+  always_ff @(posedge ap_clk) begin
+    if (!ap_rst_n) begin
+      scr_hwm <= {WORDS{HWW'(SCRATCH_D)}};
+    end else begin
+      for (int b = 0; b < WORDS; b = b + 1) begin
+        if (scr_clean_go) begin
+          if (scr_hwm[b*HWW +: HWW] <= scr_wipe_bnd)
+            scr_hwm[b*HWW +: HWW] <= '0;
+        end else if (scr_we[b] && !scr_wipe_q &&
+                     HWW'(scr_waddr[b*SCRAW + NBSH +: SCRSW]) >=
+                     scr_hwm[b*HWW +: HWW]) begin
+          scr_hwm[b*HWW +: HWW] <=
+              HWW'(scr_waddr[b*SCRAW + NBSH +: SCRSW]) + HWW'(1);
+        end
+      end
+    end
+  end
+
+  // The tree, by the beat's width: eight banks at 256 bits, four at
+  // 128, two at the quarter tile's 64.
+  generate
+    if (WORDS == 8 || WORDS == 4 || WORDS == 2) begin : g_hwm_pairs
+      always_ff @(posedge ap_clk) begin
+        if (!ap_rst_n)
+          scr_hwm_pair <= {HWPR{HWW'(SCRATCH_D)}};
+        else
+          for (int p = 0; p < HWPR; p = p + 1)
+            scr_hwm_pair[p*HWW +: HWW] <=
+                hw_max_fn(scr_hwm[(2*p)*HWW +: HWW],
+                          scr_hwm[(2*p+1)*HWW +: HWW]);
+      end
+    end else if (WORDS == 1) begin : g_hwm_one
+      always_ff @(posedge ap_clk)
+        scr_hwm_pair <= (!ap_rst_n) ? HWW'(SCRATCH_D) : scr_hwm;
+    end else begin : g_hwm_words
+      $error("cft_seq: the scratch's dirty marks are built for 1, 2, 4 or 8 word banks");
+    end
+    if (HWPR == 4) begin : g_hwm_four
+      always_ff @(posedge ap_clk)
+        scr_dirty_q <= (!ap_rst_n) ? HWW'(SCRATCH_D)
+            : hw_max_fn(hw_max_fn(scr_hwm_pair[0*HWW +: HWW],
+                                  scr_hwm_pair[1*HWW +: HWW]),
+                        hw_max_fn(scr_hwm_pair[2*HWW +: HWW],
+                                  scr_hwm_pair[3*HWW +: HWW]));
+    end else if (HWPR == 2) begin : g_hwm_two
+      always_ff @(posedge ap_clk)
+        scr_dirty_q <= (!ap_rst_n) ? HWW'(SCRATCH_D)
+            : hw_max_fn(scr_hwm_pair[0*HWW +: HWW],
+                        scr_hwm_pair[1*HWW +: HWW]);
+    end else begin : g_hwm_single
+      always_ff @(posedge ap_clk)
+        scr_dirty_q <= (!ap_rst_n) ? HWW'(SCRATCH_D) : scr_hwm_pair;
+    end
+  endgenerate
   // The scratch-in preload's cursors: which lane and which of its
   // slots the next element belongs to. Two counters rather than a
   // division, exactly as the deposit drain carries lane_cursor and
@@ -2153,6 +2382,8 @@ module cft_seq #(
       bank_phase <= 1'b0; bank_ext_q <= 1'b0;
       bank_q <= '0; sin_q <= '0; sout_q <= '0;
       scr_we <= '0; scr_raddr <= '0;
+      scr_wipe_q <= 1'b0; scr_clean_go <= 1'b0; scr_wipe_bnd <= '0;
+      scr_bcast <= 1'b0;
       scr_io_q <= 1'b0; scr_hi <= '0; scr_all <= 1'b0; rd_need <= '0;
       scr_strict_q <= 1'b0; scr_oor_q <= '0;
       h_nsin <= '0; h_nsout <= '0;
@@ -2165,6 +2396,8 @@ module cft_seq #(
       rf_we <= 1'b0;
       db_we <= '0;
       scr_we <= '0;
+      scr_wipe_q <= 1'b0;
+      scr_clean_go <= 1'b0;
 
       // ---- read channel: one burst in flight --------------------------
       if (m_rd_arvalid && m_rd_arready)
@@ -2575,7 +2808,13 @@ module cft_seq #(
             // after, so those need no wipe of their own - but n_out
             // may exceed n_in, and those slots are read on the way
             // out even if nothing wrote them.
-            szlimit <= (SCRAW+1)'(scr_wipe_slots) << NBSH;
+            // ...and no further than the dirty marks say anything was
+            // written since it was last wiped (revision 7): the rest
+            // is +0 already.
+            szlimit <= scr_wipe_bc ? (SCRAW+1)'(SCR_SUB)
+                                   : (SCRAW+1)'(scr_wipe_need) << NBSH;
+            scr_wipe_bnd <= scr_wipe_bc ? HWW'(SCRATCH_D) : scr_wipe_need;
+            scr_bcast <= scr_wipe_bc;
             // R17: the block's mask bits, one single-beat read, before
             // the wipe rather than under it. Under it would hide the
             // round trip on a fast memory and hide nothing on the card
@@ -2633,6 +2872,7 @@ module cft_seq #(
           // them computed.
           if (szaddr < szlimit) begin
             scr_we    <= {WORDS{1'b1}};
+            scr_wipe_q <= 1'b1;   // not a write the dirty marks count
             scr_waddr <= scr_flat_fn(szaddr[SCRAW-1:NBSH],
                                      6'(szaddr[NBSH-1:0]));
             scr_wdata <= '0;
@@ -2658,7 +2898,7 @@ module cft_seq #(
             sout_elems <= '0;
             dep_addend <= 32'(blk_n);
             dep_mult   <= h_maxdep[CW-1:0];
-            sin_mult   <= h_nsin;
+            sin_mult   <= scr_sin_skip ? '0 : h_nsin;
             sout_mult  <= h_nsout;
           end else begin
             if (dep_mult[0])  dep_elems  <= dep_elems  + dep_addend;
@@ -2669,7 +2909,29 @@ module cft_seq #(
             sin_mult   <= sin_mult >> 1;
             sout_mult  <= sout_mult >> 1;
           end
-          if (zaddr >= RFAW'(CW + 1) && (szaddr + 1) >= szlimit) begin
+          // ...and the two scratch-count products are COMPLETE: the bit
+          // this cycle adds is the last one either multiplier has
+          // (revision 7). Their width is SCRSW + 1, which follows the
+          // depth, while the window above was sized for the deposit
+          // product alone: CW + 1 steps, eight at MAXD 64 and twelve at
+          // 1,024. Until the dirty marks, a block whose preload or drain
+          // anything could read also wiped at least one slot - sixteen
+          // cycles at NBEATS 16 - so the window was never shorter than
+          // fifteen steps there, and this wait mattered only for a count
+          // of 2^15. With the marks, a block whose scratch is already clean
+          // wipes NOTHING, so the window can be CW + 1 steps while
+          // n_scratch_in or n_scratch_out needs more: at MAXD 64 a count
+          // of 256 is nine bits, and without this wait it is cut to 0 -
+          // nothing preloaded, nothing drained (verifier-R5's p6;
+          // tb/test_seq_core.py's scratch_preload_read_with_the_marks_
+          // clean holds it). At MAXD 1,024 the twelve steps cover every
+          // count to 4,095, so on the U50's build it costs nothing. A
+          // block that can observe no slot skips its preload
+          // (scr_sin_skip) and starts sin_mult at 0: it does not wait.
+          if (zaddr >= RFAW'(CW + 1) && (szaddr + 1) >= szlimit &&
+              (sin_mult >> 1) == '0 && (sout_mult >> 1) == '0) begin
+            // Every bank the wipe has now covered is clean.
+            scr_clean_go <= 1'b1;
             // A lane is active iff its index is below the block's
             // lane count - and blk_n IS min(blk_cap, n_q - blk_base),
             // computed one state ago. The first version asked each of
@@ -2696,8 +2958,8 @@ module cft_seq #(
             // An indexed scratch block takes the gather in place of
             // the dense preload; both end at S_LD_GO.
             gt_scr <= idx_en_q[3];
-            st <= (h_nsin == 0) ? S_LD_GO
-                : idx_en_q[3]   ? S_GTH_GO : S_SIN_GO;
+            st <= (h_nsin == 0 || scr_sin_skip) ? S_LD_GO
+                : idx_en_q[3]                   ? S_GTH_GO : S_SIN_GO;
           end
         end
 

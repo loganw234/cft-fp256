@@ -162,14 +162,16 @@ describing. Three things follow:
   addressed by lane and deposit index (P2), so the whole orbit comes
   back from one call. `--steps-per-call 1024` turns a 100,000-iteration
   reference into **98 library calls**; the host loop issues 800,000.
-  That is the software backend's figure: a tile holds 64 deposit slots
-  a lane (docs/SEQUENCER.md), so on a device the trip count is at most
-  32 and the same reference is 3,125 calls - still 256x fewer than the
-  host loop. Since 2026-09-07 the tool does not carry that 64 as a
-  literal: it reads `cft_caps.max_deposits` and, when the device's
-  budget is smaller than the default, takes `cap / 2` and says on
-  stderr what it chose. The trip count changes only how many calls a
-  run takes and not what it computes - `tests/zoom_check.py` asserts
+  That is the software backend's figure: a round-2 tile holds 64
+  deposit slots a lane and the U50's revision-7 one 1,024
+  (docs/SEQUENCER.md), so on a device the trip count is at most 32 or
+  512 and the same reference is 3,125 or 196 calls - still 256x and
+  about 4,080x fewer than the host loop. Since 2026-09-07 the tool does
+  not carry a tile's number as a literal: it reads `cft_caps.max_deposits`
+  and, when the device's budget cannot hold the default's 2,048
+  deposits a lane, takes `cap / 2` and says on stderr what it chose.
+  The trip count changes only how many calls a run takes and not what
+  it computes - `tests/zoom_check.py` asserts
   that as one of the determinism properties - so resizing a DEFAULT is
   safe; a `--steps-per-call` the user typed is refused instead, naming
   the cap, because running something other than the command line says

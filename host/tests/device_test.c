@@ -5632,6 +5632,370 @@ out:
     free(a); free(b); free(out);
 }
 
+/* ==== revision 7: a program that walks past 256 slots ==================
+ *
+ * The U50's tiles have 2,048 scratch slots a lane from revision 7 and
+ * the open-core ones 256, and the depth is part of what a non-strict
+ * STX/LDX MEANS: it reduces the index modulo the depth. So the software
+ * reference this file compares against is opened at the DEVICE's depth
+ * (main, through cft_open_ex), and this leg runs a program that reaches
+ * past slot 255 - plain and strict - on both.
+ *
+ * The program is programs/deepwalk-fp64's shape at every format: WALK
+ * samples a[0] = x, a[k+1] = a[k]*(1 + 2^-8) + 1, stored through a loop
+ * counter, then read back from the top and summed; it deposits the sum
+ * and the last sample. 1 + 2^-8 grows gently enough that fp32 holds
+ * three hundred of them. On a 256-slot tile the walk wraps (plain) or
+ * is reported past slot 255 (strict); on a deeper one it does neither.
+ *
+ * When the device is deeper than 256 the leg also holds the reference
+ * to having BEEN at that depth: the same image on a plain cft_open(NULL)
+ * handle, which is 256, must compute a different sum (plain) and report
+ * the index past the depth (strict), where the reference reports
+ * nothing. A comparison that agreed only because both sides wrapped
+ * would otherwise pass. */
+#define DEEP_WALK 300u
+
+static void make_one(uint8_t *e, cft_format fmt)
+{
+    int total = LAYOUT[(int)fmt].total_bits;
+    int ebits = LAYOUT[(int)fmt].exp_bits;
+    int sbits = total - 1 - ebits;
+    memset(e, 0, (size_t)total / 8);
+    put_bits(e, sbits, ebits, ((uint64_t)1 << (ebits - 1)) - 1);
+}
+
+static size_t deep_walk_image(uint8_t *img, cft_format fmt, int strict)
+{
+    const size_t esz = cft_format_size(fmt);
+    uint8_t k[3 * MAXE];
+    uint64_t ins[14];
+    put_index(k, fmt, 1);                        /* k0 IONE, the integer 1 */
+    make_one_plus(k + esz, fmt, 8);              /* k1 GROW, 1 + 2^-8 */
+    make_one(k + 2 * esz, fmt);                  /* k2 ONE */
+    ins[0]  = seq_alu(CFT_COPYSIGN, 4, 0, 0, 0, 0, 0, 0); /* v = x */
+    ins[1]  = seq_ctrl(1, 0, DEEP_WALK);         /* repeat WALK */
+    ins[2]  = seq_stx(4, 3);                     /*   a[i] = v */
+    ins[3]  = seq_alu(CFT_IADD, 3, 3, 0, 0, 0, 1, 0);     /*   i += 1 */
+    ins[4]  = seq_alu(CFT_FMA, 4, 4, 1, 2, 0, 1, 1);      /*   v = v*GROW+1 */
+    ins[5]  = seq_ctrl(2, 0, 0);                 /* endrep */
+    ins[6]  = seq_ctrl(1, 0, DEEP_WALK);         /* repeat WALK */
+    ins[7]  = seq_alu(CFT_ISUB, 3, 3, 0, 0, 0, 1, 0);     /*   i -= 1 */
+    ins[8]  = seq_ldx(5, 3);                     /*   s = a[i] */
+    ins[9]  = seq_alu(CFT_FMA, 6, 5, 2, 6, 0, 1, 0);      /*   acc += s */
+    ins[10] = seq_ctrl(2, 0, 0);                 /* endrep */
+    ins[11] = seq_ctrl(3, 6, 0);                 /* deposit acc */
+    ins[12] = seq_ctrl(3, 4, 0);                 /* deposit v */
+    ins[13] = seq_ctrl(0, 0, 0);
+    return seq_image_flags(img, fmt, ins, 14, k, 3, 2,
+                           strict ? CFT_PROG_FLAG_SCRATCH_STRICT : 0u);
+}
+
+/* One image on one handle over finite inputs: the deposits and STATUS. */
+static int deep_walk_run(cft_device *dev, cft_format fmt, const uint8_t *img,
+                         size_t bytes, const uint8_t *a, size_t n,
+                         uint8_t *dep, uint32_t *bus)
+{
+    cft_program *p = NULL;
+    uint32_t *cnt = (uint32_t *)malloc(n * 4);
+    cft_status st = cnt ? cft_program_load(dev, img, bytes, &p)
+                        : CFT_ERR_OUT_OF_MEMORY;
+    if (st == CFT_OK)
+        st = cft_program_run(p, a, a, a, dep, cnt, n, NULL, bus);
+    cft_program_free(p);
+    free(cnt);
+    (void)fmt;
+    return st == CFT_OK;
+}
+
+static void compare_seq_deep(cft_device *sw, cft_device *hw, cft_format fmt,
+                             size_t n, uint32_t seed)
+{
+    const size_t esz = cft_format_size(fmt);
+    uint8_t img[32 + 3 * MAXE + 14 * 8];
+    cft_caps hc, sc;
+    size_t bytes;
+    int strict;
+
+    memset(&hc, 0, sizeof hc);
+    hc.struct_size = sizeof hc;
+    memset(&sc, 0, sizeof sc);
+    sc.struct_size = sizeof sc;
+    if (cft_get_caps(hw, &hc) != CFT_OK || cft_get_caps(sw, &sc) != CFT_OK ||
+        !(hc.seq_features & CFT_SEQ_FEAT_SCRATCH) || !hc.max_scratch) {
+        not_here(NH_OTHER, "COMPARED", "  seq walk past 256 slots",
+                 "this device publishes no scratch depth");
+        return;
+    }
+    checks++;
+    if (sc.max_scratch != hc.max_scratch) {
+        printf("  FAIL seq walk past 256 slots: the reference has %lu scratch "
+               "slots a lane and the device %lu - a non-strict index reduces "
+               "modulo the depth, so the two would compute different "
+               "machines\n", (unsigned long)sc.max_scratch,
+               (unsigned long)hc.max_scratch);
+        failures++;
+        return;
+    }
+    for (strict = 0; strict < 2; strict++) {
+        if (strict && !(hc.seq_features & CFT_SEQ_FEAT_SCRATCH_STRICT)) {
+            not_here(NH_OTHER, "COMPARED", "  seq walk past 256 slots, strict",
+                     "this device does not publish SCRATCH_STRICT");
+            continue;
+        }
+        bytes = deep_walk_image(img, fmt, strict);
+        compare_seq_one(sw, hw, fmt, img, bytes, 2, n, seed + (uint32_t)strict,
+                        strict ? "seq walk past 256 slots, strict"
+                               : "seq walk past 256 slots");
+    }
+
+    /* The reference was at the device's depth, and the walk reached past
+     * 256: only askable where the device is deeper than 256. */
+    if (hc.max_scratch <= 256u) {
+        not_here(NH_OTHER, "TESTED", "  the walk's depth against 256",
+                 "this device has %lu slots a lane, so the walk wraps on "
+                 "both sides of the comparison",
+                 (unsigned long)hc.max_scratch);
+        return;
+    }
+    {
+        cft_device *plain = NULL;
+        uint8_t *a = (uint8_t *)malloc(n * esz);
+        uint8_t *d_ref = (uint8_t *)malloc(n * 2 * esz);
+        uint8_t *d_256 = (uint8_t *)malloc(n * 2 * esz);
+        uint32_t bus_ref = 0, bus_256 = 0;
+        checks++;
+        if (!a || !d_ref || !d_256 || cft_open(NULL, 0, &plain) != CFT_OK) {
+            printf("  FAIL seq walk past 256 slots: could not set up the "
+                   "256-slot handle (%s)\n", cft_last_error());
+            failures++;
+        } else {
+            fill_finite(a, fmt, n);
+            for (strict = 0; strict < 2; strict++) {
+                bytes = deep_walk_image(img, fmt, strict);
+                checks++;
+                if (!deep_walk_run(sw, fmt, img, bytes, a, n, d_ref,
+                                   &bus_ref) ||
+                    !deep_walk_run(plain, fmt, img, bytes, a, n, d_256,
+                                   &bus_256)) {
+                    printf("  FAIL seq walk past 256 slots: a run did not "
+                           "complete: %s\n", cft_last_error());
+                    failures++;
+                    continue;
+                }
+                checks++;
+                if (!memcmp(d_ref, d_256, n * 2 * esz)) {
+                    printf("  FAIL seq walk past 256 slots%s: the sums at %lu "
+                           "slots and at 256 are the same bytes, so this "
+                           "comparison could not tell the depths apart\n",
+                           strict ? ", strict" : "",
+                           (unsigned long)hc.max_scratch);
+                    failures++;
+                }
+                checks++;
+                if (strict && ((bus_256 & CFT_STATUS_SCRATCH_RANGE) == 0 ||
+                               (bus_ref & CFT_STATUS_SCRATCH_RANGE) != 0)) {
+                    printf("  FAIL seq walk past 256 slots, strict: STATUS "
+                           "0x%x at 256 and 0x%x at %lu - the index past "
+                           "slot 255 is reported at 256 and nowhere else\n",
+                           bus_256, bus_ref, (unsigned long)hc.max_scratch);
+                    failures++;
+                }
+            }
+            printf("    a walk past 256 slots at %lu: the device agrees with "
+                   "the reference, and a 256-slot handle differs (plain) and "
+                   "reports it (strict)\n", (unsigned long)hc.max_scratch);
+        }
+        cft_close(plain);
+        free(a); free(d_ref); free(d_256);
+    }
+}
+
+/* ==== revision 7: a scratch block as deep as the device =================
+ *
+ * R5's per-run block is n_scratch_in slots a lane preloaded and
+ * n_scratch_out read back, each at most the device's depth. On a
+ * 2,048-slot device - the U50's revision-7 tiles, and a software handle
+ * opened at that depth - a block of 257 to 2,048 slots is legal, and
+ * until 2026-09-29 libcft's loader refused every one of them on every
+ * handle, as CFT_ERR_INVALID_ARGUMENT with no sentence: a test of the
+ * library's own 256-slot ceiling ran whatever depth the device
+ * published (verifier-R5). No leg held a block past 256, so nothing saw
+ * it.
+ *
+ * This leg runs, on the device under test, a block of 300 slots in and
+ * out, 300 in alone, 300 out alone, and the device's whole depth both
+ * ways, and holds the bytes to what the program must make of them: it
+ * reads the preload's top slot into a deposit and stores its a operand
+ * at the out block's top slot. So each lane deposits its own preload's
+ * last element (+0 with no preload), and reads back its preload with
+ * the top slot replaced by a and +0 past the preload. It needs no
+ * reference, so a library that refused the block on both sides, or
+ * stopped a preload at 256 on both, still fails it. And it holds one
+ * slot past the depth refused BY NAME, in and out, on this device. On
+ * a device of 256 slots the 300-slot blocks are past the depth, and
+ * only the whole-depth block runs. */
+static void check_scratch_block_deep(cft_device *dev, cft_format fmt,
+                                     size_t n)
+{
+    const size_t esz = cft_format_size(fmt);
+    uint8_t img[32 + 4 * 8], zero[MAXE];
+    uint32_t cases[4][2], d;
+    unsigned ncase = 0, k;
+    uint8_t *a = NULL, *dep = NULL, *sin_buf = NULL, *sout_buf = NULL;
+    uint32_t *cnt = NULL;
+    int ran = 0;
+    cft_caps c;
+
+    memset(&c, 0, sizeof c);
+    c.struct_size = sizeof c;
+    if (cft_get_caps(dev, &c) != CFT_OK ||
+        !(c.seq_features & CFT_SEQ_FEAT_SCRATCH_IO) || !c.max_scratch) {
+        not_here(NH_OTHER, "TESTED", "  seq scratch block at the depth",
+                 "this device publishes no scratch block, or no depth");
+        return;
+    }
+    d = c.max_scratch;
+    if (n > 200)
+        n = 200;
+    if (d > 256u) {
+        cases[ncase][0] = 300u; cases[ncase][1] = 300u; ncase++;
+        cases[ncase][0] = 300u; cases[ncase][1] = 0u;   ncase++;
+        cases[ncase][0] = 0u;   cases[ncase][1] = 300u; ncase++;
+    } else {
+        not_here(NH_OTHER, "TESTED", "  seq scratch block of 300 slots",
+                 "this device has %lu scratch slots a lane, so the block "
+                 "is past its depth (refused by name above)",
+                 (unsigned long)d);
+    }
+    cases[ncase][0] = d; cases[ncase][1] = d; ncase++;
+
+    memset(zero, 0, sizeof zero);
+    a = (uint8_t *)malloc(n * esz);
+    dep = (uint8_t *)malloc(n * esz);
+    sin_buf = (uint8_t *)malloc(n * (size_t)d * esz);
+    sout_buf = (uint8_t *)malloc(n * (size_t)d * esz);
+    cnt = (uint32_t *)malloc(n * 4);
+    checks++;
+    if (!a || !dep || !sin_buf || !sout_buf || !cnt) {
+        printf("  FAIL seq scratch block at the depth: out of memory\n");
+        failures++;
+        goto out;
+    }
+    fill_finite(a, fmt, n);
+
+    for (k = 0; k < ncase; k++) {
+        const uint32_t n_in = cases[k][0], n_out = cases[k][1];
+        const uint32_t t_in = n_in ? n_in - 1u : 0u;
+        const uint32_t t_out = n_out ? n_out - 1u : 0u;
+        uint64_t ins[4];
+        cft_program *prog = NULL;
+        cft_run_args A;
+        cft_status st;
+        size_t bytes, i, bad_dep = 0, bad_out = 0, bad_cnt = 0;
+        uint32_t s;
+
+        ins[0] = seq_ldl(4, t_in);              /* the preload's top slot */
+        ins[1] = seq_ctrl(3, 4, 0);             /* deposit it */
+        ins[2] = seq_stl(0, t_out);             /* the out block's top = a */
+        ins[3] = seq_ctrl(0, 0, 0);
+        bytes = seq_image_scratch(img, fmt, ins, 4, NULL, 0, 1,
+                                  CFT_PROG_FLAG_SCRATCH_IO, n_in, n_out);
+        checks++;
+        st = cft_program_load(dev, img, bytes, &prog);
+        if (st != CFT_OK) {
+            printf("  FAIL seq scratch block of %lu in and %lu out at %lu "
+                   "slots: the image did not load (%s): %s\n",
+                   (unsigned long)n_in, (unsigned long)n_out,
+                   (unsigned long)d, cft_strerror(st), cft_last_error());
+            failures++;
+            continue;
+        }
+        fill_finite(sin_buf, fmt, n * (size_t)n_in);
+        memset(sout_buf, 0xA5, n * (size_t)d * esz);
+        memset(dep, 0xA5, n * esz);
+        run_args_init(&A, a, dep, n);
+        A.counts            = cnt;
+        A.scratch_in        = n_in ? sin_buf : NULL;
+        A.scratch_in_bytes  = n * (size_t)n_in * esz;
+        A.scratch_out       = n_out ? sout_buf : NULL;
+        A.scratch_out_bytes = n * (size_t)n_out * esz;
+        checks++;
+        st = cft_program_run_ex(prog, &A);
+        cft_program_free(prog);
+        if (st != CFT_OK) {
+            printf("  FAIL seq scratch block of %lu in and %lu out at %lu "
+                   "slots: the run failed (%s): %s\n",
+                   (unsigned long)n_in, (unsigned long)n_out,
+                   (unsigned long)d, cft_strerror(st), cft_last_error());
+            failures++;
+            continue;
+        }
+        for (i = 0; i < n; i++) {
+            const uint8_t *want_dep = n_in
+                ? sin_buf + (i * n_in + t_in) * esz : zero;
+            if (memcmp(dep + i * esz, want_dep, esz) != 0)
+                bad_dep++;
+            if (cnt[i] != 1u)
+                bad_cnt++;
+            for (s = 0; s < n_out; s++) {
+                const uint8_t *want = s == t_out ? a + i * esz
+                                    : s < n_in ? sin_buf + (i * n_in + s) * esz
+                                    : zero;
+                if (memcmp(sout_buf + (i * n_out + s) * esz, want,
+                           esz) != 0)
+                    bad_out++;
+            }
+        }
+        checks += 3;
+        if (bad_dep || bad_cnt || bad_out) {
+            printf("  FAIL seq scratch block of %lu in and %lu out at %lu "
+                   "slots: %lu of %lu lanes deposited another value than "
+                   "their preload's top slot, %lu counts were not 1, and "
+                   "%lu of %lu out-block elements are not the preload, "
+                   "a or +0 where each belongs\n",
+                   (unsigned long)n_in, (unsigned long)n_out,
+                   (unsigned long)d, (unsigned long)bad_dep,
+                   (unsigned long)n, (unsigned long)bad_cnt,
+                   (unsigned long)bad_out,
+                   (unsigned long)(n * (size_t)n_out));
+            failures++;
+            continue;
+        }
+        ran++;
+    }
+
+    /* One past the depth, in and out, refused by name on THIS device -
+     * the refusal leg asks the reference, and the card's own loader is
+     * the one a host meets. */
+    {
+        uint64_t ins[2];
+        char needle[64];
+        ins[0] = seq_ctrl(0, 0, 0);
+        ins[1] = seq_ctrl(0, 0, 0);
+        snprintf(needle, sizeof needle, "n_scratch_in is %lu",
+                 (unsigned long)d + 1u);
+        refusal(dev, fmt, "a scratch block one slot past the depth, in",
+                img, seq_image_scratch(img, fmt, ins, 2, NULL, 0, 1,
+                                       CFT_PROG_FLAG_SCRATCH_IO, d + 1u, 0),
+                CFT_ERR_UNSUPPORTED, needle);
+        snprintf(needle, sizeof needle, "n_scratch_out is %lu",
+                 (unsigned long)d + 1u);
+        refusal(dev, fmt, "a scratch block one slot past the depth, out",
+                img, seq_image_scratch(img, fmt, ins, 2, NULL, 0, 1,
+                                       CFT_PROG_FLAG_SCRATCH_IO, 0, d + 1u),
+                CFT_ERR_UNSUPPORTED, needle);
+    }
+    if (ran == (int)ncase)
+        printf("    a scratch block at %lu slots (%s the whole depth both "
+               "ways): every lane's bytes; %lu + 1 refused by name\n",
+               (unsigned long)d,
+               d > 256u ? "300 in and out, 300 in, 300 out, and" : "only",
+               (unsigned long)d);
+out:
+    free(a); free(dep); free(sin_buf); free(sout_buf); free(cnt);
+}
+
 static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
                         size_t n, uint32_t seed)
 {
@@ -5782,6 +6146,11 @@ static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
      *    with the feature has its own memory and its own two
      *    pointers. */
     check_scratch(hw, fmt, n);
+    /* 7a. revision 7: a walk past 256 slots, against the reference at
+     *     the device's depth; and a scratch block as deep as the
+     *     device, held to its own bytes (verifier-R5's finding). */
+    compare_seq_deep(sw, hw, fmt, n, seed + 7);
+    check_scratch_block_deep(hw, fmt, n);
     check_program_past_a_page(hw, fmt);
     check_program_capacity(hw, fmt);
     check_completion_witness(hw, fmt);
@@ -8741,6 +9110,11 @@ int main(int argc, char **argv)
     int only_seq = 0;       /* sequencer programs only */
     int only_buf = 0;       /* device-resident buffers only */
     int only_id = 0;        /* the device image's identity only */
+    /* --scratch-depth N: the SOFTWARE device under test opened at N
+     * scratch slots a lane (revision 7, cft_open_ex), so "sw" can stand
+     * for a 2,048-slot tile; the library refuses it for an xclbin, by
+     * name, whose depth is its own. */
+    unsigned long long dut_depth = 0;
     int f, o, r, argi;
 
     /* Emulation is orders of magnitude slower than silicon, so the
@@ -8777,6 +9151,14 @@ int main(int argc, char **argv)
             only_reduce = 1;
         } else if (!strcmp(argv[argi], "-b")) {
             only_buf = 1;
+        } else if (!strcmp(argv[argi], "--scratch-depth") &&
+                   argi + 1 < argc) {
+            dut_depth = strtoull(argv[++argi], NULL, 0);
+            if (!dut_depth) {
+                fprintf(stderr, "--scratch-depth takes a positive number of "
+                        "slots\n");
+                return 2;
+            }
         } else if (!strcmp(argv[argi], "-n") && argi + 1 < argc) {
             n = (size_t)strtoul(argv[++argi], NULL, 10);
         } else if (!strcmp(argv[argi], "-f") && argi + 1 < argc) {
@@ -8814,6 +9196,11 @@ int main(int argc, char **argv)
                     "planted, and each\n"
                     "      planted handle's decode held to the unplanted "
                     "one's\n"
+                    "  --scratch-depth N\n"
+                    "      the software device under test (\"sw\") at N "
+                    "scratch slots a lane;\n"
+                    "      the reference is always opened at the device's "
+                    "own depth\n"
                     "  --expect-refusal mixed|unreadable\n"
                     "      the identity refusal this image earns by "
                     "design, for one that\n"
@@ -8890,7 +9277,17 @@ int main(int argc, char **argv)
                 not_here(NH_OTHER, "RUN", "  the planted identity refusals",
                          "only an xclbin has tiles to plant in");
         }
-        st = cft_open(strcmp(argv[1], "sw") ? argv[1] : NULL, 0, &hw);
+        if (dut_depth) {
+            cft_open_args oa;
+            memset(&oa, 0, sizeof oa);
+            oa.struct_size   = sizeof oa;
+            oa.artifact      = strcmp(argv[1], "sw") ? argv[1] : NULL;
+            oa.scratch_depth = (uint32_t)dut_depth;
+            st = dut_depth > 0xFFFFFFFFull ? CFT_ERR_INVALID_ARGUMENT
+                                          : cft_open_ex(&oa, &hw);
+        } else {
+            st = cft_open(strcmp(argv[1], "sw") ? argv[1] : NULL, 0, &hw);
+        }
         if (st != CFT_OK) {
             fprintf(stderr, "device %s: %s\n  %s\n", argv[1],
                     cft_strerror(st), cft_last_error());
@@ -9006,6 +9403,33 @@ int main(int argc, char **argv)
                        checks - before, failures);
             fflush(stdout);
         }
+    }
+
+    /* The reference computes at the DEVICE's scratch depth (revision 7).
+     * The depth is part of what a non-strict STX/LDX means - it reduces
+     * the index modulo it - so a 2,048-slot tile compared against a
+     * 256-slot reference would be two machines, agreeing only on
+     * programs that never reach past slot 255. A device that publishes
+     * no depth (a VERSION below 0x800, or a remote server older than the
+     * field) is compared at the software backend's own 256, as always. */
+    if (caps.max_scratch && caps.max_scratch != 256u) {
+        cft_open_args oa;
+        memset(&oa, 0, sizeof oa);
+        oa.struct_size   = sizeof oa;
+        oa.scratch_depth = caps.max_scratch;
+        cft_close(sw);
+        sw = NULL;
+        st = cft_open_ex(&oa, &sw);
+        if (st != CFT_OK) {
+            fprintf(stderr, "the software reference at the device's %lu "
+                    "scratch slots: %s\n  %s\n",
+                    (unsigned long)caps.max_scratch, cft_strerror(st),
+                    cft_last_error());
+            cft_close(hw);
+            return 2;
+        }
+        printf("reference: the software backend at %lu scratch slots a "
+               "lane, the device's\n", (unsigned long)caps.max_scratch);
     }
 
     /* The device image's identity, on both handles: the software one

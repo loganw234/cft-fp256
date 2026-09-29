@@ -23,7 +23,14 @@ import re
 import sys
 
 BEAT_BITS = 256          # cft_krnl's default; the board configuration keeps it
-BOARD = {"MUL_PASSES": "10", "FUSE_NORM": "1'b1", "FUSE_ALIGN": "1'b1"}
+# The board configuration. The three capacities joined it at revision 7
+# (2026-09-29), when cft_krnl's defaults became the U50's (1,024 deposit
+# slots, 32,768 instructions, 2,048 scratch slots): the board keeps the
+# 64, 16,384 and 256 it was measured with on 2026-09-22/23, which were the
+# kernel's defaults then - so the kernel this elaborates is that run's,
+# while its parameter list, and so its bytes, gained three entries.
+BOARD = {"MUL_PASSES": "10", "FUSE_NORM": "1'b1", "FUSE_ALIGN": "1'b1",
+         "SEQ_MAXD": "64", "SEQ_IMEM_D": "16384", "SEQ_SCRATCH_D": "256"}
 SKIP = {"ap_clk", "ap_rst_n"}
 
 for arg in sys.argv[3:]:

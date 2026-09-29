@@ -388,7 +388,8 @@ def golden_certificate(prog, chains, salt, identity):
     runs = tuple(cert.certify_run(spec.kind, spec.image, spec.bank, salt, st,
                                   rs, steps=spec.steps,
                                   parameters=spec.params,
-                                  h_slots=spec.h_slots)
+                                  h_slots=spec.h_slots,
+                                  scratch_depth=DEPTH)
                  for spec, (st, rs) in zip(prog.runs, chains))
     return cert.encode(cert.Certificate(
         "keyed" if salt is not None else "open",
@@ -625,11 +626,12 @@ def golden_write(runs_specs, salt=None):
     runs = []
     for spec in runs_specs:
         st, rs = cert.run_chain(spec.image, spec.bank, spec.init,
-                                spec.segments)
+                                spec.segments, scratch_depth=DEPTH)
         runs.append(cert.certify_run(spec.kind, spec.image, spec.bank, salt,
                                      st, rs, steps=spec.steps,
                                      parameters=spec.params,
-                                     h_slots=spec.h_slots))
+                                     h_slots=spec.h_slots,
+                                     scratch_depth=DEPTH))
     return cert.encode(cert.Certificate(
         "keyed" if salt is not None else "open",
         cert.salt_commitment(salt) if salt is not None else None,
@@ -639,9 +641,11 @@ def golden_write(runs_specs, salt=None):
 def golden_flags(spec, flags):
     """The golden writer handed one segment whose flag word is `flags`,
     as a producer's own results (certify_run takes them)."""
-    st, rs = cert.run_chain(spec.image, spec.bank, spec.init, 1)
+    st, rs = cert.run_chain(spec.image, spec.bank, spec.init, 1,
+                            scratch_depth=DEPTH)
     run = cert.certify_run("main", spec.image, spec.bank, None, st,
-                           [(flags, rs[0][1])], steps=spec.steps)
+                           [(flags, rs[0][1])], steps=spec.steps,
+                           scratch_depth=DEPTH)
     return cert.encode(cert.Certificate("open", None, cert.Identity(),
                                         (run,), ()))
 
@@ -1332,10 +1336,19 @@ def hold_remote(work, legs):
 
 PATHS = {}
 EXPECT_XRT = None
+# The scratch depth the golden writer runs at (revision 7): the DEVICE's,
+# read out of the CAPS2 its expected identity names (cert.scratch_depth_of,
+# which is also what the audit re-runs at), or the software backend's 256.
+# Every program below names only static slots under 256 - the ODE rows'
+# highest is lorenz96's 200 - so their chains are the same bytes at any
+# depth that holds them; the golden writer takes the device's anyway, so a
+# program that indexed past 256 could not pass here by computing another
+# machine's answer.
+DEPTH = seq.SCRATCH_D
 
 
 def main():
-    global TOOL, SERVE, SALT, EXPECT_ID, EXPECT_XRT
+    global TOOL, SERVE, SALT, EXPECT_ID, EXPECT_XRT, DEPTH
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--tool", required=True, help="the cft-segrun binary")
     ap.add_argument("--serve", help="cft-serve, for the remote leg")
@@ -1374,6 +1387,10 @@ def main():
                      "each measured apart from this tool")
         EXPECT_XRT = ("xrt", args.expect_xclbin, args.expect_version,
                       tuple(args.expect_caps.split()), args.expect_tiles)
+        DEPTH = cert.scratch_depth_of(
+            cert.Identity(device_caps=tuple(args.expect_caps.split())))
+        print(f"  the golden writer at {DEPTH} scratch slots a lane, the "
+              f"device's (CAPS2)", flush=True)
     work = Path(args.keep).resolve() if args.keep else \
         Path(tempfile.mkdtemp(prefix="segrun-check-"))
     work.mkdir(parents=True, exist_ok=True)
@@ -1407,7 +1424,8 @@ def main():
         PATHS[prog.name] = write_inputs(work, prog)
         t0 = time.perf_counter()
         chains[prog.name] = [cert.run_chain(s.image, s.bank, s.init,
-                                            s.segments) for s in prog.runs]
+                                            s.segments, scratch_depth=DEPTH)
+                             for s in prog.runs]
         shape = ", ".join(
             f"{s.kind} {s.fmt} "
             f"{len(st[0]) // seq.Program.from_bytes(s.image).n_scratch_in}"

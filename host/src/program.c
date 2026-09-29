@@ -76,9 +76,11 @@
  * cft_get_caps publishes these three for a software device and
  * cft_program_load holds it to exactly them, which is the invariant
  * host/tests/device_test.c checks: the caps a backend reports are the
- * caps it enforces. They are NOT the tile's - a tile holds 64 deposit
- * slots a lane, 1024 instructions - and they are deliberately not
- * narrowed to match one, because the software backend is the
+ * caps it enforces. They are NOT a tile's - a tile publishes its own
+ * in CAPS, 1,024 deposit slots a lane and 32,768 instructions on the
+ * U50's revision-7 images, 64 and 16,384 on the round-2 images and
+ * the open-core builds - and they are deliberately not narrowed to
+ * match one, because the software backend is the
  * CONTRACT rather than an implementation of it, and every recorded
  * workload chain (docs/REMOTE.md, bindings/wasm/demos_chains.json)
  * was produced through this accepted set. What used to be missing was
@@ -107,13 +109,16 @@
                                 * 4-bit fields still reach 16 */
 
 /* The scratch memory's depth, a lane's own (docs/SEQUENCER.md revision
- * 3, R4). ONE define: it is the executor's array bound, the modulus
- * STX and LDX reduce by, the ceiling a static STL or LDL slot is held
- * to, and the number cft_sw_seq_caps publishes as max_scratch - and a
- * second copy of it is how those four start to disagree. */
+ * 3, R4). It is the executor's array bound, the modulus STX and LDX
+ * reduce by, the ceiling a static STL or LDL slot is held to, and the
+ * number a software handle publishes as max_scratch - and since
+ * revision 7 (2026-09-29) all four are read from ONE place, the handle:
+ * cft_sw_seq_caps publishes this default, a software handle opened at
+ * another depth publishes that one instead (device.c), and a program
+ * loaded on it takes the handle's number once, at load
+ * (seq_scratch_footprint), for every use after. A second copy of the
+ * depth is how those four would start to disagree. */
 #define SEQ_SCRATCH_D    256u
-#define SEQ_SCRATCH_LOG2 8     /* log2(SEQ_SCRATCH_D), the width of the
-                                * index STX and LDX read out of rb */
 
 #define BLOCK_LANES      64
 
@@ -189,9 +194,17 @@ struct cft_program {
     uint32_t            scratch_used;
     /* Whether this run needs a scratch memory at all - any of the four
      * codes, or a declared block. Kept because the executor allocates
-     * SEQ_SCRATCH_D slots a lane and a program that never touches one
+     * scratch_depth slots a lane and a program that never touches one
      * should not pay four megabytes a run for the possibility. */
     int                 scratch_active;
+    /* The depth this program is held to and, on a software handle, runs
+     * at (revision 7): the one the handle published when it was loaded -
+     * 256 unless the handle was opened at another - or this library's
+     * own default where a device published none. The modulus a
+     * non-strict STX/LDX reduces by is scratch_depth and the range a
+     * strict one is reported past is 2^scratch_log2, the same number. */
+    uint32_t            scratch_depth;
+    int                 scratch_log2;
     uint64_t           *insns;
     /* The program's own constants, or NULL under BANK_EXT - where
      * n_consts still says how many the program ADDRESSES and every run
@@ -920,7 +933,7 @@ static cft_status seq_check_against_device(cft_device *dev,
  * even if no instruction touches it - the block is still preloaded and
  * still read back - and a program with neither should not pay for the
  * possibility, which at SEQ_SCRATCH_D slots across a lane block is
- * four megabytes a run. */
+ * four megabytes a run (and eight times that at 2,048). */
 static void seq_scratch_footprint(cft_device *dev, cft_program *p)
 {
     cft_seq_caps c;
@@ -929,6 +942,13 @@ static void seq_scratch_footprint(cft_device *dev, cft_program *p)
 
     cft_device_seq_caps(dev, &c);
     depth = c.max_scratch ? c.max_scratch : SEQ_SCRATCH_D;
+    /* Kept for the executor (revision 7). Every depth a handle can
+     * publish is a power of two - CAPS2[3:0] is a log2, and a software
+     * handle refuses any other at open - so the log2 is exact. */
+    p->scratch_depth = depth;
+    p->scratch_log2  = 0;
+    while ((1u << p->scratch_log2) < depth)
+        p->scratch_log2++;
 
     for (pc = 0; pc < p->n_insns; pc++) {
         seq_insn d;
@@ -1103,10 +1123,31 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
             return (cft_status)cft_seq_cap_refusal(
                 "n_scratch_out", n_sout, sc.max_scratch,
                 "scratch slots a lane", "max_scratch");
-        /* And this library's own ceiling, which is its executor's
-         * depth. Only reachable when the device published none. */
-        if (n_sin > SEQ_SCRATCH_D || n_sout > SEQ_SCRATCH_D)
+        /* And where the device published NO depth, this library's own
+         * ceiling: its executor's default depth, the depth
+         * seq_scratch_footprint gives such a program too. Only there - a
+         * device that published a depth is held to its own number above
+         * and to nothing else. Zero is unknown; past the feature test
+         * above it takes a device that publishes the block without a
+         * depth, a tile whose CAPS2 sets bit 5 and not bit 4.
+         *
+         * Until 2026-09-29 this test ran whatever the device published,
+         * which held every handle's block to 256: invisible while no
+         * device published more, and a refusal with no sentence of every
+         * block from 257 to 2,048 slots once a 2,048-slot handle
+         * existed (verifier-R5; device-test's deep-block leg holds it
+         * now). */
+        if (!sc.max_scratch &&
+            (n_sin > SEQ_SCRATCH_D || n_sout > SEQ_SCRATCH_D)) {
+            cft_set_error("this image's scratch block preloads %lu slots a "
+                          "lane and reads %lu back, and this device "
+                          "published no scratch depth (cft_caps.max_scratch "
+                          "is 0, unknown), so the block is held to this "
+                          "library's own executor depth, %lu slots a lane",
+                          (unsigned long)n_sin, (unsigned long)n_sout,
+                          (unsigned long)SEQ_SCRATCH_D);
             return CFT_ERR_INVALID_ARGUMENT;
+        }
     }
 
     /* And revision 4's strict scratch range, on exactly the same terms.
@@ -1254,15 +1295,16 @@ typedef struct {
      * ANDed with the mask, computed once and read by both. */
     int    keep[BLOCK_LANES];
     uint32_t counts[BLOCK_LANES];
-    /* SEQ_SCRATCH_D slots a lane, or NULL for a program that touches
-     * no scratch and declares no block. Out of line rather than inside
-     * this struct because at fp256 it is four megabytes to the
-     * register file's half, and a program that never issues an STL
-     * should not allocate and zero it once a run. Lane i's slot s is
-     * scratch[i * SEQ_SCRATCH_D + s], and it is the lane's alone -
-     * there is no cross-lane addressing in the contract and none
-     * here. */
+    /* The program's scratch_depth slots a lane, or NULL for a program
+     * that touches no scratch and declares no block. Out of line rather
+     * than inside this struct because it is four megabytes at 256 slots
+     * to the register file's half - 34 at 2,048 - and a program that
+     * never issues an STL should not allocate and zero it once a run.
+     * Lane i's slot s is scratch[i * depth + s], and it is the lane's
+     * alone - there is no cross-lane addressing in the contract and
+     * none here. */
     cft_bn *scratch;
+    uint32_t depth;
 } seq_block;
 
 /* Lane `lane`'s slot `slot`, or NULL when this program has no scratch.
@@ -1270,9 +1312,9 @@ typedef struct {
  * case, so the NULL is a defence and not a path. */
 static cft_bn *seq_scratch_at(seq_block *B, int lane, uint32_t slot)
 {
-    if (!B->scratch || slot >= SEQ_SCRATCH_D)
+    if (!B->scratch || slot >= B->depth)
         return NULL;
-    return &B->scratch[(size_t)lane * SEQ_SCRATCH_D + slot];
+    return &B->scratch[(size_t)lane * B->depth + slot];
 }
 
 /* The constants a run computes on: the image's own, or the bank the
@@ -1532,13 +1574,18 @@ static cft_status seq_run_block(const cft_program *p, const cft_bn *konst,
          *
          * The range test is a BIT LENGTH, not a wider extract, and that
          * is the substance of R8 on this side. The line below reads
-         * only the low SEQ_SCRATCH_LOG2 bits, so before this flag
-         * existed the executor could not SEE an out-of-range index -
-         * every index was in range by construction. The depth is
-         * published as a log2 and is therefore a power of two, which
-         * makes `idx >= SEQ_SCRATCH_D` exactly
-         * `cft_bn_bitlen(idx) > SEQ_SCRATCH_LOG2` at any register
-         * width, with no truncation anywhere. */
+         * only the low scratch_log2 bits, so before this flag existed
+         * the executor could not SEE an out-of-range index - every
+         * index was in range by construction. The depth is published as
+         * a log2 and is therefore a power of two, which makes
+         * `idx >= scratch_depth` exactly
+         * `cft_bn_bitlen(idx) > scratch_log2` at any register width,
+         * with no truncation anywhere.
+         *
+         * Both are the PROGRAM's depth, which is its handle's (revision
+         * 7): 256 on a handle opened plainly, another power of two on
+         * one opened at another depth - and the modulus and the range
+         * are what a tile of that depth computes. */
         case SEQ_STX:
         case SEQ_LDX: {
             int rb = seq_reg(d.rb, d.hb);
@@ -1549,7 +1596,7 @@ static cft_status seq_run_block(const cft_program *p, const cft_bn *konst,
                 if (!B->active[i])
                     continue;
                 if (strict_range &&
-                    cft_bn_bitlen(&B->regs[i][rb]) > SEQ_SCRATCH_LOG2) {
+                    cft_bn_bitlen(&B->regs[i][rb]) > p->scratch_log2) {
                     *status |= CFT_STATUS_SCRATCH_RANGE;
                     /* +0, which is what an untouched slot reads back as.
                      * Never a stale register: that would make the result
@@ -1558,8 +1605,8 @@ static cft_status seq_run_block(const cft_program *p, const cft_bn *konst,
                         cft_bn_zero(&B->regs[i][seq_reg(d.rd, d.hd)]);
                     continue;
                 }
-                slot = cft_bn_extract(&B->regs[i][rb], 0, SEQ_SCRATCH_LOG2)
-                       & (SEQ_SCRATCH_D - 1u);
+                slot = cft_bn_extract(&B->regs[i][rb], 0, p->scratch_log2)
+                       & (p->scratch_depth - 1u);
                 cell = seq_scratch_at(B, i, slot);
                 if (!cell)
                     return CFT_ERR_INTERNAL;
@@ -1849,6 +1896,7 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
     uint8_t *pd = (uint8_t *)deposits;
     size_t esz, off;
     uint32_t acc_flags = 0, acc_status = 0;
+    uint32_t scr_reach = 0;
     seq_block *B;
     cft_bn *loaded = NULL;
     const cft_bn *konst;
@@ -2003,17 +2051,36 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
         return CFT_ERR_OUT_OF_MEMORY;
     }
     /* The scratch, only for a program that has one. Out of line and
-     * conditional because it is four megabytes at fp256 across a lane
-     * block, and every program written before this evening touches
-     * none of it. */
+     * conditional because it is four megabytes across a lane block at
+     * 256 slots (34 at 2,048), and every program written before
+     * revision 3 touches none of it. At the program's depth, which is
+     * its handle's (revision 7). */
+    B->depth = prog->scratch_depth;
     if (prog->scratch_active) {
-        B->scratch = (cft_bn *)calloc((size_t)BLOCK_LANES * SEQ_SCRATCH_D,
+        B->scratch = (cft_bn *)calloc((size_t)BLOCK_LANES * B->depth,
                                       sizeof(cft_bn));
         if (!B->scratch) {
             free(B);
             free(loaded);
             return CFT_ERR_OUT_OF_MEMORY;
         }
+    }
+    /* What of a lane's scratch a block has to clear: every slot the
+     * program can observe - the whole depth when it indexes
+     * (scratch_used says so), else its highest static slot and the
+     * slots its block reads in and out. Nothing above that is ever read
+     * or written, so its contents are not a value any program can
+     * distinguish; the tile's per-block wipe is bounded by the same rule
+     * (and since revision 7 stops sooner, where nothing has written).
+     * calloc zeroed all of it for the first block. */
+    if (prog->scratch_active) {
+        scr_reach = prog->scratch_used;
+        if (prog->n_scratch_in > scr_reach)
+            scr_reach = prog->n_scratch_in;
+        if (prog->n_scratch_out > scr_reach)
+            scr_reach = prog->n_scratch_out;
+        if (scr_reach > B->depth)
+            scr_reach = B->depth;
     }
 
     for (off = 0; off < n; off += BLOCK_LANES) {
@@ -2055,10 +2122,10 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
              * lane blocks read the same bytes as a run in one. */
             if (B->scratch) {
                 uint32_t s;
-                memset(&B->scratch[i * SEQ_SCRATCH_D], 0,
-                       (size_t)SEQ_SCRATCH_D * sizeof(cft_bn));
+                memset(&B->scratch[i * B->depth], 0,
+                       (size_t)scr_reach * sizeof(cft_bn));
                 for (s = 0; psi && s < prog->n_scratch_in; s++)
-                    seq_load_in(&B->scratch[i * SEQ_SCRATCH_D + s], psi,
+                    seq_load_in(&B->scratch[i * B->depth + s], psi,
                                 isi,
                                 (off + i) * prog->n_scratch_in + s, esz);
             }
@@ -2093,7 +2160,7 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
                  * R17's one place where the two questions differ. */
                 if (B->keep[i]) {
                     for (s = 0; s < prog->n_scratch_out; s++)
-                        cft_bn_store(&B->scratch[i * SEQ_SCRATCH_D + s],
+                        cft_bn_store(&B->scratch[i * B->depth + s],
                                      pso + ((off + i) * prog->n_scratch_out
                                             + s) * esz,
                                      (int)esz);
