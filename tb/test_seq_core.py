@@ -53,9 +53,11 @@ which runs the case deliberately and REPORTS which reading the RTL
 took without asserting either. See its docstring.
 """
 
+import functools
 import os
 import random
 import sys
+import types
 from collections import Counter
 from pathlib import Path
 
@@ -81,15 +83,67 @@ NBEATS = 16
 # The pass budget the DUT was built with, for the cycle budgets only:
 # the multi-cycle targets export it, the default is the shipping tile.
 MUL_PASSES = int(os.getenv("CFT_MUL_PASSES", "1"))
-MAXD = 64
-IMEM_D = 1024
+
+
+def _seq_generic(name, default):
+    """One of cft_seq's capacities as THIS build of the DUT has it: the
+    CFT_GENERICS entry the target built it with, or else the module's own
+    default, which this file keeps in step with the module as it always
+    has. Revision 7 (2026-09-29) made the kernel's three capacities a
+    build's parameters, and tb/Makefile's seq_coreu50 runs this bench at
+    the U50's - rtl/cft_krnl.sv's SEQ_* defaults, read out of that file
+    by tb/krnl_caps.py - handing the same words to the simulator as -P
+    and to this bench here, from one list."""
+    for g in os.environ.get("CFT_GENERICS", "").split():
+        gname, _, value = g.partition("=")
+        if gname == name:
+            return int(value)
+    return default
+
+
+MAXD = _seq_generic("MAXD", 64)
+IMEM_D = _seq_generic("IMEM_D", 1024)
 # 256 -> 512 at revision 3 (R7): the ninth kx index bit made the
 # second half of the bank reachable, and cft_seq's DEFAULT moved with
 # it because tb/test_krnl.py holds cft_krnl's SEQ_KIDX_W against it.
+# Not a build's to set: a deeper bank is an instruction-format change.
 KMEM_D = 512
 # Scratch slots a lane (revision 3, R4), and the reduction the indexed
 # forms apply. A power of two by construction.
-SCRATCH_D = 256
+SCRATCH_D = _seq_generic("SCRATCH_D", 256)
+
+# EVERY MODEL CALL IN THIS BENCH IS AT THE DUT'S DEPTH (revision 7). The
+# depth is part of what a non-strict STX/LDX means, so a model left at
+# its default of 256 would score a 2,048-slot build against a different
+# machine. Rather than thread the argument through a hundred call sites
+# and leave one behind, the name `seq` from here on is the golden model
+# with its five depth-taking entry points bound to SCRATCH_D - run, the
+# Program class, stl, ldl and the fuzz generator - and everything else
+# the module itself. At cft_seq's default build SCRATCH_D is 256 and
+# every call is exactly the call it always was.
+_seq = seq
+
+
+class _ProgramAtDepth(_seq.Program):
+    """seq.Program, written for the DUT's depth unless told otherwise."""
+
+    def __init__(self, *args, scratch_depth=SCRATCH_D, **kwargs):
+        super().__init__(*args, scratch_depth=scratch_depth, **kwargs)
+
+    @classmethod
+    def from_bytes(cls, data, scratch_depth=SCRATCH_D):
+        return super(_ProgramAtDepth, cls).from_bytes(
+            data, scratch_depth=scratch_depth)
+
+
+seq = types.SimpleNamespace(**{k: v for k, v in vars(_seq).items()
+                               if not k.startswith("__")})
+seq.Program = _ProgramAtDepth
+seq.run = functools.partial(_seq.run, scratch_depth=SCRATCH_D)
+seq.stl = functools.partial(_seq.stl, scratch_depth=SCRATCH_D)
+seq.ldl = functools.partial(_seq.ldl, scratch_depth=SCRATCH_D)
+seq.random_program = functools.partial(_seq.random_program,
+                                       scratch_depth=SCRATCH_D)
 # Registers a lane owns, and so the register file's depth (revision 2:
 # 16 -> 32). It appears here only in the CYCLE BUDGET: cft_seq wipes
 # the whole file once per lane block, so the doubling is 256 more
@@ -102,11 +156,20 @@ RF_D = REGS * NBEATS
 
 CLK_NS = 4
 
-# One memory, generously spaced. The deposit region is last and has
-# the rest of the RAM behind it, because it is the only region whose
-# size grows with max_deposits.
+# One memory, generously spaced. The deposit region comes after the
+# inputs and has two megabytes behind it, because it is the only region
+# whose size grows with max_deposits; the image has the top megabyte.
+#
+# The image sat at 0x1000 until revision 7 (2026-09-29), below the bank
+# and the streams, which held while IMEM_D was 1,024 - an 8 KB image.
+# At the U50's 32,768 (seq_coreu50) the refusal matrix's IMEM_D + 1
+# image is 256 KB, and at 0x1000 it ran over the bank, the three
+# streams and the counts, so the refusal's own "the count region was
+# written" check fired on the bench's staging rather than on the tile.
+# A megabyte holds an image of 131,068 instructions; 4 KB aligned, as
+# 0x1000 was, so every image splits into the same bursts it always did.
 RAM_BYTES = 1 << 22
-PROG_BASE = 0x00_1000
+PROG_BASE = 0x30_0000
 # The per-run constant bank (revision 2 R3), in its own region well
 # away from the image: BANK_EXT exists precisely so the two are
 # separate buffers, and a FETCH that quietly read the constants from
@@ -406,6 +469,10 @@ def unchecked(fmt, insns, consts=(), max_deposits=1):
     # terms.
     p.n_scratch_in = 0
     p.n_scratch_out = 0
+    # ...and revision 7 the depth the program is written for. run()
+    # takes its own depth and does not read this one, but __init__
+    # would have set it, and "every field" is the rule above.
+    p.scratch_depth = SCRATCH_D
     return p
 
 

@@ -55,7 +55,7 @@ PYTHON ?= python3
 
 .PHONY: sim simmc fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
         normprobe seedop reduceacc reduce krnl krnlf128 krnlf64f128 krnlseq quarter faults \
-        seq_core seqprobe seqcycles seqtrace seqbp redprog krnlfused krnlplain cycles seqbanks \
+        seq_core seq_coreu50 seqprobe seqcycles seqtrace seqbp redprog krnlfused krnlplain cycles seqbanks \
         mulpass mulcycle mulcycle2 fp32mc fp64mc fp128mc fp256mc reducemc \
         krnlmc krnlseqmc quartermc faultsmc seq_coremc seqbanksmc cyclesmc clean
 
@@ -594,6 +594,24 @@ seq_core:
 		MODULE=test_seq_core SIM_BUILD=sim_build/seq_core \
 		COCOTB_RESULTS_FILE=sim_build/seq_core/results.xml \
 		&& $(PYTHON) check_results.py sim_build/seq_core/results.xml
+
+# The same bench with cft_seq built at the U50's capacities (revision 7,
+# 2026-09-29): 1,024 deposit slots, 32,768 instructions, 2,048 scratch
+# slots - rtl/cft_krnl.sv's SEQ_* defaults, which krnl_caps.py reads out
+# of that file so the numbers exist once. seq_core runs cft_seq at its
+# own defaults (64, 1,024, 256); this one is where every model run is at
+# 2,048 slots, the top slot is 2,047, a non-strict index wraps at 2,048
+# and a strict one is reported past it. One list: each word reaches the
+# simulator as -Pcft_seq.<word> and the whole line reaches the bench as
+# CFT_GENERICS. Every indexing block wipes 32,768 cycles here against
+# 4,096 in seq_core, so it is the slower of the two.
+SEQ_U50_GENERICS = $(shell $(PYTHON) krnl_caps.py)
+seq_coreu50:
+	CFT_GENERICS="$(SEQ_U50_GENERICS)" timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
+		MODULE=test_seq_core SIM_BUILD=sim_build/seq_coreu50 \
+		KRNL_PARAMS="$(foreach g,$(SEQ_U50_GENERICS),-Pcft_seq.$(g))" \
+		COCOTB_RESULTS_FILE=sim_build/seq_coreu50/results.xml \
+		&& $(PYTHON) check_results.py sim_build/seq_coreu50/results.xml
 
 # Diagnostic probe for seq_core, not part of `make sim`. One trivial
 # program into a quiet cft_seq, printing the state register, both bus
