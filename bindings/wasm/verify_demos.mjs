@@ -26,7 +26,9 @@
 //      demos_core.js and reports on demos.html. Without this line the
 //      two could drift and the report would be about the wrong file.
 //
-//   3  THE CHAINS, three ways. First the recording's two stamps:
+//   3  THE CHAINS, three ways. First, that the core really runs over
+//      the committed module's bytes (the loader adopted the instance
+//      built from them), and the recording's two stamps:
 //      demos_chains.json names the module and the core it was
 //      recorded against, and they must be the committed module and
 //      demos_core.js. Then, for each of the thirteen configurations:
@@ -272,10 +274,38 @@ if (existsSync(PAGE)) {
 
 // ---------------------------------------------------------------------
 // The compute core, loaded into this process over the committed module.
+//
+// The bytes hashed above are the bytes that run: compiled here and
+// handed to the loader through Module.instantiateWasm, which it calls in
+// place of fetching a module itself, instantiated synchronously so that
+// a failure rejects the load. Until 2026-09-29 this passed
+// Module.wasmBinary, which the pinned loader (emcc 6.0.9) never reads:
+// it loaded bindings/node/cft_node.wasm by its own path search - the
+// same file, so the chains were always over the committed module, but
+// the argument decided nothing (verifier-C4, 2026-09-28). Whether the
+// loader adopted the instance built here is reported at the head of
+// step 3: the heap it hands back must be that instance's memory.
 // ---------------------------------------------------------------------
 const require = createRequire(import.meta.url);
 const createCftModule = require(MODULE_JS);
-const M = await createCftModule({ wasmBinary: moduleWasm });
+let M, moduleInstance = null;
+try {
+  const compiled = await WebAssembly.compile(moduleWasm);
+  M = await createCftModule({
+    instantiateWasm(imports, receive) {
+      moduleInstance = new WebAssembly.Instance(compiled, imports);
+      receive(moduleInstance, compiled);
+      return moduleInstance.exports;
+    },
+  });
+} catch (err) {
+  console.log(`  FAIL  the loader could not load the committed module: ${err.message}`);
+  process.exit(1);
+}
+const adopted = moduleInstance !== null &&
+  moduleInstance.exports.memory instanceof WebAssembly.Memory &&
+  M.HEAPU8 !== undefined &&
+  M.HEAPU8.buffer === moduleInstance.exports.memory.buffer;
 vm.runInThisContext(coreSrc, { filename: "demos_core.js" });
 const D = globalThis.CftDemos;
 if (!D) { console.log("  FAIL  demos_core.js defined no CftDemos"); process.exit(1); }
@@ -377,6 +407,14 @@ if (!RECORD) {
 
 console.log(`\n== 3. the chains (${runs.length} configuration${runs.length === 1 ? "" : "s"}` +
             `${NO_NATIVE ? ", --no-native" : ""}) ==`);
+
+if (adopted)
+  ok("the core runs over the committed module's bytes as hashed above: " +
+     "the loader adopted the instance built from them");
+else
+  bad("the loader did not adopt the committed module's bytes handed to it " +
+      "through Module.instantiateWasm, so the chains below are over a " +
+      "module it chose itself - teach this script the loader's hook");
 
 // The recording's two stamps. A chain recorded against a different
 // module or a different core is a chain about a different program, so

@@ -28,8 +28,11 @@
 //      renders, asked of the file in git.
 //   3  That the node loader's module is the SAME MODULE, by sha256.
 //      -sENVIRONMENT changes the loader, not the wasm, and that is a
-//      claim worth measuring rather than repeating: without it a
-//      replay under node would be a replay of a lookalike.
+//      claim worth measuring rather than repeating: it is what makes
+//      bindings/node the page's module behind a different front door,
+//      and the loader's JavaScript the glue for exactly these bytes.
+//      Then the loader is handed the page's bytes and must adopt them,
+//      so that what steps 3b to 5 run is the page and not a lookalike.
 //   3b THE PAGE'S EMBEDDED SAMPLE, replayed the way the page's section
 //      2 replays it on load: each of the twenty sampled opcode sets
 //      written into its own MEMFS directory and handed to
@@ -40,11 +43,16 @@
 //      negative control, which corrupts one expected value in the
 //      sample and nothing else, passed every one of them.
 //   4  The replay itself, through the page's own bytes: the node
-//      loader is handed the extracted module as Module.wasmBinary, so
-//      cft_conformance() runs on the literal contents of
-//      conformance.html over MEMFS - the same call the page makes,
-//      the same per-element then whole-array passes, over the full
-//      published sets rather than the embedded sample. One set per
+//      loader is handed the extracted module through its
+//      Module.instantiateWasm hook, so cft_conformance() runs on the
+//      literal contents of conformance.html over MEMFS - the same call
+//      the page makes, the same per-element then whole-array passes,
+//      over the full published sets rather than the embedded sample.
+//      (Not through Module.wasmBinary, which the pinned loader never
+//      reads. This script passed that until 2026-09-29, so steps 3b to
+//      5 ran bindings/node/cft_node.wasm. Step 3's sha256 made those
+//      the page's bytes, so no verdict was wrong, but it was not the
+//      mechanism this comment named.) One set per
 //      directory, which is what the page's drop zone does, so this is
 //      that path and not a tidier one: since ABI 0.3 the drop zone
 //      accepts the twenty transcendental sets as well, since 0.6 the
@@ -524,12 +532,52 @@ else
 
 // ---------------------------------------------------------------------
 // The page's module under the node loader, for steps 3b, 4 and 5
+//
+// The page's module, not the loader's file: the same bytes by step 3,
+// and this way the replay is literally of what is committed. They go
+// over through Module.instantiateWasm, which the loader calls in place
+// of fetching a module itself: the hook instantiates step 2's
+// compilation of the extracted bytes against the imports the loader
+// supplies, and the loader adopts that instance. Synchronously, so that
+// a failure rejects the load rather than leaving the loader waiting.
+//
+// Module.wasmBinary, which this script passed until 2026-09-29, is
+// never read by the pinned loader (emcc 6.0.9 declares the variable and
+// never assigns it from the argument): it loaded the .wasm beside
+// itself by its own path search, and the argument decided nothing
+// (verifier-C4, 2026-09-28). The check after the load is what notices
+// a loader that stops honouring the hook: the heap the loader hands
+// this script must be the memory of the instance built here.
 // ---------------------------------------------------------------------
 
 const { default: createCftModule } = await import(pathToFileURL(loaderJs));
-// The page's module, not the loader's file: same bytes by step 3, and
-// this way the replay is literally of what is committed.
-const M = await createCftModule({ wasmBinary: pageWasm });
+let M, pageInstance = null;
+try {
+  M = await createCftModule({
+    instantiateWasm(imports, receive) {
+      pageInstance = new WebAssembly.Instance(mod, imports);
+      receive(pageInstance, mod);
+      return pageInstance.exports;
+    },
+  });
+} catch (err) {
+  // A loader whose module is not the page's (step 3 said so above) can
+  // fail to link the page's bytes at all; that is a failure by name,
+  // not a stack trace.
+  bad(`the node loader could not load the page's bytes: ${err.message}`);
+  console.log("\nVERIFY FAILED");
+  process.exit(1);
+}
+if (pageInstance !== null &&
+    pageInstance.exports.memory instanceof WebAssembly.Memory &&
+    M.HEAPU8 !== undefined &&
+    M.HEAPU8.buffer === pageInstance.exports.memory.buffer)
+  ok("the node loader runs the page's bytes: handed them through " +
+     "Module.instantiateWasm, it adopted the instance built from them");
+else
+  bad("the node loader did not adopt the page's bytes handed to it " +
+      "through Module.instantiateWasm, so steps 3b to 5 would run a " +
+      "module it chose itself - teach this script the loader's hook");
 
 const num = "number", str = "string";
 const N = (k) => Array(k).fill(num);
