@@ -1089,7 +1089,9 @@ class Bench:
         # it indexes, otherwise the highest static slot it names and
         # the slots the scratch-out drain will read. A program that
         # names none wipes none, which is why every case that predates
-        # revision 3 has exactly the budget it had.
+        # revision 3 has exactly the budget it had. Since revision 7 the
+        # wipe is the lesser of that and what the previous block wrote,
+        # so this stays a bound.
         slots, indexed = 0, False
         for word in prog.insns:
             d = seq.decode(word)
@@ -2929,6 +2931,201 @@ async def scratch_strict_range(dut):
 
     dut._log.info(f"strict range: {bench.cases['program']} runs, "
                   f"each paired with its own modulo control")
+
+
+@cocotb.test()
+async def scratch_index_past_256_at_the_dut_depth(dut):
+    """Revision 7: an index past 256, where the DUT's depth decides.
+
+    Every indexed case above builds its indices from SCRATCH_D itself,
+    so they land on the same slots whatever the depth. These do not:
+    9 + 256k is slot 9 on a 256-slot build and a different slot for each
+    k on a deeper one (seq_coreu50's 2,048), and past the depth only on
+    the 256-slot one. Plain and strict, held to the model at the DUT's
+    depth - so seq_core holds the 256-slot machine and seq_coreu50 the
+    2,048-slot one - and on a deeper build the plain run's deposits and
+    the strict run's STATUS are asserted to DIFFER from a 256-slot
+    model's, so a bench whose model still ran at 256 would fail here.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    deeper = SCRATCH_D > 256
+    for name, n in (("fp32", 20), ("fp64", 10)):
+        fmt = FORMATS[name]
+        body = [
+            seq.stl(0, 9),           # slot 9 := a
+            seq.ldx(24, 1),          # r24 := scratch[r1], r1 == 9 + 256k
+            seq.deposit(24),
+            seq.stx(24, 1),          # scratch[r1] := r24
+            seq.ldl(25, 9),          # slot 9, the static way
+            seq.deposit(25),
+            seq.halt()]
+        idx = [_int_bits(fmt, 9 + 256 * (i % 5)) for i in range(n)]
+        a, c = operands(fmt, n, 1600), operands(fmt, n, 1602)
+        for flags, tag in ((0, "plain"),
+                           (seq.FLAG_SCRATCH_STRICT, "strict")):
+            prog = seq.Program(fmt, body, max_deposits=2, flags=flags)
+            want = await bench.program(
+                fmt, prog, a, idx, c, n,
+                f"{name} index 9 + 256k, {tag}, at {SCRATCH_D} slots")
+            at256 = _seq.run(prog, a, idx, c, scratch_depth=256)
+            reported = bool(want.status & seq.STATUS_SCRATCH_RANGE)
+            assert reported == (bool(flags) and not deeper), (
+                f"{name} {tag}: STATUS {want.status:#x} at {SCRATCH_D} "
+                f"slots - an index of 9 + 256k is past a 256-slot tile "
+                f"and inside a deeper one")
+            if deeper and not flags:
+                # plain: the 256-slot machine wraps every index to slot 9
+                assert want.deposits != at256.deposits, (
+                    f"{name} {tag}: the same deposits at {SCRATCH_D} slots "
+                    f"as at 256, so this case cannot tell the depths "
+                    f"apart")
+            elif deeper:
+                # strict: past the depth a load reads +0 - what an
+                # untouched slot inside it reads too - and the store it
+                # suppresses is of that +0, so the deposits agree and the
+                # REPORT is what tells the machines apart
+                assert want.status != at256.status, (
+                    f"{name} {tag}: STATUS {want.status:#x} at "
+                    f"{SCRATCH_D} slots and at 256 alike")
+            else:
+                assert want.deposits == at256.deposits
+                assert want.status == at256.status
+
+    dut._log.info(f"an index past 256: {bench.cases['program']} runs, "
+                  f"plain and strict, at {SCRATCH_D} slots")
+
+
+# ---- revision 7: the wipe follows what was written -------------------
+#
+# rtl/cft_seq.sv keeps a dirty high-water mark a word bank and wipes a
+# block only as far as the marks say anything was written since the last
+# wipe, where it used to wipe all SCRATCH_D slots for any program that
+# indexes - 4,096 cycles a block at 256 slots, 32,768 at the U50's 2,048.
+# Two claims, and a test each: nothing a block can read is left from
+# another block or another run; and an indexing program's block costs
+# what it wrote, not what the build has.
+
+def _walk_prog(fmt):
+    """scratch[r0] := r2; r3 := scratch[r1]; deposit r3."""
+    return seq.Program(fmt, [
+        seq.stx(2, 0),
+        seq.ldx(3, 1),
+        seq.deposit(3),
+        seq.halt()], max_deposits=1)
+
+
+@cocotb.test()
+async def scratch_blocks_see_only_their_own_writes(dut):
+    """Three blocks of fp32 lanes, run twice. Block 0 stores each lane's
+    value near the TOP of the scratch and reads it back; block 1 stores
+    at slot 3 and reads the top slot block 0 wrote in the same physical
+    lane position, which a wipe that stopped short would hand it; block
+    2 stores at slot 7 and reads block 1's slot 3. The model has no
+    blocks - every lane's scratch starts at +0 - so every read of a slot
+    the lane never wrote must be +0, and anything else is a slot leaking
+    from one block, or one run, into another."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    lpb = lanes_per_block(fmt)
+    n = 3 * lpb
+    top = [SCRATCH_D - 1 - (i % 8) for i in range(n)]
+    wr = [top[i] if i < lpb else (3 if i < 2 * lpb else 7) for i in range(n)]
+    rd = [top[i] if i < lpb else (top[i] if i < 2 * lpb else 3)
+          for i in range(n)]
+    vals = [0x3F80_0000 + i for i in range(n)]      # 1.0 and up, all nonzero
+    prog = _walk_prog(fmt)
+    for rep in range(2):
+        want = await bench.program(
+            fmt, prog, [_int_bits(fmt, v) for v in wr],
+            [_int_bits(fmt, v) for v in rd], vals, n,
+            f"three blocks, top slot then 3 then 7 (run {rep})")
+        assert want.deposits[:lpb] == vals[:lpb], \
+            "block 0 must read back what it wrote"
+        assert want.deposits[lpb:] == [0] * (2 * lpb), \
+            "blocks 1 and 2 read slots their lanes never wrote: +0"
+
+    # Across runs, and the one rule the marks could get wrong: a STATIC
+    # program wipes only what it can observe, so its short wipe must not
+    # declare clean the slots above it that an earlier run dirtied. Run
+    # A indexes near the top; run S names slot 3 alone and wipes 0..3;
+    # run B indexes again and reads what run A wrote in the same lane
+    # positions - which must be +0, so B's wipe had to reach A's slots.
+    n1 = lpb
+    high = [SCRATCH_D - 9 - (i % 8) for i in range(n1)]
+    await bench.program(fmt, prog, [_int_bits(fmt, v) for v in high],
+                        [_int_bits(fmt, v) for v in high], vals[:n1], n1,
+                        "run A: near the top")
+    stat = seq.Program(fmt, [seq.stl(0, 3), seq.ldl(3, 3), seq.deposit(3),
+                             seq.halt()], max_deposits=1)
+    await bench.program(fmt, stat, vals[:n1], vals[:n1], vals[:n1], n1,
+                        "run S: slot 3 alone")
+    want = await bench.program(fmt, prog, [_int_bits(fmt, 5)] * n1,
+                               [_int_bits(fmt, v) for v in high], vals[:n1],
+                               n1, "run B: reads run A's slots")
+    assert want.deposits == [0] * n1, "run B's lanes never wrote those slots"
+    dut._log.info(f"dirty marks: {bench.cases['program']} runs, every "
+                  f"block and run clean of the last")
+
+
+@cocotb.test()
+async def scratch_wipe_costs_what_was_written(dut):
+    """What an indexing program's block costs, against the slots it
+    wrote. Three runs of four fp32 blocks, each run once to set the marks
+    and once to time:
+
+      wide    STX through a register whose values stay below 32
+      narrow  the same program, its values below 8
+      static  STL at slot 31, wide's static twin
+
+    wide and narrow differ only in the slots they write, so their blocks
+    must differ by exactly the wipe's difference, (32 - 8) * NBEATS
+    cycles. wide and static both write at most 32 slots a lane and both
+    wipe 32, so wide must cost static's within a small constant: STX's
+    own cost against STL's, NBEATS + 2 = 18 cycles a block, measured
+    2026-09-29 before the marks and after them, at 256 slots and at
+    2,048 alike. The slack is four slots' wipe, room for the issue rework
+    beside this one; the exact difference above is what catches a wipe
+    that is off by a slot. Before revision 7's marks wide cost static's
+    plus (SCRATCH_D - 32) * NBEATS - 3,584 cycles a block at 256 slots,
+    32,256 at 2,048 - and static costs the same at every depth, so this
+    holding at both depths is wide costing at 2,048 what it costs at
+    256."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    lpb = lanes_per_block(fmt)
+    blocks = 4
+    n = blocks * lpb
+    one = sf.one_bits(fmt)
+    stx = seq.Program(fmt, [seq.stx(0, 1), seq.halt()], max_deposits=0)
+    stl = seq.Program(fmt, [seq.stl(0, 31), seq.halt()], max_deposits=0)
+    per_block = {}
+    for label, prog, below in (("wide", stx, 32), ("narrow", stx, 8),
+                               ("static", stl, 32)):
+        idx = [_int_bits(fmt, i % below) for i in range(n)]
+        await bench.program(fmt, prog, [one] * n, idx, [one] * n, n,
+                            f"{label}, setting the marks")
+        bench._stage(fmt, prog.to_bytes(), [one] * n, idx, [one] * n, n,
+                     0, 4 * n)
+        bench._drive_cfg(fmt, n)
+        t0 = get_sim_time("ns")
+        refused, flags, err = await bench._go(4_000_000, label)
+        assert refused == 0 and err == 0, (label, refused, err)
+        per_block[label] = (get_sim_time("ns") - t0) / CLK_NS / blocks
+        dut._log.info(f"{label}: {per_block[label]:.1f} cycles a block "
+                      f"at {SCRATCH_D} slots")
+    step = per_block["wide"] - per_block["narrow"]
+    assert step == (32 - 8) * NBEATS, (
+        f"slots 8 to 31 cost {step:.1f} cycles a block, where their wipe "
+        f"is {(32 - 8) * NBEATS}: the wipe is not following what was "
+        f"written (SCRATCH_D {SCRATCH_D})")
+    slack = 4 * NBEATS
+    assert per_block["wide"] <= per_block["static"] + slack, (
+        f"an indexing block costs {per_block['wide']:.1f} cycles and its "
+        f"static twin {per_block['static']:.1f}: the wipe is paying for "
+        f"slots nothing wrote (SCRATCH_D {SCRATCH_D})")
 
 
 # ======================================================================

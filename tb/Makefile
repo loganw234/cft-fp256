@@ -603,11 +603,15 @@ seq_core:
 # 2,048 slots, the top slot is 2,047, a non-strict index wraps at 2,048
 # and a strict one is reported past it. One list: each word reaches the
 # simulator as -Pcft_seq.<word> and the whole line reaches the bench as
-# CFT_GENERICS. Every indexing block wipes 32,768 cycles here against
-# 4,096 in seq_core, so it is the slower of the two.
+# CFT_GENERICS. The scratch cases build their indices from SCRATCH_D and
+# write near its top, so their blocks wipe up to 32,768 cycles here
+# against 4,096 in seq_core: about three times seq_core's simulation
+# under Verilator (275 s against 93, 2026-09-29), and so, at Icarus's
+# ratio, past SEQ_TIMEOUT - hence a timeout of its own.
 SEQ_U50_GENERICS = $(shell $(PYTHON) krnl_caps.py)
+SEQ_U50_TIMEOUT ?= 7200
 seq_coreu50:
-	CFT_GENERICS="$(SEQ_U50_GENERICS)" timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
+	CFT_GENERICS="$(SEQ_U50_GENERICS)" timeout $(SEQ_U50_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
 		MODULE=test_seq_core SIM_BUILD=sim_build/seq_coreu50 \
 		KRNL_PARAMS="$(foreach g,$(SEQ_U50_GENERICS),-Pcft_seq.$(g))" \
 		COCOTB_RESULTS_FILE=sim_build/seq_coreu50/results.xml \

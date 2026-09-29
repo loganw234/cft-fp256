@@ -84,12 +84,13 @@ SEQ_IMEM_D = krnl_param("SEQ_IMEM_D")
 SEQ_SCRATCH_D = krnl_param("SEQ_SCRATCH_D")
 # ...and the deposit budget, which the header check holds max_deposits to.
 SEQ_MAXD = krnl_param("SEQ_MAXD")
-# Cycles a block spends wiping a program's WHOLE scratch - every one of an
-# indexing program's blocks, and one whose static slots or scratch-out
-# reach the top: SCRATCH_D slots x NBEATS beats, one a cycle (cft_seq's
-# S_ZERO). 4,096 at 256 and 32,768 at 2,048, which is past the default
-# budget below on its own, so a case that pays it asks for this much
-# more per block (poll_done counts polls of ten cycles).
+# Cycles a block spends wiping a program's WHOLE scratch: SCRATCH_D slots x
+# NBEATS beats, one a cycle (cft_seq's S_ZERO), 4,096 at 256 and 32,768 at
+# 2,048, which is past the default budget below on its own. A block of an
+# indexing program, or of one whose static slots or scratch-out reach the
+# top, can pay it - since revision 7 only as far as something wrote since
+# the last wipe, so this is a bound - and a case that may asks for this
+# much more per block (poll_done counts polls of ten cycles).
 WIPE_TRIES = SEQ_SCRATCH_D * 16 // 10
 
 # CSR map (rtl/cft_csr.sv == hw/kernel.xml == docs/ARCHITECTURE.md)
@@ -1074,12 +1075,44 @@ async def krnl_sequencer(dut):
         seq.ldx(21, 2),
         seq.deposit(21),
         seq.halt()], max_deposits=2, scratch_depth=SEQ_SCRATCH_D)
-    # One block, and it indexes, so it wipes the whole scratch.
+    # One block, and it indexes, so it may wipe the whole scratch.
     await run_prog(dut, axil, ram, pscr,
                    gen_stream(FP32, n_s, rng), gen_stream(FP32, n_s, rng),
                    [i * 5 + SEQ_SCRATCH_D * (i % 3) for i in range(n_s)],
                    f"fp32 STL/LDL/STX/LDX, top slot {SEQ_SCRATCH_D - 1}",
                    tries=3000 + WIPE_TRIES)
+
+    # ---- revision 7: an index past 256, where the tile's depth decides -
+    #
+    # The case above builds its indices from the tile's own depth, so
+    # they land on the same slots whatever that depth is. These do not:
+    # 5 + 256 * (i % 4) is slot 5 four times over on a 256-slot tile and
+    # four different slots on a deeper one. A lane whose index lands on
+    # 5 reads a and leaves b there (a, b); any other reads an untouched
+    # slot and stores b in it (+0, a). Plain, the index reduces modulo
+    # the depth; strict, one past the depth is reported, suppressed and
+    # reads +0. The model runs at SEQ_SCRATCH_D, so the U50's kernel
+    # (2,048) and the open-core configurations (256, boardseq) are each
+    # held to their own machine - and a bench that ran its model at 256
+    # against a 2,048-slot tile would fail here, on lanes 1..3 of each 4.
+    for flags, tag in ((0, "plain"), (seq.FLAG_SCRATCH_STRICT, "strict")):
+        pdeep = seq.Program(FP32, [
+            seq.stl(0, 5, SEQ_SCRATCH_D),    # slot 5 := a
+            seq.ldx(4, 2),                   # r4 := scratch[c]
+            seq.deposit(4),
+            seq.stx(1, 2),                   # scratch[c] := b
+            seq.ldl(5, 5, SEQ_SCRATCH_D),    # r5 := slot 5
+            seq.deposit(5),
+            seq.halt()], max_deposits=2, flags=flags,
+            scratch_depth=SEQ_SCRATCH_D)
+        n_d = 16
+        await run_prog(dut, axil, ram, pdeep,
+                       gen_stream(FP32, n_d, rng, tame=True),
+                       gen_stream(FP32, n_d, rng, tame=True),
+                       [5 + 256 * (i % 4) for i in range(n_d)],
+                       f"fp32 an index past 256, {tag}, at "
+                       f"{SEQ_SCRATCH_D} slots",
+                       tries=3000 + WIPE_TRIES)
 
     # The block, in and out, through SCRATCH_IN_PTR and
     # SCRATCH_OUT_PTR. run_prog reads the scratch-out region back the
@@ -1183,8 +1216,8 @@ async def krnl_sequencer(dut):
                        n_scratch_out=SEQ_SCRATCH_D,
                        scratch_depth=SEQ_SCRATCH_D)
     n_max = 4
-    # The whole scratch wiped, then n_max * SCRATCH_D elements preloaded
-    # and as many drained, each one a cycle.
+    # At most the whole scratch wiped, then n_max * SCRATCH_D elements
+    # preloaded and as many drained, each one a cycle.
     await run_prog(dut, axil, ram, pmax,
                    gen_stream(FP32, n_max, rng), gen_stream(FP32, n_max, rng),
                    gen_stream(FP32, n_max, rng),

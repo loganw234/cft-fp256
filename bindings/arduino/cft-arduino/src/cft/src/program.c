@@ -1829,7 +1829,8 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
      * (scratch_used says so), else its highest static slot and the
      * slots its block reads in and out. Nothing above that is ever read
      * or written, so its contents are not a value any program can
-     * distinguish; the tile's per-block wipe is sized by the same rule.
+     * distinguish; the tile's per-block wipe is bounded by the same rule
+     * (and since revision 7 stops sooner, where nothing has written).
      * calloc zeroed all of it for the first block. */
     if (prog->scratch_active) {
         scr_reach = prog->scratch_used;
