@@ -537,6 +537,11 @@ module cft_seq #(
   // enable. Declared here because the row selects below read them.
   logic [5:0]               pb_bt, pf_bt, pg_bt, ph_bt;
   logic [LATENCY*WORDS-1:0] fr;
+  // Revision 7, R19: the beat each request fired from, shifted beside
+  // the row. The retire counted beats (wb_bt) and wrote the n-th result
+  // to beat n; with beats skipped a result must say which beat it is.
+  logic [LATENCY*6-1:0]     ft;
+  logic [5:0]               wb_tag;
   logic dr_stall;                   // the deposit drain holds (declared here
                                     // for the banks' read register, defined
                                     // with the drain's pipeline)
@@ -1261,7 +1266,13 @@ module cft_seq #(
   // next program's DEPOSIT waited for it forever).
   logic          seq_live;
   assign seq_live = (st != S_IDLE);
-  assign wb_pop  = al_ov && seq_live && (wb_bt == 6'({1'b0, nb_blk} - 6'd1));
+  // R19: the beat a result belongs to is the one it FIRED from (ft),
+  // not the count of results so far, because a beat with no active lane
+  // is never fired. An instruction that writes a register always fires
+  // the block's last beat, so its last result is on that beat whatever
+  // the mask, and that is where it leaves the queue.
+  assign wb_tag  = ft[LATENCY*6-1 -: 6];
+  assign wb_pop  = al_ov && seq_live && (wb_tag == 6'({1'b0, nb_blk} - 6'd1));
   assign q_after = q_n - {1'b0, wb_pop};
   assign q_e0    = wb_pop ? q_rd1 : q_rd0;
   assign q_e1    = wb_pop ? q_rd2 : q_rd1;
@@ -1324,8 +1335,7 @@ module cft_seq #(
   // the queue, and a control code waits no longer than it did when it
   // waited for the queue to be EMPTY.
   assign adm_go  = (st == S_DECODE) ? c_piped :
-                   (st == S_ISSUE) && !rd_hold &&
-                   (bt == 6'({1'b0, nb_blk} - 6'd1)) && nxt_ok &&
+                   (st == S_ISSUE) && !rd_hold && last_step && nxt_ok &&
                    (32'(pc) + 32'd1 < h_ninsns) && imq_piped;
   assign adm_take = adm_go && q_room;
   assign adm_w   = (st == S_ISSUE) ? imem_q : cur;
@@ -1373,7 +1383,12 @@ module cft_seq #(
   assign dep_hold_b = dep_v_b && (dep_pos_b != 2'd0 ||
                                   (b_fwd ? wb_soon : wb_bt) <= bt);
   assign dep_hold_c = dep_v_c && (dep_pos_c != 2'd0 || wb_soon <= bt);
-  assign raw_hold = (st == S_ISSUE) &&
+  // R19: only a beat with a live lane waits for its producers. The
+  // one beat issued without one - a writer's last beat, forced - fires
+  // under an empty row, so whatever it reads is never written anywhere,
+  // and making it wait would charge a masked block a whole link of a
+  // dependent chain for nothing.
+  assign raw_hold = (st == S_ISSUE) && beat_live[bt[NBSH-1:0]] &&
                     (dep_hold_a || dep_hold_b || dep_hold_c);
   // The scratch's two holds (R18). An LDX's slot comes from rb, which
   // reaches the bus only at F, so an LDX reads the scratch at G and
@@ -1395,8 +1410,10 @@ module cft_seq #(
   assign pf_ldx    = pf_v && pf_ctrl && pf_op == C_LDX;
   assign pb_st     = pb_v && pb_ctrl && (pb_op == C_STL || pb_op == C_STX);
   assign pf_st     = pf_v && pf_ctrl && (pf_op == C_STL || pf_op == C_STX);
-  assign gap_hold  = (st == S_ISSUE) && !c_is_ldx && (pb_ldx || pf_ldx);
-  assign stld_hold = (st == S_ISSUE) && c_is_ldl && (pb_st || pf_st);
+  assign gap_hold  = (st == S_ISSUE) && issue_this && !c_is_ldx &&
+                     (pb_ldx || pf_ldx);
+  assign stld_hold = (st == S_ISSUE) && issue_this && c_is_ldl &&
+                     (pb_st || pf_st);
   assign a_hold    = raw_hold || gap_hold || stld_hold;
   assign rd_hold   = issue_hold || a_hold;
   // Nothing is in the pipe: every beat addressed has acted or fired,
@@ -1404,6 +1421,70 @@ module cft_seq #(
   // end of the block (with the queue empty as well).
   logic pipe_idle;
   assign pipe_idle = !pb_v && !pf_v && !pg_v && !ph_v;
+
+  // Revision 7, R19: which beats the A stage ISSUES. A beat with no
+  // active lane writes nothing, deposits nothing and raises nothing, so
+  // it is not addressed at all: A walks the live beats and jumps the
+  // rest. The mask A reads is the one `active` holds as the beat comes
+  // up, and it can only be WIDER than the one the beat would fire under
+  // (a SETACT still in the pipe narrows it; ACTALL, the one code that
+  // widens, waits for the pipe to empty) - so a beat skipped here is
+  // dead at F as well, and a beat issued that has died by F is masked
+  // there as it always was. One exception: an instruction that WRITES a
+  // register always issues the block's last beat, live or not, because
+  // its queue slot is released by the result on that beat - an
+  // instruction every lane had left would otherwise hold its slot for
+  // ever. That beat fires under an empty row and writes nothing.
+  //
+  // The live vector is REGISTERED, a cycle behind `active`: it feeds a
+  // priority encoder, `bt` and the admission, and a view one cycle old
+  // is safe for the same reason A's view of `active` is - it can only
+  // be stale on the WIDE side. `active` narrows (SETACT, at F) or
+  // widens; a widening is the block's start (S_ZERO, many cycles before
+  // the first admission) or ACTALL (in S_DECODE with the pipe empty,
+  // three cycles before the next admission at the earliest), and the
+  // register has caught up by then. A beat live in the register and
+  // dead in `active` is issued and masked at F, as it always was.
+  logic [NBEATS-1:0] beat_live_c, beat_live, c_final, iss_mask, adm_mask;
+  generate
+    for (genvar gl = 0; gl < NBEATS; gl = gl + 1) begin : g_live
+      assign beat_live_c[gl] = |active[gl*WORDS +: WORDS];
+      assign c_final[gl]     = (32'(gl) == 32'(nb_blk) - 32'd1);
+    end
+  endgenerate
+  always_ff @(posedge ap_clk)
+    beat_live <= beat_live_c;
+  // The lowest set bit of `m` at or above `lo`, or NBEATS for none.
+  function automatic [5:0] first_from_fn(input [NBEATS-1:0] m,
+                                         input [5:0] lo);
+    logic [5:0] r;
+    logic       found;
+    begin
+      r = 6'(NBEATS);
+      found = 1'b0;
+      for (int b = 0; b < NBEATS; b = b + 1)
+        if (!found && m[b] && 32'(b) >= 32'(lo)) begin
+          r = 6'(b);
+          found = 1'b1;
+        end
+      first_from_fn = r;
+    end
+  endfunction
+  logic       c_wr, issue_this, last_step;
+  logic [5:0] next_bt, adm_first0, adm_first;
+  assign c_wr       = writer_fn(cur);
+  assign iss_mask   = beat_live | (c_wr ? c_final : '0);
+  assign issue_this = iss_mask[bt[NBSH-1:0]];
+  assign next_bt    = first_from_fn(iss_mask, bt + 6'd1);
+  assign last_step  = (next_bt == 6'(NBEATS));
+  // The first beat of the instruction being ADMITTED (the word adm_w
+  // names): the lowest beat it will issue, or - for a code that writes
+  // nothing, with every beat dead - the last beat, as one bubble step
+  // that issues nothing and ends the instruction.
+  assign adm_mask   = beat_live | (adm_wr ? c_final : '0);
+  assign adm_first0 = first_from_fn(adm_mask, 6'd0);
+  assign adm_first  = (adm_first0 == 6'(NBEATS))
+                    ? 6'({1'b0, nb_blk} - 6'd1) : adm_first0;
 
   logic [PCW:0]  pc;
   logic [PCW:0]  skip_depth;
@@ -1507,6 +1588,7 @@ module cft_seq #(
   logic [WORDS-1:0] al_row;
   logic          al_fen;
   logic [LATENCY-1:0] fq;
+  logic [5:0]    al_tag;            // R19: the beat the request fired from
   // Forwarding (2026-09-14, the second step). On a single-pass tile
   // the array accepts every cycle, so its validity line can be
   // shadowed exactly (fs: fs[LATENCY-1] is al_ov, fs[LATENCY-2] lands
@@ -1536,7 +1618,7 @@ module cft_seq #(
   always_ff @(posedge ap_clk) begin
     if (!ap_rst_n) begin
       fs <= '0; we1 <= 1'b0;
-      fr <= '0; fq <= '0;
+      fr <= '0; fq <= '0; ft <= '0;
     end else begin
       // the array's own line shifts on its enable, which on a
       // single-pass tile is every cycle; the look-ahead reads the
@@ -1551,6 +1633,7 @@ module cft_seq #(
       if (al_rdy) begin
         fr <= {fr[(LATENCY-1)*WORDS-1:0], al_row};
         fq <= {fq[LATENCY-2:0], al_fen};
+        ft <= {ft[(LATENCY-1)*6-1:0], al_tag};
       end
       we1 <= rf_we; wa1 <= rf_waddr; wd1 <= rf_wdata; wwe1 <= rf_wwe;
     end
@@ -1821,9 +1904,9 @@ module cft_seq #(
   // Forwarding's hits and merge (declared with the pipe, above): the
   // landing beat, the write in flight, the write that landed as B
   // sampled - younger first - each merged over what B read.
-  assign h1_a = FWD && al_ov && ({q_rd0, wb_bt[NBSH-1:0]} == pf_aa);
-  assign h1_b = FWD && al_ov && ({q_rd0, wb_bt[NBSH-1:0]} == pf_ab);
-  assign h1_c = FWD && al_ov && ({q_rd0, wb_bt[NBSH-1:0]} == pf_ac);
+  assign h1_a = FWD && al_ov && ({q_rd0, wb_tag[NBSH-1:0]} == pf_aa);
+  assign h1_b = FWD && al_ov && ({q_rd0, wb_tag[NBSH-1:0]} == pf_ab);
+  assign h1_c = FWD && al_ov && ({q_rd0, wb_tag[NBSH-1:0]} == pf_ac);
   assign h2_a = FWD && rf_we && (rf_waddr == pf_aa);
   assign h2_b = FWD && rf_we && (rf_waddr == pf_ab);
   assign h2_c = FWD && rf_we && (rf_waddr == pf_ac);
@@ -2146,6 +2229,40 @@ module cft_seq #(
   assign blk_act = blk_act_fn(blk_n, lpb, lpb_sh) &
                    mask_slot_fn(mask_lane, lpb, lpb_sh);
 
+  // R19: the beats a lane the CALLER HAS sits in (blk_act: the block's
+  // lanes, of those the ones the mask keeps). A beat outside the first
+  // and last of them holds no lane that can ever be active - ACTALL
+  // reactivates blk_act and nothing else - so its r0..r2 entries are
+  // never read by an issued beat that writes anything, and the stream
+  // load reads from the first such beat to the last, and not at all
+  // when there is none. One burst still, so a masked beat between two
+  // live ones is read: a second round trip would cost more than it
+  // saves.
+  logic [NBEATS-1:0] blk_live;
+  generate
+    for (genvar gk = 0; gk < NBEATS; gk = gk + 1) begin : g_blk_live
+      assign blk_live[gk] = |blk_act[gk*WORDS +: WORDS];
+    end
+  endgenerate
+  function automatic [5:0] last_set_fn(input [NBEATS-1:0] m);
+    logic [5:0] r;
+    begin
+      r = 6'd0;
+      for (int b = 0; b < NBEATS; b = b + 1)
+        if (m[b])
+          r = 6'(b);
+      last_set_fn = r;
+    end
+  endfunction
+  // Registered, for the path into the load's 64-bit address: blk_act
+  // is fixed from the mask fetch (S_MSK_W) on, and S_ZERO lasts several
+  // cycles between that and the first S_LD_GO.
+  logic [5:0] ld_lo, ld_hi;
+  always_ff @(posedge ap_clk) begin
+    ld_lo <= first_from_fn(blk_live, 6'd0);
+    ld_hi <= last_set_fn(blk_live);
+  end
+
   // R17's fetch, the block's bits out of the beat that holds them.
   //
   // A beat is 256 bits and a mask bit is a lane, so ONE beat holds 256
@@ -2359,7 +2476,7 @@ module cft_seq #(
       pc <= '0; bt <= '0; wb_bt <= '0; lp_sp <= '0; q_n <= '0;
       pb_v <= 1'b0; pf_v <= 1'b0; nxt_ok <= 1'b0;
       pg_v <= 1'b0; ph_v <= 1'b0;
-      al_row <= '0; al_fen <= 1'b0;
+      al_row <= '0; al_fen <= 1'b0; al_tag <= '0;
       pf_aa <= '0; pf_ab <= '0; pf_ac <= '0;
       dep_v_a <= 1'b0; dep_v_b <= 1'b0; dep_v_c <= 1'b0;
       // The constant bank is read unconditionally on every cycle, so
@@ -2998,7 +3115,10 @@ module cft_seq #(
         end
 
         S_LD_GO: begin
-          if (!rd_need[ld_reg]) begin
+          // R19: a dense stream with no beat a lane the caller has sits
+          // in is not loaded at all, like one no instruction reads.
+          if (!rd_need[ld_reg] ||
+              (!idx_en_q[ld_reg] && ld_lo == 6'(NBEATS))) begin
             // A stream the program never reads is not loaded: its
             // register entries stay unwritten and would read +0, and
             // nothing reads them.
@@ -3016,13 +3136,16 @@ module cft_seq #(
             gt_scr <= 1'b0;
             st <= S_GTH_GO;
           end else begin
+            // R19: from the first beat a lane the caller has sits in
+            // to the last, one burst; the beats outside stay unwritten
+            // and read +0, and nothing that writes reads them.
             rd_addr <= (ld_reg == 0 ? a_q : ld_reg == 1 ? b_q : c_q)
-                       + in_off;
+                       + in_off + (ADDR_W'(ld_lo) << $clog2(BEAT_BYTES));
             rd_sel  <= ld_reg;   // ld_reg IS the stream index
-            rd_beats_left <= {27'b0, nb_blk};
+            rd_beats_left <= 32'(ld_hi) - 32'(ld_lo) + 32'd1;
             rd_stream_on <= 1'b1;
             m_rd_rready <= 1'b1;
-            bt <= '0;
+            bt <= ld_lo;
             st <= S_LD_STREAM;
           end
         end
@@ -3034,7 +3157,7 @@ module cft_seq #(
             rf_wdata <= m_rd_rdata;
             rf_wwe <= {WORDS{1'b1}};
             bt <= bt + 1;
-            if (bt == 6'({27'b0, nb_blk} - 1)) begin
+            if (bt == ld_hi) begin
               m_rd_rready <= 1'b0;
               rd_stream_on <= 1'b0;
               if (ld_reg == 2'd2)
@@ -3181,7 +3304,7 @@ module cft_seq #(
             // reads a register waits there, a beat at a time, for a
             // queued producer of it and for nothing else.
             if (q_room) begin
-              bt <= '0;
+              bt <= adm_first;           // R19: its first live beat
               st <= S_ISSUE;
             end
             // otherwise wait here for a slot to free
@@ -3288,10 +3411,13 @@ module cft_seq #(
             rf_raddr_a <= {c_ra, bt[NBSH-1:0]};
             rf_raddr_b <= {c_rb, bt[NBSH-1:0]};
             rf_raddr_c <= {c_rc, bt[NBSH-1:0]};
-            if (c_is_ldl)
+            if (c_is_ldl && issue_this)
               scr_raddr <= scr_flat_fn(c_imm[SCRSW-1:0], bt);
-            bt <= bt + 1;
-            if (bt == 6'({1'b0, nb_blk} - 6'd1)) begin
+            // R19: on to the next beat this instruction issues, jumping
+            // the ones with no active lane; its last STEP is the one
+            // with none after it.
+            bt <= next_bt;
+            if (last_step) begin
               // The last address. The next instruction, read under this
               // one, is admitted and addressed from the next cycle if it
               // goes through the pipe and the queue has room (adm_go and
@@ -3305,7 +3431,7 @@ module cft_seq #(
               if (nxt_ok && (32'(pc) + 32'd1 < h_ninsns)) begin
                 cur <= imem_q;
                 if (imq_piped && q_room)
-                  bt <= '0;
+                  bt <= adm_first;       // R19: its first live beat
                 else
                   st <= S_DECODE;
               end else
@@ -3577,7 +3703,7 @@ module cft_seq #(
       // in program order, one beat a step, which is what makes a
       // SETACT's narrowing visible to exactly the beats after it.
       if (!issue_hold) begin
-        pb_v    <= (st == S_ISSUE) && !a_hold;
+        pb_v    <= (st == S_ISSUE) && !a_hold && issue_this;
         pb_op   <= c_op;
         pb_rnd  <= c_rnd;
         pb_ka   <= c_ka; pb_kb <= c_kb; pb_kc <= c_kc;
@@ -3614,6 +3740,7 @@ module cft_seq #(
           al_c     <= use_op_c ? op_c : alt_c;
           al_row   <= fire_ldx ? h_act : bt_act;
           al_fen   <= fire_alu;
+          al_tag   <= fire_ldx ? ph_bt : pf_bt;
         end
         if (pf_v && pf_ctrl) begin
           case (pf_op)
@@ -3679,22 +3806,23 @@ module cft_seq #(
       end
       // the read register holds imem[pc + 1] from the cycle after an
       // issue begins until the cycle pc moves
-      nxt_ok <= (st == S_ISSUE) &&
-                !(!rd_hold && bt == 6'({1'b0, nb_blk} - 6'd1));
+      nxt_ok <= (st == S_ISSUE) && !(!rd_hold && last_step);
 
       // ---- retire: the array's results, whatever state the machine is
       // in - while a program runs; the engine's pulses are not ours -
       // to the destination at the head of the queue --------------------
       if (al_ov && seq_live) begin
         rf_we <= 1'b1;
-        rf_waddr <= {q_rd0, wb_bt[NBSH-1:0]};
+        rf_waddr <= {q_rd0, wb_tag[NBSH-1:0]};
         rf_wdata <= al_d;
         rf_wwe <= wb_wwe;
         // the lanes that were active when this beat FIRED (fr), and its
         // flags only if it is arithmetic (fq): a load raises none
         if (fq[LATENCY-1])
           flags_q <= flags_q | wb_flags_or;
-        wb_bt <= wb_pop ? 6'd0 : wb_bt + 6'd1;
+        // the head's next beat not yet landed or skipped: every beat
+        // below the one that just landed has landed or was skipped
+        wb_bt <= wb_pop ? 6'd0 : wb_tag + 6'd1;
       end
       // the queue: a pop moves everything down, and an admission lands
       // behind whatever is left

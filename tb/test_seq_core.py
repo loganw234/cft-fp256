@@ -3484,6 +3484,208 @@ async def loads_carry_every_bit_pattern(dut):
 
 
 # ======================================================================
+# 10e. revision 7, R19: a beat with no active lane is not issued, and a
+#      stream beat no lane can read is not loaded
+# ======================================================================
+#
+# The sequencer issued every beat of a block and let the active bit
+# decide what was written (R17's "all masked costs what half masked
+# costs"). Now the issue skips a beat whose every lane is inactive - a
+# lane the caller masked, a lane past n, a lane a SETACT dropped - and
+# the dense stream loads read only the beats a lane the caller has sits
+# in. Nothing a program can observe moves: a skipped beat's lanes are
+# inactive, so it would have written nothing, deposited nothing and
+# raised nothing. What moves is the retire's bookkeeping, which counted
+# beats: a result now carries the beat it fired from, and an instruction
+# that writes a register always fires its block's LAST beat, so its
+# queue slot is released by a result even when every lane is out.
+
+def _beat_mask(n, lpb, lpbeat, pattern, seed=0):
+    """Masks that kill WHOLE BEATS, which R17's every-third-lane masks
+    never do: a beat is `lpbeat` lanes, a block `lpb`."""
+    rng = random.Random(seed)
+    dead_beats = set()
+    keep = []
+    for i in range(n):
+        j = i % lpb                      # lane within its block
+        b = j // lpbeat                  # beat within its block
+        if pattern == "low half":
+            k = j >= lpb // 2
+        elif pattern == "high half":
+            k = j < lpb // 2
+        elif pattern == "last lane":
+            k = j == lpb - 1
+        elif pattern == "first lane":
+            k = j == 0
+        elif pattern == "none":
+            k = False
+        elif pattern == "beats":
+            # a random set of whole beats, a fresh draw each block
+            if j == 0:
+                dead_beats = {x for x in range(lpb // lpbeat)
+                              if rng.random() < 0.5}
+            k = b not in dead_beats
+        else:
+            raise ValueError(pattern)
+        keep.append(k)
+    return keep
+
+
+@cocotb.test()
+async def masked_beats_at_every_block_length(dut):
+    """R19 against the model: masks that kill whole beats - the low half
+    of every block, the high half, all but the last lane, all but the
+    first, every lane, and random sets of whole beats - over the pipe
+    program, R18's control-code program and R17's own, at every format
+    and at block lengths from one beat to several blocks. Bench.masked
+    holds the lanes the mask keeps to the model and the lanes it clears
+    to the caller's bytes."""
+    bench = Bench(dut)
+    await bench.start()
+    pats = ("low half", "high half", "last lane", "first lane", "none",
+            "beats")
+    for name, ns in (("fp32", (8, 24, 128, 136, 256)),
+                     ("fp64", (4, 20, 64, 68)),
+                     ("fp128", (2, 10, 32, 34)),
+                     ("fp256", (1, 5, 16, 17))):
+        fmt = FORMATS[name]
+        lpb, lpbeat = lanes_per_block(fmt), lanes_per_beat(fmt)
+        progs = ((_mask_prog(fmt), "R17's"),
+                 (_pipe_program(fmt), "the pipe"),
+                 (_ctl_program(fmt), "R18's control codes"))
+        for k, n in enumerate(ns):
+            for prog, what in progs:
+                if fmt is FP256 and what == "the pipe":
+                    continue                   # the pipe program is fp32-128
+                pat = pats[(k + len(what)) % len(pats)]
+                keep = _beat_mask(n, lpb, lpbeat, pat, seed=n)
+                idx = _r18_index_stream(fmt, n, 2600 + n)
+                await bench.masked(
+                    fmt, prog, operands(fmt, n, 2700 + n),
+                    operands(fmt, n, 2800 + n),
+                    idx if what == "R18's control codes"
+                    else operands(fmt, n, 2900 + n),
+                    n, keep, f"{name} {what}, {pat} masked, n={n}")
+    dut._log.info(f"R19 whole beats masked: {bench.cases['masked']} runs")
+
+
+@cocotb.test()
+async def converged_beats_are_skipped(dut):
+    """A beat whose lanes have all CONVERGED is skipped too - the active
+    bit a SETACT cleared is the one the issue reads - and the escape map
+    comes out as the model says. Seeds are grouped by beat, so whole beats
+    converge at different iterations, and some never do."""
+    bench = Bench(dut)
+    await bench.start()
+    for name, n in (("fp32", 128), ("fp32", 40), ("fp64", 64), ("fp64", 9),
+                    ("fp128", 32), ("fp256", 16)):
+        fmt = FORMATS[name]
+        lpbeat = lanes_per_beat(fmt)
+        rng = random.Random(3000 + n)
+        a = []
+        for i in range(n):
+            if (i // lpbeat) % 3 == 0:
+                a.append(sf.zero_bits(fmt))           # stays small: never escapes
+            else:
+                e = fmt.bias + 1 + (i // lpbeat) % 3  # escapes early
+                a.append((e << fmt.man_w) | rng.getrandbits(fmt.man_w))
+        b = [sf.one_bits(fmt)] * n
+        prog = escape_program(fmt, 8, sf.from_int(fmt, 64)[0])
+        await bench.program(fmt, prog, a, b, operands(fmt, n, 3100 + n), n,
+                            f"{name} escape map, whole beats converging, n={n}")
+
+
+@cocotb.test()
+async def a_beat_no_lane_has_is_not_loaded(dut):
+    """The stream loads read only the beats a lane the caller has sits
+    in: one burst a stream a block, from the first such beat to the last,
+    and none at all for a block with no such beat. Asserted as ADDRESSES
+    in the read log, derived from the mask, so a load that still read the
+    whole block shows as a burst that is too long."""
+    bench = Bench(dut)
+    await bench.start()
+    for name, n, pat in (("fp32", 256, "low half"), ("fp32", 256, "high half"),
+                         ("fp64", 128, "last lane"), ("fp128", 64, "none"),
+                         ("fp32", 136, "first lane")):
+        fmt = FORMATS[name]
+        lpb, lpbeat = lanes_per_block(fmt), lanes_per_beat(fmt)
+        keep = _beat_mask(n, lpb, lpbeat, pat)
+        prog = _mask_prog(fmt)          # reads r0 and r1: streams a and b
+        await bench.masked(fmt, prog, operands(fmt, n, 3200 + n),
+                           operands(fmt, n, 3300 + n),
+                           operands(fmt, n, 3400 + n), n, keep,
+                           f"{name} {pat} masked, n={n}: the loads")
+        ebytes = fmt.width // 8
+        for base, stream in ((A_BASE, "a"), (B_BASE, "b")):
+            want = []
+            for blk in range(0, n, lpb):
+                blk_n = min(lpb, n - blk)
+                live = [bt for bt in range(-(-blk_n // lpbeat))
+                        if any(keep[blk + bt * lpbeat + p]
+                               for p in range(lpbeat)
+                               if bt * lpbeat + p < blk_n)]
+                if not live:
+                    continue
+                lo, hi = live[0], live[-1]
+                want.append((base + blk * ebytes + lo * BEAT_BYTES,
+                             hi - lo + 1))
+            got = bench.ram.reads_in(base, base + (1 << 16))
+            assert got == want, (
+                f"{name} {pat} n={n}: stream {stream} read {got}, and the "
+                f"mask says {want} - one burst a block, from the first beat "
+                f"a lane the caller has sits in to the last")
+
+
+# Cycles a block, fp32, four blocks, twenty IANDs and a deposit - R17's
+# probe program with more to skip. BEFORE is revision 7's R18 tile, where
+# every mask cost the dense run plus four cycles a block (the mask's one
+# read); AFTER is R19's. The ceilings sit between the two. Measured under
+# Verilator (2026-09-29), cycles a block:
+#
+#   low half of each block masked   before 561.25 (R18, 1c82d4c)   after 410.0
+#   every lane masked               before 561.25                  after 344.0
+#
+# What is left of the all-masked block is the block's own machinery -
+# setup, the mask's read, one cycle a writer (its forced last beat) - and
+# the drains, which keep a masked lane's place and lose its strobe (R17).
+R19_CEILING = {
+    "low half of each block masked": 485,
+    "every lane masked": 450,
+}
+
+
+@cocotb.test()
+async def masked_beats_hold_their_saving(dut):
+    """R19's gain, HELD: a run whose masked lanes fill whole beats costs
+    less than a ceiling between the before-side (every mask costing the
+    dense run) and the after-side, and answers what the model says."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    lpb, lpbeat = lanes_per_block(fmt), lanes_per_beat(fmt)
+    n = 4 * lpb
+    iand = seq.alu(sf.OP_IAND, 3, 0, 0)
+    prog = seq.Program(fmt, [iand] * 20 + [seq.deposit(3), seq.halt()],
+                       max_deposits=1)
+    cost = {}
+    for label, pat in (("low half of each block masked", "low half"),
+                       ("every lane masked", "none")):
+        keep = _beat_mask(n, lpb, lpbeat, pat)
+        await bench.masked(fmt, prog, operands(fmt, n, 3500),
+                           operands(fmt, n, 3501), operands(fmt, n, 3502), n,
+                           keep, f"hold: {label}")
+        cost[label] = bench.last_cycles / 4
+        dut._log.info(f"hold: {label}: {cost[label]:.1f} cycles a block "
+                      f"(ceiling {R19_CEILING[label]})")
+    for label, per_block in cost.items():
+        assert per_block < R19_CEILING[label], (
+            f"hold: {label} costs {per_block:.1f} cycles a block, at or "
+            f"above the ceiling of {R19_CEILING[label]} - a beat with no "
+            f"active lane is being issued again (docs/SEQUENCER.md, "
+            f"revision 7, R19)")
+
+
+# ======================================================================
 # 11. the one that has to go last
 # ======================================================================
 
