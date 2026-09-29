@@ -416,9 +416,12 @@ cannot name.
 `mapEx` with a `scalar` operand and `reduceSeg` - not where either
 saves anything, which only a tile does. libcft's software backend
 publishes both since 2026-09-24, and the module committed beside this
-file was rebuilt that day: its software handle reports `seqFeatures`
-**0x7f1f** and `cftw_supports(dev, 30, fmt)` = 1 for IMUL, which
-`test.mjs` holds. The module committed before it (built 2026-09-15,
+file was rebuilt that day: its software handle reported `seqFeatures`
+**0x7f1f** and `cftw_supports(dev, 30, fmt)` = 1 for IMUL. Rebuilt
+again at ABI 0.16 (2026-09-29), it reports **0x1ff1f** - revision 8's
+`SEQ_FEAT_AUGADD` and `SEQ_FEAT_SCRATCH_STEP` added - and still 1 for
+IMUL, which `test.mjs` holds. The module committed before the
+2026-09-24 rebuild (built 2026-09-15,
 `b558a56`) reported 0x271f - SCALAR, REDUCE_SEG and LANE_MASK clear -
 and 0 for IMUL. It computed SCALAR, REDUCE_SEG and IMUL without
 publishing them: a scalar `mapEx`, `reduceSeg` and opcode 30 return

@@ -2260,7 +2260,8 @@ transcribe a 64 into C. The
 remote backend takes them from the handshake. The software backend
 reports its own - 2^20 deposit slots a lane, the header field's own
 2^32-1 instructions, 512 addressable constants, and every feature bit
-`cft.h` defines (`seq_features` 0x7f1f) - the capacities and the
+`cft.h` defines (`seq_features` 0x1ff1f since ABI 0.16 added revision
+8's two bits; 0x7f1f before) - the capacities and the
 sequencer's bits from `host/src/program.c`, which is the file that
 enforces them, so the number a host is told and the number a program
 is held to are one declaration. `CFT_SEQ_FEAT_SCALAR` and
@@ -3242,6 +3243,8 @@ opens the software backend plainly, so a certificate made on software is
 made at 256 (its `device-caps` reads `none`, and the audit re-runs it
 at 256); the WebAssembly module exports no `cft_open_ex`.
 
-ABI: an additive entry point and struct for 0.16. The version macro,
-the WebAssembly rebuild and the bindings' tables move with the
-integrator's bump at the merge, as every step's do.
+**The ABI version.** An additive entry point and struct:
+`CFT_ABI_VERSION_MINOR` moved to 16 for them at the merge
+(2026-09-29), with revision 8's two feature bits and the WebAssembly
+module's rebuild, as every step's is (docs/COMPATIBILITY.md, "ABI
+0.16"). A caller that needs `cft_open_ex` asks for 0.16.

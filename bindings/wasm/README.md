@@ -1058,6 +1058,48 @@ byte for byte, and both negative-control pages as well:
     bindings/wasm/conformance.html 1,390,705 bytes  sha256 5251d85896793f1a...
     bindings/wasm/demos.html         576,771 bytes  sha256 1ca464eb18aa3160...
 
+### Rebuilt at ABI 0.16, 2026-09-29 - a software handle at a tile's depth, and revision 8's two bits
+
+The bump for `cft_open_ex` (docs/HOSTAPI.md, "A software handle at a
+tile's depth") and revision 8's `CFT_SEQ_FEAT_AUGADD` and
+`CFT_SEQ_FEAT_SCRATCH_STEP` (docs/SEQUENCER.md, "Revision 8").
+`wasm_api.c` exports no call to `cft_open_ex`, so the module's software
+handle is 256 slots, as it always was. It is built from the same
+`program.c` as the library's software backend, and publishes both new
+bits: its `seq_features` is **0x1ff1f** where it was 0x7f1f, which
+`bindings/node/test.mjs` holds (137 passed, 0 failed, 1 skipped for want
+of vectors, over this module). The module is `b3c023af...`, 259,935
+bytes from 258,255, still **141 `cftw_*` exports** (149 in all).
+The round's first 0.16 build (`df5d41ab...`, 259,660 bytes) came from
+host sources that predate P2's library fix. That fix changed `program.c`,
+so a clean build from the committed sources no longer gave those bytes.
+The module was built again from the final sources before the round
+closed, and the figures here are that build's.
+
+`verify.mjs` now holds the loader's exports to the adopted instance as
+well as its heap: `M._malloc` must be the instance's own `malloc`.
+Verifier-R1 (2026-09-29) planted a loader that took its heap from the
+hook's instance and its exports from another, and the heap check alone
+printed a false ok before the run failed. With the pinned loader the
+line prints ok; with a planted `malloc` wrapper it prints FAIL, naming
+the heap or the exports as another's.
+
+`demos_chains.json` was re-recorded with `verify_demos.mjs --record`
+against the new module - after `build.sh` and before `build_demos.sh`,
+the order docs/VALIDATION.md's note on the 0.11 rebuild gives, and that
+run's two FAILs were the stale page's, as the note says they would be.
+Every chain came back
+unchanged; only the module stamp, the date and the timings moved, and
+`verify_demos.mjs` then passed 48 checks against the rebuilt page. Two
+clean container builds, with `bindings/wasm/build/` removed between
+them, produced all four files byte for byte, and both negative-control
+pages as well:
+
+    bindings/node/cft_node.wasm      259,935 bytes  sha256 b3c023afd85e7e16...
+    bindings/node/cft_node.js         74,146 bytes  sha256 dc845833acf075cb...  (unchanged)
+    bindings/wasm/conformance.html 1,392,517 bytes  sha256 e6d69f1172758566...
+    bindings/wasm/demos.html         578,617 bytes  sha256 74d229eef888d918...
+
 ## A second page: the five workloads, measured (2026-09-04)
 
 `demos.html` is the other deliverable of this directory. Same

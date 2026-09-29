@@ -323,7 +323,7 @@ reader does - the same sets, walked in the same order, the same fields,
 the same expected values - sends the case, and compares what comes back
 bit for bit. The report is `cft-selftest`'s shape:
 
-    libcft ABI 0.15 over csrp/1
+    libcft ABI 0.16 over csrp/1
     transport      COM7 at 115200 baud
     backend        software
     formats        fp32 fp64

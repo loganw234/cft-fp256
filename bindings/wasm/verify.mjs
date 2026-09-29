@@ -547,7 +547,12 @@ else
 // itself by its own path search, and the argument decided nothing
 // (verifier-C4, 2026-09-28). The check after the load is what notices
 // a loader that stops honouring the hook: the heap the loader hands
-// this script must be the memory of the instance built here.
+// this script must be the memory of the instance built here, and so
+// must its exports - one is held by identity, malloc, which every call
+// below allocates through. The heap alone was the check until ABI 0.16:
+// a planted loader that took its heap from this instance and its
+// exports from one of its own passed it with a false ok, then failed
+// at the next call (verifier-R1, 2026-09-29).
 // ---------------------------------------------------------------------
 
 const { default: createCftModule } = await import(pathToFileURL(loaderJs));
@@ -571,13 +576,17 @@ try {
 if (pageInstance !== null &&
     pageInstance.exports.memory instanceof WebAssembly.Memory &&
     M.HEAPU8 !== undefined &&
-    M.HEAPU8.buffer === pageInstance.exports.memory.buffer)
+    M.HEAPU8.buffer === pageInstance.exports.memory.buffer &&
+    typeof pageInstance.exports.malloc === "function" &&
+    M._malloc === pageInstance.exports.malloc)
   ok("the node loader runs the page's bytes: handed them through " +
-     "Module.instantiateWasm, it adopted the instance built from them");
+     "Module.instantiateWasm, it adopted the instance built from them, " +
+     "its heap and its exports");
 else
-  bad("the node loader did not adopt the page's bytes handed to it " +
-      "through Module.instantiateWasm, so steps 3b to 5 would run a " +
-      "module it chose itself - teach this script the loader's hook");
+  bad("the node loader did not adopt the instance built from the page's " +
+      "bytes handed to it through Module.instantiateWasm - its heap or " +
+      "its exports are another's - so steps 3b to 5 would run a module " +
+      "it chose itself - teach this script the loader's hook");
 
 const num = "number", str = "string";
 const N = (k) => Array(k).fill(num);

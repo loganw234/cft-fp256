@@ -797,6 +797,41 @@ inside the XRT backend. Two calls, both ADDITIVE: code written against
 | Arduino | the vendored copy re-synced, `src/build_id.c` among its 33 files; the id there is `unknown`, as for any build but `host/Makefile`'s own |
 | certificates | `build-id` is `cft_build_id()`'s string verbatim, and a certificate's device lines are what `cft_get_image_id` gives (docs/CERTIFICATES.md, "Identity") |
 
+### ABI 0.16 (2026-09-29): a software handle at a tile's depth, and revision 8's two bits
+
+The library's side of the sequencer's revisions 7 and 8
+(docs/SEQUENCER.md). Both are ADDITIVE: every 0.15 loader refused both
+new program forms, so every image a 0.15 library loads is loaded and
+computed to the same bits, and a plain `cft_open` is the 256-slot handle
+it always was.
+- `cft_open_ex` with `cft_open_args` (docs/HOSTAPI.md, "A software handle
+  at a tile's depth") opens a SOFTWARE handle at a power-of-two depth in
+  1..32,768, so a reference compared with a 2,048-slot tile computes what
+  that tile must. It is REFUSED by name for a `struct_size` other than
+  this library's, a depth out of range, a non-zero depth with an xclbin
+  or a `cft://` artifact (a device's depth is its image's) and a
+  `-DCFT_NO_PROGRAM` build.
+- Revision 8's program-model bits, defined golden-first:
+  `CFT_SEQ_FEAT_AUGADD` (CAPS2[11]; `augadd` and `augerr`, IEEE 754-2019
+  9.5's augmentedAddition, one result an instruction) and
+  `CFT_SEQ_FEAT_SCRATCH_STEP` (CAPS2[12]; STX and LDX with a signed
+  twelve-bit post-step, as CORE-V XCVmem defines it). The software backend
+  computes and publishes both, so a software handle's `seq_features` is
+  **0x1ff1f** (0x7f1f at 0.15). No tile built so far carries either, and
+  every device without a bit refuses a program that needs it at load, by
+  name.
+
+| surface | status at ABI 0.16 |
+|---|---|
+| C (`cft.h`) | complete. `api-test` holds `cft_open_ex`'s depth in the caps (2,048 asked, 2,048 published; 0 is 256) and each refusal by status and a word of its sentence, every one made before a handle exists; two plants, the depth kept out of the caps and the artifact refusal removed, each fail it by name. `device-test` opens its reference at the device's `max_scratch` and runs the whole software matrix at `--scratch-depth 2048` (`sw -s`: 918 checks, 0 failed, among them a scratch block as deep as the device, held to its own bytes, which verifier-R5's finding on the loader added). `seq_check.py` holds the revision-8 corpus and every refusal to the model |
+| hardware | revision 7's RTL (R18, R19 and the limits per build) moves no call. CAPS2[11] and [12] read zero on every tile, so a tile refuses both revision-8 forms by name |
+| XRT | no change: a non-zero depth with an xclbin is refused; a tile's depth is its CAPS2[3:0] |
+| remote | no frame change: a remote handle's depth and bits are its server's, and a depth with a `cft://` artifact is refused before any connection. `cft-serve` has no flag to serve a deeper software device |
+| Node / Browser | the module rebuilt at 0.16 as every step requires: `b3c023af...`, 259,935 bytes, still 141 `cftw_*` exports (149 in all). No export reaches `cft_open_ex`, so its software handle is 256 slots; it publishes **0x1ff1f**, which `test.mjs` holds. `verify.mjs` now holds the loader's exports to the adopted instance as well as its heap; `conformance.html` and `demos.html` were rebuilt on it, and the demos chains re-recorded with every chain unchanged (bindings/wasm/README.md) |
+| C++ (`cft.hpp`) | no wrapper for `cft_open_ex`; a C++ caller reaches it through `cft.h`, which `cft.hpp` includes |
+| Arduino | the vendored copy re-synced |
+| certificates | `cft-segrun` opens the software backend plainly, so a certificate made on software is made at 256; the audit re-runs a certificate at the depth its `device-caps` names |
+
 
 ## Hosts and boards
 

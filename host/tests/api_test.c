@@ -789,7 +789,8 @@ int main(void)
      * calls by their definitions - so it must publish both, or a caller
      * that asks cft_get_caps first, as the header tells it to, is told
      * no by a handle that would have said yes. That was this library's
-     * state until 2026-09-24 (seq_features 0x671f, now 0x7f1f).
+     * state until 2026-09-24 (seq_features 0x671f; 0x7f1f from then,
+     * and 0x1ff1f since ABI 0.16's revision-8 bits).
      *
      * Each claim is held two ways: the bit is in the word, AND the call
      * it names returns the definition's bits and flags - the scalar run
@@ -5052,6 +5053,90 @@ int main(void)
         st = cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E);
         CHECK(st == CFT_OK, "and the dense run still runs: %s",
               cft_strerror(st));
+    }
+
+    /* --- cft_open_ex (ABI 0.16): a software handle at a tile's depth --
+     *
+     * The depth is one field of the caps the handle publishes, and
+     * program.c reads every use of it from there (host/src/device.c), so
+     * what is held here is that the field is the one asked for and that
+     * every refusal is made before a handle exists, by status and by a
+     * word of its sentence. device-test holds the executor at a depth:
+     * its whole matrix runs at `--scratch-depth 2048`. */
+    {
+        static const uint32_t bad_depths[] = { 3u, 6u, 65536u, 0x80000000u };
+        cft_open_args oa;
+        cft_device *dx = NULL;
+        cft_caps cx;
+        size_t k;
+
+        memset(&oa, 0, sizeof oa);
+        oa.struct_size = sizeof oa;
+        oa.scratch_depth = 2048u;
+        st = cft_open_ex(&oa, &dx);
+        CHECK(st == CFT_OK && dx != NULL, "cft_open_ex at 2,048: %s (%s)",
+              cft_strerror(st), cft_last_error());
+        if (dx) {
+            memset(&cx, 0, sizeof cx);
+            cx.struct_size = sizeof cx;
+            CHECK(cft_get_caps(dx, &cx) == CFT_OK &&
+                  cx.max_scratch == 2048u,
+                  "a handle opened at 2,048 publishes 2,048 (%lu)",
+                  (unsigned long)cx.max_scratch);
+            cft_close(dx);
+            dx = NULL;
+        }
+        oa.scratch_depth = 0;
+        st = cft_open_ex(&oa, &dx);
+        CHECK(st == CFT_OK && dx != NULL, "cft_open_ex at 0: %s (%s)",
+              cft_strerror(st), cft_last_error());
+        if (dx) {
+            memset(&cx, 0, sizeof cx);
+            cx.struct_size = sizeof cx;
+            CHECK(cft_get_caps(dx, &cx) == CFT_OK && cx.max_scratch == 256u,
+                  "scratch_depth 0 is the backend's own 256 (%lu)",
+                  (unsigned long)cx.max_scratch);
+            cft_close(dx);
+            dx = NULL;
+        }
+        for (k = 0; k < sizeof bad_depths / sizeof bad_depths[0]; k++) {
+            oa.scratch_depth = bad_depths[k];
+            dx = (cft_device *)&oa;          /* must come back NULL */
+            st = cft_open_ex(&oa, &dx);
+            CHECK(st == CFT_ERR_INVALID_ARGUMENT && dx == NULL &&
+                  strstr(cft_last_error(), "power of two") != NULL,
+                  "scratch_depth %lu is refused as no power of two in "
+                  "1..32768: %s (%s)", (unsigned long)bad_depths[k],
+                  cft_strerror(st), cft_last_error());
+        }
+        oa.scratch_depth = 256u;
+        oa.struct_size = sizeof oa - 1;
+        dx = (cft_device *)&oa;
+        st = cft_open_ex(&oa, &dx);
+        CHECK(st == CFT_ERR_INVALID_ARGUMENT && dx == NULL &&
+              strstr(cft_last_error(), "struct_size") != NULL,
+              "a short cft_open_args is refused: %s (%s)",
+              cft_strerror(st), cft_last_error());
+        oa.struct_size = sizeof oa;
+        oa.artifact = "no-such-image.xclbin";
+        dx = (cft_device *)&oa;
+        st = cft_open_ex(&oa, &dx);
+        CHECK(st == CFT_ERR_UNSUPPORTED && dx == NULL &&
+              strstr(cft_last_error(), "SOFTWARE") != NULL,
+              "a depth with an xclbin is refused before it is opened: "
+              "%s (%s)", cft_strerror(st), cft_last_error());
+        oa.artifact = "cft://127.0.0.1:1";
+        dx = (cft_device *)&oa;
+        st = cft_open_ex(&oa, &dx);
+        CHECK(st == CFT_ERR_UNSUPPORTED && dx == NULL &&
+              strstr(cft_last_error(), "SOFTWARE") != NULL,
+              "a depth with a cft:// artifact is refused before any "
+              "connection: %s (%s)", cft_strerror(st), cft_last_error());
+        oa.artifact = NULL;
+        CHECK(cft_open_ex(NULL, &dx) == CFT_ERR_INVALID_ARGUMENT,
+              "cft_open_ex with no args is refused");
+        CHECK(cft_open_ex(&oa, NULL) == CFT_ERR_INVALID_ARGUMENT,
+              "cft_open_ex with nowhere to put the handle is refused");
     }
 
     cft_close(dev);

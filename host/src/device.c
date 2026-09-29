@@ -595,7 +595,8 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
      * Until 2026-09-24 neither was published here while both calls were
      * computed, so a caller that asked cft_get_caps first, as cft.h tells
      * it to, was told no by a handle that would have said yes (the
-     * default build's seq_features was 0x671f; it is 0x7f1f since, and
+     * default build's seq_features was 0x671f; it was 0x7f1f from then,
+     * and is 0x1ff1f since ABI 0.16 published revision 8's two bits -
      * a -DCFT_NO_PROGRAM build's 0x1810 rather than 0x10). */
     dev->seq.features  |= CFT_SEQ_FEAT_SCALAR | CFT_FEAT_REDUCE_SEG;
     dev->backend_name   = "software";
