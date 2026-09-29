@@ -496,10 +496,15 @@ class Bench:
         dut = self.dut
         await RisingEdge(dut.ap_clk)
         dut.start.value = 1
+        # Cycles from the start pulse to `done`, kept for the cases that
+        # hold a cost (revision 7's hold bench): the same count
+        # probe_seq_cycles.py prints, taken the same way.
+        t_start = get_sim_time("ns")
         await RisingEdge(dut.ap_clk)
         dut.start.value = 0
         try:
             await with_timeout(RisingEdge(dut.done), budget * CLK_NS, "ns")
+            self.last_cycles = (get_sim_time("ns") - t_start) / CLK_NS
         except Exception as exc:                     # SimTimeoutError
             if type(exc).__name__ != "SimTimeoutError":
                 raise
@@ -3031,13 +3036,19 @@ def _ctl_program(fmt, strict=False):
     into a register a queued FMA writes, and the other order; (4) a
     store reading a register the instruction behind it overwrites;
     (5) the indexed forms with a COMPUTED index, a store then an indexed
-    load of the same slot, two LDXs back to back, a static store and
-    load straight after an LDX, and an index that is a LOADED value;
+    load of the same slot, two LDXs back to back, an instruction that
+    does NOT depend on an LDX straight after one (the only shape the
+    LDX gap is for), an LDL straight after an LDX (one scratch read
+    port), a static store and load straight after an LDX, and an index
+    that is a LOADED value;
     (6) a loop whose body loads, computes, stores and narrows the mask;
     (7) the mask moving while an FMA's results are still in the array,
-    and SETACT reading a loaded register; then ACTALL, and nothing after
-    it that could raise a flag, so a ragged block reads the same whether
-    or not ACTALL wakes the padding (the bench's precondition).
+    and SETACT reading a loaded register; then ACTALL, the FMA's
+    destination deposited for every lane - a lane the SETACT dropped
+    shows whether its result was written under the row it FIRED with -
+    and nothing after it that could raise a flag, so a ragged block
+    reads the same whether or not ACTALL wakes the padding (the bench's
+    precondition).
     """
     A, M, F = sf.OP_ADD, sf.OP_MUL, sf.OP_FMA
     IADD, CMPLT = sf.OP_IADD, sf.OP_CMPLT
@@ -3071,6 +3082,12 @@ def _ctl_program(fmt, strict=False):
         seq.deposit(11),                     # an LDX's result, at once
         seq.ldx(12, 2),                      # two LDXs back to back
         seq.ldx(13, 10),
+        seq.alu(A, 24, 0, rc=1),             # INDEPENDENT of them: the gap
+        seq.ldx(25, 2),
+        seq.ldl(26, 1),                      # an LDL straight after an LDX:
+                                             # one scratch read port
+        seq.deposit(24),
+        seq.deposit(26),
         seq.stl(12, 2),                      # a store straight after them
         seq.ldl(14, 2),                      # and a load straight after it
         seq.alu(A, 15, 13, rc=14),           # r15 = r13 + r14
@@ -3097,6 +3114,9 @@ def _ctl_program(fmt, strict=False):
         seq.ldl(20, 3),
         seq.deposit(20),
         seq.actall(),
+        seq.deposit(18),                     # a dropped lane's FMA result:
+                                             # written under the row it FIRED
+                                             # with, before the SETACT
         seq.deposit(19),                     # a dropped lane's r19: +0
         seq.deposit(20),
         seq.ldl(23, 4),
@@ -3108,7 +3128,7 @@ def _ctl_program(fmt, strict=False):
         flags |= seq.FLAG_SCRATCH_STRICT
     return seq.Program(fmt, insns, consts=[_int_bits(fmt, 5),
                                            sf.one_bits(fmt)],
-                       max_deposits=16, flags=flags,
+                       max_deposits=19, flags=flags,
                        n_scratch_in=0, n_scratch_out=6)
 
 
@@ -3314,6 +3334,74 @@ async def control_code_fuzz_at_short_blocks(dut):
                                     m, f"{name} R18 fuzz n={m} #{runs}")
                 runs += 1
     dut._log.info(f"R18 control-code fuzz: {runs} programs")
+
+
+def _hold_programs(fmt):
+    """The two control-code-heavy programs R18's cost is held on."""
+    F = sf.OP_FMA
+    indep = []
+    for k in range(8):
+        indep += [seq.stl(0, k), seq.ldl(3 + k, 8 + k), seq.setact(1)]
+    indep += [seq.deposit(10), seq.halt()]
+    chain = []
+    for k in range(8):
+        chain += [seq.ldl(3 + k, k), seq.alu(F, 11 + k, 3 + k, 0, 1),
+                  seq.stl(11 + k, 8 + k)]
+    chain += [seq.deposit(18), seq.halt()]
+    return (("24 control codes, independent", indep),
+            ("8 x (load, FMA of it, store of that)", chain))
+
+
+# Cycles a block at fp32, four blocks of 128 lanes, through this bench's
+# harness (the unit bench's model RAM answers at once). BEFORE is
+# f681dee's tile, where every one of these codes waited for the queue to
+# empty and walked the block at three cycles a beat, five for a load;
+# AFTER is revision 7's. The ceiling sits between the two: a change that
+# took the control codes back out of the pipe lands above it, and one
+# that only moves a cycle or two does not. Measured, not derived - the
+# docstring of control_codes_hold_their_overlap says where.
+HOLD_CEILING = {
+    "24 control codes, independent": 1400,
+    "8 x (load, FMA of it, store of that)": 1100,
+}
+
+
+@cocotb.test()
+async def control_codes_hold_their_overlap(dut):
+    """R18's gain, HELD: two control-code-heavy programs must cost less
+    a block than the ceiling that sits between the before- and the
+    after-side, and must answer exactly what the model says.
+
+    The first program is twenty-four control codes with no dependence
+    between them (a store, a load and a SETACT, eight times over); the
+    second is the pattern the ODE census priced - a load, an FMA of what
+    it loaded, a store of what the FMA made, eight times over - where
+    every code waits on the one before it. fp32 is single-pass at every
+    MUL_PASSES, so the ceiling holds on the multi-pass tile too; there
+    the dependent program pays R14's rule instead of forwarding, which
+    is still well under it. The measured numbers are in
+    docs/SEQUENCER.md's revision-7 section.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    n = 4 * lanes_per_block(fmt)
+    # Every program measured before any is judged, so a red run still
+    # prints every number.
+    cost = {}
+    for label, insns in _hold_programs(fmt):
+        prog = seq.Program(fmt, insns, max_deposits=1)
+        await bench.program(fmt, prog, operands(fmt, n, 2500),
+                            operands(fmt, n, 2501), operands(fmt, n, 2502),
+                            n, f"hold: {label}")
+        cost[label] = bench.last_cycles / 4
+        dut._log.info(f"hold: {label}: {cost[label]:.1f} cycles a block "
+                      f"(ceiling {HOLD_CEILING[label]})")
+    for label, per_block in cost.items():
+        assert per_block < HOLD_CEILING[label], (
+            f"hold: {label} costs {per_block:.1f} cycles a block, at or above "
+            f"the ceiling of {HOLD_CEILING[label]} - the control codes have "
+            f"left the issue pipe (docs/SEQUENCER.md, revision 7, R18)")
 
 
 # ======================================================================

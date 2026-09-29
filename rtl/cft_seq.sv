@@ -375,8 +375,9 @@ module cft_seq #(
   // IOR, the integer group's bitwise OR, fired with both operands the
   // loaded value, gives the value back bit for bit at every format and
   // raises no flag - softfloat.ior returns (a | b, 0), cft_simpleops
-  // selects `a | b` and leaves its flags at zero, and both are held to
-  // each other by the conformance set. That is a schedule over a
+  // selects `a | b` and leaves its flags at zero, and the four pipe
+  // benches hold the two to each other at every format (IOR is one of
+  // tb/fpfma_common.py's SIMPLE_OPS). That is a schedule over a
   // verified operation, not arithmetic of the sequencer's own (P1);
   // and the retire takes no flag from a load whatever the array says.
   localparam logic [7:0] OP_IOR = 8'd17;
