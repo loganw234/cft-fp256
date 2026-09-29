@@ -41,7 +41,14 @@ authority:
 2. **The conformance vectors** (`make vectors`). The model writes 168
    sets, 1,068,915 cases, every format under every rounding attribute,
    with the expected result and the expected flags per case. These are
-   the fixed points every other implementation replays.
+   the fixed points every other implementation replays. A generation
+   that finishes writes their `SHA256SUMS` beside them, last, and the
+   runner replays no `vectors/out` whose record is missing, leaves out a
+   set the profile names, or does not hold under `sha256sum -c`: it
+   regenerates the directory, and fails by name if it cannot
+   (`verify/README.md`). Until 2026-09-29 the runner took any non-empty
+   `vectors/out` for the census, and `cft-selftest` passes on the five
+   sets a crashed generation left.
 3. **The C library** (`host/`, `make -C host test`). Contract tests
    (`api-test`), the partition invariants (`reduce-parts`), then the
    whole vector set replayed twice - one element at a time for exact
@@ -335,6 +342,12 @@ So that a log can be read without the harness:
   ends with `FORMAL GATE: PASS (n of n, negative control refuted)`; a
   task whose solved model carried fewer checks than the gate expects
   prints `VACUOUS` and fails.
+- before it replays `vectors/out`, every runner stage that does
+  (`libcft`, `cpp`, `node`, `wasm` and `remote`'s WebSocket leg) prints
+  `ensure_vectors: vectors/out/SHA256SUMS names all 168 sets
+  vectors/SHA256SUMS names, and all 168 it names hold`, or says by name
+  why the directory is not whole and regenerates it; the `vectors` stage
+  ends with the same words after `vectors:`.
 - the library replay prints `168 sets, 1068915 cases, all matching` after
   `make vectors` (1224915 in the runner's `libcft` stage) and
   `api-test: all contract checks passed`; the remote gate ends with

@@ -50,7 +50,7 @@ command in the `cft2204` distro.
 | buildargs | `hw/rebuild-2022.sh` hands v++ the clock constraint with VPP_PROPS set, CFT_GENERICS reaches vivado and the manifest, a lying wrapper read-back stops the build before v++ - each with its negative control (`hw/test-rebuild-argv.sh`, stub v++ and vivado) | bash; skipped by name where Vitis 2022.2 is installed under /data/Xilinx, /opt/Xilinx or /tools/Xilinx |
 | sweepjudge | `hw/sweep_freq.sh` judges a sweep point by the kernel clock's own WNS, never the shell's, and a staged image is not a closed one - thirteen verdicts on synthetic builds, both defects put back as negative controls (`hw/test-sweep-judge.sh`) | bash |
 | golden | the model's own invariants and oracles | python with pytest |
-| vectors | the conformance sets regenerate from the model | python |
+| vectors | the conformance sets regenerate from the model, and the generation's own `SHA256SUMS` names every set the profile does, each whole (below, "When vectors/out is whole") | python |
 | sim | RTL == model across all cocotb targets | docker (usable, not merely present) |
 | simmc | the same suite at the multi-cycle pass budget MC, plus the open-core board configuration - in `full` only, never in `quick` or `gate` | docker |
 | lint | every RTL file elaborates in Yosys, no latches | docker |
@@ -140,6 +140,68 @@ model, and a set served from a manifest is a set that was not
 regenerated, however sound the key. The runner's `vectors` stage calls
 the generator without `--cache`.
 
+## When vectors/out is whole
+
+Five stages replay `vectors/out`: `libcft` (`cft-selftest`), `cpp`,
+`node`, `wasm`, and `remote`'s WebSocket leg. Until 2026-09-29 each took
+any non-empty directory for the census. On 2026-09-28 a generation that
+died for want of mpmath left five of the 168 sets, and every later run
+reused them. Reproduced in scratch the next day, `cft-selftest`, both
+`cpp-api-test` builds and the WebSocket leg all pass on what that crash
+leaves; only `node` and `wasm` refused it, and not by any rule of the
+runner's.
+
+A directory is whole when the generation that wrote it finished and
+nothing has changed it since, and `vectors/gen_vectors.py` records that
+itself. It removes `SHA256SUMS` from its output directory before it
+writes a set, and after the last one writes a new one: every set it
+wrote or served from `--cache`, `<sha256>  <set>`, sorted. So a run that
+stopped part way leaves no record, whatever it overwrote. Before any of
+the five replays, and after the `vectors` stage's own generation, the
+runner asks three things:
+- is there a record;
+- does it name every set `vectors/SHA256SUMS`, the profile's record,
+  names;
+- does `sha256sum -c` hold it (`shasum -c` where there is no
+  `sha256sum`).
+Anything else is regenerated with the `vectors` stage's arguments
+(`VECTOR_ARGS`). A stage whose directory cannot be made whole fails,
+saying why by name: the generator's exit, or the check that still does
+not hold.
+
+What the check does and does not compare:
+- It compares names, not counts. A finished `make vectors` generation
+  (3000/4000/200) is replayed as it is, like the runner's own
+  (4000/6000/400). A finished but narrower one, say one attribute, is
+  regenerated.
+- A `vectors/out` written by the generator before it kept a record
+  (2026-09-29) has none, so the first replaying stage to meet it
+  regenerates it, once.
+- Still not checked: that a whole set came from TODAY's model. An
+  --only run replays a whole set from an older model as it finds it,
+  so a model change the library lacks can pass there. The gate and full
+  budgets regenerate before they replay.
+- Outside the runner nothing checks: a hand-run `make -C host test` or
+  `cpptest`, `cft-selftest` on the card, `host/tools/serial_replay.py`,
+  or `hw/sweep_freq.sh --card` (which still takes a non-empty
+  `vectors/out` as ready). Each replays what the directory holds;
+  `cd vectors/out && sha256sum -c SHA256SUMS` is the check by hand.
+
+`bash verify/test-ensure-vectors.sh` holds the record and the check to
+planted directories, by hand, in about a minute, against a small profile
+of its own:
+- the generator's record, after a finished run, a `--cache` run, and a
+  crash over a whole set (mpmath shadowed, as 2026-09-28's PATH slip hid
+  it);
+- `ensure_vectors` in nine cases: no directory, the crash's leftovers, a
+  set cut at a line boundary, a set deleted, a finished narrower
+  generation, a whole set with its record in each of sha256sum's two
+  line forms, and the crash's leftovers again with a generator that
+  fails and with one that exits 0 without writing a record;
+- four negative controls: the old non-empty test, the digest check
+  skipped, the profile's names not compared, the generator's first
+  removal dropped. Each must be caught.
+
 ## Resume semantics
 
 Each run gets an id (timestamp to the second + commit, bumped on
@@ -205,6 +267,10 @@ and adds a `SKIP` line per skipped case);
 page is not built; and `bindings/node/remote_test.mjs`'s two
 `vectors/out is not generated ... NOT RUN` lines, a missing input the
 rule below counts - the remote stage now generates the vectors first.
+Since 2026-09-29 no runner stage reaches a replay with a set absent:
+each first holds `vectors/out` to the generation's own record ("When
+vectors/out is whole", above). A replay run by hand still reports only
+the count.
 
 **What is counted, and what is only named.** The rule, once: an inner
 skip is a check that exists for this host and did not run for a HOST
