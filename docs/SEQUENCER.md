@@ -2294,14 +2294,15 @@ red on f681dee's tile, which is what a hold is for.
 three programs through the whole kernel with their committed banks,
 their segments cut to a few steps, bit-exact against the model on both
 tiles; cycles from start to done, f681dee's tile -> R18's (4b790b4, before
-R19 and before the send-back's fast loads below, which move every row
-with a load in it):
+R19 and before the send-back's fast loads below) -> revision 7 as merged
+(R18, R19 and the fast loads; the round's final tree 9fc9c0d, measured
+on amd-arc-box, 2026-09-29):
 
 | program, steps | fp64, 64 lanes | fp64, 5 lanes | fp256, 16 lanes | fp256, 3 lanes |
 |---|---|---|---|---|
-| Lorenz-96, 2 at fp64 and 1 at fp256 | 156,589 -> 67,318 | 47,948 -> 39,485 | 78,992 -> 34,363 | 30,359 -> 23,235 |
-| Lorenz-63, 10 and 4 | 10,521 -> 10,196 | 5,243 -> 5,191 | 4,593 -> 4,281 | 2,487 -> 2,422 |
-| Henon-Heiles, 10 and 4 | 4,099 -> 3,670 | 1,915 -> 1,863 | 2,071 -> 1,642 | 1,083 -> 992 |
+| Lorenz-96, 2 at fp64 and 1 at fp256 | 156,589 -> 67,318 -> 67,305 | 47,948 -> 39,485 -> 39,433 | 78,992 -> 34,363 -> 34,350 | 30,359 -> 23,235 -> 23,196 |
+| Lorenz-63, 10 and 4 | 10,521 -> 10,196 -> 10,196 | 5,243 -> 5,191 -> 5,178 | 4,593 -> 4,281 -> 4,281 | 2,487 -> 2,422 -> 2,409 |
+| Henon-Heiles, 10 and 4 | 4,099 -> 3,670 -> 3,670 | 1,915 -> 1,863 -> 1,837 | 2,071 -> 1,642 -> 1,642 | 1,083 -> 992 -> 979 |
 
 Lorenz-96, 692 scratch accesses in a 1,452-instruction step, runs 2.3
 times as fast in a full block at either format. In a block of two or
