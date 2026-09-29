@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from cft_golden import FORMATS, augmented, vectors  # noqa: E402
 from cft_golden import softfloat as sf  # noqa: E402
-from cft_golden import seq  # noqa: E402
+from cft_golden import asm, seq  # noqa: E402
 
 FP32 = FORMATS["fp32"]
 FP64 = FORMATS["fp64"]
@@ -530,3 +530,120 @@ def test_the_revision_8_arm_draws_nothing_when_off():
         p2 = seq.random_program(FP64, r2, scratch=True, wide_regs=True,
                                 rev8=False)
         assert p1 == p2 and r1.random() == r2.random()
+
+
+# ---- 6. the text form (asm.py) --------------------------------------------
+
+REV8_SRC = """.format fp64
+.deposits 2
+.scratch in 256
+augerr r5, r0, r1
+augadd r0, r0, r1
+stx r0, r4, +1
+ldx r6, r4, -1
+ldx r7, r8, -2048
+stx r9, r9, 2047
+ldx r10, r11, 0x10
+ldx r12, r13, -0x10
+deposit r0
+deposit r5
+halt
+"""
+
+
+def test_the_text_form_assembles_to_the_models_words():
+    img = asm.assemble_image(REV8_SRC, "<rev8>")
+    assert img.insns[:8] == [
+        seq.augerr(5, 0, 1), seq.augadd(0, 0, 1), seq.stx(0, 4, 1),
+        seq.ldx(6, 4, -1), seq.ldx(7, 8, -2048), seq.stx(9, 9, 2047),
+        seq.ldx(10, 11, 16), seq.ldx(12, 13, -16)]
+    # ...and the model loads the same bytes and runs them
+    prog = seq.Program.from_bytes(img.to_bytes())
+    assert prog.insns == img.insns
+
+
+def test_the_text_form_round_trips_and_writes_a_step_only_when_there_is_one():
+    image = asm.assemble(REV8_SRC, "<rev8>")
+    text = asm.disassemble(image)
+    for line in ("augerr r5, r0, r1", "augadd r0, r0, r1",
+                 "stx r0, r4, +1", "ldx r6, r4, -1", "ldx r7, r8, -2048",
+                 "stx r9, r9, +2047", "ldx r10, r11, +16",
+                 "ldx r12, r13, -16"):
+        assert line in text, line
+    assert asm.assemble(text, "<rt>") == image
+    # a zero step is the old instruction: same bytes, same text
+    old = asm.assemble(".format fp64\n.deposits 0\nldx r3, r4\nhalt\n")
+    zero = asm.assemble(".format fp64\n.deposits 0\nldx r3, r4, 0\nhalt\n")
+    assert old == zero
+    assert "ldx r3, r4\n" in asm.disassemble(zero)
+
+
+@pytest.mark.parametrize("line,fragment", [
+    ("ldx r3, r4, 2048", "outside -2048..2047"),
+    ("stx r3, r4, -2049", "outside -2048..2047"),
+    ("ldx r3, r4, r5", "is a register"),
+    ("ldx r3, r3, +1", "own index register"),
+    ("ldx r3, r4, +1, +2", "optional signed post-step"),
+    ("augadd r1, r2", "three registers"),
+    ("augerr r1, r2, r3, r4", "three registers"),
+    ("augadd r1, r2, K", "is a constant"),
+])
+def test_the_text_form_refuses_by_name(line, fragment):
+    src = ".format fp64\n.deposits 0\n.const K = 1.0\n" + line + "\nhalt\n"
+    with pytest.raises(asm.AsmError) as exc:
+        asm.assemble(src, "<test>")
+    assert fragment in str(exc.value), str(exc.value)
+
+
+def test_the_text_form_names_the_features():
+    def feats(body):
+        return asm.assemble_image(".format fp64\n.deposits 0\n" + body
+                                  + "halt\n").features()
+    assert "AUGADD" in feats("augadd r1, r2, r3\n")
+    assert "AUGADD" in feats("augerr r1, r2, r3\n")
+    assert "SCRATCH_STEP" in feats("ldx r1, r2, -1\n")
+    assert feats("ldx r1, r2\nstx r1, r2, 0\n") == ["SCRATCH"]
+    assert feats("augadd r20, r2, r3\n") == ["REGS32", "AUGADD"]
+    assert "features      SCRATCH AUGADD SCRATCH_STEP" in asm.info(
+        asm.assemble(".format fp64\n.deposits 0\naugadd r1, r2, r3\n"
+                     "stx r1, r2, +1\nhalt\n"))
+
+
+def test_the_two_validators_agree_over_the_new_codes_field_space():
+    """asm.py keeps its own validator, and the rule is that where it and
+    seq.py disagree about a program seq.py can express, asm.py is wrong.
+    Random words over every field of codes 8..13 - the stepped pair, the
+    new pair, and two codes past them - each judged by both."""
+    rng = random.Random(88)
+    accepted = refused = 0
+    for _ in range(6000):
+        code = rng.choice([seq.STX, seq.LDX, seq.AUGADD, seq.AUGERR, 12, 13])
+        word = (code | (1 << 31)
+                | (rng.randrange(16) << 8 if rng.random() < 0.8 else 0)
+                | (rng.randrange(16) << 12 if rng.random() < 0.8 else 0)
+                | (rng.randrange(16) << 16 if rng.random() < 0.8 else 0)
+                | (rng.randrange(16) << 20 if rng.random() < 0.1 else 0)
+                | (rng.randrange(8) << 24 if rng.random() < 0.05 else 0)
+                | (rng.randrange(16) << 27 if rng.random() < 0.05 else 0))
+        imm = 0
+        if rng.random() < 0.6:
+            imm |= rng.randrange(1 << 12)
+        if rng.random() < 0.05:
+            imm |= 1 << rng.randrange(12, 32)
+        if rng.random() < 0.5:
+            imm |= rng.randrange(8) << 24
+        word |= imm << 32
+        try:
+            seq.Program(FP64, [word, seq.halt()], max_deposits=0)
+            model = True
+        except seq.ProgramError:
+            model = False
+        try:
+            asm.Image(FP64, [word, asm.halt()], max_deposits=0)
+            text = True
+        except asm.AsmError:
+            text = False
+        assert model == text, (hex(word), model, text)
+        accepted += model
+        refused += not model
+    assert accepted > 500 and refused > 500, (accepted, refused)
