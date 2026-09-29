@@ -31,6 +31,7 @@ import struct
 from .formats import FORMATS, PREC_CODE, FpFormat
 from .seqflags import (FLAG_BANK_EXT, FLAG_SCRATCH_IO,
                        FLAG_SCRATCH_STRICT, names as flag_names)
+from . import augmented
 from . import softfloat as sf
 
 MAGIC = 0x50544643        # "CFTP" little-endian
@@ -149,6 +150,46 @@ CTRL_NAMES = {HALT: "halt", REPEAT: "repeat", ENDREP: "endrep",
               DEPOSIT: "deposit", SETACT: "setact", ACTALL: "actall",
               STL: "stl", LDL: "ldl", STX: "stx", LDX: "ldx"}
 
+# Revision 8 (proposed, 2026-09-29; docs/SEQUENCER.md): the exact-residual
+# add. 754-2019 clause 9.5's augmentedAddition returns a PAIR - the sum
+# rounded roundTiesTowardZero, and the exact error of that rounding - and
+# the pair is delivered the way RISC-V delivers DIV and REM: two
+# single-destination instructions, `augerr rE, rA, rB` then
+# `augadd rS, rA, rB` as the recommended (fusable) order. Each computes
+# augmented.augmented_add - the one definition, called and not copied -
+# and keeps one half; each raises that operation's flags.
+#
+# Control codes rather than two ALU opcodes, because an unassigned ALU
+# opcode is a LEGAL program today with a defined answer (the canonical
+# qNaN and invalid, softfloat.compute) and taking one would change it,
+# while an unknown control code is refused by every loader - so these
+# two change nothing that runs. They are arithmetic all the same: they
+# read no constant and no attribute (9.5 fixes the rounding), and a tile
+# computes them in the array.
+AUGADD, AUGERR = 10, 11
+CTRL_NAMES.update({AUGADD: "augadd", AUGERR: "augerr"})
+
+# Revision 8's auto-stepping index: STX and LDX carry a signed step in
+# imm[11:0], twelve bits of two's complement, and after the access the
+# index register takes rb + step modulo 2^W - IADD's arithmetic on the
+# encoding. Zero is the instruction as it always was, and every STX/LDX
+# a loader accepted before revision 8 has imm[23:0] = 0. imm[23:12] is
+# read by nothing and stays must-be-zero.
+STEP_BITS = 12
+STEP_MASK = (1 << STEP_BITS) - 1
+STEP_SIGN = 1 << (STEP_BITS - 1)
+STEP_MIN, STEP_MAX = -STEP_SIGN, STEP_SIGN - 1
+
+# The two capability bits revision 8 asks of a device, as
+# cft_caps.seq_features carries them: CAPS2[11] and CAPS2[12] land on
+# bits 15 and 16 (cft.h's CFT_SEQ_FEAT_AUGADD and
+# CFT_SEQ_FEAT_SCRATCH_STEP). A tile that predates them reads both as
+# zero: it would decode code 10 as HALT and access without stepping, so
+# a loader refuses a program that needs either, by name.
+FEAT_AUGADD = 1 << 15
+FEAT_SCRATCH_STEP = 1 << 16
+FEAT_NAMES_REV8 = {FEAT_AUGADD: "AUGADD", FEAT_SCRATCH_STEP: "SCRATCH_STEP"}
+
 # The bits of `imm` each control code READS, and so the only bits it
 # may set. Since revision 2 imm[27:24] carry the fifth bits of rd, ra,
 # rb and rc, which is what this table is mostly about:
@@ -170,9 +211,13 @@ CTRL_NAMES = {HALT: "halt", REPEAT: "repeat", ENDREP: "endrep",
 #                          bit of the one register they name - ra's
 #                          for the store, rd's for the load.
 #   STX, LDX               take the slot from a register instead, so
-#                          imm[23:0] is read by nothing and must be
+#                          imm[23:0] was read by nothing and had to be
 #                          zero; the high bits they may set are the
-#                          two registers they name.
+#                          two registers they name. Since revision 8
+#                          imm[11:0] is their STEP, and imm[23:12] is
+#                          still read by nothing.
+#   AUGADD, AUGERR         (revision 8) read ra and rb and write rd, so
+#                          the three high bits and nothing else.
 SCRATCH_SLOT_MASK = 0x00FF_FFFF
 IMM_ALLOWED = {
     HALT: 0,
@@ -183,8 +228,12 @@ IMM_ALLOWED = {
     ACTALL: 0,
     STL: SCRATCH_SLOT_MASK | (1 << REG_HI_SHIFT["ra"]),
     LDL: SCRATCH_SLOT_MASK | (1 << REG_HI_SHIFT["rd"]),
-    STX: (1 << REG_HI_SHIFT["ra"]) | (1 << REG_HI_SHIFT["rb"]),
-    LDX: (1 << REG_HI_SHIFT["rd"]) | (1 << REG_HI_SHIFT["rb"]),
+    STX: (1 << REG_HI_SHIFT["ra"]) | (1 << REG_HI_SHIFT["rb"]) | STEP_MASK,
+    LDX: (1 << REG_HI_SHIFT["rd"]) | (1 << REG_HI_SHIFT["rb"]) | STEP_MASK,
+    AUGADD: ((1 << REG_HI_SHIFT["rd"]) | (1 << REG_HI_SHIFT["ra"])
+             | (1 << REG_HI_SHIFT["rb"])),
+    AUGERR: ((1 << REG_HI_SHIFT["rd"]) | (1 << REG_HI_SHIFT["ra"])
+             | (1 << REG_HI_SHIFT["rb"])),
 }
 
 # STATUS bits. 0..2 are the engine's bus faults and 3 is the
@@ -423,17 +472,76 @@ def ldl(rd, slot):
     return encode(LDL, rd=rd, ctrl=True, imm=slot)
 
 
-def stx(ra, rb):
+def stx(ra, rb, step=0):
     """scratch[rb mod SCRATCH_D] := ra. The slot comes from the low
     log2(SCRATCH_D) bits of rb's BIT PATTERN read as an unsigned
     integer, which is where the atlas emitter keeps its loop
-    counters."""
-    return encode(STX, ra=ra, rb=rb, ctrl=True)
+    counters.
+
+    `step` (revision 8) is a signed twelve-bit post-step: after the
+    store, rb := rb + step modulo 2^W. Zero is the instruction as it
+    always was, bit for bit."""
+    return encode(STX, ra=ra, rb=rb, ctrl=True, imm=_step_imm(step))
 
 
-def ldx(rd, rb):
-    """rd := scratch[rb mod SCRATCH_D]."""
-    return encode(LDX, rd=rd, rb=rb, ctrl=True)
+def ldx(rd, rb, step=0):
+    """rd := scratch[rb mod SCRATCH_D], then rb += step (revision 8)
+    when step is not zero. A non-zero step with rd == rb is refused by
+    validate(): the loaded value would win the register, so the step
+    would select nothing."""
+    return encode(LDX, rd=rd, rb=rb, ctrl=True, imm=_step_imm(step))
+
+
+def augadd(rd, ra, rb):
+    """rd := r of augmentedAddition(ra, rb) - the sum rounded
+    roundTiesTowardZero (754-2019 9.5; revision 8)."""
+    return encode(AUGADD, rd=rd, ra=ra, rb=rb, ctrl=True)
+
+
+def augerr(rd, ra, rb):
+    """rd := e of augmentedAddition(ra, rb) - (ra + rb) - r, exactly.
+    The recommended pair is `augerr rE, rA, rB; augadd rS, rA, rB` with
+    rE neither rA nor rB, so rS may overwrite rA."""
+    return encode(AUGERR, rd=rd, ra=ra, rb=rb, ctrl=True)
+
+
+def _step_imm(step):
+    """A post-step as its imm[11:0] field: twelve-bit two's complement.
+    Refused here by name outside -2048..2047, rather than wrapped into a
+    different step."""
+    if not STEP_MIN <= step <= STEP_MAX:
+        raise ProgramError(
+            f"step {step} outside {STEP_MIN}..{STEP_MAX}: the post-step "
+            f"is a signed {STEP_BITS}-bit field, imm[{STEP_BITS - 1}:0]")
+    return step & STEP_MASK
+
+
+def index_step(d):
+    """The signed post-step a decoded STX or LDX carries (revision 8),
+    and 0 for every other instruction - including STL and LDL, whose
+    imm[23:0] is a slot and not a step."""
+    if not d["ctrl"] or d["op"] not in (STX, LDX):
+        return 0
+    s = d["imm"] & STEP_MASK
+    return s - (1 << STEP_BITS) if s & STEP_SIGN else s
+
+
+def features_rev8(insns):
+    """The revision-8 capability bits a program's instructions need, as
+    a mask of FEAT_AUGADD and FEAT_SCRATCH_STEP: the first for any
+    augadd or augerr, the second for any STX or LDX whose step is not
+    zero. A device whose seq_features lacks one refuses the program by
+    name; a zero step needs nothing, because it is the old instruction."""
+    need = 0
+    for word in insns:
+        d = decode(word)
+        if not d["ctrl"]:
+            continue
+        if d["op"] in (AUGADD, AUGERR):
+            need |= FEAT_AUGADD
+        elif index_step(d):
+            need |= FEAT_SCRATCH_STEP
+    return need
 
 
 def _check_slot(slot):
@@ -446,6 +554,27 @@ def _check_slot(slot):
         raise ProgramError(
             f"scratch slot {slot} outside 0..{SCRATCH_D - 1}")
     return slot
+
+
+def _check_dead_step(pc, d):
+    """Revision 8's one new refusal: an LDX that loads INTO its own index
+    register and steps it.
+
+    Both would write the same register, and RISC-V's post-increment loads
+    say which wins - CORE-V's XCVmem: "When same register is used as
+    address and destination (rD == rs1) for post-incremented loads,
+    loaded data has highest priority". So the step would select nothing,
+    and a field that selects nothing is a second spelling of the
+    unstepped instruction - the reason `kx` with no constant operand is
+    refused. A step of zero is the old LDX and stays legal; STX with
+    ra == rb is legal too, because its one register write is the step's
+    and it stores the index as it stood before it."""
+    if d["ctrl"] and d["op"] == LDX and index_step(d) and d["rd"] == d["rb"]:
+        raise ProgramError(
+            f"[{pc}] ldx r{d['rd']}, r{d['rb']}, {index_step(d):+d} loads "
+            f"into its own index register: the loaded value wins it "
+            f"(RISC-V CORE-V's rule), so the step selects nothing - write "
+            f"the step as 0 or load into another register")
 
 
 # ---- the program object ---------------------------------------------
@@ -692,7 +821,13 @@ class Program:
                     # slot from rb instead, so imm[23:0] is read by
                     # nothing there and IMM_ALLOWED refuses it.
                     STL: ("ra",), LDL: ("rd",),
-                    STX: ("ra", "rb"), LDX: ("rd", "rb")}[code]
+                    STX: ("ra", "rb"), LDX: ("rd", "rb"),
+                    # Revision 8's pair: two sources and a destination,
+                    # and nothing else - no rnd, since 9.5 fixes the
+                    # rounding, and no constant, since no control code
+                    # reads the bank.
+                    AUGADD: ("rd", "ra", "rb"),
+                    AUGERR: ("rd", "ra", "rb")}[code]
             raw = decode_raw(word)
             for field in ("rd", "ra", "rb", "rc"):
                 if field not in used and raw[field]:
@@ -709,6 +844,7 @@ class Program:
                     f"[{pc}] {CTRL_NAMES[code]} reads only "
                     f"imm & {IMM_ALLOWED[code]:#010x}, so imm="
                     f"{d['imm']:#010x} sets a bit it does not read")
+            _check_dead_step(pc, d)
 
             if code in (STL, LDL):
                 # A STATIC slot past the depth is refused by name, as a
@@ -1016,6 +1152,52 @@ def gather(src, table, fmt, name="index"):
     return out
 
 
+def _augmented_half(fmt, d, regs, active):
+    """Revision 8's `augadd` / `augerr` over a block of lanes: for every
+    ACTIVE lane, augmentedAddition(ra, rb) as augmented.py defines it,
+    keeping r (augadd) or e (augerr) in rd. Returns the flags the active
+    lanes raised, which are exactly augmentedAddition's under 9.5's
+    default handling - invalid, overflow with inexact, or underflow
+    without inexact - and never a rounding's inexact.
+
+    Both operands are read before rd is written, lane by lane, so rd may
+    name ra or rb exactly as it may for an ALU instruction. An inactive
+    lane - masked, padding, or dropped by SETACT - neither writes nor
+    raises, which is P3's rule for every write and every flag."""
+    keep_e = d["op"] == AUGERR
+    raised = 0
+    for i, on in enumerate(active):
+        if not on:
+            continue
+        r, e, fl = augmented.augmented_add(fmt, regs[i][d["ra"]],
+                                           regs[i][d["rb"]])
+        regs[i][d["rd"]] = e if keep_e else r
+        raised |= fl
+    return raised
+
+
+def _post_step(fmt, d, regs, active):
+    """Revision 8's post-step of STX/LDX: rb := rb + step, modulo 2^W,
+    for every active lane - IADD's arithmetic on the encoding (the step
+    sign-extended to the register's width), so the index register's
+    value after any number of steps is a function of the program alone
+    and not of the tile's depth.
+
+    It runs after the access, so the access used the index as it stood
+    (and STX stored ra as it stood, which matters when ra is rb). It is
+    NOT gated by SCRATCH_STRICT: R8 suppresses an access, and the step is
+    a register write, so a strict and a non-strict run leave rb the
+    same. A zero step writes nothing, which is the old instruction."""
+    step = index_step(d)
+    if not step:
+        return
+    inc = step & ((1 << fmt.width) - 1)
+    rb = d["rb"]
+    for i, on in enumerate(active):
+        if on:
+            regs[i][rb], _ = sf.iadd(fmt, regs[i][rb], inc)
+
+
 def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
         early_exit=True, insn_budget=None, n_active=None,
         idx_a=None, idx_b=None, idx_c=None, idx_scratch_in=None,
@@ -1294,6 +1476,12 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
             active = list(keep)
             pc += 1
             continue
+        if code in (AUGADD, AUGERR):
+            # Revision 8. Arithmetic, so the active bit gates the write
+            # AND the flags, as it does for an ALU instruction.
+            flags |= _augmented_half(fmt, d, regs, active)
+            pc += 1
+            continue
         if code in (STL, LDL, STX, LDX):
             # R4. A store is a register write for P3's purposes and a
             # load writes rd, so both are masked by the active bit and
@@ -1336,6 +1524,10 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
                     scratch[i][slot] = regs[i][d["ra"]]
                 else:
                     regs[i][d["rd"]] = scratch[i][slot]
+            # Revision 8: the post-step, after every lane's access and
+            # for every active lane - a lane whose strict access was
+            # suppressed above steps too.
+            _post_step(fmt, d, regs, active)
             pc += 1
             continue
         raise ProgramError(f"[{pc}] unknown control code {code}")
@@ -1365,7 +1557,8 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
 
 
 def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False,
-                   extended=False, wide_regs=False, scratch=False):
+                   extended=False, wide_regs=False, scratch=False,
+                   rev8=False):
     """A random program, for fuzzing. Returns (insns, consts).
 
     It lives here rather than in a test file because two different
@@ -1404,6 +1597,10 @@ def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False,
     the sequence of draws that produces a revision-1 or revision-2
     corpus is untouched to the value. Off, `scratch and ...`
     short-circuits and nothing is drawn at all.
+
+    `rev8` is revision 8's arm (proposed, 2026-09-29) on exactly the
+    scratch arm's terms: `augadd`, `augerr`, their recommended pair and
+    stepped STX/LDX, appended after the rest, drawing nothing when off.
     """
     nreg = NREG if wide_regs else NREG_REV1
     # Slots the fuzz uses. A handful of low ones so stores and loads
@@ -1473,6 +1670,12 @@ def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False,
                 insns.append(stx(rng.randrange(nreg), rng.randrange(nreg)))
             else:
                 insns.append(ldx(rng.randrange(nreg), rng.randrange(nreg)))
+        # Revision 8's arm (proposed, 2026-09-29), on the scratch arm's
+        # terms: an EXTRA instruction after everything above, and
+        # `rev8 and ...` draws nothing when off, so every corpus a seed
+        # produced before is the corpus it produces now.
+        if rev8 and rng.random() < 0.45:
+            _rev8_draw(insns, rng, nreg)
     insns += [endrep()] * depth
     insns.append(halt())
     pool = [sf.zero_bits(fmt), sf.one_bits(fmt), sf.max_normal_bits(fmt)]
@@ -1486,6 +1689,44 @@ def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False,
         # mis-indexed IMUL is loud.
         consts = pool + [(i << 4) | 0x9 for i in range(len(pool), nconst)]
     return insns, consts
+
+
+# The steps the fuzz draws: the unit steps a Cauchy product walks with,
+# strides, and both ends of the twelve-bit field.
+_FUZZ_STEPS = (1, -1, 1, -1, 2, -2, 3, -5, 8, -16, 255, -256,
+               STEP_MAX, STEP_MIN)
+
+
+def _rev8_draw(insns, rng, nreg):
+    """One revision-8 form appended to a fuzz program: `augadd`, `augerr`,
+    the recommended pair over the same operands (the shape a tile may
+    fuse), or a stepped STX/LDX. An LDX never loads into its own stepped
+    index - validate() refuses that - so its destination moves off rb."""
+    kind = rng.randrange(10)
+    if kind < 3:
+        insns.append(augadd(rng.randrange(nreg), rng.randrange(nreg),
+                            rng.randrange(nreg)))
+    elif kind < 5:
+        insns.append(augerr(rng.randrange(nreg), rng.randrange(nreg),
+                            rng.randrange(nreg)))
+    elif kind < 7:
+        ra, rb = rng.randrange(nreg), rng.randrange(nreg)
+        re = rng.randrange(nreg)
+        while re in (ra, rb):
+            re = (re + 1) % nreg
+        rs = ra if rng.random() < 0.5 else rng.randrange(nreg)
+        insns.append(augerr(re, ra, rb))
+        insns.append(augadd(rs, ra, rb))
+    else:
+        step = rng.choice(_FUZZ_STEPS)
+        rb = rng.randrange(nreg)
+        if kind < 9:
+            rd = rng.randrange(nreg)
+            if rd == rb:
+                rd = (rd + 1) % nreg
+            insns.append(ldx(rd, rb, step))
+        else:
+            insns.append(stx(rng.randrange(nreg), rb, step))
 
 
 def random_inputs(fmt, rng, n):
