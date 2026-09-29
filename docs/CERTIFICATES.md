@@ -1420,7 +1420,8 @@ card certificate's run blocks to the software backend's. It ran at
 8 checks of 8, the gate's 295 of 295 on the quad's four tiles and 295
 of 295 on the single, 48 to 50 s each, and its negative control, a
 wrong image digest, failing the device lines by name
-([CARDDAY.md](CARDDAY.md)). It ran again after each of P3b's commits,
+([CARDDAY.md](CARDDAY.md)). It ran again at 4eed552, eb2d1ae and
+d4abe2a, P3b's three answers (not at ff7ff7b alone),
 8 of 8 each time, the gate on each image 373 of 373 at 4eed552, 382 of
 382 at eb2d1ae, and 384 of 384 at d4abe2a in 66 to 68 s, nothing
 skipped (2026-09-28 and 29; the round's ledger, card-p3b, card-p3b2

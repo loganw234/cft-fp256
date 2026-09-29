@@ -603,8 +603,8 @@ they were handed over. What only a card can still say:
   3,863 us; the whole-array flush dominates below E = 64 (220 us).
 - **The area column**: kernel WNS +0.266 ns at 135 MHz for the single
   tile; the quad's is its own entry.
-- **The three instruments that told a host defect from a tile defect, and
-  a fourth added on 2026-09-18**
+- **The instruments that tell a host defect from a tile defect**, added
+  from 2026-09-18 to 2026-09-28
   - `CFT_XRT_REDUCE_BC` (2026-09-18): what the XRT reduction paths do
     with the `b` and `c` buffers a reduction never uses. Unset, they are
     allocated and never written; `poison` fills them with 0xFF - a NaN
@@ -786,7 +786,8 @@ the library itself.
 the certificates made on the quad's four tiles and 295 of 295 on the
 single, and the negative control failed the device lines by name. The
 records are `Data/runs/2026-09-28-cert-round/card-p3/`, which is not
-tracked. It ran again after each of P3b's commits, 8 of 8 each time,
+tracked. It ran again at 4eed552, eb2d1ae and d4abe2a, P3b's three
+answers (not at ff7ff7b alone), 8 of 8 each time,
 the gate on each image 373 of 373 at 4eed552, 382 of 382 at eb2d1ae,
 and 384 of 384 at d4abe2a, nothing skipped (card-p3b/, card-p3b2/ and
 card-p3b3/, beside card-p3/). Left as written below, because the list

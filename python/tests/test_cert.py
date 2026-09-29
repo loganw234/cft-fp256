@@ -2450,10 +2450,12 @@ def test_the_writer_refuses_an_empty_or_ragged_run(lor):
 
 
 def test_the_writer_refuses_what_the_executor_would(lor):
-    """run_chain and certify_run refuse by name what seq.run would not
-    run as a segment: a bank handed to an image that carries its own
+    """run_chain and certify_run refuse by name these cases seq.run would
+    not run as a segment: a bank handed to an image that carries its own
     constants, a start that is not whole lanes, a stream of the wrong
-    length. And the audit's step 4 refuses the first, for a run
+    length. Not every such case: verifier-C5 found eleven bare errors and
+    three shapes accepted in the two helpers (docs/VALIDATION.md, the
+    certificate round's known limits). And the audit's step 4 refuses the first, for a run
     certified with a bank its image cannot take (certify_run hashes what
     it is handed; it does not load the bank)."""
     k64 = sf.div(F64, dec64("1"), dec64("3"))[0]

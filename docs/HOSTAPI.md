@@ -3041,6 +3041,10 @@ set to 0, and nothing else written.
   sentence names the tile and both words. The open itself is unchanged:
   this library has always decoded tile 0's CAPS for every tile, and
   whether a mixed image should open at all is not this call's question.
+* **An XRT image one of whose tiles' CAPS could not be read at open**
+  has no words to name for that tile. The sentence names the tile, and
+  says so when the failure was planted by
+  `CFT_XRT_CAPS=plant-unreadable`.
 
 A NULL `dev` or `out`, or a `struct_size` below `sizeof(size_t)`, is
 `CFT_ERR_INVALID_ARGUMENT` first, on every backend. The answer comes
