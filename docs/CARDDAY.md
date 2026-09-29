@@ -569,11 +569,12 @@ they were handed over. What only a card can still say:
   - On a revision-7 image, whose scratch is 2,048 slots, the same set
     gives **138 of 140, by design**. The two exceptions are `r8-modulo`
     and `r8-strict`, which index slot 256 and beyond. A 256-slot tile
-    wraps that index or reports it; a 2,048-slot tile does neither.
+    wraps an index from 256 up or reports it; a 2,048-slot tile does
+    that only from 2,048 up.
   - Their expectations were made at 256 slots. On the card each equals
     the software backend opened at the device's depth (`positive-run
-    --scratch-depth 2048`), byte for byte (docs/VALIDATION.md,
-    2026-09-29).
+    --scratch-depth 2048`), byte for byte, and the same runner gives
+    140 of 140 on a round-2 image (docs/VALIDATION.md, 2026-09-29).
 - **The photograph through MAIN's library**:
   `python3 host/tests/photograph_check.py --device <image>` on both
   images. atlas-engine's card run matched the GPU on every pass with

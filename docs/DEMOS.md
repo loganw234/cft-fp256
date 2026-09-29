@@ -24,7 +24,7 @@ Live beside the conformance page at
 | module | `bindings/node/cft_node.wasm`, 259,935 bytes, sha256 `b3c023afd85e7e163007bca310b4889ab2f3c0e9a39016e80d6a311c423109de` |
 | toolchain | emcc 6.0.9 (4e4223852a0835923411059a3929907d7df1232e), `emscripten/emsdk:6.0.9@sha256:96617f27fe16421588241def73908fd348a7f9d260440ed0d00b36dcf7a063cc` |
 | configurations | 13, over 15 chains |
-| recorded | 2026-09-29, per `bindings/wasm/demos_chains.json`'s own `recorded` field - the recorder writes the UTC date, the same day on the recording desktop's clock (07:50 there, 14:50 UTC); re-recorded for the ABI 0.16 module, every chain unchanged |
+| recorded | 2026-09-29, per `bindings/wasm/demos_chains.json`'s own `recorded` field - the recorder writes the UTC date, the same day on the recording desktop's clock (13:20 there, 20:20 UTC, for the committed module; a first 0.16 build's recording, superseded, was at 07:50); re-recorded for the ABI 0.16 module, every chain unchanged |
 
 ---
 

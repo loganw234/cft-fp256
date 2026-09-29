@@ -15822,7 +15822,7 @@ Steps 4 to 6 (a C auditor, accuracy entries, cft-orbits' runs) are later work. T
 - Its sentences are restated in the commit that adds this paragraph. That commit changes docs and one test docstring only, and was gated by the docs stage and the certificate tests, not by a second front door.
 - Not run: the merged tree on the card. Each part was card-tested at its own commit, and nothing here claims a card run of the merge (verifier-C8).
 
-## 2026-09-29 - revision 7: control codes join the instruction overlap and a beat with no active lane is not issued (R18, R19), the program limits per build at the U50's 1,024 / 32,768 / 2,048, revision 8 defined golden-first, ABI 0.16; the single closes 135 MHz with +0.423 ns and passes its card legs; the round's verifiers, and its known limits
+## 2026-09-29 - revision 7: control codes join the instruction overlap and a beat with no active lane is not issued (R18, R19), the program limits per build at the U50's 1,024 / 32,768 / 2,048, revision 8 defined golden-first, ABI 0.16; the single closes 135 MHz with +0.423 ns and agrees with the model on the card, where atlas-engine's program set gives 138 of 140 by the deeper scratch's design; the round's verifiers, and its known limits
 
 **Why.** Step 4 of the controlled-divergence work order is the one RTL revision it allows (docs/ROADMAP.md, "Revision 7: step 4's RTL revision", the plan of record f681dee). The sequencer is where a program's time goes. The revision had three items:
 1. **R18: control codes join the instruction overlap.** Loads, stores, SETACT and the rest issue through the pipe instead of draining it.
@@ -15846,13 +15846,13 @@ Revision 8's program-model asks were defined golden-first beside them: TwoSum, a
 - **Heavy work to the box.** At 08:48: "shift heavier work to the remote box when possible". Runs already going stayed where they were.
 - **The push and the quad.** At 13:02: "once its confirmed on the single push to main then start the quad at 135 with full capacities and 130 if it fails, 2 builds could likely run in parallel". The lead said it would stagger the two quad builds by about 90 minutes and watch the box's memory, for CLAUDE.md's one-heavy-link trap.
   - Measured afterwards: amd-arc-box has 47 GB of RAM and 4 GB of swap. Two earlier quads' implementation runs peaked at 19 to 20 GB in placement and 21 to 24 GB in routing, which ran 2 h 42 min and 5 h 17 min, and in writing the bitstream.
-  - So two revision-7 quads would share their routing phases for hours at about 44 to 56 GB, a stagger or not.
+  - So, by arithmetic rather than measurement, two revision-7 quads would share hours of routing at about 44 to 56 GB, staggered or not.
   - The lead's default, told to Logan: the 135 MHz quad at the push, and the 130 MHz one only if 135 misses.
 - **The send-back rule, carried over.** Only a regression "(a)" or a wrong answer "(b)" sends a parcel back. Everything else merges as a recorded limit, with its false sentences restated at the merge. The lead's own commits get a verifier like any parcel's.
 
 **The parcels, in merge order.**
 - **P3, revision 8 golden-first** (fe57e51, then 8fc664a; merged 6951c88).
-  - R21: control codes 10 `augadd` and 11 `augerr`, each one half of augmentedAddition (the sum rounded toward zero, and its exact error). This is RISC-V M's DIV/REM shape, two single-destination instructions a tile may fuse. CAPS2[11] is CFT_SEQ_FEAT_AUGADD.
+  - R21: control codes 10 `augadd` and 11 `augerr`, each one half of augmentedAddition (the sum rounded to nearest with ties toward zero, and its exact error). This is RISC-V M's DIV/REM shape, two single-destination instructions a tile may fuse. CAPS2[11] is CFT_SEQ_FEAT_AUGADD.
   - R22: STX and LDX take a signed 12-bit post-step in imm[11:0], as CORE-V XCVmem defines it. CAPS2[12] is CFT_SEQ_FEAT_SCRATCH_STEP.
   - R23, per-lane sticky flags, is a design only.
   - The software backend executes R21 and R22. Every device without the bits refuses them at load, by name.
@@ -15906,8 +15906,8 @@ Revision 8's program-model asks were defined golden-first beside them: TwoSum, a
 - **9986bf8.** seq_coreu50, the unit bench at the U50's capacities, joins SIM_BENCHES (26 targets).
 - **28c28bf, ABI 0.16.**
   - `cft_open_ex`, and CFT_SEQ_FEAT_AUGADD and CFT_SEQ_FEAT_SCRATCH_STEP. The software handle's seq_features is 0x1ff1f.
-  - api-test now holds cft_open_ex: the depth in the caps, and each refusal by status and a word of its sentence. Two plants each fail it by name.
-  - verify.mjs holds the loader's exports as well as its heap (R1's third finding).
+  - api-test now holds cft_open_ex: the depth in the caps, and its refusals by status and a word of their sentences, all but the two named under the known limits. Two plants each fail it by name.
+  - verify.mjs holds the loader's `malloc` export to the adopted instance's, as well as its heap (R1's third finding). That is one export, by identity (verifier-R6).
   - The WebAssembly module was rebuilt from the final host sources: cft_node.wasm b3c023af..., 259,935 bytes, 149 exports, 141 `cftw_*`. Two clean container builds are byte for byte. verify_demos: 48 ok, every chain unchanged.
 - **90a83dd.** SEQUENCER.md's ODE table gains the merged revision's column, measured by krnlseq on the final tree. Lorenz-96 at fp64 in a full block runs in 67,305 cycles against f681dee's 156,589. Every row is at or below R18's.
 - **3197dc6.** SEQ_TIMEOUT 14,400 s, and seq_coreu50's timeout is SEQ_TIMEOUT's; see the RTL runs below.
@@ -15930,7 +15930,7 @@ Revision 8's program-model asks were defined golden-first beside them: TwoSum, a
 - **Icarus.**
   - On the pre-fix merge (9ff114e, run 20260929-080541-9ff114e, the desktop at one job): sim, lint and formal PASS; sim was 10,010 s for 26 targets.
   - On the final tree, amd-arc-box, SIM_JOBS=6, beside the single's bitstream build (run 20260929-114401-9fc9c0d): sim FAILED on a timeout. seq_core was terminated at SEQ_TIMEOUT 4,800 s (make's Error 124), with no wrong answer. The other 25 targets passed, seq_coreu50 in 5,353 s.
-  - The lead stopped that run's simmc part way, for a fresh one. seq_coreu50mc under Icarus there: 63 of 63, 5,360 s.
+  - The lead stopped that run's simmc part way, for a fresh one. seq_coreu50mc under Icarus, in a box lane of its own: 63 of 63, 5,360 s.
   - 3197dc6 raises the limit and gives it a comment with these figures.
   - sim with lint, and simmc, were started whole on 3197dc6 on the box at 14:10:59 (SIM_JOBS=6 each, in two clones), with seq_core alone beside them under the raised limit. They were still running at this entry's commit; their verdicts and times are in the paragraph the next commit adds.
   - This commit changes tb/Makefile by one comment only (below), so tb/ then differs from the tree those runs used by that comment.
@@ -15989,6 +15989,7 @@ Revision 8's program-model asks were defined golden-first beside them: TwoSum, a
     - The card is the software backend at its own depth, byte for byte. The differences from the set's expectation are 67 lanes of r8-modulo, all in the slot-0 deposit, and 705 lanes of r8-strict, all in the ldx deposit.
     - This is SEQUENCER.md's contract: a non-strict image indexing past 256 "wraps at 2,048 on the U50 and at 256 everywhere else, and computes other answers". A strict run is portable only when it reports nothing, and r8-strict reports at both depths.
     - The lead rules it no regression: the new depth is the change the round was asked to make, and the answer follows the depth the device publishes.
+    - Verifier-R6's control, run since: the same set and runner on round 2's single give 140 of 140 (141 s), r8-modulo and r8-strict matching. The differences follow the tile alone, so the ruling is now a measurement.
     - Two sentences promised more, and are restated in this commit:
       - ROADMAP's plan of record said revision 7 keeps "every answer ... as the round-2 images";
       - CARDDAY.md's "140 of 140" gains the revision-7 figure.
@@ -16010,7 +16011,7 @@ Revision 8's program-model asks were defined golden-first beside them: TwoSum, a
   | henonheiles-lf-fp256, 16 | 0.487 | 0.505 | 1.04 |
 
   - Every case's output (scratch-out digest, flags 0b10000, bus 0) is the same on both images and on the software backend, by diff.
-  - The times include each run's host work, so the kernel's own ratio is at least the one shown. That is inference, not measurement.
+  - The times include each run's host work. So the kernel's own ratio is at least the one shown, provided the host's part of a run is no smaller on revision 7: the same call, library and buffers on both images, so believed. That is inference, not measurement.
   - The simulated table's 2.3 for Lorenz-96 is two steps with a block's setup; the card's 2.55 is twenty.
 
 **The front door.**
@@ -16056,6 +16057,14 @@ Revision 8's program-model asks were defined golden-first beside them: TwoSum, a
   - the cpp, node and wasm stages' need lists lack the Python and mpmath a regeneration needs;
   - remote_test.mjs's regex admits spellings no record covers;
   - a directory check outside the library is a future option, with no ABI step.
+- **R1's and R4's notes left out of the merges' lists** (verifier-R6):
+  - bindings/node/test.mjs's 137 pass whether or not vectors/out is present;
+  - R4's load_flags_on plant stays green: a load's flag enable cannot be observed, since IOR raises no flag.
+- **Verifier-R6's notes on ABI 0.16**, all sentences or untested corners:
+  - verify.mjs holds one export by identity, so a wrapped `cftw_*` export passes it, while its ok and FAIL lines say "exports";
+  - api-test holds neither the `-DCFT_NO_PROGRAM` refusal (R6 measured it by hand in such a build) nor either bound of the depth range;
+  - cft.h's restated cft_conformance paragraph leaves out that a success report also names reduction-group and per-opcode skips.
+  COMPATIBILITY.md is restated for the first two.
 - **R5's notes on P2:**
   - test_seq.py:1288's message misleads under one plant;
   - segrun_check --device compares against software certificates at 256, which is safe: a deep program would fail, not pass.
@@ -16066,8 +16075,10 @@ Revision 8's program-model asks were defined golden-first beside them: TwoSum, a
 
 **Load, and the machine.**
 - Agents ran their builds and plants one at a time, niced. Containers did overlap: four agents' Verilator containers beside the lead's desktop Icarus run at 08:48, and three sim containers for about nine minutes at 10:47, which P2 recorded itself.
-- After Logan's 08:48 word, every long run went to amd-arc-box, which the verifiers never touched: the verifiers' and parcels' hand-backs, the RTL runs, the bitstreams and the card legs. The desktop kept only runs already going, formal (about five minutes), and the node, wasm and demos stages, since the box has no Node.
-- One read outside a verifier's brief: R5 ran `git status` and `git log -1` in P2's worktree, recorded it itself, and nothing was touched.
+- After Logan's 08:48 word, every long run went to amd-arc-box, which the verifiers never touched: the verifiers' and parcels' hand-backs, the RTL runs, the bitstreams and the card legs. The desktop kept only runs already going, formal (about five minutes), and the stages that need Node, which the box lacks: node, wasm and demos, and at the close remote (472 s).
+- Reads outside a verifier's brief, each recorded by the verifier, with nothing written:
+  - R5 ran `git status` and `git log -1` in P2's worktree;
+  - R6 ran one `ls` and one `grep` in the check tree's run state. The lead's own message had pointed it there; the lead corrected the message and copied the logs.
 
 **The lead's own slips**, each caught and recorded in the ledger:
 - **The two regressions' causes.**
@@ -16095,4 +16106,25 @@ Revision 8's program-model asks were defined golden-first beside them: TwoSum, a
   - 5f40bd8's says its six trees "equal the lead's check tree 9fc9c0d/f45890f". They equal f45890f's. 9fc9c0d's bindings tree is the module before the rebuild.
   - 5f40bd8's title says "after one send-back"; there were two. Its body says "krnlseq's first multi-pass run" (above).
 - **A stage left out of a carry-over.** The claim that the host stages at 3582de0 stand for the final tree missed that remote reads the rebuilt module (above).
+- **After the card legs began, typed and inferred again** (lead.md 14:22 to 14:48, each corrected there):
+  - a launch time typed as "about 14:24" (it was 14:21:42);
+  - the probe's dry run placed before XRT's library path was set, whose failed log the lead's by-hand run then overwrote;
+  - a timing reading stated as a conclusion ("the probe's thin margin was not the design's");
+  - card-identity's 12 against 13 "believed to be the image", where the check that followed showed the clean clone;
+  - one lane count inferred for both r8 programs (705), true of r8-strict only (r8-modulo's is 67);
+  - a three-way agreement compared by eye before it was compared by diff.
 - **A claim written before it was so.** The first draft of 3197dc6's comment said seq_coremc "was terminated" at 4,800 s while it was still running. It was restated before the commit.
+
+**The runs the first commit left running, and verifier-R6** (recorded by the commit that adds this paragraph).
+- **seq_core alone** under Icarus on amd-arc-box, SEQ_TIMEOUT=14400, beside both stage runs: 63 of 63 in 5,923 s. So SEQ_TIMEOUT's 14,400 is 2.4 times the longest bench measured loaded on the slower host, as its comment asks.
+- **sim with lint** on 3197dc6, amd-arc-box, SIM_JOBS=6, in its own clone (run 20260929-141059-3197dc6): PASS, nothing skipped. sim ok 5,968 s, all 26 benches, 0 failures; lint ok 80 s. The longest benches, by their results' test time: seq_core 5,713 s, seq_coreu50 5,094 s, krnlseq 1,747 s. The runner's verdict line is "2 stage(s) executed, 0 cached from earlier in the run, 0 failed, 0 skipped, 0 inner skip(s)".
+- **simmc** on 3197dc6, the same box, in a second clone beside it (run 20260929-141059-3197dc6): 15 of its 16 benches passed, with 0 failures. (The target list has 17 names, but `board` only groups three of them.) seq_coremc gave 63 of 63 in 4,703 s of test time, and krnlseqmc 3 of 3 in 2,186 s. The sixteenth, boardseq, was still simulating at the push. It runs test_krnl_seq through the kernel at the open-core capacities and MC=10, under Icarus and with no timeout wrapper. It was 1 h 40 min in and on its third case, krnl_ode_programs, which P1 added this round (4b790b4). Its result is recorded by a later commit. simmc is outside the gate budget (the gate is 36 of 41 stages). The same case ran at MC=10 in krnlseqmc (the U50's capacities) in this run, and the open-core sequencer at MC=10 in seq_coremc and quartermc.
+- The tb/ tree those runs used (3197dc6's, 0ae1f7f2...) differs from the one pushed by the comment b559fb0 restated, and nothing else. rtl/ is the same (c012ed9a...), and formal/ and rtl/ are unchanged since the desktop's formal pass.
+- **remote over the rebuilt module** (run 20260929-145158-f45890f, the desktop, in the check tree whose host, bindings, python, verify, programs and vectors trees are the final ones): PASS, nothing skipped, 472 s. Its WebSocket leg ran 68 checks with 0 failures, replaying 3,200 cases against the module and the model.
+- **Verifier-R6** read the lead's own commits, 77b8440 to b559fb0, and found no regression.
+  - ABI 0.16 is additive: 77b8440's api-test passes against the 0.16 library, and a 2,560-program pre-revision-8 corpus gives identical digests at 77b8440 and 3197dc6.
+  - The module rebuilds byte for byte from 28c28bf's sources.
+  - The five merges, made again with `git merge-tree`, differ from their auto-merges only by their listed resolutions and restatements.
+  - One narrow (b) by the letter, 3197dc6's message on SEQ_U50_TIMEOUT, is recorded in the slips above, as P3's "750" was.
+  - Its other findings are restated in this commit: the definition of augmentedAddition's rounding, this entry's title, verify.mjs's single export, the probe's premise, CARDDAY's 2,048 bound, COMPATIBILITY's refusal list, DEMOS's recording time, and the slips and known limits it found missing. Or they are recorded as known limits above.
+- **R6's control for the program-set ruling:** the same set and runner on round 2's single, 140 of 140 (above).
