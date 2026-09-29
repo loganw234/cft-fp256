@@ -2441,7 +2441,8 @@ whose issued beats have gaps. Now no row is above R18's or f681dee's,
 and the fourteen dense rows - every lane kept, and every other lane below
 fp256, where no beat empties - are R18's to the cycle. The bench holds
 the 48 to f681dee's cycles; the chain that ends in a DEPOSIT is logged
-beside them.
+beside them. With the count-based reach planted back it is red on the
+same 26 rows (the plants, below).
 
 The same reach moved three of the probe's masked rows (`make seqcycles`
 at 7f1d56b's RTL; every other row is f349ca6's to the cycle), each the
@@ -2542,6 +2543,11 @@ reason:
   `beats_revived_by_actall_are_read_at_once`: "fp32 an FMA and an LDL
   skip, ACTALL, their readers at once, low half, n=8: 32/32 deposit
   slots differ from the model".
+- The look-ahead by count again, in place of the tag (the send-back):
+  red in `masked_chains_cost_no_more_than_before`, "26 of 48 masked
+  chains cost more than on f681dee's tile, the first: fp32 60 links,
+  low half masked: 5233 against 4741" - e610b78's figures, to the
+  cycle.
 
 **Timing.** The live vector and the load's bounds are registered. What
 R19 adds to the issue stage's paths is a 16:1 select of a register (the
