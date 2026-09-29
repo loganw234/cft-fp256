@@ -647,3 +647,48 @@ def test_the_two_validators_agree_over_the_new_codes_field_space():
         accepted += model
         refused += not model
     assert accepted > 500 and refused > 500, (accepted, refused)
+
+
+# ---- 7. what each is worth: the kernels, held ----------------------------
+
+import rev8_worth  # noqa: E402  (python/, on the path above)
+
+
+@pytest.mark.parametrize("fmt", [FORMATS["fp64"], FORMATS["fp256"]],
+                         ids=lambda f: f.name)
+def test_the_cauchy_kernels_agree_and_count_as_documented(fmt):
+    """The three Cauchy forms compute the same bits as a direct sum in
+    the same order (run_cauchy raises otherwise), their counts are held
+    to seq.run's own, and the counts are the closed forms docs/SEQUENCER.md
+    prices: per term looped 3 ALU + 2 SCR + a loop, stepped 1 + 2 + a
+    loop with 2 steps, unrolled 1 + 2; per coefficient 3 ALU of setup and
+    a store (1 ALU in the unrolled form)."""
+    for N in (0, 1, 7, 12):
+        T = (N + 1) * (N + 2) // 2
+        res = rev8_worth.run_cauchy(fmt, N, lanes=2)
+        lo, st, un = (res[k][0] for k in ("looped", "stepped", "unrolled"))
+        assert (lo["alu"], lo["scr"], lo["steps"], lo["endrep"]) == (
+            3 * (N + 1) + 3 * T, 2 * T + N + 1, 0, T)
+        assert (st["alu"], st["scr"], st["steps"], st["endrep"]) == (
+            3 * (N + 1) + T, 2 * T + N + 1, 2 * T, T)
+        assert (un["alu"], un["scr"], un["steps"], un["endrep"]) == (
+            N + 1 + T, 2 * T + N + 1, 0, 0)
+        # the price difference is exactly 2 ALU a term at p = 0, none at 1
+        s, e = rev8_worth.CENSUS[fmt.name]["s"], rev8_worth.CENSUS[fmt.name]["e"]
+        assert rev8_worth.price(lo, s, e, 0) - rev8_worth.price(st, s, e, 0) \
+            == pytest.approx(2 * T)
+        assert rev8_worth.price(lo, s, e, 1) == pytest.approx(
+            rev8_worth.price(st, s, e, 1))
+
+
+@pytest.mark.parametrize("fmt", [FORMATS["fp64"], FORMATS["fp256"]],
+                         ids=lambda f: f.name)
+def test_the_compensated_kernels_hold_and_count_as_documented(fmt):
+    """Each form held to its own reference (run_comp raises otherwise);
+    per step kahan 5, twosum 8 and the augmented pair 3 instructions."""
+    res = rev8_worth.run_comp(fmt, K=16, lanes=4)
+    for form, per_step in (("kahan", 5), ("twosum", 8), ("augmented", 3)):
+        c = res[form][0]
+        assert (c["alu"] + c["aug"]) == 16 * per_step, form
+        assert c["endrep"] == 16 and c["scr"] == 0
+    assert res["augmented"][0]["aug"] == 32
