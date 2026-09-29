@@ -3404,6 +3404,82 @@ async def control_codes_hold_their_overlap(dut):
             f"left the issue pipe (docs/SEQUENCER.md, revision 7, R18)")
 
 
+def _every_bit_pattern(fmt, n, seed):
+    """The encodings a pass-through could get wrong, then random bits:
+    both zeros, both infinities, quiet and signalling NaNs of both signs
+    with payloads (the smallest, the largest, random), the smallest and
+    largest subnormal and random ones of both signs, the smallest
+    normal, the largest finite of both signs."""
+    rng = random.Random(seed)
+    w, mw = fmt.width, fmt.man_w
+    top = 1 << (w - 1)
+    inf = sf.inf_bits(fmt, 0)
+    quiet = 1 << (mw - 1)
+    pool = [sf.zero_bits(fmt, 0), sf.zero_bits(fmt, 1),
+            inf, inf | top,
+            inf | quiet, inf | quiet | top,              # canonical quiet NaNs
+            inf | quiet | 1, inf | fmt.man_mask | top,   # quiet, payloads
+            inf | 1, inf | 1 | top,                      # signalling, smallest
+            inf | (quiet - 1), inf | (quiet - 1) | top,  # signalling, largest
+            sf.min_subnormal_bits(fmt), sf.min_subnormal_bits(fmt) | top,
+            fmt.man_mask, fmt.man_mask | top,            # largest subnormal
+            sf.min_normal_bits(fmt), sf.max_normal_bits(fmt),
+            sf.max_normal_bits(fmt) | top]
+    for _ in range(4):
+        pool.append(inf | quiet | rng.getrandbits(mw - 1) | (top * rng.getrandbits(1)))
+        pool.append(inf | (rng.getrandbits(mw - 1) | 1) | (top * rng.getrandbits(1)))
+        pool.append(rng.getrandbits(mw) | (top * rng.getrandbits(1)))  # subnormal
+    out = list(pool)
+    rng.shuffle(out)
+    while len(out) < n:
+        out.append(rng.getrandbits(w))
+    return out[:n] if n >= len(pool) else [pool[(i + seed) % len(pool)]
+                                            for i in range(n)]
+
+
+@cocotb.test()
+async def loads_carry_every_bit_pattern(dut):
+    """A load's value rides the array as IOR(v, v) since R18, and the
+    contract is that it comes back BIT FOR BIT: nothing on the way may
+    quieten a signalling NaN, touch a payload, flush a subnormal or
+    raise a flag. Every encoding class a pass-through could get wrong is
+    stored and loaded back through LDL and LDX, by static slot and by
+    index, at one beat and at a whole block and ragged, at every format,
+    and the program does no arithmetic at all - so FLAGS must be the
+    model's zero, and it is the shadow's flag enable, not IOR, that
+    keeps a load's out. The multi-pass tile runs it too (seq_coremc)."""
+    bench = Bench(dut)
+    await bench.start()
+    prog_for = {}
+    for name in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        prog_for[name] = seq.Program(fmt, [
+            seq.stl(0, 3),              # slot 3 := a
+            seq.stx(1, 2),              # scratch[c] := b
+            seq.ldl(10, 3),             # r10 := slot 3, static
+            seq.ldx(11, 2),             # r11 := scratch[c], indexed
+            seq.ldx(12, 2),             # ...straight after, an LDX
+            seq.ldl(13, 3),             # ...and an LDL straight after that
+            seq.deposit(10), seq.deposit(11),
+            seq.deposit(12), seq.deposit(13),
+            seq.stl(11, 4),             # a loaded value stored again
+            seq.ldl(14, 4),             # and loaded again
+            seq.deposit(14),
+            seq.halt()], max_deposits=5)
+    for name in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[name]
+        lpbeat, lpb = lanes_per_beat(fmt), lanes_per_block(fmt)
+        for n in (lpbeat, lpb, lpb + lpbeat + 1):
+            idx = [_int_bits(fmt, (i * 5) % 7) for i in range(n)]
+            want = await bench.program(
+                fmt, prog_for[name], _every_bit_pattern(fmt, n, 4000 + n),
+                _every_bit_pattern(fmt, n, 4100 + n), idx, n,
+                f"{name} every bit pattern through LDL and LDX, n={n}")
+            assert want.flags == 0, (
+                f"{name}: the model raised {want.flags:#07b} for a program "
+                f"with no arithmetic - this case is not testing what it says")
+
+
 # ======================================================================
 # 11. the one that has to go last
 # ======================================================================

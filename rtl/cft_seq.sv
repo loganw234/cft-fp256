@@ -1850,6 +1850,31 @@ module cft_seq #(
   assign op_a = fwd_fn(h1_a, h2_a, h3_a, wb_wwe, rf_wwe, wwe1, al_d, rf_wdata, wd1, rf_rdata_a);
   assign op_b = fwd_fn(h1_b, h2_b, h3_b, wb_wwe, rf_wwe, wwe1, al_d, rf_wdata, wd1, rf_rdata_b);
   assign op_c = fwd_fn(h1_c, h2_c, h3_c, wb_wwe, rf_wwe, wwe1, al_d, rf_wdata, wd1, rf_rdata_c);
+
+  // The FIRE (revision 7, R18): one request a step, of one of three
+  // kinds - an ALU beat at F, an LDL beat at F with the value the
+  // scratch read, an LDX beat at H with the value G read (R8's
+  // suppressed banks +0). Never two in one step: gap_hold keeps every
+  // other beat two steps behind an LDX's. Written as one request with
+  // its fields selected here, so the forwarded operand op_x enters at
+  // the LAST 2:1 level before al_x, exactly as it did before R18: every
+  // other source - a constant, the loaded value - is chosen in parallel
+  // from registered selects, and the forwarding path, the longest into
+  // the request, is not made longer.
+  logic                 fire_alu, fire_ldl, fire_ldx, fire_go;
+  logic [BEAT_BITS-1:0] ld_val, alt_a, alt_b, alt_c;
+  logic                 use_op_a, use_op_b, use_op_c;
+  assign fire_alu = pf_v && !pf_ctrl;
+  assign fire_ldl = pf_v && pf_ctrl && pf_op == C_LDL;
+  assign fire_ldx = ph_v;
+  assign fire_go  = fire_alu || fire_ldl || fire_ldx;
+  assign ld_val   = zero_oor_fn(scr_rdata, fire_ldx ? ph_oor : '0);
+  assign alt_a    = fire_alu ? kq_a : ld_val;
+  assign alt_b    = fire_alu ? kq_b : ld_val;
+  assign alt_c    = fire_alu ? kq_c : '0;
+  assign use_op_a = fire_alu && !pf_ka;
+  assign use_op_b = fire_alu && !pf_kb;
+  assign use_op_c = fire_alu && !pf_kc;
   // The same mask for the beat the SCRATCH states are working on. A
   // store is a register write for P3's purposes and a load writes rd,
   // so both are masked by exactly this - an all-inactive loop body
@@ -3575,31 +3600,22 @@ module cft_seq #(
         ph_v    <= pg_v;
         ph_bt   <= pg_bt;
         ph_oor  <= pg_oor;
-        if (pf_v && !pf_ctrl) begin
+        // The request (fire_* above): an ALU beat with its operands, a
+        // load's value as IOR(v, v) - the scratch's read landed with the
+        // file's for an LDL, at G for an LDX - under the row it fires
+        // with, and with its flag enable off.
+        if (fire_go) begin
           al_valid <= 1'b1;
-          al_op <= pf_op;
-          al_rnd <= pf_rnd;
-          al_a <= pf_ka ? kq_a : op_a;
-          al_b <= pf_kb ? kq_b : op_b;
-          al_c <= pf_kc ? kq_c : op_c;
-          al_row <= bt_act;
-          al_fen <= 1'b1;
+          al_op    <= fire_alu ? pf_op : OP_IOR;
+          al_rnd   <= fire_alu ? pf_rnd : 3'd0;
+          al_a     <= use_op_a ? op_a : alt_a;
+          al_b     <= use_op_b ? op_b : alt_b;
+          al_c     <= use_op_c ? op_c : alt_c;
+          al_row   <= fire_ldx ? h_act : bt_act;
+          al_fen   <= fire_alu;
         end
         if (pf_v && pf_ctrl) begin
           case (pf_op)
-            // A load: v through the array, bit for bit, as IOR(v, v).
-            // The scratch's read landed with the file's (A put the
-            // address out), so the value is on the bus now.
-            C_LDL: begin
-              al_valid <= 1'b1;
-              al_op <= OP_IOR;
-              al_rnd <= pf_rnd;
-              al_a <= scr_rdata;
-              al_b <= scr_rdata;
-              al_c <= '0;
-              al_row <= bt_act;
-              al_fen <= 1'b0;
-            end
             // An indexed load's slot is its rb, which is on the bus
             // now: the address goes to the scratch's read port, and the
             // value fires at H. R8's report is taken here, where rb is,
@@ -3658,19 +3674,6 @@ module cft_seq #(
             end
             default: ;
           endcase
-        end
-        // An LDX's value, two steps after its F. Never in the same step
-        // as an F fire: gap_hold keeps every other beat two steps behind
-        // an LDX's, and two LDXs follow one another at a step apart.
-        if (ph_v) begin
-          al_valid <= 1'b1;
-          al_op <= OP_IOR;
-          al_rnd <= 3'd0;
-          al_a <= zero_oor_fn(scr_rdata, ph_oor);
-          al_b <= zero_oor_fn(scr_rdata, ph_oor);
-          al_c <= '0;
-          al_row <= h_act;
-          al_fen <= 1'b0;
         end
       end
       // the read register holds imem[pc + 1] from the cycle after an
