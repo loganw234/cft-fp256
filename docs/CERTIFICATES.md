@@ -1030,7 +1030,11 @@ where r is the run and b the boundary, 0 the initial state and S the
 output, both in decimal as the certificate numbers them. Each file is
 the state's bytes, lane-major, the bytes its hash covers. The run
 creates DIR, which must not exist before it, so two runs' states never
-share a directory. An auditor is handed the directory with the
+share a directory, and creates each file in it new. It creates the
+certificate new as well, and before DIR: an `--out` that is there
+already is refused, never overwritten, and an `--out` inside DIR cannot
+be created at all, so the certificate is never one of the boundary
+files. An auditor is handed the directory with the
 certificate, the images and banks, and a keyed certificate's salt. The
 golden audit takes the files as `states={r: {b: bytes}}`.
 
@@ -1077,7 +1081,7 @@ load, and an empty initial state, each make it raise
 five sticky flags, which no reader could read, is `malformed`, as the
 golden writer's `encode` refuses it.
 
-A writer needs three more, which the golden writer, an API rather than
+A writer needs four more, which the golden writer, an API rather than
 a command, never meets. They are the tool's, in sysexits' codes, of
 which 64 is already the auditor's usage:
 - `usage`, exit 64: a command line the tool does not take, or a file it
@@ -1086,23 +1090,34 @@ which 64 is already the auditor's usage:
   sticky flags a certificate records (`cft_caps.flags_readable` 0); a
   digest, or a segment's run, fails; or the library leaves a segment's
   flag word unwritten;
-- `output`, exit 73: the certificate or a state file cannot be written,
-  or DIR exists already.
+- `memory`, exit 71: what the runs need in memory cannot be had. Every
+  run's boundary hashes, flag words and STATUS, and the certificate's
+  text, are counted against what the process can address; then those
+  and each run's states are allocated, all before the certificate or
+  DIR is created and before any segment runs. So more boundaries than
+  the process can hold are refused with nothing made:
+  `--segments 9223372036854775807` by its size, naming its run, and
+  `--segments 1000000000000` when an allocation fails - on the Windows
+  desktop, its boundary hashes' (10^12 + 1) x 65 bytes;
+- `output`, exit 73: `--out` is there already, or lies inside DIR,
+  where it cannot be created because DIR does not exist yet; DIR is
+  there already; or the certificate or a state file cannot be created
+  or written.
 
 Every refusal prints `cft-segrun: refused <name>: <why>` and exits with
-the name's code. None writes a certificate. One made before the first
-segment leaves nothing of its own behind, and at 99f1b43 it also
-removes a file that was already at `--out` (verifier-C6). A run that fails part way leaves the
-boundary files it wrote, and says so. No backend in this tree reports
+the name's code. None writes a certificate, and none removes or changes
+a file the tool did not create. One made before the first segment
+leaves nothing behind. A run that fails part way leaves the boundary
+files it wrote, and says so. No backend in this tree reports
 flags it cannot read, leaves a flag word unwritten or reports one past
 31, so `CFT_SEGRUN_PLANT` is an instrument for the tests of those three
 refusals: `flags-unreadable`, `flags-unwritten` or `flags-wide`. Each
 makes a run refuse by that name, and says so. With `--build-id` or
 `--hash`, which run nothing, it only prints that the run is to be
 refused and exits 0 with the right output (verifier-C6). The refusals
-only a failing
-library, device or filesystem can reach have no test, since nothing on
-the desktop fails that way:
+only a failing library, device or filesystem, or another process
+writing into DIR, can reach have no test, since nothing on the desktop
+does so:
 - `cft_get_caps`, `cft_program_get_info`, `cft_program_digest`,
   `cft_sha256` or a segment's `cft_program_run_ex` returning an error;
 - the library reading an image's header differently from the tool, or
@@ -1110,13 +1125,21 @@ the desktop fails that way:
 - once the run has begun, a state file that cannot be opened, written or
   closed, a certificate that cannot be written or closed (it is opened
   before the run, and that refusal has a test), or a line that cannot be
-  formatted.
-More boundaries than the process can hold is reached from an input, and
-has no test (verifier-C6):
-- `--segments 9223372036854775807` is refused `output` (73). It is
-  checked run by run, so for run 1 only after run 0 has run.
-- `--segments 1000000000000` exits 70 with "cft-segrun: out of memory",
-  under no refusal name.
+  formatted;
+- a boundary file already in DIR when the run comes to write it
+  (`output`, as a file the run did not make).
+Of `memory`, the gate reaches the size check, the boundary hashes'
+allocation on the Windows desktop, and the certificate's text's in WSL.
+Where memory is overcommitted, an allocation the machine cannot back
+still succeeds. In WSL cft2204 (`vm.overcommit_memory` 1), 10^12
+segments get their hashes and are refused at the certificate's text,
+200 TB, past what a process can address. A count whose every
+allocation fits the address space is not refused there at all: a run
+that outgrows such a machine is the kernel's to stop, under no name of
+the tool's. The same refusal for a run's flag words, STATUS or states,
+a file read, the command line, the hash buffer or a boundary file's
+path has no test: each fails only when what the machine has left falls
+short of it, which a test would have to arrange by loading the machine.
 Every other condition the lists above name has a test, and so does
 every refusal name; not every branch of `usage` has one.
 
@@ -1125,8 +1148,9 @@ which states each segment started and ended on, as hashes, with its
 flag word and STATUS as the library reported them, on the library build
 and device the library names. It does not check an auxiliary run's
 relation to the main run. A half-step bank that is not the main bank
-halved is written as stated, and the audit refuses it (`aux-bank`). It
-computes no accuracy, and it signs nothing.
+halved, or a half-step run entered from a state other than the main
+run's, is written as stated, and the audit refuses it (`aux-bank`,
+`aux-start`). It computes no accuracy, and it signs nothing.
 
 **Its gate** is `host/tests/segrun_check.py`, `make -C host segruntest`,
 which `verify/run.sh`'s `programs` stage runs. It certifies
@@ -1136,11 +1160,15 @@ each image held to `programs/MANIFEST`, with its classic bank:
   exactly halved, for twice the segments;
 - beside each fp64 one, a wider run: the same source assembled at fp128,
   with the bank and the initial state exactly widened;
-- and `flagstep`, a small program written in the gate, whose segments
+- `flagstep`, a small program written in the gate, whose segments
   raise flags 20, 0, 1, 0 and 20 and STATUS 48, 48, 0, 48 and 48. Every
   ODE segment raises flags 16 and STATUS 0, so the ODE programs alone
   cannot tell a writer that drops STATUS, or writes one segment's flags
-  against another, from one that does not.
+  against another, from one that does not;
+- and `lorenz63-rk4` at fp64 once more, its half-step run entered from
+  an initial state of its own, unlike the main run's. Every other
+  half-step run shares run 0's, so a writer that entered one from run
+  0's `--init` would pass them all (verifier-C6's plant).
 
 Each program is certified keyed and open on the software backend. Then:
 - the golden reader must accept each certificate;
@@ -1148,20 +1176,24 @@ Each program is certified keyed and open on the software backend. Then:
   states, runs every segment itself and must write the same bytes;
 - every boundary file must be the golden chain's state;
 - the golden audit must accept each, in full and sampled, from the
-  states the tool wrote;
+  states the tool wrote, except the one whose half-step run starts from
+  its own state, which it must refuse `aux-start`, in full and sampled;
 - the build-id line must be what the binary prints and what the tree
   builds, and the software backend's device lines `none`.
 
 It also holds the test vectors, and each tag keyed and open against an
 HMAC written from RFC 2104 in the gate. It holds every refusal above
 that an input or the instrument can cause, by its name and code, and
-the golden writer's name for the same defect where it has one. Last, it
-makes one certificate through a loopback cft-serve, stopped by its PID.
-That certificate's device lines must be the remote rule's, and its run
-blocks byte for byte the software backend's. It also holds git to
-ignoring the tool's binary. 293 checks at 99f1b43: 41 to 42 s on the
-Windows desktop (P3's and verifier-C6's runs), and 40 s in WSL
-(2026-09-28).
+the golden writer's name for the same defect where it has one. Each
+refusal whose command line has an `--out` of its own is made again with
+a file already there, which must come through byte for byte. Last, it
+certifies `lorenz63-rk4` at fp64 and `flagstep` through a loopback
+cft-serve, stopped by its PID. Their device lines must be the remote
+rule's, and their run blocks byte for byte the software backend's,
+flagstep's flag words and STATUS among them. It also holds git to
+ignoring the tool's binary. 380 checks since P3b (293 at 99f1b43): 90 s
+on the Windows desktop when it was otherwise idle, up to 215 s while
+other work held it near 90 % CPU, and 66 s in WSL (2026-09-28).
 
 **On the card**, `hw/card-segrun.sh <image.xclbin>` runs the same gate
 with the certificates made on the tile. It holds the device lines to

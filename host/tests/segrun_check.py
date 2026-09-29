@@ -36,7 +36,9 @@ open, on the software backend:
      golden chain's state at that boundary, lane-major;
   5. cert.audit accepts the certificate from the states the tool wrote:
      every segment of every run, and then a sample the auditor draws
-     (its seed printed, so a red sample can be drawn again);
+     (its seed printed, so a red sample can be drawn again) - or, for
+     the one program certified with a relation broken on purpose, refuses
+     it by the name the relation's check has (aux-start);
   6. the identity lines are the library's: build-id is what the binary's
      own `--build-id` prints and what the tree builds (CFT_EXPECT_BUILD_ID);
      the software backend's device lines are `none` and its tiles 1.
@@ -45,11 +47,15 @@ Then:
      keyed and open, against an HMAC written here from RFC 2104;
   8. every refusal an input or the instrument can cause, by its name and
      exit code (the page lists those only a failure can reach), a refusal
-     before the run leaving nothing behind; and for each of the page's
-     names, the golden writer refusing the same defect by the same name;
-  9. with --serve: one certificate through a loopback cft-serve, stopped
-     by its PID - backend remote, the device lines the page's remote rule
-     gives, and every run block byte for byte the software backend's.
+     before the run leaving nothing behind; for each of the page's names,
+     the golden writer refusing the same defect by the same name; and each
+     refusal whose command line has an --out of its own again with a file
+     already there, which must come through it byte for byte - the tool
+     removes only what it created;
+  9. with --serve: lorenz63 and flagstep certified through a loopback
+     cft-serve, stopped by its PID - backend remote, the device lines the
+     page's remote rule gives, and every run block byte for byte the
+     software backend's, flagstep's flag words and STATUS among them.
 
 The programs: lorenz63-rk4, lorenz96-rk4 and henonheiles-lf at fp64 and
 fp256, each image held to programs/MANIFEST, with its classic bank, a
@@ -60,6 +66,12 @@ widened. And `flagstep`, written here: its segments raise flags 20, 0,
 1, 0, 20 and STATUS 48, 48, 0, 48, 48. Every ODE segment raises 16 and 0,
 so the ODE programs alone cannot tell a writer that drops STATUS, or
 writes one segment's flags against another, from one that does not.
+And lorenz63 at fp64 once more, its half-step run entered from an
+initial state of its OWN, unlike the main run's: every other half-step
+run shares run 0's, so a writer that entered a half-step run from run
+0's --init would pass them all (verifier-C6's plant). The tool must
+still write the golden writer's bytes for what it was handed; the audit
+refuses the certificate `aux-start`.
 
 Exit 0 only if every check passed; the last line says so.
 """
@@ -90,8 +102,14 @@ from cft_golden import softfloat as sf  # noqa: E402
 import gen_odes  # noqa: E402
 
 # The tool's own refusals, beside the page's table (docs/CERTIFICATES.md,
-# "The segment runner"): a command line, a device, an output.
-TOOL_OWN = {"usage": 64, "device": 69, "output": 73}
+# "The segment runner"): a command line, a device, memory, an output.
+TOOL_OWN = {"usage": 64, "device": 69, "memory": 71, "output": 73}
+
+# How long one run of the tool may take here before it is stopped and
+# failed by name: every run the gate asks for takes well under a second,
+# and a refusal that did not come - a run of 10^12 segments started -
+# must end the check, not the afternoon.
+TOOL_TIMEOUT = 120
 
 # lanes and segments a main run, chosen for time: lorenz96 carries forty
 # slots a lane and costs the golden executor about 0.24 s a lane-segment
@@ -189,6 +207,10 @@ class RunSpec:
 class Program:
     name: str
     runs: list
+    # None: the golden audit must accept the certificate. A refusal's
+    # name: the certificate carries a relation broken on purpose, and the
+    # audit must refuse it by that name, full and sampled alike.
+    audit_refuses: str = None
 
 
 def halved(fmt, bank, slots):
@@ -268,6 +290,28 @@ def flagstep_program():
                    [RunSpec("main", img, b"", init, "fp64", 5, 1)])
 
 
+def half_init_program(l63):
+    """lorenz63 at fp64 (`l63`, the gate's own) with its half-step run
+    entered from an initial state of its own: every lane's x a further
+    1/128 along, exactly. Every other half-step run in the gate shares run
+    0's initial state, so a writer that entered a half-step run from run
+    0's --init would pass them all (verifier-C6, 2026-09-28). The
+    certificate states a relation that does not hold, and the audit
+    refuses it aux-start; the tool is still held to the golden writer's
+    bytes for what it was handed."""
+    main, half = l63.runs[0], l63.runs[1]
+    assert (main.kind, half.kind) == ("main", "half-step")
+    lanes = len(main.init) // 3
+    other = []
+    for i in range(lanes):
+        other += [dec("fp64", repr(1 + i / 64 + 1 / 128)), dec("fp64", "1"),
+                  dec("fp64", "1")]
+    assert other != main.init and len(other) == len(main.init)
+    return Program("lorenz63-rk4-fp64-half-init",
+                   [main, dataclasses.replace(half, init=other)],
+                   audit_refuses="aux-start")
+
+
 # ---- the tool -------------------------------------------------------------
 
 TOOL = SERVE = None
@@ -280,8 +324,13 @@ def run_tool(args, env=None):
     e.pop("CFT_SEGRUN_PLANT", None)
     if env:
         e.update(env)
-    r = subprocess.run([str(TOOL)] + [str(a) for a in args],
-                       capture_output=True, text=True, env=e)
+    try:
+        r = subprocess.run([str(TOOL)] + [str(a) for a in args],
+                           capture_output=True, text=True, env=e,
+                           timeout=TOOL_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return (-1, "", f"segrun_check: the tool ran past {TOOL_TIMEOUT} s "
+                        f"and was stopped")
     return r.returncode, r.stdout, r.stderr
 
 
@@ -420,26 +469,42 @@ def certify_and_hold(prog, chains, mode, work, device="sw", tag="",
                   if boundary_file(sdir, r, b).is_file()}
               for r, (st, _) in enumerate(chains)}
     progs = {r: (spec.image, spec.bank) for r, spec in enumerate(prog.runs)}
-    try:
-        t0 = time.perf_counter()
-        v = cert.audit(data, salt, progs, states=states)
-        check([len(x["rerun"]) for x in v.runs] ==
-              [spec.segments for spec in prog.runs],
-              f"{what}: the golden audit ACCEPTS it, every segment of every "
-              f"run re-run from the states the tool wrote "
-              f"({time.perf_counter() - t0:.1f} s)")
-    except cert.Refusal as e:
-        bad(f"{what}: the golden audit refuses it: {e.name}: {e.message}")
-    try:
-        choose = {r: ("sample", max(1, spec.segments // 2))
-                  for r, spec in enumerate(prog.runs)}
-        v = cert.audit(data, salt, progs, states=states, choose=choose)
-        ok(f"{what}: the golden audit ACCEPTS a sample of "
-           f"{[len(x['rerun']) for x in v.runs]} segments, seed "
-           f"{v.runs[0]['seed']}")
-    except cert.Refusal as e:
-        bad(f"{what}: the golden audit refuses a sample: {e.name}: "
-            f"{e.message}")
+    choose = {r: ("sample", max(1, spec.segments // 2))
+              for r, spec in enumerate(prog.runs)}
+    if prog.audit_refuses:
+        # a relation broken on purpose: the audit must refuse it by its
+        # check's name, full and sampled alike (relations come before any
+        # re-run)
+        for how, kw in (("in full", {}), ("sampled", {"choose": choose})):
+            try:
+                cert.audit(data, salt, progs, states=states, **kw)
+                bad(f"{what}: the golden audit ACCEPTS it {how}, and its "
+                    f"relation is broken on purpose")
+            except cert.Refusal as e:
+                check(e.name == prog.audit_refuses,
+                      f"{what}: the golden audit refuses it {how}, "
+                      f"{prog.audit_refuses}, as its broken relation must be",
+                      f"it says {e.name}: {e.message}")
+    else:
+        try:
+            t0 = time.perf_counter()
+            v = cert.audit(data, salt, progs, states=states)
+            check([len(x["rerun"]) for x in v.runs] ==
+                  [spec.segments for spec in prog.runs],
+                  f"{what}: the golden audit ACCEPTS it, every segment of "
+                  f"every run re-run from the states the tool wrote "
+                  f"({time.perf_counter() - t0:.1f} s)")
+        except cert.Refusal as e:
+            bad(f"{what}: the golden audit refuses it: {e.name}: "
+                f"{e.message}")
+        try:
+            v = cert.audit(data, salt, progs, states=states, choose=choose)
+            ok(f"{what}: the golden audit ACCEPTS a sample of "
+               f"{[len(x['rerun']) for x in v.runs]} segments, seed "
+               f"{v.runs[0]['seed']}")
+        except cert.Refusal as e:
+            bad(f"{what}: the golden audit refuses a sample: {e.name}: "
+                f"{e.message}")
     hold_identity(what, parsed.identity,
                   "remote" if device.startswith("cft://") else
                   "software" if device == "sw" else "xrt")
@@ -623,6 +688,9 @@ def hold_refusals(work, l63, flag):
     half_bank = f("l63.half", l63.runs[1].bank)
     exists = d / "exists"
     exists.mkdir(exist_ok=True)
+    # a file already at --out: every refusal must leave it byte for byte
+    kept = b"a file that was at --out before the run\n" + bytes(range(256))
+    P["existing"] = f("existing.cert", kept)
 
     def base(out, sdir, image="img", bnk="bank", ini="init", seg="1",
              steps="100", mode=("--salt", P["salt"]), extra=(), runs=None):
@@ -792,7 +860,71 @@ def hold_refusals(work, l63, flag):
          lambda o, s: base(o, exists), None, None),
         ("a certificate in a directory that is not there", "output",
          lambda o, s: base(d / "absent" / "c.cert", s), None, None),
+        # P3b (verifier-C6's findings): no run overwrites a file it did not
+        # make; the certificate can never be a boundary file; and a run the
+        # process cannot hold is refused by name before anything runs
+        ("an --out that is there already", "output",
+         lambda o, s: base(P["existing"], s), None, None),
+        ("an --out inside --states, named as boundary 0", "output",
+         lambda o, s: base(s / "run-0-boundary-0.bin", s), None, None),
+        ("run 1 asking 2^63 - 1 segments, run 0 one", "memory",
+         lambda o, s: base(o, s, runs=main_run + [
+             str((1 << 63) - 1) if x == "2" else x for x in half_run]),
+         None, None),
+        ("10^12 segments", "memory",
+         lambda o, s: base(o, s, seg=str(10 ** 12)), None, None),
     ]
+    # refused by a check the tool makes only after the outputs are made:
+    # the library's loader, which needs the device, opened after them
+    AFTER_OUTPUTS = {"an image the loader refuses (an unknown control code)"}
+
+    def survive(i, label, name, argf, env):
+        """The same refusal with a file already at --out, which it must
+        leave byte for byte. A defect found only after the outputs are
+        made - the device, the library's loader, the flag words, the states
+        directory - is met first by the --out that is there, refused
+        `output`. A case whose command line has no --out of its own to give
+        it (none at all, the two small modes, or an --out the case fixes)
+        has nothing to keep, and is not counted."""
+        keep, sdir2 = d / f"case{i}.kept", d / f"case{i}.states2"
+        args2 = [str(a) for a in argf(keep, sdir2)]
+        if "--out" not in args2 or \
+                args2[args2.index("--out") + 1] != str(keep):
+            return
+        keep.write_bytes(kept)
+        rc2, _, se2 = run_tool(args2, env)
+        m2 = REFUSED.search(se2)
+        got2 = m2.group(1) if m2 else None
+        late = (name in ("device", "output") or label in AFTER_OUTPUTS
+                or (env or {}).get("CFT_SEGRUN_PLANT", "").startswith(
+                    "flags-"))
+        want2 = "output" if late else name
+        code2 = cert.REFUSALS.get(want2, TOOL_OWN.get(want2))
+        same = keep.is_file() and keep.read_bytes() == kept
+        check(rc2 == code2 and got2 == want2 and same and not sdir2.exists(),
+              f"  and a file already at --out comes through it byte for "
+              f"byte, refused {want2}: {label}",
+              f"exit {rc2}, {got2 or 'no refusal named'}, the file "
+              f"{'kept' if same else 'CHANGED or gone'}, states "
+              f"{'left' if sdir2.exists() else 'none'}: "
+              f"{se2.strip()[-200:]}")
+
+    # what a refusal's words must begin with (a regular expression), where
+    # the name alone would not show the check it was made by: an --out
+    # inside --states must be refused as the --out it is, not later as a
+    # boundary file that collides with it; a run too long to hold, by what
+    # is held before any segment runs - run 1 by its own size, before run
+    # 0 has run. 10^12 segments are refused by the boundary hashes'
+    # allocation where memory is not overcommitted (the Windows desktop),
+    # and by the certificate's text, 200 TB, past what a process can
+    # address, where it is (WSL cft2204, vm.overcommit_memory 1).
+    says = {"an --out that is there already": r"--out .+ is there already",
+            "an --out inside --states, named as boundary 0":
+                r"--out .+ cannot be created",
+            "run 1 asking 2^63 - 1 segments, run 0 one":
+                r"run 1: .* held before any segment runs",
+            "10^12 segments": r"(run 0: |the certificate's text ).* held "
+                              r"before any segment runs"}
     for i, (label, name, argf, env, twin) in enumerate(cases):
         out, sdir = d / f"case{i}.cert", d / f"case{i}.states"
         args = argf(out, sdir)
@@ -803,6 +935,11 @@ def hold_refusals(work, l63, flag):
         check(rc == code and got == name,
               f"refused {name} (exit {code}): {label}",
               f"exit {rc}, {got or 'no refusal named'}: {se.strip()[-240:]}")
+        if label in says:
+            words = se[m.end():].lstrip() if m else ""
+            check(re.match(says[label], words) is not None,
+                  f"  and its words begin {says[label]!r}: {label}",
+                  f"they are {words.strip()[:200]!r}")
         if env and env["CFT_SEGRUN_PLANT"] in ("flags-unwritten",
                                                 "flags-wide"):
             files = sorted(os.listdir(sdir)) if sdir.is_dir() else None
@@ -817,6 +954,7 @@ def hold_refusals(work, l63, flag):
                 left = [p.name for p in (out,) if p.exists()]
             check(not left, f"  and nothing left behind: {label}",
                   f"left {left}")
+        survive(i, label, name, argf, env)
         if twin is not None:
             try:
                 twin()
@@ -829,20 +967,27 @@ def hold_refusals(work, l63, flag):
                 bad(f"  the golden writer has no name for {label}: "
                     f"{type(e).__name__}: {e}")
     check(not (d / "absent").exists(), "a refused --out made no directory")
+    check(P["existing"].read_bytes() == kept,
+          "the file at --out in 'an --out that is there already' is as it "
+          "was, byte for byte")
 
 
 # ---- the remote leg ---------------------------------------------------------
 
-def hold_remote(work, prog, chains, sw_data):
+def hold_remote(work, legs):
+    """`legs`: (program, its golden chains, its keyed software certificate)
+    for each program certified through the server - lorenz63, whose every
+    segment is flags 16 and STATUS 0, and flagstep, whose are not, so that
+    a flag word or STATUS lost on the way back from a server is seen."""
     print("== 9. through a loopback cft-serve: the page's remote rule, and "
-          "the same chain", flush=True)
+          "the same chains", flush=True)
     rd = work / "remote"
     rd.mkdir(parents=True, exist_ok=True)
     port_file, pid_file = rd / "port", rd / "pid"
     log = open(rd / "serve.log", "w")
     proc = subprocess.Popen([str(SERVE), "--port", "0", "--port-file",
                              str(port_file), "--pid-file", str(pid_file),
-                             "--max-conns", "1"],
+                             "--max-conns", str(len(legs))],
                             stdout=log, stderr=subprocess.STDOUT)
     print(f"  cft-serve pid {proc.pid}", flush=True)
     try:
@@ -856,15 +1001,15 @@ def hold_remote(work, prog, chains, sw_data):
         if not check(port is not None, "cft-serve reports its port",
                      f"exit {proc.poll()}"):
             return
-        res = certify_and_hold(prog, chains, "keyed", work,
-                               device=f"cft://127.0.0.1:{port}",
-                               tag=" remote")
-        if res is None:
-            return
-        data = res[0]
-        check(runs_part(data) == runs_part(sw_data),
-              f"{prog.name} keyed remote: every run block, byte for byte, "
-              f"the software backend's")
+        for prog, chains, sw_data in legs:
+            res = certify_and_hold(prog, chains, "keyed", work,
+                                   device=f"cft://127.0.0.1:{port}",
+                                   tag=" remote")
+            if res is None:
+                continue
+            check(runs_part(res[0]) == runs_part(sw_data),
+                  f"{prog.name} keyed remote: every run block, byte for "
+                  f"byte, the software backend's")
     finally:
         if proc.poll() is None:
             proc.terminate()              # by PID: this child and no other
@@ -950,6 +1095,8 @@ def main():
             p.runs = [r for r in p.runs if r.kind != "wider"]
     flag = flagstep_program()
     programs.append(flag)
+    programs.append(half_init_program(
+        next(p for p in programs if p.name == "lorenz63-rk4-fp64")))
     chains = {}
     for prog in programs:
         PATHS[prog.name] = write_inputs(work, prog)
@@ -1021,10 +1168,11 @@ def main():
                   "behind its server", flush=True)
         else:
             skip("the remote leg", "no --serve given")
-    elif l63.name in sw_keyed:
-        hold_remote(work, l63, chains[l63.name], sw_keyed[l63.name])
+    elif l63.name in sw_keyed and flag.name in sw_keyed:
+        hold_remote(work, [(p, chains[p.name], sw_keyed[p.name])
+                           for p in (l63, flag)])
     else:
-        bad("the remote leg: the software certificate it compares with was "
+        bad("the remote leg: a software certificate it compares with was "
             "not made")
 
     if not args.keep:

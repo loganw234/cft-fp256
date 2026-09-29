@@ -784,10 +784,13 @@ model needs the standard library only). In order, each step an `ok` or a
      run (left out, on a NOTE line, for an image without fp128);
    - `flagstep`, whose segments raise flags and a STATUS the ODE
      programs never do (a NOTE, NOT TESTED, if the image refuses it);
+   - since P3b, `lorenz63-rk4` at fp64 once more, its half-step run
+     entered from a state of its own;
    - each certificate accepted by the golden reader, byte for byte the
      golden writer's from the initial states, its boundary files the
      golden chain's, and accepted by the golden audit, in full and
-     sampled;
+     sampled - all but that last one, which the audit must refuse
+     `aux-start`;
    - each made again on the software backend, every run block byte for
      byte the card's.
 3. **The negative control.** Handed device-test's own SHA-256 as the
