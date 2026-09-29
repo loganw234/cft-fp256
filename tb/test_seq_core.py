@@ -2994,6 +2994,329 @@ async def the_pipe_at_every_block_length(dut):
 
 
 # ======================================================================
+# 10d. revision 7, R18: the control codes in the pipe, at every block
+#      length, with every hazard shape the change creates
+# ======================================================================
+#
+# Until R18 every control code that read the file, moved the mask or
+# ended the block waited for the queue of results to EMPTY and then
+# walked the block's beats in states of its own. Now DEPOSIT, SETACT and
+# the four scratch codes go through the issue pipe one beat a cycle and
+# wait, a beat at a time, only for a queued producer of what they read;
+# the loads ride the array (IOR(v, v)) and take a queue slot, so they
+# are producers themselves; the active row is taken when a beat FIRES
+# rather than when its result retires; and ACTALL, and what ends the
+# block, wait for the pipe rather than for nothing or the queue. The
+# rules are docs/SEQUENCER.md's R18. Every case below runs against the
+# model's one-instruction-at-a-time executor, which is the definition.
+
+def _r18_index_stream(fmt, n, seed):
+    """Integers as bit patterns, a third of them in range: what an
+    indexed code reads as rb. The rest are past the depth by whole
+    multiples of it, so the modulo lands them on the same slots the
+    in-range lanes use, and SCRATCH_STRICT suppresses them."""
+    rng = random.Random(seed)
+    return [_int_bits(fmt, rng.randrange(8) + SCRATCH_D * (i % 3))
+            for i in range(n)]
+
+
+def _ctl_program(fmt, strict=False):
+    """Every hazard shape R18 creates, in one program.
+
+    (1) a control code reading a destination still in flight (a deposit
+    and a store of the ADD before them, both forwarded at F), and one
+    reading nothing queued; (2) a store then a load of the same slot at
+    once - which a short block makes the store's write and the load's
+    read adjacent - then the loaded register used at once; (3) a load
+    into a register a queued FMA writes, and the other order; (4) a
+    store reading a register the instruction behind it overwrites;
+    (5) the indexed forms with a COMPUTED index, a store then an indexed
+    load of the same slot, two LDXs back to back, a static store and
+    load straight after an LDX, and an index that is a LOADED value;
+    (6) a loop whose body loads, computes, stores and narrows the mask;
+    (7) the mask moving while an FMA's results are still in the array,
+    and SETACT reading a loaded register; then ACTALL, and nothing after
+    it that could raise a flag, so a ragged block reads the same whether
+    or not ACTALL wakes the padding (the bench's precondition).
+    """
+    A, M, F = sf.OP_ADD, sf.OP_MUL, sf.OP_FMA
+    IADD, CMPLT = sf.OP_IADD, sf.OP_CMPLT
+    insns = [
+        # (1)
+        seq.alu(A, 3, 0, rc=1),              # r3 = a + b
+        seq.deposit(3),                      # r3 in flight
+        seq.stl(3, 0),                       # slot 0 := r3, in flight
+        seq.deposit(1),                      # nothing queued writes r1
+        # (2)
+        seq.ldl(4, 0),                       # r4 = slot 0, just stored
+        seq.alu(M, 5, 4, 1),                 # r5 = r4 * b: reads the load
+        seq.deposit(5),
+        # (3)
+        seq.alu(F, 6, 0, 1, 3),              # r6 = a*b + r3, in flight...
+        seq.ldl(6, 0),                       # ...when the load writes r6
+        seq.deposit(6),                      # the load's value, not the FMA's
+        seq.ldl(7, 0),
+        seq.alu(A, 7, 0, rc=2),              # r7 = a + c, after the load
+        seq.deposit(7),
+        # (4)
+        seq.alu(A, 8, 1, rc=0),              # r8 = b + a
+        seq.stl(8, 1),                       # slot 1 := r8 (waits on the ADD)
+        seq.alu(M, 8, 0, 0),                 # r8 = a * a, after the store read
+        seq.ldl(9, 1),                       # r9 = slot 1 = the OLD r8
+        seq.deposit(9),
+        # (5)
+        seq.alu(IADD, 10, 2, 0, kb=True),    # r10 = c + 5, an integer
+        seq.stx(3, 10),                      # scratch[r10] := r3
+        seq.ldx(11, 10),                     # r11 = scratch[r10], the same slot
+        seq.deposit(11),                     # an LDX's result, at once
+        seq.ldx(12, 2),                      # two LDXs back to back
+        seq.ldx(13, 10),
+        seq.stl(12, 2),                      # a store straight after them
+        seq.ldl(14, 2),                      # and a load straight after it
+        seq.alu(A, 15, 13, rc=14),           # r15 = r13 + r14
+        seq.deposit(15),
+        seq.ldx(16, 11),                     # an index that was LOADED
+        seq.deposit(16),
+        # (6)
+        seq.repeat(3),
+        seq.ldl(21, 4),
+        seq.alu(F, 21, 21, 0, 1),            # r21 = r21 * a + b
+        seq.stl(21, 4),
+        seq.alu(CMPLT, 22, 21, 0),           # r22 = r21 < a
+        seq.setact(22),                      # lanes drop out
+        seq.endrep(),
+        # (7)
+        seq.alu(CMPLT, 17, 0, 1),            # r17 = a < b
+        seq.alu(F, 18, 0, 1, 3),             # r18 = a*b + r3, in flight...
+        seq.setact(17),                      # ...when the mask narrows
+        seq.alu(A, 19, 18, rc=0),            # r19 = r18 + a, narrowed
+        seq.deposit(18),
+        seq.deposit(19),
+        seq.stl(19, 3),                      # a store under the narrowed mask
+        seq.setact(4),                       # SETACT reading a LOADED register
+        seq.ldl(20, 3),
+        seq.deposit(20),
+        seq.actall(),
+        seq.deposit(19),                     # a dropped lane's r19: +0
+        seq.deposit(20),
+        seq.ldl(23, 4),
+        seq.deposit(23),
+        seq.halt(),
+    ]
+    flags = seq.FLAG_SCRATCH_IO
+    if strict:
+        flags |= seq.FLAG_SCRATCH_STRICT
+    return seq.Program(fmt, insns, consts=[_int_bits(fmt, 5),
+                                           sf.one_bits(fmt)],
+                       max_deposits=16, flags=flags,
+                       n_scratch_in=0, n_scratch_out=6)
+
+
+@cocotb.test()
+async def control_codes_at_every_block_length(dut):
+    """R18 against the model at every block length a run can have.
+
+    The same block lengths the_pipe_at_every_block_length uses, because
+    the same mechanisms change shape with them: a one-beat block puts a
+    store's write and the next load's read in adjacent steps (the
+    store-then-load wait), a two-beat block has an LDX's value still in
+    G or H when the next instruction's first beat comes up (the LDX
+    gap), five beats fill the queue, and sixteen never hold. Each run
+    twice: the modulo, and SCRATCH_STRICT with two lanes in three
+    indexing past the depth, whose loads fire +0 and whose stores do
+    not land.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for name, ns in (("fp32", (8, 9, 16, 24, 40, 72, 128, 136, 150)),
+                     ("fp64", (4, 5, 8, 20, 64, 66)),
+                     ("fp128", (2, 3, 10, 32, 33))):
+        fmt = FORMATS[name]
+        for strict in (False, True):
+            prog = _ctl_program(fmt, strict)
+            for n in ns:
+                await bench.program(
+                    fmt, prog, operands(fmt, n, 1700 + n),
+                    operands(fmt, n, 1800 + n),
+                    _r18_index_stream(fmt, n, 1900 + n), n,
+                    f"{name} control codes, {'strict' if strict else 'modulo'},"
+                    f" n={n}")
+    dut._log.info(f"R18 hazard shapes: {bench.cases['program']} runs")
+
+
+@cocotb.test()
+async def mask_moves_while_results_are_in_flight(dut):
+    """The smallest program that says WHEN the active bit is sampled.
+
+    An FMA over every lane, then a SETACT that drops half of them while
+    the FMA's results are still in the array, then ACTALL, then the FMA's
+    destination deposited. The model runs one instruction at a time, so
+    every lane was active when the FMA ran and every lane's r3 is the
+    FMA's result. A retire that masked by the mask as it stands when a
+    result COMES BACK - which is what the RTL did until R18, when no
+    code could move the mask before the queue had emptied - would leave
+    the dropped lanes' r3 at +0, and the deposit shows it. At sixteen
+    beats the FMA's beat b lands one cycle after the SETACT's beat b
+    has narrowed its row; at one beat, many cycles after.
+    """
+    bench = Bench(dut)
+    await bench.start()
+    for name, ns in (("fp32", (8, 16, 40, 128, 150)),
+                     ("fp64", (4, 20, 64)),
+                     ("fp128", (2, 10, 32))):
+        fmt = FORMATS[name]
+        zero, one = sf.zero_bits(fmt), sf.one_bits(fmt)
+        prog = seq.Program(fmt, [
+            seq.alu(sf.OP_FMA, 3, 0, 1, 2),     # every lane, in flight...
+            seq.setact(1),                      # ...when half drop out
+            seq.alu(sf.OP_ADD, 4, 3, rc=0),     # r4 = r3 + a, the survivors
+            seq.actall(),
+            seq.deposit(3),                     # every lane's FMA result
+            seq.deposit(4),                     # the dropped lanes' +0
+            seq.halt()], max_deposits=2)
+        for n in ns:
+            half = [one if (i % 2) == 0 else zero for i in range(n)]
+            await bench.program(fmt, prog, dense(fmt, n, 2000 + n), half,
+                                dense(fmt, n, 2100 + n), n,
+                                f"{name} FMA in flight under a SETACT, n={n}")
+
+
+def _halt_program(fmt):
+    """HALT with an FMA's results still in the array and a store and a
+    deposit just ahead of them: the FMA's FLAGS, the store's slot (the
+    scratch-out block) and the deposit must all be there - the end of
+    the block waits for the queue AND the pipe."""
+    return seq.Program(fmt, [
+        seq.alu(sf.OP_FMA, 3, 0, 1, 2),
+        seq.stl(3, 0),
+        seq.alu(sf.OP_MUL, 4, 3, 0),
+        seq.deposit(4),
+        seq.stl(4, 1),
+        seq.alu(sf.OP_FMA, 5, 0, 1, 2),
+        seq.halt()], max_deposits=1,
+        flags=seq.FLAG_SCRATCH_IO, n_scratch_in=0, n_scratch_out=2)
+
+
+@cocotb.test()
+async def halt_right_after_arithmetic(dut):
+    """HALT (and, in the second program, the implicit halt) straight
+    after arithmetic, a store and a deposit, at every block length."""
+    bench = Bench(dut)
+    await bench.start()
+    for name, ns in (("fp32", (8, 9, 24, 128, 136)),
+                     ("fp64", (4, 5, 64, 66)),
+                     ("fp128", (2, 3, 32, 33))):
+        fmt = FORMATS[name]
+        explicit = _halt_program(fmt)
+        implicit = seq.Program(fmt, explicit.insns[:-1], max_deposits=1,
+                               flags=seq.FLAG_SCRATCH_IO, n_scratch_in=0,
+                               n_scratch_out=2)
+        for prog, how in ((explicit, "HALT"), (implicit, "the implicit halt")):
+            for n in ns:
+                await bench.program(fmt, prog, operands(fmt, n, 2200 + n),
+                                    operands(fmt, n, 2300 + n),
+                                    operands(fmt, n, 2400 + n), n,
+                                    f"{name} {how} after arithmetic, n={n}")
+
+
+def _r18_random_program(fmt, rng):
+    """A program that is mostly control codes, over FOUR registers and
+    FOUR slots, so nearly every instruction depends on one a step or two
+    before it: the densest hazard traffic the pipe can be given. Loops,
+    SETACT inside them, and an ACTALL at the top level now and then."""
+    regs = (3, 4, 5, 6)
+    slots = (0, 1, 2, 3)
+    arith = (sf.OP_ADD, sf.OP_MUL, sf.OP_FMA, sf.OP_IAND, sf.OP_IXOR,
+             sf.OP_CMPLT, sf.OP_SELECT, sf.OP_MIN)
+    body, depth, deposits = [], 0, 0
+
+    def one():
+        nonlocal deposits
+        r = rng.random()
+        rd = rng.choice(regs)
+        ra, rb, rc = (rng.choice(regs + (0, 1, 2)) for _ in range(3))
+        if r < 0.25:
+            op = rng.choice(arith)
+            return seq.alu(op, rd, ra, rb, rc)
+        if r < 0.40:
+            return seq.stl(ra, rng.choice(slots))
+        if r < 0.55:
+            return seq.ldl(rd, rng.choice(slots))
+        if r < 0.63:
+            return seq.stx(ra, rng.choice((2, 10)))
+        if r < 0.71:
+            return seq.ldx(rd, rng.choice((2, 10)))
+        if r < 0.80 and deposits < 12:
+            deposits += 1
+            return seq.deposit(ra)
+        if r < 0.86:
+            return seq.setact(rng.choice((0, 1, 2) + regs))
+        return seq.alu(sf.OP_IADD, 10, 2, rng.choice(regs))
+
+    for _ in range(rng.randrange(18, 34)):
+        if depth == 0 and rng.random() < 0.08:
+            body.append(seq.repeat(rng.randrange(2, 4)))
+            depth += 1
+            continue
+        if depth and rng.random() < 0.12:
+            body.append(seq.endrep())
+            depth -= 1
+            continue
+        if depth == 0 and rng.random() < 0.05:
+            body.append(seq.actall())
+            continue
+        body.append(one())
+    while depth:
+        body.append(seq.endrep())
+        depth -= 1
+    if rng.random() < 0.5:
+        body.append(seq.halt())
+    strict = rng.random() < 0.5
+    flags = seq.FLAG_SCRATCH_IO | (seq.FLAG_SCRATCH_STRICT if strict else 0)
+    return seq.Program(fmt, body, max_deposits=12, flags=flags,
+                       n_scratch_in=0, n_scratch_out=4)
+
+
+@cocotb.test()
+async def control_code_fuzz_at_short_blocks(dut):
+    """Programs that are mostly control codes, over four registers and
+    four slots, at one, two, three and sixteen beats and across a block
+    boundary - the block lengths where the pipe's holds bind. Every run
+    against the model, whole machine: deposits, counts, the scratch-out
+    block, FLAGS and STATUS. ACTALL can read a ragged block two ways
+    (the module docstring), so a program that has one runs block-
+    aligned."""
+    bench = Bench(dut)
+    await bench.start()
+    rng = random.Random(20260929)
+    runs = 0
+    for name, ns in (("fp32", (8, 16, 24, 128, 136)),
+                     ("fp64", (4, 8, 12, 64, 68)),
+                     ("fp128", (2, 4, 6, 32, 34))):
+        fmt = FORMATS[name]
+        for n in ns:
+            for _ in range(3):
+                while True:
+                    try:
+                        prog = _r18_random_program(fmt, rng)
+                    except seq.ProgramError:
+                        continue           # a shape the loader refuses
+                    break
+                m = n
+                if has_actall(prog.insns):
+                    lpb = lanes_per_block(fmt)
+                    m = -(-n // lpb) * lpb
+                await bench.program(fmt, prog,
+                                    operands(fmt, m, rng.randrange(1 << 20)),
+                                    operands(fmt, m, rng.randrange(1 << 20)),
+                                    _r18_index_stream(fmt, m,
+                                                      rng.randrange(1 << 20)),
+                                    m, f"{name} R18 fuzz n={m} #{runs}")
+                runs += 1
+    dut._log.info(f"R18 control-code fuzz: {runs} programs")
+
+
+# ======================================================================
 # 11. the one that has to go last
 # ======================================================================
 
