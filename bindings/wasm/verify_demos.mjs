@@ -19,7 +19,8 @@
 //      would just be a claim about some other build. Then the same
 //      bytes are asked their ABI, and it must be the one cft.h states
 //      - verify.mjs's step 2, asked of this page: a header bumped
-//      without a rebuild fails here, not only in the wasm stage.
+//      without a rebuild fails here, not only in the wasm and node
+//      stages.
 //
 //   2  THE COMPUTE CORE. The core spliced into the page must be
 //      demos_core.js byte for byte, because this script drives
@@ -163,7 +164,7 @@ function extractBlock(html, id) {
 // functions; the two must stay in step. Until 2026-09-29 this script
 // had no ABI check at all, and a tree whose cft.h had moved past the
 // committed module passed it (verifier-C4, 2026-09-28): only the wasm
-// stage said so.
+// and node stages said so.
 // ---------------------------------------------------------------------
 function abiFromHeader() {
   const h = readFileSync(join(ROOT, "host", "include", "cft.h"), "utf8");

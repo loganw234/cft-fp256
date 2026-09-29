@@ -559,14 +559,26 @@ Four checks, in order:
 1. **The module.** The bytes embedded in `demos.html` are walked back
    out of emcc's SINGLE_FILE string literal - one byte per code unit,
    walked rather than evaluated, because a build product is data - and
-   hashed. They must equal `bindings/node/cft_node.wasm`.
+   hashed. They must equal `bindings/node/cft_node.wasm`. Then they
+   are asked `cftw_abi_version()` under stub imports, and the answer
+   must be the ABI `host/include/cft.h` states - `verify.mjs`'s step 2,
+   asked of this page. Until 2026-09-29 a header bumped without a
+   rebuild passed this checker; only the wasm and node stages
+   caught it.
 2. **The compute core.** The core spliced into the page must be
    `demos_core.js` byte for byte, so that the report is about the page
    and not about a lookalike.
-3. **The chains, three ways.** For each of the thirteen
-   configurations: run the native tool with the flags the page prints,
-   run the compute core over the committed module, and compare both
-   against `demos_chains.json`. All three must agree.
+3. **The chains, three ways.** First two preconditions. The compute
+   core must run over the committed module's own bytes: they are
+   handed to the loader through `Module.instantiateWasm`, and the
+   loader must adopt them. And `demos_chains.json` must have been
+   recorded against the committed module and the `demos_core.js` in
+   the tree: its `module_sha256` and `core_sha256`, the two stamps
+   `make_demos.py` also checks when it builds the page. Until
+   2026-09-29 nothing read them after the build. Then, for each of the
+   thirteen configurations: run the native tool with the flags the
+   page prints, run the compute core over the committed module, and
+   compare both against `demos_chains.json`. All three must agree.
 4. **The sequencer program engine.** For each configuration that can
    run one - the two zoom frames and the two newton orbits runs - the
    core is run again with `engine: "program"`, and two things must
@@ -645,7 +657,11 @@ red banner naming the sabotage. Running its Collatz panel:
 `git checkout -- bindings/wasm/demos_core.js`, run it again, and both
 chains are green. Note that the checker failed **twice per chain** -
 against the tool it just ran and against the recording - which is the
-point of keeping both.
+point of keeping both. Those four are the chains' lines. With the page
+present, the same edit also fails ahead of them: check 2, because the
+page's core is no longer `demos_core.js`, and since 2026-09-29 the
+recording's core stamp. That makes six FAIL lines (measured
+2026-09-29; five before that day).
 
 ---
 

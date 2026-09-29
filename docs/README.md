@@ -1,11 +1,11 @@
 # The documents, by what you open them for
 
-Thirty-eight files, 54,028 lines. Flat in one directory they look like one
+Thirty-eight files, 54,044 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
 - **18,612 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
-- **6,219 lines of tool manual**, one per shipped program;
+- **6,235 lines of tool manual**, one per shipped program;
 - **1,984 lines of operations**, read when you are about to do something to
   hardware;
 - **27,213 lines of record and argument** — the ledger, the roadmap and the
@@ -75,7 +75,7 @@ running.
 | [MERSENNE.md](MERSENNE.md) | 882 | `cft-mersenne` — Lucas-Lehmer |
 | [ENCLOSE.md](ENCLOSE.md) | 845 | `cft-enclose` — directed-rounding interval enclosure |
 | [COLLATZ.md](COLLATZ.md) | 648 | `cft-collatz` — Collatz trajectories |
-| [DEMOS.md](DEMOS.md) | 747 | the same five workloads in one browser tab, on the conformance wasm module |
+| [DEMOS.md](DEMOS.md) | 763 | the same five workloads in one browser tab, on the conformance wasm module |
 | [BENCHMARKS.md](BENCHMARKS.md) | 631 | what all of the above measure, in software and on the card |
 
 ## Operations — doing a thing to hardware
