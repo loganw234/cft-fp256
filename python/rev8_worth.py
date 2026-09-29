@@ -44,9 +44,15 @@ from cft_golden import FORMATS, augmented  # noqa: E402
 from cft_golden import softfloat as sf  # noqa: E402
 from cft_golden import seq  # noqa: E402
 
-# The census (docs/VALIDATION.md, 2026-09-25, "The census"), in ALU units.
-CENSUS = {"fp64": dict(s=5.21, e=3.07 / 1.72),
-          "fp256": dict(s=5.08, e=2.93 / 7.18)}
+# The census (docs/VALIDATION.md, 2026-09-25, "The census"), in ALU units:
+# a = 1.72 ns at fp64 and 7.18 at fp256, e = 3.07 and 2.93 ns a step.
+A_NS = {"fp64": 1.72, "fp256": 7.18}
+CENSUS = {"fp64": dict(s=5.21, e=3.07 / A_NS["fp64"]),
+          "fp256": dict(s=5.08, e=2.93 / A_NS["fp256"])}
+# ...and e is NOT resolved: "50 ms on any one moves it between about 0.5
+# and 5.5 ns" (the same entry's corrections, verifier-V2). So every share
+# below is printed at the central e and at both ends of that range.
+E_RANGE_NS = (0.5, 5.5)
 
 SCRATCH_CODES = (seq.STL, seq.LDL, seq.STX, seq.LDX)
 AUG_CODES = (seq.AUGADD, seq.AUGERR)
@@ -209,7 +215,8 @@ def run_cauchy(fmt, N, lanes=3, seed=5):
 # in registers r0, r2 and r1; the loop body is one step:
 #
 #   kahan     y = h*x + c; t = x + y; z = t - x; c = y - z; x := t
-#             Fast2Sum's error: exact only when |x| >= |y| in exponent
+#             Fast2Sum's error: exact whenever x's exponent is at least
+#             y's (sufficient, not necessary); not exact in general
 #   twosum    y = h*x + c; s = x + y; bp = s - x; ap = s - bp;
 #             db = y - bp; da = x - ap; c = da + db; x := s
 #             Knuth's TwoSum: exact for every order, six additions
@@ -220,8 +227,9 @@ def run_cauchy(fmt, N, lanes=3, seed=5):
 # The copy (x := t, an IOR) is what a REPEAT body pays to keep x in one
 # register; unrolling by two renames it away and doubles the body. Both
 # are shown. The three forms do NOT compute the same bits: RNE and
-# roundTiesTowardZero part at ties, and Fast2Sum's error is exact only
-# under its precondition - each is held to its own reference.
+# roundTiesTowardZero part at ties, and Fast2Sum's error is exact where
+# its condition holds and not in general - each is held to its own
+# reference.
 
 def comp_program(fmt, K, form):
     insns = [seq.repeat(K)]
@@ -325,11 +333,25 @@ def report(check=False):
                     f"{price(c, s, e, 0):10.1f} {price(c, s, e, 1):10.1f}")
             lo, st = res["looped"][0], res["stepped"][0]
             per = (price(lo, s, e, 0) - price(st, s, e, 0)) / terms
+            es = [x / A_NS[fname] for x in E_RANGE_NS]
+
+            def term_share(ee):
+                return 100 * 2 / (3 + 2 * s + ee)
+
+            def product_share(ee):
+                return 100 * (1 - price(st, s, ee, 0) / price(lo, s, ee, 0))
             lines.append(f"   stepped against looped: {per:.2f} ALU a term "
-                         f"saved at p = 0 "
-                         f"({100 * (1 - price(st, s, e, 0) / price(lo, s, e, 0)):.1f}%), "
+                         f"saved at p = 0, "
                          f"{(price(lo, s, e, 1) - price(st, s, e, 1)) / terms:.2f} "
                          f"at p = 1")
+            lines.append(f"   at p = 0, of a looped TERM: {term_share(e):.1f}% "
+                         f"(e = {e:.2f}); {term_share(es[1]):.1f} to "
+                         f"{term_share(es[0]):.1f}% over e = {es[0]:.2f}.."
+                         f"{es[1]:.2f}")
+            lines.append(f"   at p = 0, of the whole PRODUCT (setup and "
+                         f"stores too): {product_share(e):.1f}%; "
+                         f"{product_share(es[1]):.1f} to "
+                         f"{product_share(es[0]):.1f}% over the same e")
         res = run_comp(fmt)
         K = 64
         lines.append(f"-- compensated step, {K} steps, one lane --")

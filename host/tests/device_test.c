@@ -866,7 +866,9 @@ static uint64_t seq_alu_kx9(unsigned op, unsigned rd, unsigned ia,
 
 /* The four scratch codes. STL reads ra and imm[23:0]; LDL writes rd
  * and reads imm[23:0]; STX reads ra and rb; LDX writes rd and reads
- * rb, and for the indexed pair imm[23:0] must be zero. Registers are
+ * rb. For the indexed pair imm[11:0] is the post-step since revision 8
+ * (proposed 2026-09-29; zero is the unstepped instruction, which is all
+ * these two helpers write) and imm[23:12] must be zero. Registers are
  * five bits, with the fifth of each in its own bit of imm[27:24]. */
 enum { SEQ_C_STL = 6, SEQ_C_LDL = 7, SEQ_C_STX = 8, SEQ_C_LDX = 9 };
 

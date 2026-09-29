@@ -486,9 +486,8 @@ def stx(ra, rb, step=0):
 
 def ldx(rd, rb, step=0):
     """rd := scratch[rb mod SCRATCH_D], then rb += step (revision 8)
-    when step is not zero. A non-zero step with rd == rb is refused by
-    validate(): the loaded value would win the register, so the step
-    would select nothing."""
+    when step is not zero - unless rd IS rb, where the loaded value wins
+    the register and the step is discarded (_post_step)."""
     return encode(LDX, rd=rd, rb=rb, ctrl=True, imm=_step_imm(step))
 
 
@@ -554,27 +553,6 @@ def _check_slot(slot):
         raise ProgramError(
             f"scratch slot {slot} outside 0..{SCRATCH_D - 1}")
     return slot
-
-
-def _check_dead_step(pc, d):
-    """Revision 8's one new refusal: an LDX that loads INTO its own index
-    register and steps it.
-
-    Both would write the same register, and RISC-V's post-increment loads
-    say which wins - CORE-V's XCVmem: "When same register is used as
-    address and destination (rD == rs1) for post-incremented loads,
-    loaded data has highest priority". So the step would select nothing,
-    and a field that selects nothing is a second spelling of the
-    unstepped instruction - the reason `kx` with no constant operand is
-    refused. A step of zero is the old LDX and stays legal; STX with
-    ra == rb is legal too, because its one register write is the step's
-    and it stores the index as it stood before it."""
-    if d["ctrl"] and d["op"] == LDX and index_step(d) and d["rd"] == d["rb"]:
-        raise ProgramError(
-            f"[{pc}] ldx r{d['rd']}, r{d['rb']}, {index_step(d):+d} loads "
-            f"into its own index register: the loaded value wins it "
-            f"(RISC-V CORE-V's rule), so the step selects nothing - write "
-            f"the step as 0 or load into another register")
 
 
 # ---- the program object ---------------------------------------------
@@ -844,7 +822,6 @@ class Program:
                     f"[{pc}] {CTRL_NAMES[code]} reads only "
                     f"imm & {IMM_ALLOWED[code]:#010x}, so imm="
                     f"{d['imm']:#010x} sets a bit it does not read")
-            _check_dead_step(pc, d)
 
             if code in (STL, LDL):
                 # A STATIC slot past the depth is refused by name, as a
@@ -1187,9 +1164,18 @@ def _post_step(fmt, d, regs, active):
     (and STX stored ra as it stood, which matters when ra is rb). It is
     NOT gated by SCRATCH_STRICT: R8 suppresses an access, and the step is
     a register write, so a strict and a non-strict run leave rb the
-    same. A zero step writes nothing, which is the old instruction."""
+    same. A zero step writes nothing, which is the old instruction.
+
+    An LDX whose destination IS its index register keeps what it loaded
+    - the slot's value, or R8's +0 for a suppressed access - and the
+    step is discarded. That is RISC-V's answer to the one case where
+    both writes land in one register (rung 2 of Logan's rule): CORE-V's
+    post-increment loads (OpenHW XCVmem), "When same register is used as
+    address and destination (rD == rs1) for post-incremented loads,
+    loaded data has highest priority over incremented address when
+    writing to this same register"."""
     step = index_step(d)
-    if not step:
+    if not step or (d["op"] == LDX and d["rd"] == d["rb"]):
         return
     inc = step & ((1 << fmt.width) - 1)
     rb = d["rb"]
@@ -1700,8 +1686,9 @@ _FUZZ_STEPS = (1, -1, 1, -1, 2, -2, 3, -5, 8, -16, 255, -256,
 def _rev8_draw(insns, rng, nreg):
     """One revision-8 form appended to a fuzz program: `augadd`, `augerr`,
     the recommended pair over the same operands (the shape a tile may
-    fuse), or a stepped STX/LDX. An LDX never loads into its own stepped
-    index - validate() refuses that - so its destination moves off rb."""
+    fuse), or a stepped STX/LDX. A quarter of the stepped loads land in
+    their own index register, the one case where the step is discarded
+    and the loaded value kept (CORE-V's rule, _post_step)."""
     kind = rng.randrange(10)
     if kind < 3:
         insns.append(augadd(rng.randrange(nreg), rng.randrange(nreg),
@@ -1721,9 +1708,7 @@ def _rev8_draw(insns, rng, nreg):
         step = rng.choice(_FUZZ_STEPS)
         rb = rng.randrange(nreg)
         if kind < 9:
-            rd = rng.randrange(nreg)
-            if rd == rb:
-                rd = (rd + 1) % nreg
+            rd = rb if rng.random() < 0.25 else rng.randrange(nreg)
             insns.append(ldx(rd, rb, step))
         else:
             insns.append(stx(rng.randrange(nreg), rb, step))

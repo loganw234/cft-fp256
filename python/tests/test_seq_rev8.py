@@ -12,9 +12,11 @@ these hold `seq.py` to:
 * STX / LDX with a signed twelve-bit post-step in imm[11:0]: the access
   at the index as it stood, then rb := rb + step modulo 2^W, whatever
   SCRATCH_STRICT decides about the access, and never for an inactive
-  lane. A zero step is the old instruction, bit for bit.
-* the refusals: every field the two new codes do not read, imm[23:12]
-  on a stepped access, and an LDX that loads into its own stepped index.
+  lane. A zero step is the old instruction, bit for bit. An LDX that
+  loads into its own index keeps the loaded value and discards the step
+  (RISC-V CORE-V's rule, rung 2 of Logan's rule).
+* the refusals: every field the two new codes do not read, and
+  imm[23:12] on a stepped access.
 
 Each test says what it would catch, and the fuzz at the end checks that
 it reached what it claims to, because a property test that never meets
@@ -131,18 +133,61 @@ def test_imm_23_12_stays_reserved_on_a_stepped_access(code):
             _prog(FP32, [seq.encode(code, ctrl=True, imm=1 << k, **regs)])
 
 
-def test_an_ldx_into_its_own_stepped_index_is_refused_and_nothing_else():
-    """CORE-V's rule gives the register to the loaded value, so the step
-    would select nothing: refused. A zero step is the old LDX and loads;
-    STX with ra == rb has one register write, the step's, and loads."""
+def test_an_ldx_into_its_own_stepped_index_loads():
+    """Rung 2: RISC-V CORE-V's post-increment loads define the case -
+    the loaded value wins the register - so the form is legal, not
+    refused, at every register and every step. It still needs the
+    SCRATCH_STEP bit, as every non-zero step does."""
     for r in (0, 5, 16, 31):
-        with pytest.raises(seq.ProgramError, match="own index register"):
-            _prog(FP32, [seq.ldx(r, r, 1)])
-        with pytest.raises(seq.ProgramError, match="own index register"):
-            _prog(FP32, [seq.ldx(r, r, seq.STEP_MIN)])
+        for step in (1, -1, seq.STEP_MAX, seq.STEP_MIN):
+            p = _prog(FP32, [seq.ldx(r, r, step)])
+            assert seq.features_rev8(p.insns) == seq.FEAT_SCRATCH_STEP
         _prog(FP32, [seq.ldx(r, r, 0)])
         _prog(FP32, [seq.stx(r, r, -3)])
-        _prog(FP32, [seq.ldx((r + 1) % 32, r, 7)])
+
+
+@pytest.mark.parametrize("fmt", ALL, ids=lambda f: f.name)
+@pytest.mark.parametrize("strict", [False, True])
+def test_an_ldx_into_its_own_index_keeps_the_load_and_discards_the_step(
+        fmt, strict):
+    """The loaded value is what the register holds - the slot's value, or
+    under SCRATCH_STRICT the +0 a suppressed access loads - and the step
+    is discarded: `ldx rX, rX, s` leaves the machine exactly as
+    `ldx rX, rX, 0` does, strict and not, over indices in range, past the
+    depth, and near 2^W. A pointer chase: each loaded value is the next
+    index."""
+    rng = random.Random(fmt.width + strict)
+    W = fmt.width
+    pool = [0, 1, 2, 3, 7, 15, 255, 256, 300, (1 << W) - 1,
+            sf.one_bits(fmt)]
+    flags = seq.FLAG_SCRATCH_IO | (seq.FLAG_SCRATCH_STRICT if strict else 0)
+    reported = 0
+    for r in (0, 5, 31):
+        for step in (1, -1, seq.STEP_MAX, seq.STEP_MIN):
+            def run(s):
+                p = seq.Program(fmt, [seq.ldl(r, 0), seq.repeat(4),
+                                      seq.ldx(r, r, s), seq.deposit(r),
+                                      seq.endrep(), seq.halt()],
+                                max_deposits=4, flags=flags,
+                                n_scratch_in=16)
+                return seq.run(p, [0] * 8, [0] * 8, scratch_in=sin)
+            sin = [rng.choice(pool) for _ in range(16 * 8)]
+            stepped, plain = run(step), run(0)
+            assert stepped.state() == plain.state(), (r, step, strict)
+            # and what it holds is the chase through the block
+            for lane in range(8):
+                block = sin[16 * lane: 16 * lane + 16] + [0] * 240
+                idx, want = block[0], []
+                for _ in range(4):
+                    if strict and idx >= seq.SCRATCH_D:
+                        idx = 0              # suppressed: +0 is loaded
+                    else:
+                        idx = block[idx % seq.SCRATCH_D]
+                    want.append(idx)
+                assert stepped.deposits[4 * lane: 4 * lane + 4] == want
+            reported += bool(stepped.status & seq.STATUS_SCRATCH_RANGE)
+    if strict:
+        assert reported, "no strict chase ran past the depth"
 
 
 def test_the_next_control_code_is_still_unknown():
@@ -224,6 +269,41 @@ def test_each_lane_raises_exactly_augmented_additions_flags(fmt):
     # 9.5's combinations: none, invalid, overflow+inexact, underflow
     assert {0, sf.FLAG_INVALID, sf.FLAG_OVERFLOW | sf.FLAG_INEXACT,
             sf.FLAG_UNDERFLOW} <= seen
+
+
+@pytest.mark.parametrize("fmt", ALL, ids=lambda f: f.name)
+@pytest.mark.parametrize("code", [seq.AUGADD, seq.AUGERR],
+                         ids=["augadd", "augerr"])
+def test_each_half_alone_raises_the_whole_operations_flags(fmt, code):
+    """R21: EACH of the two raises exactly augmentedAddition's flags - so
+    a program that keeps only the error, `augerr` alone, raises what the
+    operation raises, and so does `augadd` alone. Every pool pair whose
+    flags are not zero and a sample of the rest, each run as the only
+    lane of its own run, value and flags held to augmented.py. (The tests
+    above run the pair or a lone augadd; verifier-R3's plant "augerr
+    raises nothing" passed them all.)"""
+    rng = random.Random(fmt.width * 29 + code)
+    pairs = vectors.augmented_pairs(fmt, 0)
+    flagged = [(x, y) for x, y in pairs
+               if augmented.augmented_add(fmt, x, y)[2]]
+    quiet = [(x, y) for x, y in pairs
+             if not augmented.augmented_add(fmt, x, y)[2]]
+    chosen = rng.sample(flagged, min(len(flagged), 200)) + \
+        rng.sample(quiet, min(len(quiet), 60))
+    make = seq.augadd if code == seq.AUGADD else seq.augerr
+    prog = seq.Program(fmt, [make(5, 0, 1), seq.deposit(5), seq.halt()],
+                       max_deposits=1)
+    classes = set()
+    for x, y in chosen:
+        r, e, want = augmented.augmented_add(fmt, x, y)
+        res = seq.run(prog, [x], [y])
+        assert res.flags == want, (
+            f"{fmt.name} {seq.CTRL_NAMES[code]} alone on ({x:#x}, {y:#x}): "
+            f"flags {res.flags:#x}, augmentedAddition raises {want:#x}")
+        assert res.deposits == [r if code == seq.AUGADD else e]
+        classes.add(want)
+    assert {sf.FLAG_INVALID, sf.FLAG_OVERFLOW | sf.FLAG_INEXACT,
+            sf.FLAG_UNDERFLOW} <= classes, classes
 
 
 def test_ties_go_to_the_smaller_magnitude_not_to_even():
@@ -487,7 +567,8 @@ def test_p3_fuzz_with_revision_8_on():
     rng = random.Random(20260929)
     fmt = FP32
     checked = saved = 0
-    seen = dict(augadd=0, augerr=0, pair=0, ldx_step=0, stx_step=0)
+    seen = dict(augadd=0, augerr=0, pair=0, ldx_step=0, stx_step=0,
+                ldx_own=0)
     for _ in range(400):
         insns, consts = seq.random_program(fmt, rng, scratch=True,
                                            wide_regs=True, rev8=True)
@@ -508,6 +589,8 @@ def test_p3_fuzz_with_revision_8_on():
                 seen["augerr"] += 1
             elif seq.index_step(d):
                 seen["ldx_step" if d["op"] == seq.LDX else "stx_step"] += 1
+                if d["op"] == seq.LDX and d["rd"] == d["rb"]:
+                    seen["ldx_own"] += 1        # the step discarded
             prev = d if d["ctrl"] else None
         n = rng.randint(1, 6)
         a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
@@ -582,8 +665,13 @@ def test_the_text_form_round_trips_and_writes_a_step_only_when_there_is_one():
     ("ldx r3, r4, 2048", "outside -2048..2047"),
     ("stx r3, r4, -2049", "outside -2048..2047"),
     ("ldx r3, r4, r5", "is a register"),
-    ("ldx r3, r3, +1", "own index register"),
+    ("ldx r3, r4, +-1", "two signs"),
+    ("ldx r3, r4, --1", "two signs"),
+    ("stx r3, r4, -+0x10", "two signs"),
     ("ldx r3, r4, +1, +2", "optional signed post-step"),
+    ("augerr.rtz r1, r2, r3", "control instruction and takes no suffix"),
+    ("augadd.kx r1, r2, r3", "fixes its rounding"),
+    ("ldx.rtz r3, r4", "control instruction and takes no suffix"),
     ("augadd r1, r2", "three registers"),
     ("augerr r1, r2, r3, r4", "three registers"),
     ("augadd r1, r2, K", "is a constant"),
@@ -593,6 +681,20 @@ def test_the_text_form_refuses_by_name(line, fragment):
     with pytest.raises(asm.AsmError) as exc:
         asm.assemble(src, "<test>")
     assert fragment in str(exc.value), str(exc.value)
+
+
+def test_the_text_form_takes_an_own_index_load_and_a_trailing_comma():
+    """`ldx r3, r3, +1` assembles to the model's word and reads back as
+    written (rung 2: legal, the step discarded). And a trailing comma is
+    an empty operand, which the text form drops on every line in both
+    assemblers - so `ldx r3, r4,` is `ldx r3, r4`, step zero, exactly as
+    `stx r1, r2,` assembled before revision 8."""
+    head = ".format fp64\n.deposits 0\n"
+    img = asm.assemble_image(head + "ldx r3, r3, +1\nhalt\n")
+    assert img.insns[0] == seq.ldx(3, 3, 1)
+    assert "ldx r3, r3, +1" in asm.disassemble(img.to_bytes())
+    assert asm.assemble(head + "ldx r3, r4,\nhalt\n") == \
+        asm.assemble(head + "ldx r3, r4\nhalt\n")
 
 
 def test_the_text_form_names_the_features():

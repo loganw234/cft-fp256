@@ -427,15 +427,16 @@ static int seq_augadd_fields_ok(const seq_insn *d)
              (d->imm & ~hi));
 }
 
-/* An LDX that loads into its own stepped index. Both writes would land
- * in one register, and RISC-V's post-increment loads say the loaded
- * value wins (CORE-V XCVmem: "loaded data has highest priority"), so the
- * step would select nothing: a second spelling of the unstepped LDX,
- * refused as kx with no constant operand is. STX with ra == rb is legal,
- * since its one register write is the step's. */
-static int seq_dead_step(const seq_insn *d)
+/* An LDX that loads into its own stepped index: both writes would land in
+ * one register, and RISC-V's post-increment loads say which wins (CORE-V
+ * XCVmem: "When same register is used as address and destination (rD ==
+ * rs1) for post-incremented loads, loaded data has highest priority over
+ * incremented address when writing to this same register"). So the
+ * loaded value is kept and the step discarded - rung 2 of Logan's rule.
+ * STX with ra == rb has one register write, the step's, and keeps it. */
+static int seq_step_discarded(const seq_insn *d)
 {
-    return d->op == SEQ_LDX && seq_step(d) != 0 &&
+    return d->op == SEQ_LDX &&
            seq_reg(d->rd, d->hd) == seq_reg(d->rb, d->hb);
 }
 
@@ -557,12 +558,13 @@ static cft_status seq_validate(const cft_program *p)
         /* The four scratch codes of revision 3, R4. The reserved-field
          * rule settles each of them and adds nothing new: STL reads
          * `ra` and imm[23:0]; LDL writes `rd` and reads imm[23:0]; STX
-         * reads `ra` and `rb`; LDX writes `rd` and reads `rb`, and for
-         * those last two imm[23:0] is a field nothing reads. Every
-         * other field - the remaining register fields, `rnd`, the `k`
-         * flags, `kx`, and the parts of imm[31:24] that are not the
-         * high bit of a register this instruction names - must be
-         * zero.
+         * reads `ra` and `rb`; LDX writes `rd` and reads `rb`. For those
+         * last two imm[23:0] was a field nothing read until revision 8
+         * (proposed 2026-09-29) made imm[11:0] their post-step, so now
+         * imm[23:12] is the part nothing reads. Every other field - the
+         * remaining register fields, `rnd`, the `k` flags, `kx`, and the
+         * parts of imm[31:24] that are not the high bit of a register
+         * this instruction names - must be zero.
          *
          * The slot of a static form is checked against the DEVICE's
          * depth rather than here, exactly as a constant index is: what
@@ -597,16 +599,6 @@ static cft_status seq_validate(const cft_program *p)
                                      (1u << (SEQ_REGHI_SHIFT + 2)) |
                                      SEQ_STEP_MASK)))
                 return CFT_ERR_INVALID_ARGUMENT;
-            if (seq_dead_step(&d)) {
-                cft_set_error("instruction %lu is ldx r%d, r%d, %+d: it "
-                              "loads into its own index register, and the "
-                              "loaded value wins it, so the step selects "
-                              "nothing - write the step as 0 or load into "
-                              "another register", (unsigned long)pc,
-                              seq_reg(d.rd, d.hd), seq_reg(d.rb, d.hb),
-                              seq_step(&d));
-                return CFT_ERR_INVALID_ARGUMENT;
-            }
             break;
         case SEQ_AUGADD:
         case SEQ_AUGERR:
@@ -1354,7 +1346,9 @@ static cft_status seq_exec_augmented(const cft_program *p, seq_block *B,
  * library's own IADD, or ISUB by the step's magnitude, which is the same
  * residue. NOT gated by SCRATCH_STRICT: R8 suppresses an access, and the
  * step is a register write, so a strict and a non-strict run leave rb
- * the same. A zero step writes nothing: the old instruction. */
+ * the same. A zero step writes nothing: the old instruction. Nor does an
+ * LDX into its own index, which keeps what it loaded - the slot's value,
+ * or R8's +0 - and discards the step (seq_step_discarded). */
 static cft_status seq_post_step(const cft_program *p, seq_block *B,
                                 int nlane, const seq_insn *d)
 {
@@ -1362,7 +1356,7 @@ static cft_status seq_post_step(const cft_program *p, seq_block *B,
     const int rb = seq_reg(d->rb, d->hb);
     cft_bn mag, zero;
     int i;
-    if (!step)
+    if (!step || seq_step_discarded(d))
         return CFT_OK;
     cft_bn_set_u32(&mag, (uint32_t)(step < 0 ? -step : step));
     cft_bn_zero(&zero);

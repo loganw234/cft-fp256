@@ -411,9 +411,9 @@ def stx(ra, rb, step=0):
 
 
 def ldx(rd, rb, step=0):
-    """`rd := scratch[rb mod SCRATCH_D]`, then `rb += step` (revision 8).
-    imm[23:12] must be zero, and a non-zero step with rd == rb is
-    refused: the loaded value would win the register."""
+    """`rd := scratch[rb mod SCRATCH_D]`, then `rb += step` (revision 8)
+    - unless rd is rb, where the loaded value wins the register and the
+    step is discarded (CORE-V's rule). imm[23:12] must be zero."""
     return encode(LDX, rd=rd, rb=rb, ctrl=True, imm=_step_imm(step))
 
 
@@ -691,14 +691,6 @@ class Image:
                     f"{'its step and ' if code in STEP_CODES else ''}"
                     f"its register high bit(s), so the rest of imm must be "
                     f"zero and imm is {d['imm']:#010x}")
-        if code == LDX and step_of(d) and d["rd"] == d["rb"]:
-            # CORE-V's rule: the loaded value wins the register, so the
-            # step would select nothing - a second spelling of `ldx`.
-            raise AsmError(
-                f"[{pc}] ldx r{d['rd']}, r{d['rb']}, {step_of(d):+d} loads "
-                f"into its own index register, so the step selects nothing "
-                f"(the loaded value wins it); write the step as 0 or load "
-                f"into another register")
         if slot:
             v = d["imm"] & SLOT_MASK
             if v >= self.scratch_depth:
@@ -972,11 +964,15 @@ class _Asm:
         return v
 
     def step(self, tok):
-        """A post-step operand (revision 8) -> a signed int: an optional
-        sign, then decimal or 0x hex - `+1`, `-1`, `-0x10`. Refused by
-        name outside the twelve-bit field, and refused if it names a
-        register, so `ldx r3, r4, r5` is a message rather than a step."""
+        """A post-step operand (revision 8) -> a signed int: ONE optional
+        sign, then decimal or 0x hex - `+1`, `-1`, `-0x10`, `3`. Refused
+        by name outside the twelve-bit field, with a second sign (`+-1`,
+        `--1`), and where it names a register, so `ldx r3, r4, r5` is a
+        message rather than a step."""
         body = tok[1:] if tok[:1] in "+-" else tok
+        if body[:1] in ("+", "-"):
+            self.fail(f"{tok!r} carries two signs; a post-step is one "
+                      f"optional sign and a number")
         if _REGNAME.match(body) or body.lower() in self.reg_names:
             self.fail(f"{tok} is a register, and a post-step is a signed "
                       f"number")
@@ -1246,6 +1242,15 @@ class _Asm:
 
     def do_alu(self, mnemonic, args):
         name, *suffixes = mnemonic.split(".")
+        if name in CTRL_CODES:
+            # `augerr.rtz`, `ldx.kx`: a control mnemonic with a suffix.
+            # Say what it is rather than that it is no opcode.
+            why = (" - 754-2019 9.5 fixes its rounding (roundTiesTowardZero), "
+                   "so no attribute can be written" if name in ("augadd",
+                                                                "augerr")
+                   else "")
+            self.fail(f"{name} is a control instruction and takes no "
+                      f"suffix{why}")
         rnd = sf.RND_RNE
         force_kx = False
         for suffix in suffixes:

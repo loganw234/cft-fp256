@@ -75,9 +75,11 @@ post-step. Besides the generator's arm it runs the recommended pair over
 augmented.py's own stress families (ties, cancellations, subnormal
 residuals, the overflow threshold), and a directed walk whose indices
 start at the depth's edge and near zero, so a strict program crosses the
-depth and a decrement wraps at the register's width. Its refusals - an
-LDX that loads into its own stepped index, imm[23:12], every field the
-pair does not read, control code 12 - are corrupted in. And one leg that
+depth and a decrement wraps at the register's width. Its refusals -
+imm[23:12], every field the pair does not read, control code 12 - are
+corrupted in and also listed once each. `ldx rX, rX, step`, a load into
+its own index, has a directed leg of its own: the loaded value wins and
+the step is discarded (CORE-V's rule), strict and not. And one leg that
 needs no corpus: a remote handle to a server whose HELLO publishes the
 round-2 tile's word, where every revision-8 form must be refused BY NAME
 on the client, and loads when the word publishes the bit.
@@ -1097,23 +1099,21 @@ _WALK_STARTS = (0, 1, 2, 250, 253, 255, 256, 300)
 
 
 def corrupt_rev8(insns, rng):
-    """The refusals revision 8 adds, one per program: an LDX that loads
-    into its own stepped index, a set bit in imm[23:12] of a stepped
-    access, and every field augadd/augerr do not read - rc and its high
-    bit, rnd, a k flag, kx, imm[23:0] and imm[31:28] - and the next
-    control code, 12, which is still unknown. Each is refused by the
-    model and must be by libcft."""
+    """The refusals revision 8 adds, one per program: a set bit in
+    imm[23:12] of a stepped access, and every field augadd/augerr do not
+    read - rc and its high bit, rnd, a k flag, kx, imm[23:0] and
+    imm[31:28] - and the next control code, 12, which is still unknown.
+    Each is refused by the model and must be by libcft. (An LDX into its
+    own stepped index was a refusal here until the send-back of
+    2026-09-29 took rung 2: it loads, the step discarded - see
+    rev8_own_index_leg.)"""
     out = list(insns)
-    what = rng.choice(["ldx_dead_step", "step_reserved_bit", "aug_rc",
+    what = rng.choice(["step_reserved_bit", "aug_rc",
                        "aug_rnd", "aug_kx", "aug_kb", "aug_imm_low",
                        "aug_imm_high", "code_12"])
     code = rng.choice([seq.AUGADD, seq.AUGERR])
     regs = dict(rd=1, ra=2, rb=3, ctrl=True)
-    if what == "ldx_dead_step":
-        r = rng.randrange(32)
-        word = seq.encode(seq.LDX, rd=r, rb=r, ctrl=True,
-                          imm=rng.choice([1, 7, 0x800, 0xFFF]))
-    elif what == "step_reserved_bit":
+    if what == "step_reserved_bit":
         op = rng.choice([seq.STX, seq.LDX])
         fields = dict(ra=1, rb=2) if op == seq.STX else dict(rd=1, rb=2)
         word = seq.encode(op, ctrl=True,
@@ -1138,9 +1138,8 @@ def corrupt_rev8(insns, rng):
 
 
 def rev8_refusal_words():
-    """Every revision-8 refusal, once, as (label, word): an LDX loading
-    into its own stepped index at four steps and three registers; each bit
-    of imm[23:12] on a stepped STX and a stepped LDX; and on augadd and
+    """Every revision-8 refusal, once, as (label, word): each bit of
+    imm[23:12] on a stepped STX and a stepped LDX; and on augadd and
     augerr each field they do not read - rc, rc's high bit, each rnd, each
     k flag, kx, each bit of imm[23:0] and of imm[31:27] - and three codes
     that stay unknown. corrupt_rev8 above DRAWS from the same kinds, which
@@ -1148,10 +1147,6 @@ def rev8_refusal_words():
     one every run (a C plant that accepted imm[23:12] on LDX went uncaught
     by the draw at 120 programs, 2026-09-29)."""
     words = []
-    for r in (0, 5, 31):
-        for step in (1, -1, seq.STEP_MAX, seq.STEP_MIN):
-            words.append((f"ldx r{r}, r{r}, {step:+d}", seq.encode(
-                seq.LDX, rd=r, rb=r, ctrl=True, imm=step & seq.STEP_MASK)))
     for op, fields in ((seq.STX, dict(ra=1, rb=2)),
                        (seq.LDX, dict(rd=1, rb=2))):
         for b in range(12, 24):
@@ -1204,6 +1199,78 @@ def rev8_directed_refusals(lib, dev, fmt, name, R):
             R["directed"] += 1
 
 
+def rev8_own_index_leg(lib, dev, fmt, name, R):
+    """`ldx rX, rX, step`: the load lands in its own index register, the
+    loaded value wins it and the step is discarded - RISC-V CORE-V's rule
+    for post-incremented loads, which rung 2 of Logan's rule takes.
+
+    Each program chases pointers - the loaded value is the next index -
+    through a scratch block of small indices, large ones and a float's
+    bits, four times, depositing each, then stores the index through
+    itself with a step (`stx rX, rX, step`, which keeps its step) and
+    deposits it again. Three registers, the four edge steps, strict and
+    not, n across the 64-lane block. Held two ways: libcft against the
+    model, and the model against the same program with the load's step
+    written as 0 - which a discarded step must equal exactly."""
+    rng = random.Random(fmt.width * 131 + 7)
+    W = fmt.width
+    pool = [0, 1, 2, 3, 5, 9, 15, 255, 256, 300, (1 << W) - 1,
+            sf_one(fmt)]
+    k = 0
+    for r in (0, 5, 31):
+        for step in (1, -1, seq.STEP_MAX, seq.STEP_MIN):
+            for strict in (False, True):
+                def body(s):
+                    return [seq.ldl(r, 0), seq.repeat(4),
+                            seq.ldx(r, r, s), seq.deposit(r), seq.endrep(),
+                            seq.stx(r, r, step), seq.deposit(r),
+                            seq.halt()]
+                flags = (seq.FLAG_SCRATCH_IO
+                         | (seq.FLAG_SCRATCH_STRICT if strict else 0))
+                prog = seq.Program(fmt, body(step), max_deposits=5,
+                                   flags=flags, n_scratch_in=16,
+                                   n_scratch_out=16)
+                zero = seq.Program(fmt, body(0), max_deposits=5,
+                                   flags=flags, n_scratch_in=16,
+                                   n_scratch_out=16)
+                n = (1, 65, 129)[k % 3]
+                k += 1
+                a = seq.random_inputs(fmt, rng, n)
+                b = seq.random_inputs(fmt, rng, n)
+                c = seq.random_inputs(fmt, rng, n)
+                sin = [rng.choice(pool) for _ in range(16 * n)]
+                want = seq.run(prog, a, b, c, scratch_in=sin)
+                same = seq.run(zero, a, b, c, scratch_in=sin)
+                if want.state() != same.state():
+                    print(f"  MISMATCH {name} (own-index leg) r{r} step "
+                          f"{step:+d} strict={strict}: the model's stepped "
+                          f"load is not its unstepped one")
+                    R["bad"] += 1
+                try:
+                    got = run_in_c_ex(lib, dev, prog, a, b, c, sin)
+                except RuntimeError as e:
+                    print(f"  MISMATCH {name} (own-index leg) r{r} step "
+                          f"{step:+d}: libcft refuses what the model runs: "
+                          f"{e}")
+                    R["bad"] += 1
+                    continue
+                if got != (want.deposits, want.counts, want.flags,
+                           want.status, want.scratch_out):
+                    print(f"  MISMATCH {name} (own-index leg) r{r} step "
+                          f"{step:+d} strict={strict} n={n}: libcft and "
+                          f"the model differ")
+                    R["bad"] += 1
+                    continue
+                R["own_index"] += 1
+                if strict and want.status & seq.STATUS_SCRATCH_RANGE:
+                    R["own_index_range"] += 1
+
+
+def sf_one(fmt):
+    """1.0's bits in `fmt`: an index no depth reaches, and a float."""
+    return seq.sf.one_bits(fmt)
+
+
 def rev8_corpus(lib, dev, fmt, name, args, R):
     """The sixth corpus, for one format. Mutates the counters in R.
 
@@ -1221,6 +1288,7 @@ def rev8_corpus(lib, dev, fmt, name, args, R):
       loads and stores in a loop - so a strict program crosses the depth
       (and reports) and a -1 walk wraps at the register's width."""
     rev8_directed_refusals(lib, dev, fmt, name, R)
+    rev8_own_index_leg(lib, dev, fmt, name, R)
     rng = random.Random(args.seed ^ (fmt.width * 7919) ^ 0x8E7D)
     checked = 0
     stress = vectors.augmented_pairs(fmt, 0)
@@ -1238,11 +1306,16 @@ def rev8_corpus(lib, dev, fmt, name, args, R):
             maxdep = max(maxdep, 2)
         elif shape == "walk":
             k = rng.randint(4, 12)
+            # ...and the two index registers deposited after the loop, so
+            # a step lost where SCRATCH_STRICT suppressed the access shows
+            # in the output and not only in a later load (verifier-R3's
+            # plant C4 went green at 60 trials without them).
             insns = [seq.ldl(7, 0), seq.ldl(9, 1), seq.repeat(k),
                      seq.ldx(8, 7, rng.choice([1, 1, -1, 3])),
                      seq.stx(8, 9, rng.choice([1, -1, -1, 5])),
-                     seq.deposit(8), seq.endrep()] + insns
-            maxdep = max(maxdep, k)
+                     seq.deposit(8), seq.endrep(),
+                     seq.deposit(7), seq.deposit(9)] + insns
+            maxdep = max(maxdep, k + 2)
             R["walks"] += 1
         if io:
             nsin = max(2 if shape == "walk" else 0, rng.choice([0, 1, 3]))
@@ -1470,7 +1543,11 @@ def rev8_remote_refusals(lib, R):
                 handle = ctypes.c_void_p()
                 rc = lib.cft_program_load(dev, image, len(image),
                                           ctypes.byref(handle))
-                msg = lib.cft_last_error().decode()
+                # cft_last_error is only this call's after a refusal: a
+                # load that succeeds leaves the previous sentence there
+                # (verifier-R3), so it is read for a refusal alone.
+                msg = (lib.cft_last_error().decode() if rc != CFT_OK
+                       else "(loaded; no error)")
                 if rc == CFT_OK:
                     lib.cft_program_free(handle)
                 must_refuse = bool(bit) and not published
@@ -1538,7 +1615,7 @@ def main():
     R = dict(total=0, refused=0, bad=0, blocked=0, augadd=0, augerr=0,
              pair=0, ldx_step=0, stx_step=0, walks=0, strict=0, range=0,
              inv=0, ovf=0, unf=0, remote_refused=0, remote_loaded=0,
-             directed=0)
+             directed=0, own_index=0, own_index_range=0)
     try:
         for name in args.formats:
             fmt = FORMATS[name]
@@ -1683,12 +1760,15 @@ def main():
           f"{R['strict']} strict of which {R['range']} reported an "
           f"out-of-range index; runs raising invalid {R['inv']}, overflow "
           f"{R['ovf']}, underflow {R['unf']}; {R['directed']} directed "
-          f"refusals refused by both")
+          f"refusals refused by both; {R['own_index']} own-index loads "
+          f"(ldx rX, rX, step) equal in both and to their unstepped "
+          f"twins, {R['own_index_range']} of them strict and reporting")
     bad += S["bad"] + X["bad"] + M["bad"] + R["bad"]
     if R["total"] and not all(R[k] for k in (
             "refused", "blocked", "augadd", "augerr", "pair", "ldx_step",
             "stx_step", "walks", "strict", "range", "inv", "ovf", "unf",
-            "remote_refused", "remote_loaded", "directed")):
+            "remote_refused", "remote_loaded", "directed",
+            "own_index", "own_index_range")):
         print("THE REVISION-8 CORPUS DID NOT REACH EVERY FORM - a counter "
               "above is zero, so a form, a flag class, the strict report "
               "or the remote refusal went uncompared")

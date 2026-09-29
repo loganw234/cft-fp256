@@ -482,7 +482,7 @@ One 64-bit little-endian word.
 | 29 | `kc` | as `ka`, for source C |
 | 30 | `kx` | the constant indices come from `imm`, not from the operand fields |
 | 31 | `ctrl` | this is a control instruction |
-| 55:32 | `imm[23:0]` | the three constant indices under `kx`; the SLOT on `STL`/`LDL`; part of the trip count on `REPEAT`; zero otherwise |
+| 55:32 | `imm[23:0]` | the three constant indices under `kx`; the SLOT on `STL`/`LDL`; part of the trip count on `REPEAT`; the post-step in `imm[11:0]` on `STX`/`LDX` (revision 8, proposed: R22); zero otherwise |
 | 56 | `imm[24]` | `rd[4]`, the fifth bit of the destination register |
 | 57 | `imm[25]` | `ra[4]` |
 | 58 | `imm[26]` | `rb[4]` |
@@ -752,9 +752,10 @@ the hardware does not have to be:
   `imm[23:0]`, so `imm[24]` may; `STX` reads `ra` and `rb` and `LDX`
   writes `rd` and reads `rb`, so those two may set their own two high
   bits and must leave `imm[23:0]` at zero, because their slot comes
-  from a register and the immediate is read by nothing. On all four,
-  every remaining register field, `rnd`, `ka`/`kb`/`kc` and `kx` must
-  be zero.
+  from a register and the immediate is read by nothing - `imm[23:12]`
+  since revision 8's proposed R22 made `imm[11:0]` their post-step. On
+  all four, every remaining register field, `rnd`, `ka`/`kb`/`kc` and
+  `kx` must be zero.
 
   One redundancy is deliberately NOT refused: a `kx` instruction whose
   indices all happen to be below sixteen is a second spelling of a
@@ -2045,7 +2046,7 @@ CAPS2[12] = `cft_caps.seq_features` bit 16 =
 | form | effect |
 |---|---|
 | `STX ra, rb, step` | `scratch[rb] := ra`, then `rb := rb + step` |
-| `LDX rd, rb, step` | `rd := scratch[rb]`, then `rb := rb + step` |
+| `LDX rd, rb, step` | `rd := scratch[rb]`, then `rb := rb + step` - unless `rd` is `rb`, which keeps the loaded value |
 
 `scratch[rb]` is R4's and R8's: rb's bit pattern reduced modulo the depth,
 or reported under SCRATCH_STRICT.
@@ -2065,7 +2066,8 @@ XCVmem, the CV32E40P's post-incrementing loads and stores: "rD =
 Mem32(rs1) rs1 += Sext(Imm[11:0])", the store likewise - and twelve bits
 is RISC-V's I-type immediate. So the access uses the index as it stood, a
 store stores `ra` as it stood (the index itself, when `ra` is `rb`), and
-then the index steps.
+then the index steps - except where a load's destination is the index
+register itself, below.
 
 **Width and wrap: rung 3.** rb := (rb + step) modulo 2^W, W the format's
 width: IADD's arithmetic on the encoding, which the software backend
@@ -2086,18 +2088,26 @@ reports, which keeps R8's promise that a strict run reporting nothing
 computes the same at every depth. A step that walks past the depth
 reports nothing by itself; the first access past it does.
 
-**`LDX rd, rb, step` with `rd` = `rb` and a non-zero step is refused at
-load.** Both writes would land in one register, and CORE-V says which
-wins: "When same register is used as address and destination (rD == rs1)
-for post-incremented loads, loaded data has highest priority over
-incremented address" (rung 2). The step would select nothing - a second
-spelling of the unstepped LDX - and a field that selects nothing is
-refused, as `kx` with no constant operand is (rung 3). A step of zero, and
-STX with `ra` = `rb`, stay legal.
+**`LDX rd, rb, step` with `rd` = `rb`: the loaded value wins and the step
+is discarded - rung 2.** Both writes would land in one register, and
+RISC-V's post-increment loads define which one does: "When same register
+is used as address and destination (rD == rs1) for post-incremented loads,
+loaded data has highest priority over incremented address when writing to
+this same register" (CORE-V XCVmem, OpenHW's CV32E40P manual). So the
+register holds what the load delivered - the slot's value, or under
+SCRATCH_STRICT the +0 of a suppressed access - and `ldx rX, rX, s`
+computes exactly what `ldx rX, rX, 0` does. It is a second spelling of
+the unstepped load, and it loads: the step field is READ and a defined
+priority discards its effect, which is the latitude a `kx` instruction
+whose indices are all below sixteen has, not the refusal of a field
+nothing reads. It still needs CAPS2[12], as every non-zero step does - the
+bit is about the encoding. STX with `ra` = `rb` has one register write,
+the step's, and keeps it. (Until the send-back of 2026-09-29 this form was
+refused, a rung-3 choice taken while rung 2 had an answer.)
 
 **What a tile would need** (believed, not built). A stepped STX writes one
-register, rb, and a stepped LDX two, rd and then rb; the register file has
-one write port. In today's scratch states the port is idle in the cycle
+register, rb, and a stepped LDX two, rd and then rb - one, when rd is rb;
+the register file has one write port. In today's scratch states the port is idle in the cycle
 the index is on the bus (`S_SCR_AD`), so a step could ride it there. Under
 R18, where a load retires through the array's queue (P1's rule), the step
 is a second producer and needs a write cycle a beat unless revision 8
@@ -2138,11 +2148,20 @@ unit:
 
 Per term: looped 3 + 2s + e, stepped 1 + 2s + e + 2p, unrolled 1 + 2s.
 What that says, and no more:
-- The step saves exactly the two integer adds a term, 2 ALU - 12.7 to
-  12.9% of a looped term at fp64 and 14.2 to 14.5% at fp256 at today's
-  s - when its write is free (p = 0), and nothing when it takes a write
-  cycle of its own (p = 1), which is where one register-file write port
-  puts it under R18 unless revision 8 gives it another path.
+- The step saves exactly the two integer adds a term, 2 ALU, when its
+  write is free (p = 0): 13.2% of a looped term at fp64 and 14.7% at
+  fp256 at the census's s and e, and of a whole product, setup and stores
+  included, 12.7% and 12.9% at fp64 (N = 30, 64) and 14.2% and 14.5% at
+  fp256. It saves nothing when the step takes a write cycle of its own
+  (p = 1), which is where one register-file write port puts it under R18
+  unless revision 8 gives it another path.
+- Those shares carry the census's own uncertainty. Its loop cost e is not
+  resolved - one wall-clock run moves it anywhere from about 0.5 to 5.5 ns
+  (the same entry's corrections, verifier-V2) - so a looped term's share
+  is 12.0 to 14.6% at fp64 and 14.4 to 15.1% at fp256, and an order-30
+  product's 11.7 to 14.1% at fp64. The census records s's own spread
+  under the same noise too (4.7 to 5.7 at fp64); these figures take its
+  central value. `python/rev8_worth.py` prints each.
 - The unrolled form is the cheapest in time, because it has no loop:
   5,857 against the looped 7,796 and the stepped 6,804 at fp64, N = 30.
   It pays in words - O(N^2): 1,551 at N = 30 and 6,566 at N = 64 for one
@@ -2164,7 +2183,7 @@ is one FMA and the rest is compensation. The state lives in registers:
 
 | form | words | instructions a step | unrolled by two | the error is exact |
 |---|---|---|---|---|
-| Fast2Sum (Kahan) | 10 | 5 | 4 | only when x's exponent is at least y's |
+| Fast2Sum (Kahan) | 10 | 5 | 4 | whenever x's exponent is at least y's (sufficient, not necessary); not always |
 | TwoSum (Knuth) | 13 | 8 | 7 | always |
 | `augerr` + `augadd` | 8 | 3 | 3 | always |
 
@@ -2172,13 +2191,15 @@ Each step also costs a loop iteration, e. The first two pay a copy (an
 IOR) to keep x in one register in a REPEAT body, or unroll by two to
 rename it; the pair works in place. So a compensated step is 3
 instructions against the always-exact TwoSum's 7 or 8 - 57 to 62% fewer -
-and against Fast2Sum's 4 or 5 - 25 to 40% fewer - without Fast2Sum's
-precondition. None of it touches the scratch, so R18 does not move these
+and against Fast2Sum's 4 or 5 - 25 to 40% fewer - with its error exact
+for every pair of operands, where Fast2Sum's is guaranteed exact only
+under a condition on them. None of it touches the scratch, so R18 does not move these
 figures. The ask's "2 instructions instead of 4" counted one instruction
 delivering both halves; on this tile that is two register writes a beat
 either way (R21), so the pair's 3 is what a step costs. The three forms
 do not compute the same bits - roundTiesTowardZero and roundTiesToEven
-part at ties, and Fast2Sum is exact only under its precondition - so a
+part at ties, and Fast2Sum's error can differ where its condition does
+not hold - so a
 program ported from an RNE TwoSum changes its bits at ties, and each form
 is held to its own reference.
 
