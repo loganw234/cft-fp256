@@ -36,7 +36,9 @@ open, on the software backend:
      golden chain's state at that boundary, lane-major;
   5. cert.audit accepts the certificate from the states the tool wrote:
      every segment of every run, and then a sample the auditor draws
-     (its seed printed, so a red sample can be drawn again);
+     (its seed printed, so a red sample can be drawn again) - or, for
+     the one program certified with a relation broken on purpose, refuses
+     it by the name the relation's check has (aux-start);
   6. the identity lines are the library's: build-id is what the binary's
      own `--build-id` prints and what the tree builds (CFT_EXPECT_BUILD_ID);
      the software backend's device lines are `none` and its tiles 1.
@@ -45,11 +47,28 @@ Then:
      keyed and open, against an HMAC written here from RFC 2104;
   8. every refusal an input or the instrument can cause, by its name and
      exit code (the page lists those only a failure can reach), a refusal
-     before the run leaving nothing behind; and for each of the page's
-     names, the golden writer refusing the same defect by the same name;
-  9. with --serve: one certificate through a loopback cft-serve, stopped
-     by its PID - backend remote, the device lines the page's remote rule
-     gives, and every run block byte for byte the software backend's.
+     before the run leaving nothing behind; for each of the page's names,
+     the golden writer refusing the same defect by the same name; and each
+     refusal whose command line has an --out of its own again with a file
+     already there, which must come through it byte for byte - the tool
+     removes only what it created;
+  9. with --serve: lorenz63 and flagstep certified through a loopback
+     cft-serve, stopped by its PID - backend remote, the device lines the
+     page's remote rule gives, and every run block byte for byte the
+     software backend's, flagstep's flag words and STATUS among them;
+ 10. memory. What a run beside the main run costs: flagstep on 65,535
+     lanes, a main run and two half-step runs, against the main run alone
+     - no more than the two runs' inputs and one state to spare, where
+     4eed552 held every run's working set at once (verifier-C7's
+     regression); peak commit on Windows, on Linux the least address
+     space the run writes its certificate in (ulimit -v), found by
+     bisection. And what the trial costs the runs, to the page: the least
+     address space with the trial and with its allocations skipped
+     (CFT_SEGRUN_PLANT=trial-skipped), in two small shapes where eb2d1ae's
+     trial cost them up to 40 KiB (verifier-C7) - on Linux; on Windows,
+     where identical runs' peak commit differs by several pages, NOT
+     TESTED, by name. A host whose hard address-space limit stops a
+     measurement says NOT TESTED too, and the gate goes on.
 
 The programs: lorenz63-rk4, lorenz96-rk4 and henonheiles-lf at fp64 and
 fp256, each image held to programs/MANIFEST, with its classic bank, a
@@ -60,6 +79,12 @@ widened. And `flagstep`, written here: its segments raise flags 20, 0,
 1, 0, 20 and STATUS 48, 48, 0, 48, 48. Every ODE segment raises 16 and 0,
 so the ODE programs alone cannot tell a writer that drops STATUS, or
 writes one segment's flags against another, from one that does not.
+And lorenz63 at fp64 once more, its half-step run entered from an
+initial state of its OWN, unlike the main run's: every other half-step
+run shares run 0's, so a writer that entered a half-step run from run
+0's --init would pass them all (verifier-C6's plant). The tool must
+still write the golden writer's bytes for what it was handed; the audit
+refuses the certificate `aux-start`.
 
 Exit 0 only if every check passed; the last line says so.
 """
@@ -90,8 +115,14 @@ from cft_golden import softfloat as sf  # noqa: E402
 import gen_odes  # noqa: E402
 
 # The tool's own refusals, beside the page's table (docs/CERTIFICATES.md,
-# "The segment runner"): a command line, a device, an output.
-TOOL_OWN = {"usage": 64, "device": 69, "output": 73}
+# "The segment runner"): a command line, a device, memory, an output.
+TOOL_OWN = {"usage": 64, "device": 69, "memory": 71, "output": 73}
+
+# How long one run of the tool may take here before it is stopped and
+# failed by name: every run the gate asks for takes well under a second,
+# and a refusal that did not come - a run of 10^12 segments started -
+# must end the check, not the afternoon.
+TOOL_TIMEOUT = 120
 
 # lanes and segments a main run, chosen for time: lorenz96 carries forty
 # slots a lane and costs the golden executor about 0.24 s a lane-segment
@@ -189,6 +220,10 @@ class RunSpec:
 class Program:
     name: str
     runs: list
+    # None: the golden audit must accept the certificate. A refusal's
+    # name: the certificate carries a relation broken on purpose, and the
+    # audit must refuse it by that name, full and sampled alike.
+    audit_refuses: str = None
 
 
 def halved(fmt, bank, slots):
@@ -268,6 +303,28 @@ def flagstep_program():
                    [RunSpec("main", img, b"", init, "fp64", 5, 1)])
 
 
+def half_init_program(l63):
+    """lorenz63 at fp64 (`l63`, the gate's own) with its half-step run
+    entered from an initial state of its own: every lane's x a further
+    1/128 along, exactly. Every other half-step run in the gate shares run
+    0's initial state, so a writer that entered a half-step run from run
+    0's --init would pass them all (verifier-C6, 2026-09-28). The
+    certificate states a relation that does not hold, and the audit
+    refuses it aux-start; the tool is still held to the golden writer's
+    bytes for what it was handed."""
+    main, half = l63.runs[0], l63.runs[1]
+    assert (main.kind, half.kind) == ("main", "half-step")
+    lanes = len(main.init) // 3
+    other = []
+    for i in range(lanes):
+        other += [dec("fp64", repr(1 + i / 64 + 1 / 128)), dec("fp64", "1"),
+                  dec("fp64", "1")]
+    assert other != main.init and len(other) == len(main.init)
+    return Program("lorenz63-rk4-fp64-half-init",
+                   [main, dataclasses.replace(half, init=other)],
+                   audit_refuses="aux-start")
+
+
 # ---- the tool -------------------------------------------------------------
 
 TOOL = SERVE = None
@@ -280,8 +337,13 @@ def run_tool(args, env=None):
     e.pop("CFT_SEGRUN_PLANT", None)
     if env:
         e.update(env)
-    r = subprocess.run([str(TOOL)] + [str(a) for a in args],
-                       capture_output=True, text=True, env=e)
+    try:
+        r = subprocess.run([str(TOOL)] + [str(a) for a in args],
+                           capture_output=True, text=True, env=e,
+                           timeout=TOOL_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return (-1, "", f"segrun_check: the tool ran past {TOOL_TIMEOUT} s "
+                        f"and was stopped")
     return r.returncode, r.stdout, r.stderr
 
 
@@ -420,26 +482,42 @@ def certify_and_hold(prog, chains, mode, work, device="sw", tag="",
                   if boundary_file(sdir, r, b).is_file()}
               for r, (st, _) in enumerate(chains)}
     progs = {r: (spec.image, spec.bank) for r, spec in enumerate(prog.runs)}
-    try:
-        t0 = time.perf_counter()
-        v = cert.audit(data, salt, progs, states=states)
-        check([len(x["rerun"]) for x in v.runs] ==
-              [spec.segments for spec in prog.runs],
-              f"{what}: the golden audit ACCEPTS it, every segment of every "
-              f"run re-run from the states the tool wrote "
-              f"({time.perf_counter() - t0:.1f} s)")
-    except cert.Refusal as e:
-        bad(f"{what}: the golden audit refuses it: {e.name}: {e.message}")
-    try:
-        choose = {r: ("sample", max(1, spec.segments // 2))
-                  for r, spec in enumerate(prog.runs)}
-        v = cert.audit(data, salt, progs, states=states, choose=choose)
-        ok(f"{what}: the golden audit ACCEPTS a sample of "
-           f"{[len(x['rerun']) for x in v.runs]} segments, seed "
-           f"{v.runs[0]['seed']}")
-    except cert.Refusal as e:
-        bad(f"{what}: the golden audit refuses a sample: {e.name}: "
-            f"{e.message}")
+    choose = {r: ("sample", max(1, spec.segments // 2))
+              for r, spec in enumerate(prog.runs)}
+    if prog.audit_refuses:
+        # a relation broken on purpose: the audit must refuse it by its
+        # check's name, full and sampled alike (relations come before any
+        # re-run)
+        for how, kw in (("in full", {}), ("sampled", {"choose": choose})):
+            try:
+                cert.audit(data, salt, progs, states=states, **kw)
+                bad(f"{what}: the golden audit ACCEPTS it {how}, and its "
+                    f"relation is broken on purpose")
+            except cert.Refusal as e:
+                check(e.name == prog.audit_refuses,
+                      f"{what}: the golden audit refuses it {how}, "
+                      f"{prog.audit_refuses}, as its broken relation must be",
+                      f"it says {e.name}: {e.message}")
+    else:
+        try:
+            t0 = time.perf_counter()
+            v = cert.audit(data, salt, progs, states=states)
+            check([len(x["rerun"]) for x in v.runs] ==
+                  [spec.segments for spec in prog.runs],
+                  f"{what}: the golden audit ACCEPTS it, every segment of "
+                  f"every run re-run from the states the tool wrote "
+                  f"({time.perf_counter() - t0:.1f} s)")
+        except cert.Refusal as e:
+            bad(f"{what}: the golden audit refuses it: {e.name}: "
+                f"{e.message}")
+        try:
+            v = cert.audit(data, salt, progs, states=states, choose=choose)
+            ok(f"{what}: the golden audit ACCEPTS a sample of "
+               f"{[len(x['rerun']) for x in v.runs]} segments, seed "
+               f"{v.runs[0]['seed']}")
+        except cert.Refusal as e:
+            bad(f"{what}: the golden audit refuses a sample: {e.name}: "
+                f"{e.message}")
     hold_identity(what, parsed.identity,
                   "remote" if device.startswith("cft://") else
                   "software" if device == "sw" else "xrt")
@@ -623,6 +701,9 @@ def hold_refusals(work, l63, flag):
     half_bank = f("l63.half", l63.runs[1].bank)
     exists = d / "exists"
     exists.mkdir(exist_ok=True)
+    # a file already at --out: every refusal must leave it byte for byte
+    kept = b"a file that was at --out before the run\n" + bytes(range(256))
+    P["existing"] = f("existing.cert", kept)
 
     def base(out, sdir, image="img", bnk="bank", ini="init", seg="1",
              steps="100", mode=("--salt", P["salt"]), extra=(), runs=None):
@@ -792,7 +873,84 @@ def hold_refusals(work, l63, flag):
          lambda o, s: base(o, exists), None, None),
         ("a certificate in a directory that is not there", "output",
          lambda o, s: base(d / "absent" / "c.cert", s), None, None),
+        # P3b (verifier-C6's findings): no run overwrites a file it did not
+        # make; the certificate can never be a boundary file; and a run the
+        # process cannot hold is refused by name before anything runs
+        ("an --out that is there already", "output",
+         lambda o, s: base(P["existing"], s), None, None),
+        ("an --out inside --states, named as boundary 0", "output",
+         lambda o, s: base(s / "run-0-boundary-0.bin", s), None, None),
+        ("run 1 asking 2^63 - 1 segments, run 0 one", "memory",
+         lambda o, s: base(o, s, runs=main_run + [
+             str((1 << 63) - 1) if x == "2" else x for x in half_run]),
+         None, None),
+        ("10^12 segments", "memory",
+         lambda o, s: base(o, s, seg=str(10 ** 12)), None, None),
+        # verifier-C7's Windows findings: an existing directory at --out
+        # was refused as "Permission denied", and the null device accepted
+        ("an --out that is a directory there already", "output",
+         lambda o, s: base(exists, s), None, None),
+        ("the null device as --out", "output",
+         lambda o, s: base(os.devnull, s), None, None),
     ]
+    # refused by a check the tool makes only after the outputs are made:
+    # the library's loader, which needs the device, opened after them
+    AFTER_OUTPUTS = {"an image the loader refuses (an unknown control code)"}
+
+    def survive(i, label, name, argf, env):
+        """The same refusal with a file already at --out, which it must
+        leave byte for byte. A defect found only after the outputs are
+        made - the device, the library's loader, the flag words, the states
+        directory - is met first by the --out that is there, refused
+        `output`. A case whose command line has no --out of its own to give
+        it (none at all, the two small modes, or an --out the case fixes)
+        has nothing to keep, and is not counted."""
+        keep, sdir2 = d / f"case{i}.kept", d / f"case{i}.states2"
+        args2 = [str(a) for a in argf(keep, sdir2)]
+        if "--out" not in args2 or \
+                args2[args2.index("--out") + 1] != str(keep):
+            return
+        keep.write_bytes(kept)
+        rc2, _, se2 = run_tool(args2, env)
+        m2 = REFUSED.search(se2)
+        got2 = m2.group(1) if m2 else None
+        late = (name in ("device", "output") or label in AFTER_OUTPUTS
+                or (env or {}).get("CFT_SEGRUN_PLANT", "").startswith(
+                    "flags-"))
+        want2 = "output" if late else name
+        code2 = cert.REFUSALS.get(want2, TOOL_OWN.get(want2))
+        same = keep.is_file() and keep.read_bytes() == kept
+        check(rc2 == code2 and got2 == want2 and same and not sdir2.exists(),
+              f"  and a file already at --out comes through it byte for "
+              f"byte, refused {want2}: {label}",
+              f"exit {rc2}, {got2 or 'no refusal named'}, the file "
+              f"{'kept' if same else 'CHANGED or gone'}, states "
+              f"{'left' if sdir2.exists() else 'none'}: "
+              f"{se2.strip()[-200:]}")
+
+    # what a refusal's words must begin with (a regular expression), where
+    # the name alone would not show the check it was made by: an --out
+    # inside --states must be refused as the --out it is, not later as a
+    # boundary file that collides with it; a run too long to hold, by what
+    # is held before any segment runs - run 1 by its own size, before run
+    # 0 has run. 10^12 segments are refused by the boundary hashes'
+    # allocation where memory is not overcommitted (the Windows desktop),
+    # and by the certificate's text, 200 TB, past what a process can
+    # address, where it is (WSL cft2204, vm.overcommit_memory 1).
+    says = {"an --out that is there already": r"--out .+ is there already",
+            "an --out inside --states, named as boundary 0":
+                r"--out .+ cannot be created",
+            "run 1 asking 2^63 - 1 segments, run 0 one":
+                r"run 1: \d+ segments need more memory than this process "
+                r"can address",
+            "10^12 segments":
+                r"(run 0: \d+ x 65 bytes for the boundary hashes|\d+ x 1 "
+                r"bytes for the certificate's text) could not be had; .*"
+                r"before anything is made",
+            "an --out that is a directory there already":
+                r"--out .+ is there already",
+            "the null device as --out":
+                r"--out .+ (is not a file|is there already)"}
     for i, (label, name, argf, env, twin) in enumerate(cases):
         out, sdir = d / f"case{i}.cert", d / f"case{i}.states"
         args = argf(out, sdir)
@@ -803,6 +961,11 @@ def hold_refusals(work, l63, flag):
         check(rc == code and got == name,
               f"refused {name} (exit {code}): {label}",
               f"exit {rc}, {got or 'no refusal named'}: {se.strip()[-240:]}")
+        if label in says:
+            words = se[m.end():].lstrip() if m else ""
+            check(re.match(says[label], words) is not None,
+                  f"  and its words begin {says[label]!r}: {label}",
+                  f"they are {words.strip()[:200]!r}")
         if env and env["CFT_SEGRUN_PLANT"] in ("flags-unwritten",
                                                 "flags-wide"):
             files = sorted(os.listdir(sdir)) if sdir.is_dir() else None
@@ -817,6 +980,7 @@ def hold_refusals(work, l63, flag):
                 left = [p.name for p in (out,) if p.exists()]
             check(not left, f"  and nothing left behind: {label}",
                   f"left {left}")
+        survive(i, label, name, argf, env)
         if twin is not None:
             try:
                 twin()
@@ -829,20 +993,306 @@ def hold_refusals(work, l63, flag):
                 bad(f"  the golden writer has no name for {label}: "
                     f"{type(e).__name__}: {e}")
     check(not (d / "absent").exists(), "a refused --out made no directory")
+    # read only if it is there: a tool that removed it fails here by name,
+    # and the gate goes on to the remote leg and removes its work directory
+    # (verifier-C7's plant F crashed this line at 4eed552)
+    check(P["existing"].is_file() and P["existing"].read_bytes() == kept,
+          "the file at --out in 'an --out that is there already' is as it "
+          "was, byte for byte",
+          "it is CHANGED" if P["existing"].is_file() else "it is GONE")
+
+
+# ---- memory: what a run costs, and what the trial costs --------------------
+
+# flagstep at fp64: 16 bytes a lane, so 1,048,560 bytes of state - 16
+# short of 1 MiB, so that the tool reads each initial state into a buffer
+# of exactly 1 MiB
+PEAK_LANES = 65535
+
+
+def read_buffer(n):
+    """What cft-segrun's read_file holds an n-byte file in: 64 KiB,
+    doubled until the file's bytes and its end both fit."""
+    cap = 1 << 16
+    while cap <= n:
+        cap *= 2
+    return cap
+
+
+class Unmeasured(Exception):
+    """This host cannot take the measurement: named NOT TESTED, never a
+    failure of the tool and never a crash of the gate."""
+
+
+class Unwritten(Exception):
+    """The run did not write its certificate under all the memory the
+    measurement may give it: the tool's failure, by name."""
+
+
+def tool_env(env):
+    e = dict(os.environ)
+    e.pop("CFT_SEGRUN_PLANT", None)
+    if env:
+        e.update(env)
+    return e
+
+
+def peak_commit(args, env=None):
+    """Windows: the run's peak commit (PeakPagefileUsage), read from its
+    process handle once it has exited. -> (rc, stderr, bytes)"""
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+
+        class Counters(ctypes.Structure):
+            _fields_ = [("cb", wt.DWORD), ("PageFaultCount", wt.DWORD),
+                        ("PeakWorkingSetSize", ctypes.c_size_t),
+                        ("WorkingSetSize", ctypes.c_size_t),
+                        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                        ("PagefileUsage", ctypes.c_size_t),
+                        ("PeakPagefileUsage", ctypes.c_size_t)]
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.K32GetProcessMemoryInfo.argtypes = [
+            wt.HANDLE, ctypes.POINTER(Counters), wt.DWORD]
+        k32.K32GetProcessMemoryInfo.restype = wt.BOOL
+        p = subprocess.Popen([str(TOOL)] + [str(a) for a in args],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, env=tool_env(env))
+    except (ImportError, AttributeError, OSError, ValueError) as e:
+        raise Unmeasured(f"the peak commit cannot be read here: "
+                         f"{type(e).__name__}: {e}")
+    try:
+        _, se = p.communicate(timeout=TOOL_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.communicate()
+        return -1, f"stopped after {TOOL_TIMEOUT} s", 0
+    c = Counters()
+    c.cb = ctypes.sizeof(c)
+    if not k32.K32GetProcessMemoryInfo(int(p._handle), ctypes.byref(c),
+                                       c.cb):
+        raise Unmeasured(f"GetProcessMemoryInfo failed "
+                         f"({ctypes.get_last_error()})")
+    return p.returncode, se, c.PeakPagefileUsage
+
+
+def least_address_space(argf, d, tag, env=None, step=4096):
+    """Linux: the least address space - RLIMIT_AS, verifier-C7's `ulimit
+    -v` - under which the run writes its certificate, to `step` bytes:
+    doubled from 16 MiB until it writes, then bisected. Only the soft
+    limit is set, and never past the hard limit this process has, which
+    an unprivileged process may not raise (verifier-C7 ran the gate as
+    `nobody` under a hard limit of about 8 GB: the 16 GiB this asked for
+    at eb2d1ae stopped it with a traceback). -> bytes; Unmeasured when
+    the hard limit stops the measurement, Unwritten when 16 GiB does not
+    let the run write."""
+    try:
+        import resource
+        hard = resource.getrlimit(resource.RLIMIT_AS)[1]
+    except (ImportError, OSError, ValueError) as e:
+        raise Unmeasured(f"RLIMIT_AS cannot be read here: {e}")
+    cap = 1 << 34
+    if hard != resource.RLIM_INFINITY and hard < cap:
+        cap = hard
+    n = [0]
+    last = [""]
+
+    def ok(limit):
+        n[0] += 1
+        out, sdir = d / f"{tag}{n[0]}.cert", d / f"{tag}{n[0]}.states"
+
+        def lim():
+            resource.setrlimit(resource.RLIMIT_AS, (limit, hard))
+        try:
+            r = subprocess.run([str(TOOL)] + [str(a) for a in
+                                              argf(out, sdir)],
+                               capture_output=True, text=True,
+                               preexec_fn=lim, env=tool_env(env),
+                               timeout=TOOL_TIMEOUT)
+            good, last[0] = r.returncode == 0, r.stderr
+        except subprocess.TimeoutExpired:
+            good, last[0] = False, f"stopped after {TOOL_TIMEOUT} s"
+        except (subprocess.SubprocessError, OSError, ValueError) as e:
+            raise Unmeasured(f"the tool cannot be started under an address-"
+                             f"space limit here: {type(e).__name__}: {e}")
+        finally:
+            if out.exists():
+                out.unlink()
+            shutil.rmtree(sdir, ignore_errors=True)
+        return good
+
+    lo, hi = 0, min(1 << 24, cap)
+    while not ok(hi):
+        if hi >= cap and cap < 1 << 34:
+            raise Unmeasured(f"the run does not write its certificate under "
+                             f"{hi} bytes, this process's hard address-"
+                             f"space limit: {last[0].strip()[-200:]}")
+        if hi >= cap:
+            raise Unwritten(f"not even under {hi} bytes: "
+                            f"{last[0].strip()[-240:]}")
+        lo, hi = hi, min(hi * 2, cap)
+    while hi - lo > step:
+        mid = (lo + hi) // 2 // step * step
+        if mid <= lo:
+            break
+        if ok(mid):
+            hi = mid
+        else:
+            lo = mid
+    return hi
+
+
+def kib(n):
+    return f"{n / 1024:,.0f} KiB"
+
+
+def hold_peak(work, flag):
+    """verifier-C7's regressions, held.
+    4eed552 held every run's two states and streams at once, where
+    99f1b43 held one run's: a main run and two half-step runs must cost
+    what the main run alone does, and no more than the two further runs'
+    inputs beside it and one state to spare. Measured as the platform
+    measures a process: its peak commit on Windows, and on Linux the least
+    address space it writes its certificate in.
+    eb2d1ae's trial took its pieces under 64 KiB from the C library's heap
+    and left the heap bigger, so the runs needed up to 40 KiB more than
+    99f1b43's: the trial must cost the runs nothing, to the page. Held on
+    Linux, where the least address space is the same run after run; on
+    Windows, identical runs' peak commit differs by several pages, so
+    there it is NOT TESTED."""
+    print("== 10. memory: a run beside the main run costs its own inputs, "
+          "and the trial costs the runs nothing", flush=True)
+    d = work / "peak"
+    d.mkdir(parents=True, exist_ok=True)
+    img = flag.runs[0].image
+    lane = list(flag.runs[0].init[:2])
+    pi = d / "flag.cftp"
+    pi.write_bytes(img)
+    inits = {}
+    for lanes in (PEAK_LANES, 1, 16):
+        inits[lanes] = d / f"flag-{lanes}.init"
+        inits[lanes].write_bytes(cert.state_bytes("fp64", lane * lanes))
+    salt = d / "salt.bin"
+    salt.write_bytes(bytes(range(32)))
+
+    def argf(lanes, segments, n_half, keyed=False):
+        pn = inits[lanes]
+
+        def f(out, sdir):
+            a = ["--out", out, "--states", sdir,
+                 *(("--salt", salt) if keyed else ("--open",)),
+                 "--run", "main", "--image", pi, "--init", pn,
+                 "--segments", str(segments), "--steps", "1"]
+            for _ in range(n_half):
+                a += ["--run", "half-step", "--h-slots", "0", "--image", pi,
+                      "--init", pn, "--segments", str(2 * segments),
+                      "--steps", "1"]
+            return a
+        return f
+
+    linux = sys.platform.startswith("linux")
+    what_run = "what a run beside the main run costs"
+    try:
+        # 1. a run's own working set: one run against three
+        shapes = (("the main run alone", 0),
+                  ("the main run and two half-step runs", 2))
+        vals = []
+        if os.name == "nt":
+            how = "peak commit"
+            for label, k in shapes:
+                out, sdir = d / f"w{k}.cert", d / f"w{k}.states"
+                rc, se, pk = peak_commit(argf(PEAK_LANES, 1, k)(out, sdir))
+                if not check(rc == 0, f"{label}, {PEAK_LANES} lanes: "
+                             f"written, and its peak commit read",
+                             f"rc {rc}: {se.strip()[-240:]}"):
+                    return
+                vals.append(pk)
+        elif linux:
+            how = "least address space (ulimit -v)"
+            for label, k in shapes:
+                try:
+                    vals.append(least_address_space(
+                        argf(PEAK_LANES, 1, k), d, f"l{k}-", step=1 << 16))
+                except Unwritten as e:
+                    bad(f"{label}, {PEAK_LANES} lanes: written, under a "
+                        f"limit found by bisection - {e}")
+                    return
+                ok(f"{label}, {PEAK_LANES} lanes: written, under a limit "
+                   f"found by bisection")
+        else:
+            raise Unmeasured(f"no way to measure a process's peak here "
+                             f"({sys.platform})")
+        one, three = vals
+        inputs = 2 * (read_buffer(PEAK_LANES * 16) + read_buffer(len(img)))
+        state = PEAK_LANES * 16
+        check(three - one <= inputs + state,
+              f"{how}: the main run alone {kib(one)}, with two half-step "
+              f"runs {kib(three)} - {kib(three - one)} more, within the two "
+              f"runs' inputs ({kib(inputs)}) and one state ({kib(state)})",
+              f"{kib(three - one)} more, past {kib(inputs + state)}: a run "
+              f"holds a working set of its own beside the others' (4eed552 "
+              f"held every run's states at once; verifier-C7)")
+    except Unmeasured as e:
+        skip(what_run, f"NOT TESTED here - {e}")
+
+    # 2. the trial's cost to the runs, to the page: the least address
+    # space with the trial and with its allocations skipped (the
+    # instrument), in two small shapes verifier-C7 found it in
+    trial_shapes = (
+        ("1 lane, open, a main run of 100 segments and a half-step run "
+         "of 200", argf(1, 100, 1)),
+        ("16 lanes, keyed, a main run of 30 segments and two half-step "
+         "runs of 60", argf(16, 30, 2, keyed=True)))
+    what_trial = "what the trial costs the runs, to the page"
+    if not linux:
+        skip(what_trial, "NOT TESTED here - " + (
+             "identical runs' peak commit differs by several pages on "
+             "Windows, so a page is below what it can see; held on Linux"
+             if os.name == "nt" else
+             f"no way to measure a process's address space here "
+             f"({sys.platform})"))
+        return
+    try:
+        for i, (label, f) in enumerate(trial_shapes):
+            try:
+                with_trial = least_address_space(f, d, f"t{i}-")
+                without = least_address_space(
+                    f, d, f"s{i}-", env={"CFT_SEGRUN_PLANT": "trial-skipped"})
+            except Unwritten as e:
+                bad(f"what the trial costs the runs ({label}): the run "
+                    f"written under a limit found by bisection - {e}")
+                continue
+            check(with_trial <= without,
+                  f"least address space with the trial {kib(with_trial)}, "
+                  f"with its allocations skipped {kib(without)}: the trial "
+                  f"costs the runs nothing ({label})",
+                  f"the trial costs the runs {kib(with_trial - without)} - "
+                  f"it has left the heap bigger (eb2d1ae's pieces under "
+                  f"64 KiB from calloc; verifier-C7)")
+    except Unmeasured as e:
+        skip(what_trial, f"NOT TESTED here - {e}")
 
 
 # ---- the remote leg ---------------------------------------------------------
 
-def hold_remote(work, prog, chains, sw_data):
+def hold_remote(work, legs):
+    """`legs`: (program, its golden chains, its keyed software certificate)
+    for each program certified through the server - lorenz63, whose every
+    segment is flags 16 and STATUS 0, and flagstep, whose are not, so that
+    a flag word or STATUS lost on the way back from a server is seen."""
     print("== 9. through a loopback cft-serve: the page's remote rule, and "
-          "the same chain", flush=True)
+          "the same chains", flush=True)
     rd = work / "remote"
     rd.mkdir(parents=True, exist_ok=True)
     port_file, pid_file = rd / "port", rd / "pid"
     log = open(rd / "serve.log", "w")
     proc = subprocess.Popen([str(SERVE), "--port", "0", "--port-file",
                              str(port_file), "--pid-file", str(pid_file),
-                             "--max-conns", "1"],
+                             "--max-conns", str(len(legs))],
                             stdout=log, stderr=subprocess.STDOUT)
     print(f"  cft-serve pid {proc.pid}", flush=True)
     try:
@@ -856,15 +1306,15 @@ def hold_remote(work, prog, chains, sw_data):
         if not check(port is not None, "cft-serve reports its port",
                      f"exit {proc.poll()}"):
             return
-        res = certify_and_hold(prog, chains, "keyed", work,
-                               device=f"cft://127.0.0.1:{port}",
-                               tag=" remote")
-        if res is None:
-            return
-        data = res[0]
-        check(runs_part(data) == runs_part(sw_data),
-              f"{prog.name} keyed remote: every run block, byte for byte, "
-              f"the software backend's")
+        for prog, chains, sw_data in legs:
+            res = certify_and_hold(prog, chains, "keyed", work,
+                                   device=f"cft://127.0.0.1:{port}",
+                                   tag=" remote")
+            if res is None:
+                continue
+            check(runs_part(res[0]) == runs_part(sw_data),
+                  f"{prog.name} keyed remote: every run block, byte for "
+                  f"byte, the software backend's")
     finally:
         if proc.poll() is None:
             proc.terminate()              # by PID: this child and no other
@@ -950,6 +1400,8 @@ def main():
             p.runs = [r for r in p.runs if r.kind != "wider"]
     flag = flagstep_program()
     programs.append(flag)
+    programs.append(half_init_program(
+        next(p for p in programs if p.name == "lorenz63-rk4-fp64")))
     chains = {}
     for prog in programs:
         PATHS[prog.name] = write_inputs(work, prog)
@@ -1021,11 +1473,13 @@ def main():
                   "behind its server", flush=True)
         else:
             skip("the remote leg", "no --serve given")
-    elif l63.name in sw_keyed:
-        hold_remote(work, l63, chains[l63.name], sw_keyed[l63.name])
+    elif l63.name in sw_keyed and flag.name in sw_keyed:
+        hold_remote(work, [(p, chains[p.name], sw_keyed[p.name])
+                           for p in (l63, flag)])
     else:
-        bad("the remote leg: the software certificate it compares with was "
+        bad("the remote leg: a software certificate it compares with was "
             "not made")
+    hold_peak(work, flag)
 
     if not args.keep:
         shutil.rmtree(work, ignore_errors=True)

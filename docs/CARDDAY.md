@@ -786,7 +786,11 @@ the library itself.
 the certificates made on the quad's four tiles and 295 of 295 on the
 single, and the negative control failed the device lines by name. The
 records are `Data/runs/2026-09-28-cert-round/card-p3/`, which is not
-tracked. Left as written below, because the list is also the recipe.*
+tracked. It ran again after each of P3b's commits, 8 of 8 each time,
+the gate on each image 373 of 373 at 4eed552, 382 of 382 at eb2d1ae,
+and 384 of 384 at d4abe2a, nothing skipped (card-p3b/, card-p3b2/ and
+card-p3b3/, beside card-p3/). Left as written below, because the list
+is also the recipe.*
 
 The certificate round's step 3 (docs/ROADMAP.md) is `cft-segrun`
 (docs/CERTIFICATES.md, "The segment runner"). It is held on the
@@ -813,12 +817,21 @@ model needs the standard library only). In order, each step an `ok` or a
      run (left out, on a NOTE line, for an image without fp128);
    - `flagstep`, whose segments raise flags and a STATUS the ODE
      programs never do (a NOTE, NOT TESTED, if the image refuses it);
+   - since P3b, `lorenz63-rk4` at fp64 once more, its half-step run
+     entered from a state of its own;
    - each certificate accepted by the golden reader, byte for byte the
      golden writer's from the initial states, its boundary files the
      golden chain's, and accepted by the golden audit, in full and
-     sampled;
+     sampled - all but that last one, which the audit must refuse
+     `aux-start`;
    - each made again on the software backend, every run block byte for
-     byte the card's.
+     byte the card's;
+   - on the software backend, the gate's refusals, and since P3b's
+     send-backs its memory checks: what a run beside the main run costs,
+     and what the trial costs the runs, each the least `ulimit -v` found
+     by bisection. At eb2d1ae the first alone took about 22 s on the
+     box, the gate going from 54 and 51 s to 76 and 75 s (card-p3b/,
+     card-p3b2/).
 3. **The negative control.** Handed device-test's own SHA-256 as the
    image's, the gate must fail the device lines by name.
 

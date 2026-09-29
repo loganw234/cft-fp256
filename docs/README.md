@@ -1,12 +1,12 @@
 # The documents, by what you open them for
 
-Thirty-eight files, 53,565 lines. Flat in one directory they look like one
+Thirty-eight files, 53,743 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **18,442 lines you consult while working** — the three under *Start here*,
+- **18,607 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,219 lines of tool manual**, one per shipped program;
-- **1,970 lines of operations**, read when you are about to do something to
+- **1,983 lines of operations**, read when you are about to do something to
   hardware;
 - **26,934 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
@@ -48,7 +48,7 @@ product, not the implementation.
 | [SEQUENCER.md](SEQUENCER.md) | 1,914 | The orbit sequencer and the program model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 862 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
-| [CERTIFICATES.md](CERTIFICATES.md) | 1,284 | The certificate, version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Complete enough to write a reader and an auditor from the page. And the segment runner, `cft-segrun`, that writes one from the library. |
+| [CERTIFICATES.md](CERTIFICATES.md) | 1,449 | The certificate, version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Complete enough to write a reader and an auditor from the page. And the segment runner, `cft-segrun`, that writes one from the library. |
 
 ## Reference you call into
 
@@ -83,7 +83,7 @@ running.
 | document | lines | what it is for |
 |---|---|---|
 | [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 245 | Building a bitstream, and the five traps — three of which exit 0, and two that look like a design failure. `hw/build-pair.sh` is this document as an executable. |
-| [CARDDAY.md](CARDDAY.md) | 945 | Card day: the runbook as it was actually run, the staged pairs, and the forensics kept when build trees are reclaimed. |
+| [CARDDAY.md](CARDDAY.md) | 958 | Card day: the runbook as it was actually run, the staged pairs, and the forensics kept when build trees are reclaimed. |
 | [BRINGUP.md](BRINGUP.md) | 780 | Hardware bring-up, and the gates CI's green tick does not cover. |
 
 ## The record
