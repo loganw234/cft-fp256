@@ -274,7 +274,7 @@ if [ "$CARD" -eq 1 ]; then
   if [ ! -d vectors/out ] || [ -z "$(ls vectors/out 2> /dev/null)" ]; then
     make vectors > "$OUT/vectors.log" 2>&1 || fail "--card: make vectors failed, see $OUT/vectors.log"
   fi
-  say "vectors: $(ls vectors/out | wc -l) sets"
+  say "vectors: $(ls vectors/out/*.jsonl | wc -l) sets"
   xrt xbutil examine > "$OUT/xbutil-examine.txt" 2>&1
   card=$(grep -m1 -E '\[[0-9a-f]{4}:[0-9a-f:.]+\]' "$OUT/xbutil-examine.txt" | tr -s ' |' ' ')
   [ -n "$card" ] || fail "--card: xbutil examine lists no device, see $OUT/xbutil-examine.txt"

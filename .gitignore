@@ -41,13 +41,17 @@ packaged_kernel/
 .run.prev/
 .ipcache/
 
-# generated vectors (regenerate with vectors/gen_vectors.py)
+# generated vectors (regenerate with vectors/gen_vectors.py), and beside
+# them the SHA256SUMS a finished generation writes last, which
+# verify/run.sh holds them to before it replays them
 vectors/out/
 # and the generator's content-hash manifest, which records what it
 # wrote so an unchanged model need not write it again. Outside
-# vectors/out on purpose: a vector set is a directory of vector sets
-# and nothing else, so a consumer that scans it - or a hash walk that
-# proves two runs produced the same bytes - sees what it always saw.
+# vectors/out on purpose: it is the cache's, not the sets'. vectors/out
+# holds the sets and their one record, and every reader in this tree
+# takes a set by name or by .jsonl, so a consumer that scans it - or a
+# hash walk over the sets that proves two runs produced the same bytes -
+# sees what it always saw.
 vectors/.gen-cache/
 
 # libcft build products (make -C host)
