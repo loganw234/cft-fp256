@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Thirty-eight files, 55,703 lines. Flat in one directory they look like one
+Thirty-eight files, 56,007 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
 - **20,269 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,237 lines of tool manual**, one per shipped program;
-- **1,984 lines of operations**, read when you are about to do something to
+- **1,992 lines of operations**, read when you are about to do something to
   hardware;
-- **27,213 lines of record and argument** — the ledger, the roadmap and the
+- **27,509 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -83,7 +83,7 @@ running.
 | document | lines | what it is for |
 |---|---|---|
 | [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 245 | Building a bitstream, and the five traps — three of which exit 0, and two that look like a design failure. `hw/build-pair.sh` is this document as an executable. |
-| [CARDDAY.md](CARDDAY.md) | 959 | Card day: the runbook as it was actually run, the staged pairs, and the forensics kept when build trees are reclaimed. |
+| [CARDDAY.md](CARDDAY.md) | 967 | Card day: the runbook as it was actually run, the staged pairs, and the forensics kept when build trees are reclaimed. |
 | [BRINGUP.md](BRINGUP.md) | 780 | Hardware bring-up, and the gates CI's green tick does not cover. |
 
 ## The record
@@ -93,8 +93,8 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 15,823 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
-| [ROADMAP.md](ROADMAP.md) | 3,801 | What is built, what is next, and what was decided against. |
+| [VALIDATION.md](VALIDATION.md) | 16,098 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [ROADMAP.md](ROADMAP.md) | 3,822 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1,082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
 | [NOVEL.md](NOVEL.md) | 561 | Results for which no prior description was found, with the standard of evidence stated first. |
 | [ATLAS.md](ATLAS.md) | 367 | The atlas-engine integration, assessed before any of it was done. |

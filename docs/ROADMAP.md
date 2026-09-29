@@ -3713,12 +3713,33 @@ bound for any method that has no rigorous remainder.
 ### Revision 7: step 4's RTL revision (plan of record, 2026-09-29)
 
 Step 4 of the controlled-divergence work order is the RTL revision.
-Logan cleared it on 2026-09-29 and took the lead's defaults. Nothing in
-it exists yet unless it says so.
+Logan cleared it on 2026-09-29 and took the lead's defaults.
 
-**What revision 7 is.** Three items. Each keeps every answer a program
-gets today: the same bits, flags, STATUS, deposits and scratch-out as
-the round-2 images, only in fewer cycles or with more room.
+**Built, the same day** (docs/VALIDATION.md, 2026-09-29, "revision 7").
+- R18, R19 and the limits are merged. The single tile closes 135 MHz and
+  passed its card legs.
+- As built, the single came first, as the timing read, and the quad
+  follows it at the full capacities.
+- Revision 8 is defined golden-first, and refused by name on every tile.
+  Its RTL is a later revision's.
+- The single at 175 MHz was not attempted. At 135 MHz it has +0.423 ns,
+  and 175 MHz asks for 1.69 ns more of every path.
+- The rest of this section is the plan as written that morning, with
+  one sentence amended at the close (below).
+
+**What revision 7 is.** Three items. R18 and R19 keep every answer a
+program gets today: the same bits, flags, STATUS, deposits and
+scratch-out as the round-2 images, only in fewer cycles. The limits keep
+every answer but one class.
+- A program that indexes the scratch past 256 slots computes on the
+  U50's 2,048 what any 2,048-slot tile computes, which is not what a
+  round-2 tile computes (docs/SEQUENCER.md, "the program limits per
+  build").
+- atlas-engine's two R8 probes showed it on the card, each equal to the
+  software backend at the device's depth.
+- This sentence said "every answer ... only in fewer cycles or with more
+  room" until the close; the card showed that "more room" changes some
+  answers.
 1. **Control codes join the instruction overlap (R18).**
    - Today (R12) every control code that reads the register file, moves
      the mask or ends the block waits for the whole result queue to

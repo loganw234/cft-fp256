@@ -595,11 +595,11 @@ faults:
 # 4,800 s with no wrong answer (run 20260929-114401-9fc9c0d), while the
 # same 63 cases at the U50's capacities took about 5,350 s (seq_coreu50
 # in that stage, seq_coreu50mc at MC=10 beside it). seq_coremc, the same
-# bench at MC=10, runs under this line too. 4,800 had been twice seq_core's
-# 1,923 s on the desktop at 48 cases (run 20260929-080541-9ff114e), and
-# 2,400 before that. Measure it again when the suite grows, on the slower
-# host and loaded as the runner loads it, and keep this at about twice
-# the measurement.
+# bench at MC=10, runs under this line too. 4,800 had been twice the
+# 2,400 before it, set when seq_core took 1,923 s on the desktop at 48
+# cases (run 20260929-080541-9ff114e). Measure it again when the suite
+# grows, on the slower host and loaded as the runner loads it, and keep
+# this at about twice the measurement.
 SEQ_TIMEOUT ?= 14400
 
 seq_core:

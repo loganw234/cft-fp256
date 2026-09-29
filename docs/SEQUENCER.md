@@ -2292,8 +2292,8 @@ red on f681dee's tile, which is what a hold is for.
 
 `krnl_ode_programs` in `tb/test_krnl_seq.py` runs `programs/gen_odes.py`'s
 three programs through the whole kernel with their committed banks,
-their segments cut to a few steps, bit-exact against the model on both
-tiles; cycles from start to done, f681dee's tile -> R18's (4b790b4, before
+their segments cut to a few steps, bit-exact against the model on each
+of the three trees; cycles from start to done, f681dee's tile -> R18's (4b790b4, before
 R19 and before the send-back's fast loads below) -> revision 7 as merged
 (R18, R19 and the fast loads; the round's final tree 9fc9c0d, measured
 on amd-arc-box, 2026-09-29):

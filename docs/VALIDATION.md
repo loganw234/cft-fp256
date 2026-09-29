@@ -15821,3 +15821,278 @@ Steps 4 to 6 (a C auditor, accuracy entries, cft-orbits' runs) are later work. T
 - C8 also ran `--only docs,programs,libcft,golden` on 4d951e5 (run 20260929-031003-4d951e5): PASS, with the four known inner skips. libcft compiles segrun.c too, which closes the one stage not re-run above.
 - Its sentences are restated in the commit that adds this paragraph. That commit changes docs and one test docstring only, and was gated by the docs stage and the certificate tests, not by a second front door.
 - Not run: the merged tree on the card. Each part was card-tested at its own commit, and nothing here claims a card run of the merge (verifier-C8).
+
+## 2026-09-29 - revision 7: control codes join the instruction overlap and a beat with no active lane is not issued (R18, R19), the program limits per build at the U50's 1,024 / 32,768 / 2,048, revision 8 defined golden-first, ABI 0.16; the single closes 135 MHz with +0.423 ns and passes its card legs; the round's verifiers, and its known limits
+
+**Why.** Step 4 of the controlled-divergence work order is the one RTL revision it allows (docs/ROADMAP.md, "Revision 7: step 4's RTL revision", the plan of record f681dee). The sequencer is where a program's time goes. The revision had three items:
+1. **R18: control codes join the instruction overlap.** Loads, stores, SETACT and the rest issue through the pipe instead of draining it.
+2. **R19: beat skipping.** A beat with no active lane is not issued.
+3. **The program limits per build.** They are sized as large as the U50 allows and adjustable, as Logan asked in the certificate round.
+
+R18 and R19 change no answer. The limits change one class of answers: a program that indexes the scratch past 256 slots now computes what any 2,048-slot tile computes, which is not what a round-2 tile computes. That is by design (docs/SEQUENCER.md), and the card shows it below.
+
+Revision 8's program-model asks were defined golden-first beside them: TwoSum, auto-stepping LDX and STX, and per-lane flags. The round's records are in `Data/runs/2026-09-29-rev7-round/` (gitignored): the ledger, the briefs, and the lead's box scripts' logs on amd-arc-box under `/data/rev7-*` (Logan's to delete).
+
+**Logan's decisions this round** (the ledger, lead.md):
+- **Scope and defaults.** "RTL work is cleared to happen today once ready", then "Defaults are fine, go ahead":
+  - R18, R19 and the limits: IMEM_D 32,768, MAXD raised, SCRATCH_D 2,048 if the memory allows, KMEM_D staying at 512;
+  - revision 8 golden-first;
+  - 135 MHz for both images;
+  - bitstreams on amd-arc-box.
+- **Long runs go to the lead.** "dont have the individual agents all run the full suites, have them hand back large runs to you to monitor". Agents ran Verilator, targeted benches, golden tests and plants. The lead ran Icarus, the gate stages and every box run.
+- **TwoSum's rounding.** "adhere to IEEE 754 when an option, RISC V approaches if nothing is in IEEE 754, and if neither state a way to handle it, whatever approach aligns best with the current systems". So TwoSum is 754-2019 clause 9.5's augmentedAddition, as libcft already computes it on the host.
+- **Two pre-existing tasks as parcels**, each followed by a verifier: the partial vectors/out (P4) and the WebAssembly page checkers (P5).
+- **A storm precaution.** Agents logged and committed often; it was lifted the same morning. amd-arc-box lost power briefly at about 04:10, with nothing of the round on it, and passed a health check at 04:16.
+- **Heavy work to the box.** At 08:48: "shift heavier work to the remote box when possible". Runs already going stayed where they were.
+- **The push and the quad.** At 13:02: "once its confirmed on the single push to main then start the quad at 135 with full capacities and 130 if it fails, 2 builds could likely run in parallel". The lead said it would stagger the two quad builds by about 90 minutes and watch the box's memory, for CLAUDE.md's one-heavy-link trap.
+  - Measured afterwards: amd-arc-box has 47 GB of RAM and 4 GB of swap. Two earlier quads' implementation runs peaked at 19 to 20 GB in placement and 21 to 24 GB in routing, which ran 2 h 42 min and 5 h 17 min, and in writing the bitstream.
+  - So two revision-7 quads would share their routing phases for hours at about 44 to 56 GB, a stagger or not.
+  - The lead's default, told to Logan: the 135 MHz quad at the push, and the 130 MHz one only if 135 misses.
+- **The send-back rule, carried over.** Only a regression "(a)" or a wrong answer "(b)" sends a parcel back. Everything else merges as a recorded limit, with its false sentences restated at the merge. The lead's own commits get a verifier like any parcel's.
+
+**The parcels, in merge order.**
+- **P3, revision 8 golden-first** (fe57e51, then 8fc664a; merged 6951c88).
+  - R21: control codes 10 `augadd` and 11 `augerr`, each one half of augmentedAddition (the sum rounded toward zero, and its exact error). This is RISC-V M's DIV/REM shape, two single-destination instructions a tile may fuse. CAPS2[11] is CFT_SEQ_FEAT_AUGADD.
+  - R22: STX and LDX take a signed 12-bit post-step in imm[11:0], as CORE-V XCVmem defines it. CAPS2[12] is CFT_SEQ_FEAT_SCRATCH_STEP.
+  - R23, per-lane sticky flags, is a design only.
+  - The software backend executes R21 and R22. Every device without the bits refuses them at load, by name.
+  - Verifier-R3 found no regression. Nothing that runs today changed: the corpus digests and the five old corpora are identical at f681dee. R21 is exactly augmentedAddition, 0 mismatches over 31,424 golden runs. R22 matches between C and the model.
+  - One narrow (b): "device-test sw -s 750 checks" was f681dee's count, from a stale binary; the tree gives 754. The lead had carried the 750 into its own ledger.
+  - P3 was sent back for that, and for Logan's rung 2: CORE-V defines `ldx rX, rX, step` (the load wins and the step is dropped), so P3's refusal of it, a rung-3 choice, became the defined behaviour.
+  - R3's re-check: no (a), no (b). Its sentences were restated at the merge.
+- **P5, the WebAssembly checkers** (3f30dd1; merged 7617305).
+  - verify.mjs, verify_demos.mjs and bindings/node/lib.mjs hand the page's own bytes to the loader through `Module.instantiateWasm` and hold its heap to the instance built from them.
+  - verify_demos.mjs holds the page's module to cft.h's ABI.
+  - Verifier-R1: no (a), no (b). One message was restated at the merge.
+- **P4, the vectors record** (38cf2eb, 966ed89; merged 9411544).
+  - The generator removes SHA256SUMS before it writes a set, and writes it last.
+  - Every replaying stage requires the record, every set the profile names, and `sha256sum -c`. Otherwise it regenerates, by name.
+  - Verifier-R2: no (a), no (b). Four sentences were restated at the merge. The fifth, cft.h's "names the sets that ran", was restated at the ABI step.
+  - The lead's runs: run 20260929-052812-7fab71a, PASS, 8 stages, nothing skipped. Run 20260929-071241-7fab71a, with one set removed: named, regenerated, and PASS.
+- **P2, the program limits** (2276052, then 811e3c4, ffc4195 and 4648d5e; merged fd47b2e).
+  - MAXD 1,024, IMEM_D 32,768 and SCRATCH_D 2,048 are cft_krnl parameters, with the U50's values as defaults. The open-core builds pin 64 / 16,384 / 256.
+  - The scratch at 2,048 slots is 4K UltraRAM sub-arrays behind a registered select.
+  - A dirty high-water mark limits each block's wipe to what was written. A wipe wider than one sub-array is broadcast to all of them at once, so no block wipes more than 4,096 cycles at any depth.
+  - The model and libcft run at a handle's depth: `cft_open_ex`, ABI 0.16.
+  - Verifier-R5 found one (b) and two (a)s by the letter at 2276052:
+    - (b): on a 2,048-slot handle, libcft refused every scratch-I/O block of 257 to 2,048 slots with no sentence. Fixed at 811e3c4, with a device-test leg that runs a block as deep as the device.
+    - (a): the first indexing block after a reset cost 32,921 cycles against f681dee's 4,249. The rule behind it, "all dirty after a reset", was the lead's own.
+    - (a): a scratch-in block nothing reads cost 36,947 against 80.
+    - Both (a)s were fixed at ffc4195 (the broadcast wipe, and no preload for a block that can observe none of it). R5 measured 4,249.2 and 82.
+  - Four of R5's plants passed P2's benches. Cases were added at ffc4195, and one for the drain as a preload's only reader at 4648d5e.
+  - R5's write-port monitor saw no violation of the marks' invariant: 169,915 writes and 13.5 million wipe bank-writes at 2,048 slots, a mid-run reset included, and later the merged RTL at both depths.
+  - R5's verdict at 4648d5e: no (a), no (b).
+- **P1, R18 and R19** (e610b78, then 7f1d56b, 4c1ea1e, 9b8c747 and 5a2e006; merged 5f40bd8).
+  - Control codes issue at one beat a cycle and wait only on queued producers of what they read.
+  - Loads are queued producers. A load is FAST when every queued writer ahead of it is a fast load: its value goes to the register file at F (LDL) or H (LDX) through the retire port and never enters the array.
+  - The active mask is sampled at fire.
+  - R19 skips beats with no active lane, using a look-ahead by tag.
+  - Verifier-R4 found no wrong answer at e610b78: 2,365 runs of its own shapes at MC=1, and its sets at MC=10. It found three (a)s, all cycles:
+    - on a one-beat block, a loaded value used at once was 2 to 15% slower (fp256, n = 1, [LDL; DEPOSIT] x 10: 377 -> 419);
+    - on the multi-pass tile, 106 of 392 load rows were slower (fp256, n = 64: 8,321 -> 14,929);
+    - R19 lost forwarding's look-ahead behind masked low beats (4,741 -> 5,233).
+  - P1 was sent back. The fast loads, a multi-pass policy (a load that cannot be fast waits for the drain) and the look-ahead by tag fixed all three.
+  - R4 re-measured on the same box as f681dee:
+    - 464 rows at MC=1, 392 at MC=10 and 60 chain rows, none slower: 377 -> 317, 8,321 -> 2,829, 4,741 -> 4,525;
+    - the ODE programs through the kernel at MC=10, 20 of 20 faster than f681dee (Lorenz-96, full fp64 block: 234,264 -> 150,336);
+    - its nine answer sets and its fast-load attacks, green at MC=1 and MC=10.
+  - Four of R4's seven plants had passed P1's benches. Each now has a case, red on its plant.
+  - The re-check found one narrow (b), a sentence: "within a pass period of each other" held in 1 of 9 rows. P1 was sent back a second time for it, and restated it at 5a2e006. 5f40bd8's title says "after one send-back"; there were two.
+  - R4's verdict at 5a2e006: no (a), no (b).
+
+**The lead's integration commits.**
+- **The check tree.** rev7-check12 took P2 and P1 hours before their verdicts, so the long runs could start. It is never pushed. rev7-round then took the same merges with the verdicts in their messages.
+  - At 5f40bd8 the rtl, tb, host, python, bindings and hw trees equal the check tree's final ones by git tree hash (rtl c012ed9a...). So the check tree's runs are this tree's.
+- **9986bf8.** seq_coreu50, the unit bench at the U50's capacities, joins SIM_BENCHES (26 targets).
+- **28c28bf, ABI 0.16.**
+  - `cft_open_ex`, and CFT_SEQ_FEAT_AUGADD and CFT_SEQ_FEAT_SCRATCH_STEP. The software handle's seq_features is 0x1ff1f.
+  - api-test now holds cft_open_ex: the depth in the caps, and each refusal by status and a word of its sentence. Two plants each fail it by name.
+  - verify.mjs holds the loader's exports as well as its heap (R1's third finding).
+  - The WebAssembly module was rebuilt from the final host sources: cft_node.wasm b3c023af..., 259,935 bytes, 149 exports, 141 `cftw_*`. Two clean container builds are byte for byte. verify_demos: 48 ok, every chain unchanged.
+- **90a83dd.** SEQUENCER.md's ODE table gains the merged revision's column, measured by krnlseq on the final tree. Lorenz-96 at fp64 in a full block runs in 67,305 cycles against f681dee's 156,589. Every row is at or below R18's.
+- **3197dc6.** SEQ_TIMEOUT 14,400 s, and seq_coreu50's timeout is SEQ_TIMEOUT's; see the RTL runs below.
+- **The commit that adds this entry.**
+  - docs/VERIFICATION.md's golden row, 2,432.
+  - The restatements:
+    - tb/Makefile's comment: 4,800 had been twice the 2,400 before it;
+    - SEQUENCER.md's "on both tiles", now three trees;
+    - ROADMAP's plan-of-record sentence, and a "Built" paragraph at its head;
+    - CARDDAY.md's program-set line.
+  - docs/README.md's counts.
+
+**The RTL runs.**
+- **Verilator, on the final tree 9fc9c0d on amd-arc-box:**
+  - seq_core, seq_coremc (MC=10), seq_coreu50 and seq_coreu50mc (MC=10): 63 of 63 each, 754 to 871 s;
+  - krnlseq and krnlseqmc (MC=10): 3 of 3 each. This was krnlseqmc's first run on this round's RTL, and the first multi-pass run of krnl_ode_programs, which P1 added (4b790b4). krnlseqmc itself has been a simmc target since 2026-09-06. The lead's ledger, and 5f40bd8's message ("krnlseq's first multi-pass run"), said more than that: they widened R4's "not run at e610b78" into "never run".
+  - seqbp: 1 of 1;
+  - redprog: 3 of 3.
+- **Formal**, on the desktop (run 20260929-114626-9fc9c0d): PASS.
+- **Icarus.**
+  - On the pre-fix merge (9ff114e, run 20260929-080541-9ff114e, the desktop at one job): sim, lint and formal PASS; sim was 10,010 s for 26 targets.
+  - On the final tree, amd-arc-box, SIM_JOBS=6, beside the single's bitstream build (run 20260929-114401-9fc9c0d): sim FAILED on a timeout. seq_core was terminated at SEQ_TIMEOUT 4,800 s (make's Error 124), with no wrong answer. The other 25 targets passed, seq_coreu50 in 5,353 s.
+  - The lead stopped that run's simmc part way, for a fresh one. seq_coreu50mc under Icarus there: 63 of 63, 5,360 s.
+  - 3197dc6 raises the limit and gives it a comment with these figures.
+  - sim with lint, and simmc, were started whole on 3197dc6 on the box at 14:10:59 (SIM_JOBS=6 each, in two clones), with seq_core alone beside them under the raised limit. They were still running at this entry's commit; their verdicts and times are in the paragraph the next commit adds.
+  - This commit changes tb/Makefile by one comment only (below), so tb/ then differs from the tree those runs used by that comment.
+
+**Timing, and the images.**
+- **Out-of-context synthesis** of cft_krnl at 135 MHz in WSL (xcu50-fsvh2104-2-e):
+  - P1's RTL left the kernel's worst slack where f681dee had it, +1.576 ns on an engine path, for +2,240 LUTs.
+  - The merged tree at the U50's capacities: the same +1.576. Paths into the sequencer +1.885 ns; paths from the UltraRAMs +4.280 ns.
+  - The scratch landed in 64 URAMs as designed. Per tile: 143,004 LUTs, 217 block RAM tiles, 64 URAM.
+- **The probe single (rev7a, 3582de0, pre-fix):** kernel WNS +0.065 ns. Its worst paths were the engine's FIFO into the fp256 FMA, and the sequencer's 32K-deep instruction memory cascade into its state register (+0.101).
+- **The final single (rev7b, from 9fc9c0d; rtl and hw trees equal 5f40bd8's):**
+  - kernel WNS +0.423 ns, TNS 0, 0 failing of 155,552 endpoints, at 135 MHz with retiming and phys_opt;
+  - its worst path is the engine's CSR into a reader (22 levels), not the sequencer;
+  - so every path of the kernel clock has at least +0.423 ns. That includes the risks the parcels and verifiers read: P1's imem -> st, R4's R19 admission path, rd_hold and the new load operands, and R5's S_ZERO exit;
+  - CLB LUTs 272,636 (31.31%), block RAM tiles 398.5, URAM 68;
+  - verify-image: all 8 checks passed. Staged as ~/cardday-rev7b/cft_hw_single.xclbin, 37,282,943 bytes, sha256 2d1d3272..., re-hashed byte-identical, 156 minutes from the start of the link;
+  - Round 2's single had +0.266 ns.
+  - The probe's worst path, the engine's FIFO into the FMA, is one neither parcel touched. The final tree's worst path is another engine path. The two images differ in RTL (P1's fix, P2's broadcast), so these two builds cannot say how much of the 0.36 ns between them is design and how much is placement. BITSTREAM-BUILDS' trap 5 records placement moving this path by tenths from build to build.
+
+**On the card** (U50 at 02:00.1, XRT 2.19, shell xilinx_u50_gen3x16_xdma_base_5):
+- **An early leg on the probe image** (10:52):
+  - api-test passed.
+  - device-test -q -n 8: 2,626 checks, 0 failed. -n 4096: 10,266 checks, 0 failed.
+  - The scratch-block leg ran on the tile at 2,048 slots, every lane's bytes; 2,049 was refused by name.
+  - The identity: VERSION 0x00000a00, CAPS 0x19faffff, CAPS2 0x000007fb. card-identity: 12 checks, 0 failed.
+- **The final image's legs** (from 14:21:42; logs in the box's /data/rev7-final/card/):
+  - **The host.** Built with XRT=1 in a fresh clone of 3197dc6, whose host tree equals 9fc9c0d's: make rc 0, exactly the two known warnings (cft_resident.cpp:264 and :265). Every tool is XRT-linked, with build id `commit=3197dc6... tracked=clean untracked=none`. The bitstream's own clone was not used, because its untracked build directory would have made the id `untracked=present`.
+  - **The sets.** Generated from the final tree by the runner's vectors stage: ok, 420 s.
+  - **XRT** 2.19.194.
+  - **api-test:** all contract checks passed.
+  - **device-test:**
+    - -q -n 8: 2,626 checks, 0 failed;
+    - -n 4096: 10,266 checks, 0 failed, 11 s;
+    - -r: 2,417 checks, 0 failed.
+  - **-i:** the image's SHA-256 2d1d3272..., 37,282,943 bytes, VERSION 0x00000a00, CAPS 0x19faffff, CAPS2 0x000007fb, the words the probe image read.
+  - **At every format**, the deep scratch on the tile:
+    - a scratch block at 2,048 slots (300 in and out, 300 in, 300 out, the whole depth both ways), every lane's bytes, with 2,049 refused by name;
+    - a walk past 256 slots at 2,048, the device agreeing with the reference at the device's depth;
+    - slot 2,048 refused by name ("this device's is 2047").
+  - **Revision 8.** The tile publishes neither of its bits, and a stepped STX/LDX is refused on it by name.
+  - **cft-selftest** over the sets just generated: 168 sets, 1,224,915 cases, all matching, 766 s. It replays the elementwise and transcendental sets twice: once an element at a time for exact flags, then as arrays.
+  - **hw/card-identity.sh:** 13 checks, 0 failed. The probe's early leg gave 12 because it ran in the build clone: its untracked build directory turned the stale-binary check into a NOTE, as intended.
+  - **hw/card-segrun.sh:** 6 checks, 0 failed.
+    - The certificates made on the card: 384 checks, 0 failed, 0 skipped, 75 s.
+    - The negative control, handed device-test's own SHA-256 as the image's, failed the device lines by name.
+  - **atlas-engine's program set** through the stock runner, run from a copy with SHA256SUMS all matching: **138 of 140**, where round 2's images gave 140. The two are `r8-modulo` and `r8-strict`, atlas-engine's probes of R8, "an indexed scratch access past the depth".
+    - The programs: `stx r1, r0; ldx r2, r0; ldl r3, 0` and four deposits, fp32, 1,024 lanes. 810 lanes index at or past 256, and 105 at or past 2,048.
+    - The set's expected deposits were made at 256 slots. There a non-strict index of 256 wraps to slot 0 and a strict one stores nothing; at 2,048 both are in range.
+    - Measured with positive-run on the set's own streams:
+
+    | case | the set's expectation | software, 256 | software, 2,048 | the card | STATUS |
+    |---|---|---|---|---|---|
+    | r8-modulo | ce526ce7... | ce526ce7... | 6f1fe6d6... | 6f1fe6d6... | 0 |
+    | r8-strict | addc31b3... | addc31b3... | a7d21d11... | a7d21d11... | 0x20 |
+
+    - The card is the software backend at its own depth, byte for byte. The differences from the set's expectation are 67 lanes of r8-modulo, all in the slot-0 deposit, and 705 lanes of r8-strict, all in the ldx deposit.
+    - This is SEQUENCER.md's contract: a non-strict image indexing past 256 "wraps at 2,048 on the U50 and at 256 everywhere else, and computes other answers". A strict run is portable only when it reports nothing, and r8-strict reports at both depths.
+    - The lead rules it no regression: the new depth is the change the round was asked to make, and the answer follows the depth the device publishes.
+    - Two sentences promised more, and are restated in this commit:
+      - ROADMAP's plan of record said revision 7 keeps "every answer ... as the round-2 images";
+      - CARDDAY.md's "140 of 140" gains the revision-7 figure.
+  - P2's hand-back item, "programs/check.py's deepwalk rows on the card", cannot run as written: check.py takes no device. The deep scratch on the card is held instead by the legs above and by card-segrun.
+- **A card-side cycle probe.** The plan's "cycle probes, as the after-side". It is a card-day script (odetime.py, beside the box logs), not committed.
+  - What it runs: the three committed ODE programs at their own step counts, assembled and held to programs/MANIFEST as the segrun gate does, through `cft_program_run_ex` on one tile.
+  - How: one warm-up, then the median of 31 runs, with every run's scratch-out, flags and bus required identical.
+  - Where: on the final single, and on round 2's single (5b7aa19), both at 135 MHz. Round 2's cft_seq.sv is f681dee's apart from comments.
+
+  | case | revision 7 | round 2 | ratio |
+  |---|---|---|---|
+  | lorenz96-rk4-fp64, 64 lanes | 4.300 ms | 10.968 ms | 2.55 |
+  | lorenz96-rk4-fp64, 5 | 2.954 | 3.615 | 1.22 |
+  | lorenz96-rk4-fp256, 16 | 4.290 | 10.923 | 2.55 |
+  | lorenz96-rk4-fp256, 3 | 3.058 | 4.138 | 1.35 |
+  | lorenz63-rk4-fp64, 64 | 1.099 | 1.120 | 1.02 |
+  | lorenz63-rk4-fp256, 16 | 1.094 | 1.141 | 1.04 |
+  | henonheiles-lf-fp64, 64 | 0.470 | 0.529 | 1.13 |
+  | henonheiles-lf-fp256, 16 | 0.487 | 0.505 | 1.04 |
+
+  - Every case's output (scratch-out digest, flags 0b10000, bus 0) is the same on both images and on the software backend, by diff.
+  - The times include each run's host work, so the kernel's own ratio is at least the one shown. That is inference, not measurement.
+  - The simulated table's 2.3 for Lorenz-96 is two steps with a block's setup; the card's 2.55 is twenty.
+
+**The front door.**
+- **The host stages** on the check tree at 3582de0, whose host tree equals the final one (run 20260929-081657-3582de0): 35 of 36 ok on Windows, with the four known inner skips. lang-rust FAILED for the desktop's recorded toolchain limit, MSVC rustc against the MinGW library. It passed on Linux in WSL, rustc 1.98.0: "rust: same library, same bits".
+  - golden: 2,429 passed. The stage collects 2,432: P3's 81 in test_seq_rev8.py, and P2's six scratch-depth tests in test_seq.py, one in test_asm.py and one in test_cert.py. It collected 2,343 at 77b8440.
+- **node, wasm and demos over the rebuilt module** (run 20260929-132831-f45890f, the desktop): PASS, nothing skipped (node 1,442 s, wasm 1,100 s, demos 86 s).
+- **remote, over the rebuilt module.** The runs above left one stage out. remote's WebSocket leg (bindings/node/remote_test.mjs) loads the local module and compares every case with it, so remote's pass at 3582de0 was over the first ABI 0.16 build, not the final one. Re-run on the desktop, which has Node where amd-arc-box has none: run 20260929-145158-f45890f, in the check tree, whose host, bindings, python, verify, programs and vectors trees equal the final ones. Its verdict is recorded in the paragraph the next commit adds.
+- **sim, lint and simmc** on 3197dc6: above.
+
+**Known limits, recorded rather than fixed** (Logan's rule):
+- **Cycle counts at MUL_PASSES > 1** move by up to a pass period less one with the array's free-running phase. The MC>1 holds allow exactly that; R4 names a hold at equal phase as a possible refinement.
+- **Not built, named as possible gains:** the per-beat store-then-LDL rule (2 cycles an adjacency at sixteen beats), and R4's equal-phase hold.
+- **seq_coreu50mc** (the U50's capacities at MC=10) is in no runner stage. No shipped build pairs them: the U50 is single-pass, and the multi-pass Kintex-7 board pins the open-core capacities. It ran in the lead's box lanes this round, 63 of 63 under Verilator and under Icarus.
+- **A block observing part of a longer preload loads all of it**, as f681dee did. SEQUENCER.md names the cost.
+- **The software backend's depth stops at the handle:**
+  - cft-serve serves a software device at 256 slots only;
+  - cft-segrun makes software certificates at 256;
+  - the WebAssembly module exports no cft_open_ex.
+- **Depth 1** is accepted by the model and by libcft; the RTL refuses to elaborate it.
+- **hw/openxc7/imul_bisect*.ys** pin no capacities, so a re-run builds the U50's.
+- **cft_program_load**, pre-existing, raised as a task of its own:
+  - its deposit ceiling refuses with no sentence where no cap was published;
+  - it does not clear cft_last_error on entry, so an unnamed refusal prints a stale sentence.
+- **`make seqtrace`** names a signal (kq2_c) that exists in no RTL. Broken before this round.
+- **R3's notes:**
+  - no directed case of two registers differing only in the high bit, though the code compares all five bits;
+  - asm.py reads numbers with Python's int(), so `1_0` reads as 10 where cft-asm refuses it, since before this round;
+  - on a device without CAPS2[12], a nonzero step goes from INVALID_ARGUMENT to UNSUPPORTED, by name, because the encoding now has a meaning;
+  - -DCFT_NO_AUGMENTED alone does not link cft.dll, as at f681dee;
+  - the seq stage now opens a loopback TCP socket for its remote leg.
+  - Kept as the lead's design choice: `ldx rX, rX, step` needs CAPS2[12] although today's tiles would compute its defined result.
+- **R1's notes on P5:**
+  - loadModule()'s M loses wasmBinary and gains instantiateWasm, neither documented;
+  - a corrupt module rejects with the CompileError or LinkError itself rather than "Aborted(...)", with the same cause text and rc;
+  - with demos.html absent, a bumped cft.h passes verify_demos.mjs by its pinned SKIP, which the runner counts and --require-all fails;
+  - bindings/node/program_test.mjs runs in no runner stage.
+- **R2's notes on P4:**
+  - test-ensure-vectors.sh never runs do_vectors;
+  - its CR guards are blind under Git Bash's grep 3.0, with sha256sum -c as the backstop;
+  - `control` counts any FAIL without asserting the reason;
+  - two runs in one tree can hollow a set after the first run's check;
+  - the seed is not checked;
+  - the cpp, node and wasm stages' need lists lack the Python and mpmath a regeneration needs;
+  - remote_test.mjs's regex admits spellings no record covers;
+  - a directory check outside the library is a future option, with no ABI step.
+- **R5's notes on P2:**
+  - test_seq.py:1288's message misleads under one plant;
+  - segrun_check --device compares against software certificates at 256, which is safe: a deep program would fail, not pass.
+- **Depth-dependent programs differ between a round-2 tile and a revision-7 tile**, by design (above, the program set). A result made on one depth is reproduced by the software backend or the golden model opened at that depth. `cft-segrun`'s certificates carry the device's CAPS2, and the golden audit re-runs at the scratch depth it names (662e523).
+- **The quad, and the single at 175 MHz, are not this entry's.**
+  - The quad at the full capacities follows the push: 135 MHz, and 130 only if 135 misses (above).
+  - At 135 MHz the single has +0.423 ns, and 175 MHz asks 1.69 ns more of every path.
+
+**Load, and the machine.**
+- Agents ran their builds and plants one at a time, niced. Containers did overlap: four agents' Verilator containers beside the lead's desktop Icarus run at 08:48, and three sim containers for about nine minutes at 10:47, which P2 recorded itself.
+- After Logan's 08:48 word, every long run went to amd-arc-box, which the verifiers never touched: the verifiers' and parcels' hand-backs, the RTL runs, the bitstreams and the card legs. The desktop kept only runs already going, formal (about five minutes), and the node, wasm and demos stages, since the box has no Node.
+- One read outside a verifier's brief: R5 ran `git status` and `git log -1` in P2's worktree, recorded it itself, and nothing was touched.
+
+**The lead's own slips**, each caught and recorded in the ledger:
+- **The two regressions' causes.**
+  - The reset price R5 measured came from the lead's own rule, "all dirty after a reset".
+  - The lead read program.c's 256-slot line at the P2 merge and took its comment as true; R5 found it a (b).
+- **A figure repeated without measuring.** P3's "750" went into the lead's ledger from a report. R3's (b).
+- **Typed, not measured.**
+  - An entry was written before the lead read a failed launch: WSL's path conversion, Git Bash's `/mnt/...` rewriting.
+  - A message to R4 said a hand-back had been read when only its heading had.
+  - rc= in three box summary scripts was taken after `$(date)` and always read 0. No verdict rested on it.
+- **Shell and launch slips.**
+  - An unquoted heredoc lost two code spans from a ledger entry. Its correction first said it was checked by grep, where only a reading of the command could check it.
+  - A launch under the tool's own timeout was stopped within a minute.
+  - An `rm -rf` of root-owned files stopped a hand-back's first launch.
+  - lang-rust was not skipped by request on the desktop.
+- **A product that did not reproduce.** The WebAssembly module first committed with ABI 0.16, on the check tree, was built before P2's library fix changed program.c. So a build from the committed sources gave other bytes. It was rebuilt before the merge.
+- **Estimates that the box refuted.**
+  - seq_coreu50's cost was believed 45 minutes; it was 60 on the desktop.
+  - SEQ_TIMEOUT 4,800 was set from a desktop measurement and was not enough on the box.
+  - 3197dc6's comment then said 4,800 "had been twice seq_core's 1,923 s". It was 2.5 times; 4,800 was twice the 2,400 before it. lead.md said the same. Verifier-R6 found it, and this commit restates the comment.
+  - seq_coreu50's own timeout comment (P2's) had been stale since P2's broadcast wipe. Neither P2 nor R5 caught it; the lead found it at 3197dc6.
+- **A verifier's words widened.** R4 said krnlseqmc had not been run at P1's commit; the lead's summary made it "never run multi-pass". That reached 5f40bd8's message and the lead's ledger (above, the RTL runs).
+- **Commit messages that say more than was measured** (verifier-R6). None is rewritten, since the ledgers cite their SHAs.
+  - 3197dc6's says `SEQ_U50_TIMEOUT=123` "moves only seq_coreu50's". It moves seq_coreu50mc's too, which reads the same variable; the lead's make -n check never ran that target with the override.
+  - 5f40bd8's says its six trees "equal the lead's check tree 9fc9c0d/f45890f". They equal f45890f's. 9fc9c0d's bindings tree is the module before the rebuild.
+  - 5f40bd8's title says "after one send-back"; there were two. Its body says "krnlseq's first multi-pass run" (above).
+- **A stage left out of a carry-over.** The claim that the host stages at 3582de0 stand for the final tree missed that remote reads the rebuilt module (above).
+- **A claim written before it was so.** The first draft of 3197dc6's comment said seq_coremc "was terminated" at 4,800 s while it was still running. It was restated before the commit.
