@@ -685,13 +685,19 @@ module cft_seq #(
         always_ff @(posedge ap_clk) begin
           if (scr_we[gs])
             bank[scr_waddr[gs*SCRAW +: SCRAW]] <= scr_wdata[gs*32 +: 32];
-          // Unconditional, like the deposit buffer's and the constant
-          // bank's: one write port and one unconditional synchronous
-          // read port is the shape an inference engine recognises as a
-          // memory, and the address is stable whenever the answer is
-          // wanted, so a read enable would buy nothing and cost a
-          // condition.
-          rd_q <= bank[scr_raddr[gs*SCRAW +: SCRAW]];
+          // Held with the array's standing request, as the register
+          // file's read registers are (revision 7, R18). It was
+          // unconditional while only the scratch states read it, one
+          // access at a time; the loads now read it INSIDE the issue pipe
+          // - an LDL between A and F, an LDX between F and H - and on a
+          // multi-pass tile the pipe holds between accepts, so a register
+          // that kept sampling would hand the fire the NEXT beat's slot.
+          // issue_hold is zero outside a program's issue, so the preload,
+          // the wipe and the scratch-out drain read it exactly as before.
+          // A read enable is still the shape a block RAM's output
+          // register infers from.
+          if (!issue_hold)
+            rd_q <= bank[scr_raddr[gs*SCRAW +: SCRAW]];
         end
         assign scr_rdata[gs*32 +: 32] = rd_q;
       end else begin : g_sub
@@ -706,17 +712,21 @@ module cft_seq #(
           always_ff @(posedge ap_clk) begin
             if (scr_we[gs] && wa[SCRAW-1 -: SCR_SELW] == SCR_SELW'(gk))
               sub[wa[SCR_SAW-1:0]] <= scr_wdata[gs*32 +: 32];
-            // Unconditional, as g_one's: every sub-array reads the low
-            // address every cycle and the select picks one.
-            rd_q <= sub[ra[SCR_SAW-1:0]];
+            // Held as g_one's is, for R18's reason: every sub-array reads
+            // the low address whenever the pipe moves, and the select
+            // picks one.
+            if (!issue_hold)
+              rd_q <= sub[ra[SCR_SAW-1:0]];
           end
           assign rd_all[gk*32 +: 32] = rd_q;
         end
         // Registered from the same address on the same edge as the
-        // reads, so the select and the data it selects are always one
-        // read's.
+        // reads, and held with them, so the select and the data it
+        // selects are always one read's - a held read keeps its own
+        // sub-array.
         always_ff @(posedge ap_clk)
-          sel_q <= ra[SCRAW-1 -: SCR_SELW];
+          if (!issue_hold)
+            sel_q <= ra[SCRAW-1 -: SCR_SELW];
         assign scr_rdata[gs*32 +: 32] = rd_all[32'(sel_q) * 32 +: 32];
       end
     end

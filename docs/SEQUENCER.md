@@ -2040,7 +2040,9 @@ in UltraRAM it does, with the deposit buffer, at about 388 of 640. So
 the scratch is not left to inference: at more than 256 slots each bank
 is built from 4,096 x 32 sub-arrays - revision 3's shape, one URAM
 apiece, pinned there by `(* ram_style = "ultra" *)` - and read through
-one 8:1 mux selected by the slot's high bits, registered with the read.
+one 8:1 mux selected by the slot's high bits, registered with the read
+and held with it while the issue pipe holds (R18's rule for the read
+register, so a held load keeps its own sub-array).
 Chosen over the attribute on a 32K-deep array for timing at 135 MHz: an
 eight-deep cascade puts up to seven cascade hops between a URAM's output
 and the fabric, where standalone URAMs put one LUT mux (believed, from
@@ -2051,7 +2053,12 @@ buffer and the instruction memory (block RAM, bit-sliced, is expected)
 is the first number the revision-7 build should read.
 
 In cycles, measured on `cft_seq` in simulation (fp32, four blocks of
-128 lanes, model RAM answering at once), before the fix below:
+128 lanes, model RAM answering at once), before the fix below. Both
+tables here were measured before R18 and R19 joined the tree, which
+move what an instruction costs, so their absolute numbers move with
+them; what the benches assert - the wipe's difference exact, and an
+indexing block within a small constant of its static twin at either
+depth - does not.
 
 | program | `MAXD` 64, `SCRATCH_D` 256 | `MAXD` 1,024, `SCRATCH_D` 2,048 |
 |---|---|---|
