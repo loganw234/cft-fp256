@@ -794,8 +794,11 @@ model needs the standard library only). In order, each step an `ok` or a
    - each made again on the software backend, every run block byte for
      byte the card's;
    - on the software backend, the gate's refusals, and since P3b's
-     send-back what a run beside the main run costs in memory (the least
-     `ulimit -v`, found by bisection - a few dozen short runs).
+     send-backs its memory checks: what a run beside the main run costs,
+     and what the trial costs the runs, each the least `ulimit -v` found
+     by bisection. At eb2d1ae the first alone took about 22 s on the
+     box, the gate going from 54 and 51 s to 76 and 75 s (card-p3b/,
+     card-p3b2/).
 3. **The negative control.** Handed device-test's own SHA-256 as the
    image's, the gate must fail the device lines by name.
 

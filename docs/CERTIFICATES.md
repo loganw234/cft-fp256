@@ -1105,13 +1105,20 @@ Every refusal prints `cft-segrun: refused <name>: <why>` and exits with
 the name's code. None writes a certificate, and none removes or changes
 a file the tool did not create. One made before the first segment
 leaves nothing behind. A run that fails part way leaves the boundary
-files it wrote, and says so. No backend in this tree reports
+files it wrote, and says so. A `device` or `program-image` refusal
+adds the library's sentence (`cft_last_error()`), unless it is the one
+`cft_get_image_id` left before the runs: a sentence can outlive its
+call, and at eb2d1ae a segment's out-of-memory carried that one
+(verifier-C7). No backend in this tree reports
 flags it cannot read, leaves a flag word unwritten or reports one past
 31, so `CFT_SEGRUN_PLANT` is an instrument for the tests of those three
 refusals: `flags-unreadable`, `flags-unwritten` or `flags-wide`. Each
 makes a run refuse by that name, and says so. With `--build-id` or
 `--hash`, which run nothing, it only prints that the run is to be
-refused and exits 0 with the right output (verifier-C6). The refusals
+refused and exits 0 with the right output (verifier-C6). A fourth,
+`trial-skipped`, refuses nothing: it skips the trial's allocations
+(**Memory**, below), keeping its size checks, so that the gate can
+measure what the trial costs the runs. The refusals
 only a failing library, device or filesystem, or another process, can
 reach have no test in the gate:
 - `cft_get_caps`, `cft_program_get_info`, `cft_program_digest`,
@@ -1155,36 +1162,60 @@ process cannot have is refused with nothing made. `--segments
 1) x 65 bytes on the Windows desktop, and at the certificate's text in
 WSL.
 
-The trial never needs more at once than the runs themselves will. It
-holds no hash's buffer (a state's size), no library, device or
-program, and each large piece rounded down to whole pages, taken from
-the operating system so that the C library's heap is left as it was.
+The trial takes nothing from the C library's heap. Every piece comes
+from the operating system, rounded down to whole pages, and a piece
+under a page is not tried; the trial's own list of what it holds comes
+from the operating system too. All of it is given back before the
+outputs are made. So the runs allocate from the heap they would have
+had without the trial, and the trial costs them nothing. At eb2d1ae it
+did not: its pieces under 64 KiB came from `calloc` and left the heap
+bigger, so the runs needed up to 40 KiB more than 99f1b43's in 24 of
+96 small shapes, and 99f1b43 wrote certificates under limits eb2d1ae
+refused (verifier-C7, 2026-09-29).
+
+The trial holds no hash's buffer (a state's size) and no library,
+device or program: at each run, less than 99f1b43's tool held there.
+But it holds every run's initial state throughout, as 99f1b43's runs
+did, where the runs now let each go once it is copied. So the trial can
+need more than the runs themselves, and refuse a certificate they alone
+could have written. In verifier-C7's `up` shape (a main run of 64 Ki
+lanes, then half-step runs of 256 Ki and 1 Mi) the trial needs 10,444
+KiB more than its runs in WSL (10,440 at eb2d1ae): the tool's least
+`ulimit -v` there is 92,452 kB, and 82,008 kB with the trial skipped.
+99f1b43 needs 108,832 kB, so it could not write that certificate
+either: a known limit, not a regression.
+
 Measured on verifier-C7's case (flagstep, 1,048,576 lanes, a main and
 two half-step runs), the least `ulimit -v` it writes the certificate
 under in WSL is 164,128 kB at 99f1b43, 250,744 kB at 4eed552, and
 147,744 kB now. Its peak commit on the desktop is 157,936 to 157,984
-KiB at 99f1b43 and 141,532 to 141,568 KiB now. In five other shapes in
-WSL the tool never needs more address space than 99f1b43's did, to the
-page, and writes the same bytes (2026-09-28):
-- a tiny run;
-- three tiny runs;
-- the gate's lorenz63, with a half-step and a wider run;
-- three runs of 1 MiB states;
-- the same three through a remote handle.
+KiB at 99f1b43 and 141,532 to 141,568 KiB now. In verifier-C7's sweep
+of 96 small shapes in WSL (flagstep; 1, 16 and 256 lanes; two or three
+runs; a main run of 10 to 500 segments and half-step runs of twice
+that; open and keyed), the tool writes its certificate, the same bytes,
+under the least `ulimit -v` 99f1b43 writes it under, in all 96; eb2d1ae
+fails there in 24. On the desktop, under a job's commit limit of 5,680
+KiB, the smallest of them (1 lane, a main run of 100 segments and a
+half-step run of 200) is written by 99f1b43 and by the tool, 3 times of
+3, and by eb2d1ae 0 of 3; across 72 of the shapes the tool's peak
+commit is 99f1b43's within the several pages that separate identical
+runs there (2026-09-29).
 
 What the trial cannot promise:
-- a hash's buffer or a boundary file's path;
+- a hash's buffer or a boundary file's path, or a piece under a page;
 - the library's own memory;
 - memory the machine gives others between the trial and the run.
-A piece of the tool's that cannot be had after the trial had it is
-refused `memory` part way, with the boundary files left and said so.
+Where the operating system has no anonymous mapping, the trial is its
+size checks alone. A piece of the tool's that cannot be had after the
+trial had it is refused `memory` part way, with the boundary files left
+and said so.
 So are the tool's other allocations: a file read, the command line's
 lists, a hash's buffer, a boundary file's path, and the certificate's
 text as it grows. None of these has a test in the gate, though none
 needs the machine loaded to reach it: an address-space limit reaches
 each, and verifier-C7 had an initial state's read refused `memory`
 under `ulimit -v` in WSL. The gate holds the size check, the trial's
-refusals and what a run costs (below).
+refusals, what a run costs and what the trial costs (below).
 
 Where memory is overcommitted, an allocation the machine cannot back
 still succeeds. Linux does so in both of its usual modes. Mode 1 (WSL
@@ -1202,13 +1233,16 @@ after about 66 million segments with about 4.9 GB touched. The run
 would then be refused `output` part way, by name, its boundary files
 left and said so. That is arithmetic, not a run.
 
-**Known limits.** On Windows, `--out file:name` writes the certificate
-into a new NTFS stream of an existing file: its data is kept, and its
-time changes. `--out name\` makes a plain file `name`. Both are names
-the user gave, and neither changes a file's data. A run killed by a
-signal leaves the certificate it created, empty, and its boundary files,
-since a signal runs no cleanup; at 99f1b43 the same kill truncated a
-file already at `--out`.
+**Known limits.** On Windows, `--out name:stream` writes the
+certificate into a new NTFS stream of an existing file or directory
+`name`: the file's data, or the directory's entries, are kept, and its
+time changes (verifier-C7). `--out name\` makes a plain file `name`.
+Both are names the user gave, and neither changes a file's data. A run
+killed by a signal leaves the certificate it created, empty, and its
+boundary files, since a signal runs no cleanup; at 99f1b43 the same
+kill truncated a file already at `--out`. The trial holds every run's
+initial state, and can refuse a certificate the runs alone could write
+(**Memory**, above).
 
 **What it certifies, and what it does not.** It certifies what ran:
 which states each segment started and ended on, as hashes, with its
@@ -1259,20 +1293,31 @@ cft-serve, stopped by its PID. Their device lines must be the remote
 rule's, and their run blocks byte for byte the software backend's,
 flagstep's flag words and STATUS among them.
 
-Last, it holds what a run costs: flagstep on 65,535 lanes, a main run
-and two half-step runs, against the main run alone. The two further
-runs may cost their inputs and one state more, no more. At 4eed552,
-which held every run's working set at once, they cost two whole working
-sets. The gate measures a process as its platform does: its peak commit
-on Windows, and on Linux the least address space it writes its
-certificate in (`ulimit -v`), found by bisection. It also holds git to
-ignoring the tool's binary.
+Last, it holds memory. What a run costs: flagstep on 65,535 lanes, a
+main run and two half-step runs, against the main run alone. The two
+further runs may cost their inputs and one state more, no more. At
+4eed552, which held every run's working set at once, they cost two
+whole working sets. The gate measures a process as its platform does:
+its peak commit on Windows, and on Linux the least address space it
+writes its certificate in (`ulimit -v`), doubled from 16 MiB and then
+bisected. And what the trial costs the runs, to the page: in two small
+shapes, the least address space with the trial must be no more than
+with `trial-skipped` (eb2d1ae's trial, planted back, costs them 20 KiB
+and 4 KiB). That is held on Linux, where the least address space of a
+run is the same every time. On Windows, identical runs' peak commit
+differs by up to 16 KiB, more than a page, so there it is NOT TESTED,
+by name (a SKIP line, which `verify/run.sh` counts as an inner skip).
+The bisection sets only the soft limit, never past the hard limit the
+gate's process has. A host whose hard limit stops a measurement says
+NOT TESTED too, and the gate goes on (at eb2d1ae, run as `nobody` under
+a hard limit of about 8 GB, it stopped with a traceback; verifier-C7).
+It also holds git to ignoring the tool's binary.
 
-389 checks since P3b's send-back (293 at 99f1b43, 380 at 4eed552): 40
-to 42 s on the Windows desktop, with other work holding its CPU at 22
-to 44 %, and 48 to 49 s in WSL (2026-09-28). Verifier-C7 measured
-4eed552's 380 at 45 to 52 s with the desktop at 0 to 4 %, and 163 s
-at about 93 %.
+Since P3b's second send-back: 391 checks on Linux, 41 to 43 s in WSL;
+389 on the Windows desktop and one SKIP, the trial's cost NOT TESTED
+there, 39 to 41 s (2026-09-29). There were 293 at 99f1b43, 380 at
+4eed552 and 389 at eb2d1ae. Verifier-C7 measured 4eed552's 380 at 45
+to 52 s with the desktop at 0 to 4 % CPU, and 163 s at about 93 %.
 
 **On the card**, `hw/card-segrun.sh <image.xclbin>` runs the same gate
 with the certificates made on the tile. It holds the device lines to

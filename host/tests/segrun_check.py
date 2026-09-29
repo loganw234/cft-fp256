@@ -56,12 +56,19 @@ Then:
      cft-serve, stopped by its PID - backend remote, the device lines the
      page's remote rule gives, and every run block byte for byte the
      software backend's, flagstep's flag words and STATUS among them;
- 10. what a run beside the main run costs: flagstep on 65,535 lanes, a
-     main run and two half-step runs, against the main run alone - no
-     more than the two runs' inputs and one state to spare, where 4eed552
-     held every run's working set at once (verifier-C7's regression).
-     Peak commit on Windows; on Linux the least address space the run
-     writes its certificate in (ulimit -v), found by bisection.
+ 10. memory. What a run beside the main run costs: flagstep on 65,535
+     lanes, a main run and two half-step runs, against the main run alone
+     - no more than the two runs' inputs and one state to spare, where
+     4eed552 held every run's working set at once (verifier-C7's
+     regression); peak commit on Windows, on Linux the least address
+     space the run writes its certificate in (ulimit -v), found by
+     bisection. And what the trial costs the runs, to the page: the least
+     address space with the trial and with its allocations skipped
+     (CFT_SEGRUN_PLANT=trial-skipped), in two small shapes where eb2d1ae's
+     trial cost them up to 40 KiB (verifier-C7) - on Linux; on Windows,
+     where identical runs' peak commit differs by several pages, NOT
+     TESTED, by name. A host whose hard address-space limit stops a
+     measurement says NOT TESTED too, and the gate goes on.
 
 The programs: lorenz63-rk4, lorenz96-rk4 and henonheiles-lf at fp64 and
 fp256, each image held to programs/MANIFEST, with its classic bank, a
@@ -995,7 +1002,7 @@ def hold_refusals(work, l63, flag):
           "it is CHANGED" if P["existing"].is_file() else "it is GONE")
 
 
-# ---- the memory a run beside the main run costs ----------------------------
+# ---- memory: what a run costs, and what the trial costs --------------------
 
 # flagstep at fp64: 16 bytes a lane, so 1,048,560 bytes of state - 16
 # short of 1 MiB, so that the tool reads each initial state into a buffer
@@ -1012,47 +1019,85 @@ def read_buffer(n):
     return cap
 
 
-def peak_commit(args):
+class Unmeasured(Exception):
+    """This host cannot take the measurement: named NOT TESTED, never a
+    failure of the tool and never a crash of the gate."""
+
+
+class Unwritten(Exception):
+    """The run did not write its certificate under all the memory the
+    measurement may give it: the tool's failure, by name."""
+
+
+def tool_env(env):
+    e = dict(os.environ)
+    e.pop("CFT_SEGRUN_PLANT", None)
+    if env:
+        e.update(env)
+    return e
+
+
+def peak_commit(args, env=None):
     """Windows: the run's peak commit (PeakPagefileUsage), read from its
-    process handle once it has exited. -> (rc, stderr, bytes or None)"""
-    import ctypes
-    import ctypes.wintypes as wt
+    process handle once it has exited. -> (rc, stderr, bytes)"""
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
 
-    class Counters(ctypes.Structure):
-        _fields_ = [("cb", wt.DWORD), ("PageFaultCount", wt.DWORD),
-                    ("PeakWorkingSetSize", ctypes.c_size_t),
-                    ("WorkingSetSize", ctypes.c_size_t),
-                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
-                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
-                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
-                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
-                    ("PagefileUsage", ctypes.c_size_t),
-                    ("PeakPagefileUsage", ctypes.c_size_t)]
+        class Counters(ctypes.Structure):
+            _fields_ = [("cb", wt.DWORD), ("PageFaultCount", wt.DWORD),
+                        ("PeakWorkingSetSize", ctypes.c_size_t),
+                        ("WorkingSetSize", ctypes.c_size_t),
+                        ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                        ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                        ("PagefileUsage", ctypes.c_size_t),
+                        ("PeakPagefileUsage", ctypes.c_size_t)]
 
-    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    k32.K32GetProcessMemoryInfo.argtypes = [
-        wt.HANDLE, ctypes.POINTER(Counters), wt.DWORD]
-    k32.K32GetProcessMemoryInfo.restype = wt.BOOL
-    p = subprocess.Popen([str(TOOL)] + [str(a) for a in args],
-                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         text=True)
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.K32GetProcessMemoryInfo.argtypes = [
+            wt.HANDLE, ctypes.POINTER(Counters), wt.DWORD]
+        k32.K32GetProcessMemoryInfo.restype = wt.BOOL
+        p = subprocess.Popen([str(TOOL)] + [str(a) for a in args],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, env=tool_env(env))
+    except (ImportError, AttributeError, OSError, ValueError) as e:
+        raise Unmeasured(f"the peak commit cannot be read here: "
+                         f"{type(e).__name__}: {e}")
     try:
         _, se = p.communicate(timeout=TOOL_TIMEOUT)
     except subprocess.TimeoutExpired:
         p.kill()
         p.communicate()
-        return -1, f"stopped after {TOOL_TIMEOUT} s", None
+        return -1, f"stopped after {TOOL_TIMEOUT} s", 0
     c = Counters()
     c.cb = ctypes.sizeof(c)
-    got = k32.K32GetProcessMemoryInfo(int(p._handle), ctypes.byref(c), c.cb)
-    return p.returncode, se, c.PeakPagefileUsage if got else None
+    if not k32.K32GetProcessMemoryInfo(int(p._handle), ctypes.byref(c),
+                                       c.cb):
+        raise Unmeasured(f"GetProcessMemoryInfo failed "
+                         f"({ctypes.get_last_error()})")
+    return p.returncode, se, c.PeakPagefileUsage
 
 
-def least_address_space(argf, d, tag):
-    """Linux: the least RLIMIT_AS, to 4 KiB, under which the run writes its
-    certificate - verifier-C7's `ulimit -v`, found by bisection from 16 GiB
-    down. -> (bytes or None, stderr at 16 GiB)"""
-    import resource
+def least_address_space(argf, d, tag, env=None, step=4096):
+    """Linux: the least address space - RLIMIT_AS, verifier-C7's `ulimit
+    -v` - under which the run writes its certificate, to `step` bytes:
+    doubled from 16 MiB until it writes, then bisected. Only the soft
+    limit is set, and never past the hard limit this process has, which
+    an unprivileged process may not raise (verifier-C7 ran the gate as
+    `nobody` under a hard limit of about 8 GB: the 16 GiB this asked for
+    at eb2d1ae stopped it with a traceback). -> bytes; Unmeasured when
+    the hard limit stops the measurement, Unwritten when 16 GiB does not
+    let the run write."""
+    try:
+        import resource
+        hard = resource.getrlimit(resource.RLIMIT_AS)[1]
+    except (ImportError, OSError, ValueError) as e:
+        raise Unmeasured(f"RLIMIT_AS cannot be read here: {e}")
+    cap = 1 << 34
+    if hard != resource.RLIM_INFINITY and hard < cap:
+        cap = hard
     n = [0]
     last = [""]
 
@@ -1061,103 +1106,175 @@ def least_address_space(argf, d, tag):
         out, sdir = d / f"{tag}{n[0]}.cert", d / f"{tag}{n[0]}.states"
 
         def lim():
-            resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+            resource.setrlimit(resource.RLIMIT_AS, (limit, hard))
         try:
             r = subprocess.run([str(TOOL)] + [str(a) for a in
                                               argf(out, sdir)],
                                capture_output=True, text=True,
-                               preexec_fn=lim, timeout=TOOL_TIMEOUT)
+                               preexec_fn=lim, env=tool_env(env),
+                               timeout=TOOL_TIMEOUT)
             good, last[0] = r.returncode == 0, r.stderr
         except subprocess.TimeoutExpired:
             good, last[0] = False, f"stopped after {TOOL_TIMEOUT} s"
-        if out.exists():
-            out.unlink()
-        shutil.rmtree(sdir, ignore_errors=True)
+        except (subprocess.SubprocessError, OSError, ValueError) as e:
+            raise Unmeasured(f"the tool cannot be started under an address-"
+                             f"space limit here: {type(e).__name__}: {e}")
+        finally:
+            if out.exists():
+                out.unlink()
+            shutil.rmtree(sdir, ignore_errors=True)
         return good
 
-    lo, hi = 0, 1 << 34
-    if not ok(hi):
-        return None, last[0]
-    while hi - lo > 4096:
-        mid = (lo + hi) // 2 // 4096 * 4096
+    lo, hi = 0, min(1 << 24, cap)
+    while not ok(hi):
+        if hi >= cap and cap < 1 << 34:
+            raise Unmeasured(f"the run does not write its certificate under "
+                             f"{hi} bytes, this process's hard address-"
+                             f"space limit: {last[0].strip()[-200:]}")
+        if hi >= cap:
+            raise Unwritten(f"not even under {hi} bytes: "
+                            f"{last[0].strip()[-240:]}")
+        lo, hi = hi, min(hi * 2, cap)
+    while hi - lo > step:
+        mid = (lo + hi) // 2 // step * step
         if mid <= lo:
             break
         if ok(mid):
             hi = mid
         else:
             lo = mid
-    return hi, ""
+    return hi
+
+
+def kib(n):
+    return f"{n / 1024:,.0f} KiB"
 
 
 def hold_peak(work, flag):
-    """verifier-C7's regression, held: 4eed552 held every run's two states
-    and streams at once, where 99f1b43 held one run's, so a certificate
-    99f1b43 writes under a memory limit it refused `memory`. A main run and
-    two half-step runs must cost what the main run alone does, and no more
-    than the two further runs' inputs beside it and one state to spare -
-    at 4eed552 they cost two whole working sets more. Measured as the
-    platform measures a process: its peak commit on Windows, and on Linux
-    the least address space it runs in (ulimit -v, as C7 measured)."""
+    """verifier-C7's regressions, held.
+    4eed552 held every run's two states and streams at once, where
+    99f1b43 held one run's: a main run and two half-step runs must cost
+    what the main run alone does, and no more than the two further runs'
+    inputs beside it and one state to spare. Measured as the platform
+    measures a process: its peak commit on Windows, and on Linux the least
+    address space it writes its certificate in.
+    eb2d1ae's trial took its pieces under 64 KiB from the C library's heap
+    and left the heap bigger, so the runs needed up to 40 KiB more than
+    99f1b43's: the trial must cost the runs nothing, to the page. Held on
+    Linux, where the least address space is the same run after run; on
+    Windows, identical runs' peak commit differs by several pages, so
+    there it is NOT TESTED."""
     print("== 10. memory: a run beside the main run costs its own inputs, "
-          "not a working set of its own", flush=True)
+          "and the trial costs the runs nothing", flush=True)
     d = work / "peak"
     d.mkdir(parents=True, exist_ok=True)
     img = flag.runs[0].image
-    init = cert.state_bytes("fp64", list(flag.runs[0].init[:2]) * PEAK_LANES)
-    pi, pn = d / "flag.cftp", d / "flag.init"
+    lane = list(flag.runs[0].init[:2])
+    pi = d / "flag.cftp"
     pi.write_bytes(img)
-    pn.write_bytes(init)
+    inits = {}
+    for lanes in (PEAK_LANES, 1, 16):
+        inits[lanes] = d / f"flag-{lanes}.init"
+        inits[lanes].write_bytes(cert.state_bytes("fp64", lane * lanes))
+    salt = d / "salt.bin"
+    salt.write_bytes(bytes(range(32)))
 
-    def argf(n_half):
+    def argf(lanes, segments, n_half, keyed=False):
+        pn = inits[lanes]
+
         def f(out, sdir):
-            a = ["--out", out, "--states", sdir, "--open", "--run", "main",
-                 "--image", pi, "--init", pn, "--segments", "1",
-                 "--steps", "1"]
+            a = ["--out", out, "--states", sdir,
+                 *(("--salt", salt) if keyed else ("--open",)),
+                 "--run", "main", "--image", pi, "--init", pn,
+                 "--segments", str(segments), "--steps", "1"]
             for _ in range(n_half):
                 a += ["--run", "half-step", "--h-slots", "0", "--image", pi,
-                      "--init", pn, "--segments", "1", "--steps", "1"]
+                      "--init", pn, "--segments", str(2 * segments),
+                      "--steps", "1"]
             return a
         return f
 
-    shapes = (("the main run alone", 0), ("the main run and two half-step "
-                                          "runs", 2))
-    vals = []
-    if os.name == "nt":
-        how = "peak commit"
-        for label, k in shapes:
-            out, sdir = d / f"w{k}.cert", d / f"w{k}.states"
-            rc, se, pk = peak_commit(argf(k)(out, sdir))
-            if not check(rc == 0 and pk is not None,
-                         f"{label}, {PEAK_LANES} lanes: written, and its "
-                         f"peak commit read", f"rc {rc}: {se.strip()[-240:]}"):
-                return
-            vals.append(pk)
-    elif sys.platform.startswith("linux"):
-        how = "least address space (ulimit -v)"
-        for label, k in shapes:
-            v, se = least_address_space(argf(k), d, f"l{k}-")
-            if not check(v is not None, f"{label}, {PEAK_LANES} lanes: "
-                         f"written, under a limit found by bisection",
-                         f"not even under 16 GiB: {se.strip()[-240:]}"):
-                return
-            vals.append(v)
-    else:
-        skip("what a run beside the main run costs",
-             f"no way to measure a process's peak here ({sys.platform})")
-        return
-    one, three = vals
-    inputs = 2 * (read_buffer(len(init)) + read_buffer(len(img)))
-    state = len(init)
+    linux = sys.platform.startswith("linux")
+    what_run = "what a run beside the main run costs"
+    try:
+        # 1. a run's own working set: one run against three
+        shapes = (("the main run alone", 0),
+                  ("the main run and two half-step runs", 2))
+        vals = []
+        if os.name == "nt":
+            how = "peak commit"
+            for label, k in shapes:
+                out, sdir = d / f"w{k}.cert", d / f"w{k}.states"
+                rc, se, pk = peak_commit(argf(PEAK_LANES, 1, k)(out, sdir))
+                if not check(rc == 0, f"{label}, {PEAK_LANES} lanes: "
+                             f"written, and its peak commit read",
+                             f"rc {rc}: {se.strip()[-240:]}"):
+                    return
+                vals.append(pk)
+        elif linux:
+            how = "least address space (ulimit -v)"
+            for label, k in shapes:
+                try:
+                    vals.append(least_address_space(
+                        argf(PEAK_LANES, 1, k), d, f"l{k}-", step=1 << 16))
+                except Unwritten as e:
+                    bad(f"{label}, {PEAK_LANES} lanes: written, under a "
+                        f"limit found by bisection - {e}")
+                    return
+                ok(f"{label}, {PEAK_LANES} lanes: written, under a limit "
+                   f"found by bisection")
+        else:
+            raise Unmeasured(f"no way to measure a process's peak here "
+                             f"({sys.platform})")
+        one, three = vals
+        inputs = 2 * (read_buffer(PEAK_LANES * 16) + read_buffer(len(img)))
+        state = PEAK_LANES * 16
+        check(three - one <= inputs + state,
+              f"{how}: the main run alone {kib(one)}, with two half-step "
+              f"runs {kib(three)} - {kib(three - one)} more, within the two "
+              f"runs' inputs ({kib(inputs)}) and one state ({kib(state)})",
+              f"{kib(three - one)} more, past {kib(inputs + state)}: a run "
+              f"holds a working set of its own beside the others' (4eed552 "
+              f"held every run's states at once; verifier-C7)")
+    except Unmeasured as e:
+        skip(what_run, f"NOT TESTED here - {e}")
 
-    def kib(n):
-        return f"{n / 1024:,.0f} KiB"
-    check(three - one <= inputs + state,
-          f"{how}: the main run alone {kib(one)}, with two half-step runs "
-          f"{kib(three)} - {kib(three - one)} more, within the two runs' "
-          f"inputs ({kib(inputs)}) and one state ({kib(state)})",
-          f"{kib(three - one)} more, past {kib(inputs + state)}: a run holds "
-          f"a working set of its own beside the others' (4eed552 held every "
-          f"run's states at once; verifier-C7)")
+    # 2. the trial's cost to the runs, to the page: the least address
+    # space with the trial and with its allocations skipped (the
+    # instrument), in two small shapes verifier-C7 found it in
+    trial_shapes = (
+        ("1 lane, open, a main run of 100 segments and a half-step run "
+         "of 200", argf(1, 100, 1)),
+        ("16 lanes, keyed, a main run of 30 segments and two half-step "
+         "runs of 60", argf(16, 30, 2, keyed=True)))
+    what_trial = "what the trial costs the runs, to the page"
+    if not linux:
+        skip(what_trial, "NOT TESTED here - " + (
+             "identical runs' peak commit differs by several pages on "
+             "Windows, so a page is below what it can see; held on Linux"
+             if os.name == "nt" else
+             f"no way to measure a process's address space here "
+             f"({sys.platform})"))
+        return
+    try:
+        for i, (label, f) in enumerate(trial_shapes):
+            try:
+                with_trial = least_address_space(f, d, f"t{i}-")
+                without = least_address_space(
+                    f, d, f"s{i}-", env={"CFT_SEGRUN_PLANT": "trial-skipped"})
+            except Unwritten as e:
+                bad(f"what the trial costs the runs ({label}): the run "
+                    f"written under a limit found by bisection - {e}")
+                continue
+            check(with_trial <= without,
+                  f"least address space with the trial {kib(with_trial)}, "
+                  f"with its allocations skipped {kib(without)}: the trial "
+                  f"costs the runs nothing ({label})",
+                  f"the trial costs the runs {kib(with_trial - without)} - "
+                  f"it has left the heap bigger (eb2d1ae's pieces under "
+                  f"64 KiB from calloc; verifier-C7)")
+    except Unmeasured as e:
+        skip(what_trial, f"NOT TESTED here - {e}")
 
 
 # ---- the remote leg ---------------------------------------------------------

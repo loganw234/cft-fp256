@@ -1162,9 +1162,11 @@ clean-programs:
 #                       --out of its own, which must come through byte
 #                       for byte; the page's test vectors; lorenz63 and
 #                       the flags program through a loopback cft-serve,
-#                       stopped by PID; and what a run beside the main
-#                       run costs in memory (peak commit on Windows, the
-#                       least ulimit -v on Linux).
+#                       stopped by PID; what a run beside the main run
+#                       costs in memory (peak commit on Windows, the
+#                       least ulimit -v on Linux); and, on Linux, that
+#                       the trial before anything is made costs the runs
+#                       nothing, to the page (NOT TESTED on Windows).
 #                       verify/run.sh's `programs` stage runs it.
 #
 # The tree's build id goes in as make test hands api-test its own, so a

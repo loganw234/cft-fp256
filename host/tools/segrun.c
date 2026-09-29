@@ -168,8 +168,12 @@
  *   flags-wide         each segment's flag word gains bit 5
  * Each says so on stderr, and makes a certificate's run refuse by that
  * name; with --build-id or --hash, which run nothing, it only prints its
- * note and the run exits 0 with the right output. Any other value is
- * refused as `usage`.
+ * note and the run exits 0 with the right output. A fourth refuses
+ * nothing:
+ *   trial-skipped      the trial's allocations are skipped, its size
+ *                      checks kept (try_runs), so that the gate can hold
+ *                      the trial to costing the runs nothing
+ * Any other value is refused as `usage`.
  *
  * ---------------------------------------------------------------
  * What it certifies, and what it does not
@@ -345,6 +349,7 @@ static unsigned long long STATE_FILES = 0;
 
 /* CFT_SEGRUN_PLANT, the instrument (the header comment). */
 static int PLANT_UNREADABLE = 0, PLANT_UNWRITTEN = 0, PLANT_WIDE = 0;
+static int PLANT_NO_TRIAL = 0;
 
 static void cleanup(void)
 {
@@ -392,11 +397,20 @@ static void refuse(const char *name, const char *fmt, ...)
     exit(code);
 }
 
+/* cft_last_error() before the calls refuse_st reports on, once a call
+ * whose failure the tool expects has left its sentence there (identify's
+ * cft_get_image_id, on the software backend and through a remote one). A
+ * sentence can outlive its call (cft.h): the one a failure reports must
+ * be one it wrote, so the same sentence as before is not shown. */
+static char LAST_BEFORE[512];
+
 static void refuse_st(const char *name, const char *what, cft_status st)
 {
     const char *detail = cft_last_error();
-    refuse(name, "%s: %s%s%s", what, cft_strerror(st),
-           (detail && *detail) ? " - " : "", (detail && *detail) ? detail : "");
+    int fresh = detail && *detail &&
+                strncmp(detail, LAST_BEFORE, sizeof LAST_BEFORE - 1) != 0;
+    refuse(name, "%s: %s%s%s", what, cft_strerror(st), fresh ? " - " : "",
+           fresh ? detail : "");
 }
 
 /* Every allocation of the tool's that fails is refused by name, `memory`.
@@ -1065,29 +1079,42 @@ static int add_ok(size_t *acc, size_t v)
  * pieces their size decides: each run's hashes, flag words and STATUS,
  * kept; its two states and its streams, taken and let go; the
  * certificate's text last, at the least it can be. A run the process
- * cannot have is refused `memory` then, with nothing made. The trial
- * never needs more at once than the runs will, and less than 99f1b43's
- * tool held at each run's peak: it holds no hash's buffer (a state's
- * size, and the one piece a run holds for moments), no library, device
- * or program, and each large piece rounded down to whole pages, taken
- * from the operating system itself so that trying it leaves the C
- * library's heap - and every allocation after it - as it was.
+ * cannot have is refused `memory` then, with nothing made.
+ *
+ * The trial takes nothing from the C library's heap. Every piece comes
+ * from the operating system, rounded down to whole pages (a piece under
+ * a page is not tried), and so does the trial's own list of what it
+ * holds; all of it is given back before the outputs are made. So the
+ * runs allocate from the heap they would have had without the trial,
+ * and the trial costs them nothing - which the gate holds to the page on
+ * Linux (verifier-C7, 2026-09-29: at eb2d1ae the pieces under 64 KiB
+ * came from calloc, left the heap up to 40 KiB bigger, and 99f1b43 wrote
+ * certificates under limits eb2d1ae refused).
+ *
+ * The trial holds no hash's buffer and no library, device or program -
+ * at each run, less than 99f1b43's tool held there. But it holds every
+ * run's initial state throughout, as 99f1b43's runs did, where the runs
+ * now let each go once it is copied: so the trial can need more than the
+ * runs themselves (verifier-C7's `up` shape, about 10 MB), and refuse a
+ * certificate they alone could have written, which 99f1b43 could not
+ * write either.
  *
  * What the trial cannot promise: a hash's buffer and a boundary file's
- * path; the library's own memory, which fails as `program-image` or
- * `device`; and memory the machine gives others between the trial and
- * the run. A piece of the tool's that cannot be had after the trial had
- * it is still refused `memory`, part way. */
+ * path; a piece under a page; the library's own memory, which fails as
+ * `program-image` or `device`; and memory the machine gives others
+ * between the trial and the run. A piece of the tool's that cannot be
+ * had after the trial had it is still refused `memory`, part way. Where
+ * the operating system has no anonymous mapping, the trial is its size
+ * checks alone. */
 
 typedef struct {
     void *p;
     size_t n;
-    int os;                     /* from the operating system, not calloc */
 } trial;
 
-#define TRIAL_OS_FROM ((size_t)64 * 1024)
-
 #if defined(_WIN32) || defined(SEG_MAP_ANON)
+#  define TRIAL_OS 1
+
 static size_t page_size(void)
 {
 #  if defined(_WIN32)
@@ -1099,49 +1126,51 @@ static size_t page_size(void)
     return p > 0 ? (size_t)p : 4096;
 #  endif
 }
-#endif
 
-/* `bytes` tried, or 0. A large piece is taken from the operating system,
- * rounded down to whole pages: the runs' own allocation of it, the C
- * library's with its header, can only be larger. */
+/* `n` bytes, a whole number of pages, from the operating system, or
+ * NULL: never from the C library's heap. */
+static void *os_take(size_t n)
+{
+#  if defined(_WIN32)
+    return VirtualAlloc(NULL, n, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+#  else
+    void *p = mmap(NULL, n, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | SEG_MAP_ANON, -1, 0);
+    return p == MAP_FAILED ? NULL : p;
+#  endif
+}
+
+static void os_give(void *p, size_t n)
+{
+#  if defined(_WIN32)
+    (void)n;
+    VirtualFree(p, 0, MEM_RELEASE);
+#  else
+    munmap(p, n);
+#  endif
+}
+
+/* `bytes` tried: rounded down to whole pages and taken from the operating
+ * system - the runs' own allocation of it, the C library's with its
+ * header, can only be larger - or, under a page, not tried at all. 0
+ * only if the operating system refuses it. */
 static int trial_take(trial *t, size_t bytes)
 {
+    size_t pg = page_size();
     t->p = NULL;
-    t->n = bytes ? bytes : 1;
-    t->os = 0;
-#if defined(_WIN32) || defined(SEG_MAP_ANON)
-    if (t->n >= TRIAL_OS_FROM) {
-        size_t pg = page_size();
-        t->os = 1;
-        t->n = (t->n / pg) * pg;
-#  if defined(_WIN32)
-        t->p = VirtualAlloc(NULL, t->n, MEM_RESERVE | MEM_COMMIT,
-                            PAGE_READWRITE);
-#  else
-        t->p = mmap(NULL, t->n, PROT_READ | PROT_WRITE,
-                    MAP_PRIVATE | SEG_MAP_ANON, -1, 0);
-        if (t->p == MAP_FAILED)
-            t->p = NULL;
-#  endif
-        return t->p != NULL;
-    }
-#endif
-    t->p = calloc(1, t->n);
+    t->n = bytes / pg * pg;
+    if (t->n == 0)
+        return 1;
+    t->p = os_take(t->n);
     return t->p != NULL;
 }
 
 static void trial_give(trial *t)
 {
-    if (t->p && t->os) {
-#if defined(_WIN32)
-        VirtualFree(t->p, 0, MEM_RELEASE);
-#elif defined(SEG_MAP_ANON)
-        munmap(t->p, t->n);
-#endif
-    } else if (t->p) {
-        free(t->p);
-    }
+    if (t->p)
+        os_give(t->p, t->n);
     t->p = NULL;
+    t->n = 0;
 }
 
 /* One piece of the trial: `n` x `sz` bytes for `what`, of run `r` (or of
@@ -1159,14 +1188,16 @@ static void trial_or_refuse(trial *t, size_t n, size_t sz, long r,
                "anything is made, so nothing was", who,
                (unsigned long long)n, (unsigned long long)sz, what);
 }
+#else
+#  define TRIAL_OS 0
+#endif
 
 static void try_runs(const run_spec *runs, size_t n_runs, const char *states,
                      int keyed)
 {
-    size_t r, i, text_max = HEAD_TEXT, text_min = 0, cap = 4096;
+    size_t r, text_max = HEAD_TEXT, text_min = 0, cap = 4096;
     size_t path = strlen(states) + PATH_TAIL;
     size_t lead = keyed ? 64 : 0;      /* the HMAC's key block */
-    trial *kept, now[3];
 
     /* every size, against what the process can address */
     for (r = 0; r < n_runs; r++) {
@@ -1199,38 +1230,58 @@ static void try_runs(const run_spec *runs, size_t n_runs, const char *states,
                    (unsigned long long)text_min);
         cap *= 2;
     }
+    if (PLANT_NO_TRIAL)
+        return;
 
-    /* tried in the order the runs need it: each run's hashes, flag words
-     * and STATUS kept, as the certificate keeps them; its two states and
-     * its streams taken and let go, as the run lets them go */
-    kept = (trial *)xcalloc(3 * n_runs, sizeof *kept);
-    for (r = 0; r < n_runs; r++) {
-        const run_spec *R = &runs[r];
-        size_t S = (size_t)R->segments;
-        long ri = (long)r;
-        trial_or_refuse(&kept[3 * r], S + 1, sizeof *R->hash, ri,
-                        "the boundary hashes");
-        trial_or_refuse(&kept[3 * r + 1], S, sizeof(uint32_t), ri,
-                        "the flag words");
-        trial_or_refuse(&kept[3 * r + 2], S, sizeof(uint32_t), ri, "STATUS");
-        trial_or_refuse(&now[0], R->state_bytes, 1, ri, "a state");
-        trial_or_refuse(&now[1], R->state_bytes, 1, ri, "a state");
-        trial_or_refuse(&now[2], R->lanes, R->esz, ri, "the streams");
-        for (i = 0; i < 3; i++)
-            trial_give(&now[i]);
+#if TRIAL_OS
+    {
+        /* tried in the order the runs need it: each run's hashes, flag
+         * words and STATUS kept, as the certificate keeps them; its two
+         * states and its streams taken and let go, as the run lets them
+         * go. The list of what is kept is the operating system's too. */
+        size_t pg = page_size(), list, i;
+        trial *kept, now[3];
+        if (!mul_ok(3 * sizeof *kept, n_runs, &list) ||
+            !add_ok(&list, pg - 1))
+            refuse("memory", "the trial's list of %lu runs is more than "
+                   "this process can address", (unsigned long)n_runs);
+        list = list / pg * pg;
+        kept = (trial *)os_take(list);
+        if (!kept)
+            refuse("memory", "%llu bytes for the trial's own list could not "
+                   "be had; nothing was made", (unsigned long long)list);
+        for (r = 0; r < n_runs; r++) {
+            const run_spec *R = &runs[r];
+            size_t S = (size_t)R->segments;
+            long ri = (long)r;
+            trial_or_refuse(&kept[3 * r], S + 1, sizeof *R->hash, ri,
+                            "the boundary hashes");
+            trial_or_refuse(&kept[3 * r + 1], S, sizeof(uint32_t), ri,
+                            "the flag words");
+            trial_or_refuse(&kept[3 * r + 2], S, sizeof(uint32_t), ri,
+                            "STATUS");
+            trial_or_refuse(&now[0], R->state_bytes, 1, ri, "a state");
+            trial_or_refuse(&now[1], R->state_bytes, 1, ri, "a state");
+            trial_or_refuse(&now[2], R->lanes, R->esz, ri, "the streams");
+            for (i = 0; i < 3; i++)
+                trial_give(&now[i]);
+        }
+        /* the certificate's text, beside every run's hashes, at the least
+         * it can be and grown as put() grows it: 4096 doubled, the old
+         * buffer and the new held together at the last doubling */
+        now[0].p = NULL;
+        now[0].n = 0;
+        if (cap > 4096)
+            trial_or_refuse(&now[0], cap / 2, 1, -1,
+                            "the certificate's text");
+        trial_or_refuse(&now[1], cap, 1, -1, "the certificate's text");
+        trial_give(&now[0]);
+        trial_give(&now[1]);
+        for (i = 0; i < 3 * n_runs; i++)
+            trial_give(&kept[i]);
+        os_give(kept, list);
     }
-    /* the certificate's text, beside every run's hashes, at the least it
-     * can be and grown as put() grows it: 4096 doubled, the old buffer
-     * and the new held together at the last doubling */
-    now[0].p = NULL;
-    if (cap > 4096)
-        trial_or_refuse(&now[0], cap / 2, 1, -1, "the certificate's text");
-    trial_or_refuse(&now[1], cap, 1, -1, "the certificate's text");
-    trial_give(&now[0]);
-    trial_give(&now[1]);
-    for (i = 0; i < 3 * n_runs; i++)
-        trial_give(&kept[i]);
-    free(kept);
+#endif
 }
 
 /* A run's own allocation, as the trial took it: one that fails now is
@@ -1373,12 +1424,16 @@ int main(int argc, char **argv)
             PLANT_UNWRITTEN = 1;
         else if (!strcmp(plant, "flags-wide"))
             PLANT_WIDE = 1;
+        else if (!strcmp(plant, "trial-skipped"))
+            PLANT_NO_TRIAL = 1;
         else
             refuse("usage", "CFT_SEGRUN_PLANT=%s is not an instrument this "
                    "tool has (flags-unreadable, flags-unwritten, "
-                   "flags-wide)", plant);
+                   "flags-wide, trial-skipped)", plant);
         fprintf(stderr, "cft-segrun: CFT_SEGRUN_PLANT=%s - an instrument: "
-                "this run is to be refused\n", plant);
+                "%s\n", plant, PLANT_NO_TRIAL ? "the trial's allocations "
+                "are skipped, its size checks kept" : "this run is to be "
+                "refused");
     }
 
     if (argc < 2) {
@@ -1579,6 +1634,7 @@ int main(int argc, char **argv)
         hex_of(digest, 32, R->program_digest);
     }
     identify(dev, &caps, &id);
+    snprintf(LAST_BEFORE, sizeof LAST_BEFORE, "%s", cft_last_error());
 
     /* ---- the runs, segment by segment ------------------------------------ */
     for (r = 0; r < n_runs; r++) {
