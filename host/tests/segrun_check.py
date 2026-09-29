@@ -55,7 +55,13 @@ Then:
   9. with --serve: lorenz63 and flagstep certified through a loopback
      cft-serve, stopped by its PID - backend remote, the device lines the
      page's remote rule gives, and every run block byte for byte the
-     software backend's, flagstep's flag words and STATUS among them.
+     software backend's, flagstep's flag words and STATUS among them;
+ 10. what a run beside the main run costs: flagstep on 65,535 lanes, a
+     main run and two half-step runs, against the main run alone - no
+     more than the two runs' inputs and one state to spare, where 4eed552
+     held every run's working set at once (verifier-C7's regression).
+     Peak commit on Windows; on Linux the least address space the run
+     writes its certificate in (ulimit -v), found by bisection.
 
 The programs: lorenz63-rk4, lorenz96-rk4 and henonheiles-lf at fp64 and
 fp256, each image held to programs/MANIFEST, with its classic bank, a
@@ -873,6 +879,12 @@ def hold_refusals(work, l63, flag):
          None, None),
         ("10^12 segments", "memory",
          lambda o, s: base(o, s, seg=str(10 ** 12)), None, None),
+        # verifier-C7's Windows findings: an existing directory at --out
+        # was refused as "Permission denied", and the null device accepted
+        ("an --out that is a directory there already", "output",
+         lambda o, s: base(exists, s), None, None),
+        ("the null device as --out", "output",
+         lambda o, s: base(os.devnull, s), None, None),
     ]
     # refused by a check the tool makes only after the outputs are made:
     # the library's loader, which needs the device, opened after them
@@ -922,9 +934,16 @@ def hold_refusals(work, l63, flag):
             "an --out inside --states, named as boundary 0":
                 r"--out .+ cannot be created",
             "run 1 asking 2^63 - 1 segments, run 0 one":
-                r"run 1: .* held before any segment runs",
-            "10^12 segments": r"(run 0: |the certificate's text ).* held "
-                              r"before any segment runs"}
+                r"run 1: \d+ segments need more memory than this process "
+                r"can address",
+            "10^12 segments":
+                r"(run 0: \d+ x 65 bytes for the boundary hashes|\d+ x 1 "
+                r"bytes for the certificate's text) could not be had; .*"
+                r"before anything is made",
+            "an --out that is a directory there already":
+                r"--out .+ is there already",
+            "the null device as --out":
+                r"--out .+ (is not a file|is there already)"}
     for i, (label, name, argf, env, twin) in enumerate(cases):
         out, sdir = d / f"case{i}.cert", d / f"case{i}.states"
         args = argf(out, sdir)
@@ -967,9 +986,178 @@ def hold_refusals(work, l63, flag):
                 bad(f"  the golden writer has no name for {label}: "
                     f"{type(e).__name__}: {e}")
     check(not (d / "absent").exists(), "a refused --out made no directory")
-    check(P["existing"].read_bytes() == kept,
+    # read only if it is there: a tool that removed it fails here by name,
+    # and the gate goes on to the remote leg and removes its work directory
+    # (verifier-C7's plant F crashed this line at 4eed552)
+    check(P["existing"].is_file() and P["existing"].read_bytes() == kept,
           "the file at --out in 'an --out that is there already' is as it "
-          "was, byte for byte")
+          "was, byte for byte",
+          "it is CHANGED" if P["existing"].is_file() else "it is GONE")
+
+
+# ---- the memory a run beside the main run costs ----------------------------
+
+# flagstep at fp64: 16 bytes a lane, so 1,048,560 bytes of state - 16
+# short of 1 MiB, so that the tool reads each initial state into a buffer
+# of exactly 1 MiB
+PEAK_LANES = 65535
+
+
+def read_buffer(n):
+    """What cft-segrun's read_file holds an n-byte file in: 64 KiB,
+    doubled until the file's bytes and its end both fit."""
+    cap = 1 << 16
+    while cap <= n:
+        cap *= 2
+    return cap
+
+
+def peak_commit(args):
+    """Windows: the run's peak commit (PeakPagefileUsage), read from its
+    process handle once it has exited. -> (rc, stderr, bytes or None)"""
+    import ctypes
+    import ctypes.wintypes as wt
+
+    class Counters(ctypes.Structure):
+        _fields_ = [("cb", wt.DWORD), ("PageFaultCount", wt.DWORD),
+                    ("PeakWorkingSetSize", ctypes.c_size_t),
+                    ("WorkingSetSize", ctypes.c_size_t),
+                    ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                    ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                    ("PagefileUsage", ctypes.c_size_t),
+                    ("PeakPagefileUsage", ctypes.c_size_t)]
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.K32GetProcessMemoryInfo.argtypes = [
+        wt.HANDLE, ctypes.POINTER(Counters), wt.DWORD]
+    k32.K32GetProcessMemoryInfo.restype = wt.BOOL
+    p = subprocess.Popen([str(TOOL)] + [str(a) for a in args],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         text=True)
+    try:
+        _, se = p.communicate(timeout=TOOL_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.communicate()
+        return -1, f"stopped after {TOOL_TIMEOUT} s", None
+    c = Counters()
+    c.cb = ctypes.sizeof(c)
+    got = k32.K32GetProcessMemoryInfo(int(p._handle), ctypes.byref(c), c.cb)
+    return p.returncode, se, c.PeakPagefileUsage if got else None
+
+
+def least_address_space(argf, d, tag):
+    """Linux: the least RLIMIT_AS, to 4 KiB, under which the run writes its
+    certificate - verifier-C7's `ulimit -v`, found by bisection from 16 GiB
+    down. -> (bytes or None, stderr at 16 GiB)"""
+    import resource
+    n = [0]
+    last = [""]
+
+    def ok(limit):
+        n[0] += 1
+        out, sdir = d / f"{tag}{n[0]}.cert", d / f"{tag}{n[0]}.states"
+
+        def lim():
+            resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+        try:
+            r = subprocess.run([str(TOOL)] + [str(a) for a in
+                                              argf(out, sdir)],
+                               capture_output=True, text=True,
+                               preexec_fn=lim, timeout=TOOL_TIMEOUT)
+            good, last[0] = r.returncode == 0, r.stderr
+        except subprocess.TimeoutExpired:
+            good, last[0] = False, f"stopped after {TOOL_TIMEOUT} s"
+        if out.exists():
+            out.unlink()
+        shutil.rmtree(sdir, ignore_errors=True)
+        return good
+
+    lo, hi = 0, 1 << 34
+    if not ok(hi):
+        return None, last[0]
+    while hi - lo > 4096:
+        mid = (lo + hi) // 2 // 4096 * 4096
+        if mid <= lo:
+            break
+        if ok(mid):
+            hi = mid
+        else:
+            lo = mid
+    return hi, ""
+
+
+def hold_peak(work, flag):
+    """verifier-C7's regression, held: 4eed552 held every run's two states
+    and streams at once, where 99f1b43 held one run's, so a certificate
+    99f1b43 writes under a memory limit it refused `memory`. A main run and
+    two half-step runs must cost what the main run alone does, and no more
+    than the two further runs' inputs beside it and one state to spare -
+    at 4eed552 they cost two whole working sets more. Measured as the
+    platform measures a process: its peak commit on Windows, and on Linux
+    the least address space it runs in (ulimit -v, as C7 measured)."""
+    print("== 10. memory: a run beside the main run costs its own inputs, "
+          "not a working set of its own", flush=True)
+    d = work / "peak"
+    d.mkdir(parents=True, exist_ok=True)
+    img = flag.runs[0].image
+    init = cert.state_bytes("fp64", list(flag.runs[0].init[:2]) * PEAK_LANES)
+    pi, pn = d / "flag.cftp", d / "flag.init"
+    pi.write_bytes(img)
+    pn.write_bytes(init)
+
+    def argf(n_half):
+        def f(out, sdir):
+            a = ["--out", out, "--states", sdir, "--open", "--run", "main",
+                 "--image", pi, "--init", pn, "--segments", "1",
+                 "--steps", "1"]
+            for _ in range(n_half):
+                a += ["--run", "half-step", "--h-slots", "0", "--image", pi,
+                      "--init", pn, "--segments", "1", "--steps", "1"]
+            return a
+        return f
+
+    shapes = (("the main run alone", 0), ("the main run and two half-step "
+                                          "runs", 2))
+    vals = []
+    if os.name == "nt":
+        how = "peak commit"
+        for label, k in shapes:
+            out, sdir = d / f"w{k}.cert", d / f"w{k}.states"
+            rc, se, pk = peak_commit(argf(k)(out, sdir))
+            if not check(rc == 0 and pk is not None,
+                         f"{label}, {PEAK_LANES} lanes: written, and its "
+                         f"peak commit read", f"rc {rc}: {se.strip()[-240:]}"):
+                return
+            vals.append(pk)
+    elif sys.platform.startswith("linux"):
+        how = "least address space (ulimit -v)"
+        for label, k in shapes:
+            v, se = least_address_space(argf(k), d, f"l{k}-")
+            if not check(v is not None, f"{label}, {PEAK_LANES} lanes: "
+                         f"written, under a limit found by bisection",
+                         f"not even under 16 GiB: {se.strip()[-240:]}"):
+                return
+            vals.append(v)
+    else:
+        skip("what a run beside the main run costs",
+             f"no way to measure a process's peak here ({sys.platform})")
+        return
+    one, three = vals
+    inputs = 2 * (read_buffer(len(init)) + read_buffer(len(img)))
+    state = len(init)
+
+    def kib(n):
+        return f"{n / 1024:,.0f} KiB"
+    check(three - one <= inputs + state,
+          f"{how}: the main run alone {kib(one)}, with two half-step runs "
+          f"{kib(three)} - {kib(three - one)} more, within the two runs' "
+          f"inputs ({kib(inputs)}) and one state ({kib(state)})",
+          f"{kib(three - one)} more, past {kib(inputs + state)}: a run holds "
+          f"a working set of its own beside the others' (4eed552 held every "
+          f"run's states at once; verifier-C7)")
 
 
 # ---- the remote leg ---------------------------------------------------------
@@ -1174,6 +1362,7 @@ def main():
     else:
         bad("the remote leg: a software certificate it compares with was "
             "not made")
+    hold_peak(work, flag)
 
     if not args.keep:
         shutil.rmtree(work, ignore_errors=True)

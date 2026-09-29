@@ -792,7 +792,10 @@ model needs the standard library only). In order, each step an `ok` or a
      sampled - all but that last one, which the audit must refuse
      `aux-start`;
    - each made again on the software backend, every run block byte for
-     byte the card's.
+     byte the card's;
+   - on the software backend, the gate's refusals, and since P3b's
+     send-back what a run beside the main run costs in memory (the least
+     `ulimit -v`, found by bisection - a few dozen short runs).
 3. **The negative control.** Handed device-test's own SHA-256 as the
    image's, the gate must fail the device lines by name.
 

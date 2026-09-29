@@ -1031,10 +1031,10 @@ output, both in decimal as the certificate numbers them. Each file is
 the state's bytes, lane-major, the bytes its hash covers. The run
 creates DIR, which must not exist before it, so two runs' states never
 share a directory, and creates each file in it new. It creates the
-certificate new as well, and before DIR: an `--out` that is there
-already is refused, never overwritten, and an `--out` inside DIR cannot
-be created at all, so the certificate is never one of the boundary
-files. An auditor is handed the directory with the
+certificate new as well, as a regular file, and before DIR: an `--out`
+that is there already is refused, never overwritten, and an `--out`
+inside DIR cannot be created at all, so the certificate is never one of
+the boundary files. An auditor is handed the directory with the
 certificate, the images and banks, and a keyed certificate's salt. The
 golden audit takes the files as `states={r: {b: bytes}}`.
 
@@ -1090,19 +1090,16 @@ which 64 is already the auditor's usage:
   sticky flags a certificate records (`cft_caps.flags_readable` 0); a
   digest, or a segment's run, fails; or the library leaves a segment's
   flag word unwritten;
-- `memory`, exit 71: what the runs need in memory cannot be had. Every
-  run's boundary hashes, flag words and STATUS, and the certificate's
-  text, are counted against what the process can address; then those
-  and each run's states are allocated, all before the certificate or
-  DIR is created and before any segment runs. So more boundaries than
-  the process can hold are refused with nothing made:
-  `--segments 9223372036854775807` by its size, naming its run, and
-  `--segments 1000000000000` when an allocation fails - on the Windows
-  desktop, its boundary hashes' (10^12 + 1) x 65 bytes;
-- `output`, exit 73: `--out` is there already, or lies inside DIR,
-  where it cannot be created because DIR does not exist yet; DIR is
-  there already; or the certificate or a state file cannot be created
-  or written.
+- `memory`, exit 71: what the runs need in memory cannot be had, found
+  before anything is made (**Memory**, below), or another of the tool's
+  own allocations fails. The library's allocations are not the tool's:
+  a library out of memory is refused as what failed, `program-image`
+  (the load) or `device` (a segment's run), and a stdio buffer that
+  cannot be had as `usage` (reading) or `output` (writing);
+- `output`, exit 73: `--out` is there already, is not a regular file
+  (Windows' `NUL`), or lies inside DIR, where it cannot be created
+  because DIR does not exist yet; DIR is there already; or the
+  certificate or a state file cannot be created or written.
 
 Every refusal prints `cft-segrun: refused <name>: <why>` and exits with
 the name's code. None writes a certificate, and none removes or changes
@@ -1115,9 +1112,8 @@ refusals: `flags-unreadable`, `flags-unwritten` or `flags-wide`. Each
 makes a run refuse by that name, and says so. With `--build-id` or
 `--hash`, which run nothing, it only prints that the run is to be
 refused and exits 0 with the right output (verifier-C6). The refusals
-only a failing library, device or filesystem, or another process
-writing into DIR, can reach have no test, since nothing on the desktop
-does so:
+only a failing library, device or filesystem, or another process, can
+reach have no test in the gate:
 - `cft_get_caps`, `cft_program_get_info`, `cft_program_digest`,
   `cft_sha256` or a segment's `cft_program_run_ex` returning an error;
 - the library reading an image's header differently from the tool, or
@@ -1128,20 +1124,91 @@ does so:
   formatted;
 - a boundary file already in DIR when the run comes to write it
   (`output`, as a file the run did not make).
-Of `memory`, the gate reaches the size check, the boundary hashes'
-allocation on the Windows desktop, and the certificate's text's in WSL.
+Two of these do happen on the desktop when another process makes them,
+and verifier-C7 made both, there and in WSL (2026-09-28): a loopback
+server killed part way through a run made a segment's run fail, refused
+`device` with the boundary files written so far left and said so; and
+a thread that wrote a boundary file into DIR ahead of the run had it
+refused `output`, the thread's file kept byte for byte. Each is a race,
+so the gate holds neither. Every other condition the lists above name
+has a test, and so does every refusal name; not every branch of `usage`
+or of `memory` has one.
+
+**Memory.** The runs allocate as 99f1b43's tool did, and never hold
+more at once. A run takes its boundary hashes, flag words and STATUS
+when it starts, and keeps them for the certificate. It takes its two
+states and its +0 streams, and lets them go when it ends, so no run
+holds another's. A hash's buffer and a boundary file's path are held
+only while each is used, and the certificate's text is grown after the
+last run. They hold a little less than 99f1b43's did: each image is let
+go once the library has loaded and digested it, and each initial state
+once it is copied into its run's first state.
+
+Before the certificate or DIR is created, the tool counts what the runs
+need against what the process can address. It then tries, in the runs'
+own order, the pieces their sizes decide: each run's hashes, flag words
+and STATUS, kept; its two states and streams, taken and let go; and
+last the certificate's text, at the least it can be. So a run the
+process cannot have is refused with nothing made. `--segments
+9223372036854775807` on run 1 is refused by its size, naming the run.
+`--segments 1000000000000` is refused at its boundary hashes' (10^12 +
+1) x 65 bytes on the Windows desktop, and at the certificate's text in
+WSL.
+
+The trial never needs more at once than the runs themselves will. It
+holds no hash's buffer (a state's size), no library, device or
+program, and each large piece rounded down to whole pages, taken from
+the operating system so that the C library's heap is left as it was.
+Measured on verifier-C7's case (flagstep, 1,048,576 lanes, a main and
+two half-step runs), the least `ulimit -v` it writes the certificate
+under in WSL is 164,128 kB at 99f1b43, 250,744 kB at 4eed552, and
+147,744 kB now. Its peak commit on the desktop is 157,936 to 157,984
+KiB at 99f1b43 and 141,532 to 141,568 KiB now. In five other shapes in
+WSL the tool never needs more address space than 99f1b43's did, to the
+page, and writes the same bytes (2026-09-28):
+- a tiny run;
+- three tiny runs;
+- the gate's lorenz63, with a half-step and a wider run;
+- three runs of 1 MiB states;
+- the same three through a remote handle.
+
+What the trial cannot promise:
+- a hash's buffer or a boundary file's path;
+- the library's own memory;
+- memory the machine gives others between the trial and the run.
+A piece of the tool's that cannot be had after the trial had it is
+refused `memory` part way, with the boundary files left and said so.
+So are the tool's other allocations: a file read, the command line's
+lists, a hash's buffer, a boundary file's path, and the certificate's
+text as it grows. None of these has a test in the gate, though none
+needs the machine loaded to reach it: an address-space limit reaches
+each, and verifier-C7 had an initial state's read refused `memory`
+under `ulimit -v` in WSL. The gate holds the size check, the trial's
+refusals and what a run costs (below).
+
 Where memory is overcommitted, an allocation the machine cannot back
-still succeeds. In WSL cft2204 (`vm.overcommit_memory` 1), 10^12
-segments get their hashes and are refused at the certificate's text,
-200 TB, past what a process can address. A count whose every
-allocation fits the address space is not refused there at all: a run
-that outgrows such a machine is the kernel's to stop, under no name of
-the tool's. The same refusal for a run's flag words, STATUS or states,
-a file read, the command line, the hash buffer or a boundary file's
-path has no test: each fails only when what the machine has left falls
-short of it, which a test would have to arrange by loading the machine.
-Every other condition the lists above name has a test, and so does
-every refusal name; not every branch of `usage` has one.
+still succeeds. Linux does so in both of its usual modes. Mode 1 (WSL
+cft2204) refuses nothing that fits the address space, and mode 0, the
+default and amd-arc-box's, refuses only a single allocation larger than
+the machine's memory and swap (the kernel's rule; not measured on
+amd-arc-box). There, a count whose allocations each pass is not refused
+before it runs. In WSL, 2 x 10^11 segments run: verifier-C7 ran them at
+4eed552, and they ran again at P3b's send-back, 7,087 boundary files in
+the first second before they were stopped. Such a run touches about 73
+bytes of memory a segment and writes a file of at least one disk block
+a boundary, and the certificate is written only at the end. So on
+cft2204, with 66 million free inodes, the files would run out first,
+after about 66 million segments with about 4.9 GB touched. The run
+would then be refused `output` part way, by name, its boundary files
+left and said so. That is arithmetic, not a run.
+
+**Known limits.** On Windows, `--out file:name` writes the certificate
+into a new NTFS stream of an existing file: its data is kept, and its
+time changes. `--out name\` makes a plain file `name`. Both are names
+the user gave, and neither changes a file's data. A run killed by a
+signal leaves the certificate it created, empty, and its boundary files,
+since a signal runs no cleanup; at 99f1b43 the same kill truncated a
+file already at `--out`.
 
 **What it certifies, and what it does not.** It certifies what ran:
 which states each segment started and ended on, as hashes, with its
@@ -1186,14 +1253,26 @@ HMAC written from RFC 2104 in the gate. It holds every refusal above
 that an input or the instrument can cause, by its name and code, and
 the golden writer's name for the same defect where it has one. Each
 refusal whose command line has an `--out` of its own is made again with
-a file already there, which must come through byte for byte. Last, it
+a file already there, which must come through byte for byte. It
 certifies `lorenz63-rk4` at fp64 and `flagstep` through a loopback
 cft-serve, stopped by its PID. Their device lines must be the remote
 rule's, and their run blocks byte for byte the software backend's,
-flagstep's flag words and STATUS among them. It also holds git to
-ignoring the tool's binary. 380 checks since P3b (293 at 99f1b43): 90 s
-on the Windows desktop when it was otherwise idle, up to 215 s while
-other work held it near 90 % CPU, and 66 s in WSL (2026-09-28).
+flagstep's flag words and STATUS among them.
+
+Last, it holds what a run costs: flagstep on 65,535 lanes, a main run
+and two half-step runs, against the main run alone. The two further
+runs may cost their inputs and one state more, no more. At 4eed552,
+which held every run's working set at once, they cost two whole working
+sets. The gate measures a process as its platform does: its peak commit
+on Windows, and on Linux the least address space it writes its
+certificate in (`ulimit -v`), found by bisection. It also holds git to
+ignoring the tool's binary.
+
+389 checks since P3b's send-back (293 at 99f1b43, 380 at 4eed552): 40
+to 42 s on the Windows desktop, with other work holding its CPU at 22
+to 44 %, and 48 to 49 s in WSL (2026-09-28). Verifier-C7 measured
+4eed552's 380 at 45 to 52 s with the desktop at 0 to 4 %, and 163 s
+at about 93 %.
 
 **On the card**, `hw/card-segrun.sh <image.xclbin>` runs the same gate
 with the certificates made on the tile. It holds the device lines to

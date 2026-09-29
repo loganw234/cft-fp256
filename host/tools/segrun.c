@@ -52,17 +52,18 @@
  * `end`, and the hash line. `steps` and every `--param` are stated, not
  * checked, as the page says.
  *
- * Every file the tool writes is one it creates new (O_EXCL): --out must
- * not exist either, and no run overwrites a file, so a refusal that
- * removes what it made never removes anything else. --out is created
- * BEFORE DIR, so an --out inside DIR cannot be created at all - DIR does
- * not exist yet - and a certificate can never be one of the boundary
- * files. And everything a run needs in memory - every run's hashes, flag
- * words and STATUS, its states, the hash buffer and the certificate's
- * text - is allocated before either is created and before any segment
- * runs, so a run the process cannot hold is refused then, by name. (Where
- * memory is overcommitted, an allocation the machine cannot back still
- * succeeds, and only what the address space cannot hold is refused.)
+ * Every file the tool writes is one it creates new (O_EXCL), and a
+ * regular file: --out must not exist either, and no run overwrites a
+ * file, so a refusal that removes what it made never removes anything
+ * else. --out is created BEFORE DIR, so an --out inside DIR cannot be
+ * created at all - DIR does not exist yet - and a certificate can never
+ * be one of the boundary files. And what the runs need in memory is
+ * tried before either is created (try_runs): taken and let go in the
+ * order the runs will take it, so a run the process cannot hold is
+ * refused then, by name, while the runs themselves hold no more at once
+ * than 99f1b43's did - one run's states at a time. (Where memory is
+ * overcommitted, an allocation the machine cannot back still succeeds,
+ * and only what the address space cannot hold is refused.)
  *
  * ---------------------------------------------------------------
  * Hashes
@@ -135,13 +136,19 @@
  *                      not open, it cannot read the sticky flags a
  *                      certificate records (cft_caps.flags_readable), or
  *                      a digest or a segment's run fails
- *   memory (71)        the process cannot hold what the runs need, more
+ *   memory (71)        the process cannot have what the runs need, more
  *                      than it can address or more than it is given -
  *                      found before anything is created or run - or
- *                      any other allocation fails
+ *                      another of this tool's own allocations fails. The
+ *                      LIBRARY's allocations are not this tool's: a
+ *                      library out of memory is refused as what failed,
+ *                      `program-image` (cft_program_load) or `device`
+ *                      (a segment's run); a stdio buffer that cannot be
+ *                      had, as `usage` (reading) or `output` (writing)
  *   output (73)        the certificate or the states cannot be created
- *                      or written: --out or DIR already exists, or --out
- *                      lies inside DIR, which is not there yet
+ *                      or written: --out or DIR already exists, --out is
+ *                      not a regular file (Windows' NUL), or --out lies
+ *                      inside DIR, which is not there yet
  * A refusal writes no certificate, and removes only what the run itself
  * created. One made before the first segment leaves nothing behind; a
  * run that fails part way leaves the boundary files it had written, and
@@ -159,8 +166,10 @@
  *   flags-unwritten    each segment's flag word is treated as left
  *                      unwritten by the library
  *   flags-wide         each segment's flag word gains bit 5
- * Each only ever causes a refusal, and says so on stderr; any other
- * value is refused as `usage`.
+ * Each says so on stderr, and makes a certificate's run refuse by that
+ * name; with --build-id or --hash, which run nothing, it only prints its
+ * note and the run exits 0 with the right output. Any other value is
+ * refused as `usage`.
  *
  * ---------------------------------------------------------------
  * What it certifies, and what it does not
@@ -178,6 +187,8 @@
  */
 #if !defined(_WIN32)
 #  define _POSIX_C_SOURCE 200112L   /* 199309L hid snprintf on Darwin (2026-09-09) */
+#  define _DEFAULT_SOURCE           /* glibc: MAP_ANONYMOUS beside POSIX */
+#  define _DARWIN_C_SOURCE          /* Darwin: MAP_ANON beside POSIX */
 #endif
 
 #include <errno.h>
@@ -189,6 +200,10 @@
 #include <string.h>
 
 #if defined(_WIN32)
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <windows.h>              /* VirtualAlloc, for try_runs */
 #  include <direct.h>
 #  include <fcntl.h>
 #  include <io.h>
@@ -197,26 +212,58 @@
 #  define RMDIR(p) _rmdir(p)
 #else
 #  include <fcntl.h>
+#  include <sys/mman.h>             /* mmap, for try_runs */
 #  include <sys/stat.h>
 #  include <sys/types.h>
 #  include <unistd.h>
 #  define MKDIR(p) mkdir((p), 0777)
 #  define RMDIR(p) rmdir(p)
+#  if defined(MAP_ANONYMOUS)
+#    define SEG_MAP_ANON MAP_ANONYMOUS
+#  elif defined(MAP_ANON)
+#    define SEG_MAP_ANON MAP_ANON
+#  endif
+#endif
+/* stat, fstat and fileno under their Windows names, which -std=c99
+ * leaves declared there, and the POSIX ones elsewhere */
+#if defined(_WIN32)
+typedef struct _stat stat_t;
+#  define STAT(p, b)   _stat((p), (b))
+#  define FSTAT(d, b)  _fstat((d), (b))
+#  define FILENO(f)    _fileno(f)
+#  define IS_FILE(m)   (((m) & _S_IFMT) == _S_IFREG)
+#else
+typedef struct stat stat_t;
+#  define STAT(p, b)   stat((p), (b))
+#  define FSTAT(d, b)  fstat((d), (b))
+#  define FILENO(f)    fileno(f)
+#  define IS_FILE(m)   S_ISREG(m)
 #endif
 
 /* A file this run creates NEW, or NULL with errno set (EEXIST when the
  * path is taken): O_EXCL, so no file the tool writes is one it did not
  * create, and a refusal that removes what the run made removes nothing
- * else. */
+ * else. Windows answers O_EXCL on a directory that is there with EACCES,
+ * not EEXIST, so a path that is there is called so whatever it is. */
 static FILE *create_new(const char *path)
 {
     FILE *f;
     int e;
+    stat_t sb;
 #if defined(_WIN32)
     int fd = _open(path, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
                    _S_IREAD | _S_IWRITE);
-    if (fd < 0)
+#else
+    int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0666);
+#endif
+    if (fd < 0) {
+        e = errno;
+        if (e == EACCES && STAT(path, &sb) == 0)
+            e = EEXIST;
+        errno = e;
         return NULL;
+    }
+#if defined(_WIN32)
     f = _fdopen(fd, "wb");
     if (!f) {
         e = errno;
@@ -225,9 +272,6 @@ static FILE *create_new(const char *path)
         errno = e;
     }
 #else
-    int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0666);
-    if (fd < 0)
-        return NULL;
     f = fdopen(fd, "wb");
     if (!f) {
         e = errno;
@@ -355,11 +399,11 @@ static void refuse_st(const char *name, const char *what, cft_status st)
            (detail && *detail) ? " - " : "", (detail && *detail) ? detail : "");
 }
 
-/* Every allocation that fails is refused by name, `memory`. The ones a
- * run's size decides are made up front (hold_runs), so that a run the
- * process cannot hold is refused before anything is created or run;
- * this is the rest: the inputs as they are read, the command line's
- * lists, and the certificate's text past its reservation. */
+/* Every allocation of the tool's that fails is refused by name, `memory`.
+ * What a run's size decides is tried before anything is made (try_runs)
+ * and taken again as the run reaches it (run_take); this is the rest:
+ * the inputs as they are read, the command line's lists, a hash's
+ * buffer, a boundary file's path, and the certificate's text. */
 static void *xcalloc(size_t n, size_t sz)
 {
     void *p;
@@ -505,32 +549,16 @@ static void sha256_of(const void *data, size_t n, uint8_t out[32])
         refuse_st("device", "cft_sha256", st);
 }
 
-/* One buffer every hash is taken over: the padded key block (keyed),
- * the tag and the bytes. Reserved once, before anything runs, for the
- * largest state or stream a run hashes (hold_runs), so no segment
- * allocates; work() grows it only for --hash, which runs nothing. */
-#define WORK_HEAD (64 + TAG_STREAM_LEN)   /* the key block and the longest tag */
-static uint8_t *WORK = NULL;
-static size_t WORK_CAP = 0;
-
-static uint8_t *work(size_t n)
-{
-    if (n > WORK_CAP) {
-        free(WORK);
-        WORK = (uint8_t *)xcalloc(n, 1);
-        WORK_CAP = n;
-    }
-    return WORK;
-}
-
 /* HMAC-SHA-256 (RFC 2104, B = 64) of tag || msg under a 32-byte key.
  * The key is shorter than the block, so it is its own K0, zero-padded;
- * cft_sha256 is one-shot, so each pass hashes one buffer. */
+ * cft_sha256 is one-shot, so each pass hashes one buffer, taken for the
+ * hash and let go after it - never held while the library runs a
+ * segment, which has buffers of its own. */
 static void hmac_sha256(const uint8_t key[SALT_BYTES],
                         const void *tag, size_t tag_len,
                         const void *msg, size_t msg_len, uint8_t out[32])
 {
-    uint8_t *inner = work(64 + tag_len + msg_len);
+    uint8_t *inner = (uint8_t *)xcalloc(64 + tag_len + msg_len, 1);
     uint8_t outer[64 + 32], ih[32];
     size_t i;
     for (i = 0; i < 64; i++) {
@@ -543,6 +571,7 @@ static void hmac_sha256(const uint8_t key[SALT_BYTES],
     if (msg_len)
         memcpy(inner + 64 + tag_len, msg, msg_len);
     sha256_of(inner, 64 + tag_len + msg_len, ih);
+    free(inner);
     memcpy(outer + 64, ih, 32);
     sha256_of(outer, sizeof outer, out);
 }
@@ -556,11 +585,12 @@ static void tagged_hash(const uint8_t *salt, const char *tag, size_t tag_len,
     if (salt) {
         hmac_sha256(salt, tag, tag_len, bytes, n, d);
     } else {
-        uint8_t *buf = work(tag_len + n);
+        uint8_t *buf = (uint8_t *)xcalloc(tag_len + n, 1);
         memcpy(buf, tag, tag_len);
         if (n)
             memcpy(buf + tag_len, bytes, n);
         sha256_of(buf, tag_len + n, d);
+        free(buf);
     }
     hex_of(d, 32, hex);
 }
@@ -690,8 +720,6 @@ typedef struct {
     char stream_hash[3][65];
     char (*hash)[65];           /* boundaries 0..S */
     uint32_t *flags, *status;   /* segments 0..S-1 */
-    uint8_t *cur, *next, *zero; /* the two states a segment moves between,
-                                 * and the +0 streams */
 } run_spec;
 
 static void add_param(run_spec *r, const char *s)
@@ -957,46 +985,50 @@ static void identify(cft_device *dev, const cft_caps *caps, identity *id)
 
 /* ---- the states directory ---------------------------------------------- */
 
-/* A boundary file's path, reserved with the rest (hold_runs): the
- * directory's name, "/run-", 20 digits, "-boundary-", 20, ".bin". */
-static char *PATHBUF = NULL;
-static size_t PATHBUF_CAP = 0;
+/* A boundary file's path: the directory's name, "/run-", 20 digits,
+ * "-boundary-", 20, ".bin". */
+#define PATH_TAIL 64
 
 static void write_boundary(size_t r, uint64_t b, const void *state, size_t n)
 {
+    size_t cap = strlen(STATES_DIR) + PATH_TAIL;
+    char *path = (char *)xcalloc(cap, 1);
     FILE *f;
-    snprintf(PATHBUF, PATHBUF_CAP, "%s/run-%lu-boundary-%llu.bin",
-             STATES_DIR, (unsigned long)r, (unsigned long long)b);
+    snprintf(path, cap, "%s/run-%lu-boundary-%llu.bin", STATES_DIR,
+             (unsigned long)r, (unsigned long long)b);
     /* created new: the directory is the run's own, so a file already
      * there is one this run did not make, and it is left as it is */
-    f = create_new(PATHBUF);
+    f = create_new(path);
     if (!f)
-        refuse("output", "%s cannot be created (%s)", PATHBUF,
+        refuse("output", "%s cannot be created (%s)", path,
                errno == EEXIST ? "a file this run did not make is there "
                                  "already" : strerror(errno));
     STATE_FILES++;
     if (fwrite(state, 1, n, f) != n) {
         fclose(f);
-        refuse("output", "a short write to %s", PATHBUF);
+        refuse("output", "a short write to %s", path);
     }
     if (fclose(f) != 0)
-        refuse("output", "%s could not be closed (%s)", PATHBUF,
-               strerror(errno));
+        refuse("output", "%s could not be closed (%s)", path, strerror(errno));
+    free(path);
 }
 
-/* ---- what every run needs, held before anything is created or run --- */
+/* ---- what every run needs, tried before anything is created or run --- */
 
-/* The certificate's text, at most: a segment's line is 195 bytes
- * ("segment " and 19 digits, " start " and 64, " end " and 64, " flags "
- * and 2, " status " and 10, and its LF); a run block's other lines are
- * under 1 KiB beside its h-slots (4 bytes each) and parameters (under
- * 100 each); the header, `accuracy`, `end` and the hash line under
- * 1 KiB. */
-#define SEGMENT_TEXT 200
-#define RUN_TEXT     4096
-#define HSLOT_TEXT   4
-#define PARAM_TEXT   100
-#define HEAD_TEXT    2048
+/* The certificate's text. At most, for the count against what the
+ * process can address: a segment's line is 195 bytes ("segment " and 19
+ * digits, " start " and 64, " end " and 64, " flags " and 2, " status "
+ * and 10, and its LF); a run block's other lines are under 1 KiB beside
+ * its h-slots (4 bytes each) and parameters (under 100 each); the
+ * header, `accuracy`, `end` and the hash line under 1 KiB. At the least,
+ * for the trial: the segment lines alone, each at least 167 bytes (one
+ * digit where the most is 19, 2 and 10). */
+#define SEGMENT_TEXT     200
+#define SEGMENT_TEXT_MIN 167
+#define RUN_TEXT         4096
+#define HSLOT_TEXT       4
+#define PARAM_TEXT       100
+#define HEAD_TEXT        2048
 
 static int mul_ok(size_t a, size_t b, size_t *out)
 {
@@ -1014,85 +1046,205 @@ static int add_ok(size_t *acc, size_t v)
     return 1;
 }
 
-/* `r` names the run whose size asks for it, or is -1 for what the runs
- * share. */
-static void *hold(size_t n, size_t sz, long r, const char *what)
+/* ---- the trial ------------------------------------------------------------
+ *
+ * The runs allocate as 99f1b43's tool did, and hold no more at once: a
+ * run's boundary hashes, flag words and STATUS when it starts, kept for
+ * the certificate; its two states and its +0 streams, let go when it
+ * ends; a hash's buffer and a boundary file's path for as long as each
+ * takes; the certificate's text last, grown as it is written. So a run
+ * beside the main run costs its own inputs and hashes, never a second
+ * working set (verifier-C7, 2026-09-28: 4eed552 held every run's states
+ * at once, and refused under a limit a certificate 99f1b43 writes). They
+ * hold a little less than 99f1b43's did: each image is let go once the
+ * library has loaded and digested it, each initial state once it is
+ * copied into the run's first state.
+ *
+ * Before anything is made, try_runs counts all of it against what the
+ * process can address, and then tries, in the runs' own order, the
+ * pieces their size decides: each run's hashes, flag words and STATUS,
+ * kept; its two states and its streams, taken and let go; the
+ * certificate's text last, at the least it can be. A run the process
+ * cannot have is refused `memory` then, with nothing made. The trial
+ * never needs more at once than the runs will, and less than 99f1b43's
+ * tool held at each run's peak: it holds no hash's buffer (a state's
+ * size, and the one piece a run holds for moments), no library, device
+ * or program, and each large piece rounded down to whole pages, taken
+ * from the operating system itself so that trying it leaves the C
+ * library's heap - and every allocation after it - as it was.
+ *
+ * What the trial cannot promise: a hash's buffer and a boundary file's
+ * path; the library's own memory, which fails as `program-image` or
+ * `device`; and memory the machine gives others between the trial and
+ * the run. A piece of the tool's that cannot be had after the trial had
+ * it is still refused `memory`, part way. */
+
+typedef struct {
+    void *p;
+    size_t n;
+    int os;                     /* from the operating system, not calloc */
+} trial;
+
+#define TRIAL_OS_FROM ((size_t)64 * 1024)
+
+#if defined(_WIN32) || defined(SEG_MAP_ANON)
+static size_t page_size(void)
 {
-    char who[32] = "";
-    void *p = (sz && n > (size_t)-1 / sz) ? NULL
-            : calloc(n ? n : 1, sz ? sz : 1);
-    if (r >= 0)
-        snprintf(who, sizeof who, "run %ld: ", r);
-    if (!p)
-        refuse("memory", "%s%llu x %llu bytes for %s could not be had; what "
-               "every run needs is held before any segment runs, so none "
-               "has", who, (unsigned long long)n, (unsigned long long)sz,
-               what);
-    return p;
+#  if defined(_WIN32)
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    return si.dwPageSize ? (size_t)si.dwPageSize : 4096;
+#  else
+    long p = sysconf(_SC_PAGESIZE);
+    return p > 0 ? (size_t)p : 4096;
+#  endif
+}
+#endif
+
+/* `bytes` tried, or 0. A large piece is taken from the operating system,
+ * rounded down to whole pages: the runs' own allocation of it, the C
+ * library's with its header, can only be larger. */
+static int trial_take(trial *t, size_t bytes)
+{
+    t->p = NULL;
+    t->n = bytes ? bytes : 1;
+    t->os = 0;
+#if defined(_WIN32) || defined(SEG_MAP_ANON)
+    if (t->n >= TRIAL_OS_FROM) {
+        size_t pg = page_size();
+        t->os = 1;
+        t->n = (t->n / pg) * pg;
+#  if defined(_WIN32)
+        t->p = VirtualAlloc(NULL, t->n, MEM_RESERVE | MEM_COMMIT,
+                            PAGE_READWRITE);
+#  else
+        t->p = mmap(NULL, t->n, PROT_READ | PROT_WRITE,
+                    MAP_PRIVATE | SEG_MAP_ANON, -1, 0);
+        if (t->p == MAP_FAILED)
+            t->p = NULL;
+#  endif
+        return t->p != NULL;
+    }
+#endif
+    t->p = calloc(1, t->n);
+    return t->p != NULL;
 }
 
-/* Every run's hashes, flag words and STATUS, its two states and its +0
- * streams, the hash buffer, a boundary file's path and the certificate's
- * whole text: counted first against what size_t can address, run by
- * run, then allocated - all of it before the certificate or the states
- * directory is created and before any segment runs. So a run the
- * process cannot hold (`--segments` past what it can address, or past
- * what it can be given) is refused `memory` with nothing made. Where
- * memory is overcommitted (WSL's vm.overcommit_memory 1), what it can be
- * given is everything the address space holds, and the kernel, not this
- * tool, answers for what the machine cannot back. */
-static void hold_runs(run_spec *runs, size_t n_runs, const char *states,
-                      text *body)
+static void trial_give(trial *t)
 {
-    size_t r, text_need = HEAD_TEXT, work_need = WORK_HEAD, t;
+    if (t->p && t->os) {
+#if defined(_WIN32)
+        VirtualFree(t->p, 0, MEM_RELEASE);
+#elif defined(SEG_MAP_ANON)
+        munmap(t->p, t->n);
+#endif
+    } else if (t->p) {
+        free(t->p);
+    }
+    t->p = NULL;
+}
+
+/* One piece of the trial: `n` x `sz` bytes for `what`, of run `r` (or of
+ * the certificate, for r = -1), or the refusal. */
+static void trial_or_refuse(trial *t, size_t n, size_t sz, long r,
+                            const char *what)
+{
+    size_t bytes;
+    char who[32] = "";
+    if (r >= 0)
+        snprintf(who, sizeof who, "run %ld: ", r);
+    if (!mul_ok(n, sz, &bytes) || !trial_take(t, bytes))
+        refuse("memory", "%s%llu x %llu bytes for %s could not be had; what "
+               "the runs need is tried, in the order they need it, before "
+               "anything is made, so nothing was", who,
+               (unsigned long long)n, (unsigned long long)sz, what);
+}
+
+static void try_runs(const run_spec *runs, size_t n_runs, const char *states,
+                     int keyed)
+{
+    size_t r, i, text_max = HEAD_TEXT, text_min = 0, cap = 4096;
+    size_t path = strlen(states) + PATH_TAIL;
+    size_t lead = keyed ? 64 : 0;      /* the HMAC's key block */
+    trial *kept, now[3];
+
+    /* every size, against what the process can address */
     for (r = 0; r < n_runs; r++) {
-        run_spec *R = &runs[r];
-        size_t S = (size_t)R->segments, h, a, b;
+        const run_spec *R = &runs[r];
+        size_t S = (size_t)R->segments, h, a, tmax, tmin, b;
         int ok = (uint64_t)S == R->segments && S < (size_t)-1 &&
                  mul_ok(S + 1, sizeof *R->hash, &h) &&
-                 mul_ok(S, 2 * sizeof(uint32_t), &a) &&
-                 mul_ok(S, SEGMENT_TEXT, &t) && add_ok(&t, RUN_TEXT) &&
-                 add_ok(&t, R->n_hslots * HSLOT_TEXT) &&
-                 add_ok(&t, R->n_param_s * PARAM_TEXT) &&
-                 add_ok(&text_need, t);
-        if (!ok || !add_ok(&h, a))
+                 mul_ok(S, 2 * sizeof(uint32_t), &a) && add_ok(&h, a) &&
+                 mul_ok(S, SEGMENT_TEXT, &tmax) && add_ok(&tmax, RUN_TEXT) &&
+                 add_ok(&tmax, R->n_hslots * HSLOT_TEXT) &&
+                 add_ok(&tmax, R->n_param_s * PARAM_TEXT) &&
+                 add_ok(&text_max, tmax) &&
+                 mul_ok(S, SEGMENT_TEXT_MIN, &tmin) &&
+                 add_ok(&text_min, tmin);
+        if (!ok)
             refuse("memory", "run %lu: %llu segments need more memory than "
                    "this process can address - the boundary hashes, flag "
-                   "words and STATUS, and the certificate's text, which are "
-                   "held before any segment runs", (unsigned long)r,
-                   (unsigned long long)R->segments);
+                   "words and STATUS, or the certificate's text", (unsigned
+                   long)r, (unsigned long long)R->segments);
         b = R->state_bytes > R->lanes * R->esz ? R->state_bytes
                                                : R->lanes * R->esz;
-        if (!add_ok(&b, WORK_HEAD))
+        if (!add_ok(&b, lead + TAG_STREAM_LEN) || !add_ok(&b, path))
             refuse("memory", "run %lu: its state is past what this process "
                    "can address", (unsigned long)r);
-        if (b > work_need)
-            work_need = b;
     }
+    while (cap - 1 < text_min) {
+        if (cap > (size_t)-1 / 2)
+            refuse("memory", "the certificate's text, at least %llu bytes, "
+                   "is more than this process can address",
+                   (unsigned long long)text_min);
+        cap *= 2;
+    }
+
+    /* tried in the order the runs need it: each run's hashes, flag words
+     * and STATUS kept, as the certificate keeps them; its two states and
+     * its streams taken and let go, as the run lets them go */
+    kept = (trial *)xcalloc(3 * n_runs, sizeof *kept);
     for (r = 0; r < n_runs; r++) {
-        run_spec *R = &runs[r];
+        const run_spec *R = &runs[r];
         size_t S = (size_t)R->segments;
         long ri = (long)r;
-        R->hash = (char (*)[65])hold(S + 1, sizeof *R->hash, ri,
-                                     "the boundary hashes");
-        R->flags = (uint32_t *)hold(S, sizeof(uint32_t), ri,
-                                    "the flag words");
-        R->status = (uint32_t *)hold(S, sizeof(uint32_t), ri, "STATUS");
-        R->cur = (uint8_t *)hold(R->state_bytes, 1, ri, "a state");
-        R->next = (uint8_t *)hold(R->state_bytes, 1, ri, "a state");
-        R->zero = (uint8_t *)hold(R->lanes, R->esz, ri, "the streams");
+        trial_or_refuse(&kept[3 * r], S + 1, sizeof *R->hash, ri,
+                        "the boundary hashes");
+        trial_or_refuse(&kept[3 * r + 1], S, sizeof(uint32_t), ri,
+                        "the flag words");
+        trial_or_refuse(&kept[3 * r + 2], S, sizeof(uint32_t), ri, "STATUS");
+        trial_or_refuse(&now[0], R->state_bytes, 1, ri, "a state");
+        trial_or_refuse(&now[1], R->state_bytes, 1, ri, "a state");
+        trial_or_refuse(&now[2], R->lanes, R->esz, ri, "the streams");
+        for (i = 0; i < 3; i++)
+            trial_give(&now[i]);
     }
-    WORK = (uint8_t *)hold(work_need, 1, -1, "the hash buffer");
-    WORK_CAP = work_need;
-    PATHBUF_CAP = strlen(states) + 64;
-    PATHBUF = (char *)hold(PATHBUF_CAP, 1, -1, "a boundary file's path");
-    body->p = (char *)malloc(text_need);
-    if (!body->p)
-        refuse("memory", "the certificate's text needs up to %llu bytes, "
-               "which this process could not have; it is held before any "
-               "segment runs, so none has", (unsigned long long)text_need);
-    body->cap = text_need;
-    body->n = 0;
+    /* the certificate's text, beside every run's hashes, at the least it
+     * can be and grown as put() grows it: 4096 doubled, the old buffer
+     * and the new held together at the last doubling */
+    now[0].p = NULL;
+    if (cap > 4096)
+        trial_or_refuse(&now[0], cap / 2, 1, -1, "the certificate's text");
+    trial_or_refuse(&now[1], cap, 1, -1, "the certificate's text");
+    trial_give(&now[0]);
+    trial_give(&now[1]);
+    for (i = 0; i < 3 * n_runs; i++)
+        trial_give(&kept[i]);
+    free(kept);
+}
+
+/* A run's own allocation, as the trial took it: one that fails now is
+ * refused by the same name, part way. */
+static void *run_take(size_t n, size_t sz, size_t r, const char *what)
+{
+    void *p = (sz && n > (size_t)-1 / sz) ? NULL
+            : calloc(n ? n : 1, sz ? sz : 1);
+    if (!p)
+        refuse("memory", "run %lu: %llu x %llu bytes for %s could not be "
+               "had, although they could when tried before anything was "
+               "made", (unsigned long)r, (unsigned long long)n,
+               (unsigned long long)sz, what);
+    return p;
 }
 
 /* ---- usage --------------------------------------------------------------- */
@@ -1335,8 +1487,8 @@ int main(int argc, char **argv)
     for (r = 0; r < n_runs; r++)
         check_run(&runs[r], r);
 
-    /* ---- what every run needs, before anything is made or run --------- */
-    hold_runs(runs, n_runs, states_path, &body);
+    /* ---- what every run needs, tried before anything is made ------------ */
+    try_runs(runs, n_runs, states_path, salt != NULL);
 
     /* ---- the outputs, before any device work ----------------------------
      * Both created new, the certificate first: a file already at --out is
@@ -1354,6 +1506,19 @@ int main(int argc, char **argv)
                strerror(errno), errno == ENOENT ? "; an --out inside "
                "--states, which this run creates and which must not exist "
                "yet, is refused this way" : "");
+    }
+    {
+        /* a device opens "new" too (Windows' NUL): what was opened must be
+         * a file, and a device is not this run's to remove */
+        stat_t sb;
+        if (FSTAT(FILENO(CERT_FP), &sb) != 0 || !IS_FILE(sb.st_mode)) {
+            FILE *f = CERT_FP;
+            CERT_FP = NULL;
+            fclose(f);
+            refuse("output", "--out %s is not a file, and the certificate is "
+                   "one; a device or other special file there is left as it "
+                   "is", out_path);
+        }
     }
     STATES_DIR = states_path;
     if (MKDIR(states_path) != 0)
@@ -1404,6 +1569,10 @@ int main(int argc, char **argv)
                    R->image_path);
         sha256_of(R->img, R->img_bytes, digest);
         hex_of(digest, 32, R->image_digest);
+        /* the library holds its own copy of the image (cft_program_load),
+         * and the certificate needs only its digest */
+        free(R->img);
+        R->img = NULL;
         st = cft_program_digest(R->prog, bank, R->bank_bytes, digest);
         if (st != CFT_OK)
             refuse_st("device", "cft_program_digest", st);
@@ -1415,12 +1584,28 @@ int main(int argc, char **argv)
     for (r = 0; r < n_runs; r++) {
         run_spec *R = &runs[r];
         const void *bank = R->bank_bytes ? R->bank : NULL;
-        /* held by hold_runs: no segment allocates */
-        uint8_t *cur = R->cur, *next = R->next, *zero = R->zero;
+        uint8_t *cur, *next, *zero;
         uint64_t k;
         int s;
 
+        /* as the trial took them: this run's hashes, flag words and STATUS,
+         * kept for the certificate; its two states and its streams, let go
+         * when it ends, so no run holds another's */
+        R->hash = (char (*)[65])run_take((size_t)R->segments + 1,
+                                         sizeof *R->hash, r,
+                                         "the boundary hashes");
+        R->flags = (uint32_t *)run_take((size_t)R->segments,
+                                        sizeof(uint32_t), r, "the flag words");
+        R->status = (uint32_t *)run_take((size_t)R->segments,
+                                         sizeof(uint32_t), r, "STATUS");
+        cur = (uint8_t *)run_take(R->state_bytes, 1, r, "a state");
+        next = (uint8_t *)run_take(R->state_bytes, 1, r, "a state");
+        zero = (uint8_t *)run_take(R->lanes, R->esz, r, "the streams");
         memcpy(cur, R->init, R->state_bytes);
+        /* boundary 0 is written and hashed from cur: the initial state is
+         * not needed again */
+        free(R->init);
+        R->init = NULL;
 
         for (s = 0; s < 3; s++)
             tagged_hash(salt, stream_tag(s), TAG_STREAM_LEN, zero,
@@ -1478,6 +1663,9 @@ int main(int argc, char **argv)
             cur = next;
             next = t;
         }
+        free(cur);
+        free(next);
+        free(zero);
     }
 
     /* ---- the certificate ------------------------------------------------- */
@@ -1579,16 +1767,11 @@ int main(int argc, char **argv)
         free(runs[r].hash);
         free(runs[r].flags);
         free(runs[r].status);
-        free(runs[r].cur);
-        free(runs[r].next);
-        free(runs[r].zero);
         free((void *)runs[r].param_s);
     }
     free(runs);
     free(salt);
     free(body.p);
-    free(WORK);
-    free(PATHBUF);
     cft_close(dev);
     return 0;
 }
