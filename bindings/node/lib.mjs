@@ -358,10 +358,16 @@ export const FORMATOF_METHOD = {
 let cached = null;
 
 /** Instantiate the wasm module once per process and return the cwrap
- *  table. The .wasm is read here and handed over as Module.wasmBinary
- *  rather than left to emscripten's own path search, so the package
- *  works from any working directory and there is exactly one place
- *  that decides which module got loaded. */
+ *  table. The .wasm is read here, compiled here and handed to the
+ *  loader through its Module.instantiateWasm hook, which the loader
+ *  calls in place of finding a module itself - so there is exactly one
+ *  place that decides which module got loaded, and it is this file.
+ *  Until 2026-09-29 the bytes went over as Module.wasmBinary, which the
+ *  pinned loader (emcc 6.0.9) never reads: it found the cft_node.wasm
+ *  beside itself by its own path search. That was the same file, so the
+ *  package ran the right module, but not by the mechanism this comment
+ *  named. instantiate() now refuses a loader that does not adopt the
+ *  instance built here, rather than run a module nothing here chose. */
 export function loadModule() {
   if (!cached) cached = instantiate();
   return cached;
@@ -429,10 +435,10 @@ export async function sha256(bytes) {
 async function instantiate() {
   const wasmPath = join(HERE, "cft_node.wasm");
   const jsPath = join(HERE, "cft_node.js");
-  let createCftModule, wasmBinary;
+  let createCftModule, wasmBytes;
   try {
     createCftModule = require(jsPath);
-    wasmBinary = readFileSync(wasmPath);
+    wasmBytes = readFileSync(wasmPath);
   } catch (err) {
     throw new Error(
       `cft: could not load the wasm module (${err.message}). ` +
@@ -440,7 +446,30 @@ async function instantiate() {
       `build products; regenerate them with ` +
       `\`bash bindings/wasm/build.sh\`.`);
   }
-  const M = await createCftModule({ wasmBinary });
+  // Instantiated inside the hook against the imports the loader
+  // supplies, synchronously, so that a failure rejects this promise
+  // rather than leaving the loader waiting on a callback.
+  const wasmModule = await WebAssembly.compile(wasmBytes);
+  let instance = null;
+  const M = await createCftModule({
+    instantiateWasm(imports, receive) {
+      instance = new WebAssembly.Instance(wasmModule, imports);
+      receive(instance, wasmModule);
+      return instance.exports;
+    },
+  });
+  // Adopted means the heap the loader works in is this instance's
+  // memory. A loader that ignored the hook would have fetched a module
+  // of its own, and the cwrap table below would drive that.
+  if (!(instance !== null &&
+        instance.exports.memory instanceof WebAssembly.Memory &&
+        M.HEAPU8 !== undefined &&
+        M.HEAPU8.buffer === instance.exports.memory.buffer))
+    throw new Error(
+      `cft: the wasm loader did not adopt the module read from ` +
+      `${wasmPath} through Module.instantiateWasm, so it would run a ` +
+      `module it chose itself - refused. Teach lib.mjs the loader's ` +
+      `hook.`);
 
   const n = "number", s = "string";
   const C = {

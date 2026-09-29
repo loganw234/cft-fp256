@@ -16,14 +16,23 @@
 //      must equal bindings/node/cft_node.wasm - the module
 //      conformance.html embeds and three documents quote. A demos page
 //      running a DIFFERENT module would still produce chains; they
-//      would just be a claim about some other build.
+//      would just be a claim about some other build. Then the same
+//      bytes are asked their ABI, and it must be the one cft.h states
+//      - verify.mjs's step 2, asked of this page: a header bumped
+//      without a rebuild fails here, not only in the wasm and node
+//      stages.
 //
 //   2  THE COMPUTE CORE. The core spliced into the page must be
 //      demos_core.js byte for byte, because this script drives
 //      demos_core.js and reports on demos.html. Without this line the
 //      two could drift and the report would be about the wrong file.
 //
-//   3  THE CHAINS, three ways. For each of the thirteen configurations:
+//   3  THE CHAINS, three ways. First, that the core really runs over
+//      the committed module's bytes (the loader adopted the instance
+//      built from them), and the recording's two stamps:
+//      demos_chains.json names the module and the core it was
+//      recorded against, and they must be the committed module and
+//      demos_core.js. Then, for each of the thirteen configurations:
 //      run the NATIVE tool with the flags the page prints, run the
 //      browser's compute core over the committed wasm module, and
 //      compare both against the chain recorded in demos_chains.json.
@@ -144,6 +153,53 @@ function extractBlock(html, id) {
   return html.slice(from, to);
 }
 
+// ---------------------------------------------------------------------
+// The ABI: what cft.h states, and what a module reports.
+//
+// cftw_abi_version() returns (major << 16) | minor and touches neither
+// memory nor an import, so stub imports are enough to ask it. The
+// expectation is read out of the header rather than typed here, because
+// a typed number would agree with a stale header as happily as with a
+// fresh one. This is bindings/wasm/verify.mjs's step 2, the same three
+// functions; the two must stay in step. Until 2026-09-29 this script
+// had no ABI check at all, and a tree whose cft.h had moved past the
+// committed module passed it (verifier-C4, 2026-09-28): only the wasm
+// and node stages said so.
+// ---------------------------------------------------------------------
+function abiFromHeader() {
+  const h = readFileSync(join(ROOT, "host", "include", "cft.h"), "utf8");
+  const get = (name) => {
+    const m = h.match(new RegExp(`^#define\\s+${name}\\s+(\\d+)`, "m"));
+    if (!m) throw new Error(`cft.h has no ${name}`);
+    return Number(m[1]);
+  };
+  const major = get("CFT_ABI_VERSION_MAJOR");
+  const minor = get("CFT_ABI_VERSION_MINOR");
+  return { major, minor, encoded: (major << 16) | minor };
+}
+
+function stubImports(mod) {
+  const imports = {};
+  for (const d of WebAssembly.Module.imports(mod)) {
+    const ns = (imports[d.module] ??= {});
+    if (d.kind === "function") ns[d.name] = () => 0;
+    else if (d.kind === "memory")
+      ns[d.name] = new WebAssembly.Memory({ initial: 256, maximum: 32768 });
+    else if (d.kind === "table")
+      ns[d.name] = new WebAssembly.Table({ initial: 0, element: "anyfunc" });
+    else ns[d.name] = new WebAssembly.Global({ value: "i32", mutable: true }, 0);
+  }
+  return imports;
+}
+
+async function abiOf(bytes) {
+  const mod = await WebAssembly.compile(bytes);
+  const inst = await WebAssembly.instantiate(mod, stubImports(mod));
+  return inst.exports.cftw_abi_version() >>> 0;
+}
+
+const spell = (v) => `${v >>> 16}.${v & 0xffff}`;
+
 const moduleWasm = readFileSync(MODULE_WASM);
 const moduleHash = sha256(moduleWasm);
 const coreSrc = readFileSync(CORE, "utf8");
@@ -161,8 +217,9 @@ if (existsSync(PAGE)) {
   console.log(`        ${raw.length.toLocaleString("en-US")} bytes, ` +
               `sha256 ${sha256(raw)}`);
   console.log("\n== 1. the module the page embeds ==");
+  let pageWasm = null;
   try {
-    const pageWasm = extractWasm(html);
+    pageWasm = extractWasm(html);
     const pageHash = sha256(pageWasm);
     note(`page module ${pageWasm.length.toLocaleString("en-US")} bytes, ` +
          `sha256 ${pageHash}`);
@@ -174,6 +231,26 @@ if (existsSync(PAGE)) {
           `bindings/node/cft_node.wasm (${moduleHash})`);
   } catch (err) {
     bad(`could not read the page's module: ${err.message}`);
+  }
+  if (pageWasm) {
+    // A separate try: a header this script cannot read is not a page
+    // it cannot read, and the report should not say it is.
+    try {
+      const want = abiFromHeader();
+      const abi = await abiOf(pageWasm);
+      note(`page module cftw_abi_version() = ${abi} (${spell(abi)}); ` +
+           `cft.h says ${want.encoded} (${want.major}.${want.minor})`);
+      if (abi === want.encoded)
+        ok(`the page's module reports libcft ABI ${spell(abi)}, matching ` +
+           `the header`);
+      else
+        bad(`the page's module reports ABI ${spell(abi)} where the tree is ` +
+            `at ${want.major}.${want.minor} - rebuild the module and both ` +
+            `pages (bindings/wasm/build.sh, then verify_demos.mjs ` +
+            `--record, then build_demos.sh, then verify again)`);
+    } catch (err) {
+      bad(`could not hold the page's module to cft.h's ABI: ${err.message}`);
+    }
   }
 
   console.log("\n== 2. the compute core the page embeds ==");
@@ -199,10 +276,38 @@ if (existsSync(PAGE)) {
 
 // ---------------------------------------------------------------------
 // The compute core, loaded into this process over the committed module.
+//
+// The bytes hashed above are the bytes that run: compiled here and
+// handed to the loader through Module.instantiateWasm, which it calls in
+// place of fetching a module itself, instantiated synchronously so that
+// a failure rejects the load. Until 2026-09-29 this passed
+// Module.wasmBinary, which the pinned loader (emcc 6.0.9) never reads:
+// it loaded bindings/node/cft_node.wasm by its own path search - the
+// same file, so the chains were always over the committed module, but
+// the argument decided nothing (verifier-C4, 2026-09-28). Whether the
+// loader adopted the instance built here is reported at the head of
+// step 3: the heap it hands back must be that instance's memory.
 // ---------------------------------------------------------------------
 const require = createRequire(import.meta.url);
 const createCftModule = require(MODULE_JS);
-const M = await createCftModule({ wasmBinary: moduleWasm });
+let M, moduleInstance = null;
+try {
+  const compiled = await WebAssembly.compile(moduleWasm);
+  M = await createCftModule({
+    instantiateWasm(imports, receive) {
+      moduleInstance = new WebAssembly.Instance(compiled, imports);
+      receive(moduleInstance, compiled);
+      return moduleInstance.exports;
+    },
+  });
+} catch (err) {
+  console.log(`  FAIL  the loader could not load the committed module: ${err.message}`);
+  process.exit(1);
+}
+const adopted = moduleInstance !== null &&
+  moduleInstance.exports.memory instanceof WebAssembly.Memory &&
+  M.HEAPU8 !== undefined &&
+  M.HEAPU8.buffer === moduleInstance.exports.memory.buffer;
 vm.runInThisContext(coreSrc, { filename: "demos_core.js" });
 const D = globalThis.CftDemos;
 if (!D) { console.log("  FAIL  demos_core.js defined no CftDemos"); process.exit(1); }
@@ -304,6 +409,45 @@ if (!RECORD) {
 
 console.log(`\n== 3. the chains (${runs.length} configuration${runs.length === 1 ? "" : "s"}` +
             `${NO_NATIVE ? ", --no-native" : ""}) ==`);
+
+if (adopted)
+  ok("the core runs over the committed module's bytes as hashed above: " +
+     "the loader adopted the instance built from them");
+else
+  bad("the loader did not adopt the committed module's bytes handed to it " +
+      "through Module.instantiateWasm, so the chains below are over a " +
+      "module it chose itself - teach this script the loader's hook");
+
+// The recording's two stamps. A chain recorded against a different
+// module or a different core is a chain about a different program, so
+// the recording names both, and make_demos.py refuses to build the page
+// from a file whose stamps are not the committed module and core. That
+// is a check made once, at build time. Until 2026-09-29 nothing read the
+// stamps after it: a demos_chains.json left at an old module stamp,
+// everything else rebuilt, passed this script (verifier-C4,
+// 2026-09-28). The comparison below is against the recording, so the
+// recording has to be about what this run loads. --record rewrites both
+// stamps, so there is nothing to hold them to.
+if (recorded) {
+  const coreHash = sha256(Buffer.from(coreSrc));
+  const stamp = (v) => (typeof v === "string" ? v : `none (${JSON.stringify(v)})`);
+  if (recorded.module_sha256 === moduleHash)
+    ok(`demos_chains.json was recorded against the committed module, ` +
+       `sha256 ${moduleHash.slice(0, 16)}…`);
+  else
+    bad(`demos_chains.json was recorded against module ` +
+        `${stamp(recorded.module_sha256)}, and the committed module is ` +
+        `${moduleHash} - re-record with --record (make_demos.py will not ` +
+        `build the page from this file either)`);
+  if (recorded.core_sha256 === coreHash)
+    ok(`demos_chains.json was recorded against demos_core.js as it ` +
+       `stands, sha256 ${coreHash.slice(0, 16)}…`);
+  else
+    bad(`demos_chains.json was recorded against compute core ` +
+        `${stamp(recorded.core_sha256)}, and demos_core.js is ${coreHash} ` +
+        `- re-record with --record (make_demos.py will not build the page ` +
+        `from this file either)`);
+}
 
 const fresh = [];
 const coreResults = {};        // "panel/run" -> the loop engine's result

@@ -39,7 +39,13 @@
 #include <cft_remote.h>
 #include <remote/cft_remote_replay.h>
 
-/* The ABI word this client CLAIMS; the server refuses a mismatch.
+/* The ABI word this client CLAIMS, and the server refuses a mismatch,
+ * so it has to be your server's. The value below is the one the probe
+ * printed when this example was written, libcft 0.11, and the
+ * library's version steps do not move it: any other server - every
+ * one since 0.12 - refuses it at HELLO, with both versions in the
+ * message, and this sketch prints the server's. Ask yours once and
+ * put the line the probe prints here:
  *   python host/tools/cft-serial-bridge.py --probe-abi HOST:PORT  */
 #define CFT_REMOTE_ABI 0x0000000BUL      /* libcft 0.11 */
 

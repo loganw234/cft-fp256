@@ -221,7 +221,9 @@ the build directory:
    into a test*;
 3. checks the node loader's `.wasm` is the same module by sha256,
    because a replay through a lookalike would prove nothing about
-   the page;
+   the page, and then that the loader, handed the page's bytes,
+   adopts them: the heap it hands back must be the memory of the
+   instance built from those bytes;
 
    3b. replays the page's **embedded sample** the way its section 2
    does on load - each of the twenty sampled opcode sets in its own
@@ -233,8 +235,8 @@ the build directory:
    one expected value flipped in that sample) passed all of them; it
    fails here by name, and `node bindings/wasm/verify.mjs --page
    bindings/wasm/build/negative_control.html` is how to watch it;
-4. hands the extracted bytes to the node loader as
-   `Module.wasmBinary` and replays the full sets through
+4. hands the extracted bytes to the node loader through its
+   `Module.instantiateWasm` hook and replays the full sets through
    `cft_conformance()` over MEMFS - the page's own bytes, the
    library's own file-reading path, one call per set. One set per
    directory, which is what the page does with a dropped file, over
@@ -243,7 +245,13 @@ the build directory:
    `make vectors` has written them, the four augmented, twenty
    reduction and twenty character sets, the four magnitude sets of 9.6
    and the eighty formatOf sets of 5.4.1 (one per ordered pair of
-   formats per attribute);
+   formats per attribute). Until 2026-09-29 the bytes went over as
+   `Module.wasmBinary`, which the pinned emcc 6.0.9 loader never
+   reads, so steps 3b to 5 ran `bindings/node/cft_node.wasm`: the
+   same bytes by step 3's sha256, so no verdict was wrong, but not the
+   mechanism this list named. `bindings/node/lib.mjs` and
+   `verify_demos.mjs` passed the same dead argument, and take the
+   same hook now;
 5. drives **every operation that is not an opcode through its own
    wrapper**, reading the same files itself: the thirty-nine
    transcendentals (`cftw_exp` … `cftw_hypot`, `cftw_sinpi` …
@@ -1077,8 +1085,11 @@ make_demos.py        page assembly (+ --corrupt), and the three module
 build_demos.sh       the containerized build; the image pin is READ
                      OUT OF build.sh rather than typed again
 demos.html           THE DELIVERABLE - committed build product
-verify_demos.mjs     the browserless check: module, core, and every
-                     chain three ways (tool, core, recording)
+verify_demos.mjs     the browserless check: module (its bytes and, since
+                     2026-09-29, its ABI against cft.h), core, the
+                     recording's module and core stamps (since the
+                     same day), and every chain three ways (tool,
+                     core, recording)
 ```
 
 **The page.** 486,822 bytes, sha256
@@ -1138,6 +1149,9 @@ Collatz panel reports **2 of 2 chains DIFFER**; the same edit made to
 `demos_core.js` makes `verify_demos.mjs` fail four times (each chain
 against both the tool and the recording); restoring the file makes both
 green again. A checker that has never been seen to fail proves nothing.
+(Four was the chains' count on this date. On 2026-09-29 the same edit
+failed six lines, the page's core and the recording's core stamp
+besides; `docs/DEMOS.md` has the run.)
 
 **No network at runtime.** Loading the page costs one GET for the file
 and one for the Worker's `blob:` URL. Nothing else appears in the
