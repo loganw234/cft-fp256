@@ -2132,12 +2132,24 @@ there, at MUL_PASSES 10, riding the array is slower than f681dee's
 wait-then-load at fp256 over four blocks: 15,724 -> 16,682 cycles with
 an LDL, 31,681 -> 32,611 with an LDX. The policy makes them 12,523 and
 28,483, so it stays, held by those rows; with it planted out the bench
-is red on them. It is not the faster choice everywhere - behind an FMA
+is red on them. It is not the faster choice everywhere: behind an FMA
 of the loaded value at fp128 over four blocks riding costs 9,105 and
-the policy 9,427, both under f681dee's 11,862 - and at one beat the
-three are within a pass period of each other. On the single-pass tile
-the same three programs ride the array and are well under f681dee at
-every size (fp32, one beat, the LDL and its deposit: 541 -> 439).
+the policy 9,427, both under f681dee's 11,862. At MUL_PASSES 10 and one
+beat, at fp64, fp128 and fp256 - the rungs whose pass period is more
+than one - the policy is under f681dee's on all nine rows: by 43 to 87
+cycles on eight, and by 3 on the LDL and its deposit at fp256 (1,645
+against 1,648), less than that rung's pass period of 10. Riding is
+under f681dee's by 40 to 91 cycles at fp64 and fp128, and within two
+cycles of it, either way, at fp256 (1,650, 5,621 and 1,884 against
+1,648, 5,621 and 1,886). Neither is always the faster of the two: the
+policy is faster by 40 to 85 cycles on three rows (the LDX at fp128
+and fp256, the LDL and an FMA of it at fp256), riding by 23 and 35 on
+two (the LDL and its deposit at fp64 and fp128), and the other four
+differ by 5 cycles or less. (Until verifier-R4 measured them, this
+said that at one beat the three were within a pass period of each
+other; one row of the nine is.) On the single-pass tile the same three
+programs ride the array and are well under f681dee at every size (fp32,
+one beat, the LDL and its deposit: 541 -> 439).
 
 **The pass phase: a multi-pass tile's cycle counts are exact to a pass
 period, not to a cycle.** The array's enable counts wall cycles from the
