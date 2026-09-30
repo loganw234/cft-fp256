@@ -158,6 +158,10 @@
 #include "cft.h"
 #include "../src/bigint.h"
 #include "../src/sha256.h"
+/* the exact arithmetic of an accuracy entry, the bigint's missing pieces,
+ * the formats and the certificate's words: shared with cft-segrun, which
+ * writes the entries this tool re-derives (the plan's step 5) */
+#include "cert_exact.h"
 
 #if defined(__GNUC__)
 #  define NORETURN __attribute__((noreturn))
@@ -175,38 +179,18 @@
 /* The width rule: 1,023 bits a numerator or a denominator. One exact step
  * on two in-rule values needs 2 x 1,023 + 1 bits, so a cft_bn narrower
  * than that is not a conforming auditor of exact values (the page, "The
- * width rule"). */
-#define WIDTH_BITS   1023
-#define AUDIT_EXACT  (CFT_BN_LIMBS * 32 >= 2 * WIDTH_BITS + 1)
+ * width rule"). Both are cert_exact.h's, under this file's old names. The
+ * formats (FMT, ESZ, PREC), the directions (RND_NAME, RND_CODE), the
+ * certificate's words (KIND_NAME, METHOD_NAME, KINDS, METHOD_KIND) and
+ * MAX_TERMS, MAX_FACTORS and MAX_SLOT are there too. */
+#define WIDTH_BITS   CX_WIDTH_BITS
+#define AUDIT_EXACT  CX_EXACT
 
 #define SALT_BYTES   32
 #define SEED_BYTES   32
 #define MAX_HSLOTS   512       /* h-slots at most, each below it */
-#define MAX_TERMS    64
-#define MAX_FACTORS  8
-#define MAX_SLOT     0xFFFFu   /* a term's slot: the scratch counts are 16-bit */
 #define DEC_MAX      ((uint64_t)INT64_MAX)
 #define NONE         (-1LL)
-
-/* ---- the formats ------------------------------------------------------- */
-
-typedef struct {
-    const char *name;
-    int width, ew, mw;          /* bits: whole, exponent, trailing significand */
-} fmt_t;
-
-static const fmt_t FMT[4] = {
-    { "fp32", 32, 8, 23 }, { "fp64", 64, 11, 52 },
-    { "fp128", 128, 15, 112 }, { "fp256", 256, 19, 236 },
-};
-#define ESZ(f)   ((size_t)FMT[f].width / 8)
-#define PREC(f)  (FMT[f].mw + 1)
-#define BIAS(f)  ((1L << (FMT[f].ew - 1)) - 1)
-#define EMIN(f)  (1 - BIAS(f))
-
-static const char *const RND_NAME[5] = { "rne", "rtz", "rdn", "rup", "rmm" };
-static const cft_round RND_CODE[5] = { CFT_RNE, CFT_RTZ, CFT_RDN, CFT_RUP,
-                                       CFT_RMM };
 
 /* ---- refusals ---------------------------------------------------------- */
 
@@ -505,15 +489,7 @@ static void state_hash(const uint8_t *salt, const void *bytes, size_t n,
 
 /* ---- spellings --------------------------------------------------------- */
 
-static int is_hexl(char c)
-{
-    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
-}
-
-static int hexval(char c)
-{
-    return c <= '9' ? c - '0' : c - 'a' + 10;
-}
+/* (is_hexl and hexval are cert_exact.h's) */
 
 /* `0`, or a nonzero digit and digits: the one spelling, of any length */
 static int dec_spelling(const char *s)
@@ -575,246 +551,18 @@ static int word_index(const char *s, const char *const *words, int n)
     return -1;
 }
 
-/* ---- cft_bn: the library's bigint, and what it lacks ------------------- */
+/* ---- cft_bn, elements and rationals ------------------------------------
+ *
+ * cft_bn's missing pieces (a division, a gcd, an exact left shift), an
+ * element's exact value, and the rationals under the width rule are
+ * cert_exact.h's, shared with cft-segrun (the plan's step 5); every
+ * failure there is a status, which this file turns into its refusals
+ * and internal(). What stays here is what only the auditor does with an
+ * element: read one from the page's hex, hold a half-step bank to
+ * exactly half the main one, widen one a rung, and hold a decimal to
+ * its hex. */
 
-static void bn_norm(cft_bn *r)
-{
-    while (r->n > 0 && r->v[r->n - 1] == 0)
-        r->n--;
-}
-
-static int bn_is_one(const cft_bn *a)
-{
-    return a->n == 1 && a->v[0] == 1;
-}
-
-static int bn_tz(const cft_bn *a)              /* a nonzero */
-{
-    int i, b;
-    for (i = 0; i < a->n; i++) {
-        uint32_t w = a->v[i];
-        if (w) {
-            b = 0;
-            while (!(w & 1u)) {
-                w >>= 1;
-                b++;
-            }
-            return i * 32 + b;
-        }
-    }
-    return 0;
-}
-
-/* r = a << k, exactly: 1 only if the result has more than CFT_BN_BITS
- * bits. (cft_bn_shl keeps a spare limb and refuses any shift of a value
- * that fills the container, a shift by 0 included.) r may alias a. */
-static int bn_shl(cft_bn *r, const cft_bn *a, int k)
-{
-    int limbs = k >> 5, bits = k & 31, an = a->n, len, rn, i;
-    if (a->n == 0) {
-        r->n = 0;
-        return 0;
-    }
-    len = cft_bn_bitlen(a);
-    if (k < 0 || len > CFT_BN_BITS - k)
-        return 1;
-    rn = (len + k + 31) >> 5;
-    for (i = rn - 1; i >= 0; i--) {
-        int ih = i - limbs, il = i - limbs - 1;
-        uint32_t hi = (ih >= 0 && ih < an) ? a->v[ih] : 0u;
-        uint32_t lo = (il >= 0 && il < an) ? a->v[il] : 0u;
-        r->v[i] = bits ? ((hi << bits) | (lo >> (32 - bits))) : hi;
-    }
-    r->n = rn;
-    return 0;
-}
-
-/* q = a / b and rem = a % b (b nonzero), by shift and subtract; q or rem
- * may be NULL, and either may alias a or b. */
-static void bn_divmod(cft_bn *q, cft_bn *rem, const cft_bn *a,
-                      const cft_bn *b)
-{
-    cft_bn r, d, quo;
-    int la = cft_bn_bitlen(a), lb = cft_bn_bitlen(b), s, i;
-    cft_bn_copy(&r, a);
-    cft_bn_zero(&quo);
-    if (la >= lb) {
-        s = la - lb;
-        if (bn_shl(&d, b, s))
-            internal("the audit's division", CFT_ERR_INTERNAL);
-        for (i = s; i >= 0; i--) {
-            if (cft_bn_cmp(&r, &d) >= 0) {
-                cft_bn_sub(&r, &r, &d);
-                cft_bn_setbit(&quo, i);
-            }
-            cft_bn_shr(&d, &d, 1);
-        }
-    }
-    if (q)
-        cft_bn_copy(q, &quo);
-    if (rem)
-        cft_bn_copy(rem, &r);
-}
-
-/* a / d for one limb d, into q (which may alias a); the remainder back */
-static uint32_t bn_div_u32(cft_bn *q, const cft_bn *a, uint32_t d)
-{
-    uint64_t r = 0;
-    int i;
-    for (i = a->n - 1; i >= 0; i--) {
-        uint64_t cur = (r << 32) | a->v[i];
-        q->v[i] = (uint32_t)(cur / d);
-        r = cur % d;
-    }
-    q->n = a->n;
-    bn_norm(q);
-    return (uint32_t)r;
-}
-
-static uint32_t gcd_u32(uint32_t a, uint32_t b)
-{
-    while (b) {
-        uint32_t t = a % b;
-        a = b;
-        b = t;
-    }
-    return a;
-}
-
-/* g = gcd(a, b): the common power of two, then Stein on the odd parts,
- * with a single-limb Euclid once either part fits one limb. */
-static void bn_gcd(cft_bn *g, const cft_bn *a0, const cft_bn *b0)
-{
-    cft_bn a, b;
-    int za, zb, k;
-    if (cft_bn_is_zero(a0)) {
-        cft_bn_copy(g, b0);
-        return;
-    }
-    if (cft_bn_is_zero(b0)) {
-        cft_bn_copy(g, a0);
-        return;
-    }
-    za = bn_tz(a0);
-    zb = bn_tz(b0);
-    k = za < zb ? za : zb;
-    cft_bn_shr(&a, a0, za);
-    cft_bn_shr(&b, b0, zb);
-    for (;;) {
-        int c;
-        if (bn_is_one(&a) || bn_is_one(&b)) {
-            cft_bn_set_u32(g, 1);
-            break;
-        }
-        if (b.n == 1 || a.n == 1) {
-            const cft_bn *big = b.n == 1 ? &a : &b;
-            uint32_t small = b.n == 1 ? b.v[0] : a.v[0];
-            cft_bn t;
-            uint32_t r = bn_div_u32(&t, big, small);
-            cft_bn_set_u32(g, gcd_u32(small, r));
-            break;
-        }
-        c = cft_bn_cmp(&a, &b);
-        if (c == 0) {
-            cft_bn_copy(g, &a);
-            break;
-        }
-        if (c > 0) {
-            cft_bn_sub(&a, &a, &b);
-            cft_bn_shr(&a, &a, bn_tz(&a));
-        } else {
-            cft_bn_sub(&b, &b, &a);
-            cft_bn_shr(&b, &b, bn_tz(&b));
-        }
-    }
-    if (k && bn_shl(g, g, k))
-        internal("the audit's gcd", CFT_ERR_INTERNAL);
-}
-
-static void bn_from_hex(cft_bn *r, const char *h, size_t len)
-{
-    size_t i;
-    int limbs = (int)((4 * len + 31) / 32);
-    if (limbs > CFT_BN_LIMBS)
-        internal("a hex value past the bigint", CFT_ERR_INTERNAL);
-    for (i = 0; i < (size_t)limbs; i++)
-        r->v[i] = 0;
-    for (i = 0; i < len; i++) {
-        size_t bit = 4 * (len - 1 - i);
-        r->v[bit / 32] |= (uint32_t)hexval(h[i]) << (bit % 32);
-    }
-    r->n = limbs;
-    bn_norm(r);
-}
-
-/* lowercase hex, no leading zeros; "0" for zero */
-static void bn_hex(const cft_bn *a, char *out)
-{
-    static const char D[] = "0123456789abcdef";
-    int nib = (cft_bn_bitlen(a) + 3) / 4, i;
-    if (nib == 0) {
-        strcpy(out, "0");
-        return;
-    }
-    for (i = 0; i < nib; i++)
-        out[i] = D[cft_bn_extract(a, 4 * (nib - 1 - i), 4)];
-    out[nib] = 0;
-}
-
-/* ---- elements ---------------------------------------------------------- */
-
-enum { EL_ZERO, EL_FINITE, EL_INF, EL_NAN };
-
-typedef struct {
-    int kind, sign;
-    cft_bn m;       /* EL_FINITE: the significand, odd */
-    long e;         /* EL_FINITE: the value is (-1)^sign m 2^e, m odd */
-} elem_t;
-
-/* An encoding's value (cert.element_fraction), reduced: m odd. */
-static void decode(int f, const uint8_t *le, elem_t *x)
-{
-    cft_bn b;
-    uint32_t biased, emask = (1u << FMT[f].ew) - 1u;
-    int z;
-    cft_bn_load(&b, le, (int)ESZ(f));
-    x->sign = cft_bn_bit(&b, FMT[f].width - 1);
-    biased = cft_bn_extract(&b, FMT[f].mw, FMT[f].ew);
-    cft_bn_copy(&x->m, &b);
-    cft_bn_mask(&x->m, FMT[f].mw);
-    if (biased == emask) {
-        x->kind = cft_bn_is_zero(&x->m) ? EL_INF : EL_NAN;
-        return;
-    }
-    if (biased == 0) {
-        if (cft_bn_is_zero(&x->m)) {
-            x->kind = EL_ZERO;
-            return;
-        }
-        x->e = EMIN(f) - FMT[f].mw;
-    } else {
-        cft_bn_setbit(&x->m, FMT[f].mw);
-        x->e = (long)biased - BIAS(f) - FMT[f].mw;
-    }
-    x->kind = EL_FINITE;
-    z = bn_tz(&x->m);
-    cft_bn_shr(&x->m, &x->m, z);
-    x->e += z;
-}
-
-/* The bits of a finite element's exact value, reduced: numerator and
- * denominator. Zero is 0/1. */
-static void elem_bits(const elem_t *x, long *nb, long *db)
-{
-    if (x->kind == EL_ZERO) {
-        *nb = 0;
-        *db = 1;
-        return;
-    }
-    *nb = cft_bn_bitlen(&x->m) + (x->e > 0 ? x->e : 0);
-    *db = x->e < 0 ? -x->e + 1 : 1;
-}
-
+#if AUDIT_EXACT
 static void elem_from_hex(int f, const char *h, uint8_t *le)
 {
     size_t i, n = ESZ(f);
@@ -822,6 +570,7 @@ static void elem_from_hex(int f, const char *h, uint8_t *le)
         le[i] = (uint8_t)(hexval(h[2 * (n - 1 - i)]) << 4 |
                           hexval(h[2 * (n - 1 - i) + 1]));
 }
+#endif
 
 /* x exactly half of y, both of format f, y finite and nonzero */
 static int is_half(int f, const uint8_t *x_le, const uint8_t *y_le)
@@ -846,6 +595,7 @@ static void widen(int f, const uint8_t *in, uint8_t *out, size_t n)
         internal("cft_convert", st);
 }
 
+#if AUDIT_EXACT
 /* the element's exact decimal is `dtok` (cft_to_decimal_char, 0 digits) */
 static int decimal_is(int f, const uint8_t *le, const char *dtok)
 {
@@ -864,230 +614,13 @@ static int decimal_is(int f, const uint8_t *le, const char *dtok)
     free(buf);
     return same;
 }
-
-#if AUDIT_EXACT
-/* ---- rationals, exact, under the width rule ---------------------------- */
-
-typedef struct { int neg; cft_bn n, d; } rat;   /* reduced, d > 0; 0 is 0/1 */
-
-static void rat_zero(rat *r)
-{
-    r->neg = 0;
-    cft_bn_zero(&r->n);
-    cft_bn_set_u32(&r->d, 1);
-}
-
-static void rat_reduce(rat *r)
-{
-    cft_bn g, odd;
-    int z;
-    if (cft_bn_is_zero(&r->n)) {
-        rat_zero(r);
-        return;
-    }
-    bn_gcd(&g, &r->n, &r->d);
-    if (bn_is_one(&g))
-        return;
-    z = bn_tz(&g);
-    cft_bn_shr(&odd, &g, z);
-    cft_bn_shr(&r->n, &r->n, z);
-    cft_bn_shr(&r->d, &r->d, z);
-    if (bn_is_one(&odd))
-        return;
-    if (odd.n == 1) {
-        bn_div_u32(&r->n, &r->n, odd.v[0]);
-        bn_div_u32(&r->d, &r->d, odd.v[0]);
-    } else {
-        bn_divmod(&r->n, NULL, &r->n, &odd);
-        bn_divmod(&r->d, NULL, &r->d, &odd);
-    }
-}
-
-static int rat_in_rule(const rat *r)
-{
-    return cft_bn_bitlen(&r->n) <= WIDTH_BITS &&
-           cft_bn_bitlen(&r->d) <= WIDTH_BITS;
-}
-
-/* The width rule, on a value just computed (cert._checked). */
-static void rat_checked(const rat *r, const char *what)
-{
-    if (!rat_in_rule(r))
-        refuse("width", NOWHERE, "%s needs a %d-bit numerator and a %d-bit "
-               "denominator; version 1 allows %d bits each", what,
-               cft_bn_bitlen(&r->n), cft_bn_bitlen(&r->d), WIDTH_BITS);
-}
-
-static void rat_mul(rat *r, const rat *a, const rat *b)
-{
-    rat t;
-    t.neg = a->neg ^ b->neg;
-    if (cft_bn_mul(&t.n, &a->n, &b->n) || cft_bn_mul(&t.d, &a->d, &b->d))
-        internal("an exact product past the bigint", CFT_ERR_INTERNAL);
-    rat_reduce(&t);
-    *r = t;
-}
-
-static void rat_add(rat *r, const rat *a, const rat *b)
-{
-    cft_bn x, y;
-    rat t;
-    if (cft_bn_mul(&x, &a->n, &b->d) || cft_bn_mul(&y, &b->n, &a->d) ||
-        cft_bn_mul(&t.d, &a->d, &b->d))
-        internal("an exact sum past the bigint", CFT_ERR_INTERNAL);
-    if (a->neg == b->neg) {
-        if (cft_bn_add(&t.n, &x, &y))
-            internal("an exact sum past the bigint", CFT_ERR_INTERNAL);
-        t.neg = a->neg;
-    } else if (cft_bn_cmp(&x, &y) >= 0) {
-        cft_bn_sub(&t.n, &x, &y);
-        t.neg = a->neg;
-    } else {
-        cft_bn_sub(&t.n, &y, &x);
-        t.neg = b->neg;
-    }
-    rat_reduce(&t);
-    *r = t;
-}
-
-static void rat_sub(rat *r, const rat *a, const rat *b)
-{
-    rat nb = *b;
-    if (!cft_bn_is_zero(&nb.n))
-        nb.neg = !nb.neg;
-    rat_add(r, a, &nb);
-}
-
-static int rat_cmp(const rat *a, const rat *b)
-{
-    cft_bn x, y;
-    int c;
-    if (a->neg != b->neg)
-        return a->neg ? -1 : 1;
-    if (cft_bn_mul(&x, &a->n, &b->d) || cft_bn_mul(&y, &b->n, &a->d))
-        internal("an exact comparison past the bigint", CFT_ERR_INTERNAL);
-    c = cft_bn_cmp(&x, &y);
-    return a->neg ? -c : c;
-}
-
-static int rat_eq(const rat *a, const rat *b)
-{
-    return a->neg == b->neg && cft_bn_cmp(&a->n, &b->n) == 0 &&
-           cft_bn_cmp(&a->d, &b->d) == 0;
-}
-
-/* the page's one spelling: hex numerator (signed), '/', hex denominator */
-static void rat_text(const rat *r, char *out)
-{
-    if (r->neg)
-        *out++ = '-';
-    bn_hex(&r->n, out);
-    out += strlen(out);
-    *out++ = '/';
-    bn_hex(&r->d, out);
-}
-
-/* A finite element's exact value, in rule: 0, or 1 if it is not finite,
- * or 2 if it is past the rule. */
-static int rat_of_elem(rat *r, const elem_t *x)
-{
-    long nb, db;
-    if (x->kind == EL_INF || x->kind == EL_NAN)
-        return 1;
-    elem_bits(x, &nb, &db);
-    if (nb > WIDTH_BITS || db > WIDTH_BITS)
-        return 2;
-    rat_zero(r);
-    if (x->kind == EL_ZERO)
-        return 0;
-    r->neg = x->sign;
-    if (x->e >= 0) {
-        if (bn_shl(&r->n, &x->m, (int)x->e))
-            internal("an element past the bigint", CFT_ERR_INTERNAL);
-    } else {
-        cft_bn one;
-        cft_bn_copy(&r->n, &x->m);
-        cft_bn_set_u32(&one, 1);
-        if (bn_shl(&r->d, &one, (int)-x->e))
-            internal("an element past the bigint", CFT_ERR_INTERNAL);
-    }
-    return 0;
-}
-
-static const char *KIND_WORD[4] = { "finite", "finite", "inf", "nan" };
-
-/* cert._exact: an element's exact value under the width rule; a
- * non-finite one has none, refused by name. */
-static void exact_of(rat *r, int f, const uint8_t *le, const char *what)
-{
-    elem_t x;
-    int got;
-    decode(f, le, &x);
-    got = rat_of_elem(r, &x);
-    if (got == 1)
-        refuse("accuracy-finite", NOWHERE, "%s is %s%s; an exact value "
-               "needs a finite element", what, x.kind == EL_INF && x.sign ?
-               "-" : "", KIND_WORD[x.kind]);
-    if (got == 2) {
-        long nb, db;
-        elem_bits(&x, &nb, &db);
-        refuse("width", NOWHERE, "%s needs a %ld-bit numerator and a %ld-bit "
-               "denominator; version 1 allows %d bits each", what, nb, db,
-               WIDTH_BITS);
-    }
-}
-
-/* q correctly rounded into format f under rnd (cert.round_rational):
- * one division leaves m and a sticky, as _round_rational's does, and
- * cft_from_hex_char rounds the dyadic value (2m + 1) 2^(q - 1) - or
- * m 2^q, exact - which is round_pack's answer for it. Zero is +0. */
-static void rat_round(const rat *q, int f, int rnd, uint8_t *out)
-{
-    cft_bn m, rem, t;
-    long w = PREC(f) + 3, qe;
-    char hex[CFT_BN_BITS / 4 + 8], text[CFT_BN_BITS / 4 + 64];
-    const char *in[1];
-    size_t bad = 0;
-    uint32_t fl = 0;
-    cft_status st;
-    if (cft_bn_is_zero(&q->n)) {
-        memset(out, 0, ESZ(f));
-        return;
-    }
-    qe = (long)(cft_bn_bitlen(&q->n) - cft_bn_bitlen(&q->d)) - w;
-    if (qe >= 0) {
-        if (bn_shl(&t, &q->d, (int)qe))
-            internal("rounding past the bigint", CFT_ERR_INTERNAL);
-        bn_divmod(&m, &rem, &q->n, &t);
-    } else {
-        if (bn_shl(&t, &q->n, (int)-qe))
-            internal("rounding past the bigint", CFT_ERR_INTERNAL);
-        bn_divmod(&m, &rem, &t, &q->d);
-    }
-    if (!cft_bn_is_zero(&rem)) {
-        if (bn_shl(&m, &m, 1) || cft_bn_inc(&m))
-            internal("rounding past the bigint", CFT_ERR_INTERNAL);
-        qe -= 1;
-    }
-    bn_hex(&m, hex);
-    snprintf(text, sizeof text, "%s0x%sp%ld", q->neg ? "-" : "", hex, qe);
-    in[0] = text;
-    st = cft_from_hex_char(host_dev(), (cft_format)f, RND_CODE[rnd], in, out,
-                           1, &bad, &fl);
-    if (st != CFT_OK)
-        internal("cft_from_hex_char", st);
-}
-#endif /* AUDIT_EXACT */
+#endif
 
 /* ---- the certificate --------------------------------------------------- */
 
-enum { K_MAIN, K_HALF, K_WIDER };
-static const char *const KIND_NAME[3] = { "main", "half-step", "wider" };
-enum { M_DRIFT, M_HALVING, M_WIDER };
-static const char *const METHOD_NAME[3] = { "drift", "step-halving", "wider" };
-static const char *const KINDS[3] = { "bound", "estimate", "measurement" };
-static const int METHOD_KIND[3] = { 2, 1, 1 };   /* measurement, estimate */
-enum { V_EXACT, V_ROUNDED, V_ENCLOSED };
+/* (a run's kind K_*, an entry's method M_* and a value's form V_*, with
+ * their words, and an entry's term_t, value_t and entry_t, are
+ * cert_exact.h's) */
 
 typedef struct {
     const char *start, *end;        /* 64 hex, into the body */
@@ -1103,30 +636,6 @@ typedef struct {
     int has_depth;
     uint32_t depth;                 /* its `scratch-depth` parameter */
 } run_t;
-
-#if AUDIT_EXACT
-typedef struct {
-    rat coef;
-    unsigned n;
-    unsigned slot[MAX_FACTORS];
-} term_t;
-
-typedef struct {
-    int form, fmt, rnd;
-    rat exact;
-    uint8_t bits[32], lo[32], hi[32];
-} value_t;
-
-typedef struct {
-    int method;
-    uint64_t uses;
-    int has_lane;
-    uint64_t lane;
-    unsigned n_terms;
-    term_t *terms;
-    value_t value;
-} entry_t;
-#endif
 
 typedef struct {
     int keyed;
@@ -1648,81 +1157,19 @@ static void read_run(rdr_t *R, cert_t *C, uint64_t i)
 static void read_rational(const char *tok, rat *q, const char *what,
                           long long line)
 {
-    const char *p = tok, *num, *slash, *den;
-    size_t nl, dl, i;
-    int neg = 0, ok = 1;
-    long nbits, dbits;
-    if (*p == '-') {
-        neg = 1;
-        p++;
-    }
-    num = p;
-    slash = strchr(p, '/');
-    if (!slash) {
-        ok = 0;
-    } else {
-        nl = (size_t)(slash - num);
-        den = slash + 1;
-        dl = strlen(den);
-        if (nl == 0 || dl == 0)
-            ok = 0;
-        for (i = 0; ok && i < nl; i++)
-            ok = is_hexl(num[i]);
-        for (i = 0; ok && i < dl; i++)
-            ok = is_hexl(den[i]);
-        if (ok && num[0] == '0' && (nl > 1 || neg))
-            ok = 0;             /* 0 alone, unsigned; else no leading zero */
-        if (ok && den[0] == '0')
-            ok = 0;
-    }
-    if (!ok) {
-        /* the golden's two reasons: a zero denominator, or the spelling */
-        const char *s = tok;
-        int zero_den = 0;
-        if (*s == '-')
-            s++;
-        if (*s && *s != '/') {
-            const char *t = s;
-            while (*t && is_hexl(*t))
-                t++;
-            if (*t == '/' && t[1]) {
-                const char *u = t + 1;
-                while (*u == '0')
-                    u++;
-                zero_den = *u == 0;
-            }
-        }
-        malformed(line, "%s '%.80s': %s", what, tok, zero_den ?
-                  "a zero denominator" : "not hex numerator/denominator in "
-                  "their one spelling (lowercase, no leading zeros, the sign "
-                  "on the numerator, no '+')");
-    }
-    nl = (size_t)(slash - num);
-    den = slash + 1;
-    dl = strlen(den);
-    /* the width rule by the digits alone, FIRST - before zero's spelling
-     * and before any gcd (P3's design, approved 2026-09-29) - so that no
-     * token past 1,023 bits is ever held, here or in the golden reader */
-    nbits = num[0] == '0' ? 0 : (long)(4 * (nl - 1)) +
-            (hexval(num[0]) >= 8 ? 4 : hexval(num[0]) >= 4 ? 3 :
-             hexval(num[0]) >= 2 ? 2 : 1);
-    dbits = (long)(4 * (dl - 1)) + (hexval(den[0]) >= 8 ? 4 :
-             hexval(den[0]) >= 4 ? 3 : hexval(den[0]) >= 2 ? 2 : 1);
-    if (nbits > WIDTH_BITS || dbits > WIDTH_BITS)
-        refuse("width", AT_LINE(line), "line %lld: %s needs a %ld-bit "
-               "numerator and a %ld-bit denominator; version 1 allows %d bits "
-               "each", line, what, nbits, dbits, WIDTH_BITS);
-    if (num[0] == '0' && !(dl == 1 && den[0] == '1'))
-        malformed(line, "%s '%.80s': zero is spelled 0/1", what, tok);
-    q->neg = neg;
-    bn_from_hex(&q->n, num, nl);
-    bn_from_hex(&q->d, den, dl);
-    {
-        cft_bn g;
-        bn_gcd(&g, &q->n, &q->d);
-        if (!bn_is_one(&g))
-            malformed(line, "%s '%.80s' is not in lowest terms", what, tok);
-    }
+    /* cx_rat_parse holds the page's order: the spelling, then the digits
+     * against the width rule FIRST - before zero's spelling and before any
+     * gcd (P3's design, approved 2026-09-29) - so that no token past 1,023
+     * bits is ever held, here or in the golden reader; then zero's one
+     * spelling, and last lowest terms */
+    char why[256];
+    int st = cx_rat_parse(tok, q, what, why, sizeof why);
+    if (st == CX_MALFORMED)
+        malformed(line, "%s", why);
+    if (st == CX_WIDTH)
+        refuse("width", AT_LINE(line), "line %lld: %s", line, why);
+    if (st)
+        internal(why, CFT_ERR_INTERNAL);
 }
 
 /* an element: its hex, then that it is not a NaN, then its decimal */
@@ -1744,15 +1191,7 @@ static void read_element(int f, const char *htok, const char *dtok,
                "is not the exact decimal of %s", line, what, dtok, htok);
 }
 
-/* an element's order key: -inf 0, finite 1, +inf 2 (NaNs never reach) */
-static int order_kind(int f, const uint8_t *le)
-{
-    elem_t x;
-    decode(f, le, &x);
-    if (x.kind == EL_INF)
-        return x.sign ? 0 : 2;
-    return 1;
-}
+/* (an element's order key, order_kind, is cert_exact.h's) */
 
 /* A value's format word, and a format this build's library carries. The
  * value's decimals and any rounding into its format are the library's
@@ -1799,29 +1238,27 @@ static void read_value(rdr_t *R, value_t *v, uint64_t j)
         v->fmt = value_format(l->tok[2], j, ln);
         read_element(v->fmt, l->tok[3], l->tok[4], "the lower end", v->lo, ln);
         read_element(v->fmt, l->tok[5], l->tok[6], "the upper end", v->hi, ln);
+        /* each finite end against the width rule, the lower first: the
+         * writer's check too (cx_end_in_rule) */
         for (e = 0; e < 2; e++) {
-            elem_t x;
-            long nb, db;
-            decode(v->fmt, e ? v->hi : v->lo, &x);
-            if (x.kind != EL_ZERO && x.kind != EL_FINITE)
-                continue;
-            elem_bits(&x, &nb, &db);
-            if (nb > WIDTH_BITS || db > WIDTH_BITS)
-                refuse("width", AT_LINE(ln), "the %s end's exact value needs "
-                       "a %ld-bit numerator and a %ld-bit denominator; "
-                       "version 1 allows %d bits each", e ? "upper" : "lower",
-                       nb, db, WIDTH_BITS);
+            char why[200];
+            if (cx_end_in_rule(v->fmt, e ? v->hi : v->lo,
+                               e ? "upper" : "lower", why, sizeof why))
+                refuse("width", AT_LINE(ln), "%s", why);
         }
         {
             int kl = order_kind(v->fmt, v->lo), kh = order_kind(v->fmt, v->hi);
-            int above = kl > kh;
+            int above = kl > kh, c = 0;
             if (kl == 1 && kh == 1) {
-                elem_t x;
+                elem_t x, y;
                 decode(v->fmt, v->lo, &x);
-                rat_of_elem(&a, &x);
-                decode(v->fmt, v->hi, &x);
-                rat_of_elem(&b, &x);
-                above = rat_cmp(&a, &b) > 0;
+                decode(v->fmt, v->hi, &y);
+                /* each end was held to the rule just above */
+                if (rat_of_elem(&a, &x) || rat_of_elem(&b, &y) ||
+                    rat_cmp(&a, &b, &c))
+                    internal("an enclosure's two ends, compared",
+                             CFT_ERR_INTERNAL);
+                above = c > 0;
             }
             if (above)
                 malformed(ln, "an enclosure's lower end is above its upper "
@@ -3258,161 +2695,71 @@ static const uint8_t *need_state(uint64_t r, uint64_t b)
     return s;
 }
 
-static void quantity(rat *q, const entry_t *E, int f, const uint8_t *state,
-                     uint64_t i, uint32_t nslots, const char *which)
+/* A run as cert_exact.h's derivation reads it: the certificate's kind,
+ * lanes and segments, and its program's format and slots a lane. */
+static void run_shape(const cert_t *C, const prog_t *P, uint64_t r,
+                      cx_run *s)
 {
-    unsigned t, s;
-    char what[160];
-    rat_zero(q);
-    for (t = 0; t < E->n_terms; t++) {
-        const term_t *T = &E->terms[t];
-        rat p = T->coef;
-        for (s = 0; s < T->n; s++) {
-            rat v;
-            snprintf(what, sizeof what, "lane %llu slot %u of the %s state",
-                     (unsigned long long)i, T->slot[s], which);
-            exact_of(&v, f, state + ((size_t)i * nslots + T->slot[s]) * ESZ(f),
-                     what);
-            rat_mul(&p, &p, &v);
-            snprintf(what, sizeof what, "term %u's product, lane %llu", t,
-                     (unsigned long long)i);
-            rat_checked(&p, what);
-        }
-        rat_add(q, q, &p);
-        snprintf(what, sizeof what, "the quantity's sum at term %u, lane %llu",
-                 t, (unsigned long long)i);
-        rat_checked(q, what);
-    }
+    s->kind = C->runs[r].kind;
+    s->fmt = P[r].fmt;
+    s->lanes = C->runs[r].lanes;
+    s->S = C->runs[r].S;
+    s->nslots = P[r].n_in;
 }
 
+/* A status of cert_exact.h's, refused by its name at the entry (ENTRY_NOW
+ * adds it), or an internal error. One call a name, so that the census
+ * (audit_plants.py) still plants each name apart. */
+static void refuse_cx(int st, uint64_t j, const char *why)
+{
+    if (st == CX_RUN)
+        refuse("accuracy-run", NOWHERE, "entry %llu: %s",
+               (unsigned long long)j, why);
+    if (st == CX_SCOPE)
+        refuse("accuracy-scope", NOWHERE, "entry %llu: %s",
+               (unsigned long long)j, why);
+    if (st == CX_SLOT)
+        refuse("accuracy-slot", NOWHERE, "entry %llu: %s",
+               (unsigned long long)j, why);
+    if (st == CX_FINITE)
+        refuse("accuracy-finite", NOWHERE, "%s", why);
+    if (st == CX_WIDTH)
+        refuse("width", NOWHERE, "%s", why);
+    if (st)
+        internal(why, CFT_ERR_INTERNAL);
+}
+
+/* cert.derive: its checks in its order (cx_entry_check), the two states
+ * it reads in its order (need_state: state-missing), and the value, every
+ * step held to the width rule (cx_entry_value). */
 static void derive(const cert_t *C, const prog_t *P, uint64_t j, rat *out)
 {
     const entry_t *E = &C->entries[j];
-    uint64_t r = E->uses, lanes, i, first_lane, last_lane;
-    uint32_t nslots;
-    int f, have = 0;
-    rat best;
-    char what[160];
-    if (r >= C->R)
-        refuse("accuracy-run", NOWHERE, "entry %llu: entry uses run %llu, and "
-               "the certificate has %llu", (unsigned long long)j,
-               (unsigned long long)r, (unsigned long long)C->R);
-    if (E->method != M_DRIFT) {
-        int want = E->method == M_HALVING ? K_HALF : K_WIDER;
-        if (r == 0 || C->runs[r].kind != want)
-            refuse("accuracy-run", NOWHERE, "entry %llu: a %s estimate "
-                   "compares run 0 with a %s run; run %llu is %s",
-                   (unsigned long long)j, METHOD_NAME[E->method],
-                   KIND_NAME[want], (unsigned long long)r, r == 0 ?
-                   "the main run" : KIND_NAME[C->runs[r].kind]);
-    }
-    lanes = C->runs[r].lanes;
-    if (E->has_lane && E->lane >= lanes)
-        refuse("accuracy-scope", NOWHERE, "entry %llu: lane %llu of a run of "
-               "%llu lanes", (unsigned long long)j,
-               (unsigned long long)E->lane, (unsigned long long)lanes);
-    f = P[r].fmt;
-    nslots = P[r].n_in;
-    first_lane = E->has_lane ? E->lane : 0;
-    last_lane = E->has_lane ? E->lane + 1 : lanes;
-    rat_zero(&best);
-    if (E->method == M_DRIFT) {
-        const uint8_t *s0, *sS;
-        unsigned t, s;
-        for (t = 0; t < E->n_terms; t++)
-            for (s = 0; s < E->terms[t].n; s++)
-                if (E->terms[t].slot[s] >= nslots)
-                    refuse("accuracy-slot", NOWHERE, "entry %llu: a term "
-                           "names slot %u; run %llu's state has %lu slots a "
-                           "lane", (unsigned long long)j, E->terms[t].slot[s],
-                           (unsigned long long)r, (unsigned long)nslots);
-        s0 = need_state(r, 0);
-        sS = need_state(r, C->runs[r].S);
-        for (i = first_lane; i < last_lane; i++) {
-            rat qf, qi, d;
-            quantity(&qf, E, f, sS, i, nslots, "final");
-            quantity(&qi, E, f, s0, i, nslots, "initial");
-            rat_sub(&d, &qf, &qi);
-            snprintf(what, sizeof what, "the drift of lane %llu",
-                     (unsigned long long)i);
-            rat_checked(&d, what);
-            if (E->has_lane) {
-                *out = d;
-                return;
-            }
-            d.neg = 0;
-            if (!have || rat_cmp(&d, &best) > 0)
-                best = d;
-            have = 1;
-        }
-    } else {
-        int f0 = P[0].fmt;
-        const uint8_t *F0 = need_state(0, C->runs[0].S);
-        const uint8_t *Fr = need_state(r, C->runs[r].S);
-        for (i = first_lane; i < last_lane; i++) {
-            rat e;
-            uint32_t s;
-            rat_zero(&e);
-            for (s = 0; s < nslots; s++) {
-                rat a, b, d;
-                snprintf(what, sizeof what, "run 0 lane %llu slot %lu",
-                         (unsigned long long)i, (unsigned long)s);
-                exact_of(&a, f0, F0 + ((size_t)i * nslots + s) * ESZ(f0),
-                         what);
-                snprintf(what, sizeof what, "run %llu lane %llu slot %lu",
-                         (unsigned long long)r, (unsigned long long)i,
-                         (unsigned long)s);
-                exact_of(&b, f, Fr + ((size_t)i * nslots + s) * ESZ(f), what);
-                rat_sub(&d, &a, &b);
-                d.neg = 0;
-                snprintf(what, sizeof what, "the difference at lane %llu slot "
-                         "%lu", (unsigned long long)i, (unsigned long)s);
-                rat_checked(&d, what);
-                if (rat_cmp(&d, &e) > 0)
-                    e = d;
-            }
-            if (E->has_lane) {
-                *out = e;
-                return;
-            }
-            if (!have || rat_cmp(&e, &best) > 0)
-                best = e;
-            have = 1;
-        }
-    }
-    *out = best;
+    cx_run m, u;
+    uint64_t need[2][2];
+    const uint8_t *a, *b;
+    char why[512];
+    int exists = E->uses < C->R;
+    memset(&u, 0, sizeof u);       /* read only once the run is known to exist */
+    run_shape(C, P, 0, &m);
+    if (exists)
+        run_shape(C, P, E->uses, &u);
+    refuse_cx(cx_entry_check(E, C->R, &m, exists ? &u : NULL, why,
+                             sizeof why), j, why);
+    cx_entry_needs(E, &m, &u, need);
+    a = need_state(need[0][0], need[0][1]);
+    b = need_state(need[1][0], need[1][1]);
+    refuse_cx(cx_entry_value(E, &m, &u, a, b, out, why, sizeof why), j, why);
 }
 
-/* cert.value_holds */
+/* cert.value_holds, through the software handle the rounding needs */
 static int value_holds(const value_t *v, const rat *q)
 {
-    if (v->form == V_EXACT)
-        return rat_eq(&v->exact, q);
-    if (v->form == V_ROUNDED) {
-        uint8_t b[32];
-        rat_round(q, v->fmt, v->rnd, b);
-        return memcmp(b, v->bits, ESZ(v->fmt)) == 0;
-    }
-    {
-        int kl = order_kind(v->fmt, v->lo), kh = order_kind(v->fmt, v->hi);
-        elem_t x;
-        rat e;
-        if (kl == 2 || kh == 0)
-            return 0;
-        if (kl == 1) {
-            decode(v->fmt, v->lo, &x);
-            rat_of_elem(&e, &x);
-            if (rat_cmp(&e, q) > 0)
-                return 0;
-        }
-        if (kh == 1) {
-            decode(v->fmt, v->hi, &x);
-            rat_of_elem(&e, &x);
-            if (rat_cmp(q, &e) > 0)
-                return 0;
-        }
-        return 1;
-    }
+    int holds = 0;
+    if (cx_value_holds(host_dev(), v, q, &holds))
+        internal("an accuracy value held to its re-derivation (the rounding "
+                 "past the bigint, or cft_from_hex_char)", CFT_ERR_INTERNAL);
+    return holds;
 }
 #endif /* AUDIT_EXACT */
 
@@ -3453,7 +2800,7 @@ static void print_verdict(const cert_t *C, const plan_t *plan
 #endif
                           )
 {
-    uint64_t r, i;
+    uint64_t r;
     printf("cft-certificate 1: ACCEPTED - every check passed\n");
     printf("%s\n", C->keyed ? "keyed: the salt handed is the one committed to"
            : "open: no salt - its hashes are plain SHA-256, and anyone "
@@ -3486,8 +2833,9 @@ static void print_verdict(const cert_t *C, const plan_t *plan
         printf("\n");
     }
 #if AUDIT_EXACT
+    uint64_t i;
     for (i = 0; i < C->A; i++) {
-        char t[2 * (CFT_BN_BITS / 4) + 8];
+        char t[CX_RAT_TEXT];
         rat_text(&values[i], t);
         printf("accuracy entry %llu: re-derived as %s - the value is the stated "
                "function of the certified runs; that an estimate estimates "
@@ -3558,10 +2906,18 @@ static void probe_rat(const char *s, rat *q)
     q->neg = *s == '-';
     if (q->neg)
         s++;
-    bn_from_hex(&q->n, s, (size_t)(slash - s));
-    bn_from_hex(&q->d, slash + 1, strlen(slash + 1));
+    if (bn_from_hex(&q->n, s, (size_t)(slash - s)) ||
+        bn_from_hex(&q->d, slash + 1, strlen(slash + 1)))
+        internal("the probe: a rational past the bigint", CFT_ERR_INTERNAL);
     if (cft_bn_is_zero(&q->n))
         q->neg = 0;
+}
+
+/* a status of cert_exact.h's that is not a verdict, in the probe */
+static void probe_ok(int st, const char *what)
+{
+    if (st)
+        internal(what, CFT_ERR_INTERNAL);
 }
 
 static void probe_elem_out(int f, const uint8_t *le)
@@ -3587,14 +2943,15 @@ int main(void)
         if (!strcmp(tok[0], "gcd") || !strcmp(tok[0], "divmod")) {
             cft_bn a, b, q, r;
             char h[CFT_BN_BITS / 4 + 2];
-            bn_from_hex(&a, tok[1], strlen(tok[1]));
-            bn_from_hex(&b, tok[2], strlen(tok[2]));
+            probe_ok(bn_from_hex(&a, tok[1], strlen(tok[1])) ||
+                     bn_from_hex(&b, tok[2], strlen(tok[2])),
+                     "the probe: a natural past the bigint");
             if (tok[0][0] == 'g') {
-                bn_gcd(&q, &a, &b);
+                probe_ok(bn_gcd(&q, &a, &b), "the probe: bn_gcd");
                 bn_hex(&q, h);
                 printf("%s\n", h);
             } else {
-                bn_divmod(&q, &r, &a, &b);
+                probe_ok(bn_divmod(&q, &r, &a, &b), "the probe: bn_divmod");
                 bn_hex(&q, h);
                 printf("%s ", h);
                 bn_hex(&r, h);
@@ -3603,19 +2960,21 @@ int main(void)
         } else if (!strcmp(tok[0], "add") || !strcmp(tok[0], "sub") ||
                    !strcmp(tok[0], "mul") || !strcmp(tok[0], "cmp")) {
             rat x, y, z;
-            char t[2 * (CFT_BN_BITS / 4) + 8];
+            char t[CX_RAT_TEXT];
+            int c = 0;
             probe_rat(tok[1], &x);
             probe_rat(tok[2], &y);
             if (tok[0][0] == 'c') {
-                printf("%d\n", rat_cmp(&x, &y));
+                probe_ok(rat_cmp(&x, &y, &c), "the probe: rat_cmp");
+                printf("%d\n", c);
                 continue;
             }
             if (tok[0][0] == 'a')
-                rat_add(&z, &x, &y);
+                probe_ok(rat_add(&z, &x, &y), "the probe: rat_add");
             else if (tok[0][0] == 's')
-                rat_sub(&z, &x, &y);
+                probe_ok(rat_sub(&z, &x, &y), "the probe: rat_sub");
             else
-                rat_mul(&z, &x, &y);
+                probe_ok(rat_mul(&z, &x, &y), "the probe: rat_mul");
             rat_text(&z, t);
             printf("%s\n", t);
         } else if (!strcmp(tok[0], "round")) {
@@ -3623,7 +2982,7 @@ int main(void)
             rat q;
             uint8_t out[32];
             probe_rat(tok[3], &q);
-            rat_round(&q, f, r, out);
+            probe_ok(cx_round(host_dev(), &q, f, r, out), "the probe: cx_round");
             probe_elem_out(f, out);
             printf("\n");
         } else if (!strcmp(tok[0], "exact")) {
@@ -3631,17 +2990,18 @@ int main(void)
             uint8_t le[32];
             elem_t x;
             rat q;
-            char t[2 * (CFT_BN_BITS / 4) + 8];
+            char t[CX_RAT_TEXT];
             elem_from_hex(f, tok[2], le);
             decode(f, le, &x);
             got = rat_of_elem(&q, &x);
-            if (got == 1) {
+            if (got == CX_FINITE) {
                 printf("nonfinite\n");
-            } else if (got == 2) {
+            } else if (got == CX_WIDTH) {
                 long nb, db;
                 elem_bits(&x, &nb, &db);
                 printf("width %ld %ld\n", nb, db);
             } else {
+                probe_ok(got, "the probe: rat_of_elem");
                 rat_text(&q, t);
                 printf("%s\n", t);
             }
@@ -3684,11 +3044,19 @@ int main(void)
     return 0;
 }
 
-#else /* the tool */
+/* The tool's own main is compiled in the probe build too, under an
+ * external name nothing calls: so the probe build is exactly the tool's
+ * code beside the probe, and nothing in it is "defined but not used" (the
+ * project's builds are warning-free; the lead's condition, 2026-09-30). */
+#define AUDIT_MAIN audit_tool_main
+int audit_tool_main(int argc, char **argv);
+#else
+#define AUDIT_MAIN main
+#endif /* CFT_AUDIT_PROBE */
 
 /* ---- main -------------------------------------------------------------- */
 
-int main(int argc, char **argv)
+int AUDIT_MAIN(int argc, char **argv)
 {
     const char *cert_path = NULL, *salt_path = NULL, *states_path = NULL;
     const char *seed_arg = NULL, *plant = getenv("CFT_AUDIT_PLANT");
@@ -3871,7 +3239,7 @@ int main(int argc, char **argv)
         ENTRY_NOW = (long long)j;
         derive(&C, P, j, &values[j]);
         if (!value_holds(&C.entries[j].value, &values[j])) {
-            char t[2 * (CFT_BN_BITS / 4) + 8];
+            char t[CX_RAT_TEXT];
             rat_text(&values[j], t);
             refuse("accuracy-value", NOWHERE, "entry %llu: the value recorded "
                    "is not the %s of the certified runs, which is %s",
@@ -3885,4 +3253,3 @@ int main(int argc, char **argv)
 #endif
     return 0;
 }
-#endif /* CFT_AUDIT_PROBE */

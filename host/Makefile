@@ -1232,8 +1232,10 @@ corpustest: cft-segrun$(EXE)
 # So it is built here, in the same make as the libcft.a it links, from
 # the same cft_config.h: a cft_bn narrower than the width rule needs
 # compiles the tool without its exact arithmetic (the lead's decision,
-# 2026-09-29). The headers are prerequisites, and the recipe names its
-# two inputs, since $^ would hand gcc the headers too.
+# 2026-09-29). That arithmetic lives in tools/cert_exact.h, header-only,
+# shared with cft-segrun since the plan's step 5. The headers are
+# prerequisites, and the recipe names its two inputs, since $^ would
+# hand gcc the headers too.
 #
 #   make audittest      the equality gate, tests/audit_check.py: every
 #                       parse call test_cert.py makes, and every audit
@@ -1257,8 +1259,8 @@ all: cft-audit$(EXE)
 clean: clean-audit
 .PHONY: audittest clean-audit
 
-cft-audit$(EXE): tools/audit.c libcft.a src/bigint.h src/sha256.h \
-                 include/cft_config.h
+cft-audit$(EXE): tools/audit.c tools/cert_exact.h libcft.a src/bigint.h \
+                 src/sha256.h include/cft_config.h
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/audit.c libcft.a -o $@ \
 		$(XRTLIBS)
 
