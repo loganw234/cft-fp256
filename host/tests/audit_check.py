@@ -122,7 +122,7 @@ def skip(what, why):
     print(f"SKIP  {what}: {why}", flush=True)
 
 
-# ---- verdicts ----------------------------------------------------------------
+# ---- verdicts ---------------------------------------------------------------
 
 def loc_of(e):
     return tuple("-" if v is None else str(v)
@@ -188,8 +188,9 @@ def same(g, t, read_only=False):
         return True, ""
     if g[0] == "accepted":
         if t[0] != "accepted":
-            return False, (f"golden ACCEPTED; the tool "
-                           f"{'refused ' + t[1][0] + ' at ' + str(t[1][2]) if t[0] == 'refused' else t[1]}")
+            said = (f"refused {t[1][0]} at {t[1][2]}" if t[0] == "refused"
+                    else t[1])
+            return False, f"golden ACCEPTED; the tool {said}"
         if read_only:
             ok_read = bool(t[1]) and t[1][0].startswith(
                 "cft-certificate 1: READ")
@@ -234,7 +235,7 @@ def hold(args, env, g, label, workdir, read_only=False, quiet=True):
     return check(agree, label, why, quiet=quiet)
 
 
-# ---- translating a golden call into files and options --------------------------
+# ---- translating a golden call into files and options -----------------------
 
 class Untranslatable(Exception):
     """These arguments have no faithful spelling as files and options."""
@@ -379,7 +380,7 @@ def translate(workdir, data, salt, programs=None, states=None, streams=None,
     return args
 
 
-# ---- section 2: test_cert.py, shadowed -------------------------------------------
+# ---- section 2: test_cert.py, shadowed --------------------------------------
 
 ORIG_PARSE = ORIG_AUDIT = ORIG_SEQ_RUN = None
 
@@ -559,10 +560,11 @@ def section_shadow(work):
     return sh
 
 
-# ---- section 1: the tool's own -------------------------------------------------------
+# ---- section 1: the tool's own ----------------------------------------------
 
 def section_tool(work):
-    print("== 1. the tool's own: usage, --sample, a drawn seed, git", flush=True)
+    print("== 1. the tool's own: usage, --sample, a drawn seed, git",
+          flush=True)
     d = work / "own"
     d.mkdir(parents=True, exist_ok=True)
     # the page's test vector, and cert.sample over a grid
@@ -773,7 +775,7 @@ def hold_ignored():
               f"{r.returncode}")
 
 
-# ---- section 3: segrun_check's certificates ---------------------------------------
+# ---- section 3: segrun_check's certificates ---------------------------------
 
 def audits_of(work, label, data, salt, progs, states, fmt_of, want=None):
     """Hold both auditors equal on one certificate: in full from every
@@ -880,7 +882,7 @@ def section_segrun(work):
     return sampled_case
 
 
-# ---- section 4: the golden corpus ------------------------------------------------------
+# ---- section 4: the golden corpus -------------------------------------------
 
 def read_manifest(path):
     """certificates/MANIFEST (P2's format, the audit round's ledger P2.md
@@ -917,7 +919,8 @@ def read_manifest(path):
 
 
 def section_corpus(work, root):
-    print("== 4. the golden corpus, every case in full and sampled", flush=True)
+    print("== 4. the golden corpus, every case in full and sampled",
+          flush=True)
     man = root / "certificates" / "MANIFEST"
     if not man.is_file():
         skip("the golden corpus", f"{root} has no certificates/MANIFEST")
@@ -941,7 +944,7 @@ def section_corpus(work, root):
                   None, c.get("verdict"))
 
 
-# ---- section 5: the narrow build -------------------------------------------------
+# ---- section 5: the narrow build --------------------------------------------
 
 def section_narrow(work, cc, lib_src):
     print("== 5. the narrow build: a 576-bit cft_bn refuses build-width at an "
@@ -1005,7 +1008,7 @@ def section_narrow(work, cc, lib_src):
         TOOL = wide
 
 
-# ---- section 6: the numerics against Python's integers and the golden -----------
+# ---- section 6: the numerics against Python's integers and the golden -------
 
 def compile_with(cc, lib_src, out, defs, work):
     """cc on the library's sources and tools/audit.c, from host/. A
@@ -1221,7 +1224,7 @@ def section_numerics(work, cc, lib_src):
               "; ".join(w for w in wrong if w.startswith(op))[:600])
 
 
-# ---- main ----------------------------------------------------------------------
+# ---- main -------------------------------------------------------------------
 
 def main():
     global TOOL, SEGRUN, RECORD
