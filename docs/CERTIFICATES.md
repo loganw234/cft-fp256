@@ -1266,8 +1266,10 @@ bank:
   and it carries on from there.
 
 The C auditor is held to these controls as well. Its gate hands it every
-parse and audit call test_cert.py makes, and requires the golden
-auditor's verdict by name, code and location ("The audit tool").
+parse call test_cert.py makes, and every audit call whose arguments
+files and options can carry, 243 of 282; the other 39 are counted and
+named. It requires the golden auditor's verdict by name, code and
+location ("The audit tool").
 
 ## The segment runner
 
@@ -1665,13 +1667,23 @@ A run index that names no run of the certificate is refused by the
 step that reads that argument, as `cert.audit` refuses a key that is no
 run: `choice` for a choice, `program-image` for an image or a bank,
 `stream` for a stream, and `state-shape` for a state file of a run or
-boundary that does not exist. Every file the command line names is read
-before step 1, and each state file at step 7.
+boundary that does not exist.
+
+**When it reads them.** The certificate, the salt, and every image,
+bank and stream are read before step 1. The state files are listed
+then too, and each is held to be a regular file and opened. So a file
+the command line names that cannot be read, or a directory by a
+boundary file's name, is `usage` before any step. A state's bytes are
+read at step 7, where `cert.audit` takes them, and only a file that
+changed or went after it was opened fails there: `usage` at step 7.
 
 `--read` is `cert.parse(data, salt)`: the hash line, the body's hash and
 the strict form, and with `--salt` the salt against the mode and the
 commitment. `--sample` prints the segments `cert.sample` draws, as the
-page's test vector writes them.
+page's test vector writes them. It samples through a map of at least
+4K slots, and a K whose map this process cannot size or allocate is
+`memory`, at once; on a 64-bit build every K from 2^59 up is. There
+`cert.sample` has no verdict: it builds the list of all S segments.
 
 **What it answers.**
 - Accepted: stdout is the golden verdict's lines,
@@ -1681,13 +1693,16 @@ page's test vector writes them.
   line=<n> run=<r> segment=<k> entry=<j>`, each field `-` where it does
   not apply: the golden refusal's `.line`, `.run`, `.segment` and
   `.entry`. The exit code is the name's (the table under "Refusals").
-- Three names are the tool's own:
+- Four names are the tool's own:
   - `usage`, exit 64: a command line it does not take, or a file it
-    names that cannot be read;
-  - `memory`, exit 71: an allocation of its own that fails. A number
-    the certificate states is never `memory` ("What an audit spends");
+    names that cannot be read (above);
+  - `memory`, exit 71: an allocation of its own that fails, or a
+    `--sample` K past what a map can be sized for. A number the
+    certificate states is never `memory` ("What an audit spends");
   - `build-width`, exit 78: a narrow build handed a certificate with an
-    accuracy entry (below).
+    accuracy entry;
+  - `build-format`, exit 78: a narrow build handed a run in a format
+    above its ceiling (both below).
 - A library call that fails where no refusal names the failure, such as
   a software handle that does not open or a conversion that fails, is
   not a verdict. It prints `cft-audit: internal error` and exits 70.
@@ -1712,19 +1727,34 @@ page's test vector writes them.
   That is round_pack's answer, as the golden's is.
 - The gate held each of these to Python's integers or the golden model
   before they were trusted (section 6, below).
-- **The narrow build.** A `cft_bn` narrower than 2,047 bits (2 x 1,023
-  + 1; 576 bits at an fp128 ceiling) compiles the tool without its exact
-  arithmetic. It is a `#if`, so no build computes an exact value in a
-  narrower bigint. Its reader refuses `build-width` at an `accuracy`
-  line whose count is at least 1 and agrees with its entries, located at
-  that line. A certificate with `accuracy 0` carries no exact value, and
-  the narrow build audits it in full. This is "The width rule"'s
-  narrower build, refusing rather than auditing differently.
+- **The narrow build.** A library built with a `CFT_MAX_FORMAT` below 3
+  carries the formats up to that ceiling, and by default a narrower
+  `cft_bn` (`host/include/cft_config.h`). A narrow build audits in full
+  a certificate carrying no exact value and no format above its
+  ceiling. Anything else it refuses rather than audit differently, as
+  "The width rule" asks of a narrower build: its reader refuses by a
+  name of the tool's own, at the line that shows the lack.
+  - `build-format` at a run's `program-format` line naming a format
+    above the ceiling. Without it that run's image would fail to load at
+    step 4, `program-image`: a name for an input that is not the one
+    certified, where the cause is the build (verifier-A1's finding; the
+    lead's decision, 2026-09-29).
+  - `build-width` at an `accuracy` line whose count is at least 1 and
+    agrees with its entries, where the `cft_bn` is narrower than 2,047
+    bits (2 x 1,023 + 1; 576 bits at an fp128 ceiling). Such a build
+    compiles the tool without its exact arithmetic. It is a `#if`, so no
+    build computes an exact value in a narrower bigint.
+  - The two follow separate settings, the ceiling and the bigint's
+    width, which `CFT_BN_LIMBS` can set apart from the ceiling. The gate
+    builds `CFT_MAX_FORMAT=2` at its default width, where both apply.
 - **The instrument.** `CFT_AUDIT_PLANT=executor-refuses` makes every
   re-run's executor refuse, as test_cert.py's monkeypatched `seq.run`
   does, so that the gate holds that refusal (`program-image` at the
-  run and segment). Any other value is `usage`. No library in this tree
-  refuses a re-run that passed steps 4 to 7.
+  run and segment). The empty string is the variable unset, as
+  `CFT_SEGRUN_PLANT`'s is: cmd and Windows PowerShell remove a variable
+  set empty, so an empty one means the same everywhere. Any other value
+  is `usage`. No library in this tree refuses a re-run that passed
+  steps 4 to 7.
 
 **What it proves, and what it does not.** It proves what "What an audit
 proves" says, for the segments it re-runs. It is independent of the
@@ -1738,9 +1768,13 @@ which `verify/run.sh`'s `audit` stage runs in the gate budget. It hands
 both auditors the same inputs, and requires the same verdict: the
 refusal's name, code and location, or both ACCEPTED with the same lines.
 1. **The tool's own:**
-   - every `usage` refusal a command line or a file causes;
+   - every `usage` refusal a command line or a file causes. A directory
+     by a boundary file's name, beside a certificate step 1 refuses, is
+     among them, so a tool that found it only at step 7 goes red;
    - `--sample` against the page's vector and against `cert.sample`,
-     with its `choice` refusals;
+     with its `choice` refusals, and three samples whose map cannot be
+     sized (K of 2^62, twice, and 2^63 - 1), each `memory` at once;
+   - the instrument set empty, which is the instrument unset;
    - a seed the operating system draws: different in two audits, and
      the same verdict again when handed back;
    - five controls the plant census asked for (below);
@@ -1748,8 +1782,8 @@ refusal's name, code and location, or both ACCEPTED with the same lines.
 2. **test_cert.py**, run in the gate's process with `cert.parse` and
    `cert.audit` shadowed. Every top-level call its tests make is handed
    to the tool too, translated into files and options. So the tool is
-   held to every control the golden auditor is held to, and stays so as
-   controls are added.
+   held to every control the golden auditor is held to whose arguments
+   files and options can spell, and stays so as controls are added.
    - A call whose arguments no file or option spells faithfully is
      counted and named, not compared: a list where a mapping goes, a
      string or bool key, an integer past the format, a salt that is not
@@ -1762,9 +1796,13 @@ refusal's name, code and location, or both ACCEPTED with the same lines.
 4. **The golden corpus** (`certificates/MANIFEST`), where the tree has
    one: every case the same three ways, the two auditors against each
    other and against the manifest's verdict.
-5. **The narrow build**, compiled at `CFT_MAX_FORMAT=2`: `build-width`
-   at the example's `accuracy` line, in an audit and in `--read`, and
-   the same runs with `accuracy 0` audited in full.
+5. **The narrow build**, compiled at `CFT_MAX_FORMAT=2`:
+   - `build-width` at the example's `accuracy` line, in an audit and in
+     `--read`, and the same runs with `accuracy 0` audited in full;
+   - `build-format` at run 0's `program-format` line, in an audit and in
+     `--read`, of an open fp256 certificate cft-segrun makes with
+     `accuracy 0`. The golden auditor and the default build accept it
+     (verifier-A1's case).
 6. **The numerics**, through a probe build of `tools/audit.c`
    (`-DCFT_AUDIT_PROBE`, compiled only by the gate):
    - the tool's division, gcd and exact arithmetic against Python's
@@ -1775,13 +1813,14 @@ refusal's name, code and location, or both ACCEPTED with the same lines.
    - `cft_convert` and `cft_to_decimal_char` against `cert.widen` and
      `chars.to_decimal`.
 
-Measured on the desktop, niced and with the desktop in use
-(2026-09-29): 6,742 checks, 0 failed, 216 s. That run read the corpus
-from P2's tree before integration. Where a tree has no corpus, section
-4 is a SKIP line, which `verify/run.sh` counts as an inner skip.
-- Section 2: test_cert.py's 93 tests pass in 111 s, 70 s of it the
-  tool's 6,475 runs. Every one of the 6,250 top-level parse calls, and
-  225 of the 264 audit calls, got the same verdict from the tool. The
+Measured on the desktop, niced, on a day it was in use (2026-09-29, at
+b10047d): 6,781 checks, 0 failed, 209 s. That run read the corpus from
+P2's tree at 679c64d, the commit the lead merged. Where a tree has no
+corpus, section 4 is a SKIP line, which `verify/run.sh` counts as an
+inner skip.
+- Section 2: test_cert.py's 101 tests pass in 110 s, 69 s of it the
+  tool's 6,505 runs. Every one of the 6,262 top-level parse calls, and
+  243 of the 282 audit calls, got the same verdict from the tool. The
   other 39 pass arguments no file spells.
 - Section 6: the probe's 4,566 operations all agree, in 15 s.
 
@@ -1793,11 +1832,14 @@ skips and that names itself when it refuses. The gate's recorded cases
 changes only the cases that reach its call, so each site is planted in
 turn and only its own cases replayed.
 
-On `tools/audit.c` as of ac5f055, with the gate's 6,617 cases, the
-census found 160 sites (134 s on the desktop, 2026-09-29):
-- **144 red.** Each turns a case red, and the gate's line names the
-  golden auditor's refusal beside the tool's other answer.
-- **11 green.** Each stays green because another check refuses its
+On `tools/audit.c` as of 293b561, with the gate's 6,655 cases, the
+census found 165 sites (149 s on the desktop, 2026-09-29):
+- **146 red.** Each turns a case red, and the gate's line names the
+  golden auditor's refusal beside the tool's other answer. Two of them
+  are verifier-A1's: `build-format` planted lets its case reach step 4,
+  which refuses `program-image`; and the `--sample` map's size planted
+  leaves a map of 16 slots, and the sample runs past the census's 20 s.
+- **12 green.** Each stays green because another check refuses its
   cases by the same name at the same place:
   - in the golden auditor's order too:
     - a block-starting line whose block is behind: the next rule of
@@ -1814,20 +1856,26 @@ census found 160 sites (134 s on the desktop, 2026-09-29):
       past the empty bank;
     - an h-slot past the bank: read from the file buffer's zero-filled
       slack, it holds zero;
+    - a directory by a boundary file's name: on Windows, where the
+      census ran, opening a directory fails as well, and that check says
+      `usage` before step 1 too;
     - no argument at all, `--sample` given twice, and no `--cert`: each
       is `usage` by the next check.
-- **5 unreached.** No input reaches these:
+- **7 unreached.** No input reaches these:
   - an allocation of the tool's own that fails (`memory`);
-  - a state file gone between the listing of `--states` and its size
-    (`usage`);
+  - a state file listed that then cannot be sized, or opened: gone
+    since the listing, or behind permissions the gate does not set
+    (`usage`, twice);
   - an operating system that gives no random bytes, on Windows and
     elsewhere (`usage`, twice);
+  - a state file that changed or went between its opening and step 7
+    (`usage`);
   - a library that fails a re-run the checks before it allowed
     (`program-image`). Its instrument twin is red.
 
-The census's first pass found nine more with no case to reach them, or
-none to turn them red. The gate gained a control for each:
-- four `usage` cases;
+The census's first pass left sites that no case reached, or that none
+turned red, and the gate gained ten controls for them:
+- five `usage` cases;
 - an audit of each of two programs that are not segments. test_cert.py
   reaches those two reasons through the writer only;
 - a stream for a run the certificate lacks;
