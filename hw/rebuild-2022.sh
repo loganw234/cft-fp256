@@ -396,7 +396,7 @@ for t in $TARGETS; do
     # (This script runs under `set -euo pipefail`: every pipeline here
     # that can find nothing ends in `|| true`, or a hit whose entry no
     # run of this build added would end the script mid-manifest, which
-    # e98d0ca's first form of this loop did - verifier-F1, 2026-09-30.)
+    # fd25e9f's form of this loop did - verifier-F1, 2026-09-30.)
     for mcu in ${CLOCK_CUS//./ }; do
       rl="$runs/ulp_${mcu}_0_synth_1/runme.log"
       [ -f "$rl" ] || continue

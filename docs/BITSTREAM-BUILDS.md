@@ -104,7 +104,10 @@ other's `.xo`, temp dir and xclbin.
 `retimed_runs:` line lists the CUs whose netlist came from a
 `synth_design -retiming`, read from the runs' own `runme.log`s after
 the build. Identical CUs share one synthesis through Vivado's IP
-cache, so a cache hit is followed to the run that added its entry.
+cache, so a cache hit is followed to the run that added its entry. A
+hit whose entry an earlier build added (a reused `BUILD`, a shared
+cache) has no run to follow, and is named on a separate
+`retiming_unresolved:` line with its cache-ID, not counted either way.
 Until 2026-09-30 the flag reached `cft_krnl_1`'s run
 alone. A single was retimed whole, but a quad had one tile of four
 retimed while its manifest said `retiming: 1` (docs/VALIDATION.md,

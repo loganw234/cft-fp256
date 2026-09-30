@@ -307,7 +307,7 @@ fi
 
 # Every CU a cache hit of an entry no run of this build added. The script
 # must finish with its whole manifest and name the hits unresolved - under
-# set -euo pipefail, e98d0ca's form of this loop ended the script there.
+# set -euo pipefail, fd25e9f's form of this loop ended the script there.
 echo "== unresolved cache hits: the build finishes and names them =="
 log=$(STUB_FOREIGN_CACHE=1 run_it "$SCRIPT" "hw/link_quad.cfg" "foreign")
 rc=$(cat "$TMP/rc-foreign")
