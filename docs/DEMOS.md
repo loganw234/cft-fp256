@@ -517,8 +517,8 @@ one fact is not paranoia when the fact is the whole argument.
 with `bindings/wasm/build/` removed between them (2026-09-07; the
 2026-09-04 page was 486,822 bytes, sha256 `e3711319627e6828...`, built
 the same way). Those are that day's bytes. The page has been rebuilt
-with the module since - the committed one is 578,617 bytes, sha256
-`74d229eef888d918...`, at ABI 0.16 - so read the pair above as the
+with the module since - the committed one is 585,089 bytes, sha256
+`842dbe2f171aa1e6...`, at ABI 0.16 - so read the pair above as the
 2026-09-07 measurement and the table at the top of this file as what
 is in the tree.
 

@@ -2338,8 +2338,8 @@ After a load that succeeds, the library's slot is empty. A device
 backend's older message can still show through an empty slot, so the
 guarantee rests on the sentences, not on the clear: `seq_check.py`
 holds a refusal on a `cft://` handle after the remote backend's own
-failure. The loader's four allocation failures carry no sentence; the
-remote and XRT backends name their own out-of-memory failures. Two
+failure. The loader's four allocation failures carry no sentence, and
+ten of the remote and XRT backends' fourteen carry none either. Two
 exceptions remain:
 - a build with `CFT_ERRMSG_MAX` 1 drops sentences by design, so its
   slot shows a remote handle's older message;
@@ -2352,9 +2352,9 @@ No status changed on a 64-bit host. On a 32-bit one (wasm32, the
 `size_t` holds could wrap the length check, and where the wrapped
 length matched the image's size it came back `CFT_ERR_OUT_OF_MEMORY`
 from the allocation. The length is computed in
-64 bits now, so that image is `CFT_ERR_ARTIFACT` there too. The
-committed WebAssembly module was built before the change and carries
-it from its next rebuild. `api-test` holds every one of these
+64 bits now, so that image is `CFT_ERR_ARTIFACT` there too, and the
+committed WebAssembly module carries the change since its rebuild of
+2026-09-30. `api-test` holds every one of these
 refusals but the deposit ceiling, which no software handle reaches and
 `seq_check.py` holds through a `cft://` handle. It also holds the slot
 after a good load.

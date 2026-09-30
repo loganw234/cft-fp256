@@ -1145,9 +1145,8 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
      * one, since cft_last_error() then falls through to a device
      * backend's message, which may be older still. So the clear is for
      * the exits that are not refusals: a load that succeeds, and the
-     * allocation failures, which carry no sentence here (the remote and
-     * XRT backends name their own out-of-memory failures; these four do
-     * not). */
+     * allocation failures, which carry no sentence here (nor do ten of
+     * the remote and XRT backends' fourteen out-of-memory returns). */
     cft_clear_error();
     if (!dev || !image || !out) {
         cft_set_error("cft_program_load was given a NULL %s; it needs the "

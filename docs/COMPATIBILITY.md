@@ -834,6 +834,25 @@ it always was.
 | certificates | `cft-segrun` opens the software backend plainly, so a certificate made on software is made at 256; the audit re-runs a certificate at the depth its `device-caps` names |
 
 
+### Named load refusals, and a described length in 64 bits (2026-09-30, no ABI step)
+
+No call gained or lost a meaning. `cft_program_load` clears the
+library's error slot on entry, and every refusal it makes writes a
+sentence naming its cause (docs/HOSTAPI.md, "`cft_program_load` is an
+exception to that, since 2026-09-30"). One status moved, on 32-bit
+hosts only. An image whose header describes more bytes than a 32-bit
+`size_t` holds, where the wrapped length matched the image's size, was
+`CFT_ERR_OUT_OF_MEMORY` there; it is `CFT_ERR_ARTIFACT`, as on a 64-bit
+host. The same round made an escalated square root carry its
+truncation (host/src/mpfloat.c): no result at the contract's precision
+moved (verifier-F1, 472,040 calls byte for byte).
+
+| surface | status |
+|---|---|
+| C (`cft.h`) | `api-test` holds 44 load refusals, each after a planted stale sentence, and the slot after a good load; `seq_check.py` holds the deposit ceiling through a `cft://` handle |
+| Node / Browser | the module rebuilt at 0.16 as every change to its sources requires: `733cfa2c...`, 266,089 bytes, still 141 `cftw_*` exports. It answers the crafted header ARTIFACT, "describes 4294967336", where the module before it answered "out of memory" (verifier-F4). `program_test.mjs` holds that, and a sentence on every refusal, when it is run: no stage runs it. `conformance.html` and `demos.html` were rebuilt on it, byte-identical over two clean builds, and the demos chains re-recorded with every chain unchanged (bindings/wasm/README.md) |
+| Arduino | the vendored copy re-synced |
+
 ## Hosts and boards
 
 Where the library has been built and run, as opposed to where it is

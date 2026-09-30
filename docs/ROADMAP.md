@@ -3759,8 +3759,9 @@ certificate plan's steps 4 and 7").
   included: a file it cannot open is `usage` before any step. The
   golden auditor, which takes no files, names the step at which it
   refuses the certificate, where there is one.
-- The corpus's depth cases tell 256 from the deeper depths, not 2,048
-  from them. That is a follow-up.
+- The corpus's depth cases told 256 from the deeper depths, not 2,048
+  from them. The fixes round pinned every depth from 128 to 32,768
+  the next day (docs/VALIDATION.md, 2026-09-30, "the fixes round").
 - The rest of this section is the plan as written that evening.
 
 **What the tree has.**

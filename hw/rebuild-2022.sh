@@ -324,10 +324,11 @@ for t in $TARGETS; do
     # EVERY CU, from the nk= line, as the clock constraint is. Until
     # 2026-09-30 this named ulp_cft_krnl_1_0_synth_1 alone, which is
     # the whole kernel in a single but one of four synthesis runs in a
-    # quad: every quad built with RETIMING=1 had tile 1 retimed and
-    # tiles 2 to 4 not, while its manifest said "retiming: 1"
-    # (revision 7's q135 and q130, whose ten worst paths were all in
-    # tile 4; docs/VALIDATION.md, 2026-09-30). hw/test-rebuild-argv.sh
+    # quad: a quad built with RETIMING=1 alone had at most tile 1
+    # retimed and tiles 2 to 4 not, while its manifest said
+    # "retiming: 1" (revision 7's q135 and q130; q135's ten worst
+    # paths were all in tile 4; docs/VALIDATION.md, 2026-09-30, "the
+    # fixes round"). hw/test-rebuild-argv.sh
     # holds one property per CU, and its control puts the old line
     # back; the manifest's retimed_runs: says which runs did retime.
     for cu in ${CLOCK_CUS//./ }; do

@@ -16343,3 +16343,155 @@ Each posted its proposals to the ledger before it built, and the lead decided th
   - The launch at main typed a guessed SHA, `2852cc4a`. The script's `rev-parse --verify` refused it before any run. An `< /dev/null` on an ssh fed by a pipe had also left that launch's tar empty.
   - `--only transcend,mpfr` at main skipped the library stage that builds libcft.so, so its transcend leg compared nothing. It was run again with the library built.
   - The first re-run of mpfr with the pinned MPFR tested the system MPFR again: mpfr-check was up to date, so make did not relink it. It was removed and rebuilt, and `ldd` checked.
+
+## 2026-09-30 - the fixes round: an escalated square root carries its truncation, and the transcend stage's escalation run reaches the library on Windows; RETIMING retimes every tile of a quad, where it had reached tile 1 alone; the MPFR harness keeps a zero's sign on LP64 hosts; the golden corpus pins every depth from 128 to 32,768; every refusal in the program-load path says why; the module rebuilt; the round's verifiers, and its known limits
+
+**Why.** The audit round's gate budget on amd-arc-box (this date's entry above) failed two stages that were not its own. Its verifiers left three gaps in the golden corpus, and revision 7 left two unnamed-refusal limits. When Logan asked whether the aggressive options had been used in revision 7's quad, the lead found that RETIMING had reached one of its four tiles. Logan approved the lead's order and scope, with one checkpoint:
+- "Go ahead with your order, if any of the first 5 are small enough, you may handle them alone";
+- "Hold before starting Step 3 once your get there, the language and its compiler."
+The records are in `Data/runs/2026-09-30-fixes-round/` (gitignored): its ledger and its briefs. Fixes 1 to 3 were the lead's alone; 4 and 5 went to parcels Q4 and Q5. Every commit, the lead's included, had a verifier:
+- F1 on the lead's fixes through 05df871;
+- F2 on Q4;
+- F3 on Q5;
+- F4 on the rest: 962ccd0, 1dd94bd, 54f9639, both merges, the module rebuild, and this entry.
+
+**Fix 1: the escalated square root (28ba263, then 962ccd0).**
+- **The failure.** The transcend stage's escalation run (`--min-prec 64`, a test override that lowers the precision the library's Ziv loop starts at: 64 for fp128) stopped on the box: fp128 `rootn(0x2, 2)`, rne, was one ulp below libcft's own `sqrt`. The same at main.
+- **The cause**, found by reading and measured by verifier-F1:
+  - `cft_mp_sqrt` returned the input's relative error halved, `(a->err + 1) / 2`, and nothing for `bn_isqrt`'s floor. An exact operand therefore came back with err 0 on an inexact root.
+  - Forced to start at 64 bits, the loop evaluated at a 111-bit working significand, narrower than fp128's 113. The zero radius made the enclosure a point, and the loop decided at once on the 111-bit truncation, `...ea94`. The true value is 0.489 ulp above `...ea95`, so the answer was 1.489 ulps below it and one ulp below the correct rounding.
+  - The golden model, whose square root is mpmath interval arithmetic, gives `...ea95` under the same override.
+- **The fix.** `bn_isqrt` reports whether its final remainder is 0. An inexact root carries +2 units of 2^-W: its truncation, below one unit in the last place of a W-bit root. An exact root keeps the input's error alone, so no exact case can stop deciding. Measured by F1:
+  - the fixed loop declines at 64 and decides `...ea95` at 128;
+  - bn_isqrt's flag agrees with squaring back over 200,000 inputs;
+  - exhaustive at W = 8, 10, 12 and 14, the old radius is violated by every inexact root, and the fix by none at W = 14 (228,480 cases).
+- **The harness's hole.** `transcend_check.py --min-prec` set the variable inside Python. On Windows `cft.dll` reads `getenv` from msvcrt.dll, while Python is a UCRT program, each C runtime with its own copy of the environment. So the stage's escalation run had never escalated on the desktop. Measured: the same command passed there, and failed with the variable set before the process. A process that does not start with the variable now runs itself again with it, on every platform.
+- **Measured:**
+  - on the desktop, fp128 through the escalation path gives 131,300 comparisons, C == model. A scratch copy with the old radius fails with the original assertion, so the knob reaches the library and the fix is what passes it;
+  - on amd-arc-box (`--only libcft,transcend,bindings` at 28ba263), PASS, nothing skipped. transcend's two runs give 607,217 and 580,977 comparisons, the second the escalation run that failed at main.
+- **Verifier-F1** found no wrong answer in fix 1. It measured:
+  - every format through the escalation path: fp32 119,800 comparisons, fp64 184,825, fp256 145,265;
+  - 180 calls whose exact roots reach the loop, all equal to the model;
+  - 472,040 calls through every entry point that reaches the square root, byte-identical to main's library at the contract's precision.
+  962ccd0 makes mpfloat.c's error table say so, with the second-order terms F1 found (known limits, below). It changes no code: its object is byte-identical to 05df871's (F4).
+
+**Fix 2: RETIMING on every tile (e98d0ca, fd25e9f, 05df871, 1dd94bd, 54f9639).**
+- **The defect.** `hw/rebuild-2022.sh` set RETIMING as one property on the run named `ulp_cft_krnl_1_0_synth_1`. That is the whole kernel of a single, but one of four synthesis runs of a quad. Measured in revision 7's q135 and q130:
+  - krnl_1 synthesized with `-retiming`;
+  - krnl_4 synthesized without it;
+  - krnl_2 and krnl_3 were cache hits of krnl_4's unretimed netlist;
+  - every one of q135's ten worst paths was in tile 4.
+  The manifest said "retiming: 1" regardless.
+- **The fix.**
+  - One property per CU from the `nk=` line, as the clock constraint already is.
+  - The manifest gains `retimed_runs:`, read from the runs' own logs after the build. It follows an IP-cache hit to the run that added its entry, since identical CUs share one synthesis and a hit runs no `synth_design` of its own.
+  - A hit whose producer is not in the build, and a CU with no run log, are named on `retiming_unresolved:` and counted neither way.
+  - `hw/test-rebuild-argv.sh` (the `buildargs` stage) holds one property per CU and the manifest's reading of a stub that leaves runs as Vivado's cache does, with controls.
+- **Verifier-F1 found a regression, fixed in 05df871.** fd25e9f's hit-following ran under `set -euo pipefail`. A hit whose entry no run of the build added ended the script mid-manifest, where main's finished. F1 also found the test's hit-following resting on the stub producing hits, which nothing asserted, and the control's pattern matching two loops. All three are fixed, and each plant is red, the old form included.
+- **The records, corrected here.** From e5ff791 (2026-09-02) until e98d0ca, the one-run form was the script's only one (`git log -S`), so every quad built with RETIMING=1 in that span used it. The old quad trees still on amd-arc-box, matched to entries by their directory names and read by 05df871's logic:
+  - the retimed quad (2026-09-02), the tip quad (2026-09-02, "closes at 135 MHz: kernel +0.143"), the card-day quad (2026-09-07) and the revision-2 quad (2026-09-08): tile 1 retimed, tiles 2 to 4 not;
+  - the revision-3 and read-ahead quads: tile 1 a cache hit of an entry an earlier build added, with an ID that differs from its unretimed siblings'. So tile 1 was retimed, INFERRED, not measured. Tiles 2 to 4 were not;
+  - build-rev4-quad: tile 1's run left no directory, unknown; tiles 2 to 4 not retimed;
+  - revision 7's q135 and q130: tile 1. The relaunch q135b, with every property: all four, measured.
+  So wherever an entry before this one says a quad was built "with retiming", it had at most one tile of four retimed; the trees above confirm it for those named. q135b is the first quad with all four, by VPP_PROPS beside the flag. Every single was retimed whole, since a single has one run.
+
+**Fix 3: the MPFR harness's zero (76e2984).**
+- **The failure.** The mpfr stage on the box gave 37 value mismatches in 739,234 cases, all roundTiesToAway: `pown` at n = ±2,147,483,647 in every format, and one `pow`. libcft gave −0 with underflow and inexact, and the golden model gives the same; the harness's reference gave +0. It was the same at main, and with the system MPFR 4.2.1 and the pinned 4.2.2 alike.
+- **The cause.** `t_oracle` evaluates first at MPFR's widest exponent range. With a 64-bit `mpfr_exp_t` (LP64, the box) that range holds `pown(-2.5, -2147483647)`, about 2^-2.8e9, so the value lands in the RMM subnormal branch. That branch recomputes at the default range, where it underflows to a signed zero, and then read the sign with `mpfr_sgn`, which is 0 for any zero. With a 32-bit `mpfr_exp_t` (Windows) the first evaluation underflows, and the underflow branch already read the sign bit. That is why the desktop passed. F1 measured the mechanism on both widths (WSL's MPFR 4.1.0 among them).
+- **The fix.** `mpfr_signbit` in the three RMM subnormal branches.
+- **Measured.** The box's mpfr stage at 76e2984 with the pinned 4.2.2: PASS, 0 value mismatches, 0 flag. The desktop: 0 mismatches, 431 s (F1).
+
+**Fix 4: the golden corpus pins every depth (Q4: df06c14, 6d9411b; merge abcbc8d).** It closes the audit round's three known limits T3, 9.3 and G1.
+- **The depth ladder.** deepwrap-fp64's program becomes eight probes at p = 16,384 down to 128. A non-strict LDX at p reads x where the depth D ≤ p; an STX at p + 2 stores the trip count into z. So a segment's y and z count the probes at or past D, and every power of two from 128 to 32,768 has its own chain.
+- **Auxiliary runs.** Each deepwrap case gains a half-step run at its stated depth: the first check that holds either auditor to an auxiliary run's depth.
+- **The tie lanes.** augsum-fp64 gains two lanes whose first augadd is a tie at ±(2^53 + 3), where roundTiesTowardZero (754's augmentedAddition) and ties-to-even differ.
+- **The keep rule.** `corpus.py make` now keeps a certificate whose content did not change, so nine cases keep their bytes and producer (0b8ea10), and three name A (df06c14). The branch was merged with its history.
+- **Verifier-F2** found no regression and no wrong answer. It measured:
+  - its own plants, each passing the old corpus and failing the new one by name: seven stated/run depth pairs, the depth in the main run's block only, and ties-to-even in the golden model, in libcft and in both. The old gap was wider than recorded: 256 stated and run at 128 or 4 also passed;
+  - no model of a tile that reduces indices wrongly reproduces either chain;
+  - the nine kept certificates byte-identical;
+  - corpustest 156, segrun_check 458, test_cert 101 and the audit gate's corpus section 73, unchanged.
+
+**Fix 5: every load refusal names its cause (Q5: 4c5d9bc, 0aa6fe6; merge b1f1458).**
+- **The sentences.** 33 refusals in `cft_program_load`, `seq_validate` and `seq_check_operands` wrote no sentence, and the slot was not cleared, so one printed an earlier call's words (revision 7's P2 measured it). Now `cft_clear_error()` runs first, and every refusal names its cause.
+- **The table.** The control-field rules are one table (`seq_ctrl[]`), which decides a refusal and names its field.
+- **The 64-bit length.** The described image length is computed in 64 bits. On a 32-bit host (wasm32, the 32-bit boards) a crafted header answered `CFT_ERR_OUT_OF_MEMORY` where a 64-bit host answers ARTIFACT. It is ARTIFACT everywhere now, the one status change, approved by the lead as a wrong answer fixed.
+- **Verifier-F3** found no regression and no wrong answer. It measured:
+  - the table held to 76e2984 exhaustively: every control op 0 to 15, every register, rnd and k pattern, 268,435,456 images;
+  - 341,163,072 C images in all, 0 status differences, and 2,124,517 through seq.py, 0 disagreements;
+  - every one of 1,840,194 sentences that fired equal to an independent derivation;
+  - five kinds of wrap on i686, out of memory before and ARTIFACT after;
+  - each sentence's removal red.
+  Its sentences were restated at the merge, a printed clause among them: "no control code rounds" was untrue of augadd.
+
+**The module rebuilt (7f1f05e).** The WebAssembly module compiles host/Makefile's source list, so fixes 1 and 5 reach wasm32 only through a rebuild. Measured on the desktop, with the pinned emsdk 6.0.9 image:
+- two clean builds byte-identical in all four files. `cft_node.wasm` is 266,089 bytes, `733cfa2c...`, 141 `cftw_*` exports as before;
+- `demos_chains.json` re-recorded, all 15 chains unchanged;
+- `demos.html` byte-identical across two builds;
+- `verify_demos.mjs`: 48 checks.
+`program_test.mjs` gains Q5's two cases: the crafted header ARTIFACT with its "describes 4294967336", and a sentence on every refusal. They pass against the new module and fail against the old one.
+
+**Verifier-F4 checked the lead's integration** and found no regression. It measured:
+- 962ccd0's mpfloat.c object byte-identical to 05df871's, with and without the transcendentals;
+- rebuild-2022.sh under stubs in 24 cases: producers retimed, unretimed and mixed, hits of each, foreign hits, and no log on one, two or all four CUs. Every case finished with a whole manifest, and no CU was in both lists. Removing 54f9639's line turns the no-log leg red, and fd25e9f's form turns three legs red;
+- each merge made again from its parents: every one-sided path equal to its side, and nothing lost;
+- the module built once more from a clean clone, byte for byte: build.sh 42 s, build_demos.sh 9 s;
+- program_test.mjs at 37 passed, and at 36 passed and 1 failed against b1f1458's module. That module answers the crafted header "out of memory", so wasm32's old answer is measured, not inferred from i686.
+It found three wrong sentences, each restated in this entry's commit:
+- "at most tile 1" in this entry's draft, rebuild-2022.sh and BITSTREAM-BUILDS.md. q135b, built from the old script with VPP_PROPS naming tiles 2 to 4, had all four retimed;
+- DEMOS.md's committed page, which it gave as 578,617 bytes; it is 585,089;
+- HOSTAPI's "the committed WebAssembly module was built before the change", untrue since 7f1f05e.
+Its others are restated below, or recorded as known limits.
+
+**The front door.**
+- **The gate budget on amd-arc-box at 7f1f05e** (run 20260930-084843-7f1f05e, 115 minutes, niced, beside q135b's link): PASS, 29 stages ok and 0 failed.
+  - The two stages that failed at main in the audit round pass:
+    - transcend, 836 s: 607,217 comparisons at the contract's precision and 580,977 through the escalation path, C equal to the model on every one;
+    - mpfr, 562 s, with the pinned MPFR 4.2.2: 739,234 cases, 0 value and 0 flag mismatches.
+  - Every stage the round touched passes: docs 9 s, golden 537 s, libcft 763 s, programs 99 s, audit 171 s, bindings 171 s, cpp 1,962 s and remote 569 s.
+  - **8 skipped by name**: buildargs by its own rule (a real Vitis is on the box); lang-rust, julia, go, csharp, r and fortran, and demos, for tools the box lacks.
+  - **4 inner skips**: golden's known three (the Arduino loopback binary, twice, and `math.fma`, which needs Python 3.13), and remote's WebSocket leg, since the box has no node.
+- **On the desktop at 7f1f05e**, the stages the box cannot run: `--only buildargs,node,wasm,demos,docs`, PASS, nothing skipped (run 20260930-084926-7f1f05e, 2,814 s): buildargs 15 s, docs 10 s, demos 81 s, node 1,642 s, wasm 1,064 s.
+- **The language legs at 7f1f05e.**
+  - julia, go, csharp, r and fortran: ok on the desktop (run 20260930-103514-7f1f05e).
+  - lang-rust failed there for the desktop's recorded limit, MSVC rustc against the MinGW library.
+  - lang-rust passed in WSL (cft2204, GNU rustc 1.98.0, on an archive of 7f1f05e): "rust: same library, same bits".
+- **Not run this round, on any host:** remote's WebSocket leg.
+
+**Known limits, recorded rather than fixed** (Logan's rule):
+- **Second-order error terms** (F1). An exact root of an inexact operand omits sqrt's O(e²), about Ea² 2^-(W+3) units. mul_ui, div_ui and like-sign add pass err_in with no spare unit for err_in times a truncation. Both are pre-existing, and below one unit at every working precision in use: under 2^-11 at fp32's 88 bits for any unsaturated error. A square root runs at 104 bits or more even under the 64-bit test override, so the error table's "larger only under the override" does not happen for it (F4). A saturated err is a clamp, not a bound, as mpfloat.c says at its cancellation rule. Its header says the opposite, that a saturated bound cannot decide a rounding, which is untrue at any W above 41 (F4).
+- **The cancellation rule rounds a first-order term down** (F4, measured with the library's own `cft_mp_add`). An unlike-sign add floors the shorter operand's scaled error when its shift is negative. So it returns err 2 where the worst true error is 2.5 units, and 3 where it is 3.5, at W = 88, 128, 237 and 928 alike. mpfloat.c's header says every rule rounds its first-order terms up. It is pre-existing, from 0d00a1e (2026-09-02). No gate has seen a result move by it, and its repair is a follow-up.
+- **retimed_runs reads the build's logs.** A cache hit from an earlier build, or a missing run log, is unresolved by design. The revision-3 and read-ahead quads' tile 1 is inferred. The stub's model of Vivado's cache matches the quoted log fragments; the message text beyond them is not determined (F1). A runme.log that exists but holds none of the patterns is read as unretimed and not named. Under the stub, an hw_emu manifest names every CU `:no-runme.log`, and whether a real hw_emu link leaves synthesis runs is not determined (F4).
+- **Pages outside this ledger still call the old quads retimed:** ROADMAP ("retiming does not close the quad"), ARCHITECTURE, SCALING, PLATFORMS, LAYOUTS, hw/layouts/u50-4xfp256.cfg and hw/gen_layouts.py (F4). They are restated with q135b's result, which tests the claim.
+- **The corpus's keep rule trusts a committed build-id**, and no gate runs `make` (F2). A wrong build-id would now be kept where it used to be overwritten.
+- **deepwrap-fp64.cfta's comment** "the last store to land is the one at p = D" holds for 128 to 16,384 (F2). z = n holds at every depth. The comment stays, since changing the source moves its committed digest.
+- **augsum's sampled audit misses a ties-to-even golden model** two draws in three. The tie is in segment 0 alone; the writer, the chain and the full audit catch it on every seed (Q4, F2).
+- **A revision-7 tile loading the new deepwrap** is believed, not tested: it uses revision-7 features only, and no card was touched.
+- **No runner stage runs `program_test.mjs`**, so its two new checks hold only when it is run by hand (F4).
+- **No gate reaches a loader OUT_OF_MEMORY**, so the clear's effect there is held by nothing but F3's i686 probe. **api-test holds some numbers of each sentence**, not all: a wrong constants count in one sentence passes it (F3).
+- **Two exceptions to "that load's reason"** (HOSTAPI states both):
+  - a CFT_ERRMSG_MAX 1 build drops sentences by design and shows a remote handle's older one;
+  - on XRT, a `cft_host_in` refusal can show a remote handle's older sentence first (verifier-V10's order).
+- **The golden's KREG message** names an index's low byte where the C names the nine-bit index. On two-fault images the C and seq.py can name different true faults, since their check orders predate the round.
+- **4c5d9bc's message** says four of seq_check_operands' nine sentences name "the operand". They are instruction-wide (listed in b1f1458).
+- **Q5's suggestions, not acted on:** `cft_set_error` has no format attribute, so no compiler holds its 101 calls (F3 found them consistent under one forced on). `cft-serve`'s slot is process-global, so entry points without a clear can still show another connection's sentence.
+
+**Load, and the machine.**
+- Every agent ran one run at a time, niced, on the desktop, while Logan used it, and no agent touched amd-arc-box or the card. F1 compiled an MPFR probe in WSL (cft2204), and Q5 ran host/fuzz with ASan and UBSan there. F3 and Q5 used an i686 toolchain on the desktop.
+- The lead's runs:
+  - fx1, fx3 and the gate budget on amd-arc-box, beside the quad link;
+  - the two module builds, 41 s and 40 s, and the demos builds, on the desktop in the pinned container, one at a time after `docker ps`.
+
+**The lead's own slips**, each caught and recorded in the ledger:
+- **A shell heredoc halved a backslash** in fix 2's first edit, so `printf '%s\n'` got a literal newline in its format string. It worked, but was not what was meant. The argv test's own control found it by failing to match the loop, before the commit.
+- **fd25e9f's regression.** The hit-following loop, written under `set -euo pipefail` without `|| true`, could end the script mid-manifest (F1's (a)). The fix is 05df871.
+- **e98d0ca's retimed_runs under-reported.** It read each CU's own log, so for q135b it would have said tile 4 alone. The lead's check against q135b's real logs found it (fd25e9f).
+- **Commit messages that said more than was measured:**
+  - 28ba263's "decided at about 128" and "a true value just above a midpoint" are wrong; it decided at 64, on a truncation;
+  - 28ba263's reason for no multiply, a root^2 product "which a 9-limb narrow build would refuse", is untrue, since no build below 64 limbs compiles mpfloat.c;
+  - 76e2984 names `t_oracle` "tfn_oracle";
+  - 05df871's comments named e98d0ca where fd25e9f's form was the one that failed. Those comments are corrected in 1dd94bd.
+  (F1, each.)
+  - fd25e9f's message says a hit whose entry an earlier build added "is named on a `retiming_unresolved:` line, not guessed". At fd25e9f such a hit ended the script before that line (F1's (a), repaired in 05df871; F4).
+- **A restatement that overcorrected.** b1f1458 restated "no CFT_ERR_OUT_OF_MEMORY in this library carries a sentence" as "the remote and XRT backends name their own". Ten of their fourteen carry none (F4). HOSTAPI and program.c's comment are restated in this entry's commit.
+- **A citation ahead of its entry.** e98d0ca's comment and BITSTREAM-BUILDS.md cited this entry before it existed (F1). This entry is it, and the citations now name it.
