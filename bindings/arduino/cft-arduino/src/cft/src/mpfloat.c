@@ -57,6 +57,15 @@
  *                algorithms in transcend.c are shaped to keep small.
  *
  *   sqrt         sqrt(1+e) = 1 + e/2 + O(e^2).      ceil(Ea/2) + 2
+ *                The + 2 is the integer root's truncation, and an
+ *                EXACT root has none: ceil(Ea/2) alone. That leaves
+ *                sqrt's O(e^2), about Ea^2 2^-(W+3) units, to the
+ *                slack of the other rules: below 2^-11 units at the
+ *                smallest ordinary working precision (2p + 40 = 88
+ *                bits, fp32) for any unsaturated Ea, and larger only
+ *                under the 64-bit test override (verifier-F1,
+ *                2026-09-30; the code carried no + 2 at all before
+ *                that day, see cft_mp_sqrt).
  *
  *   scale by 2^k Exact.                                        +0
  *
@@ -64,7 +73,12 @@
  * failure: a saturated bound simply cannot decide a rounding, so the
  * Ziv loop raises the working precision and tries again. The one thing
  * that would be a failure is a bound that is too small, which is why
- * every rule above rounds up and why none of them is an estimate.
+ * every rule above rounds its first-order terms up and why none of
+ * them is an estimate. Second-order terms are left to the rules'
+ * slack: sqrt's exact case, and an incoming error times a truncation
+ * in mul_ui, div_ui and like-sign add, which pass err_in with no spare
+ * unit. verifier-F1 found them on 2026-09-30, sub-unit at the ordinary
+ * working precisions.
  */
 
 /* This module is optional: the multiprecision evaluator the
