@@ -23,11 +23,32 @@ a silent resume from a state the file did not describe.
     exit 0               accepted (reported, not a finding by itself)
     a signal, or a sanitiser report on stderr    CRASH
     no exit inside the timeout                   HANG
+
+A CERTIFIED cft-orbits run (docs/ORBITS.md, "Certified runs",
+2026-09-30) writes checkpoint version 3: version 2's lines, the
+certificate so far, and a `sum` line over the file. Two entries seed
+from one - `orbits-cert` open and `orbits-cert-keyed` keyed - made fresh
+each session in the work directory with the states directory beside
+it, since both name this build and the states' hashes (never cached in
+corpus/ckpt). Their refusals are named two ways, both the contract's:
+a checkpoint that does not describe the run, the reader's sentence and
+exit 2; and the certified path's `cft-orbits: refused <name>: <why>`,
+with that name's code (salt-missing, identity, state-hash, ...). A run
+the flag certificate stops (exit 3, "raised 0x..") is refused by name
+too: the arithmetic left the domain. The mutator knows the version-3
+block, and makes the sum again over three mutations in four, so that
+the strict reader behind the sum is what it reaches. And an accepted
+certified resume runs to the end and writes its certificate, which
+must be the uninterrupted run's, byte for byte: one that differs is
+held to the golden audit (python/cft_golden/cert.py), and is a finding
+- a SILENT WRONG RESUME - unless the audit refuses it by name.
 """
 
 import argparse
+import hashlib
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -80,6 +101,20 @@ TOOLS = {
                    "37", "--stop-after-passes", "5", "--quiet"],
     },
 }
+
+# A certified cft-orbits run: Kepler, fp64, 8 intervals of 16 steps,
+# stopped at 37 - part way through interval 2, two intervals closed - so
+# the seed's `cert` block carries segment lines and flags so far. The
+# resume runs to the end and writes the certificate; `cert` names the
+# mode, and one_tool adds --cert, --cert-states and the salt choice.
+_ORBITS_CERT = ["--problem", "kepler", "--format", "fp64", "--members", "4",
+                "--periods", "2", "--steps-per-period", "64",
+                "--sample-every", "16", "--rsqrt", "newton", "--engine",
+                "segments", "--batch", "3", "--quiet"]
+for _name, _mode in (("orbits-cert", "open"), ("orbits-cert-keyed", "keyed")):
+    TOOLS[_name] = {"exe": "cft-orbits",
+                    "seed": _ORBITS_CERT + ["--stop-after-steps", "37"],
+                    "resume": _ORBITS_CERT, "cert": _mode}
 
 INTERESTING = ["0", "1", "-1", "2", "7", "8", "63", "64", "65", "255",
                "256", "4294967295", "4294967296", "2147483647",
@@ -138,6 +173,118 @@ def mutate(text, rng):
     return "\n".join(lines)
 
 
+WORDS = ["0", "1", "15", "16", "17", "31", "32", "99", "016", "-1", "",
+         "4294967295", "4294967296", "18446744073709551616"]
+
+
+def mutate_cert(text, rng):
+    """One mutation that knows a certified cft-orbits checkpoint's block
+    (version 3; docs/ORBITS.md, "Certified runs"): its flag words and
+    STATUS, its hashes, its mode, its segment lines, the `at` line it is
+    held to, the certificate lines a resume holds to its own, and the
+    state values it cannot hold to anything but the sum."""
+    lines = text.split("\n")
+    cert = [i for i, l in enumerate(lines) if l.startswith("cert ")]
+    segs = [i for i in cert if lines[i].startswith("cert segment ")]
+    what = rng.randrange(8)
+    if what == 0:                        # a flag word or a STATUS
+        cand = [i for i in cert if " flags " in lines[i]]
+        if cand:
+            i = rng.choice(cand)
+            tok = lines[i].split(" ")
+            key = "flags" if rng.randrange(2) else "status"
+            tok[tok.index(key) + 1] = rng.choice(WORDS)
+            lines[i] = " ".join(tok)
+    elif what == 1:                      # a hash: another, or respelt
+        hashes = [t for i in cert for t in lines[i].split(" ")
+                  if len(t) == 64]
+        cand = [i for i in cert
+                if any(len(t) == 64 for t in lines[i].split(" "))]
+        if cand:
+            i = rng.choice(cand)
+            tok = lines[i].split(" ")
+            j = rng.choice([j for j, t in enumerate(tok) if len(t) == 64])
+            tok[j] = rng.choice(hashes + [tok[j][1:], tok[j] + "0",
+                                          tok[j].upper(), "0" * 64])
+            lines[i] = " ".join(tok)
+    elif what == 2:                      # the mode, the other way
+        for i in cert:
+            if lines[i].startswith("cert mode "):
+                lines[i] = ("cert mode open" if lines[i].endswith("keyed")
+                            else "cert mode keyed")
+    elif what == 3 and segs:             # a segment line dropped, repeated,
+        i = rng.choice(segs)             # or two exchanged
+        how = rng.randrange(3)
+        if how == 0:
+            del lines[i]
+        elif how == 1:
+            lines.insert(i, lines[i])
+        elif len(segs) > 1:
+            j = rng.choice([s for s in segs if s != i])
+            lines[i], lines[j] = lines[j], lines[i]
+    elif what == 4:                      # the at line, a step or a sample
+        for i, l in enumerate(lines):
+            if l.startswith("at "):
+                tok = l.split(" ")
+                k = rng.choice([1, 2])
+                if tok[k].isdigit():
+                    tok[k] = str(max(0, int(tok[k]) +
+                                     rng.choice([-16, -1, 1, 16])))
+                lines[i] = " ".join(tok)
+    elif what == 5 and cert:             # a certificate line's value
+        i = rng.choice(cert)
+        tok = lines[i].split(" ")
+        if len(tok) > 2:
+            tok[rng.randrange(2, len(tok))] = rng.choice(WORDS + INTERESTING)
+            lines[i] = " ".join(tok)
+    elif what == 6:                      # a state value: another one
+        st = [i for i, l in enumerate(lines) if l.startswith("state ")]
+        if st:
+            i, j = rng.choice(st), rng.choice(st)
+            a, b = lines[i].split(" "), lines[j].split(" ")
+            if len(a) > 2 and len(b) > 2:
+                a[rng.randrange(2, len(a))] = b[rng.randrange(2, len(b))]
+                lines[i] = " ".join(a)
+    elif cert:                           # a block line dropped or moved
+        i = rng.choice(cert)
+        line = lines.pop(i)
+        if rng.randrange(2):
+            lines.insert(rng.randrange(len(lines)), line)
+    return "\n".join(lines)
+
+
+def resum(text):
+    """A version-3 checkpoint's `sum` made again over what it follows, so
+    that a mutation reaches the strict reader behind it."""
+    i = text.rfind("\nsum ")
+    if i < 0:
+        return text
+    body = text[:i + 1]
+    return (body + "sum " +
+            hashlib.sha256(body.encode("latin-1", "replace")).hexdigest() +
+            "\n")
+
+
+# A certified cft-orbits run's refusals name themselves, with the name's
+# own exit code (docs/ORBITS.md, "Certified runs"); and cft-orbits' flag
+# certificate stops a run whose arithmetic left the domain, exit 3, naming
+# what raised what (docs/ORBITS.md, "Flags"). Both are named refusals.
+NAMED = re.compile(r"^cft-[a-z]+: refused ([a-z][a-z0-9-]*): ", re.M)
+FLAGSTOP = re.compile(r"raised 0x[0-9a-f]+ - this workload can only ever "
+                      r"raise inexact")
+
+
+def refusal_name(proc):
+    """What refused: the name a certified refusal gives, `flags` for the
+    flag certificate, `sentence` for a die() message and exit 2."""
+    m = NAMED.search(proc.stderr or "")
+    if m:
+        return m.group(1)
+    if proc.returncode == 3:
+        return "flags"
+    return "sentence"
+
+
 def classify(proc, timed_out):
     if timed_out:
         return "HANG"
@@ -150,6 +297,10 @@ def classify(proc, timed_out):
     if proc.returncode == 0:
         return "ACCEPT"
     if proc.returncode == 2 and err.strip():
+        return "REFUSE"
+    if proc.returncode not in (1, 70) and NAMED.search(err):
+        return "REFUSE"
+    if proc.returncode == 3 and FLAGSTOP.search(err):
         return "REFUSE"
     return "EXIT%d" % proc.returncode
 
@@ -168,35 +319,88 @@ def one_tool(name, bindir, outdir, seconds, seed, timeout):
     corpus_dir = HERE / "corpus" / "ckpt"
     corpus_dir.mkdir(parents=True, exist_ok=True)
     seed_path = corpus_dir / f"{name}.ckpt"
-
-    if not seed_path.exists():
-        tmp = work / "seed.ckpt"
+    mode = spec.get("cert")
+    cert_args = []
+    if mode:
+        # A certified run's seed names this build and its states' hashes,
+        # so it is made fresh in the work directory, never cached; and so
+        # is the uninterrupted run's certificate every accepted resume's
+        # must equal.
+        salt = work / "fuzz.salt"
+        salt.write_bytes(bytes(range(7, 39)))
+        mode_args = (["--cert-salt", str(salt)] if mode == "keyed"
+                     else ["--cert-open"])
+        for p in ("seed.cert", "seed.ckpt", "ref.cert"):
+            if (work / p).exists():
+                (work / p).unlink()
+        for d in ("seed.states", "ref.states"):
+            shutil.rmtree(work / d, ignore_errors=True)
         r = subprocess.run([str(exe)] + spec["seed"] +
-                           ["--checkpoint", str(tmp)],
-                           capture_output=True, text=True, timeout=600)
-        if r.returncode != 0 or not tmp.exists():
-            print(f"{name}: SKIP (the seed run failed: {r.stderr[:200]})")
+                           ["--checkpoint", str(work / "seed.ckpt"),
+                            "--cert", str(work / "seed.cert"),
+                            "--cert-states", str(work / "seed.states")] +
+                           mode_args, capture_output=True, text=True,
+                           timeout=600)
+        ref = subprocess.run([str(exe)] + spec["resume"] +
+                             ["--cert", str(work / "ref.cert"),
+                              "--cert-states", str(work / "ref.states")] +
+                             mode_args, capture_output=True, text=True,
+                             timeout=600)
+        if r.returncode or ref.returncode or \
+                not (work / "seed.ckpt").exists():
+            print(f"{name}: SKIP (the certified seed run failed: "
+                  f"{(r.stderr + ref.stderr)[-200:]})")
             return {}
-        shutil.copyfile(tmp, seed_path)
-
-    corpus = [p.read_text(errors="replace") for p in sorted(corpus_dir.glob(f"{name}*"))]
+        reference = (work / "ref.cert").read_bytes()
+        corpus = [(work / "seed.ckpt").read_text(errors="replace")]
+        cert_args = ["--cert", str(work / "cur.cert"), "--cert-states",
+                     str(work / "cur.states")] + mode_args
+    else:
+        if not seed_path.exists():
+            tmp = work / "seed.ckpt"
+            r = subprocess.run([str(exe)] + spec["seed"] +
+                               ["--checkpoint", str(tmp)],
+                               capture_output=True, text=True, timeout=600)
+            if r.returncode != 0 or not tmp.exists():
+                print(f"{name}: SKIP (the seed run failed: {r.stderr[:200]})")
+                return {}
+            shutil.copyfile(tmp, seed_path)
+        corpus = [p.read_text(errors="replace")
+                  for p in sorted(corpus_dir.glob(f"{name}*"))
+                  if p.name == f"{name}.ckpt" or
+                  not p.name.startswith(f"{name}-cert")]
     rng = random.Random(seed ^ (hash(name) & 0xFFFF))
-    counts = {}
+    counts, names = {}, {}
     t0 = time.time()
     n = 0
     cur = work / "cur.ckpt"
     findings = 0
 
     while time.time() - t0 < seconds:
-        text = mutate(rng.choice(corpus), rng)
-        for _ in range(rng.randrange(3)):
-            text = mutate(text, rng)
-        cur.write_text(text, errors="replace")
+        if mode:
+            text = rng.choice(corpus)
+            for _ in range(1 + rng.randrange(3)):
+                text = (mutate_cert(text, rng) if rng.randrange(4)
+                        else mutate(text, rng))
+            if rng.randrange(4):
+                text = resum(text)
+            shutil.rmtree(work / "cur.states", ignore_errors=True)
+            shutil.copytree(work / "seed.states", work / "cur.states")
+            for p in ("cur.cert", "cur.cert.tmp"):
+                if (work / p).exists():
+                    (work / p).unlink()
+        else:
+            text = mutate(rng.choice(corpus), rng)
+            for _ in range(rng.randrange(3)):
+                text = mutate(text, rng)
+        # as mutated, LF and all: text mode on Windows would make every
+        # LF a CRLF, which a version-3 reader refuses at its first byte
+        cur.write_text(text, errors="replace", newline="\n")
         timed_out = False
         try:
             proc = subprocess.run(
                 [str(exe), "--resume", "--checkpoint", str(cur)] +
-                spec["resume"], capture_output=True, text=True,
+                spec["resume"] + cert_args, capture_output=True, text=True,
                 timeout=timeout)
         except subprocess.TimeoutExpired:
             timed_out = True
@@ -206,10 +410,16 @@ def one_tool(name, bindir, outdir, seconds, seed, timeout):
                 stderr = ""
             proc = P()
         verdict = classify(proc, timed_out)
+        if verdict == "REFUSE":
+            nm = refusal_name(proc)
+            names[nm] = names.get(nm, 0) + 1
+        if mode and verdict == "ACCEPT":
+            verdict = accepted_certificate(work, mode, salt, reference)
         counts[verdict] = counts.get(verdict, 0) + 1
         n += 1
-        if verdict in ("HANG", "SANITIZER") or verdict.startswith("SIGNAL") \
-                or verdict.startswith("EXIT"):
+        if verdict in ("HANG", "SANITIZER", "SILENT-WRONG",
+                       "ACCEPT-NO-CERTIFICATE") or \
+                verdict.startswith("SIGNAL") or verdict.startswith("EXIT"):
             findings += 1
             keep = HERE / "crashes" / "ckpt"
             keep.mkdir(parents=True, exist_ok=True)
@@ -222,7 +432,38 @@ def one_tool(name, bindir, outdir, seconds, seed, timeout):
     el = time.time() - t0
     summary = " ".join(f"{k}={v}" for k, v in sorted(counts.items()))
     print(f"{name}: {n} resumes in {el:.0f}s ({n / el:.1f}/s)  {summary}")
+    if names:
+        print(f"  {name}: refused by " +
+              ", ".join(f"{k} {v}" for k, v in sorted(names.items())))
     return counts
+
+
+def accepted_certificate(work, mode, salt, reference):
+    """A certified resume that was accepted runs to the end and writes
+    its certificate. The same bytes as the uninterrupted run's: ACCEPT.
+    Other bytes: the golden audit, in full from the states directory the
+    resume left, must refuse it by name - ACCEPT-AUDIT-REFUSED-<name>, a
+    checkpoint written to pass the sum whose certificate the audit
+    catches - or it is a SILENT-WRONG resume. No certificate at all is
+    ACCEPT-NO-CERTIFICATE. The last two are findings."""
+    c = work / "cur.cert"
+    if not c.exists():
+        return "ACCEPT-NO-CERTIFICATE"
+    data = c.read_bytes()
+    if data == reference:
+        return "ACCEPT"
+    sys.path.insert(0, str(HERE.parents[1] / "python"))
+    from cft_golden import cert            # the golden auditor
+    d = work / "cur.states"
+    states = {0: {int(p.name[len("run-0-boundary-"):-4]): p.read_bytes()
+                  for p in d.glob("run-0-boundary-*.bin")}}
+    try:
+        cert.audit(data, salt.read_bytes() if mode == "keyed" else None,
+                   {0: ((d / "run-0.cftp").read_bytes(), None)},
+                   states=states)
+    except cert.Refusal as e:
+        return "ACCEPT-AUDIT-REFUSED-" + e.name
+    return "SILENT-WRONG"
 
 
 def main():
@@ -259,7 +500,8 @@ def main():
             total[k] = total.get(k, 0) + v
     print("\ntotal: " + " ".join(f"{k}={v}" for k, v in sorted(total.items())))
     bad = sum(v for k, v in total.items()
-              if k in ("HANG", "SANITIZER") or k.startswith("SIGNAL")
+              if k in ("HANG", "SANITIZER", "SILENT-WRONG",
+                       "ACCEPT-NO-CERTIFICATE") or k.startswith("SIGNAL")
               or k.startswith("EXIT"))
     if bad:
         print(f"{bad} checkpoint(s) did something other than refuse cleanly "

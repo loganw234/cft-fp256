@@ -77,6 +77,13 @@ Seven groups of checks:
                   eleven that do not.
  7. Refusals.     What the two program engines must refuse, and the
                   precise reason each is refused.
+ 8. Certificates. Certified runs of the Newton route (docs/ORBITS.md,
+                  "Certified runs"): each sample interval one segment of
+                  the stride's image, the certificate held to the golden
+                  reader and writer, to the records and to both auditors;
+                  the same bytes however the run was cut, batched,
+                  relayed or killed; the controls, each refused by name
+                  by both auditors; and every refusal, by name and code.
 """
 
 import argparse
@@ -2728,7 +2735,20 @@ def check_certificates(tool, tmp, audit_exe):
              lambda t: _resum(t, lambda b: b.replace(
                  " flags 16 status 0\ncert interval",
                  " flags 99 status 0\ncert interval", 1)),
-             "flag word (0 to 31)")):
+             "flag word (0 to 31)"),
+            ("the last closed segment's flag word 16 made 17, invalid "
+             "raised, which this tool would have stopped at, its sum made "
+             "again",
+             lambda t: _resum(t, lambda b: b.replace(
+                 " flags 16 status 0\ncert interval",
+                 " flags 17 status 0\ncert interval", 1)),
+             "stops a run at any flag but inexact"),
+            ("the interval in progress's STATUS 0 made 1, its sum made "
+             "again",
+             lambda t: _resum(t, lambda b: b.replace(
+                 "cert interval flags 16 status 0\n",
+                 "cert interval flags 16 status 1\n", 1)),
+             "stops a run at any STATUS bit")):
         serial[0] += 1
         tag = "rs-ck-%d" % serial[0]
         shutil.copytree(d_o, work / (tag + ".states"))

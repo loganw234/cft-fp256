@@ -32,7 +32,11 @@ Where things stand (2026-09-29):
   an entry's value with one code, `host/tools/cert_exact.h`;
 - the golden certificates, twelve programs and their certificates in
   `certificates/`, hold both writers to committed bytes (see "Golden
-  certificates").
+  certificates");
+- `cft-orbits` certifies its own runs on the Newton route, each sample
+  interval a segment of one image (2026-09-30; [ORBITS.md](ORBITS.md),
+  "Certified runs"), and the `workloads` stage holds each to the golden
+  writer and to both auditors.
 
 ## What a certificate says, and what an audit proves
 
@@ -1295,7 +1299,9 @@ location ("The audit tool").
 
 ## The segment runner
 
-`cft-segrun` is the C writer, the plan's step 3. It runs a program as
+`cft-segrun` is the C writer of any segment program, the plan's step 3;
+`cft-orbits` writes certificates of its own runs too ([ORBITS.md](ORBITS.md),
+"Certified runs"). It runs a program as
 consecutive segments on one libcft device handle, keeps the state at
 every boundary, and writes a version-1 certificate, its accuracy entries
 included since the plan's step 5 (2026-09-30). `make -C host all` builds
@@ -2520,9 +2526,16 @@ Logan's permission.
   golden writer has no way to take a mask, a table or a stream per
   segment, and it refuses a program that deposits (`program-shape`)
   rather than certify part of it.
-- **Certify cft-orbits' runs.** The plan's step 6 certifies Newton-route
-  intervals, each a program image and bank this format holds. Its
-  records carry no flags today (docs/ROADMAP.md).
+- **Certify cft-orbits' exact route, or give its runs an accuracy
+  entry.** Its Newton-route runs are certified, each sample interval a
+  segment of one image (2026-09-30; [ORBITS.md](ORBITS.md), "Certified
+  runs"). The default exact route has no image: its divide and square
+  root are host calls between program runs, and certifying it needs an
+  orbit integrator in the golden model. No auxiliary run can be related
+  to an orbits run, since its constants ride in its image and are
+  derived in each format. Its energy is not a polynomial in the state.
+  Its angular momentum is, and a drift of it waits for the shared exact
+  arithmetic of the round that certified the runs.
 - **Record a remote run's scratch depth.** The remote protocol carries
   no CAPS2, so a certificate made through a remote handle reads
   `device-caps unknown` and is re-run at 256 (revision 7, "The chain").

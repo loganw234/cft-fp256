@@ -1,11 +1,11 @@
 # The documents, by what you open them for
 
-Thirty-eight files, 57,880 lines. Flat in one directory they look like one
+Thirty-eight files, 58,172 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **21,408 lines you consult while working** — the three under *Start here*,
+- **21,421 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
-- **6,237 lines of tool manual**, one per shipped program;
+- **6,516 lines of tool manual**, one per shipped program;
 - **2,011 lines of operations**, read when you are about to do something to
   hardware;
 - **28,224 lines of record and argument** — the ledger, the roadmap and the
@@ -48,7 +48,7 @@ product, not the implementation.
 | [SEQUENCER.md](SEQUENCER.md) | 3,354 | The orbit sequencer and the program model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 917 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
-| [CERTIFICATES.md](CERTIFICATES.md) | 2,535 | The certificate, version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Complete enough to write a reader and an auditor from the page. And the segment runner, `cft-segrun`, that writes one from the library, its accuracy entries included; the audit tool, `cft-audit`, that audits one in C with the same exact arithmetic; and the golden certificates in `certificates/` that hold both writers to committed bytes. |
+| [CERTIFICATES.md](CERTIFICATES.md) | 2,548 | The certificate, version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Complete enough to write a reader and an auditor from the page. And the segment runner, `cft-segrun`, that writes one from the library, its accuracy entries included; the audit tool, `cft-audit`, that audits one in C with the same exact arithmetic; and the golden certificates in `certificates/` that hold both writers to committed bytes. |
 
 ## Reference you call into
 
@@ -71,7 +71,7 @@ running.
 | document | lines | tool |
 |---|---|---|
 | [ZOOM.md](ZOOM.md) | 856 | `cft-zoom` — deep-zoom Mandelbrot reference orbits |
-| [ORBITS.md](ORBITS.md) | 1,612 | `cft-orbits` — symplectic few-body integration |
+| [ORBITS.md](ORBITS.md) | 1,891 | `cft-orbits` — symplectic few-body integration, and its certified runs |
 | [MERSENNE.md](MERSENNE.md) | 882 | `cft-mersenne` — Lucas-Lehmer |
 | [ENCLOSE.md](ENCLOSE.md) | 845 | `cft-enclose` — directed-rounding interval enclosure |
 | [COLLATZ.md](COLLATZ.md) | 648 | `cft-collatz` — Collatz trajectories |

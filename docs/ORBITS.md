@@ -942,6 +942,13 @@ old build's resume appends to `--records` as it always did, so if that
 run was ever killed, its records file is not to be trusted past the
 kill - its checkpoint and its chain are.
 
+**Version 3** (2026-09-30) is a certified run's, and only a certified
+run writes it: version 2's lines, then the certificate so far, then a
+`sum` line over the whole file ("Certified runs", below). Every other
+run's checkpoint is version 2, byte for byte as it was. A resume with
+`--cert` requires version 3, and one without refuses it, each saying
+which version it met.
+
 The checkpoint is **step-granular, not sample-granular**: the ensemble
 state is complete after every step, so a timed checkpoint may fall
 between any two of them and `--resume` picks up part way through a
@@ -1158,6 +1165,277 @@ proves the derivation right.
 
 ---
 
+## Certified runs
+
+Since 2026-09-30 a run on the Newton route can be certified: it writes a
+version-1 certificate ([CERTIFICATES.md](CERTIFICATES.md)), a statement
+of what ran that an auditor checks by re-running its segments on an
+implementation the producer does not control. It is the certificate
+plan's step 6 ([ROADMAP.md](ROADMAP.md), "Segments, certificates and
+the audit tool").
+
+```
+./cft-orbits --problem kepler --format fp64 --members 4 --periods 2 \
+             --steps-per-period 64 --sample-every 16 \
+             --engine segments --rsqrt newton \
+             --cert run.cert --cert-states run.states --cert-open
+```
+
+`--cert-salt SALT` in place of `--cert-open` makes it keyed: every hash
+an HMAC under a file of exactly 32 random bytes ("Keyed or open").
+
+**What the certificate says.** One run, `main`:
+- its image is the one `seg_build` makes for the STRIDE. The tool builds
+  and loads it before anything runs, whatever lengths the engine then
+  runs. Its constants ride in it and it takes no bank, so its
+  `program-image` and `program-digest` are one digest;
+- `lanes` is `--members`, lane i member i; `steps` is the stride; the
+  three streams are +0; `parameters 0`;
+- a segment for each sample interval: the hashes of the states it
+  started and ended on, its flag word and its STATUS;
+- `accuracy 0`;
+- its identity lines are the library's, as `cft-segrun` writes them. The
+  certificate's encoding is `host/tools/cert_write.h`, taken from
+  cft-segrun's own.
+A STATE is the lane-major scratch block the image reads: member m's
+slots in order, slot c `q_c` and slot `ncomp + c` `v_c`, each element
+format-width and little-endian. `--cert-states DIR` is a directory the
+run makes new. It holds the image, `run-0.cftp`, and every boundary's
+state, `run-0-boundary-<b>.bin`, written as the run reaches it -
+boundary 0 is setup's ensemble, the records' sample 0. They are the
+files `cft-audit --states` and `cert.audit` take:
+
+```
+cft-audit --cert run.cert --states run.states --run 0 --image run.states/run-0.cftp
+```
+
+**One interval, one segment.** The engine runs an interval as one or
+more shorter segments - the loader's limit and the checkpoint clock cut
+it ("As resumable segments") - each in batch chunks. An audit re-runs
+it whole, one run of the stride's image over every lane. The two agree
+bit for bit, flag word and STATUS included, because:
+- a step hands the next nothing but the scratch block and the `q`
+  registers, which the image loads from and stores to their own slots,
+  and a load or a store rounds nothing and raises nothing;
+- the image for k steps differs from the stride's in its trip count
+  alone;
+- a batch chunk is a block of lanes, which the page already takes as the
+  dense run exactly ("The chain"): end states in lane order, flag words
+  and STATUS OR'd.
+So an interval's word is the OR of every run and chunk inside it,
+apart from `FLAGS_SEEN`, which the invariants' host calls reach too.
+Measured before it was built (the steps-5-and-6 round's ledger, S3,
+2026-09-30):
+- the disassembly of four images: no register a stream sets is read
+  before the program writes it, and the only registers a step hands the
+  next are the `q`s;
+- images for two lengths differ in one byte, the trip count;
+- in the golden model, nine cuts of two strides end on the whole
+  interval, every piece raising 16;
+- the traced engine, cut by a lowered loader limit and by the steady
+  clock, at batch 1 to 4: `cert.run_segment` of the stride's image, from
+  each of the engine's boundaries, ended on the next with the engine's
+  OR'd word, in all 12 intervals of 7 configurations.
+
+**Stream a.** An ordinary segments run hands `q_0` as stream a, which
+the first `LDL` overwrites, since `cft_run_args`' `a` may not be NULL. A
+certified run hands a +0 buffer, so that its stream lines state what
+ran. Nothing a run computes can differ: no image reads r0, r1 or r2
+before writing it. The gate holds a certified run's records to an
+ordinary run's, byte for byte.
+
+**Flags and STATUS.** Each is what the library reported: the word is
+preset to all ones and held to having been written (`device`) and to
+the five sticky flags (`malformed`), as cft-segrun holds it. A certified
+run still stops at any flag but inexact (exit 3, "Flags") and at any
+STATUS bit, and it needs a device that reads its flags (`device`). So
+every segment line of an orbits certificate says `flags 16 status 0`.
+The records do not change: no chain moves, and the browser demos' four
+orbits chains stand.
+
+**When it is written.** When the run completes, and not before. Every
+interval is a whole stride - the tool rounds a run's steps down to whole
+strides - and a certificate exists for no other run. So a stop inside an
+interval is an interruption, not a short interval, and is not refused:
+`--stop-after-steps`, `--stop-after-samples`, a kill, or the flag
+certificate each leave no certificate. The run, resumed to its end,
+writes the uninterrupted run's bytes. A stop without `--checkpoint` IS
+refused (`usage`): that run could never be resumed to write one. The
+certificate is written to `CERT.tmp`, which is created before DIR, as
+cft-segrun creates its certificate before its states. It is then moved
+to CERT without replacing anything, so it is whole or absent, and never
+over a file.
+
+**The checkpoint, version 3.** A certified run's checkpoint is version
+2's lines, then the certificate so far, then `end` and a `sum`:
+
+```
+cft-orbits-checkpoint 3
+format fp64                         ... version 2's lines, as they are ...
+inv 3 ...
+cert mode open                      the certificate's lines from `mode`
+cert build-id commit=...            to `segments S`, each prefixed `cert `
+...
+cert segments 8
+cert boundary 0 <hash>              the initial state's hash
+cert segment 0 start <h> end <h> flags 16 status 0     one per closed interval
+cert segment 1 start <h> end <h> flags 16 status 0
+cert interval flags 16 status 0     the interval in progress, so far
+end
+sum <hex>                           SHA-256 of every byte before this line
+```
+
+The interval's flags so far must travel with it. A stop at an
+interval's last step leaves the interval unclosed (the checkpoint says
+`at 16 0`), and the resumed process closes it without running a step,
+so the whole word is the checkpoint's. A resume that dropped it would
+write 0 there, and the negative control `drop-flags` does exactly that.
+The reader is strict, where version 2's is as lenient as it was:
+- the sum first, so a file cut or changed anywhere is refused before a
+  line is read;
+- then every line once, in its order, each value in its one spelling;
+- version 2's lines held to the run as version 2's reader holds them,
+  and to what it only skipped (`spread`, `bodies`, `dims`, `samples`);
+- every certificate line through `segments` held to the one this process
+  writes;
+- the segments' continuity;
+- every flag word and STATUS to one this tool could have written (flags
+  0 or 16, STATUS 0), since a run stops at any other;
+- the interval in progress to no word where it has run no step;
+- at a sample boundary, the state lines to that boundary's hash.
+Any departure is a sentence and exit 2, as every checkpoint refusal
+before it was. A resume refuses the salt, the build and device, and the
+states by name (below), and it replaces a boundary file past its
+checkpoint's last boundary: one the process before it wrote and was
+stopped before a checkpoint counted. A sum proves the bytes are the
+writer's, not who the writer was. A checkpoint written to pass it can
+hand a resume a state the run never reached mid interval, or move its
+step within the interval, and the certificate that follows fails its own
+audit (`segment-end`). The fuzz lane measures that (below).
+
+**Refused by name.** Each prints `cft-orbits: refused <name>: <why>`
+and exits with the name's code. The page's names where the page has one
+for the defect, and cft-segrun's where it has the same condition:
+
+| what | name | exit |
+|---|---|---|
+| `--cert` with `--engine loop`, the default, or `--engine program`: host calls, or one whole program that deposits | `engine` | 64 |
+| `--cert` with `--rsqrt exact`, the default: its divide and square root are host calls between runs, so an interval is no image | `rsqrt-exact` | 64 |
+| `--cert-accuracy step-halving`: a half-step run halves the bank's h-slots, and this image carries its constants (the page's `aux-h-slots`) | `step-halving` | 64 |
+| `--cert-accuracy wider`: the constants are derived in each format and the Newton passes change with it, so the image one format wider is not this one's widened (the page's `aux-image`; measured, Kepler fp128's image is 47 instructions to fp64's 39, and its two h-constants are not fp64's widened) | `wider` | 64 |
+| `--cert-accuracy energy-drift`: the energy goes through 1/r, and version 1 carries a drift only of a polynomial ([CERTIFICATES.md](CERTIFICATES.md), "What version 1 does not do") | `energy-drift` | 64 |
+| a stride past the loader's limits: a trip count past 2^32 - 1, or the image past 2^40 instructions, which the loader itself refuses, with its sentence | `program-image` | 4 |
+| the options' shape: `--cert` without `--cert-states` or without one salt choice, a certified option without `--cert`, one given twice, a stop without `--checkpoint`, a salt file that cannot be read | `usage` | 64 |
+| a salt that is not 32 bytes | `salt-length` | 4 |
+| a device that cannot read the sticky flags; a flag word the library left unwritten; a digest that fails | `device` | 69 |
+| a flag word past the five sticky flags | `malformed` | 2 |
+| memory the certificate needs, found before anything is made | `memory` | 71 |
+| CERT there already; a fresh run's DIR there already, or a resumed run's missing; `CERT.tmp` or a file in DIR that cannot be written | `output` | 73 |
+| a resume: a keyed run handed `--cert-open`, an open one a salt, or another salt | `salt-missing`, `salt-unexpected`, `salt-commitment` | 4 |
+| a resume on another build or device than the certificate names - both identities in the sentence | `identity` | 78 |
+| a resume whose DIR does not hold this run's image, or its boundaries so far | `image-digest`, `state-missing`, `state-shape`, `state-hash` | 4 |
+
+No name has 3, the flag certificate's exit, or 9, the kill instrument's.
+Every refusal before the run leaves nothing made. One during it leaves
+DIR as far as it got. A resume's changes nothing of the run's: its
+checkpoint, its states and its records are as they were.
+
+**Accuracy.** None, in this version. A step-halving or wider estimate
+needs an auxiliary run version 1 can relate to this one, and neither can
+be one (the table). The energy is not a polynomial in the state.
+Angular momentum is: `q0 v1 - q1 v0` for Kepler, and a sum weighted by
+the masses' exact values for the outer system. Its drift is "the
+angular-momentum certificate" above, roundoff alone, and a version-1
+drift entry could carry it exactly. It waits for the round's shared
+exact arithmetic (the lead's decision, 2026-09-30), and `--cert-accuracy`
+does not offer it meanwhile.
+
+**What it proves, and what it does not.** An audit proves each interval
+it re-runs: from its certified start state, the stride's image ends on
+the certified end state with the certified word and STATUS
+([CERTIFICATES.md](CERTIFICATES.md), "What an audit proves"). It does
+not prove the exact route, which has no image: certifying it needs an
+orbit integrator in the golden model, which is not planned. It proves
+nothing about the records' invariants or the 300-digit oracle's
+comparisons; those are this page's other gates. A certificate made on
+the software backend was made by libcft, so there only the golden
+auditor is independent of it. No card has certified a run: that is the
+lead's leg, later.
+
+**Its gate** is `orbits_check.py`'s section [8], in the `workloads`
+stage; `make -C host orbitstest` builds `cft-audit` for it. It certifies
+two runs, each keyed (the page's example salt) and open:
+- Kepler fp64 leapfrog: 4 members, 8 intervals of 16 steps;
+- the outer system fp256 yoshida4: 3 members, 4 intervals of 9 steps -
+  its image indexes constants past 15 (`kx`).
+For each:
+- the golden reader accepts it strictly;
+- the golden writer, running every interval WHOLE with `seq.run` from
+  boundary 0, writes the same bytes;
+- every boundary file is its chain's state and its sample's records;
+- every segment says `flags 16 status 0`;
+- both auditors accept it with the same verdict, line for line: in full
+  from DIR, in full from boundary 0 alone, and sampled.
+The same bytes then come from runs cut at a loader limit of 5 (4 for the
+outer system), by checkpoints under the steady clock, and at batch 1, 2
+and 3. They come from relays stopped every 37 steps (mid interval), 16
+(every interval's last step, unclosed) and 13 (the outer system,
+keyed); from a run killed as its third checkpoint appeared; and from a
+resume of the final checkpoint with the certificate removed. A certified
+run's records are an ordinary run's. Each control is refused by name
+by both auditors, with the same code and location:
+- an interval's end state changed: `segment-end`;
+- a flag word changed: `segment-flags`;
+- an interval dropped: `continuity`;
+- `=transpose`'s own certificate, whose states are certified in the
+  layout the image reads: `segment-end` at segment 0;
+- a resume under `=drop-flags` after a stop at an interval's last step:
+  not the uninterrupted certificate, and `segment-flags`.
+Every refusal above is made, by name and exit code, with nothing made
+or changed. Three are reachable only through `CFT_ORBITS_CERT_PLANT`, a
+test instrument as `CFT_SEGRUN_PLANT` is: `flags-unreadable`,
+`flags-unwritten` and `flags-wide`. Another build's identity, with the
+sum made again, is `identity`. Eight checkpoint cases are refused with
+their sentences, exit 2:
+- version 2 with `--cert`, and version 3 without;
+- a byte changed, and the file cut;
+- with the sum made again: a line repeated, a flag word out of range,
+  one this tool would have stopped at, and a STATUS bit.
+Measured on the desktop, niced (2026-09-30): [8] is 85 checks in 12 to
+14 s. The whole of `orbits_check.py` is 204 checks, 0 failures, in 52
+s, where it was 119 in 38 s before. An ordinary run's checkpoints, records,
+chain line and segment dump are be3eb72's, byte for byte.
+
+**The fuzz lane.** `host/fuzz/fuzz_ckpt.py` seeds two entries,
+`orbits-cert` (open) and `orbits-cert-keyed`, from a certified run's
+version-3 checkpoint, made fresh each session with its states directory.
+Its mutator knows the block, and makes the sum again over three
+mutations in four, so that the strict reader behind the sum is what it
+reaches. An accepted resume runs to its end, and its certificate must be
+the uninterrupted run's. One that differs is held to the golden audit,
+and is a finding, a silent wrong resume, unless the audit refuses it by
+name.
+
+Measured on 2026-09-30 in the lane's cft-sim image (gcc 13, address and
+undefined-behaviour sanitisers), capped at 2 CPUs and niced: 60 s an
+entry, 678 resumes, 5.6 a second.
+- 631 were refused by name: 541 by the reader's sentences, then 24
+  `salt-unexpected`, 21 `identity`, 20 `salt-missing`, 12
+  `program-digest`, 11 `image-digest` and 2 `salt-commitment`.
+- 16 were accepted and wrote the uninterrupted certificate.
+- 31 were accepted and wrote another. Each came from a checkpoint whose
+  sum the mutator had made again, and the golden audit refused every one
+  by name: 30 `segment-end` (a mid-interval state, or the step, moved)
+  and 1 `segment-flags` (a word of 16 made 0).
+- None crashed, hung, tripped a sanitiser or resumed silently wrong.
+A shorter unsanitised run on the desktop, before that one, found that
+the reader accepted words the tool could never write. It accepted 19
+checkpoints with a STATUS bit, and 8 changed flag words, some of them
+impossible ones; the audit refused each. The reader now refuses a flag
+but inexact, and any STATUS bit, itself, and the gate holds both.
+
+---
+
 ## Determinism, and how it is tested
 
 The claim is:
@@ -1189,6 +1467,7 @@ same bytes wherever it sits.
 | segments | `--engine segments` against the host loop on both problems and both schemes at binary256 and on one configuration at each other format, operation counts included, and at the segment lengths real runs use (1,024 steps; 1 + 99,999; intervals split at a lowered loader limit); five stop points; its own batch sizes, 10^12 included; the outer solar system resumed in 37-step pieces by segments alone and by the two engines in turn; where its checkpoints fall and the checkpoint it ends on, against the host loop's under a steady clock, and a real run's first checkpoint part way through a long interval; the image cache keyed by the whole length; its checkpoint's rename under a `stat()` poll and held open, and how long that rename is retried; intervals past one segment's limits run; its census against the program's structure; the golden model's executor and assembler on its image; the flag certificate on a planted fault; and a control on each comparison but the census, the batch sizes and the three narrower formats, which must fail ("As resumable segments" names them) |
 | interruption | a run stopped every 37 steps - which does not divide the 96-step sample interval, so most stops land mid-interval - and resumed at a different batch size must end on the same checkpoint and the same records, byte for byte, as one that was never stopped; and runs KILLED, on both engines - at their first checkpoint, and with their records ahead of it - and each resumed by the other engine, must end on the uninterrupted run's checkpoint and records too, with a control that resumes without cutting the records back and must fail; runs ended the instant a checkpoint is in place leave the records exactly that long, with a control that hands them over after the rename and must fail; a run whose records another process appends to is stopped by name at its next checkpoint and resumed to the uninterrupted run; a run into a file that says it holds nothing, whatever is written (as the WSL share presents a Linux FIFO), writes its records without a checkpoint and is stopped by name at its first with one; a relay without `--records` ends on the same checkpoint |
 | refusals | the three things `--engine program` must refuse, the four `--engine segments` must, the negative controls and test instruments set where they do not apply or to a malformed value, `--checkpoint-interval` values that are not a number of seconds, the records files and records paths (pipes, devices, a file another process holds) `--resume` must refuse, `--records` and `--checkpoint` as one file, and a records file that cannot be opened or emptied, each with its reason and in bounded time |
+| certificates | section [8]: two certified runs, keyed and open, each held to the golden writer, to its records and to both auditors; the same bytes however the run was cut, batched, relayed or killed; five controls, each refused by name by both auditors; every refusal of the certified path by name and exit code ("Certified runs") |
 
 ---
 

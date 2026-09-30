@@ -3343,6 +3343,22 @@ static void ck3_identity(char **cur, char *stop, const char **want,
                (int)wn[4], want[4], (int)wn[5], want[5]);
 }
 
+/* A flag word and STATUS this tool could have written for interval k: a
+ * run stops at any flag but inexact (exit 3, note_flags) and at any
+ * STATUS bit (seg_run), so no checkpoint of a certified run holds one. A
+ * word outside that is refused, not carried into a certificate. */
+static void ck3_possible(uint64_t fl, uint64_t st, uint64_t k)
+{
+    if (fl & CERT_FLAGS)
+        ck3_die("interval %" PRIu64 " says flags %" PRIu64 ", and this tool "
+                "stops a run at any flag but inexact (exit 3), so no "
+                "checkpoint of its holds one", k, fl);
+    if (st)
+        ck3_die("interval %" PRIu64 " says STATUS %" PRIu64 ", and this tool "
+                "stops a run at any STATUS bit, so no checkpoint of its holds "
+                "one", k, st);
+}
+
 /* A cw_text's lines, one at a time: the next line and its length. */
 static const char *ck3_next_of(const char **p, size_t *n)
 {
@@ -3541,6 +3557,7 @@ static void ckpt_read3(runstate *R)
             !(t = ck3_tok(&val)) || strcmp(t, "status") ||
             !(t = ck3_tok(&val)) || !ck3_dec(t, 0xffffffffull, &st) || *val)
             ck3_die("a segment line's flag word (0 to 31) and STATUS");
+        ck3_possible(fl, st, j);
         R->c_flags[j] = (uint32_t)fl;
         R->c_status[j] = (uint32_t)st;
     }
@@ -3550,6 +3567,7 @@ static void ckpt_read3(runstate *R)
         !(t = ck3_tok(&val)) || strcmp(t, "status") ||
         !(t = ck3_tok(&val)) || !ck3_dec(t, 0xffffffffull, &st) || *val)
         ck3_die("`cert interval flags <0..31> status <n>` belongs here");
+    ck3_possible(fl, st, sample);
     if (step == sample * R->stride && (fl || st))
         ck3_die("the interval in progress has run no step, and says it "
                 "raised flags %" PRIu64 " and STATUS %" PRIu64, fl, st);
