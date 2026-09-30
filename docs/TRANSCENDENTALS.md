@@ -199,7 +199,8 @@ fixed, and two input families settle that on their own:
 
 ### The error model
 
-`err` counts units of 2^-W of RELATIVE error:
+`err` counts units of 2^-W of RELATIVE error, W being the value's own
+width (the bit length of its significand):
 
     |true - value| <= err * 2^-W * |value|
 
@@ -209,17 +210,37 @@ above 2^(W-1) has ulps twice as coarse, relatively, as one just below
 2^W, so an ulp-based bound has to be doubled at every multiply to stay
 safe, and 2^170 over a series is not a bound but a surrender.
 
-The rules, each an upper bound and each rounded up:
+The count has no ceiling. It is a whole number of units carried with
+its own exponent, c·2^k: exact below 2^63, and past that rounded UP to
+63 significant bits, so a bound of any size is carried exactly or
+rounded up and is never replaced by a smaller one. The one value above
+every finite count is infinity - a bound, and one that cannot decide -
+and a rule produces it only where its own bound already exceeds a
+relative error of 1: a divisor, or a logarithm's argument, whose
+relative error passes 1/2.
+
+The rules, each an upper bound at every size of count and every
+working precision, and each rounded up. `trunc(X)` is `X + 2 +
+ceil(X·2^(1-W))`: truncating to W bits a value that already carries X
+costs the truncation's two units and their cross term with X.
 
 | step | bound |
 |---|---|
-| truncation to W bits | +2 (one ulp is at most 2·2^-W relatively) |
-| multiply | Ea + Eb + 3 |
-| divide | Ea + Eb + 3 |
-| add, like signs | Ea + Eb + 2 (\|a+b\| >= max(\|a\|,\|b\|)) |
-| add, unlike signs | 2·(Ea << (ea-er)) + 2·(Eb << (eb-er)) + 2 |
-| square root | ceil(Ea/2) + 2 |
+| truncation to W bits | trunc(X) (one ulp is at most 2·2^-W relatively) |
+| multiply | X = Ea + Eb + max(1, ceil(Ea·Eb·2^-W)), then trunc(X) |
+| divide | X = Ea + Eb + max(1, ceil(2(Ea+Eb)·Eb·2^-W)) while Eb is below 2^(W-1), infinity past it; then trunc(X) |
+| multiply or divide by a small integer | trunc(Ea) |
+| add, like signs | trunc(Ea + Eb) (\|a+b\| >= max(\|a\|,\|b\|)) |
+| add, unlike signs | (Ea << (la-lr+1)) + (Eb << (lb-lr+1)), a scale-down rounded up to a whole unit; then trunc() if the difference is wider than W bits |
+| add, b wholly below a's last place | Ea + max(2, b's magnitude and b's own error, relative to a) |
+| square root | ceil(Ea/2) + ceil(Ea²·2^-(W+1)) while Ea is below 2^W, Ea past it; then trunc() if the root is inexact |
 | scale by a power of two | exact |
+
+`host/src/mpfloat.c`'s header derives each row, and
+`host/tests/mp_err_check.c` holds every row to its claim exactly, in
+GMP: every significand pair, alignment and sign pair at W = 6 against
+fourteen counts from zero past 2^W to infinity, and a fixed-seed sample
+to 928 bits (the runner's `mpfr` stage runs it).
 
 The unlike-signs row is where a subtraction that loses k bits costs k
 bits of the error budget, and it is the term the algorithms below are
@@ -229,18 +250,37 @@ shaped to keep small.
 of `[m - err, m + err] * 2^exp` and accepts only if they agree. A bound
 that is too generous costs an escalation; it cannot cost a wrong
 answer. The only bound that could is one that is too SMALL, which is
-why every rule rounds up and why the saturating arithmetic saturates
-upward.
+why every rule is an upper bound at every size and rounds up, and why
+the count has no ceiling.
+
+Until 2026-09-30 it had one. The count saturated at 2^40, and a
+saturated count was a clamp that still decided: 17,816 of the 298,133
+final roundings over `transcend_check.py`'s sweep, every result equal
+to the model's. A clamp that a later operation scaled back down looked
+like an ordinary count, and was not a bound either. The count that
+replaced it is at least the old one at every step, so it decides no
+rounding the old one did not; what it changes is which attempt
+decides. Over `transcend_check.py`'s fp256 sweep on 2026-09-30 it took
+353 of 137,814 calls one attempt further, from 514 bits to the cap at
+832, and changed no result. Every one was pow, powr, pown or compound
+whose base - x, or 1 + x for compound - is one unit in its last place
+from a small integer, a simple fraction or a power of two. By the
+binomial theorem such a result lies within about 2^-2p of a
+representable number, and the old count had decided every one of them
+on its clamp. Over that sweep no infinite count arose, and the closest
+decision had 69 bits of room.
 
 One consequence took a deliberate experiment to find. When two
 approximations cancel EXACTLY, the difference is not provably zero -
 and an exact zero is the one value that destroys the bound rather than
 widening it, because zero has no relative error to carry. `cft_mp_add`
-therefore returns a saturated bound rather than a zero whenever either
-operand was inexact, which makes the enclosure reach zero and the loop
-escalate. At the contract's own working precisions the operands of the
-subtraction that can do this are exact, so nothing had ever reached it;
-running the evaluator below its design precision did, in the form of
+therefore returns a FAILURE whenever either operand was inexact, and
+the Ziv loop escalates, as it does on any failure below the cap. (The
+first repair returned a saturated bound instead, which does not reach
+zero: "What phase 2 changed in phase 1's machinery" below.) At the
+contract's own working precisions the operands of the subtraction that
+can do this are exact, so nothing had ever reached it; running the
+evaluator below its design precision did, in the form of
 `pow(1 + 2^-112, 1 + 2^-112)` returning exactly 1.
 
 ### Division and square root inside the evaluator
@@ -772,8 +812,10 @@ instead of being added alternately into one running sum. That is not
 tidiness. `cft_mp_add`'s unlike-signs rule charges a factor of two per
 step even when nothing cancels, because the result can be half the
 larger operand; over the hundred and thirty terms `mp_atan_series`
-needs at the deepest working precision that is 2^65 and the bound
-saturates. Split in two it is ONE doubling in total, and the
+needs at the deepest working precision that is 2^65 - sixty-five bits
+of the guard spent on nothing, and until 2026-09-30, when the count
+saturated at 2^40, a clamp rather than a bound. Split in two it is ONE
+doubling in total, and the
 accumulators themselves only ever add like signs. The final
 subtraction is safe by construction: for sin the positive part is
 `v + v^5/120 + ...` and the negative `v^3/6 + ...`, so with
@@ -866,9 +908,9 @@ trigonometric pool came out at 42 entries where 192 were asked for.
 found that two inexact approximations cancelling to zero destroy the
 error bound rather than widening it, and repaired it by returning the
 larger operand with a SATURATED bound, on the reasoning that the
-enclosure would then reach zero. It does not: `err` saturates at 2^40
-while the significand is `2^(W-1)`, so at any working precision above
-41 bits the enclosure is narrow, decidable and wrong. With the pool
+enclosure would then reach zero. It did not: `err` then saturated at
+2^40 while the significand is `2^(W-1)`, so at any working precision
+above 41 bits the enclosure was narrow, decidable and wrong. With the pool
 fixed, that showed up as `pow(2 + ulp, ~10^4)` at fp128 overflowing
 where the true value is about `2^9888`. The true difference is bounded
 only in ABSOLUTE terms, which a relative bound around any value cannot

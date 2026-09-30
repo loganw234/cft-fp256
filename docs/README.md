@@ -1,9 +1,9 @@
 # The documents, by what you open them for
 
-Thirty-eight files, 57,603 lines. Flat in one directory they look like one
+Thirty-eight files, 57,650 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **21,131 lines you consult while working** — the three under *Start here*,
+- **21,178 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,237 lines of tool manual**, one per shipped program;
 - **2,011 lines of operations**, read when you are about to do something to
@@ -33,7 +33,7 @@ answer is not in here — it is `make verify-quick`, and
 | document | lines | what it is for |
 |---|---|---|
 | [INTEGRATION.md](INTEGRATION.md) | 253 | Choosing a path: which surface to use for which job. The shortest route from "I have a workload" to "I know what to call." |
-| [VERIFICATION.md](VERIFICATION.md) | 408 | Every gate, what it proves, how long it really takes. Twelve tiers, forty-two runner stages. |
+| [VERIFICATION.md](VERIFICATION.md) | 413 | Every gate, what it proves, how long it really takes. Twelve tiers, forty-two runner stages. |
 | [COMPLIANCE.md](COMPLIANCE.md) | 172 | IEEE 754-2019 clause by clause: what is implemented, what is refused, and where each is proven. |
 
 ## The contract
@@ -55,7 +55,7 @@ product, not the implementation.
 | document | lines | what it is for |
 |---|---|---|
 | [HOSTAPI.md](HOSTAPI.md) | 3,298 | The host API, function by function. The largest reference here and the one most often wanted. |
-| [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,669 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
+| [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,711 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
 | [REMOTE.md](REMOTE.md) | 1,411 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 536 | Programs as files: the assembler, the program library, the runner. |
 | [EMBEDDED.md](EMBEDDED.md) | 709 | libcft on microcontrollers, and the profiles the embedded gate runs. |
