@@ -5525,20 +5525,43 @@ int main(void)
                   CFT_ERR_ARTIFACT, "is 40 bytes", "describes 4294967336",
                   "536870913 x 8 of instructions");
 
-        /* The entry clear, which is what nothing above can see. */
+        /* The entry clear, which is what nothing above can see. A good
+         * load leaves the library's slot empty, and cft_last_error() then
+         * falls through to a device backend's older message where one
+         * exists (docs/HOSTAPI.md): in an XRT build, the XRT backend's own
+         * words for the cft_open of no-such.xclbin above. So the clear is
+         * held to that fall-through, taken from a good load BEFORE the
+         * plant: after plant and load, the words are the fall-through's
+         * again, and the planted sentence is gone. Until 2026-09-30 this
+         * required the words to be empty, which only a build without a
+         * device backend's message meets: an XRT build failed it (the card
+         * leg of revision 7's quad q135b). */
         n = ld_image(img, 0x50544643u, 1, CFT_FP32, 4, 0, 0, 1, 0, halt, 1);
-        CHECK(ld_plant(dev), "the clear's leg: the plant left no sentence");
-        st = cft_program_load(dev, img, n, &lp);
-        CHECK(st == CFT_OK && lp != NULL,
-              "the clear's leg: a good image loads: %s (%s)",
-              cft_strerror(st), cft_last_error());
-        CHECK(cft_last_error()[0] == '\0',
-              "a load that succeeds must leave the slot empty - it holds "
-              "the earlier call's '%s'", cft_last_error());
-        cft_program_free(lp);
+        {
+            char through[CFT_ERRMSG_MAX + 1];
+            st = cft_program_load(dev, img, n, &lp);
+            CHECK(st == CFT_OK && lp != NULL,
+                  "the clear's leg: a good image loads first: %s (%s)",
+                  cft_strerror(st), cft_last_error());
+            snprintf(through, sizeof through, "%s", cft_last_error());
+            cft_program_free(lp);
+            CHECK(ld_plant(dev), "the clear's leg: the plant left no sentence");
+            CHECK(strcmp(cft_last_error(), through) != 0,
+                  "the clear's leg: the plant shows through as '%s'",
+                  cft_last_error());
+            st = cft_program_load(dev, img, n, &lp);
+            CHECK(st == CFT_OK && lp != NULL,
+                  "the clear's leg: a good image loads: %s (%s)",
+                  cft_strerror(st), cft_last_error());
+            CHECK(strcmp(cft_last_error(), through) == 0,
+                  "a load that succeeds must clear the library's slot - "
+                  "cft_last_error() shows '%s', where a good load before "
+                  "the plant showed '%s'", cft_last_error(), through);
+            cft_program_free(lp);
+        }
         printf("  program load: %lu refusals, each its status and a "
-               "sentence of its own after an earlier call's; the slot "
-               "empty after a good load\n",
+               "sentence of its own after an earlier call's; a good "
+               "load clears the library's slot\n",
                (unsigned long)(sizeof L / sizeof L[0] + 7u));
     }
 
