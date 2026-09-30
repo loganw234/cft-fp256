@@ -1422,6 +1422,19 @@ def derive(entry, runs, shapes, states):
                           f"a {entry.method} estimate compares run 0 with a "
                           f"{want} run; run {r} is "
                           f"{'the main run' if r == 0 else runs[r].kind}")
+        # An estimate compares the two final states lane by lane and slot
+        # by slot, so it is defined only where run r has run 0's lanes and
+        # slots a lane (the lead's decision, 2026-09-30: it was an
+        # IndexError here, or run 0's state read by run r's shape). An
+        # audit never meets it: step 8 refuses such a run first, aux-lanes
+        # or aux-image. A writer, which checks no relation, meets it here.
+        if runs[r].lanes != runs[0].lanes or shapes[r][1] != shapes[0][1]:
+            raise Refusal("accuracy-run",
+                          f"a {entry.method} estimate compares run 0's final "
+                          f"state with run {r}'s, lane by lane and slot by "
+                          f"slot; run {r} is {runs[r].lanes} lanes of "
+                          f"{shapes[r][1]} slots and run 0 is "
+                          f"{runs[0].lanes} lanes of {shapes[0][1]}")
     lanes = runs[r].lanes
     if entry.lane is not None and entry.lane >= lanes:
         raise Refusal("accuracy-scope", f"lane {entry.lane} of a run of "

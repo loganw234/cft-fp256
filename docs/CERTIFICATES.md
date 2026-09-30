@@ -665,7 +665,14 @@ difference - is held to the width rule (refused `width`):
 - **step-halving** and **wider**, for each lane i in scope:
   - E_i = max over slots s of |F0[i][s] - Fr[i][s]|, the slots in
     order, starting from 0, and in each slot F0's value before Fr's;
-  - F0 is run 0's final state and Fr is run r's.
+  - F0 is run 0's final state and Fr is run r's;
+  - so the estimate is defined only where run r has run 0's lanes and
+    slots a lane. Where it has not, the entry is refused `accuracy-run`,
+    after its run's kind and before its lane. An audit never meets that
+    refusal, since step 8 refuses such a run first (`aux-lanes`,
+    `aux-image`); a writer, which checks no relation, does (the lead's
+    decision, 2026-09-30: the golden writer raised an IndexError there,
+    or read run 0's state by run r's shape).
 - The value is D_i or E_i for one lane, or the maximum over the lanes
   of |D_i| or E_i.
 - The order fixes every intermediate value, and so it decides two
@@ -971,7 +978,8 @@ check passes.
      certified flag word (`segment-flags`) and STATUS
      (`segment-status`).
 10. **Accuracy**, entry by entry:
-    - the run it uses exists and is of the right kind (`accuracy-run`);
+    - the run it uses exists and is of the right kind, and an estimate's
+      run has the main run's lanes and slots a lane (`accuracy-run`);
     - its lane exists (`accuracy-scope`);
     - its terms' slots exist (`accuracy-slot`);
     - the states it reads are known (`state-missing`), a drift's
@@ -1070,7 +1078,7 @@ accuracy 7, the auditor's own usage 64. The name is the report.
 | `segment-end` | 6 | a re-run segment does not end on its certified end state |
 | `segment-flags` | 6 | a re-run segment's flag word is not the certified one |
 | `segment-status` | 6 | a re-run segment's STATUS is not the certified one |
-| `accuracy-run` | 7 | an entry uses a run that does not exist, or one of the wrong kind |
+| `accuracy-run` | 7 | an entry uses a run that does not exist, or one of the wrong kind; or an estimate's run has other lanes, or other slots a lane, than the main run |
 | `accuracy-scope` | 7 | an entry names a lane the run does not have |
 | `accuracy-slot` | 7 | a term names a slot the state does not have |
 | `accuracy-finite` | 7 | an exact value needs an element that is not finite |

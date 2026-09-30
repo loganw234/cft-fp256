@@ -1482,6 +1482,43 @@ def test_an_accuracy_entry_refers_to_what_exists(lor):
            + tuple(lor.runs[1:]))
     refused("accuracy-run", cert.derive, dataclasses.replace(e0, uses=0),
             odd, lor.shapes, lor.ends)
+
+
+def test_an_estimate_needs_run_0s_lanes_and_slots(lor):
+    """An estimate compares the two final states lane by lane and slot by
+    slot, so run r must have run 0's lanes and slots a lane: otherwise
+    `accuracy-run`, where derive() used to raise an IndexError or read
+    run 0's state by run r's shape (the lead's decision, 2026-09-30, for
+    cft-segrun's entries). The writer meets it: it checks no relation.
+    The audit does not: step 8 refuses such a run first, by aux-lanes or
+    aux-image, so no audit's verdict moves."""
+    e0, e1, e2, e3 = lor.entries
+    runs, shapes, ends = lor.runs, lor.shapes, lor.ends
+    more = (runs[0], dataclasses.replace(runs[1], lanes=LANES + 1), runs[2])
+    fewer = (runs[0], runs[1], dataclasses.replace(runs[2], lanes=LANES - 1))
+    wide = [shapes[0], (F64, 4), shapes[2]]
+    narrow = [shapes[0], shapes[1], (F128, 2)]
+    for bad, rr, sh in ((e0, more, shapes),     # run 1: more lanes
+                        (e1, fewer, shapes),    # run 2: fewer lanes
+                        (e0, runs, wide),       # run 1: more slots
+                        (e1, runs, narrow)):    # run 2: fewer slots
+        e = refused("accuracy-run", cert.derive, bad, rr, sh, ends)
+        assert "lane by lane and slot by slot" in e.message, e.message
+    # before the lane: lane 4 is past run 1's four lanes too, and the
+    # shape is named, not the scope
+    e = refused("accuracy-run", cert.derive,
+                dataclasses.replace(e0, lane=LANES + 1), more, shapes, ends)
+    assert "lane by lane and slot by slot" in e.message, e.message
+    # after the run's kind: run 1 in `more` is of the wrong kind for a
+    # wider estimate, and of the wrong shape; the kind is named
+    e = refused("accuracy-run", cert.derive,
+                dataclasses.replace(e1, uses=1), more, shapes, ends)
+    assert "wider run" in e.message, e.message
+    # a drift reads one run: another run's shape is none of its business
+    assert cert.derive(e3, more, wide, ends) == lor.values[3]
+    # the same runs as the fixture's: the fixture's values
+    assert [cert.derive(e, runs, shapes, ends) for e in lor.entries] == \
+        list(lor.values)
     # the final state an entry needs, neither handed nor re-run into
     e = refused("state-missing", cert.audit, lor.data, SALT, lor.progs,
                 states={r: {0: lor.st[r][0]} for r in range(3)},
