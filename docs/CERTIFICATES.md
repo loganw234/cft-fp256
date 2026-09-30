@@ -254,12 +254,13 @@ width. `cft-audit` is that auditor ("The audit tool"). Its gate holds
 its verdicts to the golden auditor's on every width control
 test_cert.py makes, and its arithmetic to Python's integers.
 
-A narrower build is not a conforming auditor of exact values. The
-bigint is 576 bits at an fp128 ceiling and 288 below
-(`host/include/cft_config.h`). Such a build must refuse to audit a
-certificate that carries an exact value, rather than audit it
-differently. `cft-audit` built so refuses `build-width` (exit 78, a
-name of the tool's own) at an `accuracy` line counting 1 or more.
+A narrower build is not a conforming auditor of exact values. By
+default the bigint is 576 bits at an fp128 ceiling and 288 below, and
+`CFT_BN_LIMBS` can keep it at 2,048 under either
+(`host/include/cft_config.h`). A build whose bigint is narrower must
+refuse to audit a certificate that carries an exact value, rather than
+audit it differently. `cft-audit` built so refuses `build-width` (exit
+78, a name of the tool's own) at an `accuracy` line counting 1 or more.
 
 For the values these runs produce, 1,023 bits is room enough. Over one
 segment of order-one states, the drift of Henon-Heiles' cubic energy
@@ -1674,8 +1675,11 @@ bank and stream are read before step 1. The state files are listed
 then too, and each is held to be a regular file and opened. So a file
 the command line names that cannot be read, or a directory by a
 boundary file's name, is `usage` before any step. A state's bytes are
-read at step 7, where `cert.audit` takes them, and only a file that
-changed or went after it was opened fails there: `usage` at step 7.
+read at step 7, where `cert.audit` takes them. Two things can fail
+there: a file that changed or went after it was opened, `usage`; and a
+file too large for the memory the tool may use, `memory` (verifier-A1:
+100 MiB under a 64 MiB commit limit). A state read whole but of the
+wrong size is `state-shape`, as the golden's.
 
 `--read` is `cert.parse(data, salt)`: the hash line, the body's hash and
 the strict form, and with `--salt` the salt against the mode and the
@@ -1699,10 +1703,11 @@ page's test vector writes them. It samples through a map of at least
   - `memory`, exit 71: an allocation of its own that fails, or a
     `--sample` K past what a map can be sized for. A number the
     certificate states is never `memory` ("What an audit spends");
-  - `build-width`, exit 78: a narrow build handed a certificate with an
-    accuracy entry;
-  - `build-format`, exit 78: a narrow build handed a run in a format
-    above its ceiling (both below).
+  - `build-width`, exit 78: a build whose bigint is narrower than 2,047
+    bits, handed a certificate with an accuracy entry;
+  - `build-format`, exit 78: a build asked for a format above its
+    ceiling, by a run, by an image, or by an accuracy value where it
+    reads one (both below).
 - A library call that fails where no refusal names the failure, such as
   a software handle that does not open or a conversion that fails, is
   not a verdict. It prints `cft-audit: internal error` and exits 70.
@@ -1727,26 +1732,36 @@ page's test vector writes them. It samples through a map of at least
   That is round_pack's answer, as the golden's is.
 - The gate held each of these to Python's integers or the golden model
   before they were trusted (section 6, below).
-- **The narrow build.** A library built with a `CFT_MAX_FORMAT` below 3
-  carries the formats up to that ceiling, and by default a narrower
-  `cft_bn` (`host/include/cft_config.h`). A narrow build audits in full
-  a certificate carrying no exact value and no format above its
-  ceiling. Anything else it refuses rather than audit differently, as
-  "The width rule" asks of a narrower build: its reader refuses by a
-  name of the tool's own, at the line that shows the lack.
-  - `build-format` at a run's `program-format` line naming a format
-    above the ceiling. Without it that run's image would fail to load at
-    step 4, `program-image`: a name for an input that is not the one
-    certified, where the cause is the build (verifier-A1's finding; the
-    lead's decision, 2026-09-29).
-  - `build-width` at an `accuracy` line whose count is at least 1 and
-    agrees with its entries, where the `cft_bn` is narrower than 2,047
-    bits (2 x 1,023 + 1; 576 bits at an fp128 ceiling). Such a build
-    compiles the tool without its exact arithmetic. It is a `#if`, so no
-    build computes an exact value in a narrower bigint.
-  - The two follow separate settings, the ceiling and the bigint's
-    width, which `CFT_BN_LIMBS` can set apart from the ceiling. The gate
-    builds `CFT_MAX_FORMAT=2` at its default width, where both apply.
+- **The narrow builds.** A library built with a `CFT_MAX_FORMAT` below
+  3 carries the formats up to that ceiling. Its `cft_bn` is narrower by
+  default, 576 bits at the fp128 ceiling, and `CFT_BN_LIMBS` can keep it
+  at 2,048 bits (`host/include/cft_config.h`). A narrow build audits in
+  full, with the golden's verdict, a certificate whose runs and values
+  are all in formats within its ceiling, handed images in those
+  formats, and, where its bigint is narrower than 2,047 bits, carrying
+  no exact value. What it cannot do it refuses by a name of the tool's
+  own, where the certificate or an input asks for it, rather than audit
+  differently ("The width rule"). The rule is the lead's (2026-09-29,
+  after verifier-A1 found a narrow build doing otherwise twice): nothing
+  a narrow build cannot do reaches another name or an internal error.
+  - `build-format` wherever a format above the ceiling would reach the
+    library. The reader raises it at the format word, before the rest
+    of that line: at a run's `program-format` line, whose image the
+    library cannot load, and at an accuracy value's line, `rounded` or
+    `enclosed`, whose decimals and rounding are the library's. A build
+    whose bigint is narrower reads no value's line: its `build-width`
+    comes first, at the `accuracy` line. Step 4 raises it at a run
+    stated within the ceiling whose image's header names a format above
+    it. The golden refuses that image `program-format`, or
+    `program-image` for a defect found past its format, and a build that
+    cannot load the image cannot learn which.
+  - `build-width`, where the `cft_bn` is narrower than 2,047 bits
+    (2 x 1,023 + 1): at an `accuracy` line whose count is at least 1 and
+    agrees with its entries. Such a build compiles the tool without its
+    exact arithmetic. It is a `#if`, so no build computes an exact value
+    in a narrower bigint.
+  - The gate builds `CFT_MAX_FORMAT=2` both ways, at its own bigint and
+    at `CFT_BN_LIMBS=64` (section 5, below).
 - **The instrument.** `CFT_AUDIT_PLANT=executor-refuses` makes every
   re-run's executor refuse, as test_cert.py's monkeypatched `seq.run`
   does, so that the gate holds that refusal (`program-image` at the
@@ -1796,13 +1811,24 @@ refusal's name, code and location, or both ACCEPTED with the same lines.
 4. **The golden corpus** (`certificates/MANIFEST`), where the tree has
    one: every case the same three ways, the two auditors against each
    other and against the manifest's verdict.
-5. **The narrow build**, compiled at `CFT_MAX_FORMAT=2`:
-   - `build-width` at the example's `accuracy` line, in an audit and in
-     `--read`, and the same runs with `accuracy 0` audited in full;
-   - `build-format` at run 0's `program-format` line, in an audit and in
-     `--read`, of an open fp256 certificate cft-segrun makes with
-     `accuracy 0`. The golden auditor and the default build accept it
-     (verifier-A1's case).
+5. **The narrow builds**, both at `CFT_MAX_FORMAT=2`:
+   - at its own 576-bit bigint: `build-width` at the example's
+     `accuracy` line, in an audit and in `--read`, and the same runs with
+     `accuracy 0` audited in full. lor (test_cert.py) with entry 1's
+     value in fp256 is `build-width` at its `accuracy` line, before any
+     value;
+   - at `CFT_BN_LIMBS=64`, compiled at -O1 to keep it cheap: lor's four
+     entries and the page's example audited in full, with the golden's
+     verdict. lor with entry 1's value re-made in fp256, rounded or
+     enclosed, is `build-format` at that value's line, in an audit and
+     in `--read`. The golden auditor and the default build accept it
+     (verifier-A1's second case);
+   - in both: `build-format` at run 0's `program-format` line, in an
+     audit and in `--read`, of an open fp256 certificate cft-segrun makes
+     with `accuracy 0`, which the golden auditor and the default build
+     accept (A1's first case). And `build-format` at run 0 when the same
+     images are handed under runs restated as fp128, which the golden
+     auditor and the default build refuse `program-format`.
 6. **The numerics**, through a probe build of `tools/audit.c`
    (`-DCFT_AUDIT_PROBE`, compiled only by the gate):
    - the tool's division, gcd and exact arithmetic against Python's
@@ -1814,14 +1840,15 @@ refusal's name, code and location, or both ACCEPTED with the same lines.
      `chars.to_decimal`.
 
 Measured on the desktop, niced, on a day it was in use (2026-09-29, at
-b10047d): 6,781 checks, 0 failed, 209 s. That run read the corpus from
+ca1327f): 6,799 checks, 0 failed, 219 s. That run read the corpus from
 P2's tree at 679c64d, the commit the lead merged. Where a tree has no
 corpus, section 4 is a SKIP line, which `verify/run.sh` counts as an
 inner skip.
-- Section 2: test_cert.py's 101 tests pass in 110 s, 69 s of it the
+- Section 2: test_cert.py's 101 tests pass in 109 s, 67 s of it the
   tool's 6,505 runs. Every one of the 6,262 top-level parse calls, and
   243 of the 282 audit calls, got the same verdict from the tool. The
   other 39 pass arguments no file spells.
+- Section 5: 26 checks, the two narrow builds compiled in 5 s each.
 - Section 6: the probe's 4,566 operations all agree, in 15 s.
 
 **The plants.** `host/tests/audit_plants.py` is the census. In a fresh
@@ -1832,13 +1859,18 @@ skips and that names itself when it refuses. The gate's recorded cases
 changes only the cases that reach its call, so each site is planted in
 turn and only its own cases replayed.
 
-On `tools/audit.c` as of 293b561, with the gate's 6,655 cases, the
-census found 165 sites (149 s on the desktop, 2026-09-29):
-- **146 red.** Each turns a case red, and the gate's line names the
-  golden auditor's refusal beside the tool's other answer. Two of them
-  are verifier-A1's: `build-format` planted lets its case reach step 4,
-  which refuses `program-image`; and the `--sample` map's size planted
-  leaves a map of 16 slots, and the sample runs past the census's 20 s.
+On `tools/audit.c` as of ca1327f, with the gate's 6,669 cases, the
+census found 167 sites (157 s on the desktop, 2026-09-29):
+- **148 red.** Each turns a case red, and the gate's line names the
+  golden auditor's refusal beside the tool's other answer. Four answer
+  verifier-A1's findings, each planted in turn:
+  - `build-format` at a run's `program-format` line: its case reaches
+    step 4, which refuses it `build-format` at the run, not the line;
+  - `build-format` at a value's line: its case reaches the library's
+    decimal, an internal error, exit 70;
+  - `build-format` at an image above the ceiling: `program-image`;
+  - the `--sample` map's size: a map of 16 slots, and the sample runs
+    past the census's 20 s.
 - **12 green.** Each stays green because another check refuses its
   cases by the same name at the same place:
   - in the golden auditor's order too:
@@ -1858,7 +1890,9 @@ census found 165 sites (149 s on the desktop, 2026-09-29):
       slack, it holds zero;
     - a directory by a boundary file's name: on Windows, where the
       census ran, opening a directory fails as well, and that check says
-      `usage` before step 1 too;
+      `usage` before step 1 too. On Linux it is red, measured by
+      verifier-A1 in WSL (cft2204): fopen opens a directory, and the
+      certificate beside it is refused `hash-line`;
     - no argument at all, `--sample` given twice, and no `--cert`: each
       is `usage` by the next check.
 - **7 unreached.** No input reaches these:
