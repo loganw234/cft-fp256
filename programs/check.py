@@ -1721,7 +1721,10 @@ def check_revision3_corpus(args, tmp, trials=120):
 #                really there). The same transcription as identity, so
 #                not independent either. Control: ode_step with a wrong
 #                weight or kick must exceed the ceiling. Without mpmath
-#                neither runs, and each is named as skipped.
+#                neither runs, and each is named as skipped. Its
+#                reference is scheme_exact and scheme_run, which
+#                programs/estimates.py calls as the rounding reference
+#                and, with the bank's h-slots halved, the converged one.
 #   resume       two segments chained through the scratch block are one
 #                segment of twice the steps. Controls, through the same
 #                code path as the claim: the second segment entered with
@@ -2288,6 +2291,38 @@ def _mirror_out(base, fmt, K, block, nstate, steps):
         out += ode_step(base, o, K, block[i * nstate:(i + 1) * nstate],
                         steps)
     return out
+
+
+# The 300-digit scheme arm's reference, as two functions other scripts
+# call: programs/estimates.py scores a certificate's two estimates with
+# them (docs/studies/ACC-A-estimates.md). check_ode's arm is these and
+# its own verdict. The arithmetic is ode_step through _MpOps, so it is
+# the mirror's transcription with the roundings taken out - the
+# program's own scheme, not an independent one.
+SCHEME_DPS = 300
+
+
+def scheme_exact(fmt, bits):
+    """An encoding's exact value, as an mpf. Exact: SCHEME_DPS digits hold
+    the significand of every format this file runs (fp256's 237 bits),
+    and the scale is a power of two, so this is the encoding's value and
+    not a rounding of it."""
+    fr = _frac(fmt, bits)
+    with mpmath.workdps(SCHEME_DPS):
+        return mpmath.mpf(fr.numerator) / fr.denominator
+
+
+def scheme_run(base, Km, lanes, steps, detuned=False):
+    """ode_step through _MpOps at SCHEME_DPS digits - the program's scheme
+    with its roundings taken out - over `steps` steps from each lane of
+    `lanes` (lists of mpf), with the bank's values Km (mpf, in declaration
+    order) -> one list of mpf a lane. `detuned` is the arm's negative
+    control, as ode_step says. What a caller computes from the results is
+    at the caller's precision, so check_ode holds SCHEME_DPS around its
+    own comparisons."""
+    with mpmath.workdps(SCHEME_DPS):
+        return [ode_step(base, _MpOps, Km, s, steps, detuned=detuned)
+                for s in lanes]
 
 
 def ode_initial(base, fmt, n):
@@ -4460,19 +4495,19 @@ def check_ode(args, name, image, image_path, tmp):
     else:
         mp = mpmath.mp
         saved = mp.dps
-        mp.dps = 300
+        mp.dps = SCHEME_DPS
         try:
-            def mpf_of(bits):
-                fr = _frac(fmt, bits)
-                return mpmath.mpf(fr.numerator) / fr.denominator
-            Km = [mpf_of(b) for b in K]
+            Km = [scheme_exact(fmt, b) for b in K]
+            lanes = [[scheme_exact(fmt, b)
+                      for b in s_in[i * nstate:(i + 1) * nstate]]
+                     for i in range(n)]
+            exact = scheme_run(base, Km, lanes, steps)
+            wrong = scheme_run(base, Km, lanes, steps, detuned=True)
             worst = worst_mut = mpmath.mpf(0)
             for i in range(n):
-                s_mp = [mpf_of(b) for b in s_in[i * nstate:(i + 1) * nstate]]
-                exact = ode_step(base, _MpOps, Km, s_mp, steps)
-                wrong = ode_step(base, _MpOps, Km, s_mp, steps, detuned=True)
-                got = [mpf_of(b) for b in lib[i * nstate:(i + 1) * nstate]]
-                for g, e, w in zip(got, exact, wrong):
+                got = [scheme_exact(fmt, b)
+                       for b in lib[i * nstate:(i + 1) * nstate]]
+                for g, e, w in zip(got, exact[i], wrong[i]):
                     scale = max(abs(e), mpmath.mpf(1))
                     worst = max(worst, abs(g - e) / scale)
                     worst_mut = max(worst_mut, abs(g - w) / scale)
