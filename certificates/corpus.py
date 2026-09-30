@@ -31,17 +31,21 @@ WHAT `check` HOLDS, for every case certificates/MANIFEST lists:
      and encode, handed the committed certificate's identity lines -
      writes the committed bytes, byte for byte;
   4. every boundary of the golden chain is the committed state file;
-  5. cft-segrun, on the software backend at the case's depth, writes the
-     committed certificate NORMALIZED in two places and in nothing else:
-     its build-id line is the one the binary's own --build-id prints,
-     and its hash line is computed again over that body; an accuracy
-     case has its accuracy block replaced by `accuracy 0`, the block the
-     tool writes before the plan's step 5. Every other line is a function
-     of what the manifest fixes - the image, bank, initial state,
-     segments, steps, parameters, mode and salt, depth - and of the
-     backend, which the gate fixes to software. build-id names the
-     library build, which changes with every commit by design, and the
-     hash line covers it. Its boundary files are the committed ones;
+  5. cft-segrun, on the software backend at the case's depth, handed the
+     case's accuracy entries as the committed certificate defines them
+     (each one's method, run, scope, quantity and terms, and its value's
+     form - never its value), writes the committed certificate
+     NORMALIZED in two places and in nothing else: its build-id line is
+     the one the binary's own --build-id prints, and its hash line is
+     computed again over that body. So the tool makes the three accuracy
+     cases WHOLE, their values included (the plan's step 5, 2026-09-30;
+     until then their accuracy block was replaced by `accuracy 0`, the
+     block the tool wrote). Every other line is a function of what the
+     manifest fixes - the image, bank, initial state, segments, steps,
+     parameters, mode and salt, depth, and the entries' definitions -
+     and of the backend, which the gate fixes to software. build-id names
+     the library build, which changes with every commit by design, and
+     the hash line covers it. Its boundary files are the committed ones;
   6. the golden audit gives each case its expected verdict, in full from
      the initial states alone, and sampled from the committed states
      directory (the seed printed; --seed draws the same sample again);
@@ -50,8 +54,10 @@ WHAT `check` HOLDS, for every case certificates/MANIFEST lists:
 
 `make` writes the corpus again from the recipes below: every image, bank,
 state and certificate, and the manifest. A certificate is the one
-cft-segrun writes, with the golden writer's accuracy block where the case
-has one; `example` is the golden writer's, as the page prints it. It
+cft-segrun writes, its accuracy entries included; `make` refuses a case
+whose entries are not, value for value, the ones the golden writer makes
+from the same runs. `example` is the golden writer's, as the page prints
+it (build-id unknown), and cft-segrun's entries must be its entries. It
 refuses to run unless the tool's build id is clean, so that each
 certificate names a commit anyone can check out.
 
@@ -165,7 +171,10 @@ class Case:
     depth: int
     backends: str           # any or software
     accuracy: int
-    accuracy_by: str        # none, or golden: only the golden writer, before step 5
+    # none, or both: the golden writer and cft-segrun each make the
+    # entries, held to the committed bytes (golden, only the golden
+    # writer's, until the plan's step 5, 2026-09-30)
+    accuracy_by: str
     verdict: str            # accepted, or the name of a refusal
     states: str             # the directory of every boundary's file
     runs: list
@@ -312,8 +321,8 @@ def read_manifest(path=MANIFEST):
         backends = tok[1]
         n, tok = L.take("accuracy", 3)
         acc = _dec(n, tok[1], "accuracy")
-        if tok[2] not in ("none", "golden") or (acc == 0) != (tok[2] == "none"):
-            raise ManifestError(n, "accuracy is `0 none` or `<A> golden` with "
+        if tok[2] not in ("none", "both") or (acc == 0) != (tok[2] == "none"):
+            raise ManifestError(n, "accuracy is `0 none` or `<A> both` with "
                                    "A at least 1")
         acc_by = tok[2]
         n, tok = L.take("verdict", (2, 3))
@@ -739,9 +748,31 @@ def run_tool(args):
     return r.returncode, r.stdout, r.stderr
 
 
-def tool_args(case, runs_io, out, sdir):
+def entry_args(entries):
+    """cft-segrun's options for accuracy entries (docs/CERTIFICATES.md,
+    "The segment runner"), from cert.Entry objects: each one's method,
+    run, scope, a drift's quantity and terms, and its value's form. Never
+    its value: that is what the tool computes."""
+    a = []
+    for e in entries:
+        a += ["--entry", e.method, "--uses", str(e.uses), "--scope",
+              "max-lanes" if e.lane is None else f"lane:{e.lane}"]
+        if e.method == "drift":
+            a += ["--quantity", e.label]
+            for c, slots in e.terms:
+                a += ["--term", ",".join([cert.rational_text(Fraction(c))]
+                                         + [f"s{s}" for s in slots])]
+        v = e.value
+        a += ["--value", "exact" if v.form == "exact" else
+              f"rounded:{v.fmt}:{v.rnd}" if v.form == "rounded" else
+              f"enclosed:{v.fmt}"]
+    return a
+
+
+def tool_args(case, runs_io, out, sdir, entries=()):
     """cft-segrun's command line for `case`: runs_io is each run's
-    (image path, bank path or None, init path)."""
+    (image path, bank path or None, init path); `entries` are the case's
+    accuracy entries, as cert.Entry objects whose values are not read."""
     a = ["--out", out, "--states", sdir]
     a += ["--salt", rp(case.salt[0])] if case.mode == "keyed" else ["--open"]
     depth = case.runs[0].depth_param()
@@ -759,19 +790,17 @@ def tool_args(case, runs_io, out, sdir):
         for n, v in r.parameters:
             if n != DEPTH_PARAM:
                 a += ["--param", f"{n}={v}"]
-    return a
+    return a + entry_args(entries)
 
 
-def normalized(data, build_id, strip_accuracy):
+def normalized(data, build_id):
     """The committed certificate as cft-segrun must write it: its build-id
-    line the tool's, its accuracy block `accuracy 0` where the tool writes
-    none yet (before step 5), and the hash line computed again."""
+    line the tool's, and the hash line computed again. Nothing else: since
+    the plan's step 5 (2026-09-30) the tool writes the accuracy block
+    too."""
     lines = cert.body_of(data).decode("ascii").split("\n")[:-1]
     lines = [f"build-id {build_id}" if ln.startswith("build-id ") else ln
              for ln in lines]
-    if strip_accuracy:
-        k = next(i for i, ln in enumerate(lines) if ln.startswith("accuracy "))
-        lines = lines[:k] + ["accuracy 0", "end"]
     return cert.rehash("\n".join(lines) + "\n")
 
 
@@ -928,26 +957,32 @@ def make(force_dirty=False, rewrite_all=False):
                                          f".cert", None), c.mode,
                         (salt_path, sha256(salt)) if c.mode == "keyed"
                         else None, c.depth, c.backends, len(c.entries),
-                        "golden" if c.entries else "none", c.verdict,
+                        "both" if c.entries else "none", c.verdict,
                         f"certificates/{c.name}/states", runs)
             out = work / f"{c.name}.cert"
-            rc, _, se = run_tool(tool_args(case, io, out, rp(case.states)))
+            rc, _, se = run_tool(tool_args(case, io, out, rp(case.states),
+                                           entries_from(c.entries)))
             if rc != 0:
                 sys.exit(f"corpus make: {c.name}: cft-segrun refused it: "
                          f"{se.strip()}")
             data = out.read_bytes()
             parsed = cert.parse(data, salt=salt if c.mode == "keyed" else None)
             if c.entries or c.name == "example":
+                # the tool's entries must be the golden writer's, value for
+                # value, from the same runs (the plan's step 5)
                 imgs = {p: rp(p).read_bytes() for p in images}
                 g_runs, chains, _, shapes = golden_runs(
                     case, imgs, salt if c.mode == "keyed" else None)
                 ents = golden_entries(entries_from(c.entries), g_runs,
                                       shapes, chains)
-                idn = PAGE_IDENTITY if c.name == "example" else \
-                    parsed.identity
-                data = cert.encode(cert.Certificate(
-                    parsed.mode, parsed.salt_commitment, idn, parsed.runs,
-                    ents))
+                if parsed.accuracy != tuple(ents):
+                    sys.exit(f"corpus make: {c.name}: cft-segrun's accuracy "
+                             f"entries are not the golden writer's from the "
+                             f"same runs")
+                if c.name == "example":
+                    data = cert.encode(cert.Certificate(
+                        parsed.mode, parsed.salt_commitment, PAGE_IDENTITY,
+                        parsed.runs, ents))
             if c.name == "example" and data != page_example():
                 sys.exit("corpus make: the example case is not "
                          "docs/CERTIFICATES.md's example certificate")
@@ -960,7 +995,7 @@ def make(force_dirty=False, rewrite_all=False):
             how = "made"
             if old is not None and \
                     old[1] == [r.boundaries for r in case.runs] and \
-                    (old[0] == data or normalized(old[0], bid, False) == data):
+                    (old[0] == data or normalized(old[0], bid) == data):
                 data, how = old[0], "kept"
                 kept += 1
             rp(case.certificate[0]).write_bytes(data)
@@ -1121,7 +1156,9 @@ def hold_case(case, images, build_id, seed, work):
                rp(r.state_path(case, 0))) for r in case.runs]
         out, sdir = work / f"{case.name}.cert", work / f"{case.name}.states"
         t1 = time.perf_counter()
-        rc, _, se = run_tool(tool_args(case, io, out, sdir))
+        # the entries as the committed certificate defines them; their
+        # values are what the tool must make again
+        rc, _, se = run_tool(tool_args(case, io, out, sdir, parsed.accuracy))
         if check_that(rc == 0, f"{case.name}: cft-segrun makes it on the "
                       f"software backend ({time.perf_counter() - t1:.1f} s)",
                       f"rc {rc}: {se.strip()[-300:]}"):
@@ -1130,11 +1167,11 @@ def hold_case(case, images, build_id, seed, work):
             check_that(got == build_id, f"{case.name}: its build-id line is "
                        f"what the binary's --build-id prints",
                        f"{got!r} against {build_id!r}")
-            want = normalized(data, build_id, case.accuracy > 0)
-            what = ("the committed bytes but for build-id, the accuracy block "
-                    "(accuracy 0, before step 5) and the hash line" if
-                    case.accuracy else "the committed bytes but for build-id "
-                    "and the hash line")
+            want = normalized(data, build_id)
+            what = ("the committed bytes, its accuracy entries' values made "
+                    "from their definitions, but for build-id and the hash "
+                    "line" if case.accuracy else "the committed bytes but for "
+                    "build-id and the hash line")
             check_that(mine == want, f"{case.name}: cft-segrun writes {what}",
                        first_difference(want, mine))
             names = sorted(os.listdir(sdir)) if sdir.is_dir() else []

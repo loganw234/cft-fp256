@@ -36,7 +36,7 @@ certificate certificates/lorenz63-rk4-fp64/lorenz63-rk4-fp64.cert d1a7ce61cc9771
 mode open
 depth 256
 backends any
-accuracy 2 golden
+accuracy 2 both
 verdict accepted
 states certificates/lorenz63-rk4-fp64/states
 runs 3
@@ -248,7 +248,7 @@ certificate certificates/henonheiles-lf-fp256/henonheiles-lf-fp256.cert afd7cabd
 mode open
 depth 256
 backends any
-accuracy 1 golden
+accuracy 1 both
 verdict accepted
 states certificates/henonheiles-lf-fp256/states
 runs 2
@@ -289,7 +289,7 @@ mode keyed
 salt certificates/example.salt 630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd
 depth 256
 backends any
-accuracy 2 golden
+accuracy 2 both
 verdict accepted
 states certificates/example/states
 runs 2
