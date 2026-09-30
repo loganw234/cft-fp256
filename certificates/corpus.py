@@ -7,6 +7,7 @@ docs/CERTIFICATES.md, "Golden certificates", is its manual.
     python certificates/corpus.py check --tool host/cft-segrun[.exe]
                                         [--seed HEX] [--keep DIR]
     python certificates/corpus.py make  --tool host/cft-segrun[.exe]
+                                        [--rewrite-all]
 
 `make -C host corpustest` runs `check` with the tree's cft-segrun, and
 verify/run.sh's `programs` stage runs that, beside segruntest.
@@ -53,6 +54,13 @@ cft-segrun writes, with the golden writer's accuracy block where the case
 has one; `example` is the golden writer's, as the page prints it. It
 refuses to run unless the tool's build id is clean, so that each
 certificate names a commit anyone can check out.
+
+It KEEPS a case's committed certificate, byte for byte, where the one it
+makes equals it but for build-id and the hash line and every boundary
+file has the committed manifest's digest: a case's bytes, and the commit
+its build-id names, move only when what it certifies does (the fixes
+round, 2026-09-30). `--rewrite-all` writes every certificate the tool
+makes, as `make` did before.
 
 The manifest's grammar is read strictly by read_manifest(), which another
 gate may import (P1's cft-audit gate does): printable ASCII and LF, one
@@ -813,7 +821,26 @@ def tool_build_id():
     return out.strip()
 
 
-def make(force_dirty=False):
+def committed_certificates():
+    """What `make` may keep: case name -> (its certificate's bytes, each
+    run's boundary digests), for every case of the committed manifest
+    whose certificate file has the manifest's SHA-256. Read before
+    anything is cleared; empty where there is no manifest, or it does not
+    read."""
+    try:
+        old = read_manifest()
+    except (ManifestError, OSError, UnicodeDecodeError):
+        return {}
+    out = {}
+    for c in old.cases:
+        f = rp(c.certificate[0])
+        data = f.read_bytes() if f.is_file() else None
+        if data is not None and sha256(data) == c.certificate[1]:
+            out[c.name] = (data, [r.boundaries for r in c.runs])
+    return out
+
+
+def make(force_dirty=False, rewrite_all=False):
     bid = tool_build_id()
     print(f"corpus make: {TOOL}\n  build-id {bid}", flush=True)
     if not force_dirty and not bid.endswith("tracked=clean untracked=none"):
@@ -822,6 +849,11 @@ def make(force_dirty=False):
                  "build it in a clean worktree (or --force-dirty for a "
                  "trial that will not be committed)")
     C = recipes()
+    # what may be kept, read before anything below is cleared
+    committed = {} if rewrite_all else committed_certificates()
+    if rewrite_all:
+        print("  --rewrite-all: every certificate is the one made now",
+              flush=True)
     # clear what the script writes, and every other directory here but
     # programs/ and __pycache__/ (the second loop), so no stale case stays
     for d in ["images"] + [c.name for c in C]:
@@ -850,7 +882,7 @@ def make(force_dirty=False):
     salt = bytes(range(32))
     rp(salt_path).write_bytes(salt)
     work = Path(tempfile.mkdtemp(prefix="corpus-make-"))
-    cases = []
+    cases, kept = [], 0
     try:
         for c in C:
             t0 = time.perf_counter()
@@ -900,13 +932,22 @@ def make(force_dirty=False):
             if c.name == "example" and data != page_example():
                 sys.exit("corpus make: the example case is not "
                          "docs/CERTIFICATES.md's example certificate")
-            rp(case.certificate[0]).write_bytes(data)
-            case.certificate = (case.certificate[0], sha256(data))
             for r in case.runs:
                 r.boundaries = [sha256(rp(r.state_path(case, b)).read_bytes())
                                 for b in range(r.segments + 1)]
+            # the committed certificate is kept where this one equals it
+            # but for build-id and the hash line, and so are its states
+            old = committed.get(c.name)
+            how = "made"
+            if old is not None and \
+                    old[1] == [r.boundaries for r in case.runs] and \
+                    (old[0] == data or normalized(old[0], bid, False) == data):
+                data, how = old[0], "kept"
+                kept += 1
+            rp(case.certificate[0]).write_bytes(data)
+            case.certificate = (case.certificate[0], sha256(data))
             cases.append(case)
-            print(f"  {c.name}: {len(data):,} bytes, "
+            print(f"  {c.name}: {len(data):,} bytes, {how}, "
                   f"{time.perf_counter() - t0:.1f} s", flush=True)
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -914,8 +955,9 @@ def make(force_dirty=False):
                          .encode("ascii"))
     total = sum(p.stat().st_size for p in HERE.rglob("*")
                 if p.is_file() and "__pycache__" not in p.parts)
-    print(f"corpus make: {len(cases)} cases, {total:,} bytes under "
-          f"certificates/ (this script and the sources included)")
+    print(f"corpus make: {len(cases)} cases, {kept} kept and "
+          f"{len(cases) - kept} made; {total:,} bytes under certificates/ "
+          f"(this script and the sources included)")
     return 0
 
 
@@ -1191,6 +1233,10 @@ def main():
     ap.add_argument("--force-dirty", action="store_true",
                     help="make: allow a tool whose build is not clean (a "
                     "trial, never committed)")
+    ap.add_argument("--rewrite-all", action="store_true",
+                    help="make: write every certificate the tool makes, "
+                    "where by default a committed one that the new one "
+                    "equals but for build-id and the hash line is kept")
     args = ap.parse_args()
     if args.tool:
         TOOL = Path(args.tool).resolve()
@@ -1199,7 +1245,7 @@ def main():
     if args.what == "make":
         if TOOL is None:
             sys.exit("corpus make: --tool is required")
-        return make(args.force_dirty)
+        return make(args.force_dirty, args.rewrite_all)
     seed = bytes.fromhex(args.seed) if args.seed else os.urandom(32)
     if len(seed) != 32:
         sys.exit("corpus: --seed is 64 hex digits")

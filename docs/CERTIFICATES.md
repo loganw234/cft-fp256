@@ -2128,7 +2128,12 @@ slowest with the desktop at about 77 % from other work (2026-09-29).
 gate by name: a change to the model, a hash, an encoding, the assembler's
 output, or the `programs/` sources and banks the corpus names. When the
 change is meant, its commit runs `corpus.py make` with a clean build of
-cft-segrun, and says so.
+cft-segrun, and says so. `make` keeps a case's committed certificate,
+byte for byte, where the one it makes equals it but for `build-id` and
+the hash line, and every boundary file has the committed manifest's
+digest. So a case's bytes, and the commit its `build-id` names, move
+only when what it certifies does (the fixes round, 2026-09-30). `make
+--rewrite-all` writes every certificate the tool makes.
 
 **Its producer.** `make` refuses a tool whose build is not clean, so each
 certificate names a commit anyone can check out.
