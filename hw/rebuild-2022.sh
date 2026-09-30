@@ -399,7 +399,9 @@ for t in $TARGETS; do
     # fd25e9f's form of this loop did - verifier-F1, 2026-09-30.)
     for mcu in ${CLOCK_CUS//./ }; do
       rl="$runs/ulp_${mcu}_0_synth_1/runme.log"
-      [ -f "$rl" ] || continue
+      # No log at all (seen in an old tree: build-rev4-quad has no
+      # ulp_cft_krnl_1_0_synth_1 directory) is unknown, not unretimed.
+      [ -f "$rl" ] || { ru="$ru $mcu:no-runme.log"; continue; }
       src="$rl"
       id=$(sed -n 's/.*Using cached IP synthesis design for IP .*, cache-ID = \([0-9a-f]*\).*/\1/p' "$rl" | head -1 || true)
       if [ -n "$id" ]; then
@@ -411,7 +413,7 @@ for t in $TARGETS; do
     done
     rr=${rr# }; ru=${ru# }
     echo "retimed_runs:  ${rr:-none}"
-    [ -z "$ru" ] || echo "retiming_unresolved: $ru   # cache hits an earlier build produced"
+    [ -z "$ru" ] || echo "retiming_unresolved: $ru   # cache hits an earlier build produced, or no run log"
     echo "place_directive: ${PLACE_DIRECTIVE:-default}"
     echo "route_directive: ${ROUTE_DIRECTIVE:-default}"
     echo "phys_opt:      $PHYS_OPT"

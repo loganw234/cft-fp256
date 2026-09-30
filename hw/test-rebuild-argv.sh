@@ -117,6 +117,8 @@ if [ -n "$tmpd" ]; then
       last_r=$cu; else last_n=$cu; fi
   done
   for cu in $cus; do
+    # STUB_NO_LOG=<cu>: that CU's run leaves no runme.log at all.
+    [ "$cu" = "${STUB_NO_LOG:-}" ] && continue
     d="$runs/ulp_${cu}_0_synth_1"; mkdir -p "$d"
     if printf '%s\n' "$@" | grep -qx "run.ulp_${cu}_0_synth_1.{STEPS.SYNTH_DESIGN.ARGS.RETIMING}=true"; then
       id=21c6eb981cfcf745; me=$last_r; flag=" -retiming"; else id=1a011ef8b8b87f6a; me=$last_n; flag=""; fi
@@ -321,6 +323,23 @@ elif [ "$un" != "cft_krnl_1:21c6eb981cfcf745 cft_krnl_2:21c6eb981cfcf745 cft_krn
   say_fail "unresolved: retiming_unresolved is '$un'"
 else
   echo "  ok   unresolved: rc 0, the manifest whole, and retiming_unresolved names all four"
+fi
+
+# A CU whose run left no log is unknown: named on retiming_unresolved:,
+# and in neither list otherwise.
+echo "== a run with no log: named, not counted =="
+log=$(STUB_NO_LOG=cft_krnl_2 run_it "$SCRIPT" "hw/link_quad.cfg" "nolog")
+man="$TMP/build-nolog/cft_hw.manifest.txt"
+mr=$(sed -n 's/^retimed_runs:  //p' "$man" 2>/dev/null)
+un=$(sed -n 's/^retiming_unresolved: \([^#]*\).*/\1/p' "$man" 2>/dev/null | sed 's/ *$//')
+if [ "$(cat "$TMP/rc-nolog")" != 0 ]; then
+  say_fail "no log: the script exited $(cat "$TMP/rc-nolog")"
+elif [ "$un" != "cft_krnl_2:no-runme.log" ]; then
+  say_fail "no log: retiming_unresolved is '$un', not 'cft_krnl_2:no-runme.log'"
+elif [ "$mr" != "cft_krnl_1 cft_krnl_3 cft_krnl_4" ]; then
+  say_fail "no log: retimed_runs is '$mr'"
+else
+  echo "  ok   no log: cft_krnl_2 named unresolved, the other three retimed"
 fi
 
 # The retiming defect put back: cft_krnl_1's run alone, as the script

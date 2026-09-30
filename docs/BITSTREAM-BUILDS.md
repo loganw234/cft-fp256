@@ -107,7 +107,8 @@ the build. Identical CUs share one synthesis through Vivado's IP
 cache, so a cache hit is followed to the run that added its entry. A
 hit whose entry an earlier build added (a reused `BUILD`, a shared
 cache) has no run to follow, and is named on a separate
-`retiming_unresolved:` line with its cache-ID, not counted either way.
+`retiming_unresolved:` line with its cache-ID, not counted either way,
+and so is a CU whose run left no `runme.log`.
 Until 2026-09-30 the flag reached `cft_krnl_1`'s run
 alone. A single was retimed whole, but a quad had one tile of four
 retimed while its manifest said `retiming: 1` (docs/VALIDATION.md,
