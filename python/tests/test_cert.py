@@ -3082,6 +3082,140 @@ def test_a_run_is_bounded_by_what_was_handed_for_it(lor):
     assert e.run == 1, e.message
 
 
+def test_a_stream_handed_bounds_its_own_run_only(lor):
+    """A stream handed bounds the run it was handed for, as a state does,
+    and no other (verifier-A3's case, 2026-09-29: with a stream for any
+    run bounding every run, test_cert.py stayed green). Run 1 states 10^12
+    lanes, run 0 is handed its three +0 streams, and runs 0 and 2 their
+    states: run 1 is bounded by nothing handed for it, so its +0 streams
+    are never built, and its relation names it - `aux-lanes`, at run 1 -
+    within a second, its traced memory flat against the same audit at 10
+    lanes. Bounded by run 0's stream, it would build [zero] x 10^12."""
+    r0, r1, r2 = lor.runs
+    zero = [0] * LANES
+    got = {}
+    with no_runaway():
+        for L in (10,) + HUGE_LANES:
+            data = cert.encode(keyed(
+                (r0, dataclasses.replace(r1, lanes=L), r2), ()))
+            e, dt, peak = spent("aux-lanes", cert.audit, data, SALT,
+                                lor.progs,
+                                states={0: lor.states[0], 2: lor.states[2]},
+                                streams={0: (zero, zero, zero)})
+            assert (e.run, e.segment) == (1, None), (L, e.message)
+            assert dt < SPEND_SECONDS, (L, dt)
+            assert peak < SPEND_LIMIT, (L, peak)
+            got[L] = peak
+    for L in HUGE_LANES:
+        assert abs(got[L] - got[10]) <= FLAT_SLACK, (L, got[L], got[10])
+
+
+def test_three_nones_are_no_stream_handed(lor):
+    """(None, None, None) is the page's own spelling of three +0 streams,
+    and hands no stream: it bounds nothing (verifier-A3's case,
+    2026-09-29: counted as a stream handed, it would build three
+    [zero] x 10^12 while test_cert.py stayed green). The main run alone,
+    stating 10^12 or 2^63 - 1 lanes, streams {0: (None, None, None)}:
+    with no states, `state-missing` at run 0 boundary 0; with the
+    fixture's 9-element states, `state-shape` there - each within a
+    second, its traced memory flat against the same audit at 10 lanes."""
+    nones = {0: (None, None, None)}
+    got = {}
+    with no_runaway():
+        for L in (10,) + HUGE_LANES:
+            one = _one_run(lor, L)
+            for name, kw in (("state-missing", {}),
+                             ("state-shape", {"states": {0: lor.states[0]}})):
+                e, dt, peak = spent(name, cert.audit, one, SALT,
+                                    {0: lor.progs[0]}, streams=nones, **kw)
+                assert (e.run, e.segment) == (0, 0), (L, name, e.message)
+                assert dt < SPEND_SECONDS, (L, name, dt)
+                assert peak < SPEND_LIMIT, (L, name, peak)
+                got[(L, name)] = peak
+    for (L, name), peak in got.items():
+        assert abs(peak - got[(10, name)]) <= FLAT_SLACK, (L, name, peak)
+
+
+def test_a_run_is_bounded_by_a_state_for_one_of_its_own_boundaries(lor):
+    """The boundaries a state bounds a run from are the run's own, 0 to its
+    S, not the main run's (verifier-A3's case, 2026-09-29: with the main
+    run's S, the audit crashed at step 9 and test_cert.py stayed green).
+    The half-step run is handed its boundary 7 alone - past the main
+    run's S of 4, inside its own 8 - and named to re-run segment 7 from
+    it, beside the other two runs in full: ACCEPTED, every accuracy value
+    re-derived."""
+    st = lor.states
+    v = cert.audit(lor.data, SALT, lor.progs,
+                   states={0: st[0], 1: {7: st[1][7]}, 2: st[2]},
+                   choose={0: "all", 1: [7], 2: "all"})
+    assert v.exit_code == 0
+    assert [r["rerun"] for r in v.runs] == [list(range(S)), [7],
+                                           list(range(S))]
+    assert v.accuracy == list(lor.values)
+    lines = v.lines()
+    assert lines[0] == "cft-certificate 1: ACCEPTED - every check passed"
+    assert lines[3] == (f"run 1 half-step fp64, {LANES} lanes, {2 * S} "
+                        f"segments: re-ran 1 of {2 * S}, the segments named: "
+                        f"[7]")
+
+
+def test_a_run_is_bounded_against_its_own_lanes(lor):
+    """The lanes a state is compared with are its own run's, not the main
+    run's (verifier-A3's case, 2026-09-29: against the main run's 3 lanes,
+    run 1's 9-element states would bound its 10^12, and the audit build
+    [zero] x 10^12 while test_cert.py stayed green). Run 1 states 10^12
+    or 2^63 - 1 lanes, and every run is handed its own states: run 1 is
+    bounded by nothing of its size, and step 7 finds its state too short
+    - `state-shape`, run 1 boundary 0 - within a second, its traced
+    memory flat against the same audit at 10 lanes."""
+    r0, r1, r2 = lor.runs
+    got = {}
+    with no_runaway():
+        for L in (10,) + HUGE_LANES:
+            data = cert.encode(keyed(
+                (r0, dataclasses.replace(r1, lanes=L), r2), ()))
+            e, dt, peak = spent("state-shape", cert.audit, data, SALT,
+                                lor.progs, states=lor.states)
+            assert (e.run, e.segment) == (1, 0), (L, e.message)
+            assert dt < SPEND_SECONDS, (L, dt)
+            assert peak < SPEND_LIMIT, (L, peak)
+            got[L] = peak
+    for L in HUGE_LANES:
+        assert abs(got[L] - got[10]) <= FLAT_SLACK, (L, got[L], got[10])
+
+
+def test_a_bounded_wider_run_beside_an_unbounded_main_run(lor):
+    """Step 8 widens the MAIN run's streams, so its guard reads the main
+    run's bound, not the wider run's (verifier-A3's case A, 2026-09-29:
+    guarded on the wider run instead, the audit crashed and test_cert.py
+    stayed green). The fixture with states for runs 1 and 2 only: the main
+    run is bounded by nothing, its streams were never built, and the
+    wider run's `aux-start` needs its initial state - `state-missing`, run
+    0 boundary 0, the wider relation's and not a re-run's."""
+    e = refused("state-missing", cert.audit, lor.data, SALT, lor.progs,
+                states={1: lor.states[1], 2: lor.states[2]})
+    assert (e.run, e.segment) == (0, 0), e.message
+    assert "exactly widened" in e.message, e.message
+
+
+def test_an_unbounded_wider_runs_streams_are_held_to_the_main_runs(lor):
+    """A wider run's streams are held to the main run's exactly widened
+    whenever the main run is bounded, whether or not the wider run is
+    (verifier-A3's case B, 2026-09-29: with the guard asking both, the
+    defect below went unseen and the audit said `state-missing` at a
+    later run). Run 2's stream a certified as another hash, the main run
+    handed its states, the wider run nothing: `aux-streams`, at run 2 -
+    with the half-step run's states handed too, and without."""
+    r0, r1, r2 = lor.runs
+    bad = dataclasses.replace(r2, streams=("ab" * 32,) + r2.streams[1:])
+    data = cert.encode(dataclasses.replace(lor.cert, runs=(r0, r1, bad),
+                                           accuracy=()))
+    for states in ({0: lor.states[0]}, {0: lor.states[0], 1: lor.states[1]}):
+        e = refused("aux-streams", cert.audit, data, SALT, lor.progs,
+                    states=states)
+        assert (e.run, e.segment) == (2, None), (sorted(states), e.message)
+
+
 BLOCKY = """.format   fp64
 .deposits 0
 .scratch  in 4

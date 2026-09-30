@@ -1186,8 +1186,28 @@ The controls cover:
   - "at least `lanes` elements" at its edge, by values and by bytes
     (9 elements bound 9 lanes and not 10; 71 bytes bound 8 and not 9);
     the output's boundary S bounding as boundary 0 does, and one past S
-    bounding nothing; and a run bounded by its own states, never by
-    another run's;
+    bounding nothing;
+  - a run bounded by what was handed for it alone, which verifier-A3
+    found held only by its run key:
+    - by its own states and streams, never another run's: run 1
+      stating 10^12 lanes beside streams handed for run 0 alone is
+      `aux-lanes` at run 1, within a second, its memory flat;
+    - by a stream handed, and (None, None, None), three +0 streams in
+      the page's own spelling, hands none: the main run stating 10^12
+      lanes beside it is `state-missing` at run 0 boundary 0, or
+      `state-shape` there with its states, within a second, its
+      memory flat;
+    - by a state for one of its own boundaries, not the main run's:
+      the half-step run handed its boundary 7 alone, past the main
+      run's S of 4, and named to re-run segment 7, is ACCEPTED;
+    - against its own `lanes`, not the main run's: run 1 stating
+      10^12 lanes beside every run's own states is `state-shape` at
+      run 1 boundary 0, within a second, its memory flat;
+  - step 8's guard reading the main run's bound, not the wider run's:
+    a bounded wider run beside a main run handed nothing is
+    `state-missing` at run 0's initial state, and an unbounded wider run
+    beside a bounded main run still has its streams held to the main
+    run's widened, `aux-streams` at run 2 (verifier-A3's cases);
   - a segment computed 64 lanes at a time: its end state, flag word and
     STATUS equal to the dense run's, at a depth past 256, over three
     blocks, the last leaving its loop early and alone overflowing and
