@@ -1164,9 +1164,14 @@ clean-programs:
 #                       the flags program through a loopback cft-serve,
 #                       stopped by PID; what a run beside the main run
 #                       costs in memory (peak commit on Windows, the
-#                       least ulimit -v on Linux); and, on Linux, that
-#                       the trial before anything is made costs the runs
-#                       nothing, to the page (NOT TESTED on Windows).
+#                       least ulimit -v on Linux); on Linux, that the
+#                       trial before anything is made costs the runs
+#                       nothing, to the page (NOT TESTED on Windows);
+#                       and --scratch-depth: a program whose answer
+#                       depends on the depth, certified at 256 and at
+#                       2,048 with the depth stated in every run block,
+#                       byte for byte the golden writer's at each and
+#                       audited there, and the option's refusals.
 #                       verify/run.sh's `programs` stage runs it.
 #
 # The tree's build id goes in as make test hands api-test its own, so a

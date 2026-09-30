@@ -1106,7 +1106,7 @@ every boundary, and writes a version-1 certificate. `make -C host all`
 builds it, from `host/tools/segrun.c`.
 
     cft-segrun --out CERT --states DIR (--salt SALT | --open)
-               [--device sw|<xclbin>|cft://host:port]
+               [--device sw|<xclbin>|cft://host:port | --scratch-depth N]
                --run main --image IMG [--bank BANK] --init INIT
                           --segments S --steps K [--param NAME=N ...]
                [--run half-step --h-slots I,J,... --image IMG ...]
@@ -1134,6 +1134,21 @@ builds it, from `host/tools/segrun.c`.
   certificate keyed. `--open` makes it open.
 - `steps` and each `--param` are stated, not checked. Parameters are
   written in the order given, and must already be in byte order.
+- `--scratch-depth N` opens the software backend at N scratch slots a
+  lane through `cft_open_ex`, as positive-run's option does, so that it
+  computes what a tile of that depth must: a non-strict STX or LDX
+  reduces its index modulo the depth.
+  - Every run block then states `parameter scratch-depth N`, in its
+    place in byte order among the run's parameters. That is the
+    parameter the audit reads as the run's depth (see "The chain").
+  - It is written only when the option is given, so every certificate
+    made without it is byte for byte what it was before the option
+    existed.
+  - The identity lines do not change: the software backend's device
+    lines stay `none`, and the depth is stated in the run blocks
+    instead.
+  - N is a power of two from 1 to 32,768, the range `cft_open_ex` takes
+    and the reader holds the parameter to.
 - It writes `accuracy 0`. Accuracy is the plan's step 5.
 - `--hash` prints one of the hashes above for a file's bytes, and
   `--build-id` the library's `cft_build_id()`. The gate holds the first
@@ -1202,7 +1217,15 @@ A writer needs four more, which the golden writer, an API rather than
 a command, never meets. They are the tool's, in sysexits' codes, of
 which 64 is already the auditor's usage:
 - `usage`, exit 64: a command line the tool does not take, or a file it
-  names that cannot be read;
+  names that cannot be read. Among them, refused before anything is
+  made, is a `--scratch-depth`:
+  - beside a `--device` other than `sw`: a device's depth is its image's,
+    and `cft_open_ex` refuses the two together too;
+  - not a power of two from 1 to 32,768, or not in its one decimal
+    spelling;
+  - given twice.
+  A `--param scratch-depth=...` is refused `usage` too: that parameter is
+  written by the option alone, from the depth the backend was opened at;
 - `device`, exit 69: the device does not open; it cannot read the
   sticky flags a certificate records (`cft_caps.flags_readable` 0); a
   digest, or a segment's run, fails; or the library leaves a segment's
@@ -1411,6 +1434,33 @@ cft-serve, stopped by its PID. Their device lines must be the remote
 rule's, and their run blocks byte for byte the software backend's,
 flagstep's flag words and STATUS among them.
 
+It holds `--scratch-depth` on the software backend (the golden-certificate
+round, 2026-09-29):
+- **deepstep**, written in the gate, reads index 256 through a
+  non-strict LDX. That is its own slot 0 at 256 slots, and at 2,048 a
+  slot nothing wrote. Certified at 256 (open) and at 2,048 (open and
+  keyed), each certificate:
+  - states `parameter scratch-depth N` between the run's own `alpha`
+    and `zeta`, in byte order;
+  - is byte for byte the golden writer's at that depth;
+  - has every boundary file the golden chain's;
+  - is accepted by the golden audit in full and sampled, re-run at the
+    depth it states.
+- The two depths end on other states, so the leg holds the depth and
+  not only the line.
+- lorenz63-rk4's main, half-step and wider runs at 2,048 state the
+  depth in every run block, and audit green.
+- Its refusals are among the others:
+  - beside an xclbin and beside a `cft://` device;
+  - 0, 3, 65,536, `02048`, `2048x` and `-2048`;
+  - the option twice, and beside `--hash` or `--build-id`;
+  - a `--param scratch-depth=`.
+- The range's two ends are taken, each refused only by the library's
+  loader, at the depth it opened, for a program that cannot load there:
+  flagstep's two slots at a depth of 1, and at 32,768 an image the loader
+  refuses, so that nothing runs at 32,768. A scratch run's lane block is
+  545 MB there (cft.h).
+
 Last, it holds memory. What a run costs: flagstep on 65,535 lanes, a
 main run and two half-step runs, against the main run alone. The two
 further runs may cost their inputs and one state more, no more. At
@@ -1435,9 +1485,12 @@ NOT TESTED too, and the gate goes on (at eb2d1ae, run as `nobody` under
 a hard limit of about 8 GB, it stopped with a traceback; verifier-C7).
 It also holds git to ignoring the tool's binary.
 
-Since P3b's second send-back: 391 checks on Linux, 41 to 43 s in WSL;
-389 on the Windows desktop and one SKIP, the trial's cost NOT TESTED
-there, 39 to 41 s (2026-09-29). There were 293 at 99f1b43, 380 at
+With `--scratch-depth` (2026-09-29): 458 checks on the Windows desktop
+and one SKIP, the trial's cost NOT TESTED there, 55 s. On Linux the two
+checks of the trial's cost run in the SKIP's place, so 460 there, by
+that arithmetic and not yet run. Before it, since P3b's second
+send-back: 391 checks on Linux, 41 to 43 s in WSL; 389 on the Windows
+desktop and one SKIP, 39 to 41 s. There were 293 at 99f1b43, 380 at
 4eed552 and 389 at eb2d1ae. Verifier-C7 measured 4eed552's 380 at 45
 to 52 s with the desktop at 0 to 4 % CPU, and 163 s at about 93 %.
 
@@ -1484,4 +1537,6 @@ and card-p3b3).
   than 256 slots, fails its own audit rather than passing, unless its
   runs state the server's depth by their `scratch-depth` parameter. A
   certificate made on the software backend is re-run at 256 too, unless
-  its runs state a depth that way ("The chain").
+  its runs state a depth that way ("The chain"). cft-segrun states one
+  in every run block when it is given `--scratch-depth N`, which it
+  takes for the software backend only.
