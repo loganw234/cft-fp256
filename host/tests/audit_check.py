@@ -41,7 +41,16 @@ verdict, line for line.
   5. the narrow build: libcft and cft-audit compiled at CFT_MAX_FORMAT=2
      (a 576-bit cft_bn), which must refuse `build-width` (78) at an
      `accuracy` line counting at least 1, and audit an `accuracy 0`
-     certificate in full.
+     certificate in full;
+  6. the tool's numerics, through a probe build of tools/audit.c
+     (-DCFT_AUDIT_PROBE, never the tool itself): its own division, gcd
+     and exact arithmetic held to Python's integers up to 2,047 bits, its
+     rounding of a rational to cert.round_rational in every format and
+     direction, an element's exact value and width to
+     cert.element_fraction, and the library's widening (cft_convert) and
+     exact decimal (cft_to_decimal_char) to cert.widen and
+     chars.to_decimal - measured before they are trusted, on a fixed
+     seed's random cases and each operation's edges.
 
 With --record DIR, every tool run is kept as a case - its files, its
 command line and the golden verdict it must give - for
@@ -865,24 +874,12 @@ def section_narrow(work, cc, lib_src):
     # cft_config.h allows only with CFT_NO_TRANSCEND; CFT_NO_CONFORMANCE
     # too, since the conformance replay calls the transcendentals and a
     # tool must link (profiles-check compiles each profile, never links)
-    cmd = cc.split() + ["-std=c99", "-O1", "-DCFT_MAX_FORMAT=2",
-                        "-DCFT_NO_TRANSCEND", "-DCFT_NO_CONFORMANCE",
-                        "-Iinclude"] + \
-        lib_src.split() + ["tools/audit.c", "-o", str(exe)]
-    # a compiler named by its path finds its own programs (cc1, as, ld)
-    # and their DLLs beside it: its directory goes on PATH for the
-    # compiler's process alone, never for this one
-    env = dict(os.environ)
-    first = cc.split()[0]
-    if os.path.dirname(first):
-        env["PATH"] = os.path.dirname(first) + os.pathsep + env.get("PATH", "")
     t0 = time.perf_counter()
-    r = subprocess.run(cmd, cwd=str(HOST), capture_output=True, text=True,
-                       env=env)
-    if not check(r.returncode == 0 and exe.is_file(),
-                 f"cft-audit and libcft built at CFT_MAX_FORMAT=2 "
-                 f"({time.perf_counter() - t0:.0f} s)",
-                 r.stderr.strip()[-400:]):
+    built, err = compile_with(cc, lib_src, exe,
+                              ["-DCFT_MAX_FORMAT=2", "-DCFT_NO_TRANSCEND",
+                               "-DCFT_NO_CONFORMANCE"], work)
+    if not check(built, f"cft-audit and libcft built at CFT_MAX_FORMAT=2 "
+                 f"({time.perf_counter() - t0:.0f} s)", err.strip()[-400:]):
         return
     global TOOL
     wide, TOOL = TOOL, exe
@@ -919,6 +916,222 @@ def section_narrow(work, cc, lib_src):
         TOOL = wide
 
 
+# ---- section 6: the numerics against Python's integers and the golden -----------
+
+def compile_with(cc, lib_src, out, defs, work):
+    """cc on the library's sources and tools/audit.c, from host/. A
+    compiler named by its path finds its own programs (cc1, as, ld) and
+    their DLLs beside it: its directory goes on PATH for the compiler's
+    process alone, never for this one. -> (ok, stderr)"""
+    env = dict(os.environ)
+    first = cc.split()[0]
+    if os.path.dirname(first):
+        env["PATH"] = os.path.dirname(first) + os.pathsep + env.get("PATH",
+                                                                    "")
+    cmd = cc.split() + ["-std=c99", "-O2"] + defs + ["-Iinclude"] + \
+        lib_src.split() + ["tools/audit.c", "-o", str(out)]
+    r = subprocess.run(cmd, cwd=str(HOST), capture_output=True, text=True,
+                       env=env)
+    return r.returncode == 0 and out.is_file(), r.stderr
+
+
+def _hexelem(fmt, bits):
+    return f"{bits:0{FORMATS[fmt].width // 4}x}"
+
+
+def _rattext(q):
+    return cert.rational_text(q)
+
+
+def numeric_cases(rng):
+    """(probe line, the answer Python's integers or the golden model give)
+    for every operation the probe has, random under a fixed seed and at
+    the edges each one has."""
+    import math
+    from fractions import Fraction
+    from cft_golden import chars
+    from cft_golden import softfloat as sf
+    out = []
+
+    def nat(bits):
+        return (1 << (bits - 1)) | rng.getrandbits(bits - 1) if bits > 1 \
+            else 1
+
+    # gcd and divmod, up to 2,047 bits: the widest an in-rule step makes
+    fib = [0, 1]
+    while fib[-1].bit_length() < 2040:
+        fib.append(fib[-1] + fib[-2])
+    pairs = [(0, nat(100)), (nat(100), 0), (0, 1), (1, 1), (6, 4),
+             (1 << 2046, 1 << 1000), ((1 << 2047) - 1, (1 << 2047) - 1),
+             (fib[-1], fib[-2]), (nat(2047), 1), (nat(2047), nat(2047)),
+             (nat(2017), nat(2020)), (nat(33), nat(2047))]
+    for _ in range(150):
+        pairs.append((nat(rng.randint(1, 2047)), nat(rng.randint(1, 2047))))
+    for _ in range(60):
+        g = nat(rng.randint(2, 1000))
+        x, y = nat(rng.randint(1, 1000)), nat(rng.randint(1, 1000))
+        if (g * x).bit_length() <= 2047 and (g * y).bit_length() <= 2047:
+            pairs.append((g * x, g * y))
+    for a, b in pairs:
+        out.append((f"gcd {a:x} {b:x}", f"{math.gcd(a, b):x}"))
+        if b:
+            q, r = divmod(a, b)
+            out.append((f"divmod {a:x} {b:x}", f"{q:x} {r:x}"))
+
+    # exact arithmetic: in-rule operands, reduced results of any width the
+    # bigint holds (a product up to 2,046 bits, a sum up to 2,047)
+    def rat():
+        k = rng.random()
+        if k < 0.1:
+            return Fraction(0)
+        if k < 0.3:     # dyadic, as an element's value is
+            q = Fraction(nat(rng.randint(1, 900)),
+                         1 << rng.randint(0, 1000))
+        else:
+            q = Fraction(nat(rng.randint(1, 1023)),
+                         nat(rng.randint(1, 1023)))
+        while abs(q.numerator).bit_length() > 1023 or \
+                q.denominator.bit_length() > 1023:
+            q = Fraction(q.numerator >> 1 or 1, q.denominator)
+        return -q if rng.random() < 0.5 else q
+    ca, cb = (1 << 600) + 1, (1 << 601) - 1
+    rats = [(Fraction(1, ca), Fraction(1, cb)), (Fraction(1, cb),
+                                                 Fraction(-1, cb)),
+            (Fraction(0), Fraction(0)), (Fraction(-1, 3), Fraction(1, 3)),
+            (Fraction((1 << 1023) - 1), Fraction((1 << 1023) - 1)),
+            (Fraction(1, (1 << 1023) - 1), Fraction(-1, (1 << 1023) - 3))]
+    rats += [(rat(), rat()) for _ in range(250)]
+    for x, y in rats:
+        out.append((f"add {_rattext(x)} {_rattext(y)}", _rattext(x + y)))
+        out.append((f"sub {_rattext(x)} {_rattext(y)}", _rattext(x - y)))
+        out.append((f"mul {_rattext(x)} {_rattext(y)}", _rattext(x * y)))
+        out.append((f"cmp {_rattext(x)} {_rattext(y)}",
+                    str((x > y) - (x < y))))
+        out.append((f"cmp {_rattext(x)} {_rattext(x)}", "0"))
+
+    # rounding an in-rule rational into each format, each direction
+    names = ("fp32", "fp64", "fp128", "fp256")
+    rnds = ("rne", "rtz", "rdn", "rup", "rmm")
+
+    def value(fmt, bits):
+        return cert.element_fraction(fmt, bits)[1]
+    for fi, fmt in enumerate(names):
+        f = FORMATS[fmt]
+        qs = [rat() for _ in range(40)]
+        # at and between the format's own values: exact, a tie, a third
+        for _ in range(12):
+            e = rng.randint(-120, 120) if fmt == "fp32" else \
+                rng.randint(-1000, 1000)
+            ulp = Fraction(2) ** (e - f.prec)
+            q0 = nat(f.prec) * ulp
+            qs += [q0, q0 + ulp / 2, -q0 - ulp / 2, q0 + ulp / 3]
+        qs += [Fraction(1 << 200), Fraction(1, 1 << 300),
+               Fraction(1, 1 << 150), Fraction(3, 1 << 151),
+               Fraction(-1, 1 << 150), Fraction(1, 1 << 1022),
+               Fraction(1, (1 << 1022) + 1), Fraction((1 << 1023) - 1),
+               Fraction(1, 3 << 900), Fraction(1, (1 << 900) - 1)]
+        for q in qs:
+            if abs(q.numerator).bit_length() > 1023 or \
+                    q.denominator.bit_length() > 1023:
+                continue
+            for ri, rn in enumerate(rnds):
+                if rng.random() < 0.5 and q not in qs[40:]:
+                    continue
+                out.append((f"round {fi} {ri} {_rattext(q)}",
+                            _hexelem(fmt, cert.round_rational(fmt, q, rn))))
+
+    # elements: exact values, widening, decimals, halves
+    def specials(fmt):
+        """+0, -0, +inf, -inf, a quiet NaN, two signaling ones, the
+        smallest and largest subnormal, the smallest normal, the largest
+        finite, minus the smallest subnormal, and one"""
+        f = FORMATS[fmt]
+        w, mw = f.width, f.man_w
+        ew = w - 1 - mw
+        emask = ((1 << ew) - 1) << mw
+        top = 1 << (w - 1)
+        one = ((1 << (ew - 1)) - 1) << mw
+        return [0, top, emask, top | emask, emask | (1 << (mw - 1)),
+                emask | 1, top | emask | 5, 1, (1 << mw) - 1, 1 << mw,
+                emask - 1, top | 1, one]
+    for fi, fmt in enumerate(names):
+        w = FORMATS[fmt].width
+        bits = specials(fmt) + [rng.getrandbits(w) for _ in range(30)]
+        # values near one, whose exact values are in the rule
+        bits += [(((1 << (w - 2)) - (1 << FORMATS[fmt].man_w)) |
+                  rng.getrandbits(FORMATS[fmt].man_w)) for _ in range(10)]
+        for b in bits:
+            kind, v = cert.element_fraction(fmt, b)
+            if kind != "finite":
+                want = "nonfinite"
+            elif abs(v.numerator).bit_length() > 1023 or \
+                    v.denominator.bit_length() > 1023:
+                want = (f"width {abs(v.numerator).bit_length()} "
+                        f"{v.denominator.bit_length()}")
+            else:
+                want = _rattext(v)
+            out.append((f"exact {fi} {_hexelem(fmt, b)}", want))
+            if fi < 3:
+                out.append((f"widen {fi} {_hexelem(fmt, b)}",
+                            _hexelem(names[fi + 1], cert.widen(fmt, b))))
+            out.append((f"decimal {fi} {_hexelem(fmt, b)}",
+                        chars.to_decimal(FORMATS[fmt], b, 0)[0]))
+            if kind == "finite" and v != 0:
+                half = sf.mul(FORMATS[fmt], b, chars.from_decimal(
+                    FORMATS[fmt], "0.5", sf.RND_RNE)[0])[0]
+                for x in (half, half + 1, half - 1 if half else 0, b):
+                    x &= (1 << w) - 1
+                    kx, vx = cert.element_fraction(fmt, x)
+                    out.append((f"half {fi} {_hexelem(fmt, x)} "
+                                f"{_hexelem(fmt, b)}",
+                                "1" if kx == "finite" and vx == v / 2
+                                else "0"))
+    return out
+
+
+def section_numerics(work, cc, lib_src):
+    print("== 6. the tool's numerics - its division, gcd, exact arithmetic "
+          "and rounding, an element's exact value, and the library's "
+          "widening and exact decimal - against Python's integers and the "
+          "golden model", flush=True)
+    if not cc or not lib_src:
+        skip("the tool's numerics", "no --cc and --lib-src given (make -C "
+             "host audittest gives both)")
+        return
+    import random
+    d = work / "probe"
+    d.mkdir(parents=True, exist_ok=True)
+    exe = d / ("cft-audit-probe" + (".exe" if os.name == "nt" else ""))
+    t0 = time.perf_counter()
+    built, err = compile_with(cc, lib_src, exe, ["-DCFT_AUDIT_PROBE"], work)
+    if not check(built, f"the probe, tools/audit.c with -DCFT_AUDIT_PROBE, "
+                 f"built ({time.perf_counter() - t0:.0f} s)", err[-400:]):
+        return
+    cases = numeric_cases(random.Random(20260929))
+    t0 = time.perf_counter()
+    r = subprocess.run([str(exe)], input="".join(c + "\n" for c, _ in cases),
+                       capture_output=True, text=True, timeout=600)
+    got = r.stdout.split("\n")
+    tally = {}
+    wrong = []
+    for i, (line, want) in enumerate(cases):
+        op = line.split(" ")[0]
+        t = tally.setdefault(op, [0, 0])
+        t[0] += 1
+        if i < len(got) and got[i] == want:
+            t[1] += 1
+        else:
+            wrong.append(f"{line[:120]}: the probe says "
+                         f"{(got[i] if i < len(got) else '(nothing)')[:80]!r}"
+                         f", Python {want[:80]!r}")
+    check(r.returncode == 0, f"the probe ran {len(cases)} operations "
+          f"({time.perf_counter() - t0:.1f} s)", r.stderr.strip()[-300:])
+    for op, (n, good) in sorted(tally.items()):
+        check(n == good, f"{op}: {good} of {n} as Python's integers and the "
+              f"golden model give them",
+              "; ".join(w for w in wrong if w.startswith(op))[:600])
+
+
 # ---- main ----------------------------------------------------------------------
 
 def main():
@@ -932,7 +1145,7 @@ def main():
     ap.add_argument("--keep", help="write everything here and keep it")
     ap.add_argument("--record", help="keep every tool run as a case here, "
                     "for audit_plants.py")
-    ap.add_argument("--sections", default="1,2,3,4,5",
+    ap.add_argument("--sections", default="1,2,3,4,5,6",
                     help="which sections to run (default all)")
     ap.add_argument("--corpus-root", help="the tree whose certificates/ "
                     "holds the golden corpus (default this one)")
@@ -969,6 +1182,8 @@ def main():
                        if args.corpus_root else ROOT)
     if "5" in sections:
         section_narrow(work, args.cc, args.lib_src)
+    if "6" in sections:
+        section_numerics(work, args.cc, args.lib_src)
     if not args.keep:
         shutil.rmtree(work, ignore_errors=True)
     print(f"audit_check: {CHECKS} checks, {len(FAILED)} failed, "

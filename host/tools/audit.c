@@ -3424,6 +3424,166 @@ static int do_sample(const char *seed_s, const char *r_s, const char *S_s,
     return 0;
 }
 
+#if defined(CFT_AUDIT_PROBE)
+/* ---- the probe --------------------------------------------------------- */
+
+/* This file's numerics, one operation a line on stdin and one answer a
+ * line on stdout, so that the gate holds them to Python's integers and
+ * to the golden model (host/tests/audit_check.py, section 6): the
+ * division, the gcd, the exact arithmetic, the rounding, an element's
+ * exact value, and the library's widening and exact decimal, measured
+ * before they are trusted (the brief). Compiled only by the gate, with
+ * -DCFT_AUDIT_PROBE; the tool itself has no such mode.
+ *
+ *   gcd A B | divmod A B          hex naturals, up to 2,047 bits
+ *   add P Q | sub P Q | mul P Q   rationals [-]N/D, reduced
+ *   cmp P Q                       -1, 0 or 1
+ *   round F R P                   format 0..3, direction 0..4: its bits
+ *   exact F H                     nonfinite, width NB DB, or N/D
+ *   widen F H                     H one format up, exactly
+ *   decimal F H                   the exact decimal
+ *   half F X Y                    1 if X is exactly half of Y
+ *
+ * An element is hex, big-endian, width/4 digits, as a certificate
+ * spells one. */
+#if !AUDIT_EXACT
+#error "the probe needs the exact arithmetic: a cft_bn of 2,047 bits or more"
+#endif
+
+static void probe_rat(const char *s, rat *q)
+{
+    const char *slash = strchr(s, '/');
+    q->neg = *s == '-';
+    if (q->neg)
+        s++;
+    bn_from_hex(&q->n, s, (size_t)(slash - s));
+    bn_from_hex(&q->d, slash + 1, strlen(slash + 1));
+    if (cft_bn_is_zero(&q->n))
+        q->neg = 0;
+}
+
+static void probe_elem_out(int f, const uint8_t *le)
+{
+    size_t i;
+    for (i = ESZ(f); i-- > 0;)
+        printf("%02x", le[i]);
+}
+
+int main(void)
+{
+    static char line[1 << 16];
+    while (fgets(line, sizeof line, stdin)) {
+        char *tok[5];
+        int n = 0;
+        char *p = strtok(line, " \n");
+        while (p && n < 5) {
+            tok[n++] = p;
+            p = strtok(NULL, " \n");
+        }
+        if (n == 0)
+            continue;
+        if (!strcmp(tok[0], "gcd") || !strcmp(tok[0], "divmod")) {
+            cft_bn a, b, q, r;
+            char h[CFT_BN_BITS / 4 + 2];
+            bn_from_hex(&a, tok[1], strlen(tok[1]));
+            bn_from_hex(&b, tok[2], strlen(tok[2]));
+            if (tok[0][0] == 'g') {
+                bn_gcd(&q, &a, &b);
+                bn_hex(&q, h);
+                printf("%s\n", h);
+            } else {
+                bn_divmod(&q, &r, &a, &b);
+                bn_hex(&q, h);
+                printf("%s ", h);
+                bn_hex(&r, h);
+                printf("%s\n", h);
+            }
+        } else if (!strcmp(tok[0], "add") || !strcmp(tok[0], "sub") ||
+                   !strcmp(tok[0], "mul") || !strcmp(tok[0], "cmp")) {
+            rat x, y, z;
+            char t[2 * (CFT_BN_BITS / 4) + 8];
+            probe_rat(tok[1], &x);
+            probe_rat(tok[2], &y);
+            if (tok[0][0] == 'c') {
+                printf("%d\n", rat_cmp(&x, &y));
+                continue;
+            }
+            if (tok[0][0] == 'a')
+                rat_add(&z, &x, &y);
+            else if (tok[0][0] == 's')
+                rat_sub(&z, &x, &y);
+            else
+                rat_mul(&z, &x, &y);
+            rat_text(&z, t);
+            printf("%s\n", t);
+        } else if (!strcmp(tok[0], "round")) {
+            int f = atoi(tok[1]), r = atoi(tok[2]);
+            rat q;
+            uint8_t out[32];
+            probe_rat(tok[3], &q);
+            rat_round(&q, f, r, out);
+            probe_elem_out(f, out);
+            printf("\n");
+        } else if (!strcmp(tok[0], "exact")) {
+            int f = atoi(tok[1]), got;
+            uint8_t le[32];
+            elem_t x;
+            rat q;
+            char t[2 * (CFT_BN_BITS / 4) + 8];
+            elem_from_hex(f, tok[2], le);
+            decode(f, le, &x);
+            got = rat_of_elem(&q, &x);
+            if (got == 1) {
+                printf("nonfinite\n");
+            } else if (got == 2) {
+                long nb, db;
+                elem_bits(&x, &nb, &db);
+                printf("width %ld %ld\n", nb, db);
+            } else {
+                rat_text(&q, t);
+                printf("%s\n", t);
+            }
+        } else if (!strcmp(tok[0], "widen")) {
+            int f = atoi(tok[1]);
+            uint8_t le[32], w[32];
+            elem_from_hex(f, tok[2], le);
+            widen(f, le, w, 1);
+            probe_elem_out(f + 1, w);
+            printf("\n");
+        } else if (!strcmp(tok[0], "decimal")) {
+            int f = atoi(tok[1]);
+            uint8_t le[32];
+            size_t len = 0;
+            uint32_t fl = 0;
+            char *buf;
+            cft_status st;
+            elem_from_hex(f, tok[2], le);
+            st = cft_to_decimal_char(host_dev(), (cft_format)f, CFT_RNE, le, 0,
+                                     NULL, 0, &len, &fl);
+            if (st != CFT_ERR_INVALID_ARGUMENT || len == 0)
+                internal("cft_to_decimal_char, sizing", st);
+            buf = (char *)xalloc(len, 1);
+            st = cft_to_decimal_char(host_dev(), (cft_format)f, CFT_RNE, le, 0,
+                                     buf, len, &len, &fl);
+            if (st != CFT_OK)
+                internal("cft_to_decimal_char", st);
+            printf("%s\n", buf);
+            free(buf);
+        } else if (!strcmp(tok[0], "half")) {
+            int f = atoi(tok[1]);
+            uint8_t x[32], y[32];
+            elem_from_hex(f, tok[2], x);
+            elem_from_hex(f, tok[3], y);
+            printf("%d\n", is_half(f, x, y));
+        } else {
+            printf("?\n");
+        }
+    }
+    return 0;
+}
+
+#else /* the tool */
+
 /* ---- main -------------------------------------------------------------- */
 
 int main(int argc, char **argv)
@@ -3623,3 +3783,4 @@ int main(int argc, char **argv)
 #endif
     return 0;
 }
+#endif /* CFT_AUDIT_PROBE */
