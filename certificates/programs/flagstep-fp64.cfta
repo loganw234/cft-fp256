@@ -1,0 +1,40 @@
+; flagstep-fp64 - a segment whose flags and STATUS change from segment to
+; segment: a golden certificate of its own (certificates/MANIFEST;
+; docs/CERTIFICATES.md, "Golden certificates").
+;
+; It is host/tests/segrun_check.py's FLAGSTEP as that gate wrote it on
+; 2026-09-29, copied here so that the corpus does not move when the gate
+; does. From its two lanes of (c, x) = (3, 1) and (3, 5), its five
+; segments raise flags 20, 0, 1, 0 and 20 and STATUS 48, 48, 0, 48 and
+; 48. Every ODE segment raises 16 and 0, so the ODE cases alone cannot
+; tell a writer that drops STATUS, or writes one segment's flags against
+; another, from one that does not.
+.format   fp64
+.deposits 0
+.scratch  in 2
+.scratch  out 2
+.scratch  strict
+.const    ONE   = 0x3ff0000000000000
+.const    THIRD = 0x3fd5555555555555
+.const    HUGE  = 0x7fe0000000000000
+.const    INF   = 0x7ff0000000000000
+; slot 0 is a counter c, slot 1 a value x. Each segment: c <- c - 1;
+; c/3 is inexact where c is not a power of two, c * 2^1023 overflows
+; where |c| >= 2, c * inf is invalid where c = 0; x <- x c.
+ldl    r3, 0
+ldl    r4, 1
+sub    r3, r3, ONE
+mul    r5, r3, THIRD
+mul    r6, r3, HUGE
+mul    r7, r3, INF
+mul    r4, r4, r3
+stl    r3, 0
+stl    r4, 1
+; STATUS: an indexed load at c's bit pattern is past the scratch in a
+; strict image unless c = +0 (bit 5); setact leaves active every lane
+; whose c is not 0, and each deposits past max_deposits 0 (bit 4)
+ldx    r8, r3
+setact r3
+deposit r4
+actall
+halt

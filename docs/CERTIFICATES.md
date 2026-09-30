@@ -23,6 +23,9 @@ Where things stand (2026-09-28):
 - the segment runner, `cft-segrun`, writes version-1 certificates from
   the library (see "The segment runner"), and the `programs` stage
   holds them byte for byte to the golden writer;
+- the golden certificates, twelve programs and their certificates in
+  `certificates/`, hold both writers to committed bytes (see "Golden
+  certificates");
 - the C auditor is later work, in the plan of record:
   [ROADMAP.md](ROADMAP.md), "Segments, certificates and the audit
   tool".
@@ -1508,6 +1511,187 @@ d4abe2a, P3b's three answers (not at ff7ff7b alone),
 382 at eb2d1ae, and 384 of 384 at d4abe2a in 66 to 68 s, nothing
 skipped (2026-09-28 and 29; the round's ledger, card-p3b, card-p3b2
 and card-p3b3).
+
+## Golden certificates
+
+`certificates/` holds a committed corpus of programs and their
+certificates: the plan's step 7. Logan asked for it on 2026-09-29, as
+"programs and their certificates utilized as regression tests
+themselves as well as conformance tests in the future". It is a
+regression test now, and a conformance test for another implementation
+later.
+
+**Why it exists.** The segment runner's gate holds cft-segrun and the
+golden writer to each other, from states it makes fresh. So a change
+that moves both at once passes it: a change to the model, to a hash or
+to an encoding. A committed certificate does not move. Every such change
+either keeps the corpus's bytes, or changes them in a commit that says
+so, made by `python certificates/corpus.py make`.
+
+**The cases.** There are twelve, each small: 2 to 4 lanes, and 2 to 8
+segments a run. Each holds something no other does:
+- `lorenz63-rk4-fp64`, `lorenz96-rk4-fp64` and `henonheiles-lf-fp64`: the
+  three ODE programs at fp64, open. Each has a half-step run and a wider
+  fp128 run beside its main run. lorenz63's carries two estimates:
+  `wider`, enclosed in fp64, and `step-halving`, exact over the lanes.
+- `lorenz63-rk4-fp256`, `lorenz96-rk4-fp256` and `henonheiles-lf-fp256`:
+  the same at fp256, each with a half-step run. henonheiles' carries the
+  energy's drift over its four lanes, exact. The value has a 697-bit
+  numerator and a denominator of 3 x 2^717, 719 bits: near the width
+  rule, where a C auditor's bigint is near its reach.
+- `example`: this page's example certificate, byte for byte, keyed under
+  the example salt, with the page's two entries. The gate holds the
+  page's block to the committed file.
+- `flagstep-fp64`: flags and STATUS that change from segment to segment
+  (20, 0, 1, 0, 20 and 48, 48, 0, 48, 48), which no ODE segment's do.
+- `augsum-fp64`: revision 8. augadd and augerr keep a compensated sum,
+  and a stepped STX and LDX store and read back its partial sums. Only
+  the software backend makes it: no tile built so far publishes either
+  revision-8 bit, and a tile without one refuses the program at load,
+  by name.
+- `deepwrap-fp64-256` and `deepwrap-fp64-2048`: one program and one
+  initial state, certified at 256 slots and at 2,048 through `cft-segrun
+  --scratch-depth`. A non-strict LDX at index 256 and STX at index 258
+  wrap into the carried block at 256 and do not at 2,048, so the two
+  chains differ. Each certificate states its depth.
+- `lorenz63-rk4-fp64-half-init`: a half-step run entered from an initial
+  state of its own. Its runs are what ran, but its stated relation to
+  the main run does not hold, so its expected verdict is the refusal
+  `aux-start`: one committed negative for every auditor.
+
+The corpus's data is about 145 KB.
+
+**The files.**
+- `certificates/MANIFEST`: every case, every file it names, and each
+  file's SHA-256.
+- `certificates/images/`: every image a run names. The gate assembles
+  each again from its source and requires the same bytes:
+  - a library image from `programs/`, whose digest `programs/MANIFEST`
+    also carries;
+  - a wider run's from its main run's source, with the `.format` line a
+    rung up;
+  - the corpus's own from `certificates/programs/`.
+- `certificates/<case>/<case>.cert`: the certificate.
+- `certificates/<case>/states/run-<r>-boundary-<b>.bin`: every boundary
+  of every run, lane-major, as cft-segrun writes them. Handed whole, the
+  directory serves a sampled audit; its boundary-0 files alone serve a
+  full audit from the initial states.
+- `certificates/<case>/run-<r>.bank`: a bank that is no library file, a
+  half-step run's halved bank or a wider run's widened one.
+- `certificates/example.salt`: the example salt, 00 01 .. 1f. This page
+  prints it, so it is a test salt only, and never an owner's.
+- `certificates/corpus.py`: `make` writes the corpus, and `check` is its
+  gate.
+- Git keeps the bytes: a certificate is `-text`, and the states and the
+  salt are `binary` (.gitattributes).
+
+**The manifest** is text in a certificate's own style: printable ASCII
+and LF, one record a line, its key first, single spaces. It takes two
+liberties: `#` begins a comment line, and blank lines separate cases.
+Paths are from the repository's root.
+- It opens with `cft-golden-corpus 1`. Then comes `source <path> <sha256>`
+  for each of the corpus's own programs, and `image <path> <sha256>
+  library <name>` or `image <path> <sha256> source <path> [format <fmt>]`
+  for each image.
+- A block for each case follows:
+  - `case`, then `what`, a sentence for a person;
+  - `certificate <path> <sha256>`;
+  - `mode`, and for a keyed case `salt <path> <sha256>`;
+  - `depth`, and `backends any` or `backends software`;
+  - `accuracy <A> none` or `accuracy <A> golden`, golden when only the
+    golden writer makes the entries, as before step 5;
+  - `verdict accepted` or `verdict refused <name>`;
+  - `states <dir>` and `runs <R>`.
+- Each run follows its case's lines:
+  - its `run` line as the certificate spells it;
+  - `image <path>`;
+  - `bank <path> <sha256>` or `bank none`;
+  - `segments`, `steps`, `parameters` and each `parameter`;
+  - a `boundary <b> <sha256>` line for each boundary, the SHA-256 of the
+    state file's bytes, not the certificate's tagged hash.
+- corpus.py's `read_manifest` reads it strictly and names the line of
+  any departure. Another gate may import it.
+
+**As a regression test.** `make -C host corpustest` runs `corpus.py check
+--tool ./cft-segrun`. For each case it holds:
+1. every file against its SHA-256, and no file under `certificates/` that
+   the manifest does not name, so an edited or added file fails by its
+   name;
+2. every image against its source, assembled again;
+3. the golden writer making the committed bytes again, byte for byte:
+   - `run_chain` and `certify_run` at the case's depth;
+   - each accuracy value derived again, under the definition the
+     committed entry states;
+   - `encode`, handed the committed certificate's identity lines;
+4. every boundary of the golden chain against its committed file;
+5. cft-segrun, on the software backend at the case's depth, writing the
+   committed certificate normalized in two places and in nothing else:
+   - its `build-id` line is what the binary's own `--build-id` prints,
+     and its hash line is computed again over that body;
+   - for an accuracy case, the accuracy block is `accuracy 0`, the block
+     the tool writes before step 5;
+   - why nothing else may differ: every other line is a function of what
+     the manifest fixes (the image, bank, initial state, segments,
+     steps, parameters, mode and salt, and depth) and of the backend,
+     which the gate fixes to software. `build-id` names the library
+     build, which changes with every commit by design, and the hash line
+     covers it;
+   - its boundary files are the committed ones;
+6. the golden audit giving the case its expected verdict, in full from
+   the initial states alone, and sampled from the committed states with
+   its seed printed;
+7. the case named `example` being this page's example certificate.
+
+It is 156 checks, 23 to 27 s on the Windows desktop, niced
+(2026-09-29).
+
+**Changing it.** A change that moves any byte of the corpus fails the
+gate by name: a change to the model, a hash, an encoding, the assembler's
+output, or the `programs/` sources and banks the corpus names. When the
+change is meant, its commit runs `corpus.py make` with a clean build of
+cft-segrun, and says so.
+
+**Its producer.** `make` refuses a tool whose build is not clean, so each
+certificate names a commit anyone can check out.
+- Every certificate but `example`'s was written by cft-segrun built
+  clean from 0b8ea10, the commit that added `--scratch-depth`: its
+  `build-id` is `tracked=clean untracked=none`. The golden writer's
+  accuracy block stands where the case has one.
+- `example`'s is the golden writer's, with the identity this page prints
+  (`build-id unknown`).
+
+**As a conformance test.** Another implementation (another library, a
+GPU library, a tile) takes each case's images, banks and initial states
+from the manifest. It runs every run's segments at the case's depth and
+writes a certificate. It conforms on the case when its certificate
+reproduces:
+- every run block, from `run` to `output`, byte for byte;
+- every accuracy value, where it writes accuracy;
+- and its boundary states are the committed files.
+
+Its identity lines name it, and are not compared; neither is the hash
+line, which covers them. The other rules:
+- **Depth.** A case's depth is its runs' `scratch-depth` parameter where
+  they state one, and 256 otherwise. A tile states its depth in CAPS2
+  and writes no such parameter. So a tile of a case's depth conforms
+  when its run blocks equal the committed ones with that parameter taken
+  out and the parameter count one less.
+- **Revision 8.** A tile without revision 8 refuses `augsum-fp64` at
+  load, by name, and that refusal is its conforming answer.
+- **Auditors.** An auditor conforms when it gives each case its
+  `verdict`, in full and sampled.
+
+The corpus is described here and committed in this repository, and
+published nowhere else. Publishing it outside this repository needs
+Logan's permission.
+
+**What it does not hold yet.**
+- A certificate made on a tile. The lead's, later: a deepwrap case from
+  the revision-7 single, whose CAPS2 reads 2,048, would join with the
+  card's device lines.
+- One made through a remote handle.
+- Streams other than +0, which cft-segrun does not take.
+- Accuracy entries made in C, which are step 5.
 
 ## What version 1 does not do
 

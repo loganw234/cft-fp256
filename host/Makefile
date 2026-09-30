@@ -1194,6 +1194,31 @@ clean-segrun:
 	rm -f cft-segrun cft-segrun.exe
 # ==================== end of the cft-segrun block ==================
 
+# ===================================================================
+# The golden certificates: a committed corpus of programs and their
+# certificates (certificates/; docs/CERTIFICATES.md, "Golden
+# certificates"; the plan of record's step 7, docs/ROADMAP.md)
+#
+#   make corpustest     certificates/corpus.py check: every file against
+#                       certificates/MANIFEST's SHA-256, and none
+#                       unlisted; every image against its source; each
+#                       case made again by the golden writer, byte for
+#                       byte, and by cft-segrun, byte for byte but for
+#                       build-id, the accuracy block it does not write
+#                       before step 5, and the hash line; every boundary
+#                       file; the golden audit's expected verdict, in
+#                       full and sampled; and the page's example.
+#
+# segruntest holds the tool and the golden writer to each other, so a
+# change that moves both at once passes it; this holds both to bytes
+# that do not move. Which runner stage runs it is the lead's, decided
+# at integration (2026-09-29).
+# ===================================================================
+.PHONY: corpustest
+corpustest: cft-segrun$(EXE)
+	$(PYTHON) ../certificates/corpus.py check --tool ./cft-segrun$(EXE)
+# ==================== end of the golden-certificate block ============
+
 # Removes every platform's products, not just this one's. A tree on a
 # shared volume gets built from more than one platform, and a clean
 # that leaves the other platform's shared library behind leaves

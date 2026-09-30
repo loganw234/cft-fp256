@@ -32,3 +32,10 @@ Makefile text eol=lf
 *.xo binary
 # WebAssembly modules are binary; say so rather than let git sniff it
 *.wasm binary
+# The golden certificates (certificates/). A certificate is bytes that
+# certificates/MANIFEST holds by SHA-256, so git never converts one
+# (-text), while a diff still shows it as text. The boundary states and
+# the example salt are binary.
+certificates/**/*.cert -text
+certificates/**/*.bin binary
+certificates/*.salt binary

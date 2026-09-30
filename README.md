@@ -175,6 +175,7 @@ the tables and the method; the charts regenerate with
 | `bindings/` | The WebAssembly build behind the pages above, a Node package, and a Python drop-in for the MPFR pattern. |
 | `hw/` | Vitis packaging, HBM layout and the build pipeline. Bitstreams built and run on silicon. |
 | `vectors/` | The conformance sets: 1,068,915 cases, deterministic and seeded, at the counts `make vectors` passes the generator. The verification runner's `vectors` stage regenerates at the generator's own defaults instead, which is a larger census - 1,224,915 cases over the same 168 sets. |
+| `certificates/` | The golden certificates: twelve programs and their certificates, committed with every input and every boundary state. Both certificate writers must make each one again byte for byte, and the golden audit must give each its expected verdict. So a change to the model, a hash or an encoding that moves both writers at once cannot pass unseen. Another implementation can take the same cases as a conformance test (`docs/CERTIFICATES.md`, "Golden certificates"). |
 
 Each of these has a document in `docs/` carrying the detail, the dates
 and the measurements.

@@ -1,0 +1,47 @@
+; deepwrap-fp64 - a segment whose answer depends on the scratch depth.
+; The golden certificates hold it twice, at 256 slots and at 2,048
+; (certificates/MANIFEST; docs/CERTIFICATES.md, "Golden certificates").
+;
+; docs/SEQUENCER.md, revision 7: a tile's scratch depth is its build's.
+; It is 2,048 slots a lane on the U50's revision-7 images, and 256 on
+; the others and on the software backend unless it is opened at another.
+; A NON-strict STX or LDX reduces its index modulo that depth, so the
+; same image computes other answers on devices of other depths.
+;
+; The state is three slots a lane, (x, y, z), and the program indexes
+; past them:
+;   `ldx` at index 256 is slot 0, x, at 256 slots. At 2,048 it is a
+;     slot no instruction writes before this read, so it reads +0.
+;   `stx` at index 258 is slot 2, z, at 256 slots, so z becomes the new
+;     x. At 2,048 the store lands past the carried block and is lost.
+; So from one state, y grows by x/2 a segment at 256 and holds at 2,048,
+; and z follows x at 256 and keeps its value at 2,048. A certificate
+; says which it ran at: a software run states `parameter scratch-depth
+; N` ("The chain"). A strict image would have reported both accesses
+; instead (STATUS[5]) at 256; this one is not strict on purpose.
+.format   fp64
+.deposits 0
+.scratch  in 3
+.scratch  out 3
+.const    I256  = 0x0000000000000100   ; the raw encoding of integer 256
+.const    I258  = 0x0000000000000102   ; and of integer 258
+.const    HALF  = 0.5
+.const    GROW  = 1.25
+.const    SHIFT = 0.5
+.reg      x     = r3
+.reg      y     = r4
+.reg      at    = r6                   ; +0 at the start: integer 0
+.reg      seen  = r7
+.reg      to    = r8                   ; +0 at the start: integer 0
+
+ldl    x, 0
+ldl    y, 1
+iadd   at, at, I256
+ldx    seen, at                        ; slot 256 mod the depth
+fma    y, seen, HALF, y                ; y := seen/2 + y
+fma    x, x, GROW, SHIFT               ; x := 1.25 x + 0.5
+stl    x, 0
+stl    y, 1
+iadd   to, to, I258
+stx    x, to                           ; slot 258 mod the depth := x
+halt
