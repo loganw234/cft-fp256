@@ -58,9 +58,15 @@
  * only bound that could is one that is too SMALL, which is why every
  * rule rounds up and why the saturating arithmetic saturates upward.
  *
- * A saturated error (CFT_MP_ERR_MAX) is therefore not an error
- * condition: it is a value whose enclosure is too wide to decide, and
- * the Ziv loop above will raise the precision and try again.
+ * The exception is saturation. A saturated error (CFT_MP_ERR_MAX) is a
+ * clamp, not a bound, and it is NOT too wide to decide: at any working
+ * precision about 41 bits above the format's, which is every ordinary
+ * one, cft_mp_round decides on it. Measured on 2026-09-30, 17,816 of
+ * 298,133 final roundings in host/tests/transcend_check.py's sweep
+ * decided that way, every result equal to the model's. So "it can
+ * never produce a wrong answer" above holds for every unsaturated
+ * bound, and for a saturated one it is not proved. mpfloat.c's header
+ * has the measurement, and why refusing to decide is not the repair.
  */
 
 #ifndef CFT_MPFLOAT_H
@@ -80,9 +86,9 @@
  * fp256 exponent range can demand. */
 #define CFT_MP_PREC_MAX 928
 
-/* An error bound this large cannot decide any rounding, so it is the
- * saturation point rather than a failure. Kept far below UINT64_MAX so
- * that the scaling in cft_mp_add cannot wrap. */
+/* The saturation point. A count here is a clamp, not a bound, and it
+ * can still decide a rounding (mpfloat.c's header). Kept far below
+ * UINT64_MAX so that the scaling in cft_mp_add cannot wrap. */
 #define CFT_MP_ERR_MAX ((uint64_t)1 << 40)
 
 typedef struct {
@@ -122,6 +128,10 @@ int  cft_mp_div(cft_mp *r, const cft_mp *a, const cft_mp *b, int W);
 int  cft_mp_mul_ui(cft_mp *r, const cft_mp *a, uint32_t u, int W);
 int  cft_mp_div_ui(cft_mp *r, const cft_mp *a, uint32_t u, int W);
 int  cft_mp_sqrt(cft_mp *r, const cft_mp *a, int W);
+
+/* An error count times 2^k, rounded up and saturating: the one way
+ * this module and transcend.c rescale a bound. */
+uint64_t cft_mp_err_scale(uint64_t err, int k);
 int  cft_mp_const(cft_mp *r, cft_mp_constant which, int W);
 
 /* floor(sqrt(n)) with an exactness flag, for the exact-case tests in

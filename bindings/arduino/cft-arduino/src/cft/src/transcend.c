@@ -1532,7 +1532,6 @@ static int mp_log_of_mp(cft_mp *r, const cft_mp *v, int W)
     cft_mp l;
     uint64_t add;
     long E0;
-    int sh;
 
     if (v->zero || v->sign)
         return 1;
@@ -1543,16 +1542,9 @@ static int mp_log_of_mp(cft_mp *r, const cft_mp *v, int W)
     E0 = cft_mp_exp2_of(&l);
     if (E0 < -32)
         return 1;                        /* too near 1 to convert the bound */
-    add = v->err;
-    sh = 1 - (int)E0;
-    if (sh > 0) {
-        if (sh >= 40 || add > (CFT_MP_ERR_MAX >> sh))
-            add = CFT_MP_ERR_MAX;
-        else
-            add <<= sh;
-    } else if (sh < 0) {
-        add >>= (-sh > 63 ? 63 : -sh);
-    }
+    /* Rounded up: this floored until 2026-09-30, as cft_mp_add's
+     * cancellation did. */
+    add = cft_mp_err_scale(v->err, 1 - (int)E0);
     mp_bump(&l, add);
     cft_mp_copy(r, &l);
     return 0;

@@ -52,7 +52,12 @@
  *                the result's vr, the amplification is 2^(va - vr) and
  *                2^(vb - vr) respectively:
  *                        2*(Ea << (ea-er)) + 2*(Eb << (eb-er)) + 2
- *                which is where a subtraction that loses k bits costs
+ *                each scaling rounded up (cft_mp_err_scale), since
+ *                a shorter operand's error is scaled DOWN, and a
+ *                floor there dropped up to a unit: until 2026-09-30,
+ *                err 2 where the worst true error is 2.5 units
+ *                (verifier-F4 of the fixes round, measured). That
+ *                is where a subtraction that loses k bits costs
  *                k bits of the error budget. This is the term the
  *                algorithms in transcend.c are shaped to keep small.
  *
@@ -62,19 +67,35 @@
  *                sqrt's O(e^2), about Ea^2 2^-(W+3) units, to the
  *                slack of the other rules: below 2^-11 units at the
  *                smallest ordinary working precision (2p + 40 = 88
- *                bits, fp32) for any unsaturated Ea, and larger only
- *                under the 64-bit test override (verifier-F1,
- *                2026-09-30; the code carried no + 2 at all before
- *                that day, see cft_mp_sqrt).
+ *                bits, fp32) for any unsaturated Ea, and smaller
+ *                under the 64-bit test override, where a square
+ *                root still runs at 104 bits or more (verifiers F1
+ *                and F4, 2026-09-30; the code carried no + 2 at all
+ *                before that day, see cft_mp_sqrt).
  *
  *   scale by 2^k Exact.                                        +0
  *
- * All of it is saturating upward at CFT_MP_ERR_MAX, which is not a
- * failure: a saturated bound simply cannot decide a rounding, so the
- * Ziv loop raises the working precision and tries again. The one thing
- * that would be a failure is a bound that is too small, which is why
- * every rule above rounds its first-order terms up and why none of
- * them is an estimate. Second-order terms are left to the rules'
+ * All of it saturates upward at CFT_MP_ERR_MAX, and a saturated count
+ * is a CLAMP, not a bound: the true error may be larger, and the count
+ * still decides. enclosure() is m +- err in the significand's own
+ * units, so a count of 2^40 is narrow enough to decide a rounding at
+ * any working precision about 41 bits or more above the format's,
+ * which is every ordinary one (verifier-F4 of the fixes round). A
+ * square root or a cancellation can also scale a saturated count down
+ * into an ordinary-looking one. It is not rare. Measured on 2026-09-30
+ * over host/tests/transcend_check.py at the contract's precision:
+ * 1,781,005 saturations, 1,769,620 of them the cancellation rule
+ * amplifying an inexact operand's error, and 17,816 of 298,133 final
+ * roundings decided on a saturated count. Every one of the 607,217
+ * results equalled the model's rigorous enclosure. Refusing to decide
+ * on a saturated count is not a repair: it makes calls such as expm1
+ * of fp32 0x42b17218 refuse at the Ziv cap, because the cancellation
+ * saturates at every working precision. A count that cannot clamp is
+ * the repair, and it is a follow-up (docs/ROADMAP.md, "Steps 5 and 6").
+ * The one thing that would be a failure is a bound that is too small,
+ * which is why every rule above rounds its first-order terms up and
+ * why none of them is an estimate - saturation apart. Second-order
+ * terms are left to the rules'
  * slack: sqrt's exact case, and an incoming error times a truncation
  * in mul_ui, div_ui and like-sign add, which pass err_in with no spare
  * unit. verifier-F1 found them on 2026-09-30, sub-unit at the ordinary
@@ -105,12 +126,23 @@ static uint64_t err_add(uint64_t a, uint64_t b)
     return s;
 }
 
-static uint64_t err_shl(uint64_t a, int k)
+/* An error count times 2^k, rounded UP and saturating. A count scaled
+ * down keeps any unit it would drop, since a bound rounded down is not
+ * a bound. */
+uint64_t cft_mp_err_scale(uint64_t a, int k)
 {
     if (a == 0)
         return 0;
-    if (k < 0)
-        return a >> (-k > 63 ? 63 : -k);
+    if (k < 0) {
+        int s = -k;
+        uint64_t q;
+        if (s > 63)
+            return 1;
+        q = a >> s;
+        if (a & (((uint64_t)1 << s) - 1))
+            q++;
+        return q;
+    }
     if (k >= 63 || a > (CFT_MP_ERR_MAX >> k))
         return CFT_MP_ERR_MAX;
     return a << k;
@@ -315,8 +347,8 @@ int cft_mp_add(cft_mp *r, const cft_mp *a, const cft_mp *b, int W)
             int lr = cft_bn_bitlen(&s);
             int la = cft_bn_bitlen(&ma);
             int lb = cft_bn_bitlen(&mb);
-            err_out = err_add(err_shl(erra, la - lr + 1),
-                              err_shl(errb, lb - lr + 1));
+            err_out = err_add(cft_mp_err_scale(erra, la - lr + 1),
+                              cft_mp_err_scale(errb, lb - lr + 1));
         }
     }
     return mp_norm(r, W, sign, &s, e0, err_out);
