@@ -888,6 +888,12 @@ def main():
                     help=f"the converged reference's tolerance ({TAU})")
     ap.add_argument("--keep", help="keep the sweep's runs in this directory")
     args = ap.parse_args()
+    # LF on every platform, so that a re-run redirected to a file diffs
+    # against the committed run line for line (Windows would write CRLF)
+    try:
+        sys.stdout.reconfigure(newline="\n")
+    except (AttributeError, ValueError):
+        pass
     if mpmath is None:
         sys.exit("estimates: needs mpmath - check.py's 300-digit arm is "
                  "written in it, and odefun is its")
