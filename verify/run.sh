@@ -885,11 +885,12 @@ stage character "the clause-5.12 conversions and the 9.7 payloads vs the model, 
   PY "$ROOT/host/tests/character_check.py"
 
 # The transcendentals, twice. The first run is at the contract's
-# own working precision, where the Ziv loop has never once
-# escalated; the second forces the library to START below the
-# precision it needs, so the escalation path runs - against an
-# UNESCALATED model, which is what makes it a comparison rather
-# than a coincidence. That second run is what found the
+# own working precision, where the Ziv loop seldom escalates (84
+# times over the whole run, counted in an instrumented library on
+# amd-arc-box on 2026-09-30); the second forces the library to
+# START below the precision it needs, so the escalation path runs at
+# scale - against an UNESCALATED model, which is what makes it a
+# comparison rather than a coincidence. That second run is what found the
 # exact-cancellation hole in the evaluator's error bound, twice: once
 # in phase 1 and once on 2026-09-03, when the first repair turned out
 # to be unsound at any working precision above 41 bits.
