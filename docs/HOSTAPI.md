@@ -2311,6 +2311,54 @@ an older failure's sentence can outlive its call. Read
 detail for that call when it names it (verifier-V9 and the lead,
 2026-09-28).
 
+**`cft_program_load` is an exception to that, since 2026-09-30.**
+It clears the library's slot on entry, and every refusal it makes
+writes a sentence of its own:
+- the header's, `CFT_ERR_ARTIFACT`: a short image, the magic, the
+  version, `scratch_io` without its flag, an unknown flag bit, a
+  precision code off the ladder, a length other than the header
+  describes;
+- the instruction stream's, `CFT_ERR_INVALID_ARGUMENT`, each naming
+  the instruction and what it breaks: its opcode or control code, the
+  field and its value, or the loop or the bound it passes;
+- the library's own deposit ceiling, and a NULL argument.
+Until then 33 of those refusals wrote nothing, so each showed whatever
+an earlier call had left. P2 of the revision-7 round measured one
+printing a `cft_run_ex` index refusal's words. Run against the library
+before the change, every refusal `api-test` now holds did the same. So
+after a refused load `cft_last_error()` is that load's reason, in the
+meaning of the golden model's `ProgramError` for the same image. For
+an image with two faults the two may each name a different one, since
+their checks ran in different orders before this change:
+
+    instruction 3 is DEPOSIT, which reads only imm & 0x02000000, so
+    imm = 0x01000000 sets a bit it does not read
+
+After a load that succeeds, the library's slot is empty. A device
+backend's older message can still show through an empty slot, so the
+guarantee rests on the sentences, not on the clear: `seq_check.py`
+holds a refusal on a `cft://` handle after the remote backend's own
+failure. The loader's four allocation failures carry no sentence; the
+remote and XRT backends name their own out-of-memory failures. Two
+exceptions remain:
+- a build with `CFT_ERRMSG_MAX` 1 drops sentences by design, so its
+  slot shows a remote handle's older message;
+- on XRT, a load that `cft_host_in` refuses (a lost resident buffer)
+  can show a remote handle's older sentence first, in a process that
+  holds both, the order verifier-V10 recorded.
+
+No status changed on a 64-bit host. On a 32-bit one (wasm32, the
+32-bit boards), an image whose header describes more bytes than a
+`size_t` holds could wrap the length check, and where the wrapped
+length matched the image's size it came back `CFT_ERR_OUT_OF_MEMORY`
+from the allocation. The length is computed in
+64 bits now, so that image is `CFT_ERR_ARTIFACT` there too. The
+committed WebAssembly module was built before the change and carries
+it from its next rebuild. `api-test` holds every one of these
+refusals but the deposit ceiling, which no software handle reaches and
+`seq_check.py` holds through a `cft://` handle. It also holds the slot
+after a good load.
+
 **Every `CFT_ERR_UNSUPPORTED` carries a sentence (2026-09-14)** - on
 every profile but `CFT_TINY`, whose one-byte `CFT_ERRMSG_MAX` keeps
 the status and drops every sentence (docs/EMBEDDED.md). It did

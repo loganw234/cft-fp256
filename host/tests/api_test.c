@@ -554,6 +554,109 @@ static int build_id_form(const char *s, char *why, size_t n)
     return 0;
 }
 
+/* ---- the program-load refusals (the fixes round's Q5, 2026-09-30) ---
+ *
+ * One instruction word, as a constant expression so the case table in
+ * main can hold it: op[7:0], rd[11:8], ra[15:12], rb[19:16], rc[23:20],
+ * rnd[26:24], the flags ka kb kc kx at 27..30 (`k`: LD_KA and friends),
+ * ctrl 31, imm[63:32] - docs/SEQUENCER.md's layout. */
+#define LD_KA 1u
+#define LD_KB 2u
+#define LD_KX 8u
+#define LDW(c, op, rd, ra, rb, rc, rnd, k, imm)                            \
+    ((uint64_t)(op) | ((uint64_t)(rd) << 8) | ((uint64_t)(ra) << 12) |    \
+     ((uint64_t)(rb) << 16) | ((uint64_t)(rc) << 20) |                    \
+     ((uint64_t)(rnd) << 24) | ((uint64_t)(k) << 27) |                    \
+     ((uint64_t)(c) << 31) | ((uint64_t)(uint32_t)(imm) << 32))
+#define LD_ALU(op, rd, ra, rb, rc, rnd, k, imm)                            \
+    LDW(0, op, rd, ra, rb, rc, rnd, k, imm)
+#define LD_CTL(op, rd, ra, rb, rc, rnd, k, imm)                            \
+    LDW(1, op, rd, ra, rb, rc, rnd, k, imm)
+#define LD_HALT       LD_CTL(0, 0, 0, 0, 0, 0, 0, 0)
+#define LD_REPEAT(t)  LD_CTL(1, 0, 0, 0, 0, 0, 0, (t))
+#define LD_ENDREP     LD_CTL(2, 0, 0, 0, 0, 0, 0, 0)
+#define LD_ADD        LD_ALU(1, 0, 0, 0, 0, 0, 0, 0)
+
+/* An image: the header, `n_consts` zero constants of `esz` bytes (none
+ * under BANK_EXT), then `n` instructions. Returns its length. `img`
+ * must hold 32 + n_consts * esz + 8 * n bytes. */
+static size_t ld_image(uint8_t *img, uint32_t magic, uint32_t ver,
+                       uint32_t prec, size_t esz, uint32_t flags,
+                       uint32_t scratch_io, uint32_t maxdep,
+                       uint32_t n_consts, const uint64_t *ins, size_t n)
+{
+    size_t off = 32, k;
+    put32(img + 0, magic);
+    put32(img + 4, ver);
+    put32(img + 8, (uint32_t)n);
+    put32(img + 12, n_consts);
+    put32(img + 16, maxdep);
+    put32(img + 20, prec);
+    put32(img + 24, flags);
+    put32(img + 28, scratch_io);
+    if (!(flags & CFT_PROG_FLAG_BANK_EXT)) {
+        memset(img + off, 0, (size_t)n_consts * esz);
+        off += (size_t)n_consts * esz;
+    }
+    for (k = 0; k < n; k++, off += 8)
+        put64(img + off, ins[k]);
+    return off;
+}
+
+/* A failing call that leaves a sentence of its own in cft_last_error():
+ * P2's, the one measured explaining a load refusal in the revision-7
+ * round - cft_run_ex, an index at its source's length. Returns whether
+ * it did. */
+static int ld_plant(cft_device *dev)
+{
+    uint8_t a8[4 * 8], d8[4 * 8];
+    uint32_t ix[4] = { 0u, 1u, 4u, 3u };     /* 4 is past the source */
+    cft_elem_args E;
+    memset(a8, 0, sizeof a8);
+    memset(&E, 0, sizeof E);
+    E.struct_size = sizeof E;
+    E.a = a8; E.b = a8; E.c = a8; E.d = d8; E.n = 4;
+    E.idx_a = ix; E.idx_a_src = 4;
+    return cft_run_ex(dev, CFT_ADD, CFT_FP64, CFT_RNE, &E) ==
+               CFT_ERR_INVALID_ARGUMENT &&
+           strstr(cft_last_error(), "cft_run_ex") != NULL;
+}
+
+/* A load that must be refused: a sentence planted first on `live`, then
+ * the load on `dev`, held to its status - the one each always had on a
+ * 64-bit host, and since 2026-09-30 on a 32-bit one too - and to a
+ * sentence of its own, non-empty, not the planted one, and saying each
+ * of `say0`..`say2` (NULL ends the list early). `dev` and `img` may be
+ * NULL, and `give_out` 0 passes a NULL `out`: three of the refusals. */
+static void ld_expect(cft_device *live, cft_device *dev, const char *what,
+                      const void *img, size_t bytes, int give_out,
+                      cft_status want, const char *say0, const char *say1,
+                      const char *say2)
+{
+    const char *says[3];
+    cft_program *prog = NULL;
+    cft_status st;
+    const char *msg;
+    size_t k;
+
+    says[0] = say0; says[1] = say1; says[2] = say2;
+    CHECK(ld_plant(live), "%s: the call meant to plant a sentence first "
+          "left none", what);
+    st = cft_program_load(dev, img, bytes, give_out ? &prog : NULL);
+    msg = cft_last_error();
+    CHECK(st == want, "%s: %s, and the status must be %s (%s)", what,
+          cft_strerror(st), cft_strerror(want), msg);
+    CHECK(msg[0] != '\0', "%s: refused with no sentence", what);
+    CHECK(strstr(msg, "cft_run_ex") == NULL,
+          "%s: the sentence is an earlier call's: '%s'", what, msg);
+    for (k = 0; k < 3 && says[k]; k++)
+        CHECK(strstr(msg, says[k]) != NULL,
+              "%s: the sentence does not say \"%s\": '%s'", what, says[k],
+              msg);
+    if (st == CFT_OK)
+        cft_program_free(prog);
+}
+
 /* ------------------------------------------------------------------ */
 
 int main(void)
@@ -5137,6 +5240,306 @@ int main(void)
               "cft_open_ex with no args is refused");
         CHECK(cft_open_ex(&oa, NULL) == CFT_ERR_INVALID_ARGUMENT,
               "cft_open_ex with nowhere to put the handle is refused");
+    }
+
+    /* --- every refusal in the program-load path says why, and never
+     *     another call's why (the fixes round's Q5, 2026-09-30) --------
+     *
+     * CLAUDE.md's discipline: what cannot be done is refused BY NAME, and
+     * cft_last_error() carries the sentence behind a refusal
+     * (host/src/backend.h). cft_program_load broke that twice, as P2 of
+     * the revision-7 round found. Refusals in its own body (eight, the
+     * NULL argument's among them), in seq_validate (sixteen) and in
+     * seq_check_operands (nine) returned a status and no sentence; and it
+     * never cleared the slot, so such a refusal printed an earlier call's
+     * sentence - P2 measured a cft_run_ex index refusal explaining a load.
+     *
+     * Every one fires here, each on its own image, after a failing call
+     * has planted a sentence (ld_expect), and each is held to three
+     * things: its status, which is what it always was; a sentence that
+     * names the cause - the instruction, the code or opcode, the field,
+     * the value and its limit - in the meaning of the ProgramError the
+     * golden model's seq.py raises for the same image; and not the
+     * planted one. One refusal cannot fire on a software handle: the
+     * library's own ceiling on max_deposits, which a handle that
+     * publishes a cap of its own reaches second, refused by name there
+     * (cft_seq_cap_refusal). seq_check.py holds it, through a remote
+     * handle to a server that publishes none.
+     *
+     * Then the entry clear on its own. With every refusal named, a
+     * refusal's sentence replaces the planted one whether or not the
+     * slot was cleared first. What only the clear does is empty the slot
+     * where the load writes nothing, and a load that succeeds is that
+     * case: so the last leg plants a sentence, loads a good image and
+     * wants the slot empty. */
+    {
+        static const struct {
+            const char *what;
+            cft_status  want;
+            uint32_t    magic, ver, prec, flags, scr, n_consts;
+            size_t      n;
+            uint64_t    ins[11];
+            const char *say[3];
+        } L[] = {
+            /* the header's own; 0 in magic and ver is the valid one */
+            { .what = "a magic that is not CFTP",
+              .want = CFT_ERR_ARTIFACT, .magic = 0x12345678u,
+              .n = 1, .ins = { LD_HALT },
+              .say = { "magic is 0x12345678", "not 0x50544643" } },
+            { .what = "a program-image version this library does not read",
+              .want = CFT_ERR_ARTIFACT, .ver = 2u,
+              .n = 1, .ins = { LD_HALT },
+              .say = { "version 2", "reads version 1" } },
+            { .what = "scratch_io non-zero without SCRATCH_IO",
+              .want = CFT_ERR_ARTIFACT, .scr = 0x00010002u,
+              .n = 1, .ins = { LD_HALT },
+              .say = { "scratch_io, is 0x00010002",
+                       "do not carry SCRATCH_IO" } },
+            { .what = "a flag bit this library does not know",
+              .want = CFT_ERR_ARTIFACT, .flags = 0x80u,
+              .n = 1, .ins = { LD_HALT },
+              .say = { "flags are 0x00000080", "0x00000080 of that",
+                       "BANK_EXT" } },
+            { .what = "a precision code off the ladder",
+              .want = CFT_ERR_ARTIFACT, .prec = 4u,
+              .n = 1, .ins = { LD_HALT },
+              .say = { "precision code is 4", "3 fp256" } },
+            /* seq_validate: the bound, the loops, the codes */
+            { .what = "a worst case past 2^40 instructions",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 6,
+              .ins = { LD_REPEAT(1u << 20), LD_REPEAT(1u << 20), LD_ADD,
+                       LD_ENDREP, LD_ENDREP, LD_HALT },
+              .say = { "instruction 2", "1099512676353",
+                       "1099511627776 (2^40)" } },
+            { .what = "a trip-count product past 2^40",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 5,
+              .ins = { LD_REPEAT(1u << 20), LD_REPEAT(1u << 21), LD_ENDREP,
+                       LD_ENDREP, LD_HALT },
+              .say = { "instruction 1 is REPEAT 2097152", "1048576 times",
+                       "1099511627776" } },
+            { .what = "REPEAT 0",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 3,
+              .ins = { LD_REPEAT(0), LD_ENDREP, LD_HALT },
+              .say = { "instruction 0 is REPEAT 0", "not a loop" } },
+            { .what = "five nested loops",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 11,
+              .ins = { LD_REPEAT(1), LD_REPEAT(1), LD_REPEAT(1), LD_REPEAT(1),
+                       LD_REPEAT(1), LD_ENDREP, LD_ENDREP, LD_ENDREP,
+                       LD_ENDREP, LD_ENDREP, LD_HALT },
+              .say = { "instruction 4", "inside 4 open loops",
+                       "at most 4 deep" } },
+            { .what = "an ENDREP with no REPEAT open",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_ENDREP, LD_HALT },
+              .say = { "instruction 0 is an ENDREP", "no REPEAT open" } },
+            { .what = "ACTALL inside a loop",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 4,
+              .ins = { LD_REPEAT(2), LD_CTL(5, 0, 0, 0, 0, 0, 0, 0),
+                       LD_ENDREP, LD_HALT },
+              .say = { "instruction 1 is ACTALL inside a loop",
+                       "early exit" } },
+            { .what = "HALT inside a loop",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 4,
+              .ins = { LD_REPEAT(2), LD_HALT, LD_ENDREP, LD_HALT },
+              .say = { "instruction 1 is HALT inside a loop",
+                       "cannot gate it" } },
+            { .what = "a loop left open at the end",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_REPEAT(2), LD_ADD },
+              .say = { "after instruction 1", "inside 1 open loop",
+                       "ENDREP" } },
+            { .what = "an unknown control code",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_CTL(12, 0, 0, 0, 0, 0, 0, 0), LD_HALT },
+              .say = { "instruction 0 is control code 12", "0 to 11" } },
+            { .what = "a reserved rounding attribute",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_ALU(1, 0, 0, 0, 0, 5, 0, 0), LD_HALT },
+              .say = { "instruction 0 (add, opcode 1)", "rnd is 5",
+                       "0 to 4" } },
+            /* a field each control code does not read, one per row of
+             * seq_ctrl: an operand field, rnd, a k flag or kx, imm */
+            { .what = "HALT naming rb",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 1,
+              .ins = { LD_CTL(0, 0, 0, 3, 0, 0, 0, 0) },
+              .say = { "instruction 0 is HALT", "does not read rb",
+                       "it is 3" } },
+            { .what = "REPEAT with a rounding attribute",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 3,
+              .ins = { LD_CTL(1, 0, 0, 0, 0, 1, 0, 2), LD_ENDREP, LD_HALT },
+              .say = { "instruction 0 is REPEAT", "does not read rnd",
+                       "it is 1" } },
+            { .what = "ENDREP with kx",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 4,
+              .ins = { LD_REPEAT(2), LD_CTL(2, 0, 0, 0, 0, 0, LD_KX, 0),
+                       LD_ENDREP, LD_HALT },
+              .say = { "instruction 1 is ENDREP", "does not read kx" } },
+            { .what = "DEPOSIT with rd's high bit",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_CTL(3, 0, 4, 0, 0, 0, 0, 1u << 24), LD_HALT },
+              .say = { "instruction 0 is DEPOSIT", "imm & 0x02000000",
+                       "imm = 0x01000000" } },
+            { .what = "SETACT with ka",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_CTL(4, 0, 1, 0, 0, 0, LD_KA, 0), LD_HALT },
+              .say = { "instruction 0 is SETACT", "does not read ka" } },
+            { .what = "ACTALL naming rd",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_CTL(5, 1, 0, 0, 0, 0, 0, 0), LD_HALT },
+              .say = { "instruction 0 is ACTALL", "does not read rd",
+                       "it is 1" } },
+            { .what = "STL naming rb",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_CTL(6, 0, 0, 1, 0, 0, 0, 0), LD_HALT },
+              .say = { "instruction 0 is STL", "does not read rb" } },
+            { .what = "LDL naming ra",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_CTL(7, 4, 2, 0, 0, 0, 0, 0), LD_HALT },
+              .say = { "instruction 0 is LDL", "does not read ra",
+                       "it is 2" } },
+            { .what = "STX with imm[13], read by nothing",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_CTL(8, 0, 0, 1, 0, 0, 0, 1u << 13), LD_HALT },
+              .say = { "instruction 0 is STX", "imm & 0x06000fff",
+                       "imm = 0x00002000" } },
+            { .what = "LDX naming rc",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_CTL(9, 4, 0, 1, 1, 0, 0, 0), LD_HALT },
+              .say = { "instruction 0 is LDX", "does not read rc" } },
+            { .what = "AUGADD with a rounding attribute",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_CTL(10, 3, 0, 1, 0, 2, 0, 0), LD_HALT },
+              .say = { "instruction 0 is AUGADD", "does not read rnd",
+                       "it is 2" } },
+            { .what = "AUGERR with imm[0]",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_CTL(11, 3, 0, 1, 0, 0, 0, 1), LD_HALT },
+              .say = { "instruction 0 is AUGERR", "imm & 0x07000000",
+                       "imm = 0x00000001" } },
+            /* seq_check_operands: an ALU instruction's operands */
+            { .what = "an ALU instruction with imm[31]",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_ALU(1, 0, 0, 0, 0, 0, 0, 0x80000000u), LD_HALT },
+              .say = { "instruction 0 (add, opcode 1)",
+                       "imm[31] is reserved" } },
+            { .what = "kx with no operand naming a constant",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_ALU(1, 0, 0, 0, 0, 0, LD_KX, 0), LD_HALT },
+              .say = { "instruction 0 (add, opcode 1) sets kx",
+                       "no operand names a constant" } },
+            { .what = "imm[23:0] without kx",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_ALU(1, 0, 0, 0, 0, 0, 0, 5), LD_HALT },
+              .say = { "has no kx", "imm[23:0] must be zero",
+                       "it is 0x000005" } },
+            { .what = "imm[30:28] without kx",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_ALU(1, 0, 0, 0, 0, 0, 0, 1u << 29), LD_HALT },
+              .say = { "has no kx", "imm[30:28]", "they are 0x2" } },
+            { .what = "a constant operand with its register high bit",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n_consts = 2, .n = 2,
+              .ins = { LD_ALU(0, 4, 0, 1, 2, 0, LD_KB, 1u << 26), LD_HALT },
+              .say = { "instruction 0 (fma, opcode 0)",
+                       "rb names a constant", "imm[26]" } },
+            { .what = "a register operand's ninth bit under kx",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n_consts = 2, .n = 2,
+              .ins = { LD_ALU(0, 4, 0, 0, 0, 0, LD_KB | LD_KX,
+                              (1u << 8) | (1u << 28)), LD_HALT },
+              .say = { "ra names a register",
+                       "ninth constant-index bit imm[28]" } },
+            { .what = "a kx constant whose register field is set",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n_consts = 2, .n = 2,
+              .ins = { LD_ALU(0, 4, 0, 3, 0, 0, LD_KB | LD_KX, 1u << 8),
+                       LD_HALT },
+              .say = { "rb names constant 1 through imm under kx",
+                       "the rb field must be zero", "it is 3" } },
+            { .what = "a register operand's byte of imm under kx",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n_consts = 2, .n = 2,
+              .ins = { LD_ALU(0, 4, 0, 0, 0, 0, LD_KB | LD_KX,
+                              5u | (1u << 8)), LD_HALT },
+              .say = { "ra names a register under kx", "imm[7:0]",
+                       "it is 0x05" } },
+            { .what = "a four-bit constant index past the bank",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n_consts = 2, .n = 2,
+              .ins = { LD_ALU(0, 4, 0, 5, 0, 0, LD_KB, 0), LD_HALT },
+              .say = { "rb names constant 5", "declares 2 (n_consts)" } },
+            { .what = "a nine-bit kx constant index past the bank",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n_consts = 2, .n = 2,
+              .ins = { LD_ALU(0, 4, 0, 0, 0, 0, LD_KB | LD_KX,
+                              (0x10u << 8) | (1u << 29)), LD_HALT },
+              .say = { "rb names constant 272", "declares 2 (n_consts)" } }
+        };
+        static const uint64_t halt[1] = { LD_HALT };
+        uint8_t img[256];
+        size_t k, n;
+        cft_program *lp = NULL;
+
+        for (k = 0; k < sizeof L / sizeof L[0]; k++) {
+            const size_t esz = L[k].prec <= (uint32_t)CFT_FP256
+                                   ? cft_format_size((cft_format)L[k].prec)
+                                   : 4u;
+            n = ld_image(img, L[k].magic ? L[k].magic : 0x50544643u,
+                         L[k].ver ? L[k].ver : 1u, L[k].prec, esz,
+                         L[k].flags, L[k].scr, 1, L[k].n_consts, L[k].ins,
+                         L[k].n);
+            ld_expect(dev, dev, L[k].what, img, n, 1, L[k].want,
+                      L[k].say[0], L[k].say[1], L[k].say[2]);
+        }
+
+        /* The three NULL arguments, and the length: an image shorter than
+         * a header, one longer than its header describes, and a BANK_EXT
+         * image that still carries the constant section it says it has
+         * not. */
+        n = ld_image(img, 0x50544643u, 1, CFT_FP32, 4, 0, 0, 1, 0, halt, 1);
+        ld_expect(dev, NULL, "a NULL device", img, n, 1,
+                  CFT_ERR_INVALID_ARGUMENT, "NULL device", NULL, NULL);
+        ld_expect(dev, dev, "a NULL image", NULL, n, 1,
+                  CFT_ERR_INVALID_ARGUMENT, "NULL image", NULL, NULL);
+        ld_expect(dev, dev, "a NULL out", img, n, 0,
+                  CFT_ERR_INVALID_ARGUMENT, "NULL out", NULL, NULL);
+        ld_expect(dev, dev, "an image shorter than a header", img, 31, 1,
+                  CFT_ERR_ARTIFACT, "31 bytes", "32-byte header", NULL);
+        img[n] = 0;
+        ld_expect(dev, dev, "an image a byte longer than its header says",
+                  img, n + 1, 1, CFT_ERR_ARTIFACT, "is 41 bytes",
+                  "describes 40", "1 x 8 of instructions");
+        n = ld_image(img, 0x50544643u, 1, CFT_FP32, 4, 0, 0, 1, 2, halt, 1);
+        put32(img + 24, CFT_PROG_FLAG_BANK_EXT);
+        ld_expect(dev, dev, "a BANK_EXT image carrying constants", img, n, 1,
+                  CFT_ERR_ARTIFACT, "is 48 bytes", "describes 40",
+                  "under BANK_EXT");
+
+        /* The length a header describes, where a 32-bit size_t wraps it:
+         * n_insns 0x20000001 is 8 * 0x20000001 = 2^32 + 8 bytes of
+         * instructions, 8 once wrapped, so this 40-byte image passed the
+         * check on an i686 build and came back CFT_ERR_OUT_OF_MEMORY from
+         * the allocation, where this 64-bit one says CFT_ERR_ARTIFACT
+         * (measured 2026-09-30; wasm32 and the 32-bit boards are such
+         * hosts). The check is made in 64 bits now. No gate here runs a
+         * 32-bit build, so this holds the status and the 64-bit number
+         * where it can, and the i686 probe's before and after are in the
+         * round's ledger; a 32-bit build of this file holds it there. */
+        n = ld_image(img, 0x50544643u, 1, CFT_FP32, 4, 0, 0, 1, 0, halt, 1);
+        put32(img + 8, 0x20000001u);
+        ld_expect(dev, dev, "a header describing 2^32 + 40 bytes", img, n, 1,
+                  CFT_ERR_ARTIFACT, "is 40 bytes", "describes 4294967336",
+                  "536870913 x 8 of instructions");
+
+        /* The entry clear, which is what nothing above can see. */
+        n = ld_image(img, 0x50544643u, 1, CFT_FP32, 4, 0, 0, 1, 0, halt, 1);
+        CHECK(ld_plant(dev), "the clear's leg: the plant left no sentence");
+        st = cft_program_load(dev, img, n, &lp);
+        CHECK(st == CFT_OK && lp != NULL,
+              "the clear's leg: a good image loads: %s (%s)",
+              cft_strerror(st), cft_last_error());
+        CHECK(cft_last_error()[0] == '\0',
+              "a load that succeeds must leave the slot empty - it holds "
+              "the earlier call's '%s'", cft_last_error());
+        cft_program_free(lp);
+        printf("  program load: %lu refusals, each its status and a "
+               "sentence of its own after an earlier call's; the slot "
+               "empty after a good load\n",
+               (unsigned long)(sizeof L / sizeof L[0] + 7u));
     }
 
     cft_close(dev);

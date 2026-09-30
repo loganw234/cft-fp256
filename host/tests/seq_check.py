@@ -103,6 +103,7 @@ from cft_golden import FORMATS, vectors  # noqa: E402
 from cft_golden import seq  # noqa: E402
 
 CFT_OK = 0
+CFT_ERR_INVALID_ARGUMENT = 1
 CFT_ERR_UNSUPPORTED = 2
 
 
@@ -1435,9 +1436,13 @@ class _FakeServer:
 
     CAPS_V3 = 76
 
-    def __init__(self, features, backend=b"xrt"):
+    def __init__(self, features, backend=b"xrt", max_deposits=64):
         self.features = features
         self.backend = backend
+        # 0 is what cft_caps calls unknown - what a server older than the
+        # field publishes - and the one way a handle reaches
+        # cft_program_load's own deposit ceiling (deposit_ceiling_remote).
+        self.max_deposits = max_deposits
         self.other_ops = []
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.bind(("127.0.0.1", 0))
@@ -1483,8 +1488,9 @@ class _FakeServer:
                         caps = (struct.pack("<6I", 0xF, 0xFF, 1, 0xA00, 1,
                                             abi)
                                 + self.backend.ljust(32, b"\0")
-                                + struct.pack("<5I", 64, 16384, 512,
-                                              self.features, 256))
+                                + struct.pack("<5I", self.max_deposits,
+                                              16384, 512, self.features,
+                                              256))
                         assert len(caps) == self.CAPS_V3
                         conn.sendall(self._frame(abi, fid, op, caps))
                     elif op == 0x00FF:                       # BYE
@@ -1544,8 +1550,12 @@ def rev8_remote_refusals(lib, R):
                 rc = lib.cft_program_load(dev, image, len(image),
                                           ctypes.byref(handle))
                 # cft_last_error is only this call's after a refusal: a
-                # load that succeeds leaves the previous sentence there
-                # (verifier-R3), so it is read for a refusal alone.
+                # load that succeeds left the previous sentence there
+                # (verifier-R3), so it is read for a refusal alone. Since
+                # 2026-09-30 a load clears the library's own slot on entry,
+                # and a successful one leaves it empty - but a device
+                # backend's older message still shows through an empty
+                # slot, so the rule stands.
                 msg = (lib.cft_last_error().decode() if rc != CFT_OK
                        else "(loaded; no error)")
                 if rc == CFT_OK:
@@ -1580,6 +1590,113 @@ def rev8_remote_refusals(lib, R):
     print(f"revision-8 remote leg: {R['remote_refused']} refused by name on a "
           f"server without the bits, {R['remote_loaded']} loaded where "
           f"published or not needed")
+
+
+def deposit_ceiling_remote(lib):
+    """cft_program_load's own ceiling on max_deposits, by name - the one
+    refusal of the load path that a software handle cannot reach
+    (the fixes round's Q5, 2026-09-30).
+
+    A handle that publishes a deposit cap refuses a program past it by
+    name, first; the library's ceiling of 2^20 is reached only where a
+    device published no cap (0, unknown - a server older than the field)
+    or one above it. So the handle here is a remote one to a fake server
+    whose HELLO publishes max_deposits 0. The load is the client's own,
+    made from that word, and no load reaches the wire.
+
+    Before each load a failing call plants a DEVICE BACKEND's sentence: a
+    program run, which the fake server does not answer. That is the case
+    the entry clear alone cannot cover - cft_last_error() falls through an
+    empty library slot to the remote backend's message - so the refusal
+    must carry its own sentence, or it shows the remote's. Held three
+    ways: 2^20 loads, 2^20 + 1 and 2^32 - 1 are CFT_ERR_INVALID_ARGUMENT
+    naming both numbers and the unknown cap, and the golden model refuses
+    what the C refuses and loads what it loads. -> failures"""
+    bad = 0
+    srv = _FakeServer(0x7F1F, max_deposits=0)
+    dev = ctypes.c_void_p()
+    url = f"cft://127.0.0.1:{srv.port}".encode()
+    if lib.cft_open(url, 0, ctypes.byref(dev)) != CFT_OK:
+        print(f"  MISMATCH (deposit-ceiling leg): cft_open of the fake "
+              f"server failed: {lib.cft_last_error().decode()}")
+        srv.close()
+        return 1
+    fmt = FORMATS["fp64"]
+    plant = ctypes.c_void_p()
+    a = ctypes.create_string_buffer(fmt.width // 8)
+    good = seq.Program(fmt, [seq.halt()], max_deposits=0).to_bytes()
+    try:
+        if lib.cft_program_load(dev, good, len(good),
+                                ctypes.byref(plant)) != CFT_OK:
+            print(f"  MISMATCH (deposit-ceiling leg): a one-HALT program "
+                  f"did not load: {lib.cft_last_error().decode()}")
+            return 1
+        for maxdep, loads in ((1 << 20, True), ((1 << 20) + 1, False),
+                              (0xFFFFFFFF, False)):
+            image = bytearray(good)
+            struct.pack_into("<I", image, 16, maxdep)
+            image = bytes(image)
+            rc = lib.cft_program_run(plant, a, None, None, None, None, 1,
+                                     None, None)
+            planted = lib.cft_last_error().decode()
+            if rc == CFT_OK or not planted:
+                print(f"  MISMATCH (deposit-ceiling leg): the run meant to "
+                      f"plant the remote backend's sentence gave rc {rc} "
+                      f"and {planted!r}")
+                bad += 1
+            handle = ctypes.c_void_p()
+            st = lib.cft_program_load(dev, image, len(image),
+                                      ctypes.byref(handle))
+            msg = lib.cft_last_error().decode()
+            if st == CFT_OK:
+                lib.cft_program_free(handle)
+            try:
+                seq.Program.from_bytes(image)
+                golden_loads = True
+            except seq.ProgramError:
+                golden_loads = False
+            if golden_loads != loads:
+                print(f"  MISMATCH (deposit-ceiling leg): the golden model "
+                      f"{'loads' if golden_loads else 'refuses'} "
+                      f"max_deposits {maxdep}")
+                bad += 1
+            if loads:
+                if st != CFT_OK:
+                    print(f"  MISMATCH (deposit-ceiling leg): max_deposits "
+                          f"{maxdep} is at the ceiling and was refused: rc "
+                          f"{st}, {msg!r}")
+                    bad += 1
+                continue
+            want = (f"max_deposits is {maxdep}, past {1 << 20}",
+                    "cft_caps.max_deposits, is 0 (unknown)")
+            if (st != CFT_ERR_INVALID_ARGUMENT or planted and planted in msg
+                    or not all(w in msg for w in want)):
+                print(f"  MISMATCH (deposit-ceiling leg): max_deposits "
+                      f"{maxdep} on a handle that publishes no cap gave rc "
+                      f"{st} and {msg!r} - wanted "
+                      f"CFT_ERR_INVALID_ARGUMENT ({CFT_ERR_INVALID_ARGUMENT}) "
+                      f"saying {want}, and not the remote backend's "
+                      f"{planted!r}")
+                bad += 1
+        # A run ships its image first (PROG_LOAD, 0x0020), and the fake
+        # server answers nothing but HELLO and BYE - so the planting run
+        # is the one frame it may see. cft_program_load sends none.
+        stray = [op for op in srv.other_ops if op != 0x0020]
+        if stray:
+            print(f"  MISMATCH (deposit-ceiling leg): something other than "
+                  f"the planting run reached the wire: "
+                  f"{[hex(o) for o in stray]}")
+            bad += 1
+    finally:
+        if plant:
+            lib.cft_program_free(plant)
+        lib.cft_close(dev)
+        srv.close()
+    print(f"deposit-ceiling leg: max_deposits 2^20, 2^20 + 1 and 2^32 - 1 "
+          f"on a handle publishing no deposit cap, each after the remote "
+          f"backend's own sentence was planted, against the golden model: "
+          f"{bad} disagreements")
+    return bad
 
 
 def main():
@@ -1725,6 +1842,7 @@ def main():
     finally:
         lib.cft_close(dev)
     rev8_remote_refusals(lib, R)
+    ceiling_bad = deposit_ceiling_remote(lib)
 
     print(f"\n{total} programs run through both implementations, "
           f"{refused_both} refused by both")
@@ -1763,7 +1881,7 @@ def main():
           f"refusals refused by both; {R['own_index']} own-index loads "
           f"(ldx rX, rX, step) equal in both and to their unstepped "
           f"twins, {R['own_index_range']} of them strict and reporting")
-    bad += S["bad"] + X["bad"] + M["bad"] + R["bad"]
+    bad += S["bad"] + X["bad"] + M["bad"] + R["bad"] + ceiling_bad
     if R["total"] and not all(R[k] for k in (
             "refused", "blocked", "augadd", "augerr", "pair", "ldx_step",
             "stx_step", "walks", "strict", "range", "inv", "ovf", "unf",

@@ -53,6 +53,10 @@
  * nothing in a build that has neither, and a header included in two
  * places under two conditions is how a signature drifts. */
 #include "backend.h"
+/* The header flags by name, rendered from a mask, for the refusal of a
+ * flag bit this loader does not know - the generated table the comment
+ * above SEQ_FLAGS_KNOWN points at, rather than a list written here. */
+#include "../include/cft_seq_flags.h"
 
 #define SEQ_MAGIC        0x50544643u   /* "CFTP" */
 #define SEQ_VERSION      1u
@@ -348,53 +352,113 @@ static uint64_t rd_le64(const uint8_t *p)
  * instruction without `kx`, or for an operand that names a register,
  * or in the four-bit constant form, it is a field nothing reads and
  * must be zero. imm[31] alone is left, and stays reserved-must-be-zero
- * as the version guard for whatever comes next. */
+ * as the version guard for whatever comes next.
+ *
+ * Each refusal says which rule, naming the instruction, its opcode, the
+ * operand and the field, in the meaning of the ProgramError seq.py
+ * raises for it. Until 2026-09-30 all nine returned
+ * CFT_ERR_INVALID_ARGUMENT with no sentence at all. */
 static cft_status seq_check_operands(const cft_program *p,
-                                     const seq_insn *d)
+                                     const seq_insn *d, uint32_t pc)
 {
     static const int shift[3] = { SEQ_KX_SHIFT_A, SEQ_KX_SHIFT_B,
                                   SEQ_KX_SHIFT_C };
+    static const char *const opnd[3] = { "ra", "rb", "rc" };
     const int reg[3] = { d->ra, d->rb, d->rc };
     const int hi[3]  = { d->ha, d->hb, d->hc };
     const int k9[3]  = { d->k9a, d->k9b, d->k9c };
     const int kf[3]  = { d->ka, d->kb, d->kc };
+    const unsigned long at = (unsigned long)pc;
+    const char *name = cft_op_name((cft_op)d->op);
     int which;
 
-    if (d->imm & SEQ_IMM_RESERVED)
-        return CFT_ERR_INVALID_ARGUMENT;
-    if (d->kx) {
-        if (!(d->ka || d->kb || d->kc))
-            return CFT_ERR_INVALID_ARGUMENT;
-    } else if (d->imm & SEQ_KX_INDICES) {
+    if (d->imm & SEQ_IMM_RESERVED) {
+        cft_set_error("instruction %lu (%s, opcode %d): imm[31] is "
+                      "reserved and must be zero, and it is set",
+                      at, name, d->op);
         return CFT_ERR_INVALID_ARGUMENT;
     }
-    if (!d->kx && (d->imm & SEQ_KX9_MASK))
+    if (d->kx) {
+        if (!(d->ka || d->kb || d->kc)) {
+            cft_set_error("instruction %lu (%s, opcode %d) sets kx and no "
+                          "operand names a constant, so the bit selects "
+                          "nothing and the instruction has a second "
+                          "encoding with kx clear", at, name, d->op);
+            return CFT_ERR_INVALID_ARGUMENT;
+        }
+    } else if (d->imm & SEQ_KX_INDICES) {
+        cft_set_error("instruction %lu (%s, opcode %d) has no kx, so it "
+                      "reads no immediate: imm[23:0] must be zero, and it "
+                      "is 0x%06lx", at, name, d->op,
+                      (unsigned long)(d->imm & SEQ_KX_INDICES));
         return CFT_ERR_INVALID_ARGUMENT;
+    }
+    if (!d->kx && (d->imm & SEQ_KX9_MASK)) {
+        cft_set_error("instruction %lu (%s, opcode %d) has no kx, so the "
+                      "ninth constant-index bits imm[30:28] are read by "
+                      "nothing and must be zero, and they are 0x%lx",
+                      at, name, d->op,
+                      (unsigned long)((d->imm & SEQ_KX9_MASK) >>
+                                      SEQ_KX9_SHIFT));
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
 
     for (which = 0; which < 3; which++) {
         uint32_t byte = (d->imm >> shift[which]) & 0xFFu;
         uint32_t idx;
-        if (kf[which] && hi[which])
+        if (kf[which] && hi[which]) {
+            cft_set_error("instruction %lu (%s, opcode %d): %s names a "
+                          "constant, so its register high bit imm[%d] is "
+                          "read by nothing and must be zero", at, name,
+                          d->op, opnd[which], SEQ_REGHI_SHIFT + 1 + which);
             return CFT_ERR_INVALID_ARGUMENT;
+        }
         /* The ninth bit is read under `kx` for a constant operand and
-         * nowhere else, so everywhere else it must be zero. */
-        if (!(d->kx && kf[which]) && k9[which])
+         * nowhere else, so everywhere else it must be zero. Without
+         * `kx` the test above has already refused it, so what reaches
+         * here is an operand under `kx` that names a register. */
+        if (!(d->kx && kf[which]) && k9[which]) {
+            cft_set_error("instruction %lu (%s, opcode %d): %s names a "
+                          "register, so its ninth constant-index bit "
+                          "imm[%d] is read by nothing and must be zero",
+                          at, name, d->op, opnd[which],
+                          SEQ_KX9_SHIFT + which);
             return CFT_ERR_INVALID_ARGUMENT;
+        }
         if (d->kx && kf[which]) {
-            if (reg[which])
-                return CFT_ERR_INVALID_ARGUMENT;
             idx = byte | ((uint32_t)k9[which] << 8);
-        } else if (d->kx) {
-            if (byte)
+            if (reg[which]) {
+                cft_set_error("instruction %lu (%s, opcode %d): %s names "
+                              "constant %lu through imm under kx, so the %s "
+                              "field must be zero, and it is %d", at, name,
+                              d->op, opnd[which], (unsigned long)idx,
+                              opnd[which], reg[which]);
                 return CFT_ERR_INVALID_ARGUMENT;
+            }
+        } else if (d->kx) {
+            if (byte) {
+                cft_set_error("instruction %lu (%s, opcode %d): %s names a "
+                              "register under kx, so its byte of imm, "
+                              "imm[%d:%d], is read by nothing and must be "
+                              "zero, and it is 0x%02lx", at, name, d->op,
+                              opnd[which], shift[which] + 7, shift[which],
+                              (unsigned long)byte);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
             continue;
         } else if (kf[which]) {
             idx = (uint32_t)reg[which];
         } else {
             continue;
         }
-        if (idx >= p->n_consts)
+        if (idx >= p->n_consts) {
+            cft_set_error("instruction %lu (%s, opcode %d): %s names "
+                          "constant %lu, and the program's header declares "
+                          "%lu (n_consts), indexed from 0", at, name, d->op,
+                          opnd[which], (unsigned long)idx,
+                          (unsigned long)p->n_consts);
             return CFT_ERR_INVALID_ARGUMENT;
+        }
     }
     return CFT_OK;
 }
@@ -427,19 +491,6 @@ static int seq_step(const seq_insn *d)
         return 0;
     s = (int)(d->imm & SEQ_STEP_MASK);
     return (s & 0x800) ? s - 0x1000 : s;
-}
-
-/* augadd and augerr read ra and rb and write rd, five bits each. Every
- * other field is unread and must be zero: rc and its high bit, rnd
- * (9.5 fixes the rounding, so no attribute can be spelled), the k flags
- * and kx (no control code reads the bank), imm[23:0] and imm[31:28]. */
-static int seq_augadd_fields_ok(const seq_insn *d)
-{
-    const uint32_t hi = (1u << (SEQ_REGHI_SHIFT + 0)) |
-                        (1u << (SEQ_REGHI_SHIFT + 1)) |
-                        (1u << (SEQ_REGHI_SHIFT + 2));
-    return !(d->rc || d->rnd || d->ka || d->kb || d->kc || d->kx ||
-             (d->imm & ~hi));
 }
 
 /* An LDX that loads into its own stepped index: both writes would land in
@@ -497,9 +548,139 @@ static cft_status seq_rev8_against_device(const cft_seq_caps *c,
     return CFT_OK;
 }
 
+/* What each control code READS, and so the only fields it may set: the
+ * canonicity rule docs/SEQUENCER.md states - any field an instruction
+ * does not read being non-zero is refused - as seq.py writes it, in
+ * `used` and IMM_ALLOWED. Fields a control instruction does not read
+ * must be zero so that one operation has one encoding; otherwise a
+ * readback hash is not a hash of the program.
+ *
+ * One table decides the refusal AND names it, so the two cannot
+ * disagree about which field it was. Until 2026-09-30 a condition per
+ * code decided, the same fields exactly, and none said which. A code
+ * with no row here is unknown and refused as unknown, so a code added to
+ * the enum above without a row stays refused rather than accepted.
+ *
+ * `regs` is the operand fields a code reads as the ENCODING holds them,
+ * four bits each (SEQ_F_RD for rd, and so on); their fifth bits live in
+ * imm[27:24] and are held through `imm`. That is what REPEAT needs: it
+ * reads its `imm` entirely, as the trip count - it always has - so
+ * `repeat 0xffffffff` sets all four high bits and names no register, and
+ * the canonicity rule, which is about fields an instruction does not
+ * read, reaches nothing there. Constraining imm[27:24] on a REPEAT would
+ * refuse every trip count at or above 2^24, including the
+ * `repeat 0xffffffff` docs/SEQUENCER.md's own worst-case paragraph relies
+ * on being loadable and refused by the 2^40 bound instead.
+ * docs/HOSTAPI.md records the reading.
+ *
+ * DEPOSIT and SETACT read `ra`, so of the four high bits only imm[25],
+ * ra's - the single relaxation revision 2 made here: their `imm` was
+ * required to be zero whole and is now zero but for that bit. HALT,
+ * ENDREP and ACTALL read no field of `imm` at all.
+ *
+ * The four scratch codes of revision 3, R4, add no rule: STL reads `ra`
+ * and imm[23:0], its slot; LDL writes `rd` and reads imm[23:0]; STX reads
+ * `ra` and `rb`; LDX writes `rd` and reads `rb`. For those last two
+ * imm[23:0] was a field nothing read until revision 8 (proposed
+ * 2026-09-29) made imm[11:0] their post-step (SEQ_STEP_MASK), so now
+ * imm[23:12] is the part nothing reads. The slot of a static form is
+ * checked against the DEVICE's depth rather than here, exactly as a
+ * constant index is: what bounds it is a capacity a tile publishes, not
+ * a property of the encoding.
+ *
+ * augadd and augerr (revision 8) read ra and rb and write rd, five bits
+ * each. Every other field is unread and must be zero: rc and its high
+ * bit, rnd (9.5 fixes the rounding, so no attribute can be spelled),
+ * imm[23:0] and imm[31:28].
+ *
+ * No control code reads rnd, a `k` flag or `kx`: none reads a rounding
+ * attribute (augadd and augerr round, at the one rounding 9.5 fixes),
+ * and none reads the constant bank. */
+#define SEQ_F_RD   1u
+#define SEQ_F_RA   2u
+#define SEQ_F_RB   4u
+#define SEQ_F_RC   8u
+#define SEQ_HI_RD  ((uint32_t)1u << (SEQ_REGHI_SHIFT + 0))
+#define SEQ_HI_RA  ((uint32_t)1u << (SEQ_REGHI_SHIFT + 1))
+#define SEQ_HI_RB  ((uint32_t)1u << (SEQ_REGHI_SHIFT + 2))
+
+static const struct {
+    const char *name;
+    unsigned    regs;       /* SEQ_F_: the operand fields it reads */
+    uint32_t    imm;        /* the bits of imm it reads */
+} seq_ctrl[] = {
+    [SEQ_HALT]    = { "HALT",    0,        0 },
+    [SEQ_REPEAT]  = { "REPEAT",  0,        0xFFFFFFFFu },
+    [SEQ_ENDREP]  = { "ENDREP",  0,        0 },
+    [SEQ_DEPOSIT] = { "DEPOSIT", SEQ_F_RA, SEQ_HI_RA },
+    [SEQ_SETACT]  = { "SETACT",  SEQ_F_RA, SEQ_HI_RA },
+    [SEQ_ACTALL]  = { "ACTALL",  0,        0 },
+    [SEQ_STL]     = { "STL",     SEQ_F_RA, SEQ_KX_INDICES | SEQ_HI_RA },
+    [SEQ_LDL]     = { "LDL",     SEQ_F_RD, SEQ_KX_INDICES | SEQ_HI_RD },
+    [SEQ_STX]     = { "STX",     SEQ_F_RA | SEQ_F_RB,
+                      SEQ_HI_RA | SEQ_HI_RB | SEQ_STEP_MASK },
+    [SEQ_LDX]     = { "LDX",     SEQ_F_RD | SEQ_F_RB,
+                      SEQ_HI_RD | SEQ_HI_RB | SEQ_STEP_MASK },
+    [SEQ_AUGADD]  = { "AUGADD",  SEQ_F_RD | SEQ_F_RA | SEQ_F_RB,
+                      SEQ_HI_RD | SEQ_HI_RA | SEQ_HI_RB },
+    [SEQ_AUGERR]  = { "AUGERR",  SEQ_F_RD | SEQ_F_RA | SEQ_F_RB,
+                      SEQ_HI_RD | SEQ_HI_RA | SEQ_HI_RB }
+};
+#define SEQ_NCTRL  ((int)(sizeof seq_ctrl / sizeof seq_ctrl[0]))
+
+/* A known control instruction's fields against its row: CFT_OK, or the
+ * first field it sets and does not read, by name - seq.py's order, the
+ * operand fields, then rnd, the `k` flags and `kx`, then imm. */
+static cft_status seq_ctrl_fields(const seq_insn *d, uint32_t pc)
+{
+    static const char *const regname[4]  = { "rd", "ra", "rb", "rc" };
+    static const char *const flagname[4] = { "ka", "kb", "kc", "kx" };
+    const int regs[4]  = { d->rd, d->ra, d->rb, d->rc };
+    const int flags[4] = { d->ka, d->kb, d->kc, d->kx };
+    const unsigned long at = (unsigned long)pc;
+    const char *name = seq_ctrl[d->op].name;
+    const uint32_t reads = seq_ctrl[d->op].imm;
+    int f;
+
+    for (f = 0; f < 4; f++)
+        if (regs[f] && !(seq_ctrl[d->op].regs & (1u << f))) {
+            cft_set_error("instruction %lu is %s, which does not read %s, "
+                          "so it must be zero, and it is %d", at, name,
+                          regname[f], regs[f]);
+            return CFT_ERR_INVALID_ARGUMENT;
+        }
+    if (d->rnd) {
+        cft_set_error("instruction %lu is %s, which does not read rnd - no "
+                      "control code reads a rounding attribute - so it must "
+                      "be zero, and it is "
+                      "%d", at, name, d->rnd);
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    for (f = 0; f < 4; f++)
+        if (flags[f]) {
+            cft_set_error("instruction %lu is %s, which does not read %s - "
+                          "no control code reads the constant bank - so it "
+                          "must be clear, and it is set", at, name,
+                          flagname[f]);
+            return CFT_ERR_INVALID_ARGUMENT;
+        }
+    if (d->imm & ~reads) {
+        cft_set_error("instruction %lu is %s, which reads only imm & "
+                      "0x%08lx, so imm = 0x%08lx sets a bit it does not "
+                      "read", at, name, (unsigned long)reads,
+                      (unsigned long)d->imm);
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    return CFT_OK;
+}
+
 /* Everything docs/SEQUENCER.md says the loader refuses. A program that
  * a device could execute ambiguously is stopped here, so the hardware
- * never has to decide what an ambiguous one means. */
+ * never has to decide what an ambiguous one means.
+ *
+ * Every refusal names the instruction and the rule it broke, in the
+ * meaning of the ProgramError seq.py's validate() raises for it (the
+ * words differ); until 2026-09-30 none did. */
 static cft_status seq_validate(const cft_program *p)
 {
     uint32_t pc;
@@ -518,115 +699,57 @@ static cft_status seq_validate(const cft_program *p)
         seq_decode(p->insns[pc], &d);
 
         worst += mult[top];
-        if (worst > SEQ_MAX_INSNS)
+        if (worst > SEQ_MAX_INSNS) {
+            cft_set_error("instruction %lu takes the program's worst-case "
+                          "instruction count to %llu, past the bound of "
+                          "%llu (2^40): its loops are finite but not a "
+                          "bound", (unsigned long)pc,
+                          (unsigned long long)worst,
+                          (unsigned long long)SEQ_MAX_INSNS);
             return CFT_ERR_INVALID_ARGUMENT;
+        }
 
         if (!d.ctrl) {
-            ost = seq_check_operands(p, &d);
+            ost = seq_check_operands(p, &d, pc);
             if (ost != CFT_OK)
                 return ost;
-            if (d.rnd > 4)
+            if (d.rnd > 4) {
+                cft_set_error("instruction %lu (%s, opcode %d): its "
+                              "rounding attribute rnd is %d, and the "
+                              "contract defines 0 to 4 - the rest are "
+                              "reserved", (unsigned long)pc,
+                              cft_op_name((cft_op)d.op), d.op, d.rnd);
                 return CFT_ERR_INVALID_ARGUMENT;
+            }
             continue;
         }
 
-        /* Fields a control instruction does not read must be zero, so
-         * one operation has one encoding - otherwise a readback hash
-         * is not a hash of the program.
-         *
-         * A control instruction reads at most `ra` (DEPOSIT, SETACT),
-         * so of the four register high bits in imm[27:24] only those
-         * two read one - imm[25], ra's - and that is the single
-         * relaxation revision 2 makes here: their `imm` was required
-         * to be zero whole and is now required to be zero but for that
-         * bit. HALT, ENDREP and ACTALL read no field of `imm` at all
-         * and it stays zero whole.
-         *
-         * REPEAT is the exception and reads its `imm` ENTIRELY, as the
-         * trip count - it always has. The canonicity rule is about
-         * fields an instruction does not read, so it reaches nothing
-         * here: constraining imm[27:24] on a REPEAT would refuse every
-         * trip count at or above 2^24, including the `repeat
-         * 0xffffffff` docs/SEQUENCER.md's own worst-case paragraph
-         * relies on being loadable and refused by the 2^40 bound
-         * instead. docs/HOSTAPI.md records the reading. */
-        switch (d.op) {
-        case SEQ_HALT:
-        case SEQ_ENDREP:
-        case SEQ_ACTALL:
-            if (d.rd || d.ra || d.rb || d.rc || d.rnd || d.ka || d.kb ||
-                d.kc || d.kx || d.imm)
-                return CFT_ERR_INVALID_ARGUMENT;
-            break;
-        case SEQ_REPEAT:
-            if (d.rd || d.ra || d.rb || d.rc || d.rnd || d.ka || d.kb ||
-                d.kc || d.kx)
-                return CFT_ERR_INVALID_ARGUMENT;
-            break;
-        case SEQ_DEPOSIT:
-        case SEQ_SETACT:
-            if (d.rd || d.rb || d.rc || d.rnd || d.ka || d.kb || d.kc ||
-                d.kx ||
-                (d.imm & ~(uint32_t)(1u << (SEQ_REGHI_SHIFT + 1))))
-                return CFT_ERR_INVALID_ARGUMENT;
-            break;
-        /* The four scratch codes of revision 3, R4. The reserved-field
-         * rule settles each of them and adds nothing new: STL reads
-         * `ra` and imm[23:0]; LDL writes `rd` and reads imm[23:0]; STX
-         * reads `ra` and `rb`; LDX writes `rd` and reads `rb`. For those
-         * last two imm[23:0] was a field nothing read until revision 8
-         * (proposed 2026-09-29) made imm[11:0] their post-step, so now
-         * imm[23:12] is the part nothing reads. Every other field - the
-         * remaining register fields, `rnd`, the `k` flags, `kx`, and the
-         * parts of imm[31:24] that are not the high bit of a register
-         * this instruction names - must be zero.
-         *
-         * The slot of a static form is checked against the DEVICE's
-         * depth rather than here, exactly as a constant index is: what
-         * bounds it is a capacity a tile publishes, not a property of
-         * the encoding. */
-        case SEQ_STL:
-            if (d.rd || d.rb || d.rc || d.rnd || d.ka || d.kb || d.kc ||
-                d.kx ||
-                (d.imm & ~(SEQ_KX_INDICES |
-                           (uint32_t)(1u << (SEQ_REGHI_SHIFT + 1)))))
-                return CFT_ERR_INVALID_ARGUMENT;
-            break;
-        case SEQ_LDL:
-            if (d.ra || d.rb || d.rc || d.rnd || d.ka || d.kb || d.kc ||
-                d.kx ||
-                (d.imm & ~(SEQ_KX_INDICES |
-                           (uint32_t)(1u << (SEQ_REGHI_SHIFT + 0)))))
-                return CFT_ERR_INVALID_ARGUMENT;
-            break;
-        /* imm[11:0] is the indexed pair's post-step since revision 8
-         * (SEQ_STEP_MASK); imm[23:12] is still read by nothing. */
-        case SEQ_STX:
-            if (d.rd || d.rc || d.rnd || d.ka || d.kb || d.kc || d.kx ||
-                (d.imm & ~(uint32_t)((1u << (SEQ_REGHI_SHIFT + 1)) |
-                                     (1u << (SEQ_REGHI_SHIFT + 2)) |
-                                     SEQ_STEP_MASK)))
-                return CFT_ERR_INVALID_ARGUMENT;
-            break;
-        case SEQ_LDX:
-            if (d.ra || d.rc || d.rnd || d.ka || d.kb || d.kc || d.kx ||
-                (d.imm & ~(uint32_t)((1u << (SEQ_REGHI_SHIFT + 0)) |
-                                     (1u << (SEQ_REGHI_SHIFT + 2)) |
-                                     SEQ_STEP_MASK)))
-                return CFT_ERR_INVALID_ARGUMENT;
-            break;
-        case SEQ_AUGADD:
-        case SEQ_AUGERR:
-            if (!seq_augadd_fields_ok(&d))
-                return CFT_ERR_INVALID_ARGUMENT;
-            break;
-        default:
+        /* A control code, held to its row of seq_ctrl above - which
+         * says, per code, which fields it reads and why. */
+        if (d.op >= SEQ_NCTRL) {
+            cft_set_error("instruction %lu is control code %d, and the "
+                          "control codes are 0 to %d (HALT to %s): an "
+                          "unknown one is refused, not guessed at",
+                          (unsigned long)pc, d.op, SEQ_NCTRL - 1,
+                          seq_ctrl[SEQ_NCTRL - 1].name);
             return CFT_ERR_INVALID_ARGUMENT;
         }
+        ost = seq_ctrl_fields(&d, pc);
+        if (ost != CFT_OK)
+            return ost;
 
         if (d.op == SEQ_REPEAT) {
-            if (d.imm == 0 || depth >= SEQ_MAX_DEPTH)
+            if (d.imm == 0) {
+                cft_set_error("instruction %lu is REPEAT 0, which is not a "
+                              "loop; omit it", (unsigned long)pc);
                 return CFT_ERR_INVALID_ARGUMENT;
+            }
+            if (depth >= SEQ_MAX_DEPTH) {
+                cft_set_error("instruction %lu is a REPEAT inside %d open "
+                              "loops, and loops nest at most %d deep",
+                              (unsigned long)pc, depth, SEQ_MAX_DEPTH);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
             depth++;
             top++;
             /* Checked BEFORE the product is taken, not after: mult and
@@ -637,13 +760,26 @@ static cft_status seq_validate(const cft_program *p)
              * integers do not wrap, refused it (host/fuzz,
              * 2026-09-07). mult[top - 1] is at least 1, so the
              * division is safe, and imm > MAX / mult is exactly
-             * mult * imm > MAX. */
-            if (d.imm > SEQ_MAX_INSNS / mult[top - 1])
+             * mult * imm > MAX - which is why the sentence names the
+             * two factors and not their product. */
+            if (d.imm > SEQ_MAX_INSNS / mult[top - 1]) {
+                cft_set_error("instruction %lu is REPEAT %lu inside loops "
+                              "that already run their body %llu times: the "
+                              "product is past %llu (2^40), the bound on a "
+                              "program's worst-case instruction count, so "
+                              "its loops are finite but not a bound",
+                              (unsigned long)pc, (unsigned long)d.imm,
+                              (unsigned long long)mult[top - 1],
+                              (unsigned long long)SEQ_MAX_INSNS);
                 return CFT_ERR_INVALID_ARGUMENT;
+            }
             mult[top] = mult[top - 1] * d.imm;
         } else if (d.op == SEQ_ENDREP) {
-            if (depth == 0)
+            if (depth == 0) {
+                cft_set_error("instruction %lu is an ENDREP with no REPEAT "
+                              "open", (unsigned long)pc);
                 return CFT_ERR_INVALID_ARGUMENT;
+            }
             depth--;
             top--;
         } else if ((d.op == SEQ_ACTALL || d.op == SEQ_HALT) && depth > 0) {
@@ -651,10 +787,28 @@ static cft_status seq_validate(const cft_program *p)
              * observable - ACTALL because it can reactivate a lane,
              * HALT because its effect is not per-lane and so the
              * active mask cannot gate it. */
+            if (d.op == SEQ_ACTALL)
+                cft_set_error("instruction %lu is ACTALL inside a loop, "
+                              "where it could reactivate a lane and make "
+                              "the all-lanes-done early exit observable",
+                              (unsigned long)pc);
+            else
+                cft_set_error("instruction %lu is HALT inside a loop: the "
+                              "active mask cannot gate it, so the "
+                              "all-lanes-done early exit would be "
+                              "observable", (unsigned long)pc);
             return CFT_ERR_INVALID_ARGUMENT;
         }
     }
-    return depth == 0 ? CFT_OK : CFT_ERR_INVALID_ARGUMENT;
+    if (depth != 0) {
+        /* depth > 0 needs a REPEAT, so there is a last instruction */
+        cft_set_error("the program ends, after instruction %lu, inside %d "
+                      "open loop%s: every REPEAT needs its ENDREP",
+                      (unsigned long)(p->n_insns - 1u), depth,
+                      depth == 1 ? "" : "s");
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    return CFT_OK;
 }
 
 /* The software backend's own sequencer capacities, for device.c to
@@ -976,21 +1130,44 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
     const uint8_t *p = (const uint8_t *)image;
     cft_program *prog;
     uint32_t magic, ver, n_insns, n_consts, maxdep, prec, flags, scr_io;
-    uint32_t n_sin = 0, n_sout = 0;
-    size_t esz, want, kbytes, i;
+    uint32_t n_sin = 0, n_sout = 0, n_stored;
+    size_t esz, kbytes, i;
+    uint64_t want;
     cft_status st;
 
-    if (!dev || !image || !out)
+    /* Before anything can refuse. This entry point reaches no device
+     * backend, so nothing else clears the library's slot for it, and
+     * until 2026-09-30 a refusal here that wrote no sentence left
+     * cft_last_error() explaining an earlier call - P2 of the revision-7
+     * round measured one printing a cft_run_ex index refusal. Every
+     * refusal below now writes its own sentence, the NULL argument's
+     * included: the clear alone would not do for a refusal left without
+     * one, since cft_last_error() then falls through to a device
+     * backend's message, which may be older still. So the clear is for
+     * the exits that are not refusals: a load that succeeds, and the
+     * allocation failures, which carry no sentence here (the remote and
+     * XRT backends name their own out-of-memory failures; these four do
+     * not). */
+    cft_clear_error();
+    if (!dev || !image || !out) {
+        cft_set_error("cft_program_load was given a NULL %s; it needs the "
+                      "device, the image and somewhere to put the program",
+                      !dev ? "device" : !image ? "image" : "out");
         return CFT_ERR_INVALID_ARGUMENT;
+    }
     *out = NULL;
     /* The image is read here, on the host: a resident buffer's device
      * bytes come home first (softfloat.h). Until 2026-09-26 nothing in
      * this file brought anything home (verifier-V8, N2). */
     st = (cft_status)cft_host_in(dev, image, bytes);
     if (st != CFT_OK)
-        return st;
-    if (bytes < SEQ_HEADER_BYTES)
+        return st;          /* the backend's own sentence (softfloat.h) */
+    if (bytes < SEQ_HEADER_BYTES) {
+        cft_set_error("this image is %lu bytes, shorter than the %d-byte "
+                      "header every program image begins with",
+                      (unsigned long)bytes, SEQ_HEADER_BYTES);
         return CFT_ERR_ARTIFACT;
+    }
 
     magic    = rd_le32(p +  0);
     ver      = rd_le32(p +  4);
@@ -1009,19 +1186,53 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
     flags    = rd_le32(p + 24);
     scr_io   = rd_le32(p + 28);
 
-    if (magic != SEQ_MAGIC || ver != SEQ_VERSION)
+    /* The header's own refusals, each CFT_ERR_ARTIFACT as it always was
+     * and each with the sentence seq.py's from_bytes gives the same
+     * image (the words differ; the meaning is the model's). */
+    if (magic != SEQ_MAGIC) {
+        cft_set_error("this image's magic is 0x%08lx, not 0x%08lx "
+                      "(\"CFTP\"), so it is not a program image",
+                      (unsigned long)magic, (unsigned long)SEQ_MAGIC);
         return CFT_ERR_ARTIFACT;
-    if (!(flags & CFT_PROG_FLAG_SCRATCH_IO) && scr_io)
+    }
+    if (ver != SEQ_VERSION) {
+        cft_set_error("this image is program-image version %lu, and this "
+                      "library reads version %lu", (unsigned long)ver,
+                      (unsigned long)SEQ_VERSION);
         return CFT_ERR_ARTIFACT;
+    }
+    if (!(flags & CFT_PROG_FLAG_SCRATCH_IO) && scr_io) {
+        cft_set_error("this image's header word 7, scratch_io, is 0x%08lx "
+                      "and its flags do not carry SCRATCH_IO; with that bit "
+                      "clear the word is reserved and must be zero",
+                      (unsigned long)scr_io);
+        return CFT_ERR_ARTIFACT;
+    }
     /* A flag bit this library does not know is an image it cannot
      * read: the bit says something about the layout or the run, and
      * the honest answer to a sentence you cannot parse is not to
      * guess. This is the version guard for everything flags will ever
      * carry, which is why the round needed no VERSION step. */
-    if (flags & ~SEQ_FLAGS_KNOWN)
+    if (flags & ~SEQ_FLAGS_KNOWN) {
+        char known[CFT_SEQ_FLAG_NAMES_MAX];
+        cft_set_error("this image's header flags are 0x%08lx, and 0x%08lx "
+                      "of that is bits this library does not know: it knows "
+                      "%s (mask 0x%08lx), and every other bit is reserved "
+                      "and must be zero", (unsigned long)flags,
+                      (unsigned long)(flags & ~SEQ_FLAGS_KNOWN),
+                      cft_seq_flag_names(SEQ_FLAGS_KNOWN, known,
+                                         sizeof known),
+                      (unsigned long)SEQ_FLAGS_KNOWN);
         return CFT_ERR_ARTIFACT;
-    if (prec > 3)
+    }
+    if (prec > 3) {
+        cft_set_error("this image's precision code is %lu, which is not on "
+                      "the ladder: 0 %s, 1 %s, 2 %s, 3 %s",
+                      (unsigned long)prec, cft_format_name(CFT_FP32),
+                      cft_format_name(CFT_FP64), cft_format_name(CFT_FP128),
+                      cft_format_name(CFT_FP256));
         return CFT_ERR_ARTIFACT;
+    }
     /* A program is compiled for one format, because its constants are
      * format-width values. Refuse it here rather than at the first
      * instruction that would issue a precision this device does not
@@ -1061,9 +1272,23 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
      * about what this process can represent rather than about any
      * device. Only reachable when the device published no cap of its
      * own - cft_caps documents zero as unknown, and a remote server
-     * older than those fields is the one thing that produces it. */
-    if (maxdep > SEQ_MAX_DEPOSITS)
+     * older than those fields is the one thing that produces it - or
+     * one above this ceiling, which no device does. The sentence says
+     * which (2026-09-30; until then it said nothing). */
+    if (maxdep > SEQ_MAX_DEPOSITS) {
+        cft_seq_caps mc;
+        cft_device_seq_caps(dev, &mc);
+        cft_set_error("this image's max_deposits is %lu, past %lu, this "
+                      "library's own ceiling on deposit slots a lane - a "
+                      "run's output is n times that many elements, so the "
+                      "ceiling bounds what one image can make a host "
+                      "allocate; this device's own cap, "
+                      "cft_caps.max_deposits, is %lu%s",
+                      (unsigned long)maxdep, (unsigned long)SEQ_MAX_DEPOSITS,
+                      (unsigned long)mc.max_deposits,
+                      mc.max_deposits ? "" : " (unknown)");
         return CFT_ERR_INVALID_ARGUMENT;
+    }
 
     /* A BANK_EXT image on a device that cannot take a bank, refused
      * BEFORE the map is ever touched.
@@ -1179,15 +1404,35 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
     /* A BANK_EXT image is a header and an instruction stream, full
      * stop: n_consts says how many constants the program ADDRESSES,
      * and none of them is in the file. */
-    kbytes = (flags & CFT_PROG_FLAG_BANK_EXT)
-             ? 0 : (size_t)n_consts * esz;
-    want = (size_t)SEQ_HEADER_BYTES + kbytes +
-           (size_t)n_insns * SEQ_INSN_BYTES;
+    n_stored = (flags & CFT_PROG_FLAG_BANK_EXT) ? 0u : n_consts;
+    /* In 64 bits, not in size_t. Two 32-bit header fields describe up
+     * to about 2^38 bytes, which a 32-bit size_t wraps: 8 * 0x20000001
+     * instructions came to 8, so a 40-byte image passed this check on
+     * such a host and failed later, at the allocation, as
+     * CFT_ERR_OUT_OF_MEMORY, where a 64-bit host answered
+     * CFT_ERR_ARTIFACT (measured on an i686 build, 2026-09-30; wasm32
+     * and the 32-bit boards are such hosts). The same image now gets the
+     * same answer on every host. Once the check has passed, every part
+     * of `want` is part of `bytes`, so kbytes below fits a size_t. */
+    want = (uint64_t)SEQ_HEADER_BYTES + (uint64_t)n_stored * esz +
+           (uint64_t)n_insns * SEQ_INSN_BYTES;
     /* Exactly, not at least: a program is its header, its constants
      * and its instructions, so anything else is a different program
      * and should not load as this one. */
-    if (bytes != want)
+    if ((uint64_t)bytes != want) {
+        cft_set_error("this image is %llu bytes and its header describes "
+                      "%llu: %d of header, %lu x %lu of constants%s and "
+                      "%lu x %d of instructions. A program image is exactly "
+                      "those, so this one is a different program",
+                      (unsigned long long)bytes, (unsigned long long)want,
+                      SEQ_HEADER_BYTES, (unsigned long)n_stored,
+                      (unsigned long)esz,
+                      (flags & CFT_PROG_FLAG_BANK_EXT)
+                          ? " (none in the image, under BANK_EXT)" : "",
+                      (unsigned long)n_insns, SEQ_INSN_BYTES);
         return CFT_ERR_ARTIFACT;
+    }
+    kbytes = (size_t)n_stored * esz;
 
     prog = (cft_program *)calloc(1, sizeof *prog);
     if (!prog)
