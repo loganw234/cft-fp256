@@ -1,6 +1,8 @@
-; deepwrap-fp64 - a segment whose answer depends on the scratch depth.
-; The golden certificates hold it twice, at 256 slots and at 2,048
-; (certificates/MANIFEST; docs/CERTIFICATES.md, "Golden certificates").
+; deepwrap-fp64 - a segment whose answer depends on the scratch depth,
+; and tells every depth from 128 to 32,768 from every other. The golden
+; certificates hold it twice, at 256 slots and at 2,048, each with a
+; half-step run (certificates/MANIFEST; docs/CERTIFICATES.md, "Golden
+; certificates").
 ;
 ; docs/SEQUENCER.md, revision 7: a tile's scratch depth is its build's.
 ; It is 2,048 slots a lane on the U50's revision-7 images, and 256 on
@@ -8,40 +10,60 @@
 ; A NON-strict STX or LDX reduces its index modulo that depth, so the
 ; same image computes other answers on devices of other depths.
 ;
-; The state is three slots a lane, (x, y, z), and the program indexes
-; past them:
-;   `ldx` at index 256 is slot 0, x, at 256 slots. At 2,048 it is a
-;     slot no instruction writes before this read, so it reads +0.
-;   `stx` at index 258 is slot 2, z, at 256 slots, so z becomes the new
-;     x. At 2,048 the store lands past the carried block and is lost.
-; So from one state, y grows by x/2 a segment at 256 and holds at 2,048,
-; and z follows x at 256 and keeps its value at 2,048. A certificate
-; says which it ran at: a software run states `parameter scratch-depth
-; N` ("The chain"). A strict image would have reported both accesses
-; instead (STATUS[5]) at 256; this one is not strict on purpose.
+; The state is three slots a lane, (x, y, z). Eight probes index past
+; them, at p = 16,384, 8,192, ..., 256 and 128:
+;   `ldx` at p reads slot 0, x, at every depth up to p, since p is a
+;     multiple of the depth there. Past it, p is a slot nothing writes,
+;     so it reads +0. Each read joins y, times H.
+;   `stx` at p + 2 stores the trip's count, 1 to 8, in slot 2, z, at
+;     every depth up to p. Past it the store lands in slot p + 2, which
+;     nothing reads.
+; So at a depth D, n probes reach the carried block, n being how many p
+; are at or past D: 8 at 128 and below, 7 at 256, 6 at 512, 5 at 1,024,
+; 4 at 2,048, 3 at 4,096, 2 at 8,192, 1 at 16,384 and 0 at 32,768. A
+; segment is one Euler step of x' = x, y' = n x:
+;   x := x + H x,   y := y + n H x,
+; and z ends it as n, where n is at least 1: the probes go down from
+; 16,384, so the last store to land is the one at p = D. At 32,768 no
+; store lands, and z is kept. The loads (y) and the stores (z) each say
+; the depth.
+;
+; H, the step, is the bank's first slot: the half-step run halves it.
+; The bank also carries the loop's integers, as raw encodings: 32,768
+; (p before its first shift), 1 (the shift) and 2 (the stores' offset).
+; A certificate says which depth it ran at: a software run states
+; `parameter scratch-depth N` ("The chain"). This image is not strict on
+; purpose: a strict one would report every probe past the depth
+; (STATUS[5]) instead, and compute the same at every depth.
 .format   fp64
 .deposits 0
+.bank     external
 .scratch  in 3
 .scratch  out 3
-.const    I256  = 0x0000000000000100   ; the raw encoding of integer 256
-.const    I258  = 0x0000000000000102   ; and of integer 258
-.const    HALF  = 0.5
-.const    GROW  = 1.25
-.const    SHIFT = 0.5
+.const    H                            ; the step
+.const    ONE                          ; 1.0
+.const    ITOP                         ; the raw encoding of integer 32,768
+.const    IONE                         ; of integer 1
+.const    ITWO                         ; and of integer 2
 .reg      x     = r3
 .reg      y     = r4
-.reg      at    = r6                   ; +0 at the start: integer 0
-.reg      seen  = r7
-.reg      to    = r8                   ; +0 at the start: integer 0
+.reg      p     = r5                   ; +0 at the start: integer 0
+.reg      v     = r6
+.reg      c     = r7                   ; +0 at the start
+.reg      at    = r8
 
 ldl    x, 0
 ldl    y, 1
-iadd   at, at, I256
-ldx    seen, at                        ; slot 256 mod the depth
-fma    y, seen, HALF, y                ; y := seen/2 + y
-fma    x, x, GROW, SHIFT               ; x := 1.25 x + 0.5
+iadd   p, p, ITOP                      ; p := 32,768
+repeat 8
+  ishr   p, p, IONE                    ; p := 16,384, 8,192, ..., 128
+  ldx    v, p                          ; slot p mod the depth: x, or +0
+  fma    y, v, H, y                    ; y := v H + y
+  add    c, c, ONE                     ; c := the trip, 1 to 8
+  iadd   at, p, ITWO
+  stx    c, at                         ; slot p + 2 mod the depth := c
+endrep
+fma    x, x, H, x                      ; x := x H + x
 stl    x, 0
 stl    y, 1
-iadd   to, to, I258
-stx    x, to                           ; slot 258 mod the depth := x
 halt

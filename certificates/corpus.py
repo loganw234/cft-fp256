@@ -7,6 +7,7 @@ docs/CERTIFICATES.md, "Golden certificates", is its manual.
     python certificates/corpus.py check --tool host/cft-segrun[.exe]
                                         [--seed HEX] [--keep DIR]
     python certificates/corpus.py make  --tool host/cft-segrun[.exe]
+                                        [--rewrite-all]
 
 `make -C host corpustest` runs `check` with the tree's cft-segrun, and
 verify/run.sh's `programs` stage runs that, beside segruntest.
@@ -53,6 +54,13 @@ cft-segrun writes, with the golden writer's accuracy block where the case
 has one; `example` is the golden writer's, as the page prints it. It
 refuses to run unless the tool's build id is clean, so that each
 certificate names a commit anyone can check out.
+
+It KEEPS a case's committed certificate, byte for byte, where the one it
+makes equals it but for build-id and the hash line and every boundary
+file has the committed manifest's digest: a case's bytes, and the commit
+its build-id names, move only when what it certifies does (the fixes
+round, 2026-09-30). `--rewrite-all` writes every certificate the tool
+makes, as `make` did before.
 
 The manifest's grammar is read strictly by read_manifest(), which another
 gate may import (P1's cft-audit gate does): printable ASCII and LF, one
@@ -600,7 +608,9 @@ def ode_runs(base, fmt, lanes, S, wider, init=None, half_init=None):
 
 def recipes():
     """Every case of the corpus, as `make` writes it (the lead's decision,
-    2026-09-29: eleven cases and the twelfth, half-init)."""
+    2026-09-29: eleven cases and the twelfth, half-init; deepwrap's depth
+    ladder and half-step runs, and augsum's tie lanes, the fixes round,
+    2026-09-30)."""
     C = []
     C.append(CaseRecipe(
         "lorenz63-rk4-fp64",
@@ -660,27 +670,44 @@ def recipes():
         [RunRecipe("main", fl, b"", None, cert.state_bytes(
             "fp64", [dec("fp64", t) for t in ("3", "1", "3", "5")]), 5, 1)]))
     au = _src_image("augsum-fp64", "certificates/programs/augsum-fp64.cfta")
+    # lanes 2 and 3 (the fixes round, 2026-09-30): the first augadd of each
+    # is +-(2^53 + 3), a tie between +-(2^53 + 2), whose significand is
+    # odd, and +-(2^53 + 4), so roundTiesTowardZero and roundTiesToEven
+    # part there. Lane 1's 1e16 + 1 is a tie at which they agree.
+    tie = str(2 ** 53 + 2)
     C.append(CaseRecipe(
         "augsum-fp64",
         "augsum, the corpus's own: revision 8's augadd and augerr in a "
-        "compensated sum, and a stepped STX and LDX; 2 lanes, 3 segments; "
-        "the software backend only",
+        "compensated sum, and a stepped STX and LDX; 4 lanes, 3 segments, "
+        "lanes 2 and 3 meeting augadd ties, +-(2^53 + 3), at which "
+        "roundTiesTowardZero and roundTiesToEven part; the software "
+        "backend only",
         [RunRecipe("main", au, b"", None, cert.state_bytes(
             "fp64", [dec("fp64", t) for t in
-                     ("1", "0", "0.1", "0", "1e16", "0", "1", "0")]), 3, 4)],
+                     ("1", "0", "0.1", "0", "1e16", "0", "1", "0",
+                      tie, "0", "1", "0", "-" + tie, "0", "-1", "0")]),
+            3, 4)],
         backends="software"))
+    # deepwrap: its bank is H, 1.0, and the raw integers 32,768, 1 and 2
+    # (the source's header); the half-step run halves H, slot 0
     dw = _src_image("deepwrap-fp64", "certificates/programs/deepwrap-fp64.cfta")
+    dwb = cert.state_bytes("fp64", [dec("fp64", "0.25"), dec("fp64", "1"),
+                                    1 << 15, 1, 2])
     dwi = cert.state_bytes("fp64", [dec("fp64", t) for t in
-                                    ("1", "0.25", "3", "2", "0.5", "7")])
+                                    ("1", "0.25", "0", "2", "0.5", "0")])
     for depth in (256, 2048):
         C.append(CaseRecipe(
             f"deepwrap-fp64-{depth}",
             f"deepwrap, the corpus's own, at {depth:,} scratch slots: a "
-            f"non-strict ldx at index 256 and stx at 258, which "
-            + ("wrap into the carried block" if depth == 256 else
-               "do not wrap") + "; 2 lanes, 3 segments",
-            [RunRecipe("main", dw, b"", None, dwi, 3, 1,
-                       params=((DEPTH_PARAM, depth),))],
+            f"non-strict ldx at p and stx at p + 2, for p = 16,384 down to "
+            f"128, reach the carried block at every depth up to p, so every "
+            f"depth from 128 to 32,768 has its own chain; a main run of 3 "
+            f"segments and a half-step run of 6, each stating the depth; 2 "
+            f"lanes",
+            [RunRecipe("main", dw, dwb, None, dwi, 3, 1,
+                       params=((DEPTH_PARAM, depth),)),
+             RunRecipe("half-step", dw, halved("fp64", dwb, (0,)), None, dwi,
+                       6, 1, params=((DEPTH_PARAM, depth),), h_slots=(0,))],
             depth=depth, by_depth_option=True))
     hi = ode_runs("lorenz63-rk4", "fp64", 2, 2, False, half_init=[
         v for i in range(2) for v in (dec("fp64", repr(1 + i / 64 + 1 / 128)),
@@ -813,7 +840,26 @@ def tool_build_id():
     return out.strip()
 
 
-def make(force_dirty=False):
+def committed_certificates():
+    """What `make` may keep: case name -> (its certificate's bytes, each
+    run's boundary digests), for every case of the committed manifest
+    whose certificate file has the manifest's SHA-256. Read before
+    anything is cleared; empty where there is no manifest, or it does not
+    read."""
+    try:
+        old = read_manifest()
+    except (ManifestError, OSError, UnicodeDecodeError):
+        return {}
+    out = {}
+    for c in old.cases:
+        f = rp(c.certificate[0])
+        data = f.read_bytes() if f.is_file() else None
+        if data is not None and sha256(data) == c.certificate[1]:
+            out[c.name] = (data, [r.boundaries for r in c.runs])
+    return out
+
+
+def make(force_dirty=False, rewrite_all=False):
     bid = tool_build_id()
     print(f"corpus make: {TOOL}\n  build-id {bid}", flush=True)
     if not force_dirty and not bid.endswith("tracked=clean untracked=none"):
@@ -822,6 +868,11 @@ def make(force_dirty=False):
                  "build it in a clean worktree (or --force-dirty for a "
                  "trial that will not be committed)")
     C = recipes()
+    # what may be kept, read before anything below is cleared
+    committed = {} if rewrite_all else committed_certificates()
+    if rewrite_all:
+        print("  --rewrite-all: every certificate is the one made now",
+              flush=True)
     # clear what the script writes, and every other directory here but
     # programs/ and __pycache__/ (the second loop), so no stale case stays
     for d in ["images"] + [c.name for c in C]:
@@ -850,7 +901,7 @@ def make(force_dirty=False):
     salt = bytes(range(32))
     rp(salt_path).write_bytes(salt)
     work = Path(tempfile.mkdtemp(prefix="corpus-make-"))
-    cases = []
+    cases, kept = [], 0
     try:
         for c in C:
             t0 = time.perf_counter()
@@ -900,13 +951,22 @@ def make(force_dirty=False):
             if c.name == "example" and data != page_example():
                 sys.exit("corpus make: the example case is not "
                          "docs/CERTIFICATES.md's example certificate")
-            rp(case.certificate[0]).write_bytes(data)
-            case.certificate = (case.certificate[0], sha256(data))
             for r in case.runs:
                 r.boundaries = [sha256(rp(r.state_path(case, b)).read_bytes())
                                 for b in range(r.segments + 1)]
+            # the committed certificate is kept where this one equals it
+            # but for build-id and the hash line, and so are its states
+            old = committed.get(c.name)
+            how = "made"
+            if old is not None and \
+                    old[1] == [r.boundaries for r in case.runs] and \
+                    (old[0] == data or normalized(old[0], bid, False) == data):
+                data, how = old[0], "kept"
+                kept += 1
+            rp(case.certificate[0]).write_bytes(data)
+            case.certificate = (case.certificate[0], sha256(data))
             cases.append(case)
-            print(f"  {c.name}: {len(data):,} bytes, "
+            print(f"  {c.name}: {len(data):,} bytes, {how}, "
                   f"{time.perf_counter() - t0:.1f} s", flush=True)
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -914,8 +974,9 @@ def make(force_dirty=False):
                          .encode("ascii"))
     total = sum(p.stat().st_size for p in HERE.rglob("*")
                 if p.is_file() and "__pycache__" not in p.parts)
-    print(f"corpus make: {len(cases)} cases, {total:,} bytes under "
-          f"certificates/ (this script and the sources included)")
+    print(f"corpus make: {len(cases)} cases, {kept} kept and "
+          f"{len(cases) - kept} made; {total:,} bytes under certificates/ "
+          f"(this script and the sources included)")
     return 0
 
 
@@ -1191,6 +1252,10 @@ def main():
     ap.add_argument("--force-dirty", action="store_true",
                     help="make: allow a tool whose build is not clean (a "
                     "trial, never committed)")
+    ap.add_argument("--rewrite-all", action="store_true",
+                    help="make: write every certificate the tool makes, "
+                    "where by default a committed one that the new one "
+                    "equals but for build-id and the hash line is kept")
     args = ap.parse_args()
     if args.tool:
         TOOL = Path(args.tool).resolve()
@@ -1199,7 +1264,7 @@ def main():
     if args.what == "make":
         if TOOL is None:
             sys.exit("corpus make: --tool is required")
-        return make(args.force_dirty)
+        return make(args.force_dirty, args.rewrite_all)
     seed = bytes.fromhex(args.seed) if args.seed else os.urandom(32)
     if len(seed) != 32:
         sys.exit("corpus: --seed is 64 hex digits")

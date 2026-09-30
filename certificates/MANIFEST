@@ -15,10 +15,10 @@
 cft-golden-corpus 1
 
 source certificates/programs/augsum-fp64.cfta c883bdfcf24fdaaac2fe7da96b1e565f8a527586357074d45a6f7246bd31d464
-source certificates/programs/deepwrap-fp64.cfta 1ee5b5a8740aeeb14603176badfb84b1c6c289178678b5e037a200d8ccc24daf
+source certificates/programs/deepwrap-fp64.cfta 4876b3d10d0375059b998039484d9d7c85b6914724e3a52b67f6c027371aa649
 source certificates/programs/flagstep-fp64.cfta b8ecf694f9bafbbbd6c6a442b9f9cf749e0a4f1354188a8ee44a799e975bb948
 image certificates/images/augsum-fp64.cftp 7ecd133081fc7a35bf0a5b9cf5d749c94688f8005a5d090c748318d091858198 source certificates/programs/augsum-fp64.cfta
-image certificates/images/deepwrap-fp64.cftp 01e7b9907ffbef5e2095ee1614f4d831187fbef8d8203bd0ec96a81a264e9fb2 source certificates/programs/deepwrap-fp64.cfta
+image certificates/images/deepwrap-fp64.cftp f3e494eb4a14c935ed1374173126125b8d4ad6e3948b90558af0ab42b886fa85 source certificates/programs/deepwrap-fp64.cfta
 image certificates/images/flagstep-fp64.cftp e3f822d4acea1d12e19c8fae19569e5ea7747acea6b44c8e9fb36e42226efb14 source certificates/programs/flagstep-fp64.cfta
 image certificates/images/henonheiles-lf-fp128.cftp 36aae70a12aa0921eedac68c3f783bcbec28bb8043981e0aa0887c98f95a4fef source programs/henonheiles-lf-fp64.cfta format fp128
 image certificates/images/henonheiles-lf-fp256.cftp bca321c224cba29f3bf32eea494157b64ea01c1e1022cde88adee82c0d6e91d5 library henonheiles-lf-fp256.cftp
@@ -338,8 +338,8 @@ boundary 4 6cdcb9ea11f76d53df2acd5595d45dc00f699acf7a7104931720ca1217c2958c
 boundary 5 6c54e55edc297041f3b6cf644e6a5230871435d94284432ae2dc3c54712d6be5
 
 case augsum-fp64
-what augsum, the corpus's own: revision 8's augadd and augerr in a compensated sum, and a stepped STX and LDX; 2 lanes, 3 segments; the software backend only
-certificate certificates/augsum-fp64/augsum-fp64.cert 5bf07ef50a8ccbf40f46099f10bfe7c902e99108b4e4e04abc74b6bb436281a7
+what augsum, the corpus's own: revision 8's augadd and augerr in a compensated sum, and a stepped STX and LDX; 4 lanes, 3 segments, lanes 2 and 3 meeting augadd ties, +-(2^53 + 3), at which roundTiesTowardZero and roundTiesToEven part; the software backend only
+certificate certificates/augsum-fp64/augsum-fp64.cert 281c81104bb8f61b0a6bc2c8fa96ab16a39ea7d43df0847361e3f5187abb49eb
 mode open
 depth 256
 backends software
@@ -353,54 +353,82 @@ bank none
 segments 3
 steps 4
 parameters 0
-boundary 0 4ee9c2a8a3f445e03dc88a3b9dc4225f1258d3f733c6537abc8e0e164ab9bb30
-boundary 1 4dd2c793695b705698b13a3dc00f21aeec2fb0ecf3a59d833a55442025477d69
-boundary 2 26f324ddd68e87bbf598dc6125f6189c028132d010af6b71b53e4bc03ce85594
-boundary 3 b4c8ec19d7f486c83179d191a0e87d031db1c08fd46c4e00acf8a873e1551f74
+boundary 0 952c953e3982a1a716524457e35361b8b9821705f92f68a9d8c1fb856e4bc06b
+boundary 1 2e1c427bfa519854b004452baac039bc6119d0c4b13a00bdd19bd2b71c8876dc
+boundary 2 dd30051de3ebf0bb651bce3ba3bf0b316bf7cc8da3c96c1e860dccf6893db6a2
+boundary 3 7eaf9a3f82d66105d2eac45bbf591d72c03e1f70085af6c0d7738da220d863cc
 
 case deepwrap-fp64-256
-what deepwrap, the corpus's own, at 256 scratch slots: a non-strict ldx at index 256 and stx at 258, which wrap into the carried block; 2 lanes, 3 segments
-certificate certificates/deepwrap-fp64-256/deepwrap-fp64-256.cert ab158d51d3df852608f9a019ecbdfba3077feed04b31c202a493bc36cc685da1
+what deepwrap, the corpus's own, at 256 scratch slots: a non-strict ldx at p and stx at p + 2, for p = 16,384 down to 128, reach the carried block at every depth up to p, so every depth from 128 to 32,768 has its own chain; a main run of 3 segments and a half-step run of 6, each stating the depth; 2 lanes
+certificate certificates/deepwrap-fp64-256/deepwrap-fp64-256.cert 51c6137329756b4129a7034fb7fbf2d442e01c3a7be8f181f78df54684641bf1
 mode open
 depth 256
 backends any
 accuracy 0 none
 verdict accepted
 states certificates/deepwrap-fp64-256/states
-runs 1
+runs 2
 run 0 main
 image certificates/images/deepwrap-fp64.cftp
-bank none
+bank certificates/deepwrap-fp64-256/run-0.bank e67413fcbdfb04e11164facce78836a5d3276eaeedb7633d5278ab6ba808694b
 segments 3
 steps 1
 parameters 1
 parameter scratch-depth 256
-boundary 0 ac068d807246cf6f8079e0024925e5ad9314adee744ec82dea2fd1eeb5a201d5
-boundary 1 68126290560f6f477e42ca78e0d1a91968a831b515c2c6c1ee73520ddc95aec6
-boundary 2 fb2cdf25fcb78611656e5426d727ba4eb89cb9f89db2e48b2bbe8ee415f2138b
-boundary 3 7d363ba5b6975cefbb1796c467bdc5118e88b54abd469397d4d1fd5f1a5944af
+boundary 0 fc482e4678bff43a65426c73bd9780750ca9ca843e3c9099c9eb3f1905d3c7a4
+boundary 1 60d75f1de3b8a2cdf1df5a1c9ec8160dc1891bdb598bdfeae8e26e1cac95bc1f
+boundary 2 e5e51a0498e13695b3c82e6d8c46d2f4251c149d57d9f4a3ca31b951cb6a56e2
+boundary 3 0ffcb9c855f990e86ba5e17e97ba13d44836368f69ec032028f4f8181528d16f
+run 1 half-step h-slots 1 0
+image certificates/images/deepwrap-fp64.cftp
+bank certificates/deepwrap-fp64-256/run-1.bank b0ea8c8030d1d85f81d94b0fd701c4dce24e5316f1ccfeefa8d47705fade2849
+segments 6
+steps 1
+parameters 1
+parameter scratch-depth 256
+boundary 0 fc482e4678bff43a65426c73bd9780750ca9ca843e3c9099c9eb3f1905d3c7a4
+boundary 1 1b5df6af380511208801c9ed286e6757b4d108e9263c18189b4a47994516a0ae
+boundary 2 d4bb05726be2a0ab5a7716626f621a94d2b4e43296686f1dac463c1e7e10013d
+boundary 3 a91ba49d9c307a46386954d587298acc4b9b077ed068872084b3933aabfdc168
+boundary 4 887a2c5e5bec9deb5231795c7ec93d035c3cf76dd3e317b0da50685a79764c2e
+boundary 5 03f75573db35d6f480e5c1cca245ff76c4609b1e3606caac012bd80c477d0d5a
+boundary 6 92b851e60c3557000fa750ca2e6766297f1e084468b54133414cf3bdb70a888d
 
 case deepwrap-fp64-2048
-what deepwrap, the corpus's own, at 2,048 scratch slots: a non-strict ldx at index 256 and stx at 258, which do not wrap; 2 lanes, 3 segments
-certificate certificates/deepwrap-fp64-2048/deepwrap-fp64-2048.cert a2a0d55ddbec7491717aebf892d34f18698a632478d61e0c7fd7c876583c52fc
+what deepwrap, the corpus's own, at 2,048 scratch slots: a non-strict ldx at p and stx at p + 2, for p = 16,384 down to 128, reach the carried block at every depth up to p, so every depth from 128 to 32,768 has its own chain; a main run of 3 segments and a half-step run of 6, each stating the depth; 2 lanes
+certificate certificates/deepwrap-fp64-2048/deepwrap-fp64-2048.cert 603db61d51bd09b246f1b765154bacdd5e6b4636be7e5207b5dd55f2c1d7b975
 mode open
 depth 2048
 backends any
 accuracy 0 none
 verdict accepted
 states certificates/deepwrap-fp64-2048/states
-runs 1
+runs 2
 run 0 main
 image certificates/images/deepwrap-fp64.cftp
-bank none
+bank certificates/deepwrap-fp64-2048/run-0.bank e67413fcbdfb04e11164facce78836a5d3276eaeedb7633d5278ab6ba808694b
 segments 3
 steps 1
 parameters 1
 parameter scratch-depth 2048
-boundary 0 ac068d807246cf6f8079e0024925e5ad9314adee744ec82dea2fd1eeb5a201d5
-boundary 1 ca9884b99e762c3a5f0e0bf529ce05685718760921c8e606a64020c46c46184d
-boundary 2 3d1117085ed2b79f0d2c15003fae5525afbe72f06cd8226d83cbab7c6d5f48d5
-boundary 3 6df6667eb576baf5b6bcae132dc9e2a4fa829ccf5287f9610ab34e404b1b4cb9
+boundary 0 fc482e4678bff43a65426c73bd9780750ca9ca843e3c9099c9eb3f1905d3c7a4
+boundary 1 3b36a4503a6fbfbbf3a1eb45cadb22763f23728c87fdac0c3622420dc9fa531c
+boundary 2 3170bf3b67bba6d0da97d5aa33225b4595ca4f6c6fe576785475174ff30f15a7
+boundary 3 8a0dc79f98ef4a65e6c75b7992dc1f858472bdb1c27e68cab8cbfbf2ccb04986
+run 1 half-step h-slots 1 0
+image certificates/images/deepwrap-fp64.cftp
+bank certificates/deepwrap-fp64-2048/run-1.bank b0ea8c8030d1d85f81d94b0fd701c4dce24e5316f1ccfeefa8d47705fade2849
+segments 6
+steps 1
+parameters 1
+parameter scratch-depth 2048
+boundary 0 fc482e4678bff43a65426c73bd9780750ca9ca843e3c9099c9eb3f1905d3c7a4
+boundary 1 15c1e03a0c3b94918c2ed8147ad9ad0f1acc6aaccd6bf36786450c284cd184e9
+boundary 2 3e4ebe315b555341cbb393755b3b0dde3bd1eb11551fa7ff2105ee7413c78c83
+boundary 3 8f5ffca587196a42065852024c9ecdac00a5c7c33dd7f5dbe8387606b0a6105d
+boundary 4 b53e4feb2d0b4ce215a59dc4776af0047ada3e8258e3138d8fd665b819cae580
+boundary 5 a1a9344828944afa7a0365a0f2d425a63b9abc3f4935562e7c80a9366cfefddc
+boundary 6 5be43c0b3187c2da814f00db5aea761689f03c9ec1420d78e0d7d618d0978245
 
 case lorenz63-rk4-fp64-half-init
 what Lorenz-63 at fp64, 2 lanes, a main run of 2 segments and a half-step run of 4 entered from an initial state of its OWN: a relation the certificate states and does not hold, refused aux-start

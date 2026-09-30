@@ -1634,9 +1634,10 @@ round, 2026-09-29):
   every deeper depth, not only the line. It does not tell 2,048 from
   any other depth of 512 or more: the program writes slots 0 and 1 only
   and reads slot 256, which nothing writes at any depth from 512 up, so
-  each computes the same chain. A tool that runs at
-  4,096 while stating 2,048 passes it, and the corpus's depth case too
-  (verifier-A2's plant T3). A known limit.
+  each computes the same chain. A tool that runs at 4,096 while stating
+  2,048 passes it (verifier-A2's plant T3), a known limit of this leg.
+  The golden corpus's deepwrap-fp64-2048 fails that tool, since its
+  chain is 2,048's alone ("Golden certificates"; since 2026-09-30).
 - lorenz63-rk4's main, half-step and wider runs at 2,048 state the
   depth in every run block, and audit green.
 - Its refusals are among the others:
@@ -2024,17 +2025,46 @@ segments a run. Each holds something no other does:
   the software backend makes it: no tile built so far publishes either
   revision-8 bit, and a tile without one refuses the program at load,
   by name.
-- `deepwrap-fp64-256` and `deepwrap-fp64-2048`: one program and one
-  initial state, certified at 256 slots and at 2,048 through `cft-segrun
-  --scratch-depth`. A non-strict LDX at index 256 and STX at index 258
-  wrap into the carried block at 256 and do not at 2,048, so the two
-  chains differ. Each certificate states its depth.
+  - Its lanes 2 and 3 start at s = +-(2^53 + 2) with t = +-1, so their
+    first augadd is a tie: +-(2^53 + 3), between +-(2^53 + 2), whose
+    significand is odd, and +-(2^53 + 4). roundTiesTowardZero, 754's
+    rule, gives +-(2^53 + 2) and e = +-1, and roundTiesToEven would give
+    +-(2^53 + 4). So an augadd that rounds its ties to even fails the
+    case, and so does one that rounds them toward minus infinity (lane
+    3).
+  - Lane 1's 1e16 + 1 is a tie at which those two agree, since 1e16 is
+    both the smaller and the even neighbour. An augadd that rounds ties
+    away from zero, or toward plus infinity, fails there.
+- `deepwrap-fp64-256` and `deepwrap-fp64-2048`: one program, one bank
+  and one initial state, certified at 256 slots and at 2,048 through
+  `cft-segrun --scratch-depth`. Each has a main run of 3 segments and a
+  half-step run of 6.
+  - Eight probes index past the carried block, at p = 16,384 down to
+    128. A non-strict LDX at p reads slot 0 at every depth up to p, and
+    +0 past it. A non-strict STX at p + 2 stores the trip's count in slot
+    2 at every depth up to p. So at a depth D, n probes reach the
+    carried block: 7 at 256, 4 at 2,048, 0 at 32,768. A segment is an
+    Euler step of x' = x, y' = n x, and z ends it as n: z starts at 0,
+    and at 32,768 no store lands (the source's header).
+  - So every power of two from 128 to 32,768 computes its own chain, in
+    both runs, and every depth below 128 computes 128's. That was
+    measured on 2026-09-30 at every power of two from 4 to 32,768, and
+    at each, libcft's boundary states are the golden model's. At 1 and
+    2 slots the image does not load. A run at 4,096, or at 1,024,
+    stating 2,048 fails deepwrap-fp64-2048 (verifier-A2's plant T3).
+  - Both runs of each state `parameter scratch-depth N`. So a writer that
+    states the depth in the main run's block alone fails both cases.
+  - It needs nothing past revision 7: a bank, the scratch block, a
+    non-strict LDX and STX, IADD and ISHR, and a loop. So a revision-7
+    tile loads it (by docs/SEQUENCER.md's features; no card has run
+    it).
 - `lorenz63-rk4-fp64-half-init`: a half-step run entered from an initial
   state of its own. Its runs are what ran, but its stated relation to
   the main run does not hold, so its expected verdict is the refusal
   `aux-start`: one committed negative for every auditor.
 
-The corpus's data is about 145 KB.
+The corpus's data is about 153 KB: 170 files and 152,617 bytes besides
+corpus.py (145,061 bytes until 2026-09-30).
 
 **The files.**
 - `certificates/MANIFEST`: every case, every file it names, and each
@@ -2121,23 +2151,33 @@ case it holds:
    its seed printed;
 7. the case named `example` being this page's example certificate.
 
-It is 156 checks, 23 to 32 s on the Windows desktop, niced, the
-slowest with the desktop at about 77 % from other work (2026-09-29).
+It is 156 checks, 21 to 32 s on the Windows desktop, niced. The
+slowest was with the desktop at about 77 % from other work (2026-09-29).
+With the fixes round's cases it was 21 to 23 s (2026-09-30).
 
 **Changing it.** A change that moves any byte of the corpus fails the
 gate by name: a change to the model, a hash, an encoding, the assembler's
 output, or the `programs/` sources and banks the corpus names. When the
 change is meant, its commit runs `corpus.py make` with a clean build of
-cft-segrun, and says so.
+cft-segrun, and says so. `make` keeps a case's committed certificate,
+byte for byte, where the one it makes equals it but for `build-id` and
+the hash line, and every boundary file has the committed manifest's
+digest. So a case's bytes, and the commit its `build-id` names, move
+only when what it certifies does (the fixes round, 2026-09-30). `make
+--rewrite-all` writes every certificate the tool makes.
 
 **Its producer.** `make` refuses a tool whose build is not clean, so each
-certificate names a commit anyone can check out.
-- Every certificate but `example`'s was written by cft-segrun built
-  clean from 0b8ea10, the commit that added `--scratch-depth`: its
-  `build-id` is `tracked=clean untracked=none`. The golden writer's
-  accuracy block stands where the case has one.
-- `example`'s is the golden writer's, with the identity this page prints
-  (`build-id unknown`).
+certificate names a commit anyone can check out. Every certificate but
+`example`'s was written by cft-segrun built clean from one of two
+commits, and its `build-id` says `tracked=clean untracked=none`:
+- 0b8ea10, the commit that added `--scratch-depth`, wrote the six ODE
+  cases', flagstep's and half-init's (2026-09-29);
+- df06c14, the commit whose `make` keeps a certificate its remake
+  equals, wrote augsum's and the two deepwrap cases' (2026-09-30). That
+  `make` kept the other nine.
+The golden writer's accuracy block stands where the case has one.
+`example`'s is the golden writer's, with the identity this page prints
+(`build-id unknown`).
 
 **As a conformance test.** Another implementation (another library, a
 GPU library, a tile) takes each case's images, banks and initial states
@@ -2161,7 +2201,10 @@ The other rules:
   out and the parameter count one less. Every case but the two deepwrap
   ones has the same chain at 256 and at 2,048 (by the golden model, not
   a card run), so a 2,048 tile conforms on every case but
-  deepwrap-fp64-256, and refuses augsum-fp64 (below).
+  deepwrap-fp64-256, and refuses augsum-fp64 (below). Each deepwrap
+  case's chain is its own depth's alone: at every other power of two
+  from 4 to 32,768 the chain differs, and at 1 and 2 the image does not
+  load. So a tile of any other depth that loads it fails each of them.
 - **Revision 8.** A tile without revision 8 refuses `augsum-fp64` at
   load, by name, and that refusal is its conforming answer.
 - **Auditors.** An auditor conforms when it gives each case its
