@@ -1149,12 +1149,18 @@ do_mpfr() {
   # oracle is the same everywhere it runs.
   local pfx="$ROOT/verify/_mpfr-prefix"
   if [ -f "$pfx/include/mpfr.h" ]; then
-    HOSTMAKE "mpfr-check$EXE" CFLAGS="-O2 -I$pfx/include" \
-      LDLIBS="-L$pfx/lib" || return 1
+    HOSTMAKE "mpfr-check$EXE" "mp-err-check$EXE" \
+      CFLAGS="-O2 -I$pfx/include" LDLIBS="-L$pfx/lib" || return 1
   else
-    HOSTMAKE "mpfr-check$EXE" || return 1
+    HOSTMAKE "mpfr-check$EXE" "mp-err-check$EXE" || return 1
   fi
-  (cd "$ROOT/host" && "./mpfr-check$EXE" 24 7)
+  (cd "$ROOT/host" && "./mpfr-check$EXE" 24 7) || return 1
+  # The evaluator's error rules held exactly, each verdict in GMP
+  # (host/tests/mp_err_check.c): W = 6 exhaustively and a fixed-seed
+  # sample, about 17 s on the desktop; its controls must fail. GMP
+  # comes with MPFR - mpfr.h includes gmp.h, and the pinned prefix
+  # installs both - so the probe that skips this stage covers it.
+  (cd "$ROOT/host" && "./mp-err-check$EXE")
 }
 
 do_soakquick() {
@@ -1165,7 +1171,7 @@ do_soakquick() {
   QUICK=1 OUT="$RUNDIR/soak-quick-out" bash "$ROOT/hw/run-soak.sh"
 }
 need host-cc mpfr
-stage mpfr "MPFR parity, all rungs and modes, flags - the only external oracle reaching fp128/fp256, and the only one at all for the thirty-nine transcendentals" -- do_mpfr
+stage mpfr "MPFR parity, all rungs and modes, flags - the only external oracle reaching fp128/fp256, and the only one at all for the thirty-nine transcendentals; then the evaluator's error rules, exactly, in GMP" -- do_mpfr
 
 need host-cc
 stage soak-quick "native-oracle soak, QUICK depth + sabotage control" -- do_soakquick

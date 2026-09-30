@@ -120,6 +120,7 @@ host/device-test
 host/divsqrt-soak
 host/clause5-soak
 host/mpfr-check
+host/mp-err-check
 host/cft-collatz
 host/cft-enclose
 host/cft-mersenne

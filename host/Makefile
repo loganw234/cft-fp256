@@ -835,8 +835,9 @@ ifneq ($(EXE),)
 divsqrt-soak: divsqrt-soak$(EXE)
 clause5-soak: clause5-soak$(EXE)
 mpfr-check: mpfr-check$(EXE)
+mp-err-check: mp-err-check$(EXE)
 cft-bench-peers: cft-bench-peers$(EXE)
-.PHONY: divsqrt-soak clause5-soak mpfr-check cft-bench-peers
+.PHONY: divsqrt-soak clause5-soak mpfr-check mp-err-check cft-bench-peers
 endif
 
 # MPFR parity: the third oracle, and the only independent one that
@@ -846,6 +847,15 @@ endif
 mpfr-check$(EXE): tools/mpfr_check.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/mpfr_check.c libcft.a \
 	  -o $@ $(XRTLIBS) $(LDLIBS) -lmpfr -lgmp -lm
+
+# The evaluator's error rules held to their claim, exactly: every rule
+# src/mpfloat.c derives, at W = 6 exhaustively and a fixed-seed sample
+# to 928 bits, each verdict computed in GMP (tests/mp_err_check.c's
+# header). GMP only - the runner's mpfr stage runs it, since that stage
+# already needs GMP. `./mp-err-check --full` is the full random sweep.
+mp-err-check$(EXE): tests/mp_err_check.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tests/mp_err_check.c libcft.a \
+	  -o $@ $(XRTLIBS) $(LDLIBS) -lgmp -lm
 
 # libquadmath is linked if and only if the compiler would COMPILE the
 # __float128 rows. cft_bench_peers.c gates them on
@@ -1283,7 +1293,7 @@ clean:
 	      cft-collatz cft-collatz.exe \
 	      cft-bench-peers cft-bench-peers.exe \
 	      divsqrt-soak divsqrt-soak.exe clause5-soak clause5-soak.exe \
-	      mpfr-check mpfr-check.exe \
+	      mpfr-check mpfr-check.exe mp-err-check mp-err-check.exe \
 	      reduce-parts reduce-parts.exe \
 	      device-test device-test.exe \
 	      cpp-api-test cpp-api-test.exe \
