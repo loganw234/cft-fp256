@@ -3756,8 +3756,9 @@ certificate plan's steps 4 and 7").
   width alone. `build-format` came from verifier-A1's two wrong
   answers, one in each narrow build.
 - cft-audit opens every input file before step 1, state files
-  included: a file it cannot open is `usage` before any step, where
-  the golden auditor, which takes no files, names the step.
+  included: a file it cannot open is `usage` before any step. The
+  golden auditor, which takes no files, names the step at which it
+  refuses the certificate, where there is one.
 - The corpus's depth cases tell 256 from the deeper depths, not 2,048
   from them. That is a follow-up.
 - The rest of this section is the plan as written that evening.
