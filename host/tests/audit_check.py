@@ -17,10 +17,14 @@ name, its exit code and its location (line, run, segment, entry), or
 both ACCEPTED with the same verdict, line for line.
 
   1. the tool's own: every usage refusal a command line or a file can
-     cause; `--sample` against the page's test vector and against
-     cert.sample over a grid, with the choice refusals; a seed drawn by
-     the operating system, printed, different each audit, and the same
-     verdict again under it; git ignoring the binary in both its forms;
+     cause, a state file that is a directory among them, refused before
+     step 1; `--sample` against the page's test vector and against
+     cert.sample over a grid, with the choice refusals, and a K past
+     what a map can be sized for refused `memory` (71), promptly; the
+     instrument set empty, which is the instrument unset; a seed drawn
+     by the operating system, printed, different each audit, and the
+     same verdict again under it; git ignoring the binary in both its
+     forms;
   2. test_cert.py, run in this process with cert.parse and cert.audit
      SHADOWED: every top-level call a test makes is also handed to the
      tool, so "every control test_cert.py makes" is every call its
@@ -87,8 +91,10 @@ sys.path.insert(0, str(HERE))
 
 from cft_golden import FORMATS, cert, seq  # noqa: E402
 
-# The tool's own refusals, beside the page's table.
-TOOL_OWN = {"usage": 64, "memory": 71, "build-width": 78}
+# The tool's own refusals, beside the page's table: the codes the checks
+# below want of them.
+TOOL_OWN = {"usage": 64, "memory": 71, "build-width": 78,
+            "build-format": 78}
 TOOL_TIMEOUT = 120
 SEED0 = bytes(32)
 FIXED_SEED = hashlib.sha256(b"audit_check: the fixed sampling seed").digest()
@@ -623,13 +629,15 @@ def section_tool(work):
         args = ["--sample", bytes(32).hex(), "0", str(S_), str(k_)]
         rc, out, err = run_tool(args)
         t = tool_verdict(rc, out, err)
-        want = ("refused", ("memory", 71, ("-", "-", "-", "-")))
+        want = ("refused", ("memory", TOOL_OWN["memory"],
+                            ("-", "-", "-", "-")))
         check(t == want and out == "", f"--sample of {k_} from {S_}: "
               f"refused memory (71), promptly", f"{t}")
         record(None, args, None, [want[0], list(want[1])],
                f"--sample of {k_} from {S_}")
     # the instrument set to the empty string is the instrument unset, as
-    # CFT_SEGRUN_PLANT's is (Windows cannot spell an empty variable)
+    # CFT_SEGRUN_PLANT's is (cmd and Windows PowerShell remove a variable
+    # set empty, so an empty one means the same everywhere)
     args = ["--sample", rows["sample-seed"], rows["sample-run"],
             rows["sample-of"], rows["sample-k"]]
     env = {"CFT_AUDIT_PLANT": ""}
@@ -697,11 +705,12 @@ def section_tool(work):
                              lor], None)):
         rc, out, err = run_tool(args, env, cwd=d)
         t = tool_verdict(rc, out, err)
-        check(t[0] == "refused" and t[1][0] == "usage" and rc == 64 and
+        code = TOOL_OWN["usage"]
+        check(t[0] == "refused" and t[1][0] == "usage" and rc == code and
               t[1][2] == ("-", "-", "-", "-") and out == "",
-              f"refused usage (exit 64), nothing on stdout: {label}",
+              f"refused usage (exit {code}), nothing on stdout: {label}",
               f"{t}")
-        record(d, args, env, ["refused", ["usage", 64, ["-"] * 4]],
+        record(d, args, env, ["refused", ["usage", code, ["-"] * 4]],
                f"usage: {label}")
     census_controls(work)
 
@@ -1015,7 +1024,8 @@ def section_narrow(work, cc, lib_src):
         acc = next(i + 1 for i, ln in enumerate(
             cert.body_of(data).decode().split("\n")) if
             ln.startswith("accuracy "))
-        want = ("refused", ("build-width", 78, (str(acc), "-", "-", "-")))
+        want = ("refused", ("build-width", TOOL_OWN["build-width"],
+                            (str(acc), "-", "-", "-")))
         check(t == want, f"the page's example (accuracy 2): refused "
               f"build-width, exit 78, at its accuracy line {acc}", f"{t}")
         record(e, args, None, [want[0], list(want[1])], "narrow: the page's "
@@ -1059,7 +1069,8 @@ def section_narrow(work, cc, lib_src):
         line = next(i + 1 for i, ln in enumerate(
             cert.body_of(data2).decode().split("\n"))
             if ln.startswith("program-format "))
-        want = ("refused", ("build-format", 78, (str(line), "-", "-", "-")))
+        want = ("refused", ("build-format", TOOL_OWN["build-format"],
+                            (str(line), "-", "-", "-")))
         for how, a in (("its audit", args), ("its --read",
                                              ["--read"] + args[:2])):
             rc, out, err = run_tool(a, cwd=e2)

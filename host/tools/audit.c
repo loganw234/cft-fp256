@@ -3091,7 +3091,8 @@ static void check_relations(const cert_t *C, const uint8_t *salt,
  * executor refuse, as test_cert.py's monkeypatched seq.run does, so that
  * the gate can hold the refusal a later executor could make. Any other
  * value is `usage`, and the empty string is the variable unset, as
- * CFT_SEGRUN_PLANT's is: Windows cannot spell an empty variable at all. */
+ * CFT_SEGRUN_PLANT's is: cmd and Windows PowerShell remove a variable
+ * they are told to set empty, so an empty one means the same everywhere. */
 static int PLANT_EXECUTOR = 0;
 
 /* Step 9 (cert._rerun). */
