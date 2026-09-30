@@ -478,7 +478,7 @@ static void oracle(const fdesc *f, mop op, int mi,
             mpz_t n;
             mpfr_t scaled, frac, half;
             raw_op(y, op, a, b, c, MPFR_RNDZ, &t1);
-            sign = mpfr_sgn(y) < 0;
+            sign = mpfr_signbit(y) != 0;       /* a signed zero keeps it */
             mpz_init(n);
             mpfr_init2(scaled, f->p + 4);
             mpfr_init2(frac, f->p + 4);
@@ -916,7 +916,7 @@ static void c5_round_into(const fdesc *f, const mpfr_t x, int mi,
             mpz_t nn;
             mpfr_t scaled, frac, half;
             t1b = mpfr_set(y, x, MPFR_RNDZ);
-            sgn = mpfr_sgn(y) < 0;
+            sgn = mpfr_signbit(y) != 0;        /* a signed zero keeps it */
             mpz_init(nn);
             mpfr_init2(scaled, f->p + 4);
             mpfr_init2(frac, f->p + 4);
@@ -3572,7 +3572,18 @@ static void t_oracle(const fdesc *f, int fn, int mi, const uint8_t *ba,
             mpz_t n;
             mpfr_t scaled, frac, half;
             t1 = raw_tfn(y, fn, a, b, nn, MPFR_RNDZ);
-            sign = mpfr_sgn(y) < 0;
+            /* The sign BIT: y is recomputed here at MPFR's DEFAULT
+             * exponent range, where a value this far below the
+             * format's grid underflows to a SIGNED zero, and
+             * mpfr_sgn of a signed zero is 0. On an LP64 host
+             * (mpfr_exp_t 64-bit) the unbounded evaluation above
+             * holds pown(-2.5, -2147483647) without underflowing, so
+             * it lands here, and until 2026-09-30 came out +0 where
+             * libcft and the golden model give -0: 37 cases on
+             * amd-arc-box. With a 32-bit mpfr_exp_t (Windows)
+             * that evaluation underflows first, and the underflow
+             * branch above reads the sign bit already. */
+            sign = mpfr_signbit(y) != 0;
             mpz_init(n);
             mpfr_init2(scaled, f->p + 4);
             mpfr_init2(frac, f->p + 4);
