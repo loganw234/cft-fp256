@@ -13,6 +13,10 @@
  *                         --segments S --steps K [--param NAME=N ...]
  *              [--run half-step --h-slots I,J,... --image IMG ...]
  *              [--run wider --image IMG ...]
+ *              [--entry drift|step-halving|wider --uses R
+ *                       --scope max-lanes|lane:I
+ *                       [--quantity LABEL --term C[,sI...] ...]
+ *                       --value exact|rounded:FMT:RND|enclosed:FMT] ...
  *   cft-segrun --hash state|stream-a|stream-b|stream-c FILE
  *              (--salt SALT | --open)
  *   cft-segrun --hash commitment --salt SALT
@@ -48,9 +52,23 @@
  * the certificate, the images and banks, and a keyed certificate's salt.
  *
  * The certificate is written last, once every segment of every run has
- * run: the lines in the page's order, `accuracy 0` (accuracy is step 5),
- * `end`, and the hash line. `steps` and every `--param` are stated, not
- * checked, as the page says.
+ * run: the lines in the page's order, the accuracy block, `end`, and the
+ * hash line. `steps` and every `--param` are stated, not checked, as the
+ * page says.
+ *
+ * ACCURACY ENTRIES (the plan's step 5, 2026-09-30). Each `--entry`, after
+ * the runs, is one entry of the accuracy block, in the order given: its
+ * method, the run it uses, its scope, a drift's quantity and terms, and
+ * its value's form (the page's "Accuracy entries"). The kind is the
+ * method's. Every value is computed as "The functions, exactly" says, in
+ * its order, each value held to the width rule, by cert_exact.h -
+ * cft-audit's own arithmetic, moved there so that the two tools compute
+ * with one code - from the states the runs wrote to DIR, read back once
+ * every run has run, one entry's two states at a time, each held to the
+ * hash the certificate carries at its boundary. Every value first, then
+ * every value's form: the golden writer's order (cert.derive, then
+ * make_value and encode's reader). With no --entry the block is
+ * `accuracy 0`, byte for byte what the tool wrote before step 5.
  *
  * `--scratch-depth N` (the golden-certificate round, 2026-09-29) opens
  * the SOFTWARE backend at N scratch slots a lane through cft_open_ex, as
@@ -77,9 +95,11 @@
  * tried before either is created (try_runs): taken and let go in the
  * order the runs will take it, so a run the process cannot hold is
  * refused then, by name, while the runs themselves hold no more at once
- * than 99f1b43's did - one run's states at a time. (Where memory is
- * overcommitted, an allocation the machine cannot back still succeeds,
- * and only what the address space cannot hold is refused.)
+ * than 99f1b43's did - one run's states at a time - and the accuracy
+ * entries after them one entry's two states at a time, which is never
+ * more than the largest run held. (Where memory is overcommitted, an
+ * allocation the machine cannot back still succeeds, and only what the
+ * address space cannot hold is refused.)
  *
  * ---------------------------------------------------------------
  * Hashes
@@ -143,16 +163,38 @@
  *   line-unexpected (2), line-order (2)
  *                      a parameter name repeated, or smaller than the
  *                      one before it (names in byte order)
+ * and for an accuracy entry, before anything runs:
+ *   malformed (2)      a method, label, run, lane or slot not in its
+ *                      spelling; a drift with no quantity, no term or more
+ *                      than 64; an estimate given a quantity or a term; a
+ *                      coefficient not in its one spelling; a factor not
+ *                      s<slot>, more than 8, or out of order; a value
+ *                      that is not exact, rounded:FMT:RND or enclosed:FMT
+ *   width (3)          a coefficient past the width rule by its digits
+ *   accuracy-run (7)   a run that does not exist; an estimate on run 0,
+ *                      on a run of the other kind, or on one whose lanes
+ *                      or slots a lane are not run 0's
+ *   accuracy-scope (7) a lane the run does not have
+ *   accuracy-slot (7)  a slot the run's state does not have
+ * and after the runs, from the states read back:
+ *   accuracy-finite (7) an element a value needs that is not finite
+ *   width (3)          a value computed past the rule, in the page's
+ *                      order, or an enclosure's finite end past it
  * - the same names, for the same defects, as the golden writer's
- *   (cert.run_chain, certify_run, encode). And the tool's own, which the
- *   golden writer - an API, not a command - has no use for:
+ *   (cert.run_chain, certify_run, derive, make_value, encode). And the
+ *   tool's own, which the golden writer - an API, not a command - has no
+ *   use for:
  *   usage (64)         a command line this tool does not take (among
- *                      them a --scratch-depth it cannot open, above), or
- *                      a file it names that cannot be read
+ *                      them a --scratch-depth it cannot open, above, and
+ *                      an entry's options out of place, twice, or
+ *                      without --uses, --scope or --value), or a file it
+ *                      names that cannot be read
  *   device (69)        the device cannot make or report the run: it does
  *                      not open, it cannot read the sticky flags a
  *                      certificate records (cft_caps.flags_readable), or
- *                      a digest or a segment's run fails
+ *                      a digest or a segment's run fails; or the software
+ *                      handle an accuracy value is rounded and spelt
+ *                      through does not open, or a conversion fails
  *   memory (71)        the process cannot have what the runs need, more
  *                      than it can address or more than it is given -
  *                      found before anything is created or run - or
@@ -165,11 +207,27 @@
  *   output (73)        the certificate or the states cannot be created
  *                      or written: --out or DIR already exists, --out is
  *                      not a regular file (Windows' NUL), or --out lies
- *                      inside DIR, which is not there yet
+ *                      inside DIR, which is not there yet; or a boundary
+ *                      file read back for an entry is not the state this
+ *                      run wrote there (its size or hash): another
+ *                      process changed DIR
+ *   build-width (78)   a build whose bigint is narrower than the width
+ *                      rule's steps need (2,047 bits), given an --entry:
+ *                      it has no exact arithmetic (cft-audit's name)
+ *   build-format (78)  a value rounded or enclosed in a format above the
+ *                      build's CFT_MAX_FORMAT (cft-audit's name)
  * A refusal writes no certificate, and removes only what the run itself
  * created. One made before the first segment leaves nothing behind; a
- * run that fails part way leaves the boundary files it had written, and
- * says so.
+ * run that fails part way, or an entry refused after the runs, leaves
+ * the boundary files it had written, and says so. An exact step past the
+ * bigint, which the width rule makes impossible, is no refusal: it prints
+ * "cft-segrun: internal error" and exits 70, as cft-audit's does.
+ *
+ * The read-back refusal has a plant build, not an instrument: compiled
+ * with -DCFT_SEGRUN_PLANT_STATE_CHANGED (by the gate, never by the
+ * Makefile), the first state read back has a bit flipped, and the run is
+ * refused `output`. The tool the Makefile builds has no such path (the
+ * lead's condition, 2026-09-30).
  *
  * Two refusals guard against a LIBRARY that misreports a segment's flag
  * word: one it left unwritten (the word preset to all ones is still all
@@ -197,14 +255,17 @@
  * ---------------------------------------------------------------
  *
  * It certifies what ran: which bits each segment started and ended on
- * (as hashes), with its flags and STATUS, on which library and device.
- * It checks nothing about an auxiliary run's relation to the main run -
- * a half-step bank that is not the main bank halved is written as stated
- * and refused by the audit (`aux-bank`) - and nothing about accuracy. It
- * signs nothing: the hash line catches corruption, not forgery. The gate
- * is host/tests/segrun_check.py: the golden writer, handed this
- * certificate's identity lines, the same salt and the same initial
- * states, runs every segment itself and must write the same bytes.
+ * (as hashes), with its flags and STATUS, on which library and device;
+ * and each accuracy entry's value as the stated function of the states
+ * it certifies. It checks nothing about an auxiliary run's relation to
+ * the main run - a half-step bank that is not the main bank halved is
+ * written as stated and refused by the audit (`aux-bank`), and an
+ * estimate against it computed as stated - and nothing about how well an
+ * estimate estimates. It signs nothing: the hash line catches
+ * corruption, not forgery. The gate is host/tests/segrun_check.py: the
+ * golden writer, handed this certificate's identity lines, the same salt,
+ * the same initial states and the same entries, runs every segment
+ * itself and must write the same bytes.
  */
 #if !defined(_WIN32)
 #  define _POSIX_C_SOURCE 200112L   /* 199309L hid snprintf on Darwin (2026-09-09) */
@@ -305,6 +366,12 @@ static FILE *create_new(const char *path)
 }
 
 #include "cft.h"
+/* An accuracy entry's exact arithmetic, cft-audit's, shared (the plan's
+ * step 5): the functions exactly, the width rule, the rounding and the
+ * enclosure, each returning a status this file refuses by name. With it
+ * come the formats (FMT, ESZ), the directions (RND_NAME), the run kinds
+ * (K_MAIN, K_HALF, K_WIDER, KIND_NAME) and the methods' words. */
+#include "cert_exact.h"
 
 /* refuse() never returns, and its message is a printf format. mingw-w64
  * names the archetype its stdio really is; elsewhere it is printf. */
@@ -354,10 +421,14 @@ static const char *const FORMAT_NAME[4] = { "fp32", "fp64", "fp128", "fp256" };
 static const struct { const char *name; int code; } REFUSAL[] = {
     /* the page's names: the inputs a writer refuses */
     { "malformed", 2 }, { "line-order", 2 }, { "line-unexpected", 2 },
+    { "width", 3 },
     { "salt-length", 4 }, { "program-image", 4 }, { "program-shape", 4 },
     { "state-shape", 4 },
+    { "accuracy-run", 7 }, { "accuracy-scope", 7 }, { "accuracy-slot", 7 },
+    { "accuracy-finite", 7 },
     /* the tool's own (docs/CERTIFICATES.md, "The segment runner") */
     { "usage", 64 }, { "device", 69 }, { "memory", 71 }, { "output", 73 },
+    { "build-width", 78 }, { "build-format", 78 },
 };
 
 /* What a refusal must undo: the certificate this run created is
@@ -400,6 +471,9 @@ static void refuse(const char *name, const char *fmt, ...)
     NORETURN PRINTF_LIKE(2, 3);
 static void refuse_st(const char *name, const char *what, cft_status st)
     NORETURN;
+#if CX_EXACT
+static void internal(const char *what) NORETURN;
+#endif
 
 static void refuse(const char *name, const char *fmt, ...)
 {
@@ -423,6 +497,19 @@ static void refuse(const char *name, const char *fmt, ...)
     cleanup();
     exit(code);
 }
+
+/* What no refusal names and the width rule makes impossible: an exact step
+ * past the bigint. Not a verdict on the input, so no name of the page's:
+ * exit 70, as cft-audit's internal error (the lead's decision,
+ * 2026-09-30). Only the exact arithmetic can reach it. */
+#if CX_EXACT
+static void internal(const char *what)
+{
+    fprintf(stderr, "cft-segrun: internal error: %s\n", what);
+    cleanup();
+    exit(70);
+}
+#endif
 
 /* cft_last_error() before the calls refuse_st reports on, once a call
  * whose failure the tool expects has left its sentence there (identify's
@@ -747,8 +834,8 @@ static const char *segment_shape(const header *H, char *why, size_t cap)
 
 /* ---- one run --------------------------------------------------------- */
 
-enum { K_MAIN, K_HALF, K_WIDER };
-static const char *const KIND_NAME[3] = { "main", "half-step", "wider" };
+/* (the kinds, K_MAIN, K_HALF and K_WIDER, and their words, KIND_NAME, are
+ * cert_exact.h's) */
 
 typedef struct {
     int kind;
@@ -783,6 +870,35 @@ static void add_param(run_spec *r, const char *s)
     free(r->param_s);
     grown[r->n_param_s++] = s;
     r->param_s = grown;
+}
+
+/* ---- one accuracy entry (docs/CERTIFICATES.md, "Accuracy entries") ----- */
+
+typedef struct {
+    /* as given: --entry, --uses, --scope, --quantity, each --term, --value */
+    const char *method_s, *uses_s, *scope_s, *label_s, *value_s;
+    const char **term_s;
+    size_t n_term_s;
+
+    /* checked before anything is made: the bytes of the two states it
+     * reads, and of its lines in the certificate, at least and at most */
+    size_t need_bytes[2];
+    size_t text_least, text_most;
+#if CX_EXACT
+    entry_t E;          /* its definition; E.value is made after the runs */
+    rat q;              /* its value, derived after the runs */
+#endif
+} entry_spec;
+
+static void add_term(entry_spec *X, const char *s)
+{
+    const char **grown = (const char **)xcalloc(X->n_term_s + 1,
+                                                sizeof *grown);
+    if (X->n_term_s)
+        memcpy(grown, X->term_s, X->n_term_s * sizeof *grown);
+    free(X->term_s);
+    grown[X->n_term_s++] = s;
+    X->term_s = grown;
 }
 
 /* Everything about run `idx` that can be refused before a device is
@@ -1110,11 +1226,23 @@ static int add_ok(size_t *acc, size_t v)
  * library has loaded and digested it, each initial state once it is
  * copied into the run's first state.
  *
+ * The accuracy entries come after the last run has let its states go:
+ * each reads its two states back from DIR into buffers of their exact
+ * size and lets both go before the next entry reads its own (the plan's
+ * step 5). The pair is one run's (a drift) or run 0's final state beside
+ * a run of run 0's lanes and slots (an estimate), so the entries hold no
+ * more at once than the largest run did: its two states, its streams
+ * and a hash's copy. Measured with segrun_check's section 10 (flagstep,
+ * 65,535 lanes, three runs and two entries reading four states): no more
+ * peak commit than the three runs alone, to within the noise of
+ * identical runs (2026-09-30).
+ *
  * Before anything is made, try_runs counts all of it against what the
  * process can address, and then tries, in the runs' own order, the
  * pieces their size decides: each run's hashes, flag words and STATUS,
- * kept; its two states and its streams, taken and let go; the
- * certificate's text last, at the least it can be. A run the process
+ * kept; its two states and its streams, taken and let go; then each
+ * entry's two states, taken and let go; the certificate's text last, at
+ * the least it can be, its entries' lines among it. A run the process
  * cannot have is refused `memory` then, with nothing made.
  *
  * The trial takes nothing from the C library's heap. Every piece comes
@@ -1224,12 +1352,24 @@ static void trial_or_refuse(trial *t, size_t n, size_t sz, long r,
                "anything is made, so nothing was", who,
                (unsigned long long)n, (unsigned long long)sz, what);
 }
+
+/* One of accuracy entry j's two states, taken and let go as the entry
+ * takes it when it reads the state back. */
+static void trial_entry_or_refuse(trial *t, size_t bytes, size_t j)
+{
+    if (!trial_take(t, bytes))
+        refuse("memory", "entry %lu: %llu bytes for a state read back could "
+               "not be had; what the runs and the entries need is tried, in "
+               "the order they need it, before anything is made, so nothing "
+               "was", (unsigned long)j, (unsigned long long)bytes);
+}
 #else
 #  define TRIAL_OS 0
 #endif
 
-static void try_runs(const run_spec *runs, size_t n_runs, const char *states,
-                     int keyed)
+static void try_runs(const run_spec *runs, size_t n_runs,
+                     const entry_spec *entries, size_t n_entries,
+                     const char *states, int keyed)
 {
     size_t r, text_max = HEAD_TEXT, text_min = 0, cap = 4096;
     size_t path = strlen(states) + PATH_TAIL;
@@ -1260,6 +1400,13 @@ static void try_runs(const run_spec *runs, size_t n_runs, const char *states,
             refuse("memory", "run %lu: its state is past what this process "
                    "can address", (unsigned long)r);
     }
+    /* each accuracy entry's lines; the states it reads are the runs' own,
+     * each counted above */
+    for (r = 0; r < n_entries; r++)
+        if (!add_ok(&text_max, entries[r].text_most) ||
+            !add_ok(&text_min, entries[r].text_least))
+            refuse("memory", "entry %lu: the certificate's text is more "
+                   "than this process can address", (unsigned long)r);
     while (cap - 1 < text_min) {
         if (cap > (size_t)-1 / 2)
             refuse("memory", "the certificate's text, at least %llu bytes, "
@@ -1303,6 +1450,15 @@ static void try_runs(const run_spec *runs, size_t n_runs, const char *states,
             for (i = 0; i < 3; i++)
                 trial_give(&now[i]);
         }
+        /* each accuracy entry's two states, read back once the runs have
+         * run, beside every run's hashes: taken and let go in the entries'
+         * order, as each entry lets its pair go before the next reads */
+        for (r = 0; r < n_entries; r++) {
+            trial_entry_or_refuse(&now[0], entries[r].need_bytes[0], r);
+            trial_entry_or_refuse(&now[1], entries[r].need_bytes[1], r);
+            trial_give(&now[0]);
+            trial_give(&now[1]);
+        }
         /* the certificate's text, beside every run's hashes, at the least
          * it can be and grown as put() grows it: 4096 doubled, the old
          * buffer and the new held together at the last doubling */
@@ -1335,6 +1491,451 @@ static void *run_take(size_t n, size_t sz, size_t r, const char *what)
     return p;
 }
 
+/* ---- accuracy entries -------------------------------------------------------
+ *
+ * Each --entry is one entry of the certificate's accuracy block, in the
+ * order given, after the runs (docs/CERTIFICATES.md, "Accuracy entries";
+ * the plan's step 5). Its value is computed by cert_exact.h, cft-audit's
+ * own arithmetic, from the states the runs wrote to DIR, read back once
+ * every run has run - one entry's two states at a time - each held to the
+ * hash the certificate carries at its boundary. Every refusal takes the
+ * golden writer's name for the same defect (cert.derive, make_value and
+ * encode's reader).
+ *
+ * The bytes of an entry's lines, at least (for the trial: each line's
+ * fixed words, one digit a number, and an exact 0/1) and at most (for the
+ * count against what the process can address: a value's line is under
+ * 4 KiB - an exact value is two parts of at most 256 hex digits, and an
+ * element's exact decimal, for a value within the width rule, under 1,400
+ * characters - and a term's under 1 KiB). */
+#define ENTRY_TEXT_LEAST     64
+#define ENTRY_TEXT_MOST      8192
+#define QUANTITY_TEXT_LEAST  19
+#define TERM_TEXT_LEAST      9
+#define TERM_TEXT_MOST       1024
+
+#if CX_EXACT
+/* An entry's run, lane or slot: a decimal in its one spelling, of any
+ * length, saturated at 2^64 - 1. Past 2^63 - 1 it is no index a
+ * certificate can hold, and names no run, lane or slot, so the check
+ * against the runs refuses it (accuracy-run, -scope, -slot), as
+ * cert.derive does before encode's reader could call it malformed. */
+static int dec_sat(const char *s, uint64_t *out)
+{
+    size_t i, n = strlen(s);
+    uint64_t v = 0;
+    if (n == 0 || (s[0] == '0' && n > 1))
+        return 0;
+    for (i = 0; i < n; i++) {
+        unsigned d;
+        if (s[i] < '0' || s[i] > '9')
+            return 0;
+        d = (unsigned)(s[i] - '0');
+        v = v > (UINT64_MAX - d) / 10u ? UINT64_MAX : v * 10u + d;
+    }
+    *out = v;
+    return 1;
+}
+
+/* A run as an entry reads it (cert_exact.h's cx_run). */
+static void run_shape_of(const run_spec *R, cx_run *s)
+{
+    s->kind = R->kind;
+    s->fmt = (int)R->H.prec;
+    s->lanes = R->lanes;
+    s->S = R->segments;
+    s->nslots = R->H.n_in;
+}
+
+/* A status of cert_exact.h's for entry j, refused by the page's name; a
+ * library call that failed, `device`; the rest, an internal error. */
+static void refuse_cx(int st, size_t j, const char *why)
+{
+    const char *name = cx_name(st);
+    if (st == CX_OK)
+        return;
+    if (st == CX_LIBRARY)
+        refuse_st("device", "an accuracy value's rounding "
+                  "(cft_from_hex_char)", CFT_ERR_INTERNAL);
+    if (!name)
+        internal(why);
+    refuse(name, "entry %lu: %s", (unsigned long)j, why);
+}
+
+/* A --term: the coefficient in its one spelling (the reader's order:
+ * malformed, then width by its digits), then its factors, s<slot> each,
+ * at most eight, in non-decreasing order. A slot is any decimal index:
+ * one past the state is accuracy-slot, as cert.derive refuses it. */
+static void parse_term(const char *s, term_t *T, size_t j, size_t t)
+{
+    size_t n = strlen(s);
+    char *buf = (char *)xcalloc(n + 1, 1), *p, *comma, why[256];
+    int st;
+    uint64_t v;
+    memcpy(buf, s, n);
+    p = buf;
+    comma = strchr(p, ',');
+    if (comma)
+        *comma = 0;
+    st = cx_rat_parse(p, &T->coef, "a coefficient", why, sizeof why);
+    if (st == CX_MALFORMED)
+        refuse("malformed", "entry %lu term %lu: %s", (unsigned long)j,
+               (unsigned long)t, why);
+    if (st == CX_WIDTH)
+        refuse("width", "entry %lu term %lu: %s", (unsigned long)j,
+               (unsigned long)t, why);
+    if (st)
+        internal(why);
+    T->n = 0;
+    while (comma) {
+        p = comma + 1;
+        comma = strchr(p, ',');
+        if (comma)
+            *comma = 0;
+        if (p[0] != 's' || !dec_sat(p + 1, &v))
+            refuse("malformed", "entry %lu term %lu: factor '%.40s' is not "
+                   "s<slot>, the slot a decimal integer in its one spelling",
+                   (unsigned long)j, (unsigned long)t, p);
+        if (T->n < MAX_FACTORS)
+            T->slot[T->n] = v;
+        T->n++;
+    }
+    if (T->n > MAX_FACTORS)
+        refuse("malformed", "entry %lu term %lu: a term has at most %d "
+               "factors, and this one has %u", (unsigned long)j,
+               (unsigned long)t, MAX_FACTORS, T->n);
+    for (n = 1; n < T->n; n++)
+        if (T->slot[n] < T->slot[n - 1])
+            refuse("malformed", "entry %lu term %lu: a term's factors are in "
+                   "non-decreasing slot order", (unsigned long)j,
+                   (unsigned long)t);
+    free(buf);
+}
+
+/* A --value: exact, rounded:FMT:RND or enclosed:FMT, each word the
+ * page's (make_value's malformed); a format this build's library does
+ * not carry is refused by the build's name at its word, as cft-audit's
+ * reader does, before the rest (its decimals and rounding are the
+ * library's). */
+static void parse_value(const char *s, value_t *v, size_t j)
+{
+    size_t n = strlen(s), k, parts = 1;
+    char *buf = (char *)xcalloc(n + 1, 1), *part[3] = { NULL, NULL, NULL };
+    int f = -1, d = -1;
+    memcpy(buf, s, n);
+    part[0] = buf;
+    for (k = 0; k < n; k++)
+        if (buf[k] == ':') {
+            buf[k] = 0;
+            if (parts < 3)
+                part[parts] = buf + k + 1;
+            parts++;
+        }
+    if (!strcmp(part[0], "exact"))
+        v->form = V_EXACT;
+    else if (!strcmp(part[0], "rounded"))
+        v->form = V_ROUNDED;
+    else if (!strcmp(part[0], "enclosed"))
+        v->form = V_ENCLOSED;
+    else
+        refuse("malformed", "entry %lu: --value '%.60s': a value's form is "
+               "exact, rounded or enclosed", (unsigned long)j, s);
+    if (parts != (v->form == V_EXACT ? 1u : v->form == V_ROUNDED ? 3u : 2u))
+        refuse("malformed", "entry %lu: --value '%.60s' is not exact, "
+               "rounded:FMT:RND or enclosed:FMT", (unsigned long)j, s);
+    if (v->form != V_EXACT) {
+        for (k = 0; k < 4; k++)
+            if (!strcmp(part[1], FMT[k].name))
+                f = (int)k;
+        if (f < 0)
+            refuse("malformed", "entry %lu: a %s value's format is one of "
+                   "fp32, fp64, fp128, fp256, not '%.40s'", (unsigned long)j,
+                   part[0], part[1]);
+        if (f > CFT_MAX_FORMAT)
+            refuse("build-format", "entry %lu: its value is stated in %s, and "
+                   "this build's library carries formats up to %s "
+                   "(CFT_MAX_FORMAT=%d); its decimals and its rounding are the "
+                   "library's, so it refuses rather than write it differently",
+                   (unsigned long)j, FMT[f].name, FMT[CFT_MAX_FORMAT].name,
+                   CFT_MAX_FORMAT);
+        v->fmt = f;
+    }
+    if (v->form == V_ROUNDED) {
+        for (k = 0; k < 5; k++)
+            if (!strcmp(part[2], RND_NAME[k]))
+                d = (int)k;
+        if (d < 0)
+            refuse("malformed", "entry %lu: a rounded value's direction is "
+                   "one of rne, rtz, rdn, rup, rmm, not '%.40s'",
+                   (unsigned long)j, part[2]);
+        v->rnd = d;
+    }
+    free(buf);
+}
+
+/* Entry j, checked before anything is made: its words and spellings as
+ * the reader holds them, then against the runs in cert.derive's order
+ * (the run it uses, that run's kind and shape, the lane, the slots). And
+ * what it will need: the bytes of the two states it reads, and of its
+ * lines. */
+static void check_entry(entry_spec *X, size_t j, const run_spec *runs,
+                        size_t n_runs)
+{
+    entry_t *E = &X->E;
+    char why[512];
+    uint64_t v, need[2][2];
+    cx_run m, u;
+    size_t t;
+    int k, st;
+
+    for (k = 0; k < 3 && strcmp(X->method_s, METHOD_NAME[k]) != 0; k++)
+        ;
+    if (k == 3)
+        refuse("malformed", "entry %lu: method '%.40s' is not drift, "
+               "step-halving or wider", (unsigned long)j, X->method_s);
+    E->method = k;
+    if (!X->uses_s || !X->scope_s || !X->value_s)
+        refuse("usage", "entry %lu (%s) needs --uses, --scope and --value",
+               (unsigned long)j, METHOD_NAME[k]);
+    if (!dec_sat(X->uses_s, &v))
+        refuse("malformed", "entry %lu: --uses '%.40s' is not a run index, a "
+               "decimal integer in its one spelling", (unsigned long)j,
+               X->uses_s);
+    E->uses = v;
+    if (!strcmp(X->scope_s, "max-lanes")) {
+        E->has_lane = 0;
+    } else if (!strncmp(X->scope_s, "lane:", 5) &&
+               dec_sat(X->scope_s + 5, &v)) {
+        E->has_lane = 1;
+        E->lane = v;
+    } else {
+        refuse("malformed", "entry %lu: --scope '%.40s' is max-lanes, or "
+               "lane:I with I a lane index, a decimal integer in its one "
+               "spelling", (unsigned long)j, X->scope_s);
+    }
+    if (E->method == M_DRIFT) {
+        if (!X->label_s)
+            refuse("malformed", "entry %lu: a drift states its quantity: "
+                   "--quantity LABEL and its terms, --term", (unsigned long)j);
+        if (!name_ok(X->label_s, strlen(X->label_s)))
+            refuse("malformed", "entry %lu: label '%.80s' is not a lowercase "
+                   "letter, then lowercase letters, digits and '-', at most "
+                   "%d", (unsigned long)j, X->label_s, MAX_NAME);
+        if (X->n_term_s < 1 || X->n_term_s > MAX_TERMS)
+            refuse("malformed", "entry %lu: a drift's quantity has 1 to %d "
+                   "terms (--term), and this one has %lu", (unsigned long)j,
+                   MAX_TERMS, (unsigned long)X->n_term_s);
+        E->terms = (term_t *)xcalloc(X->n_term_s, sizeof *E->terms);
+        E->n_terms = (unsigned)X->n_term_s;
+        for (t = 0; t < X->n_term_s; t++)
+            parse_term(X->term_s[t], &E->terms[t], j, t);
+    } else if (X->label_s || X->n_term_s) {
+        refuse("malformed", "entry %lu: a %s estimate states no quantity; "
+               "--quantity and --term are a drift's", (unsigned long)j,
+               METHOD_NAME[E->method]);
+    }
+    parse_value(X->value_s, &E->value, j);
+
+    memset(&u, 0, sizeof u);
+    run_shape_of(&runs[0], &m);
+    if (E->uses < n_runs)
+        run_shape_of(&runs[E->uses], &u);
+    st = cx_entry_check(E, n_runs, &m, E->uses < n_runs ? &u : NULL, why,
+                        sizeof why);
+    refuse_cx(st, j, why);
+
+    cx_entry_needs(E, &m, &u, need);
+    X->need_bytes[0] = runs[need[0][0]].state_bytes;
+    X->need_bytes[1] = runs[need[1][0]].state_bytes;
+    X->text_least = ENTRY_TEXT_LEAST;
+    X->text_most = ENTRY_TEXT_MOST;
+    if (E->method == M_DRIFT) {
+        X->text_least += QUANTITY_TEXT_LEAST + E->n_terms * TERM_TEXT_LEAST;
+        X->text_most += E->n_terms * (size_t)TERM_TEXT_MOST;
+    }
+}
+
+#if defined(CFT_SEGRUN_PLANT_STATE_CHANGED)
+/* A PLANT BUILD, compiled only by the gate (host/tests/segrun_check.py),
+ * never by the Makefile: the first state read back has its first bit
+ * flipped, as if another process had changed the file, so that the gate
+ * holds the refusal that follows (`output`). The shipped tool has no such
+ * path (the lead's condition, 2026-09-30). */
+static int PLANTED_STATE = 0;
+#endif
+
+/* Run r's boundary-b state, read back from the file this run wrote: into
+ * a buffer of exactly its size, and held to the hash the certificate
+ * carries at that boundary, which the run computed as it wrote the file.
+ * A file that is not that state, or cannot be read, is refused `output`:
+ * another process changed DIR. */
+static uint8_t *read_back(const run_spec *runs, const uint8_t *salt,
+                          uint64_t r, uint64_t b, size_t j)
+{
+    const run_spec *R = &runs[r];
+    size_t n = R->state_bytes, got, cap = strlen(STATES_DIR) + PATH_TAIL;
+    char *path = (char *)xcalloc(cap, 1);
+    uint8_t *buf = (uint8_t *)run_take(n, 1, (size_t)r, "a state read back");
+    char hex[65];
+    FILE *f;
+    int more;
+    snprintf(path, cap, "%s/run-%lu-boundary-%llu.bin", STATES_DIR,
+             (unsigned long)r, (unsigned long long)b);
+    f = fopen(path, "rb");
+    if (!f)
+        refuse("output", "entry %lu: %s cannot be read back (%s)",
+               (unsigned long)j, path, strerror(errno));
+    got = fread(buf, 1, n, f);
+    more = fgetc(f);
+    if (ferror(f)) {
+        fclose(f);
+        refuse("output", "entry %lu: %s cannot be read back", (unsigned long)j,
+               path);
+    }
+    fclose(f);
+    if (got != n || more != EOF)
+        refuse("output", "entry %lu: %s is not the %lu bytes this run wrote "
+               "there: another process changed %s", (unsigned long)j, path,
+               (unsigned long)n, STATES_DIR);
+#if defined(CFT_SEGRUN_PLANT_STATE_CHANGED)
+    if (!PLANTED_STATE) {
+        PLANTED_STATE = 1;
+        buf[0] ^= 1u;
+        fprintf(stderr, "cft-segrun: CFT_SEGRUN_PLANT_STATE_CHANGED - a plant "
+                "build: the first state read back, %s, has its first bit "
+                "flipped\n", path);
+    }
+#endif
+    state_hash(salt, buf, n, hex);
+    if (strcmp(hex, R->hash[b]) != 0)
+        refuse("output", "entry %lu: %s is not the state this run wrote there "
+               "- its hash is not the one the certificate carries at run %lu "
+               "boundary %llu: another process changed %s", (unsigned long)j,
+               path, (unsigned long)r, (unsigned long long)b, STATES_DIR);
+    free(path);
+    return buf;
+}
+
+/* Entry j's value, once every run has run: its two states read back, in
+ * cert.derive's order, and "The functions, exactly" on them; then both
+ * let go, before the next entry reads its own. */
+static void derive_entry(entry_spec *X, size_t j, const run_spec *runs,
+                         const uint8_t *salt)
+{
+    cx_run m, u;
+    uint64_t need[2][2];
+    uint8_t *s[2];
+    char why[512];
+    int st;
+    run_shape_of(&runs[0], &m);
+    run_shape_of(&runs[X->E.uses], &u);
+    cx_entry_needs(&X->E, &m, &u, need);
+    s[0] = read_back(runs, salt, need[0][0], need[0][1], j);
+    s[1] = read_back(runs, salt, need[1][0], need[1][1], j);
+    st = cx_entry_value(&X->E, &m, &u, s[0], s[1], &X->q, why, sizeof why);
+    free(s[0]);
+    free(s[1]);
+    refuse_cx(st, j, why);
+}
+
+/* Entry j's value in its form (cert.make_value, and encode's width at an
+ * enclosure's finite end), after every entry's value is derived: the
+ * golden writer's order. */
+static void make_value(entry_spec *X, size_t j, cft_device *arith)
+{
+    char why[512];
+    value_t *v = &X->E.value;
+    refuse_cx(cx_value_make(arith, &X->q, v->form, v->fmt, v->rnd, v, why,
+                            sizeof why), j, why);
+}
+
+/* An element as the certificate spells one: its bits in width/4 hex
+ * digits, a space, and its exact decimal (cft_to_decimal_char at 0
+ * digits, as cft-audit holds it). */
+static void put_element(text *t, int f, const uint8_t *le, cft_device *arith)
+{
+    size_t i, len = 0;
+    uint32_t fl = 0;
+    char *dec;
+    cft_status st;
+    for (i = ESZ(f); i-- > 0;)
+        put(t, "%02x", le[i]);
+    st = cft_to_decimal_char(arith, (cft_format)f, CFT_RNE, le, 0, NULL, 0,
+                             &len, &fl);
+    if (st != CFT_ERR_INVALID_ARGUMENT || len == 0)
+        refuse_st("device", "cft_to_decimal_char, sizing an accuracy value's "
+                  "decimal", st);
+    dec = (char *)xcalloc(len, 1);
+    st = cft_to_decimal_char(arith, (cft_format)f, CFT_RNE, le, 0, dec, len,
+                             &len, &fl);
+    if (st != CFT_OK)
+        refuse_st("device", "cft_to_decimal_char, an accuracy value's decimal",
+                  st);
+    put(t, " %s", dec);
+    free(dec);
+}
+#endif /* CX_EXACT */
+
+/* The accuracy block, in the page's order and spellings (cert._body_lines):
+ * `accuracy <A>`, then each entry's lines. With no --entry it is
+ * `accuracy 0`, byte for byte what the tool wrote before step 5. One
+ * function, beside the run blocks' code, so that another writer of the
+ * same certificates can take it whole. */
+static void put_accuracy(text *t, const entry_spec *entries, size_t n,
+                         cft_device *arith)
+{
+    put(t, "accuracy %llu\n", (unsigned long long)n);
+#if CX_EXACT
+    {
+        size_t j;
+        for (j = 0; j < n; j++) {
+            const entry_t *E = &entries[j].E;
+            const value_t *v = &E->value;
+            char buf[CX_RAT_TEXT];
+            unsigned k, s;
+            put(t, "entry %llu %s\n", (unsigned long long)j,
+                METHOD_NAME[E->method]);
+            put(t, "kind %s\n", KINDS[METHOD_KIND[E->method]]);
+            put(t, "uses %llu\n", (unsigned long long)E->uses);
+            if (E->has_lane)
+                put(t, "scope lane %llu\n", (unsigned long long)E->lane);
+            else
+                put(t, "scope max-lanes\n");
+            if (E->method == M_DRIFT) {
+                put(t, "quantity %s terms %u\n", entries[j].label_s,
+                    E->n_terms);
+                for (k = 0; k < E->n_terms; k++) {
+                    rat_text(&E->terms[k].coef, buf);
+                    put(t, "term %s", buf);
+                    for (s = 0; s < E->terms[k].n; s++)
+                        put(t, " s%llu",
+                            (unsigned long long)E->terms[k].slot[s]);
+                    put(t, "\n");
+                }
+            }
+            if (v->form == V_EXACT) {
+                rat_text(&v->exact, buf);
+                put(t, "value exact %s\n", buf);
+            } else if (v->form == V_ROUNDED) {
+                put(t, "value rounded %s %s ", FMT[v->fmt].name,
+                    RND_NAME[v->rnd]);
+                put_element(t, v->fmt, v->bits, arith);
+                put(t, "\n");
+            } else {
+                put(t, "value enclosed %s ", FMT[v->fmt].name);
+                put_element(t, v->fmt, v->lo, arith);
+                put(t, " ");
+                put_element(t, v->fmt, v->hi, arith);
+                put(t, "\n");
+            }
+        }
+    }
+#else
+    (void)entries;
+    (void)arith;
+#endif
+}
+
 /* ---- usage --------------------------------------------------------------- */
 
 static void usage_text(FILE *f)
@@ -1349,6 +1950,10 @@ static void usage_text(FILE *f)
 "                        --segments S --steps K [--param NAME=N ...]\n"
 "             [--run half-step --h-slots I,J,... --image IMG ...]\n"
 "             [--run wider --image IMG ...]\n"
+"             [--entry drift|step-halving|wider --uses R\n"
+"                      --scope max-lanes|lane:I\n"
+"                      [--quantity LABEL --term C[,sI...] ...]\n"
+"                      --value exact|rounded:FMT:RND|enclosed:FMT] ...\n"
 "  cft-segrun --hash state|stream-a|stream-b|stream-c FILE\n"
 "             (--salt SALT | --open)\n"
 "  cft-segrun --hash commitment --salt SALT\n"
@@ -1375,6 +1980,16 @@ static void usage_text(FILE *f)
 "  --param NAME=N  a non-negative integer parameter: stated, not checked;\n"
 "                  names in increasing byte order\n"
 "  --h-slots LIST  a half-step run's bank slots that carry the step\n"
+"  --entry METHOD  an accuracy entry, after the runs: drift (a measurement),\n"
+"                  step-halving or wider (estimates against run 0)\n"
+"  --uses R        the run the entry is a function of\n"
+"  --scope S       max-lanes, or lane:I\n"
+"  --quantity L    a drift's quantity, named L, with its terms in order:\n"
+"  --term C,sI...  the coefficient C (hex N/D in lowest terms, 1/1 for one)\n"
+"                  and its factors, the state's slots, non-decreasing\n"
+"  --value FORM    exact, rounded:FMT:RND (rne rtz rdn rup rmm) or\n"
+"                  enclosed:FMT; each value is computed from the states the\n"
+"                  runs wrote to DIR, read back once they have run\n"
 "  --hash KIND     print one of the page's hashes of FILE, and exit\n"
 "  --build-id      print cft_build_id(), which the build-id line carries\n"
 "\n"
@@ -1447,9 +2062,11 @@ int main(int argc, char **argv)
     int open_mode = 0, want_build_id = 0, i;
     run_spec *runs = NULL;
     size_t n_runs = 0, r;
+    entry_spec *entries = NULL;
+    size_t n_entries = 0, j;
     uint8_t *salt = NULL;
     size_t salt_bytes = 0;
-    cft_device *dev = NULL;
+    cft_device *dev = NULL, *arith = NULL;
     cft_caps caps;
     cft_status st;
     identity id;
@@ -1511,6 +2128,9 @@ int main(int argc, char **argv)
             const char *k = need(argc, argv, &i);
             run_spec *grown;
             int kind;
+            if (n_entries)
+                refuse("usage", "--run %s after --entry: the runs come first, "
+                       "and the accuracy entries after them", k);
             if (!strcmp(k, "main"))
                 kind = K_MAIN;
             else if (!strcmp(k, "half-step"))
@@ -1536,6 +2156,9 @@ int main(int argc, char **argv)
             if (!cur)
                 refuse("usage", "%s belongs to a run: give it after --run",
                        a);
+            if (n_entries)
+                refuse("usage", "%s belongs to a run, and the runs come "
+                       "before the accuracy entries (--entry)", a);
             if (!strcmp(a, "--image"))         once(&cur->image_path, a, v);
             else if (!strcmp(a, "--bank"))     once(&cur->bank_path, a, v);
             else if (!strcmp(a, "--init"))     once(&cur->init_path, a, v);
@@ -1553,6 +2176,29 @@ int main(int argc, char **argv)
                            "--scratch-depth N instead", v, DEPTH_PARAM);
                 add_param(cur, v);
             }
+        } else if (!strcmp(a, "--entry")) {
+            const char *m = need(argc, argv, &i);
+            entry_spec *grown = (entry_spec *)xcalloc(n_entries + 1,
+                                                      sizeof *grown);
+            if (n_entries)
+                memcpy(grown, entries, n_entries * sizeof *grown);
+            free(entries);
+            entries = grown;
+            entries[n_entries].method_s = m;
+            n_entries++;
+        } else if (!strcmp(a, "--uses") || !strcmp(a, "--scope") ||
+                   !strcmp(a, "--quantity") || !strcmp(a, "--term") ||
+                   !strcmp(a, "--value")) {
+            const char *v = need(argc, argv, &i);
+            entry_spec *X = n_entries ? &entries[n_entries - 1] : NULL;
+            if (!X)
+                refuse("usage", "%s belongs to an accuracy entry: give it "
+                       "after --entry", a);
+            if (!strcmp(a, "--uses"))          once(&X->uses_s, a, v);
+            else if (!strcmp(a, "--scope"))    once(&X->scope_s, a, v);
+            else if (!strcmp(a, "--quantity")) once(&X->label_s, a, v);
+            else if (!strcmp(a, "--value"))    once(&X->value_s, a, v);
+            else                               add_term(X, v);
         } else {
             refuse("usage", "unknown argument '%s' (--help lists them)", a);
         }
@@ -1576,7 +2222,8 @@ int main(int argc, char **argv)
                    (unsigned long)salt_bytes);
     }
     if (hash_kind) {
-        if (out_path || states_path || device || depth_s || n_runs)
+        if (out_path || states_path || device || depth_s || n_runs ||
+            n_entries)
             refuse("usage", "--hash takes a kind, a file and --salt or "
                    "--open, and nothing else");
         if (!salt && !open_mode && strcmp(hash_kind, "commitment") != 0)
@@ -1610,8 +2257,26 @@ int main(int argc, char **argv)
     for (r = 0; r < n_runs; r++)
         check_run(&runs[r], r);
 
+    /* ---- the accuracy entries, before anything is made ----------------- */
+#if CX_EXACT
+    for (j = 0; j < n_entries; j++)
+        check_entry(&entries[j], j, runs, n_runs);
+#else
+    /* no exact arithmetic in this build: the entries' values are exact
+     * rationals, which a bigint narrower than the width rule's steps
+     * cannot compute, so it refuses rather than write them differently
+     * (cft-audit's build-width) */
+    if (n_entries)
+        refuse("build-width", "this command line has %lu accuracy entr%s, "
+               "whose values are exact, and this build's bigint is %d bits, "
+               "narrower than the %d an exact step needs; it refuses rather "
+               "than write them differently", (unsigned long)n_entries,
+               n_entries == 1 ? "y" : "ies", CFT_BN_LIMBS * 32,
+               2 * CX_WIDTH_BITS + 1);
+#endif
+
     /* ---- what every run needs, tried before anything is made ------------ */
-    try_runs(runs, n_runs, states_path, salt != NULL);
+    try_runs(runs, n_runs, entries, n_entries, states_path, salt != NULL);
 
     /* ---- the outputs, before any device work ----------------------------
      * Both created new, the certificate first: a file already at --out is
@@ -1681,6 +2346,19 @@ int main(int argc, char **argv)
                "certificate records each segment's flag word%s",
                caps.backend, PLANT_UNREADABLE ? " (planted: "
                "CFT_SEGRUN_PLANT=flags-unreadable)" : "");
+#if CX_EXACT
+    /* A rounded or enclosed value is rounded and spelt through the
+     * library, on a software handle of its own, as cft-audit's are: the
+     * arithmetic is the host's whatever --device ran the segments. */
+    for (j = 0; j < n_entries; j++)
+        if (entries[j].E.value.form != V_EXACT) {
+            st = cft_open(NULL, 0, &arith);
+            if (st != CFT_OK)
+                refuse_st("device", "cft_open, the software backend an "
+                          "accuracy value is rounded and spelt through", st);
+            break;
+        }
+#endif
 
     for (r = 0; r < n_runs; r++) {
         run_spec *R = &runs[r];
@@ -1806,6 +2484,18 @@ int main(int argc, char **argv)
         free(zero);
     }
 
+    /* ---- the accuracy entries, from the states the runs wrote ----------
+     * Every value first, each entry's two states read back and let go
+     * before the next entry's; then every value's form. That is the golden
+     * writer's order: cert.derive for each entry, then encode's reader
+     * (an enclosure's ends against the width rule). */
+#if CX_EXACT
+    for (j = 0; j < n_entries; j++)
+        derive_entry(&entries[j], j, runs, salt);
+    for (j = 0; j < n_entries; j++)
+        make_value(&entries[j], j, arith);
+#endif
+
     /* ---- the certificate ------------------------------------------------- */
     put(&body, "cft-certificate 1\n");
     put(&body, "mode %s\n", salt ? "keyed" : "open");
@@ -1823,7 +2513,6 @@ int main(int argc, char **argv)
     for (r = 0; r < n_runs; r++) {
         run_spec *R = &runs[r];
         uint64_t k;
-        size_t j;
         if (R->kind == K_HALF) {
             put(&body, "run %llu half-step h-slots %llu",
                 (unsigned long long)r, (unsigned long long)R->n_hslots);
@@ -1871,7 +2560,7 @@ int main(int argc, char **argv)
                 (unsigned)R->flags[k], (unsigned)R->status[k]);
         put(&body, "output %s\n", R->hash[R->segments]);
     }
-    put(&body, "accuracy 0\n");
+    put_accuracy(&body, entries, n_entries, arith);
     put(&body, "end\n");
     sha256_of(body.p, body.n, digest);
     hex_of(digest, 32, hex);
@@ -1914,6 +2603,21 @@ int main(int argc, char **argv)
                (unsigned)orf, (unsigned)ors);
         printf("  output      %s\n", R->hash[R->segments]);
     }
+#if CX_EXACT
+    for (j = 0; j < n_entries; j++) {
+        const entry_t *E = &entries[j].E;
+        char buf[CX_RAT_TEXT];
+        rat_text(&entries[j].q, buf);
+        printf("entry %-8lu%s, %s of run %llu, %s%s: %.60s%s (%s)\n",
+               (unsigned long)j, METHOD_NAME[E->method],
+               KINDS[METHOD_KIND[E->method]], (unsigned long long)E->uses,
+               E->has_lane ? "lane " : "max-lanes",
+               E->has_lane ? entries[j].scope_s + 5 : "", buf,
+               strlen(buf) > 60 ? "..." : "",
+               E->value.form == V_EXACT ? "exact" :
+               E->value.form == V_ROUNDED ? "rounded" : "enclosed");
+    }
+#endif
     printf("hash          %s\n", hex);
 
     for (r = 0; r < n_runs; r++) {
@@ -1927,8 +2631,17 @@ int main(int argc, char **argv)
         free((void *)runs[r].param_s);
     }
     free(runs);
+    for (j = 0; j < n_entries; j++) {
+#if CX_EXACT
+        free(entries[j].E.terms);
+#endif
+        free((void *)entries[j].term_s);
+    }
+    free(entries);
     free(salt);
     free(body.p);
+    if (arith)
+        cft_close(arith);
     cft_close(dev);
     return 0;
 }

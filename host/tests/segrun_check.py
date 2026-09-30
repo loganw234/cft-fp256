@@ -6,12 +6,15 @@ audit tool"; docs/CERTIFICATES.md, "The segment runner").
 
     python host/tests/segrun_check.py --tool host/cft-segrun[.exe]
                                       [--serve host/cft-serve[.exe]]
+                                      [--audit host/cft-audit[.exe]]
+                                      [--cc CC --lib-src "SRC ..."]
                                       [--keep DIR] [--salt-hex HEX]
     python host/tests/segrun_check.py --tool host/cft-segrun
                                       --device <image.xclbin>
                                       --expect-xclbin HEX --expect-version HEX
                                       --expect-caps "HEX [HEX]"
                                       --expect-tiles N [--no-wider]
+                                      [--audit host/cft-audit]
 
 `make -C host segruntest` runs the first with the tree's build id in
 CFT_EXPECT_BUILD_ID, and verify/run.sh's `programs` stage runs that. The
@@ -19,29 +22,41 @@ second is the card leg, which hw/card-segrun.sh runs on the box with the
 card, the identity it expects measured apart from the tool (sha256sum of
 the image, device-test -i): each certificate is made on the card, held to
 everything below, and made again on the software backend, its run blocks
-compared byte for byte.
+and its accuracy block compared byte for byte.
 
 First, git ignores the binary in both its forms, so a build of it leaves
 the next build id clean. Then, for each program below, keyed and then
-open, on the software backend:
-  1. cft-segrun runs it as consecutive segments and writes the
-     certificate and every boundary state;
+open, on the software backend, with its ACCURACY ENTRIES (ENTRIES; the
+plan's step 5, 2026-09-30):
+  1. cft-segrun runs it as consecutive segments, writes every boundary
+     state, reads the states its entries need back from them, and writes
+     the certificate, its entries' values included;
   2. the golden reader (cert.parse) accepts the certificate - with the
      salt, its commitment too;
-  3. the golden writer - cert.run_chain, certify_run and encode, handed
-     the certificate's identity lines, the salt and the INITIAL states -
-     runs every segment itself and writes the same bytes, which holds the
-     arithmetic and the carrying of state as well as the encoding;
+  3. the golden writer - cert.run_chain, certify_run, derive, make_value
+     and encode, handed the certificate's identity lines, the salt, the
+     INITIAL states and the same entries' definitions - runs every
+     segment itself and writes the same bytes, which holds the
+     arithmetic, the carrying of state and every entry's value as well as
+     the encoding;
   4. the states directory holds exactly the boundary files, each the
      golden chain's state at that boundary, lane-major;
   5. cert.audit accepts the certificate from the states the tool wrote:
-     every segment of every run, and then a sample the auditor draws
-     (its seed printed, so a red sample can be drawn again) - or, for
-     the one program certified with a relation broken on purpose, refuses
-     it by the name the relation's check has (aux-start);
+     every segment of every run and every entry re-derived, and then a
+     sample the auditor draws (its seed printed, so a red sample can be
+     drawn again) - or, for the one program certified with a relation
+     broken on purpose, refuses it by the name the relation's check has
+     (aux-start); and with --audit, cft-audit, the C auditor, gives the
+     same verdict in full, line for line, or the same refusal by name;
   6. the identity lines are the library's: build-id is what the binary's
      own `--build-id` prints and what the tree builds (CFT_EXPECT_BUILD_ID);
      the software backend's device lines are `none` and its tiles 1.
+The entries between them have every method, both scopes, every form and
+every rounding direction: a step-halving estimate on every ODE program, a
+wider one on every fp64 one, and Henon-Heiles' energy drift, exact, whose
+denominator has a 3. main() holds that, and that each direction but rup
+rounds some entry's value otherwise than rup, so that a writer that
+swapped its direction is seen by step 3.
 Then:
   7. the page's test vectors through `cft-segrun --hash`, and every tag,
      keyed and open, against an HMAC written here from RFC 2104;
@@ -62,13 +77,18 @@ Then:
      4eed552 held every run's working set at once (verifier-C7's
      regression); peak commit on Windows, on Linux the least address
      space the run writes its certificate in (ulimit -v), found by
-     bisection. And what the trial costs the runs, to the page: the least
-     address space with the trial and with its allocations skipped
+     bisection. What the accuracy entries cost: the same three runs with
+     two entries that read four states back, against the runs alone - no
+     more than ENTRY_ALLOWANCE (on Linux, and a bisection step), where one
+     state more held beside the runs' would be 1,024 KiB. And what the
+     trial costs the runs, to the page: the least address space with the
+     trial and with its allocations skipped
      (CFT_SEGRUN_PLANT=trial-skipped), in two small shapes where eb2d1ae's
-     trial cost them up to 40 KiB (verifier-C7) - on Linux; on Windows,
-     where identical runs' peak commit differs by several pages, NOT
-     TESTED, by name. A host whose hard address-space limit stops a
-     measurement says NOT TESTED too, and the gate goes on.
+     trial cost them up to 40 KiB (verifier-C7), and in a third with two
+     entries - on Linux; on Windows, where identical runs' peak commit
+     differs by several pages, NOT TESTED, by name. A host whose hard
+     address-space limit stops a measurement says NOT TESTED too, and the
+     gate goes on.
  11. --scratch-depth, on the software backend (not the card leg's): the
      tool opens the backend at N through cft_open_ex and states `parameter
      scratch-depth N` in every run block, in byte order among the run's
@@ -85,6 +105,32 @@ Then:
      or --build-id, and a `--param scratch-depth=` of the user's - are in
      step 8, and so are 1 and 32,768 taken, each refused only by the
      loader of a program that cannot load there.
+ 12. accuracy entries: every refusal an entry can meet, by its name and
+     exit code, and the golden writer refusing the same defect by the same
+     name wherever it has one (a spelling it cannot hold, such as a
+     coefficient 2/4, it has none): the command line's own (usage); each
+     spelling (malformed, and width by a coefficient's digits); the
+     entry against the runs in cert.derive's order (accuracy-run, among
+     them an estimate whose run has other lanes than run 0; accuracy-
+     scope; accuracy-slot) - each before anything is made, nothing left
+     behind; and the values after the runs (accuracy-finite, width at an
+     element, a product, a partial sum, an enclosure's end), each leaving
+     the boundary files, said so. The page's orders, each with a control:
+     1/a, 1/b, -1/b refused width where 1/b, -1/b, 1/a is written; a final
+     +inf beside an initial 1,024-bit value accuracy-finite, not width;
+     1/(3 x 2^900) enclosed in fp256 refused at its lower end, and written
+     in fp64.
+ 13. the builds only this gate compiles (with --cc and --lib-src; not the
+     card leg's): cft-segrun narrow, CFT_MAX_FORMAT=2 at its own 576-bit
+     bigint - an entry refused build-width, nothing made, and the runs
+     without entries written as the default build writes them but for
+     build-id - and at CFT_BN_LIMBS=64 - exact and fp128 values written as
+     the default build writes them, fp256 ones refused build-format. And
+     the plant build, -DCFT_SEGRUN_PLANT_STATE_CHANGED: the first state
+     read back has a bit flipped, and the run is refused `output` by the
+     state's hash, no certificate written and the boundary files left;
+     without entries it writes the default build's certificate. The shipped
+     binary carries none of the plant build's words.
 
 The programs: lorenz63-rk4, lorenz96-rk4 and henonheiles-lf at fp64 and
 fp256, each image held to programs/MANIFEST, with its classic bank, a
@@ -116,6 +162,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from fractions import Fraction
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -265,6 +312,118 @@ class Program:
     # name: the certificate carries a relation broken on purpose, and the
     # audit must refuse it by that name, full and sampled alike.
     audit_refuses: str = None
+    # the accuracy entries it is certified with (attach_entries)
+    entries: list = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass
+class EntrySpec:
+    """An accuracy entry's definition, as the tool takes it on its command
+    line and the golden writer as a cert.Entry: never its value."""
+    method: str             # drift, step-halving or wider
+    uses: int
+    lane: object            # a lane, or None for max-lanes
+    form: str               # exact, rounded or enclosed
+    fmt: str = None
+    rnd: str = None
+    label: str = None       # a drift's
+    terms: tuple = ()       # a drift's: ((coefficient, (slot, ...)), ...)
+
+
+# Henon-Heiles' energy over (x, y, px, py) = slots (0, 1, 2, 3):
+# (px^2 + py^2)/2 + (x^2 + y^2)/2 + x^2 y - y^3/3, the page's example's
+# quantity, whose y^3/3 leaves a 3 in the drift's denominator
+ENERGY = ((Fraction(1, 2), (2, 2)), (Fraction(1, 2), (3, 3)),
+          (Fraction(1, 2), (0, 0)), (Fraction(1, 2), (1, 1)),
+          (Fraction(1), (0, 0, 1)), (Fraction(-1, 3), (1, 1, 1)))
+FLAG_C = ((Fraction(1), (0,)),)     # flagstep's counter, slot 0
+
+# Each program's entries: between them every method, scope, form and
+# rounding direction. A step-halving estimate on every ODE program, a
+# wider one on every fp64 one, and Henon-Heiles' energy drift, exact,
+# whose denominator has a 3. A difference of two values of one format is
+# exact in it (Sterbenz), so a rounded or enclosed estimate names a
+# narrower format, and a drift, with its 3, rounds inexactly in any:
+# main() holds that each direction but rup rounds otherwise than rup
+# somewhere, so that a writer that swapped its direction is seen.
+ENTRIES = {
+    "lorenz63-rk4-fp64": [
+        EntrySpec("step-halving", 1, None, "enclosed", "fp32"),
+        EntrySpec("wider", 2, None, "rounded", "fp32", "rne"),
+        EntrySpec("wider", 2, 0, "enclosed", "fp64")],
+    "lorenz63-rk4-fp256": [
+        EntrySpec("step-halving", 1, 1, "rounded", "fp128", "rmm")],
+    "lorenz96-rk4-fp64": [
+        EntrySpec("step-halving", 1, None, "exact"),
+        EntrySpec("wider", 2, None, "rounded", "fp32", "rtz")],
+    "lorenz96-rk4-fp256": [
+        EntrySpec("step-halving", 1, 0, "enclosed", "fp128")],
+    "henonheiles-lf-fp64": [
+        EntrySpec("drift", 0, 1, "exact", label="energy", terms=ENERGY),
+        EntrySpec("drift", 0, None, "rounded", "fp64", "rdn",
+                  label="energy", terms=ENERGY),
+        EntrySpec("step-halving", 1, None, "rounded", "fp64", "rup"),
+        EntrySpec("wider", 2, 3, "enclosed", "fp32")],
+    "henonheiles-lf-fp256": [
+        EntrySpec("drift", 0, None, "exact", label="energy", terms=ENERGY),
+        EntrySpec("drift", 0, 2, "enclosed", "fp64", label="energy",
+                  terms=ENERGY),
+        EntrySpec("step-halving", 1, 0, "exact")],
+    # every lane's counter falls by one a segment, 3 to -2: each drift is
+    # -5, so a max-lanes that took the signed maximum writes -5, not 5
+    "flagstep-fp64": [
+        EntrySpec("drift", 0, None, "exact", label="c", terms=FLAG_C)],
+}
+
+
+def attach_entries(programs):
+    """Each program's entries (ENTRIES), leaving out any that uses a run
+    the program does not have (--no-wider drops the wider runs). No
+    check() here: audit_check's section 3 counts the constructors'."""
+    for p in programs:
+        p.entries = [e for e in ENTRIES.get(p.name, [])
+                     if e.uses < len(p.runs)]
+    return programs
+
+
+def entry_options(entries):
+    """cft-segrun's options for entries (docs/CERTIFICATES.md, "The
+    segment runner"), written again here from the page, not imported."""
+    a = []
+    for e in entries:
+        a += ["--entry", e.method, "--uses", str(e.uses), "--scope",
+              "max-lanes" if e.lane is None else f"lane:{e.lane}"]
+        if e.label is not None:
+            a += ["--quantity", e.label]
+        for c, slots in e.terms:
+            a += ["--term", ",".join([cert.rational_text(Fraction(c))]
+                                     + [f"s{s}" for s in slots])]
+        a += ["--value", "exact" if e.form == "exact" else
+              f"rounded:{e.fmt}:{e.rnd}" if e.form == "rounded" else
+              f"enclosed:{e.fmt}"]
+    return a
+
+
+def golden_entries(entries, runs, specs, chains):
+    """The golden writer's entries: cert.derive on the golden chains' first
+    and last states, then cert.make_value, as corpus.py's golden_entries
+    and test_cert's entry_with make them."""
+    ends = {}
+    for r, (st, _) in enumerate(chains):
+        ends[(r, 0)] = st[0]
+        ends[(r, len(st) - 1)] = st[-1]
+    shapes = [(FORMATS[s.fmt], seq.Program.from_bytes(s.image).n_scratch_in)
+              for s in specs]
+    out = []
+    for e in entries:
+        probe = cert.Entry(e.method, cert.METHOD_KIND.get(e.method, "bound"),
+                           e.uses, e.lane,
+                           cert.Value("exact", exact=Fraction(0)), e.label,
+                           tuple(e.terms))
+        q = cert.derive(probe, runs, shapes, ends)
+        out.append(dataclasses.replace(probe, value=cert.make_value(
+            q, e.form, e.fmt, e.rnd)))
+    return tuple(out)
 
 
 def halved(fmt, bank, slots):
@@ -373,13 +532,14 @@ SALT = None
 EXPECT_ID = None
 
 
-def run_tool(args, env=None):
+def run_tool(args, env=None, binary=None):
+    """The tool (or another build of it, `binary`) on `args`."""
     e = dict(os.environ)
     e.pop("CFT_SEGRUN_PLANT", None)
     if env:
         e.update(env)
     try:
-        r = subprocess.run([str(TOOL)] + [str(a) for a in args],
+        r = subprocess.run([str(binary or TOOL)] + [str(a) for a in args],
                            capture_output=True, text=True, env=e,
                            timeout=TOOL_TIMEOUT)
     except subprocess.TimeoutExpired:
@@ -420,7 +580,7 @@ def tool_args(prog, paths, out, states, salt_path, device="sw"):
                  "--steps", spec.steps]
         for n, v in spec.params:
             args += ["--param", f"{n}={v}"]
-    return args
+    return args + entry_options(prog.entries)
 
 
 # ---- the golden writer -------------------------------------------------
@@ -435,7 +595,8 @@ def golden_certificate(prog, chains, salt, identity):
     return cert.encode(cert.Certificate(
         "keyed" if salt is not None else "open",
         cert.salt_commitment(salt) if salt is not None else None,
-        identity, runs, ()))
+        identity, runs, golden_entries(prog.entries, runs, prog.runs,
+                                       chains)))
 
 
 def first_difference(a, b):
@@ -526,10 +687,12 @@ def certify_and_hold(prog, chains, mode, work, device="sw", tag="",
     progs = {r: (spec.image, spec.bank) for r, spec in enumerate(prog.runs)}
     choose = {r: ("sample", max(1, spec.segments // 2))
               for r, spec in enumerate(prog.runs)}
+    golden_full = None
     if prog.audit_refuses:
         # a relation broken on purpose: the audit must refuse it by its
         # check's name, full and sampled alike (relations come before any
         # re-run)
+        golden_full = ("refused", prog.audit_refuses)
         for how, kw in (("in full", {}), ("sampled", {"choose": choose})):
             try:
                 cert.audit(data, salt, progs, states=states, **kw)
@@ -544,10 +707,12 @@ def certify_and_hold(prog, chains, mode, work, device="sw", tag="",
         try:
             t0 = time.perf_counter()
             v = cert.audit(data, salt, progs, states=states)
+            golden_full = ("accepted", v.lines())
             check([len(x["rerun"]) for x in v.runs] ==
                   [spec.segments for spec in prog.runs],
                   f"{what}: the golden audit ACCEPTS it, every segment of "
-                  f"every run re-run from the states the tool wrote "
+                  f"every run re-run from the states the tool wrote"
+                  f"{', every entry re-derived' if prog.entries else ''} "
                   f"({time.perf_counter() - t0:.1f} s)")
         except cert.Refusal as e:
             bad(f"{what}: the golden audit refuses it: {e.name}: "
@@ -560,10 +725,59 @@ def certify_and_hold(prog, chains, mode, work, device="sw", tag="",
         except cert.Refusal as e:
             bad(f"{what}: the golden audit refuses a sample: {e.name}: "
                 f"{e.message}")
+    if AUDIT is not None and golden_full is not None:
+        hold_cft_audit(what, prog, data, salt, sdir, golden_full, work)
     hold_identity(what, parsed.identity,
                   "remote" if device.startswith("cft://") else
                   "software" if device == "sw" else "xrt")
     return data, sdir
+
+
+def hold_cft_audit(what, prog, data, salt, sdir, golden_full, work):
+    """The C auditor, cft-audit, on the tool's certificate, in full from
+    the states the tool wrote: the golden audit's verdict line for line,
+    each entry's re-derived value among them, or its refusal by name - so
+    that both auditors accept each certificate (the plan's step 5)."""
+    d = work / "audit" / re.sub(r"[^A-Za-z0-9.-]+", "-", what)
+    d.mkdir(parents=True, exist_ok=True)
+    cp = d / "c.cert"
+    cp.write_bytes(data)
+    args = ["--cert", cp, "--states", sdir]
+    if salt is not None:
+        (d / "salt.bin").write_bytes(salt)
+        args += ["--salt", d / "salt.bin"]
+    for r, (img, bank, _) in enumerate(PATHS[prog.name]):
+        args += ["--run", str(r), "--image", img]
+        if bank:
+            args += ["--bank", bank]
+    e = dict(os.environ)
+    e.pop("CFT_AUDIT_PLANT", None)
+    try:
+        p = subprocess.run([str(AUDIT)] + [str(a) for a in args],
+                           capture_output=True, text=True, env=e,
+                           timeout=TOOL_TIMEOUT)
+        rc, out, err = p.returncode, p.stdout, p.stderr
+    except subprocess.TimeoutExpired:
+        rc, out, err = -1, "", f"stopped after {TOOL_TIMEOUT} s"
+    if golden_full[0] == "accepted":
+        got = out.split("\n")
+        if got and got[-1] == "":
+            got = got[:-1]
+        diff = next((f"line {i + 1}: golden {x!r}, cft-audit {y!r}"
+                     for i, (x, y) in enumerate(zip(golden_full[1], got))
+                     if x != y), f"{len(golden_full[1])} lines against "
+                                 f"{len(got)}")
+        check(rc == 0 and got == list(golden_full[1]),
+              f"{what}: cft-audit ACCEPTS it in full from the states the "
+              f"tool wrote, the golden verdict line for line"
+              f"{' (its entries re-derived)' if prog.entries else ''}",
+              f"exit {rc}: {err.strip()[-240:] or diff}")
+    else:
+        name = golden_full[1]
+        m = re.search(r"cft-audit: refused ([a-z-]+):", err)
+        check(rc == cert.REFUSALS[name] and m is not None and
+              m.group(1) == name, f"{what}: cft-audit refuses it {name}, as "
+              f"the golden audit does", f"exit {rc}: {err.strip()[-240:]}")
 
 
 def runs_part(data):
@@ -1112,6 +1326,456 @@ def hold_refusals(work, l63, flag):
           "it is CHANGED" if P["existing"].is_file() else "it is GONE")
 
 
+# ---- accuracy entries: the refusals, and the page's orders -----------------
+
+def golden_write_entries(specs, entries, salt=None):
+    """The golden writer on RunSpecs and EntrySpecs: run_chain,
+    certify_run, derive, make_value, encode."""
+    runs, chains = [], []
+    for spec in specs:
+        st, rs = cert.run_chain(spec.image, spec.bank, spec.init,
+                                spec.segments, scratch_depth=DEPTH)
+        chains.append((st, rs))
+        runs.append(cert.certify_run(spec.kind, spec.image, spec.bank, salt,
+                                     st, rs, steps=spec.steps,
+                                     parameters=spec.params,
+                                     h_slots=spec.h_slots,
+                                     scratch_depth=DEPTH))
+    return cert.encode(cert.Certificate(
+        "keyed" if salt is not None else "open",
+        cert.salt_commitment(salt) if salt is not None else None,
+        cert.Identity(), tuple(runs),
+        golden_entries(entries, runs, specs, chains)))
+
+
+FP64_MAX = 0x7FEFFFFFFFFFFFFF       # (2^53 - 1) x 2^971: a 1,024-bit value
+FP64_INF = 0x7FF0000000000000
+WA, WB = (1 << 600) + 1, (1 << 601) - 1     # the page's partial-sum pair
+
+
+def hold_entries(work, l63, flag):
+    """Section 12: every refusal an entry can meet, by its name and code,
+    and the golden writer's name for the same defect where it has one; a
+    refusal before the runs leaving nothing, one after them the boundary
+    files, said so; and the page's orders, each with a control."""
+    print("== 12. accuracy entries: every refusal by its name and code, the "
+          "golden writer's for the same defect; the page's orders",
+          flush=True)
+    d = work / "entries"
+    d.mkdir(parents=True, exist_ok=True)
+    main, half = l63.runs[0], l63.runs[1]
+    wide = next((r for r in l63.runs if r.kind == "wider"), None)
+    fimg = flag.runs[0].image
+
+    def f(name, data):
+        p = d / name
+        p.write_bytes(data)
+        return p
+
+    P = {"img": f("l63.cftp", main.image), "bank": f("l63.bank", main.bank),
+         "half": f("l63.half", half.bank),
+         "init": f("l63.init", cert.state_bytes("fp64", main.init)),
+         "init2": f("l63-2.init", cert.state_bytes("fp64", main.init[:6])),
+         "fimg": f("flag.cftp", fimg)}
+    if wide is not None:
+        P["img128"] = f("l128.cftp", wide.image)
+        P["bank128"] = f("l128.bank", wide.bank)
+        P["init128"] = f("l128.init", cert.state_bytes("fp128", wide.init))
+    three, one = dec("fp64", "3"), dec("fp64", "1")
+    flag_inits = {
+        "flag": [three, dec("fp64", "1"), three, dec("fp64", "5")],
+        "flag-inf": [three, FP64_INF],
+        "flag-max": [three, FP64_MAX],
+        "flag-big": [one, dec("fp64", str(1 << 1023))],
+        "flag-tiny": [one, dec("fp64", repr(2.0 ** -600))]}
+    for k, v in flag_inits.items():
+        P[k] = f(f"{k}.init", cert.state_bytes("fp64", v))
+    hs = ",".join(str(s) for s in half.h_slots)
+
+    def specs_of(which, segs=1):
+        if which == "flag" or which.startswith("flag-"):
+            return [RunSpec("main", fimg, b"", flag_inits[which], "fp64", segs,
+                            1)]
+        s = [dataclasses.replace(main, segments=1, params=()),
+             dataclasses.replace(half, segments=2, params=())]
+        if which == "l63-other":
+            s[1] = dataclasses.replace(s[1], init=main.init[:6])
+        elif wide is not None:
+            s.append(dataclasses.replace(wide, segments=1, params=()))
+        return s
+
+    def runs_of(which, segs=1):
+        if which == "flag" or which.startswith("flag-"):
+            return ["--run", "main", "--image", P["fimg"], "--init", P[which],
+                    "--segments", str(segs), "--steps", "1"]
+        a = ["--run", "main", "--image", P["img"], "--bank", P["bank"],
+             "--init", P["init"], "--segments", "1", "--steps", "100",
+             "--run", "half-step", "--h-slots", hs, "--image", P["img"],
+             "--bank", P["half"], "--init",
+             P["init2"] if which == "l63-other" else P["init"],
+             "--segments", "2", "--steps", "100"]
+        if which != "l63-other" and wide is not None:
+            a += ["--run", "wider", "--image", P["img128"], "--bank",
+                  P["bank128"], "--init", P["init128"], "--segments", "1",
+                  "--steps", "100"]
+        return a
+
+    E = EntrySpec
+    sh = ["--entry", "step-halving", "--uses", "1", "--scope", "max-lanes",
+          "--value", "exact"]
+    SH = E("step-halving", 1, None, "exact")
+    dr = ["--entry", "drift", "--uses", "0", "--scope", "max-lanes",
+          "--quantity", "q"]
+    third = cert.rational_text(Fraction(-1, 15 << 900))
+
+    def drift(*terms, value="exact", run="0", scope="max-lanes"):
+        a = ["--entry", "drift", "--uses", run, "--scope", scope,
+             "--quantity", "q"]
+        for t in terms:
+            a += ["--term", t]
+        return a + ["--value", value]
+
+    def D(terms, lane=None, form="exact", fmt=None, uses=0):
+        return E("drift", uses, lane, form, fmt, label="q", terms=terms)
+
+    big = cert.rational_text(Fraction(1 << 1100))
+    # (label, name or "accepted", runs, the entries' options, their golden
+    # twin (EntrySpecs) or None, segments of a flagstep run)
+    cases = [
+        # the command line's own
+        ("an entry option before any --entry", "usage", "l63",
+         ["--uses", "1"] + sh, None, 1),
+        ("--run after --entry", "usage", "l63",
+         sh + ["--run", "main", "--image", P["img"]], None, 1),
+        ("a run option after --entry", "usage", "l63",
+         sh + ["--image", P["img"]], None, 1),
+        ("--uses twice in one entry", "usage", "l63",
+         sh + ["--uses", "1"], None, 1),
+        ("an entry with no --value", "usage", "l63", sh[:-2], None, 1),
+        ("an entry with no --scope", "usage", "l63",
+         sh[:4] + sh[6:], None, 1),
+        ("an entry with no --uses", "usage", "l63", sh[:2] + sh[4:], None, 1),
+        # the words and spellings, the reader's
+        ("method 'sideways'", "malformed", "l63",
+         ["--entry", "sideways"] + sh[2:], None, 1),
+        ("--uses '01'", "malformed", "l63",
+         sh[:3] + ["01"] + sh[4:], None, 1),
+        ("--scope 'lane:01'", "malformed", "l63",
+         sh[:5] + ["lane:01"] + sh[6:], None, 1),
+        ("--scope 'lanes'", "malformed", "l63",
+         sh[:5] + ["lanes"] + sh[6:], None, 1),
+        ("--scope 'lane:'", "malformed", "l63",
+         sh[:5] + ["lane:"] + sh[6:], None, 1),
+        ("a drift with no --quantity", "malformed", "l63",
+         ["--entry", "drift", "--uses", "0", "--scope", "max-lanes",
+          "--term", "1/1,s0", "--value", "exact"],
+         [E("drift", 0, None, "exact", terms=((Fraction(1), (0,)),))], 1),
+        ("a drift with no --term", "malformed", "l63",
+         dr + ["--value", "exact"], [D(())], 1),
+        ("label 'Energy'", "malformed", "l63",
+         dr[:-1] + ["Energy", "--term", "1/1,s0", "--value", "exact"],
+         [E("drift", 0, None, "exact", label="Energy",
+            terms=((Fraction(1), (0,)),))], 1),
+        ("a drift of 65 terms", "malformed", "l63",
+         drift(*(["1/1,s0"] * 65)), [D(((Fraction(1), (0,)),) * 65)], 1),
+        ("an estimate given --quantity", "malformed", "l63",
+         sh[:6] + ["--quantity", "q"] + sh[6:],
+         [E("step-halving", 1, None, "exact", label="q")], 1),
+        ("an estimate given --term", "malformed", "l63",
+         sh[:6] + ["--term", "1/1,s0"] + sh[6:],
+         [E("step-halving", 1, None, "exact",
+            terms=((Fraction(1), (0,)),))], 1),
+        ("a coefficient 2/4, not in lowest terms", "malformed", "l63",
+         drift("2/4,s0"), None, 1),
+        ("a coefficient 0/3, zero not spelt 0/1", "malformed", "l63",
+         drift("0/3,s0"), None, 1),
+        ("a coefficient 1/0", "malformed", "l63", drift("1/0,s0"), None, 1),
+        ("a coefficient 01/3", "malformed", "l63", drift("01/3,s0"), None, 1),
+        ("a coefficient +1/3", "malformed", "l63", drift("+1/3,s0"), None, 1),
+        ("a coefficient 1/A", "malformed", "l63", drift("1/A,s0"), None, 1),
+        ("a factor 'x1'", "malformed", "l63", drift("1/1,x1"), None, 1),
+        ("a factor 's01'", "malformed", "l63", drift("1/1,s01"), None, 1),
+        ("a term of nine factors", "malformed", "l63",
+         drift("1/1" + ",s0" * 9), [D(((Fraction(1), (0,) * 9),))], 1),
+        ("factors out of order", "malformed", "l63", drift("1/1,s1,s0"),
+         [D(((Fraction(1), (1, 0)),))], 1),
+        ("--value 'approx'", "malformed", "l63", sh[:-1] + ["approx"],
+         [E("step-halving", 1, None, "approx")], 1),
+        ("--value 'rounded:fp512:rne'", "malformed", "l63",
+         sh[:-1] + ["rounded:fp512:rne"],
+         [E("step-halving", 1, None, "rounded", "fp512", "rne")], 1),
+        ("--value 'rounded:fp64:rnx'", "malformed", "l63",
+         sh[:-1] + ["rounded:fp64:rnx"],
+         [E("step-halving", 1, None, "rounded", "fp64", "rnx")], 1),
+        ("--value 'rounded:fp64', no direction", "malformed", "l63",
+         sh[:-1] + ["rounded:fp64"],
+         [E("step-halving", 1, None, "rounded", "fp64")], 1),
+        ("--value 'enclosed', no format", "malformed", "l63",
+         sh[:-1] + ["enclosed"], [E("step-halving", 1, None, "enclosed")],
+         1),
+        ("--value 'exact:fp64'", "malformed", "l63", sh[:-1] + ["exact:fp64"],
+         None, 1),
+        ("a coefficient past the width rule by its digits (2^1100)", "width",
+         "l63", drift(big + ",s0"), [D(((Fraction(1 << 1100), (0,)),))], 1),
+        # against the runs, in cert.derive's order
+        ("--uses naming no run", "accuracy-run", "l63",
+         sh[:3] + [str(len(specs_of("l63")))] + sh[4:],
+         [E("step-halving", len(specs_of("l63")), None, "exact")], 1),
+        ("--uses past 2^63 - 1", "accuracy-run", "l63",
+         sh[:3] + ["1" + "0" * 20] + sh[4:],
+         [E("step-halving", 10 ** 20, None, "exact")], 1),
+        ("step-halving on run 0", "accuracy-run", "l63",
+         sh[:3] + ["0"] + sh[4:], [E("step-halving", 0, None, "exact")], 1),
+        ("wider on the half-step run", "accuracy-run", "l63",
+         ["--entry", "wider"] + sh[2:], [E("wider", 1, None, "exact")], 1),
+        ("an estimate whose half-step run has other lanes than run 0",
+         "accuracy-run", "l63-other", sh, [SH], 1),
+        ("lane 3 of 3", "accuracy-scope", "l63",
+         sh[:5] + ["lane:3"] + sh[6:], [E("step-halving", 1, 3, "exact")], 1),
+        ("a lane past 2^63 - 1", "accuracy-scope", "l63",
+         sh[:5] + ["lane:" + "9" * 21] + sh[6:],
+         [E("step-halving", 1, int("9" * 21), "exact")], 1),
+        ("slot 3 of 3", "accuracy-slot", "l63", drift("1/1,s3"),
+         [D(((Fraction(1), (3,)),))], 1),
+        ("slot 70000", "accuracy-slot", "l63", drift("1/1,s70000"),
+         [D(((Fraction(1), (70000,)),))], 1),
+        # after the runs: the values, in the page's order
+        ("an element that is not finite (flagstep's x from +inf: NaN)",
+         "accuracy-finite", "flag-inf", drift("1/1,s1"),
+         [D(((Fraction(1), (1,)),))], 5),
+        ("Q(final) before Q(initial): a final +inf beside an initial 1,024-"
+         "bit value is accuracy-finite, not width", "accuracy-finite",
+         "flag-max", drift("1/1,s1"), [D(((Fraction(1), (1,)),))], 1),
+        ("an element past the width rule (x = 2^1023 at the start)",
+         "width", "flag-big", drift("1/1,s1"), [D(((Fraction(1), (1,)),))],
+         1),
+        ("a product past the width rule (x^2 with x = 2^-600)", "width",
+         "flag-tiny", drift("1/1,s1,s1"), [D(((Fraction(1), (1, 1)),))], 1),
+        ("a partial sum past the width rule: 1/a + 1/b of 1/a, 1/b, -1/b",
+         "width", "l63",
+         drift(*(cert.rational_text(Fraction(n, d)) for n, d in
+                 ((1, WA), (1, WB), (-1, WB)))),
+         [D(tuple((Fraction(n, d_), ()) for n, d_ in
+                  ((1, WA), (1, WB), (-1, WB))))], 1),
+        ("the same terms as 1/b, -1/b, 1/a: within the rule at every step",
+         "accepted", "l63",
+         drift(*(cert.rational_text(Fraction(n, d)) for n, d in
+                 ((1, WB), (-1, WB), (1, WA)))),
+         [D(tuple((Fraction(n, d_), ()) for n, d_ in
+                  ((1, WB), (-1, WB), (1, WA))))], 1),
+        ("1/(3 x 2^900) enclosed in fp256: the lower end past the rule",
+         "width", "flag", drift(third + ",s0", value="enclosed:fp256"),
+         [D(((Fraction(-1, 15 << 900), (0,)),), form="enclosed",
+            fmt="fp256")], 5),
+        ("the same value enclosed in fp64: both ends within the rule",
+         "accepted", "flag", drift(third + ",s0", value="enclosed:fp64"),
+         [D(((Fraction(-1, 15 << 900), (0,)),), form="enclosed",
+            fmt="fp64")], 5),
+    ]
+    if wide is not None:
+        cases.append(("step-halving on the wider run", "accuracy-run", "l63",
+                      sh[:3] + ["2"] + sh[4:],
+                      [E("step-halving", 2, None, "exact")], 1))
+    before = ("usage", "malformed", "accuracy-run", "accuracy-scope",
+              "accuracy-slot")
+    for i, (label, name, which, eargs, twin, segs) in enumerate(cases):
+        out, sdir = d / f"e{i}.cert", d / f"e{i}.states"
+        args = ["--out", out, "--states", sdir, "--open"] + \
+            runs_of(which, segs) + eargs
+        rc, so, se = run_tool(args)
+        m = REFUSED.search(se)
+        got = m.group(1) if m else None
+        if name == "accepted":
+            if check(rc == 0, f"accepted: {label}", f"rc {rc}: "
+                     f"{se.strip()[-240:]}"):
+                data = out.read_bytes()
+                gold = golden_write_entries(specs_of(which, segs), twin)
+                gold = cert.encode(dataclasses.replace(
+                    cert.parse(gold), identity=cert.parse(data).identity))
+                check(gold == data, f"  and byte for byte the golden "
+                      f"writer's: {label}", first_difference(data, gold))
+            continue
+        code = cert.REFUSALS.get(name, TOOL_OWN.get(name))
+        # width by a coefficient's digits is found before anything is made
+        early = name in before or label.startswith("a coefficient past")
+        check(rc == code and got == name,
+              f"refused {name} (exit {code}): {label}",
+              f"exit {rc}, {got or 'no refusal named'}: {se.strip()[-240:]}")
+        if early:
+            left = [p.name for p in (out, sdir) if p.exists()]
+            check(not left, f"  and nothing left behind: {label}",
+                  f"left {left}")
+        else:
+            files = sorted(os.listdir(sdir)) if sdir.is_dir() else []
+            want = sorted(boundary_file(sdir, r, b).name
+                          for r, s in enumerate(specs_of(which, segs))
+                          for b in range(s.segments + 1))
+            check(not out.exists() and files == want and
+                  "written so far are left in" in se,
+                  f"  and no certificate; the {len(want)} boundary files, "
+                  f"every run having run, left and said so: {label}",
+                  f"certificate {out.exists()}, states {files[:4]}")
+        if twin is not None:
+            try:
+                golden_write_entries(specs_of(which, segs), twin)
+                bad(f"  the golden writer ACCEPTS {label}, which the tool "
+                    f"refuses as {name}")
+            except cert.Refusal as e:
+                check(e.name == name, f"  the golden writer refuses {label} "
+                      f"by the same name", f"it says {e.name}: {e.message}")
+            except Exception as e:      # noqa: BLE001 - reported, not raised
+                bad(f"  the golden writer has no name for {label}: "
+                    f"{type(e).__name__}: {e}")
+    # the small modes take no entry
+    rc, _, se = run_tool(["--hash", "state", P["init"], "--open"] + sh)
+    m = REFUSED.search(se)
+    check(rc == 64 and m is not None and m.group(1) == "usage",
+          "refused usage (exit 64): --hash with --entry",
+          f"exit {rc}: {se.strip()[-200:]}")
+
+
+# ---- the narrow builds, and the plant build ------------------------------
+
+# cft-segrun compiled narrow, as audit_check.py compiles cft-audit
+# (NARROW_BUILDS there): CFT_MAX_FORMAT=2 at the 576-bit bigint that
+# ceiling gives by default, with the transcendentals and the conformance
+# replay out, as cft_config.h requires; and at CFT_BN_LIMBS=64, the full
+# bigint under a lower ceiling. And the plant build: the default build
+# with -DCFT_SEGRUN_PLANT_STATE_CHANGED, whose first state read back has
+# a bit flipped - compiled here and nowhere else (the lead's condition,
+# 2026-09-30: the shipped tool has no plant path).
+SEGRUN_BUILDS = {
+    "narrow": ("-O2", ["-DCFT_MAX_FORMAT=2", "-DCFT_NO_TRANSCEND",
+                       "-DCFT_NO_CONFORMANCE"]),
+    "narrow64": ("-O1", ["-DCFT_MAX_FORMAT=2", "-DCFT_BN_LIMBS=64"]),
+    "plant": ("-O1", ["-DCFT_SEGRUN_PLANT_STATE_CHANGED"]),
+}
+
+
+def compile_segrun(cc, lib_src, out, opt, defs):
+    """cc on the library's sources and tools/segrun.c, from host/, with no
+    object of the tree's: -> (ok, stderr). A compiler named by its path
+    finds its own programs beside it: its directory goes on PATH for the
+    compiler's process alone."""
+    env = dict(os.environ)
+    first = cc.split()[0]
+    if os.path.dirname(first):
+        env["PATH"] = os.path.dirname(first) + os.pathsep + env.get("PATH",
+                                                                    "")
+    cmd = cc.split() + ["-std=c99", opt] + defs + ["-Iinclude"] + \
+        lib_src.split() + ["tools/segrun.c", "-o", str(out)]
+    r = subprocess.run(cmd, cwd=str(HOST), capture_output=True, text=True,
+                       env=env)
+    return r.returncode == 0 and out.is_file(), r.stderr
+
+
+def hold_builds(work, cc, lib_src, l63):
+    """Section 13: a narrow build refuses an entry by the build's own name,
+    as cft-audit's does, and writes what it can byte for byte as the
+    default build; the plant build refuses a changed state `output`."""
+    print("== 13. the narrow builds (build-width, build-format) and the "
+          "plant build (a state read back changed: output)", flush=True)
+    if not cc or not lib_src:
+        skip("the narrow builds and the plant build", "no --cc and --lib-src "
+             "given (make -C host segruntest gives both)")
+        return
+    d = work / "builds"
+    d.mkdir(parents=True, exist_ok=True)
+    exe = {}
+    for which, (opt, defs) in SEGRUN_BUILDS.items():
+        p = d / (f"cft-segrun-{which}" + (".exe" if os.name == "nt" else ""))
+        t0 = time.perf_counter()
+        built, err = compile_segrun(cc, lib_src, p, opt, defs)
+        if check(built, f"cft-segrun and libcft built {which}: {opt} "
+                 f"{' '.join(defs)} ({time.perf_counter() - t0:.0f} s)",
+                 err[-400:]):
+            exe[which] = p
+    spec = [dataclasses.replace(l63.runs[0], segments=1, params=()),
+            dataclasses.replace(l63.runs[1], segments=2, params=())]
+    paths = write_inputs(d, Program("l63-small", spec))
+    prog = Program("l63-small", spec)
+
+    def make(binary, label, entries):
+        stem = re.sub(r"[^A-Za-z0-9.-]+", "-", label)
+        out, sdir = d / f"{stem}.cert", d / f"{stem}.states"
+        args = tool_args(dataclasses.replace(prog, entries=entries), paths,
+                         out, sdir, None)
+        rc, _, se = run_tool(args, binary=binary)
+        return rc, se, out, sdir
+
+    E = EntrySpec
+    exact = [E("step-halving", 1, None, "exact")]
+    r128 = [E("step-halving", 1, 0, "rounded", "fp128", "rne")]
+    ref = {}
+    for label, ents in (("none", []), ("exact", exact), ("r128", r128)):
+        rc, se, out, _ = make(TOOL, f"default-{label}", ents)
+        check(rc == 0, f"the default build writes l63 (1 segment and 2) with "
+              f"{label} entries", se.strip()[-240:])
+        ref[label] = out.read_bytes() if rc == 0 else None
+
+    def refused_by(binary, label, ents, name, code):
+        rc, se, out, sdir = make(binary, label, ents)
+        m = REFUSED.search(se)
+        check(rc == code and m is not None and m.group(1) == name and
+              not out.exists() and not sdir.exists(),
+              f"refused {name} (exit {code}), nothing made: {label}",
+              f"exit {rc}: {se.strip()[-240:]}")
+
+    def lines(data):
+        """A body's lines but build-id: a build compiled here names no
+        build (`build-id unknown`, src/build_id.c without the header make
+        generates), and the hash line covers that line."""
+        return [ln for ln in cert.body_of(data).decode("ascii").split("\n")
+                if not ln.startswith("build-id ")]
+
+    def same_as(binary, label, ents, key):
+        rc, se, out, _ = make(binary, label, ents)
+        mine = out.read_bytes() if rc == 0 else b""
+        check(rc == 0 and ref[key] is not None and
+              lines(mine) == lines(ref[key]),
+              f"{label}: written, byte for byte the default build's but for "
+              f"build-id and the hash line",
+              f"rc {rc}: {se.strip()[-240:]}" if rc else
+              first_difference(ref[key] or b"", mine))
+    if "narrow" in exe:
+        refused_by(exe["narrow"], "narrow: an exact entry (576-bit bigint)",
+                   exact, "build-width", 78)
+        same_as(exe["narrow"], "narrow: the same runs, no entry", [], "none")
+    if "narrow64" in exe:
+        same_as(exe["narrow64"], "narrow64: an exact entry (CFT_BN_LIMBS=64)",
+                exact, "exact")
+        same_as(exe["narrow64"], "narrow64: a value rounded into fp128",
+                r128, "r128")
+        refused_by(exe["narrow64"], "narrow64: a value rounded into fp256",
+                   [E("step-halving", 1, None, "rounded", "fp256", "rne")],
+                   "build-format", 78)
+        refused_by(exe["narrow64"], "narrow64: a value enclosed in fp256",
+                   [E("step-halving", 1, None, "enclosed", "fp256")],
+                   "build-format", 78)
+    if "plant" in exe:
+        rc, se, out, sdir = make(exe["plant"], "plant: an entry", exact)
+        m = REFUSED.search(se)
+        files = sorted(os.listdir(sdir)) if sdir.is_dir() else []
+        check(rc == 73 and m is not None and m.group(1) == "output" and
+              "CFT_SEGRUN_PLANT_STATE_CHANGED" in se and
+              "is not the state this run wrote there" in se and
+              not out.exists() and len(files) == 5 and
+              "written so far are left in" in se,
+              "the plant build: the first state read back changed is "
+              "refused output (exit 73) by its hash; no certificate, the "
+              "boundary files left and said so",
+              f"exit {rc}, states {files}: {se.strip()[-300:]}")
+        same_as(exe["plant"], "plant: the same runs, no entry", [], "none")
+    rc, out_, _ = run_tool(["--help"])
+    check(rc == 0 and "CFT_SEGRUN_PLANT_STATE_CHANGED" not in out_,
+          "the shipped tool names no plant build")
+    blob = TOOL.read_bytes()
+    check(b"CFT_SEGRUN_PLANT_STATE_CHANGED" not in blob and
+          b"a plant build" not in blob,
+          "the shipped binary holds no plant build's words: it was compiled "
+          "without -DCFT_SEGRUN_PLANT_STATE_CHANGED")
+
+
 # ---- --scratch-depth: the software backend at a tile's depth ----------------
 
 def with_depth(params, depth):
@@ -1198,7 +1862,10 @@ def hold_depth(work, l63):
     # every run block: lorenz63's main, half-step and wider runs at 2,048
     what = f"{l63.name} at --scratch-depth 2048, open"
     out, sdir = d / "l63-2048.cert", d / "l63-2048.states"
-    args = [str(a) for a in tool_args(l63, PATHS[l63.name], out, sdir, None)]
+    # the run blocks at a depth, without the program's accuracy entries,
+    # which section 12 and the programs' own certificates hold
+    args = [str(a) for a in tool_args(dataclasses.replace(l63, entries=[]),
+                                      PATHS[l63.name], out, sdir, None)]
     args[args.index("--open") + 1:args.index("--open") + 1] = \
         ["--scratch-depth", "2048"]
     rc, _, se = run_tool(args)
@@ -1237,6 +1904,16 @@ def hold_depth(work, l63):
 # short of 1 MiB, so that the tool reads each initial state into a buffer
 # of exactly 1 MiB
 PEAK_LANES = 65535
+# What the accuracy entries may cost beyond the runs' own peak: their
+# definitions and lines, and the software handle the rounding goes
+# through - a small constant, where holding one more state beside the
+# runs' would be 1,024 KiB here. Measured on the desktop (2026-09-30,
+# three runs of the gate): the three runs' peak commit 10,224 to 10,284
+# KiB from run to run, and with the entries 12 KiB less, 12 KiB less and
+# 28 KiB more than the same run's three runs - a span of 40 KiB. So a
+# quarter of a state: six times that span, and a quarter of what one more
+# state held beside the runs' would cost.
+ENTRY_ALLOWANCE = 256 << 10
 
 
 def read_buffer(n):
@@ -1408,7 +2085,7 @@ def hold_peak(work, flag):
     salt = d / "salt.bin"
     salt.write_bytes(bytes(range(32)))
 
-    def argf(lanes, segments, n_half, keyed=False):
+    def argf(lanes, segments, n_half, keyed=False, entries=()):
         pn = inits[lanes]
 
         def f(out, sdir):
@@ -1420,21 +2097,32 @@ def hold_peak(work, flag):
                 a += ["--run", "half-step", "--h-slots", "0", "--image", pi,
                       "--init", pn, "--segments", str(2 * segments),
                       "--steps", "1"]
-            return a
+            return a + entry_options(entries)
         return f
+
+    # two entries that read four states once the runs have run: an
+    # estimate of run 0 against run 1, and a drift of run 2, rounded (so
+    # the software handle for the rounding is opened too)
+    two = (EntrySpec("step-halving", 1, None, "exact"),
+           EntrySpec("drift", 2, None, "rounded", "fp64", "rne", label="c",
+                     terms=FLAG_C))
 
     linux = sys.platform.startswith("linux")
     what_run = "what a run beside the main run costs"
     try:
-        # 1. a run's own working set: one run against three
-        shapes = (("the main run alone", 0),
-                  ("the main run and two half-step runs", 2))
+        # 1. a run's own working set: one run against three; and the
+        # accuracy entries' phase against the runs' (the plan's step 5)
+        shapes = (("the main run alone", 0, ()),
+                  ("the main run and two half-step runs", 2, ()),
+                  ("the same three runs with two entries reading four "
+                   "states", 2, two))
         vals = []
         if os.name == "nt":
             how = "peak commit"
-            for label, k in shapes:
-                out, sdir = d / f"w{k}.cert", d / f"w{k}.states"
-                rc, se, pk = peak_commit(argf(PEAK_LANES, 1, k)(out, sdir))
+            for i, (label, k, ents) in enumerate(shapes):
+                out, sdir = d / f"w{i}.cert", d / f"w{i}.states"
+                rc, se, pk = peak_commit(argf(PEAK_LANES, 1, k,
+                                              entries=ents)(out, sdir))
                 if not check(rc == 0, f"{label}, {PEAK_LANES} lanes: "
                              f"written, and its peak commit read",
                              f"rc {rc}: {se.strip()[-240:]}"):
@@ -1442,10 +2130,11 @@ def hold_peak(work, flag):
                 vals.append(pk)
         elif linux:
             how = "least address space (ulimit -v)"
-            for label, k in shapes:
+            for i, (label, k, ents) in enumerate(shapes):
                 try:
                     vals.append(least_address_space(
-                        argf(PEAK_LANES, 1, k), d, f"l{k}-", step=1 << 16))
+                        argf(PEAK_LANES, 1, k, entries=ents), d, f"l{i}-",
+                        step=1 << 16))
                 except Unwritten as e:
                     bad(f"{label}, {PEAK_LANES} lanes: written, under a "
                         f"limit found by bisection - {e}")
@@ -1455,7 +2144,7 @@ def hold_peak(work, flag):
         else:
             raise Unmeasured(f"no way to measure a process's peak here "
                              f"({sys.platform})")
-        one, three = vals
+        one, three, entries = vals
         inputs = 2 * (read_buffer(PEAK_LANES * 16) + read_buffer(len(img)))
         state = PEAK_LANES * 16
         check(three - one <= inputs + state,
@@ -1465,6 +2154,21 @@ def hold_peak(work, flag):
               f"{kib(three - one)} more, past {kib(inputs + state)}: a run "
               f"holds a working set of its own beside the others' (4eed552 "
               f"held every run's states at once; verifier-C7)")
+        # the entries read their states back one entry's pair at a time,
+        # after the runs have let theirs go: no more than the runs held,
+        # to within ENTRY_ALLOWANCE (their own structures and lines, the
+        # rounding's software handle) and, on Linux, one bisection step
+        allow = ENTRY_ALLOWANCE + (0 if os.name == "nt" else 1 << 16)
+        delta = entries - three
+        said = (f"{kib(delta)} more" if delta >= 0 else
+                f"{kib(-delta)} less")
+        check(delta <= allow,
+              f"{how}: the three runs {kib(three)}, with the two entries "
+              f"{kib(entries)} - {said}, within {kib(allow)} more: the "
+              f"entries' phase holds no more than the runs did (four states "
+              f"of {kib(state)} read back, a pair at a time)",
+              f"{kib(entries - three)} more, past {kib(allow)}: the entries "
+              f"hold states beside the runs', or more than one pair at once")
     except Unmeasured as e:
         skip(what_run, f"NOT TESTED here - {e}")
 
@@ -1475,7 +2179,9 @@ def hold_peak(work, flag):
         ("1 lane, open, a main run of 100 segments and a half-step run "
          "of 200", argf(1, 100, 1)),
         ("16 lanes, keyed, a main run of 30 segments and two half-step "
-         "runs of 60", argf(16, 30, 2, keyed=True)))
+         "runs of 60", argf(16, 30, 2, keyed=True)),
+        ("16 lanes, open, a main run of 30 segments, two half-step runs "
+         "of 60 and two entries", argf(16, 30, 2, entries=two)))
     what_trial = "what the trial costs the runs, to the page"
     if not linux:
         skip(what_trial, "NOT TESTED here - " + (
@@ -1561,6 +2267,7 @@ def hold_remote(work, legs):
 
 PATHS = {}
 EXPECT_XRT = None
+AUDIT = None        # cft-audit, the C auditor, held beside the golden one
 # The scratch depth the golden writer runs at (revision 7): the DEVICE's,
 # read out of the CAPS2 its expected identity names (cert.scratch_depth_of,
 # which is also what the audit re-runs at), or the software backend's 256.
@@ -1572,11 +2279,49 @@ EXPECT_XRT = None
 DEPTH = seq.SCRATCH_D
 
 
+def rounding_seen(programs, chains):
+    """For each rounding direction a rounded entry names: whether some such
+    entry's value rounds to other bits under rup. Where it does, a writer
+    that swapped that direction for rup writes other bytes than the golden
+    writer, and the byte-for-byte comparison sees it."""
+    seen = {}
+    for prog in programs:
+        rounded = [e for e in prog.entries if e.form == "rounded"]
+        if not rounded:
+            continue
+        runs = [cert.certify_run(s.kind, s.image, s.bank, None, st, rs,
+                                 steps=s.steps, parameters=s.params,
+                                 h_slots=s.h_slots, scratch_depth=DEPTH)
+                for s, (st, rs) in zip(prog.runs, chains[prog.name])]
+        for e, g in zip(prog.entries, golden_entries(prog.entries, runs,
+                                                     prog.runs,
+                                                     chains[prog.name])):
+            if e.form != "rounded":
+                continue
+            ends = {}
+            for r, (st, _) in enumerate(chains[prog.name]):
+                ends[(r, 0)], ends[(r, len(st) - 1)] = st[0], st[-1]
+            shapes = [(FORMATS[s.fmt],
+                       seq.Program.from_bytes(s.image).n_scratch_in)
+                      for s in prog.runs]
+            q = cert.derive(g, runs, shapes, ends)
+            seen[e.rnd] = seen.get(e.rnd, False) or \
+                cert.round_rational(e.fmt, q, e.rnd) != \
+                cert.round_rational(e.fmt, q, "rup")
+    return seen
+
+
 def main():
-    global TOOL, SERVE, SALT, EXPECT_ID, EXPECT_XRT, DEPTH
+    global TOOL, SERVE, SALT, EXPECT_ID, EXPECT_XRT, DEPTH, AUDIT
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--tool", required=True, help="the cft-segrun binary")
     ap.add_argument("--serve", help="cft-serve, for the remote leg")
+    ap.add_argument("--audit", help="cft-audit, the C auditor: it must "
+                    "accept each certificate as the golden audit does")
+    ap.add_argument("--cc", help="the C compiler, for the narrow builds and "
+                    "the plant build (section 13)")
+    ap.add_argument("--lib-src", help="libcft's sources, relative to host/ "
+                    "(make print-src), for section 13")
     ap.add_argument("--keep", help="write everything here and keep it")
     ap.add_argument("--salt-hex", help="the keyed salt (default: drawn "
                     "from the operating system and printed)")
@@ -1597,9 +2342,13 @@ def main():
     args = ap.parse_args()
     TOOL = Path(args.tool).resolve()
     SERVE = Path(args.serve).resolve() if args.serve else None
+    AUDIT = Path(args.audit).resolve() if args.audit else None
     if not TOOL.is_file():
         sys.exit(f"segrun_check: {TOOL} is not built (make -C host "
                  f"cft-segrun)")
+    if AUDIT is not None and not AUDIT.is_file():
+        sys.exit(f"segrun_check: {AUDIT} is not built (make -C host "
+                 f"cft-audit)")
     SALT = bytes.fromhex(args.salt_hex) if args.salt_hex else os.urandom(32)
     EXPECT_ID = os.environ.get("CFT_EXPECT_BUILD_ID") or None
     card = args.device != "sw"
@@ -1628,6 +2377,9 @@ def main():
         skip("the build-id line held to the tree's id",
              "CFT_EXPECT_BUILD_ID is not set (make -C host segruntest sets "
              "it)")
+    if AUDIT is None:
+        skip("cft-audit beside the golden audit", "no --audit given (make "
+             "-C host segruntest gives it)")
 
     print("== the binary, ignored by git", flush=True)
     hold_ignored()
@@ -1644,6 +2396,7 @@ def main():
     programs.append(flag)
     programs.append(half_init_program(
         next(p for p in programs if p.name == "lorenz63-rk4-fp64")))
+    attach_entries(programs)
     chains = {}
     for prog in programs:
         PATHS[prog.name] = write_inputs(work, prog)
@@ -1664,6 +2417,40 @@ def main():
           f"flagstep's segments raise flags {FLAGSTEP_FLAGS} and STATUS "
           f"{FLAGSTEP_STATUS} in the golden model",
           f"flags {fl}, STATUS {stt}")
+    # the entries' coverage, as the plan's step 5 asks for it
+    ents = [(p, e) for p in programs for e in p.entries]
+    if args.no_wider:
+        print("  NOTE  --no-wider: the wider estimates go with the wider "
+              "runs, so the entries' coverage is the software gate's to "
+              "hold", flush=True)
+    else:
+        check({e.method for _, e in ents} ==
+              {"drift", "step-halving", "wider"}
+              and {e.lane is None for _, e in ents} == {True, False}
+              and {e.form for _, e in ents} ==
+              {"exact", "rounded", "enclosed"}
+              and {e.rnd for _, e in ents if e.form == "rounded"} ==
+              {"rne", "rtz", "rdn", "rup", "rmm"},
+              "the entries have every method, both scopes, every form and "
+              "every rounding direction")
+        odes = [p for p in programs if p.name.split("-")[0] in
+                ("lorenz63", "lorenz96", "henonheiles")
+                and not p.audit_refuses]
+        check(all(any(e.method == "step-halving" for e in p.entries)
+                  for p in odes) and
+              all(any(e.method == "wider" for e in p.entries) for p in odes
+                  if p.name.endswith("fp64")) and
+              any(e.method == "drift" and e.form == "exact" and
+                  p.name.startswith("henonheiles") for p, e in ents),
+              "a step-halving estimate on each ODE program, a wider one on "
+              "each fp64 one, and Henon-Heiles' energy drift, exact")
+        seen = rounding_seen(programs, chains)
+        check(all(seen.get(r) for r in seen if r != "rup") and
+              any(seen.get(r) for r in seen if r != "rup"),
+              f"each rounding direction but rup rounds some entry's value to "
+              f"other bits than rup does, so a writer that swapped it for "
+              f"rup is seen ({sorted(r for r in seen if seen[r])})",
+              f"{seen}")
 
     sw_keyed = {}
     only = set(args.programs.split(",")) if args.programs else None
@@ -1709,12 +2496,16 @@ def main():
     hold_hashes(work)
     l63 = next(p for p in programs if p.name == "lorenz63-rk4-fp64")
     hold_refusals(work, l63, flag)
+    hold_entries(work, l63, flag)
     if card:
         print("  NOTE  section 11, --scratch-depth, is the software "
               "backend's: beside a device the tool refuses it (step 8)",
               flush=True)
+        print("  NOTE  section 13, the narrow builds and the plant build, is "
+              "the software backend's, compiled here", flush=True)
     else:
         hold_depth(work, l63)
+        hold_builds(work, args.cc, args.lib_src, l63)
     if SERVE is None:
         if card:
             print("  NOTE  the remote leg is not the card leg's: "

@@ -6,7 +6,10 @@
 # runner"; the plan of record's step 3, docs/ROADMAP.md): cft-segrun on
 # the card over the three ODE programs at fp64 and fp256, each
 # certificate's chain equal to the software backend's, and the golden
-# audit accepting the card's certificates.
+# audit accepting the card's certificates. Since the plan's step 5
+# (2026-09-30) each certificate carries its program's accuracy entries,
+# computed from the states the card's runs wrote, and cft-audit, the C
+# auditor, must accept each as well.
 #
 #   bash hw/card-segrun.sh <image.xclbin> [<another image.xclbin>]
 #
@@ -15,8 +18,8 @@
 #
 #   make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt all device-test
 #
-# (cft-segrun is in `all`; device-test is not; both link libcft.a
-# statically: CLAUDE.md). python3 runs the golden model, python/cft_golden,
+# (cft-segrun and cft-audit are in `all`; device-test is not; each links
+# libcft.a statically: CLAUDE.md). python3 runs the golden model, python/cft_golden,
 # which needs the standard library only; PYTHON names another.
 #
 # What it holds, in order, each an "ok" or a "FAIL" line:
@@ -31,10 +34,12 @@
 #      host/tests/segrun_check.py --device <image> with those expectations:
 #      each program certified ON THE CARD, keyed and open; the golden
 #      reader accepting it; the golden writer, from the initial states,
-#      writing the same bytes; every boundary file the golden chain's; the
-#      golden audit accepting it, in full and sampled; the identity lines
-#      equal to the expectations; and the same program made on the
-#      software backend, every run block byte for byte the card's. The
+#      writing the same bytes, every accuracy entry's value among them;
+#      every boundary file the golden chain's; the golden audit accepting
+#      it, in full and sampled, and cft-audit in full, line for line; the
+#      identity lines equal to the expectations; and the same program made
+#      on the software backend, every run block and the accuracy block
+#      byte for byte the card's. The
 #      fp64 programs carry a wider fp128 run beside the half-step one, and
 #      are run without it (--no-wider, said on a NOTE line) on an image
 #      whose formats lack fp128. `flagstep`, whose segments raise flags
@@ -61,6 +66,7 @@ usage() { echo "usage: bash hw/card-segrun.sh <image.xclbin> [<another image.xcl
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SEG="$ROOT/host/cft-segrun"
+AUD="$ROOT/host/cft-audit"
 DT="$ROOT/host/device-test"
 GATE="$ROOT/host/tests/segrun_check.py"
 PY=${PYTHON:-python3}
@@ -89,7 +95,7 @@ echo "   python: $("$PY" --version 2>&1)"
 
 # ---- 1. the build ----------------------------------------------------
 echo "== 1. the build"
-for b in "$SEG" "$DT"; do
+for b in "$SEG" "$AUD" "$DT"; do
     [ -x "$b" ] || { echo "not built: $b - make -C host XRT=1 XRT_ROOT=/opt/xilinx/xrt all device-test" >&2; exit 2; }
 done
 echo "   cft-segrun built $(stat -c %y "$SEG")"
@@ -155,6 +161,7 @@ for img in "${imgs[@]}"; do
     fi
     glog="$LOGDIR/gate$n.log"
     CFT_EXPECT_BUILD_ID="$tree_id" "$PY" "$GATE" --tool "$SEG" --device "$img" \
+        --audit "$AUD" \
         --expect-xclbin "$want" --expect-version "$ver" \
         --expect-caps "$caps${caps2:+ $caps2}" --expect-tiles "$tiles" \
         ${nowider[@]+"${nowider[@]}"} > "$glog" 2>&1
@@ -179,6 +186,7 @@ caps=$(printf '%s' "$line" | sed -n 's/.*, CAPS 0x\([0-9a-f]\{8\}\).*/\1/p')
 caps2=$(printf '%s' "$line" | sed -n 's/.*CAPS2 0x\([0-9a-f]\{8\}\).*/\1/p')
 tiles=$(sed -n 's/^device: backend xrt, \([0-9]*\) tiles\{0,1\},.*/\1/p' "$LOGDIR/id1.log" 2>/dev/null | head -1)
 CFT_EXPECT_BUILD_ID="$tree_id" "$PY" "$GATE" --tool "$SEG" --device "$img" \
+    --audit "$AUD" \
     --expect-xclbin "$wrong" --expect-version "${ver:-00000000}" \
     --expect-caps "${caps:-00000000}${caps2:+ $caps2}" --expect-tiles "${tiles:-1}" \
     --programs lorenz63-rk4-fp64 --no-wider > "$clog" 2>&1
