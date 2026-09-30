@@ -95,6 +95,7 @@ line says so.
 import argparse
 import dataclasses
 import hashlib
+import re
 import shutil
 import subprocess
 import sys
@@ -251,10 +252,11 @@ def load_cases(only=None):
     read is held to its manifest SHA-256 and every state to its
     certificate's hash before it is used."""
     man = corpus.read_manifest()
-    # --cases is refused by name before anything runs for a name that is
-    # not in the corpus (here) or a corpus case that is not scored (after
-    # the loop); a case it names that the run then fails to score fails at
-    # the end of main (verifier-W2's P3a, P3b)
+    # --cases is refused by name, before any scoring, for a name that is
+    # not in the corpus (here, before anything loads) or a corpus case that
+    # is not scored (after the loop, once the other named cases' load
+    # lines have printed); a case it names that the run then fails to
+    # score fails at the end of main (verifier-W2's P3a, P3b, headonly)
     unknown = sorted(set(only or ()) - {c.name for c in man.cases})
     if unknown:
         sys.exit(f"estimates: --cases names no case of certificates/MANIFEST: "
@@ -903,14 +905,16 @@ def sweep_system(case, J, L, tool, work):
 # is kept (Record), and each section it prints is held to the committed
 # section with the same first line:
 #   - a case's `-- ` section, line for line, apart from `time` lines;
-#   - the loading section (`== the cases`) line by line as a subset, since
-#     --cases loads fewer cases.
+#   - the loading section (`== the cases`) line for line too - under
+#     --cases, to the committed lines of the named cases, since each of a
+#     case's load lines begins with its name.
 # The first difference ends the run, naming the file, the section and the
 # committed line, with both lines. At the end, every committed `-- `
 # section, in a mode the run ran, of a case it was ASKED for (--cases, or
-# every case without it) must have been printed (Against.missing); and
+# every case without it) must have been printed (Against.missing). And
 # with or without --against, every case --cases names must have been
-# scored (main). The committed runs themselves are made WITHOUT --against,
+# SCORED, as its printed lines show (_scored in main): a heading alone is
+# not a score. The committed runs themselves are made WITHOUT --against,
 # whose own lines would otherwise sit inside the sections they follow.
 
 class Record:
@@ -985,6 +989,52 @@ def _case_of(heading):
     return "certified", head.split(":")[0]
 
 
+def _load_case_of(line):
+    """The corpus case a line of the loading section is about - `  ok    <case>:
+    ...`, `  FAIL  <case>: ...`, `  not scored: <case> - ...` - or None."""
+    for lead, sep in (("  ok    ", ":"), ("  FAIL  ", ":"),
+                      ("  not scored: ", " - ")):
+        if line.startswith(lead):
+            return line[len(lead):].split(sep)[0]
+    return None
+
+
+def _scored(lines):
+    """{case: {mode}} for each case the run's printed lines show SCORED - a
+    heading alone is not a score, since score_certified prints its heading
+    before it scores anything (verifier-W2's headonly, 2026-09-30):
+      - certified: its section holds the max-lanes estimate to cert.derive,
+        which is printed once the last boundary is scored;
+      - sweep: its section has a step-halving row for every level 0..J."""
+    last = {f"{b}-{f}": J for (b, f), (J, _L) in SWEEP.items()}
+    row = re.compile(r"^ {4}( ?\d+) {2,}\S+ {2,}(R_\d+|odefun|none) ")
+    out, cur, levels = {}, None, set()
+
+    def close():
+        if cur and cur[0] == "sweep" and cur[1] in last and \
+                levels >= set(range(last[cur[1]] + 1)):
+            out.setdefault(cur[1], set()).add("sweep")
+
+    for t in lines:
+        if t.startswith(("-- ", "== ")):
+            close()
+            cur = _case_of(t) if t.startswith("-- ") else None
+            levels = set()
+            continue
+        if cur is None:
+            continue
+        kind, case = cur
+        if kind == "certified" and t.startswith(
+                f"  ok    {case}: the max-lanes estimate is cert.derive's"):
+            out.setdefault(case, set()).add("certified")
+        elif kind == "sweep":
+            m = row.match(t)
+            if m:
+                levels.add(int(m.group(1)))
+    close()
+    return out
+
+
 class Against:
     """The committed runs a run is held to, section by section."""
 
@@ -1000,7 +1050,14 @@ class Against:
             self.files.append((shown, sections_of(lines)))
         self.seen = set()
 
-    def hold(self, printed, subset=False):
+    def hold(self, printed, cases=None):
+        """Hold a section the run just printed, heading first, line for line
+        to the committed section with the same heading, `time` lines apart.
+        `cases`: for the loading section under --cases, the committed lines
+        are narrowed to the named cases' own (each begins with its name),
+        and the run's are held to those, line for line. Until the second
+        send-back the loading section was held only as a subset, and a load
+        check that vanished passed (verifier-W2's loadcheck)."""
         while printed and printed[0] == "":
             printed = printed[1:]
         heading = printed[0]
@@ -1014,14 +1071,9 @@ class Against:
             self._fail(f"section '{_name(heading)}' is in no committed run ("
                        f"{', '.join(s for s, _ in self.files)}): {heading}")
         where = f"{shown}, section '{_name(heading)}' (its line {start})"
-        if subset:
-            have = {t for _k, t in old}
-            for _k, t in body:
-                if t not in have:
-                    self._fail(f"{where} has no line\n        {t}")
-            ok(f"against {where}: each of this run's {len(body)} lines is "
-               f"one of its lines")
-            return
+        if cases is not None:
+            old = [(k, t) for k, t in old if _load_case_of(t) in cases]
+            where += f", the lines of {', '.join(sorted(cases))}"
         for i in range(max(len(old), len(body))):
             a = old[i] if i < len(old) else None
             b = body[i][1] if i < len(body) else None
@@ -1098,6 +1150,9 @@ def main():
     against = Against(args.against) if args.against else None
     mpmath.mp.dps = check.SCHEME_DPS
     only = set(args.cases.split(",")) if args.cases else None
+    if only is not None and "" in only:
+        sys.exit("estimates: --cases names an empty case: a comma with no "
+                 "name beside it")
     swept = {f"{b}-{f}" for b, f in SWEEP}
     if args.mode == "sweep" and only and only - swept:
         sys.exit(f"estimates: --cases names "
@@ -1119,7 +1174,7 @@ def main():
             say(f"  not scored: {name} - {why}")
         timed("loading and holding the corpus", t0)
         if against:
-            against.hold(rec.since(mark), subset=True)
+            against.hold(rec.since(mark), cases=only)
         if args.mode in ("certified", "all"):
             say()
             say("== certified: every lane of the corpus's runs")
@@ -1152,17 +1207,21 @@ def main():
                 {args.mode}
             against.missing(modes, only)
         if only:
-            # Every case --cases names must have been scored, in some mode
-            # this run ran: read from what the run PRINTED, not from its
-            # own list of cases, which is the thing that could lose one.
-            printed = {_case_of(t)[1] for t in rec.since(0)
-                       if t.startswith("-- ")}
-            for name in sorted(only - printed):
-                bad(f"--cases names {name}, and this run scored it in no "
-                    f"mode")
-            if only <= printed:
-                ok(f"every case --cases names was scored: "
-                   f"{', '.join(sorted(only))}")
+            # Every case --cases names must have been SCORED, in some mode
+            # this run ran: read from what the run printed (_scored), not
+            # from its own list of cases, which is the thing that could
+            # lose one; and a heading is not a score.
+            scored = _scored(rec.since(0))
+            for name in sorted(only):
+                if not scored.get(name):
+                    bad(f"--cases names {name}, and this run scored it in "
+                        f"no mode: no certified section held its max-lanes "
+                        f"estimate to cert.derive, and no sweep section "
+                        f"printed a step-halving row for every level")
+            if all(scored.get(name) for name in only):
+                how = "; ".join(name + " (" + ", ".join(sorted(scored[name]))
+                                + ")" for name in sorted(only))
+                ok(f"every case --cases names was scored: {how}")
     except Differs:
         pass                    # named by its FAIL line; the run ends here
     say()

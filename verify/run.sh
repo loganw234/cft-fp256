@@ -1045,8 +1045,8 @@ stage estimates "a certificate's two estimates scored, lorenz63 and lorenz96 at 
 # level a certificate that cft-segrun, built here first, makes and the
 # golden audit samples. Both are held to their committed runs. 9 to 14
 # minutes on the desktop: the committed runs' halves took 355 s and 206 s,
-# and verifier-W2's the same day 441 s and 406 s, at 5 to 38% load from
-# other work.
+# and verifier-W2's the same day 441 s and 406 s, the desktop 5% busy just
+# before the first of those and 1% before the second.
 do_estimates_full() {
   HOSTMAKE "cft-segrun$EXE" || return 1
   PY "$ROOT/programs/estimates.py" all --tool "$ROOT/host/cft-segrun$EXE" \

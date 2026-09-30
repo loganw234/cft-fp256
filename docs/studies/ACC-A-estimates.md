@@ -654,8 +654,10 @@ mpmath:
 **Time.** 355 s for `certified` and 206 s for `sweep`, run one at a time
 and niced, on a desktop in use: 3% busy with other work when the first
 began, and not measured again before the second. verifier-W2 ran the
-same two halves the same day in 441 s and 406 s, with the desktop 5% to
-38% busy with other work. So `all` is 9 to 14 minutes here.
+same two halves the same day in 441 s and 406 s. By its readings the
+desktop was 5% busy just before the certified half and 1% just before
+the sweep half, and 38% a few minutes before either. So `all` is 9 to 14
+minutes here.
 - Henon-Heiles' K = 11 is 270 s of the first.
 - `--cases A,B` limits either mode to named corpus cases.
 - `--tau` sets the tolerance.
