@@ -1616,8 +1616,9 @@ run did, which was its two states, its streams and a hash's copy. The
 gate measures it (**Its gate**, below). On the desktop, with flagstep's
 three runs of 65,535 lanes and two entries that read four states back,
 the peak commit was:
-- in three runs of the gate, 12 KiB less, 12 KiB less and 28 KiB more
-  than the same three runs without entries (10,224 to 10,284 KiB);
+- in four runs of the gate, 12 KiB less, 12 KiB less, 28 KiB more and
+  40 KiB more than the same three runs without entries (10,224 to 10,284
+  KiB);
 - beside that, one more state held beside the runs' would be 1,024 KiB.
 So the entries add nothing that identical runs' noise does not
 (2026-09-30). Each entry's definition is held from the command line to

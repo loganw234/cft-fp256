@@ -1908,11 +1908,11 @@ PEAK_LANES = 65535
 # definitions and lines, and the software handle the rounding goes
 # through - a small constant, where holding one more state beside the
 # runs' would be 1,024 KiB here. Measured on the desktop (2026-09-30,
-# three runs of the gate): the three runs' peak commit 10,224 to 10,284
-# KiB from run to run, and with the entries 12 KiB less, 12 KiB less and
-# 28 KiB more than the same run's three runs - a span of 40 KiB. So a
-# quarter of a state: six times that span, and a quarter of what one more
-# state held beside the runs' would cost.
+# four runs of the gate): the three runs' peak commit 10,224 to 10,284
+# KiB from run to run, and with the entries 12 KiB less, 12 KiB less, 28
+# KiB more and 40 KiB more than the same run's three runs - a span of 52
+# KiB. So a quarter of a state: about five times that span, and a
+# quarter of what one more state held beside the runs' would cost.
 ENTRY_ALLOWANCE = 256 << 10
 
 
