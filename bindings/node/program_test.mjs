@@ -341,6 +341,12 @@ test("a truncated, over-long or mislabelled image is a different program",
   const bend = (bytes, at, to) => {
     const c = Uint8Array.from(bytes); c[at] = to; return c;
   };
+  const halt1 = programImage({
+    formatCode: c64.format.code, elementBytes: c64.format.size,
+    consts: [], maxDeposits: 0, insns: [ctl("halt")],
+  });
+  const wrapped = Uint8Array.from(halt1);
+  wrapped.set([0x01, 0x00, 0x00, 0x20], 8);     // n_insns = 0x20000001
   const cases = [
     ["one byte short", good.slice(0, good.length - 1)],
     ["one byte long", Uint8Array.from([...good, 0])],
@@ -350,15 +356,29 @@ test("a truncated, over-long or mislabelled image is a different program",
     ["a version this loader does not speak", bend(good, 4, 2)],
     ["a non-zero reserved header word", bend(good, 24, 1)],
     ["a precision code off the ladder", bend(good, 20, 9)],
+    // A one-HALT image of 40 bytes whose n_insns says 0x20000001: its
+    // header describes 32 + 8 x 0x20000001 = 4,294,967,336 bytes, which
+    // a 32-bit size_t wraps to 40. wasm32 answered it "out of memory"
+    // until the module's rebuild of 2026-09-30 (the fixes round's Q5),
+    // which computes the length in 64 bits: ARTIFACT on every host.
+    ["a header describing 2^32 + 40 bytes", wrapped,
+     /artifact missing/, /describes 4294967336/],
   ];
-  for (const [what, image] of cases) {
+  for (const [what, image, ...want] of cases) {
     let threw = null;
     try { c64.loadProgram(image); } catch (err) { threw = err; }
     ok(threw, `${what} must be refused`);
+    // Every refusal on the load path names its own cause since the same
+    // rebuild: the message carries the library's sentence after " - ".
+    ok(/ - \S/.test(threw.message),
+       `${what}: the refusal must carry a sentence: "${threw.message}"`);
+    for (const re of want)
+      ok(re.test(threw.message), `${what}: ${re} in "${threw.message}"`);
   }
-  // and the untouched image still loads, so the eight above failed for
+  // and the untouched images still load, so the nine above failed for
   // the reason claimed and not because the whole test is broken
   c64.loadProgram(good).free();
+  c64.loadProgram(halt1).free();
 });
 
 test("a freed program refuses every later call", () => {

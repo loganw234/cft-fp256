@@ -19,12 +19,12 @@ Live beside the conformance page at
 
 | | |
 |---|---|
-| page | `bindings/wasm/demos.html`, 578,617 bytes |
-| sha256 | `74d229eef888d9180109a0fb902b1f1944324ff1dadbff7c84f2cf9832161671` |
-| module | `bindings/node/cft_node.wasm`, 259,935 bytes, sha256 `b3c023afd85e7e163007bca310b4889ab2f3c0e9a39016e80d6a311c423109de` |
+| page | `bindings/wasm/demos.html`, 585,089 bytes |
+| sha256 | `842dbe2f171aa1e6be036431004a9c5efa0eb234293039bc87937c342ee477a1` |
+| module | `bindings/node/cft_node.wasm`, 266,089 bytes, sha256 `733cfa2c4d14b2bf584ed724a56aa50dc30e5581d9bb56c68f3568bff3d78d1c` |
 | toolchain | emcc 6.0.9 (4e4223852a0835923411059a3929907d7df1232e), `emscripten/emsdk:6.0.9@sha256:96617f27fe16421588241def73908fd348a7f9d260440ed0d00b36dcf7a063cc` |
 | configurations | 13, over 15 chains |
-| recorded | 2026-09-29, per `bindings/wasm/demos_chains.json`'s own `recorded` field - the recorder writes the UTC date, the same day on the recording desktop's clock (13:20 there, 20:20 UTC, for the committed module; a first 0.16 build's recording, superseded, was at 07:50); re-recorded for the ABI 0.16 module, every chain unchanged |
+| recorded | 2026-09-30, per `bindings/wasm/demos_chains.json`'s own `recorded` field - the recorder writes the UTC date, the same day on the recording desktop's clock (08:43 there, 15:43 UTC); re-recorded for the fixes round's rebuild of the ABI 0.16 module, every chain unchanged |
 
 ---
 

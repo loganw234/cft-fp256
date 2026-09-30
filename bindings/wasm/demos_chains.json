@@ -1,7 +1,7 @@
 {
-  "recorded": "2026-09-29",
+  "recorded": "2026-09-30",
   "host": "DESKTOP-T33SK86",
-  "module_sha256": "b3c023afd85e7e163007bca310b4889ab2f3c0e9a39016e80d6a311c423109de",
+  "module_sha256": "733cfa2c4d14b2bf584ed724a56aa50dc30e5581d9bb56c68f3568bff3d78d1c",
   "core_sha256": "ccd6ba4a1206bfd41e59709529c7721bd66b902ee5660a22c6f69ed47e1284d2",
   "build_command": "make -C host CC=gcc OS=Windows_NT TMP=/tmp TEMP=/tmp cft-collatz.exe cft-zoom.exe cft-orbits.exe cft-enclose.exe cft-mersenne.exe",
   "runs": [
@@ -21,17 +21,17 @@
         "chain": "b13572843b19a7efba863c3c32390e6730108fe40bd8213acee7400bad676a2f"
       },
       "native": {
-        "seconds": 0.303,
+        "seconds": 0.292,
         "report": [
           "library calls 2437",
           "opcode issues 56051 elementwise passes over one element each",
-          "time          0.011 s",
-          "throughput    227180 Collatz steps/s, 93.2 elements/s"
+          "time          0.008 s",
+          "throughput    289320 Collatz steps/s, 118.7 elements/s"
         ]
       },
       "core": {
-        "seconds": 0.041,
-        "rate": 59439.0243902439,
+        "seconds": 0.035,
+        "rate": 69628.57142857142,
         "unit": "Collatz steps",
         "calls": 58489
       }
@@ -51,17 +51,17 @@
         "chain": "c2ccab682e3747261561871ee0f99d3b3d43f88fa7fa4de18eff7e46a0555c51"
       },
       "native": {
-        "seconds": 0.205,
+        "seconds": 0.224,
         "report": [
           "library calls 178",
           "opcode issues 1369489 elementwise passes over one element each",
-          "time          0.196 s",
-          "throughput    303281 Collatz steps/s, 5093.6 elements/s"
+          "time          0.216 s",
+          "throughput    275623 Collatz steps/s, 4629.1 elements/s"
         ]
       },
       "core": {
-        "seconds": 0.278,
-        "rate": 214179.8561151079,
+        "seconds": 0.28,
+        "rate": 212649.99999999997,
         "unit": "Collatz steps",
         "calls": 66638
       }
@@ -88,18 +88,18 @@
         "pixels": "5fb8f0de8bb1be57ef39f7a0f69520d0ed8f0cdd0cad600a6e7e4ada757d11f3"
       },
       "native": {
-        "seconds": 13.712,
+        "seconds": 13.555,
         "report": [
           "library calls 1 for the orbit",
           "pixel work    6342288 pixel-iterations at fp64",
-          "time          0.005 s reference, 13.493 s pixels",
-          "throughput    191825 reference iterations/s at fp256 (1534599 elementwise ops/s)",
-          "470051 pixel-iterations/s at fp64 (10816342 elementwise ops/s), 1214.3 pixels/s"
+          "time          0.006 s reference, 13.337 s pixels",
+          "throughput    166622 reference iterations/s at fp256 (1332978 elementwise ops/s)",
+          "475527 pixel-iterations/s at fp64 (10942339 elementwise ops/s), 1228.4 pixels/s"
         ]
       },
       "core": {
-        "seconds": 17.739,
-        "rate": 357533.5700997801,
+        "seconds": 17.157,
+        "rate": 369661.8289910824,
         "unit": "fp64 pixel-iterations",
         "calls": 220724
       }
@@ -126,18 +126,18 @@
         "pixels": "878ae482df8da39326d658c0ec9047d1a29c2b1eb15902a24175d4e899c81dda"
       },
       "native": {
-        "seconds": 3.856,
+        "seconds": 3.798,
         "report": [
           "library calls 1 for the orbit",
           "pixel work    1835008 pixel-iterations at fp64",
-          "time          0.003 s reference, 3.820 s pixels",
-          "throughput    310715 reference iterations/s at fp64 (2485721 elementwise ops/s)",
-          "480430 pixel-iterations/s at fp64 (11054957 elementwise ops/s), 4289.6 pixels/s"
+          "time          0.002 s reference, 3.766 s pixels",
+          "throughput    431652 reference iterations/s at fp64 (3453213 elementwise ops/s)",
+          "487309 pixel-iterations/s at fp64 (11213236 elementwise ops/s), 4351.0 pixels/s"
         ]
       },
       "core": {
-        "seconds": 5.079,
-        "rate": 361293.16794644616,
+        "seconds": 4.862,
+        "rate": 377418.34635952284,
         "unit": "fp64 pixel-iterations",
         "calls": 55124
       }
@@ -160,17 +160,17 @@
         "chain": "12012be36beb6d5fc15f9b4b17e84af30923399503a744bdef7a6e4042d93cc9"
       },
       "native": {
-        "seconds": 0.598,
+        "seconds": 0.545,
         "report": [
           "library calls 23627",
           "elementwise   155208 opcode issues, plus 33808 composed div/sqrt",
-          "time          0.431 s",
-          "throughput    4756 steps/s, 38048 element-steps/s, 438941 library element-ops/s"
+          "time          0.396 s",
+          "throughput    5169 steps/s, 41352 element-steps/s, 477058 library element-ops/s"
         ]
       },
       "core": {
-        "seconds": 0.52,
-        "rate": 31507.692307692305,
+        "seconds": 0.514,
+        "rate": 31875.486381322957,
         "unit": "element-steps",
         "calls": 23627
       }
@@ -193,17 +193,17 @@
         "chain": "3ebf95ae53d96a38c5b541ec08cb9c6d60e59cb7727cdc6ea5ae5aba6d4aa96a"
       },
       "native": {
-        "seconds": 0.225,
+        "seconds": 0.221,
         "report": [
           "library calls 23627",
           "elementwise   155208 opcode issues, plus 33808 composed div/sqrt",
-          "time          0.213 s",
-          "throughput    9622 steps/s, 76973 element-steps/s, 888009 library element-ops/s"
+          "time          0.212 s",
+          "throughput    9683 steps/s, 77463 element-steps/s, 893660 library element-ops/s"
         ]
       },
       "core": {
-        "seconds": 0.241,
-        "rate": 67983.40248962656,
+        "seconds": 0.246,
+        "rate": 66601.62601626017,
         "unit": "element-steps",
         "calls": 23627
       }
@@ -226,17 +226,17 @@
         "chain": "d1e580c42eee48f2fad8d14fbf0c1b5529dc3b74287ea16e35ce3a8a27df78d8"
       },
       "native": {
-        "seconds": 0.214,
+        "seconds": 0.205,
         "report": [
           "library calls 74827",
           "elementwise   597576 opcode issues, plus 1040 composed div/sqrt",
-          "time          0.203 s",
-          "throughput    10081 steps/s, 80652 element-steps/s, 2946747 library element-ops/s"
+          "time          0.193 s",
+          "throughput    10605 steps/s, 84841 element-steps/s, 3099787 library element-ops/s"
         ]
       },
       "core": {
-        "seconds": 0.281,
-        "rate": 58306.04982206405,
+        "seconds": 0.265,
+        "rate": 61826.415094339616,
         "unit": "element-steps",
         "calls": 74827
       }
@@ -259,17 +259,17 @@
         "chain": "6b38342d22e85da1d432077fe1c1e90853337a7dff5620352596bd95b4001c2a"
       },
       "native": {
-        "seconds": 0.085,
+        "seconds": 0.084,
         "report": [
           "library calls 50251",
           "elementwise   400968 opcode issues, plus 1040 composed div/sqrt",
-          "time          0.074 s",
-          "throughput    27521 steps/s, 220171 element-steps/s, 5402244 library element-ops/s"
+          "time          0.073 s",
+          "throughput    28223 steps/s, 225782 element-steps/s, 5539925 library element-ops/s"
         ]
       },
       "core": {
-        "seconds": 0.11,
-        "rate": 148945.45454545456,
+        "seconds": 0.106,
+        "rate": 154566.03773584907,
         "unit": "element-steps",
         "calls": 50251
       }
@@ -293,12 +293,12 @@
         "chain": "d9f761c22220f1aa185c2ccbfbf4b2d83e4f8d84dced8e61cdb8882d7528b208"
       },
       "native": {
-        "seconds": 0.191,
+        "seconds": 0.166,
         "report": [
           "library calls 189",
           "element ops   4845",
-          "time          0.004 s",
-          "throughput    11748.6 enclosures/s, 1161676 element ops/s"
+          "time          0.005 s",
+          "throughput    9523.6 enclosures/s, 941673 element ops/s"
         ]
       },
       "core": {
@@ -327,17 +327,17 @@
         "chain": "835ca8ab9aa3358d6ad0dcfdf167e813a65ed3bfb5dffcf31b32927f28c7e3d1"
       },
       "native": {
-        "seconds": 0.018,
+        "seconds": 0.019,
         "report": [
           "library calls 237",
           "element ops   5661",
-          "time          0.006 s",
-          "throughput    7861.8 enclosures/s, 908274 element ops/s"
+          "time          0.007 s",
+          "throughput    7102.5 enclosures/s, 820554 element ops/s"
         ]
       },
       "core": {
-        "seconds": 0.009,
-        "rate": 5444.444444444445,
+        "seconds": 0.011,
+        "rate": 4454.545454545455,
         "unit": "enclosures",
         "calls": 2588
       }
@@ -361,12 +361,12 @@
         "chain": "4ff5b22ba2333153491c101eb8aab83e4128a051a50d73e0e654a07438cc4f0c"
       },
       "native": {
-        "seconds": 0.026,
+        "seconds": 0.027,
         "report": [
           "library calls 315",
           "element ops   6987",
-          "time          0.011 s",
-          "throughput    4291.2 enclosures/s, 611896 element ops/s"
+          "time          0.012 s",
+          "throughput    3961.2 enclosures/s, 564830 element ops/s"
         ]
       },
       "core": {
@@ -395,17 +395,17 @@
         "chain": "93cdda3270eaa7ba434ddbbabcc54d77a5afa28779e05bccef4f7b81cc43400c"
       },
       "native": {
-        "seconds": 0.045,
+        "seconds": 0.044,
         "report": [
           "library calls 453",
           "element ops   9333",
-          "time          0.026 s",
-          "throughput    1915.8 enclosures/s, 364907 element ops/s"
+          "time          0.025 s",
+          "throughput    1997.2 enclosures/s, 380402 element ops/s"
         ]
       },
       "core": {
-        "seconds": 0.027,
-        "rate": 1814.8148148148148,
+        "seconds": 0.029,
+        "rate": 1689.655172413793,
         "unit": "enclosures",
         "calls": 2826
       }
@@ -430,18 +430,18 @@
         "chain": "7555f58433fa902b06a0c2b7057d8d1b86b55e2aeff7636abb55ef53c0d80aca"
       },
       "native": {
-        "seconds": 3.258,
+        "seconds": 3.159,
         "report": [
           "limb products  2425336",
           "carry passes   56694",
           "library calls  1232076",
-          "time           2.944 s",
-          "throughput     823827 limb products/s, 3319.646 squarings/s, 4223420 elementwise op issues/s"
+          "time           2.858 s",
+          "throughput     848604 limb products/s, 3419.487 squarings/s, 4350443 elementwise op issues/s"
         ]
       },
       "core": {
-        "seconds": 3.846,
-        "rate": 630612.5845033801,
+        "seconds": 3.773,
+        "rate": 642813.6761197986,
         "unit": "limb products",
         "calls": 1232293
       }

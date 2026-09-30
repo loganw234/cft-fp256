@@ -1100,6 +1100,43 @@ pages as well:
     bindings/wasm/conformance.html 1,392,517 bytes  sha256 e6d69f1172758566...
     bindings/wasm/demos.html         578,617 bytes  sha256 74d229eef888d918...
 
+### Rebuilt at ABI 0.16, 2026-09-30 - named load refusals, a 64-bit length, and the square root's truncation
+
+No ABI change. The fixes round changed host sources this module is
+built from, so it was rebuilt, as every change to them requires:
+- `program.c` and `device.c`: every refusal in the program-load path
+  writes a sentence, the slot is cleared on entry, and the image's
+  described length is computed in 64 bits. On wasm32, whose `size_t`
+  is 32 bits, a header describing 2^32 + 40 bytes answered "out of
+  memory" from this module's predecessor. It is ARTIFACT now, as on a
+  64-bit host;
+- `mpfloat.c`: the square root's error bound carries the integer
+  root's truncation. Only the escalation path, a test override, was
+  seen to decide a rounding wrongly without it.
+`bindings/node/program_test.mjs`'s malformed-image test holds both new
+facts:
+- a ninth case, that header, must throw `artifact missing` and
+  `describes 4294967336`;
+- every case must carry the library's sentence after " - ".
+Against the module before this rebuild (`b3c023af...`), that test
+fails at its first case for want of a sentence. Against this one it
+passes: 37 passed, 0 failed.
+
+`demos_chains.json` was re-recorded with `verify_demos.mjs --record`,
+after `build.sh` and before `build_demos.sh`. Its one FAIL was the
+stale page's, as the order predicts. All 15 chains came back
+unchanged; the module stamp, the date and the timings moved.
+`verify_demos.mjs` then passed its 48 checks against the rebuilt page.
+Two clean container builds, with `bindings/wasm/build/` removed
+between them, produced all four files byte for byte, and both
+negative-control pages as well. Still **141 `cftw_*` exports** (149 in
+all):
+
+    bindings/node/cft_node.wasm      266,089 bytes  sha256 733cfa2c4d14b2bf...
+    bindings/node/cft_node.js         74,146 bytes  sha256 dc845833acf075cb...  (unchanged)
+    bindings/wasm/conformance.html 1,398,987 bytes  sha256 2f0eb45ec3f46923...
+    bindings/wasm/demos.html         585,089 bytes  sha256 842dbe2f171aa1e6...
+
 ## A second page: the five workloads, measured (2026-09-04)
 
 `demos.html` is the other deliverable of this directory. Same
