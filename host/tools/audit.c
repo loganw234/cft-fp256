@@ -31,7 +31,9 @@
  *                   choose[R]: `all`, `sample:K`, or segments `K,K,...`
  *   --states DIR    every file named run-<r>-boundary-<b>.bin, r and b in
  *                   their one decimal spelling, is states[r][b]: the
- *                   files cft-segrun writes. Other files are not read
+ *                   files cft-segrun writes. Other files are not read.
+ *                   Each is held to be a regular file and opened before
+ *                   step 1 (`usage` there), and its bytes read at step 7
  *   --seed HEX      the sampling seed, 64 hex digits (`seed`). Absent and a
  *                   sample asked: 32 bytes drawn from the operating system,
  *                   and printed
@@ -64,7 +66,8 @@
  * that is what the gate holds. Four names are the tool's own:
  *   usage (64)        a command line this tool does not take, or a file
  *                     it names that cannot be read
- *   memory (71)       an allocation of this tool's own that fails
+ *   memory (71)       an allocation of this tool's own that fails, or a
+ *                     --sample K whose map this process cannot size
  *   build-width (78)  a build whose bigint is narrower than the width
  *                     rule needs, handed a certificate with an accuracy
  *                     entry (below)
@@ -97,8 +100,9 @@
  * build whose cft_bn is narrower than 2,047 bits compiles WITHOUT the
  * exact arithmetic (a #if, not an #error) and its reader refuses
  * `build-width` at an `accuracy` line counting at least 1: no build ever
- * computes an exact value in a narrower bigint. A certificate with
- * `accuracy 0` it audits in full.
+ * computes an exact value in a narrower bigint. A narrow build audits in
+ * full a certificate carrying no exact value and no format above its
+ * ceiling (build-format, above).
  *
  * An element's exact decimal is cft_to_decimal_char at 0 digits, which is
  * exact; a value exactly widened is cft_convert one rung up; a rational

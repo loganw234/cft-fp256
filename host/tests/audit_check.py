@@ -533,8 +533,9 @@ class Shadow:
 def section_shadow(work):
     global ORIG_PARSE, ORIG_AUDIT, ORIG_SEQ_RUN
     import pytest
-    print("== 2. test_cert.py, every parse and audit call shadowed through "
-          "the tool", flush=True)
+    print("== 2. test_cert.py shadowed: every parse call, and every audit "
+          "call files and options can carry, through the tool too",
+          flush=True)
     ORIG_PARSE, ORIG_AUDIT, ORIG_SEQ_RUN = cert.parse, cert.audit, seq.run
     sh = Shadow(work)
     real_os = cert.os

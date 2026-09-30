@@ -985,19 +985,20 @@ stage programs "the program library: both assemblers against the MANIFEST, the r
 # host/tests/audit_check.py; docs/CERTIFICATES.md, "The audit tool"):
 # cft-audit and cert.audit are handed the same inputs and must give the
 # same verdict - a refusal's name, exit code and location, or both
-# ACCEPTED with the same lines. The inputs: every parse and audit call
-# test_cert.py makes, shadowed in-process (so pytest); cft-segrun's
-# certificates of segrun_check's programs, in full, from the initial
-# states and sampled; the golden corpus; and a narrow build of libcft
-# and the tool at CFT_MAX_FORMAT=2, which must refuse build-width - so a
-# C compiler. A stage of its own in the gate budget (the lead,
+# ACCEPTED with the same lines. The inputs: every parse call test_cert.py
+# makes, and every audit call whose arguments files and options can
+# carry, shadowed in-process (so pytest; the rest are counted and
+# named); cft-segrun's certificates of segrun_check's programs, in full,
+# from the initial states and sampled; the golden corpus; and a narrow
+# build of libcft and the tool at CFT_MAX_FORMAT=2, which must refuse
+# build-width and build-format - so a C compiler. A stage of its own in the gate budget (the lead,
 # 2026-09-29): about four minutes on the desktop, too long for quick,
 # where programs keeps both writers' checks.
 do_audit() {
   HOSTMAKE audittest PYTHON="$PYBIN"
 }
 need host-cc python pytest
-stage audit "the C auditor held to the golden one: every parse and audit call test_cert.py makes, cft-segrun's certificates and the golden corpus through both, the same refusal by name, code and location or the same verdict; and a narrow build refusing build-width" -- do_audit
+stage audit "the C auditor held to the golden one: test_cert.py's parse calls and every audit call files can carry, cft-segrun's certificates and the golden corpus through both, the same refusal by name, code and location or the same verdict; and a narrow build refusing build-width and build-format" -- do_audit
 
 # reduce_check.py holds the model's partition tree to the C partitioner
 # through host/reduce-parts, and SKIPs that half by name when the binary

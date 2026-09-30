@@ -1208,15 +1208,17 @@ clean-segrun:
 # two inputs, since $^ would hand gcc the headers too.
 #
 #   make audittest      the equality gate, tests/audit_check.py: every
-#                       parse and audit call test_cert.py makes, shadowed
-#                       through the tool; cft-segrun's certificates of
-#                       segrun_check's programs; the golden corpus where
-#                       the tree has one; each held to the same verdict
-#                       as cert.audit - the refusal's name, code and
-#                       location, or both ACCEPTED with the same lines;
-#                       and the library and the tool compiled narrow
-#                       (CFT_MAX_FORMAT=2) with $(CC), which must refuse
-#                       build-width. verify/run.sh's `audit` stage runs
+#                       parse call test_cert.py makes, and every audit
+#                       call whose arguments files and options can
+#                       carry, shadowed through the tool; cft-segrun's
+#                       certificates of segrun_check's programs; the
+#                       golden corpus where the tree has one; each held
+#                       to the same verdict as cert.audit - the
+#                       refusal's name, code and location, or both
+#                       ACCEPTED with the same lines; and the library
+#                       and the tool compiled narrow (CFT_MAX_FORMAT=2)
+#                       with $(CC), which must refuse build-width and
+#                       build-format. verify/run.sh's `audit` stage runs
 #                       it, in the gate budget (about four minutes on
 #                       the desktop, 2026-09-29).
 # ===================================================================
