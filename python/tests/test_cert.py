@@ -2467,6 +2467,63 @@ def test_an_entrys_checks_in_order(lor):
     assert (e.run, e.segment, e.entry) == (0, S, 0)
 
 
+# A one-slot segment that doubles its slot: verifier-A1's, for step 10's
+# orders (verifier-A1.md, 2026-09-29 22:00:12).
+DBL = """.format   fp64
+.deposits 0
+.bank     external
+.scratch  in 1
+.scratch  out 1
+.const    TWO
+ldl  r3, 0
+fma  r3, r3, TWO, r0
+stl  r3, 0
+halt
+"""
+FP64_MAX = 0x7FEFFFFFFFFFFFFF               # (2^53 - 1) x 2^971: 1,024 bits
+Q_SLOT0 = cert.Entry("drift", "measurement", 0, None,
+                     cert.Value("exact", exact=Fraction(0)), "q",
+                     ((Fraction(1), (0,)),))
+
+
+def _doubling(init, segments):
+    """DBL run from `init` for `segments` segments, certified OPEN with a
+    drift of slot 0. -> (bytes, programs, boundary states)"""
+    img = asm.assemble(DBL, "dbl")
+    bank = cert.state_bytes("fp64", [dec64("2")])
+    st, rs = cert.run_chain(img, bank, init, segments)
+    run = cert.certify_run("main", img, bank, None, st, rs, steps=1)
+    return (cert.encode(opened((run,), (Q_SLOT0,))), {0: (img, bank)},
+            dict(enumerate(st)))
+
+
+def test_a_drift_takes_q_of_the_final_state_first():
+    """The page's order: "Q of the final state first, then Q of the
+    initial state". Verifier-C5 found it without a control, and
+    verifier-A1 found the C auditor's gate could not see it reversed
+    (2026-09-29). Lane 0 starts at fp64's largest finite, whose exact
+    value has a 1,024-bit numerator, past the width rule, and doubles to
+    +inf: the final state's +inf is reached first, `accuracy-finite`
+    (entry 0) - read the initial state first and it would be `width`."""
+    data, progs, st = _doubling([FP64_MAX], 1)
+    e = refused("accuracy-finite", cert.audit, data, None, progs,
+                states={0: st})
+    assert (e.run, e.segment, e.entry) == (None, None, 0), e.message
+
+
+def test_a_drift_needs_its_initial_state_before_its_final():
+    """The states a drift reads are needed in the page's order, the
+    initial state before the final (step 10; verifier-A1, 2026-09-29,
+    found it unheld, and unstated until now). Three segments, only
+    boundary 1 handed, segment 1 chosen: boundary 2 is re-run into, and
+    neither 0 nor 3 is known - `state-missing` at run 0 boundary 0, entry
+    0, where the final first would name boundary 3."""
+    data, progs, st = _doubling([dec64("1")], 3)
+    e = refused("state-missing", cert.audit, data, None, progs,
+                states={0: {1: st[1]}}, choose={0: [1]})
+    assert (e.run, e.segment, e.entry) == (0, 0, 0), e.message
+
+
 def test_states_and_the_chain_are_checked_in_order_of_place(lor):
     """Steps 6 and 7 name the first place in order: run by run, and in a
     run segment by segment (then the output) or boundary by boundary."""

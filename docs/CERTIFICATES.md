@@ -960,7 +960,8 @@ check passes.
     - the run it uses exists and is of the right kind (`accuracy-run`);
     - its lane exists (`accuracy-scope`);
     - its terms' slots exist (`accuracy-slot`);
-    - the states it reads are known (`state-missing`);
+    - the states it reads are known (`state-missing`), a drift's
+      initial state before its final;
     - the value, re-derived under the width rule (`width`,
       `accuracy-finite`), is the value written (`accuracy-value`).
 
@@ -1118,8 +1119,9 @@ ledger, 2026-09-28):
 - `aux-image`'s half-step digest part, and separately its wider part,
   moved after `aux-segments`;
 - seven orders the page states: steps 4, 5 and 7 run by run; a drift's
-  lanes in order, and Q(final) before Q(initial); an estimate's slots
-  in order, and F0's value before Fr's;
+  lanes in order, and Q(final) before Q(initial), which has a control
+  since the audit round (below); an estimate's slots in order, and F0's
+  value before Fr's;
 - two locations: the stream-hash refusal's run, and a count refusal's
   line;
 - a fresh sampling seed drawn for each run, where the page draws one
@@ -1163,6 +1165,11 @@ The controls cover:
 - every accuracy check, the values derived again from the states with
   none of the implementation's code, an estimate's last slot, and an
   enclosure's ends held inclusive;
+- two of step 10's orders (verifier-A1, the audit round): Q of a
+  drift's final state before Q of its initial state (a final +inf
+  beside an initial value of 1,024 bits is `accuracy-finite`, not
+  `width`), and its initial state needed before its final
+  (`state-missing` at boundary 0, not S);
 - the audit's order, every adjacent pair of its steps from the choice
   to accuracy, and an auditor's seed never the certificate's;
 - the verdict's sampled segments, byte for byte;
