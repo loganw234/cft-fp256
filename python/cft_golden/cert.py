@@ -1562,9 +1562,10 @@ class Verdict:
                          f"{r['seed']}: a producer who made f of these {S} "
                          f"segments wrong escapes it with probability "
                          f"C({S}-f,{k})/C({S},{k}); for f = 1 that is "
-                         f"{p1.numerator}/{p1.denominator}")
+                         f"{p1.numerator}/{p1.denominator}; the segments "
+                         f"sampled: {_segment_list(r['rerun'])}")
             elif r["how"] == "named":
-                head += f", the segments named: {r['rerun']}"
+                head += f", the segments named: {_segment_list(r['rerun'])}"
             else:
                 head += ", every segment"
             out.append(head)
@@ -1575,6 +1576,15 @@ class Verdict:
                        f"not shown")
         out += self.identity
         return out
+
+
+def _segment_list(segments):
+    """Segment indices as the verdict spells them, a sample's and a named
+    choice's alike: in decimal, a comma and one space between them, in
+    square brackets - `[1, 3]` - in the order they were re-run, which the
+    plan makes ascending. P1's C auditor prints the same bytes (the audit
+    round's ledger, P3.md, 2026-09-29)."""
+    return "[" + ", ".join(str(k) for k in segments) + "]"
 
 
 def identity_report(cert):

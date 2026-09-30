@@ -911,8 +911,9 @@ none is given. For run r, with S segments and a sample of k:
 - ACCEPTED;
 - the mode;
 - for each run, which segments were re-run and how they were chosen.
-  For a sampled run it gives the seed and the escape probability
-  C(S-f, k)/C(S, k), with its value for f = 1;
+  For a sampled run it gives the seed, the escape probability
+  C(S-f, k)/C(S, k) with its value for f = 1, and the segments the
+  sample drew, ascending, spelt as a named choice's are: `[1, 3]`;
 - each accuracy value, re-derived, with what that proves and what it
   does not;
 - each identity field: unknown, or stated and not checked.

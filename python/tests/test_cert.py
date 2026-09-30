@@ -1505,6 +1505,30 @@ def test_a_sampled_audit_states_what_it_missed(lor):
     assert "C(4-f,2)/C(4,2); for f = 1 that is 1/2" in text
     assert "C(8-f,3)/C(8,3); for f = 1 that is 5/8" in text
     assert seed.hex() in text
+    # which segments a sample re-ran, ascending, spelt as a named choice's
+    # are (the lead's decision, 2026-09-29: the page's verdict gives "which
+    # segments were re-run"; P1's C auditor prints the same bytes)
+    lines = v.lines()
+    assert lines[2] == (
+        f"run 0 main fp64, 3 lanes, {S} segments: re-ran 2 of {S}, a sample "
+        f"drawn with the auditor's seed {seed.hex()}: a producer who made f "
+        f"of these {S} segments wrong escapes it with probability "
+        f"C({S}-f,2)/C({S},2); for f = 1 that is 1/2; the segments sampled: "
+        f"[0, 1]")
+    assert cert.sample(seed, 0, S, 2) == [0, 1]
+    assert lines[3].endswith("for f = 1 that is 5/8; the segments sampled: "
+                             "[4, 5, 7]")
+    assert v.runs[1]["rerun"] == [4, 5, 7]
+    assert lines[4] == (f"run 2 wider fp128, 3 lanes, {S} segments: re-ran 2 "
+                        f"of {S}, the segments named: [1, 3]")
+    # one segment is one index in its brackets; every segment is said so
+    one = cert.audit(lor.data, SALT, lor.progs, states=lor.states,
+                     choose={0: ("sample", 1), 1: [5], 2: "all"},
+                     seed=seed).lines()
+    assert one[2].endswith(
+        f"; the segments sampled: [{cert.sample(seed, 0, S, 1)[0]}]")
+    assert one[3].endswith(", the segments named: [5]")
+    assert one[4].endswith(f"re-ran {S} of {S}, every segment")
     # no seed given: the auditor draws its own, never the certificate's,
     # and reports it so the sample can be reproduced
     v1 = cert.audit(lor.data, SALT, lor.progs, states=lor.states,
