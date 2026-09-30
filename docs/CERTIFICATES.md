@@ -1644,8 +1644,8 @@ case it holds:
    its seed printed;
 7. the case named `example` being this page's example certificate.
 
-It is 156 checks, 23 to 28 s on the Windows desktop, niced
-(2026-09-29).
+It is 156 checks, 23 to 32 s on the Windows desktop, niced, the
+slowest with the desktop at about 77 % from other work (2026-09-29).
 
 **Changing it.** A change that moves any byte of the corpus fails the
 gate by name: a change to the model, a hash, an encoding, the assembler's
