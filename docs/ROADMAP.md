@@ -3862,6 +3862,167 @@ re-runs on libcft, so it is independent of the golden model, and for a
 certificate libcft's software backend made, only the golden auditor is
 independent of the producer ("What an audit proves").
 
+### Steps 5 and 6: accuracy in C, and cft-orbits' runs certified (plan of record, 2026-09-30)
+
+Logan approved this order on 2026-09-30 ("Go ahead with your order"):
+the fixes round, then the certificate plan's steps 5 and 6, then a hold
+before the work order's step 3. Nothing in it exists yet unless it says
+so.
+
+**What the tree has** (the lead's survey of 2026-09-30, read from the
+code).
+- **Accuracy, on the golden side only.** Version 1 defines three
+  methods (docs/CERTIFICATES.md, "Accuracy entries").
+  - cert.py's writer makes the entries its caller specifies, and its
+    audit re-derives them at step 10.
+  - Three corpus cases carry entries the golden writer made:
+    - lorenz63-rk4-fp64: a wider and a step-halving estimate;
+    - henonheiles-lf-fp256: the energy drift;
+    - example: a drift and a step-halving estimate.
+- **cft-audit re-derives every entry in C.** Its exact rationals sit on
+  libcft's `cft_bn`, with a division and gcd of its own, the width rule,
+  and the rounded and enclosed forms. All of it is static in audit.c,
+  behind `AUDIT_EXACT`, and a refusal there prints and exits.
+- **cft-segrun writes `accuracy 0`.** It holds one run's states at a
+  time, so after a run ends its initial and final states exist only as
+  its boundary files. corpus.py's check replaces a case's accuracy block
+  with `accuracy 0` before comparing cft-segrun's bytes.
+- **No estimate has been scored.** check.py's 300-digit "scheme" arm
+  measures rounding, inline in `check_ode`. No converged reference
+  exists anywhere in the tree.
+- **cft-orbits' segments engine** builds one image for each segment
+  length, up to eight cached.
+  - The constants ride in the image, and there is no bank.
+  - Stream a is the members' q_0, set on every segment, and the image's
+    first load overwrites it.
+  - A segment never crosses a sample boundary. Its length follows the
+    wall clock while the run writes checkpoints.
+  - Flags are OR'd into one word for the whole run. Neither a record nor
+    the checkpoint (version 2) carries any.
+  - orbits_check.py compares the golden executor with the library on
+    each configuration's first segment only, without its flags.
+
+**Parcels.**
+1. **S1: accuracy entries in cft-segrun.**
+   - It takes one option set per entry, after the runs: the method, the
+     run it uses, the scope, the form (with its format and attribute
+     where the form names them), the label, and a drift's terms. The
+     syntax goes to the lead before it is built.
+   - Each value is computed as "The functions, exactly" says, in that
+     order, with the width rule on every value computed. Each refusal
+     takes the golden writer's name.
+   - The exact arithmetic is cft-audit's, moved to one file both tools
+     build, whose functions return rather than exit. cft-audit's
+     verdicts may not move: audittest holds them.
+   - It reads the states back from the boundary files it wrote, so it
+     still holds one run's states at a time. Where its memory grows, its
+     trial and segrun_check's measurement say by how much.
+   - A narrow build refuses an accuracy entry by name, as cft-audit
+     does.
+   - Its gate:
+     - segrun_check: cft-segrun writes every method, scope and form,
+       byte for byte the golden writer's, and both auditors accept each;
+     - the corpus: cft-segrun remakes the three accuracy cases whole,
+       and corpus.py stops normalizing them;
+     - plants in fresh copies, each red by name: a term out of order, a
+       partial sum unchecked, an enclosure end widened, a rounding
+       attribute swapped.
+   - The docs: CERTIFICATES.md's "The segment runner" and "Golden
+     certificates", corpus.py's docstring and host/Makefile's comment,
+     wherever each says "before step 5".
+2. **S2: the estimates scored.**
+   - A converged reference: the scheme at h/2^k, computed at a stated
+     precision far below the run format's rounding floor, with k raised
+     until two successive levels agree to a stated tolerance. It covers
+     the three ODE programs at fp64 and fp256, over the segments
+     segrun_check and the corpus certify.
+   - A rounding reference: check.py's 300-digit arm, the scheme at 300
+     digits from the bank's rounded values, made a function others can
+     call. check.py's own results may not move.
+   - What is measured:
+     - each step-halving estimate, against the method error the
+       converged reference gives. For an order-p scheme, Richardson puts
+       the step-halving difference near (1 - 2^-p) of the error at h:
+       15/16 for RK4, 3/4 for Stormer-Verlet. The study says how near;
+     - each wider estimate, against the rounding error the 300-digit arm
+       gives. This is fp64 only, since fp256 is refused by name.
+   - A study in docs/studies/, and a script that makes it again. Whether
+     a stage holds it goes to the lead.
+   - It writes no C and changes no certificate.
+3. **S3: cft-orbits' runs certified, on the Newton route.** A design
+   goes to the lead before anything is built. It answers:
+   - **Segments.** Each sample interval is one certified segment, run by
+     one image: `seg_build`'s image for the stride. The engine runs an
+     interval as one or more shorter segments, and the audit re-runs it
+     whole. The design measures that the two agree bit for bit on every
+     configuration the gate uses, and says what could make them differ.
+   - **Streams.** Version 1 fixes a run's streams. Measure that the
+     result does not depend on stream a, and state +0.
+   - **Flags and STATUS per interval,** in the certificate's segment
+     lines. The records gaining them would move every record-chain
+     value, the four orbits chains in bindings/wasm/demos_chains.json,
+     and the browser core that writes the same lines. The lead's default
+     is that the records do not change. A design that changes them names
+     everything that moves.
+   - **Resume.** A certified run resumed from a checkpoint writes the
+     same certificate as one never interrupted. The checkpoint carries
+     the interval's flags so far, in a version the reader requires,
+     named so.
+   - **The writer.** segrun.c is S1's until S1 merges. The design says
+     how cft-orbits writes a certificate without a second copy of the
+     writer, and in what order it builds around S1.
+   - **Refused by name:**
+     - `--rsqrt exact`, which has no image;
+     - the loop and program engines;
+     - an interval shorter than the stride;
+     - a stride past the loader's limits;
+     - half-step and wider runs: the constants ride in the image, and
+       the Newton passes change with the format;
+     - an energy drift, which version 1 cannot carry.
+   - Its gate: orbits_check certifies a Kepler fp64 run and an outer
+     fp256 run. Both auditors accept each, in full and sampled. Controls
+     are refused by name: an interval's end state changed, a flag word
+     changed, an interval dropped.
+
+**The lead's own, beside the parcels.**
+- **mpfloat's cancellation rule** (verifier-F4, 2026-09-30, a known limit
+  of the fixes round). `err_shl` rounds a right shift down, so an
+  unlike-sign add floors the shorter operand's scaled error: F4 measured
+  err 2 where the worst true error is 2.5 units. The fix rounds it up.
+  It also makes true the file's header on a saturated bound and the
+  sqrt row's clause on the override. It is held exhaustively at small W,
+  showing the bound holds, and by the transcend stage and F1's
+  byte-for-byte check, showing no result at the contract's precision
+  moves. A larger bound can only escalate sooner.
+- **The module rebuilt** at the round's end, since mpfloat.c is compiled
+  into it.
+- **q135b's result,** when it lands: its card legs, and the pages that
+  still call the old quads retimed, restated.
+- **Two gates widened** (verifier-F4): the node stage runs
+  `program_test.mjs`, and a stage runs `bindings/arduino/sync.py
+  --check`. Today no stage runs either.
+
+**How it is held.**
+- A verifier for each parcel, W1 to W3, and W4 for the lead's own
+  commits.
+- Agents run quick tests only and hand the long runs back to the lead.
+  The desktop is Logan's to use: one run at a time, niced, and `docker
+  ps` first.
+- amd-arc-box holds the quad build until it lands, then the gate budget.
+  The card legs are the lead's: cft-segrun's entries on the card, and a
+  certified orbits run there if S3 makes one.
+- Logan's send-back rule. Anything the hardware or the page cannot do is
+  refused by name.
+
+**What it is not.**
+- A bound: no version-1 method has a rigorous remainder.
+- A method for a quantity that is not polynomial, such as cft-orbits'
+  energy.
+- The exact route certified: that needs an orbit integrator in the golden
+  model.
+- A signature, or the remote protocol's CAPS2.
+- The work order's step 3, which waits for Logan.
+
 ### Revision 7: step 4's RTL revision (plan of record, 2026-09-29)
 
 Step 4 of the controlled-divergence work order is the RTL revision.
