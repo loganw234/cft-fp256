@@ -923,6 +923,157 @@ def test_the_audit_reruns_at_the_certified_devices_scratch_depth():
             dataclasses.replace(u50, device_caps=caps)) == 256
 
 
+def _deep_segment():
+    """The 300-slot segment above, certified as run at 2,048 slots: two
+    lanes, three segments, one lane's slots 0 and 299 each gaining one a
+    segment. -> (image, states, results)"""
+    seq = cert.seq
+    one = sf.one_bits(F64)
+    top = 299
+    prog = seq.Program(F64, [
+        seq.ldl(3, top, 2048),
+        seq.alu(sf.OP_FMA, rd=3, ra=3, rb=0, rc=0, kb=True, kc=True),
+        seq.stl(3, top, 2048),
+        seq.ldl(4, 0, 2048),
+        seq.alu(sf.OP_FMA, rd=4, ra=4, rb=0, rc=0, kb=True, kc=True),
+        seq.stl(4, 0, 2048),
+        seq.halt()], consts=[one], max_deposits=0,
+        flags=seq.FLAG_SCRATCH_IO, n_scratch_in=top + 1,
+        n_scratch_out=top + 1, scratch_depth=2048)
+    img = prog.to_bytes()
+    init = [dec64(repr(0.5 + i / 8)) for i in range(2 * (top + 1))]
+    st, rs = cert.run_chain(img, None, init, 3, scratch_depth=2048)
+    return img, st, rs
+
+
+def test_a_runs_scratch_depth_parameter_is_its_depth():
+    """Where device-caps gives no depth - the software backend's `none`, a
+    CAPS word alone, `unknown`, a CAPS2 without bit 4 - a run's
+    `scratch-depth` parameter does, so that a software handle opened
+    deeper can say its depth (the lead's decision, 2026-09-29). The
+    300-slot segment loads only on a deeper tile: under each such
+    identity it audits green at its parameter's 2,048, and without the
+    parameter it is refused by name at 256. Where CAPS2 names a depth,
+    that is every run's, whatever a parameter says."""
+    img, st, rs = _deep_segment()
+    progs, states = {0: (img, None)}, {0: dict(enumerate(st))}
+    said = cert.certify_run("main", img, None, SALT, st, rs, steps=1,
+                            scratch_depth=2048,
+                            parameters=(("scratch-depth", 2048),))
+    plain = cert.certify_run("main", img, None, SALT, st, rs, steps=1,
+                             scratch_depth=2048)
+    for caps in ("none", ("19e9ffff",), "unknown", ("19faffff", "000007eb")):
+        idn = dataclasses.replace(IDENTITY, device_caps=caps)
+        c = cert.parse(cert.encode(keyed((said,), (), idn)))
+        assert cert.scratch_depth_of(c.identity, c.runs[0]) == 2048
+        assert cert.scratch_depth_of(c.identity) == 256
+        v = cert.audit(cert.encode(keyed((said,), (), idn)), SALT, progs,
+                       states=states)
+        assert v.exit_code == 0 and len(v.runs[0]["rerun"]) == 3
+        e = refused("program-image", cert.audit,
+                    cert.encode(keyed((plain,), (), idn)), SALT, progs,
+                    states=states)
+        assert "256" in e.message and e.run == 0
+    # CAPS2 with bit 4 is the device's depth, and so every run's: 256 on a
+    # round-2 image, where the parameter's 2,048 is not read
+    r2 = dataclasses.replace(IDENTITY, backend="xrt", device_xclbin="ab" * 32,
+                             device_version="00000a00",
+                             device_caps=("19e9ffff", "000007f8"))
+    c = cert.parse(cert.encode(keyed((said,), (), r2)))
+    assert cert.scratch_depth_of(c.identity, c.runs[0]) == 256
+    refused("program-image", cert.audit, cert.encode(keyed((said,), (), r2)),
+            SALT, progs, states=states)
+
+
+def test_the_scratch_depth_parameter_is_a_depth(lor):
+    """The reader holds `scratch-depth` to a power of two in 1..32,768, the
+    depths CAPS2[3:0] can name: `malformed` otherwise, at its line, after
+    the line's name, its place in byte order and its decimal spelling are
+    read, as every parameter's are. The writer refuses one the same way,
+    since it reads back what it writes. Every other parameter is stated,
+    not checked, whatever its value."""
+    L = lines_of(lor.data)
+    p = find(L, "parameters ")          # run 0's: ensemble-spread, members
+    head, rest = L[:p], L[p + 3:]
+
+    def with_depth(v, name="scratch-depth"):
+        return rebuilt(head + ["parameters 3", "parameter ensemble-spread 64",
+                               "parameter members 3", f"parameter {name} {v}"]
+                       + rest)
+    for v in (1, 2, 256, 2048, 32768):
+        c = cert.parse(with_depth(v))
+        assert c.runs[0].parameters[-1] == ("scratch-depth", v)
+        assert cert.scratch_depth_of(c.identity, c.runs[0]) == v
+        assert cert.scratch_depth_of(c.identity, c.runs[1]) == 256
+    for v in ("0", "3", "255", "257", "32769", "65536",
+              "9223372036854775807"):
+        e = refused("malformed", cert.parse, with_depth(v))
+        assert e.line == p + 4 and "scratch depth" in e.message, e.message
+    # its decimal spelling first, as any parameter's
+    e = refused("malformed", cert.parse, with_depth("03"))
+    assert e.line == p + 4 and "one spelling" in e.message, e.message
+    # a name one letter off is stated, not checked
+    assert cert.parse(with_depth(3, "scratch-depths")).runs[0].parameters[
+        -1] == ("scratch-depths", 3)
+    # its place among the run's parameters before its value
+    e = refused("line-order", cert.parse, rebuilt(
+        head + ["parameters 2", "parameter zz 1", "parameter scratch-depth 3"]
+        + rest))
+    assert e.line == p + 3
+    bad = dataclasses.replace(lor.runs[0], parameters=lor.runs[0].parameters
+                              + (("scratch-depth", 3),))
+    refused("malformed", cert.encode, keyed((bad,) + lor.runs[1:],
+                                            lor.entries))
+
+
+def test_an_auxiliary_run_is_at_the_main_runs_depth(lor):
+    """An auxiliary run is the main run's instructions on the same machine,
+    so at its scratch depth (the lead's decision, 2026-09-29): a half-step
+    or wider run whose scratch-depth parameter names another depth than
+    the main run's is refused `aux-image`, after its lanes and before its
+    segments. The same depth said two ways is the same machine, and under
+    CAPS2 every run is at the device's depth whatever it says."""
+    r0, r1, r2 = lor.runs
+    P = lor.progs
+    at512 = (("scratch-depth", 512),)
+    half512 = dataclasses.replace(r1, parameters=at512)
+    e = refused("aux-image", _audit_runs, lor, [r0, half512],
+                {0: P[0], 1: P[1]})
+    assert e.run == 1 and "scratch depth of 512" in e.message, e.message
+    e = refused("aux-image", _audit_runs, lor,
+                [r0, dataclasses.replace(r2, parameters=at512)],
+                {0: P[0], 1: P[2]})
+    assert e.run == 1 and "scratch depth of 512" in e.message, e.message
+    # the main run's parameter against an auxiliary run's default
+    e = refused("aux-image", _audit_runs, lor,
+                [dataclasses.replace(r0, parameters=r0.parameters + at512),
+                 r1], {0: P[0], 1: P[1]})
+    assert "and the main run at 512" in e.message, e.message
+    # after aux-lanes, before aux-segments: each defect alone is its own
+    ch = _fake_chain(r1.chain[0].start, S)
+    two = tuple(cert.stream_hash(SALT, n, cert.state_bytes("fp64", [0, 0]))
+                for n in "abc")
+    refused("aux-lanes", _audit_runs, lor, [r0, dataclasses.replace(
+        half512, lanes=2, streams=two)], {0: P[0], 1: P[1]})
+    refused("aux-image", _audit_runs, lor, [r0, dataclasses.replace(
+        half512, chain=ch, output=ch[-1].end)], {0: P[0], 1: P[1]})
+    refused("aux-segments", _audit_runs, lor, [r0, dataclasses.replace(
+        r1, chain=ch, output=ch[-1].end)], {0: P[0], 1: P[1]})
+    both = {0: lor.states[0], 1: lor.states[1]}
+    # 256 said on the half-step run alone is the main run's 256
+    _audit_runs(lor, [r0, dataclasses.replace(r1, parameters=(
+        ("scratch-depth", 256),))], {0: P[0], 1: P[1]}, states=both,
+        choose={0: [0], 1: [0]})
+    # under CAPS2 both runs are at the device's 2,048, whatever run 1 says
+    u50 = dataclasses.replace(IDENTITY, backend="xrt",
+                              device_xclbin="ab" * 32,
+                              device_version="00000a00",
+                              device_caps=("19faffff", "000007fb"))
+    cert.audit(cert.encode(dataclasses.replace(
+        lor.cert, identity=u50, runs=(r0, half512), accuracy=())), SALT,
+        {0: P[0], 1: P[1]}, states=both, choose={0: [0], 1: [0]})
+
+
 def test_a_full_audit_handed_only_the_initial_states(lor):
     """Each segment starts from the one before it, re-run in this audit
     and matched: the most independent audit there is, handed nothing

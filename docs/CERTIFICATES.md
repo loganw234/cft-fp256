@@ -288,7 +288,7 @@ auxiliary.
 | `stream-b <digest>` | stream b |
 | `stream-c <digest>` | stream c |
 | `parameters <p>` | how many parameter lines follow; 0 or more |
-| `parameter <name> <n>` | a non-negative integer parameter the bank does not carry: stated, not checked. Names strictly increasing in byte order. A real-valued parameter belongs in the bank, where the program digest covers it |
+| `parameter <name> <n>` | a non-negative integer parameter the bank does not carry: stated, not checked, but for one name. Names strictly increasing in byte order. A real-valued parameter belongs in the bank, where the program digest covers it. The one name read is `scratch-depth`: the run's scratch depth where `device-caps` gives none (see "The chain"), a power of two in 1..32,768 |
 | `segments <S>` | how many segment lines follow; at least 1 |
 | `segment <k> start <digest> end <digest> flags <n> status <n>` | segment k: the hashes of its start and end states, its sticky IEEE flag word (0..31) and its STATUS (0..2^32-1) |
 | `output <digest>` | the hash of the run's final state |
@@ -490,15 +490,18 @@ scratch_depth=depth)`, where:
 - no index table and no lane mask are used;
 - the streams are the run's;
 - the start state is the segment's start;
-- `depth` is the scratch depth of the device the certificate names
-  (revision 7, 2026-09-29): `1 << CAPS2[3:0]` when `device-caps`
-  carries CAPS2 with CAPS2[4] set - 256 on the round-2 images, 2,048 on
-  the U50's revision-7 ones - and 256, the model's default, otherwise
-  (`none` for the software backend, which cft-segrun opens at its own
-  256; a CAPS word alone; `unknown`). A non-strict `STX`/`LDX` reduces
-  its index modulo the depth, and a state wider than 256 slots only
-  loads on a deeper device, so a run is re-run at the depth it had or
-  it is a different machine. `cert.scratch_depth_of` is the rule.
+- `depth` is the scratch depth the run had (revision 7, 2026-09-29):
+  `1 << CAPS2[3:0]` when `device-caps` carries CAPS2 with CAPS2[4] set
+  - 256 on the round-2 images, 2,048 on the U50's revision-7 ones - for
+  every run, since a certificate names one device; otherwise the run's
+  `scratch-depth` parameter, where it states one, which is how a
+  software handle opened deeper says its depth (the lead's decision,
+  2026-09-29); and 256, the model's default, otherwise (`none` for the
+  software backend opened plainly; a CAPS word alone; `unknown`). A
+  non-strict `STX`/`LDX` reduces its index modulo the depth, and a
+  state wider than 256 slots only loads on a deeper device, so a run is
+  re-run at the depth it had or it is a different machine.
+  `cert.scratch_depth_of` is the rule.
 
 Its end state is the run's `scratch_out`, its flag word the run's sticky
 IEEE flags (invalid 1, divide-by-zero 2, overflow 4, underflow 8,
@@ -531,7 +534,7 @@ relation, in this order, before it re-runs anything:
 |---|---|---|
 | `aux-format` | the main run's format | the next rung: fp32 to fp64, fp64 to fp128, fp128 to fp256. At fp256, the top of the ladder, refused: a program image is at most fp256, so a rounding estimate by a wider re-run cannot exist there |
 | `aux-lanes` | the main run's lanes | the main run's lanes |
-| `aux-image` | the same steps a segment, and the same image digest | the same steps, and an image that is the main image one format wider: the same instruction words, `max_deposits`, flags, constant count and scratch word, the precision code one rung up, and any constants the image carries exactly widened |
+| `aux-image` | the same steps a segment, and the same image digest; then the main run's scratch depth | the same steps, and an image that is the main image one format wider: the same instruction words, `max_deposits`, flags, constant count and scratch word, the precision code one rung up, and any constants the image carries exactly widened; then the main run's scratch depth |
 | `aux-segments` | twice the main run's segments | the main run's segments |
 | `aux-h-slots` | the main image takes its constants from a bank, and each named slot is inside that bank and holds a finite nonzero value there | (none named) |
 | `aux-bank` | each named slot exactly half the main bank's value; every other slot bit-identical | every slot the main bank's value exactly widened |
@@ -543,6 +546,13 @@ is exact for every finite and infinite value, and a NaN becomes the
 wider format's canonical quiet NaN. The wider checks of streams and
 start state need the main run's streams and initial state handed to the
 audit.
+
+An auxiliary run is the main run's instructions on the same machine, so
+it runs at the main run's scratch depth ("The chain"; the lead's
+decision, 2026-09-29). Where `device-caps` names a depth, every run has
+it; where runs state their own by the `scratch-depth` parameter, a run
+at another depth reduces a non-strict `STX`/`LDX` by another modulus,
+and is refused `aux-image`.
 
 Why a wider run is held to its instructions rather than to its image
 digest: an image's header carries its format's precision code, so an
@@ -690,8 +700,9 @@ statement of what it ran on.
   checking - a certificate that misstated its device's depth would fail
   its own re-run, as one that misstated any number the arithmetic reads
   would. A remote handle's certificate records `unknown` and is re-run
-  at 256, whatever its server's depth: the protocol carries no CAPS2, a
-  limit of this version (below, "What version 1 does not do").
+  at 256 unless its runs state a depth by their `scratch-depth`
+  parameter, whatever its server's depth: the protocol carries no
+  CAPS2, a limit of this version (below, "What version 1 does not do").
 
 ## The detached signature
 
@@ -939,7 +950,7 @@ accuracy 7, the auditor's own usage 64. The name is the report.
 | `line-order` | 2 | lines are out of their order |
 | `line-unexpected` | 2 | a line has no place where it stands: a repeat, or a line of a block already read |
 | `count` | 2 | a count disagrees with the lines or tokens it counts |
-| `malformed` | 2 | a value breaks its one spelling, its range or its token count, or a line breaks the byte rules; a count out of its own range; a writer asked to certify a run of no segments, handed a certificate object it cannot spell, or handed a field that does not read back as itself (a value of the wrong type); asked to write a value it cannot spell (not a rational, or a form, format or direction the page does not name) |
+| `malformed` | 2 | a value breaks its one spelling, its range or its token count, or a line breaks the byte rules; a count out of its own range; a `scratch-depth` parameter that is not a power of two in 1..32,768; a writer asked to certify a run of no segments, handed a certificate object it cannot spell, or handed a field that does not read back as itself (a value of the wrong type); asked to write a value it cannot spell (not a rational, or a form, format or direction the page does not name) |
 | `decimal` | 2 | an element's decimal is not the exact decimal of its hex |
 | `accuracy-kind` | 2 | an entry's kind is not its method's; every `bound` in version 1 |
 | `width` | 3 | an exact value past 1,023 bits in numerator or denominator: written, computed (an element's, a product, a partial sum, a difference), an enclosure's finite end, or one a writer was asked to round or enclose |
@@ -959,7 +970,7 @@ accuracy 7, the auditor's own usage 64. The name is the report.
 | `continuity` | 5 | a segment does not start where the one before it ended, or the output is not the last end |
 | `aux-format` | 5 | an auxiliary run's format is not its relation's, including any wider run of an fp256 run |
 | `aux-lanes` | 5 | an auxiliary run's lanes differ from the main run's |
-| `aux-image` | 5 | an auxiliary run's image or steps are not the main run's, or the main run's one format wider |
+| `aux-image` | 5 | an auxiliary run's image or steps are not the main run's, or the main run's one format wider, or it runs at another scratch depth than the main run's |
 | `aux-segments` | 5 | a half-step run without twice the segments, or a wider run without the same |
 | `aux-h-slots` | 5 | a named h-slot outside the bank, or holding zero or a non-finite value there, or a main image that takes no bank |
 | `aux-bank` | 5 | a bank that is not the main bank halved in exactly the named slots, or exactly widened |
@@ -1470,6 +1481,7 @@ and card-p3b3).
   no CAPS2, so a certificate made through a remote handle reads
   `device-caps unknown` and is re-run at 256 (revision 7, "The chain").
   A run that indexed past 256 on a deeper server, or held a state wider
-  than 256 slots, fails its own audit rather than passing. A certificate
-  made on the software backend is made at 256 too: cft-segrun opens it
-  plainly and takes no depth.
+  than 256 slots, fails its own audit rather than passing, unless its
+  runs state the server's depth by their `scratch-depth` parameter. A
+  certificate made on the software backend is re-run at 256 too, unless
+  its runs state a depth that way ("The chain").

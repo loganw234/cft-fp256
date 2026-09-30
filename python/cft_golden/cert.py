@@ -90,6 +90,18 @@ KINDS = ("bound", "estimate", "measurement")
 MAX_TERMS = 64
 MAX_FACTORS = 8
 
+# The one parameter the audit READS (the lead's decision, 2026-09-29): a
+# run's scratch depth, where `device-caps` gives none - so that a software
+# handle opened deeper (cft_open_ex, cft-segrun --scratch-depth) can say
+# the depth it ran at. Every other parameter is stated and not checked.
+DEPTH_PARAMETER = "scratch-depth"
+
+
+def _is_depth(v):
+    """A scratch depth a certificate may state: a power of two in
+    1..32,768, the four bits of CAPS2[3:0] (seq.SCRATCH_D_MAX)."""
+    return _is_int(v) and 1 <= v <= seq.SCRATCH_D_MAX and not v & (v - 1)
+
 # Refusal name -> exit code, one table (the specification prints the
 # same one, and test_cert.py holds the two equal). Codes are families
 # in the order the audit reaches them; the NAME is the report.
@@ -1031,7 +1043,12 @@ class _Reader:
                                 f"parameter {toks[1]!r} comes after "
                                 f"{params[-1][0]!r}; names are in "
                                 f"increasing order", at)
-            params.append((toks[1], self.dec(toks[2], "a parameter", i=at)))
+            v = self.dec(toks[2], "a parameter", i=at)
+            if toks[1] == DEPTH_PARAMETER and not _is_depth(v):
+                raise self.malformed(f"parameter {DEPTH_PARAMETER} {v}: a "
+                                     f"run's scratch depth is a power of two "
+                                     f"in 1..{seq.SCRATCH_D_MAX}", at)
+            params.append((toks[1], v))
         S = self.count_line("segments", "segment", 1, True)
         chain = []
         for k in range(S):
@@ -1249,16 +1266,21 @@ def _segment_shape(prog):
     return None
 
 
-def scratch_depth_of(identity):
-    """The scratch depth a certificate's runs had, which the audit re-runs
-    them at (revision 7): 1 << CAPS2[3:0] where `device-caps` carries
-    CAPS2 with CAPS2[4] set, which every tile from revision 3 does - 256
-    on the round-2 images, 2,048 on the U50's revision-7 ones. Otherwise
-    the model's default of 256: the software backend's, which cft-segrun
-    opens plainly, and every tile's before revision 7. A REMOTE handle's
-    certificate records `unknown` and is re-run at 256, whatever its
-    server's depth - the protocol carries no CAPS2 (a known limit,
-    docs/CERTIFICATES.md).
+def scratch_depth_of(identity, run=None):
+    """The scratch depth a run had, which the audit re-runs it at
+    (revision 7): 1 << CAPS2[3:0] where `device-caps` carries CAPS2 with
+    CAPS2[4] set, which every tile from revision 3 does - 256 on the
+    round-2 images, 2,048 on the U50's revision-7 ones - and then for
+    every run, since a certificate names one device. Otherwise the run's
+    `scratch-depth` parameter, where it states one (the audit round,
+    2026-09-29): a software handle opened deeper says its depth so, and
+    the reader has held it to a power of two in 1..32,768. Otherwise the
+    model's default of 256: the software backend's opened plainly, and
+    every tile's before revision 7. A REMOTE handle's certificate records
+    `unknown` and is re-run at 256 unless its runs state a depth,
+    whatever its server's - the protocol carries no CAPS2 (a known limit,
+    docs/CERTIFICATES.md). With no `run`, the answer the device lines
+    alone give: CAPS2's depth, or 256.
 
     Reading the word is not checking it. The identity is still stated and
     never checked; a certificate that misstates its device's depth simply
@@ -1269,6 +1291,10 @@ def scratch_depth_of(identity):
         word = int(caps[1], 16)
         if word & 0x10:
             return 1 << (word & 0xF)
+    if run is not None:
+        for name, v in run.parameters:
+            if name == DEPTH_PARAMETER:
+                return v
     return seq.SCRATCH_D
 
 
@@ -1700,12 +1726,12 @@ def _is_bytes(v):
 
 def _check_programs(cert, programs):
     programs = _run_mapping(cert, programs, "programs", "program-image")
-    # The depth every run is re-run at: the certificate's device's
-    # (scratch_depth_of), read once, since a certificate records one
-    # device for all its runs.
-    depth = scratch_depth_of(cert.identity)
     out = []
     for r, run in enumerate(cert.runs):
+        # The depth this run is re-run at (scratch_depth_of): the
+        # certificate's device's, which is every run's, or else the run's
+        # own scratch-depth parameter, or 256.
+        depth = scratch_depth_of(cert.identity, run)
         if r not in programs:
             raise Refusal("program-image", f"run {r}: no program image was "
                                            f"handed to the audit", run=r)
@@ -1887,6 +1913,15 @@ def _check_relations(cert, salt, progs, strm, known):
             if why:
                 raise Refusal("aux-image", f"{where} is not the main image "
                                            f"one format wider: {why}", run=r)
+        # the same instructions on the same machine: a run at another
+        # scratch depth reduces a non-strict STX/LDX by another modulus
+        # (the lead's decision, 2026-09-29). Under CAPS2 the runs cannot
+        # differ; under the scratch-depth parameter they can.
+        if PA["depth"] != P0["depth"]:
+            raise Refusal("aux-image", f"{where} is re-run at a scratch depth "
+                                       f"of {PA['depth']} and the main run at "
+                                       f"{P0['depth']}: the same instructions "
+                                       f"on another machine", run=r)
         # segments
         want = 2 * len(main.chain) if half else len(main.chain)
         if len(A.chain) != want:
