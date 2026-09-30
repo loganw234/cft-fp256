@@ -3084,25 +3084,30 @@ def test_a_run_is_bounded_by_what_was_handed_for_it(lor):
 
 BLOCKY = """.format   fp64
 .deposits 0
-.scratch  in 3
-.scratch  out 3
+.scratch  in 4
+.scratch  out 4
 .scratch  strict
 .const    ONE   = 1.0
 .const    THIRD = 0x3fd5555555555555
-; slot 0 a counter c, slot 1 a value x, slot 2 an index i (its bits).
-; A lane leaves the loop when c reaches 0 - early, in a block of lanes
-; that all do. x x overflows where x is huge. x is stored at scratch
-; slot i and read back, doubling x, where i is inside the depth; past
-; it (strict) the store and the load are reported, STATUS[5], and x
-; stays.
+; slot 0 a counter c, slot 1 a value x, slot 2 an index i (its bits),
+; slot 3 a switch d. A lane leaves the loop when c reaches 0 - early, in
+; a block of lanes that all do. A lane whose d is not +0 deposits, past
+; max_deposits 0: STATUS[4]. x x underflows where x is tiny and
+; overflows where it is huge. x is stored at scratch slot i and read
+; back, doubling x, where i is inside the depth; past it (strict) the
+; store and the load are reported, STATUS[5], and x stays.
 ldl    r3, 0
 ldl    r4, 1
 ldl    r9, 2
+ldl    r10, 3
 repeat 40
   sub    r3, r3, ONE
   mul    r4, r4, THIRD
   setact r3
 endrep
+actall
+setact r10
+deposit r4
 actall
 mul    r5, r4, r4
 stx    r4, r9
@@ -3115,18 +3120,27 @@ halt
 
 
 def _blocky_start(n=130):
-    """Lane i: c = i mod 45 + 1, x = 1 + i/64, i = 300 + i - except the
-    last two lanes, the third block's, whose c is 2 and 3 (so that block
-    leaves its loop early), and the last lane's x of 1e300 (it alone
-    overflows) and index 600 (it alone is past 512)."""
+    """Lane i: c = i mod 45 + 1, x = 1 + i/64, i = 300 + i, d = +0 - but
+    each of the three blocks (64, 64 and 2 lanes) with something no other
+    has, so that the flag word and STATUS are each the OR of three
+    different blocks' and not any one block's:
+    - lane 5 (block 0): x = 1e-300, whose square underflows (flag 8);
+    - lane 70 (block 1): index 600, past a depth of 512 (STATUS[5]);
+    - lanes 128 and 129 (block 2): c = 2 and 3, so the block leaves its
+      loop early, and d = 1, so they deposit (STATUS[4]); lane 129's
+      x = 1e300, whose square overflows (flag 4)."""
     init = []
     for i in range(n):
-        c, x, ix = i % 45 + 1, 1 + i / 64, 300 + i
+        c, x, ix, d = i % 45 + 1, 1 + i / 64, 300 + i, 0.0
+        if i == 5:
+            x = 1e-300
+        if i == 70:
+            ix = 600
         if i >= n - 2:
-            c = i - (n - 2) + 2
+            c, d = i - (n - 2) + 2, 1.0
         if i == n - 1:
-            x, ix = 1e300, 600
-        init += [dec64(repr(float(c))), dec64(repr(x)), ix]
+            x = 1e300
+        init += [dec64(repr(float(c))), dec64(repr(x)), ix, dec64(repr(d))]
     return init
 
 
@@ -3136,31 +3150,36 @@ def test_the_audit_re_runs_a_segment_in_blocks_of_64_lanes():
     one block's scratch at the certified depth, not every lane's (the
     lead's decision, 2026-09-29). By P3 (docs/SEQUENCER.md) that is the
     dense run exactly. Held here at a depth past 256, over three blocks
-    (64, 64 and 2 lanes) of a strict program whose last block leaves its
-    loop early and whose last lane alone overflows and indexes past the
-    depth: the end state, the flag word and STATUS equal the dense run's,
-    and the audit accepts a chain the dense writer made. One block's
-    scratch is what it holds: 256 one-slot lanes at 32,768 slots peak at
-    one block's 16 MiB (measured), where the dense run's is 64."""
+    (64, 64 and 2 lanes) of a strict program, each block raising a flag
+    or a STATUS bit no other raises, and the last leaving its loop early:
+    the end state, the flag word and STATUS equal the dense run's, which
+    no one block's, first or last, equals; and the audit accepts a chain
+    the dense writer made. One block's scratch is what it holds: 256
+    one-slot lanes at 32,768 slots peak at one block's 16 MiB (measured),
+    where the dense run's is 64."""
     seq = cert.seq
     img = asm.assemble(BLOCKY, "blocky")
     prog = seq.Program.from_bytes(img, scratch_depth=512)
     init = _blocky_start()
-    n = len(init) // 3
+    n = len(init) // 4
     z = [0] * n
     dense = seq.run(prog, z, z, z, scratch_in=init, scratch_depth=512)
     out, flags, status = cert.run_segment(prog, z, z, z, init,
                                           scratch_depth=512)
     assert out == list(dense.scratch_out)
     assert (flags, status) == (dense.flags, dense.status)
-    # what makes it a test of blocks: the third block alone overflows and
-    # is past the depth, and it leaves its loop before the others do
+    # what makes it a test of blocks: each block has a flag or a STATUS
+    # bit of its own, so that no one block's word is the run's, and the
+    # third leaves its loop before the others do
     blocks = [seq.run(prog, z[lo:hi], z[lo:hi], z[lo:hi],
-                      scratch_in=init[3 * lo:3 * hi], scratch_depth=512)
+                      scratch_in=init[4 * lo:4 * hi], scratch_depth=512)
               for lo, hi in ((0, 64), (64, 128), (128, n))]
-    assert [bool(b.flags & 4) for b in blocks] == [False, False, True]
-    assert [b.status for b in blocks] == [0, 0, seq.STATUS_SCRATCH_RANGE]
-    assert dense.status == seq.STATUS_SCRATCH_RANGE and dense.flags & 4
+    assert [b.flags for b in blocks] == [16 | 8, 16, 16 | 4]
+    assert [b.status for b in blocks] == [0, seq.STATUS_SCRATCH_RANGE,
+                                          seq.STATUS_DEPOSIT_OVERFLOW]
+    assert dense.flags == 16 | 8 | 4
+    assert dense.status == (seq.STATUS_SCRATCH_RANGE
+                            | seq.STATUS_DEPOSIT_OVERFLOW)
     assert (blocks[2].insns_executed < blocks[0].insns_executed
             == blocks[1].insns_executed == dense.insns_executed)
     # and the depth is read: at 256 every index is past it, other answers
