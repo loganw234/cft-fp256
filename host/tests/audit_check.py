@@ -203,22 +203,26 @@ def same(g, t, read_only=False):
     return False, f"golden gave no verdict ({g[1]})"
 
 
-def record(workdir, args, env, want, label):
+def record(workdir, args, env, want, label, read_only=False, binary="tool"):
     """Keep this tool run as a case for audit_plants.py: its files, its
-    arguments relative to its directory, and the golden verdict."""
+    arguments relative to its directory, and the verdict it must give -
+    of the tool, or of the narrow build (binary "narrow")."""
     if RECORD is None:
         return
     RECORDED[0] += 1
     d = RECORD / f"{RECORDED[0]:06d}"
-    shutil.copytree(workdir, d)
+    if workdir is not None:
+        shutil.copytree(workdir, d)
+    else:
+        d.mkdir(parents=True)
     rel = []
     for a in args:
         s = str(a)
-        rel.append(os.path.relpath(s, workdir) if os.path.isabs(s) and
-                   s.startswith(str(workdir)) else s)
+        rel.append(os.path.relpath(s, workdir) if workdir is not None and
+                   os.path.isabs(s) and s.startswith(str(workdir)) else s)
     (d / "case.json").write_text(json.dumps(
-        {"args": rel, "env": env or {}, "want": want, "label": label}),
-        encoding="utf-8")
+        {"args": rel, "env": env or {}, "want": want, "label": label,
+         "read_only": read_only, "binary": binary}), encoding="utf-8")
 
 
 def hold(args, env, g, label, workdir, read_only=False, quiet=True):
@@ -226,7 +230,7 @@ def hold(args, env, g, label, workdir, read_only=False, quiet=True):
     rc, out, err = run_tool(args, env, cwd=workdir)
     t = tool_verdict(rc, out, err)
     agree, why = same(g, t, read_only)
-    record(workdir, args, env, list(g), label)
+    record(workdir, args, env, list(g), label, read_only)
     return check(agree, label, why, quiet=quiet)
 
 
@@ -458,7 +462,8 @@ class Shadow:
                                                f"#{self.calls[kind]}")])[-5:]
         t = tool_verdict(rc, out, err)
         agree, why = same(g, t, read_only)
-        record(d, args, env, list(g), f"{test} ({kind} #{self.calls[kind]})")
+        record(d, args, env, list(g), f"{test} ({kind} #{self.calls[kind]})",
+               read_only)
         global CHECKS
         CHECKS += 1
         if not agree:
@@ -565,23 +570,27 @@ def section_tool(work):
     at = text.index("<!-- the test vectors -->")
     block = re.search(r"```[a-z]*\n(.*?)```", text[at:], re.S).group(1)
     rows = dict(ln.split(None, 1) for ln in block.strip().split("\n"))
-    rc, out, err = run_tool(["--sample", rows["sample-seed"],
-                             rows["sample-run"], rows["sample-of"],
-                             rows["sample-k"]])
+    args = ["--sample", rows["sample-seed"], rows["sample-run"],
+            rows["sample-of"], rows["sample-k"]]
+    rc, out, err = run_tool(args)
     check(rc == 0 and out.strip() == rows["sample"],
           f"--sample: the page's vector, {rows['sample']}",
           f"exit {rc}: {out.strip() or err.strip()}")
+    record(None, args, None, ["accepted", [rows["sample"]]],
+           "--sample, the page's vector")
     grid = 0
     for seed in (bytes(32), bytes(range(32)),
                  hashlib.sha256(b"auditor").digest()):
         for r, S, k in ((0, 10, 3), (1, 8, 8), (2, 1000, 17), (7, 5, 1),
                         ((1 << 32) - 1, 4, 2), (3, 1, 1), (0, 64, 63)):
-            rc, out, _ = run_tool(["--sample", seed.hex(), str(r), str(S),
-                                   str(k)])
+            args = ["--sample", seed.hex(), str(r), str(S), str(k)]
+            rc, out, _ = run_tool(args)
             want = " ".join(str(x) for x in cert.sample(seed, r, S, k))
             grid += check(rc == 0 and out.strip() == want,
                           f"--sample {seed.hex()[:8]}.. {r} {S} {k}",
                           f"{out.strip()!r}, golden {want!r}", quiet=True)
+            record(None, args, None, ["accepted", [want]],
+                   f"--sample {r} {S} {k}")
     print(f"  ok    --sample equals cert.sample on {grid} points of the grid",
           flush=True)
     for label, a, b in (
@@ -599,6 +608,7 @@ def section_tool(work):
         agree, why = same(g, tool_verdict(rc, out, err))
         check(agree, f"--sample, {label}: refused choice as cert.sample is",
               why)
+        record(None, ["--sample"] + a, None, list(g), f"--sample, {label}")
     # usage: every refusal a command line or a file can cause
     lor = work / "own" / "l.cert"
     lor.write_bytes(b"cft-certificate 1\n")
@@ -636,16 +646,89 @@ def section_tool(work):
             ("a boundary file misspelt", ["--cert", lor, "--states",
                                           d / "states-bad"], None),
             ("CFT_AUDIT_PLANT=bogus", ["--cert", lor],
-             {"CFT_AUDIT_PLANT": "bogus"})):
-        rc, out, err = run_tool(args, env)
+             {"CFT_AUDIT_PLANT": "bogus"}),
+            # the census's (audit_plants.py): each of these reaches a check
+            # no case above does, or a site whose own cases another check
+            # would decide the same way
+            ("--read twice", ["--read", "--read", "--cert", lor], None),
+            ("--sample twice", ["--sample", "00" * 32, "0", "4", "2",
+                                "--sample", "00" * 32, "0", "4", "2"], None),
+            ("--stream before any --run", ["--cert", lor, "--stream", "a",
+                                           lor], None),
+            ("--seed with no value, last", ["--read", "--cert", lor,
+                                            "--seed"], None),
+            ("--stream ab", ["--cert", lor, "--run", "0", "--stream", "ab",
+                             lor], None)):
+        rc, out, err = run_tool(args, env, cwd=d)
         t = tool_verdict(rc, out, err)
         check(t[0] == "refused" and t[1][0] == "usage" and rc == 64 and
               t[1][2] == ("-", "-", "-", "-") and out == "",
               f"refused usage (exit 64), nothing on stdout: {label}",
               f"{t}")
-    # a seed the operating system draws: different each audit, printed,
-    # and the same verdict again when it is handed back
-    return
+        record(d, args, env, ["refused", ["usage", 64, ["-"] * 4]],
+               f"usage: {label}")
+    census_controls(work)
+
+
+def census_controls(work):
+    """Golden against tool on inputs no test_cert.py call hands the audit,
+    each for a check the plant census (audit_plants.py) found no case to
+    reach, or found another check to decide the same way for the cases
+    that reach it:
+      - a stream one byte past whole elements whose whole ones are the
+        run's lanes, and a state one byte past its size: only the
+        whole-element check refuses these, where 23 and 71 bytes are
+        refused by the length checks too;
+      - a stream for a run the certificate does not have, handed;
+      - a program whose scratch block goes in as 2 and out as 1, and a
+        segment-shaped one that deposits, AUDITED: test_cert.py holds these
+        two reasons through the writer (run_chain) only."""
+    import test_cert as T
+    from cft_golden import asm
+    print("== 1c. controls the plant census asked for", flush=True)
+    data, progs, states = T.example_certificate()
+    fmt, lanes = "fp64", 2
+    n = 0
+
+    def one(label, dat=data, salt=T.SALT, prg=progs, **kw):
+        nonlocal n
+        n += 1
+        d = work / "census" / f"c{n}"
+        if d.exists():
+            shutil.rmtree(d)
+        d.mkdir(parents=True)
+        kw.setdefault("states", states)
+        g = golden(cert.audit, dat, salt, prg, **kw)
+        args = translate(d, dat, salt, programs=prg, **kw)
+        hold(args, None, g, f"{label}: {describe(g)}", d, quiet=False)
+    whole = cert.state_bytes(fmt, [0] * lanes)
+    one("a stream of whole elements and one byte, the lanes long",
+        streams={0: (whole + b"\x00", None, None)})
+    s0 = cert.state_bytes(fmt, states[0][0])
+    one("a state of one byte past its size",
+        states={0: {**states[0], 0: s0 + b"\x00"}, 1: states[1]})
+    one("a stream handed for a run the certificate does not have",
+        streams={5: (whole, None, None)})
+    # two programs that are not segments, audited
+    for label, src in (
+            ("scratch in 2, out 1", ".format   fp64\n.deposits 0\n"
+             ".scratch  in 2\n.scratch  out 1\nldl  r3, 0\nstl  r3, 0\n"
+             "halt\n"),
+            ("a segment's scratch that deposits", ".format   fp64\n"
+             ".deposits 1\n.scratch  in 1\n.scratch  out 1\nldl  r3, 0\n"
+             "deposit r3\nstl  r3, 0\nhalt\n")):
+        img = asm.assemble(src, "shape")
+        h = hashlib.sha256(b"a start").hexdigest()
+        e = hashlib.sha256(b"an end").hexdigest()
+        zero = cert.stream_hash(None, "a", bytes(8))
+        run = cert.Run("main", fmt, cert.sha256(img), cert.sha256(img), 1, 1,
+                       (zero, cert.stream_hash(None, "b", bytes(8)),
+                        cert.stream_hash(None, "c", bytes(8))), (),
+                       (cert.Segment(h, e, 0, 0),), e)
+        c = cert.encode(cert.Certificate("open", None, T.IDENTITY, (run,),
+                                         ()))
+        one(f"{label}, audited", dat=c, salt=None, prg={0: (img, None)},
+            states=None)
 
 
 def drawn_seed_checks(work, case):
@@ -894,15 +977,17 @@ def section_narrow(work, cc, lib_src):
         acc = next(i + 1 for i, ln in enumerate(
             cert.body_of(data).decode().split("\n")) if
             ln.startswith("accuracy "))
-        check(t == ("refused", ("build-width", 78, (str(acc), "-", "-",
-                                                    "-"))),
-              f"the page's example (accuracy 2): refused build-width, exit "
-              f"78, at its accuracy line {acc}", f"{t}")
-        rc, out, err = run_tool(["--read"] + args[:2] +
-                                ["--salt", e / "salt"], cwd=e)
+        want = ("refused", ("build-width", 78, (str(acc), "-", "-", "-")))
+        check(t == want, f"the page's example (accuracy 2): refused "
+              f"build-width, exit 78, at its accuracy line {acc}", f"{t}")
+        record(e, args, None, [want[0], list(want[1])], "narrow: the page's "
+               "example refused build-width", binary="narrow")
+        args = ["--read"] + args[:2] + ["--salt", e / "salt"]
+        rc, out, err = run_tool(args, cwd=e)
         t = tool_verdict(rc, out, err)
-        check(t[0] == "refused" and t[1][0] == "build-width",
-              "its --read, the same", f"{t}")
+        check(t == want, "its --read, the same", f"{t}")
+        record(e, args, None, [want[0], list(want[1])], "narrow: --read of "
+               "the page's example refused build-width", binary="narrow")
         # the same runs with accuracy 0: audited in full
         c = cert.parse(data)
         data0 = cert.encode(dataclasses.replace(c, accuracy=()))
@@ -910,8 +995,12 @@ def section_narrow(work, cc, lib_src):
         e0.mkdir(exist_ok=True)
         g = golden(cert.audit, data0, T.SALT, progs, states=states)
         args = translate(e0, data0, T.SALT, programs=progs, states=states)
-        hold(args, None, g, "the same runs with accuracy 0: the narrow build "
-             "audits them in full, the golden verdict", e0, quiet=False)
+        rc, out, err = run_tool(args, cwd=e0)
+        agree, why = same(g, tool_verdict(rc, out, err))
+        check(agree, "the same runs with accuracy 0: the narrow build audits "
+              "them in full, the golden verdict", why)
+        record(e0, args, None, list(g), "narrow: accuracy 0, audited in full",
+               binary="narrow")
     finally:
         TOOL = wide
 
