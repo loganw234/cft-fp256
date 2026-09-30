@@ -3738,6 +3738,110 @@ Not in step 2: signing; per-lane flags (a step-4 hardware ask); and a
 bound for any method that has no rigorous remainder.
 
 
+### Steps 4 and 7: the C auditor and golden certificates (plan of record, 2026-09-29)
+
+Logan chose this round on 2026-09-29 ("Go with your recommendation of
+the C auditor and golden certificates"), with revision 7's quad still
+building. Nothing in it exists yet unless it says so.
+
+**What the tree has.**
+- **The golden side.** docs/CERTIFICATES.md is the whole of version 1.
+  python/cft_golden/cert.py has the golden reader, writer and audit
+  (`cert.audit`, ten steps), held by python/tests/test_cert.py's
+  controls.
+- **The C writer.** cft-segrun, host/tools/segrun.c, is held byte for
+  byte to the golden writer by host/tests/segrun_check.py, in the
+  `programs` stage, and by hw/card-segrun.sh on the card.
+- **What libcft already offers an auditor:**
+  - `cft_open_ex`, a software handle at any depth, for re-runs at the
+    certified depth;
+  - `cft_program_load` and `cft_program_run_ex`;
+  - `cft_sha256`;
+  - `cft_convert`, convertFormat, for "exactly widened";
+  - `cft_to_decimal_char`, correctly rounded at any digit count, so exact
+    with enough digits, for an element's decimal;
+  - the 2,048-bit bigint (host/src/bigint.h) the width rule was sized
+    for ("The width rule": 2 x 1,023 + 1 bits fit, with one to spare).
+
+**The rule this round adds, inherited from step 2.** An auditor's
+memory and time are bounded by what it is HANDED, never by a number a
+certificate STATES.
+- Today the golden audit builds three +0 streams of the certificate's
+  `lanes` before any hash check (`_streams_or_zero`). So `lanes
+  4294967295` commits about 100 GB (verifier-C5).
+- Allocating nothing would not be enough. The +0 stream's hash covers
+  lanes x width bytes, so a certificate stating 10^12 lanes costs
+  terabytes of hashing at step 5 even if it holds none of them.
+- The design goes to the lead before either auditor builds it: which
+  check bounds `lanes` (and a state's size) by what was handed, where
+  it stands in "The order of the checks", and under which name it
+  refuses. Both auditors then implement the same rule, in the same
+  order, with the same name, and CERTIFICATES.md states it.
+
+**Parcels.**
+1. **P1: `cft-audit`, the audit in C** (host/tools/, beside cft-segrun,
+   in `make -C host all`). It carries out every step of "The audit", the
+   strict reader included, in the page's order, with each refusal's
+   name, exit code and location, and the verdict the page describes.
+   - Re-runs go through libcft's software backend at the certified
+     depth.
+   - Exact values go through the default bigint. A narrower build
+     refuses a certificate that carries one, as "The width rule" says.
+   - Its gate runs `cft-audit` and `cert.audit` on the same inputs and
+     requires the same verdict: the name, the code and the location.
+     The inputs are every control test_cert.py makes, every certificate
+     segrun_check makes, and the golden corpus (P2), in full and sampled
+     under a fixed seed.
+   - It runs in a runner stage. Stage and budget are proposed to the
+     lead first.
+   - No ABI change is expected. One needed goes to the lead.
+2. **P2: golden certificates, the step-7 corpus.** It gets a directory
+   of its own, with a manifest: each case's program (by
+   programs/MANIFEST name), bank, initial state, mode, segments, steps,
+   runs and depth, the committed certificate, and its boundary states'
+   digests.
+   - Cases, at least:
+     - the three ODE programs, open, with half-step and wider runs;
+     - one keyed case, under the page's example salt, which is public
+       and so a test salt only;
+     - flagstep's flags and STATUS;
+     - a revision-8 program, which only the software backend runs;
+     - a segment program whose answer depends on the scratch depth,
+       certified at 256 and at 2,048. cft-segrun then needs
+       `--scratch-depth` (software only, as positive-run has it).
+     - Accuracy entries, which only the golden writer makes before
+       step 5, on the cases marked so.
+   - Its gate: the golden writer remakes every case byte for byte, with
+     the identity lines taken from the committed certificate. cft-segrun
+     remakes every case it can, byte for byte but for `build-id` and
+     the hash line. Both auditors accept every case, in full from the
+     initial states.
+   - CERTIFICATES.md gains "Golden certificates": what an implementation
+     must reproduce (the run blocks and accuracy values) and what names
+     the implementation (the identity lines), so the corpus is a
+     conformance test for another library or a tile.
+3. **P3: the rule in the golden audit.**
+   - It proposes the design of the rule above, first, for both auditors.
+   - It builds it in cert.py and states it in CERTIFICATES.md.
+   - It holds it with controls: a certificate stating 10^12 lanes, and
+     2^63 - 1, refused by name within a second, with memory flat.
+   - P1 builds the same rule in C, from the approved design.
+
+**How it is held.**
+- A verifier for each parcel, and for the lead's own commits.
+- Agents run quick tests only: golden unit tests, the gate on the
+  desktop, and plants. The desktop is Logan's to use today: one
+  container at a time, and `docker ps` first. amd-arc-box holds the quad
+  build until it lands. The long runs are the lead's.
+- Logan's send-back rule. Anything the hardware or the page cannot do
+  is refused by name.
+
+**What it is not.** Step 5's accuracy entries in C, the remote
+protocol's CAPS2, a signature, and a card-side auditor. The C auditor
+re-runs on libcft, so it is independent of the golden model, and for a
+certificate libcft's software backend made, only the golden auditor is
+independent of the producer ("What an audit proves").
+
 ### Revision 7: step 4's RTL revision (plan of record, 2026-09-29)
 
 Step 4 of the controlled-divergence work order is the RTL revision.
