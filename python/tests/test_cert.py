@@ -26,11 +26,15 @@ for name, so those three cannot drift from the code. The rest of the
 page is prose, held by review.
 """
 
+import contextlib
 import dataclasses
 import hashlib
+import math
 import re
 import struct
 import sys
+import time
+import tracemalloc
 import types
 from fractions import Fraction
 from pathlib import Path
@@ -2860,6 +2864,396 @@ def test_a_seed_handed_is_a_seed_whatever_is_asked(lor):
     for bad in (bytes(31), bytes(33), "seed"):
         refused("choice", cert.audit, lor.data, SALT, lor.progs,
                 states=lor.states, seed=bad)
+
+
+# ---- what an audit spends (the audit round, P3, 2026-09-29) -----------------
+#
+# The rule step 2 left: an auditor's memory and time are bounded by what it
+# is handed, never by a number a certificate states (docs/CERTIFICATES.md,
+# "What an audit spends"). A run's `lanes` is the one number no line pays
+# for. A run is BOUNDED by a stream handed for it, or by a state for one of
+# its boundaries 0..S holding at least `lanes` elements, and only a bounded
+# run's +0 streams are built and hashed (step 5), and only a bounded main
+# run's streams are widened for a wider run (step 8). An unbounded run
+# costs nothing and cannot be accepted.
+
+HUGE_LANES = (10 ** 12, (1 << 63) - 1)
+# "Within a second with memory flat" (the lead's brief), measured per
+# audit: its time, and the peak of tracemalloc's traced memory over the
+# call alone. Flat means under SPEND_LIMIT, and within FLAT_SLACK of the
+# same audit's at 10 lanes, which is refused on the same path: the stated
+# number moves by eleven orders of magnitude and the memory does not.
+SPEND_SECONDS = 1.0
+SPEND_LIMIT = 4 << 20
+FLAT_SLACK = 64 << 10
+
+
+def _vm_bytes():
+    """This process's address space on Linux (/proc/self/status VmSize),
+    or None where there is no such file."""
+    try:
+        with open("/proc/self/status", encoding="ascii") as f:
+            for ln in f:
+                if ln.startswith("VmSize:"):
+                    return int(ln.split()[1]) * 1024
+    except OSError:
+        return None
+    return None
+
+
+@contextlib.contextmanager
+def no_runaway(seconds=60):
+    """The net under the huge-`lanes` controls, so that a regression that
+    spends by `lanes` fails by name rather than loading the machine:
+    - on Linux, an address-space limit 4 GiB above the process's own
+      (RLIMIT_AS, the soft limit only), under which an allocation sized by
+      `lanes` fails as MemoryError, where overcommit (WSL's mode 1) would
+      let [zero] * 10^12 through and then touch it; on Windows the commit
+      limit refuses such an allocation by itself;
+    - faulthandler's watchdog, which ends a run that hashes forever after
+      `seconds`, with every thread's traceback, rather than hang the
+      stage."""
+    import faulthandler
+    faulthandler.dump_traceback_later(seconds, exit=True)
+    restore = None
+    try:
+        import resource
+    except ImportError:
+        resource = None
+    vm = _vm_bytes() if sys.platform.startswith("linux") else None
+    if resource is not None and vm is not None:
+        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        cap = vm + (4 << 30)
+        for lim in (soft, hard):
+            if lim != resource.RLIM_INFINITY:
+                cap = min(cap, lim)
+        resource.setrlimit(resource.RLIMIT_AS, (cap, hard))
+        restore = (soft, hard)
+    try:
+        yield
+    finally:
+        faulthandler.cancel_dump_traceback_later()
+        if restore is not None:
+            resource.setrlimit(resource.RLIMIT_AS, restore)
+
+
+def spent(name, fn, *a, **k):
+    """fn(*a, **k) must be refused by NAME. -> (the refusal, its seconds,
+    the peak of tracemalloc's traced memory over the call alone, above
+    what was traced before it)."""
+    was = tracemalloc.is_tracing()
+    if not was:
+        tracemalloc.start()
+    tracemalloc.reset_peak()
+    base = tracemalloc.get_traced_memory()[0]
+    t0 = time.perf_counter()
+    try:
+        e = refused(name, fn, *a, **k)
+    finally:
+        dt = time.perf_counter() - t0
+        peak = tracemalloc.get_traced_memory()[1] - base
+        if not was:
+            tracemalloc.stop()
+    return e, dt, peak
+
+
+def _one_run(lor, lanes):
+    """The fixture's main run alone, stating `lanes`."""
+    return with_runs(lor, [dataclasses.replace(lor.runs[0], lanes=lanes)])
+
+
+def _three_runs(lor, lanes):
+    """All three of the fixture's runs stating `lanes`, so that every
+    relation holds and the wider run's reaches the main run's streams."""
+    return cert.encode(keyed([dataclasses.replace(r, lanes=lanes)
+                              for r in lor.runs], ()))
+
+
+def test_a_huge_lanes_costs_nothing_and_is_refused_by_name(lor):
+    """`lanes` 10^12 and 2^63 - 1 - on the main run alone, and on all three
+    runs - audited in full and sampled, with the fixture's states handed
+    (9 elements each) and with none: each refused by name, at its place,
+    within a second, its traced memory flat against the same audit at 10
+    lanes. With states, step 7 finds a state too short to be the run's
+    (`state-shape`, run 0 boundary 0). With none, the audit needs a state
+    it was not handed (`state-missing`): at step 9 for the main run alone,
+    and at step 8 for the three, where the wider run needs the main run's
+    initial state widened - its streams, which it would hash first, were
+    never built. Before this rule the first of these committed about
+    8 x 10^12 bytes (verifier-C5 met 4,294,967,295 lanes for real)."""
+    seed = bytes(32)
+    first = cert.sample(seed, 0, S, 1)[0]
+    P0 = {0: lor.progs[0]}
+    sampled3 = {r: ("sample", 1) for r in range(3)}
+    got = {}
+    with no_runaway():
+        for L in (10,) + HUGE_LANES:
+            one, three = _one_run(lor, L), _three_runs(lor, L)
+            cases = [
+                ("one, full, states", one, P0, {"states": {0: lor.states[0]}},
+                 "state-shape", (0, 0)),
+                ("one, full, none", one, P0, {}, "state-missing", (0, 0)),
+                ("one, sampled, states", one, P0,
+                 {"states": {0: lor.states[0]}, "choose": {0: ("sample", 1)},
+                  "seed": seed}, "state-shape", (0, 0)),
+                ("one, sampled, none", one, P0,
+                 {"choose": {0: ("sample", 1)}, "seed": seed},
+                 "state-missing", (0, first)),
+                ("three, full, states", three, lor.progs,
+                 {"states": lor.states}, "state-shape", (0, 0)),
+                ("three, full, none", three, lor.progs, {}, "state-missing",
+                 (0, 0)),
+                ("three, sampled, states", three, lor.progs,
+                 {"states": lor.states, "choose": sampled3, "seed": seed},
+                 "state-shape", (0, 0)),
+                ("three, sampled, none", three, lor.progs,
+                 {"choose": sampled3, "seed": seed}, "state-missing", (0, 0)),
+            ]
+            for what, data, progs, kw, name, where in cases:
+                e, dt, peak = spent(name, cert.audit, data, SALT, progs, **kw)
+                assert (e.run, e.segment) == where, (L, what, e.message)
+                if what.startswith("three") and name == "state-missing":
+                    # step 8's: the wider run's start, not a re-run's
+                    assert "exactly widened" in e.message, e.message
+                assert dt < SPEND_SECONDS, (L, what, dt)
+                assert peak < SPEND_LIMIT, (L, what, peak)
+                got[(L, what)] = peak
+    for (L, what), peak in got.items():
+        assert abs(peak - got[(10, what)]) <= FLAT_SLACK, (
+            f"{what}: {peak} bytes at lanes {L}, {got[(10, what)]} at 10")
+
+
+def test_the_rules_place_in_the_order(lor):
+    """Step 5's rule against its neighbours, at lanes 10^12: the `streams`
+    argument's shape before any run; a stream handed held by its LENGTH
+    before anything is built beside it (the old order built the +0 streams
+    first, so a stream of 3 beside 10^12 lanes committed); step 4 before
+    it; and step 6 after it, reached having spent nothing."""
+    r0 = dataclasses.replace(lor.runs[0], lanes=10 ** 12)
+    one = with_runs(lor, [r0])
+    P0 = {0: lor.progs[0]}
+    hh = asm.assemble((PROGRAMS / "henonheiles-lf-fp64.cfta").read_text(
+        encoding="utf-8"), "henonheiles-lf-fp64")
+    ch = list(r0.chain)
+    ch[2] = dataclasses.replace(ch[2], start=ch[1].start)
+    with no_runaway():
+        e = refused("stream", cert.audit, one, SALT, P0, streams=[None])
+        assert (e.run, e.segment) == (None, None)
+        e = refused("stream", cert.audit, one, SALT, P0,
+                    streams={0: ([0] * LANES, None, None)})
+        assert e.run == 0 and "holds 3 values" in e.message, e.message
+        refused("image-digest", cert.audit, one, SALT, {0: (hh, lor.bank)})
+        e = refused("continuity", cert.audit, with_runs(lor, [
+            dataclasses.replace(r0, chain=tuple(ch))]), SALT, P0)
+        assert (e.run, e.segment) == (0, 2)
+
+
+def test_a_run_is_bounded_by_what_was_handed_for_it(lor):
+    """"At least `lanes` elements", at its edge, by values and by bytes: the
+    initial state's 9 elements (72 bytes) bound 9 lanes - whose +0 streams
+    are then built, and differ from the certified 3-lane ones, `stream` -
+    and not 10, whose run is left to step 7, `state-shape`; 71 bytes bound
+    8 lanes and not 9. The output's boundary S bounds as boundary 0 does,
+    and a boundary past S bounds nothing. And per run: a half-step run
+    stating 9 lanes is not bounded by the main run's 9-element states, so
+    its streams are left unchecked and its relation names it (`aux-lanes`)
+    - bounded by any run's states, it would be `stream`."""
+    whole = cert.state_bytes("fp64", lor.init)
+    assert len(whole) == 72
+    P0 = {0: lor.progs[0]}
+    for lanes, b, state, name in (
+            (9, 0, lor.init, "stream"), (10, 0, lor.init, "state-shape"),
+            (9, 0, whole, "stream"), (10, 0, whole, "state-shape"),
+            (8, 0, whole[:-1], "stream"), (9, 0, whole[:-1], "state-shape"),
+            (9, S, lor.st[0][S], "stream"),
+            (10, S, lor.st[0][S], "state-shape")):
+        e = refused(name, cert.audit, _one_run(lor, lanes), SALT, P0,
+                    states={0: {b: state}})
+        assert e.run == 0, (lanes, b, len(state), e.message)
+        assert e.segment == (None if name == "stream" else b), e.message
+    e = refused("state-shape", cert.audit, _one_run(lor, 10), SALT, P0,
+                states={0: {S + 1: lor.init + lor.init[:3]}})
+    assert (e.run, e.segment) == (0, None), e.message
+    assert f"a state was handed for {S + 1}" in e.message, e.message
+    r0, r1, r2 = lor.runs
+    e = refused("aux-lanes", cert.audit, cert.encode(keyed(
+        (r0, dataclasses.replace(r1, lanes=9), r2), ())), SALT, lor.progs,
+        states={0: lor.states[0], 2: lor.states[2]})
+    assert e.run == 1, e.message
+
+
+BLOCKY = """.format   fp64
+.deposits 0
+.scratch  in 3
+.scratch  out 3
+.scratch  strict
+.const    ONE   = 1.0
+.const    THIRD = 0x3fd5555555555555
+; slot 0 a counter c, slot 1 a value x, slot 2 an index i (its bits).
+; A lane leaves the loop when c reaches 0 - early, in a block of lanes
+; that all do. x x overflows where x is huge. x is stored at scratch
+; slot i and read back, doubling x, where i is inside the depth; past
+; it (strict) the store and the load are reported, STATUS[5], and x
+; stays.
+ldl    r3, 0
+ldl    r4, 1
+ldl    r9, 2
+repeat 40
+  sub    r3, r3, ONE
+  mul    r4, r4, THIRD
+  setact r3
+endrep
+actall
+mul    r5, r4, r4
+stx    r4, r9
+ldx    r6, r9
+add    r4, r4, r6
+stl    r3, 0
+stl    r4, 1
+halt
+"""
+
+
+def _blocky_start(n=130):
+    """Lane i: c = i mod 45 + 1, x = 1 + i/64, i = 300 + i - except the
+    last two lanes, the third block's, whose c is 2 and 3 (so that block
+    leaves its loop early), and the last lane's x of 1e300 (it alone
+    overflows) and index 600 (it alone is past 512)."""
+    init = []
+    for i in range(n):
+        c, x, ix = i % 45 + 1, 1 + i / 64, 300 + i
+        if i >= n - 2:
+            c = i - (n - 2) + 2
+        if i == n - 1:
+            x, ix = 1e300, 600
+        init += [dec64(repr(float(c))), dec64(repr(x)), ix]
+    return init
+
+
+def test_the_audit_re_runs_a_segment_in_blocks_of_64_lanes():
+    """The golden audit re-runs a segment BLOCK_LANES lanes at a time
+    (cert.run_segment), as libcft and the tile do, so that a re-run holds
+    one block's scratch at the certified depth, not every lane's (the
+    lead's decision, 2026-09-29). By P3 (docs/SEQUENCER.md) that is the
+    dense run exactly. Held here at a depth past 256, over three blocks
+    (64, 64 and 2 lanes) of a strict program whose last block leaves its
+    loop early and whose last lane alone overflows and indexes past the
+    depth: the end state, the flag word and STATUS equal the dense run's,
+    and the audit accepts a chain the dense writer made. One block's
+    scratch is what it holds: 256 one-slot lanes at 32,768 slots peak at
+    one block's 16 MiB (measured), where the dense run's is 64."""
+    seq = cert.seq
+    img = asm.assemble(BLOCKY, "blocky")
+    prog = seq.Program.from_bytes(img, scratch_depth=512)
+    init = _blocky_start()
+    n = len(init) // 3
+    z = [0] * n
+    dense = seq.run(prog, z, z, z, scratch_in=init, scratch_depth=512)
+    out, flags, status = cert.run_segment(prog, z, z, z, init,
+                                          scratch_depth=512)
+    assert out == list(dense.scratch_out)
+    assert (flags, status) == (dense.flags, dense.status)
+    # what makes it a test of blocks: the third block alone overflows and
+    # is past the depth, and it leaves its loop before the others do
+    blocks = [seq.run(prog, z[lo:hi], z[lo:hi], z[lo:hi],
+                      scratch_in=init[3 * lo:3 * hi], scratch_depth=512)
+              for lo, hi in ((0, 64), (64, 128), (128, n))]
+    assert [bool(b.flags & 4) for b in blocks] == [False, False, True]
+    assert [b.status for b in blocks] == [0, 0, seq.STATUS_SCRATCH_RANGE]
+    assert dense.status == seq.STATUS_SCRATCH_RANGE and dense.flags & 4
+    assert (blocks[2].insns_executed < blocks[0].insns_executed
+            == blocks[1].insns_executed == dense.insns_executed)
+    # and the depth is read: at 256 every index is past it, other answers
+    assert list(seq.run(prog, z, z, z, scratch_in=init,
+                        scratch_depth=256).scratch_out) != out
+    # the audit, blocks against the dense writer's chain, at the depth its
+    # run states
+    st, rs = cert.run_chain(img, None, init, 2, scratch_depth=512)
+    run = cert.certify_run("main", img, None, SALT, st, rs, steps=40,
+                           scratch_depth=512,
+                           parameters=(("scratch-depth", 512),))
+    v = cert.audit(cert.encode(keyed((run,), ())), SALT, {0: (img, None)},
+                   states={0: {0: init}})
+    assert v.exit_code == 0 and len(v.runs[0]["rerun"]) == 2
+    # one block's scratch: 256 one-slot lanes at 32,768 slots
+    small = asm.assemble(".format   fp64\n.deposits 0\n.scratch  in 1\n"
+                         ".scratch  out 1\n.const    ONE = 1.0\n"
+                         "ldl  r3, 0\nadd  r3, r3, ONE\nstl  r3, 0\nhalt\n",
+                         "one-slot")
+    deep = seq.Program.from_bytes(small, scratch_depth=32768)
+    z = [0] * 256
+    was = tracemalloc.is_tracing()
+    if not was:
+        tracemalloc.start()
+    tracemalloc.reset_peak()
+    base = tracemalloc.get_traced_memory()[0]
+    try:
+        cert.run_segment(deep, z, z, z, [sf.one_bits(F64)] * 256,
+                         scratch_depth=32768)
+        peak = tracemalloc.get_traced_memory()[1] - base
+    finally:
+        if not was:
+            tracemalloc.stop()
+    assert peak < 24 << 20, f"{peak} bytes: more than one block's scratch"
+
+
+def test_a_rationals_digits_are_held_to_the_rule_first(lor):
+    """A rational's token is read in the page's order (the lead's decision,
+    2026-09-29): its spelling; then each part's digits against the width
+    rule, before anything is converted or reduced; then zero's one
+    spelling; last, lowest terms. So a long token that is not in lowest
+    terms is `width`, where the golden reader said `malformed` - a C
+    auditor on a 2,048-bit bigint cannot hold it, let alone reduce it -
+    and a short one is `malformed` as before. No control before this one
+    held a long reducible token (the round's ledger, P3.md). The digits'
+    edge: 256 hex digits whose first is 7 are 1,023 bits, whose first is
+    8 are 1,024, and 257 are past it whatever they begin with."""
+    L = lines_of(lor.data)
+    t = find(L, "term 1/1 s0 s0")
+
+    def term(tok):
+        return rebuilt(L[:t] + [f"term {tok} s0 s0"] + L[t + 1:])
+    big = 1 << 1101
+    top = (1 << 1023) - 1
+    for tok, name, why in (
+            (f"{big:x}/2", "width", "by its digits"),
+            (f"2/{big:x}", "width", "by its digits"),
+            (f"-{big:x}/2", "width", "by its digits"),
+            (f"0/{big:x}", "width", "by its digits"),
+            ("4/2", "malformed", "not in lowest terms"),
+            ("0/3", "malformed", "zero is spelled 0/1"),
+            (f"{big + 0xabc:X}/3", "malformed", "one spelling"),
+            (f"0{big:x}/3", "malformed", "one spelling"),
+            (f"{top:x}/2", None, None),
+            (f"1/{top:x}", None, None),
+            (f"-{top:x}/3", None, None),
+            (f"{top + 1:x}/3", "width", "by its digits"),
+            (f"1/{top + 1:x}", "width", "by its digits"),
+            (f"{(top + 1) << 1:x}/3", "width", "by its digits")):
+        if name is None:
+            assert cert.parse(term(tok)).accuracy[2].terms[0][0] == Fraction(
+                *(int(x, 16) for x in tok.split("/")))
+            continue
+        e = refused(name, cert.parse, term(tok))
+        assert e.line == t + 1 and why in e.message, (tok[:20], e.message)
+    assert len(f"{top:x}") == len(f"{top + 1:x}") == 256
+    assert len(f"{(top + 1) << 1:x}") == 257
+
+
+def test_the_escape_probability_of_one_wrong_segment_is_linear():
+    """For f = 1, the value the verdict prints, the escape probability is
+    computed as (S - k)/S, reduced (the lead's decision, 2026-09-29):
+    equal to the binomials' ratio, held here at every k of every S to 40,
+    and linear where they are not - two binomials of 200,000 and their gcd
+    took 0.83 s on the desktop (measured, 2026-09-29), (S - k)/S takes
+    microseconds, so at 400,000 a quarter of a second is ample margin."""
+    for S_ in range(1, 41):
+        for k in range(1, S_ + 1):
+            assert cert.escape_probability(S_, k, 1) == Fraction(
+                math.comb(S_ - 1, k), math.comb(S_, k)) == Fraction(S_ - k, S_)
+    t0 = time.perf_counter()
+    assert cert.escape_probability(400_000, 200_000, 1) == Fraction(1, 2)
+    assert time.perf_counter() - t0 < 0.25
 
 
 # ---- the specification, held to the code ------------------------------------

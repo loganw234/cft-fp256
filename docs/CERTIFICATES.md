@@ -183,7 +183,9 @@ one byte string.
   - zero is `0/1`;
   - a zero denominator is refused.
   So one third is `1/3`, minus one half `-1/2`, and 2/4, 0/3, -0/1,
-  +1/3, 1/-3, 01/3 and 1/A are all refused as malformed.
+  +1/3, 1/-3, 01/3 and 1/A are all refused as malformed. A token whose
+  digits alone are past the width rule is refused `width` before its
+  terms are reduced (see "The width rule").
 - **Word:** one of the fixed words the line's definition lists, in
   lowercase.
 - **Name:** a label or a parameter's name: a lowercase letter, then
@@ -208,6 +210,19 @@ refused, `width`, by every writer and every reader, the golden model's
 included, and nothing past it is ever approximated: a writer asked for a
 rounded or enclosed value of an exact value past the rule refuses it,
 as it would refuse the exact value.
+
+**A rational's token is held to it by its digits first.** The reader
+takes a rational's token in this order: its spelling (`malformed`);
+then each part's digits against the rule, before anything is converted
+or reduced (`width`); then zero's one spelling, 0/1, and last lowest
+terms (`malformed`). A part spelt without leading zeros is past 1,023
+bits when it has more than 256 hex digits, or 256 whose first is 8 or
+more. So a long token that is not in lowest terms is `width`, and a
+short one `malformed`: an auditor whose exact arithmetic is 2,048 bits
+wide cannot hold a longer token, let alone reduce it, and the golden
+reader's reduction of one would cost the square of its length (the
+lead's decision, 2026-09-29). A token in lowest terms has its value's
+own parts, so its digits decide the rule for its value too.
 
 **Its reach over a value's elements.**
 - An ENCLOSURE's two ends are compared with the exact value, an exact
@@ -491,10 +506,10 @@ scratch_depth=depth)`, where:
 - the streams are the run's;
 - the start state is the segment's start;
 - `depth` is the scratch depth the run had (revision 7, 2026-09-29):
-  `1 << CAPS2[3:0]` when `device-caps` carries CAPS2 with CAPS2[4] set
-  - 256 on the round-2 images, 2,048 on the U50's revision-7 ones - for
-  every run, since a certificate names one device; otherwise the run's
-  `scratch-depth` parameter, where it states one, which is how a
+  `1 << CAPS2[3:0]` when `device-caps` carries CAPS2 with CAPS2[4] set,
+  for every run, since a certificate names one device - 256 on the
+  round-2 images, 2,048 on the U50's revision-7 ones; otherwise the
+  run's `scratch-depth` parameter, where it states one, which is how a
   software handle opened deeper says its depth (the lead's decision,
   2026-09-29); and 256, the model's default, otherwise (`none` for the
   software backend opened plainly; a CAPS word alone; `unknown`). A
@@ -506,6 +521,18 @@ scratch_depth=depth)`, where:
 Its end state is the run's `scratch_out`, its flag word the run's sticky
 IEEE flags (invalid 1, divide-by-zero 2, overflow 4, underflow 8,
 inexact 16) and its STATUS the run's STATUS word.
+
+**An auditor may compute a segment a block of lanes at a time**, and
+the golden auditor does, 64 lanes to a block as libcft's software
+backend and the tile do (`cert.run_segment`; the lead's decision,
+2026-09-29). Each block is the same run over its own lanes' streams and
+start state. The end state is the blocks' end states in lane order, and
+the flag word and STATUS are the OR of the blocks'. This is the dense
+run exactly. Lanes share nothing but the early exit, which is invisible
+(docs/SEQUENCER.md, P3): every write and every flag is masked by the
+lane's active bit, which is also what lets lanes be split across tiles.
+It is done so that a re-run holds one block's scratch at the certified
+depth, not every lane's (see "What an audit spends").
 
 **A program is a segment** when its whole state travels through the
 scratch block and nothing else comes out:
@@ -780,7 +807,8 @@ accuracy line; each entry; `end`.
 
 **Values.** A line whose key is right and whose values break their
 spelling, their range or their token count is `malformed`. A rational
-past the width rule is `width`. An element's decimal that is not the
+past the width rule is `width`, found by its digits before its terms
+are reduced ("The width rule"). An element's decimal that is not the
 exact decimal of its hex is `decimal`. An entry whose kind is not its
 method's is `accuracy-kind`.
 
@@ -834,6 +862,46 @@ The certificate itself is bytes, and anything else is a TypeError of the
 golden model's Python interface rather than a refusal: a reader in any
 other language reads a file.
 
+**What an audit spends.** An auditor's memory and time are bounded by
+what it is handed - the certificate's bytes, each run's image and bank,
+the states and streams, and its own choice - and never by a number the
+certificate states (the plan's step 4, 2026-09-29).
+- Every count the certificate states is held to the lines or tokens it
+  counts before they are read ("Counts first"), and every index and slot
+  to its range before it is used. So each costs the certificate's own
+  bytes. A rational's token is held to the width rule by its digits
+  before it is reduced ("The width rule").
+- A run's `lanes` is the one number no line pays for: `lanes
+  1000000000000` is one line, and a +0 stream of that run is 10^12
+  elements. So a run is BOUNDED when the audit was handed a stream of
+  it, or a state for one of its boundaries (0 to S) that holds at least
+  `lanes` elements - for a state handed as bytes, at least `lanes` x
+  width/8 bytes. Nothing else bounds a run.
+- The audit builds and hashes a run's +0 streams only when the run is
+  bounded (step 5), and hashes the main run's streams exactly widened
+  only when the main run is bounded (step 8). Every other step that
+  spends on `lanes` reads a state handed, or one re-run from it, that
+  step 7 has held to `lanes` x slots.
+- A run that is not bounded costs nothing, and cannot be accepted. A
+  state handed for it with fewer than `lanes` elements cannot be its
+  state (`state-shape`, step 7), and with none handed its re-runs have
+  no start (`state-missing`, at step 9, or at step 8 when a wider run
+  needs the main run's initial state). So the audit refuses it where it
+  would have anyway, without first spending anything on its `lanes`.
+- The re-runs' scratch depth is stated too, by `device-caps` or a run's
+  `scratch-depth` parameter ("The chain"), and is at most 32,768 slots a
+  lane by this page. An auditor re-runs a segment one block of lanes at
+  a time, as the tile does ("The chain"), so a re-run holds one block's
+  scratch at the certified depth: a constant the page fixes, whatever
+  the lanes. In libcft's software backend a block is 64 lanes of depth
+  x 260 bytes, 545 MB at 32,768 (`host/include/cft.h`); in the golden
+  auditor 64 lanes of depth references, 16 MiB at 32,768 (measured with
+  tracemalloc, 2026-09-29). Its time is at most the lanes handed times
+  the depth, since a block's scratch starts at +0.
+- A size is compared with a stated number exactly. `lanes` x slots and
+  `lanes` x width/8 can pass 2^64, so an implementation divides the size
+  handed rather than multiplying the number stated.
+
 **The order of the checks.** An auditor refuses at the first failure,
 and exits with that refusal's code (the table below), or 0 when every
 check passes.
@@ -861,9 +929,12 @@ check passes.
      segment (else `program-shape`);
    - the bank is exactly the constants the image addresses, or empty for
      an image that carries its own (else `program-image`).
-5. **Streams**, run by run: each of a, b and c, as handed or +0, is n
-   elements of the run's format whose hash is the certified one
-   (`stream`).
+5. **Streams**, run by run. Each stream handed is n elements of the
+   run's format, held first by its length, before anything is built
+   beside it (`stream`). Then, for a bounded run, each of a, b and c, as
+   handed or +0, holds only elements of the format and has the
+   certified hash (`stream`). A run that is not bounded has its +0
+   streams neither built nor checked (see "What an audit spends").
 6. **Continuity**, run by run (`continuity`).
 7. **States handed**, run by run and boundary by boundary: each is
    lanes x slots elements of a boundary that exists (`state-shape`),
@@ -872,8 +943,12 @@ check passes.
    table under "Auxiliary runs", then all of run 2's, and so on
    (`aux-format` through `aux-start`, and `state-missing` when a wider
    run's check needs run 0's initial state). So run 1's `aux-start`
-   comes before run 2's `aux-segments`.
-9. **Re-runs**, run by run, the chosen segments in ascending order.
+   comes before run 2's `aux-segments`. A wider run's `aux-streams`
+   hashes the main run's streams exactly widened only when the main run
+   is bounded. When it is not, no state of the main run was handed, and
+   the wider run's `aux-start` refuses `state-missing`.
+9. **Re-runs**, run by run, the chosen segments in ascending order,
+   each computed a block of lanes at a time ("The chain").
    - Each starts from its start state, handed or re-run into
      (`state-missing` when neither).
    - One the executor refuses to run is refused `program-image`, at its
@@ -923,8 +998,9 @@ none is given. For run r, with S segments and a sample of k:
 - the mode;
 - for each run, which segments were re-run and how they were chosen.
   For a sampled run it gives the seed, the escape probability
-  C(S-f, k)/C(S, k) with its value for f = 1, and the segments the
-  sample drew, ascending, spelt as a named choice's are: `[1, 3]`;
+  C(S-f, k)/C(S, k) with its value for f = 1 - (S - k)/S, reduced,
+  and computed so, in time linear in the digits of S - and the segments
+  the sample drew, ascending, spelt as a named choice's are: `[1, 3]`;
 - each accuracy value, re-derived, with what that proves and what it
   does not;
 - each identity field: unknown, or stated and not checked.
@@ -953,7 +1029,7 @@ accuracy 7, the auditor's own usage 64. The name is the report.
 | `malformed` | 2 | a value breaks its one spelling, its range or its token count, or a line breaks the byte rules; a count out of its own range; a `scratch-depth` parameter that is not a power of two in 1..32,768; a writer asked to certify a run of no segments, handed a certificate object it cannot spell, or handed a field that does not read back as itself (a value of the wrong type); asked to write a value it cannot spell (not a rational, or a form, format or direction the page does not name) |
 | `decimal` | 2 | an element's decimal is not the exact decimal of its hex |
 | `accuracy-kind` | 2 | an entry's kind is not its method's; every `bound` in version 1 |
-| `width` | 3 | an exact value past 1,023 bits in numerator or denominator: written, computed (an element's, a product, a partial sum, a difference), an enclosure's finite end, or one a writer was asked to round or enclose |
+| `width` | 3 | an exact value past 1,023 bits in numerator or denominator: written (a rational's token found so by its digits, before its terms are reduced), computed (an element's, a product, a partial sum, a difference), an enclosure's finite end, or one a writer was asked to round or enclose |
 | `salt-missing` | 4 | the audit of a keyed certificate was handed no salt |
 | `salt-unexpected` | 4 | the audit of an open certificate was handed a salt |
 | `salt-length` | 4 | a salt that is not 32 bytes |
@@ -963,7 +1039,7 @@ accuracy 7, the auditor's own usage 64. The name is the report.
 | `program-image` | 4 | no image was handed, the image does not load, the bank is not the size it addresses, or the executor refuses a re-run; `programs` not in its shape |
 | `program-format` | 4 | the image's format is not the run's |
 | `program-shape` | 4 | the program is not a segment |
-| `stream` | 4 | a stream handed (or +0) is not the one certified, is not the run's lanes long, holds a value that is not an element, or is bytes that are not whole elements; `streams` not in its shape |
+| `stream` | 4 | a stream handed (or +0, in a bounded run) is not the one certified, is not the run's lanes long, holds a value that is not an element, or is bytes that are not whole elements; `streams` not in its shape |
 | `state-shape` | 4 | a state handed is the wrong size, holds a value that is not an element, is bytes that are not whole elements, or is for a run or boundary that does not exist; `states` not in its shape; a writer handed states and segment results that disagree in number, or a start that is not whole lanes |
 | `state-hash` | 4 | a state handed is not the one certified at its boundary |
 | `state-missing` | 4 | a state the audit needs was neither handed nor re-run into |
@@ -1088,7 +1164,44 @@ The controls cover:
   none of the implementation's code, an estimate's last slot, and an
   enclosure's ends held inclusive;
 - the audit's order, every adjacent pair of its steps from the choice
-  to accuracy, and an auditor's seed never the certificate's.
+  to accuracy, and an auditor's seed never the certificate's;
+- the verdict's sampled segments, byte for byte;
+- a run's `scratch-depth` parameter: the depths it can state and those
+  it cannot, read where `device-caps` gives no depth and not where it
+  does, and an auxiliary run held to the main run's depth;
+- what an audit spends (the audit round, 2026-09-29):
+  - `lanes` 10^12 and 2^63 - 1, on the main run alone and on all three
+    runs, in full and sampled audits, with states handed and without.
+    Each is refused by name at its place (`state-shape` at step 7, or
+    `state-missing` at step 9, or at step 8 for a wider run). Each takes
+    under a second, with its memory flat: the peak of tracemalloc's
+    traced memory over the audit call is within 64 KiB of the same
+    audit's at 10 lanes, and under 4 MiB. Measured on the desktop
+    (2026-09-29): at most 9.5 ms and 31.8 KiB traced for each of the
+    24, flat within 0.3 KiB, and the process's peak commit moved by
+    nothing;
+  - the rule's place: the `streams` argument's shape before any run; a
+    stream handed held by its length before anything is built beside
+    it; step 4 before; step 6 after, reached having spent nothing;
+  - "at least `lanes` elements" at its edge, by values and by bytes
+    (9 elements bound 9 lanes and not 10; 71 bytes bound 8 and not 9);
+    the output's boundary S bounding as boundary 0 does, and one past S
+    bounding nothing; and a run bounded by its own states, never by
+    another run's;
+  - a segment computed 64 lanes at a time: its end state, flag word and
+    STATUS equal to the dense run's, at a depth past 256, over three
+    blocks, the last leaving its loop early and alone overflowing and
+    past the depth; and one block's scratch held at a time (256
+    one-slot lanes at 32,768 peak under 24 MiB);
+  - a rational's digits held to the width rule before its terms: a long
+    token not in lowest terms is `width`, a short one `malformed`, and
+    the digits' edge at 256 hex digits, 7 and 8;
+  - the escape probability for f = 1, (S - k)/S, equal to the
+    binomials' ratio at every k of every S to 40, and linear;
+  - every huge-`lanes` control runs under a net, so that a regression
+    fails by name rather than loading the machine: on Linux an
+    address-space limit 4 GiB above the process's own, and everywhere
+    a watchdog that ends a run that hashes forever.
 
 The real audit is `programs/lorenz63-rk4-fp64.cfta` with its classic
 bank:

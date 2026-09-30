@@ -64,6 +64,12 @@ WIDTH = 1023
 SALT_BYTES = 32
 SEED_BYTES = 32
 
+# The lanes an audit re-runs at once (run_segment): libcft's BLOCK_LANES
+# (host/src/program.c), so that each auditor holds one block's scratch
+# at the certified depth - a constant the page fixes, where the dense
+# seq.run holds every lane's (the lead's decision, 2026-09-29).
+BLOCK_LANES = 64
+
 # The domain-separation tags. No tag is a prefix of another - they part
 # at "salt" / "state" / "stream" - so no message in one domain is a
 # message in another. The salt's is fixed by the plan of record; the
@@ -403,6 +409,13 @@ def _index(tok):
         return None
     v = int(tok)
     return v if v <= DEC_MAX else None
+
+
+def _hex_bits(digits):
+    """The bit length of a magnitude spelt in hex with no leading zero
+    (`0` for zero), from its digits alone: four bits a digit past the
+    first, and the first digit's own."""
+    return 4 * (len(digits) - 1) + int(digits[0], 16).bit_length()
 
 
 def rational_text(q):
@@ -748,7 +761,16 @@ class _Reader:
         return tok
 
     def rational(self, tok, what, i=None):
-        """A rational in its one spelling, under the width rule."""
+        """A rational in its one spelling, under the width rule: its
+        spelling first; then each part's DIGITS against the rule, before
+        anything is converted or reduced; then zero's one spelling, 0/1;
+        last, lowest terms (the lead's decision, 2026-09-29). So a long
+        token that is not in lowest terms is `width`, a short one
+        `malformed`: an auditor whose exact arithmetic is 2,048 bits wide
+        cannot hold a longer token, let alone reduce it, and the golden
+        reader's gcd of one would cost the square of its length. In lowest
+        terms a token's parts ARE its value's, so its digits decide the
+        rule for its value too."""
         m = _RAT.fullmatch(tok)
         if not m:
             if re.fullmatch(r"-?[0-9a-f]+/0+", tok):
@@ -758,6 +780,12 @@ class _Reader:
                        "spelling (lowercase, no leading zeros, the sign "
                        "on the numerator, no '+')")
             raise self.malformed(f"{what} {tok[:80]!r}: {why}", i)
+        nb, db = _hex_bits(m.group(1).lstrip("-")), _hex_bits(m.group(2))
+        if nb > WIDTH or db > WIDTH:
+            raise self.fail("width", f"{what} {tok[:40]!r}... is a {nb}-bit "
+                                     f"numerator over a {db}-bit denominator "
+                                     f"by its digits; version 1 allows "
+                                     f"{WIDTH} bits each", i)
         n, d = int(m.group(1), 16), int(m.group(2), 16)
         if n == 0 and d != 1:
             raise self.malformed(f"{what} {tok[:80]!r}: zero is spelled 0/1",
@@ -765,11 +793,7 @@ class _Reader:
         if math.gcd(abs(n), d) != 1:
             raise self.malformed(f"{what} {tok[:80]!r} is not in lowest "
                                  f"terms", i)
-        q = Fraction(n, d)
-        try:
-            return _checked(q, what)
-        except Refusal as r:
-            raise self.fail("width", r.message, i)
+        return Fraction(n, d)
 
     def element(self, fmt, htok, dtok, what):
         """An element, read from the line just taken by expect(): exactly
@@ -1554,7 +1578,12 @@ def sample(seed, run, S, k):
 
 def escape_probability(S, k, f):
     """C(S - f, k) / C(S, k): the chance that a sample of k from S
-    segments misses all of f wrong ones."""
+    segments misses all of f wrong ones. For f = 1, the value the verdict
+    prints, it is (S - k)/S and is computed so: equal to the binomials'
+    ratio, and linear in the digits of S where two binomials of S and
+    their gcd are not (the lead's decision, 2026-09-29)."""
+    if f == 1:
+        return Fraction(S - k, S)
     return Fraction(math.comb(S - f, k), math.comb(S, k))
 
 
@@ -1658,12 +1687,22 @@ def audit(data, salt, programs, states=None, streams=None, choose=None,
                     none handed
       4 programs    per run: image digest, program digest, the image
                     decodes, its format, its shape as a segment
-      5 streams     per run: a, b and c against their hashes
+      5 streams     per run: each handed one's length; then, for a
+                    BOUNDED run, a, b and c against their hashes
       6 continuity  per run: each start is the last end; the output
       7 states      every state handed, against its boundary's hash
       8 relations   per auxiliary run, to the main run
-      9 re-runs     per run, the chosen segments in ascending order
+      9 re-runs     per run, the chosen segments in ascending order,
+                    each in blocks of BLOCK_LANES lanes (run_segment)
      10 accuracy    per entry, re-derived and held to its value
+
+    What it spends is bounded by what it is handed, never by a number the
+    certificate states (docs/CERTIFICATES.md, "What an audit spends"): a
+    run's `lanes` is read against a stream or a state handed for that run
+    before anything of its size is built or hashed, and a run with none
+    such - BOUNDED by nothing handed - costs nothing and cannot be
+    accepted. The scratch depth is at most 32,768 slots by the page, and
+    a re-run holds one block of lanes at it.
 
     programs  {run: (image bytes, bank bytes)}
     states    {run: {boundary: values or bytes}}; boundary 0 is the
@@ -1680,7 +1719,7 @@ def audit(data, salt, programs, states=None, streams=None, choose=None,
     plan = _plan(cert, choose, seed)                            # choice
     check_salt(cert, salt)                                      # 3
     progs = _check_programs(cert, programs)                     # 4
-    strm = _check_streams(cert, salt, progs, streams)           # 5
+    strm = _check_streams(cert, salt, progs, streams, states)   # 5
     _check_continuity(cert)                                     # 6
     known = _check_states(cert, salt, progs, states)            # 7
     _check_relations(cert, salt, progs, strm, known)            # 8
@@ -1776,7 +1815,39 @@ def _check_programs(cert, programs):
     return out
 
 
-def _check_streams(cert, salt, progs, streams):
+def _state_bounds(states, r, S, lanes, esz):
+    """Is run r BOUNDED by a state handed for it (docs/CERTIFICATES.md,
+    "What an audit spends"): one for a boundary 0..S that holds at least
+    `lanes` elements - a list or tuple of that many items, or bytes of at
+    least lanes x esz, found by dividing the size handed, never by
+    multiplying `lanes`? Reads the argument as it was handed and refuses
+    nothing: a state in a shape step 7 refuses bounds nothing, and step 7
+    refuses it by its own name."""
+    if not isinstance(states, dict):
+        return False
+    for key, per in states.items():
+        if not (_is_int(key) and key == r and isinstance(per, dict)):
+            continue
+        for b, s in per.items():
+            if not (_is_int(b) and 0 <= b <= S):
+                continue
+            if isinstance(s, (bytes, bytearray)) and len(s) // esz >= lanes:
+                return True
+            if isinstance(s, (tuple, list)) and len(s) >= lanes:
+                return True
+    return False
+
+
+def _check_streams(cert, salt, progs, streams, states):
+    """Step 5, run by run. Each stream handed is held to the run's lanes
+    by its length first, before anything is built beside it. Then, for a
+    BOUNDED run only - one handed a stream, or a state of at least its
+    lanes (_state_bounds) - the +0 streams are built and every stream is
+    held to its certified hash. An unbounded run's are neither built nor
+    checked, which costs nothing whatever its `lanes` says; it cannot be
+    accepted, since its re-runs have no state of its size to start from
+    (step 7's `state-shape`, or `state-missing` at step 8 or 9). Its
+    entry is None."""
     streams = _run_mapping(cert, streams, "streams", "stream")
     out = []
     for r, run in enumerate(cert.runs):
@@ -1794,10 +1865,17 @@ def _check_streams(cert, salt, progs, streams):
                           _as_values(fmt, s, "stream",
                                      f"run {r} stream {nm}", run=r)
                           for nm, s in zip("abc", given))
-        try:
-            abc = _streams_or_zero(fmt, run.lanes, given)
-        except Refusal as e:
-            raise Refusal("stream", f"run {r}: {e.message}", run=r)
+            for nm, s in zip("abc", given):
+                if s is not None and len(s) != run.lanes:
+                    raise Refusal("stream", f"run {r}: stream {nm} holds "
+                                            f"{len(s)} values; the run has "
+                                            f"{run.lanes} lanes", run=r)
+        handed = given is not None and any(s is not None for s in given)
+        if not handed and not _state_bounds(states, r, len(run.chain),
+                                            run.lanes, fmt.width // 8):
+            out.append(None)
+            continue
+        abc = _streams_or_zero(fmt, run.lanes, given)
         for i, (nm, s) in enumerate(zip("abc", abc)):
             if not all(0 <= v < (1 << fmt.width) for v in s):
                 raise Refusal("stream", f"run {r}: stream {nm} holds a value "
@@ -1980,7 +2058,11 @@ def _check_relations(cert, salt, progs, strm, known):
             if A.streams != main.streams:
                 raise Refusal("aux-streams", f"{where}: its streams are not "
                                              f"the main run's", run=r)
-        else:
+        elif strm[0] is not None:
+            # The main run's streams exactly widened, hashed only when the
+            # main run is bounded (step 5 built them). When it is not, no
+            # state of it was handed - step 7 refused any too short to be
+            # one - and `aux-start` below refuses `state-missing`.
             fmtA = PA["prog"].fmt
             for i, nm in enumerate("abc"):
                 w = [widen(main.fmt, x) for x in strm[0][i]]
@@ -2073,11 +2155,42 @@ def _plan(cert, choose, seed):
     return plan
 
 
+def run_segment(prog, a, b, c, start, *, bank=None,
+                scratch_depth=seq.SCRATCH_D):
+    """One segment, as the audit re-runs it: `seq.run` over the lanes
+    BLOCK_LANES at a time - each block its own lanes' streams and start
+    state - with the end state the blocks' in lane order, and the flag
+    word and STATUS the OR of the blocks'. -> (end state, flags, status).
+
+    This is the dense `seq.run` over every lane, exactly: every write and
+    every flag is masked by the lane's active bit, and the early exit, the
+    one thing lanes share, is invisible (docs/SEQUENCER.md, P3) - the
+    property that lets lanes be split across tiles, and what libcft's
+    software backend and the tile compute, block by block. What it buys:
+    a re-run holds one block's scratch at the certified depth, at most
+    64 x 32,768 slots, where the dense run holds every lane's (the lead's
+    decision, 2026-09-29; docs/CERTIFICATES.md, "What an audit
+    spends")."""
+    n = len(a)
+    per = prog.n_scratch_in
+    out, flags, status = [], 0, 0
+    for lo in range(0, n, BLOCK_LANES):
+        hi = min(n, lo + BLOCK_LANES)
+        res = seq.run(prog, a[lo:hi], b[lo:hi], c[lo:hi], bank=bank,
+                      scratch_depth=scratch_depth,
+                      scratch_in=start[lo * per:hi * per])
+        out += res.scratch_out
+        flags |= res.flags
+        status |= res.status
+        # let this block's scratch go before the next block takes its own
+        del res
+    return out, flags, status
+
+
 def _rerun(cert, salt, progs, strm, known, plan):
     for r, run in enumerate(cert.runs):
         p = progs[r]
         fmt = p["prog"].fmt
-        a, b, c = strm[r]
         for k in plan[r]["rerun"]:
             s = known.get((r, k))
             if s is None:
@@ -2087,29 +2200,32 @@ def _rerun(cert, salt, progs, strm, known, plan):
                               + (", and it is the initial state" if k == 0
                                  else f", and segment {k - 1} was not re-run "
                                       f"to give it"), run=r, segment=k)
+            # A run with a state known is bounded, so step 5 built its
+            # streams: a state held to `lanes` x slots at step 7 holds at
+            # least `lanes` elements.
+            a, b, c = strm[r]
             try:
-                res = seq.run(p["prog"], a, b, c, bank=p["bankv"],
-                              scratch_depth=p["depth"],
-                              scratch_in=s)
+                out, fl, st = run_segment(p["prog"], a, b, c, s,
+                                          bank=p["bankv"],
+                                          scratch_depth=p["depth"])
             except seq.ProgramError as e:
                 raise Refusal("program-image", f"run {r} segment {k}: the "
                                                f"executor refuses it: {e}",
                               run=r, segment=k)
-            out = list(res.scratch_out)
             seg = run.chain[k]
             if state_hash(salt, state_bytes(fmt, out)) != seg.end:
                 raise Refusal("segment-end",
                               f"run {r} segment {k}: re-run from its "
                               f"certified start state, it does not end on "
                               f"its certified end state", run=r, segment=k)
-            if res.flags != seg.flags:
+            if fl != seg.flags:
                 raise Refusal("segment-flags",
                               f"run {r} segment {k}: the re-run raises flags "
-                              f"{res.flags} and the certificate says "
+                              f"{fl} and the certificate says "
                               f"{seg.flags}", run=r, segment=k)
-            if res.status != seg.status:
+            if st != seg.status:
                 raise Refusal("segment-status",
                               f"run {r} segment {k}: the re-run's STATUS is "
-                              f"{res.status} and the certificate says "
+                              f"{st} and the certificate says "
                               f"{seg.status}", run=r, segment=k)
             known.setdefault((r, k + 1), out)
