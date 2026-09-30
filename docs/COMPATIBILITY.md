@@ -844,8 +844,8 @@ hosts only. An image whose header describes more bytes than a 32-bit
 `size_t` holds, where the wrapped length matched the image's size, was
 `CFT_ERR_OUT_OF_MEMORY` there; it is `CFT_ERR_ARTIFACT`, as on a 64-bit
 host. The same round made an escalated square root carry its
-truncation (host/src/mpfloat.c): no result at the contract's precision
-moved (verifier-F1, 472,040 calls byte for byte).
+truncation (host/src/mpfloat.c): none of verifier-F1's 472,040 calls at
+the contract's precision moved, byte for byte.
 
 | surface | status |
 |---|---|

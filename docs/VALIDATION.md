@@ -16441,28 +16441,29 @@ It found three wrong sentences, each restated in this entry's commit:
 - "at most tile 1" in this entry's draft, rebuild-2022.sh and BITSTREAM-BUILDS.md. q135b, built from the old script with VPP_PROPS naming tiles 2 to 4, had all four retimed;
 - DEMOS.md's committed page, which it gave as 578,617 bytes; it is 585,089;
 - HOSTAPI's "the committed WebAssembly module was built before the change", untrue since 7f1f05e.
-Its others are restated below, or recorded as known limits.
+Its others are restated below, or recorded as known limits. F4 then checked 8aa99cf, this entry's first commit. The three restatements are true, nothing else moved, and the front door matches the box's and the desktop's records. It found one more wrong sentence, the 4c5d9bc bullet below, and nits. Both are restated in the next commit.
 
 **The front door.**
 - **The gate budget on amd-arc-box at 7f1f05e** (run 20260930-084843-7f1f05e, 115 minutes, niced, beside q135b's link): PASS, 29 stages ok and 0 failed.
   - The two stages that failed at main in the audit round pass:
     - transcend, 836 s: 607,217 comparisons at the contract's precision and 580,977 through the escalation path, C equal to the model on every one;
     - mpfr, 562 s, with the pinned MPFR 4.2.2: 739,234 cases, 0 value and 0 flag mismatches.
-  - Every stage the round touched passes: docs 9 s, golden 537 s, libcft 763 s, programs 99 s, audit 171 s, bindings 171 s, cpp 1,962 s and remote 569 s.
+  - Every stage the round touched passes: docs 9 s, golden 537 s, libcft 763 s, seq 8 s, programs 99 s, audit 171 s, bindings 171 s, cpp 1,962 s and remote 569 s.
   - **8 skipped by name**: buildargs by its own rule (a real Vitis is on the box); lang-rust, julia, go, csharp, r and fortran, and demos, for tools the box lacks.
   - **4 inner skips**: golden's known three (the Arduino loopback binary, twice, and `math.fma`, which needs Python 3.13), and remote's WebSocket leg, since the box has no node.
-- **On the desktop at 7f1f05e**, the stages the box cannot run: `--only buildargs,node,wasm,demos,docs`, PASS, nothing skipped (run 20260930-084926-7f1f05e, 2,814 s): buildargs 15 s, docs 10 s, demos 81 s, node 1,642 s, wasm 1,064 s.
+- **On the desktop at 7f1f05e**, the stages the box cannot run, and docs: `--only buildargs,node,wasm,demos,docs`, PASS, nothing skipped (run 20260930-084926-7f1f05e, stage times summing to 2,812 s): buildargs 15 s, docs 10 s, demos 81 s, node 1,642 s, wasm 1,064 s.
 - **The language legs at 7f1f05e.**
   - julia, go, csharp, r and fortran: ok on the desktop (run 20260930-103514-7f1f05e).
   - lang-rust failed there for the desktop's recorded limit, MSVC rustc against the MinGW library.
   - lang-rust passed in WSL (cft2204, GNU rustc 1.98.0, on an archive of 7f1f05e): "rust: same library, same bits".
-- **Not run this round, on any host:** remote's WebSocket leg.
+- **Not run this round, on any host:** remote's WebSocket leg, and golden's three inner-skipped checks.
+- **On this entry's own commit, 8aa99cf**, the stages it can move: `--only docs,buildargs,bindings` on the desktop, PASS, nothing skipped (run 20260930-105209-8aa99cf): docs 9 s, buildargs 15 s, bindings 136 s. Its program.c change is a comment, and the object is byte-identical to 7f1f05e's (F4).
 
 **Known limits, recorded rather than fixed** (Logan's rule):
-- **Second-order error terms** (F1). An exact root of an inexact operand omits sqrt's O(e²), about Ea² 2^-(W+3) units. mul_ui, div_ui and like-sign add pass err_in with no spare unit for err_in times a truncation. Both are pre-existing, and below one unit at every working precision in use: under 2^-11 at fp32's 88 bits for any unsaturated error. A square root runs at 104 bits or more even under the 64-bit test override, so the error table's "larger only under the override" does not happen for it (F4). A saturated err is a clamp, not a bound, as mpfloat.c says at its cancellation rule. Its header says the opposite, that a saturated bound cannot decide a rounding, which is untrue at any W above 41 (F4).
+- **Second-order error terms** (F1). An exact root of an inexact operand omits sqrt's O(e²), about Ea² 2^-(W+3) units. mul_ui, div_ui and like-sign add pass err_in with no spare unit for err_in times a truncation. Both are pre-existing, and below one unit at every working precision in use: under 2^-11 at fp32's 88 bits for any unsaturated error. A square root runs at 104 bits or more even under the 64-bit test override, so the error table's "larger only under the override" does not happen for it (F4). A saturated err is a clamp, not a bound, as mpfloat.c says at its cancellation rule. Its header says the opposite, that a saturated bound cannot decide a rounding. That is untrue wherever the working precision is about 41 bits or more above the format's, which covers every ordinary working precision but not, for one, fp128 under the override (F4).
 - **The cancellation rule rounds a first-order term down** (F4, measured with the library's own `cft_mp_add`). An unlike-sign add floors the shorter operand's scaled error when its shift is negative. So it returns err 2 where the worst true error is 2.5 units, and 3 where it is 3.5, at W = 88, 128, 237 and 928 alike. mpfloat.c's header says every rule rounds its first-order terms up. It is pre-existing, from 0d00a1e (2026-09-02). No gate has seen a result move by it, and its repair is a follow-up.
 - **retimed_runs reads the build's logs.** A cache hit from an earlier build, or a missing run log, is unresolved by design. The revision-3 and read-ahead quads' tile 1 is inferred. The stub's model of Vivado's cache matches the quoted log fragments; the message text beyond them is not determined (F1). A runme.log that exists but holds none of the patterns is read as unretimed and not named. Under the stub, an hw_emu manifest names every CU `:no-runme.log`, and whether a real hw_emu link leaves synthesis runs is not determined (F4).
-- **Pages outside this ledger still call the old quads retimed:** ROADMAP ("retiming does not close the quad"), ARCHITECTURE, SCALING, PLATFORMS, LAYOUTS, hw/layouts/u50-4xfp256.cfg and hw/gen_layouts.py (F4). They are restated with q135b's result, which tests the claim.
+- **Pages outside this ledger still call the old quads retimed:** ROADMAP ("retiming does not close the quad"), ARCHITECTURE, SCALING, PLATFORMS, LAYOUTS, hw/layouts/u50-4xfp256.cfg and hw/gen_layouts.py (F4). None is changed here. They wait for q135b's result, which tests the claim.
 - **The corpus's keep rule trusts a committed build-id**, and no gate runs `make` (F2). A wrong build-id would now be kept where it used to be overwritten.
 - **deepwrap-fp64.cfta's comment** "the last store to land is the one at p = D" holds for 128 to 16,384 (F2). z = n holds at every depth. The comment stays, since changing the source moves its committed digest.
 - **augsum's sampled audit misses a ties-to-even golden model** two draws in three. The tie is in segment 0 alone; the writer, the chain and the full audit catch it on every seed (Q4, F2).
@@ -16473,14 +16474,15 @@ Its others are restated below, or recorded as known limits.
   - a CFT_ERRMSG_MAX 1 build drops sentences by design and shows a remote handle's older one;
   - on XRT, a `cft_host_in` refusal can show a remote handle's older sentence first (verifier-V10's order).
 - **The golden's KREG message** names an index's low byte where the C names the nine-bit index. On two-fault images the C and seq.py can name different true faults, since their check orders predate the round.
-- **4c5d9bc's message** says four of seq_check_operands' nine sentences name "the operand". They are instruction-wide (listed in b1f1458).
+- **4c5d9bc's message** says seq_check_operands' nine "name the instruction, the opcode, the operand and the field". Four of the nine are instruction-wide and name no operand (F3). b1f1458's list put it the other way round (F4).
 - **Q5's suggestions, not acted on:** `cft_set_error` has no format attribute, so no compiler holds its 101 calls (F3 found them consistent under one forced on). `cft-serve`'s slot is process-global, so entry points without a clear can still show another connection's sentence.
 
 **Load, and the machine.**
 - Every agent ran one run at a time, niced, on the desktop, while Logan used it, and no agent touched amd-arc-box or the card. F1 compiled an MPFR probe in WSL (cft2204), and Q5 ran host/fuzz with ASan and UBSan there. F3 and Q5 used an i686 toolchain on the desktop.
 - The lead's runs:
   - fx1, fx3 and the gate budget on amd-arc-box, beside the quad link;
-  - the two module builds, 41 s and 40 s, and the demos builds, on the desktop in the pinned container, one at a time after `docker ps`.
+  - the two module builds, 41 s and 40 s, and the demos builds, on the desktop in the pinned container, one at a time after `docker ps`;
+  - the desktop's runner runs at 7f1f05e (the stages the box cannot run, and the language legs) and at 8aa99cf, and lang-rust in WSL, each niced.
 
 **The lead's own slips**, each caught and recorded in the ledger:
 - **A shell heredoc halved a backslash** in fix 2's first edit, so `printf '%s\n'` got a literal newline in its format string. It worked, but was not what was meant. The argv test's own control found it by failing to match the loop, before the commit.
@@ -16493,5 +16495,6 @@ Its others are restated below, or recorded as known limits.
   - 05df871's comments named e98d0ca where fd25e9f's form was the one that failed. Those comments are corrected in 1dd94bd.
   (F1, each.)
   - fd25e9f's message says a hit whose entry an earlier build added "is named on a `retiming_unresolved:` line, not guessed". At fd25e9f such a hit ended the script before that line (F1's (a), repaired in 05df871; F4).
-- **A restatement that overcorrected.** b1f1458 restated "no CFT_ERR_OUT_OF_MEMORY in this library carries a sentence" as "the remote and XRT backends name their own". Ten of their fourteen carry none (F4). HOSTAPI and program.c's comment are restated in this entry's commit.
+- **A restatement that overcorrected.** Before b1f1458, HOSTAPI said the loader's four allocation failures carry no sentence, "as no `CFT_ERR_OUT_OF_MEMORY` in this library does". b1f1458 restated that as "the remote and XRT backends name their own out-of-memory failures". Ten of their fourteen carry none (F4). HOSTAPI and program.c's comment are restated in this entry's commit.
+- **8aa99cf's message** says each retiming sentence "now says a quad built with the flag alone". The entry's says "an entry before this one" (F4).
 - **A citation ahead of its entry.** e98d0ca's comment and BITSTREAM-BUILDS.md cited this entry before it existed (F1). This entry is it, and the citations now name it.
