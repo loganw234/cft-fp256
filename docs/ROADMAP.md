@@ -3766,9 +3766,9 @@ building. Nothing in it exists yet unless it says so.
 **The rule this round adds, inherited from step 2.** An auditor's
 memory and time are bounded by what it is HANDED, never by a number a
 certificate STATES.
-- Today the golden audit builds three +0 streams of the certificate's
-  `lanes` before any hash check (`_streams_or_zero`). So `lanes
-  4294967295` commits about 100 GB (verifier-C5).
+- Until P3's e5af2f1 the golden audit built three +0 streams of the
+  certificate's `lanes` before any hash check (`_streams_or_zero`), so
+  `lanes 4294967295` committed about 100 GB (verifier-C5).
 - Allocating nothing would not be enough. The +0 stream's hash covers
   lanes x width bytes, so a certificate stating 10^12 lanes costs
   terabytes of hashing at step 5 even if it holds none of them.

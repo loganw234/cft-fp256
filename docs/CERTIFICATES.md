@@ -1203,6 +1203,30 @@ The controls cover:
     address-space limit 4 GiB above the process's own, and everywhere
     a watchdog that ends a run that hashes forever.
 
+The rule's plants (the audit round, 2026-09-29) were each made in a
+fresh copy of the implementation at 00c2a2f, and each turned a named
+control red for its reason (the round's ledger, P3.md):
+- the rule removed;
+- the rule moved one step later, the +0 streams built before the bound
+  is read;
+- step 8's guard alone removed;
+- "at least" made "more than";
+- a run bounded by any run's states, by a state for any boundary, and
+  not by the output's;
+- a handed stream's length checked after the build;
+- a dense re-run;
+- each of four one-block readings of the flag word's and STATUS's OR;
+- the blocks' end states out of lane order, and their start states
+  sliced by lane;
+- a rational's digits read after its gcd, or not at all, or its first
+  digit taken as four bits;
+- the escape probability computed by its binomials.
+Eleven more plants hold the verdict's segments and the `scratch-depth`
+parameter. Three of the four one-block readings were green against
+e5af2f1, whose special lanes all sat in its last block, so that block's
+flags and STATUS were the run's. The control was strengthened at
+00c2a2f, and they are red.
+
 The real audit is `programs/lorenz63-rk4-fp64.cfta` with its classic
 bank:
 - three lanes over four segments, with a half-step run of eight and a
