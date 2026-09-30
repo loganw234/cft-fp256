@@ -136,6 +136,9 @@ host/remote-test
 # `?? host/cft-segrun`, which made every later build id untracked=present.
 # host/tests/segrun_check.py now holds git to ignoring both forms.
 host/cft-segrun
+# the C auditor (docs/CERTIFICATES.md, "The audit tool"), added with its
+# line here; host/tests/audit_check.py holds git to ignoring both forms
+host/cft-audit
 # host/fuzz: the harness binaries, the sanitised copies of the workload
 # tools, the scratch a resume run writes, and the corpus entries the
 # engine grew. The SEEDS in corpus/*/ are checked in (make_seeds.py

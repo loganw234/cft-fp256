@@ -1189,6 +1189,55 @@ clean-segrun:
 	rm -f cft-segrun cft-segrun.exe
 # ==================== end of the cft-segrun block ==================
 
+# ===================================================================
+# cft-audit - the audit of a version-1 certificate in C, beside the
+# golden one (docs/CERTIFICATES.md, "The audit tool"; the plan of
+# record's step 4, docs/ROADMAP.md)
+#
+# Its own delimited block on the same terms as the blocks above:
+# TOOLS += plus an explicit `all:` prerequisite, and `clean` gains a
+# prerequisite rather than a longer command line.
+#
+# It includes two of the library's INTERNAL headers, src/bigint.h (the
+# 2,048-bit bigint its exact values go through) and src/sha256.h (the
+# streaming hash), as collatz.c and its neighbours include the second.
+# So it is built here, in the same make as the libcft.a it links, from
+# the same cft_config.h: a cft_bn narrower than the width rule needs
+# compiles the tool without its exact arithmetic (the lead's decision,
+# 2026-09-29). The headers are prerequisites, and the recipe names its
+# two inputs, since $^ would hand gcc the headers too.
+#
+#   make audittest      the equality gate, tests/audit_check.py: every
+#                       parse and audit call test_cert.py makes, shadowed
+#                       through the tool; cft-segrun's certificates of
+#                       segrun_check's programs; the golden corpus where
+#                       the tree has one; each held to the same verdict
+#                       as cert.audit - the refusal's name, code and
+#                       location, or both ACCEPTED with the same lines;
+#                       and the library and the tool compiled narrow
+#                       (CFT_MAX_FORMAT=2) with $(CC), which must refuse
+#                       build-width. verify/run.sh's `audit` stage runs
+#                       it, in the gate budget (about four minutes on
+#                       the desktop, 2026-09-29).
+# ===================================================================
+TOOLS += cft-audit$(EXE)
+all: cft-audit$(EXE)
+clean: clean-audit
+.PHONY: audittest clean-audit
+
+cft-audit$(EXE): tools/audit.c libcft.a src/bigint.h src/sha256.h \
+                 include/cft_config.h
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/audit.c libcft.a -o $@ \
+		$(XRTLIBS)
+
+audittest: cft-audit$(EXE) cft-segrun$(EXE)
+	$(PYTHON) tests/audit_check.py --tool ./cft-audit$(EXE) \
+		--segrun ./cft-segrun$(EXE) --cc "$(CC)" --lib-src "$(SRC)"
+
+clean-audit:
+	rm -f cft-audit cft-audit.exe
+# ==================== end of the cft-audit block ===================
+
 # Removes every platform's products, not just this one's. A tree on a
 # shared volume gets built from more than one platform, and a clean
 # that leaves the other platform's shared library behind leaves
