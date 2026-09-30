@@ -1,0 +1,275 @@
+== ACC-A: a certificate's two estimates, scored (programs/estimates.py sweep)
+mpmath 1.3.0 on gmpy; the scheme at 300 digits (check.SCHEME_DPS); TAU 1e-6; levels to at most 10 (RK4) and 13 (Stormer-Verlet)
+
+== the cases: certificates/MANIFEST
+  ok    lorenz63-rk4-fp64: the certificate is the manifest's
+  ok    lorenz63-rk4-fp64: run 0 (main, fp64) - its image, bank and 4 boundary states are the manifest's files and the certificate's hashes
+  ok    lorenz63-rk4-fp64: run 1 (half-step, fp64) - its image, bank and 7 boundary states are the manifest's files and the certificate's hashes
+  ok    lorenz63-rk4-fp64: run 2 (wider, fp128) - its image, bank and 4 boundary states are the manifest's files and the certificate's hashes
+  ok    lorenz63-rk4-fp64: run 0's bank is gen_odes.py's classic bank, so its slots are H, H2, H6, TWO, SIGMA, RHO, BETA
+  ok    lorenz63-rk4-fp64: the half-step run's h-slots [0, 1, 2] are the slots named H, H2, H6
+  ok    lorenz63-rk4-fp256: the certificate is the manifest's
+  ok    lorenz63-rk4-fp256: run 0 (main, fp256) - its image, bank and 4 boundary states are the manifest's files and the certificate's hashes
+  ok    lorenz63-rk4-fp256: run 1 (half-step, fp256) - its image, bank and 7 boundary states are the manifest's files and the certificate's hashes
+  ok    lorenz63-rk4-fp256: run 0's bank is gen_odes.py's classic bank, so its slots are H, H2, H6, TWO, SIGMA, RHO, BETA
+  ok    lorenz63-rk4-fp256: the half-step run's h-slots [0, 1, 2] are the slots named H, H2, H6
+  ok    lorenz96-rk4-fp64: the certificate is the manifest's
+  ok    lorenz96-rk4-fp64: run 0 (main, fp64) - its image, bank and 3 boundary states are the manifest's files and the certificate's hashes
+  ok    lorenz96-rk4-fp64: run 1 (half-step, fp64) - its image, bank and 5 boundary states are the manifest's files and the certificate's hashes
+  ok    lorenz96-rk4-fp64: run 2 (wider, fp128) - its image, bank and 3 boundary states are the manifest's files and the certificate's hashes
+  ok    lorenz96-rk4-fp64: run 0's bank is gen_odes.py's classic bank, so its slots are H, H2, H6, TWO, F
+  ok    lorenz96-rk4-fp64: the half-step run's h-slots [0, 1, 2] are the slots named H, H2, H6
+  ok    lorenz96-rk4-fp256: the certificate is the manifest's
+  ok    lorenz96-rk4-fp256: run 0 (main, fp256) - its image, bank and 3 boundary states are the manifest's files and the certificate's hashes
+  ok    lorenz96-rk4-fp256: run 1 (half-step, fp256) - its image, bank and 5 boundary states are the manifest's files and the certificate's hashes
+  ok    lorenz96-rk4-fp256: run 0's bank is gen_odes.py's classic bank, so its slots are H, H2, H6, TWO, F
+  ok    lorenz96-rk4-fp256: the half-step run's h-slots [0, 1, 2] are the slots named H, H2, H6
+  ok    henonheiles-lf-fp64: the certificate is the manifest's
+  ok    henonheiles-lf-fp64: run 0 (main, fp64) - its image, bank and 5 boundary states are the manifest's files and the certificate's hashes
+  ok    henonheiles-lf-fp64: run 1 (half-step, fp64) - its image, bank and 9 boundary states are the manifest's files and the certificate's hashes
+  ok    henonheiles-lf-fp64: run 2 (wider, fp128) - its image, bank and 5 boundary states are the manifest's files and the certificate's hashes
+  ok    henonheiles-lf-fp64: run 0's bank is gen_odes.py's classic bank, so its slots are H, H2, MH, ONE, TWO
+  ok    henonheiles-lf-fp64: the half-step run's h-slots [0, 1, 2] are the slots named H, H2, MH
+  ok    henonheiles-lf-fp256: the certificate is the manifest's
+  ok    henonheiles-lf-fp256: run 0 (main, fp256) - its image, bank and 5 boundary states are the manifest's files and the certificate's hashes
+  ok    henonheiles-lf-fp256: run 1 (half-step, fp256) - its image, bank and 9 boundary states are the manifest's files and the certificate's hashes
+  ok    henonheiles-lf-fp256: run 0's bank is gen_odes.py's classic bank, so its slots are H, H2, MH, ONE, TWO
+  ok    henonheiles-lf-fp256: the half-step run's h-slots [0, 1, 2] are the slots named H, H2, MH
+  ok    example: the certificate is the manifest's
+  ok    example: run 0 (main, fp64) - its image, bank and 3 boundary states are the manifest's files and the certificate's hashes
+  ok    example: run 1 (half-step, fp64) - its image, bank and 5 boundary states are the manifest's files and the certificate's hashes
+  ok    example: run 0's bank is gen_odes.py's classic bank, so its slots are H, H2, MH, ONE, TWO
+  ok    example: the half-step run's h-slots [0, 1, 2] are the slots named H, H2, MH
+  not scored: flagstep-fp64 - not an ODE program, and no auxiliary run: nothing to estimate
+  not scored: augsum-fp64 - not an ODE program, and no auxiliary run: nothing to estimate
+  not scored: deepwrap-fp64-256 - not an ODE program: its half-step run halves a bank slot that steps no differential equation, so there is no method error to estimate
+  not scored: deepwrap-fp64-2048 - not an ODE program: its half-step run halves a bank slot that steps no differential equation, so there is no method error to estimate
+  not scored: lorenz63-rk4-fp64-half-init - its certificate states a relation that does not hold, on purpose, and the audit refuses it aux-start: its half-step run starts from another state, so its difference is not an estimate of anything
+time  loading and holding the corpus: 0.0 s
+
+== sweep: lane 0 as h shrinks, each level a certificate cft-segrun makes here
+
+-- lorenz63-rk4 at fp64, lane 0, as h shrinks: levels j = 0..9, h = H/2^j, 3 x 2^j segments of 100 steps; the scheme at 300 digits to level L = 10; Richardson's 1 - 2^-p = 0.9375
+time  lorenz63-rk4 fp64 lane 0, levels 0..10: 47.9 s
+time  lorenz63-rk4 fp64 lane 0, odefun: 5.3 s
+  lane 0's levels k = 1..10 against odefun at T (1 + delta), level by level: the scheme's levels approach odefun as each level's own stated error u_k = |R_k - R_(k-1)|/15 says
+     k    |R_k - od|           u_k     ratio
+     1     6.1772e-6     8.2591e-6   0.74793
+     2     3.2359e-7     3.9024e-7   0.82922
+     3     1.8256e-8     2.0356e-8   0.89683
+     4     1.0793e-9     1.1451e-9    0.9425
+     5    6.5522e-11    6.7582e-11   0.96951
+     6    4.0347e-12    4.0991e-12   0.98428
+     7    2.5028e-13    2.5229e-13   0.99201
+     8    1.5583e-14    1.5646e-14   0.99595
+     9    9.7187e-16    9.7408e-16   0.99774
+    10    6.0572e-17    6.0753e-17   0.99702
+  the deepest level L = 10: |R_L - od| = 6.057e-17, 2 u_L = 1.215e-16; its Richardson extrapolation R_L + (R_L - R_(L-1))/15 is 2.95e-19 from odefun and moved 3.97e-18 from level L - 1's; odefun's 30 and 40 digits differ by 6.65e-31
+  ok    lorenz63-rk4 fp64: odefun sits at the scheme's own limit - at every level k >= 3 |R_k - od|/u_k is in [0.5, 2.0], and |R_L - od| <= 2 u_L - so it may score a level, within its stated agreement max(those three) = 3.97e-18
+  ok    lorenz63-rk4-fp64-j0: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 7db14101ff22e083...
+  ok    lorenz63-rk4-fp64-j0: lane 0 of the corpus's runs, bit for bit
+  ok    lorenz63-rk4-fp64-j1: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 7b8ace3e821bd93e...
+  ok    lorenz63-rk4-fp64-j1: its main run's final state is level 0's half-step run's, bit for bit
+  ok    lorenz63-rk4-fp64-j2: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed e31c57d67149e883...
+  ok    lorenz63-rk4-fp64-j2: its main run's final state is level 1's half-step run's, bit for bit
+  ok    lorenz63-rk4-fp64-j3: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed fc8ec4acda990ffc...
+  ok    lorenz63-rk4-fp64-j3: its main run's final state is level 2's half-step run's, bit for bit
+  ok    lorenz63-rk4-fp64-j4: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed bcbfdb37ada3f051...
+  ok    lorenz63-rk4-fp64-j4: its main run's final state is level 3's half-step run's, bit for bit
+  ok    lorenz63-rk4-fp64-j5: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed c6978ceea8641fa8...
+  ok    lorenz63-rk4-fp64-j5: its main run's final state is level 4's half-step run's, bit for bit
+  ok    lorenz63-rk4-fp64-j6: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed f83003709d4bedb8...
+  ok    lorenz63-rk4-fp64-j6: its main run's final state is level 5's half-step run's, bit for bit
+  ok    lorenz63-rk4-fp64-j7: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 312c0cea4186477b...
+  ok    lorenz63-rk4-fp64-j7: its main run's final state is level 6's half-step run's, bit for bit
+  ok    lorenz63-rk4-fp64-j8: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 8075289ac8b1fa98...
+  ok    lorenz63-rk4-fp64-j8: its main run's final state is level 7's half-step run's, bit for bit
+  ok    lorenz63-rk4-fp64-j9: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 8ce57adf6c1aca8f...
+  ok    lorenz63-rk4-fp64-j9: its main run's final state is level 8's half-step run's, bit for bit
+time  lorenz63-rk4 fp64 cft-segrun and the audits: 20.8 s
+  step-halving at level j: E = max |F_j - F_(j+1)| (the half-step run's), the method error M = max |R_j - ref|, the total error |F_j - ref|, rho = |F_j - R_j| the run's rounding; ref is R_10 where 2u_L <= 0.001 M, else odefun where its stated agreement <= 0.01 M; the uncertainty is the reference's
+     j            E     ref            M                   E/M  exact |R_j - R_(j+1)|/M        total             E/total         rho
+     0   0.00012389    R_10   0.00013006   0.952506 +- 8.9e-13      0.952506 +- 8.9e-13   0.00013006  0.952506 +- 8.9e-13    1.76e-15
+     1    5.8536e-6    R_10    6.1772e-6   0.947615 +- 1.9e-11      0.947615 +- 1.9e-11    6.1772e-6  0.947615 +- 1.9e-11     1.8e-14
+     2    3.0534e-7    R_10    3.2359e-7   0.943584 +- 3.5e-10      0.943584 +- 3.5e-10    3.2359e-7  0.943585 +- 3.5e-10    2.28e-14
+     3    1.7177e-8    R_10    1.8256e-8    0.940889 +- 6.3e-9       0.940881 +- 6.3e-9    1.8256e-8   0.94089 +- 6.3e-9    4.13e-14
+     4    1.0136e-9    R_10    1.0793e-9    0.939168 +- 1.1e-7        0.93929 +- 1.1e-7    1.0791e-9    0.9393 +- 1.1e-7    1.51e-13
+     5   6.1426e-11    R_10   6.5522e-11    0.937497 +- 1.7e-6       0.938423 +- 1.7e-6   6.5502e-11  0.937777 +- 1.7e-6    4.02e-14
+     6   3.8334e-12    R_10   4.0346e-12    0.950116 +- 2.9e-5       0.937982 +- 2.8e-5   4.0758e-12  0.940533 +- 2.8e-5    1.34e-13
+     7   4.5386e-13    R_10   2.5022e-13    1.81385 +- 0.00088      0.937965 +- 0.00046   2.4714e-13   1.83643 +- 0.0009    1.27e-14
+     8   6.0751e-13  odefun   1.5583e-14     38.9857 +- 0.0099      0.937633 +- 0.00024   2.2467e-13   2.70403 +- 4.8e-5    2.22e-13
+     9   2.6645e-13  odefun   9.7187e-16        274.166 +- 1.1       0.937674 +- 0.0038   3.8284e-13  0.695985 +- 7.2e-6    3.84e-13
+  wider at level j: W = max |F_j - F_j(wider)| against rho = |F_j - R_j|; the wider run's own rounding |F2 - R_j| beside
+     j            W          rho    W/rho - 1   |F2 - R_j|
+     0  1.75873e-15  1.75873e-15    -9.54e-18     1.68e-32
+     1  1.80487e-14  1.80487e-14    -6.45e-19     1.16e-32
+     2  2.27562e-14  2.27562e-14     5.24e-19     1.21e-32
+     3  4.13168e-14  4.13168e-14    -1.07e-19      4.1e-32
+     4  1.51121e-13  1.51121e-13     3.23e-19     4.89e-32
+     5  4.01942e-14  4.01942e-14    -1.46e-18     5.87e-32
+     6  1.33522e-13  1.33522e-13     1.07e-18     1.43e-31
+     7  1.27424e-14  1.27424e-14    -3.38e-18     9.44e-32
+     8  2.22139e-13  2.22139e-13     2.25e-19     8.83e-32
+     9  3.83816e-13  3.83816e-13     6.96e-20     3.55e-31
+time  lorenz63-rk4 fp64 sweep in all: 74.0 s
+
+-- lorenz96-rk4 at fp64, lane 0, as h shrinks: levels j = 0..7, h = H/2^j, 2 x 2^j segments of 20 steps; the scheme at 300 digits to level L = 8; Richardson's 1 - 2^-p = 0.9375
+time  lorenz96-rk4 fp64 lane 0, levels 0..8: 24.2 s
+time  lorenz96-rk4 fp64 lane 0, odefun: 3.8 s
+  lane 0's levels k = 1..8 against odefun at T (1 + delta), level by level: the scheme's levels approach odefun as each level's own stated error u_k = |R_k - R_(k-1)|/15 says
+     k    |R_k - od|           u_k     ratio
+     1      5.275e-9     5.1997e-9    1.0145
+     2    3.3152e-10    3.2957e-10    1.0059
+     3    2.0771e-11    2.0716e-11    1.0026
+     4    1.2997e-12    1.2981e-12    1.0012
+     5    8.1273e-14    8.1225e-14    1.0006
+     6     5.081e-15    5.0795e-15    1.0003
+     7     3.176e-16    3.1756e-16    1.0001
+     8    1.9851e-17     1.985e-17    1.0001
+  the deepest level L = 8: |R_L - od| = 1.985e-17, 2 u_L = 3.97e-17; its Richardson extrapolation R_L + (R_L - R_(L-1))/15 is 9.72e-21 from odefun and moved 3.07e-19 from level L - 1's; odefun's 30 and 40 digits differ by 7.79e-31
+  ok    lorenz96-rk4 fp64: odefun sits at the scheme's own limit - at every level k >= 3 |R_k - od|/u_k is in [0.5, 2.0], and |R_L - od| <= 2 u_L - so it may score a level, within its stated agreement max(those three) = 3.07e-19
+  ok    lorenz96-rk4-fp64-j0: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 0f01416c2c0e362a...
+  ok    lorenz96-rk4-fp64-j0: lane 0 of the corpus's runs, bit for bit
+  ok    lorenz96-rk4-fp64-j1: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 36d46ef86b1f1f83...
+  ok    lorenz96-rk4-fp64-j1: its main run's final state is level 0's half-step run's, bit for bit
+  ok    lorenz96-rk4-fp64-j2: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 5d35988d861b3548...
+  ok    lorenz96-rk4-fp64-j2: its main run's final state is level 1's half-step run's, bit for bit
+  ok    lorenz96-rk4-fp64-j3: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 61e9c900d85b6342...
+  ok    lorenz96-rk4-fp64-j3: its main run's final state is level 2's half-step run's, bit for bit
+  ok    lorenz96-rk4-fp64-j4: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 5c07b824be86f28d...
+  ok    lorenz96-rk4-fp64-j4: its main run's final state is level 3's half-step run's, bit for bit
+  ok    lorenz96-rk4-fp64-j5: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed f8290d6261fcfd8a...
+  ok    lorenz96-rk4-fp64-j5: its main run's final state is level 4's half-step run's, bit for bit
+  ok    lorenz96-rk4-fp64-j6: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 20759524c2f6f7d7...
+  ok    lorenz96-rk4-fp64-j6: its main run's final state is level 5's half-step run's, bit for bit
+  ok    lorenz96-rk4-fp64-j7: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 4b0a25c3663e22eb...
+  ok    lorenz96-rk4-fp64-j7: its main run's final state is level 6's half-step run's, bit for bit
+time  lorenz96-rk4 fp64 cft-segrun and the audits: 12.6 s
+  step-halving at level j: E = max |F_j - F_(j+1)| (the half-step run's), the method error M = max |R_j - ref|, the total error |F_j - ref|, rho = |F_j - R_j| the run's rounding; ref is R_8 where 2u_L <= 0.001 M, else odefun where its stated agreement <= 0.01 M; the uncertainty is the reference's
+     j            E     ref            M                   E/M  exact |R_j - R_(j+1)|/M        total             E/total         rho
+     0    7.7996e-8     R_8    8.3271e-8   0.936652 +- 4.5e-10      0.936652 +- 4.5e-10    8.3271e-8  0.936652 +- 4.5e-10    1.56e-14
+     1    4.9435e-9     R_8     5.275e-9    0.937152 +- 7.1e-9       0.937154 +- 7.1e-9    5.2751e-9   0.93715 +- 7.1e-9    3.79e-14
+     2   3.1075e-10     R_8   3.3152e-10    0.937372 +- 1.1e-7       0.937347 +- 1.1e-7   3.3154e-10  0.937308 +- 1.1e-7    4.97e-14
+     3   1.9476e-11     R_8   2.0771e-11    0.937671 +- 1.8e-6       0.937429 +- 1.8e-6   2.0785e-11  0.937031 +- 1.8e-6    6.19e-14
+     4   1.1493e-12     R_8   1.2996e-12    0.884329 +- 2.7e-5        0.93748 +- 2.9e-5   1.3088e-12  0.878141 +- 2.7e-5    1.25e-13
+     5   2.6112e-13     R_8   8.1253e-14      3.2137 +- 0.0016      0.937712 +- 0.00046   2.1758e-13  1.20015 +- 0.00022    1.85e-13
+     6   3.3396e-13  odefun    5.081e-15      65.7268 +- 0.004       0.937492 +- 5.7e-5   3.4922e-13  0.956291 +- 8.4e-7    3.49e-13
+     7    8.793e-13  odefun    3.176e-16        2768.55 +- 2.7      0.937497 +- 0.00091   6.8317e-13   1.28708 +- 5.8e-7    6.83e-13
+  wider at level j: W = max |F_j - F_j(wider)| against rho = |F_j - R_j|; the wider run's own rounding |F2 - R_j| beside
+     j            W          rho    W/rho - 1   |F2 - R_j|
+     0  1.56272e-14  1.56272e-14     8.59e-19      2.2e-32
+     1  3.78671e-14  3.78671e-14    -5.08e-19     2.04e-32
+     2  4.96781e-14  4.96781e-14      3.8e-19     4.24e-32
+     3  6.18757e-14  6.18757e-14     2.97e-19     6.29e-32
+     4  1.24676e-13  1.24676e-13    -5.15e-20     1.85e-31
+     5  1.85228e-13  1.85228e-13    -2.86e-19      9.0e-32
+     6  3.49224e-13  3.49224e-13     6.21e-20     1.86e-31
+     7  6.83175e-13  6.83175e-13     2.54e-19     2.79e-31
+time  lorenz96-rk4 fp64 sweep in all: 40.7 s
+
+-- henonheiles-lf at fp64, lane 0, as h shrinks: levels j = 0..10, h = H/2^j, 4 x 2^j segments of 100 steps; the scheme at 300 digits to level L = 11; Richardson's 1 - 2^-p = 0.75
+time  henonheiles-lf fp64 lane 0, levels 0..11: 29.9 s
+time  henonheiles-lf fp64 lane 0, odefun: 0.7 s
+  lane 0's levels k = 1..11 against odefun at T (1 + delta), level by level: the scheme's levels approach odefun as each level's own stated error u_k = |R_k - R_(k-1)|/3 says
+     k    |R_k - od|           u_k     ratio
+     1     2.6752e-6     2.6752e-6   0.99999
+     2      6.688e-7      6.688e-7       1.0
+     3      1.672e-7      1.672e-7       1.0
+     4       4.18e-8       4.18e-8       1.0
+     5      1.045e-8      1.045e-8       1.0
+     6     2.6125e-9     2.6125e-9       1.0
+     7    6.5312e-10    6.5312e-10       1.0
+     8    1.6328e-10    1.6328e-10       1.0
+     9     4.082e-11     4.082e-11       1.0
+    10    1.0205e-11    1.0205e-11       1.0
+    11    2.5513e-12    2.5513e-12       1.0
+  the deepest level L = 11: |R_L - od| = 2.551e-12, 2 u_L = 5.103e-12; its Richardson extrapolation R_L + (R_L - R_(L-1))/3 is 2.32e-23 from odefun and moved 3.47e-22 from level L - 1's; odefun's 30 and 40 digits differ by 9.27e-33
+  ok    henonheiles-lf fp64: odefun sits at the scheme's own limit - at every level k >= 3 |R_k - od|/u_k is in [0.5, 2.0], and |R_L - od| <= 2 u_L - so it may score a level, within its stated agreement max(those three) = 3.47e-22
+  ok    henonheiles-lf-fp64-j0: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 982192ea900d7a16...
+  ok    henonheiles-lf-fp64-j0: lane 0 of the corpus's runs, bit for bit
+  ok    henonheiles-lf-fp64-j1: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed afab018128cfddb0...
+  ok    henonheiles-lf-fp64-j1: its main run's final state is level 0's half-step run's, bit for bit
+  ok    henonheiles-lf-fp64-j2: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 88ca6f55d5d9ac7f...
+  ok    henonheiles-lf-fp64-j2: its main run's final state is level 1's half-step run's, bit for bit
+  ok    henonheiles-lf-fp64-j3: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 648b8f80dbe1e7b7...
+  ok    henonheiles-lf-fp64-j3: its main run's final state is level 2's half-step run's, bit for bit
+  ok    henonheiles-lf-fp64-j4: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed d355318580468e6b...
+  ok    henonheiles-lf-fp64-j4: its main run's final state is level 3's half-step run's, bit for bit
+  ok    henonheiles-lf-fp64-j5: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 0fee7ba5fd6ba432...
+  ok    henonheiles-lf-fp64-j5: its main run's final state is level 4's half-step run's, bit for bit
+  ok    henonheiles-lf-fp64-j6: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 677b7cae088f706c...
+  ok    henonheiles-lf-fp64-j6: its main run's final state is level 5's half-step run's, bit for bit
+  ok    henonheiles-lf-fp64-j7: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed b11f64f55823d9ec...
+  ok    henonheiles-lf-fp64-j7: its main run's final state is level 6's half-step run's, bit for bit
+  ok    henonheiles-lf-fp64-j8: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 0f9029c936a6d0b1...
+  ok    henonheiles-lf-fp64-j8: its main run's final state is level 7's half-step run's, bit for bit
+  ok    henonheiles-lf-fp64-j9: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed 0f8df676c3a53b0f...
+  ok    henonheiles-lf-fp64-j9: its main run's final state is level 8's half-step run's, bit for bit
+  ok    henonheiles-lf-fp64-j10: the golden audit accepts cft-segrun's certificate, re-running [1, 1, 1] sampled segments, seed de78ee67405afb36...
+  ok    henonheiles-lf-fp64-j10: its main run's final state is level 9's half-step run's, bit for bit
+time  henonheiles-lf fp64 cft-segrun and the audits: 32.4 s
+  step-halving at level j: E = max |F_j - F_(j+1)| (the half-step run's), the method error M = max |R_j - ref|, the total error |F_j - ref|, rho = |F_j - R_j| the run's rounding; ref is R_11 where 2u_L <= 0.001 M, else odefun where its stated agreement <= 0.01 M; the uncertainty is the reference's
+     j            E     ref            M                   E/M  exact |R_j - R_(j+1)|/M        total             E/total         rho
+     0    8.0257e-6    R_11    1.0701e-5    0.750002 +- 3.6e-7       0.750002 +- 3.6e-7    1.0701e-5  0.750002 +- 3.6e-7    1.31e-15
+     1    2.0064e-6    R_11    2.6752e-6    0.750001 +- 1.4e-6       0.750001 +- 1.4e-6    2.6752e-6  0.750001 +- 1.4e-6    1.18e-15
+     2     5.016e-7    R_11     6.688e-7    0.750003 +- 5.7e-6       0.750003 +- 5.7e-6     6.688e-7  0.750003 +- 5.7e-6    2.19e-15
+     3     1.254e-7    R_11     1.672e-7    0.750011 +- 2.3e-5       0.750011 +- 2.3e-5     1.672e-7  0.750011 +- 2.3e-5    1.62e-15
+     4     3.135e-8    R_11    4.1797e-8    0.750046 +- 9.2e-5       0.750046 +- 9.2e-5    4.1797e-8  0.750046 +- 9.2e-5    3.58e-15
+     5    7.8375e-9    R_11    1.0447e-8   0.750183 +- 0.00037      0.750183 +- 0.00037    1.0447e-8  0.750183 +- 0.00037     1.7e-15
+     6    1.9594e-9  odefun    2.6125e-9   0.750002 +- 1.0e-13          0.75 +- 1.0e-13    2.6125e-9  0.750001 +- 1.0e-13    6.31e-15
+     7   4.8984e-10  odefun   6.5312e-10   0.749999 +- 4.0e-13          0.75 +- 4.0e-13   6.5312e-10     0.75 +- 4.0e-13    6.79e-15
+     8   1.2246e-10  odefun   1.6328e-10   0.749978 +- 1.6e-12          0.75 +- 1.6e-12   1.6328e-10  0.74998 +- 1.6e-12     9.8e-15
+     9   3.0604e-11  odefun    4.082e-11   0.749733 +- 6.4e-12          0.75 +- 6.4e-12   4.0823e-11  0.749677 +- 6.4e-12    8.16e-15
+    10   7.6608e-12  odefun   1.0205e-11   0.750685 +- 2.6e-11          0.75 +- 2.6e-11   1.0219e-11  0.749658 +- 2.5e-11    5.73e-14
+  wider at level j: W = max |F_j - F_j(wider)| against rho = |F_j - R_j|; the wider run's own rounding |F2 - R_j| beside
+     j            W          rho    W/rho - 1   |F2 - R_j|
+     0  1.30932e-15  1.30932e-15    -1.04e-19     3.27e-34
+     1  1.18026e-15  1.18026e-15     -5.9e-21      3.4e-34
+     2  2.19097e-15  2.19097e-15    -1.39e-20     9.53e-34
+     3    1.621e-15    1.621e-15    -3.03e-19     1.61e-33
+     4  3.58051e-15  3.58051e-15     -3.6e-19     2.02e-33
+     5  1.69529e-15  1.69529e-15     4.24e-19     3.18e-33
+     6  6.30627e-15  6.30627e-15     1.07e-18     6.77e-33
+     7  6.79378e-15  6.79378e-15      5.3e-19      3.6e-33
+     8  9.79505e-15  9.79505e-15     5.96e-19     5.84e-33
+     9  8.15922e-15  8.15922e-15    -6.36e-19     8.61e-33
+    10  5.72744e-14  5.72744e-14     1.45e-19     1.75e-32
+time  henonheiles-lf fp64 sweep in all: 63.1 s
+
+-- lorenz63-rk4 at fp256, lane 0, as h shrinks: levels j = 0..4, h = H/2^j, 3 x 2^j segments of 100 steps; the scheme at 300 digits to level L = 8; Richardson's 1 - 2^-p = 0.9375
+time  lorenz63-rk4 fp256 lane 0, levels 0..8: 12.2 s
+time  lorenz63-rk4 fp256 lane 0, odefun: 5.0 s
+  lane 0's levels k = 1..8 against odefun at T (1 + delta), level by level: the scheme's levels approach odefun as each level's own stated error u_k = |R_k - R_(k-1)|/15 says
+     k    |R_k - od|           u_k     ratio
+     1     6.1772e-6     8.2591e-6   0.74793
+     2     3.2359e-7     3.9024e-7   0.82922
+     3     1.8256e-8     2.0356e-8   0.89683
+     4     1.0793e-9     1.1451e-9    0.9425
+     5    6.5522e-11    6.7582e-11   0.96951
+     6    4.0347e-12    4.0991e-12   0.98428
+     7    2.5028e-13    2.5229e-13   0.99202
+     8    1.5584e-14    1.5646e-14   0.99598
+  the deepest level L = 8: |R_L - od| = 1.558e-14, 2 u_L = 3.129e-14; its Richardson extrapolation R_L + (R_L - R_(L-1))/15 is 1.25e-16 from odefun and moved 3.89e-15 from level L - 1's; odefun's 30 and 40 digits differ by 9.64e-31
+  ok    lorenz63-rk4 fp256: odefun sits at the scheme's own limit - at every level k >= 3 |R_k - od|/u_k is in [0.5, 2.0], and |R_L - od| <= 2 u_L - so it may score a level, within its stated agreement max(those three) = 3.89e-15
+  ok    lorenz63-rk4-fp256-j0: the golden audit accepts cft-segrun's certificate, re-running [1, 1] sampled segments, seed 6e6d87ee04ecdcc7...
+  ok    lorenz63-rk4-fp256-j0: lane 0 of the corpus's runs, bit for bit
+  ok    lorenz63-rk4-fp256-j1: the golden audit accepts cft-segrun's certificate, re-running [1, 1] sampled segments, seed 02e39b4aee1e1769...
+  ok    lorenz63-rk4-fp256-j1: its main run's final state is level 0's half-step run's, bit for bit
+  ok    lorenz63-rk4-fp256-j2: the golden audit accepts cft-segrun's certificate, re-running [1, 1] sampled segments, seed 5256dd520931beb7...
+  ok    lorenz63-rk4-fp256-j2: its main run's final state is level 1's half-step run's, bit for bit
+  ok    lorenz63-rk4-fp256-j3: the golden audit accepts cft-segrun's certificate, re-running [1, 1] sampled segments, seed 53cf2f70c0d32edb...
+  ok    lorenz63-rk4-fp256-j3: its main run's final state is level 2's half-step run's, bit for bit
+  ok    lorenz63-rk4-fp256-j4: the golden audit accepts cft-segrun's certificate, re-running [1, 1] sampled segments, seed 784acb7650674b28...
+  ok    lorenz63-rk4-fp256-j4: its main run's final state is level 3's half-step run's, bit for bit
+time  lorenz63-rk4 fp256 cft-segrun and the audits: 1.2 s
+  step-halving at level j: E = max |F_j - F_(j+1)| (the half-step run's), the method error M = max |R_j - ref|, the total error |F_j - ref|, rho = |F_j - R_j| the run's rounding; ref is R_8 where 2u_L <= 0.001 M, else odefun where its stated agreement <= 0.01 M; the uncertainty is the reference's
+     j            E     ref            M                   E/M  exact |R_j - R_(j+1)|/M        total             E/total         rho
+     0   0.00012389     R_8   0.00013006   0.952506 +- 2.3e-10      0.952506 +- 2.3e-10   0.00013006  0.952506 +- 2.3e-10    5.61e-70
+     1    5.8536e-6     R_8    6.1772e-6    0.947615 +- 4.8e-9       0.947615 +- 4.8e-9    6.1772e-6  0.947615 +- 4.8e-9    6.85e-70
+     2    3.0534e-7     R_8    3.2359e-7    0.943584 +- 9.1e-8       0.943584 +- 9.1e-8    3.2359e-7  0.943584 +- 9.1e-8    1.77e-70
+     3    1.7177e-8     R_8    1.8256e-8    0.940882 +- 1.6e-6       0.940882 +- 1.6e-6    1.8256e-8  0.940882 +- 1.6e-6    2.81e-69
+     4    1.0137e-9     R_8    1.0792e-9    0.939303 +- 2.7e-5       0.939303 +- 2.7e-5    1.0792e-9  0.939303 +- 2.7e-5    1.66e-69
+time  lorenz63-rk4 fp256 sweep in all: 18.5 s
+
+time  total: 205.7 s
+estimates: 110 checks, 0 failed, 0 not converged - every check passed
