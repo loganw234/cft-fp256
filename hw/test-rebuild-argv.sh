@@ -120,7 +120,10 @@ if [ -n "$tmpd" ]; then
     d="$runs/ulp_${cu}_0_synth_1"; mkdir -p "$d"
     if printf '%s\n' "$@" | grep -qx "run.ulp_${cu}_0_synth_1.{STEPS.SYNTH_DESIGN.ARGS.RETIMING}=true"; then
       id=21c6eb981cfcf745; me=$last_r; flag=" -retiming"; else id=1a011ef8b8b87f6a; me=$last_n; flag=""; fi
-    if [ "$cu" = "$me" ]; then
+    # STUB_FOREIGN_CACHE=1: every entry was added by an EARLIER build (a
+    # reused BUILD or a shared cache), so every CU is a hit whose
+    # producer is not in this build.
+    if [ "$cu" = "$me" ] && [ "${STUB_FOREIGN_CACHE:-0}" != 1 ]; then
       printf 'Command: synth_design -top ulp_%s_0 -part xcu50%s\nINFO: [Coretcl 2-1648] Added synthesis output to IP cache for IP ulp_%s_0, cache-ID = %s\n' "$cu" "$flag" "$cu" "$id" > "$d/runme.log"
     else
       printf 'INFO: [IP_Flow 19-4838] Using cached IP synthesis design for IP ulp_%s_0, cache-ID = %s.\n' "$cu" "$id" > "$d/runme.log"
@@ -205,6 +208,18 @@ for pair in "hw/link.cfg:single:1" "hw/link_quad.cfg:quad:4"; do
   fi
   # And the manifest says what the runs did: cache hits followed to the
   # run that synthesized their entry.
+  # The quad's four identical CUs must share a synthesis through the
+  # stub's cache, or the manifest's hit-following is never exercised
+  # and a manifest that read each CU's own log would pass (F1's P3b).
+  if [ "$tag" = quad ]; then
+    hits=$(grep -l 'Using cached IP synthesis design' \
+             "$TMP/build-$tag"/_x_hw/link/vivado/vpl/prj/prj.runs/ulp_*_synth_1/runme.log 2>/dev/null | wc -l)
+    if [ "$hits" -lt 1 ]; then
+      say_fail "$tag: the stub's runs hold no cache hit, so retimed_runs' hit-following is untested"
+    else
+      echo "  ok   $tag: $hits of the CUs are cache hits, as Vivado leaves them"
+    fi
+  fi
   mr=$(sed -n 's/^retimed_runs:  //p' "$TMP/build-$tag/cft_hw.manifest.txt" 2>/dev/null)
   if [ "$mr" != "$want" ]; then
     say_fail "$tag: the manifest's retimed_runs is '$mr', not '$want'"
@@ -290,11 +305,33 @@ else
   fi
 fi
 
+# Every CU a cache hit of an entry no run of this build added. The script
+# must finish with its whole manifest and name the hits unresolved - under
+# set -euo pipefail, e98d0ca's form of this loop ended the script there.
+echo "== unresolved cache hits: the build finishes and names them =="
+log=$(STUB_FOREIGN_CACHE=1 run_it "$SCRIPT" "hw/link_quad.cfg" "foreign")
+rc=$(cat "$TMP/rc-foreign")
+man="$TMP/build-foreign/cft_hw.manifest.txt"
+un=$(sed -n 's/^retiming_unresolved: \([^#]*\).*/\1/p' "$man" 2>/dev/null | sed 's/ *$//')
+if [ "$rc" != 0 ]; then
+  say_fail "unresolved: the script exited $rc - see $TMP/out-foreign.txt"
+elif ! grep -q '^clock_arg:' "$man" 2>/dev/null; then
+  say_fail "unresolved: the manifest stops before clock_arg:"
+elif [ "$un" != "cft_krnl_1:21c6eb981cfcf745 cft_krnl_2:21c6eb981cfcf745 cft_krnl_3:21c6eb981cfcf745 cft_krnl_4:21c6eb981cfcf745" ]; then
+  say_fail "unresolved: retiming_unresolved is '$un'"
+else
+  echo "  ok   unresolved: rc 0, the manifest whole, and retiming_unresolved names all four"
+fi
+
 # The retiming defect put back: cft_krnl_1's run alone, as the script
 # had it until 2026-09-30. The quad must then retime cft_krnl_1 alone,
 # which the check above refuses.
 echo "== negative control: RETIMING on cft_krnl_1's run alone =="
 SAB1="$TMP/sabotaged-retiming.sh"
+# Aimed at exactly one line: F1 found the pattern also matching the
+# manifest's loop, which then took the sabotage without the cmp noticing.
+nmatch=$(grep -c '^    for cu in .*CLOCK_CUS.*; do$' "$SCRIPT" || true)
+[ "$nmatch" = 1 ] || say_fail "control: the retiming loop's pattern matches $nmatch lines, not 1 - re-aim it"
 awk '!done_ && /^    for cu in [$][{]CLOCK_CUS[/][/][.][/] [}]; do$/ { print "    for cu in cft_krnl_1; do"; done_ = 1; next } { print }' \
     "$SCRIPT" > "$SAB1"
 if cmp -s "$SCRIPT" "$SAB1"; then

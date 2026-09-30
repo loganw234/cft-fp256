@@ -393,17 +393,21 @@ for t in $TARGETS; do
     # A hit whose entry an earlier build added is named, not guessed.
     rr="" ru=""
     runs="$BUILD/_x_$t/link/vivado/vpl/prj/prj.runs"
-    for cu in ${CLOCK_CUS//./ }; do
-      rl="$runs/ulp_${cu}_0_synth_1/runme.log"
+    # (This script runs under `set -euo pipefail`: every pipeline here
+    # that can find nothing ends in `|| true`, or a hit whose entry no
+    # run of this build added would end the script mid-manifest, which
+    # e98d0ca's first form of this loop did - verifier-F1, 2026-09-30.)
+    for mcu in ${CLOCK_CUS//./ }; do
+      rl="$runs/ulp_${mcu}_0_synth_1/runme.log"
       [ -f "$rl" ] || continue
       src="$rl"
-      id=$(sed -n 's/.*Using cached IP synthesis design for IP .*, cache-ID = \([0-9a-f]*\).*/\1/p' "$rl" | head -1)
+      id=$(sed -n 's/.*Using cached IP synthesis design for IP .*, cache-ID = \([0-9a-f]*\).*/\1/p' "$rl" | head -1 || true)
       if [ -n "$id" ]; then
         src=$(grep -l "Added synthesis output to IP cache for IP .*, cache-ID = $id" \
-                "$runs"/ulp_*_synth_1/runme.log 2>/dev/null | head -1)
-        [ -n "$src" ] || { ru="$ru $cu:$id"; continue; }
+                "$runs"/ulp_*_synth_1/runme.log 2>/dev/null | head -1 || true)
+        [ -n "$src" ] || { ru="$ru $mcu:$id"; continue; }
       fi
-      grep -q 'Command: synth_design.*-retiming' "$src" && rr="$rr $cu"
+      if grep -q 'Command: synth_design.*-retiming' "$src"; then rr="$rr $mcu"; fi
     done
     rr=${rr# }; ru=${ru# }
     echo "retimed_runs:  ${rr:-none}"
