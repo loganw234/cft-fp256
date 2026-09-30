@@ -100,9 +100,12 @@ exactly that reason: two links sharing a directory overwrite each
 other's `.xo`, temp dir and xclbin.
 
 `RETIMING=1` retimes the synthesis run of every CU the link config's
-`nk=` line names, as the clock constraint does, and the manifest's
-`retimed_runs:` line lists the runs whose own `runme.log` shows it
-after the build. Until 2026-09-30 the flag reached `cft_krnl_1`'s run
+`nk=` line names, as the clock constraint does. The manifest's
+`retimed_runs:` line lists the CUs whose netlist came from a
+`synth_design -retiming`, read from the runs' own `runme.log`s after
+the build. Identical CUs share one synthesis through Vivado's IP
+cache, so a cache hit is followed to the run that added its entry.
+Until 2026-09-30 the flag reached `cft_krnl_1`'s run
 alone. A single was retimed whole, but a quad had one tile of four
 retimed while its manifest said `retiming: 1` (docs/VALIDATION.md,
 2026-09-30). `hw/test-rebuild-argv.sh` (the `buildargs` stage) holds

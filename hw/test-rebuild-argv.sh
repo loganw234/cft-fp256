@@ -97,8 +97,36 @@ cat > "$TMP/bin/v++" <<'STUB'
 printf '%s\n' "$@" >> "$VPP_ARGV_LOG"
 out=""
 prev=""
-for a in "$@"; do [ "$prev" = "-o" ] && out="$a"; prev="$a"; done
+tmpd=""
+for a in "$@"; do
+  [ "$prev" = "-o" ] && out="$a"
+  [ "$prev" = "--temp_dir" ] && tmpd="$a"
+  prev="$a"
+done
 [ -n "$out" ] && { mkdir -p "$(dirname "$out")"; : > "$out"; }
+# The synthesis runs, the way Vivado's IP cache leaves them (measured in
+# revision 7's q135, q130 and q135b): CUs with the same properties share
+# one cache-ID; the LAST CU of each ID synthesizes and adds the entry,
+# the others are hits. A retimed CU's synth_design carries -retiming.
+if [ -n "$tmpd" ]; then
+  cus=$(sed -n 's/^\([a-z0-9_]*\)\.ap_clk.*/\1/p' <(printf '%s\n' "$@" | tr ',' '\n' | sed 's/^[0-9]*://'))
+  runs="$tmpd/link/vivado/vpl/prj/prj.runs"
+  last_r=""; last_n=""
+  for cu in $cus; do
+    if printf '%s\n' "$@" | grep -qx "run.ulp_${cu}_0_synth_1.{STEPS.SYNTH_DESIGN.ARGS.RETIMING}=true"; then
+      last_r=$cu; else last_n=$cu; fi
+  done
+  for cu in $cus; do
+    d="$runs/ulp_${cu}_0_synth_1"; mkdir -p "$d"
+    if printf '%s\n' "$@" | grep -qx "run.ulp_${cu}_0_synth_1.{STEPS.SYNTH_DESIGN.ARGS.RETIMING}=true"; then
+      id=21c6eb981cfcf745; me=$last_r; flag=" -retiming"; else id=1a011ef8b8b87f6a; me=$last_n; flag=""; fi
+    if [ "$cu" = "$me" ]; then
+      printf 'Command: synth_design -top ulp_%s_0 -part xcu50%s\nINFO: [Coretcl 2-1648] Added synthesis output to IP cache for IP ulp_%s_0, cache-ID = %s\n' "$cu" "$flag" "$cu" "$id" > "$d/runme.log"
+    else
+      printf 'INFO: [IP_Flow 19-4838] Using cached IP synthesis design for IP ulp_%s_0, cache-ID = %s.\n' "$cu" "$id" > "$d/runme.log"
+    fi
+  done
+fi
 exit 0
 STUB
 chmod +x "$TMP/bin/vivado" "$TMP/bin/v++"
@@ -174,6 +202,14 @@ for pair in "hw/link.cfg:single:1" "hw/link_quad.cfg:quad:4"; do
     say_fail "$tag: RETIMING=1 retimes '$rt', not every CU '$want'"
   else
     echo "  ok   $tag: RETIMING=1 retimes every CU: $rt"
+  fi
+  # And the manifest says what the runs did: cache hits followed to the
+  # run that synthesized their entry.
+  mr=$(sed -n 's/^retimed_runs:  //p' "$TMP/build-$tag/cft_hw.manifest.txt" 2>/dev/null)
+  if [ "$mr" != "$want" ]; then
+    say_fail "$tag: the manifest's retimed_runs is '$mr', not '$want'"
+  else
+    echo "  ok   $tag: the manifest's retimed_runs: $mr"
   fi
 done
 
@@ -267,8 +303,11 @@ if cmp -s "$SCRIPT" "$SAB1"; then
 else
   log=$(run_it "$SAB1" "hw/link_quad.cfg" "sabotage-retiming")
   rt=$(retimed_cus_of "$log")
-  if [ "$rt" = "cft_krnl_1" ]; then
-    echo "  ok   control: the sabotaged quad retimes '$rt' alone, and this test sees it"
+  mr=$(sed -n 's/^retimed_runs:  //p' "$TMP/build-sabotage-retiming/cft_hw.manifest.txt" 2>/dev/null)
+  if [ "$rt" = "cft_krnl_1" ] && [ "$mr" = "cft_krnl_1" ]; then
+    echo "  ok   control: the sabotaged quad retimes '$rt' alone, its manifest says '$mr', and this test sees it"
+  elif [ "$rt" = "cft_krnl_1" ]; then
+    say_fail "control: the argv retimes cft_krnl_1 alone, but the manifest says '$mr'"
   else
     say_fail "control: the sabotaged quad retimed '$rt', not the defect's cft_krnl_1"
   fi

@@ -1,12 +1,12 @@
 # The documents, by what you open them for
 
-Thirty-eight files, 57,165 lines. Flat in one directory they look like one
+Thirty-eight files, 57,168 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
 - **21,018 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,237 lines of tool manual**, one per shipped program;
-- **2,003 lines of operations**, read when you are about to do something to
+- **2,006 lines of operations**, read when you are about to do something to
   hardware;
 - **27,907 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
@@ -82,7 +82,7 @@ running.
 
 | document | lines | what it is for |
 |---|---|---|
-| [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 255 | Building a bitstream, and the five traps — three of which exit 0, and two that look like a design failure. `hw/build-pair.sh` is this document as an executable. |
+| [BITSTREAM-BUILDS.md](BITSTREAM-BUILDS.md) | 258 | Building a bitstream, and the five traps — three of which exit 0, and two that look like a design failure. `hw/build-pair.sh` is this document as an executable. |
 | [CARDDAY.md](CARDDAY.md) | 968 | Card day: the runbook as it was actually run, the staged pairs, and the forensics kept when build trees are reclaimed. |
 | [BRINGUP.md](BRINGUP.md) | 780 | Hardware bring-up, and the gates CI's green tick does not cover. |
 

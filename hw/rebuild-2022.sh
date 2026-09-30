@@ -378,13 +378,36 @@ for t in $TARGETS; do
     # What the synthesis runs themselves did, read from each CU's own
     # runme.log after the build: "retiming: 1" is the request, and a
     # request once reached one run of four without anything saying so.
-    rr=""
+    #
+    # Identical CUs share ONE synthesis through Vivado's IP cache: the
+    # first run synthesizes and logs "Added synthesis output to IP
+    # cache ... cache-ID = <id>", the others log "Using cached IP
+    # synthesis design ... cache-ID = <id>" and run no synth_design of
+    # their own. The ID covers the run's properties, so a retimed and
+    # an unretimed CU never share one (measured 2026-09-30: revision
+    # 7's q135 had krnl_1 synthesized with -retiming, krnl_4 without,
+    # and krnl_2 and krnl_3 cache hits of krnl_4's; q135b, every CU
+    # retimed, had krnl_4 synthesized with -retiming and the other
+    # three its cache hits). So a hit is followed to the run in this
+    # build that added its entry, and that run's synth_design is read.
+    # A hit whose entry an earlier build added is named, not guessed.
+    rr="" ru=""
+    runs="$BUILD/_x_$t/link/vivado/vpl/prj/prj.runs"
     for cu in ${CLOCK_CUS//./ }; do
-      rl="$BUILD/_x_$t/link/vivado/vpl/prj/prj.runs/ulp_${cu}_0_synth_1/runme.log"
-      [ -f "$rl" ] && grep -q -i -- '-retiming' "$rl" && rr="$rr $cu"
+      rl="$runs/ulp_${cu}_0_synth_1/runme.log"
+      [ -f "$rl" ] || continue
+      src="$rl"
+      id=$(sed -n 's/.*Using cached IP synthesis design for IP .*, cache-ID = \([0-9a-f]*\).*/\1/p' "$rl" | head -1)
+      if [ -n "$id" ]; then
+        src=$(grep -l "Added synthesis output to IP cache for IP .*, cache-ID = $id" \
+                "$runs"/ulp_*_synth_1/runme.log 2>/dev/null | head -1)
+        [ -n "$src" ] || { ru="$ru $cu:$id"; continue; }
+      fi
+      grep -q 'Command: synth_design.*-retiming' "$src" && rr="$rr $cu"
     done
-    rr=${rr# }
+    rr=${rr# }; ru=${ru# }
     echo "retimed_runs:  ${rr:-none}"
+    [ -z "$ru" ] || echo "retiming_unresolved: $ru   # cache hits an earlier build produced"
     echo "place_directive: ${PLACE_DIRECTIVE:-default}"
     echo "route_directive: ${ROUTE_DIRECTIVE:-default}"
     echo "phys_opt:      $PHYS_OPT"
