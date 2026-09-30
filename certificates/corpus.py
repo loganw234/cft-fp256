@@ -608,7 +608,9 @@ def ode_runs(base, fmt, lanes, S, wider, init=None, half_init=None):
 
 def recipes():
     """Every case of the corpus, as `make` writes it (the lead's decision,
-    2026-09-29: eleven cases and the twelfth, half-init)."""
+    2026-09-29: eleven cases and the twelfth, half-init; deepwrap's depth
+    ladder and half-step runs, and augsum's tie lanes, the fixes round,
+    2026-09-30)."""
     C = []
     C.append(CaseRecipe(
         "lorenz63-rk4-fp64",
@@ -668,27 +670,44 @@ def recipes():
         [RunRecipe("main", fl, b"", None, cert.state_bytes(
             "fp64", [dec("fp64", t) for t in ("3", "1", "3", "5")]), 5, 1)]))
     au = _src_image("augsum-fp64", "certificates/programs/augsum-fp64.cfta")
+    # lanes 2 and 3 (the fixes round, 2026-09-30): the first augadd of each
+    # is +-(2^53 + 3), a tie between +-(2^53 + 2), whose significand is
+    # odd, and +-(2^53 + 4), so roundTiesTowardZero and roundTiesToEven
+    # part there. Lane 1's 1e16 + 1 is a tie at which they agree.
+    tie = str(2 ** 53 + 2)
     C.append(CaseRecipe(
         "augsum-fp64",
         "augsum, the corpus's own: revision 8's augadd and augerr in a "
-        "compensated sum, and a stepped STX and LDX; 2 lanes, 3 segments; "
-        "the software backend only",
+        "compensated sum, and a stepped STX and LDX; 4 lanes, 3 segments, "
+        "lanes 2 and 3 meeting augadd ties, +-(2^53 + 3), at which "
+        "roundTiesTowardZero and roundTiesToEven part; the software "
+        "backend only",
         [RunRecipe("main", au, b"", None, cert.state_bytes(
             "fp64", [dec("fp64", t) for t in
-                     ("1", "0", "0.1", "0", "1e16", "0", "1", "0")]), 3, 4)],
+                     ("1", "0", "0.1", "0", "1e16", "0", "1", "0",
+                      tie, "0", "1", "0", "-" + tie, "0", "-1", "0")]),
+            3, 4)],
         backends="software"))
+    # deepwrap: its bank is H, 1.0, and the raw integers 32,768, 1 and 2
+    # (the source's header); the half-step run halves H, slot 0
     dw = _src_image("deepwrap-fp64", "certificates/programs/deepwrap-fp64.cfta")
+    dwb = cert.state_bytes("fp64", [dec("fp64", "0.25"), dec("fp64", "1"),
+                                    1 << 15, 1, 2])
     dwi = cert.state_bytes("fp64", [dec("fp64", t) for t in
-                                    ("1", "0.25", "3", "2", "0.5", "7")])
+                                    ("1", "0.25", "0", "2", "0.5", "0")])
     for depth in (256, 2048):
         C.append(CaseRecipe(
             f"deepwrap-fp64-{depth}",
             f"deepwrap, the corpus's own, at {depth:,} scratch slots: a "
-            f"non-strict ldx at index 256 and stx at 258, which "
-            + ("wrap into the carried block" if depth == 256 else
-               "do not wrap") + "; 2 lanes, 3 segments",
-            [RunRecipe("main", dw, b"", None, dwi, 3, 1,
-                       params=((DEPTH_PARAM, depth),))],
+            f"non-strict ldx at p and stx at p + 2, for p = 16,384 down to "
+            f"128, reach the carried block at every depth up to p, so every "
+            f"depth from 128 to 32,768 has its own chain; a main run of 3 "
+            f"segments and a half-step run of 6, each stating the depth; 2 "
+            f"lanes",
+            [RunRecipe("main", dw, dwb, None, dwi, 3, 1,
+                       params=((DEPTH_PARAM, depth),)),
+             RunRecipe("half-step", dw, halved("fp64", dwb, (0,)), None, dwi,
+                       6, 1, params=((DEPTH_PARAM, depth),), h_slots=(0,))],
             depth=depth, by_depth_option=True))
     hi = ode_runs("lorenz63-rk4", "fp64", 2, 2, False, half_init=[
         v for i in range(2) for v in (dec("fp64", repr(1 + i / 64 + 1 / 128)),
