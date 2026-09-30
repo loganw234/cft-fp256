@@ -23,6 +23,9 @@ Where things stand (2026-09-28):
 - the segment runner, `cft-segrun`, writes version-1 certificates from
   the library (see "The segment runner"), and the `programs` stage
   holds them byte for byte to the golden writer;
+- the golden certificates, twelve programs and their certificates in
+  `certificates/`, hold both writers to committed bytes (see "Golden
+  certificates");
 - the C auditor is later work, in the plan of record:
   [ROADMAP.md](ROADMAP.md), "Segments, certificates and the audit
   tool".
@@ -1276,7 +1279,7 @@ every boundary, and writes a version-1 certificate. `make -C host all`
 builds it, from `host/tools/segrun.c`.
 
     cft-segrun --out CERT --states DIR (--salt SALT | --open)
-               [--device sw|<xclbin>|cft://host:port]
+               [--device sw|<xclbin>|cft://host:port | --scratch-depth N]
                --run main --image IMG [--bank BANK] --init INIT
                           --segments S --steps K [--param NAME=N ...]
                [--run half-step --h-slots I,J,... --image IMG ...]
@@ -1304,6 +1307,21 @@ builds it, from `host/tools/segrun.c`.
   certificate keyed. `--open` makes it open.
 - `steps` and each `--param` are stated, not checked. Parameters are
   written in the order given, and must already be in byte order.
+- `--scratch-depth N` opens the software backend at N scratch slots a
+  lane through `cft_open_ex`, as positive-run's option does, so that it
+  computes what a tile of that depth must: a non-strict STX or LDX
+  reduces its index modulo the depth.
+  - Every run block then states `parameter scratch-depth N`, in its
+    place in byte order among the run's parameters. That is the
+    parameter the audit reads as the run's depth (see "The chain").
+  - It is written only when the option is given, so every certificate
+    made without it is byte for byte what it was before the option
+    existed.
+  - The identity lines do not change: the software backend's device
+    lines stay `none`, and the depth is stated in the run blocks
+    instead.
+  - N is a power of two from 1 to 32,768, the range `cft_open_ex` takes
+    and the reader holds the parameter to.
 - It writes `accuracy 0`. Accuracy is the plan's step 5.
 - `--hash` prints one of the hashes above for a file's bytes, and
   `--build-id` the library's `cft_build_id()`. The gate holds the first
@@ -1372,7 +1390,15 @@ A writer needs four more, which the golden writer, an API rather than
 a command, never meets. They are the tool's, in sysexits' codes, of
 which 64 is already the auditor's usage:
 - `usage`, exit 64: a command line the tool does not take, or a file it
-  names that cannot be read;
+  names that cannot be read. Among them, refused before anything is
+  made, is a `--scratch-depth`:
+  - beside a `--device` other than `sw`: a device's depth is its image's,
+    and `cft_open_ex` refuses the two together too;
+  - not a power of two from 1 to 32,768, or not in its one decimal
+    spelling;
+  - given twice.
+  A `--param scratch-depth=...` is refused `usage` too: that parameter is
+  written by the option alone, from the depth the backend was opened at;
 - `device`, exit 69: the device does not open; it cannot read the
   sticky flags a certificate records (`cft_caps.flags_readable` 0); a
   digest, or a segment's run, fails; or the library leaves a segment's
@@ -1581,6 +1607,37 @@ cft-serve, stopped by its PID. Their device lines must be the remote
 rule's, and their run blocks byte for byte the software backend's,
 flagstep's flag words and STATUS among them.
 
+It holds `--scratch-depth` on the software backend (the golden-certificate
+round, 2026-09-29):
+- **deepstep**, written in the gate, reads index 256 through a
+  non-strict LDX. That is its own slot 0 at 256 slots, and at 2,048 a
+  slot nothing wrote. Certified at 256 (open) and at 2,048 (open and
+  keyed), each certificate:
+  - states `parameter scratch-depth N` between the run's own `alpha`
+    and `zeta`, in byte order;
+  - is byte for byte the golden writer's at that depth;
+  - has every boundary file the golden chain's;
+  - is accepted by the golden audit in full and sampled, re-run at the
+    depth it states.
+- The two depths end on other states, so the leg holds 256 against
+  every deeper depth, not only the line. It does not tell 2,048 from
+  the depths above 512: the program reads slot 256 and writes 258, so
+  every depth from 512 up computes the same chain. A tool that runs at
+  4,096 while stating 2,048 passes it, and the corpus's depth case too
+  (verifier-A2's plant T3). A known limit.
+- lorenz63-rk4's main, half-step and wider runs at 2,048 state the
+  depth in every run block, and audit green.
+- Its refusals are among the others:
+  - beside an xclbin and beside a `cft://` device;
+  - 0, 3, 65,536, `02048`, `2048x` and `-2048`;
+  - the option twice, and beside `--hash` or `--build-id`;
+  - a `--param scratch-depth=`.
+- The range's two ends are taken, each refused only by the library's
+  loader, at the depth it opened, for a program that cannot load there:
+  flagstep's two slots at a depth of 1, and at 32,768 an image the loader
+  refuses, so that nothing runs at 32,768. A scratch run's lane block is
+  545 MB there (cft.h).
+
 Last, it holds memory. What a run costs: flagstep on 65,535 lanes, a
 main run and two half-step runs, against the main run alone. The two
 further runs may cost their inputs and one state more, no more. At
@@ -1605,9 +1662,12 @@ NOT TESTED too, and the gate goes on (at eb2d1ae, run as `nobody` under
 a hard limit of about 8 GB, it stopped with a traceback; verifier-C7).
 It also holds git to ignoring the tool's binary.
 
-Since P3b's second send-back: 391 checks on Linux, 41 to 43 s in WSL;
-389 on the Windows desktop and one SKIP, the trial's cost NOT TESTED
-there, 39 to 41 s (2026-09-29). There were 293 at 99f1b43, 380 at
+With `--scratch-depth` (2026-09-29): 458 checks on the Windows desktop
+and one SKIP, the trial's cost NOT TESTED there, 55 s. On Linux the two
+checks of the trial's cost run in the SKIP's place, so 460 there, by
+that arithmetic and not yet run. Before it, since P3b's second
+send-back: 391 checks on Linux, 41 to 43 s in WSL; 389 on the Windows
+desktop and one SKIP, 39 to 41 s. There were 293 at 99f1b43, 380 at
 4eed552 and 389 at eb2d1ae. Verifier-C7 measured 4eed552's 380 at 45
 to 52 s with the desktop at 0 to 4 % CPU, and 163 s at about 93 %.
 
@@ -1625,6 +1685,198 @@ d4abe2a, P3b's three answers (not at ff7ff7b alone),
 382 at eb2d1ae, and 384 of 384 at d4abe2a in 66 to 68 s, nothing
 skipped (2026-09-28 and 29; the round's ledger, card-p3b, card-p3b2
 and card-p3b3).
+
+## Golden certificates
+
+`certificates/` holds a committed corpus of programs and their
+certificates: the plan's step 7. Logan asked for it on 2026-09-29, as
+"programs and their certificates utilized as regression tests
+themselves as well as conformance tests in the future". It is a
+regression test now, and a conformance test for another implementation
+later.
+
+**Why it exists.** The segment runner's gate holds cft-segrun and the
+golden writer to each other, from states it makes fresh. So a change
+that moves both at once passes it: a change to the model, to a hash or
+to an encoding. A committed certificate does not move. Every such change
+either keeps the corpus's bytes, or changes them in a commit that says
+so, made by `python certificates/corpus.py make`.
+
+**The cases.** There are twelve, each small: 2 to 4 lanes, and 2 to 8
+segments a run. Each holds something no other does:
+- `lorenz63-rk4-fp64`, `lorenz96-rk4-fp64` and `henonheiles-lf-fp64`: the
+  three ODE programs at fp64, open. Each has a half-step run and a wider
+  fp128 run beside its main run. lorenz63's carries two estimates:
+  `wider`, enclosed in fp64, and `step-halving`, exact over the lanes.
+- `lorenz63-rk4-fp256`, `lorenz96-rk4-fp256` and `henonheiles-lf-fp256`:
+  the same at fp256, each with a half-step run. henonheiles' carries the
+  energy's drift over its four lanes, exact. The value has a 697-bit
+  numerator and a denominator of 3 x 2^717, 719 bits: near the width
+  rule, where a C auditor's bigint is near its reach.
+- `example`: this page's example certificate, byte for byte, keyed under
+  the example salt, with the page's two entries. The gate holds the
+  page's block to the committed file.
+- `flagstep-fp64`: flags and STATUS that change from segment to segment
+  (20, 0, 1, 0, 20 and 48, 48, 0, 48, 48), which no ODE segment's do.
+- `augsum-fp64`: revision 8. augadd and augerr keep a compensated sum,
+  and a stepped STX and LDX store and read back its partial sums. Only
+  the software backend makes it: no tile built so far publishes either
+  revision-8 bit, and a tile without one refuses the program at load,
+  by name.
+- `deepwrap-fp64-256` and `deepwrap-fp64-2048`: one program and one
+  initial state, certified at 256 slots and at 2,048 through `cft-segrun
+  --scratch-depth`. A non-strict LDX at index 256 and STX at index 258
+  wrap into the carried block at 256 and do not at 2,048, so the two
+  chains differ. Each certificate states its depth.
+- `lorenz63-rk4-fp64-half-init`: a half-step run entered from an initial
+  state of its own. Its runs are what ran, but its stated relation to
+  the main run does not hold, so its expected verdict is the refusal
+  `aux-start`: one committed negative for every auditor.
+
+The corpus's data is about 145 KB.
+
+**The files.**
+- `certificates/MANIFEST`: every case, every file it names, and each
+  file's SHA-256.
+- `certificates/images/`: every image a run names. The gate assembles
+  each again from its source and requires the same bytes:
+  - a library image from `programs/`, whose digest `programs/MANIFEST`
+    also carries;
+  - a wider run's from its main run's source, with the `.format` line a
+    rung up;
+  - the corpus's own from `certificates/programs/`.
+- `certificates/<case>/<case>.cert`: the certificate.
+- `certificates/<case>/states/run-<r>-boundary-<b>.bin`: every boundary
+  of every run, lane-major, as cft-segrun writes them. Handed whole, the
+  directory serves a sampled audit; its boundary-0 files alone serve a
+  full audit from the initial states.
+- `certificates/<case>/run-<r>.bank`: a bank that is no library file, a
+  half-step run's halved bank or a wider run's widened one.
+- `certificates/example.salt`: the example salt, 00 01 .. 1f. This page
+  prints it, so it is a test salt only, and never an owner's.
+- `certificates/corpus.py`: `make` writes the corpus, and `check` is its
+  gate.
+- Git keeps the bytes: a certificate is `-text`, and the states and the
+  salt are `binary` (.gitattributes).
+
+**The manifest** is text in a certificate's own style: printable ASCII
+and LF, one record a line, its key first, single spaces. It takes two
+liberties: `#` begins a comment line, and blank lines separate cases.
+Paths are from the repository's root.
+- Its first record, after the comment lines at its head, is
+  `cft-golden-corpus 1`. Then comes `source <path> <sha256>`
+  for each of the corpus's own programs, and `image <path> <sha256>
+  library <name>` or `image <path> <sha256> source <path> [format <fmt>]`
+  for each image.
+- A block for each case follows:
+  - `case`, then `what`, a sentence for a person;
+  - `certificate <path> <sha256>`;
+  - `mode`, and for a keyed case `salt <path> <sha256>`;
+  - `depth`, and `backends any` or `backends software`;
+  - `accuracy 0 none`, or `accuracy <A> golden` when the case has A
+    entries, which only the golden writer makes before step 5;
+  - `verdict accepted` or `verdict refused <name>`;
+  - `states <dir>` and `runs <R>`.
+- Each run follows its case's lines:
+  - its `run` line as the certificate spells it;
+  - `image <path>`;
+  - `bank <path> <sha256>` or `bank none`;
+  - `segments`, `steps`, `parameters` and each `parameter`;
+  - a `boundary <b> <sha256>` line for each boundary, the SHA-256 of the
+    state file's bytes, not the certificate's tagged hash.
+- corpus.py's `read_manifest` reads it strictly and names the line of
+  any departure. Another gate may import it.
+
+**As a regression test.** `make -C host corpustest` runs `corpus.py check
+--tool ./cft-segrun`, and verify/run.sh's `programs` stage runs it beside
+the segment runner's gate (the lead's decision, 2026-09-29). For each
+case it holds:
+1. every file against its SHA-256, and no file under `certificates/` that
+   the manifest does not name, so an edited or added file fails by its
+   name;
+2. every image against its source, assembled again;
+3. the golden writer making the committed bytes again, byte for byte:
+   - `run_chain` and `certify_run` at the case's depth;
+   - each accuracy value derived again, under the definition the
+     committed entry states;
+   - `encode`, handed the committed certificate's identity lines;
+4. every boundary of the golden chain against its committed file;
+5. cft-segrun, on the software backend at the case's depth, writing the
+   committed certificate normalized in two places - three for an
+   accuracy case - and in nothing else:
+   - its `build-id` line is what the binary's own `--build-id` prints,
+     and its hash line is computed again over that body;
+   - for an accuracy case, the accuracy block is `accuracy 0`, the block
+     the tool writes before step 5;
+   - why nothing else may differ: every other line is a function of what
+     the manifest fixes (the image, bank, initial state, segments,
+     steps, parameters, mode and salt, and depth) and of the backend,
+     which the gate fixes to software. `build-id` names the library
+     build, which changes with every commit by design, and the hash line
+     covers it;
+   - its boundary files are the committed ones;
+6. the golden audit giving the case its expected verdict, in full from
+   the initial states alone, and sampled from the committed states with
+   its seed printed;
+7. the case named `example` being this page's example certificate.
+
+It is 156 checks, 23 to 32 s on the Windows desktop, niced, the
+slowest with the desktop at about 77 % from other work (2026-09-29).
+
+**Changing it.** A change that moves any byte of the corpus fails the
+gate by name: a change to the model, a hash, an encoding, the assembler's
+output, or the `programs/` sources and banks the corpus names. When the
+change is meant, its commit runs `corpus.py make` with a clean build of
+cft-segrun, and says so.
+
+**Its producer.** `make` refuses a tool whose build is not clean, so each
+certificate names a commit anyone can check out.
+- Every certificate but `example`'s was written by cft-segrun built
+  clean from 0b8ea10, the commit that added `--scratch-depth`: its
+  `build-id` is `tracked=clean untracked=none`. The golden writer's
+  accuracy block stands where the case has one.
+- `example`'s is the golden writer's, with the identity this page prints
+  (`build-id unknown`).
+
+**As a conformance test.** Another implementation (another library, a
+GPU library, a tile) takes each case's images, banks and initial states
+from the manifest. It runs every run's segments at the case's depth and
+writes a certificate. It conforms on the case when its certificate
+reproduces:
+- every run block, from `run` to `output`, byte for byte;
+- every accuracy value, where it writes accuracy;
+- and its boundary states are the committed files.
+
+The streams are +0 in every case, and the manifest does not state them.
+Its identity lines name it, and are not compared; neither is the hash
+line, which covers them. The other lines - the magic line, `mode`,
+`salt-commitment`, `runs`, the accuracy entries' definitions and `end` -
+follow from the recipe and the grammar; this rule does not name them.
+The other rules:
+- **Depth.** A case's depth is its runs' `scratch-depth` parameter where
+  they state one, and 256 otherwise. A tile states its depth in CAPS2
+  and writes no such parameter. So a tile of a case's depth conforms
+  when its run blocks equal the committed ones with that parameter taken
+  out and the parameter count one less. Every case but the two deepwrap
+  ones has the same chain at 256 and at 2,048 (by the golden model, not
+  a card run), so a 2,048 tile conforms on every case but
+  deepwrap-fp64-256, and refuses augsum-fp64 (below).
+- **Revision 8.** A tile without revision 8 refuses `augsum-fp64` at
+  load, by name, and that refusal is its conforming answer.
+- **Auditors.** An auditor conforms when it gives each case its
+  `verdict`, in full and sampled.
+
+The corpus is described here and committed in this repository, and
+published nowhere else. Publishing it outside this repository needs
+Logan's permission.
+
+**What it does not hold yet.**
+- A certificate made on a tile. The lead's, later: a deepwrap case from
+  the revision-7 single, whose CAPS2 reads 2,048, would join with the
+  card's device lines.
+- One made through a remote handle.
+- Streams other than +0, which cft-segrun does not take.
+- Accuracy entries made in C, which are step 5.
 
 ## What version 1 does not do
 
@@ -1654,4 +1906,6 @@ and card-p3b3).
   than 256 slots, fails its own audit rather than passing, unless its
   runs state the server's depth by their `scratch-depth` parameter. A
   certificate made on the software backend is re-run at 256 too, unless
-  its runs state a depth that way ("The chain").
+  its runs state a depth that way ("The chain"). cft-segrun states one
+  in every run block when it is given `--scratch-depth N`, which it
+  takes for the software backend only.

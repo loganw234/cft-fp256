@@ -1164,9 +1164,14 @@ clean-programs:
 #                       the flags program through a loopback cft-serve,
 #                       stopped by PID; what a run beside the main run
 #                       costs in memory (peak commit on Windows, the
-#                       least ulimit -v on Linux); and, on Linux, that
-#                       the trial before anything is made costs the runs
-#                       nothing, to the page (NOT TESTED on Windows).
+#                       least ulimit -v on Linux); on Linux, that the
+#                       trial before anything is made costs the runs
+#                       nothing, to the page (NOT TESTED on Windows);
+#                       and --scratch-depth: a program whose answer
+#                       depends on the depth, certified at 256 and at
+#                       2,048 with the depth stated in every run block,
+#                       byte for byte the golden writer's at each and
+#                       audited there, and the option's refusals.
 #                       verify/run.sh's `programs` stage runs it.
 #
 # The tree's build id goes in as make test hands api-test its own, so a
@@ -1188,6 +1193,31 @@ segruntest: cft-segrun$(EXE) cft-serve$(EXE)
 clean-segrun:
 	rm -f cft-segrun cft-segrun.exe
 # ==================== end of the cft-segrun block ==================
+
+# ===================================================================
+# The golden certificates: a committed corpus of programs and their
+# certificates (certificates/; docs/CERTIFICATES.md, "Golden
+# certificates"; the plan of record's step 7, docs/ROADMAP.md)
+#
+#   make corpustest     certificates/corpus.py check: every file against
+#                       certificates/MANIFEST's SHA-256, and none
+#                       unlisted; every image against its source; each
+#                       case made again by the golden writer, byte for
+#                       byte, and by cft-segrun, byte for byte but for
+#                       build-id, the accuracy block it does not write
+#                       before step 5, and the hash line; every boundary
+#                       file; the golden audit's expected verdict, in
+#                       full and sampled; and the page's example.
+#
+# segruntest holds the tool and the golden writer to each other, so a
+# change that moves both at once passes it; this holds both to bytes
+# that do not move. verify/run.sh's `programs` stage runs it, beside
+# segruntest (the lead's decision, 2026-09-29).
+# ===================================================================
+.PHONY: corpustest
+corpustest: cft-segrun$(EXE)
+	$(PYTHON) ../certificates/corpus.py check --tool ./cft-segrun$(EXE)
+# ==================== end of the golden-certificate block ============
 
 # Removes every platform's products, not just this one's. A tree on a
 # shared volume gets built from more than one platform, and a clean

@@ -69,6 +69,22 @@ Then:
      where identical runs' peak commit differs by several pages, NOT
      TESTED, by name. A host whose hard address-space limit stops a
      measurement says NOT TESTED too, and the gate goes on.
+ 11. --scratch-depth, on the software backend (not the card leg's): the
+     tool opens the backend at N through cft_open_ex and states `parameter
+     scratch-depth N` in every run block, in byte order among the run's
+     parameters. `deepstep`, written here, reads index 256 through a
+     non-strict LDX, which is its own slot 0 at 256 slots and a slot
+     nothing wrote at 2,048: certified at each, it is byte for byte the
+     golden writer's at that depth, each boundary file the golden chain's,
+     and the golden audit accepts it, re-running at the depth the
+     certificate states; and the two depths' end states differ, so the
+     program does test the depth. lorenz63's main, half-step and wider
+     runs at 2,048 carry the parameter in every block and audit green.
+     Its refusals - beside a device, a depth that is not a power of two in
+     1..32,768 or not in its one spelling, the option twice, beside --hash
+     or --build-id, and a `--param scratch-depth=` of the user's - are in
+     step 8, and so are 1 and 32,768 taken, each refused only by the
+     loader of a program that cannot load there.
 
 The programs: lorenz63-rk4, lorenz96-rk4 and henonheiles-lf at fp64 and
 fp256, each image held to programs/MANIFEST, with its classic bank, a
@@ -165,6 +181,31 @@ halt
 """
 FLAGSTEP_FLAGS = [20, 0, 1, 0, 20]
 FLAGSTEP_STATUS = [48, 48, 0, 48, 48]
+
+# The depth leg's program (section 11): its answer depends on the scratch
+# depth. It is written here rather than taken from certificates/, so that
+# the tool's gate and the golden-certificate corpus share no input.
+DEEPSTEP = """.format   fp64
+.deposits 0
+.scratch  in 2
+.scratch  out 2
+.const    I256 = 0x0000000000000100
+.const    ONE  = 0x3ff0000000000000
+; slot 0 is x, slot 1 is y. Each segment: y <- y + scratch[256 mod D],
+; then x <- x + 1. A non-strict LDX reduces its index modulo the depth D:
+; at 256 slots index 256 is slot 0, so y gathers x; at 2,048 it is a
+; slot nothing wrote, +0, so y holds.
+ldl    r3, 0
+ldl    r4, 1
+iadd   r6, r6, I256
+ldx    r5, r6
+add    r4, r4, r5
+add    r3, r3, ONE
+stl    r3, 0
+stl    r4, 1
+halt
+"""
+DEPTH_PARAM = "scratch-depth"
 
 CHECKS = 0
 FAILED = []
@@ -896,10 +937,64 @@ def hold_refusals(work, l63, flag):
          lambda o, s: base(exists, s), None, None),
         ("the null device as --out", "output",
          lambda o, s: base(os.devnull, s), None, None),
+        # --scratch-depth (section 11): the software backend only, a
+        # power of two in 1..32,768 in its one spelling, given once, and
+        # the parameter it writes is the option's alone. The golden
+        # writer has no twin for any: it is handed a depth, not a line.
+        ("--scratch-depth beside an xclbin", "usage",
+         lambda o, s: base(o, s, extra=["--device", d / "absent.xclbin",
+                                        "--scratch-depth", "2048"]),
+         None, None),
+        ("--scratch-depth beside a cft:// device", "usage",
+         lambda o, s: base(o, s, extra=["--device", "cft://127.0.0.1:1",
+                                        "--scratch-depth", "2048"]),
+         None, None),
+        ("--scratch-depth 0", "usage",
+         lambda o, s: base(o, s, extra=["--scratch-depth", "0"]), None, None),
+        ("--scratch-depth 3", "usage",
+         lambda o, s: base(o, s, extra=["--scratch-depth", "3"]), None, None),
+        ("--scratch-depth 65536", "usage",
+         lambda o, s: base(o, s, extra=["--scratch-depth", "65536"]), None,
+         None),
+        ("--scratch-depth 02048", "usage",
+         lambda o, s: base(o, s, extra=["--scratch-depth", "02048"]), None,
+         None),
+        ("--scratch-depth 2048x", "usage",
+         lambda o, s: base(o, s, extra=["--scratch-depth", "2048x"]), None,
+         None),
+        ("--scratch-depth -2048", "usage",
+         lambda o, s: base(o, s, extra=["--scratch-depth", "-2048"]), None,
+         None),
+        ("--scratch-depth given twice", "usage",
+         lambda o, s: base(o, s, extra=["--scratch-depth", "256",
+                                        "--scratch-depth", "256"]), None,
+         None),
+        ("--param scratch-depth=2048", "usage",
+         lambda o, s: base(o, s, extra=["--param", "scratch-depth=2048"]),
+         None, None),
+        ("--hash with --scratch-depth", "usage",
+         lambda o, s: ["--hash", "state", P["init"], "--open",
+                       "--scratch-depth", "256"], None, None),
+        ("--build-id with --scratch-depth", "usage",
+         lambda o, s: ["--build-id", "--scratch-depth", "256"], None, None),
+        # the ends of the range are TAKEN: each is refused only by the
+        # library's loader, at the depth it was opened at, for a program
+        # that cannot load there - flagstep's two slots at a depth of 1,
+        # and at 32,768 an image the loader refuses, so that nothing runs
+        # there (a scratch run's lane block is 545 MB at 32,768; cft.h)
+        ("--scratch-depth 1, a program of 2 slots", "program-image",
+         lambda o, s: base(o, s, image="fimg", bnk=None, ini="finit",
+                           extra=["--scratch-depth", "1"]), None, None),
+        ("--scratch-depth 32768, an image the loader refuses",
+         "program-image",
+         lambda o, s: base(o, s, image="img-ctl", bnk=None, ini="finit",
+                           extra=["--scratch-depth", "32768"]), None, None),
     ]
     # refused by a check the tool makes only after the outputs are made:
     # the library's loader, which needs the device, opened after them
-    AFTER_OUTPUTS = {"an image the loader refuses (an unknown control code)"}
+    AFTER_OUTPUTS = {"an image the loader refuses (an unknown control code)",
+                     "--scratch-depth 1, a program of 2 slots",
+                     "--scratch-depth 32768, an image the loader refuses"}
 
     def survive(i, label, name, argf, env):
         """The same refusal with a file already at --out, which it must
@@ -954,7 +1049,18 @@ def hold_refusals(work, l63, flag):
             "an --out that is a directory there already":
                 r"--out .+ is there already",
             "the null device as --out":
-                r"--out .+ (is not a file|is there already)"}
+                r"--out .+ (is not a file|is there already)",
+            "--scratch-depth beside an xclbin":
+                r"--scratch-depth 2048 beside --device ",
+            "--scratch-depth 3":
+                r"--scratch-depth 3 is not a power of two from 1 to 32768",
+            "--param scratch-depth=2048":
+                r"--param scratch-depth=2048: scratch-depth is the parameter "
+                r"--scratch-depth writes",
+            "--scratch-depth 1, a program of 2 slots":
+                r"run 0: cft_program_load",
+            "--scratch-depth 32768, an image the loader refuses":
+                r"run 0: cft_program_load"}
     for i, (label, name, argf, env, twin) in enumerate(cases):
         out, sdir = d / f"case{i}.cert", d / f"case{i}.states"
         args = argf(out, sdir)
@@ -1004,6 +1110,125 @@ def hold_refusals(work, l63, flag):
           "the file at --out in 'an --out that is there already' is as it "
           "was, byte for byte",
           "it is CHANGED" if P["existing"].is_file() else "it is GONE")
+
+
+# ---- --scratch-depth: the software backend at a tile's depth ----------------
+
+def with_depth(params, depth):
+    """A run's parameters with `scratch-depth` in its place in byte order,
+    as the tool writes it under --scratch-depth."""
+    return tuple(sorted(tuple(params) + ((DEPTH_PARAM, depth),),
+                        key=lambda p: p[0].encode("ascii")))
+
+
+def audit_both(what, data, salt, progs, states, segments):
+    """The golden audit in full and sampled; each must accept."""
+    choose = {r: ("sample", max(1, s // 2)) for r, s in enumerate(segments)}
+    for how, kw in (("in full", {}), ("sampled", {"choose": choose})):
+        try:
+            v = cert.audit(data, salt, progs, states=states, **kw)
+            want = segments if how == "in full" else \
+                [max(1, s // 2) for s in segments]
+            check([len(x["rerun"]) for x in v.runs] == want,
+                  f"{what}: the golden audit ACCEPTS it {how}, re-running at "
+                  f"the depth the certificate states")
+        except cert.Refusal as e:
+            bad(f"{what}: the golden audit refuses it {how}: {e.name}: "
+                f"{e.message}")
+
+
+def hold_depth(work, l63):
+    """Section 11: --scratch-depth. The tool's certificate at each depth is
+    the golden writer's at that depth, with the depth stated in every run
+    block, and the golden audit re-runs it there."""
+    print("== 11. --scratch-depth: the software backend at a tile's depth, "
+          "stated in every run block", flush=True)
+    d = work / "depth"
+    d.mkdir(parents=True, exist_ok=True)
+    img = asm.assemble(DEEPSTEP, "deepstep")
+    init = [dec("fp64", t) for t in ("1", "0.5", "2", "0.25")]
+    pi, pn = d / "deepstep.cftp", d / "deepstep.init"
+    pi.write_bytes(img)
+    pn.write_bytes(cert.state_bytes("fp64", init))
+    ends = {}
+    for depth, mode in ((256, "open"), (2048, "open"), (2048, "keyed")):
+        salt = SALT if mode == "keyed" else None
+        what = f"deepstep at --scratch-depth {depth}, {mode}"
+        out, sdir = d / f"{depth}-{mode}.cert", d / f"{depth}-{mode}.states"
+        rc, _, se = run_tool(
+            ["--out", out, "--states", sdir] +
+            (["--salt", work / "salt.bin"] if salt else ["--open"]) +
+            ["--scratch-depth", str(depth), "--run", "main", "--image", pi,
+             "--init", pn, "--segments", "3", "--steps", "1",
+             "--param", "alpha=1", "--param", "zeta=2"])
+        if not check(rc == 0, f"{what}: cft-segrun exits 0",
+                     f"rc {rc}: {se.strip()[-300:]}"):
+            continue
+        data = out.read_bytes()
+        got = [ln for ln in data.decode("ascii").split("\n")
+               if ln.startswith("parameter")]
+        check(got == ["parameters 3", "parameter alpha 1",
+                      f"parameter {DEPTH_PARAM} {depth}",
+                      "parameter zeta 2"],
+              f"{what}: the run block states the depth, in byte order among "
+              f"the run's own parameters", f"it says {got}")
+        st, rs = cert.run_chain(img, b"", init, 3, scratch_depth=depth)
+        ends[(depth, mode)] = st[-1]
+        run = cert.certify_run("main", img, b"", salt, st, rs, steps=1,
+                               parameters=with_depth((("alpha", 1),
+                                                      ("zeta", 2)), depth),
+                               scratch_depth=depth)
+        idn = cert.parse(data).identity
+        gold = cert.encode(cert.Certificate(
+            mode, cert.salt_commitment(salt) if salt else None, idn, (run,),
+            ()))
+        check(gold == data, f"{what}: the golden writer at {depth} slots "
+              f"writes the same bytes", first_difference(data, gold))
+        check(all(boundary_file(sdir, 0, b).read_bytes()
+                  == cert.state_bytes("fp64", st[b]) for b in range(4)),
+              f"{what}: every boundary file is the golden chain's state "
+              f"at {depth} slots")
+        audit_both(what, data, salt, {0: (img, None)},
+                   {0: {b: boundary_file(sdir, 0, b).read_bytes()
+                        for b in range(4)}}, [3])
+    if (256, "open") in ends and (2048, "open") in ends:
+        check(ends[(256, "open")] != ends[(2048, "open")],
+              "deepstep ends on other states at 256 and at 2,048 slots, so "
+              "the leg above holds the depth and not only the line")
+    # every run block: lorenz63's main, half-step and wider runs at 2,048
+    what = f"{l63.name} at --scratch-depth 2048, open"
+    out, sdir = d / "l63-2048.cert", d / "l63-2048.states"
+    args = [str(a) for a in tool_args(l63, PATHS[l63.name], out, sdir, None)]
+    args[args.index("--open") + 1:args.index("--open") + 1] = \
+        ["--scratch-depth", "2048"]
+    rc, _, se = run_tool(args)
+    if check(rc == 0, f"{what}: cft-segrun exits 0",
+             f"rc {rc}: {se.strip()[-300:]}"):
+        data = out.read_bytes()
+        runs, states, wrong = [], {}, []
+        for r, spec in enumerate(l63.runs):
+            st, rs = cert.run_chain(spec.image, spec.bank, spec.init,
+                                    spec.segments, scratch_depth=2048)
+            runs.append(cert.certify_run(
+                spec.kind, spec.image, spec.bank, None, st, rs,
+                steps=spec.steps, parameters=with_depth(spec.params, 2048),
+                h_slots=spec.h_slots, scratch_depth=2048))
+            states[r] = {b: boundary_file(sdir, r, b).read_bytes()
+                         for b in range(len(st))}
+            wrong += [(r, b) for b in range(len(st)) if states[r][b]
+                      != cert.state_bytes(spec.fmt, st[b])]
+        gold = cert.encode(cert.Certificate("open", None,
+                                            cert.parse(data).identity,
+                                            tuple(runs), ()))
+        check(gold == data, f"{what}: every run block states the depth, and "
+              f"the golden writer at 2,048 writes the same bytes",
+              first_difference(data, gold))
+        check(not wrong, f"{what}: every boundary file is the golden chain's "
+              f"state at 2,048 slots", f"(run, boundary) {wrong[:4]}")
+        audit_both(what, data, None,
+                   {r: (s.image, s.bank or None)
+                    for r, s in enumerate(l63.runs)}, states,
+                   [s.segments for s in l63.runs])
 
 
 # ---- memory: what a run costs, and what the trial costs --------------------
@@ -1484,6 +1709,12 @@ def main():
     hold_hashes(work)
     l63 = next(p for p in programs if p.name == "lorenz63-rk4-fp64")
     hold_refusals(work, l63, flag)
+    if card:
+        print("  NOTE  section 11, --scratch-depth, is the software "
+              "backend's: beside a device the tool refuses it (step 8)",
+              flush=True)
+    else:
+        hold_depth(work, l63)
     if SERVE is None:
         if card:
             print("  NOTE  the remote leg is not the card leg's: "

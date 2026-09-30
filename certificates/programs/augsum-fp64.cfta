@@ -1,0 +1,58 @@
+; augsum-fp64 - revision 8 in a segment: a compensated sum by
+; augmentedAddition, and its partial sums through a stepped STX and LDX.
+; A golden certificate of its own (certificates/MANIFEST;
+; docs/CERTIFICATES.md, "Golden certificates").
+;
+; docs/SEQUENCER.md, revision 8: `augadd rD, rA, rB` keeps the sum of
+; IEEE 754-2019 9.5's augmentedAddition, rounded roundTiesTowardZero,
+; and `augerr rD, rA, rB` its exact error; `stx` and `ldx` take a signed
+; post-step, added to the index register after the access. The software
+; backend publishes both bits (ABI 0.16: CFT_SEQ_FEAT_AUGADD, CAPS2[11],
+; and CFT_SEQ_FEAT_SCRATCH_STEP, CAPS2[12]). No tile built so far carries
+; either, and a device without a bit refuses the program at load, by
+; name, so only the software backend makes this case (the manifest's
+; `backends software`).
+;
+; The state is four slots a lane: s the sum, e the compensation, t the
+; next term, and d the last step the sum took. Each segment adds four
+; terms, t, t/3, t/9 and t/27. For each, `augerr` takes the exact error
+; of s + t first, so that `augadd` can then write s itself, and the
+; error joins e. Each new s is also stored at slots 8, 9, 10 and 11 by
+; `stx` with a post-step of +1. After the loop the last two are read
+; back by `ldx` with a post-step of -1, and their difference is d.
+.format   fp64
+.deposits 0
+.scratch  in 4
+.scratch  out 4
+.const    THIRD = 0x3fd5555555555555
+.const    I8    = 0x0000000000000008   ; the raw encoding of integer 8
+.const    IONE  = 0x0000000000000001   ; and of integer 1
+.reg      s     = r3
+.reg      e     = r4
+.reg      t     = r5
+.reg      err   = r6
+.reg      i     = r7                   ; +0 at the start: integer 0
+.reg      last  = r9
+.reg      prev  = r10
+.reg      d     = r11
+
+ldl    s, 0
+ldl    e, 1
+ldl    t, 2
+iadd   i, i, I8                        ; the ring starts at slot 8
+repeat 4
+  augerr err, s, t                     ; the exact error of s + t
+  augadd s, s, t                       ; s + t, rounded ties toward zero
+  add    e, e, err
+  stx    s, i, 1                       ; slot i := s, then i := i + 1
+  mul    t, t, THIRD
+endrep
+isub   i, i, IONE                      ; slot 11, the last stored
+ldx    last, i, -1                     ; then i := 10
+ldx    prev, i, -1                     ; slot 10; then i := 9
+sub    d, last, prev
+stl    s, 0
+stl    e, 1
+stl    t, 2
+stl    d, 3
+halt

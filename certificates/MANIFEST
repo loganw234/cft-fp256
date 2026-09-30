@@ -1,0 +1,437 @@
+# certificates/MANIFEST - the golden certificates: every case, and
+# every file's SHA-256 (docs/CERTIFICATES.md, "Golden certificates").
+#
+# Written by `python certificates/corpus.py make`; held by its
+# `check` (make -C host corpustest). Paths are from the repository's
+# root. An implementation that uses the corpus as a conformance
+# test makes each case's runs from the images, banks and initial
+# states named here, at the case's depth, and must reproduce every
+# run block and accuracy value of the certificate. The identity
+# lines name the implementation that made it.
+#
+# The one salt here, certificates/example.salt, is the bytes 00 01
+# .. 1f: docs/CERTIFICATES.md prints it, so it is a TEST salt only,
+# and never an owner's.
+cft-golden-corpus 1
+
+source certificates/programs/augsum-fp64.cfta c883bdfcf24fdaaac2fe7da96b1e565f8a527586357074d45a6f7246bd31d464
+source certificates/programs/deepwrap-fp64.cfta 1ee5b5a8740aeeb14603176badfb84b1c6c289178678b5e037a200d8ccc24daf
+source certificates/programs/flagstep-fp64.cfta b8ecf694f9bafbbbd6c6a442b9f9cf749e0a4f1354188a8ee44a799e975bb948
+image certificates/images/augsum-fp64.cftp 7ecd133081fc7a35bf0a5b9cf5d749c94688f8005a5d090c748318d091858198 source certificates/programs/augsum-fp64.cfta
+image certificates/images/deepwrap-fp64.cftp 01e7b9907ffbef5e2095ee1614f4d831187fbef8d8203bd0ec96a81a264e9fb2 source certificates/programs/deepwrap-fp64.cfta
+image certificates/images/flagstep-fp64.cftp e3f822d4acea1d12e19c8fae19569e5ea7747acea6b44c8e9fb36e42226efb14 source certificates/programs/flagstep-fp64.cfta
+image certificates/images/henonheiles-lf-fp128.cftp 36aae70a12aa0921eedac68c3f783bcbec28bb8043981e0aa0887c98f95a4fef source programs/henonheiles-lf-fp64.cfta format fp128
+image certificates/images/henonheiles-lf-fp256.cftp bca321c224cba29f3bf32eea494157b64ea01c1e1022cde88adee82c0d6e91d5 library henonheiles-lf-fp256.cftp
+image certificates/images/henonheiles-lf-fp64.cftp af8b49674a8053b28b631ad50714e61eb0ec51487b3f40d6490b87bfe357ec77 library henonheiles-lf-fp64.cftp
+image certificates/images/lorenz63-rk4-fp128.cftp ae1f5f5d9a3ac70415476f8cc984e05a57d788186997d28498f612449dae938f source programs/lorenz63-rk4-fp64.cfta format fp128
+image certificates/images/lorenz63-rk4-fp256.cftp 8561f230aa2695dc3f2a68b5350ec820770fbbded5c8d043b146bbf01c4da5c0 library lorenz63-rk4-fp256.cftp
+image certificates/images/lorenz63-rk4-fp64.cftp a4f98313cb8aad6262879db9f31ac393af8219116d931645f987bab051838b65 library lorenz63-rk4-fp64.cftp
+image certificates/images/lorenz96-rk4-fp128.cftp 3bd9c4026d0ee6e82df6e000e70686cab205381457797f08993531f561944d88 source programs/lorenz96-rk4-fp64.cfta format fp128
+image certificates/images/lorenz96-rk4-fp256.cftp d16f1cbf13408b00b41eb596109aa3743e5d9cca1c76ce2a588824c0771c2cdf library lorenz96-rk4-fp256.cftp
+image certificates/images/lorenz96-rk4-fp64.cftp c45fbe8277d7b530be8a027167936485fa272101575133391ba79a11dc150db0 library lorenz96-rk4-fp64.cftp
+
+case lorenz63-rk4-fp64
+what Lorenz-63 by RK4 at fp64, 3 lanes: a main run of 3 segments, a half-step run of 6 and a wider fp128 run of 3; a wider estimate enclosed in fp64 and a step-halving estimate exact
+certificate certificates/lorenz63-rk4-fp64/lorenz63-rk4-fp64.cert d1a7ce61cc9771265a559f4642afd552136264eff8e011679a27c527daba55f6
+mode open
+depth 256
+backends any
+accuracy 2 golden
+verdict accepted
+states certificates/lorenz63-rk4-fp64/states
+runs 3
+run 0 main
+image certificates/images/lorenz63-rk4-fp64.cftp
+bank programs/lorenz63-rk4-fp64.classic.bank c91cc547b6d5f616fff66d2abd2cbc83d1cfb4bce464d9a6ae79473bd947bf09
+segments 3
+steps 100
+parameters 2
+parameter ensemble-spread 64
+parameter members 3
+boundary 0 9fd3043360306f8ed70785dd2793a6cbcb9813d49993c4728e26090a56b545f7
+boundary 1 a422aad97b3b4d3a47f8f47c8eeb4b892af64f45486507af1b98a170ee954619
+boundary 2 4d97b31b231a7e37d5e9b1595ff6363b86a6e807ca5587eeccd0f8365c4f301e
+boundary 3 6bc9ddfabdb2e4b00f118b38ae9a3c6b07c934c15ce77385f768777639801e7c
+run 1 half-step h-slots 3 0 1 2
+image certificates/images/lorenz63-rk4-fp64.cftp
+bank certificates/lorenz63-rk4-fp64/run-1.bank a7db2cff0d527899e6e9e23943d08b4d3c139d4ff141081ded41599345ea3290
+segments 6
+steps 100
+parameters 1
+parameter members 3
+boundary 0 9fd3043360306f8ed70785dd2793a6cbcb9813d49993c4728e26090a56b545f7
+boundary 1 2b07b1198cbfeb1083893cecee2f2815c08c0290a5cb36514fff2193009da675
+boundary 2 0acb188adcbdac42246b4a3c9a22f0e6f7004237597dfb2072db48c8dcc443da
+boundary 3 e9f9a5952f28c9202ad77698d81154082a4e86877b941f94e38328ba1d4d1772
+boundary 4 a82c34b3020a1e4a639bcc39f01ff53f5cdf9e9f5f79ed6f2852a251d74fe460
+boundary 5 bd20a6f67fd3c2934d4c3fb6225011e32392b70e24f5bd9e6d8a0f616ddb0a3c
+boundary 6 095aba15fbc4efcb74fc9cb62150f0bf89cb587a1fdbd79942f8759cb58a0b3f
+run 2 wider
+image certificates/images/lorenz63-rk4-fp128.cftp
+bank certificates/lorenz63-rk4-fp64/run-2.bank 62756c92acb35a52c9842a4f4dbc8c0a81c55bf174db117d3b093b85bd6656a3
+segments 3
+steps 100
+parameters 0
+boundary 0 8282d52a63d3f57202563d30842df2d8133f6d7bc94058c6d1f2425b87ada52f
+boundary 1 374770f17703fcba377d856d6dace6d3a24925a604fa62e4a853987a91499aeb
+boundary 2 f56e02f8133a8c99244a5e4be3b52a525d493954f5d1e6926b2fdfb08a6a1ee6
+boundary 3 041b8a7ac2da5a1529029b0ca419110dd9a9dc2030107827b190f76ade05e879
+
+case lorenz63-rk4-fp256
+what Lorenz-63 by RK4 at fp256, 3 lanes: a main run of 3 segments and a half-step run of 6
+certificate certificates/lorenz63-rk4-fp256/lorenz63-rk4-fp256.cert 0d7adc68f3b6dfad9d4225770dfe8d42a2c3b77c5d865c6854e8fc6c5603b1d5
+mode open
+depth 256
+backends any
+accuracy 0 none
+verdict accepted
+states certificates/lorenz63-rk4-fp256/states
+runs 2
+run 0 main
+image certificates/images/lorenz63-rk4-fp256.cftp
+bank programs/lorenz63-rk4-fp256.classic.bank 479ab866c54897712d18553e791d53da65f250aeed7336a82ee690101e76a7d0
+segments 3
+steps 100
+parameters 2
+parameter ensemble-spread 64
+parameter members 3
+boundary 0 22333f605b65176b8e18b2a9e1a64cc94acca4ea348c05edae3834bdb3124e2c
+boundary 1 efad777f2358f508e5c1242e33453a7b9e9744cf8d2a890ad5a310c0530752c7
+boundary 2 8ae4789ab12331da4d025460ec7c2a208adf288d3bc6ee5760c1eb1e0f4912ff
+boundary 3 39a27912f059e0ca76585705ea9d877ab73215309d379a21fe2fd741d31fcdee
+run 1 half-step h-slots 3 0 1 2
+image certificates/images/lorenz63-rk4-fp256.cftp
+bank certificates/lorenz63-rk4-fp256/run-1.bank b880caca418768813ebfcbf06dceb306abf1097f7edb1f2f03d718ba2e58ba26
+segments 6
+steps 100
+parameters 1
+parameter members 3
+boundary 0 22333f605b65176b8e18b2a9e1a64cc94acca4ea348c05edae3834bdb3124e2c
+boundary 1 8ab694836e649ab2eb6f474e1afa75ad1d2b55e8544584fdfe433a6a3ccad76f
+boundary 2 cbb53896c718aef548b8a507bc686172060ab8760401d652c364a96ecc884ee9
+boundary 3 f81e224c96ceeb9a06471372587d2bde92957b608eab7b9df95f21211680df10
+boundary 4 d250da9500821fa7376db95c341cd3a72fba1e26c04cefd6c49af5772f06097a
+boundary 5 7da302628537c166aca13b9ce159a63eb6effba9c7227b30f64d109b5e12d6c9
+boundary 6 2b98244bc1e55c8c550a9e41a884f5acfcfe61d77e6c4f0a6fc0469428d49ec6
+
+case lorenz96-rk4-fp64
+what Lorenz-96 by RK4 at fp64, 2 lanes of 40 slots: a main run of 2 segments, a half-step run of 4 and a wider fp128 run of 2
+certificate certificates/lorenz96-rk4-fp64/lorenz96-rk4-fp64.cert 2117f3dbba7588b398e0337c66c606c0a7d722d744005eff7eed3a571e63f146
+mode open
+depth 256
+backends any
+accuracy 0 none
+verdict accepted
+states certificates/lorenz96-rk4-fp64/states
+runs 3
+run 0 main
+image certificates/images/lorenz96-rk4-fp64.cftp
+bank programs/lorenz96-rk4-fp64.classic.bank 68c249869952646c5031c3022e398bf9685df880da1559e9f4021cbb207d2b09
+segments 2
+steps 20
+parameters 2
+parameter ensemble-spread 64
+parameter members 2
+boundary 0 eccf3a571e2a4f0974b09529614a9920c7c06277cb0fd6b897800fa83c134b2c
+boundary 1 b8e467142124685e66b8caf2ad864cc9c99d2dfcb9a364144aa2465496ae2148
+boundary 2 ff52257ec82797e94f8d5db5ce568488d1988e78e8cb4edb8fa39becfa703853
+run 1 half-step h-slots 3 0 1 2
+image certificates/images/lorenz96-rk4-fp64.cftp
+bank certificates/lorenz96-rk4-fp64/run-1.bank 00725aa1a6cfd8908184c739d6dfe4fabe113ced20de5e101f9407b987836700
+segments 4
+steps 20
+parameters 1
+parameter members 2
+boundary 0 eccf3a571e2a4f0974b09529614a9920c7c06277cb0fd6b897800fa83c134b2c
+boundary 1 2150eb92e4296df34a5f610a2eae91ecf981280698a13b85c11247d3b3ced3c2
+boundary 2 65fd9a162acbef503296469ea0b53069f9807de3afc188d5d84ec63ab595fdf7
+boundary 3 240b6d22e83df478d56fe3661af92a3e903ecd6c2e9d7dd49e3d80f7d96d8a7f
+boundary 4 d553a36cdcefc109befecc04ecdfc8f036a7496d6baf51f8200ef5780cc5f242
+run 2 wider
+image certificates/images/lorenz96-rk4-fp128.cftp
+bank certificates/lorenz96-rk4-fp64/run-2.bank a83f5df43788a134e34d08e5b141fefa94b684050c3eb71d6faa9f1c37e808c4
+segments 2
+steps 20
+parameters 0
+boundary 0 368a857718768e3197971d14f73acfef54e4fd35336685b0ce0b288cf6c02e18
+boundary 1 3d5794fff19a6a8b741820180a719776d3d619fcc155b31e4808d9990a6494af
+boundary 2 e7e6eeee848b90ccb6e5ba7fe0b069de08b55967e09d10b6bb30eb774951332c
+
+case lorenz96-rk4-fp256
+what Lorenz-96 by RK4 at fp256, 2 lanes of 40 slots: a main run of 2 segments and a half-step run of 4
+certificate certificates/lorenz96-rk4-fp256/lorenz96-rk4-fp256.cert 4509221115a71c4bc37d3c68febcda75f83650adcb57a5a43f14bb0a8a05fcb5
+mode open
+depth 256
+backends any
+accuracy 0 none
+verdict accepted
+states certificates/lorenz96-rk4-fp256/states
+runs 2
+run 0 main
+image certificates/images/lorenz96-rk4-fp256.cftp
+bank programs/lorenz96-rk4-fp256.classic.bank 8f2c14637f4e0cc5d85bd41d8b113a7e329f9e7a84da86f99e8645b4e8e176ae
+segments 2
+steps 20
+parameters 2
+parameter ensemble-spread 64
+parameter members 2
+boundary 0 85f53ad0332c5e67c251bdeaa6463fa6d22a6107b70b594c64823b4153815255
+boundary 1 37a0d8844653e70b3d9114574c0d40d5873b58f39f5775bd78879dc5d78e09ef
+boundary 2 e4926a1eb67256615a5da36c8be587d8618e68a5cc7e753d9d1325b94673bad5
+run 1 half-step h-slots 3 0 1 2
+image certificates/images/lorenz96-rk4-fp256.cftp
+bank certificates/lorenz96-rk4-fp256/run-1.bank 01dff4fdbca8ee0e6b375fd5a1c020d56814094e2d4edb8db8412f5d281be064
+segments 4
+steps 20
+parameters 1
+parameter members 2
+boundary 0 85f53ad0332c5e67c251bdeaa6463fa6d22a6107b70b594c64823b4153815255
+boundary 1 cb06ccb5bd1045de04d77341a278f2e71b10d2a8ec2fb03f5fe20deb3b945682
+boundary 2 cf64e67cbf559057fdf407ec70ca254eb240516e734051ba25b4f9a95d52d5f0
+boundary 3 1f1984d1df27db5fb98c825a47eed81158d91941212f6c5c719367c608ffe4c7
+boundary 4 b18f4146533414490093cb0803367f3051c1124c46bdd9a3909ee5c6c486a9d8
+
+case henonheiles-lf-fp64
+what Henon-Heiles by Stormer-Verlet at fp64, 4 lanes: a main run of 4 segments, a half-step run of 8 and a wider fp128 run of 4
+certificate certificates/henonheiles-lf-fp64/henonheiles-lf-fp64.cert b1935e7a3163a97ea4f711a71b91fa9976757daf64e0d1149cf53dddd667bb54
+mode open
+depth 256
+backends any
+accuracy 0 none
+verdict accepted
+states certificates/henonheiles-lf-fp64/states
+runs 3
+run 0 main
+image certificates/images/henonheiles-lf-fp64.cftp
+bank programs/henonheiles-lf-fp64.classic.bank ba37e0dd52e236a51a1fde9aecbf52171bcc339b8d374d05e32aba6527c12b4e
+segments 4
+steps 100
+parameters 2
+parameter ensemble-spread 64
+parameter members 4
+boundary 0 d6418f27097f17dc9e33dbe35e94ce13c585b0834cc43adf55d89a9b4aa6e1c0
+boundary 1 294fba0a31bb09a3b96b2e82dbe7f771d05e174903d2ca180a5cabaf1c1092e1
+boundary 2 fcf40bea6f3471eafbf689ce3607f56c046950d622ffc302c71c5eff68919707
+boundary 3 01b1a18e9ed7e8f40750d821e14c2a6dc67bca08cd3bfc9cac20a50d01fae1f8
+boundary 4 244a84891971d9d6ebd78301df19c9477660a9ac46195ff69f4d3d1401585b32
+run 1 half-step h-slots 3 0 1 2
+image certificates/images/henonheiles-lf-fp64.cftp
+bank certificates/henonheiles-lf-fp64/run-1.bank e06b0fd3d44d71c9a90d0c8878b744723aad78e2b936b4abc0fe87aeb47bb3af
+segments 8
+steps 100
+parameters 1
+parameter members 4
+boundary 0 d6418f27097f17dc9e33dbe35e94ce13c585b0834cc43adf55d89a9b4aa6e1c0
+boundary 1 56a0667841ea21b7425d20506d46b99e2f10f6dda8b76a7a7f324ed24c8c81ad
+boundary 2 59f7b47f30012c535bfb139b021a29596405606fe7919f43ea22049f1dd33be1
+boundary 3 db7e930db73a87b1347a621ec99d128941d2bad121a9a11043d3f5670f6a451a
+boundary 4 785396067f43b7f8adcd1191aae5bee3c5fd4ae2bdbaf3e11af887e4cc8615e4
+boundary 5 cc8ac9d0c7a40f1fa74f8d93e2194b5e72bbae177754f50ac93af4bdefbd2ca8
+boundary 6 db2db653443f134e68cf0a207ea651c6e6457db6b8966c90dfdb261aa8856d9c
+boundary 7 c49cb55e8b70e87b9806df7afc7e088f12013980778bc1608d9ef2295fa25b27
+boundary 8 2913a11e322ab71b1ecb9acee9d9b41c394209b320f53a18ac4e37aaff27997d
+run 2 wider
+image certificates/images/henonheiles-lf-fp128.cftp
+bank certificates/henonheiles-lf-fp64/run-2.bank 7321b3cfebf4c3fef2abc6f25c2e31990eb628c6d0380a587c3df03f9384eda0
+segments 4
+steps 100
+parameters 0
+boundary 0 e437fb3128046a4cb7d2d4c2cd869e1e4d7fbbd7f9d37b17d0dfd50b334adc19
+boundary 1 ebf4f6846f2d9a741f5bf8d7260d352b787874b770751756fcd05b1eafdebc4a
+boundary 2 14a39ccd82d16fe97b266fadcbeea49650b7d9407962cb5d6b98333f4cdba7d5
+boundary 3 8ada586e57f540cd11d1026978bd51d5e881c868a9ff1b7f0781df600414df8a
+boundary 4 7b5848bed66a1fd3a390db08459140962c1de5aa02c185f3856f6d3c92d39bb2
+
+case henonheiles-lf-fp256
+what Henon-Heiles by Stormer-Verlet at fp256, 4 lanes: a main run of 4 segments and a half-step run of 8; the energy's drift over the lanes, exact, near the width rule
+certificate certificates/henonheiles-lf-fp256/henonheiles-lf-fp256.cert afd7cabd2261d09bb5814f1b6ecdd818d6fbc2baca17dc6e9faa2985e203b3ea
+mode open
+depth 256
+backends any
+accuracy 1 golden
+verdict accepted
+states certificates/henonheiles-lf-fp256/states
+runs 2
+run 0 main
+image certificates/images/henonheiles-lf-fp256.cftp
+bank programs/henonheiles-lf-fp256.classic.bank 1969d0fa5bddab0fc3846df208f5ad13a53d47f7bbddd15cfaef96271c348b5b
+segments 4
+steps 100
+parameters 2
+parameter ensemble-spread 64
+parameter members 4
+boundary 0 e18b589445e0c1fc5ee64cb866e432939e09db69e528d64fbda6694b388506ab
+boundary 1 990ed8d4b54a2e37378b4cbde2552653896d47ef69913274275f33492344ebba
+boundary 2 d5005ad5d5f6901f4897d40279183a5df0d104ac5ead65d5cd95d00bb802eed2
+boundary 3 b7123dfd971383def50ccf1c8263194ae7b85fe9a5b5378854a4a37ba9ddb568
+boundary 4 e31244e0d0a8b5d27edf5259c102840015f45bd949913ae1020bda1d25e6d3ef
+run 1 half-step h-slots 3 0 1 2
+image certificates/images/henonheiles-lf-fp256.cftp
+bank certificates/henonheiles-lf-fp256/run-1.bank 4ddc402f2e40fc02755cdbd9012826d6a87dab56b63705963ffae9fc0528fcf0
+segments 8
+steps 100
+parameters 1
+parameter members 4
+boundary 0 e18b589445e0c1fc5ee64cb866e432939e09db69e528d64fbda6694b388506ab
+boundary 1 fa93c1699f3a54a52224e8bcf0fdee81eb375c925b149c62251b0f43c7afd5a4
+boundary 2 553cc3025bf3f4a747ef319fe91e4c20a98fafd815694644fcc448a9debbfc30
+boundary 3 182334b66bbdfdaa4c580f2dcfcd186725dc8160433fd5764379a214438cf241
+boundary 4 48b00fcfe227f863142b5bde90dd3c56b6e573471ea636c1e77fde1f414891df
+boundary 5 10155abae605aea9c858fb837319d1149c9a0c92152bf4fa40d3dc984484e298
+boundary 6 d9d56fcb10f066dd9a9367a21ac300d6f6ac67a0f20b19c1c73e98eb88908810
+boundary 7 e7a21552d338a94c7f48b9c29f745fdf6d8c04b6e17d8f0d3949aab3e6cbc797
+boundary 8 7e1da6b4067792d73d840701db7a024f6c88f30e183eb42c8fcf0bedcdba1f32
+
+case example
+what docs/CERTIFICATES.md's example certificate, byte for byte: Henon-Heiles at fp64, 2 lanes, a main run of 2 segments and a half-step run of 4, KEYED under the page's example salt, with the page's two entries
+certificate certificates/example/example.cert 420a28c6aeb0c48ea1f65030f15ca917b5fb2a471b6d0d95226c2fb6a12f29e1
+mode keyed
+salt certificates/example.salt 630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd
+depth 256
+backends any
+accuracy 2 golden
+verdict accepted
+states certificates/example/states
+runs 2
+run 0 main
+image certificates/images/henonheiles-lf-fp64.cftp
+bank programs/henonheiles-lf-fp64.classic.bank ba37e0dd52e236a51a1fde9aecbf52171bcc339b8d374d05e32aba6527c12b4e
+segments 2
+steps 100
+parameters 0
+boundary 0 0e5ae6452a2b71a68e3705ed8660f86c0bdcecf6fcb37924d2ddc9c5956b6b95
+boundary 1 5e3f75341a93fecfb437a3aff288a16334d05194da6c63b64a2b4343f6fc8313
+boundary 2 9179580724bf13bc74314aaf5fc7dfde9320f81228e01b0d1fade3824b470d4b
+run 1 half-step h-slots 3 0 1 2
+image certificates/images/henonheiles-lf-fp64.cftp
+bank certificates/example/run-1.bank e06b0fd3d44d71c9a90d0c8878b744723aad78e2b936b4abc0fe87aeb47bb3af
+segments 4
+steps 100
+parameters 0
+boundary 0 0e5ae6452a2b71a68e3705ed8660f86c0bdcecf6fcb37924d2ddc9c5956b6b95
+boundary 1 47319818434c6b02fefca7e163277ee9b8b8927e439cec6f6737a733bd6f8491
+boundary 2 1960f6b245084d5d459ddc0a3bab1dae0fd1126d686e4b33088513fbc5ea5779
+boundary 3 22d73fdd606d5372c91eedc302de0d9c9af0e04e2bf2e4bf5d10e6ecefe1c3a5
+boundary 4 febc1558877e43a9ac1343eed3f6638e4a9f15a4ccf20179408283c5c228498d
+
+case flagstep-fp64
+what flagstep, the corpus's own: 2 lanes, 5 segments raising flags 20, 0, 1, 0, 20 and STATUS 48, 48, 0, 48, 48
+certificate certificates/flagstep-fp64/flagstep-fp64.cert c254f0e630663cd429cdeddfefbf11a247cf64a70e5e98777dc030bbee2fe65a
+mode open
+depth 256
+backends any
+accuracy 0 none
+verdict accepted
+states certificates/flagstep-fp64/states
+runs 1
+run 0 main
+image certificates/images/flagstep-fp64.cftp
+bank none
+segments 5
+steps 1
+parameters 0
+boundary 0 7d70783e4842109744eb803168a9cf7b3ddde1534e0bafc8fa241928b3879a00
+boundary 1 d014668c5a9a686f1620cde57a5463e0e6dbbe8002148f4ca7e08730e17e2263
+boundary 2 93bb30496fbf3b9e0b3f6aee8e1212a3ce0f1110e03c5af939f4be5ba911fbd9
+boundary 3 66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925
+boundary 4 6cdcb9ea11f76d53df2acd5595d45dc00f699acf7a7104931720ca1217c2958c
+boundary 5 6c54e55edc297041f3b6cf644e6a5230871435d94284432ae2dc3c54712d6be5
+
+case augsum-fp64
+what augsum, the corpus's own: revision 8's augadd and augerr in a compensated sum, and a stepped STX and LDX; 2 lanes, 3 segments; the software backend only
+certificate certificates/augsum-fp64/augsum-fp64.cert 5bf07ef50a8ccbf40f46099f10bfe7c902e99108b4e4e04abc74b6bb436281a7
+mode open
+depth 256
+backends software
+accuracy 0 none
+verdict accepted
+states certificates/augsum-fp64/states
+runs 1
+run 0 main
+image certificates/images/augsum-fp64.cftp
+bank none
+segments 3
+steps 4
+parameters 0
+boundary 0 4ee9c2a8a3f445e03dc88a3b9dc4225f1258d3f733c6537abc8e0e164ab9bb30
+boundary 1 4dd2c793695b705698b13a3dc00f21aeec2fb0ecf3a59d833a55442025477d69
+boundary 2 26f324ddd68e87bbf598dc6125f6189c028132d010af6b71b53e4bc03ce85594
+boundary 3 b4c8ec19d7f486c83179d191a0e87d031db1c08fd46c4e00acf8a873e1551f74
+
+case deepwrap-fp64-256
+what deepwrap, the corpus's own, at 256 scratch slots: a non-strict ldx at index 256 and stx at 258, which wrap into the carried block; 2 lanes, 3 segments
+certificate certificates/deepwrap-fp64-256/deepwrap-fp64-256.cert ab158d51d3df852608f9a019ecbdfba3077feed04b31c202a493bc36cc685da1
+mode open
+depth 256
+backends any
+accuracy 0 none
+verdict accepted
+states certificates/deepwrap-fp64-256/states
+runs 1
+run 0 main
+image certificates/images/deepwrap-fp64.cftp
+bank none
+segments 3
+steps 1
+parameters 1
+parameter scratch-depth 256
+boundary 0 ac068d807246cf6f8079e0024925e5ad9314adee744ec82dea2fd1eeb5a201d5
+boundary 1 68126290560f6f477e42ca78e0d1a91968a831b515c2c6c1ee73520ddc95aec6
+boundary 2 fb2cdf25fcb78611656e5426d727ba4eb89cb9f89db2e48b2bbe8ee415f2138b
+boundary 3 7d363ba5b6975cefbb1796c467bdc5118e88b54abd469397d4d1fd5f1a5944af
+
+case deepwrap-fp64-2048
+what deepwrap, the corpus's own, at 2,048 scratch slots: a non-strict ldx at index 256 and stx at 258, which do not wrap; 2 lanes, 3 segments
+certificate certificates/deepwrap-fp64-2048/deepwrap-fp64-2048.cert a2a0d55ddbec7491717aebf892d34f18698a632478d61e0c7fd7c876583c52fc
+mode open
+depth 2048
+backends any
+accuracy 0 none
+verdict accepted
+states certificates/deepwrap-fp64-2048/states
+runs 1
+run 0 main
+image certificates/images/deepwrap-fp64.cftp
+bank none
+segments 3
+steps 1
+parameters 1
+parameter scratch-depth 2048
+boundary 0 ac068d807246cf6f8079e0024925e5ad9314adee744ec82dea2fd1eeb5a201d5
+boundary 1 ca9884b99e762c3a5f0e0bf529ce05685718760921c8e606a64020c46c46184d
+boundary 2 3d1117085ed2b79f0d2c15003fae5525afbe72f06cd8226d83cbab7c6d5f48d5
+boundary 3 6df6667eb576baf5b6bcae132dc9e2a4fa829ccf5287f9610ab34e404b1b4cb9
+
+case lorenz63-rk4-fp64-half-init
+what Lorenz-63 at fp64, 2 lanes, a main run of 2 segments and a half-step run of 4 entered from an initial state of its OWN: a relation the certificate states and does not hold, refused aux-start
+certificate certificates/lorenz63-rk4-fp64-half-init/lorenz63-rk4-fp64-half-init.cert a98caa4ff1d58ca9971306704a62335db4774013db6e5d4453bc046ebf85bc1c
+mode open
+depth 256
+backends any
+accuracy 0 none
+verdict refused aux-start
+states certificates/lorenz63-rk4-fp64-half-init/states
+runs 2
+run 0 main
+image certificates/images/lorenz63-rk4-fp64.cftp
+bank programs/lorenz63-rk4-fp64.classic.bank c91cc547b6d5f616fff66d2abd2cbc83d1cfb4bce464d9a6ae79473bd947bf09
+segments 2
+steps 100
+parameters 2
+parameter ensemble-spread 64
+parameter members 2
+boundary 0 96099b582b409de8627dd865cf727634554cd0b41c623579ba3f4bd74f36666b
+boundary 1 1cc8f1cd016ad7cf7c069a90a6bbd19ca7384c2db44e884d1d37043753b5bec1
+boundary 2 56249d4c8cfceaa2f801f138c6d7c2f1c049636e304c3b99b80e8ba73e730c0b
+run 1 half-step h-slots 3 0 1 2
+image certificates/images/lorenz63-rk4-fp64.cftp
+bank certificates/lorenz63-rk4-fp64-half-init/run-1.bank a7db2cff0d527899e6e9e23943d08b4d3c139d4ff141081ded41599345ea3290
+segments 4
+steps 100
+parameters 1
+parameter members 2
+boundary 0 78ce6b09e6c027974d9c71dffa956378b0207eddf3a5f551c868904d7c584f3f
+boundary 1 355e1894c4f8d24c81d2ab0fa1ba6c7fa46eaf9a703a4f6fa55ee316f2f64ea9
+boundary 2 e4743b91d3b7f6d8294725bedae94e79bd7b5ad3c60a840676f2f62e7ede26c7
+boundary 3 f81ba5a11d15fe942c97f1986f5708bbc5e8358ff09d87f1a805fb506d32bf86
+boundary 4 97b13a863e53b048507f81dde2cdff286320f5eab726fc5aa0ea8900c8a5dfc4

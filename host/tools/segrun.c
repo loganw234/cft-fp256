@@ -8,7 +8,7 @@
  * runner" is this tool's manual.
  *
  *   cft-segrun --out CERT --states DIR (--salt SALT | --open)
- *              [--device sw|<xclbin>|cft://host:port]
+ *              [--device sw|<xclbin>|cft://host:port | --scratch-depth N]
  *              --run main --image IMG [--bank BANK] --init INIT
  *                         --segments S --steps K [--param NAME=N ...]
  *              [--run half-step --h-slots I,J,... --image IMG ...]
@@ -51,6 +51,22 @@
  * run: the lines in the page's order, `accuracy 0` (accuracy is step 5),
  * `end`, and the hash line. `steps` and every `--param` are stated, not
  * checked, as the page says.
+ *
+ * `--scratch-depth N` (the golden-certificate round, 2026-09-29) opens
+ * the SOFTWARE backend at N scratch slots a lane through cft_open_ex, as
+ * positive-run's option does: the depth is part of what an image
+ * computes, since a non-strict STX/LDX reduces its index modulo it. The
+ * certificate says so in every run block, `parameter scratch-depth N`,
+ * in byte order among the run's parameters - the one parameter the page
+ * READS: an audit re-runs a run at it where the device lines carry no
+ * CAPS2 depth, as a software certificate's never do ("The chain"). It
+ * is written only when the option is given, so every certificate made
+ * without it is byte for byte what it always was. Refused `usage`
+ * before anything is made: beside a --device other than sw (a device's
+ * depth is its image's, and cft_open_ex refuses it too); N not a
+ * decimal in its one spelling, or not a power of two in 1..32,768
+ * (CAPS2[3:0] is a four-bit log2, cft_open_ex's range and the reader's);
+ * and a `--param scratch-depth=...`, since the name is the option's.
  *
  * Every file the tool writes is one it creates new (O_EXCL), and a
  * regular file: --out must not exist either, and no run overwrites a
@@ -130,8 +146,9 @@
  * - the same names, for the same defects, as the golden writer's
  *   (cert.run_chain, certify_run, encode). And the tool's own, which the
  *   golden writer - an API, not a command - has no use for:
- *   usage (64)         a command line this tool does not take, or a file
- *                      it names that cannot be read
+ *   usage (64)         a command line this tool does not take (among
+ *                      them a --scratch-depth it cannot open, above), or
+ *                      a file it names that cannot be read
  *   device (69)        the device cannot make or report the run: it does
  *                      not open, it cannot read the sticky flags a
  *                      certificate records (cft_caps.flags_readable), or
@@ -308,6 +325,12 @@ static FILE *create_new(const char *path)
 #define SALT_BYTES    32
 #define MAX_HSLOTS    512      /* h-slots at most, and each below it */
 #define MAX_NAME      64       /* a parameter's name, at most */
+/* --scratch-depth: a power of two in 1..DEPTH_MAX, since CAPS2[3:0] is a
+ * four-bit log2 (cft_open_ex's range, and the reader's for the one
+ * parameter the page reads, which carries it) */
+#define DEPTH_MAX     32768u
+static const char DEPTH_PARAM[] = "scratch-depth";
+#define DEPTH_PARAM_LEN (sizeof DEPTH_PARAM - 1)
 #define FLAGS_KNOWN   (CFT_PROG_FLAG_BANK_EXT | CFT_PROG_FLAG_SCRATCH_IO | \
                        CFT_PROG_FLAG_SCRATCH_STRICT)
 
@@ -350,6 +373,10 @@ static unsigned long long STATE_FILES = 0;
 /* CFT_SEGRUN_PLANT, the instrument (the header comment). */
 static int PLANT_UNREADABLE = 0, PLANT_UNWRITTEN = 0, PLANT_WIDE = 0;
 static int PLANT_NO_TRIAL = 0;
+
+/* --scratch-depth N, or 0 where it was not given: the software backend
+ * is then opened plainly, at its own 256, and no run block states it */
+static uint32_t SCRATCH_DEPTH = 0;
 
 static void cleanup(void)
 {
@@ -516,6 +543,17 @@ static int name_ok(const char *s, size_t n)
               s[i] == '-'))
             return 0;
     return 1;
+}
+
+/* Two names in the reader's byte order - ASCII's, a name before every
+ * longer one it begins: <0, 0 or >0 as a comes before, is, or comes
+ * after b. */
+static int name_cmp(const char *a, size_t an, const char *b, size_t bn)
+{
+    int c = memcmp(a, b, an < bn ? an : bn);
+    if (c == 0)
+        c = an < bn ? -1 : an > bn ? 1 : 0;
+    return c;
 }
 
 /* cft_build_id()'s grammar, as the page's reader holds the build-id line
@@ -881,9 +919,7 @@ static void check_run(run_spec *r, size_t idx)
                        "digits and '-', at most %d", (unsigned long)idx, s,
                        MAX_NAME);
             if (prev) {
-                c = memcmp(prev, s, prev_n < n ? prev_n : n);
-                if (c == 0)
-                    c = prev_n < n ? -1 : prev_n > n ? 1 : 0;
+                c = name_cmp(prev, prev_n, s, n);
                 if (c == 0)
                     refuse("line-unexpected", "run %lu: parameter '%.*s' "
                            "again", (unsigned long)idx, (int)n, s);
@@ -1203,12 +1239,13 @@ static void try_runs(const run_spec *runs, size_t n_runs, const char *states,
     for (r = 0; r < n_runs; r++) {
         const run_spec *R = &runs[r];
         size_t S = (size_t)R->segments, h, a, tmax, tmin, b;
+        size_t params = R->n_param_s + (SCRATCH_DEPTH ? 1u : 0u);
         int ok = (uint64_t)S == R->segments && S < (size_t)-1 &&
                  mul_ok(S + 1, sizeof *R->hash, &h) &&
                  mul_ok(S, 2 * sizeof(uint32_t), &a) && add_ok(&h, a) &&
                  mul_ok(S, SEGMENT_TEXT, &tmax) && add_ok(&tmax, RUN_TEXT) &&
                  add_ok(&tmax, R->n_hslots * HSLOT_TEXT) &&
-                 add_ok(&tmax, R->n_param_s * PARAM_TEXT) &&
+                 add_ok(&tmax, params * PARAM_TEXT) &&
                  add_ok(&text_max, tmax) &&
                  mul_ok(S, SEGMENT_TEXT_MIN, &tmin) &&
                  add_ok(&text_min, tmin);
@@ -1307,7 +1344,7 @@ static void usage_text(FILE *f)
 "(docs/CERTIFICATES.md, version 1; \"The segment runner\" is the manual)\n"
 "\n"
 "  cft-segrun --out CERT --states DIR (--salt SALT | --open)\n"
-"             [--device sw|<xclbin>|cft://host:port]\n"
+"             [--device sw|<xclbin>|cft://host:port | --scratch-depth N]\n"
 "             --run main --image IMG [--bank BANK] --init INIT\n"
 "                        --segments S --steps K [--param NAME=N ...]\n"
 "             [--run half-step --h-slots I,J,... --image IMG ...]\n"
@@ -1324,6 +1361,9 @@ static void usage_text(FILE *f)
 "  --open          open: plain SHA-256, no salt\n"
 "  --device        the software backend (sw, the default), an .xclbin, or\n"
 "                  a cft-serve at cft://host:port\n"
+"  --scratch-depth N  the software backend at N scratch slots a lane (a\n"
+"                  power of two, 1 to 32768), as a tile of that depth; every\n"
+"                  run block then says `parameter scratch-depth N`\n"
 "  --run KIND      main first; then half-step or wider auxiliary runs\n"
 "  --image IMG     the program image (.cftp), a segment: SCRATCH_IO, in = out\n"
 "  --bank BANK     a BANK_EXT image's constants, n_consts values, raw\n"
@@ -1402,6 +1442,7 @@ int main(int argc, char **argv)
 {
     const char *out_path = NULL, *states_path = NULL, *salt_path = NULL;
     const char *device = NULL, *hash_kind = NULL, *hash_file = NULL;
+    const char *depth_s = NULL;
     const char *plant = getenv("CFT_SEGRUN_PLANT");
     int open_mode = 0, want_build_id = 0, i;
     run_spec *runs = NULL;
@@ -1464,6 +1505,8 @@ int main(int argc, char **argv)
             open_mode = 1;
         } else if (!strcmp(a, "--device")) {
             once(&device, a, need(argc, argv, &i));
+        } else if (!strcmp(a, "--scratch-depth")) {
+            once(&depth_s, a, need(argc, argv, &i));
         } else if (!strcmp(a, "--run")) {
             const char *k = need(argc, argv, &i);
             run_spec *grown;
@@ -1499,7 +1542,17 @@ int main(int argc, char **argv)
             else if (!strcmp(a, "--segments")) once(&cur->segments_s, a, v);
             else if (!strcmp(a, "--steps"))    once(&cur->steps_s, a, v);
             else if (!strcmp(a, "--h-slots"))  once(&cur->hslots_s, a, v);
-            else                               add_param(cur, v);
+            else {
+                /* the one name the page reads is the option's to write,
+                 * from the depth the backend was opened at */
+                if (!strncmp(v, DEPTH_PARAM, DEPTH_PARAM_LEN) &&
+                    v[DEPTH_PARAM_LEN] == '=')
+                    refuse("usage", "--param %s: %s is the parameter "
+                           "--scratch-depth writes, from the depth the "
+                           "software backend is opened at; give "
+                           "--scratch-depth N instead", v, DEPTH_PARAM);
+                add_param(cur, v);
+            }
         } else {
             refuse("usage", "unknown argument '%s' (--help lists them)", a);
         }
@@ -1523,7 +1576,7 @@ int main(int argc, char **argv)
                    (unsigned long)salt_bytes);
     }
     if (hash_kind) {
-        if (out_path || states_path || device || n_runs)
+        if (out_path || states_path || device || depth_s || n_runs)
             refuse("usage", "--hash takes a kind, a file and --salt or "
                    "--open, and nothing else");
         if (!salt && !open_mode && strcmp(hash_kind, "commitment") != 0)
@@ -1536,6 +1589,21 @@ int main(int argc, char **argv)
         refuse("usage", "--out and --states are required");
     if (!salt_path && !open_mode)
         refuse("usage", "say --salt SALT (keyed) or --open");
+    if (depth_s) {
+        uint64_t v;
+        if (device && strcmp(device, "sw") != 0)
+            refuse("usage", "--scratch-depth %s beside --device %s: it opens "
+                   "the SOFTWARE backend at a tile's depth, and a device's "
+                   "depth is its image's (CAPS2[3:0]); cft_open_ex refuses "
+                   "the two together too", depth_s, device);
+        if (!dec_ok(depth_s, &v) || v < 1 || v > DEPTH_MAX || (v & (v - 1)))
+            refuse("usage", "--scratch-depth %s is not a power of two from 1 "
+                   "to %u in its one decimal spelling: a tile publishes its "
+                   "depth as a four-bit log2 (CAPS2[3:0]), and the reader "
+                   "holds a certificate's scratch-depth to the same range",
+                   depth_s, DEPTH_MAX);
+        SCRATCH_DEPTH = (uint32_t)v;
+    }
     if (n_runs == 0)
         refuse("malformed", "a certificate has at least one run, and run 0 "
                "is main (--run main ...)");
@@ -1583,10 +1651,24 @@ int main(int argc, char **argv)
     STATES_CREATED = 1;
 
     /* ---- the device ----------------------------------------------------- */
-    st = cft_open((device && strcmp(device, "sw") != 0) ? device : NULL, 0,
-                  &dev);
-    if (st != CFT_OK)
-        refuse_st("device", "cft_open", st);
+    if (SCRATCH_DEPTH) {
+        /* the software backend at a tile's depth; the option was held to
+         * cft_open_ex's range above, and beside a device it was refused */
+        cft_open_args oa;
+        memset(&oa, 0, sizeof oa);
+        oa.struct_size   = sizeof oa;
+        oa.artifact      = NULL;
+        oa.index         = 0;
+        oa.scratch_depth = SCRATCH_DEPTH;
+        st = cft_open_ex(&oa, &dev);
+        if (st != CFT_OK)
+            refuse_st("device", "cft_open_ex", st);
+    } else {
+        st = cft_open((device && strcmp(device, "sw") != 0) ? device : NULL,
+                      0, &dev);
+        if (st != CFT_OK)
+            refuse_st("device", "cft_open", st);
+    }
     memset(&caps, 0, sizeof caps);
     caps.struct_size = sizeof caps;
     st = cft_get_caps(dev, &caps);
@@ -1760,11 +1842,27 @@ int main(int argc, char **argv)
         put(&body, "stream-a %s\n", R->stream_hash[0]);
         put(&body, "stream-b %s\n", R->stream_hash[1]);
         put(&body, "stream-c %s\n", R->stream_hash[2]);
-        put(&body, "parameters %llu\n", (unsigned long long)R->n_param_s);
-        for (j = 0; j < R->n_param_s; j++) {
-            const char *s = R->param_s[j];
-            const char *eq = strchr(s, '=');
-            put(&body, "parameter %.*s %s\n", (int)(eq - s), s, eq + 1);
+        put(&body, "parameters %llu\n", (unsigned long long)R->n_param_s +
+            (SCRATCH_DEPTH ? 1u : 0u));
+        {
+            /* --scratch-depth's parameter in its place in byte order among
+             * the run's own, which are in that order already (check_run),
+             * and none of which is named as it is (refused as usage) */
+            int depth_put = SCRATCH_DEPTH == 0;
+            for (j = 0; j < R->n_param_s; j++) {
+                const char *s = R->param_s[j];
+                const char *eq = strchr(s, '=');
+                if (!depth_put && name_cmp(DEPTH_PARAM, DEPTH_PARAM_LEN, s,
+                                           (size_t)(eq - s)) < 0) {
+                    put(&body, "parameter %s %lu\n", DEPTH_PARAM,
+                        (unsigned long)SCRATCH_DEPTH);
+                    depth_put = 1;
+                }
+                put(&body, "parameter %.*s %s\n", (int)(eq - s), s, eq + 1);
+            }
+            if (!depth_put)
+                put(&body, "parameter %s %lu\n", DEPTH_PARAM,
+                    (unsigned long)SCRATCH_DEPTH);
         }
         put(&body, "segments %llu\n", (unsigned long long)R->segments);
         for (k = 0; k < R->segments; k++)
@@ -1797,6 +1895,9 @@ int main(int argc, char **argv)
     printf("build-id      %s\n", id.build_id);
     printf("device        %s: xclbin %s, version %s, caps %s, tiles %s\n",
            id.backend, id.xclbin, id.version, id.caps, id.tiles);
+    if (SCRATCH_DEPTH)
+        printf("scratch-depth %lu slots a lane (cft_open_ex), stated in "
+               "every run block\n", (unsigned long)SCRATCH_DEPTH);
     for (r = 0; r < n_runs; r++) {
         run_spec *R = &runs[r];
         uint64_t k;
