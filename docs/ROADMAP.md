@@ -3755,8 +3755,8 @@ certificate plan's steps 4 and 7").
   tool's own, `build-width` and `build-format`. The plan named the
   width alone. `build-format` came from verifier-A1's two wrong
   answers, one in each narrow build.
-- cft-audit reads every input file before step 1, state files
-  included. A file it cannot use is `usage` before any step, where
+- cft-audit opens every input file before step 1, state files
+  included: a file it cannot open is `usage` before any step, where
   the golden auditor, which takes no files, names the step.
 - The corpus's depth cases tell 256 from the deeper depths, not 2,048
   from them. That is a follow-up.

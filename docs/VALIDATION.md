@@ -16152,7 +16152,7 @@ Revision 8's program-model asks were defined golden-first beside them: TwoSum, a
   - both board case lists are pinned by name, so a new test_krnl_seq case reaches no board target until it is named;
   - boardkrnl and boardseqode compile the same Verilator model twice, a possible saving.
 
-## 2026-09-30 - the certificate plan's steps 4 and 7: cft-audit, the audit in C, gives the golden audit's verdict on every input its gate and its verifier made; an auditor's memory and time bounded by what it is handed, never by a number a certificate states; twelve golden certificates, remade by both writers, as a regression test and a conformance test; the round's verifiers, and its known limits
+## 2026-09-30 - the certificate plan's steps 4 and 7: cft-audit, the audit in C, gives the golden audit's verdict on every input its gate and its verifier made, apart from its own named refusals; an auditor's memory and time bounded by what it is handed, never by a number a certificate states; twelve golden certificates, remade by both writers, as a regression test and a conformance test; the round's verifiers, and its known limits
 
 **Why.** Step 2's round left the certificate with a golden audit in Python and nothing else, and named two gaps. Anyone checking a certificate had to trust the model's own code, and a certificate stating a huge `lanes` made the golden audit allocate for it (the known limit "to be designed out in step 4"). This round took two of the plan's steps:
 - **step 4**, an auditor in C, `cft-audit`, written from docs/CERTIFICATES.md and held to the golden audit's verdicts;
@@ -16174,11 +16174,11 @@ Each posted its proposals to the ledger before it built, and the lead decided th
 **The rule (P3: 9c8d30b, dbeb94f, e5af2f1, 00c2a2f, 070df59, then 91eccee and 0d0cbd8).** An auditor's memory and time are bounded by what it is handed, never by a number a certificate states (CERTIFICATES.md, "What an audit spends").
 - **A run is bounded** by a stream handed for it (held by its length) or by a state handed for one of its own boundaries 0..S that holds at least `lanes` elements.
   - Step 5 builds and hashes a run's +0 streams only for a bounded run. Step 8 builds the wider run's only when the main run is bounded.
-  - No new refusal name: an unbounded run is refused where it was, by the check that needs what it was not handed.
+  - No new refusal name: an unbounded run is refused by the check that needs what it was not handed. Where f2b7115 refused its +0 streams `stream` at step 5, that later check now refuses it: of verifier-A3's 384 such audits, 354 moved, to `state-shape` 276, `state-missing` 30 and `aux-lanes` 48. The design names this change, and the page states it.
 - **The golden re-run goes in 64-lane blocks**, each block's flags and STATUS ORed and its end states joined in lane order. No verdict depends on a block's size.
 - **A rational token's hex-digit count is held to the width rule before its gcd.** A long token not in lowest terms is now `width`, where it was `malformed`. No auditor on a 2,048-bit bigint could decide the old order. The lead accepted the change; no control held the old one.
 - **The escape probability for f = 1 is (S - k)/S**, exact, in place of the binomial form.
-- **A run's depth.** `parameter scratch-depth N` (a power of two from 1 to 32,768, `malformed` otherwise) is its re-run depth where device-caps gives none, and CAPS2 wins where both are present. An auxiliary run is held to the main run's depth, under `aux-image`.
+- **A run's depth.** `parameter scratch-depth N` (a power of two from 1 to 32,768, `malformed` otherwise) is its re-run depth where device-caps gives none, and CAPS2's depth wins where CAPS2 carries one (bit 4). An auxiliary run is held to the main run's depth, under `aux-image`.
 - **A sampled run's verdict** ends with the segments sampled, ascending.
 - MEASURED by P3: a certificate stating `lanes` 10^12 or 2^63 - 1 is refused by name in at most 9.5 ms, with at most 31.8 KiB traced, and the process's peak commit does not move. The time is the load's: verifier-A3 measured 11.0 ms in one run, and at most 18.9 ms over 2,304 audits. test_cert.py's verdicts at f2b7115 are unchanged, apart from the long token and the sampled clause, and so are the gate's 36 golden-audit lines.
 - **Verifier-A3** found no regression and no wrong answer. Its measurements:
@@ -16195,14 +16195,14 @@ Each posted its proposals to the ledger before it built, and the lead decided th
   So were two of verifier-A1's, on step 10's order. P3 added eight controls (91eccee, 0d0cbd8), and A3 measured each plant red. test_cert.py is 101.
 
 **The corpus (P2: 0b8ea10, fcc71b2, 80293c1, 679c64d).**
-- **`cft-segrun --scratch-depth N`** opens the software backend at depth N and writes `parameter scratch-depth N` in every run block. It is refused with a device, and for a depth out of cft_open_ex's range, leaving nothing. segrun_check.py gains the leg: 458 checks on the desktop, 69 of them new.
-- **certificates/** holds twelve cases: MANIFEST, corpus.py (`make`, `check`), three sources, twelve images, the example salt, and 145,094 bytes of data. `make -C host corpustest` runs the check, in the `programs` stage. Each case's certificate:
+- **`cft-segrun --scratch-depth N`** opens the software backend at depth N and writes `parameter scratch-depth N` in every run block. It is refused with a device other than the software backend, and for a depth out of cft_open_ex's range, leaving nothing. segrun_check.py gains the leg: 458 checks on the desktop, 69 of them new.
+- **certificates/** holds twelve cases: MANIFEST, corpus.py (`make`, `check`), three sources, twelve images, the example salt, and 145,061 bytes of data (153 files). `make -C host corpustest` runs the check, in the `programs` stage. Each case's certificate:
   - is read by the golden reader;
   - is remade byte for byte by the golden writer, handed the committed identity lines;
   - is remade by cft-segrun, byte for byte but for `build-id` and the hash line, and for an accuracy case the accuracy block, which cft-segrun does not write before step 5;
   - has every boundary equal to the golden chain's;
   - is audited to the verdict the manifest names, in full and sampled.
-  The cases differ in format, depth (256 and 2,048), revision 8's augadd and augerr, flags and STATUS by segment, mode (one keyed, under the page's example salt), and one refused `aux-start`. The committed certificates name the producer 0b8ea10, clean. audit-p2 was merged with its history (ba4a0a9), so that commit stays reachable.
+  The cases differ in format, depth (256 and 2,048), revision 8's augadd and augerr, flags and STATUS by segment, mode (one keyed, under the page's example salt), and one refused `aux-start`. Eleven of the twelve committed certificates name the producer 0b8ea10, clean; `example`, the golden writer's, says `build-id unknown`. audit-p2 was merged with its history (ba4a0a9), so that commit stays reachable.
 - **As a conformance test**, "Golden certificates" states what an implementation must reproduce (every run block and accuracy value) and what it may name for itself (the identity lines).
 - MEASURED by P2: corpustest 156 checks, 0 failed, in 23 to 32 s. Its plants were red:
   - one byte of a certificate;
@@ -16219,7 +16219,7 @@ Each posted its proposals to the ledger before it built, and the lead decided th
   - 25 bad `--scratch-depth` values and 6 other forms are refused `usage` with nothing left;
   - segrun_check is line for line f2b7115's but for its new section;
   - the runner's `programs` stage passes in 102 s.
-  Three of its plants passed the corpus, and are known limits below.
+  Four of its single plants passed the corpus. Three are known limits below. The fourth, a tool whose build id is always `unknown` (T4), segrun_check catches, as it catches the normalization widened by one line to hide a backend change (9.2, with T2).
 
 **The C auditor (P1: be1c434, ec132d3, 5211172, e840973, c407cd4, efd2e18; the send-backs 293b561, b10047d, 6eeb412, 163423d, then ca1327f and 67b0244).** `cft-audit` (host/tools/audit.c, built by `make -C host all`) is the page's audit in C: the strict reader and the ten steps in the page's order, exact arithmetic on the library's bigint with its own division and gcd, sampling, and P3's rule check for check.
 - Its refusals are the page's, with the page's exit families. Its own are `usage` 64, `memory` 71, and 78 for what a build cannot do. That is `build-width` where its bigint is narrower than the width rule needs, and `build-format` for a format above its ceiling, asked by a run, an image or an accuracy value.
@@ -16231,7 +16231,7 @@ Each posted its proposals to the ledger before it built, and the lead decided th
   - 4,566 numeric operations against Python's integers and the golden model.
   At P1's first hand-in (394c9ea) it gave 6,742 checks, 0 failed, 216 s on the desktop.
 - **The census** (host/tests/audit_plants.py): every refusal site disabled alone in a fresh copy. At 394c9ea it counted 160 sites: 144 red, 11 green and 5 unreached. Each green site is shadowed by the next check, by the same name at the same place, and each site is named.
-- **Verifier-A1** confirmed equal verdicts over the gate, on the desktop and in WSL (6,740, 0 failed), and 13,313 inputs beyond it in its named runs, 0 differing (16,513 with two more fuzz runs, 19,623 with its harness's trials). It confirmed the reader's order, 27,224 probe operations at the edges, 1,000 decimals and 1,029 widenings, the bound (`lanes` 10 to 2^63 - 1 costing at most 22 ms and 1,224 KiB of commit), and sampling to S = 2^63 - 1.
+- **Verifier-A1** confirmed equal verdicts over the gate, on the desktop and in WSL (6,740, 0 failed, and one skip each: its copies were in no git repository), and 13,313 inputs beyond it in its named runs, 0 differing (16,513 with two more fuzz runs, 19,623 with its harness's trials). It confirmed the reader's order, 27,224 probe operations at the edges, 1,000 decimals and 1,029 widenings, the bound (`lanes` 10 to 2^63 - 1 costing at most 22 ms and 1,224 KiB of commit), and sampling to S = 2^63 - 1.
   - **One wrong answer, in the narrow build only.** Built with CFT_MAX_FORMAT=2, cft-audit refused an fp256 run `program-image` (exit 4, an input), where cert.audit and the default build accept it. The page said such a build audits an `accuracy 0` certificate in full, and the name blamed the input for what the build lacks. The lead sent P1 back.
   - Two of A1's plants, step 10's two orders, were green in the gate: no control held them. P3 took their controls (0d0cbd8).
 - **The first send-back (293b561, b10047d, 6eeb412, 163423d)**, after audit-p1 was rebased onto 0d0cbd8. By range-diff (P1 and A1), five of the six earlier commits came through with the same content, and the docs commit differs only in docs/README.md's counts.
@@ -16247,7 +16247,7 @@ Each posted its proposals to the ledger before it built, and the lead decided th
   - no verdict moved against 394c9ea over 10,028 inputs;
   - the gate on Linux (WSL): 6,779 checks and one git skip, 0 failed. There the census's regular-file site is red, as P1 believed.
   - **A second wrong answer, of the same kind**, in a narrow build no gate compiled: CFT_MAX_FORMAT=2 with CFT_BN_LIMBS=64, a pair cft_config.h documents. An accuracy value stated in fp256, beside runs within the ceiling, stopped the tool with "internal error", exit 70, where cert.audit and the default build accept it. The lead sent P1 back a second time.
-  - **The state-file change departs from the golden's names**, and the lead accepted it. A directory by a boundary file's name, beside a certificate the golden refuses at steps 1 to 6, is `usage` where the golden names the step. The golden takes no directory, and the page states the tool's behaviour. It brings state files under the rule approved with P1's command line: every input file is read before step 1. The same held before for a misspelt boundary name or a missing image.
+  - **The state-file change departs from the golden's names**, and the lead accepted it. A directory by a boundary file's name, beside a certificate the golden refuses at steps 1 to 6, is `usage` where the golden names the step. The golden takes no directory, and the page states the tool's behaviour. It brings state files under the rule approved with P1's command line, that every input file is read before step 1: each is now opened before step 1, and its bytes read at step 7, where only a file changed since it was opened, or one too large for memory, is refused. The same held before for a misspelt boundary name or a missing image.
 - **The second send-back (ca1327f, 67b0244).**
   - `build-format` at an accuracy value's line whose format word is above the ceiling.
   - P1 found one more site of the same class: step 4's load of an image whose header names a format above the ceiling, under a run stated within it. The golden and the default build say `program-format` there. A narrow build had said `program-image`, an input's name. It now says `build-format` at the run, raised only where the load answers CFT_ERR_UNSUPPORTED and the header's format is above the ceiling.
@@ -16278,7 +16278,7 @@ Each posted its proposals to the ledger before it built, and the lead decided th
   - corpus check 156, 0 failed;
   - the docs check clean, with 42 stages, 28 quick and 37 gate;
   - on amd-arc-box, `make -C host XRT=1 all` at 694507f builds cft-audit with exactly the two known warnings (cft_resident.cpp:264 and :265), and no third.
-- **Some SHAs in the ledgers are no longer reachable.** Twelve commits the ledgers name were rewritten by their own parcel before its merge, and are on no branch:
+- **Some SHAs in the ledgers are no longer reachable.** Eleven commits the ledgers name were rewritten by their own parcel before its merge, and are on no branch:
   - P1's first chain, 394c9ea among them (verifier-A1's first frozen tree), rebased onto P3's last commit;
   - P1's two cherry-picks, dropped as P3's own patches;
   - two earlier forms of P3's controls commit.
@@ -16302,26 +16302,36 @@ Each posted its proposals to the ledger before it built, and the lead decided th
     - The gate's fresh clone has no `verify/_mpfr-prefix`, so the stage built against the box's system MPFR 4.2.1, where the repository pins 4.2.2 (verify/build-mpfr-oracle.sh). Relinked against the pinned 4.2.2 (static, confirmed by ldd and its version string), the stage gives the same 37.
     - Each is a negative base to an odd power that underflows. libcft gives -0 with underflow and inexact, and the golden model gives the same bits and flags (three cases, measured). The harness's roundTiesToAway reference gives +0. IEEE 754 keeps the exact result's sign, so the harness is the wrong side, not libcft.
     - The desktop's gate passed the same stage on 953fe99, and why the hosts differ is not determined. A task of its own ("Fix mpfr-check's roundTiesToAway zero sign on Linux").
+- **On this entry's own commit, fe9c27f**, the stages its docs-only commits after 694507f can move:
+  - `--only docs,audit` on the desktop: PASS, nothing skipped (run 20260930-030308-fe9c27f). audit took 231 s through the Windows runner, which no agent had run it through.
+  - `--only docs,golden,programs,audit` on amd-arc-box: PASS, with golden's three known inner skips (run 20260930-030249-fe9c27f).
+- **Verifier-A4 checked the lead's integration.** Each merge made again from its parents; nothing lost; the history kept; the quick numbers re-run. It found:
+  - one false clause in a restatement, which a2db816 restates;
+  - in this entry and ROADMAP, seven numbers or sentences that claimed too much, one of them A4's own count;
+  - and smaller sentences and omissions, among them the three slips at the end of this entry.
+  The commit that adds this paragraph restates them, except fe9c27f's own message, which is history. That message says libcft and the golden model give -0 for the 37 cases; the golden model was measured on three, as this entry says. The commit changes docs only, and the docs check gates it.
 
 **Known limits, recorded rather than fixed** (Logan's rule):
 - **The corpus pins depth 256 against the rest, not 2,048** (A2's T3). A tool at 4,096 stating 2,048 passes both the corpus and segrun_check. The corpus's deepwrap reads slot 256 and writes 258, and the gate's deepstep reads 256 and writes slots 0 and 1, so each computes the same chain at every depth from 512 up.
 - **No case has an auxiliary run at a stated depth** (A2's 9.3). segrun_check catches the depth written in the main run's block only; the corpus does not.
 - **augsum meets no augadd tie where the two roundings differ** (A2's G1). test_augmented.py catches ties-to-even; the corpus does not.
 - A follow-up task, "Pin the golden corpus's depth case to 2,048", takes the three above.
+- **A tool whose build id is always `unknown` passes the corpus** (A2's T4): the check takes each tool's build-id line from the tool's own `--build-id`. segrun_check's CFT_EXPECT_BUILD_ID catches it.
 - **corpus.py exits by traceback**, naming no case, when a tool writes a certificate the reader refuses.
 - **cft-asm refuses revision 8's augerr**, so augsum's image comes from the golden assembler alone (pre-existing).
 - **`--param scratch-depth=N` is refused `usage`**, where f2b7115's cft-segrun took it and wrote the line. This is the lead's decision, since `--scratch-depth` sets the depth and the line together. No committed file, and nothing under Data/runs, uses the name.
-- **A certificate that states a depth it did not run at is refused now.** At f2b7115, a run at 256 slots that stated `parameter scratch-depth 2048` was accepted, since the golden audit then ignored the parameter. It is refused `segment-end` now: since P3's dbeb94f, the audit re-runs a run at the depth it states (verifier-A2, on a deepwrap certificate). That meets a regression's letter, and the lead's decision (19:55:06) made the parameter mean the depth. The page states the parameter's meaning, not the change.
+- **A certificate whose run's answer differs at the depth it states is refused now.** At f2b7115, a run at 256 slots that stated `parameter scratch-depth 2048` was accepted, since the golden audit then ignored the parameter. It is refused `segment-end` now: since P3's dbeb94f, the audit re-runs a run at the depth it states (verifier-A2, on a deepwrap certificate). That meets a regression's letter, and the lead's decision (19:55:06) made the parameter mean the depth. The page states the parameter's meaning, not the change.
+- **An unbounded run is refused later than before**, by the check that needs what was not handed, where f2b7115 refused its +0 streams `stream` at step 5 (verifier-A3's 354 of 384). The design names it and the page states it, so it is a stated change, not a regression.
 - **The depth still costs time.** A re-run costs the lanes handed times the depth: each block's scratch starts at +0. Bounding that needs the executors to hold only the slots a program touches.
 - **The writer stays dense.** `run_chain` holds every lane's scratch, as the producer's own cost.
 - **An estimate's need order** (run 0's final state before run r's) is unstated on the page and uncontrolled (P3).
 - **The census's 12 green and 7 unreached sites** stay as named on the page. Each green site is shadowed by a later check that refuses the same cases by the same name at the same place. The unreached are a failed allocation, file races, no OS randomness, and a library failing a re-run the checks allowed. The regular-file check is green on Windows, where the census runs, and red on Linux (verifier-A1, in WSL).
 - **cft_bn_shl** (host/src/bigint.c) keeps a spare limb and refuses any shift of a value that fills the container, a shift by 0 included. cft-audit uses its own shift; the library is unchanged.
-- **cft-audit reads every input file before step 1**, state files included. A directory by a boundary file's name, beside a certificate the golden refuses at steps 1 to 6, is `usage` where the golden names the step. The golden takes no directory. The page states the rule, and the lead accepted it.
+- **cft-audit opens every input file before step 1**, state files included, and reads a state's bytes at step 7. A directory by a boundary file's name, beside a certificate the golden refuses at steps 1 to 6, is `usage` where the golden names the step. The golden takes no directory. The page states the rule, and the lead accepted it.
 - **A stated depth costs the C auditor memory.** A run at `scratch-depth` 32,768 commits about 520 MiB whatever its lanes (verifier-A1, measured; the page states the constant).
-- **`narrow` compiled with -Wall** gives 13 unused-function warnings in tools/audit.c: the exact-arithmetic helpers outside its `#if`. No make target compiles it with warnings on.
+- **`narrow` compiled with -Wall** gives 13 unused-function and unused-variable warnings in tools/audit.c: the exact-arithmetic helpers outside its `#if`. No make target compiles it with warnings on.
 
-**Load, and the machine.** Every agent ran one run at a time, niced, on the desktop, while Logan used it. No agent touched amd-arc-box or the card. The Linux runs were in WSL cft2204, which is this desktop: P3's net, with no plant there, and verifier-A1's gate and census sites. The long runs were the lead's. The gate budget ran on amd-arc-box, beside revision 7's quad link, niced.
+**Load, and the machine.** Every agent ran one run at a time, niced, on the desktop, while Logan used it. No parcel or verifier touched amd-arc-box or the card; the lead's runs there are above. The Linux runs were in WSL cft2204, which is this desktop: P3's net, with no plant there, and verifier-A1's gate and census sites. The long runs were the lead's. The gate budget ran on amd-arc-box, beside revision 7's quad link, niced. A note for anyone planting here (verifier-A2): a rename-swap of two files of equal size is invisible to `git status` and survives `git checkout -- .`, since both trust stat data, so a reset is checked by content.
 
 **The lead's own slips**, each caught and recorded in the ledger:
 - **An order reversed in a message.** The lead's message to P3 said the golden reads a drift's final state before its initial. The code reads boundary 0 first, and A1's words and case agree with it. P3 held the code's order, and the page now states it.
@@ -16329,3 +16339,7 @@ Each posted its proposals to the ledger before it built, and the lead decided th
 - **A restatement that was itself false.** Restating A2's sentence at P2's merge, the lead wrote that the segment runner's depth leg "reads slot 256 and writes 258". That is the corpus's program, deepwrap; the leg's deepstep writes slots 0 and 1. Verifier-A4 found it, and a2db816 restates it.
 - **Counts in merge messages that were not what was measured.** ba4a0a9 says 21 bad `--scratch-depth` values; A2 measured 25 and six other forms. 694507f says "about 13,700 inputs"; A1 had corrected its own count to 13,313. The messages are history; this entry and the ledger carry the measured figures (verifier-A4).
 - **Two builds that failed, and what one left.** On the merged tree, the lead's first build set `TMP= TEMP=` on make's line, so gcc had an empty temp path. The second set neither, so MSYS make's recipe had no TMP, and gcc tried C:/WINDOWS. Neither made a binary. The first left two untracked temp files in the worktree's host/: segrun.c's assembly and an empty .res. They were found after an abort, read, and removed. The build that worked passes TMP and TEMP as the Windows temp directory.
+- **Three runs on amd-arc-box that measured less than they seemed to.** Each is caught and recorded in the ledger, and none is counted above.
+  - The launch at main typed a guessed SHA, `2852cc4a`. The script's `rev-parse --verify` refused it before any run. An `< /dev/null` on an ssh fed by a pipe had also left that launch's tar empty.
+  - `--only transcend,mpfr` at main skipped the library stage that builds libcft.so, so its transcend leg compared nothing. It was run again with the library built.
+  - The first re-run of mpfr with the pinned MPFR tested the system MPFR again: mpfr-check was up to date, so make did not relink it. It was removed and rebuilt, and `ldd` checked.
