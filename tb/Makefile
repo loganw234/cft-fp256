@@ -102,7 +102,7 @@ sim: $(SIM_BENCHES)
 # shipping default; this is the third-tier tile's own census.
 simmc: fp32mc fp64mc fp128mc fp256mc mulpass mulcycle reducemc krnlmc \
        quartermc faultsmc seq_coremc krnlseqmc seqbanksmc \
-       board boardkrnl boardseq boardfp256
+       board boardkrnl boardseq boardseqode boardfp256
 
 # The iterated chunk-column multiplier against exact integer
 # arithmetic, at every column count the three wide rungs can build -
@@ -483,7 +483,7 @@ OPEN_CAPS_GENERICS = SEQ_MAXD=64 SEQ_IMEM_D=16384 SEQ_SCRATCH_D=256
 BOARD_PARAMS = -Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1                -Pcft_krnl.MUL_PASSES=$(MC) \
                $(foreach g,$(OPEN_CAPS_GENERICS),-Pcft_krnl.$(g))
 
-board: boardkrnl boardseq boardfp256
+board: boardkrnl boardseq boardseqode boardfp256
 
 # boardkrnl runs under Verilator by default. Icarus evaluates this one
 # configuration - the engine-driven kernel at ten passes with both
@@ -508,9 +508,27 @@ boardkrnl:
 	CFT_GENERICS="$(OPEN_CAPS_GENERICS)" CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(BOARDKRNL_SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl SIM_BUILD=sim_build/boardkrnl$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardkrnl$(MC)/results.xml \
 		&& $(PYTHON) check_results.py sim_build/boardkrnl$(MC)/results.xml
 
+# boardseq and boardseqode are one module, test_krnl_seq, split by case
+# (2026-09-29). Revision 7 gave the module a third case,
+# krnl_ode_programs (4b790b4): the three ODE programs through the whole
+# kernel, the array busy for about 684,000 cycles at ten passes. In
+# this configuration that is boardkrnl's Icarus cost again. On
+# amd-arc-box boardseq ran its first two cases as it always had, then
+# reached 0.53 ns of simulated time a second in the third: about 60
+# days for the 2.74 ms of simulated time the case took in krnlseqmc.
+# It was stopped after 3 h 30 min, 14 us in, so simmc never finished
+# on the tree that added it (docs/VALIDATION.md, revision 7).
+# So boardseq keeps the two cases it ran before revision 7, on the
+# suite's simulator, and boardseqode runs the ODE case under Verilator
+# by default, as boardkrnl does. BOARDSEQODE_SIM=icarus puts it back.
 boardseq:
-	CFT_GENERICS="$(OPEN_CAPS_GENERICS)" CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl_seq SIM_BUILD=sim_build/boardseq$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardseq$(MC)/results.xml \
+	TESTCASE=krnl_sequencer,krnl_lane_mask CFT_GENERICS="$(OPEN_CAPS_GENERICS)" CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl_seq SIM_BUILD=sim_build/boardseq$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardseq$(MC)/results.xml \
 		&& $(PYTHON) check_results.py sim_build/boardseq$(MC)/results.xml
+
+BOARDSEQODE_SIM ?= verilator
+boardseqode:
+	TESTCASE=krnl_ode_programs CFT_GENERICS="$(OPEN_CAPS_GENERICS)" CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(BOARDSEQODE_SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl_seq SIM_BUILD=sim_build/boardseqode$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardseqode$(MC)/results.xml \
+		&& $(PYTHON) check_results.py sim_build/boardseqode$(MC)/results.xml
 
 boardfp256:
 	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp256 		MODULE=test_fpfma_fp256 SIM_BUILD=sim_build/boardfp256$(MC) 		KRNL_PARAMS="-Ptb_fpfma_fp256.MUL_PASSES=$(MC)" 		COCOTB_RESULTS_FILE=sim_build/boardfp256$(MC)/results.xml \
