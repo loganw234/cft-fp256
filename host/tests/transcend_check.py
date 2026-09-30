@@ -56,8 +56,13 @@ import argparse
 import ctypes
 import os
 import random
+import subprocess
 import sys
 from pathlib import Path
+
+# CFT_TRANSCEND_MINPREC as it was in the environment this process
+# STARTED with, read before anything can set it (see --min-prec).
+MINPREC_AT_START = os.environ.get("CFT_TRANSCEND_MINPREC")
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
@@ -1161,7 +1166,26 @@ def main():
         # reference - which is the property worth proving: raising the
         # working precision must land on the same bits, or the loop is
         # deciding something the mathematics does not.
-        os.environ["CFT_TRANSCEND_MINPREC"] = str(args.min_prec)
+        #
+        # The variable has to be in the environment the process STARTS
+        # with. Setting os.environ here reached the library on Linux
+        # but not on Windows, where cft.dll reads getenv from
+        # msvcrt.dll and Python is a UCRT program, each C runtime with
+        # its own copy of the environment. So on the desktop this run
+        # never escalated, and passed while fp128 rootn(0x2, 2) was one
+        # ulp low under it (measured 2026-09-30: the same command
+        # passed, and failed with the variable set before the process).
+        # A process that did not start with it runs itself again with
+        # it, on every platform.
+        want = str(args.min_prec)
+        if MINPREC_AT_START != want:
+            env = dict(os.environ, CFT_TRANSCEND_MINPREC=want)
+            print(f"transcend_check: running again with "
+                  f"CFT_TRANSCEND_MINPREC={want} in the environment it "
+                  "starts with, so the library's C runtime sees it",
+                  flush=True)
+            sys.exit(subprocess.run([sys.executable, *sys.argv],
+                                    env=env).returncode)
     formats = [s.strip() for s in args.formats.split(",") if s.strip()]
 
     lib = load_library()

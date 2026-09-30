@@ -121,7 +121,7 @@
     {
       "source": "host/src/mpfloat.c",
       "dest": "src/cft/src/mpfloat.c",
-      "sha256": "2b05f9c123c9700740a9c4fd3a82dcf9217db464f9240bac4bcd6a405e8c6262"
+      "sha256": "0a41943eb3cb78770c129129a8d125688690afc65260ea8667d5eecd2d618b0e"
     },
     {
       "source": "host/src/mpfloat.h",

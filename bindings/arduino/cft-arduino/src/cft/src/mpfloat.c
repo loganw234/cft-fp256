@@ -392,8 +392,9 @@ int cft_mp_div_ui(cft_mp *r, const cft_mp *a, uint32_t u, int W)
  *
  * Digit-by-digit integer square root, for the same reason division is
  * schoolbook: floor(sqrt(N)) with a remainder is exact to within one
- * unit in the last place without an argument. */
-static int bn_isqrt(cft_bn *root, const cft_bn *n)
+ * unit in the last place without an argument. The remainder it ends
+ * with is N - root^2, so `exact` (when asked for) is whether it is 0. */
+static int bn_isqrt(cft_bn *root, int *exact, const cft_bn *n)
 {
     cft_bn rem, trial;
     int i, nb = cft_bn_bitlen(n);
@@ -421,13 +422,15 @@ static int bn_isqrt(cft_bn *root, const cft_bn *n)
             cft_bn_setbit(root, 0);
         }
     }
+    if (exact)
+        *exact = cft_bn_bitlen(&rem) == 0;
     return 0;
 }
 
 int cft_mp_isqrt(cft_bn *root, int *exact, const cft_bn *n)
 {
     cft_bn sq;
-    if (bn_isqrt(root, n))
+    if (bn_isqrt(root, NULL, n))
         return 1;
     if (cft_bn_mul(&sq, root, root))
         return 1;
@@ -435,11 +438,21 @@ int cft_mp_isqrt(cft_bn *root, int *exact, const cft_bn *n)
     return 0;
 }
 
+/* The root's error is the input's, halved, plus the truncation.
+ * bn_isqrt returns floor(sqrt(n)), and root lands on exactly W bits,
+ * so an inexact root lies below the true one by less than a unit in
+ * its last place: 2 units of 2^-W relative. Until 2026-09-30 that term
+ * was missing, so an exact operand came back with err 0 on an inexact
+ * root. No gate saw it decide a rounding wrongly at the contract's
+ * starting precision, but forced to start at 64 bits
+ * (CFT_TRANSCEND_MINPREC) the loop decided fp128 rootn(0x2, 2) one ulp
+ * low of squareRoot (verify/run.sh transcend, the escalation run). An
+ * exact root, and only an exact root, keeps the input's error alone. */
 int cft_mp_sqrt(cft_mp *r, const cft_mp *a, int W)
 {
     cft_bn n, root;
     long e;
-    int L, k;
+    int L, k, exact;
     if (a->zero) {
         cft_mp_set_zero(r);
         return 0;
@@ -455,9 +468,10 @@ int cft_mp_sqrt(cft_mp *r, const cft_mp *a, int W)
     }
     if (k < 0 || cft_bn_shl(&n, &a->m, k))
         return 1;
-    if (bn_isqrt(&root, &n))
+    if (bn_isqrt(&root, &exact, &n))
         return 1;
-    return mp_norm(r, W, 0, &root, e / 2, (a->err + 1) / 2);
+    return mp_norm(r, W, 0, &root, e / 2,
+                   err_add((a->err + 1) / 2, exact ? 0 : 2));
 }
 
 /* The integer part of the value, truncated toward zero and saturated.
