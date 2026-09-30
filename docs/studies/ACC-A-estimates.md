@@ -622,7 +622,12 @@ and cft-segrun built from the same tree with MSYS2's mingw64 gcc.
 **Checking a re-run.** Each captured run is the whole output, and only
 `time` lines differ between runs. A re-run of lorenz96-rk4-fp64 alone
 (`--cases`) reproduced its section of certified.out.txt exactly, apart
-from those lines.
+from those lines. `--against FILE` makes that comparison itself. It
+holds every section a run prints to the committed section with the same
+first line, and names the first line that differs.
 
-**No runner stage** holds any of this as of this study. Whether one
-should is the lead's decision.
+**Two runner stages hold it** (the lead's decision, 2026-09-30):
+- `estimates`, in the gate budget: `certified --cases
+  lorenz63-rk4-fp64,lorenz96-rk4-fp64` against certified.out.txt, 47 s;
+- `estimates-full`, in the full census only: `all` against both runs.
+Both are in docs/VERIFICATION.md.

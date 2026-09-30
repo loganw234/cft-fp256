@@ -7,6 +7,12 @@ estimate: every number of docs/studies/ACC-A-estimates.md, made again.
     python programs/estimates.py sweep --tool host/cft-segrun[.exe]
                                        [--cases A,B] [--keep DIR]
     python programs/estimates.py all --tool host/cft-segrun[.exe]
+    ... [--against docs/studies/acc-a/certified.out.txt]
+        [--against docs/studies/acc-a/sweep.out.txt]
+
+--against holds the run to a committed one, section by section, and
+names the first line that differs (below, "--against"). verify/run.sh's
+`estimates` and `estimates-full` stages run it that way.
 
 A certificate (docs/CERTIFICATES.md, "Accuracy entries") can carry two
 ESTIMATES: `step-halving`, the largest absolute difference over the
@@ -244,6 +250,11 @@ def load_cases(only=None):
     read is held to its manifest SHA-256 and every state to its
     certificate's hash before it is used."""
     man = corpus.read_manifest()
+    unknown = sorted(set(only or ()) - {c.name for c in man.cases})
+    if unknown:
+        # a name that selects nothing would score nothing and pass
+        sys.exit(f"estimates: --cases names no case of certificates/MANIFEST: "
+                 f"{', '.join(unknown)}")
     scored, skipped = [], []
     for c in man.cases:
         if only and c.name not in only:
@@ -877,6 +888,161 @@ def sweep_system(case, J, L, tool, work):
     return out
 
 
+# ---- --against: a run held to a committed one ------------------------------
+#
+# verify/run.sh's `estimates` and `estimates-full` stages run this script
+# --against the committed runs in docs/studies/acc-a/. What the run prints
+# is kept (Record), and each section it prints is held to the committed
+# section with the same first line:
+#   - a case's `-- ` section, line for line, apart from `time` lines;
+#   - the loading section (`== the cases`) line by line as a subset, since
+#     --cases loads fewer cases.
+# The first difference ends the run, naming the file, the section and the
+# committed line, with both lines. At the end, every committed `-- `
+# section of a case this run loaded, in a mode it ran, must have been
+# printed. The committed runs themselves are made WITHOUT --against, whose
+# own lines would otherwise sit inside the sections they follow.
+
+class Record:
+    """stdout, written through and kept."""
+
+    def __init__(self, out):
+        self.out, self.parts = out, []
+
+    def write(self, s):
+        self.parts.append(s)
+        return self.out.write(s)
+
+    def flush(self):
+        self.out.flush()
+
+    def mark(self):
+        return "".join(self.parts).count("\n")
+
+    def since(self, mark):
+        return "".join(self.parts).split("\n")[mark:-1]
+
+
+class Differs(Exception):
+    pass
+
+
+CLOSING = ("time  total:", "estimates: ", "NOT CONVERGED: ", "FAILED: ")
+
+
+def _kept(pairs):
+    """(line number, text) pairs without `time` lines or trailing blanks."""
+    out = [(k, t) for k, t in pairs if not t.startswith("time")]
+    while out and out[-1][1] == "":
+        out.pop()
+    return out
+
+
+def sections_of(lines):
+    """{first line: (its line number, [(line number, text)])} for every
+    `-- ` and `== ` section of a run's output, each running to the next
+    such line or to the run's closing lines. A first line met twice keeps
+    its first section."""
+    out, cur = {}, None
+    for k, t in enumerate(lines, 1):
+        if t.startswith(("-- ", "== ")):
+            cur = None if t in out else t
+            if cur is not None:
+                out[cur] = (k, [])
+            continue
+        if t.startswith(CLOSING):
+            cur = None
+            continue
+        if cur is not None:
+            out[cur][1].append((k, t))
+    return {h: (k, _kept(body)) for h, (k, body) in out.items()}
+
+
+def _name(heading):
+    """A section by its case: `-- lorenz63-rk4-fp64`, `-- lorenz63-rk4 at
+    fp64`, `== the cases`."""
+    return heading.split(":")[0].split(",")[0]
+
+
+def _case_of(heading):
+    """(mode, corpus case) of a `-- ` section: `-- <case>: ...` in a
+    certified run, `-- <system> at <format>, lane 0, as h shrinks ...` in a
+    sweep."""
+    head = heading[3:]
+    if ", lane 0, as h shrinks" in head:
+        base, _at, fmt = head.split(",")[0].split(" ")
+        return "sweep", f"{base}-{fmt}"
+    return "certified", head.split(":")[0]
+
+
+class Against:
+    """The committed runs a run is held to, section by section."""
+
+    def __init__(self, paths):
+        self.files = []
+        for p in paths:
+            path = Path(p).resolve()
+            try:
+                shown = path.relative_to(ROOT).as_posix()
+            except ValueError:
+                shown = str(p)
+            lines = path.read_text(encoding="utf-8").split("\n")
+            self.files.append((shown, sections_of(lines)))
+        self.seen = set()
+
+    def hold(self, printed, subset=False):
+        while printed and printed[0] == "":
+            printed = printed[1:]
+        heading = printed[0]
+        body = _kept(list(enumerate(printed[1:], 2)))
+        self.seen.add(heading)
+        for shown, secs in self.files:
+            if heading in secs:
+                start, old = secs[heading]
+                break
+        else:
+            self._fail(f"section '{_name(heading)}' is in no committed run ("
+                       f"{', '.join(s for s, _ in self.files)}): {heading}")
+        where = f"{shown}, section '{_name(heading)}' (its line {start})"
+        if subset:
+            have = {t for _k, t in old}
+            for _k, t in body:
+                if t not in have:
+                    self._fail(f"{where} has no line\n        {t}")
+            ok(f"against {where}: each of this run's {len(body)} lines is "
+               f"one of its lines")
+            return
+        for i in range(max(len(old), len(body))):
+            a = old[i] if i < len(old) else None
+            b = body[i][1] if i < len(body) else None
+            if a is None or b is None or a[1] != b:
+                at = f"line {a[0]}" if a else \
+                    f"the line after {old[-1][0] if old else start}"
+                self._fail(f"{where} differs at {at}:\n"
+                           f"        committed: "
+                           f"{a[1] if a else '(the section ends)'}\n"
+                           f"        this run:  "
+                           f"{b if b is not None else '(the section ends)'}")
+        ok(f"against {where}: all {len(body)} lines are the committed ones, "
+           f"`time` lines apart")
+
+    def missing(self, modes, loaded):
+        for shown, secs in self.files:
+            for heading, (start, _old) in secs.items():
+                if not heading.startswith("-- ") or heading in self.seen:
+                    continue
+                kind, case = _case_of(heading)
+                if kind in modes and case in loaded:
+                    self._fail(f"{shown}, section '{_name(heading)}' (its "
+                               f"line {start}) was not printed by this run")
+        ok(f"against {', '.join(s for s, _ in self.files)}: every committed "
+           f"section of the cases and modes this run ran was printed")
+
+    def _fail(self, why):
+        bad(f"against {why}")
+        raise Differs(why)
+
+
 # ---- main ----------------------------------------------------------------------
 
 def main():
@@ -887,6 +1053,9 @@ def main():
     ap.add_argument("--tau", default=TAU,
                     help=f"the converged reference's tolerance ({TAU})")
     ap.add_argument("--keep", help="keep the sweep's runs in this directory")
+    ap.add_argument("--against", action="append", default=[],
+                    help="a committed run (docs/studies/acc-a/) to hold this "
+                         "one to, section by section; may be given twice")
     args = ap.parse_args()
     # LF on every platform, so that a re-run redirected to a file diffs
     # against the committed run line for line (Windows would write CRLF)
@@ -899,6 +1068,9 @@ def main():
                  "written in it, and odefun is its")
     if args.mode in ("sweep", "all") and not args.tool:
         sys.exit("estimates: the sweep needs --tool, cft-segrun")
+    rec = Record(sys.stdout)
+    sys.stdout = rec
+    against = Against(args.against) if args.against else None
     mpmath.mp.dps = check.SCHEME_DPS
     only = set(args.cases.split(",")) if args.cases else None
     say(f"== ACC-A: a certificate's two estimates, scored "
@@ -907,32 +1079,49 @@ def main():
         f"at {check.SCHEME_DPS} digits (check.SCHEME_DPS); TAU {args.tau}; "
         f"levels to at most {KCAP[4]} (RK4) and {KCAP[2]} (Stormer-Verlet)")
     say()
-    say("== the cases: certificates/MANIFEST")
-    t0 = time.perf_counter()
-    cases, skipped = load_cases(only)
-    for name, why in skipped:
-        say(f"  not scored: {name} - {why}")
-    timed("loading and holding the corpus", t0)
-    results = {}
-    if args.mode in ("certified", "all"):
-        say()
-        say("== certified: every lane of the corpus's runs")
-        for case in cases:
-            results[case.name] = score_certified(case, args.tau)
-    if args.mode in ("sweep", "all"):
-        say()
-        say("== sweep: lane 0 as h shrinks, each level a certificate "
-            "cft-segrun makes here")
-        tool = Path(args.tool).resolve()
-        work = Path(args.keep) if args.keep else \
-            Path(tempfile.mkdtemp(prefix="acc-a-"))
-        work.mkdir(parents=True, exist_ok=True)
-        by = {(c.base, c.fmt): c for c in cases if c.name != "example"}
-        for key, (J, L) in SWEEP.items():
-            if key in by:
-                sweep_system(by[key], J, L, tool, work)
-        if not args.keep:
-            shutil.rmtree(work, ignore_errors=True)
+    try:
+        mark = rec.mark()
+        say("== the cases: certificates/MANIFEST")
+        t0 = time.perf_counter()
+        cases, skipped = load_cases(only)
+        for name, why in skipped:
+            say(f"  not scored: {name} - {why}")
+        timed("loading and holding the corpus", t0)
+        if against:
+            against.hold(rec.since(mark), subset=True)
+        if args.mode in ("certified", "all"):
+            say()
+            say("== certified: every lane of the corpus's runs")
+            for case in cases:
+                mark = rec.mark()
+                score_certified(case, args.tau)
+                if against:
+                    against.hold(rec.since(mark))
+        if args.mode in ("sweep", "all"):
+            say()
+            say("== sweep: lane 0 as h shrinks, each level a certificate "
+                "cft-segrun makes here")
+            tool = Path(args.tool).resolve()
+            work = Path(args.keep) if args.keep else \
+                Path(tempfile.mkdtemp(prefix="acc-a-"))
+            work.mkdir(parents=True, exist_ok=True)
+            by = {(c.base, c.fmt): c for c in cases if c.name != "example"}
+            try:
+                for key, (J, L) in SWEEP.items():
+                    if key in by:
+                        mark = rec.mark()
+                        sweep_system(by[key], J, L, tool, work)
+                        if against:
+                            against.hold(rec.since(mark))
+            finally:
+                if not args.keep:
+                    shutil.rmtree(work, ignore_errors=True)
+        if against:
+            modes = {"certified", "sweep"} if args.mode == "all" else \
+                {args.mode}
+            against.missing(modes, {c.name for c in cases})
+    except Differs:
+        pass                    # named by its FAIL line; the run ends here
     say()
     for name in NOT_CONVERGED:
         say(f"NOT CONVERGED: {name}")
@@ -944,7 +1133,6 @@ def main():
         f"{len(NOT_CONVERGED)} not converged - "
         f"{'every check passed' if good else 'NOT every check passed'}")
     return 0 if good else 1
-
 
 if __name__ == "__main__":
     sys.exit(main())
