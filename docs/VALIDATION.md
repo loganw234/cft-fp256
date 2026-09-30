@@ -16151,3 +16151,181 @@ Revision 8's program-model asks were defined golden-first beside them: TwoSum, a
 - **Known limits:**
   - both board case lists are pinned by name, so a new test_krnl_seq case reaches no board target until it is named;
   - boardkrnl and boardseqode compile the same Verilator model twice, a possible saving.
+
+## 2026-09-30 - the certificate plan's steps 4 and 7: cft-audit, the audit in C, gives the golden audit's verdict on every input its gate and its verifier made; an auditor's memory and time bounded by what it is handed, never by a number a certificate states; twelve golden certificates, remade by both writers, as a regression test and a conformance test; the round's verifiers, and its known limits
+
+**Why.** Step 2's round left the certificate with a golden audit in Python and nothing else, and named two gaps. Anyone checking a certificate had to trust the model's own code, and a certificate stating a huge `lanes` made the golden audit allocate for it (the known limit "to be designed out in step 4"). This round took two of the plan's steps:
+- **step 4**, an auditor in C, `cft-audit`, written from docs/CERTIFICATES.md and held to the golden audit's verdicts;
+- **step 7**, golden certificates. That is Logan's suggestion of 2026-09-29, recorded in ROADMAP (72c4fa1): a committed corpus of programs and their certificates, remade by both writers as a regression test and reproduced by other implementations as a conformance test.
+Both needed the rule first. The round's records are in `Data/runs/2026-09-29-audit-round/` (gitignored): its ledger and its briefs.
+
+**Logan's decisions this round** (the ledger, lead.md):
+- "Go with your recommendation of the C auditor and golden certificates" - the round, opened while revision 7's quad was still building.
+- The send-back rule, carried over (2026-09-27): only a regression or a wrong answer sends a parcel back. Everything else merges as a recorded known limit, and a sentence that claims too much is restated at the merge.
+- Agents test quickly and hand long runs to the lead: "dont have the individual agents all run the full suites, have them hand back large runs to you to monitor rather than them, but they should still verify and test as much as they can quickly."
+- The desktop was in use: heavy runs went to amd-arc-box, and each agent ran one run at a time, niced.
+
+**The plan** (f2b7115, ROADMAP "Steps 4 and 7"). Three parcels in parallel:
+- P1, the C auditor and its equality gate;
+- P2, the corpus;
+- P3, the rule, designed first for both auditors and then built in cert.py.
+Each posted its proposals to the ledger before it built, and the lead decided them there.
+
+**The rule (P3: 9c8d30b, dbeb94f, e5af2f1, 00c2a2f, 070df59, then 91eccee and 0d0cbd8).** An auditor's memory and time are bounded by what it is handed, never by a number a certificate states (CERTIFICATES.md, "What an audit spends").
+- **A run is bounded** by a stream handed for it (held by its length) or by a state handed for one of its own boundaries 0..S that holds at least `lanes` elements.
+  - Step 5 builds and hashes a run's +0 streams only for a bounded run. Step 8 builds the wider run's only when the main run is bounded.
+  - No new refusal name: an unbounded run is refused where it was, by the check that needs what it was not handed.
+- **The golden re-run goes in 64-lane blocks**, each block's flags and STATUS ORed and its end states joined in lane order. No verdict depends on a block's size.
+- **A rational token's hex-digit count is held to the width rule before its gcd.** A long token not in lowest terms is now `width`, where it was `malformed`. No auditor on a 2,048-bit bigint could decide the old order. The lead accepted the change; no control held the old one.
+- **The escape probability for f = 1 is (S - k)/S**, exact, in place of the binomial form.
+- **A run's depth.** `parameter scratch-depth N` (a power of two from 1 to 32,768, `malformed` otherwise) is its re-run depth where device-caps gives none, and CAPS2 wins where both are present. An auxiliary run is held to the main run's depth, under `aux-image`.
+- **A sampled run's verdict** ends with the segments sampled, ascending.
+- MEASURED by P3: a certificate stating `lanes` 10^12 or 2^63 - 1 is refused by name in at most 9.5 ms, with at most 31.8 KiB traced, and the process's peak commit does not move. The time is the load's: verifier-A3 measured 11.0 ms in one run, and at most 18.9 ms over 2,304 audits. test_cert.py's verdicts at f2b7115 are unchanged, apart from the long token and the sampled clause, and so are the gate's 36 golden-audit lines.
+- **Verifier-A3** found no regression and no wrong answer. Its measurements:
+  - 2,304 audits at `lanes` 10 up to 2^63 - 1, at most 18.9 ms and 31.8 KiB traced each;
+  - 7,900 blocked re-runs equal to the dense `seq.run`;
+  - the depth parameter's range over 0..2^20;
+  - 13,500 tokens, and a 10 MB reducible one refused in 0.42 s;
+  - 245,650 (S - k)/S pairs equal to the binomial form;
+  - every call of f2b7115's controls replayed.
+  Six of A3's plants were green at 070df59: the code was right and no control held it. The six:
+  - two on the per-run bound for streams;
+  - two on step 8's guard;
+  - two on the main run's S and `lanes`.
+  So were two of verifier-A1's, on step 10's order. P3 added eight controls (91eccee, 0d0cbd8), and A3 measured each plant red. test_cert.py is 101.
+
+**The corpus (P2: 0b8ea10, fcc71b2, 80293c1, 679c64d).**
+- **`cft-segrun --scratch-depth N`** opens the software backend at depth N and writes `parameter scratch-depth N` in every run block. It is refused with a device, and for a depth out of cft_open_ex's range, leaving nothing. segrun_check.py gains the leg: 458 checks on the desktop, 69 of them new.
+- **certificates/** holds twelve cases: MANIFEST, corpus.py (`make`, `check`), three sources, twelve images, the example salt, and 145,094 bytes of data. `make -C host corpustest` runs the check, in the `programs` stage. Each case's certificate:
+  - is read by the golden reader;
+  - is remade byte for byte by the golden writer, handed the committed identity lines;
+  - is remade by cft-segrun, byte for byte but for `build-id` and the hash line, and for an accuracy case the accuracy block, which cft-segrun does not write before step 5;
+  - has every boundary equal to the golden chain's;
+  - is audited to the verdict the manifest names, in full and sampled.
+  The cases differ in format, depth (256 and 2,048), revision 8's augadd and augerr, flags and STATUS by segment, mode (one keyed, under the page's example salt), and one refused `aux-start`. The committed certificates name the producer 0b8ea10, clean. audit-p2 was merged with its history (ba4a0a9), so that commit stays reachable.
+- **As a conformance test**, "Golden certificates" states what an implementation must reproduce (every run block and accuracy value) and what it may name for itself (the identity lines).
+- MEASURED by P2: corpustest 156 checks, 0 failed, in 23 to 32 s. Its plants were red:
+  - one byte of a certificate;
+  - a boundary digest;
+  - the golden writer's state encoding;
+  - --scratch-depth ignored;
+  - the depth case certified at the wrong depth;
+  - the version moved in both writers at once, which segrun_check cannot see and the corpus can.
+- **Verifier-A2** found no regression and no wrong answer. It measured, in plain clones:
+  - the corpus is its manifest, file for file;
+  - 0b8ea10's clean tool remakes it byte for byte;
+  - the normalization copies nothing from the tool;
+  - the bytes hold on checkout under autocrlf true, input, false and eol=crlf;
+  - 25 bad `--scratch-depth` values and 6 other forms are refused `usage` with nothing left;
+  - segrun_check is line for line f2b7115's but for its new section;
+  - the runner's `programs` stage passes in 102 s.
+  Three of its plants passed the corpus, and are known limits below.
+
+**The C auditor (P1: be1c434, ec132d3, 5211172, e840973, c407cd4, efd2e18; the send-backs 293b561, b10047d, 6eeb412, 163423d, then ca1327f and 67b0244).** `cft-audit` (host/tools/audit.c, built by `make -C host all`) is the page's audit in C: the strict reader and the ten steps in the page's order, exact arithmetic on the library's bigint with its own division and gcd, sampling, and P3's rule check for check.
+- Its refusals are the page's, with the page's exit families. Its own are `usage` 64, `memory` 71, and 78 for what a build cannot do. That is `build-width` where its bigint is narrower than the width rule needs, and `build-format` for a format above its ceiling, asked by a run, an image or an accuracy value.
+- **Its gate** is host/tests/audit_check.py (`make -C host audittest`), in a stage of its own, `audit`, in the gate budget: 42 stages, 28 quick, 37 gate. It holds cft-audit's verdict equal to cert.audit's - the refusal's name, exit code and place, or ACCEPTED and the same verdict lines - over:
+  - test_cert.py's calls: every parse call, and every audit call whose arguments files and options can carry (243 of 282; the other 39 are counted and named);
+  - segrun_check's certificates;
+  - the golden corpus;
+  - the narrow builds;
+  - 4,566 numeric operations against Python's integers and the golden model.
+  At P1's first hand-in (394c9ea) it gave 6,742 checks, 0 failed, 216 s on the desktop.
+- **The census** (host/tests/audit_plants.py): every refusal site disabled alone in a fresh copy. At 394c9ea it counted 160 sites: 144 red, 11 green and 5 unreached. Each green site is shadowed by the next check, by the same name at the same place, and each site is named.
+- **Verifier-A1** confirmed equal verdicts over the gate, on the desktop and in WSL (6,740, 0 failed), and 13,313 inputs beyond it in its named runs, 0 differing (16,513 with two more fuzz runs, 19,623 with its harness's trials). It confirmed the reader's order, 27,224 probe operations at the edges, 1,000 decimals and 1,029 widenings, the bound (`lanes` 10 to 2^63 - 1 costing at most 22 ms and 1,224 KiB of commit), and sampling to S = 2^63 - 1.
+  - **One wrong answer, in the narrow build only.** Built with CFT_MAX_FORMAT=2, cft-audit refused an fp256 run `program-image` (exit 4, an input), where cert.audit and the default build accept it. The page said such a build audits an `accuracy 0` certificate in full, and the name blamed the input for what the build lacks. The lead sent P1 back.
+  - Two of A1's plants, step 10's two orders, were green in the gate: no control held them. P3 took their controls (0d0cbd8).
+- **The first send-back (293b561, b10047d, 6eeb412, 163423d)**, after audit-p1 was rebased onto 0d0cbd8. By range-diff (P1 and A1), five of the six earlier commits came through with the same content, and the docs commit differs only in docs/README.md's counts.
+  - `build-format`, 78: the reader raises it at a run's program-format line above the build's ceiling, in an audit and in `--read`.
+  - `--sample` hung for K >= 2^62, where 4K wrapped in uint64_t. K > SIZE_MAX / 32 is now `memory` at once, and below that the map doubles without wrapping.
+  - State files are listed, stat'ed, held to be regular files and opened before step 1. A failure there is `usage` before any step.
+  - Sentences.
+  - The gate: 6,781 checks, 0 failed, 209 s. The census: 165 sites, 146 red, 12 green, 7 unreached.
+- **A1's re-check** measured:
+  - the first wrong answer fixed, over 264 runs in six builds;
+  - build-format never raised in the default build, at the ceiling, or for a wider run within it;
+  - --sample exact against cert.sample and the page, with no hang, over 275 checks;
+  - no verdict moved against 394c9ea over 10,028 inputs;
+  - the gate on Linux (WSL): 6,779 checks and one git skip, 0 failed. There the census's regular-file site is red, as P1 believed.
+  - **A second wrong answer, of the same kind**, in a narrow build no gate compiled: CFT_MAX_FORMAT=2 with CFT_BN_LIMBS=64, a pair cft_config.h documents. An accuracy value stated in fp256, beside runs within the ceiling, stopped the tool with "internal error", exit 70, where cert.audit and the default build accept it. The lead sent P1 back a second time.
+  - **The state-file change departs from the golden's names**, and the lead accepted it. A directory by a boundary file's name, beside a certificate the golden refuses at steps 1 to 6, is `usage` where the golden names the step. The golden takes no directory, and the page states the tool's behaviour. It brings state files under the rule approved with P1's command line: every input file is read before step 1. The same held before for a misspelt boundary name or a missing image.
+- **The second send-back (ca1327f, 67b0244).**
+  - `build-format` at an accuracy value's line whose format word is above the ceiling.
+  - P1 found one more site of the same class: step 4's load of an image whose header names a format above the ceiling, under a run stated within it. The golden and the default build say `program-format` there. A narrow build had said `program-image`, an input's name. It now says `build-format` at the run, raised only where the load answers CFT_ERR_UNSUPPORTED and the header's format is above the ceiling.
+  - The lead accepted that choice. A build that cannot load the image cannot learn whether the golden says `program-format` or `program-image`, and the cause is the build.
+  - The gate compiles both narrow builds: `narrow` (CFT_MAX_FORMAT=2 at its 576-bit bigint) and `narrow64` (with CFT_BN_LIMBS=64, at -O1). Section 5 grew from 8 checks to 26.
+  - The page's narrow-build text is restated so that every sentence holds in both.
+  - The gate: 6,799 checks, 0 failed, 219 s. The census: 167 sites, 148 red, 12 green, 7 unreached.
+- **A1's second re-check** found no regression and no wrong answer:
+  - 708 targeted runs over six builds went as the page predicts;
+  - 9,678 fuzzed or mutated narrow-build inputs, none reaching an internal error or another name;
+  - 9,914 default-build inputs gave the same verdicts at 67b0244 as at 163423d, and the golden's;
+  - the two new census sites are red.
+
+**The lead's integration** (audit-round, merges only). 19aaca9 merges P3, ba4a0a9 P2 and 694507f P1, each with its history. Each merge restates its verifier's sentences (other: sentence), as its commit message lists.
+- P1's merge orders the page's status list as the segment runner, the C auditor, then the golden certificates, and drops P2's "the C auditor is later work".
+- It adds that the audit tool's gate holds cft-audit to each golden case's verdict.
+- It takes A1's last note: an image the library finds malformed first keeps `program-image` in every build.
+- CLAUDE.md's budget counts become 28 of 42 and 37 of 42. The edit is the lead's; no agent may make it.
+- MEASURED on the merged tree after P2's merge (desktop, niced):
+  - corpus check 156, 0 failed;
+  - segrun_check 458, 0 failed, 1 skip;
+  - test_cert.py 101;
+  - the docs check clean.
+- MEASURED after P1's merge:
+  - cft-audit and cft-segrun built with 0 warnings;
+  - audit_check.py 6,799 checks, 0 failed, 219 s, reading certificates/ in the tree;
+  - test_cert.py 101;
+  - corpus check 156, 0 failed;
+  - the docs check clean, with 42 stages, 28 quick and 37 gate;
+  - on amd-arc-box, `make -C host XRT=1 all` at 694507f builds cft-audit with exactly the two known warnings (cft_resident.cpp:264 and :265), and no third.
+- **Some SHAs in the ledgers are no longer reachable.** Twelve commits the ledgers name were rewritten by their own parcel before its merge, and are on no branch:
+  - P1's first chain, 394c9ea among them (verifier-A1's first frozen tree), rebased onto P3's last commit;
+  - P1's two cherry-picks, dropped as P3's own patches;
+  - two earlier forms of P3's controls commit.
+  Their content went on. By range-diff (P1 and A1), 394c9ea's commits are efd2e18's, the docs commit differing only in docs/README.md's counts. Every later verdict is on a reachable commit (verifier-A4).
+
+**The front door.**
+- **The gate budget on amd-arc-box at 694507f** (run 20260930-002449-694507f, 117 minutes, niced, beside revision 7's quad link) failed two stages, and neither failure is the round's.
+  - **27 stages ok**, every stage the round touched among them:
+    - docs 9 s, golden 544 s (its three known inner skips), programs 102 s, audit 174 s, libcft 765 s;
+    - bindings 177 s, cpp 2,028 s, remote 573 s (one inner skip);
+    - sweepjudge, vectors, lint, formal, generated, selfcheck, divsqrt, clause5, character, augmented, status96, formatof, diff, seq, reduce, photograph, lang-cpp, workloads and soak-quick.
+  - **8 skipped by name**: buildargs by its own rule (a real Vitis is on the box); lang-rust, julia, go, csharp, r and fortran, and demos, for tools the box lacks.
+  - **transcend failed.** The contract-precision run passed: 607,217 comparisons, C equal to the model. The escalation run (`--min-prec 64`) stopped: libcft's fp128 rootn of the subnormal 0x2 with n = 2, rne, is one ulp below libcft's own sqrt.
+    - The same fails at main (2852cc4) on the box, measured, with libcft.so built first.
+    - It fails on the desktop too, with CFT_TRANSCEND_MINPREC=64 set before the process.
+    - The stage sets the variable inside Python, which a Windows DLL's getenv does not see. So on the desktop its escalation run has never escalated, and its passes there proved nothing about that path.
+    - The override is a test hook that forces the escalation path, the same path an ordinary call takes when its first precision is not enough. transcend.c says ordinary calls have not been seen to escalate.
+    - Both are pre-existing, and a task of their own ("Fix rootn escalation misround and transcend Windows hole").
+  - **mpfr failed**: 37 value mismatches in 739,234 cases, 0 flag mismatches. All are roundTiesToAway: `pown` at n = ±2,147,483,647 in every format, and one fp64 `pow`.
+    - The same 37 fail at main on the box.
+    - The gate's fresh clone has no `verify/_mpfr-prefix`, so the stage built against the box's system MPFR 4.2.1, where the repository pins 4.2.2 (verify/build-mpfr-oracle.sh). Relinked against the pinned 4.2.2 (static, confirmed by ldd and its version string), the stage gives the same 37.
+    - Each is a negative base to an odd power that underflows. libcft gives -0 with underflow and inexact, and the golden model gives the same bits and flags (three cases, measured). The harness's roundTiesToAway reference gives +0. IEEE 754 keeps the exact result's sign, so the harness is the wrong side, not libcft.
+    - The desktop's gate passed the same stage on 953fe99, and why the hosts differ is not determined. A task of its own ("Fix mpfr-check's roundTiesToAway zero sign on Linux").
+
+**Known limits, recorded rather than fixed** (Logan's rule):
+- **The corpus pins depth 256 against the rest, not 2,048** (A2's T3). A tool at 4,096 stating 2,048 passes both the corpus and segrun_check. The corpus's deepwrap reads slot 256 and writes 258, and the gate's deepstep reads 256 and writes slots 0 and 1, so each computes the same chain at every depth from 512 up.
+- **No case has an auxiliary run at a stated depth** (A2's 9.3). segrun_check catches the depth written in the main run's block only; the corpus does not.
+- **augsum meets no augadd tie where the two roundings differ** (A2's G1). test_augmented.py catches ties-to-even; the corpus does not.
+- A follow-up task, "Pin the golden corpus's depth case to 2,048", takes the three above.
+- **corpus.py exits by traceback**, naming no case, when a tool writes a certificate the reader refuses.
+- **cft-asm refuses revision 8's augerr**, so augsum's image comes from the golden assembler alone (pre-existing).
+- **`--param scratch-depth=N` is refused `usage`**, where f2b7115's cft-segrun took it and wrote the line. This is the lead's decision, since `--scratch-depth` sets the depth and the line together. No committed file, and nothing under Data/runs, uses the name.
+- **A certificate that states a depth it did not run at is refused now.** At f2b7115, a run at 256 slots that stated `parameter scratch-depth 2048` was accepted, since the golden audit then ignored the parameter. It is refused `segment-end` now: since P3's dbeb94f, the audit re-runs a run at the depth it states (verifier-A2, on a deepwrap certificate). That meets a regression's letter, and the lead's decision (19:55:06) made the parameter mean the depth. The page states the parameter's meaning, not the change.
+- **The depth still costs time.** A re-run costs the lanes handed times the depth: each block's scratch starts at +0. Bounding that needs the executors to hold only the slots a program touches.
+- **The writer stays dense.** `run_chain` holds every lane's scratch, as the producer's own cost.
+- **An estimate's need order** (run 0's final state before run r's) is unstated on the page and uncontrolled (P3).
+- **The census's 12 green and 7 unreached sites** stay as named on the page. Each green site is shadowed by a later check that refuses the same cases by the same name at the same place. The unreached are a failed allocation, file races, no OS randomness, and a library failing a re-run the checks allowed. The regular-file check is green on Windows, where the census runs, and red on Linux (verifier-A1, in WSL).
+- **cft_bn_shl** (host/src/bigint.c) keeps a spare limb and refuses any shift of a value that fills the container, a shift by 0 included. cft-audit uses its own shift; the library is unchanged.
+- **cft-audit reads every input file before step 1**, state files included. A directory by a boundary file's name, beside a certificate the golden refuses at steps 1 to 6, is `usage` where the golden names the step. The golden takes no directory. The page states the rule, and the lead accepted it.
+- **A stated depth costs the C auditor memory.** A run at `scratch-depth` 32,768 commits about 520 MiB whatever its lanes (verifier-A1, measured; the page states the constant).
+- **`narrow` compiled with -Wall** gives 13 unused-function warnings in tools/audit.c: the exact-arithmetic helpers outside its `#if`. No make target compiles it with warnings on.
+
+**Load, and the machine.** Every agent ran one run at a time, niced, on the desktop, while Logan used it. No agent touched amd-arc-box or the card. The Linux runs were in WSL cft2204, which is this desktop: P3's net, with no plant there, and verifier-A1's gate and census sites. The long runs were the lead's. The gate budget ran on amd-arc-box, beside revision 7's quad link, niced.
+
+**The lead's own slips**, each caught and recorded in the ledger:
+- **An order reversed in a message.** The lead's message to P3 said the golden reads a drift's final state before its initial. The code reads boundary 0 first, and A1's words and case agree with it. P3 held the code's order, and the page now states it.
+- **A build called failed before it finished.** The ledger said revision 7's quad at 135 MHz "failed timing" while its post-route phys_opt was still running. A correction entry followed within minutes.
+- **A restatement that was itself false.** Restating A2's sentence at P2's merge, the lead wrote that the segment runner's depth leg "reads slot 256 and writes 258". That is the corpus's program, deepwrap; the leg's deepstep writes slots 0 and 1. Verifier-A4 found it, and a2db816 restates it.
+- **Counts in merge messages that were not what was measured.** ba4a0a9 says 21 bad `--scratch-depth` values; A2 measured 25 and six other forms. 694507f says "about 13,700 inputs"; A1 had corrected its own count to 13,313. The messages are history; this entry and the ledger carry the measured figures (verifier-A4).
+- **Two builds that failed, and what one left.** On the merged tree, the lead's first build set `TMP= TEMP=` on make's line, so gcc had an empty temp path. The second set neither, so MSYS make's recipe had no TMP, and gcc tried C:/WINDOWS. Neither made a binary. The first left two untracked temp files in the worktree's host/: segrun.c's assembly and an empty .res. They were found after an abort, read, and removed. The build that worked passes TMP and TEMP as the Windows temp directory.

@@ -3708,7 +3708,9 @@ verifier.
 7. **Golden certificates** (Logan, 2026-09-29: "add a series of 'Golden
    certificates', programs and their certificates utilized as
    regression tests themselves as well as conformance tests in the
-   future"). Not built yet.
+   future"). Built on 2026-09-29, in the round below ("Steps 4 and
+   7"): certificates/, and docs/CERTIFICATES.md, "Golden
+   certificates".
    - **What it is.** A committed corpus. Each case holds:
      - a program from the library, its bank and an initial state;
      - OPEN hashing, segments and steps;
@@ -3743,6 +3745,22 @@ bound for any method that has no rigorous remainder.
 Logan chose this round on 2026-09-29 ("Go with your recommendation of
 the C auditor and golden certificates"), with revision 7's quad still
 building. Nothing in it exists yet unless it says so.
+
+**Built, the same night** (docs/VALIDATION.md, 2026-09-30, "the
+certificate plan's steps 4 and 7").
+- P3's rule is in cert.py. P2's corpus is certificates/, held by
+  corpustest in the `programs` stage. P1's cft-audit is in `make -C
+  host all`, held by a stage of its own, `audit`, in the gate budget.
+- As built, a narrow build names what it lacks by two names of the
+  tool's own, `build-width` and `build-format`. The plan named the
+  width alone. `build-format` came from verifier-A1's two wrong
+  answers, one in each narrow build.
+- cft-audit reads every input file before step 1, state files
+  included. A file it cannot use is `usage` before any step, where
+  the golden auditor, which takes no files, names the step.
+- The corpus's depth cases tell 256 from the deeper depths, not 2,048
+  from them. That is a follow-up.
+- The rest of this section is the plan as written that evening.
 
 **What the tree has.**
 - **The golden side.** docs/CERTIFICATES.md is the whole of version 1.
