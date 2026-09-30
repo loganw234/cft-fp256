@@ -316,13 +316,25 @@ for t in $TARGETS; do
     fi
   fi
   if [ "$RETIMING" = 1 ] && [ "$t" = "hw" ]; then
-    # The kernel's own OOC synthesis run inside the vpl project. The
-    # name is the packaged IP's, observed in prj.runs of a completed
-    # build; if a future platform renames it, v++ says so loudly rather
-    # than silently skipping the property.
-    vprop+=(--vivado.prop
-      "run.ulp_cft_krnl_1_0_synth_1.{STEPS.SYNTH_DESIGN.ARGS.RETIMING}=true")
-    echo "== RETIMING enabled on the kernel synthesis run"
+    # Each compute unit's own OOC synthesis run inside the vpl project,
+    # ulp_<cu>_0_synth_1: the name is the packaged IP's, observed in
+    # prj.runs of completed builds; if a future platform renames it,
+    # v++ says so loudly rather than silently skipping the property.
+    #
+    # EVERY CU, from the nk= line, as the clock constraint is. Until
+    # 2026-09-30 this named ulp_cft_krnl_1_0_synth_1 alone, which is
+    # the whole kernel in a single but one of four synthesis runs in a
+    # quad: every quad built with RETIMING=1 had tile 1 retimed and
+    # tiles 2 to 4 not, while its manifest said "retiming: 1"
+    # (revision 7's q135 and q130, whose ten worst paths were all in
+    # tile 4; docs/VALIDATION.md, 2026-09-30). hw/test-rebuild-argv.sh
+    # holds one property per CU, and its control puts the old line
+    # back; the manifest's retimed_runs: says which runs did retime.
+    for cu in ${CLOCK_CUS//./ }; do
+      vprop+=(--vivado.prop
+        "run.ulp_${cu}_0_synth_1.{STEPS.SYNTH_DESIGN.ARGS.RETIMING}=true")
+    done
+    echo "== RETIMING enabled on the synthesis run of every CU: $CLOCK_CUS"
   fi
   v++ -l -t "$t" --platform "$PLATFORM" --config "$LINK_CFG" $extra \
       "${vprop[@]}" \
@@ -363,6 +375,16 @@ for t in $TARGETS; do
     echo "link_cfg:      $LINK_CFG"
     echo "kernel_freq:   $KERNEL_FREQ"
     echo "retiming:      $RETIMING"
+    # What the synthesis runs themselves did, read from each CU's own
+    # runme.log after the build: "retiming: 1" is the request, and a
+    # request once reached one run of four without anything saying so.
+    rr=""
+    for cu in ${CLOCK_CUS//./ }; do
+      rl="$BUILD/_x_$t/link/vivado/vpl/prj/prj.runs/ulp_${cu}_0_synth_1/runme.log"
+      [ -f "$rl" ] && grep -q -i -- '-retiming' "$rl" && rr="$rr $cu"
+    done
+    rr=${rr# }
+    echo "retimed_runs:  ${rr:-none}"
     echo "place_directive: ${PLACE_DIRECTIVE:-default}"
     echo "route_directive: ${ROUTE_DIRECTIVE:-default}"
     echo "phys_opt:      $PHYS_OPT"

@@ -99,6 +99,16 @@ CFT_GENERICS="EN_FP32=0 EN_FP256=0" BUILD=build-<name>-pkg TARGETS="" \
 exactly that reason: two links sharing a directory overwrite each
 other's `.xo`, temp dir and xclbin.
 
+`RETIMING=1` retimes the synthesis run of every CU the link config's
+`nk=` line names, as the clock constraint does, and the manifest's
+`retimed_runs:` line lists the runs whose own `runme.log` shows it
+after the build. Until 2026-09-30 the flag reached `cft_krnl_1`'s run
+alone. A single was retimed whole, but a quad had one tile of four
+retimed while its manifest said `retiming: 1` (docs/VALIDATION.md,
+2026-09-30). `hw/test-rebuild-argv.sh` (the `buildargs` stage) holds
+one property per CU for both link configs, and its control puts the
+old one-run line back.
+
 ## The five traps
 
 ### 1. KERNEL_FREQ defaults to 10 MHz

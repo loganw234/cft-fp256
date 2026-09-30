@@ -115,11 +115,18 @@ run_it() {                       # run_it <script> <link-cfg> <tag>
     BUILD="$TMP/build-$tag" \
     TARGETS="${TARGETS_FOR_RUN-hw}" \
     KERNEL_FREQ=135000000 \
+    RETIMING="${RETIMING_FOR_RUN-1}" \
     VPP_PROPS="run.impl_1.STEPS.OPT_DESIGN.IS_ENABLED=true" \
     LINK_CFG="$cfg" \
     bash "$script" ) > "$TMP/out-$tag.txt" 2>&1
   echo $? > "$TMP/rc-$tag"
   echo "$log"
+}
+
+# The CUs whose synthesis run the argv retimes, in argv order.
+retimed_cus_of() {              # retimed_cus_of <argv-log> -> "cu cu ..."
+  sed -n 's/^run\.ulp_\(.*\)_0_synth_1\.{STEPS\.SYNTH_DESIGN\.ARGS\.RETIMING}=true$/\1/p' "$1" \
+    | tr '\n' ' ' | sed 's/ $//'
 }
 
 # --clock.freqHz present, and the value the environment asked for.
@@ -158,6 +165,16 @@ for pair in "hw/link.cfg:single:1" "hw/link_quad.cfg:quad:4"; do
   # The property that erased it must itself have survived.
   grep -q -- '--vivado.prop' "$log" \
     || say_fail "$tag: --vivado.prop missing, so VPP_PROPS never reached v++"
+  # RETIMING=1 reaches the synthesis run of EVERY CU the nk= line
+  # names. Until 2026-09-30 it reached cft_krnl_1's alone, and three
+  # tiles of every quad went unretimed.
+  want=$(sed -n 's/^[[:space:]]*nk=[^:]*:[0-9]*:\(.*\)$/\1/p' "$ROOT/$cfg" | tr '.' ' ')
+  rt=$(retimed_cus_of "$log")
+  if [ "$rt" != "$want" ]; then
+    say_fail "$tag: RETIMING=1 retimes '$rt', not every CU '$want'"
+  else
+    echo "  ok   $tag: RETIMING=1 retimes every CU: $rt"
+  fi
 done
 
 # ------------------------------------------------------------- generics
@@ -237,9 +254,30 @@ else
   fi
 fi
 
+# The retiming defect put back: cft_krnl_1's run alone, as the script
+# had it until 2026-09-30. The quad must then retime cft_krnl_1 alone,
+# which the check above refuses.
+echo "== negative control: RETIMING on cft_krnl_1's run alone =="
+SAB1="$TMP/sabotaged-retiming.sh"
+awk '!done_ && /^    for cu in [$][{]CLOCK_CUS[/][/][.][/] [}]; do$/ { print "    for cu in cft_krnl_1; do"; done_ = 1; next } { print }' \
+    "$SCRIPT" > "$SAB1"
+if cmp -s "$SCRIPT" "$SAB1"; then
+  say_fail "control: the retiming loop no longer matches the sabotage"
+  echo "        pattern, so this control proves nothing. Re-aim it."
+else
+  log=$(run_it "$SAB1" "hw/link_quad.cfg" "sabotage-retiming")
+  rt=$(retimed_cus_of "$log")
+  if [ "$rt" = "cft_krnl_1" ]; then
+    echo "  ok   control: the sabotaged quad retimes '$rt' alone, and this test sees it"
+  else
+    say_fail "control: the sabotaged quad retimed '$rt', not the defect's cft_krnl_1"
+  fi
+fi
+
 echo
 if [ "$fails" -eq 0 ]; then
-  echo "rebuild-2022.sh: the clock constraint survives VPP_PROPS, CFT_GENERICS"
+  echo "rebuild-2022.sh: the clock constraint survives VPP_PROPS, RETIMING=1"
+  echo "reaches the synthesis run of every CU, CFT_GENERICS"
   echo "reaches vivado and the manifest, a lying wrapper read-back stops the"
   echo "build before v++, TARGETS=\"\" packages without linking, and each check"
   echo "still fails when its defect is put back."
