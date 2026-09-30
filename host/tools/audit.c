@@ -61,13 +61,20 @@
  * .run, .segment and .entry), and the exit code is the name's. Every name
  * and code is the page's table's, and the same check refuses the same
  * defect by the same name at the same place as the golden auditor does:
- * that is what the gate holds. Three names are the tool's own:
+ * that is what the gate holds. Four names are the tool's own:
  *   usage (64)        a command line this tool does not take, or a file
  *                     it names that cannot be read
  *   memory (71)       an allocation of this tool's own that fails
  *   build-width (78)  a build whose bigint is narrower than the width
  *                     rule needs, handed a certificate with an accuracy
  *                     entry (below)
+ *   build-format (78) a build whose library carries formats only up to
+ *                     CFT_MAX_FORMAT, handed a run of a wider format: the
+ *                     reader refuses it at that run's program-format line
+ *                     (the lead's decision, 2026-09-29, after
+ *                     verifier-A1 found such a run refused program-image,
+ *                     a name for an input that is not the one certified,
+ *                     where the cause is the build)
  * A library call that fails where no refusal names the failure (a
  * software device that does not open, a conversion that fails) is not a
  * verdict: it prints "cft-audit: internal error" and exits 70.
@@ -224,6 +231,7 @@ static const struct { const char *name; int code; } REFUSAL[] = {
     { "choice", 64 },
     /* the tool's own */
     { "usage", 64 }, { "memory", 71 }, { "build-width", 78 },
+    { "build-format", 78 },
 };
 
 /* Where a refusal is: each field NONE where it does not apply. */
@@ -1551,6 +1559,16 @@ static void read_run(rdr_t *R, cert_t *C, uint64_t i)
      * line before it (found by the gate: 27 lines off by one) */
     v = take(R, KEY_PFORMAT);
     run->fmt = rd_word(v, LADDER, 4, "the program format", PREV(R));
+    /* a format this build's library does not carry (CFT_MAX_FORMAT):
+     * refused by the build's name, here, where the format is read, and
+     * never later as an image that does not load - which would name an
+     * input as not the one certified when the cause is the build */
+    if (run->fmt > CFT_MAX_FORMAT)
+        refuse("build-format", AT_LINE(PREV(R)), "line %lld: run %llu is "
+               "%s, and this build's library carries formats up to %s "
+               "(CFT_MAX_FORMAT=%d); it refuses rather than audit it "
+               "differently", PREV(R), (unsigned long long)i,
+               FMT[run->fmt].name, FMT[CFT_MAX_FORMAT].name, CFT_MAX_FORMAT);
     v = take(R, KEY_PIMAGE);
     run->image = rd_hex(v, 64, "the image digest", PREV(R));
     v = take(R, KEY_PDIGEST);
@@ -2140,6 +2158,13 @@ static void list_states(const char *dir)
         SF[N_SF].r = r;
         SF[N_SF].b = b;
         {
+            /* a state file is held to be one, and opened, before step 1,
+             * so that one that cannot be read is `usage` before any step
+             * (verifier-A1: a directory by a boundary's name was refused
+             * only at step 7, after steps 1 to 6 had passed); its bytes
+             * are read at step 7, where only a file changed or gone since
+             * can fail */
+            FILE *f;
 #if defined(_WIN32)
             struct _stati64 sb;
             if (_stati64(SF[N_SF].path, &sb) != 0)
@@ -2149,6 +2174,18 @@ static void list_states(const char *dir)
 #endif
                 refuse("usage", NOWHERE, "%s cannot be read (%s)",
                        SF[N_SF].path, strerror(errno));
+#if defined(_WIN32)
+            if ((sb.st_mode & _S_IFMT) != _S_IFREG)
+#else
+            if (!S_ISREG(sb.st_mode))
+#endif
+                refuse("usage", NOWHERE, "%s is named as a boundary file and "
+                       "is not a file", SF[N_SF].path);
+            f = fopen(SF[N_SF].path, "rb");
+            if (!f)
+                refuse("usage", NOWHERE, "%s cannot be read (%s)",
+                       SF[N_SF].path, strerror(errno));
+            fclose(f);
             SF[N_SF].size = (uint64_t)sb.st_size;
         }
         N_SF++;
@@ -2257,8 +2294,17 @@ static uint64_t *sample(const uint8_t *seed, uint32_t run, uint64_t S,
     prng_t P;
     smap M;
     uint64_t j, *out;
+    /* 4k slots, sized without wrapping: at K = 2^62 the product 4k is 0
+     * in 64 bits, and a map left at 16 slots probed forever once full
+     * (verifier-A1). A k whose map this process cannot address is the
+     * tool's own `memory`; an audit's k is at most its run's segments,
+     * which its lines pay for, so only --sample can ask for one. */
+    if (k > (uint64_t)((size_t)-1 / (4 * sizeof(uint64_t))))
+        refuse("memory", NOWHERE, "a sample of %llu needs a map of 4 x "
+               "%llu slots, more than this process can address",
+               (unsigned long long)k, (unsigned long long)k);
     M.cap = 16;
-    while (M.cap < 4 * k)
+    while (M.cap < 4 * (size_t)k)
         M.cap *= 2;
     M.key = (uint64_t *)xalloc(M.cap, sizeof *M.key);
     M.val = (uint64_t *)xalloc(M.cap, sizeof *M.val);
@@ -2801,9 +2847,13 @@ static void check_states(const cert_t *C, const uint8_t *salt,
                        (unsigned long long)r, (unsigned long long)run->S);
         for (j = i; j < N_SF && SF[j].r == r; j++) {
             uint64_t b = SF[j].b, nvals;
-            size_t n;
-            uint8_t *s = read_named("the state file", SF[j].path, &n);
+            size_t n = 0;
+            uint8_t *s = read_file(SF[j].path, &n);
             char hex[65];
+            if (!s)
+                refuse("usage", NOWHERE, "the state file %s was opened before "
+                       "step 1 and cannot be read at step 7 (%s): it changed "
+                       "or went since", SF[j].path, strerror(errno));
             if (n % esz)
                 refuse("state-shape", AT_RS(r, b), "run %llu boundary %llu: "
                        "%lu bytes is not a whole number of %s elements (%lu "
@@ -3039,7 +3089,9 @@ static void check_relations(const cert_t *C, const uint8_t *salt,
 
 /* CFT_AUDIT_PLANT, the instrument: `executor-refuses` makes every re-run's
  * executor refuse, as test_cert.py's monkeypatched seq.run does, so that
- * the gate can hold the refusal a later executor could make. */
+ * the gate can hold the refusal a later executor could make. Any other
+ * value is `usage`, and the empty string is the variable unset, as
+ * CFT_SEGRUN_PLANT's is: Windows cannot spell an empty variable at all. */
 static int PLANT_EXECUTOR = 0;
 
 /* Step 9 (cert._rerun). */

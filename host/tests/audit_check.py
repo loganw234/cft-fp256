@@ -9,12 +9,12 @@ record's step 4 (docs/ROADMAP.md, "Steps 4 and 7"; docs/CERTIFICATES.md,
                                      [--cc CC --lib-src "SRC ..."]
                                      [--keep DIR] [--record DIR]
 
-`make -C host audittest` runs it, and verify/run.sh's `programs` stage
-runs that. Every input is handed to both auditors - cft-audit as files
-and options, cert.audit (or cert.parse) as the arguments it takes - and
-they must give the SAME verdict: the refusal's name, its exit code and
-its location (line, run, segment, entry), or both ACCEPTED with the same
-verdict, line for line.
+`make -C host audittest` runs it, and verify/run.sh's `audit` stage, in
+the gate budget, runs that. Every input is handed to both auditors -
+cft-audit as files and options, cert.audit (or cert.parse) as the
+arguments it takes - and they must give the SAME verdict: the refusal's
+name, its exit code and its location (line, run, segment, entry), or
+both ACCEPTED with the same verdict, line for line.
 
   1. the tool's own: every usage refusal a command line or a file can
      cause; `--sample` against the page's test vector and against
@@ -39,9 +39,12 @@ verdict, line for line.
      each case in full and sampled, both auditors against each other and
      against the manifest's verdict;
   5. the narrow build: libcft and cft-audit compiled at CFT_MAX_FORMAT=2
-     (a 576-bit cft_bn), which must refuse `build-width` (78) at an
-     `accuracy` line counting at least 1, and audit an `accuracy 0`
-     certificate in full;
+     (a 576-bit cft_bn, formats to fp128), which must refuse
+     `build-width` (78) at an `accuracy` line counting at least 1, refuse
+     `build-format` (78) at the `program-format` line of a run above its
+     ceiling - an fp256 certificate the golden auditor and the default
+     tool accept (verifier-A1's case) - and audit in full a certificate
+     with neither;
   6. the tool's numerics, through a probe build of tools/audit.c
      (-DCFT_AUDIT_PROBE, never the tool itself): its own division, gcd
      and exact arithmetic held to Python's integers up to 2,047 bits, its
@@ -612,10 +615,39 @@ def section_tool(work):
               why)
         record(None, ["--sample"] + a, None, list(g), f"--sample, {label}")
     # usage: every refusal a command line or a file can cause
+    # --sample past what a map can be sized for: the tool's own `memory`,
+    # promptly (at K = 2^62, 4K wrapped to 0 and the map probed forever;
+    # verifier-A1). cert.sample has no verdict there (it builds range(S)).
+    big = (1 << 63) - 1
+    for S_, k_ in ((1 << 62, 1 << 62), (big, 1 << 62), (big, big)):
+        args = ["--sample", bytes(32).hex(), "0", str(S_), str(k_)]
+        rc, out, err = run_tool(args)
+        t = tool_verdict(rc, out, err)
+        want = ("refused", ("memory", 71, ("-", "-", "-", "-")))
+        check(t == want and out == "", f"--sample of {k_} from {S_}: "
+              f"refused memory (71), promptly", f"{t}")
+        record(None, args, None, [want[0], list(want[1])],
+               f"--sample of {k_} from {S_}")
+    # the instrument set to the empty string is the instrument unset, as
+    # CFT_SEGRUN_PLANT's is (Windows cannot spell an empty variable)
+    args = ["--sample", rows["sample-seed"], rows["sample-run"],
+            rows["sample-of"], rows["sample-k"]]
+    env = {"CFT_AUDIT_PLANT": ""}
+    rc, out, err = run_tool(args, env)
+    check(rc == 0 and out.strip() == rows["sample"], "CFT_AUDIT_PLANT set "
+          "empty is the instrument unset: --sample still prints the page's "
+          "vector", f"exit {rc}: {out.strip() or err.strip()}")
+    record(None, args, env, ["accepted", [rows["sample"]]],
+           "CFT_AUDIT_PLANT empty")
     lor = work / "own" / "l.cert"
     lor.write_bytes(b"cft-certificate 1\n")
     (d / "states-bad").mkdir(exist_ok=True)
     (d / "states-bad" / "run-01-boundary-0.bin").write_bytes(b"")
+    # a directory by a boundary file's name: `usage` BEFORE step 1, which
+    # this certificate (no hash line) would fail - so a tool that found it
+    # only at step 7 says hash-line here (verifier-A1)
+    (d / "states-dir" / "run-0-boundary-0.bin").mkdir(parents=True,
+                                                      exist_ok=True)
     for label, args, env in (
             ("no argument at all", [], None),
             ("an unknown option", ["--cert", lor, "--lanes", "3"], None),
@@ -647,6 +679,8 @@ def section_tool(work):
                                                     "--states", lor], None),
             ("a boundary file misspelt", ["--cert", lor, "--states",
                                           d / "states-bad"], None),
+            ("a directory named as a boundary file, found before step 1",
+             ["--cert", lor, "--states", d / "states-dir"], None),
             ("CFT_AUDIT_PLANT=bogus", ["--cert", lor],
              {"CFT_AUDIT_PLANT": "bogus"}),
             # the census's (audit_plants.py): each of these reaches a check
@@ -947,8 +981,9 @@ def section_corpus(work, root):
 # ---- section 5: the narrow build --------------------------------------------
 
 def section_narrow(work, cc, lib_src):
-    print("== 5. the narrow build: a 576-bit cft_bn refuses build-width at an "
-          "accuracy line counting 1 or more", flush=True)
+    print("== 5. the narrow build (CFT_MAX_FORMAT=2): build-width at an "
+          "accuracy line counting 1 or more, build-format at a run above "
+          "fp128", flush=True)
     if not cc or not lib_src:
         skip("the narrow build", "no --cc and --lib-src given (make -C host "
              "audittest gives both)")
@@ -1004,8 +1039,70 @@ def section_narrow(work, cc, lib_src):
               "them in full, the golden verdict", why)
         record(e0, args, None, list(g), "narrow: accuracy 0, audited in full",
                binary="narrow")
+        # a run above the build's ceiling (verifier-A1's case): cft-segrun's
+        # open lorenz63-rk4-fp256 certificate, two runs, accuracy 0, every
+        # state handed. The golden auditor and the default tool ACCEPT it;
+        # the narrow build refuses build-format at run 0's program-format
+        # line, never program-image, a name for an input not the one
+        # certified where the cause is the build
+        data2, progs2, states2 = fp256_certificate(d / "fp256")
+        g = golden(cert.audit, data2, None, progs2, states=states2)
+        check(g[0] == "accepted", "an open fp256 certificate of two runs "
+              "and accuracy 0: the golden audit accepts it", describe(g))
+        e2 = d / "fp256-audit"
+        e2.mkdir(exist_ok=True)
+        args = translate(e2, data2, None, programs=progs2, states=states2)
+        TOOL = wide
+        hold(args, None, g, "  and the default tool accepts it, the same "
+             "verdict", e2, quiet=False)
+        TOOL = exe
+        line = next(i + 1 for i, ln in enumerate(
+            cert.body_of(data2).decode().split("\n"))
+            if ln.startswith("program-format "))
+        want = ("refused", ("build-format", 78, (str(line), "-", "-", "-")))
+        for how, a in (("its audit", args), ("its --read",
+                                             ["--read"] + args[:2])):
+            rc, out, err = run_tool(a, cwd=e2)
+            t = tool_verdict(rc, out, err)
+            check(t == want, f"  and the narrow build refuses {how} "
+                  f"build-format, exit 78, at run 0's program-format line "
+                  f"{line}", f"{t}")
+            record(e2, a, None, [want[0], list(want[1])], f"narrow: the fp256 "
+                   f"certificate, {how}, build-format", binary="narrow")
     finally:
         TOOL = wide
+
+
+def fp256_certificate(d):
+    """cft-segrun's open certificate of lorenz63-rk4 at fp256: one lane,
+    a main run of 1 segment and its half-step run of 2 (segrun_check's
+    program, cut short), with every boundary state. -> (bytes, programs,
+    states)"""
+    import segrun_check as sc
+    sc.TOOL = SEGRUN
+    prog = sc.ode_program("lorenz63-rk4", "fp256", sc.manifest())
+    main, half = prog.runs[0], prog.runs[1]
+    lane = main.init[:3]
+    runs = [dataclasses.replace(main, init=lane, segments=1,
+                                params=(("members", 1),)),
+            dataclasses.replace(half, init=lane, segments=2,
+                                params=(("members", 1),))]
+    prog = dataclasses.replace(prog, runs=runs)
+    if d.exists():
+        shutil.rmtree(d)
+    d.mkdir(parents=True)
+    paths = sc.write_inputs(d, prog)
+    out, sdir = d / "c.cert", d / "states"
+    r = subprocess.run([str(SEGRUN)] + [str(a) for a in sc.tool_args(
+        prog, paths, out, sdir, None)], capture_output=True, text=True,
+        timeout=TOOL_TIMEOUT)
+    if r.returncode != 0:
+        raise RuntimeError(f"cft-segrun: {r.stderr.strip()[-300:]}")
+    progs = {i: (s.image, s.bank) for i, s in enumerate(runs)}
+    states = {i: {b: (sdir / f"run-{i}-boundary-{b}.bin").read_bytes()
+                  for b in range(s.segments + 1)}
+              for i, s in enumerate(runs)}
+    return out.read_bytes(), progs, states
 
 
 # ---- section 6: the numerics against Python's integers and the golden -------
