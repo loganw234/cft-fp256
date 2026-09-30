@@ -26,11 +26,15 @@ for name, so those three cannot drift from the code. The rest of the
 page is prose, held by review.
 """
 
+import contextlib
 import dataclasses
 import hashlib
+import math
 import re
 import struct
 import sys
+import time
+import tracemalloc
 import types
 from fractions import Fraction
 from pathlib import Path
@@ -923,6 +927,157 @@ def test_the_audit_reruns_at_the_certified_devices_scratch_depth():
             dataclasses.replace(u50, device_caps=caps)) == 256
 
 
+def _deep_segment():
+    """The 300-slot segment above, certified as run at 2,048 slots: two
+    lanes, three segments, one lane's slots 0 and 299 each gaining one a
+    segment. -> (image, states, results)"""
+    seq = cert.seq
+    one = sf.one_bits(F64)
+    top = 299
+    prog = seq.Program(F64, [
+        seq.ldl(3, top, 2048),
+        seq.alu(sf.OP_FMA, rd=3, ra=3, rb=0, rc=0, kb=True, kc=True),
+        seq.stl(3, top, 2048),
+        seq.ldl(4, 0, 2048),
+        seq.alu(sf.OP_FMA, rd=4, ra=4, rb=0, rc=0, kb=True, kc=True),
+        seq.stl(4, 0, 2048),
+        seq.halt()], consts=[one], max_deposits=0,
+        flags=seq.FLAG_SCRATCH_IO, n_scratch_in=top + 1,
+        n_scratch_out=top + 1, scratch_depth=2048)
+    img = prog.to_bytes()
+    init = [dec64(repr(0.5 + i / 8)) for i in range(2 * (top + 1))]
+    st, rs = cert.run_chain(img, None, init, 3, scratch_depth=2048)
+    return img, st, rs
+
+
+def test_a_runs_scratch_depth_parameter_is_its_depth():
+    """Where device-caps gives no depth - the software backend's `none`, a
+    CAPS word alone, `unknown`, a CAPS2 without bit 4 - a run's
+    `scratch-depth` parameter does, so that a software handle opened
+    deeper can say its depth (the lead's decision, 2026-09-29). The
+    300-slot segment loads only on a deeper tile: under each such
+    identity it audits green at its parameter's 2,048, and without the
+    parameter it is refused by name at 256. Where CAPS2 names a depth,
+    that is every run's, whatever a parameter says."""
+    img, st, rs = _deep_segment()
+    progs, states = {0: (img, None)}, {0: dict(enumerate(st))}
+    said = cert.certify_run("main", img, None, SALT, st, rs, steps=1,
+                            scratch_depth=2048,
+                            parameters=(("scratch-depth", 2048),))
+    plain = cert.certify_run("main", img, None, SALT, st, rs, steps=1,
+                             scratch_depth=2048)
+    for caps in ("none", ("19e9ffff",), "unknown", ("19faffff", "000007eb")):
+        idn = dataclasses.replace(IDENTITY, device_caps=caps)
+        c = cert.parse(cert.encode(keyed((said,), (), idn)))
+        assert cert.scratch_depth_of(c.identity, c.runs[0]) == 2048
+        assert cert.scratch_depth_of(c.identity) == 256
+        v = cert.audit(cert.encode(keyed((said,), (), idn)), SALT, progs,
+                       states=states)
+        assert v.exit_code == 0 and len(v.runs[0]["rerun"]) == 3
+        e = refused("program-image", cert.audit,
+                    cert.encode(keyed((plain,), (), idn)), SALT, progs,
+                    states=states)
+        assert "256" in e.message and e.run == 0
+    # CAPS2 with bit 4 is the device's depth, and so every run's: 256 on a
+    # round-2 image, where the parameter's 2,048 is not read
+    r2 = dataclasses.replace(IDENTITY, backend="xrt", device_xclbin="ab" * 32,
+                             device_version="00000a00",
+                             device_caps=("19e9ffff", "000007f8"))
+    c = cert.parse(cert.encode(keyed((said,), (), r2)))
+    assert cert.scratch_depth_of(c.identity, c.runs[0]) == 256
+    refused("program-image", cert.audit, cert.encode(keyed((said,), (), r2)),
+            SALT, progs, states=states)
+
+
+def test_the_scratch_depth_parameter_is_a_depth(lor):
+    """The reader holds `scratch-depth` to a power of two in 1..32,768, the
+    depths CAPS2[3:0] can name: `malformed` otherwise, at its line, after
+    the line's name, its place in byte order and its decimal spelling are
+    read, as every parameter's are. The writer refuses one the same way,
+    since it reads back what it writes. Every other parameter is stated,
+    not checked, whatever its value."""
+    L = lines_of(lor.data)
+    p = find(L, "parameters ")          # run 0's: ensemble-spread, members
+    head, rest = L[:p], L[p + 3:]
+
+    def with_depth(v, name="scratch-depth"):
+        return rebuilt(head + ["parameters 3", "parameter ensemble-spread 64",
+                               "parameter members 3", f"parameter {name} {v}"]
+                       + rest)
+    for v in (1, 2, 256, 2048, 32768):
+        c = cert.parse(with_depth(v))
+        assert c.runs[0].parameters[-1] == ("scratch-depth", v)
+        assert cert.scratch_depth_of(c.identity, c.runs[0]) == v
+        assert cert.scratch_depth_of(c.identity, c.runs[1]) == 256
+    for v in ("0", "3", "255", "257", "32769", "65536",
+              "9223372036854775807"):
+        e = refused("malformed", cert.parse, with_depth(v))
+        assert e.line == p + 4 and "scratch depth" in e.message, e.message
+    # its decimal spelling first, as any parameter's
+    e = refused("malformed", cert.parse, with_depth("03"))
+    assert e.line == p + 4 and "one spelling" in e.message, e.message
+    # a name one letter off is stated, not checked
+    assert cert.parse(with_depth(3, "scratch-depths")).runs[0].parameters[
+        -1] == ("scratch-depths", 3)
+    # its place among the run's parameters before its value
+    e = refused("line-order", cert.parse, rebuilt(
+        head + ["parameters 2", "parameter zz 1", "parameter scratch-depth 3"]
+        + rest))
+    assert e.line == p + 3
+    bad = dataclasses.replace(lor.runs[0], parameters=lor.runs[0].parameters
+                              + (("scratch-depth", 3),))
+    refused("malformed", cert.encode, keyed((bad,) + lor.runs[1:],
+                                            lor.entries))
+
+
+def test_an_auxiliary_run_is_at_the_main_runs_depth(lor):
+    """An auxiliary run is the main run's instructions on the same machine,
+    so at its scratch depth (the lead's decision, 2026-09-29): a half-step
+    or wider run whose scratch-depth parameter names another depth than
+    the main run's is refused `aux-image`, after its lanes and before its
+    segments. The same depth said two ways is the same machine, and under
+    CAPS2 every run is at the device's depth whatever it says."""
+    r0, r1, r2 = lor.runs
+    P = lor.progs
+    at512 = (("scratch-depth", 512),)
+    half512 = dataclasses.replace(r1, parameters=at512)
+    e = refused("aux-image", _audit_runs, lor, [r0, half512],
+                {0: P[0], 1: P[1]})
+    assert e.run == 1 and "scratch depth of 512" in e.message, e.message
+    e = refused("aux-image", _audit_runs, lor,
+                [r0, dataclasses.replace(r2, parameters=at512)],
+                {0: P[0], 1: P[2]})
+    assert e.run == 1 and "scratch depth of 512" in e.message, e.message
+    # the main run's parameter against an auxiliary run's default
+    e = refused("aux-image", _audit_runs, lor,
+                [dataclasses.replace(r0, parameters=r0.parameters + at512),
+                 r1], {0: P[0], 1: P[1]})
+    assert "and the main run at 512" in e.message, e.message
+    # after aux-lanes, before aux-segments: each defect alone is its own
+    ch = _fake_chain(r1.chain[0].start, S)
+    two = tuple(cert.stream_hash(SALT, n, cert.state_bytes("fp64", [0, 0]))
+                for n in "abc")
+    refused("aux-lanes", _audit_runs, lor, [r0, dataclasses.replace(
+        half512, lanes=2, streams=two)], {0: P[0], 1: P[1]})
+    refused("aux-image", _audit_runs, lor, [r0, dataclasses.replace(
+        half512, chain=ch, output=ch[-1].end)], {0: P[0], 1: P[1]})
+    refused("aux-segments", _audit_runs, lor, [r0, dataclasses.replace(
+        r1, chain=ch, output=ch[-1].end)], {0: P[0], 1: P[1]})
+    both = {0: lor.states[0], 1: lor.states[1]}
+    # 256 said on the half-step run alone is the main run's 256
+    _audit_runs(lor, [r0, dataclasses.replace(r1, parameters=(
+        ("scratch-depth", 256),))], {0: P[0], 1: P[1]}, states=both,
+        choose={0: [0], 1: [0]})
+    # under CAPS2 both runs are at the device's 2,048, whatever run 1 says
+    u50 = dataclasses.replace(IDENTITY, backend="xrt",
+                              device_xclbin="ab" * 32,
+                              device_version="00000a00",
+                              device_caps=("19faffff", "000007fb"))
+    cert.audit(cert.encode(dataclasses.replace(
+        lor.cert, identity=u50, runs=(r0, half512), accuracy=())), SALT,
+        {0: P[0], 1: P[1]}, states=both, choose={0: [0], 1: [0]})
+
+
 def test_a_full_audit_handed_only_the_initial_states(lor):
     """Each segment starts from the one before it, re-run in this audit
     and matched: the most independent audit there is, handed nothing
@@ -1505,6 +1660,30 @@ def test_a_sampled_audit_states_what_it_missed(lor):
     assert "C(4-f,2)/C(4,2); for f = 1 that is 1/2" in text
     assert "C(8-f,3)/C(8,3); for f = 1 that is 5/8" in text
     assert seed.hex() in text
+    # which segments a sample re-ran, ascending, spelt as a named choice's
+    # are (the lead's decision, 2026-09-29: the page's verdict gives "which
+    # segments were re-run"; P1's C auditor prints the same bytes)
+    lines = v.lines()
+    assert lines[2] == (
+        f"run 0 main fp64, 3 lanes, {S} segments: re-ran 2 of {S}, a sample "
+        f"drawn with the auditor's seed {seed.hex()}: a producer who made f "
+        f"of these {S} segments wrong escapes it with probability "
+        f"C({S}-f,2)/C({S},2); for f = 1 that is 1/2; the segments sampled: "
+        f"[0, 1]")
+    assert cert.sample(seed, 0, S, 2) == [0, 1]
+    assert lines[3].endswith("for f = 1 that is 5/8; the segments sampled: "
+                             "[4, 5, 7]")
+    assert v.runs[1]["rerun"] == [4, 5, 7]
+    assert lines[4] == (f"run 2 wider fp128, 3 lanes, {S} segments: re-ran 2 "
+                        f"of {S}, the segments named: [1, 3]")
+    # one segment is one index in its brackets; every segment is said so
+    one = cert.audit(lor.data, SALT, lor.progs, states=lor.states,
+                     choose={0: ("sample", 1), 1: [5], 2: "all"},
+                     seed=seed).lines()
+    assert one[2].endswith(
+        f"; the segments sampled: [{cert.sample(seed, 0, S, 1)[0]}]")
+    assert one[3].endswith(", the segments named: [5]")
+    assert one[4].endswith(f"re-ran {S} of {S}, every segment")
     # no seed given: the auditor draws its own, never the certificate's,
     # and reports it so the sample can be reproduced
     v1 = cert.audit(lor.data, SALT, lor.progs, states=lor.states,
@@ -2288,6 +2467,63 @@ def test_an_entrys_checks_in_order(lor):
     assert (e.run, e.segment, e.entry) == (0, S, 0)
 
 
+# A one-slot segment that doubles its slot: verifier-A1's, for step 10's
+# orders (verifier-A1.md, 2026-09-29 22:00:12).
+DBL = """.format   fp64
+.deposits 0
+.bank     external
+.scratch  in 1
+.scratch  out 1
+.const    TWO
+ldl  r3, 0
+fma  r3, r3, TWO, r0
+stl  r3, 0
+halt
+"""
+FP64_MAX = 0x7FEFFFFFFFFFFFFF               # (2^53 - 1) x 2^971: 1,024 bits
+Q_SLOT0 = cert.Entry("drift", "measurement", 0, None,
+                     cert.Value("exact", exact=Fraction(0)), "q",
+                     ((Fraction(1), (0,)),))
+
+
+def _doubling(init, segments):
+    """DBL run from `init` for `segments` segments, certified OPEN with a
+    drift of slot 0. -> (bytes, programs, boundary states)"""
+    img = asm.assemble(DBL, "dbl")
+    bank = cert.state_bytes("fp64", [dec64("2")])
+    st, rs = cert.run_chain(img, bank, init, segments)
+    run = cert.certify_run("main", img, bank, None, st, rs, steps=1)
+    return (cert.encode(opened((run,), (Q_SLOT0,))), {0: (img, bank)},
+            dict(enumerate(st)))
+
+
+def test_a_drift_takes_q_of_the_final_state_first():
+    """The page's order: "Q of the final state first, then Q of the
+    initial state". Verifier-C5 found it without a control, and
+    verifier-A1 found the C auditor's gate could not see it reversed
+    (2026-09-29). Lane 0 starts at fp64's largest finite, whose exact
+    value has a 1,024-bit numerator, past the width rule, and doubles to
+    +inf: the final state's +inf is reached first, `accuracy-finite`
+    (entry 0) - read the initial state first and it would be `width`."""
+    data, progs, st = _doubling([FP64_MAX], 1)
+    e = refused("accuracy-finite", cert.audit, data, None, progs,
+                states={0: st})
+    assert (e.run, e.segment, e.entry) == (None, None, 0), e.message
+
+
+def test_a_drift_needs_its_initial_state_before_its_final():
+    """The states a drift reads are needed in the page's order, the
+    initial state before the final (step 10; verifier-A1, 2026-09-29,
+    found it unheld, and unstated until now). Three segments, only
+    boundary 1 handed, segment 1 chosen: boundary 2 is re-run into, and
+    neither 0 nor 3 is known - `state-missing` at run 0 boundary 0, entry
+    0, where the final first would name boundary 3."""
+    data, progs, st = _doubling([dec64("1")], 3)
+    e = refused("state-missing", cert.audit, data, None, progs,
+                states={0: {1: st[1]}}, choose={0: [1]})
+    assert (e.run, e.segment, e.entry) == (0, 0, 0), e.message
+
+
 def test_states_and_the_chain_are_checked_in_order_of_place(lor):
     """Steps 6 and 7 name the first place in order: run by run, and in a
     run segment by segment (then the output) or boundary by boundary."""
@@ -2685,6 +2921,549 @@ def test_a_seed_handed_is_a_seed_whatever_is_asked(lor):
     for bad in (bytes(31), bytes(33), "seed"):
         refused("choice", cert.audit, lor.data, SALT, lor.progs,
                 states=lor.states, seed=bad)
+
+
+# ---- what an audit spends (the audit round, P3, 2026-09-29) -----------------
+#
+# The rule step 2 left: an auditor's memory and time are bounded by what it
+# is handed, never by a number a certificate states (docs/CERTIFICATES.md,
+# "What an audit spends"). A run's `lanes` is the one number no line pays
+# for. A run is BOUNDED by a stream handed for it, or by a state for one of
+# its boundaries 0..S holding at least `lanes` elements, and only a bounded
+# run's +0 streams are built and hashed (step 5), and only a bounded main
+# run's streams are widened for a wider run (step 8). An unbounded run
+# costs nothing and cannot be accepted.
+
+HUGE_LANES = (10 ** 12, (1 << 63) - 1)
+# "Within a second with memory flat" (the lead's brief), measured per
+# audit: its time, and the peak of tracemalloc's traced memory over the
+# call alone. Flat means under SPEND_LIMIT, and within FLAT_SLACK of the
+# same audit's at 10 lanes, which is refused on the same path: the stated
+# number moves by eleven orders of magnitude and the memory does not.
+SPEND_SECONDS = 1.0
+SPEND_LIMIT = 4 << 20
+FLAT_SLACK = 64 << 10
+
+
+def _vm_bytes():
+    """This process's address space on Linux (/proc/self/status VmSize),
+    or None where there is no such file."""
+    try:
+        with open("/proc/self/status", encoding="ascii") as f:
+            for ln in f:
+                if ln.startswith("VmSize:"):
+                    return int(ln.split()[1]) * 1024
+    except OSError:
+        return None
+    return None
+
+
+@contextlib.contextmanager
+def no_runaway(seconds=60):
+    """The net under the huge-`lanes` controls, so that a regression that
+    spends by `lanes` fails by name rather than loading the machine:
+    - on Linux, an address-space limit 4 GiB above the process's own
+      (RLIMIT_AS, the soft limit only), under which an allocation sized by
+      `lanes` fails as MemoryError, where overcommit (WSL's mode 1) would
+      let [zero] * 10^12 through and then touch it; on Windows the commit
+      limit refuses such an allocation by itself;
+    - faulthandler's watchdog, which ends a run that hashes forever after
+      `seconds`, with every thread's traceback, rather than hang the
+      stage."""
+    import faulthandler
+    faulthandler.dump_traceback_later(seconds, exit=True)
+    restore = None
+    try:
+        import resource
+    except ImportError:
+        resource = None
+    vm = _vm_bytes() if sys.platform.startswith("linux") else None
+    if resource is not None and vm is not None:
+        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        cap = vm + (4 << 30)
+        for lim in (soft, hard):
+            if lim != resource.RLIM_INFINITY:
+                cap = min(cap, lim)
+        resource.setrlimit(resource.RLIMIT_AS, (cap, hard))
+        restore = (soft, hard)
+    try:
+        yield
+    finally:
+        faulthandler.cancel_dump_traceback_later()
+        if restore is not None:
+            resource.setrlimit(resource.RLIMIT_AS, restore)
+
+
+def spent(name, fn, *a, **k):
+    """fn(*a, **k) must be refused by NAME. -> (the refusal, its seconds,
+    the peak of tracemalloc's traced memory over the call alone, above
+    what was traced before it)."""
+    was = tracemalloc.is_tracing()
+    if not was:
+        tracemalloc.start()
+    tracemalloc.reset_peak()
+    base = tracemalloc.get_traced_memory()[0]
+    t0 = time.perf_counter()
+    try:
+        e = refused(name, fn, *a, **k)
+    finally:
+        dt = time.perf_counter() - t0
+        peak = tracemalloc.get_traced_memory()[1] - base
+        if not was:
+            tracemalloc.stop()
+    return e, dt, peak
+
+
+def _one_run(lor, lanes):
+    """The fixture's main run alone, stating `lanes`."""
+    return with_runs(lor, [dataclasses.replace(lor.runs[0], lanes=lanes)])
+
+
+def _three_runs(lor, lanes):
+    """All three of the fixture's runs stating `lanes`, so that every
+    relation holds and the wider run's reaches the main run's streams."""
+    return cert.encode(keyed([dataclasses.replace(r, lanes=lanes)
+                              for r in lor.runs], ()))
+
+
+def test_a_huge_lanes_costs_nothing_and_is_refused_by_name(lor):
+    """`lanes` 10^12 and 2^63 - 1 - on the main run alone, and on all three
+    runs - audited in full and sampled, with the fixture's states handed
+    (9 elements each) and with none: each refused by name, at its place,
+    within a second, its traced memory flat against the same audit at 10
+    lanes. With states, step 7 finds a state too short to be the run's
+    (`state-shape`, run 0 boundary 0). With none, the audit needs a state
+    it was not handed (`state-missing`): at step 9 for the main run alone,
+    and at step 8 for the three, where the wider run needs the main run's
+    initial state widened - its streams, which it would hash first, were
+    never built. Before this rule the first of these committed about
+    8 x 10^12 bytes (verifier-C5 met 4,294,967,295 lanes for real)."""
+    seed = bytes(32)
+    first = cert.sample(seed, 0, S, 1)[0]
+    P0 = {0: lor.progs[0]}
+    sampled3 = {r: ("sample", 1) for r in range(3)}
+    got = {}
+    with no_runaway():
+        for L in (10,) + HUGE_LANES:
+            one, three = _one_run(lor, L), _three_runs(lor, L)
+            cases = [
+                ("one, full, states", one, P0, {"states": {0: lor.states[0]}},
+                 "state-shape", (0, 0)),
+                ("one, full, none", one, P0, {}, "state-missing", (0, 0)),
+                ("one, sampled, states", one, P0,
+                 {"states": {0: lor.states[0]}, "choose": {0: ("sample", 1)},
+                  "seed": seed}, "state-shape", (0, 0)),
+                ("one, sampled, none", one, P0,
+                 {"choose": {0: ("sample", 1)}, "seed": seed},
+                 "state-missing", (0, first)),
+                ("three, full, states", three, lor.progs,
+                 {"states": lor.states}, "state-shape", (0, 0)),
+                ("three, full, none", three, lor.progs, {}, "state-missing",
+                 (0, 0)),
+                ("three, sampled, states", three, lor.progs,
+                 {"states": lor.states, "choose": sampled3, "seed": seed},
+                 "state-shape", (0, 0)),
+                ("three, sampled, none", three, lor.progs,
+                 {"choose": sampled3, "seed": seed}, "state-missing", (0, 0)),
+            ]
+            for what, data, progs, kw, name, where in cases:
+                e, dt, peak = spent(name, cert.audit, data, SALT, progs, **kw)
+                assert (e.run, e.segment) == where, (L, what, e.message)
+                if what.startswith("three") and name == "state-missing":
+                    # step 8's: the wider run's start, not a re-run's
+                    assert "exactly widened" in e.message, e.message
+                assert dt < SPEND_SECONDS, (L, what, dt)
+                assert peak < SPEND_LIMIT, (L, what, peak)
+                got[(L, what)] = peak
+    for (L, what), peak in got.items():
+        assert abs(peak - got[(10, what)]) <= FLAT_SLACK, (
+            f"{what}: {peak} bytes at lanes {L}, {got[(10, what)]} at 10")
+
+
+def test_the_rules_place_in_the_order(lor):
+    """Step 5's rule against its neighbours, at lanes 10^12: the `streams`
+    argument's shape before any run; a stream handed held by its LENGTH
+    before anything is built beside it (the old order built the +0 streams
+    first, so a stream of 3 beside 10^12 lanes committed); step 4 before
+    it; and step 6 after it, reached having spent nothing."""
+    r0 = dataclasses.replace(lor.runs[0], lanes=10 ** 12)
+    one = with_runs(lor, [r0])
+    P0 = {0: lor.progs[0]}
+    hh = asm.assemble((PROGRAMS / "henonheiles-lf-fp64.cfta").read_text(
+        encoding="utf-8"), "henonheiles-lf-fp64")
+    ch = list(r0.chain)
+    ch[2] = dataclasses.replace(ch[2], start=ch[1].start)
+    with no_runaway():
+        e = refused("stream", cert.audit, one, SALT, P0, streams=[None])
+        assert (e.run, e.segment) == (None, None)
+        e = refused("stream", cert.audit, one, SALT, P0,
+                    streams={0: ([0] * LANES, None, None)})
+        assert e.run == 0 and "holds 3 values" in e.message, e.message
+        refused("image-digest", cert.audit, one, SALT, {0: (hh, lor.bank)})
+        e = refused("continuity", cert.audit, with_runs(lor, [
+            dataclasses.replace(r0, chain=tuple(ch))]), SALT, P0)
+        assert (e.run, e.segment) == (0, 2)
+
+
+def test_a_run_is_bounded_by_what_was_handed_for_it(lor):
+    """"At least `lanes` elements", at its edge, by values and by bytes: the
+    initial state's 9 elements (72 bytes) bound 9 lanes - whose +0 streams
+    are then built, and differ from the certified 3-lane ones, `stream` -
+    and not 10, whose run is left to step 7, `state-shape`; 71 bytes bound
+    8 lanes and not 9. The output's boundary S bounds as boundary 0 does,
+    and a boundary past S bounds nothing. And per run: a half-step run
+    stating 9 lanes is not bounded by the main run's 9-element states, so
+    its streams are left unchecked and its relation names it (`aux-lanes`)
+    - bounded by any run's states, it would be `stream`."""
+    whole = cert.state_bytes("fp64", lor.init)
+    assert len(whole) == 72
+    P0 = {0: lor.progs[0]}
+    for lanes, b, state, name in (
+            (9, 0, lor.init, "stream"), (10, 0, lor.init, "state-shape"),
+            (9, 0, whole, "stream"), (10, 0, whole, "state-shape"),
+            (8, 0, whole[:-1], "stream"), (9, 0, whole[:-1], "state-shape"),
+            (9, S, lor.st[0][S], "stream"),
+            (10, S, lor.st[0][S], "state-shape")):
+        e = refused(name, cert.audit, _one_run(lor, lanes), SALT, P0,
+                    states={0: {b: state}})
+        assert e.run == 0, (lanes, b, len(state), e.message)
+        assert e.segment == (None if name == "stream" else b), e.message
+    e = refused("state-shape", cert.audit, _one_run(lor, 10), SALT, P0,
+                states={0: {S + 1: lor.init + lor.init[:3]}})
+    assert (e.run, e.segment) == (0, None), e.message
+    assert f"a state was handed for {S + 1}" in e.message, e.message
+    r0, r1, r2 = lor.runs
+    e = refused("aux-lanes", cert.audit, cert.encode(keyed(
+        (r0, dataclasses.replace(r1, lanes=9), r2), ())), SALT, lor.progs,
+        states={0: lor.states[0], 2: lor.states[2]})
+    assert e.run == 1, e.message
+
+
+def test_a_stream_handed_bounds_its_own_run_only(lor):
+    """A stream handed bounds the run it was handed for, as a state does,
+    and no other (verifier-A3's case, 2026-09-29: with a stream for any
+    run bounding every run, test_cert.py stayed green). Run 1 states 10^12
+    lanes, run 0 is handed its three +0 streams, and runs 0 and 2 their
+    states: run 1 is bounded by nothing handed for it, so its +0 streams
+    are never built, and its relation names it - `aux-lanes`, at run 1 -
+    within a second, its traced memory flat against the same audit at 10
+    lanes. Bounded by run 0's stream, it would build [zero] x 10^12."""
+    r0, r1, r2 = lor.runs
+    zero = [0] * LANES
+    got = {}
+    with no_runaway():
+        for L in (10,) + HUGE_LANES:
+            data = cert.encode(keyed(
+                (r0, dataclasses.replace(r1, lanes=L), r2), ()))
+            e, dt, peak = spent("aux-lanes", cert.audit, data, SALT,
+                                lor.progs,
+                                states={0: lor.states[0], 2: lor.states[2]},
+                                streams={0: (zero, zero, zero)})
+            assert (e.run, e.segment) == (1, None), (L, e.message)
+            assert dt < SPEND_SECONDS, (L, dt)
+            assert peak < SPEND_LIMIT, (L, peak)
+            got[L] = peak
+    for L in HUGE_LANES:
+        assert abs(got[L] - got[10]) <= FLAT_SLACK, (L, got[L], got[10])
+
+
+def test_three_nones_are_no_stream_handed(lor):
+    """(None, None, None) is the page's own spelling of three +0 streams,
+    and hands no stream: it bounds nothing (verifier-A3's case,
+    2026-09-29: counted as a stream handed, it would build three
+    [zero] x 10^12 while test_cert.py stayed green). The main run alone,
+    stating 10^12 or 2^63 - 1 lanes, streams {0: (None, None, None)}:
+    with no states, `state-missing` at run 0 boundary 0; with the
+    fixture's 9-element states, `state-shape` there - each within a
+    second, its traced memory flat against the same audit at 10 lanes."""
+    nones = {0: (None, None, None)}
+    got = {}
+    with no_runaway():
+        for L in (10,) + HUGE_LANES:
+            one = _one_run(lor, L)
+            for name, kw in (("state-missing", {}),
+                             ("state-shape", {"states": {0: lor.states[0]}})):
+                e, dt, peak = spent(name, cert.audit, one, SALT,
+                                    {0: lor.progs[0]}, streams=nones, **kw)
+                assert (e.run, e.segment) == (0, 0), (L, name, e.message)
+                assert dt < SPEND_SECONDS, (L, name, dt)
+                assert peak < SPEND_LIMIT, (L, name, peak)
+                got[(L, name)] = peak
+    for (L, name), peak in got.items():
+        assert abs(peak - got[(10, name)]) <= FLAT_SLACK, (L, name, peak)
+
+
+def test_a_run_is_bounded_by_a_state_for_one_of_its_own_boundaries(lor):
+    """The boundaries a state bounds a run from are the run's own, 0 to its
+    S, not the main run's (verifier-A3's case, 2026-09-29: with the main
+    run's S, the audit crashed at step 9 and test_cert.py stayed green).
+    The half-step run is handed its boundary 7 alone - past the main
+    run's S of 4, inside its own 8 - and named to re-run segment 7 from
+    it, beside the other two runs in full: ACCEPTED, every accuracy value
+    re-derived."""
+    st = lor.states
+    v = cert.audit(lor.data, SALT, lor.progs,
+                   states={0: st[0], 1: {7: st[1][7]}, 2: st[2]},
+                   choose={0: "all", 1: [7], 2: "all"})
+    assert v.exit_code == 0
+    assert [r["rerun"] for r in v.runs] == [list(range(S)), [7],
+                                           list(range(S))]
+    assert v.accuracy == list(lor.values)
+    lines = v.lines()
+    assert lines[0] == "cft-certificate 1: ACCEPTED - every check passed"
+    assert lines[3] == (f"run 1 half-step fp64, {LANES} lanes, {2 * S} "
+                        f"segments: re-ran 1 of {2 * S}, the segments named: "
+                        f"[7]")
+
+
+def test_a_run_is_bounded_against_its_own_lanes(lor):
+    """The lanes a state is compared with are its own run's, not the main
+    run's (verifier-A3's case, 2026-09-29: against the main run's 3 lanes,
+    run 1's 9-element states would bound its 10^12, and the audit build
+    [zero] x 10^12 while test_cert.py stayed green). Run 1 states 10^12
+    or 2^63 - 1 lanes, and every run is handed its own states: run 1 is
+    bounded by nothing of its size, and step 7 finds its state too short
+    - `state-shape`, run 1 boundary 0 - within a second, its traced
+    memory flat against the same audit at 10 lanes."""
+    r0, r1, r2 = lor.runs
+    got = {}
+    with no_runaway():
+        for L in (10,) + HUGE_LANES:
+            data = cert.encode(keyed(
+                (r0, dataclasses.replace(r1, lanes=L), r2), ()))
+            e, dt, peak = spent("state-shape", cert.audit, data, SALT,
+                                lor.progs, states=lor.states)
+            assert (e.run, e.segment) == (1, 0), (L, e.message)
+            assert dt < SPEND_SECONDS, (L, dt)
+            assert peak < SPEND_LIMIT, (L, peak)
+            got[L] = peak
+    for L in HUGE_LANES:
+        assert abs(got[L] - got[10]) <= FLAT_SLACK, (L, got[L], got[10])
+
+
+def test_a_bounded_wider_run_beside_an_unbounded_main_run(lor):
+    """Step 8 widens the MAIN run's streams, so its guard reads the main
+    run's bound, not the wider run's (verifier-A3's case A, 2026-09-29:
+    guarded on the wider run instead, the audit crashed and test_cert.py
+    stayed green). The fixture with states for runs 1 and 2 only: the main
+    run is bounded by nothing, its streams were never built, and the
+    wider run's `aux-start` needs its initial state - `state-missing`, run
+    0 boundary 0, the wider relation's and not a re-run's."""
+    e = refused("state-missing", cert.audit, lor.data, SALT, lor.progs,
+                states={1: lor.states[1], 2: lor.states[2]})
+    assert (e.run, e.segment) == (0, 0), e.message
+    assert "exactly widened" in e.message, e.message
+
+
+def test_an_unbounded_wider_runs_streams_are_held_to_the_main_runs(lor):
+    """A wider run's streams are held to the main run's exactly widened
+    whenever the main run is bounded, whether or not the wider run is
+    (verifier-A3's case B, 2026-09-29: with the guard asking both, the
+    defect below went unseen and the audit said `state-missing` at a
+    later run). Run 2's stream a certified as another hash, the main run
+    handed its states, the wider run nothing: `aux-streams`, at run 2 -
+    with the half-step run's states handed too, and without."""
+    r0, r1, r2 = lor.runs
+    bad = dataclasses.replace(r2, streams=("ab" * 32,) + r2.streams[1:])
+    data = cert.encode(dataclasses.replace(lor.cert, runs=(r0, r1, bad),
+                                           accuracy=()))
+    for states in ({0: lor.states[0]}, {0: lor.states[0], 1: lor.states[1]}):
+        e = refused("aux-streams", cert.audit, data, SALT, lor.progs,
+                    states=states)
+        assert (e.run, e.segment) == (2, None), (sorted(states), e.message)
+
+
+BLOCKY = """.format   fp64
+.deposits 0
+.scratch  in 4
+.scratch  out 4
+.scratch  strict
+.const    ONE   = 1.0
+.const    THIRD = 0x3fd5555555555555
+; slot 0 a counter c, slot 1 a value x, slot 2 an index i (its bits),
+; slot 3 a switch d. A lane leaves the loop when c reaches 0 - early, in
+; a block of lanes that all do. A lane whose d is not +0 deposits, past
+; max_deposits 0: STATUS[4]. x x underflows where x is tiny and
+; overflows where it is huge. x is stored at scratch slot i and read
+; back, doubling x, where i is inside the depth; past it (strict) the
+; store and the load are reported, STATUS[5], and x stays.
+ldl    r3, 0
+ldl    r4, 1
+ldl    r9, 2
+ldl    r10, 3
+repeat 40
+  sub    r3, r3, ONE
+  mul    r4, r4, THIRD
+  setact r3
+endrep
+actall
+setact r10
+deposit r4
+actall
+mul    r5, r4, r4
+stx    r4, r9
+ldx    r6, r9
+add    r4, r4, r6
+stl    r3, 0
+stl    r4, 1
+halt
+"""
+
+
+def _blocky_start(n=130):
+    """Lane i: c = i mod 45 + 1, x = 1 + i/64, i = 300 + i, d = +0 - but
+    each of the three blocks (64, 64 and 2 lanes) with something no other
+    has, so that the flag word and STATUS are each the OR of three
+    different blocks' and not any one block's:
+    - lane 5 (block 0): x = 1e-300, whose square underflows (flag 8);
+    - lane 70 (block 1): index 600, past a depth of 512 (STATUS[5]);
+    - lanes 128 and 129 (block 2): c = 2 and 3, so the block leaves its
+      loop early, and d = 1, so they deposit (STATUS[4]); lane 129's
+      x = 1e300, whose square overflows (flag 4)."""
+    init = []
+    for i in range(n):
+        c, x, ix, d = i % 45 + 1, 1 + i / 64, 300 + i, 0.0
+        if i == 5:
+            x = 1e-300
+        if i == 70:
+            ix = 600
+        if i >= n - 2:
+            c, d = i - (n - 2) + 2, 1.0
+        if i == n - 1:
+            x = 1e300
+        init += [dec64(repr(float(c))), dec64(repr(x)), ix, dec64(repr(d))]
+    return init
+
+
+def test_the_audit_re_runs_a_segment_in_blocks_of_64_lanes():
+    """The golden audit re-runs a segment BLOCK_LANES lanes at a time
+    (cert.run_segment), as libcft and the tile do, so that a re-run holds
+    one block's scratch at the certified depth, not every lane's (the
+    lead's decision, 2026-09-29). By P3 (docs/SEQUENCER.md) that is the
+    dense run exactly. Held here at a depth past 256, over three blocks
+    (64, 64 and 2 lanes) of a strict program, each block raising a flag
+    or a STATUS bit no other raises, and the last leaving its loop early:
+    the end state, the flag word and STATUS equal the dense run's, which
+    no one block's, first or last, equals; and the audit accepts a chain
+    the dense writer made. One block's scratch is what it holds: 256
+    one-slot lanes at 32,768 slots peak at one block's 16 MiB (measured),
+    where the dense run's is 64."""
+    seq = cert.seq
+    img = asm.assemble(BLOCKY, "blocky")
+    prog = seq.Program.from_bytes(img, scratch_depth=512)
+    init = _blocky_start()
+    n = len(init) // 4
+    z = [0] * n
+    dense = seq.run(prog, z, z, z, scratch_in=init, scratch_depth=512)
+    out, flags, status = cert.run_segment(prog, z, z, z, init,
+                                          scratch_depth=512)
+    assert out == list(dense.scratch_out)
+    assert (flags, status) == (dense.flags, dense.status)
+    # what makes it a test of blocks: each block has a flag or a STATUS
+    # bit of its own, so that no one block's word is the run's, and the
+    # third leaves its loop before the others do
+    blocks = [seq.run(prog, z[lo:hi], z[lo:hi], z[lo:hi],
+                      scratch_in=init[4 * lo:4 * hi], scratch_depth=512)
+              for lo, hi in ((0, 64), (64, 128), (128, n))]
+    assert [b.flags for b in blocks] == [16 | 8, 16, 16 | 4]
+    assert [b.status for b in blocks] == [0, seq.STATUS_SCRATCH_RANGE,
+                                          seq.STATUS_DEPOSIT_OVERFLOW]
+    assert dense.flags == 16 | 8 | 4
+    assert dense.status == (seq.STATUS_SCRATCH_RANGE
+                            | seq.STATUS_DEPOSIT_OVERFLOW)
+    assert (blocks[2].insns_executed < blocks[0].insns_executed
+            == blocks[1].insns_executed == dense.insns_executed)
+    # and the depth is read: at 256 every index is past it, other answers
+    assert list(seq.run(prog, z, z, z, scratch_in=init,
+                        scratch_depth=256).scratch_out) != out
+    # the audit, blocks against the dense writer's chain, at the depth its
+    # run states
+    st, rs = cert.run_chain(img, None, init, 2, scratch_depth=512)
+    run = cert.certify_run("main", img, None, SALT, st, rs, steps=40,
+                           scratch_depth=512,
+                           parameters=(("scratch-depth", 512),))
+    v = cert.audit(cert.encode(keyed((run,), ())), SALT, {0: (img, None)},
+                   states={0: {0: init}})
+    assert v.exit_code == 0 and len(v.runs[0]["rerun"]) == 2
+    # one block's scratch: 256 one-slot lanes at 32,768 slots
+    small = asm.assemble(".format   fp64\n.deposits 0\n.scratch  in 1\n"
+                         ".scratch  out 1\n.const    ONE = 1.0\n"
+                         "ldl  r3, 0\nadd  r3, r3, ONE\nstl  r3, 0\nhalt\n",
+                         "one-slot")
+    deep = seq.Program.from_bytes(small, scratch_depth=32768)
+    z = [0] * 256
+    was = tracemalloc.is_tracing()
+    if not was:
+        tracemalloc.start()
+    tracemalloc.reset_peak()
+    base = tracemalloc.get_traced_memory()[0]
+    try:
+        cert.run_segment(deep, z, z, z, [sf.one_bits(F64)] * 256,
+                         scratch_depth=32768)
+        peak = tracemalloc.get_traced_memory()[1] - base
+    finally:
+        if not was:
+            tracemalloc.stop()
+    assert peak < 24 << 20, f"{peak} bytes: more than one block's scratch"
+
+
+def test_a_rationals_digits_are_held_to_the_rule_first(lor):
+    """A rational's token is read in the page's order (the lead's decision,
+    2026-09-29): its spelling; then each part's digits against the width
+    rule, before anything is converted or reduced; then zero's one
+    spelling; last, lowest terms. So a long token that is not in lowest
+    terms is `width`, where the golden reader said `malformed` - a C
+    auditor on a 2,048-bit bigint cannot hold it, let alone reduce it -
+    and a short one is `malformed` as before. No control before this one
+    held a long reducible token (the round's ledger, P3.md). The digits'
+    edge: 256 hex digits whose first is 7 are 1,023 bits, whose first is
+    8 are 1,024, and 257 are past it whatever they begin with."""
+    L = lines_of(lor.data)
+    t = find(L, "term 1/1 s0 s0")
+
+    def term(tok):
+        return rebuilt(L[:t] + [f"term {tok} s0 s0"] + L[t + 1:])
+    big = 1 << 1101
+    top = (1 << 1023) - 1
+    for tok, name, why in (
+            (f"{big:x}/2", "width", "by its digits"),
+            (f"2/{big:x}", "width", "by its digits"),
+            (f"-{big:x}/2", "width", "by its digits"),
+            (f"0/{big:x}", "width", "by its digits"),
+            ("4/2", "malformed", "not in lowest terms"),
+            ("0/3", "malformed", "zero is spelled 0/1"),
+            (f"{big + 0xabc:X}/3", "malformed", "one spelling"),
+            (f"0{big:x}/3", "malformed", "one spelling"),
+            (f"{top:x}/2", None, None),
+            (f"1/{top:x}", None, None),
+            (f"-{top:x}/3", None, None),
+            (f"{top + 1:x}/3", "width", "by its digits"),
+            (f"1/{top + 1:x}", "width", "by its digits"),
+            (f"{(top + 1) << 1:x}/3", "width", "by its digits")):
+        if name is None:
+            assert cert.parse(term(tok)).accuracy[2].terms[0][0] == Fraction(
+                *(int(x, 16) for x in tok.split("/")))
+            continue
+        e = refused(name, cert.parse, term(tok))
+        assert e.line == t + 1 and why in e.message, (tok[:20], e.message)
+    assert len(f"{top:x}") == len(f"{top + 1:x}") == 256
+    assert len(f"{(top + 1) << 1:x}") == 257
+
+
+def test_the_escape_probability_of_one_wrong_segment_is_linear():
+    """For f = 1, the value the verdict prints, the escape probability is
+    computed as (S - k)/S, reduced (the lead's decision, 2026-09-29):
+    equal to the binomials' ratio, held here at every k of every S to 40,
+    and linear where they are not - two binomials of 200,000 and their gcd
+    took 0.83 s on the desktop (measured, 2026-09-29), (S - k)/S takes
+    microseconds, so at 400,000 a quarter of a second is ample margin."""
+    for S_ in range(1, 41):
+        for k in range(1, S_ + 1):
+            assert cert.escape_probability(S_, k, 1) == Fraction(
+                math.comb(S_ - 1, k), math.comb(S_, k)) == Fraction(S_ - k, S_)
+    t0 = time.perf_counter()
+    assert cert.escape_probability(400_000, 200_000, 1) == Fraction(1, 2)
+    assert time.perf_counter() - t0 < 0.25
 
 
 # ---- the specification, held to the code ------------------------------------
