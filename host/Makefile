@@ -1216,11 +1216,13 @@ clean-segrun:
 #                       to the same verdict as cert.audit - the
 #                       refusal's name, code and location, or both
 #                       ACCEPTED with the same lines; and the library
-#                       and the tool compiled narrow (CFT_MAX_FORMAT=2)
-#                       with $(CC), which must refuse build-width and
-#                       build-format. verify/run.sh's `audit` stage runs
-#                       it, in the gate budget (about four minutes on
-#                       the desktop, 2026-09-29).
+#                       and the tool compiled narrow with $(CC), at
+#                       CFT_MAX_FORMAT=2 with its own bigint and with
+#                       CFT_BN_LIMBS=64, which must refuse build-width
+#                       and build-format and audit the rest in full.
+#                       verify/run.sh's `audit` stage runs it, in the
+#                       gate budget (about four minutes on the desktop,
+#                       2026-09-29).
 # ===================================================================
 TOOLS += cft-audit$(EXE)
 all: cft-audit$(EXE)

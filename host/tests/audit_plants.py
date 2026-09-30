@@ -12,9 +12,10 @@ round's brief, P1; the census practice of the certificate round).
 In a FRESH COPY of host/ - never in the tree - every call of refuse()
 and malformed() in tools/audit.c becomes a numbered SITE that
 CFT_AUDIT_PLANT_SITE=<n> skips, as if its check had passed, and that
-names itself on stderr when it refuses. Two binaries are built from the
-copy: the tool, and the narrow build (CFT_MAX_FORMAT=2) for the one site
-only it compiles.
+names itself on stderr when it refuses. Three binaries are built from
+the copy: the tool, and the gate's two narrow builds (CFT_MAX_FORMAT=2
+at its own bigint and at CFT_BN_LIMBS=64, audit_check.NARROW_BUILDS),
+for the sites only a narrow build reaches.
 
 Then:
   1. every recorded case is replayed with no plant, and must give the
@@ -210,16 +211,16 @@ def main():
     print(f"  {len(sites)} refusal sites in tools/audit.c, instrumented in "
           f"{copy}", flush=True)
     exes = {}
-    for which, defs in (("tool", []), ("narrow", [
-            "-DCFT_MAX_FORMAT=2", "-DCFT_NO_TRANSCEND",
-            "-DCFT_NO_CONFORMANCE"])):
+    builds = [("tool", "-O2", [])] + [
+        (which, opt, defs) for which, (opt, defs) in ac.NARROW_BUILDS.items()]
+    for which, opt, defs in builds:
         exe = copy / (f"planted-{which}" + (".exe" if os.name == "nt"
                                             else ""))
         env = dict(os.environ)
         first = args.cc.split()[0]
         if os.path.dirname(first):
             env["PATH"] = os.path.dirname(first) + os.pathsep + env["PATH"]
-        r = subprocess.run(args.cc.split() + ["-std=c99", "-O2", "-w"] + defs +
+        r = subprocess.run(args.cc.split() + ["-std=c99", opt, "-w"] + defs +
                            ["-Iinclude"] + args.lib_src.split() +
                            ["tools/audit.c", "-o", str(exe)], cwd=str(copy),
                            capture_output=True, text=True, env=env)

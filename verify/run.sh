@@ -989,16 +989,17 @@ stage programs "the program library: both assemblers against the MANIFEST, the r
 # makes, and every audit call whose arguments files and options can
 # carry, shadowed in-process (so pytest; the rest are counted and
 # named); cft-segrun's certificates of segrun_check's programs, in full,
-# from the initial states and sampled; the golden corpus; and a narrow
-# build of libcft and the tool at CFT_MAX_FORMAT=2, which must refuse
-# build-width and build-format - so a C compiler. A stage of its own in the gate budget (the lead,
-# 2026-09-29): about four minutes on the desktop, too long for quick,
-# where programs keeps both writers' checks.
+# from the initial states and sampled; the golden corpus; and two narrow
+# builds of libcft and the tool at CFT_MAX_FORMAT=2, at its own bigint
+# and at CFT_BN_LIMBS=64, which must refuse build-width and build-format
+# and audit the rest in full - so a C compiler. A stage of its own in the
+# gate budget (the lead, 2026-09-29): about four minutes on the desktop,
+# too long for quick, where programs keeps both writers' checks.
 do_audit() {
   HOSTMAKE audittest PYTHON="$PYBIN"
 }
 need host-cc python pytest
-stage audit "the C auditor held to the golden one: test_cert.py's parse calls and every audit call files can carry, cft-segrun's certificates and the golden corpus through both, the same refusal by name, code and location or the same verdict; and a narrow build refusing build-width and build-format" -- do_audit
+stage audit "the C auditor held to the golden one: test_cert.py's parse calls and every audit call files can carry, cft-segrun's certificates and the golden corpus through both, the same refusal by name, code and location or the same verdict; and two narrow builds refusing build-width and build-format" -- do_audit
 
 # reduce_check.py holds the model's partition tree to the C partitioner
 # through host/reduce-parts, and SKIPs that half by name when the binary

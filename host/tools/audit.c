@@ -72,12 +72,15 @@
  *                     rule needs, handed a certificate with an accuracy
  *                     entry (below)
  *   build-format (78) a build whose library carries formats only up to
- *                     CFT_MAX_FORMAT, handed a run of a wider format: the
- *                     reader refuses it at that run's program-format line
- *                     (the lead's decision, 2026-09-29, after
- *                     verifier-A1 found such a run refused program-image,
- *                     a name for an input that is not the one certified,
- *                     where the cause is the build)
+ *                     CFT_MAX_FORMAT, asked for a wider one: the reader
+ *                     refuses it at the format word, a run's
+ *                     program-format line or an accuracy value's
+ *                     (rounded or enclosed), and step 4 at a run whose
+ *                     image's header names one. The lead's decisions,
+ *                     2026-09-29, after verifier-A1 found such a run
+ *                     refused program-image, a name for an input that is
+ *                     not the one certified where the cause is the
+ *                     build, and such a value an internal error
  * A library call that fails where no refusal names the failure (a
  * software device that does not open, a conversion that fails) is not a
  * verdict: it prints "cft-audit: internal error" and exits 70.
@@ -100,9 +103,11 @@
  * build whose cft_bn is narrower than 2,047 bits compiles WITHOUT the
  * exact arithmetic (a #if, not an #error) and its reader refuses
  * `build-width` at an `accuracy` line counting at least 1: no build ever
- * computes an exact value in a narrower bigint. A narrow build audits in
- * full a certificate carrying no exact value and no format above its
- * ceiling (build-format, above).
+ * computes an exact value in a narrower bigint. CFT_BN_LIMBS can keep a
+ * build's bigint at 2,048 bits under a lower CFT_MAX_FORMAT; such a
+ * build audits exact values, in formats within its ceiling. Every build
+ * audits in full what it can, and refuses by its own name only what it
+ * cannot (build-width, build-format).
  *
  * An element's exact decimal is cft_to_decimal_char at 0 digits, which is
  * exact; a value exactly widened is cft_convert one rung up; a rational
@@ -1749,9 +1754,29 @@ static int order_kind(int f, const uint8_t *le)
     return 1;
 }
 
-static void read_value(rdr_t *R, value_t *v)
+/* A value's format word, and a format this build's library carries. The
+ * value's decimals and any rounding into its format are the library's
+ * (cft_to_decimal_char, cft_from_hex_char), so a format above
+ * CFT_MAX_FORMAT is refused by the build's name here, at the word and
+ * before the rest of its line - never an internal error at its decimal
+ * (verifier-A1's second finding, in a CFT_MAX_FORMAT=2 build with
+ * CFT_BN_LIMBS=64; the lead's decision, 2026-09-29). */
+static int value_format(const char *tok, uint64_t j, long long ln)
 {
     static const char *const LADDER[4] = { "fp32", "fp64", "fp128", "fp256" };
+    int f = rd_word(tok, LADDER, 4, "the value's format", ln);
+    if (f > CFT_MAX_FORMAT)
+        refuse("build-format", AT_LINE(ln), "line %lld: entry %llu's value is "
+               "stated in %s, and this build's library carries formats up to "
+               "%s (CFT_MAX_FORMAT=%d); its decimals and its rounding are the "
+               "library's, so it refuses rather than audit it differently",
+               ln, (unsigned long long)j, FMT[f].name,
+               FMT[CFT_MAX_FORMAT].name, CFT_MAX_FORMAT);
+    return f;
+}
+
+static void read_value(rdr_t *R, value_t *v, uint64_t j)
+{
     line_t *l = expect(R, KEY_VALUE, -1);
     long long ln = PREV(R);
     const char *form = l->ntok > 1 ? l->tok[1] : "";
@@ -1762,7 +1787,7 @@ static void read_value(rdr_t *R, value_t *v)
     }
     if (!strcmp(form, "rounded") && l->ntok == 6) {
         v->form = V_ROUNDED;
-        v->fmt = rd_word(l->tok[2], LADDER, 4, "the value's format", ln);
+        v->fmt = value_format(l->tok[2], j, ln);
         v->rnd = rd_word(l->tok[3], RND_NAME, 5, "the rounding direction", ln);
         read_element(v->fmt, l->tok[4], l->tok[5], "the value", v->bits, ln);
         return;
@@ -1771,7 +1796,7 @@ static void read_value(rdr_t *R, value_t *v)
         int e;
         rat a, b;
         v->form = V_ENCLOSED;
-        v->fmt = rd_word(l->tok[2], LADDER, 4, "the value's format", ln);
+        v->fmt = value_format(l->tok[2], j, ln);
         read_element(v->fmt, l->tok[3], l->tok[4], "the lower end", v->lo, ln);
         read_element(v->fmt, l->tok[5], l->tok[6], "the upper end", v->hi, ln);
         for (e = 0; e < 2; e++) {
@@ -1885,7 +1910,7 @@ static void read_entry(rdr_t *R, cert_t *C, uint64_t j)
                               "slot order");
         }
     }
-    read_value(R, &E->value);
+    read_value(R, &E->value, j);
 }
 #endif /* AUDIT_EXACT */
 
@@ -2650,6 +2675,26 @@ static prog_t *check_programs(const cert_t *C)
                               &p->prog);
         if (st != CFT_OK) {
             const char *why = cft_last_error();
+            /* An image whose header names a format above this build's,
+             * under a run that states one within it (the reader refused
+             * any other): the library refuses the format, after the
+             * header checks it makes first (CFT_ERR_ARTIFACT) and before
+             * any other. Which of the golden's names the image earns -
+             * program-format for the mismatch, or program-image for a
+             * defect past the format - this build cannot learn without
+             * loading it, so it refuses by the build's name rather than
+             * give either (the lead's rule, 2026-09-29: nothing a narrow
+             * build cannot do reaches another name). Only a build below
+             * the ladder's top gets here. */
+            uint32_t hf = p->image_bytes >= 32 ? le32(p->image + 20) : 0;
+            if (st == CFT_ERR_UNSUPPORTED && (int)hf > CFT_MAX_FORMAT &&
+                hf <= 3)
+                refuse("build-format", AT_RUN(r), "run %llu: the image handed "
+                       "is %s by its header, and this build's library carries "
+                       "formats up to %s (CFT_MAX_FORMAT=%d), so it cannot "
+                       "load it; it refuses rather than audit it differently",
+                       (unsigned long long)r, FMT[hf].name,
+                       FMT[CFT_MAX_FORMAT].name, CFT_MAX_FORMAT);
             refuse("program-image", AT_RUN(r), "run %llu: the image does not "
                    "load at %lu scratch slots: %s%s%s", (unsigned long long)r,
                    (unsigned long)p->depth, cft_strerror(st),

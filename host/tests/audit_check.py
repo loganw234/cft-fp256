@@ -42,13 +42,18 @@ both ACCEPTED with the same verdict, line for line.
   4. the golden corpus (certificates/MANIFEST), where the tree has one:
      each case in full and sampled, both auditors against each other and
      against the manifest's verdict;
-  5. the narrow build: libcft and cft-audit compiled at CFT_MAX_FORMAT=2
-     (a 576-bit cft_bn, formats to fp128), which must refuse
-     `build-width` (78) at an `accuracy` line counting at least 1, refuse
-     `build-format` (78) at the `program-format` line of a run above its
-     ceiling - an fp256 certificate the golden auditor and the default
-     tool accept (verifier-A1's case) - and audit in full a certificate
-     with neither;
+  5. two narrow builds: libcft and cft-audit compiled at CFT_MAX_FORMAT=2
+     (formats to fp128), at its own 576-bit cft_bn and at CFT_BN_LIMBS=64
+     (NARROW_BUILDS). The first must refuse `build-width` (78) at an
+     `accuracy` line counting at least 1; the second must audit exact
+     values within the ceiling in full, lor's four entries and the page's
+     example, with the golden's verdict. Both must refuse `build-format`
+     (78) wherever a format above the ceiling would reach the library: a
+     run's `program-format` line (an fp256 certificate the golden auditor
+     and the default tool accept: verifier-A1's first case), an accuracy
+     value's line (lor with entry 1 in fp256, rounded or enclosed: A1's
+     second), and at a run whose image's header is fp256 under a stated
+     fp128, which the golden refuses program-format;
   6. the tool's numerics, through a probe build of tools/audit.c
      (-DCFT_AUDIT_PROBE, never the tool itself): its own division, gcd
      and exact arithmetic held to Python's integers up to 2,047 bits, its
@@ -216,7 +221,8 @@ def same(g, t, read_only=False):
 def record(workdir, args, env, want, label, read_only=False, binary="tool"):
     """Keep this tool run as a case for audit_plants.py: its files, its
     arguments relative to its directory, and the verdict it must give -
-    of the tool, or of the narrow build (binary "narrow")."""
+    of the tool, or of a narrow build (binary "narrow" or "narrow64",
+    NARROW_BUILDS)."""
     if RECORD is None:
         return
     RECORDED[0] += 1
@@ -988,27 +994,91 @@ def section_corpus(work, root):
                   None, c.get("verdict"))
 
 
-# ---- section 5: the narrow build --------------------------------------------
+# ---- section 5: the narrow builds -------------------------------------------
+
+# The two narrow builds section 5 compiles, and audit_plants.py again:
+# -> (optimization, defines). "narrow" is CFT_MAX_FORMAT=2 at the bigint
+# that ceiling gives by default, 18 limbs (576 bits), which cft_config.h
+# allows only with CFT_NO_TRANSCEND; CFT_NO_CONFORMANCE too, since the
+# conformance replay calls the transcendentals and a tool must link
+# (profiles-check compiles each profile, never links). "narrow64" is the
+# same ceiling with CFT_BN_LIMBS=64, the combination cft_config.h
+# documents as building: the full bigint under a lower ceiling (where
+# verifier-A1 found its second narrow-build finding). It is compiled at
+# -O1, which is enough for the few runs it makes: 5.8 s where -O2 took
+# 9.2 s on the desktop (2026-09-29).
+NARROW_BUILDS = {
+    "narrow": ("-O2", ["-DCFT_MAX_FORMAT=2", "-DCFT_NO_TRANSCEND",
+                       "-DCFT_NO_CONFORMANCE"]),
+    "narrow64": ("-O1", ["-DCFT_MAX_FORMAT=2", "-DCFT_BN_LIMBS=64"]),
+}
+
+
+def fixture_function(fx):
+    """The function under a pytest fixture. A fixture refuses to be
+    called directly, and pytest has kept the function under a different
+    name in different versions."""
+    got = getattr(fx, "_get_wrapped_function", None)
+    if got is not None:
+        return got()
+    got = getattr(fx, "__pytest_wrapped__", None)
+    if got is not None:
+        return got.obj
+    return getattr(fx, "__wrapped__", fx)
+
+
+def line_of(data, prefix, nth=0):
+    """The body's line number of the nth line that starts with prefix."""
+    return [i + 1 for i, ln in enumerate(cert.body_of(data).decode().split(
+        "\n")) if ln.startswith(prefix)][nth]
+
+
+def held_refused(exe_label, binary, workdir, args, name, loc, what,
+                 read_args=None):
+    """The build at TOOL must refuse `name` (the tool's own) at loc, in
+    the audit and, given read_args, in --read too."""
+    want = ("refused", (name, TOOL_OWN[name], loc))
+    pairs = [("its audit", args)]
+    if read_args is not None:
+        pairs.append(("its --read", read_args))
+    for how, a in pairs:
+        rc, out, err = run_tool(a, cwd=workdir)
+        t = tool_verdict(rc, out, err)
+        where = ("line " + loc[0]) if loc[0] != "-" else ("run " + loc[1])
+        check(t == want and out == "", f"  and {exe_label} refuses {how} "
+              f"{name}, exit {TOOL_OWN[name]}, at {where}: {what}", f"{t}")
+        record(workdir, a, None, [want[0], list(want[1])],
+               f"{binary}: {what}, {how}, {name}", binary=binary)
+
+
+def image_above(fp256):
+    """The fp256 certificate's runs restated as fp128, the images left
+    fp256: the golden refuses program-format at run 0, since a certificate
+    that states one format for an image of another is not the one the
+    image ran under; a narrow build cannot load the image to know that."""
+    data, progs, states = fp256
+    c = cert.parse(data)
+    lie = cert.encode(dataclasses.replace(c, runs=tuple(
+        dataclasses.replace(r, fmt="fp128") for r in c.runs)))
+    return lie, progs, states
+
 
 def section_narrow(work, cc, lib_src):
-    print("== 5. the narrow build (CFT_MAX_FORMAT=2): build-width at an "
-          "accuracy line counting 1 or more, build-format at a run above "
-          "fp128", flush=True)
+    print("== 5. two narrow builds at CFT_MAX_FORMAT=2, its own 576-bit "
+          "bigint and CFT_BN_LIMBS=64: build-width, build-format at a run, "
+          "a value or an image above fp128, and what each audits in full",
+          flush=True)
     if not cc or not lib_src:
-        skip("the narrow build", "no --cc and --lib-src given (make -C host "
+        skip("the narrow builds", "no --cc and --lib-src given (make -C host "
              "audittest gives both)")
         return
     d = work / "narrow"
     d.mkdir(parents=True, exist_ok=True)
-    exe = d / ("cft-audit-narrow" + (".exe" if os.name == "nt" else ""))
-    # CFT_MAX_FORMAT=2 narrows cft_bn to 18 limbs (576 bits), which
-    # cft_config.h allows only with CFT_NO_TRANSCEND; CFT_NO_CONFORMANCE
-    # too, since the conformance replay calls the transcendentals and a
-    # tool must link (profiles-check compiles each profile, never links)
+    ext = ".exe" if os.name == "nt" else ""
+    exe = d / ("cft-audit-narrow" + ext)
     t0 = time.perf_counter()
-    built, err = compile_with(cc, lib_src, exe,
-                              ["-DCFT_MAX_FORMAT=2", "-DCFT_NO_TRANSCEND",
-                               "-DCFT_NO_CONFORMANCE"], work)
+    opt, defs = NARROW_BUILDS["narrow"]
+    built, err = compile_with(cc, lib_src, exe, defs, work, opt)
     if not check(built, f"cft-audit and libcft built at CFT_MAX_FORMAT=2 "
                  f"({time.perf_counter() - t0:.0f} s)", err.strip()[-400:]):
         return
@@ -1067,20 +1137,147 @@ def section_narrow(work, cc, lib_src):
         hold(args, None, g, "  and the default tool accepts it, the same "
              "verdict", e2, quiet=False)
         TOOL = exe
-        line = next(i + 1 for i, ln in enumerate(
-            cert.body_of(data2).decode().split("\n"))
-            if ln.startswith("program-format "))
-        want = ("refused", ("build-format", TOOL_OWN["build-format"],
-                            (str(line), "-", "-", "-")))
-        for how, a in (("its audit", args), ("its --read",
-                                             ["--read"] + args[:2])):
-            rc, out, err = run_tool(a, cwd=e2)
-            t = tool_verdict(rc, out, err)
-            check(t == want, f"  and the narrow build refuses {how} "
-                  f"build-format, exit 78, at run 0's program-format line "
-                  f"{line}", f"{t}")
-            record(e2, a, None, [want[0], list(want[1])], f"narrow: the fp256 "
-                   f"certificate, {how}, build-format", binary="narrow")
+        pf = str(line_of(data2, "program-format "))
+        held_refused("the narrow build", "narrow", e2, args, "build-format",
+                     (pf, "-", "-", "-"), "the fp256 certificate at run 0's "
+                     "program-format line", ["--read"] + args[:2])
+        # the same images under runs that state fp128: the reader passes
+        # them, and step 4 would hand the library an fp256 image. The
+        # golden and the default tool refuse program-format; a narrow
+        # build refuses build-format at the run, never program-image
+        lie, progs3, states3 = image_above((data2, progs2, states2))
+        g = golden(cert.audit, lie, None, progs3, states=states3)
+        check(g == ("refused", ("program-format", 4, ("-", "0", "-", "-"))),
+              "the fp256 images under runs stated fp128: the golden refuses "
+              "program-format at run 0", describe(g))
+        e3 = d / "fp256-stated-fp128"
+        e3.mkdir(exist_ok=True)
+        args3 = translate(e3, lie, None, programs=progs3, states=states3)
+        TOOL = wide
+        hold(args3, None, g, "  and the default tool, the same verdict", e3,
+             quiet=False)
+        TOOL = exe
+        held_refused("the narrow build", "narrow", e3, args3, "build-format",
+                     ("-", "0", "-", "-"), "the fp256 images under runs "
+                     "stated fp128")
+        # verifier-A1's second case, lor with entry 1's value in fp256:
+        # here the accuracy line comes first, build-width at it
+        L = fixture_function(T.lor)()
+        lor_cases = lor_above(L)
+        acc = str(line_of(L.data, "accuracy "))
+        e4 = d / "lor-rounded-fp256"
+        e4.mkdir(exist_ok=True)
+        data4 = lor_cases[0][1]
+        args4 = translate(e4, data4, T.SALT, programs=L.progs,
+                          states=L.states, choose=LOR_CHOOSE)
+        held_refused("the narrow build", "narrow", e4, args4, "build-width",
+                     (acc, "-", "-", "-"), "lor with entry 1 rounded fp256, "
+                     "at its accuracy line, before any value")
+    finally:
+        TOOL = wide
+    section_narrow64(work, cc, lib_src, d, T, L, lor_cases,
+                     (data2, progs2, states2), (lie, progs3, states3))
+
+
+# lor's segments a case above the ceiling is audited on: one a run
+# (verifier-A1's choice), so that the golden's re-runs stay few
+LOR_CHOOSE = {0: [0], 1: [0], 2: [0]}
+
+
+def lor_above(L):
+    """lor (test_cert.py) with entry 1's value re-made in fp256, rounded
+    to nearest and enclosed by its two neighbours: formats above a
+    CFT_MAX_FORMAT=2 build's, which cert.audit and the default tool
+    accept. -> [(label, bytes), ...]"""
+    q1 = L.values[1]
+    vals = (("rounded fp256 rne", cert.Value(
+                "rounded", fmt="fp256", rnd="rne",
+                bits=cert.round_rational("fp256", q1, "rne"))),
+            ("enclosed fp256", cert.Value(
+                "enclosed", fmt="fp256",
+                lo=cert.round_rational("fp256", q1, "rdn"),
+                hi=cert.round_rational("fp256", q1, "rup"))))
+    out = []
+    for label, v in vals:
+        es = list(L.entries)
+        es[1] = dataclasses.replace(es[1], value=v)
+        out.append((label, cert.encode(dataclasses.replace(
+            L.cert, accuracy=tuple(es)))))
+    return out
+
+
+def section_narrow64(work, cc, lib_src, d, T, L, lor_cases, fp256, image):
+    """The same ceiling at CFT_BN_LIMBS=64: exact values within the
+    ceiling audited in full, and build-format wherever a format above it
+    would reach the library - a value's line (verifier-A1's second case),
+    a run's program-format line, and an image's header."""
+    global TOOL
+    exe = d / ("cft-audit-narrow64" + (".exe" if os.name == "nt" else ""))
+    t0 = time.perf_counter()
+    opt, defs = NARROW_BUILDS["narrow64"]
+    built, err = compile_with(cc, lib_src, exe, defs, work, opt)
+    if not check(built, f"cft-audit and libcft built at CFT_MAX_FORMAT=2 "
+                 f"with CFT_BN_LIMBS=64, {opt} "
+                 f"({time.perf_counter() - t0:.0f} s)", err.strip()[-400:]):
+        return
+    wide, TOOL = TOOL, exe
+    try:
+        # exact values within the ceiling: audited in full, the golden's
+        # verdict - lor's four entries (every method, form and scope), and
+        # the page's example, which the other narrow build refuses
+        # build-width
+        ex_data, ex_progs, ex_states = T.example_certificate()
+        for name, label, data, progs, states in (
+                ("lor", "lor, its four entries", L.data, L.progs, L.states),
+                ("example", "the page's example (accuracy 2)", ex_data,
+                 ex_progs, ex_states)):
+            salt = T.SALT
+            e = d / ("n64-" + name)
+            e.mkdir(exist_ok=True)
+            g = golden(cert.audit, data, salt, progs, states=states)
+            args = translate(e, data, salt, programs=progs, states=states)
+            rc, out, err = run_tool(args, cwd=e)
+            agree, why = same(g, tool_verdict(rc, out, err))
+            check(agree and g[0] == "accepted", f"{label}: the wide-bigint "
+                  f"build audits it in full, the golden's verdict", why)
+            record(e, args, None, list(g), f"narrow64: {label}, in full",
+                   binary="narrow64")
+        # a value above the ceiling: build-format at its line
+        vline = str(line_of(L.data, "value ", 1))
+        for label, data in lor_cases:
+            e = d / ("n64-lor-" + label.split()[0])
+            e.mkdir(exist_ok=True)
+            g = golden(cert.audit, data, T.SALT, L.progs, states=L.states,
+                       choose=LOR_CHOOSE)
+            check(g[0] == "accepted", f"lor with entry 1 {label}: the golden "
+                  f"audit accepts it", describe(g))
+            args = translate(e, data, T.SALT, programs=L.progs,
+                             states=L.states, choose=LOR_CHOOSE)
+            TOOL = wide
+            hold(args, None, g, "  and the default tool, the same verdict", e,
+                 quiet=False)
+            TOOL = exe
+            held_refused("the wide-bigint build", "narrow64", e, args,
+                         "build-format", (vline, "-", "-", "-"),
+                         f"lor with entry 1 {label}, at the value's line",
+                         ["--read"] + args[:4])
+        # a run above the ceiling, and an image above it
+        data2, progs2, states2 = fp256
+        e = d / "n64-fp256"
+        e.mkdir(exist_ok=True)
+        args = translate(e, data2, None, programs=progs2, states=states2)
+        held_refused("the wide-bigint build", "narrow64", e, args,
+                     "build-format", (str(line_of(data2, "program-format ")),
+                                      "-", "-", "-"),
+                     "the fp256 certificate at run 0's program-format line",
+                     ["--read"] + args[:2])
+        lie, progs3, states3 = image
+        e = d / "n64-fp256-stated-fp128"
+        e.mkdir(exist_ok=True)
+        args = translate(e, lie, None, programs=progs3, states=states3)
+        held_refused("the wide-bigint build", "narrow64", e, args,
+                     "build-format", ("-", "0", "-", "-"),
+                     "the fp256 images under runs stated fp128")
     finally:
         TOOL = wide
 
@@ -1119,7 +1316,7 @@ def fp256_certificate(d):
 
 # ---- section 6: the numerics against Python's integers and the golden -------
 
-def compile_with(cc, lib_src, out, defs, work):
+def compile_with(cc, lib_src, out, defs, work, opt="-O2"):
     """cc on the library's sources and tools/audit.c, from host/. A
     compiler named by its path finds its own programs (cc1, as, ld) and
     their DLLs beside it: its directory goes on PATH for the compiler's
@@ -1129,7 +1326,7 @@ def compile_with(cc, lib_src, out, defs, work):
     if os.path.dirname(first):
         env["PATH"] = os.path.dirname(first) + os.pathsep + env.get("PATH",
                                                                     "")
-    cmd = cc.split() + ["-std=c99", "-O2"] + defs + ["-Iinclude"] + \
+    cmd = cc.split() + ["-std=c99", opt] + defs + ["-Iinclude"] + \
         lib_src.split() + ["tools/audit.c", "-o", str(out)]
     r = subprocess.run(cmd, cwd=str(HOST), capture_output=True, text=True,
                        env=env)
