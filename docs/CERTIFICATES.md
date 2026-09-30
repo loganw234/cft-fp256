@@ -23,9 +23,10 @@ Where things stand (2026-09-28):
 - the segment runner, `cft-segrun`, writes version-1 certificates from
   the library (see "The segment runner"), and the `programs` stage
   holds them byte for byte to the golden writer;
-- the C auditor is later work, in the plan of record:
-  [ROADMAP.md](ROADMAP.md), "Segments, certificates and the audit
-  tool".
+- the C auditor, `cft-audit`, audits them in C beside the golden one
+  (see "The audit tool"), and the `audit` stage holds its verdicts equal
+  to `cert.audit`'s (2026-09-29; the plan of record,
+  [ROADMAP.md](ROADMAP.md), "Steps 4 and 7").
 
 ## What a certificate says, and what an audit proves
 
@@ -249,14 +250,16 @@ not. A product needs 2,046, and a comparison of a/b with c/d compares
 two such products. So a C auditor built at the default width can compute
 every in-rule step without overflow, and, applying the same rule to the
 same values in the same order, cannot differ from the golden auditor on
-width. That is the design's argument; no C auditor exists yet to measure
-it against.
+width. `cft-audit` is that auditor ("The audit tool"). Its gate holds
+its verdicts to the golden auditor's on every width control
+test_cert.py makes, and its arithmetic to Python's integers.
 
 A narrower build is not a conforming auditor of exact values. The
 bigint is 576 bits at an fp128 ceiling and 288 below
 (`host/include/cft_config.h`). Such a build must refuse to audit a
 certificate that carries an exact value, rather than audit it
-differently.
+differently. `cft-audit` built so refuses `build-width` (exit 78, a
+name of the tool's own) at an `accuracy` line counting 1 or more.
 
 For the values these runs produce, 1,023 bits is room enough. Over one
 segment of order-one states, the drift of Henon-Heiles' cubic energy
@@ -1262,6 +1265,10 @@ bank:
 - red, naming segment 1, when a producer's boundary 2 is one bit wrong
   and it carries on from there.
 
+The C auditor is held to these controls as well. Its gate hands it every
+parse and audit call test_cert.py makes, and requires the golden
+auditor's verdict by name, code and location ("The audit tool").
+
 ## The segment runner
 
 `cft-segrun` is the C writer, the plan's step 3. It runs a program as
@@ -1620,6 +1627,213 @@ d4abe2a, P3b's three answers (not at ff7ff7b alone),
 skipped (2026-09-28 and 29; the round's ledger, card-p3b, card-p3b2
 and card-p3b3).
 
+## The audit tool
+
+`cft-audit` is the C auditor, the plan's step 4: every step of "The
+audit", the strict reader included, in this page's order, beside the
+golden one. `make -C host all` builds it, from `host/tools/audit.c`.
+
+    cft-audit --cert CERT [--salt SALT] [--states DIR] [--seed HEX]
+              --run 0 --image IMG [--bank BANK] [--stream a|b|c FILE ...]
+                      [--choose all|sample:K|K,K,...]
+              [--run 1 --image IMG ...] ...
+    cft-audit --read --cert CERT [--salt SALT]
+    cft-audit --sample SEED R S K
+
+**What it is handed.** Each option is one argument of `cert.audit`
+("The shape of what it is handed"):
+- `--cert`: the certificate's bytes;
+- `--salt`: a file of any length, whose length is step 3's
+  (`salt-length`). With none, no salt is handed;
+- `--run R` opens run R's block, and the options after it, up to the
+  next `--run`, are run R's:
+  - `--image` and `--bank`: its program, image and bank;
+  - `--stream X FILE`: its stream X, the others +0;
+  - `--choose`: its choice, `all` (the default), `sample:K`, or the
+    segments `K,K,...`;
+- `--states DIR`: every file in DIR named `run-<r>-boundary-<b>.bin`, r
+  and b in their one decimal spelling, is run r's state at boundary b.
+  Those are the files cft-segrun writes ("The segment runner"). Other
+  files are not read, and one named so but spelt otherwise
+  (`run-01-boundary-0.bin`) is `usage`;
+- `--seed HEX`: the sample's seed, 64 hex digits. Any other value is
+  `choice`, at step 2. With none and a sample asked, the operating
+  system draws 32 bytes, once for the audit, and the verdict prints
+  them.
+
+A run index that names no run of the certificate is refused by the
+step that reads that argument, as `cert.audit` refuses a key that is no
+run: `choice` for a choice, `program-image` for an image or a bank,
+`stream` for a stream, and `state-shape` for a state file of a run or
+boundary that does not exist. Every file the command line names is read
+before step 1, and each state file at step 7.
+
+`--read` is `cert.parse(data, salt)`: the hash line, the body's hash and
+the strict form, and with `--salt` the salt against the mode and the
+commitment. `--sample` prints the segments `cert.sample` draws, as the
+page's test vector writes them.
+
+**What it answers.**
+- Accepted: stdout is the golden verdict's lines,
+  `cert.Verdict.lines()`, byte for byte, and the exit code is 0.
+- Refused: stderr carries `cft-audit: refused <name>: <why>`, as
+  cft-segrun prints its refusals, and then `cft-audit: location
+  line=<n> run=<r> segment=<k> entry=<j>`, each field `-` where it does
+  not apply: the golden refusal's `.line`, `.run`, `.segment` and
+  `.entry`. The exit code is the name's (the table under "Refusals").
+- Three names are the tool's own:
+  - `usage`, exit 64: a command line it does not take, or a file it
+    names that cannot be read;
+  - `memory`, exit 71: an allocation of its own that fails. A number
+    the certificate states is never `memory` ("What an audit spends");
+  - `build-width`, exit 78: a narrow build handed a certificate with an
+    accuracy entry (below).
+- A library call that fails where no refusal names the failure, such as
+  a software handle that does not open or a conversion that fails, is
+  not a verdict. It prints `cft-audit: internal error` and exits 70.
+
+**How it computes.**
+- **Re-runs** go through libcft's software backend at each run's depth
+  ("The chain"), on a handle `cft_open_ex` opens for that depth. A
+  segment the executor refuses is `program-image` at its run and
+  segment, with the library's sentence.
+- **Hashes** are the library's streaming SHA-256 (`host/src/sha256.h`,
+  which `cft_sha256` wraps). So a state is hashed where it lies, and a
+  bounded run's +0 streams need no buffer.
+- **Exact values** go through the library's own 2,048-bit bigint,
+  `cft_bn` (`host/src/bigint.h`, an internal header; the lead's
+  decision, 2026-09-29). The tool adds a division, a gcd and an exact
+  left shift of its own: `cft_bn_shl` keeps a spare limb, and refuses to
+  shift a value that fills the container, even by 0.
+- **Elements.** An element's exact decimal is `cft_to_decimal_char` at
+  0 digits, and a value exactly widened is `cft_convert`. A rational
+  rounded into a format is one integer division, as `_round_rational`'s
+  is, then `cft_from_hex_char` on the dyadic value that division leaves.
+  That is round_pack's answer, as the golden's is.
+- The gate held each of these to Python's integers or the golden model
+  before they were trusted (section 6, below).
+- **The narrow build.** A `cft_bn` narrower than 2,047 bits (2 x 1,023
+  + 1; 576 bits at an fp128 ceiling) compiles the tool without its exact
+  arithmetic. It is a `#if`, so no build computes an exact value in a
+  narrower bigint. Its reader refuses `build-width` at an `accuracy`
+  line whose count is at least 1 and agrees with its entries, located at
+  that line. A certificate with `accuracy 0` carries no exact value, and
+  the narrow build audits it in full. This is "The width rule"'s
+  narrower build, refusing rather than auditing differently.
+- **The instrument.** `CFT_AUDIT_PLANT=executor-refuses` makes every
+  re-run's executor refuse, as test_cert.py's monkeypatched `seq.run`
+  does, so that the gate holds that refusal (`program-image` at the
+  run and segment). Any other value is `usage`. No library in this tree
+  refuses a re-run that passed steps 4 to 7.
+
+**What it proves, and what it does not.** It proves what "What an audit
+proves" says, for the segments it re-runs. It is independent of the
+golden model: it reads with its own reader and re-runs with libcft. It
+is not independent of libcft. For a certificate cft-segrun made on the
+software backend, libcft made it, so only the golden auditor is
+independent of the producer there.
+
+**Its gate** is `host/tests/audit_check.py`, `make -C host audittest`,
+which `verify/run.sh`'s `audit` stage runs in the gate budget. It hands
+both auditors the same inputs, and requires the same verdict: the
+refusal's name, code and location, or both ACCEPTED with the same lines.
+1. **The tool's own:**
+   - every `usage` refusal a command line or a file causes;
+   - `--sample` against the page's vector and against `cert.sample`,
+     with its `choice` refusals;
+   - a seed the operating system draws: different in two audits, and
+     the same verdict again when handed back;
+   - five controls the plant census asked for (below);
+   - git ignoring the binary.
+2. **test_cert.py**, run in the gate's process with `cert.parse` and
+   `cert.audit` shadowed. Every top-level call its tests make is handed
+   to the tool too, translated into files and options. So the tool is
+   held to every control the golden auditor is held to, and stays so as
+   controls are added.
+   - A call whose arguments no file or option spells faithfully is
+     counted and named, not compared: a list where a mapping goes, a
+     string or bool key, an integer past the format, a salt that is not
+     bytes.
+   - A seed the golden audit draws is caught and handed to the tool.
+   - An executor the test makes refuse is the instrument.
+3. **segrun_check's certificates:** cft-segrun on its programs, keyed
+   and open, each audited in full, in full from the initial states
+   alone, and sampled under a fixed seed.
+4. **The golden corpus** (`certificates/MANIFEST`), where the tree has
+   one: every case the same three ways, the two auditors against each
+   other and against the manifest's verdict.
+5. **The narrow build**, compiled at `CFT_MAX_FORMAT=2`: `build-width`
+   at the example's `accuracy` line, in an audit and in `--read`, and
+   the same runs with `accuracy 0` audited in full.
+6. **The numerics**, through a probe build of `tools/audit.c`
+   (`-DCFT_AUDIT_PROBE`, compiled only by the gate):
+   - the tool's division, gcd and exact arithmetic against Python's
+     integers, up to 2,047 bits;
+   - its rounding against `cert.round_rational`, in every format and
+     direction;
+   - an element's exact value and width against `cert.element_fraction`;
+   - `cft_convert` and `cft_to_decimal_char` against `cert.widen` and
+     `chars.to_decimal`.
+
+Measured on the desktop, niced and with the desktop in use
+(2026-09-29): 6,742 checks, 0 failed, 216 s. That run read the corpus
+from P2's tree before integration. Where a tree has no corpus, section
+4 is a SKIP line, which `verify/run.sh` counts as an inner skip.
+- Section 2: test_cert.py's 93 tests pass in 111 s, 70 s of it the
+  tool's 6,475 runs. Every one of the 6,250 top-level parse calls, and
+  225 of the 264 audit calls, got the same verdict from the tool. The
+  other 39 pass arguments no file spells.
+- Section 6: the probe's 4,566 operations all agree, in 15 s.
+
+**The plants.** `host/tests/audit_plants.py` is the census. In a fresh
+copy of host/, never the tree, every call of `refuse` or `malformed` in
+`tools/audit.c` becomes a numbered site that an environment variable
+skips and that names itself when it refuses. The gate's recorded cases
+(`audit_check.py --record`) are replayed through the copy. A plant
+changes only the cases that reach its call, so each site is planted in
+turn and only its own cases replayed.
+
+On `tools/audit.c` as of ac5f055, with the gate's 6,617 cases, the
+census found 160 sites (134 s on the desktop, 2026-09-29):
+- **144 red.** Each turns a case red, and the gate's line names the
+  golden auditor's refusal beside the tool's other answer.
+- **11 green.** Each stays green because another check refuses its
+  cases by the same name at the same place:
+  - in the golden auditor's order too:
+    - a block-starting line whose block is behind: the next rule of
+      "A line that is not the one expected" says `line-unexpected`;
+    - a decimal's spelling, read again with its size;
+    - zero spelt 0/3, which is not in lowest terms either;
+    - a program without SCRATCH_IO, whose scratch goes in as 0 slots,
+      the second reason;
+  - in C alone:
+    - a run line of two tokens, and a term with no coefficient: the
+      next read takes the next line's key, never a kind or a rational,
+      and refuses `malformed` at the same line;
+    - a half-step run beside a main image with no bank: every h-slot is
+      past the empty bank;
+    - an h-slot past the bank: read from the file buffer's zero-filled
+      slack, it holds zero;
+    - no argument at all, `--sample` given twice, and no `--cert`: each
+      is `usage` by the next check.
+- **5 unreached.** No input reaches these:
+  - an allocation of the tool's own that fails (`memory`);
+  - a state file gone between the listing of `--states` and its size
+    (`usage`);
+  - an operating system that gives no random bytes, on Windows and
+    elsewhere (`usage`, twice);
+  - a library that fails a re-run the checks before it allowed
+    (`program-image`). Its instrument twin is red.
+
+The census's first pass found nine more with no case to reach them, or
+none to turn them red. The gate gained a control for each:
+- four `usage` cases;
+- an audit of each of two programs that are not segments. test_cert.py
+  reaches those two reasons through the writer only;
+- a stream for a run the certificate lacks;
+- a stream of whole elements and one byte;
+- a state one byte past its size.
+
 ## What version 1 does not do
 
 - **Sign.** The detached signature is reserved, and no scheme is
@@ -1639,8 +1853,6 @@ and card-p3b3).
 - **Certify cft-orbits' runs.** The plan's step 6 certifies Newton-route
   intervals, each a program image and bank this format holds. Its
   records carry no flags today (docs/ROADMAP.md).
-- **Audit in C.** The C auditor is the plan's step 4. The build id (step
-  2) and the segment runner (step 3) exist.
 - **Record a remote run's scratch depth.** The remote protocol carries
   no CAPS2, so a certificate made through a remote handle reads
   `device-caps unknown` and is re-run at 256 (revision 7, "The chain").
