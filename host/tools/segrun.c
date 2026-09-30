@@ -1479,12 +1479,16 @@ static void parse_value(const char *s, value_t *v, size_t j)
             refuse("malformed", "entry %lu: a %s value's format is one of "
                    "fp32, fp64, fp128, fp256, not '%.40s'", (unsigned long)j,
                    part[0], part[1]);
+        /* the format by its word as given, which the loop above matched to
+         * FMT[f].name: never FMT[f] here, where f is past the build's
+         * ceiling (gcc 13 flags that subscript in the default build, where
+         * the branch cannot be taken; parcel S3, 2026-09-30) */
         if (f > CFT_MAX_FORMAT)
             refuse("build-format", "entry %lu: its value is stated in %s, and "
                    "this build's library carries formats up to %s "
                    "(CFT_MAX_FORMAT=%d); its decimals and its rounding are the "
                    "library's, so it refuses rather than write it differently",
-                   (unsigned long)j, FMT[f].name, FMT[CFT_MAX_FORMAT].name,
+                   (unsigned long)j, part[1], FMT[CFT_MAX_FORMAT].name,
                    CFT_MAX_FORMAT);
         v->fmt = f;
     }
