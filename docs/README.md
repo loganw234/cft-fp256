@@ -1,9 +1,9 @@
 # The documents, by what you open them for
 
-Thirty-eight files, 56,635 lines. Flat in one directory they look like one
+Thirty-eight files, 56,942 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **20,709 lines you consult while working** — the three under *Start here*,
+- **21,016 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,237 lines of tool manual**, one per shipped program;
 - **1,993 lines of operations**, read when you are about to do something to
@@ -33,7 +33,7 @@ answer is not in here — it is `make verify-quick`, and
 | document | lines | what it is for |
 |---|---|---|
 | [INTEGRATION.md](INTEGRATION.md) | 253 | Choosing a path: which surface to use for which job. The shortest route from "I have a workload" to "I know what to call." |
-| [VERIFICATION.md](VERIFICATION.md) | 397 | Every gate, what it proves, how long it really takes. Twelve tiers, forty-one runner stages. |
+| [VERIFICATION.md](VERIFICATION.md) | 405 | Every gate, what it proves, how long it really takes. Twelve tiers, forty-two runner stages. |
 | [COMPLIANCE.md](COMPLIANCE.md) | 172 | IEEE 754-2019 clause by clause: what is implemented, what is refused, and where each is proven. |
 
 ## The contract
@@ -48,7 +48,7 @@ product, not the implementation.
 | [SEQUENCER.md](SEQUENCER.md) | 3,354 | The orbit sequencer and the program model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 898 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
-| [CERTIFICATES.md](CERTIFICATES.md) | 1,911 | The certificate, version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Complete enough to write a reader and an auditor from the page. And the segment runner, `cft-segrun`, that writes one from the library, and the golden certificates in `certificates/` that hold both writers to committed bytes. |
+| [CERTIFICATES.md](CERTIFICATES.md) | 2,210 | The certificate, version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Complete enough to write a reader and an auditor from the page. And the segment runner, `cft-segrun`, that writes one from the library, the audit tool, `cft-audit`, that audits one in C, and the golden certificates in `certificates/` that hold both writers to committed bytes. |
 
 ## Reference you call into
 

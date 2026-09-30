@@ -21,7 +21,8 @@
 #                                      # soak, the five workloads, the browser demos and
 #                                      # the remote backend - after a host build
 #   bash verify/run.sh --budget gate    # ~2 h quiet, ~4 h loaded: quick + golden,
-#                                      # vectors, libcft, transcend, mpfr, cpp, lint, formal
+#                                      # vectors, libcft, transcend, mpfr, cpp, lint, formal,
+#                                      # and the C auditor's gate (audit)
 #   bash verify/run.sh --budget full    # everything: the census (adds sim, simmc,
 #                                      # node, wasm, images)
 #   Measured durations for every stage, quiet and loaded, are in
@@ -142,14 +143,15 @@ BUDGET=""
 # reviewer ran before merging in September 2026: quick plus the
 # model's own suite, the vectors, the million-case replay, the
 # transcendentals, MPFR, the C++ header and the two RTL gates that
-# need only a container. `full` is the census. Measured on the
+# need only a container - and, since 2026-09-29, the C auditor held to
+# the golden one (audit). `full` is the census. Measured on the
 # Windows desktop (docs/VERIFICATION.md has the table, quiet against
 # loaded): quick ~20 min, gate ~2 h with the box quiet and ~4 h loaded
 # now that the formal gate holds thirty proofs and a negative control
 # (thirty-one tasks), full longer by the simulation suite and the two
 # browser replays; on the WSL distro the replay stages take seconds.
 BUDGET_QUICK=docs,generated,buildargs,sweepjudge,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,programs,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
-BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp
+BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit
 RESUME=""
 FRESH=0
 REQUIRE_ALL=0
@@ -987,6 +989,26 @@ do_programs() {
 # (verifier-V3, 2026-09-25).
 need host-cc python
 stage programs "the program library: both assemblers against the MANIFEST, the readback, the generated corpora, and every row's own check; then cft-segrun's certificates of the ODE rows, byte for byte the golden writer's, audited; then the golden certificates, both writers held to committed bytes" -- do_programs
+
+# The C auditor held to the golden one (host/Makefile's audittest,
+# host/tests/audit_check.py; docs/CERTIFICATES.md, "The audit tool"):
+# cft-audit and cert.audit are handed the same inputs and must give the
+# same verdict - a refusal's name, exit code and location, or both
+# ACCEPTED with the same lines. The inputs: every parse call test_cert.py
+# makes, and every audit call whose arguments files and options can
+# carry, shadowed in-process (so pytest; the rest are counted and
+# named); cft-segrun's certificates of segrun_check's programs, in full,
+# from the initial states and sampled; the golden corpus; and two narrow
+# builds of libcft and the tool at CFT_MAX_FORMAT=2, at its own bigint
+# and at CFT_BN_LIMBS=64, which must refuse build-width and build-format
+# and audit the rest in full - so a C compiler. A stage of its own in the
+# gate budget (the lead, 2026-09-29): about four minutes on the desktop,
+# too long for quick, where programs keeps both writers' checks.
+do_audit() {
+  HOSTMAKE audittest PYTHON="$PYBIN"
+}
+need host-cc python pytest
+stage audit "the C auditor held to the golden one: test_cert.py's parse calls and every audit call files can carry, cft-segrun's certificates and the golden corpus through both, the same refusal by name, code and location or the same verdict; and two narrow builds refusing build-width and build-format" -- do_audit
 
 # reduce_check.py holds the model's partition tree to the C partitioner
 # through host/reduce-parts, and SKIPs that half by name when the binary
