@@ -779,7 +779,7 @@ stage libcft "host library: build + contract tests + the build id regenerated + 
 # earlier (as this did when written) meant the corpus check took its
 # skip path on any clean checkout - including CI, where it would then
 # never have run the one check that had actually caught drift.
-# Five generators' committed files, each held to its generator. Not
+# Six generators' committed files, each held to its generator. Not
 # every generated file in the tree: host/include/cft_seq_flags.h is held
 # by `make seqflags` (python/gen_seq_flags.py --check) and
 # rtl/cft_seed_rom.svh by the golden suite's test_seed_rom_sync.py.
@@ -1109,7 +1109,7 @@ do_node() {
      && node conformance.mjs "$ROOT/vectors/out")
 }
 need node
-stage node "Node binding: unit tests and the program-load tests, then the vectors through cft_node.wasm" -- do_node
+stage node "Node binding: unit tests and program_test.mjs, then the vectors through cft_node.wasm" -- do_node
 
 do_wasm() {
   ensure_vectors || return 1

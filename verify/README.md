@@ -56,7 +56,7 @@ command in the `cft2204` distro.
 | lint | every RTL file elaborates in Yosys, no latches | docker |
 | formal | the FIFO, seedop and simpleops theorems, the leading-zero cone's equivalence at every window width, the multi-cycle multiplier's exactness at the real chunk for every pass geometry, and the negative control - 31 tasks, about 7 minutes (420 s of solver time on the merged tree, docs/VALIDATION.md 2026-09-07; formal/README.md) | docker |
 | libcft | C library contract + the conformance replay: 168 sets, 1.2M cases at the runner's generator counts - opcodes, transcendentals, character sequences, augmented pairs, reductions, magnitude forms, formatOf | cc, python |
-| generated | the committed output of five generators still matches a fresh generation, by each one's `--check` (`hw/gen_layouts.py`, `host/tools/gen_2opi.py`, `host/tools/gen_mp_consts.py`, `bindings/node/make_seq_corpus.py`, `python/gen_divfull.py`) | python; cc to build the library `make_seq_corpus.py` loads, and with neither a compiler nor a built library that one check is an inner skip |
+| generated | the committed output of six generators still matches a fresh generation, by each one's `--check` (`hw/gen_layouts.py`, `host/tools/gen_2opi.py`, `host/tools/gen_mp_consts.py`, `bindings/node/make_seq_corpus.py`, `python/gen_divfull.py`, `bindings/arduino/sync.py`) | python; cc to build the library `make_seq_corpus.py` loads, and with neither a compiler nor a built library that one check is an inner skip |
 | selfcheck | device-test harness can detect, full sw matrix | cc |
 | divsqrt | composed div/sqrt + seeds vs model, per-element flags | cc, python |
 | clause5 | the clause-5 completion set vs model | cc, python |
@@ -73,7 +73,7 @@ command in the `cft2204` distro.
 | cpp | `cft.hpp` vs `cft.h` at C++17 and C++20: every entry point, same bits and flags, plus the conformance replay through the wrapper | cc, g++ |
 | lang-cpp, lang-rust, lang-julia, lang-go, lang-csharp, lang-r | that language's example vs the C example, same bits (`make -C host examples-lang`, one leg at a time) | cc + that toolchain |
 | lang-fortran | the Fortran example builds and runs through iso_c_binding; it prints no checksum line | cc, gfortran |
-| node | the Node binding: its unit tests, then the vectors through `cft_node.wasm` | node |
+| node | the Node binding: its unit tests and `program_test.mjs`, then the vectors through `cft_node.wasm` | node |
 | wasm | the committed conformance page, verified without a browser | node |
 | workloads | the five contract workloads vs their oracles and their own determinism properties - `collatztest`, `enclosetest`, `mersennetest`, `orbitstest`, `zoomtest` in host/ | cc, python with mpmath |
 | demos | the browser demos' compute core reproduces the C tools' chains, without a browser (`bindings/wasm/verify_demos.mjs`) | cc, node |

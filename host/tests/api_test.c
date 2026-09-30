@@ -29,6 +29,8 @@
 #include "../src/tile_select.h"
 #include "../src/lane_cut.h"
 #include "../src/mask_bits.h"
+#include "../src/backend.h"      /* cftx_last_error */
+#include "../src/remote.h"       /* cftr_last_error */
 
 static int failures;
 
@@ -622,6 +624,26 @@ static int ld_plant(cft_device *dev)
            strstr(cft_last_error(), "cft_run_ex") != NULL;
 }
 
+/* What cft_last_error() shows while the library's own slot is empty:
+ * a device backend's older message, in device.c's order (the remote
+ * backend's, then XRT's), or nothing. So cft_last_error() equals this
+ * exactly when the library's slot is empty, in every build: an XRT
+ * build shows its backend's words for the cft_open of no-such.xclbin
+ * below through an empty slot, and a build without one shows "". This
+ * file is compiled with the library's own XRT define for that. */
+static const char *backend_words(void)
+{
+#ifndef CFT_NO_REMOTE
+    if (*cftr_last_error())
+        return cftr_last_error();
+#endif
+#ifdef CFT_ENABLE_XRT
+    return cftx_last_error();
+#else
+    return "";
+#endif
+}
+
 /* A load that must be refused: a sentence planted first on `live`, then
  * the load on `dev`, held to its status - the one each always had on a
  * 64-bit host, and since 2026-09-30 on a 32-bit one too - and to a
@@ -646,7 +668,9 @@ static void ld_expect(cft_device *live, cft_device *dev, const char *what,
     msg = cft_last_error();
     CHECK(st == want, "%s: %s, and the status must be %s (%s)", what,
           cft_strerror(st), cft_strerror(want), msg);
-    CHECK(msg[0] != '\0', "%s: refused with no sentence", what);
+    CHECK(strcmp(msg, backend_words()) != 0,
+          "%s: refused with no sentence of the library's own ('%s')",
+          what, msg);
     CHECK(strstr(msg, "cft_run_ex") == NULL,
           "%s: the sentence is an earlier call's: '%s'", what, msg);
     for (k = 0; k < 3 && says[k]; k++)
@@ -767,9 +791,9 @@ int main(void)
         return 1;
 
     {
-        /* No device backend is compiled in, so asking for one has to
-         * fail loudly rather than quietly hand back the software
-         * backend under another name. */
+        /* An artifact that does not exist - and, in a build without
+         * XRT, any artifact at all - has to fail loudly rather than
+         * quietly hand back the software backend under another name. */
         cft_device *hw = (cft_device *)(void *)0x1;
         CHECK(cft_open("no-such.xclbin", 0, &hw) != CFT_OK && hw == NULL,
               "an artifact open must fail, and must not leave a handle");
@@ -5526,39 +5550,26 @@ int main(void)
                   "536870913 x 8 of instructions");
 
         /* The entry clear, which is what nothing above can see. A good
-         * load leaves the library's slot empty, and cft_last_error() then
-         * falls through to a device backend's older message where one
-         * exists (docs/HOSTAPI.md): in an XRT build, the XRT backend's own
-         * words for the cft_open of no-such.xclbin above. So the clear is
-         * held to that fall-through, taken from a good load BEFORE the
-         * plant: after plant and load, the words are the fall-through's
-         * again, and the planted sentence is gone. Until 2026-09-30 this
-         * required the words to be empty, which only a build without a
-         * device backend's message meets: an XRT build failed it (the card
-         * leg of revision 7's quad q135b). */
+         * load leaves the library's slot empty, so cft_last_error() is
+         * then exactly backend_words(): nothing in a build without a
+         * device backend's message, and in an XRT build that backend's
+         * own words for the cft_open of no-such.xclbin above
+         * (docs/HOSTAPI.md). Until 2026-09-30 this required the words to
+         * be empty, which an XRT build failed (the card leg of revision
+         * 7's quad q135b). */
         n = ld_image(img, 0x50544643u, 1, CFT_FP32, 4, 0, 0, 1, 0, halt, 1);
-        {
-            char through[CFT_ERRMSG_MAX + 1];
-            st = cft_program_load(dev, img, n, &lp);
-            CHECK(st == CFT_OK && lp != NULL,
-                  "the clear's leg: a good image loads first: %s (%s)",
-                  cft_strerror(st), cft_last_error());
-            snprintf(through, sizeof through, "%s", cft_last_error());
-            cft_program_free(lp);
-            CHECK(ld_plant(dev), "the clear's leg: the plant left no sentence");
-            CHECK(strcmp(cft_last_error(), through) != 0,
-                  "the clear's leg: the plant shows through as '%s'",
-                  cft_last_error());
-            st = cft_program_load(dev, img, n, &lp);
-            CHECK(st == CFT_OK && lp != NULL,
-                  "the clear's leg: a good image loads: %s (%s)",
-                  cft_strerror(st), cft_last_error());
-            CHECK(strcmp(cft_last_error(), through) == 0,
-                  "a load that succeeds must clear the library's slot - "
-                  "cft_last_error() shows '%s', where a good load before "
-                  "the plant showed '%s'", cft_last_error(), through);
-            cft_program_free(lp);
-        }
+        CHECK(ld_plant(dev), "the clear's leg: the plant left no sentence");
+        CHECK(strcmp(cft_last_error(), backend_words()) != 0,
+              "the clear's leg: the plant is not in the library's slot");
+        st = cft_program_load(dev, img, n, &lp);
+        CHECK(st == CFT_OK && lp != NULL,
+              "the clear's leg: a good image loads: %s (%s)",
+              cft_strerror(st), cft_last_error());
+        CHECK(strcmp(cft_last_error(), backend_words()) == 0,
+              "a load that succeeds must leave the library's slot empty - "
+              "cft_last_error() shows '%s', where a device backend's "
+              "message is '%s'", cft_last_error(), backend_words());
+        cft_program_free(lp);
         printf("  program load: %lu refusals, each its status and a "
                "sentence of its own after an earlier call's; a good "
                "load clears the library's slot\n",

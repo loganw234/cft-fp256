@@ -3882,7 +3882,9 @@ code).
 - **cft-audit re-derives every entry in C.** Its exact rationals sit on
   libcft's `cft_bn`, with a division and gcd of its own, the width rule,
   and the rounded and enclosed forms. All of it is static in audit.c,
-  behind `AUDIT_EXACT`, and a refusal there prints and exits.
+  most of it behind `AUDIT_EXACT` (the division and gcd sit outside,
+  where the probe build calls them), and a refusal there prints and
+  exits.
 - **cft-segrun writes `accuracy 0`.** It holds one run's states at a
   time, so after a run ends its initial and final states exist only as
   its boundary files. corpus.py's check replaces a case's accuracy block

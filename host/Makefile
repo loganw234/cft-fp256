@@ -386,7 +386,7 @@ enclose-clean:
 	rm -f cft-enclose cft-enclose.exe
 
 api-test$(EXE): tests/api_test.c libcft.a
-	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $(XRTDEF) $^ -o $@ $(XRTLIBS)
 
 # Built against src/ as well as include/: the canonical partitioner is
 # internal, and a host never sees it - it calls cft_reduce.
