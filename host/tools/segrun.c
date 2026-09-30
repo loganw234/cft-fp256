@@ -322,49 +322,6 @@ typedef struct stat stat_t;
 #  define IS_FILE(m)   S_ISREG(m)
 #endif
 
-/* A file this run creates NEW, or NULL with errno set (EEXIST when the
- * path is taken): O_EXCL, so no file the tool writes is one it did not
- * create, and a refusal that removes what the run made removes nothing
- * else. Windows answers O_EXCL on a directory that is there with EACCES,
- * not EEXIST, so a path that is there is called so whatever it is. */
-static FILE *create_new(const char *path)
-{
-    FILE *f;
-    int e;
-    stat_t sb;
-#if defined(_WIN32)
-    int fd = _open(path, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
-                   _S_IREAD | _S_IWRITE);
-#else
-    int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0666);
-#endif
-    if (fd < 0) {
-        e = errno;
-        if (e == EACCES && STAT(path, &sb) == 0)
-            e = EEXIST;
-        errno = e;
-        return NULL;
-    }
-#if defined(_WIN32)
-    f = _fdopen(fd, "wb");
-    if (!f) {
-        e = errno;
-        _close(fd);
-        remove(path);
-        errno = e;
-    }
-#else
-    f = fdopen(fd, "wb");
-    if (!f) {
-        e = errno;
-        close(fd);
-        remove(path);
-        errno = e;
-    }
-#endif
-    return f;
-}
-
 #include "cft.h"
 /* An accuracy entry's exact arithmetic, cft-audit's, shared (the plan's
  * step 5): the functions exactly, the width rule, the rounding and the
@@ -372,6 +329,13 @@ static FILE *create_new(const char *path)
  * come the formats (FMT, ESZ), the directions (RND_NAME), the run kinds
  * (K_MAIN, K_HALF, K_WIDER, KIND_NAME) and the methods' words. */
 #include "cert_exact.h"
+/* The certificate's encoding, shared with cft-orbits' certified runs
+ * (the steps-5-and-6 round's parcel S3, 2026-09-30): the tagged hashes
+ * and the salt's commitment, the identity lines, the text and the lines,
+ * an entry's lines, and a file created new (cw_create_new: O_EXCL, so no
+ * file the tool writes is one it did not create). Each returns the name
+ * this file refuses by; the words and the exits stay here. */
+#include "cert_write.h"
 
 /* refuse() never returns, and its message is a printf format. mingw-w64
  * names the archetype its stdio really is; elsewhere it is printf. */
@@ -401,18 +365,10 @@ static const char DEPTH_PARAM[] = "scratch-depth";
 #define FLAGS_KNOWN   (CFT_PROG_FLAG_BANK_EXT | CFT_PROG_FLAG_SCRATCH_IO | \
                        CFT_PROG_FLAG_SCRATCH_STRICT)
 
-/* The domain tags (docs/CERTIFICATES.md, "Hashes"). Each length is
- * stated, not left to a terminator: a state's and a stream's tag END IN
- * a NUL byte, which is the separator the page puts before the bytes,
- * and the salt's has none. */
-static const char TAG_SALT[]     = "cft-certificate 1 salt";
-#define TAG_SALT_LEN   (sizeof TAG_SALT - 1)        /* 22, no NUL */
-static const char TAG_STATE[]    = "cft-certificate 1 state";
-#define TAG_STATE_LEN  (sizeof TAG_STATE)           /* 24, the NUL included */
-static const char TAG_STREAM_A[] = "cft-certificate 1 stream a";
-static const char TAG_STREAM_B[] = "cft-certificate 1 stream b";
-static const char TAG_STREAM_C[] = "cft-certificate 1 stream c";
-#define TAG_STREAM_LEN (sizeof TAG_STREAM_A)        /* 27, the NUL included */
+/* The domain tags (docs/CERTIFICATES.md, "Hashes") are cert_write.h's,
+ * CW_TAG_*: each length stated, not left to a terminator, since a state's
+ * and a stream's tag END IN a NUL byte, the separator the page puts
+ * before the bytes, and the salt's has none. */
 
 static const char *const FORMAT_NAME[4] = { "fp32", "fp64", "fp128", "fp256" };
 
@@ -643,43 +599,7 @@ static int name_cmp(const char *a, size_t an, const char *b, size_t bn)
     return c;
 }
 
-/* cft_build_id()'s grammar, as the page's reader holds the build-id line
- * to it: `unknown` whole, or its three fields in their order. */
-static int build_id_ok(const char *s)
-{
-    size_t n = 0;
-    const char *p;
-    if (!strcmp(s, "unknown"))
-        return 1;
-    if (strncmp(s, "commit=", 7) != 0)
-        return 0;
-    p = s + 7;
-    while ((p[n] >= '0' && p[n] <= '9') || (p[n] >= 'a' && p[n] <= 'f'))
-        n++;
-    if (n != 40 && n != 64)
-        return 0;
-    p += n;
-    if (!strncmp(p, " tracked=clean", 14))
-        p += 14;
-    else if (!strncmp(p, " tracked=modified", 17))
-        p += 17;
-    else
-        return 0;
-    return !strcmp(p, " untracked=none") || !strcmp(p, " untracked=present");
-}
-
-static void hex_of(const uint8_t *in, size_t n, char *out)
-{
-    static const char D[] = "0123456789abcdef";
-    size_t i;
-    for (i = 0; i < n; i++) {
-        out[2 * i]     = D[in[i] >> 4];
-        out[2 * i + 1] = D[in[i] & 15];
-    }
-    out[2 * n] = 0;
-}
-
-/* ---- the hashes ---------------------------------------------------------- */
+/* ---- the hashes: cert_write.h's, refused by the name each returns ---- */
 
 static void sha256_of(const void *data, size_t n, uint8_t out[32])
 {
@@ -688,69 +608,32 @@ static void sha256_of(const void *data, size_t n, uint8_t out[32])
         refuse_st("device", "cft_sha256", st);
 }
 
-/* HMAC-SHA-256 (RFC 2104, B = 64) of tag || msg under a 32-byte key.
- * The key is shorter than the block, so it is its own K0, zero-padded;
- * cft_sha256 is one-shot, so each pass hashes one buffer, taken for the
- * hash and let go after it - never held while the library runs a
- * segment, which has buffers of its own. */
-static void hmac_sha256(const uint8_t key[SALT_BYTES],
-                        const void *tag, size_t tag_len,
-                        const void *msg, size_t msg_len, uint8_t out[32])
+/* A hash cert_write.h made, or the name it refused by: `memory` for a
+ * buffer the hash needed, `device` for cft_sha256. */
+static void hashed(const char *why, const char *what)
 {
-    uint8_t *inner = (uint8_t *)xcalloc(64 + tag_len + msg_len, 1);
-    uint8_t outer[64 + 32], ih[32];
-    size_t i;
-    for (i = 0; i < 64; i++) {
-        uint8_t k = i < SALT_BYTES ? key[i] : 0;
-        inner[i] = (uint8_t)(k ^ 0x36);
-        outer[i] = (uint8_t)(k ^ 0x5c);
-    }
-    if (tag_len)
-        memcpy(inner + 64, tag, tag_len);
-    if (msg_len)
-        memcpy(inner + 64 + tag_len, msg, msg_len);
-    sha256_of(inner, 64 + tag_len + msg_len, ih);
-    free(inner);
-    memcpy(outer + 64, ih, 32);
-    sha256_of(outer, sizeof outer, out);
-}
-
-/* The hash of tag || bytes: keyed under `salt`, or open (plain SHA-256)
- * when `salt` is NULL. */
-static void tagged_hash(const uint8_t *salt, const char *tag, size_t tag_len,
-                        const void *bytes, size_t n, char hex[65])
-{
-    uint8_t d[32];
-    if (salt) {
-        hmac_sha256(salt, tag, tag_len, bytes, n, d);
-    } else {
-        uint8_t *buf = (uint8_t *)xcalloc(tag_len + n, 1);
-        memcpy(buf, tag, tag_len);
-        if (n)
-            memcpy(buf + tag_len, bytes, n);
-        sha256_of(buf, tag_len + n, d);
-        free(buf);
-    }
-    hex_of(d, 32, hex);
+    if (why && !strcmp(why, "memory"))
+        refuse("memory", "the buffer for %s's hash could not be allocated",
+               what);
+    if (why)
+        refuse(why, "cft_sha256, hashing %s: %s", what, cft_last_error());
 }
 
 static void state_hash(const uint8_t *salt, const void *bytes, size_t n,
                        char hex[65])
 {
-    tagged_hash(salt, TAG_STATE, TAG_STATE_LEN, bytes, n, hex);
+    hashed(cw_state_hash(salt, bytes, n, hex), "a state");
 }
 
-static const char *stream_tag(int which)
+static void stream_hash(const uint8_t *salt, int which, const void *bytes,
+                        size_t n, char hex[65])
 {
-    return which == 0 ? TAG_STREAM_A : which == 1 ? TAG_STREAM_B
-                                                   : TAG_STREAM_C;
+    hashed(cw_stream_hash(salt, which, bytes, n, hex), "a stream");
 }
 
 static void salt_commitment(const uint8_t *salt, char hex[65])
 {
-    uint8_t d[32];
-    hmac_sha256(salt, TAG_SALT, TAG_SALT_LEN, NULL, 0, d);
-    hex_of(d, 32, hex);
+    hashed(cw_salt_commitment(salt, hex), "the salt's commitment");
 }
 
 /* ---- the image header, read before the library sees the bytes --------- */
@@ -1054,99 +937,44 @@ static void check_run(run_spec *r, size_t idx)
     }
 }
 
-/* ---- the certificate's text --------------------------------------------- */
+/* ---- the certificate's text: cert_write.h's, refused by name ----------- */
 
-typedef struct {
-    char  *p;
-    size_t n, cap;
-} text;
+typedef cw_text text;
+
+/* A line or a piece of one, or the refusal: `output` for a line that
+ * cannot be formatted, `memory` for text that cannot grow (from 4,096
+ * bytes doubled, as the trial counts it: try_runs). */
+static void lines_ok(const char *why)
+{
+    if (why && !strcmp(why, "output"))
+        refuse("output", "a certificate line could not be formatted");
+    if (why)
+        refuse(why, "the certificate's text could not grow");
+}
 
 static void put(text *t, const char *fmt, ...) PRINTF_LIKE(2, 3);
 
 static void put(text *t, const char *fmt, ...)
 {
     va_list ap;
-    int len;
+    const char *why;
     va_start(ap, fmt);
-    len = vsnprintf(NULL, 0, fmt, ap);
+    why = cw_vput(t, fmt, ap);
     va_end(ap);
-    if (len < 0)
-        refuse("output", "a certificate line could not be formatted");
-    if (t->n + (size_t)len + 1 > t->cap) {
-        size_t cap = t->cap ? t->cap : 4096;
-        char *grown;
-        while (t->n + (size_t)len + 1 > cap)
-            cap *= 2;
-        grown = (char *)xcalloc(cap, 1);
-        if (t->n)
-            memcpy(grown, t->p, t->n);
-        free(t->p);
-        t->p = grown;
-        t->cap = cap;
-    }
-    va_start(ap, fmt);
-    vsnprintf(t->p + t->n, (size_t)len + 1, fmt, ap);
-    va_end(ap);
-    t->n += (size_t)len;
+    lines_ok(why);
 }
 
-/* ---- identity ------------------------------------------------------------ */
+/* ---- identity: cert_write.h's, from the library and nowhere else ------- */
 
-typedef struct {
-    const char *build_id;
-    const char *backend;        /* one of the page's four words */
-    char xclbin[72], version[16], caps[24], tiles[24];
-} identity;
+typedef cw_identity identity;
 
 static void identify(cft_device *dev, const cft_caps *caps, identity *id)
 {
-    cft_image_id im;
-    cft_status st;
-    int sw = !strcmp(caps->backend, "software");
-    int remote = !strcmp(caps->backend, "remote");
-
-    id->build_id = cft_build_id();
-    if (!id->build_id || !build_id_ok(id->build_id))
+    if (cw_identify(dev, caps, id))
         refuse("malformed", "cft_build_id() returned '%s', which is not the "
                "page's grammar; the build-id line is that string verbatim, "
                "so no certificate can be written from it",
                id->build_id ? id->build_id : "(null)");
-
-    id->backend = sw ? "software" : remote ? "remote"
-                : !strcmp(caps->backend, "xrt") ? "xrt" : "unknown";
-
-    memset(&im, 0, sizeof im);
-    im.struct_size = sizeof im;
-    st = cft_get_image_id(dev, &im);
-    if (st == CFT_OK && im.struct_size >= offsetof(cft_image_id, caps) +
-                                            2 * sizeof im.caps[0]) {
-        hex_of(im.sha256, 32, id->xclbin);
-        snprintf(id->version, sizeof id->version, "%08x", (unsigned)im.version);
-        if (im.n_caps == 1)
-            snprintf(id->caps, sizeof id->caps, "%08x", (unsigned)im.caps[0]);
-        else if (im.n_caps == 2)
-            snprintf(id->caps, sizeof id->caps, "%08x %08x",
-                     (unsigned)im.caps[0], (unsigned)im.caps[1]);
-        else
-            snprintf(id->caps, sizeof id->caps, "unknown");
-    } else if (sw) {
-        /* no xclbin and no registers: the fields do not exist here */
-        snprintf(id->xclbin, sizeof id->xclbin, "none");
-        snprintf(id->version, sizeof id->version, "none");
-        snprintf(id->caps, sizeof id->caps, "none");
-    } else {
-        snprintf(id->xclbin, sizeof id->xclbin, "unknown");
-        snprintf(id->caps, sizeof id->caps, "unknown");
-        if (remote && caps->device_version)
-            snprintf(id->version, sizeof id->version, "%08x",
-                     (unsigned)caps->device_version);
-        else
-            snprintf(id->version, sizeof id->version, "unknown");
-    }
-    if (caps->tiles >= 1)
-        snprintf(id->tiles, sizeof id->tiles, "%u", (unsigned)caps->tiles);
-    else
-        snprintf(id->tiles, sizeof id->tiles, "unknown");
 }
 
 /* ---- the states directory ---------------------------------------------- */
@@ -1164,7 +992,7 @@ static void write_boundary(size_t r, uint64_t b, const void *state, size_t n)
              (unsigned long)r, (unsigned long long)b);
     /* created new: the directory is the run's own, so a file already
      * there is one this run did not make, and it is left as it is */
-    f = create_new(path);
+    f = cw_create_new(path);
     if (!f)
         refuse("output", "%s cannot be created (%s)", path,
                errno == EEXIST ? "a file this run did not make is there "
@@ -1396,7 +1224,7 @@ static void try_runs(const run_spec *runs, size_t n_runs,
                    long)r, (unsigned long long)R->segments);
         b = R->state_bytes > R->lanes * R->esz ? R->state_bytes
                                                : R->lanes * R->esz;
-        if (!add_ok(&b, lead + TAG_STREAM_LEN) || !add_ok(&b, path))
+        if (!add_ok(&b, lead + CW_TAG_STREAM_LEN) || !add_ok(&b, path))
             refuse("memory", "run %lu: its state is past what this process "
                    "can address", (unsigned long)r);
     }
@@ -1849,38 +1677,13 @@ static void make_value(entry_spec *X, size_t j, cft_device *arith)
                             sizeof why), j, why);
 }
 
-/* An element as the certificate spells one: its bits in width/4 hex
- * digits, a space, and its exact decimal (cft_to_decimal_char at 0
- * digits, as cft-audit holds it). */
-static void put_element(text *t, int f, const uint8_t *le, cft_device *arith)
-{
-    size_t i, len = 0;
-    uint32_t fl = 0;
-    char *dec;
-    cft_status st;
-    for (i = ESZ(f); i-- > 0;)
-        put(t, "%02x", le[i]);
-    st = cft_to_decimal_char(arith, (cft_format)f, CFT_RNE, le, 0, NULL, 0,
-                             &len, &fl);
-    if (st != CFT_ERR_INVALID_ARGUMENT || len == 0)
-        refuse_st("device", "cft_to_decimal_char, sizing an accuracy value's "
-                  "decimal", st);
-    dec = (char *)xcalloc(len, 1);
-    st = cft_to_decimal_char(arith, (cft_format)f, CFT_RNE, le, 0, dec, len,
-                             &len, &fl);
-    if (st != CFT_OK)
-        refuse_st("device", "cft_to_decimal_char, an accuracy value's decimal",
-                  st);
-    put(t, " %s", dec);
-    free(dec);
-}
 #endif /* CX_EXACT */
 
 /* The accuracy block, in the page's order and spellings (cert._body_lines):
- * `accuracy <A>`, then each entry's lines. With no --entry it is
- * `accuracy 0`, byte for byte what the tool wrote before step 5. One
- * function, beside the run blocks' code, so that another writer of the
- * same certificates can take it whole. */
+ * `accuracy <A>`, then each entry's lines, which are cert_write.h's
+ * (cw_entry_lines, this function's own until the steps-5-and-6 round's
+ * parcel S3 took it whole for cft-orbits). With no --entry it is
+ * `accuracy 0`, byte for byte what the tool wrote before step 5. */
 static void put_accuracy(text *t, const entry_spec *entries, size_t n,
                          cft_device *arith)
 {
@@ -1888,46 +1691,15 @@ static void put_accuracy(text *t, const entry_spec *entries, size_t n,
 #if CX_EXACT
     {
         size_t j;
+        char why[512];
         for (j = 0; j < n; j++) {
-            const entry_t *E = &entries[j].E;
-            const value_t *v = &E->value;
-            char buf[CX_RAT_TEXT];
-            unsigned k, s;
-            put(t, "entry %llu %s\n", (unsigned long long)j,
-                METHOD_NAME[E->method]);
-            put(t, "kind %s\n", KINDS[METHOD_KIND[E->method]]);
-            put(t, "uses %llu\n", (unsigned long long)E->uses);
-            if (E->has_lane)
-                put(t, "scope lane %llu\n", (unsigned long long)E->lane);
-            else
-                put(t, "scope max-lanes\n");
-            if (E->method == M_DRIFT) {
-                put(t, "quantity %s terms %u\n", entries[j].label_s,
-                    E->n_terms);
-                for (k = 0; k < E->n_terms; k++) {
-                    rat_text(&E->terms[k].coef, buf);
-                    put(t, "term %s", buf);
-                    for (s = 0; s < E->terms[k].n; s++)
-                        put(t, " s%llu",
-                            (unsigned long long)E->terms[k].slot[s]);
-                    put(t, "\n");
-                }
-            }
-            if (v->form == V_EXACT) {
-                rat_text(&v->exact, buf);
-                put(t, "value exact %s\n", buf);
-            } else if (v->form == V_ROUNDED) {
-                put(t, "value rounded %s %s ", FMT[v->fmt].name,
-                    RND_NAME[v->rnd]);
-                put_element(t, v->fmt, v->bits, arith);
-                put(t, "\n");
-            } else {
-                put(t, "value enclosed %s ", FMT[v->fmt].name);
-                put_element(t, v->fmt, v->lo, arith);
-                put(t, " ");
-                put_element(t, v->fmt, v->hi, arith);
-                put(t, "\n");
-            }
+            const char *e = cw_entry_lines(t, j, &entries[j].E,
+                                           entries[j].label_s, arith, why,
+                                           sizeof why);
+            if (e && !strcmp(e, "output"))
+                lines_ok(e);            /* a line that cannot be formatted */
+            if (e)
+                refuse(e, "%s could not be made", why);
         }
     }
 #else
@@ -2043,8 +1815,7 @@ static int do_hash(const char *kind, const char *file, const uint8_t *salt)
         if (which == 3)
             state_hash(salt, bytes, n, hex);
         else
-            tagged_hash(salt, stream_tag(which), TAG_STREAM_LEN, bytes, n,
-                        hex);
+            stream_hash(salt, which, bytes, n, hex);
         free(bytes);
     }
     printf("%s\n", hex);
@@ -2284,7 +2055,7 @@ int main(int argc, char **argv)
      * created at all, since --states must not exist yet - so the
      * certificate can never be one of the boundary files. */
     CERT_PATH = out_path;
-    CERT_FP = create_new(out_path);
+    CERT_FP = cw_create_new(out_path);
     if (!CERT_FP) {
         if (errno == EEXIST)
             refuse("output", "--out %s is there already; the certificate is "
@@ -2383,7 +2154,7 @@ int main(int argc, char **argv)
                    "differently from this tool", (unsigned long)r,
                    R->image_path);
         sha256_of(R->img, R->img_bytes, digest);
-        hex_of(digest, 32, R->image_digest);
+        cw_hex(digest, 32, R->image_digest);
         /* the library holds its own copy of the image (cft_program_load),
          * and the certificate needs only its digest */
         free(R->img);
@@ -2391,7 +2162,7 @@ int main(int argc, char **argv)
         st = cft_program_digest(R->prog, bank, R->bank_bytes, digest);
         if (st != CFT_OK)
             refuse_st("device", "cft_program_digest", st);
-        hex_of(digest, 32, R->program_digest);
+        cw_hex(digest, 32, R->program_digest);
     }
     identify(dev, &caps, &id);
     snprintf(LAST_BEFORE, sizeof LAST_BEFORE, "%s", cft_last_error());
@@ -2424,8 +2195,8 @@ int main(int argc, char **argv)
         R->init = NULL;
 
         for (s = 0; s < 3; s++)
-            tagged_hash(salt, stream_tag(s), TAG_STREAM_LEN, zero,
-                        R->lanes * R->esz, R->stream_hash[s]);
+            stream_hash(salt, s, zero, R->lanes * R->esz,
+                        R->stream_hash[s]);
         write_boundary(r, 0, cur, R->state_bytes);
         state_hash(salt, cur, R->state_bytes, R->hash[0]);
 
@@ -2497,18 +2268,13 @@ int main(int argc, char **argv)
 #endif
 
     /* ---- the certificate ------------------------------------------------- */
+    /* the lines are cert_write.h's (the header's identity lines, a run
+     * block's head, each segment line, `end` and the hash line), shared
+     * with cft-orbits; the runs' own lines between them are this tool's */
     put(&body, "cft-certificate 1\n");
-    put(&body, "mode %s\n", salt ? "keyed" : "open");
-    if (salt) {
+    if (salt)
         salt_commitment(salt, commitment);
-        put(&body, "salt-commitment %s\n", commitment);
-    }
-    put(&body, "build-id %s\n", id.build_id);
-    put(&body, "backend %s\n", id.backend);
-    put(&body, "device-xclbin %s\n", id.xclbin);
-    put(&body, "device-version %s\n", id.version);
-    put(&body, "device-caps %s\n", id.caps);
-    put(&body, "device-tiles %s\n", id.tiles);
+    lines_ok(cw_identity_lines(&body, salt ? commitment : NULL, &id));
     put(&body, "runs %llu\n", (unsigned long long)n_runs);
     for (r = 0; r < n_runs; r++) {
         run_spec *R = &runs[r];
@@ -2523,14 +2289,10 @@ int main(int argc, char **argv)
             put(&body, "run %llu %s\n", (unsigned long long)r,
                 KIND_NAME[R->kind]);
         }
-        put(&body, "program-format %s\n", FORMAT_NAME[R->H.prec]);
-        put(&body, "program-image %s\n", R->image_digest);
-        put(&body, "program-digest %s\n", R->program_digest);
-        put(&body, "lanes %llu\n", (unsigned long long)R->lanes);
-        put(&body, "steps %llu\n", (unsigned long long)R->steps);
-        put(&body, "stream-a %s\n", R->stream_hash[0]);
-        put(&body, "stream-b %s\n", R->stream_hash[1]);
-        put(&body, "stream-c %s\n", R->stream_hash[2]);
+        lines_ok(cw_run_head(&body, FORMAT_NAME[R->H.prec], R->image_digest,
+                             R->program_digest, R->lanes, R->steps,
+                             R->stream_hash[0], R->stream_hash[1],
+                             R->stream_hash[2]));
         put(&body, "parameters %llu\n", (unsigned long long)R->n_param_s +
             (SCRATCH_DEPTH ? 1u : 0u));
         {
@@ -2555,16 +2317,22 @@ int main(int argc, char **argv)
         }
         put(&body, "segments %llu\n", (unsigned long long)R->segments);
         for (k = 0; k < R->segments; k++)
-            put(&body, "segment %llu start %s end %s flags %u status %u\n",
-                (unsigned long long)k, R->hash[k], R->hash[k + 1],
-                (unsigned)R->flags[k], (unsigned)R->status[k]);
+            lines_ok(cw_segment_line(&body, k, R->hash[k], R->hash[k + 1],
+                                     R->flags[k], R->status[k]));
         put(&body, "output %s\n", R->hash[R->segments]);
     }
     put_accuracy(&body, entries, n_entries, arith);
-    put(&body, "end\n");
-    sha256_of(body.p, body.n, digest);
-    hex_of(digest, 32, hex);
-    put(&body, "hash %s\n", hex);
+    {
+        /* `end` and the hash line, SHA-256 of the body before it, whose
+         * 64 digits the report prints */
+        const char *why = cw_finish(&body);
+        if (why && !strcmp(why, "device"))
+            refuse("device", "cft_sha256, hashing the body: %s",
+                   cft_last_error());
+        lines_ok(why);
+        memcpy(hex, body.p + body.n - 65, 64);
+        hex[64] = 0;
+    }
 
     if (fwrite(body.p, 1, body.n, CERT_FP) != body.n)
         refuse("output", "a short write to %s", out_path);

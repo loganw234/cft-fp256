@@ -922,7 +922,9 @@ clean: clean-orbits
 # tools/cert_write.h, the certificate's encoding (certified runs,
 # docs/ORBITS.md), is included, not compiled beside it: the tool stays
 # one source file, as fuzz/run_ckpt.sh and docs/DEMOS.md build it.
-cft-orbits$(EXE): tools/orbits.c libcft.a tools/cert_write.h src/sha256.h
+cft-orbits$(EXE): tools/orbits.c libcft.a tools/cert_write.h \
+                  tools/cert_exact.h src/sha256.h src/bigint.h \
+                  include/cft_config.h
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/orbits.c libcft.a -o $@ \
 		$(XRTLIBS)
 
@@ -1203,8 +1205,8 @@ all: cft-segrun$(EXE)
 clean: clean-segrun
 .PHONY: segruntest clean-segrun
 
-cft-segrun$(EXE): tools/segrun.c tools/cert_exact.h libcft.a src/bigint.h \
-                  include/cft_config.h
+cft-segrun$(EXE): tools/segrun.c tools/cert_exact.h tools/cert_write.h \
+                  libcft.a src/bigint.h include/cft_config.h
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/segrun.c libcft.a -o $@ \
 		$(XRTLIBS)
 

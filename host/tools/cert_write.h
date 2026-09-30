@@ -11,13 +11,15 @@
  *     the hash line over the body;
  *   - a file created new, never over one that is there.
  *
- * One copy for every writer. cft-orbits' certified runs (host/tools/
- * orbits.c, docs/ORBITS.md "Certified runs") write with it. It was taken
- * from cft-segrun's own code (host/tools/segrun.c), which moves onto it in
- * the steps-5-and-6 round's second phase, once that round's parcel S1 has
- * merged (docs/ROADMAP.md). Until then segrun.c keeps the copy this was
- * taken from, and neither may change a byte of what the other writes: the
- * gates hold both to the golden writer (cert.py's encode).
+ * One copy for every writer: cft-segrun (host/tools/segrun.c) and
+ * cft-orbits' certified runs (host/tools/orbits.c, docs/ORBITS.md
+ * "Certified runs") write with it. It was taken from cft-segrun's own
+ * code in the steps-5-and-6 round (docs/ROADMAP.md; parcel S3,
+ * 2026-09-30) - an entry's lines among it, which were segrun's
+ * put_accuracy (parcel S1) - and segrun.c keeps no copy. The gates hold
+ * both writers to the golden writer (cert.py's encode), byte for byte:
+ * host/tests/segrun_check.py, certificates/corpus.py and
+ * host/tests/orbits_check.py's [8].
  *
  * Nothing here prints, and nothing exits. A function that can fail returns
  * NULL, or the NAME a writer refuses by - the page's (`malformed`) or the
@@ -50,6 +52,10 @@
 #endif
 
 #include "cft.h"
+/* The accuracy entries' definitions and exact arithmetic, shared by the
+ * writers and cft-audit (parcel S1, 2026-09-30): an entry's lines below
+ * spell its terms and value from cert_exact.h's entry_t. */
+#include "cert_exact.h"
 
 /* The body's text is a printf format; mingw-w64 names the archetype its
  * stdio really is, and elsewhere it is printf. */
@@ -298,41 +304,57 @@ typedef struct {
     size_t n, cap;
 } cw_text;
 
-/* One formatted piece, appended; the text stays NUL-terminated. */
-static inline const char *cw_put(cw_text *t, const char *fmt, ...)
-    CW_PRINTF_LIKE(2, 3);
-
-static inline const char *cw_put(cw_text *t, const char *fmt, ...)
+/* One formatted piece, appended; the text stays NUL-terminated. It grows
+ * as cft-segrun's text always grew, from 4,096 bytes doubled, which its
+ * trial of what the runs need counts on (segrun.c, try_runs). */
+static inline const char *cw_vput(cw_text *t, const char *fmt, va_list ap)
 {
-    va_list ap;
+    va_list again;
     int len;
-    va_start(ap, fmt);
+    va_copy(again, ap);
     len = vsnprintf(NULL, 0, fmt, ap);
-    va_end(ap);
-    if (len < 0)
+    if (len < 0) {
+        va_end(again);
         return "output";
+    }
     if (t->n + (size_t)len + 1 > t->cap) {
         size_t cap = t->cap ? t->cap : 4096;
         char *grown;
         while (t->n + (size_t)len + 1 > cap) {
-            if (cap > (size_t)-1 / 2)
+            if (cap > (size_t)-1 / 2) {
+                va_end(again);
                 return "memory";
+            }
             cap *= 2;
         }
         grown = (char *)calloc(cap, 1);
-        if (!grown)
+        if (!grown) {
+            va_end(again);
             return "memory";
+        }
         if (t->n)
             memcpy(grown, t->p, t->n);
         free(t->p);
         t->p = grown;
         t->cap = cap;
     }
-    va_start(ap, fmt);
-    vsnprintf(t->p + t->n, (size_t)len + 1, fmt, ap);
-    va_end(ap);
+    vsnprintf(t->p + t->n, (size_t)len + 1, fmt, again);
+    va_end(again);
     t->n += (size_t)len;
     return NULL;
+}
+
+static inline const char *cw_put(cw_text *t, const char *fmt, ...)
+    CW_PRINTF_LIKE(2, 3);
+
+static inline const char *cw_put(cw_text *t, const char *fmt, ...)
+{
+    va_list ap;
+    const char *why;
+    va_start(ap, fmt);
+    why = cw_vput(t, fmt, ap);
+    va_end(ap);
+    return why;
 }
 
 static inline void cw_text_free(cw_text *t)
@@ -403,6 +425,113 @@ static inline const char *cw_finish(cw_text *t)
     cw_hex(d, 32, hex);
     return cw_put(t, "hash %s\n", hex);
 }
+
+/* ---- an accuracy entry's lines ----------------------------------------
+ *
+ * After `accuracy <A>`, which is the caller's, each entry's lines in the
+ * page's order and spellings (cert._body_lines): `entry`, `kind`, `uses`,
+ * `scope`, a drift's `quantity` and each `term`, and `value`. They were
+ * cft-segrun's put_accuracy (parcel S1), taken whole. A build whose
+ * bigint cannot hold an exact value (cert_exact.h, CX_EXACT 0) has no
+ * entries to spell, and refuses one by its own name before it gets here. */
+#if CX_EXACT
+
+/* An element as the certificate spells one: its bits in width/4 hex
+ * digits, a space, and its exact decimal - cft_to_decimal_char at 0
+ * digits on `arith`, a software handle, as cft-audit holds it. */
+static inline const char *cw_element(cw_text *t, int f, const uint8_t *le,
+                                     cft_device *arith, char *why,
+                                     size_t cap)
+{
+    size_t i, len = 0;
+    uint32_t fl = 0;
+    char *dec;
+    const char *e = NULL;
+    cft_status st;
+    for (i = ESZ(f); !e && i-- > 0;)
+        e = cw_put(t, "%02x", le[i]);
+    if (e)
+        return e;
+    st = cft_to_decimal_char(arith, (cft_format)f, CFT_RNE, le, 0, NULL, 0,
+                             &len, &fl);
+    if (st != CFT_ERR_INVALID_ARGUMENT || len == 0) {
+        snprintf(why, cap, "cft_to_decimal_char, sizing an accuracy value's "
+                 "decimal: %s", cft_strerror(st));
+        return "device";
+    }
+    dec = (char *)calloc(len, 1);
+    if (!dec) {
+        snprintf(why, cap, "an accuracy value's decimal, %lu bytes",
+                 (unsigned long)len);
+        return "memory";
+    }
+    st = cft_to_decimal_char(arith, (cft_format)f, CFT_RNE, le, 0, dec, len,
+                             &len, &fl);
+    if (st != CFT_OK) {
+        free(dec);
+        snprintf(why, cap, "cft_to_decimal_char, an accuracy value's "
+                 "decimal: %s", cft_strerror(st));
+        return "device";
+    }
+    e = cw_put(t, " %s", dec);
+    free(dec);
+    return e;
+}
+
+/* Entry j's lines; `label` is a drift's quantity's name. */
+static inline const char *cw_entry_lines(cw_text *t, uint64_t j,
+                                         const entry_t *E, const char *label,
+                                         cft_device *arith, char *why,
+                                         size_t cap)
+{
+    const value_t *v = &E->value;
+    char buf[CX_RAT_TEXT];
+    unsigned k, s;
+    const char *e;
+    snprintf(why, cap, "entry %llu's lines", (unsigned long long)j);
+    e = cw_put(t, "entry %llu %s\nkind %s\nuses %llu\n", (unsigned long long)j,
+               METHOD_NAME[E->method], KINDS[METHOD_KIND[E->method]],
+               (unsigned long long)E->uses);
+    if (!e)
+        e = E->has_lane ? cw_put(t, "scope lane %llu\n",
+                                 (unsigned long long)E->lane)
+                        : cw_put(t, "scope max-lanes\n");
+    if (!e && E->method == M_DRIFT) {
+        e = cw_put(t, "quantity %s terms %u\n", label, E->n_terms);
+        for (k = 0; !e && k < E->n_terms; k++) {
+            rat_text(&E->terms[k].coef, buf);
+            e = cw_put(t, "term %s", buf);
+            for (s = 0; !e && s < E->terms[k].n; s++)
+                e = cw_put(t, " s%llu",
+                           (unsigned long long)E->terms[k].slot[s]);
+            if (!e)
+                e = cw_put(t, "\n");
+        }
+    }
+    if (e)
+        return e;
+    if (v->form == V_EXACT) {
+        rat_text(&v->exact, buf);
+        return cw_put(t, "value exact %s\n", buf);
+    }
+    if (v->form == V_ROUNDED) {
+        e = cw_put(t, "value rounded %s %s ", FMT[v->fmt].name,
+                   RND_NAME[v->rnd]);
+        if (!e)
+            e = cw_element(t, v->fmt, v->bits, arith, why, cap);
+        return e ? e : cw_put(t, "\n");
+    }
+    e = cw_put(t, "value enclosed %s ", FMT[v->fmt].name);
+    if (!e)
+        e = cw_element(t, v->fmt, v->lo, arith, why, cap);
+    if (!e)
+        e = cw_put(t, " ");
+    if (!e)
+        e = cw_element(t, v->fmt, v->hi, arith, why, cap);
+    return e ? e : cw_put(t, "\n");
+}
+
+#endif /* CX_EXACT */
 
 /* ---- files ----------------------------------------------------------- */
 
