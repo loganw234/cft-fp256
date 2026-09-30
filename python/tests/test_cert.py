@@ -3337,9 +3337,11 @@ def _blocky_start(n=130):
 
 def test_the_audit_re_runs_a_segment_in_blocks_of_64_lanes():
     """The golden audit re-runs a segment BLOCK_LANES lanes at a time
-    (cert.run_segment), as libcft and the tile do, so that a re-run holds
-    one block's scratch at the certified depth, not every lane's (the
-    lead's decision, 2026-09-29). By P3 (docs/SEQUENCER.md) that is the
+    (cert.run_segment), as libcft's software backend does (the tile's
+    block is LATENCY beats of a format's lanes, and no verdict depends
+    on a block's size), so that a re-run holds one block's scratch at the
+    certified depth, not every lane's (the lead's decision, 2026-09-29).
+    By P3 (docs/SEQUENCER.md) that is the
     dense run exactly. Held here at a depth past 256, over three blocks
     (64, 64 and 2 lanes) of a strict program, each block raising a flag
     or a STATUS bit no other raises, and the last leaving its loop early:

@@ -534,14 +534,15 @@ the golden auditor does, 64 lanes to a block as libcft's software
 backend does (`cert.run_segment`; the lead's decision, 2026-09-29). The
 tile's block is LATENCY beats of a format's lanes - 128 lanes at fp32,
 64 at fp64, 32 at fp128 and 16 at fp256 (docs/SEQUENCER.md) - and no
-verdict depends on a block's size. Each block is the same run over its own lanes' streams and
-start state. The end state is the blocks' end states in lane order, and
-the flag word and STATUS are the OR of the blocks'. This is the dense
-run exactly. Lanes share nothing but the early exit, which is invisible
-(docs/SEQUENCER.md, P3): every write and every flag is masked by the
-lane's active bit, which is also what lets lanes be split across tiles.
-It is done so that a re-run holds one block's scratch at the certified
-depth, not every lane's (see "What an audit spends").
+verdict depends on a block's size. Each block is the same run over its
+own lanes' streams and start state. The end state is the blocks' end
+states in lane order, and the flag word and STATUS are the OR of the
+blocks'. This is the dense run exactly. Lanes share nothing but the
+early exit, which is invisible (docs/SEQUENCER.md, P3): every write and
+every flag is masked by the lane's active bit, which is also what lets
+lanes be split across tiles. It is done so that a re-run holds one
+block's scratch at the certified depth, not every lane's (see "What an
+audit spends").
 
 **A program is a segment** when its whole state travels through the
 scratch block and nothing else comes out:
@@ -1231,8 +1232,8 @@ The controls cover:
   - a segment computed 64 lanes at a time: its end state, flag word and
     STATUS equal to the dense run's, at a depth past 256, over three
     blocks, each raising a flag or a STATUS bit no other raises, the
-    last leaving its loop early; and one block's scratch held at a time (256
-    one-slot lanes at 32,768 peak under 24 MiB);
+    last leaving its loop early; and one block's scratch held at a time
+    (256 one-slot lanes at 32,768 peak under 24 MiB);
   - a rational's digits held to the width rule before its terms: a long
     token not in lowest terms is `width`, a short one `malformed`, and
     the digits' edge at 256 hex digits, 7 and 8;
@@ -1631,8 +1632,9 @@ round, 2026-09-29):
     depth it states.
 - The two depths end on other states, so the leg holds 256 against
   every deeper depth, not only the line. It does not tell 2,048 from
-  the depths above 512: the program reads slot 256 and writes 258, so
-  every depth from 512 up computes the same chain. A tool that runs at
+  any other depth of 512 or more: the program writes slots 0 and 1 only
+  and reads slot 256, which nothing writes at any depth from 512 up, so
+  each computes the same chain. A tool that runs at
   4,096 while stating 2,048 passes it, and the corpus's depth case too
   (verifier-A2's plant T3). A known limit.
 - lorenz63-rk4's main, half-step and wider runs at 2,048 state the
