@@ -412,6 +412,15 @@ void cft_sw_seq_caps(cft_seq_caps *out);
  * something was unsupported. Cleared the moment anything reaches a
  * backend, so it never explains someone else's failure.
  *
+ * cft_clear_error empties it for an entry point that reaches no backend
+ * and must still never show an earlier call's sentence: cft_program_load
+ * clears it on entry (2026-09-30), and every refusal it makes then
+ * writes a sentence of its own, so what a refused load leaves in
+ * cft_last_error() is that load's reason and nobody else's. Its own
+ * function rather than cft_set_error(""), which is -Wformat-zero-length,
+ * and rather than device.c's backend_call(), which is static and is
+ * compiled only where a device backend is.
+ *
  * Every CFT_ERR_UNSUPPORTED this library returns goes through one of
  * these, because a refusal without a sentence leaves cft_last_error()
  * empty - or worse, still holding the previous failure's - at exactly
@@ -441,6 +450,7 @@ void cft_sw_seq_caps(cft_seq_caps *out);
  *                            (`needs`, named as its CFT_ opcode) that
  *                            this device lacks at `fmt` */
 void cft_set_error(const char *fmt, ...);
+void cft_clear_error(void);
 int  cft_seq_cap_refusal(const char *field, unsigned long asked,
                          unsigned long cap, const char *units,
                          const char *caps_field);

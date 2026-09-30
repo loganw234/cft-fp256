@@ -390,7 +390,9 @@ CFT_BN_LIMBS=64 (see cft_config.h)"
  * refusal helpers, a CFT_TINY build compiles 31 call sites that write
  * one and a default build 83. CFT_NO_PROGRAM removes the sequencer's
  * - program.c's 44 and the two on device.c's program route for an
- * indexed operand - and no others.
+ * indexed operand - and no others. program.c's own count has moved
+ * since: 47 at 76e2984 (2026-09-30), and 79 once every refusal in the
+ * program-load path was given a sentence that day.
  *
  * The tiny profile drops the slot anyway, to save RAM: 320 bytes is
  * sixteen percent of an ATmega328P's two kilobytes, and the vsnprintf

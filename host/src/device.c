@@ -1060,6 +1060,14 @@ CFT_API void cft_close(cft_device *dev)
  * load would go on explaining a run that failed for another reason
  * ten calls later.
  *
+ * The other direction needed the same rule, and until 2026-09-30 a
+ * load did not have it: cft_program_load reaches no backend, so nothing
+ * cleared the slot, and a refusal it made without a sentence printed
+ * the last call's - "cft_run_ex: idx_a[128] = 4294967294 is at or past
+ * the 256 elements ...", measured by P2 of the revision-7 round. It now
+ * calls cft_clear_error() on entry and writes a sentence at every
+ * refusal it makes.
+ *
  * Its producers are the library's refusals by name - this file's,
  * program.c's, and the other modules' through the helpers backend.h
  * declares; cft_program_load's capacity refusal was the first
@@ -1086,6 +1094,13 @@ void cft_set_error(const char *fmt, ...)
 #else
     (void)fmt;
 #endif
+}
+
+/* backend.h says who calls it. In every build, and at every
+ * CFT_ERRMSG_MAX: at 1 the slot is that one byte, already empty. */
+void cft_clear_error(void)
+{
+    g_msg[0] = '\0';
 }
 
 #if defined(CFT_ENABLE_XRT) || !defined(CFT_NO_REMOTE)
