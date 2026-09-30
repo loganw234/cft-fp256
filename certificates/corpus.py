@@ -8,7 +8,8 @@ docs/CERTIFICATES.md, "Golden certificates", is its manual.
                                         [--seed HEX] [--keep DIR]
     python certificates/corpus.py make  --tool host/cft-segrun[.exe]
 
-`make -C host corpustest` runs `check` with the tree's cft-segrun.
+`make -C host corpustest` runs `check` with the tree's cft-segrun, and
+verify/run.sh's `programs` stage runs that, beside segruntest.
 
 WHY IT EXISTS. host/tests/segrun_check.py holds cft-segrun and the golden
 writer to EACH OTHER, from states made fresh, so a change that moves both

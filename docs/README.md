@@ -1,9 +1,9 @@
 # The documents, by what you open them for
 
-Thirty-eight files, 56,450 lines. Flat in one directory they look like one
+Thirty-eight files, 56,452 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **20,524 lines you consult while working** — the three under *Start here*,
+- **20,526 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,237 lines of tool manual**, one per shipped program;
 - **1,993 lines of operations**, read when you are about to do something to
@@ -48,7 +48,7 @@ product, not the implementation.
 | [SEQUENCER.md](SEQUENCER.md) | 3,354 | The orbit sequencer and the program model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 898 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
-| [CERTIFICATES.md](CERTIFICATES.md) | 1,726 | The certificate, version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Complete enough to write a reader and an auditor from the page. And the segment runner, `cft-segrun`, that writes one from the library, and the golden certificates in `certificates/` that hold both writers to committed bytes. |
+| [CERTIFICATES.md](CERTIFICATES.md) | 1,728 | The certificate, version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Complete enough to write a reader and an auditor from the page. And the segment runner, `cft-segrun`, that writes one from the library, and the golden certificates in `certificates/` that hold both writers to committed bytes. |
 
 ## Reference you call into
 

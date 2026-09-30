@@ -1211,8 +1211,8 @@ clean-segrun:
 #
 # segruntest holds the tool and the golden writer to each other, so a
 # change that moves both at once passes it; this holds both to bytes
-# that do not move. Which runner stage runs it is the lead's, decided
-# at integration (2026-09-29).
+# that do not move. verify/run.sh's `programs` stage runs it, beside
+# segruntest (the lead's decision, 2026-09-29).
 # ===================================================================
 .PHONY: corpustest
 corpustest: cft-segrun$(EXE)

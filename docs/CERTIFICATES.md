@@ -1613,7 +1613,9 @@ Paths are from the repository's root.
   any departure. Another gate may import it.
 
 **As a regression test.** `make -C host corpustest` runs `corpus.py check
---tool ./cft-segrun`. For each case it holds:
+--tool ./cft-segrun`, and verify/run.sh's `programs` stage runs it beside
+the segment runner's gate (the lead's decision, 2026-09-29). For each
+case it holds:
 1. every file against its SHA-256, and no file under `certificates/` that
    the manifest does not name, so an edited or added file fails by its
    name;
@@ -1642,7 +1644,7 @@ Paths are from the repository's root.
    its seed printed;
 7. the case named `example` being this page's example certificate.
 
-It is 156 checks, 23 to 27 s on the Windows desktop, niced
+It is 156 checks, 23 to 28 s on the Windows desktop, niced
 (2026-09-29).
 
 **Changing it.** A change that moves any byte of the corpus fails the

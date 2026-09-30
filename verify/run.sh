@@ -968,8 +968,17 @@ stage seq "the sequencer: C vs model over fuzzed programs, plain and with indexe
 # stage count, which CLAUDE.md states; the gate is about the library's
 # programs, so it lives here. -k, so a failing asmtest still lets the
 # certificate gate report.
+#
+# Then the golden certificates (host/Makefile's corpustest,
+# certificates/corpus.py; docs/CERTIFICATES.md, "Golden certificates"):
+# a committed corpus of twelve programs and their certificates, each made
+# again by the golden writer and by cft-segrun and held to its committed
+# bytes, and audited. segruntest holds the two writers to each other, so
+# a change that moves both at once passes it; this one does not. It
+# joined this stage beside segruntest by the lead's decision (2026-09-29),
+# about 25 s of it on the desktop.
 do_programs() {
-  HOSTMAKE -k collatz asmtest segruntest PYTHON="$PYBIN"
+  HOSTMAKE -k collatz asmtest segruntest corpustest PYTHON="$PYBIN"
 }
 # Not mpmath: programs/check.py needs it only for the ODE rows' 300-digit
 # arm, which it skips by name - an inner skip this runner counts on the
@@ -977,7 +986,7 @@ do_programs() {
 # other check with it, the stdlib-only textbook arm included
 # (verifier-V3, 2026-09-25).
 need host-cc python
-stage programs "the program library: both assemblers against the MANIFEST, the readback, the generated corpora, and every row's own check; then cft-segrun's certificates of the ODE rows, byte for byte the golden writer's, audited" -- do_programs
+stage programs "the program library: both assemblers against the MANIFEST, the readback, the generated corpora, and every row's own check; then cft-segrun's certificates of the ODE rows, byte for byte the golden writer's, audited; then the golden certificates, both writers held to committed bytes" -- do_programs
 
 # reduce_check.py holds the model's partition tree to the C partitioner
 # through host/reduce-parts, and SKIPs that half by name when the binary
