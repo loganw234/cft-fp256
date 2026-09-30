@@ -106,15 +106,20 @@ TOOLS = {
 # stopped at 37 - part way through interval 2, two intervals closed - so
 # the seed's `cert` block carries segment lines and flags so far. The
 # resume runs to the end and writes the certificate; `cert` names the
-# mode, and one_tool adds --cert, --cert-states and the salt choice.
+# mode, and one_tool adds --cert, --cert-states and the salt choice. The
+# keyed one also writes the angular momentum's drift entry, so its seed
+# says `cert entries angular-momentum-drift` and its resumes derive it.
 _ORBITS_CERT = ["--problem", "kepler", "--format", "fp64", "--members", "4",
                 "--periods", "2", "--steps-per-period", "64",
                 "--sample-every", "16", "--rsqrt", "newton", "--engine",
                 "segments", "--batch", "3", "--quiet"]
-for _name, _mode in (("orbits-cert", "open"), ("orbits-cert-keyed", "keyed")):
+for _name, _mode, _acc in (
+        ("orbits-cert", "open", []),
+        ("orbits-cert-keyed", "keyed",
+         ["--cert-accuracy", "angular-momentum-drift"])):
     TOOLS[_name] = {"exe": "cft-orbits",
-                    "seed": _ORBITS_CERT + ["--stop-after-steps", "37"],
-                    "resume": _ORBITS_CERT, "cert": _mode}
+                    "seed": _ORBITS_CERT + _acc + ["--stop-after-steps", "37"],
+                    "resume": _ORBITS_CERT + _acc, "cert": _mode}
 
 INTERESTING = ["0", "1", "-1", "2", "7", "8", "63", "64", "65", "255",
                "256", "4294967295", "4294967296", "2147483647",

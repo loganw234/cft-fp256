@@ -726,10 +726,11 @@ static void *xcalloc(size_t n, size_t sz)
  * "Refusals"), and cft-segrun's own name and code where it has one for
  * the same condition ("The segment runner"); the rest are this tool's.
  * Each prints "cft-orbits: refused <name>: <why>" and exits with the
- * name's code. No name has 3, the flag certificate's exit, or 9, the
- * kill instrument's. A checkpoint that does not describe this run is
- * the checkpoint reader's to refuse, as it always was: a sentence, and
- * exit 2 (ckpt_read).
+ * name's code. `width` has the page's 3, which the flag certificate's
+ * exit shares; the name tells them apart. None has 9, the kill
+ * instrument's. A checkpoint that does not describe this run is the
+ * checkpoint reader's to refuse, as it always was: a sentence, and exit 2
+ * (ckpt_read).
  * =================================================================== */
 #if defined(__GNUC__)
 #  define ORB_NORETURN __attribute__((noreturn))
@@ -739,16 +740,20 @@ static void *xcalloc(size_t n, size_t sz)
 
 static const struct { const char *name; int code; } CERT_REFUSAL[] = {
     /* the page's */
-    { "malformed", 2 },
+    { "malformed", 2 }, { "width", 3 },
     { "salt-length", 4 }, { "salt-missing", 4 }, { "salt-unexpected", 4 },
     { "salt-commitment", 4 }, { "image-digest", 4 },
     { "program-digest", 4 }, { "program-image", 4 }, { "state-shape", 4 },
     { "state-hash", 4 }, { "state-missing", 4 },
+    { "accuracy-run", 7 }, { "accuracy-scope", 7 }, { "accuracy-slot", 7 },
+    { "accuracy-finite", 7 },
     /* what this tool cannot certify, and why is in the sentence */
     { "rsqrt-exact", 64 }, { "engine", 64 }, { "step-halving", 64 },
     { "wider", 64 }, { "energy-drift", 64 },
-    /* the tool's own: cft-segrun's usage, device, memory and output */
+    /* the tool's own: cft-segrun's usage, device, memory, output and
+     * build-width */
     { "usage", 64 }, { "device", 69 }, { "memory", 71 }, { "output", 73 },
+    { "build-width", 78 },
     /* a resume on another build or device than the certificate names */
     { "identity", 78 },
 };
@@ -1229,6 +1234,17 @@ typedef struct {
     uint8_t     *c_state;             /* one boundary, lane-major */
     size_t       c_state_bytes;
     int          c_written;           /* the certificate is at CERT */
+    /* --cert-accuracy angular-momentum-drift: a drift entry for each
+     * component of the angular momentum, over run 0, the maximum over its
+     * lanes, exact (cert_entries) */
+    int          c_angmom;
+    unsigned     c_n_entries;
+#if CX_EXACT
+    entry_t      c_entries[3];
+    term_t      *c_terms;             /* each entry's, 2 a body */
+    rat          c_q[3];              /* each entry's value, derived */
+#endif
+    const char  *c_labels[3];
 } runstate;
 
 /* ---- chunked library calls ---------------------------------------
@@ -1855,10 +1871,13 @@ enum { SR_X = 19, SR_Y, SR_W, SR_E, SR_Z, SR_G, SR_T1, SR_V };
  * CFT_SEGRUN_PLANT does for cft-segrun: `flags-unreadable`, the device
  * taken to be one that cannot read the sticky flags (refused `device`
  * before anything is made); `flags-unwritten`, each segment's flag word
- * taken to be left unwritten by the library (refused `device`); and
+ * taken to be left unwritten by the library (refused `device`);
  * `flags-wide`, each word gaining bit 5, past the five sticky flags
- * (refused `malformed`). Announced on stderr; refused where there is no
- * --cert. */
+ * (refused `malformed`); and `width`, the first angular-momentum term's
+ * coefficient taken times 2^-1000, so that its first product is past the
+ * width rule (refused `width`, as the golden writer refuses the same
+ * entry). Announced on stderr; refused where there is no --cert, and
+ * `width` where there is no --cert-accuracy. */
 static int NEGCTL_TRANSPOSE = 0, NEGCTL_ZERO_R2 = 0, NEGCTL_UNCAPPED = 0;
 static int NEGCTL_LATE_STOP = 0, NEGCTL_OVERLONG = 0, NEGCTL_APPEND = 0;
 static int NEGCTL_FLUSH_LATE = 0, NEGCTL_DROP_FLAGS = 0;
@@ -2584,6 +2603,168 @@ static void cert_close(runstate *R)
     cert_boundary(R, R->sample);
 }
 
+/* ---- the accuracy entries: the angular momentum's drift ----------------
+ *
+ * L = sum over bodies b of m_b (q_b x v_b) is a polynomial in the state,
+ * so version 1 carries its drift exactly (docs/CERTIFICATES.md, "Accuracy
+ * entries"): one `drift` entry for each component - x, y and z for the
+ * outer system, z alone for the planar Kepler problem - over run 0, the
+ * maximum over its lanes of |L(final) - L(initial)|, exact, labelled
+ * angular-momentum-<component>. Component k's terms, body by body:
+ * m_b q_(k+1) v_(k+2), then -m_b q_(k+2) v_(k+1), the indices mod 3; each
+ * coefficient is the exact value of the mass the run computed with, and 1
+ * for Kepler's test particle, whose L the tool reports as q0 v1 - q1 v0.
+ * So the quantity is the one invariants() sums, in exact arithmetic. Its
+ * drift is docs/ORBITS.md's "angular-momentum certificate": both schemes
+ * conserve L exactly, so what moves it is the arithmetic alone. Every
+ * value is cert_exact.h's, as cft-segrun and cft-audit compute every
+ * entry, held to the width rule at each step and refused `width` by name
+ * past it (the lead's conditions, 2026-09-30). */
+#if CX_EXACT
+static int PLANT_WIDTH = 0;           /* CFT_ORBITS_CERT_PLANT=width */
+
+/* A cert_exact.h status, refused by its name, the page's; one that is no
+ * verdict is an internal error, as cft-segrun's is. */
+static void cert_cx(int st, const char *why)
+{
+    const char *name = cx_name(st);
+    if (st == CX_OK)
+        return;
+    if (st == CX_LIBRARY)
+        refuse("device", "the library failed an accuracy value's rounding: "
+               "%s", why);
+    if (!name) {
+        fprintf(stderr, "cft-orbits: internal error: %s\n", why);
+        exit(70);
+    }
+    refuse(name, "%s", why);
+}
+
+/* The entries' definitions, before anything runs: their terms, and
+ * cert.derive's checks of them against the run (cx_entry_check). */
+static void cert_entries(runstate *R)
+{
+    static const char *const LABEL[3] = {
+        "angular-momentum-x", "angular-momentum-y", "angular-momentum-z"
+    };
+    const fmt_info *fi = R->fi;
+    int f = (int)fi->fmt, nb = R->nb, k, b;
+    unsigned n = 0, j;
+    char why[512];
+    cx_run m;
+
+    R->c_terms = (term_t *)calloc((size_t)(3 * 2 * nb), sizeof(term_t));
+    if (!R->c_terms)
+        refuse("memory", "the accuracy entries' terms could not be "
+               "allocated");
+    for (k = R->nd == 2 ? 2 : 0; k < 3; k++) {
+        int k1 = (k + 1) % 3, k2 = (k + 2) % 3;
+        entry_t *E = &R->c_entries[n];
+        term_t *T = R->c_terms + (size_t)n * 2 * nb;
+        memset(E, 0, sizeof *E);
+        E->method = M_DRIFT;
+        E->uses = 0;
+        E->has_lane = 0;
+        E->n_terms = (unsigned)(2 * nb);
+        E->terms = T;
+        E->value.form = V_EXACT;
+        for (b = 0; b < nb; b++) {
+            uint8_t one[MAX_ESZ];
+            const uint8_t *mass = R->c_m[b];     /* its first element */
+            char what[64];
+            if (R->O->problem == PROB_KEPLER) {
+                val_from_i64(fi, 1, one);
+                mass = one;
+            }
+            snprintf(what, sizeof what, "body %d's mass", b);
+            cert_cx(cx_exact(&T[2 * b].coef, f, mass, what, why, sizeof why),
+                    why);
+            T[2 * b].n = 2;
+            T[2 * b].slot[0] = (uint64_t)COMP(R, b, k1);
+            T[2 * b].slot[1] = (uint64_t)(R->ncomp + COMP(R, b, k2));
+            T[2 * b + 1] = T[2 * b];
+            T[2 * b + 1].coef.neg = !T[2 * b].coef.neg;
+            T[2 * b + 1].slot[0] = (uint64_t)COMP(R, b, k2);
+            T[2 * b + 1].slot[1] = (uint64_t)(R->ncomp + COMP(R, b, k1));
+        }
+        R->c_labels[n++] = LABEL[k];
+    }
+    R->c_n_entries = n;
+    if (PLANT_WIDTH) {
+        /* the first term's coefficient times 2^-1000: within the rule for
+         * Kepler's 1, and its first product with a state value past it */
+        rat p;
+        memset(&p, 0, sizeof p);
+        cft_bn_set_u32(&p.n, 1);
+        cft_bn_zero(&p.d);
+        cft_bn_setbit(&p.d, 1000);
+        if (rat_mul(&R->c_terms[0].coef, &R->c_terms[0].coef, &p))
+            refuse("width", "the planted coefficient is past the bigint");
+    }
+    m.kind = K_MAIN;
+    m.fmt = f;
+    m.lanes = R->O->members;
+    m.S = R->nsamples;
+    m.nslots = (uint32_t)(2 * R->ncomp);
+    for (j = 0; j < n; j++)
+        cert_cx(cx_entry_check(&R->c_entries[j], 1, &m, &m, why, sizeof why),
+                why);
+}
+
+/* Boundary b's state, read back from DIR and held to the hash the
+ * certificate carries for it, as cft-segrun reads its states back: a file
+ * another process changed is refused `output`. */
+static uint8_t *cert_read_back(runstate *R, uint64_t b)
+{
+    char name[64], h[CW_HEX];
+    char *path;
+    uint8_t *buf;
+    size_t n = 0;
+    snprintf(name, sizeof name, "run-0-boundary-%" PRIu64 ".bin", b);
+    path = cert_path_in(R->O->cert_states, name);
+    errno = 0;
+    buf = cert_slurp(path, R->c_state_bytes, &n);
+    if (!buf || n != R->c_state_bytes)
+        refuse("output", "%s cannot be read back as the %lu bytes this run "
+               "wrote there (%s): another process changed %s", path,
+               (unsigned long)R->c_state_bytes,
+               errno ? strerror(errno) : "its size", R->O->cert_states);
+    cert_ok(cw_state_hash(R->salt, buf, n, h), "a state read back");
+    if (strcmp(h, R->c_bhash[b]) != 0)
+        refuse("output", "%s is not the state this run wrote there - its "
+               "hash is not the one the certificate carries at boundary %"
+               PRIu64 ": another process changed %s", path, b,
+               R->O->cert_states);
+    free(path);
+    return buf;
+}
+
+/* Every entry's value, in the golden writer's order: each derived from
+ * the initial state and the final one, read back (cert.derive), and only
+ * then each made in its form (cert.make_value). */
+static void cert_derive(runstate *R)
+{
+    uint8_t *first = cert_read_back(R, 0);
+    uint8_t *last = cert_read_back(R, R->nsamples);
+    char why[512];
+    cx_run m;
+    unsigned j;
+    m.kind = K_MAIN;
+    m.fmt = (int)R->fi->fmt;
+    m.lanes = R->O->members;
+    m.S = R->nsamples;
+    m.nslots = (uint32_t)(2 * R->ncomp);
+    for (j = 0; j < R->c_n_entries; j++)
+        cert_cx(cx_entry_value(&R->c_entries[j], &m, &m, first, last,
+                               &R->c_q[j], why, sizeof why), why);
+    free(first);
+    free(last);
+    for (j = 0; j < R->c_n_entries; j++)
+        cert_cx(cx_value_make(DEV, &R->c_q[j], V_EXACT, 0, 0,
+                              &R->c_entries[j].value, why, sizeof why), why);
+}
+#endif /* CX_EXACT */
+
 /* What the certificate says before any segment runs: the stride's image
  * and its digests (the loader must take it: a stride past its limits is
  * refused here, with the library's sentence), the identity, the +0
@@ -2665,6 +2846,10 @@ static void cert_setup(runstate *R, const cft_caps *caps)
                " intervals, and a state of %lu bytes, could not be "
                "allocated", R->nsamples, (unsigned long)R->c_state_bytes);
     R->c_replace_from = UINT64_MAX;
+#if CX_EXACT
+    if (R->c_angmom)
+        cert_entries(R);
+#endif
 }
 
 /* A fresh certified run's files: DIR, made new, and in it the image and
@@ -2787,6 +2972,10 @@ static void cert_finish(runstate *R)
     const char *why;
     int moved;
 
+#if CX_EXACT
+    if (R->c_n_entries)
+        cert_derive(R);             /* before a byte of the text */
+#endif
     memset(&t, 0, sizeof t);
     why = cw_put(&t, "cft-certificate 1\n%sruns 1\nrun 0 main\n%s",
                  R->c_ident.p, R->c_runhead.p);
@@ -2794,10 +2983,22 @@ static void cert_finish(runstate *R)
         why = cw_segment_line(&t, k, R->c_bhash[k], R->c_bhash[k + 1],
                               R->c_flags[k], R->c_status[k]);
     if (!why)
-        why = cw_put(&t, "output %s\naccuracy 0\n", R->c_bhash[S]);
-    if (!why)
-        why = cw_finish(&t);
+        why = cw_put(&t, "output %s\naccuracy %u\n", R->c_bhash[S],
+                     R->c_n_entries);
     cert_ok(why, "the certificate's text");
+#if CX_EXACT
+    {
+        char ewhy[512];
+        unsigned j;
+        for (j = 0; j < R->c_n_entries; j++) {
+            why = cw_entry_lines(&t, j, &R->c_entries[j], R->c_labels[j], DEV,
+                                 ewhy, sizeof ewhy);
+            if (why)
+                refuse(why, "%s could not be written", ewhy);
+        }
+    }
+#endif
+    cert_ok(cw_finish(&t), "the certificate's text");
 
     if (fwrite(t.p, 1, t.n, CERT_TMP_FP) != t.n ||
         fflush(CERT_TMP_FP) != 0)
@@ -3077,6 +3278,8 @@ static void ckpt_write(runstate *R)
         char sum[65];
         ck_lines(&o, "cert ", &R->c_ident);
         ck_lines(&o, "cert ", &R->c_runhead);
+        ck_put(&o, "cert entries %s\n", R->c_angmom ? "angular-momentum-drift"
+                                                    : "none");
         ck_put(&o, "cert boundary 0 %s\n", R->c_bhash[0]);
         for (j = 0; j < R->sample; j++)
             ck_put(&o, "cert segment %" PRIu64 " start %s end %s flags %u "
@@ -3532,6 +3735,22 @@ static void ckpt_read3(runstate *R)
             ck3_cert_line(R, &cur, stop, ln[x], lnn[x]);
         }
     }
+    /* the entries the run was started to write: a certificate states one
+     * set, so a resume asks for the same */
+    val = ck3_key(&cur, stop, "cert entries", 0);
+    if (strcmp(val, "none") && strcmp(val, "angular-momentum-drift"))
+        ck3_die("`cert entries` is none or angular-momentum-drift, not "
+                "`%.40s`", val);
+    if (strcmp(val, R->c_angmom ? "angular-momentum-drift" : "none"))
+        die(R->c_angmom
+            ? "the run was certified without accuracy entries, and this "
+              "resume asks for --cert-accuracy angular-momentum-drift: a "
+              "certificate states one set of entries - resume the run as it "
+              "was started, or start it again"
+            : "the run was certified with --cert-accuracy "
+              "angular-momentum-drift, and this resume asks for none: a "
+              "certificate states one set of entries - resume the run as it "
+              "was started, or start it again");
     val = ck3_key(&cur, stop, "cert boundary", 0);
     if (!(t = ck3_tok(&val)) || strcmp(t, "0") || !ck3_hex64(val))
         ck3_die("`cert boundary 0` and the initial state's hash belong here");
@@ -4392,11 +4611,24 @@ static void report(runstate *R, double elapsed, const char *backend)
     printf("  throughput    %.0f steps/s, %.0f element-steps/s, "
            "%.0f library element-ops/s\n", steps_s, elem_s, ops_s);
     printf("  chain         %s\n", chain);
-    if (R->cert && R->c_written)
+    if (R->cert && R->c_written) {
         printf("  certificate   %s (%s, %" PRIu64 " segments of %" PRIu64
                " steps; the image and %" PRIu64 " states in %s)\n",
                O->cert_path, R->salt ? "keyed" : "open", R->nsamples,
                R->stride, R->nsamples + 1, O->cert_states);
+#if CX_EXACT
+        {
+            unsigned j;
+            for (j = 0; j < R->c_n_entries; j++) {
+                char buf[CX_RAT_TEXT];
+                rat_text(&R->c_q[j], buf);
+                printf("  accuracy %u    %s drift, the most over the members, "
+                       "exact: %.60s%s\n", j, R->c_labels[j], buf,
+                       strlen(buf) > 60 ? "..." : "");
+            }
+        }
+#endif
+    }
     else if (R->cert)
         printf("  certificate   not written yet: the run stopped at step %"
                PRIu64 " of %" PRIu64 ", and a certificate is written when "
@@ -4525,7 +4757,8 @@ static void cert_options(const options *O, uint8_t **salt)
                "so an interval is no image; certify --rsqrt newton, whose "
                "every interval is one (the exact route needs an orbit "
                "integrator in the golden model, docs/ROADMAP.md)");
-    if (O->cert_accuracy) {
+    if (O->cert_accuracy &&
+        strcmp(O->cert_accuracy, "angular-momentum-drift") != 0) {
         if (!strcmp(O->cert_accuracy, "step-halving"))
             refuse("step-halving", "a step-halving estimate needs a "
                    "half-step run on a bank whose h-slots are halved, and "
@@ -4542,9 +4775,17 @@ static void cert_options(const options *O, uint8_t **salt)
                    "not a polynomial in the state, and version 1 carries a "
                    "drift only of a polynomial (docs/CERTIFICATES.md, "
                    "\"What version 1 does not do\")");
-        refuse("usage", "--cert-accuracy takes step-halving, wider or "
-               "energy-drift, and refuses each by its name");
+        refuse("usage", "--cert-accuracy takes angular-momentum-drift, and "
+               "refuses step-halving, wider and energy-drift, each by its "
+               "name");
     }
+#if !CX_EXACT
+    if (O->cert_accuracy)
+        refuse("build-width", "this build's bigint is %d bits, and an exact "
+               "value needs %d (docs/CERTIFICATES.md, \"The width rule\"): "
+               "it writes no accuracy entry rather than one computed "
+               "narrower", (int)CFT_BN_BITS, 2 * CX_WIDTH_BITS + 1);
+#endif
     if ((O->stop_after_steps >= 0 || O->stop_after_samples >= 0) && !O->ckpt)
         refuse("usage", "--stop-after-steps and --stop-after-samples stop a "
                "certified run before its end, and it writes its certificate "
@@ -4813,26 +5054,38 @@ int main(int argc, char **argv)
         {
             const char *cp = getenv("CFT_ORBITS_CERT_PLANT");
             if (cp && *cp) {
+                int width = 0;
                 if (!strcmp(cp, "flags-unreadable"))
                     PLANT_UNREADABLE = 1;
                 else if (!strcmp(cp, "flags-unwritten"))
                     PLANT_UNWRITTEN = 1;
                 else if (!strcmp(cp, "flags-wide"))
                     PLANT_WIDE = 1;
+                else if (!strcmp(cp, "width"))
+                    width = 1;
                 else
                     die("CFT_ORBITS_CERT_PLANT takes flags-unreadable, "
-                        "flags-unwritten or flags-wide");
+                        "flags-unwritten, flags-wide or width");
                 if (!O.cert_path)
                     die("CFT_ORBITS_CERT_PLANT instruments a certified run, "
                         "and there is no --cert");
+                if (width && !O.cert_accuracy)
+                    die("CFT_ORBITS_CERT_PLANT=width instruments an accuracy "
+                        "entry, and there is no --cert-accuracy");
+#if CX_EXACT
+                PLANT_WIDTH = width;
+#endif
                 fprintf(stderr, "cft-orbits: TEST INSTRUMENT ACTIVE "
                         "(CFT_ORBITS_CERT_PLANT=%s): %s\n", cp,
                         PLANT_UNREADABLE ? "the device is taken to be one "
                         "that cannot read the sticky flags" :
                         PLANT_UNWRITTEN ? "each segment's flag word is taken "
                         "to be left unwritten by the library" :
-                        "each segment's flag word gains bit 5, past the five "
-                        "sticky flags");
+                        PLANT_WIDE ? "each segment's flag word gains bit 5, "
+                        "past the five sticky flags" :
+                        "the first term's coefficient is taken times "
+                        "2^-1000, so its first product is past the width "
+                        "rule");
             }
         }
         {
@@ -4877,6 +5130,7 @@ int main(int argc, char **argv)
     R.O = &O;
     R.cert = O.cert_path != NULL;
     R.salt = salt;
+    R.c_angmom = O.cert_accuracy != NULL;   /* the one method not refused */
     esz = fi.esz;
     R.nb = O.problem == PROB_KEPLER ? 1 : N_OUTER;
     R.nd = O.problem == PROB_KEPLER ? 2 : 3;

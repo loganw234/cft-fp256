@@ -1193,7 +1193,8 @@ an HMAC under a file of exactly 32 random bytes ("Keyed or open").
   three streams are +0; `parameters 0`;
 - a segment for each sample interval: the hashes of the states it
   started and ended on, its flag word and its STATUS;
-- `accuracy 0`;
+- `accuracy 0`, or with `--cert-accuracy angular-momentum-drift` the
+  angular momentum's drift, exact ("Accuracy", below);
 - its identity lines are the library's, as `cft-segrun` writes them. The
   certificate's encoding is `host/tools/cert_write.h`, taken from
   cft-segrun's own.
@@ -1277,6 +1278,7 @@ cert mode open                      the certificate's lines from `mode`
 cert build-id commit=...            to `segments S`, each prefixed `cert `
 ...
 cert segments 8
+cert entries none                   or angular-momentum-drift: what it was started to write
 cert boundary 0 <hash>              the initial state's hash
 cert segment 0 start <h> end <h> flags 16 status 0     one per closed interval
 cert segment 1 start <h> end <h> flags 16 status 0
@@ -1329,26 +1331,55 @@ for the defect, and cft-segrun's where it has the same condition:
 | a salt that is not 32 bytes | `salt-length` | 4 |
 | a device that cannot read the sticky flags; a flag word the library left unwritten; a digest that fails | `device` | 69 |
 | a flag word past the five sticky flags | `malformed` | 2 |
+| an accuracy entry's value, or any value computed on the way, past the width rule | `width` | 3 |
+| an accuracy entry that needs a state value that is not finite: a NaN state, which the Newton route can reach without a flag ("Flags") | `accuracy-finite` | 7 |
+| `--cert-accuracy` in a build whose bigint is narrower than an exact value needs | `build-width` | 78 |
 | memory the certificate needs, found before anything is made | `memory` | 71 |
 | CERT there already; a fresh run's DIR there already, or a resumed run's missing; `CERT.tmp` or a file in DIR that cannot be written | `output` | 73 |
 | a resume: a keyed run handed `--cert-open`, an open one a salt, or another salt | `salt-missing`, `salt-unexpected`, `salt-commitment` | 4 |
 | a resume on another build or device than the certificate names - both identities in the sentence | `identity` | 78 |
 | a resume whose DIR does not hold this run's image, or its boundaries so far | `image-digest`, `state-missing`, `state-shape`, `state-hash` | 4 |
 
-No name has 3, the flag certificate's exit, or 9, the kill instrument's.
-Every refusal before the run leaves nothing made. One during it leaves
-DIR as far as it got. A resume's changes nothing of the run's: its
-checkpoint, its states and its records are as they were.
+`width` has the page's 3, which the flag certificate's exit shares; the
+name tells them apart. No name has 9, the kill instrument's. Every
+refusal before the run leaves nothing made. One during it, or at its
+end, leaves DIR as far as it got and writes no certificate. A resume's
+changes nothing of the run's: its checkpoint, its states and its records
+are as they were.
 
-**Accuracy.** None, in this version. A step-halving or wider estimate
-needs an auxiliary run version 1 can relate to this one, and neither can
-be one (the table). The energy is not a polynomial in the state.
-Angular momentum is: `q0 v1 - q1 v0` for Kepler, and a sum weighted by
-the masses' exact values for the outer system. Its drift is "the
-angular-momentum certificate" above, roundoff alone, and a version-1
-drift entry could carry it exactly. It waits for the round's shared
-exact arithmetic (the lead's decision, 2026-09-30), and `--cert-accuracy`
-does not offer it meanwhile.
+**Accuracy.** `--cert-accuracy angular-momentum-drift` asks for the one
+entry version 1 can carry for an orbits run. A step-halving or wider
+estimate needs an auxiliary run version 1 can relate to this one, and
+neither can be one (the table). The energy is not a polynomial in the
+state. The angular momentum is, `L = sum over bodies of m_b (q_b x
+v_b)`, so its drift is carried exactly as a version-1 `drift` entry
+(the lead's decision D6, 2026-09-30):
+- one entry for each component, labelled `angular-momentum-x`, `-y` and
+  `-z` for the outer system and `angular-momentum-z` alone for the planar
+  Kepler problem. Each is a `measurement`, uses run 0, is `scope
+  max-lanes` (the most over the members of `|L(final) - L(initial)|`) and
+  has its value `exact`;
+- component k's terms, body by body: `m_b q_(k+1) v_(k+2)`, then
+  `-m_b q_(k+2) v_(k+1)`, the indices mod 3 and the slots the state's.
+  Each coefficient is the exact value of the mass the run computed with,
+  or 1 for Kepler's test particle, whose L the tool reports as
+  `q0 v1 - q1 v0`. So the quantity is the one `invariants()` sums, in
+  exact arithmetic;
+- its drift is "the angular-momentum certificate" above: both schemes
+  conserve L exactly, so what moves it is the arithmetic alone.
+Each value is computed by `host/tools/cert_exact.h`, the arithmetic
+cft-segrun and cft-audit compute every entry with, from boundary 0 and
+the final boundary read back from DIR and held to their hashes. Every
+value on the way is held to the width rule and refused `width` by name
+past it. On the gate's configurations it was computed, not estimated:
+- Kepler fp64: 1.223e-15, a 60-bit numerator over a 110-bit denominator,
+  and no value on the way wider than 110 bits;
+- the outer system fp256: 1.637e-76, 5.260e-76 and 1.993e-75, numerators
+  of 488 to 490 bits over denominators of 739 to 741, and no value on the
+  way wider than 741 bits. That is 282 bits inside the rule's 1,023.
+The checkpoint says which entries the run was started to write (`cert
+entries`), and a resume that asks for others is refused with a sentence:
+a certificate states one set.
 
 **What it proves, and what it does not.** An audit proves each interval
 it re-runs: from its certified start state, the stride's image ends on
@@ -1364,18 +1395,29 @@ lead's leg, later.
 
 **Its gate** is `orbits_check.py`'s section [8], in the `workloads`
 stage; `make -C host orbitstest` builds `cft-audit` for it. It certifies
-two runs, each keyed (the page's example salt) and open:
+two runs, each keyed (the page's example salt) and open, each with the
+angular momentum's drift entries:
 - Kepler fp64 leapfrog: 4 members, 8 intervals of 16 steps;
 - the outer system fp256 yoshida4: 3 members, 4 intervals of 9 steps -
   its image indexes constants past 15 (`kx`).
 For each:
 - the golden reader accepts it strictly;
 - the golden writer, running every interval WHOLE with `seq.run` from
-  boundary 0, writes the same bytes;
+  boundary 0, and deriving every entry itself (`cert.derive`), writes
+  the same bytes. It takes each term from the problem's structure and
+  each mass from `--dump-setup`'s exact decimal, never from the
+  certificate;
 - every boundary file is its chain's state and its sample's records;
 - every segment says `flags 16 status 0`;
 - both auditors accept it with the same verdict, line for line: in full
-  from DIR, in full from boundary 0 alone, and sampled.
+  from DIR, in full from boundary 0 alone, and sampled;
+- each entry is a `measurement` labelled by its component, and the width
+  of every value on the way to it is computed, and reported, within the
+  rule ("Accuracy", above).
+A run without `--cert-accuracy` writes `accuracy 0`, the golden writer's
+bytes, and both auditors accept it. Under `CFT_ORBITS_CERT_PLANT=width`
+(the first term's coefficient times 2^-1000), the run is refused `width`
+at "term 0's product", as the golden writer refuses the same entry.
 The same bytes then come from runs cut at a loader limit of 5 (4 for the
 outer system), by checkpoints under the steady clock, and at batch 1, 2
 and 3. They come from relays stopped every 37 steps (mid interval), 16
@@ -1392,23 +1434,27 @@ by both auditors, with the same code and location:
 - a resume under `=drop-flags` after a stop at an interval's last step:
   not the uninterrupted certificate, and `segment-flags`.
 Every refusal above is made, by name and exit code, with nothing made
-or changed. Three are reachable only through `CFT_ORBITS_CERT_PLANT`, a
+or changed. Four are reachable only through `CFT_ORBITS_CERT_PLANT`, a
 test instrument as `CFT_SEGRUN_PLANT` is: `flags-unreadable`,
-`flags-unwritten` and `flags-wide`. Another build's identity, with the
-sum made again, is `identity`. Eight checkpoint cases are refused with
-their sentences, exit 2:
+`flags-unwritten`, `flags-wide` and `width`; [7b] holds its malformed
+values, and its being set where it does not apply. Another build's
+identity, with the sum made again, is `identity`. Ten checkpoint cases
+are refused with their sentences, exit 2:
 - version 2 with `--cert`, and version 3 without;
 - a byte changed, and the file cut;
 - with the sum made again: a line repeated, a flag word out of range,
-  one this tool would have stopped at, and a STATUS bit.
-Measured on the desktop, niced (2026-09-30): [8] is 85 checks in 12 to
-14 s. The whole of `orbits_check.py` is 204 checks, 0 failures, in 52
-s, where it was 119 in 38 s before. An ordinary run's checkpoints, records,
-chain line and segment dump are be3eb72's, byte for byte.
+  one this tool would have stopped at, and a STATUS bit;
+- a run started with the entries resumed without them, and one started
+  without resumed with them.
+Measured on the desktop, niced (2026-09-30): [8] is 91 checks in 17 s.
+The whole of `orbits_check.py` is 214 checks, 0 failures, in 65 s, where
+it was 119 in 38 s before. An ordinary run's checkpoints, records, chain
+line and segment dump are be3eb72's, byte for byte.
 
 **The fuzz lane.** `host/fuzz/fuzz_ckpt.py` seeds two entries,
-`orbits-cert` (open) and `orbits-cert-keyed`, from a certified run's
-version-3 checkpoint, made fresh each session with its states directory.
+`orbits-cert` (open) and `orbits-cert-keyed` (with the angular
+momentum's drift entry), from a certified run's version-3 checkpoint,
+made fresh each session with its states directory.
 Its mutator knows the block, and makes the sum again over three
 mutations in four, so that the strict reader behind the sum is what it
 reaches. An accepted resume runs to its end, and its certificate must be
@@ -1433,6 +1479,17 @@ the reader accepted words the tool could never write. It accepted 19
 checkpoints with a STATUS bit, and 8 changed flag words, some of them
 impossible ones; the audit refused each. The reader now refuses a flag
 but inexact, and any STATUS bit, itself, and the gate holds both.
+
+Again once the checkpoint carried `cert entries` and the keyed seed its
+entry, the same way (2026-09-30): 566 resumes, 4.7 a second.
+- 522 were refused by name: 441 by the reader's sentences, then 29
+  `salt-missing`, 19 `identity`, 17 `salt-unexpected`, 8
+  `program-digest`, 5 `image-digest` and 3 `salt-commitment`.
+- 15 were accepted with the uninterrupted certificate, its entry among
+  them.
+- 29 were accepted with another, each refused by the golden audit by
+  name, `segment-end`.
+- Nothing else.
 
 ---
 

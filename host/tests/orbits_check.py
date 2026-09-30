@@ -91,6 +91,7 @@ import hashlib
 import os
 import re
 import shutil
+from fractions import Fraction
 import subprocess
 import sys
 import tempfile
@@ -2148,17 +2149,20 @@ def check_certificates(tool, tmp, audit_exe):
          "--rsqrt", "newton", "--engine", "segments", "--quiet"]
     MODE = {"keyed": ["--cert-salt", salt_file], "open": ["--cert-open"]}
     SALT = {"keyed": salt_file.read_bytes(), "open": None}
+    ACC = ["--cert-accuracy", "angular-momentum-drift"]
     seed = bytes(range(100, 132))
     serial = [0]
 
     def paths(tag):
         return work / (tag + ".cert"), work / (tag + ".states")
 
-    def certify(tag, argv, mode, *extra, env=None):
-        """A certified run; -> (proc, certificate path, states dir)."""
+    def certify(tag, argv, mode, *extra, env=None, entries=True):
+        """A certified run, with the angular momentum's drift entries
+        unless `entries` is False; -> (proc, certificate, states dir)."""
         c, d = paths(tag)
         proc = tool.run(*argv, "--cert", c, "--cert-states", d, *MODE[mode],
-                        *extra, expect_ok=False, env=env)
+                        *(ACC if entries else []), *extra, expect_ok=False,
+                        env=env)
         return proc, c, d
 
     def audits(c, d, mode, states="all", choose=None):
@@ -2229,10 +2233,31 @@ def check_certificates(tool, tmp, audit_exe):
                                      (d / "run-0-boundary-0.bin").read_bytes())
             states, results = cert.run_chain(image, None, init,
                                              len(run.chain))
+            grun = cert.certify_run("main", image, None, SALT[mode], states,
+                                    results, steps=run.steps)
+            # the entries, made again here: each component's terms from
+            # the problem's structure, each mass from --dump-setup's exact
+            # decimal, each value by cert.derive from the golden chain
+            st_ = tool.setup(*argv)
+            nb, nd = st_["bodies"], st_["dims"]
+            nslots = 2 * nb * nd
+            entries, sizes = [], []
+            for elabel, terms in _angmom_terms(argv[1], st_["mass"], nb, nd):
+                probe = cert.Entry("drift", "measurement", 0, None,
+                                   cert.Value("exact", exact=Fraction(0)),
+                                   elabel, terms)
+                q = cert.derive(probe, (grun,), [(run.fmt, nslots)],
+                                {(0, 0): states[0],
+                                 (0, len(states) - 1): states[-1]})
+                sizes.append((elabel, _widest(terms, fmt, states[0],
+                                              states[-1], nslots, run.lanes),
+                              q))
+                entries.append(cert.Entry("drift", "measurement", 0, None,
+                                          cert.make_value(q, "exact"), elabel,
+                                          terms))
             gold = cert.encode(cert.Certificate(
                 parsed.mode, parsed.salt_commitment, parsed.identity,
-                (cert.certify_run("main", image, None, SALT[mode], states,
-                                  results, steps=run.steps),), ()))
+                (grun,), tuple(entries)))
             files = [(d / ("run-0-boundary-%d.bin" % b)).read_bytes()
                      for b in range(len(states))]
             check(gold == data and all(files[b] == cert.state_bytes(fmt, s)
@@ -2240,12 +2265,36 @@ def check_certificates(tool, tmp, audit_exe):
                   run.steps == stride and
                   all((s.flags, s.status) == (16, 0) for s in run.chain),
                   "%s, %s: the golden writer, running each of the %d "
-                  "intervals WHOLE with seq.run from boundary 0, writes the "
+                  "intervals WHOLE with seq.run from boundary 0 and deriving "
+                  "the %d angular-momentum drift entr%s itself, writes the "
                   "same bytes; every boundary file is its chain's state; "
                   "every segment says flags 16 status 0, as the library "
-                  "reported" % (label, mode, len(run.chain)),
+                  "reported" % (label, mode, len(run.chain), len(entries),
+                                "y" if len(entries) == 1 else "ies"),
                   "%s, %s: the golden writer's certificate or chain is not "
                   "the tool's" % (label, mode))
+            if mode == "keyed":
+                # the width rule, COMPUTED on this configuration: the most
+                # bits any value reaches on the way, in cert.derive's order
+                most = max(max(w) for _, w, _ in sizes)
+                kinds = ([e.kind for e in parsed.accuracy] ==
+                         ["measurement"] * len(entries))
+                labels = ([e.label for e in parsed.accuracy] ==
+                          [s[0] for s in sizes])
+                check(most <= 1023 and kinds and labels,
+                      "%s: each entry's kind a measurement and its label the "
+                      "component; every value within the width rule, "
+                      "computed - %s; the widest %d bits of 1,023"
+                      % (label, "; ".join(
+                          "%s %s, numerator %d and denominator %d bits, %d "
+                          "and %d the most on the way"
+                          % (n, "0" if q == 0 else "%.3e" % float(q),
+                             abs(q.numerator).bit_length(),
+                             q.denominator.bit_length(), w[0], w[1])
+                          for n, w, q in sizes), most),
+                      "%s: an entry past the width rule (%d bits), or not a "
+                      "measurement labelled by its component" % (label,
+                                                                  most))
             # every boundary file is the records' exact decimals
             recs = parse_records(rec)
             good = True
@@ -2503,6 +2552,64 @@ def check_certificates(tool, tmp, audit_exe):
                     "a resume that dropped the interval's flags so far "
                     "(=drop-flags)")
 
+    # --- no entries asked: `accuracy 0`; and the width rule, by name -----
+    proc, c, d = certify("no-entries", K, "open", entries=False)
+    if proc.returncode == 0 and c.exists():
+        data = c.read_bytes()
+        parsed = cert.parse(data)
+        run = parsed.runs[0]
+        image = (d / "run-0.cftp").read_bytes()
+        init = cert.state_values(FORMATS["fp64"],
+                                 (d / "run-0-boundary-0.bin").read_bytes())
+        states, results = cert.run_chain(image, None, init, len(run.chain))
+        gold = cert.encode(cert.Certificate(
+            "open", None, parsed.identity,
+            (cert.certify_run("main", image, None, None, states, results,
+                              steps=run.steps),), ()))
+        g, t = audits(c, d, "open")
+        check(gold == data and b"\naccuracy 0\n" in data and
+              g[0] == "accepted" and t == g,
+              "kepler, open, no --cert-accuracy: `accuracy 0`, the golden "
+              "writer's bytes, and both auditors accept it",
+              "kepler, open, no --cert-accuracy: not the golden writer's "
+              "bytes, or not accepted (golden %s, cft-audit %s)" % (g, t))
+    else:
+        check(False, "", "kepler, open, no --cert-accuracy: the run failed "
+                         "(exit %d) %s" % (proc.returncode, proc.stderr[-200:]))
+    # the width plant: the first term's coefficient taken times 2^-1000, so
+    # that its first product is past the rule. The golden writer refuses
+    # the same entry `width`, and so must the tool, by name, with no
+    # certificate.
+    proc, c, d = certify("width-plant", K, "open",
+                         env=env_with(CFT_ORBITS_CERT_PLANT="width"))
+    st_ = tool.setup(*K)
+    (elabel, terms), = _angmom_terms("kepler", st_["mass"], 1, 2)
+    planted = ((terms[0][0] * Fraction(1, 2 ** 1000), terms[0][1]),) + \
+        terms[1:]
+    try:
+        run = cert.parse((work / "no-entries.cert").read_bytes()).runs[0]
+        gs = cert.state_values(FORMATS["fp64"],
+                               (d / "run-0-boundary-0.bin").read_bytes())
+        gstates, gres = cert.run_chain((d / "run-0.cftp").read_bytes(), None,
+                                       gs, len(run.chain))
+        cert.derive(cert.Entry("drift", "measurement", 0, None,
+                               cert.Value("exact", exact=Fraction(0)), elabel,
+                               planted),
+                    (run,), [("fp64", 4)],
+                    {(0, 0): gstates[0], (0, len(gstates) - 1): gstates[-1]})
+        golden_says = "accepted"
+    except cert.Refusal as e:
+        golden_says = e.name + ": " + str(e)
+    check(refusal(proc) == ("width", 3) and "term 0's product" in
+          proc.stderr and golden_says.startswith("width") and
+          "term 0's product" in golden_says and not c.exists(),
+          "refused width (exit 3), no certificate: the first term's "
+          "coefficient taken times 2^-1000 (CFT_ORBITS_CERT_PLANT=width), "
+          "its first product past the rule - where the golden writer refuses "
+          "the same entry, `%s`" % golden_says[:90],
+          "the width plant: the tool %s (exit %d), the golden writer %s"
+          % (refusal(proc)[0], proc.returncode, golden_says[:120]))
+
     # --- what the certified path refuses, by name and exit code ----------
     NAMES = {"engine": 64, "rsqrt-exact": 64, "step-halving": 64,
              "wider": 64, "energy-drift": 64, "usage": 64,
@@ -2628,10 +2735,10 @@ def check_certificates(tool, tmp, audit_exe):
                                         for p in d.iterdir()))
 
     def resume_refused(label, tag, ck, mode_args, name, sentence=None,
-                       env=None, exit_code=None):
+                       env=None, exit_code=None, acc=ACC):
         c, d = paths(tag)
         before = snapshot(ck, d)
-        proc = tool.run(*K, "--cert", c, "--cert-states", d, *mode_args,
+        proc = tool.run(*K, "--cert", c, "--cert-states", d, *mode_args, *acc,
                         "--checkpoint", ck, "--resume", expect_ok=False,
                         env=env)
         got = refusal(proc)
@@ -2697,11 +2804,29 @@ def check_certificates(tool, tmp, audit_exe):
     shutil.copyfile(cko, ck)
     c, d = paths(tag)
     proc = tool.run(*K, "--cert", c, "--cert-states", d, "--cert-open",
-                    "--checkpoint", ck, "--resume", expect_ok=False)
+                    *ACC, "--checkpoint", ck, "--resume", expect_ok=False)
     check(refusal(proc) == ("output", 73) and not d.exists(),
           "resume refused output (exit 73): its states directory is not "
           "there", "resume without its states directory: %s"
           % proc.stderr.strip()[-200:])
+    # a certificate states one set of entries: a resume asks for the same
+    serial[0] += 1
+    tag = "rs-entries-%d" % serial[0]
+    shutil.copytree(d_o, work / (tag + ".states"))
+    ck = work / (tag + ".ckpt")
+    shutil.copyfile(cko, ck)
+    resume_refused("a run certified with the angular-momentum entries, "
+                   "resumed without --cert-accuracy", tag, ck,
+                   ["--cert-open"], None, "the run was certified with "
+                   "--cert-accuracy angular-momentum-drift, and this resume "
+                   "asks for none", exit_code=2, acc=[])
+    ck_plain = work / "rs-noentries.ckpt"
+    certify("rs-noentries", K, "open", "--stop-after-steps", 37,
+            "--checkpoint", ck_plain, entries=False)
+    resume_refused("a run certified without entries, resumed with "
+                   "--cert-accuracy angular-momentum-drift", "rs-noentries",
+                   ck_plain, ["--cert-open"], None, "the run was certified "
+                   "without accuracy entries", exit_code=2)
     # the checkpoint's own refusals: a sentence, and exit 2
     plain = work / "rs-plain.ckpt"
     tool.run(*K, "--stop-after-steps", 37, "--checkpoint", plain)
@@ -2761,6 +2886,53 @@ def check_certificates(tool, tmp, audit_exe):
 def _flip(data, i):
     """`data` with bit 0 of byte i flipped."""
     return data[:i] + bytes([data[i] ^ 1]) + data[i + 1:]
+
+
+def _angmom_terms(problem, masses, nb, nd):
+    """The angular momentum's drift entries' terms, from the problem's
+    structure alone: for each component k (z alone in the plane), body by
+    body, m_b q_(k+1) v_(k+2) then -m_b q_(k+2) v_(k+1), indices mod 3, a
+    state's slot c q_c and slot ncomp + c v_c; m_b the exact value of the
+    mass --dump-setup states, and 1 for Kepler's test particle.
+    -> [(label, ((coefficient, (slot, slot)), ...)), ...]"""
+    ncomp = nb * nd
+    out = []
+    for k in ((2,) if nd == 2 else (0, 1, 2)):
+        k1, k2 = (k + 1) % 3, (k + 2) % 3
+        terms = []
+        for b in range(nb):
+            m = Fraction(1) if problem == "kepler" else Fraction(masses[b])
+            terms.append((m, (b * nd + k1, ncomp + b * nd + k2)))
+            terms.append((-m, (b * nd + k2, ncomp + b * nd + k1)))
+        out.append(("angular-momentum-" + "xyz"[k], tuple(terms)))
+    return out
+
+
+def _widest(terms, fmt, first, last, nslots, lanes):
+    """The most bits a numerator and a denominator reach on the way to a
+    drift entry's value, every value cert.derive computes, in its order:
+    each element's, each product, each partial sum, each lane's drift.
+    -> [numerator bits, denominator bits]"""
+    from cft_golden import cert
+    most = [0, 0]
+
+    def note(q):
+        most[0] = max(most[0], abs(q.numerator).bit_length())
+        most[1] = max(most[1], q.denominator.bit_length())
+        return q
+
+    def q_of(state, i):
+        q = Fraction(0)
+        for c, slots in terms:
+            p = note(c)
+            for s in slots:
+                v = note(cert.element_fraction(fmt, state[i * nslots + s])[1])
+                p = note(p * v)
+            q = note(q + p)
+        return q
+    for i in range(lanes):
+        note(q_of(last, i) - q_of(first, i))
+    return most
 
 
 def _resum(text, fn):
@@ -3219,6 +3391,22 @@ def main():
              ["--engine", "loop", "--periods", 1],
              dict(os.environ, CFT_ORBITS_SHARE_FIFO="1"),
              "instruments the records file, and there is no --records"),
+            ("CFT_ORBITS_CERT_PLANT on a run that is not certified",
+             ["--engine", "segments", "--rsqrt", "newton", "--periods", 1],
+             dict(os.environ, CFT_ORBITS_CERT_PLANT="flags-wide"),
+             "instruments a certified run, and there is no --cert"),
+            ("CFT_ORBITS_CERT_PLANT=width on a certified run with no entry",
+             ["--engine", "segments", "--rsqrt", "newton", "--periods", 1,
+              "--cert", Path(tmp) / "never.cert", "--cert-states",
+              Path(tmp) / "never.states", "--cert-open"],
+             dict(os.environ, CFT_ORBITS_CERT_PLANT="width"),
+             "instruments an accuracy entry, and there is no "
+             "--cert-accuracy"),
+            ("CFT_ORBITS_NEGATIVE_CONTROL=drop-flags on a run that is not "
+             "certified",
+             ["--engine", "segments", "--rsqrt", "newton", "--periods", 1],
+             dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="drop-flags"),
+             "sabotages a certified run's resume, and there is no --cert"),
             ("--records in a directory that is not there - the step, the "
              "file and the system's reason named",
              ["--engine", "loop", "--periods", 1, "--records",
@@ -3248,7 +3436,11 @@ def main():
                  "takes a whole number of checkpoints, 1 to 4294967295"),
                 ("CFT_ORBITS_SHARE_FIFO",
                  ("0", "2", "01", " 1", "1 ", "yes", "true"),
-                 "CFT_ORBITS_SHARE_FIFO takes 1")):
+                 "CFT_ORBITS_SHARE_FIFO takes 1"),
+                ("CFT_ORBITS_CERT_PLANT",
+                 ("flags", "Flags-wide", " width", "width ", "widths", "1"),
+                 "CFT_ORBITS_CERT_PLANT takes flags-unreadable, "
+                 "flags-unwritten, flags-wide or width")):
             ran = []
             for val in bad:
                 proc = tool.run("--engine", "segments", "--rsqrt", "newton",
