@@ -36,9 +36,10 @@ THE THREE REFERENCES.
         at every boundary, |R_K - R_(K-1)| <= TAU |R_0 - R_K| (maxima over
         the slots) and the last ratio of successive differences is
         within RATIO_BAND of 2^p. Its error is stated as u = |R_K -
-        R_(K-1)| / (2^p - 1), and 2u is the bound every ratio's
-        uncertainty is computed from. A case that reaches its cap
-        (KCAP) first is named NOT CONVERGED and not scored.
+        R_(K-1)| / (2^p - 1), Richardson's estimate, and every ratio
+        carries 2u as its uncertainty (an estimate, checked against
+        odefun below, and not a proven bound). A case that reaches its
+        cap (KCAP) first is named NOT CONVERGED and not scored.
   odefun  mpmath's own Taylor-series integrator, from the same exact
         start with the bank's parameter values, at 30 and 40 digits. It
         shares no code with the program, gen_odes.py or ode_step (the
@@ -250,9 +251,12 @@ def load_cases(only=None):
     read is held to its manifest SHA-256 and every state to its
     certificate's hash before it is used."""
     man = corpus.read_manifest()
+    # --cases is refused by name before anything runs for a name that is
+    # not in the corpus (here) or a corpus case that is not scored (after
+    # the loop); a case it names that the run then fails to score fails at
+    # the end of main (verifier-W2's P3a, P3b)
     unknown = sorted(set(only or ()) - {c.name for c in man.cases})
     if unknown:
-        # a name that selects nothing would score nothing and pass
         sys.exit(f"estimates: --cases names no case of certificates/MANIFEST: "
                  f"{', '.join(unknown)}")
     scored, skipped = [], []
@@ -280,6 +284,10 @@ def load_cases(only=None):
             skipped.append((c.name, "no auxiliary run, so no estimate"))
             continue
         scored.append(load_case(c, man))
+    if only:
+        for name, why in skipped:       # only cases --cases named are here
+            sys.exit(f"estimates: --cases names {name}, which is not "
+                     f"scored: {why}")
     return scored, skipped
 
 
@@ -1026,17 +1034,32 @@ class Against:
         ok(f"against {where}: all {len(body)} lines are the committed ones, "
            f"`time` lines apart")
 
-    def missing(self, modes, loaded):
+    def missing(self, modes, requested):
+        """Every committed `-- ` section, in a mode this run ran, of a case
+        it was ASKED for - `requested`, from --cases, or every case when
+        that is None - must have been printed. Keyed to the request, never
+        to what the run loaded or scored: keyed to the cases it loaded, a
+        run that dropped a case it was asked for, or every case, passed
+        (verifier-W2's P3a and P3b, 2026-09-30)."""
+        want = 0
         for shown, secs in self.files:
             for heading, (start, _old) in secs.items():
-                if not heading.startswith("-- ") or heading in self.seen:
+                if not heading.startswith("-- "):
                     continue
                 kind, case = _case_of(heading)
-                if kind in modes and case in loaded:
+                if kind not in modes or (requested is not None and
+                                         case not in requested):
+                    continue
+                want += 1
+                if heading not in self.seen:
                     self._fail(f"{shown}, section '{_name(heading)}' (its "
                                f"line {start}) was not printed by this run")
-        ok(f"against {', '.join(s for s, _ in self.files)}: every committed "
-           f"section of the cases and modes this run ran was printed")
+        if not want:
+            self._fail(f"{', '.join(s for s, _ in self.files)}: no committed "
+                       f"section is of a case and mode this run was asked "
+                       f"for, so nothing was held")
+        ok(f"against {', '.join(s for s, _ in self.files)}: all {want} "
+           f"committed sections of the cases and modes asked for were printed")
 
     def _fail(self, why):
         bad(f"against {why}")
@@ -1073,6 +1096,12 @@ def main():
     against = Against(args.against) if args.against else None
     mpmath.mp.dps = check.SCHEME_DPS
     only = set(args.cases.split(",")) if args.cases else None
+    swept = {f"{b}-{f}" for b, f in SWEEP}
+    if args.mode == "sweep" and only and only - swept:
+        sys.exit(f"estimates: --cases names "
+                 f"{', '.join(sorted(only - swept))}, which the sweep does "
+                 f"not follow; it follows lane 0 of "
+                 f"{', '.join(sorted(swept))}")
     say(f"== ACC-A: a certificate's two estimates, scored "
         f"(programs/estimates.py {args.mode})")
     say(f"mpmath {mpmath.__version__} on {mpmath.libmp.BACKEND}; the scheme "
@@ -1119,7 +1148,19 @@ def main():
         if against:
             modes = {"certified", "sweep"} if args.mode == "all" else \
                 {args.mode}
-            against.missing(modes, {c.name for c in cases})
+            against.missing(modes, only)
+        if only:
+            # Every case --cases names must have been scored, in some mode
+            # this run ran: read from what the run PRINTED, not from its
+            # own list of cases, which is the thing that could lose one.
+            printed = {_case_of(t)[1] for t in rec.since(0)
+                       if t.startswith("-- ")}
+            for name in sorted(only - printed):
+                bad(f"--cases names {name}, and this run scored it in no "
+                    f"mode")
+            if only <= printed:
+                ok(f"every case --cases names was scored: "
+                   f"{', '.join(sorted(only))}")
     except Differs:
         pass                    # named by its FAIL line; the run ends here
     say()
