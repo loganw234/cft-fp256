@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Thirty-eight files, 56,069 lines. Flat in one directory they look like one
+Thirty-eight files, 56,094 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **20,270 lines you consult while working** — the three under *Start here*,
+- **20,272 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,237 lines of tool manual**, one per shipped program;
 - **1,993 lines of operations**, read when you are about to do something to
   hardware;
-- **27,569 lines of record and argument** — the ledger, the roadmap and the
+- **27,592 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -33,7 +33,7 @@ answer is not in here — it is `make verify-quick`, and
 | document | lines | what it is for |
 |---|---|---|
 | [INTEGRATION.md](INTEGRATION.md) | 253 | Choosing a path: which surface to use for which job. The shortest route from "I have a workload" to "I know what to call." |
-| [VERIFICATION.md](VERIFICATION.md) | 395 | Every gate, what it proves, how long it really takes. Twelve tiers, forty-one runner stages. |
+| [VERIFICATION.md](VERIFICATION.md) | 397 | Every gate, what it proves, how long it really takes. Twelve tiers, forty-one runner stages. |
 | [COMPLIANCE.md](COMPLIANCE.md) | 172 | IEEE 754-2019 clause by clause: what is implemented, what is refused, and where each is proven. |
 
 ## The contract
@@ -93,7 +93,7 @@ reading material for a working session.
 
 | document | lines | what it is for |
 |---|---|---|
-| [VALIDATION.md](VALIDATION.md) | 16,130 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
+| [VALIDATION.md](VALIDATION.md) | 16,153 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
 | [ROADMAP.md](ROADMAP.md) | 3,850 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1,082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
 | [NOVEL.md](NOVEL.md) | 561 | Results for which no prior description was found, with the standard of evidence stated first. |

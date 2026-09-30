@@ -16128,3 +16128,26 @@ Revision 8's program-model asks were defined golden-first beside them: TwoSum, a
   - One narrow (b) by the letter, 3197dc6's message on SEQ_U50_TIMEOUT, is recorded in the slips above, as P3's "750" was.
   - Its other findings are restated in this commit: the definition of augmentedAddition's rounding, this entry's title, verify.mjs's single export, the probe's premise, CARDDAY's 2,048 bound, COMPATIBILITY's refusal list, DEMOS's recording time, and the slips and known limits it found missing. Or they are recorded as known limits above.
 - **R6's control for the program-set ruling:** the same set and runner on round 2's single, 140 of 140 (above).
+
+**boardseq, and the fix after the push** (72c4fa1 was pushed with boardseq still running; this paragraph is its promised record).
+- **What happened.** In simmc on 3197dc6, boardseq passed its two older cases, krnl_sequencer and krnl_lane_mask (its log's "passed" lines, copied beside the round's box logs). It then ran P1's krnl_ode_programs in the board configuration at 0.53 ns of simulated time a second: two samples 121 s apart. The case covers 2,736,740 ns in krnlseqmc, so about 60 days at that rate. boardseq had no timeout; the lead stopped the stage at 17:40, 12,551 s in.
+- **What it is.** A simulator cost in the suite, not a design fault. It is boardkrnl's case, recorded in tb/Makefile since 2026-09-07. Logan: "Icarus has been known to run significantly slower compared to verilator in some cases, not entirely sure its an "issue" or just a quirk between simulators on certain tasks". What changed with revision 7 is only that simmc could not finish. R4, R6 and the lead had all missed it.
+- **The fix, c720ca9.** boardseq keeps its two older cases on Icarus, pinned by TESTCASE, and a new boardseqode runs the ODE case under Verilator, as boardkrnl does.
+  - The commit was first eebfea4. Its message said simmc had finished at f681dee, where simmc was never run: verifier-R6's narrow (b). The message was reworded before the push, with the tree unchanged (7b424293...).
+  - Before revision 7, the last full simmc on record was at 6a2b26c, whose RTL is f681dee's apart from comments, and boardseq's two cases took 3,170 s in a `make -j3 board` run at ef9c3ec.
+- **Measured.** simmc whole on that tree (amd-arc-box, SIM_JOBS=4, run 20260929-174233-eebfea4, beside the quad's bitstream build): PASS, nothing skipped, 4,584 s, every bench with 0 failures.
+  - boardseq 2 of 2, 3,272 s of test time;
+  - boardseqode 1 of 1, 754 s after its Verilator compile;
+  - seq_coremc 63 of 63, 4,480 s;
+  - krnlseqmc 3 of 3.
+- **Verifier-R6 on the fix:**
+  - it keeps boardseq's pre-revision-7 coverage on Icarus;
+  - cocotb 1.9.2 reads the TESTCASE the recipe sets;
+  - krnl_ode_programs runs correctly alone, 1 of 1 under Verilator in krnlseq's configuration (MC=1, the U50's capacities), its twelve cycle lines equal to the in-module run's (V5). In the board configuration, running alone is simmc's boardseqode, 1 of 1, with no cycle comparison.
+- **The commit that adds this paragraph:**
+  - gives every board target a hang guard, BOARD_TIMEOUT 7,200 s. That is about twice boardseq's 3,371 s from its first build file to its results in that run;
+  - restates the fix's comment where R6 found it loose (the 684,000 cycles, the 3 h 26 min, the rate);
+  - restates simmc's counts and timings in docs/VERIFICATION.md, verify/README.md and verify/run.sh's comment, and verify/README.md's sim timings from 2026-09-07, which 88f06d2 had left (R6).
+- **Known limits:**
+  - both board case lists are pinned by name, so a new test_krnl_seq case reaches no board target until it is named;
+  - boardkrnl and boardseqode compile the same Verilator model twice, a possible saving.

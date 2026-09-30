@@ -679,7 +679,8 @@ stage sim "cocotb RTL suite, all 26 targets, SIM_JOBS at a time (docker cft-sim)
 # (tb/Makefile simmc, MC=10 unless MC= says otherwise): the multi-cycle
 # tile's own census, beside the shipping default rather than instead
 # of it. Not in the quick or gate budgets - it is the third tier's
-# gate, and it takes as long as sim does.
+# gate. On 2026-09-29 it took 1 h 16 min at four jobs on amd-arc-box,
+# where sim took 1 h 40 min at six (docs/VERIFICATION.md).
 need docker
 stage simmc "cocotb suite at the multi-cycle pass budget MC (docker cft-sim)" -- do_simmc
 

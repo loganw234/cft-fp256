@@ -32,7 +32,7 @@ three cuts, kept in `run.sh` beside the stage list:
 |---|---|---|
 | `quick` | the `docs`, `generated`, `buildargs` and `sweepjudge` checks, every model-vs-C check (selfcheck, divsqrt, clause5, character, augmented, status96, formatof, diff, seq, reduce), the GPU's photograph, bindings, the seven language legs, the five workloads, the browser demos, soak-quick and the remote backend - after a host build the budget makes itself | about 20 minutes, loaded or not |
 | `gate` | quick + golden, vectors, lint, formal, libcft, transcend, mpfr, cpp - what a package's reviewer ran before merging | about 2 hours with the box quiet, about 4 loaded (2026-09-07) |
-| `full` | everything: gate + sim, simmc, node, wasm, images | about 2 hours quiet (2026-09-04, run 20260904-035237), 227 minutes loaded (2026-09-03, run 20260903-164537) |
+| `full` | everything: gate + sim, simmc, node, wasm, images | about 2 hours quiet (2026-09-04, run 20260904-035237), 227 minutes loaded (2026-09-03, run 20260903-164537). Not measured whole since revision 7: sim alone took 1 h 40 min at six jobs and simmc 1 h 16 min at four on amd-arc-box, loaded (2026-09-29) |
 
 The slow stages are the replays and the RTL simulation, and they are
 slow on THIS host: libcft, cpp, vectors and wasm took 1794, 1471, 1170
@@ -93,12 +93,17 @@ docs/COMPATIBILITY.md keeps the dated per-language rows, and the
 recipe for giving a Windows host every toolchain the stages want.
 
 Wall time for the standard set is dominated by `sim`,
-`transcend` and `cpp`. `sim` is ~40 min serial in the container, ~25 min
-under Verilator on a 36-core box, almost all of it compilation, and **55
-minutes at four jobs on this desktop beside a Vivado run** (2026-09-07);
-`simmc MC=10`, which is in `full` only, is about 50 minutes at four
-jobs, its engine-driven board kernel under Verilator because Icarus does
-not finish that one (docs/VERIFICATION.md). The targets are
+`transcend` and `cpp`. On 2026-09-07 `sim` was ~40 min serial in the
+container, ~25 min under Verilator on a 36-core box, almost all of it
+compilation, and **55 minutes at four jobs on this desktop beside a
+Vivado run**. At revision 7's first merge (9ff114e, its seq_core then
+48 cases) it was 2 h 47 min at one job on the desktop. With the 63-case
+sequencer benches it was 1 h 40 min at six jobs on amd-arc-box beside
+other work (2026-09-29). `simmc MC=10`, which is in `full` only,
+was about 50 minutes at four jobs, and 1 h 16 min at four jobs on the
+box on 2026-09-29. Two of its board benches run under Verilator because
+Icarus does not finish them: the engine-driven board kernel, and
+revision 7's ODE case in the board configuration (docs/VERIFICATION.md). The targets are
 parallel-safe by construction - each writes its own sim_build/<name> and
 results file - so `SIM_JOBS=n` hands make `-j n` (and `-k`, so one
 failing target does not hide the others): the whole suite cold at -j12

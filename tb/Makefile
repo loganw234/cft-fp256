@@ -485,6 +485,19 @@ BOARD_PARAMS = -Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1                -Pc
 
 board: boardkrnl boardseq boardseqode boardfp256
 
+# The board targets' hang guard (2026-09-29). None had one, which is why
+# boardseq could stall for 3.5 hours with nothing to show it (above).
+# 7,200 s is about twice the longest board bench measured on amd-arc-box
+# that day: boardseq's two cases took 3,371 s from its first build file
+# to its results (SIM_JOBS=4, beside a bitstream build). By the same
+# measure boardseqode took 1,234 s and boardkrnl 496 s, a little under
+# their time under the guard, since Verilator writes its first file only
+# after its front end has run; boardfp256 took 53 s. It catches a hang; it is not a budget. It also turns
+# BOARDKRNL_SIM=icarus or BOARDSEQODE_SIM=icarus into a failure after
+# two hours rather than a run of days. Raise BOARD_TIMEOUT for a
+# deliberately long run.
+BOARD_TIMEOUT ?= 7200
+
 # boardkrnl runs under Verilator by default. Icarus evaluates this one
 # configuration - the engine-driven kernel at ten passes with both
 # ladders on - at about 2.5 ns of simulated time a second through the
@@ -505,33 +518,38 @@ board: boardkrnl boardseq boardseqode boardfp256
 # reason to skip the bench. BOARDKRNL_SIM=icarus puts it back.
 BOARDKRNL_SIM ?= verilator
 boardkrnl:
-	CFT_GENERICS="$(OPEN_CAPS_GENERICS)" CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(BOARDKRNL_SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl SIM_BUILD=sim_build/boardkrnl$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardkrnl$(MC)/results.xml \
+	CFT_GENERICS="$(OPEN_CAPS_GENERICS)" CFT_MUL_PASSES=$(MC) timeout $(BOARD_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(BOARDKRNL_SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl SIM_BUILD=sim_build/boardkrnl$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardkrnl$(MC)/results.xml \
 		&& $(PYTHON) check_results.py sim_build/boardkrnl$(MC)/results.xml
 
 # boardseq and boardseqode are one module, test_krnl_seq, split by case
 # (2026-09-29). Revision 7 gave the module a third case,
 # krnl_ode_programs (4b790b4): the three ODE programs through the whole
-# kernel, the array busy for about 684,000 cycles at ten passes. In
-# this configuration that is boardkrnl's Icarus cost again. On
-# amd-arc-box boardseq ran its first two cases as it always had, then
-# reached 0.53 ns of simulated time a second in the third: about 60
-# days for the 2.74 ms of simulated time the case took in krnlseqmc.
-# It was stopped after 3 h 30 min, 14 us in, so simmc never finished
-# on the tree that added it (docs/VALIDATION.md, revision 7).
+# kernel, about 684,000 cycles start to done at ten passes in krnlseqmc
+# (unfused, at the U50's capacities). In the board configuration that
+# is boardkrnl's Icarus cost again. On amd-arc-box boardseq passed its
+# first two cases, then ran the third at 0.53 ns of simulated time a
+# second. At that rate the 2.74 ms of simulated time the case took in
+# krnlseqmc would need about 60 days, and every Icarus rate on record
+# for this configuration means it cannot finish. The stage was stopped
+# after 12,551 s, boardseq about 3 h 26 min in and 14 us into the case,
+# so simmc never finished on the tree that added it (docs/VALIDATION.md,
+# revision 7).
 # So boardseq keeps the two cases it ran before revision 7, on the
 # suite's simulator, and boardseqode runs the ODE case under Verilator
 # by default, as boardkrnl does. BOARDSEQODE_SIM=icarus puts it back.
+# Both case lists are pinned by name: a case added to test_krnl_seq
+# reaches neither target until it is named in one of them.
 boardseq:
-	TESTCASE=krnl_sequencer,krnl_lane_mask CFT_GENERICS="$(OPEN_CAPS_GENERICS)" CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl_seq SIM_BUILD=sim_build/boardseq$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardseq$(MC)/results.xml \
+	TESTCASE=krnl_sequencer,krnl_lane_mask CFT_GENERICS="$(OPEN_CAPS_GENERICS)" CFT_MUL_PASSES=$(MC) timeout $(BOARD_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl_seq SIM_BUILD=sim_build/boardseq$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardseq$(MC)/results.xml \
 		&& $(PYTHON) check_results.py sim_build/boardseq$(MC)/results.xml
 
 BOARDSEQODE_SIM ?= verilator
 boardseqode:
-	TESTCASE=krnl_ode_programs CFT_GENERICS="$(OPEN_CAPS_GENERICS)" CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(BOARDSEQODE_SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl_seq SIM_BUILD=sim_build/boardseqode$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardseqode$(MC)/results.xml \
+	TESTCASE=krnl_ode_programs CFT_GENERICS="$(OPEN_CAPS_GENERICS)" CFT_MUL_PASSES=$(MC) timeout $(BOARD_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(BOARDSEQODE_SIM) TOPLEVEL=cft_krnl 		MODULE=test_krnl_seq SIM_BUILD=sim_build/boardseqode$(MC) 		KRNL_PARAMS="$(BOARD_PARAMS)" 		COCOTB_RESULTS_FILE=sim_build/boardseqode$(MC)/results.xml \
 		&& $(PYTHON) check_results.py sim_build/boardseqode$(MC)/results.xml
 
 boardfp256:
-	CFT_MUL_PASSES=$(MC) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp256 		MODULE=test_fpfma_fp256 SIM_BUILD=sim_build/boardfp256$(MC) 		KRNL_PARAMS="-Ptb_fpfma_fp256.MUL_PASSES=$(MC)" 		COCOTB_RESULTS_FILE=sim_build/boardfp256$(MC)/results.xml \
+	CFT_MUL_PASSES=$(MC) timeout $(BOARD_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=tb_fpfma_fp256 		MODULE=test_fpfma_fp256 SIM_BUILD=sim_build/boardfp256$(MC) 		KRNL_PARAMS="-Ptb_fpfma_fp256.MUL_PASSES=$(MC)" 		COCOTB_RESULTS_FILE=sim_build/boardfp256$(MC)/results.xml \
 		&& $(PYTHON) check_results.py sim_build/boardfp256$(MC)/results.xml
 
 # Cycle counts on the RTL, which is where they actually live: hw_emu's
