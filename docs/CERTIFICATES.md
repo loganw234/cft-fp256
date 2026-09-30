@@ -21,12 +21,15 @@ Where things stand (2026-09-29):
   `cft_get_image_id` ([HOSTAPI.md](HOSTAPI.md), "Identity at ABI
   0.15");
 - the segment runner, `cft-segrun`, writes version-1 certificates from
-  the library (see "The segment runner"), and the `programs` stage
-  holds them byte for byte to the golden writer;
+  the library (see "The segment runner"), their accuracy entries
+  included since the plan's step 5 (2026-09-30; [ROADMAP.md](ROADMAP.md),
+  "Steps 5 and 6"), and the `programs` stage holds them byte for byte to
+  the golden writer;
 - the C auditor, `cft-audit`, audits them in C beside the golden one
   (see "The audit tool"), and the `audit` stage holds its verdicts equal
   to `cert.audit`'s (2026-09-29; the plan of record,
-  [ROADMAP.md](ROADMAP.md), "Steps 4 and 7");
+  [ROADMAP.md](ROADMAP.md), "Steps 4 and 7"). The two C tools compute
+  an entry's value with one code, `host/tools/cert_exact.h`;
 - the golden certificates, twelve programs and their certificates in
   `certificates/`, hold both writers to committed bytes (see "Golden
   certificates").
@@ -1294,8 +1297,9 @@ location ("The audit tool").
 
 `cft-segrun` is the C writer, the plan's step 3. It runs a program as
 consecutive segments on one libcft device handle, keeps the state at
-every boundary, and writes a version-1 certificate. `make -C host all`
-builds it, from `host/tools/segrun.c`.
+every boundary, and writes a version-1 certificate, its accuracy entries
+included since the plan's step 5 (2026-09-30). `make -C host all` builds
+it, from `host/tools/segrun.c`.
 
     cft-segrun --out CERT --states DIR (--salt SALT | --open)
                [--device sw|<xclbin>|cft://host:port | --scratch-depth N]
@@ -1303,6 +1307,10 @@ builds it, from `host/tools/segrun.c`.
                           --segments S --steps K [--param NAME=N ...]
                [--run half-step --h-slots I,J,... --image IMG ...]
                [--run wider --image IMG ...]
+               [--entry drift|step-halving|wider --uses R
+                        --scope max-lanes|lane:I
+                        [--quantity LABEL --term C[,sI...] ...]
+                        --value exact|rounded:FMT:RND|enclosed:FMT] ...
     cft-segrun --hash state|stream-a|stream-b|stream-c FILE
                (--salt SALT | --open)
     cft-segrun --hash commitment --salt SALT
@@ -1341,10 +1349,58 @@ builds it, from `host/tools/segrun.c`.
     instead.
   - N is a power of two from 1 to 32,768, the range `cft_open_ex` takes
     and the reader holds the parameter to.
-- It writes `accuracy 0`. Accuracy is the plan's step 5.
 - `--hash` prints one of the hashes above for a file's bytes, and
   `--build-id` the library's `cft_build_id()`. The gate holds the first
   to the test vectors above.
+
+**Its accuracy entries** (the plan's step 5, 2026-09-30). Each `--entry`
+comes after the runs and opens one entry of the accuracy block, in the
+order given. The options after it are that entry's:
+- `--entry` names the method: `drift`, `step-halving` or `wider`. The
+  kind is the method's (`measurement`, or `estimate`), so it takes no
+  option.
+- `--uses R` is the run the entry is a function of.
+- `--scope max-lanes`, or `--scope lane:I`.
+- A drift names its quantity, `--quantity LABEL`, and gives its terms,
+  one `--term` each, in the order they are summed. A term is the
+  certificate's `term` line with commas for its spaces: the coefficient
+  in the page's one spelling (hex, lowest terms, `1/1` for one), then its
+  factors, `s<slot>` each, non-decreasing. A constant term is its
+  coefficient alone. An estimate takes neither option.
+- `--value exact`, `--value rounded:FMT:RND` or `--value enclosed:FMT`,
+  with FMT one of fp32 to fp256 and RND one of `rne`, `rtz`, `rdn`, `rup`
+  and `rmm`.
+
+The page's example certificate is made with these two:
+
+    --entry drift --uses 0 --scope lane:1 --quantity energy
+            --term 1/2,s2,s2 --term 1/2,s3,s3 --term 1/2,s0,s0
+            --term 1/2,s1,s1 --term 1/1,s0,s0,s1 --term -1/3,s1,s1,s1
+            --value exact
+    --entry step-halving --uses 1 --scope max-lanes --value rounded:fp64:rup
+
+How each value is made:
+- It is computed as "The functions, exactly" says, in its order, with
+  every value held to the width rule.
+- The states come from the files the runs wrote to DIR. They are read
+  back once every run has run, one entry's two states at a time: a
+  drift's run at boundary 0 and then at S, an estimate's run 0 and then
+  its run, each at its last boundary. Each state is read into a buffer of
+  its own size and held to the hash the certificate carries at that
+  boundary. A file that is not that state is refused `output`: another
+  process changed DIR.
+- Every value is computed first, and then every value is put in its
+  form. That is the golden writer's order: `cert.derive` for each entry,
+  then `make_value` and `encode`'s reader.
+- A rounded or enclosed value is rounded and spelt through a software
+  handle of its own, as cft-audit's are, whatever `--device` ran the
+  segments.
+- With no `--entry`, the block is `accuracy 0`, byte for byte what the
+  tool wrote before step 5.
+- The arithmetic is cft-audit's own. Step 5 moved it into one file that
+  both tools build, `host/tools/cert_exact.h`. It is header-only, and
+  each of its functions returns a status, which each tool refuses by
+  name.
 
 **The states.** Each boundary is written as it is reached, to
 
@@ -1398,6 +1454,42 @@ the page's name and code for it, the name the golden writer
 - `line-unexpected` and `line-order`, for a parameter named twice, or
   out of byte order.
 
+An accuracy entry is refused by the names the golden writer gives the
+same defect (`cert.derive`, `make_value`, and `encode`'s reader). Before
+anything is made, each entry in turn is checked for its spellings, then
+against the runs in `cert.derive`'s order:
+- `malformed`, for:
+  - a method, a label, a run, a lane or a slot not in its spelling;
+  - a drift with no `--quantity`, no `--term`, or more than 64;
+  - an estimate given a `--quantity` or a `--term`;
+  - a coefficient not in its one spelling: a zero denominator, 0/3, or
+    not in lowest terms;
+  - a factor not `s<slot>`, more than eight of them, or out of order;
+  - a `--value` that is not `exact`, `rounded:FMT:RND` or
+    `enclosed:FMT`, in the page's words;
+- `width`, for a coefficient past the width rule by its digits;
+- `accuracy-run`, for a run that does not exist, and for an estimate on
+  run 0, on a run of the other kind, or on a run whose lanes or slots a
+  lane are not run 0's;
+- `accuracy-scope`, for a lane the run does not have;
+- `accuracy-slot`, for a slot the run's state does not have (so every
+  slot from 65,536).
+
+After the runs, from the states read back:
+- `accuracy-finite`, for an element a value needs that is not finite;
+- `width`, for a value computed past the rule (an element's exact value,
+  a product, a partial sum or a difference, in the page's order), and
+  for an enclosure's finite end past it, the lower end first.
+
+For one defect, the name is the golden writer's. Where one command line
+has two, the tool names the first in its own order, which can differ
+from the golden writer's: the golden writer checks the runs in `derive`
+and the spellings at `encode`, and has no "before anything is made".
+The same is true of a run's checks, which name a run's parameter
+before a later run's image. For a spelling the golden writer cannot be
+handed, such as a coefficient 2/4 (a `Fraction` is in lowest terms), it
+has no name, and the tool uses the reader's, `malformed`.
+
 For two of these the golden writer has no name. An image that does not
 load, and an empty initial state, each make it raise
 `seq.ProgramError`, and the tool uses the table's `program-image` and
@@ -1405,12 +1497,15 @@ load, and an empty initial state, each make it raise
 five sticky flags, which no reader could read, is `malformed`, as the
 golden writer's `encode` refuses it.
 
-A writer needs four more, which the golden writer, an API rather than
+A writer needs more names, which the golden writer, an API rather than
 a command, never meets. They are the tool's, in sysexits' codes, of
 which 64 is already the auditor's usage:
 - `usage`, exit 64: a command line the tool does not take, or a file it
-  names that cannot be read. Among them, refused before anything is
-  made, is a `--scratch-depth`:
+  names that cannot be read. Among them are an entry's options out of
+  place (before any `--entry`, or a run's after one, or a `--run` after
+  one), given twice in one entry, or an entry without `--uses`,
+  `--scope` or `--value`. Also refused before anything is made is a
+  `--scratch-depth`:
   - beside a `--device` other than `sw`: a device's depth is its image's,
     and `cft_open_ex` refuses the two together too;
   - not a power of two from 1 to 32,768, or not in its one decimal
@@ -1420,8 +1515,10 @@ which 64 is already the auditor's usage:
   written by the option alone, from the depth the backend was opened at;
 - `device`, exit 69: the device does not open; it cannot read the
   sticky flags a certificate records (`cft_caps.flags_readable` 0); a
-  digest, or a segment's run, fails; or the library leaves a segment's
-  flag word unwritten;
+  digest, or a segment's run, fails; the library leaves a segment's
+  flag word unwritten; or the software handle an accuracy value is
+  rounded and spelt through does not open, or one of its conversions
+  fails;
 - `memory`, exit 71: what the runs need in memory cannot be had, found
   before anything is made (**Memory**, below), or another of the tool's
   own allocations fails. The library's allocations are not the tool's:
@@ -1430,14 +1527,29 @@ which 64 is already the auditor's usage:
   cannot be had as `usage` (reading) or `output` (writing);
 - `output`, exit 73: `--out` is there already, is not a regular file
   (Windows' `NUL`), or lies inside DIR, where it cannot be created
-  because DIR does not exist yet; DIR is there already; or the
-  certificate or a state file cannot be created or written.
+  because DIR does not exist yet; DIR is there already; the certificate
+  or a state file cannot be created or written; or a boundary file read
+  back for an entry is not the state this run wrote there (its size or
+  its hash) or cannot be read, because another process changed DIR;
+- `build-width`, exit 78, cft-audit's name: a build whose bigint is
+  narrower than 2,047 bits, given an `--entry`. Such a build has no
+  exact arithmetic, so it refuses rather than write a value differently.
+  It comes after the runs' checks and before anything is made;
+- `build-format`, exit 78, cft-audit's name too: a value rounded or
+  enclosed in a format above the build's `CFT_MAX_FORMAT`. It is found
+  at the format's word, since the value's decimals and its rounding are
+  the library's. A run in such a format stays what it was, the loader's
+  `program-image`.
+
+An exact step past the bigint, which the width rule makes impossible, is
+not a refusal. It prints `cft-segrun: internal error` and exits 70, as
+cft-audit's does.
 
 Every refusal prints `cft-segrun: refused <name>: <why>` and exits with
 the name's code. None writes a certificate, and none removes or changes
 a file the tool did not create. One made before the first segment
-leaves nothing behind. A run that fails part way leaves the boundary
-files it wrote, and says so. A `device` or `program-image` refusal
+leaves nothing behind. A run that fails part way, and an entry refused
+after the runs, leave the boundary files written, and say so. A `device` or `program-image` refusal
 adds the library's sentence (`cft_last_error()`), unless it is the one
 `cft_get_image_id` left before the runs: a sentence can outlive its
 call, and at eb2d1ae a segment's out-of-memory carried that one
@@ -1450,7 +1562,13 @@ makes a run refuse by that name, and says so. With `--build-id` or
 refused and exits 0 with the right output (verifier-C6). A fourth,
 `trial-skipped`, refuses nothing: it skips the trial's allocations
 (**Memory**, below), keeping its size checks, so that the gate can
-measure what the trial costs the runs. The refusals
+measure what the trial costs the runs. The read-back refusal has a
+plant BUILD instead of an instrument (the lead's condition, 2026-09-30).
+Compiled with `-DCFT_SEGRUN_PLANT_STATE_CHANGED`, by the gate and never
+by the Makefile, the first state read back has a bit flipped, and the
+run is refused `output` by the state's hash. The tool `make` builds has
+no such path, and the gate holds its binary to none of the plant
+build's words. The refusals
 only a failing library, device or filesystem, or another process, can
 reach have no test in the gate:
 - `cft_get_caps`, `cft_program_get_info`, `cft_program_digest`,
@@ -1462,7 +1580,12 @@ reach have no test in the gate:
   before the run, and that refusal has a test), or a line that cannot be
   formatted;
 - a boundary file already in DIR when the run comes to write it
-  (`output`, as a file the run did not make).
+  (`output`, as a file the run did not make);
+- a boundary file changed, or gone, between its writing and an entry's
+  reading it back (`output`; the plant build holds the check, and a
+  race does not);
+- the software handle for an accuracy value not opening, or one of its
+  conversions failing (`device`).
 Two of these do happen on the desktop when another process makes them,
 and verifier-C7 made both, there and in WSL (2026-09-28): a loopback
 server killed part way through a run made a segment's run fail, refused
@@ -1483,11 +1606,33 @@ last run. They hold a little less than 99f1b43's did: each image is let
 go once the library has loaded and digested it, and each initial state
 once it is copied into its run's first state.
 
+The accuracy entries come after the last run has let its states go.
+Each reads its two states back into buffers of their exact size, and
+lets both go before the next entry reads its own. The pair is one run's
+(a drift), or run 0's final state beside a run of run 0's lanes and
+slots (an estimate: other shapes are refused before anything is made).
+So, by arithmetic, the entries hold no more at once than the largest
+run did, which was its two states, its streams and a hash's copy. The
+gate measures it (**Its gate**, below). On the desktop, with flagstep's
+three runs of 65,535 lanes and two entries that read four states back,
+the peak commit was:
+- in three runs of the gate, 12 KiB less, 12 KiB less and 28 KiB more
+  than the same three runs without entries (10,224 to 10,284 KiB);
+- beside that, one more state held beside the runs' would be 1,024 KiB.
+So the entries add nothing that identical runs' noise does not
+(2026-09-30). Each entry's definition is held from the command line to
+the end: a rational of about 520 bytes a term at the default bigint,
+about 36 KiB for a drift of 64 terms. Its value is held too, about 520
+bytes. None of it grows with lanes or segments. The least address space
+in Linux (`ulimit -v`), and the trial's cost with entries, are measured
+by the gate on Linux; they have not been run for this page yet.
+
 Before the certificate or DIR is created, the tool counts what the runs
 need against what the process can address. It then tries, in the runs'
 own order, the pieces their sizes decide: each run's hashes, flag words
-and STATUS, kept; its two states and streams, taken and let go; and
-last the certificate's text, at the least it can be. So a run the
+and STATUS, kept; its two states and streams, taken and let go; then
+each entry's two states, taken and let go; and last the certificate's
+text, at the least it can be, its entries' lines among it. So a run the
 process cannot have is refused with nothing made. `--segments
 9223372036854775807` on run 1 is refused by its size, naming the run.
 `--segments 1000000000000` is refused at its boundary hashes' (10^12 +
@@ -1580,11 +1725,14 @@ initial state, and can refuse a certificate the runs alone could write
 **What it certifies, and what it does not.** It certifies what ran:
 which states each segment started and ended on, as hashes, with its
 flag word and STATUS as the library reported them, on the library build
-and device the library names. It does not check an auxiliary run's
-relation to the main run. A half-step bank that is not the main bank
-halved, or a half-step run entered from a state other than the main
-run's, is written as stated, and the audit refuses it (`aux-bank`,
-`aux-start`). It computes no accuracy, and it signs nothing.
+and device the library names. It certifies each accuracy entry's value
+as the stated function of the states it certifies, and says nothing
+more of an estimate than the page does: that an estimate estimates well
+is not shown. It does not check an auxiliary run's relation to the main
+run. A half-step bank that is not the main bank halved, or a half-step
+run entered from a state other than the main run's, is written as
+stated, an estimate against it computed as stated, and the audit
+refuses it (`aux-bank`, `aux-start`). It signs nothing.
 
 **Its gate** is `host/tests/segrun_check.py`, `make -C host segruntest`,
 which `verify/run.sh`'s `programs` stage runs. It certifies
@@ -1604,14 +1752,35 @@ each image held to `programs/MANIFEST`, with its classic bank:
   half-step run shares run 0's, so a writer that entered one from run
   0's `--init` would pass them all (verifier-C6's plant).
 
-Each program is certified keyed and open on the software backend. Then:
+Each program is certified keyed and open on the software backend, with
+accuracy entries (since the plan's step 5, 2026-09-30):
+- Between them the entries have every method, both scopes, every form
+  and every rounding direction:
+  - a step-halving estimate on each ODE program;
+  - a wider one on each fp64 program;
+  - Henon-Heiles' energy drift, exact, whose denominator has a 3, at
+    fp64 on lane 1 and at fp256 over the lanes, near the width rule;
+  - flagstep's counter drift over the lanes. Every lane's drift is -5,
+    so a writer that took the signed maximum writes -5.
+- A difference of two values of one format is exact in it, so a rounded
+  estimate names a narrower format. The gate holds that each direction
+  but `rup` rounds some entry's value to other bits than `rup` does, so
+  that a writer that swapped its direction is seen.
+
+Then:
 - the golden reader must accept each certificate;
-- the golden writer, handed its identity lines, the salt and the initial
-  states, runs every segment itself and must write the same bytes;
+- the golden writer, handed its identity lines, the salt, the initial
+  states and the same entries' definitions, runs every segment itself
+  and must write the same bytes, every entry's value among them;
 - every boundary file must be the golden chain's state;
 - the golden audit must accept each, in full and sampled, from the
-  states the tool wrote, except the one whose half-step run starts from
-  its own state, which it must refuse `aux-start`, in full and sampled;
+  states the tool wrote, every entry re-derived, except the one whose
+  half-step run starts from its own state, which it must refuse
+  `aux-start`, in full and sampled;
+- cft-audit, handed the same files, must give the golden audit's
+  verdict in full, line for line (each entry's re-derived value among
+  them), or its refusal by name, so that both auditors accept each
+  certificate;
 - the build-id line must be what the binary prints and what the tree
   builds, and the software backend's device lines `none`.
 
@@ -1659,17 +1828,66 @@ round, 2026-09-29):
   refuses, so that nothing runs at 32,768. A scratch run's lane block is
   545 MB there (cft.h).
 
+It holds the accuracy entries' refusals (2026-09-30). Each is held by
+its name and code, and by the golden writer refusing the same defect by
+the same name wherever it has one. The golden writer has no name for a
+spelling it cannot be handed, such as a coefficient 2/4.
+- The command line's own: an entry option before any `--entry`, a
+  `--run` or a run's option after one, an option twice, and a missing
+  `--uses`, `--scope` or `--value`.
+- Every spelling (`malformed`), and a coefficient past the rule by its
+  digits (`width`).
+- The entry against the runs:
+  - `accuracy-run`: a run that is not there, a run index past 2^63 - 1,
+    step-halving on run 0 or on the wider run, wider on the half-step
+    run, and an estimate whose half-step run has other lanes;
+  - `accuracy-scope`: lane 3 of 3, and a lane past 2^63 - 1;
+  - `accuracy-slot`: slot 3 of 3, and slot 70,000.
+- Each of these leaves nothing behind.
+- After the runs, `accuracy-finite` (a NaN reached from +inf) and
+  `width` (an element of 2^1023, a product x^2 with x = 2^-600, a
+  partial sum, an enclosure's end). Each leaves the boundary files,
+  every run having run, and says so.
+- The page's orders, each with its control:
+  - 1/a, 1/b, -1/b is refused `width`, and 1/b, -1/b, 1/a is written,
+    byte for byte the golden writer's;
+  - a final +inf beside an initial fp64 largest finite, a 1,024-bit
+    value, is `accuracy-finite`, not `width`;
+  - 1/(3 x 2^900) enclosed in fp256 is refused at its lower end, and
+    enclosed in fp64 it is written.
+
+It builds what only it compiles, with `--cc` and `--lib-src` as the
+audit tool's gate has them:
+- cft-segrun narrow, at `CFT_MAX_FORMAT=2`:
+  - at its own 576-bit bigint, an entry is refused `build-width` with
+    nothing made, and the same runs without entries are written as the
+    default build writes them, but for `build-id` (a build compiled from
+    the sources names none);
+  - at `CFT_BN_LIMBS=64`, an exact entry and one rounded into fp128 are
+    written as the default build writes them, and fp256 rounded or
+    enclosed is refused `build-format`;
+- the plant build, `-DCFT_SEGRUN_PLANT_STATE_CHANGED`: its entry's first
+  state read back is refused `output` (exit 73) by its hash, with no
+  certificate and the boundary files left. Without entries it writes the
+  default build's certificate;
+- and the shipped binary carries none of the plant build's words.
+
 Last, it holds memory. What a run costs: flagstep on 65,535 lanes, a
 main run and two half-step runs, against the main run alone. The two
 further runs may cost their inputs and one state more, no more. At
 4eed552, which held every run's working set at once, they cost two
-whole working sets. The gate measures a process as its platform does:
+whole working sets. What the accuracy entries cost: the same three runs
+with two entries that read four states back, against the three runs
+alone. They may cost 256 KiB more, a quarter of one of those states
+(and on Linux one bisection step), and no more; holding one more state
+beside the runs' would cost 1,024 KiB. The gate measures a process as
+its platform does:
 its peak commit on Windows, and on Linux the least address space it
 writes its certificate in (`ulimit -v`), doubled from 16 MiB and then
 bisected. And what the trial costs the runs, to the page: in two small
-shapes, the least address space with the trial must be no more than
-with `trial-skipped` (eb2d1ae's trial, planted back, costs them 20 KiB
-and 4 KiB). That is held on Linux, where the least address space of a
+shapes, and in a third with two entries, the least address space with
+the trial must be no more than with `trial-skipped` (eb2d1ae's trial,
+planted back, costs them 20 KiB and 4 KiB). That is held on Linux, where the least address space of a
 run is the same every time in one environment. The trial-skipped run
 carries 30 more bytes of environment, which in a window of 32 bytes in
 every 4,096 add a page to it alone; a leaked page is not seen there,
@@ -1683,7 +1901,11 @@ NOT TESTED too, and the gate goes on (at eb2d1ae, run as `nobody` under
 a hard limit of about 8 GB, it stopped with a traceback; verifier-C7).
 It also holds git to ignoring the tool's binary.
 
-With `--scratch-depth` (2026-09-29): 458 checks on the Windows desktop
+With the accuracy entries (2026-09-30): 634 checks on the Windows
+desktop and one SKIP, the trial's cost NOT TESTED there, 80 s. On Linux
+the three checks of the trial's cost run in the SKIP's place, so 637
+there, by that arithmetic and not yet run. With `--scratch-depth`
+(2026-09-29): 458 checks on the Windows desktop
 and one SKIP, the trial's cost NOT TESTED there, 55 s. On Linux the two
 checks of the trial's cost run in the SKIP's place, so 460 there, by
 that arithmetic and not yet run. Before it, since P3b's second
@@ -1695,7 +1917,12 @@ to 52 s with the desktop at 0 to 4 % CPU, and 163 s at about 93 %.
 **On the card**, `hw/card-segrun.sh <image.xclbin>` runs the same gate
 with the certificates made on the tile. It holds the device lines to
 `sha256sum` of the image and to what `device-test -i` prints, and each
-card certificate's run blocks to the software backend's. It ran at
+card certificate's run blocks to the software backend's. Since step 5
+each card certificate carries its program's accuracy entries, from the
+states the card's runs wrote. Its accuracy block is held to the
+software backend's too, and the script hands the gate cft-audit, so
+both auditors must accept each card certificate. It has not run with
+entries on a card yet: the card legs are the lead's. It ran at
 99f1b43 on 2026-09-28, on the U50 (XRT 2.19) with both round-2 images:
 8 checks of 8, the gate's 295 of 295 on the quad's four tiles and 295
 of 295 on the single, 48 to 50 s each, and its negative control, a
@@ -1802,6 +2029,19 @@ page's test vector writes them. It samples through a map of at least
   decision, 2026-09-29). The tool adds a division, a gcd and an exact
   left shift of its own: `cft_bn_shl` keeps a spare limb, and refuses to
   shift a value that fills the container, even by 0.
+- **One arithmetic, two tools.** Since the plan's step 5 (2026-09-30)
+  the tool's exact arithmetic lives in `host/tools/cert_exact.h`, which
+  cft-segrun builds too, so the writer and the C auditor compute every
+  value with the same code. It holds the bigint's missing pieces, an
+  element's exact value, the rationals under the width rule, the
+  rounding, a rational token's reading, and "The functions, exactly", in
+  three parts: the checks, the states read, and the value. It also holds
+  `value_holds`. Every function returns a status and prints nothing:
+  this tool maps each status to its refusal (step 10's names at the
+  entry) or to its internal error, as before. The header is compiled
+  into every build of the tool, the narrow builds and the probe among
+  them, and each build compiles warning-free with the project's flags
+  (-std=c99 -Wall -Wextra -Wpedantic -Wshadow; the lead's condition).
 - **Elements.** An element's exact decimal is `cft_to_decimal_char` at
   0 digits, and a value exactly widened is `cft_convert`. A rational
   rounded into a format is one integer division, as `_round_rational`'s
@@ -1886,8 +2126,10 @@ refusal's name, code and location, or both ACCEPTED with the same lines.
    - A seed the golden audit draws is caught and handed to the tool.
    - An executor the test makes refuse is the instrument.
 3. **segrun_check's certificates:** cft-segrun on its programs, keyed
-   and open, each audited in full, in full from the initial states
-   alone, and sampled under a fixed seed.
+   and open, with the accuracy entries segrun_check gives them (every
+   method, scope, form and direction; since step 5), each audited in
+   full, in full from the initial states alone, and sampled under a
+   fixed seed.
 4. **The golden corpus** (`certificates/MANIFEST`), where the tree has
    one: every case the same three ways, the two auditors against each
    other and against the manifest's verdict.
@@ -1931,13 +2173,28 @@ inner skip.
 - Section 5: 26 checks, the two narrow builds compiled in 5 s each.
 - Section 6: the probe's 4,566 operations all agree, in 15 s.
 
+With the arithmetic moved to `cert_exact.h` and the entries in section
+3 (2026-09-30, on the desktop, niced): 6,800 checks, 0 failed, 0
+skipped, 221 s. The one check more counts section 3's entries, 15 of
+them. Section 2's test_cert.py, then 102 tests with the golden writer's
+new `accuracy-run`, passed through the tool, with parse 6,262 of 6,262
+and audit 243 of 282 as before. The move alone, before the entries,
+gave 6,799 of 6,799 in 218 s. So no verdict moved.
+
 **The plants.** `host/tests/audit_plants.py` is the census. In a fresh
 copy of host/, never the tree, every call of `refuse` or `malformed` in
 `tools/audit.c` becomes a numbered site that an environment variable
 skips and that names itself when it refuses. The gate's recorded cases
 (`audit_check.py --record`) are replayed through the copy. A plant
 changes only the cases that reach its call, so each site is planted in
-turn and only its own cases replayed.
+turn and only its own cases replayed. Since step 5 the arithmetic's
+refusals come back to `tools/audit.c` as statuses from `cert_exact.h`,
+refused there one call a name (step 10's `accuracy-run`, `-scope`,
+`-slot`, `-finite` and `width` each at its own call), so the census
+still plants each name apart. It does not plant inside the header,
+whose checks are held by the gates' controls: test_cert.py's through
+section 2, and segrun_check's section 12. The census below is
+ca1327f's, and has not been run again since the move.
 
 On `tools/audit.c` as of ca1327f, with the gate's 6,669 cases, the
 census found 167 sites (157 s on the desktop, 2026-09-29):
@@ -2071,8 +2328,10 @@ segments a run. Each holds something no other does:
   the main run does not hold, so its expected verdict is the refusal
   `aux-start`: one committed negative for every auditor.
 
-The corpus's data is about 153 KB: 170 files and 152,617 bytes besides
-corpus.py (145,061 bytes until 2026-09-30).
+The corpus's data is about 153 KB: 170 files and 152,611 bytes besides
+corpus.py (152,617 until step 5 made the manifest's three `golden`
+words `both`, and 145,061 before the fixes round's cases, both
+2026-09-30).
 
 **The files.**
 - `certificates/MANIFEST`: every case, every file it names, and each
@@ -2112,8 +2371,11 @@ Paths are from the repository's root.
   - `certificate <path> <sha256>`;
   - `mode`, and for a keyed case `salt <path> <sha256>`;
   - `depth`, and `backends any` or `backends software`;
-  - `accuracy 0 none`, or `accuracy <A> golden` when the case has A
-    entries, which only the golden writer makes before step 5;
+  - `accuracy 0 none`, or `accuracy <A> both` when the case has A
+    entries. `both` says both writers make them: the golden writer, and
+    cft-segrun handed each entry's definition, each held to the
+    committed bytes. Until step 5 the word was `golden`, the golden
+    writer's alone;
   - `verdict accepted` or `verdict refused <name>`;
   - `states <dir>` and `runs <R>`.
 - Each run follows its case's lines:
@@ -2141,18 +2403,21 @@ case it holds:
    - `encode`, handed the committed certificate's identity lines;
 4. every boundary of the golden chain against its committed file;
 5. cft-segrun, on the software backend at the case's depth, writing the
-   committed certificate normalized in two places - three for an
-   accuracy case - and in nothing else:
+   committed certificate normalized in two places and in nothing else:
    - its `build-id` line is what the binary's own `--build-id` prints,
      and its hash line is computed again over that body;
-   - for an accuracy case, the accuracy block is `accuracy 0`, the block
-     the tool writes before step 5;
+   - the three accuracy cases (lorenz63-rk4-fp64, henonheiles-lf-fp256
+     and example) are made WHOLE. The tool is handed each entry as the
+     committed certificate defines it: its method, run, scope, quantity
+     and terms, and its value's form, never its value. It makes every
+     value again. Until step 5 their accuracy block was replaced by
+     `accuracy 0`, the block the tool wrote then;
    - why nothing else may differ: every other line is a function of what
      the manifest fixes (the image, bank, initial state, segments,
-     steps, parameters, mode and salt, and depth) and of the backend,
-     which the gate fixes to software. `build-id` names the library
-     build, which changes with every commit by design, and the hash line
-     covers it;
+     steps, parameters, mode and salt, and depth), of the entries'
+     definitions, and of the backend, which the gate fixes to software.
+     `build-id` names the library build, which changes with every commit
+     by design, and the hash line covers it;
    - its boundary files are the committed ones;
 6. the golden audit giving the case its expected verdict, in full from
    the initial states alone, and sampled from the committed states with
@@ -2161,7 +2426,8 @@ case it holds:
 
 It is 156 checks, 21 to 32 s on the Windows desktop, niced. The
 slowest was with the desktop at about 77 % from other work (2026-09-29).
-With the fixes round's cases it was 21 to 23 s (2026-09-30).
+With the fixes round's cases it was 21 to 23 s (2026-09-30), and with
+the tool making the accuracy cases whole, 22 to 25 s (2026-09-30).
 
 **Changing it.** A change that moves any byte of the corpus fails the
 gate by name: a change to the model, a hash, an encoding, the assembler's
@@ -2183,9 +2449,15 @@ commits, and its `build-id` says `tracked=clean untracked=none`:
 - df06c14, the commit whose `make` keeps a certificate its remake
   equals, wrote augsum's and the two deepwrap cases' (2026-09-30). That
   `make` kept the other nine.
-The golden writer's accuracy block stands where the case has one.
+
+The two accuracy cases cft-segrun writes, lorenz63-rk4-fp64 and
+henonheiles-lf-fp256, carry the golden writer's accuracy block, as
+written at 0b8ea10. Since step 5 the tool makes the same block, and
+`make` refuses a case whose entries are not the golden writer's, value
+for value. So `make` kept both certificates byte for byte (2026-09-30).
 `example`'s is the golden writer's, with the identity this page prints
-(`build-id unknown`).
+(`build-id unknown`), and the check holds cft-segrun's to it but for
+`build-id`.
 
 **As a conformance test.** Another implementation (another library, a
 GPU library, a tile) takes each case's images, banks and initial states
@@ -2230,7 +2502,6 @@ Logan's permission.
   card's device lines.
 - One made through a remote handle.
 - Streams other than +0, which cft-segrun does not take.
-- Accuracy entries made in C, which are step 5.
 
 ## What version 1 does not do
 
