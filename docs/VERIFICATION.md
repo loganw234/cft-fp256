@@ -205,7 +205,7 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | `transcend` | 12.6 min | **52 min** | the thirty-nine functions twice, the second pass through the escalation path |
 | `bindings` (cftmpfr vs gmpy2) | 2.4 min | 8 min | |
 | `cpp` (C++17 and C++20, each a full replay) | 25 min | not measured loaded | |
-| `node` (unit tests + `conformance.mjs`) | 5 min + 17 min | | |
+| `node` (unit tests, `program_test.mjs` + `conformance.mjs`) | 5 min + 17 min | | |
 | `wasm` (`verify.mjs`, the page without a browser) | 11 min | 30 min | the page's own embedded sample first, 4,015 cases over 20 sets replayed as its section 2 does (the build's `negative_control.html` fails there by name, `verify.mjs --page`); then 1,068,915 cases through the page's bytes on `make vectors`' sets (about 1.2 million at the runner's generator counts), then 832,915 over 148 sets through the wrappers. The module must be REBUILT when an opcode is assigned, not merely revisioned: this lane replays the sets, so one predating opcode 31 failed 20 of 148 - all twenty reduce sets, each at its first `maxall` case |
 | `mpfr` | 8 min | | |
 | `soak-quick` | 1.6 min | | |
@@ -268,7 +268,10 @@ scripts in the tree own a committed artifact and each already had a
 `--check` mode that exits 1 when the file on disk differs from a fresh
 generation - `hw/gen_layouts.py`, `host/tools/gen_2opi.py`,
 `host/tools/gen_mp_consts.py` and `bindings/node/make_seq_corpus.py` (a
-fifth, `python/gen_divfull.py`, joined on 2026-09-14). **Nothing invoked
+fifth, `python/gen_divfull.py`, joined on 2026-09-14, and a sixth,
+`bindings/arduino/sync.py`, on 2026-09-30: the Arduino library's
+vendored copy of host/, which no stage had checked until then, as
+verifier-F4 of the fixes round found). **Nothing invoked
 any of them**, and by 2026-09-13 two had drifted: the five
 `hw/layouts/*.cfg` carried a superseded WNS note in a commented-out clock
 line, and `bindings/node/seq_corpus.jsonl` had been stale since the `kx`

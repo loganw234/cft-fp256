@@ -133,7 +133,8 @@ and absent from `all:`. The repo's idiom is a second `all: <tool>` line,
 which make merges; this one tool had skipped it. It also had no clean
 rule, so a stale binary could outlive a `clean`.
 
-**`bindings/arduino/sync.py --check` passes.** Measured 2026-09-16: 30
+**`bindings/arduino/sync.py --check` passes, and the `generated` stage
+runs it since 2026-09-30** (no stage did before). Measured 2026-09-16: 30
 vendored files, all identical to `host/` (28 on 2026-09-12; round 2
 added `mask_bits.h` and its neighbour; 32 from 2026-09-25, when
 `tile_select.h` and `lane_cut.h` joined `host/src`; 33 from 2026-09-28,

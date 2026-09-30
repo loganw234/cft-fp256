@@ -827,11 +827,11 @@ do_generated() {
   fi
   for g in hw/gen_layouts.py host/tools/gen_2opi.py \
            host/tools/gen_mp_consts.py bindings/node/make_seq_corpus.py \
-           python/gen_divfull.py; do
+           python/gen_divfull.py bindings/arduino/sync.py; do
     out=$(PY "$ROOT/$g" --check 2>&1); grc=$?
     if [ $grc -eq 0 ]; then
       printf '  ok    %s\n' "$g"
-    elif printf '%s' "$out" | grep -qiE "stale|differs from a fresh"; then
+    elif printf '%s' "$out" | grep -qiE "stale|differs from a fresh|has drifted from host/"; then
       printf '  STALE %s - regenerate with: python %s\n' "$g" "$g"
       printf '%s\n' "$out" | tail -3 | sed 's/^/        /'
       rc=1
@@ -848,7 +848,7 @@ do_generated() {
   return $rc
 }
 need python
-stage generated "the committed output of five generators still matches a fresh generation, by each one's --check" -- do_generated
+stage generated "the committed output of six generators still matches a fresh generation, by each one's --check (the Arduino copy of host/ among them)" -- do_generated
 
 do_selfcheck() {
   HOSTMAKE "device-test$EXE" || return 1
@@ -1105,10 +1105,11 @@ stage lang-fortran "Fortran example builds and runs through iso_c_binding (print
 
 do_node() {
   ensure_vectors || return 1
-  (cd "$ROOT/bindings/node" && node test.mjs && node conformance.mjs "$ROOT/vectors/out")
+  (cd "$ROOT/bindings/node" && node test.mjs && node program_test.mjs \
+     && node conformance.mjs "$ROOT/vectors/out")
 }
 need node
-stage node "Node binding: unit tests, then the vectors through cft_node.wasm" -- do_node
+stage node "Node binding: unit tests and the program-load tests, then the vectors through cft_node.wasm" -- do_node
 
 do_wasm() {
   ensure_vectors || return 1
