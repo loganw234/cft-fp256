@@ -907,9 +907,11 @@ def sweep_system(case, J, L, tool, work):
 #     --cases loads fewer cases.
 # The first difference ends the run, naming the file, the section and the
 # committed line, with both lines. At the end, every committed `-- `
-# section of a case this run loaded, in a mode it ran, must have been
-# printed. The committed runs themselves are made WITHOUT --against, whose
-# own lines would otherwise sit inside the sections they follow.
+# section, in a mode the run ran, of a case it was ASKED for (--cases, or
+# every case without it) must have been printed (Against.missing); and
+# with or without --against, every case --cases names must have been
+# scored (main). The committed runs themselves are made WITHOUT --against,
+# whose own lines would otherwise sit inside the sections they follow.
 
 class Record:
     """stdout, written through and kept."""

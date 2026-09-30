@@ -9,7 +9,14 @@ certified". What it changed in the tree:
   section 1.3;
 - `programs/estimates.py`, new: the instrument;
 - `docs/studies/acc-a/`: the instrument's two captured runs;
-- this file, and its row in docs/README.md.
+- this file, and its row in docs/README.md;
+- `verify/run.sh`: the two stages that hold this study to its committed
+  runs, `estimates` and `estimates-full` (section 9), and the width of
+  the names in its tables;
+- docs/VERIFICATION.md: a row for each stage, and a paragraph on them;
+- README.md, CLAUDE.md and docs/README.md: the stage counts they state
+  (44 total, 38 in the gate budget), CLAUDE.md's two numbers and nothing
+  else there.
 
 No C, and no certificate, image or program, was changed. **Nothing here
 is a bound.** docs/CERTIFICATES.md says an estimate "indicates an error
@@ -65,9 +72,9 @@ Every number below is one of three kinds and says which:
    All RUN.
 5. **Read with that in mind, a certificate on these programs says the
    following.**
-   - Where W/E is small (here 2e-7 or less at h = 0.01), the true method
-     error is E/0.95 to E/0.75. Richardson's correction recovers it to
-     1.6% on these programs.
+   - Where W/E is small (here at most 2.0e-7 per lane at h = 0.01,
+     Lorenz-96's lane 0), the true method error is E/0.95 to E/0.75.
+     Richardson's correction recovers it to 1.6% on these programs.
    - Where W is not small against E, E is not a method error at all.
    - Neither estimate covers the rounding of the bank's derived
      constants.
@@ -236,10 +243,21 @@ fields are written again, in textbook form, in `programs/estimates.py`.
 - its value at (1 + delta) t is 0.98 to 1.04 u from R_K.
 RUN, the `odefun at 30 and 40 digits` tables.
 
-**What that shows.** R_K's stated error is its real distance from the
-limit, measured by a method that shares nothing with the scheme. It
-also shows that the limit IS the ODE's solution at the shifted time, so
-a mistake shared by gen_odes.py and `ode_step` would show here.
+**What that shows.** R_K's stated error is its real distance from
+odefun's solution, measured by a method that shares nothing with the
+scheme: 0.98 to 1.04 u everywhere. It cannot show WHICH time the limit is
+at. Its resolution is about u, and u is at least 1,000 times the time
+shift on both fp64 RK4 cases: about 4e-12 against 3.5e-15 on Lorenz-63
+at t = 3, and 5e-15 against 1.1e-18 on Lorenz-96. At fp256 there is no
+shift to show.
+
+**What shows the shifted time** is section 1.7. There, lane 0's deepest
+level, extrapolated, lands within 2.95e-19 of odefun at the shifted time
+on Lorenz-63, whose shift is 3.5e-15. The stated agreement, 4.0e-18, is
+nearly 900 times below the shift (885). So a mistake shared by gen_odes.py and
+`ode_step` that moved the limit by as much as the shift would show
+there. On Lorenz-96 the same margin is 3.6 times (3.1e-19 against
+1.1e-18).
 
 ### 1.7 The sweep, and which reference scored which run
 
@@ -314,9 +332,12 @@ E/M is the estimate over the method error, with 2u as its uncertainty
 
 **Against the total error** max |F0 - R_K|, the ratios agree with E/M to
 6 digits in every case (RUN, the `E/total` column). At h = 0.01
-rounding is far below the method error: W/E is at most 2.1e-10
-(Lorenz-63), 1.9e-7 (Lorenz-96) and 1.6e-10 (Henon-Heiles). Lorenz-96's
-shows in the 7th digit.
+rounding is far below the method error. Per lane, W/E is at most:
+- 2.1e-10 on Lorenz-63 (lane 2);
+- 2.0e-7 on Lorenz-96 (lane 0; 1.9e-7 over the lanes, the max-lanes W
+  over the max-lanes E);
+- 1.6e-10 on Henon-Heiles (lane 0).
+Lorenz-96's shows in the 7th digit.
 
 **fp64 and fp256 agree** to 6 digits, since the scheme and its method
 error are the same. They agree to 7 digits except on Lorenz-96, where
@@ -445,48 +466,73 @@ arithmetic rounding differs fifteenfold, and why it grows with t
 ## 5. As h shrinks
 
 Lane 0, a certified run at every level. E, M and the total error are as
-in section 2, at level j. rho = max |F_j - R_j|. The last column is the
-step-halving ratio in exact arithmetic, |R_j - R_(j+1)| / M (RUN,
+in section 2, at level j, and `ref` is what M and the total error were
+measured against (section 1.7). rho = max |F_j - R_j|. `exact` is the
+step-halving ratio in exact arithmetic, |R_j - R_(j+1)| / M. Every ratio
+carries the uncertainty the run prints, from its reference's stated
+error: 2u_L for R_L, the stated agreement for odefun (RUN,
 sweep.out.txt).
 
 **Lorenz-63, fp64.**
 
-| j | h | E/M | E / total | rho | exact |
-|---|---|---|---|---|---|
-| 0 | H | 0.952506 | 0.952506 | 1.8e-15 | 0.952506 |
-| 2 | H/4 | 0.943584 | 0.943585 | 2.3e-14 | 0.943584 |
-| 4 | H/16 | 0.939168 | 0.9393 | 1.5e-13 | 0.93929 |
-| 5 | H/32 | 0.937497 | 0.937777 | 4.0e-14 | 0.938423 |
-| 6 | H/64 | 0.950116 | 0.940533 | 1.3e-13 | 0.937982 |
-| 7 | H/128 | 1.81385 | 1.83643 | 1.3e-14 | 0.937965 |
-| 8 | H/256 | 38.99 | 2.704 | 2.2e-13 | 0.93763 |
-| 9 | H/512 | 274.2 | 0.696 | 3.8e-13 | 0.93767 |
+| j | h | ref | E/M | exact | E / total | rho |
+|---|---|---|---|---|---|---|
+| 0 | H | R_10 | 0.952506 +- 8.9e-13 | 0.952506 +- 8.9e-13 | 0.952506 +- 8.9e-13 | 1.76e-15 |
+| 1 | H/2 | R_10 | 0.947615 +- 1.9e-11 | 0.947615 +- 1.9e-11 | 0.947615 +- 1.9e-11 | 1.8e-14 |
+| 2 | H/4 | R_10 | 0.943584 +- 3.5e-10 | 0.943584 +- 3.5e-10 | 0.943585 +- 3.5e-10 | 2.28e-14 |
+| 3 | H/8 | R_10 | 0.940889 +- 6.3e-9 | 0.940881 +- 6.3e-9 | 0.94089 +- 6.3e-9 | 4.13e-14 |
+| 4 | H/16 | R_10 | 0.939168 +- 1.1e-7 | 0.93929 +- 1.1e-7 | 0.9393 +- 1.1e-7 | 1.51e-13 |
+| 5 | H/32 | R_10 | 0.937497 +- 1.7e-6 | 0.938423 +- 1.7e-6 | 0.937777 +- 1.7e-6 | 4.02e-14 |
+| 6 | H/64 | R_10 | 0.950116 +- 2.9e-5 | 0.937982 +- 2.8e-5 | 0.940533 +- 2.8e-5 | 1.34e-13 |
+| 7 | H/128 | R_10 | 1.81385 +- 0.00088 | 0.937965 +- 0.00046 | 1.83643 +- 0.0009 | 1.27e-14 |
+| 8 | H/256 | odefun | 38.9857 +- 0.0099 | 0.937633 +- 0.00024 | 2.70403 +- 4.8e-5 | 2.22e-13 |
+| 9 | H/512 | odefun | 274.166 +- 1.1 | 0.937674 +- 0.0038 | 0.695985 +- 7.2e-6 | 3.84e-13 |
 
 **Lorenz-96, fp64.**
 
-| j | E/M | E / total | rho | exact |
-|---|---|---|---|---|
-| 0 | 0.936652 | 0.936652 | 1.6e-14 | 0.936652 |
-| 3 | 0.937671 | 0.937031 | 6.2e-14 | 0.937429 |
-| 4 | 0.884329 | 0.878141 | 1.3e-13 | 0.93748 |
-| 5 | 3.2137 | 1.20015 | 1.9e-13 | 0.93771 |
-| 6 | 65.73 | 0.956 | 3.5e-13 | 0.93749 |
-| 7 | 2768.6 | 1.287 | 6.8e-13 | 0.93750 |
+| j | ref | E/M | exact | E / total | rho |
+|---|---|---|---|---|---|
+| 0 | R_8 | 0.936652 +- 4.5e-10 | 0.936652 +- 4.5e-10 | 0.936652 +- 4.5e-10 | 1.56e-14 |
+| 1 | R_8 | 0.937152 +- 7.1e-9 | 0.937154 +- 7.1e-9 | 0.93715 +- 7.1e-9 | 3.79e-14 |
+| 2 | R_8 | 0.937372 +- 1.1e-7 | 0.937347 +- 1.1e-7 | 0.937308 +- 1.1e-7 | 4.97e-14 |
+| 3 | R_8 | 0.937671 +- 1.8e-6 | 0.937429 +- 1.8e-6 | 0.937031 +- 1.8e-6 | 6.19e-14 |
+| 4 | R_8 | 0.884329 +- 2.7e-5 | 0.93748 +- 2.9e-5 | 0.878141 +- 2.7e-5 | 1.25e-13 |
+| 5 | R_8 | 3.2137 +- 0.0016 | 0.937712 +- 0.00046 | 1.20015 +- 0.00022 | 1.85e-13 |
+| 6 | odefun | 65.7268 +- 0.004 | 0.937492 +- 5.7e-5 | 0.956291 +- 8.4e-7 | 3.49e-13 |
+| 7 | odefun | 2768.55 +- 2.7 | 0.937497 +- 0.00091 | 1.28708 +- 5.8e-7 | 6.83e-13 |
 
 **Henon-Heiles, fp64.**
-- E/M runs 0.750002, 0.750001, 0.750003 ... 0.750183 through j = 5.
-  Scored by R_11, whose 2u is 0.05% at j = 5.
-- From j = 6, scored by odefun: 0.750002, 0.749999, 0.749978, 0.749733
-  and 0.750685 at j = 10.
-- The exact ratio from j = 6 on is 0.75 within its uncertainty: 1e-13 at
-  j = 6, and 2.6e-11 at j = 10.
-- rho grows from 1.3e-15 to 5.7e-14.
-- The method error falls from 1.1e-5 to 1.0e-11. So at h/1024 rounding
-  is still 1/180 of it.
 
-**Lorenz-63, fp256** (j = 0..4): 0.952506, 0.947615, 0.943584, 0.940882
-and 0.939303. rho is at most 2.8e-69, so these are the exact-arithmetic
-values.
+| j | ref | E/M | exact | E / total | rho |
+|---|---|---|---|---|---|
+| 0 | R_11 | 0.750002 +- 3.6e-7 | 0.750002 +- 3.6e-7 | 0.750002 +- 3.6e-7 | 1.31e-15 |
+| 1 | R_11 | 0.750001 +- 1.4e-6 | 0.750001 +- 1.4e-6 | 0.750001 +- 1.4e-6 | 1.18e-15 |
+| 2 | R_11 | 0.750003 +- 5.7e-6 | 0.750003 +- 5.7e-6 | 0.750003 +- 5.7e-6 | 2.19e-15 |
+| 3 | R_11 | 0.750011 +- 2.3e-5 | 0.750011 +- 2.3e-5 | 0.750011 +- 2.3e-5 | 1.62e-15 |
+| 4 | R_11 | 0.750046 +- 9.2e-5 | 0.750046 +- 9.2e-5 | 0.750046 +- 9.2e-5 | 3.58e-15 |
+| 5 | R_11 | 0.750183 +- 0.00037 | 0.750183 +- 0.00037 | 0.750183 +- 0.00037 | 1.7e-15 |
+| 6 | odefun | 0.750002 +- 1.0e-13 | 0.75 +- 1.0e-13 | 0.750001 +- 1.0e-13 | 6.31e-15 |
+| 7 | odefun | 0.749999 +- 4.0e-13 | 0.75 +- 4.0e-13 | 0.75 +- 4.0e-13 | 6.79e-15 |
+| 8 | odefun | 0.749978 +- 1.6e-12 | 0.75 +- 1.6e-12 | 0.74998 +- 1.6e-12 | 9.8e-15 |
+| 9 | odefun | 0.749733 +- 6.4e-12 | 0.75 +- 6.4e-12 | 0.749677 +- 6.4e-12 | 8.16e-15 |
+| 10 | odefun | 0.750685 +- 2.6e-11 | 0.75 +- 2.6e-11 | 0.749658 +- 2.5e-11 | 5.73e-14 |
+
+- **The method error** falls from 1.1e-5 at j = 0 to 1.0e-11 at j = 10,
+  while rho grows from 1.3e-15 to 5.7e-14. So at h/1024 rounding is
+  still 1/180 of it.
+- **Where the reference's own error shows.** Where R_L scores a level,
+  its own error, which the +- covers, biases the ratio.
+  - Henon-Heiles at j = 3, 4 and 5: R_11's error makes the ratio
+    0.75/(1 - 4^(j - 11)), 1.1e-5, 4.6e-5 and 1.8e-4 above 3/4. That is
+    0.750011, 0.750046 and 0.750183: each inside its +-, and gone once
+    odefun scores the level from j = 6.
+  - Lorenz-96's exact ratio at j = 5 carries R_8's bias, +2.3e-4, inside
+    its +-0.00046.
+
+**Lorenz-63, fp256**, every level scored by R_8: 0.952506 +- 2.3e-10,
+0.947615 +- 4.8e-9, 0.943584 +- 9.1e-8, 0.940882 +- 1.6e-6 and
+0.939303 +- 2.7e-5 at j = 0..4. rho is at most 2.8e-69, so these are the
+exact-arithmetic values.
 
 **Wider at every level:** W/rho - 1 is at most 3.4e-18 in all three
 fp64 sweeps.
@@ -517,8 +563,8 @@ For the three programs here, at the certified h:
 
 1. **A step-halving estimate E is 93% to 99% of the method error**
    (0.75 of it for Stormer-Verlet), when rounding is far below it:
-   - here W/E is 2e-7 or less, and at fp256 there is no rounding to
-     speak of;
+   - here W/E is at most 2.0e-7 per lane, and at fp256 there is no
+     rounding to speak of;
    - the method error is then E x 1.050 (Lorenz-63, T = 3), E x 1.068
      (Lorenz-96) or E x 1.33333 (Henon-Heiles);
    - Richardson's correction E x 2^p/(2^p - 1) recovers it to 1.6%
@@ -607,8 +653,9 @@ mpmath:
 
 **Time.** 355 s for `certified` and 206 s for `sweep`, run one at a time
 and niced, on a desktop in use: 3% busy with other work when the first
-began, and not measured again before the second. That is about 9
-minutes for `all`.
+began, and not measured again before the second. verifier-W2 ran the
+same two halves the same day in 441 s and 406 s, with the desktop 5% to
+38% busy with other work. So `all` is 9 to 14 minutes here.
 - Henon-Heiles' K = 11 is 270 s of the first.
 - `--cases A,B` limits either mode to named corpus cases.
 - `--tau` sets the tolerance.
@@ -628,6 +675,9 @@ first line, and names the first line that differs.
 
 **Two runner stages hold it** (the lead's decision, 2026-09-30):
 - `estimates`, in the gate budget: `certified --cases
-  lorenz63-rk4-fp64,lorenz96-rk4-fp64` against certified.out.txt, 47 s;
+  lorenz63-rk4-fp64,lorenz96-rk4-fp64` against certified.out.txt, 50 s
+  and 51 s in two clean runs;
 - `estimates-full`, in the full census only: `all` against both runs.
-Both are in docs/VERIFICATION.md.
+Each fails, by name, for a committed section of a case it was asked for
+that it did not print, and for a named case it did not score. Both are
+in docs/VERIFICATION.md.
