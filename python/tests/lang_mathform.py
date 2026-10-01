@@ -102,10 +102,14 @@ class _Expr:
         return left
 
     def unary(self):
-        if self.peek() == ("op", MINUS):
+        count = 0
+        while self.peek() == ("op", MINUS):      # a run, in a loop
             self.take()
-            return ("neg", self.unary())
-        return self.atom()
+            count += 1
+        tree = self.atom()
+        for _ in range(count):
+            tree = ("neg", tree)
+        return tree
 
     def atom(self):
         t = self.take()
@@ -249,8 +253,14 @@ class MathForm:
                 v = _arith(node[0], v, self._eval(node[2], env))
             return v
         if kind == "neg":
-            v = self._eval(t[1], env)
-            return v.map2(0, lambda x, _y: -x) if isinstance(v, Vec) else -v
+            count = 0
+            while t[0] == "neg":                    # a run, in a loop
+                count += 1
+                t = t[1]
+            v = self._eval(t, env)
+            if count % 2:
+                v = v.map2(0, lambda x, _y: -x) if isinstance(v, Vec) else -v
+            return v
         if kind == "abs":
             return abs(self._eval(t[1], env))
         if kind == "cmp":

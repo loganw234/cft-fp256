@@ -434,33 +434,34 @@ PLANTS = {"reassociated-sum": plant_reassociated,
 
 
 def plant_outcome(plant, name, fmtname):
-    """(lanes differing from seq.py at the own count, of how many, the
-    first count at which any lane differs, the integers lane's verdict)."""
+    """{count: lanes differing from seq.py there}, over the gate's own
+    counts (1, 2, 5 and the image's), with the number of lanes - the
+    comparison the gate makes, at every count it makes it."""
     g = PLANTS[plant](graph(name, fmtname))
-    ls, roles = lanes(name, fmtname)
+    ls, _roles = lanes(name, fmtname)
     run = lang.run(g, [list(x) for x in ls], OWN_STEPS[name],
                    at=CHECKPOINTS)
-    first = None
+    differ = {}
     for s in _counts():
         steps = OWN_STEPS[name] if s is None else s
         want, _f = seq_run(name, fmtname, steps)
         got, _g = _interp_at(run, name, s)
-        if got != want and first is None:
-            first = steps
-    want, _f = seq_run(name, fmtname, OWN_STEPS[name])
-    differ = [k for k, (a, b) in enumerate(zip(run.states, want)) if a != b]
-    ints = roles.get("integers")
-    return differ, len(ls), first, (None if ints is None else ints in differ)
+        differ[steps] = [k for k, (a, b) in enumerate(zip(got, want))
+                         if a != b]
+    return differ, len(ls)
 
 
 @pytest.mark.parametrize("plant", list(PLANTS))
 @pytest.mark.parametrize("fmtname", FORMATS_BUILT)
 def test_plant_disagrees_with_seq(plant, fmtname):
+    """Each plant disagrees with seq.py where the gate compares - at some
+    count among 1, 2, 5 and the image's own, in some lane. (A plant can
+    disagree at one count and agree again at a later one: verifier-VL1
+    measured lanes that reconverge, so no single count is the test.)"""
     name = "lorenz63-rk4"
-    differ, total, first, ints = plant_outcome(plant, name, fmtname)
-    print(f"plant {plant} on {name}-{fmtname}: {len(differ)} of {total} "
-          f"lanes differ from seq.py after {OWN_STEPS[name]} steps; the "
-          f"first count with a difference is {first}; the small-integer "
-          f"lane {'differs' if ints else 'agrees'}")
-    assert differ, f"plant {plant} stayed green at {total} lanes"
-    assert first is not None
+    differ, total = plant_outcome(plant, name, fmtname)
+    seen = sorted({k for ks in differ.values() for k in ks})
+    print(f"plant {plant} on {name}-{fmtname}: lanes differing from seq.py "
+          f"at counts {', '.join(f'{s}: {len(ks)}' for s, ks in differ.items())}"
+          f" of {total}; {len(seen)} lanes differ at some count")
+    assert seen, f"plant {plant} stayed green at {total} lanes"
