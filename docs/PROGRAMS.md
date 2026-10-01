@@ -79,6 +79,8 @@ assemblers hold, refusing the same sources for the same reasons:
   number: a decimal there is read as 5.12.2 says, at any length
   (verifier-VD1 measured 4,301 and 6,000 digits accepted by both).
 
+A `.cftl` source, the language's, follows the same rule in the same
+words (docs/LANGUAGE.md), so the round's two text forms share one.
 The whole source is checked before any line is assembled, UTF-8 first
 and then the characters, so of several faults both name the same one.
 A caller of `asm.py` that holds a file passes its bytes: a text-mode

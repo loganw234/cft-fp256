@@ -1,0 +1,13 @@
+; Henon-Heiles (1964), Stormer-Verlet, drift-kick-drift: the language's
+; statement of the image of the same name in programs/. The kick is
+; fma(h, force, p) with the force as written here: one neg more a step
+; than the image's fma(-h, ...), and the same bits (docs/LANGUAGE.md).
+system henonheiles
+format fp64
+round  rne
+state  x, y, px, py
+d/dt x  = px
+d/dt y  = py
+d/dt px = -(x * fma(2, y, 1))
+d/dt py = fma(y, y - 1, -(x * x))
+step   stormer-verlet, h = 1/100, q = (x, y), p = (px, py)

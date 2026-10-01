@@ -1,0 +1,14 @@
+; Lorenz (1963), stepped by the classical Runge-Kutta method: the
+; language's statement of the image of the same name in programs/,
+; which the reference interpreter reproduces bit for bit, FLAGS
+; included (python/tests/test_lang_refs.py). docs/LANGUAGE.md is the
+; language.
+system lorenz63
+format fp256
+round  rne
+state  x, y, z
+param  sigma = 10, rho = 28, beta = 8/3
+d/dt x = sigma * (y - x)
+d/dt y = fma(x, rho - z, -y)
+d/dt z = fma(x, y, -(beta * z))
+step   rk4, h = 1/100
