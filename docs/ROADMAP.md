@@ -4234,10 +4234,12 @@ and verifier-P1 checked this section against the tree).
     by 3).
 - **The precedents.**
   - atlas-engine lowers pinned GLSL to binary32 tile programs. It keeps
-    an op list with scoped sharing, folds no float constant or
-    identity, inlines calls, turns control flow into SELECT, and
-    prices its spiller in lane cost. Its output is checked five ways: its own interpreter,
-    libcft, seq.py, asm.py's byte-for-byte reassembly, and positive-run.
+    an op list with scoped sharing, folds no arithmetic between float
+    constants and no float identity (a constant's negation it folds
+    exactly, by the sign bit), inlines calls, turns control flow into
+    SELECT, and prices its spiller in lane cost. Its output is checked
+    five ways: its own interpreter, libcft, seq.py, asm.py's
+    byte-for-byte reassembly, and positive-run.
   - cft-orbits builds its images at run time, in C.
   - The docs already treat the order of roundings as the contract
     (ORBITS.md, and DETERMINISM.md's "Ordering"). COMPLIANCE.md files
@@ -4284,8 +4286,9 @@ files under "language".
      is one.
    - The compiler may commute the operands of + and *, which is bit for
      bit here. DETERMINISM.md's "Ordering" holds it for +, and
-     verifier-P1 measured both over 975,240 comparisons, NaN payloads
-     included. It may also share identical
+     verifier-P1 measured + and * (104,180 comparisons each) and fma's
+     multiplicands swapped (766,880), NaN payloads included. It may
+     also share identical
      subexpressions, and schedule and allocate freely. None of these
      changes a value or the run's FLAGS.
 2. **Every operation written is performed.** A value defined and never
@@ -4298,10 +4301,11 @@ files under "language".
    - A `const`, and any expression whose operands are all constants, is
      evaluated exactly and rounded once, under the program's attribute.
      Its flags are the compiler's report, not the run's.
-   - So under rdn or rup a constant's negation is not the negation of
-     its rounding. With beta a const, -beta is the attribute's rounding
-     of -8/3. With beta a param, -beta is a run-time negation of the
-     bank's value.
+   - So under rdn or rup an inexact constant's negation is not the
+     negation of its rounding: 8/3 and 1/100 differ, 2 and 1/2 do not.
+     With beta a const, -beta is the attribute's rounding of -8/3.
+     With beta a param, -beta is a run-time negation of the bank's
+     value.
    - Everything else is a run-time operation. So h/6 is RN(1/600), x*2*3
      is (x*2)*3, and x*(2*3) is x*6.
    - Refused by name: a constant that overflows, a nonzero one that
@@ -4342,9 +4346,10 @@ files under "language".
     - an explicit time dependence (v1);
     - anything past the target device's stated capacities: registers
       plus scratch (2,048 slots on the U50's revision 7, 256
-      elsewhere), the bank (512), the program length, the 2^40
-      worst-case instructions, the format, or a feature the target's
-      CAPS bits do not publish;
+      elsewhere), the bank (512), the program length, the format, or
+      a feature the target's CAPS bits do not publish;
+    - the loader's own bound of 2^40 worst-case instructions, the same
+      on every device;
     - the constant cases above.
 
 **The compiler, proposed.** It is a Python package of its own, held to
@@ -4356,9 +4361,10 @@ following:
 - It schedules for the tile's overlap. At a full block the latency is
   hidden. Deposits and scratch accesses are priced per format from the
   census, re-measured, since revision 7 made Lorenz-96 2.55 times
-  faster.
+  faster in a full block (1.22 and 1.35 in short ones).
 - It emits the instructions a tile runs, revision 7's. Revision 8's
-  exist only in the model and the software backend.
+  exist only in the model, the reference assembler and the software
+  backend; no RTL and no cft-asm.c carries them.
 - It allocates registers r3 to r31, and spills to strict scratch.
 - It keeps the state in scratch (the segment shape), and runs the step
   loop as one REPEAT.
@@ -4431,17 +4437,18 @@ step-halving estimate runs on.
      image, so the refusal comes after the image has crossed: the
      refusal the loader exists to prevent.
    - Golden-first: seq.py refuses it by name, then program.c. The model
-     then refuses what the tile refuses; asm.py already refuses such an
-     image. The module is rebuilt.
+     then refuses the bank depth the tile refuses (it still accepts
+     more instructions and deposit slots than a tile, deliberately).
+     asm.py already refuses such an image. The module is rebuilt.
 2. **cft-asm.c splits a long line.**
    - Its `fgets` reads 1,023 bytes at a time, so a longer line is
      assembled as two. A comment whose tail reads ` deposit r0` gave an
      image with an extra deposit, at exit 0 (the survey, measured).
      asm.py reads the line whole.
    - The fix is cft-asm.c's alone: it reads a line whole, at any
-     length, as asm.py does. Today a line past 2,046 bytes splits three
-     ways, and verifier-P1 saw one refused with the wrong error at the
-     wrong line.
+     length, as asm.py does. Today a line of 2,047 to 3,069 bytes
+     splits three ways and a longer one more, and verifier-P1 saw one
+     refused with the wrong error at the wrong line.
 3. **Sentences the survey found stale:**
    - SEQUENCER.md's "no image carries revision 7", and its "under fifty
      instructions and six constants";
@@ -4453,7 +4460,7 @@ step-halving estimate runs on.
    - ATLAS.md's "11 of 256".
 
    rtl/cft_seq.sv's stale comments (the header check's flag width at
-   :40, and the bank's 256 entries at :53, :144 and :1288, now 512) wait
+   :40, and the bank's 256 entries at :53, :144 and :1289, now 512) wait
    for the next RTL change, so that the built images' rtl tree stays
    the tree they were built from.
 
