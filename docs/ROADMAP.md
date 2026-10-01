@@ -1190,6 +1190,13 @@ fix), four tiles at 135 MHz with `-retiming`:
 | without retiming | -0.113 | -23.0 | 463 |
 | **with retiming** | **-0.141** | -45.9 | 836 |
 
+*Corrected 2026-09-30:* the build "with retiming" had tile 1 alone
+retimed. hw/rebuild-2022.sh set the property on `cft_krnl_1`'s
+synthesis run by name, and a quad has four. Revision 7's quad,
+retimed on all four tiles with ExtraTimingOpt, AggressiveExplore and
+phys_opt, closed 135 MHz at +0.003 (q135b; docs/VALIDATION.md, 2026-09-30, "the fixes round" and "the steps 5 and 6 round").
+So what follows measured one retimed tile in four, not retiming.
+
 Slightly worse, and the reason is visible in the router's own
 trajectory: both builds left placement at exactly +0.055 - the placer
 met its target and stopped, the met-target lesson again - and both

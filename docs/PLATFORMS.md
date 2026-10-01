@@ -27,7 +27,7 @@ against a vendor's marketing arithmetic. The constants:
 | shell + one CU (U50) | 123,897 LUT | differenced routed builds, docs/SCALING.md |
 | each further CU | +12,626 LUT | (161,775 - 123,897) / 3, docs/LAYOUTS.md |
 | practical routing ceiling | ~85% | docs/SCALING.md; the routed quad closed at 80.6% |
-| kernel clock | 135 MHz, -2 grade, retimed - the quad's, and the clock the demand derivation below uses; the single tile's is 175 MHz (closed and proven on the card, 2026-09-24) | 9f73107, docs/LAYOUTS.md; docs/VALIDATION.md, 2026-09-16 and 2026-09-24 |
+| kernel clock | 135 MHz, -2 grade - the quad's (revision 7's closes it at +0.003 with all four tiles retimed; the quads before it had tile 1 alone retimed, docs/VALIDATION.md, 2026-09-30, "the fixes round" and "the steps 5 and 6 round"), and the clock the demand derivation below uses; the single tile's is 175 MHz (closed and proven on the card, 2026-09-24) | 9f73107, docs/LAYOUTS.md; docs/VALIDATION.md, 2026-09-16 and 2026-09-24 |
 | beat | 256 bits, one per cycle per stream | docs/ARCHITECTURE.md |
 | streams | 3 in + 1 out = 4 AXI masters per tile | docs/ARCHITECTURE.md |
 | measured cost | 1.125 cycles/beat marginal, 40 fixed, since the read-ahead of 2026-09-09; the demand below is derived from the 1.250 and 36 measured before it | `make cycles`, docs/VALIDATION.md 2026-09-09, docs/SCALING.md |

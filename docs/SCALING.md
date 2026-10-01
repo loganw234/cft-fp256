@@ -128,7 +128,9 @@ building at 135 MHz with the ladders off as this is written; neither
 result is known.
 
 *Known now (2026-09-02):* the single closed (+0.045, with or without
-retiming); the quad missed 135 twice (-0.113, -0.141). Since then the
+retiming); the quad missed 135 twice (-0.113, -0.141, the second with
+tile 1 alone retimed: docs/VALIDATION.md, 2026-09-30, "the fixes round" and "the steps 5 and 6 round", where revision 7's quad closes 135
+with all four retimed). Since then the
 tile lost 16k LUT out of context without touching the ladders - the
 seed ROM as case tables (129,708) and the round stage's arithmetic
 moved up a stage (123,420) - which is within 200 LUT of the

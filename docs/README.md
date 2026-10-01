@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Thirty-eight files, 57,605 lines. Flat in one directory they look like one
+Thirty-eight files, 57,616 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **21,131 lines you consult while working** — the three under *Start here*,
+- **21,135 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,237 lines of tool manual**, one per shipped program;
 - **2,011 lines of operations**, read when you are about to do something to
   hardware;
-- **28,226 lines of record and argument** — the ledger, the roadmap and the
+- **28,233 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -44,7 +44,7 @@ product, not the implementation.
 | document | lines | what it is for |
 |---|---|---|
 | [DETERMINISM.md](DETERMINISM.md) | 1,442 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 1,167 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 1,169 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
 | [SEQUENCER.md](SEQUENCER.md) | 3,354 | The orbit sequencer and the program model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 917 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
@@ -60,7 +60,7 @@ product, not the implementation.
 | [PROGRAMS.md](PROGRAMS.md) | 536 | Programs as files: the assembler, the program library, the runner. |
 | [EMBEDDED.md](EMBEDDED.md) | 709 | libcft on microcontrollers, and the profiles the embedded gate runs. |
 | [PLATFORMS.md](PLATFORMS.md) | 2,928 | Which FPGA to buy, borrow or rent next, measured against the tile this project builds; every figure carries a source and every price the date it was seen. |
-| [SCALING.md](SCALING.md) | 421 | What more tiles buy, and what they do not. |
+| [SCALING.md](SCALING.md) | 423 | What more tiles buy, and what they do not. |
 
 ## The tools, one document each
 
@@ -94,7 +94,7 @@ reading material for a working session.
 | document | lines | what it is for |
 |---|---|---|
 | [VALIDATION.md](VALIDATION.md) | 16,500 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
-| [ROADMAP.md](ROADMAP.md) | 4,137 | What is built, what is next, and what was decided against. |
+| [ROADMAP.md](ROADMAP.md) | 4,144 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1,082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
 | [NOVEL.md](NOVEL.md) | 561 | Results for which no prior description was found, with the standard of evidence stated first. |
 | [ATLAS.md](ATLAS.md) | 367 | The atlas-engine integration, assessed before any of it was done. |

@@ -597,7 +597,9 @@ seed ROM's index multiply, `SEED_P[i*18 +: 18]` built as a DSP48 and
 a 9216-bit shifter (docs/ROADMAP.md, "The DSP on the critical path
 was never the multiplier"). Retiming closes a single at 135 MHz at
 +0.045 - exactly what the same tree closes without it - and does not
-close a quad (-0.141 against -0.113 unretimed): both leave placement
+close a quad (-0.141 against -0.113 unretimed; that quad had tile 1
+alone retimed, it turned out, and revision 7's quad, retimed on all
+four, closed 135 MHz, docs/VALIDATION.md, 2026-09-30, "the fixes round" and "the steps 5 and 6 round"): both leave placement
 at +0.055 and lose the margin in routing, which is wire. The ROM is a
 case table now and the round stage's arithmetic sits in S12; what is
 left at the head of the list is S10->S11, the LZC-fed coarse
