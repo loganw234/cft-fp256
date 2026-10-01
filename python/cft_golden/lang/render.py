@@ -62,10 +62,10 @@ def greek(name):
 
 # ---- the canonical form -----------------------------------------------
 
-def _leaf_text(g, ref):
+def _leaf_text(g, ref, comps):
     kind, i = ref[0], int(ref[1:])
     if kind == "s":
-        return g.components()[i]
+        return comps[i]
     if kind == "l":
         return g.lane[i][0]
     if kind == "p":
@@ -89,7 +89,7 @@ class _Canon:
     def ref(self, ref, parent):
         """A ref written where `parent` (top, arg, bin or neg) uses it."""
         if ref[0] != "n":
-            text = _leaf_text(self.g, ref)
+            text = _leaf_text(self.g, ref, self.comps)
             if (ref[0] == "c" and parent in ("bin", "neg")
                     and C.is_compound(text)):
                 return f"({text})"
@@ -139,6 +139,9 @@ class _Canon:
                         text = f"({text})"
             return text, "bin"
         if op == "neg":
+            # a run of minuses is written flat, `- - -x`, one minus a
+            # neg: the parser reads a run in a loop, so the canonical
+            # form of any run reads back, however long
             count, inner = 1, args[0]
             while True:
                 nxt = self._inline(inner, ("neg",))
@@ -146,10 +149,7 @@ class _Canon:
                     break
                 count += 1
                 inner = nxt[1][0]
-            text = "-" + self.ref(inner, "neg")
-            for _ in range(count - 1):
-                text = f"-({text})"
-            return text, "neg"
+            return "- " * (count - 1) + "-" + self.ref(inner, "neg"), "neg"
         if op == "select":
             a, b, c = (self.ref(x, "arg") for x in args)
             return f"select({c}, {a}, {b})", "call"
@@ -224,10 +224,10 @@ def _let_order(g, sec, integ):
             prefix, _dot, rest = sec.nodes[k][2].partition(".")
             groups.setdefault(prefix, []).append((rest, k))
         order = []
+        comp_index = {c: n for n, c in enumerate(g.components())}
         for prefix in _groups(integ):
             members = groups.pop(prefix, [])
             lets = [k for rest, k in members if rest not in comps]
-            comp_index = {c: n for n, c in enumerate(g.components())}
             outs = sorted((comp_index[rest], k) for rest, k in members
                           if rest in comps)
             order.extend(lets + [k for _c, k in outs])
@@ -241,6 +241,20 @@ def _let_order(g, sec, integ):
                                      f"before {sec.nodes[dep][2]}")
         done.add(k)
     return order
+
+
+def definitions(g):
+    """{label: its definition as the canonical form writes it}, for the
+    step section, in the order the canonical form writes them - what an
+    expansion block is compared by, label by label."""
+    sec = g.step
+    can = _Canon(g, sec)
+    try:
+        order = _let_order(g, sec, g.integrator[0] if g.is_flow else None)
+    except AssertionError:
+        order = [k for k, (_o, _a, lb) in enumerate(sec.nodes)
+                 if lb is not None]
+    return {sec.nodes[k][2]: can.definition(k) for k in order}
 
 
 def _const_rows(g):
@@ -490,9 +504,13 @@ class _Math:
                 count += 1
                 inner = nxt[1][0]
             m = self.ref(inner)
-            for _ in range(count):
-                m = m_neg(m)
-            return m
+            if count == 1:
+                return m_neg(m)
+            # a run of negations, flat: --x, one minus a negation
+            inner_text = m.text if m.prec >= 1 and \
+                not m.text.startswith(MINUS) else f"({m.text})"
+            rest = M(MINUS * (count - 1) + inner_text, 2)
+            return M(MINUS + rest.text, 2, neg=rest)
         a = [self.ref(x) for x in args]
         if op == "fma":
             prod = m_prod(a[0], a[1])

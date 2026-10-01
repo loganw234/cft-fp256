@@ -137,8 +137,11 @@ def _number(text, i, line):
                 while i < n and text[i] in _DIGITS:
                     i += 1
                 exp = esign * chars._int_from_digits(text[j:i])
-        if len(intpart) > 1 and intpart[0] == "0":
-            raise _syntax(f"{text[start:i]}: a number does not start "
+        is_integer = text[start:i].isdigit()
+        if is_integer and len(intpart) > 1 and intpart[0] == "0":
+            # 05 is octal in C; 05.5 and 007e-3 are decimals there and
+            # here, read as chars.lex_decimal reads them
+            raise _syntax(f"{text[start:i]}: an integer does not start "
                           f"with 0 followed by another digit (in C that "
                           f"is octal)", line)
         digits = chars._int_from_digits(intpart + frac)
@@ -174,7 +177,8 @@ def lex(text):
 
     while i < n:
         c = text[i]
-        if c == "\n":
+        if c == "\n" or (c == "\r" and text[i + 1:i + 2] != "\n"):
+            # a line ends at LF, at CR LF, and at a lone CR
             if depth == 0 and toks and toks[-1].kind != "nl":
                 toks.append(Tok("nl", "\n", line))
             line += 1
@@ -184,7 +188,7 @@ def lex(text):
             i += 1
             continue
         if c == ";":
-            while i < n and text[i] != "\n":
+            while i < n and text[i] not in "\r\n":
                 i += 1
             continue
         if ord(c) > 127:

@@ -58,9 +58,20 @@ def in_range(value):
     return -LIMIT_LOG2 <= lo and hi <= LIMIT_LOG2
 
 
+def exact(value):
+    """The value as a Fraction, refusing a float: no binary64 may reach
+    a constant (a Python float is binary64 already, and Fraction would
+    take one silently)."""
+    if isinstance(value, float):
+        raise AssertionError(f"a float ({value!r}) reached the constant "
+                             f"code, which is exact rationals only")
+    return value if isinstance(value, Fraction) else Fraction(value)
+
+
 def round_once(fmt, rnd, value):
     """(bits, flags) of the exact rational `value` rounded once into
     `fmt` under `rnd`. Zero is +0: the rational has no sign of zero."""
+    value = exact(value)
     if value == 0:
         return sf.zero_bits(fmt, 0), 0
     sign = 1 if value < 0 else 0
@@ -135,6 +146,12 @@ def _pow_2_5(d):
     return (a, b) if d == 1 else None
 
 
+def digits(n):
+    """A non-negative integer's decimal digits, at any length: Python's
+    own str() stops at 4,300 digits, and a constant may have more."""
+    return chars._digits_from_int(n)
+
+
 def _decimal(value):
     """The terminating decimal of `value` (whose denominator is
     2^a 5^b) as (sign, digits, exp10): value = sign digits x 10^exp10,
@@ -142,11 +159,10 @@ def _decimal(value):
     a, b = _pow_2_5(value.denominator)
     k = max(a, b)
     n = abs(value.numerator) * 10 ** k // value.denominator
-    e = -k
-    while n and n % 10 == 0:
-        n //= 10
-        e += 1
-    return ("-" if value < 0 else ""), str(n), e
+    text = digits(n)
+    stripped = text.rstrip("0") or "0"
+    e = -k + (len(text) - len(stripped))
+    return ("-" if value < 0 else ""), stripped, e
 
 
 def _hex(value):
@@ -171,64 +187,122 @@ def _hex(value):
 MAX_DECIMAL_DIGITS = 24
 
 
+def _short_decimal(value):
+    """The decimal spelling of a terminating value with at most
+    MAX_DECIMAL_DIGITS significant digits - positional for a leading
+    digit between 10^-6 and 10^20, else with an exponent - or None."""
+    if _pow_2_5(value.denominator) is None:
+        return None
+    sign, ds, e = _decimal(value)
+    if len(ds) > MAX_DECIMAL_DIGITS:
+        return None
+    lead = e + len(ds) - 1
+    if -6 <= lead <= 20:
+        if e >= 0:
+            return sign + ds + "0" * e
+        point = len(ds) + e
+        if point > 0:
+            return sign + ds[:point] + "." + ds[point:]
+        return sign + "0." + "0" * (-point) + ds
+    body = ds[0] + ("." + ds[1:] if len(ds) > 1 else "")
+    return f"{sign}{body}e{lead}"
+
+
+def _fraction_text(value):
+    sign = "-" if value < 0 else ""
+    num = digits(abs(value.numerator))
+    if value.denominator == 1:
+        return sign + num
+    return f"{sign}{num}/{digits(value.denominator)}"
+
+
 def literal(value):
     """The canonical spelling of an exact value, which the parser reads
-    back to the same rational: an integer; a decimal when it terminates
-    within MAX_DECIMAL_DIGITS significant digits (positional for a
-    leading digit between 10^-6 and 10^20, else with an exponent); a
-    hexadecimal significand when it is dyadic and longer; else p/q."""
-    value = Fraction(value)
-    if value.denominator == 1:
-        return str(value.numerator)
-    if _pow_2_5(value.denominator) is not None:
-        sign, digits, e = _decimal(value)
-        if len(digits) <= MAX_DECIMAL_DIGITS:
-            lead = e + len(digits) - 1
-            if -6 <= lead <= 20:
-                if e >= 0:
-                    return sign + digits + "0" * e
-                point = len(digits) + e
-                if point > 0:
-                    return sign + digits[:point] + "." + digits[point:]
-                return sign + "0." + "0" * (-point) + digits
-            body = digits[0] + ("." + digits[1:] if len(digits) > 1 else "")
-            return f"{sign}{body}e{lead}"
-        if value.denominator & (value.denominator - 1) == 0:
-            return _hex(value)
-    return f"{value.numerator}/{value.denominator}"
+    back to the same rational, at any size: a decimal (an integer among
+    them) when it terminates within MAX_DECIMAL_DIGITS significant
+    digits, positional or with an exponent; a hexadecimal significand
+    when it is dyadic and longer; else p, or p/q, in full."""
+    value = exact(value)
+    short = _short_decimal(value)
+    if short is not None:
+        return short
+    d = value.denominator
+    if d != 1 and d & (d - 1) == 0:
+        return _hex(value)                     # dyadic, and long
+    return _fraction_text(value)
 
 
 def math_literal(value):
-    """The mathematical form's spelling: an integer, a terminating
-    decimal within MAX_DECIMAL_DIGITS digits, or p/q - never a
-    hexadecimal significand, which is not conventional notation."""
-    value = Fraction(value)
-    if value.denominator == 1:
-        return str(value.numerator)
-    if _pow_2_5(value.denominator) is not None:
-        sign, digits, e = _decimal(value)
-        if len(digits) <= MAX_DECIMAL_DIGITS:
-            return literal(value)
-    return f"{value.numerator}/{value.denominator}"
+    """The mathematical form's spelling: a decimal within
+    MAX_DECIMAL_DIGITS significant digits, else p or p/q in full -
+    never a hexadecimal significand, which is not conventional
+    notation."""
+    value = exact(value)
+    short = _short_decimal(value)
+    return short if short is not None else _fraction_text(value)
+
+
+def frac_text(value):
+    """An exact value as the step graph writes it: p or p/q, at any
+    size."""
+    return _fraction_text(exact(value))
+
+
+def parse_frac(text):
+    """frac_text read back, at any size (Fraction's own parser stops at
+    Python's 4,300-digit limit)."""
+    if not isinstance(text, str) or not text:
+        raise ValueError(f"{text!r} is not an exact value")
+    sign = -1 if text.startswith("-") else 1
+    body = text[1:] if sign < 0 else text
+    num, slash, den = body.partition("/")
+    if not num.isdigit() or (slash and not den.isdigit()) or \
+            (slash and den.startswith("0")) or \
+            (len(num) > 1 and num.startswith("0")):
+        raise ValueError(f"{text!r} is not p or p/q")
+    n = chars._int_from_digits(num)
+    q = chars._int_from_digits(den) if slash else 1
+    value = Fraction(sign * n, q)
+    if frac_text(value) != text:
+        raise ValueError(f"{text!r} is not in lowest terms")
+    return value
+
+
+def brief(value):
+    """A constant as a refusal's sentence names it: in full when short,
+    else its order of magnitude - a sentence is not the place for a
+    value of five thousand digits."""
+    value = exact(value)
+    if value == 0:
+        return "0"
+    # spell it only when that is cheap: the decimal of a value of a
+    # million bits takes seconds, and a sentence wants forty characters
+    size = value.numerator.bit_length() + value.denominator.bit_length()
+    if size <= 512:
+        text = literal(value)
+        if len(text) <= 40:
+            return text
+    lo, _hi = log2_bounds(value)
+    return (f"{'-' if value < 0 else ''}a value near 2^{lo + 1} "
+            f"(about 10^{(lo + 1) * 30103 // 100000})")
 
 
 def h_form(factor):
     """An h-scaled constant's spelling from its factor: h, h/q, p*h or
     p*h/q, with the sign in front. Read back it is that factor times h
     exactly - the parser's unary minus binds tighter than * and /."""
-    f = Fraction(factor)
+    f = exact(factor)
     if f == 1:
         return "h"
     if f == -1:
         return "-h"
-    p, q = f.numerator, f.denominator
-    if q == 1:
-        return f"{p}*h"
-    if p == 1:
-        return f"h/{q}"
-    if p == -1:
-        return f"-h/{q}"
-    return f"{p}*h/{q}"
+    sign = "-" if f < 0 else ""
+    p, q = digits(abs(f.numerator)), digits(f.denominator)
+    if f.denominator == 1:
+        return f"{sign}{p}*h"
+    if abs(f.numerator) == 1:
+        return f"{sign}h/{q}"
+    return f"{sign}{p}*h/{q}"
 
 
 def is_compound(text):

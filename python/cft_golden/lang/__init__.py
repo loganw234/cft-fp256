@@ -50,12 +50,12 @@ def compile_text(text, source="<text>"):
 
 
 def load(path):
-    """compile_text of a file, read as ASCII text with its line ends
-    kept as they are."""
+    """compile_text of a file: UTF-8 (a leading byte-order mark is not
+    text, and is dropped), its line ends as they are."""
     p = Path(path)
     data = p.read_bytes()
     try:
-        text = data.decode("utf-8")
+        text = data.decode("utf-8-sig")
     except UnicodeDecodeError:
         raise Refusal("syntax", "the file is not UTF-8 text",
                       source=str(path)) from None

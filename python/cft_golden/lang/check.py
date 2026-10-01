@@ -23,10 +23,9 @@ Evaluation modes, and what each may read:
            not depend on h.
 """
 
-from fractions import Fraction
-
 from .. import softfloat as sf
 from ..formats import FORMATS
+from ..seq import SCRATCH_D_MAX
 from . import constants as C
 from .graph import Node, StepGraph, canonical
 from .refusals import Refusal, too_deep
@@ -55,6 +54,11 @@ RESERVED = (KEYWORDS | frozenset(BUILTINS) | frozenset({"sqrt", "h"})
 # rtl/cft_seq.sv's KMEM_D): params and constants share it.
 BANK_SLOTS = 512
 
+# A lane's state and lane params live in its scratch, and no tile can
+# publish a deeper scratch than this (seq.py SCRATCH_D_MAX: CAPS2[3:0]
+# is a four-bit log2). So it bounds an array, a range, and a lane.
+LANE_SLOTS = SCRATCH_D_MAX
+
 _STEP_OPTIONS = {"rk4": ("h",), "euler": ("h",),
                  "stormer-verlet": ("h", "q", "p"), "map": ("h",)}
 
@@ -74,11 +78,15 @@ def _reserved_why(name):
 class K:
     """A constant: coef x h^deg, exactly. deg is 0 for a plain rational
     and 1 for an h-scaled one; any other power refuses where it would
-    become a leaf (`h-nonlinear`)."""
+    become a leaf (`h-nonlinear`). coef is a Fraction and never a float:
+    C.exact refuses one, so no binary64 can reach a constant."""
     __slots__ = ("coef", "deg")
 
     def __init__(self, coef, deg=0):
-        self.coef = Fraction(coef)
+        self.coef = C.exact(coef)
+        if not isinstance(deg, int) or isinstance(deg, bool):
+            raise AssertionError(f"a constant's power of h is an integer, "
+                                 f"not {deg!r}")
         self.deg = deg if self.coef != 0 else 0
 
 
@@ -243,10 +251,15 @@ class Checker:
                 length, cyclic = payload
                 if length is not None:
                     v = length.value
-                    if v.denominator != 1 or v < 1:
+                    if not length.text.isdigit() or v < 1:
                         raise Refusal("array-length", f"{name}[{length.text}]"
-                                      f": an array has a whole number of "
-                                      f"components, at least 1", line)
+                                      f": an array's length is written as a "
+                                      f"whole number, at least 1", line)
+                    if v > LANE_SLOTS:
+                        raise Refusal(
+                            "array-length", f"{name}[{length.text}]: an "
+                            f"array has at most {LANE_SLOTS:,} components, "
+                            f"the deepest scratch any tile publishes", line)
                     d.length = int(v)
                 d.cyclic = cyclic
             elif kind == "const":
@@ -265,6 +278,13 @@ class Checker:
         # the flat layout
         self.state_decls = [self.names[name] for name, *_ in
                             self.state_items]
+        total = sum(1 if d.length is None else d.length
+                    for d in self.state_decls) + n_lane
+        if total > LANE_SLOTS:
+            raise Refusal("lane-capacity", f"a lane holds {total:,} values "
+                          f"(its state and its lane params), and the deepest "
+                          f"scratch any tile publishes holds {LANE_SLOTS:,}",
+                          self.state_decls[0].line)
         base = 0
         self.comp_names = []
         for d in self.state_decls:
@@ -447,6 +467,11 @@ class Checker:
             raise Refusal("index-range", f"{lo}..{hi} is empty: a range "
                           f"includes both its ends and runs upward",
                           rng.line)
+        if hi - lo + 1 > LANE_SLOTS:
+            raise Refusal("index-range", f"{lo}..{hi} covers {hi - lo + 1:,} "
+                          f"indices; a range covers at most {LANE_SLOTS:,}, "
+                          f"the deepest scratch any tile publishes",
+                          rng.line)
         return [{var: k} for k in range(lo, hi + 1)]
 
     def wrap(self, d, k, line):
@@ -480,11 +505,20 @@ class Checker:
                           f"(d/dt x[i] = ...) or give a range (... for "
                           f"{e.name} in 0..9)", line)
         if isinstance(e, Neg):
-            return -self.index_value(e.arg, env, line)
+            sign = 1
+            while isinstance(e, Neg):              # a run, in a loop
+                sign, e = -sign, e.arg
+            return sign * self.index_value(e, env, line)
         if isinstance(e, Bin) and e.op in ("+", "-", "*"):
-            a = self.index_value(e.left, env, line)
-            b = self.index_value(e.right, env, line)
-            return a + b if e.op == "+" else a - b if e.op == "-" else a * b
+            chain = []
+            while isinstance(e, Bin) and e.op in ("+", "-", "*"):
+                chain.append(e)                    # a chain, in a loop
+                e = e.left
+            v = self.index_value(e, env, line)
+            for b in reversed(chain):
+                r = self.index_value(b.right, env, line)
+                v = v + r if b.op == "+" else v - r if b.op == "-" else v * r
+            return v
         raise Refusal("index-not-integer", "an index is integer "
                       "arithmetic (+, - and *) on literals and the "
                       "statement's index variable", line)
@@ -541,6 +575,16 @@ class Checker:
             while isinstance(e, Neg):
                 negs.append(e)
                 e = e.arg
+            if isinstance(e, Num) and e.value == 0:
+                # a minus written on a zero literal asks for -0, a sign
+                # the rational cannot keep; any other constant whose
+                # exact value is zero is +0, negated or not
+                raise Refusal(
+                    "constant-negative-zero",
+                    f"-{e.text} is not a rational: a constant has no sign "
+                    f"of zero, and v1 refuses a minus written on a zero "
+                    f"(a constant whose exact value is 0 is +0 under every "
+                    f"attribute)", negs[-1].line)
             v = self.eval(e, ctx)
             for n in reversed(negs):
                 v = self.negate(v, n.line)
@@ -569,13 +613,7 @@ class Checker:
 
     def negate(self, v, line):
         if isinstance(v, K):
-            if v.coef == 0:
-                raise Refusal(
-                    "constant-negative-zero",
-                    "-0 is not a rational: a constant has no sign of zero, "
-                    "and v1 refuses -0 (a constant whose exact value is 0 "
-                    "is +0 under every attribute)", line)
-            return K(-v.coef, v.deg)
+            return K(-v.coef, v.deg)          # exact; a zero stays +0
         return self.apply("neg", [v], line)
 
     def binary(self, e, a, b):
@@ -668,8 +706,11 @@ class Checker:
         if kind == "const":
             v = self.const_value(d, line)
             if v.deg != 0 and ctx.mode in ("field", "default"):
-                raise self.h_scope(ctx, f"the const {name} depends on h",
-                                   line)
+                # what h-scope keeps out is a value that moves when a
+                # step-halving run halves h; a const whose value does
+                # not (h/h, abs(1/(3*h))*h) is a plain rational
+                raise self.h_scope(ctx, f"the const {name}'s value "
+                                   f"depends on h", line)
             return v
         # a let
         if ctx.mode in ("const", "default"):
@@ -797,14 +838,18 @@ class Checker:
         if key not in self.rounded:
             value = key[0]
             bits, flags = C.round_once(self.fmt, self.rnd, value)
-            spell = C.literal(value) if key[1] is None else \
-                f"{C.h_form(key[1])} = {C.literal(value)}"
-            where = (f"{C.FORMAT_754[self.fmt.name]} under "
-                     f"{sf.RND_NAMES[self.rnd]}")
-            if C.overflowed(flags):
-                raise Refusal("constant-overflow", f"{spell} overflows "
-                              f"{where}", line)
-            if C.rounded_to_zero(self.fmt, value, bits):
+            over = C.overflowed(flags)
+            vanished = C.rounded_to_zero(self.fmt, value, bits)
+            if over or vanished:
+                # the test first, the sentence after: a sentence names a
+                # constant briefly, whatever its size
+                spell = C.brief(value) if key[1] is None else \
+                    f"{C.h_form(key[1])} = {C.brief(value)}"
+                where = (f"{C.FORMAT_754[self.fmt.name]} under "
+                         f"{sf.RND_NAMES[self.rnd]}")
+                if over:
+                    raise Refusal("constant-overflow", f"{spell} overflows "
+                                  f"{where}", line)
                 raise Refusal("constant-rounds-to-zero", f"{spell} is not "
                               f"zero and rounds to zero in {where}", line)
             self.rounded[key] = (bits, flags)
@@ -831,9 +876,14 @@ class Checker:
             return K(x.coef * y.coef, x.deg + y.deg)
 
         def mag(x):
-            return K(abs(x.coef) * self.sign_h() ** x.deg, x.deg)
+            # |c h^d| as a multiple of h^d is |c| (sign h)^d. The sign is
+            # +1 or -1, so (sign h)^d needs d's parity alone - for a
+            # negative d too, where 1 ** -1 would be the float 1.0.
+            flip = self.sign_h() < 0 and x.deg % 2 == 1
+            return K(-abs(x.coef) if flip else abs(x.coef), x.deg)
 
         def value(x):
+            # Fraction ** int is exact, a negative power included
             return x.coef * (self.h_value ** x.deg if x.deg else 1)
 
         if op == "add":
@@ -1015,9 +1065,10 @@ class Checker:
                     outs[c] = v
         return [outs[c] for c in allc]
 
-    def block(self, field_outs, expansion_outs):
-        """Hold a written-out expansion block to the template's
-        expansion, byte for byte."""
+    def block_build(self):
+        """Evaluate a written-out expansion block: its outputs, and its
+        `next` lines - before the unused check, so that what the block
+        reads counts as read."""
         blk = self.exp_st
         labels = {}
         nexts = {}
@@ -1068,32 +1119,45 @@ class Checker:
                                   f"{fam.defs[comp][1]}) is never used, and "
                                   f"every operation written is performed",
                                   fam.defs[comp][1])
+        return outs, nexts, labels
+
+    def block_compare(self, field_outs, expansion_outs, built):
+        """Hold a written-out expansion block to the template's
+        expansion, byte for byte; a difference is named at the first
+        label, in the order the canonical form writes them, whose
+        definition differs."""
+        from .render import definitions
+        outs, nexts, labels = built
+        blk = self.exp_st
         want = self.assemble(field_outs, expansion_outs)
         got = self.assemble(field_outs, outs,
                             [nexts[c][1] for c in range(self.n)])
         if want.to_bytes() == got.to_bytes():
             return
         line, why = blk.line, "the bytes differ"
-        a, b = want.step, got.step
-        if want.const != got.const:
-            why = "its constants differ from the expansion's"
+        lines = {}
+        for fam in labels.values():
+            for comp, (_e, ln, _v) in fam.defs.items():
+                lines[fam.name if comp is None else f"{fam.name}[{comp}]"] = ln
+        a, b = definitions(want), definitions(got)
+        for label, text in a.items():
+            if b.get(label) != text:
+                if label in b:
+                    why = (f"{label} is {b[label]} here, and {text} in the "
+                           f"expansion")
+                else:
+                    why = f"{label} = {text} is missing"
+                line = lines.get(label, blk.line)
+                break
         else:
-            for k in range(max(len(a.nodes), len(b.nodes))):
-                x = a.nodes[k] if k < len(a.nodes) else None
-                y = b.nodes[k] if k < len(b.nodes) else None
-                if x != y:
-                    label = (x or y)[2]
-                    why = (f"node {k} is {_show(x)} in the expansion and "
-                           f"{_show(y)} here")
-                    for fam in labels.values():
-                        for comp, (_e, ln, _v) in fam.defs.items():
-                            lb = fam.name if comp is None else \
-                                f"{fam.name}[{comp}]"
-                            if label is not None and lb == label:
-                                line = ln
-                    break
+            extra = [lb for lb in b if lb not in a]
+            if extra:
+                why = f"{extra[0]} is not in the expansion"
+                line = lines.get(extra[0], blk.line)
+            elif want.const != got.const:
+                why = "its constants differ from the expansion's"
             else:
-                for c, (x, y) in enumerate(zip(a.out, b.out)):
+                for c, (x, y) in enumerate(zip(want.step.out, got.step.out)):
                     if x != y:
                         why = f"the next of {self.comp_names[c]} differs"
                         line = nexts[c][1]
@@ -1115,14 +1179,16 @@ class Checker:
             v = self.eval(d.expr, ctx)
             value = v.coef
             bits, flags = C.round_once(self.fmt, self.rnd, value)
-            where = (f"{C.FORMAT_754[self.fmt.name]} under "
-                     f"{sf.RND_NAMES[self.rnd]}")
-            if C.overflowed(flags):
-                raise Refusal("constant-overflow", f"{d.name}'s default "
-                              f"{C.literal(value)} overflows {where}", d.line)
-            if C.rounded_to_zero(self.fmt, value, bits):
+            over = C.overflowed(flags)
+            if over or C.rounded_to_zero(self.fmt, value, bits):
+                where = (f"{C.FORMAT_754[self.fmt.name]} under "
+                         f"{sf.RND_NAMES[self.rnd]}")
+                if over:
+                    raise Refusal("constant-overflow", f"{d.name}'s default "
+                                  f"{C.brief(value)} overflows {where}",
+                                  d.line)
                 raise Refusal("constant-rounds-to-zero", f"{d.name}'s "
-                              f"default {C.literal(value)} is not zero and "
+                              f"default {C.brief(value)} is not zero and "
                               f"rounds to zero in {where}", d.line)
             d.value = (value, bits, flags)
 
@@ -1194,6 +1260,7 @@ class Checker:
             field_outs = None
             step_outs = self.build_map()
         self.defaults()
+        built = self.block_build() if self.exp_st is not None else None
         self.unused()
         graph = self.assemble(field_outs, step_outs)
         slots = len(graph.param) + len(graph.const)
@@ -1201,17 +1268,34 @@ class Checker:
             raise Refusal("bank-capacity", f"{len(graph.param)} params and "
                           f"{len(graph.const)} constants: the bank holds "
                           f"{BANK_SLOTS} on every device")
-        if self.exp_st is not None:
-            self.block(field_outs, step_outs)
+        if built is not None:
+            self.block_compare(field_outs, step_outs, built)
         return graph
 
 
-def _show(node):
-    if node is None:
-        return "absent"
-    op, args, label = node
-    text = f"{op}({', '.join(args)})"
-    return f"{text} labelled {label}" if label else text
+def constant_of(text):
+    """The exact value of a constant written as text, by the language's
+    own rules - its literals (decimal, hexadecimal significand, a/b),
+    exact arithmetic, a minus written on a zero refused - or a Refusal.
+    It reads no name: a run value is a number, not a program."""
+    from .syntax import Parser, lex
+    try:
+        p = Parser(lex(text))
+        e = p.expr()
+        t = p.peek()
+        if t.kind not in ("nl", "eof"):
+            raise Refusal("syntax", f"{text!r} is one constant, and "
+                          f"{t.text!r} follows it")
+        if p.peek().kind == "nl":
+            p.take()
+            if p.peek().kind != "eof":
+                raise Refusal("syntax", f"{text!r} is one constant, on one "
+                              f"line")
+        checker = Checker([])
+        v = checker.eval(e, checker.const_ctx(None))
+    except RecursionError:
+        raise too_deep("this constant") from None
+    return v.coef
 
 
 def check(text, source="<text>"):

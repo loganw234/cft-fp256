@@ -69,15 +69,17 @@ the gate holds that.
 
 ## The text
 
-- One statement a line. `;` starts a comment that runs to the end of the
-  line, as in `.cfta`. A newline inside `( )` or `[ ]` continues the
-  statement. Outside comments the text is ASCII.
+- One statement a line. A line ends at LF, at CR LF or at a lone CR, and
+  `lang.load` drops a file's leading byte-order mark. `;` starts a comment
+  that runs to the end of the line, as in `.cfta`. A newline inside
+  `( )` or `[ ]` continues the statement. Outside comments the text is
+  ASCII.
 - Parentheses and brackets nest at most 100 deep (`too-deep`). A chain
-  such as `a + b + c` and a run of minuses may be any length: the checker
-  walks them in loops. What is left to recurse, deep nesting and long
-  chains of lets, is held to Python's own recursion limit, which the
-  package keeps rather than raises, and past it the refusal is
-  `too-deep` too.
+  such as `a + b + c`, an index such as `x[i + 1 + 1 ...]`, and a run of
+  minuses may be any length: the checker and the renderers walk them in
+  loops. What is left to recurse, deep nesting and long chains of lets,
+  is held to Python's own recursion limit, which the package keeps
+  rather than raises, and past it the refusal is `too-deep` too.
 - A name is a letter or `_` followed by letters, digits and `_`, and
   names are case-sensitive: `Y` and `y` are two names.
 - A dotted name such as `k1.x` or `Y2.x[3]` is a **label**: it names a
@@ -136,19 +138,33 @@ operator.
 - **decimal:** IEEE 754-2019 5.12.2's syntax, exactly as `chars.lex_decimal`
   reads it: digits with an optional point, at least one digit, and an
   optional `e` exponent. `0.01`, `1e-2`, `.5` and `2.` are all decimals,
-  and each is exactly D x 10^k.
+  and each is exactly D x 10^k. A decimal may lead with zeros, as
+  lex_decimal reads it and as C does: `05.5` is 5.5 and `007e-3` is
+  0.007. Only an integer, digits alone, may not.
 - **hexadecimal significand:** 5.12.3's syntax, as `chars.lex_hex` reads
   it, with the binary exponent required: `0x1.8p+1` is 3. `0x10` with no
   `p` is refused, as `syntax`, because an encoding is not a literal.
 - **a/b** is not a separate token. It is a constant division, and
   constant arithmetic is exact, so `8/3` is the rational 8/3.
-- A literal beyond 2^+-1048576 is `constant-range`. It lies outside
-  every format by far, and the evaluator refuses it rather than build
-  the integer.
+- **The bound.** A literal, or a constant expression's exact value,
+  beyond 2^+-1048576 is `constant-range`. It lies outside every format by
+  far, and the evaluator refuses it rather than build the integer.
+  - Inside that bound a constant is held exactly at any size.
+  - The step graph and the canonical form write a constant of thousands
+    of digits in full, reading it back the same, and Python's own
+    4,300-digit limit on printing an integer is no bound here.
+  - A refusal's sentence names a long constant by its magnitude.
 
 ### Arrays and indices
 
-- Arrays are one-dimensional: `state x[40]`.
+- Arrays are one-dimensional: `state x[40]`. An array's length is written
+  as a whole number (`x[4]`, not `x[4.0]`), from 1 to 32,768
+  (`array-length`).
+- A lane holds its state and its lane params, at most 32,768 values in
+  all (`lane-capacity`). A range covers at most 32,768 indices
+  (`index-range`). No tile publishes a deeper scratch than that (seq.py's
+  `SCRATCH_D_MAX`), and the bound keeps a source like `state x[1000000000]`
+  from taking the machine's memory before it is refused.
 - `cyclic` makes an index wrap modulo the length, so `x[-1]` is `x[39]`.
   On any other array an index outside 0..N-1 is `index-range`.
 - `d/dt x[i] = ...`, where `i` is bound by nothing else, runs over the
@@ -266,19 +282,25 @@ attribute, where it meets a run-time operation or the bank:
 - through `chars._round_rational`, one integer division and one
   `softfloat.round_pack`;
 - never through binary64, and never twice: `h/6` is RN(1/600), not
-  RN(RN(1/100)/6).
+  RN(RN(1/100)/6). No float can reach a constant at all: every constant
+  path is Fractions and integers, and the code that holds a constant
+  refuses a float outright (the gate sweeps abs and copysign over every
+  power of h from -3 to 3, both signs of h, to hold it).
 
 Its rounding's flags are the compiler's report, written into the
 intention-out, and not the run's FLAGS.
 
-**Zero is +0.** A constant whose exact value is zero (`0`, `1 - 1`,
-`-1 * 0`) is +0 under every attribute. This is a choice: the exact
-rational has no sign of zero, so the language does not invent one.
+**Zero is +0.** A constant whose exact value is zero is +0 under every
+attribute. That covers `0`, `1 - 1` and `-1 * 0`, and a negated zero
+the text did not write as one: `-(1 - 1)`, and `-i` where an index
+variable i is 0. This is a choice: the exact rational has no sign of
+zero, so the language does not invent one.
 
 **What a rational cannot carry is refused.** In v1 a constant cannot be
 any of these:
-- `-0`, a unary minus applied to a constant whose exact value is zero:
-  `constant-negative-zero`;
+- `-0`, a minus written on a zero literal (`-0`, `-0.0`, `-(0)`,
+  `- -0`, `-0x0p+0`): the writer asked for a sign the rational cannot
+  keep, `constant-negative-zero`;
 - `inf` or `infinity`: `constant-infinity`;
 - `nan` or `snan`: `constant-nan`;
 - a constant divided by a constant zero: `constant-division-by-zero`.
@@ -324,8 +346,11 @@ param is a run-time neg of its rounded value. For an exact constant
   these magnitudes; the gate holds that, and verifier-P1 measured it.
 - A constant is either independent of h or a rational multiple of it.
   `h*h`, `1/h` and `h + 1` do not halve with h, and are `h-nonlinear`.
-- A flow's equations and their lets cannot read h, directly or through
-  a const (`h-scope`).
+- A flow's equations and their lets cannot read h, nor a const whose
+  value depends on h (`h-scope`): a step-halving run halves h, and such
+  a right-hand side would move with it. A const whose value does not
+  depend on h is a plain rational wherever it is used, however it was
+  written: `const c = h/h` is 1.
 - A map may name a step, `step map, h = ...`. Its equations may then use
   h, and its h-scaled constants are listed like a template's.
 
@@ -512,16 +537,28 @@ holds it, as canonical JSON, version 1.
   unlabelled node has exactly one use, which the builder asserts.
 - **Constant subexpressions are folded exactly** as nodes are built.
 - **Nodes are ordered by an iterative post-order walk** from the outputs,
-  in state order, operands in order. Statement order, let order and
-  spelling (`0.01` against `1/100`, `h/2` against `0.5*h`) do not reach
-  the bytes.
+  in state order, operands in order. The order of equations and lets,
+  and spelling (`0.01` against `1/100`, `h/2` against `0.5*h`), do not
+  reach the bytes. The order of declarations does where it is a layout:
+  the state's is the lane layout, and the params' and lane params' are
+  the bank's and the lane's.
 - **ASCII, the key order above, no spaces, one node a line, a final
   newline.**
 - **No set or hash order anywhere.** The gate builds each reference
   under two other PYTHONHASHSEEDs and compares the bytes.
-- **Reading back.** `StepGraph.from_bytes` refuses (`graph-format`)
-  bytes that are not canonical, refs that point forward, and an
-  encoding that is not its exact value rounded once.
+- **Reading back.** `StepGraph.from_bytes` takes only the bytes the
+  language would make. It refuses (`graph-format`) four kinds of input:
+  - bytes not in this layout;
+  - a ref that points forward;
+  - an encoding that is not its exact value rounded once;
+  - a graph that is not canonical.
+
+  A graph is canonical when it is the graph of its own canonical form:
+  rendered, parsed and checked again, it gives the same bytes. That
+  refuses, among others, a dead node, a node order that is not the
+  walk's, a shared unlabelled node, a const nothing reads, options on
+  the wrong integrator, and a step that is not its field's expansion.
+  JSON nested too deep is refused by name too.
 - **The constants' report.** `StepGraph.constant_report()` lists every
   constant and default the step reads, as the compiler's manifest wants
   them: its spelling, exact value, h-factor, encoding, flags and exact
@@ -547,7 +584,7 @@ compiler's business.
 ```
 run = lang.run(graph, states, steps,
                lane_params=None,   # one list a lane, declaration order; None takes the defaults
-               params=None,        # {name: int, Fraction or text}: run values, each rounded once
+               params=None,        # {name: int, Fraction or a constant as text}: run values, each rounded once
                param_bits=None,    # {name: encoding}: run values as a bank carries them
                h=None,             # an exact step in place of h: every h-scaled constant recomputed
                at=())              # step counts at which to record (states, FLAGS)
@@ -572,11 +609,23 @@ is seq.py's `scratch_in[k*m:(k+1)*m]`, and after S steps
 references m is 3, 40 and 4: exactly their images' `.scratch in` and
 `.scratch out`.
 
+**Run values.** A run value is an int, a Fraction, or a constant written
+as text, which is read by the language's own rules:
+- its literals, so `0x1p-3` and `8/3` are exact;
+- exact arithmetic;
+- a minus written on a zero refused;
+- the bound of 2^+-1048576.
+
+Each is rounded once under the program's attribute, and refused by the
+same constant refusals as a source's constant.
+
 **Refusals of a run.**
 - A lane of the wrong length is `lane-shape`.
 - A value that is not an encoding is `lane-value`.
 - A run value for no param is `unknown-param`.
-- A Python float as a run value is `param-value`: it is binary64 already.
+- `param-value`: a Python float as a run value (it is binary64 already),
+  text that is not a constant, or one param given both as a value and as
+  an encoding.
 - A step count that is not a whole number is `step-count`.
 
 ## The intention-out
@@ -597,12 +646,15 @@ source, two ways. `python/cft_golden/lang/render.py` writes both.
   - A binary operation under a unary minus is parenthesised, and so is
     a unary minus that is an operand of a binary operation: `(-x) * y`,
     `-(x * y)`.
+  - A run of minuses is written flat, one minus a negation: `- -x`,
+    `- - -(x * y)`. The parser reads a run in a loop, so the canonical
+    form of any run reads back, however long.
 - **Constants.** A constant is written as its h-multiple (`h`, `h/2`,
-  `2*h`) or as its exact value:
-  - an integer;
-  - a decimal when it terminates within 24 digits;
+  `2*h`) or as its exact value, at any size:
+  - a decimal when it terminates within 24 significant digits, an
+    integer among them (`2`, `0.01`, `1e4400`);
   - a hexadecimal significand when it is dyadic and longer;
-  - otherwise `p/q`.
+  - otherwise `p` or `p/q`, in full.
 - **The step.** A flow keeps its equations and writes its step out in an
   `expansion` block. The block's lets come in the template's statement
   order, components in state order.
@@ -629,13 +681,15 @@ in UTF-8 plain text.
   rendering needs its own exact-evaluation check before it can be
   trusted, and a LaTeX one would be a third renderer with its own check.
 
-**The two checks**, held in the gate (`python/tests/test_lang.py`), on
+**The three checks**, held in the gate (`python/tests/test_lang.py`), on
 the six references and on sixty seeded random systems that cover every
 operation, constants folded, lets, arrays, lane params, every format and
 attribute, and each integrator and maps:
 1. **The canonical form is itself a valid source.** Parsed again it gives
-   the same step graph, byte for byte. A canonical form that parses back
-   to a different graph is a defect, not a style choice.
+   the same step graph, byte for byte, and written out again it gives
+   the same text, byte for byte, comments included. A canonical form
+   that parses back to a different graph is a defect, not a style
+   choice.
 2. **The mathematical form, evaluated exactly at random rational points,
    gives what the step graph gives evaluated exactly.**
    - `python/tests/lang_mathform.py` is the test's own reader of the
@@ -643,6 +697,13 @@ attribute, and each integrator and maps:
    - For a flow it checks each right-hand side, and the whole step
      through the template's scheme. For rk4 that holds the expansion to
      the textbook scheme, exactly.
+3. **What the intention-out says besides its code is read back and held
+   to the graph and to the test's own arithmetic.** In the canonical
+   form's comments: each constant's exact value, its encoding (in hex
+   and as a hexadecimal significand), its flags and its relative error,
+   each param's default the same way, and the operation counts. In the
+   mathematical form: each printed default, and each printed name
+   against Unicode's own Greek letters, not the renderer's table.
 
 ### Lorenz-63, as the renderers write it
 
@@ -781,7 +842,8 @@ The text and its declarations:
 | `duplicate-name` | a name declared twice |
 | `reserved-name` | a reserved word used to name a value |
 | `undefined-name` | a name used and never declared |
-| `array-length` | an array whose length is not a whole number of at least 1 |
+| `array-length` | an array whose length is not written as a whole number from 1 to 32,768 |
+| `lane-capacity` | a lane of more than 32,768 values (its state and lane params), the deepest scratch any tile publishes |
 | `unused` | a const, param, lane param, let or h that nothing uses |
 | `cycle` | a definition that depends on itself |
 | `not-constant` | a value needed when the program is compiled that reads the state, a param, a lane param or a let |
@@ -828,7 +890,7 @@ The values a rational cannot carry, and the one rounding:
 
 | name | what it refuses |
 |---|---|
-| `constant-negative-zero` | `-0` written as a constant |
+| `constant-negative-zero` | a minus written on a zero literal (`-0`, `-0.0`, `-(0)`) |
 | `constant-infinity` | `inf` or `infinity` |
 | `constant-nan` | `nan` or `snan` |
 | `constant-division-by-zero` | a constant divided by a constant zero |
@@ -842,7 +904,7 @@ A run, and a step graph's bytes:
 | `lane-shape` | a lane with the wrong number of values |
 | `lane-value` | a lane value that does not fit the format |
 | `unknown-param` | a run value for a name that is not a param, or an h for a system without one |
-| `param-value` | a run value that is not an exact rational, or an encoding that does not fit |
+| `param-value` | a run value that is not an exact rational (a float, or text that is not a constant), an encoding that does not fit, or a param given both ways |
 | `step-count` | a step count that is not a whole number of at least 0 |
 | `graph-format` | bytes that are not a version-1 step graph |
 
@@ -888,7 +950,9 @@ Both files run in the golden stage (`pytest python/tests`) and under
   exactly.
 - **Four plants.** Each is a wrong semantics built by the test as a
   modified copy of Lorenz-63's step graph, run by the shipped
-  interpreter, and each must disagree with seq.py:
+  interpreter, and each must disagree with seq.py at some count the
+  gate compares at (a lane can differ at one count and agree again at a
+  later one, so no single count is the test):
   - a reassociated rk4 sum;
   - a contraction (a*b + c made one fma);
   - the contraction undone, verifier-P1's plant;
@@ -901,8 +965,12 @@ Both files run in the golden stage (`pytest python/tests`) and under
 - negation and unary minus under the directed attributes;
 - every refusal, by name and line;
 - the mutation fuzz;
+- verifier-VL1's cases: constants through a power of h exact, with no
+  float able to reach one; constants of thousands of digits; runs of
+  minuses; non-canonical graphs refused; the bounds on arrays, ranges
+  and lanes; run values as text;
 - determinism across hash seeds;
-- the intention-out's two checks;
+- the intention-out's three checks;
 - this document's refusal tables, template text and Lorenz-63 blocks
   against the code.
 

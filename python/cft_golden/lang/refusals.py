@@ -43,8 +43,10 @@ CATALOGUE = {
     "reserved-name": "a keyword, a built-in, h or a refused name used "
                      "to name a value",
     "undefined-name": "a name used and never declared",
-    "array-length": "an array whose length is not a whole number "
-                    "of at least 1",
+    "array-length": "an array whose length is not written as a whole "
+                    "number from 1 to 32,768",
+    "lane-capacity": "a lane of more than 32,768 values (state and lane "
+                     "params), the deepest scratch any tile publishes",
     "unused": "a const, param, lane param, let or h that nothing uses",
     "cycle": "a definition that depends on itself",
     "not-constant": "a value needed when the program is compiled that "

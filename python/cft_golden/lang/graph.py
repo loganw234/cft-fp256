@@ -86,7 +86,7 @@ def _ref_kind(ref):
 
 
 def _frac(text):
-    return Fraction(text)
+    return K_.parse_frac(text)
 
 
 def _key_sort(entry):
@@ -273,7 +273,7 @@ class StepGraph:
                                     ensure_ascii=True)
 
         def ex(v):
-            return None if v is None else str(Fraction(v))
+            return None if v is None else K_.frac_text(v)
 
         def bx(b):
             return None if b is None else K_.bits_hex(fmt, b)
@@ -316,10 +316,18 @@ class StepGraph:
 
     @classmethod
     def from_bytes(cls, data):
-        """The graph these bytes are, or `graph-format`. The bytes must
-        be canonical (re-serialised, they come back the same), every
-        ref must point at an earlier node or an existing leaf, and every
-        encoding must be its exact value rounded once."""
+        """The graph these bytes are, or `graph-format`.
+
+        Three tests, each a refusal by name: the bytes are ASCII JSON in
+        the layout above (re-serialised, they come back the same); every
+        ref points at an earlier node or an existing leaf and every
+        encoding is its exact value rounded once; and the graph is
+        CANONICAL - it is the graph of its own canonical form, so the
+        language would have made exactly these bytes. That last one is
+        what refuses a dead node, a node order that is not the
+        post-order walk, a shared unlabelled node, a const table out of
+        order or with an entry nothing reads, options on the wrong
+        integrator, and a step that is not its field's expansion."""
         def bad(why):
             return Refusal("graph-format",
                            f"these bytes are not a version-1 step graph: "
@@ -328,6 +336,8 @@ class StepGraph:
             obj = json.loads(bytes(data).decode("ascii"))
         except (UnicodeDecodeError, ValueError) as exc:
             raise bad(f"not ASCII JSON ({exc})") from None
+        except RecursionError:
+            raise bad("JSON nested deeper than a graph's") from None
         try:
             g = cls._from_obj(obj)
         except Refusal:
@@ -339,7 +349,22 @@ class StepGraph:
         if problem:
             raise bad(problem)
         if g.to_bytes() != bytes(data):
-            raise bad("not canonical: re-serialised it differs")
+            raise bad("not in the canonical layout: re-serialised it "
+                      "differs")
+        from .check import check
+        from .render import render_canonical
+        try:
+            again = check(render_canonical(g), "<canonical form>")
+        except Refusal as r:
+            raise bad(f"its canonical form is refused ({r.name}: "
+                      f"{r.sentence})") from None
+        except (KeyError, IndexError, AssertionError, ValueError,
+                TypeError, AttributeError) as exc:
+            raise bad(f"it has no canonical form ({type(exc).__name__}: "
+                      f"{exc})") from None
+        if again.to_bytes() != bytes(data):
+            raise bad("not canonical: the language makes other bytes from "
+                      "this graph's own canonical form")
         return g
 
     @classmethod

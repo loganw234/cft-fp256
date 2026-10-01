@@ -21,6 +21,7 @@ from fractions import Fraction
 
 from .. import softfloat as sf
 from . import constants as C
+from .check import constant_of
 from .refusals import Refusal
 
 
@@ -61,30 +62,45 @@ def _whole(n):
 
 
 def _exact_run_value(name, value):
+    """A run value as an exact rational: an int, a Fraction, or text
+    read by the language's own rules for a constant (constant_of)."""
     if isinstance(value, float):
         raise Refusal("param-value", f"{name}'s run value is a Python float, "
                       f"which is binary64 already: give an int, a Fraction "
                       f"or the literal as text")
     if isinstance(value, bool):
         raise Refusal("param-value", f"{name}'s run value is a bool")
-    try:
-        return Fraction(value)
-    except (TypeError, ValueError, ZeroDivisionError):
+    if isinstance(value, str):
+        try:
+            v = constant_of(value)
+        except Refusal as r:
+            if r.name.startswith("constant-") or r.name == "too-deep":
+                raise
+            raise Refusal("param-value", f"{name}'s run value {value!r} is "
+                          f"not a constant: {r.sentence}") from None
+    elif isinstance(value, (int, Fraction)):
+        v = Fraction(value)
+    else:
         raise Refusal("param-value", f"{name}'s run value {value!r} is not "
                       f"an exact rational (an int, a Fraction or text such "
-                      f"as 8/3 or 0.01)") from None
+                      f"as 8/3, 0.01 or 0x1p-3)")
+    if not C.in_range(v):
+        raise Refusal("constant-range", f"{name}'s run value lies beyond "
+                      f"2^+-{C.LIMIT_LOG2}, outside every format by far")
+    return v
 
 
 def _round_run(graph, name, value):
     fmt, rnd = graph.fmt, graph.rnd
     bits, flags = C.round_once(fmt, rnd, value)
-    where = f"{C.FORMAT_754[fmt.name]} under {sf.RND_NAMES[rnd]}"
-    if C.overflowed(flags):
-        raise Refusal("constant-overflow", f"{name} = {C.literal(value)} "
-                      f"overflows {where}")
-    if C.rounded_to_zero(fmt, value, bits):
+    over = C.overflowed(flags)
+    if over or C.rounded_to_zero(fmt, value, bits):
+        where = f"{C.FORMAT_754[fmt.name]} under {sf.RND_NAMES[rnd]}"
+        if over:
+            raise Refusal("constant-overflow", f"{name} = {C.brief(value)} "
+                          f"overflows {where}")
         raise Refusal("constant-rounds-to-zero", f"{name} = "
-                      f"{C.literal(value)} is not zero and rounds to zero in "
+                      f"{C.brief(value)} is not zero and rounds to zero in "
                       f"{where}")
     return bits
 
@@ -151,6 +167,10 @@ def run(graph, states, steps, lane_params=None, params=None,
                               f"encoding")
     names = [p[0] for p in graph.param]
     pbits = [p[2] for p in graph.param]
+    both = sorted(set(params or {}) & set(param_bits or {}))
+    if both:
+        raise Refusal("param-value", f"{both[0]} is given both as a value "
+                      f"and as an encoding; a run gives each param once")
     for name, value in (params or {}).items():
         if name not in names:
             raise Refusal("unknown-param", f"{name} is not a param of "
