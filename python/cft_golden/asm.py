@@ -877,6 +877,94 @@ class Image:
                    scratch_depth=scratch_depth, scratch_io=scratch_io)
 
 
+# ---- the text form's characters (2026-10-01) -------------------------
+#
+# One rule, held by this file and by host/tools/cft-asm.c alike, so the
+# two cannot disagree about what a line is - which they did: this file
+# split lines with str.splitlines(), which also ends one at a lone CR,
+# VT, FF, 0x1c-0x1e, NEL, U+2028 and U+2029, and cft-asm.c at LF alone,
+# so `; note\rdeposit r0` was a comment and a deposit here and a
+# comment there, at exit 0 (verifier-VD1, the language round). NUL and
+# Ctrl-Z were C-side truncations: a NUL ends a C string, a Ctrl-Z a
+# Windows text-mode read. docs/PROGRAMS.md states the rule:
+#
+# * a source is UTF-8;
+# * a line ends at a line feed, and a carriage return immediately before
+#   it is part of that end - so a CRLF file reads as its LF twin;
+# * every other line boundary str.splitlines() knows, and NUL and
+#   Ctrl-Z, is refused by name anywhere in a source, comments included;
+# * outside a comment - before a line's first `;` - a line holds only
+#   printable ASCII, spaces and tabs.
+#
+# The source is checked whole before any line is assembled: UTF-8 first,
+# then the characters line by line, so of several faults both
+# assemblers name the same one.
+
+_LINE_BREAKS = {
+    0x0d: "a carriage return (0x0d) that is not part of a CRLF line end",
+    0x0b: "a vertical tab (0x0b)",
+    0x0c: "a form feed (0x0c)",
+    0x1c: "a file separator (0x1c)",
+    0x1d: "a group separator (0x1d)",
+    0x1e: "a record separator (0x1e)",
+    0x85: "a next line (U+0085)",
+    0x2028: "a line separator (U+2028)",
+    0x2029: "a paragraph separator (U+2029)",
+}
+_NEVER = {0x00: "a NUL (0x00)", 0x1a: "a Ctrl-Z (0x1a)"}
+
+# The most digits a decimal number may have: Python's own int() refuses
+# a longer decimal string since 3.11 (sys.int_info.default_max_str_
+# digits), and this file then raised an uncaught ValueError on an `op`
+# or `r` number that long (verifier-VD1). The text form states the bound
+# itself, the same on every interpreter, 3.10's included, and refuses
+# past it by name. No field is within thousands of digits of it.
+MAX_DECIMAL_DIGITS = 4300
+
+
+def _char_name(cp):
+    """A character as a refusal names it."""
+    if cp in _LINE_BREAKS:
+        return _LINE_BREAKS[cp]
+    if cp in _NEVER:
+        return _NEVER[cp]
+    if cp < 0x20 or cp == 0x7F:
+        return f"the control character 0x{cp:02x}"
+    return f"the character U+{cp:04X}"
+
+
+def _source_text(text, source):
+    """The source as the str the rule reads. Bytes are decoded as UTF-8,
+    strictly, and a str must be one UTF-8 can carry; a fault is refused
+    with its line, as cft-asm.c refuses the same bytes. A caller with a
+    FILE should hand over its bytes: a text-mode read turns a lone CR
+    into a line end before this file could refuse it."""
+    if isinstance(text, (bytes, bytearray, memoryview)):
+        data = bytes(text)
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            line = data.count(b"\n", 0, exc.start) + 1
+            raise AsmError(f"{source}:{line}: the source is not UTF-8 "
+                           f"(byte 0x{data[exc.start]:02x})") from None
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        line = text.count("\n", 0, exc.start) + 1
+        raise AsmError(f"{source}:{line}: the source is not UTF-8 (a lone "
+                       f"surrogate, U+{ord(text[exc.start]):04X})") from None
+    return text
+
+
+def _decimal_value(tok, digits, what):
+    """A decimal number's value, refused by name past
+    MAX_DECIMAL_DIGITS digits - before int(), which would raise."""
+    if len(digits) > MAX_DECIMAL_DIGITS:
+        raise AsmError(f"{what}: {tok!r} has {len(digits)} digits, and a "
+                       f"decimal number has at most {MAX_DECIMAL_DIGITS}")
+    return int(digits)
+
+
 # ---- the assembler ---------------------------------------------------
 
 _COMMENT = re.compile(r";.*$")
@@ -889,12 +977,28 @@ def _split(line):
     return [t for t in re.split(r"[\s,]+", line.strip()) if t]
 
 
+_DECIMAL = re.compile(r"[+-]?[0-9](?:_?[0-9])*")
+_HEX = re.compile(r"0x_?[0-9a-f](?:_?[0-9a-f])*")
+
+
 def _parse_uint(tok, what):
+    """A number as int() reads one: base 16 after a 0x (either case) and
+    base 10 otherwise - one optional sign on a decimal, none after 0x,
+    single underscores between digits and one after the 0x (PEP 515).
+    The token is printable ASCII (the character rule), where the two
+    patterns above are exactly int()'s language; they are written out so
+    a decimal past MAX_DECIMAL_DIGITS digits is refused by name before
+    int() could raise on it."""
     t = tok.lower()
-    try:
-        return int(t, 16) if t.startswith("0x") else int(t, 10)
-    except ValueError:
-        raise AsmError(f"{what}: {tok!r} is not a number")
+    if _HEX.fullmatch(t):
+        return int(t, 16)
+    if _DECIMAL.fullmatch(t):
+        n = sum(c.isdigit() for c in t)
+        if n > MAX_DECIMAL_DIGITS:
+            raise AsmError(f"{what}: {tok!r} has {n} digits, and a decimal "
+                           f"number has at most {MAX_DECIMAL_DIGITS}")
+        return int(t, 10)
+    raise AsmError(f"{what}: {tok!r} is not a number")
 
 
 class _Asm:
@@ -921,6 +1025,13 @@ class _Asm:
     def fail(self, msg):
         raise AsmError(f"{self.source}:{self.lineno}: {msg}")
 
+    def decimal(self, tok, digits, what):
+        """_decimal_value, its refusal located at this line."""
+        try:
+            return _decimal_value(tok, digits, what)
+        except AsmError as exc:
+            self.fail(str(exc))
+
     # -- operands ------------------------------------------------------
 
     def reg(self, tok):
@@ -938,7 +1049,7 @@ class _Asm:
                 self.fail(f"{tok} is a scratch slot, and this operand must "
                           f"be a register")
             self.fail(f"{tok!r} is not a register")
-        n = int(m.group(1))
+        n = self.decimal(tok, m.group(1), "a register")
         if not 0 <= n < NREG:
             self.fail(f"r{n} is outside r0..r{NREG - 1}")
         return n
@@ -1144,7 +1255,7 @@ class _Asm:
         m = _REGNAME.match(args[2])
         if not m:
             self.fail(f"{args[2]!r} is not r0..r{NREG - 1}")
-        n = int(m.group(1))
+        n = self.decimal(args[2], m.group(1), "a register")
         if not 0 <= n < NREG:
             self.fail(f"r{n} is outside r0..r{NREG - 1}")
         self.reg_names[low] = n
@@ -1278,7 +1389,7 @@ class _Asm:
                 self.fail(f"{suffix!r} is not rne, rtz, rdn, rup, rmm or kx")
         m = _OPNUM.match(name)
         if m:
-            op = int(m.group(1))
+            op = self.decimal(name, m.group(1), "an opcode")
             if op > 255:
                 self.fail(f"op{op} does not fit the opcode byte")
             fields = (A, B, C)          # an opcode we cannot name has
@@ -1322,8 +1433,45 @@ class _Asm:
 
     # -- the pass ------------------------------------------------------
 
+    def lines(self):
+        """The source's lines under the text form's character rule (the
+        block above _LINE_BREAKS): split at LF alone, a CR just before an
+        LF dropped with it, and every character of every line held to
+        the rule - the whole source, before any line is assembled."""
+        segs = self.text.split("\n")
+        ended = self.text.endswith("\n")
+        if ended:
+            segs.pop()            # a final LF ends a line; it starts none
+        out = []
+        for i, seg in enumerate(segs, 1):
+            self.lineno = i
+            if (ended or i < len(segs)) and seg.endswith("\r"):
+                seg = seg[:-1]
+            comment = False
+            for ch in seg:
+                cp = ord(ch)
+                if cp in _LINE_BREAKS:
+                    self.fail(f"{_char_name(cp)}: a line ends at a line "
+                              f"feed, or a carriage return and a line "
+                              f"feed, and at no other character, so a "
+                              f"source holds none of the others anywhere")
+                if cp in _NEVER:
+                    self.fail(f"{_char_name(cp)}: a source holds none "
+                              f"anywhere, in a comment or out of one")
+                if comment:
+                    continue
+                if ch == ";":
+                    comment = True
+                elif not (ch == "\t" or 0x20 <= cp <= 0x7E):
+                    self.fail(f"{_char_name(cp)} outside a comment, where "
+                              f"a line holds only printable ASCII, spaces "
+                              f"and tabs")
+            out.append(seg)
+        self.lineno = 0
+        return out
+
     def run(self):
-        for raw in self.text.splitlines():
+        for raw in self.lines():
             self.lineno += 1
             line = _COMMENT.sub("", raw)
             toks = _split(line)
@@ -1371,7 +1519,9 @@ class _Asm:
 
 
 def assemble_image(text, source="<text>") -> Image:
-    return _Asm(text, source).run()
+    """`.cfta` source - a str, or the bytes of a file, which is how a
+    caller holding a file should pass it (_source_text) - to its Image."""
+    return _Asm(_source_text(text, source), source).run()
 
 
 def assemble(text, source="<text>") -> bytes:
