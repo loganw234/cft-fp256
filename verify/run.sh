@@ -885,9 +885,12 @@ stage character "the clause-5.12 conversions and the 9.7 payloads vs the model, 
   PY "$ROOT/host/tests/character_check.py"
 
 # The transcendentals, twice. The first run is at the contract's
-# own working precision, where the Ziv loop seldom escalates (84
-# times over the whole run, counted in an instrumented library on
-# amd-arc-box on 2026-09-30); the second forces the library to
+# own working precision, where the Ziv loop seldom escalates: 805
+# times over the whole run with the error count that has no ceiling,
+# and 84 with the count as it was before, saturating at 2^40 (both
+# counted by the lead on amd-arc-box on 2026-09-30 - the 805 in S4's
+# timed run of the sweep, the 84 in an instrumented library); the
+# second forces the library to
 # START below the precision it needs, so the escalation path runs at
 # scale - against an UNESCALATED model, which is what makes it a
 # comparison rather than a coincidence. That second run is what found the

@@ -29,12 +29,34 @@
  * it rounding up, and a count scaled DOWN rounds up to a whole unit.
  * Scaling UP moves k and is exact, so an amplified count is carried at
  * its size. Past k = 2^24 the count is infinity - a bound, since it is
- * above every true error, and one that cannot decide. Nothing reaches
- * it by growth: one operation scales a count up by at most 2W + 2
- * bits. The rules below produce it in two places only, div and
- * transcend.c's mp_log_of_mp, both where the rule's bound already
- * exceeds a relative error of 1, so it never displaces a bound that
- * could decide.
+ * above every true error, and one that cannot decide - and it never
+ * displaces a bound that could:
+ *
+ *   Two rules make it on purpose. div does where the divisor's relative
+ *   error is 1/2 or more, which makes its bound 1 or more. transcend.c's
+ *   mp_log_of_mp does where the argument's is: known only within a
+ *   factor of two, its logarithm is known only within ln 2, absolutely.
+ *   That is not always a relative error past 1 (log 2^100 would still
+ *   be known to about 1%), but it is one past 2^-19 - |log v| is below
+ *   2^18 for any argument the evaluator forms - and that logarithm is
+ *   asinh's, acosh's or atanh's result itself (halved, for atanh),
+ *   which the Ziv loop rounds to 24 bits or more. It cannot decide.
+ *
+ *   A count can also grow to it. A cancellation scales one up by at
+ *   most 2W + 2 bits, but a multiply charges ea*eb*2^-W, so two counts
+ *   past 2^W multiply: at W = 64, 2^1000 times itself gives 2^1936
+ *   (verifier-W5), and a few dozen multiplies reach 2^(2^24), where
+ *   err_mul and cft_mp_err_up give infinity a little before canonical
+ *   form would (mpfloat.h). But a count of 2^W or more is a relative
+ *   error of 1 or more and decides nothing (enclosure() reaches zero).
+ *   A cancellation scales a count down by a few times W bits at most,
+ *   and only add's skip branch further, by the ratio of the two values,
+ *   so one near 2^(2^24) comes back below 2^W only under a value about
+ *   2^(2^24 - W) times larger - where cft_mp_round refuses an exponent
+ *   past 2^24, and the screens keep every value far inside that.
+ *
+ * Measured: the transcend sweep's instrumented contract run made no
+ * infinite count at all (amd-arc-box, 2026-09-30).
  *
  * Widths. An operation at W reads each operand's count in units of
  * 2^-W (cft_mp_err_at): scaled up by 2^(W - Wx), exactly, when the
@@ -137,10 +159,17 @@
  * cft_mp_const truncates the 1088-bit constant with a count of 1 in,
  * so trunc(1) = 4. The stored constant is the true one truncated at
  * 1088 bits, and truncating that at W is truncating the true one at
- * W, so the 1 is spare; it is kept from the old rule.
+ * W, so the 1 is spare; it is kept from the old rule. That holds at
+ * every W below 1088, and so at every W a caller asks for (none asks
+ * past CFT_MP_PREC_MAX, 928); host/tests/mp_err_check.c holds it
+ * against MPFR at each one. A known limit: the function also accepts
+ * W = 1088, where nothing is truncated and the count is the 1 alone -
+ * short for ln10, whose stored value is 1.06 units low relatively
+ * (verifier-W5, 2026-09-30).
  *
  * ---------------------------------------------------------------
- * The old count, and why this one decides nothing the old one did not
+ * The old count, and why this one decides only what the old one did,
+ * but for one exception
  * ---------------------------------------------------------------
  *
  * Until 2026-09-30 `err` was a uint64_t that saturated at 2^40, and a
@@ -173,11 +202,21 @@
  * No significand depends on a count: the rules only compute counts,
  * and the only other readers are enclosure() and cft_mp_add's
  * exact-cancellation test, which asks only whether both counts are
- * zero. (div's and div_ui's shifts are the old ones whenever the
- * dividend is W bits wide, which it is at every call site.) So, by
- * induction over an evaluation, every count here is at least the one
- * the old rules computed at the same step - the clamp only ever
- * lowered those - and every enclosure contains the old one.
+ * zero. Three significand paths are not the old code's, all where an
+ * operand is not W bits wide: div's shift (the old W + 1 whenever the
+ * divisor is no wider than the dividend), div_ui's (the old 34
+ * whenever the dividend is W bits or wider), and add_skip, which now
+ * normalises the larger operand to W bits where the old code returned
+ * it at its own width. No call site hands any of them such an operand:
+ * the only operand read at a width not its own is the Payne-Hanek
+ * reduction's t, and it enters a multiply alone (read from the code;
+ * over the sweep's fp32, fp64 and fp128 runs, both schedules,
+ * verifier-W5 measured none of the three reached, and over the whole
+ * contract run amd-arc-box measured no div shift that differed). So,
+ * by induction over an
+ * evaluation, every value here is the old one and every count at
+ * least the one the old rules computed at the same step - the clamp
+ * only ever lowered those - and every enclosure contains the old one.
  *
  * Hence a rounding this module decides at a working precision, the
  * old module decided at the same precision with the same bits and
@@ -188,10 +227,11 @@
  * its enclosure holds the true value. A screen (cft_mp_cmp_int) this
  * module fires, the old one fired; one the old fired and this does not
  * falls through to the Ziv loop, which is always safe. So against the
- * old module a call can only take an extra escalation, and it refuses
- * (CFT_ERR_INTERNAL) only if that escalation reaches the cap - which
- * the gate's transcend and mpfr stages report as a mismatch, naming
- * the operands. Its answer is the old one's wherever the old one was
+ * old module a call can take an extra escalation - or, at that
+ * exception, one fewer - and it refuses (CFT_ERR_INTERNAL) only if an
+ * extra escalation reaches the cap, which the gate's transcend and
+ * mpfr stages report as a mismatch, naming the operands. Its answer is
+ * the old one's wherever the old one was
  * right, which the sweep holds against the model on every result;
  * where a clamp had decided a rounding wrongly, this module escalates
  * past the clamp instead.
@@ -875,7 +915,9 @@ int cft_mp_const(cft_mp *r, cft_mp_constant which, int W)
      * bits, so it is already low by up to one unit there; truncating
      * further to W is the truncation mp_norm charges. The count of 1
      * going in is spare - a truncation of a truncation is one - and is
-     * kept from the old rule (the header): trunc(1), 4 units. */
+     * kept from the old rule (the header): trunc(1), 4 units. At W =
+     * 1088 itself nothing is truncated and the 1 is the whole count,
+     * short for ln10: a known limit no caller reaches (the header). */
     return mp_norm(r, W, 0, &v, e, cft_mp_err_u64(1));
 }
 

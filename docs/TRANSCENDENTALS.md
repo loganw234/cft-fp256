@@ -215,9 +215,17 @@ its own exponent, c·2^k: exact below 2^63, and past that rounded UP to
 63 significant bits, so a bound of any size is carried exactly or
 rounded up and is never replaced by a smaller one. The one value above
 every finite count is infinity - a bound, and one that cannot decide -
-and a rule produces it only where its own bound already exceeds a
-relative error of 1: a divisor, or a logarithm's argument, whose
-relative error passes 1/2.
+and it never displaces a bound that could. Two rules make it on
+purpose. A divisor whose relative error passes 1/2 gives a bound of 1
+or more. A logarithm's argument known only within a factor of two gives
+a logarithm known only within ln 2, absolutely: not always a relative
+error of 1 (log 2^100 would still be known to about 1%), but always
+more than 2^-19, since no argument the evaluator forms has a logarithm
+of 2^18 or more, and that logarithm is asinh's, acosh's or atanh's
+result itself, rounded to 24 bits or more. A count can also grow to
+infinity, since a multiply of two counts past 2^W multiplies them; but
+a count of 2^W or more is already a relative error of 1, which decides
+nothing (`host/src/mpfloat.c`'s header has the rest).
 
 The rules, each an upper bound at every size of count and every
 working precision, and each rounded up. `trunc(X)` is `X + 2 +
@@ -240,7 +248,11 @@ costs the truncation's two units and their cross term with X.
 `host/tests/mp_err_check.c` holds every row to its claim exactly, in
 GMP: every significand pair, alignment and sign pair at W = 6 against
 fourteen counts from zero past 2^W to infinity, and a fixed-seed sample
-to 928 bits (the runner's `mpfr` stage runs it).
+to 928 bits. Against MPFR it also holds two claims outside the table:
+the count each stored constant carries, at every W from 2 to 928, and
+the logarithm's conversion of an argument's error into its own
+(`mp_log_of_mp`, phase 3's "Two reductions, two derivations"). The
+runner's `mpfr` stage runs it.
 
 The unlike-signs row is where a subtraction that loses k bits costs k
 bits of the error budget, and it is the term the algorithms below are
@@ -259,16 +271,26 @@ final roundings over `transcend_check.py`'s sweep, every result equal
 to the model's. A clamp that a later operation scaled back down looked
 like an ordinary count, and was not a bound either. The count that
 replaced it is at least the old one at every step, so it decides no
-rounding the old one did not; what it changes is which attempt
-decides. Over `transcend_check.py`'s fp256 sweep on 2026-09-30 it took
-353 of 137,814 calls one attempt further, from 514 bits to the cap at
-832, and changed no result. Every one was pow, powr, pown or compound
-whose base - x, or 1 + x for compound - is one unit in its last place
-from a small integer, a simple fraction or a power of two. By the
-binomial theorem such a result lies within about 2^-2p of a
-representable number, and the old count had decided every one of them
-on its clamp. Over that sweep no infinite count arose, and the closest
-decision had 69 bits of room.
+rounding the old one did not decide at the same attempt, with one
+exception: where an end of the OLD enclosure lay exactly on the
+format's grid, the old flags disagreed and the old loop escalated, and
+the new count may decide there - correctly, since its enclosure holds
+the true value (`host/src/mpfloat.c`'s header; verifier-W5 found 135
+among 2,219,337 decisions on chains run through both libraries side by
+side, and over the sweep no call took fewer attempts than before).
+What it changes is which attempt decides, never a result. Over the
+whole sweep at the contract's precision (amd-arc-box, 2026-09-30) the
+escalations rose from 84 to 805: 703 calls took more attempts and none
+fewer, the C time rose 2%, and no result changed; no infinite count
+arose, and the closest decision had 58 bits of room. Over the fp256
+sweep alone (the desktop, the same day) it took 353 of 137,814 calls
+one attempt further, from 514 bits to the cap at 832. Every one was
+pow, powr, pown or compound, and each of the 351 examined one by one
+had a base - x, or 1 + x for compound - one unit in its last place from
+a small integer, a simple fraction or a power of two. By the binomial
+theorem such a result lies within about 2^-2p of a representable
+number, and the old count had decided every one of them on its clamp;
+there the closest decision had 69 bits of room.
 
 One consequence took a deliberate experiment to find. When two
 approximations cancel EXACTLY, the difference is not provably zero -
@@ -493,8 +515,9 @@ Table Maker's Dilemma is the honest gap: there is no proof that no
 input requires more than the cap, at fp128 or fp256 or anywhere else.
 What there is, is a counting argument that puts the expected number at
 2^-83 across the whole fp256 pow input space, a hand analysis of the
-one structured family that does escalate, and a loud refusal if either
-is wrong.
+one structured family phase 1 saw escalate (2026-09-02; "The error
+model" above has the ones that escalate since), and a loud refusal if
+either is wrong.
 
 ## What was actually run
 
@@ -533,13 +556,15 @@ carry a test-only knob that lowers the FIRST attempt's precision -
 `CFT_TRANSCEND_MINPREC` in the C, `START_PREC_OVERRIDE` in the model -
 and the `transcend` stage of `verify/run.sh` runs the sweep twice,
 once normally and once with the C forced to start at 64 bits against an
-UNESCALATED model. That second run drives 6,542 escalations through
-`transcend_check.py`'s pools, and it is what found the
+UNESCALATED model. That second run drove 6,542 escalations through
+`transcend_check.py`'s pools over 72,275 comparisons on 2026-09-02, and
+150,218 over 580,977 on 2026-09-30, with the error count that has no
+ceiling (amd-arc-box, an instrumented library); it is what found the
 exact-cancellation hole in the error bound described above. The knob
 cannot change a result: a rounding the enclosure decides at some
 precision is decided the same way at every higher one, because raising
 the precision only narrows the enclosure - and the run proves it, over
-72,275 comparisons against a reference that did not escalate.
+every comparison it makes against a reference that did not escalate.
 
 ## What was not here on 2026-09-02
 

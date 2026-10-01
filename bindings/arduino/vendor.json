@@ -121,12 +121,12 @@
     {
       "source": "host/src/mpfloat.c",
       "dest": "src/cft/src/mpfloat.c",
-      "sha256": "27380a1ab20e2d94a1d4390d75692f7317e24b9cc11d9146eccbaa72476d7737"
+      "sha256": "119fd5eaa2a20507fb9aa4f39c3f52ff706b80e2c4400cd8ec9b864a9639afb3"
     },
     {
       "source": "host/src/mpfloat.h",
       "dest": "src/cft/src/mpfloat.h",
-      "sha256": "4b8677ef6d221beaee38cc977bed6f34f8e24774347ad48f3fea12f53f336f17"
+      "sha256": "1f2e88997177bf620904e68f8f444b3755f5352045961f872496e2f4a7cdc506"
     },
     {
       "source": "host/src/program.c",
@@ -176,7 +176,7 @@
     {
       "source": "host/src/transcend.c",
       "dest": "src/cft/src/transcend.c",
-      "sha256": "cfa5e50e595a19b55e265fc59066e2b907e6130dd3d8cce50057986364a53a89"
+      "sha256": "b2049ac6d079ed061703b4a738f70195ed37d1f40e0704c098a8527d7d564f3c"
     },
     {
       "source": "host/src/transcend.h",

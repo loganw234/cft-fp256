@@ -129,13 +129,15 @@ void cft_tr_reset_stats(void)
  * scale: in ordinary use this loop seldom escalates, and a path seldom
  * taken is a path barely tested. Phase 1 counted no escalation at all
  * over 95,680 elements through the MPFR campaign and 76,115 through
- * the model check; the lead counted 84 over host/tests/transcend_check.py
- * at the contract's precision on 2026-09-30 (amd-arc-box, an
- * instrumented library). It cannot change a result: a rounding the
- * enclosure decides at some precision is decided the same way at every
- * higher one, because raising the precision only narrows the
- * enclosure. host/tests/transcend_check.py --min-prec proves that by
- * replaying the whole sweep with it set. */
+ * the model check. Over host/tests/transcend_check.py at the contract's
+ * precision, on amd-arc-box on 2026-09-30, the lead counted 84 with the
+ * error count as it was then, saturating at 2^40 (an instrumented
+ * library), and 805 with the count that has no ceiling (S4's timed run
+ * of the same sweep): the price of not deciding on a clamp. It cannot
+ * change a result: a rounding the enclosure decides at some precision
+ * is decided the same way at every higher one, because raising the
+ * precision only narrows the enclosure. host/tests/transcend_check.py
+ * --min-prec proves that by replaying the whole sweep with it set. */
 static int tr_start_prec(const cft_fmt_desc *f)
 {
     static int probed, forced;

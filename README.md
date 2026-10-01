@@ -232,12 +232,15 @@ runs that failed stay in the record. The load-bearing ones:
   the transcendental share of a 739,234-case campaign at ABI 0.7
   (2026-09-04) - with zero value and zero flag mismatches.
 - **The error bound behind them is checked rule by rule**: every rule
-  of the multiprecision evaluator held to its claim exactly, in GMP,
-  over 16.8 million results - every significand pair at a 6-bit working
-  precision against error counts from zero to infinity, and a sample to
-  928 bits. The evaluator as it was before 2026-09-30, whose count
-  saturated at 2^40, fails the same check on 3,969,901 of 10,334,817
-  (the `mpfr` stage, 2026-09-30).
+  of the multiprecision evaluator's arithmetic held to its claim
+  exactly, in GMP, over 16.8 million results - every significand pair
+  at a 6-bit working precision against error counts from zero to
+  infinity, and a sample to 928 bits - and its constants' error count
+  and its logarithm's conversion of an argument's error held against
+  MPFR (the `mpfr` stage, since 2026-09-30). The evaluator as it was
+  before that day, whose count saturated at 2^40, fails the same check
+  of the arithmetic on 3,969,901 of 10,334,817 (the check built against
+  that library, on the desktop, 2026-09-30).
 - **A GPU agrees, bit for bit, on a real workload.** atlas-engine's
   deterministic camera around a plate, lowered to a sequencer program:
   a million samples a pass, five words a sample, and every pass's

@@ -154,10 +154,14 @@ authority:
     the only external oracle that reaches binary128 and binary256, and
     the only one at all for the transcendentals. Since 2026-09-30 the
     same stage then holds the transcendental evaluator's own error
-    rules to their claim, exactly, in GMP (`host/tests/mp_err_check.c`):
-    every rule `host/src/mpfloat.c` derives, on operands built field by
-    field, with two controls that must fail - the rules as they were
-    before that day, and a comparison made on the stored value alone.
+    claims, exactly (`host/tests/mp_err_check.c`): every rule
+    `host/src/mpfloat.c` derives, in GMP on operands built field by
+    field, and against MPFR the count each constant carries and the
+    logarithm's conversion of an argument's error, with controls that
+    must fail - the rules as they were before that day, a comparison
+    made on the stored value alone, a constant's count cut to one unit,
+    and the logarithm without its argument's error. `transcend.c`'s own
+    allowances, such as a truncated series' tail, are not among them.
 12. **Hardware, out of the runner.** The native-oracle soaks
     (`hw/run-soak.sh`), hardware emulation, the on-card runs
     (`hw/run-device-test.sh`), and the out-of-context and shell timing
@@ -212,7 +216,7 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | `cpp` (C++17 and C++20, each a full replay) | 25 min | not measured loaded | |
 | `node` (unit tests, `program_test.mjs` + `conformance.mjs`) | 5 min + 17 min | | |
 | `wasm` (`verify.mjs`, the page without a browser) | 11 min | 30 min | the page's own embedded sample first, 4,015 cases over 20 sets replayed as its section 2 does (the build's `negative_control.html` fails there by name, `verify.mjs --page`); then 1,068,915 cases through the page's bytes on `make vectors`' sets (about 1.2 million at the runner's generator counts), then 832,915 over 148 sets through the wrappers. The module must be REBUILT when an opcode is assigned, not merely revisioned: this lane replays the sets, so one predating opcode 31 failed 20 of 148 - all twenty reduce sets, each at its first `maxall` case |
-| `mpfr` | 8 min, and 16 to 18 s more for `mp-err-check` | | since 2026-09-30 the stage ends with `host/tests/mp_err_check.c`: every error rule of the transcendental evaluator held to its claim exactly, each verdict computed in GMP - W = 6 exhaustively (every significand pair, alignment and sign pair against fourteen counts from zero past 2^W to infinity), a fixed-seed sample to 928 bits, and verifier-W4's scaled-down clamp end to end: 16,800,951 results, 16 to 18 s on the desktop niced. Its controls must fail and do: the old rules' counts fail the same verdicts on 847,605 operands, and a comparison made on the stored value alone on 568,676. Built against the library as it was before the count had an exponent (aeb3f5e) with `-DMP_ERR_CHECK_BASE`, it fails on 3,969,901 results out of 10,334,817, W4's case among them, and its transcription of the old rules equals that library on every operand compared. GMP comes with MPFR, so the stage's own probe covers it; `mp-err-check --full` is the long sweep, not in the stage |
+| `mpfr` | 8 min, and about half a minute more for `mp-err-check` (28 s on the desktop, 2026-09-30) | | since 2026-09-30 the stage ends with `host/tests/mp_err_check.c`: every error rule `host/src/mpfloat.c` derives held to its claim exactly, each verdict computed in GMP - W = 6 exhaustively (every significand pair, alignment and sign pair against fourteen counts from zero past 2^W to infinity), a fixed-seed sample to 928 bits, and verifier-W4's scaled-down clamp end to end - and, against MPFR's directed roundings, the count `cft_mp_const` gives all six constants at every W from 2 to 928, and `transcend.c`'s conversion of an argument's error into its logarithm's (`mp_log_of_mp`, through a probe build of `transcend.c` that only this tool compiles) over 8,000 arguments: 16,814,033 results, 28 s on the desktop niced. `transcend.c`'s own allowances (a truncated series' tail, `mp_bump`) are not held by it. Its controls must fail and do: the old rules' counts fail the same verdicts on 847,605 operands, a comparison made on the stored value alone on 568,676, a constant's count cut to one unit on 1,567, and the logarithm without its argument's error on 695. Built against the library as it was before the count had an exponent (aeb3f5e) with `-DMP_ERR_CHECK_BASE`, which leaves the MPFR legs out, it fails on 3,969,901 results out of 10,334,817, W4's case among them, and its transcription of the old rules equals that library on every operand compared. GMP and MPFR come with the stage's own probe; `mp-err-check --full` is the long sweep, not in the stage |
 | `soak-quick` | 1.6 min | | |
 | `photograph` (a GPU's record, four passes of 1,048,576 samples side by side) | 1.7 min | | 101 s a pass on one core with four running, 88 s alone; 1.2 s a pass on the U50's tile (atlas-engine, 2026-09-18). The expected hashes are an NVIDIA GPU's, not the model's |
 | the workload checks (`collatztest` ... `zoomtest`) | 1 to 3 min each | 1 to 3 min each | |

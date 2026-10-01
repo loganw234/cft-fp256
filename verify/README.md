@@ -77,7 +77,7 @@ command in the `cft2204` distro.
 | wasm | the committed conformance page, verified without a browser | node |
 | workloads | the five contract workloads vs their oracles and their own determinism properties - `collatztest`, `enclosetest`, `mersennetest`, `orbitstest`, `zoomtest` in host/ | cc, python with mpmath |
 | demos | the browser demos' compute core reproduces the C tools' chains, without a browser (`bindings/wasm/verify_demos.mjs`) | cc, node |
-| mpfr | GNU MPFR parity, every rung and mode (third oracle); then the transcendental evaluator's error rules held exactly in GMP (`host/tests/mp_err_check.c`, `mp-err-check`) | cc, libmpfr/libgmp (below) |
+| mpfr | GNU MPFR parity, every rung and mode (third oracle); then the transcendental evaluator's error claims held exactly - mpfloat.c's rules in GMP, the constants' count and the logarithm's conversion against MPFR (`host/tests/mp_err_check.c`, `mp-err-check`) | cc, libmpfr/libgmp (below) |
 | soak-quick | native-oracle spot check + the sabotage control | cc |
 | images | staged xclbins match their manifests (IMAGES=...) | xclbinutil |
 | remote | the remote backend (docs/REMOTE.md) held to the contract on loopback: `host/tests/remote_check.py` starts `cft-serve` as its own child, records the PID beside the run's logs, runs the protocol refusals, `device-test`'s full matrix, a bounded conformance replay local and remote, one Collatz chain both ways and the round-trip counts on both div/sqrt routes through it, and terminates that PID - never an image name | cc, python with mpmath |

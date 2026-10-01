@@ -66,8 +66,13 @@
  * only bound that could is one that is too SMALL. That is why every
  * rule in mpfloat.c is an upper bound at every size of count and every
  * working precision, rounds up, and carries its derivation, and why
- * host/tests/mp_err_check.c holds every rule to it exactly, in GMP,
- * over counts from zero past 2^W to infinity.
+ * host/tests/mp_err_check.c holds every one of those rules to it
+ * exactly, in GMP, over counts from zero past 2^W to infinity - and,
+ * against MPFR, the count cft_mp_const gives each constant and
+ * transcend.c's conversion of an argument's error into its
+ * logarithm's (mp_log_of_mp). transcend.c's own allowances, such as a
+ * truncated series' tail, are its algorithms' analysis and are not
+ * held there.
  *
  * Until 2026-09-30 the count was a uint64_t saturating at 2^40. A
  * saturated count was a clamp, not a bound, and it decided roundings:
@@ -77,7 +82,9 @@
  * a later operation scaled back down looked ordinary and was not one
  * (verifier-W4 measured a count of 34 against a worst true error of
  * 2^46.97 units). mpfloat.c's header has that history, and why the
- * count that replaced it decides no rounding the old one did not.
+ * count that replaced it decides no rounding the old one did not, but
+ * for the one exception it names: an end of the old enclosure on the
+ * format's grid, where the old loop escalated and this one may decide.
  */
 
 #ifndef CFT_MPFLOAT_H
@@ -103,8 +110,8 @@
  * below 2^63 is the exact integer with k = 0 and a larger one keeps 63
  * significant bits. A zero count is {0, 0}. k at CFT_MP_ERR_K_INF or
  * past it is infinity: a bound that is above every true error and
- * cannot decide. mpfloat.c's header says where infinity can arise;
- * nothing reaches it by amplification. */
+ * cannot decide. mpfloat.c's header says where infinity can arise, and
+ * why it never displaces a bound that could decide. */
 typedef struct {
     uint64_t c;
     int32_t  k;
@@ -125,8 +132,15 @@ typedef struct {
  * make or rescale a bound. */
 cft_mp_err cft_mp_err_u64(uint64_t n);                 /* n units */
 cft_mp_err cft_mp_err_add(cft_mp_err a, cft_mp_err b);
-/* a * 2^j: exact for j >= 0, where only the exponent moves; for j < 0
- * rounded up to a whole unit. */
+/* a * 2^j: for j >= 0 only the exponent moves, which is exact while it
+ * stays below CFT_MP_ERR_K_INF; for j < 0 rounded up to a whole unit.
+ * A known limit (verifier-W5, 2026-09-30): near a count of 2^(2^24)
+ * infinity comes early. Any j of 2^24 or more gives infinity even from
+ * a count of 1, which canonical form could hold as {2^62, 2^24 - 62},
+ * and the private err_mul in mpfloat.c can do the same for a product
+ * between 2^(2^24) and 2^(2^24 + 63), the top of canonical form. So
+ * "exact for j >= 0" is not exact there - a bound still, above the
+ * true value, at a size that decides nothing. */
 cft_mp_err cft_mp_err_up(cft_mp_err a, long j);
 cft_mp_err cft_mp_err_inf(void);
 int        cft_mp_err_is_inf(cft_mp_err a);
