@@ -14,12 +14,18 @@ the whole step through the template's scheme.
 
 Values are bound by POSITION, never by glyph: the state by the order of
 the form's own `Y = (...)` line, the params and lane params by the order
-of their sections. So the Greek letters the renderer prints for names
-like sigma are cosmetic, and a renderer that printed one wrong would
+of their sections. So a renderer that printed a Greek letter wrong would
 still be read correctly here - while one that wrote a wrong operation
-or a wrong constant would not.
+or a wrong constant would not. The glyphs, and every other line the
+form prints, are held by test_lang.py's check_comments.
+
+A number is read at any length: Python's int() stops at 4,300 digits,
+and a constant may have more (verifier-VL1), so a long one is read with
+the limit lifted for that one conversion, as the golden model's
+chars._int_from_digits does.
 """
 
+import sys
 from fractions import Fraction
 
 MINUS, DOT, MAPSTO, LE, NE = "−", "·", "↦", "≤", "≠"
@@ -27,6 +33,32 @@ MINUS, DOT, MAPSTO, LE, NE = "−", "·", "↦", "≤", "≠"
 
 class MathFormError(ValueError):
     pass
+
+
+def _int(digits):
+    """A string of decimal digits as an int, at any length."""
+    try:
+        return int(digits)
+    except ValueError:
+        if not digits.isdigit():
+            raise
+        old = sys.get_int_max_str_digits()
+        sys.set_int_max_str_digits(0)
+        try:
+            return int(digits)
+        finally:
+            sys.set_int_max_str_digits(old)
+
+
+def _number(text):
+    """d[.d][e[+-]d], exactly, at any length."""
+    mant, _e, exp = text.partition("e")
+    whole, _dot, frac = mant.partition(".")
+    if not (whole + frac).isdigit():
+        raise MathFormError(f"{text!r} is not a number")
+    value = Fraction(_int(whole + frac))
+    k = (int(exp) if exp else 0) - len(frac)
+    return value * 10 ** k if k >= 0 else value / 10 ** -k
 
 
 def _tokens(text):
@@ -47,7 +79,7 @@ def _tokens(text):
                     i += 1
                 while i < n and text[i].isdigit():
                     i += 1
-            out.append(("num", Fraction(text[j:i])))
+            out.append(("num", _number(text[j:i])))
             continue
         if c.isalpha() or c == "_":
             j = i
@@ -335,6 +367,13 @@ class MathForm:
             else:
                 nxt[name] = value
         return [nxt[c] for c in comps]
+
+
+def constant(text):
+    """A value the form prints alone - a default, h - read exactly:
+    8/3, −0.5, 1e5000."""
+    form = MathForm("")
+    return form._eval(_Expr(text).tree, _Env(form, {}, {}))
 
 
 class _Env:

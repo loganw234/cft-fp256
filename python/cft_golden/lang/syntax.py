@@ -6,15 +6,127 @@ expressions that carry their source lines.
 docs/LANGUAGE.md, "The text", is the grammar this implements. The
 parser knows nothing about meaning - which names exist, what is a
 constant, what a statement may say - and the checker (check.py) is
-where every refusal but `syntax`, `power`, `not-equal`,
-`chained-comparison` and the literal's own `constant-range` is made.
+where every refusal but `character`, `syntax`, `power`, `not-equal`,
+`chained-comparison`, nesting's `too-deep` and the literal's own
+`constant-range` is made.
 """
 
+import re
 from fractions import Fraction
 
 from .. import chars
 from .constants import LIMIT_LOG2
 from .refusals import Refusal
+
+# ---- the text's characters (2026-10-01) -------------------------------
+#
+# One rule for the round's two text forms: a .cftl source is held to the
+# rule a .cfta source is (docs/PROGRAMS.md, "The text form's
+# characters"; asm.py's lines()), in the same words, so that no reader -
+# this lexer, cft-asm, an LF-only tool, str.splitlines() - sees a line
+# the others do not. Before it a lone CR ended a line here and in no
+# LF-only reader, so `; rounding: the default<CR>round rdn` was a comment
+# to grep and rdn to the parser; and a form feed, NEL or U+2028 in a
+# comment hid from the parser a line splitlines() showed (verifier-VL1):
+#
+# * a source is UTF-8;
+# * a line ends at a line feed, and a carriage return immediately before
+#   it is part of that end - so a CRLF file reads as its LF twin;
+# * every other line boundary str.splitlines() knows, and NUL and
+#   Ctrl-Z, is refused by name anywhere in a source, comments included;
+# * outside a comment - before a line's first `;` - a line holds only
+#   printable ASCII, spaces and tabs. A byte-order mark is no exception:
+#   it is a character outside a comment like any other.
+#
+# The source is checked whole before any of it is lexed, UTF-8 first and
+# then the characters line by line, left to right, so of several faults
+# the first is named - the one asm.py names.
+
+LINE_BREAKS = {
+    0x0d: "a carriage return (0x0d) that is not part of a CRLF line end",
+    0x0b: "a vertical tab (0x0b)",
+    0x0c: "a form feed (0x0c)",
+    0x1c: "a file separator (0x1c)",
+    0x1d: "a group separator (0x1d)",
+    0x1e: "a record separator (0x1e)",
+    0x85: "a next line (U+0085)",
+    0x2028: "a line separator (U+2028)",
+    0x2029: "a paragraph separator (U+2029)",
+}
+NEVER = {0x00: "a NUL (0x00)", 0x1a: "a Ctrl-Z (0x1a)"}
+
+_ANYWHERE = re.compile("[" + "".join(re.escape(chr(c)) for c in
+                                     sorted({**LINE_BREAKS, **NEVER})) + "]")
+_NOT_CODE = re.compile("[^\t\x20-\x7e]")
+
+
+def char_name(cp):
+    """A character as a refusal names it - asm.py's _char_name."""
+    if cp in LINE_BREAKS:
+        return LINE_BREAKS[cp]
+    if cp in NEVER:
+        return NEVER[cp]
+    if cp < 0x20 or cp == 0x7F:
+        return f"the control character 0x{cp:02x}"
+    return f"the character U+{cp:04X}"
+
+
+def _character(sentence, line):
+    return Refusal("character", sentence, line)
+
+
+def source_text(text):
+    """A source as the lexer reads it, held whole to the character rule:
+    `text` is a str, or a file's bytes (decoded as UTF-8, strictly).
+    Returns the text with each CR LF as LF, or refuses `character`,
+    naming the character and its line. A caller with a FILE should hand
+    over its bytes: a text-mode read turns a lone CR into a line end
+    before the rule could see it."""
+    if isinstance(text, (bytes, bytearray, memoryview)):
+        data = bytes(text)
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise _character(f"the source is not UTF-8 (byte "
+                             f"0x{data[exc.start]:02x})",
+                             data.count(b"\n", 0, exc.start) + 1) from None
+    elif isinstance(text, str):
+        try:
+            text.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise _character(f"the source is not UTF-8 (a lone surrogate, "
+                             f"U+{ord(text[exc.start]):04X})",
+                             text.count("\n", 0, exc.start) + 1) from None
+    else:
+        raise TypeError(f"a source is a str or a file's bytes, not "
+                        f"{type(text).__name__}")
+    segs = text.split("\n")
+    ended = text.endswith("\n")
+    if ended:
+        segs.pop()                # a final LF ends a line; it starts none
+    out = []
+    for i, seg in enumerate(segs, 1):
+        if (ended or i < len(segs)) and seg.endswith("\r"):
+            seg = seg[:-1]        # the CR of a CR LF line end
+        bad = _ANYWHERE.search(seg)
+        semi = seg.find(";")
+        code_bad = _NOT_CODE.search(seg if semi < 0 else seg[:semi])
+        if code_bad is not None and (bad is None
+                                     or code_bad.start() < bad.start()):
+            raise _character(f"{char_name(ord(code_bad.group()))} outside a "
+                             f"comment, where a line holds only printable "
+                             f"ASCII, spaces and tabs", i)
+        if bad is not None:
+            cp = ord(bad.group())
+            if cp in NEVER:
+                raise _character(f"{char_name(cp)}: a source holds none "
+                                 f"anywhere, in a comment or out of one", i)
+            raise _character(f"{char_name(cp)}: a line ends at a line feed, "
+                             f"or a carriage return and a line feed, and at "
+                             f"no other character, so a source holds none of "
+                             f"the others anywhere", i)
+        out.append(seg)
+    return "\n".join(out) + ("\n" if ended else "")
 
 # Words that start or shape a statement. Lexed as names, recognised by
 # the parser where a statement starts, and reserved: none can name a
@@ -166,9 +278,11 @@ def _number(text, i, line):
 
 
 def lex(text):
-    """The tokens of a source. A newline ends a statement unless it is
-    inside ( ) or [ ], and `d/dt` is one token where a statement starts.
-    Outside comments the text is ASCII."""
+    """The tokens of a source - a str, or a file's bytes - once the whole
+    of it is held to the character rule (source_text). A newline ends a
+    statement unless it is inside ( ) or [ ], and `d/dt` is one token
+    where a statement starts."""
+    text = source_text(text)
     toks = []
     i, n, line, depth = 0, len(text), 1, 0
 
@@ -177,24 +291,21 @@ def lex(text):
 
     while i < n:
         c = text[i]
-        if c == "\n" or (c == "\r" and text[i + 1:i + 2] != "\n"):
-            # a line ends at LF, at CR LF, and at a lone CR
+        if c == "\n":
+            # the one line end left: source_text made each CR LF an LF
+            # and refused every other
             if depth == 0 and toks and toks[-1].kind != "nl":
                 toks.append(Tok("nl", "\n", line))
             line += 1
             i += 1
             continue
-        if c in " \t\r":
+        if c in " \t":
             i += 1
             continue
         if c == ";":
-            while i < n and text[i] not in "\r\n":
+            while i < n and text[i] != "\n":
                 i += 1
             continue
-        if ord(c) > 127:
-            raise _syntax(f"U+{ord(c):04X} is outside ASCII, which the "
-                          f"language's text is (a comment may hold any "
-                          f"character)", line)
         if (c == "d" and at_start() and text.startswith("d/dt", i)
                 and (i + 4 >= n or text[i + 4] not in _NAMEC)):
             toks.append(Tok("ddt", "d/dt", line))

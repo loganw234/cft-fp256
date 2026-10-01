@@ -69,11 +69,34 @@ the gate holds that.
 
 ## The text
 
-- One statement a line. A line ends at LF, at CR LF or at a lone CR, and
-  `lang.load` drops a file's leading byte-order mark. `;` starts a comment
-  that runs to the end of the line, as in `.cfta`. A newline inside
-  `( )` or `[ ]` continues the statement. Outside comments the text is
-  ASCII.
+- One statement a line. `;` starts a comment that runs to the end of
+  the line, as in `.cfta`. A newline inside `( )` or `[ ]` continues
+  the statement.
+- **The characters** follow `.cfta`'s rule (`docs/PROGRAMS.md`, "The
+  text form's characters"), and `python/cft_golden/lang/syntax.py`
+  holds it in `asm.py`'s words, so that no reader (the parser, cft-asm,
+  an LF-only tool, `str.splitlines()`) sees a line another does not:
+  - a source is UTF-8;
+  - a line ends at LF, and a CR immediately before the LF is part of
+    that end, so a CRLF file reads as its LF twin;
+  - every other line boundary `str.splitlines()` knows (a CR that ends
+    no line, VT, FF, 0x1c to 0x1e, NEL, U+2028, U+2029), and NUL and
+    Ctrl-Z, are refused anywhere, comments included, naming the
+    character and its line (`character`);
+  - outside a comment a line holds only printable ASCII, spaces and
+    tabs, and a comment may hold any other character. A byte-order
+    mark is no exception: at the start of a file it is a character
+    outside a comment, and refused.
+
+  The whole source is held to the rule before a line of it is parsed,
+  UTF-8 first, so of several faults the first is named. A caller with a
+  file passes its bytes (`lang.load` does): a text-mode read would turn
+  a lone CR into a line end before the rule could refuse it. Until
+  2026-10-01 a lone CR ended a line here and in no LF-only reader, so
+  `; rounding: the default`, a CR and `round rdn` compiled as rdn while
+  grep showed one comment; a form feed or U+2028 in a comment hid a line
+  from the parser that `splitlines()` showed; and `lang.load` dropped a
+  byte-order mark (verifier-VL1).
 - Parentheses and brackets nest at most 100 deep (`too-deep`). A chain
   such as `a + b + c`, an index such as `x[i + 1 + 1 ...]`, and a run of
   minuses may be any length: the checker and the renderers walk them in
@@ -152,8 +175,14 @@ operator.
   - Inside that bound a constant is held exactly at any size.
   - The step graph and the canonical form write a constant of thousands
     of digits in full, reading it back the same, and Python's own
-    4,300-digit limit on printing an integer is no bound here.
-  - A refusal's sentence names a long constant by its magnitude.
+    4,300-digit limit on printing an integer is no bound here. Writing
+    one out takes time linear in its size: `1e-78900` is written in
+    0.2 s, where finding a decimal's powers of 2 and 5 a factor at a
+    time took about a minute (verifier-VL1).
+  - A refusal's sentence names a long constant by its canonical
+    spelling when that is at most forty characters (`-1e5000 overflows
+    binary64 under rne`), and otherwise by its value to five
+    significant digits (`3.3333e+4999 (to five digits)`).
 
 ### Arrays and indices
 
@@ -347,10 +376,22 @@ param is a run-time neg of its rounded value. For an exact constant
 - A constant is either independent of h or a rational multiple of it.
   `h*h`, `1/h` and `h + 1` do not halve with h, and are `h-nonlinear`.
 - A flow's equations and their lets cannot read h, nor a const whose
-  value depends on h (`h-scope`): a step-halving run halves h, and such
-  a right-hand side would move with it. A const whose value does not
-  depend on h is a plain rational wherever it is used, however it was
-  written: `const c = h/h` is 1.
+  value changes with h's size (`h-scope`): a step-halving run halves h,
+  and such a right-hand side would move with it. A const whose value
+  does not change with h's size is a plain rational wherever it is
+  used, however it was written: `const c = h/h` is 1, and
+  `copysign(1, h)` and `abs(h)/h` are h's sign, 1 or -1.
+- **h's sign is fixed when a graph is compiled.** Every constant is
+  c x h^d with c fixed by h's sign alone: `copysign(1, h)`, `abs(h)/h`
+  and, in a map, `abs(h)` (h times h's sign) are folded at the graph's
+  h. So a run may give h another value of the same sign, and that run
+  is the system compiled at that h, bit for bit, its h-scaled constants
+  recomputed; a run at an h of the other sign is refused
+  (`step-size-sign`), since compiling there gives other constants. A
+  step-halving run keeps the sign. Until 2026-10-01 such a run was
+  accepted: `d/dt x = s * x` with `s = copysign(1, h)`, compiled at 1/8
+  and run at -1/8, stepped 1 to 0.875 where compiling at -1/8 gives
+  1.125 (verifier-VL1).
 - A map may name a step, `step map, h = ...`. Its equations may then use
   h, and its h-scaled constants are listed like a template's.
 
@@ -586,7 +627,7 @@ run = lang.run(graph, states, steps,
                lane_params=None,   # one list a lane, declaration order; None takes the defaults
                params=None,        # {name: int, Fraction or a constant as text}: run values, each rounded once
                param_bits=None,    # {name: encoding}: run values as a bank carries them
-               h=None,             # an exact step in place of h: every h-scaled constant recomputed
+               h=None,             # an exact step in place of h, of h's sign: every h-scaled constant recomputed
                at=())              # step counts at which to record (states, FLAGS)
 run.states    # one list a lane: the state's encodings after `steps` steps
 run.flags     # the five IEEE flags, a sticky OR over every node, lane and step
@@ -627,6 +668,10 @@ same constant refusals as a source's constant.
   text that is not a constant, or one param given both as a value and as
   an encoding.
 - A step count that is not a whole number is `step-count`.
+- An h of the other sign from the graph's is `step-size-sign` (see "The
+  step's constants"): a run at an h of the same sign is the graph
+  compiled at that h, and the gate holds that on every reference at h/2
+  and 3h/7.
 
 ## The intention-out
 
@@ -658,9 +703,10 @@ source, two ways. `python/cft_golden/lang/render.py` writes both.
 - **The step.** A flow keeps its equations and writes its step out in an
   `expansion` block. The block's lets come in the template's statement
   order, components in state order.
-- **Comments.** They give each constant's exact value, encoding and
-  relative error, the h-scaled constants, the operation counts, and the
-  graph's sha256.
+- **Comments.** They give the graph's sha256, the attribute and the
+  format, the operation counts, each constant's exact value, encoding
+  and relative error, the h-scaled constants, and each param's and lane
+  param's default the same way (or that a lane param has none).
 
 **The mathematical form** gives the equations in conventional notation,
 in UTF-8 plain text.
@@ -676,15 +722,19 @@ in UTF-8 plain text.
   letter: `sigma` as σ, `Delta` as Δ, all twenty-four, lower and capital.
   The mapping is cosmetic. The exact-evaluation check binds every value
   by its position in the step graph's own declarations, never by the
-  glyph.
+  glyph, and the third check holds every glyph printed.
 - **No LaTeX.** There is no LaTeX rendering in this parcel. Every
   rendering needs its own exact-evaluation check before it can be
   trusted, and a LaTeX one would be a third renderer with its own check.
 
 **The three checks**, held in the gate (`python/tests/test_lang.py`), on
-the six references and on sixty seeded random systems that cover every
-operation, constants folded, lets, arrays, lane params, every format and
-attribute, and each integrator and maps:
+the six references, on five written systems whose names are Greek
+letters wherever a name is printed (params, lane params with and
+without defaults, lets and an indexed let, state components, q and p,
+each integrator, an h-scaled constant in a map), and on sixty seeded
+random systems that cover every operation, constants folded, lets,
+arrays, lane params, every format and attribute, and each integrator
+and maps:
 1. **The canonical form is itself a valid source.** Parsed again it gives
    the same step graph, byte for byte, and written out again it gives
    the same text, byte for byte, comments included. A canonical form
@@ -698,12 +748,43 @@ attribute, and each integrator and maps:
      through the template's scheme. For rk4 that holds the expansion to
      the textbook scheme, exactly.
 3. **What the intention-out says besides its code is read back and held
-   to the graph and to the test's own arithmetic.** In the canonical
-   form's comments: each constant's exact value, its encoding (in hex
-   and as a hexadecimal significand), its flags and its relative error,
-   each param's default the same way, and the operation counts. In the
-   mathematical form: each printed default, and each printed name
-   against Unicode's own Greek letters, not the renderer's table.
+   to the graph and to the test's own arithmetic and tables.** Every
+   line of both forms is read, in order, and a line the reader does not
+   expect fails, so nothing printed goes unread. The test's tables are
+   its own: IEEE 754-2019's names for the attributes and the formats,
+   each integrator's name, Unicode's own Greek letters.
+   - The canonical form's comments: the system's name; the sha256
+     line, against the test's own sha256 of the graph's bytes; the
+     attribute and the format each time they are named; the operation
+     counts; each constant's spelling (an h-multiple read with h as 1
+     is its factor, and its value that factor times the graph's h), its
+     exact value, its encoding in hex and as a hexadecimal significand,
+     its flags and its relative error, and its one rounding; the
+     h-scaled list, each item's factor in the table's order; each
+     param's and each lane param's default the same way, or a lane
+     param's "no default"; and no comment on any other line. The fixed
+     sentences are held word for word. The code between them is held
+     by the first check.
+   - The mathematical form's lines: its title, and its header's format
+     and attribute; the fixed sentences, word for word; each param's
+     and lane param's name and printed default, or a lane param's
+     name alone; each let's name, in the graph's order; each state
+     component's name wherever it is printed (the equations, Y, Q and
+     P, a map's lines); the integrator's name; h's value. Each name is
+     held against Unicode's own Greek letters. The expressions, and the
+     scheme's own lines, are the second check's, which holds them at the
+     points it samples: a select's arm, or the operand a min or max
+     discards, only at points that take it.
+   - The check is held itself: a test plants a wrong sha256 digit,
+     attribute, format, title, h-scaled list, lane default and its
+     encoding, a comment on an equation, a lane param's and a let's
+     glyph and the integrator's name, and each must be caught. Before
+     2026-10-01 the check held params' defaults and names and the
+     state's names only, and VL1's map, its lane param `rho = 1/3`
+     printed as `ρ = 2/3`, passed (verifier-VL1). Of 32 such plants,
+     one printed thing each, 29 passed on every system they changed,
+     and none passes on any now (measured on the six references, the
+     five written systems and the sixty random ones).
 
 ### Lorenz-63, as the renderers write it
 
@@ -828,6 +909,7 @@ The text and its declarations:
 
 | name | what it refuses |
 |---|---|
+| `character` | a byte or character the text does not hold: not UTF-8; a line end other than LF or CR LF, or a NUL or Ctrl-Z, anywhere; outside a comment, anything but printable ASCII, space and tab |
 | `syntax` | text that is not a statement of the language |
 | `too-deep` | parentheses nested more than 100 deep, or an expression or a chain of lets deeper than the checker evaluates |
 | `constant-range` | a constant whose exact value lies beyond 2^+-1048576 |
@@ -906,6 +988,7 @@ A run, and a step graph's bytes:
 | `unknown-param` | a run value for a name that is not a param, or an h for a system without one |
 | `param-value` | a run value that is not an exact rational (a float, or text that is not a constant), an encoding that does not fit, or a param given both ways |
 | `step-count` | a step count that is not a whole number of at least 0 |
+| `step-size-sign` | a run's h of the other sign from the graph's: a constant may hold h's sign, fixed when the graph was compiled |
 | `graph-format` | bytes that are not a version-1 step graph |
 
 The compiler's, reserved for it (L2).
@@ -969,6 +1052,13 @@ Both files run in the golden stage (`pytest python/tests`) and under
   float able to reach one; constants of thousands of digits; runs of
   minuses; non-canonical graphs refused; the bounds on arrays, ranges
   and lanes; run values as text;
+- its re-check's: the character rule, each character in a comment and
+  between tokens, from a str and from bytes, with every committed
+  `.cftl` held to it; a run's h of the graph's sign equal to the
+  system compiled at that h, and of the other sign refused; a long
+  constant named in a sentence to five digits, written out in time
+  linear in its size, and read back by the test's reader past 4,300
+  digits;
 - determinism across hash seeds;
 - the intention-out's three checks;
 - this document's refusal tables, template text and Lorenz-63 blocks

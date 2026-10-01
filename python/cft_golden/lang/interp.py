@@ -116,8 +116,9 @@ def run(graph, states, steps, lane_params=None, params=None,
                  8/3}: run values, each rounded once under the
                  program's attribute
     param_bits   {name: encoding}: run values as a bank carries them
-    h            an exact step in place of the graph's h: every h-scaled
-                 constant is recomputed from it and rounded once
+    h            an exact step in place of the graph's h, of the graph's
+                 h's sign: every h-scaled constant is recomputed from it
+                 and rounded once, which is the graph compiled at that h
     at           step counts at which to record (states, FLAGS)
 
     Returns a Run: .states, .flags, and .at = {s: (states, flags)}.
@@ -194,6 +195,20 @@ def run(graph, states, steps, lane_params=None, params=None,
         hv = _exact_run_value("h", h)
         if hv == 0:
             raise Refusal("step-size-zero", "h is exactly zero")
+        h0 = graph.integrator[1]
+        if (hv < 0) != (h0 < 0):
+            # Every constant is c x h^d with c fixed by h's sign alone,
+            # so a run at an h of the graph's sign is the graph compiled
+            # at that h, with its h-scaled constants recomputed. Across
+            # the sign it is not: copysign(1, h), abs(h)/h and abs(h)
+            # were folded at the graph's h (verifier-VL1: 0.875 here
+            # where compiling at -1/8 gave 1.125).
+            raise Refusal("step-size-sign", f"h = {C.brief(hv)} and the "
+                          f"graph was compiled at h = {C.brief(h0)}: a run "
+                          f"may give h another value of the same sign, and "
+                          f"not of the other, since a constant may hold h's "
+                          f"sign (copysign(1, h), abs(h)) as it was when "
+                          f"compiled; compile the system at this h")
         for k, (_v, factor, _b, _f) in enumerate(graph.const):
             if factor is not None:
                 cbits[k] = _round_run(graph, f"{C.h_form(factor)}",
