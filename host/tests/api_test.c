@@ -791,9 +791,10 @@ int main(void)
         return 1;
 
     {
-        /* An artifact that does not exist - and, in a build without
-         * XRT, any artifact at all - has to fail loudly rather than
-         * quietly hand back the software backend under another name. */
+        /* An artifact path that does not exist - and, in a build
+         * without XRT, any artifact path at all (a cft:// URL works
+         * either way, cft.h) - has to fail loudly rather than quietly
+         * hand back the software backend under another name. */
         cft_device *hw = (cft_device *)(void *)0x1;
         CHECK(cft_open("no-such.xclbin", 0, &hw) != CFT_OK && hw == NULL,
               "an artifact open must fail, and must not leave a handle");
