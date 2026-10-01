@@ -30,7 +30,7 @@ three cuts, kept in `run.sh` beside the stage list:
 
 | budget | stages | measured on the Windows desktop |
 |---|---|---|
-| `quick` | the `docs`, `generated`, `buildargs` and `sweepjudge` checks, every model-vs-C check (selfcheck, divsqrt, clause5, character, augmented, status96, formatof, diff, seq, reduce), the GPU's photograph, bindings, the seven language legs, the five workloads, the browser demos, soak-quick and the remote backend - after a host build the budget makes itself | about 20 minutes, loaded or not |
+| `quick` | the `docs`, `generated`, `buildargs`, `sweepjudge`, `innerskips` and `ensurevectors` checks, every model-vs-C check (selfcheck, divsqrt, clause5, character, augmented, status96, formatof, diff, seq, reduce), the GPU's photograph, bindings, the seven language legs, the five workloads, the browser demos, soak-quick and the remote backend - after a host build the budget makes itself | about 20 minutes, loaded or not |
 | `gate` | quick + golden, vectors, lint, formal, libcft, transcend, mpfr, cpp - what a package's reviewer ran before merging | about 2 hours with the box quiet, about 4 loaded (2026-09-07) |
 | `full` | everything: gate + sim, simmc, node, wasm, images | about 2 hours quiet (2026-09-04, run 20260904-035237), 227 minutes loaded (2026-09-03, run 20260903-164537). Not measured whole since revision 7: sim alone took 1 h 40 min at six jobs and simmc 1 h 16 min at four on amd-arc-box, loaded (2026-09-29) |
 
@@ -49,6 +49,8 @@ command in the `cft2204` distro.
 | docs | docs/README.md indexes every document; every tracked document's relative links and quoted repository paths resolve; the stated stage, bench, proof and index counts are true; a planted fault per check, each caught by name (`python/check_docs_index.py`) | python |
 | buildargs | `hw/rebuild-2022.sh` hands v++ the clock constraint with VPP_PROPS set, CFT_GENERICS reaches vivado and the manifest, a lying wrapper read-back stops the build before v++ - each with its negative control (`hw/test-rebuild-argv.sh`, stub v++ and vivado) | bash; skipped by name where Vitis 2022.2 is installed under /data/Xilinx, /opt/Xilinx or /tools/Xilinx |
 | sweepjudge | `hw/sweep_freq.sh` judges a sweep point by the kernel clock's own WNS, never the shell's, and a staged image is not a closed one - thirteen verdicts on synthetic builds, both defects put back as negative controls (`hw/test-sweep-judge.sh`) | bash |
+| innerskips | the runner counts and names the checks skipped inside a passing stage, held to synthetic stages, each with its negative control (`verify/test-inner-skips.sh`) | bash |
+| ensurevectors | the runner's ensure_vectors replays vectors/out only when its record is whole and held, otherwise regenerates it and says why, held to planted directories (`verify/test-ensure-vectors.sh`) | python with mpmath |
 | golden | the model's own invariants and oracles | python with pytest |
 | vectors | the conformance sets regenerate from the model, and the generation's own `SHA256SUMS` names every set the profile does, each whole (below, "When vectors/out is whole") | python |
 | sim | RTL == model across all cocotb targets | docker (usable, not merely present) |

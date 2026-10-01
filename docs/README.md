@@ -1,9 +1,9 @@
 # The documents, by what you open them for
 
-Thirty-nine files, 58,319 lines. Flat in one directory they look like one
+Thirty-nine files, 58,328 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **21,153 lines you consult while working** — the three under *Start here*,
+- **21,162 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,237 lines of tool manual**, one per shipped program;
 - **2,011 lines of operations**, read when you are about to do something to
@@ -33,7 +33,7 @@ answer is not in here — it is `make verify-quick`, and
 | document | lines | what it is for |
 |---|---|---|
 | [INTEGRATION.md](INTEGRATION.md) | 253 | Choosing a path: which surface to use for which job. The shortest route from "I have a workload" to "I know what to call." |
-| [VERIFICATION.md](VERIFICATION.md) | 426 | Every gate, what it proves, how long it really takes. Twelve tiers, forty-four runner stages. |
+| [VERIFICATION.md](VERIFICATION.md) | 435 | Every gate, what it proves, how long it really takes. Twelve tiers, forty-six runner stages. |
 | [COMPLIANCE.md](COMPLIANCE.md) | 172 | IEEE 754-2019 clause by clause: what is implemented, what is refused, and where each is proven. |
 
 ## The contract

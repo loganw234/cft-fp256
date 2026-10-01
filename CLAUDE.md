@@ -6,8 +6,8 @@ The README says what this project is; this says what will bite you.
 ## Start here: one command answers "does it still hold?"
 
 ```
-make verify-quick            # ~20 min, 28 of 44 stages
-make verify-gate             # ~2 h quiet, 38 of 44 - what a change should pass
+make verify-quick            # ~20 min, 30 of 46 stages
+make verify-gate             # ~2 h quiet, 40 of 46 - what a change should pass
 make verify                  # the full census, hours
 bash verify/run.sh --list    # every stage, with * on the ones a budget selects
 ```

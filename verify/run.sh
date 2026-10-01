@@ -152,7 +152,7 @@ BUDGET=""
 # now that the formal gate holds thirty proofs and a negative control
 # (thirty-one tasks), full longer by the simulation suite and the two
 # browser replays; on the WSL distro the replay stages take seconds.
-BUDGET_QUICK=docs,generated,buildargs,sweepjudge,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,programs,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
+BUDGET_QUICK=docs,generated,buildargs,sweepjudge,innerskips,ensurevectors,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,programs,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
 BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit,estimates
 RESUME=""
 FRESH=0
@@ -565,6 +565,22 @@ stage buildargs "hw/rebuild-2022.sh hands v++ the clock constraint with VPP_PROP
 need
 stage sweepjudge "hw/sweep_freq.sh judges a sweep point by the kernel clock's own WNS, never the shell's, and a staged image is not a closed one; each with its negative control" -- \
   bash "$ROOT/hw/test-sweep-judge.sh"
+
+# The runner's own two tests, which no stage ran until 2026-09-30: a
+# widened stage table broke test-inner-skips.sh for a commit, and only
+# a verifier running it by hand saw (verifier-W2, the steps 5 and 6
+# round). test-inner-skips.sh holds the count and naming of checks
+# skipped inside a passing stage, against synthetic stages, with its
+# negative controls: bash only. test-ensure-vectors.sh holds
+# ensure_vectors' rules for reusing or remaking vectors/out against
+# planted directories, running the generator at small counts: python
+# with mpmath. Each is skipped by name only for what it needs.
+need
+stage innerskips "verify/run.sh counts and names the checks skipped inside a passing stage, held to synthetic stages, each with its negative control (verify/test-inner-skips.sh)" -- \
+  bash "$ROOT/verify/test-inner-skips.sh"
+need python mpmath
+stage ensurevectors "verify/run.sh's ensure_vectors replays vectors/out only when its record is whole and held, and otherwise regenerates it and says why, held to planted directories (verify/test-ensure-vectors.sh)" -- \
+  bash "$ROOT/verify/test-ensure-vectors.sh"
 
 # pytest is this stage's precondition. It used to sit on `docs`, which
 # does not import it, while the bare `need` calls above cleared it - so

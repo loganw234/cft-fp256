@@ -239,7 +239,8 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | a shell link, four tiles | 3 to 4 h | | 25 to 30 GB of the build box's 46; one at a time or the placer is killed and it looks like a design failure |
 
 The budgets in `verify/run.sh` are cuts of that table: `quick` is the
-`docs`, `generated`, `buildargs` and `sweepjudge` checks, the
+`docs`, `generated`, `buildargs`, `sweepjudge`, `innerskips` and
+`ensurevectors` checks, the
 model-versus-C stages, the GPU's photograph, the bindings, the language
 legs, the soak spot check, the workloads, the demos and the remote
 backend - about twenty minutes after a host build; `gate` adds the golden
@@ -258,7 +259,7 @@ is the only thing that skips work. (cft-rebound is the sibling repo with
 a content-addressed gate cache and a warm five-second check; this runner
 does not have one.)
 
-`bash verify/run.sh --list` prints all forty-four stages with a marker
+`bash verify/run.sh --list` prints all forty-six stages with a marker
 against the ones the given `--budget` or `--only` would actually run, so
 the list cannot imply a budget covers more than it does. The stage names
 are derived from the `stage` calls themselves rather than kept in a second
@@ -335,6 +336,14 @@ prepends the real toolchain - measured on amd-arc-box, where a stub first
 on `PATH` became `/data/Xilinx/Vitis/2022.2/bin/v++` after the source. The
 stub would lose and a two-hour link would start on a build host. So the
 stage runs where Vitis is absent, which includes CI.
+
+`innerskips` and `ensurevectors` hold the runner itself, with its two
+own tests, which no stage ran until 2026-09-30. A stage table widened
+by one commit broke `verify/test-inner-skips.sh`, which matches the
+inner-skip rows exactly, and only a verifier running it by hand saw
+it (verifier-W2, the steps 5 and 6 round). `innerskips` needs bash
+alone (about a minute); `ensurevectors` runs the vector generator at
+small counts, so it needs python with mpmath (about a minute).
 
 `sweepjudge` holds a frequency sweep's verdicts without a build. A point
 of `hw/sweep_freq.sh` is CLOSED when the kernel clock's own WNS - read by
