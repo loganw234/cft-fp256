@@ -4165,6 +4165,297 @@ bitstream builds.
    - the cycle probes, as the after-side;
    - then the single re-tried at 175 MHz.
 
+### Step 3: the language and its compiler (plan of record, 2026-10-01)
+
+Logan cleared the step on 2026-10-01 ("Yes, begin on the next step"),
+on the terms the lead had proposed: this plan goes to him before any
+code. Nothing in it exists yet unless it says so.
+
+The step, as the work order has it: the language's semantics
+(evaluation order, no implicit contraction, exact constants), then the
+compiler, with automatic variational equations. Its target is an
+equations-in, ensemble-out solver for ODEs and maps, shaped like
+`solve_ivp`, one ensemble member per lane. programs/gen_odes.py's three
+programs were written as what such a compiler would be expected to emit
+(docs/VALIDATION.md, 2026-09-25).
+
+**What the tree has** (the lead's survey of 2026-10-01: three read-only
+surveyors, each fact cited to a file and line; the records are in
+`Data/runs/2026-10-01-lang-round/`).
+- **The machine.**
+  - Each image is in one format. A lane has 32 registers, and r0 to r2
+    load from the streams. The bank addresses 512 constants, shared by
+    the run. The per-lane scratch has 256 slots on most handles and
+    2,048 on the U50's revision 7. The U50 holds 32,768 instructions;
+    open-core holds 16,384.
+  - The rounded operations are FMA, ADD and SUB (a + c and a - c,
+    through the FMA) and MUL, each one rounding. Each instruction's
+    rounding attribute is fixed in the image.
+  - The quiet operations are ABS, NEG, COPYSIGN, MIN, MAX, MINNUM,
+    MAXNUM, SELECT and three comparisons. There is also an integer
+    group, and two reciprocal seeds.
+  - There is no divide, square root, conversion or transcendental
+    opcode. divfull and sqrtfull do correctly rounded division and
+    square root in 186 to 216 instructions, using every register. The
+    transcendentals are host work.
+  - REPEAT takes an immediate count, so a step count is an image, and
+    loops nest four deep. The other control codes are SETACT and
+    DEPOSIT. There is no branch and no call.
+  - FLAGS are one sticky word for the run, not one per lane.
+- **The text form and its tools.**
+  - `.cfta` has seven directives and no constant expressions. `.const`
+    takes one literal, a decimal rounded RNE as 754's 5.12.2 says.
+  - asm.py is the reference assembler, and cft-asm.c its C twin.
+  - No tool in this tree allocates registers, schedules or spills.
+    Every program's allocation is done by hand.
+- **The references.** gen_odes.py writes three programs, at fp64 and
+  fp256:
+  - Lorenz-63, RK4, 62 instructions at fp64;
+  - Lorenz-96, RK4 at N = 40, 1,455 instructions, with its stage vectors
+    in scratch;
+  - Henon-Heiles, Stormer-Verlet, 23 instructions.
+
+  "The instruction stream IS each program's definition", and they
+  contract by hand. 26 of Lorenz-63's 53 ALU instructions a step are
+  FMAs, and x(rho - z) - y is written fma(x, rho - z, -y).
+- **The constants.**
+  - Every one is computed in the format by the golden softfloat, from
+    decimals, with no binary64.
+  - But a derived constant is a chain of roundings: H6 is RN(RN(0.01)/6).
+    That equals RN(1/600) at fp64, fp128 and fp256, but not at fp32
+    (measured).
+  - Neither rule removes S2's time shift. 6 H6 differs from H at fp32,
+    fp64 and fp128 (it is exact at fp256, where H's significand divides
+    by 3).
+- **The precedents.**
+  - atlas-engine lowers pinned GLSL to binary32 tile programs. It keeps
+    an op list with scoped sharing, folds no float identity, inlines
+    calls, turns control flow into SELECT, and prices its spiller in
+    lane cost. Its output is checked five ways: its own interpreter,
+    libcft, seq.py, asm.py's byte-for-byte reassembly, and positive-run.
+  - cft-orbits builds its images at run time, in C.
+  - The docs already treat the order of roundings as the contract
+    (ORBITS.md, and DETERMINISM.md's "Ordering"). COMPLIANCE.md files
+    754's clauses 10 and 11 under "language".
+- **Certification.**
+  - A certified segment keeps its whole state in scratch, deposits
+    nothing, and runs every lane.
+  - A half-step estimate needs BANK_EXT, with every slot that scales
+    with h named.
+  - A wider estimate needs the same instruction words, with the bank
+    exactly widened.
+
+**The language, proposed.** A system file declares:
+- a format and a rounding attribute;
+- state, constants and parameters;
+- equations;
+- an integrator from a library.
+
+The compiler turns it into a segment image, its bank and a manifest. A
+sketch, not the grammar:
+
+```
+system lorenz63
+format fp64
+round  rne
+state  x, y, z
+param  sigma = 10, rho = 28, beta = 8/3
+d/dt x = sigma * (y - x)
+d/dt y = fma(x, rho - z, -y)
+d/dt z = fma(x, y, -(beta * z))
+step   rk4, h = 1/100
+```
+
+1. **Literal evaluation**, 754-2019's 10.4.
+   - Each operator written is exactly one operation, rounded once.
+     Binary operators associate left, and parentheses are kept.
+   - Nothing is reassociated, distributed, folded as an identity or
+     widened. x + 0 is not x: it turns -0 into +0.
+   - Nothing is contracted. a*b + c is two roundings, and fma(a, b, c)
+     is one.
+   - The compiler may commute the operands of + and *, which is bit for
+     bit here (DETERMINISM.md, "Ordering"). It may also share identical
+     subexpressions, and schedule and allocate freely. None of these
+     changes a value or the run's FLAGS.
+2. **Every operation written is performed.** A value defined and never
+   used is refused by name (`unused`). So no dead-code elimination ever
+   has to decide whether a dropped operation's flags were part of the
+   answer.
+3. **Exact constants.**
+   - A literal is an exact rational: an integer, a decimal, a/b, or a
+     hex-significand.
+   - A `const`, and any expression whose operands are all constants, is
+     evaluated exactly and rounded once, under the program's attribute
+     (754's 5.12.2, "the applicable attribute"). Its flags are the
+     compiler's report, not the run's.
+   - Everything else is a run-time operation. So h/6 is RN(1/600), x*2*3
+     is (x*2)*3, and x*(2*3) is x*6.
+   - Two constants are refused by name: one that overflows, and a
+     nonzero one that rounds to zero.
+   - An inexact constant is listed in the manifest with its exact value,
+     its rounding and its relative error.
+4. **One attribute a program** (`round`, default RNE), for every rounded
+   operation and every constant. That makes one program per attribute,
+   as the hardware has it.
+5. **Parameters.**
+   - A `param` belongs to the run. Its value is in the bank, defaulting
+     to the one written, rounded once, and any expression of a param is
+     a run-time operation. So one image serves every value (BANK_EXT).
+   - A `lane param` varies by member. It lives in the scratch beside the
+     state, which is where the hardware keeps per-member data.
+6. **The step.**
+   - The integrator's h is a constant. Each multiple a template needs,
+     such as h/2 or h/6, is a constant expression rounded once.
+   - The manifest names these slots as the h-scaled ones, which
+     cft-segrun's step-halving halves exactly.
+   - It also states the template's time shift, for example
+     6 RN(h/6) / RN(h) - 1, which no rounding rule removes.
+7. **State and indices.** State is scalars and fixed-length arrays.
+   Equations can run over a compile-time index range, with cyclic
+   indexing (Lorenz-96), unrolled.
+8. **Integrators are templates written in the language**, so their
+   rounding orders are the language's. The first are rk4,
+   stormer-verlet (drift-kick-drift) and euler. Each is fixed so that the
+   three references come out bit for bit.
+9. **Maps** (`next x = ...`) as well as flows. A map's step is its own
+   template.
+10. **Refused by name at compile time:**
+    - a run-time division or square root (v1);
+    - a transcendental at run time;
+    - an explicit time dependence (v1);
+    - anything past the target device's stated capacities: registers
+      plus scratch (2,048 slots on the U50, 256 elsewhere), the bank
+      (512), the program length, or the format;
+    - the constant cases above.
+
+**The compiler, proposed.** It is a Python package of its own, held to
+the definition the way program.c is held to seq.py. It does the
+following:
+- It parses and checks the system, and computes the constants exactly,
+  with Fractions.
+- It builds a graph per step, with shared subexpressions.
+- It schedules for the tile's overlap. At a full block the latency is
+  hidden; deposits and scratch accesses are priced from the census, per
+  format.
+- It allocates registers r3 to r31, and spills to strict scratch.
+- It keeps the state in scratch (the segment shape), and runs the step
+  loop as one REPEAT.
+
+It emits `.cfta` that asm.py assembles, the image, the bank, and a
+manifest. The manifest maps names to slots, lists the h-scaled slots for
+cft-segrun's estimates, gives each constant's exact value and rounding,
+and records the counts. Every line it writes stays under cft-asm.c's
+buffer.
+
+**Parcels.**
+1. **L1: the definition, golden-first.**
+   - docs/LANGUAGE.md: the grammar, the semantics above, and the name of
+     every refusal.
+   - python/cft_golden/lang/ holds five parts:
+     - the parser;
+     - the checker;
+     - the exact constants;
+     - the step graph, which is the checked form both the interpreter
+       and the compiler read;
+     - a reference interpreter that steps a system through the golden
+       softfloat. It is the definition of correct for the language.
+   - The three references are written in it.
+   - Its gate:
+     - The interpreter's states, step for step, equal seq.py's run of
+       gen_odes.py's images on the same lanes. That holds bit for bit,
+       for every lane, at fp64 and fp256, with FLAGS included. Their
+       constants agree there, measured.
+     - Every refusal is made, by name.
+     - Plants are red: a reassociated sum, a contraction, a constant
+       rounded twice.
+2. **L2: the compiler**, held to L1's definition.
+   - It starts once L1's step graph is fixed, and merges after L1.
+   - It covers the lowering, the allocator and spiller, the scheduler,
+     the emitter and the manifest.
+   - Its gate:
+     - A corpus is compiled and run on seq.py, and equals L1's
+       interpreter bit for bit, FLAGS included. The corpus is the three
+       references plus systems a generator writes at random, at every
+       format.
+     - The same images run through libcft's software backend under
+       cft-segrun, certified, with both auditors accepting.
+     - The references' costs are measured against gen_odes.py's
+       hand-written ones: instructions, registers, scratch accesses.
+     - Plants in the lowering are red.
+   - A runner stage, `lang`.
+3. **L3: the variational equations**, after L2.
+   - The derivative of each operation becomes a rule in
+     docs/LANGUAGE.md. Its rounding order is fixed like any other
+     expression's, golden-first in the interpreter, then in the
+     compiler.
+   - It carries tangent vectors, not whole Jacobians: Lorenz-96's 40 by
+     40 is 1,600 values a lane, against 2,048 slots.
+   - Its gate is L2's, plus two more:
+     - the tangent system against an exact derivative in mpmath;
+     - Lorenz-63's largest Lyapunov exponent (about 0.906) as a smoke
+       test, renormalised on the host between segments.
+
+**The lead's own, beside the parcels** (each found by the survey).
+1. **The bank's depth is refused only on the tile.**
+   - The tile refuses n_consts above 512 at its header
+     (rtl/cft_seq.sv:3041, STATUS[3]). seq.py and program.c load such an
+     image, so the refusal comes after the image has crossed: the
+     refusal the loader exists to prevent.
+   - Golden-first: seq.py refuses it by name, then program.c. The module
+     is rebuilt.
+2. **cft-asm.c splits a long line.**
+   - Its `fgets` reads 1,023 bytes at a time, so a longer line is
+     assembled as two. A comment whose tail reads ` deposit r0` gave an
+     image with an extra deposit, at exit 0 (the survey, measured).
+     asm.py reads the line whole.
+   - The fix refuses the line by name.
+3. **Sentences the survey found stale:**
+   - SEQUENCER.md's "no image carries revision 7", and its "under fifty
+     instructions and six constants";
+   - program.c's "the same 16 in the tile";
+   - cft.h's max_scratch, "256 here and on the tile";
+   - PROGRAMS.md's "twenty-nine programs" (there are 37), and its family
+     table;
+   - gen_odes.py's "exact decimals" and "h / 6, one rounding" for H6,
+     which is RN(RN(0.01)/6);
+   - ATLAS.md's "11 of 256".
+
+   rtl/cft_seq.sv's two stale comments wait for the next RTL change, so
+   that the built images' rtl tree stays the tree they were built from.
+
+**How it is held.**
+- Golden-first: L1's definition comes before L2's compiler is held to
+  it, and L3 follows L2.
+- A verifier for each parcel and for the lead's own commits, and
+  Logan's send-back rule.
+- The work is Python and the golden model until a compiled image meets
+  libcft, which is light on the desktop.
+- The card legs are the lead's: the compiled references on the U50,
+  certified, against software.
+
+**What it is not.**
+- Run-time division or square root. Both are refused in v1. Inlining
+  divfull or sqrtfull means spilling every register around it, which
+  is a later parcel.
+- Run-time transcendentals. That is the work order's step 6, the
+  correctly rounded math library.
+- Time-dependent systems, adaptive steps and events. There is no
+  branch; SETACT and a fixed REPEAT would do.
+- Per-lane flags. FLAGS are the run's; R23 is a design.
+- A Python front end. If one follows, it refuses a Python float as a
+  constant by name, since Python's 0.01 is binary64.
+- The gallery (step 5), the service and its submissions, and a
+  certificate that names its source.
+
+**For Logan.**
+- The syntax: a language in its own files, or one embedded in Python.
+  - The lead recommends its own files. A decimal is read exactly from
+    the text, and the source is a file a certificate could name.
+  - Embedding in Python is familiar, but every float literal arrives
+    as binary64.
+- Everything else above is the lead's default, and can change before L1
+  starts.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
