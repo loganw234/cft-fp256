@@ -67,7 +67,6 @@
 #define MAX_CONSTS     512
 #define MAX_INSNS      65536
 #define MAX_NAMES      1024
-#define MAX_LINE       1024
 #define NREG           32
 #define REG_FIELD      16
 #define KADDR_PLAIN    16
@@ -1110,7 +1109,6 @@ static void assemble_line(program *P, char *line)
             P->n_slots++;
         } else if (!strcmp(d, ".const")) {
             int bare = (ntok == 2) && (P->flags & FLAG_BANK_EXT);
-            char joined[MAX_LINE];
             need_fmt(P);
             if (!bare && (ntok < 4 || strcmp(tok[2], "=")))
                 diel(".const takes NAME = value%s",
@@ -1130,20 +1128,29 @@ static void assemble_line(program *P, char *line)
             if (bare || (P->flags & FLAG_BANK_EXT)) {
                 memset(P->consts[P->n_consts], 0, MAX_ESZ);
             } else {
+                /* The literal's tokens joined by single spaces, as
+                 * asm.py joins them, in a buffer sized from the tokens:
+                 * a line is read whole at any length now, so a literal
+                 * may be as long as its line. (It was a 1,024-byte array
+                 * with a "that literal is too long" refusal asm.py does
+                 * not have, unreachable while a line was cut at 1,023
+                 * bytes.) */
                 int i;
-                size_t len = 0;
-                joined[0] = 0;
+                size_t len = 0, need = 1;
+                char *joined;
+                for (i = 3; i < ntok; i++)
+                    need += strlen(tok[i]) + 1;
+                joined = (char *)xcalloc(need, 1);
                 for (i = 3; i < ntok; i++) {
                     size_t l = strlen(tok[i]);
-                    if (len + l + 2 >= sizeof joined)
-                        diel("that literal is too long");
                     if (len)
                         joined[len++] = ' ';
                     memcpy(joined + len, tok[i], l);
                     len += l;
-                    joined[len] = 0;
                 }
+                joined[len] = 0;
                 parse_literal(P, joined, P->consts[P->n_consts]);
+                free(joined);
             }
             strcpy(P->const_name[P->n_consts], tok[1]);
             P->n_consts++;
@@ -1412,6 +1419,53 @@ static uint8_t *to_bytes(const program *P, size_t *bytes_out)
     }
     *bytes_out = bytes;
     return img;
+}
+
+/* ---- source in ------------------------------------------------------- */
+
+/* One source line WHOLE, at any length, as asm.py reads it: its
+ * str.splitlines() hands each line over entire, and so does this.
+ * Until 2026-10-01 the loop below read with fgets into a 1,024-byte
+ * buffer, so a line of more than 1,023 bytes was assembled as two or
+ * more: a comment whose tail read " deposit r0" gave an image with an
+ * extra deposit at exit 0, and others were refused with the wrong
+ * error at the wrong line (programs/check.py's long-line arm holds
+ * both sides now).
+ *
+ * The bytes up to and including the '\n', or to the end of the file,
+ * into a buffer that grows to hold them; NULL at the end of the file
+ * with nothing read. From here a line is a C string, exactly as fgets
+ * left one. A read error is refused rather than taken for the end of
+ * the file, which would assemble the program up to it. */
+static char *read_line(FILE *f, char **buf, size_t *cap)
+{
+    size_t len = 0;
+    int c;
+    while ((c = getc(f)) != EOF) {
+        if (len + 2 > *cap) {
+            size_t want = *cap ? *cap * 2 : 256;
+            char *grown;
+            if (want <= *cap)
+                die("a source line is longer than this host can hold");
+            grown = (char *)realloc(*buf, want);
+            if (!grown)
+                die("out of memory");
+            *buf = grown;
+            *cap = want;
+        }
+        (*buf)[len++] = (char)c;
+        if (c == '\n')
+            break;
+    }
+    if (ferror(f)) {
+        fprintf(stderr, "cft-asm: %s: a read error after line %d\n", SRC,
+                LINENO);
+        exit(1);
+    }
+    if (!len)
+        return NULL;
+    (*buf)[len] = 0;
+    return *buf;
 }
 
 /* ---- image in -------------------------------------------------------- */
@@ -1868,7 +1922,8 @@ int main(int argc, char **argv)
         die("cft_open failed for the software backend");
 
     if (mode == 'a') {
-        char line[MAX_LINE];
+        char *line = NULL;
+        size_t cap = 0;
         FILE *f = fopen(in, "r");
         uint8_t *img;
         size_t bytes;
@@ -1880,10 +1935,11 @@ int main(int argc, char **argv)
         P.scratch_depth = SCRATCH_D_DEFAULT;
         SRC = in;
         LINENO = 0;
-        while (fgets(line, sizeof line, f)) {
+        while (read_line(f, &line, &cap)) {
             LINENO++;
             assemble_line(&P, line);
         }
+        free(line);
         fclose(f);
         LINENO = 0;
         validate(&P);

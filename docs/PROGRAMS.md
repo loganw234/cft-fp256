@@ -176,7 +176,12 @@ nine-bit constant indices on each of `ra`, `rb` and `rc`. Both exist
 because `seq.random_program` is revision 1 and a library row is
 written by a person: without them the round trip would be a round trip
 over revision 1 with extra steps, and each stage asserts what it
-reached rather than assuming it.
+reached rather than assuming it. And since 2026-10-01, on long lines:
+sources whose comments and `.const` literals run from 1,022 to 5,000
+bytes must give both the same bytes. Until then `cft-asm` read a line
+1,023 bytes at a time and assembled a longer one as two or more - a
+comment whose tail read ` deposit r0` gave an extra deposit, at exit
+0; both read a line whole now, at any length.
 
 **One thing neither carries: an arity table from libcft.** Which
 operand FIELDS an opcode reads is not in `cft_op_name`, in

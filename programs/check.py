@@ -17,7 +17,10 @@ things, in this order, and stops at the first failure:
    carries a control that must be refused by name. And gen_odes.py's
    own `--check` runs here, so a generated file that is missing or
    differs fails the run rather than waiting for someone to run the
-   generator.
+   generator. Since 2026-10-01 sources with lines of 1,022 to 5,000
+   bytes - either side of the 1,024-byte buffer cft-asm once read a
+   line in, and well past it - must give both the same bytes too, with
+   a control that cuts them where that reader did (check_long_lines).
 
 2. **The disassembler is a readback.** Every built image is
    disassembled by both implementations, the two texts must agree, and
@@ -1613,6 +1616,118 @@ def check_revision3_corpus(args, tmp, trials=120):
        f"bytes, disassembly, round trip and -i; {scratch} use the "
        f"scratch, {indexed} index it, {deep_slot} name a slot past 255, "
        f"{scratch_io} carry a per-run block, {kx9} need KX9")
+
+
+# ---- long lines ----------------------------------------------------------
+#
+# asm.py reads a line whole (str.splitlines()). cft-asm.c read one with
+# fgets into a 1,024-byte buffer until 2026-10-01, so a line of more than
+# 1,023 bytes was assembled as two or more (the language round's survey
+# and verifier-P1, measured; the round's D1 ledger has the before and
+# after): a comment whose tail read " deposit r0" gave an image with an
+# extra deposit at exit 0, and a longer comment was refused with the wrong
+# error at the wrong line. It reads a line whole now, at any length, and
+# so does its .const literal, which was joined in a buffer of the same
+# 1,024 bytes.
+#
+# This arm holds the two assemblers to each other on lines either side of
+# that buffer and well past it - 1,022 to 5,000 bytes - as comments, as
+# comments whose tail reads as an instruction, mid-file and as a last
+# line with no final newline, and as .const literals of the same lengths,
+# decimal and raw. Each must assemble to asm.py's bytes. Every source
+# here is one asm.py assembles, so a refusal from either is a failure.
+#
+# Its control watches the comparison: the same sources, cut where the old
+# reader cut them (_cut_like_fgets), must assemble to OTHER bytes or be
+# refused, every one whose longest line passes 1,023 bytes - and every
+# other one to the same bytes. So a reader that cut lines at 1,023 bytes
+# again could not pass this arm, and a change to the lengths that left
+# the old boundary unreached would be named.
+
+LONG_LINE_LENGTHS = (1022, 1023, 1024, 1034, 2100, 5000)
+
+
+def _long_line_sources():
+    """(tag, source, longest line's length) for every long-line case."""
+    head = ".format fp64\n.deposits 2\n"
+    shapes = (
+        ("a comment", lambda n: ";" + "x" * (n - 1)),
+        ("a comment ending ' deposit r0'",
+         lambda n: ";" + "x" * (n - 12) + " deposit r0"),
+        ("a comment blank to its tail 'deposit r0'",
+         lambda n: ";" + " " * (n - 11) + "deposit r0"),
+    )
+    for n in LONG_LINE_LENGTHS:
+        for name, make in shapes:
+            line = make(n)
+            assert len(line) == n
+            yield (f"{n:,} bytes, {name}, mid-file",
+                   head + line + "\ndeposit r0\nhalt\n", n)
+            yield (f"{n:,} bytes, {name}, last, no final newline",
+                   head + "deposit r0\nhalt\n" + line, n)
+        # The literal alone is n bytes: a third, correctly rounded, and
+        # 1.0 written as a raw word behind leading zeros.
+        for name, lit in (("decimal", "0." + "3" * (n - 2)),
+                          ("raw", "0x" + "0" * (n - 18) +
+                                  "3ff0000000000000")):
+            assert len(lit) == n
+            line = f".const K = {lit}"
+            yield (f"a {n:,}-byte {name} .const literal",
+                   head + line + "\nadd r3, r0, K\ndeposit r3\nhalt\n",
+                   len(line))
+
+
+def _cut_like_fgets(text, size=1024):
+    """`text` as cft-asm.c's old loop saw it: fgets(line, size, f) hands
+    over at most size - 1 bytes at a time, and each piece was assembled
+    as a line of its own."""
+    out = []
+    for line in text.splitlines(keepends=True):
+        while len(line) > size - 1:
+            out.append(line[:size - 1] + "\n")
+            line = line[size - 1:]
+        out.append(line)
+    return "".join(out)
+
+
+def check_long_lines(args, tmp):
+    n = cut = 0
+    for i, (tag, text, longest) in enumerate(_long_line_sources()):
+        src = tmp / f"long-{i}.cfta"
+        out = tmp / f"long-{i}.cftp"
+        _write_lf(src, text)
+        try:
+            py = asm.assemble(text, str(src))
+        except asm.AsmError as exc:
+            bad(f"long lines: {tag}: asm.py", str(exc)[:200])
+            return
+        r = sh([args.asm, src, "-o", out])
+        if r.returncode != 0:
+            bad(f"long lines: {tag}: cft-asm",
+                f"exit {r.returncode}: {r.stderr.strip()[:200]}")
+            return
+        c_bytes = out.read_bytes()
+        if c_bytes != py:
+            bad(f"long lines: {tag}: two assemblers",
+                f"cft-asm {len(c_bytes)} bytes, asm.py {len(py)}")
+            return
+        n += 1
+        # the control: the old reader's cut, through the same assembler
+        try:
+            old = asm.assemble(_cut_like_fgets(text), str(src))
+        except asm.AsmError:
+            old = None
+        if (old != py) != (longest > 1023):
+            bad("long lines: control",
+                f"{tag}: cut at 1,023 bytes it "
+                f"{'still gives the same bytes' if old == py else 'differs'}"
+                f" - the arm does not see the old reader there")
+            return
+        cut += old != py
+    ok(f"long lines: {n} sources identical in both assemblers",
+       f"lines of {LONG_LINE_LENGTHS[0]:,} to {LONG_LINE_LENGTHS[-1]:,} "
+       f"bytes; control: {cut} of them, every one with a line past 1,023 "
+       f"bytes, refused or other bytes when cut where the old reader cut")
 
 
 # ================= the ODE rows (programs/gen_odes.py) ===================
@@ -4872,6 +4987,9 @@ def main():
 
     print("\n-- the revision-3 corpus, in both languages --")
     check_revision3_corpus(args, tmp)
+
+    print("\n-- long lines, in both assemblers --")
+    check_long_lines(args, tmp)
 
     print("\n-- each program's own check --")
     # spill-ref-fp64 is the reference spill-fp64 is compared against, so
