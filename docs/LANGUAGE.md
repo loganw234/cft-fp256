@@ -12,9 +12,10 @@ This document is the language's definition. Its executable form is
 a parser, a checker, the exact constants, the step graph, and a
 reference interpreter that is the definition of correct for every
 compiled image. The compiler that turns a step graph into a tile image
-is the step-3 plan's parcel L2 and does not exist yet; ROADMAP.md's
+is `python/cftc`, the step-3 plan's parcel L2, held to this definition
+by the runner's `lang` stage (docs/VERIFICATION.md); ROADMAP.md's
 "Step 3: the language and its compiler (plan of record, 2026-10-01)" is
-the plan, and this is its parcel L1.
+the plan, and this document is its parcel L1.
 
 Files are `*.cftl` (a working name). The three references are written in
 it, at fp64 and fp256, in `programs/systems/`, each beside the image
@@ -1074,9 +1075,10 @@ Both files run in the golden stage (`pytest python/tests`) and under
 
 ## What v1 does not do
 
-- **The compiler** is L2's: lowering, allocation and spilling,
-  scheduling, emission, the manifest, the halved-bank file, and the
-  target-dependent refusals above.
+- **The compiler** is not this definition: it is `python/cftc` (L2),
+  with the lowering, allocation and spilling, scheduling, emission,
+  the manifest, the halved-bank file, and the target-dependent
+  refusals above.
 - **The variational equations** are L3's.
 - **Run-time division and square root.** Inlining divfull or sqrtfull
   means spilling the registers around it, which is a later parcel.

@@ -100,13 +100,30 @@ def check_stage_counts(problems, root):
     gate = members("BUDGET_GATE") or []
     derived = {"total": total, "quick": len(quick), "gate": len(gate)}
 
-    WORDS = {
-        30: "thirty", 31: "thirty-one", 32: "thirty-two", 33: "thirty-three",
-        34: "thirty-four", 35: "thirty-five", 36: "thirty-six",
-        37: "thirty-seven", 38: "thirty-eight", 39: "thirty-nine",
-        40: "forty", 41: "forty-one", 42: "forty-two", 43: "forty-three",
-        44: "forty-four", 45: "forty-five",
-    }
+    # Every count a sentence can spell from twenty to ninety-nine, made
+    # from the number words below rather than listed. The list this
+    # replaced stopped at forty-five, so THIS branch passed a spelled
+    # count past it. This branch reads a count spelled in lower-case
+    # words directly before "stages" or "runner stages" on one line.
+    # check_prose_counts, below, reads a count in digits or words, in any
+    # case and across a line break, directly before "stages", "gate
+    # stages" or "runner stages", in the same four files (and passes one
+    # near "pipe", "fma", "core" or "deep") - and at 575a819 it failed a
+    # planted "forty-seven runner stages" against 46 (verifier-VL2,
+    # 2026-10-01; the language round's L2 had measured this function
+    # alone and called such a count unchecked, which was wrong). A count
+    # with any other word before "stages" is read by neither: a planted
+    # "forty-eight verification stages" passes the whole check (verifier-
+    # VL2's re-check; measured again with "48 verification stages",
+    # 2026-10-01). So this widens one branch that another already covered
+    # for those phrasings; the control "ninety-eight runner stages" in
+    # CONTROLS holds this branch itself.
+    WORDS = {}
+    for tens_word, tens in WORD_TENS.items():
+        WORDS[tens] = tens_word
+        for unit_word, unit in WORD_UNITS.items():
+            if unit < 10:
+                WORDS[tens + unit] = f"{tens_word}-{unit_word}"
 
     for name in ("CLAUDE.md", "README.md", "docs/VERIFICATION.md",
                  "docs/README.md"):
@@ -613,6 +630,10 @@ CONTROLS = (
      r"^docs/VERIFICATION\.md says 'all 99' where the runner derives"),
     ("docs/README.md", "\nthirty runner stages\n",
      r"^docs/README\.md says 'thirty \.\.\. stages' where the runner derives"),
+    # past forty-five, which the word list once stopped at
+    ("docs/README.md", "\nninety-eight runner stages\n",
+     r"^docs/README\.md says 'ninety-eight \.\.\. stages' where the runner "
+     r"derives"),
     ("README.md", "\n99 tasks + a negative control\n",
      r"^README\.md says '99 tasks \+ a negative control'"),
     ("CLAUDE.md", "\ntwenty RTL sims\n",

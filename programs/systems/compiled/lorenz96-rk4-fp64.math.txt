@@ -1,0 +1,60 @@
+lorenz96 - the mathematical form, regenerated from the step graph
+binary64 (fp64), roundTiesToEven
+
+Each operation here is exact. The program performs the same
+operations, each rounded once, in the order the canonical form
+writes them.
+
+parameters, the run's (defaults)
+  F = 8
+
+the equations
+  dx[0]/dt = (x[1] − x[38])·x[39] + F − x[0]
+  dx[1]/dt = (x[2] − x[39])·x[0] + F − x[1]
+  dx[2]/dt = (x[3] − x[0])·x[1] + F − x[2]
+  dx[3]/dt = (x[4] − x[1])·x[2] + F − x[3]
+  dx[4]/dt = (x[5] − x[2])·x[3] + F − x[4]
+  dx[5]/dt = (x[6] − x[3])·x[4] + F − x[5]
+  dx[6]/dt = (x[7] − x[4])·x[5] + F − x[6]
+  dx[7]/dt = (x[8] − x[5])·x[6] + F − x[7]
+  dx[8]/dt = (x[9] − x[6])·x[7] + F − x[8]
+  dx[9]/dt = (x[10] − x[7])·x[8] + F − x[9]
+  dx[10]/dt = (x[11] − x[8])·x[9] + F − x[10]
+  dx[11]/dt = (x[12] − x[9])·x[10] + F − x[11]
+  dx[12]/dt = (x[13] − x[10])·x[11] + F − x[12]
+  dx[13]/dt = (x[14] − x[11])·x[12] + F − x[13]
+  dx[14]/dt = (x[15] − x[12])·x[13] + F − x[14]
+  dx[15]/dt = (x[16] − x[13])·x[14] + F − x[15]
+  dx[16]/dt = (x[17] − x[14])·x[15] + F − x[16]
+  dx[17]/dt = (x[18] − x[15])·x[16] + F − x[17]
+  dx[18]/dt = (x[19] − x[16])·x[17] + F − x[18]
+  dx[19]/dt = (x[20] − x[17])·x[18] + F − x[19]
+  dx[20]/dt = (x[21] − x[18])·x[19] + F − x[20]
+  dx[21]/dt = (x[22] − x[19])·x[20] + F − x[21]
+  dx[22]/dt = (x[23] − x[20])·x[21] + F − x[22]
+  dx[23]/dt = (x[24] − x[21])·x[22] + F − x[23]
+  dx[24]/dt = (x[25] − x[22])·x[23] + F − x[24]
+  dx[25]/dt = (x[26] − x[23])·x[24] + F − x[25]
+  dx[26]/dt = (x[27] − x[24])·x[25] + F − x[26]
+  dx[27]/dt = (x[28] − x[25])·x[26] + F − x[27]
+  dx[28]/dt = (x[29] − x[26])·x[27] + F − x[28]
+  dx[29]/dt = (x[30] − x[27])·x[28] + F − x[29]
+  dx[30]/dt = (x[31] − x[28])·x[29] + F − x[30]
+  dx[31]/dt = (x[32] − x[29])·x[30] + F − x[31]
+  dx[32]/dt = (x[33] − x[30])·x[31] + F − x[32]
+  dx[33]/dt = (x[34] − x[31])·x[32] + F − x[33]
+  dx[34]/dt = (x[35] − x[32])·x[33] + F − x[34]
+  dx[35]/dt = (x[36] − x[33])·x[34] + F − x[35]
+  dx[36]/dt = (x[37] − x[34])·x[35] + F − x[36]
+  dx[37]/dt = (x[38] − x[35])·x[36] + F − x[37]
+  dx[38]/dt = (x[39] − x[36])·x[37] + F − x[38]
+  dx[39]/dt = (x[0] − x[37])·x[38] + F − x[39]
+
+one step: the classical Runge-Kutta method (rk4), with f the right-hand sides above
+  h = 0.01
+  Y = (x[0], x[1], x[2], x[3], x[4], x[5], x[6], x[7], x[8], x[9], x[10], x[11], x[12], x[13], x[14], x[15], x[16], x[17], x[18], x[19], x[20], x[21], x[22], x[23], x[24], x[25], x[26], x[27], x[28], x[29], x[30], x[31], x[32], x[33], x[34], x[35], x[36], x[37], x[38], x[39])
+  k1 = f(Y)
+  k2 = f(Y + (h/2)·k1)
+  k3 = f(Y + (h/2)·k2)
+  k4 = f(Y + h·k3)
+  Y ↦ Y + (h/6)·(k1 + 2·k2 + 2·k3 + k4)

@@ -1,0 +1,276 @@
+{
+ "cftc_manifest": 1,
+ "compiler": {
+  "name": "cftc",
+  "version": 1
+ },
+ "source": {
+  "path": "programs/systems/henonheiles-lf-fp256.cftl",
+  "sha256": "a92d4433f0f439b0fc0f056e23aaee8bbc2b037227ca149a028df9ddcfd968ef"
+ },
+ "graph": {
+  "cftl_graph": 1,
+  "file": "henonheiles-lf-fp256.graph.json",
+  "sha256": "6ab637149472d7e4f5c06d3426faa6d49050553291559573fa5e46738c0759f8"
+ },
+ "system": "henonheiles",
+ "format": "fp256",
+ "round": "rne",
+ "integrator": {
+  "name": "stormer-verlet",
+  "h": "1/100",
+  "options": {
+   "q": [
+    "x",
+    "y"
+   ],
+   "p": [
+    "px",
+    "py"
+   ]
+  }
+ },
+ "steps": 100,
+ "target": {
+  "name": "sw",
+  "formats": [
+   "fp32",
+   "fp64",
+   "fp128",
+   "fp256"
+  ],
+  "max_insns": 4294967295,
+  "max_consts": 512,
+  "scratch_depth": 256,
+  "max_deposits": 1048576,
+  "seq_features": "0x1ff1f"
+ },
+ "accepted_by": [
+  "sw",
+  "u50-rev7",
+  "u50-rev7-quad",
+  "u50-round2",
+  "open-core"
+ ],
+ "uses": {
+  "instructions": 23,
+  "registers": 9,
+  "register_list": [
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11
+  ],
+  "scratch_slots": 4,
+  "scratch_declared": 256,
+  "bank_slots": 5,
+  "worst_case_instructions": 1310,
+  "features": [
+   "BANK_PTR",
+   "SCRATCH",
+   "SCRATCH_IO",
+   "SCRATCH_STRICT"
+  ]
+ },
+ "per_step": {
+  "instructions": 13,
+  "alu": 12,
+  "loads": 0,
+  "stores": 0,
+  "copies": 0,
+  "endrep": 1,
+  "by_op": {
+   "fma": 8,
+   "mul": 2,
+   "sub": 1,
+   "neg": 1
+  }
+ },
+ "per_segment": {
+  "prologue_loads": 4,
+  "epilogue_stores": 4,
+  "repeat": 1,
+  "halt": 1
+ },
+ "lowering": {
+  "graph_step_nodes": 13,
+  "graph_by_op": {
+   "fma": 8,
+   "sub": 1,
+   "mul": 2,
+   "neg": 2
+  },
+  "shared": 0,
+  "folded": 1,
+  "folds": [
+   {
+    "neg": "n4",
+    "labels": [],
+    "uses": 1,
+    "flip_slots": [
+     2
+    ]
+   }
+  ],
+  "order": "latency",
+  "pinning": "all"
+ },
+ "scratch": {
+  "in": 4,
+  "out": 4,
+  "spill_slots": 0,
+  "strict": true,
+  "layout": [
+   {
+    "slot": 0,
+    "name": "x",
+    "kind": "state",
+    "pinned": "r3"
+   },
+   {
+    "slot": 1,
+    "name": "y",
+    "kind": "state",
+    "pinned": "r4"
+   },
+   {
+    "slot": 2,
+    "name": "px",
+    "kind": "state",
+    "pinned": "r5"
+   },
+   {
+    "slot": 3,
+    "name": "py",
+    "kind": "state",
+    "pinned": "r6"
+   }
+  ]
+ },
+ "bank": [
+  {
+   "slot": 0,
+   "name": "h",
+   "kind": "const",
+   "exact": "1/100",
+   "h_factor": "1",
+   "encoding": "0x3fff847ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae",
+   "value": "0x1.47ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147aep-7",
+   "flags": [
+    "inexact"
+   ],
+   "relative_error": "-5.6598e-73",
+   "halved": "0x3fff747ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae"
+  },
+  {
+   "slot": 1,
+   "name": "h/2",
+   "kind": "const",
+   "exact": "1/200",
+   "h_factor": "1/2",
+   "encoding": "0x3fff747ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae",
+   "value": "0x1.47ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147aep-8",
+   "flags": [
+    "inexact"
+   ],
+   "relative_error": "-5.6598e-73",
+   "halved": "0x3fff647ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae"
+  },
+  {
+   "slot": 2,
+   "name": "flip(h)",
+   "kind": "flip",
+   "flips": 0,
+   "const": "0.01",
+   "exact": "-1/100",
+   "h_factor": "-1",
+   "encoding": "0xbfff847ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae",
+   "value": "-0x1.47ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147aep-7",
+   "flags": [
+    "inexact"
+   ],
+   "relative_error": "-5.6598e-73",
+   "halved": "0xbfff747ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae"
+  },
+  {
+   "slot": 3,
+   "name": "1",
+   "kind": "const",
+   "exact": "1",
+   "h_factor": null,
+   "encoding": "0x3ffff00000000000000000000000000000000000000000000000000000000000",
+   "value": "1",
+   "flags": [],
+   "relative_error": "0"
+  },
+  {
+   "slot": 4,
+   "name": "2",
+   "kind": "const",
+   "exact": "2",
+   "h_factor": null,
+   "encoding": "0x4000000000000000000000000000000000000000000000000000000000000000",
+   "value": "2",
+   "flags": [],
+   "relative_error": "0"
+  }
+ ],
+ "param_overrides": [],
+ "h_slots": [
+  0,
+  1,
+  2
+ ],
+ "time_shift": [
+  {
+   "expression": "2 RN(h/2) / RN(h) - 1",
+   "exact": "0",
+   "value": "0"
+  },
+  {
+   "expression": "RN(h) / RN(h) - 1",
+   "exact": "0",
+   "value": "0"
+  }
+ ],
+ "cost_model": {
+  "assumes": "revision 7, a single-pass tile; believed from docs/SEQUENCER.md R12-R19, not measured; the card's measurement is the lead's",
+  "cycles_per_step_one_beat": 100,
+  "cycles_per_step_sixteen_beats": 193
+ },
+ "files": {
+  "cfta": {
+   "name": "henonheiles-lf-fp256.cfta",
+   "sha256": "ab0898ebe5326211a5428d4c653c16cae26ff15093f25e6278ace5b0e539b95b"
+  },
+  "image": {
+   "name": "henonheiles-lf-fp256.cftp",
+   "sha256": "4922514ec32eab9dfded547e0d35932605179a966da74ab35ae848e0fe1fe9ae"
+  },
+  "bank": {
+   "name": "henonheiles-lf-fp256.bank",
+   "sha256": "1969d0fa5bddab0fc3846df208f5ad13a53d47f7bbddd15cfaef96271c348b5b"
+  },
+  "half_bank": {
+   "name": "henonheiles-lf-fp256.half.bank",
+   "sha256": "4ddc402f2e40fc02755cdbd9012826d6a87dab56b63705963ffae9fc0528fcf0"
+  },
+  "graph": {
+   "name": "henonheiles-lf-fp256.graph.json",
+   "sha256": "6ab637149472d7e4f5c06d3426faa6d49050553291559573fa5e46738c0759f8"
+  },
+  "canonical": {
+   "name": "henonheiles-lf-fp256.canonical.cftl",
+   "sha256": "f5972fc814a57a532f78015e3cf5d990a80a0635fd41edc1bccaae51eb4c4304"
+  },
+  "math": {
+   "name": "henonheiles-lf-fp256.math.txt",
+   "sha256": "e085c44923aaf363077c8b435a04232755debd03de0ae57c59698a0f4f9e8476"
+  }
+ }
+}

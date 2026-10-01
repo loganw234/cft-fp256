@@ -152,7 +152,7 @@ BUDGET=""
 # now that the formal gate holds thirty proofs and a negative control
 # (thirty-one tasks), full longer by the simulation suite and the two
 # browser replays; on the WSL distro the replay stages take seconds.
-BUDGET_QUICK=docs,generated,buildargs,sweepjudge,innerskips,ensurevectors,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,programs,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
+BUDGET_QUICK=docs,generated,buildargs,sweepjudge,innerskips,ensurevectors,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,programs,lang,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
 BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit,estimates
 RESUME=""
 FRESH=0
@@ -1024,6 +1024,31 @@ do_programs() {
 # (verifier-V3, 2026-09-25).
 need host-cc python
 stage programs "the program library: both assemblers against the MANIFEST, the readback, the generated corpora, and every row's own check; then cft-segrun's certificates of the ODE rows, byte for byte the golden writer's, audited; then the golden certificates, both writers held to committed bytes" -- do_programs
+
+# The language's compiler held to the language (python/cftc; the
+# language is docs/LANGUAGE.md; programs/lang_check.py's docstring names
+# the legs). Every image the compiler writes runs on seq.py against the
+# language's reference interpreter, lang.run, bit for bit with FLAGS, on
+# many lanes at 1, 2, 5 and the image's own steps - a wrong semantics can
+# hide on one lane at the final step: the three references at four
+# formats and five attributes, nine written shapes and a seeded generated
+# corpus at every format; the references beside gen_odes.py's images and
+# classic banks, their costs pinned; the halved bank, the params, resume.
+# Then cft-segrun certifies each compiled reference with a half-step run
+# and a step-halving estimate, and the golden audit and cft-audit accept
+# each in full and sampled; two processes under two PYTHONHASHSEEDs write
+# the bytes programs/systems/compiled/ holds; every refusal by name; five
+# plants in a copy of the package, each stopped by the compiler's internal
+# check and red on seq.py with it off. In the quick budget: about two
+# minutes on the desktop, niced (L2, 2026-10-01; the lead's rule, quick
+# at about three minutes or less).
+do_lang() {
+  HOSTMAKE "cft-segrun$EXE" "cft-audit$EXE" || return 1
+  PY "$ROOT/programs/lang_check.py" --segrun "$ROOT/host/cft-segrun$EXE" \
+     --audit "$ROOT/host/cft-audit$EXE"
+}
+need host-cc python
+stage lang "the language's compiler held to its interpreter: every image on seq.py against lang.run bit for bit with FLAGS at several step counts (the references at four formats and five attributes, written shapes and a generated corpus at every format, the references beside gen_odes.py's images and classic banks), certified through cft-segrun and accepted by both auditors, deterministic, every refusal by name, its plants red" -- do_lang
 
 # The C auditor held to the golden one (host/Makefile's audittest,
 # host/tests/audit_check.py; docs/CERTIFICATES.md, "The audit tool"):
