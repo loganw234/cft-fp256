@@ -21,7 +21,7 @@
     {
       "source": "host/include/cft.h",
       "dest": "src/cft/include/cft.h",
-      "sha256": "d0d2ff235b3951760cc757d90f33889a6e04f5cad0c5dcc9a4ce64cd68318e88"
+      "sha256": "8fd26d9c7ef2618584ccb703e599d7711b4a09449df5514c25060beb69ca6308"
     },
     {
       "source": "host/include/cft_config.h",
@@ -131,7 +131,7 @@
     {
       "source": "host/src/program.c",
       "dest": "src/cft/src/program.c",
-      "sha256": "6988ac90d7e5414009379d52e2256088dfd1367122eb81590958652d82391965"
+      "sha256": "9f8042cd36223bfdf1d8f4315cc6696a16a344bc3215514ba8ab31b87ddf178b"
     },
     {
       "source": "host/src/reduce.c",

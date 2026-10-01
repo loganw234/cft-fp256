@@ -862,6 +862,184 @@ def test_a_scratch_io_count_past_the_declared_depth_is_refused():
             "sixteen-bit count")
 
 
+# A depth that holds the largest count, so only the count's own bounds
+# are under test below.
+_DEEP_SCRATCH = ".format fp64\n.deposits 1\n.scratch 65536\n"
+
+
+@pytest.mark.parametrize("which", ["in", "out"])
+@pytest.mark.parametrize("v", [-1, -4294967296])
+def test_a_scratch_io_count_below_zero_is_refused(which, v):
+    """Refused by name (2026-10-01). Until then do_scratch held a count
+    only to 65535, and run() packed each into its sixteen bits with a
+    mask, so -1 was written as 65535 and -4294967296 as 0, at exit 0,
+    wherever the depth allowed it - a silent wrong image in the
+    reference for the text form (the language round's D1 found it;
+    cft-asm refused both)."""
+    refuses(_DEEP_SCRATCH + f".scratch {which} {v}\nhalt\n",
+            f".scratch {which} is a sixteen-bit count, and {v} is below "
+            f"zero")
+
+
+@pytest.mark.parametrize("which", ["in", "out"])
+@pytest.mark.parametrize("v", [0, 65535])
+def test_a_scratch_io_count_is_written_as_itself_to_its_bound(which, v):
+    """The bounds either side of the refusals: 0 and the largest count,
+    65535, are each written into their half of header word 7 as
+    themselves."""
+    image = asm.assemble(_DEEP_SCRATCH + f".scratch {which} {v}\nhalt\n",
+                         "<test>")
+    img = asm.Image.from_bytes(image)
+    assert img.flags == asm.FLAG_SCRATCH_IO
+    assert img.scratch_io == v << (0 if which == "in" else 16)
+    assert int.from_bytes(image[28:32], "little") == img.scratch_io
+
+
+@pytest.mark.parametrize("which", ["in", "out"])
+def test_a_scratch_io_count_one_past_sixteen_bits_is_refused(which):
+    """65536 does not fit a half of the word, whatever the depth."""
+    refuses(_DEEP_SCRATCH + f".scratch {which} 65536\nhalt\n",
+            f".scratch {which} is a sixteen-bit count, at most 65535")
+
+
+# ---- 3x. the text form's characters (2026-10-01) -----------------------
+#
+# One rule, the same in cft-asm.c (docs/PROGRAMS.md): a source is UTF-8;
+# a line ends at LF, a CR just before it part of that end; every other
+# line boundary str.splitlines() knows, and NUL and Ctrl-Z, refused by
+# name anywhere; outside a comment only printable ASCII, spaces and tabs.
+# Until this date this file split lines with splitlines() and cft-asm at
+# LF alone, so `; note`, a CR and `deposit r0` was 56 bytes here and 48
+# there (verifier-VD1). programs/check.py's character arm holds the two
+# assemblers to each other on the same bytes.
+
+_RULE_HEAD = ".format fp64\n.deposits 2\ndeposit r0\n"
+_ANYWHERE = {
+    "\r": "a carriage return (0x0d) that is not part of a CRLF line end",
+    "\x0b": "a vertical tab (0x0b)",
+    "\x0c": "a form feed (0x0c)",
+    "\x1c": "a file separator (0x1c)",
+    "\x1d": "a group separator (0x1d)",
+    "\x1e": "a record separator (0x1e)",
+    "\x85": "a next line (U+0085)",
+    " ": "a line separator (U+2028)",
+    " ": "a paragraph separator (U+2029)",
+    "\x00": "a NUL (0x00)",
+    "\x1a": "a Ctrl-Z (0x1a)",
+}
+
+
+def _refused_at(src, where):
+    with pytest.raises(asm.AsmError) as exc:
+        asm.assemble(src, "<t>")
+    assert str(exc.value).startswith(f"<t>:{where}"), str(exc.value)
+    return str(exc.value)
+
+
+@pytest.mark.parametrize("c", list(_ANYWHERE),
+                         ids=lambda c: f"U+{ord(c):04X}")
+@pytest.mark.parametrize("where", ["comment", "tokens"])
+def test_a_line_break_nul_or_ctrl_z_is_refused_anywhere(c, where):
+    """In a comment too - the case VD1 found was a CR in a comment, which
+    this file took for a line end and cft-asm for comment - and from a
+    str or a file's bytes alike, with the line it is on."""
+    body = (f"; note{c}deposit r0\n" if where == "comment"
+            else f"deposit{c}r0\n")
+    src = _RULE_HEAD + body + "halt\n"
+    for text in (src, src.encode()):
+        msg = _refused_at(text, "4: ")
+        assert msg.startswith(f"<t>:4: {_ANYWHERE[c]}: "), msg
+
+
+def test_a_crlf_file_assembles_as_its_lf_twin():
+    """A CR immediately before an LF is part of that line end: a CRLF
+    file, a mixed one and one without a final line end each give the LF
+    file's bytes, from a str and from bytes."""
+    lf = _RULE_HEAD + "add r3, r0, r1\t; a tab before this\nhalt\n"
+    want = asm.assemble(lf, "<t>")
+    crlf = lf.replace("\n", "\r\n")
+    for text in (crlf, lf.replace("\n", "\r\n", 2), crlf[:-2]):
+        assert asm.assemble(text, "<t>") == want
+        assert asm.assemble(text.encode(), "<t>") == want
+
+
+@pytest.mark.parametrize("src", ["halt\r\r\n", "halt\r"],
+                         ids=["CR CR LF", "a final CR"])
+def test_a_carriage_return_not_before_a_line_feed_is_refused(src):
+    msg = _refused_at(_RULE_HEAD + src, "4: ")
+    assert _ANYWHERE["\r"] in msg
+
+
+@pytest.mark.parametrize("c, name", [
+    (" ", "the character U+00A0"), (" ", "the character U+2003"),
+    ("　", "the character U+3000"), ("﻿", "the character U+FEFF"),
+    ("\x01", "the control character 0x01"),
+    ("\x1b", "the control character 0x1b"),
+    ("\x7f", "the control character 0x7f"),
+    ("é", "the character U+00E9")],
+    ids=lambda v: f"U+{ord(v):04X}" if len(v) == 1 else None)
+def test_only_printable_ascii_space_and_tab_stand_outside_a_comment(c, name):
+    """A Unicode space between tokens is refused, not taken for a split
+    by one assembler and a token character by the other; in a comment
+    the same character is only text."""
+    msg = _refused_at(_RULE_HEAD + f"deposit{c}r0\nhalt\n", "4: ")
+    assert msg.startswith(f"<t>:4: {name} outside a comment, where a "
+                          f"line holds only printable ASCII, spaces and "
+                          f"tabs"), msg
+    asm.assemble(_RULE_HEAD + f"; x{c}y\nhalt\n", "<t>")
+
+
+@pytest.mark.parametrize("bad, lead", [
+    (b"\xff", 0xFF), (b"\x80", 0x80), (b"\xc0\x80", 0xC0),
+    (b"\xe2\x28\xa1", 0xE2), (b"\xed\xa0\x80", 0xED),
+    (b"\xf4\x90\x80\x80", 0xF4), (b"\xf0\x9f\x98\n", 0xF0)],
+    ids=lambda v: v.hex() if isinstance(v, bytes) else None)
+def test_a_source_that_is_not_utf8_is_refused_at_its_line(bad, lead):
+    """The byte named is the lead byte of the first ill-formed sequence,
+    which cft-asm names too."""
+    data = _RULE_HEAD.encode() + b"; " + bad + b"deposit r0\nhalt\n"
+    msg = _refused_at(data, "4: ")
+    assert msg == f"<t>:4: the source is not UTF-8 (byte 0x{lead:02x})"
+    data = _RULE_HEAD.encode() + b"halt\n; \xe2\x82"
+    assert _refused_at(data, "5: ").endswith("(byte 0xe2)")
+    # a str UTF-8 cannot carry
+    assert "lone surrogate, U+D800" in _refused_at(
+        _RULE_HEAD + "; \ud800\nhalt\n", "4: ")
+
+
+def test_the_source_is_checked_whole_before_any_line_is_assembled():
+    """Of two faults both assemblers name the same one: UTF-8 over the
+    whole source first, then the characters, then the instructions."""
+    data = _RULE_HEAD.encode() + b"; \x0c\n; \xff\nhalt\n"
+    assert _refused_at(data, "5: ").endswith("(byte 0xff)")
+    msg = _refused_at(_RULE_HEAD + "nosuch r3\n; \x0c\nhalt\n", "5: ")
+    assert _ANYWHERE["\x0c"] in msg
+
+
+@pytest.mark.parametrize("line, what", [
+    (".deposits " + "1" * 4301, ".deposits"),
+    ("repeat " + "1" * 4301 + "\nendrep", "repeat"),
+    ("op" + "1" * 4301 + " r3, r0, r1, r2", "an opcode"),
+    ("deposit r" + "1" * 4301, "a register"),
+    (".reg X = r" + "1" * 4301, "a register")],
+    ids=[".deposits", "repeat", "opN", "rN", ".reg"])
+def test_a_decimal_past_4300_digits_is_refused_by_name(line, what):
+    """Python's int() refuses a longer decimal string since 3.11, and an
+    `op` or `r` number that long raised an uncaught ValueError here
+    (verifier-VD1). The bound is the text form's own now, the same on
+    every interpreter, and the refusal names it."""
+    with pytest.raises(asm.AsmError) as exc:
+        asm.assemble(".format fp64\n.deposits 1\n" + line + "\nhalt\n",
+                     "<t>")
+    assert (f"{what}: '" in str(exc.value) and "' has 4301 digits, and a "
+            "decimal number has at most 4300" in str(exc.value)), \
+        str(exc.value)[:200]
+    # 4,300 digits are read: register 5, and a budget of 1
+    asm.assemble(_RULE_HEAD + "deposit r" + "0" * 4299 + "5\nhalt\n", "<t>")
+    asm.assemble(".format fp64\n.deposits " + "0" * 4299 + "1\nhalt\n",
+                 "<t>")
+
+
 def test_the_reserved_flag_bits_after_revision_four():
     """Revision 4 took bit 2 for SCRATCH_STRICT, so the first bit this
     assembler cannot read moved up again, to 3.

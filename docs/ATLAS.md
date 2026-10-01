@@ -70,7 +70,7 @@ because what it found is the reason they were closed.
 | `s.orbit` with `until` | `REPEAT n` ... `SETACT(!until)` ... `ENDREP`, the count and the escape flag in registers | the model the sequencer was built for; the emitter's unroller becomes unnecessary |
 | `sum(n, term)` | a `REPEAT` accumulating into a register | per lane, no cross-lane reduction needed |
 | `s.deposit({xyz, col, glow})` | up to seven `DEPOSIT`s per sample, index-addressed | the fixed-order deposition GPUs cannot promise; binning into the plate is a separate step, below |
-| `P[8]`, `uT`, `TAU`, `PI` | the constant bank | 11 of the 16 addressable slots gone before any coefficient - 11 of 256 since indexed constants |
+| `P[8]`, `uT`, `TAU`, `PI` | the constant bank | 11 of the 16 addressable slots gone before any coefficient - of 256 with indexed constants, and of 512 since revision 3's ninth index bit |
 
 Two operations do not map, and both sit in the stream rather than in
 the arithmetic:

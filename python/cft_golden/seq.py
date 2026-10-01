@@ -105,9 +105,28 @@ REG_HI_MASK = 0x0F00_0000
 # operand's constant index is its own 4-bit field, so sixteen; with
 # `kx` it is a byte of `imm` plus a ninth bit (revision 3's R7), so
 # 512 - which is `KMEM_D`, the capacity rtl/cft_seq.sv's header check
-# permits. `n_consts` above this is not refused (it never was above
-# sixteen either): the constants past it are simply unaddressable, and
-# every index is checked against `n_consts` anyway.
+# permits.
+#
+# So it is also the deepest bank a header may declare, and since
+# 2026-10-01 validate() refuses an `n_consts` above it, by name. No
+# instruction can address a constant past 512, and a tile refuses such
+# an image at its header check (`n_consts > KMEM_D`) - but only after
+# the image has crossed, with STATUS[3] and no explanation. Until then
+# this model loaded and ran one (verifier-P1 measured 600 and 70,000,
+# in the image and under BANK_EXT, at status 0), and so did libcft,
+# which is held to this file; asm.py already refused it. At or below
+# 512 a header may still declare more constants than its instructions
+# address: the rest are simply unaddressed, and every index is checked
+# against `n_consts` anyway.
+#
+# The bank's depth is the one capacity the model refuses where the tile
+# does, because it is the ENCODING's: a deeper bank needs a tenth index
+# bit, which is an instruction-format change. The other two it still
+# accepts past any tile's, deliberately - an instruction count to the
+# header field's 2^32 - 1 against a tile's IMEM_D, and a deposit budget
+# to MAX_DEPOSITS below against its MAXD - because the model is the
+# contract and not one tile: a device publishes those two capacities
+# and the library holds each program to its device's at load.
 #
 # It was 256 between 2026-09-07 and revision 3, which is the number
 # `KADDR_KX8` keeps: a device whose CAPS[7] is clear addresses eight
@@ -762,6 +781,15 @@ class Program:
         if not 0 <= self.max_deposits <= MAX_DEPOSITS:
             raise ProgramError(
                 f"max_deposits={self.max_deposits}, cap {MAX_DEPOSITS}")
+        # The bank's depth, which the tile refuses at its header check
+        # after the image has crossed (see KADDR_KX). The same number
+        # for an image that carries its constants and for a BANK_EXT
+        # one, since n_consts is the header field either way.
+        if self.n_consts > KADDR_KX:
+            raise ProgramError(
+                f"n_consts={self.n_consts}: an index is nine bits under "
+                f"kx, so the bank addresses at most {KADDR_KX} constants, "
+                f"and a tile refuses a deeper one at its header check")
         for k in self.consts:
             if not 0 <= k < (1 << self.fmt.width):
                 raise ProgramError("constant does not fit the format")

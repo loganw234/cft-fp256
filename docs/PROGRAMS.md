@@ -20,7 +20,7 @@ disassembler, a library of named programs with a manifest, and a
 runner that takes an image and data in and deposits and a hash out.
 
 **Where it stands.** All three are built and green on the software
-backend. `programs/` holds twenty-nine programs with a check each, `make
+backend. `programs/` holds thirty-seven programs with a check each, `make
 programs-check` runs them and generated revision-2 and revision-3
 corpora (in about twelve seconds when there were seventeen). The `BANK_EXT` run path landed with
 the host half of the afternoon round and passes; revision 3's own
@@ -57,6 +57,41 @@ nothing.
 `python/tests/test_asm.py`, and it really does produce 1, 0.5, 0.25
 and 2 from 1, 2, 4 and 0.5. An example in a specification that has
 never been run is a specification of something else.)
+
+**The text form's characters** (2026-10-01). One rule, which both
+assemblers hold, refusing the same sources for the same reasons:
+
+- a source is UTF-8;
+- a line ends at a line feed, and a carriage return immediately before
+  the line feed is part of that end, so a CRLF file reads as its LF
+  twin;
+- every other line boundary Python's `str.splitlines()` knows - a
+  carriage return that ends no line, a vertical tab, a form feed, 0x1c
+  to 0x1e, NEL (U+0085), U+2028 and U+2029 - and NUL and Ctrl-Z (0x1a)
+  are refused by name anywhere, comments included, with their line;
+- outside a comment, before a line's first `;`, a line holds only
+  printable ASCII, spaces and tabs; a comment may hold any other
+  character;
+- a number in a directive or an operand is a decimal with one
+  optional sign and at most 4,300 digits, or `0x` hexadecimal of any
+  length, single underscores allowed between digits, as Python's
+  `int()` reads them. A `.const` literal is a value, not such a
+  number: a decimal there is read as 5.12.2 says, at any length
+  (verifier-VD1 measured 4,301 and 6,000 digits accepted by both).
+
+The whole source is checked before any line is assembled, UTF-8 first
+and then the characters, so of several faults both name the same one.
+A caller of `asm.py` that holds a file passes its bytes: a text-mode
+read would turn a lone carriage return into a line end before the rule
+could see it. Eighteen call sites in seven files still pass a
+text-mode read (tests, certificates/corpus.py and check.py's own
+line 1074, verifier-VD1): harmless while every tracked source is
+plain ASCII with no carriage return, as all forty are, and recorded
+rather than changed. Until this date the two assemblers disagreed about what
+a line was: `asm.py` split at every `splitlines()` boundary and
+`cft-asm` at a line feed alone, so a carriage return in a comment hid
+the next instruction from one of them, at exit 0 (verifier-VD1), and
+a decimal past 4,300 digits raised an uncaught error in `asm.py`.
 
 Directives:
 
@@ -176,7 +211,38 @@ nine-bit constant indices on each of `ra`, `rb` and `rc`. Both exist
 because `seq.random_program` is revision 1 and a library row is
 written by a person: without them the round trip would be a round trip
 over revision 1 with extra steps, and each stage asserts what it
-reached rather than assuming it.
+reached rather than assuming it. And since 2026-10-01, on long lines:
+sources whose comments and `.const` literals run from 1,022 to 5,000
+bytes must give both the same bytes. Until then `cft-asm` read a line
+1,023 bytes at a time and assembled a longer one as two or more - a
+comment whose tail read ` deposit r0` gave an extra deposit, at exit
+0; both read a line whole now, at any length. And on every numeric
+field - `.deposits`, `.scratch`, `.slot`, a slot operand, `repeat`,
+`opN` and register numbers - at and past its bounds, in both signs and
+the spellings Python's `int()` takes: the same bytes, or the same
+refusal for the same reason. Until then `cft-asm` read numbers with
+`strtoull` and cast `.deposits` to 32 bits, so `.deposits 4294967297`
+gave max_deposits 1 at exit 0 where `asm.py` refuses it.
+
+Known differences, recorded rather than fixed (2026-10-01), each loud:
+`asm.py` accepts, and `cft-asm` refuses by name, a name of 64
+characters or more, more than 1,024 `.reg` or more than 1,024 `.slot`
+names, and more than 65,536 instructions - the C tool's fixed tables.
+Also: a raw `0x` literal with underscores, which `asm.py` reads
+(`.const K = 0x3ff0_0000_0000_0000` is 1.0 at fp64) and `cft-asm`
+refuses as wider than the format, a misleading reason; and revision
+8's forms, which only `asm.py` reads (below). Two are loud but not by
+name, in `asm.py` alone: a `.deposits 0x` number of 3,600 or more hex
+digits raises an uncaught ValueError, formatted in decimal for its
+message, where `cft-asm` refuses it by name; and with Python's digit
+limit lowered below 4,300 (`-X int_max_str_digits`,
+`PYTHONINTMAXSTRDIGITS`), so does a decimal between that limit and
+4,300 digits (verifier-VD1). The line ends and characters this
+paragraph first listed are refused by both now, under the rule above;
+a carriage return or form feed after a comment was silent then, not
+loud (verifier-VD1). (A negative
+`.scratch in` or `out` count is refused by both: until 2026-10-01
+`asm.py` wrote its low sixteen bits, -1 as 65535, at exit 0.)
 
 **One thing neither carries: an arity table from libcft.** Which
 operand FIELDS an opcode reads is not in `cft_op_name`, in
@@ -201,7 +267,7 @@ two agree is what the byte-for-byte check proves.
       build.py check.py  what the two make targets run
 
 A program earns a row by having a check: something that runs it and
-compares against the model or a tool's own chain. Twenty-nine so far -
+compares against the model or a tool's own chain. Thirty-seven so far -
 `programs/README.md` is the index and the argument; in brief:
 
 | family | rows | its check |
@@ -217,6 +283,8 @@ compares against the model or a tool's own chain. Twenty-nine so far -
 | `horner-wide-fp64` | 1 | a degree-299 Horner over a 300-entry external bank - the ninth constant-index bit - against a softfloat Horner |
 | `divfull-<fmt>`, `sqrtfull-<fmt>` | 8 | byte-identical to the image `divfull.py` generates, and 64 raw lanes - specials included - through `positive-run --bank`, both deposits against `softfloat.div` or `softfloat.sqrt` |
 | `normalabs-<fmt>` | 4 | byte-identical to `seqprogs.normal_abs_program`, and 64 raw lanes of every class in both signs through `positive-run` against `softfloat`'s class, no flag raised |
+| `deepwalk-fp64`, `deepwalk-strict-fp64` | 2 | revision 7's deeper scratch: a thousand samples stored through a loop counter and summed back from the top, written for 2,048 slots - `seq.run` at 2,048 and at 256 against the walk written out in `check.py`, the two depths' sums different and the strict one reporting STATUS 0x20 at 256 where the other wraps, and `positive-run` at both depths bit for bit against the model |
+| `lorenz63-rk4-<fmt>`, `lorenz96-rk4-<fmt>`, `henonheiles-lf-<fmt>` | 6 | the ODE segments `gen_odes.py` writes, at fp64 and fp256: its output byte for byte, each bank slot against the definition of its name, the counts against literals in `check.py`, three executors bit for bit, each step against the textbook scheme in exact rationals, the scheme at 300 digits, and two segments chained against one - with a negative control beside every arm but the header and the census |
 
 *A note on the naming.* The contract called for
 `divsqrt-<format>.cfta`. A `.cfta` file is one program and

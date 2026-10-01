@@ -1,9 +1,9 @@
 # The documents, by what you open them for
 
-Thirty-nine files, 59,819 lines. Flat in one directory they look like one
+Thirty-nine files, 59,909 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **21,660 lines you consult while working** — the three under *Start here*,
+- **21,750 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,668 lines of tool manual**, one per shipped program;
 - **2,011 lines of operations**, read when you are about to do something to
@@ -45,7 +45,7 @@ product, not the implementation.
 |---|---|---|
 | [DETERMINISM.md](DETERMINISM.md) | 1,442 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 1,169 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
-| [SEQUENCER.md](SEQUENCER.md) | 3,354 | The orbit sequencer and the program model. |
+| [SEQUENCER.md](SEQUENCER.md) | 3,367 | The orbit sequencer and the program model. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 917 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
 | [CERTIFICATES.md](CERTIFICATES.md) | 2,676 | The certificate, version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Complete enough to write a reader and an auditor from the page. And the segment runner, `cft-segrun`, that writes one from the library, its accuracy entries included; the audit tool, `cft-audit`, that audits one in C with the same exact arithmetic; and the golden certificates in `certificates/` that hold both writers to committed bytes. |
@@ -54,10 +54,10 @@ product, not the implementation.
 
 | document | lines | what it is for |
 |---|---|---|
-| [HOSTAPI.md](HOSTAPI.md) | 3,298 | The host API, function by function. The largest reference here and the one most often wanted. |
+| [HOSTAPI.md](HOSTAPI.md) | 3,307 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,737 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
 | [REMOTE.md](REMOTE.md) | 1,411 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
-| [PROGRAMS.md](PROGRAMS.md) | 536 | Programs as files: the assembler, the program library, the runner. |
+| [PROGRAMS.md](PROGRAMS.md) | 604 | Programs as files: the assembler, the program library, the runner. |
 | [EMBEDDED.md](EMBEDDED.md) | 709 | libcft on microcontrollers, and the profiles the embedded gate runs. |
 | [PLATFORMS.md](PLATFORMS.md) | 2,928 | Which FPGA to buy, borrow or rent next, measured against the tile this project builds; every figure carries a source and every price the date it was seen. |
 | [SCALING.md](SCALING.md) | 423 | What more tiles buy, and what they do not. |
