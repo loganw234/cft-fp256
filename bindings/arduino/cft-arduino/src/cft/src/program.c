@@ -109,7 +109,10 @@
  * instruction addresses a constant past it, and a tile refuses such
  * an image at its header check only after the image has crossed. At
  * or below 512 a header may still declare more constants than its
- * instructions name; the rest are simply unaddressed. */
+ * instructions name; the rest are simply unaddressed. The 512 is the
+ * loader's and every tile's since revision 3: a tile built before had a
+ * 256-entry bank, and a header of 257 to 512 still crosses to it and is
+ * refused there - a known limit, since no such tile is in use. */
 #define SEQ_MAX_DEPOSITS (1uL << 20)
 #define SEQ_IMAGE_INSNS  0xFFFFFFFFu
 #define SEQ_ADDR_CONSTS  512u  /* with kx (2026-09-07) an instruction's
@@ -906,15 +909,18 @@ static cft_status seq_check_caps(cft_device *dev, uint32_t n_insns,
  *
  * Separate from the header check above because these are properties of
  * the instruction stream rather than of the header: a program may
- * declare more constants than a device reaches (up to the 512 any
- * instruction can, past which cft_program_load refuses the header
- * itself; the rest are simply unreachable), and what a device refuses
- * to execute is a reference past its bank. That refusal cannot fire on
- * a device built so far: each publishes the whole reach of the encoding
- * it decodes - sixteen without kx, 256 with it, and 512 with KX9, which
- * is the software backend and every tile since revision 3 - and an
- * index past that reach is refused first, as the feature it needs. It
- * is real for a trimmed tile that publishes fewer.
+ * declare more constants than a device reaches - the rest are simply
+ * unreachable - up to the 512 any instruction can, past which
+ * cft_program_load refuses the header itself (on a tile built before
+ * revision 3, whose bank is 256, a header of 257 to 512 still crosses
+ * and is refused at the tile: a known limit, no such tile in use); and
+ * what a device refuses to execute is a reference past its bank. That
+ * refusal cannot fire on a device built so far: each publishes the
+ * whole reach of the encoding it decodes - sixteen without kx, 256 with
+ * it, and 512 with KX9, which is the software backend and every tile
+ * since revision 3 - and an index past that reach is refused first, as
+ * the feature it needs. It is real for a trimmed tile that publishes
+ * fewer.
  *
  * A feature the device does not publish is ABSENT, not unknown, and
  * every one of these refusals exists because the DEVICE cannot make

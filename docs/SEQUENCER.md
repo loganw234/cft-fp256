@@ -729,7 +729,9 @@ the hardware does not have to be:
   A tile refuses such an image too, at its header check, but only
   after the image has crossed, with `STATUS[3]` and no explanation. At
   or below 512 a header may still declare more constants than its
-  instructions name.
+  instructions name - but a tile built before revision 3, whose bank
+  is 256, refuses 257 to 512 itself, after crossing: a known limit,
+  since no such tile is in use.
 - a constant index outside the bank, a **scratch slot at or past
   `SCRATCH_D` in a `STL` or `LDL`**, a reserved bit, a set bit in the
   header's `flags[31:3]`, a non-zero `scratch_io` word without
