@@ -1,9 +1,9 @@
 # The documents, by what you open them for
 
-Thirty-nine files, 59,819 lines. Flat in one directory they look like one
+Forty files, 60,745 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **21,660 lines you consult while working** — the three under *Start here*,
+- **22,586 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,668 lines of tool manual**, one per shipped program;
 - **2,011 lines of operations**, read when you are about to do something to
@@ -13,7 +13,7 @@ undifferentiated pile; they are not, and the split is close to even:
   and not what you open to get something done.
 
 Half is therefore history. That is deliberate, and it is also why a
-flat listing of thirty-nine names feels heavier than the work actually is.
+flat listing of forty names feels heavier than the work actually is.
 
 This index exists because the README linked eight of the thirty-four there
 were and nothing linked the other twenty-six. Nothing has moved: a file's
@@ -46,6 +46,7 @@ product, not the implementation.
 | [DETERMINISM.md](DETERMINISM.md) | 1,442 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 1,169 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
 | [SEQUENCER.md](SEQUENCER.md) | 3,354 | The orbit sequencer and the program model. |
+| [LANGUAGE.md](LANGUAGE.md) | 926 | The language for dynamical systems: the grammar, the semantics (literal evaluation, exact constants rounded once, one attribute a program), the integrators written in it, the step graph, the reference interpreter that is the definition of correct for every compiled image, the intention-out, and every refusal by name. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 917 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
 | [CERTIFICATES.md](CERTIFICATES.md) | 2,676 | The certificate, version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Complete enough to write a reader and an auditor from the page. And the segment runner, `cft-segrun`, that writes one from the library, its accuracy entries included; the audit tool, `cft-audit`, that audits one in C with the same exact arithmetic; and the golden certificates in `certificates/` that hold both writers to committed bytes. |
