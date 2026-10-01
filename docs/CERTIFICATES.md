@@ -1465,9 +1465,9 @@ against the runs in `cert.derive`'s order:
   - a method, a label, a run, a lane or a slot not in its spelling. A
     lane or a slot given negative is one: the golden writer refuses its
     line `malformed` at `encode`. A run given negative, a minus before
-    an index in its one spelling, such as -1, is not: it names no run,
-    and it is `accuracy-run`, below, as `cert.derive` names it. `-0` and
-    `-01` spell no index, and are `malformed`;
+    a nonzero index in its one spelling, such as -1, is not: it names
+    no run, and it is `accuracy-run`, below, as `cert.derive` names it.
+    `-0` and `-01` spell no index, and are `malformed`;
   - a drift with no `--quantity`, no `--term`, or more than 64;
   - an estimate given a `--quantity` or a `--term`;
   - a coefficient not in its one spelling: a zero denominator, 0/3, or
