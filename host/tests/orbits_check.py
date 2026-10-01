@@ -83,7 +83,9 @@ Seven groups of checks:
                   reader and writer, to the records and to both auditors;
                   the same bytes however the run was cut, batched,
                   relayed or killed; the controls, each refused by name
-                  by both auditors; and every refusal, by name and code.
+                  by both auditors; and every refusal it can make, by
+                  name and code, with what each leaves - all but
+                  build-width, which no build that links reaches.
 """
 
 import argparse
@@ -2094,7 +2096,10 @@ def check_segments(tool, tmp):
 # Then the same bytes however the engine cut its intervals, whatever the
 # batch, and however the run was interrupted and resumed; the controls,
 # each refused by name by both auditors; and every refusal the certified
-# path makes, by name and exit code.
+# path can make, by name and exit code, with what each leaves behind: all
+# but `build-width`, which no build that links reaches - a bigint that
+# narrow needs CFT_NO_TRANSCEND, and cft-orbits calls cft_acos and
+# cft_rootn (docs/ORBITS.md, "Certified runs").
 # ---------------------------------------------------------------------
 _AUDIT_REFUSED = re.compile(r"^cft-audit: refused ([a-z-]+): ", re.M)
 _AUDIT_LOCATION = re.compile(r"^cft-audit: location line=(\S+) run=(\S+) "
@@ -2436,6 +2441,43 @@ def check_certificates(tool, tmp, audit_exe):
               "certificate gone, it writes the same certificate again",
               "kepler, open: resumed from its final checkpoint, exit %d %s"
               % (p3.returncode, p3.stderr[-200:]))
+        # a stop at the run's last step leaves its last interval unclosed and
+        # writes no certificate; a stop at its last sample is the run
+        # completed, and writes it
+        for label, stop, writes in (
+                ("--stop-after-steps 128, the run's last step",
+                 ["--stop-after-steps", 128], False),
+                ("--stop-after-samples 8, the run's last sample",
+                 ["--stop-after-samples", 8], True)):
+            serial[0] += 1
+            tag = "stop-end-%d" % serial[0]
+            ck = work / (tag + ".ckpt")
+            proc, c, d = certify(tag, K, "open", *stop, "--checkpoint", ck)
+            at = _at_of(ck) if ck.exists() else None
+            check(proc.returncode == 0 and
+                  (c.exists() and c.read_bytes() == whole and at == [128, 8]
+                   if writes else not c.exists() and at == [128, 7]),
+                  "kepler, open: %s - %s" % (label, "the run completed, and "
+                  "its certificate is the uninterrupted one" if writes else
+                  "its last interval unclosed (at 128 7), and no certificate"),
+                  "kepler, open: %s - exit %d, at %s, certificate %s"
+                  % (label, proc.returncode, at,
+                     "written" if c.exists() else "not written"))
+        # CERT.tmp is the tool's own name, as a checkpoint's .tmp is: a file
+        # of that name there already is cut, and the certificate written
+        serial[0] += 1
+        tag = "tmp-there-%d" % serial[0]
+        c, d = paths(tag)
+        tmpf = Path(str(c) + ".tmp")
+        tmpf.write_bytes(b"a file of the user's, by the tool's own name\n")
+        proc, c, d = certify(tag, K, "open")
+        check(proc.returncode == 0 and c.exists() and
+              c.read_bytes() == whole and not tmpf.exists(),
+              "kepler, open: a file named CERT.tmp there already is cut, and "
+              "the run writes the uninterrupted certificate",
+              "kepler, open: with a CERT.tmp there already - exit %d, %s, "
+              "CERT.tmp %s" % (proc.returncode, proc.stderr[-200:],
+                               "there" if tmpf.exists() else "gone"))
     if ob:
         rounds, mid, late, proc = relay("relay-outer", O, "keyed", 13, 2)
         c, _ = paths("relay-outer")
@@ -2600,24 +2642,37 @@ def check_certificates(tool, tmp, audit_exe):
         golden_says = "accepted"
     except cert.Refusal as e:
         golden_says = e.name + ": " + str(e)
+    # refused at the run's end: DIR is left whole, the image and every
+    # boundary, and there is no certificate and no CERT.tmp
+    left = sorted(p.name for p in d.iterdir()) if d.exists() else None
+    whole_dir = sorted(["run-0.cftp"] + ["run-0-boundary-%d.bin" % b
+                                         for b in range(9)])
     check(refusal(proc) == ("width", 3) and "term 0's product" in
           proc.stderr and golden_says.startswith("width") and
-          "term 0's product" in golden_says and not c.exists(),
-          "refused width (exit 3), no certificate: the first term's "
-          "coefficient taken times 2^-1000 (CFT_ORBITS_CERT_PLANT=width), "
-          "its first product past the rule - where the golden writer refuses "
-          "the same entry, `%s`" % golden_says[:90],
-          "the width plant: the tool %s (exit %d), the golden writer %s"
-          % (refusal(proc)[0], proc.returncode, golden_says[:120]))
+          "term 0's product" in golden_says and not c.exists() and
+          not Path(str(c) + ".tmp").exists() and left == whole_dir,
+          "refused width (exit 3) at the run's end: no certificate and no "
+          "CERT.tmp, DIR left whole (the image and all 9 boundaries); the "
+          "first term's coefficient taken times 2^-1000 "
+          "(CFT_ORBITS_CERT_PLANT=width), its first product past the rule - "
+          "where the golden writer refuses the same entry, `%s`"
+          % golden_says[:90],
+          "the width plant: the tool %s (exit %d), the golden writer %s; "
+          "DIR left %s, CERT.tmp %s"
+          % (refusal(proc)[0], proc.returncode, golden_says[:120], left,
+             "there" if Path(str(c) + ".tmp").exists() else "gone"))
 
     # --- what the certified path refuses, by name and exit code ----------
+    # the page's table, every name and its code; build-width (78) is in it
+    # and not here: no build that links reaches it
     NAMES = {"engine": 64, "rsqrt-exact": 64, "step-halving": 64,
              "wider": 64, "energy-drift": 64, "usage": 64,
              "salt-length": 4, "program-image": 4, "device": 69,
-             "malformed": 2, "output": 73, "salt-missing": 4,
+             "malformed": 2, "width": 3, "accuracy-finite": 7,
+             "memory": 71, "output": 73, "salt-missing": 4,
              "salt-unexpected": 4, "salt-commitment": 4, "identity": 78,
-             "image-digest": 4, "state-missing": 4, "state-hash": 4,
-             "state-shape": 4}
+             "image-digest": 4, "program-digest": 4, "state-missing": 4,
+             "state-hash": 4, "state-shape": 4}
     short = ["--problem", "kepler", "--format", "fp64", "--members", 2,
              "--periods", 1, "--steps-per-period", 32, "--sample-every", 8,
              "--quiet"]
@@ -2684,12 +2739,40 @@ def check_certificates(tool, tmp, audit_exe):
                     *seg, "--quiet", "--cert", c, "--cert-states", d,
                     "--cert-open", expect_ok=False)
     check(refusal(proc) == ("program-image", 4) and "cft_program_load" in
-          proc.stderr and not d.exists(),
+          proc.stderr and not d.exists() and not c.exists() and
+          not Path(str(c) + ".tmp").exists(),
           "refused program-image (exit 4), nothing made: a stride of 7e8 "
           "outer yoshida4 steps, past the loader's 2^40 instructions, with "
           "the library's sentence",
           "not refused program-image for a stride past 2^40 instructions: "
           "%s" % proc.stderr.strip()[-200:])
+    # memory: what the certificate needs, sized by the run and taken before
+    # anything is made - an interval count no size_t addresses hashes for,
+    # and one whose hashes no process can hold: 2^52 intervals are 293 PB
+    # of hashes, past an x86-64 process's address space (128 TiB, or 64
+    # PiB with five-level paging), so no allocator gives them, whatever the
+    # system's overcommit. 10^12 (65 TB) fits 47 bits, and Linux's
+    # always-overcommit would grant it and run the 10^12 steps.
+    for label, steps, sentence in (
+            ("2^62 one-step intervals, more than a size_t counts the "
+             "certificate's hashes for", 2 ** 62,
+             "%d intervals of 2 members cannot be addressed" % 2 ** 62),
+            ("2^52 one-step intervals, 293 PB of hashes, past an x86-64 "
+             "process's address space", 2 ** 52, "the certificate's hashes "
+             "and words for %d intervals, and a state of 64 bytes, could "
+             "not be allocated" % 2 ** 52)):
+        serial[0] += 1
+        c, d = paths("refused-%d" % serial[0])
+        proc = tool.run(*short, "--steps", steps, "--sample-every", 1, *seg,
+                        "--cert", c, "--cert-states", d, "--cert-open",
+                        expect_ok=False)
+        check(refusal(proc) == ("memory", NAMES["memory"]) and
+              sentence in proc.stderr and not c.exists() and
+              not d.exists() and not Path(str(c) + ".tmp").exists(),
+              "refused memory (exit 71), nothing made: %s" % label,
+              "not refused memory (exit 71) with nothing made: %s - %s, "
+              "exit %d, %s" % (label, refusal(proc)[0], proc.returncode,
+                               proc.stderr.strip()[-200:]))
     for label, cpath, dpath, name in (
             ("--cert already there", there, work / "new-1.states", "output"),
             ("--cert-states already there", work / "new-2.cert", there_dir,
@@ -2703,7 +2786,9 @@ def check_certificates(tool, tmp, audit_exe):
         check(refusal(proc) == (name, NAMES[name]) and
               there.read_bytes() == before and not list(there_dir.iterdir())
               and not (work / "new-1.states").exists() and
-              not (work / "new-3.states").exists(),
+              not (work / "new-3.states").exists() and
+              (cpath == there or not cpath.exists()) and
+              not Path(str(cpath) + ".tmp").exists(),
               "refused %s (exit %d), nothing made or changed: %s"
               % (name, NAMES[name], label),
               "not refused %s: %s - %s" % (name, label,
@@ -2715,13 +2800,22 @@ def check_certificates(tool, tmp, audit_exe):
         proc = tool.run(*short, *seg, "--cert", c, "--cert-states", d,
                         "--cert-open", expect_ok=False,
                         env=env_with(CFT_ORBITS_CERT_PLANT=plant))
+        # refused during the run: DIR is left as far as it got - its image
+        # and boundary 0 - with no certificate and no CERT.tmp
+        left = sorted(p.name for p in d.iterdir()) if d.exists() else None
         check(refusal(proc) == (name, NAMES[name]) and not c.exists() and
+              not Path(str(c) + ".tmp").exists() and
+              left == ["run-0-boundary-0.bin", "run-0.cftp"] and
               "planted" in proc.stderr,
-              "refused %s (exit %d) at the first segment, no certificate: "
-              "the library's flag word taken as %s (CFT_ORBITS_CERT_PLANT)"
+              "refused %s (exit %d) at the first segment: no certificate and "
+              "no CERT.tmp, DIR left holding its image and boundary 0; the "
+              "library's flag word taken as %s (CFT_ORBITS_CERT_PLANT)"
               % (name, NAMES[name], plant),
-              "not refused %s under %s: %s" % (name, plant,
-                                               proc.stderr.strip()[-200:]))
+              "not refused %s under %s, or not with DIR left as far as the "
+              "run got (%s, CERT.tmp %s): %s"
+              % (name, plant, left,
+                 "there" if Path(str(c) + ".tmp").exists() else "gone",
+                 proc.stderr.strip()[-200:]))
 
     # --- what a resume refuses, with nothing changed ---------------------
     def stopped(tag, mode):
@@ -2743,7 +2837,8 @@ def check_certificates(tool, tmp, audit_exe):
                         env=env)
         got = refusal(proc)
         if name:
-            ok_ = got == (name, NAMES[name])
+            ok_ = got == (name, NAMES[name]) and (sentence is None or
+                                                  sentence in proc.stderr)
         else:
             ok_ = proc.returncode == exit_code and sentence in proc.stderr
         check(ok_ and snapshot(ck, d) == before and not c.exists() and
@@ -2798,6 +2893,58 @@ def check_certificates(tool, tmp, audit_exe):
         shutil.copyfile(cko, ck)
         fn(work / (tag + ".states"))
         resume_refused(label, tag, ck, ["--cert-open"], name)
+    # the checkpoint's `cert program-digest` line not this process's, its
+    # sum made again: program-image (image-digest's) is the same digest,
+    # so only a file written to pass the sum makes the two disagree
+    serial[0] += 1
+    tag = "rs-digest-%d" % serial[0]
+    shutil.copytree(d_o, work / (tag + ".states"))
+    ck = work / (tag + ".ckpt")
+    ck.write_text(_resum(cko.read_text(), lambda b: re.sub(
+        r"(?m)^cert program-digest [0-9a-f]{64}$",
+        "cert program-digest " + "0" * 64, b)), newline="\n")
+    resume_refused("a checkpoint whose `cert program-digest` is not this "
+                   "process's (the line changed, its sum made again)", tag,
+                   ck, ["--cert-open"], "program-digest")
+    # accuracy-finite: an entry reads every state value it needs exactly,
+    # and a NaN has no exact value. No run of this tool's makes one unless a
+    # fault does ("Flags": the Newton route carries a NaN without a flag),
+    # so the resume is handed one: a completed run's final checkpoint, its
+    # certificate removed, boundary 0 given fp64's quiet NaN at lane 1 slot
+    # 0, and the checkpoint's two hashes of it (`cert boundary 0`, segment
+    # 0's start) and its sum made again. With no step left, the resume holds
+    # boundary 0 to that hash, writes its final checkpoint again, the same
+    # bytes, and refuses the entry: nothing is changed.
+    serial[0] += 1
+    tag = "rs-nan-%d" % serial[0]
+    ck_nan = work / (tag + ".ckpt")
+    proc, c, d = certify(tag, K, "open", "--checkpoint", ck_nan)
+    if check(proc.returncode == 0 and c.exists(),
+             "a run certified with its entries and a final checkpoint, for "
+             "accuracy-finite",
+             "the run for accuracy-finite failed (exit %d) %s"
+             % (proc.returncode, proc.stderr[-200:])):
+        c.unlink()
+        b0 = d / "run-0-boundary-0.bin"
+        state0 = b0.read_bytes()
+        off = (1 * 4 + 0) * 8               # lane 1 slot 0, 4 slots of 8 bytes
+        nan0 = state0[:off] + (0x7ff8 << 48).to_bytes(8, "little") + \
+            state0[off + 8:]
+        h_old, h_new = cert.state_hash(None, state0), cert.state_hash(None,
+                                                                      nan0)
+        text = ck_nan.read_text()
+        b0.write_bytes(nan0)
+        ck_nan.write_text(_resum(text, lambda b: b.replace(h_old, h_new)),
+                          newline="\n")
+        check(text.count(h_old) == 2, "boundary 0's hash is the checkpoint's "
+              "twice, `cert boundary 0` and segment 0's start: both changed",
+              "boundary 0's hash is in the checkpoint %d times, not 2"
+              % text.count(h_old))
+        resume_refused("a completed run's final checkpoint resumed with a NaN "
+                       "at boundary 0, lane 1 slot 0 (its two hashes and its "
+                       "sum made again) - the entry cannot take it exactly",
+                       tag, ck_nan, ["--cert-open"], "accuracy-finite",
+                       "lane 1 slot 0 of the initial state is nan")
     serial[0] += 1
     tag = "rs-nodir-%d" % serial[0]
     ck = work / (tag + ".ckpt")
@@ -2805,9 +2952,12 @@ def check_certificates(tool, tmp, audit_exe):
     c, d = paths(tag)
     proc = tool.run(*K, "--cert", c, "--cert-states", d, "--cert-open",
                     *ACC, "--checkpoint", ck, "--resume", expect_ok=False)
-    check(refusal(proc) == ("output", 73) and not d.exists(),
-          "resume refused output (exit 73): its states directory is not "
-          "there", "resume without its states directory: %s"
+    check(refusal(proc) == ("output", 73) and not d.exists() and
+          ck.read_bytes() == cko.read_bytes() and not c.exists() and
+          not Path(str(c) + ".tmp").exists(),
+          "resume refused output (exit 73), nothing changed or made: its "
+          "states directory is not there",
+          "resume without its states directory: %s"
           % proc.stderr.strip()[-200:])
     # a certificate states one set of entries: a resume asks for the same
     serial[0] += 1
@@ -2873,7 +3023,21 @@ def check_certificates(tool, tmp, audit_exe):
              lambda t: _resum(t, lambda b: b.replace(
                  "cert interval flags 16 status 0\n",
                  "cert interval flags 16 status 1\n", 1)),
-             "stops a run at any STATUS bit")):
+             "stops a run at any STATUS bit"),
+            # each value in its one spelling: the same value spelt another
+            # way, which cft_from_decimal_char reads (verifier-W3)
+            ("its step size h respelt with a leading 0, the same value, its "
+             "sum made again",
+             lambda t: _resum(t, lambda b: _respelt(b, "h ", 1, "zero")),
+             "is this run's step size, not in its one spelling"),
+            ("member 1's first state value respelt with an uppercase E, the "
+             "same value, its sum made again",
+             lambda t: _resum(t, lambda b: _respelt(b, "state 1 ", 2, "E")),
+             "member 1's state value"),
+            ("member 0's energy respelt with an uppercase E, the same value, "
+             "its sum made again",
+             lambda t: _resum(t, lambda b: _respelt(b, "inv 0 ", 2, "E")),
+             "member 0's invariant")):
         serial[0] += 1
         tag = "rs-ck-%d" % serial[0]
         shutil.copytree(d_o, work / (tag + ".states"))
@@ -2939,6 +3103,24 @@ def _resum(text, fn):
     """A version-3 checkpoint's body edited by fn, its sum made again."""
     body = fn(text[:text.rindex("sum ")])
     return body + "sum " + hashlib.sha256(body.encode()).hexdigest() + "\n"
+
+
+def _respelt(body, prefix, index, how):
+    """`body` with token `index` of its first line that begins `prefix`
+    spelt another way, the same value: a 0 put before its first digit
+    ("zero"), or its exponent's e made E ("E")."""
+    lines = body.split("\n")
+    i = next(i for i, l in enumerate(lines) if l.startswith(prefix))
+    tok = lines[i].split(" ")
+    v = tok[index]
+    if how == "zero":
+        v = v[:1] + "0" + v[1:] if v[:1] == "-" else "0" + v
+    else:
+        assert "e" in v, v
+        v = v.replace("e", "E", 1)
+    tok[index] = v
+    lines[i] = " ".join(tok)
+    return "\n".join(lines)
 
 
 def main():

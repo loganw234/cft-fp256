@@ -7,9 +7,13 @@
  *     owner's 32-byte salt) or open (SHA-256), each over the page's tag,
  *     and the salt's commitment;
  *   - the identity lines, from the library and nowhere else;
- *   - the lines themselves, in the page's one spelling of each value, and
- *     the hash line over the body;
+ *   - a run block's head, each segment line and each accuracy entry's
+ *     lines, in the page's one spelling of each value, then `end` and the
+ *     hash line over the body;
  *   - a file created new, never over one that is there.
+ * The other lines each writer spells itself: the magic line, `runs`, each
+ * `run` line, `parameters` and each `parameter`, `segments`, `output` and
+ * `accuracy <A>`.
  *
  * One copy for every writer: cft-segrun (host/tools/segrun.c) and
  * cft-orbits' certified runs (host/tools/orbits.c, docs/ORBITS.md

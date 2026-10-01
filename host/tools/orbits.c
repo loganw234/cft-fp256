@@ -760,7 +760,9 @@ static const struct { const char *name; int code; } CERT_REFUSAL[] = {
 
 /* CERT.tmp, which a certified run creates before anything else and moves
  * to CERT when the run completes; a process that ends otherwise removes
- * it (atexit), and one killed leaves it, empty, for the next to cut. */
+ * it (atexit), and one killed leaves it, empty, for the next to cut. The
+ * name is the tool's own, as a checkpoint's .tmp is: a file of that name
+ * there already is cut, whatever made it. */
 static char  *CERT_TMP = NULL;
 static FILE  *CERT_TMP_FP = NULL;
 
@@ -3452,6 +3454,18 @@ static int ck3_hex64(const char *s)
     return s[64] == 0;
 }
 
+/* A value `s` read as `v` is in its one spelling when it is written back
+ * as `s`: the exact decimal val_to_dec gives, which is how ckpt_write
+ * wrote it. cft_from_decimal_char reads other spellings of the same value
+ * too - a leading 0, an uppercase E - and until 2026-09-30 so did this
+ * reader, for `h`, `state` and `inv` (verifier-W3). */
+static int ck3_spelt(const fmt_info *fi, const char *s, const void *v)
+{
+    char dec[DECMAX];
+    val_to_dec(fi, v, dec, sizeof dec);
+    return strcmp(dec, s) == 0;
+}
+
 /* `key <decimal>`, which must be `want`: else the sentence `why`. */
 static void ck3_want(char **cur, char *stop, const char *key, uint64_t want,
                      const char *why)
@@ -3653,6 +3667,9 @@ static void ckpt_read3(runstate *R)
         val = ck3_key(&cur, stop, "h", 0);
         if (!val_from_dec_ok(fi, val, got, 1) || memcmp(got, R->s_h, esz))
             die("the checkpoint was written for a different step size");
+        if (!ck3_spelt(fi, val, got))
+            ck3_die("`h %.60s` is this run's step size, not in its one "
+                    "spelling: the exact decimal this tool writes", val);
     }
     ck3_want(&cur, stop, "steps", R->nsteps,
              "the checkpoint was written for a different step count");
@@ -3686,6 +3703,10 @@ static void ckpt_read3(runstate *R)
                                         : CV(R, c - R->ncomp) + m * esz;
             if (!(t = ck3_tok(&val)) || !val_from_dec_ok(fi, t, dst, 1))
                 ck3_die("bad checkpoint state value");
+            if (!ck3_spelt(fi, t, dst))
+                ck3_die("member %lu's state value `%.60s` is not in its one "
+                        "spelling, the exact decimal this tool writes",
+                        (unsigned long)m, t);
         }
         if (*val)
             ck3_die("a state line longer than a member's state");
@@ -3703,9 +3724,14 @@ static void ckpt_read3(runstate *R)
             dst[nd++] = R->L0[k] + m * esz;
             dst[nd++] = R->dLmax[k] + m * esz;
         }
-        for (i = 0; i < nd; i++)
+        for (i = 0; i < nd; i++) {
             if (!(t = ck3_tok(&val)) || !val_from_dec_ok(fi, t, dst[i], 1))
                 ck3_die("bad checkpoint invariant");
+            if (!ck3_spelt(fi, t, dst[i]))
+                ck3_die("member %lu's invariant `%.60s` is not in its one "
+                        "spelling, the exact decimal this tool writes",
+                        (unsigned long)m, t);
+        }
         if (*val)
             ck3_die("an inv line longer than a member's invariants");
     }
@@ -4780,6 +4806,13 @@ static void cert_options(const options *O, uint8_t **salt)
                "name");
     }
 #if !CX_EXACT
+    /* Unreachable in any build that links. A bigint this narrow (a
+     * CFT_BN_LIMBS below 64) needs CFT_NO_TRANSCEND (cft_config.h), which
+     * leaves out cft_acos and cft_rootn, and setup_constants calls both:
+     * measured, -DCFT_MAX_FORMAT=2 -DCFT_NO_TRANSCEND compiles this file
+     * and fails to link it (verifier-W3, 2026-09-30). The refusal stays so
+     * that a narrow build that did link would refuse an exact value by
+     * name, not compute it narrower. */
     if (O->cert_accuracy)
         refuse("build-width", "this build's bigint is %d bits, and an exact "
                "value needs %d (docs/CERTIFICATES.md, \"The width rule\"): "

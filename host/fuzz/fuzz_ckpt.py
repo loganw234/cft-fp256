@@ -33,7 +33,11 @@ it, since both name this build and the states' hashes (never cached in
 corpus/ckpt). Their refusals are named two ways, both the contract's:
 a checkpoint that does not describe the run, the reader's sentence and
 exit 2; and the certified path's `cft-orbits: refused <name>: <why>`,
-with that name's code (salt-missing, identity, state-hash, ...). A run
+with that name's code (salt-missing, identity, state-hash, ...). The
+classifier holds each name to the code the page gives it (NAME_CODES):
+a named refusal with another exit is WRONG-CODE, and a name the page
+does not give is UNKNOWN-NAME, both findings (since 2026-09-30's
+send-back; before it, any exit but 1 and 70 passed). A run
 the flag certificate stops (exit 3, "raised 0x..") is refused by name
 too: the arithmetic left the domain. The mutator knows the version-3
 block, and makes the sum again over three mutations in four, so that
@@ -258,6 +262,20 @@ def mutate_cert(text, rng):
     return "\n".join(lines)
 
 
+def ckpt_bytes(text):
+    """The bytes a mutated checkpoint is, one for each character. A
+    checkpoint is ASCII, and a bit flipped makes a byte of 0x80 or more
+    (mutate), which latin-1 alone keeps as that one byte. The file
+    resumed, the sum made again over it (resum) and a finding kept are all
+    these bytes, so a sum made again is the sum of the file the tool reads,
+    whatever the platform's default encoding. Until 2026-09-30's send-back
+    resum hashed these bytes and the file was written in the default one:
+    UTF-8 in cft-sim, where a character of 0x80 or more is two bytes, so a
+    resume whose file held one stopped at a sum that was not its file's -
+    about one in 200, verifier-W3 reckoned from the mutator's odds."""
+    return text.encode("latin-1", "replace")
+
+
 def resum(text):
     """A version-3 checkpoint's `sum` made again over what it follows, so
     that a mutation reaches the strict reader behind it."""
@@ -265,18 +283,39 @@ def resum(text):
     if i < 0:
         return text
     body = text[:i + 1]
-    return (body + "sum " +
-            hashlib.sha256(body.encode("latin-1", "replace")).hexdigest() +
+    return (body + "sum " + hashlib.sha256(ckpt_bytes(body)).hexdigest() +
             "\n")
 
 
-# A certified cft-orbits run's refusals name themselves, with the name's
-# own exit code (docs/ORBITS.md, "Certified runs"); and cft-orbits' flag
-# certificate stops a run whose arithmetic left the domain, exit 3, naming
-# what raised what (docs/ORBITS.md, "Flags"). Both are named refusals.
-NAMED = re.compile(r"^cft-[a-z]+: refused ([a-z][a-z0-9-]*): ", re.M)
+# A certified cft-orbits run's refusals name themselves, each with its
+# name's own exit code: the page's table (docs/ORBITS.md, "Certified
+# runs", "Refused by name"), held here as orbits_check.py's [8] holds it.
+# build-width and the three accuracy-* checks of an entry's definition are
+# in it although no run reaches them. And cft-orbits' flag certificate
+# stops a run whose arithmetic left the domain, exit 3, naming what raised
+# what (docs/ORBITS.md, "Flags"). Both are named refusals.
+NAME_CODES = {"cft-orbits": {
+    "engine": 64, "rsqrt-exact": 64, "step-halving": 64, "wider": 64,
+    "energy-drift": 64, "usage": 64, "salt-length": 4, "program-image": 4,
+    "device": 69, "malformed": 2, "width": 3, "accuracy-finite": 7,
+    "accuracy-run": 7, "accuracy-scope": 7, "accuracy-slot": 7,
+    "build-width": 78, "memory": 71, "output": 73, "salt-missing": 4,
+    "salt-unexpected": 4, "salt-commitment": 4, "identity": 78,
+    "image-digest": 4, "program-digest": 4, "state-missing": 4,
+    "state-shape": 4, "state-hash": 4}}
+NAMED = re.compile(r"^(cft-[a-z]+): refused ([a-z][a-z0-9-]*): ", re.M)
 FLAGSTOP = re.compile(r"raised 0x[0-9a-f]+ - this workload can only ever "
                       r"raise inexact")
+# What is a finding: a crash, a hang, a sanitiser report, an exit that is
+# not the contract's named refusal, a named refusal off its page, and a
+# certified resume accepted wrongly (accepted_certificate).
+FINDINGS = ("HANG", "SANITIZER", "SILENT-WRONG", "ACCEPT-NO-CERTIFICATE",
+            "WRONG-CODE", "UNKNOWN-NAME")
+
+
+def is_finding(verdict):
+    return verdict in FINDINGS or verdict.startswith("SIGNAL") or \
+        verdict.startswith("EXIT")
 
 
 def refusal_name(proc):
@@ -284,7 +323,7 @@ def refusal_name(proc):
     flag certificate, `sentence` for a die() message and exit 2."""
     m = NAMED.search(proc.stderr or "")
     if m:
-        return m.group(1)
+        return m.group(2)
     if proc.returncode == 3:
         return "flags"
     return "sentence"
@@ -301,9 +340,15 @@ def classify(proc, timed_out):
         return "SIGNAL%d" % (-proc.returncode)
     if proc.returncode == 0:
         return "ACCEPT"
+    m = NAMED.search(err)
+    if m:
+        # a named refusal, held to its name's code: first, so that a name
+        # whose code is not 2 cannot pass as a sentence at exit 2
+        want = NAME_CODES.get(m.group(1), {}).get(m.group(2))
+        if want is None:
+            return "UNKNOWN-NAME"
+        return "REFUSE" if proc.returncode == want else "WRONG-CODE"
     if proc.returncode == 2 and err.strip():
-        return "REFUSE"
-    if proc.returncode not in (1, 70) and NAMED.search(err):
         return "REFUSE"
     if proc.returncode == 3 and FLAGSTOP.search(err):
         return "REFUSE"
@@ -357,7 +402,7 @@ def one_tool(name, bindir, outdir, seconds, seed, timeout):
                   f"{(r.stderr + ref.stderr)[-200:]})")
             return {}
         reference = (work / "ref.cert").read_bytes()
-        corpus = [(work / "seed.ckpt").read_text(errors="replace")]
+        corpus = [(work / "seed.ckpt").read_bytes().decode("latin-1")]
         cert_args = ["--cert", str(work / "cur.cert"), "--cert-states",
                      str(work / "cur.states")] + mode_args
     else:
@@ -370,7 +415,7 @@ def one_tool(name, bindir, outdir, seconds, seed, timeout):
                 print(f"{name}: SKIP (the seed run failed: {r.stderr[:200]})")
                 return {}
             shutil.copyfile(tmp, seed_path)
-        corpus = [p.read_text(errors="replace")
+        corpus = [p.read_bytes().decode("latin-1")
                   for p in sorted(corpus_dir.glob(f"{name}*"))
                   if p.name == f"{name}.ckpt" or
                   not p.name.startswith(f"{name}-cert")]
@@ -398,9 +443,11 @@ def one_tool(name, bindir, outdir, seconds, seed, timeout):
             text = mutate(rng.choice(corpus), rng)
             for _ in range(rng.randrange(3)):
                 text = mutate(text, rng)
-        # as mutated, LF and all: text mode on Windows would make every
-        # LF a CRLF, which a version-3 reader refuses at its first byte
-        cur.write_text(text, errors="replace", newline="\n")
+        # as mutated, byte for byte and LF and all: text mode on Windows
+        # would make every LF a CRLF, which a version-3 reader refuses at
+        # its first byte, and a default encoding other than latin-1 would
+        # make another file than the one resum summed (ckpt_bytes)
+        cur.write_bytes(ckpt_bytes(text))
         timed_out = False
         try:
             proc = subprocess.run(
@@ -422,15 +469,15 @@ def one_tool(name, bindir, outdir, seconds, seed, timeout):
             verdict = accepted_certificate(work, mode, salt, reference)
         counts[verdict] = counts.get(verdict, 0) + 1
         n += 1
-        if verdict in ("HANG", "SANITIZER", "SILENT-WRONG",
-                       "ACCEPT-NO-CERTIFICATE") or \
-                verdict.startswith("SIGNAL") or verdict.startswith("EXIT"):
+        if is_finding(verdict):
             findings += 1
             keep = HERE / "crashes" / "ckpt"
             keep.mkdir(parents=True, exist_ok=True)
             dst = keep / f"{name}-{verdict}-{findings:04d}.ckpt"
             if not dst.exists():
-                dst.write_text(text, errors="replace")
+                # the bytes that were resumed, so that it replays on any
+                # platform (in text mode Windows would write CRLF)
+                dst.write_bytes(ckpt_bytes(text))
                 (keep / f"{name}-{verdict}-{findings:04d}.log").write_text(
                     (proc.stderr or "")[:8000], errors="replace")
                 print(f"  {name}: {verdict} -> {dst.name}")
@@ -504,10 +551,7 @@ def main():
                              args.timeout).items():
             total[k] = total.get(k, 0) + v
     print("\ntotal: " + " ".join(f"{k}={v}" for k, v in sorted(total.items())))
-    bad = sum(v for k, v in total.items()
-              if k in ("HANG", "SANITIZER", "SILENT-WRONG",
-                       "ACCEPT-NO-CERTIFICATE") or k.startswith("SIGNAL")
-              or k.startswith("EXIT"))
+    bad = sum(v for k, v in total.items() if is_finding(k))
     if bad:
         print(f"{bad} checkpoint(s) did something other than refuse cleanly "
               f"- see host/fuzz/crashes/ckpt")

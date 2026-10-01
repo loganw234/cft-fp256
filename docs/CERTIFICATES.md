@@ -1306,9 +1306,14 @@ keeps the state at every boundary, and writes a version-1 certificate,
 its accuracy entries included since the plan's step 5 (2026-09-30).
 `make -C host all` builds it, from `host/tools/segrun.c`. `cft-orbits`
 writes certificates of its own runs too ([ORBITS.md](ORBITS.md),
-"Certified runs"), with the same encoding: `host/tools/cert_write.h`,
-the hashes, the identity lines and every line of the text, which both
-tools include (the steps-5-and-6 round, 2026-09-30).
+"Certified runs"), with the same encoding, `host/tools/cert_write.h`,
+which both tools include (the steps-5-and-6 round, 2026-09-30). It holds
+the hashes and the salt's commitment, and the identity lines from `mode`
+to `device-tiles`. It also holds a run block's head from
+`program-format` to `stream-c`, each segment line, each accuracy entry's
+lines, `end` and the hash line, and a file's creation, new. Each tool
+spells the rest itself: the magic line, `runs`, each `run` line,
+`parameters` and each `parameter`, `segments`, `output` and `accuracy`.
 
     cft-segrun --out CERT --states DIR (--salt SALT | --open)
                [--device sw|<xclbin>|cft://host:port | --scratch-depth N]
