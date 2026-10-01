@@ -79,8 +79,14 @@ Then:
      space the run writes its certificate in (ulimit -v), found by
      bisection. What the accuracy entries cost: the same three runs with
      two entries that read four states back, against the runs alone - no
-     more than ENTRY_ALLOWANCE (on Linux, and a bisection step), where one
-     state more held beside the runs' would be 1,024 KiB. And what the
+     more than ENTRY_ALLOWANCE (on Linux, and a bisection step), so no
+     state held beside the runs', where one would be 1,024 KiB; and
+     `slotstep`, written here (16 slots a lane, 8 MiB states), one run
+     with two drifts of it against the run alone, within WIDE_ALLOWANCE (a
+     quarter of its state) - there the entries' own phase is the peak, so
+     an entry that holds a state more than its pair, or entries that hold
+     more than one pair at once, fail it (verifier-W1: in flagstep's shape
+     neither did). And what the
      trial costs the runs, to the page: the least address space with the
      trial and with its allocations skipped
      (CFT_SEGRUN_PLANT=trial-skipped), in two small shapes where eb2d1ae's
@@ -1938,6 +1944,38 @@ PEAK_LANES = 65535
 # KiB. So a quarter of a state: about five times that span, and a
 # quarter of what one more state held beside the runs' would cost.
 ENTRY_ALLOWANCE = 256 << 10
+# The entries' own phase, where it is the process's peak (verifier-W1,
+# 2026-09-30: in flagstep's shape an entry that held a third state, or
+# entries that kept every pair, cost nothing measurable, since run 0's
+# peak was far above them). A run's peak is the library's lane block (its
+# registers, and for a program with a scratch its scratch, about 4.6 MiB
+# at the default depth whatever the lanes) beside the run's two states
+# and streams, or the initial state or a hash's copy beside those. So
+# `slotstep`, written here: sixteen slots a lane, each one more a
+# segment, at 65,535 lanes, 8,388,480 bytes of state - short of 8 MiB, as
+# flagstep's is of 1 MiB. Its run holds two states, its streams (a
+# sixteenth of a state) and a third state's worth, past the library's
+# block; its entries hold a pair and a hash's copy, half a MiB less; and
+# a state more at once, 7,680 KiB more (by arithmetic).
+WIDE_SLOTS = 16
+WIDE_LANES = 65535
+# What the entries may cost there. Not ENTRY_ALLOWANCE: one command line's
+# peak commit is steady from run to run, but between command lines - no
+# entry, one or two, from a shorter or a longer path - it steps by about
+# 470 KiB (measured on the desktop, 2026-09-30: the run alone 26,780 to
+# 26,792 KiB from short paths and 26,316 to 26,344 KiB from long ones;
+# with one drift 26,812 to 26,852; with two 26,304 to 26,368). Believed:
+# the C heap keeping or giving back the initial state's first read
+# buffers (64, 128 and 256 KiB), by where the command line's own small
+# allocations land. So a quarter of this state, 2,048 KiB: four times
+# that step, and a quarter of what a state more at once would cost.
+WIDE_ALLOWANCE = WIDE_SLOTS * WIDE_LANES * 8 // 4
+SLOTSTEP = "\n".join(
+    [".format   fp64", ".deposits 0", f".scratch  in {WIDE_SLOTS}",
+     f".scratch  out {WIDE_SLOTS}", ".const    ONE = 0x3ff0000000000000"] +
+    [line for i in range(WIDE_SLOTS) for line in
+     (f"ldl    r3, {i}", "add    r3, r3, ONE", f"stl    r3, {i}")] +
+    ["halt"]) + "\n"
 
 
 def read_buffer(n):
@@ -2088,6 +2126,9 @@ def hold_peak(work, flag):
     inputs beside it and one state to spare. Measured as the platform
     measures a process: its peak commit on Windows, and on Linux the least
     address space it writes its certificate in.
+    The accuracy entries (the plan's step 5): beside the three runs, no
+    state held beside the runs'; and beside slotstep's one run, where their
+    own phase is the peak, a pair at a time (verifier-W1).
     eb2d1ae's trial took its pieces under 64 KiB from the C library's heap
     and left the heap bigger, so the runs needed up to 40 KiB more than
     99f1b43's: the trial must cost the runs nothing, to the page. Held on
@@ -2130,45 +2171,68 @@ def hold_peak(work, flag):
     two = (EntrySpec("step-halving", 1, None, "exact"),
            EntrySpec("drift", 2, None, "rounded", "fp64", "rne", label="c",
                      terms=FLAG_C))
+    # slotstep's run alone, and with two drifts of it, exact and rounded,
+    # reading four of its states back (WIDE_SLOTS)
+    pw = d / "slotstep.cftp"
+    pw.write_bytes(asm.assemble(SLOTSTEP, "slotstep"))
+    wide_init = d / f"slotstep-{WIDE_LANES}.init"
+    wide_init.write_bytes(cert.state_bytes("fp64", [dec("fp64", "1")]) *
+                          (WIDE_SLOTS * WIDE_LANES))
+    wide_state = WIDE_SLOTS * WIDE_LANES * 8
+    drifts = (EntrySpec("drift", 0, None, "exact", label="x",
+                        terms=FLAG_C),
+              EntrySpec("drift", 0, None, "rounded", "fp64", "rne",
+                        label="x", terms=FLAG_C))
+
+    def wide(entries=()):
+        def f(out, sdir):
+            return ["--out", out, "--states", sdir, "--open", "--run",
+                    "main", "--image", pw, "--init", wide_init, "--segments",
+                    "1", "--steps", "1"] + entry_options(entries)
+        return f
 
     linux = sys.platform.startswith("linux")
     what_run = "what a run beside the main run costs"
     try:
-        # 1. a run's own working set: one run against three; and the
-        # accuracy entries' phase against the runs' (the plan's step 5)
-        shapes = (("the main run alone", 0, ()),
-                  ("the main run and two half-step runs", 2, ()),
-                  ("the same three runs with two entries reading four "
-                   "states", 2, two))
+        # 1. a run's own working set: one run against three; the accuracy
+        # entries against the runs (the plan's step 5): none held beside
+        # the three runs', and their own phase, where it is slotstep's peak
+        shapes = (
+            (f"the main run alone, {PEAK_LANES} lanes",
+             argf(PEAK_LANES, 1, 0)),
+            (f"the main run and two half-step runs, {PEAK_LANES} lanes",
+             argf(PEAK_LANES, 1, 2)),
+            (f"the same three runs with two entries reading four states, "
+             f"{PEAK_LANES} lanes", argf(PEAK_LANES, 1, 2, entries=two)),
+            (f"slotstep's main run alone, {WIDE_LANES} lanes of "
+             f"{WIDE_SLOTS} slots", wide()),
+            (f"the same run with two drifts of it reading four states, "
+             f"{WIDE_LANES} lanes", wide(drifts)))
         vals = []
         if os.name == "nt":
             how = "peak commit"
-            for i, (label, k, ents) in enumerate(shapes):
+            for i, (label, f) in enumerate(shapes):
                 out, sdir = d / f"w{i}.cert", d / f"w{i}.states"
-                rc, se, pk = peak_commit(argf(PEAK_LANES, 1, k,
-                                              entries=ents)(out, sdir))
-                if not check(rc == 0, f"{label}, {PEAK_LANES} lanes: "
-                             f"written, and its peak commit read",
-                             f"rc {rc}: {se.strip()[-240:]}"):
+                rc, se, pk = peak_commit(f(out, sdir))
+                if not check(rc == 0, f"{label}: written, and its peak "
+                             f"commit read", f"rc {rc}: {se.strip()[-240:]}"):
                     return
                 vals.append(pk)
         elif linux:
             how = "least address space (ulimit -v)"
-            for i, (label, k, ents) in enumerate(shapes):
+            for i, (label, f) in enumerate(shapes):
                 try:
-                    vals.append(least_address_space(
-                        argf(PEAK_LANES, 1, k, entries=ents), d, f"l{i}-",
-                        step=1 << 16))
+                    vals.append(least_address_space(f, d, f"l{i}-",
+                                                    step=1 << 16))
                 except Unwritten as e:
-                    bad(f"{label}, {PEAK_LANES} lanes: written, under a "
-                        f"limit found by bisection - {e}")
+                    bad(f"{label}: written, under a limit found by "
+                        f"bisection - {e}")
                     return
-                ok(f"{label}, {PEAK_LANES} lanes: written, under a limit "
-                   f"found by bisection")
+                ok(f"{label}: written, under a limit found by bisection")
         else:
             raise Unmeasured(f"no way to measure a process's peak here "
                              f"({sys.platform})")
-        one, three, entries = vals
+        one, three, entries, wide_one, wide_two = vals
         inputs = 2 * (read_buffer(PEAK_LANES * 16) + read_buffer(len(img)))
         state = PEAK_LANES * 16
         check(three - one <= inputs + state,
@@ -2178,10 +2242,11 @@ def hold_peak(work, flag):
               f"{kib(three - one)} more, past {kib(inputs + state)}: a run "
               f"holds a working set of its own beside the others' (4eed552 "
               f"held every run's states at once; verifier-C7)")
-        # the entries read their states back one entry's pair at a time,
-        # after the runs have let theirs go: no more than the runs held,
-        # to within ENTRY_ALLOWANCE (their own structures and lines, the
-        # rounding's software handle) and, on Linux, one bisection step
+        # the entries cost no more than ENTRY_ALLOWANCE (their own
+        # structures and lines, the rounding's software handle) and, on
+        # Linux, one bisection step. Beside the three runs, that holds no
+        # state beside the runs': the entries' own phase is more than two
+        # states under run 0's peak there, and is not seen (verifier-W1)
         allow = ENTRY_ALLOWANCE + (0 if os.name == "nt" else 1 << 16)
         delta = entries - three
         said = (f"{kib(delta)} more" if delta >= 0 else
@@ -2189,10 +2254,27 @@ def hold_peak(work, flag):
         check(delta <= allow,
               f"{how}: the three runs {kib(three)}, with the two entries "
               f"{kib(entries)} - {said}, within {kib(allow)} more: the "
-              f"entries' phase holds no more than the runs did (four states "
-              f"of {kib(state)} read back, a pair at a time)",
+              f"entries hold no state beside the runs' (one would be "
+              f"{kib(state)} more)",
               f"{kib(entries - three)} more, past {kib(allow)}: the entries "
-              f"hold states beside the runs', or more than one pair at once")
+              f"hold memory beside the runs'")
+        # beside slotstep's one run, where the entries' phase is the peak:
+        # an entry holds its two states and a hash's copy, and lets them
+        # go before the next reads its own
+        wallow = WIDE_ALLOWANCE + (0 if os.name == "nt" else 1 << 16)
+        delta = wide_two - wide_one
+        said = (f"{kib(delta)} more" if delta >= 0 else
+                f"{kib(-delta)} less")
+        check(delta <= wallow,
+              f"{how}: slotstep's run alone {kib(wide_one)}, with its two "
+              f"entries {kib(wide_two)} - {said}, within {kib(wallow)} more: "
+              f"the entries read their states back a pair at a time (a state "
+              f"more at once would be "
+              f"{kib(wide_state - wide_state // WIDE_SLOTS)} past the run's "
+              f"own peak, by arithmetic)",
+              f"{kib(delta)} more, past {kib(wallow)}: an entry holds more "
+              f"than its two states and a hash's copy at once, or the "
+              f"entries more than one pair at once, or memory beside the run")
     except Unmeasured as e:
         skip(what_run, f"NOT TESTED here - {e}")
 

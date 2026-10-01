@@ -1619,20 +1619,36 @@ lets both go before the next entry reads its own. The pair is one run's
 slots (an estimate: other shapes are refused before anything is made).
 So, by arithmetic, the entries hold no more at once than the largest
 run did, which was its two states, its streams and a hash's copy. The
-gate measures it (**Its gate**, below). On the desktop, with flagstep's
-three runs of 65,535 lanes and two entries that read four states back,
-the peak commit was:
-- in four runs of the gate, 12 KiB less, 12 KiB less, 28 KiB more and
-  40 KiB more than the same three runs without entries (10,224 to 10,284
-  KiB);
-- beside that, one more state held beside the runs' would be 1,024 KiB.
-So the entries add nothing that identical runs' noise does not
-(2026-09-30). Each entry's definition is held from the command line to
-the end: a rational of about 520 bytes a term at the default bigint,
-about 36 KiB for a drift of 64 terms. Its value is held too, about 520
-bytes. None of it grows with lanes or segments. The least address space
-in Linux (`ulimit -v`), and the trial's cost with entries, are measured
-by the gate on Linux; they have not been run for this page yet.
+gate measures what they cost in two shapes (**Its gate**, below):
+- Beside flagstep's three runs of 65,535 lanes, whose states are 1 MiB,
+  with two entries that read four states back. In four runs of the gate
+  the peak commit was 12 KiB less, 12 KiB less, 28 KiB more and 40 KiB
+  more than the same three runs without entries (10,224 to 10,284 KiB).
+  One more state held beside the runs' would be 1,024 KiB more. So the
+  entries hold no state beside the runs'. This shape sees nothing else:
+  the entries' own phase is more than two states under run 0's peak,
+  which holds the later runs' initial states and the library's own lane
+  block (its registers and its scratch, about 4.6 MiB at the default
+  depth, whatever the lanes). An entry that held a third state, and
+  entries that kept every pair, both passed it (verifier-W1's plants,
+  2026-09-30).
+- Beside `slotstep`'s one run of 65,535 lanes of 16 slots, whose states
+  are 8 MiB, with two drifts of it that read four states back. There the
+  entries' phase is the process's peak. The run holds its two states,
+  its streams (a sixteenth of a state) and one state more at most (the
+  initial state, or a hash's copy), and the entries hold a pair and a
+  hash's copy. The peak commit was 476 KiB less, 16 KiB less and 16 KiB
+  more than the run alone (26,300 to 26,780 KiB, three runs). W1's two
+  plants were 7,668 and 7,724 KiB more (the third state) and 15,888 and
+  15,892 KiB more (every pair kept), and the gate fails both.
+
+Those are the desktop's peak commit (2026-09-30). In WSL (cft2204), the
+least address space was 0 KiB more with the entries in both shapes, and
+the two plants 7,616 and 15,808 KiB more (S1's send-back, 2026-09-30).
+Each entry's definition is held from the command line to the end: a
+rational of about 520 bytes a term at the default bigint, about 36 KiB
+for a drift of 64 terms. Its value is held too, about 520 bytes. None of
+it grows with lanes or segments.
 
 Before the certificate or DIR is created, the tool counts what the runs
 need against what the process can address. It then tries, in the runs'
@@ -1886,12 +1902,26 @@ Last, it holds memory. What a run costs: flagstep on 65,535 lanes, a
 main run and two half-step runs, against the main run alone. The two
 further runs may cost their inputs and one state more, no more. At
 4eed552, which held every run's working set at once, they cost two
-whole working sets. What the accuracy entries cost: the same three runs
-with two entries that read four states back, against the three runs
-alone. They may cost 256 KiB more, a quarter of one of those states
-(and on Linux one bisection step), and no more; holding one more state
-beside the runs' would cost 1,024 KiB. The gate measures a process as
-its platform does:
+whole working sets. What the accuracy entries cost, in two shapes
+(**Memory**, above):
+- the same three runs with two entries that read four states back,
+  against the three runs alone. They may cost 256 KiB more, a quarter
+  of one of those states (and on Linux one bisection step), and no
+  more; holding one more state beside the runs' would cost 1,024 KiB.
+  This holds no state beside the runs', and nothing of the entries' own
+  phase, which is under run 0's peak there;
+- `slotstep`, a program written in the gate, one run of 65,535 lanes of
+  16 slots, with two drifts of it that read four states back, against
+  the run alone. There the entries' phase is the peak. They may cost a
+  quarter of its 8 MiB state, 2,048 KiB, more (and on Linux one
+  bisection step): one command line's peak commit is steady, but
+  between command lines it steps by about 470 KiB on the desktop, by
+  the path and the entries given (believed: the C heap keeping the
+  initial state's first read buffers or not). By arithmetic, an entry
+  that held a state more than its pair would cost 7,680 KiB more, and
+  entries that held two pairs at once 15,872 KiB more.
+
+The gate measures a process as its platform does:
 its peak commit on Windows, and on Linux the least address space it
 writes its certificate in (`ulimit -v`), doubled from 16 MiB and then
 bisected. And what the trial costs the runs, to the page: in two small

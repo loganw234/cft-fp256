@@ -1235,10 +1235,14 @@ static int add_ok(size_t *acc, size_t v)
  * step 5). The pair is one run's (a drift) or run 0's final state beside
  * a run of run 0's lanes and slots (an estimate), so the entries hold no
  * more at once than the largest run did: its two states, its streams
- * and a hash's copy. Measured with segrun_check's section 10 (flagstep,
- * 65,535 lanes, three runs and two entries reading four states): no more
- * peak commit than the three runs alone, to within the noise of
- * identical runs (2026-09-30).
+ * and a hash's copy. Measured with segrun_check's section 10
+ * (2026-09-30): beside flagstep's three runs of 65,535 lanes, two
+ * entries reading four states back cost no more peak commit than the
+ * runs alone, to within the noise of identical runs, so they hold no
+ * state beside the runs'; and beside slotstep's one run of 8 MiB states,
+ * where the entries' phase is the peak, two drifts cost no more than the
+ * run alone, where a state more at once would cost 7.5 MiB (the first
+ * shape cannot see that: verifier-W1).
  *
  * Before anything is made, try_runs counts all of it against what the
  * process can address, and then tries, in the runs' own order, the
