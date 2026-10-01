@@ -399,14 +399,23 @@ class _Alloc:
                  if self.slot_val[s] == v]
         return locs
 
-    def temp(self, pending):
+    def temp(self, pending, overwriting=None):
+        """A register to hold a value on its way: one whose content is
+        not needed, or is also somewhere that is neither this register
+        nor `overwriting`, the location the move in hand is about to
+        write. (Counting that location as a copy lost a value once: a
+        slot-to-slot move of a swap took as its temporary the register
+        holding the slot's old value, then overwrote the slot.)"""
         dst = {d[1] for d, _v in pending if d[0] == "r"}
         needed = {v for _d, v in pending}
         for r in REGS:
             if r in dst:
                 continue
             c = self.holds[r]
-            if c is None or c not in needed or len(self.locations(c)) > 1:
+            if c is None or c not in needed:
+                return r
+            if any(loc not in (("r", r), overwriting)
+                   for loc in self.locations(c)):
                 return r
         for r in REGS:
             if r in dst:
@@ -436,7 +445,7 @@ class _Alloc:
         if src[0] == "r":
             self.stl(src[1], d[1], v)
         else:
-            t = self.temp(pending)
+            t = self.temp(pending, overwriting=d)
             if src[0] == "m":
                 self.ldl(t, src[1], v)
             else:
