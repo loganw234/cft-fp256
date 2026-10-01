@@ -420,7 +420,10 @@ def cover(c, flags):
 
 def ref_text(base, fmt):
     src = SYSTEMS / f"{base}-fp64.cftl"
-    return with_format(src.read_text(encoding="ascii"), fmt)
+    # the file's bytes, decoded and not newline-translated: a text-mode
+    # read would turn a lone CR into a line end before the language's
+    # character rule could refuse it (D1's finding, L1's rule)
+    return with_format(src.read_bytes().decode("ascii"), fmt)
 
 
 def ref_compile(base, fmt, rnd=None, steps=None):

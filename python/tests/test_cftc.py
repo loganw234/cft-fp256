@@ -249,7 +249,7 @@ def test_a_param_run_value_binary64_would_get_wrong(fmt, text, exact):
     """Values a binary64 route rounds differently - 0.1 at fp128, and at
     fp32 a value whose binary64 rounding is an fp32 tie - so that this
     test, unlike the one above, could catch Python's float in the path."""
-    src = (SYSTEMS / "lorenz63-rk4-fp64.cftl").read_text(encoding="ascii")
+    src = (SYSTEMS / "lorenz63-rk4-fp64.cftl").read_bytes().decode("ascii")
     src = src.replace("format fp64", f"format {fmt}")
     c = cftc.compile_text(src, 3, params={"sigma": text})
     slot = next(s for s in c.lowered.slots if s.kind == "param"
@@ -275,6 +275,31 @@ def test_a_renderer_fault_is_an_internal_error(monkeypatch):
     with pytest.raises(cftc.InternalError) as e:
         _hh()
     assert "not the same step graph" in str(e.value)
+
+
+def test_a_source_is_taken_as_bytes(tmp_path):
+    """A file reaches the language's character rule whole: compile_file
+    reads bytes (through lang.load), and compile_text takes a file's bytes
+    as lang.compile_text does - so a lone CR is refused, `character`. The
+    control is the text-mode read, which turns that CR into a line end
+    and hands the language a different, valid system: why bytes."""
+    text = b"system cr\nformat fp64\nstate x\rnext x = x + 1\nstep map\n"
+    p = tmp_path / "cr.cftl"
+    p.write_bytes(text)
+    with pytest.raises(lang.Refusal) as e:
+        cftc.compile_file(p, 3)
+    assert e.value.name == "character"
+    with pytest.raises(lang.Refusal) as e:
+        cftc.compile_text(p.read_bytes(), 3)
+    assert e.value.name == "character"
+    with open(p, encoding="ascii") as fh:     # text mode: the CR is gone
+        c = cftc.compile_text(fh.read(), 3)
+    assert len(c.lowered.nodes) == 1
+    good = cftc.compile_file(SYSTEMS / "henonheiles-lf-fp64.cftl", 3,
+                             stem="h", source="h.cftl")
+    same = cftc.compile_text((SYSTEMS / "henonheiles-lf-fp64.cftl")
+                             .read_bytes(), 3, stem="h", source="h.cftl")
+    assert same.files() == good.files()
 
 
 @pytest.mark.parametrize("name", ["lorenz63-rk4-fp64", "lorenz96-rk4-fp256",

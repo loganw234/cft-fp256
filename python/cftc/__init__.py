@@ -274,10 +274,18 @@ def compile_graph(graph, steps, target="sw", stem="system", source=None,
 
 def compile_text(text, steps, target="sw", source="<text>", stem=None,
                  params=None):
+    """Compile a system's text: a str, or a file's bytes - which is how a
+    caller holding a file should pass it, as lang.compile_text takes it.
+    A text-mode read turns a lone CR into a line end before the
+    language's character rule could refuse it (D1's finding, the rule
+    L1 adopted); bytes reach the rule whole, and the source's SHA-256 is
+    of those bytes."""
     system = lang.compile_text(text, source)
+    raw = bytes(text) if isinstance(text, (bytes, bytearray)) \
+        else text.encode("utf-8")
     return compile_graph(system.graph, steps, target,
                          stem=stem or "system", source=source,
-                         source_bytes=text.encode("utf-8"), params=params)
+                         source_bytes=raw, params=params)
 
 
 def compile_file(path, steps, target="sw", stem=None, params=None,
