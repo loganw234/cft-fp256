@@ -85,11 +85,12 @@ The whole source is checked before any line is assembled, UTF-8 first
 and then the characters, so of several faults both name the same one.
 A caller of `asm.py` that holds a file passes its bytes: a text-mode
 read would turn a lone carriage return into a line end before the rule
-could see it. Eighteen call sites in seven files still pass a
-text-mode read (tests, certificates/corpus.py and check.py's own
-line 1074, verifier-VD1): harmless while every tracked source is
-plain ASCII with no carriage return, as all forty are, and recorded
-rather than changed. Until this date the two assemblers disagreed about what
+could see it. Twenty-one call sites in ten files still pass a
+text-mode read (tests, certificates/corpus.py, check.py's own line
+1074 and programs/lang_check.py; verifier-VD1 counted eighteen in
+seven, and verifier-VI the rest the language round added): harmless
+while every tracked source is plain ASCII with no carriage return,
+as all forty-six are, and recorded rather than changed. Until this date the two assemblers disagreed about what
 a line was: `asm.py` split at every `splitlines()` boundary and
 `cft-asm` at a line feed alone, so a carriage return in a comment hid
 the next instruction from one of them, at exit 0 (verifier-VD1), and

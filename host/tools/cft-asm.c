@@ -669,9 +669,10 @@ static int is_ident(const char *s)
  * digits (digits_text). */
 #define REG_LIT_CAP 100000
 /* The most digits a decimal number may have: asm.py's MAX_DECIMAL_DIGITS,
- * Python's int() limit since 3.11 (and in the 3.9 and 3.10 security
- * releases that took it back), which the text form states as its own
- * so both assemblers refuse a longer one by name, on any Python. */
+ * Python's int() limit since 3.11 (and in the 3.8, 3.9 and 3.10
+ * security releases that took it back), which the text form states as
+ * its own so both assemblers refuse a longer one by name, on any
+ * Python. */
 #define MAX_DECIMAL_DIGITS 4300
 static int reg_literal(const char *s)
 {
@@ -703,9 +704,10 @@ static const char *digits_text(const char *p)
  * and a 0x number none; single underscores may stand between digits, and
  * one directly after the 0x (PEP 515); "-0" is zero. A 0x number may
  * have any number of digits, and a decimal at most MAX_DECIMAL_DIGITS -
- * Python's int() limit since 3.11 (and its 3.9 and 3.10 backports),
- * which the text form states as its own (until 2026-10-01 these comments said "any size", and asm.py raised an
- * uncaught ValueError on an `op` or `r` number that long). asm.py refuses
+ * Python's int() limit since 3.11 (and its 3.8, 3.9 and 3.10
+ * backports), which the text form states as its own (until 2026-10-01
+ * these comments said "any size", and asm.py raised an uncaught
+ * ValueError on an `op` or `r` number that long). asm.py refuses
  * a token that does not parse, or a decimal past the bound, by name, and
  * then holds the VALUE - past 2^64 or not, either sign - to each field's
  * bounds.

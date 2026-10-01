@@ -915,11 +915,12 @@ _NEVER = {0x00: "a NUL (0x00)", 0x1a: "a Ctrl-Z (0x1a)"}
 
 # The most digits a decimal number may have: Python's own int() refuses
 # a longer decimal string (sys.int_info.default_max_str_digits) since
-# 3.11, and in the 3.9 and 3.10 security releases that took the limit
-# back (3.9.21 has it, verifier-VD1), and this file then raised an
-# uncaught ValueError on an `op` or `r` number that long (verifier-VD1). The text form states the bound
-# itself, the same on every interpreter, 3.10's included, and refuses
-# past it by name. No field is within thousands of digits of it.
+# 3.11, and in the 3.8, 3.9 and 3.10 security releases that took the
+# limit back (3.8.14 and 3.9.21 have it, verifier-VD1), and this file
+# then raised an uncaught ValueError on an `op` or `r` number that
+# long (verifier-VD1). The text form states the bound itself, the same
+# on every interpreter, and refuses past it by name. No field is within
+# thousands of digits of it.
 MAX_DECIMAL_DIGITS = 4300
 
 

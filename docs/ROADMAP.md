@@ -4167,6 +4167,25 @@ bitstream builds.
 
 ### Step 3: the language and its compiler (plan of record, 2026-10-01)
 
+**Built, the same day** (docs/VALIDATION.md, 2026-10-01, "the
+language round, part one").
+- L1: the language, golden-first: docs/LANGUAGE.md, and
+  python/cft_golden/lang/ with its reference interpreter, held bit for
+  bit to seq.py on gen_odes.py's six images; the three references
+  in programs/systems/.
+- L2: the compiler, python/cftc, held bit for bit to that interpreter
+  by the `lang` stage. Its banks equal the classic ones byte for byte,
+  and Lorenz-96 compiles to 873 instructions and 110 scratch accesses
+  a step, against the hand-written 1,455 and 692.
+- The intention-out, Logan's suggestion, is written beside every
+  image and held by three checks.
+- D1: the bank's depth refused at load, the two assemblers made to
+  agree, one character rule for the text form (and for `.cftl`), and
+  the module rebuilt.
+- Next: L3, the variational equations, design first.
+- The rest of this section is the plan as approved that morning,
+  with verifier-P1's restatements and the intention-out added.
+
 Logan cleared the step on 2026-10-01 ("Yes, begin on the next step"),
 on the terms the lead had proposed: this plan goes to him before any
 code. Nothing in it exists yet unless it says so.

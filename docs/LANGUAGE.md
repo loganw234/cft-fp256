@@ -781,7 +781,7 @@ and maps:
      tell minNum from min, or maxNum from max, where no NaN is
      sampled, so a name swapped between them goes unseen. And a printed
      scheme line that no output reads is held by neither check:
-     verifier-VL1 printed an unused fifth rk4 stage, `k5 = f(Y + h*k4)`,
+     verifier-VL1 printed an unused fifth rk4 stage, `k5 = f(Y + h·k4)`,
      and every check passed. Holding each integrator's scheme word for
      word, as the titles are, is a follow-up.
    - The check is held itself: a test plants a wrong sha256 digit,

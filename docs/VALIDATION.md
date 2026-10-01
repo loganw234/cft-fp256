@@ -16668,3 +16668,179 @@ Its others are restated below, or recorded as known limits. F4 then checked 8aa9
 - 58fea7d's root README missed two of its four stage counts at first ("**44** gate stages" and "all 44"). The docs check found them before the commit.
 - The module rebuild's first `--record` ran before the five native tools were built, and wrote the 4 runs it could compare. It was restored and repeated after `make`.
 - Two readings of lang-rust in WSL said rc=1 and content 0 0. `wsl -d cft2204 -- bash -lc '...'` hands the line to WSL's default shell, which expanded `$(...)` and `$?` in the Windows cwd first. The result above was measured through `wsl --exec` with a script, and nothing was concluded from the bad readings.
+
+## 2026-10-01 - the language round, part one: the language for dynamical systems, golden-first (L1), its compiler to tile programs (L2), the intention-out, and the defects the survey found (D1); the variational equations (L3) follow
+
+**Why.** The work order's step 3: "Language semantics (evaluation order, no implicit contraction, exact constants), then the compiler, with automatic variational equations". Its target is an equations-in, ensemble-out solver for ODEs and maps, one member per lane.
+- Logan cleared it on 2026-10-01 ("Yes, begin on the next step"). The lead's terms were a plan of record put to him before any code.
+- He approved the plan: "Approve as written (Recommended)". He chose the syntax: "Its own files (Recommended)".
+- Then he suggested, verbatim: "One suggestion is to implement an "intention out" system, where on compilation the compiler will regenerate the standard format so the writer has the potential to "check" if it looks correct in their eyes. If unfeasible, it can be left out. Its more of a self audit tool for those who use the language and compiler later". It was feasible, and it was built.
+- The plan of record is docs/ROADMAP.md's "Step 3: the language and its compiler (plan of record, 2026-10-01)": 60ad15d; then 669ea40 and 9ed037b (verifier-P1's restatements); then 575a819 (the intention-out).
+- The records are in `Data/runs/2026-10-01-lang-round/` (gitignored): the ledgers and the briefs.
+
+**The survey and the plan.**
+- Three read-only surveyors read the machine, the text form and the emitters (atlas-engine included), and the golden model and the run paths, each fact cited to a file and line.
+- Verifier-P1 checked the plan against the tree. It found four wrong sentences, each restated. MEASURED by P1: an interpreter of the proposed rules reproduced all three of gen_odes.py's references bit for bit at fp64 and fp256, states and FLAGS, against seq.py on the committed images and banks. So the semantics could hold the hand-written programs before any code was written.
+
+**L1: the language, golden-first** (merge c1f34bb).
+- docs/LANGUAGE.md is the definition.
+- python/cft_golden/lang/ holds:
+  - the parser and the checker;
+  - the exact constants, Fractions only;
+  - the integrator templates, written in the language;
+  - the step graph, canonical JSON;
+  - the reference interpreter, which is the definition of correct;
+  - the intention-out's two renderers.
+- programs/systems/ holds the three references in it, at fp64 and fp256.
+- The semantics:
+  - each operator is one rounding, in the written order, with no reassociation and no contraction (`fma` is written);
+  - every operation written is performed, and a value never used is refused (`unused`);
+  - constants are exact rationals, rounded once under the program's one attribute, so h/6 is RN(1/600);
+  - a `param` is the run's and lives in the bank; a `lane param` is per member and lives in scratch;
+  - the integrator's h-scaled constants are named;
+  - unary minus binds tighter than `*`, as in C and Python, and the canonical form prints the parentheses;
+  - 61 refusal names, and the compiler's 7, through one class.
+- MEASURED by L1:
+  - the interpreter equals seq.py's runs of gen_odes.py's images at 1, 2, 5 and each image's own steps, at fp64 and fp256, states and FLAGS, with overflow, signalling-NaN and subnormal lanes;
+  - the plants are red (a reassociated sum, a contraction, a contraction undone, constants through a narrower format), each with its failing lanes counted;
+  - the gate is 250 tests in about 25 s.
+- Verifier-VL1 checked three times.
+  - The first check found three wrong answers, so the parcel was sent back:
+    - F1: a constant could pass through binary64. `(sign h) ** degree` is a Python float when the degree is negative;
+    - F2: Python's 4,300-digit limit was the working bound on constants, not the stated 2^+-1048576;
+    - F3: a run of 102 or more unary minuses printed a canonical form that could not be read back.
+    All three were fixed at their causes in af74bed.
+  - The second check found one narrow wrong answer: the intention-out's check held params' and state's printed defaults and names, and not the rest. 03ce139 made the check read every line the intention-out prints, and hold all but one kind (below): 29 of 32 one-item plants were undetected before, and all 32 are caught now. The same commit gave `.cftl` the text form's character rule (D1, below), and refused a run's h of the other sign.
+  - The third check found a sentence: "nothing printed goes unread", where an unused printed scheme line is read only by its shape and held by neither check. It was restated at the merge.
+  - MEASURED by VL1:
+    - 17,992 lane-checkpoint comparisons against seq.py, in all five attributes, FLAGS lane by lane;
+    - fp32 and fp128 images built in memory by gen_odes.py's own generators;
+    - 306,000 built-in checks against sf.compute;
+    - 37,360 fuzz edits across its checks (16,000, 12,360 and 9,000), with nothing bare raised there (verifier-VI later found inputs that were: below);
+    - the references' graph bytes and both forms byte for byte across every commit.
+
+**The intention-out.** Every compilation writes the program back out as the compiler understood it, regenerated from the step graph, never copied from the source. It has three parts:
+- the equations in standard notation, each fma shown as the a*b + c it computes and each constant as its exact value;
+- the canonical form, with every operation and its order explicit and the step written out;
+- each constant's exact value, rounding and relative error, with the counts.
+
+Three checks hold it:
+- the canonical form parses back to the same step graph, and its whole text, comments included, round-trips byte for byte;
+- the mathematical form, evaluated exactly at sampled points, equals the step graph's exact evaluation;
+- every printed line is read, and held against the graph and the test's own tables, all but a printed scheme line that no output reads, which is held only by its shape.
+
+What sampled points cannot see is stated in LANGUAGE.md.
+
+**L2: the compiler, python/cftc** (merge 30ee0fd).
+- It turns the step graph into a segment image. The state and lane params are in strict scratch, the bank is external, nothing is deposited, and the step is one `repeat`. It emits revision-7 instructions only.
+- It also writes the bank, the halved bank for a step-halving estimate, a deterministic manifest, and the intention-out.
+- The lowering:
+  - shares identical subexpressions;
+  - makes one proven fold: a neg used only as a multiplicand beside a constant c becomes a slot holding -RN(c);
+  - keeps gen_odes.py's classic bank order, so the compiled banks equal the classic banks byte for byte;
+  - allocates r3 to r31 with Belady spills;
+  - schedules from candidates by cost.
+  Its decisions read exact values and structure, never encodings, so a system's instruction words are the same at every format.
+- The `lang` stage, in the quick budget, holds it (47 stages in all, 31 quick, 41 gate).
+- MEASURED by L2:
+  - the references at four formats, and in every attribute at fp64, and a generated corpus, all equal to the interpreter on seq.py at several step counts on many lanes;
+  - the compiled references equal gen_odes.py's images in states and FLAGS at every checkpoint;
+  - cft-segrun certifies compiled images, with both auditors accepting, in full and sampled, and a step-halving estimate on the halved bank;
+  - two hash seeds give the same files.
+- MEASURED costs at fp64, hand-written against compiled:
+  - Lorenz-63: 62 against 62 instructions, 53 against 53 ALU a step;
+  - Henon-Heiles: 23 against 23;
+  - Lorenz-96: 1,455 against 873 instructions, and 692 against 110 scratch accesses a step, since L1's node order sweeps the four RK4 stages round the ring together. Homed rings (N of 20 or more) cost 2N + 30 accesses a step. The cycle figures are a model, not the card.
+- Verifier-VL2 checked three times.
+  - The first check found three wrong sentences: the docs check's comment claimed a gap that check_prose_counts already closed; the stage's time; and the special lanes' assertions. It also found a fourth allocator defect: some valid let-heavy maps failed to compile with an internal error, never a wrong image. L2 restated the sentences and fixed the defect (7 of 121 maps before, 121 of 121 after).
+  - The second check found no wrong answer in L2's text. It found the compiler's own reader weaker than L1's at big exact values, which L2 fixed.
+  - The third check found no regression and no wrong answer.
+  - MEASURED by VL2:
+    - 1,543 compilations past the corpus, none disagreeing with the interpreter: 15 pressure systems (up to 113 spill slots), 480 edge shapes in every attribute at every format, 988 from its own generator, and the references in every attribute at every format (60);
+    - 3.2 M softfloat comparisons on the fold and the commutations;
+    - 480 let-heavy maps;
+    - 352 output files identical on Windows and in WSL.
+
+**D1: the defects the survey found** (merge 8f88d5d), and the module (8f861e3).
+- **The bank's depth.** The tile refuses an image whose header declares more than 512 constants at its header check (rtl/cft_seq.sv:3041, STATUS[3]), after the image has crossed. seq.py, then program.c, now refuse it at load by name (CFT_ERR_UNSUPPORTED). Every image at or below 512 loads as before.
+- **cft-asm.c's lines and numbers.**
+  - It read a line through a 1,024-byte fgets buffer. So a longer line was assembled as two, and a comment's tail could become an instruction, at exit 0.
+  - It read numbers with strtoull and narrowing casts: 88 images that asm.py refuses were accepted, `.deposits 4294967297` among them, written as 1.
+  - It now reads lines whole and numbers as asm.py does. Agreement checks of 679 and 77 cases hold the two assemblers to each other.
+- **One character rule for the text form,** in both assemblers, asm.py first, and for `.cftl` too:
+  - a source is UTF-8;
+  - a line ends at LF, with CRLF accepted;
+  - every other line boundary, NUL and Ctrl-Z are refused anywhere, comments included;
+  - outside comments, only printable ASCII, spaces and tabs are allowed.
+  Before, a lone CR or form feed after a comment hid the next instruction from cft-asm at exit 0, where asm.py read it.
+- **asm.py's negative `.scratch` counts.** asm.py wrote a negative count as its low sixteen bits, -1 as 65535, at exit 0: a silent wrong image in the reference. It is now refused.
+- **Stale sentences,** in SEQUENCER.md, HOSTAPI.md, program.c, cft.h, PROGRAMS.md, gen_odes.py, ATLAS.md and VERIFICATION.md, restated.
+- **Verifier-VD1.** Its first check found no regression and one wrong answer: PROGRAMS.md's "each loud" was false after a comment. D1 was sent back and fixed the cause, the character rule above. VD1's re-check found no regression and no wrong answer. MEASURED by VD1: 2,692 texts and 6,100 fuzz cases give 575a819's bytes and outcomes in both assemblers, and every new check is red against the old ones.
+- **The module rebuilt** from D1's program.c, with no ABI change.
+  - Two clean container builds were identical byte for byte: cft_node.wasm is 273,646 bytes (1bbc8601...) and conformance.html 1,407,179 bytes (10010f4a...).
+  - program_test.mjs gains the n_consts case: 37 passed and 1 failed against the old module, 38 passed against the new.
+  - demos_chains.json was re-recorded, with every chain unchanged. demos.html is 593,275 bytes (a440bb2b...), and verify_demos gives 48 ok.
+
+**The lead's own.**
+- The plan and its restatements.
+- 998a6ad: render_math wrote an h-scaled constant's numerator and denominator with str(), an instance of F2's class, which L2 found. It now goes through the language's digit routine, held by three cases that failed before. Its message called that the last such path; verifier-VI found more.
+- 85a0cfd: the rest VI found. check.py's index-range sentences, lang.run's input refusals and cftc's segment-steps formatted an integer with str() or repr(), so a 5,000-digit index, range bound, lane value, encoding or step count raised Python's 4,300-digit ValueError where a named refusal was due. C.shown() names any value at any size; six cases that failed before pass, and every ordinary sentence reads as before.
+- At the merges:
+  - VD1's, VL1's and VL2's sentence findings restated;
+  - a test holding the language's character tables equal to asm.py's;
+  - LANGUAGE.md's compiler sentences, the README's quick comment and pyproject's packages, once the compiler existed.
+
+**The front door.**
+- The gate budget on amd-arc-box at 30ee0fd, niced (run 20261001-113410-30ee0fd9, 113 minutes): PASS.
+  - 33 stages executed, 0 failed.
+  - 8 skipped by name: buildargs (a real Vitis is there), six language legs (no toolchains) and demos (no node). Each ran at 30ee0fd on the desktop or in WSL (below).
+  - 4 inner skips, the same four as the last two rounds: golden's three (no Arduino loopback binary, twice; math.fma needs Python 3.13) and remote's WebSocket leg (no node).
+  - golden: 2,791 passed and 3 skipped. lang ok 121 s, and its check that a fresh compilation equals the committed compiled files held on Linux; those files were compiled on Windows.
+  - transcend: 607,217 and 580,977 comparisons over 39 functions, C == model.
+  - mpfr: 739,234 cases against the pinned MPFR 4.2.2, 0 value and 0 flag mismatches, and mp-err-check's 16,814,033 results, 0 over their bound.
+- The desktop at 30ee0fd, through the runner, niced: buildargs, docs, node, wasm, demos and the C++, Julia, Go, C#, R and Fortran legs PASS, nothing skipped, 0 inner skips (run 20261001-112121-30ee0fd). node (1,669 s) and wasm (1,112 s) replay the vector sets through the rebuilt module. Apart from docs and the C++ leg, which the box's gate ran too, these are the stages the box cannot run (node, wasm, demos) or skips by name (buildargs, and five of the language legs). lang-rust in WSL cft2204, on a git archive of 30ee0fd: rc 0, "rust: same library, same bits".
+- The card legs at 30ee0fd, the compiled references on revision 7's quad (q135b): all 12 legs PASS (791 s). Each of the six compiled references, equal to its committed image, was certified by cft-segrun on the quad and on software twice:
+  - an estimate run: 256 finite lanes, a main run, and a half-step run on the halved bank with a step-halving entry;
+  - a specials run: 259 lanes, including overflow, signalling-NaN and subnormal lanes.
+  In every leg the states directories are equal card against software, the certificates are equal outside the identity and hash lines, and cft-audit accepts with the golden audit's verdict line for line. An early run at L2's 5658f35 had all 12 legs passing. Each was card against software, with states bit for bit, certificates equal outside the identity and hash lines, and both auditors accepting.
+- After the gate: 85a0cfd (Python, refusal sentences) and the close (docs and comments). The runner's `lang` and `docs` stages and the language suites passed at them on the desktop.
+
+**Known limits, recorded rather than fixed** (Logan's rule).
+- **The language** (VL1):
+  - a printed scheme line that no output reads is held by neither check (holding each integrator's scheme word for word is a follow-up);
+  - the sampled points cannot see a comparison's threshold or strictness, an absolute value over a non-negative operand, or minNum against min where no NaN is sampled;
+  - a relative error's last printed digit is held to 1e-4 relative;
+  - ESC sequences and backspaces are allowed in a comment, in `.cftl` and `.cfta` alike, so a terminal can hide a line that both parsers read.
+- **The compiler** (VL2):
+  - compile time is superlinear: about 58 to 60 s for a 16,796-node step, and 97 s for an 8-component map with 3,063 spills;
+  - three cosmetic refusal wordings;
+  - the fourth defect's fix reorders the stores due together in 55 of 120 let-heavy maps, each still equal to the interpreter.
+- **The assemblers** (VD1), each loud:
+  - asm.py accepts, and cft-asm refuses, names of 64 or more characters, more than 1,024 `.reg` or `.slot` names, more than 65,536 instructions, and an underscored raw 0x literal (with a misleading reason);
+  - revision 8's forms are read by asm.py alone;
+  - asm.py raises an uncaught error on a `.deposits 0x` number of 3,600 or more hex digits, and under a lowered Python digit limit;
+  - twenty-one asm.py call sites in ten files still pass a text-mode read, harmless while every tracked source is plain ASCII;
+  - asm.py's number refusals carry no file and line;
+  - two test files type U+2028 and similar characters literally in their string literals, not as escapes.
+- **The docs check:** its spelled-count patterns pass "forty-eight verification stages" and "48 verification stages"; no document phrases a count so today.
+- **The bank's depth:**
+  - tiles before revision 3 had a 256-entry bank, and refuse 257 to 512 themselves, after crossing. No such tile is in use;
+  - a cft-serve built before b23732f accepts more than 512 constants from the JavaScript client.
+- **Commit messages that overstate, recorded here since history is not rewritten:**
+  - 442bd3f says that "forty-six runner stages" was checked by nothing and that "forty-seven" passed against 46. check_prose_counts caught both (VL2);
+  - 8f861e3 says it remade docs/README.md's counts; none needed remaking (VI);
+  - 998a6ad says every other big-integer path had moved to the digit routine; it had not (VI, fixed in 85a0cfd).
+
+**Load, and the machine.**
+- The desktop was Logan's throughout. The agents ran niced, one run at a time, and handed long runs back.
+- amd-arc-box ran the early card and Linux legs, the integration's card legs and the gate budget.
+- Nothing loaded either machine on purpose.
+
+**The lead's own slips.**
+- The first box launch bundled from ded90d8, which the box's checkout lacked. git refused the fetch, and nothing ran.
+- lang_card.py's first form put the special lanes beside an accuracy entry. cft-segrun refused every run by name (`accuracy-finite`), identically on the card and on software. The script was wrong, not the tool.
+- The lead's restatement at D1's merge garbled a comment in asm.py. It was tidied at L1's merge.
+- 998a6ad's test's first control was invalid. Its source declared `format` twice, and was refused for that rather than for the defect. Then the shell's backslash halving wrote a raw newline into the test file, which was caught when it failed to parse and repaired with the Edit tool.
+- `make cft-asm` without its `.exe` on Windows, and programs/check.py without `--asm` and `--runner`. Each was refused as usage and run again correctly.
+- One of 85a0cfd's new cases first asked lang.run for 10^5000 steps, which it accepts, so the test would have run forever. It was changed to a negative count, which is refused, before anything ran.
+- The lead's ledger gave the plan's copy as 335 lines; it was 336. Corrected in the ledger.
