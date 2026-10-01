@@ -101,10 +101,15 @@ def check_stage_counts(problems, root):
     derived = {"total": total, "quick": len(quick), "gate": len(gate)}
 
     # Every count a sentence can spell from twenty to ninety-nine, made
-    # from the number words below rather than listed: the list this
-    # replaced stopped at forty-five while the runner counted forty-six,
-    # so "forty-six runner stages" was checked by nothing and "forty-seven"
-    # passed against 46 (measured, the language round's L2, 2026-10-01).
+    # from the number words below rather than listed. The list this
+    # replaced stopped at forty-five, so THIS branch passed a spelled
+    # count past it. The docs check did not: check_prose_counts, below,
+    # reads every spelled stage count in the same four files, and at
+    # 575a819 it failed a planted "forty-seven runner stages" against 46
+    # (verifier-VL2, 2026-10-01; the language round's L2 had measured this
+    # function alone and called such a count unchecked, which was wrong).
+    # So this widens one branch that another already covered; the control
+    # "ninety-eight runner stages" in CONTROLS holds this branch itself.
     WORDS = {}
     for tens_word, tens in WORD_TENS.items():
         WORDS[tens] = tens_word
