@@ -438,12 +438,15 @@ def m_const(value, factor=None):
     if f < 0:
         pos = m_const(None, -f)
         return M(MINUS + pos.text, 2, neg=pos)
-    p, q = f.numerator, f.denominator
+    # The numerator and denominator through C.digits, never str(): a
+    # factor past 4,300 digits (`1e-5000 * h` at fp256) raised Python's
+    # integer-to-string limit here (found by L2 at d50ccb0).
+    p, q = C.digits(f.numerator), C.digits(f.denominator)
     if f == 1:
         return M("h", 3)
-    if q == 1:
+    if f.denominator == 1:
         return M(f"{p}{DOT}h", 1)
-    if p == 1:
+    if f.numerator == 1:
         return M(f"h/{q}", 1, div=True)
     return M(f"{p}{DOT}h/{q}", 1, div=True)
 

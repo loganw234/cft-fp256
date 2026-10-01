@@ -1686,3 +1686,20 @@ def test_one_character_rule_for_both_text_forms():
     assert lang_syntax.NEVER == asm._NEVER
     for cp in range(0x3100):
         assert lang_syntax.char_name(cp) == asm._char_name(cp), hex(cp)
+
+
+@pytest.mark.parametrize("body", [
+    "next x = x + (1e-5000 * h)",
+    "next x = x + (3e5000 * h)",
+    "next x = x + (1e-5000 * h / 7)",
+])
+def test_an_h_scaled_constant_past_4300_digits_renders(body):
+    """render_math wrote an h-scaled constant's numerator and denominator
+    with str(), so `1e-5000 * h` at fp256 passed the checker, to_bytes,
+    from_bytes and render_canonical and then raised ValueError (Python's
+    4,300-digit limit) - found by L2 at d50ccb0, fixed at the language
+    round's integration. Its intention-out must hold whole."""
+    lines = ("system s", "format fp256", "state x", body,
+             "step map, h = 1/100")
+    g = compile_("".join(line + chr(10) for line in lines))
+    check_intention_out(g, random.Random(body), points=2)
