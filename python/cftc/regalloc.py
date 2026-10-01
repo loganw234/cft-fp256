@@ -141,6 +141,7 @@ class _Alloc:
         self.next_spill = self.m
         self.out = None
         self.computed = set()
+        self.closing_regs = set()
         self._uses()
 
     # -- where each value is used ---------------------------------------
@@ -353,8 +354,13 @@ class _Alloc:
         self.computed.add(key)
 
     def stores(self, q):
-        """The homed stores whose turn has come after position q."""
+        """The homed stores whose turn has come after position q. A value
+        stored here is let go only after every store of this position: one
+        node can be the next value of several components (sharing merges
+        a[1..3] = s * s into one), and the first store once released it
+        before the others."""
         outs = self.low.outs
+        stored = []
         for i in self.pending:
             if not self.pending[i] or i in self.deferred:
                 continue
@@ -378,9 +384,11 @@ class _Alloc:
                     self.place(o, r)
                 self.stl(self.where[o], i, o)
                 self.slot_put(i, o)
-                if self.next_use(o, q) is None:
-                    self.release(o)
+                stored.append(o)
             self.pending[i] = False
+        for o in dict.fromkeys(stored):
+            if self.next_use(o, q) is None:
+                self.release(o)
 
     # -- the step's closing copies -------------------------------------------
     #
@@ -406,7 +414,10 @@ class _Alloc:
         write. (Counting that location as a copy lost a value once: a
         slot-to-slot move of a swap took as its temporary the register
         holding the slot's old value, then overwrote the slot.)"""
-        dst = {d[1] for d, _v in pending if d[0] == "r"}
+        # Every register the closing copies write is out, those already
+        # written too: a rotation once took a pinned register that had
+        # just received its next value as the temporary for its cycle.
+        dst = {d[1] for d, _v in pending if d[0] == "r"} | self.closing_regs
         needed = {v for _d, v in pending}
         for r in REGS:
             if r in dst:
@@ -467,6 +478,7 @@ class _Alloc:
             lk = ("l", j)
             if lk in self.pinned:
                 moves.append((("r", self.pinned[lk]), lk))
+        self.closing_regs = {d[1] for d, _v in moves if d[0] == "r"}
         pending = [(d, v) for d, v in moves if self.content(d) != v]
         rounds = 0
         while pending:
