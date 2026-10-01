@@ -524,14 +524,27 @@ def leg_references(rng):
                   f"{ref.flags:#x} included",
                   f"{len(failing)} lanes differ from step {first}, FLAGS "
                   f"{'equal' if fok else 'differ'}")
-            for role, lane, flag in (("overflow", specials[0],
-                                      sf.FLAG_OVERFLOW),
-                                     ("signalling NaN", specials[1],
-                                      sf.FLAG_INVALID)):
+            roles = [("overflow", specials[0], sf.FLAG_OVERFLOW, "overflow"),
+                     ("signalling NaN", specials[1], sf.FLAG_INVALID,
+                      "invalid")]
+            if base != "lorenz96-rk4":
+                roles.append(("subnormal", specials[2], sf.FLAG_UNDERFLOW,
+                              "underflow"))
+            for role, lane, flag, word in roles:
                 r1 = lang.run(c.graph, [lane], REFS[base])
                 check(r1.flags & flag,
-                      f"{base} {fmt}: the {role} lane raises "
-                      f"{'overflow' if flag == sf.FLAG_OVERFLOW else 'invalid'}")
+                      f"{base} {fmt}: the {role} lane raises {word}")
+            if base == "lorenz96-rk4":
+                # At F = 8 every right-hand side is F - x_i plus a product,
+                # so a subnormal state is lost in a result near F and nothing
+                # tiny is rounded: this lane raises inexact alone, at every
+                # format (measured). Leg C runs it at F = 0, where it
+                # underflows.
+                r1 = lang.run(c.graph, [specials[2]], REFS[base])
+                check(not r1.flags & sf.FLAG_UNDERFLOW,
+                      f"{base} {fmt}: the subnormal lane raises no underflow "
+                      f"at F = 8 (FLAGS {r1.flags:#x}); leg C runs it at "
+                      f"F = 0")
             if fmt in ("fp64", "fp256"):
                 classic = (PROGRAMS / f"{base}-{fmt}.classic.bank") \
                     .read_bytes()
@@ -625,6 +638,151 @@ SHAPES = {
               "next x = (x - y) * (x - y)\nnext y = (y - x) + (x - y)\n"
               "step map\n",
 }
+
+
+# verifier-VL2's reproducer (its probes, sc63min.cftl): two homed outputs
+# due at one position, and reloading the first evicted the second, whose
+# only later use was its own store - "output 5's value is nowhere".
+SC63MIN = """system sc63
+format fp64
+state c[44]
+let L0 = c[1] * c[35] + 1
+let L1 = c[26] * c[39] + 2
+let L2 = c[39] * c[19] + 3
+let L3 = c[17] * c[26] + 4
+let L4 = c[32] * c[37] + 5
+let L5 = c[35] * c[4] + 6
+let L6 = c[35] * c[20] + 7
+let L7 = c[23] * c[8] + 8
+let L8 = c[6] * c[3] + 9
+next c[0] = fma(c[39], c[30], c[0]) + L5 + L0
+next c[1] = c[33] * c[15]
+next c[2] = c[2]
+next c[3] = fma(c[42], c[6], c[3])
+next c[4] = c[4]
+next c[5] = c[0] * c[40]
+next c[6] = c[6]
+next c[7] = c[22] * c[26]
+next c[8] = c[8]
+next c[9] = c[9]
+next c[10] = fma(c[33], c[42], c[10]) + L2 + L1
+next c[11] = c[11]
+next c[12] = c[12]
+next c[13] = c[13]
+next c[14] = fma(c[24], c[8], c[14]) + L5
+next c[15] = c[15]
+next c[16] = c[16]
+next c[17] = c[17]
+next c[18] = c[31] * c[39] + L2
+next c[19] = (c[19] - c[2])
+next c[20] = c[20]
+next c[21] = c[21]
+next c[22] = c[22]
+next c[23] = c[23]
+next c[24] = c[24]
+next c[25] = c[22] * c[10] + L5
+next c[26] = c[26]
+next c[27] = c[20] * c[10]
+next c[28] = c[40] * c[24] + L8 + L2 + L0
+next c[29] = c[29]
+next c[30] = (c[30] - c[11])
+next c[31] = c[35] * c[30] + L7 + L8
+next c[32] = c[15] * c[6]
+next c[33] = fma(c[0], c[9], c[33]) + L3
+next c[34] = (c[34] - c[39]) + L8 + L6 + L5
+next c[35] = c[2] * c[3] + L6 + L1 + L3 + L8
+next c[36] = c[36]
+next c[37] = c[37]
+next c[38] = fma(c[20], c[33], c[38]) + L4 + L6
+next c[39] = c[39]
+next c[40] = fma(c[3], c[22], c[40])
+next c[41] = c[41]
+next c[42] = (c[42] - c[32]) + L6 + L2
+next c[43] = c[8] * c[24]
+step map
+"""
+
+
+def g_letmap(rng, k):
+    """A let-heavy homed map: 26 to 48 components, up to 40 lets of
+    products, outputs that are products, fmas, state leaves and identities
+    with lets added - the shape in which two outputs fall due for their
+    homes at one position with the registers full (verifier-VL2's hunt;
+    this generator is written again here, after its shape)."""
+    n = rng.randint(26, 48)
+    nl = rng.randint(0, 40)
+    lines = [f"system lm{k}",
+             f"format {rng.choice(['fp32', 'fp64', 'fp128', 'fp256'])}",
+             f"round {rng.choice(['rne', 'rtz', 'rdn', 'rup', 'rmm'])}",
+             f"state c[{n}]"]
+    lets = []
+    for j in range(nl):
+        a, b = rng.randrange(n), rng.randrange(n)
+        lines.append(f"let L{j} = c[{a}] * c[{b}] + {j + 1}")
+        lets.append(f"L{j}")
+    used = {name: 0 for name in lets}
+    eqs = []
+    for i in range(n):
+        kind = rng.random()
+        a, b = rng.randrange(n), rng.randrange(n)
+        picks = rng.sample(lets, min(len(lets), rng.randint(0, 4))) \
+            if lets else []
+        tail = "".join(f" + {name}" for name in picks)
+        if kind < 0.35:
+            eqs.append(f"next c[{i}] = c[{a}] * c[{b}]{tail}")
+        elif kind < 0.55:
+            eqs.append(f"next c[{i}] = c[{a}] * c[{b}]")
+            picks = []
+        elif kind < 0.7:
+            eqs.append(f"next c[{i}] = fma(c[{a}], c[{b}], c[{i}]){tail}")
+        elif kind < 0.8:
+            eqs.append(f"next c[{i}] = c[{a}]")
+            picks = []
+        else:
+            eqs.append(f"next c[{i}] = (c[{i}] - c[{a}]){tail}")
+        for name in picks:
+            used[name] += 1
+    for name, u in used.items():
+        if not u:
+            i = rng.randrange(n)
+            eqs[i] += f" + {name}"
+    lines += eqs + ["step map"]
+    return "\n".join(lines) + "\n"
+
+
+def leg_letmaps(count, rng):
+    section(f"A. {count} let-heavy homed maps, and verifier-VL2's reproducer")
+    texts = [("vl2-sc63min", SC63MIN)] + \
+        [(f"letmap {k}", g_letmap(random.Random(f"lang letmap {k}"), k))
+         for k in range(count)]
+    runs = bad_n = 0
+    t0 = time.perf_counter()
+    for name, text in texts:
+        try:
+            c = cftc.compile_text(text, 4, source=name, stem="lm")
+        except lang.Refusal as e:
+            if e.name not in ARTIFACTS:
+                bad(f"{name}: refused {e.name}: {e}")
+                bad_n += 1
+            continue
+        except cftc.InternalError as e:
+            bad(f"{name}: internal error: {e}")
+            bad_n += 1
+            continue
+        g = c.ir
+        lanes = lanes_for(g.fmt, g.n_state, rng, 6)
+        lanes += special_lanes(g.fmt, g.n_state, lanes[0], rng)
+        failing, first, fok, ref = compare(c, lanes, None, 4)
+        cover(c, ref.flags)
+        runs += 1
+        if failing or not fok:
+            bad(f"{name}: {len(failing)} of {len(lanes)} lanes differ from "
+                f"step {first}")
+            bad_n += 1
+    check(bad_n == 0, f"the let-heavy maps: {runs} compiled and equal to the "
+          f"interpreter on 9 lanes at 1, 2 and 4 steps "
+          f"({time.perf_counter() - t0:.1f} s)",
+          f"{bad_n} of {len(texts)} failed")
 
 
 def corpus_texts(count, seed="lang corpus"):
@@ -728,16 +886,56 @@ def leg_banks(rng):
               whole.flags == half1.flags | half2.flags,
               f"{base}: one segment of {2 * S} steps is two segments of "
               f"{S}, states and FLAGS")
+    # Lorenz-96's subnormal lane underflows only where F does not swamp it
+    c = ref_compile("lorenz96-rk4", "fp64")
+    g = c.ir
+    lanes = lanes_for(g.fmt, g.n_state, rng, 2, BOX["lorenz96-rk4"])
+    sub = special_lanes(g.fmt, g.n_state, lanes[0], rng)[2]
+    vals = c.lowered.bank_values()
+    fslot = next(k for k, s in enumerate(c.lowered.slots)
+                 if s.kind == "param")
+    vals[fslot] = 0
+    failing, first, fok, ref = compare(c, lanes + [sub], None, REFS[
+        "lorenz96-rk4"], bank=vals, interp={"param_bits": {"F": 0}})
+    alone = lang.run(c.graph, [sub], REFS["lorenz96-rk4"],
+                     param_bits={"F": 0})
+    check(not failing and fok and alone.flags & sf.FLAG_UNDERFLOW,
+          f"lorenz96-rk4: at F = 0 the image equals the interpreter and the "
+          f"subnormal lane raises underflow (FLAGS {alone.flags:#x})",
+          f"{len(failing)} lanes from step {first}")
+
+    def param_slot(c, name):
+        return next(s for s in c.lowered.slots if s.kind == "param"
+                    and c.ir.param[s.index][0] == name)
     c = cftc.compile_file(SYSTEMS / "lorenz63-rk4-fp64.cftl", 5,
                           params={"sigma": "12", "beta": "8/3"})
     want = K.round_once(c.ir.fmt, c.ir.rnd, Fraction(12))[0]
-    slot = next(k for k, s in enumerate(c.lowered.slots)
-                if s.kind == "param" and c.ir.param[s.index][0] == "sigma")
-    check(c.lowered.slots[slot].bits == want and
+    check(param_slot(c, "sigma").bits == want and
           [o["name"] for o in c.manifest["param_overrides"]] ==
           ["sigma", "beta"],
           "--param sigma=12 writes RN(12) into sigma's slot, and the "
           "manifest records both overrides")
+    # Two values a binary64 route gets wrong, so these checks can tell the
+    # language's reading from Python's float: 0.1 at fp128 (RN128 of 1/10,
+    # not 0.1's binary64 value widened), and at fp32 1 + 2^-24 + 2^-60,
+    # whose binary64 rounding is the fp32 tie 1 + 2^-24 and so rounds to
+    # even, to 1, where the value itself rounds up to 1 + 2^-23.
+    for fmt, text, exact in (("fp128", "0.1", Fraction(1, 10)),
+                             ("fp32", "0x1.000001000000001p+0",
+                              1 + Fraction(1, 1 << 24) +
+                              Fraction(1, 1 << 60))):
+        c = cftc.compile_text(ref_text("lorenz63-rk4", fmt), 3,
+                              source=f"lorenz63-rk4-{fmt}",
+                              params={"sigma": text})
+        right = K.round_once(c.ir.fmt, sf.RND_RNE, exact)[0]
+        via64 = K.round_once(c.ir.fmt, sf.RND_RNE,
+                             Fraction(float(exact)))[0]
+        got = param_slot(c, "sigma").bits
+        check(got == right != via64,
+              f"--param sigma={text} at {fmt} is RN of the exact value, "
+              f"{K.bits_hex(c.ir.fmt, right)}, where a binary64 route gives "
+              f"{K.bits_hex(c.ir.fmt, via64)}",
+              f"the slot holds {K.bits_hex(c.ir.fmt, got)}")
 
 
 # ---- E: libcft's software backend -----------------------------------------
@@ -1190,8 +1388,10 @@ def main(argv=None):
     ap.add_argument("--audit", help="host/cft-audit, for leg E")
     ap.add_argument("--corpus", type=int, default=48,
                     help="generated systems in leg A (default 48)")
+    ap.add_argument("--letmaps", type=int, default=120,
+                    help="let-heavy homed maps in leg A (default 120)")
     ap.add_argument("--only", default="",
-                    help="a comma list of legs: refs,corpus,banks,libcft,"
+                    help="a comma list of legs: refs,corpus,letmaps,banks,libcft,"
                          "determinism,refusals,plants")
     ap.add_argument("--write", action="store_true",
                     help="write programs/systems/compiled/ and exit")
@@ -1212,6 +1412,7 @@ def main(argv=None):
         return random.Random(f"lang check {leg}")
     legs = [("refs", lambda: leg_references(rng("refs"))),
             ("corpus", lambda: leg_corpus(a.corpus, rng("corpus"))),
+            ("letmaps", lambda: leg_letmaps(a.letmaps, rng("letmaps"))),
             ("banks", lambda: leg_banks(rng("banks"))),
             ("libcft", lambda: leg_libcft(a.segrun, a.audit, rng("libcft"),
                                           work)),

@@ -10,8 +10,11 @@
 ...` works from the repository's root as well.)
 
 Exit 0: every file written. A refusal prints
-`cftc: refused <name>: <source>:<line>: <sentence>` on stderr and exits
-3, writing nothing; a command line it does not take exits 64, `usage`.
+`cftc: refused <name>: <source>[:<line>]: <sentence>` on stderr and exits
+3, writing nothing; a command line it does not take exits 64, `usage`;
+an internal error - a defect in the compiler, never a property of the
+source - prints `cftc: internal error (a defect in the compiler): ...`
+and exits 70, writing nothing.
 """
 
 import argparse
@@ -29,6 +32,7 @@ from cftc import targets as T  # noqa: E402
 
 EXIT_REFUSED = 3
 EXIT_USAGE = 64
+EXIT_INTERNAL = 70
 
 
 class _Parser(argparse.ArgumentParser):
@@ -82,12 +86,16 @@ def main(argv=None):
         c = compile_file(a.source, a.steps, a.target, stem=a.stem,
                          params=params or None)
     except lang.Refusal as e:
-        print(f"cftc: refused {e.name}: {e}", file=sys.stderr)
+        where = e.source or a.source
+        if e.line is not None:
+            where = f"{where}:{e.line}"
+        print(f"cftc: refused {e.name}: {where}: {e.sentence}",
+              file=sys.stderr)
         return EXIT_REFUSED
     except InternalError as e:
         print(f"cftc: internal error (a defect in the compiler): {e}",
               file=sys.stderr)
-        return 70
+        return EXIT_INTERNAL
     for path in c.write(a.out):
         print(path.as_posix())
     return 0

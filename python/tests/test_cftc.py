@@ -241,6 +241,55 @@ def test_a_param_run_value_is_read_as_the_language_reads_it():
     assert e.value.name == "constant-overflow"
 
 
+@pytest.mark.parametrize("fmt, text, exact", [
+    ("fp128", "0.1", Fraction(1, 10)),
+    ("fp32", "0x1.000001000000001p+0",
+     1 + Fraction(1, 1 << 24) + Fraction(1, 1 << 60))])
+def test_a_param_run_value_binary64_would_get_wrong(fmt, text, exact):
+    """Values a binary64 route rounds differently - 0.1 at fp128, and at
+    fp32 a value whose binary64 rounding is an fp32 tie - so that this
+    test, unlike the one above, could catch Python's float in the path."""
+    src = (SYSTEMS / "lorenz63-rk4-fp64.cftl").read_text(encoding="ascii")
+    src = src.replace("format fp64", f"format {fmt}")
+    c = cftc.compile_text(src, 3, params={"sigma": text})
+    slot = next(s for s in c.lowered.slots if s.kind == "param"
+                and c.ir.param[s.index][0] == "sigma")
+    right = K.round_once(c.ir.fmt, sf.RND_RNE, exact)[0]
+    via64 = K.round_once(c.ir.fmt, sf.RND_RNE, Fraction(float(exact)))[0]
+    assert right != via64
+    assert slot.bits == right
+
+
+def test_a_renderer_fault_is_an_internal_error(monkeypatch):
+    """The intention-out failing is the compiler's defect, never a refusal
+    of the source: a renderer that writes text the language refuses, and
+    one that writes another system's valid text, both stop the compile
+    with InternalError."""
+    other = cftc.compile_file(SYSTEMS / "lorenz63-rk4-fp64.cftl", 3).canonical
+    monkeypatch.setattr(lang, "render_canonical",
+                        lambda g: "system broken\nthis is not a statement\n")
+    with pytest.raises(cftc.InternalError) as e:
+        _hh()
+    assert "intention-out" in str(e.value)
+    monkeypatch.setattr(lang, "render_canonical", lambda g: other)
+    with pytest.raises(cftc.InternalError) as e:
+        _hh()
+    assert "not the same step graph" in str(e.value)
+
+
+@pytest.mark.parametrize("name", ["lorenz63-rk4-fp64", "lorenz96-rk4-fp256",
+                                  "henonheiles-lf-fp64"])
+def test_the_compiler_reads_a_graph_from_its_bytes(name):
+    """L1's from_bytes accepts only a graph equal to its canonical form;
+    the compiler reads the bytes of every graph it is given, so a graph
+    read back from them compiles to the same files."""
+    g = lang.load(SYSTEMS / f"{name}.cftl").graph
+    back = lang.StepGraph.from_bytes(g.to_bytes())
+    a = cftc.compile_graph(g, 4, stem=name).files()
+    b = cftc.compile_graph(back, 4, stem=name).files()
+    assert a == b
+
+
 def test_the_command_line(tmp_path):
     py = [sys.executable, str(ROOT / "python" / "cftc")]
     r = subprocess.run(py + ["--targets"], capture_output=True, text=True)
@@ -257,6 +306,7 @@ def test_the_command_line(tmp_path):
                              str(tmp_path / "x")], capture_output=True,
                        text=True)
     assert r.returncode == 3 and "refused segment-steps" in r.stderr
+    assert r.stderr.count("segment-steps") == 1, r.stderr
     assert not (tmp_path / "x").exists()
     r = subprocess.run(py + [str(src)], capture_output=True, text=True)
     assert r.returncode == 64

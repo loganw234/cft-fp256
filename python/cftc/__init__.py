@@ -34,6 +34,14 @@ What it writes, for a stem (the source's name without .cftl):
 
 Every refusal is the language's Refusal (cft_golden.lang), by name. An
 InternalError is a defect in the compiler, never a property of a source.
+
+Known limit: compile time grows faster than the step does, roughly with
+its square for a wide step - the list schedulers scan their ready set at
+every pick, and six candidate orders are scheduled and allocated.
+Measured on the desktop, niced and in use (2026-10-01), for rings of
+the Lorenz-96 kind: 0.3 s at 760 nodes, 3.6 s at 3,800, 14 s at 7,980
+and 58 s at 16,796 (verifier-VL2 measured about 100 s for 16,800 before
+the homed stores were indexed by position).
 """
 
 import hashlib
@@ -242,9 +250,20 @@ def compile_graph(graph, steps, target="sw", stem="system", source=None,
     c.cycles_sixteen_beats = cycles(prog.body, 16)
     c.accepted_by = M.accepted_by(g.fmt_name, c.features,
                                   len(c.image_obj.insns), prog.slots_used)
-    c.canonical = lang.render_canonical(graph)
-    c.mathematical = lang.render_math(graph)
-    back = lang.compile_text(c.canonical, f"{stem}.canonical.cftl")
+    # The intention-out, and its first check. A failure here is a defect -
+    # in L1's renderers or in what the compiler handed them - and never a
+    # property of the source the writer gave: so it is an InternalError,
+    # even where reading the canonical form back raises the language's
+    # Refusal (verifier-VL2 planted a renderer fault; it stopped the
+    # compilation as a refusal, exit 3, until this was so).
+    try:
+        c.canonical = lang.render_canonical(graph)
+        c.mathematical = lang.render_math(graph)
+        back = lang.compile_text(c.canonical, f"{stem}.canonical.cftl")
+    except Exception as e:                       # noqa: BLE001
+        raise InternalError(f"the intention-out failed, rendering it or "
+                            f"reading the canonical form back "
+                            f"({type(e).__name__}: {e})") from None
     if back.graph.to_bytes() != c.graph_bytes:
         raise InternalError("the canonical form, read back, is not the same "
                             "step graph")
