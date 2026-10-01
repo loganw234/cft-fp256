@@ -1999,7 +1999,11 @@ NOT TESTED too, and the gate goes on (at eb2d1ae, run as `nobody` under
 a hard limit of about 8 GB, it stopped with a traceback; verifier-C7).
 It also holds git to ignoring the tool's binary.
 
-With a negative run index and `slotstep` (S1's send-back, 2026-09-30):
+With a negative lane and slot (S1's second send-back, 2026-09-30): 679
+checks on the Windows desktop and one SKIP, the trial's cost NOT TESTED
+there, 88 s; in WSL (cft2204, gcc 11.4, at 350f7f2), 682 checks, 0
+failed, nothing skipped, 81 s. With a negative run index and `slotstep`
+(S1's send-back, 2026-09-30):
 656 checks on the Windows desktop and one SKIP, the trial's cost NOT
 TESTED there, 96 s. On Linux the three checks of the trial's cost run
 in the SKIP's place: in WSL (cft2204, gcc 11.4, at f572ef3), 659 checks,
@@ -2284,7 +2288,11 @@ skipped, 221 s. The one check more counts section 3's entries, 15 of
 them. Section 2's test_cert.py, then 102 tests with the golden writer's
 new `accuracy-run`, passed through the tool, with parse 6,262 of 6,262
 and audit 243 of 282 as before. The move alone, before the entries,
-gave 6,799 of 6,799 in 218 s. So no verdict moved.
+gave 6,799 of 6,799 in 218 s. So no verdict moved. With `cert.derive`
+bounding a lane and a slot from below too (the second send-back,
+2026-09-30): 6,800 checks, 0 failed, 246 s; test_cert.py's 103 tests
+passed through the tool, parse 6,262 of 6,262 and audit 243 of 282 as
+before, so no verdict moved there either.
 
 **The plants.** `host/tests/audit_plants.py` is the census. In a fresh
 copy of host/, never the tree, every call of `refuse` or `malformed` in
