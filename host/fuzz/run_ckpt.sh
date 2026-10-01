@@ -43,12 +43,14 @@ for t in collatz enclose mersenne orbits zoom; do
     # Rebuilt when ANYTHING it is built from is newer - its own source, the
     # library's, a header. Until 2026-09-26 only tools/$t.c was compared,
     # so after a library change the lane went on fuzzing the library the
-    # tools were first built from (verifier-V8).
+    # tools were first built from (verifier-V8). tools/*.h since
+    # 2026-09-30: orbits.c includes tools/cert_write.h, the certificate's
+    # encoding.
     stale=0
     if [ ! -x "$out" ]; then
         stale=1
     fi
-    for f in "tools/$t.c" $SRC include/*.h src/*.h; do
+    for f in "tools/$t.c" $SRC include/*.h src/*.h tools/*.h; do
         if [ "$f" -nt "$out" ]; then
             stale=1
         fi

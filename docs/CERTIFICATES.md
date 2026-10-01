@@ -32,7 +32,12 @@ Where things stand (2026-09-30):
   an entry's value with one code, `host/tools/cert_exact.h`;
 - the golden certificates, twelve programs and their certificates in
   `certificates/`, hold both writers to committed bytes (see "Golden
-  certificates").
+  certificates");
+- `cft-orbits` certifies its own runs on the Newton route, each sample
+  interval a segment of one image, with its angular momentum's drift as
+  an exact entry where asked (2026-09-30; [ORBITS.md](ORBITS.md),
+  "Certified runs"), and the `workloads` stage holds each to the golden
+  writer and to both auditors.
 
 ## What a certificate says, and what an audit proves
 
@@ -1303,11 +1308,20 @@ location ("The audit tool").
 
 ## The segment runner
 
-`cft-segrun` is the C writer, the plan's step 3. It runs a program as
-consecutive segments on one libcft device handle, keeps the state at
-every boundary, and writes a version-1 certificate, its accuracy entries
-included since the plan's step 5 (2026-09-30). `make -C host all` builds
-it, from `host/tools/segrun.c`.
+`cft-segrun` is the C writer of any segment program, the plan's step 3.
+It runs a program as consecutive segments on one libcft device handle,
+keeps the state at every boundary, and writes a version-1 certificate,
+its accuracy entries included since the plan's step 5 (2026-09-30).
+`make -C host all` builds it, from `host/tools/segrun.c`. `cft-orbits`
+writes certificates of its own runs too ([ORBITS.md](ORBITS.md),
+"Certified runs"), with the same encoding, `host/tools/cert_write.h`,
+which both tools include (the steps-5-and-6 round, 2026-09-30). It holds
+the hashes and the salt's commitment, and the identity lines from `mode`
+to `device-tiles`. It also holds a run block's head from
+`program-format` to `stream-c`, each segment line, each accuracy entry's
+lines, `end` and the hash line, and a file's creation, new. Each tool
+spells the rest itself: the magic line, `runs`, each `run` line,
+`parameters` and each `parameter`, `segments`, `output` and `accuracy`.
 
     cft-segrun --out CERT --states DIR (--salt SALT | --open)
                [--device sw|<xclbin>|cft://host:port | --scratch-depth N]
@@ -2640,9 +2654,16 @@ Logan's permission.
   golden writer has no way to take a mask, a table or a stream per
   segment, and it refuses a program that deposits (`program-shape`)
   rather than certify part of it.
-- **Certify cft-orbits' runs.** The plan's step 6 certifies Newton-route
-  intervals, each a program image and bank this format holds. Its
-  records carry no flags today (docs/ROADMAP.md).
+- **Certify cft-orbits' exact route, or give its runs any accuracy entry
+  but the angular momentum's drift.** Its Newton-route runs are
+  certified, each sample interval a segment of one image, and they can
+  carry the drift of each component of their angular momentum, exact
+  (2026-09-30; [ORBITS.md](ORBITS.md), "Certified runs"). The default
+  exact route has no image: its divide and square root are host calls
+  between program runs, and certifying it needs an orbit integrator in
+  the golden model. No auxiliary run can be related to an orbits run,
+  since its constants ride in its image and are derived in each format.
+  Its energy is not a polynomial in the state.
 - **Record a remote run's scratch depth.** The remote protocol carries
   no CAPS2, so a certificate made through a remote handle reads
   `device-caps unknown` and is re-run at 256 (revision 7, "The chain").

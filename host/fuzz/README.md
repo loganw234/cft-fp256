@@ -114,7 +114,9 @@ wrap.
 **`fuzz_ckpt.py`** mutates each tool's own checkpoint and resumes from
 it. The contract being tested is the one the tools state: a malformed
 checkpoint must produce a NAMED REFUSAL - the tool's `die()` message
-and exit 2 - never a crash, never a hang, and never a silent resume
+and exit 2, or, for cft-orbits' certified checkpoints (version 3), a
+refusal by name at that name's exit code - never a crash, never a
+hang, and never a silent resume
 from a state the file did not describe.
 
 ## Layout

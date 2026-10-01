@@ -291,6 +291,43 @@
  * Newton iteration count is derived from p, and SHA-256's round
  * constants are computed from the cube roots of the primes by
  * host/src/sha256.c, the one copy this tool shares with collatz.c.
+ *
+ * ---------------------------------------------------------------
+ * Certified runs (2026-09-30)
+ * ---------------------------------------------------------------
+ *
+ * --cert CERT --cert-states DIR (--cert-salt SALT | --cert-open), on
+ * --engine segments --rsqrt newton, writes a version-1 certificate
+ * (docs/CERTIFICATES.md) when the run completes: one run, `main`, whose
+ * image is the one seg_build makes for the STRIDE and whose segments
+ * are the sample intervals, each with its start and end state's hash,
+ * its flag word and its STATUS. The engine may run an interval as
+ * several shorter segments (the loader's limit, the checkpoint clock)
+ * and in batch chunks; the interval's word is the OR of every run's
+ * and chunk's, and an audit re-runs it whole, as one run of the stride
+ * image over every lane. That the two agree is the claim the gate
+ * holds (orbits_check.py [8]): a step hands the next nothing but the
+ * scratch block and the q registers, which the image loads and stores
+ * without rounding, and an image for k steps differs from the stride's
+ * in its trip count alone (docs/ORBITS.md, "Certified runs").
+ *
+ * What a certified run does beyond an ordinary one:
+ *   - stream a is +0, an explicit zero buffer (cft_run_args' `a` may
+ *     not be NULL), where an ordinary run hands q_0 - which LDL
+ *     overwrites before anything reads it, so nothing it computes
+ *     differs, and the certificate's stream hashes are what ran;
+ *   - DIR holds the image, run-0.cftp, and each boundary's state,
+ *     run-0-boundary-<b>.bin, written as it is reached - the files
+ *     cft-audit --states and cert.audit read;
+ *   - its checkpoint is version 3: version 2's lines, then the
+ *     certificate so far (the `cert` block), then a `sum` line over the
+ *     whole file, which a resume requires;
+ *   - the certificate is written only when the run completes, into
+ *     CERT.tmp and then moved to CERT without replacing anything, by
+ *     whichever process completes it - so a stop or a kill writes none,
+ *     and a resumed run writes the uninterrupted run's bytes.
+ * Every refusal of the certified path prints "cft-orbits: refused
+ * <name>: <why>" and exits with the name's code (CERT_REFUSAL, below).
  */
 #if !defined(_WIN32)
 #  define _POSIX_C_SOURCE 200112L   /* 199309L hid snprintf on Darwin (2026-09-09) */
@@ -300,11 +337,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <inttypes.h>
 #include <errno.h>
 
 #include "cft.h"
 #include "../src/sha256.h"
+#include "cert_write.h"
 
 /* The system's own words for the last failure, kept for a refusal that
  * names its cause: strerror() here, FormatMessage on Windows (below). */
@@ -681,6 +720,104 @@ static void *xcalloc(size_t n, size_t sz)
 }
 
 /* ===================================================================
+ * The certified path's refusals (the header's "Certified runs")
+ *
+ * The page's name where the page names the defect (docs/CERTIFICATES.md,
+ * "Refusals"), and cft-segrun's own name and code where it has one for
+ * the same condition ("The segment runner"); the rest are this tool's.
+ * Each prints "cft-orbits: refused <name>: <why>" and exits with the
+ * name's code. `width` has the page's 3, which the flag certificate's
+ * exit shares; the name tells them apart. None has 9, the kill
+ * instrument's. A checkpoint that does not describe this run is the
+ * checkpoint reader's to refuse, as it always was: a sentence, and exit 2
+ * (ckpt_read).
+ * =================================================================== */
+#if defined(__GNUC__)
+#  define ORB_NORETURN __attribute__((noreturn))
+#else
+#  define ORB_NORETURN
+#endif
+
+static const struct { const char *name; int code; } CERT_REFUSAL[] = {
+    /* the page's */
+    { "malformed", 2 }, { "width", 3 },
+    { "salt-length", 4 }, { "salt-missing", 4 }, { "salt-unexpected", 4 },
+    { "salt-commitment", 4 }, { "image-digest", 4 },
+    { "program-digest", 4 }, { "program-image", 4 }, { "state-shape", 4 },
+    { "state-hash", 4 }, { "state-missing", 4 },
+    { "accuracy-run", 7 }, { "accuracy-scope", 7 }, { "accuracy-slot", 7 },
+    { "accuracy-finite", 7 },
+    /* what this tool cannot certify, and why is in the sentence */
+    { "rsqrt-exact", 64 }, { "engine", 64 }, { "step-halving", 64 },
+    { "wider", 64 }, { "energy-drift", 64 },
+    /* the tool's own: cft-segrun's usage, device, memory, output and
+     * build-width */
+    { "usage", 64 }, { "device", 69 }, { "memory", 71 }, { "output", 73 },
+    { "build-width", 78 },
+    /* a resume on another build or device than the certificate names */
+    { "identity", 78 },
+};
+
+/* CERT.tmp, which a certified run creates before anything else and moves
+ * to CERT when the run completes; a process that ends otherwise removes
+ * it (atexit), and one killed leaves it, empty, for the next to cut. The
+ * name is the tool's own, as a checkpoint's .tmp is: a file of that name
+ * there already is cut, whatever made it. */
+static char  *CERT_TMP = NULL;
+static FILE  *CERT_TMP_FP = NULL;
+
+static void cert_cleanup(void)
+{
+    if (CERT_TMP_FP) {
+        fclose(CERT_TMP_FP);
+        CERT_TMP_FP = NULL;
+        remove(CERT_TMP);
+    }
+}
+
+static void refuse(const char *name, const char *fmt, ...)
+    ORB_NORETURN CW_PRINTF_LIKE(2, 3);
+
+static void refuse(const char *name, const char *fmt, ...)
+{
+    va_list ap;
+    size_t i;
+    int code = -1;
+    for (i = 0; i < sizeof CERT_REFUSAL / sizeof CERT_REFUSAL[0]; i++)
+        if (!strcmp(CERT_REFUSAL[i].name, name))
+            code = CERT_REFUSAL[i].code;
+    if (code < 0) {
+        fprintf(stderr, "cft-orbits: internal error: unnamed refusal '%s'\n",
+                name);
+        exit(70);
+    }
+    fprintf(stderr, "cft-orbits: refused %s: ", name);
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+    exit(code);
+}
+
+/* A library call of the certified path that failed, with its sentence. */
+static void refuse_st(const char *name, const char *what, cft_status st)
+    ORB_NORETURN;
+
+static void refuse_st(const char *name, const char *what, cft_status st)
+{
+    const char *d = cft_last_error();
+    refuse(name, "%s: %s%s%s", what, cft_strerror(st), (d && *d) ? " - " : "",
+           (d && *d) ? d : "");
+}
+
+/* A cert_write.h function that returned a name: refused by it. */
+static void cert_ok(const char *why, const char *what)
+{
+    if (why)
+        refuse(why, "%s", what);
+}
+
+/* ===================================================================
  * SHA-256, from the library
  *
  * There were four copies of this hash in host/tools, one per workload
@@ -1007,6 +1144,12 @@ typedef struct {
     const char *artifact;
     const char *segment_dump;                /* --segment-dump DIR */
     int         csv, quiet, dump_setup;
+    /* a certified run (the header's "Certified runs") */
+    const char *cert_path;                   /* --cert CERT */
+    const char *cert_states;                 /* --cert-states DIR */
+    const char *cert_salt_path;              /* --cert-salt SALT */
+    int         cert_open;                   /* --cert-open */
+    const char *cert_accuracy;               /* --cert-accuracy METHOD */
 } options;
 
 typedef struct {
@@ -1071,6 +1214,39 @@ typedef struct {
     int          s_dumped;            /* --segment-dump written */
     uint64_t     s_kmax;              /* longest segment the loader takes */
     double       s_sec_per_step;      /* the last segment's, 0 untimed */
+
+    /* a certified run: the certificate so far (the header's "Certified
+     * runs"). Segment k is sample interval k: it starts on boundary k
+     * and ends on boundary k + 1, and its word and STATUS are the OR of
+     * every run and chunk the engine ran inside it. */
+    int          cert;                /* --cert given */
+    uint8_t     *salt;                /* 32 bytes, or NULL: open */
+    char         commitment[CW_HEX];  /* keyed: HMAC(salt, TAG_SALT) */
+    uint8_t     *c_image;             /* the stride's image, and its size */
+    size_t       c_image_bytes;
+    cw_identity  c_id;
+    cw_text      c_ident;             /* `mode` .. `device-tiles` */
+    cw_text      c_runhead;           /* `program-format` .. `segments S` */
+    char       (*c_bhash)[CW_HEX];    /* boundary 0 .. nsamples, as reached */
+    uint32_t    *c_flags, *c_status;  /* each closed interval's */
+    uint32_t     c_iflags, c_istatus; /* the interval in progress, so far */
+    uint64_t     c_replace_from;      /* a resumed run replaces boundary
+                                         files past its checkpoint's */
+    uint8_t     *c_zero;              /* stream a, +0, one chunk long */
+    uint8_t     *c_state;             /* one boundary, lane-major */
+    size_t       c_state_bytes;
+    int          c_written;           /* the certificate is at CERT */
+    /* --cert-accuracy angular-momentum-drift: a drift entry for each
+     * component of the angular momentum, over run 0, the maximum over its
+     * lanes, exact (cert_entries) */
+    int          c_angmom;
+    unsigned     c_n_entries;
+#if CX_EXACT
+    entry_t      c_entries[3];
+    term_t      *c_terms;             /* each entry's, 2 a body */
+    rat          c_q[3];              /* each entry's value, derived */
+#endif
+    const char  *c_labels[3];
 } runstate;
 
 /* ---- chunked library calls ---------------------------------------
@@ -1684,10 +1860,30 @@ enum { SR_X = 19, SR_Y, SR_W, SR_E, SR_Z, SR_G, SR_T1, SR_V };
  *   flush-late the records are handed to the system just AFTER the
  *              checkpoint that counts them is renamed into place rather
  *              than before, so a process that ends between the two leaves
- *              the file behind the checkpoint on disk. */
+ *              the file behind the checkpoint on disk;
+ *   drop-flags a certified run's resume takes the interval in progress
+ *              as having raised nothing so far, as a checkpoint that did
+ *              not carry its flags would, so the interval's word in the
+ *              certificate is the resumed runs' alone - which a stop at
+ *              an interval's last step makes 0 where the run raised 16,
+ *              and the audit refuses (segment-flags). Certified runs only.
+ *
+ * And one TEST INSTRUMENT of the certified path, CFT_ORBITS_CERT_PLANT,
+ * which makes what no backend in this tree does reachable, as
+ * CFT_SEGRUN_PLANT does for cft-segrun: `flags-unreadable`, the device
+ * taken to be one that cannot read the sticky flags (refused `device`
+ * before anything is made); `flags-unwritten`, each segment's flag word
+ * taken to be left unwritten by the library (refused `device`);
+ * `flags-wide`, each word gaining bit 5, past the five sticky flags
+ * (refused `malformed`); and `width`, the first angular-momentum term's
+ * coefficient taken times 2^-1000, so that its first product is past the
+ * width rule (refused `width`, as the golden writer refuses the same
+ * entry). Announced on stderr; refused where there is no --cert, and
+ * `width` where there is no --cert-accuracy. */
 static int NEGCTL_TRANSPOSE = 0, NEGCTL_ZERO_R2 = 0, NEGCTL_UNCAPPED = 0;
 static int NEGCTL_LATE_STOP = 0, NEGCTL_OVERLONG = 0, NEGCTL_APPEND = 0;
-static int NEGCTL_FLUSH_LATE = 0;
+static int NEGCTL_FLUSH_LATE = 0, NEGCTL_DROP_FLAGS = 0;
+static int PLANT_UNREADABLE = 0, PLANT_UNWRITTEN = 0, PLANT_WIDE = 0;
 
 /* The test instruments, read once in main() from the environment. A
  * negative control makes the tool wrong; an instrument changes only
@@ -2110,7 +2306,10 @@ static void seg_run(runstate *R, uint64_t k)
 
     for (chunk = 0; chunk < M; chunk += O->batch) {
         size_t n = M - chunk < O->batch ? M - chunk : O->batch;
-        uint32_t fl = 0, bus = 0;
+        /* A certified run records the word the library wrote, so it is
+         * preset to what no library writes and held to having been
+         * written (as cft-segrun holds it) - no value is assumed. */
+        uint32_t fl = R->cert ? 0xFFFFFFFFu : 0, bus = 0;
         cft_run_args A;
 
         for (i = 0; i < n; i++)
@@ -2122,7 +2321,13 @@ static void seg_run(runstate *R, uint64_t k)
             }
         memset(&A, 0, sizeof A);
         A.struct_size = sizeof A;
-        A.a = CQ(R, 0) + chunk * esz;     /* r0 is overwritten by LDL */
+        /* r0 is overwritten by LDL before anything reads it, and b and c
+         * leave r1 and r2 to LDL or to nothing, so no stream reaches a
+         * result (docs/ORBITS.md, "Certified runs"). `a` may not be
+         * NULL (cft.h): an ordinary run hands q_0, which it has; a
+         * certified one hands +0, which its certificate's stream lines
+         * then state truly. */
+        A.a = R->cert ? R->c_zero : CQ(R, 0) + chunk * esz;
         A.n = n;
         A.scratch_in = R->sin;
         A.scratch_in_bytes = n * ns * esz;
@@ -2133,6 +2338,25 @@ static void seg_run(runstate *R, uint64_t k)
         st = cft_program_run_ex(prog, &A);
         if (st != CFT_OK)
             die_st("cft_program_run_ex (a segment)", st);
+        if (R->cert) {
+            if (PLANT_UNWRITTEN)
+                fl = 0xFFFFFFFFu;
+            if (PLANT_WIDE)
+                fl |= 0x20u;
+            if (fl == 0xFFFFFFFFu)
+                refuse("device", "a segment's run at step %" PRIu64 ": the "
+                       "library did not write the flag word, and a "
+                       "certificate records it%s", R->step,
+                       PLANT_UNWRITTEN ? " (planted: CFT_ORBITS_CERT_PLANT="
+                                         "flags-unwritten)" : "");
+            if (fl > 31u)
+                refuse("malformed", "a segment's run at step %" PRIu64 ": "
+                       "the library reported flags 0x%08x, and a "
+                       "certificate's flag word is the five sticky IEEE "
+                       "flags, 0 to 31%s", R->step, (unsigned)fl,
+                       PLANT_WIDE ? " (planted: CFT_ORBITS_CERT_PLANT="
+                                    "flags-wide)" : "");
+        }
         if (bus) {
             char msg[200];
             snprintf(msg, sizeof msg,
@@ -2148,7 +2372,7 @@ static void seg_run(runstate *R, uint64_t k)
                       n * ns * esz);
             seg_write(O->segment_dump, "segment.out.bin", R->sout,
                       n * ns * esz);
-            seg_write(O->segment_dump, "segment.a.bin", CQ(R, 0), n * esz);
+            seg_write(O->segment_dump, "segment.a.bin", A.a, n * esz);
             snprintf(meta, sizeof meta,
                      "format %s\nlanes %lu\nsteps %llu\nslots %lu\n"
                      "ncomp %d\nproblem %s\n",
@@ -2167,6 +2391,11 @@ static void seg_run(runstate *R, uint64_t k)
                        esz);
             }
         note_flags(fl, "a sequencer-program segment");
+        /* The interval's own word and STATUS, apart from FLAGS_SEEN,
+         * which the invariants' host calls reach too: the OR over every
+         * run and chunk inside it, as an audit's blocks are OR'd. */
+        R->c_iflags |= fl;
+        R->c_istatus |= bus;
         N_CALLS++;
         N_ELEMOPS += (uint64_t)n * k * R->s_alu_step;
         R->s_runs++;
@@ -2230,6 +2459,590 @@ static uint64_t seg_time_cap(const runstate *R, double secs)
 }
 
 /* ===================================================================
+ * The certificate (the header's "Certified runs"; docs/ORBITS.md)
+ *
+ * One run, `main`: the stride's image, `lanes` the members, `steps` the
+ * stride, +0 streams, no parameters, and a segment for each sample
+ * interval. Its states are the lane-major scratch blocks the image
+ * reads, each boundary's written to DIR as it is reached; the image is
+ * DIR/run-0.cftp. The certificate is written when the run completes.
+ * =================================================================== */
+#if defined(_WIN32)
+#  include <direct.h>
+#  define ORB_MKDIR(p) _mkdir(p)
+#else
+#  define ORB_MKDIR(p) mkdir((p), 0777)
+#endif
+
+static int path_there(const char *path, int *is_dir)
+{
+#if defined(_WIN32)
+    struct _stat64 st;
+    if (_stat64(path, &st) != 0)
+        return 0;
+    if (is_dir)
+        *is_dir = (st.st_mode & _S_IFMT) == _S_IFDIR;
+#else
+    struct stat st;
+    if (stat(path, &st) != 0)
+        return 0;
+    if (is_dir)
+        *is_dir = S_ISDIR(st.st_mode);
+#endif
+    return 1;
+}
+
+static char *cert_path_in(const char *dir, const char *name)
+{
+    size_t n = strlen(dir) + strlen(name) + 2;
+    char *p = (char *)calloc(n, 1);
+    if (!p)
+        refuse("memory", "a path in %s could not be allocated", dir);
+    snprintf(p, n, "%s/%s", dir, name);
+    return p;
+}
+
+/* The whole of a file the run wrote, or NULL with errno set; *n is its
+ * size. A file that says it holds more than `most` bytes is not read:
+ * *n is set and NULL returned with errno 0. */
+static uint8_t *cert_slurp(const char *path, size_t most, size_t *n)
+{
+    FILE *f = fopen(path, "rb");
+    int64_t len;
+    uint8_t *buf;
+    if (!f)
+        return NULL;
+    len = file_length(f);
+    if (len < 0) {
+        fclose(f);
+        errno = EINVAL;
+        return NULL;
+    }
+    *n = (size_t)len;
+    if ((uint64_t)len > (uint64_t)most) {
+        fclose(f);
+        errno = 0;
+        return NULL;
+    }
+    buf = (uint8_t *)calloc(*n ? *n : 1, 1);
+    if (!buf) {
+        fclose(f);
+        refuse("memory", "%s (%lu bytes) could not be read into memory", path,
+               (unsigned long)*n);
+    }
+    if (fread(buf, 1, *n, f) != *n) {
+        int e = errno;
+        fclose(f);
+        free(buf);
+        errno = e ? e : EIO;
+        return NULL;
+    }
+    fclose(f);
+    return buf;
+}
+
+/* The ensemble as a certificate's state: member m's slots in order, slot
+ * c = q_c and slot ncomp + c = v_c, each element format-width and
+ * little-endian - the scratch block seg_run hands the image. The
+ * transpose control's permutation is NOT applied: the certified state is
+ * the layout the image reads, so a run made under that control is
+ * refused by its own audit (segment-end). */
+static void cert_pack(const runstate *R, uint8_t *out)
+{
+    size_t esz = R->fi->esz, M = R->O->members, m;
+    size_t ns = (size_t)(2 * R->ncomp);
+    int c;
+    for (m = 0; m < M; m++)
+        for (c = 0; c < R->ncomp; c++) {
+            memcpy(out + (m * ns + SEG_SQ(c)) * esz, CQ(R, c) + m * esz, esz);
+            memcpy(out + (m * ns + SEG_SV(R, c)) * esz, CV(R, c) + m * esz,
+                   esz);
+        }
+}
+
+/* Boundary b's state, written to DIR as it is reached and hashed. A fresh
+ * run's DIR is its own and new, so each file is created new, and one
+ * there already is one this run did not make (`output`). A resumed run
+ * REPLACES a file past its checkpoint's last boundary: the process before
+ * it wrote that file and was stopped before a checkpoint counted it, and
+ * the resumed run computes the same state again, bit for bit. */
+static void cert_boundary(runstate *R, uint64_t b)
+{
+    char name[64];
+    char *path;
+    FILE *f;
+    snprintf(name, sizeof name, "run-0-boundary-%" PRIu64 ".bin", b);
+    path = cert_path_in(R->O->cert_states, name);
+    cert_pack(R, R->c_state);
+    errno = 0;
+    f = b > R->c_replace_from ? fopen(path, "wb") : cw_create_new(path);
+    if (!f)
+        refuse("output", "%s cannot be created (%s); the boundary files "
+               "written so far are left in %s", path,
+               errno == EEXIST ? "a file this run did not make is there "
+                                 "already" : strerror(errno),
+               R->O->cert_states);
+    if (fwrite(R->c_state, 1, R->c_state_bytes, f) != R->c_state_bytes) {
+        fclose(f);
+        refuse("output", "a short write to %s", path);
+    }
+    if (fclose(f) != 0)
+        refuse("output", "%s could not be closed (%s)", path, strerror(errno));
+    free(path);
+    cert_ok(cw_state_hash(R->salt, R->c_state, R->c_state_bytes,
+                          R->c_bhash[b]), "a boundary state's hash");
+}
+
+/* Interval sample - 1 has just closed: its word and STATUS are recorded,
+ * its end state is boundary `sample`, and the next interval's word begins
+ * at nothing. */
+static void cert_close(runstate *R)
+{
+    uint64_t k = R->sample - 1;
+    R->c_flags[k] = R->c_iflags;
+    R->c_status[k] = R->c_istatus;
+    R->c_iflags = R->c_istatus = 0;
+    cert_boundary(R, R->sample);
+}
+
+/* ---- the accuracy entries: the angular momentum's drift ----------------
+ *
+ * L = sum over bodies b of m_b (q_b x v_b) is a polynomial in the state,
+ * so version 1 carries its drift exactly (docs/CERTIFICATES.md, "Accuracy
+ * entries"): one `drift` entry for each component - x, y and z for the
+ * outer system, z alone for the planar Kepler problem - over run 0, the
+ * maximum over its lanes of |L(final) - L(initial)|, exact, labelled
+ * angular-momentum-<component>. Component k's terms, body by body:
+ * m_b q_(k+1) v_(k+2), then -m_b q_(k+2) v_(k+1), the indices mod 3; each
+ * coefficient is the exact value of the mass the run computed with, and 1
+ * for Kepler's test particle, whose L the tool reports as q0 v1 - q1 v0.
+ * So the quantity is the one invariants() sums, in exact arithmetic. Its
+ * drift is docs/ORBITS.md's "angular-momentum certificate": both schemes
+ * conserve L exactly, so what moves it is the arithmetic alone. Every
+ * value is cert_exact.h's, as cft-segrun and cft-audit compute every
+ * entry, held to the width rule at each step and refused `width` by name
+ * past it (the lead's conditions, 2026-09-30). */
+#if CX_EXACT
+static int PLANT_WIDTH = 0;           /* CFT_ORBITS_CERT_PLANT=width */
+
+/* A cert_exact.h status, refused by its name, the page's; one that is no
+ * verdict is an internal error, as cft-segrun's is. */
+static void cert_cx(int st, const char *why)
+{
+    const char *name = cx_name(st);
+    if (st == CX_OK)
+        return;
+    if (st == CX_LIBRARY)
+        refuse("device", "the library failed an accuracy value's rounding: "
+               "%s", why);
+    if (!name) {
+        fprintf(stderr, "cft-orbits: internal error: %s\n", why);
+        exit(70);
+    }
+    refuse(name, "%s", why);
+}
+
+/* The entries' definitions, before anything runs: their terms, and
+ * cert.derive's checks of them against the run (cx_entry_check). */
+static void cert_entries(runstate *R)
+{
+    static const char *const LABEL[3] = {
+        "angular-momentum-x", "angular-momentum-y", "angular-momentum-z"
+    };
+    const fmt_info *fi = R->fi;
+    int f = (int)fi->fmt, nb = R->nb, k, b;
+    unsigned n = 0, j;
+    char why[512];
+    cx_run m;
+
+    R->c_terms = (term_t *)calloc((size_t)(3 * 2 * nb), sizeof(term_t));
+    if (!R->c_terms)
+        refuse("memory", "the accuracy entries' terms could not be "
+               "allocated");
+    for (k = R->nd == 2 ? 2 : 0; k < 3; k++) {
+        int k1 = (k + 1) % 3, k2 = (k + 2) % 3;
+        entry_t *E = &R->c_entries[n];
+        term_t *T = R->c_terms + (size_t)n * 2 * nb;
+        memset(E, 0, sizeof *E);
+        E->method = M_DRIFT;
+        E->uses = 0;
+        E->has_lane = 0;
+        E->n_terms = (unsigned)(2 * nb);
+        E->terms = T;
+        E->value.form = V_EXACT;
+        for (b = 0; b < nb; b++) {
+            uint8_t one[MAX_ESZ];
+            const uint8_t *mass = R->c_m[b];     /* its first element */
+            char what[64];
+            if (R->O->problem == PROB_KEPLER) {
+                val_from_i64(fi, 1, one);
+                mass = one;
+            }
+            snprintf(what, sizeof what, "body %d's mass", b);
+            cert_cx(cx_exact(&T[2 * b].coef, f, mass, what, why, sizeof why),
+                    why);
+            T[2 * b].n = 2;
+            T[2 * b].slot[0] = (uint64_t)COMP(R, b, k1);
+            T[2 * b].slot[1] = (uint64_t)(R->ncomp + COMP(R, b, k2));
+            T[2 * b + 1] = T[2 * b];
+            T[2 * b + 1].coef.neg = !T[2 * b].coef.neg;
+            T[2 * b + 1].slot[0] = (uint64_t)COMP(R, b, k2);
+            T[2 * b + 1].slot[1] = (uint64_t)(R->ncomp + COMP(R, b, k1));
+        }
+        R->c_labels[n++] = LABEL[k];
+    }
+    R->c_n_entries = n;
+    if (PLANT_WIDTH) {
+        /* the first term's coefficient times 2^-1000: within the rule for
+         * Kepler's 1, and its first product with a state value past it */
+        rat p;
+        memset(&p, 0, sizeof p);
+        cft_bn_set_u32(&p.n, 1);
+        cft_bn_zero(&p.d);
+        cft_bn_setbit(&p.d, 1000);
+        if (rat_mul(&R->c_terms[0].coef, &R->c_terms[0].coef, &p))
+            refuse("width", "the planted coefficient is past the bigint");
+    }
+    m.kind = K_MAIN;
+    m.fmt = f;
+    m.lanes = R->O->members;
+    m.S = R->nsamples;
+    m.nslots = (uint32_t)(2 * R->ncomp);
+    for (j = 0; j < n; j++)
+        cert_cx(cx_entry_check(&R->c_entries[j], 1, &m, &m, why, sizeof why),
+                why);
+}
+
+/* Boundary b's state, read back from DIR and held to the hash the
+ * certificate carries for it, as cft-segrun reads its states back: a file
+ * another process changed is refused `output`. */
+static uint8_t *cert_read_back(runstate *R, uint64_t b)
+{
+    char name[64], h[CW_HEX];
+    char *path;
+    uint8_t *buf;
+    size_t n = 0;
+    snprintf(name, sizeof name, "run-0-boundary-%" PRIu64 ".bin", b);
+    path = cert_path_in(R->O->cert_states, name);
+    errno = 0;
+    buf = cert_slurp(path, R->c_state_bytes, &n);
+    if (!buf || n != R->c_state_bytes)
+        refuse("output", "%s cannot be read back as the %lu bytes this run "
+               "wrote there (%s): another process changed %s", path,
+               (unsigned long)R->c_state_bytes,
+               errno ? strerror(errno) : "its size", R->O->cert_states);
+    cert_ok(cw_state_hash(R->salt, buf, n, h), "a state read back");
+    if (strcmp(h, R->c_bhash[b]) != 0)
+        refuse("output", "%s is not the state this run wrote there - its "
+               "hash is not the one the certificate carries at boundary %"
+               PRIu64 ": another process changed %s", path, b,
+               R->O->cert_states);
+    free(path);
+    return buf;
+}
+
+/* Every entry's value, in the golden writer's order: each derived from
+ * the initial state and the final one, read back (cert.derive), and only
+ * then each made in its form (cert.make_value). */
+static void cert_derive(runstate *R)
+{
+    uint8_t *first = cert_read_back(R, 0);
+    uint8_t *last = cert_read_back(R, R->nsamples);
+    char why[512];
+    cx_run m;
+    unsigned j;
+    m.kind = K_MAIN;
+    m.fmt = (int)R->fi->fmt;
+    m.lanes = R->O->members;
+    m.S = R->nsamples;
+    m.nslots = (uint32_t)(2 * R->ncomp);
+    for (j = 0; j < R->c_n_entries; j++)
+        cert_cx(cx_entry_value(&R->c_entries[j], &m, &m, first, last,
+                               &R->c_q[j], why, sizeof why), why);
+    free(first);
+    free(last);
+    for (j = 0; j < R->c_n_entries; j++)
+        cert_cx(cx_value_make(DEV, &R->c_q[j], V_EXACT, 0, 0,
+                              &R->c_entries[j].value, why, sizeof why), why);
+}
+#endif /* CX_EXACT */
+
+/* What the certificate says before any segment runs: the stride's image
+ * and its digests (the loader must take it: a stride past its limits is
+ * refused here, with the library's sentence), the identity, the +0
+ * streams, and the lines through `segments S` - which the checkpoint
+ * carries too, and a resume holds to its own. */
+static void cert_setup(runstate *R, const cft_caps *caps)
+{
+    const options *O = R->O;
+    const fmt_info *fi = R->fi;
+    size_t M = O->members, esz = fi->esz;
+    char img_hex[CW_HEX], dig_hex[CW_HEX], strm[3][CW_HEX];
+    cft_program *p = NULL;
+    cft_status st;
+    uint8_t d[32];
+    int s;
+
+    if (R->stride > 0xffffffffull)
+        refuse("program-image", "the stride is %" PRIu64 " steps, and a "
+               "REPEAT's trip count is 32 bits: no image runs one interval "
+               "whole, so no loader could take the certificate's image "
+               "(docs/SEQUENCER.md, \"What the loader refuses\")", R->stride);
+    R->c_image = seg_build(R, R->stride, &R->c_image_bytes);
+    st = cft_program_load(DEV, R->c_image, R->c_image_bytes, &p);
+    if (st != CFT_OK) {
+        char what[200];
+        snprintf(what, sizeof what, "the image of one %" PRIu64 "-step "
+                 "interval, the certificate's: cft_program_load", R->stride);
+        refuse_st("program-image", what, st);
+    }
+    cert_ok(cw_sha256(R->c_image, R->c_image_bytes, d), "the image's digest");
+    cw_hex(d, 32, img_hex);
+    st = cft_program_digest(p, NULL, 0, d);
+    if (st != CFT_OK)
+        refuse_st("device", "cft_program_digest", st);
+    cw_hex(d, 32, dig_hex);
+    cft_program_free(p);
+
+    if (cw_identify(DEV, caps, &R->c_id))
+        refuse("malformed", "cft_build_id() returned '%s', which is not the "
+               "page's grammar; the build-id line is that string verbatim, "
+               "so no certificate can be written from it",
+               R->c_id.build_id ? R->c_id.build_id : "(null)");
+
+    if (M > ((size_t)-1) / esz)
+        refuse("memory", "%lu members' streams cannot be addressed",
+               (unsigned long)M);
+    R->c_zero = (uint8_t *)calloc(M, esz);
+    if (!R->c_zero)
+        refuse("memory", "the +0 streams (%lu elements) could not be "
+               "allocated", (unsigned long)M);
+    for (s = 0; s < 3; s++)
+        cert_ok(cw_stream_hash(R->salt, s, R->c_zero, M * esz, strm[s]),
+                "a stream's hash");
+    if (R->salt)
+        cert_ok(cw_salt_commitment(R->salt, R->commitment),
+                "the salt's commitment");
+
+    cert_ok(cw_identity_lines(&R->c_ident, R->salt ? R->commitment : NULL,
+                              &R->c_id), "the certificate's header");
+    cert_ok(cw_run_head(&R->c_runhead, cft_format_name(fi->fmt), img_hex,
+                        dig_hex, (uint64_t)M, R->stride, strm[0], strm[1],
+                        strm[2]), "the certificate's run");
+    cert_ok(cw_put(&R->c_runhead, "parameters 0\nsegments %" PRIu64 "\n",
+                   R->nsamples), "the certificate's run");
+
+    /* the certificate's own memory, sized by the run and taken now, so
+     * a run the process cannot hold is refused before anything is made */
+    if (R->nsamples >= ((size_t)-1) / CW_HEX ||
+        (size_t)(2 * R->ncomp) > ((size_t)-1) / esz / M)
+        refuse("memory", "%" PRIu64 " intervals of %lu members cannot be "
+               "addressed", R->nsamples, (unsigned long)M);
+    R->c_bhash = (char (*)[CW_HEX])calloc((size_t)R->nsamples + 1, CW_HEX);
+    R->c_flags = (uint32_t *)calloc((size_t)R->nsamples, sizeof(uint32_t));
+    R->c_status = (uint32_t *)calloc((size_t)R->nsamples, sizeof(uint32_t));
+    R->c_state_bytes = M * (size_t)(2 * R->ncomp) * esz;
+    R->c_state = (uint8_t *)calloc(R->c_state_bytes, 1);
+    if (!R->c_bhash || !R->c_flags || !R->c_status || !R->c_state)
+        refuse("memory", "the certificate's hashes and words for %" PRIu64
+               " intervals, and a state of %lu bytes, could not be "
+               "allocated", R->nsamples, (unsigned long)R->c_state_bytes);
+    R->c_replace_from = UINT64_MAX;
+#if CX_EXACT
+    if (R->c_angmom)
+        cert_entries(R);
+#endif
+}
+
+/* A fresh certified run's files: DIR, made new, and in it the image and
+ * boundary 0, the initial state - setup_state's ensemble, the records'
+ * sample 0. */
+static void cert_fresh_files(runstate *R)
+{
+    const char *dir = R->O->cert_states;
+    char *img;
+    FILE *f;
+    if (ORB_MKDIR(dir) != 0)
+        refuse("output", "--cert-states %s cannot be created (%s); a certified "
+               "run's states directory is made new, so that no two runs' "
+               "states mix", dir,
+               errno == EEXIST ? "it is there already" : strerror(errno));
+    img = cert_path_in(dir, "run-0.cftp");
+    f = cw_create_new(img);
+    if (!f || fwrite(R->c_image, 1, R->c_image_bytes, f) != R->c_image_bytes ||
+        fclose(f) != 0)
+        refuse("output", "%s cannot be written (%s)", img, strerror(errno));
+    free(img);
+    cert_boundary(R, 0);
+}
+
+/* A resumed certified run's files, held to its checkpoint: DIR is there,
+ * its image is the one this process builds, and every boundary the
+ * checkpoint has passed is there, the size of a state, and hashes to the
+ * checkpoint's hash for it. */
+static void cert_resumed_files(runstate *R)
+{
+    const char *dir = R->O->cert_states;
+    int is_dir = 0;
+    char *path;
+    uint8_t *buf;
+    size_t n = 0;
+    uint64_t b;
+    char h[CW_HEX];
+
+    if (!path_there(dir, &is_dir) || !is_dir)
+        refuse("output", "--cert-states %s is not a directory there: a "
+               "resumed certified run's states are in the directory its "
+               "first process made", dir);
+    path = cert_path_in(dir, "run-0.cftp");
+    buf = cert_slurp(path, R->c_image_bytes, &n);
+    if (!buf || n != R->c_image_bytes ||
+        memcmp(buf, R->c_image, R->c_image_bytes) != 0)
+        refuse("image-digest", "%s is %s: the image of this run's stride, "
+               "which the certificate names, is %lu bytes this process "
+               "builds", path,
+               !buf && errno ? "not there, or cannot be read"
+                             : "not that image",
+               (unsigned long)R->c_image_bytes);
+    free(buf);
+    free(path);
+    for (b = 0; b <= R->sample; b++) {
+        char name[64];
+        snprintf(name, sizeof name, "run-0-boundary-%" PRIu64 ".bin", b);
+        path = cert_path_in(dir, name);
+        errno = 0;
+        buf = cert_slurp(path, R->c_state_bytes, &n);
+        if (!buf && errno)
+            refuse("state-missing", "%s, boundary %" PRIu64 " of this run, "
+                   "is not there, or cannot be read (%s); the checkpoint has "
+                   "passed it", path, b, strerror(errno));
+        if (!buf || n != R->c_state_bytes)
+            refuse("state-shape", "%s is %lu bytes, and a state of %lu "
+                   "members is %lu", path, (unsigned long)n,
+                   (unsigned long)R->O->members,
+                   (unsigned long)R->c_state_bytes);
+        cert_ok(cw_state_hash(R->salt, buf, n, h), "a boundary state's hash");
+        if (strcmp(h, R->c_bhash[b]) != 0)
+            refuse("state-hash", "%s does not hash to the checkpoint's "
+                   "boundary %" PRIu64 ": it is not the state this run "
+                   "certified there", path, b);
+        free(buf);
+        free(path);
+    }
+}
+
+/* Before anything is read back or made: CERT is not there; DIR is not
+ * there for a fresh run, and is for a resumed one; and CERT.tmp is
+ * created now - before DIR, as cft-segrun creates its certificate before
+ * its states directory, so a CERT inside a DIR not made yet cannot be
+ * created at all. */
+static void cert_outputs(runstate *R)
+{
+    const options *O = R->O;
+    int is_dir = 0;
+    size_t n;
+    if (path_there(O->cert_path, NULL))
+        refuse("output", "--cert %s is there already: a certificate is never "
+               "written over a file", O->cert_path);
+    if (O->resume && !(path_there(O->cert_states, &is_dir) && is_dir))
+        refuse("output", "--cert-states %s is not a directory there: a "
+               "resumed certified run's states are in the directory its "
+               "first process made", O->cert_states);
+    if (!O->resume && path_there(O->cert_states, NULL))
+        refuse("output", "--cert-states %s is there already: a certified "
+               "run's states directory is made new, so that no two runs' "
+               "states mix", O->cert_states);
+    n = strlen(O->cert_path) + 5;
+    CERT_TMP = (char *)calloc(n, 1);
+    if (!CERT_TMP)
+        refuse("memory", "a path could not be allocated");
+    snprintf(CERT_TMP, n, "%s.tmp", O->cert_path);
+    CERT_TMP_FP = fopen(CERT_TMP, "wb");
+    if (!CERT_TMP_FP)
+        refuse("output", "%s cannot be created (%s): the certificate is "
+               "written there when the run completes, then moved to %s",
+               CERT_TMP, strerror(errno), O->cert_path);
+}
+
+/* The certificate, whole, once the run has completed: into CERT.tmp,
+ * then moved to CERT without replacing anything. */
+static void cert_finish(runstate *R)
+{
+    const char *cert = R->O->cert_path;
+    cw_text t;
+    uint64_t k, S = R->nsamples;
+    const char *why;
+    int moved;
+
+#if CX_EXACT
+    if (R->c_n_entries)
+        cert_derive(R);             /* before a byte of the text */
+#endif
+    memset(&t, 0, sizeof t);
+    why = cw_put(&t, "cft-certificate 1\n%sruns 1\nrun 0 main\n%s",
+                 R->c_ident.p, R->c_runhead.p);
+    for (k = 0; !why && k < S; k++)
+        why = cw_segment_line(&t, k, R->c_bhash[k], R->c_bhash[k + 1],
+                              R->c_flags[k], R->c_status[k]);
+    if (!why)
+        why = cw_put(&t, "output %s\naccuracy %u\n", R->c_bhash[S],
+                     R->c_n_entries);
+    cert_ok(why, "the certificate's text");
+#if CX_EXACT
+    {
+        char ewhy[512];
+        unsigned j;
+        for (j = 0; j < R->c_n_entries; j++) {
+            why = cw_entry_lines(&t, j, &R->c_entries[j], R->c_labels[j], DEV,
+                                 ewhy, sizeof ewhy);
+            if (why)
+                refuse(why, "%s could not be written", ewhy);
+        }
+    }
+#endif
+    cert_ok(cw_finish(&t), "the certificate's text");
+
+    if (fwrite(t.p, 1, t.n, CERT_TMP_FP) != t.n ||
+        fflush(CERT_TMP_FP) != 0)
+        refuse("output", "a short write to %s", CERT_TMP);
+    if (fclose(CERT_TMP_FP) != 0) {
+        CERT_TMP_FP = NULL;
+        remove(CERT_TMP);
+        refuse("output", "%s could not be closed", CERT_TMP);
+    }
+    CERT_TMP_FP = NULL;
+    cw_text_free(&t);
+#if defined(_WIN32)
+    /* no MOVEFILE_REPLACE_EXISTING: a CERT that is there stays */
+    moved = MoveFileExA(CERT_TMP, cert, 0) != 0;
+    if (!moved) {
+        DWORD e = GetLastError();
+        remove(CERT_TMP);
+        note_win_error(e);
+        refuse("output", "%s could not be moved to %s (%s)%s", CERT_TMP, cert,
+               SYS_ERR, (e == ERROR_ALREADY_EXISTS || e == ERROR_FILE_EXISTS)
+                        ? ": a certificate is never written over a file"
+                        : "");
+    }
+#else
+    /* link() refuses a name that is taken, where rename() would replace
+     * it; a filesystem without hard links is asked first instead */
+    moved = link(CERT_TMP, cert) == 0;
+    if (!moved && errno != EEXIST && !path_there(cert, NULL))
+        moved = rename(CERT_TMP, cert) == 0;
+    else if (moved)
+        unlink(CERT_TMP);
+    if (!moved) {
+        int e = errno;
+        unlink(CERT_TMP);
+        refuse("output", "%s could not be moved to %s (%s)%s", CERT_TMP, cert,
+               strerror(e), e == EEXIST ? ": a certificate is never "
+                                          "written over a file" : "");
+    }
+#endif
+}
+
+/* ===================================================================
  * The checkpoint
  *
  * A line-oriented ASCII file, written to <path>.tmp, flushed, closed
@@ -2244,8 +3057,22 @@ static uint64_t seg_time_cap(const runstate *R, double secs)
  * written by then, counted whether or not it is open, so the file is
  * the same either way. A version-1 file does not say it, and is
  * refused by the magic line like any other version.
+ *
+ * Version 3 (2026-09-30) is a CERTIFIED run's, and only a certified run
+ * writes it, so every other run's checkpoint is version 2 byte for byte
+ * as it was. It is version 2's lines, then the certificate so far - the
+ * `cert` block: each certificate line from `mode` to `segments S`,
+ * prefixed `cert `; `cert boundary 0 <hash>`; a `cert segment` line for
+ * each interval closed, the certificate's own line; and `cert interval
+ * flags <n> status <n>`, what the interval in progress has raised so far
+ * - then `end`, then `sum <hex>`, SHA-256 of every byte before it. Its
+ * reader is strict (ckpt_read3): the sum first, then every line once, in
+ * this order, each value in its one spelling; a resume with --cert
+ * requires version 3, and one without refuses it. Version 2's reader is
+ * as lenient as it was.
  * =================================================================== */
-#define CKPT_MAGIC "cft-orbits-checkpoint 2"
+#define CKPT_MAGIC  "cft-orbits-checkpoint 2"   /* an ordinary run's */
+#define CKPT_MAGIC3 "cft-orbits-checkpoint 3"   /* a certified run's */
 
 /* The rename that makes a checkpoint the one on disk (file_replace,
  * above, retries it on Windows while another process holds the file).
@@ -2330,12 +3157,59 @@ static void records_sync(runstate *R)
     }
 }
 
+/* Where a checkpoint's text goes: the file, and for version 3 the running
+ * SHA-256 its `sum` line states. Each piece is formatted once and written
+ * as formatted, so version 2's bytes are what its fprintf calls wrote. */
+typedef struct {
+    FILE  *f;
+    int    summed, bad;
+    sha256 h;
+} ck_sink;
+
+static void ck_put(ck_sink *o, const char *fmt, ...) CW_PRINTF_LIKE(2, 3);
+
+static void ck_put(ck_sink *o, const char *fmt, ...)
+{
+    char small[256], *buf = small;
+    va_list ap;
+    int n;
+    va_start(ap, fmt);
+    n = vsnprintf(small, sizeof small, fmt, ap);
+    va_end(ap);
+    if (n < 0) {
+        o->bad = 1;
+        return;
+    }
+    if ((size_t)n >= sizeof small) {
+        buf = (char *)xcalloc((size_t)n + 1, 1);
+        va_start(ap, fmt);
+        vsnprintf(buf, (size_t)n + 1, fmt, ap);
+        va_end(ap);
+    }
+    if (fwrite(buf, 1, (size_t)n, o->f) != (size_t)n)
+        o->bad = 1;
+    if (o->summed)
+        sha256_push(&o->h, buf, (size_t)n);
+    if (buf != small)
+        free(buf);
+}
+
+/* A cw_text's lines, each written again with `prefix` before it. */
+static void ck_lines(ck_sink *o, const char *prefix, const cw_text *t)
+{
+    const char *p = t->p, *nl;
+    while (p && *p && (nl = strchr(p, '\n')) != NULL) {
+        ck_put(o, "%s%.*s\n", prefix, (int)(nl - p), p);
+        p = nl + 1;
+    }
+}
+
 static void ckpt_write(runstate *R)
 {
     const fmt_info *fi = R->fi;
     options *O = R->O;
     char tmp[1024], dec[DECMAX], chain[65];
-    FILE *f;
+    ck_sink o;
     size_t m, esz = fi->esz, M = O->members;
     int c, k;
 
@@ -2345,56 +3219,85 @@ static void ckpt_write(runstate *R)
         records_sync(R);
     if ((size_t)snprintf(tmp, sizeof tmp, "%s.tmp", O->ckpt) >= sizeof tmp)
         die("checkpoint path too long");
-    f = fopen(tmp, "wb");
-    if (!f)
+    memset(&o, 0, sizeof o);
+    o.f = fopen(tmp, "wb");
+    if (!o.f)
         die("cannot write the checkpoint");
+    o.summed = R->cert;
+    if (o.summed)
+        sha256_start(&o.h);
 
     hex32(R->chain, chain);
-    fprintf(f, "%s\n", CKPT_MAGIC);
-    fprintf(f, "format %s\n", cft_format_name(fi->fmt));
-    fprintf(f, "problem %s\n", problem_name(O->problem));
-    fprintf(f, "scheme %s\n", scheme_name(O->scheme));
-    fprintf(f, "rsqrt %s\n", rsqrt_name(O->rsqrt));
-    fprintf(f, "members %" PRIu64 "\n", (uint64_t)M);
-    fprintf(f, "spread %" PRIu64 "\n", O->spread);
-    fprintf(f, "bodies %d\n", R->nb);
-    fprintf(f, "dims %d\n", R->nd);
+    ck_put(&o, "%s\n", R->cert ? CKPT_MAGIC3 : CKPT_MAGIC);
+    ck_put(&o, "format %s\n", cft_format_name(fi->fmt));
+    ck_put(&o, "problem %s\n", problem_name(O->problem));
+    ck_put(&o, "scheme %s\n", scheme_name(O->scheme));
+    ck_put(&o, "rsqrt %s\n", rsqrt_name(O->rsqrt));
+    ck_put(&o, "members %" PRIu64 "\n", (uint64_t)M);
+    ck_put(&o, "spread %" PRIu64 "\n", O->spread);
+    ck_put(&o, "bodies %d\n", R->nb);
+    ck_put(&o, "dims %d\n", R->nd);
     val_to_dec(fi, R->s_h, dec, sizeof dec);
-    fprintf(f, "h %s\n", dec);
-    fprintf(f, "steps %" PRIu64 "\n", R->nsteps);
-    fprintf(f, "stride %" PRIu64 "\n", R->stride);
-    fprintf(f, "samples %" PRIu64 "\n", R->nsamples);
-    fprintf(f, "at %" PRIu64 " %" PRIu64 "\n", R->step, R->sample);
-    fprintf(f, "chain %s\n", chain);
-    fprintf(f, "recbytes %" PRIu64 "\n", R->rec_bytes);
+    ck_put(&o, "h %s\n", dec);
+    ck_put(&o, "steps %" PRIu64 "\n", R->nsteps);
+    ck_put(&o, "stride %" PRIu64 "\n", R->stride);
+    ck_put(&o, "samples %" PRIu64 "\n", R->nsamples);
+    ck_put(&o, "at %" PRIu64 " %" PRIu64 "\n", R->step, R->sample);
+    ck_put(&o, "chain %s\n", chain);
+    ck_put(&o, "recbytes %" PRIu64 "\n", R->rec_bytes);
     for (m = 0; m < M; m++) {
-        fprintf(f, "state %" PRIu64, (uint64_t)m);
+        ck_put(&o, "state %" PRIu64, (uint64_t)m);
         for (c = 0; c < R->ncomp; c++) {
             val_to_dec(fi, CQ(R, c) + m * esz, dec, sizeof dec);
-            fprintf(f, " %s", dec);
+            ck_put(&o, " %s", dec);
         }
         for (c = 0; c < R->ncomp; c++) {
             val_to_dec(fi, CV(R, c) + m * esz, dec, sizeof dec);
-            fprintf(f, " %s", dec);
+            ck_put(&o, " %s", dec);
         }
-        fprintf(f, "\n");
+        ck_put(&o, "\n");
     }
     for (m = 0; m < M; m++) {
-        fprintf(f, "inv %" PRIu64, (uint64_t)m);
+        ck_put(&o, "inv %" PRIu64, (uint64_t)m);
         val_to_dec(fi, R->H0 + m * esz, dec, sizeof dec);
-        fprintf(f, " %s", dec);
+        ck_put(&o, " %s", dec);
         val_to_dec(fi, R->dHmax + m * esz, dec, sizeof dec);
-        fprintf(f, " %s", dec);
+        ck_put(&o, " %s", dec);
         for (k = 0; k < R->nL; k++) {
             val_to_dec(fi, R->L0[k] + m * esz, dec, sizeof dec);
-            fprintf(f, " %s", dec);
+            ck_put(&o, " %s", dec);
             val_to_dec(fi, R->dLmax[k] + m * esz, dec, sizeof dec);
-            fprintf(f, " %s", dec);
+            ck_put(&o, " %s", dec);
         }
-        fprintf(f, "\n");
+        ck_put(&o, "\n");
     }
-    fprintf(f, "end\n");
-    if (fflush(f) != 0 || fclose(f) != 0)
+    if (R->cert) {
+        /* the certificate so far: its lines through `segments S`, the
+         * initial state's hash, every closed interval's segment line, and
+         * the interval in progress's word and STATUS so far */
+        uint64_t j;
+        uint8_t d[32];
+        char sum[65];
+        ck_lines(&o, "cert ", &R->c_ident);
+        ck_lines(&o, "cert ", &R->c_runhead);
+        ck_put(&o, "cert entries %s\n", R->c_angmom ? "angular-momentum-drift"
+                                                    : "none");
+        ck_put(&o, "cert boundary 0 %s\n", R->c_bhash[0]);
+        for (j = 0; j < R->sample; j++)
+            ck_put(&o, "cert segment %" PRIu64 " start %s end %s flags %u "
+                   "status %u\n", j, R->c_bhash[j], R->c_bhash[j + 1],
+                   (unsigned)R->c_flags[j], (unsigned)R->c_status[j]);
+        ck_put(&o, "cert interval flags %u status %u\n",
+               (unsigned)R->c_iflags, (unsigned)R->c_istatus);
+        ck_put(&o, "end\n");
+        sha256_end(&o.h, d);
+        hex32(d, sum);
+        o.summed = 0;
+        ck_put(&o, "sum %s\n", sum);
+    } else {
+        ck_put(&o, "end\n");
+    }
+    if (o.bad || fflush(o.f) != 0 || fclose(o.f) != 0)
         die("the checkpoint did not write cleanly");
     if (ckpt_replace(tmp, O->ckpt) != 0)
         die("the checkpoint could not be renamed into place (on Windows, "
@@ -2450,6 +3353,493 @@ static int dec_u64(const char *s, uint64_t max, uint64_t *out)
     return 1;
 }
 
+/* ---- version 3: a certified run's checkpoint, read strictly -----------
+ *
+ * The sum first: the last line is `sum` and 64 lowercase hex digits, the
+ * SHA-256 of every byte before it - so a file cut, or changed anywhere,
+ * is refused before a line of it is read. Then every line once, in the
+ * order ckpt_write writes them, each value in its one spelling and range:
+ * version 2's lines held to this run as version 2's reader holds them,
+ * and to what it only skipped (spread, bodies, dims, samples); then the
+ * `cert` block. Its lines through `segments` must be the ones this
+ * process writes - the salt's by the page's names, the build and device
+ * by `identity` with both named, the image by `image-digest` and
+ * `program-digest` - and every other departure is a sentence, exit 2, as
+ * every checkpoint refusal before it was. A sum proves the bytes are the
+ * writer's, not who the writer was: a file written to pass it could hand
+ * a resume a state the run never reached mid-interval, and the audit is
+ * what refuses the certificate that follows (segment-end); at a sample
+ * boundary the state is held to the boundary's hash here. */
+static const char *CK3_FILE;
+static unsigned long CK3_LINE;
+
+static void ck3_die(const char *fmt, ...) ORB_NORETURN CW_PRINTF_LIKE(1, 2);
+
+static void ck3_die(const char *fmt, ...)
+{
+    char msg[1200];
+    int n = snprintf(msg, sizeof msg, "the checkpoint %s, line %lu: ",
+                     CK3_FILE, CK3_LINE);
+    va_list ap;
+    if (n < 0 || (size_t)n >= sizeof msg)
+        n = 0;
+    va_start(ap, fmt);
+    vsnprintf(msg + n, sizeof msg - (size_t)n, fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "cft-orbits: %s\n", msg);    /* die()'s words and exit */
+    exit(2);
+}
+
+/* The next line of the body, NUL-terminated in place; NULL past `end`. */
+static char *ck3_line(char **cur, char *stop)
+{
+    char *p = *cur, *nl;
+    if (p >= stop)
+        return NULL;
+    nl = (char *)memchr(p, '\n', (size_t)(stop - p));
+    if (!nl)
+        return NULL;
+    *nl = 0;
+    *cur = nl + 1;
+    CK3_LINE++;
+    return p;
+}
+
+/* The next line, which must be `key` and one space and its values, or
+ * `key` alone when `bare`: the values, or "" when bare. */
+static char *ck3_key(char **cur, char *stop, const char *key, int bare)
+{
+    char *ln = ck3_line(cur, stop);
+    size_t n = strlen(key);
+    if (!ln)
+        ck3_die("the file ends where `%s` belongs", key);
+    if (strncmp(ln, key, n) != 0 || (bare ? ln[n] != 0 : ln[n] != ' ' ||
+                                     !ln[n + 1]))
+        ck3_die("`%.80s` where `%s` belongs", ln, key);
+    return ln + n + (bare ? 0 : 1);
+}
+
+/* One space-separated token of *p, in place; NULL when there is none. */
+static char *ck3_tok(char **p)
+{
+    char *s = *p, *e;
+    if (!*s)
+        return NULL;
+    e = strchr(s, ' ');
+    if (e) {
+        if (e == s || !e[1])
+            return NULL;            /* two spaces, or one at the end */
+        *e = 0;
+        *p = e + 1;
+    } else {
+        *p = s + strlen(s);
+    }
+    return s;
+}
+
+/* A decimal in its one spelling, 0 or a nonzero digit and digits. */
+static int ck3_dec(const char *s, uint64_t max, uint64_t *out)
+{
+    if (!*s || (s[0] == '0' && s[1]))
+        return 0;
+    return dec_u64(s, max, out);
+}
+
+static int ck3_hex64(const char *s)
+{
+    int i;
+    for (i = 0; i < 64; i++)
+        if (!((s[i] >= '0' && s[i] <= '9') || (s[i] >= 'a' && s[i] <= 'f')))
+            return 0;
+    return s[64] == 0;
+}
+
+/* A value `s` read as `v` is in its one spelling when it is written back
+ * as `s`: the exact decimal val_to_dec gives, which is how ckpt_write
+ * wrote it. cft_from_decimal_char reads other spellings of the same value
+ * too - a leading 0, an uppercase E - and until 2026-09-30 so did this
+ * reader, for `h`, `state` and `inv` (verifier-W3). */
+static int ck3_spelt(const fmt_info *fi, const char *s, const void *v)
+{
+    char dec[DECMAX];
+    val_to_dec(fi, v, dec, sizeof dec);
+    return strcmp(dec, s) == 0;
+}
+
+/* `key <decimal>`, which must be `want`: else the sentence `why`. */
+static void ck3_want(char **cur, char *stop, const char *key, uint64_t want,
+                     const char *why)
+{
+    uint64_t v;
+    char *val = ck3_key(cur, stop, key, 0);
+    if (!ck3_dec(val, UINT64_MAX, &v))
+        ck3_die("`%s %.40s` is not a decimal in its one spelling", key, val);
+    if (v != want)
+        die(why);
+}
+
+/* A `cert` line that must be `want`, one of this process's own lines. */
+static void ck3_cert_line(runstate *R, char **cur, char *stop,
+                          const char *want, size_t wn)
+{
+    char *ln = ck3_line(cur, stop);
+    const char *key_end = memchr(want, ' ', wn);
+    size_t kn = key_end ? (size_t)(key_end - want) : wn;
+    char key[32];
+    if (!ln)
+        ck3_die("the file ends where `cert %.*s` belongs", (int)wn, want);
+    if (strncmp(ln, "cert ", 5) != 0)
+        ck3_die("`%.80s` where the certificate's `cert %.*s` belongs", ln,
+                (int)kn, want);
+    ln += 5;
+    if (strlen(ln) == wn && memcmp(ln, want, wn) == 0)
+        return;
+    snprintf(key, sizeof key, "%.*s", (int)(kn < sizeof key - 1 ? kn
+                                             : sizeof key - 1), want);
+    if (!strcmp(key, "mode") && !strncmp(ln, "mode ", 5)) {
+        if (!strcmp(ln + 5, "keyed") && !R->salt)
+            refuse("salt-missing", "the run was certified keyed, and this "
+                   "resume was handed --cert-open: resume it with the "
+                   "--cert-salt it was started with");
+        if (!strcmp(ln + 5, "open") && R->salt)
+            refuse("salt-unexpected", "the run was certified open, and this "
+                   "resume was handed --cert-salt: resume it with "
+                   "--cert-open");
+    }
+    if (!strcmp(key, "salt-commitment") &&
+        !strncmp(ln, "salt-commitment ", 16))
+        refuse("salt-commitment", "HMAC(salt, 'cft-certificate 1 salt') "
+               "of the --cert-salt handed is not the commitment the run was "
+               "certified under: this is not its salt");
+    if (!strcmp(key, "program-image") && !strncmp(ln, "program-image ", 14))
+        refuse("image-digest", "the image this process builds for the "
+               "stride, program-image %s, is not the one the run was "
+               "certified with, %s: resume it with the build that started "
+               "it, or start again", want + 14, ln + 14);
+    if (!strcmp(key, "program-digest") &&
+        !strncmp(ln, "program-digest ", 15))
+        refuse("program-digest", "this process's program digest, %s, is "
+               "not the one the run was certified with, %s", want + 15,
+               ln + 15);
+    ck3_die("`cert %.80s` where this run's certificate has `%.*s`", ln,
+            (int)wn, want);
+}
+
+/* The identity lines: all six read, then compared, so a refusal names the
+ * whole of both identities (the lead's decision, 2026-09-30). */
+static void ck3_identity(char **cur, char *stop, const char **want,
+                         const size_t *wn)
+{
+    static const char *const KEYS[6] = {
+        "build-id", "backend", "device-xclbin", "device-version",
+        "device-caps", "device-tiles"
+    };
+    char *got[6];
+    int i, differ = 0;
+    for (i = 0; i < 6; i++) {
+        size_t kn = strlen(KEYS[i]);
+        got[i] = ck3_line(cur, stop);
+        if (!got[i])
+            ck3_die("the file ends where `cert %s` belongs", KEYS[i]);
+        if (strncmp(got[i], "cert ", 5) != 0 ||
+            strncmp(got[i] + 5, KEYS[i], kn) != 0 || got[i][5 + kn] != ' ')
+            ck3_die("`%.80s` where `cert %s` belongs", got[i], KEYS[i]);
+        got[i] += 5 + kn + 1;                /* the value */
+        if (strlen(got[i]) != wn[i] || memcmp(got[i], want[i], wn[i]) != 0)
+            differ = 1;
+    }
+    if (differ)
+        refuse("identity", "the run was certified on build-id %s, backend "
+               "%s, device-xclbin %s, device-version %s, device-caps %s, "
+               "device-tiles %s; this process is build-id %.*s, backend %.*s, "
+               "device-xclbin %.*s, device-version %.*s, device-caps %.*s, "
+               "device-tiles %.*s. A certificate names one build and one "
+               "device: resume the run on those, or start it again", got[0],
+               got[1], got[2], got[3], got[4], got[5], (int)wn[0], want[0],
+               (int)wn[1], want[1], (int)wn[2], want[2], (int)wn[3], want[3],
+               (int)wn[4], want[4], (int)wn[5], want[5]);
+}
+
+/* A flag word and STATUS this tool could have written for interval k: a
+ * run stops at any flag but inexact (exit 3, note_flags) and at any
+ * STATUS bit (seg_run), so no checkpoint of a certified run holds one. A
+ * word outside that is refused, not carried into a certificate. */
+static void ck3_possible(uint64_t fl, uint64_t st, uint64_t k)
+{
+    if (fl & CERT_FLAGS)
+        ck3_die("interval %" PRIu64 " says flags %" PRIu64 ", and this tool "
+                "stops a run at any flag but inexact (exit 3), so no "
+                "checkpoint of its holds one", k, fl);
+    if (st)
+        ck3_die("interval %" PRIu64 " says STATUS %" PRIu64 ", and this tool "
+                "stops a run at any STATUS bit, so no checkpoint of its holds "
+                "one", k, st);
+}
+
+/* A cw_text's lines, one at a time: the next line and its length. */
+static const char *ck3_next_of(const char **p, size_t *n)
+{
+    const char *s = *p, *nl;
+    if (!s || !*s)
+        return NULL;
+    nl = strchr(s, '\n');
+    if (!nl)
+        return NULL;
+    *n = (size_t)(nl - s);
+    *p = nl + 1;
+    return s;
+}
+
+static void ckpt_read3(runstate *R)
+{
+    const fmt_info *fi = R->fi;
+    options *O = R->O;
+    size_t esz = fi->esz, M = O->members, n = 0, m, wn[6];
+    uint8_t *file, d[32];
+    char *body, *stop, *cur, *val, *t, sum[65];
+    const char *w, *want[6];
+    uint64_t v, step, sample, j, fl, st;
+    int c, k, i;
+
+    CK3_FILE = O->ckpt;
+    CK3_LINE = 0;
+    errno = 0;
+    file = cert_slurp(O->ckpt, (size_t)-1 / 2, &n);
+    if (!file)
+        die("cannot read the checkpoint named by --resume");
+    /* the sum: the last line, over every byte before it */
+    if (n < 70 || file[n - 1] != '\n')
+        die("the checkpoint does not end in a `sum` line and a newline "
+            "(version 3): it was cut, or it is not the file this tool wrote");
+    body = (char *)file;
+    stop = body + n - 1;                     /* the sum line's newline */
+    t = stop;
+    while (t > body && t[-1] != '\n')
+        t--;
+    if (stop - t != 68 || strncmp(t, "sum ", 4) != 0)
+        die("the checkpoint's last line is not `sum` and 64 hex digits "
+            "(version 3): it was cut, or it is not the file this tool wrote");
+    *stop = 0;
+    if (!ck3_hex64(t + 4))
+        die("the checkpoint's `sum` is not 64 lowercase hex digits");
+    {
+        sha256 h;
+        sha256_start(&h);
+        sha256_push(&h, body, (size_t)(t - body));
+        sha256_end(&h, d);
+        hex32(d, sum);
+    }
+    if (strcmp(sum, t + 4) != 0)
+        die("the checkpoint's `sum` is not the SHA-256 of what it follows: "
+            "it is not the file this tool wrote, byte for byte - it was cut, "
+            "or something else changed it (version 3)");
+    stop = t;                                /* the body ends here */
+    for (cur = body; cur < stop; cur++)
+        if (*cur != '\n' && (*cur < 0x20 || *cur > 0x7e))
+            die("the checkpoint holds a byte that is not printable ASCII");
+    cur = body;
+
+    /* version 2's lines */
+    if (strcmp(ck3_key(&cur, stop, CKPT_MAGIC3, 1), "") != 0)
+        ck3_die("not the version-3 magic line");
+    val = ck3_key(&cur, stop, "format", 0);
+    if (strcmp(val, cft_format_name(fi->fmt)))
+        die("the checkpoint was written for a different format");
+    val = ck3_key(&cur, stop, "problem", 0);
+    if (strcmp(val, problem_name(O->problem)))
+        die("the checkpoint was written for a different problem");
+    val = ck3_key(&cur, stop, "scheme", 0);
+    if (strcmp(val, scheme_name(O->scheme)))
+        die("the checkpoint was written for a different scheme");
+    val = ck3_key(&cur, stop, "rsqrt", 0);
+    if (strcmp(val, rsqrt_name(O->rsqrt)))
+        die("the checkpoint was written for a different 1/r^3 route");
+    ck3_want(&cur, stop, "members", (uint64_t)M,
+             "the checkpoint has a different ensemble size");
+    ck3_want(&cur, stop, "spread", O->spread,
+             "the checkpoint was written for a different --spread");
+    ck3_want(&cur, stop, "bodies", (uint64_t)R->nb,
+             "the checkpoint was written for a different problem");
+    ck3_want(&cur, stop, "dims", (uint64_t)R->nd,
+             "the checkpoint was written for a different problem");
+    {
+        uint8_t got[MAX_ESZ];
+        val = ck3_key(&cur, stop, "h", 0);
+        if (!val_from_dec_ok(fi, val, got, 1) || memcmp(got, R->s_h, esz))
+            die("the checkpoint was written for a different step size");
+        if (!ck3_spelt(fi, val, got))
+            ck3_die("`h %.60s` is this run's step size, not in its one "
+                    "spelling: the exact decimal this tool writes", val);
+    }
+    ck3_want(&cur, stop, "steps", R->nsteps,
+             "the checkpoint was written for a different step count");
+    ck3_want(&cur, stop, "stride", R->stride,
+             "the checkpoint was written for a different sample interval");
+    ck3_want(&cur, stop, "samples", R->nsamples,
+             "the checkpoint was written for a different sample count");
+    val = ck3_key(&cur, stop, "at", 0);
+    if (!(t = ck3_tok(&val)) || !ck3_dec(t, UINT64_MAX, &step) ||
+        !(t = ck3_tok(&val)) || !ck3_dec(t, UINT64_MAX, &sample) || *val)
+        ck3_die("bad checkpoint at-line");
+    if (step > R->nsteps || sample > R->nsamples ||
+        step < sample * R->stride || step - sample * R->stride > R->stride ||
+        (sample == R->nsamples && step != R->nsteps))
+        ck3_die("at %" PRIu64 " %" PRIu64 " is no place a run of %" PRIu64
+                " steps sampled every %" PRIu64 " can be", step, sample,
+                R->nsteps, R->stride);
+    val = ck3_key(&cur, stop, "chain", 0);
+    if (!ck3_hex64(val) || !unhex32(val, R->chain))
+        ck3_die("bad checkpoint chain");
+    val = ck3_key(&cur, stop, "recbytes", 0);
+    if (!ck3_dec(val, UINT64_MAX, &R->rec_bytes))
+        ck3_die("bad checkpoint recbytes line");
+    for (m = 0; m < M; m++) {
+        val = ck3_key(&cur, stop, "state", 0);
+        if (!(t = ck3_tok(&val)) || !ck3_dec(t, UINT64_MAX, &v) || v != m)
+            ck3_die("a state line out of its place: member %lu's belongs "
+                    "here", (unsigned long)m);
+        for (c = 0; c < 2 * R->ncomp; c++) {
+            uint8_t *dst = c < R->ncomp ? CQ(R, c) + m * esz
+                                        : CV(R, c - R->ncomp) + m * esz;
+            if (!(t = ck3_tok(&val)) || !val_from_dec_ok(fi, t, dst, 1))
+                ck3_die("bad checkpoint state value");
+            if (!ck3_spelt(fi, t, dst))
+                ck3_die("member %lu's state value `%.60s` is not in its one "
+                        "spelling, the exact decimal this tool writes",
+                        (unsigned long)m, t);
+        }
+        if (*val)
+            ck3_die("a state line longer than a member's state");
+    }
+    for (m = 0; m < M; m++) {
+        uint8_t *dst[8];
+        int nd = 0;
+        val = ck3_key(&cur, stop, "inv", 0);
+        if (!(t = ck3_tok(&val)) || !ck3_dec(t, UINT64_MAX, &v) || v != m)
+            ck3_die("an inv line out of its place: member %lu's belongs "
+                    "here", (unsigned long)m);
+        dst[nd++] = R->H0 + m * esz;
+        dst[nd++] = R->dHmax + m * esz;
+        for (k = 0; k < R->nL; k++) {
+            dst[nd++] = R->L0[k] + m * esz;
+            dst[nd++] = R->dLmax[k] + m * esz;
+        }
+        for (i = 0; i < nd; i++) {
+            if (!(t = ck3_tok(&val)) || !val_from_dec_ok(fi, t, dst[i], 1))
+                ck3_die("bad checkpoint invariant");
+            if (!ck3_spelt(fi, t, dst[i]))
+                ck3_die("member %lu's invariant `%.60s` is not in its one "
+                        "spelling, the exact decimal this tool writes",
+                        (unsigned long)m, t);
+        }
+        if (*val)
+            ck3_die("an inv line longer than a member's invariants");
+    }
+
+    /* the certificate so far: its lines through `segments`, this
+     * process's own - the identity's six read whole, then compared */
+    {
+        const char *ln[32];
+        size_t lnn[32];
+        int nl = 0, x;
+        for (x = 0; x < 2; x++) {
+            w = x ? R->c_runhead.p : R->c_ident.p;
+            while (nl < 32 && (ln[nl] = ck3_next_of(&w, &lnn[nl])) != NULL)
+                nl++;
+        }
+        for (x = 0; x < nl; x++) {
+            if (!strncmp(ln[x], "build-id ", 9) && x + 6 <= nl) {
+                for (i = 0; i < 6; i++) {
+                    const char *sp = memchr(ln[x + i], ' ', lnn[x + i]);
+                    want[i] = sp + 1;
+                    wn[i] = lnn[x + i] - (size_t)(sp + 1 - ln[x + i]);
+                }
+                ck3_identity(&cur, stop, want, wn);
+                x += 5;
+                continue;
+            }
+            ck3_cert_line(R, &cur, stop, ln[x], lnn[x]);
+        }
+    }
+    /* the entries the run was started to write: a certificate states one
+     * set, so a resume asks for the same */
+    val = ck3_key(&cur, stop, "cert entries", 0);
+    if (strcmp(val, "none") && strcmp(val, "angular-momentum-drift"))
+        ck3_die("`cert entries` is none or angular-momentum-drift, not "
+                "`%.40s`", val);
+    if (strcmp(val, R->c_angmom ? "angular-momentum-drift" : "none"))
+        die(R->c_angmom
+            ? "the run was certified without accuracy entries, and this "
+              "resume asks for --cert-accuracy angular-momentum-drift: a "
+              "certificate states one set of entries - resume the run as it "
+              "was started, or start it again"
+            : "the run was certified with --cert-accuracy "
+              "angular-momentum-drift, and this resume asks for none: a "
+              "certificate states one set of entries - resume the run as it "
+              "was started, or start it again");
+    val = ck3_key(&cur, stop, "cert boundary", 0);
+    if (!(t = ck3_tok(&val)) || strcmp(t, "0") || !ck3_hex64(val))
+        ck3_die("`cert boundary 0` and the initial state's hash belong here");
+    memcpy(R->c_bhash[0], val, CW_HEX);
+    for (j = 0; j < sample; j++) {
+        val = ck3_key(&cur, stop, "cert segment", 0);
+        if (!(t = ck3_tok(&val)) || !ck3_dec(t, UINT64_MAX, &v) || v != j)
+            ck3_die("segment %" PRIu64 "'s line belongs here: the "
+                    "checkpoint is %" PRIu64 " intervals in", j, sample);
+        if (!(t = ck3_tok(&val)) || strcmp(t, "start") ||
+            !(t = ck3_tok(&val)) || !ck3_hex64(t))
+            ck3_die("a segment line's start hash");
+        if (strcmp(t, R->c_bhash[j]) != 0)
+            ck3_die("segment %" PRIu64 " does not start where %s", j,
+                    j ? "the segment before it ended"
+                      : "boundary 0, the initial state, is");
+        if (!(t = ck3_tok(&val)) || strcmp(t, "end") ||
+            !(t = ck3_tok(&val)) || !ck3_hex64(t))
+            ck3_die("a segment line's end hash");
+        memcpy(R->c_bhash[j + 1], t, CW_HEX);
+        if (!(t = ck3_tok(&val)) || strcmp(t, "flags") ||
+            !(t = ck3_tok(&val)) || !ck3_dec(t, 31, &fl) ||
+            !(t = ck3_tok(&val)) || strcmp(t, "status") ||
+            !(t = ck3_tok(&val)) || !ck3_dec(t, 0xffffffffull, &st) || *val)
+            ck3_die("a segment line's flag word (0 to 31) and STATUS");
+        ck3_possible(fl, st, j);
+        R->c_flags[j] = (uint32_t)fl;
+        R->c_status[j] = (uint32_t)st;
+    }
+    val = ck3_key(&cur, stop, "cert interval", 0);
+    if (!(t = ck3_tok(&val)) || strcmp(t, "flags") ||
+        !(t = ck3_tok(&val)) || !ck3_dec(t, 31, &fl) ||
+        !(t = ck3_tok(&val)) || strcmp(t, "status") ||
+        !(t = ck3_tok(&val)) || !ck3_dec(t, 0xffffffffull, &st) || *val)
+        ck3_die("`cert interval flags <0..31> status <n>` belongs here");
+    ck3_possible(fl, st, sample);
+    if (step == sample * R->stride && (fl || st))
+        ck3_die("the interval in progress has run no step, and says it "
+                "raised flags %" PRIu64 " and STATUS %" PRIu64, fl, st);
+    R->c_iflags = (uint32_t)fl;
+    R->c_istatus = (uint32_t)st;
+    if (NEGCTL_DROP_FLAGS)
+        R->c_iflags = R->c_istatus = 0;      /* the planted defect */
+    (void)ck3_key(&cur, stop, "end", 1);
+    if (cur != stop)
+        ck3_die("a line after `end`, before the sum");
+    free(file);
+
+    R->step = step;
+    R->sample = sample;
+    /* at a sample boundary the state IS that boundary */
+    if (step == sample * R->stride) {
+        char h[CW_HEX];
+        cert_pack(R, R->c_state);
+        cert_ok(cw_state_hash(R->salt, R->c_state, R->c_state_bytes, h),
+                "the checkpoint's state's hash");
+        if (strcmp(h, R->c_bhash[sample]) != 0)
+            die("the checkpoint's state is not boundary the run certified "
+                "where the checkpoint says it is");
+    }
+    R->c_replace_from = sample;
+}
+
 static void ckpt_read(runstate *R)
 {
     const fmt_info *fi = R->fi;
@@ -2462,9 +3852,26 @@ static void ckpt_read(runstate *R)
 
     if (!f)
         die("cannot read the checkpoint named by --resume");
-    if (!fgets(line, (int)linecap, f) ||
-        strcmp(trim_nl(line), CKPT_MAGIC) != 0)
+    if (!fgets(line, (int)linecap, f))
         die("that file is not a cft-orbits checkpoint of this version");
+    trim_nl(line);
+    if (!strcmp(line, CKPT_MAGIC3)) {
+        fclose(f);
+        free(line);
+        if (!R->cert)
+            die("the checkpoint is version 3, a certified run's: resume it "
+                "with --cert, --cert-states and the salt choice it was "
+                "started with (docs/ORBITS.md, \"Certified runs\")");
+        ckpt_read3(R);
+        return;
+    }
+    if (strcmp(line, CKPT_MAGIC) != 0)
+        die("that file is not a cft-orbits checkpoint of this version");
+    if (R->cert)
+        die("the checkpoint is version 2, a run that was not certified: no "
+            "interval before its step has a hash or a flag word, so --cert "
+            "cannot resume it - resume it without --cert, or start the "
+            "certified run again (a certified run's checkpoint is version 3)");
 
     while (fgets(line, (int)linecap, f)) {
         char *p = line;
@@ -3230,6 +4637,28 @@ static void report(runstate *R, double elapsed, const char *backend)
     printf("  throughput    %.0f steps/s, %.0f element-steps/s, "
            "%.0f library element-ops/s\n", steps_s, elem_s, ops_s);
     printf("  chain         %s\n", chain);
+    if (R->cert && R->c_written) {
+        printf("  certificate   %s (%s, %" PRIu64 " segments of %" PRIu64
+               " steps; the image and %" PRIu64 " states in %s)\n",
+               O->cert_path, R->salt ? "keyed" : "open", R->nsamples,
+               R->stride, R->nsamples + 1, O->cert_states);
+#if CX_EXACT
+        {
+            unsigned j;
+            for (j = 0; j < R->c_n_entries; j++) {
+                char buf[CX_RAT_TEXT];
+                rat_text(&R->c_q[j], buf);
+                printf("  accuracy %u    %s drift, the most over the members, "
+                       "exact: %.60s%s\n", j, R->c_labels[j], buf,
+                       strlen(buf) > 60 ? "..." : "");
+            }
+        }
+#endif
+    }
+    else if (R->cert)
+        printf("  certificate   not written yet: the run stopped at step %"
+               PRIu64 " of %" PRIu64 ", and a certificate is written when "
+               "its run completes - --resume it\n", R->step, R->nsteps);
     printf("\n");
     free(sep0);
     free(sep1);
@@ -3286,6 +4715,17 @@ static void usage(void)
 "  --stop-after-samples N   stop cleanly after N samples this run\n"
 "  --stop-after-steps N     stop cleanly after N steps this run\n"
 "  --records PATH           one line per (sample, member), exact decimal\n"
+"  --cert CERT              certify the run (--engine segments, --rsqrt\n"
+"                           newton): a version-1 certificate, written when\n"
+"                           the run completes, a segment a sample interval\n"
+"                           (docs/ORBITS.md, \"Certified runs\")\n"
+"  --cert-states DIR        with --cert: a new directory for the image and\n"
+"                           every boundary state, the files an audit takes\n"
+"  --cert-salt SALT         with --cert: keyed under a file of 32 random\n"
+"                           bytes\n"
+"  --cert-open              with --cert: open, plain SHA-256 hashes\n"
+"  --cert-accuracy METHOD   step-halving, wider or energy-drift: each\n"
+"                           refused by its name, with the reason\n"
 "  --artifact PATH          an .xclbin; omit for the software backend\n"
 "  --csv                    machine-readable summary\n"
 "  --quiet                  summary only\n"
@@ -3301,6 +4741,104 @@ static const char *need(int argc, char **argv, int *i)
     return argv[++(*i)];
 }
 
+/* A certified run's option, given once. */
+static void cert_once(const char **slot, const char *opt, const char *v)
+{
+    if (*slot)
+        refuse("usage", "%s is given twice", opt);
+    *slot = v;
+}
+
+/* What a certified run refuses before anything is opened or made, in this
+ * order: the options' shape; the engine, the route and the accuracy it
+ * cannot certify, each by its own name; a stop it could never finish; and
+ * the salt. The engine and the route are asked before the tool's own
+ * checks of them, so that a certified run is refused by name. */
+static void cert_options(const options *O, uint8_t **salt)
+{
+    size_t n = 0;
+    if (!O->cert_path) {
+        if (O->cert_states || O->cert_salt_path || O->cert_open ||
+            O->cert_accuracy)
+            refuse("usage", "--cert-states, --cert-salt, --cert-open and "
+                   "--cert-accuracy describe a certified run, and there is "
+                   "no --cert");
+        return;
+    }
+    if (!O->cert_states)
+        refuse("usage", "--cert needs --cert-states DIR, the directory its "
+               "image and states are written to");
+    if (!!O->cert_salt_path == !!O->cert_open)
+        refuse("usage", "--cert needs one of --cert-salt SALT (keyed) and "
+               "--cert-open (open)");
+    if (O->engine != ENG_SEGMENTS)
+        refuse("engine", "--engine %s: a certified interval is one image run "
+               "over every lane, which --engine segments runs; the loop "
+               "engine runs host calls, and --engine program runs the whole "
+               "integration as one program that deposits",
+               O->engine == ENG_LOOP ? "loop (the default)" : "program");
+    if (O->rsqrt != RSQRT_NEWTON)
+        refuse("rsqrt-exact", "--rsqrt exact (the default) computes 1/r^3 "
+               "with cft_sqrt and cft_div, host calls between program runs, "
+               "so an interval is no image; certify --rsqrt newton, whose "
+               "every interval is one (the exact route needs an orbit "
+               "integrator in the golden model, docs/ROADMAP.md)");
+    if (O->cert_accuracy &&
+        strcmp(O->cert_accuracy, "angular-momentum-drift") != 0) {
+        if (!strcmp(O->cert_accuracy, "step-halving"))
+            refuse("step-halving", "a step-halving estimate needs a "
+                   "half-step run on a bank whose h-slots are halved, and "
+                   "this run's image carries its constants and takes no bank "
+                   "(the page's aux-h-slots)");
+        if (!strcmp(O->cert_accuracy, "wider"))
+            refuse("wider", "a wider re-run must be this image's "
+                   "instructions one format wider, its constants exactly "
+                   "widened; this tool derives its constants in each format "
+                   "and its Newton passes change with the format (the page's "
+                   "aux-image)");
+        if (!strcmp(O->cert_accuracy, "energy-drift"))
+            refuse("energy-drift", "the energy goes through 1/r, which is "
+                   "not a polynomial in the state, and version 1 carries a "
+                   "drift only of a polynomial (docs/CERTIFICATES.md, "
+                   "\"What version 1 does not do\")");
+        refuse("usage", "--cert-accuracy takes angular-momentum-drift, and "
+               "refuses step-halving, wider and energy-drift, each by its "
+               "name");
+    }
+#if !CX_EXACT
+    /* Unreachable in any build that links. A bigint this narrow (a
+     * CFT_BN_LIMBS below 64) needs CFT_NO_TRANSCEND (cft_config.h), which
+     * leaves out cft_acos and cft_rootn, and setup_constants calls both:
+     * measured, -DCFT_MAX_FORMAT=2 -DCFT_NO_TRANSCEND compiles this file
+     * and fails to link it (verifier-W3, 2026-09-30). The refusal stays so
+     * that a narrow build that did link would refuse an exact value by
+     * name, not compute it narrower. */
+    if (O->cert_accuracy)
+        refuse("build-width", "this build's bigint is %d bits, and an exact "
+               "value needs %d (docs/CERTIFICATES.md, \"The width rule\"): "
+               "it writes no accuracy entry rather than one computed "
+               "narrower", (int)CFT_BN_BITS, 2 * CX_WIDTH_BITS + 1);
+#endif
+    if ((O->stop_after_steps >= 0 || O->stop_after_samples >= 0) && !O->ckpt)
+        refuse("usage", "--stop-after-steps and --stop-after-samples stop a "
+               "certified run before its end, and it writes its certificate "
+               "only at its end: without --checkpoint it could never be "
+               "resumed to write one");
+    if (O->cert_salt_path) {
+        uint8_t *s;
+        errno = 0;
+        s = cert_slurp(O->cert_salt_path, 4096, &n);
+        if (!s && errno)
+            refuse("usage", "--cert-salt %s cannot be read (%s)",
+                   O->cert_salt_path, strerror(errno));
+        if (!s || n != CW_SALT_BYTES)
+            refuse("salt-length", "--cert-salt %s is %lu bytes; a salt is "
+                   "exactly %d random bytes", O->cert_salt_path,
+                   (unsigned long)n, CW_SALT_BYTES);
+        *salt = s;
+    }
+}
+
 int main(int argc, char **argv)
 {
     options O;
@@ -3314,6 +4852,7 @@ int main(int argc, char **argv)
     int stopping = 0;
     int i, c, k;
     size_t esz;
+    uint8_t *salt = NULL;       /* --cert-salt's 32 bytes, read by cert_options */
 
     memset(&O, 0, sizeof O);
     O.problem = PROB_KEPLER;
@@ -3407,6 +4946,19 @@ int main(int argc, char **argv)
         else if (!strcmp(a, "--artifact")) O.artifact = need(argc, argv, &i);
         else if (!strcmp(a, "--segment-dump"))
             O.segment_dump = need(argc, argv, &i);
+        else if (!strcmp(a, "--cert"))
+            cert_once(&O.cert_path, a, need(argc, argv, &i));
+        else if (!strcmp(a, "--cert-states"))
+            cert_once(&O.cert_states, a, need(argc, argv, &i));
+        else if (!strcmp(a, "--cert-salt"))
+            cert_once(&O.cert_salt_path, a, need(argc, argv, &i));
+        else if (!strcmp(a, "--cert-accuracy"))
+            cert_once(&O.cert_accuracy, a, need(argc, argv, &i));
+        else if (!strcmp(a, "--cert-open")) {
+            if (O.cert_open)
+                refuse("usage", "--cert-open is given twice");
+            O.cert_open = 1;
+        }
         else if (!strcmp(a, "--dump-setup")) O.dump_setup = 1;
         else if (!strcmp(a, "--csv")) O.csv = 1;
         else if (!strcmp(a, "--quiet")) O.quiet = 1;
@@ -3415,6 +4967,8 @@ int main(int argc, char **argv)
             return 2;
         }
     }
+    atexit(cert_cleanup);
+    cert_options(&O, &salt);
     if (!O.members)
         die("--members must be positive");
     if (!O.batch)
@@ -3457,10 +5011,19 @@ int main(int argc, char **argv)
                 what = "the records are handed to the system after the "
                        "checkpoint that counts them is in place - a process "
                        "ending between the two leaves them behind it";
+            } else if (!strcmp(nc, "drop-flags")) {
+                NEGCTL_DROP_FLAGS = 1;
+                what = "a certified run's resume takes the interval in "
+                       "progress as having raised nothing so far - its "
+                       "certificate is deliberately wrong there";
             } else {
                 die("CFT_ORBITS_NEGATIVE_CONTROL takes transpose, zero-r2, "
-                    "uncapped, late-stop, overlong, append or flush-late");
+                    "uncapped, late-stop, overlong, append, flush-late or "
+                    "drop-flags");
             }
+            if (NEGCTL_DROP_FLAGS && !O.cert_path)
+                die("CFT_ORBITS_NEGATIVE_CONTROL=drop-flags sabotages a "
+                    "certified run's resume, and there is no --cert");
             if (NEGCTL_APPEND || NEGCTL_FLUSH_LATE
                 ? O.engine == ENG_PROGRAM : O.engine != ENG_SEGMENTS)
                 die(NEGCTL_APPEND || NEGCTL_FLUSH_LATE
@@ -3522,6 +5085,43 @@ int main(int argc, char **argv)
             }
         }
         {
+            const char *cp = getenv("CFT_ORBITS_CERT_PLANT");
+            if (cp && *cp) {
+                int width = 0;
+                if (!strcmp(cp, "flags-unreadable"))
+                    PLANT_UNREADABLE = 1;
+                else if (!strcmp(cp, "flags-unwritten"))
+                    PLANT_UNWRITTEN = 1;
+                else if (!strcmp(cp, "flags-wide"))
+                    PLANT_WIDE = 1;
+                else if (!strcmp(cp, "width"))
+                    width = 1;
+                else
+                    die("CFT_ORBITS_CERT_PLANT takes flags-unreadable, "
+                        "flags-unwritten, flags-wide or width");
+                if (!O.cert_path)
+                    die("CFT_ORBITS_CERT_PLANT instruments a certified run, "
+                        "and there is no --cert");
+                if (width && !O.cert_accuracy)
+                    die("CFT_ORBITS_CERT_PLANT=width instruments an accuracy "
+                        "entry, and there is no --cert-accuracy");
+#if CX_EXACT
+                PLANT_WIDTH = width;
+#endif
+                fprintf(stderr, "cft-orbits: TEST INSTRUMENT ACTIVE "
+                        "(CFT_ORBITS_CERT_PLANT=%s): %s\n", cp,
+                        PLANT_UNREADABLE ? "the device is taken to be one "
+                        "that cannot read the sticky flags" :
+                        PLANT_UNWRITTEN ? "each segment's flag word is taken "
+                        "to be left unwritten by the library" :
+                        PLANT_WIDE ? "each segment's flag word gains bit 5, "
+                        "past the five sticky flags" :
+                        "the first term's coefficient is taken times "
+                        "2^-1000, so its first product is past the width "
+                        "rule");
+            }
+        }
+        {
             const char *sf = getenv("CFT_ORBITS_SHARE_FIFO");
             if (sf && *sf) {
                 if (strcmp(sf, "1"))
@@ -3550,12 +5150,20 @@ int main(int argc, char **argv)
     if (!(caps.format_mask & (1u << (unsigned)O.fmt)))
         die("this backend does not carry that format");
     FLAGS_TRUSTED = caps.flags_readable != 0;
+    if (O.cert_path && (PLANT_UNREADABLE || !caps.flags_readable))
+        refuse("device", "this %s device cannot read the sticky flags, and a "
+               "certificate records each segment's flag word%s",
+               caps.backend, PLANT_UNREADABLE ? " (planted: "
+               "CFT_ORBITS_CERT_PLANT=flags-unreadable)" : "");
 
     measure_format(&fi, O.fmt);
 
     memset(&R, 0, sizeof R);
     R.fi = &fi;
     R.O = &O;
+    R.cert = O.cert_path != NULL;
+    R.salt = salt;
+    R.c_angmom = O.cert_accuracy != NULL;   /* the one method not refused */
     esz = fi.esz;
     R.nb = O.problem == PROB_KEPLER ? 1 : N_OUTER;
     R.nd = O.problem == PROB_KEPLER ? 2 : 3;
@@ -3678,10 +5286,18 @@ int main(int argc, char **argv)
         return 0;
     }
 
+    /* A certified run's image, digests, identity and streams, then its
+     * outputs' places - all before a checkpoint is read or a file made */
+    if (R.cert) {
+        cert_setup(&R, &caps);
+        cert_outputs(&R);
+    }
     if (O.resume) {
         if (!O.ckpt)
             die("--resume needs --checkpoint");
         ckpt_read(&R);
+        if (R.cert)
+            cert_resumed_files(&R);     /* read, never changed */
     }
     if (O.records_path) {
         if (O.ckpt)
@@ -3704,6 +5320,10 @@ int main(int argc, char **argv)
                             " - it was left as it was, and nothing written "
                             "to it");
     }
+    /* the last thing before the run: a fresh certified run's DIR, its
+     * image and boundary 0 */
+    if (R.cert && !O.resume)
+        cert_fresh_files(&R);
 
     if (!O.quiet && !O.csv)
         printf("cft-orbits: %s backend, %s, p = %d, %s, %s, %s engine\n",
@@ -3853,6 +5473,8 @@ int main(int argc, char **argv)
                 break;
             R.sample++;
             emit_sample(&R, R.sample, R.step, R.q, R.v);
+            if (R.cert)
+                cert_close(&R);         /* before any checkpoint counts it */
             emitted++;
             if (O.ckpt && clock_s() - tckpt >= O.ckpt_interval) {
                 ckpt_write(&R);
@@ -3867,6 +5489,13 @@ int main(int argc, char **argv)
         ckpt_write(&R);
     if (R.recf && fclose(R.recf) != 0)
         die("the records file could not be written");
+    /* A certificate exists only for a run that completed, every interval
+     * a whole stride; the final checkpoint is on disk first, so a failure
+     * here leaves a run that --resume completes again. */
+    if (R.cert && R.sample == R.nsamples) {
+        cert_finish(&R);
+        R.c_written = 1;
+    }
 
     report(&R, elapsed, caps.backend);
 
@@ -3886,6 +5515,15 @@ int main(int argc, char **argv)
     for (k = 0; k < SEG_CACHE; k++)
         if (R.sprog[k])
             cft_program_free(R.sprog[k]);
+    free(R.salt);
+    free(R.c_image);
+    free(R.c_bhash);
+    free(R.c_flags);
+    free(R.c_status);
+    free(R.c_zero);
+    free(R.c_state);
+    cw_text_free(&R.c_ident);
+    cw_text_free(&R.c_runhead);
     cft_close(DEV);
     return 0;
 }

@@ -77,6 +77,16 @@ Seven groups of checks:
                   eleven that do not.
  7. Refusals.     What the two program engines must refuse, and the
                   precise reason each is refused.
+ 8. Certificates. Certified runs of the Newton route (docs/ORBITS.md,
+                  "Certified runs"): each sample interval one segment of
+                  the stride's image, the certificate held to the golden
+                  reader and writer, to the records and to both auditors;
+                  the same bytes however the run was cut, batched,
+                  relayed or killed; the controls, each refused by name
+                  by both auditors; and every refusal it can make, by
+                  name and code, with what each leaves - all but
+                  build-width, which no build whose tool and library
+                  share one configuration reaches.
 """
 
 import argparse
@@ -84,6 +94,7 @@ import hashlib
 import os
 import re
 import shutil
+from fractions import Fraction
 import subprocess
 import sys
 import tempfile
@@ -2074,10 +2085,1053 @@ def check_segments(tool, tmp):
               "accepted (%d of 2 refused)" % (label, refused))
 
 
+# ---------------------------------------------------------------------
+# [8] Certified runs (docs/ORBITS.md, "Certified runs")
+#
+# A certified run's certificate is held three ways: to the golden model
+# (its reader, strictly; its writer, which runs every interval WHOLE with
+# seq.run and must make the same bytes; its chain, which every boundary
+# file must be), to the tool's own records (every boundary file is its
+# sample's exact decimals), and to both auditors (cert.audit and
+# cft-audit, the same verdict, line for line or refusal for refusal).
+# Then the same bytes however the engine cut its intervals, whatever the
+# batch, and however the run was interrupted and resumed; the controls,
+# each refused by name by both auditors; and every refusal the certified
+# path can make, by name and exit code, with what each leaves behind: all
+# but `build-width`, which no build whose tool and library share one
+# configuration reaches (a mixed build does, verifier-W3b) - a bigint that
+# narrow needs CFT_NO_TRANSCEND, and cft-orbits calls cft_acos and
+# cft_rootn (docs/ORBITS.md, "Certified runs").
+# ---------------------------------------------------------------------
+_AUDIT_REFUSED = re.compile(r"^cft-audit: refused ([a-z-]+): ", re.M)
+_AUDIT_LOCATION = re.compile(r"^cft-audit: location line=(\S+) run=(\S+) "
+                             r"segment=(\S+) entry=(\S+)$", re.M)
+_ORBITS_REFUSED = re.compile(r"^cft-orbits: refused ([a-z-]+): ", re.M)
+
+
+def _golden_verdict(fn, *a, **k):
+    """-> ("refused", (name, code, location)) or ("accepted", lines)."""
+    from cft_golden import cert
+    try:
+        v = fn(*a, **k)
+    except cert.Refusal as e:
+        loc = tuple("-" if x is None else str(x)
+                    for x in (e.line, e.run, e.segment, e.entry))
+        return "refused", (e.name, e.exit_code, loc)
+    return "accepted", v.lines()
+
+
+def _tool_verdict(proc):
+    if proc.returncode == 0:
+        return "accepted", proc.stdout.split("\n")[:-1]
+    m = _AUDIT_REFUSED.search(proc.stderr)
+    loc = _AUDIT_LOCATION.search(proc.stderr)
+    if m and loc:
+        return "refused", (m.group(1), proc.returncode, tuple(loc.groups()))
+    return "error", "exit %d: %s" % (proc.returncode, proc.stderr[-200:])
+
+
+def check_certificates(tool, tmp, audit_exe):
+    """[8] certified runs of the Newton route: --cert on --engine
+    segments. Controls: the certificate's end state, flag word and an
+    interval each changed, the transpose control's own certificate, and a
+    resume that drops the interval's flags so far (=drop-flags) - each
+    refused by name by both auditors."""
+    from cft_golden import cert, chars
+    print("\n[8] certified runs: each sample interval one segment of the "
+          "stride's image, audited by both auditors")
+    tmp = Path(tmp)
+    work = tmp / "cert"
+    work.mkdir()
+    salt_file = work / "example.salt"
+    salt_file.write_bytes(bytes(range(32)))    # the page's example salt
+    other_salt = work / "other.salt"
+    other_salt.write_bytes(bytes(range(1, 33)))
+    K = ["--problem", "kepler", "--scheme", "leapfrog", "--format", "fp64",
+         "--members", 4, "--periods", 2, "--steps-per-period", 64,
+         "--sample-every", 16, "--rsqrt", "newton", "--engine", "segments",
+         "--quiet"]
+    O = ["--problem", "outer", "--scheme", "yoshida4", "--format", "fp256",
+         "--members", 3, "--years", 1, "--days", 10, "--sample-every", 9,
+         "--rsqrt", "newton", "--engine", "segments", "--quiet"]
+    MODE = {"keyed": ["--cert-salt", salt_file], "open": ["--cert-open"]}
+    SALT = {"keyed": salt_file.read_bytes(), "open": None}
+    ACC = ["--cert-accuracy", "angular-momentum-drift"]
+    seed = bytes(range(100, 132))
+    serial = [0]
+
+    def paths(tag):
+        return work / (tag + ".cert"), work / (tag + ".states")
+
+    def certify(tag, argv, mode, *extra, env=None, entries=True):
+        """A certified run, with the angular momentum's drift entries
+        unless `entries` is False; -> (proc, certificate, states dir)."""
+        c, d = paths(tag)
+        proc = tool.run(*argv, "--cert", c, "--cert-states", d, *MODE[mode],
+                        *(ACC if entries else []), *extra, expect_ok=False,
+                        env=env)
+        return proc, c, d
+
+    def audits(c, d, mode, states="all", choose=None):
+        """Both auditors on one certificate: -> (golden, tool)."""
+        image = (d / "run-0.cftp").read_bytes()
+        data = c.read_bytes()
+        sdir = d
+        if states == "initial":
+            serial[0] += 1
+            sdir = work / ("initial-%d" % serial[0])
+            sdir.mkdir()
+            shutil.copyfile(d / "run-0-boundary-0.bin",
+                            sdir / "run-0-boundary-0.bin")
+        st = {0: {int(p.name[len("run-0-boundary-"):-4]): p.read_bytes()
+                  for p in sdir.glob("run-0-boundary-*.bin")}}
+        kw = {"states": st}
+        args = [audit_exe, "--cert", c, "--states", sdir, "--run", 0,
+                "--image", d / "run-0.cftp"]
+        if choose:
+            kw.update(choose={0: ("sample", choose)}, seed=seed)
+            args += ["--choose", "sample:%d" % choose, "--seed", seed.hex()]
+        if SALT[mode] is not None:
+            args += ["--salt", salt_file]
+        g = _golden_verdict(cert.audit, data, SALT[mode],
+                            {0: (image, None)}, **kw)
+        t = _tool_verdict(subprocess.run([str(a) for a in args],
+                                         capture_output=True, text=True))
+        return g, t
+
+    def refusal(proc):
+        m = _ORBITS_REFUSED.search(proc.stderr)
+        return (m.group(1) if m else None), proc.returncode
+
+    # --- the two runs, keyed and open ------------------------------------
+    made = {}
+    for label, argv, fmtname, stride in (("kepler fp64 leapfrog", K, "fp64",
+                                          16),
+                                         ("outer fp256 yoshida4", O, "fp256",
+                                          9)):
+        fmt = FORMATS[fmtname]
+        for mode in ("keyed", "open"):
+            tag = "%s-%s" % (argv[1], mode)
+            rec = work / (tag + ".txt")
+            proc, c, d = certify(tag, argv, mode, "--records", rec)
+            if not check(proc.returncode == 0 and c.exists(),
+                         "%s, %s: certified, exit 0" % (label, mode),
+                         "%s, %s: the certified run failed (exit %d) %s"
+                         % (label, mode, proc.returncode,
+                            proc.stderr[-300:])):
+                continue
+            made[(argv[1], mode)] = (c, d, rec)
+            data = c.read_bytes()
+            try:
+                parsed = cert.parse(data, SALT[mode])
+                why = None
+            except cert.Refusal as e:
+                parsed, why = None, "%s: %s" % (e.name, e)
+            check(parsed is not None,
+                  "%s, %s: the golden reader accepts it strictly" % (label,
+                                                                     mode),
+                  "%s, %s: the golden reader refuses it - %s" % (label, mode,
+                                                                  why))
+            if parsed is None:
+                continue
+            run = parsed.runs[0]
+            image = (d / "run-0.cftp").read_bytes()
+            init = cert.state_values(fmt,
+                                     (d / "run-0-boundary-0.bin").read_bytes())
+            states, results = cert.run_chain(image, None, init,
+                                             len(run.chain))
+            grun = cert.certify_run("main", image, None, SALT[mode], states,
+                                    results, steps=run.steps)
+            # the entries, made again here: each component's terms from
+            # the problem's structure, each mass from --dump-setup's exact
+            # decimal, each value by cert.derive from the golden chain
+            st_ = tool.setup(*argv)
+            nb, nd = st_["bodies"], st_["dims"]
+            nslots = 2 * nb * nd
+            entries, sizes = [], []
+            for elabel, terms in _angmom_terms(argv[1], st_["mass"], nb, nd):
+                probe = cert.Entry("drift", "measurement", 0, None,
+                                   cert.Value("exact", exact=Fraction(0)),
+                                   elabel, terms)
+                q = cert.derive(probe, (grun,), [(run.fmt, nslots)],
+                                {(0, 0): states[0],
+                                 (0, len(states) - 1): states[-1]})
+                sizes.append((elabel, _widest(terms, fmt, states[0],
+                                              states[-1], nslots, run.lanes),
+                              q))
+                entries.append(cert.Entry("drift", "measurement", 0, None,
+                                          cert.make_value(q, "exact"), elabel,
+                                          terms))
+            gold = cert.encode(cert.Certificate(
+                parsed.mode, parsed.salt_commitment, parsed.identity,
+                (grun,), tuple(entries)))
+            files = [(d / ("run-0-boundary-%d.bin" % b)).read_bytes()
+                     for b in range(len(states))]
+            check(gold == data and all(files[b] == cert.state_bytes(fmt, s)
+                                       for b, s in enumerate(states)) and
+                  run.steps == stride and
+                  all((s.flags, s.status) == (16, 0) for s in run.chain),
+                  "%s, %s: the golden writer, running each of the %d "
+                  "intervals WHOLE with seq.run from boundary 0 and deriving "
+                  "the %d angular-momentum drift entr%s itself, writes the "
+                  "same bytes; every boundary file is its chain's state; "
+                  "every segment says flags 16 status 0, as the library "
+                  "reported" % (label, mode, len(run.chain), len(entries),
+                                "y" if len(entries) == 1 else "ies"),
+                  "%s, %s: the golden writer's certificate or chain is not "
+                  "the tool's" % (label, mode))
+            if mode == "keyed":
+                # the width rule, COMPUTED on this configuration: the most
+                # bits any value reaches on the way, in cert.derive's order
+                most = max(max(w) for _, w, _ in sizes)
+                kinds = ([e.kind for e in parsed.accuracy] ==
+                         ["measurement"] * len(entries))
+                labels = ([e.label for e in parsed.accuracy] ==
+                          [s[0] for s in sizes])
+                check(most <= 1023 and kinds and labels,
+                      "%s: each entry's kind a measurement and its label the "
+                      "component; every value within the width rule, "
+                      "computed - %s; the widest %d bits of 1,023"
+                      % (label, "; ".join(
+                          "%s %s, numerator %d and denominator %d bits, %d "
+                          "and %d the most on the way"
+                          % (n, "0" if q == 0 else "%.3e" % float(q),
+                             abs(q.numerator).bit_length(),
+                             q.denominator.bit_length(), w[0], w[1])
+                          for n, w, q in sizes), most),
+                      "%s: an entry past the width rule (%d bits), or not a "
+                      "measurement labelled by its component" % (label,
+                                                                  most))
+            # every boundary file is the records' exact decimals
+            recs = parse_records(rec)
+            good = True
+            for b in range(len(states)):
+                vals = []
+                for row in [r for r in recs if r[0] == b]:
+                    vals += [chars.from_decimal(fmt, x)[0]
+                             for x in row[3] + row[4]]
+                good &= cert.state_bytes(fmt, vals) == files[b]
+            check(good, "%s, %s: every boundary file holds its sample's "
+                        "records, exact decimal for exact decimal (the "
+                        "state lane-major, slot c q_c, slot ncomp + c v_c)"
+                  % (label, mode),
+                  "%s, %s: a boundary file is not its sample's records"
+                  % (label, mode))
+            for how, kw in (("in full from the states directory",
+                             {"states": "all"}),
+                            ("in full from boundary 0 alone, every later "
+                             "state re-run into", {"states": "initial"}),
+                            ("sampled, 2 segments under a fixed seed",
+                             {"states": "all", "choose": 2})):
+                g, t = audits(c, d, mode, **kw)
+                check(g[0] == "accepted" and t == g,
+                      "%s, %s: both auditors accept it %s, the same verdict "
+                      "line for line" % (label, mode, how),
+                      "%s, %s, audited %s: golden %s, cft-audit %s"
+                      % (label, mode, how, g, t))
+
+    # --- the same bytes however the intervals were cut --------------------
+    base = made.get(("kepler", "open"))
+    if base:
+        whole = base[0].read_bytes()
+        ck = work / "cut.ckpt"
+        for label, extra, env in (
+                ("its intervals cut at a loader limit lowered to 5 steps "
+                 "(CFT_ORBITS_SEGMENT_LIMIT)", ["--batch", 3],
+                 env_with(CFT_ORBITS_SEGMENT_LIMIT="5")),
+                ("its intervals cut by checkpoints under a steady clock "
+                 "(CFT_ORBITS_VIRTUAL_CLOCK)",
+                 ["--checkpoint", ck, "--checkpoint-interval", "0.05"],
+                 env_with(CFT_ORBITS_VIRTUAL_CLOCK="0.01")),
+                ("at batch 1, one lane a run", ["--batch", 1], None),
+                ("at batch 3, chunks of 3 and 1", ["--batch", 3], None)):
+            serial[0] += 1
+            tag = "cut-%d" % serial[0]
+            proc, c, d = certify(tag, K, "open", *extra, env=env)
+            same = (proc.returncode == 0 and c.read_bytes() == whole and
+                    all((d / p.name).read_bytes() == p.read_bytes()
+                        for p in base[1].iterdir()))
+            check(same, "kepler, open: %s - the same certificate and states, "
+                        "byte for byte" % label,
+                  "kepler, open: %s - the certificate or a state differs "
+                  "(exit %d) %s" % (label, proc.returncode,
+                                    proc.stderr[-200:]))
+    ob = made.get(("outer", "keyed"))
+    if ob:
+        proc, c, d = certify("outer-cut", O, "keyed", "--batch", 2,
+                             env=env_with(CFT_ORBITS_SEGMENT_LIMIT="4"))
+        check(proc.returncode == 0 and c.read_bytes() == ob[0].read_bytes(),
+              "outer, keyed: its intervals cut at 4 steps and in chunks of 2 "
+              "and 1 - the same certificate, byte for byte",
+              "outer, keyed: the cut run's certificate differs (exit %d)"
+              % proc.returncode)
+    # stream a: a certified run hands +0, an ordinary one q_0
+    for argv, key in ((K, "kepler"), (O, "outer")):
+        m = made.get((key, "open"))
+        if not m:
+            continue
+        rec = work / ("plain-%s.txt" % key)
+        tool.run(*argv, "--records", rec)
+        check(rec.read_bytes() == m[2].read_bytes(),
+              "%s: the certified run's records, stream a +0, are an "
+              "ordinary run's, stream a q_0, byte for byte - no stream "
+              "reaches a result" % key,
+              "%s: the certified run's records differ from an ordinary "
+              "run's" % key)
+
+    # --- resumed: the uninterrupted run's bytes ---------------------------
+    def relay(tag, argv, mode, stop, batch, env=None):
+        c, d = paths(tag)
+        ck = work / (tag + ".ckpt")
+        rounds, mid, closed_late = 0, 0, 0
+        while rounds < 60:
+            proc, c, d = certify(tag, argv, mode, "--stop-after-steps", stop,
+                                 "--checkpoint", ck, "--batch", batch,
+                                 *(["--resume"] if rounds else []),
+                                 env=env)
+            rounds += 1
+            if proc.returncode:
+                return rounds, mid, closed_late, proc
+            st, sm = _at_of(ck)
+            stride = _field_of(ck, "stride")
+            if st % stride:
+                mid += 1
+            elif st != sm * stride:
+                closed_late += 1
+            if c.exists():
+                break
+        return rounds, mid, closed_late, proc
+
+    if base:
+        whole = base[0].read_bytes()
+        for tag, stop, batch in (("relay-37", 37, 3), ("relay-16", 16, 1)):
+            rounds, mid, late, proc = relay(tag, K, "open", stop, batch)
+            c, _ = paths(tag)
+            check(proc.returncode == 0 and c.exists() and
+                  c.read_bytes() == whole and (mid or late),
+                  "kepler, open: stopped every %d steps and resumed %d times "
+                  "at batch %d (%d stops mid interval, %d at an interval's "
+                  "last step, unclosed) - the uninterrupted certificate, "
+                  "byte for byte" % (stop, rounds - 1, batch, mid, late),
+                  "kepler, open: the relay every %d steps did not end on the "
+                  "uninterrupted certificate (exit %d) %s"
+                  % (stop, proc.returncode, proc.stderr[-200:]))
+        # killed the instant its third checkpoint is in place, resumed
+        ck = work / "killed.ckpt"
+        proc, c, d = certify("killed", K, "open", "--checkpoint", ck,
+                             "--checkpoint-interval", "0.05",
+                             env=env_with(CFT_ORBITS_VIRTUAL_CLOCK="0.01",
+                                          CFT_ORBITS_DIE_AFTER_CHECKPOINT=
+                                          "3"))
+        at = _at_of(ck) if ck.exists() else None
+        p2, c, d = certify("killed", K, "open", "--checkpoint", ck,
+                           "--resume")
+        check(proc.returncode == 9 and not c.with_suffix(".cert.tmp").exists()
+              and p2.returncode == 0 and c.read_bytes() == whole,
+              "kepler, open: killed as its third checkpoint appeared (at "
+              "%s), then resumed - the uninterrupted certificate" % at,
+              "kepler, open: the killed and resumed run's certificate "
+              "differs (exits %d, %d) %s" % (proc.returncode, p2.returncode,
+                                             p2.stderr[-200:]))
+        # resumed from its final checkpoint, the certificate removed
+        c, d = paths("killed")
+        c.unlink()
+        p3, c, d = certify("killed", K, "open", "--checkpoint", ck,
+                           "--resume")
+        check(p3.returncode == 0 and c.read_bytes() == whole,
+              "kepler, open: resumed from its final checkpoint with the "
+              "certificate gone, it writes the same certificate again",
+              "kepler, open: resumed from its final checkpoint, exit %d %s"
+              % (p3.returncode, p3.stderr[-200:]))
+        # a stop at the run's last step leaves its last interval unclosed and
+        # writes no certificate; a stop at its last sample is the run
+        # completed, and writes it
+        for label, stop, writes in (
+                ("--stop-after-steps 128, the run's last step",
+                 ["--stop-after-steps", 128], False),
+                ("--stop-after-samples 8, the run's last sample",
+                 ["--stop-after-samples", 8], True)):
+            serial[0] += 1
+            tag = "stop-end-%d" % serial[0]
+            ck = work / (tag + ".ckpt")
+            proc, c, d = certify(tag, K, "open", *stop, "--checkpoint", ck)
+            at = _at_of(ck) if ck.exists() else None
+            check(proc.returncode == 0 and
+                  (c.exists() and c.read_bytes() == whole and at == [128, 8]
+                   if writes else not c.exists() and at == [128, 7]),
+                  "kepler, open: %s - %s" % (label, "the run completed, and "
+                  "its certificate is the uninterrupted one" if writes else
+                  "its last interval unclosed (at 128 7), and no certificate"),
+                  "kepler, open: %s - exit %d, at %s, certificate %s"
+                  % (label, proc.returncode, at,
+                     "written" if c.exists() else "not written"))
+        # CERT.tmp is the tool's own name, as a checkpoint's .tmp is: a file
+        # of that name there already is cut, and the certificate written
+        serial[0] += 1
+        tag = "tmp-there-%d" % serial[0]
+        c, d = paths(tag)
+        tmpf = Path(str(c) + ".tmp")
+        tmpf.write_bytes(b"a file of the user's, by the tool's own name\n")
+        proc, c, d = certify(tag, K, "open")
+        check(proc.returncode == 0 and c.exists() and
+              c.read_bytes() == whole and not tmpf.exists(),
+              "kepler, open: a file named CERT.tmp there already is cut, and "
+              "the run writes the uninterrupted certificate",
+              "kepler, open: with a CERT.tmp there already - exit %d, %s, "
+              "CERT.tmp %s" % (proc.returncode, proc.stderr[-200:],
+                               "there" if tmpf.exists() else "gone"))
+    if ob:
+        rounds, mid, late, proc = relay("relay-outer", O, "keyed", 13, 2)
+        c, _ = paths("relay-outer")
+        check(proc.returncode == 0 and c.exists() and
+              c.read_bytes() == ob[0].read_bytes(),
+              "outer, keyed: stopped every 13 steps and resumed %d times - "
+              "the uninterrupted certificate" % (rounds - 1),
+              "outer, keyed: the relay's certificate differs (exit %d) %s"
+              % (proc.returncode, proc.stderr[-200:]))
+
+    # --- the controls: each refused by name by both auditors -------------
+    def edited(src, tag, fn):
+        """A copy of certificate `src` with its body edited by fn and a
+        valid hash line over it, beside its own states."""
+        body = cert.body_of(src.read_bytes()).decode("ascii")
+        new = fn(body.split("\n")[:-1])
+        text = "\n".join(new) + "\n"
+        c = work / (tag + ".cert")
+        c.write_bytes(cert.rehash(text.encode("ascii")))
+        return c
+
+    def both_refuse(c, d, mode, states, name, seg, label):
+        g, t = audits(c, d, mode, states=states)
+        want = ("refused", (name, cert.REFUSALS[name],
+                            ("-", "0", str(seg), "-")))
+        check(g == want and t == g,
+              "CONTROL: %s - both auditors refuse %s at run 0 segment %d"
+              % (label, name, seg),
+              "CONTROL FAILED: %s - golden %s, cft-audit %s"
+              % (label, g, t))
+
+    if base:
+        c0, d0 = base[0], base[1]
+
+        def end_changed(lines):
+            seg = {int(l.split()[1]): i for i, l in enumerate(lines)
+                   if l.startswith("segment ")}
+            other = lines[seg[5]].split()[5]          # boundary 6's hash
+            a = lines[seg[2]].split()
+            a[5] = other
+            b = lines[seg[3]].split()
+            b[3] = other
+            lines[seg[2]], lines[seg[3]] = " ".join(a), " ".join(b)
+            return lines
+
+        both_refuse(edited(c0, "ctl-end", end_changed), d0, "open",
+                    "initial", "segment-end", 2,
+                    "segment 2's end state changed (its end and segment 3's "
+                    "start moved to boundary 6's hash, the hash line made "
+                    "again), audited from boundary 0")
+
+        def flags_changed(lines):
+            i = next(i for i, l in enumerate(lines)
+                     if l.startswith("segment 1 "))
+            lines[i] = lines[i].replace(" flags 16 ", " flags 17 ")
+            return lines
+
+        both_refuse(edited(c0, "ctl-flags", flags_changed), d0, "open",
+                    "all", "segment-flags", 1,
+                    "segment 1's flag word changed from 16 to 17")
+
+        def dropped(lines):
+            out, k = [], 0
+            for l in lines:
+                if l.startswith("segments "):
+                    l = "segments %d" % (int(l.split()[1]) - 1)
+                elif l.startswith("segment "):
+                    if l.startswith("segment 3 "):
+                        continue
+                    f = l.split()
+                    f[1] = str(k)
+                    k += 1
+                    l = " ".join(f)
+                out.append(l)
+            return out
+
+        both_refuse(edited(c0, "ctl-dropped", dropped), d0, "open", "all",
+                    "continuity", 3,
+                    "interval 3 dropped (its line removed, the count and the "
+                    "later indices made to agree)")
+        proc, c, d = certify("ctl-transpose", K, "open",
+                             env=env_with(CFT_ORBITS_NEGATIVE_CONTROL=
+                                          "transpose"))
+        if check(proc.returncode == 0 and c.exists(),
+                 "CONTROL: under =transpose the run certifies what it "
+                 "computed",
+                 "CONTROL: under =transpose the run failed (exit %d)"
+                 % proc.returncode):
+            both_refuse(c, d, "open", "all", "segment-end", 0,
+                        "=transpose's own certificate (v_0 and v_1 packed "
+                        "into each other's slots, the state certified in the "
+                        "layout the image reads)")
+        # a resume that drops the interval's flags so far
+        ck = work / "ctl-drop.ckpt"
+        certify("ctl-drop", K, "open", "--stop-after-steps", 16,
+                "--checkpoint", ck)
+        at = _at_of(ck)
+        proc, c, d = certify("ctl-drop", K, "open", "--checkpoint", ck,
+                             "--resume",
+                             env=env_with(CFT_ORBITS_NEGATIVE_CONTROL=
+                                          "drop-flags"))
+        check(at == [16, 0] and proc.returncode == 0 and
+              "NEGATIVE CONTROL ACTIVE" in proc.stderr and
+              c.read_bytes() != c0.read_bytes(),
+              "CONTROL: stopped at interval 0's last step (at 16 0, "
+              "unclosed) and resumed under =drop-flags, the certificate is "
+              "NOT the uninterrupted one",
+              "CONTROL FAILED: at %s, exit %d, the resumed certificate %s the "
+              "uninterrupted one" % (at, proc.returncode,
+                                     "equals" if c.exists() and
+                                     c.read_bytes() == c0.read_bytes()
+                                     else "vs"))
+        both_refuse(c, d, "open", "all", "segment-flags", 0,
+                    "a resume that dropped the interval's flags so far "
+                    "(=drop-flags)")
+
+    # --- no entries asked: `accuracy 0`; and the width rule, by name -----
+    proc, c, d = certify("no-entries", K, "open", entries=False)
+    if proc.returncode == 0 and c.exists():
+        data = c.read_bytes()
+        parsed = cert.parse(data)
+        run = parsed.runs[0]
+        image = (d / "run-0.cftp").read_bytes()
+        init = cert.state_values(FORMATS["fp64"],
+                                 (d / "run-0-boundary-0.bin").read_bytes())
+        states, results = cert.run_chain(image, None, init, len(run.chain))
+        gold = cert.encode(cert.Certificate(
+            "open", None, parsed.identity,
+            (cert.certify_run("main", image, None, None, states, results,
+                              steps=run.steps),), ()))
+        g, t = audits(c, d, "open")
+        check(gold == data and b"\naccuracy 0\n" in data and
+              g[0] == "accepted" and t == g,
+              "kepler, open, no --cert-accuracy: `accuracy 0`, the golden "
+              "writer's bytes, and both auditors accept it",
+              "kepler, open, no --cert-accuracy: not the golden writer's "
+              "bytes, or not accepted (golden %s, cft-audit %s)" % (g, t))
+    else:
+        check(False, "", "kepler, open, no --cert-accuracy: the run failed "
+                         "(exit %d) %s" % (proc.returncode, proc.stderr[-200:]))
+    # the width plant: the first term's coefficient taken times 2^-1000, so
+    # that its first product is past the rule. The golden writer refuses
+    # the same entry `width`, and so must the tool, by name, with no
+    # certificate.
+    proc, c, d = certify("width-plant", K, "open",
+                         env=env_with(CFT_ORBITS_CERT_PLANT="width"))
+    st_ = tool.setup(*K)
+    (elabel, terms), = _angmom_terms("kepler", st_["mass"], 1, 2)
+    planted = ((terms[0][0] * Fraction(1, 2 ** 1000), terms[0][1]),) + \
+        terms[1:]
+    try:
+        run = cert.parse((work / "no-entries.cert").read_bytes()).runs[0]
+        gs = cert.state_values(FORMATS["fp64"],
+                               (d / "run-0-boundary-0.bin").read_bytes())
+        gstates, gres = cert.run_chain((d / "run-0.cftp").read_bytes(), None,
+                                       gs, len(run.chain))
+        cert.derive(cert.Entry("drift", "measurement", 0, None,
+                               cert.Value("exact", exact=Fraction(0)), elabel,
+                               planted),
+                    (run,), [("fp64", 4)],
+                    {(0, 0): gstates[0], (0, len(gstates) - 1): gstates[-1]})
+        golden_says = "accepted"
+    except cert.Refusal as e:
+        golden_says = e.name + ": " + str(e)
+    # refused at the run's end: DIR is left whole, the image and every
+    # boundary, and there is no certificate and no CERT.tmp
+    left = sorted(p.name for p in d.iterdir()) if d.exists() else None
+    whole_dir = sorted(["run-0.cftp"] + ["run-0-boundary-%d.bin" % b
+                                         for b in range(9)])
+    check(refusal(proc) == ("width", 3) and "term 0's product" in
+          proc.stderr and golden_says.startswith("width") and
+          "term 0's product" in golden_says and not c.exists() and
+          not Path(str(c) + ".tmp").exists() and left == whole_dir,
+          "refused width (exit 3) at the run's end: no certificate and no "
+          "CERT.tmp, DIR left whole (the image and all 9 boundaries); the "
+          "first term's coefficient taken times 2^-1000 "
+          "(CFT_ORBITS_CERT_PLANT=width), its first product past the rule - "
+          "where the golden writer refuses the same entry, `%s`"
+          % golden_says[:90],
+          "the width plant: the tool %s (exit %d), the golden writer %s; "
+          "DIR left %s, CERT.tmp %s"
+          % (refusal(proc)[0], proc.returncode, golden_says[:120], left,
+             "there" if Path(str(c) + ".tmp").exists() else "gone"))
+
+    # --- what the certified path refuses, by name and exit code ----------
+    # the page's table, every name and its code; build-width (78) is in it
+    # and not here: no build whose tool and library share one
+    # configuration reaches it
+    NAMES = {"engine": 64, "rsqrt-exact": 64, "step-halving": 64,
+             "wider": 64, "energy-drift": 64, "usage": 64,
+             "salt-length": 4, "program-image": 4, "device": 69,
+             "malformed": 2, "width": 3, "accuracy-finite": 7,
+             "memory": 71, "output": 73, "salt-missing": 4,
+             "salt-unexpected": 4, "salt-commitment": 4, "identity": 78,
+             "image-digest": 4, "program-digest": 4, "state-missing": 4,
+             "state-hash": 4, "state-shape": 4}
+    short = ["--problem", "kepler", "--format", "fp64", "--members", 2,
+             "--periods", 1, "--steps-per-period", 32, "--sample-every", 8,
+             "--quiet"]
+    seg = ["--rsqrt", "newton", "--engine", "segments"]
+    salt31 = work / "short.salt"
+    salt31.write_bytes(bytes(31))
+    there = work / "there.cert"
+    there.write_bytes(b"not mine\n")
+    there_dir = work / "there.states"
+    there_dir.mkdir()
+    fresh_refusals = (
+        ("--engine loop, the default", [], ["--cert-open"], None, "engine"),
+        ("--engine program", ["--rsqrt", "newton", "--engine", "program"],
+         ["--cert-open"], None, "engine"),
+        ("--rsqrt exact, the default", ["--engine", "segments"],
+         ["--cert-open"], None, "rsqrt-exact"),
+        ("--cert-accuracy step-halving", seg,
+         ["--cert-open", "--cert-accuracy", "step-halving"], None,
+         "step-halving"),
+        ("--cert-accuracy wider", seg,
+         ["--cert-open", "--cert-accuracy", "wider"], None, "wider"),
+        ("--cert-accuracy energy-drift", seg,
+         ["--cert-open", "--cert-accuracy", "energy-drift"], None,
+         "energy-drift"),
+        ("--cert-accuracy of no method", seg,
+         ["--cert-open", "--cert-accuracy", "drift"], None, "usage"),
+        ("--cert-salt and --cert-open both", seg,
+         ["--cert-open", "--cert-salt", salt_file], None, "usage"),
+        ("neither --cert-salt nor --cert-open", seg, [], None, "usage"),
+        ("--cert-open given twice", seg, ["--cert-open", "--cert-open"],
+         None, "usage"),
+        ("--stop-after-steps without --checkpoint", seg,
+         ["--cert-open", "--stop-after-steps", 3], None, "usage"),
+        ("a salt of 31 bytes", seg, ["--cert-salt", salt31], None,
+         "salt-length"),
+        ("a salt file that is not there", seg,
+         ["--cert-salt", work / "no.salt"], None, "usage"),
+        ("the device taken to read no flags (CFT_ORBITS_CERT_PLANT)", seg,
+         ["--cert-open"], {"CFT_ORBITS_CERT_PLANT": "flags-unreadable"},
+         "device"),
+        ("a stride of 2^32 steps, past a trip count", ["--steps",
+         4294967296, "--sample-every", 4294967296] + seg, ["--cert-open"],
+         None, "program-image"),
+    )
+    for label, extra, cflags, env, name in fresh_refusals:
+        serial[0] += 1
+        c, d = paths("refused-%d" % serial[0])
+        proc = tool.run(*short, *extra, "--cert", c, "--cert-states", d,
+                        *cflags, expect_ok=False,
+                        env=env_with(**env) if env else None)
+        got = refusal(proc)
+        check(got == (name, NAMES[name]) and not c.exists() and
+              not d.exists() and not Path(str(c) + ".tmp").exists(),
+              "refused %s (exit %d), nothing made: %s"
+              % (name, NAMES[name], label),
+              "not refused %s (exit %d) with nothing made: %s - %s, exit "
+              "%d, %s" % (name, NAMES[name], label, got[0], proc.returncode,
+                          proc.stderr.strip()[-200:]))
+    # the loader's own ceiling: 2^40 instructions (outer yoshida4)
+    serial[0] += 1
+    c, d = paths("refused-%d" % serial[0])
+    proc = tool.run("--problem", "outer", "--scheme", "yoshida4", "--members",
+                    1, "--steps", 700000000, "--sample-every", 700000000,
+                    *seg, "--quiet", "--cert", c, "--cert-states", d,
+                    "--cert-open", expect_ok=False)
+    check(refusal(proc) == ("program-image", 4) and "cft_program_load" in
+          proc.stderr and not d.exists() and not c.exists() and
+          not Path(str(c) + ".tmp").exists(),
+          "refused program-image (exit 4), nothing made: a stride of 7e8 "
+          "outer yoshida4 steps, past the loader's 2^40 instructions, with "
+          "the library's sentence",
+          "not refused program-image for a stride past 2^40 instructions: "
+          "%s" % proc.stderr.strip()[-200:])
+    # memory: what the certificate needs, sized by the run and taken before
+    # anything is made - an interval count no size_t addresses hashes for,
+    # and one whose hashes no process can hold: 2^52 intervals are 293 PB
+    # of hashes, past an x86-64 process's address space (128 TiB, or 64
+    # PiB with five-level paging), so no allocator gives them, whatever the
+    # system's overcommit. 10^12 (65 TB) fits 47 bits, and Linux's
+    # always-overcommit would grant it and run the 10^12 steps.
+    for label, steps, sentence in (
+            ("2^62 one-step intervals, more than a size_t counts the "
+             "certificate's hashes for", 2 ** 62,
+             "%d intervals of 2 members cannot be addressed" % 2 ** 62),
+            ("2^52 one-step intervals, 293 PB of hashes, past an x86-64 "
+             "process's address space", 2 ** 52, "the certificate's hashes "
+             "and words for %d intervals, and a state of 64 bytes, could "
+             "not be allocated" % 2 ** 52)):
+        serial[0] += 1
+        c, d = paths("refused-%d" % serial[0])
+        proc = tool.run(*short, "--steps", steps, "--sample-every", 1, *seg,
+                        "--cert", c, "--cert-states", d, "--cert-open",
+                        expect_ok=False)
+        check(refusal(proc) == ("memory", NAMES["memory"]) and
+              sentence in proc.stderr and not c.exists() and
+              not d.exists() and not Path(str(c) + ".tmp").exists(),
+              "refused memory (exit 71), nothing made: %s" % label,
+              "not refused memory (exit 71) with nothing made: %s - %s, "
+              "exit %d, %s" % (label, refusal(proc)[0], proc.returncode,
+                               proc.stderr.strip()[-200:]))
+    for label, cpath, dpath, name in (
+            ("--cert already there", there, work / "new-1.states", "output"),
+            ("--cert-states already there", work / "new-2.cert", there_dir,
+             "output"),
+            ("--cert inside a --cert-states not made yet",
+             work / "new-3.states" / "c.cert", work / "new-3.states",
+             "output")):
+        before = there.read_bytes()
+        proc = tool.run(*short, *seg, "--cert", cpath, "--cert-states", dpath,
+                        "--cert-open", expect_ok=False)
+        check(refusal(proc) == (name, NAMES[name]) and
+              there.read_bytes() == before and not list(there_dir.iterdir())
+              and not (work / "new-1.states").exists() and
+              not (work / "new-3.states").exists() and
+              (cpath == there or not cpath.exists()) and
+              not Path(str(cpath) + ".tmp").exists(),
+              "refused %s (exit %d), nothing made or changed: %s"
+              % (name, NAMES[name], label),
+              "not refused %s: %s - %s" % (name, label,
+                                           proc.stderr.strip()[-200:]))
+    for plant, name in (("flags-unwritten", "device"),
+                        ("flags-wide", "malformed")):
+        serial[0] += 1
+        c, d = paths("refused-%d" % serial[0])
+        proc = tool.run(*short, *seg, "--cert", c, "--cert-states", d,
+                        "--cert-open", expect_ok=False,
+                        env=env_with(CFT_ORBITS_CERT_PLANT=plant))
+        # refused during the run: DIR is left as far as it got - its image
+        # and boundary 0 - with no certificate and no CERT.tmp
+        left = sorted(p.name for p in d.iterdir()) if d.exists() else None
+        check(refusal(proc) == (name, NAMES[name]) and not c.exists() and
+              not Path(str(c) + ".tmp").exists() and
+              left == ["run-0-boundary-0.bin", "run-0.cftp"] and
+              "planted" in proc.stderr,
+              "refused %s (exit %d) at the first segment: no certificate and "
+              "no CERT.tmp, DIR left holding its image and boundary 0; the "
+              "library's flag word taken as %s (CFT_ORBITS_CERT_PLANT)"
+              % (name, NAMES[name], plant),
+              "not refused %s under %s, or not with DIR left as far as the "
+              "run got (%s, CERT.tmp %s): %s"
+              % (name, plant, left,
+                 "there" if Path(str(c) + ".tmp").exists() else "gone",
+                 proc.stderr.strip()[-200:]))
+
+    # --- what a resume refuses, with nothing changed ---------------------
+    def stopped(tag, mode):
+        """A certified run stopped at step 37: its checkpoint and states."""
+        ck = work / (tag + ".ckpt")
+        certify(tag, K, mode, "--stop-after-steps", 37, "--checkpoint", ck)
+        return ck
+
+    def snapshot(ck, d):
+        return (ck.read_bytes(), sorted((p.name, p.read_bytes())
+                                        for p in d.iterdir()))
+
+    def resume_refused(label, tag, ck, mode_args, name, sentence=None,
+                       env=None, exit_code=None, acc=ACC):
+        c, d = paths(tag)
+        before = snapshot(ck, d)
+        proc = tool.run(*K, "--cert", c, "--cert-states", d, *mode_args, *acc,
+                        "--checkpoint", ck, "--resume", expect_ok=False,
+                        env=env)
+        got = refusal(proc)
+        if name:
+            ok_ = got == (name, NAMES[name]) and (sentence is None or
+                                                  sentence in proc.stderr)
+        else:
+            ok_ = proc.returncode == exit_code and sentence in proc.stderr
+        check(ok_ and snapshot(ck, d) == before and not c.exists() and
+              not Path(str(c) + ".tmp").exists(),
+              "resume refused %s, nothing changed: %s"
+              % (name or "(exit %d)" % exit_code, label),
+              "resume not refused as it should be: %s - exit %d, %s"
+              % (label, proc.returncode, proc.stderr.strip()[-240:]))
+
+    ckk = stopped("rs-keyed", "keyed")
+    cko = stopped("rs-open", "open")
+    resume_refused("a keyed run resumed with --cert-open", "rs-keyed", ckk,
+                   ["--cert-open"], "salt-missing")
+    resume_refused("an open run resumed with --cert-salt", "rs-open", cko,
+                   ["--cert-salt", salt_file], "salt-unexpected")
+    resume_refused("a keyed run resumed with another salt", "rs-keyed", ckk,
+                   ["--cert-salt", other_salt], "salt-commitment")
+    # the build-id line edited, the sum made again: another build
+    def another_build(body):
+        lines = body.split("\n")
+        i = next(i for i, l in enumerate(lines)
+                 if l.startswith("cert build-id "))
+        lines[i] = ("cert build-id commit=" + "0" * 40 +
+                    " tracked=clean untracked=none")
+        return "\n".join(lines)
+
+    ck_id = work / "rs-identity.ckpt"
+    ck_id.write_text(_resum(cko.read_text(), another_build), newline="\n")
+    c_o, d_o = paths("rs-open")
+    shutil.copytree(d_o, work / "rs-identity.states")
+    resume_refused("a checkpoint whose run was certified on another build "
+                   "(its build-id line changed, its sum made again)",
+                   "rs-identity", ck_id, ["--cert-open"], "identity")
+    # the states directory, each way wrong
+    for label, name, fn in (
+            ("a bit of a constant in the states directory's image flipped",
+             "image-digest",
+             lambda d: (d / "run-0.cftp").write_bytes(
+                 _flip((d / "run-0.cftp").read_bytes(), 40))),
+            ("boundary 1 removed", "state-missing",
+             lambda d: (d / "run-0-boundary-1.bin").unlink()),
+            ("boundary 1 changed", "state-hash",
+             lambda d: (d / "run-0-boundary-1.bin").write_bytes(
+                 bytes(len((d / "run-0-boundary-1.bin").read_bytes())))),
+            ("boundary 1 a byte short", "state-shape",
+             lambda d: (d / "run-0-boundary-1.bin").write_bytes(
+                 (d / "run-0-boundary-1.bin").read_bytes()[:-1]))):
+        serial[0] += 1
+        tag = "rs-dir-%d" % serial[0]
+        shutil.copytree(d_o, work / (tag + ".states"))
+        ck = work / (tag + ".ckpt")
+        shutil.copyfile(cko, ck)
+        fn(work / (tag + ".states"))
+        resume_refused(label, tag, ck, ["--cert-open"], name)
+    # the checkpoint's `cert program-digest` line not this process's, its
+    # sum made again: program-image (image-digest's) is the same digest,
+    # so only a file written to pass the sum makes the two disagree
+    serial[0] += 1
+    tag = "rs-digest-%d" % serial[0]
+    shutil.copytree(d_o, work / (tag + ".states"))
+    ck = work / (tag + ".ckpt")
+    ck.write_text(_resum(cko.read_text(), lambda b: re.sub(
+        r"(?m)^cert program-digest [0-9a-f]{64}$",
+        "cert program-digest " + "0" * 64, b)), newline="\n")
+    resume_refused("a checkpoint whose `cert program-digest` is not this "
+                   "process's (the line changed, its sum made again)", tag,
+                   ck, ["--cert-open"], "program-digest")
+    # accuracy-finite: an entry reads every state value it needs exactly,
+    # and a NaN has no exact value. No run of this tool's makes one unless a
+    # fault does ("Flags": the Newton route carries a NaN without a flag),
+    # so the resume is handed one: a completed run's final checkpoint, its
+    # certificate removed, boundary 0 given fp64's quiet NaN at lane 1 slot
+    # 0, and the checkpoint's two hashes of it (`cert boundary 0`, segment
+    # 0's start) and its sum made again. With no step left, the resume holds
+    # boundary 0 to that hash, writes its final checkpoint again, the same
+    # bytes, and refuses the entry: nothing is changed.
+    serial[0] += 1
+    tag = "rs-nan-%d" % serial[0]
+    ck_nan = work / (tag + ".ckpt")
+    proc, c, d = certify(tag, K, "open", "--checkpoint", ck_nan)
+    if check(proc.returncode == 0 and c.exists(),
+             "a run certified with its entries and a final checkpoint, for "
+             "accuracy-finite",
+             "the run for accuracy-finite failed (exit %d) %s"
+             % (proc.returncode, proc.stderr[-200:])):
+        c.unlink()
+        b0 = d / "run-0-boundary-0.bin"
+        state0 = b0.read_bytes()
+        off = (1 * 4 + 0) * 8               # lane 1 slot 0, 4 slots of 8 bytes
+        nan0 = state0[:off] + (0x7ff8 << 48).to_bytes(8, "little") + \
+            state0[off + 8:]
+        h_old, h_new = cert.state_hash(None, state0), cert.state_hash(None,
+                                                                      nan0)
+        text = ck_nan.read_text()
+        b0.write_bytes(nan0)
+        ck_nan.write_text(_resum(text, lambda b: b.replace(h_old, h_new)),
+                          newline="\n")
+        check(text.count(h_old) == 2, "boundary 0's hash is the checkpoint's "
+              "twice, `cert boundary 0` and segment 0's start: both changed",
+              "boundary 0's hash is in the checkpoint %d times, not 2"
+              % text.count(h_old))
+        resume_refused("a completed run's final checkpoint resumed with a NaN "
+                       "at boundary 0, lane 1 slot 0 (its two hashes and its "
+                       "sum made again) - the entry cannot take it exactly",
+                       tag, ck_nan, ["--cert-open"], "accuracy-finite",
+                       "lane 1 slot 0 of the initial state is nan")
+    serial[0] += 1
+    tag = "rs-nodir-%d" % serial[0]
+    ck = work / (tag + ".ckpt")
+    shutil.copyfile(cko, ck)
+    c, d = paths(tag)
+    proc = tool.run(*K, "--cert", c, "--cert-states", d, "--cert-open",
+                    *ACC, "--checkpoint", ck, "--resume", expect_ok=False)
+    check(refusal(proc) == ("output", 73) and not d.exists() and
+          ck.read_bytes() == cko.read_bytes() and not c.exists() and
+          not Path(str(c) + ".tmp").exists(),
+          "resume refused output (exit 73), nothing changed or made: its "
+          "states directory is not there",
+          "resume without its states directory: %s"
+          % proc.stderr.strip()[-200:])
+    # a certificate states one set of entries: a resume asks for the same
+    serial[0] += 1
+    tag = "rs-entries-%d" % serial[0]
+    shutil.copytree(d_o, work / (tag + ".states"))
+    ck = work / (tag + ".ckpt")
+    shutil.copyfile(cko, ck)
+    resume_refused("a run certified with the angular-momentum entries, "
+                   "resumed without --cert-accuracy", tag, ck,
+                   ["--cert-open"], None, "the run was certified with "
+                   "--cert-accuracy angular-momentum-drift, and this resume "
+                   "asks for none", exit_code=2, acc=[])
+    ck_plain = work / "rs-noentries.ckpt"
+    certify("rs-noentries", K, "open", "--stop-after-steps", 37,
+            "--checkpoint", ck_plain, entries=False)
+    resume_refused("a run certified without entries, resumed with "
+                   "--cert-accuracy angular-momentum-drift", "rs-noentries",
+                   ck_plain, ["--cert-open"], None, "the run was certified "
+                   "without accuracy entries", exit_code=2)
+    # the checkpoint's own refusals: a sentence, and exit 2
+    plain = work / "rs-plain.ckpt"
+    tool.run(*K, "--stop-after-steps", 37, "--checkpoint", plain)
+    serial[0] += 1
+    tag = "rs-v2-%d" % serial[0]
+    shutil.copytree(d_o, work / (tag + ".states"))
+    resume_refused("an uncertified run's checkpoint (version 2) with --cert",
+                   tag, plain, ["--cert-open"], None,
+                   "the checkpoint is version 2, a run that was not "
+                   "certified", exit_code=2)
+    before = cko.read_bytes()
+    proc = tool.run(*K, "--checkpoint", cko, "--resume", expect_ok=False)
+    check(proc.returncode == 2 and "the checkpoint is version 3, a certified "
+          "run's" in proc.stderr and cko.read_bytes() == before,
+          "resume refused (exit 2), nothing changed: a certified run's "
+          "checkpoint (version 3) without --cert",
+          "a version-3 checkpoint resumed without --cert: exit %d, %s"
+          % (proc.returncode, proc.stderr.strip()[-200:]))
+    for label, fn, sentence in (
+            ("a byte changed in its state lines",
+             lambda t: t.replace("state 1 ", "state 1 1", 1),
+             "is not the SHA-256 of what it follows"),
+            ("cut a line short", lambda t: t[:-30] + "\n",
+             "last line is not `sum`"),
+            ("a line repeated, its sum made again",
+             lambda t: _resum(t, lambda b: b.replace(
+                 "cert lanes 4\n", "cert lanes 4\ncert lanes 4\n", 1)),
+             "where this run's certificate has `steps 16`"),
+            ("the last closed segment's flag word 16 made 99, its sum made "
+             "again",
+             lambda t: _resum(t, lambda b: b.replace(
+                 " flags 16 status 0\ncert interval",
+                 " flags 99 status 0\ncert interval", 1)),
+             "flag word (0 to 31)"),
+            ("the last closed segment's flag word 16 made 17, invalid "
+             "raised, which this tool would have stopped at, its sum made "
+             "again",
+             lambda t: _resum(t, lambda b: b.replace(
+                 " flags 16 status 0\ncert interval",
+                 " flags 17 status 0\ncert interval", 1)),
+             "stops a run at any flag but inexact"),
+            ("the interval in progress's STATUS 0 made 1, its sum made "
+             "again",
+             lambda t: _resum(t, lambda b: b.replace(
+                 "cert interval flags 16 status 0\n",
+                 "cert interval flags 16 status 1\n", 1)),
+             "stops a run at any STATUS bit"),
+            # each value in its one spelling: the same value spelt another
+            # way, which cft_from_decimal_char reads (verifier-W3)
+            ("its step size h respelt with a leading 0, the same value, its "
+             "sum made again",
+             lambda t: _resum(t, lambda b: _respelt(b, "h ", 1, "zero")),
+             "is this run's step size, not in its one spelling"),
+            ("member 1's first state value respelt with an uppercase E, the "
+             "same value, its sum made again",
+             lambda t: _resum(t, lambda b: _respelt(b, "state 1 ", 2, "E")),
+             "member 1's state value"),
+            ("member 0's energy respelt with an uppercase E, the same value, "
+             "its sum made again",
+             lambda t: _resum(t, lambda b: _respelt(b, "inv 0 ", 2, "E")),
+             "member 0's invariant")):
+        serial[0] += 1
+        tag = "rs-ck-%d" % serial[0]
+        shutil.copytree(d_o, work / (tag + ".states"))
+        ck = work / (tag + ".ckpt")
+        ck.write_text(fn(cko.read_text()), newline="\n")
+        resume_refused("a version-3 checkpoint " + label, tag, ck,
+                       ["--cert-open"], None, sentence, exit_code=2)
+
+
+def _flip(data, i):
+    """`data` with bit 0 of byte i flipped."""
+    return data[:i] + bytes([data[i] ^ 1]) + data[i + 1:]
+
+
+def _angmom_terms(problem, masses, nb, nd):
+    """The angular momentum's drift entries' terms, from the problem's
+    structure alone: for each component k (z alone in the plane), body by
+    body, m_b q_(k+1) v_(k+2) then -m_b q_(k+2) v_(k+1), indices mod 3, a
+    state's slot c q_c and slot ncomp + c v_c; m_b the exact value of the
+    mass --dump-setup states, and 1 for Kepler's test particle.
+    -> [(label, ((coefficient, (slot, slot)), ...)), ...]"""
+    ncomp = nb * nd
+    out = []
+    for k in ((2,) if nd == 2 else (0, 1, 2)):
+        k1, k2 = (k + 1) % 3, (k + 2) % 3
+        terms = []
+        for b in range(nb):
+            m = Fraction(1) if problem == "kepler" else Fraction(masses[b])
+            terms.append((m, (b * nd + k1, ncomp + b * nd + k2)))
+            terms.append((-m, (b * nd + k2, ncomp + b * nd + k1)))
+        out.append(("angular-momentum-" + "xyz"[k], tuple(terms)))
+    return out
+
+
+def _widest(terms, fmt, first, last, nslots, lanes):
+    """The most bits a numerator and a denominator reach on the way to a
+    drift entry's value, every value cert.derive computes, in its order:
+    each element's, each product, each partial sum, each lane's drift.
+    -> [numerator bits, denominator bits]"""
+    from cft_golden import cert
+    most = [0, 0]
+
+    def note(q):
+        most[0] = max(most[0], abs(q.numerator).bit_length())
+        most[1] = max(most[1], q.denominator.bit_length())
+        return q
+
+    def q_of(state, i):
+        q = Fraction(0)
+        for c, slots in terms:
+            p = note(c)
+            for s in slots:
+                v = note(cert.element_fraction(fmt, state[i * nslots + s])[1])
+                p = note(p * v)
+            q = note(q + p)
+        return q
+    for i in range(lanes):
+        note(q_of(last, i) - q_of(first, i))
+    return most
+
+
+def _resum(text, fn):
+    """A version-3 checkpoint's body edited by fn, its sum made again."""
+    body = fn(text[:text.rindex("sum ")])
+    return body + "sum " + hashlib.sha256(body.encode()).hexdigest() + "\n"
+
+
+def _respelt(body, prefix, index, how):
+    """`body` with token `index` of its first line that begins `prefix`
+    spelt another way, the same value: a 0 put before its first digit
+    ("zero"), or its exponent's e made E ("E")."""
+    lines = body.split("\n")
+    i = next(i for i, l in enumerate(lines) if l.startswith(prefix))
+    tok = lines[i].split(" ")
+    v = tok[index]
+    if how == "zero":
+        v = v[:1] + "0" + v[1:] if v[:1] == "-" else "0" + v
+    else:
+        assert "e" in v, v
+        v = v.replace("e", "E", 1)
+    tok[index] = v
+    lines[i] = " ".join(tok)
+    return "\n".join(lines)
+
+
 def main():
     global CHECKS
     ap = argparse.ArgumentParser()
     ap.add_argument("--exe", default=None)
+    ap.add_argument("--audit", default=None,
+                    help="cft-audit, for [8]; host/cft-audit by default")
     ap.add_argument("--quick", action="store_true")
     args = ap.parse_args()
 
@@ -2090,7 +3144,19 @@ def main():
                 break
     if exe is None or not Path(exe).exists():
         raise SystemExit("cft-orbits not found - run `make -C host orbits`")
-    tool = Tool(exe)
+    audit = args.audit
+    if audit is None:
+        for cand in ("cft-audit.exe", "cft-audit"):
+            path = ROOT / "host" / cand
+            if path.exists():
+                audit = path
+                break
+    if audit is None or not Path(audit).exists():
+        raise SystemExit("cft-audit not found, and [8] audits every "
+                         "certificate with it - `make -C host orbitstest` "
+                         "builds it")
+    audit = Path(audit).resolve()
+    tool = Tool(Path(exe).resolve())
     tmp = tempfile.mkdtemp(prefix="orbits-check-")
 
     periods = 2 if args.quick else 4
@@ -2483,7 +3549,7 @@ def main():
              ["--engine", "segments", "--periods", 1],
              dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="transposed"),
              "takes transpose, zero-r2, uncapped, late-stop, overlong, "
-             "append or flush-late"),
+             "append, flush-late or drop-flags"),
             ("=flush-late on --engine program, which cannot resume",
              ["--engine", "program", "--rsqrt", "newton", "--periods", 1],
              dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="flush-late"),
@@ -2510,6 +3576,22 @@ def main():
              ["--engine", "loop", "--periods", 1],
              dict(os.environ, CFT_ORBITS_SHARE_FIFO="1"),
              "instruments the records file, and there is no --records"),
+            ("CFT_ORBITS_CERT_PLANT on a run that is not certified",
+             ["--engine", "segments", "--rsqrt", "newton", "--periods", 1],
+             dict(os.environ, CFT_ORBITS_CERT_PLANT="flags-wide"),
+             "instruments a certified run, and there is no --cert"),
+            ("CFT_ORBITS_CERT_PLANT=width on a certified run with no entry",
+             ["--engine", "segments", "--rsqrt", "newton", "--periods", 1,
+              "--cert", Path(tmp) / "never.cert", "--cert-states",
+              Path(tmp) / "never.states", "--cert-open"],
+             dict(os.environ, CFT_ORBITS_CERT_PLANT="width"),
+             "instruments an accuracy entry, and there is no "
+             "--cert-accuracy"),
+            ("CFT_ORBITS_NEGATIVE_CONTROL=drop-flags on a run that is not "
+             "certified",
+             ["--engine", "segments", "--rsqrt", "newton", "--periods", 1],
+             dict(os.environ, CFT_ORBITS_NEGATIVE_CONTROL="drop-flags"),
+             "sabotages a certified run's resume, and there is no --cert"),
             ("--records in a directory that is not there - the step, the "
              "file and the system's reason named",
              ["--engine", "loop", "--periods", 1, "--records",
@@ -2539,7 +3621,11 @@ def main():
                  "takes a whole number of checkpoints, 1 to 4294967295"),
                 ("CFT_ORBITS_SHARE_FIFO",
                  ("0", "2", "01", " 1", "1 ", "yes", "true"),
-                 "CFT_ORBITS_SHARE_FIFO takes 1")):
+                 "CFT_ORBITS_SHARE_FIFO takes 1"),
+                ("CFT_ORBITS_CERT_PLANT",
+                 ("flags", "Flags-wide", " width", "width ", "widths", "1"),
+                 "CFT_ORBITS_CERT_PLANT takes flags-unreadable, "
+                 "flags-unwritten, flags-wide or width")):
             ran = []
             for val in bad:
                 proc = tool.run("--engine", "segments", "--rsqrt", "newton",
@@ -2575,6 +3661,9 @@ def main():
               % ", ".join(repr(v) for v in bad),
               "--checkpoint-interval accepted a value that is not a number "
               "of seconds: %s" % "; ".join(ran))
+
+        # -------------------------------------------------------------
+        check_certificates(tool, tmp, audit)
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

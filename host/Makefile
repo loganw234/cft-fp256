@@ -919,8 +919,14 @@ all: cft-orbits$(EXE)
 clean: clean-orbits
 .PHONY: orbits orbitstest clean-orbits
 
-cft-orbits$(EXE): tools/orbits.c libcft.a
-	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+# tools/cert_write.h, the certificate's encoding (certified runs,
+# docs/ORBITS.md), is included, not compiled beside it: the tool stays
+# one source file, as fuzz/run_ckpt.sh and docs/DEMOS.md build it.
+cft-orbits$(EXE): tools/orbits.c libcft.a tools/cert_write.h \
+                  tools/cert_exact.h src/sha256.h src/bigint.h \
+                  include/cft_config.h
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/orbits.c libcft.a -o $@ \
+		$(XRTLIBS)
 
 orbits: cft-orbits$(EXE)
 
@@ -936,8 +942,11 @@ orbits: cft-orbits$(EXE)
 # a make recipe is often not the interpreter on your shell's PATH, so
 # pass one in the way verify/run.sh does:
 #     make -C host orbitstest PYTHON=/c/path/to/python.exe
-orbitstest: cft-orbits$(EXE)
-	$(PYTHON) tests/orbits_check.py
+#
+# Its section [8] certifies runs, and both auditors audit each: the
+# golden one (python/cft_golden/cert.py) and cft-audit, built here.
+orbitstest: cft-orbits$(EXE) cft-audit$(EXE)
+	$(PYTHON) tests/orbits_check.py --audit ./cft-audit$(EXE)
 
 clean-orbits:
 	rm -f cft-orbits cft-orbits.exe
@@ -1198,8 +1207,8 @@ all: cft-segrun$(EXE)
 clean: clean-segrun
 .PHONY: segruntest clean-segrun
 
-cft-segrun$(EXE): tools/segrun.c tools/cert_exact.h libcft.a src/bigint.h \
-                  include/cft_config.h
+cft-segrun$(EXE): tools/segrun.c tools/cert_exact.h tools/cert_write.h \
+                  libcft.a src/bigint.h include/cft_config.h
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/segrun.c libcft.a -o $@ \
 		$(XRTLIBS)
 
