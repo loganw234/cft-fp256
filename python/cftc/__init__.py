@@ -35,6 +35,25 @@ What it writes, for a stem (the source's name without .cftl):
 Every refusal is the language's Refusal (cft_golden.lang), by name. An
 InternalError is a defect in the compiler, never a property of a source.
 
+A system with tangent vectors (docs/LANGUAGE.md, "The variational
+equations") compiles the same way: its step graph is version 2, read by
+ir.py into an extended state - the state, then each vector's components,
+which is the lane block [state | v | w | lane params] - so the image
+carries the tangent's operations beside the step's, every value homed or
+pinned like a state component. The manifest names the vectors and their
+slots; Compilation.scratch_block and run take `tangents`. The schedulers
+gain one candidate for such a graph only, the interleaved walk
+(schedule.py), which keeps the stage values a tangent reads in registers.
+
+Known limit: the choice between candidates reads no capacity - fewest
+instructions a step first, then one-beat cycles - so for Lorenz-96 at
+N = 40 with three or four tangent vectors the older orders' fewer
+instructions win at more scratch (5,288 instructions and 490 slots at
+T = 3, where the interleaved walk takes 6,286 and 300). Choosing by the
+target's capacity would make the image depend on the target, which this
+design rules out: one image, the same bytes, serves every target that
+accepts it.
+
 Known limit: compile time grows faster than the step does, roughly with
 its square for a wide step - the list schedulers scan their ready set at
 every pick, and six candidate orders are scheduled and allocated - and
@@ -131,10 +150,18 @@ class Compilation:
             written.append(out / name)
         return written
 
-    def scratch_block(self, states, lane_params=None):
+    def scratch_block(self, states, lane_params=None, tangents=None):
         """The lane-major block a run takes: each lane's state, then its
-        lane params (their defaults where none are given)."""
+        tangent vectors' values in declaration order (a system with
+        tangent vectors: `tangents` as lang.run takes them, one list a
+        lane of one list a vector), then its lane params (their defaults
+        where none are given)."""
         g = self.ir
+        if g.T and tangents is None:
+            raise ValueError(f"a system with tangent vectors "
+                             f"({', '.join(g.tangent)}) needs tangents")
+        if not g.T and tangents is not None:
+            raise ValueError("this system has no tangent vectors")
         out = []
         for k, st in enumerate(states):
             if lane_params is None:
@@ -144,11 +171,19 @@ class Compilation:
                                      "lane_params")
             else:
                 lp = lane_params[k]
-            out += list(st) + list(lp)
+            tv = []
+            if g.T:
+                if len(tangents[k]) != g.T or \
+                        any(len(t) != g.n_primal for t in tangents[k]):
+                    raise ValueError(f"lane {k}'s tangents are not {g.T} "
+                                     f"vectors of {g.n_primal} values")
+                for t in tangents[k]:
+                    tv += list(t)
+            out += list(st) + tv + list(lp)
         return out
 
     def run(self, states, lane_params=None, bank=None, scratch_depth=None,
-            streams=None):
+            streams=None, tangents=None):
         """The image on seq.py: streams +0 unless given, every lane
         active, its own bank unless one is given, at its declared depth
         unless another is given. -> seq.Result."""
@@ -160,7 +195,8 @@ class Compilation:
             a, b, c = streams
         vals = self.lowered.bank_values() if bank is None else list(bank)
         return seq.run(prog, a, b, c, bank=vals,
-                       scratch_in=self.scratch_block(states, lane_params),
+                       scratch_in=self.scratch_block(states, lane_params,
+                                                     tangents),
                        scratch_depth=scratch_depth or self.depth)
 
 
@@ -273,9 +309,13 @@ def compile_graph(graph, steps, target="sw", stem="system", source=None,
                f"{len(c.image_obj.insns):,} instructions and {t.name} holds "
                f"{t.max_insns:,}", source=src)
     if prog.slots_used > t.scratch_depth:
+        held = f"{g.n_primal} state"
+        if g.T:
+            held += (f", {g.T * g.n_primal} for {g.T} tangent "
+                     f"vector{'s' if g.T > 1 else ''}")
         refuse("scratch-capacity", f"this program needs {prog.slots_used:,} "
-               f"scratch slots a lane ({g.n_state} state, {len(g.lane)} lane "
-               f"params, {prog.spill_slots} spills) and {t.name} has "
+               f"scratch slots a lane ({held}, {len(g.lane)} lane params, "
+               f"{prog.spill_slots} spills) and {t.name} has "
                f"{t.scratch_depth:,}", source=src)
     verify(low, prog, c.image, steps, half)
     seq.Program.from_bytes(c.image, scratch_depth=c.depth)

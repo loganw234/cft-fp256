@@ -34,6 +34,21 @@ The candidate orders:
   integrated   latency while fewer than (registers - margin) values are
                live, pressure above (Goodman and Hsu's integrated
                prepass), at margins 2, 4 and 8
+  interleaved  for a step with tangent vectors only: the post-order walk
+               from the outputs, each component's tangent outputs beside
+               its own (x0, v.x0, w.x0, x1, ...), operands in order. A
+               tangent reads each stage's primal values, and the other
+               orders compute the whole primal step first, so those
+               values wait in scratch: Lorenz-96 at N = 40 with one
+               vector spilled 309 values under the six above and 59 here,
+               and 59 at every N measured (L3, 2026-10-01). It is offered
+               beside the six, never in their place: for Lorenz-63 the
+               latency order stays cheaper, and for three or four vectors
+               at N = 40 the six's fewer instructions win under the
+               objective, at more scratch (490 slots against 300 at
+               T = 3) - the objective does not read the target's
+               capacity, which would make the image depend on the target
+               (a known limit, docs/LANGUAGE.md).
 """
 
 LAT = 17            # LATENCY 16 + 1: a dependent link, issue to issue
@@ -41,6 +56,50 @@ FAST_LOAD = 3       # a fast LDL's value, issue to readable (R18), believed
 
 CANDIDATES = (("graph", 0), ("pressure", 0), ("latency", 0),
               ("integrated", 2), ("integrated", 4), ("integrated", 8))
+TANGENT_CANDIDATES = (("interleaved", 0),)
+
+
+def candidates(low):
+    """The candidate orders for this step: the six, and for a step with
+    tangent vectors the interleaved walk after them, so that a tie keeps
+    the six's choice and a step without tangents compiles as before."""
+    return CANDIDATES + (TANGENT_CANDIDATES if low.graph.T else ())
+
+
+def interleaved(low):
+    """The post-order walk from the outputs taken as x0, v.x0, w.x0, x1,
+    ... - the graph's own walk with each tangent output beside its
+    component's - walked in a loop."""
+    g = low.graph
+    n, T = g.n_primal, g.T
+    roots = []
+    for i in range(n):
+        roots.append(low.outs[i])
+        roots.extend(low.outs[n * (k + 1) + i] for k in range(T))
+    nodes = low.nodes
+    seen, out = set(), []
+    for root in roots:
+        if root[0] != "n" or root[1] in seen:
+            continue
+        stack = [[root[1], 0]]
+        while stack:
+            frame = stack[-1]
+            j, a = frame
+            args = nodes[j].args
+            if a < len(args):
+                frame[1] = a + 1
+                r = args[a]
+                if r[0] == "n" and r[1] not in seen:
+                    stack.append([r[1], 0])
+                continue
+            stack.pop()
+            if j not in seen:
+                seen.add(j)
+                out.append(j)
+    # a node no output reads - none in a canonical step - is placed last,
+    # in the graph's order, so the order is total
+    out += [j for j in range(len(nodes)) if j not in seen]
+    return out
 
 
 def _dag(nodes):
@@ -62,6 +121,8 @@ def order(low, name, margin=0, pinned=(), budget=29):
     n = len(nodes)
     if name == "graph":
         return list(range(n))
+    if name == "interleaved":
+        return interleaved(low)
     succ, height = _dag(nodes)
     indeg = [sum(1 for r in nd.args if r[0] == "n") for nd in nodes]
     remaining = {}

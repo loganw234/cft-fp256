@@ -85,6 +85,13 @@ def build(c):
     layout = []
     for i, name in enumerate(g.components):
         entry = {"slot": i, "name": name, "kind": "state"}
+        if i >= g.n_primal:
+            # a tangent vector's component: the vector, and the state
+            # component it is the tangent of
+            vk, comp = divmod(i - g.n_primal, g.n_primal)
+            entry = {"slot": i, "name": name, "kind": "tangent",
+                     "vector": g.tangent[vk],
+                     "of": g.primal_components[comp]}
         r = prog.pinned.get(("s", i))
         entry["pinned"] = None if r is None else f"r{r}"
         layout.append(entry)
@@ -123,7 +130,7 @@ def build(c):
         "cftc_manifest": 1,
         "compiler": {"name": "cftc", "version": c.version},
         "source": {"path": c.source, "sha256": c.source_sha256},
-        "graph": {"cftl_graph": 1, "file": f"{c.stem}.graph.json",
+        "graph": {"cftl_graph": g.version, "file": f"{c.stem}.graph.json",
                   "sha256": g.sha256},
         "system": g.system,
         "format": g.fmt_name,
@@ -182,6 +189,20 @@ def build(c):
         "param_overrides": overrides,
         "h_slots": list(low.h_slots),
         "time_shift": time_shift(g),
+    }
+    if g.T:
+        # the variational equations' own entries, only where the graph
+        # has them, so a manifest without tangents is what it was
+        m["tangent"] = {
+            "vectors": list(g.tangent),
+            "components": g.n_primal,
+            "slots": [g.n_primal * (k + 1) for k in range(g.T)],
+        }
+        m["lowering"]["graph_step_nodes"] = g.primal_step_nodes
+        m["lowering"]["graph_by_op"] = g.primal_counts
+        m["lowering"]["graph_tangent_step_nodes"] = g.tangent_step_nodes
+        m["lowering"]["graph_tangent_by_op"] = g.tangent_counts
+    m.update({
         "cost_model": {
             "assumes": "revision 7, a single-pass tile; believed from "
                        "docs/SEQUENCER.md R12-R19, not measured; the card's "
@@ -190,7 +211,7 @@ def build(c):
             "cycles_per_step_sixteen_beats": c.cycles_sixteen_beats,
         },
         "files": c.file_digests(),
-    }
+    })
     return m
 
 

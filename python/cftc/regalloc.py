@@ -597,7 +597,7 @@ def best_program(low, candidates=None):
     for pi, pin in enumerate(pinnings(low)):
         keys = pinned_keys(low, pin)
         for ci, (name, margin) in enumerate(candidates or
-                                            schedule.CANDIDATES):
+                                            schedule.candidates(low)):
             order = schedule.order(low, name, margin, keys, len(REGS))
             prog = allocate(low, order, pin)
             prog.candidate = (name, margin)
