@@ -1959,9 +1959,8 @@ It also holds git to ignoring the tool's binary.
 With a negative run index and `slotstep` (S1's send-back, 2026-09-30):
 656 checks on the Windows desktop and one SKIP, the trial's cost NOT
 TESTED there, 96 s. On Linux the three checks of the trial's cost run
-in the SKIP's place, so 659 there, by that arithmetic. Section 10 alone
-has run in WSL (cft2204), each of its checks green, the trial's three
-among them; the rest of the gate has not run on Linux. With the accuracy
+in the SKIP's place: in WSL (cft2204, gcc 11.4, at f572ef3), 659 checks,
+0 failed, nothing skipped, 85 s. With the accuracy
 entries (2026-09-30): 634 checks on the Windows
 desktop and one SKIP, the trial's cost NOT TESTED there, 80 s. On Linux
 the three checks of the trial's cost run in the SKIP's place, so 637
