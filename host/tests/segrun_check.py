@@ -86,7 +86,8 @@ Then:
      quarter of its state) - there the entries' own phase is the peak, so
      an entry that holds a state more than its pair, or entries that hold
      more than one pair at once, fail it (verifier-W1: in flagstep's shape
-     neither did). And what the
+     neither did). Its entries are drifts: a fault in an estimate's
+     read-back alone passes both shapes (verifier-W1b). And what the
      trial costs the runs, to the page: the least address space with the
      trial and with its allocations skipped
      (CFT_SEGRUN_PLANT=trial-skipped), in two small shapes where eb2d1ae's
@@ -1992,11 +1993,18 @@ WIDE_LANES = 65535
 # entry, one or two, from a shorter or a longer path - it steps by about
 # 470 KiB (measured on the desktop, 2026-09-30: the run alone 26,780 to
 # 26,792 KiB from short paths and 26,316 to 26,344 KiB from long ones;
-# with one drift 26,812 to 26,852; with two 26,304 to 26,368). Believed:
-# the C heap keeping or giving back the initial state's first read
-# buffers (64, 128 and 256 KiB), by where the command line's own small
-# allocations land. So a quarter of this state, 2,048 KiB: four times
-# that step, and a quarter of what a state more at once would cost.
+# with one drift 26,812 to 26,852; with two 26,304 to 26,368). The step is
+# read_file's first buffers for the initial state, 64 to 512 KiB, in the C
+# heap (verifier-W1b, measured: with a first buffer of 1 MiB there is no
+# step, and every command line sits at the UPPER level), so the lower
+# level is a command line whose later allocations reuse their freed
+# memory; it is at most theirs, 960 KiB. So a quarter of this state
+# (8,192 KiB), 2,048 KiB: twice that bound. A state more at once costs
+# 7,680 KiB past the run's peak, not a whole state, since the run holds
+# its streams (512 KiB) and the entries do not; for the same reason the
+# entries' own phase may grow by 2,560 KiB before the check fails (W1b:
+# a quarter of a state held, +1,548 and +1,524 KiB, passes), and a state
+# more fails it by 5,632 KiB.
 WIDE_ALLOWANCE = WIDE_SLOTS * WIDE_LANES * 8 // 4
 SLOTSTEP = "\n".join(
     [".format   fp64", ".deposits 0", f".scratch  in {WIDE_SLOTS}",
@@ -2156,7 +2164,8 @@ def hold_peak(work, flag):
     address space it writes its certificate in.
     The accuracy entries (the plan's step 5): beside the three runs, no
     state held beside the runs'; and beside slotstep's one run, where their
-    own phase is the peak, a pair at a time (verifier-W1).
+    own phase is the peak, a pair at a time, for its two drifts
+    (verifier-W1; it holds no estimate: verifier-W1b).
     eb2d1ae's trial took its pieces under 64 KiB from the C library's heap
     and left the heap bigger, so the runs needed up to 40 KiB more than
     99f1b43's: the trial must cost the runs nothing, to the page. Held on
@@ -2200,7 +2209,16 @@ def hold_peak(work, flag):
            EntrySpec("drift", 2, None, "rounded", "fp64", "rne", label="c",
                      terms=FLAG_C))
     # slotstep's run alone, and with two drifts of it, exact and rounded,
-    # reading four of its states back (WIDE_SLOTS)
+    # reading four of its states back (WIDE_SLOTS). Drifts only: an
+    # estimate needs a second run, and before the runs the trial holds
+    # every run's initial state beside the larger run's two states and
+    # streams - by arithmetic, that run's streams above an estimate's
+    # phase with a state more, so no shape of the tool as shipped shows
+    # one (measured, 2026-09-30: slotstep's main run beside its fp128
+    # wider run peaks at 59,244 KiB, and with a wider estimate 59,248;
+    # with the trial skipped, its instrument, 51,472 and 51,496). The
+    # read-back is one code for every method (derive_entry), but a fault
+    # in an estimate's alone passes both shapes (verifier-W1b's plant).
     pw = d / "slotstep.cftp"
     pw.write_bytes(asm.assemble(SLOTSTEP, "slotstep"))
     wide_init = d / f"slotstep-{WIDE_LANES}.init"
@@ -2295,8 +2313,8 @@ def hold_peak(work, flag):
                 f"{kib(-delta)} less")
         check(delta <= wallow,
               f"{how}: slotstep's run alone {kib(wide_one)}, with its two "
-              f"entries {kib(wide_two)} - {said}, within {kib(wallow)} more: "
-              f"the entries read their states back a pair at a time (a state "
+              f"drifts {kib(wide_two)} - {said}, within {kib(wallow)} more: "
+              f"the drifts read their states back a pair at a time (a state "
               f"more at once would be "
               f"{kib(wide_state - wide_state // WIDE_SLOTS)} past the run's "
               f"own peak, by arithmetic)",

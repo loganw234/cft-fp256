@@ -1184,7 +1184,7 @@ clean-programs:
 #                       its plant build, compiled only here, whose first
 #                       state read back is changed (output); and what the
 #                       entries cost in memory: no state beside the runs',
-#                       and their states read back a pair at a time.
+#                       and drifts' states read back a pair at a time.
 #                       verify/run.sh's `programs` stage runs it.
 #
 # The tree's build id goes in as make test hands api-test its own, so a

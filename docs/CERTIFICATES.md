@@ -1653,10 +1653,21 @@ gate measures what they cost in two shapes (**Its gate**, below):
   its streams (a sixteenth of a state) and one state more at most (the
   initial state, or a hash's copy), and the entries hold a pair and a
   hash's copy. In six runs the peak commit was 476, 88 and 16 KiB less,
-  and 16, 16 and 52 KiB more, than the run alone (26,300 to 26,780 KiB).
-  Against the gate as committed, W1's two plants were 7,696 and 7,668
-  KiB more (the third state) and 15,912 and 15,848 KiB more (every pair
-  kept), and the gate fails both.
+  and 16, 16 and 52 KiB more, than the run alone (26,300 to 26,780 KiB),
+  and in verifier-W1b's, from other work paths, from 468 KiB less to 116
+  KiB more. Against the gate as committed, W1's two plants were 7,696
+  and 7,668 KiB more (the third state) and 15,912 and 15,848 KiB more
+  (every pair kept), and the gate fails both. Its entries are drifts.
+  An estimate needs a second run, and before the runs the trial holds
+  every run's initial state beside the larger run's two states and
+  streams: by arithmetic, that run's streams above an estimate's phase
+  with a state more. So no shape of the tool as shipped shows an
+  estimate's read-back. Measured: slotstep's main run beside its fp128
+  wider run (16 MiB states) peaks at 59,244 KiB, and with a wider
+  estimate 59,248; with the trial skipped (its instrument), 51,472 and
+  51,496 (S1, 2026-09-30). A fault in an estimate's read-back alone
+  passes both shapes (verifier-W1b's plant): the read-back is one code
+  for every method, and the gate holds it on drifts.
 
 Those are the desktop's peak commit (2026-09-30). In WSL (cft2204), the
 least address space was 0 KiB more with the entries in both shapes, and
@@ -1759,7 +1770,15 @@ killed by a signal leaves the certificate it created, empty, and its
 boundary files, since a signal runs no cleanup; at 99f1b43 the same
 kill truncated a file already at `--out`. The trial holds every run's
 initial state, and can refuse a certificate the runs alone could write
-(**Memory**, above).
+(**Memory**, above). On Windows the command line reaches the tool
+through the system's code page, which maps a character it lacks to a
+near one ("best fit") before the tool reads it: a U+2212 MINUS SIGN,
+U+FF0D FULLWIDTH HYPHEN-MINUS or U+2010 HYPHEN before 1 arrives as
+`-1`, and is refused as -1 is, and U+FF11 FULLWIDTH DIGIT ONE arrives as
+`1` and is taken as 1 (verifier-W1b on `--uses`, and S1 on a lane and a
+slot, 2026-09-30). So a spelling outside ASCII can be read as an ASCII
+one there. It is Windows' conversion, before `main`, for every option
+of every tool in this tree: a known limit, not fixed.
 
 **What it certifies, and what it does not.** It certifies what ran:
 which states each segment started and ended on, as hashes, with its
@@ -1947,10 +1966,18 @@ whole working sets. What the accuracy entries cost, in two shapes
   quarter of its 8 MiB state, 2,048 KiB, more (and on Linux one
   bisection step): one command line's peak commit is steady, but
   between command lines it steps by about 470 KiB on the desktop, by
-  the path and the entries given (believed: the C heap keeping the
-  initial state's first read buffers or not). By arithmetic, an entry
-  that held a state more than its pair would cost 7,680 KiB more, and
-  entries that held two pairs at once 15,872 KiB more.
+  the path and the entries given. Verifier-W1b measured the cause: the
+  initial state's first read buffers, 64 to 512 KiB, in the C heap.
+  With a first buffer of 1 MiB there is no step, and every command line
+  sits at the upper level, so the lower one is a command line whose
+  later allocations reuse those buffers' freed memory. The step is at
+  most the buffers, 960 KiB. By arithmetic, an entry that held a state
+  more than its pair would cost 7,680 KiB more, and entries that held
+  two pairs at once 15,872 KiB more: a state less the streams the run
+  holds and the entries do not (512 KiB), which also lets the entries'
+  own phase grow by up to 2,560 KiB before the check fails (verifier-
+  W1b: a quarter of a state held, 1,548 and 1,524 KiB more, passes).
+  Its entries are drifts (**Memory**, above).
 
 The gate measures a process as its platform does:
 its peak commit on Windows, and on Linux the least address space it

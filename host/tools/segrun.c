@@ -1241,9 +1241,10 @@ static int add_ok(size_t *acc, size_t v)
  * entries reading four states back cost no more peak commit than the
  * runs alone, to within the noise of identical runs, so they hold no
  * state beside the runs'; and beside slotstep's one run of 8 MiB states,
- * where the entries' phase is the peak, two drifts cost no more than the
- * run alone, where a state more at once would cost 7.5 MiB (the first
- * shape cannot see that: verifier-W1).
+ * where the entries' phase is the peak, two drifts cost the run alone's
+ * peak to within a quarter of a state - from 476 KiB less to 116 KiB
+ * more (S1 and verifier-W1b) - where a state more at once would cost 7.5
+ * MiB (the first shape cannot see that: verifier-W1).
  *
  * Before anything is made, try_runs counts all of it against what the
  * process can address, and then tries, in the runs' own order, the
