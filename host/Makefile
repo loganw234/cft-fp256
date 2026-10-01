@@ -848,14 +848,23 @@ mpfr-check$(EXE): tools/mpfr_check.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/mpfr_check.c libcft.a \
 	  -o $@ $(XRTLIBS) $(LDLIBS) -lmpfr -lgmp -lm
 
-# The evaluator's error rules held to their claim, exactly: every rule
-# src/mpfloat.c derives, at W = 6 exhaustively and a fixed-seed sample
-# to 928 bits, each verdict computed in GMP (tests/mp_err_check.c's
-# header). GMP only - the runner's mpfr stage runs it, since that stage
-# already needs GMP. `./mp-err-check --full` is the full random sweep.
-mp-err-check$(EXE): tests/mp_err_check.c libcft.a
-	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tests/mp_err_check.c libcft.a \
-	  -o $@ $(XRTLIBS) $(LDLIBS) -lgmp -lm
+# The evaluator's error claims held exactly (tests/mp_err_check.c's
+# header): every rule src/mpfloat.c derives, at W = 6 exhaustively and a
+# fixed-seed sample to 928 bits, each verdict computed in GMP; then the
+# count cft_mp_const gives each constant, and src/transcend.c's
+# conversion of an argument's error into its logarithm's (mp_log_of_mp),
+# both against MPFR's directed roundings. That conversion is a static
+# function, so this recipe compiles src/transcend.c a second time with
+# -DCFT_TRANSCEND_PROBE, which adds one entry point and changes nothing
+# else, into this tool alone; it defines everything libcft.a's
+# transcend.o does, so the linker never takes that member. The library
+# is never built with the probe. GMP and MPFR - the runner's mpfr stage
+# runs it, since that stage already needs both. `./mp-err-check --full`
+# is the full random sweep.
+mp-err-check$(EXE): tests/mp_err_check.c src/transcend.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $(XRTDEF) -DCFT_TRANSCEND_PROBE \
+	  tests/mp_err_check.c src/transcend.c libcft.a \
+	  -o $@ $(XRTLIBS) $(LDLIBS) -lmpfr -lgmp -lm
 
 # libquadmath is linked if and only if the compiler would COMPILE the
 # __float128 rows. cft_bench_peers.c gates them on

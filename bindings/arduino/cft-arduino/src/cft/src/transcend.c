@@ -5145,6 +5145,25 @@ cft_status cft_tr_apply(cft_device *dev, int fn, cft_format fmt,
     return tr_batch(dev, fn, fmt, rnd, a, b, nn, d, n, flags_out);
 }
 
+#if defined(CFT_TRANSCEND_PROBE)
+/* ---- the probe ------------------------------------------------------ *
+ *
+ * mp_log_of_mp's conversion of an argument's error into its logarithm's
+ * is an error rule like mpfloat.c's, and a static function, so
+ * host/tests/mp_err_check.c reaches it here, to hold it end to end
+ * against MPFR's log. Only that tool's make target defines
+ * CFT_TRANSCEND_PROBE: it compiles this file a second time, into the
+ * tool. The library is never built with it, and with it undefined this
+ * block is nothing at all - the default objects are byte for byte the
+ * ones without it. */
+int cft_tr_probe_log_of_mp(cft_mp *r, const cft_mp *v, int W);
+
+int cft_tr_probe_log_of_mp(cft_mp *r, const cft_mp *v, int W)
+{
+    return mp_log_of_mp(r, v, W);
+}
+#endif /* CFT_TRANSCEND_PROBE */
+
 #else  /* CFT_NO_TRANSCEND */
 
 /* An empty translation unit is not strictly conforming C99 and

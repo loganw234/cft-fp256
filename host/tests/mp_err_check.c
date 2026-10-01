@@ -1,8 +1,9 @@
 /* Copyright 2026 Logan W.
  * SPDX-License-Identifier: Apache-2.0
  *
- * The multiprecision evaluator's error rules, held to their claim
- * exactly.
+ * The multiprecision evaluator's error claims, each held exactly: the
+ * rules of its arithmetic, its constants' count, and its logarithm's
+ * conversion of an argument's error.
  *
  * host/src/mpfloat.c carries with every value a count of units of
  * 2^-W of relative error, and derives a rule for each operation (its
@@ -31,6 +32,34 @@
  * every result at or above the exact one, canonical, and exact
  * wherever mpfloat.h says it is.
  *
+ * Two error claims outside those rules are held end to end, against
+ * MPFR (since verifier-W5 found, on 2026-09-30, that nothing held
+ * them):
+ *
+ *   cft_mp_const   the true constant lies in the enclosure of the value
+ *                  it returns, for all six, at every W from 2 to
+ *                  CFT_MP_PREC_MAX - the widest any caller asks for
+ *   mp_log_of_mp   src/transcend.c's conversion of an argument's error
+ *                  into its logarithm's: for every V in the argument's
+ *                  enclosure, log V lies in the result's - log is
+ *                  increasing, so the enclosure's two ends decide it,
+ *                  and a finite count where that enclosure reaches
+ *                  zero fails. A fixed-seed sample at the working
+ *                  widths the evaluator takes a logarithm at, 104 to
+ *                  928, with arguments of that width, narrower and
+ *                  wider, and counts from zero past 2^W to infinity.
+ *                  The function is static: a probe build of
+ *                  src/transcend.c (-DCFT_TRANSCEND_PROBE, this
+ *                  tool's make target and nothing else) reaches it
+ *
+ * Each true value is bracketed by MPFR's two directed roundings - the
+ * constant, or the logarithm of an end, rounded down and up - so it lies
+ * between them and a verdict that holds is a proof; the enclosure's
+ * ends are exact dyadics, compared exactly. NOT held here: transcend.c's
+ * own allowances, such as a truncated series' tail or the reduction
+ * window's (mp_bump). Those are its algorithms' analysis, and reach the
+ * gate only through the results the transcend and mpfr stages compare.
+ *
  * Two more things are held wherever the operands are W bits wide and
  * their counts 2^40 or less - the old count's range:
  *
@@ -44,6 +73,10 @@
  *                  rules left to slack. A checker that cannot fail them
  *                  could not see a rule that is not a bound.
  *
+ * The two MPFR legs have controls of their own, which must fail too: a
+ * constant's count cut to one unit, half the truncation it carries, and
+ * the logarithm with its argument's error left out.
+ *
  * And one regression end to end, verifier-W4's: two subtractions at
  * W = 88 through which the old code scaled a clamp back down into an
  * ordinary-looking count of 34, against a worst true error of 2^46.97
@@ -53,7 +86,9 @@
  * -DMP_ERR_CHECK_BASE against the old tree itself, this file checks
  * that transcription against the old library, operand by operand, and
  * reports the old library's own failures - which is how the control
- * was confirmed against the real thing, not a copy of it.
+ * was confirmed against the real thing, not a copy of it. That build
+ * leaves the MPFR legs out (the old tree has no probe) and needs GMP
+ * alone.
  *
  *     mp-err-check              W = 6 exhaustively (every significand
  *                               pair, alignment and sign pair, and
@@ -61,15 +96,18 @@
  *                               fixed-seed sample: 100,000 trials of
  *                               each operation at each width from 8
  *                               to 128 bits, a quarter of that at 256
- *                               and a sixteenth at 512 and 928, and a
- *                               million of the count's arithmetic.
- *                               The runner's mpfr stage runs this:
- *                               about 17 s on the Windows desktop.
+ *                               and a sixteenth at 512 and 928, a
+ *                               million of the count's arithmetic,
+ *                               the six constants at every width, and
+ *                               8,000 logarithm arguments. The
+ *                               runner's mpfr stage runs this: about
+ *                               half a minute on the Windows desktop.
  *     mp-err-check --full       the full random sweep: ten times the
- *                               sample, and ten million of the
- *                               arithmetic
+ *                               sample, ten million of the arithmetic
+ *                               and 80,000 logarithm arguments
  *     mp-err-check --seed N     another seed for the sample
  *     mp-err-check --per N      N trials per width instead
+ *     mp-err-check --logs N     N logarithm arguments instead
  *
  * Exit 0 when every rule held and the controls failed; 1 otherwise,
  * with the first failures printed.
@@ -85,8 +123,17 @@
 #include <math.h>
 
 #include <gmp.h>
+#ifndef MP_ERR_CHECK_BASE
+#include <mpfr.h>
+#endif
 
 #include "../src/mpfloat.h"
+
+#ifndef MP_ERR_CHECK_BASE
+/* src/transcend.c's probe, compiled into this tool alone by its make
+ * target (-DCFT_TRANSCEND_PROBE): mp_log_of_mp itself. */
+int cft_tr_probe_log_of_mp(cft_mp *r, const cft_mp *v, int W);
+#endif
 
 #define OLD_MAX ((uint64_t)1 << 40)      /* the old count's clamp */
 
@@ -793,10 +840,14 @@ static void versus_old(tally *T, uint64_t old, int rinf, int held_old)
     }
 #else
     if (!rinf && mpz_cmp(Er, Eo) < 0) {
+        /* Through fail(), so its 40-line cap holds: printed for every
+         * operand, a failing run wrote 34 to 58 MB of log (verifier-W5's
+         * plants, 2026-09-30). The tally keeps the whole count. */
+        char s1[64];
         T->below_old++;
-        gmp_printf("  FAIL %s: below the old rule's count: %Zd < %llu\n",
-                   T->name, Er, (unsigned long long)old);
-        failures++;
+        gmp_snprintf(s1, sizeof s1, "%Zd", Er);
+        fail(T, "below the old rule's count", "%s < %llu", s1,
+             (unsigned long long)old);
     }
     if (!held_old)
         T->ctl_fail++;
@@ -1319,6 +1370,341 @@ out:
     mpq_clear(qw); mpq_clear(qmax);
 }
 
+#ifndef MP_ERR_CHECK_BASE
+/* ---- the constants and the logarithm's conversion, against MPFR -------- *
+ *
+ * The header's two claims outside mpfloat.c's rules. Each true value is
+ * bracketed by MPFR's directed roundings, [lo, hi], and the verdict is
+ * that the enclosure r(1 -+ E 2^-w) holds the whole bracket: its low end
+ * at or below lo and its high end at or above hi, compared exactly.
+ */
+
+static tally T_const = { .name = "const" }, T_log = { .name = "log" };
+static unsigned long long const_ctl;           /* a count of 1 fails */
+static unsigned long long log_ctl, log_ctl_of; /* the argument's error left out */
+static unsigned long long log_inf, log_inf_early;
+
+static mpz_t b1, b2, b3, g1, g2, g3;
+static mpfr_t fr_a, fr_b, fr_v, fr_lo, fr_hi, fr_t, fr_y;
+
+/* rop = N * 2^k, exactly: the precision is N's own bit length. */
+static void fr_exact(mpfr_t rop, const mpz_t N, long k)
+{
+    long n = z_bitlen(N);
+    mpfr_set_prec(rop, (mpfr_prec_t)(n < 2 ? 2 : n));
+    mpfr_set_z_2exp(rop, N, (mpfr_exp_t)k, MPFR_RNDN);
+}
+
+/* r's enclosure holds [lo, hi]. Infinity holds everything; an exact
+ * zero holds nothing a nonzero bracket can be. */
+static int ok_bracket(const cft_mp *r, const mpz_t E, int rinf,
+                      mpfr_t lo, mpfr_t hi)
+{
+    long w;
+    if (rinf)
+        return 1;
+    if (r->zero)
+        return 0;
+    z_from_bn(b1, &r->m);
+    w = z_bitlen(b1);
+    mpz_mul(b2, E, b1);                        /* E m */
+    zterm(b1, r->sign, b1, w);                 /* (-1)^s m 2^w */
+    mpz_sub(b3, b1, b2);                       /* the low end, and */
+    mpz_add(b2, b1, b2);                       /* the high, in 2^(e-w) */
+    fr_exact(fr_a, b3, r->exp - w);
+    fr_exact(fr_b, b2, r->exp - w);
+    return mpfr_cmp(fr_a, lo) <= 0 && mpfr_cmp(hi, fr_b) <= 0;
+}
+
+/* Every constant at every width a caller can ask for. 1,400 bits put
+ * the bracket far inside the smallest margin a correct count leaves:
+ * the true error of a truncation of the stored 1088-bit value is under
+ * two units at every W below 1088, against a count of four. */
+#define CONST_PREC 1400
+
+static void const_leg(void)
+{
+    static const char *nm[6] = { "ln2", "log2e", "ln10", "log10e", "pi",
+                                 "1/pi" };
+    mpfr_t lo[6], hi[6], ten;
+    int c, W, rinf;
+    for (c = 0; c < 6; c++) {
+        mpfr_init2(lo[c], CONST_PREC);
+        mpfr_init2(hi[c], CONST_PREC);
+    }
+    mpfr_init2(ten, 8);
+    mpfr_set_ui(ten, 10, MPFR_RNDN);
+    mpfr_const_log2(lo[CFT_MP_C_LN2], MPFR_RNDD);
+    mpfr_const_log2(hi[CFT_MP_C_LN2], MPFR_RNDU);
+    mpfr_log(lo[CFT_MP_C_LN10], ten, MPFR_RNDD);
+    mpfr_log(hi[CFT_MP_C_LN10], ten, MPFR_RNDU);
+    mpfr_const_pi(lo[CFT_MP_C_PI], MPFR_RNDD);
+    mpfr_const_pi(hi[CFT_MP_C_PI], MPFR_RNDU);
+    /* the reciprocals: 1/x falls as x rises */
+    mpfr_ui_div(lo[CFT_MP_C_LOG2E], 1, hi[CFT_MP_C_LN2], MPFR_RNDD);
+    mpfr_ui_div(hi[CFT_MP_C_LOG2E], 1, lo[CFT_MP_C_LN2], MPFR_RNDU);
+    mpfr_ui_div(lo[CFT_MP_C_LOG10E], 1, hi[CFT_MP_C_LN10], MPFR_RNDD);
+    mpfr_ui_div(hi[CFT_MP_C_LOG10E], 1, lo[CFT_MP_C_LN10], MPFR_RNDU);
+    mpfr_ui_div(lo[CFT_MP_C_INVPI], 1, hi[CFT_MP_C_PI], MPFR_RNDD);
+    mpfr_ui_div(hi[CFT_MP_C_INVPI], 1, lo[CFT_MP_C_PI], MPFR_RNDU);
+    for (c = 0; c < 6; c++)
+        for (W = 2; W <= CFT_MP_PREC_MAX; W++) {
+            cft_mp r;
+            if (cft_mp_const(&r, (cft_mp_constant)c, W)) {
+                fail(&T_const, "refused", "%s at W %d", nm[c], W);
+                continue;
+            }
+            T_const.checked++;
+            get_err(Er, &rinf, &r);
+            if (!ok_bracket(&r, Er, rinf, lo[c], hi[c])) {
+                char s1[400];
+                T_const.over++;
+                show(s1, sizeof s1, &r);
+                fail(&T_const, "the true constant outside its enclosure",
+                     "%s at W %d: %s", nm[c], W, s1);
+            }
+            /* the control: one unit, where the truncation can cost two */
+            mpz_set_ui(Eo, 1);
+            if (!ok_bracket(&r, Eo, 0, lo[c], hi[c]))
+                const_ctl++;
+        }
+    for (c = 0; c < 6; c++) {
+        mpfr_clear(lo[c]);
+        mpfr_clear(hi[c]);
+    }
+    mpfr_clear(ten);
+}
+
+/* One argument v = m * 2^e, of m's width wv, with the count cv, at the
+ * working width W; ctl asks for the control on it. Nothing here draws a
+ * random number, so the sample is the same whatever the library
+ * answers. */
+static void log_case(int W, long wv, const mpz_t m, long e, spec cv,
+                     int ctl)
+{
+    tally *T = &T_log;
+    cft_mp v, r, v0, r0;
+    int rinf, vinf, inf0;
+    long P;
+    if (!mk(&v, 0, e, m, cv)) {
+        T->unheld++;
+        return;
+    }
+    if (cft_tr_probe_log_of_mp(&r, &v, W)) {
+        /* Its refusals: the argument exactly 1, or its logarithm below
+         * 2^-32 (E0 < -32, where the bound is not converted) - the
+         * argument as mp_log_exact takes it, truncated to W bits when
+         * it is wider. Anything else is not a refusal the conversion
+         * makes. */
+        if (wv > W) {
+            mpz_fdiv_q_2exp(g1, m, (mp_bitcnt_t)(wv - W));
+            fr_exact(fr_v, g1, e + (wv - W));
+        } else {
+            fr_exact(fr_v, m, e);
+        }
+        if (mpfr_cmp_ui(fr_v, 1) != 0) {
+            mpfr_set_prec(fr_t, 64);
+            mpfr_log(fr_t, fr_v, MPFR_RNDN);
+            mpfr_set_prec(fr_y, 2);
+            mpfr_set_ui_2exp(fr_y, 1, -31, MPFR_RNDN);
+            if (mpfr_cmpabs(fr_t, fr_y) >= 0)
+                fail(T, "refused", "W %d, v of width %ld, 2^%ld", W, wv,
+                     e + wv);
+        }
+        T->refused++;
+        return;
+    }
+    T->checked++;
+    get_err(Er, &rinf, &r);
+    get_err(Ea, &vinf, &v);                    /* v's count, units 2^-wv */
+    if (rinf) {
+        log_inf++;
+        /* infinity is a bound; the rule makes it from a count of 2^(W-1)
+         * or more read at W, and one sooner would cost a decision */
+        if (!vinf) {
+            mpz_set(g1, Ea);
+            if (wv < W)
+                mpz_mul_2exp(g1, g1, (mp_bitcnt_t)(W - wv));
+            if (z_bitlen(g1) < W)
+                log_inf_early++;
+        }
+        return;
+    }
+    if (vinf) {
+        T->over++;
+        fail(T, "a finite count from an argument with none",
+             "W %d, v of width %ld", W, wv);
+        return;
+    }
+    /* V's ends, m (2^wv -+ C) 2^(e - wv) */
+    mpz_set_ui(g1, 1);
+    mpz_mul_2exp(g1, g1, (mp_bitcnt_t)wv);
+    mpz_sub(g2, g1, Ea);
+    if (mpz_sgn(g2) <= 0) {
+        char s1[400];
+        T->over++;
+        show(s1, sizeof s1, &r);
+        fail(T, "a finite count where the argument's enclosure reaches zero",
+             "W %d, v of width %ld, 2^%ld -> %s", W, wv, e + wv, s1);
+        return;
+    }
+    mpz_mul(g2, g2, m);
+    mpz_add(g3, g1, Ea);
+    mpz_mul(g3, g3, m);
+    P = (W > wv ? W : wv) + 64;
+    fr_exact(fr_v, g2, e - wv);
+    mpfr_set_prec(fr_lo, (mpfr_prec_t)P);
+    mpfr_log(fr_lo, fr_v, MPFR_RNDD);         /* at or below log V_lo */
+    fr_exact(fr_v, g3, e - wv);
+    mpfr_set_prec(fr_hi, (mpfr_prec_t)P);
+    mpfr_log(fr_hi, fr_v, MPFR_RNDU);         /* at or above log V_hi */
+    if (!ok_bracket(&r, Er, 0, fr_lo, fr_hi)) {
+        char s1[400], s3[400];
+        T->over++;
+        show(s1, sizeof s1, &v);
+        show(s3, sizeof s3, &r);
+        fail(T, "log of the argument's enclosure outside the result's",
+             "W %d: log %s -> %s", W, s1, s3);
+    }
+    /* The control, on a quarter of the arguments that carry an error:
+     * the same value with that error left out, which must fail. */
+    if (mpz_sgn(Ea) && ctl) {
+        v0 = v;
+        put_err(&v0, sp(0, 0));
+        if (cft_tr_probe_log_of_mp(&r0, &v0, W) == 0) {
+            log_ctl_of++;
+            get_err(Eo, &inf0, &r0);
+            if (!ok_bracket(&r0, Eo, inf0, fr_lo, fr_hi))
+                log_ctl++;
+        }
+    }
+}
+
+/* A random count in [2^j, 2^(j+1)), j >= 0. */
+static spec sp_between(long j)
+{
+    if (j < 0)
+        j = 0;
+    if (j <= 61)
+        return sp(((uint64_t)1 << j) + below((uint64_t)1 << j), 0);
+    return sp(((uint64_t)1 << 62) | (next() >> 2), j - 62);
+}
+
+/* The argument's count, in units of its own width wv, by its relative
+ * error e: zero; small; 2^-5 to 1/2, where the conversion's 2^(1 - E0)
+ * has the least room; at the rule's limit of 1/2 read at W; 1/2 to 1;
+ * 1 and past it, where no finite bound exists; and anything. */
+static spec log_count(long wv, int W)
+{
+    uint64_t u = below(20);
+    if (u < 3)
+        return sp(0, 0);
+    if (u < 5)
+        return sp(1 + below((uint64_t)1 << 20), 0);
+    if (u < 11)
+        return sp_between(wv - 2 - (long)below(4));
+    if (u < 13) {
+        long j = wv > W && (next() & 1) ? W - 1 : wv - 1;
+        switch (below(3)) {
+        case 0:  return sp_below(j);
+        case 1:  return sp_pow2(j);
+        default: return j < 63 ? sp(((uint64_t)1 << j) + 1, 0)
+                               : sp(((uint64_t)1 << 62) + 1, j - 62);
+        }
+    }
+    if (u < 16)
+        return sp_between(wv - 1);
+    if (u < 19) {
+        switch (below(6)) {
+        case 0:  return sp_below(wv);
+        case 1:  return sp_pow2(wv);
+        case 2:  return sp_between(wv);
+        case 3:  return sp_pow2(wv + 3);
+        case 4:  return wv < 100 ? sp((uint64_t)3 << 61, 39) : sp_pow2(wv + 9);
+        default: return sp_inf();
+        }
+    }
+    return sp(next() >> below(63), 0);
+}
+
+/* The widths the evaluator takes a logarithm at: Wi = W + 32 + the
+ * format's headroom, from 104 (fp32 forced to start at 64 bits by
+ * CFT_TRANSCEND_MINPREC, the narrowest any call reaches) through each
+ * format's first attempt (128, 189, 313, 565) and cap (360, 595, 879,
+ * 883) to CFT_MP_PREC_MAX. Narrower, the logarithm's own evaluation can
+ * refuse (an exact cancellation of 8-bit sums), which is not the
+ * conversion's refusal and no caller sees. */
+static const int LOGW[] = { 104, 107, 111, 128, 169, 189, 256, 313, 360,
+                            565, 595, 832, 879, 883, 928 };
+#define NLOGW 15
+#define LOG_ARGS 8000          /* the default run's; --full takes ten times */
+
+/* n arguments, in three kinds: a logarithm just above a power of two
+ * of either sign, so that the stored l sits at the bottom of its binade
+ * where 2^(1 - E0) has the least room; an argument near 1, its log from
+ * 2^-1 down past the refusal at 2^-32; and anywhere, at scales to
+ * 2^+-200,000. Each at a width of its own: W, narrower, or wider (the
+ * Payne-Hanek reduction's t is wider). Two thirds are drawn at the
+ * widths to 360, since one at 832 or more costs a few milliseconds. */
+static void log_leg(long n)
+{
+    long i;
+    mpz_t m;
+    mpz_init(m);
+    for (i = 0; i < n; i++) {
+        int W = LOGW[below(3) ? below(NLOGW - 6) : NLOGW - 6 + below(6)];
+        uint64_t u = below(10), kind = below(8);
+        long wv, e;
+        wv = u < 6 ? W : (u < 8 ? W - 1 - (long)below(4)
+                                : W + 1 + (long)below(u == 8 ? 40 : 300));
+        if (wv < 2)
+            wv = 2;
+        if (kind < 3) {
+            long E0 = below(4) ? (long)below(21) - 3 : -(long)below(33);
+            mpfr_set_prec(fr_t, (mpfr_prec_t)(wv + 64));
+            mpfr_set_prec(fr_y, 64);
+            mpfr_set_ui(fr_y, (unsigned long)(next() & 0xffffffffu),
+                        MPFR_RNDN);
+            mpfr_mul_2si(fr_y, fr_y, -32 - (long)below(30), MPFR_RNDN);
+            mpfr_add_ui(fr_y, fr_y, 1, MPFR_RNDN);  /* 1 + delta, exact */
+            mpfr_mul_2si(fr_t, fr_y, E0, MPFR_RNDN);
+            if (next() & 1)
+                mpfr_neg(fr_t, fr_t, MPFR_RNDN);
+            mpfr_set_prec(fr_v, (mpfr_prec_t)wv);
+            mpfr_exp(fr_v, fr_t, MPFR_RNDN);
+            e = (long)mpfr_get_z_2exp(m, fr_v);
+        } else if (kind < 5) {
+            long k = 1 + (long)below(40), lo = wv - 1 - k;
+            mpz_set_ui(m, 1);
+            if (lo >= 1) {
+                rnd_sig(t5, lo);                    /* 2^-k-ish below 1 */
+            } else {
+                mpz_set_ui(t5, 1);
+            }
+            if (next() & 1) {                       /* 1 + small */
+                mpz_mul_2exp(m, m, (mp_bitcnt_t)(wv - 1));
+                mpz_add(m, m, t5);
+                e = -(wv - 1);
+            } else {                                /* 1 - small */
+                mpz_mul_2exp(m, m, (mp_bitcnt_t)wv);
+                mpz_sub(m, m, t5);
+                e = -wv;
+            }
+        } else {
+            rnd_sig(m, wv);
+            e = -(wv - 1) + (below(8) ? (long)below(2001) - 1000
+                                      : (long)below(400001) - 200000);
+        }
+        {
+            spec cv = log_count(z_bitlen(m), W);
+            int ctl = below(4) == 0;
+            log_case(W, z_bitlen(m), m, e, cv, ctl);
+        }
+    }
+    mpz_clear(m);
+}
+#endif
+
 /* ---- the legs -------------------------------------------------------------- */
 
 static const uint32_t UIS[] = { 1, 2, 3, 5, 7, 255, 0x80000001u, 0xffffffffu };
@@ -1466,13 +1852,34 @@ static unsigned long long control_failed;
 
 static void report(const tally *T)
 {
+    int is_log = 0;
+#ifndef MP_ERR_CHECK_BASE
+    is_log = T == &T_log;
+#endif
     printf("  %-8s %12llu results, %llu over their bound", T->name,
            T->checked, T->over);
     if (T->refused)
-        printf(", %llu refused (the exact cancellation)", T->refused);
+        printf(", %llu refused (%s)", T->refused,
+               is_log ? "v exactly 1, or its log below 2^-32"
+                      : "the exact cancellation");
     if (T->unheld)
-        printf(", %llu operands the old field cannot hold", T->unheld);
+        printf(", %llu operands %s", T->unheld,
+               is_log ? "too wide to build" : "the old field cannot hold");
     printf("\n");
+#ifndef MP_ERR_CHECK_BASE
+    if (T == &T_const) {
+        printf("           all six constants at every W from 2 to %d, "
+               "against MPFR; a count of one unit fails on %llu of them\n",
+               CFT_MP_PREC_MAX, const_ctl);
+        return;
+    }
+    if (T == &T_log) {
+        printf("           %llu infinite (%llu from a count below 2^(W-1) "
+               "read at W); with the argument's error left out, %llu of "
+               "%llu fail\n", log_inf, log_inf_early, log_ctl, log_ctl_of);
+        return;
+    }
+#endif
     if (T == &T_cmp) {
         printf("           %llu decided; the stored value's own answer, "
                "ignoring the count, fails on %llu of %llu\n",
@@ -1492,12 +1899,16 @@ static void report(const tally *T)
 
 int main(int argc, char **argv)
 {
-    long per = 100000;
+    long per = 100000, logs = -1;
     int full = 0, i;
     clock_t t0 = clock();
     const tally *all[] = { &T_add, &T_sub, &T_mul, &T_div, &T_mul_ui,
                            &T_div_ui, &T_sqrt, &T_set, &T_cmp, &T_arith,
-                           &T_reg };
+                           &T_reg
+#ifndef MP_ERR_CHECK_BASE
+                           , &T_const, &T_log
+#endif
+                         };
     unsigned long long total = 0, over = 0;
 
     for (i = 1; i < argc; i++) {
@@ -1508,9 +1919,11 @@ int main(int argc, char **argv)
             rs = strtoull(argv[++i], NULL, 0) | 1;
         } else if (!strcmp(argv[i], "--per") && i + 1 < argc) {
             per = atol(argv[++i]);
+        } else if (!strcmp(argv[i], "--logs") && i + 1 < argc) {
+            logs = atol(argv[++i]);
         } else {
             fprintf(stderr, "usage: mp-err-check [--full] [--seed N] "
-                            "[--per TRIALS-PER-WIDTH]\n");
+                            "[--per TRIALS-PER-WIDTH] [--logs ARGUMENTS]\n");
             return 2;
         }
     }
@@ -1532,8 +1945,22 @@ int main(int argc, char **argv)
 #ifndef MP_ERR_CHECK_BASE
     {
         long n, narith = full ? 10000000 : 1000000;
+        long nlog = logs >= 0 ? logs : (full ? 10 * LOG_ARGS : LOG_ARGS);
         for (n = 0; n < narith; n++)
             arith_case();
+        /* After every leg above, so their samples are what they were:
+         * the logarithm's draws continue the same fixed sequence. */
+        mpz_init(b1); mpz_init(b2); mpz_init(b3);
+        mpz_init(g1); mpz_init(g2); mpz_init(g3);
+        mpfr_init2(fr_a, 2); mpfr_init2(fr_b, 2); mpfr_init2(fr_v, 2);
+        mpfr_init2(fr_lo, 2); mpfr_init2(fr_hi, 2); mpfr_init2(fr_t, 2);
+        mpfr_init2(fr_y, 2);
+        printf("mp-err-check: the six constants against MPFR, W = 2 to %d\n",
+               CFT_MP_PREC_MAX);
+        const_leg();
+        printf("mp-err-check: the logarithm's conversion against MPFR's "
+               "log, %ld arguments\n", nlog);
+        log_leg(nlog);
     }
 #endif
     for (i = 0; i < (int)(sizeof all / sizeof all[0]); i++) {
@@ -1547,6 +1974,7 @@ int main(int argc, char **argv)
 #ifdef MP_ERR_CHECK_BASE
     {
         unsigned long long model = 0;
+        (void)logs;                      /* the MPFR legs are left out */
         for (i = 0; i < (int)(sizeof all / sizeof all[0]); i++)
             model += all[i]->model;
         printf("mp-err-check: the OLD library, %llu results: %llu over their "
@@ -1574,12 +2002,26 @@ int main(int argc, char **argv)
                "enclosure that decides too much\n");
         failures++;
     }
-    printf("mp-err-check: %llu results over the rules and the count's "
-           "arithmetic, %llu over their bound: %s; the old rules' counts "
-           "fail the same verdicts on %llu, and the stored value's own "
-           "answers fail cmp_int's on %llu (the controls); %.1f s\n",
+    if (const_ctl == 0) {
+        printf("  FAIL the control: a constant's count of one unit held at "
+               "every width, so this checker could not see a constant's "
+               "count that is short\n");
+        failures++;
+    }
+    if (log_ctl == 0) {
+        printf("  FAIL the control: the logarithm held with its argument's "
+               "error left out, so this checker could not see a conversion "
+               "that is short\n");
+        failures++;
+    }
+    printf("mp-err-check: %llu results over the rules, the constants, the "
+           "logarithm's conversion and the count's arithmetic, %llu over "
+           "their bound: %s; the old rules' counts fail the same verdicts "
+           "on %llu, the stored value's own answers fail cmp_int's on %llu, "
+           "a constant's count of one unit fails on %llu, and the logarithm "
+           "without its argument's error on %llu (the controls); %.1f s\n",
            total, over, failures ? "FAILED" : "every one within its bound",
-           control_failed, T_cmp.ctl_fail,
+           control_failed, T_cmp.ctl_fail, const_ctl, log_ctl,
            (double)(clock() - t0) / CLOCKS_PER_SEC);
     return failures ? 1 : 0;
 #endif

@@ -176,7 +176,7 @@
     {
       "source": "host/src/transcend.c",
       "dest": "src/cft/src/transcend.c",
-      "sha256": "1b81eee3dbf60b6cb6f490c0b3f059fcf9afae1393c095ba58245b373902d7d0"
+      "sha256": "cfa5e50e595a19b55e265fc59066e2b907e6130dd3d8cce50057986364a53a89"
     },
     {
       "source": "host/src/transcend.h",

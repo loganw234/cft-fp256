@@ -1155,11 +1155,14 @@ do_mpfr() {
     HOSTMAKE "mpfr-check$EXE" "mp-err-check$EXE" || return 1
   fi
   (cd "$ROOT/host" && "./mpfr-check$EXE" 24 7) || return 1
-  # The evaluator's error rules held exactly, each verdict in GMP
-  # (host/tests/mp_err_check.c): W = 6 exhaustively and a fixed-seed
-  # sample, about 17 s on the desktop; its controls must fail. GMP
-  # comes with MPFR - mpfr.h includes gmp.h, and the pinned prefix
-  # installs both - so the probe that skips this stage covers it.
+  # The evaluator's error claims held exactly (host/tests/mp_err_check.c):
+  # mpfloat.c's rules in GMP, W = 6 exhaustively and a fixed-seed
+  # sample; then, against MPFR, the constants' count and transcend.c's
+  # logarithm conversion, through a probe build of transcend.c that
+  # only that tool compiles. About half a minute on the desktop; its
+  # controls must fail. It needs GMP and MPFR, which the probe that
+  # skips this stage already asks for - mpfr.h includes gmp.h, and the
+  # pinned prefix installs both.
   (cd "$ROOT/host" && "./mp-err-check$EXE")
 }
 
@@ -1171,7 +1174,7 @@ do_soakquick() {
   QUICK=1 OUT="$RUNDIR/soak-quick-out" bash "$ROOT/hw/run-soak.sh"
 }
 need host-cc mpfr
-stage mpfr "MPFR parity, all rungs and modes, flags - the only external oracle reaching fp128/fp256, and the only one at all for the thirty-nine transcendentals; then the evaluator's error rules, exactly, in GMP" -- do_mpfr
+stage mpfr "MPFR parity, all rungs and modes, flags - the only external oracle reaching fp128/fp256, and the only one at all for the thirty-nine transcendentals; then the evaluator's error claims, exactly, in GMP and MPFR" -- do_mpfr
 
 need host-cc
 stage soak-quick "native-oracle soak, QUICK depth + sabotage control" -- do_soakquick
