@@ -1,0 +1,277 @@
+{
+ "cftc_manifest": 1,
+ "compiler": {
+  "name": "cftc",
+  "version": 1
+ },
+ "source": {
+  "path": "programs/systems/lorenz63-rk4-fp256.cftl",
+  "sha256": "86b80bb821f75312db13de79c1a20ee5a162ce2c04f313eab2a59f99b9b026ea"
+ },
+ "graph": {
+  "cftl_graph": 1,
+  "file": "lorenz63-rk4-fp256.graph.json",
+  "sha256": "39a936811e73fdd6ba02b934ac78e326b9e27224d894ff2aa46de9d3824ef507"
+ },
+ "system": "lorenz63",
+ "format": "fp256",
+ "round": "rne",
+ "integrator": {
+  "name": "rk4",
+  "h": "1/100",
+  "options": null
+ },
+ "steps": 100,
+ "target": {
+  "name": "sw",
+  "formats": [
+   "fp32",
+   "fp64",
+   "fp128",
+   "fp256"
+  ],
+  "max_insns": 4294967295,
+  "max_consts": 512,
+  "scratch_depth": 256,
+  "max_deposits": 1048576,
+  "seq_features": "0x1ff1f"
+ },
+ "accepted_by": [
+  "sw",
+  "u50-rev7",
+  "u50-rev7-quad",
+  "u50-round2",
+  "open-core"
+ ],
+ "uses": {
+  "instructions": 62,
+  "registers": 12,
+  "register_list": [
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14
+  ],
+  "scratch_slots": 3,
+  "scratch_declared": 256,
+  "bank_slots": 7,
+  "worst_case_instructions": 5408,
+  "features": [
+   "BANK_PTR",
+   "SCRATCH",
+   "SCRATCH_IO",
+   "SCRATCH_STRICT"
+  ]
+ },
+ "per_step": {
+  "instructions": 54,
+  "alu": 53,
+  "loads": 0,
+  "stores": 0,
+  "copies": 0,
+  "endrep": 1,
+  "by_op": {
+   "mul": 8,
+   "sub": 8,
+   "neg": 8,
+   "fma": 26,
+   "add": 3
+  }
+ },
+ "per_segment": {
+  "prologue_loads": 3,
+  "epilogue_stores": 3,
+  "repeat": 1,
+  "halt": 1
+ },
+ "lowering": {
+  "graph_step_nodes": 53,
+  "graph_by_op": {
+   "fma": 26,
+   "add": 3,
+   "sub": 8,
+   "mul": 8,
+   "neg": 8
+  },
+  "shared": 0,
+  "folded": 0,
+  "folds": [],
+  "order": "latency",
+  "pinning": "all"
+ },
+ "scratch": {
+  "in": 3,
+  "out": 3,
+  "spill_slots": 0,
+  "strict": true,
+  "layout": [
+   {
+    "slot": 0,
+    "name": "x",
+    "kind": "state",
+    "pinned": "r3"
+   },
+   {
+    "slot": 1,
+    "name": "y",
+    "kind": "state",
+    "pinned": "r4"
+   },
+   {
+    "slot": 2,
+    "name": "z",
+    "kind": "state",
+    "pinned": "r5"
+   }
+  ]
+ },
+ "bank": [
+  {
+   "slot": 0,
+   "name": "h",
+   "kind": "const",
+   "exact": "1/100",
+   "h_factor": "1",
+   "encoding": "0x3fff847ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae",
+   "value": "0x1.47ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147aep-7",
+   "flags": [
+    "inexact"
+   ],
+   "relative_error": "-5.6598e-73",
+   "halved": "0x3fff747ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae"
+  },
+  {
+   "slot": 1,
+   "name": "h/2",
+   "kind": "const",
+   "exact": "1/200",
+   "h_factor": "1/2",
+   "encoding": "0x3fff747ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae",
+   "value": "0x1.47ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147aep-8",
+   "flags": [
+    "inexact"
+   ],
+   "relative_error": "-5.6598e-73",
+   "halved": "0x3fff647ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae"
+  },
+  {
+   "slot": 2,
+   "name": "h/6",
+   "kind": "const",
+   "exact": "1/600",
+   "h_factor": "1/6",
+   "encoding": "0x3fff5b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e8",
+   "value": "0x1.b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e8p-10",
+   "flags": [
+    "inexact"
+   ],
+   "relative_error": "-5.6598e-73",
+   "halved": "0x3fff4b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e8"
+  },
+  {
+   "slot": 3,
+   "name": "2",
+   "kind": "const",
+   "exact": "2",
+   "h_factor": null,
+   "encoding": "0x4000000000000000000000000000000000000000000000000000000000000000",
+   "value": "2",
+   "flags": [],
+   "relative_error": "0"
+  },
+  {
+   "slot": 4,
+   "name": "sigma",
+   "kind": "param",
+   "default": true,
+   "exact": "10",
+   "h_factor": null,
+   "encoding": "0x4000240000000000000000000000000000000000000000000000000000000000",
+   "value": "10",
+   "flags": [],
+   "relative_error": "0"
+  },
+  {
+   "slot": 5,
+   "name": "rho",
+   "kind": "param",
+   "default": true,
+   "exact": "28",
+   "h_factor": null,
+   "encoding": "0x40003c0000000000000000000000000000000000000000000000000000000000",
+   "value": "28",
+   "flags": [],
+   "relative_error": "0"
+  },
+  {
+   "slot": 6,
+   "name": "beta",
+   "kind": "param",
+   "default": true,
+   "exact": "8/3",
+   "h_factor": null,
+   "encoding": "0x4000055555555555555555555555555555555555555555555555555555555555",
+   "value": "0x1.55555555555555555555555555555555555555555555555555555555555p+1",
+   "flags": [
+    "inexact"
+   ],
+   "relative_error": "-2.2639e-72"
+  }
+ ],
+ "param_overrides": [],
+ "h_slots": [
+  0,
+  1,
+  2
+ ],
+ "time_shift": [
+  {
+   "expression": "6 RN(h/6) / RN(h) - 1",
+   "exact": "0",
+   "value": "0"
+  }
+ ],
+ "cost_model": {
+  "assumes": "revision 7, a single-pass tile; believed from docs/SEQUENCER.md R12-R19, not measured; the card's measurement is the lead's",
+  "cycles_per_step_one_beat": 289,
+  "cycles_per_step_sixteen_beats": 849
+ },
+ "files": {
+  "cfta": {
+   "name": "lorenz63-rk4-fp256.cfta",
+   "sha256": "80c07bbc6777a29e633a416d1a04ac0419607a2fa8500686e05babbfa72bfd34"
+  },
+  "image": {
+   "name": "lorenz63-rk4-fp256.cftp",
+   "sha256": "5fc98d1b87a01fc2dca866d527b038269b8ac4847f2ef99acbb22cc20af5dde3"
+  },
+  "bank": {
+   "name": "lorenz63-rk4-fp256.bank",
+   "sha256": "479ab866c54897712d18553e791d53da65f250aeed7336a82ee690101e76a7d0"
+  },
+  "half_bank": {
+   "name": "lorenz63-rk4-fp256.half.bank",
+   "sha256": "b880caca418768813ebfcbf06dceb306abf1097f7edb1f2f03d718ba2e58ba26"
+  },
+  "graph": {
+   "name": "lorenz63-rk4-fp256.graph.json",
+   "sha256": "39a936811e73fdd6ba02b934ac78e326b9e27224d894ff2aa46de9d3824ef507"
+  },
+  "canonical": {
+   "name": "lorenz63-rk4-fp256.canonical.cftl",
+   "sha256": "3fffeaf396a32ab896123f1380b67793cad53b340cc4c3fb25a6fe4dfb8e2b9b"
+  },
+  "math": {
+   "name": "lorenz63-rk4-fp256.math.txt",
+   "sha256": "a767a1cac9dd3c86281d89058cd4184106f8e37958062de59a7836ab845257b7"
+  }
+ }
+}

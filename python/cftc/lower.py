@@ -301,10 +301,13 @@ def halve(low, source=None):
 
 
 def _slot_words(low, s):
+    from cft_golden.lang import constants as K
     if s.kind == "param":
         return f"param {low.graph.param[s.index][0]}"
-    what = "the flip of const" if s.kind == "flip" else "const"
-    return f"{what} {low.graph.const[s.index][0]}"
+    exact, factor = low.graph.const[s.index][:2]
+    name = (f"{K.h_form(factor)} = {K.literal(exact)}" if factor is not None
+            else K.literal(exact))
+    return f"the flip of {name}" if s.kind == "flip" else name
 
 
 def lower(graph, param_bits=None):

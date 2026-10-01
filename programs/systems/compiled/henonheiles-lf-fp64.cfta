@@ -1,0 +1,47 @@
+; henonheiles-lf-fp64 - written by cftc from programs/systems/henonheiles-lf-fp64.cftl;
+; edit that, not this file.
+; source  sha256 f52a6e857f5b4b556eac75b0e4d5e9c4c707faf9324f5e145e56c5fbe568a1a4
+; graph   sha256 20f91a254a42fc73b3e84d92f493b9aaf4757e5de29d679bad327d368d558e84
+; system  henonheiles: fp64, rne, stormer-verlet, h = 0.01
+; target  sw; 100 steps a segment
+; a step  12 ALU, 0 loads, 0 stores, 0 copies, and the endrep
+; registers 9 (r3..r11)
+
+.format   fp64
+.deposits 0
+.bank     external
+.scratch  strict
+.scratch  in 4
+.scratch  out 4
+
+.const    b0                        ; h = 0.01 (h-scaled x 1): 0x3f847ae147ae147b
+.const    b1                        ; h/2 = 0.005 (h-scaled x 0.5): 0x3f747ae147ae147b
+.const    b2                        ; flip(h) = -0.01 (h-scaled x -1): 0xbf847ae147ae147b
+.const    b3                        ; 1 (const): 0x3ff0000000000000
+.const    b4                        ; 2 (const): 0x4000000000000000
+
+; the pinned values into their registers
+ldl      r3, 0                      ; x, from its home
+ldl      r4, 1                      ; y, from its home
+ldl      r5, 2                      ; px, from its home
+ldl      r6, 3                      ; py, from its home
+repeat 100
+  fma      r7, b1, r5, r3           ; Q1.x = fma(h/2, px, x)
+  fma      r8, b1, r6, r4           ; Q1.y = fma(h/2, py, y)
+  mul      r9, r7, r7               ; n8 = mul(Q1.x, Q1.x)
+  fma      r10, b4, r8, b3          ; n2 = fma(2, Q1.y, 1)
+  sub      r11, r8, b3              ; n7 = sub(Q1.y, 1)
+  neg      r9, r9                   ; n9 = neg(n8)
+  mul      r10, r7, r10             ; n3 = mul(Q1.x, n2)
+  fma      r9, r8, r11, r9          ; n10 = fma(Q1.y, n7, n9)
+  fma      r5, b2, r10, r5          ; P1.px = fma(flip(h), n3, px)
+  fma      r6, b0, r9, r6           ; P1.py = fma(h, n10, py)
+  fma      r3, b1, r5, r7           ; next x = fma(h/2, P1.px, Q1.x)
+  fma      r4, b1, r6, r8           ; next y = fma(h/2, P1.py, Q1.y)
+endrep
+; the pinned state back to its homes
+stl      r3, 0                      ; x, the segment's last state
+stl      r4, 1                      ; y, the segment's last state
+stl      r5, 2                      ; px, the segment's last state
+stl      r6, 3                      ; py, the segment's last state
+halt

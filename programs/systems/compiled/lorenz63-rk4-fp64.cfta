@@ -1,0 +1,88 @@
+; lorenz63-rk4-fp64 - written by cftc from programs/systems/lorenz63-rk4-fp64.cftl;
+; edit that, not this file.
+; source  sha256 dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+; graph   sha256 e3153e4d526117574089681d5539012b16fc7d493015315656ceda6c5e93e80c
+; system  lorenz63: fp64, rne, rk4, h = 0.01
+; target  sw; 100 steps a segment
+; a step  53 ALU, 0 loads, 0 stores, 0 copies, and the endrep
+; registers 12 (r3..r14)
+
+.format   fp64
+.deposits 0
+.bank     external
+.scratch  strict
+.scratch  in 3
+.scratch  out 3
+
+.const    b0                        ; h = 0.01 (h-scaled x 1): 0x3f847ae147ae147b
+.const    b1                        ; h/2 = 0.005 (h-scaled x 0.5): 0x3f747ae147ae147b
+.const    b2                        ; h/6 = 1/600 (h-scaled x 1/6): 0x3f5b4e81b4e81b4f
+.const    b3                        ; 2 (const): 0x4000000000000000
+.const    b4                        ; sigma = 10 (param): 0x4024000000000000
+.const    b5                        ; rho = 28 (param): 0x403c000000000000
+.const    b6                        ; beta = 8/3 (param): 0x4005555555555555
+
+; the pinned values into their registers
+ldl      r3, 0                      ; x, from its home
+ldl      r4, 1                      ; y, from its home
+ldl      r5, 2                      ; z, from its home
+repeat 100
+  mul      r6, b6, r5               ; n3 = mul(beta, z)
+  sub      r7, r4, r3               ; n0 = sub(y, x)
+  sub      r8, b5, r5               ; n8 = sub(rho, z)
+  neg      r9, r4                   ; n9 = neg(y)
+  neg      r6, r6                   ; n4 = neg(n3)
+  mul      r7, b4, r7               ; k1.x = mul(sigma, n0)
+  fma      r8, r3, r8, r9           ; k1.y = fma(x, n8, n9)
+  fma      r6, r3, r4, r6           ; k1.z = fma(x, y, n4)
+  fma      r9, b1, r7, r3           ; Y2.x = fma(h/2, k1.x, x)
+  fma      r10, b1, r8, r4          ; Y2.y = fma(h/2, k1.y, y)
+  fma      r11, b1, r6, r5          ; Y2.z = fma(h/2, k1.z, z)
+  neg      r12, r10                 ; n12 = neg(Y2.y)
+  sub      r13, r10, r9             ; n15 = sub(Y2.y, Y2.x)
+  mul      r14, b6, r11             ; n22 = mul(beta, Y2.z)
+  sub      r11, b5, r11             ; n7 = sub(rho, Y2.z)
+  mul      r13, b4, r13             ; k2.x = mul(sigma, n15)
+  neg      r14, r14                 ; n23 = neg(n22)
+  fma      r11, r9, r11, r12        ; k2.y = fma(Y2.x, n7, n12)
+  fma      r12, b1, r13, r3         ; Y3.x = fma(h/2, k2.x, x)
+  fma      r7, b3, r13, r7          ; S2.x = fma(2, k2.x, k1.x)
+  fma      r9, r9, r10, r14         ; k2.z = fma(Y2.x, Y2.y, n23)
+  fma      r10, b1, r11, r4         ; Y3.y = fma(h/2, k2.y, y)
+  fma      r8, b3, r11, r8          ; S2.y = fma(2, k2.y, k1.y)
+  fma      r11, b1, r9, r5          ; Y3.z = fma(h/2, k2.z, z)
+  sub      r13, r10, r12            ; n18 = sub(Y3.y, Y3.x)
+  neg      r14, r10                 ; n27 = neg(Y3.y)
+  fma      r6, b3, r9, r6           ; S2.z = fma(2, k2.z, k1.z)
+  mul      r9, b6, r11              ; n37 = mul(beta, Y3.z)
+  sub      r11, b5, r11             ; n26 = sub(rho, Y3.z)
+  mul      r13, b4, r13             ; k3.x = mul(sigma, n18)
+  neg      r9, r9                   ; n38 = neg(n37)
+  fma      r11, r12, r11, r14       ; k3.y = fma(Y3.x, n26, n27)
+  fma      r14, b0, r13, r3         ; Y4.x = fma(h, k3.x, x)
+  fma      r7, b3, r13, r7          ; S3.x = fma(2, k3.x, S2.x)
+  fma      r9, r12, r10, r9         ; k3.z = fma(Y3.x, Y3.y, n38)
+  fma      r10, b0, r11, r4         ; Y4.y = fma(h, k3.y, y)
+  fma      r8, b3, r11, r8          ; S3.y = fma(2, k3.y, S2.y)
+  fma      r11, b0, r9, r5          ; Y4.z = fma(h, k3.z, z)
+  sub      r12, r10, r14            ; n31 = sub(Y4.y, Y4.x)
+  neg      r13, r10                 ; n42 = neg(Y4.y)
+  fma      r6, b3, r9, r6           ; S3.z = fma(2, k3.z, S2.z)
+  mul      r9, b6, r11              ; n48 = mul(beta, Y4.z)
+  sub      r11, b5, r11             ; n41 = sub(rho, Y4.z)
+  mul      r12, b4, r12             ; k4.x = mul(sigma, n31)
+  neg      r9, r9                   ; n49 = neg(n48)
+  fma      r11, r14, r11, r13       ; k4.y = fma(Y4.x, n41, n42)
+  add      r7, r7, r12              ; S4.x = add(S3.x, k4.x)
+  fma      r9, r14, r10, r9         ; k4.z = fma(Y4.x, Y4.y, n49)
+  add      r8, r8, r11              ; S4.y = add(S3.y, k4.y)
+  fma      r3, b2, r7, r3           ; next x = fma(h/6, S4.x, x)
+  add      r6, r6, r9               ; S4.z = add(S3.z, k4.z)
+  fma      r4, b2, r8, r4           ; next y = fma(h/6, S4.y, y)
+  fma      r5, b2, r6, r5           ; next z = fma(h/6, S4.z, z)
+endrep
+; the pinned state back to its homes
+stl      r3, 0                      ; x, the segment's last state
+stl      r4, 1                      ; y, the segment's last state
+stl      r5, 2                      ; z, the segment's last state
+halt
