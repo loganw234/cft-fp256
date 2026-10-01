@@ -1459,7 +1459,12 @@ same defect (`cert.derive`, `make_value`, and `encode`'s reader). Before
 anything is made, each entry in turn is checked for its spellings, then
 against the runs in `cert.derive`'s order:
 - `malformed`, for:
-  - a method, a label, a run, a lane or a slot not in its spelling;
+  - a method, a label, a run, a lane or a slot not in its spelling. A
+    lane or a slot given negative is one: the golden writer refuses its
+    line `malformed` at `encode`. A run given negative, a minus before
+    an index in its one spelling, such as -1, is not: it names no run,
+    and it is `accuracy-run`, below, as `cert.derive` names it. `-0` and
+    `-01` spell no index, and are `malformed`;
   - a drift with no `--quantity`, no `--term`, or more than 64;
   - an estimate given a `--quantity` or a `--term`;
   - a coefficient not in its one spelling: a zero denominator, 0/3, or
@@ -1468,9 +1473,10 @@ against the runs in `cert.derive`'s order:
   - a `--value` that is not `exact`, `rounded:FMT:RND` or
     `enclosed:FMT`, in the page's words;
 - `width`, for a coefficient past the width rule by its digits;
-- `accuracy-run`, for a run that does not exist, and for an estimate on
-  run 0, on a run of the other kind, or on a run whose lanes or slots a
-  lane are not run 0's;
+- `accuracy-run`, for a run that does not exist (an index past the
+  runs, or a negative one), and for an estimate on run 0, on a run of
+  the other kind, or on a run whose lanes or slots a lane are not run
+  0's;
 - `accuracy-scope`, for a lane the run does not have;
 - `accuracy-slot`, for a slot the run's state does not have (so every
   slot from 65,536).
@@ -1837,11 +1843,14 @@ spelling it cannot be handed, such as a coefficient 2/4.
   `--run` or a run's option after one, an option twice, and a missing
   `--uses`, `--scope` or `--value`.
 - Every spelling (`malformed`), and a coefficient past the rule by its
-  digits (`width`).
+  digits (`width`). Among them `--uses -0` and `-01`, and a lane or a
+  slot given negative, which the golden writer refuses `malformed` too.
 - The entry against the runs:
   - `accuracy-run`: a run that is not there, a run index past 2^63 - 1,
-    step-halving on run 0 or on the wider run, wider on the half-step
-    run, and an estimate whose half-step run has other lanes;
+    a negative one (-1, a drift's -5, and -10^20), step-halving on run 0
+    or on the wider run, wider on the half-step run, and an estimate
+    whose half-step run has other lanes. Until verifier-W1 found it
+    (2026-09-30), a negative run was refused `malformed`;
   - `accuracy-scope`: lane 3 of 3, and a lane past 2^63 - 1;
   - `accuracy-slot`: slot 3 of 3, and slot 70,000.
 - Each of these leaves nothing behind.

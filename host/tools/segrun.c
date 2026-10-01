@@ -165,13 +165,16 @@
  *                      one before it (names in byte order)
  * and for an accuracy entry, before anything runs:
  *   malformed (2)      a method, label, run, lane or slot not in its
- *                      spelling; a drift with no quantity, no term or more
+ *                      spelling (a run given negative, -1, is spelt, and
+ *                      names no run: accuracy-run); a drift with no
+ *                      quantity, no term or more
  *                      than 64; an estimate given a quantity or a term; a
  *                      coefficient not in its one spelling; a factor not
  *                      s<slot>, more than 8, or out of order; a value
  *                      that is not exact, rounded:FMT:RND or enclosed:FMT
  *   width (3)          a coefficient past the width rule by its digits
- *   accuracy-run (7)   a run that does not exist; an estimate on run 0,
+ *   accuracy-run (7)   a run that does not exist, a negative one among
+ *                      them; an estimate on run 0,
  *                      on a run of the other kind, or on one whose lanes
  *                      or slots a lane are not run 0's
  *   accuracy-scope (7) a lane the run does not have
@@ -1690,7 +1693,7 @@ static void check_entry(entry_spec *X, size_t j, const run_spec *runs,
     uint64_t v, need[2][2];
     cx_run m, u;
     size_t t;
-    int k, st;
+    int k, st, negative;
 
     for (k = 0; k < 3 && strcmp(X->method_s, METHOD_NAME[k]) != 0; k++)
         ;
@@ -1701,11 +1704,19 @@ static void check_entry(entry_spec *X, size_t j, const run_spec *runs,
     if (!X->uses_s || !X->scope_s || !X->value_s)
         refuse("usage", "entry %lu (%s) needs --uses, --scope and --value",
                (unsigned long)j, METHOD_NAME[k]);
-    if (!dec_sat(X->uses_s, &v))
+    /* The run: a decimal in its one spelling, or a negative one, a minus
+     * and a nonzero decimal in its one spelling. A negative index names no
+     * run, and the golden writer handed one refuses it accuracy-run, at
+     * cert.derive's first check (`not 0 <= r < len(runs)`), before
+     * encode's reader could call it malformed: so it is held to the
+     * runs below, as an index past them is (verifier-W1, 2026-09-30: it
+     * was refused malformed). -0 and -01 spell no index: malformed. */
+    negative = X->uses_s[0] == '-' && dec_sat(X->uses_s + 1, &v) && v != 0;
+    if (!negative && !dec_sat(X->uses_s, &v))
         refuse("malformed", "entry %lu: --uses '%.40s' is not a run index, a "
                "decimal integer in its one spelling", (unsigned long)j,
                X->uses_s);
-    E->uses = v;
+    E->uses = negative ? UINT64_MAX : v;
     if (!strcmp(X->scope_s, "max-lanes")) {
         E->has_lane = 0;
     } else if (!strncmp(X->scope_s, "lane:", 5) &&
@@ -1746,6 +1757,11 @@ static void check_entry(entry_spec *X, size_t j, const run_spec *runs,
         run_shape_of(&runs[E->uses], &u);
     st = cx_entry_check(E, n_runs, &m, E->uses < n_runs ? &u : NULL, why,
                         sizeof why);
+    if (st == CX_RUN && negative)       /* the run as given, not saturated */
+        snprintf(why, sizeof why, "entry uses run %.40s%s, and the "
+                 "certificate has %llu", X->uses_s,
+                 strlen(X->uses_s) > 40 ? "..." : "",
+                 (unsigned long long)n_runs);
     refuse_cx(st, j, why);
 
     cx_entry_needs(E, &m, &u, need);

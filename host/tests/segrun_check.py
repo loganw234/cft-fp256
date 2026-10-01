@@ -111,11 +111,12 @@ Then:
      coefficient 2/4, it has none): the command line's own (usage); each
      spelling (malformed, and width by a coefficient's digits); the
      entry against the runs in cert.derive's order (accuracy-run, among
-     them an estimate whose run has other lanes than run 0; accuracy-
-     scope; accuracy-slot) - each before anything is made, nothing left
-     behind; and the values after the runs (accuracy-finite, width at an
-     element, a product, a partial sum, an enclosure's end), each leaving
-     the boundary files, said so. The page's orders, each with a control:
+     them a negative run and an estimate whose run has other lanes than
+     run 0; accuracy-scope; accuracy-slot) - each before anything is made,
+     nothing left behind; and the values after the runs (accuracy-finite,
+     width at an element, a product, a partial sum, an enclosure's end),
+     each leaving the boundary files, said so. The page's orders, each
+     with a control:
      1/a, 1/b, -1/b refused width where 1/b, -1/b, 1/a is written; a final
      +inf beside an initial 1,024-bit value accuracy-finite, not width;
      1/(3 x 2^900) enclosed in fp256 refused at its lower end, and written
@@ -1460,6 +1461,19 @@ def hold_entries(work, l63, flag):
          ["--entry", "sideways"] + sh[2:], None, 1),
         ("--uses '01'", "malformed", "l63",
          sh[:3] + ["01"] + sh[4:], None, 1),
+        # a minus spells a negative run (accuracy-run, below) only before
+        # a nonzero index in its one spelling
+        ("--uses '-0'", "malformed", "l63", sh[:3] + ["-0"] + sh[4:], None,
+         1),
+        ("--uses '-01'", "malformed", "l63", sh[:3] + ["-01"] + sh[4:], None,
+         1),
+        # a negative lane or slot: the golden writer reads it by Python's
+        # negative index, and its encode refuses the line it would write
+        ("--scope 'lane:-1'", "malformed", "l63",
+         sh[:5] + ["lane:-1"] + sh[6:], [E("step-halving", 1, -1, "exact")],
+         1),
+        ("a factor 's-1'", "malformed", "l63", drift("1/1,s-1"),
+         [D(((Fraction(1), (-1,)),))], 1),
         ("--scope 'lane:01'", "malformed", "l63",
          sh[:5] + ["lane:01"] + sh[6:], None, 1),
         ("--scope 'lanes'", "malformed", "l63",
@@ -1524,6 +1538,16 @@ def hold_entries(work, l63, flag):
         ("--uses past 2^63 - 1", "accuracy-run", "l63",
          sh[:3] + ["1" + "0" * 20] + sh[4:],
          [E("step-halving", 10 ** 20, None, "exact")], 1),
+        # a negative run names none: cert.derive's first check, `not 0 <=
+        # r < len(runs)` (verifier-W1, 2026-09-30: it was malformed)
+        ("--uses -1, a negative run", "accuracy-run", "l63",
+         sh[:3] + ["-1"] + sh[4:], [E("step-halving", -1, None, "exact")],
+         1),
+        ("--uses -5 on a drift", "accuracy-run", "l63",
+         drift("1/1,s0", run="-5"), [D(((Fraction(1), (0,)),), uses=-5)], 1),
+        ("--uses -10^20, a negative run past -(2^63 - 1)", "accuracy-run",
+         "l63", sh[:3] + ["-1" + "0" * 20] + sh[4:],
+         [E("step-halving", -10 ** 20, None, "exact")], 1),
         ("step-halving on run 0", "accuracy-run", "l63",
          sh[:3] + ["0"] + sh[4:], [E("step-halving", 0, None, "exact")], 1),
         ("wider on the half-step run", "accuracy-run", "l63",
