@@ -1,0 +1,2534 @@
+; lorenz96-rk4-tangent-fp256 - written by cftc from programs/systems/lorenz96-rk4-tangent-fp256.cftl;
+; edit that, not this file.
+; source  sha256 c474b7084fa06b994a11c05725f57ac8f33e1c6ee2412e06c59940c3a2871372
+; graph   sha256 af7914b70c7cbd35ead133ef4f41b3232e47ebbc53aef61daa863cd92d998672
+; system  lorenz96: fp256, rne, rk4, h = 0.01
+; tangent v (slots 40..79)
+; target  sw; 20 steps a segment
+; a step  1680 ALU, 488 loads, 340 stores, 0 copies, and the endrep
+; registers 29 (r3..r31)
+
+.format   fp256
+.deposits 0
+.bank     external
+.scratch  strict
+.scratch  in 80
+.scratch  out 80
+
+.const    b0                        ; h = 0.01 (h-scaled x 1): 0x3fff847ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae
+.const    b1                        ; h/2 = 0.005 (h-scaled x 0.5): 0x3fff747ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae147ae
+.const    b2                        ; h/6 = 1/600 (h-scaled x 1/6): 0x3fff5b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e81b4e8
+.const    b3                        ; 2 (const): 0x4000000000000000000000000000000000000000000000000000000000000000
+.const    b4                        ; F = 8 (param): 0x4000200000000000000000000000000000000000000000000000000000000000
+
+repeat 20
+  ldl      r3, 3                    ; x[3], from its home
+  ldl      r4, 0                    ; x[0], from its home
+  sub      r5, r3, r4               ; n0 = sub(x[3], x[0])
+  ldl      r6, 2                    ; x[2], from its home
+  sub      r7, b4, r6               ; n1 = sub(F, x[2])
+  ldl      r8, 1                    ; x[1], from its home
+  fma      r7, r5, r8, r7           ; k1.x[2] = fma(n0, x[1], n1)
+  fma      r9, b1, r7, r6           ; Y2.x[2] = fma(h/2, k1.x[2], x[2])
+  ldl      r10, 37                  ; x[37], from its home
+  sub      r11, r4, r10             ; n4 = sub(x[0], x[37])
+  ldl      r12, 39                  ; x[39], from its home
+  sub      r13, b4, r12             ; n5 = sub(F, x[39])
+  ldl      r14, 38                  ; x[38], from its home
+  fma      r13, r11, r14, r13       ; k1.x[39] = fma(n4, x[38], n5)
+  fma      r15, b1, r13, r12        ; Y2.x[39] = fma(h/2, k1.x[39], x[39])
+  sub      r16, r9, r15             ; n8 = sub(Y2.x[2], Y2.x[39])
+  sub      r17, r8, r14             ; n9 = sub(x[1], x[38])
+  sub      r18, b4, r4              ; n10 = sub(F, x[0])
+  fma      r18, r17, r12, r18       ; k1.x[0] = fma(n9, x[39], n10)
+  fma      r19, b1, r18, r4         ; Y2.x[0] = fma(h/2, k1.x[0], x[0])
+  sub      r20, r6, r12             ; n13 = sub(x[2], x[39])
+  sub      r21, b4, r8              ; n14 = sub(F, x[1])
+  fma      r21, r20, r4, r21        ; k1.x[1] = fma(n13, x[0], n14)
+  fma      r22, b1, r21, r8         ; Y2.x[1] = fma(h/2, k1.x[1], x[1])
+  sub      r23, b4, r22             ; n17 = sub(F, Y2.x[1])
+  fma      r23, r16, r19, r23       ; k2.x[1] = fma(n8, Y2.x[0], n17)
+  fma      r24, b1, r23, r8         ; Y3.x[1] = fma(h/2, k2.x[1], x[1])
+  ldl      r25, 34                  ; x[34], from its home
+  sub      r26, r10, r25            ; n20 = sub(x[37], x[34])
+  ldl      r27, 36                  ; x[36], from its home
+  sub      r28, b4, r27             ; n21 = sub(F, x[36])
+  ldl      r29, 35                  ; x[35], from its home
+  fma      r28, r26, r29, r28       ; k1.x[36] = fma(n20, x[35], n21)
+  fma      r30, b1, r28, r27        ; Y2.x[36] = fma(h/2, k1.x[36], x[36])
+  sub      r31, r15, r30            ; n24 = sub(Y2.x[39], Y2.x[36])
+  stl      r13, 80                  ; k1.x[39], spilled
+  sub      r13, r14, r29            ; n25 = sub(x[38], x[35])
+  stl      r28, 81                  ; k1.x[36], spilled
+  sub      r28, b4, r10             ; n26 = sub(F, x[37])
+  fma      r28, r13, r27, r28       ; k1.x[37] = fma(n25, x[36], n26)
+  stl      r28, 82                  ; k1.x[37], spilled
+  fma      r28, b1, r28, r10        ; Y2.x[37] = fma(h/2, k1.x[37], x[37])
+  stl      r7, 83                   ; k1.x[2], spilled
+  sub      r7, r12, r27             ; n29 = sub(x[39], x[36])
+  stl      r21, 84                  ; k1.x[1], spilled
+  sub      r21, b4, r14             ; n30 = sub(F, x[38])
+  fma      r21, r7, r10, r21        ; k1.x[38] = fma(n29, x[37], n30)
+  stl      r21, 85                  ; k1.x[38], spilled
+  fma      r21, b1, r21, r14        ; Y2.x[38] = fma(h/2, k1.x[38], x[38])
+  stl      r23, 86                  ; k2.x[1], spilled
+  sub      r23, b4, r21             ; n33 = sub(F, Y2.x[38])
+  fma      r23, r31, r28, r23       ; k2.x[38] = fma(n24, Y2.x[37], n33)
+  stl      r23, 87                  ; k2.x[38], spilled
+  fma      r23, b1, r23, r14        ; Y3.x[38] = fma(h/2, k2.x[38], x[38])
+  stl      r31, 88                  ; n24, spilled
+  sub      r31, r24, r23            ; n36 = sub(Y3.x[1], Y3.x[38])
+  stl      r7, 89                   ; n29, spilled
+  sub      r7, r19, r28             ; n37 = sub(Y2.x[0], Y2.x[37])
+  stl      r13, 90                  ; n25, spilled
+  sub      r13, b4, r15             ; n38 = sub(F, Y2.x[39])
+  fma      r13, r7, r21, r13        ; k2.x[39] = fma(n37, Y2.x[38], n38)
+  stl      r13, 91                  ; k2.x[39], spilled
+  fma      r13, b1, r13, r12        ; Y3.x[39] = fma(h/2, k2.x[39], x[39])
+  stl      r7, 92                   ; n37, spilled
+  sub      r7, r22, r21             ; n41 = sub(Y2.x[1], Y2.x[38])
+  stl      r26, 93                  ; n20, spilled
+  sub      r26, b4, r19             ; n42 = sub(F, Y2.x[0])
+  fma      r26, r7, r15, r26        ; k2.x[0] = fma(n41, Y2.x[39], n42)
+  stl      r15, 94                  ; Y2.x[39], spilled
+  fma      r15, b1, r26, r4         ; Y3.x[0] = fma(h/2, k2.x[0], x[0])
+  stl      r7, 95                   ; n41, spilled
+  sub      r7, b4, r15              ; n45 = sub(F, Y3.x[0])
+  fma      r7, r31, r13, r7         ; k3.x[0] = fma(n36, Y3.x[39], n45)
+  fma      r18, b3, r26, r18        ; S2.x[0] = fma(2, k2.x[0], k1.x[0])
+  fma      r18, b3, r7, r18         ; S3.x[0] = fma(2, k3.x[0], S2.x[0])
+  ldl      r26, 4                   ; x[4], from its home
+  sub      r26, r26, r8             ; n49 = sub(x[4], x[1])
+  stl      r31, 96                  ; n36, spilled
+  sub      r31, b4, r3              ; n50 = sub(F, x[3])
+  fma      r31, r26, r6, r31        ; k1.x[3] = fma(n49, x[2], n50)
+  stl      r31, 97                  ; k1.x[3], spilled
+  fma      r31, b1, r31, r3         ; Y2.x[3] = fma(h/2, k1.x[3], x[3])
+  stl      r31, 98                  ; Y2.x[3], spilled
+  sub      r31, r31, r19            ; n53 = sub(Y2.x[3], Y2.x[0])
+  stl      r9, 99                   ; Y2.x[2], spilled
+  sub      r9, b4, r9               ; n54 = sub(F, Y2.x[2])
+  fma      r9, r31, r22, r9         ; k2.x[2] = fma(n53, Y2.x[1], n54)
+  stl      r9, 100                  ; k2.x[2], spilled
+  fma      r9, b1, r9, r6           ; Y3.x[2] = fma(h/2, k2.x[2], x[2])
+  stl      r9, 101                  ; Y3.x[2], spilled
+  sub      r9, r9, r13              ; n57 = sub(Y3.x[2], Y3.x[39])
+  stl      r24, 102                 ; Y3.x[1], spilled
+  sub      r24, b4, r24             ; n58 = sub(F, Y3.x[1])
+  fma      r24, r9, r15, r24        ; k3.x[1] = fma(n57, Y3.x[0], n58)
+  fma      r3, b0, r24, r8          ; Y4.x[1] = fma(h, k3.x[1], x[1])
+  stl      r24, 103                 ; k3.x[1], spilled
+  ldl      r24, 32                  ; x[32], from its home
+  sub      r24, r29, r24            ; n61 = sub(x[35], x[32])
+  stl      r9, 104                  ; n57, spilled
+  sub      r9, b4, r25              ; n62 = sub(F, x[34])
+  stl      r22, 105                 ; Y2.x[1], spilled
+  ldl      r22, 33                  ; x[33], from its home
+  fma      r9, r24, r22, r9         ; k1.x[34] = fma(n61, x[33], n62)
+  stl      r9, 106                  ; k1.x[34], spilled
+  fma      r9, b1, r9, r25          ; Y2.x[34] = fma(h/2, k1.x[34], x[34])
+  stl      r9, 107                  ; Y2.x[34], spilled
+  sub      r9, r28, r9              ; n65 = sub(Y2.x[37], Y2.x[34])
+  sub      r22, r27, r22            ; n66 = sub(x[36], x[33])
+  stl      r24, 108                 ; n61, spilled
+  sub      r24, b4, r29             ; n67 = sub(F, x[35])
+  fma      r24, r22, r25, r24       ; k1.x[35] = fma(n66, x[34], n67)
+  stl      r24, 109                 ; k1.x[35], spilled
+  fma      r24, b1, r24, r29        ; Y2.x[35] = fma(h/2, k1.x[35], x[35])
+  sub      r25, b4, r30             ; n70 = sub(F, Y2.x[36])
+  fma      r25, r9, r24, r25        ; k2.x[36] = fma(n65, Y2.x[35], n70)
+  stl      r25, 110                 ; k2.x[36], spilled
+  fma      r25, b1, r25, r27        ; Y3.x[36] = fma(h/2, k2.x[36], x[36])
+  stl      r25, 111                 ; Y3.x[36], spilled
+  sub      r25, r13, r25            ; n73 = sub(Y3.x[39], Y3.x[36])
+  stl      r24, 112                 ; Y2.x[35], spilled
+  sub      r24, r21, r24            ; n74 = sub(Y2.x[38], Y2.x[35])
+  stl      r9, 113                  ; n65, spilled
+  sub      r9, b4, r28              ; n75 = sub(F, Y2.x[37])
+  fma      r9, r24, r30, r9         ; k2.x[37] = fma(n74, Y2.x[36], n75)
+  stl      r9, 114                  ; k2.x[37], spilled
+  fma      r9, b1, r9, r10          ; Y3.x[37] = fma(h/2, k2.x[37], x[37])
+  stl      r30, 115                 ; Y2.x[36], spilled
+  sub      r30, b4, r23             ; n78 = sub(F, Y3.x[38])
+  fma      r30, r25, r9, r30        ; k3.x[38] = fma(n73, Y3.x[37], n78)
+  stl      r30, 116                 ; k3.x[38], spilled
+  fma      r30, b0, r30, r14        ; Y4.x[38] = fma(h, k3.x[38], x[38])
+  stl      r30, 117                 ; Y4.x[38], spilled
+  sub      r30, r3, r30             ; n81 = sub(Y4.x[1], Y4.x[38])
+  stl      r3, 118                  ; Y4.x[1], spilled
+  sub      r3, r15, r9              ; n82 = sub(Y3.x[0], Y3.x[37])
+  stl      r9, 119                  ; Y3.x[37], spilled
+  sub      r9, b4, r13              ; n83 = sub(F, Y3.x[39])
+  fma      r9, r3, r23, r9          ; k3.x[39] = fma(n82, Y3.x[38], n83)
+  stl      r9, 120                  ; k3.x[39], spilled
+  fma      r9, b0, r9, r12          ; Y4.x[39] = fma(h, k3.x[39], x[39])
+  fma      r7, b0, r7, r4           ; Y4.x[0] = fma(h, k3.x[0], x[0])
+  stl      r7, 121                  ; Y4.x[0], spilled
+  sub      r7, b4, r7               ; n87 = sub(F, Y4.x[0])
+  fma      r7, r30, r9, r7          ; k4.x[0] = fma(n81, Y4.x[39], n87)
+  add      r7, r18, r7              ; S4.x[0] = add(S3.x[0], k4.x[0])
+  fma      r7, b2, r7, r4           ; next x[0] = fma(h/6, S4.x[0], x[0])
+  ldl      r18, 43                  ; v.x[3], from its home
+  stl      r9, 122                  ; Y4.x[39], spilled
+  ldl      r9, 40                   ; v.x[0], from its home
+  stl      r30, 123                 ; n81, spilled
+  sub      r30, r18, r9             ; n760 = sub(v.x[3], v.x[0])
+  stl      r23, 124                 ; Y3.x[38], spilled
+  ldl      r23, 42                  ; v.x[2], from its home
+  stl      r3, 125                  ; n82, spilled
+  neg      r3, r23                  ; n762 = neg(v.x[2])
+  stl      r25, 126                 ; n73, spilled
+  ldl      r25, 41                  ; v.x[1], from its home
+  fma      r3, r5, r25, r3          ; n763 = fma(n0, v.x[1], n762)
+  fma      r3, r30, r8, r3          ; v.k1.x[2] = fma(n760, x[1], n763)
+  fma      r5, b1, r3, r23          ; v.Y2.x[2] = fma(h/2, v.k1.x[2], v.x[2])
+  ldl      r30, 77                  ; v.x[37], from its home
+  stl      r3, 127                  ; v.k1.x[2], spilled
+  sub      r3, r9, r30              ; n766 = sub(v.x[0], v.x[37])
+  ldl      r8, 79                   ; v.x[39], from its home
+  stl      r24, 128                 ; n74, spilled
+  neg      r24, r8                  ; n768 = neg(v.x[39])
+  stl      r22, 129                 ; n66, spilled
+  ldl      r22, 78                  ; v.x[38], from its home
+  fma      r11, r11, r22, r24       ; n769 = fma(n4, v.x[38], n768)
+  fma      r3, r3, r14, r11         ; v.k1.x[39] = fma(n766, x[38], n769)
+  fma      r11, b1, r3, r8          ; v.Y2.x[39] = fma(h/2, v.k1.x[39], v.x[39])
+  sub      r24, r5, r11             ; n772 = sub(v.Y2.x[2], v.Y2.x[39])
+  stl      r3, 130                  ; v.k1.x[39], spilled
+  sub      r3, r25, r22             ; n774 = sub(v.x[1], v.x[38])
+  neg      r14, r9                  ; n776 = neg(v.x[0])
+  fma      r14, r17, r8, r14        ; n777 = fma(n9, v.x[39], n776)
+  fma      r3, r3, r12, r14         ; v.k1.x[0] = fma(n774, x[39], n777)
+  fma      r14, b1, r3, r9          ; v.Y2.x[0] = fma(h/2, v.k1.x[0], v.x[0])
+  sub      r17, r23, r8             ; n780 = sub(v.x[2], v.x[39])
+  neg      r12, r25                 ; n782 = neg(v.x[1])
+  fma      r12, r20, r9, r12        ; n783 = fma(n13, v.x[0], n782)
+  fma      r4, r17, r4, r12         ; v.k1.x[1] = fma(n780, x[0], n783)
+  stl      r7, 0                    ; next x[0]
+  fma      r7, b1, r4, r25          ; v.Y2.x[1] = fma(h/2, v.k1.x[1], v.x[1])
+  neg      r12, r7                  ; n786 = neg(v.Y2.x[1])
+  fma      r12, r16, r14, r12       ; n787 = fma(n8, v.Y2.x[0], n786)
+  fma      r12, r24, r19, r12       ; v.k2.x[1] = fma(n772, Y2.x[0], n787)
+  fma      r16, b1, r12, r25        ; v.Y3.x[1] = fma(h/2, v.k2.x[1], v.x[1])
+  ldl      r17, 74                  ; v.x[34], from its home
+  sub      r19, r30, r17            ; n790 = sub(v.x[37], v.x[34])
+  ldl      r20, 76                  ; v.x[36], from its home
+  neg      r24, r20                 ; n792 = neg(v.x[36])
+  stl      r4, 131                  ; v.k1.x[1], spilled
+  ldl      r4, 93                   ; n20, from slot 93
+  stl      r12, 132                 ; v.k2.x[1], spilled
+  ldl      r12, 75                  ; v.x[35], from its home
+  fma      r4, r4, r12, r24         ; n793 = fma(n20, v.x[35], n792)
+  fma      r4, r19, r29, r4         ; v.k1.x[36] = fma(n790, x[35], n793)
+  fma      r19, b1, r4, r20         ; v.Y2.x[36] = fma(h/2, v.k1.x[36], v.x[36])
+  sub      r24, r11, r19            ; n796 = sub(v.Y2.x[39], v.Y2.x[36])
+  stl      r4, 93                   ; v.k1.x[36], spilled
+  sub      r4, r22, r12             ; n798 = sub(v.x[38], v.x[35])
+  neg      r29, r30                 ; n800 = neg(v.x[37])
+  stl      r19, 133                 ; v.Y2.x[36], spilled
+  ldl      r19, 90                  ; n25, from slot 90
+  fma      r19, r19, r20, r29       ; n801 = fma(n25, v.x[36], n800)
+  fma      r4, r4, r27, r19         ; v.k1.x[37] = fma(n798, x[36], n801)
+  fma      r19, b1, r4, r30         ; v.Y2.x[37] = fma(h/2, v.k1.x[37], v.x[37])
+  sub      r29, r8, r20             ; n804 = sub(v.x[39], v.x[36])
+  stl      r4, 90                   ; v.k1.x[37], spilled
+  neg      r4, r22                  ; n806 = neg(v.x[38])
+  ldl      r27, 89                  ; n29, from slot 89
+  fma      r4, r27, r30, r4         ; n807 = fma(n29, v.x[37], n806)
+  fma      r4, r29, r10, r4         ; v.k1.x[38] = fma(n804, x[37], n807)
+  fma      r27, b1, r4, r22         ; v.Y2.x[38] = fma(h/2, v.k1.x[38], v.x[38])
+  neg      r29, r27                 ; n810 = neg(v.Y2.x[38])
+  stl      r4, 89                   ; v.k1.x[38], spilled
+  ldl      r4, 88                   ; n24, from slot 88
+  fma      r4, r4, r19, r29         ; n811 = fma(n24, v.Y2.x[37], n810)
+  fma      r4, r24, r28, r4         ; v.k2.x[38] = fma(n796, Y2.x[37], n811)
+  fma      r24, b1, r4, r22         ; v.Y3.x[38] = fma(h/2, v.k2.x[38], v.x[38])
+  sub      r28, r16, r24            ; n814 = sub(v.Y3.x[1], v.Y3.x[38])
+  sub      r29, r14, r19            ; n816 = sub(v.Y2.x[0], v.Y2.x[37])
+  stl      r4, 88                   ; v.k2.x[38], spilled
+  neg      r4, r11                  ; n818 = neg(v.Y2.x[39])
+  ldl      r10, 92                  ; n37, from slot 92
+  fma      r4, r10, r27, r4         ; n819 = fma(n37, v.Y2.x[38], n818)
+  fma      r4, r29, r21, r4         ; v.k2.x[39] = fma(n816, Y2.x[38], n819)
+  fma      r10, b1, r4, r8          ; v.Y3.x[39] = fma(h/2, v.k2.x[39], v.x[39])
+  sub      r21, r7, r27             ; n822 = sub(v.Y2.x[1], v.Y2.x[38])
+  neg      r29, r14                 ; n824 = neg(v.Y2.x[0])
+  stl      r4, 92                   ; v.k2.x[39], spilled
+  ldl      r4, 95                   ; n41, from slot 95
+  fma      r4, r4, r11, r29         ; n825 = fma(n41, v.Y2.x[39], n824)
+  ldl      r11, 94                  ; Y2.x[39], from slot 94
+  fma      r4, r21, r11, r4         ; v.k2.x[0] = fma(n822, Y2.x[39], n825)
+  fma      r11, b1, r4, r9          ; v.Y3.x[0] = fma(h/2, v.k2.x[0], v.x[0])
+  neg      r21, r11                 ; n828 = neg(v.Y3.x[0])
+  ldl      r29, 96                  ; n36, from slot 96
+  fma      r21, r29, r10, r21       ; n829 = fma(n36, v.Y3.x[39], n828)
+  fma      r13, r28, r13, r21       ; v.k3.x[0] = fma(n814, Y3.x[39], n829)
+  fma      r3, b3, r4, r3           ; v.S2.x[0] = fma(2, v.k2.x[0], v.k1.x[0])
+  fma      r3, b3, r13, r3          ; v.S3.x[0] = fma(2, v.k3.x[0], v.S2.x[0])
+  ldl      r4, 44                   ; v.x[4], from its home
+  sub      r21, r4, r25             ; n833 = sub(v.x[4], v.x[1])
+  neg      r28, r18                 ; n835 = neg(v.x[3])
+  fma      r26, r26, r23, r28       ; n836 = fma(n49, v.x[2], n835)
+  fma      r21, r21, r6, r26        ; v.k1.x[3] = fma(n833, x[2], n836)
+  fma      r26, b1, r21, r18        ; v.Y2.x[3] = fma(h/2, v.k1.x[3], v.x[3])
+  sub      r14, r26, r14            ; n839 = sub(v.Y2.x[3], v.Y2.x[0])
+  neg      r28, r5                  ; n841 = neg(v.Y2.x[2])
+  fma      r28, r31, r7, r28        ; n842 = fma(n53, v.Y2.x[1], n841)
+  ldl      r29, 105                 ; Y2.x[1], from slot 105
+  fma      r14, r14, r29, r28       ; v.k2.x[2] = fma(n839, Y2.x[1], n842)
+  fma      r28, b1, r14, r23        ; v.Y3.x[2] = fma(h/2, v.k2.x[2], v.x[2])
+  sub      r31, r28, r10            ; n845 = sub(v.Y3.x[2], v.Y3.x[39])
+  stl      r21, 94                  ; v.k1.x[3], spilled
+  neg      r21, r16                 ; n847 = neg(v.Y3.x[1])
+  stl      r14, 95                  ; v.k2.x[2], spilled
+  ldl      r14, 104                 ; n57, from slot 104
+  fma      r14, r14, r11, r21       ; n848 = fma(n57, v.Y3.x[0], n847)
+  fma      r14, r31, r15, r14       ; v.k3.x[1] = fma(n845, Y3.x[0], n848)
+  fma      r21, b0, r14, r25        ; v.Y4.x[1] = fma(h, v.k3.x[1], v.x[1])
+  ldl      r31, 72                  ; v.x[32], from its home
+  sub      r31, r12, r31            ; n851 = sub(v.x[35], v.x[32])
+  neg      r25, r17                 ; n853 = neg(v.x[34])
+  stl      r16, 96                  ; v.Y3.x[1], spilled
+  ldl      r16, 108                 ; n61, from slot 108
+  stl      r28, 104                 ; v.Y3.x[2], spilled
+  ldl      r28, 73                  ; v.x[33], from its home
+  fma      r16, r16, r28, r25       ; n854 = fma(n61, v.x[33], n853)
+  ldl      r25, 33                  ; x[33], from its home
+  fma      r16, r31, r25, r16       ; v.k1.x[34] = fma(n851, x[33], n854)
+  fma      r31, b1, r16, r17        ; v.Y2.x[34] = fma(h/2, v.k1.x[34], v.x[34])
+  stl      r16, 108                 ; v.k1.x[34], spilled
+  sub      r16, r19, r31            ; n857 = sub(v.Y2.x[37], v.Y2.x[34])
+  stl      r31, 134                 ; v.Y2.x[34], spilled
+  sub      r31, r20, r28            ; n859 = sub(v.x[36], v.x[33])
+  neg      r28, r12                 ; n861 = neg(v.x[35])
+  ldl      r25, 129                 ; n66, from slot 129
+  fma      r25, r25, r17, r28       ; n862 = fma(n66, v.x[34], n861)
+  ldl      r28, 34                  ; x[34], from its home
+  fma      r25, r31, r28, r25       ; v.k1.x[35] = fma(n859, x[34], n862)
+  fma      r31, b1, r25, r12        ; v.Y2.x[35] = fma(h/2, v.k1.x[35], v.x[35])
+  stl      r25, 129                 ; v.k1.x[35], spilled
+  ldl      r25, 133                 ; v.Y2.x[36], from slot 133
+  neg      r12, r25                 ; n865 = neg(v.Y2.x[36])
+  ldl      r17, 113                 ; n65, from slot 113
+  fma      r12, r17, r31, r12       ; n866 = fma(n65, v.Y2.x[35], n865)
+  ldl      r17, 112                 ; Y2.x[35], from slot 112
+  fma      r12, r16, r17, r12       ; v.k2.x[36] = fma(n857, Y2.x[35], n866)
+  fma      r16, b1, r12, r20        ; v.Y3.x[36] = fma(h/2, v.k2.x[36], v.x[36])
+  stl      r12, 113                 ; v.k2.x[36], spilled
+  sub      r12, r10, r16            ; n869 = sub(v.Y3.x[39], v.Y3.x[36])
+  sub      r27, r27, r31            ; n871 = sub(v.Y2.x[38], v.Y2.x[35])
+  neg      r19, r19                 ; n873 = neg(v.Y2.x[37])
+  ldl      r20, 128                 ; n74, from slot 128
+  fma      r19, r20, r25, r19       ; n874 = fma(n74, v.Y2.x[36], n873)
+  ldl      r20, 115                 ; Y2.x[36], from slot 115
+  fma      r19, r27, r20, r19       ; v.k2.x[37] = fma(n871, Y2.x[36], n874)
+  fma      r27, b1, r19, r30        ; v.Y3.x[37] = fma(h/2, v.k2.x[37], v.x[37])
+  stl      r19, 128                 ; v.k2.x[37], spilled
+  neg      r19, r24                 ; n877 = neg(v.Y3.x[38])
+  ldl      r30, 126                 ; n73, from slot 126
+  fma      r19, r30, r27, r19       ; n878 = fma(n73, v.Y3.x[37], n877)
+  ldl      r30, 119                 ; Y3.x[37], from slot 119
+  fma      r12, r12, r30, r19       ; v.k3.x[38] = fma(n869, Y3.x[37], n878)
+  fma      r19, b0, r12, r22        ; v.Y4.x[38] = fma(h, v.k3.x[38], v.x[38])
+  sub      r22, r21, r19            ; n881 = sub(v.Y4.x[1], v.Y4.x[38])
+  stl      r12, 126                 ; v.k3.x[38], spilled
+  sub      r12, r11, r27            ; n883 = sub(v.Y3.x[0], v.Y3.x[37])
+  neg      r10, r10                 ; n885 = neg(v.Y3.x[39])
+  stl      r19, 135                 ; v.Y4.x[38], spilled
+  ldl      r19, 125                 ; n82, from slot 125
+  fma      r10, r19, r24, r10       ; n886 = fma(n82, v.Y3.x[38], n885)
+  ldl      r19, 124                 ; Y3.x[38], from slot 124
+  fma      r10, r12, r19, r10       ; v.k3.x[39] = fma(n883, Y3.x[38], n886)
+  fma      r12, b0, r10, r8         ; v.Y4.x[39] = fma(h, v.k3.x[39], v.x[39])
+  fma      r13, b0, r13, r9         ; v.Y4.x[0] = fma(h, v.k3.x[0], v.x[0])
+  neg      r8, r13                  ; n890 = neg(v.Y4.x[0])
+  stl      r10, 125                 ; v.k3.x[39], spilled
+  ldl      r10, 123                 ; n81, from slot 123
+  fma      r8, r10, r12, r8         ; n891 = fma(n81, v.Y4.x[39], n890)
+  ldl      r10, 122                 ; Y4.x[39], from slot 122
+  fma      r8, r22, r10, r8         ; v.k4.x[0] = fma(n881, Y4.x[39], n891)
+  add      r3, r3, r8               ; v.S4.x[0] = add(v.S3.x[0], v.k4.x[0])
+  fma      r3, b2, r3, r9           ; next v.x[0] = fma(h/6, v.S4.x[0], v.x[0])
+  stl      r3, 40                   ; next v.x[0]
+  ldl      r3, 86                   ; k2.x[1], from slot 86
+  ldl      r8, 84                   ; k1.x[1], from slot 84
+  fma      r3, b3, r3, r8           ; S2.x[1] = fma(2, k2.x[1], k1.x[1])
+  ldl      r8, 103                  ; k3.x[1], from slot 103
+  fma      r3, b3, r8, r3           ; S3.x[1] = fma(2, k3.x[1], S2.x[1])
+  ldl      r8, 5                    ; x[5], from its home
+  sub      r9, r8, r6               ; n93 = sub(x[5], x[2])
+  ldl      r22, 4                   ; x[4], from its home
+  stl      r24, 84                  ; v.Y3.x[38], spilled
+  sub      r24, b4, r22             ; n94 = sub(F, x[4])
+  ldl      r19, 3                   ; x[3], from its home
+  fma      r24, r9, r19, r24        ; k1.x[4] = fma(n93, x[3], n94)
+  stl      r27, 86                  ; v.Y3.x[37], spilled
+  fma      r27, b1, r24, r22        ; Y2.x[4] = fma(h/2, k1.x[4], x[4])
+  sub      r29, r27, r29            ; n97 = sub(Y2.x[4], Y2.x[1])
+  ldl      r30, 98                  ; Y2.x[3], from slot 98
+  stl      r16, 103                 ; v.Y3.x[36], spilled
+  sub      r16, b4, r30             ; n98 = sub(F, Y2.x[3])
+  ldl      r25, 99                  ; Y2.x[2], from slot 99
+  fma      r16, r29, r25, r16       ; k2.x[3] = fma(n97, Y2.x[2], n98)
+  fma      r20, b1, r16, r19        ; Y3.x[3] = fma(h/2, k2.x[3], x[3])
+  sub      r15, r20, r15            ; n101 = sub(Y3.x[3], Y3.x[0])
+  stl      r31, 105                 ; v.Y2.x[35], spilled
+  ldl      r31, 101                 ; Y3.x[2], from slot 101
+  sub      r17, b4, r31             ; n102 = sub(F, Y3.x[2])
+  ldl      r28, 102                 ; Y3.x[1], from slot 102
+  fma      r17, r15, r28, r17       ; k3.x[2] = fma(n101, Y3.x[1], n102)
+  stl      r24, 123                 ; k1.x[4], spilled
+  fma      r24, b0, r17, r6         ; Y4.x[2] = fma(h, k3.x[2], x[2])
+  sub      r10, r24, r10            ; n105 = sub(Y4.x[2], Y4.x[39])
+  stl      r16, 136                 ; k2.x[3], spilled
+  ldl      r16, 118                 ; Y4.x[1], from slot 118
+  sub      r6, b4, r16              ; n106 = sub(F, Y4.x[1])
+  ldl      r16, 121                 ; Y4.x[0], from slot 121
+  fma      r6, r10, r16, r6         ; k4.x[1] = fma(n105, Y4.x[0], n106)
+  add      r3, r3, r6               ; S4.x[1] = add(S3.x[1], k4.x[1])
+  ldl      r6, 1                    ; x[1], from its home
+  fma      r3, b2, r3, r6           ; next x[1] = fma(h/6, S4.x[1], x[1])
+  stl      r3, 1                    ; next x[1]
+  ldl      r3, 132                  ; v.k2.x[1], from slot 132
+  ldl      r6, 131                  ; v.k1.x[1], from slot 131
+  fma      r3, b3, r3, r6           ; v.S2.x[1] = fma(2, v.k2.x[1], v.k1.x[1])
+  fma      r3, b3, r14, r3          ; v.S3.x[1] = fma(2, v.k3.x[1], v.S2.x[1])
+  ldl      r6, 45                   ; v.x[5], from its home
+  sub      r14, r6, r23             ; n897 = sub(v.x[5], v.x[2])
+  neg      r6, r4                   ; n899 = neg(v.x[4])
+  fma      r6, r9, r18, r6          ; n900 = fma(n93, v.x[3], n899)
+  fma      r6, r14, r19, r6         ; v.k1.x[4] = fma(n897, x[3], n900)
+  fma      r9, b1, r6, r4           ; v.Y2.x[4] = fma(h/2, v.k1.x[4], v.x[4])
+  sub      r7, r9, r7               ; n903 = sub(v.Y2.x[4], v.Y2.x[1])
+  neg      r14, r26                 ; n905 = neg(v.Y2.x[3])
+  fma      r14, r29, r5, r14        ; n906 = fma(n97, v.Y2.x[2], n905)
+  fma      r7, r7, r25, r14         ; v.k2.x[3] = fma(n903, Y2.x[2], n906)
+  fma      r14, b1, r7, r18         ; v.Y3.x[3] = fma(h/2, v.k2.x[3], v.x[3])
+  sub      r11, r14, r11            ; n909 = sub(v.Y3.x[3], v.Y3.x[0])
+  ldl      r29, 104                 ; v.Y3.x[2], from slot 104
+  stl      r6, 131                  ; v.k1.x[4], spilled
+  neg      r6, r29                  ; n911 = neg(v.Y3.x[2])
+  stl      r7, 132                  ; v.k2.x[3], spilled
+  ldl      r7, 96                   ; v.Y3.x[1], from slot 96
+  fma      r6, r15, r7, r6          ; n912 = fma(n101, v.Y3.x[1], n911)
+  fma      r6, r11, r28, r6         ; v.k3.x[2] = fma(n909, Y3.x[1], n912)
+  fma      r11, b0, r6, r23         ; v.Y4.x[2] = fma(h, v.k3.x[2], v.x[2])
+  sub      r15, r11, r12            ; n915 = sub(v.Y4.x[2], v.Y4.x[39])
+  stl      r12, 137                 ; v.Y4.x[39], spilled
+  neg      r12, r21                 ; n917 = neg(v.Y4.x[1])
+  fma      r10, r10, r13, r12       ; n918 = fma(n105, v.Y4.x[0], n917)
+  fma      r10, r15, r16, r10       ; v.k4.x[1] = fma(n915, Y4.x[0], n918)
+  add      r3, r3, r10              ; v.S4.x[1] = add(v.S3.x[1], v.k4.x[1])
+  ldl      r10, 41                  ; v.x[1], from its home
+  fma      r3, b2, r3, r10          ; next v.x[1] = fma(h/6, v.S4.x[1], v.x[1])
+  stl      r3, 41                   ; next v.x[1]
+  ldl      r3, 100                  ; k2.x[2], from slot 100
+  ldl      r10, 83                  ; k1.x[2], from slot 83
+  fma      r3, b3, r3, r10          ; S2.x[2] = fma(2, k2.x[2], k1.x[2])
+  fma      r3, b3, r17, r3          ; S3.x[2] = fma(2, k3.x[2], S2.x[2])
+  ldl      r10, 6                   ; x[6], from its home
+  sub      r12, r10, r19            ; n112 = sub(x[6], x[3])
+  sub      r15, b4, r8              ; n113 = sub(F, x[5])
+  fma      r15, r12, r22, r15       ; k1.x[5] = fma(n112, x[4], n113)
+  fma      r17, b1, r15, r8         ; Y2.x[5] = fma(h/2, k1.x[5], x[5])
+  sub      r25, r17, r25            ; n116 = sub(Y2.x[5], Y2.x[2])
+  stl      r15, 83                  ; k1.x[5], spilled
+  sub      r15, b4, r27             ; n117 = sub(F, Y2.x[4])
+  fma      r15, r25, r30, r15       ; k2.x[4] = fma(n116, Y2.x[3], n117)
+  stl      r15, 99                  ; k2.x[4], spilled
+  fma      r15, b1, r15, r22        ; Y3.x[4] = fma(h/2, k2.x[4], x[4])
+  sub      r28, r15, r28            ; n120 = sub(Y3.x[4], Y3.x[1])
+  stl      r20, 100                 ; Y3.x[3], spilled
+  sub      r20, b4, r20             ; n121 = sub(F, Y3.x[3])
+  fma      r20, r28, r31, r20       ; k3.x[3] = fma(n120, Y3.x[2], n121)
+  fma      r19, b0, r20, r19        ; Y4.x[3] = fma(h, k3.x[3], x[3])
+  sub      r16, r19, r16            ; n124 = sub(Y4.x[3], Y4.x[0])
+  stl      r24, 102                 ; Y4.x[2], spilled
+  sub      r24, b4, r24             ; n125 = sub(F, Y4.x[2])
+  stl      r19, 138                 ; Y4.x[3], spilled
+  ldl      r19, 118                 ; Y4.x[1], from slot 118
+  fma      r24, r16, r19, r24       ; k4.x[2] = fma(n124, Y4.x[1], n125)
+  add      r3, r3, r24              ; S4.x[2] = add(S3.x[2], k4.x[2])
+  ldl      r24, 2                   ; x[2], from its home
+  fma      r3, b2, r3, r24          ; next x[2] = fma(h/6, S4.x[2], x[2])
+  stl      r3, 2                    ; next x[2]
+  ldl      r3, 95                   ; v.k2.x[2], from slot 95
+  ldl      r24, 127                 ; v.k1.x[2], from slot 127
+  fma      r3, b3, r3, r24          ; v.S2.x[2] = fma(2, v.k2.x[2], v.k1.x[2])
+  fma      r3, b3, r6, r3           ; v.S3.x[2] = fma(2, v.k3.x[2], v.S2.x[2])
+  ldl      r6, 46                   ; v.x[6], from its home
+  sub      r24, r6, r18             ; n924 = sub(v.x[6], v.x[3])
+  ldl      r6, 45                   ; v.x[5], from its home
+  stl      r15, 95                  ; Y3.x[4], spilled
+  neg      r15, r6                  ; n926 = neg(v.x[5])
+  fma      r12, r12, r4, r15        ; n927 = fma(n112, v.x[4], n926)
+  fma      r12, r24, r22, r12       ; v.k1.x[5] = fma(n924, x[4], n927)
+  fma      r15, b1, r12, r6         ; v.Y2.x[5] = fma(h/2, v.k1.x[5], v.x[5])
+  sub      r5, r15, r5              ; n930 = sub(v.Y2.x[5], v.Y2.x[2])
+  neg      r24, r9                  ; n932 = neg(v.Y2.x[4])
+  fma      r24, r25, r26, r24       ; n933 = fma(n116, v.Y2.x[3], n932)
+  fma      r5, r5, r30, r24         ; v.k2.x[4] = fma(n930, Y2.x[3], n933)
+  fma      r24, b1, r5, r4          ; v.Y3.x[4] = fma(h/2, v.k2.x[4], v.x[4])
+  sub      r7, r24, r7              ; n936 = sub(v.Y3.x[4], v.Y3.x[1])
+  neg      r25, r14                 ; n938 = neg(v.Y3.x[3])
+  fma      r25, r28, r29, r25       ; n939 = fma(n120, v.Y3.x[2], n938)
+  fma      r7, r7, r31, r25         ; v.k3.x[3] = fma(n936, Y3.x[2], n939)
+  fma      r25, b0, r7, r18         ; v.Y4.x[3] = fma(h, v.k3.x[3], v.x[3])
+  sub      r28, r25, r13            ; n942 = sub(v.Y4.x[3], v.Y4.x[0])
+  stl      r13, 96                  ; v.Y4.x[0], spilled
+  neg      r13, r11                 ; n944 = neg(v.Y4.x[2])
+  fma      r13, r16, r21, r13       ; n945 = fma(n124, v.Y4.x[1], n944)
+  fma      r13, r28, r19, r13       ; v.k4.x[2] = fma(n942, Y4.x[1], n945)
+  add      r3, r3, r13              ; v.S4.x[2] = add(v.S3.x[2], v.k4.x[2])
+  fma      r3, b2, r3, r23          ; next v.x[2] = fma(h/6, v.S4.x[2], v.x[2])
+  stl      r3, 42                   ; next v.x[2]
+  ldl      r3, 136                  ; k2.x[3], from slot 136
+  ldl      r13, 97                  ; k1.x[3], from slot 97
+  fma      r3, b3, r3, r13          ; S2.x[3] = fma(2, k2.x[3], k1.x[3])
+  fma      r3, b3, r20, r3          ; S3.x[3] = fma(2, k3.x[3], S2.x[3])
+  ldl      r13, 7                   ; x[7], from its home
+  sub      r16, r13, r22            ; n131 = sub(x[7], x[4])
+  sub      r20, b4, r10             ; n132 = sub(F, x[6])
+  fma      r20, r16, r8, r20        ; k1.x[6] = fma(n131, x[5], n132)
+  fma      r23, b1, r20, r10        ; Y2.x[6] = fma(h/2, k1.x[6], x[6])
+  sub      r28, r23, r30            ; n135 = sub(Y2.x[6], Y2.x[3])
+  sub      r30, b4, r17             ; n136 = sub(F, Y2.x[5])
+  fma      r30, r28, r27, r30       ; k2.x[5] = fma(n135, Y2.x[4], n136)
+  stl      r20, 97                  ; k1.x[6], spilled
+  fma      r20, b1, r30, r8         ; Y3.x[5] = fma(h/2, k2.x[5], x[5])
+  sub      r31, r20, r31            ; n139 = sub(Y3.x[5], Y3.x[2])
+  stl      r12, 98                  ; v.k1.x[5], spilled
+  ldl      r12, 95                  ; Y3.x[4], from slot 95
+  stl      r30, 101                 ; k2.x[5], spilled
+  sub      r30, b4, r12             ; n140 = sub(F, Y3.x[4])
+  stl      r5, 127                  ; v.k2.x[4], spilled
+  ldl      r5, 100                  ; Y3.x[3], from slot 100
+  fma      r30, r31, r5, r30        ; k3.x[4] = fma(n139, Y3.x[3], n140)
+  fma      r22, b0, r30, r22        ; Y4.x[4] = fma(h, k3.x[4], x[4])
+  sub      r19, r22, r19            ; n143 = sub(Y4.x[4], Y4.x[1])
+  stl      r22, 118                 ; Y4.x[4], spilled
+  ldl      r22, 138                 ; Y4.x[3], from slot 138
+  sub      r22, b4, r22             ; n144 = sub(F, Y4.x[3])
+  ldl      r12, 102                 ; Y4.x[2], from slot 102
+  fma      r22, r19, r12, r22       ; k4.x[3] = fma(n143, Y4.x[2], n144)
+  add      r3, r3, r22              ; S4.x[3] = add(S3.x[3], k4.x[3])
+  ldl      r22, 3                   ; x[3], from its home
+  fma      r3, b2, r3, r22          ; next x[3] = fma(h/6, S4.x[3], x[3])
+  stl      r3, 3                    ; next x[3]
+  ldl      r3, 132                  ; v.k2.x[3], from slot 132
+  ldl      r22, 94                  ; v.k1.x[3], from slot 94
+  fma      r3, b3, r3, r22          ; v.S2.x[3] = fma(2, v.k2.x[3], v.k1.x[3])
+  fma      r3, b3, r7, r3           ; v.S3.x[3] = fma(2, v.k3.x[3], v.S2.x[3])
+  ldl      r7, 47                   ; v.x[7], from its home
+  sub      r22, r7, r4              ; n951 = sub(v.x[7], v.x[4])
+  ldl      r7, 46                   ; v.x[6], from its home
+  stl      r20, 94                  ; Y3.x[5], spilled
+  neg      r20, r7                  ; n953 = neg(v.x[6])
+  fma      r16, r16, r6, r20        ; n954 = fma(n131, v.x[5], n953)
+  fma      r16, r22, r8, r16        ; v.k1.x[6] = fma(n951, x[5], n954)
+  fma      r20, b1, r16, r7         ; v.Y2.x[6] = fma(h/2, v.k1.x[6], v.x[6])
+  sub      r22, r20, r26            ; n957 = sub(v.Y2.x[6], v.Y2.x[3])
+  neg      r26, r15                 ; n959 = neg(v.Y2.x[5])
+  fma      r26, r28, r9, r26        ; n960 = fma(n135, v.Y2.x[4], n959)
+  fma      r22, r22, r27, r26       ; v.k2.x[5] = fma(n957, Y2.x[4], n960)
+  fma      r26, b1, r22, r6         ; v.Y3.x[5] = fma(h/2, v.k2.x[5], v.x[5])
+  sub      r28, r26, r29            ; n963 = sub(v.Y3.x[5], v.Y3.x[2])
+  neg      r29, r24                 ; n965 = neg(v.Y3.x[4])
+  fma      r29, r31, r14, r29       ; n966 = fma(n139, v.Y3.x[3], n965)
+  fma      r28, r28, r5, r29        ; v.k3.x[4] = fma(n963, Y3.x[3], n966)
+  fma      r29, b0, r28, r4         ; v.Y4.x[4] = fma(h, v.k3.x[4], v.x[4])
+  sub      r21, r29, r21            ; n969 = sub(v.Y4.x[4], v.Y4.x[1])
+  neg      r31, r25                 ; n971 = neg(v.Y4.x[3])
+  fma      r19, r19, r11, r31       ; n972 = fma(n143, v.Y4.x[2], n971)
+  fma      r19, r21, r12, r19       ; v.k4.x[3] = fma(n969, Y4.x[2], n972)
+  add      r3, r3, r19              ; v.S4.x[3] = add(v.S3.x[3], v.k4.x[3])
+  fma      r3, b2, r3, r18          ; next v.x[3] = fma(h/6, v.S4.x[3], v.x[3])
+  stl      r3, 43                   ; next v.x[3]
+  ldl      r3, 99                   ; k2.x[4], from slot 99
+  ldl      r18, 123                 ; k1.x[4], from slot 123
+  fma      r3, b3, r3, r18          ; S2.x[4] = fma(2, k2.x[4], k1.x[4])
+  fma      r3, b3, r30, r3          ; S3.x[4] = fma(2, k3.x[4], S2.x[4])
+  ldl      r18, 8                   ; x[8], from its home
+  sub      r19, r18, r8             ; n150 = sub(x[8], x[5])
+  sub      r21, b4, r13             ; n151 = sub(F, x[7])
+  fma      r21, r19, r10, r21       ; k1.x[7] = fma(n150, x[6], n151)
+  fma      r30, b1, r21, r13        ; Y2.x[7] = fma(h/2, k1.x[7], x[7])
+  sub      r27, r30, r27            ; n154 = sub(Y2.x[7], Y2.x[4])
+  sub      r31, b4, r23             ; n155 = sub(F, Y2.x[6])
+  fma      r31, r27, r17, r31       ; k2.x[6] = fma(n154, Y2.x[5], n155)
+  stl      r21, 99                  ; k1.x[7], spilled
+  fma      r21, b1, r31, r10        ; Y3.x[6] = fma(h/2, k2.x[6], x[6])
+  sub      r5, r21, r5              ; n158 = sub(Y3.x[6], Y3.x[3])
+  stl      r16, 100                 ; v.k1.x[6], spilled
+  ldl      r16, 94                  ; Y3.x[5], from slot 94
+  stl      r31, 104                 ; k2.x[6], spilled
+  sub      r31, b4, r16             ; n159 = sub(F, Y3.x[5])
+  stl      r22, 123                 ; v.k2.x[5], spilled
+  ldl      r22, 95                  ; Y3.x[4], from slot 95
+  fma      r31, r5, r22, r31        ; k3.x[5] = fma(n158, Y3.x[4], n159)
+  fma      r8, b0, r31, r8          ; Y4.x[5] = fma(h, k3.x[5], x[5])
+  sub      r12, r8, r12             ; n162 = sub(Y4.x[5], Y4.x[2])
+  stl      r8, 102                  ; Y4.x[5], spilled
+  ldl      r8, 118                  ; Y4.x[4], from slot 118
+  sub      r8, b4, r8               ; n163 = sub(F, Y4.x[4])
+  ldl      r16, 138                 ; Y4.x[3], from slot 138
+  fma      r8, r12, r16, r8         ; k4.x[4] = fma(n162, Y4.x[3], n163)
+  add      r3, r3, r8               ; S4.x[4] = add(S3.x[4], k4.x[4])
+  ldl      r8, 4                    ; x[4], from its home
+  fma      r3, b2, r3, r8           ; next x[4] = fma(h/6, S4.x[4], x[4])
+  stl      r3, 4                    ; next x[4]
+  ldl      r3, 127                  ; v.k2.x[4], from slot 127
+  ldl      r8, 131                  ; v.k1.x[4], from slot 131
+  fma      r3, b3, r3, r8           ; v.S2.x[4] = fma(2, v.k2.x[4], v.k1.x[4])
+  fma      r3, b3, r28, r3          ; v.S3.x[4] = fma(2, v.k3.x[4], v.S2.x[4])
+  ldl      r8, 48                   ; v.x[8], from its home
+  sub      r28, r8, r6              ; n978 = sub(v.x[8], v.x[5])
+  ldl      r8, 47                   ; v.x[7], from its home
+  stl      r21, 127                 ; Y3.x[6], spilled
+  neg      r21, r8                  ; n980 = neg(v.x[7])
+  fma      r19, r19, r7, r21        ; n981 = fma(n150, v.x[6], n980)
+  fma      r19, r28, r10, r19       ; v.k1.x[7] = fma(n978, x[6], n981)
+  fma      r21, b1, r19, r8         ; v.Y2.x[7] = fma(h/2, v.k1.x[7], v.x[7])
+  sub      r9, r21, r9              ; n984 = sub(v.Y2.x[7], v.Y2.x[4])
+  neg      r28, r20                 ; n986 = neg(v.Y2.x[6])
+  fma      r27, r27, r15, r28       ; n987 = fma(n154, v.Y2.x[5], n986)
+  fma      r9, r9, r17, r27         ; v.k2.x[6] = fma(n984, Y2.x[5], n987)
+  fma      r27, b1, r9, r7          ; v.Y3.x[6] = fma(h/2, v.k2.x[6], v.x[6])
+  sub      r14, r27, r14            ; n990 = sub(v.Y3.x[6], v.Y3.x[3])
+  neg      r28, r26                 ; n992 = neg(v.Y3.x[5])
+  fma      r5, r5, r24, r28         ; n993 = fma(n158, v.Y3.x[4], n992)
+  fma      r5, r14, r22, r5         ; v.k3.x[5] = fma(n990, Y3.x[4], n993)
+  fma      r14, b0, r5, r6          ; v.Y4.x[5] = fma(h, v.k3.x[5], v.x[5])
+  sub      r11, r14, r11            ; n996 = sub(v.Y4.x[5], v.Y4.x[2])
+  neg      r28, r29                 ; n998 = neg(v.Y4.x[4])
+  fma      r12, r12, r25, r28       ; n999 = fma(n162, v.Y4.x[3], n998)
+  fma      r11, r11, r16, r12       ; v.k4.x[4] = fma(n996, Y4.x[3], n999)
+  add      r3, r3, r11              ; v.S4.x[4] = add(v.S3.x[4], v.k4.x[4])
+  fma      r3, b2, r3, r4           ; next v.x[4] = fma(h/6, v.S4.x[4], v.x[4])
+  stl      r3, 44                   ; next v.x[4]
+  ldl      r3, 101                  ; k2.x[5], from slot 101
+  ldl      r4, 83                   ; k1.x[5], from slot 83
+  fma      r3, b3, r3, r4           ; S2.x[5] = fma(2, k2.x[5], k1.x[5])
+  fma      r3, b3, r31, r3          ; S3.x[5] = fma(2, k3.x[5], S2.x[5])
+  ldl      r4, 9                    ; x[9], from its home
+  sub      r11, r4, r10             ; n169 = sub(x[9], x[6])
+  sub      r12, b4, r18             ; n170 = sub(F, x[8])
+  fma      r12, r11, r13, r12       ; k1.x[8] = fma(n169, x[7], n170)
+  fma      r28, b1, r12, r18        ; Y2.x[8] = fma(h/2, k1.x[8], x[8])
+  sub      r17, r28, r17            ; n173 = sub(Y2.x[8], Y2.x[5])
+  sub      r31, b4, r30             ; n174 = sub(F, Y2.x[7])
+  fma      r31, r17, r23, r31       ; k2.x[7] = fma(n173, Y2.x[6], n174)
+  stl      r12, 83                  ; k1.x[8], spilled
+  fma      r12, b1, r31, r13        ; Y3.x[7] = fma(h/2, k2.x[7], x[7])
+  sub      r22, r12, r22            ; n177 = sub(Y3.x[7], Y3.x[4])
+  stl      r19, 95                  ; v.k1.x[7], spilled
+  ldl      r19, 127                 ; Y3.x[6], from slot 127
+  stl      r31, 101                 ; k2.x[7], spilled
+  sub      r31, b4, r19             ; n178 = sub(F, Y3.x[6])
+  stl      r9, 131                  ; v.k2.x[6], spilled
+  ldl      r9, 94                   ; Y3.x[5], from slot 94
+  fma      r31, r22, r9, r31        ; k3.x[6] = fma(n177, Y3.x[5], n178)
+  fma      r10, b0, r31, r10        ; Y4.x[6] = fma(h, k3.x[6], x[6])
+  sub      r16, r10, r16            ; n181 = sub(Y4.x[6], Y4.x[3])
+  stl      r10, 132                 ; Y4.x[6], spilled
+  ldl      r10, 102                 ; Y4.x[5], from slot 102
+  sub      r10, b4, r10             ; n182 = sub(F, Y4.x[5])
+  ldl      r19, 118                 ; Y4.x[4], from slot 118
+  fma      r10, r16, r19, r10       ; k4.x[5] = fma(n181, Y4.x[4], n182)
+  add      r3, r3, r10              ; S4.x[5] = add(S3.x[5], k4.x[5])
+  ldl      r10, 5                   ; x[5], from its home
+  fma      r3, b2, r3, r10          ; next x[5] = fma(h/6, S4.x[5], x[5])
+  stl      r3, 5                    ; next x[5]
+  ldl      r3, 123                  ; v.k2.x[5], from slot 123
+  ldl      r10, 98                  ; v.k1.x[5], from slot 98
+  fma      r3, b3, r3, r10          ; v.S2.x[5] = fma(2, v.k2.x[5], v.k1.x[5])
+  fma      r3, b3, r5, r3           ; v.S3.x[5] = fma(2, v.k3.x[5], v.S2.x[5])
+  ldl      r5, 49                   ; v.x[9], from its home
+  sub      r10, r5, r7              ; n1005 = sub(v.x[9], v.x[6])
+  ldl      r5, 48                   ; v.x[8], from its home
+  stl      r12, 98                  ; Y3.x[7], spilled
+  neg      r12, r5                  ; n1007 = neg(v.x[8])
+  fma      r11, r11, r8, r12        ; n1008 = fma(n169, v.x[7], n1007)
+  fma      r10, r10, r13, r11       ; v.k1.x[8] = fma(n1005, x[7], n1008)
+  fma      r11, b1, r10, r5         ; v.Y2.x[8] = fma(h/2, v.k1.x[8], v.x[8])
+  sub      r12, r11, r15            ; n1011 = sub(v.Y2.x[8], v.Y2.x[5])
+  neg      r15, r21                 ; n1013 = neg(v.Y2.x[7])
+  fma      r15, r17, r20, r15       ; n1014 = fma(n173, v.Y2.x[6], n1013)
+  fma      r12, r12, r23, r15       ; v.k2.x[7] = fma(n1011, Y2.x[6], n1014)
+  fma      r15, b1, r12, r8         ; v.Y3.x[7] = fma(h/2, v.k2.x[7], v.x[7])
+  sub      r17, r15, r24            ; n1017 = sub(v.Y3.x[7], v.Y3.x[4])
+  neg      r24, r27                 ; n1019 = neg(v.Y3.x[6])
+  fma      r22, r22, r26, r24       ; n1020 = fma(n177, v.Y3.x[5], n1019)
+  fma      r17, r17, r9, r22        ; v.k3.x[6] = fma(n1017, Y3.x[5], n1020)
+  fma      r22, b0, r17, r7         ; v.Y4.x[6] = fma(h, v.k3.x[6], v.x[6])
+  sub      r24, r22, r25            ; n1023 = sub(v.Y4.x[6], v.Y4.x[3])
+  neg      r25, r14                 ; n1025 = neg(v.Y4.x[5])
+  fma      r16, r16, r29, r25       ; n1026 = fma(n181, v.Y4.x[4], n1025)
+  fma      r16, r24, r19, r16       ; v.k4.x[5] = fma(n1023, Y4.x[4], n1026)
+  add      r3, r3, r16              ; v.S4.x[5] = add(v.S3.x[5], v.k4.x[5])
+  fma      r3, b2, r3, r6           ; next v.x[5] = fma(h/6, v.S4.x[5], v.x[5])
+  stl      r3, 45                   ; next v.x[5]
+  ldl      r3, 104                  ; k2.x[6], from slot 104
+  ldl      r6, 97                   ; k1.x[6], from slot 97
+  fma      r3, b3, r3, r6           ; S2.x[6] = fma(2, k2.x[6], k1.x[6])
+  fma      r3, b3, r31, r3          ; S3.x[6] = fma(2, k3.x[6], S2.x[6])
+  ldl      r6, 10                   ; x[10], from its home
+  sub      r16, r6, r13             ; n188 = sub(x[10], x[7])
+  sub      r24, b4, r4              ; n189 = sub(F, x[9])
+  fma      r24, r16, r18, r24       ; k1.x[9] = fma(n188, x[8], n189)
+  fma      r25, b1, r24, r4         ; Y2.x[9] = fma(h/2, k1.x[9], x[9])
+  sub      r23, r25, r23            ; n192 = sub(Y2.x[9], Y2.x[6])
+  sub      r31, b4, r28             ; n193 = sub(F, Y2.x[8])
+  fma      r31, r23, r30, r31       ; k2.x[8] = fma(n192, Y2.x[7], n193)
+  stl      r24, 97                  ; k1.x[9], spilled
+  fma      r24, b1, r31, r18        ; Y3.x[8] = fma(h/2, k2.x[8], x[8])
+  sub      r9, r24, r9              ; n196 = sub(Y3.x[8], Y3.x[5])
+  stl      r10, 94                  ; v.k1.x[8], spilled
+  ldl      r10, 98                  ; Y3.x[7], from slot 98
+  stl      r31, 104                 ; k2.x[8], spilled
+  sub      r31, b4, r10             ; n197 = sub(F, Y3.x[7])
+  stl      r12, 123                 ; v.k2.x[7], spilled
+  ldl      r12, 127                 ; Y3.x[6], from slot 127
+  fma      r31, r9, r12, r31        ; k3.x[7] = fma(n196, Y3.x[6], n197)
+  fma      r13, b0, r31, r13        ; Y4.x[7] = fma(h, k3.x[7], x[7])
+  sub      r19, r13, r19            ; n200 = sub(Y4.x[7], Y4.x[4])
+  stl      r13, 118                 ; Y4.x[7], spilled
+  ldl      r13, 132                 ; Y4.x[6], from slot 132
+  sub      r13, b4, r13             ; n201 = sub(F, Y4.x[6])
+  ldl      r10, 102                 ; Y4.x[5], from slot 102
+  fma      r13, r19, r10, r13       ; k4.x[6] = fma(n200, Y4.x[5], n201)
+  add      r3, r3, r13              ; S4.x[6] = add(S3.x[6], k4.x[6])
+  ldl      r13, 6                   ; x[6], from its home
+  fma      r3, b2, r3, r13          ; next x[6] = fma(h/6, S4.x[6], x[6])
+  stl      r3, 6                    ; next x[6]
+  ldl      r3, 131                  ; v.k2.x[6], from slot 131
+  ldl      r13, 100                 ; v.k1.x[6], from slot 100
+  fma      r3, b3, r3, r13          ; v.S2.x[6] = fma(2, v.k2.x[6], v.k1.x[6])
+  fma      r3, b3, r17, r3          ; v.S3.x[6] = fma(2, v.k3.x[6], v.S2.x[6])
+  ldl      r13, 50                  ; v.x[10], from its home
+  sub      r17, r13, r8             ; n1032 = sub(v.x[10], v.x[7])
+  ldl      r13, 49                  ; v.x[9], from its home
+  stl      r24, 100                 ; Y3.x[8], spilled
+  neg      r24, r13                 ; n1034 = neg(v.x[9])
+  fma      r16, r16, r5, r24        ; n1035 = fma(n188, v.x[8], n1034)
+  fma      r16, r17, r18, r16       ; v.k1.x[9] = fma(n1032, x[8], n1035)
+  fma      r17, b1, r16, r13        ; v.Y2.x[9] = fma(h/2, v.k1.x[9], v.x[9])
+  sub      r20, r17, r20            ; n1038 = sub(v.Y2.x[9], v.Y2.x[6])
+  neg      r24, r11                 ; n1040 = neg(v.Y2.x[8])
+  fma      r23, r23, r21, r24       ; n1041 = fma(n192, v.Y2.x[7], n1040)
+  fma      r20, r20, r30, r23       ; v.k2.x[8] = fma(n1038, Y2.x[7], n1041)
+  fma      r23, b1, r20, r5         ; v.Y3.x[8] = fma(h/2, v.k2.x[8], v.x[8])
+  sub      r24, r23, r26            ; n1044 = sub(v.Y3.x[8], v.Y3.x[5])
+  neg      r26, r15                 ; n1046 = neg(v.Y3.x[7])
+  fma      r9, r9, r27, r26         ; n1047 = fma(n196, v.Y3.x[6], n1046)
+  fma      r9, r24, r12, r9         ; v.k3.x[7] = fma(n1044, Y3.x[6], n1047)
+  fma      r24, b0, r9, r8          ; v.Y4.x[7] = fma(h, v.k3.x[7], v.x[7])
+  sub      r26, r24, r29            ; n1050 = sub(v.Y4.x[7], v.Y4.x[4])
+  neg      r29, r22                 ; n1052 = neg(v.Y4.x[6])
+  fma      r19, r19, r14, r29       ; n1053 = fma(n200, v.Y4.x[5], n1052)
+  fma      r19, r26, r10, r19       ; v.k4.x[6] = fma(n1050, Y4.x[5], n1053)
+  add      r3, r3, r19              ; v.S4.x[6] = add(v.S3.x[6], v.k4.x[6])
+  fma      r3, b2, r3, r7           ; next v.x[6] = fma(h/6, v.S4.x[6], v.x[6])
+  stl      r3, 46                   ; next v.x[6]
+  ldl      r3, 101                  ; k2.x[7], from slot 101
+  ldl      r7, 99                   ; k1.x[7], from slot 99
+  fma      r3, b3, r3, r7           ; S2.x[7] = fma(2, k2.x[7], k1.x[7])
+  fma      r3, b3, r31, r3          ; S3.x[7] = fma(2, k3.x[7], S2.x[7])
+  ldl      r7, 11                   ; x[11], from its home
+  sub      r19, r7, r18             ; n207 = sub(x[11], x[8])
+  sub      r26, b4, r6              ; n208 = sub(F, x[10])
+  fma      r26, r19, r4, r26        ; k1.x[10] = fma(n207, x[9], n208)
+  fma      r29, b1, r26, r6         ; Y2.x[10] = fma(h/2, k1.x[10], x[10])
+  sub      r30, r29, r30            ; n211 = sub(Y2.x[10], Y2.x[7])
+  sub      r31, b4, r25             ; n212 = sub(F, Y2.x[9])
+  fma      r31, r30, r28, r31       ; k2.x[9] = fma(n211, Y2.x[8], n212)
+  stl      r26, 99                  ; k1.x[10], spilled
+  fma      r26, b1, r31, r4         ; Y3.x[9] = fma(h/2, k2.x[9], x[9])
+  sub      r12, r26, r12            ; n215 = sub(Y3.x[9], Y3.x[6])
+  stl      r16, 101                 ; v.k1.x[9], spilled
+  ldl      r16, 100                 ; Y3.x[8], from slot 100
+  stl      r31, 127                 ; k2.x[9], spilled
+  sub      r31, b4, r16             ; n216 = sub(F, Y3.x[8])
+  stl      r20, 131                 ; v.k2.x[8], spilled
+  ldl      r20, 98                  ; Y3.x[7], from slot 98
+  fma      r31, r12, r20, r31       ; k3.x[8] = fma(n215, Y3.x[7], n216)
+  fma      r18, b0, r31, r18        ; Y4.x[8] = fma(h, k3.x[8], x[8])
+  sub      r10, r18, r10            ; n219 = sub(Y4.x[8], Y4.x[5])
+  stl      r18, 102                 ; Y4.x[8], spilled
+  ldl      r18, 118                 ; Y4.x[7], from slot 118
+  sub      r18, b4, r18             ; n220 = sub(F, Y4.x[7])
+  ldl      r16, 132                 ; Y4.x[6], from slot 132
+  fma      r18, r10, r16, r18       ; k4.x[7] = fma(n219, Y4.x[6], n220)
+  add      r3, r3, r18              ; S4.x[7] = add(S3.x[7], k4.x[7])
+  ldl      r18, 7                   ; x[7], from its home
+  fma      r3, b2, r3, r18          ; next x[7] = fma(h/6, S4.x[7], x[7])
+  stl      r3, 7                    ; next x[7]
+  ldl      r3, 123                  ; v.k2.x[7], from slot 123
+  ldl      r18, 95                  ; v.k1.x[7], from slot 95
+  fma      r3, b3, r3, r18          ; v.S2.x[7] = fma(2, v.k2.x[7], v.k1.x[7])
+  fma      r3, b3, r9, r3           ; v.S3.x[7] = fma(2, v.k3.x[7], v.S2.x[7])
+  ldl      r9, 51                   ; v.x[11], from its home
+  sub      r18, r9, r5              ; n1059 = sub(v.x[11], v.x[8])
+  ldl      r9, 50                   ; v.x[10], from its home
+  stl      r26, 95                  ; Y3.x[9], spilled
+  neg      r26, r9                  ; n1061 = neg(v.x[10])
+  fma      r19, r19, r13, r26       ; n1062 = fma(n207, v.x[9], n1061)
+  fma      r18, r18, r4, r19        ; v.k1.x[10] = fma(n1059, x[9], n1062)
+  fma      r19, b1, r18, r9         ; v.Y2.x[10] = fma(h/2, v.k1.x[10], v.x[10])
+  sub      r21, r19, r21            ; n1065 = sub(v.Y2.x[10], v.Y2.x[7])
+  neg      r26, r17                 ; n1067 = neg(v.Y2.x[9])
+  fma      r26, r30, r11, r26       ; n1068 = fma(n211, v.Y2.x[8], n1067)
+  fma      r21, r21, r28, r26       ; v.k2.x[9] = fma(n1065, Y2.x[8], n1068)
+  fma      r26, b1, r21, r13        ; v.Y3.x[9] = fma(h/2, v.k2.x[9], v.x[9])
+  sub      r27, r26, r27            ; n1071 = sub(v.Y3.x[9], v.Y3.x[6])
+  neg      r30, r23                 ; n1073 = neg(v.Y3.x[8])
+  fma      r12, r12, r15, r30       ; n1074 = fma(n215, v.Y3.x[7], n1073)
+  fma      r12, r27, r20, r12       ; v.k3.x[8] = fma(n1071, Y3.x[7], n1074)
+  fma      r27, b0, r12, r5         ; v.Y4.x[8] = fma(h, v.k3.x[8], v.x[8])
+  sub      r14, r27, r14            ; n1077 = sub(v.Y4.x[8], v.Y4.x[5])
+  neg      r30, r24                 ; n1079 = neg(v.Y4.x[7])
+  fma      r10, r10, r22, r30       ; n1080 = fma(n219, v.Y4.x[6], n1079)
+  fma      r10, r14, r16, r10       ; v.k4.x[7] = fma(n1077, Y4.x[6], n1080)
+  add      r3, r3, r10              ; v.S4.x[7] = add(v.S3.x[7], v.k4.x[7])
+  fma      r3, b2, r3, r8           ; next v.x[7] = fma(h/6, v.S4.x[7], v.x[7])
+  stl      r3, 47                   ; next v.x[7]
+  ldl      r3, 104                  ; k2.x[8], from slot 104
+  ldl      r8, 83                   ; k1.x[8], from slot 83
+  fma      r3, b3, r3, r8           ; S2.x[8] = fma(2, k2.x[8], k1.x[8])
+  fma      r3, b3, r31, r3          ; S3.x[8] = fma(2, k3.x[8], S2.x[8])
+  ldl      r8, 12                   ; x[12], from its home
+  sub      r10, r8, r4              ; n226 = sub(x[12], x[9])
+  sub      r14, b4, r7              ; n227 = sub(F, x[11])
+  fma      r14, r10, r6, r14        ; k1.x[11] = fma(n226, x[10], n227)
+  fma      r30, b1, r14, r7         ; Y2.x[11] = fma(h/2, k1.x[11], x[11])
+  sub      r28, r30, r28            ; n230 = sub(Y2.x[11], Y2.x[8])
+  sub      r31, b4, r29             ; n231 = sub(F, Y2.x[10])
+  fma      r31, r28, r25, r31       ; k2.x[10] = fma(n230, Y2.x[9], n231)
+  stl      r14, 83                  ; k1.x[11], spilled
+  fma      r14, b1, r31, r6         ; Y3.x[10] = fma(h/2, k2.x[10], x[10])
+  sub      r20, r14, r20            ; n234 = sub(Y3.x[10], Y3.x[7])
+  stl      r18, 98                  ; v.k1.x[10], spilled
+  ldl      r18, 95                  ; Y3.x[9], from slot 95
+  stl      r31, 104                 ; k2.x[10], spilled
+  sub      r31, b4, r18             ; n235 = sub(F, Y3.x[9])
+  stl      r21, 123                 ; v.k2.x[9], spilled
+  ldl      r21, 100                 ; Y3.x[8], from slot 100
+  fma      r31, r20, r21, r31       ; k3.x[9] = fma(n234, Y3.x[8], n235)
+  fma      r4, b0, r31, r4          ; Y4.x[9] = fma(h, k3.x[9], x[9])
+  sub      r16, r4, r16             ; n238 = sub(Y4.x[9], Y4.x[6])
+  stl      r4, 132                  ; Y4.x[9], spilled
+  ldl      r4, 102                  ; Y4.x[8], from slot 102
+  sub      r4, b4, r4               ; n239 = sub(F, Y4.x[8])
+  ldl      r18, 118                 ; Y4.x[7], from slot 118
+  fma      r4, r16, r18, r4         ; k4.x[8] = fma(n238, Y4.x[7], n239)
+  add      r3, r3, r4               ; S4.x[8] = add(S3.x[8], k4.x[8])
+  ldl      r4, 8                    ; x[8], from its home
+  fma      r3, b2, r3, r4           ; next x[8] = fma(h/6, S4.x[8], x[8])
+  stl      r3, 8                    ; next x[8]
+  ldl      r3, 131                  ; v.k2.x[8], from slot 131
+  ldl      r4, 94                   ; v.k1.x[8], from slot 94
+  fma      r3, b3, r3, r4           ; v.S2.x[8] = fma(2, v.k2.x[8], v.k1.x[8])
+  fma      r3, b3, r12, r3          ; v.S3.x[8] = fma(2, v.k3.x[8], v.S2.x[8])
+  ldl      r4, 52                   ; v.x[12], from its home
+  sub      r12, r4, r13             ; n1086 = sub(v.x[12], v.x[9])
+  ldl      r4, 51                   ; v.x[11], from its home
+  stl      r14, 94                  ; Y3.x[10], spilled
+  neg      r14, r4                  ; n1088 = neg(v.x[11])
+  fma      r10, r10, r9, r14        ; n1089 = fma(n226, v.x[10], n1088)
+  fma      r10, r12, r6, r10        ; v.k1.x[11] = fma(n1086, x[10], n1089)
+  fma      r12, b1, r10, r4         ; v.Y2.x[11] = fma(h/2, v.k1.x[11], v.x[11])
+  sub      r11, r12, r11            ; n1092 = sub(v.Y2.x[11], v.Y2.x[8])
+  neg      r14, r19                 ; n1094 = neg(v.Y2.x[10])
+  fma      r14, r28, r17, r14       ; n1095 = fma(n230, v.Y2.x[9], n1094)
+  fma      r11, r11, r25, r14       ; v.k2.x[10] = fma(n1092, Y2.x[9], n1095)
+  fma      r14, b1, r11, r9         ; v.Y3.x[10] = fma(h/2, v.k2.x[10], v.x[10])
+  sub      r15, r14, r15            ; n1098 = sub(v.Y3.x[10], v.Y3.x[7])
+  neg      r28, r26                 ; n1100 = neg(v.Y3.x[9])
+  fma      r20, r20, r23, r28       ; n1101 = fma(n234, v.Y3.x[8], n1100)
+  fma      r15, r15, r21, r20       ; v.k3.x[9] = fma(n1098, Y3.x[8], n1101)
+  fma      r20, b0, r15, r13        ; v.Y4.x[9] = fma(h, v.k3.x[9], v.x[9])
+  sub      r22, r20, r22            ; n1104 = sub(v.Y4.x[9], v.Y4.x[6])
+  neg      r28, r27                 ; n1106 = neg(v.Y4.x[8])
+  fma      r16, r16, r24, r28       ; n1107 = fma(n238, v.Y4.x[7], n1106)
+  fma      r16, r22, r18, r16       ; v.k4.x[8] = fma(n1104, Y4.x[7], n1107)
+  add      r3, r3, r16              ; v.S4.x[8] = add(v.S3.x[8], v.k4.x[8])
+  fma      r3, b2, r3, r5           ; next v.x[8] = fma(h/6, v.S4.x[8], v.x[8])
+  stl      r3, 48                   ; next v.x[8]
+  ldl      r3, 127                  ; k2.x[9], from slot 127
+  ldl      r5, 97                   ; k1.x[9], from slot 97
+  fma      r3, b3, r3, r5           ; S2.x[9] = fma(2, k2.x[9], k1.x[9])
+  fma      r3, b3, r31, r3          ; S3.x[9] = fma(2, k3.x[9], S2.x[9])
+  ldl      r5, 13                   ; x[13], from its home
+  sub      r16, r5, r6              ; n245 = sub(x[13], x[10])
+  sub      r22, b4, r8              ; n246 = sub(F, x[12])
+  fma      r22, r16, r7, r22        ; k1.x[12] = fma(n245, x[11], n246)
+  fma      r28, b1, r22, r8         ; Y2.x[12] = fma(h/2, k1.x[12], x[12])
+  sub      r25, r28, r25            ; n249 = sub(Y2.x[12], Y2.x[9])
+  sub      r31, b4, r30             ; n250 = sub(F, Y2.x[11])
+  fma      r31, r25, r29, r31       ; k2.x[11] = fma(n249, Y2.x[10], n250)
+  stl      r22, 97                  ; k1.x[12], spilled
+  fma      r22, b1, r31, r7         ; Y3.x[11] = fma(h/2, k2.x[11], x[11])
+  sub      r21, r22, r21            ; n253 = sub(Y3.x[11], Y3.x[8])
+  stl      r10, 100                 ; v.k1.x[11], spilled
+  ldl      r10, 94                  ; Y3.x[10], from slot 94
+  stl      r31, 127                 ; k2.x[11], spilled
+  sub      r31, b4, r10             ; n254 = sub(F, Y3.x[10])
+  stl      r11, 131                 ; v.k2.x[10], spilled
+  ldl      r11, 95                  ; Y3.x[9], from slot 95
+  fma      r31, r21, r11, r31       ; k3.x[10] = fma(n253, Y3.x[9], n254)
+  fma      r6, b0, r31, r6          ; Y4.x[10] = fma(h, k3.x[10], x[10])
+  sub      r18, r6, r18             ; n257 = sub(Y4.x[10], Y4.x[7])
+  stl      r6, 118                  ; Y4.x[10], spilled
+  ldl      r6, 132                  ; Y4.x[9], from slot 132
+  sub      r6, b4, r6               ; n258 = sub(F, Y4.x[9])
+  ldl      r10, 102                 ; Y4.x[8], from slot 102
+  fma      r6, r18, r10, r6         ; k4.x[9] = fma(n257, Y4.x[8], n258)
+  add      r3, r3, r6               ; S4.x[9] = add(S3.x[9], k4.x[9])
+  ldl      r6, 9                    ; x[9], from its home
+  fma      r3, b2, r3, r6           ; next x[9] = fma(h/6, S4.x[9], x[9])
+  stl      r3, 9                    ; next x[9]
+  ldl      r3, 123                  ; v.k2.x[9], from slot 123
+  ldl      r6, 101                  ; v.k1.x[9], from slot 101
+  fma      r3, b3, r3, r6           ; v.S2.x[9] = fma(2, v.k2.x[9], v.k1.x[9])
+  fma      r3, b3, r15, r3          ; v.S3.x[9] = fma(2, v.k3.x[9], v.S2.x[9])
+  ldl      r6, 53                   ; v.x[13], from its home
+  sub      r15, r6, r9              ; n1113 = sub(v.x[13], v.x[10])
+  ldl      r6, 52                   ; v.x[12], from its home
+  stl      r22, 101                 ; Y3.x[11], spilled
+  neg      r22, r6                  ; n1115 = neg(v.x[12])
+  fma      r16, r16, r4, r22        ; n1116 = fma(n245, v.x[11], n1115)
+  fma      r15, r15, r7, r16        ; v.k1.x[12] = fma(n1113, x[11], n1116)
+  fma      r16, b1, r15, r6         ; v.Y2.x[12] = fma(h/2, v.k1.x[12], v.x[12])
+  sub      r17, r16, r17            ; n1119 = sub(v.Y2.x[12], v.Y2.x[9])
+  neg      r22, r12                 ; n1121 = neg(v.Y2.x[11])
+  fma      r22, r25, r19, r22       ; n1122 = fma(n249, v.Y2.x[10], n1121)
+  fma      r17, r17, r29, r22       ; v.k2.x[11] = fma(n1119, Y2.x[10], n1122)
+  fma      r22, b1, r17, r4         ; v.Y3.x[11] = fma(h/2, v.k2.x[11], v.x[11])
+  sub      r23, r22, r23            ; n1125 = sub(v.Y3.x[11], v.Y3.x[8])
+  neg      r25, r14                 ; n1127 = neg(v.Y3.x[10])
+  fma      r21, r21, r26, r25       ; n1128 = fma(n253, v.Y3.x[9], n1127)
+  fma      r21, r23, r11, r21       ; v.k3.x[10] = fma(n1125, Y3.x[9], n1128)
+  fma      r23, b0, r21, r9         ; v.Y4.x[10] = fma(h, v.k3.x[10], v.x[10])
+  sub      r24, r23, r24            ; n1131 = sub(v.Y4.x[10], v.Y4.x[7])
+  neg      r25, r20                 ; n1133 = neg(v.Y4.x[9])
+  fma      r18, r18, r27, r25       ; n1134 = fma(n257, v.Y4.x[8], n1133)
+  fma      r18, r24, r10, r18       ; v.k4.x[9] = fma(n1131, Y4.x[8], n1134)
+  add      r3, r3, r18              ; v.S4.x[9] = add(v.S3.x[9], v.k4.x[9])
+  fma      r3, b2, r3, r13          ; next v.x[9] = fma(h/6, v.S4.x[9], v.x[9])
+  stl      r3, 49                   ; next v.x[9]
+  ldl      r3, 104                  ; k2.x[10], from slot 104
+  ldl      r13, 99                  ; k1.x[10], from slot 99
+  fma      r3, b3, r3, r13          ; S2.x[10] = fma(2, k2.x[10], k1.x[10])
+  fma      r3, b3, r31, r3          ; S3.x[10] = fma(2, k3.x[10], S2.x[10])
+  ldl      r13, 14                  ; x[14], from its home
+  sub      r18, r13, r7             ; n264 = sub(x[14], x[11])
+  sub      r24, b4, r5              ; n265 = sub(F, x[13])
+  fma      r24, r18, r8, r24        ; k1.x[13] = fma(n264, x[12], n265)
+  fma      r25, b1, r24, r5         ; Y2.x[13] = fma(h/2, k1.x[13], x[13])
+  sub      r29, r25, r29            ; n268 = sub(Y2.x[13], Y2.x[10])
+  sub      r31, b4, r28             ; n269 = sub(F, Y2.x[12])
+  fma      r31, r29, r30, r31       ; k2.x[12] = fma(n268, Y2.x[11], n269)
+  stl      r24, 99                  ; k1.x[13], spilled
+  fma      r24, b1, r31, r8         ; Y3.x[12] = fma(h/2, k2.x[12], x[12])
+  sub      r11, r24, r11            ; n272 = sub(Y3.x[12], Y3.x[9])
+  stl      r15, 95                  ; v.k1.x[12], spilled
+  ldl      r15, 101                 ; Y3.x[11], from slot 101
+  stl      r31, 104                 ; k2.x[12], spilled
+  sub      r31, b4, r15             ; n273 = sub(F, Y3.x[11])
+  stl      r17, 123                 ; v.k2.x[11], spilled
+  ldl      r17, 94                  ; Y3.x[10], from slot 94
+  fma      r31, r11, r17, r31       ; k3.x[11] = fma(n272, Y3.x[10], n273)
+  fma      r7, b0, r31, r7          ; Y4.x[11] = fma(h, k3.x[11], x[11])
+  sub      r10, r7, r10             ; n276 = sub(Y4.x[11], Y4.x[8])
+  stl      r7, 102                  ; Y4.x[11], spilled
+  ldl      r7, 118                  ; Y4.x[10], from slot 118
+  sub      r7, b4, r7               ; n277 = sub(F, Y4.x[10])
+  ldl      r15, 132                 ; Y4.x[9], from slot 132
+  fma      r7, r10, r15, r7         ; k4.x[10] = fma(n276, Y4.x[9], n277)
+  add      r3, r3, r7               ; S4.x[10] = add(S3.x[10], k4.x[10])
+  ldl      r7, 10                   ; x[10], from its home
+  fma      r3, b2, r3, r7           ; next x[10] = fma(h/6, S4.x[10], x[10])
+  stl      r3, 10                   ; next x[10]
+  ldl      r3, 131                  ; v.k2.x[10], from slot 131
+  ldl      r7, 98                   ; v.k1.x[10], from slot 98
+  fma      r3, b3, r3, r7           ; v.S2.x[10] = fma(2, v.k2.x[10], v.k1.x[10])
+  fma      r3, b3, r21, r3          ; v.S3.x[10] = fma(2, v.k3.x[10], v.S2.x[10])
+  ldl      r7, 54                   ; v.x[14], from its home
+  sub      r21, r7, r4              ; n1140 = sub(v.x[14], v.x[11])
+  ldl      r7, 53                   ; v.x[13], from its home
+  stl      r24, 98                  ; Y3.x[12], spilled
+  neg      r24, r7                  ; n1142 = neg(v.x[13])
+  fma      r18, r18, r6, r24        ; n1143 = fma(n264, v.x[12], n1142)
+  fma      r18, r21, r8, r18        ; v.k1.x[13] = fma(n1140, x[12], n1143)
+  fma      r21, b1, r18, r7         ; v.Y2.x[13] = fma(h/2, v.k1.x[13], v.x[13])
+  sub      r19, r21, r19            ; n1146 = sub(v.Y2.x[13], v.Y2.x[10])
+  neg      r24, r16                 ; n1148 = neg(v.Y2.x[12])
+  fma      r24, r29, r12, r24       ; n1149 = fma(n268, v.Y2.x[11], n1148)
+  fma      r19, r19, r30, r24       ; v.k2.x[12] = fma(n1146, Y2.x[11], n1149)
+  fma      r24, b1, r19, r6         ; v.Y3.x[12] = fma(h/2, v.k2.x[12], v.x[12])
+  sub      r26, r24, r26            ; n1152 = sub(v.Y3.x[12], v.Y3.x[9])
+  neg      r29, r22                 ; n1154 = neg(v.Y3.x[11])
+  fma      r11, r11, r14, r29       ; n1155 = fma(n272, v.Y3.x[10], n1154)
+  fma      r11, r26, r17, r11       ; v.k3.x[11] = fma(n1152, Y3.x[10], n1155)
+  fma      r26, b0, r11, r4         ; v.Y4.x[11] = fma(h, v.k3.x[11], v.x[11])
+  sub      r27, r26, r27            ; n1158 = sub(v.Y4.x[11], v.Y4.x[8])
+  neg      r29, r23                 ; n1160 = neg(v.Y4.x[10])
+  fma      r10, r10, r20, r29       ; n1161 = fma(n276, v.Y4.x[9], n1160)
+  fma      r10, r27, r15, r10       ; v.k4.x[10] = fma(n1158, Y4.x[9], n1161)
+  add      r3, r3, r10              ; v.S4.x[10] = add(v.S3.x[10], v.k4.x[10])
+  fma      r3, b2, r3, r9           ; next v.x[10] = fma(h/6, v.S4.x[10], v.x[10])
+  stl      r3, 50                   ; next v.x[10]
+  ldl      r3, 127                  ; k2.x[11], from slot 127
+  ldl      r9, 83                   ; k1.x[11], from slot 83
+  fma      r3, b3, r3, r9           ; S2.x[11] = fma(2, k2.x[11], k1.x[11])
+  fma      r3, b3, r31, r3          ; S3.x[11] = fma(2, k3.x[11], S2.x[11])
+  ldl      r9, 15                   ; x[15], from its home
+  sub      r10, r9, r8              ; n283 = sub(x[15], x[12])
+  sub      r27, b4, r13             ; n284 = sub(F, x[14])
+  fma      r27, r10, r5, r27        ; k1.x[14] = fma(n283, x[13], n284)
+  fma      r29, b1, r27, r13        ; Y2.x[14] = fma(h/2, k1.x[14], x[14])
+  sub      r30, r29, r30            ; n287 = sub(Y2.x[14], Y2.x[11])
+  sub      r31, b4, r25             ; n288 = sub(F, Y2.x[13])
+  fma      r31, r30, r28, r31       ; k2.x[13] = fma(n287, Y2.x[12], n288)
+  stl      r27, 83                  ; k1.x[14], spilled
+  fma      r27, b1, r31, r5         ; Y3.x[13] = fma(h/2, k2.x[13], x[13])
+  sub      r17, r27, r17            ; n291 = sub(Y3.x[13], Y3.x[10])
+  stl      r18, 94                  ; v.k1.x[13], spilled
+  ldl      r18, 98                  ; Y3.x[12], from slot 98
+  stl      r31, 127                 ; k2.x[13], spilled
+  sub      r31, b4, r18             ; n292 = sub(F, Y3.x[12])
+  stl      r19, 131                 ; v.k2.x[12], spilled
+  ldl      r19, 101                 ; Y3.x[11], from slot 101
+  fma      r31, r17, r19, r31       ; k3.x[12] = fma(n291, Y3.x[11], n292)
+  fma      r8, b0, r31, r8          ; Y4.x[12] = fma(h, k3.x[12], x[12])
+  sub      r15, r8, r15             ; n295 = sub(Y4.x[12], Y4.x[9])
+  stl      r8, 132                  ; Y4.x[12], spilled
+  ldl      r8, 102                  ; Y4.x[11], from slot 102
+  sub      r8, b4, r8               ; n296 = sub(F, Y4.x[11])
+  ldl      r18, 118                 ; Y4.x[10], from slot 118
+  fma      r8, r15, r18, r8         ; k4.x[11] = fma(n295, Y4.x[10], n296)
+  add      r3, r3, r8               ; S4.x[11] = add(S3.x[11], k4.x[11])
+  ldl      r8, 11                   ; x[11], from its home
+  fma      r3, b2, r3, r8           ; next x[11] = fma(h/6, S4.x[11], x[11])
+  stl      r3, 11                   ; next x[11]
+  ldl      r3, 123                  ; v.k2.x[11], from slot 123
+  ldl      r8, 100                  ; v.k1.x[11], from slot 100
+  fma      r3, b3, r3, r8           ; v.S2.x[11] = fma(2, v.k2.x[11], v.k1.x[11])
+  fma      r3, b3, r11, r3          ; v.S3.x[11] = fma(2, v.k3.x[11], v.S2.x[11])
+  ldl      r8, 55                   ; v.x[15], from its home
+  sub      r11, r8, r6              ; n1167 = sub(v.x[15], v.x[12])
+  ldl      r8, 54                   ; v.x[14], from its home
+  stl      r27, 100                 ; Y3.x[13], spilled
+  neg      r27, r8                  ; n1169 = neg(v.x[14])
+  fma      r10, r10, r7, r27        ; n1170 = fma(n283, v.x[13], n1169)
+  fma      r10, r11, r5, r10        ; v.k1.x[14] = fma(n1167, x[13], n1170)
+  fma      r11, b1, r10, r8         ; v.Y2.x[14] = fma(h/2, v.k1.x[14], v.x[14])
+  sub      r12, r11, r12            ; n1173 = sub(v.Y2.x[14], v.Y2.x[11])
+  neg      r27, r21                 ; n1175 = neg(v.Y2.x[13])
+  fma      r27, r30, r16, r27       ; n1176 = fma(n287, v.Y2.x[12], n1175)
+  fma      r12, r12, r28, r27       ; v.k2.x[13] = fma(n1173, Y2.x[12], n1176)
+  fma      r27, b1, r12, r7         ; v.Y3.x[13] = fma(h/2, v.k2.x[13], v.x[13])
+  sub      r14, r27, r14            ; n1179 = sub(v.Y3.x[13], v.Y3.x[10])
+  neg      r30, r24                 ; n1181 = neg(v.Y3.x[12])
+  fma      r17, r17, r22, r30       ; n1182 = fma(n291, v.Y3.x[11], n1181)
+  fma      r14, r14, r19, r17       ; v.k3.x[12] = fma(n1179, Y3.x[11], n1182)
+  fma      r17, b0, r14, r6         ; v.Y4.x[12] = fma(h, v.k3.x[12], v.x[12])
+  sub      r20, r17, r20            ; n1185 = sub(v.Y4.x[12], v.Y4.x[9])
+  neg      r30, r26                 ; n1187 = neg(v.Y4.x[11])
+  fma      r15, r15, r23, r30       ; n1188 = fma(n295, v.Y4.x[10], n1187)
+  fma      r15, r20, r18, r15       ; v.k4.x[11] = fma(n1185, Y4.x[10], n1188)
+  add      r3, r3, r15              ; v.S4.x[11] = add(v.S3.x[11], v.k4.x[11])
+  fma      r3, b2, r3, r4           ; next v.x[11] = fma(h/6, v.S4.x[11], v.x[11])
+  stl      r3, 51                   ; next v.x[11]
+  ldl      r3, 104                  ; k2.x[12], from slot 104
+  ldl      r4, 97                   ; k1.x[12], from slot 97
+  fma      r3, b3, r3, r4           ; S2.x[12] = fma(2, k2.x[12], k1.x[12])
+  fma      r3, b3, r31, r3          ; S3.x[12] = fma(2, k3.x[12], S2.x[12])
+  ldl      r4, 16                   ; x[16], from its home
+  sub      r15, r4, r5              ; n302 = sub(x[16], x[13])
+  sub      r20, b4, r9              ; n303 = sub(F, x[15])
+  fma      r20, r15, r13, r20       ; k1.x[15] = fma(n302, x[14], n303)
+  fma      r30, b1, r20, r9         ; Y2.x[15] = fma(h/2, k1.x[15], x[15])
+  sub      r28, r30, r28            ; n306 = sub(Y2.x[15], Y2.x[12])
+  sub      r31, b4, r29             ; n307 = sub(F, Y2.x[14])
+  fma      r31, r28, r25, r31       ; k2.x[14] = fma(n306, Y2.x[13], n307)
+  stl      r20, 97                  ; k1.x[15], spilled
+  fma      r20, b1, r31, r13        ; Y3.x[14] = fma(h/2, k2.x[14], x[14])
+  sub      r19, r20, r19            ; n310 = sub(Y3.x[14], Y3.x[11])
+  stl      r10, 101                 ; v.k1.x[14], spilled
+  ldl      r10, 100                 ; Y3.x[13], from slot 100
+  stl      r31, 104                 ; k2.x[14], spilled
+  sub      r31, b4, r10             ; n311 = sub(F, Y3.x[13])
+  stl      r12, 123                 ; v.k2.x[13], spilled
+  ldl      r12, 98                  ; Y3.x[12], from slot 98
+  fma      r31, r19, r12, r31       ; k3.x[13] = fma(n310, Y3.x[12], n311)
+  fma      r5, b0, r31, r5          ; Y4.x[13] = fma(h, k3.x[13], x[13])
+  sub      r18, r5, r18             ; n314 = sub(Y4.x[13], Y4.x[10])
+  stl      r5, 118                  ; Y4.x[13], spilled
+  ldl      r5, 132                  ; Y4.x[12], from slot 132
+  sub      r5, b4, r5               ; n315 = sub(F, Y4.x[12])
+  ldl      r10, 102                 ; Y4.x[11], from slot 102
+  fma      r5, r18, r10, r5         ; k4.x[12] = fma(n314, Y4.x[11], n315)
+  add      r3, r3, r5               ; S4.x[12] = add(S3.x[12], k4.x[12])
+  ldl      r5, 12                   ; x[12], from its home
+  fma      r3, b2, r3, r5           ; next x[12] = fma(h/6, S4.x[12], x[12])
+  stl      r3, 12                   ; next x[12]
+  ldl      r3, 131                  ; v.k2.x[12], from slot 131
+  ldl      r5, 95                   ; v.k1.x[12], from slot 95
+  fma      r3, b3, r3, r5           ; v.S2.x[12] = fma(2, v.k2.x[12], v.k1.x[12])
+  fma      r3, b3, r14, r3          ; v.S3.x[12] = fma(2, v.k3.x[12], v.S2.x[12])
+  ldl      r5, 56                   ; v.x[16], from its home
+  sub      r14, r5, r7              ; n1194 = sub(v.x[16], v.x[13])
+  ldl      r5, 55                   ; v.x[15], from its home
+  stl      r20, 95                  ; Y3.x[14], spilled
+  neg      r20, r5                  ; n1196 = neg(v.x[15])
+  fma      r15, r15, r8, r20        ; n1197 = fma(n302, v.x[14], n1196)
+  fma      r14, r14, r13, r15       ; v.k1.x[15] = fma(n1194, x[14], n1197)
+  fma      r15, b1, r14, r5         ; v.Y2.x[15] = fma(h/2, v.k1.x[15], v.x[15])
+  sub      r16, r15, r16            ; n1200 = sub(v.Y2.x[15], v.Y2.x[12])
+  neg      r20, r11                 ; n1202 = neg(v.Y2.x[14])
+  fma      r20, r28, r21, r20       ; n1203 = fma(n306, v.Y2.x[13], n1202)
+  fma      r16, r16, r25, r20       ; v.k2.x[14] = fma(n1200, Y2.x[13], n1203)
+  fma      r20, b1, r16, r8         ; v.Y3.x[14] = fma(h/2, v.k2.x[14], v.x[14])
+  sub      r22, r20, r22            ; n1206 = sub(v.Y3.x[14], v.Y3.x[11])
+  neg      r28, r27                 ; n1208 = neg(v.Y3.x[13])
+  fma      r19, r19, r24, r28       ; n1209 = fma(n310, v.Y3.x[12], n1208)
+  fma      r19, r22, r12, r19       ; v.k3.x[13] = fma(n1206, Y3.x[12], n1209)
+  fma      r22, b0, r19, r7         ; v.Y4.x[13] = fma(h, v.k3.x[13], v.x[13])
+  sub      r23, r22, r23            ; n1212 = sub(v.Y4.x[13], v.Y4.x[10])
+  neg      r28, r17                 ; n1214 = neg(v.Y4.x[12])
+  fma      r18, r18, r26, r28       ; n1215 = fma(n314, v.Y4.x[11], n1214)
+  fma      r18, r23, r10, r18       ; v.k4.x[12] = fma(n1212, Y4.x[11], n1215)
+  add      r3, r3, r18              ; v.S4.x[12] = add(v.S3.x[12], v.k4.x[12])
+  fma      r3, b2, r3, r6           ; next v.x[12] = fma(h/6, v.S4.x[12], v.x[12])
+  stl      r3, 52                   ; next v.x[12]
+  ldl      r3, 127                  ; k2.x[13], from slot 127
+  ldl      r6, 99                   ; k1.x[13], from slot 99
+  fma      r3, b3, r3, r6           ; S2.x[13] = fma(2, k2.x[13], k1.x[13])
+  fma      r3, b3, r31, r3          ; S3.x[13] = fma(2, k3.x[13], S2.x[13])
+  ldl      r6, 17                   ; x[17], from its home
+  sub      r18, r6, r13             ; n321 = sub(x[17], x[14])
+  sub      r23, b4, r4              ; n322 = sub(F, x[16])
+  fma      r23, r18, r9, r23        ; k1.x[16] = fma(n321, x[15], n322)
+  fma      r28, b1, r23, r4         ; Y2.x[16] = fma(h/2, k1.x[16], x[16])
+  sub      r25, r28, r25            ; n325 = sub(Y2.x[16], Y2.x[13])
+  sub      r31, b4, r30             ; n326 = sub(F, Y2.x[15])
+  fma      r31, r25, r29, r31       ; k2.x[15] = fma(n325, Y2.x[14], n326)
+  stl      r23, 99                  ; k1.x[16], spilled
+  fma      r23, b1, r31, r9         ; Y3.x[15] = fma(h/2, k2.x[15], x[15])
+  sub      r12, r23, r12            ; n329 = sub(Y3.x[15], Y3.x[12])
+  stl      r14, 98                  ; v.k1.x[15], spilled
+  ldl      r14, 95                  ; Y3.x[14], from slot 95
+  stl      r31, 127                 ; k2.x[15], spilled
+  sub      r31, b4, r14             ; n330 = sub(F, Y3.x[14])
+  stl      r16, 131                 ; v.k2.x[14], spilled
+  ldl      r16, 100                 ; Y3.x[13], from slot 100
+  fma      r31, r12, r16, r31       ; k3.x[14] = fma(n329, Y3.x[13], n330)
+  fma      r13, b0, r31, r13        ; Y4.x[14] = fma(h, k3.x[14], x[14])
+  sub      r10, r13, r10            ; n333 = sub(Y4.x[14], Y4.x[11])
+  stl      r13, 102                 ; Y4.x[14], spilled
+  ldl      r13, 118                 ; Y4.x[13], from slot 118
+  sub      r13, b4, r13             ; n334 = sub(F, Y4.x[13])
+  ldl      r14, 132                 ; Y4.x[12], from slot 132
+  fma      r13, r10, r14, r13       ; k4.x[13] = fma(n333, Y4.x[12], n334)
+  add      r3, r3, r13              ; S4.x[13] = add(S3.x[13], k4.x[13])
+  ldl      r13, 13                  ; x[13], from its home
+  fma      r3, b2, r3, r13          ; next x[13] = fma(h/6, S4.x[13], x[13])
+  stl      r3, 13                   ; next x[13]
+  ldl      r3, 123                  ; v.k2.x[13], from slot 123
+  ldl      r13, 94                  ; v.k1.x[13], from slot 94
+  fma      r3, b3, r3, r13          ; v.S2.x[13] = fma(2, v.k2.x[13], v.k1.x[13])
+  fma      r3, b3, r19, r3          ; v.S3.x[13] = fma(2, v.k3.x[13], v.S2.x[13])
+  ldl      r13, 57                  ; v.x[17], from its home
+  sub      r19, r13, r8             ; n1221 = sub(v.x[17], v.x[14])
+  ldl      r13, 56                  ; v.x[16], from its home
+  stl      r23, 94                  ; Y3.x[15], spilled
+  neg      r23, r13                 ; n1223 = neg(v.x[16])
+  fma      r18, r18, r5, r23        ; n1224 = fma(n321, v.x[15], n1223)
+  fma      r18, r19, r9, r18        ; v.k1.x[16] = fma(n1221, x[15], n1224)
+  fma      r19, b1, r18, r13        ; v.Y2.x[16] = fma(h/2, v.k1.x[16], v.x[16])
+  sub      r21, r19, r21            ; n1227 = sub(v.Y2.x[16], v.Y2.x[13])
+  neg      r23, r15                 ; n1229 = neg(v.Y2.x[15])
+  fma      r23, r25, r11, r23       ; n1230 = fma(n325, v.Y2.x[14], n1229)
+  fma      r21, r21, r29, r23       ; v.k2.x[15] = fma(n1227, Y2.x[14], n1230)
+  fma      r23, b1, r21, r5         ; v.Y3.x[15] = fma(h/2, v.k2.x[15], v.x[15])
+  sub      r24, r23, r24            ; n1233 = sub(v.Y3.x[15], v.Y3.x[12])
+  neg      r25, r20                 ; n1235 = neg(v.Y3.x[14])
+  fma      r12, r12, r27, r25       ; n1236 = fma(n329, v.Y3.x[13], n1235)
+  fma      r12, r24, r16, r12       ; v.k3.x[14] = fma(n1233, Y3.x[13], n1236)
+  fma      r24, b0, r12, r8         ; v.Y4.x[14] = fma(h, v.k3.x[14], v.x[14])
+  sub      r25, r24, r26            ; n1239 = sub(v.Y4.x[14], v.Y4.x[11])
+  neg      r26, r22                 ; n1241 = neg(v.Y4.x[13])
+  fma      r10, r10, r17, r26       ; n1242 = fma(n333, v.Y4.x[12], n1241)
+  fma      r10, r25, r14, r10       ; v.k4.x[13] = fma(n1239, Y4.x[12], n1242)
+  add      r3, r3, r10              ; v.S4.x[13] = add(v.S3.x[13], v.k4.x[13])
+  fma      r3, b2, r3, r7           ; next v.x[13] = fma(h/6, v.S4.x[13], v.x[13])
+  stl      r3, 53                   ; next v.x[13]
+  ldl      r3, 104                  ; k2.x[14], from slot 104
+  ldl      r7, 83                   ; k1.x[14], from slot 83
+  fma      r3, b3, r3, r7           ; S2.x[14] = fma(2, k2.x[14], k1.x[14])
+  fma      r3, b3, r31, r3          ; S3.x[14] = fma(2, k3.x[14], S2.x[14])
+  ldl      r7, 18                   ; x[18], from its home
+  sub      r10, r7, r9              ; n340 = sub(x[18], x[15])
+  sub      r25, b4, r6              ; n341 = sub(F, x[17])
+  fma      r25, r10, r4, r25        ; k1.x[17] = fma(n340, x[16], n341)
+  fma      r26, b1, r25, r6         ; Y2.x[17] = fma(h/2, k1.x[17], x[17])
+  sub      r29, r26, r29            ; n344 = sub(Y2.x[17], Y2.x[14])
+  sub      r31, b4, r28             ; n345 = sub(F, Y2.x[16])
+  fma      r31, r29, r30, r31       ; k2.x[16] = fma(n344, Y2.x[15], n345)
+  stl      r25, 83                  ; k1.x[17], spilled
+  fma      r25, b1, r31, r4         ; Y3.x[16] = fma(h/2, k2.x[16], x[16])
+  sub      r16, r25, r16            ; n348 = sub(Y3.x[16], Y3.x[13])
+  stl      r18, 100                 ; v.k1.x[16], spilled
+  ldl      r18, 94                  ; Y3.x[15], from slot 94
+  stl      r31, 104                 ; k2.x[16], spilled
+  sub      r31, b4, r18             ; n349 = sub(F, Y3.x[15])
+  stl      r21, 123                 ; v.k2.x[15], spilled
+  ldl      r21, 95                  ; Y3.x[14], from slot 95
+  fma      r31, r16, r21, r31       ; k3.x[15] = fma(n348, Y3.x[14], n349)
+  fma      r9, b0, r31, r9          ; Y4.x[15] = fma(h, k3.x[15], x[15])
+  sub      r14, r9, r14             ; n352 = sub(Y4.x[15], Y4.x[12])
+  stl      r9, 132                  ; Y4.x[15], spilled
+  ldl      r9, 102                  ; Y4.x[14], from slot 102
+  sub      r9, b4, r9               ; n353 = sub(F, Y4.x[14])
+  ldl      r18, 118                 ; Y4.x[13], from slot 118
+  fma      r9, r14, r18, r9         ; k4.x[14] = fma(n352, Y4.x[13], n353)
+  add      r3, r3, r9               ; S4.x[14] = add(S3.x[14], k4.x[14])
+  ldl      r9, 14                   ; x[14], from its home
+  fma      r3, b2, r3, r9           ; next x[14] = fma(h/6, S4.x[14], x[14])
+  stl      r3, 14                   ; next x[14]
+  ldl      r3, 131                  ; v.k2.x[14], from slot 131
+  ldl      r9, 101                  ; v.k1.x[14], from slot 101
+  fma      r3, b3, r3, r9           ; v.S2.x[14] = fma(2, v.k2.x[14], v.k1.x[14])
+  fma      r3, b3, r12, r3          ; v.S3.x[14] = fma(2, v.k3.x[14], v.S2.x[14])
+  ldl      r9, 58                   ; v.x[18], from its home
+  sub      r12, r9, r5              ; n1248 = sub(v.x[18], v.x[15])
+  ldl      r9, 57                   ; v.x[17], from its home
+  stl      r25, 101                 ; Y3.x[16], spilled
+  neg      r25, r9                  ; n1250 = neg(v.x[17])
+  fma      r10, r10, r13, r25       ; n1251 = fma(n340, v.x[16], n1250)
+  fma      r10, r12, r4, r10        ; v.k1.x[17] = fma(n1248, x[16], n1251)
+  fma      r12, b1, r10, r9         ; v.Y2.x[17] = fma(h/2, v.k1.x[17], v.x[17])
+  sub      r11, r12, r11            ; n1254 = sub(v.Y2.x[17], v.Y2.x[14])
+  neg      r25, r19                 ; n1256 = neg(v.Y2.x[16])
+  fma      r25, r29, r15, r25       ; n1257 = fma(n344, v.Y2.x[15], n1256)
+  fma      r11, r11, r30, r25       ; v.k2.x[16] = fma(n1254, Y2.x[15], n1257)
+  fma      r25, b1, r11, r13        ; v.Y3.x[16] = fma(h/2, v.k2.x[16], v.x[16])
+  sub      r27, r25, r27            ; n1260 = sub(v.Y3.x[16], v.Y3.x[13])
+  neg      r29, r23                 ; n1262 = neg(v.Y3.x[15])
+  fma      r16, r16, r20, r29       ; n1263 = fma(n348, v.Y3.x[14], n1262)
+  fma      r16, r27, r21, r16       ; v.k3.x[15] = fma(n1260, Y3.x[14], n1263)
+  fma      r27, b0, r16, r5         ; v.Y4.x[15] = fma(h, v.k3.x[15], v.x[15])
+  sub      r17, r27, r17            ; n1266 = sub(v.Y4.x[15], v.Y4.x[12])
+  neg      r29, r24                 ; n1268 = neg(v.Y4.x[14])
+  fma      r14, r14, r22, r29       ; n1269 = fma(n352, v.Y4.x[13], n1268)
+  fma      r14, r17, r18, r14       ; v.k4.x[14] = fma(n1266, Y4.x[13], n1269)
+  add      r3, r3, r14              ; v.S4.x[14] = add(v.S3.x[14], v.k4.x[14])
+  fma      r3, b2, r3, r8           ; next v.x[14] = fma(h/6, v.S4.x[14], v.x[14])
+  stl      r3, 54                   ; next v.x[14]
+  ldl      r3, 127                  ; k2.x[15], from slot 127
+  ldl      r8, 97                   ; k1.x[15], from slot 97
+  fma      r3, b3, r3, r8           ; S2.x[15] = fma(2, k2.x[15], k1.x[15])
+  fma      r3, b3, r31, r3          ; S3.x[15] = fma(2, k3.x[15], S2.x[15])
+  ldl      r8, 19                   ; x[19], from its home
+  sub      r14, r8, r4              ; n359 = sub(x[19], x[16])
+  sub      r17, b4, r7              ; n360 = sub(F, x[18])
+  fma      r17, r14, r6, r17        ; k1.x[18] = fma(n359, x[17], n360)
+  fma      r29, b1, r17, r7         ; Y2.x[18] = fma(h/2, k1.x[18], x[18])
+  sub      r30, r29, r30            ; n363 = sub(Y2.x[18], Y2.x[15])
+  sub      r31, b4, r26             ; n364 = sub(F, Y2.x[17])
+  fma      r31, r30, r28, r31       ; k2.x[17] = fma(n363, Y2.x[16], n364)
+  stl      r17, 97                  ; k1.x[18], spilled
+  fma      r17, b1, r31, r6         ; Y3.x[17] = fma(h/2, k2.x[17], x[17])
+  sub      r21, r17, r21            ; n367 = sub(Y3.x[17], Y3.x[14])
+  stl      r10, 95                  ; v.k1.x[17], spilled
+  ldl      r10, 101                 ; Y3.x[16], from slot 101
+  stl      r31, 127                 ; k2.x[17], spilled
+  sub      r31, b4, r10             ; n368 = sub(F, Y3.x[16])
+  stl      r11, 131                 ; v.k2.x[16], spilled
+  ldl      r11, 94                  ; Y3.x[15], from slot 94
+  fma      r31, r21, r11, r31       ; k3.x[16] = fma(n367, Y3.x[15], n368)
+  fma      r4, b0, r31, r4          ; Y4.x[16] = fma(h, k3.x[16], x[16])
+  sub      r18, r4, r18             ; n371 = sub(Y4.x[16], Y4.x[13])
+  stl      r4, 118                  ; Y4.x[16], spilled
+  ldl      r4, 132                  ; Y4.x[15], from slot 132
+  sub      r4, b4, r4               ; n372 = sub(F, Y4.x[15])
+  ldl      r10, 102                 ; Y4.x[14], from slot 102
+  fma      r4, r18, r10, r4         ; k4.x[15] = fma(n371, Y4.x[14], n372)
+  add      r3, r3, r4               ; S4.x[15] = add(S3.x[15], k4.x[15])
+  ldl      r4, 15                   ; x[15], from its home
+  fma      r3, b2, r3, r4           ; next x[15] = fma(h/6, S4.x[15], x[15])
+  stl      r3, 15                   ; next x[15]
+  ldl      r3, 123                  ; v.k2.x[15], from slot 123
+  ldl      r4, 98                   ; v.k1.x[15], from slot 98
+  fma      r3, b3, r3, r4           ; v.S2.x[15] = fma(2, v.k2.x[15], v.k1.x[15])
+  fma      r3, b3, r16, r3          ; v.S3.x[15] = fma(2, v.k3.x[15], v.S2.x[15])
+  ldl      r4, 59                   ; v.x[19], from its home
+  sub      r16, r4, r13             ; n1275 = sub(v.x[19], v.x[16])
+  ldl      r4, 58                   ; v.x[18], from its home
+  stl      r17, 98                  ; Y3.x[17], spilled
+  neg      r17, r4                  ; n1277 = neg(v.x[18])
+  fma      r14, r14, r9, r17        ; n1278 = fma(n359, v.x[17], n1277)
+  fma      r14, r16, r6, r14        ; v.k1.x[18] = fma(n1275, x[17], n1278)
+  fma      r16, b1, r14, r4         ; v.Y2.x[18] = fma(h/2, v.k1.x[18], v.x[18])
+  sub      r15, r16, r15            ; n1281 = sub(v.Y2.x[18], v.Y2.x[15])
+  neg      r17, r12                 ; n1283 = neg(v.Y2.x[17])
+  fma      r17, r30, r19, r17       ; n1284 = fma(n363, v.Y2.x[16], n1283)
+  fma      r15, r15, r28, r17       ; v.k2.x[17] = fma(n1281, Y2.x[16], n1284)
+  fma      r17, b1, r15, r9         ; v.Y3.x[17] = fma(h/2, v.k2.x[17], v.x[17])
+  sub      r20, r17, r20            ; n1287 = sub(v.Y3.x[17], v.Y3.x[14])
+  neg      r30, r25                 ; n1289 = neg(v.Y3.x[16])
+  fma      r21, r21, r23, r30       ; n1290 = fma(n367, v.Y3.x[15], n1289)
+  fma      r20, r20, r11, r21       ; v.k3.x[16] = fma(n1287, Y3.x[15], n1290)
+  fma      r21, b0, r20, r13        ; v.Y4.x[16] = fma(h, v.k3.x[16], v.x[16])
+  sub      r22, r21, r22            ; n1293 = sub(v.Y4.x[16], v.Y4.x[13])
+  neg      r30, r27                 ; n1295 = neg(v.Y4.x[15])
+  fma      r18, r18, r24, r30       ; n1296 = fma(n371, v.Y4.x[14], n1295)
+  fma      r18, r22, r10, r18       ; v.k4.x[15] = fma(n1293, Y4.x[14], n1296)
+  add      r3, r3, r18              ; v.S4.x[15] = add(v.S3.x[15], v.k4.x[15])
+  fma      r3, b2, r3, r5           ; next v.x[15] = fma(h/6, v.S4.x[15], v.x[15])
+  stl      r3, 55                   ; next v.x[15]
+  ldl      r3, 104                  ; k2.x[16], from slot 104
+  ldl      r5, 99                   ; k1.x[16], from slot 99
+  fma      r3, b3, r3, r5           ; S2.x[16] = fma(2, k2.x[16], k1.x[16])
+  fma      r3, b3, r31, r3          ; S3.x[16] = fma(2, k3.x[16], S2.x[16])
+  ldl      r5, 20                   ; x[20], from its home
+  sub      r18, r5, r6              ; n378 = sub(x[20], x[17])
+  sub      r22, b4, r8              ; n379 = sub(F, x[19])
+  fma      r22, r18, r7, r22        ; k1.x[19] = fma(n378, x[18], n379)
+  fma      r30, b1, r22, r8         ; Y2.x[19] = fma(h/2, k1.x[19], x[19])
+  sub      r28, r30, r28            ; n382 = sub(Y2.x[19], Y2.x[16])
+  sub      r31, b4, r29             ; n383 = sub(F, Y2.x[18])
+  fma      r31, r28, r26, r31       ; k2.x[18] = fma(n382, Y2.x[17], n383)
+  stl      r22, 99                  ; k1.x[19], spilled
+  fma      r22, b1, r31, r7         ; Y3.x[18] = fma(h/2, k2.x[18], x[18])
+  sub      r11, r22, r11            ; n386 = sub(Y3.x[18], Y3.x[15])
+  stl      r14, 94                  ; v.k1.x[18], spilled
+  ldl      r14, 98                  ; Y3.x[17], from slot 98
+  stl      r31, 104                 ; k2.x[18], spilled
+  sub      r31, b4, r14             ; n387 = sub(F, Y3.x[17])
+  stl      r15, 123                 ; v.k2.x[17], spilled
+  ldl      r15, 101                 ; Y3.x[16], from slot 101
+  fma      r31, r11, r15, r31       ; k3.x[17] = fma(n386, Y3.x[16], n387)
+  fma      r6, b0, r31, r6          ; Y4.x[17] = fma(h, k3.x[17], x[17])
+  sub      r10, r6, r10             ; n390 = sub(Y4.x[17], Y4.x[14])
+  stl      r6, 102                  ; Y4.x[17], spilled
+  ldl      r6, 118                  ; Y4.x[16], from slot 118
+  sub      r6, b4, r6               ; n391 = sub(F, Y4.x[16])
+  ldl      r14, 132                 ; Y4.x[15], from slot 132
+  fma      r6, r10, r14, r6         ; k4.x[16] = fma(n390, Y4.x[15], n391)
+  add      r3, r3, r6               ; S4.x[16] = add(S3.x[16], k4.x[16])
+  ldl      r6, 16                   ; x[16], from its home
+  fma      r3, b2, r3, r6           ; next x[16] = fma(h/6, S4.x[16], x[16])
+  stl      r3, 16                   ; next x[16]
+  ldl      r3, 131                  ; v.k2.x[16], from slot 131
+  ldl      r6, 100                  ; v.k1.x[16], from slot 100
+  fma      r3, b3, r3, r6           ; v.S2.x[16] = fma(2, v.k2.x[16], v.k1.x[16])
+  fma      r3, b3, r20, r3          ; v.S3.x[16] = fma(2, v.k3.x[16], v.S2.x[16])
+  ldl      r6, 60                   ; v.x[20], from its home
+  sub      r20, r6, r9              ; n1302 = sub(v.x[20], v.x[17])
+  ldl      r6, 59                   ; v.x[19], from its home
+  stl      r22, 100                 ; Y3.x[18], spilled
+  neg      r22, r6                  ; n1304 = neg(v.x[19])
+  fma      r18, r18, r4, r22        ; n1305 = fma(n378, v.x[18], n1304)
+  fma      r18, r20, r7, r18        ; v.k1.x[19] = fma(n1302, x[18], n1305)
+  fma      r20, b1, r18, r6         ; v.Y2.x[19] = fma(h/2, v.k1.x[19], v.x[19])
+  sub      r19, r20, r19            ; n1308 = sub(v.Y2.x[19], v.Y2.x[16])
+  neg      r22, r16                 ; n1310 = neg(v.Y2.x[18])
+  fma      r22, r28, r12, r22       ; n1311 = fma(n382, v.Y2.x[17], n1310)
+  fma      r19, r19, r26, r22       ; v.k2.x[18] = fma(n1308, Y2.x[17], n1311)
+  fma      r22, b1, r19, r4         ; v.Y3.x[18] = fma(h/2, v.k2.x[18], v.x[18])
+  sub      r23, r22, r23            ; n1314 = sub(v.Y3.x[18], v.Y3.x[15])
+  neg      r28, r17                 ; n1316 = neg(v.Y3.x[17])
+  fma      r11, r11, r25, r28       ; n1317 = fma(n386, v.Y3.x[16], n1316)
+  fma      r11, r23, r15, r11       ; v.k3.x[17] = fma(n1314, Y3.x[16], n1317)
+  fma      r23, b0, r11, r9         ; v.Y4.x[17] = fma(h, v.k3.x[17], v.x[17])
+  sub      r24, r23, r24            ; n1320 = sub(v.Y4.x[17], v.Y4.x[14])
+  neg      r28, r21                 ; n1322 = neg(v.Y4.x[16])
+  fma      r10, r10, r27, r28       ; n1323 = fma(n390, v.Y4.x[15], n1322)
+  fma      r10, r24, r14, r10       ; v.k4.x[16] = fma(n1320, Y4.x[15], n1323)
+  add      r3, r3, r10              ; v.S4.x[16] = add(v.S3.x[16], v.k4.x[16])
+  fma      r3, b2, r3, r13          ; next v.x[16] = fma(h/6, v.S4.x[16], v.x[16])
+  stl      r3, 56                   ; next v.x[16]
+  ldl      r3, 127                  ; k2.x[17], from slot 127
+  ldl      r10, 83                  ; k1.x[17], from slot 83
+  fma      r3, b3, r3, r10          ; S2.x[17] = fma(2, k2.x[17], k1.x[17])
+  fma      r3, b3, r31, r3          ; S3.x[17] = fma(2, k3.x[17], S2.x[17])
+  ldl      r10, 21                  ; x[21], from its home
+  sub      r13, r10, r7             ; n397 = sub(x[21], x[18])
+  sub      r24, b4, r5              ; n398 = sub(F, x[20])
+  fma      r24, r13, r8, r24        ; k1.x[20] = fma(n397, x[19], n398)
+  fma      r28, b1, r24, r5         ; Y2.x[20] = fma(h/2, k1.x[20], x[20])
+  sub      r26, r28, r26            ; n401 = sub(Y2.x[20], Y2.x[17])
+  sub      r31, b4, r30             ; n402 = sub(F, Y2.x[19])
+  fma      r31, r26, r29, r31       ; k2.x[19] = fma(n401, Y2.x[18], n402)
+  stl      r24, 83                  ; k1.x[20], spilled
+  fma      r24, b1, r31, r8         ; Y3.x[19] = fma(h/2, k2.x[19], x[19])
+  sub      r15, r24, r15            ; n405 = sub(Y3.x[19], Y3.x[16])
+  stl      r18, 101                 ; v.k1.x[19], spilled
+  ldl      r18, 100                 ; Y3.x[18], from slot 100
+  stl      r31, 127                 ; k2.x[19], spilled
+  sub      r31, b4, r18             ; n406 = sub(F, Y3.x[18])
+  stl      r19, 131                 ; v.k2.x[18], spilled
+  ldl      r19, 98                  ; Y3.x[17], from slot 98
+  fma      r31, r15, r19, r31       ; k3.x[18] = fma(n405, Y3.x[17], n406)
+  fma      r7, b0, r31, r7          ; Y4.x[18] = fma(h, k3.x[18], x[18])
+  sub      r14, r7, r14             ; n409 = sub(Y4.x[18], Y4.x[15])
+  stl      r7, 132                  ; Y4.x[18], spilled
+  ldl      r7, 102                  ; Y4.x[17], from slot 102
+  sub      r7, b4, r7               ; n410 = sub(F, Y4.x[17])
+  ldl      r18, 118                 ; Y4.x[16], from slot 118
+  fma      r7, r14, r18, r7         ; k4.x[17] = fma(n409, Y4.x[16], n410)
+  add      r3, r3, r7               ; S4.x[17] = add(S3.x[17], k4.x[17])
+  ldl      r7, 17                   ; x[17], from its home
+  fma      r3, b2, r3, r7           ; next x[17] = fma(h/6, S4.x[17], x[17])
+  stl      r3, 17                   ; next x[17]
+  ldl      r3, 123                  ; v.k2.x[17], from slot 123
+  ldl      r7, 95                   ; v.k1.x[17], from slot 95
+  fma      r3, b3, r3, r7           ; v.S2.x[17] = fma(2, v.k2.x[17], v.k1.x[17])
+  fma      r3, b3, r11, r3          ; v.S3.x[17] = fma(2, v.k3.x[17], v.S2.x[17])
+  ldl      r7, 61                   ; v.x[21], from its home
+  sub      r11, r7, r4              ; n1329 = sub(v.x[21], v.x[18])
+  ldl      r7, 60                   ; v.x[20], from its home
+  stl      r24, 95                  ; Y3.x[19], spilled
+  neg      r24, r7                  ; n1331 = neg(v.x[20])
+  fma      r13, r13, r6, r24        ; n1332 = fma(n397, v.x[19], n1331)
+  fma      r11, r11, r8, r13        ; v.k1.x[20] = fma(n1329, x[19], n1332)
+  fma      r13, b1, r11, r7         ; v.Y2.x[20] = fma(h/2, v.k1.x[20], v.x[20])
+  sub      r12, r13, r12            ; n1335 = sub(v.Y2.x[20], v.Y2.x[17])
+  neg      r24, r20                 ; n1337 = neg(v.Y2.x[19])
+  fma      r24, r26, r16, r24       ; n1338 = fma(n401, v.Y2.x[18], n1337)
+  fma      r12, r12, r29, r24       ; v.k2.x[19] = fma(n1335, Y2.x[18], n1338)
+  fma      r24, b1, r12, r6         ; v.Y3.x[19] = fma(h/2, v.k2.x[19], v.x[19])
+  sub      r25, r24, r25            ; n1341 = sub(v.Y3.x[19], v.Y3.x[16])
+  neg      r26, r22                 ; n1343 = neg(v.Y3.x[18])
+  fma      r15, r15, r17, r26       ; n1344 = fma(n405, v.Y3.x[17], n1343)
+  fma      r15, r25, r19, r15       ; v.k3.x[18] = fma(n1341, Y3.x[17], n1344)
+  fma      r25, b0, r15, r4         ; v.Y4.x[18] = fma(h, v.k3.x[18], v.x[18])
+  sub      r26, r25, r27            ; n1347 = sub(v.Y4.x[18], v.Y4.x[15])
+  neg      r27, r23                 ; n1349 = neg(v.Y4.x[17])
+  fma      r14, r14, r21, r27       ; n1350 = fma(n409, v.Y4.x[16], n1349)
+  fma      r14, r26, r18, r14       ; v.k4.x[17] = fma(n1347, Y4.x[16], n1350)
+  add      r3, r3, r14              ; v.S4.x[17] = add(v.S3.x[17], v.k4.x[17])
+  fma      r3, b2, r3, r9           ; next v.x[17] = fma(h/6, v.S4.x[17], v.x[17])
+  stl      r3, 57                   ; next v.x[17]
+  ldl      r3, 104                  ; k2.x[18], from slot 104
+  ldl      r9, 97                   ; k1.x[18], from slot 97
+  fma      r3, b3, r3, r9           ; S2.x[18] = fma(2, k2.x[18], k1.x[18])
+  fma      r3, b3, r31, r3          ; S3.x[18] = fma(2, k3.x[18], S2.x[18])
+  ldl      r9, 22                   ; x[22], from its home
+  sub      r14, r9, r8              ; n416 = sub(x[22], x[19])
+  sub      r26, b4, r10             ; n417 = sub(F, x[21])
+  fma      r26, r14, r5, r26        ; k1.x[21] = fma(n416, x[20], n417)
+  fma      r27, b1, r26, r10        ; Y2.x[21] = fma(h/2, k1.x[21], x[21])
+  sub      r29, r27, r29            ; n420 = sub(Y2.x[21], Y2.x[18])
+  sub      r31, b4, r28             ; n421 = sub(F, Y2.x[20])
+  fma      r31, r29, r30, r31       ; k2.x[20] = fma(n420, Y2.x[19], n421)
+  stl      r26, 97                  ; k1.x[21], spilled
+  fma      r26, b1, r31, r5         ; Y3.x[20] = fma(h/2, k2.x[20], x[20])
+  sub      r19, r26, r19            ; n424 = sub(Y3.x[20], Y3.x[17])
+  stl      r11, 98                  ; v.k1.x[20], spilled
+  ldl      r11, 95                  ; Y3.x[19], from slot 95
+  stl      r31, 104                 ; k2.x[20], spilled
+  sub      r31, b4, r11             ; n425 = sub(F, Y3.x[19])
+  stl      r12, 123                 ; v.k2.x[19], spilled
+  ldl      r12, 100                 ; Y3.x[18], from slot 100
+  fma      r31, r19, r12, r31       ; k3.x[19] = fma(n424, Y3.x[18], n425)
+  fma      r8, b0, r31, r8          ; Y4.x[19] = fma(h, k3.x[19], x[19])
+  sub      r18, r8, r18             ; n428 = sub(Y4.x[19], Y4.x[16])
+  stl      r8, 118                  ; Y4.x[19], spilled
+  ldl      r8, 132                  ; Y4.x[18], from slot 132
+  sub      r8, b4, r8               ; n429 = sub(F, Y4.x[18])
+  ldl      r11, 102                 ; Y4.x[17], from slot 102
+  fma      r8, r18, r11, r8         ; k4.x[18] = fma(n428, Y4.x[17], n429)
+  add      r3, r3, r8               ; S4.x[18] = add(S3.x[18], k4.x[18])
+  ldl      r8, 18                   ; x[18], from its home
+  fma      r3, b2, r3, r8           ; next x[18] = fma(h/6, S4.x[18], x[18])
+  stl      r3, 18                   ; next x[18]
+  ldl      r3, 131                  ; v.k2.x[18], from slot 131
+  ldl      r8, 94                   ; v.k1.x[18], from slot 94
+  fma      r3, b3, r3, r8           ; v.S2.x[18] = fma(2, v.k2.x[18], v.k1.x[18])
+  fma      r3, b3, r15, r3          ; v.S3.x[18] = fma(2, v.k3.x[18], v.S2.x[18])
+  ldl      r8, 62                   ; v.x[22], from its home
+  sub      r15, r8, r6              ; n1356 = sub(v.x[22], v.x[19])
+  ldl      r8, 61                   ; v.x[21], from its home
+  stl      r26, 94                  ; Y3.x[20], spilled
+  neg      r26, r8                  ; n1358 = neg(v.x[21])
+  fma      r14, r14, r7, r26        ; n1359 = fma(n416, v.x[20], n1358)
+  fma      r14, r15, r5, r14        ; v.k1.x[21] = fma(n1356, x[20], n1359)
+  fma      r15, b1, r14, r8         ; v.Y2.x[21] = fma(h/2, v.k1.x[21], v.x[21])
+  sub      r16, r15, r16            ; n1362 = sub(v.Y2.x[21], v.Y2.x[18])
+  neg      r26, r13                 ; n1364 = neg(v.Y2.x[20])
+  fma      r26, r29, r20, r26       ; n1365 = fma(n420, v.Y2.x[19], n1364)
+  fma      r16, r16, r30, r26       ; v.k2.x[20] = fma(n1362, Y2.x[19], n1365)
+  fma      r26, b1, r16, r7         ; v.Y3.x[20] = fma(h/2, v.k2.x[20], v.x[20])
+  sub      r17, r26, r17            ; n1368 = sub(v.Y3.x[20], v.Y3.x[17])
+  neg      r29, r24                 ; n1370 = neg(v.Y3.x[19])
+  fma      r19, r19, r22, r29       ; n1371 = fma(n424, v.Y3.x[18], n1370)
+  fma      r17, r17, r12, r19       ; v.k3.x[19] = fma(n1368, Y3.x[18], n1371)
+  fma      r19, b0, r17, r6         ; v.Y4.x[19] = fma(h, v.k3.x[19], v.x[19])
+  sub      r21, r19, r21            ; n1374 = sub(v.Y4.x[19], v.Y4.x[16])
+  neg      r29, r25                 ; n1376 = neg(v.Y4.x[18])
+  fma      r18, r18, r23, r29       ; n1377 = fma(n428, v.Y4.x[17], n1376)
+  fma      r18, r21, r11, r18       ; v.k4.x[18] = fma(n1374, Y4.x[17], n1377)
+  add      r3, r3, r18              ; v.S4.x[18] = add(v.S3.x[18], v.k4.x[18])
+  fma      r3, b2, r3, r4           ; next v.x[18] = fma(h/6, v.S4.x[18], v.x[18])
+  stl      r3, 58                   ; next v.x[18]
+  ldl      r3, 127                  ; k2.x[19], from slot 127
+  ldl      r4, 99                   ; k1.x[19], from slot 99
+  fma      r3, b3, r3, r4           ; S2.x[19] = fma(2, k2.x[19], k1.x[19])
+  fma      r3, b3, r31, r3          ; S3.x[19] = fma(2, k3.x[19], S2.x[19])
+  ldl      r4, 23                   ; x[23], from its home
+  sub      r18, r4, r5              ; n435 = sub(x[23], x[20])
+  sub      r21, b4, r9              ; n436 = sub(F, x[22])
+  fma      r21, r18, r10, r21       ; k1.x[22] = fma(n435, x[21], n436)
+  fma      r29, b1, r21, r9         ; Y2.x[22] = fma(h/2, k1.x[22], x[22])
+  sub      r30, r29, r30            ; n439 = sub(Y2.x[22], Y2.x[19])
+  sub      r31, b4, r27             ; n440 = sub(F, Y2.x[21])
+  fma      r31, r30, r28, r31       ; k2.x[21] = fma(n439, Y2.x[20], n440)
+  stl      r21, 99                  ; k1.x[22], spilled
+  fma      r21, b1, r31, r10        ; Y3.x[21] = fma(h/2, k2.x[21], x[21])
+  sub      r12, r21, r12            ; n443 = sub(Y3.x[21], Y3.x[18])
+  stl      r14, 100                 ; v.k1.x[21], spilled
+  ldl      r14, 94                  ; Y3.x[20], from slot 94
+  stl      r31, 127                 ; k2.x[21], spilled
+  sub      r31, b4, r14             ; n444 = sub(F, Y3.x[20])
+  stl      r16, 131                 ; v.k2.x[20], spilled
+  ldl      r16, 95                  ; Y3.x[19], from slot 95
+  fma      r31, r12, r16, r31       ; k3.x[20] = fma(n443, Y3.x[19], n444)
+  fma      r5, b0, r31, r5          ; Y4.x[20] = fma(h, k3.x[20], x[20])
+  sub      r11, r5, r11             ; n447 = sub(Y4.x[20], Y4.x[17])
+  stl      r5, 102                  ; Y4.x[20], spilled
+  ldl      r5, 118                  ; Y4.x[19], from slot 118
+  sub      r5, b4, r5               ; n448 = sub(F, Y4.x[19])
+  ldl      r14, 132                 ; Y4.x[18], from slot 132
+  fma      r5, r11, r14, r5         ; k4.x[19] = fma(n447, Y4.x[18], n448)
+  add      r3, r3, r5               ; S4.x[19] = add(S3.x[19], k4.x[19])
+  ldl      r5, 19                   ; x[19], from its home
+  fma      r3, b2, r3, r5           ; next x[19] = fma(h/6, S4.x[19], x[19])
+  stl      r3, 19                   ; next x[19]
+  ldl      r3, 123                  ; v.k2.x[19], from slot 123
+  ldl      r5, 101                  ; v.k1.x[19], from slot 101
+  fma      r3, b3, r3, r5           ; v.S2.x[19] = fma(2, v.k2.x[19], v.k1.x[19])
+  fma      r3, b3, r17, r3          ; v.S3.x[19] = fma(2, v.k3.x[19], v.S2.x[19])
+  ldl      r5, 63                   ; v.x[23], from its home
+  sub      r17, r5, r7              ; n1383 = sub(v.x[23], v.x[20])
+  ldl      r5, 62                   ; v.x[22], from its home
+  stl      r21, 101                 ; Y3.x[21], spilled
+  neg      r21, r5                  ; n1385 = neg(v.x[22])
+  fma      r18, r18, r8, r21        ; n1386 = fma(n435, v.x[21], n1385)
+  fma      r17, r17, r10, r18       ; v.k1.x[22] = fma(n1383, x[21], n1386)
+  fma      r18, b1, r17, r5         ; v.Y2.x[22] = fma(h/2, v.k1.x[22], v.x[22])
+  sub      r20, r18, r20            ; n1389 = sub(v.Y2.x[22], v.Y2.x[19])
+  neg      r21, r15                 ; n1391 = neg(v.Y2.x[21])
+  fma      r21, r30, r13, r21       ; n1392 = fma(n439, v.Y2.x[20], n1391)
+  fma      r20, r20, r28, r21       ; v.k2.x[21] = fma(n1389, Y2.x[20], n1392)
+  fma      r21, b1, r20, r8         ; v.Y3.x[21] = fma(h/2, v.k2.x[21], v.x[21])
+  sub      r22, r21, r22            ; n1395 = sub(v.Y3.x[21], v.Y3.x[18])
+  neg      r30, r26                 ; n1397 = neg(v.Y3.x[20])
+  fma      r12, r12, r24, r30       ; n1398 = fma(n443, v.Y3.x[19], n1397)
+  fma      r12, r22, r16, r12       ; v.k3.x[20] = fma(n1395, Y3.x[19], n1398)
+  fma      r22, b0, r12, r7         ; v.Y4.x[20] = fma(h, v.k3.x[20], v.x[20])
+  sub      r23, r22, r23            ; n1401 = sub(v.Y4.x[20], v.Y4.x[17])
+  neg      r30, r19                 ; n1403 = neg(v.Y4.x[19])
+  fma      r11, r11, r25, r30       ; n1404 = fma(n447, v.Y4.x[18], n1403)
+  fma      r11, r23, r14, r11       ; v.k4.x[19] = fma(n1401, Y4.x[18], n1404)
+  add      r3, r3, r11              ; v.S4.x[19] = add(v.S3.x[19], v.k4.x[19])
+  fma      r3, b2, r3, r6           ; next v.x[19] = fma(h/6, v.S4.x[19], v.x[19])
+  stl      r3, 59                   ; next v.x[19]
+  ldl      r3, 104                  ; k2.x[20], from slot 104
+  ldl      r6, 83                   ; k1.x[20], from slot 83
+  fma      r3, b3, r3, r6           ; S2.x[20] = fma(2, k2.x[20], k1.x[20])
+  fma      r3, b3, r31, r3          ; S3.x[20] = fma(2, k3.x[20], S2.x[20])
+  ldl      r6, 24                   ; x[24], from its home
+  sub      r11, r6, r10             ; n454 = sub(x[24], x[21])
+  sub      r23, b4, r4              ; n455 = sub(F, x[23])
+  fma      r23, r11, r9, r23        ; k1.x[23] = fma(n454, x[22], n455)
+  fma      r30, b1, r23, r4         ; Y2.x[23] = fma(h/2, k1.x[23], x[23])
+  sub      r28, r30, r28            ; n458 = sub(Y2.x[23], Y2.x[20])
+  sub      r31, b4, r29             ; n459 = sub(F, Y2.x[22])
+  fma      r31, r28, r27, r31       ; k2.x[22] = fma(n458, Y2.x[21], n459)
+  stl      r23, 83                  ; k1.x[23], spilled
+  fma      r23, b1, r31, r9         ; Y3.x[22] = fma(h/2, k2.x[22], x[22])
+  sub      r16, r23, r16            ; n462 = sub(Y3.x[22], Y3.x[19])
+  stl      r17, 95                  ; v.k1.x[22], spilled
+  ldl      r17, 101                 ; Y3.x[21], from slot 101
+  stl      r31, 104                 ; k2.x[22], spilled
+  sub      r31, b4, r17             ; n463 = sub(F, Y3.x[21])
+  stl      r20, 123                 ; v.k2.x[21], spilled
+  ldl      r20, 94                  ; Y3.x[20], from slot 94
+  fma      r31, r16, r20, r31       ; k3.x[21] = fma(n462, Y3.x[20], n463)
+  fma      r10, b0, r31, r10        ; Y4.x[21] = fma(h, k3.x[21], x[21])
+  sub      r14, r10, r14            ; n466 = sub(Y4.x[21], Y4.x[18])
+  stl      r10, 132                 ; Y4.x[21], spilled
+  ldl      r10, 102                 ; Y4.x[20], from slot 102
+  sub      r10, b4, r10             ; n467 = sub(F, Y4.x[20])
+  ldl      r17, 118                 ; Y4.x[19], from slot 118
+  fma      r10, r14, r17, r10       ; k4.x[20] = fma(n466, Y4.x[19], n467)
+  add      r3, r3, r10              ; S4.x[20] = add(S3.x[20], k4.x[20])
+  ldl      r10, 20                  ; x[20], from its home
+  fma      r3, b2, r3, r10          ; next x[20] = fma(h/6, S4.x[20], x[20])
+  stl      r3, 20                   ; next x[20]
+  ldl      r3, 131                  ; v.k2.x[20], from slot 131
+  ldl      r10, 98                  ; v.k1.x[20], from slot 98
+  fma      r3, b3, r3, r10          ; v.S2.x[20] = fma(2, v.k2.x[20], v.k1.x[20])
+  fma      r3, b3, r12, r3          ; v.S3.x[20] = fma(2, v.k3.x[20], v.S2.x[20])
+  ldl      r10, 64                  ; v.x[24], from its home
+  sub      r12, r10, r8             ; n1410 = sub(v.x[24], v.x[21])
+  ldl      r10, 63                  ; v.x[23], from its home
+  stl      r23, 98                  ; Y3.x[22], spilled
+  neg      r23, r10                 ; n1412 = neg(v.x[23])
+  fma      r11, r11, r5, r23        ; n1413 = fma(n454, v.x[22], n1412)
+  fma      r11, r12, r9, r11        ; v.k1.x[23] = fma(n1410, x[22], n1413)
+  fma      r12, b1, r11, r10        ; v.Y2.x[23] = fma(h/2, v.k1.x[23], v.x[23])
+  sub      r13, r12, r13            ; n1416 = sub(v.Y2.x[23], v.Y2.x[20])
+  neg      r23, r18                 ; n1418 = neg(v.Y2.x[22])
+  fma      r23, r28, r15, r23       ; n1419 = fma(n458, v.Y2.x[21], n1418)
+  fma      r13, r13, r27, r23       ; v.k2.x[22] = fma(n1416, Y2.x[21], n1419)
+  fma      r23, b1, r13, r5         ; v.Y3.x[22] = fma(h/2, v.k2.x[22], v.x[22])
+  sub      r24, r23, r24            ; n1422 = sub(v.Y3.x[22], v.Y3.x[19])
+  neg      r28, r21                 ; n1424 = neg(v.Y3.x[21])
+  fma      r16, r16, r26, r28       ; n1425 = fma(n462, v.Y3.x[20], n1424)
+  fma      r16, r24, r20, r16       ; v.k3.x[21] = fma(n1422, Y3.x[20], n1425)
+  fma      r24, b0, r16, r8         ; v.Y4.x[21] = fma(h, v.k3.x[21], v.x[21])
+  sub      r25, r24, r25            ; n1428 = sub(v.Y4.x[21], v.Y4.x[18])
+  neg      r28, r22                 ; n1430 = neg(v.Y4.x[20])
+  fma      r14, r14, r19, r28       ; n1431 = fma(n466, v.Y4.x[19], n1430)
+  fma      r14, r25, r17, r14       ; v.k4.x[20] = fma(n1428, Y4.x[19], n1431)
+  add      r3, r3, r14              ; v.S4.x[20] = add(v.S3.x[20], v.k4.x[20])
+  fma      r3, b2, r3, r7           ; next v.x[20] = fma(h/6, v.S4.x[20], v.x[20])
+  stl      r3, 60                   ; next v.x[20]
+  ldl      r3, 127                  ; k2.x[21], from slot 127
+  ldl      r7, 97                   ; k1.x[21], from slot 97
+  fma      r3, b3, r3, r7           ; S2.x[21] = fma(2, k2.x[21], k1.x[21])
+  fma      r3, b3, r31, r3          ; S3.x[21] = fma(2, k3.x[21], S2.x[21])
+  ldl      r7, 25                   ; x[25], from its home
+  sub      r14, r7, r9              ; n473 = sub(x[25], x[22])
+  sub      r25, b4, r6              ; n474 = sub(F, x[24])
+  fma      r25, r14, r4, r25        ; k1.x[24] = fma(n473, x[23], n474)
+  fma      r28, b1, r25, r6         ; Y2.x[24] = fma(h/2, k1.x[24], x[24])
+  sub      r27, r28, r27            ; n477 = sub(Y2.x[24], Y2.x[21])
+  sub      r31, b4, r30             ; n478 = sub(F, Y2.x[23])
+  fma      r31, r27, r29, r31       ; k2.x[23] = fma(n477, Y2.x[22], n478)
+  stl      r25, 97                  ; k1.x[24], spilled
+  fma      r25, b1, r31, r4         ; Y3.x[23] = fma(h/2, k2.x[23], x[23])
+  sub      r20, r25, r20            ; n481 = sub(Y3.x[23], Y3.x[20])
+  stl      r11, 94                  ; v.k1.x[23], spilled
+  ldl      r11, 98                  ; Y3.x[22], from slot 98
+  stl      r31, 127                 ; k2.x[23], spilled
+  sub      r31, b4, r11             ; n482 = sub(F, Y3.x[22])
+  stl      r13, 131                 ; v.k2.x[22], spilled
+  ldl      r13, 101                 ; Y3.x[21], from slot 101
+  fma      r31, r20, r13, r31       ; k3.x[22] = fma(n481, Y3.x[21], n482)
+  fma      r9, b0, r31, r9          ; Y4.x[22] = fma(h, k3.x[22], x[22])
+  sub      r17, r9, r17             ; n485 = sub(Y4.x[22], Y4.x[19])
+  stl      r9, 118                  ; Y4.x[22], spilled
+  ldl      r9, 132                  ; Y4.x[21], from slot 132
+  sub      r9, b4, r9               ; n486 = sub(F, Y4.x[21])
+  ldl      r11, 102                 ; Y4.x[20], from slot 102
+  fma      r9, r17, r11, r9         ; k4.x[21] = fma(n485, Y4.x[20], n486)
+  add      r3, r3, r9               ; S4.x[21] = add(S3.x[21], k4.x[21])
+  ldl      r9, 21                   ; x[21], from its home
+  fma      r3, b2, r3, r9           ; next x[21] = fma(h/6, S4.x[21], x[21])
+  stl      r3, 21                   ; next x[21]
+  ldl      r3, 123                  ; v.k2.x[21], from slot 123
+  ldl      r9, 100                  ; v.k1.x[21], from slot 100
+  fma      r3, b3, r3, r9           ; v.S2.x[21] = fma(2, v.k2.x[21], v.k1.x[21])
+  fma      r3, b3, r16, r3          ; v.S3.x[21] = fma(2, v.k3.x[21], v.S2.x[21])
+  ldl      r9, 65                   ; v.x[25], from its home
+  sub      r16, r9, r5              ; n1437 = sub(v.x[25], v.x[22])
+  ldl      r9, 64                   ; v.x[24], from its home
+  stl      r25, 100                 ; Y3.x[23], spilled
+  neg      r25, r9                  ; n1439 = neg(v.x[24])
+  fma      r14, r14, r10, r25       ; n1440 = fma(n473, v.x[23], n1439)
+  fma      r14, r16, r4, r14        ; v.k1.x[24] = fma(n1437, x[23], n1440)
+  fma      r16, b1, r14, r9         ; v.Y2.x[24] = fma(h/2, v.k1.x[24], v.x[24])
+  sub      r15, r16, r15            ; n1443 = sub(v.Y2.x[24], v.Y2.x[21])
+  neg      r25, r12                 ; n1445 = neg(v.Y2.x[23])
+  fma      r25, r27, r18, r25       ; n1446 = fma(n477, v.Y2.x[22], n1445)
+  fma      r15, r15, r29, r25       ; v.k2.x[23] = fma(n1443, Y2.x[22], n1446)
+  fma      r25, b1, r15, r10        ; v.Y3.x[23] = fma(h/2, v.k2.x[23], v.x[23])
+  sub      r26, r25, r26            ; n1449 = sub(v.Y3.x[23], v.Y3.x[20])
+  neg      r27, r23                 ; n1451 = neg(v.Y3.x[22])
+  fma      r20, r20, r21, r27       ; n1452 = fma(n481, v.Y3.x[21], n1451)
+  fma      r20, r26, r13, r20       ; v.k3.x[22] = fma(n1449, Y3.x[21], n1452)
+  fma      r26, b0, r20, r5         ; v.Y4.x[22] = fma(h, v.k3.x[22], v.x[22])
+  sub      r19, r26, r19            ; n1455 = sub(v.Y4.x[22], v.Y4.x[19])
+  neg      r27, r24                 ; n1457 = neg(v.Y4.x[21])
+  fma      r17, r17, r22, r27       ; n1458 = fma(n485, v.Y4.x[20], n1457)
+  fma      r17, r19, r11, r17       ; v.k4.x[21] = fma(n1455, Y4.x[20], n1458)
+  add      r3, r3, r17              ; v.S4.x[21] = add(v.S3.x[21], v.k4.x[21])
+  fma      r3, b2, r3, r8           ; next v.x[21] = fma(h/6, v.S4.x[21], v.x[21])
+  stl      r3, 61                   ; next v.x[21]
+  ldl      r3, 104                  ; k2.x[22], from slot 104
+  ldl      r8, 99                   ; k1.x[22], from slot 99
+  fma      r3, b3, r3, r8           ; S2.x[22] = fma(2, k2.x[22], k1.x[22])
+  fma      r3, b3, r31, r3          ; S3.x[22] = fma(2, k3.x[22], S2.x[22])
+  ldl      r8, 26                   ; x[26], from its home
+  sub      r17, r8, r4              ; n492 = sub(x[26], x[23])
+  sub      r19, b4, r7              ; n493 = sub(F, x[25])
+  fma      r19, r17, r6, r19        ; k1.x[25] = fma(n492, x[24], n493)
+  fma      r27, b1, r19, r7         ; Y2.x[25] = fma(h/2, k1.x[25], x[25])
+  sub      r29, r27, r29            ; n496 = sub(Y2.x[25], Y2.x[22])
+  sub      r31, b4, r28             ; n497 = sub(F, Y2.x[24])
+  fma      r31, r29, r30, r31       ; k2.x[24] = fma(n496, Y2.x[23], n497)
+  stl      r19, 99                  ; k1.x[25], spilled
+  fma      r19, b1, r31, r6         ; Y3.x[24] = fma(h/2, k2.x[24], x[24])
+  sub      r13, r19, r13            ; n500 = sub(Y3.x[24], Y3.x[21])
+  stl      r14, 101                 ; v.k1.x[24], spilled
+  ldl      r14, 100                 ; Y3.x[23], from slot 100
+  stl      r31, 104                 ; k2.x[24], spilled
+  sub      r31, b4, r14             ; n501 = sub(F, Y3.x[23])
+  stl      r15, 123                 ; v.k2.x[23], spilled
+  ldl      r15, 98                  ; Y3.x[22], from slot 98
+  fma      r31, r13, r15, r31       ; k3.x[23] = fma(n500, Y3.x[22], n501)
+  fma      r4, b0, r31, r4          ; Y4.x[23] = fma(h, k3.x[23], x[23])
+  sub      r11, r4, r11             ; n504 = sub(Y4.x[23], Y4.x[20])
+  stl      r4, 102                  ; Y4.x[23], spilled
+  ldl      r4, 118                  ; Y4.x[22], from slot 118
+  sub      r4, b4, r4               ; n505 = sub(F, Y4.x[22])
+  ldl      r14, 132                 ; Y4.x[21], from slot 132
+  fma      r4, r11, r14, r4         ; k4.x[22] = fma(n504, Y4.x[21], n505)
+  add      r3, r3, r4               ; S4.x[22] = add(S3.x[22], k4.x[22])
+  ldl      r4, 22                   ; x[22], from its home
+  fma      r3, b2, r3, r4           ; next x[22] = fma(h/6, S4.x[22], x[22])
+  stl      r3, 22                   ; next x[22]
+  ldl      r3, 131                  ; v.k2.x[22], from slot 131
+  ldl      r4, 95                   ; v.k1.x[22], from slot 95
+  fma      r3, b3, r3, r4           ; v.S2.x[22] = fma(2, v.k2.x[22], v.k1.x[22])
+  fma      r3, b3, r20, r3          ; v.S3.x[22] = fma(2, v.k3.x[22], v.S2.x[22])
+  ldl      r4, 66                   ; v.x[26], from its home
+  sub      r20, r4, r10             ; n1464 = sub(v.x[26], v.x[23])
+  ldl      r4, 65                   ; v.x[25], from its home
+  stl      r19, 95                  ; Y3.x[24], spilled
+  neg      r19, r4                  ; n1466 = neg(v.x[25])
+  fma      r17, r17, r9, r19        ; n1467 = fma(n492, v.x[24], n1466)
+  fma      r17, r20, r6, r17        ; v.k1.x[25] = fma(n1464, x[24], n1467)
+  fma      r19, b1, r17, r4         ; v.Y2.x[25] = fma(h/2, v.k1.x[25], v.x[25])
+  sub      r18, r19, r18            ; n1470 = sub(v.Y2.x[25], v.Y2.x[22])
+  neg      r20, r16                 ; n1472 = neg(v.Y2.x[24])
+  fma      r20, r29, r12, r20       ; n1473 = fma(n496, v.Y2.x[23], n1472)
+  fma      r18, r18, r30, r20       ; v.k2.x[24] = fma(n1470, Y2.x[23], n1473)
+  fma      r20, b1, r18, r9         ; v.Y3.x[24] = fma(h/2, v.k2.x[24], v.x[24])
+  sub      r21, r20, r21            ; n1476 = sub(v.Y3.x[24], v.Y3.x[21])
+  neg      r29, r25                 ; n1478 = neg(v.Y3.x[23])
+  fma      r13, r13, r23, r29       ; n1479 = fma(n500, v.Y3.x[22], n1478)
+  fma      r13, r21, r15, r13       ; v.k3.x[23] = fma(n1476, Y3.x[22], n1479)
+  fma      r21, b0, r13, r10        ; v.Y4.x[23] = fma(h, v.k3.x[23], v.x[23])
+  sub      r22, r21, r22            ; n1482 = sub(v.Y4.x[23], v.Y4.x[20])
+  neg      r29, r26                 ; n1484 = neg(v.Y4.x[22])
+  fma      r11, r11, r24, r29       ; n1485 = fma(n504, v.Y4.x[21], n1484)
+  fma      r11, r22, r14, r11       ; v.k4.x[22] = fma(n1482, Y4.x[21], n1485)
+  add      r3, r3, r11              ; v.S4.x[22] = add(v.S3.x[22], v.k4.x[22])
+  fma      r3, b2, r3, r5           ; next v.x[22] = fma(h/6, v.S4.x[22], v.x[22])
+  stl      r3, 62                   ; next v.x[22]
+  ldl      r3, 127                  ; k2.x[23], from slot 127
+  ldl      r5, 83                   ; k1.x[23], from slot 83
+  fma      r3, b3, r3, r5           ; S2.x[23] = fma(2, k2.x[23], k1.x[23])
+  fma      r3, b3, r31, r3          ; S3.x[23] = fma(2, k3.x[23], S2.x[23])
+  ldl      r5, 27                   ; x[27], from its home
+  sub      r11, r5, r6              ; n511 = sub(x[27], x[24])
+  sub      r22, b4, r8              ; n512 = sub(F, x[26])
+  fma      r22, r11, r7, r22        ; k1.x[26] = fma(n511, x[25], n512)
+  fma      r29, b1, r22, r8         ; Y2.x[26] = fma(h/2, k1.x[26], x[26])
+  sub      r30, r29, r30            ; n515 = sub(Y2.x[26], Y2.x[23])
+  sub      r31, b4, r27             ; n516 = sub(F, Y2.x[25])
+  fma      r31, r30, r28, r31       ; k2.x[25] = fma(n515, Y2.x[24], n516)
+  stl      r22, 83                  ; k1.x[26], spilled
+  fma      r22, b1, r31, r7         ; Y3.x[25] = fma(h/2, k2.x[25], x[25])
+  sub      r15, r22, r15            ; n519 = sub(Y3.x[25], Y3.x[22])
+  stl      r17, 98                  ; v.k1.x[25], spilled
+  ldl      r17, 95                  ; Y3.x[24], from slot 95
+  stl      r31, 127                 ; k2.x[25], spilled
+  sub      r31, b4, r17             ; n520 = sub(F, Y3.x[24])
+  stl      r18, 131                 ; v.k2.x[24], spilled
+  ldl      r18, 100                 ; Y3.x[23], from slot 100
+  fma      r31, r15, r18, r31       ; k3.x[24] = fma(n519, Y3.x[23], n520)
+  fma      r6, b0, r31, r6          ; Y4.x[24] = fma(h, k3.x[24], x[24])
+  sub      r14, r6, r14             ; n523 = sub(Y4.x[24], Y4.x[21])
+  stl      r6, 132                  ; Y4.x[24], spilled
+  ldl      r6, 102                  ; Y4.x[23], from slot 102
+  sub      r6, b4, r6               ; n524 = sub(F, Y4.x[23])
+  ldl      r17, 118                 ; Y4.x[22], from slot 118
+  fma      r6, r14, r17, r6         ; k4.x[23] = fma(n523, Y4.x[22], n524)
+  add      r3, r3, r6               ; S4.x[23] = add(S3.x[23], k4.x[23])
+  ldl      r6, 23                   ; x[23], from its home
+  fma      r3, b2, r3, r6           ; next x[23] = fma(h/6, S4.x[23], x[23])
+  stl      r3, 23                   ; next x[23]
+  ldl      r3, 123                  ; v.k2.x[23], from slot 123
+  ldl      r6, 94                   ; v.k1.x[23], from slot 94
+  fma      r3, b3, r3, r6           ; v.S2.x[23] = fma(2, v.k2.x[23], v.k1.x[23])
+  fma      r3, b3, r13, r3          ; v.S3.x[23] = fma(2, v.k3.x[23], v.S2.x[23])
+  ldl      r6, 67                   ; v.x[27], from its home
+  sub      r13, r6, r9              ; n1491 = sub(v.x[27], v.x[24])
+  ldl      r6, 66                   ; v.x[26], from its home
+  stl      r22, 94                  ; Y3.x[25], spilled
+  neg      r22, r6                  ; n1493 = neg(v.x[26])
+  fma      r11, r11, r4, r22        ; n1494 = fma(n511, v.x[25], n1493)
+  fma      r11, r13, r7, r11        ; v.k1.x[26] = fma(n1491, x[25], n1494)
+  fma      r13, b1, r11, r6         ; v.Y2.x[26] = fma(h/2, v.k1.x[26], v.x[26])
+  sub      r12, r13, r12            ; n1497 = sub(v.Y2.x[26], v.Y2.x[23])
+  neg      r22, r19                 ; n1499 = neg(v.Y2.x[25])
+  fma      r22, r30, r16, r22       ; n1500 = fma(n515, v.Y2.x[24], n1499)
+  fma      r12, r12, r28, r22       ; v.k2.x[25] = fma(n1497, Y2.x[24], n1500)
+  fma      r22, b1, r12, r4         ; v.Y3.x[25] = fma(h/2, v.k2.x[25], v.x[25])
+  sub      r23, r22, r23            ; n1503 = sub(v.Y3.x[25], v.Y3.x[22])
+  neg      r30, r20                 ; n1505 = neg(v.Y3.x[24])
+  fma      r15, r15, r25, r30       ; n1506 = fma(n519, v.Y3.x[23], n1505)
+  fma      r15, r23, r18, r15       ; v.k3.x[24] = fma(n1503, Y3.x[23], n1506)
+  fma      r23, b0, r15, r9         ; v.Y4.x[24] = fma(h, v.k3.x[24], v.x[24])
+  sub      r24, r23, r24            ; n1509 = sub(v.Y4.x[24], v.Y4.x[21])
+  neg      r30, r21                 ; n1511 = neg(v.Y4.x[23])
+  fma      r14, r14, r26, r30       ; n1512 = fma(n523, v.Y4.x[22], n1511)
+  fma      r14, r24, r17, r14       ; v.k4.x[23] = fma(n1509, Y4.x[22], n1512)
+  add      r3, r3, r14              ; v.S4.x[23] = add(v.S3.x[23], v.k4.x[23])
+  fma      r3, b2, r3, r10          ; next v.x[23] = fma(h/6, v.S4.x[23], v.x[23])
+  stl      r3, 63                   ; next v.x[23]
+  ldl      r3, 104                  ; k2.x[24], from slot 104
+  ldl      r10, 97                  ; k1.x[24], from slot 97
+  fma      r3, b3, r3, r10          ; S2.x[24] = fma(2, k2.x[24], k1.x[24])
+  fma      r3, b3, r31, r3          ; S3.x[24] = fma(2, k3.x[24], S2.x[24])
+  ldl      r10, 28                  ; x[28], from its home
+  sub      r14, r10, r7             ; n530 = sub(x[28], x[25])
+  sub      r24, b4, r5              ; n531 = sub(F, x[27])
+  fma      r24, r14, r8, r24        ; k1.x[27] = fma(n530, x[26], n531)
+  fma      r30, b1, r24, r5         ; Y2.x[27] = fma(h/2, k1.x[27], x[27])
+  sub      r28, r30, r28            ; n534 = sub(Y2.x[27], Y2.x[24])
+  sub      r31, b4, r29             ; n535 = sub(F, Y2.x[26])
+  fma      r31, r28, r27, r31       ; k2.x[26] = fma(n534, Y2.x[25], n535)
+  stl      r24, 97                  ; k1.x[27], spilled
+  fma      r24, b1, r31, r8         ; Y3.x[26] = fma(h/2, k2.x[26], x[26])
+  sub      r18, r24, r18            ; n538 = sub(Y3.x[26], Y3.x[23])
+  stl      r11, 100                 ; v.k1.x[26], spilled
+  ldl      r11, 94                  ; Y3.x[25], from slot 94
+  stl      r31, 104                 ; k2.x[26], spilled
+  sub      r31, b4, r11             ; n539 = sub(F, Y3.x[25])
+  stl      r12, 123                 ; v.k2.x[25], spilled
+  ldl      r12, 95                  ; Y3.x[24], from slot 95
+  fma      r31, r18, r12, r31       ; k3.x[25] = fma(n538, Y3.x[24], n539)
+  fma      r7, b0, r31, r7          ; Y4.x[25] = fma(h, k3.x[25], x[25])
+  sub      r17, r7, r17             ; n542 = sub(Y4.x[25], Y4.x[22])
+  stl      r7, 118                  ; Y4.x[25], spilled
+  ldl      r7, 132                  ; Y4.x[24], from slot 132
+  sub      r7, b4, r7               ; n543 = sub(F, Y4.x[24])
+  ldl      r11, 102                 ; Y4.x[23], from slot 102
+  fma      r7, r17, r11, r7         ; k4.x[24] = fma(n542, Y4.x[23], n543)
+  add      r3, r3, r7               ; S4.x[24] = add(S3.x[24], k4.x[24])
+  ldl      r7, 24                   ; x[24], from its home
+  fma      r3, b2, r3, r7           ; next x[24] = fma(h/6, S4.x[24], x[24])
+  stl      r3, 24                   ; next x[24]
+  ldl      r3, 131                  ; v.k2.x[24], from slot 131
+  ldl      r7, 101                  ; v.k1.x[24], from slot 101
+  fma      r3, b3, r3, r7           ; v.S2.x[24] = fma(2, v.k2.x[24], v.k1.x[24])
+  fma      r3, b3, r15, r3          ; v.S3.x[24] = fma(2, v.k3.x[24], v.S2.x[24])
+  ldl      r7, 68                   ; v.x[28], from its home
+  sub      r15, r7, r4              ; n1518 = sub(v.x[28], v.x[25])
+  ldl      r7, 67                   ; v.x[27], from its home
+  stl      r24, 101                 ; Y3.x[26], spilled
+  neg      r24, r7                  ; n1520 = neg(v.x[27])
+  fma      r14, r14, r6, r24        ; n1521 = fma(n530, v.x[26], n1520)
+  fma      r14, r15, r8, r14        ; v.k1.x[27] = fma(n1518, x[26], n1521)
+  fma      r15, b1, r14, r7         ; v.Y2.x[27] = fma(h/2, v.k1.x[27], v.x[27])
+  sub      r16, r15, r16            ; n1524 = sub(v.Y2.x[27], v.Y2.x[24])
+  neg      r24, r13                 ; n1526 = neg(v.Y2.x[26])
+  fma      r24, r28, r19, r24       ; n1527 = fma(n534, v.Y2.x[25], n1526)
+  fma      r16, r16, r27, r24       ; v.k2.x[26] = fma(n1524, Y2.x[25], n1527)
+  fma      r24, b1, r16, r6         ; v.Y3.x[26] = fma(h/2, v.k2.x[26], v.x[26])
+  sub      r25, r24, r25            ; n1530 = sub(v.Y3.x[26], v.Y3.x[23])
+  neg      r28, r22                 ; n1532 = neg(v.Y3.x[25])
+  fma      r18, r18, r20, r28       ; n1533 = fma(n538, v.Y3.x[24], n1532)
+  fma      r18, r25, r12, r18       ; v.k3.x[25] = fma(n1530, Y3.x[24], n1533)
+  fma      r25, b0, r18, r4         ; v.Y4.x[25] = fma(h, v.k3.x[25], v.x[25])
+  sub      r26, r25, r26            ; n1536 = sub(v.Y4.x[25], v.Y4.x[22])
+  neg      r28, r23                 ; n1538 = neg(v.Y4.x[24])
+  fma      r17, r17, r21, r28       ; n1539 = fma(n542, v.Y4.x[23], n1538)
+  fma      r17, r26, r11, r17       ; v.k4.x[24] = fma(n1536, Y4.x[23], n1539)
+  add      r3, r3, r17              ; v.S4.x[24] = add(v.S3.x[24], v.k4.x[24])
+  fma      r3, b2, r3, r9           ; next v.x[24] = fma(h/6, v.S4.x[24], v.x[24])
+  stl      r3, 64                   ; next v.x[24]
+  ldl      r3, 127                  ; k2.x[25], from slot 127
+  ldl      r9, 99                   ; k1.x[25], from slot 99
+  fma      r3, b3, r3, r9           ; S2.x[25] = fma(2, k2.x[25], k1.x[25])
+  fma      r3, b3, r31, r3          ; S3.x[25] = fma(2, k3.x[25], S2.x[25])
+  ldl      r9, 29                   ; x[29], from its home
+  sub      r17, r9, r8              ; n549 = sub(x[29], x[26])
+  sub      r26, b4, r10             ; n550 = sub(F, x[28])
+  fma      r26, r17, r5, r26        ; k1.x[28] = fma(n549, x[27], n550)
+  fma      r28, b1, r26, r10        ; Y2.x[28] = fma(h/2, k1.x[28], x[28])
+  sub      r27, r28, r27            ; n553 = sub(Y2.x[28], Y2.x[25])
+  sub      r31, b4, r30             ; n554 = sub(F, Y2.x[27])
+  fma      r31, r27, r29, r31       ; k2.x[27] = fma(n553, Y2.x[26], n554)
+  stl      r26, 99                  ; k1.x[28], spilled
+  fma      r26, b1, r31, r5         ; Y3.x[27] = fma(h/2, k2.x[27], x[27])
+  sub      r12, r26, r12            ; n557 = sub(Y3.x[27], Y3.x[24])
+  stl      r14, 95                  ; v.k1.x[27], spilled
+  ldl      r14, 101                 ; Y3.x[26], from slot 101
+  stl      r31, 127                 ; k2.x[27], spilled
+  sub      r31, b4, r14             ; n558 = sub(F, Y3.x[26])
+  stl      r16, 131                 ; v.k2.x[26], spilled
+  ldl      r16, 94                  ; Y3.x[25], from slot 94
+  fma      r31, r12, r16, r31       ; k3.x[26] = fma(n557, Y3.x[25], n558)
+  fma      r8, b0, r31, r8          ; Y4.x[26] = fma(h, k3.x[26], x[26])
+  sub      r11, r8, r11             ; n561 = sub(Y4.x[26], Y4.x[23])
+  stl      r8, 102                  ; Y4.x[26], spilled
+  ldl      r8, 118                  ; Y4.x[25], from slot 118
+  sub      r8, b4, r8               ; n562 = sub(F, Y4.x[25])
+  ldl      r14, 132                 ; Y4.x[24], from slot 132
+  fma      r8, r11, r14, r8         ; k4.x[25] = fma(n561, Y4.x[24], n562)
+  add      r3, r3, r8               ; S4.x[25] = add(S3.x[25], k4.x[25])
+  ldl      r8, 25                   ; x[25], from its home
+  fma      r3, b2, r3, r8           ; next x[25] = fma(h/6, S4.x[25], x[25])
+  stl      r3, 25                   ; next x[25]
+  ldl      r3, 123                  ; v.k2.x[25], from slot 123
+  ldl      r8, 98                   ; v.k1.x[25], from slot 98
+  fma      r3, b3, r3, r8           ; v.S2.x[25] = fma(2, v.k2.x[25], v.k1.x[25])
+  fma      r3, b3, r18, r3          ; v.S3.x[25] = fma(2, v.k3.x[25], v.S2.x[25])
+  ldl      r8, 69                   ; v.x[29], from its home
+  sub      r18, r8, r6              ; n1545 = sub(v.x[29], v.x[26])
+  ldl      r8, 68                   ; v.x[28], from its home
+  stl      r26, 98                  ; Y3.x[27], spilled
+  neg      r26, r8                  ; n1547 = neg(v.x[28])
+  fma      r17, r17, r7, r26        ; n1548 = fma(n549, v.x[27], n1547)
+  fma      r17, r18, r5, r17        ; v.k1.x[28] = fma(n1545, x[27], n1548)
+  fma      r18, b1, r17, r8         ; v.Y2.x[28] = fma(h/2, v.k1.x[28], v.x[28])
+  sub      r19, r18, r19            ; n1551 = sub(v.Y2.x[28], v.Y2.x[25])
+  neg      r26, r15                 ; n1553 = neg(v.Y2.x[27])
+  fma      r26, r27, r13, r26       ; n1554 = fma(n553, v.Y2.x[26], n1553)
+  fma      r19, r19, r29, r26       ; v.k2.x[27] = fma(n1551, Y2.x[26], n1554)
+  fma      r26, b1, r19, r7         ; v.Y3.x[27] = fma(h/2, v.k2.x[27], v.x[27])
+  sub      r20, r26, r20            ; n1557 = sub(v.Y3.x[27], v.Y3.x[24])
+  neg      r27, r24                 ; n1559 = neg(v.Y3.x[26])
+  fma      r12, r12, r22, r27       ; n1560 = fma(n557, v.Y3.x[25], n1559)
+  fma      r12, r20, r16, r12       ; v.k3.x[26] = fma(n1557, Y3.x[25], n1560)
+  fma      r20, b0, r12, r6         ; v.Y4.x[26] = fma(h, v.k3.x[26], v.x[26])
+  sub      r21, r20, r21            ; n1563 = sub(v.Y4.x[26], v.Y4.x[23])
+  neg      r27, r25                 ; n1565 = neg(v.Y4.x[25])
+  fma      r11, r11, r23, r27       ; n1566 = fma(n561, v.Y4.x[24], n1565)
+  fma      r11, r21, r14, r11       ; v.k4.x[25] = fma(n1563, Y4.x[24], n1566)
+  add      r3, r3, r11              ; v.S4.x[25] = add(v.S3.x[25], v.k4.x[25])
+  fma      r3, b2, r3, r4           ; next v.x[25] = fma(h/6, v.S4.x[25], v.x[25])
+  stl      r3, 65                   ; next v.x[25]
+  ldl      r3, 104                  ; k2.x[26], from slot 104
+  ldl      r4, 83                   ; k1.x[26], from slot 83
+  fma      r3, b3, r3, r4           ; S2.x[26] = fma(2, k2.x[26], k1.x[26])
+  fma      r3, b3, r31, r3          ; S3.x[26] = fma(2, k3.x[26], S2.x[26])
+  ldl      r4, 30                   ; x[30], from its home
+  sub      r11, r4, r5              ; n568 = sub(x[30], x[27])
+  sub      r21, b4, r9              ; n569 = sub(F, x[29])
+  fma      r21, r11, r10, r21       ; k1.x[29] = fma(n568, x[28], n569)
+  fma      r27, b1, r21, r9         ; Y2.x[29] = fma(h/2, k1.x[29], x[29])
+  sub      r29, r27, r29            ; n572 = sub(Y2.x[29], Y2.x[26])
+  sub      r31, b4, r28             ; n573 = sub(F, Y2.x[28])
+  fma      r31, r29, r30, r31       ; k2.x[28] = fma(n572, Y2.x[27], n573)
+  stl      r21, 83                  ; k1.x[29], spilled
+  fma      r21, b1, r31, r10        ; Y3.x[28] = fma(h/2, k2.x[28], x[28])
+  sub      r16, r21, r16            ; n576 = sub(Y3.x[28], Y3.x[25])
+  stl      r17, 94                  ; v.k1.x[28], spilled
+  ldl      r17, 98                  ; Y3.x[27], from slot 98
+  stl      r31, 104                 ; k2.x[28], spilled
+  sub      r31, b4, r17             ; n577 = sub(F, Y3.x[27])
+  stl      r19, 123                 ; v.k2.x[27], spilled
+  ldl      r19, 101                 ; Y3.x[26], from slot 101
+  fma      r31, r16, r19, r31       ; k3.x[27] = fma(n576, Y3.x[26], n577)
+  fma      r5, b0, r31, r5          ; Y4.x[27] = fma(h, k3.x[27], x[27])
+  sub      r14, r5, r14             ; n580 = sub(Y4.x[27], Y4.x[24])
+  stl      r5, 132                  ; Y4.x[27], spilled
+  ldl      r5, 102                  ; Y4.x[26], from slot 102
+  sub      r5, b4, r5               ; n581 = sub(F, Y4.x[26])
+  ldl      r17, 118                 ; Y4.x[25], from slot 118
+  fma      r5, r14, r17, r5         ; k4.x[26] = fma(n580, Y4.x[25], n581)
+  add      r3, r3, r5               ; S4.x[26] = add(S3.x[26], k4.x[26])
+  ldl      r5, 26                   ; x[26], from its home
+  fma      r3, b2, r3, r5           ; next x[26] = fma(h/6, S4.x[26], x[26])
+  stl      r3, 26                   ; next x[26]
+  ldl      r3, 131                  ; v.k2.x[26], from slot 131
+  ldl      r5, 100                  ; v.k1.x[26], from slot 100
+  fma      r3, b3, r3, r5           ; v.S2.x[26] = fma(2, v.k2.x[26], v.k1.x[26])
+  fma      r3, b3, r12, r3          ; v.S3.x[26] = fma(2, v.k3.x[26], v.S2.x[26])
+  ldl      r5, 70                   ; v.x[30], from its home
+  sub      r12, r5, r7              ; n1572 = sub(v.x[30], v.x[27])
+  ldl      r5, 69                   ; v.x[29], from its home
+  stl      r21, 100                 ; Y3.x[28], spilled
+  neg      r21, r5                  ; n1574 = neg(v.x[29])
+  fma      r11, r11, r8, r21        ; n1575 = fma(n568, v.x[28], n1574)
+  fma      r11, r12, r10, r11       ; v.k1.x[29] = fma(n1572, x[28], n1575)
+  fma      r12, b1, r11, r5         ; v.Y2.x[29] = fma(h/2, v.k1.x[29], v.x[29])
+  sub      r13, r12, r13            ; n1578 = sub(v.Y2.x[29], v.Y2.x[26])
+  neg      r21, r18                 ; n1580 = neg(v.Y2.x[28])
+  fma      r21, r29, r15, r21       ; n1581 = fma(n572, v.Y2.x[27], n1580)
+  fma      r13, r13, r30, r21       ; v.k2.x[28] = fma(n1578, Y2.x[27], n1581)
+  fma      r21, b1, r13, r8         ; v.Y3.x[28] = fma(h/2, v.k2.x[28], v.x[28])
+  sub      r22, r21, r22            ; n1584 = sub(v.Y3.x[28], v.Y3.x[25])
+  neg      r29, r26                 ; n1586 = neg(v.Y3.x[27])
+  fma      r16, r16, r24, r29       ; n1587 = fma(n576, v.Y3.x[26], n1586)
+  fma      r16, r22, r19, r16       ; v.k3.x[27] = fma(n1584, Y3.x[26], n1587)
+  fma      r22, b0, r16, r7         ; v.Y4.x[27] = fma(h, v.k3.x[27], v.x[27])
+  sub      r23, r22, r23            ; n1590 = sub(v.Y4.x[27], v.Y4.x[24])
+  neg      r29, r20                 ; n1592 = neg(v.Y4.x[26])
+  fma      r14, r14, r25, r29       ; n1593 = fma(n580, v.Y4.x[25], n1592)
+  fma      r14, r23, r17, r14       ; v.k4.x[26] = fma(n1590, Y4.x[25], n1593)
+  add      r3, r3, r14              ; v.S4.x[26] = add(v.S3.x[26], v.k4.x[26])
+  fma      r3, b2, r3, r6           ; next v.x[26] = fma(h/6, v.S4.x[26], v.x[26])
+  stl      r3, 66                   ; next v.x[26]
+  ldl      r3, 127                  ; k2.x[27], from slot 127
+  ldl      r6, 97                   ; k1.x[27], from slot 97
+  fma      r3, b3, r3, r6           ; S2.x[27] = fma(2, k2.x[27], k1.x[27])
+  fma      r3, b3, r31, r3          ; S3.x[27] = fma(2, k3.x[27], S2.x[27])
+  ldl      r6, 31                   ; x[31], from its home
+  sub      r14, r6, r10             ; n587 = sub(x[31], x[28])
+  sub      r23, b4, r4              ; n588 = sub(F, x[30])
+  fma      r23, r14, r9, r23        ; k1.x[30] = fma(n587, x[29], n588)
+  fma      r29, b1, r23, r4         ; Y2.x[30] = fma(h/2, k1.x[30], x[30])
+  sub      r30, r29, r30            ; n591 = sub(Y2.x[30], Y2.x[27])
+  sub      r31, b4, r27             ; n592 = sub(F, Y2.x[29])
+  fma      r31, r30, r28, r31       ; k2.x[29] = fma(n591, Y2.x[28], n592)
+  stl      r23, 97                  ; k1.x[30], spilled
+  fma      r23, b1, r31, r9         ; Y3.x[29] = fma(h/2, k2.x[29], x[29])
+  sub      r19, r23, r19            ; n595 = sub(Y3.x[29], Y3.x[26])
+  stl      r11, 101                 ; v.k1.x[29], spilled
+  ldl      r11, 100                 ; Y3.x[28], from slot 100
+  stl      r31, 127                 ; k2.x[29], spilled
+  sub      r31, b4, r11             ; n596 = sub(F, Y3.x[28])
+  stl      r13, 131                 ; v.k2.x[28], spilled
+  ldl      r13, 98                  ; Y3.x[27], from slot 98
+  fma      r31, r19, r13, r31       ; k3.x[28] = fma(n595, Y3.x[27], n596)
+  fma      r10, b0, r31, r10        ; Y4.x[28] = fma(h, k3.x[28], x[28])
+  sub      r17, r10, r17            ; n599 = sub(Y4.x[28], Y4.x[25])
+  stl      r10, 118                 ; Y4.x[28], spilled
+  ldl      r10, 132                 ; Y4.x[27], from slot 132
+  sub      r10, b4, r10             ; n600 = sub(F, Y4.x[27])
+  ldl      r11, 102                 ; Y4.x[26], from slot 102
+  fma      r10, r17, r11, r10       ; k4.x[27] = fma(n599, Y4.x[26], n600)
+  add      r3, r3, r10              ; S4.x[27] = add(S3.x[27], k4.x[27])
+  ldl      r10, 27                  ; x[27], from its home
+  fma      r3, b2, r3, r10          ; next x[27] = fma(h/6, S4.x[27], x[27])
+  stl      r3, 27                   ; next x[27]
+  ldl      r3, 123                  ; v.k2.x[27], from slot 123
+  ldl      r10, 95                  ; v.k1.x[27], from slot 95
+  fma      r3, b3, r3, r10          ; v.S2.x[27] = fma(2, v.k2.x[27], v.k1.x[27])
+  fma      r3, b3, r16, r3          ; v.S3.x[27] = fma(2, v.k3.x[27], v.S2.x[27])
+  ldl      r10, 71                  ; v.x[31], from its home
+  sub      r16, r10, r8             ; n1599 = sub(v.x[31], v.x[28])
+  ldl      r10, 70                  ; v.x[30], from its home
+  stl      r23, 95                  ; Y3.x[29], spilled
+  neg      r23, r10                 ; n1601 = neg(v.x[30])
+  fma      r14, r14, r5, r23        ; n1602 = fma(n587, v.x[29], n1601)
+  fma      r14, r16, r9, r14        ; v.k1.x[30] = fma(n1599, x[29], n1602)
+  fma      r16, b1, r14, r10        ; v.Y2.x[30] = fma(h/2, v.k1.x[30], v.x[30])
+  sub      r15, r16, r15            ; n1605 = sub(v.Y2.x[30], v.Y2.x[27])
+  neg      r23, r12                 ; n1607 = neg(v.Y2.x[29])
+  fma      r23, r30, r18, r23       ; n1608 = fma(n591, v.Y2.x[28], n1607)
+  fma      r15, r15, r28, r23       ; v.k2.x[29] = fma(n1605, Y2.x[28], n1608)
+  fma      r23, b1, r15, r5         ; v.Y3.x[29] = fma(h/2, v.k2.x[29], v.x[29])
+  sub      r24, r23, r24            ; n1611 = sub(v.Y3.x[29], v.Y3.x[26])
+  neg      r30, r21                 ; n1613 = neg(v.Y3.x[28])
+  fma      r19, r19, r26, r30       ; n1614 = fma(n595, v.Y3.x[27], n1613)
+  fma      r19, r24, r13, r19       ; v.k3.x[28] = fma(n1611, Y3.x[27], n1614)
+  fma      r24, b0, r19, r8         ; v.Y4.x[28] = fma(h, v.k3.x[28], v.x[28])
+  sub      r25, r24, r25            ; n1617 = sub(v.Y4.x[28], v.Y4.x[25])
+  neg      r30, r22                 ; n1619 = neg(v.Y4.x[27])
+  fma      r17, r17, r20, r30       ; n1620 = fma(n599, v.Y4.x[26], n1619)
+  fma      r17, r25, r11, r17       ; v.k4.x[27] = fma(n1617, Y4.x[26], n1620)
+  add      r3, r3, r17              ; v.S4.x[27] = add(v.S3.x[27], v.k4.x[27])
+  fma      r3, b2, r3, r7           ; next v.x[27] = fma(h/6, v.S4.x[27], v.x[27])
+  stl      r3, 67                   ; next v.x[27]
+  ldl      r3, 104                  ; k2.x[28], from slot 104
+  ldl      r7, 99                   ; k1.x[28], from slot 99
+  fma      r3, b3, r3, r7           ; S2.x[28] = fma(2, k2.x[28], k1.x[28])
+  fma      r3, b3, r31, r3          ; S3.x[28] = fma(2, k3.x[28], S2.x[28])
+  ldl      r7, 32                   ; x[32], from its home
+  sub      r17, r7, r9              ; n606 = sub(x[32], x[29])
+  sub      r25, b4, r6              ; n607 = sub(F, x[31])
+  fma      r25, r17, r4, r25        ; k1.x[31] = fma(n606, x[30], n607)
+  fma      r30, b1, r25, r6         ; Y2.x[31] = fma(h/2, k1.x[31], x[31])
+  sub      r28, r30, r28            ; n610 = sub(Y2.x[31], Y2.x[28])
+  sub      r31, b4, r29             ; n611 = sub(F, Y2.x[30])
+  fma      r31, r28, r27, r31       ; k2.x[30] = fma(n610, Y2.x[29], n611)
+  stl      r25, 99                  ; k1.x[31], spilled
+  fma      r25, b1, r31, r4         ; Y3.x[30] = fma(h/2, k2.x[30], x[30])
+  sub      r13, r25, r13            ; n614 = sub(Y3.x[30], Y3.x[27])
+  stl      r14, 98                  ; v.k1.x[30], spilled
+  ldl      r14, 95                  ; Y3.x[29], from slot 95
+  stl      r31, 104                 ; k2.x[30], spilled
+  sub      r31, b4, r14             ; n615 = sub(F, Y3.x[29])
+  stl      r15, 123                 ; v.k2.x[29], spilled
+  ldl      r15, 100                 ; Y3.x[28], from slot 100
+  fma      r31, r13, r15, r31       ; k3.x[29] = fma(n614, Y3.x[28], n615)
+  fma      r9, b0, r31, r9          ; Y4.x[29] = fma(h, k3.x[29], x[29])
+  sub      r11, r9, r11             ; n618 = sub(Y4.x[29], Y4.x[26])
+  stl      r9, 102                  ; Y4.x[29], spilled
+  ldl      r9, 118                  ; Y4.x[28], from slot 118
+  sub      r9, b4, r9               ; n619 = sub(F, Y4.x[28])
+  ldl      r14, 132                 ; Y4.x[27], from slot 132
+  fma      r9, r11, r14, r9         ; k4.x[28] = fma(n618, Y4.x[27], n619)
+  add      r3, r3, r9               ; S4.x[28] = add(S3.x[28], k4.x[28])
+  ldl      r9, 28                   ; x[28], from its home
+  fma      r3, b2, r3, r9           ; next x[28] = fma(h/6, S4.x[28], x[28])
+  stl      r3, 28                   ; next x[28]
+  ldl      r3, 131                  ; v.k2.x[28], from slot 131
+  ldl      r9, 94                   ; v.k1.x[28], from slot 94
+  fma      r3, b3, r3, r9           ; v.S2.x[28] = fma(2, v.k2.x[28], v.k1.x[28])
+  fma      r3, b3, r19, r3          ; v.S3.x[28] = fma(2, v.k3.x[28], v.S2.x[28])
+  ldl      r9, 72                   ; v.x[32], from its home
+  sub      r19, r9, r5              ; n1626 = sub(v.x[32], v.x[29])
+  ldl      r9, 71                   ; v.x[31], from its home
+  stl      r25, 94                  ; Y3.x[30], spilled
+  neg      r25, r9                  ; n1628 = neg(v.x[31])
+  fma      r17, r17, r10, r25       ; n1629 = fma(n606, v.x[30], n1628)
+  fma      r17, r19, r4, r17        ; v.k1.x[31] = fma(n1626, x[30], n1629)
+  fma      r19, b1, r17, r9         ; v.Y2.x[31] = fma(h/2, v.k1.x[31], v.x[31])
+  sub      r18, r19, r18            ; n1632 = sub(v.Y2.x[31], v.Y2.x[28])
+  neg      r25, r16                 ; n1634 = neg(v.Y2.x[30])
+  fma      r25, r28, r12, r25       ; n1635 = fma(n610, v.Y2.x[29], n1634)
+  fma      r18, r18, r27, r25       ; v.k2.x[30] = fma(n1632, Y2.x[29], n1635)
+  fma      r25, b1, r18, r10        ; v.Y3.x[30] = fma(h/2, v.k2.x[30], v.x[30])
+  sub      r26, r25, r26            ; n1638 = sub(v.Y3.x[30], v.Y3.x[27])
+  neg      r28, r23                 ; n1640 = neg(v.Y3.x[29])
+  fma      r13, r13, r21, r28       ; n1641 = fma(n614, v.Y3.x[28], n1640)
+  fma      r13, r26, r15, r13       ; v.k3.x[29] = fma(n1638, Y3.x[28], n1641)
+  fma      r26, b0, r13, r5         ; v.Y4.x[29] = fma(h, v.k3.x[29], v.x[29])
+  sub      r20, r26, r20            ; n1644 = sub(v.Y4.x[29], v.Y4.x[26])
+  neg      r28, r24                 ; n1646 = neg(v.Y4.x[28])
+  fma      r11, r11, r22, r28       ; n1647 = fma(n618, v.Y4.x[27], n1646)
+  fma      r11, r20, r14, r11       ; v.k4.x[28] = fma(n1644, Y4.x[27], n1647)
+  add      r3, r3, r11              ; v.S4.x[28] = add(v.S3.x[28], v.k4.x[28])
+  fma      r3, b2, r3, r8           ; next v.x[28] = fma(h/6, v.S4.x[28], v.x[28])
+  stl      r3, 68                   ; next v.x[28]
+  ldl      r3, 127                  ; k2.x[29], from slot 127
+  ldl      r8, 83                   ; k1.x[29], from slot 83
+  fma      r3, b3, r3, r8           ; S2.x[29] = fma(2, k2.x[29], k1.x[29])
+  fma      r3, b3, r31, r3          ; S3.x[29] = fma(2, k3.x[29], S2.x[29])
+  ldl      r8, 33                   ; x[33], from its home
+  sub      r11, r8, r4              ; n625 = sub(x[33], x[30])
+  sub      r20, b4, r7              ; n626 = sub(F, x[32])
+  fma      r20, r11, r6, r20        ; k1.x[32] = fma(n625, x[31], n626)
+  fma      r28, b1, r20, r7         ; Y2.x[32] = fma(h/2, k1.x[32], x[32])
+  sub      r27, r28, r27            ; n629 = sub(Y2.x[32], Y2.x[29])
+  sub      r31, b4, r30             ; n630 = sub(F, Y2.x[31])
+  fma      r31, r27, r29, r31       ; k2.x[31] = fma(n629, Y2.x[30], n630)
+  stl      r20, 83                  ; k1.x[32], spilled
+  fma      r20, b1, r31, r6         ; Y3.x[31] = fma(h/2, k2.x[31], x[31])
+  sub      r15, r20, r15            ; n633 = sub(Y3.x[31], Y3.x[28])
+  stl      r17, 100                 ; v.k1.x[31], spilled
+  ldl      r17, 94                  ; Y3.x[30], from slot 94
+  stl      r31, 127                 ; k2.x[31], spilled
+  sub      r31, b4, r17             ; n634 = sub(F, Y3.x[30])
+  stl      r18, 131                 ; v.k2.x[30], spilled
+  ldl      r18, 95                  ; Y3.x[29], from slot 95
+  fma      r31, r15, r18, r31       ; k3.x[30] = fma(n633, Y3.x[29], n634)
+  fma      r4, b0, r31, r4          ; Y4.x[30] = fma(h, k3.x[30], x[30])
+  sub      r14, r4, r14             ; n637 = sub(Y4.x[30], Y4.x[27])
+  stl      r4, 132                  ; Y4.x[30], spilled
+  ldl      r4, 102                  ; Y4.x[29], from slot 102
+  sub      r4, b4, r4               ; n638 = sub(F, Y4.x[29])
+  ldl      r17, 118                 ; Y4.x[28], from slot 118
+  fma      r4, r14, r17, r4         ; k4.x[29] = fma(n637, Y4.x[28], n638)
+  add      r3, r3, r4               ; S4.x[29] = add(S3.x[29], k4.x[29])
+  ldl      r4, 29                   ; x[29], from its home
+  fma      r3, b2, r3, r4           ; next x[29] = fma(h/6, S4.x[29], x[29])
+  stl      r3, 29                   ; next x[29]
+  ldl      r3, 123                  ; v.k2.x[29], from slot 123
+  ldl      r4, 101                  ; v.k1.x[29], from slot 101
+  fma      r3, b3, r3, r4           ; v.S2.x[29] = fma(2, v.k2.x[29], v.k1.x[29])
+  fma      r3, b3, r13, r3          ; v.S3.x[29] = fma(2, v.k3.x[29], v.S2.x[29])
+  ldl      r4, 73                   ; v.x[33], from its home
+  sub      r13, r4, r10             ; n1653 = sub(v.x[33], v.x[30])
+  ldl      r4, 72                   ; v.x[32], from its home
+  stl      r20, 101                 ; Y3.x[31], spilled
+  neg      r20, r4                  ; n1655 = neg(v.x[32])
+  fma      r11, r11, r9, r20        ; n1656 = fma(n625, v.x[31], n1655)
+  fma      r11, r13, r6, r11        ; v.k1.x[32] = fma(n1653, x[31], n1656)
+  fma      r13, b1, r11, r4         ; v.Y2.x[32] = fma(h/2, v.k1.x[32], v.x[32])
+  sub      r12, r13, r12            ; n1659 = sub(v.Y2.x[32], v.Y2.x[29])
+  neg      r20, r19                 ; n1661 = neg(v.Y2.x[31])
+  fma      r20, r27, r16, r20       ; n1662 = fma(n629, v.Y2.x[30], n1661)
+  fma      r12, r12, r29, r20       ; v.k2.x[31] = fma(n1659, Y2.x[30], n1662)
+  fma      r20, b1, r12, r9         ; v.Y3.x[31] = fma(h/2, v.k2.x[31], v.x[31])
+  sub      r21, r20, r21            ; n1665 = sub(v.Y3.x[31], v.Y3.x[28])
+  neg      r27, r25                 ; n1667 = neg(v.Y3.x[30])
+  fma      r15, r15, r23, r27       ; n1668 = fma(n633, v.Y3.x[29], n1667)
+  fma      r15, r21, r18, r15       ; v.k3.x[30] = fma(n1665, Y3.x[29], n1668)
+  fma      r21, b0, r15, r10        ; v.Y4.x[30] = fma(h, v.k3.x[30], v.x[30])
+  sub      r22, r21, r22            ; n1671 = sub(v.Y4.x[30], v.Y4.x[27])
+  neg      r27, r26                 ; n1673 = neg(v.Y4.x[29])
+  fma      r14, r14, r24, r27       ; n1674 = fma(n637, v.Y4.x[28], n1673)
+  fma      r14, r22, r17, r14       ; v.k4.x[29] = fma(n1671, Y4.x[28], n1674)
+  add      r3, r3, r14              ; v.S4.x[29] = add(v.S3.x[29], v.k4.x[29])
+  fma      r3, b2, r3, r5           ; next v.x[29] = fma(h/6, v.S4.x[29], v.x[29])
+  stl      r3, 69                   ; next v.x[29]
+  ldl      r3, 104                  ; k2.x[30], from slot 104
+  ldl      r5, 97                   ; k1.x[30], from slot 97
+  fma      r3, b3, r3, r5           ; S2.x[30] = fma(2, k2.x[30], k1.x[30])
+  fma      r3, b3, r31, r3          ; S3.x[30] = fma(2, k3.x[30], S2.x[30])
+  ldl      r5, 34                   ; x[34], from its home
+  sub      r14, r5, r6              ; n644 = sub(x[34], x[31])
+  sub      r22, b4, r8              ; n645 = sub(F, x[33])
+  fma      r22, r14, r7, r22        ; k1.x[33] = fma(n644, x[32], n645)
+  fma      r27, b1, r22, r8         ; Y2.x[33] = fma(h/2, k1.x[33], x[33])
+  sub      r29, r27, r29            ; n648 = sub(Y2.x[33], Y2.x[30])
+  sub      r31, b4, r28             ; n649 = sub(F, Y2.x[32])
+  fma      r31, r29, r30, r31       ; k2.x[32] = fma(n648, Y2.x[31], n649)
+  stl      r22, 97                  ; k1.x[33], spilled
+  fma      r22, b1, r31, r7         ; Y3.x[32] = fma(h/2, k2.x[32], x[32])
+  sub      r18, r22, r18            ; n652 = sub(Y3.x[32], Y3.x[29])
+  stl      r11, 95                  ; v.k1.x[32], spilled
+  ldl      r11, 101                 ; Y3.x[31], from slot 101
+  sub      r5, b4, r11              ; n653 = sub(F, Y3.x[31])
+  stl      r31, 104                 ; k2.x[32], spilled
+  ldl      r31, 94                  ; Y3.x[30], from slot 94
+  fma      r5, r18, r31, r5         ; k3.x[31] = fma(n652, Y3.x[30], n653)
+  stl      r12, 123                 ; v.k2.x[31], spilled
+  fma      r12, b0, r5, r6          ; Y4.x[31] = fma(h, k3.x[31], x[31])
+  sub      r17, r12, r17            ; n656 = sub(Y4.x[31], Y4.x[28])
+  ldl      r6, 132                  ; Y4.x[30], from slot 132
+  sub      r6, b4, r6               ; n657 = sub(F, Y4.x[30])
+  stl      r12, 118                 ; Y4.x[31], spilled
+  ldl      r12, 102                 ; Y4.x[29], from slot 102
+  fma      r6, r17, r12, r6         ; k4.x[30] = fma(n656, Y4.x[29], n657)
+  add      r3, r3, r6               ; S4.x[30] = add(S3.x[30], k4.x[30])
+  ldl      r6, 30                   ; x[30], from its home
+  fma      r3, b2, r3, r6           ; next x[30] = fma(h/6, S4.x[30], x[30])
+  stl      r3, 30                   ; next x[30]
+  ldl      r3, 131                  ; v.k2.x[30], from slot 131
+  ldl      r6, 98                   ; v.k1.x[30], from slot 98
+  fma      r3, b3, r3, r6           ; v.S2.x[30] = fma(2, v.k2.x[30], v.k1.x[30])
+  fma      r3, b3, r15, r3          ; v.S3.x[30] = fma(2, v.k3.x[30], v.S2.x[30])
+  ldl      r6, 74                   ; v.x[34], from its home
+  sub      r15, r6, r9              ; n1680 = sub(v.x[34], v.x[31])
+  ldl      r6, 73                   ; v.x[33], from its home
+  neg      r11, r6                  ; n1682 = neg(v.x[33])
+  fma      r11, r14, r4, r11        ; n1683 = fma(n644, v.x[32], n1682)
+  fma      r11, r15, r7, r11        ; v.k1.x[33] = fma(n1680, x[32], n1683)
+  fma      r14, b1, r11, r6         ; v.Y2.x[33] = fma(h/2, v.k1.x[33], v.x[33])
+  sub      r15, r14, r16            ; n1686 = sub(v.Y2.x[33], v.Y2.x[30])
+  neg      r16, r13                 ; n1688 = neg(v.Y2.x[32])
+  fma      r16, r29, r19, r16       ; n1689 = fma(n648, v.Y2.x[31], n1688)
+  fma      r15, r15, r30, r16       ; v.k2.x[32] = fma(n1686, Y2.x[31], n1689)
+  fma      r16, b1, r15, r4         ; v.Y3.x[32] = fma(h/2, v.k2.x[32], v.x[32])
+  sub      r23, r16, r23            ; n1692 = sub(v.Y3.x[32], v.Y3.x[29])
+  neg      r29, r20                 ; n1694 = neg(v.Y3.x[31])
+  fma      r18, r18, r25, r29       ; n1695 = fma(n652, v.Y3.x[30], n1694)
+  fma      r18, r23, r31, r18       ; v.k3.x[31] = fma(n1692, Y3.x[30], n1695)
+  fma      r23, b0, r18, r9         ; v.Y4.x[31] = fma(h, v.k3.x[31], v.x[31])
+  sub      r24, r23, r24            ; n1698 = sub(v.Y4.x[31], v.Y4.x[28])
+  neg      r29, r21                 ; n1700 = neg(v.Y4.x[30])
+  fma      r17, r17, r26, r29       ; n1701 = fma(n656, v.Y4.x[29], n1700)
+  fma      r17, r24, r12, r17       ; v.k4.x[30] = fma(n1698, Y4.x[29], n1701)
+  add      r3, r3, r17              ; v.S4.x[30] = add(v.S3.x[30], v.k4.x[30])
+  fma      r3, b2, r3, r10          ; next v.x[30] = fma(h/6, v.S4.x[30], v.x[30])
+  stl      r3, 70                   ; next v.x[30]
+  ldl      r3, 127                  ; k2.x[31], from slot 127
+  ldl      r10, 99                  ; k1.x[31], from slot 99
+  fma      r3, b3, r3, r10          ; S2.x[31] = fma(2, k2.x[31], k1.x[31])
+  fma      r3, b3, r5, r3           ; S3.x[31] = fma(2, k3.x[31], S2.x[31])
+  ldl      r5, 107                  ; Y2.x[34], from slot 107
+  sub      r10, r5, r30             ; n663 = sub(Y2.x[34], Y2.x[31])
+  sub      r17, b4, r27             ; n664 = sub(F, Y2.x[33])
+  fma      r17, r10, r28, r17       ; k2.x[33] = fma(n663, Y2.x[32], n664)
+  fma      r24, b1, r17, r8         ; Y3.x[33] = fma(h/2, k2.x[33], x[33])
+  sub      r29, r24, r31            ; n667 = sub(Y3.x[33], Y3.x[30])
+  sub      r30, b4, r22             ; n668 = sub(F, Y3.x[32])
+  ldl      r31, 101                 ; Y3.x[31], from slot 101
+  fma      r30, r29, r31, r30       ; k3.x[32] = fma(n667, Y3.x[31], n668)
+  stl      r11, 94                  ; v.k1.x[33], spilled
+  fma      r11, b0, r30, r7         ; Y4.x[32] = fma(h, k3.x[32], x[32])
+  sub      r12, r11, r12            ; n671 = sub(Y4.x[32], Y4.x[29])
+  stl      r17, 98                  ; k2.x[33], spilled
+  ldl      r17, 118                 ; Y4.x[31], from slot 118
+  stl      r15, 99                  ; v.k2.x[32], spilled
+  sub      r15, b4, r17             ; n672 = sub(F, Y4.x[31])
+  ldl      r7, 132                  ; Y4.x[30], from slot 132
+  fma      r15, r12, r7, r15        ; k4.x[31] = fma(n671, Y4.x[30], n672)
+  add      r3, r3, r15              ; S4.x[31] = add(S3.x[31], k4.x[31])
+  ldl      r15, 31                  ; x[31], from its home
+  fma      r3, b2, r3, r15          ; next x[31] = fma(h/6, S4.x[31], x[31])
+  stl      r3, 31                   ; next x[31]
+  ldl      r3, 123                  ; v.k2.x[31], from slot 123
+  ldl      r15, 100                 ; v.k1.x[31], from slot 100
+  fma      r3, b3, r3, r15          ; v.S2.x[31] = fma(2, v.k2.x[31], v.k1.x[31])
+  fma      r3, b3, r18, r3          ; v.S3.x[31] = fma(2, v.k3.x[31], v.S2.x[31])
+  ldl      r15, 134                 ; v.Y2.x[34], from slot 134
+  sub      r18, r15, r19            ; n1707 = sub(v.Y2.x[34], v.Y2.x[31])
+  neg      r19, r14                 ; n1709 = neg(v.Y2.x[33])
+  fma      r10, r10, r13, r19       ; n1710 = fma(n663, v.Y2.x[32], n1709)
+  fma      r10, r18, r28, r10       ; v.k2.x[33] = fma(n1707, Y2.x[32], n1710)
+  fma      r18, b1, r10, r6         ; v.Y3.x[33] = fma(h/2, v.k2.x[33], v.x[33])
+  sub      r19, r18, r25            ; n1713 = sub(v.Y3.x[33], v.Y3.x[30])
+  neg      r25, r16                 ; n1715 = neg(v.Y3.x[32])
+  fma      r25, r29, r20, r25       ; n1716 = fma(n667, v.Y3.x[31], n1715)
+  fma      r19, r19, r31, r25       ; v.k3.x[32] = fma(n1713, Y3.x[31], n1716)
+  fma      r25, b0, r19, r4         ; v.Y4.x[32] = fma(h, v.k3.x[32], v.x[32])
+  sub      r26, r25, r26            ; n1719 = sub(v.Y4.x[32], v.Y4.x[29])
+  neg      r29, r23                 ; n1721 = neg(v.Y4.x[31])
+  fma      r12, r12, r21, r29       ; n1722 = fma(n671, v.Y4.x[30], n1721)
+  fma      r12, r26, r7, r12        ; v.k4.x[31] = fma(n1719, Y4.x[30], n1722)
+  add      r3, r3, r12              ; v.S4.x[31] = add(v.S3.x[31], v.k4.x[31])
+  fma      r3, b2, r3, r9           ; next v.x[31] = fma(h/6, v.S4.x[31], v.x[31])
+  stl      r3, 71                   ; next v.x[31]
+  ldl      r3, 104                  ; k2.x[32], from slot 104
+  ldl      r9, 83                   ; k1.x[32], from slot 83
+  fma      r3, b3, r3, r9           ; S2.x[32] = fma(2, k2.x[32], k1.x[32])
+  fma      r3, b3, r30, r3          ; S3.x[32] = fma(2, k3.x[32], S2.x[32])
+  ldl      r9, 112                  ; Y2.x[35], from slot 112
+  sub      r12, r9, r28             ; n678 = sub(Y2.x[35], Y2.x[32])
+  sub      r26, b4, r5              ; n679 = sub(F, Y2.x[34])
+  fma      r26, r12, r27, r26       ; k2.x[34] = fma(n678, Y2.x[33], n679)
+  ldl      r28, 34                  ; x[34], from its home
+  fma      r29, b1, r26, r28        ; Y3.x[34] = fma(h/2, k2.x[34], x[34])
+  sub      r30, r29, r31            ; n682 = sub(Y3.x[34], Y3.x[31])
+  sub      r31, b4, r24             ; n683 = sub(F, Y3.x[33])
+  fma      r31, r30, r22, r31       ; k3.x[33] = fma(n682, Y3.x[32], n683)
+  stl      r26, 83                  ; k2.x[34], spilled
+  fma      r26, b0, r31, r8         ; Y4.x[33] = fma(h, k3.x[33], x[33])
+  sub      r7, r26, r7              ; n686 = sub(Y4.x[33], Y4.x[30])
+  stl      r10, 100                 ; v.k2.x[33], spilled
+  sub      r10, b4, r11             ; n687 = sub(F, Y4.x[32])
+  fma      r10, r7, r17, r10        ; k4.x[32] = fma(n686, Y4.x[31], n687)
+  add      r3, r3, r10              ; S4.x[32] = add(S3.x[32], k4.x[32])
+  ldl      r10, 32                  ; x[32], from its home
+  fma      r3, b2, r3, r10          ; next x[32] = fma(h/6, S4.x[32], x[32])
+  stl      r3, 32                   ; next x[32]
+  ldl      r3, 99                   ; v.k2.x[32], from slot 99
+  ldl      r10, 95                  ; v.k1.x[32], from slot 95
+  fma      r3, b3, r3, r10          ; v.S2.x[32] = fma(2, v.k2.x[32], v.k1.x[32])
+  fma      r3, b3, r19, r3          ; v.S3.x[32] = fma(2, v.k3.x[32], v.S2.x[32])
+  ldl      r10, 105                 ; v.Y2.x[35], from slot 105
+  sub      r13, r10, r13            ; n1728 = sub(v.Y2.x[35], v.Y2.x[32])
+  neg      r19, r15                 ; n1730 = neg(v.Y2.x[34])
+  fma      r12, r12, r14, r19       ; n1731 = fma(n678, v.Y2.x[33], n1730)
+  fma      r12, r13, r27, r12       ; v.k2.x[34] = fma(n1728, Y2.x[33], n1731)
+  ldl      r13, 74                  ; v.x[34], from its home
+  fma      r19, b1, r12, r13        ; v.Y3.x[34] = fma(h/2, v.k2.x[34], v.x[34])
+  sub      r20, r19, r20            ; n1734 = sub(v.Y3.x[34], v.Y3.x[31])
+  stl      r12, 95                  ; v.k2.x[34], spilled
+  neg      r12, r18                 ; n1736 = neg(v.Y3.x[33])
+  fma      r12, r30, r16, r12       ; n1737 = fma(n682, v.Y3.x[32], n1736)
+  fma      r12, r20, r22, r12       ; v.k3.x[33] = fma(n1734, Y3.x[32], n1737)
+  fma      r20, b0, r12, r6         ; v.Y4.x[33] = fma(h, v.k3.x[33], v.x[33])
+  sub      r21, r20, r21            ; n1740 = sub(v.Y4.x[33], v.Y4.x[30])
+  neg      r30, r25                 ; n1742 = neg(v.Y4.x[32])
+  fma      r7, r7, r23, r30         ; n1743 = fma(n686, v.Y4.x[31], n1742)
+  fma      r7, r21, r17, r7         ; v.k4.x[32] = fma(n1740, Y4.x[31], n1743)
+  add      r3, r3, r7               ; v.S4.x[32] = add(v.S3.x[32], v.k4.x[32])
+  fma      r3, b2, r3, r4           ; next v.x[32] = fma(h/6, v.S4.x[32], v.x[32])
+  stl      r3, 72                   ; next v.x[32]
+  ldl      r3, 98                   ; k2.x[33], from slot 98
+  ldl      r4, 97                   ; k1.x[33], from slot 97
+  fma      r3, b3, r3, r4           ; S2.x[33] = fma(2, k2.x[33], k1.x[33])
+  fma      r3, b3, r31, r3          ; S3.x[33] = fma(2, k3.x[33], S2.x[33])
+  ldl      r4, 115                  ; Y2.x[36], from slot 115
+  sub      r4, r4, r27              ; n693 = sub(Y2.x[36], Y2.x[33])
+  sub      r7, b4, r9               ; n694 = sub(F, Y2.x[35])
+  fma      r7, r4, r5, r7           ; k2.x[35] = fma(n693, Y2.x[34], n694)
+  ldl      r9, 35                   ; x[35], from its home
+  fma      r21, b1, r7, r9          ; Y3.x[35] = fma(h/2, k2.x[35], x[35])
+  sub      r22, r21, r22            ; n697 = sub(Y3.x[35], Y3.x[32])
+  sub      r27, b4, r29             ; n698 = sub(F, Y3.x[34])
+  fma      r27, r22, r24, r27       ; k3.x[34] = fma(n697, Y3.x[33], n698)
+  fma      r30, b0, r27, r28        ; Y4.x[34] = fma(h, k3.x[34], x[34])
+  sub      r17, r30, r17            ; n701 = sub(Y4.x[34], Y4.x[31])
+  sub      r31, b4, r26             ; n702 = sub(F, Y4.x[33])
+  fma      r31, r17, r11, r31       ; k4.x[33] = fma(n701, Y4.x[32], n702)
+  add      r3, r3, r31              ; S4.x[33] = add(S3.x[33], k4.x[33])
+  fma      r3, b2, r3, r8           ; next x[33] = fma(h/6, S4.x[33], x[33])
+  stl      r3, 33                   ; next x[33]
+  ldl      r3, 100                  ; v.k2.x[33], from slot 100
+  ldl      r8, 94                   ; v.k1.x[33], from slot 94
+  fma      r3, b3, r3, r8           ; v.S2.x[33] = fma(2, v.k2.x[33], v.k1.x[33])
+  fma      r3, b3, r12, r3          ; v.S3.x[33] = fma(2, v.k3.x[33], v.S2.x[33])
+  ldl      r8, 133                  ; v.Y2.x[36], from slot 133
+  sub      r8, r8, r14              ; n1749 = sub(v.Y2.x[36], v.Y2.x[33])
+  neg      r10, r10                 ; n1751 = neg(v.Y2.x[35])
+  fma      r4, r4, r15, r10         ; n1752 = fma(n693, v.Y2.x[34], n1751)
+  fma      r4, r8, r5, r4           ; v.k2.x[35] = fma(n1749, Y2.x[34], n1752)
+  ldl      r5, 75                   ; v.x[35], from its home
+  fma      r8, b1, r4, r5           ; v.Y3.x[35] = fma(h/2, v.k2.x[35], v.x[35])
+  sub      r10, r8, r16             ; n1755 = sub(v.Y3.x[35], v.Y3.x[32])
+  neg      r12, r19                 ; n1757 = neg(v.Y3.x[34])
+  fma      r12, r22, r18, r12       ; n1758 = fma(n697, v.Y3.x[33], n1757)
+  fma      r10, r10, r24, r12       ; v.k3.x[34] = fma(n1755, Y3.x[33], n1758)
+  fma      r12, b0, r10, r13        ; v.Y4.x[34] = fma(h, v.k3.x[34], v.x[34])
+  sub      r14, r12, r23            ; n1761 = sub(v.Y4.x[34], v.Y4.x[31])
+  neg      r15, r20                 ; n1763 = neg(v.Y4.x[33])
+  fma      r15, r17, r25, r15       ; n1764 = fma(n701, v.Y4.x[32], n1763)
+  fma      r14, r14, r11, r15       ; v.k4.x[33] = fma(n1761, Y4.x[32], n1764)
+  add      r3, r3, r14              ; v.S4.x[33] = add(v.S3.x[33], v.k4.x[33])
+  fma      r3, b2, r3, r6           ; next v.x[33] = fma(h/6, v.S4.x[33], v.x[33])
+  stl      r3, 73                   ; next v.x[33]
+  ldl      r3, 83                   ; k2.x[34], from slot 83
+  ldl      r6, 106                  ; k1.x[34], from slot 106
+  fma      r3, b3, r3, r6           ; S2.x[34] = fma(2, k2.x[34], k1.x[34])
+  fma      r3, b3, r27, r3          ; S3.x[34] = fma(2, k3.x[34], S2.x[34])
+  ldl      r6, 111                  ; Y3.x[36], from slot 111
+  sub      r14, r6, r24             ; n708 = sub(Y3.x[36], Y3.x[33])
+  sub      r15, b4, r21             ; n709 = sub(F, Y3.x[35])
+  fma      r15, r14, r29, r15       ; k3.x[35] = fma(n708, Y3.x[34], n709)
+  fma      r16, b0, r15, r9         ; Y4.x[35] = fma(h, k3.x[35], x[35])
+  sub      r11, r16, r11            ; n712 = sub(Y4.x[35], Y4.x[32])
+  sub      r17, b4, r30             ; n713 = sub(F, Y4.x[34])
+  fma      r17, r11, r26, r17       ; k4.x[34] = fma(n712, Y4.x[33], n713)
+  add      r3, r3, r17              ; S4.x[34] = add(S3.x[34], k4.x[34])
+  fma      r3, b2, r3, r28          ; next x[34] = fma(h/6, S4.x[34], x[34])
+  stl      r3, 34                   ; next x[34]
+  ldl      r3, 95                   ; v.k2.x[34], from slot 95
+  ldl      r17, 108                 ; v.k1.x[34], from slot 108
+  fma      r3, b3, r3, r17          ; v.S2.x[34] = fma(2, v.k2.x[34], v.k1.x[34])
+  fma      r3, b3, r10, r3          ; v.S3.x[34] = fma(2, v.k3.x[34], v.S2.x[34])
+  ldl      r10, 103                 ; v.Y3.x[36], from slot 103
+  sub      r17, r10, r18            ; n1770 = sub(v.Y3.x[36], v.Y3.x[33])
+  neg      r18, r8                  ; n1772 = neg(v.Y3.x[35])
+  fma      r14, r14, r19, r18       ; n1773 = fma(n708, v.Y3.x[34], n1772)
+  fma      r14, r17, r29, r14       ; v.k3.x[35] = fma(n1770, Y3.x[34], n1773)
+  fma      r17, b0, r14, r5         ; v.Y4.x[35] = fma(h, v.k3.x[35], v.x[35])
+  sub      r18, r17, r25            ; n1776 = sub(v.Y4.x[35], v.Y4.x[32])
+  neg      r22, r12                 ; n1778 = neg(v.Y4.x[34])
+  fma      r11, r11, r20, r22       ; n1779 = fma(n712, v.Y4.x[33], n1778)
+  fma      r11, r18, r26, r11       ; v.k4.x[34] = fma(n1776, Y4.x[33], n1779)
+  add      r3, r3, r11              ; v.S4.x[34] = add(v.S3.x[34], v.k4.x[34])
+  fma      r3, b2, r3, r13          ; next v.x[34] = fma(h/6, v.S4.x[34], v.x[34])
+  stl      r3, 74                   ; next v.x[34]
+  ldl      r3, 109                  ; k1.x[35], from slot 109
+  fma      r3, b3, r7, r3           ; S2.x[35] = fma(2, k2.x[35], k1.x[35])
+  fma      r3, b3, r15, r3          ; S3.x[35] = fma(2, k3.x[35], S2.x[35])
+  ldl      r7, 119                  ; Y3.x[37], from slot 119
+  sub      r11, r7, r29             ; n719 = sub(Y3.x[37], Y3.x[34])
+  sub      r13, b4, r6              ; n720 = sub(F, Y3.x[36])
+  fma      r13, r11, r21, r13       ; k3.x[36] = fma(n719, Y3.x[35], n720)
+  ldl      r15, 36                  ; x[36], from its home
+  fma      r18, b0, r13, r15        ; Y4.x[36] = fma(h, k3.x[36], x[36])
+  sub      r22, r18, r26            ; n723 = sub(Y4.x[36], Y4.x[33])
+  sub      r23, b4, r16             ; n724 = sub(F, Y4.x[35])
+  fma      r23, r22, r30, r23       ; k4.x[35] = fma(n723, Y4.x[34], n724)
+  add      r3, r3, r23              ; S4.x[35] = add(S3.x[35], k4.x[35])
+  fma      r3, b2, r3, r9           ; next x[35] = fma(h/6, S4.x[35], x[35])
+  stl      r3, 35                   ; next x[35]
+  ldl      r3, 129                  ; v.k1.x[35], from slot 129
+  fma      r3, b3, r4, r3           ; v.S2.x[35] = fma(2, v.k2.x[35], v.k1.x[35])
+  fma      r3, b3, r14, r3          ; v.S3.x[35] = fma(2, v.k3.x[35], v.S2.x[35])
+  ldl      r4, 86                   ; v.Y3.x[37], from slot 86
+  sub      r9, r4, r19              ; n1785 = sub(v.Y3.x[37], v.Y3.x[34])
+  neg      r14, r10                 ; n1787 = neg(v.Y3.x[36])
+  fma      r11, r11, r8, r14        ; n1788 = fma(n719, v.Y3.x[35], n1787)
+  fma      r9, r9, r21, r11         ; v.k3.x[36] = fma(n1785, Y3.x[35], n1788)
+  ldl      r11, 76                  ; v.x[36], from its home
+  fma      r14, b0, r9, r11         ; v.Y4.x[36] = fma(h, v.k3.x[36], v.x[36])
+  sub      r19, r14, r20            ; n1791 = sub(v.Y4.x[36], v.Y4.x[33])
+  neg      r20, r17                 ; n1793 = neg(v.Y4.x[35])
+  fma      r20, r22, r12, r20       ; n1794 = fma(n723, v.Y4.x[34], n1793)
+  fma      r19, r19, r30, r20       ; v.k4.x[35] = fma(n1791, Y4.x[34], n1794)
+  add      r3, r3, r19              ; v.S4.x[35] = add(v.S3.x[35], v.k4.x[35])
+  fma      r3, b2, r3, r5           ; next v.x[35] = fma(h/6, v.S4.x[35], v.x[35])
+  stl      r3, 75                   ; next v.x[35]
+  ldl      r3, 110                  ; k2.x[36], from slot 110
+  ldl      r5, 81                   ; k1.x[36], from slot 81
+  fma      r3, b3, r3, r5           ; S2.x[36] = fma(2, k2.x[36], k1.x[36])
+  fma      r3, b3, r13, r3          ; S3.x[36] = fma(2, k3.x[36], S2.x[36])
+  ldl      r5, 124                  ; Y3.x[38], from slot 124
+  sub      r5, r5, r21              ; n730 = sub(Y3.x[38], Y3.x[35])
+  sub      r7, b4, r7               ; n731 = sub(F, Y3.x[37])
+  fma      r7, r5, r6, r7           ; k3.x[37] = fma(n730, Y3.x[36], n731)
+  ldl      r13, 37                  ; x[37], from its home
+  fma      r19, b0, r7, r13         ; Y4.x[37] = fma(h, k3.x[37], x[37])
+  sub      r20, r19, r30            ; n734 = sub(Y4.x[37], Y4.x[34])
+  sub      r21, b4, r18             ; n735 = sub(F, Y4.x[36])
+  fma      r21, r20, r16, r21       ; k4.x[36] = fma(n734, Y4.x[35], n735)
+  add      r3, r3, r21              ; S4.x[36] = add(S3.x[36], k4.x[36])
+  fma      r3, b2, r3, r15          ; next x[36] = fma(h/6, S4.x[36], x[36])
+  stl      r3, 36                   ; next x[36]
+  ldl      r3, 113                  ; v.k2.x[36], from slot 113
+  ldl      r15, 93                  ; v.k1.x[36], from slot 93
+  fma      r3, b3, r3, r15          ; v.S2.x[36] = fma(2, v.k2.x[36], v.k1.x[36])
+  fma      r3, b3, r9, r3           ; v.S3.x[36] = fma(2, v.k3.x[36], v.S2.x[36])
+  ldl      r9, 84                   ; v.Y3.x[38], from slot 84
+  sub      r8, r9, r8               ; n1800 = sub(v.Y3.x[38], v.Y3.x[35])
+  neg      r4, r4                   ; n1802 = neg(v.Y3.x[37])
+  fma      r4, r5, r10, r4          ; n1803 = fma(n730, v.Y3.x[36], n1802)
+  fma      r4, r8, r6, r4           ; v.k3.x[37] = fma(n1800, Y3.x[36], n1803)
+  ldl      r5, 77                   ; v.x[37], from its home
+  fma      r6, b0, r4, r5           ; v.Y4.x[37] = fma(h, v.k3.x[37], v.x[37])
+  sub      r8, r6, r12              ; n1806 = sub(v.Y4.x[37], v.Y4.x[34])
+  neg      r9, r14                  ; n1808 = neg(v.Y4.x[36])
+  fma      r9, r20, r17, r9         ; n1809 = fma(n734, v.Y4.x[35], n1808)
+  fma      r8, r8, r16, r9          ; v.k4.x[36] = fma(n1806, Y4.x[35], n1809)
+  add      r3, r3, r8               ; v.S4.x[36] = add(v.S3.x[36], v.k4.x[36])
+  fma      r3, b2, r3, r11          ; next v.x[36] = fma(h/6, v.S4.x[36], v.x[36])
+  stl      r3, 76                   ; next v.x[36]
+  ldl      r3, 114                  ; k2.x[37], from slot 114
+  ldl      r8, 82                   ; k1.x[37], from slot 82
+  fma      r3, b3, r3, r8           ; S2.x[37] = fma(2, k2.x[37], k1.x[37])
+  fma      r3, b3, r7, r3           ; S3.x[37] = fma(2, k3.x[37], S2.x[37])
+  ldl      r7, 117                  ; Y4.x[38], from slot 117
+  sub      r8, r7, r16              ; n741 = sub(Y4.x[38], Y4.x[35])
+  sub      r9, b4, r19              ; n742 = sub(F, Y4.x[37])
+  fma      r9, r8, r18, r9          ; k4.x[37] = fma(n741, Y4.x[36], n742)
+  add      r3, r3, r9               ; S4.x[37] = add(S3.x[37], k4.x[37])
+  fma      r3, b2, r3, r13          ; next x[37] = fma(h/6, S4.x[37], x[37])
+  stl      r3, 37                   ; next x[37]
+  ldl      r3, 128                  ; v.k2.x[37], from slot 128
+  ldl      r9, 90                   ; v.k1.x[37], from slot 90
+  fma      r3, b3, r3, r9           ; v.S2.x[37] = fma(2, v.k2.x[37], v.k1.x[37])
+  fma      r3, b3, r4, r3           ; v.S3.x[37] = fma(2, v.k3.x[37], v.S2.x[37])
+  ldl      r4, 135                  ; v.Y4.x[38], from slot 135
+  sub      r9, r4, r17              ; n1815 = sub(v.Y4.x[38], v.Y4.x[35])
+  neg      r10, r6                  ; n1817 = neg(v.Y4.x[37])
+  fma      r8, r8, r14, r10         ; n1818 = fma(n741, v.Y4.x[36], n1817)
+  fma      r8, r9, r18, r8          ; v.k4.x[37] = fma(n1815, Y4.x[36], n1818)
+  add      r3, r3, r8               ; v.S4.x[37] = add(v.S3.x[37], v.k4.x[37])
+  fma      r3, b2, r3, r5           ; next v.x[37] = fma(h/6, v.S4.x[37], v.x[37])
+  stl      r3, 77                   ; next v.x[37]
+  ldl      r3, 87                   ; k2.x[38], from slot 87
+  ldl      r5, 85                   ; k1.x[38], from slot 85
+  fma      r3, b3, r3, r5           ; S2.x[38] = fma(2, k2.x[38], k1.x[38])
+  ldl      r5, 116                  ; k3.x[38], from slot 116
+  fma      r3, b3, r5, r3           ; S3.x[38] = fma(2, k3.x[38], S2.x[38])
+  ldl      r5, 122                  ; Y4.x[39], from slot 122
+  sub      r8, r5, r18              ; n748 = sub(Y4.x[39], Y4.x[36])
+  sub      r9, b4, r7               ; n749 = sub(F, Y4.x[38])
+  fma      r9, r8, r19, r9          ; k4.x[38] = fma(n748, Y4.x[37], n749)
+  add      r3, r3, r9               ; S4.x[38] = add(S3.x[38], k4.x[38])
+  ldl      r9, 38                   ; x[38], from its home
+  fma      r3, b2, r3, r9           ; next x[38] = fma(h/6, S4.x[38], x[38])
+  stl      r3, 38                   ; next x[38]
+  ldl      r3, 88                   ; v.k2.x[38], from slot 88
+  ldl      r9, 89                   ; v.k1.x[38], from slot 89
+  fma      r3, b3, r3, r9           ; v.S2.x[38] = fma(2, v.k2.x[38], v.k1.x[38])
+  ldl      r9, 126                  ; v.k3.x[38], from slot 126
+  fma      r3, b3, r9, r3           ; v.S3.x[38] = fma(2, v.k3.x[38], v.S2.x[38])
+  ldl      r9, 137                  ; v.Y4.x[39], from slot 137
+  sub      r10, r9, r14             ; n1824 = sub(v.Y4.x[39], v.Y4.x[36])
+  neg      r11, r4                  ; n1826 = neg(v.Y4.x[38])
+  fma      r8, r8, r6, r11          ; n1827 = fma(n748, v.Y4.x[37], n1826)
+  fma      r8, r10, r19, r8         ; v.k4.x[38] = fma(n1824, Y4.x[37], n1827)
+  add      r3, r3, r8               ; v.S4.x[38] = add(v.S3.x[38], v.k4.x[38])
+  ldl      r8, 78                   ; v.x[38], from its home
+  fma      r3, b2, r3, r8           ; next v.x[38] = fma(h/6, v.S4.x[38], v.x[38])
+  stl      r3, 78                   ; next v.x[38]
+  ldl      r3, 91                   ; k2.x[39], from slot 91
+  ldl      r8, 80                   ; k1.x[39], from slot 80
+  fma      r3, b3, r3, r8           ; S2.x[39] = fma(2, k2.x[39], k1.x[39])
+  ldl      r8, 120                  ; k3.x[39], from slot 120
+  fma      r3, b3, r8, r3           ; S3.x[39] = fma(2, k3.x[39], S2.x[39])
+  ldl      r8, 121                  ; Y4.x[0], from slot 121
+  sub      r8, r8, r19              ; n755 = sub(Y4.x[0], Y4.x[37])
+  sub      r5, b4, r5               ; n756 = sub(F, Y4.x[39])
+  fma      r5, r8, r7, r5           ; k4.x[39] = fma(n755, Y4.x[38], n756)
+  add      r3, r3, r5               ; S4.x[39] = add(S3.x[39], k4.x[39])
+  ldl      r5, 39                   ; x[39], from its home
+  fma      r3, b2, r3, r5           ; next x[39] = fma(h/6, S4.x[39], x[39])
+  stl      r3, 39                   ; next x[39]
+  ldl      r3, 92                   ; v.k2.x[39], from slot 92
+  ldl      r5, 130                  ; v.k1.x[39], from slot 130
+  fma      r3, b3, r3, r5           ; v.S2.x[39] = fma(2, v.k2.x[39], v.k1.x[39])
+  ldl      r5, 125                  ; v.k3.x[39], from slot 125
+  fma      r3, b3, r5, r3           ; v.S3.x[39] = fma(2, v.k3.x[39], v.S2.x[39])
+  ldl      r5, 96                   ; v.Y4.x[0], from slot 96
+  sub      r5, r5, r6               ; n1833 = sub(v.Y4.x[0], v.Y4.x[37])
+  neg      r6, r9                   ; n1835 = neg(v.Y4.x[39])
+  fma      r4, r8, r4, r6           ; n1836 = fma(n755, v.Y4.x[38], n1835)
+  fma      r4, r5, r7, r4           ; v.k4.x[39] = fma(n1833, Y4.x[38], n1836)
+  add      r3, r3, r4               ; v.S4.x[39] = add(v.S3.x[39], v.k4.x[39])
+  ldl      r4, 79                   ; v.x[39], from its home
+  fma      r3, b2, r3, r4           ; next v.x[39] = fma(h/6, v.S4.x[39], v.x[39])
+  stl      r3, 79                   ; next v.x[39]
+endrep
+halt

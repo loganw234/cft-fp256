@@ -19,7 +19,7 @@ Apache-2.0.
 | What it computes | How you call it | How it is checked | On the card | When it pays |
 |---|---|---|---|---|
 | binary32 / 64 / 128 / 256 | C, C++, Python, Rust, Julia, Go, C#, R, Fortran | **1,068,915** conformance cases | Alveo U50: 1,071,635, 1,224,915, then the published 1,068,915 cases replayed on silicon | **binary128 4.5x**, **binary256 5.5x** |
-| 31 opcodes, 5 rounding modes, 39 transcendentals | one ABI; software, FPGA or remote; no dependencies | **47** gate stages, 26 RTL sims, 30 proofs | 427 M elem/s, 4 tiles, ~35 W | **binary32 / 64: a CPU wins** |
+| 31 opcodes, 5 rounding modes, 39 transcendentals | one ABI; software, FPGA or remote; no dependencies | **48** gate stages, 26 RTL sims, 30 proofs | 427 M elem/s, 4 tiles, ~35 W | **binary32 / 64: a CPU wins** |
 
 <sub>Speed-ups are **multiply**, one tile against the fastest software on the same machine - the CPU's own FPU, `__float128` or MPFR, never our own softfloat. Four tiles reach 17.5x and 21.1x. Fused multiply-add is a different picture, and better: 14.0x at binary128 on one tile. [Where those lines fall, measured](#when-this-matters-and-when-it-does-not).</sub>
 
@@ -185,12 +185,12 @@ and the measurements.
 One command runs the gates, in three sizes:
 
 ```bash
-make verify-quick   # ~20 min, 31 of 47 stages: model-vs-C, the program
+make verify-quick   # ~20 min, 31 of 48 stages: model-vs-C, the program
                     # library, the language's compiler, the bindings,
                     # seven language legs, soak,
                     # the five workloads, the browser demos and the
                     # remote backend
-make verify-gate    # ~2 h, 41 of 47: the above plus the golden model,
+make verify-gate    # ~2 h, 42 of 48: the above plus the golden model,
                     # vectors, libcft, transcendentals, MPFR, C++,
                     # the Yosys lint, the formal proofs, the C
                     # auditor held to the golden one and two cases
@@ -203,7 +203,7 @@ make verify         # the full census, hours: adds the cocotb suites,
 Every stage names itself, logs itself and writes a `.ok` or `.fail`
 marker; `--resume` continues an interrupted run and refuses to cross
 commits. A stage whose tools are absent is **skipped by name with the
-reason** rather than passed. `bash verify/run.sh --list` prints all 47 with
+reason** rather than passed. `bash verify/run.sh --list` prints all 48 with
 a `*` against the ones a given budget selects, and `docs/VERIFICATION.md`
 maps what each one proves and how long it really takes.
 

@@ -1,0 +1,156 @@
+; lorenz63-rk4-tangent-fp64 - written by cftc from programs/systems/lorenz63-rk4-tangent-fp64.cftl;
+; edit that, not this file.
+; source  sha256 f349df8fb30d2d52ea471f30f299698dceb772201b693c3422474e3a910bb75b
+; graph   sha256 ebc7e273e18205cd08be8b82224aad1097b4ad163a9ebe3ebde33f66e66e8890
+; system  lorenz63: fp64, rne, rk4, h = 0.01
+; tangent v (slots 3..5)
+; target  sw; 100 steps a segment
+; a step  114 ALU, 0 loads, 0 stores, 0 copies, and the endrep
+; registers 26 (r3..r28)
+
+.format   fp64
+.deposits 0
+.bank     external
+.scratch  strict
+.scratch  in 6
+.scratch  out 6
+
+.const    b0                        ; h = 0.01 (h-scaled x 1): 0x3f847ae147ae147b
+.const    b1                        ; h/2 = 0.005 (h-scaled x 0.5): 0x3f747ae147ae147b
+.const    b2                        ; h/6 = 1/600 (h-scaled x 1/6): 0x3f5b4e81b4e81b4f
+.const    b3                        ; 2 (const): 0x4000000000000000
+.const    b4                        ; sigma = 10 (param): 0x4024000000000000
+.const    b5                        ; rho = 28 (param): 0x403c000000000000
+.const    b6                        ; beta = 8/3 (param): 0x4005555555555555
+
+; the pinned values into their registers
+ldl      r3, 0                      ; x, from its home
+ldl      r4, 1                      ; y, from its home
+ldl      r5, 2                      ; z, from its home
+ldl      r6, 3                      ; v.x, from its home
+ldl      r7, 4                      ; v.y, from its home
+ldl      r8, 5                      ; v.z, from its home
+repeat 100
+  mul      r9, b6, r8               ; n57 = mul(beta, v.z)
+  neg      r10, r8                  ; n64 = neg(v.z)
+  neg      r11, r7                  ; n65 = neg(v.y)
+  sub      r12, r4, r3              ; n0 = sub(y, x)
+  mul      r13, b6, r5              ; n3 = mul(beta, z)
+  sub      r14, b5, r5              ; n8 = sub(rho, z)
+  neg      r15, r4                  ; n9 = neg(y)
+  sub      r16, r7, r6              ; n53 = sub(v.y, v.x)
+  neg      r9, r9                   ; n58 = neg(n57)
+  fma      r10, r3, r10, r11        ; n66 = fma(x, n64, n65)
+  mul      r11, b4, r12             ; k1.x = mul(sigma, n0)
+  neg      r12, r13                 ; n4 = neg(n3)
+  fma      r13, r3, r14, r15        ; k1.y = fma(x, n8, n9)
+  mul      r15, b4, r16             ; v.k1.x = mul(sigma, n53)
+  fma      r9, r3, r7, r9           ; n59 = fma(x, v.y, n58)
+  fma      r10, r6, r14, r10        ; v.k1.y = fma(v.x, n8, n66)
+  fma      r14, b1, r11, r3         ; Y2.x = fma(h/2, k1.x, x)
+  fma      r12, r3, r4, r12         ; k1.z = fma(x, y, n4)
+  fma      r16, b1, r13, r4         ; Y2.y = fma(h/2, k1.y, y)
+  fma      r17, b1, r15, r6         ; v.Y2.x = fma(h/2, v.k1.x, v.x)
+  fma      r9, r6, r4, r9           ; v.k1.z = fma(v.x, y, n59)
+  fma      r18, b1, r10, r7         ; v.Y2.y = fma(h/2, v.k1.y, v.y)
+  fma      r19, b1, r12, r5         ; Y2.z = fma(h/2, k1.z, z)
+  sub      r20, r16, r14            ; n15 = sub(Y2.y, Y2.x)
+  neg      r21, r16                 ; n12 = neg(Y2.y)
+  fma      r22, b1, r9, r8          ; v.Y2.z = fma(h/2, v.k1.z, v.z)
+  neg      r23, r18                 ; n69 = neg(v.Y2.y)
+  sub      r24, r18, r17            ; n73 = sub(v.Y2.y, v.Y2.x)
+  mul      r25, b6, r19             ; n22 = mul(beta, Y2.z)
+  sub      r19, b5, r19             ; n7 = sub(rho, Y2.z)
+  mul      r20, b4, r20             ; k2.x = mul(sigma, n15)
+  mul      r26, b6, r22             ; n81 = mul(beta, v.Y2.z)
+  neg      r22, r22                 ; n62 = neg(v.Y2.z)
+  mul      r24, b4, r24             ; v.k2.x = mul(sigma, n73)
+  neg      r25, r25                 ; n23 = neg(n22)
+  fma      r21, r14, r19, r21       ; k2.y = fma(Y2.x, n7, n12)
+  fma      r27, b1, r20, r3         ; Y3.x = fma(h/2, k2.x, x)
+  fma      r11, b3, r20, r11        ; S2.x = fma(2, k2.x, k1.x)
+  neg      r20, r26                 ; n82 = neg(n81)
+  fma      r22, r14, r22, r23       ; n70 = fma(Y2.x, n62, n69)
+  fma      r23, b1, r24, r6         ; v.Y3.x = fma(h/2, v.k2.x, v.x)
+  fma      r25, r14, r16, r25       ; k2.z = fma(Y2.x, Y2.y, n23)
+  fma      r26, b1, r21, r4         ; Y3.y = fma(h/2, k2.y, y)
+  fma      r13, b3, r21, r13        ; S2.y = fma(2, k2.y, k1.y)
+  fma      r15, b3, r24, r15        ; v.S2.x = fma(2, v.k2.x, v.k1.x)
+  fma      r14, r14, r18, r20       ; n83 = fma(Y2.x, v.Y2.y, n82)
+  fma      r18, r17, r19, r22       ; v.k2.y = fma(v.Y2.x, n7, n70)
+  fma      r19, b1, r25, r5         ; Y3.z = fma(h/2, k2.z, z)
+  sub      r20, r26, r27            ; n18 = sub(Y3.y, Y3.x)
+  neg      r21, r26                 ; n27 = neg(Y3.y)
+  fma      r12, b3, r25, r12        ; S2.z = fma(2, k2.z, k1.z)
+  fma      r14, r17, r16, r14       ; v.k2.z = fma(v.Y2.x, Y2.y, n83)
+  fma      r16, b1, r18, r7         ; v.Y3.y = fma(h/2, v.k2.y, v.y)
+  fma      r10, b3, r18, r10        ; v.S2.y = fma(2, v.k2.y, v.k1.y)
+  mul      r17, b6, r19             ; n37 = mul(beta, Y3.z)
+  sub      r18, b5, r19             ; n26 = sub(rho, Y3.z)
+  mul      r19, b4, r20             ; k3.x = mul(sigma, n18)
+  fma      r20, b1, r14, r8         ; v.Y3.z = fma(h/2, v.k2.z, v.z)
+  neg      r22, r16                 ; n87 = neg(v.Y3.y)
+  sub      r24, r16, r23            ; n76 = sub(v.Y3.y, v.Y3.x)
+  fma      r9, b3, r14, r9          ; v.S2.z = fma(2, v.k2.z, v.k1.z)
+  neg      r14, r17                 ; n38 = neg(n37)
+  fma      r17, r27, r18, r21       ; k3.y = fma(Y3.x, n26, n27)
+  fma      r21, b0, r19, r3         ; Y4.x = fma(h, k3.x, x)
+  fma      r11, b3, r19, r11        ; S3.x = fma(2, k3.x, S2.x)
+  mul      r19, b6, r20             ; n99 = mul(beta, v.Y3.z)
+  neg      r20, r20                 ; n86 = neg(v.Y3.z)
+  mul      r24, b4, r24             ; v.k3.x = mul(sigma, n76)
+  fma      r14, r27, r26, r14       ; k3.z = fma(Y3.x, Y3.y, n38)
+  fma      r25, b0, r17, r4         ; Y4.y = fma(h, k3.y, y)
+  fma      r13, b3, r17, r13        ; S3.y = fma(2, k3.y, S2.y)
+  neg      r17, r19                 ; n100 = neg(n99)
+  fma      r19, r27, r20, r22       ; n88 = fma(Y3.x, n86, n87)
+  fma      r20, b0, r24, r6         ; v.Y4.x = fma(h, v.k3.x, v.x)
+  fma      r15, b3, r24, r15        ; v.S3.x = fma(2, v.k3.x, v.S2.x)
+  fma      r22, b0, r14, r5         ; Y4.z = fma(h, k3.z, z)
+  sub      r24, r25, r21            ; n31 = sub(Y4.y, Y4.x)
+  neg      r28, r25                 ; n42 = neg(Y4.y)
+  fma      r12, b3, r14, r12        ; S3.z = fma(2, k3.z, S2.z)
+  fma      r14, r27, r16, r17       ; n101 = fma(Y3.x, v.Y3.y, n100)
+  fma      r16, r23, r18, r19       ; v.k3.y = fma(v.Y3.x, n26, n88)
+  mul      r17, b6, r22             ; n48 = mul(beta, Y4.z)
+  sub      r18, b5, r22             ; n41 = sub(rho, Y4.z)
+  mul      r19, b4, r24             ; k4.x = mul(sigma, n31)
+  fma      r14, r23, r26, r14       ; v.k3.z = fma(v.Y3.x, Y3.y, n101)
+  fma      r22, b0, r16, r7         ; v.Y4.y = fma(h, v.k3.y, v.y)
+  fma      r10, b3, r16, r10        ; v.S3.y = fma(2, v.k3.y, v.S2.y)
+  neg      r16, r17                 ; n49 = neg(n48)
+  fma      r17, r21, r18, r28       ; k4.y = fma(Y4.x, n41, n42)
+  add      r11, r11, r19            ; S4.x = add(S3.x, k4.x)
+  fma      r19, b0, r14, r8         ; v.Y4.z = fma(h, v.k3.z, v.z)
+  neg      r23, r22                 ; n105 = neg(v.Y4.y)
+  sub      r24, r22, r20            ; n92 = sub(v.Y4.y, v.Y4.x)
+  fma      r9, b3, r14, r9          ; v.S3.z = fma(2, v.k3.z, v.S2.z)
+  fma      r14, r21, r25, r16       ; k4.z = fma(Y4.x, Y4.y, n49)
+  add      r13, r13, r17            ; S4.y = add(S3.y, k4.y)
+  fma      r3, b2, r11, r3          ; next x = fma(h/6, S4.x, x)
+  mul      r11, b6, r19             ; n112 = mul(beta, v.Y4.z)
+  neg      r16, r19                 ; n104 = neg(v.Y4.z)
+  mul      r17, b4, r24             ; v.k4.x = mul(sigma, n92)
+  add      r12, r12, r14            ; S4.z = add(S3.z, k4.z)
+  fma      r4, b2, r13, r4          ; next y = fma(h/6, S4.y, y)
+  neg      r11, r11                 ; n113 = neg(n112)
+  fma      r13, r21, r16, r23       ; n106 = fma(Y4.x, n104, n105)
+  add      r14, r15, r17            ; v.S4.x = add(v.S3.x, v.k4.x)
+  fma      r5, b2, r12, r5          ; next z = fma(h/6, S4.z, z)
+  fma      r11, r21, r22, r11       ; n114 = fma(Y4.x, v.Y4.y, n113)
+  fma      r12, r20, r18, r13       ; v.k4.y = fma(v.Y4.x, n41, n106)
+  fma      r6, b2, r14, r6          ; next v.x = fma(h/6, v.S4.x, v.x)
+  fma      r11, r20, r25, r11       ; v.k4.z = fma(v.Y4.x, Y4.y, n114)
+  add      r10, r10, r12            ; v.S4.y = add(v.S3.y, v.k4.y)
+  add      r9, r9, r11              ; v.S4.z = add(v.S3.z, v.k4.z)
+  fma      r7, b2, r10, r7          ; next v.y = fma(h/6, v.S4.y, v.y)
+  fma      r8, b2, r9, r8           ; next v.z = fma(h/6, v.S4.z, v.z)
+endrep
+; the pinned state back to its homes
+stl      r3, 0                      ; x, the segment's last state
+stl      r4, 1                      ; y, the segment's last state
+stl      r5, 2                      ; z, the segment's last state
+stl      r6, 3                      ; v.x, the segment's last state
+stl      r7, 4                      ; v.y, the segment's last state
+stl      r8, 5                      ; v.z, the segment's last state
+halt

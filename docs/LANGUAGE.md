@@ -1306,7 +1306,7 @@ stdlib-only.
   and rounded otherwise - `da*b + a*db` for `fma(da, b, a * db)` - is
   invisible to exact evaluation (measured: it passed every point). It is
   held by the committed compiled variational references' graph bytes
-  (programs/systems/compiled-tangent/), by this document's rule table
+  (`programs/systems/compiled-tangent/`), by this document's rule table
   held to the code - each rule rendered on a one-operation system - and
   by the blocks above, held to the renderers;
 - **special values**: NaNs, infinities and the sign of zero do not exist
@@ -1566,7 +1566,7 @@ under `make golden`, with no change to either.
   sources against the renderers and the committed files.
 
 The compiled images are held to the interpreter by the `tangent` stage
-(programs/tangent_check.py; docs/VERIFICATION.md).
+(`programs/tangent_check.py`; docs/VERIFICATION.md).
 
 ## What v1 does not do
 

@@ -1,0 +1,333 @@
+{
+ "cftc_manifest": 1,
+ "compiler": {
+  "name": "cftc",
+  "version": 1
+ },
+ "source": {
+  "path": "programs/systems/lorenz63-rk4-tangent-fp64.cftl",
+  "sha256": "f349df8fb30d2d52ea471f30f299698dceb772201b693c3422474e3a910bb75b"
+ },
+ "graph": {
+  "cftl_graph": 2,
+  "file": "lorenz63-rk4-tangent-fp64.graph.json",
+  "sha256": "ebc7e273e18205cd08be8b82224aad1097b4ad163a9ebe3ebde33f66e66e8890"
+ },
+ "system": "lorenz63",
+ "format": "fp64",
+ "round": "rne",
+ "integrator": {
+  "name": "rk4",
+  "h": "1/100",
+  "options": null
+ },
+ "steps": 100,
+ "target": {
+  "name": "sw",
+  "formats": [
+   "fp32",
+   "fp64",
+   "fp128",
+   "fp256"
+  ],
+  "max_insns": 4294967295,
+  "max_consts": 512,
+  "scratch_depth": 256,
+  "max_deposits": 1048576,
+  "seq_features": "0x1ff1f"
+ },
+ "accepted_by": [
+  "sw",
+  "u50-rev7",
+  "u50-rev7-quad",
+  "u50-round2",
+  "open-core"
+ ],
+ "uses": {
+  "instructions": 129,
+  "registers": 26,
+  "register_list": [
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   18,
+   19,
+   20,
+   21,
+   22,
+   23,
+   24,
+   25,
+   26,
+   27,
+   28
+  ],
+  "scratch_slots": 6,
+  "scratch_declared": 256,
+  "bank_slots": 7,
+  "worst_case_instructions": 11514,
+  "features": [
+   "REGS32",
+   "BANK_PTR",
+   "SCRATCH",
+   "SCRATCH_IO",
+   "SCRATCH_STRICT"
+  ]
+ },
+ "per_step": {
+  "instructions": 115,
+  "alu": 114,
+  "loads": 0,
+  "stores": 0,
+  "copies": 0,
+  "endrep": 1,
+  "by_op": {
+   "mul": 16,
+   "neg": 20,
+   "sub": 12,
+   "fma": 60,
+   "add": 6
+  }
+ },
+ "per_segment": {
+  "prologue_loads": 6,
+  "epilogue_stores": 6,
+  "repeat": 1,
+  "halt": 1
+ },
+ "lowering": {
+  "graph_step_nodes": 53,
+  "graph_by_op": {
+   "fma": 26,
+   "add": 3,
+   "sub": 8,
+   "mul": 8,
+   "neg": 8
+  },
+  "shared": 4,
+  "folded": 0,
+  "folds": [],
+  "order": "latency",
+  "pinning": "all",
+  "graph_tangent_step_nodes": 65,
+  "graph_tangent_by_op": {
+   "fma": 34,
+   "add": 3,
+   "sub": 8,
+   "mul": 8,
+   "neg": 12
+  }
+ },
+ "scratch": {
+  "in": 6,
+  "out": 6,
+  "spill_slots": 0,
+  "strict": true,
+  "layout": [
+   {
+    "slot": 0,
+    "name": "x",
+    "kind": "state",
+    "pinned": "r3"
+   },
+   {
+    "slot": 1,
+    "name": "y",
+    "kind": "state",
+    "pinned": "r4"
+   },
+   {
+    "slot": 2,
+    "name": "z",
+    "kind": "state",
+    "pinned": "r5"
+   },
+   {
+    "slot": 3,
+    "name": "v.x",
+    "kind": "tangent",
+    "vector": "v",
+    "of": "x",
+    "pinned": "r6"
+   },
+   {
+    "slot": 4,
+    "name": "v.y",
+    "kind": "tangent",
+    "vector": "v",
+    "of": "y",
+    "pinned": "r7"
+   },
+   {
+    "slot": 5,
+    "name": "v.z",
+    "kind": "tangent",
+    "vector": "v",
+    "of": "z",
+    "pinned": "r8"
+   }
+  ]
+ },
+ "bank": [
+  {
+   "slot": 0,
+   "name": "h",
+   "kind": "const",
+   "exact": "1/100",
+   "h_factor": "1",
+   "encoding": "0x3f847ae147ae147b",
+   "value": "0x1.47ae147ae147bp-7",
+   "flags": [
+    "inexact"
+   ],
+   "relative_error": "+2.0817e-17",
+   "halved": "0x3f747ae147ae147b"
+  },
+  {
+   "slot": 1,
+   "name": "h/2",
+   "kind": "const",
+   "exact": "1/200",
+   "h_factor": "1/2",
+   "encoding": "0x3f747ae147ae147b",
+   "value": "0x1.47ae147ae147bp-8",
+   "flags": [
+    "inexact"
+   ],
+   "relative_error": "+2.0817e-17",
+   "halved": "0x3f647ae147ae147b"
+  },
+  {
+   "slot": 2,
+   "name": "h/6",
+   "kind": "const",
+   "exact": "1/600",
+   "h_factor": "1/6",
+   "encoding": "0x3f5b4e81b4e81b4f",
+   "value": "0x1.b4e81b4e81b4fp-10",
+   "flags": [
+    "inexact"
+   ],
+   "relative_error": "+6.4185e-17",
+   "halved": "0x3f4b4e81b4e81b4f"
+  },
+  {
+   "slot": 3,
+   "name": "2",
+   "kind": "const",
+   "exact": "2",
+   "h_factor": null,
+   "encoding": "0x4000000000000000",
+   "value": "2",
+   "flags": [],
+   "relative_error": "0"
+  },
+  {
+   "slot": 4,
+   "name": "sigma",
+   "kind": "param",
+   "default": true,
+   "exact": "10",
+   "h_factor": null,
+   "encoding": "0x4024000000000000",
+   "value": "10",
+   "flags": [],
+   "relative_error": "0"
+  },
+  {
+   "slot": 5,
+   "name": "rho",
+   "kind": "param",
+   "default": true,
+   "exact": "28",
+   "h_factor": null,
+   "encoding": "0x403c000000000000",
+   "value": "28",
+   "flags": [],
+   "relative_error": "0"
+  },
+  {
+   "slot": 6,
+   "name": "beta",
+   "kind": "param",
+   "default": true,
+   "exact": "8/3",
+   "h_factor": null,
+   "encoding": "0x4005555555555555",
+   "value": "0x1.5555555555555p+1",
+   "flags": [
+    "inexact"
+   ],
+   "relative_error": "-5.5511e-17"
+  }
+ ],
+ "param_overrides": [],
+ "h_slots": [
+  0,
+  1,
+  2
+ ],
+ "time_shift": [
+  {
+   "expression": "6 RN(h/6) / RN(h) - 1",
+   "exact": "1/23058430092136940",
+   "value": "+4.3368e-17"
+  }
+ ],
+ "tangent": {
+  "vectors": [
+   "v"
+  ],
+  "components": 3,
+  "slots": [
+   3
+  ]
+ },
+ "cost_model": {
+  "assumes": "revision 7, a single-pass tile; believed from docs/SEQUENCER.md R12-R19, not measured; the card's measurement is the lead's",
+  "cycles_per_step_one_beat": 357,
+  "cycles_per_step_sixteen_beats": 1825
+ },
+ "files": {
+  "cfta": {
+   "name": "lorenz63-rk4-tangent-fp64.cfta",
+   "sha256": "c64462e337d7d797a998535655266360e1acfbd76fa5f0ffc9802acdfc681e09"
+  },
+  "image": {
+   "name": "lorenz63-rk4-tangent-fp64.cftp",
+   "sha256": "016268f7488bb376a876801a6eadd2e12f887d267e8e2e44a943d646cd595d81"
+  },
+  "bank": {
+   "name": "lorenz63-rk4-tangent-fp64.bank",
+   "sha256": "c91cc547b6d5f616fff66d2abd2cbc83d1cfb4bce464d9a6ae79473bd947bf09"
+  },
+  "half_bank": {
+   "name": "lorenz63-rk4-tangent-fp64.half.bank",
+   "sha256": "a7db2cff0d527899e6e9e23943d08b4d3c139d4ff141081ded41599345ea3290"
+  },
+  "graph": {
+   "name": "lorenz63-rk4-tangent-fp64.graph.json",
+   "sha256": "ebc7e273e18205cd08be8b82224aad1097b4ad163a9ebe3ebde33f66e66e8890"
+  },
+  "canonical": {
+   "name": "lorenz63-rk4-tangent-fp64.canonical.cftl",
+   "sha256": "0eebc3f68e722127e47e5c2961ad186dbbcf72cfae51d44dad508454093f42ad"
+  },
+  "math": {
+   "name": "lorenz63-rk4-tangent-fp64.math.txt",
+   "sha256": "ce9d17883b1e3644ddd0e48d9fa59827111908a0c0788df16df17020abae3818"
+  }
+ }
+}

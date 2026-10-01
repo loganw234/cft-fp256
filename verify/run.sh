@@ -146,14 +146,15 @@ BUDGET=""
 # transcendentals, MPFR, the C++ header and the two RTL gates that
 # need only a container - and, since 2026-09-29, the C auditor held to
 # the golden one (audit), and since 2026-09-30 two cases of the
-# certificate estimates' study (estimates). `full` is the census. Measured on the
+# certificate estimates' study (estimates), and since 2026-10-01 the
+# language's variational equations (tangent). `full` is the census. Measured on the
 # Windows desktop (docs/VERIFICATION.md has the table, quiet against
 # loaded): quick ~20 min, gate ~2 h with the box quiet and ~4 h loaded
 # now that the formal gate holds thirty proofs and a negative control
 # (thirty-one tasks), full longer by the simulation suite and the two
 # browser replays; on the WSL distro the replay stages take seconds.
 BUDGET_QUICK=docs,generated,buildargs,sweepjudge,innerskips,ensurevectors,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,programs,lang,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
-BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit,estimates
+BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit,estimates,tangent
 RESUME=""
 FRESH=0
 REQUIRE_ALL=0
@@ -1049,6 +1050,36 @@ do_lang() {
 }
 need host-cc python
 stage lang "the language's compiler held to its interpreter: every image on seq.py against lang.run bit for bit with FLAGS at several step counts (the references at four formats and five attributes, written shapes and a generated corpus at every format, the references beside gen_odes.py's images and classic banks), certified through cft-segrun and accepted by both auditors, deterministic, every refusal by name, its plants red" -- do_lang
+
+# The language's variational equations held (docs/LANGUAGE.md, "The
+# variational equations"; programs/tangent_check.py's docstring names the
+# legs). A system that declares `tangent v` carries its step's derivative
+# along tangent vectors; every image the compiler writes for one runs on
+# seq.py against lang.run bit for bit with FLAGS, states and tangents, at
+# 1, 2, 5 and its own steps - the references with tangents at four
+# formats, five attributes and two vectors, written shapes and a
+# generated corpus at every format, on lanes whose tangents hold a
+# signalling NaN, -0, a subnormal and the largest finite - with the
+# primal unchanged by its tangent; the tangent sections equal to the
+# stage's own exact dual numbers. Lorenz-63's largest Lyapunov exponent
+# from the compiled reference through cft-segrun, renormalised on the
+# host by exact powers of two (8 lanes to t = 1,000 at fp64, within 0.01
+# of 0.9056), the renormalisation shown exact; the exponent again at
+# fp256 from one certified chain both auditors accept (4 lanes to
+# t = 1,000, within 0.02); each compiled variational reference certified
+# and accepted by both auditors; the bytes programs/systems/compiled-
+# tangent/ holds, and the `lang` stage's 48 still; refusals by name;
+# wrong derivations red on the derivative and the exponent, a rule
+# rounded otherwise red on the committed bytes, and four compiler plants
+# red on seq.py. In the gate budget: about three and a half minutes on
+# the desktop, niced and in use (L3, 2026-10-01).
+do_tangent() {
+  HOSTMAKE "cft-segrun$EXE" "cft-audit$EXE" || return 1
+  PY "$ROOT/programs/tangent_check.py" --segrun "$ROOT/host/cft-segrun$EXE" \
+     --audit "$ROOT/host/cft-audit$EXE"
+}
+need host-cc python
+stage tangent "the language's variational equations: every image with tangent vectors on seq.py against lang.run bit for bit with FLAGS, states and tangents (references, written shapes and a generated corpus at every format), the primal unchanged, the tangent equal to exact dual numbers; Lorenz-63's largest Lyapunov exponent through cft-segrun, and at fp256 from a certified chain both auditors accept; the compiled references certified, deterministic, committed; refusals by name, its plants red" -- do_tangent
 
 # The C auditor held to the golden one (host/Makefile's audittest,
 # host/tests/audit_check.py; docs/CERTIFICATES.md, "The audit tool"):
