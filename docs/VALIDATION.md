@@ -16743,7 +16743,7 @@ What sampled points cannot see is stated in LANGUAGE.md.
   Its decisions read exact values and structure, never encodings, so a system's instruction words are the same at every format.
 - The `lang` stage, in the quick budget, holds it (47 stages in all, 31 quick, 41 gate).
 - MEASURED by L2:
-  - the references at four formats, and in every attribute at fp64, and a generated corpus, all equal to the interpreter on seq.py at several step counts on many lanes;
+  - the references at four formats, Lorenz-63 and Henon-Heiles in every attribute at fp64, and a generated corpus, all equal to the interpreter on seq.py at several step counts on many lanes;
   - the compiled references equal gen_odes.py's images in states and FLAGS at every checkpoint;
   - cft-segrun certifies compiled images, with both auditors accepting, in full and sampled, and a step-halving estimate on the halved bank;
   - two hash seeds give the same files.
@@ -16756,7 +16756,7 @@ What sampled points cannot see is stated in LANGUAGE.md.
   - The second check found no wrong answer in L2's text. It found the compiler's own reader weaker than L1's at big exact values, which L2 fixed.
   - The third check found no regression and no wrong answer.
   - MEASURED by VL2:
-    - 1,543 compilations past the corpus, none disagreeing with the interpreter: 15 pressure systems (up to 113 spill slots), 480 edge shapes in every attribute at every format, 988 from its own generator, and the references in every attribute at every format (60);
+    - 1,543 compilations past the corpus, none disagreeing with the interpreter: 15 pressure systems (up to 113 spill slots), 24 edge shapes in every attribute at every format (480 compilations), 988 from its own generator, and the references in every attribute at every format (60);
     - 3.2 M softfloat comparisons on the fold and the commutations;
     - 480 let-heavy maps;
     - 352 output files identical on Windows and in WSL.
@@ -16803,7 +16803,7 @@ What sampled points cannot see is stated in LANGUAGE.md.
   - an estimate run: 256 finite lanes, a main run, and a half-step run on the halved bank with a step-halving entry;
   - a specials run: 259 lanes, including overflow, signalling-NaN and subnormal lanes.
   In every leg the states directories are equal card against software, the certificates are equal outside the identity and hash lines, and cft-audit accepts with the golden audit's verdict line for line. An early run at L2's 5658f35 had all 12 legs passing. Each was card against software, with states bit for bit, certificates equal outside the identity and hash lines, and both auditors accepting.
-- After the gate: 85a0cfd (Python, refusal sentences) and the close (docs and comments). The runner's `lang` and `docs` stages and the language suites passed at them on the desktop.
+- After the gate: 85a0cfd (Python, refusal sentences) and the close (docs and comments). The runner's `lang` and `docs` stages and the language suites passed at 85a0cfd on the desktop (the lead), and at the close in a fresh clone (verifier-VI: lang ok 158 s, the suites 541 passed, the docs check clean).
 
 **Known limits, recorded rather than fixed** (Logan's rule).
 - **The language** (VL1):
