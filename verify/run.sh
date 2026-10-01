@@ -1071,8 +1071,10 @@ stage lang "the language's compiler held to its interpreter: every image on seq.
 # tangent/ holds, and the `lang` stage's 48 still; refusals by name;
 # wrong derivations red on the derivative and the exponent, a rule
 # rounded otherwise red on the committed bytes, and four compiler plants
-# red on seq.py. In the gate budget: about three and a half minutes on
-# the desktop, niced and in use (L3, 2026-10-01).
+# red on seq.py. In the gate budget: 196 s run directly and 346 s
+# through the runner on the desktop, niced and in use, and past 13
+# minutes, unfinished, beside another process holding it at 100% (L3,
+# 2026-10-01).
 do_tangent() {
   HOSTMAKE "cft-segrun$EXE" "cft-audit$EXE" || return 1
   PY "$ROOT/programs/tangent_check.py" --segrun "$ROOT/host/cft-segrun$EXE" \
