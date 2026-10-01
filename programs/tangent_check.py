@@ -26,15 +26,22 @@ lang_check.py, whose helpers this reuses), with tangents:
      alternating), the first and last asserted to raise what they are
      there for in the tangent and not in the primal
   B  the `lang` stage's written shapes and this stage's (time in the
-     state, ties and zeros, one side of a min or a select zero, every
-     activity pattern of fma, lets with lane params under
+     state, three placed on ties and zeros - with two lanes each whose
+     third component is their first - one side of a min or a select
+     zero, every activity pattern of fma, lets with lane params under
      stormer-verlet, a map with h, a tangent written out in full) and a
      seeded generated corpus with one or two vectors, at every format
   C  the primal unchanged: on every system of A and B, a run's states
      and primal flags are the run's without the tangent, and the graph's
      primal lines the version-1 graph's
   D  the derivative: the tangent sections evaluated exactly against this
-     stage's own exact dual numbers, at random rational points
+     stage's own exact dual numbers, at random rational points, about
+     half of them placed (a component equal to another, or zero); and at
+     the ties and zeros the placed shapes put where a convention decides -
+     operands equal in value and different in tangent - where a tie
+     given its second operand's tangent, or a zero's sign taken as -, is
+     asserted to give another answer, so that a convention other than
+     the table's fails there
   E  Lorenz-63's largest Lyapunov exponent: the compiled reference on
      libcft's software backend through cft-segrun, one invocation a
      segment, the tangent renormalised on the host by an exact power of
@@ -142,15 +149,23 @@ def tangent_specials(fmt, n, T, base):
     return [snan, small, huge]
 
 
-def lanes_with_tangents(c, rng, count, box=None):
+def lanes_with_tangents(c, rng, count, box=None, placed=False):
     """(states, tangents, lane params or None, roles): random lanes, the
     primal's three special lanes with ordinary tangents, and three lanes
-    on lane 0's state whose tangents are special. `roles` names the two
-    whose tangent must raise a flag its primal does not."""
+    on lane 0's state whose tangents are special; with `placed`, two more
+    whose third component is their first, the tangents random - the
+    placed shapes' ties and zeros, decided on the image as in the
+    interpreter. `roles` names the two whose tangent must raise a flag
+    its primal does not."""
     g = c.ir
     n, T = g.n_primal, g.T
     states = LC.lanes_for(g.fmt, n, rng, count, box)
     states += LC.special_lanes(g.fmt, n, states[0], rng)
+    if placed:
+        for _ in range(2):
+            lane = LC.lanes_for(g.fmt, n, rng, 1, box)[0]
+            lane[2] = lane[0]
+            states.append(lane)
     tans = [tangent_values(g.fmt, n, T, rng) for _ in states]
     tspec = tangent_specials(g.fmt, n, T, tans[0])
     states += [list(states[0]) for _ in tspec]
@@ -240,15 +255,17 @@ def primal_unchanged(g, primal_text, states, top, lane_params=None):
 
 # ---- D: the derivative, this stage's own dual numbers ---------------------
 
-def _sgn(x):
-    return -1 if x < 0 else 1
+def _sgn(x, zero=1):
+    return -1 if x < 0 else (zero if x == 0 else 1)
 
 
-def _dual(op, a):
+def _dual(op, a, tie=0, zero=1):
     """One operation on (value, derivative) pairs, exactly, by calculus -
     with the rule table's choices at its measure-zero points (a tie gives
     the first operand's, a zero's sign is +) - written again here, not
-    read from the derivation."""
+    read from the derivation. tie=1 and zero=-1 are the other choices,
+    which a placed point must tell apart from the table's; a value is
+    the same under any of them."""
     v = [p[0] for p in a]
     d = [p[1] for p in a]
     if op == "add":
@@ -262,13 +279,15 @@ def _dual(op, a):
     if op == "neg":
         return -v[0], -d[0]
     if op == "abs":
-        return abs(v[0]), _sgn(v[0]) * d[0]
+        return abs(v[0]), _sgn(v[0], zero) * d[0]
     if op == "copysign":
-        return _sgn(v[1]) * abs(v[0]), _sgn(v[0]) * _sgn(v[1]) * d[0]
-    if op in ("min", "minnum"):
-        return (v[0], d[0]) if v[0] <= v[1] else (v[1], d[1])
-    if op in ("max", "maxnum"):
-        return (v[0], d[0]) if v[0] >= v[1] else (v[1], d[1])
+        return (_sgn(v[1]) * abs(v[0]),
+                _sgn(v[0], zero) * _sgn(v[1], zero) * d[0])
+    if op in ("min", "minnum", "max", "maxnum"):
+        if v[0] == v[1]:
+            return v[tie], d[tie]
+        first = (v[0] < v[1]) == (op in ("min", "minnum"))
+        return (v[0], d[0]) if first else (v[1], d[1])
     if op in ("cmplt", "cmple", "cmpeq"):
         t = {"cmplt": v[0] < v[1], "cmple": v[0] <= v[1],
              "cmpeq": v[0] == v[1]}[op]
@@ -278,38 +297,82 @@ def _dual(op, a):
     raise AssertionError(op)
 
 
+def dual_derivative(g, section, st, tv, pa, la, tie=0, zero=1):
+    """The exact derivative of a primal section along tv, by _dual."""
+    sec = g.section(section)
+    nil = Fraction(0)
+    vals = {"s": list(zip(st, tv)), "l": [(x, nil) for x in la],
+            "p": [(x, nil) for x in pa],
+            "c": [(v, nil) for v, *_r in g.const]}
+    nodes = []
+
+    def get(r):
+        return nodes[int(r[1:])] if r[0] == "n" else vals[r[0]][int(r[1:])]
+    for op, args, _l in sec.nodes:
+        nodes.append(_dual(op, [get(a) for a in args], tie, zero))
+    return [get(o)[1] for o in sec.out]
+
+
+def _q(rng):
+    return Fraction(rng.randint(-5000, 5000), rng.randint(1, 4000))
+
+
 def derivative_misses(g, rng, points=2):
     """(points tried, points where a tangent section's exact value is not
-    the dual numbers' derivative of the section it differentiates)."""
-    bad_n = tot = 0
+    the dual numbers' derivative of the section it differentiates). About
+    half the points are placed: one component set equal to another or to
+    zero, the tangent random, so that a tie or a zero there has operands
+    whose tangents differ."""
+    bad_n = tot = placed = 0
     for primal, tangent in (("field", "tangent_field"),
                             ("step", "tangent_step")):
-        sec = g.section(primal)
-        if sec is None:
+        if g.section(primal) is None:
             continue
         for _ in range(points):
-            def q():
-                return Fraction(rng.randint(-5000, 5000), rng.randint(1, 4000))
-            st = [q() for _ in range(g.n_state)]
-            tv = [q() for _ in range(g.n_state)]
-            pa = [q() for _ in g.param]
-            la = [q() for _ in g.lane]
-            zero = Fraction(0)
-            vals = {"s": list(zip(st, tv)), "l": [(x, zero) for x in la],
-                    "p": [(x, zero) for x in pa],
-                    "c": [(v, zero) for v, *_r in g.const]}
-            nodes = []
-
-            def get(r):
-                return nodes[int(r[1:])] if r[0] == "n" else \
-                    vals[r[0]][int(r[1:])]
-            for op, args, _l in sec.nodes:
-                nodes.append(_dual(op, [get(a) for a in args]))
-            want = [get(o)[1] for o in sec.out]
+            n = g.n_state
+            st = [_q(rng) for _ in range(n)]
+            r, i = rng.random(), rng.randrange(n)
+            if r < 0.25 and n > 1:
+                st[rng.choice([j for j in range(n) if j != i])] = st[i]
+            elif r < 0.5:
+                st[i] = Fraction(0)
+            placed += r < 0.25 and n > 1 or 0.25 <= r < 0.5
+            tv = [_q(rng) for _ in range(n)]
+            pa = [_q(rng) for _ in g.param]
+            la = [_q(rng) for _ in g.lane]
+            want = dual_derivative(g, primal, st, tv, pa, la)
             got = g.exact_eval(tangent, st, pa, la, tangent=tv)
             tot += 1
             bad_n += got != want
-    return tot, bad_n
+    return tot, bad_n, placed
+
+
+def placed_misses(g, rng, decides, points=6):
+    """At points with the third component equal to the first, every value
+    nonzero, the tangents of the two different: (points, points where the
+    tangent is not the table's derivative, points where a convention the
+    system decides gives the same answer as the table's - a placement
+    that cannot fail)."""
+    other = {"tie": {"tie": 1}, "zero": {"zero": -1}}
+    tot = bad_n = blind = 0
+    for primal, tangent in (("field", "tangent_field"),
+                            ("step", "tangent_step")):
+        if g.section(primal) is None:
+            continue
+        for _ in range(points):
+            while True:
+                st = [_q(rng) for _ in range(g.n_state)]
+                st[2] = st[0]
+                tv = [_q(rng) for _ in range(g.n_state)]
+                if all(st) and tv[0] != tv[2]:
+                    break
+            want = dual_derivative(g, primal, st, tv, [], [])
+            tot += 1
+            bad_n += g.exact_eval(tangent, st, tangent=tv) != want
+            blind += any(dual_derivative(g, primal, st, tv, [], [],
+                                         **other[d]) == want
+                         for d in decides)
+    return tot, bad_n, blind
 
 
 # ---- coverage -------------------------------------------------------------
@@ -417,10 +480,18 @@ SHAPES = {
     "time-in-the-state": "system tdep\nformat fp64\nstate t, x\ntangent v\n"
                          "d/dt t = 1\nd/dt x = fma(x, t, -x)\n"
                          "step rk4, h = 1/8\n",
-    "ties-and-zeros": "system tz\nformat fp64\nstate x, y\ntangent v\n"
-                      "next x = min(x, x) + abs(y - y) * x\n"
-                      "next y = copysign(y, x - x) + maxnum(y, y)\n"
-                      "step map\n",
+    "placed-ties": "system pt\nformat fp64\nstate x, y, z, w\ntangent v\n"
+                   "next x = max(x, z) * y\nnext y = min(z, x) - w\n"
+                   "next z = maxnum(z, x) + y\nnext w = minnum(x, z) * w\n"
+                   "step map\n",
+    "placed-zeros": "system pz\nformat fp64\nstate x, y, z\ntangent v\n"
+                    "next x = y * abs(z - x)\n"
+                    "next y = copysign(x - z, y) - x\n"
+                    "next z = copysign(y, z - x) * y\nstep map\n",
+    "placed-inside": "system pi\nformat fp64\nstate x, y, z\ntangent v\n"
+                     "let p = x * y\nlet q = z * y\n"
+                     "d/dt x = min(p, q) - abs(p - q)\nd/dt y = -y\n"
+                     "d/dt z = maxnum(q, p) * y\nstep rk4, h = 1/16\n",
     "one-side-zero": "system one\nformat fp64\nstate x, y\ntangent v\n"
                      "param p = 1/3\n"
                      "next x = min(x, p) + select(x < y, y, p)\n"
@@ -488,7 +559,8 @@ def leg_corpus(count, rng):
             except cftc.InternalError as e:
                 failed.append(f"{what} {fmt}: internal error: {e}")
                 continue
-            states, tans, lp, _roles = lanes_with_tangents(c, rng, 3)
+            states, tans, lp, _roles = lanes_with_tangents(
+                c, rng, 3, placed=what.startswith("shape placed-"))
             failing, fok, ref = compare(c, states, tans, 4, lp)
             cover(c, ref.flags)
             runs += 1
@@ -502,7 +574,8 @@ def leg_corpus(count, rng):
     for f in failed[:10]:
         print(f"        {f}")
     check(not failed and runs > 0, f"{runs} compiled systems equal the "
-          f"interpreter on 9 lanes at 1, 2 and 4 steps, states and tangents, "
+          f"interpreter on 9 lanes (11 for the placed shapes, two lanes on "
+          f"their ties and zeros) at 1, 2 and 4 steps, states and tangents, "
           f"FLAGS included, the primal unchanged in each "
           f"({time.perf_counter() - t0:.1f} s)", f"{len(failed)} failed")
     print(f"  refused as a writer would be, by name: "
@@ -526,14 +599,35 @@ def leg_derivative(rng):
             graphs.append(lang.compile_text(text).graph)
         except lang.Refusal:
             pass
-    tot = bad_n = 0
+    tot = bad_n = placed = 0
     for g in graphs:
-        a, b = derivative_misses(g, rng, 4)
+        a, b, c = derivative_misses(g, rng, 4)
         tot += a
         bad_n += b
-    check(bad_n == 0 and tot > 100, f"{len(graphs)} systems, {tot} points: "
-          f"the tangent sections evaluated exactly equal the exact "
-          f"derivative of the step at every one", f"{bad_n} points differ")
+        placed += c
+    check(bad_n == 0 and tot > 100, f"{len(graphs)} systems, {tot} points, "
+          f"{placed} of them placed: the tangent sections evaluated exactly "
+          f"equal the exact derivative of the step at every one",
+          f"{bad_n} points differ")
+    # the ties and zeros placed where a convention decides: the third
+    # component equal to the first, their tangents different
+    decides = {"placed-ties": ("tie",), "placed-zeros": ("zero",),
+               "placed-inside": ("tie", "zero")}
+    tot = bad_n = blind = 0
+    for name, d in decides.items():
+        a, b, c = placed_misses(lang.compile_text(SHAPES[name]).graph, rng, d)
+        tot += a
+        bad_n += b
+        blind += c
+    check(bad_n == 0 and blind == 0 and tot > 0, f"{tot} points on the "
+          f"three placed shapes - min, max, minnum and maxnum at a tie, abs "
+          f"and copysign's two sources at a zero, alone and inside "
+          f"expressions, operands equal in value and different in tangent: "
+          f"the tangent is the table's derivative at every one, and a tie "
+          f"given its second operand's tangent, or a zero's sign taken as "
+          f"-, gives another answer at every one",
+          f"{bad_n} differ from the table's, {blind} where another "
+          f"convention gives the same answer")
 
 
 # ---- E: the Lyapunov smoke test -------------------------------------------
@@ -1144,7 +1238,7 @@ def leg_plants(rng, segrun_path, work):
                     g = lang.compile_text(text).graph
                 except lang.Refusal:
                     continue
-                a, b = derivative_misses(g, rng)
+                a, b, _p = derivative_misses(g, rng)
                 tot += a
                 bad_n += b
                 systems += b > 0

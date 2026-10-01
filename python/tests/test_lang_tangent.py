@@ -10,10 +10,15 @@ equations"; python/cft_golden/lang/tangent.py): the language's L3.
                        measure-zero values and the specials, bit for bit
   the derivative       the fourth check: the tangent sections evaluated
                        exactly against the test's own dual numbers, on
-                       the references, on generated systems and at ties
-                       and zeros placed on purpose; three plants red on
-                       it, and the rounding-order plant green on it and
-                       red on the bytes
+                       the references and generated systems at random
+                       points, about half of them placed (a component
+                       equal to another or zero), and at ties and zeros
+                       placed where the conventions decide - operands
+                       equal in value and different in tangent, where
+                       the other conventions are asserted to give
+                       another answer; three plants red on it, and the
+                       rounding-order plant green on it and red on the
+                       bytes
   A and B              the template on the extended system against the
                        step's own tangent: exactly equal everywhere, node
                        for node where no tangent is identically zero,
@@ -225,15 +230,18 @@ def test_a_product_by_plus_or_minus_one_is_exact(fmtname):
 
 # ---- the derivative: the fourth check ---------------------------------------
 
-def _sgn(x):
-    return -1 if x < 0 else 1
+def _sgn(x, zero=1):
+    return -1 if x < 0 else (zero if x == 0 else 1)
 
 
-def _dual(op, a):
+def _dual(op, a, tie=0, zero=1):
     """The test's own derivative: (value, derivative) pairs, the
     conventions at measure-zero points written again from the document's
     rule table - the + side of an exact zero (exact arithmetic has no
-    -0), ties to the first operand."""
+    -0), ties to the first operand. tie=1 (a tie takes the second
+    operand's tangent) and zero=-1 (a zero's sign is -) are the other
+    conventions, which a placed point must tell apart from the table's;
+    values are the same under any of them."""
     v = [p[0] for p in a]
     d = [p[1] for p in a]
     if op == "add":
@@ -247,13 +255,15 @@ def _dual(op, a):
     if op == "neg":
         return -v[0], -d[0]
     if op == "abs":
-        return abs(v[0]), _sgn(v[0]) * d[0]
+        return abs(v[0]), _sgn(v[0], zero) * d[0]
     if op == "copysign":
-        return _sgn(v[1]) * abs(v[0]), _sgn(v[0]) * _sgn(v[1]) * d[0]
-    if op in ("min", "minnum"):
-        return (v[0], d[0]) if v[0] <= v[1] else (v[1], d[1])
-    if op in ("max", "maxnum"):
-        return (v[0], d[0]) if v[0] >= v[1] else (v[1], d[1])
+        return (_sgn(v[1]) * abs(v[0]),
+                _sgn(v[0], zero) * _sgn(v[1], zero) * d[0])
+    if op in ("min", "minnum", "max", "maxnum"):
+        if v[0] == v[1]:
+            return v[tie], d[tie]
+        first = (v[0] < v[1]) == (op in ("min", "minnum"))
+        return (v[0], d[0]) if first else (v[1], d[1])
     if op == "cmplt":
         return F(1 if v[0] < v[1] else 0), F(0)
     if op == "cmple":
@@ -265,7 +275,7 @@ def _dual(op, a):
     raise AssertionError(op)
 
 
-def dual_eval(g, section, state, tangent, params, lanes):
+def dual_eval(g, section, state, tangent, params, lanes, tie=0, zero=1):
     """The exact directional derivative of a primal section's outputs."""
     sec = g.section(section)
     vals = {"s": list(zip(state, tangent)),
@@ -278,7 +288,7 @@ def dual_eval(g, section, state, tangent, params, lanes):
         k, i = r[0], int(r[1:])
         return nodes[i] if k == "n" else vals[k][i]
     for op, args, _l in sec.nodes:
-        nodes.append(_dual(op, [get(a) for a in args]))
+        nodes.append(_dual(op, [get(a) for a in args], tie, zero))
     return [get(o)[1] for o in sec.out]
 
 
@@ -286,16 +296,33 @@ def _q(rng):
     return F(rng.randint(-5000, 5000), rng.randint(1, 4000))
 
 
+def _point(rng, n):
+    """A state: random rationals, and half the time PLACED - one component
+    set equal to another (a tie wherever the step compares the two or
+    takes their min or max) or to zero (a zero of whatever reads it
+    alone). The tangent stays random, so at a placed tie the operands'
+    tangents differ, and a convention there changes the derivative."""
+    state = [_q(rng) for _ in range(n)]
+    r = rng.random()
+    i = rng.randrange(n)
+    if r < 0.25 and n > 1:
+        state[rng.choice([j for j in range(n) if j != i])] = state[i]
+    elif r < 0.5:
+        state[i] = F(0)
+    return state
+
+
 def derivative_misses(g, rng, points=3):
     """(points, points where the tangent is not the derivative), over the
-    field (a flow's) and the step, at random rational points."""
+    field (a flow's) and the step, at random rational points, about
+    half of them placed."""
     bad = tot = 0
     for section, tsection in (("field", "tangent_field"),
                               ("step", "tangent_step")):
         if g.section(section) is None:
             continue
         for _ in range(points):
-            state = [_q(rng) for _ in range(g.n_state)]
+            state = _point(rng, g.n_state)
             tangent = [_q(rng) for _ in range(g.n_state)]
             params = [_q(rng) for _ in g.param]
             lanes = [_q(rng) for _ in g.lane]
@@ -324,27 +351,61 @@ def tangent_corpus(count=60, seed="tangent corpus"):
     return out
 
 
-# ties and zeros, on purpose: where the conventions decide
-TIES = [
-    "system t\nformat fp64\nstate x, y\ntangent v\nnext x = min(x, x) + "
-    "max(y, y)\nnext y = minnum(x, x) * maxnum(y, y)\nstep map\n",
-    "system t\nformat fp64\nstate x, y\ntangent v\nnext x = abs(x - x) + y"
-    "\nnext y = copysign(y, x - x)\nstep map\n",
-    "system t\nformat fp64\nstate x, y\ntangent v\nlet r = x * y\n"
-    "next x = select(r == r, min(r, y * x), x)\nnext y = abs(r - r) * y\n"
-    "step map\n",
-]
+# Ties and zeros placed where the conventions decide: operands EQUAL in
+# value and DIFFERENT in tangent. Each system is evaluated at x = z with
+# v.x != v.z - min(x, z), a tie inside an expression (min(x*y, z*y) and
+# lets r = x*y, s = z*y), abs(x - z) and copysign's two sources at x - z
+# - so that a tie given the second operand's tangent, or a zero's sign
+# taken as -, changes the derivative there; the test asserts that it
+# does at every point. (verifier-VL3: the ties this list placed before -
+# min(x, x), abs(x - x) - had equal or zero tangents, where no
+# convention can change the answer, and two planted conventions passed.)
+# The value says which convention each system's points must tell apart.
+TIES = {
+    "the min family at a tie": (
+        "system t\nformat fp64\nstate x, y, z, w\ntangent v\n"
+        "next x = min(x, z) + y\nnext y = max(z, x) * y\n"
+        "next z = minnum(x, z) * w\nnext w = maxnum(z, x) - w\n"
+        "step map\n", ("tie",)),
+    "abs and copysign's two sources at a zero": (
+        "system t\nformat fp64\nstate x, y, z\ntangent v\n"
+        "next x = abs(x - z) * y + x\nnext y = copysign(y, x - z)\n"
+        "next z = copysign(x - z, y) + z\nstep map\n", ("zero",)),
+    "a tie and a zero inside expressions": (
+        "system t\nformat fp64\nstate x, y, z, w\ntangent v\n"
+        "let r = x * y\nlet s = z * y\nnext x = min(r, s)\n"
+        "next y = max(s, r) * w + abs(r - s)\n"
+        "next z = minnum(x * w, z * w) - maxnum(z * y, x * y)\n"
+        "next w = select(r < s, x, abs(z * w - x * w))\nstep map\n",
+        ("tie", "zero")),
+    "a flow's field at a tie and a zero": (
+        "system t\nformat fp64\nstate x, y, z\ntangent v\n"
+        "d/dt x = min(x, z) - y\nd/dt y = abs(x - z) * y\n"
+        "d/dt z = maxnum(z, x) * x\nstep euler, h = 1/8\n",
+        ("tie", "zero")),
+}
+OTHER = {"tie": {"tie": 1}, "zero": {"zero": -1}}
+
+
+def placed(rng, g):
+    """A point of a TIES system: x = z, every value nonzero, v.x != v.z."""
+    while True:
+        state = [_q(rng) for _ in range(g.n_state)]
+        state[2] = state[0]
+        tangent = [_q(rng) for _ in range(g.n_state)]
+        if all(state) and tangent[0] != tangent[2]:
+            return state, tangent
 
 
 def test_the_tangent_is_the_derivative():
     """The fourth check, on the references with tangents, sixty
-    generated systems that cover every operation, and systems whose
-    every point is a tie or a zero."""
+    generated systems that cover every operation, and the systems placed
+    on ties and zeros, at random points, about half of them placed."""
     rng = random.Random("the derivative")
     tot = bad = 0
     ops = set()
     graphs = [tref(n) for n in TREFS] + tangent_corpus() + \
-        [compile_(t) for t in TIES]
+        [compile_(t) for t, _d in TIES.values()]
     for g in graphs:
         a, b = derivative_misses(g, rng)
         tot += a
@@ -354,14 +415,30 @@ def test_the_tangent_is_the_derivative():
     assert ops == set(lang.OPS)
 
 
-def test_ties_and_zeros_are_sampled_where_they_decide():
+def test_ties_and_zeros_are_placed_where_they_decide():
+    """At every placed point of every TIES system, field and step: the
+    tangent is the table's derivative, and it is NOT the derivative under
+    the other convention the system's points decide - so a tie or zero
+    convention that differs from the table fails here."""
     rng = random.Random("ties")
-    for text in TIES:
+    points = 0
+    for what, (text, decides) in TIES.items():
         g = compile_(text)
-        for _ in range(4):
-            x = _q(rng)
-            got = g.exact_eval("tangent_step", [x, x], tangent=[F(3), F(1)])
-            assert got == dual_eval(g, "step", [x, x], [F(3), F(1)], [], [])
+        for _ in range(6):
+            state, tangent = placed(rng, g)
+            for section, tsection in (("field", "tangent_field"),
+                                      ("step", "tangent_step")):
+                if g.section(section) is None:
+                    continue
+                got = g.exact_eval(tsection, state, tangent=tangent)
+                want = dual_eval(g, section, state, tangent, [], [])
+                assert got == want, (what, section, state, tangent)
+                for d in decides:
+                    other = dual_eval(g, section, state, tangent, [], [],
+                                      **OTHER[d])
+                    assert other != want, (what, section, d)
+                points += 1
+    assert points == 6 * (len(TIES) + 1)
 
 
 class _Plant(lang_tangent.Derivation):

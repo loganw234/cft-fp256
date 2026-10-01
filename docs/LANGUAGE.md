@@ -1289,10 +1289,18 @@ is a defect in the sentence that says everything is checked):
    must EQUAL the test's own derivative of the primal sections: dual
    numbers in exact rationals, (value, derivative) pairs carried through
    every node, the conventions at measure-zero points written again
-   from the rule table above, at random rational points and at targeted
-   ties and zeros. So the printed variational equations are the
-   derivative of the printed equations, and not merely what the graph
-   says.
+   from the rule table above. The points are random rationals, about
+   half of them placed (one component set equal to another, or to
+   zero), and the ties and zeros the conventions decide, placed with
+   operands equal in value and different in tangent: min, max, minnum
+   and maxnum of x and z at x = z with v.x different from v.z, alone
+   and inside expressions, and abs and copysign's two sources at
+   x - z. There the check also asserts that a tie given its second
+   operand's tangent, or a zero's sign taken as -, gives another
+   answer, so that a convention other than the table's fails it
+   (measured: each, planted, red on the test and on the stage). So the
+   printed variational equations are the derivative of the printed
+   equations, and not merely what the graph says.
 
 **Why exact dual numbers, not mpmath.** Every operation is piecewise
 polynomial, so the exact derivative exists, and equality needs no
@@ -1314,8 +1322,15 @@ stdlib-only.
   bit for bit, with tangents holding signalling NaNs, infinities, -0 and
   subnormals, and by unit tests of each rule's specials;
 - **a convention at a measure-zero point** that differs from the table:
-  only where a sampled point lands on one, so the gate places points on
-  ties and zeros on purpose.
+  only at a point placed on one whose operands differ in tangent - at a
+  tie of two operands with the same tangent, or a zero whose tangent is
+  zero, every convention gives the same answer. The gate places such
+  points for the min family's ties and for abs's and copysign's zeros
+  (check 4); a tie or a zero anywhere else, such as a select whose
+  comparison flips, is seen only where a placed point falls on it. The
+  conventions themselves are held bit for bit by the unit tests of each
+  rule's measure-zero values and specials, and by the rule table's
+  text, which the rules are rendered against.
 
 **The Lyapunov smoke test** (the `tangent` stage): Lorenz-63's largest
 exponent, from `lorenz63-rk4-tangent-fp64.cftl` compiled, run on
@@ -1542,10 +1557,13 @@ under `make golden`, with no change to either.
   measure-zero values (a tie, ±0, a NaN result) and a product by ±1 at
   the specials, bit for bit;
 - the fourth check - the tangent evaluated exactly against the test's
-  own dual numbers - on the references with tangent vectors, on
-  generated systems that cover every operation, and at ties and zeros
-  placed on purpose; three plants, each red on it: a wrong product rule,
-  a dropped tangent term, a tangent reading the wrong primal value; the
+  own dual numbers - on the references with tangent vectors and on
+  generated systems that cover every operation, at random points,
+  about half of them placed, and at ties and zeros placed where a
+  convention decides (operands equal in value, different in tangent),
+  where the other conventions are asserted to give another answer;
+  three plants, each red on it: a wrong product rule, a dropped tangent
+  term, a tangent reading the wrong primal value; the
   rounding-order plant `da*b + a*db`, green on it and red on the
   committed bytes and the rule table;
 - construction A against B: equal exactly at sampled points on every
