@@ -107,6 +107,33 @@ the gate holds that.
   loops. What is left to recurse, deep nesting and long chains of lets,
   is held to Python's own recursion limit, which the package keeps
   rather than raises, and past it the refusal is `too-deep` too.
+- **The canonical form is held to the same 100**, so that it always reads
+  back ("The intention-out"). It can nest deeper than its source three
+  ways:
+  - a negation used as an operand of a binary operation is written in
+    parentheses, `(-a) * b`, so `-(-(x) * y) * y` nests two levels a
+    level: 51 levels, written 51 deep, would be written 101 deep;
+  - a tangent's rule writes an unnamed primal value again inside a call
+    ("The variational equations"), so the tangent of an unnamed product
+    of n terms nests n - 1 deep from a source 0 deep, and a min chain's
+    tangent one level deeper than the chain;
+  - euler's and stormer-verlet's step writes a right-hand side in place
+    inside the template's fma, `next x = fma(h, <rhs>, x)`, one level
+    deeper than its equation.
+
+  A source whose canonical form would nest past 100 is refused
+  `too-deep` at the line of the equation or let whose line would be too
+  deep - primal or tangent, a written tangent equation or tangent let at
+  its own line - and the sentence names that line and its depth. The
+  depth is measured as the parser counts nesting, on what the canonical
+  form would write: `python/cft_golden/lang/nesting.py` follows the
+  renderer's rules without writing the text, and
+  `python/tests/test_lang_readback.py` holds it to the lexer's own count
+  of the renderer's text, line by line, so nothing is refused whose
+  canonical form reads back. Lets bound the depth: the canonical form
+  writes a let by its name. Until 2026-10-01 such a source was accepted,
+  and the compiler stopped at its own check of the canonical form, exit
+  70, "a defect in the compiler" (verifier-VL3; parcel D2).
 - A name is a letter or `_` followed by letters, digits and `_`, and
   names are case-sensitive: `Y` and `y` are two names.
 - A dotted name such as `k1.x` or `Y2.x[3]` is a **label**: it names a
@@ -257,7 +284,13 @@ the language takes 754's clauses 4.1, 10 and 11 at their strictest:
   widened.
 - A value defined and never used is `unused`. Every operation written is
   performed, so no dead-code elimination ever has to decide whether a
-  dropped operation's flags were part of the answer.
+  dropped operation's flags were part of the answer. h is used where a
+  constant of the step scales with it ("The step's constants"): every
+  flow's template has one, and a map that names its step but reads h
+  only where it folds to a constant that does not scale - `h - h`,
+  `h/h`, `copysign(1, h)` - is `unused` at the step line, its sentence
+  naming each use that folded, by line, with its value:
+  `h - h at line 5 is 0`.
 
 The compiler (L2) may commute the operands of `+` and `*`, share
 identical subexpressions, schedule and allocate freely. None of these
@@ -388,12 +421,25 @@ param is a run-time neg of its rounded value. For an exact constant
   these magnitudes; the gate holds that, and verifier-P1 measured it.
 - A constant is either independent of h or a rational multiple of it.
   `h*h`, `1/h` and `h + 1` do not halve with h, and are `h-nonlinear`.
-- A flow's equations and their lets cannot read h, nor a const whose
-  value changes with h's size (`h-scope`): a step-halving run halves h,
-  and such a right-hand side would move with it. A const whose value
-  does not change with h's size is a plain rational wherever it is
-  used, however it was written: `const c = h/h` is 1, and
-  `copysign(1, h)` and `abs(h)/h` are h's sign, 1 or -1.
+  - The rule holds a constant's value, not the products and quotients
+    that make it: the checker carries every constant as c x h^d,
+    exactly, so `(h*h)/h` is h, and `(h*h)/(h*h)` is 1 - in a map, a
+    use of h that folds away (below).
+  - A sum of different powers of h, and a min, max, minnum, maxnum,
+    comparison or select of a constant that changes with h's size, are
+    refused where they are made, whatever surrounds them: `(h + 1) - 1`
+    at its sum although its value is h, and `min(h, 2*h)` although at
+    h's sign it is a multiple of h. h's sign enters a constant only
+    through copysign and abs.
+- A flow's equations and their lets cannot read h, whatever it folds to,
+  nor a const whose value changes with h's size (`h-scope`): a
+  step-halving run halves h, and a right-hand side must not move with
+  it. The rule refuses h read directly even where the value would not
+  move, `(h/h) * x`, and a const that changes with h's size even where
+  it is read so that it would not, `c/c`. A const whose value does not
+  change with h's size is a plain rational wherever it is used, however
+  it was written: `const c = h/h` is 1, and `copysign(1, h)` and
+  `abs(h)/h` are h's sign, 1 or -1.
 - **h's sign is fixed when a graph is compiled.** Every constant is
   c x h^d with c fixed by h's sign alone: `copysign(1, h)`, `abs(h)/h`
   and, in a map, `abs(h)` (h times h's sign) are folded at the graph's
@@ -407,6 +453,16 @@ param is a run-time neg of its rounded value. For an exact constant
   1.125 (verifier-VL1).
 - A map may name a step, `step map, h = ...`. Its equations may then use
   h, and its h-scaled constants are listed like a template's.
+- **A map that names h must use it in a constant that scales with it**,
+  or it is `unused`: h is used only there. `h - h`, `h/h`,
+  `(h*h)/(h*h)`, `copysign(1, h)`, `abs(h)/h` and `0*h` each fold to a
+  constant that does not scale, and a map that reads h only so would
+  declare an h its step never reads. Write the constant, or leave h out
+  of the step line. In a map `abs(h)` is h times its sign, a scaled
+  constant, and `h - h + h` is h; a flow always uses h, in its template.
+  Until 2026-10-01 such a map was accepted, and its canonical form,
+  declaring h and reading it nowhere, did not read back: the compiler
+  stopped with exit 70 (the challenge suite's finding 1; parcel D2).
 
 The references' constants at fp64 under rne. At fp256 every one equals
 its classic bank slot as well; the gate holds both.
@@ -1375,7 +1431,7 @@ The text and its declarations:
 |---|---|
 | `character` | a byte or character the text does not hold: not UTF-8; a line end other than LF or CR LF, or a NUL or Ctrl-Z, anywhere; outside a comment, anything but printable ASCII, space and tab |
 | `syntax` | text that is not a statement of the language |
-| `too-deep` | parentheses nested more than 100 deep, or an expression or a chain of lets deeper than the checker evaluates |
+| `too-deep` | parentheses nested more than 100 deep - in the source, or in the canonical form it would have: a negation used as a multiplicand, the tangent of an unnamed product or a min chain, euler's and stormer-verlet's step around a right-hand side - or an expression or a chain of lets deeper than the checker evaluates |
 | `constant-range` | a constant whose exact value lies beyond 2^+-1048576 |
 | `missing-system` | no `system` line |
 | `missing-format` | no `format` line |
@@ -1390,7 +1446,7 @@ The text and its declarations:
 | `undefined-name` | a name used and never declared |
 | `array-length` | an array whose length is not written as a whole number from 1 to 32,768 |
 | `lane-capacity` | a lane of more than 32,768 values (its state and lane params), the deepest scratch any tile publishes |
-| `unused` | a const, param, lane param, let or h that nothing uses |
+| `unused` | a const, param, lane param, let or h that nothing uses; h is used only where a constant of the step scales with it, so a map whose every use of h folds away is `unused` |
 | `cycle` | a definition that depends on itself |
 | `not-constant` | a value needed when the program is compiled that reads the state, a param, a lane param or a let |
 | `bank-capacity` | more than 512 params and constants: the bank holds 512 on every device |

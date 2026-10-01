@@ -1226,12 +1226,17 @@ def test_f1_no_float_reaches_the_constant_code():
                     cases[f"copysign({c_text} * {hd}, {s_text}) * {back}"] = \
                         abs(c * h ** d) * s / h ** d
                 for expr, value in cases.items():
+                    # `+ h`: k folds to a rational, and a map whose every
+                    # use of h folds away is `unused` (D2, 2026-10-01) - its
+                    # canonical form would declare an h nothing reads
                     g = compile_(f"system s\nformat fp256\nstate x\n"
-                                 f"const k = {expr}\nnext x = k * x\n"
+                                 f"const k = {expr}\nnext x = k * x + h\n"
                                  f"step map, h = {h_text}\n")
-                    got = [(v, b) for v, fa, b, _f in g.const]
+                    got = [(v, b) for v, fa, b, _f in g.const if fa is None]
                     assert got == [(value, C.round_once(fmt, sf.RND_RNE,
                                                         value)[0])], expr
+                    assert [fa for _v, fa, _b, _f in g.const
+                            if fa is not None] == [1]
     with pytest.raises(AssertionError):
         lang_check.K(0.5)
     with pytest.raises(AssertionError):

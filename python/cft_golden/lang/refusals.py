@@ -29,7 +29,8 @@ CATALOGUE = {
                  "a NUL or Ctrl-Z, anywhere; outside a comment, anything "
                  "but printable ASCII, space and tab",
     "syntax": "the text is not a statement of the language",
-    "too-deep": "parentheses nested more than 100 deep, or an expression "
+    "too-deep": "parentheses nested more than 100 deep - in the source, "
+                "or in the canonical form it would have - or an expression "
                 "or a chain of lets deeper than the checker evaluates",
     "constant-range": "a constant whose exact value lies beyond "
                       "2^+-1048576, outside every format by far",
@@ -52,7 +53,8 @@ CATALOGUE = {
                     "number from 1 to 32,768",
     "lane-capacity": "a lane of more than 32,768 values (state and lane "
                      "params), the deepest scratch any tile publishes",
-    "unused": "a const, param, lane param, let or h that nothing uses",
+    "unused": "a const, param, lane param, let or h that nothing uses; h "
+              "is used only where a constant of the step scales with it",
     "cycle": "a definition that depends on itself",
     "not-constant": "a value needed when the program is compiled that "
                     "reads the state, a param, a lane param or a let",

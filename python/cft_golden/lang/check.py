@@ -29,8 +29,8 @@ from ..seq import SCRATCH_D_MAX
 from . import constants as C
 from .graph import PRIMAL_OF, Node, StepGraph, canonical
 from .refusals import Refusal, too_deep
-from .syntax import (KEYWORDS, Bin, Call, Cmp, Index, Name, Neg, Num,
-                     Target, parse)
+from .syntax import (KEYWORDS, MAX_NESTING, Bin, Call, Cmp, Index, Name,
+                     Neg, Num, Target, parse)
 from .tangent import Derivation
 from .templates import (FLOW_INTEGRATORS, INTEGRATORS, LABEL_PREFIXES,
                         TEMPLATES)
@@ -81,15 +81,102 @@ class K:
     """A constant: coef x h^deg, exactly. deg is 0 for a plain rational
     and 1 for an h-scaled one; any other power refuses where it would
     become a leaf (`h-nonlinear`). coef is a Fraction and never a float:
-    C.exact refuses one, so no binary64 can reach a constant."""
-    __slots__ = ("coef", "deg")
+    C.exact refuses one, so no binary64 can reach a constant.
 
-    def __init__(self, coef, deg=0):
+    hsrc is None for a constant that never read h, and otherwise (the
+    outermost constant expression that read it, its index environment):
+    where the constant meets the step, one of degree 0 is a use of h that
+    folded away, which the `unused` check names (Checker.unused)."""
+    __slots__ = ("coef", "deg", "hsrc")
+
+    def __init__(self, coef, deg=0, hsrc=None):
         self.coef = C.exact(coef)
         if not isinstance(deg, int) or isinstance(deg, bool):
             raise AssertionError(f"a constant's power of h is an integer, "
                                  f"not {deg!r}")
         self.deg = deg if self.coef != 0 else 0
+        self.hsrc = hsrc
+
+    def read_h(self, e, env):
+        """This constant as the expression `e` makes it, having read h: a
+        new K, since a fold may hand back an operand's own (0 + c is c),
+        and a const's value is shared by every use."""
+        return K(self.coef, self.deg, (e, env))
+
+
+def _hread(*vals):
+    return any(isinstance(v, K) and v.hsrc is not None for v in vals)
+
+
+def _spelt(e):
+    """An expression's text as a sentence names it: its own names,
+    literals and operators, each nested operation parenthesised but a left
+    operand with its parent's operator (a - b - c). A chain and a run of
+    minuses are walked in loops; nesting recurses, as deep as the parser
+    allowed it (MAX_NESTING)."""
+    def operand(x, same=None):
+        text = _spelt(x)
+        if isinstance(x, (Cmp, Neg)) or (isinstance(x, Bin) and x.op != same):
+            return f"({text})"
+        return text
+    if isinstance(e, Num):
+        return e.text
+    if isinstance(e, Name):
+        return e.name
+    if isinstance(e, Index):
+        return f"{e.name}[{_spelt(e.index)}]"
+    if isinstance(e, Neg):
+        n = 0
+        while isinstance(e, Neg):
+            n, e = n + 1, e.arg
+        inner = operand(e) if isinstance(e, Bin) else _spelt(e)
+        return "- " * (n - 1) + "-" + inner
+    if isinstance(e, Bin):
+        chain = []
+        while isinstance(e, Bin):
+            chain.append(e)
+            e = e.left
+        text = operand(e, chain[-1].op)
+        for k in range(len(chain) - 1, -1, -1):
+            b = chain[k]
+            text = f"{text} {b.op} {operand(b.right)}"
+            if k and chain[k - 1].op != b.op:
+                text = f"({text})"
+        return text
+    if isinstance(e, Cmp):
+        return f"{operand(e.left)} {e.op} {operand(e.right)}"
+    if isinstance(e, Call):
+        return f"{e.name}({', '.join(_spelt(a) for a in e.args)})"
+    raise AssertionError(f"unknown expression {e!r}")
+
+
+def spell(e, env=None, limit=40):
+    """(text, where): a constant expression as a refusal's sentence names
+    it - its text, cut to `limit` characters - and, where an equation's
+    range binds index variables it reads, their values (" where i = 3")."""
+    text = _spelt(e)
+    if len(text) > limit:
+        text = text[:limit - 3] + "..."
+    where = ""
+    if env:
+        names = set()
+        stack = [e]
+        while stack:
+            x = stack.pop()
+            if isinstance(x, Name):
+                names.add(x.name)
+            elif isinstance(x, Index):
+                stack.append(x.index)
+            elif isinstance(x, Neg):
+                stack.append(x.arg)
+            elif isinstance(x, (Bin, Cmp)):
+                stack += [x.left, x.right]
+            elif isinstance(x, Call):
+                stack += list(x.args)
+        bound = [f"{v} = {C.shown(env[v])}" for v in sorted(env) if v in names]
+        if bound:
+            where = f" where {', '.join(bound)}"
+    return text, where
 
 
 class Decl:
@@ -159,8 +246,14 @@ class Checker:
         self.const_stack = []
         self.h_value = None
         self.h_busy = False
-        self.h_used = False
+        self.h_used = False             # h is read
         self.h_line = None
+        # h is USED where a constant of the step scales with it: an
+        # h-scaled leaf made (every flow's template makes some), and the
+        # uses of h that folded to a constant that does not scale -
+        # {id(expression): (expression, index environment, value)}
+        self.h_scaled = False
+        self.h_folded = {}
         # the tangent vectors, in declaration order, and what a source
         # writes of their equations: {vector: [Stmt]}, {vector: {name:
         # Decl}} for its written tangent lets
@@ -168,6 +261,7 @@ class Checker:
         self.tangents = []
         self.tangent_set = set()
         self.tan_eq_stmts = {}
+        self.tan_eq_lines = {}          # {vector: each component's line}
         self.tan_let_stmts = {}
         self.tan_lets = {}
         self.field_ctx = None
@@ -679,10 +773,17 @@ class Checker:
         return c
 
     def eval(self, e, ctx):
+        # A constant that read h carries the outermost expression that read
+        # it (K.hsrc): each operator below whose result is a constant made
+        # from one marks it as its own, so that where the constant meets
+        # the step the expression named is the whole constant written.
         if isinstance(e, Num):
             return K(e.value)
         if isinstance(e, Name):
-            return self.name_value(e.name, None, ctx, e.line)
+            v = self.name_value(e.name, None, ctx, e.line)
+            if e.name == "h" and isinstance(v, K):
+                v = v.read_h(e, ctx.env)
+            return v
         if isinstance(e, Index):
             return self.name_value(e.name, e.index, ctx, e.line)
         if isinstance(e, Neg):
@@ -701,9 +802,11 @@ class Checker:
                     f"of zero, and v1 refuses a minus written on a zero "
                     f"(a constant whose exact value is 0 is +0 under every "
                     f"attribute)", negs[-1].line)
-            v = self.eval(e, ctx)
+            inner = v = self.eval(e, ctx)
             for n in reversed(negs):
                 v = self.negate(v, n.line)
+            if isinstance(v, K) and _hread(inner):
+                v = v.read_h(negs[0], ctx.env)
             return v
         if isinstance(e, Bin):
             # a left-deep chain (a + b + c ...), walked in a loop: each
@@ -714,7 +817,11 @@ class Checker:
                 e = e.left
             v = self.eval(e, ctx)
             for b in reversed(chain):
-                v = self.binary(b, v, self.eval(b.right, ctx))
+                r = self.eval(b.right, ctx)
+                out = self.binary(b, v, r)
+                if isinstance(out, K) and _hread(v, r):
+                    out = out.read_h(b, ctx.env)
+                v = out
             return v
         if isinstance(e, Cmp):
             a = self.eval(e.left, ctx)
@@ -722,7 +829,10 @@ class Checker:
             op, args = {"<": ("cmplt", (a, b)), "<=": ("cmple", (a, b)),
                         ">": ("cmplt", (b, a)), ">=": ("cmple", (b, a)),
                         "==": ("cmpeq", (a, b))}[e.op]
-            return self.apply(op, list(args), e.line)
+            v = self.apply(op, list(args), e.line)
+            if isinstance(v, K) and _hread(a, b):
+                v = v.read_h(e, ctx.env)
+            return v
         if isinstance(e, Call):
             return self.call(e, ctx)
         raise AssertionError(f"unknown expression {e!r}")
@@ -756,8 +866,12 @@ class Checker:
             vals = [self.eval(a, ctx) for a in e.args]
             if name == "select":
                 c, a, b = vals
-                return self.apply("select", [a, b, c], e.line)
-            return self.apply(name, vals, e.line)
+                v = self.apply("select", [a, b, c], e.line)
+            else:
+                v = self.apply(name, vals, e.line)
+            if isinstance(v, K) and _hread(*vals):
+                v = v.read_h(e, ctx.env)
+            return v
         if name == "sqrt" or name in TRANSCENDENTAL:
             vals = [self.eval(a, ctx) for a in e.args]
             if vals and all(isinstance(v, K) for v in vals):
@@ -838,7 +952,7 @@ class Checker:
                 # step-halving run halves h; a const whose value does
                 # not (h/h, abs(1/(3*h))*h) is a plain rational
                 raise self.h_scope(ctx, f"the const {name}'s value "
-                                   f"depends on h", line)
+                                   f"depends on h", line, const=name)
             return v
         # a let
         if ctx.mode in ("const", "default"):
@@ -933,11 +1047,23 @@ class Checker:
                        f"is compiled, and {why}", line)
 
     @staticmethod
-    def h_scope(ctx, what, line):
+    def h_scope(ctx, what, line, const=None):
+        # A flow's sentence says the rule and its reason, never that this
+        # right-hand side would move: h read directly is refused whatever
+        # it folds to, and (h/h) * x would not move (D2; it said "the
+        # right-hand side would move with it" until 2026-10-01).
+        if ctx.mode == "field" and const is None:
+            return Refusal("h-scope", "a flow's equations cannot read h, "
+                           "whatever it folds to: a step-halving run halves "
+                           "h, and a right-hand side must not move with it "
+                           "(a const whose value does not change with h's "
+                           "size, such as const c = h/h, is a plain rational "
+                           "they may read)", line)
         if ctx.mode == "field":
-            return Refusal("h-scope", f"a flow's equations cannot read h "
-                           f"({what}): a step-halving run halves h, and the "
-                           f"right-hand side would move with it", line)
+            return Refusal("h-scope", f"a flow's equations cannot read the "
+                           f"const {const}, whose value changes with h's "
+                           f"size: a step-halving run halves h, and a "
+                           f"right-hand side must not move with it", line)
         return Refusal("h-scope", f"a default cannot read h ({what}): a "
                        f"step-halving run halves h, and the default would "
                        f"not follow it", line)
@@ -1011,6 +1137,7 @@ class Checker:
                           f"h^{k.deg}, which does not halve with h: a "
                           f"constant is a rational, or a rational multiple "
                           f"of h", line)
+        self.h_meets(k)
         if k.deg == 0:
             key = (k.coef, None)
         else:
@@ -1035,6 +1162,16 @@ class Checker:
             self.rounded[key] = (bits, flags)
         return ("c", key)
 
+    def h_meets(self, k):
+        """A constant of degree 0 or 1 meeting the step - a leaf, or a
+        map's constant output: one that scales with h uses h; one that read
+        h and does not scale is a use of h that folded away."""
+        if k.deg == 1:
+            self.h_scaled = True
+        elif k.deg == 0 and k.hsrc is not None:
+            e, env = k.hsrc
+            self.h_folded.setdefault(id(e), (e, env, k.coef))
+
     def sign_h(self):
         return 1 if self.h_value is None or self.h_value > 0 else -1
 
@@ -1046,10 +1183,12 @@ class Checker:
             if y.coef == 0:
                 return x
             if x.deg != y.deg:
+                # not "does not halve with h": 2 + h*h at h = 2 is 6, and 3
+                # at h = 1 (D2). What is true of every such sum is the rule.
                 raise Refusal("h-nonlinear", "a sum of h and a constant, or "
-                              "of different powers of h, does not halve "
-                              "with h: a constant is a rational, or a "
-                              "rational multiple of h", line)
+                              "of different powers of h, is neither a "
+                              "rational nor a rational multiple of h, which "
+                              "a constant is", line)
             return K(x.coef + y.coef, x.deg)
 
         def mul(x, y):
@@ -1088,9 +1227,18 @@ class Checker:
             r = K(-m.coef, m.deg) if value(a[1]) < 0 else m
         else:
             if any(x.deg != 0 for x in a):
-                raise Refusal("h-nonlinear", f"{op} of a constant that "
-                              f"depends on h is not a fixed multiple of h, "
-                              f"and would not halve with it", line)
+                # The rule, true of every input that reaches it. It said
+                # "is not a fixed multiple of h, and would not halve with
+                # it", untrue of min(h, 2*h), which is h at h > 0, and of
+                # h < 0, fixed by h's sign (the challenge suite's finding 2).
+                what = "a comparison" if op in ("cmplt", "cmple", "cmpeq") \
+                    else op
+                raise Refusal("h-nonlinear", f"{what} of a constant that "
+                              f"changes with h's size is refused, even where, "
+                              f"at h's sign, the result would be fixed or a "
+                              f"multiple of h: a constant is a rational or a "
+                              f"rational multiple of h, and h's sign enters "
+                              f"one only through copysign and abs", line)
             v = [x.coef for x in a]
             if op in ("min", "minnum"):
                 r = K(min(v[0], v[1]))
@@ -1430,6 +1578,7 @@ class Checker:
             # the difference is refused as one, by name
             self.defaults()
         for vec, (vals, lines) in written.items():
+            self.tan_eq_lines[vec] = lines
             fams = self.tan_lets.get(vec, {})
             want = self.assemble(field_outs, step_outs, tangent=(tf, ts))
             if self.is_flow:
@@ -1531,30 +1680,73 @@ class Checker:
                               f"rounds to zero in {where}", d.line)
             d.value = (value, bits, flags)
 
-    def unused(self):
+    def unused(self, outs):
+        """Every declared name, let and h used, or `unused` at the first
+        line that is not. `outs` are the primal equations' outputs: a map's
+        constant output meets the step there, after this check."""
+        tail = ", and every operation written is performed"
         found = []
         for d in self.names.values():
             if d.kind in ("const", "param", "lane") and not d.used:
                 kind = "lane param" if d.kind == "lane" else d.kind
-                found.append((d.line, f"the {kind} {d.name} is never used"))
+                found.append((d.line, f"the {kind} {d.name} is never "
+                                      f"used{tail}"))
             elif d.kind == "let":
                 for comp, (_e, ln, _env) in d.defs.items():
                     if comp not in d.used_comps:
                         label = d.name if comp is None else f"{d.name}[{comp}]"
-                        found.append((ln, f"the let {label} is never used"))
+                        found.append((ln, f"the let {label} is never "
+                                          f"used{tail}"))
         if self.h_line is not None and not self.h_used:
-            found.append((self.h_line, "h is declared and never used"))
+            found.append((self.h_line, f"h is declared and never used{tail}"))
+        elif self.h_line is not None and not self.h_scales(outs):
+            found.append((self.h_line, self.h_folded_sentence()))
         for fams in self.tan_lets.values():
             for d in fams.values():
                 for comp, (_e, ln, _env) in d.defs.items():
                     if comp not in d.used_comps:
                         label = d.name if comp is None else f"{d.name}[{comp}]"
                         found.append((ln, f"the tangent let {label} is "
-                                          f"never used"))
+                                          f"never used{tail}"))
         if found:
-            line, what = min(found, key=lambda t: t[0])
-            raise Refusal("unused", f"{what}, and every operation written "
-                          f"is performed", line)
+            line, sentence = min(found, key=lambda t: t[0])
+            raise Refusal("unused", sentence, line)
+
+    def h_scales(self, outs):
+        """Whether h is used: whether a constant of the step scales with it
+        (docs/LANGUAGE.md, "The step's constants"). Every leaf has met the
+        step by now (h_meets); a map's constant output meets it here. A
+        constant output of another power is refused `h-nonlinear` when the
+        graph is assembled, as it always was, so it counts as no fold."""
+        if self.h_scaled:
+            return True
+        other_power = False
+        for v in outs:
+            if isinstance(v, K):
+                if v.deg in (0, 1):
+                    self.h_meets(v)
+                else:
+                    other_power = True
+        return self.h_scaled or other_power
+
+    def h_folded_sentence(self):
+        """`unused`'s sentence for an h read only where it folds away: each
+        such use by line, with its value (D2, 2026-10-01: before it, the
+        source was accepted and its canonical form, declaring h and reading
+        it nowhere, did not read back - cftc's exit 70)."""
+        uses = sorted(self.h_folded.values(), key=lambda u: u[0].line)
+        shown = []
+        for e, env, value in uses[:3]:
+            text, where = spell(e, env)
+            shown.append(f"{text} at line {e.line} is {C.brief(value)}{where}")
+        if len(uses) > 3:
+            shown.append(f"{len(uses) - 3:,} more")
+        listed = "" if not shown else f" ({shown[0]})" if len(shown) == 1 \
+            else " (" + ", ".join(shown[:-1]) + ", and " + shown[-1] + ")"
+        which = "the constant" if len(uses) == 1 else "the constants"
+        return (f"no constant of the step scales with h, so h is never used: "
+                f"it is read only where it folds to a constant that does "
+                f"not{listed}; write {which}, or leave h out of the step line")
 
     def assemble(self, field_outs, step_outs, step_lines=None, tangent=None,
                  tangent_lines=(None, None)):
@@ -1624,7 +1816,7 @@ class Checker:
         self.defaults()
         tangent = self.tangent_build(field_outs, step_outs)
         built = self.block_build() if self.exp_st is not None else None
-        self.unused()
+        self.unused(field_outs if self.is_flow else step_outs)
         graph = self.assemble(field_outs, step_outs, tangent=tangent)
         slots = len(graph.param) + len(graph.const)
         if slots > BANK_SLOTS:
@@ -1633,7 +1825,80 @@ class Checker:
                           f"{BANK_SLOTS} on every device")
         if built is not None:
             self.block_compare(field_outs, step_outs, built, tangent)
+        self.canonical_nesting(graph)
         return graph
+
+    # ==== the canonical form's nesting (D2) ============================
+
+    def canonical_nesting(self, graph):
+        """A source whose canonical form would nest past what the parser
+        reads is `too-deep`, at the source line of the equation or let
+        whose rendered line is too deep - so that every source accepted has
+        a canonical form that reads back (docs/LANGUAGE.md, "The text").
+        The depth is the renderer's own, measured by nesting.py without
+        writing the text; this is a rule of the language, not a read-back."""
+        from .nesting import lines
+        worst = None
+        for _code, depth, section, what, vec in lines(graph):
+            if depth <= MAX_NESTING:
+                continue
+            line, desc = self.nesting_source(section, what, vec)
+            key = (line, -depth)
+            if worst is None or key < worst[0]:
+                worst = (key, desc, depth, line)
+        if worst is None:
+            return
+        _key, desc, depth, line = worst
+        raise Refusal("too-deep", f"the canonical form would write {desc} "
+                      f"{C.shown(depth, group=True)} deep, and the language "
+                      f"reads nesting {MAX_NESTING} deep at most: name parts "
+                      f"of this line's expression with lets, which the "
+                      f"canonical form keeps as names, so that its depth is "
+                      f"bounded", line)
+
+    def nesting_source(self, section, what, vec):
+        """(source line, the line as the sentence names it) for a line the
+        canonical form writes: `what` is ("out", component) or ("label",
+        label) of `section`, written for the tangent vector `vec` in a
+        tangent section. The line is the equation's or the let's - a
+        written tangent equation's or tangent let's where the source writes
+        one - and, for a line of the expansion block, the equation or let
+        the stage evaluates."""
+        tangent = section in PRIMAL_OF
+        primal = PRIMAL_OF.get(section, section)
+        word = "d/dt" if self.is_flow else "next"
+        kind, x = what
+        in_block = self.is_flow and primal == "step"
+        if kind == "out":
+            name = self.comp_names[x]
+            line = self.eqs[x][2]
+            if in_block:
+                code = f"next {vec}.{name}" if tangent else f"next {name}"
+                return line, f"{code}, in its expansion block,"
+            if not tangent:
+                return line, f"{word} {name}"
+            written = self.tan_eq_lines.get(vec)
+            return (written[x] if written else line,
+                    f"{word} {vec}.{name}, the tangent of {word} {name},")
+        label = x
+        rest = label.partition(".")[2] if in_block else label
+        base, _b, idx = rest.partition("[")
+        comp = int(idx[:-1]) if idx else None
+        d = self.names.get(base)
+        if d is not None and d.kind == "let":
+            line = d.defs[comp][1]
+            if tangent and not in_block:
+                fam = self.tan_lets.get(vec, {}).get(f"{vec}.{base}")
+                if fam is not None and comp in fam.defs:
+                    line = fam.defs[comp][1]
+        else:                       # a stage's component: k1.x, Y2.x[3]
+            line = self.eqs[self.comp_names.index(rest)][2]
+        code = f"let {vec}.{label}" if tangent else f"let {label}"
+        if in_block:
+            return line, f"{code}, in its expansion block,"
+        if tangent:
+            return line, f"{code}, the tangent of let {label},"
+        return line, code
 
 
 def constant_of(text):
