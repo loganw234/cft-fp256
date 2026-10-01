@@ -4375,6 +4375,28 @@ cft-segrun's estimates, gives each constant's exact value and rounding,
 and records the counts. The compiler also writes the halved bank a
 step-halving estimate runs on.
 
+**The intention-out** (Logan's suggestion, 2026-10-01: a self-audit
+for the language's writers). Every compilation also writes the program
+back out as the compiler understood it. It is regenerated from the step
+graph, not copied from the source, and has three parts:
+- the equations in standard mathematical notation, each fma shown as
+  the a*b + c it computes and each constant as its exact value, for
+  the writer to hold against the textbook or the paper;
+- the program in the language's canonical form, with every operation
+  and its order explicit, every shared subexpression named, and the
+  integrator's step written out;
+- each constant's exact value, its rounding and its relative error,
+  and the step's operation counts.
+
+Two checks hold it:
+- the canonical form is itself a valid source, and parsed again it
+  gives the same step graph, byte for byte;
+- the mathematical form, evaluated exactly at random rational points,
+  gives what the step graph's right-hand sides give evaluated exactly.
+
+L1 builds both renderers and their checks; L2 writes the
+intention-out beside every image.
+
 **Parcels.**
 1. **L1: the definition, golden-first.**
    - docs/LANGUAGE.md: the grammar, the semantics above, and the name of
@@ -4388,12 +4410,15 @@ step-halving estimate runs on.
      - a reference interpreter that steps a system through the golden
        softfloat. It is the definition of correct for the language.
    - The three references are written in it.
+   - The intention-out's two renderers.
    - Its gate:
      - The interpreter's states, step for step, equal seq.py's run of
        gen_odes.py's images on the same lanes. That holds bit for bit,
        for every lane, at fp64 and fp256, with FLAGS included. Their
        constants agree there, measured.
      - Every refusal is made, by name.
+     - The intention-out's two checks, on the references and on
+       random systems.
      - Plants are red: a reassociated sum, a contraction, and a
        constant rounded through a narrower format. A constant rounded
        twice by H6's own route cannot fail at fp64 or fp256. Each plant
@@ -4402,7 +4427,7 @@ step-halving estimate runs on.
 2. **L2: the compiler**, held to L1's definition.
    - It starts once L1's step graph is fixed, and merges after L1.
    - It covers the lowering, the allocator and spiller, the scheduler,
-     the emitter and the manifest.
+     the emitter, the manifest and the intention-out.
    - Its gate:
      - A corpus is compiled and run on seq.py, and equals L1's
        interpreter bit for bit, FLAGS included. The corpus is the three
