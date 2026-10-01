@@ -1642,10 +1642,11 @@ gate measures what they cost in two shapes (**Its gate**, below):
   entries' phase is the process's peak. The run holds its two states,
   its streams (a sixteenth of a state) and one state more at most (the
   initial state, or a hash's copy), and the entries hold a pair and a
-  hash's copy. The peak commit was 476 KiB less, 16 KiB less and 16 KiB
-  more than the run alone (26,300 to 26,780 KiB, three runs). W1's two
-  plants were 7,668 and 7,724 KiB more (the third state) and 15,888 and
-  15,892 KiB more (every pair kept), and the gate fails both.
+  hash's copy. In six runs the peak commit was 476, 88 and 16 KiB less,
+  and 16, 16 and 52 KiB more, than the run alone (26,300 to 26,780 KiB).
+  Against the gate as committed, W1's two plants were 7,696 and 7,668
+  KiB more (the third state) and 15,912 and 15,848 KiB more (every pair
+  kept), and the gate fails both.
 
 Those are the desktop's peak commit (2026-09-30). In WSL (cft2204), the
 least address space was 0 KiB more with the entries in both shapes, and
@@ -1955,7 +1956,13 @@ NOT TESTED too, and the gate goes on (at eb2d1ae, run as `nobody` under
 a hard limit of about 8 GB, it stopped with a traceback; verifier-C7).
 It also holds git to ignoring the tool's binary.
 
-With the accuracy entries (2026-09-30): 634 checks on the Windows
+With a negative run index and `slotstep` (S1's send-back, 2026-09-30):
+656 checks on the Windows desktop and one SKIP, the trial's cost NOT
+TESTED there, 96 s. On Linux the three checks of the trial's cost run
+in the SKIP's place, so 659 there, by that arithmetic. Section 10 alone
+has run in WSL (cft2204), each of its checks green, the trial's three
+among them; the rest of the gate has not run on Linux. With the accuracy
+entries (2026-09-30): 634 checks on the Windows
 desktop and one SKIP, the trial's cost NOT TESTED there, 80 s. On Linux
 the three checks of the trial's cost run in the SKIP's place, so 637
 there, by that arithmetic and not yet run. With `--scratch-depth`
