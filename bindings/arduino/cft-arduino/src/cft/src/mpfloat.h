@@ -38,7 +38,8 @@
  *
  * Every operation TRUNCATES toward zero and every operation carries
  * `err`, an upper bound on the RELATIVE distance from the true value
- * in units of 2^-W:
+ * in units of 2^-W, W being the value's own width, the bit length of
+ * its significand:
  *
  *     |true - value| <= err * 2^-W * |value|
  *
@@ -49,24 +50,41 @@
  * significand's last place, which is how cft_mp_round turns the bound
  * back into an enclosure: [m - err, m + err] * 2^exp.
  *
+ * The count has no ceiling. It is a cft_mp_err, a whole number of
+ * units carried with its own exponent: exact below 2^63, and past that
+ * rounded UP to 63 significant bits. So a bound of any size is carried
+ * exactly or rounded up, and never replaced by a smaller one. The one
+ * value above every finite count is infinity, which is a bound too -
+ * it is above every true error - and which never decides.
+ *
  * The bounds are deliberately loose - upper bounds, not estimates -
  * because of the property that makes the whole scheme sound: the bound
  * is CHECKED at the end. cft_mp_round rounds both ends of that
  * enclosure and accepts the result only if they agree on the bits AND
  * on the flags. A bound that is too generous costs an escalation to a
  * higher working precision; it can never produce a wrong answer. The
- * only bound that could is one that is too SMALL, which is why every
- * rule rounds up and why the saturating arithmetic saturates upward.
+ * only bound that could is one that is too SMALL. That is why every
+ * rule in mpfloat.c is an upper bound at every size of count and every
+ * working precision, rounds up, and carries its derivation, and why
+ * host/tests/mp_err_check.c holds every one of those rules to it
+ * exactly, in GMP, over counts from zero past 2^W to infinity - and,
+ * against MPFR, the count cft_mp_const gives each constant and
+ * transcend.c's conversion of an argument's error into its
+ * logarithm's (mp_log_of_mp). transcend.c's own allowances, such as a
+ * truncated series' tail, are its algorithms' analysis and are not
+ * held there.
  *
- * The exception is saturation. A saturated error (CFT_MP_ERR_MAX) is a
- * clamp, not a bound, and it is NOT too wide to decide: at any working
- * precision about 41 bits above the format's, which is every ordinary
- * one, cft_mp_round decides on it. Measured on 2026-09-30, 17,816 of
- * 298,133 final roundings in host/tests/transcend_check.py's sweep
- * decided that way, every result equal to the model's. So "it can
- * never produce a wrong answer" above holds for every unsaturated
- * bound, and for a saturated one it is not proved. mpfloat.c's header
- * has the measurement, and why refusing to decide is not the repair.
+ * Until 2026-09-30 the count was a uint64_t saturating at 2^40. A
+ * saturated count was a clamp, not a bound, and it decided roundings:
+ * 17,816 of the 298,133 final roundings in
+ * host/tests/transcend_check.py's sweep, every result equal to the
+ * model's. Nor was every count below the ceiling a bound: a clamp that
+ * a later operation scaled back down looked ordinary and was not one
+ * (verifier-W4 measured a count of 34 against a worst true error of
+ * 2^46.97 units). mpfloat.c's header has that history, and why the
+ * count that replaced it decides no rounding the old one did not, but
+ * for the one exception it names: an end of the old enclosure on the
+ * format's grid, where the old loop escalated and this one may decide.
  */
 
 #ifndef CFT_MPFLOAT_H
@@ -79,25 +97,60 @@
 
 /* The widest working significand. The binding constraint is the
  * 2048-bit bigint container: cft_mp_mul forms the full 2W-bit product
- * and cft_mp_div shifts the numerator left by W before dividing, so
- * 2W must fit with room to spare. 928 leaves 192 bits of headroom, and
- * is itself 832 (the Ziv cap, python/cft_golden/transcend.py) plus 32
- * bits of guard plus the 19 bits of argument-reduction headroom the
- * fp256 exponent range can demand. */
+ * and cft_mp_div shifts the numerator left by W + 1 or more before
+ * dividing, so 2W must fit with room to spare. 928 leaves 192 bits of
+ * headroom, and is itself 832 (the Ziv cap,
+ * python/cft_golden/transcend.py) plus 32 bits of guard plus the 19
+ * bits of argument-reduction headroom the fp256 exponent range can
+ * demand. */
 #define CFT_MP_PREC_MAX 928
 
-/* The saturation point. A count here is a clamp, not a bound, and it
- * can still decide a rounding (mpfloat.c's header). Kept far below
- * UINT64_MAX so that the scaling in cft_mp_add cannot wrap. */
-#define CFT_MP_ERR_MAX ((uint64_t)1 << 40)
+/* An error count: c * 2^k whole units of 2^-W. Canonical: c below
+ * 2^63, k >= 0, and c at or above 2^62 whenever k > 0, so a count
+ * below 2^63 is the exact integer with k = 0 and a larger one keeps 63
+ * significant bits. A zero count is {0, 0}. k at CFT_MP_ERR_K_INF or
+ * past it is infinity: a bound that is above every true error and
+ * cannot decide. mpfloat.c's header says where infinity can arise, and
+ * why it never displaces a bound that could decide. */
+typedef struct {
+    uint64_t c;
+    int32_t  k;
+} cft_mp_err;
+
+#define CFT_MP_ERR_K_INF ((int32_t)1 << 24)
 
 typedef struct {
-    int      sign;    /* 1 when negative */
-    int      zero;    /* the value is exactly zero; m and exp unused */
-    long     exp;     /* value = (-1)^sign * m * 2^exp */
-    uint64_t err;     /* |true - value| <= err * 2^-W * |value| */
-    cft_bn   m;       /* exactly W bits when !zero: bit W-1 set */
+    int        sign;  /* 1 when negative */
+    int        zero;  /* the value is exactly zero; m and exp unused */
+    long       exp;   /* value = (-1)^sign * m * 2^exp */
+    cft_mp_err err;   /* |true - value| <= err * 2^-W * |value| */
+    cft_bn     m;     /* exactly W bits when !zero: bit W-1 set */
 } cft_mp;
+
+/* The count's arithmetic: every result is the exact one or above it,
+ * never below. These are the only ways this module and transcend.c
+ * make or rescale a bound. */
+cft_mp_err cft_mp_err_u64(uint64_t n);                 /* n units */
+cft_mp_err cft_mp_err_add(cft_mp_err a, cft_mp_err b);
+/* a * 2^j: for j >= 0 only the exponent moves, which is exact while it
+ * stays below CFT_MP_ERR_K_INF; for j < 0 rounded up to a whole unit.
+ * A known limit (verifier-W5, 2026-09-30): near a count of 2^(2^24)
+ * infinity comes early. Any j of 2^24 or more gives infinity even from
+ * a count of 1, which canonical form could hold as {2^62, 2^24 - 62},
+ * and the private err_mul in mpfloat.c can do the same for a product
+ * between 2^(2^24) and just under 2^(2^24 + 62), the top of canonical
+ * form (verifier-W5). So
+ * "exact for j >= 0" is not exact there - a bound still, above the
+ * true value, at a size that decides nothing. */
+cft_mp_err cft_mp_err_up(cft_mp_err a, long j);
+cft_mp_err cft_mp_err_inf(void);
+int        cft_mp_err_is_inf(cft_mp_err a);
+/* 1 when a < 2^j is certain from a's bit length; 0 otherwise. */
+int        cft_mp_err_lt_pow2(cft_mp_err a, long j);
+/* v's count read in units of 2^-W: scaled up exactly by 2^(W - Wv)
+ * when v is narrower than W bits, and kept - an overstatement - when
+ * it is wider. */
+cft_mp_err cft_mp_err_at(const cft_mp *v, int W);
 
 /* The generated constants (host/src/mp_consts.h), by index. */
 typedef enum {
@@ -129,9 +182,6 @@ int  cft_mp_mul_ui(cft_mp *r, const cft_mp *a, uint32_t u, int W);
 int  cft_mp_div_ui(cft_mp *r, const cft_mp *a, uint32_t u, int W);
 int  cft_mp_sqrt(cft_mp *r, const cft_mp *a, int W);
 
-/* An error count times 2^k, rounded up and saturating: the one way
- * this module and transcend.c rescale a bound. */
-uint64_t cft_mp_err_scale(uint64_t err, int k);
 int  cft_mp_const(cft_mp *r, cft_mp_constant which, int W);
 
 /* floor(sqrt(n)) with an exactness flag, for the exact-case tests in

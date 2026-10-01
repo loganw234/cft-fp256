@@ -916,11 +916,15 @@ stage character "the clause-5.12 conversions and the 9.7 payloads vs the model, 
   PY "$ROOT/host/tests/character_check.py"
 
 # The transcendentals, twice. The first run is at the contract's
-# own working precision, where the Ziv loop has never once
-# escalated; the second forces the library to START below the
-# precision it needs, so the escalation path runs - against an
-# UNESCALATED model, which is what makes it a comparison rather
-# than a coincidence. That second run is what found the
+# own working precision, where the Ziv loop seldom escalates: 805
+# times over the whole run with the error count that has no ceiling,
+# and 84 with the count as it was before, saturating at 2^40 (both
+# counted by the lead on amd-arc-box on 2026-09-30 - the 805 in S4's
+# timed run of the sweep, the 84 in an instrumented library); the
+# second forces the library to
+# START below the precision it needs, so the escalation path runs at
+# scale - against an UNESCALATED model, which is what makes it a
+# comparison rather than a coincidence. That second run is what found the
 # exact-cancellation hole in the evaluator's error bound, twice: once
 # in phase 1 and once on 2026-09-03, when the first repair turned out
 # to be unsound at any working precision above 41 bits.
@@ -1223,12 +1227,21 @@ do_mpfr() {
   # oracle is the same everywhere it runs.
   local pfx="$ROOT/verify/_mpfr-prefix"
   if [ -f "$pfx/include/mpfr.h" ]; then
-    HOSTMAKE "mpfr-check$EXE" CFLAGS="-O2 -I$pfx/include" \
-      LDLIBS="-L$pfx/lib" || return 1
+    HOSTMAKE "mpfr-check$EXE" "mp-err-check$EXE" \
+      CFLAGS="-O2 -I$pfx/include" LDLIBS="-L$pfx/lib" || return 1
   else
-    HOSTMAKE "mpfr-check$EXE" || return 1
+    HOSTMAKE "mpfr-check$EXE" "mp-err-check$EXE" || return 1
   fi
-  (cd "$ROOT/host" && "./mpfr-check$EXE" 24 7)
+  (cd "$ROOT/host" && "./mpfr-check$EXE" 24 7) || return 1
+  # The evaluator's error claims held exactly (host/tests/mp_err_check.c):
+  # mpfloat.c's rules in GMP, W = 6 exhaustively and a fixed-seed
+  # sample; then, against MPFR, the constants' count and transcend.c's
+  # logarithm conversion, through a probe build of transcend.c that
+  # only that tool compiles. About half a minute on the desktop; its
+  # controls must fail. It needs GMP and MPFR, which the probe that
+  # skips this stage already asks for - mpfr.h includes gmp.h, and the
+  # pinned prefix installs both.
+  (cd "$ROOT/host" && "./mp-err-check$EXE")
 }
 
 do_soakquick() {
@@ -1239,7 +1252,7 @@ do_soakquick() {
   QUICK=1 OUT="$RUNDIR/soak-quick-out" bash "$ROOT/hw/run-soak.sh"
 }
 need host-cc mpfr
-stage mpfr "MPFR parity, all rungs and modes, flags - the only external oracle reaching fp128/fp256, and the only one at all for the thirty-nine transcendentals" -- do_mpfr
+stage mpfr "MPFR parity, all rungs and modes, flags - the only external oracle reaching fp128/fp256, and the only one at all for the thirty-nine transcendentals; then the evaluator's error claims, exactly, in GMP and MPFR" -- do_mpfr
 
 need host-cc
 stage soak-quick "native-oracle soak, QUICK depth + sabotage control" -- do_soakquick

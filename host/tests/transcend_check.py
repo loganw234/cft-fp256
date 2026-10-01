@@ -316,7 +316,12 @@ def pow_pairs(fmt, trials, seed):
             for base in (one + dy, one - dy):
                 pairs.append((base, b))
                 pairs.append((base, b | fmt.sign_mask))
-    # The one family measured to make the Ziv loop escalate at all:
+    # The one family phase 1 measured to make the Ziv loop escalate at
+    # all (2026-09-02), and not the only one since: on 2026-09-30 the
+    # whole sweep escalated 84 times with the error count saturating at
+    # 2^40 and 805 with the count that has no ceiling (amd-arc-box;
+    # docs/TRANSCENDENTALS.md, "The error model"), and at fp256 tanh,
+    # pown and compound escalated as well as pow and powr (the desktop).
     # pow(1+u, -(1+u)) is 1 - u + u^3/2, so it sits three precisions
     # from the representable 1-u and the first attempt cannot see the
     # gap. The u^2 term cancels only for this exponent, and no

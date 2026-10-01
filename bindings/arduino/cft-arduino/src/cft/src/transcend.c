@@ -126,14 +126,18 @@ void cft_tr_reset_stats(void)
 /* The first attempt's precision, and an override for tests only.
  *
  * CFT_TRANSCEND_MINPREC lowers it so that the escalation path runs at
- * all: in ordinary use this loop has never escalated once - 95,680
- * elements through the MPFR campaign and 76,115 through the model
- * check, zero escalations between them - and a path never taken is a
- * path never tested. It cannot change a result: a rounding the
- * enclosure decides at some precision is decided the same way at every
- * higher one, because raising the precision only narrows the
- * enclosure. host/tests/transcend_check.py --min-prec proves that by
- * replaying the whole sweep with it set. */
+ * scale: in ordinary use this loop seldom escalates, and a path seldom
+ * taken is a path barely tested. Phase 1 counted no escalation at all
+ * over 95,680 elements through the MPFR campaign and 76,115 through
+ * the model check. Over host/tests/transcend_check.py at the contract's
+ * precision, on amd-arc-box on 2026-09-30, the lead counted 84 with the
+ * error count as it was then, saturating at 2^40 (an instrumented
+ * library), and 805 with the count that has no ceiling (S4's timed run
+ * of the same sweep): the price of not deciding on a clamp. It cannot
+ * change a result: a rounding the enclosure decides at some precision
+ * is decided the same way at every higher one, because raising the
+ * precision only narrows the enclosure. host/tests/transcend_check.py
+ * --min-prec proves that by replaying the whole sweep with it set. */
 static int tr_start_prec(const cft_fmt_desc *f)
 {
     static int probed, forced;
@@ -694,10 +698,12 @@ static int pow5(cft_bn *r, long n, int maxbits)
 
 /* ---- the multiprecision series ------------------------------------- */
 
+/* k more units on v's count, in units of v's own width. The count has
+ * no ceiling (mpfloat.h), so this is a sum and nothing else; until
+ * 2026-09-30 it saturated at 2^40. */
 static void mp_bump(cft_mp *v, uint64_t k)
 {
-    uint64_t s = v->err + k;
-    v->err = (s < v->err || s > CFT_MP_ERR_MAX) ? CFT_MP_ERR_MAX : s;
+    v->err = cft_mp_err_add(v->err, cft_mp_err_u64(k));
 }
 
 /* Has the series term fallen below the working precision's reach? */
@@ -981,9 +987,12 @@ static int mp_log1p_lane(cft_mp *r, const cft_fmt_desc *f, const lane *a,
  * alternating terms into a single running sum. The reason is the error
  * model: cft_mp_add's unlike-signs rule charges a factor of two per
  * step even when nothing cancels, because the result can be half the
- * larger operand. Over a hundred and thirty terms that is 2^130 and
- * the bound saturates; split in two it is one doubling in total, and
- * the accumulators themselves only ever add like signs.
+ * larger operand. In one running sum every other term has the opposite
+ * sign, so over a hundred and thirty terms that is 2^65: sixty-five
+ * bits of the guard spent on nothing (and until 2026-09-30, when the
+ * count saturated at 2^40, a clamp rather than a bound). Split in two
+ * it is one doubling in total, and the accumulators themselves only
+ * ever add like signs.
  *
  * The final subtraction is safe by construction. For sin, the positive
  * part is v + v^5/120 + ... and the negative v^3/6 + ..., so with
@@ -1522,15 +1531,20 @@ static int tr_ph_reduce(tr_pi_red *R, const lane *a, const cft_fmt_desc *f)
  * phase-1 caller had. asinh, acosh and atanh do not: their logarithm's
  * argument is itself computed. If the true value is within eps
  * relatively of the stored one then the logarithms differ by at most
- * 2*eps ABSOLUTELY, and dividing that by the result's own magnitude
- * turns it back into the relative bound the type carries. Every caller
- * here keeps |log v| above 0.48, so the conversion costs at most three
- * doublings; a caller that did not would get a refusal and an
- * escalation rather than a silent widening. */
+ * -log(1 - eps) <= 2*eps ABSOLUTELY - for eps <= 1/2, where the
+ * function's convexity and log 2 < 1 give it - and dividing that by
+ * the result's own magnitude, at least 2^E0, turns it back into the
+ * relative bound the type carries: eps * 2^(1 - E0), added to l's own.
+ * Past eps = 1/2 the argument is not known to within a factor of two
+ * and the count is infinity (mpfloat.h): a bound, and one that cannot
+ * decide. Every caller here keeps |log v| above 0.48, so the
+ * conversion costs at most three doublings; a caller that did not
+ * would get a refusal and an escalation rather than a silent
+ * widening. */
 static int mp_log_of_mp(cft_mp *r, const cft_mp *v, int W)
 {
     cft_mp l;
-    uint64_t add;
+    cft_mp_err ev;
     long E0;
 
     if (v->zero || v->sign)
@@ -1542,10 +1556,13 @@ static int mp_log_of_mp(cft_mp *r, const cft_mp *v, int W)
     E0 = cft_mp_exp2_of(&l);
     if (E0 < -32)
         return 1;                        /* too near 1 to convert the bound */
-    /* Rounded up: this floored until 2026-09-30, as cft_mp_add's
-     * cancellation did. */
-    add = cft_mp_err_scale(v->err, 1 - (int)E0);
-    mp_bump(&l, add);
+    /* Scaled up exactly, and down rounded up to a whole unit: this
+     * floored until 2026-09-30, as cft_mp_add's cancellation did. */
+    ev = cft_mp_err_at(v, W);
+    if (cft_mp_err_lt_pow2(ev, (long)W - 1))
+        l.err = cft_mp_err_add(l.err, cft_mp_err_up(ev, 1 - E0));
+    else
+        l.err = cft_mp_err_inf();
     cft_mp_copy(r, &l);
     return 0;
 }
@@ -5129,6 +5146,25 @@ cft_status cft_tr_apply(cft_device *dev, int fn, cft_format fmt,
 {
     return tr_batch(dev, fn, fmt, rnd, a, b, nn, d, n, flags_out);
 }
+
+#if defined(CFT_TRANSCEND_PROBE)
+/* ---- the probe ------------------------------------------------------ *
+ *
+ * mp_log_of_mp's conversion of an argument's error into its logarithm's
+ * is an error rule like mpfloat.c's, and a static function, so
+ * host/tests/mp_err_check.c reaches it here, to hold it end to end
+ * against MPFR's log. Only that tool's make target defines
+ * CFT_TRANSCEND_PROBE: it compiles this file a second time, into the
+ * tool. The library is never built with it, and with it undefined this
+ * block is nothing at all - the default objects are byte for byte the
+ * ones without it. */
+int cft_tr_probe_log_of_mp(cft_mp *r, const cft_mp *v, int W);
+
+int cft_tr_probe_log_of_mp(cft_mp *r, const cft_mp *v, int W)
+{
+    return mp_log_of_mp(r, v, W);
+}
+#endif /* CFT_TRANSCEND_PROBE */
 
 #else  /* CFT_NO_TRANSCEND */
 

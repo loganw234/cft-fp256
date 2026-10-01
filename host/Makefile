@@ -835,8 +835,9 @@ ifneq ($(EXE),)
 divsqrt-soak: divsqrt-soak$(EXE)
 clause5-soak: clause5-soak$(EXE)
 mpfr-check: mpfr-check$(EXE)
+mp-err-check: mp-err-check$(EXE)
 cft-bench-peers: cft-bench-peers$(EXE)
-.PHONY: divsqrt-soak clause5-soak mpfr-check cft-bench-peers
+.PHONY: divsqrt-soak clause5-soak mpfr-check mp-err-check cft-bench-peers
 endif
 
 # MPFR parity: the third oracle, and the only independent one that
@@ -845,6 +846,24 @@ endif
 # for the RMM construction and the flag-derivation policy.
 mpfr-check$(EXE): tools/mpfr_check.c libcft.a
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/mpfr_check.c libcft.a \
+	  -o $@ $(XRTLIBS) $(LDLIBS) -lmpfr -lgmp -lm
+
+# The evaluator's error claims held exactly (tests/mp_err_check.c's
+# header): every rule src/mpfloat.c derives, at W = 6 exhaustively and a
+# fixed-seed sample to 928 bits, each verdict computed in GMP; then the
+# count cft_mp_const gives each constant, and src/transcend.c's
+# conversion of an argument's error into its logarithm's (mp_log_of_mp),
+# both against MPFR's directed roundings. That conversion is a static
+# function, so this recipe compiles src/transcend.c a second time with
+# -DCFT_TRANSCEND_PROBE, which adds one entry point and changes nothing
+# else, into this tool alone; it defines everything libcft.a's
+# transcend.o does, so the linker never takes that member. The library
+# is never built with the probe. GMP and MPFR - the runner's mpfr stage
+# runs it, since that stage already needs both. `./mp-err-check --full`
+# is the full random sweep.
+mp-err-check$(EXE): tests/mp_err_check.c src/transcend.c libcft.a
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $(XRTDEF) -DCFT_TRANSCEND_PROBE \
+	  tests/mp_err_check.c src/transcend.c libcft.a \
 	  -o $@ $(XRTLIBS) $(LDLIBS) -lmpfr -lgmp -lm
 
 # libquadmath is linked if and only if the compiler would COMPILE the
@@ -1315,7 +1334,7 @@ clean:
 	      cft-collatz cft-collatz.exe \
 	      cft-bench-peers cft-bench-peers.exe \
 	      divsqrt-soak divsqrt-soak.exe clause5-soak clause5-soak.exe \
-	      mpfr-check mpfr-check.exe \
+	      mpfr-check mpfr-check.exe mp-err-check mp-err-check.exe \
 	      reduce-parts reduce-parts.exe \
 	      device-test device-test.exe \
 	      cpp-api-test cpp-api-test.exe \
