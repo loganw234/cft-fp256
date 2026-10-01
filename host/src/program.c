@@ -909,10 +909,12 @@ static cft_status seq_check_caps(cft_device *dev, uint32_t n_insns,
  * declare more constants than a device reaches (up to the 512 any
  * instruction can, past which cft_program_load refuses the header
  * itself; the rest are simply unreachable), and what a device refuses
- * to execute is a reference past its bank. Structurally impossible on a device that addresses
- * all sixteen a four-bit field reaches, which is every device shipped
- * so far; it becomes real for a trimmed tile that publishes fewer, and
- * for the wide constant index CAPS[4] publishes.
+ * to execute is a reference past its bank. That refusal cannot fire on
+ * a device built so far: each publishes the whole reach of the encoding
+ * it decodes - sixteen without kx, 256 with it, and 512 with KX9, which
+ * is the software backend and every tile since revision 3 - and an
+ * index past that reach is refused first, as the feature it needs. It
+ * is real for a trimmed tile that publishes fewer.
  *
  * A feature the device does not publish is ABSENT, not unknown, and
  * every one of these refusals exists because the DEVICE cannot make
