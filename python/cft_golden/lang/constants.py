@@ -324,6 +324,24 @@ def brief(value):
     return f"{five_digits(value)} (to five digits)"
 
 
+def shown(x, group=False):
+    """Any value as a refusal's sentence names it, at any size. An int of
+    at most 128 bits as itself (grouped by thousands when `group`); a
+    Fraction of at most 128 bits a side as its repr, as the sentences
+    always wrote it; a longer int or Fraction through brief(), since
+    Python's own str() stops at 4,300 digits (verifier-VI found the
+    index-range, run-input and segment-steps sentences raising there);
+    anything else as its repr."""
+    if isinstance(x, bool) or not isinstance(x, (int, Fraction)):
+        return repr(x)
+    if isinstance(x, int) and x.bit_length() <= 128:
+        return f"{x:,}" if group else repr(x)
+    if isinstance(x, Fraction) and x.numerator.bit_length() <= 128 \
+            and x.denominator.bit_length() <= 128:
+        return repr(x)
+    return brief(x)
+
+
 def five_digits(value):
     """A nonzero value to five significant digits, rounded half to even,
     as -1.0000e+5000 - from bit lengths and a few big-integer operations,

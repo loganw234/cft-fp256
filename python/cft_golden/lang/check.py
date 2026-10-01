@@ -463,12 +463,14 @@ class Checker:
                           f"variable is a new name", rng.line)
         lo = self.index_value(rng.lo, {}, rng.line)
         hi = self.index_value(rng.hi, {}, rng.line)
+        span = f"{C.shown(lo)}..{C.shown(hi)}"
         if lo > hi:
-            raise Refusal("index-range", f"{lo}..{hi} is empty: a range "
+            raise Refusal("index-range", f"{span} is empty: a range "
                           f"includes both its ends and runs upward",
                           rng.line)
         if hi - lo + 1 > LANE_SLOTS:
-            raise Refusal("index-range", f"{lo}..{hi} covers {hi - lo + 1:,} "
+            raise Refusal("index-range", f"{span} covers "
+                          f"{C.shown(hi - lo + 1, group=True)} "
                           f"indices; a range covers at most {LANE_SLOTS:,}, "
                           f"the deepest scratch any tile publishes",
                           rng.line)
@@ -479,7 +481,8 @@ class Checker:
             return k % d.length
         if not 0 <= k < d.length:
             raise Refusal("index-range", f"{d.name} has {d.length} "
-                          f"components and is not cyclic: {d.name}[{k}] "
+                          f"components and is not cyclic: "
+                          f"{d.name}[{C.shown(k)}] "
                           f"is outside 0..{d.length - 1}", line)
         return k
 
