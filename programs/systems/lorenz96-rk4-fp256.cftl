@@ -1,0 +1,9 @@
+; Lorenz (1996) on a ring of 40, the same Runge-Kutta step: the
+; language's statement of the image of the same name in programs/.
+system lorenz96
+format fp256
+round  rne
+state  x[40] cyclic
+param  F = 8
+d/dt x[i] = fma(x[i+1] - x[i-2], x[i-1], F - x[i])
+step   rk4, h = 1/100
