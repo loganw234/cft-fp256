@@ -686,8 +686,10 @@ typedef struct cft_caps {
      * It is a CAPACITY and CFT_SEQ_FEAT_SCRATCH is the FEATURE; the
      * two are asked separately, because a device that publishes no
      * scratch at all publishes neither and a device that predates the
-     * register publishes a clear bit with a zero depth. 256 here and
-     * on the tile. */
+     * register publishes a clear bit with a zero depth. 256 on a
+     * software handle, unless cft_open_ex opened it at another depth
+     * (ABI 0.16), and on every tile with a scratch but the U50's
+     * revision-7 images, which publish 2,048. */
     uint32_t max_scratch;      /* scratch slots a lane, 0 = none or
                                 * unknown */
 

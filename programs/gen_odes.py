@@ -52,7 +52,11 @@ be resumed.
 The default banks are data (`<name>.classic.bank`): raw format-width
 values, dense, in the order the source declares them. check.py holds
 the value in each slot to the derivation of the NAME the source gives
-that slot, from exact decimals.
+that slot. H, TWO, ONE, SIGMA, RHO, F and BETA are exact values rounded
+once: H is RN(0.01) from its decimal, BETA is RN(8/3). H2 and MH are
+exact operations on the rounded H, H / 2 and -H. H6 is RN(H / 6) of that
+rounded H, so two roundings from 1/100: the same bits as RN(1/600) at
+fp64 and fp256, the formats built here, though not at fp32.
 """
 
 import argparse
@@ -142,7 +146,7 @@ def _mutant_note(name, mutant):
             "control for programs/check.py - never written to disk.", ""]
 
 
-# ---- the banks, from exact decimals --------------------------------------
+# ---- the banks: exact values rounded once, and H's derivations -----------
 
 def _dec(fmt, text):
     bits, _ = chars.from_decimal(fmt, text, sf.RND_RNE)

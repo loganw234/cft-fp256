@@ -20,7 +20,7 @@ disassembler, a library of named programs with a manifest, and a
 runner that takes an image and data in and deposits and a hash out.
 
 **Where it stands.** All three are built and green on the software
-backend. `programs/` holds twenty-nine programs with a check each, `make
+backend. `programs/` holds thirty-seven programs with a check each, `make
 programs-check` runs them and generated revision-2 and revision-3
 corpora (in about twelve seconds when there were seventeen). The `BANK_EXT` run path landed with
 the host half of the afternoon round and passes; revision 3's own
@@ -206,7 +206,7 @@ two agree is what the byte-for-byte check proves.
       build.py check.py  what the two make targets run
 
 A program earns a row by having a check: something that runs it and
-compares against the model or a tool's own chain. Twenty-nine so far -
+compares against the model or a tool's own chain. Thirty-seven so far -
 `programs/README.md` is the index and the argument; in brief:
 
 | family | rows | its check |
@@ -222,6 +222,8 @@ compares against the model or a tool's own chain. Twenty-nine so far -
 | `horner-wide-fp64` | 1 | a degree-299 Horner over a 300-entry external bank - the ninth constant-index bit - against a softfloat Horner |
 | `divfull-<fmt>`, `sqrtfull-<fmt>` | 8 | byte-identical to the image `divfull.py` generates, and 64 raw lanes - specials included - through `positive-run --bank`, both deposits against `softfloat.div` or `softfloat.sqrt` |
 | `normalabs-<fmt>` | 4 | byte-identical to `seqprogs.normal_abs_program`, and 64 raw lanes of every class in both signs through `positive-run` against `softfloat`'s class, no flag raised |
+| `deepwalk-fp64`, `deepwalk-strict-fp64` | 2 | revision 7's deeper scratch: a thousand samples stored through a loop counter and summed back from the top, written for 2,048 slots - `seq.run` at 2,048 and at 256 against the walk written out in `check.py`, the two depths' sums different and the strict one reporting STATUS 0x20 at 256 where the other wraps, and `positive-run` at both depths bit for bit against the model |
+| `lorenz63-rk4-<fmt>`, `lorenz96-rk4-<fmt>`, `henonheiles-lf-<fmt>` | 6 | the ODE segments `gen_odes.py` writes, at fp64 and fp256: its output byte for byte, each bank slot against the definition of its name, the counts against literals in `check.py`, three executors bit for bit, each step against the textbook scheme in exact rationals, the scheme at 300 digits, and two segments chained against one - with a negative control beside every arm but the header and the census |
 
 *A note on the naming.* The contract called for
 `divsqrt-<format>.cfta`. A `.cfta` file is one program and

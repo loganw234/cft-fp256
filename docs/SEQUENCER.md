@@ -20,8 +20,11 @@ program can observe: **R18**, the control codes that walk the block's
 beats go through the issue pipe one beat a cycle and wait only for what
 they read; **R19**, a beat with no active lane is not issued and a
 stream beat no lane can read is not loaded. It is simulated and benched
-against the model; no image carries it yet. Its section is the last in
-this file, and R12 to R15 carry notes where it changed them.*
+against the model, and it is on silicon: the U50's revision-7 single
+(rev7b, built from 9fc9c0d, 135 MHz) agreed with the model on the card
+on 2026-09-29, and its quad (q135b, built from cf97a50, 135 MHz) passed
+its card legs on 2026-09-30 (docs/VALIDATION.md). Its section is the
+last in this file, and R12 to R15 carry notes where it changed them.*
 
 *Revision 6 is on silicon. The round-2 single tile (VERSION 0xA00,
 built from 5b7aa19 at 135 MHz) ran its programs, gathers, masks and
@@ -994,8 +997,9 @@ mirrors softfloat.py), divsqrt.c's program route is the C port, and
 the matrix holds all three bit-identical, flags included. It is a
 useful existence proof of the design's claim: a real correctly-rounded
 algorithm - conditionals, encoding surgery and all - fits the
-six-control-code ISA with no additions, in under fifty instructions
-and six constants.
+six-control-code ISA with no additions: the quotient in 43 to 49
+instructions and six constants, and the root in 51 to 60 instructions
+and nine, fp32 to fp256 (programs/div-*.cfta and sqrt-*.cfta).
 
 ## What the workloads asked of the program model (2026-09-04)
 
