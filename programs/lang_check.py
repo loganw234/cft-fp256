@@ -1203,15 +1203,21 @@ def main(argv=None):
         return write_references()
     only = {x for x in a.only.split(",") if x}
     t0 = time.perf_counter()
-    rng = random.Random("lang check")
     work = Path(tempfile.mkdtemp(prefix="lang-check-"))
-    legs = [("refs", lambda: leg_references(rng)),
-            ("corpus", lambda: leg_corpus(a.corpus, rng)),
-            ("banks", lambda: leg_banks(rng)),
-            ("libcft", lambda: leg_libcft(a.segrun, a.audit, rng, work)),
+
+    def rng(leg):
+        # one generator a leg, so that a leg's lanes - and so its counts,
+        # a plant's failing lanes among them - are the same whichever
+        # other legs ran before it (--only)
+        return random.Random(f"lang check {leg}")
+    legs = [("refs", lambda: leg_references(rng("refs"))),
+            ("corpus", lambda: leg_corpus(a.corpus, rng("corpus"))),
+            ("banks", lambda: leg_banks(rng("banks"))),
+            ("libcft", lambda: leg_libcft(a.segrun, a.audit, rng("libcft"),
+                                          work)),
             ("determinism", lambda: leg_determinism(work)),
             ("refusals", leg_refusals),
-            ("plants", lambda: leg_plants(rng, work))]
+            ("plants", lambda: leg_plants(rng("plants"), work))]
     try:
         for name, fn in legs:
             if only and name not in only:
