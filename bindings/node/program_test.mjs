@@ -381,6 +381,38 @@ test("a truncated, over-long or mislabelled image is a different program",
   c64.loadProgram(halt1).free();
 });
 
+test("a bank deeper than an instruction can address is refused here, " +
+     "before the image crosses", () => {
+  // Since 2026-10-01 (the language round's D1) cft_program_load refuses
+  // a header n_consts above 512 on every device, as the golden model's
+  // loader does: no instruction addresses past 512, and a tile refused
+  // such an image only at its header check, after it had crossed. With
+  // the constant section carried, and under BANK_EXT, where the header
+  // alone declares the depth.
+  const zero = new Uint8Array(c64.format.size);
+  const image = (n, ext) => programImage({
+    formatCode: c64.format.code, elementBytes: c64.format.size,
+    insns: [ctl("halt")], maxDeposits: 0,
+    ...(ext ? { flags: FLAG_BANK_EXT, nConsts: n }
+            : { consts: Array(n).fill(zero) }),
+  });
+  for (const ext of [false, true]) {
+    const how = ext ? " under BANK_EXT" : "";
+    for (const n of [513, 600]) {
+      let threw = null;
+      try { c64.loadProgram(image(n, ext)); } catch (err) { threw = err; }
+      ok(threw, `n_consts ${n}${how} must be refused, not loaded`);
+      ok(/cft_program_load/.test(threw.message),
+         `n_consts ${n}${how}: the error names the call that refused it`);
+      ok(new RegExp(`declares ${n} constants`).test(threw.message),
+         `n_consts ${n}${how}: the sentence names the depth: ` +
+         `"${threw.message}"`);
+    }
+    // and the deepest bank an instruction can address still loads
+    c64.loadProgram(image(512, ext)).free();
+  }
+});
+
 test("a freed program refuses every later call", () => {
   const p = c64.loadProgram(countdown(1));
   p.run([1]);

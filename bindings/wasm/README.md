@@ -1169,6 +1169,40 @@ the same demos page. Still **141 `cftw_*` exports** (149 in all):
     bindings/wasm/conformance.html 1,406,871 bytes  sha256 bd2a86fc8b9831fe...
     bindings/wasm/demos.html         592,968 bytes  sha256 2d3c8bd042a6fde1...
 
+### Rebuilt at ABI 0.16, 2026-10-01 (the language round) - a bank deeper than an instruction can address, refused before it crosses
+
+No ABI change. The round's D1 changed `program.c`, which this
+module is built from. `cft_program_load` now refuses an image whose
+header declares more than 512 constants, on every device and by
+name, as the golden model's loader does, where a tile refused it only
+at its header check, after the image had crossed. So the module was
+rebuilt, as every change to its sources requires.
+
+`bindings/node/program_test.mjs` gains the case. It covers 513 and
+600 constants, carried and under BANK_EXT, each refused with the
+library's sentence, while 512 still loads. Against the module before
+the rebuild it gave 37 passed and 1 failed (the control: 513 loaded),
+and against the rebuilt one 38 passed and 0 failed.
+
+`demos_chains.json` was re-recorded with `verify_demos.mjs --record`.
+That ran after `build.sh` and before `build_demos.sh`, with the five
+native tools built first, at 09:11 on the desktop's clock (16:11 UTC).
+The record's one FAIL was the stale page's, as the order predicts.
+All 15 chains of the 13 configurations came back unchanged; the module
+stamp and the timings moved. `verify_demos.mjs` then passed its 48
+checks against the rebuilt page.
+
+Two clean container builds, with `bindings/wasm/build/` removed
+between them, produced the module, `cft_node.js` and the conformance
+page byte for byte. Two runs of `build_demos.sh` produced the same
+demos page. Still **141 `cftw_*` exports** (149 in all), the same
+names as before:
+
+    bindings/node/cft_node.wasm      273,646 bytes  sha256 1bbc86010da8adf2...
+    bindings/node/cft_node.js         74,146 bytes  sha256 dc845833acf075cb...  (unchanged)
+    bindings/wasm/conformance.html 1,407,179 bytes  sha256 10010f4a0dc03376...
+    bindings/wasm/demos.html         593,275 bytes  sha256 a440bb2b8bc310f6...
+
 ## A second page: the five workloads, measured (2026-09-04)
 
 `demos.html` is the other deliverable of this directory. Same

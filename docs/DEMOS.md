@@ -19,12 +19,12 @@ Live beside the conformance page at
 
 | | |
 |---|---|
-| page | `bindings/wasm/demos.html`, 592,968 bytes |
-| sha256 | `2d3c8bd042a6fde1b71260c874ae08ec0114e1438f0e0aa494fba65a4e272812` |
-| module | `bindings/node/cft_node.wasm`, 273,335 bytes, sha256 `9e6ec560df43da90da6916bb55114aa65f662f3288aaa842dac0eb5a1eb6d221` |
+| page | `bindings/wasm/demos.html`, 593,275 bytes |
+| sha256 | `a440bb2b8bc310f6bd8c55b0208d2569a643870ad4e0c320037f9a64822cf200` |
+| module | `bindings/node/cft_node.wasm`, 273,646 bytes, sha256 `1bbc86010da8adf29d5ef9c1a9deb83abf4456b2fc1c9f90679e49481bd686d8` |
 | toolchain | emcc 6.0.9 (4e4223852a0835923411059a3929907d7df1232e), `emscripten/emsdk:6.0.9@sha256:96617f27fe16421588241def73908fd348a7f9d260440ed0d00b36dcf7a063cc` |
 | configurations | 13, over 15 chains |
-| recorded | 2026-10-01, per `bindings/wasm/demos_chains.json`'s own `recorded` field - the recorder writes the UTC date, which was 2026-09-30 on the recording desktop's clock (20:52 there, 03:52 UTC); re-recorded for the steps 5 and 6 round's rebuild of the ABI 0.16 module, every chain unchanged |
+| recorded | 2026-10-01, per `bindings/wasm/demos_chains.json`'s own `recorded` field - the recorder writes the UTC date, the same day on the recording desktop's clock (09:11 there, 16:11 UTC); re-recorded for the language round's rebuild of the ABI 0.16 module, every chain unchanged |
 
 ---
 
@@ -517,8 +517,8 @@ one fact is not paranoia when the fact is the whole argument.
 with `bindings/wasm/build/` removed between them (2026-09-07; the
 2026-09-04 page was 486,822 bytes, sha256 `e3711319627e6828...`, built
 the same way). Those are that day's bytes. The page has been rebuilt
-with the module since - the committed one is 592,968 bytes, sha256
-`2d3c8bd042a6fde1...`, at ABI 0.16 - so read the pair above as the
+with the module since - the committed one is 593,275 bytes, sha256
+`a440bb2b8bc310f6...`, at ABI 0.16 - so read the pair above as the
 2026-09-07 measurement and the table at the top of this file as what
 is in the tree.
 
