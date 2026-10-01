@@ -668,6 +668,10 @@ static int is_ident(const char *s)
  * REG_LIT_CAP, past every register; a message prints the token's own
  * digits (digits_text). */
 #define REG_LIT_CAP 100000
+/* The most digits a decimal number may have: asm.py's MAX_DECIMAL_DIGITS,
+ * Python's int() limit since 3.11, which the text form states as its
+ * own so both assemblers refuse a longer one by name, on any Python. */
+#define MAX_DECIMAL_DIGITS 4300
 static int reg_literal(const char *s)
 {
     const char *p;
@@ -696,9 +700,14 @@ static const char *digits_text(const char *p)
  * asm.py's _parse_uint is Python's int() of the token: base 16 after a
  * 0x (either case), base 10 otherwise. So a decimal may carry ONE sign
  * and a 0x number none; single underscores may stand between digits, and
- * one directly after the 0x (PEP 515); "-0" is zero; and the value has
- * any size. asm.py refuses a token that does not parse, by name, and then
- * holds the VALUE - of any size, either sign - to each field's bounds.
+ * one directly after the 0x (PEP 515); "-0" is zero. A 0x number may
+ * have any number of digits, and a decimal at most MAX_DECIMAL_DIGITS -
+ * Python's int() limit since 3.11, which the text form states as its own
+ * (until 2026-10-01 these comments said "any size", and asm.py raised an
+ * uncaught ValueError on an `op` or `r` number that long). asm.py refuses
+ * a token that does not parse, or a decimal past the bound, by name, and
+ * then holds the VALUE - past 2^64 or not, either sign - to each field's
+ * bounds.
  *
  * So this keeps the sign, the magnitude while it fits 64 bits, and
  * whether it did not, and every caller holds all three to asm.py's
@@ -714,6 +723,7 @@ typedef struct {
     int      neg;       /* below zero */
     int      big;       /* the magnitude does not fit 64 bits */
     int      hex;       /* written 0x... */
+    int      digits;    /* how many, sign and underscores aside */
     uint64_t mag;       /* the magnitude, when it fits */
 } number;
 
@@ -761,6 +771,7 @@ static int read_number(const char *tok, number *n)
         return 0;
     if (!n->big && n->mag == 0)
         n->neg = 0;
+    n->digits = digits;
     return 1;
 }
 
@@ -768,6 +779,19 @@ static void need_number(const char *tok, const char *what, number *n)
 {
     if (!read_number(tok, n))
         diel("%s: '%s' is not a number", what, tok);
+    if (!n->hex && n->digits > MAX_DECIMAL_DIGITS)
+        diel("%s: '%s' has %d digits, and a decimal number has at most %d",
+             what, tok, n->digits, MAX_DECIMAL_DIGITS);
+}
+
+/* The bound above, on the digits of an `rN` or an `opN`. */
+static void need_digits(const char *tok, const char *digits,
+                        const char *what)
+{
+    size_t k = strlen(digits);
+    if (k > MAX_DECIMAL_DIGITS)
+        diel("%s: '%s' has %d digits, and a decimal number has at most %d",
+             what, tok, (int)k, MAX_DECIMAL_DIGITS);
 }
 
 /* A number as asm.py's messages print it, Python's str() of the int: a
@@ -846,6 +870,7 @@ static int parse_reg(const program *P, const char *tok)
                  "register", tok);
         diel("'%s' is not a register", tok);
     }
+    need_digits(tok, tok + 1, "a register");
     if (n >= NREG)
         diel("r%s is outside r0..r%d", digits_text(tok + 1), NREG - 1);
     return n;
@@ -1008,7 +1033,9 @@ static void do_ctrl(program *P, int code, char **tok, int ntok)
 
 static void do_alu(program *P, const char *mnemonic, char **tok, int ntok)
 {
-    char name[64];
+    /* Sized from the mnemonic, so an `opN` of any length reaches the
+     * opcode check, as in asm.py; a 64-byte array refused it first. */
+    char *name = (char *)xcalloc(strlen(mnemonic) + 1, 1);
     const char *dot;
     int rnd = 0, force_kx = 0, op = -1, kx;
     const char *fields = "abc";
@@ -1023,8 +1050,6 @@ static void do_alu(program *P, const char *mnemonic, char **tok, int ntok)
     dot = strchr(mnemonic, '.');
     if (dot) {
         size_t n = (size_t)(dot - mnemonic);
-        if (n >= sizeof name)
-            diel("'%s' is not an opcode this ISA has", mnemonic);
         memcpy(name, mnemonic, n);
         name[n] = 0;
         while (dot) {
@@ -1033,7 +1058,8 @@ static void do_alu(program *P, const char *mnemonic, char **tok, int ntok)
             size_t mn = next ? (size_t)(next - dot - 1) : strlen(dot + 1);
             int matched = 0, r;
             if (mn >= sizeof mod)
-                diel("'%s' is not rne, rtz, rdn, rup, rmm or kx", dot + 1);
+                diel("'%.*s' is not rne, rtz, rdn, rup, rmm or kx", (int)mn,
+                     dot + 1);
             memcpy(mod, dot + 1, mn);
             mod[mn] = 0;
             if (!strcmp(mod, "kx")) {
@@ -1047,8 +1073,6 @@ static void do_alu(program *P, const char *mnemonic, char **tok, int ntok)
             dot = next;
         }
     } else {
-        if (strlen(mnemonic) >= sizeof name)
-            diel("'%s' is not an opcode this ISA has", mnemonic);
         strcpy(name, mnemonic);
     }
 
@@ -1060,6 +1084,7 @@ static void do_alu(program *P, const char *mnemonic, char **tok, int ntok)
         strspn(name + 2, "0123456789") == strlen(name + 2)) {
         const char *dg;
         unsigned v = 0;
+        need_digits(name, name + 2, "an opcode");
         for (dg = name + 2; *dg && v <= 255; dg++)
             v = v * 10u + (unsigned)(*dg - '0');
         if (v > 255)
@@ -1120,6 +1145,7 @@ static void do_alu(program *P, const char *mnemonic, char **tok, int ntok)
             }
     }
     emit(P, encode(op, reg, kflag, rnd, kx, 0, imm));
+    free(name);
 }
 
 static void assemble_line(program *P, char *line)
@@ -1338,6 +1364,7 @@ static void assemble_line(program *P, char *line)
             rnum = reg_literal(tok[3]);
             if (rnum < 0)
                 diel("'%s' is not r0..r%d", tok[3], NREG - 1);
+            need_digits(tok[3], tok[3] + 1, "a register");
             if (rnum >= NREG)
                 diel("r%s is outside r0..r%d", digits_text(tok[3] + 1),
                      NREG - 1);
@@ -1365,12 +1392,11 @@ static void assemble_line(program *P, char *line)
     }
     need_fmt(P);
     {
-        char m[64];
-        if (strlen(tok[0]) >= sizeof m)
-            diel("'%s' is not an opcode this ISA has", tok[0]);
+        char *m = (char *)xcalloc(strlen(tok[0]) + 1, 1);
         strcpy(m, tok[0]);
         lower(m);
         do_alu(P, m, tok + 1, ntok - 1);
+        free(m);
     }
 }
 
@@ -1599,49 +1625,168 @@ static uint8_t *to_bytes(const program *P, size_t *bytes_out)
 
 /* ---- source in ------------------------------------------------------- */
 
-/* One source line WHOLE, at any length, as asm.py reads it: its
- * str.splitlines() hands each line over entire, and so does this.
- * Until 2026-10-01 the loop below read with fgets into a 1,024-byte
- * buffer, so a line of more than 1,023 bytes was assembled as two or
- * more: a comment whose tail read " deposit r0" gave an image with an
- * extra deposit at exit 0, and others were refused with the wrong
- * error at the wrong line (programs/check.py's long-line arm holds
- * both sides now).
+/* The text form's characters (2026-10-01): the rule docs/PROGRAMS.md
+ * states and python/cft_golden/asm.py holds, here in its words, so the
+ * two assemblers cannot disagree about what a line is - which they did.
+ * asm.py split lines with str.splitlines(), which also ends one at a lone
+ * CR, VT, FF, 0x1c-0x1e, NEL, U+2028 and U+2029, and this file at LF
+ * alone, so `; note<CR>deposit r0` was a comment and a deposit there and
+ * a comment here, at exit 0 (verifier-VD1). This file also read in text
+ * mode, where a Ctrl-Z ends a Windows read, and kept lines as C strings,
+ * which a NUL ends. Before that (b87b95b) it read with fgets into a
+ * 1,024-byte buffer and assembled a longer line as two.
  *
- * The bytes up to and including the '\n', or to the end of the file,
- * into a buffer that grows to hold them; NULL at the end of the file
- * with nothing read. From here a line is a C string, exactly as fgets
- * left one. A read error is refused rather than taken for the end of
- * the file, which would assemble the program up to it. */
-static char *read_line(FILE *f, char **buf, size_t *cap)
+ * So the file is read whole, in binary, and held to the rule before any
+ * line is assembled - UTF-8 first, then the characters line by line, in
+ * asm.py's order, so of several faults both name the same one:
+ *
+ * - the source is UTF-8;
+ * - a line ends at LF, and a CR immediately before it is part of that
+ *   end, so a CRLF file reads as its LF twin;
+ * - every other line boundary str.splitlines() knows, and NUL and
+ *   Ctrl-Z, is refused by name anywhere, comments included;
+ * - outside a comment - before a line's first `;` - a line holds only
+ *   printable ASCII, spaces and tabs. */
+
+/* The offset of the lead byte of the first ill-formed UTF-8 sequence in
+ * p[0..n), or n: the byte Python's strict decoder names
+ * (UnicodeDecodeError.start), by the Unicode Standard's table of
+ * well-formed byte sequences (3-7). */
+static size_t utf8_bad(const uint8_t *p, size_t n)
 {
-    size_t len = 0;
-    int c;
-    while ((c = getc(f)) != EOF) {
-        if (len + 2 > *cap) {
-            size_t want = *cap ? *cap * 2 : 256;
-            char *grown;
-            if (want <= *cap)
-                die("a source line is longer than this host can hold");
-            grown = (char *)realloc(*buf, want);
-            if (!grown)
-                die("out of memory");
-            *buf = grown;
-            *cap = want;
+    size_t i = 0;
+    while (i < n) {
+        uint8_t b = p[i], lo = 0x80, hi = 0xBF;
+        size_t len, k;
+        if (b < 0x80) {
+            i++;
+            continue;
         }
-        (*buf)[len++] = (char)c;
-        if (c == '\n')
-            break;
+        if (b >= 0xC2 && b <= 0xDF)
+            len = 2;
+        else if (b == 0xE0)
+            len = 3, lo = 0xA0;
+        else if ((b >= 0xE1 && b <= 0xEC) || b == 0xEE || b == 0xEF)
+            len = 3;
+        else if (b == 0xED)
+            len = 3, hi = 0x9F;
+        else if (b == 0xF0)
+            len = 4, lo = 0x90;
+        else if (b >= 0xF1 && b <= 0xF3)
+            len = 4;
+        else if (b == 0xF4)
+            len = 4, hi = 0x8F;
+        else
+            return i;
+        if (i + 1 >= n || p[i + 1] < lo || p[i + 1] > hi)
+            return i;
+        for (k = 2; k < len; k++)
+            if (i + k >= n || p[i + k] < 0x80 || p[i + k] > 0xBF)
+                return i;
+        i += len;
     }
-    if (ferror(f)) {
-        fprintf(stderr, "cft-asm: %s: a read error after line %d\n", SRC,
-                LINENO);
-        exit(1);
+    return n;
+}
+
+/* The character at p[*k] of well-formed UTF-8, and *k past it. */
+static uint32_t utf8_at(const uint8_t *p, size_t *k)
+{
+    uint8_t b = p[*k];
+    size_t len = b < 0x80 ? 1 : b >= 0xF0 ? 4 : b >= 0xE0 ? 3 : 2, j;
+    uint32_t cp = len == 1 ? b : len == 2 ? (b & 0x1Fu)
+                : len == 3 ? (b & 0x0Fu) : (b & 0x07u);
+    for (j = 1; j < len; j++)
+        cp = (cp << 6) | (p[*k + j] & 0x3Fu);
+    *k += len;
+    return cp;
+}
+
+/* A character as a refusal names it - asm.py's _char_name. */
+static const char *char_name(uint32_t cp, char *buf, size_t cap)
+{
+    switch (cp) {
+    case 0x0d:
+        return "a carriage return (0x0d) that is not part of a CRLF line "
+               "end";
+    case 0x0b: return "a vertical tab (0x0b)";
+    case 0x0c: return "a form feed (0x0c)";
+    case 0x1c: return "a file separator (0x1c)";
+    case 0x1d: return "a group separator (0x1d)";
+    case 0x1e: return "a record separator (0x1e)";
+    case 0x85: return "a next line (U+0085)";
+    case 0x2028: return "a line separator (U+2028)";
+    case 0x2029: return "a paragraph separator (U+2029)";
+    case 0x00: return "a NUL (0x00)";
+    case 0x1a: return "a Ctrl-Z (0x1a)";
+    default: break;
     }
-    if (!len)
-        return NULL;
-    (*buf)[len] = 0;
-    return *buf;
+    if (cp < 0x20 || cp == 0x7F)
+        snprintf(buf, cap, "the control character 0x%02x", (unsigned)cp);
+    else
+        snprintf(buf, cap, "the character U+%04X", (unsigned)cp);
+    return buf;
+}
+
+static int line_break(uint32_t cp)
+{
+    return cp == 0x0d || cp == 0x0b || cp == 0x0c ||
+           (cp >= 0x1c && cp <= 0x1e) || cp == 0x85 ||
+           cp == 0x2028 || cp == 0x2029;
+}
+
+/* The source data[0..n) held to the rule, whole, and cut into lines:
+ * the result's k-th entry is line k + 1 as a C string, its LF and a CR
+ * before it gone, written into data in place. data[n] must be 0. */
+static char **source_lines(uint8_t *data, size_t n, size_t *count)
+{
+    size_t bad = utf8_bad(data, n), s = 0, cnt = 0, i;
+    char **lines;
+    char nm[48];
+    if (bad < n) {
+        LINENO = 1;
+        for (i = 0; i < bad; i++)
+            LINENO += data[i] == '\n';
+        diel("the source is not UTF-8 (byte 0x%02x)", data[bad]);
+    }
+    for (i = 0; i < n; i++)
+        cnt += data[i] == '\n';
+    lines = (char **)xcalloc(cnt + 1, sizeof *lines);
+    cnt = 0;
+    while (s < n) {
+        size_t e = s, ce, k;
+        int comment = 0;
+        while (e < n && data[e] != '\n')
+            e++;
+        ce = e;
+        if (e < n && ce > s && data[ce - 1] == '\r')
+            ce--;
+        LINENO = (int)(cnt + 1);
+        for (k = s; k < ce;) {
+            uint32_t cp = utf8_at(data, &k);
+            if (line_break(cp))
+                diel("%s: a line ends at a line feed, or a carriage return "
+                     "and a line feed, and at no other character, so a "
+                     "source holds none of the others anywhere",
+                     char_name(cp, nm, sizeof nm));
+            if (cp == 0x00 || cp == 0x1a)
+                diel("%s: a source holds none anywhere, in a comment or out "
+                     "of one", char_name(cp, nm, sizeof nm));
+            if (comment)
+                continue;
+            if (cp == ';')
+                comment = 1;
+            else if (!(cp == '\t' || (cp >= 0x20 && cp <= 0x7E)))
+                diel("%s outside a comment, where a line holds only "
+                     "printable ASCII, spaces and tabs",
+                     char_name(cp, nm, sizeof nm));
+        }
+        data[ce] = 0;
+        lines[cnt++] = (char *)data + s;
+        s = e + 1;
+    }
+    LINENO = 0;
+    *count = cnt;
+    return lines;
 }
 
 /* ---- image in -------------------------------------------------------- */
@@ -1669,6 +1814,14 @@ static uint8_t *read_file(const char *path, size_t *n_out)
         have += got;
         if (got == 0)
             break;
+    }
+    /* A read error is refused rather than taken for the end of the
+     * file, which would assemble, or disassemble, what came before it.
+     * The loop above grows the buffer before every read, so it always
+     * ends with have < cap: buf[have] is a zero byte (source_lines). */
+    if (ferror(f)) {
+        fprintf(stderr, "cft-asm: %s: a read error\n", path);
+        exit(1);
     }
     fclose(f);
     *n_out = have;
@@ -2098,25 +2251,24 @@ int main(int argc, char **argv)
         die("cft_open failed for the software backend");
 
     if (mode == 'a') {
-        char *line = NULL;
-        size_t cap = 0;
-        FILE *f = fopen(in, "r");
+        /* Binary, whole, and held to the text form's rule before any
+         * line is assembled (source_lines). */
+        size_t n_src, n_lines, k;
+        uint8_t *text = read_file(in, &n_src);
+        char **lines;
         uint8_t *img;
         size_t bytes;
-        if (!f) {
-            fprintf(stderr, "cft-asm: cannot open %s\n", in);
-            return 1;
-        }
         memset(&P, 0, sizeof P);
         P.scratch_depth = SCRATCH_D_DEFAULT;
         SRC = in;
         LINENO = 0;
-        while (read_line(f, &line, &cap)) {
-            LINENO++;
-            assemble_line(&P, line);
+        lines = source_lines(text, n_src, &n_lines);
+        for (k = 0; k < n_lines; k++) {
+            LINENO = (int)(k + 1);
+            assemble_line(&P, lines[k]);
         }
-        free(line);
-        fclose(f);
+        free(lines);
+        free(text);
         LINENO = 0;
         validate(&P);
         img = to_bytes(&P, &bytes);

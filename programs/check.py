@@ -22,7 +22,10 @@ things, in this order, and stops at the first failure:
    line in, and well past it - must give both the same bytes too, with
    a control that cuts them where that reader did (check_long_lines);
    and every numeric field, at and past its bounds, the same bytes or
-   the same refusal for the same reason (check_numeric_fields).
+   the same refusal for the same reason (check_numeric_fields); and
+   the text form's character rule, each refused character in a comment
+   and between tokens, CRLF files, ill-formed UTF-8, on the same bytes
+   (check_characters).
 
 2. **The disassembler is a readback.** Every built image is
    disassembled by both implementations, the two texts must agree, and
@@ -181,7 +184,9 @@ def assemble_both(args, src, image_path):
         return None
     c_bytes = Path(image_path).read_bytes()
     try:
-        py_bytes = asm.assemble(src.read_text(encoding="utf-8"), str(src))
+        # The file's bytes, as cft-asm reads it: a text-mode read would
+        # turn a lone CR into a line end before asm.py could refuse it.
+        py_bytes = asm.assemble(src.read_bytes(), str(src))
     except asm.AsmError as exc:
         bad(f"{name}: asm.py", str(exc))
         return None
@@ -1732,16 +1737,130 @@ def check_long_lines(args, tmp):
        f"bytes, refused or other bytes when cut where the old reader cut")
 
 
+# ---- characters ----------------------------------------------------------
+#
+# The text form's one character rule (docs/PROGRAMS.md, "The text form's
+# characters"; asm.py's lines() and cft-asm.c's source_lines hold it): a
+# source is UTF-8; a line ends at LF, a CR just before it part of that
+# end; every other line boundary str.splitlines() knows, and NUL and
+# Ctrl-Z, refused by name anywhere, comments included; outside a comment
+# only printable ASCII, spaces and tabs. Until 2026-10-01 the two
+# assemblers disagreed about what a line was: asm.py split at every
+# splitlines() boundary and cft-asm at LF alone, so `; note`, a CR and
+# `deposit r0` was a comment and a deposit in one and a comment in the
+# other, at exit 0 - 56 bytes against 48 (verifier-VD1).
+#
+# This arm hands both assemblers the same BYTES (asm.py takes a file's
+# bytes; a text-mode read would turn a lone CR into a line end first):
+# each refused character in a comment, between tokens and at the end of
+# a file; each character refused only outside a comment, there and in a
+# comment; LF, CRLF and mixed files, and lone CRs; ill-formed UTF-8 of
+# each shape; and sources with two faults, where both must name the same
+# one. Each case must give the same bytes, or be refused by both at the
+# same line for the same reason.
+
+_CH_HEAD = ".format fp64\n.deposits 2\ndeposit r0\n"
+_CH_ANYWHERE = ("\r", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85",
+                " ", " ", "\x00", "\x1a")
+_CH_OUTSIDE = (" ", " ", "　", "﻿", "\x01", "\x1b",
+               "\x7f", "é")
+
+
+def _character_cases():
+    """(tag, source bytes, whether both must assemble it)."""
+    head = _CH_HEAD.encode()
+    tail = b"deposit r0\nhalt\n"
+    for c in _CH_ANYWHERE:
+        e = c.encode()
+        n = f"U+{ord(c):04X}"
+        yield f"{n} in a comment", head + b"; note" + e + tail, False
+        yield f"{n} between tokens", head + b"deposit" + e + b"r0\nhalt\n", \
+            False
+        yield f"{n} at the end of the file", head + b"halt\n; end" + e, False
+    for c in _CH_OUTSIDE:
+        e = c.encode()
+        n = f"U+{ord(c):04X}"
+        yield f"{n} between tokens", head + b"deposit" + e + b"r0\nhalt\n", \
+            False
+        yield f"{n} in a name", head + b".reg X" + e + b" = r1\nhalt\n", False
+        yield f"{n} in a comment", head + b"; x" + e + b"y\nhalt\n", True
+    lf = (_CH_HEAD + "add r3, r0, r1\t; a tab before it\nhalt\n").encode()
+    yield "an LF file", lf, True
+    yield "its CRLF twin", lf.replace(b"\n", b"\r\n"), True
+    yield "CRLF and LF mixed", lf.replace(b"\n", b"\r\n", 2), True
+    yield "CRLF, no final line end", lf.replace(b"\n", b"\r\n")[:-2], True
+    yield "CR CR LF", head + b"halt\r\r\n", False
+    yield "a final lone CR", head + b"halt\r", False
+    yield "a CR as the whole file", b"\r", False
+    for bad in (b"\xff", b"\x80", b"\xc0\x80", b"\xe2\x28\xa1",
+                b"\xed\xa0\x80", b"\xf4\x90\x80\x80", b"\xf0\x9f\x98\n"):
+        yield f"{bad.hex()} in a comment", head + b"; " + bad + tail, False
+    yield "e282 truncated at the end", head + b"halt\n; \xe2\x82", False
+    for good in ("é", "—", "\U0001f600"):
+        yield f"U+{ord(good):04X} in a comment", \
+            head + b"; " + good.encode() + b"\nhalt\n", True
+    yield "two faults: ill-formed UTF-8 after a form feed", \
+        head + b"; \x0c\n; \xff\nhalt\n", False
+    yield "two faults: a form feed after an unknown opcode", \
+        head + b"nosuch r3\n; \x0c\nhalt\n", False
+
+
+def _line_reason(msg, name):
+    """":<line>: <reason>" - a message after the file's name."""
+    i = msg.rfind(name)
+    return msg[i + len(name):].strip() if i >= 0 else msg.strip()
+
+
+def check_characters(args, tmp):
+    src = tmp / "chars.cfta"
+    out = tmp / "chars.cftp"
+    n = same = both = 0
+    for tag, data, must in _character_cases():
+        src.write_bytes(data)
+        if out.exists():
+            out.unlink()
+        r = sh([args.asm, src, "-o", out])
+        c_bytes = out.read_bytes() if r.returncode == 0 else None
+        c_why = _line_reason(r.stderr, src.name) if r.returncode else None
+        try:
+            py, py_why = asm.assemble(data, str(src)), None
+        except asm.AsmError as exc:
+            py, py_why = None, _line_reason(str(exc), src.name)
+        n += 1
+        if py is not None and c_bytes is not None and py == c_bytes and must:
+            same += 1
+            continue
+        if py is None and c_bytes is None and c_why == py_why and not must:
+            both += 1
+            continue
+        c_says = (f"refuses {c_why!r}" if c_bytes is None
+                  else f"assembles it ({len(c_bytes)} bytes)")
+        py_says = (f"refuses {py_why!r}" if py is None
+                   else f"assembles it ({len(py)} bytes)")
+        want = "both to assemble it alike" if must else \
+            "both to refuse it alike"
+        bad(f"characters: {tag}",
+            f"cft-asm {c_says}; asm.py {py_says}; expected {want}")
+        return
+    ok(f"characters: {n} sources under the text form's character rule",
+       f"{same} assembled to the same bytes by both, {both} refused by both "
+       f"at the same line for the same reason")
+
+
 # ---- numbers -------------------------------------------------------------
 #
-# asm.py reads every number in a source with Python's int() - any size,
-# either sign on a decimal, none after 0x, PEP 515's underscores - and
-# then holds the value to the field's bounds. cft-asm.c read one with
-# strtoull until 2026-10-01: it saturated past 2^64 - 1, wrapped a minus
-# sign into a huge magnitude, read "0x" as 0 and took a sign after 0x, and
-# `.deposits` cast the answer to 32 bits, so `.deposits 4294967297` gave
-# max_deposits 1 at exit 0 where asm.py refuses it. `op0x10` was opcode
-# 16, and a name `r100001` was no register (asm.py: it would shadow one).
+# asm.py reads every number in a source as Python's int() does - either
+# sign on a decimal, none after 0x, PEP 515's underscores; a 0x number of
+# any length and a decimal of at most 4,300 digits, the bound the text
+# form states (MAX_DECIMAL_DIGITS; "any size" until the language round's
+# VD1, which found asm.py raising an uncaught ValueError on an `op` or
+# `r` number past it) - and then holds the value to the field's bounds.
+# cft-asm.c read one with strtoull until 2026-10-01: it saturated past
+# 2^64 - 1, wrapped a minus sign into a huge magnitude, read "0x" as 0
+# and took a sign after 0x, and `.deposits` cast the answer to 32 bits,
+# so `.deposits 4294967297` gave max_deposits 1 at exit 0 where asm.py
+# refuses it. `op0x10` was opcode 16, and a name `r100001` was no
+# register (asm.py: it would shadow one).
 # MEASURED in the language round (its D1 ledger): 88 of 889 probes over
 # these fields were images asm.py refuses.
 #
@@ -1770,6 +1889,9 @@ _NUM_SPELLINGS = ("0x", "0x0", "0X10", "0x100000001", "0x10000000000000000",
                   "0x__10", "1__0", "_1", "1_", "00010", "1e3", "5x")
 _NUM_NEGATIVES = ("-1", "-5", "-4294967295", "-4294967296",
                   "-18446744073709551615")
+# At and past the decimal bound (MAX_DECIMAL_DIGITS, 4,300 digits), and
+# a value of 1 written past it: refused for its length, not its value.
+_NUM_LONG = ("1" * 4300, "1" * 4301, "0" * 4300 + "1")
 _NUM_HEAD = ".format fp64\n.deposits 1\n"
 _NUM_DEEP = _NUM_HEAD + ".scratch 16777216\n"
 
@@ -1820,7 +1942,7 @@ def _numeric_cases():
         for b in bounds:
             values.update((b - 1, b, b + 1))
         for v in ([str(x) for x in sorted(values)] + list(_NUM_SPELLINGS)
-                  + list(_NUM_NEGATIVES)):
+                  + list(_NUM_NEGATIVES) + list(_NUM_LONG)):
             yield site, v, make(v)
 
 
@@ -5142,6 +5264,9 @@ def main():
 
     print("\n-- the revision-3 corpus, in both languages --")
     check_revision3_corpus(args, tmp)
+
+    print("\n-- characters, in both assemblers --")
+    check_characters(args, tmp)
 
     print("\n-- long lines, in both assemblers --")
     check_long_lines(args, tmp)

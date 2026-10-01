@@ -58,6 +58,34 @@ nothing.
 and 2 from 1, 2, 4 and 0.5. An example in a specification that has
 never been run is a specification of something else.)
 
+**The text form's characters** (2026-10-01). One rule, which both
+assemblers hold, refusing the same sources for the same reasons:
+
+- a source is UTF-8;
+- a line ends at a line feed, and a carriage return immediately before
+  the line feed is part of that end, so a CRLF file reads as its LF
+  twin;
+- every other line boundary Python's `str.splitlines()` knows - a
+  carriage return that ends no line, a vertical tab, a form feed, 0x1c
+  to 0x1e, NEL (U+0085), U+2028 and U+2029 - and NUL and Ctrl-Z (0x1a)
+  are refused by name anywhere, comments included, with their line;
+- outside a comment, before a line's first `;`, a line holds only
+  printable ASCII, spaces and tabs; a comment may hold any other
+  character;
+- a number is a decimal with one optional sign and at most 4,300
+  digits, or `0x` hexadecimal of any length, single underscores
+  allowed between digits, as Python's `int()` reads them.
+
+The whole source is checked before any line is assembled, UTF-8 first
+and then the characters, so of several faults both name the same one.
+A caller of `asm.py` that holds a file passes its bytes: a text-mode
+read would turn a lone carriage return into a line end before the rule
+could see it. Until this date the two assemblers disagreed about what
+a line was: `asm.py` split at every `splitlines()` boundary and
+`cft-asm` at a line feed alone, so a carriage return in a comment hid
+the next instruction from one of them, at exit 0 (verifier-VD1), and
+a decimal past 4,300 digits raised an uncaught error in `asm.py`.
+
 Directives:
 
 | directive | meaning |
@@ -190,11 +218,14 @@ refusal for the same reason. Until then `cft-asm` read numbers with
 gave max_deposits 1 at exit 0 where `asm.py` refuses it.
 
 Known differences, recorded rather than fixed (2026-10-01), each loud:
-`asm.py` accepts, and `cft-asm` refuses by name, a line ended by a
-lone carriage return or a form feed, a name of 64 characters or more,
-and a number written in non-ASCII digits. (A negative `.scratch in` or
-`out` count is refused by both: until 2026-10-01 `asm.py` wrote its
-low sixteen bits, -1 as 65535, at exit 0.)
+`asm.py` accepts, and `cft-asm` refuses by name, a name of 64
+characters or more, more than 1,024 `.reg` or more than 1,024 `.slot`
+names, and more than 65,536 instructions - the C tool's fixed tables.
+The line ends and characters this paragraph first listed are refused
+by both now, under the rule above; a carriage return or form feed after
+a comment was silent then, not loud (verifier-VD1). (A negative
+`.scratch in` or `out` count is refused by both: until 2026-10-01
+`asm.py` wrote its low sixteen bits, -1 as 65535, at exit 0.)
 
 **One thing neither carries: an arity table from libcft.** Which
 operand FIELDS an opcode reads is not in `cft_op_name`, in
