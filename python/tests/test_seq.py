@@ -1085,6 +1085,81 @@ def test_bank_refusals():
                     flags=seq.FLAG_BANK_EXT, n_consts=1)
 
 
+def _int_bits(fmt, v):
+    """An integer's encoding in `fmt` (exact for every one used here)."""
+    bits, flags = sf.from_int(fmt, v)
+    assert flags == 0
+    return bits
+
+
+def _deep_bank_image(fmt, n_consts, bank_ext):
+    """The bytes of a three-instruction image whose header declares
+    `n_consts` constants - built by hand, not through seq.Program, so
+    that a header the model refuses can still be written. It reads the
+    deepest constant an index reaches, K[min(n_consts, 512) - 1], and
+    K[i] is i."""
+    import struct
+    idx = min(n_consts, seq.KADDR_KX) - 1
+    insns = [seq.alu(sf.OP_ADD, 4, ra=0, rc=idx, kc=True,
+                     kx=idx >= seq.KADDR_PLAIN),
+             seq.deposit(4), seq.halt()]
+    esz = fmt.width // 8
+    out = struct.pack("<8I", seq.MAGIC, seq.VERSION, len(insns), n_consts,
+                      1, seq.PREC_CODE[fmt.name],
+                      seq.FLAG_BANK_EXT if bank_ext else 0, 0)
+    if not bank_ext:
+        out += b"".join(_int_bits(fmt, i).to_bytes(esz, "little")
+                        for i in range(n_consts))
+    return out + b"".join(struct.pack("<Q", w) for w in insns), insns
+
+
+def test_a_bank_deeper_than_an_index_reaches_is_refused_at_load():
+    """`n_consts` above 512 is refused by name (2026-10-01), in the
+    image or under BANK_EXT, from bytes or from the constructor.
+
+    Nine index bits under kx address 512 constants, and a tile refuses
+    a deeper bank at its header check - after the image has crossed,
+    with STATUS[3]. Until this date the model loaded and ran such an
+    image (verifier-P1 measured 600 and 70,000 at status 0), which is
+    the acceptance this replaces; asm.py already refused it, and its
+    reader is held to the same answer here. At 512 the image loads and
+    reads its last constant, so the boundary is the bank's and not one
+    below it."""
+    from cft_golden import asm
+    fmt = FP64
+    a = [_int_bits(fmt, v) for v in (1, 2, 3)]
+    zeros = [0] * len(a)
+    for bank_ext in (False, True):
+        form = "BANK_EXT" if bank_ext else "in the image"
+        img, insns = _deep_bank_image(fmt, 512, bank_ext)
+        p = seq.Program.from_bytes(img)
+        assert p.n_consts == 512, form
+        bank = [_int_bits(fmt, i) for i in range(512)] if bank_ext \
+            else None
+        r = seq.run(p, a, zeros, zeros, bank=bank)
+        assert r.status == 0, form
+        assert r.deposits == [_int_bits(fmt, 511 + v) for v in (1, 2, 3)], \
+            f"{form}: 512 constants load, and K[511] is the one read"
+        assert asm.Image.from_bytes(img).n_consts == 512, form
+        for n in (513, 600):
+            img, _ = _deep_bank_image(fmt, n, bank_ext)
+            with pytest.raises(seq.ProgramError,
+                               match=f"n_consts={n}: .* addresses at most "
+                                     f"512 constants"):
+                seq.Program.from_bytes(img)
+            with pytest.raises(asm.AsmError, match="at most 512"):
+                asm.Image.from_bytes(img)
+            with pytest.raises(seq.ProgramError,
+                               match="addresses at most 512 constants"):
+                if bank_ext:
+                    seq.Program(fmt, insns, flags=seq.FLAG_BANK_EXT,
+                                n_consts=n)
+                else:
+                    seq.Program(fmt, insns,
+                                consts=[_int_bits(fmt, i)
+                                        for i in range(n)])
+
+
 def test_digest_covers_the_bank():
     """What ran is ONE hash of image and data together: the image alone
     cannot distinguish two runs of a BANK_EXT program."""
