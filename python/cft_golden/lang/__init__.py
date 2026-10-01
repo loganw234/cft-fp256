@@ -45,21 +45,22 @@ class System:
 
 
 def compile_text(text, source="<text>"):
-    """Parse and check a system's text. A Refusal names the source."""
-    return System(source, text, _check(text, source))
+    """Parse and check a system's text - a str, or a file's bytes, which
+    is how a caller holding a file should pass it (a text-mode read
+    turns a lone CR into a line end before the character rule could
+    refuse it). A Refusal names the source."""
+    graph = _check(text, source)
+    if not isinstance(text, str):
+        text = bytes(text).decode("utf-8")      # the check read it whole
+    return System(source, text, graph)
 
 
 def load(path):
-    """compile_text of a file: UTF-8 (a leading byte-order mark is not
-    text, and is dropped), its line ends as they are."""
-    p = Path(path)
-    data = p.read_bytes()
-    try:
-        text = data.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        raise Refusal("syntax", "the file is not UTF-8 text",
-                      source=str(path)) from None
-    return compile_text(text, str(path))
+    """compile_text of a file's bytes: UTF-8, held whole to the
+    character rule (docs/LANGUAGE.md, "The text") - a byte-order mark
+    included, which outside a comment is refused like any other
+    character outside ASCII."""
+    return compile_text(Path(path).read_bytes(), str(path))
 
 
 __all__ = ["CATALOGUE", "COMPILER_REFUSALS", "GREEK", "INTEGRATORS", "NAMES",

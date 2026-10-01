@@ -134,16 +134,37 @@ def sig(q, n=5):
 
 # ---- canonical spellings ----------------------------------------------
 
+# log2(5) = 2.32192809488736234787..., and log10(2) = 0.30102999566398119...
+# as integer ratios, each within 10^-15 of the true value: enough to
+# place a power of 5 or of 10 within one at any size a constant may have
+# (2^+-LIMIT_LOG2), where the error they leave is below 10^-9.
+_LOG2_5 = (23219280948873623, 10 ** 16)
+_LOG10_2 = (30102999566398, 10 ** 14)          # below log10(2)
+
+
 def _pow_2_5(d):
-    """(a, b) with d = 2^a 5^b, or None."""
-    a = b = 0
-    while d % 2 == 0:
-        d //= 2
-        a += 1
-    while d % 5 == 0:
-        d //= 5
-        b += 1
-    return (a, b) if d == 1 else None
+    """(a, b) with d = 2^a 5^b, or None - in a few big-integer
+    operations at any size. Dividing out one factor at a time was
+    quadratic in the exponent: 1e-78900 took a minute to write out
+    (verifier-VL1)."""
+    a = (d & -d).bit_length() - 1
+    odd = d >> a
+    if odd == 1:
+        return a, 0
+    if odd % 5:
+        return None
+    # 5^b has floor(b log2 5) + 1 bits, so odd's bit length fixes b to
+    # one of two neighbours
+    b = (odd.bit_length() - 1) * _LOG2_5[1] // _LOG2_5[0]
+    lo = max(b - 1, 1)
+    p = 5 ** lo
+    for cand in range(lo, b + 3):
+        if p == odd:
+            return a, cand
+        if p > odd:
+            return None
+        p *= 5
+    return None
 
 
 def digits(n):
@@ -155,13 +176,26 @@ def digits(n):
 def _decimal(value):
     """The terminating decimal of `value` (whose denominator is
     2^a 5^b) as (sign, digits, exp10): value = sign digits x 10^exp10,
-    digits without trailing zeros."""
+    digits without trailing zeros - or None when it has more than
+    MAX_DECIMAL_DIGITS significant digits, which is found without
+    writing it out: the digits are written only when there are few."""
     a, b = _pow_2_5(value.denominator)
     k = max(a, b)
-    n = abs(value.numerator) * 10 ** k // value.denominator
+    n = abs(value.numerator) << (k - a)
+    n *= 5 ** (k - b)                              # |value| x 10^k
+    # with at most MAX_DECIMAL_DIGITS significant digits, n ends in at
+    # least t0 zeros: n has more than (L - 1) log10 2 digits
+    t0 = max(0, (n.bit_length() - 1) * _LOG10_2[0] // _LOG10_2[1]
+             - MAX_DECIMAL_DIGITS)
+    if t0:
+        n, r = divmod(n, 10 ** t0)
+        if r:
+            return None
     text = digits(n)
     stripped = text.rstrip("0") or "0"
-    e = -k + (len(text) - len(stripped))
+    if len(stripped) > MAX_DECIMAL_DIGITS:
+        return None
+    e = -k + t0 + (len(text) - len(stripped))
     return ("-" if value < 0 else ""), stripped, e
 
 
@@ -193,9 +227,10 @@ def _short_decimal(value):
     digit between 10^-6 and 10^20, else with an exponent - or None."""
     if _pow_2_5(value.denominator) is None:
         return None
-    sign, ds, e = _decimal(value)
-    if len(ds) > MAX_DECIMAL_DIGITS:
+    parts = _decimal(value)
+    if parts is None:
         return None
+    sign, ds, e = parts
     lead = e + len(ds) - 1
     if -6 <= lead <= 20:
         if e >= 0:
@@ -269,22 +304,51 @@ def parse_frac(text):
 
 
 def brief(value):
-    """A constant as a refusal's sentence names it: in full when short,
-    else its order of magnitude - a sentence is not the place for a
-    value of five thousand digits."""
+    """A constant as a refusal's sentence names it: its canonical
+    spelling when that is at most forty characters (-1e5000), else its
+    value to five significant digits - a sentence is not the place for
+    a value of five thousand digits. Cheap at any size: a p/q is
+    written out only when it is short."""
     value = exact(value)
     if value == 0:
         return "0"
-    # spell it only when that is cheap: the decimal of a value of a
-    # million bits takes seconds, and a sentence wants forty characters
-    size = value.numerator.bit_length() + value.denominator.bit_length()
-    if size <= 512:
-        text = literal(value)
-        if len(text) <= 40:
-            return text
-    lo, _hi = log2_bounds(value)
-    return (f"{'-' if value < 0 else ''}a value near 2^{lo + 1} "
-            f"(about 10^{(lo + 1) * 30103 // 100000})")
+    text = _short_decimal(value)
+    if text is None:
+        d = value.denominator
+        if d != 1 and d & (d - 1) == 0:
+            text = _hex(value)
+        elif abs(value.numerator).bit_length() + d.bit_length() <= 140:
+            text = _fraction_text(value)     # past 140 bits, over 40 digits
+    if text is not None and len(text) <= 40:
+        return text
+    return f"{five_digits(value)} (to five digits)"
+
+
+def five_digits(value):
+    """A nonzero value to five significant digits, rounded half to even,
+    as -1.0000e+5000 - from bit lengths and a few big-integer operations,
+    at any size. (sig() is the same for the small numbers it prints.)"""
+    sign = "-" if value < 0 else ""
+    n, d = abs(value.numerator), value.denominator
+    # e0 at or below floor(log10 |value|): |value| > 2^(bits n - bits d - 1)
+    e0 = ((n.bit_length() - d.bit_length() - 1) * _LOG10_2[0]
+          // _LOG10_2[1] - 1)
+    if e0 <= 4:
+        num, den = n * 10 ** (4 - e0), d
+    else:
+        num, den = n, d * 10 ** (e0 - 4)
+    # num / den = |value| / 10^(e0 - 4) holds 5 to 8 digits before the
+    # point; keep five, and round the rest once
+    shift = len(str(num // den)) - 5
+    den *= 10 ** shift
+    q, r = divmod(num, den)
+    if 2 * r > den or (2 * r == den and q % 2):
+        q += 1
+    e = e0 + shift
+    if q == 10 ** 5:
+        q, e = 10 ** 4, e + 1
+    s = str(q)
+    return f"{sign}{s[0]}.{s[1:]}e{e:+d}"
 
 
 def h_form(factor):

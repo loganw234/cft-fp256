@@ -23,6 +23,11 @@ error rather than a new name.
 
 CATALOGUE = {
     # -- text and declarations ---------------------------------------
+    "character": "a byte or a character the text does not hold: bytes "
+                 "that are not UTF-8; a line end other than LF or CR LF "
+                 "(a lone CR, VT, FF, 0x1c-0x1e, NEL, U+2028, U+2029) or "
+                 "a NUL or Ctrl-Z, anywhere; outside a comment, anything "
+                 "but printable ASCII, space and tab",
     "syntax": "the text is not a statement of the language",
     "too-deep": "parentheses nested more than 100 deep, or an expression "
                 "or a chain of lets deeper than the checker evaluates",
@@ -111,6 +116,9 @@ CATALOGUE = {
                    "not fit the format",
     "step-count": "a step count that is not a whole number of at "
                   "least 0",
+    "step-size-sign": "a run's h of the other sign from the graph's: a "
+                      "constant may hold h's sign, fixed when the graph "
+                      "was compiled",
     "graph-format": "bytes that are not a version-1 step graph",
 }
 

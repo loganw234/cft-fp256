@@ -23,12 +23,19 @@ Here:
   the intention-out    the canonical form parses back to the same graph,
                        byte for byte; the mathematical form, evaluated
                        exactly at random rational points, equals the step
-                       graph evaluated exactly - on the references and on
-                       random systems
+                       graph evaluated exactly; every other line of both
+                       read back and held - on the references, written
+                       systems with Greek names and random systems
+  the characters       .cfta's rule, in asm.py's words: each line break
+                       but LF and CR LF, NUL and Ctrl-Z refused anywhere,
+                       only printable ASCII outside a comment, UTF-8
+  a run's h            of the graph's sign, the system compiled at that h;
+                       of the other sign, refused
   the documents        docs/LANGUAGE.md's refusal table and its copy of
                        the integrators are the code's
 """
 
+import hashlib
 import os
 import random
 import re
@@ -50,8 +57,10 @@ from cft_golden import FORMATS, asm, chars, lang  # noqa: E402
 from cft_golden import softfloat as sf  # noqa: E402
 from cft_golden.lang import check as lang_check  # noqa: E402
 from cft_golden.lang import constants as C  # noqa: E402
+from cft_golden.lang import syntax as lang_syntax  # noqa: E402
 from cft_golden.lang.graph import Section  # noqa: E402
 from lang_mathform import MathForm  # noqa: E402
+from lang_mathform import constant as mathform_constant  # noqa: E402
 
 PROGRAMS = REPO / "programs"
 SYSTEMS = PROGRAMS / "systems"
@@ -288,6 +297,8 @@ def _src(*body, step="step map"):
 
 _MAP = ("state x",)
 REFUSALS = {
+    "character": (_src("state x", "; a form feed \x0c in a comment",
+                       "next x = x"), 4),
     "syntax": (_src("state x", "next x = x +"), 4),
     "too-deep": (_src("state x", "next x = " + "(" * 101 + "x" + ")" * 101),
                  4),
@@ -437,6 +448,8 @@ RUN_REFUSALS = {
     "param-value": lambda: lang.run(_l63(), [[0, 0, 0]], 1,
                                     params={"sigma": 0.5}),
     "step-count": lambda: lang.run(_l63(), [[0, 0, 0]], -1),
+    "step-size-sign": lambda: lang.run(_l63(), [[0, 0, 0]], 1,
+                                       h=F(-1, 100)),
     "graph-format": lambda: lang.StepGraph.from_bytes(b"{}"),
 }
 
@@ -478,7 +491,8 @@ def test_the_documents_table_is_the_catalogue():
 
 _POOL = ["x", "y", "(", ")", "*", "-", "+", "/", "1", "0", ".", "[", "]",
          ",", "=", " ", "\n", "h", "fma", "e", "i", "<", ";", "x[i]", "-0",
-         "nan", "d/dt", "next", "let r = ", "2/0"]
+         "nan", "d/dt", "next", "let r = ", "2/0", "\r", "\r\n", "\x0c",
+         " ", "﻿", "\x00", "é", "\t"]
 
 
 @pytest.mark.parametrize("name", ["lorenz63-rk4-fp64", "lorenz96-rk4-fp64",
@@ -581,66 +595,78 @@ def _glyph(name):
     return _UNICODE_GREEK.get(base, base) + bracket + rest
 
 
-def _sig_value(text):
-    """`+2.0817e-17` as an exact rational."""
-    return Fraction(text)
+# The names the intention-out restates, from IEEE 754-2019 (4.3, the
+# rounding-direction attributes; 3.6, the binary interchange formats) and
+# from the integrators' own names - the test's tables, not the renderer's.
+ATTR_754 = {"rne": "roundTiesToEven", "rtz": "roundTowardZero",
+            "rdn": "roundTowardNegative", "rup": "roundTowardPositive",
+            "rmm": "roundTiesToAway"}
+BINARY = {"fp32": "binary32", "fp64": "binary64", "fp128": "binary128",
+          "fp256": "binary256"}
+SCHEME = {"euler": "the forward Euler method (euler)",
+          "rk4": "the classical Runge-Kutta method (rk4)",
+          "stormer-verlet": "Stormer-Verlet, drift-kick-drift "
+                            "(stormer-verlet)",
+          "map": "the map (map)"}
 
 
-def check_comments(g, canon, math):
-    """What the intention-out says besides its code, read back and held
-    to the graph and to the test's own arithmetic: each constant's exact
-    value, encoding and relative error, each default's, the operation
-    counts, and the mathematical form's printed defaults and names."""
-    fmt = g.fmt
-    lines = canon.splitlines()
-    rows = []
-    k = next(i for i, ln in enumerate(lines)
-             if ln.startswith("; constants")) + 1
-    while lines[k].startswith(";   "):
-        rows.append(lines[k][4:].split())
-        k += 1
-    assert len(rows) == len(g.const)
-    for row, (value, factor, bits, flags) in zip(rows, g.const):
-        name, exact_text, bits_text, hex_text = row[:4]
-        assert lang_check.constant_of(exact_text) == value
-        if factor is not None:
-            assert lang_check.constant_of(name.replace("h", f"({value / factor})")) \
-                == value
-        else:
-            assert lang_check.constant_of(name) == value
-        assert int(bits_text, 16) == bits
-        assert chars.from_hex(fmt, hex_text, sf.RND_RNE)[0] == bits
-        _check_described(fmt, value, bits, flags, " ".join(row[4:]))
-    for name, value, bits, flags in g.param:
-        line = next(ln for ln in lines if ln.startswith(f"param  {name} = "))
-        code, comment = line.split(";", 1)
-        assert lang_check.constant_of(code.split("=", 1)[1]) == value
-        bits_text, hex_text, *desc = comment.split()
-        assert int(bits_text, 16) == bits
-        assert chars.from_hex(fmt, hex_text, sf.RND_RNE)[0] == bits
-        _check_described(fmt, value, bits, flags, " ".join(desc))
-    counts = {"field": g.field, "step": g.step}
-    for line in lines:
-        m = re.search(r"(the equations|a step) (\d+) \(([^)]*)\)", line)
-        if not m:
-            continue
-        sec = counts["field" if m.group(1) == "the equations" else "step"]
-        mine = {}
-        for op, _a, _l in sec.nodes:
-            mine[op] = mine.get(op, 0) + 1
-        said = {op: int(n) for n, op in
-                (part.split() for part in m.group(3).split(", "))}
-        assert int(m.group(2)) == len(sec.nodes) and said == mine
-    mlines = math.splitlines()
-    if g.param:
-        k = mlines.index("parameters, the run's (defaults)") + 1
-        for name, value, _b, _f in g.param:
-            printed, default = mlines[k].strip().split(" = ")
-            assert printed == _glyph(name)
-            assert Fraction(default.replace("−", "-")) == value
-            k += 1
-    y = next(ln for ln in mlines if ln.startswith("  Y = ("))
-    assert y[7:-1].split(", ") == [_glyph(c) for c in g.components()]
+class _Lines:
+    """A form's lines, read in order, each held to what is expected: a
+    line the reader does not expect, or one left over, fails."""
+
+    def __init__(self, text, what):
+        assert text.endswith("\n"), f"the {what} does not end its last line"
+        self.lines = text[:-1].split("\n")
+        self.k = 0
+        self.what = what
+
+    def peek(self):
+        return self.lines[self.k] if self.k < len(self.lines) else None
+
+    def take(self, want=None):
+        assert self.k < len(self.lines), f"the {self.what} ends early"
+        line = self.lines[self.k]
+        assert want is None or line == want, \
+            f"{self.what} line {self.k + 1}: {line!r}, where {want!r}"
+        self.k += 1
+        return line
+
+    def after(self, head):
+        """The rest of the next line, which must start with `head`."""
+        line = self.take()
+        assert line.startswith(head), \
+            f"{self.what} line {self.k}: {line!r} does not start {head!r}"
+        return line[len(head):]
+
+    def done(self):
+        assert self.k == len(self.lines), \
+            f"{self.what} line {self.k + 1}, {self.lines[self.k]!r}, is " \
+            f"one the test does not expect"
+
+
+def _counts_said(text, sec):
+    """`53 (26 fma, 3 add, ...)` against the section's own nodes, or `0`
+    for a section of none."""
+    if not sec.nodes:
+        assert text == "0", text
+        return
+    m = re.fullmatch(r"(\d+) \(([^)]*)\)", text)
+    assert m, text
+    mine = {}
+    for op, _a, _l in sec.nodes:
+        mine[op] = mine.get(op, 0) + 1
+    said = {}
+    for part in m.group(2).split(", "):
+        n, op = part.split(" ")
+        assert op not in said and int(n) > 0
+        said[op] = int(n)
+    assert int(m.group(1)) == len(sec.nodes) and said == mine
+
+
+def _encoding_said(fmt, bits_text, hex_text, bits):
+    """An encoding, in hex and as a hexadecimal significand."""
+    assert bits_text == "0x" + format(bits, f"0{fmt.width // 4}x")
+    assert chars.from_hex(fmt, hex_text, sf.RND_RNE)[0] == bits
 
 
 def _check_described(fmt, value, bits, flags, desc):
@@ -649,13 +675,196 @@ def _check_described(fmt, value, bits, flags, desc):
     if desc == "exact":
         assert flags == 0 and C.value_of(fmt, bits) == value
         return
-    words, _sep, rel_text = desc.partition("relative error ")
+    m = re.fullmatch(r"(inexact|underflow|inexact, underflow), relative "
+                     r"error ([+-]\d\.\d{4}e[+-]\d+)", desc)
+    assert m, desc
+    words = m.group(1).split(", ")
     assert ("inexact" in words) == bool(flags & sf.FLAG_INEXACT)
     assert ("underflow" in words) == bool(flags & sf.FLAG_UNDERFLOW)
     true = (C.value_of(fmt, bits) - value) / value
-    printed = _sig_value(rel_text)
+    printed = Fraction(m.group(2))
     assert (printed > 0) == (true > 0)
     assert abs(printed - true) <= abs(true) * Fraction(1, 10 ** 4)
+
+
+def _default_said(g, comment, value, bits, flags):
+    """A param's or a lane param's comment: its default's encoding."""
+    bits_text, hex_text, *desc = comment.split()
+    _encoding_said(g.fmt, bits_text, hex_text, bits)
+    _check_described(g.fmt, value, bits, flags, " ".join(desc))
+
+
+def check_canonical_said(g, canon):
+    """Every comment of the canonical form, line by line: the system's
+    name, the sha256 line (the test's own sha256 of the graph's bytes),
+    the attribute and the format each time they are named, the
+    operation counts, each constant's spelling, exact value, encoding,
+    flags and relative error, the h-scaled list, each param's and lane
+    param's default; and no comment on any other line. The code between
+    is held by the round trips."""
+    fmt, attr = g.fmt.name, g.round_name
+    r = _Lines(canon, "canonical form")
+    r.take(f"; {g.system} - the canonical form, regenerated from the step "
+           f"graph")
+    r.take(f"; sha256 {hashlib.sha256(g.to_bytes()).hexdigest()}")
+    r.take(";")
+    r.take("; Read back, this text gives the same step graph, byte for "
+           "byte. Every")
+    r.take("; operation is written once, in the order it is performed; each "
+           "one")
+    r.take(f"; that rounds rounds once, under {attr} ({ATTR_754[attr]}), in "
+           f"{BINARY[fmt]}.")
+    r.take(";")
+    if g.is_flow:
+        said = r.after("; operations: the equations ")
+        assert said.endswith(";")
+        _counts_said(said[:-1], g.field)
+        _counts_said(r.after(";             a step "), g.step)
+    else:
+        _counts_said(r.after("; operations: a step "), g.step)
+    r.take(";")
+    if not g.const:
+        r.take("; constants: none")
+    else:
+        r.take(f"; constants, exact value -> {BINARY[fmt]} under {attr}:")
+        for value, factor, bits, flags in g.const:
+            name, exact_text, bits_text, hex_text, *desc = \
+                r.after(";   ").split()
+            if factor is None:
+                assert lang_check.constant_of(name) == value
+            else:
+                # h/2 is its factor times h: read with h as 1, and the
+                # value is that factor times the graph's own h
+                assert lang_check.constant_of(name.replace("h", "(1)")) \
+                    == factor
+                assert value == factor * g.integrator[1]
+            assert lang_check.constant_of(exact_text) == value
+            assert C.round_once(g.fmt, g.rnd, value) == (bits, flags)
+            _encoding_said(g.fmt, bits_text, hex_text, bits)
+            _check_described(g.fmt, value, bits, flags, " ".join(desc))
+        scaled = [fa for _v, fa, _b, _f in g.const if fa is not None]
+        if scaled:
+            items = r.after("; h-scaled, halved by a step-halving bank: ")
+            assert [lang_check.constant_of(t.replace("h", "(1)"))
+                    for t in items.split(", ")] == scaled
+    r.take("")
+    params = {name: (value, bits, flags) for name, value, bits, flags
+              in g.param}
+    lanes = {name: (value, bits) for name, value, bits in g.lane}
+    seen = []
+    while r.peek() is not None:
+        line = r.take()
+        if ";" not in line:
+            continue
+        code, comment = line.split(";", 1)
+        words = code.split()
+        if words[:1] == ["param"]:
+            name = words[1]
+            _default_said(g, comment, *params[name])
+        elif words[:2] == ["lane", "param"]:
+            name = words[2]
+            value, bits = lanes[name]
+            if value is None:
+                assert comment == " no default: each lane gives it"
+            else:
+                rounded, flags = C.round_once(g.fmt, g.rnd, value)
+                assert rounded == bits
+                _default_said(g, comment, value, bits, flags)
+        else:
+            raise AssertionError(f"a comment on a line of code: {line!r}")
+        seen.append(name)
+    assert sorted(seen) == sorted(list(params) + list(lanes))
+    r.done()
+
+
+def check_math_said(g, math):
+    """Every line of the mathematical form but its expressions, which
+    check 2 evaluates: the title and the header (format and attribute),
+    the fixed sentences word for word, each param's and lane param's
+    name and default, each let's name, each state component's name
+    wherever it is printed, the integrator's name, h's value and the
+    vectors Y, Q and P - each name against Unicode's own Greek letters."""
+    fmt, attr = g.fmt.name, g.round_name
+    integ, h, options = g.integrator
+    comps = g.components()
+    r = _Lines(math, "mathematical form")
+    r.take(f"{g.system} - the mathematical form, regenerated from the step "
+           f"graph")
+    r.take(f"{BINARY[fmt]} ({fmt}), {ATTR_754[attr]}")
+    r.take("")
+    r.take("Each operation here is exact. The program performs the same")
+    r.take("operations, each rounded once, in the order the canonical form")
+    r.take("writes them.")
+    r.take("")
+
+    def value_of(name):
+        return mathform_constant(r.after(f"  {_glyph(name)} = "))
+    if g.param:
+        r.take("parameters, the run's (defaults)")
+        for name, value, _b, _f in g.param:
+            assert value_of(name) == value
+        r.take("")
+    if g.lane:
+        r.take("lane parameters, each lane's (defaults)")
+        for name, value, _b in g.lane:
+            if value is None:
+                r.take(f"  {_glyph(name)}")
+            else:
+                assert value_of(name) == value
+        r.take("")
+    sec = g.field if g.is_flow else g.step
+    labels = [lb for _o, _a, lb in sec.nodes if lb is not None]
+    if labels:
+        r.take("where")
+        for lb in labels:
+            r.after(f"  {_glyph(lb)} = ")
+        r.take("")
+    y = "  Y = (" + ", ".join(_glyph(c) for c in comps) + ")"
+    if g.is_flow:
+        r.take("the equations")
+        for c in comps:
+            r.after(f"  d{_glyph(c)}/dt = ")
+        r.take("")
+        if integ == "stormer-verlet":
+            r.take(f"one step: {SCHEME[integ]}, with v the right-hand sides "
+                   f"of dQ/dt and a those of dP/dt")
+        else:
+            r.take(f"one step: {SCHEME[integ]}, with f the right-hand sides "
+                   f"above")
+        assert value_of("h") == h
+        r.take(y)
+        if integ == "stormer-verlet":
+            for key, vec in (("q", "Q"), ("p", "P")):
+                names = [c for d in options[key] for c in comps
+                         if c == d or c.startswith(d + "[")]
+                r.take(f"  {vec} = (" + ", ".join(_glyph(c) for c in names)
+                       + ")")
+        # the scheme's own lines, which check 2 evaluates
+        while r.peek() is not None:
+            assert re.fullmatch(r"  \S+ (=|↦) .+", r.take())
+    else:
+        r.take(f"one step: {SCHEME['map']}")
+        if h is not None:
+            assert value_of("h") == h
+        r.take(y)
+        for c in comps:
+            r.after(f"  {_glyph(c)} ↦ ")
+    r.done()
+
+
+def check_comments(g, canon, math):
+    """What the intention-out says besides its code, every line of it,
+    read back and held to the graph and to the test's own arithmetic
+    and tables (docs/LANGUAGE.md, the third check). A line that cannot
+    even be read is a failure of the same kind."""
+    try:
+        check_canonical_said(g, canon)
+        check_math_said(g, math)
+    except AssertionError:
+        raise
+    except Exception as e:  # noqa: BLE001 - a form the reader cannot read
+        raise AssertionError(f"what the intention-out says cannot be read: "
+                             f"{type(e).__name__}: {e}") from e
 
 
 def check_intention_out(g, rng, points=3):
@@ -680,6 +889,41 @@ def check_intention_out(g, rng, points=3):
 @pytest.mark.parametrize("name", REFS)
 def test_intention_out_of_the_references(name):
     check_intention_out(ref(name), random.Random(f"io {name}"))
+
+
+# Greek names in every place a name is printed - params, lane params with
+# and without defaults, lets and an indexed let, state components, q and
+# p - each integrator, and an h-scaled constant in a map: what the
+# random systems (named p0, l0, s0 ...) never print as a letter
+# (verifier-VL1's map first: its lane default printed as 2/3 for 1/3
+# passed the check before 2026-10-01).
+NAMED_SYSTEMS = {
+    "vl1-map": ("system g\nformat fp64\nstate x\nparam sigma = 2\n"
+                "lane param rho = 1/3, beta\nlet theta = x * x\n"
+                "next x = fma(theta, rho, beta) * sigma\nstep map\n"),
+    "pendulum-rk4": ("system pendulum\nformat fp128\nround rdn\n"
+                     "state Theta, omega\nparam gamma = 1/10\n"
+                     "lane param mu = 2/3\nlet phi = mu * Theta\n"
+                     "d/dt Theta = omega\n"
+                     "d/dt omega = -(phi + gamma * omega)\n"
+                     "step rk4, h = 1/64\n"),
+    "sv": ("system sv\nformat fp32\nround rup\nstate xi, pi\n"
+           "lane param kappa\nd/dt xi = pi\nd/dt pi = -(kappa * xi)\n"
+           "step stormer-verlet, h = 0.01, q = (xi), p = (pi)\n"),
+    "eta-map": ("system wave\nformat fp256\nround rmm\nstate eta[3] cyclic\n"
+                "lane param nu = 3\nlet Delta[i] = eta[i+1] - eta[i] "
+                "for i in 0..2\nnext eta[i] = fma(h * nu, Delta[i], eta[i])\n"
+                "step map, h = 1/2\n"),
+    "euler": ("system decay\nformat fp64\nround rtz\nstate lambda\n"
+              "param tau = 1/3\nd/dt lambda = -(tau * lambda)\n"
+              "step euler, h = 1/8\n"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(NAMED_SYSTEMS))
+def test_intention_out_of_named_systems(name):
+    g = compile_(NAMED_SYSTEMS[name], name)
+    check_intention_out(g, random.Random(f"io {name}"))
 
 
 _LITS = ["1", "2", "3", "0.5", "0.25", "1.5", "(1/3)", "(2/7)", "(5/3)",
@@ -1101,14 +1345,318 @@ def test_run_values_read_as_the_language_reads_them():
     assert info.value.name == "param-value"
 
 
-def test_line_ends_and_a_byte_order_mark(tmp_path):
-    text = (SYSTEMS / "henonheiles-lf-fp64.cftl").read_text()
+# ---- verifier-VL1's re-check (the second send-back of 2026-10-01) ----------------
+#
+# The text's characters: .cftl holds .cfta's rule (docs/PROGRAMS.md;
+# asm.py's lines()), in its words. Before, a lone CR ended a line here and
+# in no LF-only reader, so `; rounding: the default<CR>round rdn` compiled
+# as rdn while grep showed a comment; and VT, FF, 0x1c-0x1e, NEL, U+2028
+# or U+2029 in a comment left the parser at rne where splitlines() showed
+# `round rdn`; a byte-order mark was dropped (verifier-VL1).
+
+_RULE_HEAD = "system s\nformat fp64\nstate x\n"
+_RULE_TAIL = "next x = x * 3\nstep map\n"
+_ANYWHERE = {
+    "\r": "a carriage return (0x0d) that is not part of a CRLF line end",
+    "\x0b": "a vertical tab (0x0b)",
+    "\x0c": "a form feed (0x0c)",
+    "\x1c": "a file separator (0x1c)",
+    "\x1d": "a group separator (0x1d)",
+    "\x1e": "a record separator (0x1e)",
+    "\x85": "a next line (U+0085)",
+    " ": "a line separator (U+2028)",
+    " ": "a paragraph separator (U+2029)",
+    "\x00": "a NUL (0x00)",
+    "\x1a": "a Ctrl-Z (0x1a)",
+}
+
+
+def _char_refused(text, line):
+    with pytest.raises(lang.Refusal) as info:
+        compile_(text, "<t>")
+    r = info.value
+    assert (r.name, r.line) == ("character", line), str(r)
+    return r.sentence
+
+
+@pytest.mark.parametrize("c", list(_ANYWHERE),
+                         ids=lambda c: f"U+{ord(c):04X}")
+@pytest.mark.parametrize("where", ["comment", "tokens"])
+def test_a_line_break_nul_or_ctrl_z_is_refused_anywhere(c, where):
+    """In a comment too - VL1's case is the comment one - and from a str
+    or a file's bytes alike, at its line, named as asm.py names it."""
+    if where == "comment":
+        src = _RULE_HEAD + f"; rounding: the default{c}round rdn\n" + \
+            _RULE_TAIL
+    else:
+        src = _RULE_HEAD + f"next x = x{c}* 3\nstep map\n"
+    for text in (src, src.encode()):
+        sentence = _char_refused(text, 4)
+        assert sentence.startswith(f"{_ANYWHERE[c]}: "), sentence
+
+
+def test_a_crlf_file_compiles_as_its_lf_twin():
+    """A CR immediately before an LF is part of that line end: a CRLF
+    file, a mixed one and one without a final line end each give the LF
+    file's graph, from bytes and from a str."""
+    lf = (SYSTEMS / "henonheiles-lf-fp64.cftl").read_bytes()
     want = ref("henonheiles-lf-fp64").to_bytes()
-    assert compile_(text.replace("\n", "\r")).to_bytes() == want
-    assert compile_(text.replace("\n", "\r\n")).to_bytes() == want
+    crlf = lf.replace(b"\n", b"\r\n")
+    for data in (crlf, lf.replace(b"\n", b"\r\n", 2), crlf[:-2]):
+        assert compile_(data).to_bytes() == want
+        assert compile_(data.decode("utf-8")).to_bytes() == want
+
+
+@pytest.mark.parametrize("tail", ["step map\r\r\n", "step map\r"],
+                         ids=["CR CR LF", "a final CR"])
+def test_a_carriage_return_not_before_a_line_feed_is_refused(tail):
+    assert _ANYWHERE["\r"] in _char_refused(
+        _RULE_HEAD + "next x = x * 3\n" + tail, 5)
+
+
+@pytest.mark.parametrize("c, name", [
+    (" ", "the character U+00A0"), (" ", "the character U+2003"),
+    ("　", "the character U+3000"), ("﻿", "the character U+FEFF"),
+    ("\x01", "the control character 0x01"),
+    ("\x1b", "the control character 0x1b"),
+    ("\x7f", "the control character 0x7f"),
+    ("é", "the character U+00E9")],
+    ids=lambda v: f"U+{ord(v):04X}" if len(v) == 1 else None)
+def test_only_printable_ascii_space_and_tab_stand_outside_a_comment(c, name):
+    """Between tokens refused, by name; in a comment only text."""
+    sentence = _char_refused(_RULE_HEAD + f"next x = x{c}* 3\nstep map\n", 4)
+    assert sentence == (f"{name} outside a comment, where a line holds only "
+                        f"printable ASCII, spaces and tabs")
+    compile_(_RULE_HEAD + f"; x{c}y\n" + _RULE_TAIL)
+    compile_(_RULE_HEAD + "next x = x\t* 3\nstep map\n")
+
+
+@pytest.mark.parametrize("bad, lead", [
+    (b"\xff", 0xFF), (b"\x80", 0x80), (b"\xc0\x80", 0xC0),
+    (b"\xe2\x28\xa1", 0xE2), (b"\xed\xa0\x80", 0xED),
+    (b"\xf4\x90\x80\x80", 0xF4), (b"\xf0\x9f\x98\n", 0xF0)],
+    ids=lambda v: v.hex() if isinstance(v, bytes) else None)
+def test_a_source_that_is_not_utf8_is_refused_at_its_line(bad, lead):
+    """The byte named is the lead byte of the first ill-formed sequence,
+    as asm.py and cft-asm name it."""
+    data = _RULE_HEAD.encode() + b"; " + bad + b"note\n" + _RULE_TAIL.encode()
+    assert _char_refused(data, 4) == \
+        f"the source is not UTF-8 (byte 0x{lead:02x})"
+    data = (_RULE_HEAD + _RULE_TAIL).encode() + b"; \xe2\x82"
+    assert _char_refused(data, 6).endswith("(byte 0xe2)")
+    assert "lone surrogate, U+D800" in _char_refused(
+        _RULE_HEAD + "; \ud800\n" + _RULE_TAIL, 4)
+
+
+def test_the_source_is_held_whole_before_a_line_is_read():
+    """Of two faults the first is named: UTF-8 over the whole source,
+    then the characters, then the statements."""
+    data = _RULE_HEAD.encode() + b"; \x0c\n; \xff\n" + _RULE_TAIL.encode()
+    assert _char_refused(data, 5).endswith("(byte 0xff)")
+    assert _ANYWHERE["\x0c"] in _char_refused(
+        _RULE_HEAD + "nosuch x\n; \x0c\n" + _RULE_TAIL, 5)
+
+
+def test_a_byte_order_mark_is_refused_not_dropped(tmp_path):
+    """lang.load once dropped a leading byte-order mark; it is a
+    character outside a comment like any other now, as in .cfta."""
     p = tmp_path / "bom.cftl"
-    p.write_bytes(b"\xef\xbb\xbf" + text.encode("ascii"))
-    assert lang.load(p).graph.to_bytes() == want
+    p.write_bytes(b"\xef\xbb\xbf" + (SYSTEMS / "lorenz63-rk4-fp64.cftl")
+                  .read_bytes())
+    with pytest.raises(lang.Refusal) as info:
+        lang.load(p)
+    assert (info.value.name, info.value.line) == ("character", 1)
+    assert info.value.sentence.startswith("the character U+FEFF outside a "
+                                          "comment")
+    assert str(info.value).startswith(str(p))
+
+
+def test_every_committed_source_holds_the_character_rule():
+    """Every .cftl in programs/ - the references, and whatever is
+    committed beside them - is held to the rule, whole, as bytes."""
+    paths = sorted(PROGRAMS.glob("**/*.cftl"))
+    assert len(paths) >= 6
+    for p in paths:
+        data = p.read_bytes()
+        assert lang_syntax.source_text(data) == data.decode("utf-8"), p
+
+
+# h's sign. A constant is c x h^d with c fixed by h's sign alone, so a run
+# at an h of the graph's sign is the graph compiled at that h; across the
+# sign it was not: `const s = copysign(1, h)` compiled at 1/8 and run at
+# -1/8 stepped x = 1 to 0.875, where compiling at -1/8 gives 1.125
+# (verifier-VL1). Such a run is refused by name.
+
+def _sign_system(kind, h):
+    if kind == "map":
+        return (f"system s\nformat fp64\nround rdn\nstate x\n"
+                f"next x = x + abs(h)\nstep map, h = {h}\n")
+    return (f"system s\nformat fp64\nround rup\nstate x\nconst s = {kind}\n"
+            f"d/dt x = s * x\nstep euler, h = {h}\n")
+
+
+def _sign_carried(g):
+    """What h's sign fixed: the constants that do not scale with h, and
+    the factors of those that do."""
+    return ([v for v, fa, _b, _f in g.const if fa is None],
+            [fa for _v, fa, _b, _f in g.const if fa is not None])
+
+
+@pytest.mark.parametrize("kind", ["copysign(1, h)", "abs(h)/h",
+                                  "abs(1/(3*h))*h", "map"])
+def test_a_run_h_keeps_the_graphs_sign(kind):
+    g = compile_(_sign_system(kind, "1/8"))
+    one = sf.one_bits(g.fmt)
+    for h0, h in ((g, F(-1, 8)), (compile_(_sign_system(kind, "-1/8")),
+                                  F(1, 8))):
+        with pytest.raises(lang.Refusal) as info:
+            lang.run(h0, [[one]], 1, h=h)
+        assert info.value.name == "step-size-sign"
+    # why: compiled at -1/8 the sign-carrying constants are others, so no
+    # recomputing of the h-scaled ones could give that graph
+    assert _sign_carried(compile_(_sign_system(kind, "-1/8"))) != \
+        _sign_carried(g)
+    for h in ("1/16", "3/7", "0x1p-10", "1e-300"):
+        again = compile_(_sign_system(kind, h))
+        assert _sign_carried(again) == _sign_carried(g)
+        assert lang.run(g, [[one]], 3, h=h).states == \
+            lang.run(again, [[one]], 3).states
+
+
+def test_a_run_h_is_the_reference_compiled_at_that_h():
+    """At h/2 and at 3h/7: each reference run with its h replaced equals
+    the reference compiled at that h, bit for bit, FLAGS included."""
+    rng = random.Random("run h")
+    for name in REFS:
+        g = ref(name)
+        text = (SYSTEMS / f"{name}.cftl").read_text()
+        assert g.integrator[1] == F(1, 100) and "h = 1/100" in text
+        top = 3 << (g.fmt.width - 2)          # positive, below 2
+        lanes = [[rng.getrandbits(g.fmt.width) & ~top
+                  for _ in range(g.n_state)] for _ in range(2)]
+        for new in (F(1, 200), F(3, 700)):
+            again = compile_(text.replace("h = 1/100", f"h = {new}"))
+            a = lang.run(g, lanes, 2, h=new)
+            b = lang.run(again, lanes, 2)
+            assert (a.states, a.flags) == (b.states, b.flags), name
+
+
+# The nits: a long constant named rightly in a sentence, written out in
+# time linear in its size, and read back by the test's own reader at any
+# length.
+
+_BRIEF = [
+    (-10 ** 5000, "-1e5000"), (10 ** 300, "1e300"),
+    (F(1, 10 ** 5000), "1e-5000"), (F(1, 3), "1/3"),
+    (F(1, 2 ** 1074), "0x1p-1074"),
+    (F(10 ** 5000, 3), "3.3333e+4999 (to five digits)"),
+    (F(-2 * 10 ** 5000, 3), "-6.6667e+4999 (to five digits)"),
+    (F(1, 3 * 10 ** 5000), "3.3333e-5001 (to five digits)"),
+    (F(10 ** 300000, 7), "1.4286e+299999 (to five digits)"),
+]
+
+
+@pytest.mark.parametrize("value, text", _BRIEF,
+                         ids=[text for _v, text in _BRIEF])
+def test_a_constant_is_named_briefly_and_rightly(value, text):
+    """-1e5000 was 'a value near 2^16609 (about 10^4999)'."""
+    assert C.brief(value) == text
+
+
+def test_five_digits_round_half_to_even():
+    assert C.five_digits(F(999995 * 10 ** 4994)) == "1.0000e+5000"
+    assert C.five_digits(F(999985 * 10 ** 4994)) == "9.9998e+4999"
+    assert C.five_digits(F(999985 * 10 ** 4994 + 1)) == "9.9999e+4999"
+    assert C.five_digits(F(-1, 7)) == "-1.4286e-1"
+    assert C.five_digits(F(10 ** 5)) == "1.0000e+5"
+
+
+def test_the_overflow_sentence_names_the_constant():
+    with pytest.raises(lang.Refusal) as info:
+        compile_(_src("state x", "next x = x * -1e5000"))
+    assert info.value.sentence == "-1e5000 overflows binary64 under rne"
+
+
+@pytest.mark.parametrize("lit", ["1e-78900", "1e78000", "3e-5000"])
+def test_a_constant_is_written_out_in_linear_time(lit):
+    """Rendering was quadratic in a constant's decimal exponent: 1e-20000
+    took 3.2 s and 1e-78900 about a minute, a call (verifier-VL1). The
+    bound here is far above the time measured, and far below that."""
+    g = compile_(f"system s\nformat fp256\nstate x\nnext x = x * {lit}\n"
+                 f"step map\n")
+    import time
+    t0 = time.perf_counter()
+    canon = lang.render_canonical(g)
+    lang.render_math(g)
+    assert lang.StepGraph.from_bytes(g.to_bytes()).to_bytes() == g.to_bytes()
+    assert time.perf_counter() - t0 < 5
+    assert f"x * {lit}" in canon
+
+
+@pytest.mark.parametrize("body", [
+    "next x = x * 3" + "7" * 4999,
+    "param p = 3" + "7" * 4999 + "\nnext x = x * p",
+    "next x = x * (" + "1" * 4400 + "/" + "3" * 4401 + ")",
+    "lane param p = " + "1" * 4400 + "/" + "3" * 4401 + "\nnext x = x * p",
+])
+def test_the_math_reader_reads_past_4300_digits(body):
+    """The test's own reader of the mathematical form called Fraction() on
+    a printed number, which stops at 4,300 digits (verifier-VL1)."""
+    g = compile_(f"system s\nformat fp256\nstate x\n{body}\nstep map\n")
+    check_intention_out(g, random.Random("long"), points=1)
+
+
+def _last_hex_digit_bumped(match):
+    text = match.group(0)
+    return text[:-1] + ("0" if text[-1] != "0" else "1")
+
+
+_SAID_PLANTS = [   # (which form, the change), each a wrong statement
+    ("canonical", lambda t: re.sub(r"(?m)^; sha256 \w+$",
+                                   _last_hex_digit_bumped, t)),
+    ("canonical", lambda t: re.sub(r"under (\w+) \(", lambda m: "under " + {
+        "rne": "rtz"}.get(m.group(1), "rne") + " (", t, count=1)),
+    ("canonical", lambda t: t.replace("in binary", "in binary2", 1)),
+    ("canonical", lambda t: t.replace(" - the canonical form",
+                                      "x - the canonical form", 1)),
+    ("canonical", lambda t: t.replace(", h/2", "", 1)),
+    ("canonical", lambda t: re.sub(r"(?m)^lane param \w+ = [^;]*; 0x\w+",
+                                   _last_hex_digit_bumped, t)),
+    ("canonical", lambda t: re.sub(r"(?m)^((?:d/dt|next) [^;]*)$",
+                                   r"\1  ; as written", t, count=1)),
+    ("math", lambda t: t.replace("  ρ = 1/3", "  ρ = 2/3")
+     .replace("  μ = 2/3", "  μ = 1/3")),
+    ("math", lambda t: t.replace("ρ", "ϱ").replace("θ", "ϑ")
+     .replace("φ", "ϕ").replace("σ", "ς")),
+    ("math", lambda t: re.sub(r" \((fp\d+)\), ", lambda m: " (" + {
+        "fp64": "fp32"}.get(m.group(1), "fp64") + "), ", t, count=1)),
+    ("math", lambda t: t.replace("Runge-Kutta", "Runge-Kutta-Fehlberg", 1)
+     .replace("one step: the map", "one step: a map", 1)),
+]
+
+
+def test_the_check_of_what_is_said_has_teeth():
+    """VL1's map, its lane default printed as 2/3 for 1/3, passed the
+    check before 2026-10-01's second send-back, and so did each change
+    here that its forms carry: a sha256 digit, the attribute or the
+    format restated, the title, the h-scaled list, a lane default's
+    encoding, a comment on an equation, a lane param's or a let's glyph,
+    the integrator's name. Each is caught now; the forms unchanged pass."""
+    for g in (compile_(NAMED_SYSTEMS["vl1-map"]),
+              compile_(NAMED_SYSTEMS["pendulum-rk4"]),
+              ref("lorenz63-rk4-fp64")):
+        canon, math = lang.render_canonical(g), lang.render_math(g)
+        check_comments(g, canon, math)
+        caught = 0
+        for which, plant in _SAID_PLANTS:
+            c2 = plant(canon) if which == "canonical" else canon
+            m2 = plant(math) if which == "math" else math
+            if (c2, m2) == (canon, math):
+                continue
+            with pytest.raises(AssertionError):
+                check_comments(g, c2, m2)
+            caught += 1
+        assert caught >= 7, g.system
 
 
 # ---- the documents -------------------------------------------------------------
