@@ -575,9 +575,22 @@ stage sweepjudge "hw/sweep_freq.sh judges a sweep point by the kernel clock's ow
 # ensure_vectors' rules for reusing or remaking vectors/out against
 # planted directories, running the generator at small counts: python
 # with mpmath. Each is skipped by name only for what it needs.
+# Its report quotes skip lines, which is what it tests, and this stage's
+# own log is scanned for inner skips like every other: the first run
+# counted the quotation "cpp-replay: ...: imul skipped, not on this
+# device" as a skip of this stage's (amd-arc-box, 58fea7d). So the
+# report goes to innerskips-detail.log beside the stage's log, and the
+# stage's log carries the verdict, or the report's tail on a failure.
+do_innerskips() {
+  local detail="$RUNDIR/innerskips-detail.log" rc
+  bash "$ROOT/verify/test-inner-skips.sh" > "$detail" 2>&1; rc=$?
+  if [ $rc -eq 0 ]; then tail -n 1 "$detail"; else tail -n 40 "$detail"; fi
+  echo "(the whole report: $detail)"
+  return $rc
+}
 need
 stage innerskips "verify/run.sh counts and names the checks skipped inside a passing stage, held to synthetic stages, each with its negative control (verify/test-inner-skips.sh)" -- \
-  bash "$ROOT/verify/test-inner-skips.sh"
+  do_innerskips
 need python mpmath
 stage ensurevectors "verify/run.sh's ensure_vectors replays vectors/out only when its record is whole and held, and otherwise regenerates it and says why, held to planted directories (verify/test-ensure-vectors.sh)" -- \
   bash "$ROOT/verify/test-ensure-vectors.sh"
