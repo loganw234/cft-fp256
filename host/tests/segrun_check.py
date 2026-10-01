@@ -349,7 +349,11 @@ FLAG_C = ((Fraction(1), (0,)),)     # flagstep's counter, slot 0
 # rounding direction. A step-halving estimate on every ODE program, a
 # wider one on every fp64 one, and Henon-Heiles' energy drift, exact,
 # whose denominator has a 3. A difference of two values of one format is
-# exact in it (Sterbenz), so a rounded or enclosed estimate names a
+# exact in it when they have one sign and each is within a factor of two
+# of the other (Sterbenz's lemma), and the step-halving runs here end
+# that close: all 210 pairs of final elements, run 0's beside its
+# half-step run's, meet the condition and differ exactly (measured
+# 2026-09-30). So a rounded or enclosed estimate names a
 # narrower format, and a drift, with its 3, rounds inexactly in any:
 # main() holds that each direction but rup rounds otherwise than rup
 # somewhere, so that a writer that swapped its direction is seen.

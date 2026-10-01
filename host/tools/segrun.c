@@ -1655,9 +1655,9 @@ static void parse_value(const char *s, value_t *v, size_t j)
             if (!strcmp(part[1], FMT[k].name))
                 f = (int)k;
         if (f < 0)
-            refuse("malformed", "entry %lu: a %s value's format is one of "
+            refuse("malformed", "entry %lu: %s %s value's format is one of "
                    "fp32, fp64, fp128, fp256, not '%.40s'", (unsigned long)j,
-                   part[0], part[1]);
+                   v->form == V_ENCLOSED ? "an" : "a", part[0], part[1]);
         /* the format by its word as given, which the loop above matched to
          * FMT[f].name: never FMT[f] here, where f is past the build's
          * ceiling (gcc 13 flags that subscript in the default build, where

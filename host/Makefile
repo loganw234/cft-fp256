@@ -1172,9 +1172,10 @@ clean-programs:
 #                       2,048 with the depth stated in every run block,
 #                       byte for byte the golden writer's at each and
 #                       audited there, and the option's refusals. And the
-#                       accuracy entries (the plan's step 5): every
-#                       program certified with entries of every method,
-#                       scope, form and direction, each value byte for
+#                       accuracy entries (the plan's step 5): each
+#                       program but the one that starts apart certified
+#                       with entries, between them every method, scope,
+#                       form and direction, each value byte for
 #                       byte the golden writer's and accepted by both
 #                       auditors (cft-audit is a prerequisite); every
 #                       entry's refusal by the golden writer's name; the

@@ -9,7 +9,7 @@ not control, starting each from its certified start state. This page is
 the whole of version 1. A reader and an auditor can be written from it
 alone.
 
-Where things stand (2026-09-29):
+Where things stand (2026-09-30):
 - the golden implementation is `python/cft_golden/cert.py`: encode,
   strict parse, the hashes, the chain and the audit, which re-runs
   segments with `seq.run`;
@@ -1399,8 +1399,11 @@ How each value is made:
   tool wrote before step 5.
 - The arithmetic is cft-audit's own. Step 5 moved it into one file that
   both tools build, `host/tools/cert_exact.h`. It is header-only, and
-  each of its functions returns a status, which each tool refuses by
-  name.
+  nothing in it prints or exits. Each of its functions that can fail
+  returns a status. A status that names a refusal, each tool refuses by
+  that name. An exact step past the bigint, which the width rule makes
+  impossible, is an internal error in both tools, and a library call
+  that fails is this tool's `device` and cft-audit's internal error.
 
 **The states.** Each boundary is written as it is reached, to
 
@@ -1588,8 +1591,10 @@ reach have no test in the gate:
 - a boundary file already in DIR when the run comes to write it
   (`output`, as a file the run did not make);
 - a boundary file changed, or gone, between its writing and an entry's
-  reading it back (`output`; the plant build holds the check, and a
-  race does not);
+  reading it back (`output`). The plant build holds the hash check
+  alone: a file of another size, or one that cannot be read, has no
+  test here (verifier-W1 planted both, and each was refused `output`,
+  2026-09-30), and a race is held by nothing;
 - the software handle for an accuracy value not opening, or one of its
   conversions failing (`device`).
 Two of these do happen on the desktop when another process makes them,
@@ -1775,8 +1780,10 @@ each image held to `programs/MANIFEST`, with its classic bank:
   half-step run shares run 0's, so a writer that entered one from run
   0's `--init` would pass them all (verifier-C6's plant).
 
-Each program is certified keyed and open on the software backend, with
-accuracy entries (since the plan's step 5, 2026-09-30):
+Each program is certified keyed and open on the software backend, and
+each but the one whose half-step run starts apart (the audit refuses it
+before step 10) with accuracy entries (since the plan's step 5,
+2026-09-30):
 - Between them the entries have every method, both scopes, every form
   and every rounding direction:
   - a step-halving estimate on each ODE program;
@@ -1785,10 +1792,17 @@ accuracy entries (since the plan's step 5, 2026-09-30):
     fp64 on lane 1 and at fp256 over the lanes, near the width rule;
   - flagstep's counter drift over the lanes. Every lane's drift is -5,
     so a writer that took the signed maximum writes -5.
-- A difference of two values of one format is exact in it, so a rounded
-  estimate names a narrower format. The gate holds that each direction
-  but `rup` rounds some entry's value to other bits than `rup` does, so
-  that a writer that swapped its direction is seen.
+- A difference of two values of one format is exact in it when they
+  have one sign and each is within a factor of two of the other
+  (Sterbenz's lemma). The gate's step-halving runs end that close: all
+  210 pairs of final elements, run 0's beside its half-step run's, meet
+  the condition and differ exactly (2026-09-30; verifier-W1 counted the
+  exact differences first). So a step-halving estimate's value is exact
+  in its runs' format, where no rounding shows its direction, and the
+  rounded and enclosed ones that are to show it name a narrower format.
+  The gate holds that each direction but `rup` rounds some entry's value
+  to other bits than `rup` does, so that a writer that swapped its
+  direction is seen.
 
 Then:
 - the golden reader must accept each certificate;
@@ -2076,9 +2090,11 @@ page's test vector writes them. It samples through a map of at least
   element's exact value, the rationals under the width rule, the
   rounding, a rational token's reading, and "The functions, exactly", in
   three parts: the checks, the states read, and the value. It also holds
-  `value_holds`. Every function returns a status and prints nothing:
-  this tool maps each status to its refusal (step 10's names at the
-  entry) or to its internal error, as before. The header is compiled
+  `value_holds`. Nothing in it prints or exits, and each function that
+  can fail returns a status: this tool maps a status that names a
+  refusal to that refusal (step 10's names at the entry), and the two
+  that name none, an exact step past the bigint and a library call that
+  failed, to its internal error, as before. The header is compiled
   into every build of the tool, the narrow builds and the probe among
   them, and each build compiles warning-free with the project's flags
   (-std=c99 -Wall -Wextra -Wpedantic -Wshadow; the lead's condition).
@@ -2234,11 +2250,18 @@ refused there one call a name (step 10's `accuracy-run`, `-scope`,
 still plants each name apart. It does not plant inside the header,
 whose checks are held by the gates' controls: test_cert.py's through
 section 2, and segrun_check's section 12. The census below is
-ca1327f's, and has not been run again since the move.
+verifier-W1's, run after the move.
 
-On `tools/audit.c` as of ca1327f, with the gate's 6,669 cases, the
-census found 167 sites (157 s on the desktop, 2026-09-29):
-- **148 red.** Each turns a case red, and the gate's line names the
+On `tools/audit.c` as of 0ad2609 (unchanged since the move, 0612b37),
+with the gate's 6,669 cases, the census found 163 sites (186 s on the
+desktop; verifier-W1, 2026-09-30). At ca1327f, before the move, it
+found 167: 148 red, 12 green and 7 unreached (157 s, 2026-09-29). The
+move made seven sites three, calls that refuse one name each (W1's
+reading of the diff): derive's two `accuracy-run` calls became one,
+`exact_of`'s and `rat_checked`'s `width` one, and `read_rational`'s
+three `malformed` calls one. The seven were six red and one green (zero
+spelt 0/3), and the three are red.
+- **145 red.** Each turns a case red, and the gate's line names the
   golden auditor's refusal beside the tool's other answer. Four answer
   verifier-A1's findings, each planted in turn:
   - `build-format` at a run's `program-format` line: its case reaches
@@ -2248,13 +2271,12 @@ census found 167 sites (157 s on the desktop, 2026-09-29):
   - `build-format` at an image above the ceiling: `program-image`;
   - the `--sample` map's size: a map of 16 slots, and the sample runs
     past the census's 20 s.
-- **12 green.** Each stays green because another check refuses its
+- **11 green.** Each stays green because another check refuses its
   cases by the same name at the same place:
   - in the golden auditor's order too:
     - a block-starting line whose block is behind: the next rule of
       "A line that is not the one expected" says `line-unexpected`;
     - a decimal's spelling, read again with its size;
-    - zero spelt 0/3, which is not in lowest terms either;
     - a program without SCRATCH_IO, whose scratch goes in as 0 slots,
       the second reason;
   - in C alone:
