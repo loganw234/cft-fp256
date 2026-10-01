@@ -186,12 +186,22 @@ class _Alloc:
             lk = ("l", j)
             if lk in self.pinned:
                 add(lk, self.END)
+        # Where each homed store falls due: once its value exists and its
+        # old value has no use left. stores(q) reads this index rather than
+        # every pending component at every position, which was quadratic
+        # (52 of the 166 s a 16,796-node step took to compile).
+        self.due_at = {}
         for i in self.pending:
             o = outs[i]
-            if i in self.deferred or o[0] != "n":
+            if i in self.deferred:
                 continue
             last = max(uses.get(("s", i), [-2]))
-            add(o, max(2 * self.pos_of[o[1]], last) + 1)
+            if o[0] == "n":
+                q = max(2 * self.pos_of[o[1]], last) + 1
+                add(o, q)
+            else:
+                q = last + 1
+            self.due_at.setdefault(q, []).append(i)
         for k in uses:
             uses[k].sort()
         self.uses = uses
@@ -354,23 +364,40 @@ class _Alloc:
         self.computed.add(key)
 
     def stores(self, q):
-        """The homed stores whose turn has come after position q. A value
-        stored here is let go only after every store of this position: one
-        node can be the next value of several components (sharing merges
-        a[1..3] = s * s into one), and the first store once released it
-        before the others."""
+        """The homed stores whose turn has come after position q.
+
+        Every value still due here is protected from eviction until its
+        last store here is made: a value whose only later use is a store
+        at this very position has no use AFTER q, so the eviction rule
+        would drop it as dead - reloading one output for its store once
+        evicted another due beside it, "output N's value is nowhere"
+        (verifier-VL2's let-heavy maps). The values already in registers
+        are stored first, so that the reloads after them find registers
+        those stores have freed; and a value is let go after its last store
+        here, since one node can be several components' next value
+        (sharing merges a[1..3] = s * s into one)."""
         outs = self.low.outs
-        stored = []
-        for i in self.pending:
-            if not self.pending[i] or i in self.deferred:
+        due = []
+        for i in self.due_at.get(q, ()):
+            if not self.pending[i]:
                 continue
             o = outs[i]
             if self.next_use(("s", i), q) is not None:
                 continue
             if o[0] == "n" and o not in self.computed:
                 continue
+            due.append(i)
+        if not due:
+            return
+        left = {}
+        for i in due:
+            left[outs[i]] = left.get(outs[i], 0) + 1
+        protect = {o for o in left if o[0] in "sln"}
+        due.sort(key=lambda i: (outs[i] not in self.where, i))
+        for i in due:
+            o = outs[i]
             if o[0] in "pcf":
-                r = self.take_reg(q)
+                r = self.take_reg(q, protect)
                 self.copy(r, ("b", self.low.slot_of[o]), o)
                 self.stl(r, i, o)
                 self.slot_put(i, o)
@@ -379,16 +406,17 @@ class _Alloc:
                     s = self.copy_slot(o)
                     if s is None:
                         raise InternalError(f"output {i}'s value is nowhere")
-                    r = self.take_reg(q, {o})
+                    r = self.take_reg(q, protect)
                     self.ldl(r, s, o)
                     self.place(o, r)
                 self.stl(self.where[o], i, o)
                 self.slot_put(i, o)
-                stored.append(o)
             self.pending[i] = False
-        for o in dict.fromkeys(stored):
-            if self.next_use(o, q) is None:
-                self.release(o)
+            left[o] -= 1
+            if not left[o]:
+                protect.discard(o)
+                if o[0] in "sln" and self.next_use(o, q) is None:
+                    self.release(o)
 
     # -- the step's closing copies -------------------------------------------
     #
