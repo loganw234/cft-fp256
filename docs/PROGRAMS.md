@@ -181,7 +181,20 @@ sources whose comments and `.const` literals run from 1,022 to 5,000
 bytes must give both the same bytes. Until then `cft-asm` read a line
 1,023 bytes at a time and assembled a longer one as two or more - a
 comment whose tail read ` deposit r0` gave an extra deposit, at exit
-0; both read a line whole now, at any length.
+0; both read a line whole now, at any length. And on every numeric
+field - `.deposits`, `.scratch`, `.slot`, a slot operand, `repeat`,
+`opN` and register numbers - at and past its bounds, in both signs and
+the spellings Python's `int()` takes: the same bytes, or the same
+refusal for the same reason. Until then `cft-asm` read numbers with
+`strtoull` and cast `.deposits` to 32 bits, so `.deposits 4294967297`
+gave max_deposits 1 at exit 0 where `asm.py` refuses it.
+
+Known differences, recorded rather than fixed (2026-10-01), each loud:
+`asm.py` accepts, and `cft-asm` refuses by name, a line ended by a
+lone carriage return or a form feed, a name of 64 characters or more,
+and a number written in non-ASCII digits. And `asm.py` accepts a
+negative `.scratch in` or `out` count and writes its low sixteen bits
+(-1 is 65535), which `cft-asm` refuses; that one is `asm.py`'s to fix.
 
 **One thing neither carries: an arity table from libcft.** Which
 operand FIELDS an opcode reads is not in `cft_op_name`, in

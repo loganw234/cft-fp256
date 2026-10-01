@@ -588,6 +588,11 @@ typedef struct {
     int        have_fmt;
     uint32_t   max_deposits;
     int        have_deposits;
+    /* The latest `.deposits` value when it is outside 0..MAX_DEPOSITS,
+     * as asm.py prints it, for validate() to refuse; NULL while it is in
+     * range. asm.py holds only the LAST `.deposits` to its cap, when the
+     * image is made, so a value a later line replaced is no refusal. */
+    char      *deposits_bad;
     uint32_t   flags;
     size_t     esz;
 
@@ -609,6 +614,11 @@ typedef struct {
     int      n_slots;
     char     slot_name[MAX_NAMES][64];
     uint32_t slot_value[MAX_NAMES];
+    /* A `.slot` value below zero, as asm.py prints it, refused where
+     * the name is USED - asm.py's encoder refuses it there and not at
+     * the definition, so a name defined and never used is no refusal in
+     * either. NULL for every other slot. */
+    char    *slot_bad[MAX_NAMES];
 
     uint32_t n_insns;
     uint64_t insns[MAX_INSNS];
@@ -648,17 +658,149 @@ static int is_ident(const char *s)
     return 1;
 }
 
-/* `rN` -> N, or -1. */
+/* `rN` -> N, or -1 where the token is not `r` (either case) and digits.
+ *
+ * Any number of digits is register SYNTAX, as asm.py's ^r(\d+)$ has it:
+ * a name like r100001 would shadow a register there and is refused, and
+ * an operand r100001 is outside r0..r31. Until 2026-10-01 this read a
+ * value past 100000 as no register at all, so `.const r100001 = 1` was
+ * assembled where asm.py refuses it. A value past REG_LIT_CAP reads as
+ * REG_LIT_CAP, past every register; a message prints the token's own
+ * digits (digits_text). */
+#define REG_LIT_CAP 100000
 static int reg_literal(const char *s)
 {
-    long v;
-    char *end;
+    const char *p;
+    long v = 0;
     if (!(s[0] == 'r' || s[0] == 'R') || !isdigit((unsigned char)s[1]))
         return -1;
-    v = strtol(s + 1, &end, 10);
-    if (*end || v < 0 || v > 100000)
-        return -1;
-    return (int)v;
+    for (p = s + 1; *p; p++) {
+        if (!isdigit((unsigned char)*p))
+            return -1;
+        if (v < REG_LIT_CAP)
+            v = v * 10 + (*p - '0');
+    }
+    return v < REG_LIT_CAP ? (int)v : REG_LIT_CAP;
+}
+
+/* Decimal digits as asm.py prints the int they make: no leading zero. */
+static const char *digits_text(const char *p)
+{
+    while (p[0] == '0' && p[1])
+        p++;
+    return p;
+}
+
+/* ---- numbers, as asm.py reads them -------------------------------------
+ *
+ * asm.py's _parse_uint is Python's int() of the token: base 16 after a
+ * 0x (either case), base 10 otherwise. So a decimal may carry ONE sign
+ * and a 0x number none; single underscores may stand between digits, and
+ * one directly after the 0x (PEP 515); "-0" is zero; and the value has
+ * any size. asm.py refuses a token that does not parse, by name, and then
+ * holds the VALUE - of any size, either sign - to each field's bounds.
+ *
+ * So this keeps the sign, the magnitude while it fits 64 bits, and
+ * whether it did not, and every caller holds all three to asm.py's
+ * bounds before anything is narrowed. Until 2026-10-01 it was strtoull:
+ * past 2^64 - 1 it saturated, a minus sign wrapped into a huge
+ * magnitude, "0x" read as 0, a sign after 0x was taken, and `.deposits`
+ * cast the answer to 32 bits - so `.deposits 4294967297` was assembled
+ * as max_deposits 1, at exit 0, where asm.py refuses it (the language
+ * round's D1; programs/check.py's numeric arm holds every field now).
+ * Python's int() also reads non-ASCII digits; this reads ASCII only and
+ * refuses the rest by name. */
+typedef struct {
+    int      neg;       /* below zero */
+    int      big;       /* the magnitude does not fit 64 bits */
+    int      hex;       /* written 0x... */
+    uint64_t mag;       /* the magnitude, when it fits */
+} number;
+
+static int read_number(const char *tok, number *n)
+{
+    const char *p = tok;
+    int base = 10, digits = 0, after_digit = 0;
+    memset(n, 0, sizeof *n);
+    if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+        base = 16;
+        n->hex = 1;
+        p += 2;
+        if (*p == '_')
+            p++;
+    } else if (*p == '+' || *p == '-') {
+        n->neg = *p == '-';
+        p++;
+    }
+    for (; *p; p++) {
+        int d;
+        if (*p == '_') {
+            if (!after_digit)
+                return 0;
+            after_digit = 0;
+            continue;
+        }
+        if (*p >= '0' && *p <= '9')
+            d = *p - '0';
+        else if (base == 16 && *p >= 'a' && *p <= 'f')
+            d = *p - 'a' + 10;
+        else if (base == 16 && *p >= 'A' && *p <= 'F')
+            d = *p - 'A' + 10;
+        else
+            return 0;
+        if (!n->big) {
+            if (n->mag > (UINT64_MAX - (uint64_t)d) / (uint64_t)base)
+                n->big = 1;
+            else
+                n->mag = n->mag * (uint64_t)base + (uint64_t)d;
+        }
+        digits++;
+        after_digit = 1;
+    }
+    if (!digits || !after_digit)
+        return 0;
+    if (!n->big && n->mag == 0)
+        n->neg = 0;
+    return 1;
+}
+
+static void need_number(const char *tok, const char *what, number *n)
+{
+    if (!read_number(tok, n))
+        diel("%s: '%s' is not a number", what, tok);
+}
+
+/* A number as asm.py's messages print it, Python's str() of the int: a
+ * minus sign below zero, then the digits with no plus sign, underscore
+ * or leading zero. Past 2^64 - 1 the magnitude is not held, so a decimal
+ * token's own digits are printed that way and a 0x token as written.
+ * Heap memory, printed by diel, which exits, or kept for validate(). */
+static char *number_text(const number *n, const char *tok)
+{
+    char *s = (char *)xcalloc(strlen(tok) + 24, 1);
+    const char *p = tok;
+    size_t k = 0;
+    if (!n->big) {
+        snprintf(s, strlen(tok) + 24, "%s%llu", n->neg ? "-" : "",
+                 (unsigned long long)n->mag);
+        return s;
+    }
+    if (n->hex) {
+        strcpy(s, tok);
+        return s;
+    }
+    if (*p == '+' || *p == '-') {
+        if (*p == '-')
+            s[k++] = '-';
+        p++;
+    }
+    while (*p == '0' || *p == '_')
+        p++;
+    for (; *p; p++)
+        if (*p != '_')
+            s[k++] = *p;
+    s[k] = 0;
+    return s;
 }
 
 static int find_const(const program *P, const char *name)
@@ -705,21 +847,8 @@ static int parse_reg(const program *P, const char *tok)
         diel("'%s' is not a register", tok);
     }
     if (n >= NREG)
-        diel("r%d is outside r0..r%d", n, NREG - 1);
+        diel("r%s is outside r0..r%d", digits_text(tok + 1), NREG - 1);
     return n;
-}
-
-static uint64_t parse_uint(const char *tok, const char *what)
-{
-    char *end;
-    unsigned long long v;
-    if (tok[0] == '0' && (tok[1] == 'x' || tok[1] == 'X'))
-        v = strtoull(tok + 2, &end, 16);
-    else
-        v = strtoull(tok, &end, 10);
-    if (*end || end == tok)
-        diel("%s: '%s' is not a number", what, tok);
-    return (uint64_t)v;
 }
 
 /* A static scratch slot: a `.slot` name, or a decimal or 0x literal.
@@ -728,9 +857,12 @@ static uint64_t parse_uint(const char *tok, const char *what)
 static uint32_t parse_slot(const program *P, const char *tok)
 {
     int i = find_slot_name(P, tok);
-    uint64_t v;
-    if (i >= 0)
+    number v;
+    if (i >= 0) {
+        if (P->slot_bad[i])
+            diel("scratch slot %s does not fit imm[23:0]", P->slot_bad[i]);
         return P->slot_value[i];
+    }
     if (is_ident(tok)) {
         if (find_reg_name(P, tok) >= 0 || reg_literal(tok) >= 0)
             diel("%s is a register, and a static slot is a number or a "
@@ -740,11 +872,15 @@ static uint32_t parse_slot(const program *P, const char *tok)
                  "`.slot` name - the indexed form is `stx` and `ldx`", tok);
         diel("'%s' is not a slot", tok);
     }
-    v = parse_uint(tok, "a scratch slot");
-    if (v > SLOT_MASK)
+    /* asm.py's order: past the field is refused first (do_ctrl), below
+     * zero by the encoder after it (_slot_imm). */
+    need_number(tok, "a scratch slot", &v);
+    if (!v.neg && (v.big || v.mag > SLOT_MASK))
         diel("a static slot is imm[23:0], so at most %u",
              (unsigned)SLOT_MASK);
-    return (uint32_t)v;
+    if (v.neg)
+        diel("scratch slot %s does not fit imm[23:0]", number_text(&v, tok));
+    return (uint32_t)v.mag;
 }
 
 /* A `.const` literal into `out`, format-width, little-endian.
@@ -834,15 +970,19 @@ static void do_ctrl(program *P, int code, char **tok, int ntok)
     int kflag[3] = { 0, 0, 0 };
     uint32_t imm = 0;
     if (code == C_REPEAT) {
-        uint64_t trip;
+        /* asm.py's order: zero, then past 32 bits (do_ctrl), then below
+         * zero (its encoder, repeat()). */
+        number trip;
         if (ntok != 1)
             diel("repeat takes a trip count");
-        trip = parse_uint(tok[0], "repeat");
-        if (trip == 0)
+        need_number(tok[0], "repeat", &trip);
+        if (!trip.neg && !trip.big && trip.mag == 0)
             diel("repeat 0 is not a loop; omit it");
-        if (trip >= ((uint64_t)1 << 32))
+        if (!trip.neg && (trip.big || trip.mag >= ((uint64_t)1 << 32)))
             diel("a trip count is a 32-bit immediate");
-        imm = (uint32_t)trip;
+        if (trip.neg)
+            diel("repeat trip count must be 1..2^32-1");
+        imm = (uint32_t)trip.mag;
     } else if (code == C_DEPOSIT || code == C_SETACT) {
         if (ntok != 1)
             diel("%s takes one register", CTRL_NAMES[code]);
@@ -912,13 +1052,18 @@ static void do_alu(program *P, const char *mnemonic, char **tok, int ntok)
         strcpy(name, mnemonic);
     }
 
+    /* `opN` is `op` and decimal digits only, as asm.py's ^op(\d+)$ has
+     * it: `op0x10` is no opcode there, and was opcode 16 here until
+     * 2026-10-01 (the number went through the 0x-reading parser). */
     if ((name[0] == 'o' || name[0] == 'O') &&
-        (name[1] == 'p' || name[1] == 'P') &&
-        isdigit((unsigned char)name[2])) {
-        uint64_t v = parse_uint(name + 2, "opcode");
+        (name[1] == 'p' || name[1] == 'P') && name[2] &&
+        strspn(name + 2, "0123456789") == strlen(name + 2)) {
+        const char *dg;
+        unsigned v = 0;
+        for (dg = name + 2; *dg && v <= 255; dg++)
+            v = v * 10u + (unsigned)(*dg - '0');
         if (v > 255)
-            diel("op%llu does not fit the opcode byte",
-                 (unsigned long long)v);
+            diel("op%s does not fit the opcode byte", digits_text(name + 2));
         op = (int)v;
         explicit_only = 1;
         fields = "abc";
@@ -1023,9 +1168,20 @@ static void assemble_line(program *P, char *line)
             if (!P->have_fmt)
                 diel("'%s' is not fp32, fp64, fp128 or fp256", tok[1]);
         } else if (!strcmp(d, ".deposits")) {
+            /* Whole, and held to 0..MAX_DEPOSITS when the image is made
+             * (validate), as asm.py holds its last `.deposits`; narrowed
+             * only once in range. Until 2026-10-01 it was cast to 32
+             * bits here, so 4,294,967,297 was written as 1. */
+            number v;
             if (ntok != 2)
                 diel(".deposits takes one number");
-            P->max_deposits = (uint32_t)parse_uint(tok[1], ".deposits");
+            need_number(tok[1], ".deposits", &v);
+            free(P->deposits_bad);
+            P->deposits_bad = NULL;
+            if (v.neg || v.big || v.mag > MAX_DEPOSITS)
+                P->deposits_bad = number_text(&v, tok[1]);
+            else
+                P->max_deposits = (uint32_t)v.mag;
             P->have_deposits = 1;
         } else if (!strcmp(d, ".bank")) {
             if (ntok != 2 || !streq_ci(tok[1], "external"))
@@ -1052,30 +1208,37 @@ static void assemble_line(program *P, char *line)
                     diel(".scratch strict appears twice");
                 P->flags |= FLAG_SCRATCH_STRICT;
             } else if (ntok == 2) {
-                uint64_t v = parse_uint(tok[1], ".scratch");
+                number v;
                 if (P->have_depth)
                     diel(".scratch N appears twice");
-                if (v < 1 || v > SCRATCH_D_MAX || (v & (v - 1)))
+                need_number(tok[1], ".scratch", &v);
+                if (v.neg || v.big || v.mag < 1 || v.mag > SCRATCH_D_MAX ||
+                    (v.mag & (v.mag - 1)))
                     diel(".scratch takes a power of two in 1..%u",
                          (unsigned)SCRATCH_D_MAX);
-                P->scratch_depth = (uint32_t)v;
+                P->scratch_depth = (uint32_t)v.mag;
                 P->have_depth = 1;
             } else if (ntok == 3 &&
                        (streq_ci(tok[1], "in") || streq_ci(tok[1], "out"))) {
                 int is_in = streq_ci(tok[1], "in");
-                uint64_t v = parse_uint(tok[2], ".scratch");
-                if (v > SCRATCH_IO_MAX)
+                number v;
+                need_number(tok[2], is_in ? ".scratch in" : ".scratch out",
+                            &v);
+                /* Below zero too: no count is. (asm.py, at 2026-10-01,
+                 * writes such a count's low sixteen bits instead; the
+                 * language round's D1 ledger records it for the lead.) */
+                if (v.neg || v.big || v.mag > SCRATCH_IO_MAX)
                     diel(".scratch %s is a sixteen-bit count, at most %u",
                          is_in ? "in" : "out", (unsigned)SCRATCH_IO_MAX);
                 if (is_in) {
                     if (P->have_scratch_in)
                         diel(".scratch in appears twice");
-                    P->n_scratch_in = (uint32_t)v;
+                    P->n_scratch_in = (uint32_t)v.mag;
                     P->have_scratch_in = 1;
                 } else {
                     if (P->have_scratch_out)
                         diel(".scratch out appears twice");
-                    P->n_scratch_out = (uint32_t)v;
+                    P->n_scratch_out = (uint32_t)v.mag;
                     P->have_scratch_out = 1;
                 }
                 /* Either half declares the block, so the flag is set
@@ -1086,7 +1249,7 @@ static void assemble_line(program *P, char *line)
                 diel(".scratch takes a depth, `strict`, or `in N`, or `out M`");
             }
         } else if (!strcmp(d, ".slot")) {
-            uint64_t v;
+            number v;
             if (ntok != 4 || strcmp(tok[2], "="))
                 diel(".slot takes NAME = N");
             if (!is_ident(tok[1]))
@@ -1096,8 +1259,8 @@ static void assemble_line(program *P, char *line)
                 diel("%s is already defined", tok[1]);
             if (reg_literal(tok[1]) >= 0)
                 diel("%s would shadow a register", tok[1]);
-            v = parse_uint(tok[3], ".slot");
-            if (v > SLOT_MASK)
+            need_number(tok[3], ".slot", &v);
+            if (!v.neg && (v.big || v.mag > SLOT_MASK))
                 diel("a static slot is imm[23:0], so at most %u",
                      (unsigned)SLOT_MASK);
             if (P->n_slots >= MAX_NAMES)
@@ -1105,7 +1268,10 @@ static void assemble_line(program *P, char *line)
             if (strlen(tok[1]) >= sizeof P->slot_name[0])
                 diel("that name is too long");
             strcpy(P->slot_name[P->n_slots], tok[1]);
-            P->slot_value[P->n_slots] = (uint32_t)v;
+            /* Below zero is refused where the name is used (parse_slot),
+             * as asm.py's encoder refuses it there. */
+            P->slot_bad[P->n_slots] = v.neg ? number_text(&v, tok[3]) : NULL;
+            P->slot_value[P->n_slots] = v.neg ? 0u : (uint32_t)v.mag;
             P->n_slots++;
         } else if (!strcmp(d, ".const")) {
             int bare = (ntok == 2) && (P->flags & FLAG_BANK_EXT);
@@ -1169,7 +1335,8 @@ static void assemble_line(program *P, char *line)
             if (rnum < 0)
                 diel("'%s' is not r0..r%d", tok[3], NREG - 1);
             if (rnum >= NREG)
-                diel("r%d is outside r0..r%d", rnum, NREG - 1);
+                diel("r%s is outside r0..r%d", digits_text(tok[3] + 1),
+                     NREG - 1);
             if (P->n_regs >= MAX_NAMES)
                 diel("too many register names");
             if (strlen(tok[1]) >= sizeof P->reg_name[0])
@@ -1317,6 +1484,11 @@ static void validate(const program *P)
         diel(".format is required");
     if (!P->have_deposits)
         diel(".deposits is required");
+    /* A source's value, whole (the `.deposits` line kept it), and then
+     * an image's header word, for the readback. */
+    if (P->deposits_bad)
+        diel("max_deposits=%s, cap %u", P->deposits_bad,
+             (unsigned)MAX_DEPOSITS);
     if (P->max_deposits > MAX_DEPOSITS)
         diel("max_deposits=%u, cap %u", (unsigned)P->max_deposits,
              (unsigned)MAX_DEPOSITS);

@@ -20,7 +20,9 @@ things, in this order, and stops at the first failure:
    generator. Since 2026-10-01 sources with lines of 1,022 to 5,000
    bytes - either side of the 1,024-byte buffer cft-asm once read a
    line in, and well past it - must give both the same bytes too, with
-   a control that cuts them where that reader did (check_long_lines).
+   a control that cuts them where that reader did (check_long_lines);
+   and every numeric field, at and past its bounds, the same bytes or
+   the same refusal for the same reason (check_numeric_fields).
 
 2. **The disassembler is a readback.** Every built image is
    disassembled by both implementations, the two texts must agree, and
@@ -1728,6 +1730,168 @@ def check_long_lines(args, tmp):
        f"lines of {LONG_LINE_LENGTHS[0]:,} to {LONG_LINE_LENGTHS[-1]:,} "
        f"bytes; control: {cut} of them, every one with a line past 1,023 "
        f"bytes, refused or other bytes when cut where the old reader cut")
+
+
+# ---- numbers -------------------------------------------------------------
+#
+# asm.py reads every number in a source with Python's int() - any size,
+# either sign on a decimal, none after 0x, PEP 515's underscores - and
+# then holds the value to the field's bounds. cft-asm.c read one with
+# strtoull until 2026-10-01: it saturated past 2^64 - 1, wrapped a minus
+# sign into a huge magnitude, read "0x" as 0 and took a sign after 0x, and
+# `.deposits` cast the answer to 32 bits, so `.deposits 4294967297` gave
+# max_deposits 1 at exit 0 where asm.py refuses it. `op0x10` was opcode
+# 16, and a name `r100001` was no register (asm.py: it would shadow one).
+# MEASURED in the language round (its D1 ledger): 88 of 889 probes over
+# these fields were images asm.py refuses.
+#
+# This arm holds the two assemblers to each other on every numeric field
+# a source has - .deposits, .scratch N, .scratch in and out, .slot, a
+# static slot operand, repeat, opN and register numbers, as an operand
+# and as a name - at and just past each field's own bound, at 2^32 and
+# 2^64 either side, below zero, and in the spellings int() takes or
+# refuses. Each case must give the same bytes or be refused by both, for
+# the same reason: the messages are compared without each tool's
+# "file:line: " prefix, allowing one difference - cft-asm prints a 0x
+# value past 2^64 - 1 as written, where asm.py prints its decimal. Each
+# field must be reached from both sides (some case accepted, some
+# refused), or the arm says which was not.
+#
+# One exception, held on cft-asm's side only: asm.py writes a NEGATIVE
+# `.scratch in` or `out` count's low sixteen bits (-1 is 65535, at exit
+# 0, wherever the depth allows; the D1 ledger records it for the lead).
+# cft-asm must refuse each such count, as no sixteen-bit count.
+
+_NUM_EDGES = (0, 1, (1 << 32) - 1, 1 << 32, (1 << 32) + 1,
+              (1 << 64) - 1, 1 << 64, (1 << 64) + 1)
+_NUM_SPELLINGS = ("0x", "0x0", "0X10", "0x100000001", "0x10000000000000000",
+                  "0x+1", "0x-1", "+5", "-0", "+0x5", "-0x5", "1_0", "0x_10",
+                  "0x__10", "1__0", "_1", "1_", "00010", "1e3", "5x")
+_NUM_NEGATIVES = ("-1", "-5", "-4294967295", "-4294967296",
+                  "-18446744073709551615")
+_NUM_HEAD = ".format fp64\n.deposits 1\n"
+_NUM_DEEP = _NUM_HEAD + ".scratch 16777216\n"
+
+# (field, its own bounds, the source around a value, whether a negative
+# is held on cft-asm's side only)
+_NUM_SITES = (
+    (".deposits", (1 << 20,),
+     lambda v: f".format fp64\n.deposits {v}\ndeposit r0\nhalt\n", False),
+    (".scratch N", (1 << 24, 1 << 25),
+     lambda v: _NUM_HEAD + f".scratch {v}\nstl r0, 0\nhalt\n", False),
+    (".scratch in, depth 256", (256, 0xFFFF),
+     lambda v: _NUM_HEAD + f".scratch in {v}\nhalt\n", True),
+    (".scratch out, depth 256", (256, 0xFFFF),
+     lambda v: _NUM_HEAD + f".scratch out {v}\nhalt\n", True),
+    (".scratch in, depth 2^24", (0xFFFF,),
+     lambda v: _NUM_DEEP + f".scratch in {v}\nhalt\n", True),
+    (".scratch out, depth 2^24", (0xFFFF,),
+     lambda v: _NUM_DEEP + f".scratch out {v}\nhalt\n", True),
+    (".slot", (0xFFFFFF,),
+     lambda v: _NUM_DEEP + f".slot S = {v}\nstl r0, S\nhalt\n", False),
+    (".slot, never used", (0xFFFFFF,),
+     lambda v: _NUM_DEEP + f".slot S = {v}\nhalt\n", False),
+    ("stl's slot", (0xFFFFFF,),
+     lambda v: _NUM_DEEP + f"stl r0, {v}\nhalt\n", False),
+    ("ldl's slot", (0xFFFFFF,),
+     lambda v: _NUM_DEEP + f"ldl r3, {v}\nhalt\n", False),
+    ("repeat", ((1 << 32) - 1,),
+     lambda v: _NUM_HEAD + f"repeat {v}\nendrep\nhalt\n", False),
+    ("opN", (255,),
+     lambda v: _NUM_HEAD + f"op{v} r3, r0, r1, r2\nhalt\n", False),
+    ("rN, an operand", (31,),
+     lambda v: _NUM_HEAD + f"deposit r{v}\nhalt\n", False),
+    ("rN, a .const name", (31, 100000),
+     lambda v: _NUM_HEAD + f".const r{v} = 1\nhalt\n", False),
+    ("rN, a .reg name", (31, 100000),
+     lambda v: _NUM_HEAD + f".reg r{v} = r1\nhalt\n", False),
+    ("rN, a .slot name", (31, 100000),
+     lambda v: _NUM_HEAD + f".slot r{v} = 1\nhalt\n", False),
+    (".reg's register", (31,),
+     lambda v: _NUM_HEAD + f".reg X = r{v}\ndeposit X\nhalt\n", False),
+)
+
+
+def _numeric_cases():
+    """(field, the value as written, source, held on cft-asm's side only)
+    for every case of the numeric arm."""
+    for site, bounds, make, c_only in _NUM_SITES:
+        values = set(_NUM_EDGES)
+        for b in bounds:
+            values.update((b - 1, b, b + 1))
+        for v in [str(x) for x in sorted(values)] + list(_NUM_SPELLINGS):
+            yield site, v, make(v), False
+        for v in _NUM_NEGATIVES:
+            yield site, v, make(v), c_only
+
+
+def _num_reason(msg, name):
+    """A refusal's reason: the message after the tool's "file: " or
+    "file:line: " - cft-asm's diel, asm.py's fail and its run()."""
+    i = msg.rfind(name)
+    if i >= 0:
+        msg = re.sub(r"^(:\d+)?: ", "", msg[i + len(name):])
+    return msg.strip()
+
+
+def check_numeric_fields(args, tmp):
+    src = tmp / "num.cfta"
+    out = tmp / "num.cftp"
+    n = same = both = held = 0
+    sides = {}
+    for site, v, text, c_only in _numeric_cases():
+        _write_lf(src, text)
+        if out.exists():
+            out.unlink()
+        r = sh([args.asm, src, "-o", out])
+        c_bytes = out.read_bytes() if r.returncode == 0 else None
+        c_why = _num_reason(r.stderr, src.name) if r.returncode else None
+        tag = f"numbers: {site} = {v}"
+        if c_only:
+            if c_bytes is not None or "is a sixteen-bit count" not in c_why:
+                bad(tag, f"cft-asm {'wrote an image' if c_bytes else c_why}"
+                         f" - a count below zero must be refused")
+                return
+            held += 1
+            continue
+        try:
+            py, py_why = asm.assemble(text, str(src)), None
+        except asm.AsmError as exc:
+            py, py_why = None, _num_reason(str(exc), src.name)
+        n += 1
+        if py is not None and c_bytes is not None:
+            if py != c_bytes:
+                bad(tag, f"both assemble it, to other bytes: cft-asm "
+                         f"{len(c_bytes)}, asm.py {len(py)}")
+                return
+            same += 1
+            sides.setdefault(site, set()).add("accepted")
+            continue
+        if (py is None) != (c_bytes is None):
+            c_says = "assembles it" if py is None else f"refuses: {c_why}"
+            py_says = "assembles it" if c_bytes is None else \
+                f"refuses: {py_why}"
+            bad(tag, f"cft-asm {c_says}; asm.py {py_says}")
+            return
+        hexv = v.lower().startswith("0x") and re.fullmatch(
+            r"0x_?[0-9a-f]+(_[0-9a-f]+)*", v.lower())
+        if c_why != py_why and not (
+                hexv and int(v, 16) >= 1 << 64
+                and c_why.replace(v, str(int(v, 16))) == py_why):
+            bad(tag, f"both refuse it, for other reasons: cft-asm "
+                     f"{c_why!r}, asm.py {py_why!r}")
+            return
+        both += 1
+        sides.setdefault(site, set()).add("refused")
+    unreached = [s for s, *_ in _NUM_SITES
+                 if sides.get(s) != {"accepted", "refused"}]
+    if unreached:
+        bad("numbers", f"never reached from both sides: {unreached}")
+        return
+    ok(f"numbers: {n} cases over {len(_NUM_SITES)} fields, both "
+       f"assemblers agree", f"{same} the same bytes, {both} refused by "
+       f"both for the same reason; and {held} negative scratch counts "
+       f"refused by cft-asm (asm.py writes their low sixteen bits)")
 
 
 # ================= the ODE rows (programs/gen_odes.py) ===================
@@ -4990,6 +5154,9 @@ def main():
 
     print("\n-- long lines, in both assemblers --")
     check_long_lines(args, tmp)
+
+    print("\n-- numbers, in both assemblers --")
+    check_numeric_fields(args, tmp)
 
     print("\n-- each program's own check --")
     # spill-ref-fp64 is the reference spill-fp64 is compared against, so
