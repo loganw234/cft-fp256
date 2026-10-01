@@ -22,9 +22,10 @@
 #                                      # the remote backend - after a host build
 #   bash verify/run.sh --budget gate    # ~2 h quiet, ~4 h loaded: quick + golden,
 #                                      # vectors, libcft, transcend, mpfr, cpp, lint, formal,
-#                                      # and the C auditor's gate (audit)
+#                                      # the C auditor's gate (audit) and two cases of the
+#                                      # estimates study (estimates)
 #   bash verify/run.sh --budget full    # everything: the census (adds sim, simmc,
-#                                      # node, wasm, images)
+#                                      # node, wasm, images, estimates-full)
 #   Measured durations for every stage, quiet and loaded, are in
 #   docs/VERIFICATION.md - the simulation suites and the formal gate
 #   run for more than an hour each on a busy box.
@@ -144,14 +145,15 @@ BUDGET=""
 # model's own suite, the vectors, the million-case replay, the
 # transcendentals, MPFR, the C++ header and the two RTL gates that
 # need only a container - and, since 2026-09-29, the C auditor held to
-# the golden one (audit). `full` is the census. Measured on the
+# the golden one (audit), and since 2026-09-30 two cases of the
+# certificate estimates' study (estimates). `full` is the census. Measured on the
 # Windows desktop (docs/VERIFICATION.md has the table, quiet against
 # loaded): quick ~20 min, gate ~2 h with the box quiet and ~4 h loaded
 # now that the formal gate holds thirty proofs and a negative control
 # (thirty-one tasks), full longer by the simulation suite and the two
 # browser replays; on the WSL distro the replay stages take seconds.
 BUDGET_QUICK=docs,generated,buildargs,sweepjudge,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,programs,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
-BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit
+BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit,estimates
 RESUME=""
 FRESH=0
 REQUIRE_ALL=0
@@ -206,7 +208,7 @@ if [ "$LIST" = 1 ]; then
   # budget covered all of it.
   while IFS=$'\t' read -r _nm _ds; do
     if [ -z "$ONLY" ] || in_list "$_nm" "$ONLY"; then _mk="*"; else _mk=" "; fi
-    printf '%s %-13s%s\n' "$_mk" "$_nm" "$_ds"
+    printf '%s %-15s%s\n' "$_mk" "$_nm" "$_ds"
   done < <(grep -E '^stage [a-z0-9-]+ "' "$SELF" \
     | sed -E 's/^stage ([a-z0-9-]+) +"([^"]*)".*/\1\t\2/')
   echo
@@ -387,7 +389,7 @@ stage() {  # <name> <description> -- command...
     # a resume must not re-verdict green work as skipped (under
     # --require-all that inverted a finished PASS into a FAIL).
     CACHED=$((CACHED+1))
-    note "$(printf '%-12s %-7s %s' "$name" "ok" "(cached from earlier in this run)")"
+    note "$(printf '%-14s %-7s %s' "$name" "ok" "(cached from earlier in this run)")"
     echo "{\"stage\":\"$name\",\"verdict\":\"ok-cached\"}" >> "$JSONL"
     return 0
   fi
@@ -399,7 +401,7 @@ stage() {  # <name> <description> -- command...
 
   if [ "${verdict:-}" = SKIP ]; then
     SKIPPED=$((SKIPPED+1))
-    note "$(printf '%-12s %-7s %s' "$name" "SKIP" "$reason")"
+    note "$(printf '%-14s %-7s %s' "$name" "SKIP" "$reason")"
     echo "{\"stage\":\"$name\",\"verdict\":\"skip\",\"reason\":\"$(json_esc "$reason")\"}" >> "$JSONL"
     [ "$REQUIRE_ALL" = 1 ] && FAILED=$((FAILED+1))
     return 0
@@ -423,14 +425,14 @@ stage() {  # <name> <description> -- command...
     RAN=$((RAN+1))
     rm -f "$RUNDIR/$name.fail"
     if [ "$n" -eq 0 ]; then
-      note "$(printf '%-12s %-7s %ss' "$name" "ok" "$dur")"
+      note "$(printf '%-14s %-7s %ss' "$name" "ok" "$dur")"
     else
       INNER=$((INNER+n)); INNER_BY+=("$name ($n)")
       [ "$REQUIRE_ALL" = 1 ] && FAILED=$((FAILED+1))
-      note "$(printf '%-12s %-7s %ss  + %s inner skip(s) - checks inside it that did not run:' \
+      note "$(printf '%-14s %-7s %ss  + %s inner skip(s) - checks inside it that did not run:' \
              "$name" "ok" "$dur" "$n")"
       while IFS= read -r l; do
-        note "$(printf '%-12s %s' "" "$l")"; INNER_LINES+=("$name: $l")
+        note "$(printf '%-14s %s' "" "$l")"; INNER_LINES+=("$name: $l")
       done <<< "$inner"
     fi
     echo "{\"stage\":\"$name\",\"verdict\":\"ok\",\"seconds\":$dur,\"inner_skips\":$n,\"inner_skip_lines\":[$js]}" >> "$JSONL"
@@ -439,7 +441,7 @@ stage() {  # <name> <description> -- command...
     : > "$RUNDIR/$name.fail"
     RAN=$((RAN+1))
     FAILED=$((FAILED+1))
-    note "$(printf '%-12s %-7s %ss  log: verify/state/%s/%s.log' \
+    note "$(printf '%-14s %-7s %ss  log: verify/state/%s/%s.log' \
            "$name" "FAIL" "$dur" "$RUNID" "$name")"
     echo "{\"stage\":\"$name\",\"verdict\":\"fail\",\"seconds\":$dur}" >> "$JSONL"
     tail -12 "$RUNDIR/$name.log" | sed 's/^/     | /'
@@ -1009,6 +1011,50 @@ do_audit() {
 }
 need host-cc python pytest
 stage audit "the C auditor held to the golden one: test_cert.py's parse calls and every audit call files can carry, cft-segrun's certificates and the golden corpus through both, the same refusal by name, code and location or the same verdict; and two narrow builds refusing build-width and build-format" -- do_audit
+
+# A certificate's two estimates, scored (docs/studies/ACC-A-estimates.md,
+# programs/estimates.py). Each runs --against the committed runs in
+# docs/studies/acc-a/: every section the script prints is held line for
+# line to the committed section with the same first line, `time` lines
+# apart, and the first difference fails the stage naming the file, the
+# section and the committed line, with both lines. Every committed section
+# of the cases it was ASKED for (every case, without --cases) must have
+# been printed, and every case --cases names must have been scored. Until
+# 35ec784 it asked only for the cases the run had loaded, so a run that
+# dropped one, or all, passed (verifier-W2's P3a, P3b).
+#
+# `estimates`, in the gate budget (the lead, 2026-09-30): lorenz63-rk4-fp64
+# and lorenz96-rk4-fp64, every lane. That covers the step-halving estimate
+# against the converged reference (check.py's 300-digit arm with the bank's
+# h-slots halved until two levels agree to 1e-6 of the method error), the
+# wider estimate against the arm itself, odefun's cross-check and the time
+# shift. 50 and 51 s on the desktop, two clean runs through this runner at
+# cc4f6c4 (verifier-W2's, the author's). The certified states are the corpus's
+# committed files, so it runs no C: python and mpmath only. mpmath 1.3.0
+# (gmpy) and 1.4.1 (pure Python) print the same sections (measured
+# 2026-09-30).
+need python mpmath
+stage estimates "a certificate's two estimates scored, lorenz63 and lorenz96 at fp64, every lane: step-halving against a converged reference, wider against the 300-digit arm, held line for line to the committed run (docs/studies/ACC-A-estimates.md)" -- \
+  PY "$ROOT/programs/estimates.py" certified \
+     --cases lorenz63-rk4-fp64,lorenz96-rk4-fp64 \
+     --against "$ROOT/docs/studies/acc-a/certified.out.txt"
+
+# `estimates-full`, in no budget, so only the full census runs it (the lead,
+# 2026-09-30): the study made again whole. Every ODE case of the corpus is
+# scored, and the sweep runs: lane 0 of each system as h shrinks, each
+# level a certificate that cft-segrun, built here first, makes and the
+# golden audit samples. Both are held to their committed runs. 9 to 14
+# minutes on the desktop: the committed runs' halves took 355 s and 206 s,
+# and verifier-W2's the same day 441 s and 406 s, the desktop 5% busy just
+# before the first of those and 1% before the second.
+do_estimates_full() {
+  HOSTMAKE "cft-segrun$EXE" || return 1
+  PY "$ROOT/programs/estimates.py" all --tool "$ROOT/host/cft-segrun$EXE" \
+     --against "$ROOT/docs/studies/acc-a/certified.out.txt" \
+     --against "$ROOT/docs/studies/acc-a/sweep.out.txt"
+}
+need host-cc python mpmath
+stage estimates-full "docs/studies/ACC-A-estimates.md made again whole: every ODE case of the corpus scored, and the sweep's cft-segrun certificates made and audited again, held line for line to both committed runs" -- do_estimates_full
 
 # reduce_check.py holds the model's partition tree to the C partitioner
 # through host/reduce-parts, and SKIPs that half by name when the binary

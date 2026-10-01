@@ -196,6 +196,14 @@ same () {  # <name> <got> <want>
   echo "  FAIL  $1: got '$2', wanted '$3'"; return 1
 }
 
+# The runner names each inner skip on a line of its own under its stage's
+# row, indented to the row's status column: the stage-name field, 14
+# columns since cf5af05 widened it for `estimates-full` (12 before), and
+# one space. These lines are held exactly (grep -x), so a runner that
+# indents them otherwise fails here. cf5af05 moved the indent from 13
+# spaces to 15, and this file, still expecting 13, failed 5 of 32 and 5
+# of 25 (verifier-W2, 2026-09-30).
+SUBROW='               '
 PASSV="VERDICT: PASS with 6 inner skip(s) in gappy (5), replay (1) - see reasons above"
 cases () {  # <runner>  ->  returns the number of checks it got wrong
   local d="$T/r.$RANDOM$RANDOM" bad=0 gappy_run
@@ -215,14 +223,14 @@ cases () {  # <runner>  ->  returns the number of checks it got wrong
   same  "gappy: the VERDICT names and counts them" "$VERDICT" "$PASSV" || bad=$((bad + 1))
   check "gappy: its row counts 5" grep -qE '^gappy +ok +[0-9]+s  \+ 5 inner skip\(s\)' "$OUT" || bad=$((bad + 1))
   check "gappy: the SKIP line named under the row" \
-        grep -qxF '             SKIP  second - cannot run its check here: no "lib" at C:\x\y' "$OUT" || bad=$((bad + 1))
+        grep -qxF "$SUBROW"'SKIP  second - cannot run its check here: no "lib" at C:\x\y' "$OUT" || bad=$((bad + 1))
   check "gappy: the pytest line named under the row" \
-        grep -qxF '             SKIPPED [3] tests\t_x.py:9: gmpy2 not installed' "$OUT" || bad=$((bad + 1))
+        grep -qxF "$SUBROW"'SKIPPED [3] tests\t_x.py:9: gmpy2 not installed' "$OUT" || bad=$((bad + 1))
   check "gappy: the replay's skipped set named under the row" \
-        grep -qxF '             fp256-rne.jsonl: skipped, fp256 not on this device' "$OUT" || bad=$((bad + 1))
+        grep -qxF "$SUBROW"'fp256-rne.jsonl: skipped, fp256 not on this device' "$OUT" || bad=$((bad + 1))
   check "replay: its row counts 1" grep -qE '^replay +ok +[0-9]+s  \+ 1 inner skip\(s\)' "$OUT" || bad=$((bad + 1))
   check "replay: the imul line named under the row" \
-        grep -qxF '             fp32-rne.jsonl: imul skipped, not on this device' "$OUT" || bad=$((bad + 1))
+        grep -qxF "$SUBROW"'fp32-rne.jsonl: imul skipped, not on this device' "$OUT" || bad=$((bad + 1))
   check "gappy: the census counts them" \
         grep -qF ', 0 skipped, 6 inner skip(s) (gappy (5), replay (1)).' "$OUT" || bad=$((bad + 1))
   check "gappy: the census names them" \
@@ -259,7 +267,7 @@ cases () {  # <runner>  ->  returns the number of checks it got wrong
   same  "colour: exit 0" "$RC" 0 || bad=$((bad + 1))
   check "colour: its row counts 2" grep -qE '^colour +ok +[0-9]+s  \+ 2 inner skip\(s\)' "$OUT" || bad=$((bad + 1))
   check "colour: the line named under the row, colour removed" \
-        grep -qxF '             SKIPPED [2] tests/test_y.py:4: painted by FORCE_COLOR' "$OUT" || bad=$((bad + 1))
+        grep -qxF "$SUBROW"'SKIPPED [2] tests/test_y.py:4: painted by FORCE_COLOR' "$OUT" || bad=$((bad + 1))
   check "colour: report.jsonl counts and names it, colour removed" grep -qF \
         '"inner_skips":2,"inner_skip_lines":["SKIPPED [2] tests/test_y.py:4: painted by FORCE_COLOR"]}' "$JSONL" || bad=$((bad + 1))
   go "$d" strict-colour --only colour --require-all
@@ -283,7 +291,7 @@ NCHECKS=32
 FORMS="cpp-nosets cpp-replay rc-replay sim-case"
 nskips () { if [ "$1" = rc-replay ]; then echo 2; else echo 1; fi; }
 named () {  # <stage> <the line as the runner names it under the row>
-  check "$1: named under its row: ${2:0:64}" grep -qxF "             $2" "$OUT"
+  check "$1: named under its row: ${2:0:64}" grep -qxF "$SUBROW$2" "$OUT"
 }
 forms () {  # <runner>  ->  returns the number of checks it got wrong
   local d="$T/f.$RANDOM$RANDOM" bad=0 st n new="" old="" by=""
