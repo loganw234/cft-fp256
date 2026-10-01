@@ -1422,8 +1422,26 @@ def derive(entry, runs, shapes, states):
                           f"a {entry.method} estimate compares run 0 with a "
                           f"{want} run; run {r} is "
                           f"{'the main run' if r == 0 else runs[r].kind}")
+        # An estimate compares the two final states lane by lane and slot
+        # by slot, so it is defined only where run r has run 0's lanes and
+        # slots a lane (the lead's decision, 2026-09-30: it was an
+        # IndexError here, or run 0's state read by run r's shape). An
+        # audit never meets it: step 8 refuses such a run first, aux-lanes
+        # or aux-image. A writer, which checks no relation, meets it here.
+        if runs[r].lanes != runs[0].lanes or shapes[r][1] != shapes[0][1]:
+            raise Refusal("accuracy-run",
+                          f"a {entry.method} estimate compares run 0's final "
+                          f"state with run {r}'s, lane by lane and slot by "
+                          f"slot; run {r} is {runs[r].lanes} lanes of "
+                          f"{shapes[r][1]} slots and run 0 is "
+                          f"{runs[0].lanes} lanes of {shapes[0][1]}")
+    # A lane and a slot are indices from 0, as the run is: each is bounded
+    # from below too (the lead's decision, 2026-09-30: a negative one was
+    # read by Python's index from the end - another lane's value, or an
+    # IndexError; verifier-W1b). An audit never meets one: the reader
+    # refuses a certificate that spells one. A writer meets it here.
     lanes = runs[r].lanes
-    if entry.lane is not None and entry.lane >= lanes:
+    if entry.lane is not None and not 0 <= entry.lane < lanes:
         raise Refusal("accuracy-scope", f"lane {entry.lane} of a run of "
                                         f"{lanes} lanes")
     fmt, nslots = shapes[r]
@@ -1441,7 +1459,7 @@ def derive(entry, runs, shapes, states):
     if entry.method == "drift":
         for _, slots in entry.terms:
             for s in slots:
-                if s >= nslots:
+                if not 0 <= s < nslots:
                     raise Refusal("accuracy-slot",
                                   f"a term names slot {s}; run {r}'s state "
                                   f"has {nslots} slots a lane")

@@ -1171,24 +1171,43 @@ clean-programs:
 #                       depends on the depth, certified at 256 and at
 #                       2,048 with the depth stated in every run block,
 #                       byte for byte the golden writer's at each and
-#                       audited there, and the option's refusals.
+#                       audited there, and the option's refusals. And the
+#                       accuracy entries (the plan's step 5): each
+#                       program but the one that starts apart certified
+#                       with entries, between them every method, scope,
+#                       form and direction, each value byte for
+#                       byte the golden writer's and accepted by both
+#                       auditors (cft-audit is a prerequisite); every
+#                       entry's refusal by the golden writer's name; the
+#                       page's orders; cft-segrun compiled narrow with
+#                       $(CC) from $(SRC) (build-width, build-format), and
+#                       its plant build, compiled only here, whose first
+#                       state read back is changed (output); and what the
+#                       entries cost in memory: no state beside the runs',
+#                       and drifts' states read back a pair at a time.
 #                       verify/run.sh's `programs` stage runs it.
 #
 # The tree's build id goes in as make test hands api-test its own, so a
 # certificate's build-id line is held to the library this tree builds.
+# segrun.c includes tools/cert_exact.h, the exact arithmetic it shares
+# with cft-audit, and through it src/bigint.h, an internal header: the
+# recipe names its two inputs, since $^ would hand gcc the headers too.
 # ===================================================================
 TOOLS += cft-segrun$(EXE)
 all: cft-segrun$(EXE)
 clean: clean-segrun
 .PHONY: segruntest clean-segrun
 
-cft-segrun$(EXE): tools/segrun.c libcft.a
-	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) $^ -o $@ $(XRTLIBS)
+cft-segrun$(EXE): tools/segrun.c tools/cert_exact.h libcft.a src/bigint.h \
+                  include/cft_config.h
+	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/segrun.c libcft.a -o $@ \
+		$(XRTLIBS)
 
-segruntest: cft-segrun$(EXE) cft-serve$(EXE)
+segruntest: cft-segrun$(EXE) cft-serve$(EXE) cft-audit$(EXE)
 	CFT_EXPECT_BUILD_ID="$$(GIT="$(GIT)" $(SHELL) tools/gen_build_id.sh --print)" \
 		$(PYTHON) tests/segrun_check.py --tool ./cft-segrun$(EXE) \
-		--serve ./cft-serve$(EXE)
+		--serve ./cft-serve$(EXE) --audit ./cft-audit$(EXE) \
+		--cc "$(CC)" --lib-src "$(SRC)"
 
 clean-segrun:
 	rm -f cft-segrun cft-segrun.exe
@@ -1204,10 +1223,12 @@ clean-segrun:
 #                       unlisted; every image against its source; each
 #                       case made again by the golden writer, byte for
 #                       byte, and by cft-segrun, byte for byte but for
-#                       build-id, the accuracy block it does not write
-#                       before step 5, and the hash line; every boundary
-#                       file; the golden audit's expected verdict, in
-#                       full and sampled; and the page's example.
+#                       build-id and the hash line - the three accuracy
+#                       cases whole, their entries handed to it as the
+#                       committed certificate defines them (the plan's
+#                       step 5); every boundary file; the golden audit's
+#                       expected verdict, in full and sampled; and the
+#                       page's example.
 #
 # segruntest holds the tool and the golden writer to each other, so a
 # change that moves both at once passes it; this holds both to bytes
@@ -1232,8 +1253,10 @@ corpustest: cft-segrun$(EXE)
 # So it is built here, in the same make as the libcft.a it links, from
 # the same cft_config.h: a cft_bn narrower than the width rule needs
 # compiles the tool without its exact arithmetic (the lead's decision,
-# 2026-09-29). The headers are prerequisites, and the recipe names its
-# two inputs, since $^ would hand gcc the headers too.
+# 2026-09-29). That arithmetic lives in tools/cert_exact.h, header-only,
+# shared with cft-segrun since the plan's step 5. The headers are
+# prerequisites, and the recipe names its two inputs, since $^ would
+# hand gcc the headers too.
 #
 #   make audittest      the equality gate, tests/audit_check.py: every
 #                       parse call test_cert.py makes, and every audit
@@ -1257,8 +1280,8 @@ all: cft-audit$(EXE)
 clean: clean-audit
 .PHONY: audittest clean-audit
 
-cft-audit$(EXE): tools/audit.c libcft.a src/bigint.h src/sha256.h \
-                 include/cft_config.h
+cft-audit$(EXE): tools/audit.c tools/cert_exact.h libcft.a src/bigint.h \
+                 src/sha256.h include/cft_config.h
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/audit.c libcft.a -o $@ \
 		$(XRTLIBS)
 

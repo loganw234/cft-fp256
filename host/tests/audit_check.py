@@ -37,8 +37,10 @@ both ACCEPTED with the same verdict, line for line.
      to the tool; an executor test_cert.py makes refuse (a monkeypatched
      seq.run) is the tool's instrument, CFT_AUDIT_PLANT=executor-refuses;
   3. the certificates segrun_check makes: cft-segrun on its programs,
-     keyed and open, each audited in full from every boundary, in full
-     from the initial states alone, and sampled under a fixed seed;
+     keyed and open, with the accuracy entries segrun_check gives them
+     (every method, scope, form and direction), each audited in full from
+     every boundary, in full from the initial states alone, and sampled
+     under a fixed seed;
   4. the golden corpus (certificates/MANIFEST), where the tree has one:
      each case in full and sampled, both auditors against each other and
      against the manifest's verdict;
@@ -886,6 +888,13 @@ def section_segrun(work):
     check(sc.CHECKS - n0 == 6 and not sc.FAILED,
           "segrun_check's programs: the six ODE images are programs/"
           "MANIFEST's", f"{sc.FAILED}")
+    # with the accuracy entries segrun_check certifies them with (the plan's
+    # step 5): both auditors re-derive each, and their verdicts' lines hold
+    # the values
+    sc.attach_entries(programs)
+    check(sum(len(p.entries) for p in programs) > 0,
+          f"segrun_check's programs carry their accuracy entries: "
+          f"{sum(len(p.entries) for p in programs)} of them")
     salt_path = work / "segrun" / "salt.bin"
     salt_path.parent.mkdir(parents=True, exist_ok=True)
     salt_path.write_bytes(sc.SALT)
