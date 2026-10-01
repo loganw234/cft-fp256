@@ -229,7 +229,8 @@ def compile_graph(graph, steps, target="sw", stem="system", source=None,
     if isinstance(steps, bool) or not isinstance(steps, int) \
             or not 1 <= steps <= MAX_STEPS:
         refuse("segment-steps", f"a segment is one REPEAT of 1 to "
-               f"{MAX_STEPS:,} steps, and {steps!r} was given", source=src)
+               f"{MAX_STEPS:,} steps, and {K.shown(steps)} was given",
+               source=src)
     if graph.fmt.name not in t.formats:
         refuse("target-format", f"{graph.fmt.name} is not carried by "
                f"{t.name}, which carries {', '.join(t.formats)}",

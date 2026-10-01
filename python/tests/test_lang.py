@@ -1703,3 +1703,47 @@ def test_an_h_scaled_constant_past_4300_digits_renders(body):
              "step map, h = 1/100")
     g = compile_("".join(line + chr(10) for line in lines))
     check_intention_out(g, random.Random(body), points=2)
+
+
+# ---- verifier-VI: every refusal sentence names a value at any size ------------
+# check.py's index-range sentences, lang.run's input refusals and cftc's
+# segment-steps sentence formatted their integers with str() or repr(), so
+# a value past Python's 4,300-digit limit raised a bare ValueError where a
+# named refusal was due (the class of VL1's F2; found by verifier-VI at
+# 30ee0fd, fixed at the language round's close).
+
+_HUGE = 10 ** 5000
+
+
+@pytest.mark.parametrize("body", [
+    "next x[i] = x[i + 1" + "0" * 5000 + "] for i in 0..3",
+    "next x[i] = x[i] for i in 0..1" + "0" * 5000,
+    "next x[i] = x[i] for i in -1" + "0" * 5000 + "..3",
+    "next x[i] = x[i] for i in 1" + "0" * 5000 + "..0",
+])
+def test_an_index_past_4300_digits_is_refused_by_name(body):
+    lines = ("system s", "format fp64", "state x[4]", body, "step map")
+    with pytest.raises(lang.Refusal) as e:
+        compile_("".join(line + chr(10) for line in lines))
+    assert e.value.name == "index-range"
+    assert len(str(e.value)) < 400
+
+
+def test_run_inputs_past_4300_digits_are_refused_by_name():
+    g = compile_("".join(line + chr(10) for line in (
+        "system s", "format fp64", "state x", "lane param a = 1",
+        "param p = 1", "d/dt x = a * p * x", "step euler, h = 1/8")))
+    one = C.round_once(FORMATS["fp64"], 0, Fraction(1))[0]
+    cases = [
+        ("lane-value", dict(states=[[_HUGE]], steps=1)),
+        ("lane-value", dict(states=[[one]], steps=1, lane_params=[[_HUGE]])),
+        ("param-value", dict(states=[[one]], steps=1,
+                             param_bits={"p": _HUGE})),
+        ("step-count", dict(states=[[one]], steps=1, at=(_HUGE,))),
+        ("step-count", dict(states=[[one]], steps=-_HUGE)),
+    ]
+    for name, kw in cases:
+        with pytest.raises(lang.Refusal) as e:
+            lang.run(g, **kw)
+        assert e.value.name == name, (name, kw.keys(), e.value.name)
+        assert len(str(e.value)) < 400

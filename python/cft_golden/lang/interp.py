@@ -127,13 +127,13 @@ def run(graph, states, steps, lane_params=None, params=None,
     top = 1 << fmt.width
     if not _whole(steps):
         raise Refusal("step-count", f"steps is a whole number, at least 0; "
-                      f"{steps!r} is not")
+                      f"{C.shown(steps)} is not")
     marks = []
     for s in at:
         if not _whole(s) or s > steps:
             raise Refusal("step-count", f"a checkpoint is a whole number "
-                          f"from 0 to the run's {steps} steps; {s!r} is "
-                          f"not")
+                          f"from 0 to the run's {C.shown(steps)} steps; "
+                          f"{C.shown(s)} is not")
         marks.append(s)
     n, m = graph.n_state, len(graph.lane)
     states = [list(st) for st in states]
@@ -144,8 +144,8 @@ def run(graph, states, steps, lane_params=None, params=None,
         for v in st:
             if not isinstance(v, int) or isinstance(v, bool) \
                     or not 0 <= v < top:
-                raise Refusal("lane-value", f"lane {k}'s value {v!r} is not "
-                              f"a {C.FORMAT_754[fmt.name]} encoding")
+                raise Refusal("lane-value", f"lane {k}'s value {C.shown(v)} "
+                              f"is not a {C.FORMAT_754[fmt.name]} encoding")
     if lane_params is None:
         missing = [nm for nm, d, _b in graph.lane if d is None]
         if missing:
@@ -164,8 +164,8 @@ def run(graph, states, steps, lane_params=None, params=None,
             if not isinstance(v, int) or isinstance(v, bool) \
                     or not 0 <= v < top:
                 raise Refusal("lane-value", f"lane {k}'s lane param value "
-                              f"{v!r} is not a {C.FORMAT_754[fmt.name]} "
-                              f"encoding")
+                              f"{C.shown(v)} is not a "
+                              f"{C.FORMAT_754[fmt.name]} encoding")
     names = [p[0] for p in graph.param]
     pbits = [p[2] for p in graph.param]
     both = sorted(set(params or {}) & set(param_bits or {}))
@@ -184,8 +184,9 @@ def run(graph, states, steps, lane_params=None, params=None,
                           f"{graph.system}")
         if not isinstance(value, int) or isinstance(value, bool) \
                 or not 0 <= value < top:
-            raise Refusal("param-value", f"{name}'s encoding {value!r} does "
-                          f"not fit {C.FORMAT_754[fmt.name]}")
+            raise Refusal("param-value", f"{name}'s encoding "
+                          f"{C.shown(value)} does not fit "
+                          f"{C.FORMAT_754[fmt.name]}")
         pbits[names.index(name)] = value
     cbits = [c[2] for c in graph.const]
     if h is not None:

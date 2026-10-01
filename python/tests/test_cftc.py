@@ -446,3 +446,13 @@ def test_the_command_line(tmp_path):
     assert not (tmp_path / "x").exists()
     r = subprocess.run(py + [str(src)], capture_output=True, text=True)
     assert r.returncode == 64
+
+
+def test_a_step_count_past_the_digit_limit_is_refused_by_name():
+    """segment-steps formatted the count with repr(), so a count past
+    Python's 4,300-digit limit raised a bare ValueError (verifier-VI)."""
+    src = (SYSTEMS / "lorenz63-rk4-fp64.cftl").read_bytes().decode("ascii")
+    with pytest.raises(lang.Refusal) as e:
+        cftc.compile_text(src, 10 ** 5000)
+    assert e.value.name == "segment-steps"
+    assert len(str(e.value)) < 400
