@@ -1330,6 +1330,10 @@ mispredicted the shell by 0.88 ns this week, and the quad routing as
 this is written (40149b1, retimed, 135 MHz) does NOT carry the change -
 its number measures retiming alone, which is the question it was built
 to answer.
+*Corrected 2026-09-30:* that quad had tile 1 alone retimed (the
+correction under "In the shell, retiming does not close the quad",
+above), so its number measures one retimed tile in four, not
+retiming.
 
 *Established the same evening.* A single tile from the case-ROM
 commit's RTL (0e7264e), 135 MHz, retimed, in the shell: routed, image
@@ -3870,6 +3874,33 @@ certificate libcft's software backend made, only the golden auditor is
 independent of the producer ("What an audit proves").
 
 ### Steps 5 and 6: accuracy in C, and cft-orbits' runs certified (plan of record, 2026-09-30)
+
+**Built, the same day** (docs/VALIDATION.md, 2026-09-30, "the steps 5
+and 6 round").
+- S1: cft-segrun writes every accuracy entry, byte for byte the golden
+  writer's, on cft-audit's exact arithmetic, moved to
+  host/tools/cert_exact.h. The tool makes the corpus's three accuracy
+  cases whole.
+- S2: both estimates scored, in docs/studies/ACC-A-estimates.md, held
+  by the stages `estimates` (gate) and `estimates-full` (full census).
+- S3: cft-orbits certifies its Newton-route runs on the segments
+  engine, one segment per sample interval, with the angular momentum's
+  drift as an exact entry. Its first certified runs on the card are
+  the software runs' bit for bit, and both auditors accept them.
+- Added during the round, S4: the transcendental evaluator's error
+  count can no longer clamp. The lead's cancellation fix (below) was
+  narrowed to its round-up, because refusing a saturated count refused
+  at the Ziv cap (MEASURED, expm1 of fp32 0x42b17218). Saturated counts
+  were deciding roundings, so S4 gave the count its own exponent and
+  charged the second-order terms. No result moved. At the contract's
+  precision, 84 escalations became 805, for 2% more C time.
+- The lead's own, as planned: the module rebuilt, q135b's result with
+  the retimed pages restated, and the two gates widened. Two more
+  stages run the runner's own tests (`innerskips`, `ensurevectors`).
+- Next is the hold: the work order's step 3, the language and its
+  compiler, waits for Logan.
+- The rest of this section is the plan as written that morning,
+  including its "Nothing in it exists yet".
 
 Logan approved this order on 2026-09-30 ("Go ahead with your order"):
 the fixes round, then the certificate plan's steps 5 and 6, then a hold

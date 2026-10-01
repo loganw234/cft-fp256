@@ -4806,13 +4806,16 @@ static void cert_options(const options *O, uint8_t **salt)
                "name");
     }
 #if !CX_EXACT
-    /* Unreachable in any build that links. A bigint this narrow (a
-     * CFT_BN_LIMBS below 64) needs CFT_NO_TRANSCEND (cft_config.h), which
-     * leaves out cft_acos and cft_rootn, and setup_constants calls both:
-     * measured, -DCFT_MAX_FORMAT=2 -DCFT_NO_TRANSCEND compiles this file
-     * and fails to link it (verifier-W3, 2026-09-30). The refusal stays so
-     * that a narrow build that did link would refuse an exact value by
-     * name, not compute it narrower. */
+    /* Unreachable in any build whose tool and library share one
+     * configuration. A bigint this narrow (a CFT_BN_LIMBS below 64) needs
+     * CFT_NO_TRANSCEND (cft_config.h), which leaves out cft_acos and
+     * cft_rootn, and setup_constants calls both: measured,
+     * -DCFT_MAX_FORMAT=2 -DCFT_NO_TRANSCEND compiles this file and fails
+     * to link it (verifier-W3, 2026-09-30). A mixed build reaches it:
+     * this file compiled with CFT_BN_LIMBS=32 and CFT_NO_TRANSCEND
+     * against the default library links, and refuses here
+     * (verifier-W3b). So the refusal stays: such a build refuses an
+     * exact value by name rather than compute it narrower. */
     if (O->cert_accuracy)
         refuse("build-width", "this build's bigint is %d bits, and an exact "
                "value needs %d (docs/CERTIFICATES.md, \"The width rule\"): "

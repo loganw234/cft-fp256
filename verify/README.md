@@ -30,9 +30,9 @@ three cuts, kept in `run.sh` beside the stage list:
 
 | budget | stages | measured on the Windows desktop |
 |---|---|---|
-| `quick` | the `docs`, `generated`, `buildargs`, `sweepjudge`, `innerskips` and `ensurevectors` checks, every model-vs-C check (selfcheck, divsqrt, clause5, character, augmented, status96, formatof, diff, seq, reduce), the GPU's photograph, bindings, the seven language legs, the five workloads, the browser demos, soak-quick and the remote backend - after a host build the budget makes itself | about 20 minutes, loaded or not |
-| `gate` | quick + golden, vectors, lint, formal, libcft, transcend, mpfr, cpp - what a package's reviewer ran before merging | about 2 hours with the box quiet, about 4 loaded (2026-09-07) |
-| `full` | everything: gate + sim, simmc, node, wasm, images | about 2 hours quiet (2026-09-04, run 20260904-035237), 227 minutes loaded (2026-09-03, run 20260903-164537). Not measured whole since revision 7: sim alone took 1 h 40 min at six jobs and simmc 1 h 16 min at four on amd-arc-box, loaded (2026-09-29) |
+| `quick` | the `docs`, `generated`, `buildargs`, `sweepjudge`, `innerskips` and `ensurevectors` checks, every model-vs-C check (selfcheck, divsqrt, clause5, character, augmented, status96, formatof, diff, seq, reduce), the program library (programs), the GPU's photograph, bindings, the seven language legs, the five workloads, the browser demos, soak-quick and the remote backend - after a host build the budget makes itself | about 20 minutes, loaded or not |
+| `gate` | quick + golden, vectors, lint, formal, libcft, transcend, audit, estimates, mpfr, cpp - what a package's reviewer ran before merging | about 2 hours with the box quiet, about 4 loaded (2026-09-07) |
+| `full` | everything: gate + sim, simmc, node, wasm, images, estimates-full | about 2 hours quiet (2026-09-04, run 20260904-035237), 227 minutes loaded (2026-09-03, run 20260903-164537). Not measured whole since revision 7: sim alone took 1 h 40 min at six jobs and simmc 1 h 16 min at four on amd-arc-box, loaded (2026-09-29) |
 
 The slow stages are the replays and the RTL simulation, and they are
 slow on THIS host: libcft, cpp, vectors and wasm took 1794, 1471, 1170

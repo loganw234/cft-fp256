@@ -102,7 +102,7 @@ BANK_LUT = {
 # practice - TARGETS TO MEASURE, not results.
 VARIANTS = {
     "cft_krnl":      dict(rungs=("fp32", "fp64", "fp128", "fp256"), generics="",
-                          mhz=135, clock="measured: single +0.618 (9f73107, 2026-09-02, retimed + phys_opt); quad +0.003 kernel WNS @135 (q135b from cf97a50, 2026-09-30, all four tiles retimed + phys_opt)"),
+                          mhz=135, clock="measured: single +0.618 (9f73107, 2026-09-02, retimed + phys_opt); quad +0.003 kernel WNS @135 (q135b from cf97a50, 2026-09-30, all four tiles retimed + phys_opt, ExtraTimingOpt/AggressiveExplore)"),
     "cft_krnl_f128": dict(rungs=("fp32", "fp64", "fp128"), generics="EN_FP256=0",
                           mhz=150, clock="target, unmeasured"),
     "cft_krnl_f64":  dict(rungs=("fp32", "fp64"), generics="EN_FP128=0 EN_FP256=0",

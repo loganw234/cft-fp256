@@ -16498,3 +16498,173 @@ Its others are restated below, or recorded as known limits. F4 then checked 8aa9
 - **A restatement that overcorrected.** Before b1f1458, HOSTAPI said the loader's four allocation failures carry no sentence, "as no `CFT_ERR_OUT_OF_MEMORY` in this library does". b1f1458 restated that as "the remote and XRT backends name their own out-of-memory failures". Ten of their fourteen carry none (F4). HOSTAPI and program.c's comment are restated in this entry's commit.
 - **8aa99cf's message** says each retiming sentence "now says a quad built with the flag alone". The entry's says "an entry before this one" (F4).
 - **A citation ahead of its entry.** e98d0ca's comment and BITSTREAM-BUILDS.md cited this entry before it existed (F1). This entry is it, and the citations now name it.
+
+## 2026-09-30 - the steps 5 and 6 round: cft-segrun writes accuracy entries; the two estimates a certificate can carry, scored; cft-orbits' runs certified; the transcendental evaluator's error count made unable to clamp; revision 7's quad closes 135 MHz and passes its card legs; four gates widened; the round's verifiers, send-backs and known limits
+
+**Why.** This is the last item of the order Logan approved on 2026-09-30: "Go ahead with your order, if any of the first 5 are small enough, you may handle them alone". It covers the certificate plan's steps 5 (accuracy in C) and 6 (cft-orbits' runs certified). After it, his checkpoint: "Hold before starting Step 3 once your get there, the language and its compiler." The plan of record is be3eb72, docs/ROADMAP.md, "Steps 5 and 6".
+- S4 was added during the round. Making true a known limit of the fixes round (mpfloat's cancellation rule rounding a term down), the lead found the evaluator's saturated error counts deciding roundings. That was a larger defect than the limit, measured below.
+- The records are in `Data/runs/2026-09-30-steps56-round/` (gitignored): the ledger and the briefs.
+- Logan paused the round at 14:19 ("Go ahead and instruct agents to wrap up for now to take a pause, commit where they are and leave a resume note for themselves incase context is lost in the downtime"). Every agent had committed its work and written its note by 14:28. The round resumed in a new session ("Clear to resume work"), whose first ledger entry is at 16:57. The agents of the first session did not survive it, and each was dispatched again from its brief and its own ledger's resume note.
+
+**S1: cft-segrun writes accuracy entries** (merge cb6afe0).
+- Golden first (392b046): `cert.derive` refuses `accuracy-run` for an estimate whose run has other lanes or slots than run 0, where it raised an IndexError. test_cert holds it.
+- 0612b37: cft-audit's exact arithmetic moved to host/tools/cert_exact.h, a header both tools include. Each of its functions that can fail returns a status.
+- 1921cb8 and b7bbd00:
+  - `--entry drift|step-halving|wider --uses R --scope max-lanes|lane:I [--quantity --term ...] --value exact|rounded:FMT:RND|enclosed:FMT`, byte for byte the golden writer's;
+  - the corpus's three accuracy cases made whole by the tool, all twelve certificates keeping their bytes;
+  - the manifest's `both`.
+- Verifier-W1:
+  - MEASURED: 10,710 entries byte for byte in its own differential, 899 refusals named alike, and cft-audit byte-identical over 2,880 audits;
+  - two wrong answers, and the parcel was sent back:
+    - a negative `--uses` was refused `malformed` where the golden writer says `accuracy-run`;
+    - section 10's entries memory check could not fail for what it named: an entry holding four states at once passed, since the library's own working block, about 4.6 MiB, outweighed the entries' phase.
+- S1's answer (9f1d1fd to ee2cb29):
+  - a minus before a nonzero index names no run, `accuracy-run` 7;
+  - a new shape `slotstep` (65,535 lanes, 8 MiB a state), where the entries' phase is the peak, with an allowance of 2,048 KiB. W1's plants are now red by +7,696 and +15,912 KiB;
+  - the old check claims only "no state beside the runs'".
+- MEASURED: segruntest 656/0/1 on the desktop, and 659/0/0 in WSL (the Linux-only checks); audittest 6,800/0.
+- Re-checked by verifier-W1b, twice:
+  - the first time, both of W1's findings fixed and no regression: 9,631 entries byte for byte, and every plant red on slotstep, by 3,612 to 15,920 KiB. The allowance sits in a measured gap: unplanted runs vary -476 to +116 KiB, and the smallest named failure is 7,680 KiB;
+  - one wrong answer, in a new page sentence. CERTIFICATES.md said the golden writer refuses a negative lane or slot `malformed`, where cert.derive raised an IndexError, or read Python's negative index and answered `accuracy-finite`. The gap was the golden model's, pre-existing: its lane and slot checks bounded only from above;
+  - so S1 went back, golden-first (46b1522): cert.derive bounds lanes and slots from below (`accuracy-scope`, `accuracy-slot`), and the C follows. No audit verdict can move, since the audit reads only spelled certificates;
+  - the second re-check confirmed it: 75 cases named alike by both writers; 800 random command lines identical across 20d848f, ee2cb29 and d60d124 for input without a negative index; 2,880 audits byte-identical. Its one sentence, CERTIFICATES.md's "no shape of the tool as shipped shows an estimate's read-back" (two wider estimates keeping their pairs show +7,108 KiB), was restated at the merge.
+- Also found, by S3 compiling S1's code with gcc 13.3: a `-Warray-bounds` warning in a dead branch, fixed in 20d848f. On amd-arc-box's XRT build it would have been a third warning.
+
+**S2: the two estimates scored** (merge d942f55). docs/studies/ACC-A-estimates.md and programs/estimates.py:
+- Each step-halving estimate is scored against a converged reference: the scheme at h/2^k, 300 digits, k raised until two levels agree to 1e-6 of the method error.
+- Each wider estimate is scored against check.py's 300-digit arm, made functions (e8cea9b; check.py's 161 ODE rows identical before and after).
+- The scores, step-halving estimate over method error at the certified horizon:
+  - Lorenz-63: 0.9525064 +- 6e-8, where Richardson's 15/16 is 0.9375 (h = 0.01 is not yet asymptotic for RK4, its error falling by 21 a halving);
+  - Lorenz-96: 0.9366503 +- 1e-7;
+  - Henon-Heiles: 0.7500019 +- 4e-7, against 3/4.
+  The wider estimate equals the rounding error to within 1e-17 at fp64.
+- Found:
+  - the bank's rounded h/6 shifts fp64 RK4 in time by 3.5e-15 on Lorenz-63 lane 0, twice that lane's rounding error. Neither estimate sees it, and it is exactly 0 at fp256, whose rounded h is divisible by 3;
+  - a small wider estimate is not a safe signal near the crossover.
+- Two stages hold the study: `estimates` (gate budget, about 50 s) and `estimates-full` (full census, 9 to 14 minutes).
+- Verifier-W2 checked three times, and the parcel was sent back twice:
+  - first, a check that could not fail: `--against` passed a run that scored a requested case not at all;
+  - second, a regression: S2's widened stage table broke verify/test-inner-skips.sh, which no stage ran.
+  Each was fixed (35ec784, 1ffba4c), and the third check found neither kind.
+
+**S3: cft-orbits' runs certified, on the Newton route** (merge c17f00c).
+- `--cert --cert-states (--cert-salt | --cert-open)` on the segments engine with `--rsqrt newton` writes a version-1 certificate: one run with the stride's image, and one segment per sample interval with its flags and STATUS.
+- The audit re-runs each interval whole. S3 measured it agreeing bit for bit with the engine's wall-clock cuts, and the result independent of stream a.
+- The records and chains are unchanged. Checkpoint version 3 is for certified runs only and strict, and a resumed run writes the uninterrupted certificate.
+- segrun.c writes through the shared host/tools/cert_write.h (63afefb, no certificate byte moved).
+- D6: the angular momentum's drift as an exact entry, a measurement, with its width computed: at most 741 bits on the gate's fp256 configuration.
+- fuzz_ckpt was extended to version 3. Three sessions, 678, 566 and 522 resumes, found no crash, hang or silent wrong resume.
+- Verifier-W3:
+  - MEASURED: 17 configurations of its own byte for byte, 628 cut and resume comparisons, 3,508 mutated resumes, and D4 against another device through cft-serve;
+  - one wrong answer, and the parcel was sent back: ORBITS.md said the gate made every refusal in its table, and it made no `memory`, `accuracy-finite` or `build-width`.
+- S3's answer (cf5ebeb, 8375d89):
+  - the gate makes each, except build-width, which S3 stated unreachable: a narrow build cannot link cft-orbits, measured. W3b found a mixed build that reaches it (below);
+  - the reader refuses a respelled value;
+  - fuzz_ckpt's classifier holds each name to its code.
+  S3 merged S1's send-back (06bcff4).
+- Re-checked by verifier-W3b, over the send-back and S3's merge of S1 (06bcff4): no regression, no wrong answer.
+  - MEASURED: orbits_check 226/0, with every one of [8]'s 23 names on a passing line; f752774's tool failing exactly the three respelling checks, and W3b's five plants each exactly their own; the respelling refusal over 2,666 cases; 46,000 bit patterns read back; a fuzz session of 665 resumes in cft-sim, no finding; 643 ordinary-run comparisons, 0 differing; 0 warnings in nine compiles each under mingw and gcc 13.3.
+  - Restated at the merge: build-width IS reachable, in a mixed build (orbits.c compiled with `CFT_BN_LIMBS=32 CFT_NO_TRANSCEND` against the default library), where it refuses correctly. "No build that links" became "no build whose tool and library share one configuration", in six places. An `output` refusal while the run's files are being made leaves what was written, and host/fuzz/README.md's contract names the version-3 refusals.
+
+**The evaluator's error count: the lead's round-up (aeb3f5e) and S4's count that cannot clamp** (merge 9398f1f).
+- The fixes round recorded mpfloat's cancellation rule rounding a scaled-down error count down. aeb3f5e rounds it up (`cft_mp_err_scale`, and `mp_log_of_mp`'s conversion likewise).
+- MEASURED by an exact __int128 check at W = 16: 3 of 1,999,990 results over their bound before, 0 after. Verifier-W4, exhaustively at W = 8, 10 and 12: 0 over, against 11,128, 238,954 and 801,248 before.
+- Making the header's saturation sentence true found more. "A saturated bound simply cannot decide a rounding" was false: enclosure() is m +- err in significand units, so a count of 2^40 decides at any working precision about 41 bits above the format's. MEASURED on amd-arc-box with scratch-instrumented copies, over transcend_check.py at the contract's precision:
+  - 1,781,005 saturations, 1,773,722 of them the cancellation rule amplifying an inexact operand's error;
+  - 17,816 of 298,133 final roundings decided on a saturated count, every one of the 607,217 results still equal to the model's;
+  - verifier-W4 also measured a clamp that a second cancellation scaled down into an ordinary-looking count of 34 where the true error was 2^46.97 units.
+- A sticky refusal of saturated counts is NOT the repair, MEASURED: expm1 of fp32 0x42b17218 then refused at the Ziv cap.
+- So aeb3f5e states the saturation as measured, and parcel S4 made the count unable to clamp. err is a count with its own exponent, exact below 2^63 and rounded up above. It is infinity only past an exponent of 2^24, and where two rules make it on purpose: div, for a divisor known only within 1/2, and the logarithm, for an argument known only within a factor of two. For the logarithm that is not always a relative error past 1 (mpfloat.c, verifier-W5). Every rule gains the second-order terms it lacked, and each new count is at least the old one, so no decision can change a result.
+- MEASURED:
+  - S4's exact GMP checker (host/tests/mp_err_check.c, in the mpfr stage): 16,814,033 results at the merged tree, 0 over their bound (16,800,951 before S4's send-back added the constants and the logarithm); the old rules fail 847,605 of the same verdicts;
+  - on amd-arc-box, the whole sweep base against new, call by call: every result equal to the model in both, no refusal at the cap, 84 escalations become 805 (703 calls escalate more, none less), and C time +2%;
+  - the transcend and mpfr stages PASS.
+- Verifier-W5: no regression; every rule a true upper bound.
+  - MEASURED by its own GMP checker and mpmath: 74.5 M exhaustive verdicts (W 3 to 7) and 2.14 M random ones (20 widths up to 928), 0 failing; the constants enclosing the truth at every W from 2 to 1087; 200,000 single operations with the new count never below the old; 2,219,337 lockstep decisions, the old library making all but 135 identically, each of those the header's grid exception; 27 plants.
+  - Two wrong answers, both words. mp-err-check was said to hold every rule, and never called cft_mp_const or mp_log_of_mp: three of W5's plants stayed green in it. And run.sh still said the contract run escalates 84 times.
+  - S4 went back and answered by coverage. 58f31c4 checks the six constants at every W from 2 to 928, and mp_log_of_mp end to end, against MPFR's directed roundings, through a probe compiled only into mp-err-check. 7d6e481 fixes the sentences.
+  - W5's re-check: both fixed, the three plants red (5,562, 963 and 1,128), and the default library's 32 objects byte for byte with the probe out of it. Three of its four nits were restated at the merge. The fourth is a known limit (below).
+  - W5's fp256 run on amd-arc-box, under the 64-bit override: C == model, and its 295 decisions on a negative margin are all overflow and underflow, none a normal result.
+- These close the fixes round's three recorded limits of the evaluator: the cancellation rule's floor, the header's saturation sentence, and the square root's O(e^2) left to slack. The sqrt rule now charges it.
+
+**The lead's own.**
+- ac619c9: the node stage runs `program_test.mjs`, and the generated stage runs `bindings/arduino/sync.py --check`. No stage ran either (verifier-F4). Each was watched failing for a planted drift.
+- 58fea7d and e7b6bba: stages `innerskips` and `ensurevectors` run the runner's own two tests, which no stage ran, which is how S2's table widening went unseen. The first run counted the self-test's quotation of a skip line as the stage's own inner skip. e7b6bba writes its report beside the log, and it passes with --require-all. Totals: 46 stages, 30 quick, 40 gate.
+- 3644a5a and 0c8cb8b: api-test in an XRT build (below).
+- 740b3a0: the pages that called the old quads "retimed" are restated. A quad built with RETIMING=1 alone had at most tile 1 retimed (the fixes round's survey), and revision 7's quad closes 135 MHz with all four. 740b3a0 said "tile 1 alone" in its subject and on two pages, of quads the survey did not read. The pages are restated in the close (verifier-W6), and the subject is recorded here as an overstatement.
+- 2c55763: a comment.
+- 2054660: the WebAssembly module rebuilt from the round's mpfloat.c and transcend.c, with no ABI change. MEASURED:
+  - two clean container builds byte for byte (cft_node.wasm 273,335 bytes, 9e6ec560...);
+  - demos_chains.json re-recorded, all 15 chains of the 13 configurations unchanged;
+  - verify_demos.mjs 48 checks, and program_test.mjs 37 passed;
+  - 141 `cftw_*` exports, as before.
+- Verifier-W4 checked be3eb72, ac619c9, aeb3f5e, 3644a5a and 0c8cb8b: no regression. Three wrong sentences were restated, the mpfloat.h one by S4's rewrite.
+- Verifier-W6 checked the rest of the lead's integration and this entry's draft: 740b3a0, 2c55763, 58fea7d, e7b6bba, the four merges and 2054660. No regression.
+  - MEASURED by W6:
+    - each new stage red for its own plant through the runner, and ensurevectors skipped by name without mpmath;
+    - each merge re-made by `git merge-tree`, differing from git's own only in docs/README.md and the declared restatements;
+    - the module and the demos page rebuilt byte for byte from a clone;
+    - a mixed build refusing build-width at exit 78;
+    - mp-err-check at 2054660: 16,814,033 results, 0 over.
+  - Three wrong answers, all sentences, each restated in the close:
+    - "tile 1 alone retimed", where the survey says "at most tile 1": LAYOUTS.md's round-2 quad, whose tree the survey never read; PLATFORMS.md's "the quads before it"; and this entry;
+    - this entry's memory figures, KiB divided by 1,000 and called MiB;
+    - "each pre-existing" for the cft-orbits limits, where mutate_cert's raise came with this round's e72fd5b.
+  - Its others were restated in the close or recorded below:
+    - a seventh place in orbits.c that called build-width unreachable;
+    - ROADMAP's 2026-09-02 "measures retiming alone";
+    - gen_layouts' q135b note, which lacked ExtraTimingOpt and AggressiveExplore;
+    - verify/README.md's quick row, which lacked `programs`. Beside it the lead found its gate row lacking `audit` and `estimates`, and its full row `estimates-full`;
+    - eight sentences of this entry.
+
+**Revision 7's quad, q135b: 135 MHz, and its card legs.**
+- Built from cf97a50 with RETIMING on all four tiles (the script for tile 1, VPP_PROPS for 2 to 4), ExtraTimingOpt, AggressiveExplore and phys_opt, in 445 minutes.
+- Routed WNS -0.007, which Vitis's optional post-route phys_opt took to +0.003, TNS 0. kernel_wns_ns 0.003.
+- verify-image: 8 of 8. Staged as e826b613....
+- The card legs, with the host at main aeab6fd, pass but for one check (below):
+  - device-test 2,626, 10,266 and 2,417 checks, 0 failed, over 4 tiles, fp32 to fp256;
+  - cft-selftest: 1,224,915 cases;
+  - card-identity: 16 of 16;
+  - card-segrun: 429 checks.
+- The program set: 138 of 140, the same two r8 depth probes as revision 7's single (a 2,048-slot tile).
+- The one failure was api-test in the XRT build. The fixes round's Q5 check required the error slot empty after a good load, where the XRT backend's older message shows through, as HOSTAPI documents. No XRT build had run that check. 3644a5a's repair had a blind spot, W4 found: a library leaving its own sentence after a good load passed. 0c8cb8b holds the clear exactly, the device backends' fall-through computed as cft_last_error() computes it. MEASURED: green in both builds, with controls red in both.
+
+**The front door.**
+- The gate budget on amd-arc-box at 2054660, niced (run 20260930-210027-20546609, 111 minutes): PASS. 32 stages executed, 0 failed. 8 skipped by name: buildargs (a real Vitis is there), six language legs (no toolchains) and demos (no node), each run at 2054660 on the desktop or in WSL (below). 4 inner skips: golden's three (no Arduino loopback binary, twice; math.fma needs Python 3.13) and remote's WebSocket leg (no node), the fixes round's four. transcend: 607,217 and 580,977 comparisons over 39 functions, C == model. mpfr: 739,234 cases against the pinned MPFR 4.2.2, 0 value and 0 flag mismatches, and mp-err-check's 16,814,033 results, 0 over their bound.
+- The desktop at 2054660, through the runner, niced: buildargs, docs, node, wasm, demos and the C++, Julia, Go, C#, R and Fortran legs PASS, nothing skipped, 0 inner skips (run 20260930-210101-2054660, 51 minutes). node (1,766 s) and wasm (1,125 s) replay the vector sets through the rebuilt module. Apart from docs, these are the stages the box cannot run (node, wasm, demos) or skips by name (buildargs, the language legs). lang-rust in WSL cft2204, on a git archive of 2054660 (the desktop's MSVC rustc cannot link the MinGW libcft.a): rc 0, "rust: same library, same bits".
+- The card legs on amd-arc-box at 2054660, with the host built XRT=1 and exactly the two known warnings:
+  - card-segrun on q135b and revision 7's single: 633 checks on each, 0 failed, 0 skipped (429 at aeab6fd, before S1's entries and slotstep), and its negative control red;
+  - the first certified cft-orbits runs made on a card, on the quad: Kepler fp64 open (8 segments) and the outer planets at fp256, keyed (4 segments), each with the angular momentum's drift. Each run's states are the software run's, bit for bit. Each certificate differs from the software one only in the five identity lines and the hash that covers them. cft-audit and the golden audit each accept both, re-running every segment and re-deriving every accuracy entry.
+
+**Known limits, recorded rather than fixed** (Logan's rule).
+- The evaluator's count (verifier-W5; mpfloat.h, mpfloat.c):
+  - near a count of 2^(2^24), infinity comes early: a bound still, above the true value, at a size that decides nothing;
+  - cft_mp_const accepts W = 1088, where its count is short for ln10. No caller asks past 928;
+  - with mp-err-check's cap on a failing run's log, the number of operands below the old rule's count is printed nowhere. The verdict and the exit code are right.
+- The estimates (S2, ACC-A):
+  - the bank's rounded h/6 shifts fp64 RK4 in time by 3.5e-15 on Lorenz-63 lane 0, twice that lane's rounding error, and neither estimate sees it;
+  - a small wider estimate is not a safe signal near the crossover;
+  - "scored" means the last-boundary step-halving table.
+- cft-segrun (S1, W1b):
+  - the entries memory check covers drifts only. An estimate in slotstep was declined, MEASURED: 59,244 KiB at the peak without one, 59,248 with;
+  - Windows' best-fit code page turns U+2212's "−1" into "-1" for every tool.
+- cft-orbits (S3, W3, W3b):
+  - a forger who recomputes a checkpoint's `sum` can hand a resume a state the run never reached. The certificate that follows fails its own audit (`segment-end`), and the fuzz lane measures that (ORBITS.md);
+  - new in this round, with S3's version-3 fuzzing (e72fd5b): fuzz_ckpt's mutate_cert can raise a ValueError, about 1 chain in 11,000, so about 1 session in 20 of 120 s dies, loudly. No stage runs fuzz_ckpt;
+  - pre-existing: an `h` line with an extra space is refused under "a different step size", and fuzz_ckpt's `--seed` does not reproduce a session.
+- The docs check fails at S1's intermediate commits 392b046 to b7bbd00, and is clean from 2e6b031. A bisect across them meets a red docs stage.
+- A commit message that overstates, recorded here since history is not rewritten: cf5ebeb's "each new check red before green" holds for 10 of 12 (W3b).
+
+**Load, and the machine.**
+- The desktop was in use for much of the round. W2 measured it 25 to 99% busy, with Logan in a game until about 18:27. So heavy runs went to amd-arc-box, and desktop timings carry that load: the docs check once took 115 s, against its usual 10.
+- The box ran S4's sweeps, W5's fp256 run, the merged gates, the gate budget and the card legs. The gate budget ran beside the card legs, which no gate stage touches.
+- Nothing loaded either machine on purpose.
+
+**The lead's own slips.**
+- The first launch of a box run at c17f00c was refused by its own content assertion: it required segrun.c to name cert_write.h once, and it does 8 times. Relaxed to at least once.
+- The first innerskips run counted the self-test's own quotation of a skip line as the stage's inner skip. Fixed in e7b6bba, the next commit.
+- scratchpad/fix_counts.py first read only the docs checker's stdout, but the checker prints its counts on stderr. Fixed before its first use at a merge.
+- 3644a5a's api-test repair had a blind spot, which W4 found and 0c8cb8b closed (above).
+- 58fea7d's root README missed two of its four stage counts at first ("**44** gate stages" and "all 44"). The docs check found them before the commit.
+- The module rebuild's first `--record` ran before the five native tools were built, and wrote the 4 runs it could compare. It was restored and repeated after `make`.
+- Two readings of lang-rust in WSL said rc=1 and content 0 0. `wsl -d cft2204 -- bash -lc '...'` hands the line to WSL's default shell, which expanded `$(...)` and `$?` in the Windows cwd first. The result above was measured through `wsl --exec` with a script, and nothing was concluded from the bad readings.
