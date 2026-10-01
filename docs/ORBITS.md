@@ -1473,7 +1473,10 @@ held to what it leaves:
   `program-image` at both of the loader's limits, `memory` for 2^62
   intervals (more than a `size_t` counts hashes for) and for 2^52 (293
   PB of hashes, past the address space an x86-64 process is given: 128
-  TiB, or 64 PiB with five-level paging), and `output`;
+  TiB, or 64 PiB with five-level paging), and `output`. Both `memory`
+  cases were measured refused under Linux's always-overcommit too
+  (`vm.overcommit_memory=1`, in cft-sim), where 10^12 intervals' 65 TB
+  are granted and the run goes on;
 - during the run, `device` (`flags-unwritten`) and `malformed`
   (`flags-wide`) at the first segment, DIR left holding its image and
   boundary 0; at its end, `width`, DIR left whole. None of the three
@@ -1565,6 +1568,19 @@ entry, the same way (2026-09-30): 566 resumes, 4.7 a second.
 - 29 were accepted with another, each refused by the golden audit by
   name, `segment-end`.
 - Nothing else.
+
+Again after the send-back, on cf5ebeb (2026-09-30), the same way: the
+reader holding the decimals to their one spelling, and the classifier
+each name to its code. 522 resumes, 4.5 and 4.2 a second.
+- 488 were refused by name, each at its name's code: 412 by the reader's
+  sentences, then 29 `salt-missing`, 25 `salt-unexpected`, 11
+  `identity`, 5 `program-digest`, 3 `image-digest`, 2 `salt-commitment`
+  and 1 `state-hash`.
+- 13 were accepted with the uninterrupted certificate.
+- 21 were accepted with another, each refused by the golden audit by
+  name: 20 `segment-end` and 1 `segment-flags`.
+- There was no WRONG-CODE or UNKNOWN-NAME. Nothing crashed, hung,
+  tripped a sanitiser or resumed silently wrong.
 
 ---
 
