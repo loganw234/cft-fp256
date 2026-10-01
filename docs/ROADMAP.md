@@ -4179,15 +4179,16 @@ equations-in, ensemble-out solver for ODEs and maps, shaped like
 programs were written as what such a compiler would be expected to emit
 (docs/VALIDATION.md, 2026-09-25).
 
-**What the tree has** (the lead's survey of 2026-10-01: three read-only
-surveyors, each fact cited to a file and line; the records are in
-`Data/runs/2026-10-01-lang-round/`).
+**What the tree has** (the lead's survey of 2026-10-01 by three
+read-only surveyors, each fact cited to a file and line. The round's
+ledger in `Data/runs/2026-10-01-lang-round/` summarises their reports,
+and verifier-P1 checked this section against the tree).
 - **The machine.**
   - Each image is in one format. A lane has 32 registers, and r0 to r2
     load from the streams. The bank addresses 512 constants, shared by
     the run. The per-lane scratch has 256 slots on most handles and
-    2,048 on the U50's revision 7. The U50 holds 32,768 instructions;
-    open-core holds 16,384.
+    2,048 on the U50's revision-7 images, which hold 32,768
+    instructions. Round-2 U50 images and open-core hold 16,384.
   - The rounded operations are FMA, ADD and SUB (a + c and a - c,
     through the FMA) and MUL, each one rounding. Each instruction's
     rounding attribute is fixed in the image.
@@ -4196,18 +4197,22 @@ surveyors, each fact cited to a file and line; the records are in
     group, and two reciprocal seeds.
   - There is no divide, square root, conversion or transcendental
     opcode. divfull and sqrtfull do correctly rounded division and
-    square root in 186 to 216 instructions, using every register. The
-    transcendentals are host work.
+    square root in 186 to 216 instructions. divfull uses all 32
+    registers, and sqrtfull 31. The transcendentals are host work.
   - REPEAT takes an immediate count, so a step count is an image, and
-    loops nest four deep. The other control codes are SETACT and
-    DEPOSIT. There is no branch and no call.
+    loops nest four deep. The ten control codes are HALT, REPEAT,
+    ENDREP, DEPOSIT, SETACT, ACTALL and the four scratch codes (STL,
+    LDL, STX, LDX). There is no branch and no call.
   - FLAGS are one sticky word for the run, not one per lane.
 - **The text form and its tools.**
   - `.cfta` has seven directives and no constant expressions. `.const`
-    takes one literal, a decimal rounded RNE as 754's 5.12.2 says.
+    takes one literal: a decimal, converted as 754's 5.12.2 describes
+    and rounded RNE (the assembler's choice), a hex-significand, or raw
+    bits.
   - asm.py is the reference assembler, and cft-asm.c its C twin.
   - No tool in this tree allocates registers, schedules or spills.
-    Every program's allocation is done by hand.
+    Every program in programs/ is allocated by hand. The photograph
+    stage's camera image was allocated by atlas-engine.
 - **The references.** gen_odes.py writes three programs, at fp64 and
   fp256:
   - Lorenz-63, RK4, 62 instructions at fp64;
@@ -4229,14 +4234,14 @@ surveyors, each fact cited to a file and line; the records are in
     by 3).
 - **The precedents.**
   - atlas-engine lowers pinned GLSL to binary32 tile programs. It keeps
-    an op list with scoped sharing, folds no float identity, inlines
-    calls, turns control flow into SELECT, and prices its spiller in
-    lane cost. Its output is checked five ways: its own interpreter,
+    an op list with scoped sharing, folds no float constant or
+    identity, inlines calls, turns control flow into SELECT, and
+    prices its spiller in lane cost. Its output is checked five ways: its own interpreter,
     libcft, seq.py, asm.py's byte-for-byte reassembly, and positive-run.
   - cft-orbits builds its images at run time, in C.
   - The docs already treat the order of roundings as the contract
     (ORBITS.md, and DETERMINISM.md's "Ordering"). COMPLIANCE.md files
-    754's clauses 10 and 11 under "language".
+    754's clauses 4.1, 10 and 11 under "language".
 - **Certification.**
   - A certified segment keeps its whole state in scratch, deposits
     nothing, and runs every lane.
@@ -4266,15 +4271,21 @@ d/dt z = fma(x, y, -(beta * z))
 step   rk4, h = 1/100
 ```
 
+The language takes on 754's clauses 4.1, 10 and 11, which COMPLIANCE.md
+files under "language".
+
 1. **Literal evaluation**, 754-2019's 10.4.
    - Each operator written is exactly one operation, rounded once.
      Binary operators associate left, and parentheses are kept.
    - Nothing is reassociated, distributed, folded as an identity or
-     widened. x + 0 is not x: it turns -0 into +0.
+     widened. x + 0 is not x: under every attribute but rdn it turns
+     -0 into +0.
    - Nothing is contracted. a*b + c is two roundings, and fma(a, b, c)
      is one.
    - The compiler may commute the operands of + and *, which is bit for
-     bit here (DETERMINISM.md, "Ordering"). It may also share identical
+     bit here. DETERMINISM.md's "Ordering" holds it for +, and
+     verifier-P1 measured both over 975,240 comparisons, NaN payloads
+     included. It may also share identical
      subexpressions, and schedule and allocate freely. None of these
      changes a value or the run's FLAGS.
 2. **Every operation written is performed.** A value defined and never
@@ -4285,13 +4296,17 @@ step   rk4, h = 1/100
    - A literal is an exact rational: an integer, a decimal, a/b, or a
      hex-significand.
    - A `const`, and any expression whose operands are all constants, is
-     evaluated exactly and rounded once, under the program's attribute
-     (754's 5.12.2, "the applicable attribute"). Its flags are the
-     compiler's report, not the run's.
+     evaluated exactly and rounded once, under the program's attribute.
+     Its flags are the compiler's report, not the run's.
+   - So under rdn or rup a constant's negation is not the negation of
+     its rounding. With beta a const, -beta is the attribute's rounding
+     of -8/3. With beta a param, -beta is a run-time negation of the
+     bank's value.
    - Everything else is a run-time operation. So h/6 is RN(1/600), x*2*3
      is (x*2)*3, and x*(2*3) is x*6.
-   - Two constants are refused by name: one that overflows, and a
-     nonzero one that rounds to zero.
+   - Refused by name: a constant that overflows, a nonzero one that
+     rounds to zero, a constant division by zero, and, in v1, the
+     three values a rational cannot carry (-0, the infinities, NaN).
    - An inexact constant is listed in the manifest with its exact value,
      its rounding and its relative error.
 4. **One attribute a program** (`round`, default RNE), for every rounded
@@ -4306,8 +4321,10 @@ step   rk4, h = 1/100
 6. **The step.**
    - The integrator's h is a constant. Each multiple a template needs,
      such as h/2 or h/6, is a constant expression rounded once.
-   - The manifest names these slots as the h-scaled ones, which
-     cft-segrun's step-halving halves exactly.
+   - The manifest names these slots as the h-scaled ones. A
+     step-halving estimate runs on a bank with each of them halved,
+     which is exact. cft-segrun takes that bank through `--bank` and
+     the audit checks it, so the compiler writes it.
    - It also states the template's time shift, for example
      6 RN(h/6) / RN(h) - 1, which no rounding rule removes.
 7. **State and indices.** State is scalars and fixed-length arrays.
@@ -4324,8 +4341,10 @@ step   rk4, h = 1/100
     - a transcendental at run time;
     - an explicit time dependence (v1);
     - anything past the target device's stated capacities: registers
-      plus scratch (2,048 slots on the U50, 256 elsewhere), the bank
-      (512), the program length, or the format;
+      plus scratch (2,048 slots on the U50's revision 7, 256
+      elsewhere), the bank (512), the program length, the 2^40
+      worst-case instructions, the format, or a feature the target's
+      CAPS bits do not publish;
     - the constant cases above.
 
 **The compiler, proposed.** It is a Python package of its own, held to
@@ -4335,8 +4354,11 @@ following:
   with Fractions.
 - It builds a graph per step, with shared subexpressions.
 - It schedules for the tile's overlap. At a full block the latency is
-  hidden; deposits and scratch accesses are priced from the census, per
-  format.
+  hidden. Deposits and scratch accesses are priced per format from the
+  census, re-measured, since revision 7 made Lorenz-96 2.55 times
+  faster.
+- It emits the instructions a tile runs, revision 7's. Revision 8's
+  exist only in the model and the software backend.
 - It allocates registers r3 to r31, and spills to strict scratch.
 - It keeps the state in scratch (the segment shape), and runs the step
   loop as one REPEAT.
@@ -4344,8 +4366,8 @@ following:
 It emits `.cfta` that asm.py assembles, the image, the bank, and a
 manifest. The manifest maps names to slots, lists the h-scaled slots for
 cft-segrun's estimates, gives each constant's exact value and rounding,
-and records the counts. Every line it writes stays under cft-asm.c's
-buffer.
+and records the counts. The compiler also writes the halved bank a
+step-halving estimate runs on.
 
 **Parcels.**
 1. **L1: the definition, golden-first.**
@@ -4366,8 +4388,11 @@ buffer.
        for every lane, at fp64 and fp256, with FLAGS included. Their
        constants agree there, measured.
      - Every refusal is made, by name.
-     - Plants are red: a reassociated sum, a contraction, a constant
-       rounded twice.
+     - Plants are red: a reassociated sum, a contraction, and a
+       constant rounded through a narrower format. A constant rounded
+       twice by H6's own route cannot fail at fp64 or fp256. Each plant
+       is sized to fail: verifier-P1's contraction at fp256 stayed
+       green at 8 lanes and 7 steps, and failed at 32 lanes and 100.
 2. **L2: the compiler**, held to L1's definition.
    - It starts once L1's step graph is fixed, and merges after L1.
    - It covers the lowering, the allocator and spiller, the scheduler,
@@ -4388,12 +4413,16 @@ buffer.
      docs/LANGUAGE.md. Its rounding order is fixed like any other
      expression's, golden-first in the interpreter, then in the
      compiler.
-   - It carries tangent vectors, not whole Jacobians: Lorenz-96's 40 by
-     40 is 1,600 values a lane, against 2,048 slots.
+   - It carries tangent vectors, not whole Jacobians. One Lorenz-96
+     tangent vector, with RK4's stage vectors, doubles the program's
+     200 slots to about 400: within the U50's 2,048, and past any
+     256-slot target.
    - Its gate is L2's, plus two more:
      - the tangent system against an exact derivative in mpmath;
      - Lorenz-63's largest Lyapunov exponent (about 0.906) as a smoke
-       test, renormalised on the host between segments.
+       test, renormalised on the host between segments. Those runs are
+       not certified, since a certified chain hands each segment's
+       scratch-out to the next unchanged.
 
 **The lead's own, beside the parcels** (each found by the survey).
 1. **The bank's depth is refused only on the tile.**
@@ -4401,14 +4430,18 @@ buffer.
      (rtl/cft_seq.sv:3041, STATUS[3]). seq.py and program.c load such an
      image, so the refusal comes after the image has crossed: the
      refusal the loader exists to prevent.
-   - Golden-first: seq.py refuses it by name, then program.c. The module
-     is rebuilt.
+   - Golden-first: seq.py refuses it by name, then program.c. The model
+     then refuses what the tile refuses; asm.py already refuses such an
+     image. The module is rebuilt.
 2. **cft-asm.c splits a long line.**
    - Its `fgets` reads 1,023 bytes at a time, so a longer line is
      assembled as two. A comment whose tail reads ` deposit r0` gave an
      image with an extra deposit, at exit 0 (the survey, measured).
      asm.py reads the line whole.
-   - The fix refuses the line by name.
+   - The fix is cft-asm.c's alone: it reads a line whole, at any
+     length, as asm.py does. Today a line past 2,046 bytes splits three
+     ways, and verifier-P1 saw one refused with the wrong error at the
+     wrong line.
 3. **Sentences the survey found stale:**
    - SEQUENCER.md's "no image carries revision 7", and its "under fifty
      instructions and six constants";
@@ -4416,12 +4449,13 @@ buffer.
    - cft.h's max_scratch, "256 here and on the tile";
    - PROGRAMS.md's "twenty-nine programs" (there are 37), and its family
      table;
-   - gen_odes.py's "exact decimals" and "h / 6, one rounding" for H6,
-     which is RN(RN(0.01)/6);
+   - gen_odes.py's "exact decimals", where H6 is RN(RN(0.01)/6);
    - ATLAS.md's "11 of 256".
 
-   rtl/cft_seq.sv's two stale comments wait for the next RTL change, so
-   that the built images' rtl tree stays the tree they were built from.
+   rtl/cft_seq.sv's stale comments (the header check's flag width at
+   :40, and the bank's 256 entries at :53, :144 and :1288, now 512) wait
+   for the next RTL change, so that the built images' rtl tree stays
+   the tree they were built from.
 
 **How it is held.**
 - Golden-first: L1's definition comes before L2's compiler is held to
@@ -4435,17 +4469,21 @@ buffer.
 
 **What it is not.**
 - Run-time division or square root. Both are refused in v1. Inlining
-  divfull or sqrtfull means spilling every register around it, which
-  is a later parcel.
-- Run-time transcendentals. That is the work order's step 6, the
-  correctly rounded math library.
-- Time-dependent systems, adaptive steps and events. There is no
-  branch; SETACT and a fixed REPEAT would do.
+  divfull or sqrtfull means spilling the registers around it, which
+  is a later parcel. cft-orbits computes r^-3 in a program from the
+  seed and a fixed Newton chain: a deterministic composite, not a
+  correctly rounded one, which a later parcel could offer by name.
+- Run-time transcendentals: the correctly rounded math library, a
+  later step of the work order.
+- Time-dependent systems (t would ride in the state), adaptive steps
+  and events (with no branch, SETACT and a fixed REPEAT would do).
+- Per-operation attributes, such as an interval bound's rdn and rup in
+  one program. v1 has one attribute a program.
 - Per-lane flags. FLAGS are the run's; R23 is a design.
 - A Python front end. If one follows, it refuses a Python float as a
   constant by name, since Python's 0.01 is binary64.
-- The gallery (step 5), the service and its submissions, and a
-  certificate that names its source.
+- The gallery, the service and its submissions, and a certificate that
+  names its source.
 
 **For Logan.**
 - The syntax: a language in its own files, or one embedded in Python.
