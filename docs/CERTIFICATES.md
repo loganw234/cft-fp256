@@ -9,7 +9,7 @@ not control, starting each from its certified start state. This page is
 the whole of version 1. A reader and an auditor can be written from it
 alone.
 
-Where things stand (2026-09-29):
+Where things stand (2026-09-30):
 - the golden implementation is `python/cft_golden/cert.py`: encode,
   strict parse, the hashes, the chain and the audit, which re-runs
   segments with `seq.run`;
@@ -1413,8 +1413,11 @@ How each value is made:
   tool wrote before step 5.
 - The arithmetic is cft-audit's own. Step 5 moved it into one file that
   both tools build, `host/tools/cert_exact.h`. It is header-only, and
-  each of its functions returns a status, which each tool refuses by
-  name.
+  nothing in it prints or exits. Each of its functions that can fail
+  returns a status. A status that names a refusal, each tool refuses by
+  that name. An exact step past the bigint, which the width rule makes
+  impossible, is an internal error in both tools, and a library call
+  that fails is this tool's `device` and cft-audit's internal error.
 
 **The states.** Each boundary is written as it is reached, to
 
@@ -1473,7 +1476,12 @@ same defect (`cert.derive`, `make_value`, and `encode`'s reader). Before
 anything is made, each entry in turn is checked for its spellings, then
 against the runs in `cert.derive`'s order:
 - `malformed`, for:
-  - a method, a label, a run, a lane or a slot not in its spelling;
+  - a method, a label, a run, a lane or a slot not in its spelling. A
+    lane or a slot given negative is one: the golden writer refuses its
+    line `malformed` at `encode`. A run given negative, a minus before
+    a nonzero index in its one spelling, such as -1, is not: it names
+    no run, and it is `accuracy-run`, below, as `cert.derive` names it.
+    `-0` and `-01` spell no index, and are `malformed`;
   - a drift with no `--quantity`, no `--term`, or more than 64;
   - an estimate given a `--quantity` or a `--term`;
   - a coefficient not in its one spelling: a zero denominator, 0/3, or
@@ -1482,9 +1490,10 @@ against the runs in `cert.derive`'s order:
   - a `--value` that is not `exact`, `rounded:FMT:RND` or
     `enclosed:FMT`, in the page's words;
 - `width`, for a coefficient past the width rule by its digits;
-- `accuracy-run`, for a run that does not exist, and for an estimate on
-  run 0, on a run of the other kind, or on a run whose lanes or slots a
-  lane are not run 0's;
+- `accuracy-run`, for a run that does not exist (an index past the
+  runs, or a negative one), and for an estimate on run 0, on a run of
+  the other kind, or on a run whose lanes or slots a lane are not run
+  0's;
 - `accuracy-scope`, for a lane the run does not have;
 - `accuracy-slot`, for a slot the run's state does not have (so every
   slot from 65,536).
@@ -1596,8 +1605,10 @@ reach have no test in the gate:
 - a boundary file already in DIR when the run comes to write it
   (`output`, as a file the run did not make);
 - a boundary file changed, or gone, between its writing and an entry's
-  reading it back (`output`; the plant build holds the check, and a
-  race does not);
+  reading it back (`output`). The plant build holds the hash check
+  alone: a file of another size, or one that cannot be read, has no
+  test here (verifier-W1 planted both, and each was refused `output`,
+  2026-09-30), and a race is held by nothing;
 - the software handle for an accuracy value not opening, or one of its
   conversions failing (`device`).
 Two of these do happen on the desktop when another process makes them,
@@ -1627,20 +1638,37 @@ lets both go before the next entry reads its own. The pair is one run's
 slots (an estimate: other shapes are refused before anything is made).
 So, by arithmetic, the entries hold no more at once than the largest
 run did, which was its two states, its streams and a hash's copy. The
-gate measures it (**Its gate**, below). On the desktop, with flagstep's
-three runs of 65,535 lanes and two entries that read four states back,
-the peak commit was:
-- in four runs of the gate, 12 KiB less, 12 KiB less, 28 KiB more and
-  40 KiB more than the same three runs without entries (10,224 to 10,284
-  KiB);
-- beside that, one more state held beside the runs' would be 1,024 KiB.
-So the entries add nothing that identical runs' noise does not
-(2026-09-30). Each entry's definition is held from the command line to
-the end: a rational of about 520 bytes a term at the default bigint,
-about 36 KiB for a drift of 64 terms. Its value is held too, about 520
-bytes. None of it grows with lanes or segments. The least address space
-in Linux (`ulimit -v`), and the trial's cost with entries, are measured
-by the gate on Linux; they have not been run for this page yet.
+gate measures what they cost in two shapes (**Its gate**, below):
+- Beside flagstep's three runs of 65,535 lanes, whose states are 1 MiB,
+  with two entries that read four states back. In four runs of the gate
+  the peak commit was 12 KiB less, 12 KiB less, 28 KiB more and 40 KiB
+  more than the same three runs without entries (10,224 to 10,284 KiB).
+  One more state held beside the runs' would be 1,024 KiB more. So the
+  entries hold no state beside the runs'. This shape sees nothing else:
+  the entries' own phase is more than two states under run 0's peak,
+  which holds the later runs' initial states and the library's own lane
+  block (its registers and its scratch, about 4.6 MiB at the default
+  depth, whatever the lanes). An entry that held a third state, and
+  entries that kept every pair, both passed it (verifier-W1's plants,
+  2026-09-30).
+- Beside `slotstep`'s one run of 65,535 lanes of 16 slots, whose states
+  are 8 MiB, with two drifts of it that read four states back. There the
+  entries' phase is the process's peak. The run holds its two states,
+  its streams (a sixteenth of a state) and one state more at most (the
+  initial state, or a hash's copy), and the entries hold a pair and a
+  hash's copy. In six runs the peak commit was 476, 88 and 16 KiB less,
+  and 16, 16 and 52 KiB more, than the run alone (26,300 to 26,780 KiB).
+  Against the gate as committed, W1's two plants were 7,696 and 7,668
+  KiB more (the third state) and 15,912 and 15,848 KiB more (every pair
+  kept), and the gate fails both.
+
+Those are the desktop's peak commit (2026-09-30). In WSL (cft2204), the
+least address space was 0 KiB more with the entries in both shapes, and
+the two plants 7,616 and 15,808 KiB more (S1's send-back, 2026-09-30).
+Each entry's definition is held from the command line to the end: a
+rational of about 520 bytes a term at the default bigint, about 36 KiB
+for a drift of 64 terms. Its value is held too, about 520 bytes. None of
+it grows with lanes or segments.
 
 Before the certificate or DIR is created, the tool counts what the runs
 need against what the process can address. It then tries, in the runs'
@@ -1767,8 +1795,10 @@ each image held to `programs/MANIFEST`, with its classic bank:
   half-step run shares run 0's, so a writer that entered one from run
   0's `--init` would pass them all (verifier-C6's plant).
 
-Each program is certified keyed and open on the software backend, with
-accuracy entries (since the plan's step 5, 2026-09-30):
+Each program is certified keyed and open on the software backend, and
+each but the one whose half-step run starts apart (the audit refuses it
+before step 10) with accuracy entries (since the plan's step 5,
+2026-09-30):
 - Between them the entries have every method, both scopes, every form
   and every rounding direction:
   - a step-halving estimate on each ODE program;
@@ -1777,10 +1807,17 @@ accuracy entries (since the plan's step 5, 2026-09-30):
     fp64 on lane 1 and at fp256 over the lanes, near the width rule;
   - flagstep's counter drift over the lanes. Every lane's drift is -5,
     so a writer that took the signed maximum writes -5.
-- A difference of two values of one format is exact in it, so a rounded
-  estimate names a narrower format. The gate holds that each direction
-  but `rup` rounds some entry's value to other bits than `rup` does, so
-  that a writer that swapped its direction is seen.
+- A difference of two values of one format is exact in it when they
+  have one sign and each is within a factor of two of the other
+  (Sterbenz's lemma). The gate's step-halving runs end that close: all
+  210 pairs of final elements, run 0's beside its half-step run's, meet
+  the condition and differ exactly (2026-09-30; verifier-W1 counted the
+  exact differences first). So a step-halving estimate's value is exact
+  in its runs' format, where no rounding shows its direction, and the
+  rounded and enclosed ones that are to show it name a narrower format.
+  The gate holds that each direction but `rup` rounds some entry's value
+  to other bits than `rup` does, so that a writer that swapped its
+  direction is seen.
 
 Then:
 - the golden reader must accept each certificate;
@@ -1851,11 +1888,14 @@ spelling it cannot be handed, such as a coefficient 2/4.
   `--run` or a run's option after one, an option twice, and a missing
   `--uses`, `--scope` or `--value`.
 - Every spelling (`malformed`), and a coefficient past the rule by its
-  digits (`width`).
+  digits (`width`). Among them `--uses -0` and `-01`, and a lane or a
+  slot given negative, which the golden writer refuses `malformed` too.
 - The entry against the runs:
   - `accuracy-run`: a run that is not there, a run index past 2^63 - 1,
-    step-halving on run 0 or on the wider run, wider on the half-step
-    run, and an estimate whose half-step run has other lanes;
+    a negative one (-1, a drift's -5, and -10^20), step-halving on run 0
+    or on the wider run, wider on the half-step run, and an estimate
+    whose half-step run has other lanes. Until verifier-W1 found it
+    (2026-09-30), a negative run was refused `malformed`;
   - `accuracy-scope`: lane 3 of 3, and a lane past 2^63 - 1;
   - `accuracy-slot`: slot 3 of 3, and slot 70,000.
 - Each of these leaves nothing behind.
@@ -1891,12 +1931,26 @@ Last, it holds memory. What a run costs: flagstep on 65,535 lanes, a
 main run and two half-step runs, against the main run alone. The two
 further runs may cost their inputs and one state more, no more. At
 4eed552, which held every run's working set at once, they cost two
-whole working sets. What the accuracy entries cost: the same three runs
-with two entries that read four states back, against the three runs
-alone. They may cost 256 KiB more, a quarter of one of those states
-(and on Linux one bisection step), and no more; holding one more state
-beside the runs' would cost 1,024 KiB. The gate measures a process as
-its platform does:
+whole working sets. What the accuracy entries cost, in two shapes
+(**Memory**, above):
+- the same three runs with two entries that read four states back,
+  against the three runs alone. They may cost 256 KiB more, a quarter
+  of one of those states (and on Linux one bisection step), and no
+  more; holding one more state beside the runs' would cost 1,024 KiB.
+  This holds no state beside the runs', and nothing of the entries' own
+  phase, which is under run 0's peak there;
+- `slotstep`, a program written in the gate, one run of 65,535 lanes of
+  16 slots, with two drifts of it that read four states back, against
+  the run alone. There the entries' phase is the peak. They may cost a
+  quarter of its 8 MiB state, 2,048 KiB, more (and on Linux one
+  bisection step): one command line's peak commit is steady, but
+  between command lines it steps by about 470 KiB on the desktop, by
+  the path and the entries given (believed: the C heap keeping the
+  initial state's first read buffers or not). By arithmetic, an entry
+  that held a state more than its pair would cost 7,680 KiB more, and
+  entries that held two pairs at once 15,872 KiB more.
+
+The gate measures a process as its platform does:
 its peak commit on Windows, and on Linux the least address space it
 writes its certificate in (`ulimit -v`), doubled from 16 MiB and then
 bisected. And what the trial costs the runs, to the page: in two small
@@ -1916,7 +1970,12 @@ NOT TESTED too, and the gate goes on (at eb2d1ae, run as `nobody` under
 a hard limit of about 8 GB, it stopped with a traceback; verifier-C7).
 It also holds git to ignoring the tool's binary.
 
-With the accuracy entries (2026-09-30): 634 checks on the Windows
+With a negative run index and `slotstep` (S1's send-back, 2026-09-30):
+656 checks on the Windows desktop and one SKIP, the trial's cost NOT
+TESTED there, 96 s. On Linux the three checks of the trial's cost run
+in the SKIP's place: in WSL (cft2204, gcc 11.4, at f572ef3), 659 checks,
+0 failed, nothing skipped, 85 s. With the accuracy
+entries (2026-09-30): 634 checks on the Windows
 desktop and one SKIP, the trial's cost NOT TESTED there, 80 s. On Linux
 the three checks of the trial's cost run in the SKIP's place, so 637
 there, by that arithmetic and not yet run. With `--scratch-depth`
@@ -2051,9 +2110,11 @@ page's test vector writes them. It samples through a map of at least
   element's exact value, the rationals under the width rule, the
   rounding, a rational token's reading, and "The functions, exactly", in
   three parts: the checks, the states read, and the value. It also holds
-  `value_holds`. Every function returns a status and prints nothing:
-  this tool maps each status to its refusal (step 10's names at the
-  entry) or to its internal error, as before. The header is compiled
+  `value_holds`. Nothing in it prints or exits, and each function that
+  can fail returns a status: this tool maps a status that names a
+  refusal to that refusal (step 10's names at the entry), and the two
+  that name none, an exact step past the bigint and a library call that
+  failed, to its internal error, as before. The header is compiled
   into every build of the tool, the narrow builds and the probe among
   them, and each build compiles warning-free with the project's flags
   (-std=c99 -Wall -Wextra -Wpedantic -Wshadow; the lead's condition).
@@ -2209,11 +2270,18 @@ refused there one call a name (step 10's `accuracy-run`, `-scope`,
 still plants each name apart. It does not plant inside the header,
 whose checks are held by the gates' controls: test_cert.py's through
 section 2, and segrun_check's section 12. The census below is
-ca1327f's, and has not been run again since the move.
+verifier-W1's, run after the move.
 
-On `tools/audit.c` as of ca1327f, with the gate's 6,669 cases, the
-census found 167 sites (157 s on the desktop, 2026-09-29):
-- **148 red.** Each turns a case red, and the gate's line names the
+On `tools/audit.c` as of 0ad2609 (unchanged since the move, 0612b37),
+with the gate's 6,669 cases, the census found 163 sites (186 s on the
+desktop; verifier-W1, 2026-09-30). At ca1327f, before the move, it
+found 167: 148 red, 12 green and 7 unreached (157 s, 2026-09-29). The
+move made seven sites three, calls that refuse one name each (W1's
+reading of the diff): derive's two `accuracy-run` calls became one,
+`exact_of`'s and `rat_checked`'s `width` one, and `read_rational`'s
+three `malformed` calls one. The seven were six red and one green (zero
+spelt 0/3), and the three are red.
+- **145 red.** Each turns a case red, and the gate's line names the
   golden auditor's refusal beside the tool's other answer. Four answer
   verifier-A1's findings, each planted in turn:
   - `build-format` at a run's `program-format` line: its case reaches
@@ -2223,13 +2291,12 @@ census found 167 sites (157 s on the desktop, 2026-09-29):
   - `build-format` at an image above the ceiling: `program-image`;
   - the `--sample` map's size: a map of 16 slots, and the sample runs
     past the census's 20 s.
-- **12 green.** Each stays green because another check refuses its
+- **11 green.** Each stays green because another check refuses its
   cases by the same name at the same place:
   - in the golden auditor's order too:
     - a block-starting line whose block is behind: the next rule of
       "A line that is not the one expected" says `line-unexpected`;
     - a decimal's spelling, read again with its size;
-    - zero spelt 0/3, which is not in lowest terms either;
     - a program without SCRATCH_IO, whose scratch goes in as 0 slots,
       the second reason;
   - in C alone:

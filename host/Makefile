@@ -1181,9 +1181,10 @@ clean-programs:
 #                       2,048 with the depth stated in every run block,
 #                       byte for byte the golden writer's at each and
 #                       audited there, and the option's refusals. And the
-#                       accuracy entries (the plan's step 5): every
-#                       program certified with entries of every method,
-#                       scope, form and direction, each value byte for
+#                       accuracy entries (the plan's step 5): each
+#                       program but the one that starts apart certified
+#                       with entries, between them every method, scope,
+#                       form and direction, each value byte for
 #                       byte the golden writer's and accepted by both
 #                       auditors (cft-audit is a prerequisite); every
 #                       entry's refusal by the golden writer's name; the
@@ -1191,7 +1192,8 @@ clean-programs:
 #                       $(CC) from $(SRC) (build-width, build-format), and
 #                       its plant build, compiled only here, whose first
 #                       state read back is changed (output); and what the
-#                       entries cost in memory beside the runs.
+#                       entries cost in memory: no state beside the runs',
+#                       and their states read back a pair at a time.
 #                       verify/run.sh's `programs` stage runs it.
 #
 # The tree's build id goes in as make test hands api-test its own, so a

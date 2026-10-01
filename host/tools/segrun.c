@@ -165,13 +165,16 @@
  *                      one before it (names in byte order)
  * and for an accuracy entry, before anything runs:
  *   malformed (2)      a method, label, run, lane or slot not in its
- *                      spelling; a drift with no quantity, no term or more
+ *                      spelling (a run given negative, -1, is spelt, and
+ *                      names no run: accuracy-run); a drift with no
+ *                      quantity, no term or more
  *                      than 64; an estimate given a quantity or a term; a
  *                      coefficient not in its one spelling; a factor not
  *                      s<slot>, more than 8, or out of order; a value
  *                      that is not exact, rounded:FMT:RND or enclosed:FMT
  *   width (3)          a coefficient past the width rule by its digits
- *   accuracy-run (7)   a run that does not exist; an estimate on run 0,
+ *   accuracy-run (7)   a run that does not exist, a negative one among
+ *                      them; an estimate on run 0,
  *                      on a run of the other kind, or on one whose lanes
  *                      or slots a lane are not run 0's
  *   accuracy-scope (7) a lane the run does not have
@@ -1060,10 +1063,14 @@ static int add_ok(size_t *acc, size_t v)
  * step 5). The pair is one run's (a drift) or run 0's final state beside
  * a run of run 0's lanes and slots (an estimate), so the entries hold no
  * more at once than the largest run did: its two states, its streams
- * and a hash's copy. Measured with segrun_check's section 10 (flagstep,
- * 65,535 lanes, three runs and two entries reading four states): no more
- * peak commit than the three runs alone, to within the noise of
- * identical runs (2026-09-30).
+ * and a hash's copy. Measured with segrun_check's section 10
+ * (2026-09-30): beside flagstep's three runs of 65,535 lanes, two
+ * entries reading four states back cost no more peak commit than the
+ * runs alone, to within the noise of identical runs, so they hold no
+ * state beside the runs'; and beside slotstep's one run of 8 MiB states,
+ * where the entries' phase is the peak, two drifts cost no more than the
+ * run alone, where a state more at once would cost 7.5 MiB (the first
+ * shape cannot see that: verifier-W1).
  *
  * Before anything is made, try_runs counts all of it against what the
  * process can address, and then tries, in the runs' own order, the
@@ -1476,9 +1483,9 @@ static void parse_value(const char *s, value_t *v, size_t j)
             if (!strcmp(part[1], FMT[k].name))
                 f = (int)k;
         if (f < 0)
-            refuse("malformed", "entry %lu: a %s value's format is one of "
+            refuse("malformed", "entry %lu: %s %s value's format is one of "
                    "fp32, fp64, fp128, fp256, not '%.40s'", (unsigned long)j,
-                   part[0], part[1]);
+                   v->form == V_ENCLOSED ? "an" : "a", part[0], part[1]);
         /* the format by its word as given, which the loop above matched to
          * FMT[f].name: never FMT[f] here, where f is past the build's
          * ceiling (gcc 13 flags that subscript in the default build, where
@@ -1518,7 +1525,7 @@ static void check_entry(entry_spec *X, size_t j, const run_spec *runs,
     uint64_t v, need[2][2];
     cx_run m, u;
     size_t t;
-    int k, st;
+    int k, st, negative;
 
     for (k = 0; k < 3 && strcmp(X->method_s, METHOD_NAME[k]) != 0; k++)
         ;
@@ -1529,11 +1536,19 @@ static void check_entry(entry_spec *X, size_t j, const run_spec *runs,
     if (!X->uses_s || !X->scope_s || !X->value_s)
         refuse("usage", "entry %lu (%s) needs --uses, --scope and --value",
                (unsigned long)j, METHOD_NAME[k]);
-    if (!dec_sat(X->uses_s, &v))
+    /* The run: a decimal in its one spelling, or a negative one, a minus
+     * and a nonzero decimal in its one spelling. A negative index names no
+     * run, and the golden writer handed one refuses it accuracy-run, at
+     * cert.derive's first check (`not 0 <= r < len(runs)`), before
+     * encode's reader could call it malformed: so it is held to the
+     * runs below, as an index past them is (verifier-W1, 2026-09-30: it
+     * was refused malformed). -0 and -01 spell no index: malformed. */
+    negative = X->uses_s[0] == '-' && dec_sat(X->uses_s + 1, &v) && v != 0;
+    if (!negative && !dec_sat(X->uses_s, &v))
         refuse("malformed", "entry %lu: --uses '%.40s' is not a run index, a "
                "decimal integer in its one spelling", (unsigned long)j,
                X->uses_s);
-    E->uses = v;
+    E->uses = negative ? UINT64_MAX : v;
     if (!strcmp(X->scope_s, "max-lanes")) {
         E->has_lane = 0;
     } else if (!strncmp(X->scope_s, "lane:", 5) &&
@@ -1574,6 +1589,11 @@ static void check_entry(entry_spec *X, size_t j, const run_spec *runs,
         run_shape_of(&runs[E->uses], &u);
     st = cx_entry_check(E, n_runs, &m, E->uses < n_runs ? &u : NULL, why,
                         sizeof why);
+    if (st == CX_RUN && negative)       /* the run as given, not saturated */
+        snprintf(why, sizeof why, "entry uses run %.40s%s, and the "
+                 "certificate has %llu", X->uses_s,
+                 strlen(X->uses_s) > 40 ? "..." : "",
+                 (unsigned long long)n_runs);
     refuse_cx(st, j, why);
 
     cx_entry_needs(E, &m, &u, need);
