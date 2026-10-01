@@ -676,6 +676,14 @@ difference - is held to the width rule (refused `width`):
     `aux-image`); a writer, which checks no relation, does (the lead's
     decision, 2026-09-30: the golden writer raised an IndexError there,
     or read run 0's state by run r's shape).
+- A run, a lane and a slot are indices from 0. A writer handed a
+  negative one, which no certificate can spell, refuses it by the check
+  it fails: `accuracy-run`, `accuracy-scope` or `accuracy-slot`, where
+  the index past the end is refused. An audit never meets one, since the
+  reader refuses a certificate that spells one (the lead's decision,
+  2026-09-30: the golden writer read a negative lane or slot by Python's
+  index from the end, another lane's value, an IndexError past the
+  state, or another lane's `accuracy-finite`; verifier-W1b).
 - The value is D_i or E_i for one lane, or the maximum over the lanes
   of |D_i| or E_i.
 - The order fixes every intermediate value, and so it decides two
@@ -1463,16 +1471,17 @@ anything is made, each entry in turn is checked for its spellings, then
 against the runs in `cert.derive`'s order:
 - `malformed`, for:
   - a method, a label, a run, a lane or a slot not in its spelling. A
-    lane or a slot given negative is one: the golden writer refuses its
-    line `malformed` at `encode`. A run given negative, a minus before
-    a nonzero index in its one spelling, such as -1, is not: it names
-    no run, and it is `accuracy-run`, below, as `cert.derive` names it.
-    `-0` and `-01` spell no index, and are `malformed`;
+    run, a lane or a slot given negative, a minus before a nonzero
+    index in its one spelling, such as -1, is spelt: it names none, and
+    it is `accuracy-run`, `accuracy-scope` or `accuracy-slot`, below,
+    as `cert.derive` names it. `-0` and `-01` spell no index, and are
+    `malformed`;
   - a drift with no `--quantity`, no `--term`, or more than 64;
   - an estimate given a `--quantity` or a `--term`;
   - a coefficient not in its one spelling: a zero denominator, 0/3, or
     not in lowest terms;
-  - a factor not `s<slot>`, more than eight of them, or out of order;
+  - a factor not `s<slot>`, more than eight of them, or out of order,
+    by the slots' values (-1 before 0);
   - a `--value` that is not `exact`, `rounded:FMT:RND` or
     `enclosed:FMT`, in the page's words;
 - `width`, for a coefficient past the width rule by its digits;
@@ -1480,9 +1489,10 @@ against the runs in `cert.derive`'s order:
   runs, or a negative one), and for an estimate on run 0, on a run of
   the other kind, or on a run whose lanes or slots a lane are not run
   0's;
-- `accuracy-scope`, for a lane the run does not have;
+- `accuracy-scope`, for a lane the run does not have (an index past its
+  lanes, or a negative one);
 - `accuracy-slot`, for a slot the run's state does not have (so every
-  slot from 65,536).
+  slot from 65,536, and every negative one).
 
 After the runs, from the states read back:
 - `accuracy-finite`, for an element a value needs that is not finite;
@@ -1874,16 +1884,22 @@ spelling it cannot be handed, such as a coefficient 2/4.
   `--run` or a run's option after one, an option twice, and a missing
   `--uses`, `--scope` or `--value`.
 - Every spelling (`malformed`), and a coefficient past the rule by its
-  digits (`width`). Among them `--uses -0` and `-01`, and a lane or a
-  slot given negative, which the golden writer refuses `malformed` too.
+  digits (`width`). Among them `-0` and `-01` as a run, a lane and a
+  slot.
 - The entry against the runs:
   - `accuracy-run`: a run that is not there, a run index past 2^63 - 1,
     a negative one (-1, a drift's -5, and -10^20), step-halving on run 0
     or on the wider run, wider on the half-step run, and an estimate
-    whose half-step run has other lanes. Until verifier-W1 found it
-    (2026-09-30), a negative run was refused `malformed`;
-  - `accuracy-scope`: lane 3 of 3, and a lane past 2^63 - 1;
-  - `accuracy-slot`: slot 3 of 3, and slot 70,000.
+    whose half-step run has other lanes;
+  - `accuracy-scope`: lane 3 of 3, a lane past 2^63 - 1, and a negative
+    one: -1, -4 of 3 lanes, and -1 where the last lane holds +inf, which
+    is `accuracy-scope` and not `accuracy-finite`;
+  - `accuracy-slot`: slot 3 of 3, slot 70,000, and a negative one: -1,
+    -10 of a state of 9 elements, -1 before 0 in one term, and -1 on
+    lane 0 where the state's last element is +inf.
+  Until verifier-W1 and W1b found them (2026-09-30), a negative run,
+  lane or slot was refused `malformed`, and the golden writer read a
+  negative lane or slot by Python's index from the end.
 - Each of these leaves nothing behind.
 - After the runs, `accuracy-finite` (a NaN reached from +inf) and
   `width` (an element of 2^1023, a product x^2 with x = 2^-600, a

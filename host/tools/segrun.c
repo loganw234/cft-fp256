@@ -165,9 +165,9 @@
  *                      one before it (names in byte order)
  * and for an accuracy entry, before anything runs:
  *   malformed (2)      a method, label, run, lane or slot not in its
- *                      spelling (a run given negative, -1, is spelt, and
- *                      names no run: accuracy-run); a drift with no
- *                      quantity, no term or more
+ *                      spelling (a run, lane or slot given negative, -1,
+ *                      is spelt, and names none: accuracy-run, -scope,
+ *                      -slot); a drift with no quantity, no term or more
  *                      than 64; an estimate given a quantity or a term; a
  *                      coefficient not in its one spelling; a factor not
  *                      s<slot>, more than 8, or out of order; a value
@@ -177,8 +177,9 @@
  *                      them; an estimate on run 0,
  *                      on a run of the other kind, or on one whose lanes
  *                      or slots a lane are not run 0's
- *   accuracy-scope (7) a lane the run does not have
- *   accuracy-slot (7)  a slot the run's state does not have
+ *   accuracy-scope (7) a lane the run does not have, a negative one too
+ *   accuracy-slot (7)  a slot the run's state does not have, a negative
+ *                      one too
  * and after the runs, from the states read back:
  *   accuracy-finite (7) an element a value needs that is not finite
  *   width (3)          a value computed past the rule, in the page's
@@ -1544,6 +1545,19 @@ static int dec_sat(const char *s, uint64_t *out)
     return 1;
 }
 
+/* A negative run, lane or slot: a minus and a nonzero decimal in its one
+ * spelling (-0 and -01 spell no index, and stay malformed). It names no
+ * run, lane or slot, and cert.derive bounds each from below as from
+ * above (`not 0 <= i < n`; verifier-W1 and W1b, 2026-09-30), so it is
+ * held to the runs as an index past them is, and refused accuracy-run,
+ * -scope or -slot there. Its caller stores UINT64_MAX, which names none,
+ * and gives the index as given in the sentence. */
+static int dec_neg(const char *s)
+{
+    uint64_t v;
+    return s[0] == '-' && dec_sat(s + 1, &v) && v != 0;
+}
+
 /* A run as an entry reads it (cert_exact.h's cx_run). */
 static void run_shape_of(const run_spec *R, cx_run *s)
 {
@@ -1572,13 +1586,15 @@ static void refuse_cx(int st, size_t j, const char *why)
 /* A --term: the coefficient in its one spelling (the reader's order:
  * malformed, then width by its digits), then its factors, s<slot> each,
  * at most eight, in non-decreasing order. A slot is any decimal index:
- * one past the state is accuracy-slot, as cert.derive refuses it. */
+ * one past the state is accuracy-slot, as cert.derive refuses it, and so
+ * is a negative one (dec_neg), stored as UINT64_MAX; the order is the
+ * slots' as the golden writer is handed them, -1 before 0. */
 static void parse_term(const char *s, term_t *T, size_t j, size_t t)
 {
     size_t n = strlen(s);
     char *buf = (char *)xcalloc(n + 1, 1), *p, *comma, why[256];
-    int st;
-    uint64_t v;
+    int st, neg[MAX_FACTORS] = { 0 };
+    uint64_t v, mag[MAX_FACTORS] = { 0 };
     memcpy(buf, s, n);
     p = buf;
     comma = strchr(p, ',');
@@ -1599,20 +1615,33 @@ static void parse_term(const char *s, term_t *T, size_t j, size_t t)
         comma = strchr(p, ',');
         if (comma)
             *comma = 0;
-        if (p[0] != 's' || !dec_sat(p + 1, &v))
+        if (p[0] == 's' && dec_neg(p + 1)) {
+            dec_sat(p + 2, &v);
+            if (T->n < MAX_FACTORS) {
+                T->slot[T->n] = UINT64_MAX;     /* names no slot */
+                neg[T->n] = 1;
+                mag[T->n] = v;
+            }
+        } else if (p[0] != 's' || !dec_sat(p + 1, &v)) {
             refuse("malformed", "entry %lu term %lu: factor '%.40s' is not "
                    "s<slot>, the slot a decimal integer in its one spelling",
                    (unsigned long)j, (unsigned long)t, p);
-        if (T->n < MAX_FACTORS)
+        } else if (T->n < MAX_FACTORS) {
             T->slot[T->n] = v;
+            neg[T->n] = 0;
+            mag[T->n] = v;
+        }
         T->n++;
     }
     if (T->n > MAX_FACTORS)
         refuse("malformed", "entry %lu term %lu: a term has at most %d "
                "factors, and this one has %u", (unsigned long)j,
                (unsigned long)t, MAX_FACTORS, T->n);
+    /* the slots as integers: -5 before -1, -1 before 0 */
     for (n = 1; n < T->n; n++)
-        if (T->slot[n] < T->slot[n - 1])
+        if (neg[n] != neg[n - 1] ? neg[n]
+                                 : (neg[n] ? mag[n] > mag[n - 1]
+                                           : mag[n] < mag[n - 1]))
             refuse("malformed", "entry %lu term %lu: a term's factors are in "
                    "non-decreasing slot order", (unsigned long)j,
                    (unsigned long)t);
@@ -1684,6 +1713,39 @@ static void parse_value(const char *s, value_t *v, size_t j)
     free(buf);
 }
 
+/* cx_entry_check refuses the first slot past the state, terms in order
+ * and each term's factors in order, as cert.derive does; where that slot
+ * was given negative (stored as UINT64_MAX), the sentence names it as
+ * given, as cert.derive's does, from the --term it came in. */
+static void slot_as_given(const entry_spec *X, const cx_run *u, char *why,
+                          size_t cap)
+{
+    const entry_t *E = &X->E;
+    unsigned t, k, i;
+    for (t = 0; t < E->n_terms; t++)
+        for (k = 0; k < E->terms[t].n && k < MAX_FACTORS; k++) {
+            const char *f = X->term_s[t];
+            size_t len;
+            if (E->terms[t].slot[k] < u->nslots)
+                continue;
+            for (i = 0; i <= k && f; i++) {     /* factor k: after comma k+1 */
+                f = strchr(f, ',');
+                if (f)
+                    f++;
+            }
+            if (f && f[0] == 's' && f[1] == '-') {
+                len = strcspn(f + 1, ",");
+                snprintf(why, cap, "a term names slot %.*s%s; run %llu's "
+                         "state has %lu slots a lane",
+                         (int)(len > 40 ? 40 : len), f + 1,
+                         len > 40 ? "..." : "",
+                         (unsigned long long)E->uses,
+                         (unsigned long)u->nslots);
+            }
+            return;
+        }
+}
+
 /* Entry j, checked before anything is made: its words and spellings as
  * the reader holds them, then against the runs in cert.derive's order
  * (the run it uses, that run's kind and shape, the lane, the slots). And
@@ -1697,7 +1759,7 @@ static void check_entry(entry_spec *X, size_t j, const run_spec *runs,
     uint64_t v, need[2][2];
     cx_run m, u;
     size_t t;
-    int k, st, negative;
+    int k, st, negative, neg_lane;
 
     for (k = 0; k < 3 && strcmp(X->method_s, METHOD_NAME[k]) != 0; k++)
         ;
@@ -1708,25 +1770,26 @@ static void check_entry(entry_spec *X, size_t j, const run_spec *runs,
     if (!X->uses_s || !X->scope_s || !X->value_s)
         refuse("usage", "entry %lu (%s) needs --uses, --scope and --value",
                (unsigned long)j, METHOD_NAME[k]);
-    /* The run: a decimal in its one spelling, or a negative one, a minus
-     * and a nonzero decimal in its one spelling. A negative index names no
-     * run, and the golden writer handed one refuses it accuracy-run, at
-     * cert.derive's first check (`not 0 <= r < len(runs)`), before
-     * encode's reader could call it malformed: so it is held to the
-     * runs below, as an index past them is (verifier-W1, 2026-09-30: it
-     * was refused malformed). -0 and -01 spell no index: malformed. */
-    negative = X->uses_s[0] == '-' && dec_sat(X->uses_s + 1, &v) && v != 0;
+    /* The run and the lane: a decimal in its one spelling, or a negative
+     * one (dec_neg), which names none. The golden writer handed one
+     * refuses it at cert.derive's check of that index (accuracy-run,
+     * accuracy-scope), before encode's reader could call it malformed: so
+     * it is held to the runs below, as an index past them is (verifier-W1
+     * and W1b, 2026-09-30: both were refused malformed). -0 and -01 spell
+     * no index: malformed. */
+    negative = dec_neg(X->uses_s);
     if (!negative && !dec_sat(X->uses_s, &v))
         refuse("malformed", "entry %lu: --uses '%.40s' is not a run index, a "
                "decimal integer in its one spelling", (unsigned long)j,
                X->uses_s);
     E->uses = negative ? UINT64_MAX : v;
+    neg_lane = !strncmp(X->scope_s, "lane:", 5) && dec_neg(X->scope_s + 5);
     if (!strcmp(X->scope_s, "max-lanes")) {
         E->has_lane = 0;
-    } else if (!strncmp(X->scope_s, "lane:", 5) &&
-               dec_sat(X->scope_s + 5, &v)) {
+    } else if (neg_lane || (!strncmp(X->scope_s, "lane:", 5) &&
+                            dec_sat(X->scope_s + 5, &v))) {
         E->has_lane = 1;
-        E->lane = v;
+        E->lane = neg_lane ? UINT64_MAX : v;
     } else {
         refuse("malformed", "entry %lu: --scope '%.40s' is max-lanes, or "
                "lane:I with I a lane index, a decimal integer in its one "
@@ -1761,11 +1824,18 @@ static void check_entry(entry_spec *X, size_t j, const run_spec *runs,
         run_shape_of(&runs[E->uses], &u);
     st = cx_entry_check(E, n_runs, &m, E->uses < n_runs ? &u : NULL, why,
                         sizeof why);
-    if (st == CX_RUN && negative)       /* the run as given, not saturated */
+    /* a negative index as given, not as stored */
+    if (st == CX_RUN && negative)
         snprintf(why, sizeof why, "entry uses run %.40s%s, and the "
                  "certificate has %llu", X->uses_s,
                  strlen(X->uses_s) > 40 ? "..." : "",
                  (unsigned long long)n_runs);
+    if (st == CX_SCOPE && neg_lane)
+        snprintf(why, sizeof why, "lane %.40s%s of a run of %llu lanes",
+                 X->scope_s + 5, strlen(X->scope_s + 5) > 40 ? "..." : "",
+                 (unsigned long long)u.lanes);
+    if (st == CX_SLOT)
+        slot_as_given(X, &u, why, sizeof why);
     refuse_cx(st, j, why);
 
     cx_entry_needs(E, &m, &u, need);

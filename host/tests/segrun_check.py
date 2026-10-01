@@ -118,7 +118,8 @@ Then:
      spelling (malformed, and width by a coefficient's digits); the
      entry against the runs in cert.derive's order (accuracy-run, among
      them a negative run and an estimate whose run has other lanes than
-     run 0; accuracy-scope; accuracy-slot) - each before anything is made,
+     run 0; accuracy-scope and accuracy-slot, among them a negative lane
+     and a negative slot) - each before anything is made,
      nothing left behind; and the values after the runs (accuracy-finite,
      width at an element, a product, a partial sum, an enclosure's end),
      each leaving the boundary files, said so. The page's orders, each
@@ -1471,19 +1472,18 @@ def hold_entries(work, l63, flag):
          ["--entry", "sideways"] + sh[2:], None, 1),
         ("--uses '01'", "malformed", "l63",
          sh[:3] + ["01"] + sh[4:], None, 1),
-        # a minus spells a negative run (accuracy-run, below) only before
-        # a nonzero index in its one spelling
+        # a minus spells a negative run, lane or slot (accuracy-run, -scope,
+        # -slot, below) only before a nonzero index in its one spelling
         ("--uses '-0'", "malformed", "l63", sh[:3] + ["-0"] + sh[4:], None,
          1),
         ("--uses '-01'", "malformed", "l63", sh[:3] + ["-01"] + sh[4:], None,
          1),
-        # a negative lane or slot: the golden writer reads it by Python's
-        # negative index, and its encode refuses the line it would write
-        ("--scope 'lane:-1'", "malformed", "l63",
-         sh[:5] + ["lane:-1"] + sh[6:], [E("step-halving", 1, -1, "exact")],
-         1),
-        ("a factor 's-1'", "malformed", "l63", drift("1/1,s-1"),
-         [D(((Fraction(1), (-1,)),))], 1),
+        ("--scope 'lane:-0'", "malformed", "l63",
+         sh[:5] + ["lane:-0"] + sh[6:], None, 1),
+        ("--scope 'lane:-01'", "malformed", "l63",
+         sh[:5] + ["lane:-01"] + sh[6:], None, 1),
+        ("a factor 's-0'", "malformed", "l63", drift("1/1,s-0"), None, 1),
+        ("a factor 's-01'", "malformed", "l63", drift("1/1,s-01"), None, 1),
         ("--scope 'lane:01'", "malformed", "l63",
          sh[:5] + ["lane:01"] + sh[6:], None, 1),
         ("--scope 'lanes'", "malformed", "l63",
@@ -1573,6 +1573,30 @@ def hold_entries(work, l63, flag):
          [D(((Fraction(1), (3,)),))], 1),
         ("slot 70000", "accuracy-slot", "l63", drift("1/1,s70000"),
          [D(((Fraction(1), (70000,)),))], 1),
+        # a negative lane or slot names none either: cert.derive bounds
+        # both from below too (the lead's decision, 2026-09-30; verifier-
+        # W1b: it read one by Python's index from the end - another lane's
+        # value, an IndexError, or another lane's accuracy-finite)
+        ("lane:-1, a negative lane", "accuracy-scope", "l63",
+         sh[:5] + ["lane:-1"] + sh[6:], [E("step-halving", 1, -1, "exact")],
+         1),
+        ("lane:-4 of 3 lanes", "accuracy-scope", "l63",
+         drift("1/1,s0", scope="lane:-4"),
+         [D(((Fraction(1), (0,)),), lane=-4)], 1),
+        ("lane:-1 where the last lane holds +inf: accuracy-scope, not "
+         "accuracy-finite", "accuracy-scope", "flag-inf",
+         drift("1/1,s1", scope="lane:-1"),
+         [D(((Fraction(1), (1,)),), lane=-1)], 1),
+        ("a factor s-1, a negative slot", "accuracy-slot", "l63",
+         drift("1/1,s-1"), [D(((Fraction(1), (-1,)),))], 1),
+        ("a factor s-10 of a state of 9 elements", "accuracy-slot", "l63",
+         drift("1/1,s-10"), [D(((Fraction(1), (-10,)),))], 1),
+        ("s-1 before s0, in order", "accuracy-slot", "l63",
+         drift("1/1,s-1,s0"), [D(((Fraction(1), (-1, 0)),))], 1),
+        ("s-1 on lane 0 where the state's last element is +inf: "
+         "accuracy-slot, not accuracy-finite", "accuracy-slot", "flag-inf",
+         drift("1/1,s-1", scope="lane:0"),
+         [D(((Fraction(1), (-1,)),), lane=0)], 1),
         # after the runs: the values, in the page's order
         ("an element that is not finite (flagstep's x from +inf: NaN)",
          "accuracy-finite", "flag-inf", drift("1/1,s1"),

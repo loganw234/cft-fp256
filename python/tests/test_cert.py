@@ -1526,6 +1526,69 @@ def test_an_estimate_needs_run_0s_lanes_and_slots(lor):
     assert (e.run, e.segment, e.entry) == (0, S, 0)
 
 
+def test_a_negative_lane_or_slot_names_none(lor):
+    """A lane and a slot are indices from 0, as a run is: derive() bounds
+    each from below too, a negative lane `accuracy-scope` and a negative
+    slot `accuracy-slot`, where their upper checks stand - after the run,
+    its kind and its shape, the lane before the slots, and both before
+    any value is computed. It read a negative one by Python's index from
+    the end: another lane's value, an IndexError past the state, or
+    `accuracy-finite` from a lane the entry did not name (the lead's
+    decision, 2026-09-30; verifier-W1b). cft-segrun is handed one on its
+    command line; an audit never is, since the reader refuses a
+    certificate that spells one."""
+    e0, e1, e2, e3 = lor.entries
+    runs, shapes, ends = lor.runs, lor.shapes, lor.ends
+    assert len(lor.st[0][0]) == LANES * 3 == 9      # a state of 9 elements
+    # lane -1 on finite data, which read lane 2: a drift, and each estimate
+    for bad in (dataclasses.replace(e3, lane=-1),
+                dataclasses.replace(e0, lane=-1),
+                dataclasses.replace(e1, lane=-1)):
+        e = refused("accuracy-scope", cert.derive, bad, runs, shapes, ends)
+        assert e.message == f"lane -1 of a run of {LANES} lanes", e.message
+    # lane -4 of 3, past the state from its end: an IndexError
+    for bad in (dataclasses.replace(e3, lane=-LANES - 1),
+                dataclasses.replace(e0, lane=-LANES - 1)):
+        refused("accuracy-scope", cert.derive, bad, runs, shapes, ends)
+    # slot -1 on lane 2; slot -10 of the 9-element state over the lanes
+    # (lane 0's read was an IndexError); and -1 before 0 in one term,
+    # its factors in non-decreasing order
+    for bad in (dataclasses.replace(e3, terms=((Fraction(1), (-1,)),)),
+                dataclasses.replace(e2, terms=((Fraction(1), (-10,)),)),
+                dataclasses.replace(e3, terms=SQUARES +
+                                    ((Fraction(1), (-1, 0)),))):
+        e = refused("accuracy-slot", cert.derive, bad, runs, shapes, ends)
+        assert e.message.startswith("a term names slot -"), e.message
+    # the order: the run that is not there, and an estimate's run of the
+    # wrong kind, before a negative lane; the lane before a negative slot
+    refused("accuracy-run", cert.derive,
+            dataclasses.replace(e3, uses=len(runs), lane=-1), runs, shapes,
+            ends)
+    refused("accuracy-run", cert.derive,
+            dataclasses.replace(e0, uses=0, lane=-1), runs, shapes, ends)
+    refused("accuracy-scope", cert.derive,
+            dataclasses.replace(e3, lane=-1, terms=((Fraction(1), (-1,)),)),
+            runs, shapes, ends)
+    # and before any value: +inf in the last lane, which lane -1, and
+    # slot -1 on lane 0 (its state[-1]), used to read
+    init = list(lor.init)
+    init[(LANES - 1) * 3] = sf.inf_bits(F64)
+    st, rs = cert.run_chain(lor.img, lor.bank, init, 1)
+    one = ((cert.certify_run("main", lor.img, lor.bank, SALT, st, rs,
+                             steps=100),),
+           [(F64, 3)], {(0, 0): st[0], (0, 1): st[1]})
+    refused("accuracy-finite", cert.derive,
+            dataclasses.replace(e3, lane=LANES - 1), *one)   # the control
+    refused("accuracy-scope", cert.derive, dataclasses.replace(e3, lane=-1),
+            *one)
+    refused("accuracy-slot", cert.derive,
+            dataclasses.replace(e3, lane=0, terms=((Fraction(1), (-1,)),)),
+            *one)
+    # the fixture's entries keep their values
+    assert [cert.derive(e, runs, shapes, ends) for e in lor.entries] == \
+        list(lor.values)
+
+
 def test_an_exact_value_needs_a_finite_state(lor):
     """A lane that holds a NaN has no exact quantity: refused by name,
     never approximated. (Lorenz-63 carries a NaN along faithfully.)"""
