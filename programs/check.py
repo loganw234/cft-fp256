@@ -1757,10 +1757,11 @@ def check_long_lines(args, tmp):
 # field must be reached from both sides (some case accepted, some
 # refused), or the arm says which was not.
 #
-# One exception, held on cft-asm's side only: asm.py writes a NEGATIVE
-# `.scratch in` or `out` count's low sixteen bits (-1 is 65535, at exit
-# 0, wherever the depth allows; the D1 ledger records it for the lead).
-# cft-asm must refuse each such count, as no sixteen-bit count.
+# Negative `.scratch in` and `out` counts are held like every other
+# case. Until 2026-10-01 asm.py wrote their low sixteen bits (-1 as
+# 65535, at exit 0, wherever the depth allowed), and this arm held them
+# on cft-asm's side only; asm.py refuses them now, and both must refuse
+# them for the same reason.
 
 _NUM_EDGES = (0, 1, (1 << 32) - 1, 1 << 32, (1 << 32) + 1,
               (1 << 64) - 1, 1 << 64, (1 << 64) + 1)
@@ -1772,57 +1773,55 @@ _NUM_NEGATIVES = ("-1", "-5", "-4294967295", "-4294967296",
 _NUM_HEAD = ".format fp64\n.deposits 1\n"
 _NUM_DEEP = _NUM_HEAD + ".scratch 16777216\n"
 
-# (field, its own bounds, the source around a value, whether a negative
-# is held on cft-asm's side only)
+# (field, its own bounds, the source around a value)
 _NUM_SITES = (
     (".deposits", (1 << 20,),
-     lambda v: f".format fp64\n.deposits {v}\ndeposit r0\nhalt\n", False),
+     lambda v: f".format fp64\n.deposits {v}\ndeposit r0\nhalt\n"),
     (".scratch N", (1 << 24, 1 << 25),
-     lambda v: _NUM_HEAD + f".scratch {v}\nstl r0, 0\nhalt\n", False),
+     lambda v: _NUM_HEAD + f".scratch {v}\nstl r0, 0\nhalt\n"),
     (".scratch in, depth 256", (256, 0xFFFF),
-     lambda v: _NUM_HEAD + f".scratch in {v}\nhalt\n", True),
+     lambda v: _NUM_HEAD + f".scratch in {v}\nhalt\n"),
     (".scratch out, depth 256", (256, 0xFFFF),
-     lambda v: _NUM_HEAD + f".scratch out {v}\nhalt\n", True),
+     lambda v: _NUM_HEAD + f".scratch out {v}\nhalt\n"),
     (".scratch in, depth 2^24", (0xFFFF,),
-     lambda v: _NUM_DEEP + f".scratch in {v}\nhalt\n", True),
+     lambda v: _NUM_DEEP + f".scratch in {v}\nhalt\n"),
     (".scratch out, depth 2^24", (0xFFFF,),
-     lambda v: _NUM_DEEP + f".scratch out {v}\nhalt\n", True),
+     lambda v: _NUM_DEEP + f".scratch out {v}\nhalt\n"),
     (".slot", (0xFFFFFF,),
-     lambda v: _NUM_DEEP + f".slot S = {v}\nstl r0, S\nhalt\n", False),
+     lambda v: _NUM_DEEP + f".slot S = {v}\nstl r0, S\nhalt\n"),
     (".slot, never used", (0xFFFFFF,),
-     lambda v: _NUM_DEEP + f".slot S = {v}\nhalt\n", False),
+     lambda v: _NUM_DEEP + f".slot S = {v}\nhalt\n"),
     ("stl's slot", (0xFFFFFF,),
-     lambda v: _NUM_DEEP + f"stl r0, {v}\nhalt\n", False),
+     lambda v: _NUM_DEEP + f"stl r0, {v}\nhalt\n"),
     ("ldl's slot", (0xFFFFFF,),
-     lambda v: _NUM_DEEP + f"ldl r3, {v}\nhalt\n", False),
+     lambda v: _NUM_DEEP + f"ldl r3, {v}\nhalt\n"),
     ("repeat", ((1 << 32) - 1,),
-     lambda v: _NUM_HEAD + f"repeat {v}\nendrep\nhalt\n", False),
+     lambda v: _NUM_HEAD + f"repeat {v}\nendrep\nhalt\n"),
     ("opN", (255,),
-     lambda v: _NUM_HEAD + f"op{v} r3, r0, r1, r2\nhalt\n", False),
+     lambda v: _NUM_HEAD + f"op{v} r3, r0, r1, r2\nhalt\n"),
     ("rN, an operand", (31,),
-     lambda v: _NUM_HEAD + f"deposit r{v}\nhalt\n", False),
+     lambda v: _NUM_HEAD + f"deposit r{v}\nhalt\n"),
     ("rN, a .const name", (31, 100000),
-     lambda v: _NUM_HEAD + f".const r{v} = 1\nhalt\n", False),
+     lambda v: _NUM_HEAD + f".const r{v} = 1\nhalt\n"),
     ("rN, a .reg name", (31, 100000),
-     lambda v: _NUM_HEAD + f".reg r{v} = r1\nhalt\n", False),
+     lambda v: _NUM_HEAD + f".reg r{v} = r1\nhalt\n"),
     ("rN, a .slot name", (31, 100000),
-     lambda v: _NUM_HEAD + f".slot r{v} = 1\nhalt\n", False),
+     lambda v: _NUM_HEAD + f".slot r{v} = 1\nhalt\n"),
     (".reg's register", (31,),
-     lambda v: _NUM_HEAD + f".reg X = r{v}\ndeposit X\nhalt\n", False),
+     lambda v: _NUM_HEAD + f".reg X = r{v}\ndeposit X\nhalt\n"),
 )
 
 
 def _numeric_cases():
-    """(field, the value as written, source, held on cft-asm's side only)
-    for every case of the numeric arm."""
-    for site, bounds, make, c_only in _NUM_SITES:
+    """(field, the value as written, source) for every case of the
+    numeric arm."""
+    for site, bounds, make in _NUM_SITES:
         values = set(_NUM_EDGES)
         for b in bounds:
             values.update((b - 1, b, b + 1))
-        for v in [str(x) for x in sorted(values)] + list(_NUM_SPELLINGS):
-            yield site, v, make(v), False
-        for v in _NUM_NEGATIVES:
-            yield site, v, make(v), c_only
+        for v in ([str(x) for x in sorted(values)] + list(_NUM_SPELLINGS)
+                  + list(_NUM_NEGATIVES)):
+            yield site, v, make(v)
 
 
 def _num_reason(msg, name):
@@ -1837,9 +1836,9 @@ def _num_reason(msg, name):
 def check_numeric_fields(args, tmp):
     src = tmp / "num.cfta"
     out = tmp / "num.cftp"
-    n = same = both = held = 0
+    n = same = both = 0
     sides = {}
-    for site, v, text, c_only in _numeric_cases():
+    for site, v, text in _numeric_cases():
         _write_lf(src, text)
         if out.exists():
             out.unlink()
@@ -1847,13 +1846,6 @@ def check_numeric_fields(args, tmp):
         c_bytes = out.read_bytes() if r.returncode == 0 else None
         c_why = _num_reason(r.stderr, src.name) if r.returncode else None
         tag = f"numbers: {site} = {v}"
-        if c_only:
-            if c_bytes is not None or "is a sixteen-bit count" not in c_why:
-                bad(tag, f"cft-asm {'wrote an image' if c_bytes else c_why}"
-                         f" - a count below zero must be refused")
-                return
-            held += 1
-            continue
         try:
             py, py_why = asm.assemble(text, str(src)), None
         except asm.AsmError as exc:
@@ -1890,8 +1882,7 @@ def check_numeric_fields(args, tmp):
         return
     ok(f"numbers: {n} cases over {len(_NUM_SITES)} fields, both "
        f"assemblers agree", f"{same} the same bytes, {both} refused by "
-       f"both for the same reason; and {held} negative scratch counts "
-       f"refused by cft-asm (asm.py writes their low sixteen bits)")
+       f"both for the same reason")
 
 
 # ================= the ODE rows (programs/gen_odes.py) ===================

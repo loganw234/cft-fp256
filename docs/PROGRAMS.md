@@ -192,9 +192,9 @@ gave max_deposits 1 at exit 0 where `asm.py` refuses it.
 Known differences, recorded rather than fixed (2026-10-01), each loud:
 `asm.py` accepts, and `cft-asm` refuses by name, a line ended by a
 lone carriage return or a form feed, a name of 64 characters or more,
-and a number written in non-ASCII digits. And `asm.py` accepts a
-negative `.scratch in` or `out` count and writes its low sixteen bits
-(-1 is 65535), which `cft-asm` refuses; that one is `asm.py`'s to fix.
+and a number written in non-ASCII digits. (A negative `.scratch in` or
+`out` count is refused by both: until 2026-10-01 `asm.py` wrote its
+low sixteen bits, -1 as 65535, at exit 0.)
 
 **One thing neither carries: an arity table from libcft.** Which
 operand FIELDS an opcode reads is not in `cft_op_name`, in

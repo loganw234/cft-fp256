@@ -1053,6 +1053,16 @@ class _Asm:
             self.fail(".scratch takes a depth, `strict`, or `in N`, or `out M`")
         which = args[0].lower()
         v = _parse_uint(args[1], f".scratch {which}")
+        # Below zero too (2026-10-01). _parse_uint takes a sign, as
+        # int() does, and run() packs each count into its sixteen bits
+        # with a mask - so until this date -1 was written as 65535 and
+        # -4294967296 as 0, at exit 0, wherever the depth allowed it: a
+        # silent wrong image (the language round's D1 found it; cft-asm
+        # refused both). The model refuses such a count as well
+        # (seq.py's validate).
+        if v < 0:
+            self.fail(f".scratch {which} is a sixteen-bit count, and {v} "
+                      f"is below zero")
         if v > SCRATCH_IO_MAX:
             self.fail(f".scratch {which} is a sixteen-bit count, at most "
                       f"{SCRATCH_IO_MAX}")

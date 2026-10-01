@@ -1224,10 +1224,14 @@ static void assemble_line(program *P, char *line)
                 number v;
                 need_number(tok[2], is_in ? ".scratch in" : ".scratch out",
                             &v);
-                /* Below zero too: no count is. (asm.py, at 2026-10-01,
-                 * writes such a count's low sixteen bits instead; the
-                 * language round's D1 ledger records it for the lead.) */
-                if (v.neg || v.big || v.mag > SCRATCH_IO_MAX)
+                /* Below zero, as asm.py refuses it (since 2026-10-01;
+                 * before, asm.py wrote such a count's low sixteen bits,
+                 * -1 as 65535). */
+                if (v.neg)
+                    diel(".scratch %s is a sixteen-bit count, and %s is "
+                         "below zero", is_in ? "in" : "out",
+                         number_text(&v, tok[2]));
+                if (v.big || v.mag > SCRATCH_IO_MAX)
                     diel(".scratch %s is a sixteen-bit count, at most %u",
                          is_in ? "in" : "out", (unsigned)SCRATCH_IO_MAX);
                 if (is_in) {

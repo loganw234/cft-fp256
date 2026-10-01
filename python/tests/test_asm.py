@@ -862,6 +862,46 @@ def test_a_scratch_io_count_past_the_declared_depth_is_refused():
             "sixteen-bit count")
 
 
+# A depth that holds the largest count, so only the count's own bounds
+# are under test below.
+_DEEP_SCRATCH = ".format fp64\n.deposits 1\n.scratch 65536\n"
+
+
+@pytest.mark.parametrize("which", ["in", "out"])
+@pytest.mark.parametrize("v", [-1, -4294967296])
+def test_a_scratch_io_count_below_zero_is_refused(which, v):
+    """Refused by name (2026-10-01). Until then do_scratch held a count
+    only to 65535, and run() packed each into its sixteen bits with a
+    mask, so -1 was written as 65535 and -4294967296 as 0, at exit 0,
+    wherever the depth allowed it - a silent wrong image in the
+    reference for the text form (the language round's D1 found it;
+    cft-asm refused both)."""
+    refuses(_DEEP_SCRATCH + f".scratch {which} {v}\nhalt\n",
+            f".scratch {which} is a sixteen-bit count, and {v} is below "
+            f"zero")
+
+
+@pytest.mark.parametrize("which", ["in", "out"])
+@pytest.mark.parametrize("v", [0, 65535])
+def test_a_scratch_io_count_is_written_as_itself_to_its_bound(which, v):
+    """The bounds either side of the refusals: 0 and the largest count,
+    65535, are each written into their half of header word 7 as
+    themselves."""
+    image = asm.assemble(_DEEP_SCRATCH + f".scratch {which} {v}\nhalt\n",
+                         "<test>")
+    img = asm.Image.from_bytes(image)
+    assert img.flags == asm.FLAG_SCRATCH_IO
+    assert img.scratch_io == v << (0 if which == "in" else 16)
+    assert int.from_bytes(image[28:32], "little") == img.scratch_io
+
+
+@pytest.mark.parametrize("which", ["in", "out"])
+def test_a_scratch_io_count_one_past_sixteen_bits_is_refused(which):
+    """65536 does not fit a half of the word, whatever the depth."""
+    refuses(_DEEP_SCRATCH + f".scratch {which} 65536\nhalt\n",
+            f".scratch {which} is a sixteen-bit count, at most 65535")
+
+
 def test_the_reserved_flag_bits_after_revision_four():
     """Revision 4 took bit 2 for SCRATCH_STRICT, so the first bit this
     assembler cannot read moved up again, to 3.
