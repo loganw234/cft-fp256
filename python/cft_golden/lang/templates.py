@@ -79,3 +79,39 @@ def _load():
 # {integrator: [Stmt]} - each a `let` or `next` over the names above.
 TEMPLATES = _load()
 assert tuple(TEMPLATES) == FLOW_INTEGRATORS
+
+
+def _label_prefixes():
+    """Every prefix a label of an expanded step can carry: each
+    template's lets (k1, Y2, Q1 ...) and its inline calls' names (f1, v1,
+    a1, v2), counted as the checker's expansion counts them. A tangent
+    vector may not be named after one: `Y2.x` would be both rk4's stage
+    and the tangent of x (docs/LANGUAGE.md, "The variational equations")."""
+    from .syntax import Bin, Call
+    out = set()
+    for body in TEMPLATES.values():
+        calls = {}
+
+        def walk(e, bind=None):
+            if isinstance(e, Call) and e.name in ("f", "v", "a"):
+                walk(e.args[0])
+                calls[e.name] = calls.get(e.name, 0) + 1
+                out.add(bind or f"{e.name}{calls[e.name]}")
+            elif isinstance(e, Call):
+                for x in e.args:
+                    walk(x)
+            elif isinstance(e, Bin):
+                walk(e.left)
+                walk(e.right)
+        for st in body:
+            bind = None
+            if (st.kind == "let" and isinstance(st.expr, Call)
+                    and st.expr.name in ("f", "v", "a")):
+                bind = st.target.name
+            walk(st.expr, bind)
+            if st.kind == "let":
+                out.add(st.target.name)
+    return frozenset(out)
+
+
+LABEL_PREFIXES = _label_prefixes()

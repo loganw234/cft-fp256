@@ -1,0 +1,15 @@
+; Lorenz (1963) with its variational equations: lorenz63-rk4-fp64 and one
+; tangent vector, stepped beside the state by the same program. The
+; tangent is derived, never written (docs/LANGUAGE.md, "The variational
+; equations"); the `tangent` stage reads Lorenz-63's largest Lyapunov
+; exponent from it (programs/tangent_check.py).
+system lorenz63
+format fp64
+round  rne
+state  x, y, z
+tangent v
+param  sigma = 10, rho = 28, beta = 8/3
+d/dt x = sigma * (y - x)
+d/dt y = fma(x, rho - z, -y)
+d/dt z = fma(x, y, -(beta * z))
+step   rk4, h = 1/100

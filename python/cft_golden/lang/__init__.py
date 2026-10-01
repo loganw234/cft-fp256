@@ -11,10 +11,13 @@ integrator. This package is the language's definition of correct:
                         and return it with its step graph
   StepGraph             the checked form of one step - the input the
                         interpreter, the renderers and the compiler (L2)
-                        read; canonical bytes, version 1
+                        read; canonical bytes, version 1, or 2 with the
+                        variational equations (L3): the step's tangent,
+                        derived node by node (tangent.py)
   run                   the reference interpreter: the step graph through
                         the golden softfloat, one operation a node, any
-                        number of lanes, S steps; states and FLAGS
+                        number of lanes, S steps; states and FLAGS, and a
+                        system's tangent vectors beside its state
   render_canonical      the intention-out: the program in the language's
   render_math           canonical form, and the equations in conventional
                         notation, both regenerated from the step graph

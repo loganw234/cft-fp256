@@ -23,8 +23,17 @@ A number is read at any length: Python's int() stops at 4,300 digits,
 and a constant may have more (verifier-VL1), so a long one is read with
 the limit lifted for that one conversion, as the golden model's
 chars._int_from_digits does.
+
+A system with tangent vectors (L3) prints, for each vector, its
+variational equations (d(v.x)/dt = ...) or a map's tangent lines
+(v.x ↦ ...), and a flow's tangent step: the same method on δY, where
+Df(Z)·W is the variational right-hand sides at the state Z along the
+tangent W. They are read here too, and evaluated exactly: a vector is
+bound by the ORDER its sections appear in, its components by the order
+of its δY line or of its equations - never by the glyph.
 """
 
+import re
 import sys
 from fractions import Fraction
 
@@ -83,11 +92,18 @@ def _tokens(text):
             continue
         if c.isalpha() or c == "_":
             j = i
-            while i < n and (text[i].isalnum() or text[i] == "_"):
-                i += 1
-            if i < n and text[i] == "[" and text[i + 1:i + 2].isdigit():
-                k = text.index("]", i)
-                i = k + 1
+            while True:
+                while i < n and (text[i].isalnum() or text[i] == "_"):
+                    i += 1
+                if i < n and text[i] == "[" and text[i + 1:i + 2].isdigit():
+                    k = text.index("]", i)
+                    i = k + 1
+                # a dotted name - a tangent's v.x, v.r - is one name
+                if i + 1 < n and text[i] == "." and \
+                        (text[i + 1].isalpha() or text[i + 1] == "_"):
+                    i += 1
+                    continue
+                break
             out.append(("name", text[j:i]))
             continue
         out.append(("op", c))
@@ -204,9 +220,36 @@ class Vec:
         return Vec(self.names, [fn(self.v[k], other) for k in self.names])
 
 
+class Op:
+    """Df(Z), Dv(Z) or Da(Z): the variational right-hand sides of one
+    tangent vector at the state Z, a linear map waiting for its tangent;
+    `scale` is a constant it has been multiplied by (h·Df(Y)·δY)."""
+
+    def __init__(self, form, fn, z, env, scale=Fraction(1)):
+        self.form, self.fn, self.z, self.env = form, fn, z, env
+        self.scale = scale
+
+    def scaled(self, s):
+        return Op(self.form, self.fn, self.z, self.env, self.scale * s)
+
+    def apply(self, w):
+        out = self.form._tangent_call(self.fn, self.z, w, self.env)
+        return out.map2(self.scale, lambda x, s: x * s)
+
+
 def _arith(op, a, b):
     fn = {"add": lambda x, y: x + y, "sub": lambda x, y: x - y,
           "mul": lambda x, y: x * y, "div": lambda x, y: x / y}[op]
+    if isinstance(a, Op) or isinstance(b, Op):
+        if op != "mul":
+            raise MathFormError(f"{op} of a tangent's map")
+        if isinstance(a, Op) and isinstance(b, Vec):
+            return a.apply(b)
+        if isinstance(b, Op) and not isinstance(a, (Op, Vec)):
+            return b.scaled(a)
+        if isinstance(a, Op) and not isinstance(b, (Op, Vec)):
+            return a.scaled(b)
+        raise MathFormError("a tangent's map applied to no tangent")
     if isinstance(a, Vec):
         return a.map2(b, fn)
     if isinstance(b, Vec):
@@ -216,20 +259,42 @@ def _arith(op, a, b):
     return fn(a, b)
 
 
+_TFIELD = "the variational equations of the tangent vector "
+_TMAP = "the tangent of the map, along the tangent vector "
+_TSTEP = re.compile(r"the tangent (\S+)'s step: ")
+
+
 class MathForm:
     def __init__(self, text):
         self.params, self.lanes = [], []
-        self.where = {}             # name -> tree
+        self.where = {}             # name -> tree (tangent lets: v.r)
         self.equations = {}         # component -> tree
         self.step_lines = []        # ("def", name, tree) or ("map", name, tree)
         self.vectors = {}           # Y, Q, P -> [component]
         self.h = None
         self.kind = None
+        # each tangent vector, in the order its sections appear
+        self.tvectors = []
+        self.tangent_eqs = {}       # vector -> {component: tree}
+        self.tangent_map = {}       # vector -> [(component, tree)]
+        self.tangent_steps = {}     # vector -> [("def"|"map", name, tree)]
+        self.tangent_vecs = {}      # vector -> {δY, δQ, δP: [component]}
         section = None
         for raw in text.splitlines():
             if not raw.strip():
                 continue
             if not raw.startswith("  "):
+                m = _TSTEP.match(raw)
+                if raw.startswith(_TFIELD) or raw.startswith(_TMAP):
+                    vec = raw.split(" ")[-1]
+                    section = ("tfield" if raw.startswith(_TFIELD)
+                               else "tmap", vec)
+                    self._vector(vec)
+                    continue
+                if m:
+                    section = ("tstep", m.group(1))
+                    self._vector(m.group(1))
+                    continue
                 head = raw.split(",")[0].split(":")[0]
                 section = {"parameters": "params",
                            "lane parameters": "lanes", "where": "where",
@@ -237,6 +302,9 @@ class MathForm:
                            "one step": "step"}.get(head)
                 continue
             line = raw.strip()
+            if isinstance(section, tuple):
+                self._tangent_line(section, line)
+                continue
             if section == "params" or section == "lanes":
                 name = line.split(" = ")[0]
                 (self.params if section == "params" else self.lanes).append(
@@ -265,6 +333,47 @@ class MathForm:
                     self.step_lines.append(("def", name, _Expr(rhs).tree))
         if self.kind is None:
             self.kind = "map"
+
+    def _vector(self, vec):
+        if vec not in self.tvectors:
+            self.tvectors.append(vec)
+            self.tangent_eqs[vec] = {}
+            self.tangent_map[vec] = []
+            self.tangent_steps[vec] = []
+            self.tangent_vecs[vec] = {}
+
+    def _plain(self, vec, name):
+        """v.x -> x: a tangent component as the state's component."""
+        if not name.startswith(vec + "."):
+            raise MathFormError(f"{name} is not a component of {vec}")
+        return name[len(vec) + 1:]
+
+    def _tangent_line(self, section, line):
+        kind, vec = section
+        if kind == "tstep":
+            if f" {MAPSTO} " in line:
+                name, rhs = line.split(f" {MAPSTO} ", 1)
+                self.tangent_steps[vec].append(("map", name, _Expr(rhs).tree))
+                return
+            name, rhs = line.split(" = ", 1)
+            if name in ("δY", "δQ", "δP") and rhs.startswith("("):
+                self.tangent_vecs[vec][name] = [
+                    self._plain(vec, c.strip()) for c in rhs[1:-1].split(",")]
+            else:
+                self.tangent_steps[vec].append(("def", name, _Expr(rhs).tree))
+            return
+        if kind == "tmap" and f" {MAPSTO} " in line:
+            name, rhs = line.split(f" {MAPSTO} ", 1)
+            self.tangent_map[vec].append((self._plain(vec, name),
+                                          _Expr(rhs).tree))
+            return
+        lhs, rhs = line.split(" = ", 1)
+        if kind == "tfield" and lhs.startswith("d(") and lhs.endswith(")/dt"):
+            self.tangent_eqs[vec][self._plain(vec, lhs[2:-4])] = \
+                _Expr(rhs).tree
+            return
+        self._plain(vec, lhs)               # a tangent let: v.r
+        self.where[lhs] = _Expr(rhs).tree
 
     # -- evaluation -----------------------------------------------------
 
@@ -306,6 +415,8 @@ class MathForm:
             name, args = t[1], t[2]
             if name in ("f", "v", "a"):
                 return self._field_call(name, self._eval(args[0], env), env)
+            if name in ("Df", "Dv", "Da"):
+                return Op(self, name[1:], self._eval(args[0], env), env)
             vals = [self._eval(a, env) for a in args]
             if name in ("min", "minNum"):
                 return min(vals)
@@ -328,6 +439,64 @@ class MathForm:
         inner = _Env(self, bound, env.globals)
         return Vec(outs, [self._eval(self.equations[c], inner)
                           for c in outs])
+
+    def _tangent_call(self, fn, z, w, env):
+        """Df(Z)·W: the variational equations of the vector being read,
+        at the state Z (its components bound by name) along the tangent
+        W (bound as v.x ...), for the components fn has: all for f, the
+        positions for v, the momenta for a."""
+        vec = env.vec
+        outs = {"f": self.vectors["Y"], "v": self.vectors.get("Q"),
+                "a": self.vectors.get("P")}[fn]
+        bound = dict(zip(z.names, (z.v[k] for k in z.names)))
+        for c in w.names:
+            bound[f"{vec}.{c}"] = w.v[c]
+        inner = _Env(self, bound, env.globals)
+        inner.vec = vec
+        return Vec(outs, [self._eval(self.tangent_eqs[vec][c], inner)
+                          for c in outs])
+
+    def _tangent_env(self, k, state, tangent, params, lanes):
+        vec = self.tvectors[k]
+        comps = self.vectors["Y"]
+        bound = dict(zip(comps, state))
+        bound.update((f"{vec}.{c}", t) for c, t in zip(comps, tangent))
+        env = _Env(self, bound, self._globals(list(params), list(lanes)))
+        env.vec = vec
+        return vec, comps, env
+
+    def tangent_field(self, k, state, tangent, params=(), lanes=()):
+        """The k-th vector's variational equations at (state, tangent)."""
+        vec, comps, env = self._tangent_env(k, state, tangent, params, lanes)
+        return [self._eval(self.tangent_eqs[vec][c], env) for c in comps]
+
+    def tangent_step(self, k, state, tangent, params=(), lanes=()):
+        """The k-th vector's tangent after one step: a map's tangent
+        lines, or a flow's tangent step - the primal scheme run first,
+        for its stages, then the tangent's."""
+        vec, comps, env = self._tangent_env(k, state, tangent, params, lanes)
+        if self.kind == "map":
+            got = {c: self._eval(t, env) for c, t in self.tangent_map[vec]}
+            return [got[c] for c in comps]
+        for name, names in self.vectors.items():
+            env.locals[name] = Vec(names, [env.locals[c] for c in names])
+        for kind, name, tree in self.step_lines:
+            if kind == "def":
+                env.locals[name] = self._eval(tree, env)
+        tb = dict(zip(comps, tangent))
+        for name, names in self.tangent_vecs[vec].items():
+            env.locals[name] = Vec(names, [tb[c] for c in names])
+        nxt = {}
+        for kind, name, tree in self.tangent_steps[vec]:
+            value = self._eval(tree, env)
+            if kind == "def":
+                env.locals[name] = value
+            elif isinstance(value, Vec):
+                for c in self.tangent_vecs[vec][name]:
+                    nxt[c] = value.v[c]
+            else:
+                raise MathFormError(f"{name} maps to no vector")
+        return [nxt[c] for c in comps]
 
     def _globals(self, params, lanes):
         if len(params) != len(self.params) or len(lanes) != len(self.lanes):
@@ -386,6 +555,7 @@ class _Env:
         self.locals = dict(bound)
         self.globals = globals_
         self.memo = {}
+        self.vec = None             # the tangent vector being read
 
     def lookup(self, name):
         if name in self.locals:

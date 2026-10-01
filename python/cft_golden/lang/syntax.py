@@ -134,6 +134,7 @@ def source_text(text):
 KEYWORDS = frozenset({
     "system", "format", "round", "state", "cyclic", "const", "param",
     "lane", "let", "next", "step", "for", "in", "expansion", "end",
+    "tangent",
 })
 # `integrator` starts a block only in the library's own template text.
 TEMPLATE_KEYWORDS = frozenset({"integrator"})
@@ -423,6 +424,7 @@ class Stmt:
 
       system, format, round   word
       state                   items: [(name, length Num or None, cyclic, line)]
+      tangent                 items: [(name, line)]
       const, param            items: [(name, expr, line)]
       lane                    items: [(name, expr or None, line)]
       let                     target, expr, range
@@ -531,6 +533,8 @@ class Parser:
             return Stmt(kw, t.line, word=word.text)
         if kw == "state":
             return self.state()
+        if kw == "tangent":
+            return self.tangent()
         if kw in ("const", "param"):
             return self.const_or_param(kw)
         if kw == "lane":
@@ -556,8 +560,8 @@ class Parser:
             raise _syntax("end closes an expansion block, and none is "
                           "open", t.line)
         raise _syntax(f"{kw!r} does not start a statement: system, "
-                      f"format, round, state, const, param, lane param, "
-                      f"let, d/dt, next, step or expansion", t.line)
+                      f"format, round, state, tangent, const, param, lane "
+                      f"param, let, d/dt, next, step or expansion", t.line)
 
     def state(self):
         t = self.take()
@@ -583,6 +587,20 @@ class Parser:
             self.take()
         self.end_statement("a state declaration")
         return Stmt("state", t.line, items=items)
+
+    def tangent(self):
+        """tangent NAME {, NAME}: the tangent vectors, each over the
+        whole state (docs/LANGUAGE.md, "The variational equations")."""
+        t = self.take()
+        items = []
+        while True:
+            name = self.expect_name("a tangent vector's name")
+            items.append((name.text, name.line))
+            if not self.at_op(","):
+                break
+            self.take()
+        self.end_statement("a tangent declaration")
+        return Stmt("tangent", t.line, items=items)
 
     def const_or_param(self, kw):
         t = self.take()

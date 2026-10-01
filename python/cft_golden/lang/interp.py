@@ -26,12 +26,19 @@ from .refusals import Refusal
 
 
 class Run:
-    __slots__ = ("states", "flags", "at")
+    __slots__ = ("states", "flags", "at", "tangents", "primal_flags",
+                 "at_tangents")
 
-    def __init__(self, states, flags, at):
+    def __init__(self, states, flags, at, tangents=None, primal_flags=None,
+                 at_tangents=None):
         self.states = states        # [[bits] a lane]
-        self.flags = flags          # the run's sticky FLAGS
+        self.flags = flags          # the run's sticky FLAGS: every node's
         self.at = at                # {s: (states, flags)}
+        self.tangents = tangents    # [[[bits] a vector] a lane], or None
+        # the primal nodes' FLAGS alone - a run of the system without its
+        # tangent vectors gives these, bit for bit
+        self.primal_flags = flags if primal_flags is None else primal_flags
+        self.at_tangents = at_tangents or {}    # {s: tangents}
 
 
 def _ops(fmt, rnd):
@@ -106,7 +113,7 @@ def _round_run(graph, name, value):
 
 
 def run(graph, states, steps, lane_params=None, params=None,
-        param_bits=None, h=None, at=()):
+        param_bits=None, h=None, at=(), tangents=None):
     """Step `graph` S = `steps` times on every lane.
 
     states       one list a lane: the state's encodings, flat order
@@ -120,8 +127,16 @@ def run(graph, states, steps, lane_params=None, params=None,
                  h's sign: every h-scaled constant is recomputed from it
                  and rounded once, which is the graph compiled at that h
     at           step counts at which to record (states, FLAGS)
+    tangents     for a graph with tangent vectors, and only then: one
+                 list a lane, holding one list a vector (declaration
+                 order) of the state's n encodings, flat order
 
-    Returns a Run: .states, .flags, and .at = {s: (states, flags)}.
+    Returns a Run: .states, .flags, and .at = {s: (states, flags)}; for
+    a graph with tangent vectors also .tangents (as given), .primal_flags
+    (the primal nodes' alone) and .at_tangents = {s: tangents}. Each step
+    evaluates the primal nodes first, then each vector's tangent nodes,
+    which only read them: the states and the primal flags are the run of
+    the same system without its tangents, bit for bit.
     """
     fmt, rnd = graph.fmt, graph.rnd
     top = 1 << fmt.width
@@ -166,6 +181,35 @@ def run(graph, states, steps, lane_params=None, params=None,
                 raise Refusal("lane-value", f"lane {k}'s lane param value "
                               f"{C.shown(v)} is not a "
                               f"{C.FORMAT_754[fmt.name]} encoding")
+    T = len(graph.tangent)
+    if T == 0 and tangents is not None:
+        raise Refusal("lane-shape", f"{graph.system} carries no tangent "
+                      f"vectors, and tangents were given")
+    if T:
+        vecs = ", ".join(graph.tangent)
+        if tangents is None:
+            raise Refusal("lane-shape", f"{graph.system} carries the tangent "
+                          f"vector{'s' if T > 1 else ''} {vecs}, so each "
+                          f"lane gives {'them' if T > 1 else 'it'}: tangents")
+        tangents = [[list(t) for t in lt] for lt in tangents]
+        if len(tangents) != len(states):
+            raise Refusal("lane-shape", f"{len(tangents)} lanes of tangents "
+                          f"for {len(states)} lanes of state")
+        for k, lt in enumerate(tangents):
+            if len(lt) != T:
+                raise Refusal("lane-shape", f"lane {k} holds {len(lt)} "
+                              f"tangent vectors; {graph.system} has {T} "
+                              f"({vecs})")
+            for vec, t in zip(graph.tangent, lt):
+                if len(t) != n:
+                    raise Refusal("lane-shape", f"lane {k}'s tangent {vec} "
+                                  f"holds {len(t)} values; the state has {n}")
+                for v in t:
+                    if not isinstance(v, int) or isinstance(v, bool) \
+                            or not 0 <= v < top:
+                        raise Refusal("lane-value", f"lane {k}'s tangent "
+                                      f"value {C.shown(v)} is not a "
+                                      f"{C.FORMAT_754[fmt.name]} encoding")
     names = [p[0] for p in graph.param]
     pbits = [p[2] for p in graph.param]
     both = sorted(set(params or {}) & set(param_bits or {}))
@@ -215,49 +259,88 @@ def run(graph, states, steps, lane_params=None, params=None,
                 cbits[k] = _round_run(graph, f"{C.h_form(factor)}",
                                       factor * hv)
 
-    # the program: every node's function and the slots it reads
+    # the program: every node's function and the slots it reads. The
+    # tangent's, after the primal's nodes: its inputs, then its nodes;
+    # its nN reads the primal node N of this step, its tN the vector's
+    # component N, its dN its own node N.
     fns = _ops(fmt, rnd)
     base = {"s": 0, "l": n, "p": n + m, "c": n + m + len(pbits)}
     nbase = base["c"] + len(cbits)
+    tbase = nbase + len(graph.step.nodes)
+    dbase = tbase + n
 
     def slot(ref):
         kind, i = ref[0], int(ref[1:])
         return nbase + i if kind == "n" else base[kind] + i
+
+    def tslot(ref):
+        kind, i = ref[0], int(ref[1:])
+        if kind == "t":
+            return tbase + i
+        if kind == "d":
+            return dbase + i
+        return slot(ref)
     prog = [(fns[op], tuple(slot(a) for a in args))
             for op, args, _label in graph.step.nodes]
     outs = [slot(o) for o in graph.step.out]
-    size = nbase + len(prog)
+    tprog, touts = [], []
+    if T:
+        tprog = [(fns[op], tuple(tslot(a) for a in args))
+                 for op, args, _label in graph.tangent_step.nodes]
+        touts = [tslot(o) for o in graph.tangent_step.out]
+    size = dbase + len(tprog)
 
-    flags = 0
-    final = []
+    def execute(code, v, k):
+        fl_all = 0
+        for fn, args in code:
+            if len(args) == 2:
+                res, fl = fn(v[args[0]], v[args[1]])
+            elif len(args) == 3:
+                res, fl = fn(v[args[0]], v[args[1]], v[args[2]])
+            else:
+                res, fl = fn(v[args[0]])
+            v[k] = res
+            fl_all |= fl
+            k += 1
+        return fl_all
+
+    flags = pflags = 0
+    final, final_t = [], []
     at_states = {s: [] for s in marks}
     at_flags = {s: 0 for s in marks}
+    at_t = {s: [] for s in marks}
     for li, st in enumerate(states):
         v = [0] * size
         v[0:n] = st
         v[n:n + m] = lane_params[li]
         v[n + m:n + m + len(pbits)] = pbits
         v[base["c"]:nbase] = cbits
-        lane_flags = 0
+        cur = [list(t) for t in tangents[li]] if T else []
+        lane_flags = lane_pflags = 0
         if 0 in at_states:
             at_states[0].append(list(st))
+            at_t[0].append([list(t) for t in cur])
         for step in range(1, steps + 1):
-            k = nbase
-            for fn, args in prog:
-                if len(args) == 2:
-                    res, fl = fn(v[args[0]], v[args[1]])
-                elif len(args) == 3:
-                    res, fl = fn(v[args[0]], v[args[1]], v[args[2]])
-                else:
-                    res, fl = fn(v[args[0]])
-                v[k] = res
-                lane_flags |= fl
-                k += 1
-            v[0:n] = [v[o] for o in outs]
+            lane_pflags |= execute(prog, v, nbase)
+            nxt = [v[o] for o in outs]
+            # each vector's tangent reads this step's primal values - the
+            # state the step began from and its nodes - so the state moves
+            # only once every vector is through
+            for k in range(T):
+                v[tbase:tbase + n] = cur[k]
+                lane_flags |= execute(tprog, v, dbase)
+                cur[k] = [v[o] for o in touts]
+            v[0:n] = nxt
             if step in at_states:
                 at_states[step].append(v[0:n])
-                at_flags[step] |= lane_flags
+                at_flags[step] |= lane_flags | lane_pflags
+                at_t[step].append([list(t) for t in cur])
         final.append(v[0:n])
-        flags |= lane_flags
-    return Run(final, flags, {s: (at_states[s], at_flags[s])
-                              for s in marks})
+        final_t.append(cur)
+        flags |= lane_flags | lane_pflags
+        pflags |= lane_pflags
+    at_all = {s: (at_states[s], at_flags[s]) for s in marks}
+    if not T:
+        return Run(final, flags, at_all)
+    return Run(final, flags, at_all, final_t, pflags,
+               {s: at_t[s] for s in marks})

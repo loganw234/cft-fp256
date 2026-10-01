@@ -5,7 +5,10 @@ equations and maps - whose every rounding is fixed by the text. A
 system file declares a format and a rounding attribute, its state,
 constants and parameters, its equations, and an integrator from a
 library of three; the step it denotes is checked into a **step graph**,
-and the step graph is what a run computes, bit for bit.
+and the step graph is what a run computes, bit for bit. A system may
+also ask for its **variational equations** - the derivative of its step
+along tangent vectors, stepped beside the state, every rounding fixed
+by rules written in the language (see "The variational equations").
 
 This document is the language's definition. Its executable form is
 `python/cft_golden/lang/`, in the golden model, which is the authority:
@@ -108,10 +111,12 @@ the gate holds that.
   names are case-sensitive: `Y` and `y` are two names.
 - A dotted name such as `k1.x` or `Y2.x[3]` is a **label**: it names a
   node of an expanded step, and is defined only inside an `expansion`
-  block (see "The step").
-- Keywords: `system format round state cyclic const param lane let next
-  step for in expansion end`, and `d/dt`, which is one token where a
-  statement starts.
+  block (see "The step"). A dotted name whose first part is a tangent
+  vector, such as `v.x` or `v.k1.x`, names a tangent's component, let or
+  label (see "The variational equations").
+- Keywords: `system format round state cyclic tangent const param lane
+  let next step for in expansion end`, and `d/dt`, which is one token
+  where a statement starts.
 - Reserved: no value may be named after one of these, and the check is
   `reserved-name`.
   - the keywords;
@@ -129,6 +134,7 @@ statement  = "system" NAME
            | "format" ( "fp32" | "fp64" | "fp128" | "fp256" )
            | "round" ( "rne" | "rtz" | "rdn" | "rup" | "rmm" )      ; absent: rne
            | "state" svar { "," svar }
+           | "tangent" NAME { "," NAME }                     ; the variational equations
            | "const" NAME "=" expr { "," NAME "=" expr }
            | "param" NAME "=" expr { "," NAME "=" expr }
            | "lane" "param" NAME [ "=" expr ] { "," NAME [ "=" expr ] }
@@ -144,6 +150,12 @@ option     = "h" "=" expr
            | ( "q" | "p" ) "=" "(" NAME { "," NAME } ")"   ; stormer-verlet only
 stepline   = "let" LABEL [ "[" INTEGER "]" ] "=" expr | "next" target "=" expr
 ```
+
+With tangent vectors declared, a `target` or a `LABEL` may be one of a
+vector's - `d/dt v.x`, `next v.x`, `let v.r`, and in an expansion block
+`let v.k1.x` and `next v.x` - which writes out the derivation the
+language makes anyway, and is held to it ("The variational equations",
+"Writing them out").
 
 - Statements may come in any order, and a name may be used above its
   definition. A definition that reaches itself is `cycle`.
@@ -552,11 +564,13 @@ block, and that is what makes its round trip a check of the expansion.
 
 The checked form of one step. The checker builds it; the interpreter,
 the renderers and the compiler read it. `python/cft_golden/lang/graph.py`
-holds it, as canonical JSON, version 1.
+holds it, as canonical JSON, version 1 - or version 2 for a system with
+tangent vectors, which adds three keys after `step` and changes nothing
+before them (see "The variational equations").
 
 | key | content |
 |---|---|
-| `cftl_graph` | 1 |
+| `cftl_graph` | 1, or 2 when the system declares tangent vectors |
 | `system`, `format`, `round` | the name, the format, the one attribute |
 | `state` | [[name, length or null]], declaration order. The flat component order s0, s1, ... is this order with an array's components by index: the lane layout |
 | `lane` | [[name, default exact or null, encoding or null]] |
@@ -565,11 +579,17 @@ holds it, as canonical JSON, version 1.
 | `const` | [[exact, h-factor or null, encoding, flags]]: one entry per distinct (exact value, h-factor). The h-scaled come first by factor descending, then the rest by value ascending |
 | `field` | a flow's right-hand sides once, over the state inputs: {"out": [ref], "nodes": [node]}. null for a map |
 | `step` | one step with the template expanded: {"out", "nodes"}. What the interpreter runs and the compiler compiles |
+| `tangent` | version 2 only: the tangent vectors' names, declaration order |
+| `tangent_field` | version 2 only: the derivative of `field` along a tangent vector, {"out", "nodes"}; null for a map |
+| `tangent_step` | version 2 only: the derivative of `step`, {"out", "nodes"}: what the interpreter runs once a vector, after the step |
 
 **Nodes and refs.**
 - A node is `[op, [ref, ...], label or null]`.
 - A ref is `sN` (a state input), `lN` (a lane param), `pN` (a param),
-  `cN` (a const) or `nN` (an earlier node of the same section).
+  `cN` (a const) or `nN` (an earlier node of the same section). In a
+  tangent section `nN` is a labelled node of the section it
+  differentiates, `dN` an earlier node of the tangent section itself,
+  and `tN` the tangent input N.
 - Exact values are written `p/q` or `p`; encodings are `0x` and the
   format's width in hex digits.
 
@@ -629,11 +649,19 @@ run = lang.run(graph, states, steps,
                params=None,        # {name: int, Fraction or a constant as text}: run values, each rounded once
                param_bits=None,    # {name: encoding}: run values as a bank carries them
                h=None,             # an exact step in place of h, of h's sign: every h-scaled constant recomputed
-               at=())              # step counts at which to record (states, FLAGS)
+               at=(),              # step counts at which to record (states, FLAGS)
+               tangents=None)      # with tangent vectors only: one list a lane, one list a vector of n encodings
 run.states    # one list a lane: the state's encodings after `steps` steps
 run.flags     # the five IEEE flags, a sticky OR over every node, lane and step
 run.at        # {s: (states, flags)}
+run.tangents      # with tangent vectors: one list a lane, one list a vector
+run.primal_flags  # the primal nodes' FLAGS alone: the run without the tangents
+run.at_tangents   # {s: tangents}
 ```
+
+A system with tangent vectors is run as "The variational equations,
+Running them" says: each step the primal nodes first, then each vector's
+tangent nodes, which only read them.
 
 **What a run does.** Each step, for each lane, every node of the step
 section, in order, is evaluated by its golden function under the
@@ -772,22 +800,28 @@ and maps:
      name alone; each let's name, in the graph's order; each state
      component's name wherever it is printed (the equations, Y, Q and
      P, a map's lines); the integrator's name; h's value. Each name is
-     held against Unicode's own Greek letters. The expressions, and the
-     scheme's own lines, are the second check's, which holds them at the
-     points it samples, so only at points that take them: a select's
-     arm, the operand a min or max discards, a comparison's threshold
-     or its strictness (`<` against `<=`), an absolute value where the
-     sampled operand is already non-negative. Exact arithmetic cannot
-     tell minNum from min, or maxNum from max, where no NaN is
-     sampled, so a name swapped between them goes unseen. And a printed
-     scheme line that no output reads is held by neither check:
-     verifier-VL1 printed an unused fifth rk4 stage, `k5 = f(Y + h*k4)`,
-     and every check passed. Holding each integrator's scheme word for
-     word, as the titles are, is a follow-up.
+     held against Unicode's own Greek letters. The expressions are the
+     second check's, which holds them at the points it samples, so only
+     at points that take them: a select's arm, the operand a min or max
+     discards, a comparison's threshold or its strictness (`<` against
+     `<=`), an absolute value where the sampled operand is already
+     non-negative. Exact arithmetic cannot tell minNum from min, or
+     maxNum from max, where no NaN is sampled, so a name swapped between
+     them goes unseen.
+   - Each integrator's scheme lines are held word for word, against the
+     test's own copy of each scheme, as the titles are; the second check
+     evaluates them too. So a printed stage that no output reads is
+     caught: verifier-VL1 printed an unused fifth rk4 stage,
+     `k5 = f(Y + h*k4)`, and every check passed until L3 held the
+     schemes word for word (2026-10-01). The gate plants that stage.
+   - A system with tangent vectors prints more, each line read the same
+     way, and is held by a fourth check besides ("The variational
+     equations, What the gate holds").
    - The check is held itself: a test plants a wrong sha256 digit,
      attribute, format, title, h-scaled list, lane default and its
      encoding, a comment on an equation, a lane param's and a let's
-     glyph and the integrator's name, and each must be caught. Before
+     glyph, the integrator's name and an unused fifth rk4 stage, and
+     each must be caught. Before
      2026-10-01 the check held params' defaults and names and the
      state's names only, and VL1's map, its lane param `rho = 1/3`
      printed as `ρ = 2/3`, passed (verifier-VL1). Of 32 such plants,
@@ -899,6 +933,427 @@ one step: the classical Runge-Kutta method (rk4), with f the right-hand sides ab
 
 The gate holds both blocks to the renderers' output.
 
+## The variational equations
+
+A system may ask for its **variational equations**: the derivative of
+its step along one or more **tangent vectors**, each a vector over the
+whole state, stepped beside the state by the same program. They are
+what a largest Lyapunov exponent, a sensitivity to initial conditions or
+a linear stability analysis reads. What is differentiated is the step
+itself, node by node, so a map has them as a flow does, and every
+rounding of the tangent is fixed by rules written in the language.
+`python/cft_golden/lang/tangent.py` is the derivation; the rest of this
+definition carries it (the checker, the step graph, the interpreter, the
+intention-out); the compiler compiles it (`python/cftc`), and the
+`tangent` stage holds the compiled images to it (docs/VERIFICATION.md).
+
+### Asking for them
+
+`programs/systems/lorenz63-rk4-tangent-fp64.cftl`:
+
+```
+system lorenz63
+format fp64
+round  rne
+state  x, y, z
+tangent v
+param  sigma = 10, rho = 28, beta = 8/3
+d/dt x = sigma * (y - x)
+d/dt y = fma(x, rho - z, -y)
+d/dt z = fma(x, y, -(beta * z))
+step   rk4, h = 1/100
+```
+
+- `tangent NAME {, NAME}` declares tangent vectors, one a name, in
+  order; another `tangent` line adds more, as `state` does.
+- A vector's components are `<vector>.<component>`: `v.x`, `v.x[3]` -
+  the language's way to name a vector's component, as `k1.x` names one
+  of a stage.
+- A vector's name is a plain name. It is refused `duplicate-name` when
+  it names anything else, `syntax` when dotted, and `reserved-name` when
+  reserved or a label prefix of an expanded step (k1 to k4, Y2 to Y4, S2
+  to S4, Q1, P1, and the call prefixes f1, v1, v2, a1): a vector named
+  Y2 would make `Y2.x` both rk4's stage and a tangent.
+- Nothing else is written: the tangent equations are derived. A source
+  may write them out too, and they are then held to the derivation
+  ("Writing them out"). Lorenz-96, its tangent equation written out:
+
+```
+system lorenz96
+format fp64
+round  rne
+state  x[40] cyclic
+tangent v
+param  F = 8
+d/dt x[i] = fma(x[i+1] - x[i-2], x[i-1], F - x[i])
+d/dt v.x[i] = fma(v.x[i+1] - v.x[i-2], x[i-1], fma(x[i+1] - x[i-2], v.x[i-1], -v.x[i]))
+step   rk4, h = 1/100
+```
+
+**A run's tangents** are given per lane, like the state: lang.run takes
+`tangents=`, one list a lane holding one list a vector of the state's
+n encodings in its flat order. A compiled image's lane block is the
+state, then each vector's components in declaration order, then the
+lane params: `[state | v | w | lane params]`, n(1 + T) + n_lane values
+(`lane-capacity` holds them to 32,768).
+
+### What is differentiated: the step
+
+The tangent of a system is the derivative of its **step**: each node of
+the step graph differentiated by its operation's rule (below), along a
+tangent vector, at the values the step computes. It is the step map's
+own tangent-linear model, and that is a choice between two
+constructions:
+- (A) differentiate the right-hand side f into the tangent field
+  Df(y)·v, and apply the same integrator to the extended system (y, v);
+- (B) differentiate the step the integrator makes, node by node.
+
+**In exact arithmetic they agree.** An explicit Runge-Kutta step is
+y1 = y0 + h Σ b_i k_i with k_i = f(Y_i) and Y_i = y0 + h Σ a_ij k_j; its
+derivative along v is v1 = v + h Σ b_i δk_i with δk_i = Df(Y_i)·V_i and
+V_i = v + h Σ a_ij δk_j - the same method on the extended system, with
+the same coefficients and stages. euler is its one-stage case.
+stormer-verlet's derivative is stormer-verlet on the extended system
+with positions (Q, δQ) and momenta (P, δP), which stays separable,
+since Dv(P)·δP reads momenta only and Da(Q)·δQ positions only. The
+rounded constants (RN(h/2), RN(h/6), 2) are coefficients, the same in
+both. The gate holds A and B equal, exactly, at sampled points.
+
+**In floating point they agree node for node** wherever no tangent of
+the right-hand side is identically zero: the rules give each template
+operation the template's own form on the tangent (`fma(h/2, v.k1.x,
+v.x)`, `fma(2, v.k2.x, v.k1.x)`), and A, as the checker expands it from
+a source written with the tangent as more state, equals B node for node
+after sharing (the gate holds it). They part where a component is
+identically zero - a right-hand side that reads no state, such as
+`d/dt t = 1`, the language's way to carry time. There A computes
+`fma(h/2, 0, v.t)`, one rounding of an exact value, which turns -0 into
++0 and a signalling NaN into the canonical NaN. B leaves the term out:
+`next v.t = v.t`.
+
+**The language's is B.**
+- It is the only construction a map has: a map's step is its equations.
+- It is local: one rule an operation, so the tangent's rounding order is
+  fixed by the step graph's order, the rules' written forms and the
+  canonical walk; no template needs a tangent version, and a later one
+  gets its tangent from the rules.
+- It is the derivative of what the program computes, which is what a
+  Lyapunov exponent of the system the tile runs reads.
+- It never rounds an exact zero.
+- For v1's three templates it is A, node for node, wherever A rounds no
+  zero, so the mathematical form may print the textbook scheme (the
+  same method on δY), and its exact check holds it.
+
+### The rules
+
+`a`, `b`, `c` are an operation's operands, `da`, `db`, `dc` their
+tangents and `r` its own result. A tangent is **identically zero** when
+its value reads no state component - a constant, h, a param, a lane
+param - or reads one only through a comparison or a select's condition.
+An identically-zero tangent is never an operand: each term it would
+make is left out, exactly, and where a select needs an arm it is the
+constant 0. Each rule is an expression in the language, so its
+roundings are fixed like any other's; every point where an operation is
+not differentiable is given its fixed value in the last column.
+
+| operation | its tangent | where a tangent is zero | where it is not differentiable |
+|---|---|---|---|
+| `a + b` | `da + db` | the other's tangent, as it is | - |
+| `a - b` | `da - db` | `da`; or `-db` | - |
+| `-a` | `-da` | zero | - |
+| `a * b` | `fma(da, b, a * db)` | `da * b`; or `a * db` | - |
+| `fma(a, b, c)` | `fma(da, b, fma(a, db, dc))` | each zero term left out: `fma(da, b, dc)`, `fma(a, db, dc)`, `fma(da, b, a * db)`, `da * b`, `a * db`, or `dc` | - |
+| `abs(a)` | `copysign(1, a) * da` | zero | at a = +0, da; at a = -0, -da: the side the zero's sign bit names; at a NaN, its sign bit decides |
+| `copysign(a, b)` | `copysign(1, b) * (copysign(1, a) * da)` | zero when da is | at a = ±0 as abs; at b = ±0 the jump in b is not differentiated: db is never read |
+| `min(a, b)`, `max`, `minnum`, `maxnum` | `select(r == a, da, db)` | `0` for the zero side | at a tie, ±0 included, r == a: the first operand's tangent; where the result is a NaN, r == a is false: the second's |
+| `a < b`, `<=`, `>`, `>=`, `==` | zero | | the jump at a = b is not differentiated |
+| `select(c, a, b)` | `select(c, da, db)` | `0` for the zero side | the jump at c = 0 is not differentiated: c's tangent is never read |
+| a constant, h, a param, a lane param | zero | | |
+| a state component x | the tangent input `v.x` | | |
+
+**Where a rule follows a published convention.**
+- A product's tangent is a sum of two products, and IEEE 754-2019's
+  fusedMultiplyAdd (5.4.1) rounds one of them with the sum: two
+  roundings, the fewest such a sum takes.
+- abs and copysign read the derivative's sign from the sign bit, as IEEE
+  754-2019 reads a sign: copySign (5.5.1) takes it, and isSignMinus
+  (5.7.2) counts -0 and a NaN with its sign bit set as negative. So at a
+  zero the tangent is the one-sided derivative on the side the zero's
+  sign names. For every tangent that is not a NaN, `copysign(1, a) * da`
+  is RISC-V's FSGNJX(da, a), the F extension's sign-injection XOR (da
+  with its sign bit XORed with a's, the instruction fabs is written
+  with): a product by ±1 is exact and raises nothing at any format,
+  subnormals included (measured at fp32, fp64 and fp256). A signalling
+  NaN tangent raises invalid and gives the canonical NaN, where FSGNJX
+  would keep its payload.
+- min, max, minNum and maxNum are IEEE 754-2019's 9.6 operations, which
+  each choose an operand; the tangent is the chosen one's, read as the
+  operand the result equals, so a minNum that returns its number takes
+  the number's tangent. The compare raises invalid only on a signalling
+  NaN, as the primal's own operation already did. Where the operands
+  tie the language takes the first operand's tangent; that is its own
+  convention, no published one.
+- No standard fixes a derivative's rounding; the rest are the
+  language's.
+
+**The product.** `fma(da, b, a * db)` takes two roundings: its error is
+at most u|a·db| + u|d(ab)| + O(u²), against u(|da·b| + |a·db|) +
+u|d(ab)| for the three of `da*b + a*db`. It reads the primal's operands
+a and b, already computed, and never the primal's own product, so
+Lorenz-63's image computes 53 + 61 = 114 operations a step: the
+tangent's own, and nothing of the step twice. It is **not symmetric**:
+`a * b` and `b * a` have the same primal and tangents rounded
+differently, each fixed by the order written. The compiler may commute
+the primal's multiplicands, and that never reaches the tangent, which is
+derived from the graph as written.
+
+**Reading a primal value.** A rule reads a primal value by name where it
+has one - a state component, a param, a lane param, a constant, a let, a
+label of the expanded step - and otherwise **writes it again**:
+Lorenz-63's `rho - z` in `fma(v.x, rho - z, fma(x, -v.z, -v.y))`. A
+value written again is an operation of the tangent, performed again: the
+same operation on the same values, so the same bits and the same flags
+(FLAGS is an OR). The compiler shares it with the primal's own, as it
+shares any repeated subexpression. So the canonical form's promise holds
+of the tangent too: every operation written is performed, once, in the
+order written.
+
+**Roundings, every operand's tangent nonzero** (the primal's in
+brackets): `+` and `-` 1 [1]; unary minus none [none]; `*` 2 [1]; fma 2
+[1]; abs one exact product by ±1 [none]; copysign two [none]; the min
+family and select none, a quiet compare and a select [none].
+
+**Nothing is refused for not being differentiable.** Every operation is
+differentiable almost everywhere, and each point where one is not has
+the value the table fixes; refusing abs, min or select would refuse
+working systems. A run could not refuse one either: there is no branch,
+and FLAGS belongs to the run, not to a lane.
+
+### Writing them out
+
+The canonical form writes every vector's tangent as code, and a source
+may write any of it, to pin it as an expansion block pins a template:
+- a flow's tangent equations, `d/dt v.x = ...`, with their lets,
+  `let v.r = ...` (the tangent of the let r); a map's, `next v.x = ...`;
+- in an expansion block, the tangent's lines: `let v.k1.x = ...` and
+  `next v.x = ...`, after the step's own.
+
+What is written is evaluated in that vector's own context - its
+components are the tangent inputs, a name of the state or a let is the
+primal's value, a primal expression written out is written again - and
+held to the derivation byte for byte. A difference is `tangent-mismatch`,
+named at the first label or component, in the canonical form's order,
+whose definition differs. Of a vector's equations a source writes all
+or none (`missing-equation`), and of its lines in a block all or none.
+A tangent component read where it cannot be - by the state's equations,
+lets or constants, or by another vector's equations - is
+`tangent-scope`, and so is a vector read whole (`v` for `v.x`).
+
+### The step graph, version 2
+
+A graph with tangent vectors is version 2: version 1's keys byte for
+byte, then `tangent`, `tangent_field` and `tangent_step` ("The step
+graph"). The tangent sections are **generic**, one for every vector, and
+canonical by the same walk; a tangent node is labelled with the primal
+label it is the tangent of (v.k1.x is written for the node labelled
+k1.x), and an unlabelled one has one use, since a primal value is read
+across sections only where it has a name.
+- **The primal is unchanged.** `field`, `step` and the const table are
+  the primal graph's, byte for byte, unless a rule adds a constant the
+  table lacks - only 0, 1 and -1 can be added (1 by abs and copysign; 0
+  by a min or a select with one side zero, and by an output whose
+  tangent is zero; -1 where copysign's b is a negative constant, so that
+  `copysign(1, b)` folds, as any constant expression does) - and then
+  only the const refs are renumbered by the table's value order. No
+  reference adds one, and the gate holds both cases.
+- **A graph without tangents is version 1, byte for byte**, so nothing
+  written before L3 moves: the gate holds the six references' graphs
+  and the 48 committed compiled files. A version-1 reader - cftc's,
+  before L3 - refuses a version-2 graph rather than drop its tangents.
+
+### Running them
+
+Each step, for each lane: the primal nodes first, in order, as without
+tangents; then, for each vector, the tangent nodes, which read the
+step's primal values - the state the step began from and its nodes - and
+never write them; then the state and every vector move together. So the
+states, and the primal nodes' FLAGS (`run.primal_flags`), are a run of
+the same system without its tangents, bit for bit; `run.flags` ORs
+every node's, primal and tangent, which is what a tile's FLAGS hold.
+`lane-shape` refuses tangents missing, given where the graph has none,
+or of the wrong shape, and `lane-value` a value that is not an encoding.
+
+### Lorenz-63's variational equations, as the renderers write them
+
+The canonical form of `lorenz63-rk4-tangent-fp64.cftl` is Lorenz-63's
+("Lorenz-63, as the renderers write it") with these lines more - its
+operation counts:
+
+```
+; operations: the equations 8 (2 fma, 2 sub, 2 mul, 2 neg);
+;             a step 53 (26 fma, 3 add, 8 sub, 8 mul, 8 neg);
+;             each tangent vector's equations 11 (4 fma, 2 sub, 2 mul, 3 neg)
+;             and its step 65 (34 fma, 3 add, 8 sub, 8 mul, 12 neg)
+```
+
+the tangent equations, after the state's:
+
+```
+d/dt v.x = sigma * (v.y - v.x)
+d/dt v.y = fma(v.x, rho - z, fma(x, -v.z, -v.y))
+d/dt v.z = fma(v.x, y, fma(x, v.y, -(beta * v.z)))
+```
+
+and, at the end of the expansion block, the tangent's step:
+
+```
+  let v.k1.x = sigma * (v.y - v.x)
+  let v.k1.y = fma(v.x, rho - z, fma(x, -v.z, -v.y))
+  let v.k1.z = fma(v.x, y, fma(x, v.y, -(beta * v.z)))
+  let v.Y2.x = fma(h/2, v.k1.x, v.x)
+  let v.Y2.y = fma(h/2, v.k1.y, v.y)
+  let v.Y2.z = fma(h/2, v.k1.z, v.z)
+  let v.k2.x = sigma * (v.Y2.y - v.Y2.x)
+  let v.k2.y = fma(v.Y2.x, rho - Y2.z, fma(Y2.x, -v.Y2.z, -v.Y2.y))
+  let v.k2.z = fma(v.Y2.x, Y2.y, fma(Y2.x, v.Y2.y, -(beta * v.Y2.z)))
+  let v.Y3.x = fma(h/2, v.k2.x, v.x)
+  let v.Y3.y = fma(h/2, v.k2.y, v.y)
+  let v.Y3.z = fma(h/2, v.k2.z, v.z)
+  let v.k3.x = sigma * (v.Y3.y - v.Y3.x)
+  let v.k3.y = fma(v.Y3.x, rho - Y3.z, fma(Y3.x, -v.Y3.z, -v.Y3.y))
+  let v.k3.z = fma(v.Y3.x, Y3.y, fma(Y3.x, v.Y3.y, -(beta * v.Y3.z)))
+  let v.Y4.x = fma(h, v.k3.x, v.x)
+  let v.Y4.y = fma(h, v.k3.y, v.y)
+  let v.Y4.z = fma(h, v.k3.z, v.z)
+  let v.k4.x = sigma * (v.Y4.y - v.Y4.x)
+  let v.k4.y = fma(v.Y4.x, rho - Y4.z, fma(Y4.x, -v.Y4.z, -v.Y4.y))
+  let v.k4.z = fma(v.Y4.x, Y4.y, fma(Y4.x, v.Y4.y, -(beta * v.Y4.z)))
+  let v.S2.x = fma(2, v.k2.x, v.k1.x)
+  let v.S2.y = fma(2, v.k2.y, v.k1.y)
+  let v.S2.z = fma(2, v.k2.z, v.k1.z)
+  let v.S3.x = fma(2, v.k3.x, v.S2.x)
+  let v.S3.y = fma(2, v.k3.y, v.S2.y)
+  let v.S3.z = fma(2, v.k3.z, v.S2.z)
+  let v.S4.x = v.S3.x + v.k4.x
+  let v.S4.y = v.S3.y + v.k4.y
+  let v.S4.z = v.S3.z + v.k4.z
+  next v.x = fma(h/6, v.S4.x, v.x)
+  next v.y = fma(h/6, v.S4.y, v.y)
+  next v.z = fma(h/6, v.S4.z, v.z)
+```
+
+A writer holds the tangent equations against the textbook's: dδx/dt =
+σ(δy − δx), dδy/dt = (ρ − z)δx − xδz − δy, dδz/dt = yδx + xδy − βδz.
+The mathematical form adds the variational equations after the state's:
+
+```
+the variational equations of the tangent vector v
+  d(v.x)/dt = σ·(v.y − v.x)
+  d(v.y)/dt = v.x·(ρ − z) + x·(−v.z) − v.y
+  d(v.z)/dt = v.x·y + x·v.y − β·v.z
+```
+
+and the tangent's step after the scheme:
+
+```
+the tangent v's step: the same method on δY, with Df·δY the right-hand sides of v above
+  δY = (v.x, v.y, v.z)
+  δk1 = Df(Y)·δY
+  δk2 = Df(Y + (h/2)·k1)·(δY + (h/2)·δk1)
+  δk3 = Df(Y + (h/2)·k2)·(δY + (h/2)·δk2)
+  δk4 = Df(Y + h·k3)·(δY + h·δk3)
+  δY ↦ δY + (h/6)·(δk1 + 2·δk2 + 2·δk3 + δk4)
+```
+
+The gate holds each of these blocks to the renderers' output.
+
+### What the gate holds, and what it cannot see
+
+The intention-out's checks extend to a variational system, each line it
+prints read by one of them (VL1's lesson: a printed line no check reads
+is a defect in the sentence that says everything is checked):
+1. **The round trip** reads the tangent's code - the declaration, the
+   tangent equations and lets, the block's tangent lines - back through
+   the derivation (`tangent-mismatch`), so the same graph comes back,
+   and the same text: it holds the tangent's rounding order, byte for
+   byte.
+2. **Exact evaluation** holds the variational equations, a map's tangent
+   lines and each tangent step's scheme to the tangent sections
+   evaluated exactly, at random rational states and tangents
+   (`python/tests/lang_mathform.py` reads `d(v.x)/dt`, `Df(Z)·W` and δ).
+3. **Every line read**: the operation counts against the test's own;
+   the section headers word for word; each tangent component's and
+   tangent let's name against Unicode's Greek; δY, δQ and δP; each
+   tangent scheme word for word against the test's own copy.
+4. **The derivative is right.** The tangent sections, evaluated exactly,
+   must EQUAL the test's own derivative of the primal sections: dual
+   numbers in exact rationals, (value, derivative) pairs carried through
+   every node, the conventions at measure-zero points written again
+   from the rule table above, at random rational points and at targeted
+   ties and zeros. So the printed variational equations are the
+   derivative of the printed equations, and not merely what the graph
+   says.
+
+**Why exact dual numbers, not mpmath.** Every operation is piecewise
+polynomial, so the exact derivative exists, and equality needs no
+tolerance to argue about; a central difference in mpmath would carry
+one, and a dependency besides. The plan of record said "an exact
+derivative in mpmath"; exact rationals are stronger, and the stage stays
+stdlib-only.
+
+**What the fourth check cannot see**, and what holds it instead:
+- **rounding order**: a rule replaced by one equal in exact arithmetic
+  and rounded otherwise - `da*b + a*db` for `fma(da, b, a * db)` - is
+  invisible to exact evaluation (measured: it passed every point). It is
+  held by the committed compiled variational references' graph bytes
+  (programs/systems/compiled-tangent/), by this document's rule table
+  held to the code - each rule rendered on a one-operation system - and
+  by the blocks above, held to the renderers;
+- **special values**: NaNs, infinities and the sign of zero do not exist
+  in exact arithmetic. They are held by the interpreter against seq.py
+  bit for bit, with tangents holding signalling NaNs, infinities, -0 and
+  subnormals, and by unit tests of each rule's specials;
+- **a convention at a measure-zero point** that differs from the table:
+  only where a sampled point lands on one, so the gate places points on
+  ties and zeros on purpose.
+
+**The Lyapunov smoke test** (the `tangent` stage): Lorenz-63's largest
+exponent, from `lorenz63-rk4-tangent-fp64.cftl` compiled, run on
+libcft's software backend through cft-segrun one segment at a time, the
+tangent scaled on the host between segments by an exact power of two.
+The run length and tolerance were set from a measurement, and the stage
+prints its figure each time (docs/VERIFICATION.md gives them). Such a run
+is not certified as a chain: the host changes each segment's scratch-out
+before the next. But an exact power-of-two scaling is invisible to the
+arithmetic - every rule is linear in the tangents, and rounding commutes
+with exact scaling away from overflow and underflow - so the renormalised
+tangent is the unrenormalised one times 2^-K, bit for bit (measured, and
+held by the stage). Within the format's range, a certified chain with
+no renormalisation therefore gives the same exponent: at fp256 the
+stage certifies one, both auditors accepting.
+
+### Known limits
+
+- **A long chain of unnamed products** makes each product's tangent
+  write its unnamed operands again, so the tangent grows with the square
+  of the chain's length: 5,049 tangent nodes for an unnamed 100-term
+  product, against 198 if read across (measured). Naming parts of the
+  chain with lets keeps it linear, since a let is read by name.
+- **The compiler's choice between its orders reads no capacity.** It
+  takes the fewest instructions a step, then the fewest one-beat cycles;
+  the interleaved walk, offered only for a graph with tangents, wins for
+  Lorenz-96 with one vector (2,509 instructions and 139 slots, against
+  2,568 and 389), but for three or four vectors at N = 40 the six older
+  orders' fewer instructions win at more scratch (5,288 instructions
+  and 490 slots, against 6,286 and 300, at T = 3). Choosing by the
+  target's capacity would make the image depend on the target, which
+  the compiler's design rules out (python/cftc).
+- **Capacity.** Lorenz-96 with one tangent vector needs 2N + 59 slots a
+  lane (measured): N = 40 takes 139 and fits every target; a 256-slot
+  target holds it up to N = 98 (255 slots) and refuses it
+  (`scratch-capacity`) from N = 99 (257); the U50's revision 7 (2,048)
+  accepts N = 100 (259).
+
 ## Every refusal, by name
 
 One exception, `lang.Refusal`, carries:
@@ -962,6 +1417,13 @@ Equations, indices and the step:
 | `verlet-not-separable` | a position's right-hand side reading a position, or a momentum's a momentum |
 | `expansion-mismatch` | a written-out step that is not the integrator's expansion |
 
+The variational equations:
+
+| name | what it refuses |
+|---|---|
+| `tangent-mismatch` | a written tangent equation, tangent let or expansion line that is not the derivation's |
+| `tangent-scope` | a tangent component read by the state's equations, lets or constants, or by another tangent vector's equations; or a tangent vector read whole |
+
 Operations v1 does not have:
 
 | name | what it refuses |
@@ -998,7 +1460,7 @@ A run, and a step graph's bytes:
 | `param-value` | a run value that is not an exact rational (a float, or text that is not a constant), an encoding that does not fit, or a param given both ways |
 | `step-count` | a step count that is not a whole number of at least 0 |
 | `step-size-sign` | a run's h of the other sign from the graph's: a constant may hold h's sign, fixed when the graph was compiled |
-| `graph-format` | bytes that are not a version-1 step graph |
+| `graph-format` | bytes that are not a step graph of version 1 (or 2, with tangent vectors) |
 
 The compiler's, reserved for it (L2).
 - The first five are a target's stated capacities (the plan's item 10).
@@ -1022,8 +1484,8 @@ form; the compiler words each one for the case at hand.
 
 ## The gate
 
-Both files run in the golden stage (`pytest python/tests`) and under
-`make golden`, with no change to either.
+The three files run in the golden stage (`pytest python/tests`) and
+under `make golden`, with no change to either.
 
 **`python/tests/test_lang_refs.py`: the interpreter against seq.py.**
 - **The comparison.** For each reference at fp64 and fp256:
@@ -1069,9 +1531,42 @@ Both files run in the golden stage (`pytest python/tests`) and under
   linear in its size, and read back by the test's reader past 4,300
   digits;
 - determinism across hash seeds;
-- the intention-out's three checks;
+- the intention-out's three checks, each integrator's scheme word for
+  word and the unused fifth stage planted;
 - this document's refusal tables, template text and Lorenz-63 blocks
   against the code.
+
+**`python/tests/test_lang_tangent.py`: the variational equations.**
+- each rule of the table above, rendered on a one-operation system for
+  every pattern of zero tangents, against the table's text; the
+  measure-zero values (a tie, ±0, a NaN result) and a product by ±1 at
+  the specials, bit for bit;
+- the fourth check - the tangent evaluated exactly against the test's
+  own dual numbers - on the references with tangent vectors, on
+  generated systems that cover every operation, and at ties and zeros
+  placed on purpose; three plants, each red on it: a wrong product rule,
+  a dropped tangent term, a tangent reading the wrong primal value; the
+  rounding-order plant `da*b + a*db`, green on it and red on the
+  committed bytes and the rule table;
+- construction A against B: equal exactly at sampled points on every
+  flow, node for node after sharing where no tangent is identically
+  zero, and parting, in bits, at `d/dt t = 1`;
+- the primal unchanged: the primal sections byte for byte (const refs
+  mapped where a rule adds a constant), and a run's states and
+  `primal_flags` the run without tangents';
+- every version-1 graph unchanged: the six references' bytes are the
+  committed compiled `.graph.json` files';
+- the interpreter's tangents, their refusals, T = 1 and 2, maps,
+  stormer-verlet, euler, lets and lane params;
+- writing the tangent out: accepted where it is the derivation's,
+  `tangent-mismatch` at the first difference, `tangent-scope`, all or
+  none; the intention-out's four checks on references, written
+  systems and random ones, and plants of the tangent's printed lines;
+- determinism across hash seeds; this document's variational blocks and
+  sources against the renderers and the committed files.
+
+The compiled images are held to the interpreter by the `tangent` stage
+(programs/tangent_check.py; docs/VERIFICATION.md).
 
 ## What v1 does not do
 
@@ -1079,7 +1574,12 @@ Both files run in the golden stage (`pytest python/tests`) and under
   with the lowering, allocation and spilling, scheduling, emission,
   the manifest, the halved-bank file, and the target-dependent
   refusals above.
-- **The variational equations** are L3's.
+- **Of the variational equations** (L3): whole Jacobians as a construct
+  (a system has the tangent vectors it declares, and nothing builds an
+  n by n matrix); Lyapunov spectra beyond the largest exponent, and QR
+  on the tile or the host; certified renormalisation; tangents with
+  respect to params or lane params; reverse mode, second derivatives;
+  a tangent the state reads.
 - **Run-time division and square root.** Inlining divfull or sqrtfull
   means spilling the registers around it, which is a later parcel.
 - **Run-time transcendentals.** The correctly rounded math library is a

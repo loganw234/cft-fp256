@@ -27,11 +27,13 @@ from .. import softfloat as sf
 from ..formats import FORMATS
 from ..seq import SCRATCH_D_MAX
 from . import constants as C
-from .graph import Node, StepGraph, canonical
+from .graph import PRIMAL_OF, Node, StepGraph, canonical
 from .refusals import Refusal, too_deep
 from .syntax import (KEYWORDS, Bin, Call, Cmp, Index, Name, Neg, Num,
-                     parse)
-from .templates import FLOW_INTEGRATORS, INTEGRATORS, TEMPLATES
+                     Target, parse)
+from .tangent import Derivation
+from .templates import (FLOW_INTEGRATORS, INTEGRATORS, LABEL_PREFIXES,
+                        TEMPLATES)
 
 # The built-ins and the number of arguments each takes.
 BUILTINS = {"fma": 3, "abs": 1, "copysign": 2, "min": 2, "max": 2,
@@ -94,12 +96,14 @@ class Decl:
     """A declared name."""
     __slots__ = ("kind", "name", "line", "expr", "index", "length",
                  "cyclic", "base", "value", "busy", "used", "defs",
-                 "used_comps", "indexed")
+                 "used_comps", "indexed", "lname")
 
     def __init__(self, kind, name, line):
-        self.kind = kind              # state, const, param, lane, let, label
-        self.name = name
-        self.line = line
+        self.kind = kind              # state, const, param, lane, let,
+        self.name = name              # label, tangent, or a written
+        self.line = line              # tangent let or label (tlet)
+        self.lname = None             # a tlet's label in the generic
+        #                               tangent section: r for v.r
         self.expr = None
         self.index = None             # a param's or lane param's position
         self.length = None            # an array's length
@@ -114,8 +118,15 @@ class Decl:
 
 
 class Ctx:
+    """Where an expression is evaluated. A TANGENT context - one written
+    tangent equation, tangent let or expansion line of the vector `tvec`
+    - has the mode of the primal it differentiates (field, map, block),
+    reads that vector's components as tangent inputs and its written
+    tangent lets or labels from `tlabels`, and reads the primal's lets
+    through `primal`, the context that built them, so that a let named
+    in a tangent equation is the primal's own node."""
     __slots__ = ("mode", "inputs", "memo", "busy", "prefix", "env", "line",
-                 "labels")
+                 "labels", "tvec", "tlabels", "primal")
 
     def __init__(self, mode, inputs=None, prefix=None, labels=None):
         self.mode = mode
@@ -126,12 +137,16 @@ class Ctx:
         self.env = {}
         self.line = None
         self.labels = labels
+        self.tvec = None
+        self.tlabels = None
+        self.primal = None
 
     def at(self, env, line):
         c = Ctx.__new__(Ctx)
         c.mode, c.inputs, c.memo, c.busy = (self.mode, self.inputs,
                                             self.memo, self.busy)
         c.prefix, c.labels = self.prefix, self.labels
+        c.tvec, c.tlabels, c.primal = self.tvec, self.tlabels, self.primal
         c.env, c.line = env, line
         return c
 
@@ -146,6 +161,17 @@ class Checker:
         self.h_busy = False
         self.h_used = False
         self.h_line = None
+        # the tangent vectors, in declaration order, and what a source
+        # writes of their equations: {vector: [Stmt]}, {vector: {name:
+        # Decl}} for its written tangent lets
+        self.tangent_items = []
+        self.tangents = []
+        self.tangent_set = set()
+        self.tan_eq_stmts = {}
+        self.tan_let_stmts = {}
+        self.tan_lets = {}
+        self.field_ctx = None
+        self.map_ctx = None
 
     # ==== declarations ================================================
 
@@ -167,6 +193,8 @@ class Checker:
                 once[k] = st
             elif k == "state":
                 self.state_items.extend(st.items)
+            elif k == "tangent":
+                self.tangent_items.extend(st.items)
             elif k == "const":
                 self.const_items.extend(st.items)
             elif k == "param":
@@ -228,17 +256,33 @@ class Checker:
             items.append((line, 3, "lane", name, expr))
         for st in self.let_stmts:
             items.append((st.line, 4, "let", st.target.name, st))
+        for name, line in self.tangent_items:
+            items.append((line, 5, "tangent", name, None))
         items.sort(key=lambda t: (t[0], t[1]))
+        tangent_names = {name for name, _line in self.tangent_items}
         n_param = n_lane = 0
         for line, _o, kind, name, payload in items:
             if "." in name:
+                vec = name.split(".", 1)[0]
+                if kind == "let" and vec in tangent_names:
+                    # a written tangent let, v.r: held to the derivation
+                    # once the equations' lets are known (tangent_lets)
+                    self.tan_let_stmts.setdefault(vec, []).append(payload)
+                    continue
+                if kind == "tangent":
+                    raise Refusal("syntax", f"{name}: a tangent vector's "
+                                  f"name has no dot", line)
                 raise Refusal("syntax", f"{name} is a label: a dotted name "
-                              f"is defined only in an expansion block",
-                              line)
+                              f"is defined only in an expansion block, or "
+                              f"names a tangent's let (v.r)", line)
             if name in RESERVED:
                 raise Refusal("reserved-name", f"{name} is "
                               f"{_reserved_why(name)} and cannot name a "
                               f"value", line)
+            if kind == "tangent" and name in LABEL_PREFIXES:
+                raise Refusal("reserved-name", f"{name} names a label of an "
+                              f"expanded step ({name}.x), and a tangent "
+                              f"vector named so would read as one", line)
             prev = self.names.get(name)
             if prev is not None:
                 if kind == "let" and prev.kind == "let":
@@ -247,6 +291,9 @@ class Checker:
                 raise Refusal("duplicate-name", f"{name} is already "
                               f"declared, at line {prev.line}", line)
             d = Decl(kind, name, line)
+            if kind == "tangent":
+                self.names[name] = d
+                continue
             if kind == "state":
                 length, cyclic = payload
                 if length is not None:
@@ -278,12 +325,19 @@ class Checker:
         # the flat layout
         self.state_decls = [self.names[name] for name, *_ in
                             self.state_items]
-        total = sum(1 if d.length is None else d.length
-                    for d in self.state_decls) + n_lane
+        self.tangents = [name for name, _line in self.tangent_items]
+        self.tangent_set = set(self.tangents)
+        n_comp = sum(1 if d.length is None else d.length
+                     for d in self.state_decls)
+        total = n_comp * (1 + len(self.tangents)) + n_lane
         if total > LANE_SLOTS:
+            held = ("its state and its lane params" if not self.tangents
+                    else f"its state, its {len(self.tangents)} tangent "
+                         f"vector{'s' if len(self.tangents) > 1 else ''} "
+                         f"and its lane params")
             raise Refusal("lane-capacity", f"a lane holds {total:,} values "
-                          f"(its state and its lane params), and the deepest "
-                          f"scratch any tile publishes holds {LANE_SLOTS:,}",
+                          f"({held}), and the deepest scratch any tile "
+                          f"publishes holds {LANE_SLOTS:,}",
                           self.state_decls[0].line)
         base = 0
         self.comp_names = []
@@ -380,6 +434,18 @@ class Checker:
     # ==== equations ===================================================
 
     def equations(self):
+        # a written tangent equation (d/dt v.x, next v.x) is set aside:
+        # it is held to the derivation once the step is built
+        self.tangent_set = set(self.tangents)
+        primal = []
+        for st in self.eq_stmts:
+            name = st.target.name
+            vec = name.split(".", 1)[0] if "." in name else None
+            if vec in self.tangent_set:
+                self.tan_eq_stmts.setdefault(vec, []).append(st)
+            else:
+                primal.append(st)
+        self.eq_stmts = primal
         if not self.eq_stmts:
             raise Refusal("missing-equation", f"{self.comp_names[0]} has "
                           f"no equation", self.state_decls[0].line)
@@ -388,6 +454,14 @@ class Checker:
             if st.kind != first:
                 raise Refusal("mixed-equations", "a system is a flow (d/dt) "
                               "or a map (next), not both", st.line)
+        for sts in self.tan_eq_stmts.values():
+            for st in sts:
+                if st.kind != first:
+                    raise Refusal(
+                        "mixed-equations", f"a flow's tangent equations are "
+                        f"d/dt {st.target.name} = ..., a map's next "
+                        f"{st.target.name} = ...: the system's own kind",
+                        st.line)
         self.is_flow = first == "d/dt"
         if self.is_flow and self.integ == "map":
             raise Refusal("integrator-mismatch", "map steps a map (next); "
@@ -526,6 +600,18 @@ class Checker:
                       "arithmetic (+, - and *) on literals and the "
                       "statement's index variable", line)
 
+    def tangent_targets(self, st, vec):
+        """[(flat component, index environment)] a tangent equation of
+        `vec` covers: its target v.x or v.x[i] is the state's x or x[i]."""
+        name = st.target.name
+        rest = name[len(vec) + 1:]
+        d = self.names.get(rest)
+        if d is None or d.kind != "state":
+            raise Refusal("not-state", f"{name} is not a tangent component: "
+                          f"{rest} is not a state component", st.line)
+        return self.targets(st, Target(rest, st.target.index,
+                                       st.target.line), st.range)
+
     def lets(self):
         for d in list(self.names.values()):
             if d.kind != "let":
@@ -533,6 +619,33 @@ class Checker:
             stmts = d.defs.pop("_stmts")
             for st in stmts:
                 self.let_defs(d, st.target, st.expr, st.range, st.line)
+        # a written tangent let, v.r: the tangent of the let r, a family
+        # of its own whose nodes carry r's label in the tangent section
+        for vec, stmts in self.tan_let_stmts.items():
+            fams = self.tan_lets.setdefault(vec, {})
+            for st in stmts:
+                name = st.target.name
+                rest = name[len(vec) + 1:]
+                prim = self.names.get(rest)
+                if prim is None or prim.kind != "let":
+                    raise Refusal("undefined-name", f"{name} names no "
+                                  f"tangent let: {rest} is not a let of the "
+                                  f"equations", st.line)
+                fam = fams.get(name)
+                if fam is None:
+                    fam = fams[name] = Decl("tlet", name, st.line)
+                    fam.lname = rest
+                self.let_defs(fam, st.target, st.expr, st.range, st.line)
+                if fam.indexed != prim.indexed:
+                    raise Refusal("array-index", f"{name} is the tangent of "
+                                  f"{rest}, which is "
+                                  f"{'indexed' if prim.indexed else 'a scalar'}"
+                                  f": write it so", st.line)
+            if vec not in self.tan_eq_stmts:
+                raise Refusal("missing-equation", f"{vec}'s tangent lets are "
+                              f"written and its equations are not: a source "
+                              f"writes all of {vec}'s equations, with its "
+                              f"lets, or none", stmts[0].line)
 
     def let_defs(self, d, target, expr, rng, line):
         indexed = target.index is not None
@@ -670,11 +783,19 @@ class Checker:
         if index is None and name in ctx.env:
             return K(ctx.env[name])
         if "." in name:
+            vec = name.split(".", 1)[0]
+            if vec in self.tangent_set:
+                return self.tangent_value(name, vec, index, ctx, line)
             if ctx.mode == "block":
                 fam = ctx.labels.get(name)
                 if fam is None:
                     raise Refusal("undefined-name", f"{name} is not defined "
                                   f"in this expansion block", line)
+                if ctx.tvec is not None:
+                    # the block's own label, as its primal lines built it
+                    return self.family_value(fam, index,
+                                             ctx.primal.at(ctx.env, line),
+                                             line)
                 return self.family_value(fam, index, ctx, line)
             raise Refusal("undefined-name", f"{name} is a label of a "
                           f"written-out step, and names nothing here", line)
@@ -682,6 +803,10 @@ class Checker:
         if d is None:
             return self.undeclared(name, ctx, line)
         kind = d.kind
+        if kind == "tangent":
+            raise Refusal("tangent-scope", f"{name} is a tangent vector: a "
+                          f"tangent equation reads its components ({name}.x),"
+                          f" and nothing reads the vector whole", line)
         if kind == "state":
             if ctx.mode in ("const", "default"):
                 raise self.not_constant(ctx, f"{name} is the state", line)
@@ -723,7 +848,55 @@ class Checker:
             raise Refusal("undefined-name", f"{name} is a let of the "
                           f"equations; an expansion block names it by its "
                           f"label in the step (k1.{name}, ...)", line)
+        if ctx.tvec is not None:
+            # a tangent equation reads the let's value: the primal's own
+            # node, as the equations built it
+            return self.family_value(d, index, ctx.primal.at(ctx.env, line),
+                                     line)
         return self.family_value(d, index, ctx, line)
+
+    def tangent_value(self, name, vec, index, ctx, line):
+        """A dotted name whose prefix is a tangent vector: in that vector's
+        own tangent context, a component (the tangent input) or a written
+        tangent let or label; anywhere else, `tangent-scope`."""
+        if ctx.tvec is None:
+            where = {"const": "a constant", "default": "a default"}.get(
+                ctx.mode, "the state's equations")
+            raise Refusal("tangent-scope", f"{name} is a component of the "
+                          f"tangent vector {vec}, and {where} cannot read a "
+                          f"tangent: the state never depends on its "
+                          f"tangents", line)
+        if vec != ctx.tvec:
+            raise Refusal("tangent-scope", f"{name} is a component of {vec}, "
+                          f"and these are {ctx.tvec}'s equations: one tangent "
+                          f"vector never reads another", line)
+        rest = name[len(vec) + 1:]
+        d = self.names.get(rest)
+        if d is not None and d.kind == "state":
+            if d.length is None:
+                if index is not None:
+                    raise Refusal("array-index", f"{rest} is a scalar; "
+                                  f"{name} takes no index", line)
+                return ("t", d.base)
+            if index is None:
+                raise Refusal("array-index", f"{rest} is an array of "
+                              f"{d.length}: name a component, {name}[i]",
+                              line)
+            k = self.index_value(index, ctx.env, line)
+            return ("t", d.base + self.wrap(d, k, line))
+        fam = ctx.tlabels.get(name) if ctx.tlabels else None
+        if fam is not None:
+            return self.family_value(fam, index, ctx, line)
+        if ctx.mode == "block":
+            raise Refusal("undefined-name", f"{name} is not defined in this "
+                          f"expansion block", line)
+        if d is not None and d.kind == "let":
+            raise Refusal("undefined-name", f"{name}, the tangent of the let "
+                          f"{rest}, is not written: a source that writes "
+                          f"{vec}'s equations writes its tangent lets too "
+                          f"(let {name} = ...)", line)
+        raise Refusal("undefined-name", f"{name} names no component of {vec} "
+                      f"and no tangent let: {rest} is not declared", line)
 
     def undeclared(self, name, ctx, line):
         if name == "h":
@@ -812,6 +985,10 @@ class Checker:
         expr, sline, env = d.defs[comp]
         v = self.eval(expr, ctx.at(env, sline))
         ctx.busy.discard(key)
+        if d.lname is not None:
+            # a written tangent let or label: in the generic tangent
+            # section it carries the label of what it is the tangent of
+            label = d.lname if comp is None else f"{d.lname}[{comp}]"
         if isinstance(v, Node) and v.label is None:
             v.label = label if ctx.prefix is None else f"{ctx.prefix}.{label}"
         d.used_comps.add(comp)
@@ -937,8 +1114,9 @@ class Checker:
 
     # ==== the sections =================================================
 
-    def field_call(self, comps, inputs, prefix):
-        ctx = Ctx("field", inputs=inputs, prefix=prefix)
+    def field_call(self, comps, inputs, prefix, ctx=None):
+        if ctx is None:
+            ctx = Ctx("field", inputs=inputs, prefix=prefix)
         out = {}
         for comp in comps:
             _kind, expr, line, env = self.eqs[comp]
@@ -946,7 +1124,8 @@ class Checker:
         return out
 
     def build_map(self):
-        ctx = Ctx("map", inputs=[("s", i) for i in range(self.n)])
+        ctx = self.map_ctx = Ctx("map", inputs=[("s", i)
+                                               for i in range(self.n)])
         outs = []
         for comp in range(self.n):
             _kind, expr, line, env = self.eqs[comp]
@@ -1075,46 +1254,81 @@ class Checker:
         blk = self.exp_st
         labels = {}
         nexts = {}
+        tlabels = {}            # vector -> {v.k1.x: Decl}
+        tnexts = {}             # vector -> {component: (expr, line)}
         for st in blk.body:
+            name = st.target.name
+            vec = name.split(".", 1)[0] if "." in name else None
+            if vec not in self.tangent_set:
+                vec = None
+            if st.range is not None:
+                raise Refusal("syntax", "an expansion block writes every "
+                              "component out; it takes no for", st.line)
             if st.kind == "let":
-                name = st.target.name
                 if "." not in name:
                     raise Refusal("syntax", f"{name}: an expansion block's "
                                   f"lets are labels of the step, such as "
                                   f"k1.x", st.line)
-                if st.range is not None:
-                    raise Refusal("syntax", "an expansion block writes "
-                                  "every component out; it takes no for",
-                                  st.line)
-                fam = labels.get(name)
-                if fam is None:
-                    fam = labels[name] = Decl("label", name, st.line)
+                if vec is not None:
+                    fams = tlabels.setdefault(vec, {})
+                    fam = fams.get(name)
+                    if fam is None:
+                        fam = fams[name] = Decl("tlet", name, st.line)
+                        fam.lname = name[len(vec) + 1:]
+                else:
+                    fam = labels.get(name)
+                    if fam is None:
+                        fam = labels[name] = Decl("label", name, st.line)
                 self.let_defs(fam, st.target, st.expr, None, st.line)
-            else:
-                if st.range is not None:
-                    raise Refusal("syntax", "an expansion block writes "
-                                  "every component out; it takes no for",
-                                  st.line)
-                for comp, _env in self.targets(st, st.target, None):
-                    if comp in nexts:
-                        raise Refusal(
-                            "duplicate-equation",
-                            f"{self.comp_names[comp]} already has a next "
-                            f"in this block, at line {nexts[comp][1]}",
-                            st.line)
-                    nexts[comp] = (st.expr, st.line)
+                continue
+            where = nexts if vec is None else tnexts.setdefault(vec, {})
+            comps = (self.targets(st, st.target, None) if vec is None
+                     else self.tangent_targets(st, vec))
+            for comp, _env in comps:
+                if comp in where:
+                    shown = self.comp_names[comp] if vec is None else \
+                        f"{vec}.{self.comp_names[comp]}"
+                    raise Refusal("duplicate-equation", f"{shown} already "
+                                  f"has a next in this block, at line "
+                                  f"{where[comp][1]}", st.line)
+                where[comp] = (st.expr, st.line)
         for comp in range(self.n):
             if comp not in nexts:
                 raise Refusal("missing-equation", f"the expansion block "
                               f"gives {self.comp_names[comp]} no next",
                               blk.line)
-        ctx = Ctx("block", inputs=[("s", i) for i in range(self.n)],
-                  labels=labels)
+        for vec in self.tangents:
+            if vec not in tnexts and vec not in tlabels:
+                continue
+            for comp in range(self.n):
+                if comp not in tnexts.get(vec, {}):
+                    raise Refusal("missing-equation", f"the expansion block "
+                                  f"gives {vec}.{self.comp_names[comp]} no "
+                                  f"next: a block writes all of {vec}'s "
+                                  f"lines or none", blk.line)
+        ctx = self.block_ctx = Ctx("block", inputs=[("s", i)
+                                                   for i in range(self.n)],
+                                   labels=labels)
         outs = []
         for comp in range(self.n):
             expr, line = nexts[comp]
             outs.append(self.eval(expr, ctx.at({}, line)))
-        for fam in sorted(labels.values(), key=lambda d: d.line):
+        touts = {}
+        for vec in self.tangents:
+            if vec not in tnexts:
+                continue
+            tctx = Ctx("block", inputs=[("s", i) for i in range(self.n)],
+                       labels=labels)
+            tctx.tvec, tctx.tlabels, tctx.primal = vec, tlabels.get(vec, {}), \
+                ctx
+            touts[vec] = ([self.eval(tnexts[vec][c][0],
+                                     tctx.at({}, tnexts[vec][c][1]))
+                           for c in range(self.n)],
+                          [tnexts[vec][c][1] for c in range(self.n)],
+                          tctx.tlabels)
+        fams = list(labels.values()) + [f for vec in tlabels
+                                        for f in tlabels[vec].values()]
+        for fam in sorted(fams, key=lambda d: d.line):
             for comp in sorted(fam.defs, key=lambda c: -1 if c is None else c):
                 if comp not in fam.used_comps:
                     label = fam.name if comp is None else f"{fam.name}[{comp}]"
@@ -1122,13 +1336,28 @@ class Checker:
                                   f"{fam.defs[comp][1]}) is never used, and "
                                   f"every operation written is performed",
                                   fam.defs[comp][1])
-        return outs, nexts, labels
+        return outs, nexts, labels, touts
 
-    def block_compare(self, field_outs, expansion_outs, built):
+    def block_compare(self, field_outs, expansion_outs, built, tangent):
         """Hold a written-out expansion block to the template's
         expansion, byte for byte; a difference is named at the first
         label, in the order the canonical form writes them, whose
-        definition differs."""
+        definition differs. Then each vector whose tangent lines the
+        block writes, to the derivation of the step (`tangent-mismatch`)."""
+        outs, nexts, labels, touts = built
+        self.block_primal_compare(field_outs, expansion_outs,
+                                  (outs, nexts, labels))
+        step_lines = [nexts[c][1] for c in range(self.n)]
+        for vec, (vals, lines, fams) in touts.items():
+            self.tangent_compare(
+                "tangent_step", vec,
+                self.assemble(field_outs, expansion_outs, tangent=tangent),
+                self.assemble(field_outs, outs, step_lines,
+                              tangent=(tangent[0], vals),
+                              tangent_lines=(None, lines)),
+                lines, fams, self.exp_st.line)
+
+    def block_primal_compare(self, field_outs, expansion_outs, built):
         from .render import definitions
         outs, nexts, labels = built
         blk = self.exp_st
@@ -1167,6 +1396,113 @@ class Checker:
                         break
         raise Refusal("expansion-mismatch", f"the written-out step is not "
                       f"{self.integ}'s expansion: {why}", line)
+
+    # ==== the tangent ===================================================
+
+    def tangent_build(self, field_outs, step_outs):
+        """The derivation of the field and the step (tangent.py), and
+        each vector's written tangent equations held to it. -> (tangent
+        field outputs or None, tangent step outputs), or None without
+        tangent vectors."""
+        if not self.tangents:
+            return None
+        line = self.tangent_items[0][1]
+        zero = self.leaf(K(0), line)
+        one = self.leaf(K(1), line)
+
+        def fold(op, leaves):
+            # a rule on constants alone is a constant expression: folded
+            # exactly, as the language folds any, and rounded once
+            ks = [K(key[0]) if key[1] is None else K(key[1], 1)
+                  for _c, key in leaves]
+            return self.leaf(self.fold(op, ks, line), line)
+
+        def derived(outs):
+            ts = Derivation(zero, one, fold).derive(outs)
+            return [K(0) if t is None else t for t in ts]
+        tf = derived(field_outs) if self.is_flow else None
+        ts = derived(step_outs)
+        written = {vec: self.tangent_equations(vec) for vec in self.tangents
+                   if vec in self.tan_eq_stmts}
+        if written:
+            # a param or lane param a written tangent equation reads, and
+            # the equations do not, has its default rounded now - so that
+            # the difference is refused as one, by name
+            self.defaults()
+        for vec, (vals, lines) in written.items():
+            fams = self.tan_lets.get(vec, {})
+            want = self.assemble(field_outs, step_outs, tangent=(tf, ts))
+            if self.is_flow:
+                got = self.assemble(field_outs, step_outs, tangent=(vals, ts),
+                                    tangent_lines=(lines, None))
+                self.tangent_compare("tangent_field", vec, want, got, lines,
+                                     fams, self.tan_eq_stmts[vec][0].line)
+            else:
+                got = self.assemble(field_outs, step_outs, tangent=(tf, vals),
+                                    tangent_lines=(None, lines))
+                self.tangent_compare("tangent_step", vec, want, got, lines,
+                                     fams, self.tan_eq_stmts[vec][0].line)
+        return tf, ts
+
+    def tangent_equations(self, vec):
+        """A vector's written tangent equations, evaluated in its tangent
+        context: (the outputs in component order, each one's line)."""
+        sts = self.tan_eq_stmts[vec]
+        eqs = {}
+        for st in sts:
+            for comp, env in self.tangent_targets(st, vec):
+                if comp in eqs:
+                    raise Refusal("duplicate-equation", f"{vec}."
+                                  f"{self.comp_names[comp]} already has an "
+                                  f"equation, at line {eqs[comp][1]}",
+                                  st.line)
+                eqs[comp] = (st.expr, st.line, env)
+        for comp in range(self.n):
+            if comp not in eqs:
+                raise Refusal("missing-equation", f"{vec}."
+                              f"{self.comp_names[comp]} has no equation: a "
+                              f"source writes all of {vec}'s tangent "
+                              f"equations or none", sts[0].line)
+        ctx = Ctx("field" if self.is_flow else "map",
+                  inputs=[("s", i) for i in range(self.n)])
+        ctx.tvec = vec
+        ctx.tlabels = self.tan_lets.get(vec, {})
+        ctx.primal = self.field_ctx if self.is_flow else self.map_ctx
+        vals = [self.eval(eqs[c][0], ctx.at(eqs[c][2], eqs[c][1]))
+                for c in range(self.n)]
+        return vals, [eqs[c][1] for c in range(self.n)]
+
+    def tangent_compare(self, section, vec, want, got, out_lines, fams,
+                        line):
+        """A written tangent part against the derivation, byte for byte;
+        a difference is named at the first label or component, in the
+        order the canonical form writes them, whose definition differs."""
+        if want.to_bytes() == got.to_bytes():
+            return
+        from .render import tangent_definitions
+        a = tangent_definitions(want, section, vec)
+        b = tangent_definitions(got, section, vec)
+        lines = {}
+        for fam in fams.values():
+            for comp, (_e, ln, _v) in fam.defs.items():
+                lines[fam.name if comp is None else f"{fam.name}[{comp}]"] = ln
+        for c, comp in enumerate(self.comp_names):
+            lines.setdefault(f"{vec}.{comp}", out_lines[c])
+        why = "the bytes differ"
+        for name, text in a.items():
+            if b.get(name) != text:
+                why = (f"{name} is {b[name]} here, and {text} in the "
+                       f"derivation" if name in b else
+                       f"{name} = {text} is missing")
+                line = lines.get(name, line)
+                break
+        else:
+            extra = [n for n in b if n not in a]
+            if extra:
+                why = f"{extra[0]} is not in the derivation"
+                line = lines.get(extra[0], line)
+        raise Refusal("tangent-mismatch", f"the tangent written for {vec} is "
+                      f"not the derivation's: {why}", line)
 
     # ==== the graph ====================================================
 
@@ -1208,15 +1544,25 @@ class Checker:
                         found.append((ln, f"the let {label} is never used"))
         if self.h_line is not None and not self.h_used:
             found.append((self.h_line, "h is declared and never used"))
+        for fams in self.tan_lets.values():
+            for d in fams.values():
+                for comp, (_e, ln, _env) in d.defs.items():
+                    if comp not in d.used_comps:
+                        label = d.name if comp is None else f"{d.name}[{comp}]"
+                        found.append((ln, f"the tangent let {label} is "
+                                          f"never used"))
         if found:
             line, what = min(found, key=lambda t: t[0])
             raise Refusal("unused", f"{what}, and every operation written "
                           f"is performed", line)
 
-    def assemble(self, field_outs, step_outs, step_lines=None):
+    def assemble(self, field_outs, step_outs, step_lines=None, tangent=None,
+                 tangent_lines=(None, None)):
         """The step graph of these outputs. A constant output is rounded
         here, refused at its equation's line (a flow's step at the step
-        line, or the block's `next` line)."""
+        line, or the block's `next` line). With `tangent`, (the tangent
+        field's outputs or None, the tangent step's), the graph is
+        version 2: the primal sections as without it, then the tangent's."""
         eq_lines = [self.eqs[c][2] for c in range(self.n)]
 
         def leafy(vals, lines):
@@ -1227,8 +1573,16 @@ class Checker:
         if step_lines is None:
             step_lines = ([self.step_st.line] * self.n if self.is_flow
                           else eq_lines)
-        sections, keys = canonical({"field": leafy(field_outs, eq_lines),
-                                    "step": leafy(step_outs, step_lines)})
+        sections = {"field": leafy(field_outs, eq_lines),
+                    "step": leafy(step_outs, step_lines)}
+        cross = None
+        if tangent is not None:
+            tf, ts = tangent
+            tf_lines, ts_lines = tangent_lines
+            sections["tangent_field"] = leafy(tf, tf_lines or eq_lines)
+            sections["tangent_step"] = leafy(ts, ts_lines or step_lines)
+            cross = PRIMAL_OF
+        sections, keys = canonical(sections, cross)
         const = [(v, fa) + self.rounded[(v, fa)] for v, fa in keys]
         param = []
         for d in self.params:
@@ -1243,7 +1597,10 @@ class Checker:
         state = [(d.name, d.length) for d in self.state_decls]
         return StepGraph(self.sys_st.word, self.fmt, self.rnd, state, lane,
                          param, (self.integ, self.h_value, self.options),
-                         const, sections["field"], sections["step"])
+                         const, sections["field"], sections["step"],
+                         self.tangents if tangent is not None else (),
+                         sections.get("tangent_field"),
+                         sections.get("tangent_step"))
 
     def run(self):
         self.collect()
@@ -1254,7 +1611,9 @@ class Checker:
         self.lets()
         if self.is_flow:
             leaves = [("s", i) for i in range(self.n)]
-            field = self.field_call(range(self.n), leaves, None)
+            self.field_ctx = Ctx("field", inputs=leaves)
+            field = self.field_call(range(self.n), leaves, None,
+                                    ctx=self.field_ctx)
             field_outs = [field[c] for c in range(self.n)]
             if self.integ == "stormer-verlet":
                 self.separable(field)
@@ -1263,16 +1622,17 @@ class Checker:
             field_outs = None
             step_outs = self.build_map()
         self.defaults()
+        tangent = self.tangent_build(field_outs, step_outs)
         built = self.block_build() if self.exp_st is not None else None
         self.unused()
-        graph = self.assemble(field_outs, step_outs)
+        graph = self.assemble(field_outs, step_outs, tangent=tangent)
         slots = len(graph.param) + len(graph.const)
         if slots > BANK_SLOTS:
             raise Refusal("bank-capacity", f"{len(graph.param)} params and "
                           f"{len(graph.const)} constants: the bank holds "
                           f"{BANK_SLOTS} on every device")
         if built is not None:
-            self.block_compare(field_outs, step_outs, built)
+            self.block_compare(field_outs, step_outs, built, tangent)
         return graph
 
 
