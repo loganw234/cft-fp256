@@ -2235,7 +2235,12 @@ against an unknown. One thing produces it: a remote server whose
 whose `VERSION` predates them, which is every card-day 0x410 image.
 
 `max_consts` is the number of constants an instruction can *address*,
-not the `n_consts` a header may declare. The `ka`/`kb`/`kc` bits
+not the `n_consts` a header may declare, which may be more - up to 512,
+the most any instruction addresses. Since 2026-10-01 `cft_program_load`
+refuses an `n_consts` above 512 on every device, by name and as
+`CFT_ERR_UNSUPPORTED`, as the golden model does: a tile refuses that
+image as well, but at its header check, after it has crossed, with
+`STATUS[3]` and no explanation. The `ka`/`kb`/`kc` bits
 redirect four-bit operand fields at the constant bank, so the answer was
 16 on the tile and 16 here until 2026-09-07, when `kx`
 (docs/SEQUENCER.md) gave an instruction 8-bit indices in its immediate:

@@ -720,6 +720,13 @@ the hardware does not have to be:
   nested `REPEAT 0xffffffff` fit in 104 bytes and describe 3.4e38
   iterations, which terminates in the same sense the heat death of the
   universe does. The loader multiplies the nest out and refuses.
+- a header whose **`n_consts` is above 512**, the deepest bank nine
+  index bits under `kx` address (since 2026-10-01: the model's loader,
+  then `cft_program_load` on every device, as `CFT_ERR_UNSUPPORTED`).
+  A tile refuses such an image too, at its header check, but only
+  after the image has crossed, with `STATUS[3]` and no explanation. At
+  or below 512 a header may still declare more constants than its
+  instructions name.
 - a constant index outside the bank, a **scratch slot at or past
   `SCRATCH_D` in a `STL` or `LDL`**, a reserved bit, a set bit in the
   header's `flags[31:3]`, a non-zero `scratch_io` word without

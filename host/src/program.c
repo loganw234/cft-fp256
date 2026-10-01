@@ -99,11 +99,17 @@
  * 2^32-1 is therefore the honest report: it is the largest n_insns a
  * 32-bit header field can express.
  *
- * max_consts is the number of constants an instruction can ADDRESS,
- * which is the four-bit ka/kb/kc operand field's reach and is the
- * same 16 in the tile (rtl/cft_seq.sv's KREG). It is not the header's
- * n_consts, which may legally be larger and simply leaves the excess
- * unreachable. */
+ * max_consts is the number of constants an instruction can ADDRESS:
+ * sixteen through the four-bit ka/kb/kc fields, and under kx, with
+ * revision 3's ninth index bits, 512 - the same 512 a tile of
+ * revision 3 or later publishes (rtl/cft_seq.sv's KREG, which is its
+ * KMEM_D). That is also the deepest bank a header can declare, and
+ * since 2026-10-01 cft_program_load refuses an n_consts above it on
+ * every device, by name, as the golden model's loader does: no
+ * instruction addresses a constant past it, and a tile refuses such
+ * an image at its header check only after the image has crossed. At
+ * or below 512 a header may still declare more constants than its
+ * instructions name; the rest are simply unaddressed. */
 #define SEQ_MAX_DEPOSITS (1uL << 20)
 #define SEQ_IMAGE_INSNS  0xFFFFFFFFu
 #define SEQ_ADDR_CONSTS  512u  /* with kx (2026-09-07) an instruction's
@@ -900,9 +906,10 @@ static cft_status seq_check_caps(cft_device *dev, uint32_t n_insns,
  *
  * Separate from the header check above because these are properties of
  * the instruction stream rather than of the header: a program may
- * declare more constants than it can reach (they are simply
- * unreachable), and what a device refuses to execute is a reference
- * past its bank. Structurally impossible on a device that addresses
+ * declare more constants than a device reaches (up to the 512 any
+ * instruction can, past which cft_program_load refuses the header
+ * itself; the rest are simply unreachable), and what a device refuses
+ * to execute is a reference past its bank. Structurally impossible on a device that addresses
  * all sixteen a four-bit field reaches, which is every device shipped
  * so far; it becomes real for a trimmed tile that publishes fewer, and
  * for the wide constant index CAPS[4] publishes.
@@ -1267,6 +1274,35 @@ CFT_API cft_status cft_program_load(cft_device *dev, const void *image,
     st = seq_check_caps(dev, n_insns, maxdep);
     if (st != CFT_OK)
         return st;
+    /* The bank's depth, on every device, before any backend sees the
+     * image (2026-10-01; golden-first, seq.py's validate refuses it
+     * too). 512 is what nine index bits under kx address, so no
+     * instruction can read a constant past it and no tile holds one:
+     * KMEM_D is fixed by the encoding, not by a build. A tile REFUSES
+     * an image that declares more, at its header check - with STATUS[3]
+     * and no explanation, after the image has crossed. Until this date
+     * the library loaded such an image, ran it on the software backend
+     * and handed it to that refusal on a card.
+     *
+     * CFT_ERR_UNSUPPORTED, the status of the capacity refusals beside
+     * it - an instruction count or a deposit budget past the device's -
+     * and of the tile's own STATUS[3] for this image (backend_xrt.cpp).
+     * Not CFT_ERR_ARTIFACT: the image is well formed, its bytes exactly
+     * what its header describes, and what it asks for is a bank no
+     * device has. Not cft_seq_cap_refusal either, whose sentence says
+     * "this device's is": 512 is every device's ceiling, whatever one
+     * publishes as max_consts, so the sentence names the reach. */
+    if (n_consts > SEQ_ADDR_CONSTS) {
+        cft_set_error("this image's header declares %lu constants "
+                      "(n_consts), and an instruction addresses at most "
+                      "%lu - nine index bits under kx - so no device holds "
+                      "a bank that deep: a tile refuses the image at its "
+                      "header check, after it has crossed, with STATUS[3] "
+                      "and no explanation",
+                      (unsigned long)n_consts,
+                      (unsigned long)SEQ_ADDR_CONSTS);
+        return CFT_ERR_UNSUPPORTED;
+    }
     /* The library's own absolute ceiling on a deposit budget, which is
      * about what this process can represent rather than about any
      * device. Only reachable when the device published no cap of its

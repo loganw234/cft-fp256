@@ -5550,6 +5550,79 @@ int main(void)
                   CFT_ERR_ARTIFACT, "is 40 bytes", "describes 4294967336",
                   "536870913 x 8 of instructions");
 
+        /* The bank's depth (2026-10-01; golden-first, seq.py's validate
+         * refuses it too). An n_consts above 512 - the deepest bank nine
+         * index bits under kx reach - is refused at load on every
+         * device, CFT_ERR_UNSUPPORTED as the capacity refusals beside it
+         * are, naming the count and the reach. Until this date the
+         * library loaded such an image, ran it on the software backend
+         * and handed it to a tile, which refused it at its header check
+         * with STATUS[3] (measured at 575a819: 513, 600 and 70,000 loaded
+         * and ran, in the image and under BANK_EXT). Held at 513 and 600
+         * in both forms, and at 512 in both: that loads and runs and
+         * reads K[511], so the boundary is the bank's and not one below
+         * it. A self-contained 600 is 2,456 bytes at fp32, past img[]. */
+        {
+            static uint8_t deep[32 + 600 * 4 + 3 * 8];
+            static uint8_t kbank[512 * 4];
+            static const uint64_t rd[3] = {
+                /* add r4 = r0 + K[511]: kc and kx, the index's low byte
+                 * in imm[23:16] and its ninth bit in imm[30] */
+                LD_ALU(1, 4, 0, 0, 0, 0, 4u | LD_KX,
+                       (0xFFu << 16) | (1u << 30)),
+                LD_CTL(3, 0, 4, 0, 0, 0, 0, 0),         /* deposit r4 */
+                LD_HALT };
+            static const uint32_t past[2] = { 513u, 600u };
+            uint8_t a2[8], d2[8];
+            char what[64], says[64];
+            int ext;
+            size_t j;
+
+            put32(a2, 0x3f800000u);                      /* 1.0 */
+            put32(a2 + 4, 0x40000000u);                  /* 2.0 */
+            memset(kbank, 0, sizeof kbank);
+            put32(kbank + 511 * 4, 0x43ff8000u);         /* K[511] = 511.0 */
+            for (ext = 0; ext < 2; ext++) {
+                const uint32_t fe = ext ? CFT_PROG_FLAG_BANK_EXT : 0u;
+                const char *form = ext ? "under BANK_EXT" : "in the image";
+
+                n = ld_image(deep, 0x50544643u, 1, CFT_FP32, 4, fe, 0, 1,
+                             512u, rd, 3);
+                if (!ext)
+                    memcpy(deep + 32, kbank, sizeof kbank);
+                lp = NULL;
+                st = cft_program_load(dev, deep, n, &lp);
+                CHECK(st == CFT_OK && lp != NULL,
+                      "a header of 512 constants %s must load: %s (%s)",
+                      form, cft_strerror(st), cft_last_error());
+                if (st == CFT_OK) {
+                    memset(d2, 0, sizeof d2);
+                    st = ext ? cft_program_run_bank(lp, kbank, sizeof kbank,
+                                                    a2, NULL, NULL, d2,
+                                                    NULL, 2, NULL, NULL)
+                             : cft_program_run(lp, a2, NULL, NULL, d2, NULL,
+                                               2, NULL, NULL);
+                    CHECK(st == CFT_OK && get32(d2) == 0x44000000u &&
+                          get32(d2 + 4) == 0x44004000u,
+                          "512 constants %s: 1 + K[511] and 2 + K[511] "
+                          "must be 512 and 513: %s 0x%08x 0x%08x", form,
+                          cft_strerror(st), get32(d2), get32(d2 + 4));
+                    cft_program_free(lp);
+                }
+                for (j = 0; j < 2; j++) {
+                    n = ld_image(deep, 0x50544643u, 1, CFT_FP32, 4, fe, 0,
+                                 1, past[j], rd, 3);
+                    snprintf(what, sizeof what, "a header of %lu constants "
+                             "%s", (unsigned long)past[j], form);
+                    snprintf(says, sizeof says, "declares %lu constants "
+                             "(n_consts)", (unsigned long)past[j]);
+                    ld_expect(dev, dev, what, deep, n, 1, CFT_ERR_UNSUPPORTED,
+                              says, "addresses at most 512",
+                              "no device holds a bank that deep");
+                }
+            }
+        }
+
         /* The entry clear, which is what nothing above can see. A good
          * load leaves the library's slot empty, so cft_last_error() is
          * then exactly backend_words(): nothing in a build without a
@@ -5574,7 +5647,7 @@ int main(void)
         printf("  program load: %lu refusals, each its status and a "
                "sentence of its own after an earlier call's; a good "
                "load clears the library's slot\n",
-               (unsigned long)(sizeof L / sizeof L[0] + 7u));
+               (unsigned long)(sizeof L / sizeof L[0] + 11u));
     }
 
     cft_close(dev);
