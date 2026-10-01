@@ -103,13 +103,21 @@ def check_stage_counts(problems, root):
     # Every count a sentence can spell from twenty to ninety-nine, made
     # from the number words below rather than listed. The list this
     # replaced stopped at forty-five, so THIS branch passed a spelled
-    # count past it. The docs check did not: check_prose_counts, below,
-    # reads every spelled stage count in the same four files, and at
-    # 575a819 it failed a planted "forty-seven runner stages" against 46
-    # (verifier-VL2, 2026-10-01; the language round's L2 had measured this
-    # function alone and called such a count unchecked, which was wrong).
-    # So this widens one branch that another already covered; the control
-    # "ninety-eight runner stages" in CONTROLS holds this branch itself.
+    # count past it. This branch reads a count spelled in lower-case
+    # words directly before "stages" or "runner stages" on one line.
+    # check_prose_counts, below, reads a count in digits or words, in any
+    # case and across a line break, directly before "stages", "gate
+    # stages" or "runner stages", in the same four files (and passes one
+    # near "pipe", "fma", "core" or "deep") - and at 575a819 it failed a
+    # planted "forty-seven runner stages" against 46 (verifier-VL2,
+    # 2026-10-01; the language round's L2 had measured this function
+    # alone and called such a count unchecked, which was wrong). A count
+    # with any other word before "stages" is read by neither: a planted
+    # "forty-eight verification stages" passes the whole check (verifier-
+    # VL2's re-check; measured again with "48 verification stages",
+    # 2026-10-01). So this widens one branch that another already covered
+    # for those phrasings; the control "ninety-eight runner stages" in
+    # CONTROLS holds this branch itself.
     WORDS = {}
     for tens_word, tens in WORD_TENS.items():
         WORDS[tens] = tens_word

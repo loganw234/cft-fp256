@@ -30,7 +30,11 @@ many lanes and at several step counts: the image's REPEAT patched to 1,
      image on its classic bank equal to the compiled one on its own and
      to the interpreter, and the costs side by side, pinned
   C  the halved bank against lang.run at h/2; every param's slot at a
-     random value against lang.run on those encodings
+     random value against lang.run on those encodings; values past
+     Python's 4,300-digit limit (a const of 1e-5000 and an h of 1e-4400
+     at fp256, a param's and a lane param's 5,000-digit defaults, a
+     5,000-digit run value), compiled, their exact values read back from
+     the manifest, and run against lang.run
   D  resume: one segment of 2S equals two of S
   E  libcft's software backend: cft-segrun certifies each compiled
      reference (a main run, a half-step run on the halved bank, a
@@ -541,13 +545,14 @@ def leg_references(rng):
                 # At F = 8 every right-hand side is F - x_i plus a product,
                 # so a subnormal state is lost in a result near F and nothing
                 # tiny is rounded: this lane raises inexact alone, at every
-                # format (measured). Leg C runs it at F = 0, where it
-                # underflows.
+                # format (measured, and asserted here). Leg C runs it at
+                # F = 0, where it underflows.
                 r1 = lang.run(c.graph, [specials[2]], REFS[base])
-                check(not r1.flags & sf.FLAG_UNDERFLOW,
-                      f"{base} {fmt}: the subnormal lane raises no underflow "
-                      f"at F = 8 (FLAGS {r1.flags:#x}); leg C runs it at "
-                      f"F = 0")
+                check(r1.flags == sf.FLAG_INEXACT,
+                      f"{base} {fmt}: the subnormal lane raises inexact "
+                      f"alone at F = 8 (FLAGS {r1.flags:#x}); leg C runs it "
+                      f"at F = 0",
+                      f"FLAGS {r1.flags:#x}, not {sf.FLAG_INEXACT:#x}")
             if fmt in ("fp64", "fp256"):
                 classic = (PROGRAMS / f"{base}-{fmt}.classic.bank") \
                     .read_bytes()
@@ -939,6 +944,152 @@ def leg_banks(rng):
               f"{K.bits_hex(c.ir.fmt, right)}, where a binary64 route gives "
               f"{K.bits_hex(c.ir.fmt, via64)}",
               f"the slot holds {K.bits_hex(c.ir.fmt, got)}")
+    big_values(rng)
+
+
+# ---- C: values past Python's 4,300-digit limit ------------------------------
+
+# The language holds a constant to 2^+-1048576 and reads a literal at any
+# length, so a const of 1e-5000 or an h of 1e-4400 at fp256 is a system
+# L1's checker, to_bytes and from_bytes all take - and Python's own
+# Fraction() and str() raise ValueError past 4,300 digits. The compiler
+# read and wrote exact values through them until verifier-VL2's re-check
+# (a bare ValueError, exit 1). Each case here is compiled, its exact
+# values read back from the manifest's bytes by the gate's own reader,
+# and its image run against the interpreter.
+
+BIG_STEPS = 20
+
+
+def big_int(text):
+    """A decimal integer at any length, read in chunks below Python's
+    limit - the gate's own reader, not the language's."""
+    n = 0
+    for k in range(0, len(text), 1000):
+        chunk = text[k:k + 1000]
+        n = n * 10 ** len(chunk) + int(chunk)
+    return n
+
+
+def read_frac(text):
+    """p or p/q, as the manifest writes an exact value, at any length."""
+    neg = text.startswith("-")
+    num, _, den = text[neg:].partition("/")
+    v = Fraction(big_int(num), big_int(den) if den else 1)
+    return -v if neg else v
+
+
+def long_decimal(rng, digits):
+    """(text, exact): 1.ddd...d with `digits` significant digits, the last
+    odd and not 5, so that its p/q in lowest terms has `digits` digits in
+    the numerator and in the denominator alike."""
+    body = "".join(rng.choice("0123456789") for _ in range(digits - 2)) + \
+        rng.choice("1379")
+    return "1." + body, Fraction(big_int("1" + body), 10 ** (digits - 1))
+
+
+def big_values(rng):
+    section("C. values past Python's 4,300-digit limit, compiled, read back "
+            "from the manifest, and run against the interpreter")
+    rne = sf.RND_RNE
+    fmt = FORMATS["fp256"]
+
+    def rn(v):
+        return K.bits_hex(fmt, K.round_once(fmt, rne, v)[0])
+    p_text, p_exact = long_decimal(rng, 5000)
+    q_text, q_exact = long_decimal(rng, 5000)
+    r_text, r_exact = long_decimal(rng, 5000)
+    tiny, h = Fraction(1, 10 ** 5000), Fraction(1, 10 ** 4400)
+    cases = [
+        ("a const of 1e-5000",
+         "system bigconst\nformat fp256\nstate x, y\nconst c = 1e-5000\n"
+         "next x = x * c\nnext y = y + c\nstep map\n", None),
+        ("an h of 1e-4400",
+         "system bigh\nformat fp256\nstate x\nd/dt x = -x\n"
+         "step rk4, h = 1e-4400\n", None),
+        ("a param's and a lane param's 5,000-digit defaults",
+         f"system bigdefault\nformat fp256\nstate x, y\nparam p = {p_text}\n"
+         f"lane param q = {q_text}\nnext x = x * p\nnext y = y * q\n"
+         f"step map\n", None),
+        ("a 5,000-digit run value",
+         "system bigrun\nformat fp256\nstate x\nparam p = 2\n"
+         "next x = x * p\nstep map\n", {"p": r_text}),
+    ]
+    for what, text, params in cases:
+        try:
+            c = cftc.compile_text(text, BIG_STEPS, source=what,
+                                  params=params)
+            m = json.loads(c.manifest_bytes)
+        except Exception as e:      # noqa: BLE001 - a crash is the finding
+            bad(f"{what}: cftc raised {type(e).__name__}: {str(e)[:120]}")
+            continue
+        bank = {e["name"]: e for e in m["bank"]}
+        said = []
+        if what.startswith("a const"):
+            e = bank["1e-5000"]
+            said.append(("the const's exact value", read_frac(e["exact"]),
+                         tiny, e["encoding"], rn(tiny)))
+        elif what.startswith("an h"):
+            said.append(("the integrator's h",
+                         read_frac(m["integrator"]["h"]), h, None, None))
+            for e in m["bank"]:
+                if e["h_factor"] is not None and \
+                        read_frac(e["h_factor"]) != 0:
+                    v = read_frac(e["h_factor"]) * h
+                    said.append((f"bank slot {e['slot']} ({e['name']})",
+                                 read_frac(e["exact"]), v, e["encoding"],
+                                 rn(v)))
+                    said.append((f"bank slot {e['slot']} halved", None, None,
+                                 e["halved"], rn(v / 2)))
+        elif what.startswith("a param's"):
+            e = bank["p"]
+            said.append(("p's default", read_frac(e["exact"]), p_exact,
+                         e["encoding"], rn(p_exact)))
+            lp = next(x for x in m["scratch"]["layout"]
+                      if x["name"] == "q")
+            said.append(("q's default", read_frac(lp["default"]), q_exact,
+                         lp["default_encoding"], rn(q_exact)))
+        else:
+            o = m["param_overrides"][0]
+            said.append(("the override's value", read_frac(o["value"]),
+                         r_exact, o["encoding"], rn(r_exact)))
+            said.append(("the override's default", read_frac(o["default"]),
+                         Fraction(2), None, None))
+            said.append(("p's bank slot", None, None, bank["p"]["encoding"],
+                         rn(r_exact)))
+        wrong = [f"{name}: {'value' if got != want else 'encoding'}"
+                 for name, got, want, enc, renc in said
+                 if got != want or enc != renc]
+        longest = max(len(e["exact"]) for e in m["bank"])
+        check(not wrong, f"{what}: the manifest's exact values read back "
+              f"equal to the source's, each encoding RN of its value "
+              f"({len(said)} read; the longest bank value "
+              f"{longest:,} characters)", "; ".join(wrong))
+        n = c.ir.n_state
+        lanes = lanes_for(c.ir.fmt, n, rng, 6)
+        lanes += special_lanes(c.ir.fmt, n, lanes[0], rng)
+        interp = None
+        if params:
+            interp = {"param_bits": {"p": param_slot_bits(c, "p")}}
+        failing, first, fok, ref = compare(c, lanes, None, BIG_STEPS,
+                                           interp=interp)
+        check(not failing and fok, f"{what}: {len(lanes)} lanes at 1, 2, 5 "
+              f"and {BIG_STEPS} steps equal the interpreter (FLAGS "
+              f"{ref.flags:#x})",
+              f"{len(failing)} lanes differ from step {first}, FLAGS "
+              f"{'equal' if fok else 'differ'}")
+        if c.lowered.half_bits is not None:
+            failing, first, fok, ref = compare(
+                c, lanes, None, BIG_STEPS, bank=c.lowered.half_bits,
+                interp={"h": c.ir.integrator[1] / 2})
+            check(not failing and fok, f"{what}: the halved bank equals the "
+                  f"interpreter at h/2 (FLAGS {ref.flags:#x})",
+                  f"{len(failing)} lanes from step {first}")
+
+
+def param_slot_bits(c, name):
+    return next(s.bits for s in c.lowered.slots if s.kind == "param"
+                and c.ir.param[s.index][0] == name)
 
 
 # ---- E: libcft's software backend -----------------------------------------

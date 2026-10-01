@@ -128,7 +128,11 @@ def get(name):
         return BUILTIN[name]
     if isinstance(name, str) and name.startswith("sw:"):
         text = name[3:]
-        if text.isdigit() and text[0] != "0":
+        # ASCII digits, and no more of them than the largest depth has:
+        # str.isdigit() takes a superscript two, which int() refuses, and
+        # int() refuses past 4,300 digits - each a bare ValueError once
+        if text.isascii() and text.isdigit() and text[0] != "0" and \
+                len(text) <= len(str(SCRATCH_DEPTH_MAX)):
             n = int(text)
             if 1 <= n <= SCRATCH_DEPTH_MAX and n & (n - 1) == 0:
                 return _sw(n)

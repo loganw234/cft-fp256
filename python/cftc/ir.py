@@ -16,10 +16,9 @@ sign bit inverted (lower.py).
 
 import hashlib
 import json
-from fractions import Fraction
-
 from cft_golden import FORMATS
 from cft_golden import softfloat as sf
+from cft_golden.lang import constants as K
 
 from .refusals import InternalError
 
@@ -68,17 +67,21 @@ class Graph:
                 self.components.extend(f"{name}[{k}]" for k in range(length))
         self.n_state = len(self.components)
 
+        # Exact values are read as the graph writes them, p or p/q, at any
+        # size: Fraction's own parser stops at Python's 4,300-digit limit,
+        # and the language holds constants to 2^+-1048576, so a const of
+        # 1e-5000 at fp256 is the language's and has 5,001 digits.
         def ex(t):
-            return None if t is None else Fraction(t)
+            return None if t is None else K.parse_frac(t)
 
         def bits(t):
             return None if t is None else int(t, 16)
         self.lane = [(n, ex(d), bits(b)) for n, d, b in obj["lane"]]
-        self.param = [(n, Fraction(d), int(b, 16), int(f))
+        self.param = [(n, K.parse_frac(d), int(b, 16), int(f))
                       for n, d, b, f in obj["param"]]
         name, h, options = obj["integrator"]
         self.integrator = (name, ex(h), options)
-        self.const = [(Fraction(v), ex(fa), int(b, 16), int(f))
+        self.const = [(K.parse_frac(v), ex(fa), int(b, 16), int(f))
                       for v, fa, b, f in obj["const"]]
         step = obj["step"]
         self.nodes = []

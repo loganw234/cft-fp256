@@ -37,14 +37,20 @@ InternalError is a defect in the compiler, never a property of a source.
 
 Known limit: compile time grows faster than the step does, roughly with
 its square for a wide step - the list schedulers scan their ready set at
-every pick, and six candidate orders are scheduled and allocated.
-Measured on the desktop, niced and in use (2026-10-01), for rings of
-the Lorenz-96 kind: 0.3 s at 760 nodes, 3.6 s at 3,800, 14 s at 7,980
-and 58 s at 16,796 (verifier-VL2 measured about 100 s for 16,800 before
-the homed stores were indexed by position).
+every pick, and six candidate orders are scheduled and allocated - and
+it depends on the step's shape as well as its size. Measured on the
+desktop, niced and in use (2026-10-01): rings of the Lorenz-96 kind
+took 0.3 s at 760 nodes, 3.6 s at 3,800, 13.8 s at 7,980 and 58.2 s at
+16,796 (verifier-VL2: 15.1 s and 60.5 s for the last two). Another shape
+of about the same size, verifier-VL2's 8-component map of 1,050-term
+sums, which spills 3,063 values, took about 100 s before the homed
+stores were indexed by position and 97.4 s after (verifier-VL2's
+figures): the index did not change it.
 """
 
 import hashlib
+import re
+from fractions import Fraction
 from pathlib import Path
 
 from cft_golden import asm, seq
@@ -163,7 +169,9 @@ def _param_bits(graph, params, source):
     read by the language itself, as the default of a param of a one-line
     system, so it is exactly what the same text written as a default
     would be - a decimal read exactly, a/b a constant division, never
-    binary64 - and refused by the same names."""
+    binary64 - and refused by the same names. A Python int or Fraction
+    is written out exactly first, at any size; a float is refused, being
+    binary64 already, and so is text of more than one line."""
     if not params:
         return None
     names = [p[0] for p in graph.param]
@@ -176,13 +184,37 @@ def _param_bits(graph, params, source):
             raise lang.Refusal("param-value", f"{name}'s run value is a "
                                f"Python float, which is binary64 already: "
                                f"give it as text", source=source)
-        text = (f"system runvalue\nformat {graph.fmt.name}\n"
-                f"round {graph.round_name}\nstate x\n"
-                f"param v = {value}\nnext x = x * v\nstep map\n")
+        if isinstance(value, (int, Fraction)) and \
+                not isinstance(value, bool):
+            value = K.frac_text(value)      # exact, at any size: str() is not
+        if not isinstance(value, str):
+            raise lang.Refusal("param-value", f"{name}'s run value is a "
+                               f"{type(value).__name__}: give it as text",
+                               source=source)
+        if "\n" in value or "\r" in value:
+            raise lang.Refusal("param-value", f"{name}'s run value is more "
+                               f"than one line: give a constant",
+                               source=source)
+        # The one-line system names the param itself, so that a refusal's
+        # sentence names it too (it said "v's default" once); its state is
+        # a name the value does not use, so that a value naming one is
+        # refused as naming something undeclared, not as naming the state
+        # of a system the writer never wrote.
+        taken = set(re.findall(r"[A-Za-z_]\w*", value)) | {name}
+        state = next(s for s in ["x", "y", "z"] +
+                     [f"x{k}" for k in range(len(taken) + 1)]
+                     if s not in taken)
+        system = "runvalue" if name != "runvalue" else "runvalues"
+        text = (f"system {system}\nformat {graph.fmt.name}\n"
+                f"round {graph.round_name}\nstate {state}\n"
+                f"param {name} = {value}\nnext {state} = {state} * {name}\n"
+                f"step map\n")
         try:
             g1 = lang.compile_text(text, f"--param {name}").graph
         except lang.Refusal as e:
-            raise lang.Refusal(e.name, f"--param {name}={value}: "
+            shown = value if len(value) <= 48 else \
+                f"{value[:24]}...{value[-12:]} ({len(value):,} characters)"
+            raise lang.Refusal(e.name, f"--param {name}={shown}: "
                                f"{e.sentence}", source=source) from None
         _n, exact, bits, flags = g1.param[0]
         out[names.index(name)] = (bits, flags, exact)

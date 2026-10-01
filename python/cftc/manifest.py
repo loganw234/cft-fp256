@@ -6,7 +6,9 @@ newline, the same bytes for the same source on every machine.
 
 Every exact value, encoding, flag and relative error is spelt by the
 language's own constants code (cft_golden.lang.constants), so the
-manifest and the canonical form say the same numbers.
+manifest and the canonical form say the same numbers - an exact value as
+the step graph writes it, p or p/q, through frac_text, at any size
+(str() of a Fraction stops at Python's 4,300-digit limit).
 """
 
 import json
@@ -65,7 +67,7 @@ def time_shift(g):
     for text, k, factor in SHIFTS[integ]:
         bits, _ = K.round_once(fmt, rnd, factor * h)
         shift = k * K.value_of(fmt, bits) / vh - 1
-        out.append({"expression": text, "exact": str(shift),
+        out.append({"expression": text, "exact": K.frac_text(shift),
                     "value": K.sig(shift)})
     return out
 
@@ -90,7 +92,8 @@ def build(c):
         r = prog.pinned.get(("l", j))
         layout.append({"slot": g.n_state + j, "name": name,
                        "kind": "lane param",
-                       "default": None if default is None else str(default),
+                       "default": None if default is None
+                       else K.frac_text(default),
                        "default_encoding": None if bits is None
                        else _hex(fmt, bits),
                        "pinned": None if r is None else f"r{r}"})
@@ -102,8 +105,8 @@ def build(c):
             e["const"] = K.literal(g.const[s.index][0])
         if s.kind == "param":
             e["default"] = s.default
-        e["exact"] = str(s.exact)
-        e["h_factor"] = None if s.factor is None else str(s.factor)
+        e["exact"] = K.frac_text(s.exact)
+        e["h_factor"] = None if s.factor is None else K.frac_text(s.factor)
         e["encoding"] = _hex(fmt, s.bits)
         e["value"] = _value_text(fmt, s.bits)
         e["flags"] = flag_words(s.flags)
@@ -111,9 +114,9 @@ def build(c):
         if low.half_bits is not None and k in low.h_slots:
             e["halved"] = _hex(fmt, low.half_bits[k])
         bank.append(e)
-    overrides = [{"name": g.param[s.index][0], "value": str(s.exact),
+    overrides = [{"name": g.param[s.index][0], "value": K.frac_text(s.exact),
                   "encoding": _hex(fmt, s.bits),
-                  "default": str(g.param[s.index][1])}
+                  "default": K.frac_text(g.param[s.index][1])}
                  for s in low.slots if s.kind == "param" and not s.default]
     integ, h, opts = g.integrator
     m = {
@@ -126,7 +129,7 @@ def build(c):
         "format": g.fmt_name,
         "round": g.rnd_name,
         "integrator": {"name": integ,
-                       "h": None if h is None else str(h),
+                       "h": None if h is None else K.frac_text(h),
                        "options": opts},
         "steps": c.steps,
         "target": c.target.describe(),

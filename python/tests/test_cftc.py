@@ -239,6 +239,24 @@ def test_a_param_run_value_is_read_as_the_language_reads_it():
         cftc.compile_file(SYSTEMS / "lorenz63-rk4-fp64.cftl", 3,
                           params={"sigma": "1e400"})
     assert e.value.name == "constant-overflow"
+    # the param named, not the one-line system's own name for it ("v")
+    assert e.value.sentence.startswith("--param sigma=1e400: sigma's "), \
+        e.value.sentence
+    # a value naming something names nothing the one-line system declared
+    # (it was refused as naming that system's state, x)
+    with pytest.raises(lang.Refusal) as e:
+        cftc.compile_file(SYSTEMS / "lorenz63-rk4-fp64.cftl", 3,
+                          params={"sigma": "x"})
+    assert e.value.name == "undefined-name", e.value.sentence
+    with pytest.raises(lang.Refusal) as e:
+        cftc.compile_file(SYSTEMS / "lorenz63-rk4-fp64.cftl", 3,
+                          params={"sigma": "1\nnext x = 0"})
+    assert e.value.name == "param-value", e.value.sentence
+    # a Python int is exact at any size: str() of it stops at 4,300 digits
+    c = cftc.compile_file(SYSTEMS / "lorenz63-rk4-fp256.cftl", 3,
+                          params={"sigma": 10 ** 5000})
+    o = c.manifest["param_overrides"][0]
+    assert K.parse_frac(o["value"]) == 10 ** 5000
 
 
 @pytest.mark.parametrize("fmt, text, exact", [
@@ -300,6 +318,99 @@ def test_a_source_is_taken_as_bytes(tmp_path):
     same = cftc.compile_text((SYSTEMS / "henonheiles-lf-fp64.cftl")
                              .read_bytes(), 3, stem="h", source="h.cftl")
     assert same.files() == good.files()
+
+
+def _long_decimal(seed, digits=5000):
+    """(text, exact): 1.ddd...d with `digits` significant digits, the last
+    odd and not 5, so its p/q has `digits` digits above and below - read
+    here in chunks under Python's limit, not by the language's reader."""
+    rng = random.Random(seed)
+    body = "".join(rng.choice("0123456789") for _ in range(digits - 2)) + \
+        rng.choice("1379")
+    n = 0
+    whole = "1" + body
+    for k in range(0, len(whole), 1000):
+        chunk = whole[k:k + 1000]
+        n = n * 10 ** len(chunk) + int(chunk)
+    return "1." + body, Fraction(n, 10 ** (digits - 1))
+
+
+_P, _P_EXACT = _long_decimal("p")
+_R, _R_EXACT = _long_decimal("r")
+BIG = {
+    "const": ("system bigconst\nformat fp256\nstate x, y\n"
+              "const c = 1e-5000\nnext x = x * c\nnext y = y + c\nstep map\n",
+              None),
+    "h": ("system bigh\nformat fp256\nstate x\nd/dt x = -x\n"
+          "step rk4, h = 1e-4400\n", None),
+    "default": (f"system bigdefault\nformat fp256\nstate x\n"
+                f"param p = {_P}\nnext x = x * p\nstep map\n", None),
+    "run value": ("system bigrun\nformat fp256\nstate x\nparam p = 2\n"
+                  "next x = x * p\nstep map\n", {"p": _R}),
+}
+
+
+@pytest.mark.parametrize("case", list(BIG))
+def test_values_past_pythons_digit_limit(case):
+    """The language reads a literal at any length and holds a constant to
+    2^+-1048576, so each of these is a system L1's checker takes - and
+    Python's own Fraction() and str() raise ValueError past 4,300 digits,
+    which the compiler's reader and manifest once met (verifier-VL2: a
+    bare ValueError, exit 1). Each compiles; its manifest writes the
+    exact value, read back here by the language's parse_frac; and its
+    image equals the interpreter on three lanes."""
+    text, params = BIG[case]
+    c = cftc.compile_text(text, 3, params=params)
+    m = json.loads(c.manifest_bytes)
+    bank = {b["name"]: b for b in m["bank"]}
+    if case == "const":
+        got, want = bank["1e-5000"]["exact"], Fraction(1, 10 ** 5000)
+    elif case == "h":
+        got, want = m["integrator"]["h"], Fraction(1, 10 ** 4400)
+        scaled = [b for b in m["bank"] if b["h_factor"] is not None]
+        assert scaled
+        for b in scaled:
+            assert K.parse_frac(b["exact"]) == \
+                K.parse_frac(b["h_factor"]) * want
+    elif case == "default":
+        got, want = bank["p"]["exact"], _P_EXACT
+    else:
+        got, want = m["param_overrides"][0]["value"], _R_EXACT
+        assert bank["p"]["exact"] == got
+    assert len(got) > 4300 and K.parse_frac(got) == want
+    fmt = c.ir.fmt
+    lanes = [[K.round_once(fmt, sf.RND_RNE, Fraction(v, 7))[0]]
+             * c.ir.n_state for v in (3, -11, 100)]
+    pb = None if params is None else \
+        {"p": next(s.bits for s in c.lowered.slots if s.kind == "param")}
+    ref = lang.run(c.graph, lanes, 3, param_bits=pb)
+    r = c.run(lanes)
+    n = c.ir.n_state
+    assert [r.scratch_out[k * c.ir.m:k * c.ir.m + n]
+            for k in range(3)] == ref.states
+    assert r.flags == ref.flags
+
+
+def test_the_command_line_takes_a_value_past_the_digit_limit(tmp_path):
+    """The const case through the command line: exit 0 and the manifest
+    written (it was exit 1, a traceback); and a target `sw:N` whose N is
+    past the limit, or not in ASCII digits, is a usage error, 64."""
+    src = tmp_path / "bigconst.cftl"
+    src.write_bytes(BIG["const"][0].encode("ascii"))
+    py = [sys.executable, str(ROOT / "python" / "cftc")]
+    r = subprocess.run(py + [str(src), "--steps", "3", "--target", "sw",
+                             "--out", str(tmp_path)],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    m = json.loads((tmp_path / "bigconst.manifest.json").read_bytes())
+    assert K.parse_frac(m["bank"][0]["exact"]) == Fraction(1, 10 ** 5000)
+    for name in ("sw:" + "1" * 5000, "sw:\u00b2", "sw:\u0661\u0666"):
+        assert T.get(name) is None
+    r = subprocess.run(py + [str(src), "--steps", "3", "--target",
+                             "sw:" + "1" * 5000, "--out",
+                             str(tmp_path / "x")],
+                       capture_output=True, text=True)
+    assert r.returncode == 64 and "is not a target" in r.stderr, r.stderr
 
 
 @pytest.mark.parametrize("name", ["lorenz63-rk4-fp64", "lorenz96-rk4-fp256",
