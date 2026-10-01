@@ -1137,6 +1137,38 @@ all):
     bindings/wasm/conformance.html 1,398,987 bytes  sha256 2f0eb45ec3f46923...
     bindings/wasm/demos.html         585,089 bytes  sha256 842dbe2f171aa1e6...
 
+### Rebuilt at ABI 0.16, 2026-09-30 (the steps 5 and 6 round) - an error count that cannot clamp
+
+No ABI change. The round changed `mpfloat.c` and `transcend.c`,
+which this module is built from, so it was rebuilt, as every change
+to them requires. The transcendental evaluator's error count now
+carries its own exponent and cannot clamp. Every rule gains the
+second-order terms it lacked, and a scaled-down count rounds up.
+Measured on amd-arc-box over host/tests/transcend_check.py: no
+result changed, and some calls escalate once more (84 escalations
+become 805 at the contract's precision). docs/TRANSCENDENTALS.md
+has the account.
+
+`demos_chains.json` was re-recorded with `verify_demos.mjs --record`,
+after `build.sh` and before `build_demos.sh`, with the five native
+tools built first. A first attempt without them wrote only the
+four runs it could compare; it was restored, and the record repeated
+after `make` built the tools. The record's one FAIL was the stale
+page's, as the order predicts. All 15 chains of the 13
+configurations came back unchanged; the module stamp, the date and
+the timings moved. `verify_demos.mjs` then passed its 48 checks
+against the rebuilt page, and `bindings/node/program_test.mjs` gave
+37 passed, 0 failed. Two clean container builds, with
+`bindings/wasm/build/` removed between them, produced the module,
+`cft_node.js` and the conformance page byte for byte, and the
+negative-control page as well. Two runs of `build_demos.sh` produced
+the same demos page. Still **141 `cftw_*` exports** (149 in all):
+
+    bindings/node/cft_node.wasm      273,335 bytes  sha256 9e6ec560df43da90...
+    bindings/node/cft_node.js         74,146 bytes  sha256 dc845833acf075cb...  (unchanged)
+    bindings/wasm/conformance.html 1,406,871 bytes  sha256 bd2a86fc8b9831fe...
+    bindings/wasm/demos.html         592,968 bytes  sha256 2d3c8bd042a6fde1...
+
 ## A second page: the five workloads, measured (2026-09-04)
 
 `demos.html` is the other deliverable of this directory. Same
