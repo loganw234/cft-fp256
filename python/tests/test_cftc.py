@@ -133,7 +133,7 @@ def test_targets_are_stated():
     assert T.get("u50-rev7").scratch_depth == 2048
     assert T.get("u50-rev7").max_insns == 32768
     assert T.get("u50-round2").scratch_depth == 256
-    assert T.get("sw").seq_features == 0x1ff1f
+    assert T.get("sw").seq_features == 0x7ff1f
     assert T.get("sw:2048").scratch_depth == 2048
     for bad in ("sw:0", "sw:3", "sw:65536", "sw:0256", "u51"):
         assert T.get(bad) is None
@@ -141,6 +141,58 @@ def test_targets_are_stated():
             "WIDE_CONST", "KX9"}
     for t in T.BUILTIN.values():
         assert need <= set(t.features()), t.name
+
+
+def _every_feature_image():
+    """An image needing every feature asm.py's features() can name: kx and
+    KX9 (a constant at index 256), REGS32, BANK_PTR, IMUL, SCRATCH and
+    SCRATCH_IO, and revision 8's AUGADD, SCRATCH_STEP and FLAG_CONTROL."""
+    consts = "".join(f".const K{i}\n" for i in range(257))
+    return asm.assemble_image(
+        ".format fp64\n.deposits 1\n.bank external\n.scratch in 1\n"
+        + consts + "add r1, K256, r2\nimul r17, r1, r2\nstl r1, 0\n"
+        "augadd r3, r1, r2\nstx r1, r2, -1\nquiet\nraise r4\nendquiet\n"
+        "halt\n", "every-feature")
+
+
+def test_revision_8s_bits_are_published_by_sw_alone():
+    """Revision 8's four bits (ABI 0.17, cft.h): the software targets
+    publish them, as libcft's software handle does (0x7ff1f), and no
+    revision-7 target does - so an image needing FLAG_CONTROL (R24), like
+    one needing AUGADD or SCRATCH_STEP, is accepted by `sw` alone, and
+    refused as target-feature, naming the CAPS2 bit, on the others."""
+    r8 = {"AUGADD": "CAPS2[11]", "SCRATCH_STEP": "CAPS2[12]",
+          "LANE_FLAGS": "CAPS2[13]", "FLAG_CONTROL": "CAPS2[14]"}
+    for name, place in r8.items():
+        assert T.CAPS_PLACE[name] == place
+        assert T.get("sw").seq_features & T.FEATURE_BITS[name]
+        assert T.get("sw:2048").seq_features & T.FEATURE_BITS[name]
+        for t in ("u50-rev7", "u50-rev7-quad", "u50-round2", "open-core"):
+            assert name not in T.get(t).features(), (t, name)
+    assert T.FEATURE_BITS["LANE_FLAGS"] == 1 << 17
+    assert T.FEATURE_BITS["FLAG_CONTROL"] == 1 << 18
+    from cftc import manifest as M
+    assert M.accepted_by("fp64", ["FLAG_CONTROL"], 10, 0) == ["sw"]
+    assert M.accepted_by("fp64", ["SCRATCH_STRICT"], 10, 0) == T.names()
+
+
+def test_every_feature_asm_names_is_a_target_bit():
+    """The compiler takes an image's needs from asm.py's features(), keeps
+    those FEATURE_BITS names, and refuses what a target lacks (cftc's
+    target-feature). A name asm.py reports and FEATURE_BITS lacks would be
+    dropped there, and the image accepted where its loader refuses it - so
+    every one maps, FLAG_CONTROL among them."""
+    img = _every_feature_image()
+    feats = img.features()
+    assert feats == ["kx", "REGS32", "BANK_PTR", "KX9", "IMUL", "SCRATCH",
+                     "SCRATCH_IO", "AUGADD", "SCRATCH_STEP", "FLAG_CONTROL"]
+    for f in feats:
+        name = T.ASM_FEATURE.get(f, f)
+        assert name in T.FEATURE_BITS and name in T.CAPS_PLACE, f
+    need = [T.ASM_FEATURE.get(f, f) for f in feats]
+    assert not [f for f in need if f not in T.get("sw").features()]
+    assert [f for f in need if f not in T.get("u50-rev7").features()] == \
+        ["AUGADD", "SCRATCH_STEP", "FLAG_CONTROL"]
 
 
 def test_the_compiler_raises_the_languages_names():
