@@ -336,10 +336,14 @@ the language takes 754's clauses 4.1, 10 and 11 at their strictest:
   three, and how many more: `h - h at line 5 is 0`.
 
 The compiler (L2) may commute the operands of `+` and `*`, share
-identical subexpressions, schedule and allocate freely. None of these
-changes a value or the run's FLAGS: verifier-P1 measured the
-commutations bit for bit, NaN payloads included, and FLAGS is a sticky
-OR.
+identical subexpressions, schedule and allocate freely, and (parcel C4)
+carry a division or a square root as a routine inlined where its node
+stands. None of these changes a value or the run's FLAGS: verifier-P1
+measured the commutations bit for bit, NaN payloads included; FLAGS is
+a sticky OR; and a routine runs quiet and raises exactly its
+operation's flags, held bit for bit, and flag for flag a lane at a
+time, to the golden function at every format and attribute ("The
+operations").
 
 ### The operations
 
@@ -379,9 +383,17 @@ their operands in those functions' order.
   arithmetic node does; `sqrt(-0)` is -0 and the root of +infinity is
   +infinity, neither raising anything; underflow is detected after
   rounding, as everywhere here. A tile has no divide or square-root
-  instruction: the compiler carries them only from parcel C4, and
-  refuses them by name until then (`runtime-routine`, "Every refusal, by
-  name"). The interpreter runs them now.
+  instruction, so the compiler (parcel C4) carries each as a routine
+  inlined where its node stands: divfull's or sqrtfull's own
+  instructions, relocated and specialised at the program's attribute
+  (python/cft_golden/routines.py) - 177 to 191 for a division and 155
+  to 171 for a root, by format and attribute - run in a quiet region,
+  then a raise of a word holding exactly the operation's flags (revision
+  8's flag control, docs/SEQUENCER.md, R24). The routine's internal
+  attributes, such as the division's one truncating fma, are its own,
+  and the source never sees them. An image holding one needs that
+  feature, so revision 7's targets refuse it, `target-feature`, and the
+  software targets compile and run it.
 - **A division by a constant** divides by the constant rounded once:
   `x / 3` is RN(x / RN(3)), the correctly rounded x/3 wherever the
   constant is exact in the format, and never a product by a rounded
@@ -412,8 +424,9 @@ Until 2026-10-02 a division with an operand that is not a constant was
 refused here, `runtime-division`, and a square root, `runtime-sqrt` at
 run time and `irrational-constant` of any constant, `sqrt(4)` included.
 Both are operations now ("The operations"; parcel L4), and both names
-are gone: the compiler refuses the operations by a name of its own,
-`runtime-routine`, until parcel C4 carries them.
+are gone. The compiler refused them by a name of its own,
+`runtime-routine`, until parcel C4 carried them as inlined routines;
+that name went with it.
 
 ## Constants
 
@@ -1573,11 +1586,12 @@ has one, written again where it has none.
   divisions and roots a step, and each vector adds one, `y / p`'s. So T
   vectors add T divisions for every division or root of the step whose
   tangent the step's tangent reads - rk4 with one such division in its
-  right-hand side performs four a step, and each vector adds four. Once
-  the compiler carries a division (parcel C4), as an inlined routine of
-  about 209 ALU instructions at fp64 and 213 at fp256 (divfull, measured
-  by the step-6 survey), that is about 840 instructions a vector a step
-  there.
+  right-hand side performs four a step, and each vector adds four. The
+  compiler carries a division as an inlined routine (parcel C4) of 177
+  to 191 instructions by format and attribute, 186 at fp64 under rne, so
+  there each vector adds about 720 instructions a step: rk4 with
+  `x / fma(x, x, 1)` takes 768 instructions a step, and 1,489 with one
+  vector (measured, C4).
 
 **Reading a primal value.** A rule reads a primal value by name where it
 has one - a state component, a param, a lane param, a constant, a let, a
@@ -2210,15 +2224,19 @@ that the section and the measurement cannot part:
 It takes about 50 s on one core of the desktop, nearly all of it the
 interpreter's own arithmetic.
 
-The compiled images are held to the interpreter by the `tangent` stage
-(`programs/tangent_check.py`; docs/VERIFICATION.md). The compiler's
-interim refusal is held by `python/tests/test_cftc.py` - on every target,
-through each entry point and the command line (exit 3, never 70), and at
-its line where a written tangent, a tangent let or an expansion block
-comes first - and by the `lang` stage's leg K, on generated sources that
-divide or take a root and on their canonical forms with the written-out
-step and the tangent moved above the equations; the rules by the
-`tangent` stage's leg L.
+The compiled images are held to the interpreter by the `lang` and
+`tangent` stages (`programs/lang_check.py`, `programs/tangent_check.py`;
+docs/VERIFICATION.md). Images with routines (parcel C4) are held there
+as any image is: the `lang` stage's leg K compiles generated sources
+that divide or take a root - in equations and lets, with and without
+tangent vectors, under every integrator, format and attribute - for the
+software backend, runs each on seq.py against `lang.run`, bit for bit
+with FLAGS and tangents at several step counts, and holds each refused
+`target-feature` on revision 7's targets and through the command line
+(exit 3, never 70); the `tangent` stage's leg L compiles the quotient's
+and the root's rules the same way. The routines themselves are held to
+softfloat by python/tests/test_routines.py, and their inlining by
+`python/tests/test_cftc.py`.
 
 ## What v1 does not do
 
@@ -2232,25 +2250,28 @@ step and the tangent moved above the equations; the rules by the
   on the tile or the host; certified renormalisation; tangents with
   respect to params or lane params; reverse mode, second derivatives;
   a tangent the state reads.
-- **Run-time division and square root in a compiled program.** The
-  language and its interpreter have them (L4, 2026-10-02); the compiler
-  refuses them by name, `runtime-routine`, until parcel C4 inlines the
-  routines that compute them, divfull and sqrtfull. Spilling the
-  registers around a routine is the least of that - at most 15 of its
-  values are live at once (the step-6 survey, measured). The rest:
+- **Run-time division and square root on revision 7's tiles.** The
+  compiler carries both from parcel C4, as routines inlined from divfull
+  and sqrtfull ("The operations"). Spilling the registers around one was
+  the least of it - at most 16 of a specialised routine's values are
+  live at once, and the allocator spills around it as around any value
+  (measured, C4). The rest, and where each stands:
   - **flags**: a routine's own FLAGS are its scaffolding (6/3 raises
-    inexact), and no instruction raises divideByZero, so a routine needs
-    revision 8's flag control (R8F) to raise exactly the flags of the
-    operation it implements, as the language defines them;
-  - **the compiler's one instruction a node**, in the program's one
-    attribute, with a bank of constants, their sign-flips and params: a
-    routine needs raw words (an infinity, NaNs, -0), its own internal
-    attributes and real bitwise ORs, which the compiler's internal check
-    refuses today;
+    inexact), and no instruction raises divideByZero. Revision 8's flag
+    control (R24) runs a routine quiet and raises exactly its
+    operation's flags; no tile has it before revision 8's RTL, so
+    revision 7's targets refuse such an image, `target-feature`;
+  - **the compiler's one instruction a node**: a routine's raw words (an
+    infinity, NaNs, -0, integers) are a bank slot kind of their own, its
+    internal attributes ride in its instructions, and the compiler's
+    internal check holds each routine to its fragment, instruction for
+    instruction, with its quiet region and its raise;
   - **format**: a routine's words differ by format, which ends the
     compiler's rule that a system's instruction words are the same at
-    every format, and with it the certificate's wider run, unless
-    certificate version 2 defines one.
+    every format, and with it certificate version 1's wider run, which
+    is refused by name for an image holding a routine; certificate
+    version 2's wider-source run compiles the source one format up
+    instead.
 - **Run-time transcendentals.** The correctly rounded math library is a
   later step.
 - **A built-in time, adaptive steps and events.** There is no reserved

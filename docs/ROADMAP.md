@@ -4553,6 +4553,10 @@ intention-out beside every image.
   is a later parcel. cft-orbits computes r^-3 in a program from the
   seed and a fixed Newton chain: a deterministic composite, not a
   correctly rounded one, which a later parcel could offer by name.
+  (Restated by step 6: L4 made both operations of the language, and
+  parcel C4 compiles them as inlined routines. Spilling was the least
+  of it; the routine's flags, its raw words and its format were the
+  rest - docs/LANGUAGE.md, "What v1 does not do".)
 - Run-time transcendentals: the correctly rounded math library, a
   later step of the work order.
 - Time-dependent systems (t would ride in the state), adaptive steps

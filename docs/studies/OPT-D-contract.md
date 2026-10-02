@@ -679,6 +679,19 @@ wanted, it should be a microcoded macro-op executing the existing
 sequence on hidden registers - which is study A's question, not mine -
 and not a `CALL`.
 
+*Note (step 6, parcel C4; the study above is left as written).* The
+premise did not hold. `python/cft_golden/divfull.py` (2026-09-14) puts
+the finish in the instruction stream with no rounding opcode:
+`round_pack` restated in the tile's existing integer instructions on
+the encoding, at the true scale, subnormal destinations included. That
+is a second statement of the contract's one rounding authority, held
+to it bit for bit and flag for flag at every format and attribute
+(`python/tests/test_divfull.py`), not a second authority. Revision 8's
+flag control (docs/SEQUENCER.md, R24) then lets it raise exactly the
+division's flags, which no opcode could, and the language's compiler
+inlines it where a source divides (docs/LANGUAGE.md, "The
+operations").
+
 ---
 
 ## 2. The nine asks: a verdict
