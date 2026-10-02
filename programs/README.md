@@ -13,6 +13,12 @@ evening)" sections.
       out/<name>.cftp      the built images (gitignored)
       build.py check.py    what `make programs` and `make
                            programs-check` run
+      systems/             the language's sources (docs/LANGUAGE.md),
+                           their compiled files in compiled/ and
+                           compiled-tangent/
+      workloads/           programs written elsewhere, kept as
+                           delivered: the hard-workload pack
+                           (workloads/README.md, below)
 
     make programs         assemble every source with cft-asm, write
                           out/ and MANIFEST
@@ -303,6 +309,21 @@ Twenty-four coefficients is past the sixteen a four-bit operand field
 reaches, so the FMAs from `C16` on come out in the indexed (`kx`)
 form. The assembler chooses that per instruction and the source says
 nothing about it, which is the point.
+
+## Programs written elsewhere, `programs/workloads/`
+
+`programs/workloads/cft-hard-workloads/` holds 21 programs in the
+language, with their inputs, one-step vectors from an independent exact
+evaluator, and the runner that checks them. They were written by an
+OpenAI model that was given only the language brief and some example
+files, as a test of the language's portability, and they are kept as
+delivered: their own conventions, their own oracle and runner, their own
+documents, and one line changed in their runner.
+[workloads/README.md](workloads/README.md) says what the model was given,
+what the programs showed - all 21 compile, ten fit the card and are bit
+for bit there - and why they read differently from the rest of this tree.
+They are `.cftl` sources, not `.cfta` ones, so they take no row in the
+index above: their check is their own runner's.
 
 ## What waited on another half of the round, and no longer does
 
