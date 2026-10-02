@@ -44,10 +44,13 @@ backward jump.
   REPEAT whose body starts past them moves the store to that body, which
   is then replayed from chip. A jump into the store costs nothing; a jump
   out of it costs one redirect, about 180 to 292 cycles (estimate).
-- **Stalls.** Zero a step for every image cftc emits today: each is
-  `repeat S` at pc 0, so its body's start is always on chip. A program of
-  at most 4,096 instructions is entirely on chip and runs in exactly
-  today's cycles.
+- **Stalls.** Zero a step for every image cftc emits today. Each is a
+  prologue of one load a pinned value, then `repeat S`, the step,
+  `endrep`, the pinned values' stores and `halt`. cftc pins at most 25
+  values, so a body starts by pc 26 and is always on chip. In the tree the
+  bodies start at pc 1 to 7 (measured), and the hard workloads pin
+  nothing, so theirs start at pc 1. A program of at most 4,096
+  instructions is entirely on chip and runs in exactly today's cycles.
 - **Cost.** 9 RAMB36 a tile against the IMEM's 64: 55 freed, 220 on the
   quad (computed). About 1,000 LUTs a tile (estimate). The fetch path
   loses the deep block-RAM cascade that two single-tile builds named among
@@ -231,9 +234,29 @@ program files tracked in the tree is that size (measured, below).
 
 ### Widths
 
-`pc`, `lp_body`, the store's base and `spos` take log2 of the capacity:
-24 bits at 2^24, against 15 and 16 today. The loop stack grows by 4 x 9
-bits, the rest by a few registers (computed).
+- **Today:** `pc` and `skip_depth` are `[PCW:0]`, one bit wider than
+  log2 of the instruction memory (cft_seq.sv:1636-1637), and `lp_body` is
+  `[PCW-1:0]` (:897). That is 16 and 15 bits at 32,768.
+- **Why pc has the extra bit:** it must be able to equal n_insns, the
+  implicit halt (:3646), and the header check admits n_insns equal to the
+  capacity (:3041).
+- **Streaming keeps the rule,** with PCW = log2 of the capacity, 24 at
+  2^24:
+  - `pc`, `spos` and the store's end (base + count) can equal n_insns, so
+    they take PCW + 1 bits: 25 at 2^24. `pc` must, for the implicit halt,
+    and `spos` stands at base + count, which reaches it.
+  - The store's base takes PCW + 1 bits too. In an image that bypassed
+    the loader, a REPEAT as the last word makes it n_insns.
+  - `skip_depth` keeps its `[PCW:0]`, 25 bits, which holds any nesting
+    count an image's words can make.
+  - `lp_body` stays `[PCW-1:0]`, 24 bits. It holds a body's first
+    instruction, and in any image the loader accepts that is below
+    n_insns, because the body's ENDREP follows it.
+- **With a 24-bit pc,** an image of exactly 2^24 instructions whose last
+  word is not HALT would wrap pc to 0 after that word, and the block would
+  restart for ever. Section 8 holds that case.
+- **Growth:** the loop stack grows by 4 x 9 bits, and the rest by a few
+  registers (computed).
 
 ## 3. Loops
 
@@ -253,17 +276,20 @@ store has enough instructions ahead of the consumer to cover it: about 292
 cycles at a 256-cycle round trip. At a full block that is 18 instructions
 (computed: 292 / 16.5). At the model's one-beat rate for the hard workloads,
 8.9 to 10.9 cycles an instruction (measured, below), it is 27 to 33
-instructions. A compiled image's body starts at pc 1, with 4,095
-instructions of it on chip.
+instructions. A cftc image's body starts by pc 26: pc 1 to 7 in the tree,
+measured (section 4). So the store holds the body's first 4,070
+instructions at least, or all of a shorter body.
 
 ### A body larger than the store
 
 It costs nothing a pass, if its first 4,096 instructions are on chip
 (table above). The stream refills from base + 4,096 while they run.
-Measured on the compiled images, below: every one is `repeat S` at pc 0
-with its body from pc 1. So Gray-Scott hard (34,721 instructions) runs
-pc 1 to 4,095 from chip and 4,096 to 34,719 streamed, every step, with no
-wait.
+Measured on the six hard workloads compiled for this study (below): each
+is `repeat S` at pc 0 with its body from pc 1, because none of them pins
+a value. So Gray-Scott hard (34,721 instructions) runs pc 1 to 4,095 from
+chip and 4,096 to 34,719 streamed, every step, with no wait. An image
+that pins values opens with their loads, so its body starts later, by pc
+26, and the same holds.
 
 It costs one redirect a pass only when its start is no longer on chip: an
 outer loop whose inner loop has since moved the store elsewhere (next).
@@ -323,11 +349,30 @@ so results still land and nothing is lost.
 
 ### A step, for the ten card workloads and the misses
 
-- **With this design: zero cycles a step for every one.** Each image is
-  `repeat S` at pc 0. Its body starts at pc 1 in the store, and the store
-  holds 4,095 instructions of it ahead of the streamed part. That is about
-  67,000 cycles at a full block, against a 292-cycle refill (computed:
-  4,095 x 16.5).
+- **With this design: zero cycles a step for every one.**
+  - A cftc image is a prologue of one load a pinned value, `repeat S`, the
+    step, `endrep`, the pinned values' stores and `halt`
+    (python/cftc/emit.py).
+  - cftc pins a value only when the state, with or without the lane
+    params, fits 25 of its 29 registers (python/cftc/regalloc.py,
+    `pinnings`). So a body starts by pc 26, inside the store.
+  - That leaves the body's first 4,070 instructions or more on chip,
+    ahead of the streamed part: about 67,000 cycles at a full block,
+    against a 292-cycle refill (computed: 4,070 x 16.5).
+- **The recount** (measured over every tracked program file):
+  - The six hard workloads compiled for this study pin nothing:
+    `repeat 512` at pc 0, the body from pc 1.
+  - The tree's ten cftc reference images are programs/systems/compiled and
+    compiled-tangent, the acceptance set's references. Their prologues are
+    0, 3, 4 or 6 loads, so their bodies start at pc 1 (Lorenz-96 and its
+    tangent), 4 (Lorenz-63), 5 (Henon-Heiles) or 7 (the Lorenz-63
+    tangent), at fp64 and fp256 alike.
+  - The largest prologue of the 73 files is those 6 loads. No loop body in
+    the tree starts past pc 7, so none starts past the store.
+  - The misses other than Gray-Scott hard, which I did not compile, pin
+    nothing by cftc's rule, as Gray-Scott hard does. Their state alone is
+    202 to 5,712 values (the survey's T8), past the 25 registers pinning
+    needs. That is computed from the rule, not measured on their images.
 - **The table** says what one unhidden redirect a step would cost: the
   price of designing without the store, or of a program that defeats it.
 - **The columns.** The card's cycles a step are the card's seconds a step
@@ -398,11 +443,18 @@ What it says:
     capacity, so one image serves every target (python/cftc/__init__.py;
     LANGUAGE.md).
 - **A separate gap, noticed in passing.** At one beat, `schedule.cycles`
-  charges one cycle for an independent instruction. The RTL takes four:
-  a one-step instruction pays the fetch and decode (above). That is the
-  compiler's secondary objective and one manifest column, not this design.
-  It is read from the RTL and not measured. It is raised as a question
-  below.
+  charges one cycle for an independent instruction. The RTL takes more:
+  - about four for a one-step instruction that writes no register, which
+    pays the fetch and decode (above);
+  - about seven for an arithmetic one, because each writer holds one of
+    the result queue's three slots until its result lands, so independent
+    writers are queue-bound.
+
+  R19 measured 4.3 cycles for a store and 7.0 for arithmetic with every
+  lane masked (SEQUENCER.md). That is the compiler's secondary objective
+  and one manifest column, not this design. It is read from the RTL and
+  R19's figures, not measured on these programs, and it is raised as a
+  question below.
 
 ## 5. The cost
 
@@ -435,7 +487,7 @@ What it says:
 | the FIFO's pointers and its bypass | 100 |
 | the store's range, hit and capture | 60 |
 | the port's owner select inside cft_seq | 80 |
-| the consumer's waits, the widths to 24 bits, the header check | 100 to 200 |
+| the consumer's waits, the widths to 25 and 24 bits, the header check | 100 to 200 |
 | what the 32K IMEM's fabric logic gives back | 0 to -200 |
 | a tile, net | about 1,000 (500 to 1,500) |
 
@@ -668,6 +720,18 @@ bits are used.
     from that bench's own 107,000 at 32,768). Beside it, the capacity plus
     one is refused at the header with no instruction read: a header-only
     image, since a whole one would be 128 MB.
+  - `a_program_of_exactly_the_capacity`: two images of exactly 65,536
+    instructions at `seq_corestr`'s 2^16 capacity, in `prog_fills_imem`'s
+    shape. (The U50's 2^24 is too long to simulate, and the RTL is the same
+    at either.)
+    - One ends in HALT.
+    - The other's last word is a DEPOSIT, so the block ends by the
+      implicit halt with `pc` equal to the capacity.
+    - Both are held against the model. The second hangs, and fails by the
+      bench's timeout, if `pc` is one bit short and wraps to 0 (section 2,
+      Widths).
+    - About 214,000 cycles each (computed from that bench's 107,000 at
+      32,768).
   - `a_loop_body_longer_than_the_store`: at the 64-word store, a
     200-instruction body that starts inside the store and one that starts
     past it. The first is held to its store-resident twin's cycles a pass
@@ -707,7 +771,9 @@ bits are used.
   6. no quiesce (a fetch beat lands in the next block's stream load);
   7. a faulted word executed;
   8. CAPS2[20:16] published from the store's depth instead of the
-     capacity.
+     capacity;
+  9. `pc` one bit short, `[PCW-1:0]`, red in
+     `a_program_of_exactly_the_capacity` as a hang.
 
 ### Formal
 
@@ -727,7 +793,9 @@ bits are used.
     bound;
   - the FIFO never overruns its reservation.
 - **Covers:** a redirect with bursts in flight, a straddling word, a
-  capture that fills the store, an underrun.
+  capture that fills the store, an underrun, and an image of exactly the
+  16 words, so that `spos` and the presented address reach n_insns
+  itself.
 - **Bookkeeping.** formal/run.sh gains the `run_proof` line, and the
   proof counts in docs/VERIFICATION.md and the root README move with it.
 - **Lint.** `yosys-lint`, the open-toolchain gate, and Verilator's fatal
@@ -765,7 +833,8 @@ bits are used.
 **File by file.**
 - `rtl/cft_ifetch.sv`, new: the store, the stream's FIFO (a `cft_fifo`),
   the read engine, the realigner, the rules of section 2, and the fault
-  and idle outputs.
+  and idle outputs. `spos` and the store's base and end take PCW + 1
+  bits (section 2, Widths).
 - `rtl/cft_seq.sv`:
   - instantiate the unit in place of `imem` (:473) and its read register
     (:1820-1829);
@@ -773,12 +842,12 @@ bits are used.
     (:3149);
   - the header check against the capacity (:3041), and the elaboration
     guards (:866-888);
-  - `pc`, `lp_body`, `skip_depth` to the capacity's width;
+  - the widths of section 2: `pc` and `skip_depth` to PCW + 1 bits (25 at
+    2^24) and `lp_body` to PCW (24), with PCW now log2 of the capacity;
   - `word_ok` into the continuation (:3790), `S_FETCH2` and `S_SKIP_D`;
   - REPEAT's capture strobe (:3672-3684);
   - `S_DRAIN_SETUP` raises the quiesce (:3803), and `S_WAIT_B` waits for
     the unit's idle (:4021-4027);
-  - the two capacity cases of the benches, above;
   - the port's owner select beside the main read engine (:2844-2864);
   - a fetch fault ends the block.
 - `rtl/cft_krnl.sv`: `SEQ_STREAM_D`; CAPS[23:20] as min(15, its log2); the
@@ -893,6 +962,17 @@ meets the fetch:
    capacity, and CAPS[23:20] published as min(15, ...). Recommended.
 4. **A fetch fault ends the block,** where a faulted image parse is
    executed today. Recommended, so that an unvouched word never runs.
+   - The fetch's engine must also end a short burst rather than wait for
+     its missing beats. The sequencer has no length-fault abort today: a
+     short read burst on any of its reads leaves the burst counter above
+     zero (cft_seq.sv:2849-2856), so the next read is never issued and the
+     run never ends.
+   - That hang is pre-existing (verifier-VS8). docs/CARDDAY.md:896-903's
+     "A hang should no longer be how a bus fault presents" holds for the
+     elementwise engine only.
+   - The streaming fetch must not inherit it. The setup reads and the
+     parse keep it, unless the RTL plan gives them the engine's abort as
+     well.
 5. **The deep build's shape.** Recommended: the streaming quad at 4,096
    slots, after an out-of-context probe. And an out-of-context probe of
    the packed scratch before choosing between a single or dual at 8,192
@@ -901,8 +981,10 @@ meets the fetch:
    out of context as soon as they pass their benches, before the
    revision's other RTL, to read the fetch path's slack and the LUT delta.
    Recommended. The bitstreams wait for the whole revision, as planned.
-7. **schedule.py's one-beat column.** At one beat it charges one cycle
-   where the RTL takes four for an independent instruction (section 4).
+7. **schedule.py's one-beat column.** At one beat it charges one cycle for
+   an independent instruction. The RTL takes about four for one that
+   writes no register, and about seven for arithmetic, which is held by
+   the result queue's three slots (R19 measured 7.0; section 4).
    Recommended: a bench measures it, and cftc corrects it with C4's other
    cost-model work, which already changes the committed manifests.
 
@@ -939,9 +1021,17 @@ meets the fetch:
   - **Six hard workloads compiled by cftc** (8 to 112 s each): FPUT, phi4,
     Kuramoto-Sivashinsky, reservoir and Riccati hard for `u50-rev7-quad`,
     and Gray-Scott hard for `sw:2048`. Each is `repeat 512` at pc 0, its
-    body from pc 1, then `endrep` and `halt`, with no prologue. Their
-    cost-model cycles are in section 4's tables.
+    body from pc 1, then `endrep` and `halt`, with no prologue: none of
+    them pins a value. Their cost-model cycles are in section 4's tables.
+  - **Every tracked file's prologue,** the words before its first REPEAT
+    (after verifier-VS8). The ten cftc reference images open with 0, 3, 4
+    or 6 loads and nothing else, so their bodies start at pc 1, 4, 5 or 7.
+    The largest prologue of the 73 files is 6. No first body starts past
+    pc 7.
 - **Computed:**
+  - a cftc prologue's bound, 25 loads, so a body by pc 26, from
+    regalloc.py's pinning rule;
+  - the widths, from cft_seq.sv's own rule for `pc`;
   - the round-trip bound, 144 cycles;
   - the bandwidth table;
   - the block-RAM and UltraRAM geometry;
