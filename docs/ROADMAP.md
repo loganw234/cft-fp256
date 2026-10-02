@@ -4687,8 +4687,9 @@ and the testing rule, as the last rounds ran.
    - **R8F, flag control.** Two instructions: a quiet region, in which
      the ALU's flags reach neither FLAGS nor, under R8L, the lane's
      byte, and a raise, which ORs a register's five flag bits into
-     FLAGS, and under R8L into the lane's byte. A routine then runs quiet and raises exactly the IEEE
-     flags of the operation it implements, divide-by-zero included.
+     FLAGS, and under R8L into the lane's byte. A routine then runs
+     quiet and raises exactly the IEEE flags of the operation it
+     implements, divide-by-zero included.
      - The raise also carries the mark for a lane whose last bit a
        routine could not decide (R8L's bit [7]). A run with any lane
        marked says so whether or not it asked for the per-lane block.
@@ -4710,7 +4711,24 @@ and the testing rule, as the last rounds ran.
        host, or a slower image) and how the replay is recorded;
      - whether a wider run may use the same source compiled at the wider
        format, which C4's routines need, and with it whether a
-       certificate names its source, which step 3 left out.
+       certificate names its source, which step 3 left out;
+     - scientific provenance. Logan, 2026-10-02, verbatim: "In regards
+       to the V2 certificate, also include more 'scientific provenance'
+       areas, things typical certificates in the field carry for
+       traceability etc". The design surveys what such certificates and
+       provenance records carry: calibration certificates under ISO/IEC
+       17025, W3C PROV, build-provenance attestations such as SLSA's,
+       research-object packages, and reproducibility certificates. For
+       each field it proposes whether version 2 carries it, and whether
+       an audit can check it or only report it. The fields include:
+       - when and where a run was made, and by which tools and builds;
+       - the source and the compiler that made the image;
+       - how the initial state was made;
+       - the environment;
+       - an identifier for the certificate;
+       - the signature that version 1 reserved.
+       Version 1 already records the library's build, the backend and
+       the device.
      The design comes to the lead before version 2 is fixed.
    - **R21 and R22**, augmented addition (`augadd`/`augerr`) and stepped
      STX/LDX: already in the model, the software backend and `asm.py`
@@ -4761,9 +4779,9 @@ and the testing rule, as the last rounds ran.
    - What holds today's refusals is restated with them: test_lang.py,
      test_lang_readback.py, LANGUAGE.md's table "Every refusal, by
      name", which test_lang.py holds to the code, and LANGUAGE.md's
-     other statements of the two refusals. The challenge suite's expectations
-     are the suite's to restate. The workload pack's own copy of
-     LANGUAGE.md stays as delivered.
+     other statements of the two refusals. The challenge suite's
+     expectations are the suite's to restate. The workload pack's own
+     copy of LANGUAGE.md stays as delivered.
 3. **C4, routines in the compiler.**
    - A generator in the model, in the manner of `cft_golden/divfull.py`,
      writes each routine as a relocatable fragment: registers from the
@@ -4848,18 +4866,18 @@ and the testing rule, as the last rounds ran.
   configuration, unbuilt and not placed here.
 - The gallery. Logan's reply dropped step 5, the work order's gallery
   wave 1, which step 3's Next line (above) put first, with step 6
-  beside it. That line's wave 2, the work order's step 7, his reply did
-  not mention. The lead's recommendation is that wave 2 be the one
-  gallery, after step 6, with literature-checked answers and
-  certificates published; Logan has not decided it.
+  beside it. Wave 2, the work order's step 7, is the one gallery: asked
+  whether it should be, "with literature-checked answers and published
+  certificates", Logan chose "Yes, one gallery as step 7
+  (Recommended)" (2026-10-02). It follows step 6.
 
 **Sentences elsewhere that this plan supersedes.** Each is restated by
 the parcel that changes its subject, or by the lead when the round
 closes:
 - the inlining obstacle stated as spilling registers only: step 3's
-  "What it is not" (above), LANGUAGE.md's known limit "Inlining divfull
-  or sqrtfull means spilling the registers around it", and ORBITS.md's
-  fragment-inliner sentence (L4 and C4);
+  "What it is not" (above), LANGUAGE.md's "Inlining divfull or sqrtfull
+  means spilling the registers around it" (under what v1 does not do),
+  and ORBITS.md's fragment-inliner sentence (L4 and C4);
 - docs/studies/OPT-D-contract.md's rejection of an in-program correctly
   rounded divide as a second rounding authority, which divfull has
   since answered (C4);
@@ -4877,10 +4895,12 @@ closes:
   than it (docs/VALIDATION.md). Changing the note changes the committed
   compiled files, so it waits for C4.
 
-**For Logan.**
-- Approve this plan, or change it, before any code beyond A1.
-- The RTL revision's own plan comes to him before its RTL work, as the
-  revision-7 round's did.
+**Approved.** The plan went to Logan at 39c2d4d, after verifier-P6's
+three checks, and he chose "Approve as written (Recommended)"
+(2026-10-02). He then added scientific provenance to certificate
+version 2 (above). The first wave starts once A1 merges. The RTL
+revision's own plan still comes to him before its RTL work, as the
+revision-7 round's did.
 
 ## The adoption story these serve
 
