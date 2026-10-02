@@ -225,15 +225,56 @@ STEP_MASK = (1 << STEP_BITS) - 1
 STEP_SIGN = 1 << (STEP_BITS - 1)
 STEP_MIN, STEP_MAX = -STEP_SIGN, STEP_SIGN - 1
 
-# The two capability bits revision 8 asks of a device, as
+# Revision 8's flag control (R24, the step-6 round, 2026-10-02;
+# docs/SEQUENCER.md): a quiet region and a raise, so that a routine runs
+# quiet and then raises exactly the flags of the operation it implements.
+#
+# QUIET opens a region and ENDQUIET closes the innermost. While one is
+# open, the five IEEE flags of every instruction - an ALU instruction's,
+# augadd's and augerr's, and a raise's own - reach neither FLAGS nor the
+# lane's byte (R23). That is 754-2019 5.7.4's saveAllFlags at QUIET and
+# restoreFlags of all five at ENDQUIET: nothing in a run reads a flag, so
+# silencing them is the pair's only visible effect, and nested pairs
+# compose - so regions nest, MAX_QUIET_DEPTH deep, and a raise inside one
+# is silenced. Nothing else is: STATUS[4], STATUS[5] and the mark are not
+# IEEE flags, and a region never hides a lost deposit, a suppressed access
+# or an undecided lane. Regions nest properly with loops, so whether an
+# instruction is quiet depends on its place in the program alone and the
+# early exit cannot see a region (P3).
+#
+# RAISE ra, for every ACTIVE lane: the bit pattern of ra. Bits [4:0], the
+# five flags in FLAGS's order, are ORed into FLAGS and the lane's byte
+# unless a region is open - 5.7.4's raiseFlags, its group taken from a
+# register as RISC-V's Zicsr CSRRS takes a bit mask. Bit [7], where set,
+# MARKS the lane - the byte's [7] and STATUS_MARKED - region or not. Bits
+# [6:5] and [W-1:8] are read by nothing, and no value is refused for them:
+# the register is data, as an indexed slot is.
+QUIET, ENDQUIET, RAISE = 12, 13, 14
+CTRL_NAMES.update({QUIET: "quiet", ENDQUIET: "endquiet", RAISE: "raise"})
+MAX_QUIET_DEPTH = 4
+RAISE_FLAG_BITS = 0x1F
+RAISE_MARK = 1 << 7
+
+# The capability bits revision 8 asks of a device, as
 # cft_caps.seq_features carries them: CAPS2[11] and CAPS2[12] land on
 # bits 15 and 16 (cft.h's CFT_SEQ_FEAT_AUGADD and
 # CFT_SEQ_FEAT_SCRATCH_STEP). A tile that predates them reads both as
 # zero: it would decode code 10 as HALT and access without stepping, so
 # a loader refuses a program that needs either, by name.
+#
+# CAPS2[13] and CAPS2[14] (the step-6 round's R23 and R24) land on bits 17
+# and 18: CFT_SEQ_FEAT_LANE_FLAGS, a feature of a RUN - the per-lane block
+# a caller asks for, which no image needs - and CFT_SEQ_FEAT_FLAG_CONTROL,
+# an image's, for any QUIET, ENDQUIET or RAISE. Every tile built so far
+# reads both as zero: it decodes codes 12 to 14 as HALT, and refuses
+# MODE[24] at start with STATUS[3].
 FEAT_AUGADD = 1 << 15
 FEAT_SCRATCH_STEP = 1 << 16
-FEAT_NAMES_REV8 = {FEAT_AUGADD: "AUGADD", FEAT_SCRATCH_STEP: "SCRATCH_STEP"}
+FEAT_LANE_FLAGS = 1 << 17
+FEAT_FLAG_CONTROL = 1 << 18
+FEAT_NAMES_REV8 = {FEAT_AUGADD: "AUGADD", FEAT_SCRATCH_STEP: "SCRATCH_STEP",
+                   FEAT_LANE_FLAGS: "LANE_FLAGS",
+                   FEAT_FLAG_CONTROL: "FLAG_CONTROL"}
 
 # The bits of `imm` each control code READS, and so the only bits it
 # may set. Since revision 2 imm[27:24] carry the fifth bits of rd, ra,
@@ -263,6 +304,8 @@ FEAT_NAMES_REV8 = {FEAT_AUGADD: "AUGADD", FEAT_SCRATCH_STEP: "SCRATCH_STEP"}
 #                          still read by nothing.
 #   AUGADD, AUGERR         (revision 8) read ra and rb and write rd, so
 #                          the three high bits and nothing else.
+#   QUIET, ENDQUIET        (revision 8's R24) read nothing: zero.
+#   RAISE                  (R24) reads `ra` alone, as SETACT does.
 SCRATCH_SLOT_MASK = 0x00FF_FFFF
 IMM_ALLOWED = {
     HALT: 0,
@@ -279,6 +322,9 @@ IMM_ALLOWED = {
              | (1 << REG_HI_SHIFT["rb"])),
     AUGERR: ((1 << REG_HI_SHIFT["rd"]) | (1 << REG_HI_SHIFT["ra"])
              | (1 << REG_HI_SHIFT["rb"])),
+    QUIET: 0,
+    ENDQUIET: 0,
+    RAISE: 1 << REG_HI_SHIFT["ra"],
 }
 
 # STATUS bits. 0..2 are the engine's bus faults and 3 is the
@@ -295,6 +341,24 @@ STATUS_DEPOSIT_OVERFLOW = 1 << 4
 # there, and they are reported the same way. Not an IEEE flag, for the
 # reason given above the deposit bit.
 STATUS_SCRATCH_RANGE = 1 << 5
+# Revision 8's R24: a raise whose register has bit [7] set MARKS its lane -
+# a lane whose last bit a routine's own test could not decide, to be
+# replayed before its answer is used - and the run says so here whether or
+# not it asked for R23's per-lane block. The first STATUS bit no tile and
+# no backend claims (rtl/cft_csr.sv reads STATUS as six bits padded with
+# zeros). Not an IEEE flag, so no quiet region silences it.
+STATUS_MARKED = 1 << 6
+
+# R23's byte a lane, Result.lane_flags: [4:0] the five IEEE flags the lane
+# raised outside every quiet region, in FLAGS's order; [5] its deposit
+# overflowed; [6] its indexed access fell past the depth under
+# SCRATCH_STRICT; [7] a raise marked it. So [7:5] are STATUS[6:4] one place
+# up, lane by lane: over the lanes a run owns, the OR of [4:0] is FLAGS and
+# the OR of [7:5], shifted down one, is STATUS[6:4].
+LANE_FLAGS_IEEE = 0x1F
+LANE_DEPOSIT_OVERFLOW = 1 << 5
+LANE_SCRATCH_RANGE = 1 << 6
+LANE_MARKED = 1 << 7
 
 
 class ProgramError(ValueError):
@@ -551,6 +615,26 @@ def augerr(rd, ra, rb):
     return encode(AUGERR, rd=rd, ra=ra, rb=rb, ctrl=True)
 
 
+def quiet():
+    """Open a quiet region (revision 8, R24): until its ENDQUIET the five
+    IEEE flags of every instruction reach neither FLAGS nor a lane's
+    byte - 754-2019 5.7.4's saveAllFlags, with ENDQUIET its restore."""
+    return encode(QUIET, ctrl=True)
+
+
+def endquiet():
+    """Close the innermost quiet region (R24)."""
+    return encode(ENDQUIET, ctrl=True)
+
+
+def raise_(ra):
+    """`raise rA` (R24), the underscore because `raise` is Python's. For
+    every active lane, ra[4:0] is ORed into FLAGS and the lane's byte
+    unless a quiet region is open, and ra[7] marks the lane, open region
+    or not (STATUS_MARKED, LANE_MARKED)."""
+    return encode(RAISE, ra=ra, ctrl=True)
+
+
 def _step_imm(step):
     """A post-step as its imm[11:0] field: twelve-bit two's complement.
     Refused here by name outside -2048..2047, rather than wrapped into a
@@ -574,10 +658,12 @@ def index_step(d):
 
 def features_rev8(insns):
     """The revision-8 capability bits a program's instructions need, as
-    a mask of FEAT_AUGADD and FEAT_SCRATCH_STEP: the first for any
-    augadd or augerr, the second for any STX or LDX whose step is not
-    zero. A device whose seq_features lacks one refuses the program by
-    name; a zero step needs nothing, because it is the old instruction."""
+    a mask of FEAT_AUGADD, FEAT_SCRATCH_STEP and FEAT_FLAG_CONTROL: the
+    first for any augadd or augerr, the second for any STX or LDX whose
+    step is not zero, the third for any QUIET, ENDQUIET or RAISE. A device
+    whose seq_features lacks one refuses the program by name; a zero step
+    needs nothing, because it is the old instruction. FEAT_LANE_FLAGS is
+    never here: it is asked of a run, not of an image."""
     need = 0
     for word in insns:
         d = decode(word)
@@ -585,6 +671,8 @@ def features_rev8(insns):
             continue
         if d["op"] in (AUGADD, AUGERR):
             need |= FEAT_AUGADD
+        elif d["op"] in (QUIET, ENDQUIET, RAISE):
+            need |= FEAT_FLAG_CONTROL
         elif index_step(d):
             need |= FEAT_SCRATCH_STEP
     return need
@@ -823,6 +911,15 @@ class Program:
                     f"lane owns")
 
         depth = 0
+        # Revision 8's R24: quiet regions open, and every bracket open -
+        # loops and regions together, innermost last, as (code, pc) - so
+        # that the two kinds nest properly within each other: a region
+        # opened in a loop body closes in that body, and one opened
+        # outside a loop closes outside it. Then whether an instruction
+        # is quiet depends on its place in the program alone, and the
+        # early exit cannot see a region (P3).
+        qdepth = 0
+        brackets = []
         # `mult` tracks how many times the instruction at the current
         # nesting level can execute, so the worst-case instruction
         # count is known before the program runs rather than
@@ -873,7 +970,10 @@ class Program:
                     # rounding, and no constant, since no control code
                     # reads the bank.
                     AUGADD: ("rd", "ra", "rb"),
-                    AUGERR: ("rd", "ra", "rb")}[code]
+                    AUGERR: ("rd", "ra", "rb"),
+                    # R24: the region's two ends read nothing, and the
+                    # raise reads ra alone, as SETACT does.
+                    QUIET: (), ENDQUIET: (), RAISE: ("ra",)}[code]
             raw = decode_raw(word)
             for field in ("rd", "ra", "rb", "rc"):
                 if field not in used and raw[field]:
@@ -913,11 +1013,39 @@ class Program:
                     raise ProgramError(
                         f"[{pc}] loops nest deeper than {MAX_LOOP_DEPTH}")
                 mult.append(mult[-1] * d["imm"])
+                brackets.append((REPEAT, pc))
             elif code == ENDREP:
                 depth -= 1
                 if depth < 0:
                     raise ProgramError(f"[{pc}] endrep without repeat")
+                if brackets[-1][0] != REPEAT:
+                    raise ProgramError(
+                        f"[{pc}] endrep closes its loop while the quiet "
+                        f"region opened at [{brackets[-1][1]}] is open: a "
+                        f"region opened in a loop body closes in that body")
+                brackets.pop()
                 mult.pop()
+            elif code == QUIET:
+                # R24. Four deep, as loops are: the tile counts them in a
+                # field of its own.
+                qdepth += 1
+                if qdepth > MAX_QUIET_DEPTH:
+                    raise ProgramError(
+                        f"[{pc}] quiet regions nest deeper than "
+                        f"{MAX_QUIET_DEPTH}")
+                brackets.append((QUIET, pc))
+            elif code == ENDQUIET:
+                if qdepth == 0:
+                    raise ProgramError(
+                        f"[{pc}] endquiet with no quiet region open")
+                if brackets[-1][0] != QUIET:
+                    raise ProgramError(
+                        f"[{pc}] endquiet inside the loop opened at "
+                        f"[{brackets[-1][1]}], around a region opened "
+                        f"outside it: a region opened outside a loop "
+                        f"closes outside it")
+                qdepth -= 1
+                brackets.pop()
             elif code == ACTALL and depth > 0:
                 # P3 holds only if nothing inside a loop can reactivate
                 # a lane. Refusing the program is the cheapest way to
@@ -948,6 +1076,17 @@ class Program:
                     f"[{pc}] halt inside a loop: the active mask cannot "
                     f"gate it, so the all-lanes-done early exit would "
                     f"be observable")
+            if code == HALT and qdepth:
+                # R24. A region is 5.7.4's save and its restore, and a
+                # program that stops between them has two faithful
+                # readings - 754's, in which the flags raised since the
+                # save stand because nothing restored them, and this
+                # machine's, in which they never reached FLAGS - so it is
+                # refused rather than one of them chosen.
+                raise ProgramError(
+                    f"[{pc}] halt inside the quiet region opened at "
+                    f"[{brackets[-1][1]}]: a region is a save and its "
+                    f"restore, and a program cannot stop between them")
 
             if worst > MAX_INSTRUCTIONS:
                 raise ProgramError(
@@ -957,6 +1096,12 @@ class Program:
 
         if depth != 0:
             raise ProgramError(f"{depth} loop(s) left open at the end")
+        if qdepth != 0:
+            # R24, for the reason a HALT inside a region is refused: the
+            # program would end between a save and its restore.
+            raise ProgramError(
+                f"{qdepth} quiet region(s) left open at the end, the "
+                f"innermost opened at [{brackets[-1][1]}]")
         if worst > MAX_INSTRUCTIONS:
             raise ProgramError(
                 f"worst-case instruction count {worst} exceeds "
@@ -1136,10 +1281,12 @@ IDX_NONE = 0xFFFFFFFF
 
 class Result:
     __slots__ = ("deposits", "flags", "status", "regs", "active",
-                 "counts", "insns_executed", "scratch", "scratch_out")
+                 "counts", "insns_executed", "scratch", "scratch_out",
+                 "lane_flags")
 
     def __init__(self, deposits, flags, status, regs, active, counts,
-                 insns_executed, scratch=None, scratch_out=None):
+                 insns_executed, scratch=None, scratch_out=None,
+                 lane_flags=None):
         self.deposits = deposits            # n * max_deposits values
         self.flags = flags                  # sticky IEEE flags
         self.status = status                # bus / sequencer faults
@@ -1155,6 +1302,15 @@ class Result:
         # what the device writes to that pointer: nothing.
         self.scratch = scratch if scratch is not None else []
         self.scratch_out = scratch_out if scratch_out is not None else []
+        # R23 (revision 8; built golden-first in the step-6 round): a
+        # byte a lane, lane i's at index i - [4:0] the IEEE flags it
+        # raised outside every quiet region, [5] its deposit overflowed,
+        # [6] its strict access fell past the depth, [7] a raise marked
+        # it. Computed for every run, as the counts are; a masked or a
+        # padding lane's entry is 0, the model's fresh array, as its count
+        # is (R17) - the executors leave such a lane's byte as the caller
+        # had it, and a padding lane has none.
+        self.lane_flags = lane_flags if lane_flags is not None else []
 
     def state(self):
         """Everything observable. Used to prove the early exit changes
@@ -1163,9 +1319,13 @@ class Result:
         The scratch joins it at revision 3 for the same reason the
         register file is here: an all-inactive loop body that stored
         into a slot would be observable through the scratch-out block
-        even where it moved no deposit, so P3's fuzz has to see it."""
+        even where it moved no deposit, so P3's fuzz has to see it. The
+        per-lane flags join it at revision 8 for the reason FLAGS is
+        here: a lane's byte is an output, and the early exit must not
+        move it."""
         return (self.deposits, self.flags, self.status, self.regs,
-                self.active, self.counts, self.scratch, self.scratch_out)
+                self.active, self.counts, self.scratch, self.scratch_out,
+                self.lane_flags)
 
 
 def gather(src, table, fmt, name="index"):
@@ -1201,7 +1361,7 @@ def gather(src, table, fmt, name="index"):
     return out
 
 
-def _augmented_half(fmt, d, regs, active):
+def _augmented_half(fmt, d, regs, active, lane_fl=None, loud=True):
     """Revision 8's `augadd` / `augerr` over a block of lanes: for every
     ACTIVE lane, augmentedAddition(ra, rb) as augmented.py defines it,
     keeping r (augadd) or e (augerr) in rd. Returns the flags the active
@@ -1212,7 +1372,12 @@ def _augmented_half(fmt, d, regs, active):
     Both operands are read before rd is written, lane by lane, so rd may
     name ra or rb exactly as it may for an ALU instruction. An inactive
     lane - masked, padding, or dropped by SETACT - neither writes nor
-    raises, which is P3's rule for every write and every flag."""
+    raises, which is P3's rule for every write and every flag.
+
+    Each lane's flags are also ORed into `lane_fl[i]`, its R23 byte - and
+    neither there nor into the result where `loud` is false: inside an R24
+    quiet region they are silenced, and the run's FLAGS is the caller's to
+    OR this result into."""
     keep_e = d["op"] == AUGERR
     raised = 0
     for i, on in enumerate(active):
@@ -1221,7 +1386,10 @@ def _augmented_half(fmt, d, regs, active):
         r, e, fl = augmented.augmented_add(fmt, regs[i][d["ra"]],
                                            regs[i][d["rb"]])
         regs[i][d["rd"]] = e if keep_e else r
-        raised |= fl
+        if loud:
+            raised |= fl
+            if lane_fl is not None:
+                lane_fl[i] |= fl
     return raised
 
 
@@ -1359,6 +1527,19 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
     `ACTALL` reactivates every lane the CALLER has, which a masked lane
     is not: the mask is the floor under the active bit and not a value
     an instruction can raise.
+
+    Revision 8 (the step-6 round, golden-first): `Result.lane_flags` is
+    R23's byte a lane, computed for every run - [4:0] the IEEE flags the
+    lane raised outside every quiet region, [5] its deposit overflow, [6]
+    its strict access past the depth, [7] its mark. And R24's regions and
+    raises are run here: inside a region the IEEE flags of every
+    instruction reach neither FLAGS nor a lane's byte, and a raise ORs its
+    register's [4:0] in outside one and marks the lane (STATUS_MARKED) on
+    its [7] anywhere. Over the lanes the run owns, the OR of the bytes'
+    [4:0] is FLAGS and the OR of their [7:5] is STATUS[6:4] one place up -
+    except where ACTALL has woken a lane past `n_active`, which can raise
+    into FLAGS and owns no byte: the seam tb/test_seq_core.py records in
+    `actall_over_a_ragged_block`, since a tile's ACTALL wakes none.
     """
     fmt = prog.fmt
     depth = check_scratch_depth(scratch_depth)
@@ -1477,6 +1658,14 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
     flags = 0
     status = 0
     executed = 0
+    # Revision 8. R23's byte a lane, raised as FLAGS and STATUS are and
+    # never lowered; and R24's quiet depth, counted in program order. The
+    # loader nests regions properly with loops, so the depth at an
+    # instruction is a function of where it stands: a loop body the early
+    # exit skips has balanced brackets, and the count after it is the
+    # count before it.
+    lane_fl = [0] * n
+    qdepth = 0
 
     def src(lane, spec):
         # `consts` and not `prog.consts`: under BANK_EXT the values came
@@ -1507,7 +1696,9 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
                     src(i, sa), src(i, sb), src(i, sc),
                     d["rnd"])
                 regs[i][d["rd"]] = res
-                flags |= fl
+                if not qdepth:      # R24: a quiet region silences them
+                    flags |= fl
+                    lane_fl[i] |= fl
             pc += 1
             continue
 
@@ -1544,7 +1735,9 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
                 if not active[i]:
                     continue
                 if counts[i] >= prog.max_deposits:
+                    # A report, not an IEEE flag: no quiet region hides it.
                     status |= STATUS_DEPOSIT_OVERFLOW
+                    lane_fl[i] |= LANE_DEPOSIT_OVERFLOW
                     continue
                 deposits[i * prog.max_deposits + counts[i]] = \
                     regs[i][d["ra"]]
@@ -1571,8 +1764,40 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
             continue
         if code in (AUGADD, AUGERR):
             # Revision 8. Arithmetic, so the active bit gates the write
-            # AND the flags, as it does for an ALU instruction.
-            flags |= _augmented_half(fmt, d, regs, active)
+            # AND the flags, as it does for an ALU instruction - and a
+            # quiet region silences the flags, as it does an ALU's.
+            flags |= _augmented_half(fmt, d, regs, active, lane_fl,
+                                     loud=not qdepth)
+            pc += 1
+            continue
+        if code == QUIET:
+            # R24. Not per lane: a region is a property of an
+            # instruction's place in the program, the same in every lane.
+            qdepth += 1
+            pc += 1
+            continue
+        if code == ENDQUIET:
+            qdepth -= 1
+            pc += 1
+            continue
+        if code == RAISE:
+            # R24, for every ACTIVE lane: ra's bit pattern. [4:0] are the
+            # five flags in FLAGS's order, ORed in unless a region is open
+            # (5.7.4's raiseFlags: any subset, never a clear); [7] marks
+            # the lane, open region or not, because the mark is not an
+            # IEEE flag and a lost one would make an undecided last bit
+            # look decided. [6:5] and everything from bit 8 up are read by
+            # nothing. An inactive lane raises and marks nothing (P3).
+            for i in range(n):
+                if not active[i]:
+                    continue
+                v = regs[i][d["ra"]]
+                if not qdepth:
+                    flags |= v & RAISE_FLAG_BITS
+                    lane_fl[i] |= v & RAISE_FLAG_BITS
+                if v & RAISE_MARK:
+                    status |= STATUS_MARKED
+                    lane_fl[i] |= LANE_MARKED
             pc += 1
             continue
         if code in (STL, LDL, STX, LDX):
@@ -1608,6 +1833,7 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
                     idx = regs[i][d["rb"]]
                     if strict and idx >= depth:
                         status |= STATUS_SCRATCH_RANGE
+                        lane_fl[i] |= LANE_SCRATCH_RANGE
                         if code == LDX:
                             # +0, the same thing an untouched slot reads
                             # back as; never a stale register, which
@@ -1648,13 +1874,23 @@ def run(prog: Program, a, b, c=None, bank=None, scratch_in=None,
         for s in range(nsout):
             scratch_out[i * nsout + s] = scratch[i][s]
 
+    # R23's block, on the scratch-out block's terms: the lanes the caller
+    # has. A masked lane ran nothing, and a padding lane is not the
+    # caller's and has no byte, so both read 0 - the fresh array. That
+    # also keeps out what a padding lane raises after seq.py's ACTALL wakes
+    # it (the recorded seam: a tile's ACTALL wakes only the caller's
+    # lanes), which can reach FLAGS here and so is the one place the
+    # identities over the lanes a run owns can part.
+    lane_flags = [lane_fl[i] if (i < n_active and keep[i]) else 0
+                  for i in range(n)]
+
     return Result(deposits, flags, status, regs, active, counts, executed,
-                  scratch, scratch_out)
+                  scratch, scratch_out, lane_flags)
 
 
 def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False,
                    extended=False, wide_regs=False, scratch=False,
-                   rev8=False, scratch_depth=SCRATCH_D):
+                   rev8=False, scratch_depth=SCRATCH_D, flags=False):
     """A random program, for fuzzing. Returns (insns, consts).
 
     It lives here rather than in a test file because two different
@@ -1697,6 +1933,14 @@ def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False,
     `rev8` is revision 8's arm (proposed, 2026-09-29) on exactly the
     scratch arm's terms: `augadd`, `augerr`, their recommended pair and
     stepped STX/LDX, appended after the rest, drawing nothing when off.
+
+    `flags` is R24's arm (the step-6 round, 2026-10-02), on the same terms
+    and kept apart from `rev8` so that the rev8 corpus every existing seed
+    makes is the one it made: `quiet`, `endquiet` and `raise`. Regions
+    nest properly with loops - an ENDREP the chain draws first closes the
+    regions opened inside its body, and the end closes every bracket
+    innermost first - which draws nothing, so with the arm off the closing
+    is `[endrep()] * depth` as it always was.
     """
     nreg = NREG if wide_regs else NREG_REV1
     # Slots the fuzz uses. A handful of low ones so stores and loads
@@ -1718,6 +1962,9 @@ def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False,
         nconst = max(nconst, KADDR_PLAIN + 24)
     insns = []
     depth = 0
+    # The open brackets, innermost last: a loop's REPEAT and, under R24's
+    # arm, a region's QUIET. Without the arm it holds loops alone.
+    brackets = []
     for _ in range(rng.randint(4, 22)):
         pick = rng.random()
         if pick < 0.45:
@@ -1743,9 +1990,17 @@ def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False,
         elif pick < 0.6 and depth < MAX_LOOP_DEPTH:
             insns.append(repeat(rng.randint(1, 4)))
             depth += 1
+            brackets.append(REPEAT)
         elif pick < 0.7 and depth > 0:
+            # R24's arm: a region opened in this loop's body closes in
+            # it, so the regions above the loop close first. Drawn by
+            # nothing, and none is open without the arm.
+            while brackets[-1] == QUIET:
+                brackets.pop()
+                insns.append(endquiet())
             insns.append(endrep())
             depth -= 1
+            brackets.pop()
         elif pick < 0.8:
             insns.append(deposit(rng.randrange(nreg)))
         elif pick < 0.92:
@@ -1777,7 +2032,14 @@ def random_program(fmt, rng, nconst=3, allow_halt_in_loop=False,
         # produced before is the corpus it produces now.
         if rev8 and rng.random() < 0.45:
             _rev8_draw(insns, rng, nreg)
-    insns += [endrep()] * depth
+        # R24's arm (2026-10-02), on the same terms again, and after the
+        # rest, so that `flags and ...` draws nothing when off.
+        if flags and rng.random() < 0.4:
+            _flags_draw(insns, rng, nreg, brackets)
+    # Every bracket still open, innermost first - `[endrep()] * depth`
+    # where the arm is off, because then every bracket is a loop's.
+    while brackets:
+        insns.append(endrep() if brackets.pop() == REPEAT else endquiet())
     insns.append(halt())
     pool = [sf.zero_bits(fmt), sf.one_bits(fmt), sf.max_normal_bits(fmt)]
     if nconst <= len(pool):
@@ -1827,6 +2089,24 @@ def _rev8_draw(insns, rng, nreg):
             insns.append(ldx(rd, rb, step))
         else:
             insns.append(stx(rng.randrange(nreg), rb, step))
+
+
+def _flags_draw(insns, rng, nreg, brackets):
+    """One R24 form appended to a fuzz program: a region opened (at most
+    MAX_QUIET_DEPTH open), the innermost closed where it is a region and
+    not a loop, or a raise of a register. A register's low byte is what
+    the lane computed, so the flags a raise ORs and whether it marks are
+    the program's own - both halves of every lane's byte are reached
+    without a value written for them."""
+    kind = rng.randrange(6)
+    if kind < 2 and brackets.count(QUIET) < MAX_QUIET_DEPTH:
+        insns.append(quiet())
+        brackets.append(QUIET)
+    elif kind < 3 and brackets and brackets[-1] == QUIET:
+        insns.append(endquiet())
+        brackets.pop()
+    else:
+        insns.append(raise_(rng.randrange(nreg)))
 
 
 def random_inputs(fmt, rng, n):

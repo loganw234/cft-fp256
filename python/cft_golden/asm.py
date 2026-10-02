@@ -47,7 +47,9 @@ order; the control lines are `repeat N` / `endrep`, `deposit rA`,
 `setact rA`, `actall`, `halt`, `stl rA, SLOT`, `ldl rD, SLOT`,
 `stx rA, rB` and `ldx rD, rB`. Revision 8 (proposed, 2026-09-29) adds
 `augadd rD, rA, rB` and `augerr rD, rA, rB`, and an optional signed
-post-step on the indexed pair: `stx rA, rB, STEP`, `ldx rD, rB, STEP`.
+post-step on the indexed pair: `stx rA, rB, STEP`, `ldx rD, rB, STEP`;
+and its R24 (the step-6 round, 2026-10-02) adds flag control: `quiet`
+and `endquiet` around a region and `raise rA`.
 """
 
 import hashlib
@@ -114,10 +116,18 @@ SCRATCH_IO_MAX = 0xFFFF
 # 754-2019 9.5's augmentedAddition - `augadd` keeps the sum rounded
 # roundTiesTowardZero, `augerr` the exact error.
 AUGADD, AUGERR = 10, 11
+# Revision 8's flag control (R24, the step-6 round): a quiet region,
+# `quiet` ... `endquiet`, in which no instruction's IEEE flags reach FLAGS
+# or a lane's byte, and `raise rA`, which ORs rA[4:0] into both outside a
+# region and marks the lane on rA[7] anywhere. Regions nest four deep and
+# nest properly with loops.
+QUIET, ENDQUIET, RAISE = 12, 13, 14
+MAX_QUIET_DEPTH = 4
 CTRL_NAMES = {HALT: "halt", REPEAT: "repeat", ENDREP: "endrep",
               DEPOSIT: "deposit", SETACT: "setact", ACTALL: "actall",
               STL: "stl", LDL: "ldl", STX: "stx", LDX: "ldx",
-              AUGADD: "augadd", AUGERR: "augerr"}
+              AUGADD: "augadd", AUGERR: "augerr",
+              QUIET: "quiet", ENDQUIET: "endquiet", RAISE: "raise"}
 CTRL_CODES = {v: k for k, v in CTRL_NAMES.items()}
 SCRATCH_CODES = (STL, LDL, STX, LDX)
 
@@ -152,6 +162,11 @@ CTRL_USE = {
     # revision 8: rd := r or e of augmentedAddition(ra, rb)
     AUGADD:  (("rd", "ra", "rb"), False),
     AUGERR:  (("rd", "ra", "rb"), False),
+    # revision 8's R24: the region's two ends read nothing; the raise
+    # reads ra alone
+    QUIET:    ((),           False),
+    ENDQUIET: ((),           False),
+    RAISE:    (("ra",),      False),
 }
 
 # Which byte of `imm` carries each operand's constant index under `kx`,
@@ -422,6 +437,21 @@ def augadd(rd, ra, rb):
     return encode(AUGADD, rd=rd, ra=ra, rb=rb, ctrl=True)
 
 
+def quiet():
+    """Open a quiet region (R24)."""
+    return encode(QUIET, ctrl=True)
+
+
+def endquiet():
+    """Close the innermost quiet region (R24)."""
+    return encode(ENDQUIET, ctrl=True)
+
+
+def raise_(ra):
+    """`raise rA` (R24); the underscore because `raise` is Python's."""
+    return encode(RAISE, ra=ra, ctrl=True)
+
+
 def augerr(rd, ra, rb):
     """`rd := e`, augmentedAddition(ra, rb)'s exact error (revision 8)."""
     return encode(AUGERR, rd=rd, ra=ra, rb=rb, ctrl=True)
@@ -560,11 +590,14 @@ class Image:
                     want.add("SCRATCH")
                 # Revision 8: CAPS2[11] for the augmentedAddition pair,
                 # CAPS2[12] for a step that is not zero (a zero step is
-                # the old instruction and needs nothing new).
+                # the old instruction and needs nothing new), CAPS2[14]
+                # for any of R24's three.
                 if d["op"] in (AUGADD, AUGERR):
                     want.add("AUGADD")
                 if step_of(d):
                     want.add("SCRATCH_STEP")
+                if d["op"] in (QUIET, ENDQUIET, RAISE):
+                    want.add("FLAG_CONTROL")
                 continue
             if d["kx"]:
                 want.add("kx")
@@ -582,7 +615,7 @@ class Image:
             want.add("SCRATCH_IO")
         return [f for f in ("kx", "REGS32", "BANK_PTR", "KX9", "IMUL",
                             "SCRATCH", "SCRATCH_IO", "AUGADD",
-                            "SCRATCH_STEP")
+                            "SCRATCH_STEP", "FLAG_CONTROL")
                 if f in want]
 
     # -- validation ----------------------------------------------------
@@ -739,6 +772,11 @@ class Image:
                 raise AsmError("constant does not fit the format")
 
         depth = 0
+        # R24: regions open, and every bracket open, loops and regions
+        # together as (code, pc), innermost last - the model's rule, that
+        # the two kinds nest properly within each other.
+        qdepth = 0
+        brackets = []
         mult = [1]
         worst = 0
         for pc, word in enumerate(self.insns):
@@ -757,11 +795,37 @@ class Image:
                     raise AsmError(
                         f"[{pc}] loops nest deeper than {MAX_LOOP_DEPTH}")
                 mult.append(mult[-1] * d["imm"])
+                brackets.append((REPEAT, pc))
             elif code == ENDREP:
                 depth -= 1
                 if depth < 0:
                     raise AsmError(f"[{pc}] endrep without repeat")
+                if brackets[-1][0] != REPEAT:
+                    raise AsmError(
+                        f"[{pc}] endrep closes its loop while the quiet "
+                        f"region opened at [{brackets[-1][1]}] is open: a "
+                        f"region opened in a loop body closes in that body")
+                brackets.pop()
                 mult.pop()
+            elif code == QUIET:
+                qdepth += 1
+                if qdepth > MAX_QUIET_DEPTH:
+                    raise AsmError(
+                        f"[{pc}] quiet regions nest deeper than "
+                        f"{MAX_QUIET_DEPTH}")
+                brackets.append((QUIET, pc))
+            elif code == ENDQUIET:
+                if qdepth == 0:
+                    raise AsmError(
+                        f"[{pc}] endquiet with no quiet region open")
+                if brackets[-1][0] != QUIET:
+                    raise AsmError(
+                        f"[{pc}] endquiet inside the loop opened at "
+                        f"[{brackets[-1][1]}], around a region opened "
+                        f"outside it: a region opened outside a loop "
+                        f"closes outside it")
+                qdepth -= 1
+                brackets.pop()
             elif code == ACTALL and depth > 0:
                 raise AsmError(
                     f"[{pc}] actall inside a loop would make the "
@@ -771,6 +835,11 @@ class Image:
                     f"[{pc}] halt inside a loop: the active mask cannot "
                     f"gate it, so the all-lanes-done early exit would be "
                     f"observable")
+            if code == HALT and qdepth:
+                raise AsmError(
+                    f"[{pc}] halt inside the quiet region opened at "
+                    f"[{brackets[-1][1]}]: a region is a save and its "
+                    f"restore, and a program cannot stop between them")
             if worst > MAX_INSTRUCTIONS:
                 raise AsmError(
                     f"[{pc}] worst-case instruction count exceeds "
@@ -778,6 +847,10 @@ class Image:
                     f"not a bound")
         if depth != 0:
             raise AsmError(f"{depth} loop(s) left open at the end")
+        if qdepth != 0:
+            raise AsmError(
+                f"{qdepth} quiet region(s) left open at the end, the "
+                f"innermost opened at [{brackets[-1][1]}]")
         if worst > MAX_INSTRUCTIONS:
             raise AsmError(
                 f"worst-case instruction count {worst} exceeds "
@@ -1324,11 +1397,13 @@ class _Asm:
             if trip >= (1 << 32):
                 self.fail("a trip count is a 32-bit immediate")
             self.insns.append(repeat(trip))
-        elif code in (DEPOSIT, SETACT):
+        elif code in (DEPOSIT, SETACT, RAISE):
             if len(args) != 1:
                 self.fail(f"{CTRL_NAMES[code]} takes one register")
             r = self.reg(args[0])
-            self.insns.append(deposit(r) if code == DEPOSIT else setact(r))
+            self.insns.append(deposit(r) if code == DEPOSIT
+                              else setact(r) if code == SETACT
+                              else raise_(r))
         elif code in (STL, LDL):
             if len(args) != 2:
                 self.fail(f"{CTRL_NAMES[code]} takes a register and a slot")
@@ -1591,13 +1666,17 @@ def disassemble(image) -> str:
         if d["ctrl"]:
             code = d["op"]
             name = CTRL_NAMES[code]
-            if code == ENDREP:
+            # A quiet region's body is indented as a loop's is (R24).
+            if code in (ENDREP, ENDQUIET):
                 indent -= 1
             pad = "  " * max(indent, 0)
             if code == REPEAT:
                 out.append(f"{pad}{name} {d['imm']}")
                 indent += 1
-            elif code in (DEPOSIT, SETACT):
+            elif code == QUIET:
+                out.append(f"{pad}{name}")
+                indent += 1
+            elif code in (DEPOSIT, SETACT, RAISE):
                 out.append(f"{pad}{name} r{d['ra']}")
             elif code == STL:
                 out.append(f"{pad}{name} r{d['ra']}, {d['imm'] & SLOT_MASK}")
