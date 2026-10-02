@@ -29,8 +29,11 @@ CATALOGUE = {
                  "a NUL or Ctrl-Z, anywhere; outside a comment, anything "
                  "but printable ASCII, space and tab",
     "syntax": "the text is not a statement of the language",
-    "too-deep": "parentheses nested more than 100 deep, or an expression "
-                "or a chain of lets deeper than the checker evaluates",
+    "too-deep": "parentheses nested more than 100 deep - in the source, "
+                "or in the canonical form it would have - or a system the "
+                "checker cannot evaluate from a caller whose own stack is "
+                "already deep (Python's recursion limit); never a chain, "
+                "which may be any length",
     "constant-range": "a constant whose exact value lies beyond "
                       "2^+-1048576, outside every format by far",
     "missing-system": "no `system` line",
@@ -53,7 +56,8 @@ CATALOGUE = {
     "lane-capacity": "a lane of more than 32,768 values (state, tangent "
                      "vectors and lane params), the deepest scratch any "
                      "tile publishes",
-    "unused": "a const, param, lane param, let or h that nothing uses",
+    "unused": "a const, param, lane param, let or h that nothing uses; h "
+              "is used only where a constant of the step scales with it",
     "cycle": "a definition that depends on itself",
     "not-constant": "a value needed when the program is compiled that "
                     "reads the state, a param, a lane param or a let",
@@ -204,8 +208,14 @@ def refuse(name, sentence, line=None):
 def too_deep(what):
     """The refusal for a recursion the package will not deepen: Python's
     limit is kept, since below 3.11 a deeper Python recursion is a
-    deeper C stack. Chains and runs of minus are walked in loops; what
-    is left to recurse is nesting a writer can name with lets."""
+    deeper C stack. Chains and runs of minus are walked in loops, and a
+    definition read by name at any depth is evaluated from the top
+    (check.py, BUDGET); what is left to recurse is nesting, which the
+    parser bounds at 100, so a system the language accepts meets the
+    limit only from a caller already deep in its own stack. It said "or
+    shorten a chain of lets" until D2, when a chain of lets could not be
+    any length (2026-10-01)."""
     return Refusal("too-deep", f"{what} nests deeper than this package "
-                   f"evaluates (Python's recursion limit, which it keeps): "
-                   f"name parts of it with lets, or shorten a chain of lets")
+                   f"evaluates from here (Python's recursion limit, which it "
+                   f"keeps): name parts of it with lets, or call it from a "
+                   f"shallower stack")

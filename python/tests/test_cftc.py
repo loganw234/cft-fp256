@@ -15,7 +15,8 @@ that argument rests on, cheap enough for the golden stage:
 * sharing's commutations: + and * and fma's multiplicands;
 * the targets, the refusal names (the language's one list), the
   manifest's shape, asm.py's round trip, the internal check refusing a
-  damaged image, and the command line's exits;
+  damaged image, and the command line's exits - a source whose
+  canonical form would not read back refused by name, exit 3, never 70;
 * the variational equations: an image with tangent vectors run as
   lang.run runs it, its lane block and manifest, the interleaved
   candidate offered only with tangents, scratch-capacity naming the
@@ -450,6 +451,90 @@ def test_the_command_line(tmp_path):
     assert not (tmp_path / "x").exists()
     r = subprocess.run(py + [str(src)], capture_output=True, text=True)
     assert r.returncode == 64
+
+
+def _negmul(k):
+    e = "x"
+    for _ in range(k):
+        e = f"-({e}) * y"
+    return e
+
+
+READBACK = {   # name: (source, the refusal, its line)
+    # every use of h folds away (the challenge suite's finding 1)
+    "h folded away": ("system folded\nformat fp64\nstate x\n"
+                      "next x = x + (h - h)\nstep map, h = 1/8\n",
+                      "unused", 5),
+    # a canonical form 101 deep: a negation used as a multiplicand ...
+    "nesting, primal": (f"system deep\nformat fp64\nstate x, y\n"
+                        f"next x = {_negmul(51)}\nnext y = y\nstep map\n",
+                        "too-deep", 4),
+    # ... and the tangent of an unnamed product of 102 terms (verifier-VL3)
+    "nesting, tangent": (
+        "system deeptan\nformat fp64\nstate "
+        + ", ".join(f"x{i}" for i in range(102)) + "\ntangent v\n"
+        + "next x0 = " + " * ".join(f"x{i}" for i in range(102)) + "\n"
+        + "".join(f"next x{i} = x{i}\n" for i in range(1, 102))
+        + "step map\n", "too-deep", 5),
+}
+
+
+def test_the_command_line_refuses_what_would_not_read_back(tmp_path):
+    """Each of these was accepted by the language until D2, and stopped
+    cftc with exit 70, an internal error, writing nothing: the canonical
+    form it rendered did not read back. Each is the language's own refusal
+    now - exit 3 with its name and line, nothing written, never 70 - and
+    compile_text raises the Refusal, not InternalError."""
+    py = [sys.executable, str(ROOT / "python" / "cftc")]
+    for k, (name, (text, want, line)) in enumerate(READBACK.items()):
+        with pytest.raises(lang.Refusal) as e:
+            cftc.compile_text(text, 2)
+        assert (e.value.name, e.value.line) == (want, line), name
+        src = tmp_path / f"case{k}.cftl"
+        src.write_bytes(text.encode("ascii"))
+        out = tmp_path / f"out{k}"
+        r = subprocess.run(py + [str(src), "--steps", "2", "--out", str(out)],
+                           capture_output=True, text=True)
+        assert r.returncode == 3, (name, r.returncode, r.stderr)
+        assert r.stderr.startswith(f"cftc: refused {want}: "), r.stderr
+        assert f"case{k}.cftl:{line}: " in r.stderr, r.stderr
+        assert "internal error" not in r.stderr
+        assert not out.exists()
+
+
+def _letchain(n, step="step rk4, h = 1/8"):
+    return ("system letchain\nformat fp64\nstate x, y\nlet a1 = x + y\n"
+            + "".join(f"let a{j} = a{j - 1} + y\n" for j in range(2, n + 1))
+            + f"d/dt x = a{n}\nd/dt y = y\n{step}\n")
+
+
+def test_the_command_line_compiles_a_chain_of_lets_of_any_length(tmp_path):
+    """verifier-VD2's cases/rk4_letchain_81.cftl, rebuilt: rk4 with 81 lets
+    was accepted by the language and stopped cftc at exit 70 - its canonical
+    form, whose expansion block chains the stages through labels, could not
+    be read back within Python's recursion limit. It compiles now, exit 0,
+    every file written; so does a chain of 1,000; and a cycle of 300 lets,
+    refused too-deep before for the same limit, is refused `cycle`, exit 3.
+    Never 70."""
+    py = [sys.executable, str(ROOT / "python" / "cftc")]
+    cycle = ("system cyc\nformat fp64\nstate x, y\nlet a1 = a300 + y\n"
+             + "".join(f"let a{j} = a{j - 1} + y\n" for j in range(2, 301))
+             + "next x = a150\nnext y = y\nstep map\n")
+    for k, (text, want) in enumerate(((_letchain(81), 0),
+                                      (_letchain(1000), 0), (cycle, 3))):
+        src = tmp_path / f"chain{k}.cftl"
+        src.write_bytes(text.encode("ascii"))
+        out = tmp_path / f"out{k}"
+        r = subprocess.run(py + [str(src), "--steps", "2", "--target",
+                                 "sw:32768", "--out", str(out)],
+                           capture_output=True, text=True)
+        assert r.returncode == want, (k, r.returncode, r.stderr)
+        assert "internal error" not in r.stderr
+        if want == 0:
+            assert len(list(out.iterdir())) == 8
+        else:
+            assert r.stderr.startswith("cftc: refused cycle: "), r.stderr
+            assert not out.exists()
 
 
 def test_a_step_count_past_the_digit_limit_is_refused_by_name():

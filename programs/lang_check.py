@@ -46,6 +46,16 @@ many lanes and at several step counts: the image's REPEAT patched to 1,
   H  plants in a copy of the package: each stopped by the internal check,
      and with the check off each red on seq.py, its failing lanes counted
   I  the corpus's coverage, every tally nonzero
+  J  every source the language accepts reads back (D2): maps reading h at
+     random - forms that scale with h, that fold away, that are
+     nonlinear - chains at the parser's 100 - negations used as
+     multiplicands, nested calls under every integrator, an unnamed
+     product's and a min chain's tangent, a compound constant - and chains
+     of lets past where Python's recursion limit once stopped them, with
+     and without a tangent, and a cycle of them; each compiled, its
+     canonical form read back, or refused by the name its source decides;
+     never an InternalError. No class of these reached a generator above,
+     and each stopped the compiler at exit 70 until D2's rules.
 
 A check skipped prints a line that starts with SKIP, which the runner
 counts and names on its VERDICT line.
@@ -1488,6 +1498,286 @@ def leg_plants(rng, work):
               "no lane differs")
 
 
+# ---- J: every source the language accepts reads back -----------------------
+
+# The property this leg exercises: every source the language accepts
+# compiles, its canonical form read back to the same graph (cftc's internal
+# check), or is refused by name - never an InternalError, which is the
+# compiler's own defect. Two classes broke it until D2 (2026-10-01), each a
+# cftc exit 70, and no generator above made either: a map naming h whose
+# every use folds away (the challenge suite's finding 1), and a source whose
+# canonical form nests past the parser's 100 (verifier-VL3). Here maps read
+# h at random, folding forms among them, and chains sit at the limit,
+# primal and with tangents; each source's outcome is decided by the
+# generator's own knowledge of what it wrote, and the language must agree.
+
+# Forms of h, each one constant meeting a run-time operation (or a map's
+# output), of a class the generator knows: SCALED scales with h, so h is
+# used; FOLDED reads h and folds to a constant that does not; NONLINEAR is
+# refused h-nonlinear where it is made.
+H_SCALED = ["h", "(2*h)", "(h/2)", "((h*h)/h)", "(-h)", "abs(h)",
+            "(h - h + h)", "(3*h/7)", "copysign(h, 1)", "(h/(h/h))"]
+H_FOLDED = ["(h - h)", "(h/h)", "((h*h)/(h*h))", "copysign(1, h)",
+            "(abs(h)/h)", "(0*h)", "((2*h)/(4*h))", "(h/h - 1)",
+            "copysign(2, -h)", "(h*h/(h*h) + 1)"]
+H_NONLINEAR = ["(h*h)", "(1/h)", "(h + 1)", "min(h, 2*h)", "(h < 1)",
+               "select(h < 0, h, 2*h)", "max(h, 1)", "(h == h)"]
+
+
+def g_hmap(rng, k):
+    """(text, outcome, step line): a map reading h at random through forms
+    of known class, in its equations, a const and a let. The outcome its
+    forms decide: h-nonlinear if any is nonlinear, else compiles if any
+    scales, else unused - at the step line - if h is named at all."""
+    names = ["x", "y", "z"][:rng.randint(1, 3)]
+    lines = [f"system hm{k}",
+             f"format {rng.choice(['fp32', 'fp64', 'fp128', 'fp256'])}",
+             f"round {rng.choice(['rne', 'rtz', 'rdn', 'rup', 'rmm'])}",
+             f"state {', '.join(names)}"]
+    if rng.random() < 0.3:
+        lines.append("tangent v")
+    classes = []
+    p_scaled = rng.choice([0.0, 0.15, 0.4])
+
+    def form():
+        r = rng.random()
+        cls = "scaled" if r < p_scaled else \
+            "nonlinear" if r > 0.9 else "folded"
+        classes.append(cls)
+        return rng.choice({"scaled": H_SCALED, "folded": H_FOLDED,
+                           "nonlinear": H_NONLINEAR}[cls])
+    extra = []
+    if rng.random() < 0.4:
+        lines.append(f"const c0 = {form()}")
+        extra.append("c0")
+    if rng.random() < 0.3:
+        lines.append(f"let r0 = {form()}")
+        extra.append("r0")
+    for i, x in enumerate(names):
+        other = names[(i + 1) % len(names)]
+        shape = rng.randrange(6)
+        e = (f"{x} * {form()} + {other}" if shape == 0 else
+             f"fma({x}, {form()}, {other})" if shape == 1 else
+             f"{x} + {form()}" if shape == 2 else
+             form() if shape == 3 else            # a constant output
+             f"{x} * {other}")                    # no h here
+        if i == 0 and extra:
+            # each a leaf of its own: two forms are never summed, which
+            # would make another constant than the one the class names
+            e = f"{e} + " + " + ".join(f"{x} * {u}" for u in extra)
+        lines.append(f"next {x} = {e}")
+    if not classes and rng.random() < 0.5:
+        lines.append("step map")                  # a map without h
+        return "\n".join(lines) + "\n", "compiles", None
+    lines.append(f"step map, h = "
+                 f"{rng.choice(['1/8', '0.01', '-1/3', '0x1p-4', '3/7'])}")
+    if "nonlinear" in classes:
+        return "\n".join(lines) + "\n", "h-nonlinear", None
+    if "scaled" in classes:
+        return "\n".join(lines) + "\n", "compiles", None
+    return "\n".join(lines) + "\n", "unused", len(lines)
+
+
+def nest(text):
+    """How deep a text nests as the language's lexer counts it: each ( and
+    [ a level, a comment skipped - this leg's own count."""
+    depth = best = 0
+    for ln in text.split("\n"):
+        for c in ln.split(";", 1)[0]:
+            if c in "([":
+                depth += 1
+                best = max(best, depth)
+            elif c in ")]":
+                depth = max(0, depth - 1)
+    return best
+
+
+def g_chain(kind, size, rng):
+    """(text, the depth its canonical form nests): a source at the edge of
+    the parser's 100, each kind's depth from the canonical form's own rules
+    (docs/LANGUAGE.md, "The intention-out"): a negation used as a
+    multiplicand is written (-a) * y, two levels a level; an unnamed
+    product's tangent nests one fma a term; a min chain's tangent one level
+    past the chain; euler's and stormer-verlet's step write a right-hand
+    side inside the template's fma."""
+    head = [f"system ch{size}",
+            f"format {rng.choice(['fp32', 'fp64', 'fp128', 'fp256'])}",
+            f"round {rng.choice(['rne', 'rtz', 'rdn', 'rup', 'rmm'])}"]
+
+    def neg(k, var):
+        e = var
+        for _ in range(k):
+            e = f"-({e}) * y"
+        return e
+
+    def calls(d, var):
+        e = var
+        for j in range(d):
+            e = (f"abs({e})", f"min({e}, {var})", f"fma({e}, y, y)",
+                 f"select(y < 0, {e}, y)")[j % 4] if var != "p" else \
+                f"abs({e})"
+        return e
+    names = [f"x{i}" for i in range(size)]
+    body = {
+        "negation multiplicands": (["state x, y", f"next x = {neg(size, 'x')}",
+                                    "next y = y", "step map"], 2 * size - 1),
+        "negation multiplicands, a let": (
+            ["state x, y", f"let r = {neg(size, 'x')}", "next x = r",
+             "next y = y", "step map"], 2 * size - 1),
+        "calls, a map": (["state x, y", f"next x = {calls(size, 'x')}",
+                          "next y = y", "step map"], size),
+        "calls, rk4": (["state x, y", f"d/dt x = {calls(size, 'x')}",
+                        "d/dt y = -y", "step rk4, h = 1/8"], size),
+        "calls, euler": (["state x, y", f"d/dt x = {calls(size, 'x')}",
+                          "d/dt y = -y", "step euler, h = 1/8"], size + 1),
+        "calls, stormer-verlet": (
+            ["state x, p", f"d/dt x = {calls(size, 'p')}", "d/dt p = -x",
+             "step stormer-verlet, h = 1/8, q = (x), p = (p)"], size + 1),
+        "a product's tangent": (
+            ["state " + ", ".join(names), "tangent v",
+             "next x0 = " + " * ".join(names)]
+            + [f"next {x} = {x}" for x in names[1:]] + ["step map"],
+            size - 1),
+        "a min chain's tangent": (
+            ["state " + ", ".join(names), "tangent v",
+             "next x0 = " + "min(" * (size - 1) + names[0] + "".join(
+                 f", {x})" for x in names[1:])]
+            + [f"next {x} = {x}" for x in names[1:]] + ["step map"], size),
+        # a compound constant as an operand is written in parentheses,
+        # x * (1/3): one level the source does not write (verifier-VD2)
+        "a compound constant": (
+            ["state x, y", "const k = 1/3",
+             "next x = " + "abs(" * size + "x * k" + ")" * size,
+             "next y = y", "step map"], size + 1),
+    }[kind]
+    return "\n".join(head + body[0]) + "\n", body[1]
+
+
+# Each kind with the size at which its canonical form reaches 100: the
+# boundary and one past it, and a size drawn near it.
+CHAIN_LIMITS = {"negation multiplicands": 50,
+                "negation multiplicands, a let": 50,
+                "calls, a map": 100, "calls, rk4": 100, "calls, euler": 99,
+                "calls, stormer-verlet": 99, "a product's tangent": 101,
+                "a min chain's tangent": 100, "a compound constant": 99}
+
+
+def g_letchain(kind, n, rng):
+    """A chain of n lets read by name - `let a1 = x + y`, `let aj = a(j-1)
+    + y`, through a call for "a call chain", in a cycle for "a cycle" -
+    read by x's equation, in a system of `kind`."""
+    tan = kind.endswith(" + v")
+    base = kind[:-4] if tan else kind
+    step = {"map": "step map", "a call chain, map": "step map",
+            "a cycle": "step map", "euler": "step euler, h = 1/8",
+            "rk4": "step rk4, h = 1/8",
+            "stormer-verlet": "step stormer-verlet, h = 1/8, q = (x), "
+                              "p = (y)"}[base]
+    nxt = "abs(a{p}) + y" if base.startswith("a call") else "a{p} + y"
+    first = {"stormer-verlet": "y + y", "a cycle": f"a{n} + y"}.get(base,
+                                                                   "x + y")
+    w = "next" if step == "step map" else "d/dt"
+    lines = [f"system lc{n}",
+             f"format {rng.choice(['fp32', 'fp64', 'fp128', 'fp256'])}",
+             f"round {rng.choice(['rne', 'rtz', 'rdn', 'rup', 'rmm'])}",
+             "state x, y"] + (["tangent v"] if tan else [])
+    lines.append(f"let a1 = {first}")
+    lines += [f"let a{j} = " + nxt.format(p=j - 1) for j in range(2, n + 1)]
+    lines += [f"{w} x = a{n // 2 if base == 'a cycle' else n}",
+              f"{w} y = " + ("-x" if base == "stormer-verlet" else "y"), step]
+    return "\n".join(lines) + "\n"
+
+
+# The let-chain class (verifier-VD2): where the read-back of the canonical
+# form, or the checker, stopped at Python's own limit on 87c4df9 (rk4 read
+# back to 80 lets, stormer-verlet 122, rk4 + v 64, stormer-verlet + v 97,
+# euler + v and map + v 197, a chain through a call 164 on Python 3.12),
+# one past each; far past them; and a cycle longer than that limit. Each
+# compiles, its canonical form read back - the cycle is refused by name.
+LET_CHAINS = [("rk4", 81), ("stormer-verlet", 123), ("rk4 + v", 65),
+              ("stormer-verlet + v", 98), ("euler + v", 198),
+              ("map + v", 198), ("a call chain, map", 165), ("map", 1500),
+              ("rk4", 600), ("rk4 + v", 300), ("a cycle", 600)]
+
+
+def leg_readback(count, rng):
+    section(f"J. every source the language accepts reads back: {count} maps "
+            f"reading h at random, chains at the parser's limit, and chains "
+            f"of lets past Python's")
+    t0 = time.perf_counter()
+    tally = {}
+    internal, wrong = [], []
+
+    def run(text, want, line, what):
+        """The compiler's outcome against `want` (compiles, or a refusal's
+        name and line): an InternalError is always a failure."""
+        try:
+            c = cftc.compile_text(text, 2, target="sw:4096", source=what,
+                                  stem="j")
+        except lang.Refusal as e:
+            tally[e.name] = tally.get(e.name, 0) + 1
+            if e.name != want or (line is not None and e.line != line):
+                wrong.append(f"{what}: refused {e.name} at line {e.line} "
+                             f"where {want}"
+                             + (f" at line {line}" if line else "")
+                             + f" is due ({e.sentence[:100]})")
+            return e
+        except cftc.InternalError as e:
+            tally["internal error"] = tally.get("internal error", 0) + 1
+            internal.append(f"{what}: internal error (exit 70), where {want} "
+                            f"is due: {str(e)[:150]}")
+            return None
+        tally["compiled"] = tally.get("compiled", 0) + 1
+        if want != "compiles":
+            wrong.append(f"{what}: compiled where {want} is due")
+        return c
+    for k in range(count):
+        text, want, line = g_hmap(random.Random(f"lang readback {k}"), k)
+        run(text, want, line, f"h-map {k}")
+    hmaps = dict(tally)
+    chains = 0
+    for kind, limit in CHAIN_LIMITS.items():
+        near = limit + rng.choice([-4, -2, 2, 3])
+        for size in (limit, limit + 1, near):
+            text, depth = g_chain(kind, size, rng)
+            want = "compiles" if depth <= 100 else "too-deep"
+            what = f"{kind}, {size}: canonical {depth} deep"
+            out = run(text, want, None, what)
+            chains += 1
+            # a source past 100 itself is the parser's, in its own words
+            if isinstance(out, lang.Refusal) and out.name == "too-deep" and \
+                    nest(text) <= 100 and f" {depth} deep," not in out.sentence:
+                wrong.append(f"{what}: the sentence names another depth: "
+                             f"{out.sentence[:120]}")
+            elif out is not None and not isinstance(out, lang.Refusal) and \
+                    nest(out.canonical) != depth:
+                wrong.append(f"{what}: the canonical form is "
+                             f"{nest(out.canonical)} deep")
+    for kind, n in LET_CHAINS:
+        run(g_letchain(kind, n, rng), "cycle" if kind == "a cycle" else
+            "compiles", None, f"lets, {kind}, {n}")
+        chains += 1
+    chain_tally = {n: tally[n] - hmaps.get(n, 0) for n in tally
+                   if tally[n] - hmaps.get(n, 0)}
+    for f in (internal + wrong)[:12]:
+        print(f"        {f}")
+    print(f"  maps reading h: {dict(sorted(hmaps.items()))}")
+    print(f"  chains: {dict(sorted(chain_tally.items()))}")
+    check(not internal, f"no InternalError: {count} maps reading h at "
+          f"random and {chains} chains - at the parser's limit, and chains "
+          f"of lets past Python's - each compiled with its canonical form "
+          f"read back or refused by name",
+          f"{len(internal)} stopped the compiler with an internal error, "
+          f"exit 70")
+    check(not wrong, f"each outcome the one its source decides - h folded "
+          f"away `unused` at the step line, a nonlinear form h-nonlinear, a "
+          f"canonical form past 100 `too-deep` naming its depth, every "
+          f"accepted chain's canonical form the depth its kind gives, every "
+          f"chain of lets compiled and a cycle of them `cycle` "
+          f"({time.perf_counter() - t0:.1f} s)",
+          f"{len(wrong)} otherwise")
+
+
 # ---- I: coverage ---------------------------------------------------------------
 
 def leg_coverage():
@@ -1544,9 +1834,11 @@ def main(argv=None):
                     help="generated systems in leg A (default 48)")
     ap.add_argument("--letmaps", type=int, default=120,
                     help="let-heavy homed maps in leg A (default 120)")
+    ap.add_argument("--hmaps", type=int, default=160,
+                    help="maps reading h at random in leg J (default 160)")
     ap.add_argument("--only", default="",
                     help="a comma list of legs: refs,corpus,letmaps,banks,libcft,"
-                         "determinism,refusals,plants")
+                         "determinism,refusals,plants,readback")
     ap.add_argument("--write", action="store_true",
                     help="write programs/systems/compiled/ and exit")
     ap.add_argument("--digests", help=argparse.SUPPRESS)
@@ -1572,7 +1864,8 @@ def main(argv=None):
                                           work)),
             ("determinism", lambda: leg_determinism(work)),
             ("refusals", leg_refusals),
-            ("plants", lambda: leg_plants(rng("plants"), work))]
+            ("plants", lambda: leg_plants(rng("plants"), work)),
+            ("readback", lambda: leg_readback(a.hmaps, rng("readback")))]
     try:
         for name, fn in legs:
             if only and name not in only:
