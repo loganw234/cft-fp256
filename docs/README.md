@@ -1,14 +1,14 @@
 # The documents, by what you open them for
 
-Forty-two files, 66,693 lines. Flat in one directory they look like one
+Forty-two files, 67,231 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **24,043 lines you consult while working** — the three under *Start here*,
+- **24,570 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,668 lines of tool manual**, one per shipped program;
 - **2,011 lines of operations**, read when you are about to do something to
   hardware;
-- **33,971 lines of record and argument** — the ledger, the roadmap and the
+- **33,982 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -45,20 +45,20 @@ product, not the implementation.
 |---|---|---|
 | [DETERMINISM.md](DETERMINISM.md) | 1,442 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 1,169 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
-| [SEQUENCER.md](SEQUENCER.md) | 3,367 | The orbit sequencer and the program model. |
-| [LANGUAGE.md](LANGUAGE.md) | 2,250 | The language for dynamical systems: the grammar, the semantics (literal evaluation, exact constants rounded once, one attribute a program), the integrators written in it, time (t in the state, a step counter, forcing by a rotation, each measured), the step graph, the reference interpreter that is the definition of correct for every compiled image, the intention-out, the variational equations (tangent vectors and the rule that differentiates each operation), and every refusal by name. |
+| [SEQUENCER.md](SEQUENCER.md) | 3,746 | The orbit sequencer and the program model. |
+| [LANGUAGE.md](LANGUAGE.md) | 2,253 | The language for dynamical systems: the grammar, the semantics (literal evaluation, exact constants rounded once, one attribute a program), the integrators written in it, time (t in the state, a step counter, forcing by a rotation, each measured), the step graph, the reference interpreter that is the definition of correct for every compiled image, the intention-out, the variational equations (tangent vectors and the rule that differentiates each operation), and every refusal by name. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 917 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
-| [CERTIFICATES.md](CERTIFICATES.md) | 2,676 | The certificate, version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Complete enough to write a reader and an auditor from the page. And the segment runner, `cft-segrun`, that writes one from the library, its accuracy entries included; the audit tool, `cft-audit`, that audits one in C with the same exact arithmetic; and the golden certificates in `certificates/` that hold both writers to committed bytes. |
+| [CERTIFICATES.md](CERTIFICATES.md) | 2,683 | The certificate, version 1: what a run was and how accurate it is, keyed or open, and the audit that re-runs its segments. Complete enough to write a reader and an auditor from the page. And the segment runner, `cft-segrun`, that writes one from the library, its accuracy entries included; the audit tool, `cft-audit`, that audits one in C with the same exact arithmetic; and the golden certificates in `certificates/` that hold both writers to committed bytes. |
 
 ## Reference you call into
 
 | document | lines | what it is for |
 |---|---|---|
-| [HOSTAPI.md](HOSTAPI.md) | 3,307 | The host API, function by function. The largest reference here and the one most often wanted. |
+| [HOSTAPI.md](HOSTAPI.md) | 3,402 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,737 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
-| [REMOTE.md](REMOTE.md) | 1,411 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
-| [PROGRAMS.md](PROGRAMS.md) | 619 | Programs as files: the assembler, the program library, the runner. |
+| [REMOTE.md](REMOTE.md) | 1,433 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
+| [PROGRAMS.md](PROGRAMS.md) | 640 | Programs as files: the assembler, the program library, the runner. |
 | [EMBEDDED.md](EMBEDDED.md) | 709 | libcft on microcontrollers, and the profiles the embedded gate runs. |
 | [PLATFORMS.md](PLATFORMS.md) | 2,928 | Which FPGA to buy, borrow or rent next, measured against the tile this project builds; every figure carries a source and every price the date it was seen. |
 | [SCALING.md](SCALING.md) | 423 | What more tiles buy, and what they do not. |
@@ -95,7 +95,7 @@ reading material for a working session.
 | document | lines | what it is for |
 |---|---|---|
 | [VALIDATION.md](VALIDATION.md) | 17,363 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
-| [ROADMAP.md](ROADMAP.md) | 4,932 | What is built, what is next, and what was decided against. |
+| [ROADMAP.md](ROADMAP.md) | 4,943 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1,082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
 | [NOVEL.md](NOVEL.md) | 561 | Results for which no prior description was found, with the standard of evidence stated first. |
 | [ATLAS.md](ATLAS.md) | 367 | The atlas-engine integration, assessed before any of it was done. |

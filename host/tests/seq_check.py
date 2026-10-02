@@ -76,13 +76,25 @@ augmented.py's own stress families (ties, cancellations, subnormal
 residuals, the overflow threshold), and a directed walk whose indices
 start at the depth's edge and near zero, so a strict program crosses the
 depth and a decrement wraps at the register's width. Its refusals -
-imm[23:12], every field the pair does not read, control code 12 - are
+imm[23:12], every field the pair does not read, control code 15 - are
 corrupted in and also listed once each. `ldx rX, rX, step`, a load into
 its own index, has a directed leg of its own: the loaded value wins and
 the step is discarded (CORE-V's rule), strict and not. And one leg that
 needs no corpus: a remote handle to a server whose HELLO publishes the
 round-2 tile's word, where every revision-8 form must be refused BY NAME
 on the client, and loads when the word publishes the bit.
+
+Since the step-6 round (2026-10-02, ABI 0.17) a SEVENTH corpus runs
+after the six, from its own seed: R24's flag control - `quiet`,
+`endquiet`, `raise` - and R23's per-lane flags, asked for on every run
+(docs/SEQUENCER.md). Both executors must agree on FLAGS, STATUS with
+its mark, every deposit, count and scratch-out slot and every lane
+byte, under a mask a third of the time, whose masked lanes' bytes must
+stay the caller's; the model's own identities are checked beside them.
+The bracket rules and every field the three do not read are refused by
+both, directed and corrupted in, and a remote handle to a server
+publishing a revision-7 tile's word refuses each code at load and a run
+asking for the block, by name and before any frame.
 """
 
 import argparse
@@ -181,7 +193,7 @@ def run_in_c(lib, dev, prog, a, b, c):
 
 
 class RunArgs(ctypes.Structure):
-    """cft_run_args, field for field (host/include/cft.h, ABI 0.14)."""
+    """cft_run_args, field for field (host/include/cft.h, ABI 0.17)."""
     _fields_ = [("struct_size", ctypes.c_size_t),
                 ("a", ctypes.c_void_p), ("b", ctypes.c_void_p),
                 ("c", ctypes.c_void_p),
@@ -208,7 +220,10 @@ class RunArgs(ctypes.Structure):
                 ("idx_scratch_in", ctypes.c_void_p),
                 ("idx_scratch_src", ctypes.c_size_t),
                 ("lane_mask", ctypes.c_void_p),
-                ("lane_mask_bytes", ctypes.c_size_t)]
+                ("lane_mask_bytes", ctypes.c_size_t),
+                # ABI 0.17 (docs/SEQUENCER.md R23), appended the same way
+                ("lane_flags", ctypes.c_void_p),
+                ("lane_flags_bytes", ctypes.c_size_t)]
 
 
 def run_in_c_idx(lib, dev, prog, a, b, c, n, scratch_in, idx):
@@ -1103,7 +1118,8 @@ def corrupt_rev8(insns, rng):
     """The refusals revision 8 adds, one per program: a set bit in
     imm[23:12] of a stepped access, and every field augadd/augerr do not
     read - rc and its high bit, rnd, a k flag, kx, imm[23:0] and
-    imm[31:28] - and the next control code, 12, which is still unknown.
+    imm[31:28] - and the next control code, 15, which is still unknown (12
+    to 14 are R24's since the step-6 round, and flags_corpus's).
     Each is refused by the model and must be by libcft. (An LDX into its
     own stepped index was a refusal here until the send-back of
     2026-09-29 took rung 2: it loads, the step discarded - see
@@ -1111,7 +1127,7 @@ def corrupt_rev8(insns, rng):
     out = list(insns)
     what = rng.choice(["step_reserved_bit", "aug_rc",
                        "aug_rnd", "aug_kx", "aug_kb", "aug_imm_low",
-                       "aug_imm_high", "code_12"])
+                       "aug_imm_high", "code_15"])
     code = rng.choice([seq.AUGADD, seq.AUGERR])
     regs = dict(rd=1, ra=2, rb=3, ctrl=True)
     if what == "step_reserved_bit":
@@ -1133,7 +1149,7 @@ def corrupt_rev8(insns, rng):
     elif what == "aug_imm_high":
         word = seq.encode(code, imm=1 << rng.randrange(27, 32), **regs)
     else:
-        word = seq.encode(12, ctrl=True)
+        word = seq.encode(15, ctrl=True)
     out.insert(rng.randrange(len(out)), word)
     return out, what
 
@@ -1164,7 +1180,7 @@ def rev8_refusal_words():
         for label, f in extra:
             words.append((f"{seq.CTRL_NAMES[op]} {label}",
                           seq.encode(op, **{**base, **f})))
-    for code in (12, 13, 255):
+    for code in (15, 16, 255):
         words.append((f"control code {code}", seq.encode(code, ctrl=True)))
     return words
 
@@ -1699,6 +1715,364 @@ def deposit_ceiling_remote(lib):
     return bad
 
 
+# ---- the seventh corpus: flag control (R24) and per-lane flags (R23) -------
+#
+# The step-6 round's revision-8 work, ABI 0.17: `quiet`, `endquiet` and
+# `raise`, and the byte a lane a run may ask for. Random programs with the
+# generator's flag-control arm (and the scratch and revision-8 arms beside
+# it) run through both executors with the per-lane block asked for, under
+# a mask a third of the time; FLAGS, STATUS - the mark among it - every
+# deposit, count, scratch-out slot and lane byte must agree, and a masked
+# lane's byte must be the caller's pattern on the C side. The bracket rules
+# and every field the three do not read are refused by both, directed and
+# corrupted in; and a remote handle to a server publishing a revision-7
+# tile's word refuses each code at load, and a run asking for the block,
+# by name and before any frame.
+
+def run_in_c_flags(lib, dev, prog, a, b, c, n, scratch_in, keep=None,
+                   fill=0xEE):
+    """-> (deposits, counts, flags, status, scratch_out, lane_flags)
+    through cft_program_run_ex with ABI 0.17's lane_flags asked for, and
+    ABI 0.14's mask where `keep` is given; the library's refusal as a
+    RuntimeError. The block is filled with `fill` first, so a masked
+    lane's byte - the caller's - is told from one written 0."""
+    fmt = prog.fmt
+    esz = fmt.width // 8
+    image = prog.to_bytes()
+    nsin, nsout = prog.n_scratch_in, prog.n_scratch_out
+
+    handle = ctypes.c_void_p()
+    st = lib.cft_program_load(dev, image, len(image), ctypes.byref(handle))
+    if st != CFT_OK:
+        raise RuntimeError(f"cft_program_load: "
+                           f"{lib.cft_last_error().decode()}")
+    try:
+        def pack(vals):
+            return ctypes.create_string_buffer(
+                b"".join(v.to_bytes(esz, "little") for v in vals),
+                max(1, len(vals) * esz))
+
+        buf_a, buf_b, buf_c = pack(a), pack(b), pack(c)
+        ndep = n * prog.max_deposits
+        buf_d = ctypes.create_string_buffer(max(1, ndep * esz))
+        counts = (ctypes.c_uint32 * max(1, n))()
+        flags = ctypes.c_uint32(0)
+        bus = ctypes.c_uint32(0)
+        buf_si = pack(scratch_in) if nsin else None
+        buf_so = (ctypes.create_string_buffer(max(1, n * nsout * esz))
+                  if nsout else None)
+        buf_lf = ctypes.create_string_buffer(bytes([fill]) * max(1, n),
+                                             max(1, n))
+        args = RunArgs()
+        args.struct_size = ctypes.sizeof(RunArgs)
+        args.a = ctypes.cast(buf_a, ctypes.c_void_p)
+        args.b = ctypes.cast(buf_b, ctypes.c_void_p)
+        args.c = ctypes.cast(buf_c, ctypes.c_void_p)
+        args.n = n
+        args.scratch_in = (ctypes.cast(buf_si, ctypes.c_void_p)
+                           if buf_si is not None else None)
+        args.scratch_in_bytes = (n * nsin * esz) if nsin else 0
+        args.scratch_out = (ctypes.cast(buf_so, ctypes.c_void_p)
+                            if buf_so is not None else None)
+        args.scratch_out_bytes = n * nsout * esz
+        args.deposits = ctypes.cast(buf_d, ctypes.c_void_p)
+        args.counts = counts
+        args.flags_out = ctypes.pointer(flags)
+        args.bus_out = ctypes.pointer(bus)
+        if keep is not None:
+            mbytes = (n + 7) // 8
+            raw = bytearray(mbytes)
+            for i, k in enumerate(keep):
+                if k:
+                    raw[i >> 3] |= 1 << (i & 7)
+            buf_m = ctypes.create_string_buffer(bytes(raw), max(1, mbytes))
+            args.lane_mask = ctypes.cast(buf_m, ctypes.c_void_p)
+            args.lane_mask_bytes = mbytes
+        args.lane_flags = ctypes.cast(buf_lf, ctypes.c_void_p)
+        args.lane_flags_bytes = n
+        st = lib.cft_program_run_ex(handle, ctypes.byref(args))
+        if st != CFT_OK:
+            raise RuntimeError(f"cft_program_run_ex: "
+                               f"{lib.cft_last_error().decode()}")
+        rawd = buf_d.raw
+        deposits = [int.from_bytes(rawd[i * esz:(i + 1) * esz], "little")
+                    for i in range(ndep)]
+        sout = []
+        if nsout:
+            rs = buf_so.raw
+            sout = [int.from_bytes(rs[i * esz:(i + 1) * esz], "little")
+                    for i in range(n * nsout)]
+        return (deposits, list(counts)[:n], flags.value, bus.value, sout,
+                list(buf_lf.raw[:n]))
+    finally:
+        lib.cft_program_free(handle)
+
+
+def flags_refusal_programs():
+    """Every R24 refusal, once, as (label, insns): the bracket rules, and
+    each field the three codes do not read."""
+    q, e, h = seq.quiet(), seq.endquiet(), seq.halt()
+    r, x = seq.repeat(2), seq.endrep()
+    out = [("endquiet with none open", [e, h]),
+           ("endquiet inside a loop around a region", [q, r, e, x, h]),
+           ("endrep around an open region", [r, q, x, e, h]),
+           ("five nested regions", [q] * 5 + [e] * 5 + [h]),
+           ("halt inside a region", [q, h, e, h]),
+           ("a region open at the end", [q, h])]
+    for code in (seq.QUIET, seq.ENDQUIET, seq.RAISE):
+        pre = [q] if code == seq.ENDQUIET else []
+        post = [e] if code == seq.QUIET else []
+        base = dict(ra=3 if code == seq.RAISE else 0, ctrl=True)
+        extra = [("rd", dict(rd=1)), ("rb", dict(rb=2)), ("rc", dict(rc=3)),
+                 ("rnd", dict(rnd=1)), ("ka", dict(ka=True)),
+                 ("kx", dict(kx=True))]
+        if code != seq.RAISE:
+            extra.append(("ra", dict(ra=1)))
+        extra += [(f"imm[{b}]", dict(imm=1 << b))
+                  for b in (0, 11, 23, 24, 26, 27, 31)]
+        for label, f in extra:
+            out.append((f"{seq.CTRL_NAMES[code]} {label}",
+                        pre + [seq.encode(code, **{**base, **f})] + post
+                        + [h]))
+    return out
+
+
+def _refused_by_c(lib, dev, fmt, insns, maxdep=0):
+    """Whether libcft refuses an image of `insns` the model could not
+    build - serialised past the constructor, as the first corpus does."""
+    bogus = seq.Program.__new__(seq.Program)
+    bogus.fmt, bogus.insns = fmt, insns
+    bogus.consts, bogus.max_deposits = [], maxdep
+    bogus.flags = 0
+    bogus.n_scratch_in = bogus.n_scratch_out = 0
+    bogus._n_consts = 0
+    image = bogus.to_bytes()
+    handle = ctypes.c_void_p()
+    rc = lib.cft_program_load(dev, image, len(image), ctypes.byref(handle))
+    if rc == CFT_OK:
+        lib.cft_program_free(handle)
+        return False
+    return True
+
+
+def flags_corpus(lib, dev, fmt, name, args, F):
+    """The seventh corpus, for one format. Mutates the counters in F."""
+    for label, insns in flags_refusal_programs():
+        try:
+            seq.Program(fmt, insns, max_deposits=0)
+            model_refused = False
+        except seq.ProgramError:
+            model_refused = True
+        c_refused = _refused_by_c(lib, dev, fmt, insns)
+        if not (model_refused and c_refused):
+            print(f"  MISMATCH {name} (flag-control refusal): {label}: model "
+                  f"{'refuses' if model_refused else 'loads'}, libcft "
+                  f"{'refuses' if c_refused else 'loads'}")
+            F["bad"] += 1
+        else:
+            F["directed"] += 1
+
+    rng = random.Random((args.seed * 2654435761 + fmt.width) & 0xFFFFFFFF
+                        ^ 0x24F1A6)
+    trials = max(1, args.trials // 4)
+    for _trial in range(trials):
+        insns, consts = seq.random_program(fmt, rng, scratch=True,
+                                           wide_regs=True, rev8=True,
+                                           flags=True)
+        strict = rng.random() < 0.4
+        pflags = seq.FLAG_SCRATCH_IO | (seq.FLAG_SCRATCH_STRICT
+                                        if strict else 0)
+        maxdep = rng.choice([0, 1, 2])
+        if rng.random() < 0.15:
+            # one R24 word broken, at a random place: both must refuse
+            what = rng.randrange(3)
+            if what == 0:
+                word = seq.endquiet()              # an unbalanced close
+            elif what == 1:
+                word = seq.quiet()                 # an unclosed open
+            else:
+                word = seq.encode(seq.RAISE, ra=1, rb=rng.randrange(1, 16),
+                                  ctrl=True)       # a field it does not read
+            insns = list(insns)
+            insns.insert(rng.randrange(len(insns)), word)
+            try:
+                seq.Program(fmt, insns, consts, maxdep, flags=pflags,
+                            n_scratch_out=2)
+            except seq.ProgramError:
+                bogus = seq.Program.__new__(seq.Program)
+                bogus.fmt, bogus.insns = fmt, insns
+                bogus.consts, bogus.max_deposits = consts, maxdep
+                bogus.flags = pflags
+                bogus.n_scratch_in, bogus.n_scratch_out = 0, 2
+                bogus._n_consts = len(consts)
+                image = bogus.to_bytes()
+                handle = ctypes.c_void_p()
+                rc = lib.cft_program_load(dev, image, len(image),
+                                          ctypes.byref(handle))
+                if rc == CFT_OK:
+                    lib.cft_program_free(handle)
+                    print(f"  MISMATCH {name} (flag-control corpus): the "
+                          f"model refuses a broken program and libcft "
+                          f"loads it")
+                    F["bad"] += 1
+                else:
+                    F["refused"] += 1
+                continue
+            # an inserted word that happened to stay legal runs as any
+            # other program below
+        prog = seq.Program(fmt, insns, consts, maxdep, flags=pflags,
+                           n_scratch_out=2)
+        qd = 0
+        for w in insns:
+            d = seq.decode(w)
+            if not d["ctrl"]:
+                continue
+            if d["op"] == seq.QUIET:
+                qd += 1
+                F["quiet"] += 1
+                F["nested"] += qd > 1
+            elif d["op"] == seq.ENDQUIET:
+                qd -= 1
+            elif d["op"] == seq.RAISE:
+                F["raise_quiet" if qd else "raise_loud"] += 1
+        n = rng.choice([1, 2, 63, 64, 65, 100, 129])
+        a = seq.random_inputs(fmt, rng, n)
+        b = seq.random_inputs(fmt, rng, n)
+        c = seq.random_inputs(fmt, rng, n)
+        keep = None
+        if rng.random() < 0.3:
+            keep = [rng.random() < 0.7 for _ in range(n)]
+        if n > 64:
+            F["blocked"] += 1
+        want = seq.run(prog, a, b, c, lane_mask=keep)
+        try:
+            dep, counts, fl, st, sout, lf = run_in_c_flags(
+                lib, dev, prog, a, b, c, n, None, keep)
+        except RuntimeError as exc:
+            print(f"  MISMATCH {name} (flag-control corpus): libcft refused "
+                  f"a program the model ran: {exc}")
+            F["bad"] += 1
+            continue
+        owned = [i for i in range(n) if keep is None or keep[i]]
+        esz_dep = prog.max_deposits
+        same = (fl == want.flags and st == want.status)
+        for i in owned:
+            if (lf[i] != want.lane_flags[i]
+                    or counts[i] != want.counts[i]
+                    or dep[i * esz_dep:(i + 1) * esz_dep]
+                    != want.deposits[i * esz_dep:(i + 1) * esz_dep]
+                    or sout[2 * i:2 * i + 2] != want.scratch_out[2 * i:2 * i + 2]):
+                same = False
+        for i in range(n):
+            if keep is not None and not keep[i] and lf[i] != 0xEE:
+                same = False                  # a masked lane's byte written
+        o = 0
+        for i in owned:
+            o |= want.lane_flags[i]
+        if (o & 0x1F) != want.flags or ((o >> 1) & 0x70) != (want.status
+                                                             & 0x70):
+            same = False                      # R23's identities, the model's
+        if not same:
+            F["bad"] += 1
+            if F["bad"] <= 3:
+                print(f"  MISMATCH {name} n={n} (flag-control corpus)")
+                print(f"    program  {[hex(i) for i in insns]}")
+                print(f"    flags    model 0x{want.flags:02x}  libcft "
+                      f"0x{fl:02x}; status model 0x{want.status:02x}  "
+                      f"libcft 0x{st:02x}")
+                print(f"    bytes    model {[hex(v) for v in want.lane_flags[:8]]}")
+                print(f"             libcft {[hex(v) for v in lf[:8]]}")
+        F["total"] += 1
+        F["lanes"] += len(owned)
+        F["marked"] += bool(want.status & seq.STATUS_MARKED)
+        F["masked"] += keep is not None and len(owned) < n
+        F["strict"] += strict
+        F["range"] += bool(want.status & seq.STATUS_SCRATCH_RANGE)
+        F["overflow"] += bool(want.status & seq.STATUS_DEPOSIT_OVERFLOW)
+
+
+def flags_remote_refusals(lib, F):
+    """A device without R24's or R23's bit refuses each BY NAME.
+
+    No tile publishes either (CAPS2[13] and [14] read zero), so the device
+    is a remote handle to the fake server of rev8_remote_refusals, whose
+    HELLO publishes a revision-7 tile's word, 0x7f1f. Each of the three
+    codes is refused at load naming the instruction and
+    CFT_SEQ_FEAT_FLAG_CONTROL, and loads where the word publishes the bit;
+    a program that needs neither loads, and a RUN of it that asks for the
+    per-lane flags is refused naming CFT_SEQ_FEAT_LANE_FLAGS - on the
+    client, before any frame, which the server's record holds."""
+    tile_word = 0x7F1F
+    cases = [("quiet", [seq.quiet(), seq.endquiet()], "QUIET"),
+             ("endquiet", [seq.quiet(), seq.endquiet()], "QUIET"),
+             ("raise", [seq.raise_(3)], "RAISE")]
+    fmt = FORMATS["fp64"]
+    for word, published in ((tile_word, False),
+                            (tile_word | seq.FEAT_FLAG_CONTROL, True)):
+        srv = _FakeServer(word)
+        dev = ctypes.c_void_p()
+        url = f"cft://127.0.0.1:{srv.port}".encode()
+        st = lib.cft_open(url, 0, ctypes.byref(dev))
+        if st != CFT_OK:
+            print(f"  MISMATCH (flag-control remote leg): cft_open of the "
+                  f"fake server failed: {lib.cft_last_error().decode()}")
+            F["bad"] += 1
+            srv.close()
+            continue
+        try:
+            for label, body, instr in cases:
+                prog = seq.Program(fmt, body + [seq.halt()], max_deposits=0)
+                image = prog.to_bytes()
+                handle = ctypes.c_void_p()
+                rc = lib.cft_program_load(dev, image, len(image),
+                                          ctypes.byref(handle))
+                msg = (lib.cft_last_error().decode() if rc != CFT_OK
+                       else "(loaded)")
+                if rc == CFT_OK:
+                    lib.cft_program_free(handle)
+                if not published:
+                    if (rc == CFT_ERR_UNSUPPORTED and instr in msg
+                            and "CFT_SEQ_FEAT_FLAG_CONTROL" in msg):
+                        F["remote_refused"] += 1
+                    else:
+                        print(f"  MISMATCH (flag-control remote leg): "
+                              f"{label} on 0x{word:x}: rc {rc}, {msg!r}")
+                        F["bad"] += 1
+                elif rc != CFT_OK:
+                    print(f"  MISMATCH (flag-control remote leg): {label} "
+                          f"refused where the bit is published: {msg!r}")
+                    F["bad"] += 1
+                else:
+                    F["remote_loaded"] += 1
+            # the block, asked of a run on a server whose word lacks it
+            if not published:
+                prog = seq.Program(fmt, [seq.halt()], max_deposits=0)
+                try:
+                    run_in_c_flags(lib, dev, prog, [0, 0], [0, 0], [0, 0],
+                                   2, None)
+                    print("  MISMATCH (flag-control remote leg): a run "
+                          "asking for the per-lane flags ran on a server "
+                          "without the bit")
+                    F["bad"] += 1
+                except RuntimeError as exc:
+                    if "CFT_SEQ_FEAT_LANE_FLAGS" in str(exc):
+                        F["remote_refused"] += 1
+                    else:
+                        print(f"  MISMATCH (flag-control remote leg): the "
+                              f"block was refused without its name: {exc}")
+                        F["bad"] += 1
+        finally:
+            lib.cft_close(dev)
+            srv.close()
+        if srv.other_ops:
+            print(f"  MISMATCH (flag-control remote leg): a load or run "
+                  f"reached the wire, ops {[hex(o) for o in srv.other_ops]}")
+            F["bad"] += 1
+    print(f"flag-control remote leg: {F['remote_refused']} refused by name on "
+          f"a server without the bits, {F['remote_loaded']} loaded where "
+          f"published")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--formats", nargs="+", default=["fp32", "fp64"],
@@ -1733,6 +2107,11 @@ def main():
              pair=0, ldx_step=0, stx_step=0, walks=0, strict=0, range=0,
              inv=0, ovf=0, unf=0, remote_refused=0, remote_loaded=0,
              directed=0, own_index=0, own_index_range=0)
+    # ...and the seventh's (R24 and R23, the step-6 round, ABI 0.17)
+    F = dict(total=0, refused=0, bad=0, blocked=0, directed=0, quiet=0,
+             nested=0, raise_quiet=0, raise_loud=0, marked=0, masked=0,
+             lanes=0, strict=0, range=0, overflow=0, remote_refused=0,
+             remote_loaded=0)
     try:
         for name in args.formats:
             fmt = FORMATS[name]
@@ -1839,9 +2218,11 @@ def main():
             indexed_corpus(lib, dev, fmt, name, args, X)
             masked_corpus(lib, dev, fmt, name, args, M)
             rev8_corpus(lib, dev, fmt, name, args, R)
+            flags_corpus(lib, dev, fmt, name, args, F)
     finally:
         lib.cft_close(dev)
     rev8_remote_refusals(lib, R)
+    flags_remote_refusals(lib, F)
     ceiling_bad = deposit_ceiling_remote(lib)
 
     print(f"\n{total} programs run through both implementations, "
@@ -1881,7 +2262,25 @@ def main():
           f"refusals refused by both; {R['own_index']} own-index loads "
           f"(ldx rX, rX, step) equal in both and to their unstepped "
           f"twins, {R['own_index_range']} of them strict and reporting")
-    bad += S["bad"] + X["bad"] + M["bad"] + R["bad"] + ceiling_bad
+    print(f"{F['total']} programs from the flag-control corpus run through "
+          f"both with the per-lane block asked for, {F['refused']} broken ones "
+          f"refused by both, {F['blocked']} across the block boundary: "
+          f"{F['quiet']} quiet regions ({F['nested']} nested), "
+          f"{F['raise_loud']} raises outside a region and "
+          f"{F['raise_quiet']} inside one, {F['marked']} runs with a lane "
+          f"marked, {F['masked']} masked runs, {F['lanes']} lane bytes "
+          f"compared, {F['strict']} strict runs of which {F['range']} "
+          f"reported, {F['overflow']} with a deposit overflow; "
+          f"{F['directed']} directed refusals refused by both")
+    bad += S["bad"] + X["bad"] + M["bad"] + R["bad"] + ceiling_bad + F["bad"]
+    if F["total"] and not all(F[k] for k in (
+            "refused", "blocked", "directed", "quiet", "nested",
+            "raise_quiet", "raise_loud", "marked", "masked", "range",
+            "overflow", "remote_refused", "remote_loaded")):
+        print("THE FLAG-CONTROL CORPUS DID NOT REACH EVERY FORM - a counter "
+              "above is zero, so a region, a raise, the mark, a mask, a "
+              "report or the remote refusal went uncompared")
+        return 1
     if R["total"] and not all(R[k] for k in (
             "refused", "blocked", "augadd", "augerr", "pair", "ldx_step",
             "stx_step", "walks", "strict", "range", "inv", "ovf", "unf",

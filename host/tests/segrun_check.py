@@ -238,6 +238,29 @@ halt
 FLAGSTEP_FLAGS = [20, 0, 1, 0, 20]
 FLAGSTEP_STATUS = [48, 48, 0, 48, 48]
 
+# The mark's leg (revision 8's R24, ABI 0.17): STATUS[6], CFT_STATUS_MARKED,
+# from the software backend into a certificate's segment line - through
+# cft-segrun, the golden writer, both auditors, and a loopback cft-serve.
+# Slot 0 holds an integer bit pattern c; each segment decrements it and
+# raises it, so its low five bits are the segment's flags and its bit 7
+# marks the lane. Lane 0 starts at 0x83 and lane 1 at 0x05: lane 0 marks in
+# the first three segments (0x82, 0x81, 0x80) and not after (0x7f, 0x7e).
+MARKSTEP = """.format   fp64
+.deposits 0
+.scratch  in 1
+.scratch  out 1
+.const    ONE = 0x0000000000000001
+; slot 0: an integer c. Each segment: c <- c - 1, then raise c - its
+; bits [4:0] reach FLAGS and its bit 7 marks the lane (STATUS[6])
+ldl    r3, 0
+isub   r3, r3, ONE
+raise  r3
+stl    r3, 0
+halt
+"""
+MARKSTEP_FLAGS = [6, 3, 2, 31, 30]
+MARKSTEP_STATUS = [64, 64, 64, 0, 0]
+
 # The depth leg's program (section 11): its answer depends on the scratch
 # depth. It is written here rather than taken from certificates/, so that
 # the tool's gate and the golden-certificate corpus share no input.
@@ -514,6 +537,12 @@ def flagstep_program():
             dec("fp64", "5")]
     return Program("flagstep-fp64",
                    [RunSpec("main", img, b"", init, "fp64", 5, 1)])
+
+
+def markstep_program():
+    img = asm.assemble(MARKSTEP, "markstep")
+    return Program("markstep-fp64",
+                   [RunSpec("main", img, b"", [0x83, 0x05], "fp64", 5, 1)])
 
 
 def half_init_program(l63):
@@ -2366,11 +2395,27 @@ def hold_peak(work, flag):
 
 # ---- the remote leg ---------------------------------------------------------
 
+def hold_mark_lines(what, data):
+    """The mark in the certificate itself (R24, ABI 0.17): markstep's five
+    segment lines carry the flags and STATUS words the golden chain gives,
+    STATUS 64 - CFT_STATUS_MARKED - on the first three. A writer, a backend
+    or a protocol that dropped STATUS[6] on the way would write 0 there."""
+    got = [(int(m.group(1)), int(m.group(2)))
+           for m in re.finditer(rb"^segment \d+ start \S+ end \S+ flags "
+                                rb"(\d+) status (\d+)$", data, re.M)]
+    check(got == list(zip(MARKSTEP_FLAGS, MARKSTEP_STATUS)),
+          f"{what}: the segment lines carry flags {MARKSTEP_FLAGS} and STATUS "
+          f"{MARKSTEP_STATUS} - the mark, STATUS[6], reached the certificate",
+          f"they carry {got}")
+
+
 def hold_remote(work, legs):
     """`legs`: (program, its golden chains, its keyed software certificate)
     for each program certified through the server - lorenz63, whose every
-    segment is flags 16 and STATUS 0, and flagstep, whose are not, so that
-    a flag word or STATUS lost on the way back from a server is seen."""
+    segment is flags 16 and STATUS 0, flagstep, whose are not, so that
+    a flag word or STATUS lost on the way back from a server is seen, and
+    markstep, whose STATUS[6] is the mark (R24): a server or client that
+    masked the word to bits 4 and 5 would lose it."""
     print("== 9. through a loopback cft-serve: the page's remote rule, and "
           "the same chains", flush=True)
     rd = work / "remote"
@@ -2546,6 +2591,8 @@ def main():
             p.runs = [r for r in p.runs if r.kind != "wider"]
     flag = flagstep_program()
     programs.append(flag)
+    mark = markstep_program()
+    programs.append(mark)
     programs.append(half_init_program(
         next(p for p in programs if p.name == "lorenz63-rk4-fp64")))
     attach_entries(programs)
@@ -2568,6 +2615,13 @@ def main():
     check(fl == FLAGSTEP_FLAGS and stt == FLAGSTEP_STATUS,
           f"flagstep's segments raise flags {FLAGSTEP_FLAGS} and STATUS "
           f"{FLAGSTEP_STATUS} in the golden model",
+          f"flags {fl}, STATUS {stt}")
+    fl = [x[0] for x in chains[mark.name][0][1]]
+    stt = [x[1] for x in chains[mark.name][0][1]]
+    check(fl == MARKSTEP_FLAGS and stt == MARKSTEP_STATUS,
+          f"markstep's segments raise flags {MARKSTEP_FLAGS} and STATUS "
+          f"{MARKSTEP_STATUS} in the golden model - a raise's word and its "
+          f"mark, STATUS[6]",
           f"flags {fl}, STATUS {stt}")
     # the entries' coverage, as the plan's step 5 asks for it
     ents = [(p, e) for p in programs for e in p.entries]
@@ -2620,9 +2674,12 @@ def main():
             res = certify_and_hold(prog, chains[prog.name], mode, work,
                                    device=args.device,
                                    tag=" card" if card else "",
-                                   may_refuse_load=card and prog is flag)
+                                   may_refuse_load=card and (prog is flag or
+                                                             prog is mark))
             if res:
                 made[mode] = res[0]
+                if prog is mark:
+                    hold_mark_lines(f"{prog.name} {mode}", res[0])
         if not card:
             if "keyed" in made:
                 sw_keyed[prog.name] = made["keyed"]
@@ -2665,9 +2722,10 @@ def main():
                   "behind its server", flush=True)
         else:
             skip("the remote leg", "no --serve given")
-    elif l63.name in sw_keyed and flag.name in sw_keyed:
+    elif (l63.name in sw_keyed and flag.name in sw_keyed
+          and mark.name in sw_keyed):
         hold_remote(work, [(p, chains[p.name], sw_keyed[p.name])
-                           for p in (l63, flag)])
+                           for p in (l63, flag, mark)])
     else:
         bad("the remote leg: a software certificate it compares with was "
             "not made")

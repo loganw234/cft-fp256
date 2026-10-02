@@ -4701,6 +4701,12 @@ and the testing rule, as the last rounds ran.
        The one revision therefore holds what M1 and M2 need of a tile.
      - The names and encodings are the parcel's to propose. A free
        CAPS2 bit publishes them; R21, R22 and R23 hold [11] to [13].
+     - **Built golden-first** (parcel R8, 2026-10-02; docs/SEQUENCER.md,
+       R24): three control codes, not two instructions. A region needs
+       an opening and a closing, so it is QUIET (12) and ENDQUIET (13),
+       with RAISE ra (14). They are published by CAPS2[14], with regions
+       nesting four deep with loops. The mark is never silenced by a
+       region. Revision 7's tiles refuse all three by name.
    - **R8L, per-lane flags:** R23's design (docs/SEQUENCER.md), one
      byte a lane, with one change:
      - bits [4:0] the IEEE flags, [5] deposit overflow, [6] a
@@ -4709,6 +4715,10 @@ and the testing rule, as the last rounds ran.
        sets.
      This takes an ABI step (0.17, `cft_run_args.lane_flags`), the
      module rebuilt, cft-segrun and cft-audit, and the remote protocol.
+     **Built golden-first** (parcel R8, 2026-10-02; docs/SEQUENCER.md,
+     R23, and docs/HOSTAPI.md, ABI 0.17), with MODE[24], STATUS[6] for a
+     marked lane, and the module rebuilt. cft-segrun asks for the block
+     only from certificate version 2.
    - **Certificate format version 2,** designed once, with R8L, for
      everything this step needs of it:
      - the per-lane flags;
@@ -4742,7 +4752,8 @@ and the testing rule, as the last rounds ran.
    - **R21 and R22**, augmented addition (`augadd`/`augerr`) and stepped
      STX/LDX: already in the model, the software backend and `asm.py`
      (`test_seq_rev8.py`); no tile carries either. They come to cft-asm
-     with R8F's assembler work, and to the RTL.
+     with R8F's assembler work, and to the RTL. cft-asm reads both since
+     parcel R8.
    - **R8S, instruction streaming.** The program is read from card
      memory through a prefetch, not held on-chip, so the instruction
      ceiling goes. The image format and the certificate are unchanged,

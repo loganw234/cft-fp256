@@ -254,10 +254,10 @@ payload (the server passes NULL for it, as the caller did).
 | `0x0011` | `REDUCE` | `u32 op, u32 fmt, u32 rnd, u32 present, u64 n, elem[n] per present operand` | `u32 flags, u32 bus, elem[1]` |
 | `0x0012` | `REDUCE_SEG` | `u32 op, u32 fmt, u32 rnd, u32 present, u64 n, u32 seg, elem[n] per present operand` - `n` a whole number of segments of `seg`, or refused | `u32 flags, u32 bus, elem[n / seg]` |
 | `0x0020` | `PROG_LOAD` | the program image, byte for byte | `u32 handle, u32 fmt, u32 max_deposits, u32 0` |
-| `0x0021` | `PROG_RUN` | `u32 handle, u32 present, u32 want_counts, u32 0, u64 n, elem[n] per present operand` | `u32 flags, u32 bus, elem[n * max_deposits], then u32[n] counts if wanted` |
+| `0x0021` | `PROG_RUN` | `u32 handle, u32 present, u32 want, u32 0, u64 n, elem[n] per present operand` - `want` bit 0 the counts, and no other bit | `u32 flags, u32 bus, elem[n * max_deposits], then u32[n] counts if wanted` |
 | `0x0022` | `PROG_FREE` | `u32 handle` | - |
-| `0x0023` | `PROG_RUN_BANK` | `u32 handle, u32 present, u32 want_counts, u32 bank_bytes, u64 n, elem[bank], elem[n] per present operand` | as `PROG_RUN` |
-| `0x0024` | `PROG_RUN_EX` | `u32 handle, u32 present, u32 want_counts, u32 bank_bytes, u64 n, u32 n_scratch_in, u32 n_scratch_out, elem[bank], elem[n * n_scratch_in], elem[n] per present operand` | `u32 flags, u32 bus, elem[n * max_deposits], then u32[n] counts if wanted, then elem[n * n_scratch_out]` |
+| `0x0023` | `PROG_RUN_BANK` | `u32 handle, u32 present, u32 want, u32 bank_bytes, u64 n, elem[bank], elem[n] per present operand` - `want` as `PROG_RUN`'s | as `PROG_RUN` |
+| `0x0024` | `PROG_RUN_EX` | `u32 handle, u32 present, u32 want, u32 bank_bytes, u64 n, u32 n_scratch_in, u32 n_scratch_out, elem[bank], elem[n * n_scratch_in], elem[n] per present operand` - `want` bit 0 the counts, bit 1 the per-lane flags (ABI 0.17) | `u32 flags, u32 bus, elem[n * max_deposits], then u32[n] counts if wanted, then elem[n * n_scratch_out], then u8[n] per-lane flags if wanted` |
 | `0x0030` | `BUF_ALLOC` | `u64 bytes` | `u32 handle` |
 | `0x0031` | `BUF_FREE` | `u32 handle` | - |
 | `0x0032` | `BUF_WRITE` | `u32 handle, u32 0, u64 offset, bytes` | - |
@@ -422,7 +422,9 @@ header and refuses a frame that names different ones.
 
 **WHICH of the three opcodes a run becomes is the IMAGE's decision**,
 read from its header flags - `SCRATCH_IO` first, then `BANK_EXT` - and
-never from the buffers' lengths. A `BANK_EXT` program whose `n_consts`
+never from the buffers' lengths, with one exception since ABI 0.17: a
+run that asks for the per-lane flags travels as `PROG_RUN_EX` whatever
+its image's flags, because no other frame can carry the ask (below). A `BANK_EXT` program whose `n_consts`
 is zero has a legitimately empty bank and must still travel as
 `PROG_RUN_BANK`, because the server's `cft_program_run` refuses it; a
 `SCRATCH_IO` program with two empty blocks is in exactly the same
@@ -433,6 +435,26 @@ rather than inferred at each call site.
 The scratch blocks are **per lane**, so unlike the bank they come out
 of the per-lane chunk cost rather than off the budget: the bank rides
 every chunk whole and a chunk's scratch is its own lanes' slice.
+
+**The `want` word (ABI 0.17, 2026-10-02).** The third payload word of the
+three program runs was `want_counts` until 0.17, and is `want` now: bit 0
+asks for the counts, as before, and bit 1, on `PROG_RUN_EX` alone, for
+revision 8's per-lane flags (docs/SEQUENCER.md R23; docs/HOSTAPI.md, "Per-lane
+flags and flag control at ABI 0.17"), a byte a lane after the scratch-out
+block. The server refuses any other bit, by name, before it looks at the
+handle - `PROG_RUN` and `PROG_RUN_BANK` with bit 1 among them - so an
+unknown ask is never answered with a block of the wrong length. The block
+is per lane, so it comes out of the per-lane chunk cost, and the client
+scatters each chunk's bytes to the chunk's lanes - a masked run's
+compacted lanes back to the lanes they came from - as it scatters the
+counts. A run that does not ask travels exactly as it did, so a server's
+per-opcode counts of every earlier call are unchanged. A remote handle
+publishes its server's `CFT_SEQ_FEAT_LANE_FLAGS` and refuses the block,
+on the client and before any frame, where the server lacks it: unlike
+the mask, which the client compacts away, the block can only be made
+where the run is. `remote-test` holds the bit's round trip, masked and
+not, an unknown bit refused on `PROG_RUN_EX`, bit 1 refused on
+`PROG_RUN`, and the known bits answered.
 
 **Chunking.** `RUN`, `PROG_RUN`, `PROG_RUN_BANK` and `PROG_RUN_EX`
 requests are split by the client so that no frame carries more than

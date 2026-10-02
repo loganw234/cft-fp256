@@ -471,12 +471,12 @@ enum { RUN_PLAIN = 0, RUN_BANK = 1, RUN_EX = 2 };
 static int h_prog_run(conn *C, const uint8_t *p, size_t len, answer *A,
                       int mode)
 {
-    uint32_t handle, present, want_counts, bank_bytes;
+    uint32_t handle, present, want, bank_bytes;
     uint32_t n_sin = 0, n_sout = 0;
     uint64_t n;
     cft_program *prog;
     cft_program_info info;
-    size_t esz, opnd, expect, dep_bytes, cnt_bytes, i;
+    size_t esz, opnd, expect, dep_bytes, cnt_bytes, lf_bytes, i;
     size_t fixed = (mode == RUN_EX) ? 32u : 24u;
     size_t sin_bytes = 0, sout_bytes = 0;
     const uint8_t *a = NULL, *b = NULL, *c = NULL, *bank = NULL, *q;
@@ -497,7 +497,12 @@ static int h_prog_run(conn *C, const uint8_t *p, size_t len, answer *A,
     }
     handle      = cftr_get32(p + 0);
     present     = cftr_get32(p + 4);
-    want_counts = cftr_get32(p + 8);
+    /* The third word says which outputs the client wants back: bit 0
+     * the counts, and since ABI 0.17 bit 1 the per-lane flags, which only
+     * PROG_RUN_EX carries (cft_program_run_ex is the one call with the
+     * field). Any other bit is a client this server does not understand,
+     * refused rather than read as "counts", as the word once was. */
+    want        = cftr_get32(p + 8);
     bank_bytes  = cftr_get32(p + 12);
     n           = cftr_get64(p + 16);
     if (mode == RUN_EX) {
@@ -506,6 +511,15 @@ static int h_prog_run(conn *C, const uint8_t *p, size_t len, answer *A,
     }
     if (present & ~7u) {
         snprintf(A->why, sizeof A->why, "operand mask 0x%x", (unsigned)present);
+        return -1;
+    }
+    if (want & ~(mode == RUN_EX ? 3u : 1u)) {
+        snprintf(A->why, sizeof A->why, "%s's want word 0x%x names an output "
+                 "this server does not know: bit 0 is the counts%s", opname,
+                 (unsigned)want,
+                 mode == RUN_EX ? " and bit 1 the per-lane flags"
+                                : ", and only PROG_RUN_EX carries the per-lane "
+                                  "flags");
         return -1;
     }
     if (mode == RUN_PLAIN && bank_bytes) {
@@ -585,13 +599,15 @@ static int h_prog_run(conn *C, const uint8_t *p, size_t len, answer *A,
     if (present & 4u) { c = q; }
 
     dep_bytes = (size_t)n * info.max_deposits * esz;
-    cnt_bytes = want_counts ? (size_t)n * 4u : 0u;
-    out = (uint8_t *)malloc(8u + dep_bytes + cnt_bytes + sout_bytes + 1u);
+    cnt_bytes = (want & 1u) ? (size_t)n * 4u : 0u;
+    lf_bytes  = (want & 2u) ? (size_t)n : 0u;
+    out = (uint8_t *)malloc(8u + dep_bytes + cnt_bytes + sout_bytes +
+                            lf_bytes + 1u);
     if (!out) {
         fail(A, CFT_ERR_OUT_OF_MEMORY, "allocating the deposits");
         return 0;
     }
-    if (want_counts && n) {
+    if ((want & 1u) && n) {
         counts = (uint32_t *)malloc((size_t)n * sizeof *counts);
         if (!counts) {
             free(out);
@@ -622,6 +638,15 @@ static int h_prog_run(conn *C, const uint8_t *p, size_t len, answer *A,
         args.counts            = counts;
         args.flags_out         = &flags;
         args.bus_out           = &bus;
+        /* ABI 0.17: the per-lane flags, written in place after the
+         * scratch-out block by the library itself, as that block is. This
+         * server's own library refuses them by name where its device does
+         * not publish CFT_SEQ_FEAT_LANE_FLAGS, and the refusal travels
+         * back as the call's answer. */
+        args.lane_flags        = (want & 2u)
+                               ? out + 8 + dep_bytes + cnt_bytes + sout_bytes
+                               : NULL;
+        args.lane_flags_bytes  = lf_bytes;
         st = cft_program_run_ex(prog, &args);
     } else if (mode == RUN_BANK) {
         st = cft_program_run_bank(prog, bank, (size_t)bank_bytes, a, b, c,
@@ -641,7 +666,7 @@ static int h_prog_run(conn *C, const uint8_t *p, size_t len, answer *A,
     }
     cftr_put32(out + 0, flags);
     cftr_put32(out + 4, bus);
-    for (i = 0; i < (size_t)(want_counts ? n : 0); i++)
+    for (i = 0; i < (size_t)((want & 1u) ? n : 0); i++)
         cftr_put32(out + 8 + dep_bytes + i * 4u, counts[i]);
     free(counts);
     A->status   = CFT_OK;
@@ -649,7 +674,7 @@ static int h_prog_run(conn *C, const uint8_t *p, size_t len, answer *A,
     /* The scratch-out block is written in place, after the counts, by
      * cft_program_run_ex itself - so it is already where the response
      * wants it and there is no second copy to keep in step. */
-    A->resp_len = 8u + dep_bytes + cnt_bytes + sout_bytes;
+    A->resp_len = 8u + dep_bytes + cnt_bytes + sout_bytes + lf_bytes;
     return 0;
 }
 

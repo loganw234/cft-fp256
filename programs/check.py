@@ -1625,6 +1625,407 @@ def check_revision3_corpus(args, tmp, trials=120):
        f"{scratch_io} carry a per-run block, {kx9} need KX9")
 
 
+# ---- the revision-8 corpus: both assemblers on the new forms --------------
+#
+# Revision 8 (docs/SEQUENCER.md; proposed, defined golden-first) adds five
+# forms to the text: R21's `augadd` and `augerr`, R22's signed post-step on
+# `stx` and `ldx`, and R24's `quiet`, `endquiet` and `raise`. asm.py read
+# them from 2026-09-29 (R21, R22) and 2026-10-02 (R24); cft-asm.c read none
+# until 2026-10-02, and no committed source uses one, so nothing above
+# reached them. This corpus draws them all - steps in every spelling the
+# form allows, regions nested with loops both ways and four deep, the
+# five-bit registers - and holds the two assemblers to each other on the
+# bytes, both disassemblers, the round trip and -i. It asserts what it
+# reached, decoded from the images rather than read off the text.
+
+def _r8_step_text(rng):
+    """A post-step operand in one of its spellings, or None (omitted)."""
+    pick = rng.random()
+    if pick < 0.15:
+        return None
+    v = rng.choice([1, -1, 2, -2, 8, -8, 0, asm.STEP_MIN, asm.STEP_MAX,
+                    rng.randrange(asm.STEP_MIN, asm.STEP_MAX + 1)])
+    form = rng.randrange(4)
+    if form == 0:
+        return f"{v:+d}"
+    if form == 1:
+        return str(v)
+    if form == 2:
+        sign = "-" if v < 0 else rng.choice(["", "+"])
+        return f"{sign}0x{abs(v):x}"
+    return f"{'-' if v < 0 else ''}{abs(v):_d}" if abs(v) >= 1000 \
+        else f"{v:d}"
+
+
+def revision8_program(rng):
+    fmt = FORMATS[rng.choice(["fp32", "fp64", "fp128", "fp256"])]
+    nk = rng.randrange(0, 5)
+    head = [f".format {fmt.name}", ".deposits 4"]
+    for i in range(nk):
+        head.append(f".const K{i} = 0x{rng.getrandbits(fmt.width):x}")
+    named = rng.random() < 0.4
+    if named:
+        head.append(f".reg IX = r{rng.randrange(asm.NREG)}")
+
+    def reg():
+        if named and rng.random() < 0.2:
+            return "IX"
+        return f"r{rng.randrange(asm.NREG)}"
+
+    body, stack = [], []
+    for _ in range(rng.randint(8, 30)):
+        loops = stack.count("loop")
+        quiets = stack.count("quiet")
+        pick = rng.random()
+        if pick < 0.14:
+            op = rng.choice(list(asm.OP_FIELDS))
+            args = [f"K{rng.randrange(nk)}" if nk and rng.random() < 0.3
+                    else reg() for _f in asm.OP_FIELDS[op]]
+            body.append(f"{asm.OP_NAMES[op]} {reg()}, " + ", ".join(args))
+        elif pick < 0.30:
+            body.append(f"{rng.choice(['augadd', 'augerr'])} {reg()}, "
+                        f"{reg()}, {reg()}")
+        elif pick < 0.50:
+            what = rng.choice(["stx", "ldx"])
+            first = reg()
+            index = first if what == "ldx" and rng.random() < 0.15 \
+                else reg()
+            step = _r8_step_text(rng)
+            body.append(f"{what} {first}, {index}"
+                        + (f", {step}" if step is not None else ""))
+        elif pick < 0.58 and loops < asm.MAX_LOOP_DEPTH:
+            body.append(f"repeat {rng.choice([1, 2, 3, 7])}")
+            stack.append("loop")
+        elif pick < 0.70 and quiets < asm.MAX_QUIET_DEPTH:
+            body.append("quiet")
+            stack.append("quiet")
+        elif pick < 0.82 and stack:
+            body.append("endrep" if stack.pop() == "loop" else "endquiet")
+        elif pick < 0.94:
+            body.append(f"raise {reg()}")
+        else:
+            body.append(f"deposit {reg()}")
+    while stack:
+        body.append("endrep" if stack.pop() == "loop" else "endquiet")
+    body.append("halt")
+    return "\n".join(head + [""] + body) + "\n"
+
+
+def _r8_reach(img):
+    """What one image reached, decoded: a dict of counts."""
+    got = {k: 0 for k in ("augadd", "augerr", "step+", "step-", "step-edge",
+                          "ldx-self-step", "quiet-in-loop", "loop-in-quiet",
+                          "quiet-depth-4", "raise-r16+", "aug-r16+")}
+    stack = []
+    for word in img.insns:
+        d = asm.decode(word)
+        if not d["ctrl"]:
+            continue
+        code = d["op"]
+        if code == asm.AUGADD:
+            got["augadd"] += 1
+        if code == asm.AUGERR:
+            got["augerr"] += 1
+        if code in (asm.AUGADD, asm.AUGERR) and max(
+                d["rd"], d["ra"], d["rb"]) >= 16:
+            got["aug-r16+"] += 1
+        s = asm.step_of(d)
+        got["step+"] += s > 0
+        got["step-"] += s < 0
+        got["step-edge"] += s in (asm.STEP_MIN, asm.STEP_MAX)
+        if code == asm.LDX and s and d["rd"] == d["rb"]:
+            got["ldx-self-step"] += 1
+        if code == asm.RAISE and d["ra"] >= 16:
+            got["raise-r16+"] += 1
+        if code == asm.REPEAT:
+            got["loop-in-quiet"] += "quiet" in stack
+            stack.append("loop")
+        elif code == asm.QUIET:
+            got["quiet-in-loop"] += "loop" in stack
+            stack.append("quiet")
+            got["quiet-depth-4"] += stack.count("quiet") == 4
+        elif code in (asm.ENDREP, asm.ENDQUIET):
+            stack.pop()
+    return got
+
+
+def check_revision8_corpus(args, tmp, trials=160):
+    rng = random.Random(20261002)
+    n = refused = 0
+    feats = {"AUGADD": 0, "SCRATCH_STEP": 0, "FLAG_CONTROL": 0, "REGS32": 0}
+    reach = {}
+    for trial in range(trials):
+        text = revision8_program(rng)
+        tag = f"rev8-{trial}"
+        src = tmp / (tag + ".cfta")
+        out = tmp / (tag + ".cftp")
+        _write_lf(src, text)
+        if out.exists():
+            out.unlink()
+        r = sh([args.asm, src, "-o", out])
+        try:
+            py = asm.assemble(text, str(src))
+        except asm.AsmError as exc:
+            # The generator writes only programs the loader accepts; a
+            # refusal is held to the other assembler's, for its reason.
+            c_why = _num_reason(r.stderr, src.name) if r.returncode else None
+            if c_why != _num_reason(str(exc), src.name):
+                bad(f"revision-8 corpus [{trial}]: a refusal",
+                    f"asm.py {str(exc)!r}, cft-asm {c_why!r}")
+                return
+            refused += 1
+            continue
+        if r.returncode != 0:
+            bad(f"revision-8 corpus [{trial}]: cft-asm", r.stderr.strip())
+            return
+        if out.read_bytes() != py:
+            bad(f"revision-8 corpus [{trial}]: two assemblers",
+                "the bytes differ")
+            return
+        r = sh([args.asm, "-d", out])
+        if r.returncode != 0:
+            bad(f"revision-8 corpus [{trial}]: cft-asm -d", r.stderr.strip())
+            return
+        pytext = asm.disassemble(py)
+        if r.stdout.replace("\r\n", "\n") != pytext:
+            bad(f"revision-8 corpus [{trial}]: two disassemblers",
+                "the texts differ")
+            return
+        back = tmp / (tag + ".rt.cftp")
+        rt_src = tmp / (tag + ".rt.cfta")
+        _write_lf(rt_src, pytext)
+        r = sh([args.asm, rt_src, "-o", back])
+        if (r.returncode != 0 or back.read_bytes() != py
+                or asm.assemble(pytext, tag) != py):
+            bad(f"revision-8 corpus [{trial}]: round trip",
+                "assemble(disassemble(x)) != x")
+            return
+        r = sh([args.asm, "-i", out])
+        ci = r.stdout.replace("\r\n", "\n").splitlines()
+        for pl in asm.info(py).splitlines():
+            key = pl.split()[0]
+            cl = next((l for l in ci if l.startswith(key)), None)
+            if cl != pl:
+                bad(f"revision-8 corpus [{trial}]: -i {key}",
+                    f"{pl!r} vs {cl!r}")
+                return
+        img = asm.Image.from_bytes(py)
+        for f in img.features():
+            if f in feats:
+                feats[f] += 1
+        for k, v in _r8_reach(img).items():
+            reach[k] = reach.get(k, 0) + bool(v)
+        n += 1
+    missing = [k for k, v in list(feats.items()) + list(reach.items())
+               if not v]
+    if missing or not n:
+        bad("revision-8 corpus",
+            f"never reached what it exists for: {missing} "
+            f"({n} programs assembled)")
+        return
+    ok(f"revision-8 corpus: {n} programs identical in both languages",
+       f"bytes, disassembly, round trip and -i; images needing AUGADD "
+       f"{feats['AUGADD']}, SCRATCH_STEP {feats['SCRATCH_STEP']}, "
+       f"FLAG_CONTROL {feats['FLAG_CONTROL']}; a region in a loop in "
+       f"{reach['quiet-in-loop']}, a loop in a region in "
+       f"{reach['loop-in-quiet']}, regions four deep in "
+       f"{reach['quiet-depth-4']}, a step at -2048 or 2047 in "
+       f"{reach['step-edge']}; {refused} refused by both alike")
+
+
+# ---- revision 8's refusals, in both assemblers ----------------------------
+#
+# Each case is a source (or, for the readback, an image) with the verdict
+# docs/SEQUENCER.md and asm.py give it: refused, or accepted. Both
+# assemblers must give that verdict, the same bytes where they accept and
+# the same reason where they refuse - the reason compared as the numeric
+# arm compares it, without each tool's "file:line: " prefix. A case
+# neither refuses that should be refused fails here even though the two
+# agree. The image cases go through `cft-asm -d` and Image.from_bytes,
+# which is the loader's rule applied to a readback.
+
+_R8_HEAD = ".format fp64\n.deposits 1\n"
+_R8_SOURCES = (
+    # R24: the region's brackets
+    ("endquiet, none open", "endquiet\nhalt\n", "refused"),
+    ("endquiet closing round a loop",
+     "quiet\nrepeat 2\nendquiet\nendrep\nhalt\n", "refused"),
+    ("endrep closing round a region",
+     "repeat 2\nquiet\nendrep\nendquiet\nhalt\n", "refused"),
+    ("five regions deep", "quiet\n" * 5 + "endquiet\n" * 5 + "halt\n",
+     "refused"),
+    ("four regions deep", "quiet\n" * 4 + "raise r1\n" + "endquiet\n" * 4
+     + "halt\n", "accepted"),
+    ("four loops and four regions interleaved",
+     "quiet\nrepeat 2\n" * 4 + "raise r1\n" + "endrep\nendquiet\n" * 4
+     + "halt\n", "accepted"),
+    ("halt in a region", "quiet\nhalt\nendquiet\nhalt\n", "refused"),
+    ("halt in a loop in a region", "quiet\nrepeat 2\nhalt\nendrep\n"
+     "endquiet\nhalt\n", "refused"),
+    ("a region open at the end", "quiet\nquiet\nendquiet\ndeposit r1\n",
+     "refused"),
+    ("a loop and a region open at the end", "repeat 2\nquiet\n", "refused"),
+    ("actall in a region, outside every loop",
+     "quiet\nactall\nendquiet\nhalt\n", "accepted"),
+    ("quiet with an operand", "quiet r1\nendquiet\nhalt\n", "refused"),
+    ("endquiet with an operand", "quiet\nendquiet r1\nhalt\n", "refused"),
+    ("raise with none", "raise\nhalt\n", "refused"),
+    ("raise with two", "raise r1, r2\nhalt\n", "refused"),
+    ("raise of a constant", ".const K = 1\nraise K\nhalt\n", "refused"),
+    ("raise of r32", "raise r32\nhalt\n", "refused"),
+    ("raise of r31, by a .reg name", ".reg F = r31\nraise F\nhalt\n",
+     "accepted"),
+    ("raise.rtz", "raise.rtz r1\nhalt\n", "refused"),
+    ("quiet.kx", "quiet.kx\nendquiet\nhalt\n", "refused"),
+    # R21: the augmentedAddition pair
+    ("augadd with two", "augadd r1, r2\nhalt\n", "refused"),
+    ("augerr with four", "augerr r1, r2, r3, r4\nhalt\n", "refused"),
+    ("augadd.rtz", "augadd.rtz r1, r2, r3\nhalt\n", "refused"),
+    ("augerr.kx", "augerr.kx r1, r2, r3\nhalt\n", "refused"),
+    ("augadd.kx.rne", "augadd.kx.rne r1, r2, r3\nhalt\n", "refused"),
+    ("augerr of a constant", ".const K = 1\naugerr r1, K, r2\nhalt\n",
+     "refused"),
+    ("augadd and augerr on r16-r31",
+     "augadd r31, r16, r17\naugerr r30, r16, r17\nhalt\n", "accepted"),
+    # R22: the post-step
+    ("a step with two signs", "stx r1, r2, +-1\nhalt\n", "refused"),
+    ("a step with two minus signs", "ldx r1, r2, --1\nhalt\n", "refused"),
+    ("a sign alone", "ldx r1, r2, -\nhalt\n", "refused"),
+    ("a register as the step", "ldx r1, r2, r3\nhalt\n", "refused"),
+    ("a signed register as the step", "ldx r1, r2, -r3\nhalt\n", "refused"),
+    ("a .reg name as the step", ".reg IX = r5\nstx r1, r2, ix\nhalt\n",
+     "refused"),
+    ("a constant as the step", ".const K = 1\nldx r1, r2, K\nhalt\n",
+     "refused"),
+    ("a step past 2047", "ldx r1, r2, 2048\nhalt\n", "refused"),
+    ("a step below -2048", "stx r1, r2, -2049\nhalt\n", "refused"),
+    ("a step of -0x800", "stx r1, r2, -0x800\nhalt\n", "accepted"),
+    ("a step of 0x800", "stx r1, r2, 0x800\nhalt\n", "refused"),
+    ("a step of +0x7ff", "ldx r1, r2, +0x7ff\nhalt\n", "accepted"),
+    ("a step of -0", "ldx r1, r2, -0\nhalt\n", "accepted"),
+    ("four operands", "stx r1, r2, 3, 4\nhalt\n", "refused"),
+    ("one operand", "stx r1\nhalt\n", "refused"),
+    ("a trailing comma", "stx r1, r2,\nldx r3, r4,\nhalt\n", "accepted"),
+    ("ldx rX, rX, STEP", "ldx r3, r3, 5\nhalt\n", "accepted"),
+    ("ldx.kx", "ldx.kx r1, r2\nhalt\n", "refused"),
+    ("stx.rtz", "stx.rtz r1, r2, 1\nhalt\n", "refused"),
+)
+
+
+def _r8_image(words):
+    """An fp64 image of these instruction words, no bank, packed by hand
+    rather than through Image (which validates), so a readback sees
+    exactly them."""
+    head = (asm.MAGIC, asm.VERSION, len(words), 0, 1,
+            asm.PREC_CODE["fp64"], 0, 0)
+    return (b"".join(w.to_bytes(4, "little") for w in head)
+            + b"".join(w.to_bytes(8, "little") for w in words))
+
+
+def _r8_word(code, imm=0, rd=0, ra=0, rb=0, rc=0):
+    """A control word with these fields, encoded and not validated."""
+    return asm.encode(code, rd=rd, ra=ra, rb=rb, rc=rc, ctrl=True, imm=imm)
+
+
+def _r8_images():
+    halt = _r8_word(asm.HALT)
+    return (
+        ("stx reading imm[12]", [_r8_word(asm.STX, imm=1 << 12, ra=1, rb=2),
+                                 halt], "refused"),
+        ("stx stepping -1", [_r8_word(asm.STX, imm=0xFFF, ra=1, rb=2), halt],
+         "accepted"),
+        ("augadd with rc set", [_r8_word(asm.AUGADD, rd=1, ra=2, rb=3, rc=4),
+                                halt], "refused"),
+        ("augerr with imm[0] set", [_r8_word(asm.AUGERR, imm=1, rd=1, ra=2,
+                                             rb=3), halt], "refused"),
+        ("raise with rd set", [_r8_word(asm.RAISE, rd=1, ra=2), halt],
+         "refused"),
+        ("raise with imm[25], ra's fifth bit", [_r8_word(asm.RAISE, ra=17),
+                                                halt], "accepted"),
+        ("quiet with ra set", [_r8_word(asm.QUIET, ra=1),
+                               _r8_word(asm.ENDQUIET), halt], "refused"),
+        ("endquiet with imm[0] set", [_r8_word(asm.QUIET),
+                                      _r8_word(asm.ENDQUIET, imm=1), halt],
+         "refused"),
+        ("an endquiet alone", [_r8_word(asm.ENDQUIET), halt], "refused"),
+        ("control code 15", [(15 | (1 << 31)), halt], "refused"),
+    )
+
+
+def check_revision8_refusals(args, tmp):
+    src = tmp / "r8case.cfta"
+    out = tmp / "r8case.cftp"
+    n = same = both = 0
+    for label, body, want in _R8_SOURCES:
+        text = _R8_HEAD + body
+        _write_lf(src, text)
+        if out.exists():
+            out.unlink()
+        r = sh([args.asm, src, "-o", out])
+        c_bytes = out.read_bytes() if r.returncode == 0 else None
+        c_why = _num_reason(r.stderr, src.name) if r.returncode else None
+        try:
+            py, py_why = asm.assemble(text, str(src)), None
+        except asm.AsmError as exc:
+            py, py_why = None, _num_reason(str(exc), src.name)
+        n += 1
+        tag = f"revision 8: {label}"
+        got = "refused" if py is None else "accepted"
+        if got != want:
+            bad(tag, f"asm.py {got} it ({py_why}); the contract says "
+                     f"{want}")
+            return
+        if (py is None) != (c_bytes is None):
+            c_says = f"refuses: {c_why}" if c_bytes is None \
+                else "assembles it"
+            py_says = f"refuses: {py_why}" if py is None else "assembles it"
+            bad(tag, f"cft-asm {c_says}; asm.py {py_says}")
+            return
+        if py is not None:
+            if py != c_bytes:
+                bad(tag, "both assemble it, to other bytes")
+                return
+            same += 1
+        elif c_why != py_why:
+            bad(tag, f"both refuse it, for other reasons: cft-asm "
+                     f"{c_why!r}, asm.py {py_why!r}")
+            return
+        else:
+            both += 1
+    img_path = tmp / "r8img.cftp"
+    for label, words, want in _r8_images():
+        data = _r8_image(words)
+        img_path.write_bytes(data)
+        r = sh([args.asm, "-d", img_path])
+        c_why = _num_reason(r.stderr, img_path.name) if r.returncode \
+            else None
+        try:
+            asm.Image.from_bytes(data)
+            py_why = None
+        except asm.AsmError as exc:
+            py_why = str(exc)
+        n += 1
+        tag = f"revision 8, an image: {label}"
+        got = "refused" if py_why else "accepted"
+        if got != want:
+            bad(tag, f"asm.py {got} it ({py_why}); the contract says "
+                     f"{want}")
+            return
+        if c_why != py_why:
+            bad(tag, f"cft-asm -d {c_why!r}, asm.py {py_why!r}")
+            return
+        if py_why is None:
+            if r.stdout.replace("\r\n", "\n") != asm.disassemble(data):
+                bad(tag, "the two disassemblers differ")
+                return
+            same += 1
+        else:
+            both += 1
+    ok(f"revision 8: {n} sources and images, both assemblers alike",
+       f"{same} accepted with the same bytes (or text), {both} refused for "
+       f"the same reason, each with the contract's verdict")
+
+
 # ---- long lines ----------------------------------------------------------
 #
 # asm.py reads a line whole (str.splitlines()). cft-asm.c read one with
@@ -1931,6 +2332,13 @@ _NUM_SITES = (
      lambda v: _NUM_HEAD + f".slot r{v} = 1\nhalt\n"),
     (".reg's register", (31,),
      lambda v: _NUM_HEAD + f".reg X = r{v}\ndeposit X\nhalt\n"),
+    # Revision 8's post-step (R22, since 2026-10-02): signed, -2048..2047,
+    # one sign then an unsigned number - so "+0x5" and "-0x5" are steps
+    # where they are no slot or count.
+    ("stx's step", (2048, -2048),
+     lambda v: _NUM_HEAD + f"stx r0, r1, {v}\nhalt\n"),
+    ("ldx's step", (2048, -2048),
+     lambda v: _NUM_HEAD + f"ldx r3, r1, {v}\nhalt\n"),
 )
 
 
@@ -5264,6 +5672,10 @@ def main():
 
     print("\n-- the revision-3 corpus, in both languages --")
     check_revision3_corpus(args, tmp)
+
+    print("\n-- the revision-8 corpus and refusals, in both languages --")
+    check_revision8_corpus(args, tmp)
+    check_revision8_refusals(args, tmp)
 
     print("\n-- characters, in both assemblers --")
     check_characters(args, tmp)

@@ -2269,8 +2269,9 @@ transcribe a 64 into C. The
 remote backend takes them from the handshake. The software backend
 reports its own - 2^20 deposit slots a lane, the header field's own
 2^32-1 instructions, 512 addressable constants, and every feature bit
-`cft.h` defines (`seq_features` 0x1ff1f since ABI 0.16 added revision
-8's two bits; 0x7f1f before) - the capacities and the
+`cft.h` defines (`seq_features` 0x7ff1f since ABI 0.17 added revision
+8's R23 and R24 bits, 0x1ff1f at 0.16 with its first two, 0x7f1f
+before) - the capacities and the
 sequencer's bits from `host/src/program.c`, which is the file that
 enforces them, so the number a host is told and the number a program
 is held to are one declaration. `CFT_SEQ_FEAT_SCALAR` and
@@ -2649,18 +2650,21 @@ struct-size-gated, as `flags` is.
 
 ### What a program run's `bus_out` carries
 
-Two REPORTS on a run that returned `CFT_OK`, and neither invalidates
+Three REPORTS on a run that returned `CFT_OK`, and none invalidates
 the output:
 
 | bit | name | what happened |
 |---|---|---|
 | 4 | `CFT_STATUS_DEPOSIT_OVERFLOW` | a lane deposited more than `max_deposits`; the excess was dropped, what fit is correct |
 | 5 | `CFT_STATUS_SCRATCH_RANGE` | a `SCRATCH_STRICT` image indexed the scratch at or past the device's depth; the store was suppressed, the load read +0, and the run went on (docs/SEQUENCER.md R8) |
+| 6 | `CFT_STATUS_MARKED` | a `raise` marked a lane: its routine could not decide that lane's last bit, and the lane is to be replayed before its answer is used (ABI 0.17; docs/SEQUENCER.md R24) |
 
 Bits 0 to 2 are the engine's bus faults and arrive only with
 `CFT_ERR_BUS_FAULT`; bit 3 is the trimmed-build precision refusal.
-Every backend hands back both reports - the software backend, a tile
-and the remote route. On a tile that was true of bit 4 only until
+Every backend hands back all three reports - the software backend, a
+tile and the remote route; no tile sets bit 6 yet, and the XRT backend
+passes it since 2026-10-02, the day it was defined. On a tile that was
+true of bit 4 only until
 2026-09-18: the XRT backend dropped bit 5 on the way out, so a strict
 image was computed correctly on a card and its caller was told
 nothing, which is the one thing strict exists to prevent
@@ -3305,3 +3309,94 @@ at 256); the WebAssembly module exports no `cft_open_ex`.
 (2026-09-29), with revision 8's two feature bits and the WebAssembly
 module's rebuild, as every step's is (docs/COMPATIBILITY.md, "ABI
 0.16"). A caller that needs `cft_open_ex` asks for 0.16.
+
+## Per-lane flags and flag control at ABI 0.17 (revision 8's R23 and R24, 2026-10-02)
+
+Revision 8 (docs/SEQUENCER.md) adds two things a program run reports,
+built golden-first: the model defines them, the software backend
+computes them, and no tile carries either yet. The step-6 round's R8
+built them, at Logan's choices "Flag control in rev 8 (Recommended)"
+and "Per-lane flags (R23)".
+
+    cft_run_args   lane_flags, lane_flags_bytes   n bytes, byte i lane i, or NULL and 0
+    CFT_SEQ_FEAT_LANE_FLAGS   (1u << 17)   CAPS2[13]: the block
+    CFT_SEQ_FEAT_FLAG_CONTROL (1u << 18)   CAPS2[14]: quiet, endquiet, raise
+    CFT_STATUS_MARKED         (1u << 6)    STATUS[6], a run's mark
+    CFT_LANE_DEPOSIT_OVERFLOW (1u << 5)    a lane's byte, bit 5
+    CFT_LANE_SCRATCH_RANGE    (1u << 6)    a lane's byte, bit 6
+    CFT_LANE_MARKED           (1u << 7)    a lane's byte, bit 7
+
+**The block (R23).** Pass `lane_flags` with `lane_flags_bytes` of
+exactly `n`, and byte `i` is lane `i`'s:
+
+| bit | meaning |
+|---|---|
+| [4:0] | the five IEEE flags, in FLAGS's order, as this lane raised them outside every quiet region |
+| [5] | this lane's deposit overflowed, its share of STATUS[4] |
+| [6] | this lane's strict access fell past the depth, its share of STATUS[5] |
+| [7] | a `raise` marked this lane, its share of STATUS[6] |
+
+Over the lanes the run owns - every lane below `n`, and of those the ones
+a mask keeps - the OR of the bytes' [4:0] is the run's FLAGS, of their
+[6:5] STATUS[5:4], and of their [7] STATUS[6]. A masked lane's byte is
+NOT written, as its count is not: the caller keeps what it put there. A
+lane SETACT dropped is the caller's, and its byte holds what it raised
+while it was active. Each byte is sticky within the run and starts it at
+zero. A run that does not ask writes nothing and costs nothing.
+
+**Its refusals, by name and before the run:** a `lane_flags_bytes` with
+no `lane_flags`, and a buffer whose count is not `n` - a mask's
+`(n + 7) / 8` is the count a caller who sized one by the other would
+pass - are `CFT_ERR_INVALID_ARGUMENT`. A device that does not publish
+`CFT_SEQ_FEAT_LANE_FLAGS` is `CFT_ERR_UNSUPPORTED`, with a sentence
+naming the bit. The software backend publishes it. No tile does. A
+remote handle publishes its server's bit and refuses the block where its
+server lacks it: unlike the mask, which a client compacts away, the
+block can only be made where the run is. `cft_run_args` grows, so a
+caller built against 0.16 is refused at its old `struct_size`, as every
+input struct's caller is.
+
+**Flag control (R24).** Three control codes a program may use wherever
+the device publishes `CFT_SEQ_FEAT_FLAG_CONTROL`: `quiet` (12) opens a
+region in which no instruction's IEEE flags reach FLAGS or a lane's
+byte, `endquiet` (13) closes the innermost, and `raise rA` (14) ORs
+`rA[4:0]` into both outside a region and marks the lane where `rA[7]`
+is set, anywhere. A region never silences STATUS[4], STATUS[5] or a
+mark. `cft_program_load` refuses, by name: a region closed out of turn
+with a loop, a fifth nested region, a HALT inside one or a program that
+ends with one open, and any field the three do not read
+(`CFT_ERR_INVALID_ARGUMENT`); and an image holding any of the three on a
+device without the bit, naming the instruction and the bit
+(`CFT_ERR_UNSUPPORTED`) - a tile decodes the codes as HALT. Code 15 is
+the first unknown control code now.
+
+**What a run's STATUS says.** A run with any lane marked sets
+`CFT_STATUS_MARKED`, whether or not it asked for the block. Every path
+from a backend to its caller carries the whole word: the software
+backend, `device.c`, the remote client and server, and the XRT backend,
+whose report mask passes bit 6 since 2026-10-02. `cft-segrun` and
+`cft-orbits` write the word whole into a certificate's segment lines,
+and `cft-audit` re-derives it, bit 6 with the rest.
+
+**The software handle's word.** `seq_features` is 0x7ff1f, where it was
+0x1ff1f at 0.16: every bit `cft.h` defines.
+
+**The remote protocol.** `PROG_RUN_EX`'s third payload word is `want`:
+bit 0 asks for the counts, as `want_counts` did before 0.17, and bit 1
+for the block, whose `n` bytes follow the scratch-out block in the
+response. A server refuses any other bit by name; `PROG_RUN` and
+`PROG_RUN_BANK` take bit 0 only. A run that asks for the block travels
+as `PROG_RUN_EX` whatever its image's flags; a run that does not travels
+as it did, so a server's counts of every earlier call are unchanged.
+
+**What does not take it.** `cft-segrun` never asks for the block, and
+`cft-audit`'s re-runs do not either: a version-1 certificate has no line
+for it (docs/CERTIFICATES.md), so it waits for certificate version 2. A
+marked run is certified as its STATUS says. The WebAssembly module's
+calls ask for no block; the module is rebuilt at 0.17 at the merge, as
+every step's is.
+
+**The ABI version.** An additive pair of fields and three bits:
+`CFT_ABI_VERSION_MINOR` moved to 17 for them (2026-10-02). A caller that
+needs the block or flag control asks for 0.17, and then asks
+`cft_get_caps` whether the device has them.

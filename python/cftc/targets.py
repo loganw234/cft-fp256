@@ -14,9 +14,10 @@ manifest lists every built-in target that would accept the image.
 The built-in table, and where each number is stated:
 
   sw            libcft's software backend: host/src/program.c's
-                cft_sw_seq_caps, and cft.h at ABI 0.16 (seq_features
-                0x1ff1f). `sw:N` is the same backend opened at N scratch
-                slots a lane through cft_open_ex (cft-segrun's
+                cft_sw_seq_caps, and cft.h at ABI 0.17 (seq_features
+                0x7ff1f: revision 8's four bits, R21 to R24, defined
+                golden-first). `sw:N` is the same backend opened at N
+                scratch slots a lane through cft_open_ex (cft-segrun's
                 --scratch-depth), N a power of two up to 32,768.
   u50-rev7      the U50's revision-7 single: docs/SEQUENCER.md, "Revision
                 7, the program limits per build" - 32,768 instructions,
@@ -35,7 +36,10 @@ The built-in table, and where each number is stated:
 from dataclasses import dataclass
 
 # cft_caps.seq_features, bit by bit (host/include/cft.h). The low nibble
-# is CAPS[7:4], the next CAPS[31:28], then CAPS2[7:4] and CAPS2[12:8].
+# is CAPS[7:4], the next CAPS[31:28], then CAPS2[7:4] and CAPS2[14:8].
+# A name missing here would be dropped from what an image needs, and the
+# image accepted where its loader refuses it - so every name asm.py's
+# features() can report is one (python/tests/test_cftc.py holds that).
 FEATURE_BITS = {
     "WIDE_CONST": 0x01,         # CAPS[4]   kx: indices in the immediate
     "REGS32": 0x02,             # CAPS[5]   r16..r31
@@ -49,8 +53,10 @@ FEATURE_BITS = {
     "REDUCE_SEG": 0x1000,       # CAPS2[8]
     "INDEXED": 0x2000,          # CAPS2[9]
     "LANE_MASK": 0x4000,        # CAPS2[10]
-    "AUGADD": 0x8000,           # CAPS2[11] revision 8
-    "SCRATCH_STEP": 0x10000,    # CAPS2[12] revision 8
+    "AUGADD": 0x8000,           # CAPS2[11] revision 8, R21
+    "SCRATCH_STEP": 0x10000,    # CAPS2[12] revision 8, R22
+    "LANE_FLAGS": 0x20000,      # CAPS2[13] revision 8, R23 (a run's option)
+    "FLAG_CONTROL": 0x40000,    # CAPS2[14] revision 8, R24
 }
 CAPS_PLACE = {
     "WIDE_CONST": "CAPS[4]", "REGS32": "CAPS[5]", "BANK_PTR": "CAPS[6]",
@@ -58,7 +64,8 @@ CAPS_PLACE = {
     "SCRATCH_IO": "CAPS2[5]", "SCRATCH_STRICT": "CAPS2[6]",
     "SCALAR": "CAPS2[7]", "REDUCE_SEG": "CAPS2[8]", "INDEXED": "CAPS2[9]",
     "LANE_MASK": "CAPS2[10]", "AUGADD": "CAPS2[11]",
-    "SCRATCH_STEP": "CAPS2[12]",
+    "SCRATCH_STEP": "CAPS2[12]", "LANE_FLAGS": "CAPS2[13]",
+    "FLAG_CONTROL": "CAPS2[14]",
 }
 # asm.Image.features() names `kx` what cft.h calls WIDE_CONST.
 ASM_FEATURE = {"kx": "WIDE_CONST"}
@@ -66,7 +73,7 @@ ASM_FEATURE = {"kx": "WIDE_CONST"}
 ALL_FORMATS = ("fp32", "fp64", "fp128", "fp256")
 SCRATCH_DEPTH_MAX = 1 << 15         # CAPS2[3:0] is a four-bit log2
 
-SW_FEATURES = 0x1ff1f               # ABI 0.16's software handle
+SW_FEATURES = 0x7ff1f               # ABI 0.17's software handle
 TILE_FEATURES = 0x7f1f              # every tile from revision 6 on
 
 
@@ -97,7 +104,7 @@ def _sw(depth=256):
     name = "sw" if depth == 256 else f"sw:{depth}"
     return Target(name, ALL_FORMATS, 0xFFFFFFFF, 512, depth, 1 << 20,
                   SW_FEATURES, "host/src/program.c cft_sw_seq_caps; "
-                               "cft.h ABI 0.16")
+                               "cft.h ABI 0.17")
 
 
 BUILTIN = {

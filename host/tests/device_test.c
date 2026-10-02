@@ -871,6 +871,9 @@ static uint64_t seq_alu_kx9(unsigned op, unsigned rd, unsigned ia,
  * these two helpers write) and imm[23:12] must be zero. Registers are
  * five bits, with the fifth of each in its own bit of imm[27:24]. */
 enum { SEQ_C_STL = 6, SEQ_C_LDL = 7, SEQ_C_STX = 8, SEQ_C_LDX = 9 };
+/* Revision 8's flag control (R24, ABI 0.17): QUIET and ENDQUIET read
+ * nothing; RAISE reads ra, through seq_ctrl (r0..r15) or seq_ctrl5. */
+enum { SEQ_C_QUIET = 12, SEQ_C_ENDQUIET = 13, SEQ_C_RAISE = 14 };
 
 static uint64_t seq_stl(unsigned ra, uint32_t slot)
 {
@@ -1220,9 +1223,21 @@ static cft_status try_load_rev8(cft_device *dev, cft_format fmt, int which)
                  ((uint64_t)1u << 16) | ((uint64_t)1 << 31);
         ins[1] = (uint64_t)10u | ((uint64_t)0u << 8) | ((uint64_t)0u << 12) |
                  ((uint64_t)1u << 16) | ((uint64_t)1 << 31);
-    } else {
+    } else if (which == 1) {
         ins[0] = seq_stx(0, 1) | ((uint64_t)0x001u << 32);      /* +1 */
         ins[1] = seq_ldx(4, 1) | ((uint64_t)0xFFFu << 32);      /* -1 */
+    } else {
+        /* R24 (ABI 0.17): raise r0 first, so the refusal names RAISE
+         * at instruction 0, then an empty quiet region */
+        ins[0] = seq_ctrl(SEQ_C_RAISE, 0, 0);
+        ins[1] = seq_ctrl(SEQ_C_QUIET, 0, 0);
+        ins[2] = seq_ctrl(SEQ_C_ENDQUIET, 0, 0);
+        ins[3] = seq_ctrl(0, 0, 0);              /* halt */
+        bytes = seq_image(img, fmt, ins, 4, NULL, 0, 1);
+        st = cft_program_load(dev, img, bytes, &prog);
+        if (st == CFT_OK)
+            cft_program_free(prog);
+        return st;
     }
     ins[2] = seq_ctrl(3, which ? 4 : 0, 0);      /* deposit */
     ins[3] = seq_ctrl(0, 0, 0);                  /* halt */
@@ -1476,21 +1491,24 @@ static void check_caps_enforced(cft_device *dev, const char *who)
      * ALU extensions, IMUL first - in the next one (cft.h, 2026-09-07),
      * CAPS2[7:4] in the third since revision 3, CAPS2[8] on bit 12
      * since ABI 0.13 (CFT_FEAT_REDUCE_SEG), CAPS2[10:9] on bits 14
-     * and 13 since ABI 0.14 (INDEXED, LANE_MASK), and CAPS2[12:11] on
+     * and 13 since ABI 0.14 (INDEXED, LANE_MASK), CAPS2[12:11] on
      * bits 16 and 15 since revision 8 (AUGADD, SCRATCH_STEP; proposed
-     * 2026-09-29, published by the software backend). Anything above
-     * those seventeen bits is a decode fault, not a feature. */
+     * 2026-09-29, published by the software backend), and CAPS2[14:13]
+     * on bits 18 and 17 since ABI 0.17 (LANE_FLAGS, FLAG_CONTROL:
+     * revision 8's R23 and R24, likewise). Anything above those nineteen
+     * bits is a decode fault, not a feature. */
     checks++;
-    if (c.seq_features & ~0x1FFFFu) {
+    if (c.seq_features & ~0x7FFFFu) {
         printf("  FAIL %s: seq_features 0x%lx has bits outside CAPS[7:4], "
-               "CAPS[31:28] and CAPS2[12:4]\n", who,
+               "CAPS[31:28] and CAPS2[14:4]\n", who,
                (unsigned long)c.seq_features);
         failures++;
     }
     /* Every bit cft.h defines, SCRATCH_STRICT and SCALAR included since
      * 2026-09-24 - the line used to skip both, so a word that carried
      * them printed as though it did not. */
-    printf("    features:%s%s%s%s%s%s%s%s%s%s%s%s%s%s   max_scratch %lu\n",
+    printf("    features:%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s   max_scratch "
+           "%lu\n",
            (c.seq_features & CFT_SEQ_FEAT_WIDE_CONST) ? " kx" : "",
            (c.seq_features & CFT_SEQ_FEAT_REGS32)     ? " REGS32" : "",
            (c.seq_features & CFT_SEQ_FEAT_BANK_PTR)   ? " BANK_PTR" : "",
@@ -1507,6 +1525,9 @@ static void check_caps_enforced(cft_device *dev, const char *who)
            (c.seq_features & CFT_SEQ_FEAT_AUGADD)     ? " AUGADD" : "",
            (c.seq_features & CFT_SEQ_FEAT_SCRATCH_STEP)
                                                    ? " SCRATCH_STEP" : "",
+           (c.seq_features & CFT_SEQ_FEAT_LANE_FLAGS) ? " LANE_FLAGS" : "",
+           (c.seq_features & CFT_SEQ_FEAT_FLAG_CONTROL)
+                                                   ? " FLAG_CONTROL" : "",
            (unsigned long)c.max_scratch);
 
     /* Revision 2's two feature bits, held to the same invariant as
@@ -1672,25 +1693,29 @@ static void check_caps_enforced(cft_device *dev, const char *who)
                cft_strerror(st), cft_last_error());
     }
 
-    /* Revision 8's two (proposed 2026-09-29), on exactly those terms:
-     * published means the image loads, absent means it is refused with
-     * CFT_ERR_UNSUPPORTED AND the refusal names the instruction and the
-     * bit. The software backend publishes both; every tile built so far
-     * reads CAPS2[11] and [12] as zero, so a card leg is where the
-     * absent branch fires - a tile that would decode AUGERR as HALT, and
-     * one that would access without stepping. The stepped leg needs a
-     * scratch to step through, and says so where there is none. */
+    /* Revision 8's three image bits (proposed 2026-09-29; flag control
+     * 2026-10-02), on exactly those terms: published means the image
+     * loads, absent means it is refused with CFT_ERR_UNSUPPORTED AND the
+     * refusal names the instruction and the bit. The software backend
+     * publishes all three; every tile built so far reads CAPS2[11], [12]
+     * and [14] as zero, so a card leg is where the absent branch fires -
+     * a tile that would decode AUGERR as HALT, one that would access
+     * without stepping, and one that would end the run at a RAISE. The
+     * stepped leg needs a scratch to step through, and says so where
+     * there is none. */
     {
         static const struct {
             int which; uint32_t bit; const char *macro, *instr, *what;
-        } r8[2] = {
+        } r8[3] = {
             { 0, CFT_SEQ_FEAT_AUGADD, "CFT_SEQ_FEAT_AUGADD", "AUGERR",
               "the augmentedAddition pair" },
             { 1, CFT_SEQ_FEAT_SCRATCH_STEP, "CFT_SEQ_FEAT_SCRATCH_STEP",
-              "STX with a post-step of +1", "a stepped STX/LDX" }
+              "STX with a post-step of +1", "a stepped STX/LDX" },
+            { 2, CFT_SEQ_FEAT_FLAG_CONTROL, "CFT_SEQ_FEAT_FLAG_CONTROL",
+              "RAISE", "a raise and a quiet region" }
         };
         int k;
-        for (k = 0; k < 2; k++) {
+        for (k = 0; k < 3; k++) {
             if (r8[k].which == 1 &&
                 !(c.seq_features & CFT_SEQ_FEAT_SCRATCH)) {
                 not_here(NH_OTHER, "TESTED", "    SCRATCH_STEP",
@@ -4385,6 +4410,287 @@ out:
     free(a); free(so_sw); free(so_hw); free(c_sw); free(c_hw); free(mask);
 }
 
+/* ABI 0.17's per-lane flags (docs/SEQUENCER.md R23) and revision 8's
+ * flag control (R24), device against software, under a mask with holes.
+ * Four claims, and they fail differently:
+ *
+ *   1. the two backends agree byte for byte - deposits, FLAGS, STATUS
+ *      and the block;
+ *   2. the block's identities hold on the device: over the lanes the
+ *      caller has, the OR of the bytes' [4:0] is FLAGS, of [6:5] is
+ *      STATUS[5:4], and of [7] is STATUS[6], the mark;
+ *   3. a masked lane's byte is the caller's - the pattern put there
+ *      before the run - and a kept lane's is written (0x5a has bit 6, a
+ *      strict fault, which this image cannot raise, so no kept lane can
+ *      read it);
+ *   4. the quiet region silences: the image multiplies +inf by +0 inside
+ *      one, invalid in every lane, and nothing else it does can raise
+ *      invalid - the inputs are finite and the raise's operand is ANDed
+ *      with 0x9E - so no lane's byte and not FLAGS may carry it. The
+ *      same image without the region is the control: invalid in every
+ *      kept lane's byte, so the claim could have failed.
+ *
+ * Where the device does not publish CFT_SEQ_FEAT_LANE_FLAGS the block is
+ * refused, by name, before any run - and that refusal is scored here.
+ * Where it publishes the block and not CFT_SEQ_FEAT_FLAG_CONTROL, claims
+ * 1 to 3 are held on an image with neither the raise nor the region,
+ * and the rest is NOT COMPARED, by name. */
+static void check_lane_flags(cft_device *sw, cft_device *hw, cft_format fmt,
+                             size_t n)
+{
+    const size_t esz = cft_format_size(fmt);
+    const int total = LAYOUT[(int)fmt].total_bits;
+    const int ebits = LAYOUT[(int)fmt].exp_bits;
+    uint8_t img[512], konst[3 * MAXE];
+    uint64_t ins[8], ctl[6];
+    size_t bytes, cbytes = 0, i;
+    cft_caps hc;
+    uint8_t *a = (uint8_t *)malloc(n * esz);
+    uint8_t *b = (uint8_t *)malloc(n * esz);
+    uint8_t *d_sw = (uint8_t *)malloc(n * esz);
+    uint8_t *d_hw = (uint8_t *)malloc(n * esz);
+    uint8_t *l_sw = (uint8_t *)malloc(n);
+    uint8_t *l_hw = (uint8_t *)malloc(n);
+    uint8_t *mask = (uint8_t *)malloc((n + 7) / 8);
+    uint8_t ctlimg[512];
+    cft_program *ps = NULL, *ph = NULL, *pc = NULL;
+    cft_run_args A;
+    uint32_t fl_sw = 0, fl_hw = 0, bus_sw = 0, bus_hw = 0, fl = 0, bus = 0;
+    uint32_t or_lo = 0, or_mid = 0, or_mark = 0;
+    cft_status st;
+    size_t masked_lanes = 0, marked = 0, ninsns;
+    int control = 0;
+
+    memset(&hc, 0, sizeof hc);
+    hc.struct_size = sizeof hc;
+    if (cft_get_caps(hw, &hc) != CFT_OK)
+        memset(&hc, 0, sizeof hc);
+    if (!a || !b || !d_sw || !d_hw || !l_sw || !l_hw || !mask) {
+        printf("  FAIL seq lane flags: out of memory\n");
+        failures++;
+        goto out;
+    }
+    rs = 0x1A9F + (uint32_t)fmt;
+    fill_finite(a, fmt, n);
+    fill_finite(b, fmt, n);
+    memset(mask, 0, (n + 7) / 8);
+    for (i = 0; i < n; i++) {
+        if (i % 3 == 0)
+            masked_lanes++;
+        else
+            mask[i >> 3] |= (uint8_t)(1u << (i & 7u));
+    }
+    /* k0 = +inf, k1 = +0, k2 = the integer 0x9E: a raise's flags [4:1]
+     * and its mark [7], never invalid [0] */
+    memset(konst, 0, sizeof konst);
+    put_bits(konst, total - 1 - ebits, ebits,
+             ((uint64_t)1 << ebits) - 1u);
+    konst[2 * esz] = 0x9E;
+
+    control = (hc.seq_features & CFT_SEQ_FEAT_FLAG_CONTROL) != 0;
+    if (control) {
+        /* r3 = r0 + r1 (finite, so never invalid); quiet; r4 = k0 * k1
+         * (invalid, silenced); endquiet; r5 = r0 & k2; raise r5;
+         * deposit r3; halt. Unread register fields name r3 and up, so
+         * no stream is loaded for a field an opcode does not read. */
+        ins[0] = seq_alu(CFT_ADD, 3, 0, 3, 1, CFT_RNE, 0, 0);
+        ins[1] = seq_ctrl(SEQ_C_QUIET, 0, 0);
+        ins[2] = seq_alu5(CFT_MUL, 4, 0, 1, 4, CFT_RNE, 1, 1, 0);
+        ins[3] = seq_ctrl(SEQ_C_ENDQUIET, 0, 0);
+        ins[4] = seq_alu5(CFT_IAND, 5, 0, 2, 5, CFT_RNE, 0, 1, 0);
+        ins[5] = seq_ctrl(SEQ_C_RAISE, 5, 0);
+        ins[6] = seq_ctrl(3, 3, 0);                      /* DEPOSIT r3 */
+        ins[7] = seq_ctrl(0, 0, 0);                      /* HALT */
+        ninsns = 8;
+        /* the control: the same without the region */
+        ctl[0] = ins[0]; ctl[1] = ins[2]; ctl[2] = ins[4];
+        ctl[3] = ins[5]; ctl[4] = ins[6]; ctl[5] = ins[7];
+        cbytes = seq_image(ctlimg, fmt, ctl, 6, konst, 3, 1);
+    } else {
+        ins[0] = seq_alu(CFT_ADD, 3, 0, 3, 1, CFT_RNE, 0, 0);
+        ins[1] = seq_ctrl(3, 3, 0);                      /* DEPOSIT r3 */
+        ins[2] = seq_ctrl(0, 0, 0);                      /* HALT */
+        ninsns = 3;
+    }
+    bytes = seq_image(img, fmt, ins, (unsigned)ninsns, konst, 3, 1);
+
+    st = cft_program_load(sw, img, bytes, &ps);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq lane flags: the software backend refused the "
+               "image (%s: %s)\n", cft_strerror(st), cft_last_error());
+        failures++;
+        goto out;
+    }
+    st = cft_program_load(hw, img, bytes, &ph);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq lane flags: the device refused the image "
+               "(%s: %s)\n", cft_strerror(st), cft_last_error());
+        failures++;
+        goto out;
+    }
+
+#define LF_RUN(prog_, dst_, lf_, flo_, buso_)                          \
+    do {                                                               \
+        memset(&A, 0, sizeof A);                                       \
+        A.struct_size = sizeof A;                                      \
+        A.a = a; A.b = b; A.c = b;                                     \
+        A.n = n;                                                       \
+        A.deposits = (dst_);                                           \
+        A.flags_out = (flo_);                                          \
+        A.bus_out = (buso_);                                           \
+        A.lane_mask = mask;                                            \
+        A.lane_mask_bytes = (n + 7) / 8;                               \
+        A.lane_flags = (lf_);                                          \
+        A.lane_flags_bytes = (lf_) ? n : 0;                            \
+        memset((dst_), 0x5a, n * esz);                                 \
+        if (lf_)                                                       \
+            memset((lf_), 0x5a, n);                                    \
+        st = cft_program_run_ex((prog_), &A);                          \
+    } while (0)
+
+    if (!(hc.seq_features & CFT_SEQ_FEAT_LANE_FLAGS)) {
+        /* refused by name, before any run */
+        LF_RUN(ph, d_hw, l_hw, &fl, &bus);
+        checks++;
+        if (st != CFT_ERR_UNSUPPORTED ||
+            !strstr(cft_last_error(), "CFT_SEQ_FEAT_LANE_FLAGS")) {
+            printf("  FAIL seq lane flags: the device does not publish "
+                   "CFT_SEQ_FEAT_LANE_FLAGS and a run asking for the block "
+                   "gave %s without naming the bit: %s\n",
+                   cft_strerror(st), cft_last_error());
+            failures++;
+        } else {
+            printf("  seq lane flags: CFT_SEQ_FEAT_LANE_FLAGS absent, the "
+                   "block -> %s: %s\n", cft_strerror(st), cft_last_error());
+        }
+        not_here(NH_OTHER, "COMPARED", "  seq lane flags",
+                 "this device does not publish CFT_SEQ_FEAT_LANE_FLAGS "
+                 "(the refusal is scored above)");
+        goto out;
+    }
+
+    /* 1. software against the device */
+    LF_RUN(ps, d_sw, l_sw, &fl_sw, &bus_sw);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq lane flags: the software backend refused the run "
+               "(%s: %s)\n", cft_strerror(st), cft_last_error());
+        failures++;
+        goto out;
+    }
+    LF_RUN(ph, d_hw, l_hw, &fl_hw, &bus_hw);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq lane flags: the device refused the run (%s: %s)\n",
+               cft_strerror(st), cft_last_error());
+        failures++;
+        goto out;
+    }
+    checks++;
+    if (memcmp(d_sw, d_hw, n * esz) != 0 || memcmp(l_sw, l_hw, n) != 0 ||
+        fl_sw != fl_hw || bus_sw != bus_hw) {
+        printf("  FAIL seq lane flags: the device and the software backend "
+               "differ (FLAGS 0x%02x / 0x%02x, STATUS 0x%08x / 0x%08x, "
+               "block %s)\n", (unsigned)fl_hw, (unsigned)fl_sw,
+               (unsigned)bus_hw, (unsigned)bus_sw,
+               memcmp(l_sw, l_hw, n) ? "differs" : "equal");
+        failures++;
+    }
+
+    /* 2. and 3., on the device's own bytes */
+    checks++;
+    for (i = 0; i < n; i++) {
+        int kept = (mask[i >> 3] >> (i & 7u)) & 1;
+        if (!kept) {
+            if (l_hw[i] != 0x5a) {
+                printf("  FAIL seq lane flags: lane %lu is masked and its "
+                       "byte was written (0x%02x)\n", (unsigned long)i,
+                       (unsigned)l_hw[i]);
+                failures++;
+                break;
+            }
+            continue;
+        }
+        if (l_hw[i] == 0x5a) {
+            printf("  FAIL seq lane flags: lane %lu is NOT masked and its "
+                   "byte still holds the pattern\n", (unsigned long)i);
+            failures++;
+            break;
+        }
+        or_lo |= l_hw[i] & 0x1Fu;
+        or_mid |= (l_hw[i] >> 5) & 3u;
+        or_mark |= (l_hw[i] >> 7) & 1u;
+        marked += (l_hw[i] >> 7) & 1u;
+    }
+    checks++;
+    if (or_lo != fl_hw || or_mid != ((bus_hw >> 4) & 3u) ||
+        or_mark != ((bus_hw & CFT_STATUS_MARKED) ? 1u : 0u)) {
+        printf("  FAIL seq lane flags: the identities do not hold on the "
+               "device - OR [4:0] 0x%02x against FLAGS 0x%02x, OR [6:5] %u "
+               "against STATUS[5:4] %u, OR [7] %u against STATUS[6] %u\n",
+               (unsigned)or_lo, (unsigned)fl_hw, (unsigned)or_mid,
+               (unsigned)((bus_hw >> 4) & 3u), (unsigned)or_mark,
+               (unsigned)((bus_hw >> 6) & 1u));
+        failures++;
+    }
+
+    /* 4. the region silences, and the control could have failed */
+    if (!control) {
+        not_here(NH_OTHER, "COMPARED", "  seq lane flags, a raise and a "
+                 "quiet region", "this device does not publish "
+                 "CFT_SEQ_FEAT_FLAG_CONTROL (the refusal is scored with the "
+                 "caps)");
+        printf("  seq lane flags: %lu lanes, %lu of them masked, device == "
+               "software, identities hold, masked bytes untouched\n",
+               (unsigned long)n, (unsigned long)masked_lanes);
+        goto out;
+    }
+    checks++;
+    if ((fl_hw & 1u) || (or_lo & 1u)) {
+        printf("  FAIL seq lane flags: invalid reached FLAGS or a lane's "
+               "byte, and only the quiet region's multiply raises it\n");
+        failures++;
+    }
+    st = cft_program_load(hw, ctlimg, cbytes, &pc);
+    checks++;
+    if (st != CFT_OK) {
+        printf("  FAIL seq lane flags: the device refused the control image "
+               "(%s: %s)\n", cft_strerror(st), cft_last_error());
+        failures++;
+        goto out;
+    }
+    LF_RUN(pc, d_hw, l_hw, &fl, &bus);
+    checks++;
+    if (st != CFT_OK || !(fl & 1u)) {
+        printf("  FAIL seq lane flags: the control - the image without its "
+               "region - did not raise invalid (%s, FLAGS 0x%02x), so claim "
+               "4 could not have failed\n", cft_strerror(st), (unsigned)fl);
+        failures++;
+    } else {
+        for (i = 0; i < n; i++)
+            if (((mask[i >> 3] >> (i & 7u)) & 1) && !(l_hw[i] & 1u)) {
+                printf("  FAIL seq lane flags: the control's lane %lu does "
+                       "not carry invalid\n", (unsigned long)i);
+                failures++;
+                break;
+            }
+    }
+#undef LF_RUN
+    printf("  seq lane flags: %lu lanes, %lu masked, %lu marked, device == "
+           "software, identities hold (FLAGS 0x%02x, STATUS 0x%08x), masked "
+           "bytes untouched, the region silent and its control loud\n",
+           (unsigned long)n, (unsigned long)masked_lanes,
+           (unsigned long)marked, (unsigned)fl_hw, (unsigned)bus_hw);
+out:
+    cft_program_free(ps);
+    cft_program_free(ph);
+    cft_program_free(pc);
+    free(a); free(b); free(d_sw); free(d_hw); free(l_sw); free(l_hw);
+    free(mask);
+}
+
 /* The indexed elementwise call on a device that does not publish
  * CFT_SEQ_FEAT_INDEXED: refused by name, before any run. This is the
  * round-2 library against an older image (the seq6 pair, VERSION 0x900,
@@ -6164,6 +6470,9 @@ static void compare_seq(cft_device *sw, cft_device *hw, cft_format fmt,
     check_masked(sw, hw, fmt, n);
     check_indexed_masked(sw, hw, fmt, n);
     check_masked_scratch_out(sw, hw, fmt, n);
+    /* 7c. ABI 0.17's per-lane flags (R23) and revision 8's flag control
+     *     (R24), the block refused by name where it is not published. */
+    check_lane_flags(sw, hw, fmt, n);
 
     /* 8. the argument refusals, which are the library's own and reach
      *    no device at all - so they are scored once, on the software

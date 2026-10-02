@@ -1614,6 +1614,12 @@ int cftr_program_run(void *hw, int fmt, const void *image,
      * get wrong: the sticky word is the OR over the lanes that ran,
      * and here exactly the caller's lanes ran. */
     const uint8_t *msk      = io ? io->lane_mask : NULL;
+    /* R23's per-lane flags block (ABI 0.17), or NULL. Unlike the mask the
+     * client cannot make it: only the server's device runs the lanes, so
+     * device.c has already refused it where the server's word lacks
+     * CFT_SEQ_FEAT_LANE_FLAGS, and here it rides PROG_RUN_EX's want bit 1
+     * and comes back a byte a lane, scattered as the counts are. */
+    uint8_t *plf            = io ? io->lane_flags : NULL;
     size_t *sel = NULL;             /* this chunk's kept lanes, or NULL */
     uint32_t present = (a ? 1u : 0u) | (b ? 2u : 0u) | (c ? 4u : 0u);
     unsigned npresent = (a ? 1u : 0u) + (b ? 1u : 0u) + (c ? 1u : 0u);
@@ -1636,13 +1642,18 @@ int cftr_program_run(void *hw, int fmt, const void *image,
                          (((const uint8_t *)image)[24] & 1u);
     const int scratch_io = image_bytes >= 32 &&
                            (((const uint8_t *)image)[24] & 2u);
-    const uint16_t op = scratch_io ? CFTR_OP_PROG_RUN_EX
+    /* ...and a run that asks for the per-lane flags travels as
+     * PROG_RUN_EX whatever its image's flags, because no other frame
+     * carries the bit; a run that does not travels as it always did, so
+     * a server's per-opcode counts of every older call do not move. */
+    const int ex = scratch_io || plf != NULL;
+    const uint16_t op = ex         ? CFTR_OP_PROG_RUN_EX
                       : bank_ext   ? CFTR_OP_PROG_RUN_BANK
                                    : CFTR_OP_PROG_RUN;
     /* PROG_RUN_EX's payload carries two more fixed words - the two
      * per-lane slot counts - before the bank and the scratch-in block,
      * so the server can slice a chunk without re-reading the image. */
-    const size_t fixed = scratch_io ? 32u : 24u;
+    const size_t fixed = ex ? 32u : 24u;
     size_t per_lane, lpc, off;
     uint32_t fl_acc = 0, bus_acc = 0;
     uint8_t *req = NULL;
@@ -1697,7 +1708,8 @@ int cftr_program_run(void *hw, int fmt, const void *image,
      * budget because it rides every chunk - a bank as large as the
      * budget would otherwise make every chunk one byte over. */
     per_lane = (size_t)npresent * esz + (size_t)max_deposits * esz + 4u +
-               (size_t)n_sin * esz + (size_t)n_sout * esz;
+               (size_t)n_sin * esz + (size_t)n_sout * esz +
+               (plf ? 1u : 0u);
     if (bank_bytes >= CFTR_CHUNK_BYTES) {
         set_err("this program's constant bank is %lu bytes, which does not "
                 "leave room for a lane in a %lu-byte request",
@@ -1743,7 +1755,8 @@ int cftr_program_run(void *hw, int fmt, const void *image,
         req_len = fixed + bank_bytes + sin_bytes +
                   (size_t)npresent * k * esz;
         dep_bytes = k * (size_t)max_deposits * esz;
-        want = 8u + dep_bytes + (counts ? k * 4u : 0u) + sout_bytes;
+        want = 8u + dep_bytes + (counts ? k * 4u : 0u) + sout_bytes +
+               (plf ? k : 0u);
 
         req = (uint8_t *)realloc(req, req_len);
         if (!req) {
@@ -1752,7 +1765,9 @@ int cftr_program_run(void *hw, int fmt, const void *image,
         }
         cftr_put32(req + 0, R->phandle);
         cftr_put32(req + 4, present);
-        cftr_put32(req + 8, counts ? 1u : 0u);
+        /* The want word: bit 0 the counts, bit 1 (ABI 0.17, PROG_RUN_EX
+         * only) the per-lane flags. */
+        cftr_put32(req + 8, (counts ? 1u : 0u) | (plf ? 2u : 0u));
         /* Zero on PROG_RUN, the bank's byte length on the other two.
          * The bank rides EVERY chunk rather than being staged once,
          * because a chunk is a whole run of its own lanes on the
@@ -1761,9 +1776,10 @@ int cftr_program_run(void *hw, int fmt, const void *image,
          * operands, so the repetition costs nothing measurable. */
         cftr_put32(req + 12, (uint32_t)bank_bytes);
         cftr_put64(req + 16, (uint64_t)k);
-        if (scratch_io) {
+        if (ex) {
             /* The two counts, so the server can shape THIS CHUNK's
-             * blocks. The chunk's scratch-in is the slice of the whole
+             * blocks - both zero for an image without SCRATCH_IO, which
+             * rides this opcode only to carry the per-lane flags. The chunk's scratch-in is the slice of the whole
              * block belonging to its own lanes - lane-major, so lanes
              * [off, off + k) are a contiguous run of k * n_scratch_in
              * elements - which is why the counts have to cross and a
@@ -1862,6 +1878,16 @@ int cftr_program_run(void *hw, int fmt, const void *image,
                 for (j = 0; j < k; j++)
                     memcpy(pso + sel[j] * sl, so + j * sl, sl);
             }
+        }
+        /* The per-lane flags last of all (ABI 0.17), a byte a lane of this
+         * chunk, back to the lanes they came from as the counts go. A
+         * lane's byte is its own (docs/SEQUENCER.md P2), so the compacted
+         * run gives every kept lane the byte the whole run would. */
+        if (plf) {
+            const uint8_t *lf = resp + 8 + dep_bytes +
+                                (counts ? k * 4u : 0u) + sout_bytes;
+            for (j = 0; j < k; j++)
+                plf[msk ? sel[j] : off + j] = lf[j];
         }
         free(resp);
     }

@@ -1760,6 +1760,274 @@ out:
     free(c_rm); free(c_sw);
 }
 
+/* ---- per-lane flags and flag control over the wire (ABI 0.17) ----------- *
+ *
+ * docs/SEQUENCER.md R23 and R24 through a cft:// handle, held to the
+ * software handle in this process:
+ *
+ *  - a program that silences an FMA in a quiet region and raises each
+ *    lane's own word - stream c, a pattern that reaches every subset of
+ *    the five flags, the two bits a raise does not read and the mark -
+ *    gives the same flags, STATUS and bytes on both, and each byte is its
+ *    word's [4:0] and [7] exactly;
+ *  - under a mask, which the client compacts, the masked lanes' bytes are
+ *    the caller's on both;
+ *  - PROG_RUN_EX's want word carries both outputs, held by a frame built
+ *    by hand; and an unknown want bit is refused, on PROG_RUN_EX past bit
+ *    1 and on PROG_RUN past bit 0, each on a fresh connection.
+ */
+static int want_word_refused(const char *url, uint16_t op, size_t fixed,
+                             uint32_t want, char *msg, size_t msg_size)
+{
+    char host[200], port[16], why[256];
+    uint8_t hdr[32], payload[32];
+    uint8_t *p = NULL;
+    cftr_sock s;
+    cftr_hdr h;
+    int rc, refused;
+
+    msg[0] = '\0';
+    if (parse_url(url, host, port))
+        return -1;
+    s = cftr_sock_connect(host, port);
+    if (s == CFTR_BAD_SOCK)
+        return -1;
+    cftr_sock_timeout(s, 10000);
+    hello_header(hdr, cft_abi_version(), CFTR_OP_HELLO, 0, NULL);
+    cftr_sock_send_all(s, hdr, 32);
+    rc = cftr_recv_frame(s, &h, &p, cft_abi_version(), why, sizeof why);
+    free(p);
+    p = NULL;
+    if (rc != 0 || h.status != CFT_OK) {
+        cftr_sock_close(s);
+        return -1;
+    }
+    /* handle 1, operand a, the want word, no bank, n = 0, no scratch:
+     * the server reads the want word before it looks the handle up, so
+     * an unknown bit is refused here, and a known one reaches the lookup
+     * and is answered - this connection holds no program - as the call's
+     * own argument error */
+    memset(payload, 0, sizeof payload);
+    cftr_put32(payload + 0, 1u);
+    cftr_put32(payload + 4, 1u);
+    cftr_put32(payload + 8, want);
+    hello_header(hdr, cft_abi_version(), op, (uint32_t)fixed, payload);
+    cftr_put32(hdr + 12, 2);                   /* id 2, the second request */
+    cftr_put32(hdr + 24, 0);
+    {
+        const uint32_t crc = cftr_crc32(0, hdr, 32);
+        cftr_put32(hdr + 24, cftr_crc32(crc, payload, fixed));
+    }
+    cftr_sock_send_all(s, hdr, 32);
+    cftr_sock_send_all(s, payload, fixed);
+    rc = cftr_recv_frame(s, &h, &p, cft_abi_version(), why, sizeof why);
+    if (rc == 0 && p)
+        snprintf(msg, msg_size, "%.*s", (int)h.length, (const char *)p);
+    refused = (rc == 0 && h.kind == CFTR_KIND_REFUSAL) ? 1 : 0;
+    free(p);
+    cftr_sock_close(s);
+    return refused;
+}
+
+static void program_lane_flags_tests(cft_device *sw, cft_device *rm,
+                                     const char *url)
+{
+    void *hw = cft_device_backend(rm);
+    const size_t esz = 4;                      /* fp32 */
+    const size_t N = 96;
+    uint8_t img[32 + 5 * 8], msk[(96 + 7) / 8];
+    uint8_t *a = NULL, *c = NULL, *lf_rm = NULL, *lf_sw = NULL;
+    uint64_t ins[5];
+    cft_program *pr = NULL, *ps = NULL;
+    cft_run_args A;
+    cft_caps cp;
+    uint32_t f_rm = 0, f_sw = 0, s_rm = 0, s_sw = 0;
+    size_t i;
+    char msg[256];
+
+    memset(&cp, 0, sizeof cp);
+    cp.struct_size = sizeof cp;
+    cft_get_caps(rm, &cp);
+    printf("per-lane flags and flag control over the wire:\n");
+    if (!(cp.seq_features & CFT_SEQ_FEAT_LANE_FLAGS) ||
+        !(cp.seq_features & CFT_SEQ_FEAT_FLAG_CONTROL)) {
+        printf("  NOT COMPARED - the server's device does not publish "
+               "LANE_FLAGS and FLAG_CONTROL (seq_features 0x%lx)\n",
+               (unsigned long)cp.seq_features);
+        return;
+    }
+    a     = (uint8_t *)malloc(N * esz);
+    c     = (uint8_t *)malloc(N * esz);
+    lf_rm = (uint8_t *)malloc(N);
+    lf_sw = (uint8_t *)malloc(N);
+    if (!a || !c || !lf_rm || !lf_sw) {
+        printf("  FAIL: out of memory\n");
+        goto out;
+    }
+
+    /* quiet; fma r3, r0, r1, r0; endquiet; raise r2; halt */
+    ins[0] = 12ull | (1ull << 31);
+    ins[1] = 0ull | (3ull << 8) | (0ull << 12) | (1ull << 16) | (0ull << 20);
+    ins[2] = 13ull | (1ull << 31);
+    ins[3] = 14ull | (2ull << 12) | (1ull << 31);
+    ins[4] = 0ull | (1ull << 31);
+    memset(img, 0, sizeof img);
+    cftr_put32(img + 0, 0x50544643u);
+    cftr_put32(img + 4, 1);
+    cftr_put32(img + 8, 5);                    /* n_insns */
+    cftr_put32(img + 16, 0);                   /* max_deposits */
+    cftr_put32(img + 20, 0);                   /* fp32 */
+    for (i = 0; i < 5; i++)
+        cftr_put64(img + 32 + i * 8, ins[i]);
+    fill_normal(a, N, 0);
+    /* 37 is odd, so lane i's low byte runs through every value a byte can
+     * take as i does: every subset of the flags, both unread bits, and the
+     * mark on half of them */
+    for (i = 0; i < N; i++)
+        cftr_put32(c + i * esz, (uint32_t)((i * 37u + 5u) & 0xFFu));
+
+    CHECK(cft_program_load(rm, img, sizeof img, &pr) == CFT_OK && pr,
+          "a quiet region and a raise load on the remote handle: %s",
+          cft_last_error());
+    CHECK(cft_program_load(sw, img, sizeof img, &ps) == CFT_OK && ps,
+          "and on the local software one");
+    if (!pr || !ps)
+        goto out;
+
+    memset(&A, 0, sizeof A);
+    A.struct_size      = sizeof A;
+    A.a = a; A.b = a; A.c = c;
+    A.n                = N;
+    A.flags_out        = &f_rm;
+    A.bus_out          = &s_rm;
+    A.lane_flags       = lf_rm;
+    A.lane_flags_bytes = N;
+    memset(lf_rm, 0xEE, N);
+    CHECK(cft_program_run_ex(pr, &A) == CFT_OK,
+          "the per-lane flags over the wire: %s", cft_last_error());
+    A.flags_out  = &f_sw;
+    A.bus_out    = &s_sw;
+    A.lane_flags = lf_sw;
+    memset(lf_sw, 0xEE, N);
+    CHECK(cft_program_run_ex(ps, &A) == CFT_OK, "and locally");
+    CHECK(memcmp(lf_rm, lf_sw, N) == 0 && f_rm == f_sw && s_rm == s_sw,
+          "the server and this process agree over %lu lanes - bytes, flags "
+          "0x%02lx and STATUS 0x%02lx", (unsigned long)N,
+          (unsigned long)f_rm, (unsigned long)s_rm);
+    {
+        int bad = 0, or8 = 0;
+        for (i = 0; i < N; i++) {
+            const uint8_t w = (uint8_t)((i * 37u + 5u) & 0xFFu);
+            if (lf_rm[i] != (uint8_t)(w & 0x9Fu))
+                bad = 1;
+            or8 |= lf_rm[i];
+        }
+        CHECK(!bad, "each lane's byte is its word's [4:0] and its mark - the "
+                    "FMA silenced, bits [6:5] unread");
+        CHECK((uint32_t)(or8 & 0x1F) == f_rm &&
+              (uint32_t)((or8 >> 1) & 0x70) == (s_rm & 0x70u) &&
+              (s_rm & CFT_STATUS_MARKED),
+              "the bytes' OR gives back the flags and STATUS, the mark "
+              "among it: OR 0x%02x", or8);
+    }
+
+    /* a mask, which the client compacts: every third lane masked, whose
+     * byte stays the caller's on both sides */
+    for (i = 0; i < sizeof msk; i++)
+        msk[i] = 0;
+    for (i = 0; i < N; i++)
+        if (i % 3 != 2)
+            msk[i >> 3] |= (uint8_t)(1u << (i & 7u));
+    A.lane_mask = msk;
+    A.lane_mask_bytes = sizeof msk;
+    A.flags_out = &f_rm; A.bus_out = &s_rm; A.lane_flags = lf_rm;
+    memset(lf_rm, 0xEE, N);
+    CHECK(cft_program_run_ex(pr, &A) == CFT_OK,
+          "a masked run over the wire: %s", cft_last_error());
+    A.flags_out = &f_sw; A.bus_out = &s_sw; A.lane_flags = lf_sw;
+    memset(lf_sw, 0xEE, N);
+    CHECK(cft_program_run_ex(ps, &A) == CFT_OK, "and locally");
+    {
+        int bad = 0;
+        for (i = 0; i < N; i++)
+            if (i % 3 == 2 && lf_rm[i] != 0xEEu)
+                bad = 1;
+        CHECK(!bad && memcmp(lf_rm, lf_sw, N) == 0 && f_rm == f_sw &&
+              s_rm == s_sw,
+              "a masked lane's byte is the caller's over the wire, and the "
+              "kept lanes' agree with this process's");
+    }
+    A.lane_mask = NULL;
+    A.lane_mask_bytes = 0;
+
+    /* The frame's layout, by hand: PROG_RUN_EX with want 3 - the counts
+     * and the per-lane flags - after a library run has put the program in
+     * the server's slot 1. The answer is flags, bus, no deposits
+     * (max_deposits 0), k counts, no scratch-out, then k bytes. */
+    {
+        const size_t k = 4;
+        uint8_t req[32 + 3 * 4 * 4];
+        uint8_t *resp = NULL;
+        size_t len = 0;
+        int status = -1;
+        A.n = k;
+        A.flags_out = &f_rm; A.bus_out = &s_rm; A.lane_flags = lf_rm;
+        A.lane_flags_bytes = k;
+        if (cft_program_run_ex(pr, &A) == CFT_OK) {
+            cftr_put32(req + 0, 1u);           /* handle */
+            cftr_put32(req + 4, 7u);           /* a, b and c */
+            cftr_put32(req + 8, 3u);           /* counts and lane flags */
+            cftr_put32(req + 12, 0u);          /* no bank */
+            cftr_put64(req + 16, (uint64_t)k);
+            cftr_put32(req + 24, 0u);          /* no scratch in */
+            cftr_put32(req + 28, 0u);          /* or out */
+            memcpy(req + 32, a, k * esz);
+            memcpy(req + 32 + k * esz, a, k * esz);
+            memcpy(req + 32 + 2 * k * esz, c, k * esz);
+            CHECK(!cftr_request(hw, CFTR_OP_PROG_RUN_EX, req, sizeof req,
+                                &status, &resp, &len) &&
+                  status == CFT_OK && len == 8 + k * 4 + k,
+                  "a hand-built PROG_RUN_EX asking for both outputs is "
+                  "served (status %d, %lu bytes)", status,
+                  (unsigned long)len);
+            if (resp && len == 8 + k * 4 + k)
+                CHECK(memcmp(resp + 8 + k * 4, lf_rm, k) == 0 &&
+                      cftr_get32(resp + 4) == s_rm,
+                      "and its last k bytes are the per-lane flags the "
+                      "library's own call produced");
+            free(resp);
+        }
+    }
+
+    /* the want word's refusals, each on a fresh connection */
+    {
+        int r;
+        r = want_word_refused(url, CFTR_OP_PROG_RUN_EX, 32, 4u, msg,
+                              sizeof msg);
+        CHECK(r == 1 && strstr(msg, "want word"),
+              "PROG_RUN_EX with want bit 2 is refused by name: %d (%s)", r,
+              msg);
+        r = want_word_refused(url, CFTR_OP_PROG_RUN, 24, 2u, msg, sizeof msg);
+        CHECK(r == 1 && strstr(msg, "only PROG_RUN_EX"),
+              "PROG_RUN asking for the per-lane flags is refused by name: "
+              "%d (%s)", r, msg);
+        r = want_word_refused(url, CFTR_OP_PROG_RUN_EX, 32, 3u, msg,
+                              sizeof msg);
+        CHECK(r == 0, "and both known bits are not refused (%d, %s)", r,
+              msg);
+        r = want_word_refused(url, CFTR_OP_PROG_RUN, 24, 1u, msg, sizeof msg);
+        CHECK(r == 0, "nor PROG_RUN's counts bit (%d, %s)", r, msg);
+    }
+    printf("  the bytes agree with this process lane for lane, masked or "
+           "not; the frame carries both outputs; an unknown want bit is "
+           "refused by name\n");
+
+out:
+    cft_program_free(pr);
+    cft_program_free(ps);
+    free(a); free(c); free(lf_rm); free(lf_sw);
+}
+
 /* ---- the cost ------------------------------------------------------------ */
 
 static void bench(cft_device *rm)
@@ -1950,6 +2218,7 @@ int main(int argc, char **argv)
         protocol_tests(rm);
         program_bank_tests(sw, rm);
         program_scratch_tests(sw, rm);
+        program_lane_flags_tests(sw, rm, url);
         identity_tests(sw, rm, n);
     } else {
         bench(rm);

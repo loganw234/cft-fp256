@@ -191,7 +191,9 @@ def test_an_ldx_into_its_own_index_keeps_the_load_and_discards_the_step(
 
 
 def test_the_next_control_code_is_still_unknown():
-    for code in (12, 13, 127, 255):
+    """12 to 14 are R24's since the step-6 round (test_seq_rev8_flags.py);
+    15 is the next code, and it is still refused."""
+    for code in (15, 16, 127, 255):
         with pytest.raises(seq.ProgramError, match="unknown control code"):
             _prog(FP32, [seq.encode(code, ctrl=True)])
 

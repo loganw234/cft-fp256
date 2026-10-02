@@ -918,7 +918,8 @@ int main(void)
      * that asks cft_get_caps first, as the header tells it to, is told
      * no by a handle that would have said yes. That was this library's
      * state until 2026-09-24 (seq_features 0x671f; 0x7f1f from then,
-     * and 0x1ff1f since ABI 0.16's revision-8 bits).
+     * 0x1ff1f with ABI 0.16's revision-8 bits, and 0x7ff1f since ABI
+     * 0.17's R23 and R24).
      *
      * Each claim is held two ways: the bit is in the word, AND the call
      * it names returns the definition's bits and flags - the scalar run
@@ -4697,6 +4698,151 @@ int main(void)
         cft_program_free(NULL);       /* must be safe */
     }
 
+    /* --- revision 8's flag control and per-lane flags (ABI 0.17) -----
+     *
+     * docs/SEQUENCER.md R23 and R24, on the software handle, which
+     * carries both and must say so. Four lanes of one program:
+     *
+     *   quiet; fma r3, r0, r1, r0; endquiet; raise r2; halt
+     *
+     * The FMA is inexact in every lane (4/3 squared plus 4/3) and the
+     * region silences it. r2 is stream c, the lane's flag word: nothing,
+     * divide-by-zero, invalid with the mark (0x81), and bits [6:5] alone
+     * (0x60), which a raise does not read. So the flags are 0x03, STATUS
+     * is CFT_STATUS_MARKED, and the bytes are 00 02 81 00 - whose OR
+     * gives back both words, R23's identities. Without the region every
+     * byte gains inexact; under a mask the masked lane's byte is the
+     * caller's; and the field's shape and the old struct size are
+     * refused by name. */
+    {
+        static const uint64_t cword[4] = { 0x00u, 0x02u, 0x81u, 0x60u };
+        uint64_t ins[5];
+        uint8_t img[32 + 5 * 8];
+        uint8_t a[4 * 8], c[4 * 8], lf[4];
+        uint8_t mask[1];
+        uint32_t fl = 0, bus = 0;
+        cft_program *pq = NULL;
+        cft_caps qc;
+        cft_run_args R;
+        size_t len;
+        int k, or8;
+
+        memset(&qc, 0, sizeof qc);
+        qc.struct_size = sizeof qc;
+        st = cft_get_caps(dev, &qc);
+        CHECK(st == CFT_OK &&
+              (qc.seq_features & CFT_SEQ_FEAT_LANE_FLAGS) &&
+              (qc.seq_features & CFT_SEQ_FEAT_FLAG_CONTROL),
+              "the software handle publishes CFT_SEQ_FEAT_LANE_FLAGS and "
+              "CFT_SEQ_FEAT_FLAG_CONTROL (seq_features 0x%lx)",
+              (unsigned long)qc.seq_features);
+        for (k = 0; k < 4; k++) {
+            put64(a + 8 * k, 0x3FF5555555555555ull);       /* 4/3 */
+            put64(c + 8 * k, cword[k]);
+        }
+        ins[0] = LD_CTL(12, 0, 0, 0, 0, 0, 0, 0);               /* quiet */
+        ins[1] = LD_ALU(0, 3, 0, 1, 0, 0, 0, 0);       /* fma r3,r0,r1,r0 */
+        ins[2] = LD_CTL(13, 0, 0, 0, 0, 0, 0, 0);            /* endquiet */
+        ins[3] = LD_CTL(14, 0, 2, 0, 0, 0, 0, 0);            /* raise r2 */
+        ins[4] = LD_HALT;
+        len = ld_image(img, 0x50544643u, 1u, 1u, 8, 0u, 0u, 0u, 0u, ins, 5);
+        st = cft_program_load(dev, img, len, &pq);
+        CHECK(st == CFT_OK, "a quiet region and a raise load on the "
+              "software handle: %s (%s)", cft_strerror(st),
+              cft_last_error());
+        if (pq) {
+            memset(&R, 0, sizeof R);
+            R.struct_size = sizeof R;
+            R.a = a; R.b = a; R.c = c; R.n = 4;
+            R.flags_out = &fl; R.bus_out = &bus;
+            R.lane_flags = lf; R.lane_flags_bytes = 4;
+            memset(lf, 0xEE, sizeof lf);
+            st = cft_program_run_ex(pq, &R);
+            CHECK(st == CFT_OK && fl == 0x03u && bus == CFT_STATUS_MARKED,
+                  "the region silences the FMA and the raise raises "
+                  "exactly the words: %s flags 0x%02lx STATUS 0x%02lx",
+                  cft_strerror(st), (unsigned long)fl, (unsigned long)bus);
+            CHECK(lf[0] == 0x00u && lf[1] == 0x02u &&
+                  lf[2] == (uint8_t)(0x01u | CFT_LANE_MARKED) &&
+                  lf[3] == 0x00u,
+                  "each lane's byte is its own: %02x %02x %02x %02x",
+                  lf[0], lf[1], lf[2], lf[3]);
+            or8 = lf[0] | lf[1] | lf[2] | lf[3];
+            CHECK((uint32_t)(or8 & 0x1F) == fl &&
+                  (uint32_t)((or8 >> 1) & 0x70) == (bus & 0x70u),
+                  "the bytes' OR gives back the flags and STATUS[6:4] "
+                  "(R23's identities): OR 0x%02x", or8);
+
+            /* the lane mask: lane 2 masked keeps the caller's byte and
+             * raises nothing - so neither its invalid nor its mark */
+            mask[0] = 0x0Bu;
+            R.lane_mask = mask; R.lane_mask_bytes = 1;
+            memset(lf, 0xEE, sizeof lf);
+            st = cft_program_run_ex(pq, &R);
+            CHECK(st == CFT_OK && lf[2] == 0xEEu && lf[1] == 0x02u &&
+                  fl == 0x02u && bus == 0u,
+                  "a masked lane's byte is the caller's and it raises and "
+                  "marks nothing: %s %02x %02x flags 0x%02lx STATUS 0x%02lx",
+                  cft_strerror(st), lf[1], lf[2], (unsigned long)fl,
+                  (unsigned long)bus);
+            R.lane_mask = NULL; R.lane_mask_bytes = 0;
+
+            /* the field's shape, by name, before the run */
+            R.lane_flags = NULL; R.lane_flags_bytes = 4;
+            st = cft_program_run_ex(pq, &R);
+            CHECK(st == CFT_ERR_INVALID_ARGUMENT &&
+                  strstr(cft_last_error(), "with no lane_flags"),
+                  "a count with no block is refused by name: %s (%s)",
+                  cft_strerror(st), cft_last_error());
+            R.lane_flags = lf; R.lane_flags_bytes = 1;   /* a mask's size */
+            st = cft_program_run_ex(pq, &R);
+            CHECK(st == CFT_ERR_INVALID_ARGUMENT &&
+                  strstr(cft_last_error(), "a byte a lane"),
+                  "a block sized as a mask is refused by name: %s (%s)",
+                  cft_strerror(st), cft_last_error());
+            R.lane_flags_bytes = 4;
+            /* ABI 0.16's struct ends before the two fields: refused, as an
+             * input struct of another size always is */
+            R.struct_size = offsetof(cft_run_args, lane_flags);
+            st = cft_program_run_ex(pq, &R);
+            CHECK(st == CFT_ERR_INVALID_ARGUMENT &&
+                  strstr(cft_last_error(), "missing a field"),
+                  "a 0.16-sized cft_run_args is refused at 0.17: %s (%s)",
+                  cft_strerror(st), cft_last_error());
+            R.struct_size = sizeof R;
+            cft_program_free(pq);
+            pq = NULL;
+        }
+
+        /* the control: the same program without its region raises the
+         * FMA's inexact in every lane */
+        ins[0] = LD_ALU(0, 3, 0, 1, 0, 0, 0, 0);
+        ins[1] = LD_CTL(14, 0, 2, 0, 0, 0, 0, 0);
+        ins[2] = LD_HALT;
+        len = ld_image(img, 0x50544643u, 1u, 1u, 8, 0u, 0u, 0u, 0u, ins, 3);
+        st = cft_program_load(dev, img, len, &pq);
+        if (st == CFT_OK && pq) {
+            memset(&R, 0, sizeof R);
+            R.struct_size = sizeof R;
+            R.a = a; R.b = a; R.c = c; R.n = 4;
+            R.flags_out = &fl; R.bus_out = &bus;
+            R.lane_flags = lf; R.lane_flags_bytes = 4;
+            st = cft_program_run_ex(pq, &R);
+            CHECK(st == CFT_OK && fl == 0x13u &&
+                  lf[0] == 0x10u && lf[3] == 0x10u,
+                  "without the region the FMA's inexact stands in every "
+                  "lane: flags 0x%02lx, bytes %02x .. %02x",
+                  (unsigned long)fl, lf[0], lf[3]);
+            cft_program_free(pq);
+        } else {
+            CHECK(0, "the control program loads: %s", cft_strerror(st));
+        }
+        printf("  revision 8 (ABI 0.17): a quiet region silences an FMA, a "
+               "raise ORs its word and marks, each lane's byte is its own, "
+               "a masked lane's is the caller's, and the field's shape and "
+               "the 0.16 struct are refused by name\n");
+    }
+
     /* --- SHA-256, against the vectors that define it ---------------
      *
      * FIPS 180-4's own two worked examples, copied in the base the
@@ -5375,8 +5521,62 @@ int main(void)
                        "ENDREP" } },
             { .what = "an unknown control code",
               .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_CTL(15, 0, 0, 0, 0, 0, 0, 0), LD_HALT },
+              .say = { "instruction 0 is control code 15", "0 to 14" } },
+            /* revision 8's R24 (ABI 0.17): the bracket rules and the
+             * fields the three codes do not read */
+            { .what = "an ENDQUIET with no quiet region open",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_CTL(13, 0, 0, 0, 0, 0, 0, 0), LD_HALT },
+              .say = { "instruction 0 is an ENDQUIET",
+                       "no quiet region open" } },
+            { .what = "a HALT inside a quiet region",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
               .ins = { LD_CTL(12, 0, 0, 0, 0, 0, 0, 0), LD_HALT },
-              .say = { "instruction 0 is control code 12", "0 to 11" } },
+              .say = { "instruction 1 is HALT inside the quiet region "
+                       "opened at instruction 0", "save and its restore" } },
+            { .what = "a quiet region left open at the end",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_CTL(12, 0, 0, 0, 0, 0, 0, 0), LD_ADD },
+              .say = { "after instruction 1", "inside 1 open quiet region",
+                       "ENDQUIET" } },
+            { .what = "an ENDREP closing its loop around an open region",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 5,
+              .ins = { LD_REPEAT(2), LD_CTL(12, 0, 0, 0, 0, 0, 0, 0),
+                       LD_ENDREP, LD_CTL(13, 0, 0, 0, 0, 0, 0, 0), LD_HALT },
+              .say = { "instruction 2 is an ENDREP",
+                       "quiet region opened at instruction 1",
+                       "closes in that body" } },
+            { .what = "an ENDQUIET inside a loop opened in its region",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 5,
+              .ins = { LD_CTL(12, 0, 0, 0, 0, 0, 0, 0), LD_REPEAT(2),
+                       LD_CTL(13, 0, 0, 0, 0, 0, 0, 0), LD_ENDREP, LD_HALT },
+              .say = { "instruction 2 is an ENDQUIET inside the loop opened "
+                       "at instruction 1", "closes outside it" } },
+            { .what = "a fifth nested quiet region",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 11,
+              .ins = { LD_CTL(12, 0, 0, 0, 0, 0, 0, 0),
+                       LD_CTL(12, 0, 0, 0, 0, 0, 0, 0),
+                       LD_CTL(12, 0, 0, 0, 0, 0, 0, 0),
+                       LD_CTL(12, 0, 0, 0, 0, 0, 0, 0),
+                       LD_CTL(12, 0, 0, 0, 0, 0, 0, 0),
+                       LD_CTL(13, 0, 0, 0, 0, 0, 0, 0),
+                       LD_CTL(13, 0, 0, 0, 0, 0, 0, 0),
+                       LD_CTL(13, 0, 0, 0, 0, 0, 0, 0),
+                       LD_CTL(13, 0, 0, 0, 0, 0, 0, 0),
+                       LD_CTL(13, 0, 0, 0, 0, 0, 0, 0), LD_HALT },
+              .say = { "instruction 4 is a QUIET inside 4 open quiet "
+                       "regions", "at most 4 deep" } },
+            { .what = "a RAISE that names rb",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
+              .ins = { LD_CTL(14, 0, 1, 2, 0, 0, 0, 0), LD_HALT },
+              .say = { "instruction 0 is RAISE", "does not read rb" } },
+            { .what = "a QUIET with an immediate",
+              .want = CFT_ERR_INVALID_ARGUMENT, .n = 3,
+              .ins = { LD_CTL(12, 0, 0, 0, 0, 0, 0, 1),
+                       LD_CTL(13, 0, 0, 0, 0, 0, 0, 0), LD_HALT },
+              .say = { "instruction 0 is QUIET",
+                       "reads only imm & 0x00000000" } },
             { .what = "a reserved rounding attribute",
               .want = CFT_ERR_INVALID_ARGUMENT, .n = 2,
               .ins = { LD_ALU(1, 0, 0, 0, 0, 5, 0, 0), LD_HALT },

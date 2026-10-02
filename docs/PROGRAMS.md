@@ -581,7 +581,7 @@ since landed (`seq.py`'s `STL, LDL, STX, LDX`, `SCRATCH_D` and
 This is the shape the round before used for the `BANK_EXT` path, which
 landed the same way.
 
-## Revision 8 in the text form (proposed, 2026-09-29)   **the reference assembler only**
+## Revision 8 in the text form (proposed, 2026-09-29; both assemblers since 2026-10-02)
 
 *docs/SEQUENCER.md's "Revision 8 (proposed, 2026-09-29)" is the
 contract; this is its spelling.*
@@ -591,6 +591,10 @@ contract; this is its spelling.*
     stx rA, rB, STEP         scratch[rB] := rA, then rB := rB + STEP
     ldx rD, rB, STEP         rD := scratch[rB], then rB := rB + STEP
                              (unless rD is rB: the loaded value wins)
+    quiet                    open a quiet region (R24)
+    endquiet                 close the innermost quiet region
+    raise rA                 OR rA[4:0] into FLAGS and the lane's byte,
+                             outside a region; mark the lane on rA[7]
 
 `STEP` is a signed number - at most one sign, then decimal or `0x` hex:
 `+1`, `-1`, `-0x10`, `3` - in -2048..2047, the twelve bits of imm[11:0].
@@ -608,12 +612,29 @@ registers and nothing else - no rounding suffix, because 754-2019 9.5
 fixes the rounding (`augerr.rtz` is refused saying so), and no constant,
 because no control code reads the bank. asm.py's `info()` - the reference for what
 `cft-asm -i` prints - names the features an image needs: `AUGADD` for
-the pair and `SCRATCH_STEP` for a step that is not zero.
+the pair, `SCRATCH_STEP` for a step that is not zero and `FLAG_CONTROL`
+for any of R24's three.
 
-`python/cft_golden/asm.py` reads and writes all four forms, and
-`python/tests/test_seq_rev8.py` holds its validator to `seq.py`'s over
-the new codes' whole field space. `host/tools/cft-asm.c` does NOT read
-them yet: nothing it assembles uses them - the committed `.cfta` files
-and `programs/check.py`'s own generator draw neither - so no gate turns
-red, and teaching it is the follow-up for whoever takes revision 8 to the
-tools.
+R24's three (2026-10-02, the step-6 round's R8): `quiet` and `endquiet`
+take no operand and `raise` one register, read whole from its low byte -
+bits [4:0] the flags in FLAGS's order and bit [7] the mark (docs/SEQUENCER.md,
+R24). A region nests in a region four deep and properly with loops: one
+opened in a loop body closes in it, one opened outside a loop closes
+outside it, and a `halt` inside one, or a program that ends with one open,
+is refused - each in the same words in both assemblers. The disassembler
+indents a region's body as it indents a loop's. A control mnemonic with a
+suffix (`raise.rtz`, `ldx.kx`) is refused as a control instruction that
+takes none, with 9.5's reason on the pair.
+
+`python/cft_golden/asm.py` reads and writes all seven forms, and
+`python/tests/test_seq_rev8.py` and `python/tests/test_seq_rev8_flags.py`
+hold its validator to `seq.py`'s. `host/tools/cft-asm.c` read none of
+them until 2026-10-02, when nothing it assembled used one - the committed
+`.cfta` files and `programs/check.py`'s generators drew none - so no gate
+was red. It reads all seven now, and `programs/check.py` holds the two
+together on them: a revision-8 corpus of 160 generated programs (bytes,
+both disassemblers, the round trip and `-i`, with what it reached
+asserted from the images), a revision-8 arm of 46 sources and 10 images
+each held to the contract's verdict - the same bytes, or the same
+refusal for the same reason - and the numeric arm's `stx` and `ldx`
+steps at and past their bounds.

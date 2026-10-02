@@ -1203,6 +1203,55 @@ names as before:
     bindings/wasm/conformance.html 1,407,179 bytes  sha256 10010f4a0dc03376...
     bindings/wasm/demos.html         593,275 bytes  sha256 a440bb2b8bc310f6...
 
+### Rebuilt at ABI 0.17, 2026-10-02 (the step-6 round) - revision 8's flag control and per-lane flags
+
+The bump for revision 8's flag control (R24: QUIET, ENDQUIET and RAISE)
+and per-lane flags (R23: `cft_run_args.lane_flags` and
+`lane_flags_bytes`, STATUS[6] for a marked lane), parcel R8. Both are
+built golden-first in `program.c`, which this module is built from (docs/SEQUENCER.md,
+"Revision 8"; docs/HOSTAPI.md, ABI 0.17). `wasm_api.c` is unchanged and
+exports no per-lane block, so the module computes what the library's
+software backend computes and reports the new bits: its `seq_features`
+is **0x7ff1f** where it was 0x1ff1f. `cftw_abi_version()` answers 17,
+which `verify.mjs` holds against `cft.h`.
+
+Until this rebuild, R8's branch carried four stages red for the module's
+ABI alone: `node`, `wasm`, `demos` and `remote`'s WebSocket leg
+(verifier-VR8 listed them and showed the ABI their only cause).
+
+The order was the one the 0.16 rebuild gives:
+1. `build.sh`;
+2. the five native tools built, then `verify_demos.mjs --record`. Its
+   two FAILs were the stale page's (it embedded the 0.16 module), as the
+   order predicts;
+3. `build_demos.sh`;
+4. a second clean build of both, with `bindings/wasm/build/` removed
+   between, every output and both negative-control pages byte for byte.
+
+The container was the one both scripts run, `--inside`, with
+`--cpus 4` added because the desktop was in use; the cap changes
+nothing a build writes. All 15 chains of the 13 configurations came
+back unchanged; the module stamp, the date, the rates, the seconds and
+the tools' report lines moved.
+
+`verify.mjs`'s first run stopped at the transcendental sets the
+container cannot write (no mpmath in the pinned image), as its own
+message says. `make vectors` from the repo root, 101 s, then gave
+**VERIFY OK** (1,117 s, the desktop in use):
+- abi 17 on both sides and 141 `cftw_*` entry points;
+- 4,015 embedded cases over 20 sets;
+- 1,068,915 cases over 168 sets through the page's bytes;
+- 832,915 over 148 sets through the wrappers themselves.
+
+`bindings/node/test.mjs` passed 137, failed 0, and `verify_demos.mjs`
+passed against the rebuilt page. Still **141 `cftw_*` exports**, the
+same names:
+
+    bindings/node/cft_node.wasm      276,300 bytes  sha256 6c5849bfe0c8327e...
+    bindings/node/cft_node.js         74,146 bytes  sha256 dc845833acf075cb...  (unchanged)
+    bindings/wasm/conformance.html 1,409,956 bytes  sha256 cb45769a7249ecd9...
+    bindings/wasm/demos.html         596,019 bytes  sha256 a311402001d3a122...
+
 ## A second page: the five workloads, measured (2026-09-04)
 
 `demos.html` is the other deliverable of this directory. Same

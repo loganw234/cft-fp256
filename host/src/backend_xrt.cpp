@@ -324,7 +324,16 @@ constexpr uint32_t ST_BUS_BITS  = 0x7u;
 constexpr uint32_t ST_REFUSED   = 0x8u;
 constexpr uint32_t ST_DEPOSIT_OVERFLOW = 0x10u;
 constexpr uint32_t ST_SCRATCH_RANGE    = 0x20u;
-constexpr uint32_t ST_REPORTS = ST_DEPOSIT_OVERFLOW | ST_SCRATCH_RANGE;
+/* Revision 8's R24 (ABI 0.17): STATUS[6], CFT_STATUS_MARKED - a raise
+ * marked a lane whose last bit a routine could not decide. In the mask
+ * BEFORE any tile can set it (every tile built so far reads STATUS as six
+ * bits padded with zeros, so on revision 7 it changes nothing), because a
+ * mask that stopped at bit 5 would hand back an undecided bit as though
+ * it were decided - and the run's certificates with it - which is the
+ * trap bit 5 fell into until 2026-09-18. */
+constexpr uint32_t ST_MARKED           = 0x40u;
+constexpr uint32_t ST_REPORTS = ST_DEPOSIT_OVERFLOW | ST_SCRATCH_RANGE |
+                                ST_MARKED;
 
 /* Round `n` up to a whole 256-bit beat's worth of bytes. The masters
  * move whole beats whatever the format, so a buffer that ends mid-beat

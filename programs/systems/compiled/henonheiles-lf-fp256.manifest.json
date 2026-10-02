@@ -43,7 +43,7 @@
   "max_consts": 512,
   "scratch_depth": 256,
   "max_deposits": 1048576,
-  "seq_features": "0x1ff1f"
+  "seq_features": "0x7ff1f"
  },
  "accepted_by": [
   "sw",
