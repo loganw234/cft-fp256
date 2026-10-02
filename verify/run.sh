@@ -1043,7 +1043,11 @@ stage programs "the program library: both assemblers against the MANIFEST, the r
 # each in full and sampled; two processes under two PYTHONHASHSEEDs write
 # the bytes programs/systems/compiled/ holds; every refusal by name; five
 # plants in a copy of the package, each stopped by the compiler's internal
-# check and red on seq.py with it off. In the quick budget: about two
+# check and red on seq.py with it off. Since L4 (2026-10-02), generated
+# sources that divide or take a root at run time - which the language
+# has and the compiler refuses `runtime-routine` until parcel C4 - each
+# refused by that name at its line on every target, never an internal
+# error. In the quick budget: about two
 # minutes on the desktop, niced (L2, 2026-10-01; the lead's rule, quick
 # at about three minutes or less).
 do_lang() {
@@ -1074,7 +1078,9 @@ stage lang "the language's compiler held to its interpreter: every image on seq.
 # tangent/ holds, and the `lang` stage's 48 still; refusals by name;
 # wrong derivations red on the derivative and the exponent, a rule
 # rounded otherwise red on the committed bytes, and four compiler plants
-# red on seq.py. In the gate budget: 196 s run directly and 346 s
+# red on seq.py; since L4 (2026-10-02), the quotient's and the root's
+# rules, golden-only, exactly and by a central difference, with plants.
+# In the gate budget: 196 s run directly and 346 s
 # through the runner on the desktop, niced and in use, and past 13
 # minutes, unfinished, beside another process holding it at 100% (L3,
 # 2026-10-01).

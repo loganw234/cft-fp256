@@ -12,11 +12,14 @@
                     the same step graph, byte for byte.
 
   render_math       the equations in conventional notation (UTF-8 plain
-                    text): each fma as the a*b + c it computes, each
+                    text): each fma as the a*b + c it computes, a
+                    division as a/b and a square root as √(a), each
                     constant as its exact value, the step as the
                     template's own scheme. Evaluated exactly at random
                     rational points it gives what the step graph gives
-                    evaluated exactly (python/tests/lang_mathform.py).
+                    evaluated exactly (python/tests/lang_mathform.py) -
+                    each square root a fixed function of its exact
+                    argument on both sides (graph.exact_root).
 
 Both read the step graph - and, for a flow's step, the template the
 graph names - and never the source text.
@@ -52,6 +55,7 @@ DOT = "·"
 MAPSTO = "↦"
 LE = "≤"
 NE = "≠"
+ROOT = "√"
 
 
 def greek(name):
@@ -78,10 +82,15 @@ def _leaf_text(g, ref, comps):
     return C.literal(value) if factor is None else C.h_form(factor)
 
 
-_CANON_BIN = {"add": "+", "sub": "-", "mul": "*", "cmplt": "<",
+# `/` is a product's kind, as in C and Python: a * b / c is (a * b) / c by
+# the rule that binary operators associate left, written flat like a sum,
+# so a chain of products and quotients of any length stays one level deep
+# (L4). The compound constant 8/3 is written in parentheses as an operand,
+# so `x * 8 / 3`, two operations, and `x * (8/3)`, one, read apart.
+_CANON_BIN = {"add": "+", "sub": "-", "mul": "*", "div": "/", "cmplt": "<",
               "cmple": "<=", "cmpeq": "=="}
-_KIND = {"add": "sum", "sub": "sum", "mul": "product", "cmplt": "cmp",
-         "cmple": "cmp", "cmpeq": "cmp"}
+_KIND = {"add": "sum", "sub": "sum", "mul": "product", "div": "product",
+         "cmplt": "cmp", "cmple": "cmp", "cmpeq": "cmp"}
 
 
 class _Canon:
@@ -502,6 +511,20 @@ def m_prod(a, b):
     return M(f"{_factor(a)}{DOT}{_factor(b)}", 1)
 
 
+def m_div(a, b):
+    """A run-time quotient (L4): its numerator parenthesised as a product's
+    operand is (a sum, a quotient or a negation), its denominator unless it
+    is an atom - x·y/z, (x/y)/z, x/(y·z), x/(8/3)."""
+    den = b.text if b.prec >= 3 and not b.text.startswith(MINUS) \
+        else f"({b.text})"
+    return M(f"{_factor(a)}/{den}", 1, div=True)
+
+
+def m_sqrt(a):
+    """A run-time square root (L4), as a call of the radical: √(x)."""
+    return M(f"{ROOT}({a.text})", 3)
+
+
 def m_neg(a):
     inner = a.text if a.prec >= 1 and not a.text.startswith(MINUS) \
         else f"({a.text})"
@@ -575,12 +598,12 @@ class _Math:
         return op, args
 
     def node(self, op, args):
-        if op in ("add", "sub", "mul"):
+        if op in ("add", "sub", "mul", "div"):
             # a left-deep chain, walked in a loop
             spine = [(op, args)]
             left = args[0]
             while True:
-                nxt = self._inline(left, ("add", "sub", "mul"))
+                nxt = self._inline(left, ("add", "sub", "mul", "div"))
                 if nxt is None:
                     break
                 spine.append(nxt)
@@ -588,8 +611,8 @@ class _Math:
             m = self.ref(left)
             for o, a in reversed(spine):
                 r = self.ref(a[1])
-                m = m_prod(m, r) if o == "mul" else m_sum(m, r,
-                                                          sub=o == "sub")
+                m = m_prod(m, r) if o == "mul" else m_div(m, r) \
+                    if o == "div" else m_sum(m, r, sub=o == "sub")
             return m
         if op == "neg":
             count, inner = 1, args[0]
@@ -615,6 +638,8 @@ class _Math:
             return m_sum(prod, a[2])
         if op == "abs":
             return M(f"|{a[0].text}|", 3)
+        if op == "sqrt":
+            return m_sqrt(a[0])
         if op in ("copysign", "min", "max", "minnum", "maxnum"):
             name = {"minnum": "minNum", "maxnum": "maxNum"}.get(op, op)
             return M(f"{name}({a[0].text}, {a[1].text})", 3)

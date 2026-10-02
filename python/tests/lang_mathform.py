@@ -31,13 +31,37 @@ Df(Z)·W is the variational right-hand sides at the state Z along the
 tangent W. They are read here too, and evaluated exactly: a vector is
 bound by the ORDER its sections appear in, its components by the order
 of its δY line or of its equations - never by the glyph.
+
+A run-time division prints as a/b and a square root as √(a) (L4). A
+quotient is exact in Fractions; a root is not, in general, so this reader
+takes the convention the step graph's exact evaluation states
+(cft_golden/lang/graph.py, exact_root) and computes it itself: the exact
+root where the argument is a rational's square, otherwise the root
+rounded down to a multiple of 2^-256 - a fixed function of the exact
+argument, so that the same root of the same value agrees, while a root
+taken of another value, or a missing one, does not. A division by zero or
+a negative root's argument raises an ArithmeticError.
 """
 
 import re
 import sys
 from fractions import Fraction
+from math import isqrt
 
-MINUS, DOT, MAPSTO, LE, NE = "−", "·", "↦", "≤", "≠"
+MINUS, DOT, MAPSTO, LE, NE, ROOT = "−", "·", "↦", "≤", "≠", "√"
+ROOT_BITS = 256
+
+
+def root(q):
+    """The square root as the exact checks take it (the module docstring)."""
+    q = Fraction(q)
+    if q < 0:
+        raise ArithmeticError(f"the square root of {q}")
+    n, d = q.numerator, q.denominator
+    rn, rd = isqrt(n), isqrt(d)
+    if rn * rn == n and rd * rd == d:
+        return Fraction(rn, rd)
+    return Fraction(isqrt((n << (2 * ROOT_BITS)) // d), 1 << ROOT_BITS)
 
 
 class MathFormError(ValueError):
@@ -193,6 +217,11 @@ class _Expr:
             inner = self.sum()
             self.expect("|")
             return ("abs", inner)
+        if t == ("op", ROOT):
+            self.expect("(")
+            inner = self.sum()
+            self.expect(")")
+            return ("sqrt", inner)
         if t == ("op", "["):
             left = self.sum()
             op = self.take()
@@ -404,6 +433,8 @@ class MathForm:
             return v
         if kind == "abs":
             return abs(self._eval(t[1], env))
+        if kind == "sqrt":
+            return root(self._eval(t[1], env))
         if kind == "cmp":
             a, b = self._eval(t[2], env), self._eval(t[3], env)
             truth = {"<": a < b, LE: a <= b, "=": a == b}[t[1]]

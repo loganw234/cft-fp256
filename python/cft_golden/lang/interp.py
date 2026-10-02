@@ -42,14 +42,18 @@ class Run:
 
 
 def _ops(fmt, rnd):
-    """The golden function for each node operation. The four that round
-    take the program's attribute; the rest are called as
-    softfloat.compute calls them, and ignore it."""
+    """The golden function for each node operation. The six that round
+    take the program's attribute - division and the square root among
+    them, sf.div and sf.sqrt, correctly rounded with their exact flags
+    (L4) - and the rest are called as softfloat.compute calls them, and
+    ignore it."""
     return {
         "fma": lambda a, b, c: sf.fma(fmt, a, b, c, rnd),
         "add": lambda a, b: sf.add(fmt, a, b, rnd),
         "sub": lambda a, b: sf.sub(fmt, a, b, rnd),
         "mul": lambda a, b: sf.mul(fmt, a, b, rnd),
+        "div": lambda a, b: sf.div(fmt, a, b, rnd),
+        "sqrt": lambda a: sf.sqrt(fmt, a, rnd),
         "neg": lambda a: sf.neg(fmt, a),
         "abs": lambda a: sf.fabs(fmt, a),
         "copysign": lambda a, b: sf.copysign(fmt, a, b),

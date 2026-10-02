@@ -38,15 +38,16 @@ they were before tangents existed):
   tangent_step   the derivative of `step`: {"out", "nodes"} - what the
                  interpreter runs once a vector, after the step
 
-A node is [op, [ref], label or null]; a ref is sN (a state input), lN
-(a lane param), pN (a param), cN (a const) or nN (a node of the same
-section, always an earlier one). In a tangent section nN is a LABELLED
-node of the section it differentiates (a tangent reads an unlabelled
-primal value by writing it again), dN a node of the tangent section
-itself, and tN the tangent input N - component N of the vector being
-propagated: the sections are generic, one for every vector. Exact
-values are Fractions written as p/q or p; bits are 0x and the format's
-width in hex digits.
+A node is [op, [ref], label or null]; an op is one of OPS below - div
+and sqrt, the run-time division and square root (L4, 2026-10-02), among
+them; a ref is sN (a state input), lN (a lane param), pN (a param), cN
+(a const) or nN (a node of the same section, always an earlier one). In
+a tangent section nN is a LABELLED node of the section it differentiates
+(a tangent reads an unlabelled primal value by writing it again), dN a
+node of the tangent section itself, and tN the tangent input N -
+component N of the vector being propagated: the sections are generic,
+one for every vector. Exact values are Fractions written as p/q or p;
+bits are 0x and the format's width in hex digits.
 
 What makes the bytes canonical: one node per operator written (no
 sharing - so an unlabelled node has exactly one use, asserted here);
@@ -59,6 +60,7 @@ node a line, a final newline.
 import hashlib
 import json
 from fractions import Fraction
+from math import isqrt
 
 from .. import softfloat as sf
 from ..formats import FORMATS
@@ -69,11 +71,42 @@ VERSION = 1
 
 # The operations a node may be, in the order counts are written, with
 # each one's operand count. The names are softfloat.OP_NAMES' spellings
-# and the operand order is the golden function's (asm.py's OP_FIELDS).
-OPS = {"fma": 3, "add": 2, "sub": 2, "mul": 2, "neg": 1, "abs": 1,
+# and the operand order is the golden function's (asm.py's OP_FIELDS) -
+# but for div and sqrt, which no tile instruction is: their names are the
+# golden functions' own, sf.div and sf.sqrt (L4). Count lines write only
+# the operations a section has, so a graph without these two writes what
+# it wrote before them.
+OPS = {"fma": 3, "add": 2, "sub": 2, "mul": 2, "div": 2, "sqrt": 1,
+       "neg": 1, "abs": 1,
        "copysign": 2, "min": 2, "max": 2, "minnum": 2, "maxnum": 2,
        "cmplt": 2, "cmple": 2, "cmpeq": 2, "select": 3}
-ROUNDED = frozenset({"fma", "add", "sub", "mul"})
+ROUNDED = frozenset({"fma", "add", "sub", "mul", "div", "sqrt"})
+
+# exact_eval's square root of a rational that is no rational's square: its
+# value rounded down to a multiple of 2^-ROOT_BITS - a fixed function of
+# its exact argument, which the tests' own readers compute alike (L4).
+ROOT_BITS = 256
+
+
+class Undefined(ArithmeticError):
+    """An exact evaluation that has no value: a division by zero, or the
+    square root of a negative number."""
+
+
+def exact_root(value):
+    """The square root exact_eval takes: the exact root where `value` is a
+    rational's square (constants.rational_sqrt), and otherwise the root
+    rounded down to a multiple of 2^-ROOT_BITS - so that two evaluations
+    of one expression, however it is written, take the same root of the
+    same exact argument. Undefined for a negative value."""
+    value = K_.exact(value)
+    if value < 0:
+        raise Undefined(f"the square root of {K_.brief(value)}")
+    root = K_.rational_sqrt(value)
+    if root is not None:
+        return root
+    n, d = value.numerator, value.denominator
+    return Fraction(isqrt((n << (2 * ROOT_BITS)) // d), 1 << ROOT_BITS)
 
 
 class Node:
@@ -89,11 +122,16 @@ class Node:
 
 
 class Section:
-    __slots__ = ("out", "nodes")
+    __slots__ = ("out", "nodes", "lines")
 
-    def __init__(self, out, nodes):
+    def __init__(self, out, nodes, lines=None):
         self.out = list(out)            # [ref]
         self.nodes = list(nodes)        # [(op, (ref, ...), label or None)]
+        # each node's source line, where the checker built the section
+        # from a source; None for a section read from bytes. Never part of
+        # the bytes: the compiler's interim refusal names a line with it
+        # (python/cftc, `runtime-routine`).
+        self.lines = None if lines is None else list(lines)
 
 
 def _ref_kind(ref):
@@ -206,7 +244,7 @@ def canonical(sections, cross=None):
         nodes = [(n.op, tuple(ref(a, index, foreign, own) for a in n.args),
                   n.label) for n in order]
         out[name] = Section([ref(o, index, foreign, own) for o in outs],
-                            nodes)
+                            nodes, [n.line for n in order])
     return out, ckeys
 
 
@@ -561,11 +599,17 @@ class StepGraph:
                    tangent=None):
         """The section's outputs evaluated exactly, in Fractions: every
         node's operation without rounding (fma is a*b + c, a comparison
-        is 1 or 0, copysign takes the sign of a zero as +), constants
-        at their exact values. `params` and `lanes` default to the
-        declared defaults. A tangent section (tangent_field,
-        tangent_step) takes `tangent`, one tangent vector's values, and
-        evaluates the section it differentiates first."""
+        is 1 or 0, copysign takes the sign of a zero as +, a division is
+        the exact quotient), constants at their exact values. A square
+        root is exact_root's: the exact root where its argument is a
+        rational's square, and otherwise a fixed function of its exact
+        argument - the root rounded down to 2^-ROOT_BITS - so that two
+        evaluations of the same root agree exactly (L4). A division by
+        zero or a negative root's argument raises Undefined. `params` and
+        `lanes` default to the declared defaults. A tangent section
+        (tangent_field, tangent_step) takes `tangent`, one tangent
+        vector's values, and evaluates the section it differentiates
+        first."""
         values = {"s": [Fraction(v) for v in state],
                   "l": ([Fraction(v) for v in lanes] if lanes is not None
                         else [d for _n, d, _b in self.lane]),
@@ -646,6 +690,12 @@ def _exact(op, a):
         return a[0] - a[1]
     if op == "mul":
         return a[0] * a[1]
+    if op == "div":
+        if a[1] == 0:
+            raise Undefined(f"{K_.brief(a[0])} divided by zero")
+        return a[0] / a[1]
+    if op == "sqrt":
+        return exact_root(a[0])
     if op == "neg":
         return -a[0]
     if op == "abs":
