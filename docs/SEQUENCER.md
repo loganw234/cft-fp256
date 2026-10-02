@@ -2980,7 +2980,7 @@ the software backend (parcel P2's ledger has the runs):
   library's own 256-slot ceiling that ran whatever depth the device
   published (docs/HOSTAPI.md, `cft_open_ex`).
 
-## Revision 8 (proposed, 2026-09-29): an exact-residual add, a stepped index, and per-lane flags designed
+## Revision 8 (proposed, 2026-09-29; flag control designed 2026-10-02): an exact-residual add, a stepped index, flag control and per-lane flags
 
 Three of the side project's asks (docs/ROADMAP.md, "What a side
 project asks of step 4's revision", asks 3, 4 and 5), defined
@@ -2993,15 +2993,31 @@ bit of its own, refused BY NAME wherever it is not built.
 computes it on the software backend and `host/tests/seq_check.py` holds
 the two together; a tile carries it only once an RTL revision builds it.
 
+The step-6 round (docs/ROADMAP.md, "Step 6", R8F and R8L) adds a fourth
+item and gives the third its last bit. A correctly rounded routine -
+divfull today, the math library next - runs many instructions whose own
+flags are scaffolding, and no opcode can raise divide-by-zero. Logan
+chose, for FLAGS in routines, "Flag control in rev 8 (Recommended)", and
+for this revision "Flag control, Per-lane flags (R23), TwoSum + stepped
+scratch, Instruction streaming" (2026-10-02). So R24 is flag control: a
+quiet region and a raise, so that a routine runs quiet and then raises
+exactly the flags of the operation it implements. Its raise carries a
+mark, which R23's bit [7] records: a lane whose last bit a routine could
+not decide. Revision 8's RTL comes later, in one revision whose plan goes
+to Logan first, so everything it needs of R23 and R24 is defined here
+first. Instruction streaming has a design study of its own.
+
 Each choice below took the first rung of Logan's rule (2026-09-29) that
 had an answer - "adhere to IEEE 754 when an option, RISC V approaches if
 nothing is in IEEE 754, and if neither state a way to handle it,
 whatever approach aligns best with the current systems" - and says
 which rung it was.
 
-This section is the CONTRACT for R21 and R22 and the DESIGN for R23.
-R20 is left to revision 7's third item, the program limits, should it
-take a number.
+This section is the CONTRACT for R21 and R22 and the DESIGN for R23 and
+R24, which nothing builds yet. R20 is left to revision 7's third item,
+the program limits, should it take a number. R21's and R22's text forms
+are in `asm.py`; `host/tools/cft-asm.c` does not carry them yet, and
+takes them with R24's.
 
 ### R21. `augadd` and `augerr`: 754-2019's augmentedAddition, one result an instruction
 
@@ -3276,10 +3292,17 @@ stall, which the census's s already folds in for its own pattern; the
 loop setup and the stores of results, which are the same across a
 kernel's forms; and anything a tile adds to build either item.
 
-### R23. Per-lane sticky flags (design only, not built)
+### R23. Per-lane sticky flags (designed 2026-09-29, revised 2026-10-02 for R24's mark; not built)
+
+*MODE[24] asks for the block. Feature bit CAPS2[13] =
+`cft_caps.seq_features` bit 17 = `CFT_SEQ_FEAT_LANE_FLAGS 0x20000u`. Host:
+`cft_run_args.lane_flags` and `lane_flags_bytes`, ABI 0.17; the model's
+`Result.lane_flags`.*
 
 *Nothing here is built, in the model or anywhere else. It changes how a
-run reports, so it is written down before any code.*
+run reports, so it is written down before any code. The step-6 round
+builds it golden-first - the model, the software backend, the ABI step
+and the remote protocol - and a tile carries it from revision 8's RTL.*
 
 **The ask** (docs/ROADMAP.md, ask 5): invalid and overflow delivered with
 each lane's outputs, so that a design sweep can drop the one variant that
@@ -3300,27 +3323,71 @@ per-lane output, the counts.
 
 | bit | meaning |
 |---|---|
-| [4:0] | the five IEEE flags, in FLAGS's order, as this lane raised them |
+| [4:0] | the five IEEE flags, in FLAGS's order, as this lane raised them outside every quiet region (R24) |
 | [5] | this lane's deposit overflowed (the lane's share of STATUS[4]) |
 | [6] | this lane's indexed access fell past the depth under SCRATCH_STRICT (STATUS[5]) |
-| [7] | reserved, zero |
+| [7] | a `raise` marked this lane (R24; the lane's share of STATUS[6]) |
 
-The ask names two flags; the other three and the two per-lane STATUS
-conditions cost nothing more in the byte, and they keep two identities
-every backend can check: the OR of every lane's [4:0] IS the run's
-FLAGS, and the OR of every lane's [6:5] IS STATUS[5:4]. Sticky, as FLAGS
-is: raised by the first operation that raises it, never lowered within a
-run.
+[7] was reserved and zero in this design until 2026-10-02, when the
+step-6 plan gave it R24's mark. So [7:5] are STATUS[6:4] one place up,
+lane by lane.
+
+The ask names two flags; the other three, the two per-lane STATUS
+conditions and the mark cost nothing more in the byte, and they keep three
+identities every backend can check, over the lanes the run owns - every
+lane below n, and of those the ones the mask keeps where there is one:
+- the OR of their [4:0] IS the run's FLAGS;
+- the OR of their [6:5] IS STATUS[5:4];
+- the OR of their [7] IS STATUS[6].
+Sticky, as FLAGS is: raised by the first operation that raises it, never
+lowered within a run. A lane the run owns starts every run at zero.
+
+The model's padding lanes are the one place the identities can part, and
+only through a seam already recorded: seq.py's ACTALL wakes a lane past
+`n_active`, which can then raise into FLAGS and owns no byte, where a
+tile's ACTALL wakes only the lanes the caller has (`tb/test_seq_core.py`,
+`actall_over_a_ragged_block`). A run a caller makes has no padding lane in
+the model, and a tile wakes none.
 
 **Delivered how.** An output block beside the counts, n bytes, lane i's
 at byte i, asked for per run:
-- the host: one field appended to `cft_run_args` (`lane_flags`, n bytes,
-  NULL for none), an ABI step; the remote protocol's PROG_RUN_EX carries
-  the block back; the model's `Result` gains `lane_flags`;
-- a tile: a pointer register and kernel argument beside `cnt`'s, a MODE
-  bit that asks for the block (a run that does not ask writes nothing and
-  costs nothing), and a CAPS2 bit that says it is honoured - CAPS2[13],
-  under the rule every bit above MODE[15] has kept since R17;
+- the model: `Result.lane_flags`, n values, computed for every run
+  whether or not a caller asks for them, as the counts are, and part of
+  `Result.state()`, so that P3's fuzz sees them. A masked or padding lane's
+  entry is 0: the model's arrays are fresh, R17's convention for its
+  counts;
+- the host, at ABI 0.17: two fields appended to `cft_run_args` -
+  `lane_flags`, n bytes, and `lane_flags_bytes`, which must be exactly n -
+  NULL and 0 for none. This design first asked for one field. The count
+  is the 0.14 mask's rule: the mask and this block are both byte arrays a
+  run's lanes size, (n + 7) / 8 bytes of bits against n bytes, and a
+  caller that sized one by the other is refused rather than overrun.
+  Refused by name, `CFT_ERR_INVALID_ARGUMENT`, before the run: a count
+  with no buffer, and a buffer whose count is not n. Refused by name,
+  `CFT_ERR_UNSUPPORTED`, on a device that does not publish
+  `CFT_SEQ_FEAT_LANE_FLAGS`. The software backend publishes it. A remote
+  handle publishes its server's bit, and unlike the mask, which a client
+  compacts away, the block can only be made where the run is, so a remote
+  handle refuses it where the server's word lacks the bit. The struct
+  grows, so a caller built against 0.16 is refused at its old size, as an
+  input struct always is (ABI 0.14 did the same);
+- the remote protocol: PROG_RUN_EX's third word, `want_counts` until 0.17,
+  becomes `want` - bit 0 the counts, as before, bit 1 this block, and any
+  other bit refused by the server's decoder. The response appends `u8[n]`
+  after the scratch-out block when bit 1 is set. A run that asks for the
+  block travels as PROG_RUN_EX whatever its image's flags, since no other
+  frame can carry the bit; a run that does not travels as it does today,
+  so a server's per-opcode counts of every existing call are unchanged;
+- a tile: MODE[24] asks for the block. It is the lowest bit of the range
+  every tile since the scalar guard refuses at start with STATUS[3], so a
+  revision-7 tile asked for one refuses the run rather than ignoring the
+  ask, and libcft refuses first, by name. A pointer register and kernel
+  argument beside `cnt`'s, on the D master because they are written:
+  LFLAGS_PTR at 0xB0 as argument 17, which moves VERSION to 0xB00 as
+  every appended register has. And CAPS2[13], under the rule every bit
+  above MODE[15] has kept since R17. A run that does not ask writes
+  nothing and costs nothing. The address, the argument and the VERSION
+  are the RTL plan's to confirm;
 - not packed into the counts' top byte, which is free today (a count is
   at most 2^20): the counts' values are the ABI, and every caller reading
   them would change.
@@ -3328,31 +3395,66 @@ at byte i, asked for per run:
 **What a masked lane reads.** R17's rule for every output: a masked
 lane's byte is NOT written - the caller keeps what it put there, as for
 its count and its scratch-out. A padding lane is not the caller's and has
-no byte. A lane SETACT dropped IS the caller's: its byte is written, with
-what it raised while it was active - and, if ACTALL revives it, with what
-it raises after, as FLAGS would be. A lane's byte is a function of its
-own inputs and the program alone, so a run split across tiles places
-each tile's block at its lanes' offsets, as the counts are placed, and
-needs no merge (P2). A
-run split into segments (`cft-segrun`) yields a block a segment; a
-sweep's "did this variant ever raise invalid" is the OR over its
-segments, which is the caller's.
+no byte: the block is n bytes. A lane SETACT dropped IS the caller's: its
+byte is written, with what it raised while it was active - and, if ACTALL
+revives it, with what it raises after, as FLAGS would be.
+
+**Where a split run's blocks land.** A lane's byte is a function of its
+own inputs and the program alone (P2), so nothing is merged: every byte
+is written by the one executor that ran its lane, and FLAGS and STATUS
+stay the OR over tiles.
+- The software executor writes byte i for lane i, block by block.
+- A remote handle scatters each chunk's bytes to the chunk's lanes, as
+  it scatters the counts - a masked run's compacted lanes back to the
+  lanes they came from.
+- On a tile split, each tile writes its own lanes' bytes, from its own
+  lane 0, into a buffer of its own, and the XRT backend copies each
+  tile's block to that tile's first lane in the caller's buffer, as it
+  collects the counts on the host (`host/src/device.c`): a byte a lane is
+  never worth a device copy.
+- A run split into segments yields a block a segment; a sweep's "did
+  this variant ever raise invalid" is the OR over its segments, which is
+  the caller's.
 
 **What it costs** (believed, from the RTL's shape; not synthesised):
-- flops: seven a lane of a block, 7 x 128 = 896 at fp32's 128 lanes. The
-  retire path already holds each lane's flags (`lane_flags`) before
-  `wb_flags_or` reduces them under the active row (R17), so the change
-  is a register a lane where there is one OR today;
+- flops: eight a lane of a block, 8 x 128 = 1,024 at fp32's 128 lanes -
+  this design's seven and the mark. The retire path already holds each
+  lane's flags (`lane_flags`) before `wb_flags_or` reduces them under the
+  active row (R17), so the change is a register a lane where there is one
+  OR today;
 - the drain: one more stream after the counts, 32 lanes a beat, so at
-  most four beats a block where the counts take sixteen;
+  most four beats a block where the counts take sixteen; a write strobe a
+  byte, since a block at fp256 is 16 lanes, half a beat;
 - the host: a byte array in the software executor's block, the protocol
-  field, and device-test legs holding both identities.
+  bit, and device-test legs holding the three identities.
 
 **What it changes, which is why it is designed before it is built.** A
-run's report grows from one FLAGS word to a byte a lane. A certificate
-(docs/CERTIFICATES.md) records FLAGS; a run that asked for the block has
-an output its certificate must cover, as it covers the counts, or name as
-absent. And "OR over lanes = FLAGS" becomes a check the audit can make.
+run's report grows from one FLAGS word to a byte a lane, and "OR over
+lanes = FLAGS" becomes a check the audit can make. A version-1
+certificate (docs/CERTIFICATES.md) records each segment's flag word and
+STATUS, and has no line for a block. This design once said a certificate
+would cover the block "as it covers the counts"; version 1 certifies no
+counts, since a segment deposits nothing ("The chain" there). Certificate
+version 2, designed beside this in the step-6 round, decides how the
+block, and a marked lane's replay, are certified. docs/LANGUAGE.md's
+"FLAGS belongs to the run, not to a lane" is restated when this is built.
+
+**Until certificate version 2.** A run that asks for the block has an
+output version 1 cannot cover, so until version 2 is built:
+- `cft-segrun` never asks: it zeroes its `cft_run_args` and sets
+  `struct_size`, so at ABI 0.17 its `lane_flags` is NULL and its count 0.
+  It takes no option that would ask, and an option it does not take is
+  refused `usage`, exit 64, as any is (docs/CERTIFICATES.md, "The segment
+  runner"). `cft-audit`'s re-runs fill the struct the same way;
+- the golden writer and the golden audit run `seq.run` and never read
+  `Result.lane_flags`; a version-1 reader refuses any line a block would
+  need, `unknown-line` (exit 2), wherever it stands;
+- a segment whose run marked a lane is certified as its STATUS says.
+  STATUS[6] is a bit of the 32-bit word version 1 records for every
+  segment, and every audit re-derives it (`segment-status`). So version 1
+  states that a lane was marked, not which, and records no replay; what it
+  certifies of such a run is what it certifies of any, that these bits
+  came from this program.
 
 **What a program can do without it.** Deposit a health value a lane -
 the state itself, checked on the host for a NaN or an infinity. That
@@ -3365,3 +3467,246 @@ sweep needs is the side project's to measure.
 flag only at the user's request, and a lane has no way to make one), and
 a per-element block for the elementwise `cft_run`, which the ask does not
 reach.
+
+### R24. Flag control: a quiet region and a raise (designed 2026-10-02, not built)
+
+*Control codes 12, 13 and 14. Feature bit CAPS2[14] =
+`cft_caps.seq_features` bit 18 = `CFT_SEQ_FEAT_FLAG_CONTROL 0x40000u`.
+STATUS[6], `CFT_STATUS_MARKED`. Assembler `quiet`, `endquiet` and
+`raise rA`.*
+
+| code | name | effect |
+|---|---|---|
+| 12 | `QUIET` | open a quiet region |
+| 13 | `ENDQUIET` | close the innermost quiet region |
+| 14 | `RAISE ra` | for every active lane: OR `ra[4:0]` into FLAGS and (R23) the lane's byte, unless a region is open; and where `ra[7]` is set, mark the lane |
+
+A routine runs quiet, then raises the flags of the operation it
+implements:
+
+    quiet
+      ...              ; the routine: its result in rR, and in rF its
+      ...              ; operation's flags, ORed with 0x80 where its own
+      ...              ; test could not decide the last bit
+    endquiet
+    raise rF
+
+**Why.** A routine's own flags are scaffolding. divfull's run raises
+inexact for 6/3, where the division raises nothing, and inexact rather
+than divide-by-zero for 1/0 (the step-6 round's survey of the earlier
+deferrals measured both, at fp64 and fp256). libcft hides that by muting
+the run and ORing in the flag word the image deposits
+(`host/src/divsqrt.c`), which a routine inside another program cannot do.
+And no opcode raises divide-by-zero at all: softfloat raises it in its
+division and its logB, and neither is an opcode, so log(0) could not be
+flagged however it was computed. The language's FLAGS is the OR of every
+node's IEEE flags (docs/LANGUAGE.md) and its gate compares it bit for
+bit, so a routine that is to be a node must raise exactly its
+operation's.
+
+**The region: rung 1, 754-2019 5.7.4.** 754's way to run code whose
+flags must not stand is saveAllFlags before it and restoreFlags of every
+flag after it, then raiseFlags for what the code's caller is to see. A
+quiet region is that pair: QUIET is the save and ENDQUIET the restore.
+Nothing in a run reads FLAGS or a lane's byte - no instruction tests a
+flag; a run writes them and its caller reads them after it, as the
+library's status word is written and never read back
+(docs/DETERMINISM.md) - so the only effect of the pair that anyone can
+see is that flags raised between the two do not stand after it, and
+silencing them gives exactly that. It lowers nothing: a flag raised
+before the region stands, which keeps 7.1's "Status flags shall be
+lowered only at the user's request" as R23 keeps it.
+
+Rung 1 also settles nesting. Nested save-and-restore pairs compose: the
+outer restore discards whatever the inner pair let stand, the inner
+pair's raise included. So regions nest, a region inside a region changes
+nothing, and a `raise` inside a region is silenced. A routine can then be
+copied whole into another routine's region and stay correct, with no
+rewrite of its flag instructions.
+
+**A bracket, not a saved word: rung 3, because rung 2's answer does not
+fit.** RISC-V saves and restores the accrued flags through an integer
+register (FRFLAGS and FSFLAGS on `fflags`, the "F" extension's
+"Floating-Point Control and Status Register"), and that is the hart's one
+word: its flags "indicate the exception conditions that have arisen on any
+floating-point arithmetic instruction since the field was last reset by
+software". Here that word is FLAGS - the "V" extension ORs every active
+element's exceptions into the one `fflags`, "which is exactly FLAGS here"
+(R23) - the OR over every lane of the run and every tile that ran it.
+No lane holds it,
+and a lane that read it would hold other lanes' flags: a register that
+depends on the lanes beside it, which P2 forbids, and which a run split
+across tiles would make differ by the split. A lane's own byte is R23's
+rung-3 structure, not RISC-V's; reading it into a register would be a
+path from retirement into the register file, a hazard on every beat in
+flight, and flags a program could compute with, and writing one back
+lowers a flag, which R23 declines. The machine already brackets a region
+of one kind, the loop, with an open and a close; and libcft has this
+construction one level up: a composed operation brackets its internal
+passes with `cft_flags_mute`, "save-and-restore rather than a boolean, so
+it nests", and only the outermost emit reaches the status word
+(`host/src/softfloat.h`). R24 is that seam inside a program.
+
+**What a region silences, and what it does not: rung 1.** Every source of
+the five IEEE flags: an ALU instruction's, `augadd`'s and `augerr`'s
+(R21), and a `raise`'s own [4:0]. They reach neither FLAGS nor (R23) the
+lane's byte, so R23's first identity holds inside regions too. Nothing
+else: 5.7.4 restores the status flags of 754's five exceptions and no
+other state, and STATUS[4], STATUS[5] and the mark are not IEEE flags -
+"your buffer was too small" is not one of them (the deposition section
+above; R8 likewise). So a deposit that overflows, an access past the
+depth under SCRATCH_STRICT and a mark are reported inside a region as
+outside one. A region never hides a lost deposit, a suppressed access or
+a lane its routine could not decide.
+
+**The raise: rung 1 for what it does, rung 2 for its operand.**
+raiseFlags(exceptionGroup) is 5.7.4's, and its group is "any subset of the
+exceptions" (docs/HOSTAPI.md, the status word). So a raise ORs and never
+clears, and any of the 32 subsets is legal, underflow without inexact
+included (R21 raises that combination too). 754 does not say where an
+instruction finds the group. RISC-V's answer is a register: Zicsr's CSRRS,
+"The initial value in integer register rs1 is treated as a bit mask that
+specifies bit positions to be set in the CSR" ("CSR Instructions"), which
+`csrs fflags, rs1` applies to the flags. Here each active lane applies its
+own register, as the V extension accrues each element's exceptions into
+the one word, and under R23 into its own byte as well.
+
+**Which bits it reads: rung 3.** The register's bit pattern, as STX reads
+an index:
+- bits [4:0] are the five flags in FLAGS's order: invalid 1,
+  divide-by-zero 2, overflow 4, underflow 8, inexact 16. That is
+  `cft_exception`'s order, the FLAGS register's, a certificate's and that
+  of the flag word divfull deposits. RISC-V's `fflags` holds them the
+  other way round, NX at bit 0 and NV at bit 4 (the "F" extension's
+  diagram of `fcsr`), and a routine here computes its word in this
+  contract's order;
+- bit [7] is the mark, where R23's byte has it, so the register's low
+  byte reads as a lane's byte;
+- bits [6:5] are read by nothing, nor is any bit from 8 up. Deposit
+  overflow and a strict fault are the machine's reports about itself,
+  and no program may claim one.
+No value is refused for those bits: the register is data, which is why
+an indexed slot is never refused.
+
+**The mark: rung 3.** Neither 754 nor RISC-V has one. Where a raise's
+`ra[7]` is set, the lane is marked: R23's bit [7] for the lane, and
+STATUS[6], `CFT_STATUS_MARKED`, for the run. STATUS[6] is the first bit no
+tile and no backend claims: `rtl/cft_csr.sv` reads STATUS as six bits
+padded with zeros. A marked lane's outputs are still written - its
+deposits, its count and its scratch-out are what the program computed, the
+same on every machine - and the mark says that the routine's own test found
+its last bit undecided, so the lane is to be replayed before its answer is
+used. Where it is replayed, and how the replay is recorded, are
+certificate version 2's design and the math library's (docs/ROADMAP.md,
+M1). A run with any lane marked says so in STATUS whether or not it asked
+for R23's block. A region never silences a mark: a mark lost keeps an
+undecided last bit as though it were decided, and a mark kept costs at
+most a replay.
+
+**Inactive lanes: nothing new.** A lane R17 masks, a padding lane and a
+lane SETACT dropped run no instruction, so a `raise` raises nothing for
+them and marks none: P3's rule for every flag. QUIET and ENDQUIET are not
+per lane: a region is a property of an instruction's place in the
+program, the same in every lane. None of the three computes a value, so
+P1 holds as it does for the scratch codes.
+
+**Where it is legal: rung 3.** At the top level and at any loop depth,
+nesting properly with loops: a region opened in a loop body closes in
+that body, and one opened outside a loop closes outside it. Regions nest
+four deep, as loops do. Then whether an instruction is quiet depends on
+where it stands and on nothing a run computes, so the early exit cannot
+see a region (P3): a skipped body's brackets balance, and an inactive
+lane raises nothing either way. That is why neither code needs the
+top-level rule ACTALL and HALT have.
+
+**A program that halts or ends inside a region is refused: rung 1.** A
+region is a save and its restore, and a program that stops between them
+has run a save with no restore. Two faithful readings then disagree: in
+754's, the flags raised since the save stand, because nothing restored
+them; on this machine, they never reached FLAGS. The loader refuses
+rather than choose, as it refuses `REPEAT 0` rather than let the model
+and a tile disagree about it.
+
+**The loader refuses, by name:**
+- an ENDQUIET with no region open;
+- a bracket closed out of turn: an ENDQUIET whose innermost open bracket
+  is a loop, or an ENDREP whose innermost is a region;
+- a fifth nested region;
+- a HALT inside a region, and a program that ends with one open;
+- every field the three do not read. QUIET and ENDQUIET read none:
+  every field and all of `imm` are zero, as for HALT, ENDREP and ACTALL.
+  RAISE reads `ra` alone: `imm[25]`, its fifth bit, and nothing else of
+  `imm`, with `rd`, `rb`, `rc`, `rnd`, the `k` flags and `kx` zero, as
+  for SETACT. No control code reads the bank (R21), so a constant raise
+  is a constant moved into a register once.
+
+**Every loader refuses these codes today.** 12, 13 and 14 are unknown
+control codes to `seq.py`, `host/src/program.c`, `asm.py` and
+`host/tools/cft-asm.c`, so no image any of them accepts contains one,
+and taking them changes nothing that runs: R21's argument for codes 10
+and 11. A tile decodes an unknown code as HALT (`rtl/cft_seq.sv`'s
+`default` arm), so every tile built so far would end the run where a
+region opens. So libcft refuses an image holding any of the three, on a
+device without CAPS2[14], at `cft_program_load`, by name, naming the
+instruction, as it refuses R21's codes; a remote handle publishes its
+server's bit. cftc's revision-7 targets - `u50-rev7`, `u50-rev7-quad`,
+`u50-round2` and `open-core`, whose feature word is revision 6's, 0x7f1f
+- refuse an image that needs it as `target-feature`, and its software
+targets publish it. The software backend computes R23 and R24 and
+publishes both bits, so a software handle's `seq_features` becomes
+0x7ff1f where it is 0x1ff1f at ABI 0.16.
+
+**The text form.** `quiet`, `endquiet` and `raise rA`, in `asm.py` and
+`host/tools/cft-asm.c` alike; the disassembler indents a region's body as
+it indents a loop's. cft-asm takes R21's and R22's forms in the same
+step: `augadd rD, rA, rB`, `augerr rD, rA, rB`, and the optional signed
+step of `stx rA, rB, STEP` and `ldx rD, rB, STEP` - one optional sign,
+then decimal or `0x` hex, written back only when it is not zero, as
+`asm.py` writes it. `programs/check.py` holds the two assemblers byte for
+byte, on every source in `programs/` and on generated corpora of each
+revision's forms, and a revision-8 corpus that reaches all five forms
+joins them; `python/tests/test_asm.py` and `python/tests/test_seq_rev8.py`
+hold `asm.py` to the model.
+
+**What a tile would need** (revision 8's RTL: believed, not built).
+- Decode for codes 12 to 14, which the default arm takes as HALT today.
+- A quiet depth of three bits, counted by QUIET and ENDQUIET as they are
+  decoded, in program order, as REPEAT and ENDREP keep the loop stack.
+  Neither walks a beat (R18).
+- A quiet tag on every beat that fires, captured as its active row is
+  (`wb_act`, the row a beat FIRED with since R18), which gates that
+  beat's term in `wb_flags_or`. The tag is the beat's and not the
+  region's state at retirement: under R12 to R15's overlap a region's
+  edge must not move a beat already in the pipe.
+- RAISE through the issue pipe as SETACT goes (R18), waiting only for
+  `ra`. Its lanes' `ra[4:0]` join `wb_flags_or` under the fired row and
+  the tag, and `ra[7]` sets the mark under the row, tag or not. It writes
+  no register.
+- STATUS[6]: `eng_err` widened from six bits to seven, and read as
+  `{25'b0, eng_err}`. CAPS2[14].
+- On the host, the XRT backend maps CAPS2[11] to [14] onto
+  `seq_features` bits 15 to 18 behind the VERSION that carries them -
+  today it maps CAPS2[10:4] bit by bit, and no higher bit
+  (`host/src/backend_xrt.cpp`) - and its `ST_REPORTS`, 0x30, gains bit
+  6. That is how a tile's STATUS[5] was dropped on the way out until
+  2026-09-18 (R8, "What revision 4 does not do").
+
+**Not proposed.**
+- Two codes, with the raise closing the region. It saves one word a
+  routine (`quiet ... raise rF`), and makes one instruction mean two
+  things by where it stands: a `raise` inside a region would close it
+  and one outside would not. The plan of record describes R8F as "Two
+  instructions: a quiet region ... and a raise" (docs/ROADMAP.md, "Step
+  6"); a region is one construct with an open and a close, as a loop is,
+  and three codes keep each instruction to one meaning.
+- A region by count (`quiet N`, the next N words): one code fewer, and a
+  count a hand-written program has to keep right.
+- A quiet bit on every instruction: it would spend `imm[31]`, the
+  encoding's last reserved bit and its version guard (kx, above).
+- Saving and restoring the flags through a register, RISC-V's shape:
+  above.
+- A raise from an immediate, CSRRSI's shape: a constant raise is a
+  constant in a register, and the mark makes the group six bits where
+  CSRRSI's immediate is five.
+- Lowering a flag inside a run, which R23 declines: a region lowers
+  nothing.
