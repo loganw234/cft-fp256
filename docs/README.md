@@ -1,6 +1,6 @@
 # The documents, by what you open them for
 
-Forty-one files, 63,624 lines. Flat in one directory they look like one
+Forty-two files, 65,982 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
 - **23,535 lines you consult while working** — the three under *Start here*,
@@ -8,12 +8,12 @@ undifferentiated pile; they are not, and the split is close to even:
 - **6,668 lines of tool manual**, one per shipped program;
 - **2,011 lines of operations**, read when you are about to do something to
   hardware;
-- **31,410 lines of record and argument** — the ledger, the roadmap and the
+- **33,768 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
 Half is therefore history. That is deliberate, and it is also why a
-flat listing of forty-one names feels heavier than the work actually is.
+flat listing of forty-two names feels heavier than the work actually is.
 
 This index exists because the README linked eight of the thirty-four there
 were and nothing linked the other twenty-six. Nothing has moved: a file's
@@ -106,8 +106,9 @@ reading material for a working session.
 Four rounds of "should we build it this way", with the measurements that
 settled each, one of "how far would it stretch", one
 reading of the open toolchain's router, one measurement of how well
-a certificate's estimates indicate, and one design written before its
-RTL, for Logan to approve. History of reasoning,
+a certificate's estimates indicate, one design written before its RTL,
+for Logan to approve, and one design of the certificate's version 2.
+History of reasoning,
 not current reference — but the place to look before reopening one of these
 questions.
 
@@ -121,6 +122,7 @@ questions.
 | [studies/TOOL-A-dense-router.md](studies/TOOL-A-dense-router.md) | 253 | why openXC7's router does not converge on the tile, what to change in it and in what order, and why a fork of it (loganw234/nextpnr-xilinx, `dense`) starts at the pinned 0.9.6 |
 | [studies/ACC-A-estimates.md](studies/ACC-A-estimates.md) | 685 | how well a certificate's two estimates indicate the errors they estimate: step-halving against a converged reference, the scheme at h/2^k, and wider against check.py's 300-digit arm, on every ODE case of the golden corpus and as h shrinks; the time shift the bank's rounded h/6 puts in the result, which neither estimate sees; its instrument is `programs/estimates.py`, and its captured runs are in `studies/acc-a/` |
 | [studies/R8S-streaming.md](studies/R8S-streaming.md) | 1,044 | the design proposed for revision 8's instruction streaming, before its RTL and not yet approved: the fetch through the A master during a block, a 4,096-word store with a prefetched stream past it, loops replayed from the store, what a late fetch costs a step on the hard workloads, the block RAM it frees and the timing path it shortens, the CAPS2 field for the capacity, the deep build beside it, the verification, and the RTL plan's outline |
+| [studies/CERT-V2.md](studies/CERT-V2.md) | 2,358 | a design for certificate format version 2, not yet approved or built: the per-lane flags, a marked lane replayed by the golden model and checked against it under the definition the certificate names, a wider run compiled from the named source (measured to see the constants' rounding that version 1's wider run cannot), and the scientific provenance surveyed from ISO/IEC 17025, W3C PROV, SLSA, RO-Crate and reproducibility certificates, field by field: carried or not, checked or reported, and its cost in privacy |
 
 ---
 

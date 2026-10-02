@@ -304,7 +304,7 @@ list - they were kept by hand in three places once, and two of the copies
 drifted.
 
 The `docs` stage is the cheapest of them and exists for the same reason:
-`docs/README.md` indexes the forty-one documents, and
+`docs/README.md` indexes the forty-two documents, and
 `python/check_docs_index.py` refuses a broken link, a document missing
 from the index, or a stated line count that no longer matches the file.
 Since 2026-09-24 it holds every tracked document, not only the index:
