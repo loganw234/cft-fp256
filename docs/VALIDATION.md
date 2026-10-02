@@ -16844,3 +16844,195 @@ What sampled points cannot see is stated in LANGUAGE.md.
 - `make cft-asm` without its `.exe` on Windows, and programs/check.py without `--asm` and `--runner`. Each was refused as usage and run again correctly.
 - One of 85a0cfd's new cases first asked lang.run for 10^5000 steps, which it accepts, so the test would have run forever. It was changed to a negative count, which is refused, before anything ran.
 - The lead's ledger gave the plan's copy as 335 lines; it was 336. Corrected in the ledger.
+
+## 2026-10-02 - the language round, part two: the variational equations (L3); an accepted source compiles or is refused by name (D2), from Logan's challenge suite and two verifiers; step 3 complete
+
+**Why.**
+- The work order's step 3 ends "with automatic variational equations". L3 is that clause. Its design, ten decisions, was approved at about 12:15 on 2026-10-01 (the round's ledger).
+- **The challenge suite.** On 2026-10-01 Logan put part one to a "semi-independent" stress test. Another model (GPT-6.1 Sol Max) was given the sample `.cftl` files, LANGUAGE.md and one compiled bundle, and wrote 212 standalone programs and the tools to run them.
+  - Every scored expectation held.
+  - It found one defect: two accepted maps stopped cftc with an internal error, exit 70.
+  - Logan's decision, verbatim: "Fix it in part two, refuse as unused".
+- **The same class, by two more roads.** Verifiers VL3 and VD2 found it: a canonical form nesting past the parser's 100, and a chain of lets past Python's recursion limit. On the second, Logan was asked whether the language should still state a bound on let chains, and answered, verbatim: "No limit (Recommended)".
+- **The records** are gitignored:
+  - `Data/runs/2026-10-01-lang-round/`: the ledgers and the briefs;
+  - `Data/runs/2026-10-01-challenge-suite/`: the suite, the other model's review of our results, and our runs.
+
+**L3: the variational equations** (merge 9a31e05).
+- **`tangent v, w`.** Each step's tangent is derived node by node from the step graph (construction B), with every identically-zero term left out. The rules:
+  - the product: `fma(da, b, a*db)`;
+  - fma: `fma(da, b, fma(a, db, dc))`;
+  - abs and copysign: from the sign bit, equal to RISC-V's FSGNJX for a non-NaN tangent;
+  - min, max, minnum and maxnum: `select(r == a, da, db)`, a tie to the first operand;
+  - select: its arm;
+  - a comparison: zero.
+- **Graphs.** The step graph's version 2 is used only with tangents. Every version-1 graph is byte for byte what it was.
+- **Runs and the compiler.** `lang.run` takes tangents. The compiler's extended state is `[state | v | w | lane params]`, with one more candidate order for a graph with tangents, the interleaved walk.
+- **The intention-out** writes the tangent's lines in both forms. A fourth check holds them against exact dual numbers. Every integrator's scheme lines are now held word for word, which closes L1's recorded gap (an unused printed stage).
+- **New refusals:** `tangent-mismatch` and `tangent-scope`.
+- **`tangent` became a keyword.** A part-one source that names a value `tangent` is refused now: `reserved-name` where it declares it, `syntax` where it reads it. Verifier-VI2 found it; no record had said so, and LANGUAGE.md says so now.
+- **Files and stages.**
+  - Four variational references in programs/systems/: Lorenz-63 and Lorenz-96 under rk4, each at fp64 and fp256.
+  - Their 32 compiled files in `compiled-tangent/`.
+  - The `tangent` stage, in the gate budget: 48 stages, 31 quick, 42 gate.
+- **MEASURED by L3:**
+  - Lorenz-63's largest Lyapunov exponent: 0.9020 on 8 lanes to t = 1,000, against 0.9056, within 0.01.
+  - A certified fp256 chain: 0.9047, within 0.02. It ran 40 segments, and cft-audit and the golden audit both accept it.
+  - Renormalisation by exact powers of two is bit for bit.
+  - Lorenz-96 with one tangent vector fits a 256-slot target up to N = 98 and is refused from N = 99.
+  - Its plants are red, each with its count.
+- **Verifier-VL3 checked three times.**
+  - **(b) 1, sent back:** the fourth check's "targeted ties and zeros" could not fail. Its ties had equal tangents and its zeros a zero tangent, so a tie taking the second operand's tangent, or abs at zero giving -da, passed it. f51510a places them where a convention decides (operands equal in value, different in tangent). Both plants are red on the test and on the stage's leg D, and so are VL3's own.
+  - **(b) 2, narrow:** leg D printed 222 placed points where 232 were placed. acaf4a9 counts each where it is placed.
+  - **CONFIRMED by VL3**, each measured with its own tools:
+    - the rules: 2,012 systems and 32,174 exact points, and 18,620 bit-level cases;
+    - the primal untouched: 675 sources and 5,177 compiler files identical to main's;
+    - 935 compilations equal to the interpreter on seq.py, Lorenz-96 rings to N = 120 with up to 4 tangents;
+    - (A) equal to (B) exactly;
+    - the Lyapunov tolerance is honest: VL3's own driver on 32 lanes gives 0.9053, one-lane sd 0.0048;
+    - renormalisation exact at fp256 too;
+    - the certified fp256 leg reproduced, with a full golden audit;
+    - the N = 98/99 boundary;
+    - determinism;
+    - 48/31/42.
+- **Early, at 3fa0319, on amd-arc-box:**
+  - the four compiled references on the card, each equal to software and accepted by both auditors;
+  - on Linux, `tangent`, `lang`, `golden`, `docs` and `generated` PASS.
+
+**The challenge suite** (`Data/runs/2026-10-01-challenge-suite/`). The suite's seeds equal 80abee5's files byte for byte, so it was written against part one. Its tools were read before anything ran: standard library only, no network, writing only into its own tree or a results path.
+- **At 80abee5:**
+  - the compile run on `sw`, stress included: 205 PASS, 3 TARGET-LIMIT (scratch past 256), 4 unscored investigations, two of them the exit-70 maps;
+  - three hash seeds: all 756 output files identical;
+  - `u50-rev7`: 207 PASS, every image equal to `sw`'s;
+  - the 150 run vectors: 423 of 423 checks on the interpreter and on compiled images on seq.py. The checks are loads, graph contracts, run vectors and refusals; the compiled backend's 10 run-refusal vectors test lang.run's front, and fp128 and fp256 have no vectors;
+  - the canonical round trip on all 103 compiled programs;
+  - L3 at 3fa0319: identical in every verdict and byte, independent evidence that it changes nothing for a program without tangents;
+  - the suite's own validation and regeneration: exact on Linux.
+- **The other model's review** of the archive we returned:
+  - It agreed with the diagnosis, and its independent audit found no inconsistency in 1,526 files, 1,920 bank slots and 310 half-bank slots.
+  - It corrected its tools for Windows. Run here on a Windows host, they validate, and regenerate the suite's 295 data files byte for byte (its five patched tool files differ, by design).
+  - It added a 25-case follow-up pack that takes either a round trip or an `unused` refusal at the source, and fails an internal error.
+- **At D2's merge, a5ffac7:**
+  - The two maps are refused `unused` (exit 3).
+  - The suite's `deep_let_chain` (10,001 lets) now compiles, by Logan's decision, so the suite's own expectation of `too-deep` scores it FAIL.
+  - Every other case's output files are unchanged: all 763 equal 80abee5's, apart from those `deep_let_chain` now writes. Six cases' refusal sentences are the restated ones: h_homogeneous_min, h_homogeneous_select, h_min_threshold, h_select_threshold, h_affine, flow_h_scope.
+  - The run vectors: 422 of 423 on both backends, the one being that expectation.
+  - The follow-up pack: 11 PASS and 14 refused at the source, on both backends, and no internal error.
+
+**D2: an accepted source compiles or is refused by name** (merge a5ffac7).
+- **The first two roads are now rules of the language,** each with its own name and sentence, and the third has lost its cause. cftc's internal check stays as the backstop, so a renderer's defect is still exit 70. Neither rule is a read-back.
+  1. **h is used only where a constant of the step scales with it.** A map whose every use of h folds away (`h - h`, `(h*h)/(h*h)`, `h/h`, `copysign(1, h)`, `abs(h)/h`, `0*h`, `const c = h/h`, and through a default) is `unused` at the step line. Its sentence names the folds by line, with their values.
+  2. **A source whose canonical form would nest past 100 is `too-deep`** at the line of the equation or let whose rendered line would be too deep, naming the depth. The measure is exact: equal to the lexer's count of the renderer's own text on 122,947 lines. With the rule switched off, every source it refuses fails to read back at exactly the depth named. The roads to it include:
+     - a negation used as a multiplicand, at source nesting 51;
+     - the tangent of an unnamed product of 102 terms;
+     - euler's and stormer-verlet's step around an inline right-hand side at nesting 100;
+     - a compound constant.
+  3. **A definition met 200 frames deep is evaluated again from the top** (the work-list), so chains of lets, labels and consts may be any length, and a cycle of any length is `cycle`.
+     - Before it, rk4 with 81 to 246 lets was accepted and its canonical form did not read back.
+     - The verdict itself depended on the host: a 150-let chain through a call was accepted on Python 3.12 and refused on 3.10.
+- **Sentences.** The `h-nonlinear` sentences for the min family, the comparisons, select and a sum of powers, and the `h-scope` sentence in a flow, now state the rule applied. They no longer give a cause these inputs do not have; that was the suite's finding 2.
+- **The gate.** The `lang` stage gains leg J: maps that read h at random, chains at the parser's limit, compound constants and let chains. At a5ffac7 the leg stops the compiler at exit 70 on 61 sources of 80abee5 (53 maps, 6 parser-limit chains, 2 let chains) and 94 of 3fa0319 (verifier-VI2, measured; D2 counted 58 and 87 with its first leg).
+- **MEASURED by D2:**
+  - The work-list equals unlimited recursion on 4,379 sources, under Python 3.10.12, 3.12.9 and 3.13.5, at budgets 200 and 3.
+  - Every length tried, to 2,500 lets (5,000 for a map), is accepted and reads back.
+  - 438 tests.
+- **Verifier-VD2 checked twice.**
+  - **(b), sent back:** the let-chain road, which falsified the first build's "so that it always reads back". 919dc2d answered it with D2's design, approved by the lead, and Logan's "No limit".
+  - **CONFIRMED by VD2,** each measured with its own oracle (87c4df9 at a recursion limit of 1,000,000):
+    - zero differences on 401 chain sources (cycles to 1,808, two faults deep and shallow, written tangent lets), at budgets 0, 1, 3, 12 and 200, on Python 3.10, 3.12 and 3.13;
+    - 140 chain sources to 2,500 lets and maps of 10,000, all exit 0;
+    - the cost linear;
+    - renderer plants still exit 70;
+    - 0 of 1,764 fold spellings wrong (95 at 87c4df9);
+    - the challenge suite 211 of 212 identical, `deep_let_chain` the one;
+    - the follow-up pack as above.
+
+**The lead's own.**
+- The restatements in the L3 merge were VL3's "other: sentence" findings:
+  - min and abs chains grow with the square as products do;
+  - at two tangent vectors Lorenz-96 N = 40 takes 450 slots, past every 256-slot target;
+  - "2N + 59 slots" holds from N = 14;
+  - lane-capacity counts the tangent vectors;
+  - `tangent-scope` no longer calls a tangent let "a component";
+  - copysign's sign source at -0 or a NaN is held by the rule table's text alone.
+  Two more were L3's findings 1 and 4: ROADMAP's estimate "about 400 slots, past any 256-slot target" restated as built (139 slots at N = 40), and README's gate comment naming the variational equations.
+- In the D2 merge: LANGUAGE.md's gate names its four files, with test_lang_readback.py's paragraph, and the variational known limit says where a long unnamed product stops.
+
+**The front door.**
+- **The gate budget on amd-arc-box at a5ffac7,** niced (run 20261002-043617-a5ffac7d, 122 minutes): PASS.
+  - 34 stages executed, 0 failed.
+  - 8 skipped by name: buildargs (a real Vitis is there), six language legs (no toolchains) and demos (no node).
+  - 4 inner skips, the same four as before: golden's three (no Arduino loopback binary, twice; math.fma needs Python 3.13) and remote's WebSocket leg (no node).
+  - golden: 2,943 passed and 3 skipped (601 s).
+  - lang: 185 ok, 0 FAIL, 0 SKIP (132 s). tangent: 116 ok, 0 FAIL, 0 SKIP (217 s). Each holds its committed compiled files to what the compiler writes, byte for byte, on Linux; those files were compiled on Windows.
+  - transcend: 607,217 and 580,977 comparisons over 39 functions, C == model.
+  - mpfr: 739,234 cases against the pinned MPFR 4.2.2, 0 value and 0 flag mismatches; mp-err-check's 16,814,033 results, 0 over their bound.
+  - remote: 184,736 cases, local and remote equal.
+  - The two extended hard-workload verify runs ran beside it, niced 15 (load 3.0 at its start).
+- **After the gate:** 67eb0a6, VI2's restatements (sentences, a test comment and documents). At 67eb0a6 on amd-arc-box, niced, through the runner (run 20261002-064204-67eb0a68, 919 s), `lang`, `tangent`, `docs`, `golden` and `generated` PASS, with golden's same three inner skips:
+  - golden: 2,943 passed and 3 skipped;
+  - lang: 185 ok;
+  - tangent: 116 ok.
+  The close is documents only, and the docs check passes on it.
+- **The card legs at a5ffac7,** on revision 7's quad (q135b): all 16 PASS (874 s and 427 s).
+  - The six compiled references, each equal to its committed image, were certified twice:
+    - an estimate run of 256 finite lanes, with a half-step run on the halved bank;
+    - a specials run of 259 lanes.
+  - The four variational references ran on 256 lanes, one tangent each.
+  - In every leg:
+    - the states directories are equal, card against software;
+    - the certificates are equal outside the identity and hash lines;
+    - cft-audit accepts, line for line with the golden audit.
+- On the desktop, at a5ffac7:
+  - the five language test files: 438 passed;
+  - the docs check: every count true, 48/31/42, 33 negative controls caught;
+  - the challenge suite and the follow-up pack, as above.
+- **Not rerun at a5ffac7:**
+  - node, wasm and demos, which the box cannot run;
+  - buildargs and the language legs, which it skips by name;
+  - lang-rust in WSL.
+  Each passed at 30ee0fd. Nothing they read has changed since: `git diff 80abee5 a5ffac7` is empty under host/, bindings/, vectors/, rtl/, tb/, hw/ and the Makefile. Part two changes Python under `python/cft_golden/lang`, `python/cftc` and `python/tests`, two programs, programs/systems/ (the four variational sources and their 32 compiled files), the runner (a stage, `tangent`), and documents. The gate above runs every stage that reads them.
+
+**The hard workloads on the card.** Logan then sent a second pack: 21 large programs (Gray-Scott, two-scale Lorenz-96 with written tangents, FPUT, a phi⁴ lattice, Kuramoto-Sivashinsky, a reservoir map, a matrix Riccati flow). He said, verbatim: "The curiosity is more in the hardware speeds with the hard cases". Its results are in `Data/runs/2026-10-01-hard-workloads/results/README.md`. MEASURED at 80abee5, with the pack's runner (one check fixed: it took cftc's package directory for a missing file):
+- **What fits.** Ten of the 21 fit `u50-rev7-quad`. All ten are bit for bit with libcft's software backend, on every lane.
+- **The compiler's cycle model** was believed until now. **The card is 2–6% slower than it on every program** (2.2% to 5.8%).
+- **Speed:**
+  - 98,000–433,000 fp64 lane-steps a second (1.2–1.6 G operations a second);
+  - 25,000–110,000 at fp256 (310–415 M), the same time a step as fp64;
+  - against the box's idle Xeon E5-2697 v4: 23–25x the whole 18-core chip at fp64 and 9–10x at fp256 (FPUT 10x and 3.2x).
+- **What does not fit,** since the compiler does not split a program across tiles:
+  - Gray-Scott, at 34,719 instructions a step against 32,768;
+  - Lorenz-tangent, at 59,383 and 3,587 slots against 2,048;
+  - the extended programs.
+- **On the CPU path,** the pack's own runner compiled all 21 and had verified 20 by 05:34 on 2026-10-02, none failing (the hard workloads' cpu-runs/verify-summary.txt). Riccati extended took 8.5 hours. Lorenz-tangent extended had passed every segment and was building its 8-step image, at about 2.6 hours a compilation (see the limits).
+
+**Known limits, recorded rather than fixed** (Logan's rule).
+- **The variational equations** (VL3):
+  - the `tangent` stage's comparison does not see every misreading of the graph's tangent sections in ir.py (a lane-param ref, minnum read as min); an independent check of the IR is a follow-up;
+  - the placed checks assert per system that the other convention changes the answer, so one operation's degenerate placement beside decided ones passes. Today every operation is placed so that it decides;
+  - `lang.run` raises TypeError on a mis-nested tangent list, as it does on a mis-nested state list;
+  - the order the compiler chooses reads no capacity.
+- **The language** (VD2):
+  - a long const cycle's sentence lists its whole path: 68,926 characters at 10,000 consts;
+  - short let chains that are now set aside check 18–46% slower (rk4 with 60 lets, 3.7 to 5.4 ms);
+  - which refusal wins when a source has two faults is not stated in LANGUAGE.md;
+  - a homogeneous use of h, `min(h, 2*h)`, is still refused `h-nonlinear`, conservatively, by design (the challenge suite's finding 2; the sentence is restated, the rule is not).
+- **The compiler:** compile time is superlinear, measured on the hard workloads at 2.1 and 2.6 hours for programs of about 180,000–194,000 operations a step.
+- **The card:** a program past 32,768 instructions or 2,048 slots a lane cannot run there.
+- **The challenge suite:** its expectation for `deep_let_chain` is now the suite's to restate.
+
+**Load, and the machine.**
+- The desktop was Logan's throughout, a game at 80–100% for stretches. The agents ran niced, one run at a time, and handed long runs back.
+- amd-arc-box ran the hard workloads, their CPU baseline (with the pack's other runs paused for it), the card legs and the gate budget.
+- Nothing loaded either machine on purpose. The CPU baseline's 18 and 36 processes were the measurement asked for.
+- One verifier probe did not stay small: at about 04:52 a probe of VI2's (an exponential source) reached 44 GB for about two minutes before VI2 killed it. It was niced, but memory is not.
+
+**The lead's own slips.**
+- **The box's Python.** The lead told D2, and then Logan in a question, that the box runs Python 3.10. It runs 3.12.3; WSL runs 3.10.12. D2's finding stands, a dependence on the Python version. The attribution was corrected in both ledgers and to Logan.
+- **The first speed figures.**
+  - The first seq.py column included compilation.
+  - The first software ratios (230–470x and 80–190x) were taken while the box was loaded, and were reported to Logan before the idle baseline replaced them.
+- **The part-two box launch** was refused by its own card check, which matched the launching ssh command line carrying the same pattern, and it had been given a short SHA. Both were caught before anything ran.
+- **L3's early card driver** (lang_card_tangent.py, 14:07 on 2026-10-01) read `g.n_state` where a graph with tangents has `g.n_primal`, and stopped with an IndexError before any leg ran. It was corrected and rerun.
+- **The merge restatements** VI2 found wrong: "2N + 59 ... below that the older orders win with fewer", and the lang row's chain count. Both are restated in 67eb0a6, with VI2's other sentence findings.
+- **The D2 merge's script** expected one hunk in docs/README.md, and there were two. It stopped there by its own assertion, and the rest was applied by a second script.

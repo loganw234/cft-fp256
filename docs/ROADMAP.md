@@ -4167,8 +4167,8 @@ bitstream builds.
 
 ### Step 3: the language and its compiler (plan of record, 2026-10-01)
 
-**Built, the same day** (docs/VALIDATION.md, 2026-10-01, "the
-language round, part one").
+**Built, the same day and the next** (docs/VALIDATION.md: 2026-10-01,
+"the language round, part one", and 2026-10-02, "part two").
 - L1: the language, golden-first: docs/LANGUAGE.md, and
   python/cft_golden/lang/ with its reference interpreter, held bit for
   bit to seq.py on gen_odes.py's six images; the three references
@@ -4182,7 +4182,29 @@ language round, part one").
 - D1: the bank's depth refused at load, the two assemblers made to
   agree, one character rule for the text form (and for `.cftl`), and
   the module rebuilt.
-- Next: L3, the variational equations, design first.
+- L3 (part two, docs/VALIDATION.md, 2026-10-02, "the language round,
+  part two"): the variational equations - `tangent v, w` derived
+  node by node, compiled into the extended state, held by a fourth
+  check against exact dual numbers and by the `tangent` stage;
+  Lorenz-63's largest exponent 0.9020 against the 0.9056 quoted.
+- D2 (part two): an accepted source compiles or is refused by name.
+  Logan's challenge suite found the first road (a map whose every use
+  of h folds away, now `unused`: "Fix it in part two, refuse as
+  unused"); verifiers VL3 and VD2 the other two (a canonical form
+  past 100, now `too-deep`; a chain of lets past Python's recursion,
+  now any length: "No limit").
+- Step 3 is complete (2026-10-02).
+- Next, the work order's steps 5 to 7 (step 4, revision 7, came
+  first, on 2026-09-29): gallery wave 1 with the correctly rounded
+  operations; step 6, begun beside it; gallery wave 2. Logan,
+  2026-10-02, verbatim: "Programs too big for one tile should likely
+  be included with step 6, along with the earlier deferrals. Compile
+  time is more a performance issue that can be handled later." So
+  step 6 holds the correctly rounded math library, programs past one
+  tile's instructions or scratch (the hard workloads' Gray-Scott,
+  Lorenz with tangents and the extended grids), run-time division and
+  square root, time-dependent systems and per-lane flags; the
+  compiler's superlinear compile time is performance work for later.
 - The rest of this section is the plan as approved that morning,
   with verifier-P1's restatements and the intention-out added.
 
