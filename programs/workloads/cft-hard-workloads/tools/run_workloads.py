@@ -304,7 +304,7 @@ def main():
     p.add_argument("--out",default="hard-results",help="parent for a new, uniquely named run directory")
     args=p.parse_args()
     if not args.repo:p.error("--repo or CFT_REPO is required")
-    if not (Path(args.repo)/"python"/"cftc").is_file():p.error("checkout has no python/cftc")
+    if not (Path(args.repo)/"python"/"cftc").exists():p.error("checkout has no python/cftc")
     if args.chunk<1 or args.timeout<=0:p.error("chunk and timeout must be positive")
     if args.compile_only and args.no_emit:p.error("--compile-only cannot use --no-emit")
     if args.steps is not None and args.steps<1:p.error("steps must be positive")
