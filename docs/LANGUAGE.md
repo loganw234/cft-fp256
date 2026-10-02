@@ -175,6 +175,8 @@ the gate holds that.
   `tangent` is refused now: `syntax` wherever it reads it, since the
   parser meets the read first, and `reserved-name` where it only
   declares it (verifier-VI2).
+- `t` is not reserved: a source names a value `t` to carry time in its
+  state ("Time").
 
 ### Statements
 
@@ -363,7 +365,7 @@ which is asm.py's OP_FIELDS order.
 | `sqrt(...)` | `runtime-sqrt` at run time, `irrational-constant` on a constant | v1 has no square root; inlining divfull or sqrtfull is a later parcel |
 | a transcendental | `transcendental` at run time, `irrational-constant` on a constant | the correctly rounded math library is a later step |
 | `^` or `**` | `power` | write `x * x`, and a longer product in the order meant |
-| `t`, declared nowhere | `time-dependence` | carry time in the state: `state t`, `d/dt t = 1` |
+| `t`, declared nowhere | `time-dependence` | carry time in the state, `state t` and `d/dt t = 1`, or count steps ("Time") |
 | `h` in a flow's equations | `h-scope` | a step-halving run halves h; the right-hand side must not move with it |
 
 ## Constants
@@ -515,7 +517,8 @@ classic bank's route, RN(RN(1/100)/6), gives 0x3ada740d, one ulp below:
 **The time shift.** The time shift a template's constants carry, for
 example 6 RN(h/6) / RN(h) - 1 for rk4, is no rounding rule's to remove.
 The compiler's manifest states it, and the step graph carries everything
-it needs.
+it needs. What it does to a t carried in the state is measured in
+"Time".
 
 ## The step
 
@@ -644,6 +647,253 @@ end
 So a writer can pin an expansion in a source, and a later compiler that
 expands differently is refused by name. The canonical form writes the
 block, and that is what makes its round trip a check of the expansion.
+
+## Time
+
+The language has no clock and no reserved `t`. A system that reads time
+carries it in its state, and one that needs it exactly counts its
+steps; both are written with what the language already has. Every
+figure here was measured on the reference interpreter, `lang.run` - a
+stage's values read from the step graph's labelled nodes, evaluated as
+it evaluates them - from t = 0 and k = 0, under rne unless an attribute
+is named, and `python/tests/test_lang_time.py` holds each one (parcel
+T1, 2026-10-02). An ulp count is the number of floats between t and
+RN(n h), the time after n steps rounded once to nearest, signed: +3 is
+three floats above it.
+
+### t in the state
+
+```
+state t, x
+d/dt t = 1
+d/dt x = fma(-t, x, 1)
+```
+
+- `t` is a name like any other: a source may declare it as state, a
+  const or a param. A `t` that an equation reads and nothing declares
+  is refused, `time-dependence`, and its sentence gives this advice.
+- **It is not reserved.** A reserved `t` would refuse every source that
+  follows that advice, `reserved-name` where it declares t, as making
+  `tangent` a keyword refused every value named `tangent` ("The text").
+- **What the templates make of it.** `d/dt t = 1` makes t's right-hand
+  side the constant 1, and the canonical form shows each template's
+  step on it:
+  - euler: `next t = fma(h, 1, t)`;
+  - rk4: `let Y2.t = fma(h/2, 1, t)`, Y3.t the same, `let Y4.t =
+    fma(h, 1, t)` and `next t = fma(h/6, 6, t)`. Each stage reads its
+    own time, rounded once, and the step adds 6 RN(h/6), which is not
+    RN(h): the time shift of "The step's constants";
+  - stormer-verlet, t among the positions: `let Q1.t = fma(h/2, 1, t)`
+    and `next t = fma(h/2, 1, Q1.t)`, and the kick's force reads Q1.t,
+    the midpoint time. Among the momenta t is kicked once by RN(h), and
+    no force can read it.
+
+### A dyadic step keeps t exact
+
+With h = 1/64, t stayed exactly n h at every step to 10^4, under every
+integrator and at every format. Under the other attributes, at fp64:
+- euler and stormer-verlet stayed exact under every one. Each
+  increment, h or h/2, is exact, and so is each sum while n h fits the
+  format;
+- rk4 stayed exact under rmm only. Its increment 6 RN(h/6) is not h,
+  since h/6 = 1/384 is not dyadic: the nearest attributes round each
+  sum back onto n h, and a directed one does not. From the first step t
+  falls behind under rtz and rdn, -57, -658 and -4,538 ulps after 10^2,
+  10^3 and 10^4 steps at fp64, and runs ahead under rup, +58, +659 and
+  +4,539. With h = 3/64, whose half and sixth are dyadic, rk4 keeps t
+  exact under every attribute.
+
+### Drift otherwise
+
+With h = 1/100 every sum rounds, and t wanders from n h. Ulps after n
+steps:
+
+| format | rk4 and euler, n = 10^2 | 10^3 | 10^4 | stormer-verlet, n = 10^2 | 10^3 | 10^4 |
+|---|---|---|---|---|---|---|
+| fp32 | -11 | +140 | +387 | -13 | +190 | -2,007 |
+| fp64 | +3 | -95 | +1,003 | +3 | +92 | -1,299 |
+| fp128 | +3 | -95 | +1,003 | +3 | +92 | -1,299 |
+| fp256 | +4 | +60 | -1,602 | -32 | +70 | -2,001 |
+
+- rk4 and euler agree at these marks but not at every step between.
+  rk4 adds 6 RN(h/6) where euler adds RN(h), and the two sums round
+  apart at 46 of the 10^4 steps at fp32, at one (the third) at fp64 and
+  fp128, and at none at fp256, meeting again each time.
+- fp128's rows are fp64's, at every step. Where every quantity a step
+  rounds repeats in binary with a period dividing the bits one format
+  carries beyond another, each sum rounds the same way relative to an
+  ulp in both (verifier-VT1's theorem). fp128 carries 60 bits beyond
+  fp64; euler rounds t + RN(h), stormer-verlet t + RN(h/2) and rk4
+  t + 6 RN(h/6), and 1/100, 1/200 and 1/600 all repeat every 20 bits.
+  At h = 1/99, which repeats every 30, euler and stormer-verlet agree
+  between fp64 and fp128 at every step, but rk4, whose h/6 = 1/594
+  repeats every 90, parts at 12 steps; at h = 1/19, every 18, the two
+  formats differ.
+- Under a directed attribute every rounding falls one way: after 10^4
+  steps at fp64, rk4 and euler are -2,999 ulps off under rtz and rdn
+  and +2,735 under rup. rmm's figures at fp64 are rne's.
+
+### The step counter
+
+```
+state k, x
+const dt = 1/100
+d/dt k = 100              ; h's reciprocal, written as a number
+let t = k * dt            ; the time, rounded once
+d/dt x = fma(-t, x, 1)
+step rk4, h = 1/100
+```
+
+- **A flow's equations cannot reach h.** `d/dt k = 1/h` is refused,
+  `h-scope`: "a flow's equations cannot read h, whatever it folds to".
+  So is `fma(k, h, t0)`, and so is a const read there whose value
+  changes with h, `const dt = h` or `const c = 1/h`. h's reciprocal is
+  written as a number and the step as a const, and k counts the
+  declared step. A step-halving run halves k's increment, so k counts
+  halves and k dt stays the time: k = n/2 at every step of 2 x 10^4 at
+  h = 1/200, under rk4, euler and stormer-verlet, at fp64. At any other
+  run value of h, k is not a count of steps.
+- **Exact under the nearest attributes.** k = n at every step to 10^4,
+  for h = 1/100, 1/10, 1/3 and 1/64 (rates 100, 10, 3 and 64), under
+  rk4, euler and stormer-verlet with k among the positions or the
+  momenta, at every format, and at fp64 under rmm too. Each step adds
+  the template's increment - c RN(h) under euler and as a momentum,
+  c RN(h/2) twice as a position, RN(6c) RN(h/6) under rk4 - which is
+  1 + e for a small fixed e, and a nearest attribute rounds k + 1 + e
+  back to k + 1 while e is under half an ulp of the count.
+- **Not under the directed ones.** Under rtz, rdn and rup the count was
+  wrong after the first step, for each of those h under each integrator
+  at every format, except h = 1/64 under euler and stormer-verlet,
+  whose increments are exact: at fp64 it stayed exact at every step.
+  Under rk4 a step whose sixth is dyadic counts exactly under every
+  attribute at fp64: h = 3/64, rate 64/3.
+- **Its limit is 2^p, or 2^(p-1) among the positions.** k + 1 must be a
+  float, so the count holds to 2^p steps under euler and rk4 and with k
+  among stormer-verlet's momenta: 2^24 = 16,777,216 at fp32, 2^53 at
+  fp64. Among the positions the first drift makes Q1.k = k + 1/2, which
+  must be a float too, so the count holds to 2^(p-1): 2^23 = 8,388,608
+  at fp32, 2^52 at fp64. rk4's stage counts n + 1/2, which give a stage
+  its time, hold to 2^(p-1) as well. Started two below the limit with
+  h = 1/100: at fp32 euler's counter and stormer-verlet's among the
+  momenta stopped at 2^24, rk4's counted by twos, and stormer-verlet's
+  among the positions stopped at 2^23; at fp64 each counted by twos
+  past its limit. A segment may run 2^32 - 1 steps (`segment-steps`),
+  so at fp32 one segment can outrun its counter.
+
+**t from the counter.**
+- `let t = k * dt` rounds n RN(1/100) once, and `fma(k, dt, t0)`, with
+  t0 a param or a lane param, rounds n RN(dt) + t0 once. Nothing
+  accumulates: at fp64 t equalled RN(n h) at 8,674 of the 10,001 counts
+  from 0 to 10^4 and was one ulp off at the rest (fp32 7,332 equal,
+  fp128 8,674, fp256 9,105; never two off).
+- **A stage's time.** The field reads each stage's own counter, and
+  rk4's are exact: Y2.k = Y3.k = n + 1/2 and Y4.k = n + 1, at every
+  step and format. So the same let gives each stage its own time in one
+  rounding: k2.t is RN((n + 1/2) RN(1/100)). Under stormer-verlet, k
+  among the positions, the kick's force reads Q1.k = n + 1/2, the
+  midpoint time.
+- **The correctly rounded time**, RN(n h), takes four operations: the
+  exact residual and the one correction that the golden model's divide
+  ends with (`python/cft_golden/sequences.py`), q = fma(r, y, q0):
+  ```
+  let q = k * dt
+  let r = fma(-q, 100, k)   ; k - 100 q, exactly
+  let t = fma(r, dt, q)
+  ```
+  It equalled RN(n/100) at every count from 0 to 10^4 - from the count
+  of a map that counts with `next k = k + 1`, at every format under rne
+  and at fp64 under rmm, and at fp64 from the flow's count under both.
+  In that map, at every format, it gave rup's rounding of n/100 at
+  every count; under rtz and rdn it missed at exactly the 400 counts
+  n = 25j, where n/100 is itself a float, giving the float below it;
+  and under rdn t at n = 0 is -0, the value right and the sign
+  roundTowardNegative's for an exact zero sum.
+  Past 10^4 it rests on Markstein's theorem for a quotient corrected by
+  its residual, whose hypotheses hold here: dt is within 0.375 u of
+  1/100 (u = 2^-p: -0.375 u at fp32, +0.1875 u at fp64 and fp128,
+  -0.125 u at fp256), so q is within an ulp of n/100 at every count and
+  its residual r is a float. verifier-VT1 measured it under rne and rmm
+  with no miss at every count from 0 to 2^24 at fp32, and at 30,000,
+  15,000 and 8,000 random counts at fp64, fp128 and fp256; the gate
+  holds a seeded 4,000, 4,000, 2,000 and 1,000 counts past 10^4 through
+  the language. At counts no one has run it is believed.
+
+**What the counter cannot give:** an exact t at every count when h is
+not dyadic, since n h is a float only at some counts - for h = 1/100
+every 25th, where t = k * dt is exact - and at the rest t is at best
+its rounding; h itself, since the rate and dt are written for the
+declared step; a count under a directed attribute, unless the
+template's increment is exact; a count past its limit, 2^p or 2^(p-1).
+A map counts with `next k = k + 1`, exactly under every attribute, and
+may read h: `let t = fma(k, h, t0)`.
+
+### Forcing
+
+`sin` and `cos` of t wait for the math library: today `sin(w * t)` is
+refused, `transcendental` ("sin is not computed by a program in v1"),
+and they are step 6's M2 (docs/ROADMAP.md). Until then a rotation
+carried in the state forces a system:
+
+```
+state c, s          ; c = cos(w t), s = sin(w t), started by the host
+param w = 1
+d/dt c = -(w * s)
+d/dt s = w * c
+```
+
+**Its own rounding.** c and s are state, stepped and rounded like any
+other component: each right-hand side is one product, exact here with
+w = 1, and each stage rounds. Nothing holds c^2 + s^2 to 1. Measured
+exactly from the encodings, with h = 1/100, from c = 1 and s = 0, and
+stormer-verlet's c a position and s a momentum; the rounding's share is
+the measured value less the same step evaluated without rounding, its
+constants as rounded and every operation exact:
+
+| integrator, format | n = 10^2 | 10^3 | 10^4 | the rounding's, at 10^4 |
+|---|---|---|---|---|
+| rk4, fp32 | -1.1465e-07 | -2.4863e-07 | -2.2401e-06 | -2.2865e-06 |
+| rk4, fp64 | -1.3880e-12 | -1.3888e-11 | -1.3889e-10 | -1.1986e-15 |
+| rk4, fp256 | -1.3889e-12 | -1.3889e-11 | -1.3889e-10 | -1.9992e-70 |
+| stormer-verlet, fp32 | +1.7645e-05 | +9.5304e-06 | +1.0495e-05 | +4.0936e-06 |
+| stormer-verlet, fp64 and fp256 | +1.7702e-05 | +7.4001e-06 | +6.4012e-06 | +8.3061e-15 and -7.4655e-70 |
+
+- From fp64 up the drift is the integrator's own. In exact arithmetic
+  rk4's step multiplies c^2 + s^2 by 1 - (wh)^6/72 + (wh)^8/576, which
+  comes to -1.3889e-10 after 10^4 steps; at fp32 the rounding's share
+  is the larger. stormer-verlet keeps a nearby quadratic form, not
+  c^2 + s^2, so its c^2 + s^2 oscillates without drifting. euler
+  multiplies it by 1 + (wh)^2 a step: +1.7181e+00 after 10^4 steps at
+  fp64.
+- The phase is the integrator's too: after 10^4 steps at fp64,
+  atan2(s, c) is 8.3330e-09 rad behind w t under rk4, about (wh)^5/120
+  a step, and 4.1122e-04 rad ahead under stormer-verlet.
+- With w = 3/10 the products round: at fp64 rk4's drift after 10^3
+  steps is -1.2395e-14, of which -2.2705e-15 is the rounding's.
+
+A forced, damped oscillator at resonance, x'' + gamma x' + x =
+F cos(w t) with w = 1:
+
+```
+system forced
+format fp64
+round  rne
+state  c, s, x, v
+param  w = 1, F = 1/2, gamma = 1/10
+d/dt c = -(w * s)
+d/dt s = w * c
+d/dt x = v
+d/dt v = fma(F, c, -fma(gamma, v, x))
+step   rk4, h = 1/100
+```
+
+From c = 1, s = 0 and rest, its c and s are the rotation's above, bit
+for bit, and x stayed within 4.0276e-08 of the exact solution,
+(F/gamma) (sin t - e^(-gamma t/2) sin(wd t)/wd) with
+wd = sqrt(1 - gamma^2/4), at every step to t = 100. The rotation's lag
+accounts for about 3.2e-08 of it and x's own rk4 error for about
+0.8e-08: a twin of x and v forced by the exact cos t at rk4's stage
+times stays within 0.8e-08 of the exact solution, and the example
+within 3.2e-08 of the twin (verifier-VT1).
 
 ## The step graph
 
@@ -1111,10 +1361,10 @@ v.x)`, `fma(2, v.k2.x, v.k1.x)`), and A, as the checker expands it from
 a source written with the tangent as more state, equals B node for node
 after sharing (the gate holds it). They part where a component is
 identically zero - a right-hand side that reads no state, such as
-`d/dt t = 1`, the language's way to carry time. There A computes
-`fma(h/2, 0, v.t)`, one rounding of an exact value, which turns -0 into
-+0 and a signalling NaN into the canonical NaN. B leaves the term out:
-`next v.t = v.t`.
+`d/dt t = 1`, the language's way to carry time ("Time"). There A
+computes `fma(h/2, 0, v.t)`, one rounding of an exact value, which
+turns -0 into +0 and a signalling NaN into the canonical NaN. B leaves
+the term out: `next v.t = v.t`.
 
 **The language's is B.**
 - It is the only construction a map has: a map's step is its equations.
@@ -1604,7 +1854,7 @@ form; the compiler words each one for the case at hand.
 
 ## The gate
 
-The four files run in the golden stage (`pytest python/tests`) and
+The five files run in the golden stage (`pytest python/tests`) and
 under `make golden`, with no change to either.
 
 **`python/tests/test_lang_refs.py`: the interpreter against seq.py.**
@@ -1713,6 +1963,35 @@ back** (parcel D2, 2026-10-01).
   restated `h-nonlinear` and `h-scope` sentences on the inputs that
   made the old ones false.
 
+**`python/tests/test_lang_time.py`: time** (parcel T1, 2026-10-02).
+Every figure of "Time", computed by the interpreter through the
+templates and compared, its tables parsed and its sentences matched, so
+that the section and the measurement cannot part:
+- t a name, `time-dependence` its refusal, and what each template makes
+  of `d/dt t = 1`, from the canonical form;
+- h = 1/64 exact at every step to 10^4, and at fp64 under the other
+  attributes, with rk4's directed figures and h = 3/64;
+- the drift table, rk4 against euler at every step, fp128 against fp64
+  at every step and at h = 1/99 and 1/19, the directed attributes;
+- the counter: the `h-scope` refusals, an exact count at every step,
+  the directed attributes after one step, the limit for each placement
+  started two below it, at fp32 and fp64, with rk4's stage counts, a
+  step-halving run;
+- t from the counter: one rounding, exact at every 25th count, and each
+  stage's count and time inside rk4 and the midpoint under
+  stormer-verlet, read from the step graph's labelled nodes by an
+  evaluator held to lang.run; the exact residual in a map and in a
+  flow, under each attribute, and past 10^4: dt's relative error and a
+  seeded sample of counts, each a lane;
+- forcing: sin refused; the rotation's table, and its rounding's share
+  against the same step evaluated exactly; rk4's and euler's exact
+  factors and stormer-verlet's quadratic form; the phase; w = 3/10; the
+  forced oscillator against its exact solution and against a twin
+  forced by the exact cos t; every source the section shows, compiled.
+
+It takes about 50 s on one core of the desktop, nearly all of it the
+interpreter's own arithmetic.
+
 The compiled images are held to the interpreter by the `tangent` stage
 (`programs/tangent_check.py`; docs/VERIFICATION.md).
 
@@ -1732,7 +2011,9 @@ The compiled images are held to the interpreter by the `tangent` stage
   means spilling the registers around it, which is a later parcel.
 - **Run-time transcendentals.** The correctly rounded math library is a
   later step.
-- **Explicit time, adaptive steps and events.**
+- **A built-in time, adaptive steps and events.** There is no reserved
+  `t`: a system carries time in its state or counts its steps, and sin
+  and cos of t wait for the math library ("Time").
 - **Per-operation attributes.** v1 has one attribute a program.
 - **User-defined integrators**, beyond rk4, euler, stormer-verlet and
   map.

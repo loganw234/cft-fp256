@@ -4666,8 +4666,11 @@ above (2026-09-30) number the certificate plan's steps, not these.
   exactly k h through 10^4 steps at fp64 and fp256, under rk4, euler
   and stormer-verlet. With h = 1/100 it drifted: after 10^4 steps at
   fp64, by 1,003 ulps of t under rk4 and euler, and by -1,299 under
-  stormer-verlet. A reserved `t` would refuse today's own advised
-  sources, as `tangent` did.
+  stormer-verlet. These are rne's figures. T1 measured the other
+  attributes: under rtz, rdn and rup, rk4 loses t's exactness even at
+  h = 1/64, and the step counter goes wrong after the first step
+  (LANGUAGE.md, "Time"). A reserved `t` would refuse today's own
+  advised sources, as `tangent` did.
 
 **The parts.** Parcels with verifiers, golden-first, the send-back rule
 and the testing rule, as the last rounds ran.
@@ -4800,7 +4803,8 @@ and the testing rule, as the last rounds ran.
      inlined copy in a REPEAT over argument slots) where calls are
      many. The call loop needs only revision 7's LDX, STX, IADD and
      REPEAT. A CALL instruction is not in this revision.
-4. **T1, time-dependent systems.** LANGUAGE.md and the tests:
+4. **T1, time-dependent systems: built, verified by VT1 and merged**
+   (2026-10-02; LANGUAGE.md's "Time"). LANGUAGE.md and the tests:
    - t as a state variable;
    - its exactness with a dyadic h, and its drift otherwise, measured;
    - a step counter as the exact construction. One written with h's
@@ -4808,6 +4812,8 @@ and the testing rule, as the last rounds ran.
      at 1/3) stayed an exact count through 10^4 steps at fp32, fp64 and
      fp256, under rk4 and euler (verifier-P6). `d/dt k = 1/h` is
      refused `h-scope` in a flow. t from the counter is one rounding.
+   - All of these hold under rne. Under the directed attributes the
+     counter goes wrong after the first step, as T1 measured.
    There is no reserved `t`. Forcing by sin or cos waits for M2; a
    rotation carried in the state works before it.
 5. **The math library.** The golden definition is
