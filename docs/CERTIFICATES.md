@@ -1821,6 +1821,13 @@ each image held to `programs/MANIFEST`, with its classic bank:
   ODE segment raises flags 16 and STATUS 0, so the ODE programs alone
   cannot tell a writer that drops STATUS, or writes one segment's flags
   against another, from one that does not;
+- `markstep`, also written in the gate (2026-10-02), whose segments
+  raise flags 6, 3, 2, 31 and 30 and STATUS 64, 64, 64, 0 and 0: each
+  decrements an integer and raises it (revision 8's R24), so STATUS[6],
+  the mark, comes from the software backend. Every certificate's segment
+  lines must carry it. A writer, a backend or a protocol that kept only
+  STATUS[5:4] - as the XRT backend's report mask did until that day -
+  writes 0 there;
 - and `lorenz63-rk4` at fp64 once more, its half-step run entered from
   an initial state of its own, unlike the main run's. Every other
   half-step run shares run 0's, so a writer that entered one from run
@@ -1873,10 +1880,10 @@ that an input or the instrument can cause, by its name and code, and
 the golden writer's name for the same defect where it has one. Each
 refusal whose command line has an `--out` of its own is made again with
 a file already there, which must come through byte for byte. It
-certifies `lorenz63-rk4` at fp64 and `flagstep` through a loopback
-cft-serve, stopped by its PID. Their device lines must be the remote
-rule's, and their run blocks byte for byte the software backend's,
-flagstep's flag words and STATUS among them.
+certifies `lorenz63-rk4` at fp64, `flagstep` and `markstep` through a
+loopback cft-serve, stopped by its PID. Their device lines must be the
+remote rule's, and their run blocks byte for byte the software
+backend's, flagstep's and markstep's flag words and STATUS among them.
 
 It holds `--scratch-depth` on the software backend (the golden-certificate
 round, 2026-09-29):

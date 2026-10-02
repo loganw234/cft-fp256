@@ -1212,7 +1212,10 @@ family and select none, a quiet compare and a select [none].
 differentiable almost everywhere, and each point where one is not has
 the value the table fixes; refusing abs, min or select would refuse
 working systems. A run could not refuse one either: there is no branch,
-and FLAGS belongs to the run, not to a lane.
+and what a run reports is which flags were raised, never a refusal. The
+language's FLAGS is the run's OR, over every lane; revision 8's per-lane
+flags (docs/SEQUENCER.md, R23), which a run on the machine may ask for,
+split that OR by lane and add no verdict of their own.
 
 ### Writing them out
 

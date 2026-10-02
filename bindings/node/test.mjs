@@ -125,14 +125,17 @@ test("the module is the tree's own ABI, on the software backend", () => {
  *  LANE_MASK clear truthfully because it did not yet implement it -
  *  that library refused every well-formed lane mask by name, and the
  *  mask arrived later that day (69f3df2). This is the line that says
- *  which module is in the package. 0x1ff1f is every seq_features bit
- *  cft.h defines since ABI 0.16 (2026-09-29) added revision 8's AUGADD
- *  and SCRATCH_STEP - the 0.15 module reported 0x7f1f - and a missing
- *  bit is named, not just counted.
+ *  which module is in the package. 0x7ff1f is every seq_features bit
+ *  cft.h defines since ABI 0.17 (2026-10-02) added revision 8's
+ *  LANE_FLAGS and FLAG_CONTROL - the 0.16 module reports 0x1ff1f, which
+ *  ABI 0.16 (2026-09-29) made of revision 8's AUGADD and SCRATCH_STEP,
+ *  and the 0.15 module 0x7f1f - and a missing bit is named, not just
+ *  counted. Until the module is rebuilt at 0.17 this test is red, by
+ *  design: it is the line that says which module is in the package.
  *  30 is asked of the module's own name table first, so the number is
  *  not a transcription. */
-const SW_SEQ_FEATURES = 0x1ff1f;
-test("the module's software handle publishes seq_features 0x1ff1f and supports imul", () => {
+const SW_SEQ_FEATURES = 0x7ff1f;
+test("the module's software handle publishes seq_features 0x7ff1f and supports imul", () => {
   eq(c64._C.opName(30), "imul", "the module's name for opcode 30: ");
   // Every format and both answers, collected before failing, so a stale
   // module is named for everything it gets wrong rather than the first.

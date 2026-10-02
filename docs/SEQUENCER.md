@@ -2980,7 +2980,7 @@ the software backend (parcel P2's ledger has the runs):
   library's own 256-slot ceiling that ran whatever depth the device
   published (docs/HOSTAPI.md, `cft_open_ex`).
 
-## Revision 8 (proposed, 2026-09-29; flag control designed 2026-10-02): an exact-residual add, a stepped index, flag control and per-lane flags
+## Revision 8 (proposed, 2026-09-29; flag control and per-lane flags built golden-first 2026-10-02): an exact-residual add, a stepped index, flag control and per-lane flags
 
 Three of the side project's asks (docs/ROADMAP.md, "What a side
 project asks of step 4's revision", asks 3, 4 and 5), defined
@@ -3013,11 +3013,15 @@ nothing is in IEEE 754, and if neither state a way to handle it,
 whatever approach aligns best with the current systems" - and says
 which rung it was.
 
-This section is the CONTRACT for R21 and R22 and the DESIGN for R23 and
-R24, which nothing builds yet. R20 is left to revision 7's third item,
-the program limits, should it take a number. R21's and R22's text forms
-are in `asm.py`; `host/tools/cft-asm.c` does not carry them yet, and
-takes them with R24's.
+This section is the CONTRACT for R21 to R24, and all four are built
+golden-first: `seq.py` defines them and the software backend computes
+them, R21 and R22 at ABI 0.16 and R23 and R24 at ABI 0.17 (2026-10-02,
+the step-6 round's R8). No tile carries any of them. What a tile would
+need - R23's MODE bit, its pointer register, kernel argument and VERSION,
+and each item's decode - is a proposal below, the RTL plan's to confirm.
+R20 is left to revision 7's third item, the program limits, should it
+take a number. All five text forms are in `asm.py` and, since
+2026-10-02, in `host/tools/cft-asm.c`.
 
 ### R21. `augadd` and `augerr`: 754-2019's augmentedAddition, one result an instruction
 
@@ -3292,17 +3296,19 @@ stall, which the census's s already folds in for its own pattern; the
 loop setup and the stores of results, which are the same across a
 kernel's forms; and anything a tile adds to build either item.
 
-### R23. Per-lane sticky flags (designed 2026-09-29, revised 2026-10-02 for R24's mark; not built)
+### R23. Per-lane sticky flags (designed 2026-09-29, revised 2026-10-02 for R24's mark; built golden-first 2026-10-02)
 
 *MODE[24] asks for the block. Feature bit CAPS2[13] =
 `cft_caps.seq_features` bit 17 = `CFT_SEQ_FEAT_LANE_FLAGS 0x20000u`. Host:
 `cft_run_args.lane_flags` and `lane_flags_bytes`, ABI 0.17; the model's
 `Result.lane_flags`.*
 
-*Nothing here is built, in the model or anywhere else. It changes how a
-run reports, so it is written down before any code. The step-6 round
-builds it golden-first - the model, the software backend, the ABI step
-and the remote protocol - and a tile carries it from revision 8's RTL.*
+*Built golden-first on 2026-10-02 (the step-6 round's R8): the model,
+the software backend at ABI 0.17 and the remote protocol. A tile carries
+it from revision 8's RTL, and until then every device but the software
+backend - and a remote handle over one - refuses the block by name. It
+changed how a run reports, so it was written down before any code:
+2026-09-29, and its mark on 2026-10-02.*
 
 **The ask** (docs/ROADMAP.md, ask 5): invalid and overflow delivered with
 each lane's outputs, so that a design sweep can drop the one variant that
@@ -3425,8 +3431,9 @@ stay the OR over tiles.
 - the drain: one more stream after the counts, 32 lanes a beat, so at
   most four beats a block where the counts take sixteen; a write strobe a
   byte, since a block at fp256 is 16 lanes, half a beat;
-- the host: a byte array in the software executor's block, the protocol
-  bit, and device-test legs holding the three identities.
+- the host (built): a byte array in the software executor's block, the
+  protocol bit, and device-test's lane-flags leg holding the three
+  identities on whatever device publishes the bit.
 
 **What it changes, which is why it is designed before it is built.** A
 run's report grows from one FLAGS word to a byte a lane, and "OR over
@@ -3437,7 +3444,9 @@ would cover the block "as it covers the counts"; version 1 certifies no
 counts, since a segment deposits nothing ("The chain" there). Certificate
 version 2, designed beside this in the step-6 round, decides how the
 block, and a marked lane's replay, are certified. docs/LANGUAGE.md's
-"FLAGS belongs to the run, not to a lane" is restated when this is built.
+"FLAGS belongs to the run, not to a lane" was restated when this was
+built: the language's FLAGS is the run's OR over every lane, which the
+block splits by lane and adds no verdict to.
 
 **Until certificate version 2.** A run that asks for the block has an
 output version 1 cannot cover, so until version 2 is built:
@@ -3468,7 +3477,7 @@ flag only at the user's request, and a lane has no way to make one), and
 a per-element block for the elementwise `cft_run`, which the ask does not
 reach.
 
-### R24. Flag control: a quiet region and a raise (designed 2026-10-02, not built)
+### R24. Flag control: a quiet region and a raise (designed and built golden-first 2026-10-02)
 
 *Control codes 12, 13 and 14. Feature bit CAPS2[14] =
 `cft_caps.seq_features` bit 18 = `CFT_SEQ_FEAT_FLAG_CONTROL 0x40000u`.
@@ -3640,33 +3649,55 @@ and a tile disagree about it.
   for SETACT. No control code reads the bank (R21), so a constant raise
   is a constant moved into a register once.
 
-**Every loader refuses these codes today.** 12, 13 and 14 are unknown
-control codes to `seq.py`, `host/src/program.c`, `asm.py` and
-`host/tools/cft-asm.c`, so no image any of them accepts contains one,
-and taking them changes nothing that runs: R21's argument for codes 10
-and 11. A tile decodes an unknown code as HALT (`rtl/cft_seq.sv`'s
-`default` arm), so every tile built so far would end the run where a
-region opens. So libcft refuses an image holding any of the three, on a
-device without CAPS2[14], at `cft_program_load`, by name, naming the
-instruction, as it refuses R21's codes; a remote handle publishes its
-server's bit. cftc's revision-7 targets - `u50-rev7`, `u50-rev7-quad`,
-`u50-round2` and `open-core`, whose feature word is revision 6's, 0x7f1f
-- refuse an image that needs it as `target-feature`, and its software
-targets publish it. The software backend computes R23 and R24 and
-publishes both bits, so a software handle's `seq_features` becomes
-0x7ff1f where it is 0x1ff1f at ABI 0.16.
+**Every loader refused these codes until 2026-10-02.** 12, 13 and 14
+were unknown control codes to `seq.py`, `host/src/program.c`, `asm.py`
+and `host/tools/cft-asm.c`, so no image any of them accepted before then
+contains one, and taking them changed nothing that runs: R21's argument
+for codes 10 and 11. Code 15 is the first unknown code now. A tile
+decodes an unknown code as HALT (`rtl/cft_seq.sv`'s `default` arm), so
+every tile built so far would end the run where a region opens. So
+libcft refuses an image holding any of the three, on a device without
+CAPS2[14], at `cft_program_load`, by name, naming the instruction, as it
+refuses R21's codes; a remote handle publishes its server's bit. cftc's
+revision-7 targets - `u50-rev7`, `u50-rev7-quad`, `u50-round2` and
+`open-core`, whose feature word is revision 6's, 0x7f1f - refuse an
+image that needs it as `target-feature`, and its software targets
+publish it. The software backend computes R23 and R24 and publishes both
+bits, so a software handle's `seq_features` is 0x7ff1f at ABI 0.17,
+where it was 0x1ff1f at 0.16.
 
 **The text form.** `quiet`, `endquiet` and `raise rA`, in `asm.py` and
 `host/tools/cft-asm.c` alike; the disassembler indents a region's body as
-it indents a loop's. cft-asm takes R21's and R22's forms in the same
-step: `augadd rD, rA, rB`, `augerr rD, rA, rB`, and the optional signed
-step of `stx rA, rB, STEP` and `ldx rD, rB, STEP` - one optional sign,
-then decimal or `0x` hex, written back only when it is not zero, as
-`asm.py` writes it. `programs/check.py` holds the two assemblers byte for
-byte, on every source in `programs/` and on generated corpora of each
-revision's forms, and a revision-8 corpus that reaches all five forms
-joins them; `python/tests/test_asm.py` and `python/tests/test_seq_rev8.py`
-hold `asm.py` to the model.
+it indents a loop's. cft-asm took R21's and R22's forms in the same step:
+`augadd rD, rA, rB`, `augerr rD, rA, rB`, and the optional signed step of
+`stx rA, rB, STEP` and `ldx rD, rB, STEP` - one optional sign, then
+decimal or `0x` hex, written back only when it is not zero, as `asm.py`
+writes it. `programs/check.py` holds the two assemblers byte for byte,
+on every source in `programs/` and on generated corpora of each
+revision's forms. Its revision-8 corpus reaches all five forms and says
+so from the images; its revision-8 arm holds 46 sources and 10 images to
+the contract's verdict, the same bytes or the same reason in both; and
+its numeric arm holds `stx`'s and `ldx`'s steps at and past their bounds.
+`python/tests/test_asm.py`, `python/tests/test_seq_rev8.py` and
+`python/tests/test_seq_rev8_flags.py` hold `asm.py` to the model.
+
+**Where it is held** (R23 with it). `python/tests/test_seq_rev8_flags.py`:
+the model's regions, raises, marks, bytes and identities, the loader's
+refusals, and divfull wrapped in a region raising exactly the division's
+flags lane by lane. `host/tests/seq_check.py`'s flag-control corpus:
+`program.c` against `seq.py`, FLAGS, STATUS and every lane's byte, masked
+and not, strict and not, and its refusals by their words; and, against a
+fake server whose HELLO publishes a revision-7 tile's word, each code and
+the block refused by name. api-test: the shapes, the old struct size, the
+published bits, the refusals, a raise's FLAGS and STATUS[6] and the
+block's identities. remote-test: the `want` word, an unknown bit refused,
+and the block's round trip. device-test: a raise image loads where the
+bit is published and is refused naming RAISE where it is not, and the
+lane-flags leg on any device. `host/tests/segrun_check.py`'s `markstep`:
+STATUS[6] from the software backend into every certificate's segment
+lines, audited, and through a server. cftc: `python/tests/test_cftc.py`.
+On a card, where no tile publishes CAPS2[13] or [14], each says what it
+refuses by name and what it does not compare.
 
 **What a tile would need** (revision 8's RTL: believed, not built).
 - Decode for codes 12 to 14, which the default arm takes as HALT today.
@@ -3687,9 +3718,12 @@ hold `asm.py` to the model.
 - On the host, the XRT backend maps CAPS2[11] to [14] onto
   `seq_features` bits 15 to 18 behind the VERSION that carries them -
   today it maps CAPS2[10:4] bit by bit, and no higher bit
-  (`host/src/backend_xrt.cpp`) - and its `ST_REPORTS`, 0x30, gains bit
-  6. That is how a tile's STATUS[5] was dropped on the way out until
-  2026-09-18 (R8, "What revision 4 does not do").
+  (`host/src/backend_xrt.cpp`). Its `ST_REPORTS` passes bit 6 already:
+  0x30 until 2026-10-02, when CV2's reading of the certificate path made
+  it 0x70, so a tile that sets STATUS[6] does not lose the mark - and a
+  card certificate with it - on the way out, as a tile's STATUS[5] was
+  dropped until 2026-09-18 (R8, "What revision 4 does not do"). No tile
+  sets the bit today, so on revision 7 the change changes nothing.
 
 **Not proposed.**
 - Two codes, with the raise closing the region. It saves one word a

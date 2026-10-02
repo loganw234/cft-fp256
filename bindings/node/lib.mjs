@@ -188,9 +188,14 @@ export const FEAT_REDUCE_SEG     = 0x1000;
 export const SEQ_FEAT_INDEXED    = 0x2000; // CAPS2[9]: an input block through a table
 export const SEQ_FEAT_LANE_MASK  = 0x4000; // CAPS2[10]: a per-run lane mask
 // Revision 8 of the program model (proposed 2026-09-29, docs/SEQUENCER.md):
-// the software backend publishes both; no tile built so far carries either.
+// the software backend publishes all four; no tile built so far carries any.
 export const SEQ_FEAT_AUGADD       = 0x8000;  // CAPS2[11]: augadd/augerr, 754-2019 9.5's augmentedAddition
 export const SEQ_FEAT_SCRATCH_STEP = 0x10000; // CAPS2[12]: STX/LDX with a signed post-step
+// ABI 0.17 (2026-10-02): R23's per-lane flags, a run's option the module's
+// calls do not ask for yet, and R24's flag control - quiet, endquiet and
+// raise - which an image may use wherever the handle publishes the bit.
+export const SEQ_FEAT_LANE_FLAGS   = 0x20000; // CAPS2[13]: a byte of flags a lane, asked for per run
+export const SEQ_FEAT_FLAG_CONTROL = 0x40000; // CAPS2[14]: quiet regions and raise
 
 /** The feature bits' names, for a message. */
 export const SEQ_FEATURE_NAMES = [
@@ -202,6 +207,7 @@ export const SEQ_FEATURE_NAMES = [
   [FEAT_REDUCE_SEG, "REDUCE_SEG"],
   [SEQ_FEAT_INDEXED, "INDEXED"], [SEQ_FEAT_LANE_MASK, "LANE_MASK"],
   [SEQ_FEAT_AUGADD, "AUGADD"], [SEQ_FEAT_SCRATCH_STEP, "SCRATCH_STEP"],
+  [SEQ_FEAT_LANE_FLAGS, "LANE_FLAGS"], [SEQ_FEAT_FLAG_CONTROL, "FLAG_CONTROL"],
 ];
 
 /** The features a `seq_features` word publishes, by name. An unnamed
