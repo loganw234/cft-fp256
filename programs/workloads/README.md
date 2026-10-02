@@ -60,14 +60,16 @@ the equations in [its MODELS.md](cft-hard-workloads/MODELS.md)):
 ### What they showed
 
 Measured on amd-arc-box against main at 80abee5, 2026-10-01 and 02. The
-figures and the tables are docs/VALIDATION.md's, in the entry "the
-language round, part two" (2026-10-02), under "The hard workloads on the
-card"; the run records are in Data/runs/2026-10-01-hard-workloads/, which
-is outside the tree.
+figures are docs/VALIDATION.md's, in the entry "the language round, part
+two" (2026-10-02), under "The hard workloads on the card", but for the end
+of the verify run, which came after that entry. The tables, the run
+records and that end are in Data/runs/2026-10-01-hard-workloads/results/,
+outside the tree: its README, and the verify run's own summary,
+cpu-runs/verify-summary.txt.
 
-- **All 21 compile**, on the pack's own runner. It verified 20 against its
-  vectors by 05:34 on 2026-10-02, none failing; the last, Lorenz-tangent
-  extended, had passed every segment and was building its 8-step image.
+- **All 21 compile**, on the pack's own runner, which verified all 21
+  against its vectors, none failing; the last, Lorenz-tangent extended,
+  passed at 06:04:53 on 2026-10-02 after 35,578 s.
 - **Ten fit the card** (`u50-rev7-quad`): FPUT, phi⁴, Kuramoto-Sivashinsky,
   the reservoir and Riccati, each hard and wide. Gray-Scott is past the
   tile's 32,768 instructions, Lorenz-tangent past those and its 2,048
@@ -83,10 +85,12 @@ is outside the tree.
 
 Those ten are in this tree's acceptance set, `programs/acceptance.py`, a
 device's admission test: each compiled from its source here, its image
-held to a committed digest, and run on its own three lanes and exact
-copies of them filling one block a tile. That set's `acceptance` stage
-holds the interpreter to all 21 vectors and the ten card images to
-theirs, and `acceptance-far` the other four hard and wide images.
+held to a committed digest, and run on its own three lanes and on copies
+of them filling one block a tile, each perturbed exactly: lane k from 3
+on is lane k mod 3 with (k // 3) x 2^-30 added to its first value, and
+every lane is distinct. That set's `acceptance` stage holds the
+interpreter to all 21 vectors and the ten card images to theirs, and
+`acceptance-far` the other four hard and wide images.
 
 ### The one change
 
