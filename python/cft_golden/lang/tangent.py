@@ -19,6 +19,8 @@ Each operation's tangent is a rule written in the language
   -a              -da
   a * b           fma(da, b, a * db)
   fma(a, b, c)    fma(da, b, fma(a, db, dc))
+  a / b           fma(-r, db, da) / b, r the quotient (L4)
+  sqrt(a)         da / (2 * r), r the root (L4)
   abs(a)          copysign(1, a) * da
   copysign(a, b)  copysign(1, b) * (copysign(1, a) * da)
   min, max, minnum, maxnum (a, b) with result r
@@ -28,11 +30,29 @@ Each operation's tangent is a rule written in the language
 
 A value's tangent is IDENTICALLY ZERO when it reads no state component -
 a constant, h, a param, a lane param - or reads one only through a
-comparison or a select's condition. An identically-zero tangent is never
-an operand: each term it would make is left out, exactly (fma's rule with
-dc absent is the product rule; the product rule with da absent is
-`a * db`), and where a select needs an arm it is the constant 0. So no
-tangent ever rounds an exact zero, and `x + 0 is not x` never arises.
+comparison, a select's condition or copysign's sign operand, whose
+tangents no rule reads (`relevant` below). An identically-zero tangent
+is never an operand: each term it would make is left out, exactly
+(fma's rule with dc absent is the product rule; the product rule with
+da absent is `a * db`; the quotient's with db absent is `da / b`, and
+with da absent `(-r) * db / b`), and where a select needs an arm it is
+the constant 0. So no tangent ever rounds an exact zero, and
+`x + 0 is not x` never arises.
+
+The quotient's and the root's rules read r, the operation's own result,
+as min's and max's do: (da - r db) / b, one fma and one division, two
+roundings, the fma's -r a primal value the compiler shares across
+vectors; and da / (2 r), whose doubling is exact, one rounding. Each
+whose tangent the step's tangent reads - not zero, and reaching an
+output through operands the rules differentiate - costs a tangent vector
+ONE run-time division (the quotient or root written again where it has
+no name is the primal's own operation, shared), and the root's tangent
+takes no root; any other costs a vector nothing: one whose tangent is
+identically zero (a quotient of params, the root of a param,
+select(x < 0, p, q) / p), and one whose tangent is not zero but which
+reaches the outputs only through a comparison, a select's condition or
+copysign's sign (select(x / y < 1, x, y)), since the walk below forms
+no tangent of it - docs/LANGUAGE.md, "The quotient and the root".
 
 A rule reads a primal value BY NAME where it has one - a leaf, or a
 labelled node (a let, a template label such as k1.x), which the tangent
@@ -43,16 +63,18 @@ same bits and the same flags, and FLAGS is an OR; the compiler shares it
 with the primal's own. That keeps the language's promise for the
 tangent's text - every operation written is performed, once, in the order
 the canonical form writes it - at a known price: a long chain of unnamed
-operations whose rules read an operand (products, fma, abs, copysign,
-the min family) makes each one's tangent write its unnamed operands
-again, so the tangent grows with the square of the chain (measured:
-5,049 nodes for a 100-term product chain, 198 without copies; 8,099 for
-a min chain of 90 terms). A select's condition takes no tangent, so a
-chain through it stays linear. Naming parts with lets keeps it linear.
+operations whose rules read an operand or their own result (products,
+fma, quotients, roots, abs, copysign, the min family) makes each one's
+tangent write its unnamed operands again, so the tangent grows with the
+square of the chain (measured: 5,049 nodes for a 100-term product chain,
+198 without copies; 5,247 for a chain of 99 quotients, 297 named by
+lets; 5,148 for 99 nested roots; 8,099 for a min chain of 90 terms). A
+select's condition takes no tangent, so a chain through it stays linear.
+Naming parts with lets keeps it linear.
 
 The walk is iterative, from the outputs, and makes the tangent of a node
-only when some output's tangent reads it, so a comparison's operands and
-a select's condition get none.
+only when some output's tangent reads it, so a comparison's operands, a
+select's condition and copysign's sign get none.
 """
 
 from .graph import Node
@@ -78,18 +100,20 @@ class Derivation:
     whose component i is the leaf ('t', i). A tangent is a Node, a leaf
     ('t', i), or None: identically zero.
 
-    `zero` and `one` are the leaves of the exact constants 0 and 1, as
-    the checker rounds them (each once, under the program's attribute;
-    both exact in every format). `fold(op, leaves)` is the checker's own
+    `zero`, `one` and `two` are the leaves of the exact constants 0, 1
+    and 2, as the checker rounds them (each once, under the program's
+    attribute; all exact in every format). `fold(op, leaves)` is the
+    checker's own
     exact folding of an operation on constant leaves, as a leaf: a rule
     whose operands are all constants - copysign(1, b) for a constant b -
     is a constant expression, folded as the language folds any, so the
     rule written out reads back as what was derived (`copysign(1, 2)` is
     the constant 1, and `copysign(1, -2)` the constant -1)."""
 
-    def __init__(self, zero, one, fold):
+    def __init__(self, zero, one, fold, two):
         self.zero = zero
         self.one = one
+        self.two = two
         self.fold = fold
         self.memo = {}
 
@@ -216,6 +240,23 @@ class Derivation:
             if inner is None:
                 return N("mul", da, R(a[1]))
             return N("fma", da, R(a[1]), inner)
+        if op == "div":
+            # r = a / b: (da - r db) / b. One fma rounds the numerator, its
+            # -r a negated primal value; a zero term is left out.
+            da, db = t
+            if da is None and db is None:
+                return None
+            if db is None:
+                return N("div", da, R(a[1]))
+            minus_r = N("neg", R(node))
+            if da is None:
+                return N("div", N("mul", minus_r, db), R(a[1]))
+            return N("div", N("fma", minus_r, db, da), R(a[1]))
+        if op == "sqrt":
+            # r = sqrt(a): da / (2 r), the doubling exact
+            if t[0] is None:
+                return None
+            return N("div", t[0], N("mul", self.two, R(node)))
         if op == "abs":
             if t[0] is None:
                 return None

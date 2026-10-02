@@ -352,8 +352,8 @@ REFUSALS = {
                                   "d/dt p = -x",
                                   step="step stormer-verlet, h = 1/8, "
                                        "q = (x), p = (p)"), 4),
-    "runtime-division": (_src("state x", "next x = x / 3"), 4),
-    "runtime-sqrt": (_src("state x", "next x = sqrt(x)"), 4),
+    # runtime-division and runtime-sqrt went with L4 (2026-10-02): x / 3 and
+    # sqrt(x) are the operations div and sqrt now (test_l4_* below)
     "transcendental": (_src("state x", "next x = exp(x)"), 4),
     "irrational-constant": (_src("state x", "next x = x * sqrt(2)"), 4),
     "power": (_src("state x", "next x = x^2"), 4),
@@ -442,14 +442,20 @@ def test_a_long_chain_costs_no_depth():
 
 
 def test_the_class_carries_the_compilers_names():
-    """The compiler raises its seven through this one class: each is
-    accepted, and a name in neither list is an internal error."""
+    """The compiler raises its eight through this one class: each is
+    accepted, and a name in neither list is an internal error. The eighth,
+    runtime-routine, is the compiler's own until parcel C4 (L4)."""
     for name in lang.COMPILER_REFUSALS:
         r = lang.Refusal(name, "a sentence", 3, "x.cftl")
         assert str(r) == f"x.cftl:3: {name}: a sentence"
     assert {"segment-steps", "halving-underflow", "target-format",
             "target-feature", "program-capacity", "scratch-capacity",
-            "loader-bound"} == set(lang.COMPILER_REFUSALS)
+            "loader-bound", "runtime-routine"} == set(lang.COMPILER_REFUSALS)
+    # the two the language made before L4 are no name at all now
+    for gone in ("runtime-division", "runtime-sqrt"):
+        assert gone not in lang.NAMES
+        with pytest.raises(AssertionError):
+            lang.Refusal(gone, "x")
     assert not set(lang.COMPILER_REFUSALS) & set(lang.CATALOGUE)
     with pytest.raises(AssertionError):
         lang.Refusal("no-such-name", "x")
@@ -989,7 +995,31 @@ def check_comments(g, canon, math):
                              f"{type(e).__name__}: {e}") from e
 
 
+def _held(form_value, graph_value):
+    """One exact comparison (the second check): the form's value against
+    the step graph's at one point. Where the graph's own exact evaluation
+    is undefined - a division by zero or a negative root's argument (L4),
+    in a select's discarded arm too, which the form's reader never
+    evaluates - the point decides nothing: False. Otherwise the form must
+    give the same value, and be defined: True."""
+    try:
+        want = graph_value()
+    except ArithmeticError:
+        return False
+    try:
+        got = form_value()
+    except ArithmeticError as e:
+        raise AssertionError(f"the mathematical form is undefined where the "
+                             f"step graph is not: {e}") from e
+    assert got == want
+    return True
+
+
 def check_intention_out(g, rng, points=3):
+    """The three checks on one graph; -> the points at which the second
+    decided (every evaluation defined), at most `points`, from up to four
+    times as many tried. A system without division or square root decides
+    at every point, so its points are the ones it always drew."""
     canon = lang.render_canonical(g)
     again = compile_(canon, "canonical")
     assert again.to_bytes() == g.to_bytes(), "the canonical form parses " \
@@ -1000,24 +1030,33 @@ def check_intention_out(g, rng, points=3):
     check_comments(g, canon, math)
     form = MathForm(math)
     assert len(form.tvectors) == len(g.tangent)
-    for _ in range(points):
+    decided = tried = 0
+    while decided < points and tried < 4 * points:
+        tried += 1
         state, params, lanes = _point(g, rng)
+        held = []
         if g.is_flow:
-            assert form.field(state, params, lanes) == \
-                g.exact_eval("field", state, params, lanes)
-        assert form.step(state, params, lanes) == \
-            g.exact_eval("step", state, params, lanes)
+            held.append(_held(lambda: form.field(state, params, lanes),
+                              lambda: g.exact_eval("field", state, params,
+                                                   lanes)))
+        held.append(_held(lambda: form.step(state, params, lanes),
+                          lambda: g.exact_eval("step", state, params, lanes)))
         # each tangent vector's printed equations and step, against the
         # tangent sections evaluated exactly along a random tangent
         for k in range(len(g.tangent)):
             tangent = _point(g, rng)[0]
             if g.is_flow:
-                assert form.tangent_field(k, state, tangent, params, lanes) \
-                    == g.exact_eval("tangent_field", state, params, lanes,
-                                    tangent=tangent)
-            assert form.tangent_step(k, state, tangent, params, lanes) == \
-                g.exact_eval("tangent_step", state, params, lanes,
-                             tangent=tangent)
+                held.append(_held(
+                    lambda: form.tangent_field(k, state, tangent, params,
+                                               lanes),
+                    lambda: g.exact_eval("tangent_field", state, params,
+                                         lanes, tangent=tangent)))
+            held.append(_held(
+                lambda: form.tangent_step(k, state, tangent, params, lanes),
+                lambda: g.exact_eval("tangent_step", state, params, lanes,
+                                     tangent=tangent)))
+        decided += all(held)
+    return decided
 
 
 @pytest.mark.parametrize("name", REFS)
@@ -1051,6 +1090,14 @@ NAMED_SYSTEMS = {
     "euler": ("system decay\nformat fp64\nround rtz\nstate lambda\n"
               "param tau = 1/3\nd/dt lambda = -(tau * lambda)\n"
               "step euler, h = 1/8\n"),
+    # a quotient and a root (L4): by the state, by a param, inside a let
+    "kepler-rk4": ("system kepler\nformat fp128\nround rup\n"
+                   "state rho, theta, phi, omega\nparam mu = 1/4\n"
+                   "lane param lambda = 3/2\nlet sigma = sqrt(rho * rho + 1)\n"
+                   "d/dt rho = phi\nd/dt theta = omega / rho\n"
+                   "d/dt phi = fma(rho, omega * omega, -(mu / (sigma * sigma)))\n"
+                   "d/dt omega = -(lambda * phi * omega) / rho\n"
+                   "step rk4, h = 1/64\n"),
 }
 
 
@@ -1069,12 +1116,17 @@ def _expr(rng, operands, depth):
     if depth <= 0 or rng.random() < 0.25:
         return rng.choice(operands + _LITS[:3])
     k = rng.choice(["+", "-", "*", "neg", "fma", "abs", "copysign", "min",
-                    "max", "minnum", "maxnum", "cmp", "select", "const"])
+                    "max", "minnum", "maxnum", "cmp", "select", "const",
+                    "/", "sqrt"])
 
     def sub():
         return _expr(rng, operands, depth - 1)
-    if k in ("+", "-", "*"):
+    if k in ("+", "-", "*", "/"):
         return f"({sub()} {k} {sub()})"
+    if k == "sqrt":
+        # half of them of a magnitude, so that most points have a root
+        return f"sqrt(abs({sub()}))" if rng.random() < 0.5 else \
+            f"sqrt({sub()})"
     if k == "neg":
         return f"-({sub()})"
     if k == "fma":
@@ -1162,13 +1214,16 @@ def random_system(rng, k):
 
 # A random source may fold to a constant the language refuses: -0 where
 # a negated subexpression is exactly zero, or a constant mixing h with a
-# rational. Those are skipped and counted; any other refusal fails.
-_ARTIFACTS = {"constant-negative-zero", "h-nonlinear"}
+# rational; and since L4 the square root of a constant no rational's square
+# (sqrt(2), sqrt(-3)), or a constant over a constant zero. Those are skipped
+# and counted; any other refusal fails.
+_ARTIFACTS = {"constant-negative-zero", "h-nonlinear", "irrational-constant",
+              "constant-division-by-zero"}
 
 
 def test_intention_out_of_random_systems():
     rng = random.Random("lang random systems")
-    done = skipped = 0
+    done = skipped = decided = 0
     kinds, ops, fmts, rnds = set(), set(), set(), set()
     arrays = lanes = lets = 0
     while done < 60:
@@ -1180,7 +1235,7 @@ def test_intention_out_of_random_systems():
             skipped += 1
             continue
         try:
-            check_intention_out(g, rng, points=2)
+            decided += check_intention_out(g, rng, points=2)
         except AssertionError:
             raise AssertionError(f"the intention-out fails on:\n{text}")
         kinds.add(g.integrator[0])
@@ -1193,6 +1248,9 @@ def test_intention_out_of_random_systems():
                     for _o, _a, lb in (g.field or g.step).nodes)
         done += 1
     assert skipped < done
+    # most systems decide at both their points: an undefined point (a zero
+    # divisor, a negative root's argument) is redrawn up to four times
+    assert decided >= 100, decided
     # the coverage docs/LANGUAGE.md claims of these systems, held
     assert kinds == {"rk4", "euler", "stormer-verlet", "map"}
     assert ops == set(lang.OPS)
@@ -1801,6 +1859,292 @@ def test_the_check_of_what_is_said_has_teeth():
                 check_comments(g, c2, m2)
             caught += 1
         assert caught >= 7, g.system
+
+
+# ---- L4: run-time division and square root (2026-10-02) ------------------------
+#
+# `a / b` and `sqrt(a)` with an operand that is not a constant are the nodes
+# div and sqrt, whose golden functions are softfloat's div and sqrt under the
+# program's one attribute, with their exact flags (docs/LANGUAGE.md, "The
+# operations"). They were `runtime-division` and `runtime-sqrt` until L4.
+
+def _sys1(body, state="x, y", fmt="fp64", rnd="rne", step="step map"):
+    lines = ["system l4", f"format {fmt}", f"round {rnd}", f"state {state}"]
+    return "\n".join(lines + body.split("\n") + [step]) + "\n"
+
+
+def test_l4_division_and_square_root_are_nodes():
+    """Each is one node in the golden function's operand order, and a
+    division by a constant divides by the constant rounded once - never a
+    product by a rounded reciprocal."""
+    g = compile_(_sys1("next x = x / y\nnext y = sqrt(y)"))
+    assert g.step.nodes == [("div", ("s0", "s1"), None),
+                            ("sqrt", ("s1",), None)]
+    g = compile_(_sys1("next x = 2 / x", state="x"))
+    assert g.step.nodes == [("div", ("c0", "s0"), None)]
+    g = compile_(_sys1("next x = x / 3", state="x"))
+    assert g.step.nodes == [("div", ("s0", "c0"), None)]
+    assert [v for v, *_r in g.const] == [F(3)]
+    assert lang.OPS["div"] == 2 and lang.OPS["sqrt"] == 1
+    # a constant over a constant still folds exactly
+    g = compile_(_sys1("next x = x * (8/3)", state="x"))
+    assert g.step.nodes == [("mul", ("s0", "c0"), None)]
+    assert [v for v, *_r in g.const] == [F(8, 3)]
+
+
+def test_l4_x_over_3_is_not_x_times_a_third():
+    """RN(x / 3) and RN(x * RN(1/3)) differ for about a third of all x at
+    every format (L4's ledger, measured); here one x at fp64, and the two
+    spellings the canonical form keeps apart: `x * 8 / 3`, a product and
+    then a quotient (left association), and `x * (8/3)`, one product."""
+    fmt = FORMATS["fp64"]
+    x = 0x408fe32580d0b6a0
+    div = compile_(_sys1("next x = x / 3", state="x"))
+    mul = compile_(_sys1("next x = x * (1/3)", state="x"))
+    assert lang.run(div, [[x]], 1).states[0][0] == 0x40754219008b246b
+    assert lang.run(mul, [[x]], 1).states[0][0] == 0x40754219008b246a
+    assert sf.div(fmt, x, C.round_once(fmt, 0, F(3))[0])[0] == \
+        0x40754219008b246b
+    a = compile_(_sys1("next x = x * 8/3", state="x"))
+    b = compile_(_sys1("next x = x * (8/3)", state="x"))
+    assert a.op_counts() == {"mul": 1, "div": 1}
+    assert b.op_counts() == {"mul": 1}
+    assert "next x = x * 8 / 3\n" in lang.render_canonical(a)
+    assert "next x = x * (8/3)\n" in lang.render_canonical(b)
+    for g in (a, b):
+        assert compile_(lang.render_canonical(g)).to_bytes() == g.to_bytes()
+
+
+# each case: the operands' exact values (or a special by name), and the
+# flags softfloat raises, measured in L4's ledger at all four formats
+_DIV_CASES = [("6/3", (6, 3), 0), ("1/3", (1, 3), sf.FLAG_INEXACT),
+              ("1/0", (1, 0), sf.FLAG_DIVZERO),
+              ("-1/0", (-1, 0), sf.FLAG_DIVZERO),
+              ("1/-0", (1, "-0"), sf.FLAG_DIVZERO),
+              ("0/0", (0, 0), sf.FLAG_INVALID),
+              ("inf/inf", ("inf", "inf"), sf.FLAG_INVALID),
+              ("snan/1", ("snan", 1), sf.FLAG_INVALID),
+              ("qnan/1", ("qnan", 1), 0), ("inf/1", ("inf", 1), 0),
+              ("1/inf", (1, "inf"), 0),
+              ("max/min", ("max", "min"),
+               sf.FLAG_OVERFLOW | sf.FLAG_INEXACT),
+              ("min/max", ("min", "max"),
+               sf.FLAG_UNDERFLOW | sf.FLAG_INEXACT)]
+_SQRT_CASES = [("4", 4, 0), ("2", 2, sf.FLAG_INEXACT),
+               ("-1", -1, sf.FLAG_INVALID), ("-inf", "-inf", sf.FLAG_INVALID),
+               ("snan", "snan", sf.FLAG_INVALID), ("qnan", "qnan", 0),
+               ("+inf", "inf", 0), ("-0", "-0", 0), ("+0", 0, 0)]
+
+
+def _special(fmt, v):
+    named = {"inf": sf.inf_bits(fmt), "-inf": sf.inf_bits(fmt, 1),
+             "-0": fmt.sign_mask, "snan": sf.snan_bits(fmt, 1),
+             "qnan": sf.qnan_bits(fmt), "max": sf.max_normal_bits(fmt),
+             "min": sf.min_normal_bits(fmt)}
+    return named[v] if isinstance(v, str) else \
+        C.round_once(fmt, sf.RND_RNE, F(v))[0]
+
+
+@pytest.mark.parametrize("fmtname", list(FORMATS))
+def test_l4_every_flag_of_both_operations(fmtname):
+    """Through the interpreter, a lane a case: each lane's result and FLAGS
+    are softfloat's, each case raises the flags the ledger measured - div
+    all five, sqrt invalid and inexact only - and the run's FLAGS is their
+    OR. A quiet NaN raises nothing; sqrt(-0) is -0."""
+    fmt = FORMATS[fmtname]
+    g = compile_(_sys1("next x = x / y\nnext y = y", fmt=fmtname))
+    lanes = [[_special(fmt, a), _special(fmt, b)]
+             for _n, (a, b), _f in _DIV_CASES]
+    run = lang.run(g, lanes, 1)
+    union = 0
+    for (name, _ab, want), lane, out in zip(_DIV_CASES, lanes, run.states):
+        bits, flags = sf.div(fmt, lane[0], lane[1], sf.RND_RNE)
+        assert out[0] == bits, name
+        assert flags == want, (name, flags)
+        assert lang.run(g, [lane], 1).flags == want, name
+        union |= want
+    assert run.flags == union == 0x1f
+    g = compile_(_sys1("next x = sqrt(x)", state="x", fmt=fmtname))
+    lanes = [[_special(fmt, a)] for _n, a, _f in _SQRT_CASES]
+    run = lang.run(g, lanes, 1)
+    union = 0
+    for (name, _a, want), lane, out in zip(_SQRT_CASES, lanes, run.states):
+        bits, flags = sf.sqrt(fmt, lane[0], sf.RND_RNE)
+        assert out[0] == bits and flags == want, (name, flags)
+        assert lang.run(g, [lane], 1).flags == want, name
+        union |= want
+    assert run.flags == union == sf.FLAG_INVALID | sf.FLAG_INEXACT
+    assert run.states[[n for n, *_r in _SQRT_CASES].index("-0")][0] == \
+        fmt.sign_mask
+
+
+@pytest.mark.parametrize("fmtname", list(FORMATS))
+def test_l4_exact_and_inexact_quotients_and_roots(fmtname):
+    """Under every attribute: an exact quotient or root is the exact value
+    with no flag, the same under all five; an inexact one is softfloat's
+    under that attribute, inexact, and the directed attributes bracket the
+    exact value one ulp apart."""
+    fmt = FORMATS[fmtname]
+    for rnd in ("rne", "rtz", "rdn", "rup", "rmm"):
+        code = C.RND_BY_NAME[rnd]
+        g = compile_(_sys1("next x = x / y\nnext y = sqrt(y)", fmt=fmtname,
+                           rnd=rnd))
+        for (a, b), exact in (((6, 3), True), ((1, 4), True),
+                              ((9, 4), True), ((1, 3), False),
+                              ((-2, 3), False), ((10, 7), False)):
+            x, y = (C.round_once(fmt, sf.RND_RNE, F(v))[0] for v in (a, b))
+            run = lang.run(g, [[x, y]], 1)
+            q, fq = sf.div(fmt, x, y, code)
+            s, fs = sf.sqrt(fmt, y, code)
+            assert run.states[0] == [q, s]
+            assert run.flags == fq | fs
+            if exact:
+                assert C.value_of(fmt, q) == F(a, b) and fq == 0
+            else:
+                assert fq == sf.FLAG_INEXACT
+                lo = sf.div(fmt, x, y, sf.RND_RDN)[0]
+                hi = sf.div(fmt, x, y, sf.RND_RUP)[0]
+                assert C.value_of(fmt, lo) < F(a, b) < C.value_of(fmt, hi)
+                assert abs(hi - lo) == 1        # adjacent encodings
+            # sqrt(3), sqrt(4), sqrt(7): exact only for the square
+            assert (fs == 0) == (b == 4)
+
+
+def test_l4_square_roots_of_constants():
+    """Folded where the root is exact (a rational's square), refused
+    `irrational-constant` where no rational carries it, the sentence saying
+    which; arity as any built-in's."""
+    for body, value in (("next x = x * sqrt(4)", F(2)),
+                        ("next x = x * sqrt(9/4)", F(3, 2)),
+                        ("next x = x * sqrt(0.25)", F(1, 2)),
+                        ("next x = x * sqrt(1e-400)", F(1, 10 ** 200)),
+                        ("const c = 9/4\nnext x = x * sqrt(c)", F(3, 2))):
+        g = compile_(_sys1(body, state="x"))
+        assert g.step.nodes == [("mul", ("s0", "c0"), None)], body
+        assert [v for v, *_r in g.const] == [value], body
+    g = compile_(_sys1("next x = x + sqrt(1 - 1)", state="x"))
+    assert [v for v, *_r in g.const] == [F(0)]
+    for expr, words in (("sqrt(2)", "sqrt(2) has no exact rational value - "
+                         "the constant, exactly, is no rational's square"),
+                        ("sqrt(-4)", "sqrt(-4) is not a real number"),
+                        ("sqrt(8/3)", "sqrt(8/3) has no exact rational"),
+                        # shown to five digits, where it looks like a square
+                        # (verifier-VL4): the sentence says the constant
+                        # exactly is none
+                        ("sqrt(4 + 1e-30)", "sqrt(4.0000e+0 (to five "
+                         "digits)) has no exact rational value - the "
+                         "constant, exactly, is no rational's square")):
+        with pytest.raises(lang.Refusal) as info:
+            compile_(_sys1(f"next x = x * {expr}", state="x"), "r.cftl")
+        assert (info.value.name, info.value.line) == ("irrational-constant",
+                                                      5), str(info.value)
+        assert info.value.sentence.startswith(words), info.value.sentence
+    with pytest.raises(lang.Refusal) as info:
+        compile_(_sys1("next x = sqrt(x, x)", state="x"))
+    assert (info.value.name, info.value.line) == ("arity", 5)
+    with pytest.raises(lang.Refusal) as info:
+        compile_(_sys1("next sqrt = 1", state="sqrt"))
+    assert info.value.name == "reserved-name"
+    assert "a built-in" in info.value.sentence
+
+
+@pytest.mark.parametrize("body,step,want", [
+    # a map that names its step: a quotient by h is a division by the
+    # h-scaled constant h; 1/h is h^-1, which no step-halving bank halves
+    ("next x = x / h", "step map, h = 1/8", None),
+    ("next x = h / x", "step map, h = 1/8", None),
+    ("next x = x * (h / 2)", "step map, h = 1/8", None),
+    ("next x = sqrt(x * h)", "step map, h = 1/8", None),
+    ("next x = x * (1/h)", "step map, h = 1/8", "h-nonlinear"),
+    ("next x = x / (1/h)", "step map, h = 1/8", "h-nonlinear"),
+    ("next x = x / (h * h)", "step map, h = 1/8", "h-nonlinear"),
+    ("next x = x * sqrt(h)", "step map, h = 1/8", "h-nonlinear"),
+    ("next x = x * sqrt(h * h)", "step map, h = 1/8", "h-nonlinear"),
+    # a flow's equations never read h, and a default never does
+    ("d/dt x = x / h", "step euler, h = 1/8", "h-scope"),
+    ("d/dt x = (h / 2) * x", "step rk4, h = 1/8", "h-scope"),
+    ("d/dt x = sqrt(h) * x", "step rk4, h = 1/8", "h-scope"),
+    ("param p = sqrt(h)\nnext x = x * p", "step map, h = 1/16", "h-scope"),
+])
+def test_l4_h_in_a_quotient_or_a_root(body, step, want):
+    """Each by a name that exists: h-scope in a flow and a default,
+    h-nonlinear for a constant that is no rational multiple of h (sqrt(h)
+    by the rule min and max follow, which refuses sqrt(h*h) too)."""
+    text = _sys1(body, state="x", step=step)
+    if want is not None:
+        with pytest.raises(lang.Refusal) as info:
+            compile_(text)
+        assert info.value.name == want, str(info.value)
+        assert info.value.line == 5
+        return
+    g = compile_(text)
+    assert [fa for _v, fa, _b, _f in g.const if fa is not None]
+    # a run at another h of the same sign is the system compiled there
+    again = compile_(text.replace("h = 1/8", "h = 3/64"))
+    fmt = g.fmt
+    lanes = [[C.round_once(fmt, 0, F(v, 7))[0]] for v in (3, 5, 11)]
+    a, b = lang.run(g, lanes, 2, h=F(3, 64)), lang.run(again, lanes, 2)
+    assert (a.states, a.flags) == (b.states, b.flags)
+
+
+def test_l4_a_division_by_a_constant_zero_is_a_division():
+    """x / 0 divides at run time - +inf with divide-by-zero, a NaN with
+    invalid at 0 - as x * 0 multiplies; a constant over a constant zero
+    has no exact value, and stays `constant-division-by-zero`."""
+    fmt = FORMATS["fp64"]
+    g = compile_(_sys1("next x = x / (1 - 1)", state="x"))
+    assert g.step.nodes == [("div", ("s0", "c0"), None)]
+    one = sf.one_bits(fmt)
+    assert lang.run(g, [[one]], 1).states[0][0] == sf.inf_bits(fmt)
+    assert lang.run(g, [[one]], 1).flags == sf.FLAG_DIVZERO
+    assert lang.run(g, [[0]], 1).states[0][0] == sf.qnan_bits(fmt)
+    assert lang.run(g, [[0]], 1).flags == sf.FLAG_INVALID
+    with pytest.raises(lang.Refusal) as info:
+        compile_(_sys1("next x = x * (2 / (1 - 1))", state="x"))
+    assert info.value.name == "constant-division-by-zero"
+
+
+def test_l4_a_chain_of_products_and_quotients_stays_flat():
+    """`/` is a product's kind in the canonical form: a chain of 3,000
+    alternating products and quotients is checked, written out one level
+    deep and read back, in loops - and runs as the interpreter's 3,000
+    operations."""
+    ops = " * x / y" * 1500
+    g = compile_(_sys1(f"next x = x{ops}\nnext y = y"))
+    assert g.op_counts() == {"mul": 1500, "div": 1500}
+    canon = lang.render_canonical(g)
+    line = next(ln for ln in canon.splitlines() if ln.startswith("next x"))
+    assert "(" not in line
+    assert compile_(canon).to_bytes() == g.to_bytes()
+    lang.render_math(g)
+
+
+def test_l4_the_exact_root_is_one_function():
+    """The step graph's exact evaluation and the test's own reader take
+    the same root of the same value: exact where the value is a rational's
+    square, else rounded down to 2^-256; undefined below zero, as a
+    division by zero is."""
+    from cft_golden.lang import graph as lang_graph
+    from lang_mathform import root as form_root
+    rng = random.Random("roots")
+    for _ in range(400):
+        q = F(rng.randint(0, 10 ** 30), rng.randint(1, 10 ** 20))
+        assert lang_graph.exact_root(q) == form_root(q)
+        r = lang_graph.exact_root(q)
+        assert r * r <= q < (r + F(1, 1 << 256)) ** 2 or r * r == q
+        s = F(rng.randint(0, 10 ** 12), rng.randint(1, 10 ** 9))
+        assert lang_graph.exact_root(s * s) == s == form_root(s * s)
+    for bad in (F(-1), F(-1, 7)):
+        with pytest.raises(ArithmeticError):
+            lang_graph.exact_root(bad)
+        with pytest.raises(ArithmeticError):
+            form_root(bad)
+    g = compile_(_sys1("next x = x / y\nnext y = sqrt(y)"))
+    with pytest.raises(ArithmeticError):
+        g.exact_eval("step", [F(1), F(0)])
+    with pytest.raises(ArithmeticError):
+        g.exact_eval("step", [F(1), F(-1)])
+    assert g.exact_eval("step", [F(1), F(9, 4)]) == [F(4, 9), F(3, 2)]
 
 
 # ---- the documents -------------------------------------------------------------

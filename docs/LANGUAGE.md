@@ -165,9 +165,9 @@ the gate holds that.
 - Reserved: no value may be named after one of these, and the check is
   `reserved-name`.
   - the keywords;
-  - the built-ins `fma abs min max minnum maxnum copysign select`;
-  - `sqrt` and the transcendental names (`exp`, `log`, `sin`, `pow`,
-    `hypot` and the rest of the list in `python/cft_golden/lang/check.py`);
+  - the built-ins `fma abs min max minnum maxnum copysign select sqrt`;
+  - the transcendental names (`exp`, `log`, `sin`, `pow`, `hypot` and the
+    rest of the list in `python/cft_golden/lang/check.py`);
   - `h`, the step's own name;
   - `inf infinity nan snan`.
 - `tangent` became a keyword with the variational equations (part
@@ -232,8 +232,13 @@ operator.
 - **hexadecimal significand:** 5.12.3's syntax, as `chars.lex_hex` reads
   it, with the binary exponent required: `0x1.8p+1` is 3. `0x10` with no
   `p` is refused, as `syntax`, because an encoding is not a literal.
-- **a/b** is not a separate token. It is a constant division, and
-  constant arithmetic is exact, so `8/3` is the rational 8/3.
+- **a/b** is not a separate token. It is a division: between constants
+  it is folded exactly, so `8/3` is the rational 8/3; with an operand that
+  is not a constant it is the run-time operation `div` ("The
+  operations"). So `x * 8/3` is `(x * 8) / 3`, a product and then a
+  quotient, each rounded, by the rule that binary operators associate
+  left; `x * (8/3)` is one product by RN(8/3). The canonical form writes
+  them apart: `x * 8 / 3` and `x * (8/3)`.
 - **The bound.** A literal, or a constant expression's exact value,
   beyond 2^+-1048576 is `constant-range`. It lies outside every format by
   far, and the evaluator refuses it rather than build the integer.
@@ -282,7 +287,7 @@ Precedence, lowest first:
    `chained-comparison`; `!=` is `not-equal`, since there is no such
    operation (`select(a == b, 0, 1)` is one).
 2. `+` and `-`, binary, associating left.
-3. `*` and `/`, associating left; `/` only between constants.
+3. `*` and `/`, associating left: `a * b / c` is `(a * b) / c`.
 4. unary `-`, which binds tighter than `*`, as in C and Python.
 5. a literal, a name, `name[index]`, a label, a call, or `( expr )`.
 
@@ -328,7 +333,9 @@ OR.
 
 Every node of a step graph is one of these. Its name is softfloat.py's
 OP_NAMES spelling, and its operands are in the golden function's order,
-which is asm.py's OP_FIELDS order.
+which is asm.py's OP_FIELDS order - but for `div` and `sqrt`, which no
+tile instruction is: their names are the golden functions' own, and
+their operands in those functions' order.
 
 | written | node | golden function | 754-2019 | rounds | flags it can raise |
 |---|---|---|---|---|---|
@@ -336,6 +343,8 @@ which is asm.py's OP_FIELDS order.
 | `a - b` | `sub(a, b)` | `sf.sub` | 5.4.1 subtraction | once | the same |
 | `a * b` | `mul(a, b)` | `sf.mul` | 5.4.1 multiplication | once | the same |
 | `fma(a, b, c)` | `fma(a, b, c)`, a*b + c | `sf.fma` | 5.4.1 fusedMultiplyAdd | once | the same |
+| `a / b` | `div(a, b)`, with an operand not a constant | `sf.div` | 5.4.1 division | once | all five: invalid (0/0, an infinity over an infinity, a signaling NaN), divideByZero (a finite nonzero over a zero), overflow, underflow, inexact |
+| `sqrt(a)` | `sqrt(a)`, of an operand not a constant | `sf.sqrt` | 5.4.1 squareRoot | once | invalid (a negative nonzero, -infinity included, or a signaling NaN) and inexact |
 | `-a` | `neg(a)` | `sf.neg` | 5.5.1 negate | no: exact | none, not even on a signaling NaN |
 | `abs(a)` | `abs(a)` | `sf.fabs` | 5.5.1 abs | no | none |
 | `copysign(a, b)` | `copysign(a, b)` | `sf.copysign` | 5.5.1 copySign | no | none |
@@ -350,8 +359,28 @@ which is asm.py's OP_FIELDS order.
 | `a == b` | `cmpeq(a, b)` | `sf.cmpeq` | 5.6.1 compareQuietEqual | no | the same |
 | `select(c, a, b)` | `select(a, b, c)` | `sf.select`: a if c's magnitude is not zero, else b | none: the tile's SELECT; quiet like 5.5.1 | no | none |
 
-- The four that round take the program's one attribute; the rest ignore
+- The six that round take the program's one attribute; the rest ignore
   it, as `softfloat.compute` does.
+- **Division and the square root** (L4, 2026-10-02) are each one
+  correctly rounded operation, with exactly the flags the golden function
+  raises: a quiet NaN in gives the canonical NaN and no flag, as every
+  arithmetic node does; `sqrt(-0)` is -0 and the root of +infinity is
+  +infinity, neither raising anything; underflow is detected after
+  rounding, as everywhere here. A tile has no divide or square-root
+  instruction: the compiler carries them only from parcel C4, and
+  refuses them by name until then (`runtime-routine`, "Every refusal, by
+  name"). The interpreter runs them now.
+- **A division by a constant** divides by the constant rounded once:
+  `x / 3` is RN(x / RN(3)), the correctly rounded x/3 wherever the
+  constant is exact in the format, and never a product by a rounded
+  reciprocal - `x * (1/3)` is that, one rounding of 1/3 and then one of
+  the product, and the two differ for about a third of all x at every
+  format (measured, L4). A division by the constant 0 is a division like
+  any other, as `x * 0` is a product, and gives what 754 gives: `x / 0`
+  is an infinity with divideByZero for a finite nonzero x, a NaN with
+  invalid for a zero x, an infinity with no flag for an infinite x, and
+  the canonical NaN for a NaN x, invalid only for a signaling one. A
+  constant over a constant is folded exactly ("Constants").
 - `select` takes its arguments in C's conditional order, `c ? a : b`,
   not OpenCL's select. Both arms are operands, so both are computed:
   there is no branch.
@@ -361,12 +390,18 @@ which is asm.py's OP_FIELDS order.
 
 | written | refusal | why |
 |---|---|---|
-| a division with a non-constant operand | `runtime-division` | v1 has none; `x * (1/3)` is one rounding of 1/3, then one of the product |
-| `sqrt(...)` | `runtime-sqrt` at run time, `irrational-constant` on a constant | v1 has no square root; inlining divfull or sqrtfull is a later parcel |
+| `sqrt(c)` of a constant that is no rational's square, `sqrt(2)` or `sqrt(-4)` | `irrational-constant` | a constant is an exact rational; `sqrt(9/4)` is folded to 3/2 ("Constants"), and the root of a param is taken at run time |
 | a transcendental | `transcendental` at run time, `irrational-constant` on a constant | the correctly rounded math library is a later step |
 | `^` or `**` | `power` | write `x * x`, and a longer product in the order meant |
 | `t`, declared nowhere | `time-dependence` | carry time in the state, `state t` and `d/dt t = 1`, or count steps ("Time") |
 | `h` in a flow's equations | `h-scope` | a step-halving run halves h; the right-hand side must not move with it |
+
+Until 2026-10-02 a division with an operand that is not a constant was
+refused here, `runtime-division`, and a square root, `runtime-sqrt` at
+run time and `irrational-constant` of any constant, `sqrt(4)` included.
+Both are operations now ("The operations"; parcel L4), and both names
+are gone: the compiler refuses the operations by a name of its own,
+`runtime-routine`, until parcel C4 carries them.
 
 ## Constants
 
@@ -376,6 +411,14 @@ which is asm.py's OP_FIELDS order.
   Fraction, and is not an operation.
 - So `x * 2 * 3` is `(x * 2) * 3`, two multiplies, while `x * (2 * 3)`
   is `x * 6`, one.
+- The square root of a constant is folded where it is exact, where the
+  constant is a rational's square: `sqrt(4)` is 2 and `sqrt(9/4)` is 3/2
+  (L4, 2026-10-02; they were `irrational-constant` before). Where no
+  rational carries the root it is refused (below). Folding is the
+  constant rule itself; a node would round twice - the constant once
+  where it meets the run, then the root - and spend a run-time routine on
+  a value fixed when compiled. The root of a fixed value taken at run
+  time is the root of a param: `param two = 2`, `sqrt(two)`.
 - The same holds inside the integrators' templates.
 
 **Rounded once.** A constant is rounded ONCE, under the program's
@@ -404,7 +447,10 @@ any of these:
   keep, `constant-negative-zero`;
 - `inf` or `infinity`: `constant-infinity`;
 - `nan` or `snan`: `constant-nan`;
-- a constant divided by a constant zero: `constant-division-by-zero`.
+- a constant divided by a constant zero: `constant-division-by-zero`;
+- the square root of a constant that is no rational's square - an
+  irrational one, `sqrt(2)`, or none at all, `sqrt(-4)`:
+  `irrational-constant`, its sentence saying which.
 
 All of them can still arise at run time. A lane may start at -0, an
 infinity or a NaN, and the operations make them.
@@ -452,14 +498,19 @@ param is a run-time neg of its rounded value. For an exact constant
     exactly, so `(h*h)/h` is h, and `(h*h)/(h*h)` is 1 - in a map, a
     use of h that folds away (below).
   - Folding constants, a sum of different powers of h, and a min, max,
-    minnum, maxnum, comparison or select whose operands are all
-    constants, one of them changing with h's size, are refused where they
-    are folded, whatever surrounds them: `(h + 1) - 1` at its sum
-    although its value is h, and `min(h, 2*h)` although at h's sign it is
-    a multiple of h. h's sign enters a constant only through copysign and
+    minnum, maxnum, comparison, select or square root whose operands are
+    all constants, one of them changing with h's size, are refused where
+    they are folded, whatever surrounds them: `(h + 1) - 1` at its sum
+    although its value is h, `min(h, 2*h)` although at h's sign it is
+    a multiple of h, and `sqrt(h)` and `sqrt(h*h)` (L4) although the
+    second is |h|. h's sign enters a constant only through copysign and
     abs. A run-time operation on an h-scaled constant is an operation like
     any other: `min(x, h)` in a map is a min of the state and the
-    constant h.
+    constant h, and `x / h` (L4) a division of the state by it, which a
+    step-halving bank halves with the slot. `x * (1/h)` stays
+    `h-nonlinear`: the constant that meets the run there is 1/h, which
+    doubles when h halves, so a step-halving bank, which halves each
+    h-scaled slot, would hold the wrong value.
 - A flow's equations and their lets cannot read h, whatever it folds to,
   nor a const whose value changes with h's size (`h-scope`): a
   step-halving run halves h, and a right-hand side must not move with
@@ -1077,6 +1128,11 @@ in UTF-8 plain text.
 - **fma.** Each fma is shown as the a*b + c it computes. When a is a
   constant it reads c + a·b, as textbooks write a stage. A negated
   addend reads as a subtraction.
+- **Division and the square root** (L4). A quotient reads a/b, its
+  numerator in parentheses where a product's operand would be (a sum, a
+  quotient, a negation) and its denominator unless it is a name, a
+  number or a call: x·y/z, (x/y)/z, x/(y·z). A root reads √(a). So
+  `x * 8 / 3` reads x·8/3 and `x * (8/3)` x·(8/3).
 - **Parentheses** appear only where exact arithmetic needs them.
 - **Constants.** Each constant is its exact value, and h-multiples print
   as `h/2` with h's value stated.
@@ -1092,13 +1148,13 @@ in UTF-8 plain text.
   trusted, and a LaTeX one would be a third renderer with its own check.
 
 **The three checks**, held in the gate (`python/tests/test_lang.py`), on
-the six references, on five written systems whose names are Greek
+the six references, on six written systems whose names are Greek
 letters wherever a name is printed (params, lane params with and
 without defaults, lets and an indexed let, state components, q and p,
-each integrator, an h-scaled constant in a map), and on sixty seeded
-random systems that cover every operation, constants folded, lets,
-arrays, lane params, every format and attribute, and each integrator
-and maps:
+each integrator, an h-scaled constant in a map, a quotient and a root),
+and on sixty seeded random systems that cover every operation, division
+and the square root among them, constants folded, lets, arrays, lane
+params, every format and attribute, and each integrator and maps:
 1. **The canonical form is itself a valid source.** Parsed again it gives
    the same step graph, byte for byte, and written out again it gives
    the same text, byte for byte, comments included. A canonical form
@@ -1111,6 +1167,17 @@ and maps:
    - For a flow it checks each right-hand side, and the whole step
      through the template's scheme. For rk4 that holds the expansion to
      the textbook scheme, exactly.
+   - A quotient is exact in rationals; a square root in general is not.
+     Both evaluations take the same convention for it (L4): the exact
+     root where the argument is a rational's square, and otherwise the
+     root rounded down to a multiple of 2^-256 - a fixed function of the
+     exact argument (`graph.exact_root`; the reader computes its own). So
+     the same root of the same value agrees exactly, while a root printed
+     around another expression, or missing, does not. A point at which
+     the step graph's evaluation divides by zero or takes the root of a
+     negative number - in a select's discarded arm too, which the reader
+     never evaluates - decides nothing and is drawn again; the gate holds
+     that most points decide.
 3. **What the intention-out says besides its code is read back and held
    to the graph and to the test's own arithmetic and tables.** Every
    line of both forms is read, in order, and a line the reader does not
@@ -1384,7 +1451,8 @@ the term out: `next v.t = v.t`.
 `a`, `b`, `c` are an operation's operands, `da`, `db`, `dc` their
 tangents and `r` its own result. A tangent is **identically zero** when
 its value reads no state component - a constant, h, a param, a lane
-param - or reads one only through a comparison or a select's condition.
+param - or reads one only through a comparison, a select's condition or
+copysign's sign operand, whose tangents no rule reads.
 An identically-zero tangent is never an operand: each term it would
 make is left out, exactly, and where a select needs an arm it is the
 constant 0. Each rule is an expression in the language, so its
@@ -1398,6 +1466,8 @@ not differentiable is given its fixed value in the last column.
 | `-a` | `-da` | zero | - |
 | `a * b` | `fma(da, b, a * db)` | `da * b`; or `a * db` | - |
 | `fma(a, b, c)` | `fma(da, b, fma(a, db, dc))` | each zero term left out: `fma(da, b, dc)`, `fma(a, db, dc)`, `fma(da, b, a * db)`, `da * b`, `a * db`, or `dc` | - |
+| `a / b` | `fma(-r, db, da) / b` | `da / b`; or `(-r) * db / b` | at b = ±0 the quotient has no derivative: the rule's own operations give what IEEE 754 gives there, an infinity or a NaN |
+| `sqrt(a)` | `da / (2 * r)` | zero | at a = ±0, da / ±0: an infinity with divideByZero, or a NaN with invalid where da is ±0 too; below zero r is a NaN, and so is the tangent |
 | `abs(a)` | `copysign(1, a) * da` | zero | at a = +0, da; at a = -0, -da: the side the zero's sign bit names; at a NaN, its sign bit decides |
 | `copysign(a, b)` | `copysign(1, b) * (copysign(1, a) * da)` | zero when da is | at a = ±0 as abs; at b = ±0 the jump in b is not differentiated: db is never read |
 | `min(a, b)`, `max`, `minnum`, `maxnum` | `select(r == a, da, db)` | `0` for the zero side | at a tie, ±0 included, r == a: the first operand's tangent; where the result is a NaN, r == a is false: the second's |
@@ -1428,6 +1498,10 @@ not differentiable is given its fixed value in the last column.
   NaN, as the primal's own operation already did. Where the operands
   tie the language takes the first operand's tangent; that is its own
   convention, no published one.
+- At the quotient's and the root's singular points the tangent is what
+  IEEE 754-2019's own operations give: a division by zero is an infinity
+  with divideByZero, or a NaN with invalid (7.2, 7.3), and the root of a
+  negative number a NaN with invalid.
 - No standard fixes a derivative's rounding; the rest are the
   language's.
 
@@ -1442,6 +1516,51 @@ differently, each fixed by the order written. The compiler may commute
 the primal's multiplicands, and that never reaches the tangent, which is
 derived from the graph as written.
 
+**The quotient and the root** (L4, 2026-10-02). Each rule reads r, the
+operation's own result, as the min family's rule does - by name where it
+has one, written again where it has none.
+- The quotient's tangent is (da - r·db)/b. Reading r spares the form
+  (da·b - a·db)/b², whose b² overflows and underflows sooner and rounds
+  more. da - r·db is a sum with one product, so one fma rounds it, as the
+  product's tangent rounds its sum with one of its products; then one
+  division: two roundings. The fma's -r negates a primal value, exactly,
+  and the compiler shares it across tangent vectors, as it shares the
+  min family's primal-only compare; a negated db would be one a vector.
+  Where db is identically zero - b a constant, a param or a lane param -
+  the tangent is `da / b`, one rounding, the same correctly rounded
+  division the operation is; where da is, the fma loses its zero addend,
+  as fma's own rule does, and the tangent is `(-r) * db / b`.
+- The root's tangent is da/(2·r), the textbook's da/(2√a). The doubling
+  is exact and raises nothing under every attribute - r is never
+  subnormal unless it is zero, and 2·r never overflows (measured at every
+  format) - so the rule rounds once, at its division. `r + r` gives the
+  same bits; `2 * r` is the textbook's form.
+- **What a tangent costs.** Each division or root of the step whose
+  tangent the step's tangent reads - not zero, and reaching an output
+  through operands the rules differentiate - costs each tangent vector
+  one run-time division (by b, or by 2·r) and no root; any other costs a
+  vector nothing. The quotient or root written again where it has no
+  name is the primal's own operation on the same values, which the
+  compiler shares. So nothing is paid for one whose tangent is
+  identically zero (the rules, above) - one that reads no state, as a
+  quotient of params or the root of a param, or reads it only through a
+  comparison, a select's condition or copysign's sign, as
+  `select(x < 0, p, q) / p`, `sqrt(select(x < 0, p, q))` or
+  `copysign(p, x) / q` - nor for one whose tangent is not zero but which
+  reaches the outputs only through those operands, as the quotient in
+  `select(x / y < 1, x, y)`, `x + (x / y < 1)` or `copysign(x, x / y)`,
+  whose tangent the derivation never forms (it forms a node's tangent
+  only where an output's tangent reads it). With params p and q,
+  `next x = x * (p / q)` and `next y = y / p + sqrt(q)` perform three
+  divisions and roots a step, and each vector adds one, `y / p`'s. So T
+  vectors add T divisions for every division or root of the step whose
+  tangent the step's tangent reads - rk4 with one such division in its
+  right-hand side performs four a step, and each vector adds four. Once
+  the compiler carries a division (parcel C4), as an inlined routine of
+  about 209 ALU instructions at fp64 and 213 at fp256 (divfull, measured
+  by the step-6 survey), that is about 840 instructions a vector a step
+  there.
+
 **Reading a primal value.** A rule reads a primal value by name where it
 has one - a state component, a param, a lane param, a constant, a let, a
 label of the expanded step - and otherwise **writes it again**:
@@ -1455,8 +1574,10 @@ order written.
 
 **Roundings, every operand's tangent nonzero** (the primal's in
 brackets): `+` and `-` 1 [1]; unary minus none [none]; `*` 2 [1]; fma 2
-[1]; abs one exact product by ±1 [none]; copysign two [none]; the min
-family and select none, a quiet compare and a select [none].
+[1]; `/` 2 [1], the fused numerator and the division; sqrt 1 [1], the
+division, its doubling exact; abs one exact product by ±1 [none];
+copysign two [none]; the min family and select none, a quiet compare and
+a select [none].
 
 **Nothing is refused for not being differentiable.** Every operation is
 differentiable almost everywhere, and each point where one is not has
@@ -1496,10 +1617,11 @@ k1.x), and an unlabelled one has one use, since a primal value is read
 across sections only where it has a name.
 - **The primal is unchanged.** `field`, `step` and the const table are
   the primal graph's, byte for byte, unless a rule adds a constant the
-  table lacks - only 0, 1 and -1 can be added (1 by abs and copysign; 0
+  table lacks - only 0, 1, -1 and 2 can be added (1 by abs and copysign; 0
   by a min or a select with one side zero, and by an output whose
   tangent is zero; -1 where copysign's b is a negative constant, so that
-  `copysign(1, b)` folds, as any constant expression does) - and then
+  `copysign(1, b)` folds, as any constant expression does; 2 by the
+  square root's rule, L4) - and then
   only the const refs are renumbered by the table's value order. No
   reference adds one, and the gate holds both cases.
 - **A graph without tangents is version 1, byte for byte**, so nothing
@@ -1636,23 +1758,38 @@ is a defect in the sentence that says everything is checked):
    answer, so that a convention other than the table's fails it
    (measured: each, planted, red on the test and on the stage). So the
    printed variational equations are the derivative of the printed
-   equations, and not merely what the graph says.
+   equations, and not merely what the graph says. A quotient's derivative
+   there is the textbook's (da·b - a·db)/b², not the rule's form, so the
+   two meet only where the rule is right; a root's is da/(2·r), r the
+   root as the second check takes it (L4). A point at which the test's
+   own evaluation is undefined - a zero divisor, a negative root's
+   argument, the root's derivative at zero - decides nothing.
 
-**Why exact dual numbers, not mpmath.** Every operation is piecewise
-polynomial, so the exact derivative exists, and equality needs no
-tolerance to argue about; a central difference in mpmath would carry
-one, and a dependency besides. The plan of record said "an exact
+**Why exact dual numbers, not mpmath.** Every operation but the square
+root is piecewise rational, so the exact derivative exists, and equality
+needs no tolerance to argue about; a central difference in mpmath would
+carry one, and a dependency besides. The plan of record said "an exact
 derivative in mpmath"; exact rationals are stronger, and the stage stays
-stdlib-only.
+stdlib-only. The square root (L4) is the exception, and is held twice:
+exactly, with each root the fixed function of its argument that both
+sides take, which holds the rule's form; and by a central difference in
+exact rationals, which holds the derivative itself whatever the
+convention ("What the fourth check cannot see").
 
 **What the fourth check cannot see**, and what holds it instead:
 - **rounding order**: a rule replaced by one equal in exact arithmetic
   and rounded otherwise - `da*b + a*db` for `fma(da, b, a * db)` - is
   invisible to exact evaluation (measured: it passed every point). It is
-  held by the committed compiled variational references' graph bytes
-  (`programs/systems/compiled-tangent/`), by this document's rule table
-  held to the code - each rule rendered on a one-operation system - and
-  by the blocks above, held to the renderers;
+  held by this document's rule table held to the code - each rule
+  rendered on a one-operation system - by the blocks above, held to the
+  renderers, and, for every rule but the quotient's and the root's, by
+  the committed compiled variational references' graph bytes
+  (`programs/systems/compiled-tangent/`), none of which divides or takes
+  a root until parcel C4 compiles them: until then the rule table is
+  those two rules' holder (L4; verifier-VL4 planted the quotient's rule
+  rounded otherwise and the root's halved first, each green on the
+  fourth check and the central difference and red on the rule-table
+  test, the root's on the cost test as well);
 - **special values**: NaNs, infinities and the sign of zero do not exist
   in exact arithmetic. They are held by the interpreter against seq.py
   bit for bit, with tangents holding signalling NaNs, infinities, -0 and
@@ -1668,7 +1805,19 @@ stdlib-only.
   rule's measure-zero values and specials, and by the rule table's
   text, which the rules are rendered against - all but one: copysign's
   sign source at -0 or a NaN, which no unit test places, is held by the
-  rule table's text alone (verifier-VL3).
+  rule table's text alone (verifier-VL3);
+- **the root's derivative itself** (L4): with each root the fixed
+  function of its exact argument that both sides take, the fourth check
+  holds the root's rule to its form, and would call a right derivative
+  written through r·r = a - `da * r / (2 * a)` - wrong. The derivative
+  itself, whatever the convention, is held by a central difference in
+  exact rationals: (S(x + εv) - S(x - εv))/(2ε) at ε = 2^-64, each
+  tangent component t within 2^-100·max(1, |t|) of it, at unplaced
+  random points (a difference is no derivative at a kink). Both
+  are measured with plants: a root without its 2 and a quotient's wrong
+  sign red on both, the root through r·r = a green on the difference and
+  red on the exact check (`python/tests/test_lang_tangent.py`, the
+  `tangent` stage's leg L).
 
 **The Lyapunov smoke test** (the `tangent` stage): Lorenz-63's largest
 exponent, from `lorenz63-rk4-tangent-fp64.cftl` compiled, run on
@@ -1689,18 +1838,20 @@ stage certifies one, both auditors accepting.
 
 - **A long chain of unnamed operations** makes each one's tangent
   write its unnamed operands again wherever its rule reads an operand
-  (a product, fma, abs, copysign, the min family), so the tangent
-  grows with the square of the chain's length: 5,049 tangent nodes
-  for an unnamed 100-term product, against 198 if read across, and
-  8,099 for an unnamed min chain of 90 terms (measured, the second by
-  verifier-VL3). A sum chain stays linear, and so does a chain through
-  a select's condition, which takes no tangent (198 nodes at 100
-  terms, verifier-VI2). Naming parts of the chain with lets keeps it
-  linear, since a let is read by name. From 102 terms an unnamed
-  product's tangent would print past the parser's 100 levels - from
-  101 under euler and stormer-verlet, whose step writes the field one
-  level deeper - and the source is refused `too-deep` (D2); lets keep
-  it within reach as well.
+  or its own result (a product, fma, a quotient, a root, abs, copysign,
+  the min family), so the tangent grows with the square of the chain's
+  length: 5,049 tangent nodes for an unnamed 100-term product, against
+  198 if read across; 5,247 for an unnamed chain of 99 quotients,
+  against 297 with each named by a let, and 5,148 for 99 roots nested
+  unnamed (measured by L4 and verifier-VL4); and 8,099 for an unnamed
+  min chain of 90 terms (measured by verifier-VL3). A sum chain stays
+  linear, and so does a chain through a select's condition, which takes
+  no tangent (198 nodes at 100 terms, verifier-VI2). Naming parts of
+  the chain with lets keeps it linear, since a let is read by name.
+  From 102 terms an unnamed product's tangent would print past the
+  parser's 100 levels - from 101 under euler and stormer-verlet, whose
+  step writes the field one level deeper - and the source is refused
+  `too-deep` (D2); lets keep it within reach as well.
 - **The compiler's choice between its orders reads no capacity.** It
   takes the fewest instructions a step, then the fewest one-beat cycles;
   the interleaved walk, offered only for a graph with tangents, wins for
@@ -1735,7 +1886,7 @@ One exception, `lang.Refusal`, carries:
 Nothing else escapes the parser or the checker, and the gate fuzzes the
 references to hold that. `python/cft_golden/lang/refusals.py` is the one
 list: the checker's and the interpreter's names, each made by a test in
-this definition's gate, and the compiler's seven at the end, reserved
+this definition's gate, and the compiler's eight at the end, reserved
 for it. The compiler raises them through the same class, and its own
 gate makes each one.
 
@@ -1798,10 +1949,8 @@ Operations v1 does not have:
 
 | name | what it refuses |
 |---|---|
-| `runtime-division` | a division with an operand that is not a constant |
-| `runtime-sqrt` | a square root at run time |
 | `transcendental` | a transcendental function at run time |
-| `irrational-constant` | a square root or transcendental of a constant |
+| `irrational-constant` | a square root of a constant that is no rational's square (`sqrt(2)`, `sqrt(-4)`), or a transcendental of a constant |
 | `power` | `^` or `**` |
 | `not-equal` | `!=` |
 | `chained-comparison` | a comparison of a comparison, unparenthesised |
@@ -1837,9 +1986,32 @@ The compiler's, reserved for it (L2).
   They depend on the lowering and on the device, so the compiler raises
   them. The bank's 512 is the same on every device, and the checker
   raises that one itself as `bank-capacity`.
-- The last two are the compiled image's own.
+- The next two are the compiled image's own.
+- The eighth, `runtime-routine`, is the compiler's own until parcel C4
+  (L4, 2026-10-02). A run-time division or square root is an operation
+  of the language, which the interpreter runs; a tile has no instruction
+  for either, and the compiler carries one only as an inlined routine
+  (divfull, sqrtfull), from C4, after revision 8's flag control lets a
+  routine raise exactly the flags of the operation it implements. Until
+  then the compiler refuses such a graph by this name, on every target,
+  first - before any other of its checks, and before its own reading of
+  the graph, whose operation table would stop at `div` with an internal
+  error - at the first source line holding one, in the order the source
+  writes its statements and whatever the statement: an equation, a let,
+  a written tangent equation or tangent let, a line of an expansion
+  block. The checker meets each run-time division and root at its line,
+  since it evaluates every statement a source writes, and hands the
+  lines to the compiler with the graph (never in its bytes: a graph read
+  from bytes carries none, and the refusal names no line). Until
+  2026-10-02's send-back (verifier-VL4's (b)1) the compiler named the
+  graph's nodes' lines, the primal's, so a source that wrote its tangent
+  or its expansion block above its equations was refused at an
+  equation's line. So every source the language accepts compiles or is
+  refused by name, and exit 70 stays a defect in the compiler (D2's
+  rule). With C4 the name goes: revision 7's targets refuse such an
+  image `target-feature`, and the software targets run it.
 
-The checker never raises any of the seven. The sentences below are their
+The checker never raises any of the eight. The sentences below are their
 form; the compiler words each one for the case at hand.
 
 | name | what it refuses | its sentence |
@@ -1851,6 +2023,7 @@ form; the compiler words each one for the case at hand.
 | `target-feature` | a feature whose CAPS bit the target does not publish | "this image needs a feature the target's CAPS bits do not publish" |
 | `segment-steps` | a step count outside 1 to 2^32-1, the range of the REPEAT immediate a segment's steps are | "a segment is one REPEAT of 1 to 4,294,967,295 steps; this count is not one" |
 | `halving-underflow` | an h-scaled constant whose exact halving underflows, so the step-halving bank cannot hold it exactly | "this h-scaled constant underflows when halved, so the step-halving bank would not be this bank halved exactly" |
+| `runtime-routine` | a division or square root at run time, until parcel C4 | "this step divides or takes a square root at run time, which the compiler carries only as an inlined routine, from parcel C4" |
 
 ## The gate
 
@@ -1903,6 +2076,17 @@ under `make golden`, with no change to either.
 - determinism across hash seeds;
 - the intention-out's three checks, each integrator's scheme word for
   word and the unused fifth stage planted;
+- run-time division and square root (L4): each a node in the golden
+  function's order, a division by a constant never a product by a
+  rounded reciprocal (`x / 3` against `x * (1/3)` at a measured x);
+  every flag of both through the interpreter at every format, a lane a
+  case, each lane's result and FLAGS softfloat's; exact and inexact
+  quotients and roots under every attribute; the roots of constants
+  folded or refused by name, with both sentences; h in a quotient or a
+  root, each case by its name, and a run at another h the system
+  compiled there; a division by a constant zero run; a chain of 3,000
+  products and quotients flat and read back; the exact root one
+  function in the graph's evaluation and the test's reader;
 - this document's refusal tables, template text and Lorenz-63 blocks
   against the code.
 
@@ -1935,6 +2119,19 @@ under `make golden`, with no change to either.
   `tangent-mismatch` at the first difference, `tangent-scope`, all or
   none; the intention-out's four checks on references, written
   systems and random ones, and plants of the tangent's printed lines;
+- the quotient's and the root's rules (L4): their specials bit for bit
+  (the root at ±0, below zero, at +infinity and at a square; the
+  quotient at a zero divisor, exact, inexact, by a param that is zero);
+  one division a vector for each division or root of the step whose
+  tangent the step's tangent reads, after sharing, and none for any
+  other - one whose tangent is identically zero, reading no state or
+  reading it only through a comparison, a select's condition or
+  copysign's sign, and one whose tangent is not zero but reaches the
+  outputs only through those operands; their unnamed chains' growth, as
+  the known limit states; the fourth check and the central difference
+  on written systems under every integrator and on generated ones; and
+  three plants - the root without its 2 and the quotient's wrong sign
+  red on both, the root through r·r = a red on the exact check alone;
 - determinism across hash seeds; this document's variational blocks and
   sources against the renderers and the committed files.
 
@@ -1993,7 +2190,14 @@ It takes about 50 s on one core of the desktop, nearly all of it the
 interpreter's own arithmetic.
 
 The compiled images are held to the interpreter by the `tangent` stage
-(`programs/tangent_check.py`; docs/VERIFICATION.md).
+(`programs/tangent_check.py`; docs/VERIFICATION.md). The compiler's
+interim refusal is held by `python/tests/test_cftc.py` - on every target,
+through each entry point and the command line (exit 3, never 70), and at
+its line where a written tangent, a tangent let or an expansion block
+comes first - and by the `lang` stage's leg K, on generated sources that
+divide or take a root and on their canonical forms with the written-out
+step and the tangent moved above the equations; the rules by the
+`tangent` stage's leg L.
 
 ## What v1 does not do
 
@@ -2007,8 +2211,25 @@ The compiled images are held to the interpreter by the `tangent` stage
   on the tile or the host; certified renormalisation; tangents with
   respect to params or lane params; reverse mode, second derivatives;
   a tangent the state reads.
-- **Run-time division and square root.** Inlining divfull or sqrtfull
-  means spilling the registers around it, which is a later parcel.
+- **Run-time division and square root in a compiled program.** The
+  language and its interpreter have them (L4, 2026-10-02); the compiler
+  refuses them by name, `runtime-routine`, until parcel C4 inlines the
+  routines that compute them, divfull and sqrtfull. Spilling the
+  registers around a routine is the least of that - at most 15 of its
+  values are live at once (the step-6 survey, measured). The rest:
+  - **flags**: a routine's own FLAGS are its scaffolding (6/3 raises
+    inexact), and no instruction raises divideByZero, so a routine needs
+    revision 8's flag control (R8F) to raise exactly the flags of the
+    operation it implements, as the language defines them;
+  - **the compiler's one instruction a node**, in the program's one
+    attribute, with a bank of constants, their sign-flips and params: a
+    routine needs raw words (an infinity, NaNs, -0), its own internal
+    attributes and real bitwise ORs, which the compiler's internal check
+    refuses today;
+  - **format**: a routine's words differ by format, which ends the
+    compiler's rule that a system's instruction words are the same at
+    every format, and with it the certificate's wider run, unless
+    certificate version 2 defines one.
 - **Run-time transcendentals.** The correctly rounded math library is a
   later step.
 - **A built-in time, adaptive steps and events.** There is no reserved

@@ -19,6 +19,7 @@ that the intention-out is the same text on every machine.
 """
 
 from fractions import Fraction
+from math import isqrt
 
 from .. import chars
 from .. import softfloat as sf
@@ -66,6 +67,22 @@ def exact(value):
         raise AssertionError(f"a float ({value!r}) reached the constant "
                              f"code, which is exact rationals only")
     return value if isinstance(value, Fraction) else Fraction(value)
+
+
+def rational_sqrt(value):
+    """The exact square root of a rational that is a rational's square, or
+    None: a negative value, or one whose root is irrational (2). A Fraction
+    is in lowest terms, so p/q is a rational's square exactly when p and q
+    are both squares - two integer square roots, at any size (L4: sqrt of
+    a constant folds when exact, docs/LANGUAGE.md, "Constants")."""
+    value = exact(value)
+    if value < 0:
+        return None
+    n, d = value.numerator, value.denominator
+    rn, rd = isqrt(n), isqrt(d)
+    if rn * rn != n or rd * rd != d:
+        return None
+    return Fraction(rn, rd)
 
 
 def round_once(fmt, rnd, value):

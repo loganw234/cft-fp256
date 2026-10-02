@@ -63,6 +63,16 @@ lang_check.py, whose helpers this reuses), with tangents:
      check and, with that off, red on seq.py
   K  coverage: every operation the rules write, every activity pattern
      of fma, every format, attribute and integrator, one and two vectors
+  L  the quotient's and the root's rules (L4), golden-only since the
+     compiler refuses both until parcel C4 (leg I makes the refusal, on
+     every target): written shapes and lang_check's generated sources that
+     divide or take a root, with tangent vectors - the tangent exactly
+     against this stage's own dual numbers (the quotient rule; the root as
+     the exact evaluation takes it) and against a central difference at
+     2^-64 in exact rationals; the primal unchanged; the specials bit for
+     bit; and plants - a root without its 2 and a quotient's wrong sign
+     red on both, a right root derivative written through r * r = a green
+     on the difference and red on the exact check
 
 A check skipped prints a line that starts with SKIP, which the runner
 counts and names on its VERDICT line.
@@ -88,7 +98,7 @@ sys.path.insert(0, str(ROOT / "programs"))
 
 import cftc                                               # noqa: E402
 from cftc import targets as TG                            # noqa: E402
-from cft_golden import cert, lang, seq                    # noqa: E402
+from cft_golden import FORMATS, cert, lang, seq           # noqa: E402
 from cft_golden import softfloat as sf                    # noqa: E402
 from cft_golden.lang import check as lang_check_mod       # noqa: E402
 from cft_golden.lang import constants as K                # noqa: E402
@@ -249,14 +259,33 @@ def primal_unchanged(g, primal_text, states, top, lane_params=None):
                 and b1[1:len(b0) - 2] == b0[1:-2]
                 and b1[len(b0) - 2] == b0[-2][:-1] + b",")
     added = {v for v, *_r in g.const} - {v for v, *_r in g0.const}
-    return added <= {Fraction(0), Fraction(1), Fraction(-1)} and \
-        by_value(g) == by_value(g0)
+    # 0, 1 and -1 by L3's rules, 2 by the square root's (L4)
+    return added <= {Fraction(0), Fraction(1), Fraction(-1), Fraction(2)} \
+        and by_value(g) == by_value(g0)
 
 
 # ---- D: the derivative, this stage's own dual numbers ---------------------
 
 def _sgn(x, zero=1):
     return -1 if x < 0 else (zero if x == 0 else 1)
+
+
+ROOT_BITS = 256
+
+
+def _root(q):
+    """A square root as the exact evaluations take it (cft_golden/lang/
+    graph.py's exact_root, computed again here): exact where q is a
+    rational's square, otherwise rounded down to a multiple of 2^-256; an
+    ArithmeticError below zero."""
+    q = Fraction(q)
+    if q < 0:
+        raise ArithmeticError(f"the square root of {q}")
+    n, d = q.numerator, q.denominator
+    rn, rd = math.isqrt(n), math.isqrt(d)
+    if rn * rn == n and rd * rd == d:
+        return Fraction(rn, rd)
+    return Fraction(math.isqrt((n << (2 * ROOT_BITS)) // d), 1 << ROOT_BITS)
 
 
 def _dual(op, a, tie=0, zero=1):
@@ -276,6 +305,11 @@ def _dual(op, a, tie=0, zero=1):
         return v[0] * v[1], d[0] * v[1] + v[0] * d[1]
     if op == "fma":
         return v[0] * v[1] + v[2], d[0] * v[1] + v[0] * d[1] + d[2]
+    if op == "div":                     # the quotient rule, not the form
+        return v[0] / v[1], (d[0] * v[1] - v[0] * d[1]) / (v[1] * v[1])
+    if op == "sqrt":
+        r = _root(v[0])
+        return r, d[0] / (2 * r)
     if op == "neg":
         return -v[0], -d[0]
     if op == "abs":
@@ -343,9 +377,18 @@ def derivative_misses(g, rng, points=2):
             tv = [_q(rng) for _ in range(n)]
             pa = [_q(rng) for _ in g.param]
             la = [_q(rng) for _ in g.lane]
-            want = dual_derivative(g, primal, st, tv, pa, la)
-            got = g.exact_eval(tangent, st, pa, la, tangent=tv)
+            try:
+                want = dual_derivative(g, primal, st, tv, pa, la)
+            except ArithmeticError:
+                # a zero divisor, a negative root's argument, the root's
+                # derivative at zero (L4): the point decides nothing
+                continue
             tot += 1
+            try:
+                got = g.exact_eval(tangent, st, pa, la, tangent=tv)
+            except ArithmeticError:
+                bad_n += 1
+                continue
             bad_n += got != want
     return tot, bad_n, ties, zeros
 
@@ -1114,6 +1157,15 @@ def leg_refusals():
     expect("lane-shape", lambda: lang.run(lang.load(l63).graph, [[0, 0, 0]],
                                           1),
            "lang.run of a system with a tangent vector, given none")
+    # L4: a quotient and a root with tangent vectors, whose rules divide too
+    routine = ("system dv\nformat fp64\nstate x, y\ntangent v, w\n"
+               "d/dt x = y / sqrt(x * x + 1)\nd/dt y = -x\n"
+               "step rk4, h = 1/16\n")
+    for t in LC.ROUTINE_TARGETS:
+        expect("runtime-routine", lambda: cftc.compile_text(routine, 2,
+                                                            target=t),
+               f"a quotient and a root with two tangent vectors on {t} "
+               f"(the compiler carries them only from parcel C4)")
     try:
         cftc.compile_file(l63, 3).scratch_block([[0, 0, 0]])
         bad("a compiled variational image's block without its tangents - "
@@ -1142,7 +1194,7 @@ def leg_refusals():
                                      "lorenz63-rk4-tangent-fp64.cftp")
               .is_file(), "the command line compiles a variational source")
     check(made == {"tangent-mismatch", "tangent-scope", "scratch-capacity",
-                   "program-capacity", "lane-shape"},
+                   "program-capacity", "lane-shape", "runtime-routine"},
           "every refusal named here was made", f"made {sorted(made)}")
 
 
@@ -1344,6 +1396,204 @@ def leg_coverage():
         check(COVER["flags"] & flag, f"a run raised {word}")
 
 
+# ---- L: the quotient's and the root's rules (L4) ---------------------------
+#
+# d(a / b) = fma(-r, db, da) / b and d sqrt(a) = da / (2 * r), r the
+# operation's own result (docs/LANGUAGE.md, "The quotient and the root").
+# The compiler carries neither until parcel C4 (leg I makes its refusal),
+# so this leg is the golden model's: the derivative exactly against this
+# stage's own dual numbers and by a central difference, the primal
+# unchanged, the specials bit for bit, and plants.
+
+L4_SHAPES = {
+    "map": "system m\nformat fp64\nstate x, y, z\ntangent v\n"
+           "param p = 3/7\nnext x = x / y + sqrt(z * z + 1)\n"
+           "next y = fma(y, p, 1) / (x * x + 2)\n"
+           "next z = sqrt(abs(x - y)) / p\nstep map\n",
+    "rk4": "system f\nformat fp128\nround rdn\nstate x, y\ntangent v\n"
+           "let q = x / (y * y + 1)\nd/dt x = q - sqrt(abs(x) + 1)\n"
+           "d/dt y = x / sqrt(y * y + 2)\nstep rk4, h = 1/8\n",
+    "stormer-verlet": "system k\nformat fp256\nstate q, p\ntangent v\n"
+                      "d/dt q = p / sqrt(p * p + 1)\n"
+                      "d/dt p = -(q / sqrt(q * q + 4))\n"
+                      "step stormer-verlet, h = 1/16, q = (q), p = (p)\n",
+    "euler, two vectors": "system e\nformat fp32\nround rup\nstate x\n"
+                          "tangent v, w\nd/dt x = 1 / (x * x + 1)\n"
+                          "step euler, h = 1/8\n",
+}
+FD_EPS = Fraction(1, 1 << 64)
+FD_TOL = Fraction(1, 1 << 100)
+
+
+def fd_misses(g, rng, points=2):
+    """(points, points where a tangent component is not the central
+    difference (S(x + eps v) - S(x - eps v)) / (2 eps) of the section S it
+    differentiates, in exact rationals at eps = 2^-64 - each root the
+    exact evaluation's, to 2^-256 - within 2^-100 max(1, |tangent|)): the
+    derivative itself, whatever the root's convention. Unplaced random
+    points, since a difference is no derivative at a kink; an undefined
+    point decides nothing."""
+    tot = bad_n = 0
+    for primal, tangent in (("field", "tangent_field"),
+                            ("step", "tangent_step")):
+        if g.section(primal) is None:
+            continue
+        for _ in range(points):
+            st = [_q(rng) for _ in range(g.n_state)]
+            tv = [_q(rng) for _ in range(g.n_state)]
+            pa = [_q(rng) for _ in g.param]
+            la = [_q(rng) for _ in g.lane]
+            try:
+                up = g.exact_eval(primal, [s + FD_EPS * t for s, t in
+                                           zip(st, tv)], pa, la)
+                dn = g.exact_eval(primal, [s - FD_EPS * t for s, t in
+                                           zip(st, tv)], pa, la)
+                got = g.exact_eval(tangent, st, pa, la, tangent=tv)
+            except ArithmeticError:
+                continue
+            tot += 1
+            bad_n += any(abs((u - d) / (2 * FD_EPS) - t) >
+                         FD_TOL * max(1, abs(t))
+                         for u, d, t in zip(up, dn, got))
+    return tot, bad_n
+
+
+class _L4Plant(lang_tangent.Derivation):
+    """The derivation with the quotient's or the root's rule wrong (kind),
+    or right and written through r * r = a."""
+    kind = None
+
+    def rule(self, node):
+        a, R = node.args, self.read
+
+        def N(o, *args):
+            return Node(o, args, node.line)
+        if node.op == "sqrt" and self.of(a[0]) is not None:
+            da = self.of(a[0])
+            if self.kind == "the root without its 2":
+                return N("div", da, R(node))
+            if self.kind == "the root through r * r = a":
+                return N("div", N("mul", da, R(node)),
+                         N("mul", self.two, R(a[0])))
+        if node.op == "div" and self.kind == "the quotient's sign":
+            da, db = self.of(a[0]), self.of(a[1])
+            if da is not None and db is not None:
+                return N("div", N("fma", R(node), db, da), R(a[1]))
+        return super().rule(node)
+
+
+def l4_texts(count, seed):
+    """The written shapes, then generated sources that divide or take a
+    root (lang_check's leg K generator), each with a tangent vector:
+    (text, what)."""
+    out = [(t, f"shape {s}") for s, t in L4_SHAPES.items()]
+    for k in range(count):
+        text, _line = LC.g_routine(random.Random(f"{seed} {k}"), k)
+        if "\ntangent " not in text:
+            text = with_tangent(text, "v, w" if k % 5 == 4 else "v")
+        out.append((text, f"generated {k}"))
+    return out
+
+
+def l4_graphs(texts):
+    graphs = []
+    for text, what in texts:
+        try:
+            graphs.append((lang.compile_text(text, what).graph, text, what))
+        except lang.Refusal as e:
+            if e.name not in LC.ARTIFACTS:
+                bad(f"{what}: the language refused {e}")
+    return graphs
+
+
+def leg_routines(count, rng):
+    section(f"L. the quotient's and the root's rules (L4): {len(L4_SHAPES)} "
+            f"written shapes and {count} generated systems that divide or "
+            f"take a root, with tangent vectors - the derivative exactly and "
+            f"by a central difference, the primal unchanged, the specials, "
+            f"plants")
+    t0 = time.perf_counter()
+    graphs = l4_graphs(l4_texts(count, "tangent routines"))
+    tot = bad_n = ftot = fbad = 0
+    changed = []
+    for g, text, what in graphs:
+        a, b, _t, _z = derivative_misses(g, rng, 3)
+        tot, bad_n = tot + a, bad_n + b
+        a, b = fd_misses(g, rng, 2)
+        ftot, fbad = ftot + a, fbad + b
+        fmt = g.fmt
+        states = LC.lanes_for(fmt, g.n_state, rng, 3)
+        states += LC.special_lanes(fmt, g.n_state, states[0], rng)
+        if not primal_unchanged(g, without_tangent(text), states, 2):
+            changed.append(what)
+    check(bad_n == 0 and tot >= 3 * len(graphs), f"{len(graphs)} systems, "
+          f"{tot} points: the tangent sections evaluated exactly equal this "
+          f"stage's own derivative - the quotient by the quotient rule, "
+          f"the root as the exact evaluation takes it", f"{bad_n} differ")
+    check(fbad == 0 and ftot >= 2 * len(graphs), f"{ftot} points: every "
+          f"tangent component within 2^-100 of the central difference at "
+          f"eps = 2^-64, in exact rationals", f"{fbad} differ")
+    check(not changed, f"the primal unchanged in each: its states and flags "
+          f"without the tangent, on lanes that overflow, hold a signalling "
+          f"NaN and hold subnormals, its graph's lines",
+          f"changed: {changed[:4]}")
+    # the specials, bit for bit, against the rules computed with softfloat
+    fmt = FORMATS["fp64"]
+
+    def b(v):
+        return K.round_once(fmt, sf.RND_RNE, Fraction(v))[0]
+    sign, inf, qnan = fmt.sign_mask, sf.inf_bits(fmt), sf.qnan_bits(fmt)
+    root = lang.compile_text("system s\nformat fp64\nstate x, y\ntangent v\n"
+                             "next x = x\nnext y = sqrt(x)\nstep map\n").graph
+    quo = lang.compile_text("system s\nformat fp64\nstate x, y, z\n"
+                            "tangent v\nnext x = x\nnext y = y\n"
+                            "next z = x / y\nstep map\n").graph
+    cases = [(root, [0, 0], [b(3), 0], 1, inf, sf.FLAG_DIVZERO),
+             (root, [sign, 0], [b(3), 0], 1, inf ^ sign, sf.FLAG_DIVZERO),
+             (root, [0, 0], [0, 0], 1, qnan, sf.FLAG_INVALID),
+             (root, [b(4), 0], [b(3), 0], 1, b(Fraction(3, 4)), 0),
+             (quo, [b(1), 0, 0], [b(1), b(1), 0], 2, inf ^ sign,
+              sf.FLAG_DIVZERO),
+             (quo, [b(6), b(3), 0], [b(7), b(2), 0], 2, b(1), 0)]
+    miss = []
+    for g, st, tv, comp, want, flags in cases:
+        r = lang.run(g, [st], 1, tangents=[[tv]])
+        if (r.tangents[0][0][comp], r.flags) != (want, flags):
+            miss.append(f"{g.op_counts()} at {[hex(x) for x in st]}: "
+                        f"{hex(r.tangents[0][0][comp])} FLAGS {r.flags:#x}")
+    check(not miss, f"the rules at their specials, bit for bit: the root's "
+          f"at +0 and -0 an infinity with divide-by-zero, at 0 along 0 a "
+          f"NaN with invalid, exact at a square; the quotient's at a zero "
+          f"divisor an infinity, exact at 6/3", "; ".join(miss))
+    # the plants
+    texts = l4_texts(12, "tangent routine plants")
+    original = lang_check_mod.Derivation
+    try:
+        for kind in ("the root without its 2", "the quotient's sign",
+                     "the root through r * r = a"):
+            class P(_L4Plant):
+                pass
+            P.kind = kind
+            lang_check_mod.Derivation = P
+            ex = fd = ex_tot = fd_tot = 0
+            for g, _text, _what in l4_graphs(texts):
+                a, b_, _t, _z = derivative_misses(g, rng, 2)
+                ex_tot, ex = ex_tot + a, ex + b_
+                a, b_ = fd_misses(g, rng, 2)
+                fd_tot, fd = fd_tot + a, fd + b_
+            said = (f"plant {kind!r}: the exact check {ex} of {ex_tot} "
+                    f"points, the central difference {fd} of {fd_tot}")
+            if kind == "the root through r * r = a":
+                check(ex > 0 and fd == 0, said + " - a right derivative in "
+                      "another form: green on the difference, red on the "
+                      "exact check, which holds the rule's form")
+            else:
+                check(ex > 0 and fd > 0, said + " - red on both")
+    finally:
+        lang_check_mod.Derivation = original
+    print(f"  ({time.perf_counter() - t0:.1f} s)")
+
+
 # ---- the committed references ---------------------------------------------
 
 def write_references():
@@ -1365,10 +1615,13 @@ def main(argv=None):
     ap.add_argument("--audit", help="host/cft-audit, for legs F and G")
     ap.add_argument("--corpus", type=int, default=24,
                     help="generated systems in leg B (default 24)")
+    ap.add_argument("--routines", type=int, default=24,
+                    help="generated systems that divide or take a root in "
+                         "leg L (default 24)")
     ap.add_argument("--only", default="",
                     help="a comma list of legs: refs,corpus,derivative,"
                          "lyapunov,certified,libcft,determinism,refusals,"
-                         "plants")
+                         "plants,routines")
     ap.add_argument("--write", action="store_true",
                     help="write programs/systems/compiled-tangent/ and exit")
     ap.add_argument("--digests", help=argparse.SUPPRESS)
@@ -1397,7 +1650,9 @@ def main(argv=None):
                                           rng("libcft"), work)),
             ("determinism", lambda: leg_determinism(work)),
             ("refusals", leg_refusals),
-            ("plants", lambda: leg_plants(rng("plants"), segrun_path, work))]
+            ("plants", lambda: leg_plants(rng("plants"), segrun_path, work)),
+            ("routines", lambda: leg_routines(a.routines,
+                                              rng("routines")))]
     try:
         for name, fn in legs:
             if only and name not in only:

@@ -56,6 +56,18 @@ many lanes and at several step counts: the image's REPEAT patched to 1,
      canonical form read back, or refused by the name its source decides;
      never an InternalError. No class of these reached a generator above,
      and each stopped the compiler at exit 70 until D2's rules.
+  K  run-time division and square root (L4): generated sources the
+     language accepts that divide or take a root - in equations and lets,
+     with and without tangent vectors, under every integrator, format and
+     attribute - each read back through its canonical form, run by the
+     interpreter on lanes that overflow, hold a signalling NaN and hold
+     subnormals, and refused by the compiler `runtime-routine` at the first
+     line holding one, on every target and through the command line (exit
+     3) - never an InternalError, the D2 rule between L4 and parcel C4,
+     which compiles them; and each one's canonical form with its
+     written-out step and its tangent lines moved above its equations,
+     refused at the first line holding one whatever the statement
+     (verifier-VL4's (b)1)
 
 A check skipped prints a line that starts with SKIP, which the runner
 counts and names on its VERDICT line.
@@ -67,6 +79,7 @@ import importlib
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -1347,6 +1360,11 @@ def leg_refusals():
            "2^32 steps")
     expect("halving-underflow", lambda: cftc.compile_text(halving, 2),
            "h = 3 x 2^-149 at fp32, whose half is not exact")
+    routine = ("system dv\nformat fp64\nstate x, y\nnext x = x\n"
+               "next y = sqrt(abs(x)) / y\nstep map\n")
+    expect("runtime-routine", lambda: cftc.compile_text(routine, 2),
+           "a run-time root and division, which the compiler carries only "
+           "from parcel C4 (L4; leg K holds it on every target)")
     check(made == set(cftc.NAMES), f"every one of the compiler's "
           f"{len(cftc.NAMES)} names was made", f"missing "
           f"{sorted(set(cftc.NAMES) - made)}")
@@ -1778,6 +1796,287 @@ def leg_readback(count, rng):
           f"{len(wrong)} otherwise")
 
 
+# ---- K: run-time division and square root (L4) ------------------------------
+
+# The language has `a / b` and `sqrt(a)` with operands that are not constants
+# (the nodes div and sqrt, softfloat's div and sqrt under the program's
+# attribute), and its interpreter runs them; the compiler carries them only
+# from parcel C4, and until then refuses them `runtime-routine`, first, at the
+# first source line holding one (docs/LANGUAGE.md). D2's rule must hold in
+# between: every source the language accepts compiles or is refused by name.
+
+ROUTINE_TARGETS = ["sw", "sw:4096", "sw:32768", "u50-rev7", "u50-rev7-quad",
+                   "u50-round2", "open-core"]
+
+
+def g_routine_expr(rng, states, ops, depth):
+    """An expression that divides or takes a square root at run time: each
+    form reads a state component (one of `states`) where it divides or
+    roots, so the operation is a node however the rest folds."""
+    x = rng.choice(states)
+    lit = rng.choice(LITS[:6])
+    form = rng.randrange(7)
+    if form == 0:
+        return f"({x} + {g_expr(rng, ops, depth)}) / ({x} * {x} + {lit})"
+    if form == 1:
+        return f"sqrt(abs({x}) + {lit})"
+    if form == 2:
+        return f"{x} / {rng.choice(LITS)}"
+    if form == 3:
+        return f"{lit} / ({x} * {x} + 1)"
+    if form == 4:
+        return f"{lit} / {x}"                     # a zero lane divides by 0
+    if form == 5:
+        return f"sqrt({x})"                       # a negative lane: invalid
+    return f"fma({x}, {g_expr(rng, ops, depth)}, 1) / sqrt({x} * {x} + 1)"
+
+
+def g_routine(rng, k):
+    """(text, line): a system the language takes that divides or takes a
+    root at run time somewhere - an equation, or a let one reads - under
+    any integrator, format and attribute, with or without tangent vectors;
+    and the first line holding one, by the generator's own count, which
+    the compiler's refusal must name."""
+    shape = rng.choice(["map", "maph", "rk4", "euler", "sv"])
+    lines = [f"system dv{k}",
+             f"format {rng.choice(['fp32', 'fp64', 'fp128', 'fp256'])}",
+             f"round {rng.choice(['rne', 'rtz', 'rdn', 'rup', 'rmm'])}"]
+    sv = shape == "sv"
+    comps = ["q0", "q1", "m0", "m1"] if sv else ["x", "y", "z"]
+    lines.append("state " + ", ".join(comps))
+    if rng.random() < 0.4:
+        lines.append("tangent v" + (", w" if rng.random() < 0.3 else ""))
+    params = [f"p{i}" for i in range(rng.randint(0, 2))]
+    if params:
+        lines.append("param " + ", ".join(f"{p} = {rng.choice(LITS)}"
+                                          for p in params))
+    marked = []
+    extra = list(params)
+    if not sv and rng.random() < 0.4:
+        lines.append(f"let r = {g_routine_expr(rng, comps, comps, 1)}")
+        marked.append(len(lines))
+        extra.append("r")
+    if sv:
+        # a position's right-hand side reads momenta, a momentum's positions
+        reads = {"q0": ["m0", "m1"], "q1": ["m0", "m1"],
+                 "m0": ["q0", "q1"], "m1": ["q0", "q1"]}
+        word = "d/dt"
+    else:
+        reads = {c: comps + (["h"] if shape == "maph" else [])
+                 for c in comps}
+        word = "next" if shape.startswith("map") else "d/dt"
+    pick = rng.randrange(len(comps)) if not marked or rng.random() < 0.5 \
+        else None
+    first_eq = len(lines) + 1
+    for i, c in enumerate(comps):
+        states = [s for s in reads[c] if s != "h"]
+        if i == pick or rng.random() < 0.25:
+            rhs = g_routine_expr(rng, states, reads[c], 1)
+            marked.append(len(lines) + 1)
+        else:
+            rhs = g_expr(rng, reads[c], 2)
+        lines.append(f"{word} {c} = {rhs}")
+    used = extra + (["h"] if shape == "maph" else [])
+    if used:
+        lines[first_eq - 1] += " + " + " + ".join(used)
+    lines.append({"map": "step map", "maph": "step map, h = 1/8",
+                  "rk4": "step rk4, h = 1/8", "euler": "step euler, h = 1/8",
+                  "sv": "step stormer-verlet, h = 1/8, q = (q0, q1), "
+                        "p = (m0, m1)"}[shape])
+    return "\n".join(lines) + "\n", min(marked)
+
+
+def moved_up(canon):
+    """A canonical form with its written-out step (the step line and its
+    expansion block) and its tangent lines moved above its equations and
+    lets - statements may come in any order, so it is the same system -
+    and the first line in it that holds a run-time division or root. The
+    canonical form writes a run-time division ` / ` and a root `sqrt(`,
+    where a constant's spelling has no space (1/3, h/2, 2*h/3), so a line's
+    code (before any `;`) shows which it holds. -> (text, that line, its
+    kind: equation, tangent or block)."""
+    head, step, tangent, primal = [], [], [], []
+    block = False
+    for ln in canon.split("\n")[:-1]:
+        code = ln.split(";", 1)[0].strip()
+        if block or code == "expansion" or code.startswith("step "):
+            step.append(ln)
+            block = (block or code == "expansion") and code != "end"
+        elif re.match(r"(let|next|d/dt) [A-Za-z_]\w*\.", code):
+            tangent.append(ln)
+        elif code.startswith(("let ", "next ", "d/dt ")):
+            primal.append(ln)
+        else:
+            head.append(ln)
+    lines = head + step + tangent + primal
+    for k, ln in enumerate(lines, 1):
+        code = ln.split(";", 1)[0]
+        if " / " in code or "sqrt(" in code:
+            kind = "block" if k <= len(head) + len(step) else \
+                "tangent" if k <= len(head) + len(step) + len(tangent) \
+                else "equation"
+            return "\n".join(lines) + "\n", k, kind
+    return "\n".join(lines) + "\n", None, None
+
+
+def _routine_flags():
+    """Every flag of both operations through the interpreter at every
+    format: one system a format, a lane a case, each lane's result and
+    flags softfloat's, the union all five for div and invalid with inexact
+    for sqrt. -> the failures."""
+    out = []
+    for fmtname in ("fp32", "fp64", "fp128", "fp256"):
+        fmt = FORMATS[fmtname]
+
+        def b(v):
+            return K.round_once(fmt, sf.RND_RNE, Fraction(v))[0]
+        inf, snan = sf.inf_bits(fmt), sf.snan_bits(fmt, 1)
+        mx, mn = sf.max_normal_bits(fmt), sf.min_normal_bits(fmt)
+        g = lang.compile_text(f"system f\nformat {fmtname}\nstate x, y\n"
+                              f"next x = x / y\nnext y = sqrt(y)\n"
+                              f"step map\n").graph
+        lanes = [[b(6), b(3)], [b(1), b(3)], [b(1), 0], [0, b(-1)],
+                 [inf, inf], [snan, b(4)], [mx, mn], [mn, mx], [b(2), snan]]
+        r = lang.run(g, lanes, 1)
+        union = 0
+        for lane, st in zip(lanes, r.states):
+            q, fq = sf.div(fmt, lane[0], lane[1], sf.RND_RNE)
+            s, fs = sf.sqrt(fmt, lane[1], sf.RND_RNE)
+            alone = lang.run(g, [lane], 1)
+            if st != [q, s] or alone.flags != fq | fs:
+                out.append(f"{fmtname} {[hex(v) for v in lane]}: "
+                           f"{[hex(v) for v in st]} FLAGS {alone.flags:#x}, "
+                           f"softfloat's {hex(q)} {hex(s)} {fq | fs:#x}")
+            union |= fq | fs
+        if r.flags != union or union != 0x1f:
+            out.append(f"{fmtname}: FLAGS {r.flags:#x}, the lanes' OR "
+                       f"{union:#x}, every flag 0x1f")
+    return out
+
+
+def leg_routines(count, rng):
+    section(f"K. run-time division and square root (L4): every flag of both "
+            f"through the interpreter at every format, and {count} generated "
+            f"sources that divide or take a root, each read back, run, and "
+            f"refused by the compiler by name at its line on "
+            f"{len(ROUTINE_TARGETS)} targets")
+    t0 = time.perf_counter()
+    fails = _routine_flags()
+    check(not fails, "every flag of div and sqrt at fp32, fp64, fp128 and "
+          "fp256: each lane's result and FLAGS softfloat's, div's five and "
+          "sqrt's invalid and inexact among them", "; ".join(fails[:4]))
+    tally, wrong, internal, moved = {}, [], [], {}
+    flags = runs = 0
+    cli = []
+    for k in range(count):
+        text, line = g_routine(random.Random(f"lang routines {k}"), k)
+        try:
+            g = lang.compile_text(text, f"routine-{k}").graph
+        except lang.Refusal as e:
+            tally[e.name] = tally.get(e.name, 0) + 1
+            if e.name not in ARTIFACTS:
+                wrong.append(f"routine {k}: the language refused {e}")
+            continue
+        if not {"div", "sqrt"} & set(g.op_counts("step")):
+            wrong.append(f"routine {k}: no division or root in its step")
+        canon = lang.render_canonical(g)
+        if lang.compile_text(canon, "canonical").graph.to_bytes() != \
+                g.to_bytes():
+            wrong.append(f"routine {k}: its canonical form reads back as "
+                         f"another graph")
+        lang.render_math(g)
+        # the canonical form with its written-out step and its tangent lines
+        # above its equations: the same graph, refused at the first line
+        # holding a division or root - a block's or a tangent's line, where
+        # the compiler named the equation's until verifier-VL4's (b)1
+        text2, line2, kind2 = moved_up(canon)
+        try:
+            same = lang.compile_text(text2, f"routine-{k}-moved").graph
+            if same.to_bytes() != g.to_bytes():
+                wrong.append(f"routine {k}, moved up: another graph")
+            cftc.compile_text(text2, 2, source=f"routine-{k}-moved",
+                              stem="k")
+            wrong.append(f"routine {k}, moved up: compiled")
+        except lang.Refusal as e:
+            if (e.name, e.line) != ("runtime-routine", line2):
+                wrong.append(f"routine {k}, moved up: refused {e.name} at "
+                             f"line {e.line} where runtime-routine at line "
+                             f"{line2}, a {kind2} line, is due")
+            else:
+                moved[kind2] = moved.get(kind2, 0) + 1
+        except cftc.InternalError as e:
+            internal.append(f"routine {k}, moved up: internal error (exit "
+                            f"70): {str(e)[:120]}")
+        fmt = g.fmt
+        lanes = lanes_for(fmt, g.n_state, rng, 3)
+        lanes += special_lanes(fmt, g.n_state, lanes[0], rng)
+        lanes.append([0] * g.n_state)
+        tans = None
+        if g.tangent:
+            tans = [[lanes_for(fmt, g.n_state, rng, 1)[0] for _ in g.tangent]
+                    for _ in lanes]
+        r = lang.run(g, lanes, 2, tangents=tans)
+        flags |= r.flags
+        runs += 1
+        for t in ROUTINE_TARGETS:
+            try:
+                cftc.compile_text(text, 2, target=t, source=f"routine-{k}",
+                                  stem="k")
+                wrong.append(f"routine {k} on {t}: compiled")
+            except lang.Refusal as e:
+                key = f"{e.name} at its line" if e.line == line else \
+                    f"{e.name} at line {e.line}"
+                tally[key] = tally.get(key, 0) + 1
+                if (e.name, e.line) != ("runtime-routine", line):
+                    wrong.append(f"routine {k} on {t}: refused {e.name} at "
+                                 f"line {e.line} where runtime-routine at "
+                                 f"line {line} is due ({e.sentence[:80]})")
+            except cftc.InternalError as e:
+                internal.append(f"routine {k} on {t}: internal error (exit "
+                                f"70): {str(e)[:120]}")
+        if len(cli) < 3:
+            cli.append((k, text, line))
+    py = [sys.executable, str(ROOT / "python" / "cftc")]
+    with tempfile.TemporaryDirectory() as tmp:
+        for k, text, line in cli:
+            src = Path(tmp) / f"routine{k}.cftl"
+            src.write_bytes(text.encode("ascii"))
+            out = Path(tmp) / f"out{k}"
+            p = subprocess.run(py + [str(src), "--steps", "2", "--target",
+                                     "u50-rev7-quad", "--out", str(out)],
+                               capture_output=True, text=True)
+            if p.returncode != 3 or not p.stderr.startswith(
+                    "cftc: refused runtime-routine: ") or \
+                    f"routine{k}.cftl:{line}: " not in p.stderr or \
+                    out.exists():
+                wrong.append(f"routine {k} through the command line: rc "
+                             f"{p.returncode}, {p.stderr.strip()[:120]}")
+    for f in (internal + wrong)[:10]:
+        print(f"        {f}")
+    print(f"  outcomes: {dict(sorted(tally.items()))}")
+    print(f"  moved up, refused at the first line holding one, by the kind "
+          f"of that line: {dict(sorted(moved.items()))}")
+    print(f"  the interpreter's FLAGS over the {runs} runs: {flags:#x}")
+    check(not internal, f"no InternalError: {count} generated sources that "
+          f"divide or take a root, on {len(ROUTINE_TARGETS)} targets each, "
+          f"and their canonical forms moved up",
+          f"{len(internal)} stopped the compiler with an internal error, "
+          f"exit 70")
+    check(not wrong and runs >= count // 2 and
+          {"block", "tangent", "equation"} <= set(moved),
+          f"{runs} sources accepted by the language read back and run on the "
+          f"interpreter, every one refused `runtime-routine` at the first "
+          f"line holding a division or a root on every target, and "
+          f"{len(cli)} through the command line, exit 3, nothing written; "
+          f"each one's canonical form with its written-out step and its "
+          f"tangent lines moved above its equations, the same graph, refused "
+          f"at the first line holding one - an expansion block's line "
+          f"{moved.get('block', 0)} times, a written tangent's "
+          f"{moved.get('tangent', 0)}, an equation's or a let's "
+          f"{moved.get('equation', 0)} ({time.perf_counter() - t0:.1f} s)",
+          f"{len(wrong)} otherwise")
+
+
 # ---- I: coverage ---------------------------------------------------------------
 
 def leg_coverage():
@@ -1787,8 +2086,9 @@ def leg_coverage():
                 "max", "minnum", "maxnum", "cmplt", "cmple", "cmpeq",
                 "select"]
     print(f"  {COVER['systems']} systems; ops {dict(sorted(ops.items()))}")
-    check(all(ops.get(o) for o in want_ops), "every operation of the "
-          "language was compiled and run", f"missing "
+    check(all(ops.get(o) for o in want_ops), "every operation the compiler "
+          "carries was compiled and run - all the language's but div and "
+          "sqrt, which it refuses until parcel C4 (leg K)", f"missing "
           f"{[o for o in want_ops if not ops.get(o)]}")
     check(COVER["rounds"] == {"rne", "rtz", "rdn", "rup", "rmm"},
           "every attribute", f"{sorted(COVER['rounds'])}")
@@ -1836,9 +2136,12 @@ def main(argv=None):
                     help="let-heavy homed maps in leg A (default 120)")
     ap.add_argument("--hmaps", type=int, default=160,
                     help="maps reading h at random in leg J (default 160)")
+    ap.add_argument("--routines", type=int, default=40,
+                    help="sources that divide or take a root in leg K "
+                         "(default 40)")
     ap.add_argument("--only", default="",
                     help="a comma list of legs: refs,corpus,letmaps,banks,libcft,"
-                         "determinism,refusals,plants,readback")
+                         "determinism,refusals,plants,readback,routines")
     ap.add_argument("--write", action="store_true",
                     help="write programs/systems/compiled/ and exit")
     ap.add_argument("--digests", help=argparse.SUPPRESS)
@@ -1865,7 +2168,9 @@ def main(argv=None):
             ("determinism", lambda: leg_determinism(work)),
             ("refusals", leg_refusals),
             ("plants", lambda: leg_plants(rng("plants"), work)),
-            ("readback", lambda: leg_readback(a.hmaps, rng("readback")))]
+            ("readback", lambda: leg_readback(a.hmaps, rng("readback"))),
+            ("routines", lambda: leg_routines(a.routines,
+                                              rng("routines")))]
     try:
         for name, fn in legs:
             if only and name not in only:

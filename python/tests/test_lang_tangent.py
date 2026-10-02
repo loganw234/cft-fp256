@@ -54,6 +54,7 @@ from cft_golden.lang import constants as C  # noqa: E402
 from cft_golden.lang import tangent as lang_tangent  # noqa: E402
 from cft_golden.lang.graph import Node  # noqa: E402
 from lang_mathform import MathForm  # noqa: E402
+from lang_mathform import root as exact_root  # noqa: E402
 import test_lang as TL  # noqa: E402
 
 F = Fraction
@@ -96,6 +97,11 @@ RULES = [
                       "ab": "fma(v.a, b, a * v.b)",
                       "ac": "fma(v.a, b, v.c)", "bc": "fma(a, v.b, v.c)",
                       "a": "v.a * b", "b": "a * v.b", "c": "v.c"}),
+    # L4: the quotient and the root read r, their own result, written
+    # again here since y's has no name
+    ("a / b", {"ab": "fma(-(a / b), v.b, v.a) / b", "a": "v.a / b",
+               "b": "(-(a / b)) * v.b / b"}),
+    ("sqrt(a)", {"a": "v.a / (2 * sqrt(a))"}),
     ("abs(a)", {"a": "copysign(1, a) * v.a"}),
     ("copysign(a, b)", {"ab": "copysign(1, b) * (copysign(1, a) * v.a)",
                         "a": "copysign(1, b) * (copysign(1, a) * v.a)",
@@ -117,6 +123,8 @@ DOC_RULES = {
     "`a + b`": "`da + db`", "`a - b`": "`da - db`", "`-a`": "`-da`",
     "`a * b`": "`fma(da, b, a * db)`",
     "`fma(a, b, c)`": "`fma(da, b, fma(a, db, dc))`",
+    "`a / b`": "`fma(-r, db, da) / b`",
+    "`sqrt(a)`": "`da / (2 * r)`",
     "`abs(a)`": "`copysign(1, a) * da`",
     "`copysign(a, b)`": "`copysign(1, b) * (copysign(1, a) * da)`",
     "`min(a, b)`, `max`, `minnum`, `maxnum`": "`select(r == a, da, db)`",
@@ -252,6 +260,11 @@ def _dual(op, a, tie=0, zero=1):
         return v[0] * v[1], d[0] * v[1] + v[0] * d[1]
     if op == "fma":
         return v[0] * v[1] + v[2], d[0] * v[1] + v[0] * d[1] + d[2]
+    if op == "div":                     # the textbook's rule, not the form
+        return v[0] / v[1], (d[0] * v[1] - v[0] * d[1]) / (v[1] * v[1])
+    if op == "sqrt":                    # the root as both evaluations take it
+        r = exact_root(v[0])
+        return r, d[0] / (2 * r)
     if op == "neg":
         return -v[0], -d[0]
     if op == "abs":
@@ -315,7 +328,10 @@ def _point(rng, n):
 def derivative_misses(g, rng, points=3):
     """(points, points where the tangent is not the derivative), over the
     field (a flow's) and the step, at random rational points, about
-    half of them placed."""
+    half of them placed. A point at which the test's own derivative is
+    undefined - a zero divisor, a negative root's argument, the root's
+    derivative at zero (L4) - decides nothing and is not counted; where
+    it is defined, the tangent sections must be too, and equal."""
     bad = tot = 0
     for section, tsection in (("field", "tangent_field"),
                               ("step", "tangent_step")):
@@ -326,11 +342,18 @@ def derivative_misses(g, rng, points=3):
             tangent = [_q(rng) for _ in range(g.n_state)]
             params = [_q(rng) for _ in g.param]
             lanes = [_q(rng) for _ in g.lane]
-            got = g.exact_eval(tsection, state, params, lanes,
-                               tangent=tangent)
+            try:
+                want = dual_eval(g, section, state, tangent, params, lanes)
+            except ArithmeticError:
+                continue
             tot += 1
-            bad += got != dual_eval(g, section, state, tangent, params,
-                                    lanes)
+            try:
+                got = g.exact_eval(tsection, state, params, lanes,
+                                   tangent=tangent)
+            except ArithmeticError:
+                bad += 1
+                continue
+            bad += got != want
     return tot, bad
 
 
@@ -599,6 +622,14 @@ def test_a_and_b_agree_exactly_and_node_for_node_where_nothing_is_zero():
                              .read_text()))] + tangent_corpus(80, "a and b")
              if g.is_flow and len(g.tangent) == 1]
     same = differ = 0
+
+    def outcome(fn):
+        # a zero divisor or a negative root's argument (L4): undefined in
+        # both constructions alike, which evaluate the same operations
+        try:
+            return fn()
+        except ArithmeticError:
+            return "undefined"
     for g in flows:
         gA = compile_(extended_source(g), "A")
         n = g.n_state
@@ -607,9 +638,11 @@ def test_a_and_b_agree_exactly_and_node_for_node_where_nothing_is_zero():
             tangent = [_q(rng) for _ in range(n)]
             params = [_q(rng) for _ in g.param]
             lanes = [_q(rng) for _ in g.lane]
-            assert gA.exact_eval("step", state + tangent, params, lanes)[n:] \
-                == g.exact_eval("tangent_step", state, params, lanes,
-                                tangent=tangent)
+            a = outcome(lambda: gA.exact_eval("step", state + tangent,
+                                              params, lanes)[n:])
+            b = outcome(lambda: g.exact_eval("tangent_step", state, params,
+                                             lanes, tangent=tangent))
+            assert a == b
         ids = _Ids()
         equal = _ids_a(gA, n, ids) == _ids_b(g, ids)
         if _zero_component(g):
@@ -672,10 +705,10 @@ def test_the_primal_is_unchanged_by_tangents():
             assert b1[len(b0) - 2] == b0[-2][:-1] + b","
         else:
             renumbered += 1
-            # only 0, 1 and -1 may join the table
+            # only 0, 1, -1 and 2 may join the table (2 by the root's rule)
             added = {v for v, _fa, _b, _f in g.const} - \
                 {v for v, _fa, _b, _f in g0.const}
-            assert added <= {F(0), F(1), F(-1)}
+            assert added <= {F(0), F(1), F(-1), F(2)}
         assert _sections_by_value(g) == _sections_by_value(g0)
         states = [[_bits(g.fmt, _q(rng)) for _ in range(g.n_state)]
                   for _ in range(3)]
@@ -939,6 +972,329 @@ def test_the_tangents_printed_lines_have_teeth():
                       != g.exact_eval("tangent_field", state, params, lanes,
                                       tangent=tangent))
         assert caught, (which, plant)
+
+
+# ---- L4: the quotient's and the root's rules --------------------------------------
+#
+# d(a / b) = fma(-r, db, da) / b and d sqrt(a) = da / (2 * r), r the
+# operation's own result (docs/LANGUAGE.md, "The quotient and the root").
+
+def _l4_one(text, state, tangent, params=None):
+    g = compile_(text)
+    r = lang.run(g, [state], 1, tangents=[[tangent]], params=params)
+    return r.states[0], r.tangents[0][0], r.flags, r.primal_flags
+
+
+def test_l4_the_quotient_and_the_root_at_their_specials():
+    """Bit for bit through the interpreter: the root's tangent at +0 and -0
+    (an infinity with divide-by-zero, the zero's sign; a NaN with invalid
+    where the tangent is zero too), below zero (a NaN, the primal's invalid
+    only), at +infinity (a zero, no flag), exact at a square and one
+    rounding off it; the quotient's at a zero divisor (with and without
+    the divisor's tangent), exact, inexact, and by a param, zero too."""
+    fmt = FORMATS["fp64"]
+
+    def b(v):
+        return _bits(fmt, v)
+    sign, inf, qnan = fmt.sign_mask, sf.inf_bits(fmt), sf.qnan_bits(fmt)
+    root = ("system s\nformat fp64\nstate x, y\ntangent v\nnext x = x\n"
+            "next y = sqrt(x)\nstep map\n")
+    cases = [   # x, v.x -> y's tangent, FLAGS, the primal's flags
+        (0, b(3), inf, sf.FLAG_DIVZERO, 0),
+        (sign, b(3), inf ^ sign, sf.FLAG_DIVZERO, 0),
+        (0, 0, qnan, sf.FLAG_INVALID, 0),
+        (b(-1), b(3), qnan, sf.FLAG_INVALID, sf.FLAG_INVALID),
+        (inf, b(3), 0, 0, 0),
+        (b(4), b(3), b(F(3, 4)), 0, 0),
+    ]
+    for x, vx, want, flags, pflags in cases:
+        _s, t, f, pf = _l4_one(root, [x, 0], [vx, 0])
+        assert (t[1], f, pf) == (want, flags, pflags), (hex(x), hex(vx))
+    _s, t, f, _pf = _l4_one(root, [b(2), 0], [b(1), 0])
+    s2 = sf.sqrt(fmt, b(2))[0]
+    assert t[1] == sf.div(fmt, b(1), sf.mul(fmt, b(2), s2)[0])[0]
+    assert f == sf.FLAG_INEXACT
+    quo = ("system s\nformat fp64\nstate x, y, z\ntangent v\nnext x = x\n"
+           "next y = y\nnext z = x / y\nstep map\n")
+    one = b(1)
+    # r = 1/0 = +inf; fma(-inf, 1, 1) = -inf, over +0 -inf: no new flag
+    _s, t, f, pf = _l4_one(quo, [one, 0, 0], [one, one, 0])
+    assert (t[2], f, pf) == (inf ^ sign, sf.FLAG_DIVZERO, sf.FLAG_DIVZERO)
+    # the same with v.y = 0: -inf * 0 is invalid
+    _s, t, f, _pf = _l4_one(quo, [one, 0, 0], [one, 0, 0])
+    assert (t[2], f) == (qnan, sf.FLAG_DIVZERO | sf.FLAG_INVALID)
+    # r = 6/3 = 2: (7 - 2 * 2) / 3 = 1, exact; (1 - 2 * 1) / 3 rounds once
+    _s, t, f, _pf = _l4_one(quo, [b(6), b(3), 0], [b(7), b(2), 0])
+    assert (t[2], f) == (one, 0)
+    _s, t, f, _pf = _l4_one(quo, [b(6), b(3), 0], [one, one, 0])
+    assert (t[2], f) == (b(F(-1, 3)), sf.FLAG_INEXACT)
+    # by a param, db identically zero: v.x / p, and a zero p an infinity
+    byp = ("system s\nformat fp64\nstate x, y\ntangent v\nparam p = 3\n"
+           "next x = x\nnext y = x / p\nstep map\n")
+    _s, t, f, _pf = _l4_one(byp, [b(3), 0], [b(6), 0])
+    assert (t[1], f) == (b(2), 0)
+    _s, t, f, _pf = _l4_one(byp, [b(3), 0], [b(6), 0], params={"p": 0})
+    assert (t[1], f) == (inf, sf.FLAG_DIVZERO)
+
+
+def _structural(g):
+    """(the primal step's node ids, the tangent step's ops and ids), each
+    id an operation on ids - so a value written again in the tangent has
+    the primal's id, as the compiler's sharing makes it one operation."""
+    ids = _Ids()
+    n = g.n_state
+    pn = []
+    for op, args, _l in g.step.nodes:
+        pn.append(ids((op, tuple(pn[int(a[1:])] if a[0] == "n"
+                                 else _leaf(g, a, n, ids) for a in args))))
+    tn = []
+
+    def get(a):
+        if a[0] == "d":
+            return tn[int(a[1:])]
+        if a[0] == "n":
+            return pn[int(a[1:])]
+        return _leaf(g, a, 10 ** 9, ids)
+    for op, args, _l in g.tangent_step.nodes:
+        tn.append(ids((op, tuple(get(a) for a in args))))
+    return set(pn), [(op, i) for (op, _a, _l), i in
+                     zip(g.tangent_step.nodes, tn)]
+
+
+def _reading_state(sec):
+    """For each node of a primal section, whether its tangent can be other
+    than zero - whether it reads the state through an operand whose
+    tangent its rule reads (none of a comparison's, a select's arms and
+    not its condition, copysign's first) - by the test's own walk."""
+    reads = []
+    for op, args, _l in sec.nodes:
+        rel = () if op in ("cmplt", "cmple", "cmpeq") else \
+            args[:2] if op == "select" else \
+            args[:1] if op == "copysign" else args
+        reads.append(any(a[0] == "s" or (a[0] == "n" and reads[int(a[1:])])
+                         for a in rel))
+    return reads
+
+
+def _read_by_tangent(sec):
+    """For each node of a primal section, whether the section's tangent
+    reads its tangent: whether it reaches an output through operands whose
+    tangents the rules read (none of a comparison's, a select's arms and
+    not its condition, copysign's first) - the derivation's walk from the
+    outputs, by the test's own code."""
+    read = [False] * len(sec.nodes)
+    stack = [int(o[1:]) for o in sec.out if o[0] == "n"]
+    while stack:
+        k = stack.pop()
+        if read[k]:
+            continue
+        read[k] = True
+        op, args, _l = sec.nodes[k]
+        rel = () if op in ("cmplt", "cmple", "cmpeq") else \
+            args[:2] if op == "select" else \
+            args[:1] if op == "copysign" else args
+        stack += [int(a[1:]) for a in rel if a[0] == "n"]
+    return read
+
+
+def test_l4_each_vector_pays_one_division_a_quotient_or_root():
+    """After sharing what the tangent writes again, a tangent vector's step
+    holds one division of its own for each division and each root of the
+    step whose tangent the step's tangent reads - not zero, and reaching an
+    output through operands the rules differentiate - none for any other,
+    and no root of its own: rk4 with one division and one root in its
+    right-hand sides performs eight a step, and each vector adds eight;
+    with params p and q, x * (p / q) and y / p + sqrt(q) perform three a
+    step, and each vector adds one (verifier-VL4's (b)2). A division or
+    root that reads the state only through a comparison, a select's
+    condition or copysign's sign costs nothing either: select(x < 0, p, q)
+    / p reads x and costs 0, as do copysign(p, x) / q and
+    sqrt(select(y < 0, p, q)), beside the control x / p * q, which costs 1
+    (verifier-VL4's re-check). And one whose tangent is not zero costs
+    nothing where it reaches the outputs only through those operands, since
+    the derivation forms no tangent of it there: select(x / y < 1, x, y),
+    select(sqrt(abs(x)) < 1, x, y), copysign(x, x / y) and y + (y / z < 1)
+    cost 0, beside the control z / x (verifier-VL4's third check)."""
+    for text, per_step, per_vector in (
+            ("system c\nformat fp64\nstate x, y\ntangent v\n"
+             "d/dt x = x / (y * y + 1)\nd/dt y = -sqrt(abs(x) + 1)\n"
+             "step rk4, h = 1/8\n", 8, 8),
+            ("system c\nformat fp64\nstate x, y\ntangent v, w\n"
+             "next x = x / y\nnext y = sqrt(x * x + y)\nstep map\n", 2, 2),
+            ("system c\nformat fp64\nstate x, y\ntangent v\n"
+             "param p = 2, q = 3\nnext x = x * (p / q)\n"
+             "next y = y / p + sqrt(q)\nstep map\n", 3, 1),
+            ("system c\nformat fp64\nstate x, y\ntangent v\n"
+             "param p = 2, q = 3\nnext x = x + select(x < 0, p, q) / p\n"
+             "next y = y\nstep map\n", 1, 0),
+            ("system c\nformat fp64\nstate x, y, z\ntangent v\n"
+             "param p = 2, q = 3\nnext x = x + copysign(p, x) / q\n"
+             "next y = y + sqrt(select(y < 0, p, q))\nnext z = x / p * q\n"
+             "step map\n", 3, 1),
+            ("system c\nformat fp64\nstate x, y\ntangent v\n"
+             "next x = select(x / y < 1, x, y)\n"
+             "next y = select(sqrt(abs(x)) < 1, x, y)\nstep map\n", 2, 0),
+            ("system c\nformat fp64\nstate x, y, z\ntangent v, w\n"
+             "next x = copysign(x, x / y)\nnext y = y + (y / z < 1)\n"
+             "next z = z / x\nstep map\n", 3, 1)):
+        g = compile_(text)
+        primal, tangent = _structural(g)
+        routines = [k for k, (op, _a, _l) in enumerate(g.step.nodes)
+                    if op in ("div", "sqrt")]
+        assert len(routines) == per_step, text
+        nonzero, read = _reading_state(g.step), _read_by_tangent(g.step)
+        assert sum(nonzero[k] and read[k] for k in routines) == per_vector, \
+            text
+        own_div = {i for op, i in tangent if op == "div" and i not in primal}
+        own_sqrt = {i for op, i in tangent if op == "sqrt" and i not in primal}
+        assert (len(own_div), len(own_sqrt)) == (per_vector, 0), text
+
+
+def test_l4_unnamed_quotients_and_roots_grow_with_the_square():
+    """The known limit's figures for the quotient and the root (L4,
+    verifier-VL4): their rules read the operation's own result, so an
+    unnamed chain writes it again at every level, as a product's does."""
+    names = [f"x{i}" for i in range(100)]
+    head = f"system c\nformat fp64\nstate {', '.join(names)}\ntangent v\n"
+    tail = "".join(f"next {x} = {x}\n" for x in names[1:]) + "step map\n"
+    chain = head + "next x0 = " + " / ".join(names) + "\n" + tail
+    assert len(compile_(chain).tangent_step.nodes) == 5247
+    lets = "".join(f"let q{k} = {'x0' if k == 1 else f'q{k - 1}'} / x{k}\n"
+                   for k in range(1, 100))
+    named = head + lets + "next x0 = q99\n" + tail
+    assert len(compile_(named).tangent_step.nodes) == 297
+    e = "x"
+    for _ in range(99):
+        e = f"sqrt({e})"
+    roots = f"system r\nformat fp64\nstate x\ntangent v\nnext x = {e}\nstep map\n"
+    assert len(compile_(roots).tangent_step.nodes) == 5148
+
+
+L4_SYSTEMS = {
+    "map": ("system m\nformat fp64\nstate x, y, z\ntangent v\n"
+            "param p = 3/7\nnext x = x / y + sqrt(z * z + 1)\n"
+            "next y = fma(y, p, 1) / (x * x + 2)\n"
+            "next z = sqrt(abs(x - y)) / p\nstep map\n"),
+    "rk4": ("system f\nformat fp64\nstate x, y\ntangent v\n"
+            "let q = x / (y * y + 1)\nd/dt x = q - sqrt(abs(x) + 1)\n"
+            "d/dt y = x / sqrt(y * y + 2)\nstep rk4, h = 1/8\n"),
+    "stormer-verlet": ("system k\nformat fp64\nstate q, p\ntangent v\n"
+                       "d/dt q = p / sqrt(p * p + 1)\n"
+                       "d/dt p = -(q / sqrt(q * q + 4))\n"
+                       "step stormer-verlet, h = 1/16, q = (q), p = (p)\n"),
+    "euler, two vectors": ("system e\nformat fp64\nstate x\ntangent v, w\n"
+                           "d/dt x = 1 / (x * x + 1)\nstep euler, h = 1/8\n"),
+}
+FD_EPS = F(1, 1 << 64)
+FD_TOL = F(1, 1 << 100)
+
+
+def fd_misses(g, rng, points=3):
+    """(points, points where a tangent component is not the central
+    difference): (S(x + eps v) - S(x - eps v)) / (2 eps) of a primal
+    section S in exact rationals, eps = 2^-64, each root the evaluation's
+    2^-256 one - so the difference's error is O(eps^2) plus at most about
+    2^-190 - against the tangent section, every component within 2^-100
+    max(1, |tangent|). The derivative itself, whatever the root's
+    convention. Unplaced random points: a difference is no derivative at
+    a kink; an undefined point decides nothing."""
+    tot = bad = 0
+    for section, tsection in (("field", "tangent_field"),
+                              ("step", "tangent_step")):
+        if g.section(section) is None:
+            continue
+        for _ in range(points):
+            st = [_q(rng) for _ in range(g.n_state)]
+            tv = [_q(rng) for _ in range(g.n_state)]
+            pa = [_q(rng) for _ in g.param]
+            la = [_q(rng) for _ in g.lane]
+            try:
+                up = g.exact_eval(section, [s + FD_EPS * t for s, t in
+                                            zip(st, tv)], pa, la)
+                dn = g.exact_eval(section, [s - FD_EPS * t for s, t in
+                                            zip(st, tv)], pa, la)
+                got = g.exact_eval(tsection, st, pa, la, tangent=tv)
+            except ArithmeticError:
+                continue
+            tot += 1
+            bad += any(abs((u - d) / (2 * FD_EPS) - t) >
+                       FD_TOL * max(1, abs(t)) for u, d, t in zip(up, dn, got))
+    return tot, bad
+
+
+def _l4_graphs(corpus=24, seed="l4 corpus"):
+    """The written L4 systems, and generated systems with tangent vectors
+    that divide or take a root."""
+    graphs = [compile_(t) for t in L4_SYSTEMS.values()]
+    graphs += [g for g in tangent_corpus(corpus, seed)
+               if {"div", "sqrt"} & set(g.op_counts("step"))]
+    return graphs
+
+
+def test_l4_the_rules_are_the_derivative():
+    """The fourth check (exact dual numbers, the quotient by the textbook's
+    rule) and a central difference, on the written L4 systems - a map, rk4
+    with a let, stormer-verlet, euler with two vectors - and on generated
+    ones that divide or take a root: no miss at any point."""
+    rng = random.Random("l4 derivative")
+    graphs = _l4_graphs()
+    assert len(graphs) >= 12
+    tot = bad = ftot = fbad = 0
+    for g in graphs:
+        a, b = derivative_misses(g, rng, points=4)
+        tot, bad = tot + a, bad + b
+        a, b = fd_misses(g, rng, points=3)
+        ftot, fbad = ftot + a, fbad + b
+    assert bad == 0 and tot >= 60, (tot, bad)
+    assert fbad == 0 and ftot >= 60, (ftot, fbad)
+
+
+class _L4Plant(lang_tangent.Derivation):
+    kind = None
+
+    def rule(self, node):
+        a, R = node.args, self.read
+
+        def N(o, *args):
+            return Node(o, args, node.line)
+        if node.op == "sqrt" and self.of(a[0]) is not None:
+            da = self.of(a[0])
+            if self.kind == "root without its 2":       # da / r
+                return N("div", da, R(node))
+            if self.kind == "root through r*r = a":     # da r / (2 a)
+                return N("div", N("mul", da, R(node)),
+                         N("mul", self.two, R(a[0])))
+        if node.op == "div" and self.kind == "quotient's sign":
+            da, db = self.of(a[0]), self.of(a[1])
+            if da is not None and db is not None:       # (da + r db) / b
+                return N("div", N("fma", R(node), db, da), R(a[1]))
+        return super().rule(node)
+
+
+@pytest.mark.parametrize("kind", ["root without its 2", "quotient's sign",
+                                  "root through r*r = a"])
+def test_l4_the_plants(kind, monkeypatch):
+    """Two wrong rules, each red on the exact check and on the central
+    difference; and a right derivative written through r * r = a, green on
+    the difference and red on the exact check, which holds the rule's form
+    as the committed bytes hold a rounding order."""
+    class P(_L4Plant):
+        pass
+    P.kind = kind
+    monkeypatch.setattr(lang_check, "Derivation", P)
+    rng = random.Random(f"l4 plant {kind}")
+    tot = bad = ftot = fbad = 0
+    for g in _l4_graphs(12, f"l4 plant corpus {kind}"):
+        a, b = derivative_misses(g, rng, points=2)
+        tot, bad = tot + a, bad + b
+        a, b = fd_misses(g, rng, points=2)
+        ftot, fbad = ftot + a, fbad + b
+    assert tot and ftot
+    assert bad > 0, (kind, tot)
+    if kind == "root through r*r = a":
+        assert fbad == 0, (kind, ftot, fbad)
+    else:
+        assert fbad > 0, (kind, ftot)
 
 
 # ---- the known limit, measured -----------------------------------------------------

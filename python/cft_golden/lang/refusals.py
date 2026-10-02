@@ -97,12 +97,14 @@ CATALOGUE = {
                      "another tangent vector's equations; or a tangent "
                      "vector read whole",
     # -- operations v1 does not have -----------------------------------
-    "runtime-division": "a division with an operand that is not a "
-                        "constant",
-    "runtime-sqrt": "a square root at run time",
+    # (runtime-division and runtime-sqrt went with L4, 2026-10-02: a
+    # run-time division and square root are operations, div and sqrt;
+    # until parcel C4 the compiler refuses them, `runtime-routine`)
     "transcendental": "a transcendental function at run time",
-    "irrational-constant": "a square root or transcendental of a "
-                           "constant, which no rational carries",
+    "irrational-constant": "a square root of a constant that is no "
+                           "rational's square (2, or a negative one), or a "
+                           "transcendental of a constant: values no "
+                           "rational carries",
     "power": "^ or **",
     "not-equal": "!=",
     "chained-comparison": "a comparison of a comparison, unparenthesised",
@@ -137,10 +139,11 @@ CATALOGUE = {
 
 # The compiler's refusals, reserved for it (L2): the target's stated
 # capacities (the plan's item 10), which depend on the lowering and on
-# the device, and two of the compiled image's own. The checker never
-# raises these; the compiler raises them through the same Refusal, so
-# the language has one class and one list of names, and
-# docs/LANGUAGE.md gives each its sentence.
+# the device, two of the compiled image's own, and one the compiler's
+# own until parcel C4 (L4's). The checker never raises these; the
+# compiler raises them through the same Refusal, so the language has one
+# class and one list of names, and docs/LANGUAGE.md gives each its
+# sentence.
 COMPILER_REFUSALS = {
     "scratch-capacity": "registers plus scratch past the target's: "
                         "2,048 slots on the U50's revision 7, 256 "
@@ -157,6 +160,10 @@ COMPILER_REFUSALS = {
     "halving-underflow": "an h-scaled constant whose exact halving "
                          "underflows, so the step-halving bank cannot "
                          "hold it exactly",
+    "runtime-routine": "a division or square root at run time, which the "
+                       "compiler carries only as an inlined routine "
+                       "(divfull, sqrtfull), from parcel C4; until then "
+                       "the interpreter runs such a system",
 }
 
 # Every name a Refusal may carry: the checker's and the interpreter's,

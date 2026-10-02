@@ -547,6 +547,131 @@ def test_a_step_count_past_the_digit_limit_is_refused_by_name():
     assert len(str(e.value)) < 400
 
 
+# ---- L4: run-time division and square root, refused by name until C4 ----------
+# The language has them (div, sqrt) and its interpreter runs them; a tile has
+# no such instruction, and the compiler inlines their routines only from
+# parcel C4. Until then cftc refuses them `runtime-routine`, first, on every
+# target, at the first source line holding one - never an internal error.
+
+ROUTINE = {   # name: (source, the first line holding a division or a root)
+    "a quotient": ("system d\nformat fp64\nstate x, y\nnext x = x\n"
+                   "next y = x / y\nstep map\n", 5),
+    "a root": ("system r\nformat fp64\nstate x\nnext x = sqrt(x)\n"
+               "step map\n", 4),
+    "both, a let, rk4, two vectors": (
+        "system b\nformat fp256\nstate x, y\ntangent v, w\n"
+        "let s = sqrt(abs(y) + 1)\nd/dt x = y\nd/dt y = -(x / s)\n"
+        "step rk4, h = 1/16\n", 5),
+    "a quotient by a constant": ("system c\nformat fp32\nstate x\n"
+                                 "next x = x / 3\nstep map\n", 4),
+    "a quotient by h": ("system m\nformat fp128\nstate x\nnext x = x / h\n"
+                        "step map, h = 1/8\n", 4),
+    "a division by zero": ("system z\nformat fp64\nstate x\n"
+                           "next x = x / (1 - 1)\nstep map\n", 4),
+    # verifier-VL4's (b)1: statements come in any order, and a written
+    # tangent or an expansion block above the equations holds the first
+    # division - refused at the primal's line (7, 8, 9) until the checker
+    # handed the compiler its own lines
+    "a written tangent first": (
+        "system m\nformat fp64\nstate x, y\ntangent v\n"
+        "next v.x = fma(-(x / y), v.y, v.x) / y\n"
+        "next v.y = v.y / (2 * sqrt(y))\nnext x = x / y\nnext y = sqrt(y)\n"
+        "step map\n", 5),
+    "a tangent let above its let": (
+        "system t\nformat fp64\nstate x, y\ntangent v\n"
+        "let v.u = fma(-u, v.y, v.x) / y\nnext v.x = v.u\nnext v.y = v.y\n"
+        "let u = x / y\nnext x = u\nnext y = y\nstep map\n", 5),
+    "an expansion block first": (
+        "system b\nformat fp64\nstate x, y\nstep euler, h = 0.125\n"
+        "expansion\n  next x = fma(h, x / ((y * y) + 1), x)\n"
+        "  next y = fma(h, -y, y)\nend\nd/dt x = x / ((y * y) + 1)\n"
+        "d/dt y = -y\n", 6),
+}
+
+
+@pytest.mark.parametrize("case", list(ROUTINE))
+def test_the_interim_refusal_on_every_target(case):
+    """compile_text on every built-in target and sw:N, compile_graph of the
+    language's graph and of a graph read from its bytes (which carries no
+    lines): `runtime-routine`, at the first line in source order holding
+    one, whatever its statement, before the compiler's other checks (a
+    step count of 0, a target without the format) and before its own
+    reading of the graph."""
+    text, line = ROUTINE[case]
+    g = lang.compile_text(text, "src.cftl").graph
+    assert {"div", "sqrt"} & set(g.op_counts("step"))
+    assert g.routine_lines[0] == line
+    assert lang.StepGraph.from_bytes(g.to_bytes()).routine_lines is None
+    trim = T.Target("trim", ("fp64",), 32768, 512, 2048, 1024,
+                    T.TILE_FEATURES)
+    for target in T.names() + ["sw:4096", "sw:32768", trim]:
+        for steps in (3, 0):
+            with pytest.raises(lang.Refusal) as e:
+                cftc.compile_text(text, steps, target=target,
+                                  source="src.cftl")
+            assert (e.value.name, e.value.line, e.value.source) == \
+                ("runtime-routine", line, "src.cftl"), (target, str(e.value))
+    with pytest.raises(lang.Refusal) as e:
+        cftc.compile_graph(g, 3, source="src.cftl")
+    assert (e.value.name, e.value.line) == ("runtime-routine", line)
+    back = lang.StepGraph.from_bytes(g.to_bytes())
+    with pytest.raises(lang.Refusal) as e:
+        cftc.compile_graph(back, 3)
+    assert (e.value.name, e.value.line) == ("runtime-routine", None)
+    ops = [op for op in ("div", "sqrt") if op in g.op_counts("step")]
+    s = e.value.sentence
+    assert s.startswith("this step ") and f"({', '.join(ops)})" in s, s
+    assert "parcel C4" in s and "lang.run" in s
+    for op, routine in (("div", "divfull"), ("sqrt", "sqrtfull")):
+        assert (routine in s) == (op in ops), s
+    # and the interpreter runs it
+    fmt = g.fmt
+    lanes = [[K.round_once(fmt, sf.RND_RNE, Fraction(v, 7))[0]] * g.n_state
+             for v in (3, 11)]
+    kw = {"tangents": [[lane] * len(g.tangent) for lane in lanes]} \
+        if g.tangent else {}
+    assert len(lang.run(g, lanes, 2, **kw).states) == 2
+
+
+def test_the_interim_refusal_through_the_command_line(tmp_path):
+    """Exit 3 with the name and the line, nothing written, never 70."""
+    py = [sys.executable, str(ROOT / "python" / "cftc")]
+    for k, (case, (text, line)) in enumerate(ROUTINE.items()):
+        src = tmp_path / f"routine{k}.cftl"
+        src.write_bytes(text.encode("ascii"))
+        out = tmp_path / f"out{k}"
+        r = subprocess.run(py + [str(src), "--steps", "2", "--target",
+                                 "u50-rev7-quad", "--out", str(out)],
+                           capture_output=True, text=True)
+        assert r.returncode == 3, (case, r.returncode, r.stderr)
+        assert r.stderr.startswith("cftc: refused runtime-routine: "), r.stderr
+        assert f"routine{k}.cftl:{line}: this step " in r.stderr, r.stderr
+        assert "internal error" not in r.stderr
+        assert not out.exists()
+
+
+def test_divisions_and_roots_that_fold_compile():
+    """A constant over a constant and the root of a rational's square fold
+    (L4), so a system holding only those compiles, and its image equals
+    the interpreter."""
+    text = ("system f\nformat fp64\nstate x, y\nnext x = x * (8/3)\n"
+            "next y = fma(y, sqrt(9/4), x / (1 + 1) * 0 + x * (1/3))\n"
+            "step map\n")
+    with pytest.raises(lang.Refusal) as e:      # x / (1 + 1) divides
+        cftc.compile_text(text, 3)
+    assert (e.value.name, e.value.line) == ("runtime-routine", 5)
+    text = text.replace("x / (1 + 1) * 0 + ", "")
+    c = cftc.compile_text(text, 3)
+    assert "div" not in c.graph.op_counts() and \
+        "sqrt" not in c.graph.op_counts()
+    lanes = [[K.round_once(c.ir.fmt, sf.RND_RNE, Fraction(v, 9))[0]] * 2
+             for v in (2, -5, 13)]
+    r = c.run(lanes)
+    ref = lang.run(c.graph, lanes, 3)
+    assert [r.scratch_out[k * c.ir.m:k * c.ir.m + 2] for k in range(3)] == \
+        ref.states and r.flags == ref.flags
+
+
 # ---- the variational equations (L3) -----------------------------------------
 # The `tangent` stage (programs/tangent_check.py) holds every compiled
 # variational image to lang.run on seq.py; these are its smaller facts.

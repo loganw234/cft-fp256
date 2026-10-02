@@ -584,7 +584,13 @@ def _expr(rng, leaves, depth):
 
     def a():
         return _expr(rng, leaves, depth - 1)
-    k = rng.randrange(14)
+    k = rng.randrange(17)
+    if k == 14:                         # L4: `/` is a product's kind
+        return f"{a()} * {a()} / {a()}"
+    if k == 15:
+        return f"{a()} / {a()} * {a()} - -{a()} / {a()}"
+    if k == 16:
+        return f"sqrt({a()})"
     if k == 0:
         return f"{a()} + {a()} - {a()}"
     if k == 1:
@@ -667,8 +673,11 @@ def test_the_measure_is_the_lexers_count_line_by_line():
             graphs.append(compile_(text))
             made += 1
         except lang.Refusal as r:
-            assert r.name in ("constant-negative-zero", "h-nonlinear"), \
-                f"{r}\n{text}"
+            # and since L4 a constant's root no rational carries, or a
+            # constant over a constant zero
+            assert r.name in ("constant-negative-zero", "h-nonlinear",
+                              "irrational-constant",
+                              "constant-division-by-zero"), f"{r}\n{text}"
             refusals += 1
     assert refusals < made
     for g in graphs:
@@ -836,10 +845,13 @@ EXACT += [NL.join(["system cc", "format fp64", "state x", "const c1 = 1/7"]
                   + [f"let a{j} = a{j - 1} + y" for j in range(2, 700)]
                   + ["let a700 = a699 * 1e400", "next x = a700", "next y = y",
                      "step map"]) + NL,
+          # (the prefix's fault was `y / 0`, runtime-division, until L4
+          # made a run-time division an operation, 2026-10-02: a constant
+          # over a constant zero is a fault of the same place and kind)
           NL.join(["system f", "format fp64", "state x, y",
                    "let a1 = x * 1e400"]
                   + [f"let a{j} = a{j - 1} + y" for j in range(2, 350)]
-                  + ["let a350 = (y / 0) + a349"]
+                  + ["let a350 = (y * (1/0)) + a349"]
                   + [f"let a{j} = a{j - 1} + y" for j in range(351, 701)]
                   + ["next x = a700", "next y = y", "step map"]) + NL]
 
@@ -858,7 +870,7 @@ def test_a_definition_met_deep_is_the_recursion(monkeypatch):
     assert [o[0] for o in oracle].count("accepted") == 8
     assert [o[1:3] for o in oracle if o[0] == "refused"] == \
         [("cycle", 404), ("cycle", 4), ("cycle", 598),
-         ("constant-overflow", 703), ("runtime-division", 353)]
+         ("constant-overflow", 703), ("constant-division-by-zero", 353)]
     for budget in (shipped, 3):
         monkeypatch.setattr(lang_check, "BUDGET", budget)
         assert [_outcome(t) for t in EXACT] == oracle, budget

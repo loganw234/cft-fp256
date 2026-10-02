@@ -4,7 +4,7 @@
 
 The language has one exception and one list of names
 (cft_golden.lang.refusals: CATALOGUE for the checker and the
-interpreter, COMPILER_REFUSALS for these). The compiler raises its seven
+interpreter, COMPILER_REFUSALS for these). The compiler raises its eight
 through that class - never a subclass, never a class of its own - so a
 writer meets one form of refusal from the parser to the image:
 `<source>:<line>: <name>: <sentence>`.
@@ -21,11 +21,18 @@ writer meets one form of refusal from the parser to the image:
                      immediate a segment's steps are
   halving-underflow  an h-scaled constant whose exact halving
                      underflows, so no step-halving bank holds it
+  runtime-routine    a run-time division or square root (the language's
+                     div and sqrt, L4), which the compiler carries only
+                     as an inlined routine, from parcel C4: raised first,
+                     on every target, at the first source line holding
+                     one, whatever its statement, so that no source the
+                     language accepts reaches an internal error (exit 70)
+                     in between
 """
 
 NAMES = ("target-format", "target-feature", "program-capacity",
          "scratch-capacity", "loader-bound", "segment-steps",
-         "halving-underflow")
+         "halving-underflow", "runtime-routine")
 
 
 class InternalError(AssertionError):

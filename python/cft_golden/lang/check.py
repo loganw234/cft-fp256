@@ -37,9 +37,11 @@ from .tangent import Derivation
 from .templates import (FLOW_INTEGRATORS, INTEGRATORS, LABEL_PREFIXES,
                         TEMPLATES)
 
-# The built-ins and the number of arguments each takes.
+# The built-ins and the number of arguments each takes. sqrt joined them
+# with the run-time square root (L4, 2026-10-02): of a constant it folds
+# where the root is exact and is `irrational-constant` where it is not.
 BUILTINS = {"fma": 3, "abs": 1, "copysign": 2, "min": 2, "max": 2,
-            "minnum": 2, "maxnum": 2, "select": 3}
+            "minnum": 2, "maxnum": 2, "select": 3, "sqrt": 1}
 
 # Refused by name in v1 (`transcendental`, `irrational-constant`), and so
 # reserved: a value cannot be named after one.
@@ -51,7 +53,7 @@ TRANSCENDENTAL = frozenset({
     "atanh", "cbrt", "rsqrt",
 })
 SPECIAL_WORDS = frozenset({"inf", "infinity", "nan", "snan"})
-RESERVED = (KEYWORDS | frozenset(BUILTINS) | frozenset({"sqrt", "h"})
+RESERVED = (KEYWORDS | frozenset(BUILTINS) | frozenset({"h"})
             | TRANSCENDENTAL | SPECIAL_WORDS)
 
 # The bank addresses 512 constants on every device (seq.py KADDR_KX,
@@ -132,6 +134,22 @@ def _past(limit):
     except ValueError:
         return False
     return True
+
+
+def _no_root(value):
+    """irrational-constant's sentence for sqrt of a constant whose root no
+    rational carries."""
+    shown = C.brief(value)
+    if value < 0:
+        return (f"sqrt({shown}) is not a real number: the square root of a "
+                f"negative constant has no value, and a constant is an exact "
+                f"rational (at run time such a root is a NaN, with invalid)")
+    # the constant exactly, not as shown: a long one is shown to five
+    # digits, and 4 + 1e-30 shows as 4.0000e+0, a square (verifier-VL4)
+    return (f"sqrt({shown}) has no exact rational value - the constant, "
+            f"exactly, is no rational's square, and a constant is an exact "
+            f"rational: write the root's value as a decimal or a/b, or take "
+            f"the root at run time, as the square root of a param")
 
 
 def _reserved_why(name):
@@ -364,6 +382,9 @@ class Checker:
         self.tan_lets = {}
         self.field_ctx = None
         self.map_ctx = None
+        # the source lines at which a run-time division or square root is
+        # built, whatever the statement - the graph's routine_lines (L4)
+        self.routine_lines = set()
 
     # ==== declarations ================================================
 
@@ -941,15 +962,12 @@ class Checker:
         return self.apply("neg", [v], line)
 
     def binary(self, e, a, b):
-        if e.op == "/":
-            if isinstance(a, K) and isinstance(b, K):
-                return self.fold("div", [a, b], e.line)
-            raise Refusal(
-                "runtime-division",
-                "this divides at run time, which v1 does not; for a "
-                "constant divisor multiply by its reciprocal, x * (1/3)"
-                " - one rounding of 1/3, then one of the product", e.line)
-        op = {"+": "add", "-": "sub", "*": "mul"}[e.op]
+        # A division of constants folds exactly (8/3 is the rational); one
+        # with a run-time operand is the node div, one correctly rounded
+        # division - by a constant c too, RN(a / RN(c)), never a product by
+        # a rounded reciprocal: x * (1/3) is that, and is another value for
+        # about a third of all x (L4, 2026-10-02; it was runtime-division).
+        op = {"+": "add", "-": "sub", "*": "mul", "/": "div"}[e.op]
         return self.apply(op, [a, b], e.line)
 
     def call(self, e, ctx):
@@ -970,7 +988,7 @@ class Checker:
             if isinstance(v, K) and _hread(*vals):
                 v = v.read_h(e, ctx.env)
             return v
-        if name == "sqrt" or name in TRANSCENDENTAL:
+        if name in TRANSCENDENTAL:
             vals = [self.eval(a, ctx) for a in e.args]
             if vals and all(isinstance(v, K) for v in vals):
                 raise Refusal(
@@ -978,9 +996,6 @@ class Checker:
                     f"{name} of a constant has no exact rational value in "
                     f"general, and v1 constants are rationals written as "
                     f"such: write the value as a decimal or a/b", e.line)
-            if name == "sqrt":
-                raise Refusal("runtime-sqrt", "v1 has no square root at run "
-                              "time", e.line)
             raise Refusal("transcendental", f"{name} is not computed by a "
                           f"program in v1", e.line)
         d = self.names.get(name)
@@ -988,8 +1003,8 @@ class Checker:
             raise Refusal("unknown-function", f"{name} is a {d.kind}, not a "
                           f"function", e.line)
         raise Refusal("unknown-function", f"{name} is not a built-in: fma, "
-                      f"abs, copysign, min, max, minnum, maxnum and select "
-                      f"are", e.line)
+                      f"abs, copysign, min, max, minnum, maxnum, select and "
+                      f"sqrt are", e.line)
 
     def name_value(self, name, index, ctx, line):
         if index is None and name in ctx.env:
@@ -1134,7 +1149,7 @@ class Checker:
             raise Refusal("time-dependence", "t is not declared, and v1 has "
                           "no explicit time: carry it in the state (state t,"
                           " d/dt t = 1)", line)
-        if name in BUILTINS or name == "sqrt" or name in TRANSCENDENTAL:
+        if name in BUILTINS or name in TRANSCENDENTAL:
             raise Refusal("syntax", f"{name} is a function; call it with its "
                           f"arguments", line)
         raise Refusal("undefined-name", f"{name} is not declared", line)
@@ -1301,6 +1316,12 @@ class Checker:
     def apply(self, op, args, line):
         if all(isinstance(a, K) for a in args):
             return self.fold(op, args, line)
+        if op in ("div", "sqrt") and line is not None:
+            # every statement the source writes is evaluated here - a
+            # written tangent and an expansion block too, to be held to
+            # what the language derives - so this meets each run-time
+            # division and root at the line that holds it
+            self.routine_lines.add(line)
         return Node(op, [self.leaf(a, line) if isinstance(a, K) else a
                          for a in args], line)
 
@@ -1427,6 +1448,14 @@ class Checker:
                 r = K(1 if v[0] == v[1] else 0)
             elif op == "select":
                 r = a[0] if v[2] != 0 else a[1]
+            elif op == "sqrt":
+                # folded where the root is exact (sqrt(9/4) is 3/2), refused
+                # where no rational carries it - a constant is an exact
+                # rational, and a node would round it twice (L4)
+                root = C.rational_sqrt(v[0])
+                if root is None:
+                    raise Refusal("irrational-constant", _no_root(v[0]), line)
+                r = K(root)
             else:
                 raise AssertionError(op)
         if not C.in_range(r.coef):
@@ -1732,6 +1761,7 @@ class Checker:
         line = self.tangent_items[0][1]
         zero = self.leaf(K(0), line)
         one = self.leaf(K(1), line)
+        two = self.leaf(K(2), line)             # the root's rule, da / (2 * r)
 
         def fold(op, leaves):
             # a rule on constants alone is a constant expression: folded
@@ -1741,7 +1771,7 @@ class Checker:
             return self.leaf(self.fold(op, ks, line), line)
 
         def derived(outs):
-            ts = Derivation(zero, one, fold).derive(outs)
+            ts = Derivation(zero, one, fold, two).derive(outs)
             return [K(0) if t is None else t for t in ts]
         tf = derived(field_outs) if self.is_flow else None
         ts = derived(step_outs)
@@ -2006,6 +2036,7 @@ class Checker:
         if built is not None:
             self.block_compare(field_outs, step_outs, built, tangent)
         self.canonical_nesting(graph)
+        graph.routine_lines = tuple(sorted(self.routine_lines))
         return graph
 
     # ==== the canonical form's nesting (D2) ============================
