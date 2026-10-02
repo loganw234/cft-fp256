@@ -4600,9 +4600,10 @@ the round's records (`Data/runs/2026-10-02-step6-round/`).
 
 **What the surveys found.**
 - **Division and square root** exist in-program as divfull and sqrtfull
-  (`programs/divfull-*`, `sqrtfull-*`): 210-216 and 186-195
-  instructions, correct in the last bit under every attribute by an
-  exact residual. Three things keep them out of a compiled program:
+  (`programs/divfull-*.cfta` and `programs/sqrtfull-*.cfta`, written by
+  `python/gen_divfull.py`): 210-216 and 186-195 instructions, correct
+  in the last bit under every attribute by an exact residual. Three
+  things keep them out of a compiled program:
   - **FLAGS.** The run's flags are scaffolding (6/3 raises inexact,
     measured at fp64 and fp256). The contract's flags are a deposit
     that libcft ORs in, and no opcode can raise divide-by-zero.
@@ -4626,23 +4627,29 @@ the round's records (`Data/runs/2026-10-02-step6-round/`).
     against at most 121,344.
 - **Programs past one tile.**
   - Instructions (32,768), scratch (2,048) and deposits (1,024) are
-    build parameters up to 2^15, each a four-bit field in CAPS. The
-    bank (512) is fixed by the instruction format.
+    build parameters up to 2^15, each published as a four-bit log2
+    field (CAPS[23:20], CAPS2[3:0] and CAPS[19:16]). The bank (512) is
+    fixed by the instruction format.
   - There is no path between tiles, only round trips through the host
     on one shared bus.
-  - The quad has no room left. By the revision-7 round's estimate it
-    uses about 78% of the block RAM and 82% of the LUTs; no measured
-    figures are recorded anywhere. It closed at +0.003 ns with every
-    timing option.
-  - Of the hard workloads that missed:
-    - most are bound by instructions; Lorenz-tangent hard cannot fit
-      under any allocation;
-    - two are bound by scratch: FPUT and phi4 extended;
-    - only Gray-Scott hard is near.
+  - The quad has no room left. q135b's routed utilization report, read
+    on amd-arc-box for this plan and kept in the round's records,
+    gives 719,697 LUTs (82.66%), 1,051.5 block-RAM tiles (78.24%) and
+    260 UltraRAMs (40.63%); SLR0's LUTs are at 86.12%. The quad closed
+    at +0.003 ns with every timing option.
+  - Of the 11 hard workloads that missed:
+    - nine exceed the instructions, some the scratch as well;
+      Lorenz-tangent hard and wide cannot fit under any allocation;
+    - two exceed only the scratch: FPUT and phi4 extended;
+    - only two are within the compiler's reach, Gray-Scott (hard and
+      wide, at 34,719 instructions) and phi4 extended (2,156 slots), and
+      neither is shown achievable.
 - **Time-dependent systems** already work with t as a state variable
-  (`state t`, `d/dt t = 1`). With a dyadic h, t stays exactly k h. A
-  reserved `t` would refuse today's own advised sources, as `tangent`
-  did.
+  (`state t`, `d/dt t = 1`). With a dyadic step (h = 1/64), t stayed
+  exactly k h through 10^4 steps at fp64 and fp256, under rk4, euler
+  and stormer-verlet. With h = 1/100 it drifted, by 1,003 ulps of t at
+  fp64 after 10^4 steps. A reserved `t` would refuse today's own
+  advised sources, as `tangent` did.
 
 **The parts.** Parcels with verifiers, golden-first, the send-back rule
 and the testing rule, as the last rounds ran.
@@ -4673,11 +4680,14 @@ and the testing rule, as the last rounds ran.
      **certificate format version 2**, which records the per-lane flags
      and any lane refused or replayed.
    - **R21 and R22**, augmented addition (`augadd`/`augerr`) and stepped
-     STX/LDX: already in the model. They come to cft-asm and the RTL.
+     STX/LDX: already in the model, the software backend and `asm.py`
+     (`test_seq_rev8.py`); no tile carries either. They come to cft-asm
+     and the RTL.
    - **R8S, instruction streaming.** The program is read from card
      memory through a prefetch, not held on-chip, so the instruction
-     ceiling goes. The image, the compiler and the certificate are
-     unchanged; CAPS needs a field past 2^15.
+     ceiling goes. The image format and the certificate are unchanged,
+     and the compiler needs only a target that names the larger
+     capacity. CAPS needs a field past 2^15.
      - A design study comes first: the fetch, its timing at 135 MHz, its
        cost in block RAM, and what a stall costs a step.
    - **The deep build.** A build of the same RTL with more scratch a
@@ -4711,7 +4721,8 @@ and the testing rule, as the last rounds ran.
    - It is flag-exact through R8F.
    - The internal check learns routines. An image with one needs the
      flag-control feature, so revision 7's targets refuse it by name
-     (`target-feature`), and the software targets run it now.
+     (`target-feature`), and the software targets run it once R8F is
+     in the software backend.
    - **Format-specific words:** a certified wider run of such a program
      is refused by name under certificate version 1, as cft-orbits'
      runs are, until version 2 says otherwise.
@@ -4736,11 +4747,14 @@ and the testing rule, as the last rounds ran.
        (the golden model on the host, or a slower image) and how the
        certificate records it is M1's design, to come to the lead
        first.
-     - Bank use is about 100 constants at fp64; the surveyor's estimate
-       is about 150 instructions at fp64 and 750 at fp256.
-   - **M2, sin, cos, tan.** Full range at fp64, with 2/pi's window in
-     the bank. At fp256, a stated range, beyond which a lane is marked
-     and replayed.
+     - The surveyor's estimates, nothing measured: about 100 bank
+       constants at fp64 with a 32-entry table, and about 150
+       instructions a call at fp64 and 750 at fp256.
+   - **M2, sin, cos, tan.** Full range at fp64: the bits of 2/pi it
+     needs, about 1,200, fit the bank (about 23 words), but choosing the
+     window by the exponent needs a copy in each lane's scratch, read
+     by LDX (the surveyor's estimate). At fp256, a stated range, beyond
+     which a lane is marked and replayed.
    - **M3, the pow family**, last: its structured cases need 2p to 3p
      bits.
    - **M4, atan, atan2, asin, acos,** after L4.
