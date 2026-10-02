@@ -4734,6 +4734,9 @@ and the testing rule, as the last rounds ran.
        Version 1 already records the library's build, the backend and
        the device.
      The design comes to the lead before version 2 is fixed.
+     **Designed** (2026-10-02): docs/studies/CERT-V2.md, verified by
+     VCV2 over four checks. Its twelve questions are with Logan, and
+     version 2 is fixed only after his answers.
    - **R21 and R22**, augmented addition (`augadd`/`augerr`) and stepped
      STX/LDX: already in the model, the software backend and `asm.py`
      (`test_seq_rev8.py`); no tile carries either. They come to cft-asm
@@ -4747,7 +4750,10 @@ and the testing rule, as the last rounds ran.
      `caps2`, driven by cft_krnl) widens, because a certificate's
      `device-caps` carries only CAPS and CAPS2.
      - A design study comes first: the fetch, its timing at 135 MHz, its
-       cost in block RAM, and what a stall costs a step.
+       cost in block RAM, and what a stall costs a step. **Written**
+       (2026-10-02): docs/studies/R8S-streaming.md, verified by VS8
+       over two checks. Its seven questions go to Logan with the RTL
+       plan.
    - **The deep build.** A build of the same RTL with more scratch a
      lane, 4,096 to 8,192 slots, adjustable per build as Logan's rule
      for program limits asks (2026-09-28): "as large as we can, ideally
@@ -4770,7 +4776,9 @@ and the testing rule, as the last rounds ran.
      - the card legs, with the acceptance set as the admission test,
        and the workloads that missed run on whichever build holds them.
 2. **L4, run-time division and square root in the language,
-   golden-first.**
+   golden-first: built, verified by VL4 over four checks and merged**
+   (2026-10-02; LANGUAGE.md). cftc's interim refusal is named
+   `runtime-routine`.
    - `a / b` and `sqrt(a)` with non-constant operands become nodes,
      whose golden definition is `softfloat`'s div and sqrt, with exact
      flags.

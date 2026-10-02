@@ -1,6 +1,6 @@
 # The documents, by what you open them for
 
-Forty-two files, 66,490 lines. Flat in one directory they look like one
+Forty-two files, 66,498 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
 - **24,037 lines you consult while working** — the three under *Start here*,
@@ -8,7 +8,7 @@ undifferentiated pile; they are not, and the split is close to even:
 - **6,668 lines of tool manual**, one per shipped program;
 - **2,011 lines of operations**, read when you are about to do something to
   hardware;
-- **33,774 lines of record and argument** — the ledger, the roadmap and the
+- **33,782 lines of record and argument** — the ledger, the roadmap and the
   design studies. The history of how a decision was reached, worth keeping,
   and not what you open to get something done.
 
@@ -95,7 +95,7 @@ reading material for a working session.
 | document | lines | what it is for |
 |---|---|---|
 | [VALIDATION.md](VALIDATION.md) | 17,179 | The validation ledger, append-only. Every run, including the ones that failed and the mistakes that produced them. A figure here is a fact about the run on its date and is never edited to match a later one. |
-| [ROADMAP.md](ROADMAP.md) | 4,919 | What is built, what is next, and what was decided against. |
+| [ROADMAP.md](ROADMAP.md) | 4,927 | What is built, what is next, and what was decided against. |
 | [ROUND2.md](ROUND2.md) | 1,082 | The plan for the gather, the scatter, the lane mask and the broadcast as one parcel round, with its outcome at the top: the seam the lead lands first, a brief per parcel, the verifiers, the ledger, the merge order. |
 | [NOVEL.md](NOVEL.md) | 561 | Results for which no prior description was found, with the standard of evidence stated first. |
 | [ATLAS.md](ATLAS.md) | 367 | The atlas-engine integration, assessed before any of it was done. |
