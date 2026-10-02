@@ -4668,8 +4668,9 @@ above (2026-09-30) number the certificate plan's steps, not these.
   fp64, by 1,003 ulps of t under rk4 and euler, and by -1,299 under
   stormer-verlet. These are rne's figures. T1 measured the other
   attributes: under rtz, rdn and rup, rk4 loses t's exactness even at
-  h = 1/64, and the step counter goes wrong after the first step
-  (LANGUAGE.md, "Time"). A reserved `t` would refuse today's own
+  h = 1/64, and the step counter goes wrong after the first step,
+  except with h = 1/64 under euler and stormer-verlet (LANGUAGE.md,
+  "Time"). A reserved `t` would refuse today's own
   advised sources, as `tangent` did.
 
 **The parts.** Parcels with verifiers, golden-first, the send-back rule
@@ -4735,8 +4736,9 @@ and the testing rule, as the last rounds ran.
        the device.
      The design comes to the lead before version 2 is fixed.
      **Designed** (2026-10-02): docs/studies/CERT-V2.md, verified by
-     VCV2 over four checks. Its twelve questions are with Logan, and
-     version 2 is fixed only after his answers.
+     VCV2 over four checks. Logan, on its twelve questions, verbatim:
+     "Regarding the 12 questions, the recommended solutions are
+     appropriate as stated". Version 2's build follows R8's merge.
    - **R21 and R22**, augmented addition (`augadd`/`augerr`) and stepped
      STX/LDX: already in the model, the software backend and `asm.py`
      (`test_seq_rev8.py`); no tile carries either. They come to cft-asm
@@ -4841,7 +4843,10 @@ and the testing rule, as the last rounds ran.
      needs, about 1,200, fit the bank (about 23 words), but choosing the
      window by the exponent needs a copy in each lane's scratch, read
      by LDX (the surveyor's estimate). At fp256, a stated range, beyond
-     which a lane is marked and replayed.
+     which a lane is marked and replayed. The range is wide, so that
+     marks stay rare: certificate version 2's question 3, which Logan
+     decided as recommended. 2^1024 needs about 1,300 bits of 2/pi by
+     the study's estimate, and M2 measures its cost.
    - **M3, the pow family**, last: its structured cases need 2p to 3p
      bits.
    - **M4, atan, atan2, asin, acos,** after L4.

@@ -17177,3 +17177,187 @@ What sampled points cannot see is stated in LANGUAGE.md.
 - **A count taken mid-merge.** The lead's ledger at 10:24:48 records "64 tracked documents" and 157 links, from a docs check run while the merge was uncommitted. Then `git ls-files` lists the conflicted docs/README.md once a stage. The committed tree has 62 documents and 69 links (VI1, and the lead after it).
 - **The verifier's worktree name** `verify-a1` was the audit round's. The add refused, and the audit round's tree was left alone.
 - **A PowerShell `.Replace`** on docs/README.md's counts matched nothing, and said only "no change". The docs check caught the count.
+
+## 2026-10-02 - step 6's first wave, part one: run-time division and square root in the language (L4), time (T1), and two designs for Logan, certificate version 2 (CV2) and instruction streaming (S8)
+
+**Why.**
+- **The first wave.** Logan approved step 6's plan of record as written (the entry above). It started when A1 merged, at about 10:20, with five parcels in worktrees from 1acc73a, each with a brief in the round's records:
+  - R8: revision 8's flag control and per-lane flags, golden-first. It merges in an integration of its own (it needs the WASM module rebuilt, an XRT build and the card);
+  - CV2: the design of certificate version 2;
+  - L4: run-time division and square root;
+  - T1: time-dependent systems;
+  - S8: the design study of instruction streaming.
+- **This entry is the four that merged here:** S8 (82239dd), CV2 (9541eea), T1 (e61062b) and L4 (e737aea), in that order, on step6-round from 4190a47.
+- **Logan's own words in this part.**
+  - On certificate version 2, verbatim: "In regards to the V2 certificate, also include more 'scientific provenance' areas, things typical certificates in the field carry for traceability etc".
+  - On the study's questions, verbatim: "What are the 8 questions the parcel had? I won't answer them now but I'll start considering them". The questions he was given then are now twelve (below).
+
+**L4: run-time division and square root, golden-first** (097de73, ab23e17, d34de3f, 415517d).
+- **The nodes.** `a / b` and `sqrt(a)` with an operand that is not a constant are the nodes `div` and `sqrt`. Each rounds once under the program's one attribute, with exactly softfloat's flags:
+  - div raises any of the five;
+  - sqrt raises invalid (a negative, -inf, a signalling NaN) and inexact.
+  `runtime-division` and `runtime-sqrt` are gone.
+- **Constants.**
+  - A constant over a constant still folds exactly.
+  - `x / c` divides by c once; it never multiplies by a rounded reciprocal (RN(x/3) and RN(x·RN(1/3)) differ for 600 to 695 of 2,000 x at each format).
+  - `sqrt` of a constant folds when the result is exact, decided rationally (`sqrt(4)` is 2; `sqrt(4 + 1e-30)` is refused); otherwise it is `irrational-constant`.
+- **h.**
+  - In a map, `x / h` divides by the h-scaled constant and halves with its bank, exactly (VL4: 480 comparisons).
+  - `x * (1/h)`, `sqrt(h)` and `sqrt(h*h)` are `h-nonlinear`.
+  - In a flow, h is `h-scope`, as before.
+- **The derivative rules.** For q = a/b, `fma(-q, db, da) / b`, two roundings. For s = sqrt(a), `da / (2·s)`, one rounding (the doubling is exact).
+  - A division or root costs each tangent vector one run-time division when the step's tangent reads its tangent, and nothing otherwise.
+  - That holds on 1,318 random systems with 2,499 divisions and roots (VL4).
+- **cftc's interim refusal, `runtime-routine`.** Until C4 carries routines, the compiler refuses a source that divides or takes a root at run time, by name, at the first line in source order that does. No accepted source reaches exit 70 (D2's rule).
+  - VL4 compiled 415 sources on 11 targets, and shuffled 120 forms into 702 orders, each refused at the right line.
+- **MEASURED by VL4:**
+  - div and sqrt equal softfloat on 78,500 lanes at all four formats and five attributes;
+  - 79,400 single-lane flag checks;
+  - softfloat itself cross-checked against exact rationals (54,635 quotients, 13,445 roots);
+  - 1,708 of 1,713 sources unchanged in graph and forms: every committed source, the challenge suite and 1,460 generated systems. The five that moved are the five challenge-suite cases below.
+- **The challenge suite:** 5 of 212 cases change.
+  - runtime_div_by_literal, runtime_div_denominator and runtime_sqrt are now refused `runtime-routine` at line 5.
+  - constant_sqrt (`sqrt(4)`) now compiles.
+  - unknown_function's sentence lists sqrt.
+  - These are the suite's to restate.
+- **Verifier-VL4 checked four times:**
+  - (b)1, the refusal's line: it named the primal equation's line when tangent equations came first, and ab23e17 fixed the code;
+  - (b)2, the cost note, wrong in three corners and restated each time: a division reading no state; one reading it only through a comparison, a select's condition or copysign's sign; one whose non-zero tangent no output reads;
+  - five minor sentences, restated with them.
+
+**T1: time-dependent systems** (72a38cf, 414340f). LANGUAGE.md's section "Time", held by test_lang_time.py's 50 tests.
+- **t in the state.** With h = 1/64, t stays exactly k h through 10^4 steps under rk4, euler and stormer-verlet, at all four formats. With h = 1/100 it drifts: at fp64 after 10^2, 10^3 and 10^4 steps:
+  - +3, -95 and +1,003 ulps of t under rk4 and euler;
+  - +3, +92 and -1,299 under stormer-verlet.
+- **These are rne's figures.** Under the directed attributes:
+  - the step counter goes wrong after the first step;
+  - rk4 loses t's exactness even at h = 1/64, since it adds 6·RN(h/6). At fp64: -57, -658 and -4,538 under rtz and rdn; +58, +659 and +4,539 under rup.
+- **fp128 gives fp64's figures exactly.** Verifier-VT1 proved why: when the bits of every quantity a step rounds repeat with a period dividing the two formats' precision gap, every rounding goes the same way. It predicted, and confirmed, 1/17 and 1/47 (fp64 = fp256) and 1/233 (fp32 = fp64).
+- **The counter** (`d/dt k = 100` at h = 1/100; h's reciprocal written as a number, since `d/dt k = 1/h` is `h-scope`) counts exactly to 2^p under euler, rk4 and as a momentum, and to 2^(p-1) as a position.
+- **The time from it.** `let t = k * dt` is one rounding. A four-operation construction through an exact residual gives RN(n/100) exactly under rne and rmm:
+  - measured to 10^4 by T1;
+  - by VT1, over every count to 2^24 at fp32, and on 30,000, 15,000 and 8,000 random counts at fp64, fp128 and fp256.
+  Under rup it is rup's rounding everywhere. Under rtz and rdn it misses at exactly n = 25j, and under rdn t at n = 0 is -0, its value right.
+  - Since L4, the language also writes it as one division, `let t = k / 100`. That is the attribute's rounding at every count (VI2, measured to 10^4), but the compiler refuses it as `runtime-routine` until C4. The section was restated at the merge.
+- **Forcing.** sin(w·t) is `transcendental` until M2. A rotation in the state, d/dt c = -w s and d/dt s = w c, works today: rk4 at fp64 drifts c² + s² - 1 by -1.3889e-10 after 10^4 steps, the integrator's own -n(wh)^6/72.
+- **Verifier-VT1 checked twice.**
+  - (b)1: the counter's limit is 2^(p-1) as a position.
+  - (b)2: the construction is exact under rup, though the section had said "no directed rounding".
+  - It reproduced every figure with its own probes and an exact model of each template (0 mismatches over 640 runs of 10,001 states), and planted 15 faults, all red.
+
+**S8: instruction streaming, a design study** (2051e12, e1036a6): docs/studies/R8S-streaming.md.
+- **The fetch** reads through master A, which is free while a block runs (VS8 traced every read).
+- **On chip:** a 4,096-word store holds one contiguous range, and a 512-word FIFO is fed by four 8-beat bursts.
+- **Stalls:** every image cftc emits starts its loop body by pc 26, so its body is on chip, and the stall a step is zero.
+- **What it frees:** 55 RAMB36 a tile, 220 on the quad.
+- **The capacity** goes in CAPS2[20:16] as a five-bit log2.
+- **A streaming quad at 4,096 scratch slots** looks possible by count (516 of 640 UltraRAMs). Only a probe build can say whether it closes 135 MHz.
+- **Seven questions** go to Logan with the RTL plan:
+  1. the store's depth;
+  2. the published capacity;
+  3. the CAPS2 field;
+  4. a fetch fault ending the block;
+  5. the deep build's shape;
+  6. an early out-of-context probe;
+  7. schedule.py's one-beat column, which charges one cycle where the RTL takes about seven for independent arithmetic.
+- **Verifier-VS8 checked twice.**
+  - (b)1: "each image is `repeat S` at pc 0". Pinned values' loads come first: in the reference images they sit at pc 0-2, 0-3 or 0-5, their REPEATs at pc 3, 4 or 6, and their bodies start at pc 1 (Lorenz-96), 4, 5 or 7.
+  - (b)2: pc and the store's ends need log2 + 1 bits.
+
+**CV2: certificate format version 2, a design** (0186a5d, 43262be, 67c7468, 0debf0b): docs/studies/CERT-V2.md.
+- **The per-lane flags** are covered by a hash on each segment line.
+- **A marked lane** is certified only through a replay that the audit re-makes by the golden model. An unreplayed mark is refused by name (`marked`, `replay-missing`).
+- **The definition a certificate claims** is named in two lines:
+  - the conformance profile, extended to version the program model: any change to what an accepted image computes, or to whether an image loads, steps it;
+  - a new language version.
+  A later auditor that does not cover a certificate blames the version, not the certificate (`definition-differs`).
+- **Sources.** A source may be named and checked by recompiling. A `wider-source` run beside version 1's `wider` measures the constants' rounding that `wider` cannot see: 3.5e-15 on Lorenz-63 at t = 3.
+- **Scientific provenance,** surveyed from:
+  - ISO/IEC 17025 and PTB's Digital Calibration Certificate;
+  - W3C PROV;
+  - SLSA, in-toto and build-info;
+  - RO-Crate, CodeMeta, DataCite and SWHID;
+  - cascad, CODECHECK and ACM's badges.
+  Field by field, each is carried or not, checked or reported, with its absence words and its cost in privacy. The host name, user and paths are left out; the issuer and the card's serial are opt-in.
+- **The signature:** Ed25519.
+- **Twelve questions for Logan:**
+  1. what version 2 certifies;
+  2. who replays;
+  3. M2's range at fp256, and what happens past it;
+  4. wider-source;
+  5. naming the source;
+  6. the definition's version;
+  7. mpmath;
+  8. the compiler's identity;
+  9. the provenance fields and the issuer's form;
+  10. the keyed mode;
+  11. the signature;
+  12. named generators.
+  They went to him as they stood at 0debf0b. He answered, verbatim: "Regarding the 12 questions, the recommended solutions are appropriate as stated". So version 2 is designed and decided; its build follows R8's merge. Question 3's answer, a wide range at fp256 with mark and replay past it, is now in the plan's M2.
+- **Verifier-VCV2 checked four times:**
+  - eight (b)s at first: three citations, mpmath's role, the definition's version, the replay method's place against the gates, M2's systematic marks, and two controls;
+  - then three: the profile's reach, MPFR's callers, and question 3's premise;
+  - then two: the profile's record a backstop, not the rule; and one more MPFR caller;
+  - then clean, with the backstop measured on ee78152's own images (513, 600 and 70,000 constants load at its parent and are refused at it).
+
+**The lead's merges.**
+- **docs/README.md** conflicted at each merge in its totals, and was recounted each time. It also conflicted at 9541eea in the studies' introduction and the two studies' rows, and at e737aea in LANGUAGE.md's row.
+- **VERIFICATION.md's "forty-one documents"** merged silently from S8's and CV2's identical edits. It was made "forty-two" by hand, as VS8 and VCV2 had warned, and so was README's own prose ("forty-two names"), which the docs check does not read.
+- **ROADMAP's step-6 plan:**
+  - T1, L4, the streaming study and certificate version 2's design are marked built, written or designed;
+  - its time sentences say they are rne's (T1's finding), with the dyadic exception under euler and stormer-verlet.
+- **LANGUAGE.md, where L4 made T1's sentence false** (verifier-VI2's finding). "The correctly rounded time ... takes four operations" now says the language writes it as one division since L4. The compiler refuses that division until C4, so a compiled program takes the four operations.
+- **MEASURED on the desktop at e737aea:** the six language test files, 534 passed in 87 s, niced, at 43% load. The docs check passes after each merge.
+- **The gate budget at e737aea,** niced, from a load of 0.00 (run 20261002-131138-e737aea, 127 minutes): **PASS.**
+  - 35 stages executed, 0 failed. 8 skipped by name (buildargs, the six language legs, demos), and the same four inner skips as the gate above.
+  - golden: 3,039 passed and 3 skipped (593 s), 3,042 collected with L4's and T1's tests.
+  - lang: 189 ok (129 s). tangent: 130 ok (209 s). acceptance: 41 of 41, 249 checks (484 s).
+  - transcend: 607,217 and 580,977 comparisons, C == model.
+  - mpfr: 739,234 cases, 0 value and 0 flag mismatches; mp-err-check's 16,814,033 results, 0 over their bound.
+  - remote: 184,736 cases.
+
+  VERIFICATION.md's golden, lang and tangent rows carry these figures. The stage logs are in the round's box/gate-e737aea/.
+
+**A restatement of the entry above** (verifier-VI1's two notes, in this append-only file):
+- Its load line should read: A1 measured its stage at 5% load and VA1 at 8-23%; VI1 ran its quick checks at 34%, while the round's first five parcels built beside it.
+- Its mid-merge slip: the lead's ledger at 10:24:48 records the "64 tracked documents". The 157 links come from the mid-merge run's own output.
+
+**Known limits, recorded rather than fixed** (Logan's rule).
+- **L4:**
+  - legs K and L of the language stages catch only 5 and 4 of VL4's 14 plants, since leg K never compares its sources' results. The gate's pytest catches all 14;
+  - rules equal in exact arithmetic but rounded differently pass the exact check. LANGUAGE.md says so, and the rule-table test holds the form;
+  - in the mathematical form, alternating `*` and `/` nest (about n/2 deep);
+  - a graph read back from bytes is refused without a line number;
+  - there is no correctly rounded irrational constant;
+  - the exact checks treat a square root as a fixed function of its argument (exact for a rational's square, otherwise truncated to 2^-256), so a correct root rule written through r·r = a fails them; the central difference covers the derivative;
+  - ORBITS.md's fragment-inliner sentence is left for C4, whose subject it is;
+  - the challenge suite's case utf8_before_runtime_error is still refused `character`, but its stated purpose names a runtime-division error that no longer exists.
+- **T1:** the seeded-sample test takes dt's error from the rounding function, not the program's constant; another test catches that fault.
+- **S8**, wording:
+  - a citation that misses the index-table sentence;
+  - the 144-cycle bound without VALIDATION's write-path caveat;
+  - the demand table's 2-cycle row;
+  - the LUT rows summing under the net;
+  - "R8's ledger, section 10";
+  - "up to 2^31";
+  - "largest prologue 6" counted over the 45 files with a loop;
+  - "independent writers are queue-bound", which is too wide;
+  - a pinned lane param is loaded but never stored, which the prologue sentence leaves out;
+  - section 9's moved line on the benches.
+- **A pre-existing hang** (VS8). The sequencer has no length-fault abort, so a short read burst leaves its burst counter above zero, and the run never ends. docs/CARDDAY.md's "A hang should no longer be how a bus fault presents" is true of the elementwise engine only. The streaming fetch must not inherit it; the RTL plan takes it.
+- **CV2**, open "other" items:
+  - §8.4's "which is the time shift" (VCV2 measured the gap along the flow at 1.25e-16 against ACC-A's 1.30e-16, with a fifth orthogonal);
+  - segment lines "the definition's" under `source none`;
+  - cft-orbits listed as a version-2 writer;
+  - `definition-flags` with no control;
+  - the issuer's default;
+  - the spelling of `source-param` names;
+  - where a version-1 certificate's signature is checked;
+  - §13's list of the profile's record;
+  - "the committer's word";
+  - question 3's cost comparison naming only the scratch word.
+
+**Load, and the machine.**
+- The desktop was Logan's.
+- Five parcels and up to four verifiers ran beside one another, each niced and one run at a time. The desktop's load ran from 0% to 62% as they swung.
+- amd-arc-box ran the gates alone.

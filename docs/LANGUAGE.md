@@ -843,9 +843,15 @@ step rk4, h = 1/100
   rounding: k2.t is RN((n + 1/2) RN(1/100)). Under stormer-verlet, k
   among the positions, the kick's force reads Q1.k = n + 1/2, the
   midpoint time.
-- **The correctly rounded time**, RN(n h), takes four operations: the
-  exact residual and the one correction that the golden model's divide
-  ends with (`python/cft_golden/sequences.py`), q = fma(r, y, q0):
+- **The correctly rounded time**, RN(n h). Since run-time division
+  (parcel L4), the language writes it as one division, `let t = k / 100`,
+  which is the attribute's rounding of n/100 at every count (measured to
+  10^4 by verifier-VI2: rne and rup at all four formats, and all five
+  attributes at fp64). The compiler refuses that division as
+  `runtime-routine` until parcel C4, so a compiled program takes four
+  operations instead: the exact residual and the one correction that
+  the golden model's divide ends with (`python/cft_golden/sequences.py`),
+  q = fma(r, y, q0):
   ```
   let q = k * dt
   let r = fma(-q, 100, k)   ; k - 100 q, exactly
