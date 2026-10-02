@@ -101,39 +101,57 @@ the gate holds that.
   grep showed one comment; a form feed or U+2028 in a comment hid a line
   from the parser that `splitlines()` showed; and `lang.load` dropped a
   byte-order mark (verifier-VL1).
-- Parentheses and brackets nest at most 100 deep (`too-deep`). A chain
-  such as `a + b + c`, an index such as `x[i + 1 + 1 ...]`, and a run of
-  minuses may be any length: the checker and the renderers walk them in
-  loops. What is left to recurse, deep nesting and long chains of lets,
-  is held to Python's own recursion limit, which the package keeps
-  rather than raises, and past it the refusal is `too-deep` too.
-- **The canonical form is held to the same 100**, so that it always reads
-  back ("The intention-out"). It can nest deeper than its source three
-  ways:
-  - a negation used as an operand of a binary operation is written in
-    parentheses, `(-a) * b`, so `-(-(x) * y) * y` nests two levels a
-    level: 51 levels, written 51 deep, would be written 101 deep;
-  - a tangent's rule writes an unnamed primal value again inside a call
-    ("The variational equations"), so the tangent of an unnamed product
-    of n terms nests n - 1 deep from a source 0 deep, and a min chain's
-    tangent one level deeper than the chain;
-  - euler's and stormer-verlet's step writes a right-hand side in place
-    inside the template's fma, `next x = fma(h, <rhs>, x)`, one level
-    deeper than its equation.
+- Parentheses and brackets nest at most 100 deep (`too-deep`).
+- **Chains may be any length, with the same verdict on every machine and
+  every Python.** A chain such as `a + b + c`, an index such as
+  `x[i + 1 + 1 ...]`, a run of minuses, and a chain of lets, labels or
+  consts, each reading the next, have no bound:
+  - the checker and the renderers walk chains and runs in loops;
+  - the checker evaluates a definition where it is first read, and one
+    read with Python's stack already a fixed budget deep is set aside,
+    evaluated first from the top with the path that led to it kept, and
+    the expression that read it evaluated again. What it evaluates again
+    is only a prefix it had evaluated without fault, whose effects repeat
+    nothing, so the graph's operations are the recursion's, in its order,
+    the first refusal is the recursion's, and a cycle is named at the same
+    reference. `python/tests/test_lang_readback.py` holds it to the
+    recursion run with no limit in reach, and parcel D2 measured the two
+    equal on Python 3.10, 3.12 and 3.13.
 
-  A source whose canonical form would nest past 100 is refused
-  `too-deep` at the line of the equation or let whose line would be too
-  deep - primal or tangent, a written tangent equation or tangent let at
-  its own line - and the sentence names that line and its depth. The
-  depth is measured as the parser counts nesting, on what the canonical
-  form would write: `python/cft_golden/lang/nesting.py` follows the
-  renderer's rules without writing the text, and
-  `python/tests/test_lang_readback.py` holds it to the lexer's own count
-  of the renderer's text, line by line, so nothing is refused whose
-  canonical form reads back. Lets bound the depth: the canonical form
-  writes a let by its name. Until 2026-10-01 such a source was accepted,
-  and the compiler stopped at its own check of the canonical form, exit
-  70, "a defect in the compiler" (verifier-VL3; parcel D2).
+  Until 2026-10-01 a chain of lets was held to Python's own recursion
+  limit, so the verdict hung on the Python version and on the caller's
+  stack: a chain of 150 lets through a call was accepted on Python 3.12
+  and refused on 3.10, a 230-let map accepted from the command line and
+  refused 100 frames down, and rk4 with 81 to 246 lets accepted while
+  its canonical form, whose expansion block chains the stages through
+  labels, did not read back (verifier-VD2). What is left to recurse is
+  nesting, which the 100 bounds: only a caller whose own stack is
+  already hundreds of frames deep can meet Python's recursion limit,
+  which the package keeps rather than raises, and the refusal there is
+  `too-deep` too.
+- **The canonical form is held to the same 100**, so that, with chains of
+  any length, it always reads back ("The intention-out"). It writes its
+  own parentheses - around every operation nested in another but a left
+  operand of its kind, around a compound constant used as an operand,
+  `x * (1/3)`, and around a negation used as an operand of a binary
+  operation, `(-a) * b` - and writes out what the source need not: the
+  expansion block, the tangent's lines. So it can nest deeper than its
+  source: for example, `-(-(x) * y) * y` is written `(-((-x) * y)) * y`,
+  two levels a level, and the tangent of an unnamed product of n terms
+  nests n - 1 deep from a source 0 deep. A source whose canonical form
+  would nest past 100 is refused `too-deep` at the line of the equation
+  or let whose line would be too deep - primal or tangent, a written
+  tangent equation or tangent let at its own line - and the sentence
+  names that line and its depth. The depth is the canonical form's own,
+  measured as the parser counts nesting:
+  `python/cft_golden/lang/nesting.py` follows the renderer's rules
+  without writing the text, and `python/tests/test_lang_readback.py`
+  holds it to the lexer's own count of the renderer's text, line by
+  line, so nothing is refused whose canonical form reads back. Lets
+  bound the depth: the canonical form writes a let by its name. Until
+  2026-10-01 such a source was accepted, and the compiler stopped at its
+  own check of the canonical form, exit 70, "a defect in the compiler"
+  (verifier-VL3; parcel D2).
 - A name is a letter or `_` followed by letters, digits and `_`, and
   names are case-sensitive: `Y` and `y` are two names.
 - A dotted name such as `k1.x` or `Y2.x[3]` is a **label**: it names a
@@ -289,8 +307,8 @@ the language takes 754's clauses 4.1, 10 and 11 at their strictest:
   flow's template has one, and a map that names its step but reads h
   only where it folds to a constant that does not scale - `h - h`,
   `h/h`, `copysign(1, h)` - is `unused` at the step line, its sentence
-  naming each use that folded, by line, with its value:
-  `h - h at line 5 is 0`.
+  naming the uses that folded, by line, each with its value - the first
+  three, and how many more: `h - h at line 5 is 0`.
 
 The compiler (L2) may commute the operands of `+` and `*`, share
 identical subexpressions, schedule and allocate freely. None of these
@@ -425,12 +443,15 @@ param is a run-time neg of its rounded value. For an exact constant
     that make it: the checker carries every constant as c x h^d,
     exactly, so `(h*h)/h` is h, and `(h*h)/(h*h)` is 1 - in a map, a
     use of h that folds away (below).
-  - A sum of different powers of h, and a min, max, minnum, maxnum,
-    comparison or select of a constant that changes with h's size, are
-    refused where they are made, whatever surrounds them: `(h + 1) - 1`
-    at its sum although its value is h, and `min(h, 2*h)` although at
-    h's sign it is a multiple of h. h's sign enters a constant only
-    through copysign and abs.
+  - Folding constants, a sum of different powers of h, and a min, max,
+    minnum, maxnum, comparison or select whose operands are all
+    constants, one of them changing with h's size, are refused where they
+    are folded, whatever surrounds them: `(h + 1) - 1` at its sum
+    although its value is h, and `min(h, 2*h)` although at h's sign it is
+    a multiple of h. h's sign enters a constant only through copysign and
+    abs. A run-time operation on an h-scaled constant is an operation like
+    any other: `min(x, h)` in a map is a min of the state and the
+    constant h.
 - A flow's equations and their lets cannot read h, whatever it folds to,
   nor a const whose value changes with h's size (`h-scope`): a
   step-halving run halves h, and a right-hand side must not move with
@@ -457,9 +478,11 @@ param is a run-time neg of its rounded value. For an exact constant
   or it is `unused`: h is used only there. `h - h`, `h/h`,
   `(h*h)/(h*h)`, `copysign(1, h)`, `abs(h)/h` and `0*h` each fold to a
   constant that does not scale, and a map that reads h only so would
-  declare an h its step never reads. Write the constant, or leave h out
-  of the step line. In a map `abs(h)` is h times its sign, a scaled
-  constant, and `h - h + h` is h; a flow always uses h, in its template.
+  declare an h its step never reads - a param's or lane param's default
+  that reads such a const (`const c = h/h`, `param p = c`) included.
+  Write the constant, or leave h out of the step line. In a map `abs(h)`
+  is h times its sign, a scaled constant, and `h - h + h` is h; a flow
+  always uses h, in its template.
   Until 2026-10-01 such a map was accepted, and its canonical form,
   declaring h and reading it nowhere, did not read back: the compiler
   stopped with exit 70 (the challenge suite's finding 1; parcel D2).
@@ -1431,7 +1454,7 @@ The text and its declarations:
 |---|---|
 | `character` | a byte or character the text does not hold: not UTF-8; a line end other than LF or CR LF, or a NUL or Ctrl-Z, anywhere; outside a comment, anything but printable ASCII, space and tab |
 | `syntax` | text that is not a statement of the language |
-| `too-deep` | parentheses nested more than 100 deep - in the source, or in the canonical form it would have: a negation used as a multiplicand, the tangent of an unnamed product or a min chain, euler's and stormer-verlet's step around a right-hand side - or an expression or a chain of lets deeper than the checker evaluates |
+| `too-deep` | parentheses nested more than 100 deep, in the source or in the canonical form it would have (its own parentheses, as the parser counts them); or a system the checker cannot evaluate from a caller whose own stack is already deep (Python's recursion limit) - never a chain, which may be any length |
 | `constant-range` | a constant whose exact value lies beyond 2^+-1048576 |
 | `missing-system` | no `system` line |
 | `missing-format` | no `format` line |

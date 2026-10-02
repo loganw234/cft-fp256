@@ -4,7 +4,7 @@
 (parcel D2 of the language round, 2026-10-01).
 
 An accepted source compiles or is refused by name; cftc's exit 70 is kept
-for a defect in the compiler. Two classes of accepted source broke that,
+for a defect in the compiler. Three classes of accepted source broke that,
 each stopping cftc with an internal error because the canonical form it
 rendered did not read back:
 
@@ -15,15 +15,26 @@ rendered did not read back:
                   nothing reads, which read back was `unused` (the
                   challenge suite's finding 1). Such a source is now
                   `unused` itself, at the step line, its sentence naming
-                  each use that folded, by line, with its value.
+                  the uses that folded, by line, with their values.
   too deep        a source whose canonical form nests past the 100 the
-                  parser reads: a negation used as a multiplicand, the
-                  tangent of an unnamed product or of a min chain, and
+                  parser reads - written with its own parentheses, as a
+                  negation used as a multiplicand, a compound constant,
+                  the tangent of an unnamed product or of a min chain, or
                   euler's and stormer-verlet's step around an inline
                   right-hand side (verifier-VL3's 14:34:53 entry; D2's
-                  probe). Such a source is now `too-deep` at the line of
-                  the equation or let whose rendered line is too deep,
-                  its sentence naming that line and the depth.
+                  probe; verifier-VD2). Such a source is now `too-deep`
+                  at the line of the equation or let whose rendered line
+                  is too deep, its sentence naming that line and depth.
+  a long chain    a chain of lets read by name recursed a definition a
+                  level, held to Python's own recursion limit; the
+                  canonical form's expansion block chains the stages, so
+                  rk4 with 81 to 246 lets was accepted and its canonical
+                  form did not read back (verifier-VD2), and the verdict
+                  itself hung on the Python version and the caller's
+                  stack. The checker now evaluates a definition met deep
+                  from the top (check.py, BUDGET): chains of lets, labels
+                  and consts may be any length, with the same verdict
+                  everywhere.
 
 Here: each variant refused by name, with its line and value; the controls
 accepted and read back; the challenge suite's four investigation sources,
@@ -31,14 +42,18 @@ verbatim; VL3's depth cases at their boundaries, each accepted one read
 back; the measure of nesting (lang/nesting.py) equal to this file's own
 count of what render_canonical writes, line by line, and the depth rule
 refusing exactly the sources whose canonical form would not read back;
-neither rule a read-back; and the sentences restated - h-nonlinear for the
-min family, the comparisons and select and for a sum, h-scope in a flow -
-true of the inputs that made them false.
+neither rule a read-back; the sentences restated - h-nonlinear for the min
+family, the comparisons and select and for a sum, h-scope in a flow - true
+of the inputs that made them false; and chains of lets at VD2's boundaries
+and far past them, accepted and read back, cycles of any length refused by
+name, and the evaluation of a definition met deep held to the recursion
+itself, run with no limit in reach, and to a budget forced to 3 frames.
 """
 
 import hashlib
 import random
 import sys
+import threading
 from fractions import Fraction
 from functools import lru_cache
 from pathlib import Path
@@ -430,6 +445,14 @@ BOUNDARIES = {   # name: (accepted source and its depth, refused source and
         (src(f"d/dt x = {nested(100, 'p')}", "d/dt p = -x",
              head="state x, p", step=SV), 4,
          "let Q1.x, in its expansion block,", 101)),
+    # verifier-VD2's cases/compound101.cftl: a compound constant as an
+    # operand is written in parentheses, x * (1/3) - one of the roads the
+    # rule needs no list of
+    "a compound constant, its own parentheses": (
+        (src("const k = 1/3", "next x = " + nested(99, "x * k"),
+             step="step map"), 100),
+        (src("const k = 1/3", "next x = " + nested(100, "x * k"),
+             step="step map"), 5, "next x", 101)),
 }
 
 
@@ -656,3 +679,210 @@ def test_the_measure_is_the_lexers_count_line_by_line():
         deepest = max(deepest, max(want.values()))
     assert integrators == {"map", "rk4", "euler", "stormer-verlet"}
     assert tangents and deepest == 100
+
+
+# ---- chains of any length: a definition met deep, evaluated from the top ----
+
+def letchain(kind, n):
+    """A chain of n lets - `let a1 = x + y`, `let aj = a(j-1) + y`, or
+    through a call, `abs(a(j-1)) + y` - read by x's equation, in a system
+    of `kind`: map, euler, rk4 or sv (stormer-verlet), "+v" with `tangent
+    v`, "call-" for the chain through a call (verifier-VD2's shapes)."""
+    tan = kind.endswith("+v")
+    base = kind[:-2] if tan else kind
+    call = base.startswith("call-")
+    base = base[5:] if call else base
+    step = {"map": "step map", "euler": "step euler, h = 1/8",
+            "rk4": "step rk4, h = 1/8",
+            "sv": "step stormer-verlet, h = 1/8, q = (x), p = (y)"}[base]
+    nxt = "abs(a{p}) + y" if call else "a{p} + y"
+    lines = ["system s", "format fp64", "state x, y"]
+    lines += ["tangent v"] if tan else []
+    lines.append("let a1 = " + ("y + y" if base == "sv" else "x + y"))
+    lines += [f"let a{j} = " + nxt.format(p=j - 1) for j in range(2, n + 1)]
+    w = "next" if base == "map" else "d/dt"
+    lines += [f"{w} x = a{n}", f"{w} y = " + ("-x" if base == "sv" else "y"),
+              step]
+    return NL.join(lines) + NL
+
+
+# Each at the length where, at Python's own limit and from a script, the
+# checker or the read-back of its canonical form stopped (measured on
+# 87c4df9: verifier-VD2's table and D2's): rk4 read back to 80 lets,
+# stormer-verlet 122, rk4 + v 64, stormer-verlet + v 97, euler + v and
+# map + v 197, and every kind was accepted to 246 or 247; a chain through a
+# call to 164 on Python 3.12 and 141 on 3.10, the same source taking two
+# verdicts. And far past them.
+CHAINS = [("rk4", 80), ("rk4", 81), ("rk4", 246), ("rk4", 247),
+          ("sv", 123), ("rk4+v", 65), ("sv+v", 98), ("euler+v", 198),
+          ("map+v", 198), ("map", 247), ("euler", 247), ("call-map", 142),
+          ("call-map", 165), ("call-rk4", 150), ("rk4", 2500),
+          ("map+v", 2500)]
+
+
+@pytest.mark.parametrize("kind,n", CHAINS)
+def test_a_chain_of_lets_is_any_length_and_reads_back(kind, n):
+    """Each but rk4's 80 - the last whose canonical form read back - was,
+    on Python 3.10 or 3.12, refused too-deep by Python's recursion limit
+    or accepted with a canonical form that did not read back, cftc's exit
+    70. Each is accepted now on every Python, and reads back (D2; Logan,
+    2026-10-01: no limit on a chain)."""
+    g = graph(letchain(kind, n))
+    reads_back(g)
+    assert g.op_counts("step")["add"] >= n
+
+
+def letcycle(c, entry):
+    """Lets a1 .. a{c} in a cycle - a1 reads a{c} - and x reading a{entry}.
+    a{j} is line 3 + j."""
+    lines = ["system cy", "format fp64", "state x, y", f"let a1 = a{c} + y"]
+    lines += [f"let a{j} = a{j - 1} + y" for j in range(2, c + 1)]
+    lines += [f"next x = a{entry}", "next y = y", "step map"]
+    return NL.join(lines) + NL
+
+
+@pytest.mark.parametrize("c", [3, 300, 1200])
+def test_a_cycle_of_any_length_is_named(c):
+    """A cycle of lets longer than Python's limit was refused too-deep; it
+    is `cycle` now, naming the let the recursion re-enters at the reference
+    that re-enters it, as a short one always was."""
+    for entry in sorted({1, c // 2 or 1, c}):
+        r = refused(letcycle(c, entry))
+        closer = entry + 1 if entry < c else 1      # the let that reads it
+        assert (r.name, r.line, r.sentence) == (
+            "cycle", 3 + closer, f"a{entry} depends on itself"), str(r)
+
+
+def test_a_cycle_of_consts_names_its_path():
+    for c in (3, 400):
+        lines = ["system cc", "format fp64", "state x",
+                 f"const c1 = c{c} + 1"]
+        lines += [f"const c{j} = c{j - 1} + 1" for j in range(2, c + 1)]
+        r = refused(NL.join(lines + ["next x = x * c1", "step map"]) + NL)
+        path = ", ".join(["c1"] + [f"c{j}" for j in range(c, 1, -1)] + ["c1"])
+        assert (r.name, r.line, r.sentence) == (
+            "cycle", 5, f"c1 depends on itself: {path}")
+
+
+def test_the_suites_deep_let_chain_is_accepted():
+    """The challenge suite's cases/refuse/deep_let_chain.cftl, rebuilt here
+    and held to its catalogued SHA-256: 10,001 lets, expected too-deep by
+    the suite, as LANGUAGE.md stood ("long chains of lets ... held to
+    Python's own recursion limit"). Accepted now, and read back."""
+    lines = ["system deep_let_chain", "format fp64", "round rne", "state x",
+             "let a0=x"] + [f"let a{j}=a{j - 1}+x" for j in range(1, 10001)]
+    data = (NL.join(lines + ["next x=a10000", "step map"]) + NL).encode()
+    assert hashlib.sha256(data).hexdigest() == \
+        "e425ceafbaf931604703b0a8ba33a7e73d8bd4b5fab80f29a2897422ca9106ec"
+    g = compile_(data)
+    assert g.op_counts("step") == {"add": 10000}
+    reads_back(g)
+
+
+def _outcome(text):
+    try:
+        g = compile_(text)
+    except lang.Refusal as r:
+        return ("refused", r.name, r.line, r.sentence)
+    return ("accepted", g.to_bytes())
+
+
+def _far_from_the_limit(fn):
+    """fn() in a thread with a 255 MB stack (the largest Windows takes) and
+    Python's recursion limit at 1,000,000: the recursion with no limit in
+    reach. Restores both."""
+    box = []
+
+    def run():
+        try:
+            box.append(("value", fn()))
+        except BaseException as e:            # noqa: BLE001
+            box.append(("error", e))
+    size = threading.stack_size(255 * 1024 * 1024)
+    limit = sys.getrecursionlimit()
+    try:
+        sys.setrecursionlimit(1_000_000)
+        t = threading.Thread(target=run)
+        t.start()
+        t.join()
+    finally:
+        sys.setrecursionlimit(limit)
+        threading.stack_size(size)
+    kind, value = box[0]
+    if kind == "error":
+        raise value
+    return value
+
+
+EXACT = [letchain(k, 700) for k in ("map", "rk4", "sv", "rk4+v", "map+v",
+                                    "call-map")]
+EXACT += [letcycle(800, 400), letcycle(800, 800)]
+EXACT += [NL.join(["system cc", "format fp64", "state x", "const c1 = 1/7"]
+                  + [f"const c{j} = c{j - 1} + 1" for j in range(2, 901)]
+                  + ["next x = x * c900", "step map"]) + NL,
+          NL.join(["system ac", "format fp64", "state x[900], y",
+                   "let d[0] = y", "let d[i] = d[i - 1] + y for i in 1..899",
+                   "next x[i] = d[i]", "next y = y", "step map"]) + NL,
+          NL.join(["system cb", "format fp64", "state x, y", "let a1 = x + y"]
+                  + [f"let a{j} = a{j - 1} + y" for j in range(2, 595)]
+                  + ["let a595 = a594 + a700"]
+                  + [f"let a{j} = a{j - 1} + y" for j in range(596, 700)]
+                  + ["let a700 = a699 + a595", "next x = a700", "next y = y",
+                     "step map"]) + NL,
+          # a fault met only after the deep read returns; and a fault in a
+          # let's prefix, before its read, with another deeper down that the
+          # recursion never reaches - so neither may the deferral
+          NL.join(["system f", "format fp64", "state x, y", "let a1 = x + y"]
+                  + [f"let a{j} = a{j - 1} + y" for j in range(2, 700)]
+                  + ["let a700 = a699 * 1e400", "next x = a700", "next y = y",
+                     "step map"]) + NL,
+          NL.join(["system f", "format fp64", "state x, y",
+                   "let a1 = x * 1e400"]
+                  + [f"let a{j} = a{j - 1} + y" for j in range(2, 350)]
+                  + ["let a350 = (y / 0) + a349"]
+                  + [f"let a{j} = a{j - 1} + y" for j in range(351, 701)]
+                  + ["next x = a700", "next y = y", "step map"]) + NL]
+
+
+def test_a_definition_met_deep_is_the_recursion(monkeypatch):
+    """The checker sets a definition met deep aside and evaluates it from
+    the top (check.py, BUDGET). Held to the recursion itself, run with the
+    budget out of reach and Python's limit far away: with the budget as
+    shipped, and forced to 3 frames - a definition set aside at nearly
+    every read - every source gets the same graph, byte for byte, or the
+    same refusal, name, line and sentence: a fault after the deep read and
+    one before it, a cycle's named let, a const chain, a let array's chain."""
+    shipped = lang_check.BUDGET
+    monkeypatch.setattr(lang_check, "BUDGET", 10 ** 9)
+    oracle = _far_from_the_limit(lambda: [_outcome(t) for t in EXACT])
+    assert [o[0] for o in oracle].count("accepted") == 8
+    assert [o[1:3] for o in oracle if o[0] == "refused"] == \
+        [("cycle", 404), ("cycle", 4), ("cycle", 598),
+         ("constant-overflow", 703), ("runtime-division", 353)]
+    for budget in (shipped, 3):
+        monkeypatch.setattr(lang_check, "BUDGET", budget)
+        assert [_outcome(t) for t in EXACT] == oracle, budget
+
+
+def test_the_verdict_is_the_same_from_a_deep_caller():
+    """The verdict once moved with the caller's own stack: a 230-let map
+    accepted from a script was refused 100 frames down. Called 300 frames
+    deeper, a 700-let chain and rk4 with 81 lets get the graph they get from
+    here, and read back there."""
+    def down(k, fn):
+        return fn() if k == 0 else down(k - 1, fn)
+    for text in (letchain("map", 700), letchain("rk4", 81)):
+        g = down(300, lambda: compile_(text))
+        assert g.to_bytes() == graph(text).to_bytes()
+        canon = lang.render_canonical(g)
+        assert down(300, lambda: compile_(canon)).to_bytes() == g.to_bytes()
+
+
+def test_a_default_reading_a_folded_const_is_named():
+    """h read only through a param's or a lane param's default was refused
+    `unused` naming no use: a default is evaluated outside the step
+    (verifier-VD2's cases/default_fold.cftl). Its fold is named now."""
+    for decl in ("param p = c", "lane param p = c"):
+        r = refused(src("const c = h/h", decl, "next x = x * p"))
+        assert (r.name, r.line) == ("unused", 7)
+        assert "(h / h at line 4 is 1); write the constant," in r.sentence

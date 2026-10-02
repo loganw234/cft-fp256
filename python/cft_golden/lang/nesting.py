@@ -12,17 +12,16 @@ nodes, which are in post-order, so nothing recurses however deep a line
 is - and the checker refuses a source whose canonical form would nest past
 the limit (`too-deep`, check.py's canonical_nesting).
 
-A canonical line nests deeper than its source in three ways (D2's probe on
-3fa0319, each a cftc exit 70 until this rule):
-  - a negation used as an operand of a binary operation is written in
-    parentheses, (-a) * b, so -(-(...) * y) * y nests two levels a level;
-  - a tangent's rule writes an unnamed primal value again inside a call -
-    fma(da, b, a * db), select(r == a, da, db) - so the tangent of an
-    unnamed product of n terms nests n - 1 deep from a source 0 deep, and
-    a min chain's tangent one level deeper than the chain;
-  - euler's and stormer-verlet's step writes a right-hand side in place
-    inside the template's fma (next x = fma(h, <rhs>, x)), one level
-    deeper than the equation.
+A canonical line can nest deeper than its source: the canonical form
+writes its own parentheses - around every operation nested in another but
+a left operand of its kind, around a compound constant used as an operand,
+x * (1/3), and around a negation used as an operand of a binary operation,
+(-a) * b - and writes out what a source need not, the expansion block and
+the tangent's lines. For example, -(-(...) * y) * y nests two levels a
+level there, and the tangent of an unnamed product of n terms n - 1 deep
+from a source 0 deep (D2's probe and verifier-VD2 found such sources, each
+a cftc exit 70 until this rule). lines() keeps no list of the ways: it
+measures what the canonical form would write.
 
 Each rule below is render._Canon's, one for one, and uses its operator
 tables; python/tests/test_lang_readback.py holds the measure equal to the

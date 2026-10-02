@@ -502,6 +502,41 @@ def test_the_command_line_refuses_what_would_not_read_back(tmp_path):
         assert not out.exists()
 
 
+def _letchain(n, step="step rk4, h = 1/8"):
+    return ("system letchain\nformat fp64\nstate x, y\nlet a1 = x + y\n"
+            + "".join(f"let a{j} = a{j - 1} + y\n" for j in range(2, n + 1))
+            + f"d/dt x = a{n}\nd/dt y = y\n{step}\n")
+
+
+def test_the_command_line_compiles_a_chain_of_lets_of_any_length(tmp_path):
+    """verifier-VD2's cases/rk4_letchain_81.cftl, rebuilt: rk4 with 81 lets
+    was accepted by the language and stopped cftc at exit 70 - its canonical
+    form, whose expansion block chains the stages through labels, could not
+    be read back within Python's recursion limit. It compiles now, exit 0,
+    every file written; so does a chain of 1,000; and a cycle of 300 lets,
+    refused too-deep before for the same limit, is refused `cycle`, exit 3.
+    Never 70."""
+    py = [sys.executable, str(ROOT / "python" / "cftc")]
+    cycle = ("system cyc\nformat fp64\nstate x, y\nlet a1 = a300 + y\n"
+             + "".join(f"let a{j} = a{j - 1} + y\n" for j in range(2, 301))
+             + "next x = a150\nnext y = y\nstep map\n")
+    for k, (text, want) in enumerate(((_letchain(81), 0),
+                                      (_letchain(1000), 0), (cycle, 3))):
+        src = tmp_path / f"chain{k}.cftl"
+        src.write_bytes(text.encode("ascii"))
+        out = tmp_path / f"out{k}"
+        r = subprocess.run(py + [str(src), "--steps", "2", "--target",
+                                 "sw:32768", "--out", str(out)],
+                           capture_output=True, text=True)
+        assert r.returncode == want, (k, r.returncode, r.stderr)
+        assert "internal error" not in r.stderr
+        if want == 0:
+            assert len(list(out.iterdir())) == 8
+        else:
+            assert r.stderr.startswith("cftc: refused cycle: "), r.stderr
+            assert not out.exists()
+
+
 def test_a_step_count_past_the_digit_limit_is_refused_by_name():
     """segment-steps formatted the count with repr(), so a count past
     Python's 4,300-digit limit raised a bare ValueError (verifier-VI)."""

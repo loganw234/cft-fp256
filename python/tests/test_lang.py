@@ -406,16 +406,39 @@ def test_each_refusal_by_name(name):
 
 def test_a_long_chain_costs_no_depth():
     """A sum of 3,000 terms - a left-deep chain 3,000 operations long - is
-    checked, written out and read back in loops, not frames; a chain of
-    lets that long is refused by name, never a bare RecursionError."""
+    checked, written out and read back in loops, not frames; and so, since
+    D2 (2026-10-01), is a chain of 2,000 lets.
+
+    Before, this test held that a chain of 2,000 lets was refused by name,
+    `too-deep`, never a bare RecursionError: a let read by name recursed a
+    frame or more a level, held to Python's own recursion limit, so the
+    verdict hung on the Python version and on the caller's stack. Now it
+    holds that the chain is accepted, its graph the 2,000 adds it writes,
+    its canonical form read back, its mathematical form written whole and
+    the interpreter's step from 0 the 2,000 - a definition met deep is
+    evaluated from the top (check.py, BUDGET), and a chain of lets may be
+    any length (Logan: "No limit (Recommended)"). A cycle of 2,000 lets,
+    refused too-deep before for the same limit, is refused `cycle` now, by
+    its own name. (This file's MathForm reads a `where` block by recursion,
+    a let a level, so the chain's value is the interpreter's here, which
+    walks the graph in a loop.)"""
     g = compile_(_src("state x", "next x = x" + " + x" * 3000))
     assert g.op_counts() == {"add": 3000}
     assert compile_(lang.render_canonical(g)).to_bytes() == g.to_bytes()
     assert MathForm(lang.render_math(g)).step([F(1, 3)]) == [F(3001, 3)]
     lets = [f"let r{k} = r{k - 1} + 1" for k in range(1, 2001)]
+    g = compile_(_src("state x", "let r0 = x", *lets, "next x = r2000"))
+    assert g.op_counts() == {"add": 2000}
+    assert compile_(lang.render_canonical(g)).to_bytes() == g.to_bytes()
+    math = lang.render_math(g)
+    assert "\n  r1 = x + 1\n" in math and "\n  r2000 = r1999 + 1\n" in math
+    assert lang.run(g, [[0]], 1).states[0] == [
+        C.round_once(FORMATS["fp64"], 0, F(2000))[0]]
     with pytest.raises(lang.Refusal) as info:
-        compile_(_src("state x", "let r0 = x", *lets, "next x = r2000"))
-    assert info.value.name == "too-deep"
+        compile_(_src("state x", "let r0 = r2000 + 1", *lets,
+                      "next x = r2000"))
+    assert (info.value.name, info.value.sentence) == (
+        "cycle", "r2000 depends on itself")
 
 
 def test_the_class_carries_the_compilers_names():

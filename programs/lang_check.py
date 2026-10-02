@@ -48,12 +48,14 @@ many lanes and at several step counts: the image's REPEAT patched to 1,
   I  the corpus's coverage, every tally nonzero
   J  every source the language accepts reads back (D2): maps reading h at
      random - forms that scale with h, that fold away, that are
-     nonlinear - and chains at the parser's 100 - negations used as
+     nonlinear - chains at the parser's 100 - negations used as
      multiplicands, nested calls under every integrator, an unnamed
-     product's and a min chain's tangent - each compiled, its canonical
-     form read back, or refused by the name its source decides; never an
-     InternalError. Neither class reached a generator above, and each
-     stopped the compiler at exit 70 until D2's rules.
+     product's and a min chain's tangent, a compound constant - and chains
+     of lets past where Python's recursion limit once stopped them, with
+     and without a tangent, and a cycle of them; each compiled, its
+     canonical form read back, or refused by the name its source decides;
+     never an InternalError. No class of these reached a generator above,
+     and each stopped the compiler at exit 70 until D2's rules.
 
 A check skipped prints a line that starts with SKIP, which the runner
 counts and names on its VERDICT line.
@@ -1641,6 +1643,12 @@ def g_chain(kind, size, rng):
              "next x0 = " + "min(" * (size - 1) + names[0] + "".join(
                  f", {x})" for x in names[1:])]
             + [f"next {x} = {x}" for x in names[1:]] + ["step map"], size),
+        # a compound constant as an operand is written in parentheses,
+        # x * (1/3): one level the source does not write (verifier-VD2)
+        "a compound constant": (
+            ["state x, y", "const k = 1/3",
+             "next x = " + "abs(" * size + "x * k" + ")" * size,
+             "next y = y", "step map"], size + 1),
     }[kind]
     return "\n".join(head + body[0]) + "\n", body[1]
 
@@ -1651,12 +1659,51 @@ CHAIN_LIMITS = {"negation multiplicands": 50,
                 "negation multiplicands, a let": 50,
                 "calls, a map": 100, "calls, rk4": 100, "calls, euler": 99,
                 "calls, stormer-verlet": 99, "a product's tangent": 101,
-                "a min chain's tangent": 100}
+                "a min chain's tangent": 100, "a compound constant": 99}
+
+
+def g_letchain(kind, n, rng):
+    """A chain of n lets read by name - `let a1 = x + y`, `let aj = a(j-1)
+    + y`, through a call for "a call chain", in a cycle for "a cycle" -
+    read by x's equation, in a system of `kind`."""
+    tan = kind.endswith(" + v")
+    base = kind[:-4] if tan else kind
+    step = {"map": "step map", "a call chain, map": "step map",
+            "a cycle": "step map", "euler": "step euler, h = 1/8",
+            "rk4": "step rk4, h = 1/8",
+            "stormer-verlet": "step stormer-verlet, h = 1/8, q = (x), "
+                              "p = (y)"}[base]
+    nxt = "abs(a{p}) + y" if base.startswith("a call") else "a{p} + y"
+    first = {"stormer-verlet": "y + y", "a cycle": f"a{n} + y"}.get(base,
+                                                                   "x + y")
+    w = "next" if step == "step map" else "d/dt"
+    lines = [f"system lc{n}",
+             f"format {rng.choice(['fp32', 'fp64', 'fp128', 'fp256'])}",
+             f"round {rng.choice(['rne', 'rtz', 'rdn', 'rup', 'rmm'])}",
+             "state x, y"] + (["tangent v"] if tan else [])
+    lines.append(f"let a1 = {first}")
+    lines += [f"let a{j} = " + nxt.format(p=j - 1) for j in range(2, n + 1)]
+    lines += [f"{w} x = a{n // 2 if base == 'a cycle' else n}",
+              f"{w} y = " + ("-x" if base == "stormer-verlet" else "y"), step]
+    return "\n".join(lines) + "\n"
+
+
+# The let-chain class (verifier-VD2): where the read-back of the canonical
+# form, or the checker, stopped at Python's own limit on 87c4df9 (rk4 read
+# back to 80 lets, stormer-verlet 122, rk4 + v 64, stormer-verlet + v 97,
+# euler + v and map + v 197, a chain through a call 164 on Python 3.12),
+# one past each; far past them; and a cycle longer than that limit. Each
+# compiles, its canonical form read back - the cycle is refused by name.
+LET_CHAINS = [("rk4", 81), ("stormer-verlet", 123), ("rk4 + v", 65),
+              ("stormer-verlet + v", 98), ("euler + v", 198),
+              ("map + v", 198), ("a call chain, map", 165), ("map", 1500),
+              ("rk4", 600), ("rk4 + v", 300), ("a cycle", 600)]
 
 
 def leg_readback(count, rng):
     section(f"J. every source the language accepts reads back: {count} maps "
-            f"reading h at random, and chains at the parser's limit")
+            f"reading h at random, chains at the parser's limit, and chains "
+            f"of lets past Python's")
     t0 = time.perf_counter()
     tally = {}
     internal, wrong = [], []
@@ -1706,21 +1753,27 @@ def leg_readback(count, rng):
                     nest(out.canonical) != depth:
                 wrong.append(f"{what}: the canonical form is "
                              f"{nest(out.canonical)} deep")
+    for kind, n in LET_CHAINS:
+        run(g_letchain(kind, n, rng), "cycle" if kind == "a cycle" else
+            "compiles", None, f"lets, {kind}, {n}")
+        chains += 1
     chain_tally = {n: tally[n] - hmaps.get(n, 0) for n in tally
                    if tally[n] - hmaps.get(n, 0)}
     for f in (internal + wrong)[:12]:
         print(f"        {f}")
     print(f"  maps reading h: {dict(sorted(hmaps.items()))}")
-    print(f"  chains at the limit: {dict(sorted(chain_tally.items()))}")
+    print(f"  chains: {dict(sorted(chain_tally.items()))}")
     check(not internal, f"no InternalError: {count} maps reading h at "
-          f"random and {chains} chains at the parser's limit, each compiled "
-          f"with its canonical form read back or refused by name",
+          f"random and {chains} chains - at the parser's limit, and chains "
+          f"of lets past Python's - each compiled with its canonical form "
+          f"read back or refused by name",
           f"{len(internal)} stopped the compiler with an internal error, "
           f"exit 70")
     check(not wrong, f"each outcome the one its source decides - h folded "
           f"away `unused` at the step line, a nonlinear form h-nonlinear, a "
-          f"canonical form past 100 `too-deep` naming its depth, and every "
-          f"accepted chain's canonical form the depth its kind gives "
+          f"canonical form past 100 `too-deep` naming its depth, every "
+          f"accepted chain's canonical form the depth its kind gives, every "
+          f"chain of lets compiled and a cycle of them `cycle` "
           f"({time.perf_counter() - t0:.1f} s)",
           f"{len(wrong)} otherwise")
 

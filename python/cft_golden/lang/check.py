@@ -23,6 +23,8 @@ Evaluation modes, and what each may read:
            not depend on h.
 """
 
+from sys import _getframe
+
 from .. import softfloat as sf
 from ..formats import FORMATS
 from ..seq import SCRATCH_D_MAX
@@ -63,6 +65,73 @@ LANE_SLOTS = SCRATCH_D_MAX
 
 _STEP_OPTIONS = {"rk4": ("h",), "euler": ("h",),
                  "stormer-verlet": ("h", "q", "p"), "map": ("h",)}
+
+# ---- definitions read by name, at any depth (D2, 2026-10-01) ------------
+#
+# A let, a label, a written tangent let or label, or a const is evaluated
+# where it is first read, and memoized. A chain of them read by name used to
+# recurse a definition a level, so it was held to Python's own recursion
+# limit - and the verdict hung on the Python version and the caller's stack:
+# a chain of 150 lets through a call was accepted on 3.12 and refused on
+# 3.10, a 230-let map accepted from the command line and refused 100 frames
+# down, and rk4 with 81 lets accepted while its canonical form, whose
+# expansion block chains the stages through labels, did not read back
+# (verifier-VD2; cftc's exit 70). Now a definition met where the stack is
+# BUDGET frames above the top-level evaluation - an equation's output, a
+# block's next line, a default, h - is set aside (_Deep) with the
+# definitions on the path to it, and `evaluate` evaluates them again from
+# the top, innermost first, the rest of the path kept busy, and then the
+# expression itself. Each repeats only its own prefix, which had been done
+# without fault and whose effects are idempotent (completed definitions are
+# memoized, labels set on completion, constants a cache), so every effect
+# first happens in the recursion's order, the prefix's second time adding
+# none: the same graph, the same first refusal, a cycle named at the same
+# reference.
+# python/tests/test_lang_readback.py holds it to the unlimited recursion.
+# Nothing bounds a chain: Logan, 2026-10-01, "No limit (Recommended)".
+# The budget changes no verdict, only where the stack is cut: at 200 the
+# checker's deepest point - a definition entered just under it whose own
+# expression is 99 calls deep - was 405 frames on 3.12 and 504 on 3.10,
+# under the parser's 506 for that text (D2, measured), so checking never
+# needs more stack than parsing the same source.
+BUDGET = 200
+
+
+class _Pending:
+    """A definition set aside: a let, label or written tangent let or label
+    (its context's `busy` set and its `key`) or a const (`d`), and `again`,
+    which evaluates it from the top."""
+    __slots__ = ("busy", "key", "d", "again")
+
+    def __init__(self, busy, key, d, again):
+        self.busy, self.key, self.d, self.again = busy, key, d, again
+
+
+class _Deep(Exception):
+    """A definition met too deep: `path` holds it and then each definition
+    in progress above it, innermost first."""
+
+    def __init__(self, pending):
+        super().__init__()
+        self.path = [pending]
+
+
+def _depth():
+    """The frames on the stack, the caller's own included."""
+    f, n = _getframe(1), 0
+    while f is not None:
+        n, f = n + 1, f.f_back
+    return n
+
+
+def _past(limit):
+    """Whether the caller is more than `limit` frames above the stack's
+    bottom (sys._getframe walks down that many, or raises)."""
+    try:
+        _getframe(limit)
+    except ValueError:
+        return False
+    return True
 
 
 def _reserved_why(name):
@@ -108,53 +177,78 @@ def _hread(*vals):
     return any(isinstance(v, K) and v.hsrc is not None for v in vals)
 
 
-def _spelt(e):
-    """An expression's text as a sentence names it: its own names,
-    literals and operators, each nested operation parenthesised but a left
-    operand with its parent's operator (a - b - c). A chain and a run of
-    minuses are walked in loops; nesting recurses, as deep as the parser
-    allowed it (MAX_NESTING)."""
-    def operand(x, same=None):
-        text = _spelt(x)
-        if isinstance(x, (Cmp, Neg)) or (isinstance(x, Bin) and x.op != same):
-            return f"({text})"
-        return text
+def _pieces(e):
+    """An expression's text as a sentence names it, in pieces, in order:
+    its own names, literals and operators, each nested operation
+    parenthesised but a left operand with its parent's operator (a - b - c).
+    A chain and a run of minuses are walked in loops, and nesting recurses
+    as deep as the parser allowed it (MAX_NESTING). The pieces come lazily,
+    so spell() stops at its limit: writing a long folded constant whole was
+    quadratic (verifier-VD2: 2.5 s at 128,000 terms)."""
     if isinstance(e, Num):
-        return e.text
-    if isinstance(e, Name):
-        return e.name
-    if isinstance(e, Index):
-        return f"{e.name}[{_spelt(e.index)}]"
-    if isinstance(e, Neg):
+        yield e.text
+    elif isinstance(e, Name):
+        yield e.name
+    elif isinstance(e, Index):
+        yield f"{e.name}["
+        yield from _pieces(e.index)
+        yield "]"
+    elif isinstance(e, Neg):
         n = 0
         while isinstance(e, Neg):
             n, e = n + 1, e.arg
-        inner = operand(e) if isinstance(e, Bin) else _spelt(e)
-        return "- " * (n - 1) + "-" + inner
-    if isinstance(e, Bin):
+        yield "- " * (n - 1) + "-"
+        yield from _operand(e, isinstance(e, (Bin, Cmp)))
+    elif isinstance(e, Bin):
         chain = []
         while isinstance(e, Bin):
             chain.append(e)
             e = e.left
-        text = operand(e, chain[-1].op)
+        # a left operand of another operator is parenthesised: open them all
+        # first, each closed after its own right operand
+        yield "(" * sum(1 for k in range(1, len(chain))
+                        if chain[k - 1].op != chain[k].op)
+        yield from _operand(e, isinstance(e, (Cmp, Neg)))
         for k in range(len(chain) - 1, -1, -1):
             b = chain[k]
-            text = f"{text} {b.op} {operand(b.right)}"
+            yield f" {b.op} "
+            yield from _operand(b.right, isinstance(b.right, (Bin, Cmp, Neg)))
             if k and chain[k - 1].op != b.op:
-                text = f"({text})"
-        return text
-    if isinstance(e, Cmp):
-        return f"{operand(e.left)} {e.op} {operand(e.right)}"
-    if isinstance(e, Call):
-        return f"{e.name}({', '.join(_spelt(a) for a in e.args)})"
-    raise AssertionError(f"unknown expression {e!r}")
+                yield ")"
+    elif isinstance(e, Cmp):
+        yield from _operand(e.left, isinstance(e.left, (Bin, Cmp, Neg)))
+        yield f" {e.op} "
+        yield from _operand(e.right, isinstance(e.right, (Bin, Cmp, Neg)))
+    elif isinstance(e, Call):
+        yield f"{e.name}("
+        for k, a in enumerate(e.args):
+            if k:
+                yield ", "
+            yield from _pieces(a)
+        yield ")"
+    else:
+        raise AssertionError(f"unknown expression {e!r}")
+
+
+def _operand(x, wrap):
+    if wrap:
+        yield "("
+    yield from _pieces(x)
+    if wrap:
+        yield ")"
 
 
 def spell(e, env=None, limit=40):
     """(text, where): a constant expression as a refusal's sentence names
     it - its text, cut to `limit` characters - and, where an equation's
     range binds index variables it reads, their values (" where i = 3")."""
-    text = _spelt(e)
+    out, size = [], 0
+    for piece in _pieces(e):
+        out.append(piece)
+        size += len(piece)
+        if size > limit:
+            break
+    text = "".join(out)
     if len(text) > limit:
         text = text[:limit - 3] + "..."
     where = ""
@@ -254,6 +348,10 @@ class Checker:
         # {id(expression): (expression, index environment, value)}
         self.h_scaled = False
         self.h_folded = {}
+        # the stack depth past which a definition is set aside: BUDGET above
+        # the first top-level evaluation, taken once a check (evaluate)
+        self._limit = None
+        self._comp_at = None        # a component's flat index, by name
         # the tangent vectors, in declaration order, and what a source
         # writes of their equations: {vector: [Stmt]}, {vector: {name:
         # Decl}} for its written tangent lets
@@ -473,7 +571,7 @@ class Checker:
             expr, line = opts["h"]
             self.h_line = line
             self.h_busy = True
-            v = self.eval(expr, self.const_ctx(line))
+            v = self.evaluate(expr, self.const_ctx(line))
             self.h_busy = False
             if v.deg != 0:
                 raise Refusal("cycle", "h depends on itself", line)
@@ -1068,7 +1166,55 @@ class Checker:
                        f"step-halving run halves h, and the default would "
                        f"not follow it", line)
 
-    def const_value(self, d, line):
+    # ---- evaluation from the top, and definitions set aside ------------
+
+    def evaluate(self, e, ctx):
+        """eval, at the top: an equation's output, a block's next line, a
+        default, h. A definition met too deep (_Deep) is set aside with the
+        definitions on the path to it; each is evaluated again from here,
+        innermost first, those below it on the path kept busy as they would
+        be on the recursion's stack, and then the expression itself."""
+        if self._limit is None:
+            self._limit = _depth() + BUDGET
+        pending = []              # every entry but the last is kept busy
+        while True:
+            try:
+                if not pending:
+                    return self.eval(e, ctx)
+                pending[-1].again()
+            except _Deep as deep:
+                new = deep.path[::-1]                 # outermost first
+                if pending:
+                    # the outermost is the definition being evaluated
+                    # again: it stays where it is, now on the path
+                    del new[0]
+                    self._keep(pending[-1])
+                for p in new[:-1]:
+                    self._keep(p)
+                pending.extend(new)
+                continue
+            pending.pop()
+            if pending:
+                self._release(pending[-1])
+
+    def _keep(self, p):
+        """A definition set aside, on the path: busy, as on the stack."""
+        if p.d is None:
+            p.busy.add(p.key)
+        else:
+            p.d.busy = True
+            self.const_stack.append(p.d.name)
+
+    def _release(self, p):
+        if p.d is None:
+            p.busy.discard(p.key)
+        else:
+            p.d.busy = False
+            self.const_stack.pop()
+
+    def const_value(self, d, line, again=False):
+        """A const's value, once: set aside where the stack is too deep,
+        unless `evaluate` is evaluating it again (`again`)."""
         if d.value is not None:
             d.used = True
             return d.value
@@ -1076,11 +1222,20 @@ class Checker:
             path = self.const_stack[self.const_stack.index(d.name):]
             raise Refusal("cycle", f"{d.name} depends on itself: "
                           f"{', '.join(path + [d.name])}", line)
+        if not again and _past(self._limit):
+            raise _Deep(_Pending(None, None, d,
+                                 lambda: self.const_value(d, line, True)))
         d.busy = True
         self.const_stack.append(d.name)
-        v = self.eval(d.expr, self.const_ctx(d.line))
-        self.const_stack.pop()
-        d.busy = False
+        try:
+            v = self.eval(d.expr, self.const_ctx(d.line))
+        except _Deep as deep:
+            deep.path.append(_Pending(None, None, d,
+                                      lambda: self.const_value(d, line, True)))
+            raise
+        finally:
+            self.const_stack.pop()
+            d.busy = False
         d.value = v
         d.used = True
         return v
@@ -1100,6 +1255,12 @@ class Checker:
                           f"{comp}: it defines {have[0]}..{have[-1]}"
                           if have else f"{d.name} defines no component",
                           line)
+        return self.define(d, comp, ctx, line)
+
+    def define(self, d, comp, ctx, line, again=False):
+        """A let, label or written tangent let or label, component `comp`,
+        evaluated once in a context: set aside where the stack is too deep,
+        unless `evaluate` is evaluating it again (`again`)."""
         key = (d.name, comp)
         if key in ctx.memo:
             d.used_comps.add(comp)
@@ -1107,10 +1268,23 @@ class Checker:
         label = d.name if comp is None else f"{d.name}[{comp}]"
         if key in ctx.busy:
             raise Refusal("cycle", f"{label} depends on itself", line)
+        if not again and _past(self._limit):
+            raise _Deep(_Pending(ctx.busy, key, None,
+                                 lambda: self.define(d, comp, ctx, line, True)))
+        # No bound on a chain (Logan: "No limit"); were one stated, the
+        # longest chain of lets would be counted here, on completion, from
+        # the chains of the lets this one reads.
         ctx.busy.add(key)
         expr, sline, env = d.defs[comp]
-        v = self.eval(expr, ctx.at(env, sline))
-        ctx.busy.discard(key)
+        try:
+            v = self.eval(expr, ctx.at(env, sline))
+        except _Deep as deep:
+            deep.path.append(_Pending(ctx.busy, key, None,
+                                      lambda: self.define(d, comp, ctx, line,
+                                                          True)))
+            raise
+        finally:
+            ctx.busy.discard(key)
         if d.lname is not None:
             # a written tangent let or label: in the generic tangent
             # section it carries the label of what it is the tangent of
@@ -1268,7 +1442,7 @@ class Checker:
         out = {}
         for comp in comps:
             _kind, expr, line, env = self.eqs[comp]
-            out[comp] = self.eval(expr, ctx.at(env, line))
+            out[comp] = self.evaluate(expr, ctx.at(env, line))
         return out
 
     def build_map(self):
@@ -1277,7 +1451,7 @@ class Checker:
         outs = []
         for comp in range(self.n):
             _kind, expr, line, env = self.eqs[comp]
-            outs.append(self.eval(expr, ctx.at(env, line)))
+            outs.append(self.evaluate(expr, ctx.at(env, line)))
         return outs
 
     @staticmethod
@@ -1460,7 +1634,7 @@ class Checker:
         outs = []
         for comp in range(self.n):
             expr, line = nexts[comp]
-            outs.append(self.eval(expr, ctx.at({}, line)))
+            outs.append(self.evaluate(expr, ctx.at({}, line)))
         touts = {}
         for vec in self.tangents:
             if vec not in tnexts:
@@ -1469,8 +1643,8 @@ class Checker:
                        labels=labels)
             tctx.tvec, tctx.tlabels, tctx.primal = vec, tlabels.get(vec, {}), \
                 ctx
-            touts[vec] = ([self.eval(tnexts[vec][c][0],
-                                     tctx.at({}, tnexts[vec][c][1]))
+            touts[vec] = ([self.evaluate(tnexts[vec][c][0],
+                                         tctx.at({}, tnexts[vec][c][1]))
                            for c in range(self.n)],
                           [tnexts[vec][c][1] for c in range(self.n)],
                           tctx.tlabels)
@@ -1617,7 +1791,7 @@ class Checker:
         ctx.tvec = vec
         ctx.tlabels = self.tan_lets.get(vec, {})
         ctx.primal = self.field_ctx if self.is_flow else self.map_ctx
-        vals = [self.eval(eqs[c][0], ctx.at(eqs[c][2], eqs[c][1]))
+        vals = [self.evaluate(eqs[c][0], ctx.at(eqs[c][2], eqs[c][1]))
                 for c in range(self.n)]
         return vals, [eqs[c][1] for c in range(self.n)]
 
@@ -1664,7 +1838,12 @@ class Checker:
                 continue
             ctx = Ctx("default")
             ctx.line = d.line
-            v = self.eval(d.expr, ctx)
+            v = self.evaluate(d.expr, ctx)
+            if v.hsrc is not None:
+                # a default reading a const that read h: h-scope refuses one
+                # that scales, so this is a use of h that folded, outside the
+                # step (verifier-VD2: once named nowhere in `unused`)
+                self.h_meets(v)
             value = v.coef
             bits, flags = C.round_once(self.fmt, self.rnd, value)
             over = C.overflowed(flags)
@@ -1892,7 +2071,11 @@ class Checker:
                 if fam is not None and comp in fam.defs:
                     line = fam.defs[comp][1]
         else:                       # a stage's component: k1.x, Y2.x[3]
-            line = self.eqs[self.comp_names.index(rest)][2]
+            # a dict, made once: list.index for each line past 100 was
+            # quadratic (verifier-VD2: 1.5 s at 8,000 such components)
+            if self._comp_at is None:
+                self._comp_at = {c: k for k, c in enumerate(self.comp_names)}
+            line = self.eqs[self._comp_at[rest]][2]
         code = f"let {vec}.{label}" if tangent else f"let {label}"
         if in_block:
             return line, f"{code}, in its expansion block,"
@@ -1920,7 +2103,7 @@ def constant_of(text):
                 raise Refusal("syntax", f"{text!r} is one constant, on one "
                               f"line")
         checker = Checker([])
-        v = checker.eval(e, checker.const_ctx(None))
+        v = checker.evaluate(e, checker.const_ctx(None))
     except RecursionError:
         raise too_deep("this constant") from None
     return v.coef
