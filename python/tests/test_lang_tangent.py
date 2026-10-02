@@ -1076,19 +1076,45 @@ def _reading_state(sec):
     return reads
 
 
+def _read_by_tangent(sec):
+    """For each node of a primal section, whether the section's tangent
+    reads its tangent: whether it reaches an output through operands whose
+    tangents the rules read (none of a comparison's, a select's arms and
+    not its condition, copysign's first) - the derivation's walk from the
+    outputs, by the test's own code."""
+    read = [False] * len(sec.nodes)
+    stack = [int(o[1:]) for o in sec.out if o[0] == "n"]
+    while stack:
+        k = stack.pop()
+        if read[k]:
+            continue
+        read[k] = True
+        op, args, _l = sec.nodes[k]
+        rel = () if op in ("cmplt", "cmple", "cmpeq") else \
+            args[:2] if op == "select" else \
+            args[:1] if op == "copysign" else args
+        stack += [int(a[1:]) for a in rel if a[0] == "n"]
+    return read
+
+
 def test_l4_each_vector_pays_one_division_a_quotient_or_root():
     """After sharing what the tangent writes again, a tangent vector's step
     holds one division of its own for each division and each root of the
-    step whose tangent is not zero, none for one whose tangent is
-    identically zero, and no root of its own: rk4 with one division and
-    one root in its right-hand sides performs eight a step, and each
-    vector adds eight; with params p and q, x * (p / q) and y / p + sqrt(q)
-    perform three a step, and each vector adds one (verifier-VL4's (b)2).
-    A division or root that reads the state only through a comparison, a
-    select's condition or copysign's sign costs nothing either:
-    select(x < 0, p, q) / p reads x and costs 0, as do copysign(p, x) / q
-    and sqrt(select(y < 0, p, q)), beside the control x / p * q, which
-    costs 1 (verifier-VL4's re-check)."""
+    step whose tangent the step's tangent reads - not zero, and reaching an
+    output through operands the rules differentiate - none for any other,
+    and no root of its own: rk4 with one division and one root in its
+    right-hand sides performs eight a step, and each vector adds eight;
+    with params p and q, x * (p / q) and y / p + sqrt(q) perform three a
+    step, and each vector adds one (verifier-VL4's (b)2). A division or
+    root that reads the state only through a comparison, a select's
+    condition or copysign's sign costs nothing either: select(x < 0, p, q)
+    / p reads x and costs 0, as do copysign(p, x) / q and
+    sqrt(select(y < 0, p, q)), beside the control x / p * q, which costs 1
+    (verifier-VL4's re-check). And one whose tangent is not zero costs
+    nothing where it reaches the outputs only through those operands, since
+    the derivation forms no tangent of it there: select(x / y < 1, x, y),
+    select(sqrt(abs(x)) < 1, x, y), copysign(x, x / y) and y + (y / z < 1)
+    cost 0, beside the control z / x (verifier-VL4's third check)."""
     for text, per_step, per_vector in (
             ("system c\nformat fp64\nstate x, y\ntangent v\n"
              "d/dt x = x / (y * y + 1)\nd/dt y = -sqrt(abs(x) + 1)\n"
@@ -1104,14 +1130,21 @@ def test_l4_each_vector_pays_one_division_a_quotient_or_root():
             ("system c\nformat fp64\nstate x, y, z\ntangent v\n"
              "param p = 2, q = 3\nnext x = x + copysign(p, x) / q\n"
              "next y = y + sqrt(select(y < 0, p, q))\nnext z = x / p * q\n"
-             "step map\n", 3, 1)):
+             "step map\n", 3, 1),
+            ("system c\nformat fp64\nstate x, y\ntangent v\n"
+             "next x = select(x / y < 1, x, y)\n"
+             "next y = select(sqrt(abs(x)) < 1, x, y)\nstep map\n", 2, 0),
+            ("system c\nformat fp64\nstate x, y, z\ntangent v, w\n"
+             "next x = copysign(x, x / y)\nnext y = y + (y / z < 1)\n"
+             "next z = z / x\nstep map\n", 3, 1)):
         g = compile_(text)
         primal, tangent = _structural(g)
         routines = [k for k, (op, _a, _l) in enumerate(g.step.nodes)
                     if op in ("div", "sqrt")]
         assert len(routines) == per_step, text
-        reads = _reading_state(g.step)
-        assert sum(reads[k] for k in routines) == per_vector, text
+        nonzero, read = _reading_state(g.step), _read_by_tangent(g.step)
+        assert sum(nonzero[k] and read[k] for k in routines) == per_vector, \
+            text
         own_div = {i for op, i in tangent if op == "div" and i not in primal}
         own_sqrt = {i for op, i in tangent if op == "sqrt" and i not in primal}
         assert (len(own_div), len(own_sqrt)) == (per_vector, 0), text

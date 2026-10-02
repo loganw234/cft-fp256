@@ -43,14 +43,16 @@ The quotient's and the root's rules read r, the operation's own result,
 as min's and max's do: (da - r db) / b, one fma and one division, two
 roundings, the fma's -r a primal value the compiler shares across
 vectors; and da / (2 r), whose doubling is exact, one rounding. Each
-whose tangent is not zero costs a tangent vector ONE run-time division -
-the quotient or root written again where it has no name is the primal's
-own operation, shared - and the root's tangent takes no root; one whose
-tangent is identically zero costs a vector nothing, whether it reads no
-state (a quotient of params, the root of a param) or reads it only
-through a comparison, a select's condition or copysign's sign
-(select(x < 0, p, q) / p) - docs/LANGUAGE.md, "The quotient and the
-root".
+whose tangent the step's tangent reads - not zero, and reaching an
+output through operands the rules differentiate - costs a tangent vector
+ONE run-time division (the quotient or root written again where it has
+no name is the primal's own operation, shared), and the root's tangent
+takes no root; any other costs a vector nothing: one whose tangent is
+identically zero (a quotient of params, the root of a param,
+select(x < 0, p, q) / p), and one whose tangent is not zero but which
+reaches the outputs only through a comparison, a select's condition or
+copysign's sign (select(x / y < 1, x, y)), since the walk below forms
+no tangent of it - docs/LANGUAGE.md, "The quotient and the root".
 
 A rule reads a primal value BY NAME where it has one - a leaf, or a
 labelled node (a let, a template label such as k1.x), which the tangent
@@ -71,8 +73,8 @@ select's condition takes no tangent, so a chain through it stays linear.
 Naming parts with lets keeps it linear.
 
 The walk is iterative, from the outputs, and makes the tangent of a node
-only when some output's tangent reads it, so a comparison's operands and
-a select's condition get none.
+only when some output's tangent reads it, so a comparison's operands, a
+select's condition and copysign's sign get none.
 """
 
 from .graph import Node
