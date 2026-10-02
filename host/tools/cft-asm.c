@@ -51,6 +51,18 @@
  * second flag; four control codes for the per-lane scratch; and a
  * ninth constant-index bit per operand in imm[30:28] under kx, which
  * leaves imm[31] as the only reserved-must-be-zero bit of the word.
+ *
+ * And its "Revision 8" section, which no tile builds yet and which the
+ * model, asm.py and libcft's software backend define golden-first:
+ * R21's `augadd` and `augerr` (codes 10 and 11), R22's signed post-step
+ * on `stx` and `ldx` (imm[11:0]), and R24's flag control - `quiet` and
+ * `endquiet` (12 and 13), a region whose instructions' flags reach
+ * nothing, nesting four deep and properly with loops, and `raise rA`
+ * (14). This file read none of them until 2026-10-02 (docs/PROGRAMS.md,
+ * "Revision 8 in the text form", called it the follow-up for whoever
+ * took revision 8 to the tools); programs/check.py's revision-8 corpus,
+ * its refusal arm and its numeric arm's two step fields hold it to
+ * asm.py since.
  */
 
 #include <stdarg.h>
@@ -103,12 +115,24 @@
 #define MAX_WORST      ((uint64_t)1 << 40)
 #define MAX_DEPOSITS   ((uint32_t)1 << 20)
 
+/* Codes 10 to 14 are revision 8's: the augmentedAddition pair (R21) and
+ * flag control (R24). */
 enum { C_HALT = 0, C_REPEAT, C_ENDREP, C_DEPOSIT, C_SETACT, C_ACTALL,
-       C_STL, C_LDL, C_STX, C_LDX, C_NCODES };
+       C_STL, C_LDL, C_STX, C_LDX, C_AUGADD, C_AUGERR, C_QUIET,
+       C_ENDQUIET, C_RAISE, C_NCODES };
 static const char *const CTRL_NAMES[C_NCODES] = {
     "halt", "repeat", "endrep", "deposit", "setact", "actall",
-    "stl", "ldl", "stx", "ldx"
+    "stl", "ldl", "stx", "ldx", "augadd", "augerr", "quiet",
+    "endquiet", "raise"
 };
+/* R22: the post-step of `stx` and `ldx`, a signed twelve-bit field in
+ * imm[11:0] applied to rb after the access; imm[23:12] stay unread. */
+#define STEP_BITS       12
+#define STEP_MASK       0xFFFu
+#define STEP_MIN        (-2048)
+#define STEP_MAX        2047
+/* R24: quiet regions nest at most this deep, loops apart. */
+#define MAX_QUIET_DEPTH 4
 
 /* What each control code READS, which is the whole of its encoding
  * rule: `regs` names the register fields (1 = rd, ra, rb, rc in the
@@ -132,11 +156,21 @@ static const ctrluse CTRL_USE[C_NCODES] = {
     { { 0, 1, 0, 0 }, 1 },      /* STL  scratch[imm] := ra */
     { { 1, 0, 0, 0 }, 1 },      /* LDL  rd := scratch[imm] */
     { { 0, 1, 1, 0 }, 0 },      /* STX  scratch[rb mod D] := ra */
-    { { 1, 0, 1, 0 }, 0 }       /* LDX  rd := scratch[rb mod D] */
+    { { 1, 0, 1, 0 }, 0 },      /* LDX  rd := scratch[rb mod D] */
+    { { 1, 1, 1, 0 }, 0 },      /* AUGADD rd := r of augAdd(ra, rb) */
+    { { 1, 1, 1, 0 }, 0 },      /* AUGERR rd := e of augAdd(ra, rb) */
+    { { 0, 0, 0, 0 }, 0 },      /* QUIET    */
+    { { 0, 0, 0, 0 }, 0 },      /* ENDQUIET */
+    { { 0, 1, 0, 0 }, 0 }       /* RAISE ra */
 };
 static int is_scratch_code(int c)
 {
     return c == C_STL || c == C_LDL || c == C_STX || c == C_LDX;
+}
+/* The two codes whose imm[11:0] is a post-step (R22). */
+static int is_step_code(int c)
+{
+    return c == C_STX || c == C_LDX;
 }
 
 /* Which operand fields each opcode reads, as a 3-character string over
@@ -581,6 +615,17 @@ static int const_index(const insn *d, int k)
                  (((d->imm >> KX9_SHIFT[k]) & 1u) << 8));
 }
 
+/* The signed post-step of a decoded STX or LDX (R22), else 0: asm.py's
+ * step_of. */
+static int step_of(const insn *d)
+{
+    int s;
+    if (!d->ctrl || !is_step_code(d->op))
+        return 0;
+    s = (int)(d->imm & STEP_MASK);
+    return (s >> (STEP_BITS - 1)) ? s - (1 << STEP_BITS) : s;
+}
+
 /* ---- the program under construction --------------------------------- */
 
 typedef struct {
@@ -911,6 +956,33 @@ static uint32_t parse_slot(const program *P, const char *tok)
     return (uint32_t)v.mag;
 }
 
+/* R22's post-step on `stx` and `ldx`: ONE optional sign, then a decimal
+ * or 0x number - `+1`, `-1`, `-0x10`, `3` - in -2048..2047, refused by
+ * name with a second sign (`+-1`, `--1`) and where it names a register,
+ * so `ldx r3, r4, r5` is a message rather than a step. asm.py's step(),
+ * in its order and its words: the sign comes off first, so the number
+ * after it is read as an unsigned token (one of int()'s spellings), and
+ * the value is held to the field after the sign is put back. A value
+ * past 2^64 - 1 is printed as the numeric arm allows: a decimal's own
+ * digits, a 0x token as written. */
+static int parse_step(const program *P, const char *tok)
+{
+    const char *body = (tok[0] == '+' || tok[0] == '-') ? tok + 1 : tok;
+    int neg = tok[0] == '-';
+    number v;
+    if (body[0] == '+' || body[0] == '-')
+        diel("'%s' carries two signs; a post-step is one optional sign and "
+             "a number", tok);
+    if (reg_literal(body) >= 0 || find_reg_name(P, body) >= 0)
+        diel("%s is a register, and a post-step is a signed number", tok);
+    need_number(body, "a post-step", &v);
+    if (v.big || v.mag > (neg ? (uint64_t)-STEP_MIN : (uint64_t)STEP_MAX))
+        diel("step %s%s outside %d..%d: a post-step is a signed %d-bit "
+             "field", neg ? "-" : "", number_text(&v, body), STEP_MIN,
+             STEP_MAX, STEP_BITS);
+    return neg ? -(int)v.mag : (int)v.mag;
+}
+
 /* A `.const` literal into `out`, format-width, little-endian.
  *
  * Three forms, decided by a `p`, which is not a hexadecimal digit:
@@ -1011,7 +1083,7 @@ static void do_ctrl(program *P, int code, char **tok, int ntok)
         if (trip.neg)
             diel("repeat trip count must be 1..2^32-1");
         imm = (uint32_t)trip.mag;
-    } else if (code == C_DEPOSIT || code == C_SETACT) {
+    } else if (code == C_DEPOSIT || code == C_SETACT || code == C_RAISE) {
         if (ntok != 1)
             diel("%s takes one register", CTRL_NAMES[code]);
         reg[1] = parse_reg(P, tok[0]);
@@ -1022,12 +1094,25 @@ static void do_ctrl(program *P, int code, char **tok, int ntok)
         reg[code == C_STL ? 1 : 0] = parse_reg(P, tok[0]);
         imm = parse_slot(P, tok[1]);
     } else if (code == C_STX || code == C_LDX) {
-        /* stx rA, rB   ldx rD, rB - the slot comes from rB */
-        if (ntok != 2)
-            diel("%s takes two registers - the value and the index",
+        /* stx rA, rB[, STEP]   ldx rD, rB[, STEP] - the slot comes from
+         * rB, and since revision 8 (R22) rB moves by STEP after it; a
+         * step omitted is zero, the instruction as it always was */
+        if (ntok != 2 && ntok != 3)
+            diel("%s takes two registers - the value and the index - and, "
+                 "since revision 8, an optional signed post-step",
                  CTRL_NAMES[code]);
         reg[code == C_STX ? 1 : 0] = parse_reg(P, tok[0]);
         reg[2] = parse_reg(P, tok[1]);
+        if (ntok == 3)
+            imm = (uint32_t)parse_step(P, tok[2]) & STEP_MASK;
+    } else if (code == C_AUGADD || code == C_AUGERR) {
+        /* augadd rD, rA, rB   augerr rD, rA, rB (R21) */
+        if (ntok != 3)
+            diel("%s takes three registers - the destination and the two "
+                 "addends", CTRL_NAMES[code]);
+        reg[0] = parse_reg(P, tok[0]);
+        reg[1] = parse_reg(P, tok[1]);
+        reg[2] = parse_reg(P, tok[2]);
     } else if (ntok) {
         diel("%s takes no operands", CTRL_NAMES[code]);
     }
@@ -1049,8 +1134,39 @@ static void do_alu(program *P, const char *mnemonic, char **tok, int ntok)
     int i, nops, any_k = 0, need_kx = 0;
     char order[4];
 
-    /* mnemonic, then dot-separated modifiers: a rounding name, or kx */
+    /* `augerr.rtz`, `ldx.kx`: a control mnemonic with a suffix, which
+     * reaches here because no control name has a dot. Say what it is
+     * rather than that it is no opcode, as asm.py does, and before any
+     * suffix is read - with the reason no rounding can be written on the
+     * augmentedAddition pair when a suffix other than kx is there. Until
+     * 2026-10-02 this said "'stx' is not an opcode this ISA has", or
+     * refused the suffix first. */
     dot = strchr(mnemonic, '.');
+    if (dot) {
+        size_t n = (size_t)(dot - mnemonic);
+        int c;
+        for (c = 0; c < C_NCODES; c++) {
+            const char *s = dot;
+            int other = 0;
+            if (strlen(CTRL_NAMES[c]) != n ||
+                strncmp(mnemonic, CTRL_NAMES[c], n))
+                continue;
+            while (s && (c == C_AUGADD || c == C_AUGERR)) {
+                const char *next = strchr(s + 1, '.');
+                size_t sn = next ? (size_t)(next - s - 1) : strlen(s + 1);
+                if (sn != 2 || strncmp(s + 1, "kx", 2))
+                    other = 1;
+                s = next;
+            }
+            diel("%s is a control instruction and takes no suffix%s",
+                 CTRL_NAMES[c],
+                 other ? " - 754-2019 9.5 fixes its rounding "
+                         "(roundTiesTowardZero), so no attribute can be "
+                         "written" : "");
+        }
+    }
+
+    /* mnemonic, then dot-separated modifiers: a rounding name, or kx */
     if (dot) {
         size_t n = (size_t)(dot - mnemonic);
         memcpy(name, mnemonic, n);
@@ -1490,14 +1606,16 @@ static void check_ctrl(const program *P, uint32_t pc, const insn *d)
         diel("[%u] %s does not read kx, so it must be zero",
              pc, CTRL_NAMES[code]);
     allowed_imm = u->slot ? SLOT_MASK : 0u;
+    if (is_step_code(code))
+        allowed_imm |= STEP_MASK;               /* revision 8's post-step */
     for (i = 0; i < 4; i++)
         if (u->regs[i])
             allowed_imm |= 1u << rhi_shift(i);
     if (code != C_REPEAT && (d->imm & ~allowed_imm))
-        diel("[%u] %s does not read imm beyond %sits register high bit(s), "
-             "so the rest of imm must be zero and imm is 0x%08x",
+        diel("[%u] %s does not read imm beyond %s%sits register high "
+             "bit(s), so the rest of imm must be zero and imm is 0x%08x",
              pc, CTRL_NAMES[code], u->slot ? "its slot and " : "",
-             (unsigned)d->imm);
+             is_step_code(code) ? "its step and " : "", (unsigned)d->imm);
     if (u->slot) {
         uint32_t v = d->imm & SLOT_MASK;
         if (v >= P->scratch_depth)
@@ -1513,6 +1631,13 @@ static void validate(const program *P)
     uint64_t mult[MAX_LOOP_DEPTH + 1], worst = 0;
     int depth = 0;
     uint32_t pc;
+    /* R24: every bracket open, loops and quiet regions together,
+     * innermost last - asm.py's and the model's rule, that the two kinds
+     * nest properly within each other. Each push is refused past its own
+     * depth first, so the stack holds at most both depths. */
+    int bkind[MAX_LOOP_DEPTH + MAX_QUIET_DEPTH];
+    uint32_t bpc[MAX_LOOP_DEPTH + MAX_QUIET_DEPTH];
+    int nb = 0, qdepth = 0;
     if (!P->have_fmt)
         diel(".format is required");
     if (!P->have_deposits)
@@ -1573,10 +1698,35 @@ static void validate(const program *P)
                     mult[depth] = MAX_WORST + 1;
                 else
                     mult[depth] = mult[depth - 1] * d.imm;
+                bkind[nb] = C_REPEAT;
+                bpc[nb++] = pc;
             } else if (d.op == C_ENDREP) {
                 depth--;
                 if (depth < 0)
                     diel("[%u] endrep without repeat", pc);
+                if (bkind[nb - 1] != C_REPEAT)
+                    diel("[%u] endrep closes its loop while the quiet region "
+                         "opened at [%u] is open: a region opened in a loop "
+                         "body closes in that body", pc,
+                         (unsigned)bpc[nb - 1]);
+                nb--;
+            } else if (d.op == C_QUIET) {
+                qdepth++;
+                if (qdepth > MAX_QUIET_DEPTH)
+                    diel("[%u] quiet regions nest deeper than %d", pc,
+                         MAX_QUIET_DEPTH);
+                bkind[nb] = C_QUIET;
+                bpc[nb++] = pc;
+            } else if (d.op == C_ENDQUIET) {
+                if (qdepth == 0)
+                    diel("[%u] endquiet with no quiet region open", pc);
+                if (bkind[nb - 1] != C_QUIET)
+                    diel("[%u] endquiet inside the loop opened at [%u], "
+                         "around a region opened outside it: a region "
+                         "opened outside a loop closes outside it", pc,
+                         (unsigned)bpc[nb - 1]);
+                qdepth--;
+                nb--;
             } else if (d.op == C_ACTALL && depth > 0) {
                 diel("[%u] actall inside a loop would make the "
                      "all-lanes-done early exit observable", pc);
@@ -1585,6 +1735,11 @@ static void validate(const program *P)
                      "it, so the all-lanes-done early exit would be "
                      "observable", pc);
             }
+            /* outside every loop, so the innermost bracket is a region */
+            if (d.op == C_HALT && qdepth)
+                diel("[%u] halt inside the quiet region opened at [%u]: a "
+                     "region is a save and its restore, and a program "
+                     "cannot stop between them", pc, (unsigned)bpc[nb - 1]);
         }
         if (worst > MAX_WORST)
             diel("[%u] worst-case instruction count exceeds %llu; the loop "
@@ -1593,6 +1748,9 @@ static void validate(const program *P)
     }
     if (depth != 0)
         diel("%d loop(s) left open at the end", depth);
+    if (qdepth != 0)
+        diel("%d quiet region(s) left open at the end, the innermost opened "
+             "at [%u]", qdepth, (unsigned)bpc[nb - 1]);
 }
 
 /* ---- image out ------------------------------------------------------ */
@@ -1975,7 +2133,8 @@ static void disassemble(const program *P, FILE *out)
         char pad[32];
         int n;
         decode(P->insns[pc], &d);
-        if (d.ctrl && d.op == C_ENDREP)
+        /* a quiet region's body is indented as a loop's is (R24) */
+        if (d.ctrl && (d.op == C_ENDREP || d.op == C_ENDQUIET))
             indent--;
         n = indent > 0 ? indent : 0;
         if (n > 15)
@@ -1987,7 +2146,11 @@ static void disassemble(const program *P, FILE *out)
                 fprintf(out, "%s%s %u\n", pad, CTRL_NAMES[d.op],
                         (unsigned)d.imm);
                 indent++;
-            } else if (d.op == C_DEPOSIT || d.op == C_SETACT) {
+            } else if (d.op == C_QUIET) {
+                fprintf(out, "%s%s\n", pad, CTRL_NAMES[d.op]);
+                indent++;
+            } else if (d.op == C_DEPOSIT || d.op == C_SETACT ||
+                       d.op == C_RAISE) {
                 fprintf(out, "%s%s r%d\n", pad, CTRL_NAMES[d.op], d.reg[1]);
             } else if (d.op == C_STL) {
                 fprintf(out, "%s%s r%d, %u\n", pad, CTRL_NAMES[d.op],
@@ -1995,12 +2158,18 @@ static void disassemble(const program *P, FILE *out)
             } else if (d.op == C_LDL) {
                 fprintf(out, "%s%s r%d, %u\n", pad, CTRL_NAMES[d.op],
                         d.reg[0], (unsigned)(d.imm & SLOT_MASK));
-            } else if (d.op == C_STX) {
-                fprintf(out, "%s%s r%d, r%d\n", pad, CTRL_NAMES[d.op],
-                        d.reg[1], d.reg[2]);
-            } else if (d.op == C_LDX) {
-                fprintf(out, "%s%s r%d, r%d\n", pad, CTRL_NAMES[d.op],
-                        d.reg[0], d.reg[2]);
+            } else if (d.op == C_STX || d.op == C_LDX) {
+                /* A step is written only when it is not zero, so every
+                 * image from before revision 8 disassembles as it did. */
+                int step = step_of(&d);
+                fprintf(out, "%s%s r%d, r%d", pad, CTRL_NAMES[d.op],
+                        d.op == C_STX ? d.reg[1] : d.reg[0], d.reg[2]);
+                if (step)
+                    fprintf(out, ", %+d", step);
+                fputc('\n', out);
+            } else if (d.op == C_AUGADD || d.op == C_AUGERR) {
+                fprintf(out, "%s%s r%d, r%d, r%d\n", pad, CTRL_NAMES[d.op],
+                        d.reg[0], d.reg[1], d.reg[2]);
             } else {
                 fprintf(out, "%s%s\n", pad, CTRL_NAMES[d.op]);
             }
@@ -2073,10 +2242,16 @@ static void disassemble(const program *P, FILE *out)
  * order followed by CAPS2's: kx is CAPS[4], REGS32 [5], BANK_PTR [6],
  * KX9 [7], IMUL [28], and then SCRATCH is CAPS2[4] and SCRATCH_IO
  * CAPS2[5]. Not SCRATCH_STRICT (CAPS2[6]), which the loader also
- * demands of a `.scratch strict` image: that one is not reported here. */
+ * demands of a `.scratch strict` image: that one is not reported here.
+ * Revision 8's follow, as asm.py's features() names them: AUGADD
+ * (CAPS2[11]) for the augmentedAddition pair, SCRATCH_STEP (CAPS2[12])
+ * for a post-step that is not zero - a zero step is the old instruction
+ * and needs nothing new - and FLAG_CONTROL (CAPS2[14]) for any of
+ * quiet, endquiet and raise. */
 static void features(const program *P, char *out, size_t cap)
 {
     int kx = 0, regs32 = 0, imul = 0, kx9 = 0, scratch = 0, i;
+    int augadd = 0, step = 0, flagctl = 0;
     uint32_t pc;
     for (pc = 0; pc < P->n_insns; pc++) {
         insn d;
@@ -2093,6 +2268,12 @@ static void features(const program *P, char *out, size_t cap)
             }
             if (is_scratch_code(d.op))
                 scratch = 1;
+            if (d.op == C_AUGADD || d.op == C_AUGERR)
+                augadd = 1;
+            if (step_of(&d))
+                step = 1;
+            if (d.op == C_QUIET || d.op == C_ENDQUIET || d.op == C_RAISE)
+                flagctl = 1;
             continue;
         }
         if (d.kx) {
@@ -2122,6 +2303,12 @@ static void features(const program *P, char *out, size_t cap)
         strncat(out, "SCRATCH ", cap - strlen(out) - 1);
     if (P->flags & FLAG_SCRATCH_IO)
         strncat(out, "SCRATCH_IO ", cap - strlen(out) - 1);
+    if (augadd)
+        strncat(out, "AUGADD ", cap - strlen(out) - 1);
+    if (step)
+        strncat(out, "SCRATCH_STEP ", cap - strlen(out) - 1);
+    if (flagctl)
+        strncat(out, "FLAG_CONTROL ", cap - strlen(out) - 1);
     if (!out[0])
         strncat(out, "-", cap - strlen(out) - 1);
     else
