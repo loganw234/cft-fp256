@@ -17036,3 +17036,144 @@ What sampled points cannot see is stated in LANGUAGE.md.
 - **The lead's driver for L3's early card run** (lang_card_tangent.py, 14:07 on 2026-10-01) read `g.n_state` where a graph with tangents has `g.n_primal`, and stopped with an IndexError before any leg ran. It was corrected and rerun.
 - **What VI2 found wrong:** the L3 merge's restatement "2N + 59 ... below that the older orders win with fewer", and the lang row's chain count, D2's text the merge kept. Both were restated in 67eb0a6, with VI2's other sentence findings. 67eb0a6's own slot sentence was wrong again for the smallest rings ("by a slot or a few", where N = 4 takes 21 against 67). VI2's final check found it, and the commit after the close restates it.
 - **The D2 merge's script** expected one hunk in docs/README.md, and there were two. It stopped there by its own assertion, and the rest was applied by a second script.
+
+## 2026-10-02 - step 6 begins: the hard workloads tracked as delivered, the acceptance set and a card's admission test (A1), the quad admitted on the U50; step 6's plan of record, approved
+
+**Why.**
+- Step 3 closed at aaca616. Logan was asked whether the work order's step 5, gallery wave 1, was still needed beside the hard workloads. He answered, verbatim: "Drop step 5, go to step 6 with the acceptance parcel. The workloads can be tracked in the repo, make a note where they are held that they were written by an OpenAI model who was only given the language brief and some example files as a test of the language portability. I think thats the cleanest way to state why they exist and why they could be 'different' from the rest on close inspection".
+- Step 6's scope, his words of the same morning: "Programs too big for one tile should likely be included with step 6, along with the earlier deferrals. Compile time is more a performance issue that can be handled later."
+- **The records** are gitignored, in `Data/runs/2026-10-02-step6-round/`:
+  - the ledgers;
+  - the briefs;
+  - the three surveys, kept word for word;
+  - box/: q135b's utilization reports, and A1's logs from amd-arc-box and the card.
+
+**A1: the hard workloads, tracked as delivered** (03157e0, 647578a, ad514b2).
+- **The pack** is at `programs/workloads/cft-hard-workloads/`. It was committed at 03157e0 as 87 files and 10,614,822 bytes, byte for byte the delivered zip (SHA-256 0761b7eb...d485). Every file but the runner is still those bytes.
+  - Its LANGUAGE.md is git blob 29c1b66, the brief it was given: docs/LANGUAGE.md at 80abee5.
+  - Its own SHA256SUMS holds for 85 files and fails for one: the runner's one-line fix, `.is_file()` to `.exists()` on python/cftc (647578a, alone). Its digest went from 947dc42e... to f5ad6a73...
+- **The note,** programs/workloads/README.md, says plainly:
+  - who wrote the pack, and what that model was given, in Logan's words;
+  - why the pack exists and why it reads differently;
+  - what it showed, the one fix, and that it is kept as delivered.
+- **The docs check exempts the pack's five documents** from its link and quoted-path checks, by name.
+  - The exemption holds only while each document is the bytes the pack's SHA256SUMS records, and that list is the one delivered. Its digest is pinned in the check: 9aff7024d2ec6849... (897d5bb).
+  - It is re-derived on every run; otherwise each is checked like any other document.
+  - Ten of the docs check's 43 controls are the exemption's, each caught by name.
+- **Every tree-wide tool that walks programs/ is unchanged by the pack,** measured:
+  - the character rule reads 41 `.cftl`, 21 of them the pack's;
+  - programs/check.py gives 344 passed;
+  - MANIFEST, build.py and test_asm.py see no `.cfta`;
+  - sync.py reads host/ and its own vendored tree;
+  - no pytest configuration collects the pack's tools.
+
+**A1: the acceptance set, a card's admission test** (61f8b66, 8a76484).
+- **Twenty entries,** every program of the language that runs on the card today: the six compiled references, the four variational references, and the ten workloads that fit u50-rev7-quad (FPUT, phi⁴, Kuramoto-Sivashinsky, the reservoir map and Riccati, each hard at fp64 and wide at fp256).
+- **Each entry is one run, fixed in programs/acceptance.json:**
+  - the image, the bank and the initial state, held to committed digests. The references' images are their committed files; the workloads' are compiled by the driver;
+  - the lanes: one block a tile, 256 at fp64 and 64 at fp256;
+    - for a workload, its own three initial conditions, then perturbed copies: lane k >= 3 is lane k mod 3 with (k // 3)·2^-30 added to its first value, so every lane is distinct;
+    - for a reference, values drawn from SHAKE-256, with an overflow, a signalling-NaN and a subnormal lane on tiles 1 to 3, and three special tangents for the variational ones;
+  - 4 segments: the references' own 100 or 20 steps a segment, and the workloads' 8 (phi⁴, FPUT) or 2 (the other three);
+  - every boundary's state hash, flag word and STATUS, written by `--write` on libcft's software backend at depth 2,048.
+- **A device passes** when:
+  - every digest, flag word and STATUS equals the record;
+  - cft-audit accepts each certificate in full;
+  - the golden checks accept it. The golden audit re-runs the last segment of the six entries where it fits. The spot check re-runs the last segment on seq.py, on every entry, for lanes 0, 1 and 2, the first lane of each other tile, and the special lanes: six lanes for a workload.
+- **The stages:**
+  - `acceptance` (gate budget): the set on the software backend with both auditors, and the pack's own one-step vectors held to `lang.run` on all 21 programs and to the ten card images on seq.py;
+  - `acceptance-far` (the full census only): the four hard and wide images past the card, compiled for `sw:32768`, against their vectors.
+  
+  The split is the lead's, made at 08:20 on an estimate that the box's single thread runs at half the desktop's pace. Measured, the gate half took 491 s on the box against 374 s on the desktop, about 1.3 times. So `acceptance` adds about 8 minutes to each gate, and the far half's 696 s fall in the full census only. There are now 50 stages, 31 quick and 43 gate.
+- **MEASURED by A1 on the desktop** (5% load): `--legs set,oracle` gave 41 of 41 PASS, 249 checks, 374 s; every control caught; a record tampered by one hex digit fails by name.
+
+**Verifier-VA1.**
+- **No (a). Two (b)s, sent back:**
+  - the note and VERIFICATION.md's row said "exact copies" of the lanes;
+  - the exemption's comment said it "cannot outlive its reason": a document edited together with its SHA256SUMS line passed still exempt.
+  
+  8a76484 restates the first. 897d5bb pins the list's digest, and VA1's case now fails by name.
+- **VA1's second check, of 897d5bb and 8a76484: no (a), no (b).**
+  - The pin equals the delivered list's SHA-256, and VA1's coordinated edit now fails by name, with both planted faults reported.
+  - A duplicated line, a list repaired for the runner alone, and a list with CRLF endings are all refused.
+  - Eleven mutations of the new code were each caught.
+  - "exact copies" is nowhere in the tree.
+  - The note's 21 matches the box's summary.
+- **CONFIRMED by VA1:**
+  - the pack byte for byte against the zip;
+  - the exemption's scope, its re-derivation and its controls;
+  - the note's quotation and figures;
+  - the set reproduced: 41 of 41 in 434 s, at 8-23% load;
+  - the lanes the same under Python 3.13.5 with another hash seed (14 of 14), and on Linux under WSL with Python 3.10.12 (20 of 20).
+- **No forged device passes.** Each forgery failed by name:
+  - a wrong lane, inside and outside the spot check;
+  - a wrong segment, with honest segments after it;
+  - a wrong flag word, a wrong STATUS, a wrong states file;
+  - a stale hash line.
+- **The device path:** it never falls back to software, and takes the card's depth from its certificate.
+
+**On amd-arc-box and the card** (the lead's; logs in the round's box/a1-61f8b66/).
+- **The card's admission run on revision 7's quad** (q135b, xclbin e826b61333a86ab6, 4 tiles, depth 2,048), at 61f8b66 with an XRT build: **20 of 20 PASS, 174 checks, 363 s.** The record was made on Windows's software backend, and the card reproduces every boundary hash, flag word and STATUS. cft-audit accepts every certificate.
+- **The stages through the runner** at 61f8b66, on Linux: `acceptance` PASS in 491 s, and `acceptance-far` PASS in 696 s, Lorenz-tangent hard included, which had not run on the desktop.
+- **`--golden all`,** every segment of every entry re-run on seq.py, at 61f8b66 on the software backend: **20 of 20 PASS, 188 checks, 0 failed, 2,281 s** (09:25 to 10:03). The whole record is held to the golden model, not only its spot-checked lanes and audited segments. The stage itself keeps the cheaper checks.
+- **The gate budget at the merge, 1acc73a,** niced, from a load of 0.00 (run 20261002-102320-1acc73a, 125 minutes): **PASS.**
+  - 35 stages executed, 0 failed.
+  - 8 skipped by name: buildargs (a real Vitis is there), the six language legs (no toolchains) and demos (no node).
+  - 4 inner skips, the same four as before: golden's three (no Arduino loopback binary, twice; math.fma needs Python 3.13) and remote's WebSocket leg (no node).
+  - golden: 2,943 passed and 3 skipped (548 s).
+  - lang: 185 ok (128 s). tangent: 116 ok (210 s).
+  - acceptance: 41 of 41 PASS, 249 checks (481 s).
+  - transcend: 607,217 and 580,977 comparisons over 39 functions, C == model.
+  - mpfr: 739,234 cases against the pinned MPFR 4.2.2, 0 value and 0 flag mismatches; mp-err-check's 16,814,033 results, 0 over their bound.
+  - remote: 184,736 cases, local and remote equal.
+  
+  The stage logs are copied to the round's box/gate-1acc73a/.
+
+**The hard workloads, finished** (part two's entry recorded 20 of 21). The pack's own runner verified all 21, none failing. The last, Lorenz-tangent extended, passed at 06:04:53 on 2026-10-02 after 35,578 s.
+
+**Step 6's plan of record** (docs/ROADMAP.md, "Step 6: ...").
+- **Three read-only surveys of aaca616** (the math library; programs past one tile; the earlier deferrals) are kept word for word in the round's records.
+- **Logan decided three questions before the plan was written,** verbatim:
+  - FLAGS for routines: "Flag control in rev 8 (Recommended)";
+  - revision 8: "Flag control, Per-lane flags (R23), TwoSum + stepped scratch, Instruction streaming";
+  - programs too big for one tile: "Streaming + deep build (Recommended)".
+- **q135b's utilization, MEASURED from its own routed report** (read on amd-arc-box; copied with SHA-256s to the round's box/q135b-utilization/):
+  - 719,697 LUTs (82.66%), with SLR0 at 86.12% and SLR1 at 78.95%;
+  - 1,051.5 block-RAM tiles (78.24%);
+  - 260 UltraRAMs (40.63%);
+  - 1,148 DSPs (19.29%).
+  
+  No document had recorded a measured figure for q135b; round 2's quad has its own, earlier in this file. The revision-7 round's estimate (about 1,050, 260 and 711k) holds.
+- **Verifier-P6 checked the plan three times:**
+  - at 2956e68, five (b)s: the `.cfta` files' author; three workloads within the compiler's reach, not two; bit 7 with no setter before the one RTL revision; certificate version 2 ordered before the replay it records; an L4-to-C4 gap through cftc's exit 70;
+  - at 58e3f1a, three more, in the rewrite: SCALING.md's 90.9% for a smaller tile (a fifth revision-7 tile is about 99.1% of the part); a counter written `d/dt k = 1/h`, which is refused `h-scope`; the gallery waves;
+  - at 39c2d4d, clean.
+- **Approved.** Logan, verbatim: "Approve as written (Recommended)", and for the gallery, "Yes, one gallery as step 7 (Recommended)". He then added, verbatim: "In regards to the V2 certificate, also include more 'scientific provenance' areas, things typical certificates in the field carry for traceability etc". 0eb4950 records all three.
+
+**Known limits, recorded rather than fixed** (Logan's rule).
+- **The set** (VA1):
+  - its controls hold the comparison functions, not the verdict's wiring: eight mutations of the driver leave every check green, though the committed wiring is right, as the forgeries show;
+  - no control holds the exemption to exactly five documents;
+  - a certificate one segment short raises an IndexError (acceptance.py:443) rather than a FAIL by name; only a broken cft-segrun writes one;
+  - a `cft://` device is audited at depth 256, a version-1 limit, so an entry past 256 slots fails falsely through a remote handle;
+  - the exemption cannot see an edit to the check itself: a new pin or a looser rule;
+  - two removals stop the docs check with a FileNotFoundError from the exemption's own controls rather than a problem by name: MODELS.md removed from the index (`git rm`, or `git rm --cached`; check_docs_index.py:818), and the pack's SHA256SUMS deleted from the disk (:816). The check's comment says a removal is a problem by name. It fails either way. PROGRAMS.md removed and the list untracked are refused by name (VA1, VI1). Separately, a tracked document deleted from the disk without git, any document, stops the main link check at :468, as aaca616's did at :391;
+  - `--write` made the record with the stage's own golden checks (the named segments and the spot lanes), not all of them. The box's `--golden all` (above) has since held the whole record;
+  - acceptance.py's docstring still counts the spot check among what catches a flipped bit in a boundary file; it sees only the last boundary's spot lanes.
+- **The set** (A1):
+  - the workloads' lanes carry no special values, by the brief;
+  - their runs are short: 8 or 2 steps a segment, sized to the software backend's time.
+- **Three commit messages** keep wordings the later commits restate: 61f8b66 "exact copies", 03157e0 "while they are as delivered", ad514b2 "for the tables".
+
+**Load, and the machine.**
+- The desktop was Logan's. The agents ran niced, one run at a time. A1 measured its stage at 5% load, VA1 at 8-23%, and VI1 at 34%, while the round's first five parcels built beside it.
+- amd-arc-box ran the card, the two stages and the golden audit, alone and niced, at a load of about 1.
+
+**The lead's own slips.**
+- **The plan's first draft** stated what the surveys did not support. The lead restated seven sentences before the verifier (2956e68), and P6 then found five (b)s, and three more in the rewrite. Of those three:
+  - SCALING.md's 90.9% for a smaller tile was the lead's alone;
+  - the counter followed P6's ledger shorthand, and the gallery sentence its item-5 line, as P6's ledger says.
+- **The merge's dry-run arithmetic** gave docs/README.md's total as 62,438, one short: the merge commit's own restatement added a line. The docs check caught it.
+- **A count taken mid-merge.** The lead's ledger at 10:24:48 records "64 tracked documents" and 157 links, from a docs check run while the merge was uncommitted. Then `git ls-files` lists the conflicted docs/README.md once a stage. The committed tree has 62 documents and 69 links (VI1, and the lead after it).
+- **The verifier's worktree name** `verify-a1` was the audit round's. The add refused, and the audit round's tree was left alone.
+- **A PowerShell `.Replace`** on docs/README.md's counts matched nothing, and said only "no change". The docs check caught the count.

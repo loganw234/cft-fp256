@@ -4593,13 +4593,13 @@ Logan, after step 3 closed (main aaca616):
   - for programs too big for one tile: "Streaming + deep build
     (Recommended)".
 
-This plan goes to him before any code beyond the acceptance parcel.
-Nothing in it exists yet unless it says so. The facts come from three
-read-only surveys of main aaca616 and from verifier-P6's check of this
-plan; their reports and citations are in the round's records
-(`Data/runs/2026-10-02-step6-round/`). The steps are the
-controlled-divergence work order's. "Steps 5 and 6" above (2026-09-30)
-number the certificate plan's steps, not these.
+This plan went to him before any code beyond the acceptance parcel,
+and he approved it (below). Nothing in it exists yet unless it says
+so. The facts come from three read-only surveys of main aaca616 and
+from verifier-P6's check of this plan; their reports and citations are
+in the round's records (`Data/runs/2026-10-02-step6-round/`). The
+steps are the controlled-divergence work order's. "Steps 5 and 6"
+above (2026-09-30) number the certificate plan's steps, not these.
 
 **What the surveys found.**
 - **Division and square root** exist in-program as divfull and sqrtfull
@@ -4834,7 +4834,7 @@ and the testing rule, as the last rounds ran.
    - Each function gains an L3 derivative rule.
 
 **The order.**
-- A1 now.
+- A1 first: built and merged.
 - Then, side by side:
   - R8F with R8L, and R21/R22's cft-asm work, golden-first through the
     software backend and the ABI step;
@@ -4899,9 +4899,9 @@ closes:
 **Approved.** The plan went to Logan at 39c2d4d, after verifier-P6's
 three checks, and he chose "Approve as written (Recommended)"
 (2026-10-02). He then added scientific provenance to certificate
-version 2 (above). The first wave starts once A1 merges. The RTL
-revision's own plan still comes to him before its RTL work, as the
-revision-7 round's did.
+version 2 (above). The first wave started when A1 merged, on
+2026-10-02. The RTL revision's own plan still comes to him before its
+RTL work, as the revision-7 round's did.
 
 ## The adoption story these serve
 
