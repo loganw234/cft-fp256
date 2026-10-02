@@ -1201,7 +1201,8 @@ identically zero - a right-hand side that reads no state, such as
 `a`, `b`, `c` are an operation's operands, `da`, `db`, `dc` their
 tangents and `r` its own result. A tangent is **identically zero** when
 its value reads no state component - a constant, h, a param, a lane
-param - or reads one only through a comparison or a select's condition.
+param - or reads one only through a comparison, a select's condition or
+copysign's sign operand, whose tangents no rule reads.
 An identically-zero tangent is never an operand: each term it would
 make is left out, exactly, and where a select needs an arm it is the
 constant 0. Each rule is an expression in the language, so its
@@ -1285,20 +1286,23 @@ has one, written again where it has none.
   format) - so the rule rounds once, at its division. `r + r` gives the
   same bits; `2 * r` is the textbook's form.
 - **What a tangent costs.** Each division and each square root of the
-  step whose tangent is not zero - one that reads the state - costs each
-  tangent vector one run-time division (by b, or by 2·r) and no root: the
-  quotient or root written again where it has no name is the primal's own
-  operation on the same values, which the compiler shares. One that reads
-  no state - a quotient of params, the root of a param - has a tangent
-  that is identically zero and costs a vector nothing: with params p and
-  q, `next x = x * (p / q)` and `next y = y / p + sqrt(q)` perform three
-  divisions and roots a step, and each vector adds one, `y / p`'s. So T
-  vectors add T divisions for every division or root of the step that
-  reads the state - rk4 with one such division in its right-hand side
-  performs four a step, and each vector adds four. Once the compiler
-  carries a division (parcel C4), as an inlined routine of about 209 ALU
-  instructions at fp64 and 213 at fp256 (divfull, measured by the
-  step-6 survey), that is about 840 instructions a vector a step there.
+  step whose tangent is not zero costs each tangent vector one run-time
+  division (by b, or by 2·r) and no root: the quotient or root written
+  again where it has no name is the primal's own operation on the same
+  values, which the compiler shares. One whose tangent is identically
+  zero (the rules, above) costs a vector nothing: one that reads no
+  state, as a quotient of params or the root of a param, and one that
+  reads it only through a comparison, a select's condition or copysign's
+  sign, as `select(x < 0, p, q) / p`, `sqrt(select(x < 0, p, q))` or
+  `copysign(p, x) / q`. With params p and q, `next x = x * (p / q)` and
+  `next y = y / p + sqrt(q)` perform three divisions and roots a step,
+  and each vector adds one, `y / p`'s. So T vectors add T divisions for
+  every division or root of the step whose tangent is not zero - rk4
+  with one such division in its right-hand side performs four a step,
+  and each vector adds four. Once the compiler carries a division
+  (parcel C4), as an inlined routine of about 209 ALU instructions at
+  fp64 and 213 at fp256 (divfull, measured by the step-6 survey), that
+  is about 840 instructions a vector a step there.
 
 **Reading a primal value.** A rule reads a primal value by name where it
 has one - a state component, a param, a lane param, a constant, a let, a
@@ -1861,13 +1865,15 @@ under `make golden`, with no change to either.
 - the quotient's and the root's rules (L4): their specials bit for bit
   (the root at ±0, below zero, at +infinity and at a square; the
   quotient at a zero divisor, exact, inexact, by a param that is zero);
-  one division a vector for each division or root of the step that reads
-  the state, and none for one that reads no state, after sharing; their
-  unnamed chains' growth, as the known limit states; the fourth check
-  and the central difference on written systems under every integrator
-  and on generated ones; and three plants - the root without its 2 and
-  the quotient's wrong sign red on both, the root through r·r = a red on
-  the exact check alone;
+  one division a vector for each division or root of the step whose
+  tangent is not zero, and none for one whose tangent is identically
+  zero - one that reads no state, or reads it only through a select's
+  condition or copysign's sign - after sharing; their unnamed chains'
+  growth, as the known limit states; the fourth check and the central
+  difference on written systems under every integrator and on generated
+  ones; and three plants - the root without its 2 and the quotient's
+  wrong sign red on both, the root through r·r = a red on the exact
+  check alone;
 - determinism across hash seeds; this document's variational blocks and
   sources against the renderers and the committed files.
 

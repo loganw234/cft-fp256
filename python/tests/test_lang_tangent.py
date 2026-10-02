@@ -1079,11 +1079,16 @@ def _reading_state(sec):
 def test_l4_each_vector_pays_one_division_a_quotient_or_root():
     """After sharing what the tangent writes again, a tangent vector's step
     holds one division of its own for each division and each root of the
-    step that reads the state, none for one that reads no state, and no
-    root of its own: rk4 with one division and one root in its right-hand
-    sides performs eight a step, and each vector adds eight; with params p
-    and q, x * (p / q) and y / p + sqrt(q) perform three a step, and each
-    vector adds one (verifier-VL4's (b)2)."""
+    step whose tangent is not zero, none for one whose tangent is
+    identically zero, and no root of its own: rk4 with one division and
+    one root in its right-hand sides performs eight a step, and each
+    vector adds eight; with params p and q, x * (p / q) and y / p + sqrt(q)
+    perform three a step, and each vector adds one (verifier-VL4's (b)2).
+    A division or root that reads the state only through a comparison, a
+    select's condition or copysign's sign costs nothing either:
+    select(x < 0, p, q) / p reads x and costs 0, as do copysign(p, x) / q
+    and sqrt(select(y < 0, p, q)), beside the control x / p * q, which
+    costs 1 (verifier-VL4's re-check)."""
     for text, per_step, per_vector in (
             ("system c\nformat fp64\nstate x, y\ntangent v\n"
              "d/dt x = x / (y * y + 1)\nd/dt y = -sqrt(abs(x) + 1)\n"
@@ -1092,7 +1097,14 @@ def test_l4_each_vector_pays_one_division_a_quotient_or_root():
              "next x = x / y\nnext y = sqrt(x * x + y)\nstep map\n", 2, 2),
             ("system c\nformat fp64\nstate x, y\ntangent v\n"
              "param p = 2, q = 3\nnext x = x * (p / q)\n"
-             "next y = y / p + sqrt(q)\nstep map\n", 3, 1)):
+             "next y = y / p + sqrt(q)\nstep map\n", 3, 1),
+            ("system c\nformat fp64\nstate x, y\ntangent v\n"
+             "param p = 2, q = 3\nnext x = x + select(x < 0, p, q) / p\n"
+             "next y = y\nstep map\n", 1, 0),
+            ("system c\nformat fp64\nstate x, y, z\ntangent v\n"
+             "param p = 2, q = 3\nnext x = x + copysign(p, x) / q\n"
+             "next y = y + sqrt(select(y < 0, p, q))\nnext z = x / p * q\n"
+             "step map\n", 3, 1)):
         g = compile_(text)
         primal, tangent = _structural(g)
         routines = [k for k, (op, _a, _l) in enumerate(g.step.nodes)

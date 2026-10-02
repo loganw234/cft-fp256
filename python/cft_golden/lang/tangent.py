@@ -30,24 +30,27 @@ Each operation's tangent is a rule written in the language
 
 A value's tangent is IDENTICALLY ZERO when it reads no state component -
 a constant, h, a param, a lane param - or reads one only through a
-comparison or a select's condition. An identically-zero tangent is never
-an operand: each term it would make is left out, exactly (fma's rule with
-dc absent is the product rule; the product rule with da absent is
-`a * db`; the quotient's with db absent is `da / b`, and with da absent
-`(-r) * db / b`), and where a select needs an arm it is the constant 0.
-So no tangent ever rounds an exact zero, and `x + 0 is not x` never
-arises.
+comparison, a select's condition or copysign's sign operand, whose
+tangents no rule reads (`relevant` below). An identically-zero tangent
+is never an operand: each term it would make is left out, exactly
+(fma's rule with dc absent is the product rule; the product rule with
+da absent is `a * db`; the quotient's with db absent is `da / b`, and
+with da absent `(-r) * db / b`), and where a select needs an arm it is
+the constant 0. So no tangent ever rounds an exact zero, and
+`x + 0 is not x` never arises.
 
 The quotient's and the root's rules read r, the operation's own result,
 as min's and max's do: (da - r db) / b, one fma and one division, two
 roundings, the fma's -r a primal value the compiler shares across
 vectors; and da / (2 r), whose doubling is exact, one rounding. Each
-whose tangent is not zero - one that reads the state - costs a tangent
-vector ONE run-time division - the quotient or root written again where
-it has no name is the primal's own operation, shared - and the root's
-tangent takes no root; one that reads no state (a quotient of params,
-the root of a param) has an identically-zero tangent and costs a vector
-nothing (docs/LANGUAGE.md, "The quotient and the root").
+whose tangent is not zero costs a tangent vector ONE run-time division -
+the quotient or root written again where it has no name is the primal's
+own operation, shared - and the root's tangent takes no root; one whose
+tangent is identically zero costs a vector nothing, whether it reads no
+state (a quotient of params, the root of a param) or reads it only
+through a comparison, a select's condition or copysign's sign
+(select(x < 0, p, q) / p) - docs/LANGUAGE.md, "The quotient and the
+root".
 
 A rule reads a primal value BY NAME where it has one - a leaf, or a
 labelled node (a let, a template label such as k1.x), which the tangent
