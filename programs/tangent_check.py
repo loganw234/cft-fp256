@@ -319,11 +319,13 @@ def _q(rng):
 
 def derivative_misses(g, rng, points=2):
     """(points tried, points where a tangent section's exact value is not
-    the dual numbers' derivative of the section it differentiates). About
-    half the points are placed: one component set equal to another or to
-    zero, the tangent random, so that a tie or a zero there has operands
-    whose tangents differ."""
-    bad_n = tot = placed = 0
+    the dual numbers' derivative of the section it differentiates, points
+    placed with one component equal to another, points placed with one
+    component zero). About half the points are placed, the tangent random,
+    so that a tie or a zero there has operands whose tangents differ;
+    each is counted where it is placed (a system of one component has no
+    other to tie with, so its every placement is a zero)."""
+    bad_n = tot = ties = zeros = 0
     for primal, tangent in (("field", "tangent_field"),
                             ("step", "tangent_step")):
         if g.section(primal) is None:
@@ -334,9 +336,10 @@ def derivative_misses(g, rng, points=2):
             r, i = rng.random(), rng.randrange(n)
             if r < 0.25 and n > 1:
                 st[rng.choice([j for j in range(n) if j != i])] = st[i]
+                ties += 1
             elif r < 0.5:
                 st[i] = Fraction(0)
-            placed += r < 0.25 and n > 1 or 0.25 <= r < 0.5
+                zeros += 1
             tv = [_q(rng) for _ in range(n)]
             pa = [_q(rng) for _ in g.param]
             la = [_q(rng) for _ in g.lane]
@@ -344,7 +347,7 @@ def derivative_misses(g, rng, points=2):
             got = g.exact_eval(tangent, st, pa, la, tangent=tv)
             tot += 1
             bad_n += got != want
-    return tot, bad_n, placed
+    return tot, bad_n, ties, zeros
 
 
 def placed_misses(g, rng, decides, points=6):
@@ -599,16 +602,18 @@ def leg_derivative(rng):
             graphs.append(lang.compile_text(text).graph)
         except lang.Refusal:
             pass
-    tot = bad_n = placed = 0
+    tot = bad_n = ties = zeros = 0
     for g in graphs:
-        a, b, c = derivative_misses(g, rng, 4)
+        a, b, t, z = derivative_misses(g, rng, 4)
         tot += a
         bad_n += b
-        placed += c
+        ties += t
+        zeros += z
     check(bad_n == 0 and tot > 100, f"{len(graphs)} systems, {tot} points, "
-          f"{placed} of them placed: the tangent sections evaluated exactly "
-          f"equal the exact derivative of the step at every one",
-          f"{bad_n} points differ")
+          f"{ties + zeros} of them placed ({ties} with one component set "
+          f"equal to another, {zeros} with one set to zero): the tangent "
+          f"sections evaluated exactly equal the exact derivative of the "
+          f"step at every one", f"{bad_n} points differ")
     # the ties and zeros placed where a convention decides: the third
     # component equal to the first, their tangents different
     decides = {"placed-ties": ("tie",), "placed-zeros": ("zero",),
@@ -1238,7 +1243,7 @@ def leg_plants(rng, segrun_path, work):
                     g = lang.compile_text(text).graph
                 except lang.Refusal:
                     continue
-                a, b, _p = derivative_misses(g, rng)
+                a, b, _t, _z = derivative_misses(g, rng)
                 tot += a
                 bad_n += b
                 systems += b > 0
