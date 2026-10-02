@@ -561,20 +561,31 @@ PROPOSED.
      rule and the writer gates compare run blocks byte for byte.
      build-id is the one statement that varies from build to build, and
      the corpus check normalizes it.
-   - Version 2 puts every statement that two writers of one run can make
-     differently in the header, before `runs`: the identity, the
-     provenance, the definition's version, and how the replays were made
-     (`replay-by`).
+   - Version 2 puts every statement in the header, before `runs`: the
+     identity, the provenance, the definition's version, and how the
+     replays were made (the `replay-method` lines). Some of these two
+     writers of one run make differently; the rest they must make alike.
    - A run block holds only three kinds of thing: what ran, what the
      definition computes, and what every writer is handed alike. The
      source's name is one of the last kind: it is the name of the file
      both writers are handed.
    - The gates follow: the corpus check and the writer gates
-     (segrun_check, and the corpus check's remake by cft-segrun) normalize
-     the whole header, as they normalize build-id today. They hold
-     everything from `runs` on byte for byte. So a replay certificate
-     written in C (`replay-by image`) is held to the golden writer's
-     (`replay-by golden`) by its run blocks, which must agree.
+     (segrun_check, and the corpus check's remake by cft-segrun)
+     normalize only the lines that must differ, as they normalize
+     build-id today. Those are `build-id`, `writer`, `writer-runtime`,
+     `compiler-build`, the `replay-method` lines, the three times,
+     `host-os`, `host-arch` and the environment.
+   - The gates hold every other line byte for byte:
+     - `mode` and `salt-commitment`, as version 1's check does;
+     - `profile` and `language`, so that each writer's definition is
+       held to the golden model's;
+     - `initial`, `supersedes`, the identifier, and the issuer and its
+       key, which both writers are handed alike;
+     - the device lines, which the gates fix to the software backend;
+     - everything from `runs` on.
+   - So a replay certificate written in C (`replay-method 0 image
+     <digest>`) is held to the golden writer's (`replay-method 0
+     golden`) by its run blocks, which must agree.
 
 ## 5. The field table
 
@@ -609,7 +620,7 @@ PROPOSED, field by field. The columns:
 | the host name, the user name, the CPU model, paths | deb-buildinfo (`Build-Path` and the kernel only on request) | **no** | (none) | (none) | (none) | personal data, or a fingerprint; none of them can change the bits |
 | the writer, and its runtime | SLSA builder; RO-Crate `instrument` with `softwareVersion` | yes | `writer`, `writer-runtime` | REPORTED | `unknown`; `none` | none |
 | the mpmath version | transcend.py decides every non-exact transcendental through mpmath's interval context | yes, where the definition was evaluated | in `writer-runtime` (the writer's); in the verdict's header (the auditor's) | REPORTED | `none`: the definition was not evaluated | none |
-| the definition's version: the conformance profile, and the language | CONFORMANCE.md, "Versioning"; 17025 f), the method | yes | `profile`, `language` | READ: the audit compares them with its own, to name the cause of a failed re-derivation (section 7.6) | `unknown`; `none` for `language` where no run names a source | none |
+| the definition's version: the conformance profile, extended to the program model, and the language | CONFORMANCE.md, "Versioning"; 17025 f), the method | yes | `profile`, `language` | REPORTED, and used to name a failure's cause: the audit compares them with its own (section 7.6) | `unknown`; `none` for `language` where no run names a source | none |
 | the compiler's name, output version and target | DataCite `IsCompiledBy`; SLSA `buildType` | yes, per run | `compiler` | CHECKED (a recompile) | `none` (not compiled) | none |
 | the compiler's build | SLSA `resolvedDependencies`: "artifacts needed at build time" (the compiler runs, and its output is the image) | yes | `compiler-build` | REPORTED | `none`, `unknown` | none |
 | the source | SLSA's `source` parameter; SWHID; PROV Derivation | yes, per run | `source`, `source-name` | CHECKED: the digest and the language; the name REPORTED | `none` | the digest is unkeyed, so it confirms a guessed source |
@@ -623,7 +634,7 @@ PROPOSED, field by field. The columns:
 | an amendment's link | 17025 7.8.8.3; DCC `previousReport` (a hash); DataCite `Obsoletes` | yes | `supersedes` | CHECKED when the superseded certificate is handed, else REPORTED | `none` | none |
 | the per-lane flags | R23 | yes (item 1) | `lane-flags`, and `lanes` on each segment line | CHECKED | `lane-flags no` | hashed, keyed in a keyed certificate |
 | a value before and after an adjustment | 17025 7.8.4.1 d) | yes (item 2) | `replay` lines | CHECKED | a count of 0 | the counts in the clear; the raw state and block hashed, keyed in a keyed certificate |
-| how the producer made its replays | 17025 n), deviations from the method | yes (item 2) | `replay-by`, in the header | REPORTED | `none`: no replays | none |
+| how the producer made its replays | 17025 n), deviations from the method | yes (item 2) | `replay-methods` and a `replay-method` line for each run with replays, in the header | REPORTED | `replay-methods 0`: no replays | none |
 | a traceability statement | 17025 7.8.4.1 c); VIM 2.41 | by construction: the audit's chain to the golden model | the verdict | (none) | (none) | (none) |
 
 **Fields left to the verdict, or not carried.**
@@ -656,8 +667,15 @@ transcend.py):
   rests on "The independent checks - GNU MPFR, and libcft's own
   error-tracked evaluator".
 - **MPFR is not carried.** libcft's sources name it in comments only.
-  Only the `mpfr` stage's oracle, `host/tools/mpfr_check.c`, calls it,
-  and no certificate's making or audit reaches that.
+  Its callers are tools, tests and a binding (grep):
+  - the `mpfr` stage's `host/tools/mpfr_check.c` and
+    `host/tests/mp_err_check.c`;
+  - the benchmark `host/tools/cft_bench_peers.c`;
+  - `python/tests/test_transcend.py`, through gmpy2 when it is
+    installed;
+  - the Python binding `bindings/python/cftmpfr`, through gmpy2.
+
+  None of them is on a certificate's making or audit.
 
 ## 6. Item 1: the per-lane flags
 
@@ -759,12 +777,16 @@ READ: ROADMAP.md's plan; R8's design; part M of the round's survey, 4.4.
     t growing in the state as T1 carries it, is one; T1's forcing "waits
     for M2" (ROADMAP.md, step 6, part 4). Such a run marks those lanes
     in every segment from then on.
-  - How wide M2's range is decides how often that happens. My rough
-    estimate (EST, from part M's figures): a range up to 2^E needs about
-    E + 237 + 245 bits of 2/pi at fp256, its significand plus the 245
-    bits of cancellation part M sampled. So 2^1024 needs about 1,500
-    bits, a few constants in each lane's scratch, against the 270,336
-    bits part M gives for fp256's whole range.
+  - How wide M2's range is decides how often that happens, and what the
+    range costs. gen_2opi.py's rule: 2/pi must reach (the largest e) - 1
+    + the window, with e the exponent of the argument's integer
+    significand (READ, host/tools/gen_2opi.py). For a range up to 2^E at
+    fp256, e is E - 237. A window of 237 + 245 bits (the significand,
+    and the cancellation part M sampled) plus a guard then makes about
+    E + 244 bits and the guard. So 2^1024 needs about 1,300 bits: five or
+    six fp256 constants in each lane's scratch. gen_2opi.py makes
+    270,336 bits for fp256's whole range. That is my estimate (EST);
+    M2's window decides it.
 - **The definition decides.** LANGUAGE.md makes the reference
   interpreter on the step graph "the definition of correct for every
   compiled image". The language refuses `exp` today (`transcendental`).
@@ -829,7 +851,9 @@ PROPOSED.
   C4's and M1's to define). It runs on the same device, over just the
   marked lanes: packed into a run of their own, or under R17's lane mask.
   - A C producer has no interpreter of the language, so cft-segrun
-    replays this way (`--replay-image`).
+    replays this way (`--replay-image`, an option of each run). A main
+    run and its wider-source run are at two formats, so each can name
+    its own replay image.
   - If the slower image marks the lane too, cft-segrun refuses,
     `replay-undecided`. The golden writer is the fallback.
   - For marks that come by design (M2 past its range, section 7.1), a
@@ -838,10 +862,30 @@ PROPOSED.
     estimates a copy of 2/pi in about 1,141 of a lane's 2,048 scratch
     slots for fp256's full range (the surveyor's estimate).
 - **The audit always replays by the definition,** whatever the producer
-  used. The method is recorded in the header, as provenance (`replay-by`,
-  section 7.4), and the value is checked against the definition. So a
-  slower image needs no relation of its own to the source, and no
-  auditor is handed it.
+  used. The method is recorded in the header, as provenance (the
+  `replay-method` lines, section 7.4), and the value is checked against
+  the definition. So a slower image needs no relation of its own to the
+  source, and no auditor is handed it.
+- **Refusing instead of replaying** is open for marks past a range,
+  at a cost. The routine's own range test is what makes it mark, so in
+  the lane the routine knows which marks are past its range. R23's byte
+  is full, and R24's raise reads only `ra[4:0]` and `ra[7]` (R8's
+  design), so neither carries the difference out of the lane. Two
+  carriers do:
+  - **a word in scratch-out**, which part M (4.4) lists as a per-lane
+    carrier for a refusal, and which R23 and R24 leave free. The
+    routine writes a code into a slot the language defines, and a writer
+    refuses, by name, a run whose lane carries one. Its cost is a
+    scratch slot in every lane, the instructions that write it, and a
+    language rule that names the slot;
+  - **a writer's own test.** A writer that replays recomputes each
+    marked lane, its arguments among them, and can refuse a mark past
+    the range by name instead of replaying it. Its cost is the routine's
+    stated range carried from the routine's generator to every writer,
+    the C writer included, which replays by a slower image.
+
+  Either way, such a run is not certified as version 2. Version 1 still
+  records it, mark and all.
 
 ### 7.4 The lines
 
@@ -867,10 +911,12 @@ PROPOSED.
     whose lanes are marked in every segment (M2 past its range, section
     7.1) has one replay line a segment, not one a lane, and its
     certificate stays the size of its segments.
-- How the producer made its replays is one header line, `replay-by`:
-  `none`, `golden`, or `image <digest>` (section 9.2). It is REPORTED,
-  and it sits in the header because two writers of one run make it
-  differently (rule 4).
+- How the producer made its replays is in the header (section 9.2):
+  `replay-methods <n>`, then one line for each run that has replays,
+  `replay-method <r> golden` or `replay-method <r> image <digest>`. A
+  main run and its wider-source run are at two formats, so each names
+  its own method and image. The lines are REPORTED, and they sit in the
+  header because two writers of one run make them differently (rule 4).
 - The segment line of a segment with replays carries the corrected
   values:
   - the end: the raw end, with each marked lane's values the
@@ -1041,31 +1087,102 @@ contract:
   the same way.
 
 **So a certificate names its definition,** in two header lines (section
-9.2):
-- **`profile`**: the conformance profile its bits are claimed under.
-  CONFORMANCE.md already versions the contract this way: "The profile
-  version is the vectors", and "A change to any recorded bit or flag is a
-  new profile number". An addition that changes no recorded case is a
-  minor step (1.1, 1.2) (READ, CONFORMANCE.md, "Versioning").
-- **`language`**: the language's version. None exists today. I propose
-  one, kept in the golden model, under CONFORMANCE.md's rule:
-  - a major step whenever an accepted source is refused, or computes
-    another thing. `tangent`'s reservation would have been one;
-  - a minor step for an addition that changes no accepted source.
+9.2): `profile` and `language`.
+
+**`profile`: the conformance profile, extended to the program model.**
+- **What CONFORMANCE.md versions today** (READ, "Versioning"): "The
+  profile version is the vectors", and "A change to any recorded bit or
+  flag is a new profile number". An addition that changes no recorded
+  case is a minor step (1.1, 1.2).
+- **Its record holds no program.** The record is the vector sets: 168
+  elementwise sets of opcodes, transcendentals, conversions and the
+  like. Yet the program model is normative. CONFORMANCE.md's "The
+  program model" says "A conforming implementation runs an image bit for
+  bit as the model does, or refuses it by name before running anything",
+  and every load check and re-run of an audit runs that model.
+- **So today's number does not version what an audit re-derives.**
+  ee78152 (2026-10-01) made seq.py refuse images whose header carries
+  more than 512 constants (513, 600 and 70,000), which it had loaded and
+  run at 575a819. The profile stayed 1, rightly by its rule: no recorded
+  case moved (READ, the commit's message). Under the rule as it stands,
+  an auditor after ee78152 covers a certificate made before it, and
+  would refuse such an image `program-image`, blaming an honest
+  certificate.
+- **The fix I propose: the profile versions the program model too.** Its
+  record gains program sets:
+  - the golden corpus's images, initial states and every boundary state,
+    which `certificates/MANIFEST` already holds;
+  - a set of load cases: for each of the loader's rules, an image at its
+    edge, accepted, and one past it, refused by name, generated from
+    seq.py as the vectors are.
+
+  Then any change to what an image computes, or to whether it loads,
+  moves a recorded case and steps the profile:
+  - a change to an accepted image's result or acceptance is a major step.
+    ee78152 would have been one;
+  - a feature that loads images refused before only because their
+    encoding was unclaimed (an unknown control code, say), and leaves
+    every accepted image as it was, is a minor step. Its recorded
+    refusals were of encodings held for later, and become acceptances.
+    R24's codes 12 to 14 would be one.
+- **The other way was a separate version for the program model.** I do
+  not propose it. It would name one contract with two numbers that can
+  drift apart, while CONFORMANCE.md's profile already holds the program
+  model in its text. Either way, CONFORMANCE.md's versioning rule
+  changes, and that is a contract change (question 6).
+
+**`language`: the language's version.** None exists today. I propose
+one, kept in the golden model, under the same rule:
+- a major step whenever an accepted source is refused, or computes
+  another thing. `tangent`'s reservation would have been one;
+- a minor step for an addition that changes no accepted source.
+
+**How often majors step.** Under these rules a major step is any change
+that refuses or recomputes something accepted before. Counted from L1
+(dd27ed7), the language would already have taken about four majors in
+its first two days: the step-size-sign refusal and D2's `unused` and
+`too-deep` (2026-10-01), then `tangent` (2026-10-02). That is
+verifier-VCV2's count, which I have not redone. What it means:
+- **Majors will step often while the language and the model are
+  young.** Each one leaves every older certificate uncovered by a newer
+  auditor.
+- **An uncovered certificate still passes wherever it does not touch the
+  change.** Coverage decides only who is blamed for a failure.
+- **Deciding a `definition-differs` needs the named definition:** a
+  checkout of the golden model at a commit that implements it. So
+  auditors keep old definitions at hand, as cft-orbits' resume already
+  needs the build its checkpoint names.
+- **The numbering starts with version 2's build,** so none of those four
+  ever appears in a certificate.
+- **The language can lower its own rate.** A source could declare its
+  language version, as it declares its format, so that a new keyword
+  refuses only the sources that ask for the new version. That is the
+  language's to decide, not version 2's.
 
 **Who is blamed when a re-derivation fails:**
 - **Coverage.** An auditor's definition covers a certificate's when, for
-  both versions, the majors are equal and the auditor's minor is at least
-  the certificate's. A certificate that writes `unknown` is never
-  covered.
+  each version, the majors are equal and the auditor's minor is at least
+  the certificate's.
+  - `language none` (no run names a source) is covered by every
+    language, since no check reads one.
+  - A certificate that writes `unknown` is never covered.
 - **The auditor's definition covers the certificate's.** The failure is
   the certificate's, under its own name.
 - **It does not.** Any re-derivation that fails is refused
-  `definition-differs` (exit 78), naming both versions: a re-run, a
-  replay, a definition re-run, a language check at step 4a, or a
-  recompile. Like `compiler-differs`, this is the auditor's own limit,
-  not a verdict on the certificate. Hand the audit the named definition,
-  and it decides.
+  `definition-differs`, naming both versions. That covers a load check
+  at step 4, a language check or a recompile at step 4a, a re-run, a
+  replay, and a definition re-run. Like `compiler-differs`, it is the
+  auditor's own limit, not a verdict on the certificate. Hand the audit
+  the named definition, and it decides.
+- **Exit 78 is not new for this.** It is the code version 1 already gives
+  a tool's own limits:
+  - `build-width` and `build-format` (CERTIFICATES.md, "The audit tool");
+  - cft-orbits' `identity`, a resume on another build or device than the
+    certificate names (ORBITS.md, "Certified runs").
+
+  `compiler-differs`, `definition-differs` and `definition-unavailable`
+  join that family, by version 1's rule that a code names a family and
+  the name is the report.
 - **A false certificate is refused either way.** `definition-differs` is
   a refusal too, so claiming an old definition gains a producer nothing.
 - **An auditor that cannot evaluate the definition** refuses
@@ -1082,8 +1199,8 @@ stages" (ROADMAP.md, step 6, "What the surveys found"), and transcend.py
 decides through mpmath's enclosures (section 5).
 
 **What the binding does not need** is the producer's replay method. The
-header's `replay-by` is reported. A slower image's answer is accepted
-exactly when it equals the definition's, lane by lane.
+header's `replay-method` lines are reported. A slower image's answer is
+accepted exactly when it equals the definition's, lane by lane.
 
 **A cheaper check, for an auditor handed the states and the raw
 blocks:**
@@ -1366,8 +1483,8 @@ They come after version 1's identity lines, in this order:
 
 | line | values | audit |
 |---|---|---|
-| `profile <version>` | the conformance profile the bits are claimed under (section 7.6); `unknown` | READ: compared with the auditor's own |
-| `language <version>` | the language's version; `none` where no run names a source; `unknown` | READ: compared with the auditor's own |
+| `profile <version>` | the conformance profile the bits are claimed under, extended to version the program model (section 7.6); `unknown` | REPORTED; compared with the auditor's own, to name a failure's cause |
+| `language <version>` | the language's version; `none` where no run names a source, which every language covers; `unknown` | REPORTED; compared with the auditor's own, to name a failure's cause |
 | `device-platform <text>` | the card's platform (shell) name as XRT reports it, for example `xilinx_u50_gen3x16_xdma_5_202210_1`; `none` for the software backend; `unknown` | REPORTED |
 | `device-xrt <text>` | XRT's version, for example `2.19.194`; `none`; `unknown` | REPORTED |
 | `device-clock <n>` | the kernel clock in Hz, as a decimal, for example `135000000`; `none`; `unknown` | REPORTED |
@@ -1375,7 +1492,7 @@ They come after version 1's identity lines, in this order:
 | `writer <name> <id>` | the program that wrote the certificate (`cft-segrun`, `cft-orbits`, `golden`), and its build in the build-id grammar, or `unknown` | REPORTED |
 | `writer-runtime <text>` | the golden writer's Python, and its mpmath's version wherever it evaluated the definition, for example `python-3.12.9,mpmath-1.3.0` (this desktop's); `none` for a C tool | REPORTED |
 | `compiler-build <id>` | in the build-id grammar, the build of the compiler that made the images whose runs name one; `none`; `unknown` | REPORTED |
-| `replay-by <word> [<digest>]` | how the producer made its replays: `golden`, or `image` and the replay image's SHA-256; `none` where no run has a replay | REPORTED |
+| `replay-methods <n>`, then n lines `replay-method <r> golden` or `replay-method <r> image <digest>` | how the producer made each run's replays: by the golden model, or by a replay image (its SHA-256), one line for each run that has replays, runs strictly increasing; `replay-methods 0` where no run has a replay | REPORTED |
 | `certificate-id <text>` | an identifier the issuer assigns before writing; `none` | REPORTED |
 | `issuer <text>` | who issues it: a name, an ORCID or an organisation's id, as the issuer chooses; `none`; `withheld` | REPORTED; CHECKED with a signature and a keyring |
 | `issuer-key <key>` | the Ed25519 key it is to be signed with; `none` | CHECKED by the signature |
@@ -1573,7 +1690,7 @@ none was computed:
     writer cft-segrun commit=<40 hex> tracked=clean untracked=none
     writer-runtime none
     compiler-build commit=<40 hex> tracked=clean untracked=none
-    replay-by none
+    replay-methods 0
     certificate-id none
     issuer withheld
     issuer-key none
@@ -1663,12 +1780,18 @@ PROPOSED.
   hand-written image that a source defines.
 - **10. Accuracy.** As in version 1, with `wider-source` entries.
 
-At every step that re-derives through the definition (4a's language
-checks and recompile, 8's wider-source relation, 9's re-runs and
-replays, 9a), a failure is refused `definition-differs` wherever the
-auditor's definition does not cover the certificate's (section 7.6), and
-by its own name otherwise. An auditor that cannot evaluate the
-definition refuses `definition-unavailable` where it first needs it.
+At every step that re-derives through the definition, a failure is
+refused `definition-differs` wherever the auditor's definition does not
+cover the certificate's (section 7.6), and by its own name otherwise.
+Those steps are:
+- 4's load checks (`program-image`, `program-format`, `program-shape`),
+  which run the program model's loader;
+- 4a's language checks and recompile;
+- 8's wider-source relation;
+- 9's re-runs and replays, and 9a.
+
+An auditor that cannot evaluate the definition refuses
+`definition-unavailable` where it first needs it.
 
 **The new refusals:**
 
@@ -1777,8 +1900,8 @@ tags: the block's `cft-certificate 2 lane-flags`, and the signature's
   - version-2 objects and their encoding;
   - lane flags from `Result.lane_flags` (R8's model);
   - replays by `lang.run` on the marked lanes, spliced into the chain,
-    with `replay-by golden`. Where transcend.py raises `ZivEscalation`,
-    it refuses `replay-undecided`;
+    with `replay-method <r> golden` for each run that has them. Where
+    transcend.py raises `ZivEscalation`, it refuses `replay-undecided`;
   - the source lines, computed by the language and cftc and held to the
     image it runs;
   - `profile` and `language`, from the golden model's own versions;
@@ -1790,8 +1913,10 @@ tags: the block's `cft-certificate 2 lane-flags`, and the signature's
     `run-<r>-segment-<k>.flags`. Through a remote handle the block
     travels by PROG_RUN_EX's `want` word, and a server without the
     feature is refused by name (R8's design);
-  - `--replay-image IMG`, writing `replay-by image <digest>`, with
-    `replay-missing` and `replay-undecided` as its refusals;
+  - `--replay-image IMG`, an option of each run, writing `replay-method
+    <r> image <digest>`, with `replay-missing` and `replay-undecided` as
+    its refusals. A main run and its wider-source run, at two formats,
+    each name their own;
   - `--source SRC --manifest M`, taking the source and compile lines
     from cftc's manifest, `language` among them, and holding the
     manifest's image and bank digests to the files it runs. cftc's
@@ -1831,9 +1956,13 @@ tags: the block's `cft-certificate 2 lane-flags`, and the signature's
   - the library states the profile it implements, a constant in cft.h,
     for cft-segrun to write and cft-audit to compare.
 - **The definition's versions** (section 7.6):
-  - **the profile,** stated by the golden model and by libcft. A gate
-    would hold both to CONFORMANCE.md's vectors (`vectors/SHA256SUMS`),
-    so that a recorded bit cannot move unless the profile does;
+  - **the profile,** stated by the golden model and by libcft, and
+    extended to the program model (section 7.6). A gate would hold both
+    to the profile's record, so that no recorded case could move unless
+    the profile did. That record is CONFORMANCE.md's vectors
+    (`vectors/SHA256SUMS`) and the program sets: the golden corpus's
+    states, and the load cases. The extension changes CONFORMANCE.md's
+    versioning rule (question 6);
   - **the language's version,** kept in the golden model and written
     into cftc's manifest, so that cft-segrun can state it. A gate would
     hold it to the language's committed graphs and its refusal tables,
@@ -1866,11 +1995,11 @@ add:
   - a hand-written program that marks one lane in one segment through
     R24's `RAISE`, and writes a wrong last bit there;
   - a source in `certificates/programs/` defines what it computes;
-  - the golden writer makes the case (`replay-by golden`), and cft-segrun
-    remakes it with a replay image, the source's compile (`replay-by
-    image <digest>`). The two differ in the header alone, which the
-    check normalizes, and their run blocks must agree byte for byte
-    (rule 4). That holds the C writer's replay to the definition;
+  - the golden writer makes the case (`replay-method 0 golden`), and
+    cft-segrun remakes it with a replay image, the source's compile
+    (`replay-method 0 image <digest>`). The two differ only in header
+    lines the check normalizes, and everything else must agree byte for
+    byte (rule 4). That holds the C writer's replay to the definition;
   - it needs only R8's model, so it can exist before M1;
 - every header line spelled out, with a signature under a published test
   key. Like the example salt, that key is printed, so it is never an
@@ -1914,8 +2043,11 @@ red.
 | raw values | `raw-end` the hash of another state; `raw-lanes` of a block with [7] cleared; `marked` one off | `replay-raw` |
 | `changed` | one more, and one fewer, than the replay changes | `replay-changed` |
 | the corrected segment | the raw end certified as the segment's end; the raw block as its block; the raw flag word | `segment-end`, `segment-lane-flags`, `segment-flags` |
-| the method in the header | the golden writer's certificate (`replay-by golden`) and cft-segrun's (`replay-by image`) of one marked run; then cft-segrun's with one replayed value changed | equal once the header is normalized; then not equal, by the gate's name |
+| the method in the header | the golden writer's certificate (`replay-method 0 golden`) and cft-segrun's (`replay-method 0 image <digest>`) of one marked run; then cft-segrun's with one replayed value changed; then cft-segrun's with another `profile` | equal once the normalized lines are set aside; then not equal, by the gate's name, twice |
+| two replay images | a main run and its wider-source run that both mark, replayed by two images at two formats | two `replay-method` lines, each run's own image; the golden audit accepts, and cft-audit refuses `source-missing`, as with one image |
 | the definition's version | a certificate naming `language 2` (or `profile 2`) under an auditor at 1, made to fail one replay; the same failure under an auditor at 2 | `definition-differs`; `segment-end` |
+| the definition at load | an image the auditor's model refuses at load (513 constants, as after ee78152), under a certificate at an older profile major; then at the auditor's own profile | `definition-differs` at step 4; then `program-image` |
+| `language none` | a certificate whose runs name no source, failing a re-run, under an auditor of any language and the certificate's profile | the re-run's own name: `none` is covered |
 | an auditor that cannot evaluate | a replay audited without mpmath; an enclosure forced to its cap | `definition-unavailable` |
 | no source | a replay audited with no source handed | `source-missing` |
 | the source | one byte changed | `source-digest` |
@@ -2010,18 +2142,24 @@ argument.
    cannot audit a replayed segment until a C implementation of the
    language exists. *Recommended: yes.* (Sections 7.3 and 7.5.)
 3. **M2 at fp256, past its range.** The plan marks every lane past a
-   stated range.
-   - So a long run, a forcing sin(t) for one, is replayed on the host in
-     every segment, and audited by the golden model alone.
-   - The other way is a range so wide that no argument a program reaches
-     leaves it, so marks stay rare. My estimate: a range of 2^1024 needs
-     about 1,500 bits of 2/pi, a few scratch slots a lane.
-   - Refusing past the range by name is not open. The machine cannot
-     tell a lane past the range from an undecided one, and the lane byte
-     has no bit left.
+   stated range. There are three ways to handle that:
+   - **(a) a wide range,** so that no argument a program reaches leaves
+     it, and marks stay rare. 2^1024 needs about 1,300 bits of 2/pi
+     (gen_2opi.py's rule), five or six scratch constants a lane. Past
+     the range, mark and replay, as the plan says.
+   - **(b) a narrow range,** as the plan reads. A long run, a forcing
+     sin(t) for one, is replayed on the host in every segment, and
+     audited by the golden model alone.
+   - **(c) refuse past the range by name.** The routine's own range test
+     knows. Either a word in a scratch slot the language defines carries
+     the refusal out of the lane, or a writer that replays tests each
+     marked lane's argument against the routine's range. The cost is a
+     scratch slot and its instructions in every lane, or the routine's
+     range carried to every writer; and such a run is not certified as
+     version 2.
 
-   *Recommended: a wide range, its cost measured by M2; past it, mark
-   and replay as the plan says.* (Sections 7.1 and 7.5.)
+   *Recommended: (a), its cost measured by M2. It needs nothing new, and
+   it certifies what (c) would refuse.* (Sections 7.1, 7.3 and 7.5.)
 
 **Sources and wider runs (item 3)**
 
@@ -2037,13 +2175,17 @@ argument.
 
 6. **Which definition a certificate claims.** Each certificate names
    two things:
-   - the conformance profile, CONFORMANCE.md's existing version;
+   - the conformance profile, extended to version the program model. Its
+     record gains the golden corpus and a set of load cases, so that a
+     change like ee78152's to seq.py's loader steps it;
    - a new language version.
 
    An auditor under a definition that does not cover the certificate's
    refuses a failure as `definition-differs`, blaming the version, not
-   the certificate. Without this, a later auditor would refuse an honest
-   certificate as false. *Recommended: yes.* (Section 7.6.)
+   the certificate. Majors would step often while the language is young
+   (about four since L1). *Recommended: yes. Extending the profile
+   changes CONFORMANCE.md's versioning rule, which is a contract change.*
+   (Section 7.6.)
 7. **mpmath.** The golden model decides transcendentals through mpmath,
    so the certificate reports the writer's mpmath version when it
    replayed, and the verdict reports the auditor's. MPFR is not carried:
@@ -2096,10 +2238,13 @@ argument.
 - **R8 and ST_REPORTS.** The XRT backend's mask (0x30) drops STATUS[6],
   so a card certificate would lose the mark. R8 has been told and is
   fixing it.
-- **New with this revision.** Where the profile and language versions
-  live (the golden model, cft.h, cftc's manifest) and the gates that
-  hold them (section 13), and the `lang` stage's check on cftc's
-  `VERSION`.
+- **New with this revision:**
+  - where the profile and language versions live (the golden model,
+    cft.h, cftc's manifest);
+  - the profile's program sets: the golden corpus's states, and the load
+    cases;
+  - the gates that hold them (section 13);
+  - the `lang` stage's check on cftc's `VERSION`.
 
 ## 17. Sources
 
