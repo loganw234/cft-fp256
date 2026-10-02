@@ -568,6 +568,24 @@ ROUTINE = {   # name: (source, the first line holding a division or a root)
                         "step map, h = 1/8\n", 4),
     "a division by zero": ("system z\nformat fp64\nstate x\n"
                            "next x = x / (1 - 1)\nstep map\n", 4),
+    # verifier-VL4's (b)1: statements come in any order, and a written
+    # tangent or an expansion block above the equations holds the first
+    # division - refused at the primal's line (7, 8, 9) until the checker
+    # handed the compiler its own lines
+    "a written tangent first": (
+        "system m\nformat fp64\nstate x, y\ntangent v\n"
+        "next v.x = fma(-(x / y), v.y, v.x) / y\n"
+        "next v.y = v.y / (2 * sqrt(y))\nnext x = x / y\nnext y = sqrt(y)\n"
+        "step map\n", 5),
+    "a tangent let above its let": (
+        "system t\nformat fp64\nstate x, y\ntangent v\n"
+        "let v.u = fma(-u, v.y, v.x) / y\nnext v.x = v.u\nnext v.y = v.y\n"
+        "let u = x / y\nnext x = u\nnext y = y\nstep map\n", 5),
+    "an expansion block first": (
+        "system b\nformat fp64\nstate x, y\nstep euler, h = 0.125\n"
+        "expansion\n  next x = fma(h, x / ((y * y) + 1), x)\n"
+        "  next y = fma(h, -y, y)\nend\nd/dt x = x / ((y * y) + 1)\n"
+        "d/dt y = -y\n", 6),
 }
 
 
@@ -575,12 +593,15 @@ ROUTINE = {   # name: (source, the first line holding a division or a root)
 def test_the_interim_refusal_on_every_target(case):
     """compile_text on every built-in target and sw:N, compile_graph of the
     language's graph and of a graph read from its bytes (which carries no
-    lines): `runtime-routine`, at the first line holding one, before the
-    compiler's other checks (a step count of 0, a target without the
-    format) and before its own reading of the graph."""
+    lines): `runtime-routine`, at the first line in source order holding
+    one, whatever its statement, before the compiler's other checks (a
+    step count of 0, a target without the format) and before its own
+    reading of the graph."""
     text, line = ROUTINE[case]
     g = lang.compile_text(text, "src.cftl").graph
     assert {"div", "sqrt"} & set(g.op_counts("step"))
+    assert g.routine_lines[0] == line
+    assert lang.StepGraph.from_bytes(g.to_bytes()).routine_lines is None
     trim = T.Target("trim", ("fp64",), 32768, 512, 2048, 1024,
                     T.TILE_FEATURES)
     for target in T.names() + ["sw:4096", "sw:32768", trim]:

@@ -38,8 +38,10 @@ InternalError is a defect in the compiler, never a property of a source.
 Until parcel C4, a system with a run-time division or square root - the
 language's div and sqrt, which its interpreter runs (L4) - is refused
 `runtime-routine`, first and on every target, at the first source line
-holding one: a tile has no such instruction, and the compiler does not
-yet inline the routines (divfull, sqrtfull) that compute them.
+holding one, whatever the statement (an equation, a let, a written
+tangent or a line of an expansion block): a tile has no such
+instruction, and the compiler does not yet inline the routines
+(divfull, sqrtfull) that compute them.
 
 A system with tangent vectors (docs/LANGUAGE.md, "The variational
 equations") compiles the same way: its step graph is version 2, read by
@@ -271,30 +273,32 @@ def _param_bits(graph, params, source):
 # the operation it implements. Until then a graph holding one is refused
 # by name - first, before anything here reads the graph (ir.py's op table
 # would stop at `div` with an internal error, exit 70) - at the first
-# source line holding one, so that every source the language accepts
-# compiles or is refused by name (D2's rule). The line is the checker's
-# (lang.graph.Section.lines); a graph read from bytes carries none.
+# source line holding one, whatever the statement: an equation, a let, a
+# written tangent equation or tangent let, a line of an expansion block,
+# in the order the source writes them. So every source the language
+# accepts compiles or is refused by name (D2's rule). The lines are the
+# checker's (lang's StepGraph.routine_lines, where it built each division
+# and root); a graph read from bytes carries none, and the refusal names
+# no line.
 ROUTINES = {"div": ("divides", "divfull"),
             "sqrt": ("takes a square root", "sqrtfull")}
 
 
 def refuse_routines(graph, source=None):
     """`runtime-routine` if the graph holds a run-time division or square
-    root, at the first source line holding one; otherwise nothing."""
-    found = []
+    root, at the first source line holding one, in source order and
+    whatever its statement (the graph's routine_lines); otherwise
+    nothing."""
+    found = set()
     for name in ("field", "step", "tangent_field", "tangent_step"):
         sec = graph.section(name)
-        if sec is None:
-            continue
-        lines = getattr(sec, "lines", None)
-        for k, (op, _args, _label) in enumerate(sec.nodes):
-            if op in ROUTINES:
-                found.append((lines[k] if lines else None, op))
+        if sec is not None:
+            found |= {op for op, _a, _l in sec.nodes if op in ROUTINES}
     if not found:
         return
-    placed = sorted(f for f in found if f[0] is not None)
-    line = placed[0][0] if placed else None
-    ops = [op for op in ROUTINES if any(f[1] == op for f in found)]
+    lines = getattr(graph, "routine_lines", None)
+    line = lines[0] if lines else None
+    ops = [op for op in ROUTINES if op in found]
     what = " and ".join(ROUTINES[op][0] for op in ops)
     many = len(ops) > 1
     refuse("runtime-routine",

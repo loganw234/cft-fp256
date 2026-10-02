@@ -24,9 +24,10 @@ writer meets one form of refusal from the parser to the image:
   runtime-routine    a run-time division or square root (the language's
                      div and sqrt, L4), which the compiler carries only
                      as an inlined routine, from parcel C4: raised first,
-                     at the source line, on every target, so that no
-                     source the language accepts reaches an internal
-                     error (exit 70) in between
+                     on every target, at the first source line holding
+                     one, whatever its statement, so that no source the
+                     language accepts reaches an internal error (exit 70)
+                     in between
 """
 
 NAMES = ("target-format", "target-feature", "program-capacity",

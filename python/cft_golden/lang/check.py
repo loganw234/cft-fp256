@@ -144,10 +144,12 @@ def _no_root(value):
         return (f"sqrt({shown}) is not a real number: the square root of a "
                 f"negative constant has no value, and a constant is an exact "
                 f"rational (at run time such a root is a NaN, with invalid)")
-    return (f"sqrt({shown}) has no exact rational value, since {shown} is not "
-            f"a rational's square, and a constant is an exact rational: write "
-            f"the root's value as a decimal or a/b, or take the root at run "
-            f"time, as the square root of a param")
+    # the constant exactly, not as shown: a long one is shown to five
+    # digits, and 4 + 1e-30 shows as 4.0000e+0, a square (verifier-VL4)
+    return (f"sqrt({shown}) has no exact rational value - the constant, "
+            f"exactly, is no rational's square, and a constant is an exact "
+            f"rational: write the root's value as a decimal or a/b, or take "
+            f"the root at run time, as the square root of a param")
 
 
 def _reserved_why(name):
@@ -380,6 +382,9 @@ class Checker:
         self.tan_lets = {}
         self.field_ctx = None
         self.map_ctx = None
+        # the source lines at which a run-time division or square root is
+        # built, whatever the statement - the graph's routine_lines (L4)
+        self.routine_lines = set()
 
     # ==== declarations ================================================
 
@@ -1311,6 +1316,12 @@ class Checker:
     def apply(self, op, args, line):
         if all(isinstance(a, K) for a in args):
             return self.fold(op, args, line)
+        if op in ("div", "sqrt") and line is not None:
+            # every statement the source writes is evaluated here - a
+            # written tangent and an expansion block too, to be held to
+            # what the language derives - so this meets each run-time
+            # division and root at the line that holds it
+            self.routine_lines.add(line)
         return Node(op, [self.leaf(a, line) if isinstance(a, K) else a
                          for a in args], line)
 
@@ -2025,6 +2036,7 @@ class Checker:
         if built is not None:
             self.block_compare(field_outs, step_outs, built, tangent)
         self.canonical_nesting(graph)
+        graph.routine_lines = tuple(sorted(self.routine_lines))
         return graph
 
     # ==== the canonical form's nesting (D2) ============================

@@ -374,9 +374,11 @@ their operands in those functions' order.
   reciprocal - `x * (1/3)` is that, one rounding of 1/3 and then one of
   the product, and the two differ for about a third of all x at every
   format (measured, L4). A division by the constant 0 is a division like
-  any other: `x / 0` is an infinity with divideByZero, or a NaN with
-  invalid where x is 0, as `x * 0` is a product. A constant over a
-  constant is folded exactly ("Constants").
+  any other, as `x * 0` is a product, and gives what 754 gives: `x / 0`
+  is an infinity with divideByZero for a finite nonzero x, a NaN with
+  invalid for a zero x, an infinity with no flag for an infinite x, and
+  the canonical NaN for a NaN x, invalid only for a signaling one. A
+  constant over a constant is folded exactly ("Constants").
 - `select` takes its arguments in C's conditional order, `c ? a : b`,
   not OpenCL's select. Both arms are operands, so both are computed:
   there is no branch.
@@ -505,7 +507,8 @@ param is a run-time neg of its rounded value. For an exact constant
     constant h, and `x / h` (L4) a division of the state by it, which a
     step-halving bank halves with the slot. `x * (1/h)` stays
     `h-nonlinear`: the constant that meets the run there is 1/h, which
-    no bank can halve.
+    doubles when h halves, so a step-halving bank, which halves each
+    h-scaled slot, would hold the wrong value.
 - A flow's equations and their lets cannot read h, whatever it folds to,
   nor a const whose value changes with h's size (`h-scope`): a
   step-halving run halves h, and a right-hand side must not move with
@@ -1281,12 +1284,17 @@ has one, written again where it has none.
   subnormal unless it is zero, and 2·r never overflows (measured at every
   format) - so the rule rounds once, at its division. `r + r` gives the
   same bits; `2 * r` is the textbook's form.
-- **What a tangent costs.** Each division of the step costs each tangent
-  vector one run-time division (by b), and each square root one division
-  (by 2·r) and no root: the quotient or root written again where it has
-  no name is the primal's own operation on the same values, which the
-  compiler shares. So T vectors add T divisions for every division or
-  root the step performs - rk4 with one division in its right-hand side
+- **What a tangent costs.** Each division and each square root of the
+  step whose tangent is not zero - one that reads the state - costs each
+  tangent vector one run-time division (by b, or by 2·r) and no root: the
+  quotient or root written again where it has no name is the primal's own
+  operation on the same values, which the compiler shares. One that reads
+  no state - a quotient of params, the root of a param - has a tangent
+  that is identically zero and costs a vector nothing: with params p and
+  q, `next x = x * (p / q)` and `next y = y / p + sqrt(q)` perform three
+  divisions and roots a step, and each vector adds one, `y / p`'s. So T
+  vectors add T divisions for every division or root of the step that
+  reads the state - rk4 with one such division in its right-hand side
   performs four a step, and each vector adds four. Once the compiler
   carries a division (parcel C4), as an inlined routine of about 209 ALU
   instructions at fp64 and 213 at fp256 (divfull, measured by the
@@ -1511,10 +1519,16 @@ convention ("What the fourth check cannot see").
 - **rounding order**: a rule replaced by one equal in exact arithmetic
   and rounded otherwise - `da*b + a*db` for `fma(da, b, a * db)` - is
   invisible to exact evaluation (measured: it passed every point). It is
-  held by the committed compiled variational references' graph bytes
-  (`programs/systems/compiled-tangent/`), by this document's rule table
-  held to the code - each rule rendered on a one-operation system - and
-  by the blocks above, held to the renderers;
+  held by this document's rule table held to the code - each rule
+  rendered on a one-operation system - by the blocks above, held to the
+  renderers, and, for every rule but the quotient's and the root's, by
+  the committed compiled variational references' graph bytes
+  (`programs/systems/compiled-tangent/`), none of which divides or takes
+  a root until parcel C4 compiles them: until then the rule table is
+  those two rules' holder (L4; verifier-VL4 planted the quotient's rule
+  rounded otherwise and the root's halved first, each green on the
+  fourth check and the central difference and red on the rule-table
+  test, the root's on the cost test as well);
 - **special values**: NaNs, infinities and the sign of zero do not exist
   in exact arithmetic. They are held by the interpreter against seq.py
   bit for bit, with tangents holding signalling NaNs, infinities, -0 and
@@ -1563,18 +1577,20 @@ stage certifies one, both auditors accepting.
 
 - **A long chain of unnamed operations** makes each one's tangent
   write its unnamed operands again wherever its rule reads an operand
-  (a product, fma, abs, copysign, the min family), so the tangent
-  grows with the square of the chain's length: 5,049 tangent nodes
-  for an unnamed 100-term product, against 198 if read across, and
-  8,099 for an unnamed min chain of 90 terms (measured, the second by
-  verifier-VL3). A sum chain stays linear, and so does a chain through
-  a select's condition, which takes no tangent (198 nodes at 100
-  terms, verifier-VI2). Naming parts of the chain with lets keeps it
-  linear, since a let is read by name. From 102 terms an unnamed
-  product's tangent would print past the parser's 100 levels - from
-  101 under euler and stormer-verlet, whose step writes the field one
-  level deeper - and the source is refused `too-deep` (D2); lets keep
-  it within reach as well.
+  or its own result (a product, fma, a quotient, a root, abs, copysign,
+  the min family), so the tangent grows with the square of the chain's
+  length: 5,049 tangent nodes for an unnamed 100-term product, against
+  198 if read across; 5,247 for an unnamed chain of 99 quotients,
+  against 297 with each named by a let, and 5,148 for 99 roots nested
+  unnamed (measured by L4 and verifier-VL4); and 8,099 for an unnamed
+  min chain of 90 terms (measured by verifier-VL3). A sum chain stays
+  linear, and so does a chain through a select's condition, which takes
+  no tangent (198 nodes at 100 terms, verifier-VI2). Naming parts of
+  the chain with lets keeps it linear, since a let is read by name.
+  From 102 terms an unnamed product's tangent would print past the
+  parser's 100 levels - from 101 under euler and stormer-verlet, whose
+  step writes the field one level deeper - and the source is refused
+  `too-deep` (D2); lets keep it within reach as well.
 - **The compiler's choice between its orders reads no capacity.** It
   takes the fewest instructions a step, then the fewest one-beat cycles;
   the interleaved walk, offered only for a graph with tangents, wins for
@@ -1719,12 +1735,20 @@ The compiler's, reserved for it (L2).
   then the compiler refuses such a graph by this name, on every target,
   first - before any other of its checks, and before its own reading of
   the graph, whose operation table would stop at `div` with an internal
-  error - at the first source line holding one (a graph read from bytes
-  carries no lines, and the refusal names none). So every source the
-  language accepts compiles or is refused by name, and exit 70 stays a
-  defect in the compiler (D2's rule). With C4 the name goes: revision 7's
-  targets refuse such an image `target-feature`, and the software
-  targets run it.
+  error - at the first source line holding one, in the order the source
+  writes its statements and whatever the statement: an equation, a let,
+  a written tangent equation or tangent let, a line of an expansion
+  block. The checker meets each run-time division and root at its line,
+  since it evaluates every statement a source writes, and hands the
+  lines to the compiler with the graph (never in its bytes: a graph read
+  from bytes carries none, and the refusal names no line). Until
+  2026-10-02's send-back (verifier-VL4's (b)1) the compiler named the
+  graph's nodes' lines, the primal's, so a source that wrote its tangent
+  or its expansion block above its equations was refused at an
+  equation's line. So every source the language accepts compiles or is
+  refused by name, and exit 70 stays a defect in the compiler (D2's
+  rule). With C4 the name goes: revision 7's targets refuse such an
+  image `target-feature`, and the software targets run it.
 
 The checker never raises any of the eight. The sentences below are their
 form; the compiler words each one for the case at hand.
@@ -1837,11 +1861,13 @@ under `make golden`, with no change to either.
 - the quotient's and the root's rules (L4): their specials bit for bit
   (the root at ±0, below zero, at +infinity and at a square; the
   quotient at a zero divisor, exact, inexact, by a param that is zero);
-  one division a vector for each division or root of the step, after
-  sharing; the fourth check and the central difference on written
-  systems under every integrator and on generated ones; and three
-  plants - the root without its 2 and the quotient's wrong sign red on
-  both, the root through r·r = a red on the exact check alone;
+  one division a vector for each division or root of the step that reads
+  the state, and none for one that reads no state, after sharing; their
+  unnamed chains' growth, as the known limit states; the fourth check
+  and the central difference on written systems under every integrator
+  and on generated ones; and three plants - the root without its 2 and
+  the quotient's wrong sign red on both, the root through r·r = a red on
+  the exact check alone;
 - determinism across hash seeds; this document's variational blocks and
   sources against the renderers and the committed files.
 
@@ -1873,9 +1899,12 @@ back** (parcel D2, 2026-10-01).
 The compiled images are held to the interpreter by the `tangent` stage
 (`programs/tangent_check.py`; docs/VERIFICATION.md). The compiler's
 interim refusal is held by `python/tests/test_cftc.py` - on every target,
-through each entry point and the command line (exit 3, never 70) - and
-by the `lang` stage's leg K, on generated sources that divide or take a
-root; the rules by the `tangent` stage's leg L.
+through each entry point and the command line (exit 3, never 70), and at
+its line where a written tangent, a tangent let or an expansion block
+comes first - and by the `lang` stage's leg K, on generated sources that
+divide or take a root and on their canonical forms with the written-out
+step and the tangent moved above the equations; the rules by the
+`tangent` stage's leg L.
 
 ## What v1 does not do
 

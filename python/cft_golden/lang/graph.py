@@ -122,16 +122,11 @@ class Node:
 
 
 class Section:
-    __slots__ = ("out", "nodes", "lines")
+    __slots__ = ("out", "nodes")
 
-    def __init__(self, out, nodes, lines=None):
+    def __init__(self, out, nodes):
         self.out = list(out)            # [ref]
         self.nodes = list(nodes)        # [(op, (ref, ...), label or None)]
-        # each node's source line, where the checker built the section
-        # from a source; None for a section read from bytes. Never part of
-        # the bytes: the compiler's interim refusal names a line with it
-        # (python/cftc, `runtime-routine`).
-        self.lines = None if lines is None else list(lines)
 
 
 def _ref_kind(ref):
@@ -244,7 +239,7 @@ def canonical(sections, cross=None):
         nodes = [(n.op, tuple(ref(a, index, foreign, own) for a in n.args),
                   n.label) for n in order]
         out[name] = Section([ref(o, index, foreign, own) for o in outs],
-                            nodes, [n.line for n in order])
+                            nodes)
     return out, ckeys
 
 
@@ -272,6 +267,14 @@ class StepGraph:
         self.tangent = list(tangent)        # the tangent vectors' names
         self.tangent_field = tangent_field  # Section or None
         self.tangent_step = tangent_step    # Section, when tangent
+        # Where the source holds a run-time division or square root: the
+        # lines, ascending, at which the checker built a div or sqrt node -
+        # an equation's, a let's, a written tangent equation's or tangent
+        # let's, a line of an expansion block, whatever the statement (L4).
+        # The checker sets it; a graph read from bytes, or made otherwise,
+        # has None. Never part of the bytes: the compiler's interim refusal,
+        # `runtime-routine`, names the first of them (python/cftc).
+        self.routine_lines = None
 
     # -- what it holds --------------------------------------------------
 
@@ -318,6 +321,7 @@ class StepGraph:
                       self.lane, self.param, self.integrator, self.const,
                       self.field, self.step, self.tangent,
                       self.tangent_field, self.tangent_step)
+        g.routine_lines = self.routine_lines
         for k, v in changes.items():
             setattr(g, k, v)
         return g

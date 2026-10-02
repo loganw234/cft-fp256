@@ -64,7 +64,10 @@ many lanes and at several step counts: the image's REPEAT patched to 1,
      subnormals, and refused by the compiler `runtime-routine` at the first
      line holding one, on every target and through the command line (exit
      3) - never an InternalError, the D2 rule between L4 and parcel C4,
-     which compiles them
+     which compiles them; and each one's canonical form with its
+     written-out step and its tangent lines moved above its equations,
+     refused at the first line holding one whatever the statement
+     (verifier-VL4's (b)1)
 
 A check skipped prints a line that starts with SKIP, which the runner
 counts and names on its VERDICT line.
@@ -76,6 +79,7 @@ import importlib
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -1882,6 +1886,39 @@ def g_routine(rng, k):
     return "\n".join(lines) + "\n", min(marked)
 
 
+def moved_up(canon):
+    """A canonical form with its written-out step (the step line and its
+    expansion block) and its tangent lines moved above its equations and
+    lets - statements may come in any order, so it is the same system -
+    and the first line in it that holds a run-time division or root. The
+    canonical form writes a run-time division ` / ` and a root `sqrt(`,
+    where a constant's spelling has no space (1/3, h/2, 2*h/3), so a line's
+    code (before any `;`) shows which it holds. -> (text, that line, its
+    kind: equation, tangent or block)."""
+    head, step, tangent, primal = [], [], [], []
+    block = False
+    for ln in canon.split("\n")[:-1]:
+        code = ln.split(";", 1)[0].strip()
+        if block or code == "expansion" or code.startswith("step "):
+            step.append(ln)
+            block = (block or code == "expansion") and code != "end"
+        elif re.match(r"(let|next|d/dt) [A-Za-z_]\w*\.", code):
+            tangent.append(ln)
+        elif code.startswith(("let ", "next ", "d/dt ")):
+            primal.append(ln)
+        else:
+            head.append(ln)
+    lines = head + step + tangent + primal
+    for k, ln in enumerate(lines, 1):
+        code = ln.split(";", 1)[0]
+        if " / " in code or "sqrt(" in code:
+            kind = "block" if k <= len(head) + len(step) else \
+                "tangent" if k <= len(head) + len(step) + len(tangent) \
+                else "equation"
+            return "\n".join(lines) + "\n", k, kind
+    return "\n".join(lines) + "\n", None, None
+
+
 def _routine_flags():
     """Every flag of both operations through the interpreter at every
     format: one system a format, a lane a case, each lane's result and
@@ -1928,7 +1965,7 @@ def leg_routines(count, rng):
     check(not fails, "every flag of div and sqrt at fp32, fp64, fp128 and "
           "fp256: each lane's result and FLAGS softfloat's, div's five and "
           "sqrt's invalid and inexact among them", "; ".join(fails[:4]))
-    tally, wrong, internal = {}, [], []
+    tally, wrong, internal, moved = {}, [], [], {}
     flags = runs = 0
     cli = []
     for k in range(count):
@@ -1948,6 +1985,28 @@ def leg_routines(count, rng):
             wrong.append(f"routine {k}: its canonical form reads back as "
                          f"another graph")
         lang.render_math(g)
+        # the canonical form with its written-out step and its tangent lines
+        # above its equations: the same graph, refused at the first line
+        # holding a division or root - a block's or a tangent's line, where
+        # the compiler named the equation's until verifier-VL4's (b)1
+        text2, line2, kind2 = moved_up(canon)
+        try:
+            same = lang.compile_text(text2, f"routine-{k}-moved").graph
+            if same.to_bytes() != g.to_bytes():
+                wrong.append(f"routine {k}, moved up: another graph")
+            cftc.compile_text(text2, 2, source=f"routine-{k}-moved",
+                              stem="k")
+            wrong.append(f"routine {k}, moved up: compiled")
+        except lang.Refusal as e:
+            if (e.name, e.line) != ("runtime-routine", line2):
+                wrong.append(f"routine {k}, moved up: refused {e.name} at "
+                             f"line {e.line} where runtime-routine at line "
+                             f"{line2}, a {kind2} line, is due")
+            else:
+                moved[kind2] = moved.get(kind2, 0) + 1
+        except cftc.InternalError as e:
+            internal.append(f"routine {k}, moved up: internal error (exit "
+                            f"70): {str(e)[:120]}")
         fmt = g.fmt
         lanes = lanes_for(fmt, g.n_state, rng, 3)
         lanes += special_lanes(fmt, g.n_state, lanes[0], rng)
@@ -1995,16 +2054,26 @@ def leg_routines(count, rng):
     for f in (internal + wrong)[:10]:
         print(f"        {f}")
     print(f"  outcomes: {dict(sorted(tally.items()))}")
+    print(f"  moved up, refused at the first line holding one, by the kind "
+          f"of that line: {dict(sorted(moved.items()))}")
     print(f"  the interpreter's FLAGS over the {runs} runs: {flags:#x}")
     check(not internal, f"no InternalError: {count} generated sources that "
-          f"divide or take a root, on {len(ROUTINE_TARGETS)} targets each",
+          f"divide or take a root, on {len(ROUTINE_TARGETS)} targets each, "
+          f"and their canonical forms moved up",
           f"{len(internal)} stopped the compiler with an internal error, "
           f"exit 70")
-    check(not wrong and runs >= count // 2, f"{runs} sources accepted by the "
-          f"language read back and run on the interpreter, every one refused "
-          f"`runtime-routine` at the first line holding a division or a root "
-          f"on every target, and {len(cli)} through the command line, exit 3, "
-          f"nothing written ({time.perf_counter() - t0:.1f} s)",
+    check(not wrong and runs >= count // 2 and
+          {"block", "tangent", "equation"} <= set(moved),
+          f"{runs} sources accepted by the language read back and run on the "
+          f"interpreter, every one refused `runtime-routine` at the first "
+          f"line holding a division or a root on every target, and "
+          f"{len(cli)} through the command line, exit 3, nothing written; "
+          f"each one's canonical form with its written-out step and its "
+          f"tangent lines moved above its equations, the same graph, refused "
+          f"at the first line holding one - an expansion block's line "
+          f"{moved.get('block', 0)} times, a written tangent's "
+          f"{moved.get('tangent', 0)}, an equation's or a let's "
+          f"{moved.get('equation', 0)} ({time.perf_counter() - t0:.1f} s)",
           f"{len(wrong)} otherwise")
 
 

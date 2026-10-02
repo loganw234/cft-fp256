@@ -42,10 +42,12 @@ The quotient's and the root's rules read r, the operation's own result,
 as min's and max's do: (da - r db) / b, one fma and one division, two
 roundings, the fma's -r a primal value the compiler shares across
 vectors; and da / (2 r), whose doubling is exact, one rounding. Each
-costs a tangent vector ONE run-time division a node - the quotient or
-root written again where it has no name is the primal's own operation,
-shared - and the root's tangent takes no root (docs/LANGUAGE.md, "The
-quotient and the root").
+whose tangent is not zero - one that reads the state - costs a tangent
+vector ONE run-time division - the quotient or root written again where
+it has no name is the primal's own operation, shared - and the root's
+tangent takes no root; one that reads no state (a quotient of params,
+the root of a param) has an identically-zero tangent and costs a vector
+nothing (docs/LANGUAGE.md, "The quotient and the root").
 
 A rule reads a primal value BY NAME where it has one - a leaf, or a
 labelled node (a let, a template label such as k1.x), which the tangent
@@ -56,12 +58,14 @@ same bits and the same flags, and FLAGS is an OR; the compiler shares it
 with the primal's own. That keeps the language's promise for the
 tangent's text - every operation written is performed, once, in the order
 the canonical form writes it - at a known price: a long chain of unnamed
-operations whose rules read an operand (products, fma, abs, copysign,
-the min family) makes each one's tangent write its unnamed operands
-again, so the tangent grows with the square of the chain (measured:
-5,049 nodes for a 100-term product chain, 198 without copies; 8,099 for
-a min chain of 90 terms). A select's condition takes no tangent, so a
-chain through it stays linear. Naming parts with lets keeps it linear.
+operations whose rules read an operand or their own result (products,
+fma, quotients, roots, abs, copysign, the min family) makes each one's
+tangent write its unnamed operands again, so the tangent grows with the
+square of the chain (measured: 5,049 nodes for a 100-term product chain,
+198 without copies; 5,247 for a chain of 99 quotients, 297 named by
+lets; 5,148 for 99 nested roots; 8,099 for a min chain of 90 terms). A
+select's condition takes no tangent, so a chain through it stays linear.
+Naming parts with lets keeps it linear.
 
 The walk is iterative, from the outputs, and makes the tangent of a node
 only when some output's tangent reads it, so a comparison's operands and

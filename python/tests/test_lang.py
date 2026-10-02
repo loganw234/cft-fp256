@@ -2024,10 +2024,16 @@ def test_l4_square_roots_of_constants():
         assert [v for v, *_r in g.const] == [value], body
     g = compile_(_sys1("next x = x + sqrt(1 - 1)", state="x"))
     assert [v for v, *_r in g.const] == [F(0)]
-    for expr, words in (("sqrt(2)", "sqrt(2) has no exact rational value, "
-                         "since 2 is not a rational's square"),
+    for expr, words in (("sqrt(2)", "sqrt(2) has no exact rational value - "
+                         "the constant, exactly, is no rational's square"),
                         ("sqrt(-4)", "sqrt(-4) is not a real number"),
-                        ("sqrt(8/3)", "sqrt(8/3) has no exact rational")):
+                        ("sqrt(8/3)", "sqrt(8/3) has no exact rational"),
+                        # shown to five digits, where it looks like a square
+                        # (verifier-VL4): the sentence says the constant
+                        # exactly is none
+                        ("sqrt(4 + 1e-30)", "sqrt(4.0000e+0 (to five "
+                         "digits)) has no exact rational value - the "
+                         "constant, exactly, is no rational's square")):
         with pytest.raises(lang.Refusal) as info:
             compile_(_sys1(f"next x = x * {expr}", state="x"), "r.cftl")
         assert (info.value.name, info.value.line) == ("irrational-constant",

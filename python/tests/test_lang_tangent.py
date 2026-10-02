@@ -1061,24 +1061,68 @@ def _structural(g):
                      zip(g.tangent_step.nodes, tn)]
 
 
+def _reading_state(sec):
+    """For each node of a primal section, whether its tangent can be other
+    than zero - whether it reads the state through an operand whose
+    tangent its rule reads (none of a comparison's, a select's arms and
+    not its condition, copysign's first) - by the test's own walk."""
+    reads = []
+    for op, args, _l in sec.nodes:
+        rel = () if op in ("cmplt", "cmple", "cmpeq") else \
+            args[:2] if op == "select" else \
+            args[:1] if op == "copysign" else args
+        reads.append(any(a[0] == "s" or (a[0] == "n" and reads[int(a[1:])])
+                         for a in rel))
+    return reads
+
+
 def test_l4_each_vector_pays_one_division_a_quotient_or_root():
     """After sharing what the tangent writes again, a tangent vector's step
     holds one division of its own for each division and each root of the
-    step, and no root of its own: rk4 with one division and one root in its
-    right-hand sides performs eight a step, and each vector adds eight."""
-    for text, per_step in (
+    step that reads the state, none for one that reads no state, and no
+    root of its own: rk4 with one division and one root in its right-hand
+    sides performs eight a step, and each vector adds eight; with params p
+    and q, x * (p / q) and y / p + sqrt(q) perform three a step, and each
+    vector adds one (verifier-VL4's (b)2)."""
+    for text, per_step, per_vector in (
             ("system c\nformat fp64\nstate x, y\ntangent v\n"
              "d/dt x = x / (y * y + 1)\nd/dt y = -sqrt(abs(x) + 1)\n"
-             "step rk4, h = 1/8\n", 8),
+             "step rk4, h = 1/8\n", 8, 8),
             ("system c\nformat fp64\nstate x, y\ntangent v, w\n"
-             "next x = x / y\nnext y = sqrt(x * x + y)\nstep map\n", 2)):
+             "next x = x / y\nnext y = sqrt(x * x + y)\nstep map\n", 2, 2),
+            ("system c\nformat fp64\nstate x, y\ntangent v\n"
+             "param p = 2, q = 3\nnext x = x * (p / q)\n"
+             "next y = y / p + sqrt(q)\nstep map\n", 3, 1)):
         g = compile_(text)
         primal, tangent = _structural(g)
-        steps = sum(1 for op, _a, _l in g.step.nodes if op in ("div", "sqrt"))
-        assert steps == per_step
+        routines = [k for k, (op, _a, _l) in enumerate(g.step.nodes)
+                    if op in ("div", "sqrt")]
+        assert len(routines) == per_step, text
+        reads = _reading_state(g.step)
+        assert sum(reads[k] for k in routines) == per_vector, text
         own_div = {i for op, i in tangent if op == "div" and i not in primal}
         own_sqrt = {i for op, i in tangent if op == "sqrt" and i not in primal}
-        assert (len(own_div), len(own_sqrt)) == (per_step, 0), text
+        assert (len(own_div), len(own_sqrt)) == (per_vector, 0), text
+
+
+def test_l4_unnamed_quotients_and_roots_grow_with_the_square():
+    """The known limit's figures for the quotient and the root (L4,
+    verifier-VL4): their rules read the operation's own result, so an
+    unnamed chain writes it again at every level, as a product's does."""
+    names = [f"x{i}" for i in range(100)]
+    head = f"system c\nformat fp64\nstate {', '.join(names)}\ntangent v\n"
+    tail = "".join(f"next {x} = {x}\n" for x in names[1:]) + "step map\n"
+    chain = head + "next x0 = " + " / ".join(names) + "\n" + tail
+    assert len(compile_(chain).tangent_step.nodes) == 5247
+    lets = "".join(f"let q{k} = {'x0' if k == 1 else f'q{k - 1}'} / x{k}\n"
+                   for k in range(1, 100))
+    named = head + lets + "next x0 = q99\n" + tail
+    assert len(compile_(named).tangent_step.nodes) == 297
+    e = "x"
+    for _ in range(99):
+        e = f"sqrt({e})"
+    roots = f"system r\nformat fp64\nstate x\ntangent v\nnext x = {e}\nstep map\n"
+    assert len(compile_(roots).tangent_step.nodes) == 5148
 
 
 L4_SYSTEMS = {
