@@ -22,10 +22,12 @@
 #                                      # the remote backend - after a host build
 #   bash verify/run.sh --budget gate    # ~2 h quiet, ~4 h loaded: quick + golden,
 #                                      # vectors, libcft, transcend, mpfr, cpp, lint, formal,
-#                                      # the C auditor's gate (audit) and two cases of the
-#                                      # estimates study (estimates)
+#                                      # the C auditor's gate (audit), two cases of the
+#                                      # estimates study (estimates), the variational
+#                                      # equations (tangent) and the acceptance set
 #   bash verify/run.sh --budget full    # everything: the census (adds sim, simmc,
-#                                      # node, wasm, images, estimates-full)
+#                                      # node, wasm, images, estimates-full,
+#                                      # acceptance-far)
 #   Measured durations for every stage, quiet and loaded, are in
 #   docs/VERIFICATION.md - the simulation suites and the formal gate
 #   run for more than an hour each on a busy box.
@@ -146,15 +148,16 @@ BUDGET=""
 # transcendentals, MPFR, the C++ header and the two RTL gates that
 # need only a container - and, since 2026-09-29, the C auditor held to
 # the golden one (audit), and since 2026-09-30 two cases of the
-# certificate estimates' study (estimates), and since 2026-10-01 the
-# language's variational equations (tangent). `full` is the census. Measured on the
+# certificate estimates' study (estimates), since 2026-10-01 the
+# language's variational equations (tangent), and since 2026-10-02 the
+# acceptance set (acceptance). `full` is the census. Measured on the
 # Windows desktop (docs/VERIFICATION.md has the table, quiet against
 # loaded): quick ~20 min, gate ~2 h with the box quiet and ~4 h loaded
 # now that the formal gate holds thirty proofs and a negative control
 # (thirty-one tasks), full longer by the simulation suite and the two
 # browser replays; on the WSL distro the replay stages take seconds.
 BUDGET_QUICK=docs,generated,buildargs,sweepjudge,innerskips,ensurevectors,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,programs,lang,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
-BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit,estimates,tangent
+BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit,estimates,tangent,acceptance
 RESUME=""
 FRESH=0
 REQUIRE_ALL=0
@@ -1082,6 +1085,49 @@ do_tangent() {
 }
 need host-cc python
 stage tangent "the language's variational equations: every image with tangent vectors on seq.py against lang.run bit for bit with FLAGS, states and tangents (references, written shapes and a generated corpus at every format), the primal unchanged, the tangent equal to exact dual numbers; Lorenz-63's largest Lyapunov exponent through cft-segrun, and at fp256 from a certified chain both auditors accept; the compiled references certified, deterministic, committed; refusals by name, its plants red" -- do_tangent
+
+# The acceptance set (programs/acceptance.py, whose docstring is the
+# definition; the step-6 round's parcel A1, 2026-10-02): everything that
+# runs on the card today, each entry one run fixed in the repository - the
+# six compiled references and the four variational ones as committed, and
+# the ten hard workloads that fit u50-rev7-quad (programs/workloads/),
+# compiled here and held byte for byte to committed digests - on lanes
+# filling one block a tile of the quad, through cft-segrun on libcft's
+# software backend at the card's scratch depth, 2,048 slots a lane. Every
+# boundary's state hash and every segment's flags and STATUS must be
+# programs/acceptance.json's; cft-audit must accept each certificate in
+# full; the golden audit re-runs a segment of the six entries where seq.py
+# takes ten seconds or less for one, cft-audit handed the same choice
+# printing its verdict line for line; a golden spot check re-runs every
+# entry's last segment on seq.py for a few lanes; and its controls plant a
+# digest, a flag word, a parameter and a flipped bit, each caught. Then the
+# hard workloads' own oracle, the pack's one-step vectors from the other
+# model's exact evaluator: lang.run on all 21 programs, and the ten card
+# images on seq.py. With --device <xclbin> the same driver is the
+# admission test for a card. In the gate budget (the lead's choice,
+# 2026-10-02): 375 s on the desktop, the driver run directly, niced, with
+# the desktop in use - the set 314 s, about 240 s of it compiling the ten
+# workloads, and the oracle 61 s; its run through the runner is the
+# lead's.
+do_acceptance() {
+  HOSTMAKE "cft-segrun$EXE" "cft-audit$EXE" || return 1
+  PY "$ROOT/programs/acceptance.py" --legs set,oracle \
+     --segrun "$ROOT/host/cft-segrun$EXE" --audit "$ROOT/host/cft-audit$EXE"
+}
+need host-cc python
+stage acceptance "the acceptance set, a device's admission test, on libcft's software backend: the compiled references, the variational ones and the ten hard workloads that fit the card, each one fixed run held to committed boundary hashes, flags and STATUS, cft-audit in full, the golden audit where it fits and a golden spot check on every entry, its controls caught; the hard workloads' own one-step vectors against lang.run on all 21 and the ten card images on seq.py" -- do_acceptance
+
+# `acceptance-far`, in no budget, so only the full census runs it (the
+# lead's choice, 2026-10-02): the hard workloads' own oracle on the four
+# hard and wide programs past the card, Gray-Scott and Lorenz-tangent -
+# their images compiled for sw:32768 and run on seq.py against the pack's
+# one-step vectors, which the pack's own runner already verified on
+# amd-arc-box. Python alone: about ten minutes on the desktop, nearly all
+# compiling - two of the four, Gray-Scott and Lorenz-tangent wide, took
+# 289 s together, niced (2026-10-02).
+need python
+stage acceptance-far "the hard workloads' own oracle on the four images past the card, Gray-Scott and Lorenz-tangent hard and wide: compiled for sw:32768, each on seq.py equal to the pack's one-step vector, states, FLAGS and each lane's FLAGS" -- \
+  PY "$ROOT/programs/acceptance.py" --legs far
 
 # The C auditor held to the golden one (host/Makefile's audittest,
 # host/tests/audit_check.py; docs/CERTIFICATES.md, "The audit tool"):

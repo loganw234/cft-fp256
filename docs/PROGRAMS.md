@@ -276,6 +276,10 @@ two agree is what the byte-for-byte check proves.
                          and some example files, as a test of the
                          language's portability (its README says what
                          it was given and what it showed)
+      acceptance.py      the acceptance set: everything that runs on
+      acceptance.json    the card today, each a run fixed here with its
+                         expected digests - a device's admission test,
+                         and the `acceptance` runner stage
 
 A program earns a row by having a check: something that runs it and
 compares against the model or a tool's own chain. Thirty-seven so far -

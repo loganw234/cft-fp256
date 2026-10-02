@@ -81,6 +81,13 @@ is outside the tree.
   10 times at fp256 (FPUT 10 and 3.2 times). The card is 2 to 6% slower
   than the compiler's cost model on every program.
 
+Those ten are in this tree's acceptance set, `programs/acceptance.py`, a
+device's admission test: each compiled from its source here, its image
+held to a committed digest, and run on its own three lanes and exact
+copies of them filling one block a tile. That set's `acceptance` stage
+holds the interpreter to all 21 vectors and the ten card images to
+theirs, and `acceptance-far` the other four hard and wide images.
+
 ### The one change
 
 `tools/run_workloads.py` asked for python/cftc to be a file,

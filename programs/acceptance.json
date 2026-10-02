@@ -1,0 +1,1012 @@
+{
+ "acceptance": 1,
+ "entries": [
+  {
+   "bank": "programs/systems/compiled/lorenz63-rk4-fp64.bank",
+   "bank_sha256": "c91cc547b6d5f616fff66d2abd2cbc83d1cfb4bce464d9a6ae79473bd947bf09",
+   "boundaries": [
+    "ce5f5adea9d9da970ca62f6fe4e191547951335cd6c05313b32860490d39acdb",
+    "27acacd2e7129090ffda98c6ddbf8e33821f5efe08348fa6c52759909fe24359",
+    "d958bf28008c5e990cd8194f005102919d067e2b9923a90de4167dc438653464",
+    "104350acde0f4559cbd1bd968c3e8dbc6a2a8a96da98d0d945392afd00a1130e",
+    "0145d1e628b416a2e9470697380aa92e45c71d9cd6145dba7a89f148e10abc16"
+   ],
+   "flags": [
+    29,
+    24,
+    24,
+    24
+   ],
+   "format": "fp64",
+   "golden": [
+    3
+   ],
+   "image": "programs/systems/compiled/lorenz63-rk4-fp64.cftp",
+   "image_sha256": "ff422cc92960485de0faf79f4d7a4225fdb6cf34f3baee6f5a76d33772294f1e",
+   "init_sha256": "e03590a2e60c0c04f3b69bc18264e02f84d47346b8bac8f43f272e04146d264d",
+   "kind": "reference",
+   "lanes": 256,
+   "name": "lorenz63-rk4-fp64",
+   "segments": 4,
+   "slots": 3,
+   "source": "programs/systems/lorenz63-rk4-fp64.cftl",
+   "special": [
+    127,
+    191,
+    255
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    127,
+    128,
+    191,
+    192,
+    255
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 100,
+   "target": null
+  },
+  {
+   "bank": "programs/systems/compiled/lorenz63-rk4-fp256.bank",
+   "bank_sha256": "479ab866c54897712d18553e791d53da65f250aeed7336a82ee690101e76a7d0",
+   "boundaries": [
+    "8a6d3a373a69a0be6ff5e26a58846eac3ef604a2a361659e7315c2a9be3199b2",
+    "c90f111f1a7ddd052da14d0d8591a9bb7ada854070b3e4c66ca6e920e4d7227c",
+    "3b81b7c3b174386067ce1dbc8ee4669fcb88894d4d4e06506a2c2d56e6ed2a63",
+    "57fef5bace176873d173b1c28b8e02b9ff753a853ae22f022730d8792fec5463",
+    "d223f6dfe20863b5a7854d47a4e726f7a0cd63b460948b63d287700f9cc14430"
+   ],
+   "flags": [
+    29,
+    24,
+    24,
+    24
+   ],
+   "format": "fp256",
+   "golden": [
+    3
+   ],
+   "image": "programs/systems/compiled/lorenz63-rk4-fp256.cftp",
+   "image_sha256": "5fc98d1b87a01fc2dca866d527b038269b8ac4847f2ef99acbb22cc20af5dde3",
+   "init_sha256": "40756098dfe9166c8e00e0335b181dab434990cf1dc553ee3f94a67101456c7b",
+   "kind": "reference",
+   "lanes": 64,
+   "name": "lorenz63-rk4-fp256",
+   "segments": 4,
+   "slots": 3,
+   "source": "programs/systems/lorenz63-rk4-fp256.cftl",
+   "special": [
+    31,
+    47,
+    63
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    16,
+    31,
+    32,
+    47,
+    48,
+    63
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 100,
+   "target": null
+  },
+  {
+   "bank": "programs/systems/compiled/lorenz96-rk4-fp64.bank",
+   "bank_sha256": "68c249869952646c5031c3022e398bf9685df880da1559e9f4021cbb207d2b09",
+   "boundaries": [
+    "0b4ba12d9106266741ccb9f1d03a64f2d08654b619908aefc6a9825206875e6e",
+    "f89126e9a9046c90f94a1b7990cab832d6e8ea1775044d7a2b737dc57b14237a",
+    "7ece1109e32765bfa2bf01673b038fb8b12b9a7163f0de2f060fbfa43c573698",
+    "39d2f95c01290944fc221ec19092570bad91983e9aba0ad2728af591c944e101",
+    "94dfb7e148440d97a7e0b88fad8813ae0b6ea311a5d517039b2ab2528864a034"
+   ],
+   "flags": [
+    21,
+    16,
+    16,
+    16
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": "programs/systems/compiled/lorenz96-rk4-fp64.cftp",
+   "image_sha256": "227407f8c031c235be725e45a21d36c00b202a32a637baed313e24d80213389b",
+   "init_sha256": "f20d49f83b104d083dead12daddf5cc98971b21d5dd4500c259b801b61df815c",
+   "kind": "reference",
+   "lanes": 256,
+   "name": "lorenz96-rk4-fp64",
+   "segments": 4,
+   "slots": 40,
+   "source": "programs/systems/lorenz96-rk4-fp64.cftl",
+   "special": [
+    127,
+    191,
+    255
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    127,
+    128,
+    191,
+    192,
+    255
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 20,
+   "target": null
+  },
+  {
+   "bank": "programs/systems/compiled/lorenz96-rk4-fp256.bank",
+   "bank_sha256": "8f2c14637f4e0cc5d85bd41d8b113a7e329f9e7a84da86f99e8645b4e8e176ae",
+   "boundaries": [
+    "c1c4e1fa0a1604fd069bf66dc21db93750955790b6c6b357a0f0cb1ce5508cee",
+    "4d5fbd8a4fda227378eed5d784f657d0795a7389279899cd0a9534c10e532fce",
+    "3843f3976e0408b243798a4374babacfead1cba36474f613eec555c664445a86",
+    "154aab4fc1d4528eaaec008ae82d60f6fc2727882cef3bdd679571eed81f3519",
+    "2f655e088852b75336d638d19ed5676dcb7d364996329c9e35447edc0b9acdd5"
+   ],
+   "flags": [
+    21,
+    16,
+    16,
+    16
+   ],
+   "format": "fp256",
+   "golden": [
+    3
+   ],
+   "image": "programs/systems/compiled/lorenz96-rk4-fp256.cftp",
+   "image_sha256": "cc08f10eb138dbbae9b210151d652cc4eaaa5b4ff0f07a2417e05e044d845830",
+   "init_sha256": "07b2e02a57c31e8bfd458adfc8219da40986091fb896a10f90bfc041c5951aea",
+   "kind": "reference",
+   "lanes": 64,
+   "name": "lorenz96-rk4-fp256",
+   "segments": 4,
+   "slots": 40,
+   "source": "programs/systems/lorenz96-rk4-fp256.cftl",
+   "special": [
+    31,
+    47,
+    63
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    16,
+    31,
+    32,
+    47,
+    48,
+    63
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 20,
+   "target": null
+  },
+  {
+   "bank": "programs/systems/compiled/henonheiles-lf-fp64.bank",
+   "bank_sha256": "ba37e0dd52e236a51a1fde9aecbf52171bcc339b8d374d05e32aba6527c12b4e",
+   "boundaries": [
+    "412b88896b9d8afeb7dae5e983e897bd7459b6ce800a7939737e3af027f8679f",
+    "fd68c25b147d0bba95639769359978a939a24b15ed37af9e79f055709779d0ae",
+    "73f59671ede07e94dc57aeac38cbf1a0ec9794635a44aaee51f2c9116a550077",
+    "e57e6f48d1359f87114e190316087e76022cade53ba8672aa85fefb971a0cbe4",
+    "93705839554e07f2cdbee580a080b2a6fb22e738dfbf3700d2f2256f4f0418f6"
+   ],
+   "flags": [
+    29,
+    24,
+    24,
+    24
+   ],
+   "format": "fp64",
+   "golden": [
+    3
+   ],
+   "image": "programs/systems/compiled/henonheiles-lf-fp64.cftp",
+   "image_sha256": "8c9fc65d7a99af9a63b09404ae47aeacde022ad69753595b86dc273994cf8640",
+   "init_sha256": "43e2313adb2b3882f40d3bd93bc90d981e7832be88a1ea8f0f9390bb61cac935",
+   "kind": "reference",
+   "lanes": 256,
+   "name": "henonheiles-lf-fp64",
+   "segments": 4,
+   "slots": 4,
+   "source": "programs/systems/henonheiles-lf-fp64.cftl",
+   "special": [
+    127,
+    191,
+    255
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    127,
+    128,
+    191,
+    192,
+    255
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 100,
+   "target": null
+  },
+  {
+   "bank": "programs/systems/compiled/henonheiles-lf-fp256.bank",
+   "bank_sha256": "1969d0fa5bddab0fc3846df208f5ad13a53d47f7bbddd15cfaef96271c348b5b",
+   "boundaries": [
+    "a7e5de28549d96609975dd64c6ab1d46c0692855fc0adeb015b0e047b099b1f9",
+    "09fd950dc120c156816d947ab1fcfd5502ff724e201e6fcec28abc873a88ecb1",
+    "21d57485671d16e4fbbcb2898c2498f22db28b049dffabc27b155e0b2ae70b22",
+    "520a4924c9410bd993b24d2354c19502a5cfbde91556b2336ec0a42821a0c9d4",
+    "fc2565d5dc338c2e0c5efc4940f2a8f40e0253c6ad028cfc79c810490cd2e273"
+   ],
+   "flags": [
+    29,
+    24,
+    24,
+    24
+   ],
+   "format": "fp256",
+   "golden": [
+    3
+   ],
+   "image": "programs/systems/compiled/henonheiles-lf-fp256.cftp",
+   "image_sha256": "4922514ec32eab9dfded547e0d35932605179a966da74ab35ae848e0fe1fe9ae",
+   "init_sha256": "1b6b4e13d0442fee0523249a6646eb7a1c646d74586eedae00f8a227845ed20d",
+   "kind": "reference",
+   "lanes": 64,
+   "name": "henonheiles-lf-fp256",
+   "segments": 4,
+   "slots": 4,
+   "source": "programs/systems/henonheiles-lf-fp256.cftl",
+   "special": [
+    31,
+    47,
+    63
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    16,
+    31,
+    32,
+    47,
+    48,
+    63
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 100,
+   "target": null
+  },
+  {
+   "bank": "programs/systems/compiled-tangent/lorenz63-rk4-tangent-fp64.bank",
+   "bank_sha256": "c91cc547b6d5f616fff66d2abd2cbc83d1cfb4bce464d9a6ae79473bd947bf09",
+   "boundaries": [
+    "adc24a89931a089fd9feb902fcb605a9a955266c36b3e37113f232a955bda78c",
+    "273618cc1d73894dbcbde47f0ff5fea02042ddf59ef13389e80d006b63b69bb8",
+    "68aba57aba338b15f13d2162c399680b1310996608bd36fa6bfbdd1d93783ee3",
+    "cb9e02882a5eff104e8bfcf41f7c3e32e8c380507bfa685a8fcb945d42d3337a",
+    "bcfc9b012e24fd06119b5cb4e12e78a3b9c4a3c2c34a50c90ce475e42c8c394b"
+   ],
+   "flags": [
+    29,
+    24,
+    24,
+    24
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": "programs/systems/compiled-tangent/lorenz63-rk4-tangent-fp64.cftp",
+   "image_sha256": "016268f7488bb376a876801a6eadd2e12f887d267e8e2e44a943d646cd595d81",
+   "init_sha256": "01bf73d72394fbd3acf401e81e6974287579941562a09a4af2175450c536a499",
+   "kind": "variational",
+   "lanes": 256,
+   "name": "lorenz63-rk4-tangent-fp64",
+   "segments": 4,
+   "slots": 6,
+   "source": "programs/systems/lorenz63-rk4-tangent-fp64.cftl",
+   "special": [
+    126,
+    127,
+    190,
+    191,
+    254,
+    255
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    126,
+    127,
+    128,
+    190,
+    191,
+    192,
+    254,
+    255
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 100,
+   "target": null
+  },
+  {
+   "bank": "programs/systems/compiled-tangent/lorenz63-rk4-tangent-fp256.bank",
+   "bank_sha256": "479ab866c54897712d18553e791d53da65f250aeed7336a82ee690101e76a7d0",
+   "boundaries": [
+    "03faba1e931a796d96b27e8b507b6e381281e129d3effe4d0b20b7cf96f7adca",
+    "bf6fe026dcf832299fe4c48ef81061ae68e74058fb55c04acf40dffeeda38f20",
+    "3c4b98182f62dc02af72067f55d900ad11cac81211711708e19d2bc1c6f51a19",
+    "2db640e56ef4bbf1b3357478f7f42e15b7a657404db4ca5776a717f26543ca8b",
+    "cf555ee0dc774d68be2d61e621fc9f2e38541f3c7ea7922648d8ad4d7500fac7"
+   ],
+   "flags": [
+    29,
+    24,
+    24,
+    24
+   ],
+   "format": "fp256",
+   "golden": [
+    3
+   ],
+   "image": "programs/systems/compiled-tangent/lorenz63-rk4-tangent-fp256.cftp",
+   "image_sha256": "bb6bb277a7951fa9b3335a239412b85992faa146eae9920144498fe67c56ec91",
+   "init_sha256": "89c45fcb97544a2d92adf34c7ab36c6d621468f5ecc83880a8770e58363d95cd",
+   "kind": "variational",
+   "lanes": 64,
+   "name": "lorenz63-rk4-tangent-fp256",
+   "segments": 4,
+   "slots": 6,
+   "source": "programs/systems/lorenz63-rk4-tangent-fp256.cftl",
+   "special": [
+    30,
+    31,
+    46,
+    47,
+    62,
+    63
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    16,
+    30,
+    31,
+    32,
+    46,
+    47,
+    48,
+    62,
+    63
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 100,
+   "target": null
+  },
+  {
+   "bank": "programs/systems/compiled-tangent/lorenz96-rk4-tangent-fp64.bank",
+   "bank_sha256": "68c249869952646c5031c3022e398bf9685df880da1559e9f4021cbb207d2b09",
+   "boundaries": [
+    "a110ee0283a29b4ee6749eaf1926cb482d49b7595b7993ca4f899a8a76a942a1",
+    "307e87b50121924baa3dc12c07f553d54bef5de9735e4857265d48e58b289b77",
+    "dfd2d57e5289a541e6e2d4366540d016fb6104f8e7e3ee075ac5d07c1dae5458",
+    "3cffc25565157dc8cd5e71b4fc78c37b594264a6a17d865f3ae72d32b752b5fd",
+    "bc0d84859a6b65c67b0e8cf6b724ff40367ffcc791595eae9068c0e6c92cfbd3"
+   ],
+   "flags": [
+    21,
+    16,
+    16,
+    16
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": "programs/systems/compiled-tangent/lorenz96-rk4-tangent-fp64.cftp",
+   "image_sha256": "413baec4e67490c448810736cde6aa2ce2f790a0ba38822610d96e964e7b6a62",
+   "init_sha256": "fb4da3e12dceb1f1357df71763542a2e89993dd51bc378dd33d5dcec0aa71f4b",
+   "kind": "variational",
+   "lanes": 256,
+   "name": "lorenz96-rk4-tangent-fp64",
+   "segments": 4,
+   "slots": 80,
+   "source": "programs/systems/lorenz96-rk4-tangent-fp64.cftl",
+   "special": [
+    126,
+    127,
+    190,
+    191,
+    254,
+    255
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    126,
+    127,
+    128,
+    190,
+    191,
+    192,
+    254,
+    255
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 20,
+   "target": null
+  },
+  {
+   "bank": "programs/systems/compiled-tangent/lorenz96-rk4-tangent-fp256.bank",
+   "bank_sha256": "8f2c14637f4e0cc5d85bd41d8b113a7e329f9e7a84da86f99e8645b4e8e176ae",
+   "boundaries": [
+    "205a6f1489d18c7b17762224174fed73c5ee0a0e64142d64ad71097a3451e6a9",
+    "36d9d74ebb9c87a4d9b9fdfaa09b7932dee09926bd1a6186be540d529c1cdd1a",
+    "9365ccf5d2a8e4297a11516abfb937e00eac0525924aaffc493374c20ecb5e3e",
+    "73316c66f56c72844afb40a27edd45c76778c682d279a4a9ca634b7f241b7ea2",
+    "a7e4b01a16ce14e18819feaf0d603656b4c30d81a793068e4579edf96ccaf6e9"
+   ],
+   "flags": [
+    21,
+    16,
+    16,
+    16
+   ],
+   "format": "fp256",
+   "golden": [],
+   "image": "programs/systems/compiled-tangent/lorenz96-rk4-tangent-fp256.cftp",
+   "image_sha256": "95c294921016ee4603973ae753f3e885795e8349594b731fccf38fb8a9539b34",
+   "init_sha256": "92f3a9d024bc19886549d40736c684db8cf70400f072142596762f0a444dda44",
+   "kind": "variational",
+   "lanes": 64,
+   "name": "lorenz96-rk4-tangent-fp256",
+   "segments": 4,
+   "slots": 80,
+   "source": "programs/systems/lorenz96-rk4-tangent-fp256.cftl",
+   "special": [
+    30,
+    31,
+    46,
+    47,
+    62,
+    63
+   ],
+   "spot": [
+    0,
+    1,
+    2,
+    16,
+    30,
+    31,
+    32,
+    46,
+    47,
+    48,
+    62,
+    63
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 20,
+   "target": null
+  },
+  {
+   "bank": null,
+   "bank_sha256": "e72d84bfd5683593f57b31abbffc5aced7324f93ca29ddb22fe7ff1ca7cff9cc",
+   "boundaries": [
+    "de3abbdcf489c5b55b180bcde029ca96bf3450953a905b3f07d00daa4292bb9a",
+    "453da821b3eab86fc6a77b691b7c9d9cec350a73be00a525801d8995772e4c94",
+    "cab7fc8b7b3a9118083a9242cc4bd8f2754cf191bae18d08123a5feff949e2ce",
+    "481975eed984d6f0a625ce050aacd5dfb4d7969a765d6865af7cbc93deb387da",
+    "2c6f154357de385041b0a15082fec053575d2c4a89049b7f01b1f7e560654452"
+   ],
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": null,
+   "image_sha256": "58bc0c8b48eec398049e37eb91cd14b5ab9984e6edd658e916fc5bab3e5bb736",
+   "init_sha256": "34c741a33d0f03fc2050f5e475ca6bb2cdf8d5f8ad2ea02663a8404d1095d1f2",
+   "kind": "workload",
+   "lanes": 256,
+   "name": "phi4_hard_fp64",
+   "segments": 4,
+   "slots": 512,
+   "source": "programs/workloads/cft-hard-workloads/programs/phi4_hard_fp64.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    128,
+    192
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 8,
+   "target": "u50-rev7-quad"
+  },
+  {
+   "bank": null,
+   "bank_sha256": "cea088c011e6e1b173659129f251141c933bc7ac6649116b2bc2620d1f37b87a",
+   "boundaries": [
+    "ea34c42b6b878f8ef0fa0ff52d0f5e827934b0239fbbc5edf8c041ce4e7017da",
+    "fb0cbf50b4921df23f654d6b091df530bac773b18ca4e3e129fceb4276617678",
+    "7afda6ec1b0a75477412f94577eb48d24649e165eec4c520520fd80e5fcd9409",
+    "a7ab6ce9d4661a0e613c179daa35bedf7d419d93924d2654f803fba378d52fa2",
+    "3faac764181771d9fad5c2aae3e897d7b1b5254eb5c10bf7937642a71f9bb098"
+   ],
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp256",
+   "golden": [],
+   "image": null,
+   "image_sha256": "f84dd519391a32fe3f90733ed55746117ea3851f70aa98e2bfe1e6e2b0b37e50",
+   "init_sha256": "41da8a1ac26a43ff09b31b1625e897a5125816063681ce1c1154fc82d715c33d",
+   "kind": "workload",
+   "lanes": 64,
+   "name": "phi4_wide_fp256",
+   "segments": 4,
+   "slots": 512,
+   "source": "programs/workloads/cft-hard-workloads/programs/phi4_wide_fp256.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    16,
+    32,
+    48
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 8,
+   "target": "u50-rev7-quad"
+  },
+  {
+   "bank": null,
+   "bank_sha256": "a368e612116582ad5f2a9abd5ce5e4d8b17cd18519656440a6ea79823b88c666",
+   "boundaries": [
+    "c87d58892a90474718a6befb1dd365d7e6aa9e05b2313e92460a4c3ce8fbb7c8",
+    "86024044c27a9a37f8f113c7ac34745ed5bcf8ae55644d1708537399267a60c2",
+    "0e56717546f0689fac483d6eed8634e18cbcec7c31457a12ae5555bc6b55f34e",
+    "12009dd37d630e1ce189709c70c2e35c46a4403d41e384b77d435fbbe8d3ee25",
+    "39e2da4a93cfcec077d5b1878837e7875e88ed2cfb58e2e55bea90ab82ed9c9c"
+   ],
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": null,
+   "image_sha256": "9d61c13eeeb530a43555b1c4d81ab21cad6a177d4c150de9990a8762ea989f2f",
+   "init_sha256": "53c1cff816fa249c64a910902ad0e7227c190f6cfe82d7c3cf611ab7a45bc140",
+   "kind": "workload",
+   "lanes": 256,
+   "name": "fput_hard_fp64",
+   "segments": 4,
+   "slots": 1024,
+   "source": "programs/workloads/cft-hard-workloads/programs/fput_hard_fp64.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    128,
+    192
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 8,
+   "target": "u50-rev7-quad"
+  },
+  {
+   "bank": null,
+   "bank_sha256": "189ec2f12633ede1c90c06fb8a448b0ca7fbf761b190e9ae03608fe840c8f385",
+   "boundaries": [
+    "d889a7a6138b38c167f18a961ce5397b20119ef86e1ad3d0f31459f766ad4c19",
+    "85c61b8b547e4966dbf918a8c0cadbf78612ffb549519c474177534072d0db55",
+    "b6916ecc8c601b2d9a430a58047ccb73627f43a980ac9b59028de67ab2a8e400",
+    "b1b898747a03b13f09467da7030908ce3afb78d9b8efabe1be3f2851ab92a778",
+    "d63d37d23c816bb788fd27857efb08fc5e7ad9accb2e6f8ba9dc4efa4f6289ac"
+   ],
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp256",
+   "golden": [],
+   "image": null,
+   "image_sha256": "0fce7301ffc583282b2c06882ed9cf7a3c059754ab3d664814bfe4bdd3dd5735",
+   "init_sha256": "0e2e6924805e893c13f4f62929f6315df9dd200efbebd924e323cb7ea180f680",
+   "kind": "workload",
+   "lanes": 64,
+   "name": "fput_wide_fp256",
+   "segments": 4,
+   "slots": 1024,
+   "source": "programs/workloads/cft-hard-workloads/programs/fput_wide_fp256.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    16,
+    32,
+    48
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 8,
+   "target": "u50-rev7-quad"
+  },
+  {
+   "bank": null,
+   "bank_sha256": "d1e67649f38d078cbc500205f00e97537586e5d6295fb57a9b5f8e3e5f0a5839",
+   "boundaries": [
+    "2b2d232335a3f11bbf4901c23a738a2ecde1278e1da2f2f57178dcfff0697de8",
+    "f6995e2bd3a32ac311de5cd4ca8c3eb2d2b8e75451209ec1cfceac8e6fd5b931",
+    "f03eeb02b0123a7acbc6331988c2c4ee94384116502444b50f2669a6eb11f535",
+    "0eb1b4008fc61fab4edc76548415d93acc49b9dab24dacdf91182d5b0d5c970a",
+    "5d8103fa8bd21ef667435ad7f3dde18d33d0052b28c0e11b19cc35f30096c38a"
+   ],
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": null,
+   "image_sha256": "d343b89b93c16dd5e9263da748b41e6741d999899a18af26bea3bf5f58bceb63",
+   "init_sha256": "a7c2f561ece8664a700ca17b50fa73e3d8edceb624749908fd4d4ce0a20dc634",
+   "kind": "workload",
+   "lanes": 256,
+   "name": "reservoir_hard_fp64",
+   "segments": 4,
+   "slots": 107,
+   "source": "programs/workloads/cft-hard-workloads/programs/reservoir_hard_fp64.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    128,
+    192
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 2,
+   "target": "u50-rev7-quad"
+  },
+  {
+   "bank": null,
+   "bank_sha256": "5ae90595ad442ef74c20b77611e9be7dc2eeef940007910703ce9e14bd2ec410",
+   "boundaries": [
+    "3775858a88ed0f49f3ef7954fbb38c5abaf1259d328df998e8eae8735528c454",
+    "9c836a07914dcf1dbd30b652dc31dbbf3cc5571c2c7b9ee45f1448f02dfa14fc",
+    "a9afeace5d8035b8ca4b6ebd8c86289d791660edc2636230e95e8759ae871f42",
+    "3974f0bd9968ada0814820aab40e3d015a7fb8721d9567ac93ad76f694789a4e",
+    "d8e0e0b98e450e812de29e01a63ada60e607d4786cd32a00fc8c4d4dee358c49"
+   ],
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp256",
+   "golden": [],
+   "image": null,
+   "image_sha256": "d9b9b45f6c9400b2a7950be9ba824a7182c452bfc409059c86bce4fa68591e15",
+   "init_sha256": "dbaf2ea2e26a525c48a9606114eb73024496f3b160d7e510df6676bfb7b4aa94",
+   "kind": "workload",
+   "lanes": 64,
+   "name": "reservoir_wide_fp256",
+   "segments": 4,
+   "slots": 107,
+   "source": "programs/workloads/cft-hard-workloads/programs/reservoir_wide_fp256.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    16,
+    32,
+    48
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 2,
+   "target": "u50-rev7-quad"
+  },
+  {
+   "bank": null,
+   "bank_sha256": "b3a48e9e57d908a7648cd1d4d1cc8bae3a89a9a9929834a8b1f9ed71696f3aa9",
+   "boundaries": [
+    "0f6f2d52a72650f3682bdb6c9574752e82896378085e211dae058832c17849bc",
+    "d23c67c2e852abb62edd45d95fe0d24622a3d83e9b800940c6f9c2329e87e0b8",
+    "637c9874999f90d893fa54d8aab44be706438443c0dfb65021e45819888f8839",
+    "752170265266d0cc050b846bdf02fbb8b3c598f148b0fd0479c5160c282d022f",
+    "3dd67012fac1ed9b68e75ed69883ad116f538cf97be2fba0ddfe7f02e0e7e01c"
+   ],
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": null,
+   "image_sha256": "4dfda08615b19b1aad9314755f2a978ee7f4a94a17b99690a5072513a8454362",
+   "init_sha256": "5b48927cb0339b9e1ae916162069dd01d1d4bc3d430f74acd395ce4431af8621",
+   "kind": "workload",
+   "lanes": 256,
+   "name": "kuramoto_sivashinsky_hard_fp64",
+   "segments": 4,
+   "slots": 256,
+   "source": "programs/workloads/cft-hard-workloads/programs/kuramoto_sivashinsky_hard_fp64.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    128,
+    192
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 2,
+   "target": "u50-rev7-quad"
+  },
+  {
+   "bank": null,
+   "bank_sha256": "08263fed99ac8432954360cac4af5149fd5966335253f1d43da5d14a4d72a7c8",
+   "boundaries": [
+    "dfdf2887bd45081d419886fa30a9ce560dc92665e0fdfe0abec0adf3a34dd65e",
+    "78ba6c48f11770a6181fc213183504a6e3f3850e20216f4b1cdc70c41f182535",
+    "db736faa767e4d23530228e72a9d0a4294681073f0340177b5d3d130a0439a51",
+    "1d72766a56becb5bd8f497891ec1b309902979cb42d7f2bcdb5e4674b63b8cce",
+    "c50c6e84c002e25884fb1bf93299be105fee98df2484d9d8c43e6af737d83911"
+   ],
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp256",
+   "golden": [],
+   "image": null,
+   "image_sha256": "15f8285675e53ddbddc3d1e75e6a7d4f80b809206fbee2c8dacae6b45a6e3679",
+   "init_sha256": "484de175fda4ed653285acc573313eb28bb470da56c241da49acda0f5f1c602a",
+   "kind": "workload",
+   "lanes": 64,
+   "name": "kuramoto_sivashinsky_wide_fp256",
+   "segments": 4,
+   "slots": 256,
+   "source": "programs/workloads/cft-hard-workloads/programs/kuramoto_sivashinsky_wide_fp256.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    16,
+    32,
+    48
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 2,
+   "target": "u50-rev7-quad"
+  },
+  {
+   "bank": null,
+   "bank_sha256": "1453b848f822cd0bf93d147f0cdf1bb36cf9776f5be0c60692a07e4dadaf5fc3",
+   "boundaries": [
+    "ecfafe19211ab080e208850456e3ef47d0dc673e3320f0a646394129d5a17f30",
+    "8348087b859e15db512c69fa4c7b70f1177523bf3888110bf9e253af0ab51025",
+    "2b9ae198f44dcb62bde5f2e068ed9cc7dcf4a34a15957ca84f2964d30353f788",
+    "4bc03fa017f32050bf9db3dcf8b5d357eba6d669754fc090c2b31fe14f51d726",
+    "832591d25d1331ff6c74e86e7edd14bf11ebcf601ed49107aedcf1b8b19640b8"
+   ],
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp64",
+   "golden": [],
+   "image": null,
+   "image_sha256": "46413187c11637e8b045978a38291b017fc19b10bdf14f8c75ad7c7f9d968941",
+   "init_sha256": "1038a3f0f5a2b8842a3454619704fbf3777d4afa2bfe00f9da4c0faac14e4a38",
+   "kind": "workload",
+   "lanes": 256,
+   "name": "riccati_hard_fp64",
+   "segments": 4,
+   "slots": 144,
+   "source": "programs/workloads/cft-hard-workloads/programs/riccati_hard_fp64.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    64,
+    128,
+    192
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 2,
+   "target": "u50-rev7-quad"
+  },
+  {
+   "bank": null,
+   "bank_sha256": "7298f04943314a8b293167ae8570d4b6357c41cd15a33746606799509864ac17",
+   "boundaries": [
+    "7cbc5098883907241c20f498710e894201863fe050fc2f18052c5a4f6c63e179",
+    "1cc7cb261ae7d6cd438899e4c04b8d63183a18c01c1bff82d22b0a3c5bdbbb02",
+    "6c4365353b31941757747d38c4fdfbf653e3eaf5519e74a29aafd825a20db8d3",
+    "39f42392b4ebe286bbc0c87676d8fd5106f96dcb3bbe1636875ee50fa14e66c8",
+    "91d61170bb0e53390f30b27910bdb5d2a11da055e95c2e3ef76be38f73b6920c"
+   ],
+   "flags": [
+    16,
+    16,
+    16,
+    16
+   ],
+   "format": "fp256",
+   "golden": [],
+   "image": null,
+   "image_sha256": "d4f0d60320ee69ccde14ed36916976b75b4dbd907e861f31d95a3b1cf9196e20",
+   "init_sha256": "e2d1d85a99eb5a20019d92aa49d5609cf76e94194063f02eecb5502d1eb149b9",
+   "kind": "workload",
+   "lanes": 64,
+   "name": "riccati_wide_fp256",
+   "segments": 4,
+   "slots": 144,
+   "source": "programs/workloads/cft-hard-workloads/programs/riccati_wide_fp256.cftl",
+   "special": [],
+   "spot": [
+    0,
+    1,
+    2,
+    16,
+    32,
+    48
+   ],
+   "status": [
+    0,
+    0,
+    0,
+    0
+   ],
+   "steps": 2,
+   "target": "u50-rev7-quad"
+  }
+ ],
+ "made": "programs/acceptance.py --write: libcft's software backend, cft-segrun --scratch-depth 2048, open certificates, each accepted by cft-audit in full and by the golden checks"
+}
