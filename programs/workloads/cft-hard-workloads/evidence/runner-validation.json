@@ -1,0 +1,48 @@
+{
+  "checks": {
+    "accepted synthetic compiler": {
+      "expected_classification": "PASS",
+      "verdict": "PASS"
+    },
+    "capacity synthetic compiler": {
+      "expected_classification": "TARGET-LIMIT",
+      "verdict": "PASS"
+    },
+    "correct": {
+      "journal_rows": 8,
+      "verdict": "PASS"
+    },
+    "internal synthetic compiler": {
+      "expected_classification": "INTERNAL-ERROR",
+      "verdict": "PASS"
+    },
+    "long tangent rescaling": {
+      "exact_power_of_two_scaling": true,
+      "growth_rate_checkpoints": 2,
+      "signed_zero_preserved": true,
+      "verdict": "PASS"
+    },
+    "wrong first bit": {
+      "detail": "independent one-step oracle: lane 0, component 0: 0x3ff0000000000001 != 0x3ff0000000000000",
+      "verdict": "DETECTED"
+    },
+    "wrong first flags": {
+      "detail": "independent one-step oracle: FLAGS differ",
+      "verdict": "DETECTED"
+    },
+    "wrong halved": {
+      "detail": "step halving: lane 0, component 0: 0x3ff0000000000001 != 0x3ff0000000000000",
+      "verdict": "DETECTED"
+    },
+    "wrong monolithic": {
+      "detail": "monolithic versus segmented: lane 0, component 0: 0x3ff0000000000001 != 0x3ff0000000000000",
+      "verdict": "DETECTED"
+    },
+    "wrong segment": {
+      "detail": "segment 2..4: lane 0, component 0: 0x3ff0000000000001 != 0x3ff0000000000000",
+      "verdict": "DETECTED"
+    }
+  },
+  "status": "PASS",
+  "synthetic_only": true
+}

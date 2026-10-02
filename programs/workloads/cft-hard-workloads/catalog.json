@@ -1,0 +1,1155 @@
+{
+  "cases": [
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "gray_scott",
+      "file": "programs/gray_scott_hard_fp64.cftl",
+      "format": "fp64",
+      "h": "1",
+      "halving_steps": 32,
+      "id": "gray_scott_hard_fp64",
+      "input_sha256": "449aa77e099c8e62041e2455bf45555602e604b95904580d6187c257aa3192f9",
+      "inputs": "inputs/gray_scott_hard_fp64.json",
+      "integrator": "rk4",
+      "kind": "valid",
+      "lane": [
+        "feed",
+        "kill"
+      ],
+      "long_steps": 4096,
+      "n_state": 512,
+      "params": {
+        "Du": "4/25",
+        "Dv": "2/25"
+      },
+      "reference": "reference/gray_scott_hard_fp64.json",
+      "reversal_steps": null,
+      "sha256": "1a22747da0f733f8faa39747b9999a41552e06a6f592b953e6c93490fd45e2f3",
+      "shape": {
+        "n": 16
+      },
+      "source_sha256": "1a22747da0f733f8faa39747b9999a41552e06a6f592b953e6c93490fd45e2f3",
+      "state": [
+        [
+          "u",
+          256
+        ],
+        [
+          "v",
+          256
+        ]
+      ],
+      "stress": false,
+      "tier": "hard",
+      "title": "2D Gray-Scott reaction-diffusion"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "lorenz_tangent",
+      "file": "programs/lorenz_tangent_hard_fp64.cftl",
+      "format": "fp64",
+      "h": "1/1000",
+      "halving_steps": 32,
+      "id": "lorenz_tangent_hard_fp64",
+      "input_sha256": "9a004246e40745e3cc9b2f1477efeda29ea032b8d4ec34c146d3bc4d8f42940a",
+      "inputs": "inputs/lorenz_tangent_hard_fp64.json",
+      "integrator": "rk4",
+      "kind": "valid",
+      "lane": [
+        "gain"
+      ],
+      "long_steps": 8192,
+      "n_state": 1080,
+      "params": {
+        "advection": "100",
+        "damping": "10",
+        "forcing": "10"
+      },
+      "reference": "reference/lorenz_tangent_hard_fp64.json",
+      "reversal_steps": null,
+      "sha256": "2a3280392862d34b9f7b30e6fce3bf55c854c281880c3c9340162c03619d253c",
+      "shape": {
+        "j": 8,
+        "k": 24,
+        "vectors": 4
+      },
+      "source_sha256": "2a3280392862d34b9f7b30e6fce3bf55c854c281880c3c9340162c03619d253c",
+      "state": [
+        [
+          "X",
+          24
+        ],
+        [
+          "Y",
+          192
+        ],
+        [
+          "dx0",
+          24
+        ],
+        [
+          "dy0",
+          192
+        ],
+        [
+          "dx1",
+          24
+        ],
+        [
+          "dy1",
+          192
+        ],
+        [
+          "dx2",
+          24
+        ],
+        [
+          "dy2",
+          192
+        ],
+        [
+          "dx3",
+          24
+        ],
+        [
+          "dy3",
+          192
+        ]
+      ],
+      "stress": false,
+      "tier": "hard",
+      "title": "Two-scale Lorenz-96 with tangent vectors"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "fput",
+      "file": "programs/fput_hard_fp64.cftl",
+      "format": "fp64",
+      "h": "1/64",
+      "halving_steps": 32,
+      "id": "fput_hard_fp64",
+      "input_sha256": "356797a22125c8b74c1842d0dafc67cda1b197d53aeec287810412402cbb8c62",
+      "inputs": "inputs/fput_hard_fp64.json",
+      "integrator": "stormer-verlet",
+      "kind": "valid",
+      "lane": [],
+      "long_steps": 8192,
+      "n_state": 1024,
+      "params": {
+        "alpha": "1/4",
+        "beta": "1"
+      },
+      "reference": "reference/fput_hard_fp64.json",
+      "reversal_steps": 128,
+      "sha256": "bb9a971ec53e1e037f1b490fd59080aad34df53431b631de4e7152a6f27f03cc",
+      "shape": {
+        "n": 512
+      },
+      "source_sha256": "bb9a971ec53e1e037f1b490fd59080aad34df53431b631de4e7152a6f27f03cc",
+      "state": [
+        [
+          "q",
+          512
+        ],
+        [
+          "p",
+          512
+        ]
+      ],
+      "stress": false,
+      "tier": "hard",
+      "title": "Nonlinear alpha-beta FPUT chain"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "phi4",
+      "file": "programs/phi4_hard_fp64.cftl",
+      "format": "fp64",
+      "h": "1/64",
+      "halving_steps": 32,
+      "id": "phi4_hard_fp64",
+      "input_sha256": "4fbe494dbeb6b3ca3dde330c79da5f884f3a5cecbdca429e71905e11b9cee260",
+      "inputs": "inputs/phi4_hard_fp64.json",
+      "integrator": "stormer-verlet",
+      "kind": "valid",
+      "lane": [],
+      "long_steps": 8192,
+      "n_state": 512,
+      "params": {
+        "kappa": "1/4"
+      },
+      "reference": "reference/phi4_hard_fp64.json",
+      "reversal_steps": 128,
+      "sha256": "0587dc5ab40aa3f867b9527aec7f4d4c68d45a4380f458df31516815508b32bc",
+      "shape": {
+        "n": 16
+      },
+      "source_sha256": "0587dc5ab40aa3f867b9527aec7f4d4c68d45a4380f458df31516815508b32bc",
+      "state": [
+        [
+          "q",
+          256
+        ],
+        [
+          "p",
+          256
+        ]
+      ],
+      "stress": false,
+      "tier": "hard",
+      "title": "2D double-well Hamiltonian lattice"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "kuramoto_sivashinsky",
+      "file": "programs/kuramoto_sivashinsky_hard_fp64.cftl",
+      "format": "fp64",
+      "h": "1/64",
+      "halving_steps": 32,
+      "id": "kuramoto_sivashinsky_hard_fp64",
+      "input_sha256": "455f882228eb6ac264d05f86462af879e61c6898e84dd083dccb195d198449ed",
+      "inputs": "inputs/kuramoto_sivashinsky_hard_fp64.json",
+      "integrator": "rk4",
+      "kind": "valid",
+      "lane": [],
+      "long_steps": 8192,
+      "n_state": 256,
+      "params": {},
+      "reference": "reference/kuramoto_sivashinsky_hard_fp64.json",
+      "reversal_steps": null,
+      "sha256": "8e2283989fde9714581a495091c174c4ef6615fd3c1c7cc5941cfa40637b758b",
+      "shape": {
+        "n": 256
+      },
+      "source_sha256": "8e2283989fde9714581a495091c174c4ef6615fd3c1c7cc5941cfa40637b758b",
+      "state": [
+        [
+          "u",
+          256
+        ]
+      ],
+      "stress": false,
+      "tier": "hard",
+      "title": "Kuramoto-Sivashinsky periodic spatial discretization"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "reservoir",
+      "file": "programs/reservoir_hard_fp64.cftl",
+      "format": "fp64",
+      "h": "1/32",
+      "halving_steps": 32,
+      "id": "reservoir_hard_fp64",
+      "input_sha256": "9290790c583eaaf8ee59792abfdf7c5ed0bda198c9626c8bac861668a32ff8e2",
+      "inputs": "inputs/reservoir_hard_fp64.json",
+      "integrator": "map",
+      "kind": "valid",
+      "lane": [
+        "drive"
+      ],
+      "long_steps": 16384,
+      "n_state": 106,
+      "params": {
+        "input_gain": "1/4",
+        "leak": "1/4"
+      },
+      "reference": "reference/reservoir_hard_fp64.json",
+      "reversal_steps": null,
+      "sha256": "0d65edd140fb1eb88704c63d1ba89943ea7c1be3b8f339cb339db8b69c459057",
+      "shape": {
+        "d": 96,
+        "hidden": 64
+      },
+      "source_sha256": "0d65edd140fb1eb88704c63d1ba89943ea7c1be3b8f339cb339db8b69c459057",
+      "state": [
+        [
+          "r",
+          96
+        ],
+        [
+          "z",
+          8
+        ],
+        [
+          "q",
+          null
+        ],
+        [
+          "p",
+          null
+        ]
+      ],
+      "stress": false,
+      "tier": "hard",
+      "title": "Dense two-layer recurrent reservoir and oscillator"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 16384,
+      "family": "riccati",
+      "file": "programs/riccati_hard_fp64.cftl",
+      "format": "fp64",
+      "h": "1/64",
+      "halving_steps": 32,
+      "id": "riccati_hard_fp64",
+      "input_sha256": "13871ec6e6fb1fa2ad91ccf1db3d74d1f40b26d42efa3bdbde826de2ed4a4312",
+      "inputs": "inputs/riccati_hard_fp64.json",
+      "integrator": "rk4",
+      "kind": "valid",
+      "lane": [],
+      "long_steps": 1024,
+      "n_state": 144,
+      "params": {
+        "decay": "1/8",
+        "gamma": "1/4",
+        "omega": "1/2"
+      },
+      "reference": "reference/riccati_hard_fp64.json",
+      "reversal_steps": null,
+      "sha256": "1020485a2d09abcbbf492bb60009d5ab4265fe6f3f18310ed9832ec3f65a7fca",
+      "shape": {
+        "n": 12
+      },
+      "source_sha256": "1020485a2d09abcbbf492bb60009d5ab4265fe6f3f18310ed9832ec3f65a7fca",
+      "state": [
+        [
+          "P",
+          144
+        ]
+      ],
+      "stress": false,
+      "tier": "hard",
+      "title": "Dense matrix Riccati differential equation"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "gray_scott",
+      "file": "programs/gray_scott_extended_fp64.cftl",
+      "format": "fp64",
+      "h": "1",
+      "halving_steps": 32,
+      "id": "gray_scott_extended_fp64",
+      "input_sha256": "9d845926227580a4fee923791629a71e5aebd2d44af880048d1efb639b77ff14",
+      "inputs": "inputs/gray_scott_extended_fp64.json",
+      "integrator": "rk4",
+      "kind": "valid",
+      "lane": [
+        "feed",
+        "kill"
+      ],
+      "long_steps": 4096,
+      "n_state": 2048,
+      "params": {
+        "Du": "4/25",
+        "Dv": "2/25"
+      },
+      "reference": "reference/gray_scott_extended_fp64.json",
+      "reversal_steps": null,
+      "sha256": "6bd7220e73e6bab4a4b52955afbe686ca05d54ee1973a604e789712666cd4a98",
+      "shape": {
+        "n": 32
+      },
+      "source_sha256": "6bd7220e73e6bab4a4b52955afbe686ca05d54ee1973a604e789712666cd4a98",
+      "state": [
+        [
+          "u",
+          1024
+        ],
+        [
+          "v",
+          1024
+        ]
+      ],
+      "stress": true,
+      "tier": "extended",
+      "title": "2D Gray-Scott reaction-diffusion"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "lorenz_tangent",
+      "file": "programs/lorenz_tangent_extended_fp64.cftl",
+      "format": "fp64",
+      "h": "1/1000",
+      "halving_steps": 32,
+      "id": "lorenz_tangent_extended_fp64",
+      "input_sha256": "f3150c6aa93ade55f651a7a5596bbcd53d30ba3ca4018f8135e7acb206cba316",
+      "inputs": "inputs/lorenz_tangent_extended_fp64.json",
+      "integrator": "rk4",
+      "kind": "valid",
+      "lane": [
+        "gain"
+      ],
+      "long_steps": 8192,
+      "n_state": 5712,
+      "params": {
+        "advection": "100",
+        "damping": "10",
+        "forcing": "10"
+      },
+      "reference": "reference/lorenz_tangent_extended_fp64.json",
+      "reversal_steps": null,
+      "sha256": "9f6e5493122e8989bfa519b0ca41089559aa8131f2fba4927d976da803c816fc",
+      "shape": {
+        "j": 16,
+        "k": 48,
+        "vectors": 6
+      },
+      "source_sha256": "9f6e5493122e8989bfa519b0ca41089559aa8131f2fba4927d976da803c816fc",
+      "state": [
+        [
+          "X",
+          48
+        ],
+        [
+          "Y",
+          768
+        ],
+        [
+          "dx0",
+          48
+        ],
+        [
+          "dy0",
+          768
+        ],
+        [
+          "dx1",
+          48
+        ],
+        [
+          "dy1",
+          768
+        ],
+        [
+          "dx2",
+          48
+        ],
+        [
+          "dy2",
+          768
+        ],
+        [
+          "dx3",
+          48
+        ],
+        [
+          "dy3",
+          768
+        ],
+        [
+          "dx4",
+          48
+        ],
+        [
+          "dy4",
+          768
+        ],
+        [
+          "dx5",
+          48
+        ],
+        [
+          "dy5",
+          768
+        ]
+      ],
+      "stress": true,
+      "tier": "extended",
+      "title": "Two-scale Lorenz-96 with tangent vectors"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "fput",
+      "file": "programs/fput_extended_fp64.cftl",
+      "format": "fp64",
+      "h": "1/64",
+      "halving_steps": 32,
+      "id": "fput_extended_fp64",
+      "input_sha256": "13212b6b43050c84d7f2f6d25b6304741c17452f38e6959c67fcb40a16c5f9f3",
+      "inputs": "inputs/fput_extended_fp64.json",
+      "integrator": "stormer-verlet",
+      "kind": "valid",
+      "lane": [],
+      "long_steps": 8192,
+      "n_state": 4096,
+      "params": {
+        "alpha": "1/4",
+        "beta": "1"
+      },
+      "reference": "reference/fput_extended_fp64.json",
+      "reversal_steps": 128,
+      "sha256": "ed205a08b8005da3e88d8bfc4469b28a9b54c0f14e0cdd6cfe8835a80b9a749b",
+      "shape": {
+        "n": 2048
+      },
+      "source_sha256": "ed205a08b8005da3e88d8bfc4469b28a9b54c0f14e0cdd6cfe8835a80b9a749b",
+      "state": [
+        [
+          "q",
+          2048
+        ],
+        [
+          "p",
+          2048
+        ]
+      ],
+      "stress": true,
+      "tier": "extended",
+      "title": "Nonlinear alpha-beta FPUT chain"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "phi4",
+      "file": "programs/phi4_extended_fp64.cftl",
+      "format": "fp64",
+      "h": "1/64",
+      "halving_steps": 32,
+      "id": "phi4_extended_fp64",
+      "input_sha256": "a707a3c6fd117347b93a58b69e1edd28353e6d63d8398489ed1fae77ccb413c4",
+      "inputs": "inputs/phi4_extended_fp64.json",
+      "integrator": "stormer-verlet",
+      "kind": "valid",
+      "lane": [],
+      "long_steps": 8192,
+      "n_state": 2048,
+      "params": {
+        "kappa": "1/4"
+      },
+      "reference": "reference/phi4_extended_fp64.json",
+      "reversal_steps": 128,
+      "sha256": "90f153a50a537ad78f3f6d59e320bc935cf198d576e4ff26733f35f55d691050",
+      "shape": {
+        "n": 32
+      },
+      "source_sha256": "90f153a50a537ad78f3f6d59e320bc935cf198d576e4ff26733f35f55d691050",
+      "state": [
+        [
+          "q",
+          1024
+        ],
+        [
+          "p",
+          1024
+        ]
+      ],
+      "stress": true,
+      "tier": "extended",
+      "title": "2D double-well Hamiltonian lattice"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "kuramoto_sivashinsky",
+      "file": "programs/kuramoto_sivashinsky_extended_fp64.cftl",
+      "format": "fp64",
+      "h": "1/64",
+      "halving_steps": 32,
+      "id": "kuramoto_sivashinsky_extended_fp64",
+      "input_sha256": "71da7655088a2407542efff73fe2987d655865435aa7feaf1267a9a34390502d",
+      "inputs": "inputs/kuramoto_sivashinsky_extended_fp64.json",
+      "integrator": "rk4",
+      "kind": "valid",
+      "lane": [],
+      "long_steps": 8192,
+      "n_state": 1024,
+      "params": {},
+      "reference": "reference/kuramoto_sivashinsky_extended_fp64.json",
+      "reversal_steps": null,
+      "sha256": "6aa9fd2f727de91a1448d648cd5bbadf87666d5c0fdcd1cb4939c97860d7af25",
+      "shape": {
+        "n": 1024
+      },
+      "source_sha256": "6aa9fd2f727de91a1448d648cd5bbadf87666d5c0fdcd1cb4939c97860d7af25",
+      "state": [
+        [
+          "u",
+          1024
+        ]
+      ],
+      "stress": true,
+      "tier": "extended",
+      "title": "Kuramoto-Sivashinsky periodic spatial discretization"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "reservoir",
+      "file": "programs/reservoir_extended_fp64.cftl",
+      "format": "fp64",
+      "h": "1/32",
+      "halving_steps": 32,
+      "id": "reservoir_extended_fp64",
+      "input_sha256": "538370a5a931e05222bcd76e93630b0204505fda1269e06f3c92b4fa70b688b8",
+      "inputs": "inputs/reservoir_extended_fp64.json",
+      "integrator": "map",
+      "kind": "valid",
+      "lane": [
+        "drive"
+      ],
+      "long_steps": 16384,
+      "n_state": 202,
+      "params": {
+        "input_gain": "1/4",
+        "leak": "1/4"
+      },
+      "reference": "reference/reservoir_extended_fp64.json",
+      "reversal_steps": null,
+      "sha256": "d43920ea74411c6a97e70350e69da39a06707cb3a02370923ffd0540950fad41",
+      "shape": {
+        "d": 192,
+        "hidden": 128
+      },
+      "source_sha256": "d43920ea74411c6a97e70350e69da39a06707cb3a02370923ffd0540950fad41",
+      "state": [
+        [
+          "r",
+          192
+        ],
+        [
+          "z",
+          8
+        ],
+        [
+          "q",
+          null
+        ],
+        [
+          "p",
+          null
+        ]
+      ],
+      "stress": true,
+      "tier": "extended",
+      "title": "Dense two-layer recurrent reservoir and oscillator"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 16384,
+      "family": "riccati",
+      "file": "programs/riccati_extended_fp64.cftl",
+      "format": "fp64",
+      "h": "1/64",
+      "halving_steps": 32,
+      "id": "riccati_extended_fp64",
+      "input_sha256": "eacccfd58044d6ee5bcfffe36c027db292c30ab8a1e402cb7c70b137522db8c9",
+      "inputs": "inputs/riccati_extended_fp64.json",
+      "integrator": "rk4",
+      "kind": "valid",
+      "lane": [],
+      "long_steps": 1024,
+      "n_state": 1024,
+      "params": {
+        "decay": "1/8",
+        "gamma": "1/4",
+        "omega": "1/2"
+      },
+      "reference": "reference/riccati_extended_fp64.json",
+      "reversal_steps": null,
+      "sha256": "cd0ab7690a325299ca2cd466d50e7bb33817533bd0321f353863ebdbefcfcc93",
+      "shape": {
+        "n": 32
+      },
+      "source_sha256": "cd0ab7690a325299ca2cd466d50e7bb33817533bd0321f353863ebdbefcfcc93",
+      "state": [
+        [
+          "P",
+          1024
+        ]
+      ],
+      "stress": true,
+      "tier": "extended",
+      "title": "Dense matrix Riccati differential equation"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "gray_scott",
+      "file": "programs/gray_scott_wide_fp256.cftl",
+      "format": "fp256",
+      "h": "1",
+      "halving_steps": 32,
+      "id": "gray_scott_wide_fp256",
+      "input_sha256": "449aa77e099c8e62041e2455bf45555602e604b95904580d6187c257aa3192f9",
+      "inputs": "inputs/gray_scott_wide_fp256.json",
+      "integrator": "rk4",
+      "kind": "valid",
+      "lane": [
+        "feed",
+        "kill"
+      ],
+      "long_steps": 4096,
+      "n_state": 512,
+      "params": {
+        "Du": "4/25",
+        "Dv": "2/25"
+      },
+      "reference": "reference/gray_scott_wide_fp256.json",
+      "reversal_steps": null,
+      "sha256": "ae3ece92f5ba70e7dda418080feba4e7c12cdf81cd2c0bc4359c1fe08ab448da",
+      "shape": {
+        "n": 16
+      },
+      "source_sha256": "ae3ece92f5ba70e7dda418080feba4e7c12cdf81cd2c0bc4359c1fe08ab448da",
+      "state": [
+        [
+          "u",
+          256
+        ],
+        [
+          "v",
+          256
+        ]
+      ],
+      "stress": true,
+      "tier": "wide",
+      "title": "2D Gray-Scott reaction-diffusion"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "lorenz_tangent",
+      "file": "programs/lorenz_tangent_wide_fp256.cftl",
+      "format": "fp256",
+      "h": "1/1000",
+      "halving_steps": 32,
+      "id": "lorenz_tangent_wide_fp256",
+      "input_sha256": "9a004246e40745e3cc9b2f1477efeda29ea032b8d4ec34c146d3bc4d8f42940a",
+      "inputs": "inputs/lorenz_tangent_wide_fp256.json",
+      "integrator": "rk4",
+      "kind": "valid",
+      "lane": [
+        "gain"
+      ],
+      "long_steps": 8192,
+      "n_state": 1080,
+      "params": {
+        "advection": "100",
+        "damping": "10",
+        "forcing": "10"
+      },
+      "reference": "reference/lorenz_tangent_wide_fp256.json",
+      "reversal_steps": null,
+      "sha256": "8192f0971fcc5112d02c97a9b0d96ee43c51cf5755b24902cb539e3dde8f7b44",
+      "shape": {
+        "j": 8,
+        "k": 24,
+        "vectors": 4
+      },
+      "source_sha256": "8192f0971fcc5112d02c97a9b0d96ee43c51cf5755b24902cb539e3dde8f7b44",
+      "state": [
+        [
+          "X",
+          24
+        ],
+        [
+          "Y",
+          192
+        ],
+        [
+          "dx0",
+          24
+        ],
+        [
+          "dy0",
+          192
+        ],
+        [
+          "dx1",
+          24
+        ],
+        [
+          "dy1",
+          192
+        ],
+        [
+          "dx2",
+          24
+        ],
+        [
+          "dy2",
+          192
+        ],
+        [
+          "dx3",
+          24
+        ],
+        [
+          "dy3",
+          192
+        ]
+      ],
+      "stress": true,
+      "tier": "wide",
+      "title": "Two-scale Lorenz-96 with tangent vectors"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "fput",
+      "file": "programs/fput_wide_fp256.cftl",
+      "format": "fp256",
+      "h": "1/64",
+      "halving_steps": 32,
+      "id": "fput_wide_fp256",
+      "input_sha256": "356797a22125c8b74c1842d0dafc67cda1b197d53aeec287810412402cbb8c62",
+      "inputs": "inputs/fput_wide_fp256.json",
+      "integrator": "stormer-verlet",
+      "kind": "valid",
+      "lane": [],
+      "long_steps": 8192,
+      "n_state": 1024,
+      "params": {
+        "alpha": "1/4",
+        "beta": "1"
+      },
+      "reference": "reference/fput_wide_fp256.json",
+      "reversal_steps": 128,
+      "sha256": "f79a8afd86675d7ec4a00efced726ece2bb011f3b1d4d795a1152d281a7211ea",
+      "shape": {
+        "n": 512
+      },
+      "source_sha256": "f79a8afd86675d7ec4a00efced726ece2bb011f3b1d4d795a1152d281a7211ea",
+      "state": [
+        [
+          "q",
+          512
+        ],
+        [
+          "p",
+          512
+        ]
+      ],
+      "stress": true,
+      "tier": "wide",
+      "title": "Nonlinear alpha-beta FPUT chain"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "phi4",
+      "file": "programs/phi4_wide_fp256.cftl",
+      "format": "fp256",
+      "h": "1/64",
+      "halving_steps": 32,
+      "id": "phi4_wide_fp256",
+      "input_sha256": "4fbe494dbeb6b3ca3dde330c79da5f884f3a5cecbdca429e71905e11b9cee260",
+      "inputs": "inputs/phi4_wide_fp256.json",
+      "integrator": "stormer-verlet",
+      "kind": "valid",
+      "lane": [],
+      "long_steps": 8192,
+      "n_state": 512,
+      "params": {
+        "kappa": "1/4"
+      },
+      "reference": "reference/phi4_wide_fp256.json",
+      "reversal_steps": 128,
+      "sha256": "bece6dab8956e16ffb448605f664750bbc5da519b0b117921cea817eb0a636ba",
+      "shape": {
+        "n": 16
+      },
+      "source_sha256": "bece6dab8956e16ffb448605f664750bbc5da519b0b117921cea817eb0a636ba",
+      "state": [
+        [
+          "q",
+          256
+        ],
+        [
+          "p",
+          256
+        ]
+      ],
+      "stress": true,
+      "tier": "wide",
+      "title": "2D double-well Hamiltonian lattice"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "kuramoto_sivashinsky",
+      "file": "programs/kuramoto_sivashinsky_wide_fp256.cftl",
+      "format": "fp256",
+      "h": "1/64",
+      "halving_steps": 32,
+      "id": "kuramoto_sivashinsky_wide_fp256",
+      "input_sha256": "455f882228eb6ac264d05f86462af879e61c6898e84dd083dccb195d198449ed",
+      "inputs": "inputs/kuramoto_sivashinsky_wide_fp256.json",
+      "integrator": "rk4",
+      "kind": "valid",
+      "lane": [],
+      "long_steps": 8192,
+      "n_state": 256,
+      "params": {},
+      "reference": "reference/kuramoto_sivashinsky_wide_fp256.json",
+      "reversal_steps": null,
+      "sha256": "0c9e55d837795669b10ca7a5dcb701ff722ff333fee70bf043bc297421f752fe",
+      "shape": {
+        "n": 256
+      },
+      "source_sha256": "0c9e55d837795669b10ca7a5dcb701ff722ff333fee70bf043bc297421f752fe",
+      "state": [
+        [
+          "u",
+          256
+        ]
+      ],
+      "stress": true,
+      "tier": "wide",
+      "title": "Kuramoto-Sivashinsky periodic spatial discretization"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 65536,
+      "family": "reservoir",
+      "file": "programs/reservoir_wide_fp256.cftl",
+      "format": "fp256",
+      "h": "1/32",
+      "halving_steps": 32,
+      "id": "reservoir_wide_fp256",
+      "input_sha256": "9290790c583eaaf8ee59792abfdf7c5ed0bda198c9626c8bac861668a32ff8e2",
+      "inputs": "inputs/reservoir_wide_fp256.json",
+      "integrator": "map",
+      "kind": "valid",
+      "lane": [
+        "drive"
+      ],
+      "long_steps": 16384,
+      "n_state": 106,
+      "params": {
+        "input_gain": "1/4",
+        "leak": "1/4"
+      },
+      "reference": "reference/reservoir_wide_fp256.json",
+      "reversal_steps": null,
+      "sha256": "200946c276c906ec02b900c8eb4598f0f53de0c1190d03abaf7ba5ee0079cdba",
+      "shape": {
+        "d": 96,
+        "hidden": 64
+      },
+      "source_sha256": "200946c276c906ec02b900c8eb4598f0f53de0c1190d03abaf7ba5ee0079cdba",
+      "state": [
+        [
+          "r",
+          96
+        ],
+        [
+          "z",
+          8
+        ],
+        [
+          "q",
+          null
+        ],
+        [
+          "p",
+          null
+        ]
+      ],
+      "stress": true,
+      "tier": "wide",
+      "title": "Dense two-layer recurrent reservoir and oscillator"
+    },
+    {
+      "allowed_target_refusals": [
+        "scratch-capacity",
+        "program-capacity",
+        "target-format",
+        "target-feature"
+      ],
+      "compile_steps": 1,
+      "endurance_steps": 16384,
+      "family": "riccati",
+      "file": "programs/riccati_wide_fp256.cftl",
+      "format": "fp256",
+      "h": "1/64",
+      "halving_steps": 32,
+      "id": "riccati_wide_fp256",
+      "input_sha256": "13871ec6e6fb1fa2ad91ccf1db3d74d1f40b26d42efa3bdbde826de2ed4a4312",
+      "inputs": "inputs/riccati_wide_fp256.json",
+      "integrator": "rk4",
+      "kind": "valid",
+      "lane": [],
+      "long_steps": 1024,
+      "n_state": 144,
+      "params": {
+        "decay": "1/8",
+        "gamma": "1/4",
+        "omega": "1/2"
+      },
+      "reference": "reference/riccati_wide_fp256.json",
+      "reversal_steps": null,
+      "sha256": "b8a03e8ab1bd98130e30f2ebd2ddea9ae7b2029ef198174b928b9d27d701225e",
+      "shape": {
+        "n": 12
+      },
+      "source_sha256": "b8a03e8ab1bd98130e30f2ebd2ddea9ae7b2029ef198174b928b9d27d701225e",
+      "state": [
+        [
+          "P",
+          144
+        ]
+      ],
+      "stress": true,
+      "tier": "wide",
+      "title": "Dense matrix Riccati differential equation"
+    }
+  ],
+  "language_spec_sha256": "ab70205f3e026770fb5e655b3f86c96218a283f2b547ad587ae5b0ef1a4a9c68",
+  "refusal_names": [
+    "scratch-capacity",
+    "program-capacity",
+    "loader-bound",
+    "target-format",
+    "target-feature",
+    "segment-steps",
+    "halving-underflow",
+    "bank-capacity",
+    "too-deep",
+    "unused",
+    "h-nonlinear",
+    "h-scope",
+    "syntax",
+    "graph-format"
+  ],
+  "smoke_order": [
+    "gray_scott_hard_fp64",
+    "lorenz_tangent_hard_fp64",
+    "fput_hard_fp64",
+    "phi4_hard_fp64",
+    "kuramoto_sivashinsky_hard_fp64",
+    "reservoir_hard_fp64",
+    "riccati_hard_fp64"
+  ],
+  "suite": "cft-hard-workloads",
+  "version": 1
+}

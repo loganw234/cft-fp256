@@ -41,7 +41,11 @@ so that it is not mistaken for one of ours. The ledger, docs/ROUND2.md and
 the design studies (RECORD_DOCS), each of which docs/README.md must file
 under "The record" or "The design studies", are exempt, since a path in them
 is a fact about its date; so are the products of a build or a run, each tied
-to a pattern in the file that produces it.
+to a pattern in the file that produces it. The hard-workload pack's five
+documents (DELIVERED_DOCS) are exempt from both the link and the quoted-path
+checks: they are another model's, kept as delivered, so their links and
+paths are the pack's own, and each stays exempt only while it is byte for
+byte what the pack's SHA256SUMS records.
 
 Every run also plants faults in a scratch copy of the documents - one per
 entry in CONTROLS and run_controls, covering every check and branch here -
@@ -54,6 +58,7 @@ in the version that first claimed this sentence.
     python python/check_docs_index.py          # report and exit nonzero
     python python/check_docs_index.py --quiet  # only on failure
 """
+import hashlib
 import pathlib
 import posixpath
 import re
@@ -370,6 +375,58 @@ BUILD_OUTPUTS = {
 }
 
 
+# The hard-workload pack (programs/workloads/README.md) was written by an
+# OpenAI model given the language brief and some example files, and is kept
+# as delivered. Its documents' relative links and the paths they quote are
+# the pack's, not this repository's, and none of its files may be edited, so
+# these five are exempt from the link and quoted-path checks - by name, and
+# re-derived on every run from the pack's own SHA256SUMS: a document is
+# exempt only while it is tracked, listed there, and byte for byte what the
+# list records. One edited, untracked or dropped from the list fails the run
+# by name and is checked like any other, so the exemption cannot outlive its
+# reason. (The pack's one edited file, tools/run_workloads.py, is no
+# document.)
+DELIVERED_PACK = "programs/workloads/cft-hard-workloads/"
+DELIVERED_SUMS = DELIVERED_PACK + "SHA256SUMS"
+DELIVERED_DOCS = ("LANGUAGE.md", "MODELS.md", "PROGRAMS.md", "README.md",
+                  "VALIDATION.md")
+
+
+def delivered_docs(problems, root, tracked):
+    """The pack's documents still as delivered: each named in
+    DELIVERED_DOCS, tracked, and the bytes the pack's SHA256SUMS records
+    for it. A named document that is not is a problem, by name, and is not
+    exempt."""
+    files = set(tracked)
+    sums = root / DELIVERED_SUMS
+    if DELIVERED_SUMS not in files or not sums.is_file():
+        problems.append("the delivered pack's documents are exempt by %s, "
+                        "which is not in the repository" % DELIVERED_SUMS)
+        return set()
+    listed = {}
+    for line in sums.read_text(encoding="utf-8",
+                               errors="replace").splitlines():
+        digest, sep, name = line.partition("  ")
+        if sep:
+            listed[name] = digest
+    exempt = set()
+    for name in DELIVERED_DOCS:
+        doc = DELIVERED_PACK + name
+        if doc not in files or not (root / doc).is_file():
+            problems.append("%s is exempt as delivered, but is not in the "
+                            "repository" % doc)
+        elif name not in listed:
+            problems.append("%s is exempt as delivered, but %s does not "
+                            "list it" % (doc, DELIVERED_SUMS))
+        elif hashlib.sha256((root / doc).read_bytes()).hexdigest() \
+                != listed[name]:
+            problems.append("%s is exempt as delivered, but is not the bytes "
+                            "%s records for it" % (doc, DELIVERED_SUMS))
+        else:
+            exempt.add(doc)
+    return exempt
+
+
 def build_output(tok):
     """The BUILD_OUTPUTS key covering `tok`, or None."""
     for key in BUILD_OUTPUTS:
@@ -378,8 +435,9 @@ def build_output(tok):
     return None
 
 
-def check_all_links(problems, root, tracked):
-    """Every relative link and image in every tracked document resolves."""
+def check_all_links(problems, root, tracked, delivered=()):
+    """Every relative link and image in every tracked document resolves,
+    but in the delivered pack's documents still as delivered."""
     files = set(tracked)
     dirs = {posixpath.dirname(f) for f in tracked}
     for d in list(dirs):
@@ -388,6 +446,8 @@ def check_all_links(problems, root, tracked):
             dirs.add(d)
     n = 0
     for doc in (f for f in tracked if f.endswith(".md")):
+        if doc in delivered:
+            continue
         text = (root / doc).read_text(encoding="utf-8", errors="replace")
         base = posixpath.dirname(doc)
         for line_no, line in paragraphs(text):
@@ -406,8 +466,9 @@ def check_all_links(problems, root, tracked):
     return n
 
 
-def check_quoted_paths(problems, root, tracked):
-    """A path a live document quotes in backticks is in the repository."""
+def check_quoted_paths(problems, root, tracked, delivered=()):
+    """A path a live document quotes in backticks is in the repository,
+    but in the record documents and the delivered pack's documents."""
     files = set(tracked)
     dirs = set()
     for f in tracked:
@@ -442,7 +503,7 @@ def check_quoted_paths(problems, root, tracked):
     n = 0
     for doc in (f for f in tracked if f.endswith(".md")):
         if any(doc == e or (e.endswith("/") and doc.startswith(e))
-               for e in RECORD_DOCS):
+               for e in RECORD_DOCS) or doc in delivered:
             continue
         text = (root / doc).read_text(encoding="utf-8", errors="replace")
         for line_no, line in paragraphs(text):
@@ -591,11 +652,13 @@ def run_checks(root, tracked):
     stages = check_stage_counts(problems, root)
     check_sim_bench_count(problems, root)
     check_prose_counts(problems, root, present)
-    nlinks = check_all_links(problems, root, tracked)
-    npaths = check_quoted_paths(problems, root, tracked)
+    delivered = delivered_docs(problems, root, tracked)
+    nlinks = check_all_links(problems, root, tracked, delivered)
+    npaths = check_quoted_paths(problems, root, tracked, delivered)
     return problems, {"present": len(present), "index_links": len(set(rel)),
                       "stages": stages, "links": nlinks, "paths": npaths,
-                      "docs": sum(1 for f in tracked if f.endswith(".md"))}
+                      "docs": sum(1 for f in tracked if f.endswith(".md")),
+                      "delivered": len(delivered)}
 
 
 # The planted faults. Each is put into a scratch copy of the documents and
@@ -658,7 +721,8 @@ def run_controls(root, tracked, baseline):
     with tempfile.TemporaryDirectory(prefix="check_docs_index-") as tmp:
         t = pathlib.Path(tmp)
         copy = [f for f in tracked if f.endswith(".md")] + [
-            "verify/run.sh", "tb/Makefile", "formal/run.sh"] + sorted(
+            "verify/run.sh", "tb/Makefile", "formal/run.sh",
+            DELIVERED_SUMS] + sorted(
             {producer for producer, _ in BUILD_OUTPUTS.values()})
         for f in copy:
             if (root / f).is_file():
@@ -717,6 +781,69 @@ def run_controls(root, tracked, baseline):
                       rs.replace('STATEROOT="$ROOT/verify/state"',
                                  'STATEROOT="$ROOT/verify/runs"', 1),
                       r"^verify/state is exempt as a product of verify/run\.sh"))
+        # The delivered pack's exemption, each way it can stop holding: a
+        # document edited (and then checked like any other, so the broken
+        # link and the missing path planted in it are reported too), one
+        # dropped from the pack's SHA256SUMS, one untracked, and the
+        # SHA256SUMS itself untracked. Then the other way round: the same
+        # edit recorded in the scratch SHA256SUMS as the pack's own bytes
+        # must raise nothing, or the exemption exempts nothing. These write
+        # bytes and restore them exactly - write_text above writes CRLF on
+        # Windows, and a pack document restored so is no longer as
+        # delivered for every control after it.
+        sums = (t / DELIVERED_SUMS).read_text(encoding="utf-8")
+        pdoc = DELIVERED_PACK + "MODELS.md"
+        planted_doc = ((t / pdoc).read_text(encoding="utf-8")
+                       + "\nSee [nothing](NO-SUCH-DELIVERED.md) and "
+                       "`programs/no-such-delivered.cftl`.\n")
+        resum = re.sub(r"(?m)^[0-9a-f]{64}(  MODELS\.md)$",
+                       lambda m: hashlib.sha256(planted_doc.encode("utf-8"))
+                       .hexdigest() + m.group(1), sums, count=1)
+
+        def planted(changes, files=tracked):
+            saved = {f: (t / f).read_bytes() for f in changes}
+            try:
+                for f, text in changes.items():
+                    (t / f).write_bytes(text.encode("utf-8"))
+                return set(run_checks(t, files)[0]) - base
+            finally:
+                for f, data in saved.items():
+                    (t / f).write_bytes(data)
+
+        pack_controls = [
+            ({pdoc: planted_doc}, tracked,
+             r"^programs/workloads/cft-hard-workloads/MODELS\.md is exempt "
+             r"as delivered, but is not the bytes"),
+            ({pdoc: planted_doc}, tracked,
+             r"^programs/workloads/cft-hard-workloads/MODELS\.md:\d+: broken "
+             r"link NO-SUCH-DELIVERED\.md$"),
+            ({pdoc: planted_doc}, tracked,
+             r"^programs/workloads/cft-hard-workloads/MODELS\.md:\d+: "
+             r"`programs/no-such-delivered\.cftl` is quoted"),
+            ({DELIVERED_SUMS: re.sub(r"(?m)^[0-9a-f]{64}  README\.md\n", "",
+                                     sums, count=1)}, tracked,
+             r"^programs/workloads/cft-hard-workloads/README\.md is exempt "
+             r"as delivered, but .*SHA256SUMS does not list it"),
+            ({}, [f for f in tracked if f != DELIVERED_SUMS],
+             r"^the delivered pack's documents are exempt by "
+             r"programs/workloads/cft-hard-workloads/SHA256SUMS, which is "
+             r"not in the repository"),
+            ({}, [f for f in tracked if f != DELIVERED_PACK + "PROGRAMS.md"],
+             r"^programs/workloads/cft-hard-workloads/PROGRAMS\.md is exempt "
+             r"as delivered, but is not in the repository"),
+        ]
+        for changes, files, pat in pack_controls:
+            got = planted(changes, files)
+            if not any(re.search(pat, p) for p in got):
+                failures.append("NEGATIVE CONTROL FAILED TO FAIL: %s, planted "
+                                "in the delivered pack; new problems: %s"
+                                % (pat, sorted(got) or "none"))
+        got = planted({pdoc: planted_doc, DELIVERED_SUMS: resum})
+        if resum == sums or got:
+            failures.append("the delivered pack's exemption did not exempt "
+                            "a document recorded as delivered; new problems: "
+                            "%s" % (sorted(got) or "none (the record did not "
+                                    "change)"))
         for f, add, pat in CONTROLS:
             orig = (t / f).read_text(encoding="utf-8")
             edits.append((f, orig, orig + add, pat))
@@ -734,7 +861,7 @@ def run_controls(root, tracked, baseline):
                 failures.append("NEGATIVE CONTROL FAILED TO FAIL: %s, planted "
                                 "in %s; new problems: %s"
                                 % (pat, f, sorted(got) or "none"))
-        n = len(edits)
+        n = len(edits) + len(pack_controls) + 1
     return failures, n
 
 
@@ -774,8 +901,10 @@ def main(argv):
                   "%d gate" % (stages["total"], stages["quick"],
                                stages["gate"]))
         print("                  %d tracked documents: %d relative links "
-              "resolve, %d quoted paths exist"
-              % (stats["docs"], stats["links"], stats["paths"]))
+              "resolve, %d quoted paths exist; %d delivered with the "
+              "hard-workload pack, exempt while as delivered"
+              % (stats["docs"], stats["links"], stats["paths"],
+                 stats["delivered"]))
         print("                  %d negative controls planted, each caught "
               "by name" % ncontrols)
     return 0

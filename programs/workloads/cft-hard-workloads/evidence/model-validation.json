@@ -1,0 +1,344 @@
+{
+  "actual_CFT_compilation": "NOT RUN: no CFT checkout supplied in this workspace",
+  "checks": {
+    "exact_vectors": "21 independent one-step vectors, three lanes each",
+    "generated_sources": 21,
+    "normal_RNE_rounding_interval_samples": {
+      "fp128": 300,
+      "fp256": 300,
+      "fp32": 300,
+      "fp64": 300
+    },
+    "source_equations_vs_independent_NumPy": 63
+  },
+  "independent_double_long_runs": {
+    "fput_hard_fp64": {
+      "elapsed_seconds": 0.178,
+      "final_energy": 0.03131139306923863,
+      "final_rms": 0.026161028459805186,
+      "finite": true,
+      "initial_energy": 0.03131103515625,
+      "maximum_state_magnitude_seen": 0.3887427641677371,
+      "momentum_change": 8.881784197001252e-16,
+      "relative_energy_drift": 1.1430889679708996e-05,
+      "relative_state_change": 0.5006354426977406,
+      "steps": 8192
+    },
+    "gray_scott_hard_fp64": {
+      "elapsed_seconds": 0.963,
+      "final_rms": 0.47591475942686534,
+      "final_v_std": 0.11688618598291671,
+      "finite": true,
+      "maximum_state_magnitude_seen": 0.9433756803464962,
+      "relative_state_change": 0.7321013034976736,
+      "steps": 4096,
+      "u_range": [
+        0.2678986965023265,
+        0.844078966146686
+      ],
+      "v_range": [
+        0.008235092406798162,
+        0.37268765655090685
+      ]
+    },
+    "kuramoto_sivashinsky_hard_fp64": {
+      "elapsed_seconds": 1.005,
+      "final_rms": 1.314453021560423,
+      "finite": true,
+      "maximum_state_magnitude_seen": 3.6521330840608237,
+      "mean_change": -2.8449465006019636e-16,
+      "relative_state_change": 1.027904590183294,
+      "steps": 8192
+    },
+    "lorenz_tangent_hard_fp64": {
+      "elapsed_seconds": 7.424,
+      "final_rms": 0.7437551588318289,
+      "finite": true,
+      "maximum_state_magnitude_seen": 104.82919695055905,
+      "relative_state_change": 1.2224594685536547,
+      "steps": 8192
+    },
+    "phi4_hard_fp64": {
+      "elapsed_seconds": 0.256,
+      "final_energy": -43.866628654396195,
+      "final_rms": 0.7131197473968417,
+      "finite": true,
+      "initial_energy": -43.866943359375,
+      "maximum_state_magnitude_seen": 2.0657461318392514,
+      "relative_energy_drift": 7.174080405541251e-06,
+      "relative_state_change": 1.3675885809626078,
+      "steps": 8192
+    },
+    "reservoir_hard_fp64": {
+      "elapsed_seconds": 2.347,
+      "final_rms": 0.5927703277900465,
+      "finite": true,
+      "maximum_state_magnitude_seen": 1.0001146119223936,
+      "oscillator_invariant": 0.9999999999999907,
+      "r_range": [
+        -0.9999999749374142,
+        0.999982486555316
+      ],
+      "r_std": 0.597129118695617,
+      "relative_state_change": 1.9973559052709544,
+      "steps": 16384
+    },
+    "riccati_hard_fp64": {
+      "elapsed_seconds": 0.139,
+      "final_rms": 0.4533854482758614,
+      "finite": true,
+      "maximum_state_magnitude_seen": 1.580829743309851,
+      "relative_state_change": 0.6713846620789214,
+      "smallest_symmetric_eigenvalue": 1.5615527144855808,
+      "steps": 1024,
+      "symmetry_residual": 4.336808689942018e-18
+    }
+  },
+  "limitations": [
+    "NumPy runs use doubles and different evaluation order; they are not bitwise CFT results.",
+    "Long tangent integrations rescale each vector between 128-step chunks; no QR or Lyapunov spectrum.",
+    "No physical hardware was exercised. Actual acceptance and image execution await the user's checkout."
+  ],
+  "model_identity_checks": {
+    "fput": {
+      "energy_error_ratio_h_over_h2": 4.0006127659457755,
+      "energy_gradient_error": 7.275957614183426e-12,
+      "momentum_reversal_max_abs_error": 1.745565497701662e-17,
+      "observed_step_halving_ratio": 4.000574469690191,
+      "short_endpoint_h2_vs_h4_norm": 1.1731817039131725e-06,
+      "short_endpoint_h_vs_h2_norm": 4.693400772982675e-06,
+      "short_energy_error_2h": 1.2016717138574329e-06,
+      "short_energy_error_h": 3.002337832236357e-07,
+      "short_energy_error_h2": 7.50469492521999e-08
+    },
+    "gray_scott": {
+      "observed_step_halving_ratio": 19.386801942975385,
+      "short_endpoint_h2_vs_h4_norm": 4.834071659629619e-06,
+      "short_endpoint_h_vs_h2_norm": 9.371718984338974e-05
+    },
+    "kuramoto_sivashinsky": {
+      "observed_step_halving_ratio": 17.061294550944854,
+      "short_endpoint_h2_vs_h4_norm": 5.564777934654941e-10,
+      "short_endpoint_h_vs_h2_norm": 9.49423154537465e-09
+    },
+    "lorenz_tangent": {
+      "centered_Jacobian_directional_errors": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "observed_step_halving_ratio": 15.90595458602306,
+      "short_endpoint_h2_vs_h4_norm": 2.0736080242809456e-08,
+      "short_endpoint_h_vs_h2_norm": 3.2982715063425723e-07
+    },
+    "phi4": {
+      "energy_error_ratio_h_over_h2": 4.0011659718420995,
+      "energy_gradient_error": 0.0,
+      "momentum_reversal_max_abs_error": 1.1449174941446927e-15,
+      "observed_step_halving_ratio": 4.000193077793711,
+      "short_endpoint_h2_vs_h4_norm": 1.9218781862082965e-05,
+      "short_endpoint_h_vs_h2_norm": 7.687883816833162e-05,
+      "short_energy_error_2h": 0.0008529573315954053,
+      "short_energy_error_h": 0.0002129909561858767,
+      "short_energy_error_h2": 5.3232222228416504e-05
+    },
+    "riccati": {
+      "observed_step_halving_ratio": 16.07343803887054,
+      "short_endpoint_h2_vs_h4_norm": 5.791125868618801e-11,
+      "short_endpoint_h_vs_h2_norm": 9.308330282454464e-10
+    }
+  },
+  "sources": [
+    {
+      "bank_upper_bound": 12,
+      "field_operations": 4610,
+      "id": "gray_scott_hard_fp64",
+      "max_source_nesting": 3,
+      "source_vs_independent_math_relative_error": 3.469446951953614e-18,
+      "state_values": 512,
+      "step_operations": 22024
+    },
+    {
+      "bank_upper_bound": 11,
+      "field_operations": 7105,
+      "id": "lorenz_tangent_hard_fp64",
+      "max_source_nesting": 4,
+      "source_vs_independent_math_relative_error": 0.0,
+      "state_values": 1080,
+      "step_operations": 35980
+    },
+    {
+      "bank_upper_bound": 10,
+      "field_operations": 3072,
+      "id": "fput_hard_fp64",
+      "max_source_nesting": 3,
+      "source_vs_independent_math_relative_error": 0.0,
+      "state_values": 1024,
+      "step_operations": 4608
+    },
+    {
+      "bank_upper_bound": 10,
+      "field_operations": 2304,
+      "id": "phi4_hard_fp64",
+      "max_source_nesting": 2,
+      "source_vs_independent_math_relative_error": 0.0,
+      "state_values": 512,
+      "step_operations": 3072
+    },
+    {
+      "bank_upper_bound": 12,
+      "field_operations": 3328,
+      "id": "kuramoto_sivashinsky_hard_fp64",
+      "max_source_nesting": 3,
+      "source_vs_independent_math_relative_error": 0.0,
+      "state_values": 256,
+      "step_operations": 15104
+    },
+    {
+      "bank_upper_bound": 26,
+      "field_operations": 14614,
+      "id": "reservoir_hard_fp64",
+      "max_source_nesting": 9,
+      "source_vs_independent_math_relative_error": 4.336808689942018e-19,
+      "state_values": 106,
+      "step_operations": 14614
+    },
+    {
+      "bank_upper_bound": 43,
+      "field_operations": 2881,
+      "id": "riccati_hard_fp64",
+      "max_source_nesting": 9,
+      "source_vs_independent_math_relative_error": 0.0,
+      "state_values": 144,
+      "step_operations": 12532
+    },
+    {
+      "bank_upper_bound": 12,
+      "field_operations": 18434,
+      "id": "gray_scott_extended_fp64",
+      "max_source_nesting": 3,
+      "source_vs_independent_math_relative_error": 3.469446951953614e-18,
+      "state_values": 2048,
+      "step_operations": 88072
+    },
+    {
+      "bank_upper_bound": 11,
+      "field_operations": 38497,
+      "id": "lorenz_tangent_extended_fp64",
+      "max_source_nesting": 4,
+      "source_vs_independent_math_relative_error": 5.628061273347328e-17,
+      "state_values": 5712,
+      "step_operations": 193972
+    },
+    {
+      "bank_upper_bound": 10,
+      "field_operations": 12288,
+      "id": "fput_extended_fp64",
+      "max_source_nesting": 3,
+      "source_vs_independent_math_relative_error": 0.0,
+      "state_values": 4096,
+      "step_operations": 18432
+    },
+    {
+      "bank_upper_bound": 10,
+      "field_operations": 9216,
+      "id": "phi4_extended_fp64",
+      "max_source_nesting": 2,
+      "source_vs_independent_math_relative_error": 0.0,
+      "state_values": 2048,
+      "step_operations": 12288
+    },
+    {
+      "bank_upper_bound": 12,
+      "field_operations": 13312,
+      "id": "kuramoto_sivashinsky_extended_fp64",
+      "max_source_nesting": 3,
+      "source_vs_independent_math_relative_error": 0.0,
+      "state_values": 1024,
+      "step_operations": 60416
+    },
+    {
+      "bank_upper_bound": 24,
+      "field_operations": 56854,
+      "id": "reservoir_extended_fp64",
+      "max_source_nesting": 9,
+      "source_vs_independent_math_relative_error": 4.336808689942018e-19,
+      "state_values": 202,
+      "step_operations": 56854
+    },
+    {
+      "bank_upper_bound": 47,
+      "field_operations": 43009,
+      "id": "riccati_extended_fp64",
+      "max_source_nesting": 9,
+      "source_vs_independent_math_relative_error": 0.0,
+      "state_values": 1024,
+      "step_operations": 179204
+    },
+    {
+      "bank_upper_bound": 12,
+      "field_operations": 4610,
+      "id": "gray_scott_wide_fp256",
+      "max_source_nesting": 3,
+      "source_vs_independent_math_relative_error": 3.469446951953614e-18,
+      "state_values": 512,
+      "step_operations": 22024
+    },
+    {
+      "bank_upper_bound": 11,
+      "field_operations": 7105,
+      "id": "lorenz_tangent_wide_fp256",
+      "max_source_nesting": 4,
+      "source_vs_independent_math_relative_error": 0.0,
+      "state_values": 1080,
+      "step_operations": 35980
+    },
+    {
+      "bank_upper_bound": 10,
+      "field_operations": 3072,
+      "id": "fput_wide_fp256",
+      "max_source_nesting": 3,
+      "source_vs_independent_math_relative_error": 0.0,
+      "state_values": 1024,
+      "step_operations": 4608
+    },
+    {
+      "bank_upper_bound": 10,
+      "field_operations": 2304,
+      "id": "phi4_wide_fp256",
+      "max_source_nesting": 2,
+      "source_vs_independent_math_relative_error": 0.0,
+      "state_values": 512,
+      "step_operations": 3072
+    },
+    {
+      "bank_upper_bound": 12,
+      "field_operations": 3328,
+      "id": "kuramoto_sivashinsky_wide_fp256",
+      "max_source_nesting": 3,
+      "source_vs_independent_math_relative_error": 0.0,
+      "state_values": 256,
+      "step_operations": 15104
+    },
+    {
+      "bank_upper_bound": 26,
+      "field_operations": 14614,
+      "id": "reservoir_wide_fp256",
+      "max_source_nesting": 9,
+      "source_vs_independent_math_relative_error": 4.336808689942018e-19,
+      "state_values": 106,
+      "step_operations": 14614
+    },
+    {
+      "bank_upper_bound": 43,
+      "field_operations": 2881,
+      "id": "riccati_wide_fp256",
+      "max_source_nesting": 9,
+      "source_vs_independent_math_relative_error": 0.0,
+      "state_values": 144,
+      "step_operations": 12532
+    }
+  ],
+  "status": "PASS"
+}
