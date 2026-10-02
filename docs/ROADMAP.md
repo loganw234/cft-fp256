@@ -4574,6 +4574,212 @@ intention-out beside every image.
 - Everything else above is the lead's default, and can change before L1
   starts.
 
+### Step 6: the math library, revision 8 and programs past one tile (plan of record, 2026-10-02)
+
+Logan, after step 3 closed (main aaca616):
+- On step 5: "Drop step 5, go to step 6 with the acceptance parcel. The
+  workloads can be tracked in the repo, make a note where they are held
+  that they were written by an OpenAI model who was only given the
+  language brief and some example files as a test of the language
+  portability. I think thats the cleanest way to state why they exist
+  and why they could be 'different' from the rest on close inspection".
+- On step 6's scope: "Programs too big for one tile should likely be
+  included with step 6, along with the earlier deferrals. Compile time
+  is more a performance issue that can be handled later."
+- Then, asked the questions below, he chose:
+  - for FLAGS in routines: "Flag control in rev 8 (Recommended)";
+  - for revision 8: "Flag control, Per-lane flags (R23), TwoSum +
+    stepped scratch, Instruction streaming";
+  - for programs too big for one tile: "Streaming + deep build
+    (Recommended)".
+
+This plan goes to him before any code beyond the acceptance parcel.
+Nothing in it exists yet unless it says so. The facts come from three
+read-only surveys of main aaca616, whose reports and citations are in
+the round's records (`Data/runs/2026-10-02-step6-round/`).
+
+**What the surveys found.**
+- **Division and square root** exist in-program as divfull and sqrtfull
+  (`programs/divfull-*`, `sqrtfull-*`): 210-216 and 186-195
+  instructions, correct in the last bit under every attribute by an
+  exact residual. Three things keep them out of a compiled program:
+  - **FLAGS.** The run's flags are scaffolding (6/3 raises inexact,
+    measured at fp64 and fp256). The contract's flags are a deposit
+    that libcft ORs in, and no opcode can raise divide-by-zero.
+  - **The compiler.** It carries one instruction a node, in the
+    program's one attribute. Its bank holds constants, their sign-flips
+    and params, never a raw word such as +inf, -0 or a NaN.
+  - **Format.** A routine's words differ by format, which ends "the
+    same words at every format", and with it the certificate's wider
+    run (docs/CERTIFICATES.md).
+- **The math library's ground.**
+  - The golden model's 39 correctly rounded functions are the
+    definition (`cft_golden/transcend.py`), held by the `transcend`
+    and `mpfr` stages.
+  - The tile has fma, exact products, integer operations on the
+    encoding and SELECT. It has no branch and no call, and the bank is
+    512 constants, indexed only by the instruction.
+  - A lane cannot pause for the host. So a function whose last bit
+    cannot be decided in-lane (the table maker's dilemma) needs a
+    per-lane way to say so.
+  - 2/pi for Payne-Hanek at fp256 does not fit the bank: 270,336 bits
+    against at most 121,344.
+- **Programs past one tile.**
+  - Instructions (32,768), scratch (2,048) and deposits (1,024) are
+    build parameters up to 2^15, each a four-bit field in CAPS. The
+    bank (512) is fixed by the instruction format.
+  - There is no path between tiles, only round trips through the host
+    on one shared bus.
+  - The quad has no room left. By the revision-7 round's estimate it
+    uses about 78% of the block RAM and 82% of the LUTs; no measured
+    figures are recorded anywhere. It closed at +0.003 ns with every
+    timing option.
+  - Of the hard workloads that missed:
+    - most are bound by instructions; Lorenz-tangent hard cannot fit
+      under any allocation;
+    - two are bound by scratch: FPUT and phi4 extended;
+    - only Gray-Scott hard is near.
+- **Time-dependent systems** already work with t as a state variable
+  (`state t`, `d/dt t = 1`). With a dyadic h, t stays exactly k h. A
+  reserved `t` would refuse today's own advised sources, as `tangent`
+  did.
+
+**The parts.** Parcels with verifiers, golden-first, the send-back rule
+and the testing rule, as the last rounds ran.
+
+0. **A1, the acceptance set**, approved and building:
+   - the workloads tracked in the repo, at programs/workloads once A1
+     merges, with Logan's note;
+   - the six references, the four variational references and the ten
+     workloads that fit the card, with fixed runs and committed digests;
+   - a driver that is the admission test for a card;
+   - an `acceptance` stage.
+1. **Revision 8, golden-first.** Each piece goes into the model
+   (`seq.py`), the software backend (`program.c`), both assemblers, the
+   docs and tests first. The RTL comes after, in one revision.
+   - **R8F, flag control.** Two instructions: a quiet region, in which
+     the ALU's flags do not reach FLAGS, and a raise, which ORs a
+     register's five flag bits into FLAGS. A routine then runs quiet
+     and raises exactly the IEEE flags of the operation it implements,
+     divide-by-zero included. The names and encodings are the parcel's
+     to propose; a CAPS2 bit publishes them.
+   - **R8L, per-lane flags,** R23 as designed (docs/SEQUENCER.md), one
+     byte a lane:
+     - bits [4:0] the IEEE flags, [5] deposit overflow, [6] a
+       strict-scratch fault;
+     - bit [7] reserved for a lane a routine could not decide.
+     This takes an ABI step (0.17, `cft_run_args.lane_flags`), the
+     module rebuilt, cft-segrun and cft-audit, the remote protocol, and
+     **certificate format version 2**, which records the per-lane flags
+     and any lane refused or replayed.
+   - **R21 and R22**, augmented addition (`augadd`/`augerr`) and stepped
+     STX/LDX: already in the model. They come to cft-asm and the RTL.
+   - **R8S, instruction streaming.** The program is read from card
+     memory through a prefetch, not held on-chip, so the instruction
+     ceiling goes. The image, the compiler and the certificate are
+     unchanged; CAPS needs a field past 2^15.
+     - A design study comes first: the fetch, its timing at 135 MHz, its
+       cost in block RAM, and what a stall costs a step.
+   - **The deep build.** A build of the same RTL with more scratch a
+     lane (4,096 to 8,192 slots), as a single or dual tile. Logan's rule
+     for program limits (2026-09-28): "as large as we can, ideally
+     adjustable as the other parameters are". It gives up the quad's
+     four-tile throughput. cftc gains a target for it.
+   - **The RTL revision** follows the golden-first pieces and the
+     streaming design. Its RTL plan comes to Logan before the RTL work
+     starts. Then:
+     - `make sim`, Icarus, with Verilator while iterating, and the
+       formal proofs that touch it;
+     - two bitstreams on amd-arc-box, one at a time, at
+       `KERNEL_FREQ=135000000`: the quad, and the deep single;
+     - the card legs, with the acceptance set as the admission test,
+       and the workloads that missed run on the deep build.
+2. **L4, run-time division and square root in the language,
+   golden-first.**
+   - `a / b` and `sqrt(a)` with non-constant operands become nodes,
+     whose golden definition is `softfloat`'s div and sqrt, with exact
+     flags.
+   - `runtime-division` and `runtime-sqrt` go.
+   - The interpreter, the renderers and the intention-out's checks take
+     them, and L3 gains their derivative rules.
+   - The challenge suite's expectations for those refusals become the
+     suite's to restate.
+3. **C4, routines in the compiler.**
+   - A generator in the manner of `gen_divfull` writes each routine as
+     a relocatable fragment: registers from the allocator, raw-word
+     bank slots as a new slot kind, internal attributes allowed.
+   - It is flag-exact through R8F.
+   - The internal check learns routines. An image with one needs the
+     flag-control feature, so revision 7's targets refuse it by name
+     (`target-feature`), and the software targets run it now.
+   - **Format-specific words:** a certified wider run of such a program
+     is refused by name under certificate version 1, as cft-orbits'
+     runs are, until version 2 says otherwise.
+   - **Code size:** the compiler's sharing, and a call loop (one
+     inlined copy in a REPEAT over argument slots) where calls are
+     many. A CALL instruction is not in this revision.
+4. **T1, time-dependent systems.** LANGUAGE.md and the tests:
+   - t as a state variable;
+   - its exactness with a dyadic h, and its drift otherwise, measured;
+   - a step counter as the exact construction.
+   There is no reserved `t`. Forcing by sin or cos waits for M2; a
+   rotation carried in the state works before it.
+5. **The math library.** The golden definition is
+   `cft_golden/transcend.py` for every function. Each routine is held
+   on seq.py against it over the existing pools, through `program.c`,
+   and then on the card.
+   - **M1, exp and log:** exp, expm1, exp2; log, log1p, log2.
+     - Double-word in the program's format, using augmented addition; at
+       fp32, triple-word.
+     - An in-lane test of whether the last bit is decided. A lane that
+       is not is marked in bit 7 and replayed. Where the replay runs
+       (the golden model on the host, or a slower image) and how the
+       certificate records it is M1's design, to come to the lead
+       first.
+     - Bank use is about 100 constants at fp64; the surveyor's estimate
+       is about 150 instructions at fp64 and 750 at fp256.
+   - **M2, sin, cos, tan.** Full range at fp64, with 2/pi's window in
+     the bank. At fp256, a stated range, beyond which a lane is marked
+     and replayed.
+   - **M3, the pow family**, last: its structured cases need 2p to 3p
+     bits.
+   - **M4, atan, atan2, asin, acos,** after L4.
+   - Each function gains an L3 derivative rule.
+
+**The order.**
+- A1 now.
+- Then, side by side:
+  - R8F with R8L, golden-first through the software backend, the ABI
+    step and certificate version 2;
+  - L4;
+  - T1;
+  - the streaming design study.
+- C4 follows R8F and L4.
+- M1 follows C4 and R8L.
+- The RTL revision follows R8F, R8L, R21/R22 and the approved streaming
+  design.
+- M2, M3 and M4 after M1.
+- At each merge, the gate budget on amd-arc-box. After the revision, the
+  card legs and the acceptance set on the card.
+
+**What it is not.**
+- Compile time, which is later performance work (Logan).
+- A scheduling order for scratch traffic, which is performance work
+  too.
+- Adaptive steps and events, per-operation attributes, and a Python
+  front end. Step 3's "What it is not" named them, and this plan does
+  not place them.
+- A CALL instruction.
+- A split of one program across tiles, a cut by component or by stage:
+  not chosen.
+- The gallery: one gallery after step 6, with literature-checked answers
+  and certificates published.
+
+**For Logan.**
+- Approve this plan, or change it, before any code beyond A1.
+- The RTL revision's own plan comes to him before its RTL work, as the
+  revision-7 round's did.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
