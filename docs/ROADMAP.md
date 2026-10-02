@@ -4202,9 +4202,13 @@ bitstream builds.
   time is more a performance issue that can be handled later." So
   step 6 holds the correctly rounded math library, programs past one
   tile's instructions or scratch (the hard workloads' Gray-Scott,
-  Lorenz with tangents and the extended grids), run-time division and
-  square root, time-dependent systems and per-lane flags; the
-  compiler's superlinear compile time is performance work for later.
+  Lorenz with tangents and the extended grids), and the earlier
+  deferrals as the lead listed them to Logan: run-time division and
+  square root, time-dependent systems and per-lane flags. Step 3's
+  "What it is not" names more (adaptive steps and events,
+  per-operation attributes, a Python front end), which this does not
+  place. The compiler's superlinear compile time is performance work
+  for later.
 - The rest of this section is the plan as approved that morning,
   with verifier-P1's restatements and the intention-out added.
 

@@ -172,8 +172,9 @@ the gate holds that.
   - `inf infinity nan snan`.
 - `tangent` became a keyword with the variational equations (part
   two, 2026-10-02). A source written before them that names a value
-  `tangent` is refused now: `reserved-name` where it declares it,
-  `syntax` where it reads it (verifier-VI2).
+  `tangent` is refused now: `syntax` wherever it reads it, since the
+  parser meets the read first, and `reserved-name` where it only
+  declares it (verifier-VI2).
 
 ### Statements
 
@@ -1463,9 +1464,11 @@ stage certifies one, both auditors accepting.
   target's capacity would make the image depend on the target, which
   the compiler's design rules out (python/cftc).
 - **Capacity.** Lorenz-96 with one tangent vector needs 2N + 59 slots a
-  lane from N = 14 (measured). Below that the count departs from it by
-  a slot or a few either way: N = 9 takes 78, an older order's; N = 10
-  takes 75 and N = 12 takes 84, the interleaved walk's (verifier-VI2).
+  lane from N = 14 (measured). Just below that the count departs from
+  it by a slot or a few either way: N = 9 takes 78, an older order's;
+  N = 10 takes 75 and N = 12 takes 84, the interleaved walk's. The
+  smallest rings take far fewer: N = 4 takes 21 (against 67) and N = 7
+  takes 63 (against 73) (verifier-VI2, verifier-VL3).
   N = 40 takes 139 and fits every target;
   a 256-slot target holds it up to N = 98 (255 slots) and refuses it
   (`scratch-capacity`) from N = 99 (257); the U50's revision 7 (2,048)

@@ -16870,7 +16870,7 @@ What sampled points cannot see is stated in LANGUAGE.md.
 - **Runs and the compiler.** `lang.run` takes tangents. The compiler's extended state is `[state | v | w | lane params]`, with one more candidate order for a graph with tangents, the interleaved walk.
 - **The intention-out** writes the tangent's lines in both forms. A fourth check holds them against exact dual numbers. Every integrator's scheme lines are now held word for word, which closes L1's recorded gap (an unused printed stage).
 - **New refusals:** `tangent-mismatch` and `tangent-scope`.
-- **`tangent` became a keyword.** A part-one source that names a value `tangent` is refused now: `reserved-name` where it declares it, `syntax` where it reads it. Verifier-VI2 found it; no record had said so, and LANGUAGE.md says so now.
+- **`tangent` became a keyword.** A part-one source that names a value `tangent` is refused now: `syntax` wherever it reads it, since the parser meets the read first, and `reserved-name` where it only declares it. Verifier-VI2 found it; no record had said so, and LANGUAGE.md says so now.
 - **Files and stages.**
   - Four variational references in programs/systems/: Lorenz-63 and Lorenz-96 under rk4, each at fp64 and fp256.
   - Their 32 compiled files in `compiled-tangent/`.
@@ -17033,6 +17033,6 @@ What sampled points cannot see is stated in LANGUAGE.md.
   - The first seq.py column included compilation.
   - The first software ratios (230–470x and 80–190x) were taken while the box was loaded, and were reported to Logan before the idle baseline replaced them.
 - **The part-two box launch** was refused by its own card check, which matched the launching ssh command line carrying the same pattern, and it had been given a short SHA. Both were caught before anything ran.
-- **L3's early card driver** (lang_card_tangent.py, 14:07 on 2026-10-01) read `g.n_state` where a graph with tangents has `g.n_primal`, and stopped with an IndexError before any leg ran. It was corrected and rerun.
-- **The merge restatements** VI2 found wrong: "2N + 59 ... below that the older orders win with fewer", and the lang row's chain count. Both are restated in 67eb0a6, with VI2's other sentence findings.
+- **The lead's driver for L3's early card run** (lang_card_tangent.py, 14:07 on 2026-10-01) read `g.n_state` where a graph with tangents has `g.n_primal`, and stopped with an IndexError before any leg ran. It was corrected and rerun.
+- **What VI2 found wrong:** the L3 merge's restatement "2N + 59 ... below that the older orders win with fewer", and the lang row's chain count, D2's text the merge kept. Both were restated in 67eb0a6, with VI2's other sentence findings. 67eb0a6's own slot sentence was wrong again for the smallest rings ("by a slot or a few", where N = 4 takes 21 against 67). VI2's final check found it, and the commit after the close restates it.
 - **The D2 merge's script** expected one hunk in docs/README.md, and there were two. It stopped there by its own assertion, and the rest was applied by a second script.
