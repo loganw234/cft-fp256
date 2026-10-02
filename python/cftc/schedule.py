@@ -4,9 +4,10 @@
 
 Every order here respects the step's dependences, so every order
 computes the same bits and the same FLAGS; what an order changes is the
-time a tile takes. The cost model is believed, from docs/SEQUENCER.md
-R12 to R19 (revision 7, the single-pass tile), and the card's
-measurement is the lead's:
+time a tile takes. The cost model is docs/SEQUENCER.md R12 to R19
+(revision 7, the single-pass tile), and the card has measured it: on
+revision 7's quad on the U50, ten compiled programs ran 2.2% to 5.8%
+slower than it (docs/VALIDATION.md, 2026-10-02):
 
 * an ALU instruction or a static scratch access issues one beat a cycle;
 * a dependent ALU link costs LATENCY + 1 = 17 cycles from the producer's

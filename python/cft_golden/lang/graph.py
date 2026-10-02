@@ -275,6 +275,12 @@ class StepGraph:
         # has None. Never part of the bytes: the compiler's interim refusal,
         # `runtime-routine`, names the first of them (python/cftc).
         self.routine_lines = None
+        # The format the SOURCE declares, where the checker built the graph:
+        # its `format` line's value, which a format override (check's `fmt`,
+        # cftc's --format) replaces - so the graph is at `fmt`, and this
+        # says what the text said. A graph read from bytes, or made
+        # otherwise, has None. Never part of the bytes (C4).
+        self.source_format = None
 
     # -- what it holds --------------------------------------------------
 
@@ -322,6 +328,7 @@ class StepGraph:
                       self.field, self.step, self.tangent,
                       self.tangent_field, self.tangent_step)
         g.routine_lines = self.routine_lines
+        g.source_format = self.source_format
         for k, v in changes.items():
             setattr(g, k, v)
         return g

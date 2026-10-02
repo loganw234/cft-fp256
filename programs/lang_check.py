@@ -8,6 +8,8 @@
                                   [--corpus N] [--only A,B,...]
     python programs/lang_check.py --write     regenerate the committed
                                               compiled references
+    python programs/lang_check.py --record    append to cftc's output-version
+                                              record what its rules allow
 
 The language's reference interpreter, lang.run, is the definition of
 correct (docs/LANGUAGE.md); every image the compiler writes must equal it
@@ -41,7 +43,13 @@ many lanes and at several step counts: the image's REPEAT patched to 1,
      step-halving estimate); the golden reader, the golden audit and
      cft-audit accept each, in full and sampled
   F  determinism: two processes under two PYTHONHASHSEEDs write the same
-     bytes, and the committed compiled references are those bytes
+     bytes, and the committed compiled references are those bytes; and
+     cftc's VERSION as an output version (C4): the record,
+     programs/systems/cftc-outputs.txt, ends with VERSION's block, which
+     names every committed compiled file - compiled/ and compiled-tangent/
+     - with its digest and nothing else, so a compiler change that moves
+     a committed byte fails here until VERSION is bumped (python/cftc/
+     outputs.py); the record's check caught on five plants in memory
   G  every refusal of the compiler's, by name
   H  plants in a copy of the package: each stopped by the internal check,
      and with the check off each red on seq.py, its failing lanes counted
@@ -92,6 +100,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "python"))
 
 import cftc                                               # noqa: E402
+from cftc import outputs as O                             # noqa: E402
 from cftc import targets as TG                            # noqa: E402
 from cftc.schedule import cycles                          # noqa: E402
 from cftc.regalloc import Ins                             # noqa: E402
@@ -1302,6 +1311,50 @@ def leg_determinism(work):
              != data]
     check(not wrong, "every committed compiled reference is what the "
           "compiler writes, byte for byte", f"differ: {wrong[:6]}")
+    leg_output_version()
+
+
+def leg_output_version():
+    """cftc's VERSION is an output version (C4; python/cftc/outputs.py):
+    the record's last block is VERSION's and names every committed
+    compiled file with its true digest. So a compiler change that moves
+    a committed byte fails here until VERSION is bumped and a block
+    appended (--record). And the check is held itself: each of its
+    refusals made on a copy of the record, in memory."""
+    rec = SYSTEMS / O.RECORD_NAME
+    text = rec.read_text(encoding="ascii") if rec.is_file() else ""
+    files = O.committed(SYSTEMS)
+    probs = O.problems(text, files, cftc.VERSION) if text else \
+        [f"no {rec.name}"]
+    blocks = O.parse(text) if not probs else []
+    check(not probs, f"cftc's output version {cftc.VERSION}: the record's "
+          f"last block names the {len(files)} committed compiled files, "
+          f"each with its digest, and nothing else (versions "
+          f"{', '.join(str(v) for v, _b in blocks)})", "; ".join(probs))
+    if probs:
+        return
+    some = sorted(files)[0]
+    moved = dict(files, **{some: "0" * 64})
+    planted = {
+        "a committed byte moved, VERSION not bumped":
+            O.problems(text, moved, cftc.VERSION),
+        "VERSION bumped with no block": O.problems(text, files,
+                                                   cftc.VERSION + 1),
+        "a committed file not recorded": O.problems(
+            text, dict(files, **{"compiled/x.cfta": "1" * 64}),
+            cftc.VERSION),
+        "a recorded file gone": O.problems(
+            text, {p: d for p, d in files.items() if p != some},
+            cftc.VERSION),
+        "a version out of turn": O.problems(
+            text.replace(f"version {cftc.VERSION}\n",
+                         f"version {cftc.VERSION + 1}\n"), files,
+            cftc.VERSION + 1),
+    }
+    missed = [k for k, v in planted.items() if not v]
+    check(not missed, f"the record's check catches each of "
+          f"{len(planted)} plants: {', '.join(planted)}",
+          f"missed: {missed}")
 
 
 # ---- G: refusals -------------------------------------------------------------
@@ -2126,6 +2179,21 @@ def write_references():
     return 0
 
 
+def record_main():
+    """--record: the append-only rule applied (python/cftc/outputs.py)."""
+    rec = SYSTEMS / O.RECORD_NAME
+    text = rec.read_text(encoding="ascii") if rec.is_file() else ""
+    try:
+        new, what = O.append(text, O.committed(SYSTEMS), cftc.VERSION)
+    except O.RecordError as e:
+        print(f"lang_check --record: refused: {e}")
+        return 1
+    if new != text:
+        rec.write_bytes(new.encode("ascii"))
+    print(f"lang_check --record: {what}")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--segrun", help="host/cft-segrun, for leg E")
@@ -2144,12 +2212,19 @@ def main(argv=None):
                          "determinism,refusals,plants,readback,routines")
     ap.add_argument("--write", action="store_true",
                     help="write programs/systems/compiled/ and exit")
+    ap.add_argument("--record", action="store_true",
+                    help="append to programs/systems/cftc-outputs.txt what "
+                         "its append-only rule allows - a block for a new "
+                         "cftc VERSION, or a new committed file's lines - "
+                         "and exit; refuse anything else")
     ap.add_argument("--digests", help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
     if a.digests:
         return digests_main(a.digests)
     if a.write:
         return write_references()
+    if a.record:
+        return record_main()
     only = {x for x in a.only.split(",") if x}
     t0 = time.perf_counter()
     work = Path(tempfile.mkdtemp(prefix="lang-check-"))

@@ -351,8 +351,16 @@ class Ctx:
 
 
 class Checker:
-    def __init__(self, stmts):
+    def __init__(self, stmts, fmt=None):
         self.stmts = stmts
+        # A format override (C4; certificate version 2's wider-source run):
+        # a format's name that replaces the value of the source's `format`
+        # statement, or None. The source must still be a source - its own
+        # format line is required and checked - and the system is then
+        # checked, its constants rounded and its graph built at the
+        # override (collect, below).
+        self.fmt_override = fmt
+        self.source_format = None
         self.names = {}
         self.rounded = {}
         self.const_stack = []
@@ -438,7 +446,18 @@ class Checker:
         if fst.word not in FORMATS:
             raise Refusal("unknown-format", f"{fst.word} is not a format "
                           f"here: fp32, fp64, fp128 or fp256", fst.line)
-        self.fmt = FORMATS[fst.word]
+        self.source_format = fst.word
+        over = self.fmt_override
+        if over is not None and (not isinstance(over, str)
+                                 or over not in FORMATS):
+            if not isinstance(over, str):
+                shown = f"a {type(over).__name__}, not a format's name,"
+            else:
+                shown = over if len(over) <= 40 else over[:40] + "..."
+            raise Refusal("unknown-format", f"the format override {shown} "
+                          f"is not a format here: fp32, fp64, fp128 or "
+                          f"fp256")
+        self.fmt = FORMATS[fst.word if over is None else over]
         rst = once["round"]
         if rst is None:
             self.rnd = sf.RND_RNE
@@ -2037,6 +2056,7 @@ class Checker:
             self.block_compare(field_outs, step_outs, built, tangent)
         self.canonical_nesting(graph)
         graph.routine_lines = tuple(sorted(self.routine_lines))
+        graph.source_format = self.source_format
         return graph
 
     # ==== the canonical form's nesting (D2) ============================
@@ -2141,11 +2161,15 @@ def constant_of(text):
     return v.coef
 
 
-def check(text, source="<text>"):
-    """The step graph of a source, or a Refusal naming the source."""
+def check(text, source="<text>", fmt=None):
+    """The step graph of a source, or a Refusal naming the source. `fmt`,
+    a format's name, overrides the source's `format` statement (C4): the
+    source must still declare one, and the system is checked and its
+    graph built at `fmt` - which equal to the declared format changes
+    nothing."""
     try:
         try:
-            return Checker(parse(text)).run()
+            return Checker(parse(text), fmt).run()
         except RecursionError:
             raise too_deep("this system") from None
     except Refusal as r:
