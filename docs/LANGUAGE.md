@@ -719,9 +719,15 @@ steps:
   rk4 adds 6 RN(h/6) where euler adds RN(h), and the two sums round
   apart at 46 of the 10^4 steps at fp32, at one (the third) at fp64 and
   fp128, and at none at fp256, meeting again each time.
-- fp128's rows are fp64's. In binary 1/100 repeats every 20 bits, and
-  fp128 carries 60 bits more than fp64, so each sum rounds the same way
-  relative to an ulp. At h = 1/19, which repeats every 18 bits, the two
+- fp128's rows are fp64's, at every step. Where every quantity a step
+  rounds repeats in binary with a period dividing the bits one format
+  carries beyond another, each sum rounds the same way relative to an
+  ulp in both (verifier-VT1's theorem). fp128 carries 60 bits beyond
+  fp64; euler rounds t + RN(h), stormer-verlet t + RN(h/2) and rk4
+  t + 6 RN(h/6), and 1/100, 1/200 and 1/600 all repeat every 20 bits.
+  At h = 1/99, which repeats every 30, euler and stormer-verlet agree
+  between fp64 and fp128 at every step, but rk4, whose h/6 = 1/594
+  repeats every 90, parts at 12 steps; at h = 1/19, every 18, the two
   formats differ.
 - Under a directed attribute every rounding falls one way: after 10^4
   steps at fp64, rk4 and euler are -2,999 ulps off under rtz and rdn
@@ -761,11 +767,18 @@ step rk4, h = 1/100
   whose increments are exact: at fp64 it stayed exact at every step.
   Under rk4 a step whose sixth is dyadic counts exactly under every
   attribute at fp64: h = 3/64, rate 64/3.
-- **Its limit is 2^p.** k + 1 must be a float: 2^24 = 16,777,216 steps
-  at fp32, 2^53 at fp64. Started at 2^24 - 2 at fp32 with h = 1/100,
-  euler's counter stopped at 2^24 and rk4's counted by twos. A segment
-  may run 2^32 - 1 steps (`segment-steps`), so at fp32 one segment can
-  outrun its counter.
+- **Its limit is 2^p, or 2^(p-1) among the positions.** k + 1 must be a
+  float, so the count holds to 2^p steps under euler and rk4 and with k
+  among stormer-verlet's momenta: 2^24 = 16,777,216 at fp32, 2^53 at
+  fp64. Among the positions the first drift makes Q1.k = k + 1/2, which
+  must be a float too, so the count holds to 2^(p-1): 2^23 = 8,388,608
+  at fp32, 2^52 at fp64. rk4's stage counts n + 1/2, which give a stage
+  its time, hold to 2^(p-1) as well. Started two below the limit with
+  h = 1/100: at fp32 euler's counter and stormer-verlet's among the
+  momenta stopped at 2^24, rk4's counted by twos, and stormer-verlet's
+  among the positions stopped at 2^23; at fp64 each counted by twos
+  past its limit. A segment may run 2^32 - 1 steps (`segment-steps`),
+  so at fp32 one segment can outrun its counter.
 
 **t from the counter.**
 - `let t = k * dt` rounds n RN(1/100) once, and `fma(k, dt, t0)`, with
@@ -790,17 +803,29 @@ step rk4, h = 1/100
   It equalled RN(n/100) at every count from 0 to 10^4 - from the count
   of a map that counts with `next k = k + 1`, at every format under rne
   and at fp64 under rmm, and at fp64 from the flow's count under both.
-  It is no directed rounding: in that map at fp64 it missed rtz's
-  rounding of n/100 at 400 of the counts and rdn's at 401. Past 10^4 it
-  rests on Markstein's theorem for a quotient corrected by its residual:
-  believed, not measured.
+  In that map, at every format, it gave rup's rounding of n/100 at
+  every count; under rtz and rdn it missed at exactly the 400 counts
+  n = 25j, where n/100 is itself a float, giving the float below it;
+  and under rdn t at n = 0 is -0, the value right and the sign
+  roundTowardNegative's for an exact zero sum.
+  Past 10^4 it rests on Markstein's theorem for a quotient corrected by
+  its residual, whose hypotheses hold here: dt is within 0.375 u of
+  1/100 (u = 2^-p: -0.375 u at fp32, +0.1875 u at fp64 and fp128,
+  -0.125 u at fp256), so q is within an ulp of n/100 at every count and
+  its residual r is a float. verifier-VT1 measured it under rne and rmm
+  with no miss at every count from 0 to 2^24 at fp32, and at 30,000,
+  15,000 and 8,000 random counts at fp64, fp128 and fp256; the gate
+  holds a seeded 4,000, 4,000, 2,000 and 1,000 counts past 10^4 through
+  the language. At counts no one has run it is believed.
 
-**What the counter cannot give:** an exact t when h is not dyadic, since
-n h is no float; h itself, since the rate and dt are written for the
+**What the counter cannot give:** an exact t at every count when h is
+not dyadic, since n h is a float only at some counts - for h = 1/100
+every 25th, where t = k * dt is exact - and at the rest t is at best
+its rounding; h itself, since the rate and dt are written for the
 declared step; a count under a directed attribute, unless the
-template's increment is exact; a count past 2^p. A map counts with
-`next k = k + 1`, exactly under every attribute, and may read h:
-`let t = fma(k, h, t0)`.
+template's increment is exact; a count past its limit, 2^p or 2^(p-1).
+A map counts with `next k = k + 1`, exactly under every attribute, and
+may read h: `let t = fma(k, h, t0)`.
 
 ### Forcing
 
@@ -864,8 +889,11 @@ step   rk4, h = 1/100
 From c = 1, s = 0 and rest, its c and s are the rotation's above, bit
 for bit, and x stayed within 4.0276e-08 of the exact solution,
 (F/gamma) (sin t - e^(-gamma t/2) sin(wd t)/wd) with
-wd = sqrt(1 - gamma^2/4), at every step to t = 100: about the
-rotation's lag times the response's amplitude, F/gamma = 5.
+wd = sqrt(1 - gamma^2/4), at every step to t = 100. The rotation's lag
+accounts for about 3.2e-08 of it and x's own rk4 error for about
+0.8e-08: a twin of x and v forced by the exact cos t at rk4's stage
+times stays within 0.8e-08 of the exact solution, and the example
+within 3.2e-08 of the twin (verifier-VT1).
 
 ## The step graph
 
@@ -1944,21 +1972,24 @@ that the section and the measurement cannot part:
 - h = 1/64 exact at every step to 10^4, and at fp64 under the other
   attributes, with rk4's directed figures and h = 3/64;
 - the drift table, rk4 against euler at every step, fp128 against fp64
-  and h = 1/19, the directed attributes;
+  at every step and at h = 1/99 and 1/19, the directed attributes;
 - the counter: the `h-scope` refusals, an exact count at every step,
-  the directed attributes after one step, the limit at fp32, a
+  the directed attributes after one step, the limit for each placement
+  started two below it, at fp32 and fp64, with rk4's stage counts, a
   step-halving run;
-- t from the counter: one rounding, and each stage's count and time
-  inside rk4 and the midpoint under stormer-verlet, read from the step
-  graph's labelled nodes by an evaluator held to lang.run; the exact
-  residual in a map and in a flow;
+- t from the counter: one rounding, exact at every 25th count, and each
+  stage's count and time inside rk4 and the midpoint under
+  stormer-verlet, read from the step graph's labelled nodes by an
+  evaluator held to lang.run; the exact residual in a map and in a
+  flow, under each attribute, and past 10^4: dt's relative error and a
+  seeded sample of counts, each a lane;
 - forcing: sin refused; the rotation's table, and its rounding's share
   against the same step evaluated exactly; rk4's and euler's exact
   factors and stormer-verlet's quadratic form; the phase; w = 3/10; the
-  forced oscillator against its exact solution; every source the
-  section shows, compiled.
+  forced oscillator against its exact solution and against a twin
+  forced by the exact cos t; every source the section shows, compiled.
 
-It takes about 40 s on one core of the desktop, nearly all of it the
+It takes about 50 s on one core of the desktop, nearly all of it the
 interpreter's own arithmetic.
 
 The compiled images are held to the interpreter by the `tangent` stage

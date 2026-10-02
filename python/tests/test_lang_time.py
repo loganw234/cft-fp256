@@ -13,17 +13,22 @@ section fails here by name (parcel T1, 2026-10-02).
                        attribute, rk4 under rmm, rk4's directed figures,
                        and h = 3/64
   drift otherwise      h = 1/100: the section's table, rk4 against euler at
-                       every step, fp128's rows against fp64's and h = 1/19,
-                       the directed attributes and rmm at fp64
+                       every step, fp128 against fp64 at every step and at
+                       h = 1/99 and 1/19, the directed attributes and rmm at
+                       fp64
   the step counter     the refusals; an exact count at every step under rne
                        (and rmm at fp64); the directed attributes; the limit
-                       at fp32; a step-halving run
-  t from the counter   one rounding; each stage's count and time inside rk4,
-                       the midpoint under stormer-verlet; the exact residual
+                       for each placement, 2^p or 2^(p-1), and rk4's stage
+                       counts; a step-halving run
+  t from the counter   one rounding, exact at every 25th count; each
+                       stage's count and time inside rk4, the midpoint under
+                       stormer-verlet; the exact residual, under each
+                       attribute, and past 10^4 with Markstein's hypotheses
   forcing              sin refused today; the rotation's table, its
                        rounding's share and its exact factor, the phase,
                        w = 3/10; the forced oscillator against its exact
-                       solution; every source the section shows compiles
+                       solution and against a twin; every source the
+                       section shows compiles
 
 Each figure is read from the section's own text - its tables parsed, its
 sentences matched - and computed here, so the document and the
@@ -32,6 +37,7 @@ encoding of RN(n h), the time rounded once to nearest: the signed number
 of floats between them (every value here is positive).
 """
 
+import hashlib
 import math
 import re
 import sys
@@ -413,24 +419,56 @@ def order_of_two(q):
     return k
 
 
+@lru_cache(maxsize=None)
+def t_ulps(fmt, integ, q):
+    """t carried alone at h = 1/q under rne: its ulps against RN(n/q) at
+    every step 0..10^4 (stormer-verlet with t among the positions)."""
+    body = "state t\nd/dt t = 1\n"
+    opts = ""
+    if integ == SV:
+        body, opts = "state t, u\nd/dt t = 1\nd/dt u = 0\n", ", q = (t), p = (u)"
+    g = compile_(f"system tq\nformat {fmt}\n{body}step {integ}, h = 1/{q}"
+                 f"{opts}\n")
+    r = lang.run(g, [[0] * g.n_state], N, at=range(N + 1))
+    want = rn_steps(fmt, F(1, q))
+    return tuple(r.at[n][0][0][0] - want[n] for n in range(N + 1))
+
+
 def test_fp128_is_fp64_where_the_period_divides_sixty():
-    """1/100 repeats every 20 bits and fp128 carries 60 more than fp64, so
-    their ulps agree; 1/19 repeats every 18, and they differ."""
-    assert (FORMATS["fp128"].prec - FORMATS["fp64"].prec,
-            order_of_two(100), order_of_two(19)) == (60, 20, 18)
+    """Every quantity a step rounds repeats with a period dividing the 60
+    bits between fp64 and fp128 (verifier-VT1's theorem): at h = 1/100
+    (1/100, 1/200 and 1/600 every 20 bits) their ulps agree at every step
+    under each integrator; at h = 1/99 (every 30) euler's and
+    stormer-verlet's agree and rk4's, whose 1/594 repeats every 90, part
+    at 12 steps; at h = 1/19 (every 18) they differ."""
+    assert FORMATS["fp128"].prec - FORMATS["fp64"].prec == 60
+    assert [order_of_two(q) for q in (100, 200, 600, 99, 198, 594, 19)] == \
+        [20, 20, 20, 30, 30, 90, 18]
     rows = table(DRIFT_HEAD, ["fp64", "fp128"])
     assert rows["fp64"] == rows["fp128"]
-    marks = {}
-    for fmt in ("fp64", "fp128"):
-        g = compile_(f"system t19\nformat {fmt}\nstate t\nd/dt t = 1\n"
-                     f"step euler, h = 1/19\n")
-        r = lang.run(g, [[0]], N, at=MARKS)
-        marks[fmt] = [ulps(fmt, r.at[n][0][0][0], F(n, 19)) for n in MARKS]
-    assert marks["fp64"] != marks["fp128"]
-    assert said("In binary 1/100 repeats every 20 bits, and fp128 carries 60 "
-                "bits more than fp64")
-    assert said("At h = 1/19, which repeats every 18 bits, the two formats "
-                "differ.")
+    h = F(1, 100)
+    for integ in INTEGRATORS:
+        pair = [column(history(fmt, "rne", integ, "1/100", 100), 0)
+                for fmt in ("fp64", "fp128")]
+        assert [t - r for t, r in zip(pair[0], rn_steps("fp64", h))] == \
+            [t - r for t, r in zip(pair[1], rn_steps("fp128", h))], integ
+    for integ in ("euler", SV):
+        assert t_ulps("fp64", integ, 99) == t_ulps("fp128", integ, 99), integ
+    apart = [n for n, (a, b) in enumerate(zip(t_ulps("fp64", "rk4", 99),
+                                              t_ulps("fp128", "rk4", 99)))
+             if a != b]
+    assert len(apart) == 12
+    assert t_ulps("fp64", "euler", 19) != t_ulps("fp128", "euler", 19)
+    assert said("fp128's rows are fp64's, at every step.")
+    assert said("(verifier-VT1's theorem). fp128 carries 60 bits beyond "
+                "fp64; euler rounds t + RN(h), stormer-verlet t + RN(h/2) and "
+                "rk4 t + 6 RN(h/6), and 1/100, 1/200 and 1/600 all repeat "
+                "every 20 bits.")
+    assert said(f"At h = 1/99, which repeats every 30, euler and "
+                f"stormer-verlet agree between fp64 and fp128 at every step, "
+                f"but rk4, whose h/6 = 1/594 repeats every 90, parts at "
+                f"{len(apart)} steps; at h = 1/19, every 18, the two formats "
+                f"differ.")
 
 
 def test_a_directed_attribute_drifts_one_way():
@@ -525,24 +563,66 @@ def test_the_counter_under_the_directed_attributes(fmt):
                 "step.")
 
 
-def test_the_counters_limit_at_fp32():
-    """From 2^24 - 2: euler's counter stops at 2^24, rk4's counts by
-    twos."""
-    fmt = FORMATS["fp32"]
-    start = (1 << 24) - 2
-    got = {}
-    for integ in ("euler", "rk4"):
-        g = compile_(f"system c\nformat fp32\nstate k\nd/dt k = 100\n"
-                     f"step {integ}, h = 1/100\n")
-        r = lang.run(g, [[rn("fp32", F(start))]], 6, at=range(7))
-        got[integ] = [int(C.value_of(fmt, r.at[s][0][0][0])) - start
-                      for s in range(7)]
-    assert got == {"euler": [0, 1, 2, 2, 2, 2, 2],
-                   "rk4": [0, 1, 2, 4, 6, 8, 10]}
-    assert 2 ** FORMATS["fp32"].prec == 16_777_216
-    assert said("2^24 = 16,777,216 steps at fp32, 2^53 at fp64. Started at "
-                "2^24 - 2 at fp32 with h = 1/100, euler's counter stopped at "
-                "2^24 and rk4's counted by twos.")
+PLACEMENTS = {   # a counter at rate 100, h = 1/100: its source, k's column
+    "euler": ("state k\nd/dt k = 100\nstep euler, h = 1/100\n", 0),
+    "rk4": ("state k\nd/dt k = 100\nstep rk4, h = 1/100\n", 0),
+    "a momentum": ("state x, k\nd/dt x = 0\nd/dt k = 100\n"
+                   "step stormer-verlet, h = 1/100, q = (x), p = (k)\n", 1),
+    "a position": ("state k, u\nd/dt k = 100\nd/dt u = 0\n"
+                   "step stormer-verlet, h = 1/100, q = (k), p = (u)\n", 0),
+}
+
+
+def from_below(fmt, placement, e, steps=6):
+    """The counter started at 2^e - 2: k - (2^e - 2) after 0..steps."""
+    text, i = PLACEMENTS[placement]
+    g = compile_(f"system c\nformat {fmt}\n{text}")
+    start = (1 << e) - 2
+    state = [0] * g.n_state
+    state[i] = rn(fmt, F(start))
+    r = lang.run(g, [state], steps, at=range(steps + 1))
+    return [int(C.value_of(FORMATS[fmt], r.at[s][0][0][i])) - start
+            for s in range(steps + 1)]
+
+
+def test_the_counters_limit():
+    """k + 1 must be a float, and among stormer-verlet's positions so must
+    Q1.k = k + 1/2: the count holds to 2^p under euler and rk4 and as a
+    momentum, to 2^(p-1) as a position; started two below each limit,
+    the section's stops and twos. rk4's stage count n + 1/2 holds to
+    2^(p-1)."""
+    on = list(range(7))
+    stops, twos = [0, 1, 2, 2, 2, 2, 2], [0, 1, 2, 4, 6, 8, 10]
+    for fmt, p in (("fp32", 24), ("fp64", 53)):
+        assert FORMATS[fmt].prec == p
+        for placement in ("euler", "rk4", "a momentum"):
+            assert from_below(fmt, placement, p - 1) == on, (fmt, placement)
+        assert from_below(fmt, "a position", p - 1) == (
+            stops if fmt == "fp32" else twos), fmt
+    assert from_below("fp32", "euler", 24) == stops
+    assert from_below("fp32", "a momentum", 24) == stops
+    assert from_below("fp32", "rk4", 24) == twos
+    for placement in ("euler", "rk4", "a momentum"):
+        assert from_below("fp64", placement, 53) == twos, placement
+    # rk4's stage count Y2.k = k + 1/2, from two below 2^(p-1)
+    for fmt, e in (("fp32", 23), ("fp64", 52)):
+        g = compile_(STAGES.format(fmt=fmt))
+        start = (1 << e) - 2
+        states, seen = labelled(g, (rn(fmt, F(start)), 0), 4, ("Y2.k",))
+        half = [C.value_of(FORMATS[fmt], y) - C.value_of(FORMATS[fmt], st[0])
+                for y, st in zip(seen["Y2.k"], states)]
+        assert half[:2] == [F(1, 2)] * 2 and F(1, 2) not in half[2:], fmt
+    assert (2 ** 24, 2 ** 23) == (16_777_216, 8_388_608)
+    assert said("so the count holds to 2^p steps under euler and rk4 and "
+                "with k among stormer-verlet's momenta: 2^24 = 16,777,216 "
+                "at fp32, 2^53 at fp64.")
+    assert said("so the count holds to 2^(p-1): 2^23 = 8,388,608 at fp32, "
+                "2^52 at fp64. rk4's stage counts n + 1/2, which give a stage "
+                "its time, hold to 2^(p-1) as well.")
+    assert said("at fp32 euler's counter and stormer-verlet's among the "
+                "momenta stopped at 2^24, rk4's counted by twos, and "
+                "stormer-verlet's among the positions stopped at 2^23; at "
+                "fp64 each counted by twos past its limit.")
 
 
 def test_a_step_halving_run_counts_halves():
@@ -613,6 +693,15 @@ def test_t_from_the_counter_and_each_stages_time(fmt):
                     f"counts from 0 to 10^4 and was one ulp off at the rest")
     else:
         assert said(f"{fmt} {equal:,}")
+    # n h is a float only at every 25th count, and there t = k * dt is it
+    for n in range(N + 1):
+        x = F(n, 100)
+        assert (x.denominator & (x.denominator - 1) == 0) == (n % 25 == 0), n
+        if n % 25 == 0:
+            assert C.value_of(FORMATS[fmt], seen["k1.t"][n]) == x, n
+    assert said("since n h is a float only at some counts - for h = 1/100 "
+                "every 25th, where t = k * dt is exact - and at the rest t is "
+                "at best its rounding")
     assert said("Y2.k = Y3.k = n + 1/2 and Y4.k = n + 1, at every step and "
                 "format")
     assert said("k2.t is RN((n + 1/2) RN(1/100))")
@@ -662,13 +751,15 @@ step map
 def test_the_correctly_rounded_time(fmt):
     """The section's three lets, from an exact count: RN(n/100) at every
     count from 0 to 10^4 - from a map's count under rne at every format
-    and under rmm at fp64, and at fp64 from the flow's count under both;
-    at fp64 in the map, no directed rounding, missing rtz's and rdn's at
-    the counts the section gives; the map's count exact under every
-    attribute at fp64."""
+    and under rmm at fp64, and at fp64 from the flow's count under both.
+    In the map at every format: rup's rounding at every count; under rtz
+    and rdn a miss at exactly the counts n = 25j, to the float below,
+    and under rdn -0 at n = 0. The map's count exact under every
+    attribute."""
     lets = block("let q = k * dt")
-    rnds = ATTRS if fmt == "fp64" else ("rne",)
-    missed = {}
+    rnds = ATTRS if fmt == "fp64" else ("rne", "rtz", "rdn", "rup")
+    fmt_ = FORMATS[fmt]
+    missed, by_value = {}, {}
     for rnd in rnds:
         g = compile_(RESIDUAL_MAP.format(fmt=fmt, rnd=rnd, lets=lets))
         r = lang.run(g, [[0, 0]], N + 1, at=range(N + 2))
@@ -676,15 +767,27 @@ def test_the_correctly_rounded_time(fmt):
             rn_steps(fmt, F(1), N + 1)), rnd
         t = [r.at[n + 1][0][0][1] for n in range(N + 1)]
         code = C.RND_BY_NAME[rnd]
-        want = [C.round_once(FORMATS[fmt], code, F(n, 100))[0]
-                for n in range(N + 1)]
-        missed[rnd] = sum(1 for a, b in zip(t, want) if a != b)
-    assert missed["rne"] == 0
+        want = [C.round_once(fmt_, code, F(n, 100))[0] for n in range(N + 1)]
+        missed[rnd] = [n for n in range(N + 1) if t[n] != want[n]]
+        by_value[rnd] = [n for n in missed[rnd]
+                         if C.value_of(fmt_, t[n]) != C.value_of(fmt_, want[n])]
+        for n in by_value[rnd]:          # the float below n/100
+            assert t[n] == sf.next_down(fmt_, want[n])[0], (rnd, n)
+    assert missed["rne"] == missed["rup"] == []
+    floats = [n for n in range(1, N + 1) if n % 25 == 0]
+    assert len(floats) == 400
+    assert missed["rtz"] == by_value["rtz"] == floats
+    assert by_value["rdn"] == floats and missed["rdn"] == [0] + floats
+    g = compile_(RESIDUAL_MAP.format(fmt=fmt, rnd="rdn", lets=lets))
+    zero = lang.run(g, [[0, 0]], 1).states[0][1]
+    assert zero == fmt_.sign_mask                      # -0
+    assert said("In that map, at every format, it gave rup's rounding of "
+                "n/100 at every count; under rtz and rdn it missed at exactly "
+                f"the {len(floats)} counts n = 25j, where n/100 is itself a "
+                "float, giving the float below it; and under rdn t at n = 0 "
+                "is -0")
     if fmt == "fp64":
-        assert missed["rmm"] == missed["rup"] == 0
-        assert said(f"in that map at fp64 it missed rtz's rounding of n/100 "
-                    f"at {missed['rtz']:,} of the counts and rdn's at "
-                    f"{missed['rdn']:,}")
+        assert missed["rmm"] == []
         # the flow: the same lets in the counter's field
         for rnd in ("rne", "rmm"):
             g = compile_(f"system flow\nformat fp64\nround {rnd}\n"
@@ -699,6 +802,53 @@ def test_the_correctly_rounded_time(fmt):
                 "from the flow's count under both.")
     assert said("A map counts with `next k = k + 1`, exactly under every "
                 "attribute")
+
+
+SAMPLE = {"fp32": 4_000, "fp64": 4_000, "fp128": 2_000, "fp256": 1_000}
+
+
+def sample_counts(fmt):
+    """The seeded counts past 10^4, below 2^p, every magnitude: each from
+    the SHA-256 of its name - a bit length, then the bits - so the same
+    on every Python."""
+    p = FORMATS[fmt].prec
+    out = []
+    for i in range(SAMPLE[fmt]):
+        d = int.from_bytes(hashlib.sha256(f"T1 {fmt} {i}".encode()).digest(),
+                           "big")
+        e = 14 + d % (p - 14)                   # 2^14 > 10^4
+        out.append((1 << e) + (d >> 16) % (1 << e))
+    assert all(10_000 < k < 1 << p for k in out)
+    return out
+
+
+@pytest.mark.parametrize("fmt", FMTS)
+def test_the_correctly_rounded_time_past_ten_thousand(fmt):
+    """Markstein's hypotheses: dt is within 0.375 u of 1/100 at every
+    format, by the section's figures. And the seeded counts past 10^4,
+    each a lane of the map started at that count, one step: RN(k/100)
+    under rne and rmm, every one."""
+    u = F(1, 2 ** FORMATS[fmt].prec)
+    dt = C.value_of(FORMATS[fmt], rn(fmt, F(1, 100)))
+    rel = (dt - F(1, 100)) / F(1, 100) / u
+    assert rel == {"fp32": F(-3, 8), "fp64": F(3, 16), "fp128": F(3, 16),
+                   "fp256": F(-1, 8)}[fmt]
+    assert abs(rel) <= F(3, 8) < F(1, 2)
+    assert said("dt is within 0.375 u of 1/100 (u = 2^-p: -0.375 u at fp32, "
+                "+0.1875 u at fp64 and fp128, -0.125 u at fp256)")
+    counts = sample_counts(fmt)
+    lets = block("let q = k * dt")
+    for rnd in ("rne", "rmm"):
+        g = compile_(RESIDUAL_MAP.format(fmt=fmt, rnd=rnd, lets=lets))
+        r = lang.run(g, [[rn(fmt, F(k)), 0] for k in counts], 1)
+        assert [st[1] for st in r.states] == [rn(fmt, F(k, 100))
+                                              for k in counts], rnd
+    assert said("the gate holds a seeded 4,000, 4,000, 2,000 and 1,000 "
+                "counts past 10^4 through the language")
+    assert said("verifier-VT1 measured it under rne and rmm with no miss at "
+                "every count from 0 to 2^24 at fp32, and at 30,000, 15,000 "
+                "and 8,000 random counts at fp64, fp128 and fp256")
+    assert said("At counts no one has run it is believed.")
 
 
 # ---- forcing -----------------------------------------------------------------
@@ -876,23 +1026,48 @@ def test_the_phase_and_a_rounded_product():
 def test_the_forced_oscillator():
     """The section's example: accepted; its c and s are the rotation's at
     every step, bit for bit; x against the exact solution of
-    x'' + gamma x' + x = F cos t from rest, at every step to t = 100."""
+    x'' + gamma x' + x = F cos t from rest, at every step to t = 100; and
+    that distance split, by a twin of x and v forced by the exact cos t
+    at rk4's stage times (binary64, as the exact solution is), into the
+    rotation's lag (the example against the twin) and x's own rk4 error
+    (the twin against the exact solution)."""
     g = compile_(block("system forced"))
     assert compile_(lang.render_canonical(g)).to_bytes() == g.to_bytes()
     one = rn("fp64", F(1))
     r = lang.run(g, [[one, 0, 0, 0]], N, at=range(N + 1))
     rot = rotation_history("fp64", "rk4")
     assert all(tuple(r.at[n][0][0][:2]) == rot[n] for n in range(N + 1))
-    gamma, amp = 0.1, 5.0                  # F/gamma
+    force, gamma, h = 0.5, 0.1, 0.01
     wd = math.sqrt(1 - gamma * gamma / 4)
-    worst = 0.0
-    for n in range(N + 1):
+
+    def exact(t):
+        return force / gamma * (math.sin(t) - math.exp(-gamma * t / 2)
+                                * math.sin(wd * t) / wd)
+
+    def f(t, x, v):
+        return v, force * math.cos(t) - gamma * v - x
+    twin, x, v = [0.0], 0.0, 0.0
+    for n in range(N):
         t = n / 100
-        exact = amp * (math.sin(t) - math.exp(-gamma * t / 2)
-                       * math.sin(wd * t) / wd)
-        x = float(C.value_of(FORMATS["fp64"], r.at[n][0][0][2]))
-        worst = max(worst, abs(x - exact))
+        k1 = f(t, x, v)
+        k2 = f(t + h / 2, x + h / 2 * k1[0], v + h / 2 * k1[1])
+        k3 = f(t + h / 2, x + h / 2 * k2[0], v + h / 2 * k2[1])
+        k4 = f(t + h, x + h * k3[0], v + h * k3[1])
+        x += h / 6 * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0])
+        v += h / 6 * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1])
+        twin.append(x)
+    xs = [float(C.value_of(FORMATS["fp64"], r.at[n][0][0][2]))
+          for n in range(N + 1)]
+    worst = max(abs(xs[n] - exact(n / 100)) for n in range(N + 1))
+    lag = max(abs(xs[n] - twin[n]) for n in range(N + 1))
+    own = max(abs(twin[n] - exact(n / 100)) for n in range(N + 1))
     assert said(f"x stayed within {worst:.4e} of the exact solution")
+    assert said(f"The rotation's lag accounts for about {lag / 1e-8:.1f}e-08 "
+                f"of it and x's own rk4 error for about {own / 1e-8:.1f}e-08: "
+                f"a twin of x and v forced by the exact cos t at rk4's stage "
+                f"times stays within {own / 1e-8:.1f}e-08 of the exact "
+                f"solution, and the example within {lag / 1e-8:.1f}e-08 of the "
+                f"twin (verifier-VT1).")
 
 
 def test_every_source_the_section_shows_is_accepted():
