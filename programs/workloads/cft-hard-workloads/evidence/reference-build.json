@@ -1,0 +1,254 @@
+[
+  {
+    "id": "gray_scott_hard_fp64",
+    "field_operations": 4610,
+    "step_operations": 22024,
+    "seconds": 0.361,
+    "reference_sha256": "ffbd2ddfe30e9c94bfee45627b1ee091f602f971096cd0035215ae731378fae2",
+    "lane_flags": [
+      0,
+      16,
+      16
+    ]
+  },
+  {
+    "id": "lorenz_tangent_hard_fp64",
+    "field_operations": 7105,
+    "step_operations": 35980,
+    "seconds": 0.853,
+    "reference_sha256": "6ae7044373f505858ef3017e481432854b05641fd98a7b73335ca860d9ca9c72",
+    "lane_flags": [
+      16,
+      16,
+      16
+    ]
+  },
+  {
+    "id": "fput_hard_fp64",
+    "field_operations": 3072,
+    "step_operations": 4608,
+    "seconds": 0.09,
+    "reference_sha256": "9ae0b80c25e8662128c7f26f01153144273d40769d9baed8e8ef53e849ef2b22",
+    "lane_flags": [
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "id": "phi4_hard_fp64",
+    "field_operations": 2304,
+    "step_operations": 3072,
+    "seconds": 0.077,
+    "reference_sha256": "00b5fa41291df8a745f9e7130c6a8e79658fd875eed5a143da8a733a3527b77b",
+    "lane_flags": [
+      0,
+      16,
+      16
+    ]
+  },
+  {
+    "id": "kuramoto_sivashinsky_hard_fp64",
+    "field_operations": 3328,
+    "step_operations": 15104,
+    "seconds": 0.322,
+    "reference_sha256": "d0873e0676cd3dcb15f80ba2b42a0dbd818c3bcaf78e481987a2c6170e3a876c",
+    "lane_flags": [
+      0,
+      16,
+      16
+    ]
+  },
+  {
+    "id": "reservoir_hard_fp64",
+    "field_operations": 14614,
+    "step_operations": 14614,
+    "seconds": 0.802,
+    "reference_sha256": "538c2f5986625b3ba328f2247cad1b0cec6762fedb15b652050fda77f38dcb10",
+    "lane_flags": [
+      0,
+      16,
+      16
+    ]
+  },
+  {
+    "id": "riccati_hard_fp64",
+    "field_operations": 2881,
+    "step_operations": 12532,
+    "seconds": 0.497,
+    "reference_sha256": "2244257427b076fae25ad8f465fcc4c8f273ab89715fba36bc04c249dcdaee03",
+    "lane_flags": [
+      16,
+      16,
+      16
+    ]
+  },
+  {
+    "id": "gray_scott_extended_fp64",
+    "field_operations": 18434,
+    "step_operations": 88072,
+    "seconds": 1.543,
+    "reference_sha256": "f07529f5ffa4088b72a0763ae5b8d807613689f3ca695e688ae9aeb4a9b0c46f",
+    "lane_flags": [
+      0,
+      16,
+      16
+    ]
+  },
+  {
+    "id": "lorenz_tangent_extended_fp64",
+    "field_operations": 38497,
+    "step_operations": 193972,
+    "seconds": 5.322,
+    "reference_sha256": "d4669748f17be5e80ffe30ad8ab8ea17cd889e0b3a868f8ccb128d0c80c31ec3",
+    "lane_flags": [
+      16,
+      16,
+      16
+    ]
+  },
+  {
+    "id": "fput_extended_fp64",
+    "field_operations": 12288,
+    "step_operations": 18432,
+    "seconds": 0.521,
+    "reference_sha256": "b0fe169d648f23d6a1b06c29e5b52fb6194719981c3f18c60da1aee21db79884",
+    "lane_flags": [
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "id": "phi4_extended_fp64",
+    "field_operations": 9216,
+    "step_operations": 12288,
+    "seconds": 0.397,
+    "reference_sha256": "d573a87a15aceae8844a3026e3dfb072370e849ccfec151d15f04155faa127da",
+    "lane_flags": [
+      0,
+      16,
+      16
+    ]
+  },
+  {
+    "id": "kuramoto_sivashinsky_extended_fp64",
+    "field_operations": 13312,
+    "step_operations": 60416,
+    "seconds": 1.325,
+    "reference_sha256": "2f3f6f766a8af899aafc2a95646eef719b3193d621570a2f64fd4fbcbc34bd82",
+    "lane_flags": [
+      0,
+      16,
+      16
+    ]
+  },
+  {
+    "id": "reservoir_extended_fp64",
+    "field_operations": 56854,
+    "step_operations": 56854,
+    "seconds": 3.72,
+    "reference_sha256": "cfdafccc6eb0e39a74646bf0ea7df83633536ecbe2e0989a16959a1f0add1e65",
+    "lane_flags": [
+      0,
+      16,
+      16
+    ]
+  },
+  {
+    "id": "riccati_extended_fp64",
+    "field_operations": 43009,
+    "step_operations": 179204,
+    "seconds": 6.775,
+    "reference_sha256": "53f0b66217a2a93d35917364b4423f5ee2e2ba9027004df43f10b7ccb06719b5",
+    "lane_flags": [
+      16,
+      16,
+      16
+    ]
+  },
+  {
+    "id": "gray_scott_wide_fp256",
+    "field_operations": 4610,
+    "step_operations": 22024,
+    "seconds": 0.496,
+    "reference_sha256": "0d0489fa48adc0bdc10b596730017c3f7a5e2c275adaa4688834d207134740df",
+    "lane_flags": [
+      0,
+      16,
+      16
+    ]
+  },
+  {
+    "id": "lorenz_tangent_wide_fp256",
+    "field_operations": 7105,
+    "step_operations": 35980,
+    "seconds": 1.077,
+    "reference_sha256": "f66a80e6d936bed3707ec134bc4d241fcc23bd7b83c05e1f6a60fdd5acff7e08",
+    "lane_flags": [
+      16,
+      16,
+      16
+    ]
+  },
+  {
+    "id": "fput_wide_fp256",
+    "field_operations": 3072,
+    "step_operations": 4608,
+    "seconds": 0.112,
+    "reference_sha256": "9106017b581b5c3b325d9dcb9187d412f9bed3b60c24436b59d07a52bf076d75",
+    "lane_flags": [
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "id": "phi4_wide_fp256",
+    "field_operations": 2304,
+    "step_operations": 3072,
+    "seconds": 0.08,
+    "reference_sha256": "b05ec9a2c2344a35937ba0eaab07ba34ed81b1b03b0ea6dd1007ddbe566c1312",
+    "lane_flags": [
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "id": "kuramoto_sivashinsky_wide_fp256",
+    "field_operations": 3328,
+    "step_operations": 15104,
+    "seconds": 0.336,
+    "reference_sha256": "9a54752369b0fc82b14c83ee41f81c2986966112813e497e36dde8a2aa6725d8",
+    "lane_flags": [
+      0,
+      16,
+      16
+    ]
+  },
+  {
+    "id": "reservoir_wide_fp256",
+    "field_operations": 14614,
+    "step_operations": 14614,
+    "seconds": 0.829,
+    "reference_sha256": "3d0bf4c4a91c27017424eebb84509dc3c11a33f9f5a4c929d3735563a28cde7d",
+    "lane_flags": [
+      0,
+      16,
+      16
+    ]
+  },
+  {
+    "id": "riccati_wide_fp256",
+    "field_operations": 2881,
+    "step_operations": 12532,
+    "seconds": 0.43,
+    "reference_sha256": "7938b1128174b4bf3e8477a06bf525b31a3b21ad75ca5cef030870af6b10e1ba",
+    "lane_flags": [
+      16,
+      16,
+      16
+    ]
+  }
+]

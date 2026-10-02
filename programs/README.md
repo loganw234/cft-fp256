@@ -13,6 +13,15 @@ evening)" sections.
       out/<name>.cftp      the built images (gitignored)
       build.py check.py    what `make programs` and `make
                            programs-check` run
+      systems/             the language's sources (docs/LANGUAGE.md),
+                           their compiled files in compiled/ and
+                           compiled-tangent/
+      workloads/           programs written elsewhere, kept as
+                           delivered: the hard-workload pack
+                           (workloads/README.md, below)
+      acceptance.py        the acceptance set, a device's admission
+      acceptance.json      test, and what each entry must give
+                           (below)
 
     make programs         assemble every source with cft-asm, write
                           out/ and MANIFEST
@@ -303,6 +312,46 @@ Twenty-four coefficients is past the sixteen a four-bit operand field
 reaches, so the FMAs from `C16` on come out in the indexed (`kx`)
 form. The assembler chooses that per instruction and the source says
 nothing about it, which is the point.
+
+## Programs written elsewhere, `programs/workloads/`
+
+`programs/workloads/cft-hard-workloads/` holds 21 programs in the
+language, with their inputs, one-step vectors from an independent exact
+evaluator, and the runner that checks them. They were written by an
+OpenAI model that was given only the language brief and some example
+files, as a test of the language's portability, and they are kept as
+delivered: their own conventions, their own oracle and runner, their own
+documents, and one line changed in their runner.
+[workloads/README.md](workloads/README.md) says what the model was given,
+what the programs showed - all 21 compile, ten fit the card and are bit
+for bit there - and why they read differently from the rest of this tree.
+They are `.cftl` sources, not `.cfta` ones, so they take no row in the
+index above: their check is their own runner's.
+
+## The acceptance set, `programs/acceptance.py`
+
+Everything that runs on the card today, each entry one run fixed here:
+the six compiled references and the four variational ones
+(`programs/systems/compiled/` and `programs/systems/compiled-tangent/`)
+as committed, and the ten hard workloads that fit u50-rev7-quad, compiled
+from the pack's sources and held byte for byte to committed digests. Each
+run's lanes fill one block a tile of the quad, 256 at fp64 and 64 at
+fp256, and `programs/acceptance.json` holds what it must give: the state
+hash at every segment boundary and each segment's flags and STATUS, made
+on libcft's software backend at the card's scratch depth. It is the
+admission test for a new card:
+
+    python programs/acceptance.py --device <image.xclbin>
+
+passes a card when every digest is the set's, cft-audit accepts every
+certificate in full and the golden checks accept it - the golden audit
+where it fits in time, a golden spot check on every entry; the driver's
+docstring says what each check holds. On the software
+backend it is the `acceptance` runner stage, in the gate budget, with the
+hard workloads' own one-step vectors held against the interpreter and the
+ten card images; `acceptance-far`, in the full census only, holds the
+four images past the card to theirs. `--write` remakes the record, on the
+software backend only.
 
 ## What waited on another half of the round, and no longer does
 

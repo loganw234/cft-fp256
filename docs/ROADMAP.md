@@ -4672,13 +4672,14 @@ number the certificate plan's steps, not these.
 **The parts.** Parcels with verifiers, golden-first, the send-back rule
 and the testing rule, as the last rounds ran.
 
-0. **A1, the acceptance set**, approved, and built on its branch; not
-   yet verified or merged:
-   - the workloads tracked in the repo, at programs/workloads once A1
-     merges, with Logan's note;
+0. **A1, the acceptance set: built, verified by VA1 and merged**
+   (2026-10-02; docs/VALIDATION.md):
+   - the workloads tracked in the repo, at `programs/workloads/`, with
+     Logan's note;
    - the six references, the four variational references and the ten
      workloads that fit the card, with fixed runs and committed digests;
-   - a driver that is the admission test for a card;
+   - a driver that is the admission test for a card,
+     `programs/acceptance.py`; revision 7's quad passed it, 20 of 20;
    - the stages `acceptance` (gate) and `acceptance-far` (full census).
 1. **Revision 8, golden-first.** Each piece goes into the model
    (`seq.py`), the software backend (`program.c`), both assemblers, the
