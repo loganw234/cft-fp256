@@ -151,6 +151,13 @@ def cfta(low, prog, steps, meta):
         f"; graph   sha256 {g.sha256}",
         f"; system  {g.system}: {g.fmt_name}, {g.rnd_name}, {integ}"
         + (f", h = {K.literal(h)}" if h is not None else ""),
+    ]
+    if g.T:
+        n = g.n_primal
+        lines.append("; tangent " + ", ".join(
+            f"{vec} (slots {n * (k + 1)}..{n * (k + 2) - 1})"
+            for k, vec in enumerate(g.tangent)))
+    lines += [
         f"; target  {meta['target']}; {steps} steps a segment",
         f"; a step  {counts['alu']} ALU, {counts['loads']} loads, "
         f"{counts['stores']} stores, {counts['copies']} copies, and the "

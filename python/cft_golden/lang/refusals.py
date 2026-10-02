@@ -50,8 +50,9 @@ CATALOGUE = {
     "undefined-name": "a name used and never declared",
     "array-length": "an array whose length is not written as a whole "
                     "number from 1 to 32,768",
-    "lane-capacity": "a lane of more than 32,768 values (state and lane "
-                     "params), the deepest scratch any tile publishes",
+    "lane-capacity": "a lane of more than 32,768 values (state, tangent "
+                     "vectors and lane params), the deepest scratch any "
+                     "tile publishes",
     "unused": "a const, param, lane param, let or h that nothing uses",
     "cycle": "a definition that depends on itself",
     "not-constant": "a value needed when the program is compiled that "
@@ -84,6 +85,13 @@ CATALOGUE = {
                             "position, or a momentum's a momentum",
     "expansion-mismatch": "a written-out step that is not the "
                           "integrator's expansion",
+    # -- the variational equations --------------------------------------
+    "tangent-mismatch": "a written tangent equation, tangent let or "
+                        "expansion line that is not the derivation's",
+    "tangent-scope": "a tangent component read where it cannot be: by the "
+                     "state's equations, lets or constants, or by another "
+                     "tangent vector's equations; or a tangent vector read "
+                     "whole",
     # -- operations v1 does not have -----------------------------------
     "runtime-division": "a division with an operand that is not a "
                         "constant",
@@ -119,7 +127,8 @@ CATALOGUE = {
     "step-size-sign": "a run's h of the other sign from the graph's: a "
                       "constant may hold h's sign, fixed when the graph "
                       "was compiled",
-    "graph-format": "bytes that are not a version-1 step graph",
+    "graph-format": "bytes that are not a step graph of version 1 (or 2, "
+                    "with tangent vectors)",
 }
 
 # The compiler's refusals, reserved for it (L2): the target's stated

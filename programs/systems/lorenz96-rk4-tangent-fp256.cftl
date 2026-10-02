@@ -1,0 +1,12 @@
+; Lorenz (1996) on a ring of 40 with its variational equations:
+; lorenz96-rk4-fp256 and one tangent vector, stepped beside the state by
+; the same program; the tangent is derived (docs/LANGUAGE.md, "The
+; variational equations").
+system lorenz96
+format fp256
+round  rne
+state  x[40] cyclic
+tangent v
+param  F = 8
+d/dt x[i] = fma(x[i+1] - x[i-2], x[i-1], F - x[i])
+step   rk4, h = 1/100

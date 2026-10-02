@@ -31,6 +31,7 @@ from fractions import Fraction
 
 from .. import chars
 from . import constants as C
+from .graph import PRIMAL_OF
 from .refusals import too_deep
 from .syntax import Bin, Call, Name, Num
 from .templates import TEMPLATES, TITLE
@@ -55,7 +56,10 @@ NE = "≠"
 
 def greek(name):
     """A name as the mathematical form prints it: x, or x[3], with a
-    Greek letter for a name that spells one."""
+    Greek letter for a name that spells one - each part of a dotted name
+    (a tangent's v.x, v.r) by itself."""
+    if "." in name:
+        return ".".join(greek(part) for part in name.split("."))
     base, bracket, rest = name.partition("[")
     return GREEK.get(base, base) + (bracket + rest if bracket else "")
 
@@ -81,14 +85,29 @@ _KIND = {"add": "sum", "sub": "sum", "mul": "product", "cmplt": "cmp",
 
 
 class _Canon:
-    def __init__(self, g, sec):
+    """A section written in the language. A tangent section is written
+    for one vector `vec`: its tN is that vector's component (v.x), its
+    own nodes dN are labelled v.<label>, and its nN is a labelled node of
+    `primal`, the section it differentiates, written by its label."""
+
+    def __init__(self, g, sec, vec=None, primal=None):
         self.g = g
         self.sec = sec
         self.comps = g.components()
+        self.vec = vec
+        self.primal = primal
+        self.own = "n" if vec is None else "d"
+
+    def name(self, label):
+        return label if self.vec is None else f"{self.vec}.{label}"
 
     def ref(self, ref, parent):
         """A ref written where `parent` (top, arg, bin or neg) uses it."""
-        if ref[0] != "n":
+        if ref[0] == "t":
+            return f"{self.vec}.{self.comps[int(ref[1:])]}"
+        if ref[0] == "n" and self.vec is not None:
+            return self.primal.nodes[int(ref[1:])][2]
+        if ref[0] != self.own:
             text = _leaf_text(self.g, ref, self.comps)
             if (ref[0] == "c" and parent in ("bin", "neg")
                     and C.is_compound(text)):
@@ -96,7 +115,7 @@ class _Canon:
             return text
         op, args, label = self.sec.nodes[int(ref[1:])]
         if label is not None:
-            return label
+            return self.name(label)
         text, kind = self.node(op, args)
         if kind in ("bin", "neg") and parent in ("bin", "neg"):
             return f"({text})"
@@ -104,7 +123,7 @@ class _Canon:
 
     def _inline(self, ref, ops):
         """The unlabelled node a ref names when its op is one of `ops`."""
-        if ref[0] != "n":
+        if ref[0] != self.own:
             return None
         op, args, label = self.sec.nodes[int(ref[1:])]
         if label is not None or op not in ops:
@@ -160,13 +179,14 @@ class _Canon:
         return self.node(op, args)[0]
 
 
-def _refs_labels(sec, i, seen):
-    """The labelled nodes node i's written expression names."""
+def _refs_labels(sec, i, seen, own="n"):
+    """The labelled nodes node i's written expression names (`own` is
+    the section's own node kind: n, or d in a tangent section)."""
     out = []
     stack = list(sec.nodes[i][1])
     while stack:
         r = stack.pop()
-        if r[0] != "n":
+        if r[0] != own:
             continue
         k = int(r[1:])
         if sec.nodes[k][2] is not None:
@@ -210,9 +230,10 @@ def _groups(integ):
     return out
 
 
-def _let_order(g, sec, integ):
+def _let_order(g, sec, integ, own="n"):
     """The labelled nodes of a section in the order they are written,
-    each after every label its definition names (asserted)."""
+    each after every label its definition names (asserted). A tangent
+    section's labels are the primal's (k1.x, r), so it is ordered alike."""
     labelled = [k for k, (_o, _a, lb) in enumerate(sec.nodes)
                 if lb is not None]
     if integ is None:
@@ -235,7 +256,7 @@ def _let_order(g, sec, integ):
             order.extend(k for _rest, k in groups[prefix])
     done = set()
     for k in order:
-        for dep in _refs_labels(sec, k, done):
+        for dep in _refs_labels(sec, k, done, own):
             if dep not in done:
                 raise AssertionError(f"label {sec.nodes[k][2]} is written "
                                      f"before {sec.nodes[dep][2]}")
@@ -255,6 +276,31 @@ def definitions(g):
         order = [k for k, (_o, _a, lb) in enumerate(sec.nodes)
                  if lb is not None]
     return {sec.nodes[k][2]: can.definition(k) for k in order}
+
+
+def _tangent_order(g, section):
+    sec = g.section(section)
+    integ = g.integrator[0] if section == "tangent_step" and g.is_flow \
+        else None
+    try:
+        return _let_order(g, sec, integ, "d")
+    except AssertionError:
+        return [k for k, (_o, _a, lb) in enumerate(sec.nodes)
+                if lb is not None]
+
+
+def tangent_definitions(g, section, vec):
+    """{name: its definition as the canonical form writes it}, for a
+    tangent section written for the vector `vec`: each labelled node
+    (v.k1.x, v.r) in the canonical form's order, then each component's
+    output (v.x) - what a written tangent part is compared by."""
+    sec = g.section(section)
+    can = _Canon(g, sec, vec, g.section(PRIMAL_OF[section]))
+    out = {f"{vec}.{sec.nodes[k][2]}": can.definition(k)
+           for k in _tangent_order(g, section)}
+    for c, o in enumerate(sec.out):
+        out[f"{vec}.{can.comps[c]}"] = can.ref(o, "top")
+    return out
 
 
 def _const_rows(g):
@@ -310,7 +356,18 @@ def _render_canonical(g):
              ";"]
     if g.is_flow:
         lines.append(f"; operations: the equations {g.count_text('field')};")
-        lines.append(f";             a step {g.count_text('step')}")
+        if g.tangent:
+            lines.append(f";             a step {g.count_text('step')};")
+            lines.append(f";             each tangent vector's equations "
+                         f"{g.count_text('tangent_field')}")
+            lines.append(f";             and its step "
+                         f"{g.count_text('tangent_step')}")
+        else:
+            lines.append(f";             a step {g.count_text('step')}")
+    elif g.tangent:
+        lines.append(f"; operations: a step {g.count_text('step')};")
+        lines.append(f";             each tangent vector's step "
+                     f"{g.count_text('tangent_step')}")
     else:
         lines.append(f"; operations: a step {g.count_text('step')}")
     lines.append(";")
@@ -331,6 +388,8 @@ def _render_canonical(g):
     lines.append(f"round  {attr}")
     lines.append("state  " + ", ".join(
         n if ln is None else f"{n}[{ln}]" for n, ln in g.state))
+    if g.tangent:
+        lines.append("tangent " + ", ".join(g.tangent))
     decl = []
     for name, value, bits, flags in g.param:
         decl.append((f"param  {name} = {C.literal(value)}",
@@ -359,6 +418,19 @@ def _render_canonical(g):
     word = "d/dt" if g.is_flow else "next"
     for c, out in enumerate(eq_sec.out):
         lines.append(f"{word} {comps[c]} = {can.ref(out, 'top')}")
+    # each tangent vector's equations: the derivative of those above, in
+    # the language, every operation and its order explicit - held to the
+    # derivation when read back (`tangent-mismatch`)
+    tkey = "tangent_field" if g.is_flow else "tangent_step"
+    for vec in g.tangent:
+        tsec = g.section(tkey)
+        tcan = _Canon(g, tsec, vec, eq_sec)
+        lines.append("")
+        for k in _tangent_order(g, tkey):
+            lines.append(f"let {vec}.{tsec.nodes[k][2]} = "
+                         f"{tcan.definition(k)}")
+        for c, out in enumerate(tsec.out):
+            lines.append(f"{word} {vec}.{comps[c]} = {tcan.ref(out, 'top')}")
     lines.append("")
     step = f"step {integ}"
     if h is not None:
@@ -374,6 +446,15 @@ def _render_canonical(g):
             lines.append(f"  let {g.step.nodes[k][2]} = {can.definition(k)}")
         for c, out in enumerate(g.step.out):
             lines.append(f"  next {comps[c]} = {can.ref(out, 'top')}")
+        for vec in g.tangent:
+            tsec = g.tangent_step
+            tcan = _Canon(g, tsec, vec, g.step)
+            for k in _tangent_order(g, "tangent_step"):
+                lines.append(f"  let {vec}.{tsec.nodes[k][2]} = "
+                             f"{tcan.definition(k)}")
+            for c, out in enumerate(tsec.out):
+                lines.append(f"  next {vec}.{comps[c]} = "
+                             f"{tcan.ref(out, 'top')}")
         lines.append("end")
     return "\n".join(lines) + "\n"
 
@@ -452,13 +533,24 @@ def m_const(value, factor=None):
 
 
 class _Math:
-    def __init__(self, g, sec):
+    """A section in conventional notation; a tangent section for one
+    vector `vec`, as _Canon writes one (its tN is v.x, its own nodes'
+    labels v.r, its nN the primal label)."""
+
+    def __init__(self, g, sec, vec=None, primal=None):
         self.g = g
         self.sec = sec
         self.comps = g.components()
+        self.vec = vec
+        self.primal = primal
+        self.own = "n" if vec is None else "d"
 
     def ref(self, ref):
         kind, i = ref[0], int(ref[1:])
+        if kind == "t":
+            return M(greek(f"{self.vec}.{self.comps[i]}"), 3)
+        if kind == "n" and self.vec is not None:
+            return M(greek(self.primal.nodes[i][2]), 3)
         if kind == "s":
             return M(greek(self.comps[i]), 3)
         if kind == "l":
@@ -470,11 +562,12 @@ class _Math:
             return m_const(value, factor)
         op, args, label = self.sec.nodes[i]
         if label is not None:
-            return M(greek(label), 3)
+            return M(greek(label if self.vec is None
+                           else f"{self.vec}.{label}"), 3)
         return self.node(op, args)
 
     def _inline(self, ref, ops):
-        if ref[0] != "n":
+        if ref[0] != self.own:
             return None
         op, args, label = self.sec.nodes[int(ref[1:])]
         if label is not None or op not in ops:
@@ -542,6 +635,88 @@ def _template_math(integ):
     """The template's scheme in conventional notation: each let used
     once and not a call of the right-hand side is written in place."""
     body = TEMPLATES[integ]
+    inline, _defs, tm, _constant = _template_parts(integ)
+    out = []
+    for st in body:
+        name = st.target.name
+        if st.kind == "let":
+            if name not in inline:
+                out.append(f"  {name} = {tm(st.expr).text}")
+        else:
+            out.append(f"  {name} {MAPSTO} {tm(st.expr).text}")
+    return out
+
+
+def _template_tangent_math(integ):
+    """The template's scheme for a tangent vector: the same method on
+    δY (δQ and δP), the tangent of each line of the scheme above. A call
+    k = f(Z) becomes δk = Df(Z)·δZ - the right-hand sides of the tangent
+    at the stage Z, along the stage's tangent - and every combination of
+    stages the same combination of their tangents; h and the template's
+    constants are coefficients."""
+    body = TEMPLATES[integ]
+    inline, defs, tm, constant = _template_parts(integ)
+
+    def call(e):
+        z = e.args[0]
+        return M(f"D{e.name}({tm(z).text}){DOT}{_factor(td(z))}", 1)
+
+    def td(e):
+        """The tangent of a template expression, or None where zero."""
+        if isinstance(e, Num):
+            return None
+        if isinstance(e, Name):
+            if e.name == "h":
+                return None
+            if e.name in inline:
+                return td(defs[e.name])
+            return M(f"δ{e.name}", 3)
+        if isinstance(e, Bin):
+            if e.op == "/":
+                return None
+            a, b = td(e.left), td(e.right)
+            if e.op == "*":
+                if a is not None and b is not None:
+                    raise AssertionError("a template multiplies two stages")
+                if a is None and b is None:
+                    return None
+                return m_prod(tm(e.left), b) if a is None else \
+                    m_prod(a, tm(e.right))
+            if a is None:
+                return b if e.op == "+" or b is None else m_neg(b)
+            if b is None:
+                return a
+            return m_sum(a, b, sub=e.op == "-")
+        if isinstance(e, Call) and e.name == "fma":
+            a, b, c = e.args
+            if td(a) is not None:
+                raise AssertionError("a template's fma scales by a stage")
+            db, dc = td(b), td(c)
+            prod = None if db is None else m_prod(tm(a), db)
+            if prod is None:
+                return dc
+            if dc is None:
+                return prod
+            return m_sum(dc, prod) if constant(a) else m_sum(prod, dc)
+        if isinstance(e, Call):
+            return call(e)
+        raise AssertionError(f"template expression {e!r}")
+
+    out = []
+    for st in body:
+        name = st.target.name
+        if st.kind == "let":
+            if name not in inline:
+                out.append(f"  δ{name} = {td(st.expr).text}")
+        else:
+            out.append(f"  δ{name} {MAPSTO} {td(st.expr).text}")
+    return out
+
+
+def _template_parts(integ):
+    """(the lets written in place, every let's expression, the renderer
+    of a template expression, the test for a constant one)."""
+    body = TEMPLATES[integ]
     uses = {}
 
     def count(e):
@@ -586,15 +761,11 @@ def _template_math(integ):
             return m_sum(c, prod) if constant(e.args[0]) else m_sum(prod, c)
         return M(f"{e.name}({tm(e.args[0]).text})", 3)
 
-    out = []
-    for st in body:
-        name = st.target.name
-        if st.kind == "let":
-            if name not in inline:
-                out.append(f"  {name} = {tm(st.expr).text}")
-        else:
-            out.append(f"  {name} {MAPSTO} {tm(st.expr).text}")
-    return out
+    return inline, defs, tm, constant
+
+
+def _tangent_lets(sec):
+    return [k for k, (_o, _a, lb) in enumerate(sec.nodes) if lb is not None]
 
 
 def _render_math(g):
@@ -631,11 +802,28 @@ def _render_math(g):
         for k in lets:
             lines.append(f"  {greek(sec.nodes[k][2])} = {mm.definition(k)}")
         lines.append("")
+    split = {}
+    if integ == "stormer-verlet":
+        for key, vec in (("q", "Q"), ("p", "P")):
+            split[vec] = [c for d in options[key] for c in comps
+                          if c == d or c.startswith(d + "[")]
     if g.is_flow:
         lines.append("the equations")
         for c, out in enumerate(sec.out):
             lines.append(f"  d{greek(comps[c])}/dt = {mm.ref(out).text}")
         lines.append("")
+        for vec in g.tangent:
+            tsec = g.tangent_field
+            tmm = _Math(g, tsec, vec, sec)
+            lines.append(f"the variational equations of the tangent vector "
+                         f"{greek(vec)}")
+            for k in _tangent_lets(tsec):
+                lines.append(f"  {greek(vec + '.' + tsec.nodes[k][2])} = "
+                             f"{tmm.definition(k)}")
+            for c, out in enumerate(tsec.out):
+                lines.append(f"  d({greek(vec + '.' + comps[c])})/dt = "
+                             f"{tmm.ref(out).text}")
+            lines.append("")
         if integ == "stormer-verlet":
             lines.append(f"one step: {TITLE[integ]}, with v the right-hand "
                          f"sides of dQ/dt and a those of dP/dt")
@@ -644,14 +832,25 @@ def _render_math(g):
                          f"sides above")
         lines.append(f"  h = {m_const(h).text}")
         lines.append(f"  Y = ({', '.join(greek(c) for c in comps)})")
-        if integ == "stormer-verlet":
-            for key, vec in (("q", "Q"), ("p", "P")):
-                names = []
-                for d in options[key]:
-                    names.extend(c for c in comps
-                                 if c == d or c.startswith(d + "["))
-                lines.append(f"  {vec} = ({', '.join(greek(c) for c in names)})")
+        for vec, names in split.items():
+            lines.append(f"  {vec} = ({', '.join(greek(c) for c in names)})")
         lines.extend(_template_math(integ))
+        for vec in g.tangent:
+            lines.append("")
+            if integ == "stormer-verlet":
+                lines.append(f"the tangent {greek(vec)}'s step: the same "
+                             f"method on δQ and δP, with Dv·δP and Da·δQ the "
+                             f"right-hand sides of {greek(vec)} above")
+            else:
+                lines.append(f"the tangent {greek(vec)}'s step: the same "
+                             f"method on δY, with Df·δY the right-hand sides "
+                             f"of {greek(vec)} above")
+            lines.append(f"  δY = ({', '.join(greek(vec + '.' + c) for c in comps)})")
+            for part, names in split.items():
+                lines.append(f"  δ{part} = ("
+                             + ", ".join(greek(vec + '.' + c) for c in names)
+                             + ")")
+            lines.extend(_template_tangent_math(integ))
     else:
         lines.append(f"one step: {TITLE['map']}")
         if h is not None:
@@ -659,4 +858,16 @@ def _render_math(g):
         lines.append(f"  Y = ({', '.join(greek(c) for c in comps)})")
         for c, out in enumerate(sec.out):
             lines.append(f"  {greek(comps[c])} {MAPSTO} {mm.ref(out).text}")
+        for vec in g.tangent:
+            tsec = g.tangent_step
+            tmm = _Math(g, tsec, vec, sec)
+            lines.append("")
+            lines.append(f"the tangent of the map, along the tangent vector "
+                         f"{greek(vec)}")
+            for k in _tangent_lets(tsec):
+                lines.append(f"  {greek(vec + '.' + tsec.nodes[k][2])} = "
+                             f"{tmm.definition(k)}")
+            for c, out in enumerate(tsec.out):
+                lines.append(f"  {greek(vec + '.' + comps[c])} {MAPSTO} "
+                             f"{tmm.ref(out).text}")
     return "\n".join(lines) + "\n"

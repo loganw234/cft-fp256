@@ -4464,9 +4464,12 @@ intention-out beside every image.
      expression's, golden-first in the interpreter, then in the
      compiler.
    - It carries tangent vectors, not whole Jacobians. One Lorenz-96
-     tangent vector, with RK4's stage vectors, doubles the program's
-     200 slots to about 400: within the U50's 2,048, and past any
-     256-slot target.
+     tangent vector, with RK4's stage vectors, was estimated here to
+     double the program's 200 slots to about 400, past any 256-slot
+     target. As built (L3, measured), the compiler's interleaved walk
+     keeps N = 40 with one vector at 139 slots, which every target
+     holds; a 256-slot target holds one vector up to N = 98 and refuses
+     it from N = 99.
    - Its gate is L2's, plus two more:
      - the tangent system against an exact derivative in mpmath;
      - Lorenz-63's largest Lyapunov exponent (about 0.906) as a smoke

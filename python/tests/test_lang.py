@@ -369,6 +369,10 @@ REFUSALS = {
     "constant-division-by-zero": (_src("state x", "next x = x * (1/0)"), 4),
     "constant-overflow": (_src("state x", "next x = x * 1e400"), 4),
     "constant-rounds-to-zero": (_src("state x", "next x = x * 1e-400"), 4),
+    # the variational equations (L3)
+    "tangent-scope": (_src("state x", "tangent v", "next x = x * v.x"), 5),
+    "tangent-mismatch": (_src("state x", "tangent v", "next x = x * x",
+                              "next v.x = x * v.x"), 6),
 }
 
 
@@ -609,6 +613,36 @@ SCHEME = {"euler": "the forward Euler method (euler)",
                             "(stormer-verlet)",
           "map": "the map (map)"}
 
+# Each integrator's scheme, word for word, and its tangent's - the test's
+# own copies, written from the textbook schemes, not from the renderer. A
+# printed scheme line the step does not compute is caught here: an unused
+# fifth rk4 stage once passed every check (verifier-VL1; held word for word
+# since L3, 2026-10-01, closing L1's recorded follow-up).
+SCHEME_LINES = {
+    "euler": ["  Y ↦ Y + h·f(Y)"],
+    "rk4": ["  k1 = f(Y)",
+            "  k2 = f(Y + (h/2)·k1)",
+            "  k3 = f(Y + (h/2)·k2)",
+            "  k4 = f(Y + h·k3)",
+            "  Y ↦ Y + (h/6)·(k1 + 2·k2 + 2·k3 + k4)"],
+    "stormer-verlet": ["  Q1 = Q + (h/2)·v(P)",
+                       "  P1 = P + h·a(Q1)",
+                       "  Q ↦ Q1 + (h/2)·v(P1)",
+                       "  P ↦ P1"],
+}
+TANGENT_SCHEME_LINES = {
+    "euler": ["  δY ↦ δY + h·Df(Y)·δY"],
+    "rk4": ["  δk1 = Df(Y)·δY",
+            "  δk2 = Df(Y + (h/2)·k1)·(δY + (h/2)·δk1)",
+            "  δk3 = Df(Y + (h/2)·k2)·(δY + (h/2)·δk2)",
+            "  δk4 = Df(Y + h·k3)·(δY + h·δk3)",
+            "  δY ↦ δY + (h/6)·(δk1 + 2·δk2 + 2·δk3 + δk4)"],
+    "stormer-verlet": ["  δQ1 = δQ + (h/2)·Dv(P)·δP",
+                       "  δP1 = δP + h·Da(Q1)·δQ1",
+                       "  δQ ↦ δQ1 + (h/2)·Dv(P1)·δP1",
+                       "  δP ↦ δP1"],
+}
+
 
 class _Lines:
     """A form's lines, read in order, each held to what is expected: a
@@ -720,7 +754,22 @@ def check_canonical_said(g, canon):
         said = r.after("; operations: the equations ")
         assert said.endswith(";")
         _counts_said(said[:-1], g.field)
-        _counts_said(r.after(";             a step "), g.step)
+        said = r.after(";             a step ")
+        if g.tangent:
+            assert said.endswith(";")
+            _counts_said(said[:-1], g.step)
+            _counts_said(r.after(";             each tangent vector's "
+                                 "equations "), g.tangent_field)
+            _counts_said(r.after(";             and its step "),
+                         g.tangent_step)
+        else:
+            _counts_said(said, g.step)
+    elif g.tangent:
+        said = r.after("; operations: a step ")
+        assert said.endswith(";")
+        _counts_said(said[:-1], g.step)
+        _counts_said(r.after(";             each tangent vector's step "),
+                     g.tangent_step)
     else:
         _counts_said(r.after("; operations: a step "), g.step)
     r.take(";")
@@ -783,8 +832,12 @@ def check_math_said(g, math):
     check 2 evaluates: the title and the header (format and attribute),
     the fixed sentences word for word, each param's and lane param's
     name and default, each let's name, each state component's name
-    wherever it is printed, the integrator's name, h's value and the
-    vectors Y, Q and P - each name against Unicode's own Greek letters."""
+    wherever it is printed, the integrator's name, h's value, the
+    vectors Y, Q and P, and the scheme's lines word for word (the test's
+    own SCHEME_LINES); for each tangent vector, its section headers word
+    for word, each tangent let's and component's name, its δY, δQ and δP
+    and its scheme word for word (TANGENT_SCHEME_LINES) - each name
+    against Unicode's own Greek letters."""
     fmt, attr = g.fmt.name, g.round_name
     integ, h, options = g.integrator
     comps = g.components()
@@ -821,11 +874,27 @@ def check_math_said(g, math):
             r.after(f"  {_glyph(lb)} = ")
         r.take("")
     y = "  Y = (" + ", ".join(_glyph(c) for c in comps) + ")"
+    split = {}
+    if integ == "stormer-verlet":
+        for key, vec in (("q", "Q"), ("p", "P")):
+            split[vec] = [c for d in options[key] for c in comps
+                          if c == d or c.startswith(d + "[")]
+    tsec = g.tangent_field if g.is_flow else g.tangent_step
+    tlabels = [] if tsec is None else \
+        [lb for _o, _a, lb in tsec.nodes if lb is not None]
     if g.is_flow:
         r.take("the equations")
         for c in comps:
             r.after(f"  d{_glyph(c)}/dt = ")
         r.take("")
+        for vec in g.tangent:
+            r.take(f"the variational equations of the tangent vector "
+                   f"{_tglyph(vec)}")
+            for lb in tlabels:
+                r.after(f"  {_tglyph(vec, lb)} = ")
+            for c in comps:
+                r.after(f"  d({_tglyph(vec, c)})/dt = ")
+            r.take("")
         if integ == "stormer-verlet":
             r.take(f"one step: {SCHEME[integ]}, with v the right-hand sides "
                    f"of dQ/dt and a those of dP/dt")
@@ -834,15 +903,28 @@ def check_math_said(g, math):
                    f"above")
         assert value_of("h") == h
         r.take(y)
-        if integ == "stormer-verlet":
-            for key, vec in (("q", "Q"), ("p", "P")):
-                names = [c for d in options[key] for c in comps
-                         if c == d or c.startswith(d + "[")]
-                r.take(f"  {vec} = (" + ", ".join(_glyph(c) for c in names)
-                       + ")")
-        # the scheme's own lines, which check 2 evaluates
-        while r.peek() is not None:
-            assert re.fullmatch(r"  \S+ (=|↦) .+", r.take())
+        for vec, names in split.items():
+            r.take(f"  {vec} = (" + ", ".join(_glyph(c) for c in names) + ")")
+        # the scheme's own lines, word for word; check 2 evaluates them
+        for line in SCHEME_LINES[integ]:
+            r.take(line)
+        for vec in g.tangent:
+            v = _tglyph(vec)
+            r.take("")
+            if integ == "stormer-verlet":
+                r.take(f"the tangent {v}'s step: the same method on δQ and "
+                       f"δP, with Dv·δP and Da·δQ the right-hand sides of {v} "
+                       f"above")
+            else:
+                r.take(f"the tangent {v}'s step: the same method on δY, with "
+                       f"Df·δY the right-hand sides of {v} above")
+            r.take("  δY = (" + ", ".join(_tglyph(vec, c) for c in comps)
+                   + ")")
+            for part, names in split.items():
+                r.take(f"  δ{part} = (" + ", ".join(_tglyph(vec, c)
+                                                    for c in names) + ")")
+            for line in TANGENT_SCHEME_LINES[integ]:
+                r.take(line)
     else:
         r.take(f"one step: {SCHEME['map']}")
         if h is not None:
@@ -850,7 +932,23 @@ def check_math_said(g, math):
         r.take(y)
         for c in comps:
             r.after(f"  {_glyph(c)} ↦ ")
+        for vec in g.tangent:
+            r.take("")
+            r.take(f"the tangent of the map, along the tangent vector "
+                   f"{_tglyph(vec)}")
+            for lb in tlabels:
+                r.after(f"  {_tglyph(vec, lb)} = ")
+            for c in comps:
+                r.after(f"  {_tglyph(vec, c)} ↦ ")
     r.done()
+
+
+def _tglyph(vec, name=None):
+    """A tangent vector, or one of its components or lets (v.x, v.r), as
+    the mathematical form should print it: each part by Unicode's table."""
+    if name is None:
+        return _glyph(vec)
+    return ".".join(_glyph(part) for part in f"{vec}.{name}".split("."))
 
 
 def check_comments(g, canon, math):
@@ -878,6 +976,7 @@ def check_intention_out(g, rng, points=3):
     math = lang.render_math(g)
     check_comments(g, canon, math)
     form = MathForm(math)
+    assert len(form.tvectors) == len(g.tangent)
     for _ in range(points):
         state, params, lanes = _point(g, rng)
         if g.is_flow:
@@ -885,6 +984,17 @@ def check_intention_out(g, rng, points=3):
                 g.exact_eval("field", state, params, lanes)
         assert form.step(state, params, lanes) == \
             g.exact_eval("step", state, params, lanes)
+        # each tangent vector's printed equations and step, against the
+        # tangent sections evaluated exactly along a random tangent
+        for k in range(len(g.tangent)):
+            tangent = _point(g, rng)[0]
+            if g.is_flow:
+                assert form.tangent_field(k, state, tangent, params, lanes) \
+                    == g.exact_eval("tangent_field", state, params, lanes,
+                                    tangent=tangent)
+            assert form.tangent_step(k, state, tangent, params, lanes) == \
+                g.exact_eval("tangent_step", state, params, lanes,
+                             tangent=tangent)
 
 
 @pytest.mark.parametrize("name", REFS)
@@ -1633,6 +1743,11 @@ _SAID_PLANTS = [   # (which form, the change), each a wrong statement
         "fp64": "fp32"}.get(m.group(1), "fp64") + "), ", t, count=1)),
     ("math", lambda t: t.replace("Runge-Kutta", "Runge-Kutta-Fehlberg", 1)
      .replace("one step: the map", "one step: a map", 1)),
+    # verifier-VL1's unused fifth stage, which every check passed before
+    # the scheme lines were held word for word (L3, 2026-10-01)
+    ("math", lambda t: t.replace("  k4 = f(Y + h·k3)\n",
+                                 "  k4 = f(Y + h·k3)\n  k5 = f(Y + h·k4)\n",
+                                 1)),
 ]
 
 

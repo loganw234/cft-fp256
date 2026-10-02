@@ -15,7 +15,11 @@ that argument rests on, cheap enough for the golden stage:
 * sharing's commutations: + and * and fma's multiplicands;
 * the targets, the refusal names (the language's one list), the
   manifest's shape, asm.py's round trip, the internal check refusing a
-  damaged image, and the command line's exits.
+  damaged image, and the command line's exits;
+* the variational equations: an image with tangent vectors run as
+  lang.run runs it, its lane block and manifest, the interleaved
+  candidate offered only with tangents, scratch-capacity naming the
+  tangent's slots.
 """
 
 import json
@@ -456,3 +460,89 @@ def test_a_step_count_past_the_digit_limit_is_refused_by_name():
         cftc.compile_text(src, 10 ** 5000)
     assert e.value.name == "segment-steps"
     assert len(str(e.value)) < 400
+
+
+# ---- the variational equations (L3) -----------------------------------------
+# The `tangent` stage (programs/tangent_check.py) holds every compiled
+# variational image to lang.run on seq.py; these are its smaller facts.
+
+def _tangent_lanes(fmt, n, count, T, seed):
+    rng = random.Random(seed)
+
+    def val():
+        return K.round_once(fmt, sf.RND_RNE,
+                            Fraction(rng.randint(-900, 900), 97))[0]
+    states = [[val() for _ in range(n)] for _ in range(count)]
+    tans = [[[val() for _ in range(n)] for _ in range(T)]
+            for _ in range(count)]
+    return states, tans
+
+
+def test_a_variational_image_runs_as_lang_runs():
+    for name, T in (("lorenz63-rk4-tangent-fp64", 1),):
+        c = cftc.compile_file(SYSTEMS / f"{name}.cftl", 5)
+        g = c.ir
+        assert (g.version, g.T, g.n_primal, g.n_state) == (2, 1, 3, 6)
+        states, tans = _tangent_lanes(g.fmt, 3, 4, T, name)
+        r = c.run(states, tangents=tans)
+        ref = lang.run(c.graph, states, 5, tangents=tans)
+        m = g.m
+        for k in range(4):
+            out = r.scratch_out[k * m:(k + 1) * m]
+            assert out[:3] == ref.states[k]
+            assert [out[3:6]] == ref.tangents[k]
+        assert r.flags == ref.flags
+
+
+def test_the_lane_block_and_the_manifest_of_a_variational_system():
+    """[state | v | w | lane params], in the image's scratch block and in
+    the manifest's layout; the manifest says version 2 and the vectors."""
+    text = ("system s\nformat fp64\nstate x, y\ntangent v, w\n"
+            "lane param m = 3\nnext x = x * y\nnext y = fma(m, x, y)\n"
+            "step map\n")
+    c = cftc.compile_text(text, 2)
+    g = c.ir
+    assert g.components == ["x", "y", "v.x", "v.y", "w.x", "w.y"]
+    block = c.scratch_block([[1, 2]], tangents=[[[3, 4], [5, 6]]])
+    lane_m = K.round_once(g.fmt, sf.RND_RNE, Fraction(3))[0]
+    assert block == [1, 2, 3, 4, 5, 6, lane_m]
+    with pytest.raises(ValueError):
+        c.scratch_block([[1, 2]])
+    man = c.manifest
+    assert man["graph"]["cftl_graph"] == 2
+    assert man["tangent"] == {"vectors": ["v", "w"], "components": 2,
+                              "slots": [2, 4]}
+    kinds = [(e["name"], e["kind"], e.get("vector"), e.get("of"))
+             for e in man["scratch"]["layout"]]
+    assert kinds == [("x", "state", None, None), ("y", "state", None, None),
+                     ("v.x", "tangent", "v", "x"), ("v.y", "tangent", "v", "y"),
+                     ("w.x", "tangent", "w", "x"), ("w.y", "tangent", "w", "y"),
+                     ("m", "lane param", None, None)]
+    assert man["lowering"]["graph_tangent_step_nodes"] == \
+        len(c.graph.tangent_step.nodes)
+    assert "; tangent v (slots 2..3), w (slots 4..5)" in c.cfta
+    # a system without tangents writes a manifest without the keys
+    plain = cftc.compile_file(SYSTEMS / "lorenz63-rk4-fp64.cftl", 3).manifest
+    assert "tangent" not in plain and plain["graph"]["cftl_graph"] == 1
+    assert "graph_tangent_step_nodes" not in plain["lowering"]
+
+
+def test_the_interleaved_order_is_offered_only_with_tangents():
+    from cftc import schedule
+    plain = cftc.compile_file(SYSTEMS / "lorenz96-rk4-fp64.cftl", 2)
+    assert schedule.candidates(plain.lowered) == schedule.CANDIDATES
+    var = cftc.compile_file(SYSTEMS / "lorenz96-rk4-tangent-fp64.cftl", 2)
+    assert schedule.candidates(var.lowered)[-1] == ("interleaved", 0)
+    assert var.program.candidate == ("interleaved", 0)
+    assert var.program.slots_used == 139
+
+
+def test_scratch_capacity_names_the_tangent_slots():
+    text = ("system s\nformat fp64\nstate x[200]\ntangent v\n"
+            "next x[i] = x[i] * x[i]\nstep map\n")
+    with pytest.raises(lang.Refusal) as e:
+        cftc.compile_text(text, 2, target="sw")
+    assert e.value.name == "scratch-capacity"
+    assert "200 state, 200 for 1 tangent vector" in e.value.sentence
+    c = cftc.compile_text(text, 2, target="u50-rev7")
+    assert c.program.slots_used >= 400

@@ -12,6 +12,19 @@ A ref is a pair: ("s", i) a state input, ("l", i) a lane param,
 ("p", i) a param, ("c", i) a const entry, ("n", i) a node of the step.
 The lowering adds ("f", i), a slot holding const i's encoding with its
 sign bit inverted (lower.py).
+
+A graph with tangent vectors (version 2: docs/LANGUAGE.md, "The
+variational equations") is read here into the same shape, over an
+EXTENDED state: the state's n components, then each vector's n, in
+declaration order - which is the lane block's layout, [state | v | w
+| lane params]. Its step is the primal step's nodes, then, a vector at a
+time, the generic tangent step's, each tangent input tN of vector k
+read as the state input n(k + 1) + N, each dN as that copy's node, each
+nN as the primal node it names. From here on the compiler treats a
+tangent component as one more component of the state - homed or pinned,
+loaded and stored like any - and its sharing merges what the copies
+compute alike: the primal values a tangent writes again, and the
+primal-only nodes of the rules (copysign(1, a), r == a) across vectors.
 """
 
 import hashlib
@@ -51,20 +64,31 @@ class Graph:
         except (UnicodeDecodeError, ValueError) as exc:
             raise InternalError(f"the step graph is not ASCII JSON: "
                                 f"{exc}") from None
-        if obj.get("cftl_graph") != 1:
-            raise InternalError("the step graph is not version 1")
+        self.version = obj.get("cftl_graph")
+        if self.version not in (1, 2) or isinstance(self.version, bool):
+            raise InternalError("the step graph is not version 1 or 2")
         self.system = obj["system"]
         self.fmt_name = obj["format"]
         self.fmt = FORMATS[self.fmt_name]
         self.rnd_name = obj["round"]
         self.rnd = RND_BY_NAME[self.rnd_name]
         self.state = [(n, ln) for n, ln in obj["state"]]
-        self.components = []
+        primal = []
         for name, length in self.state:
             if length is None:
-                self.components.append(name)
+                primal.append(name)
             else:
-                self.components.extend(f"{name}[{k}]" for k in range(length))
+                primal.extend(f"{name}[{k}]" for k in range(length))
+        self.tangent = list(obj["tangent"]) if self.version == 2 else []
+        self.T = len(self.tangent)
+        if self.version == 2 and not self.T:
+            raise InternalError("a version-2 step graph names no tangent "
+                                "vector")
+        self.n_primal = len(primal)
+        self.primal_components = primal
+        # the extended state: the state, then each vector's components
+        self.components = primal + [f"{vec}.{c}" for vec in self.tangent
+                                    for c in primal]
         self.n_state = len(self.components)
 
         # Exact values are read as the graph writes them, p or p/q, at any
@@ -94,17 +118,70 @@ class Graph:
                 self._check_ref(r, k)
             self.nodes.append((op, refs, label))
         self.outs = [parse_ref(o) for o in step["out"]]
-        if len(self.outs) != self.n_state:
+        if len(self.outs) != self.n_primal:
             raise InternalError(f"{len(self.outs)} outputs for "
-                                f"{self.n_state} state components")
+                                f"{self.n_primal} state components")
         for r in self.outs:
             self._check_ref(r, len(self.nodes))
+        self.primal_step_nodes = len(self.nodes)
+        self.primal_counts = self.op_counts()
+        self.tangent_step_nodes = 0
+        self.tangent_counts = {}
+        if self.T:
+            self._tangent(obj["tangent_step"])
         self.field_counts = None
         if obj.get("field") is not None:
             counts = {}
             for op, _a, _l in obj["field"]["nodes"]:
                 counts[op] = counts.get(op, 0) + 1
             self.field_counts = counts
+
+    def _tangent(self, tstep):
+        """The tangent step, a copy a vector, after the primal step's
+        nodes; its outputs after the step's (the module docstring)."""
+        P, n = self.primal_step_nodes, self.n_primal
+        nodes = tstep["nodes"]
+        self.tangent_step_nodes = len(nodes)
+        counts = {}
+        for op, _a, _l in nodes:
+            counts[op] = counts.get(op, 0) + 1
+        self.tangent_counts = {op: counts[op] for op in ARITY if op in counts}
+        for k in range(self.T):
+            base = len(self.nodes)
+
+            def ref(text, before):
+                kind, digits = text[:1], text[1:]
+                if kind not in "slpcntd" or not digits.isdigit():
+                    raise InternalError(f"{text!r} is not a tangent "
+                                        f"section's reference")
+                i = int(digits)
+                if kind == "t":
+                    if i >= n:
+                        raise InternalError(f"{text} is past the state")
+                    return ("s", n * (k + 1) + i)
+                if kind == "d":
+                    if i >= before:
+                        raise InternalError(f"{text} is not an earlier node")
+                    return ("n", base + i)
+                if kind == "n":
+                    if i >= P:
+                        raise InternalError(f"{text} is past the step")
+                    return ("n", i)
+                r = (kind, i)
+                self._check_ref(r, 0)
+                return r
+            for j, (op, args, label) in enumerate(nodes):
+                if op not in ARITY or len(args) != ARITY[op]:
+                    raise InternalError(f"tangent step node {j}: {op} with "
+                                        f"{len(args)} operands")
+                self.nodes.append((op, tuple(ref(a, j) for a in args),
+                                   None if label is None
+                                   else f"{self.tangent[k]}.{label}"))
+            outs = [ref(o, len(nodes)) for o in tstep["out"]]
+            if len(outs) != n:
+                raise InternalError(f"{len(outs)} tangent outputs for {n} "
+                                    f"state components")
+            self.outs += outs
 
     def _check_ref(self, ref, before):
         kind, i = ref
