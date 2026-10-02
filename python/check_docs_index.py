@@ -45,7 +45,8 @@ to a pattern in the file that produces it. The hard-workload pack's five
 documents (DELIVERED_DOCS) are exempt from both the link and the quoted-path
 checks: they are another model's, kept as delivered, so their links and
 paths are the pack's own, and each stays exempt only while it is byte for
-byte what the pack's SHA256SUMS records.
+byte what the pack's SHA256SUMS records, and that list is the one delivered,
+its SHA-256 pinned here (DELIVERED_SUMS_SHA256).
 
 Every run also plants faults in a scratch copy of the documents - one per
 entry in CONTROLS and run_controls, covering every check and branch here -
@@ -380,32 +381,51 @@ BUILD_OUTPUTS = {
 # as delivered. Its documents' relative links and the paths they quote are
 # the pack's, not this repository's, and none of its files may be edited, so
 # these five are exempt from the link and quoted-path checks - by name, and
-# re-derived on every run from the pack's own SHA256SUMS: a document is
-# exempt only while it is tracked, listed there, and byte for byte what the
-# list records. One edited, untracked or dropped from the list fails the run
-# by name and is checked like any other, so the exemption cannot outlive its
-# reason. (The pack's one edited file, tools/run_workloads.py, is no
-# document.)
+# re-derived on every run. The pack's SHA256SUMS must be the list as
+# delivered, its SHA-256 pinned here (DELIVERED_SUMS_SHA256), and each of the
+# five tracked and byte for byte what that list records for it. A document
+# edited or untracked, or the list edited or untracked, is a problem by name
+# and leaves what it concerns - that document, or all five - checked like any
+# other. So the exemption holds only while the five and their list are the
+# bytes delivered, whatever is edited with them; until 2026-10-02 the list
+# was not pinned, and a document edited together with its line in the list
+# stayed exempt (verifier-VA1). What this cannot see is an edit to this file
+# - a new pin, or a wider rule - which is a change to the check itself. (The
+# pack's one edited file, tools/run_workloads.py, is no document.)
 DELIVERED_PACK = "programs/workloads/cft-hard-workloads/"
 DELIVERED_SUMS = DELIVERED_PACK + "SHA256SUMS"
+# The SHA-256 of that SHA256SUMS as delivered: the delivered zip's member
+# (the zip's own SHA-256 is 0761b7eb...d485) and the blob committed with the
+# pack at 03157e0.
+DELIVERED_SUMS_SHA256 = ("9aff7024d2ec6849f8d4a8da795ca9e6"
+                         "c0c0c3502b0001c40947e4b184e2a018")
 DELIVERED_DOCS = ("LANGUAGE.md", "MODELS.md", "PROGRAMS.md", "README.md",
                   "VALIDATION.md")
 
 
-def delivered_docs(problems, root, tracked):
-    """The pack's documents still as delivered: each named in
-    DELIVERED_DOCS, tracked, and the bytes the pack's SHA256SUMS records
-    for it. A named document that is not is a problem, by name, and is not
-    exempt."""
+def delivered_docs(problems, root, tracked, pin=None):
+    """The pack's documents still as delivered: the pack's SHA256SUMS the
+    list as delivered (its SHA-256 `pin`, DELIVERED_SUMS_SHA256 unless a
+    control gives another), and each document named in DELIVERED_DOCS
+    tracked and the bytes that list records for it. Anything else is a
+    problem, by name, and what it concerns is not exempt."""
+    pin = pin or DELIVERED_SUMS_SHA256
     files = set(tracked)
     sums = root / DELIVERED_SUMS
     if DELIVERED_SUMS not in files or not sums.is_file():
         problems.append("the delivered pack's documents are exempt by %s, "
                         "which is not in the repository" % DELIVERED_SUMS)
         return set()
+    data = sums.read_bytes()
+    have = hashlib.sha256(data).hexdigest()
+    if have != pin:
+        problems.append("the delivered pack's documents are exempt by %s, "
+                        "which is not the list as delivered: its SHA-256 is "
+                        "%s, where the list delivered is %s"
+                        % (DELIVERED_SUMS, have[:16], pin[:16]))
+        return set()
     listed = {}
-    for line in sums.read_text(encoding="utf-8",
-                               errors="replace").splitlines():
+    for line in data.decode("ascii", "replace").splitlines():
         digest, sep, name = line.partition("  ")
         if sep:
             listed[name] = digest
@@ -415,11 +435,8 @@ def delivered_docs(problems, root, tracked):
         if doc not in files or not (root / doc).is_file():
             problems.append("%s is exempt as delivered, but is not in the "
                             "repository" % doc)
-        elif name not in listed:
-            problems.append("%s is exempt as delivered, but %s does not "
-                            "list it" % (doc, DELIVERED_SUMS))
         elif hashlib.sha256((root / doc).read_bytes()).hexdigest() \
-                != listed[name]:
+                != listed.get(name):
             problems.append("%s is exempt as delivered, but is not the bytes "
                             "%s records for it" % (doc, DELIVERED_SUMS))
         else:
@@ -612,8 +629,9 @@ def check_prose_counts(problems, root, present):
                             "subtotals" % s)
 
 
-def run_checks(root, tracked):
-    """Every check, against the tree at `root`. Returns (problems, stats)."""
+def run_checks(root, tracked, pin=None):
+    """Every check, against the tree at `root`. Returns (problems, stats).
+    `pin` stands in for DELIVERED_SUMS_SHA256 in one control alone."""
     docs = root / "docs"
     index = docs / "README.md"
     problems = []
@@ -652,7 +670,7 @@ def run_checks(root, tracked):
     stages = check_stage_counts(problems, root)
     check_sim_bench_count(problems, root)
     check_prose_counts(problems, root, present)
-    delivered = delivered_docs(problems, root, tracked)
+    delivered = delivered_docs(problems, root, tracked, pin)
     nlinks = check_all_links(problems, root, tracked, delivered)
     npaths = check_quoted_paths(problems, root, tracked, delivered)
     return problems, {"present": len(present), "index_links": len(set(rel)),
@@ -782,14 +800,18 @@ def run_controls(root, tracked, baseline):
                                  'STATEROOT="$ROOT/verify/runs"', 1),
                       r"^verify/state is exempt as a product of verify/run\.sh"))
         # The delivered pack's exemption, each way it can stop holding: a
-        # document edited (and then checked like any other, so the broken
-        # link and the missing path planted in it are reported too), one
-        # dropped from the pack's SHA256SUMS, one untracked, and the
-        # SHA256SUMS itself untracked. Then the other way round: the same
-        # edit recorded in the scratch SHA256SUMS as the pack's own bytes
-        # must raise nothing, or the exemption exempts nothing. These write
-        # bytes and restore them exactly - write_text above writes CRLF on
-        # Windows, and a pack document restored so is no longer as
+        # document edited, and then checked like any other, so the broken
+        # link and the missing path planted in it are reported too; the
+        # list edited, a line dropped from it, and verifier-VA1's case - the
+        # same document edited together with its line in the list, which
+        # the pin refuses, the two planted faults then reported; a document
+        # untracked; the list untracked. Then the other way round: that
+        # coordinated edit, with the scratch list's own SHA-256 pinned in
+        # place of the delivered one, must raise nothing, or the exemption
+        # exempts nothing - no edit of the tree can make an edited document
+        # as delivered now, so the control moves the pin, in memory. These
+        # write bytes and restore them exactly - write_text above writes
+        # CRLF on Windows, and a pack document restored so is no longer as
         # delivered for every control after it.
         sums = (t / DELIVERED_SUMS).read_text(encoding="utf-8")
         pdoc = DELIVERED_PACK + "MODELS.md"
@@ -799,31 +821,35 @@ def run_controls(root, tracked, baseline):
         resum = re.sub(r"(?m)^[0-9a-f]{64}(  MODELS\.md)$",
                        lambda m: hashlib.sha256(planted_doc.encode("utf-8"))
                        .hexdigest() + m.group(1), sums, count=1)
+        coordinated = {pdoc: planted_doc, DELIVERED_SUMS: resum}
 
-        def planted(changes, files=tracked):
+        def planted(changes, files=tracked, pin=None):
             saved = {f: (t / f).read_bytes() for f in changes}
             try:
                 for f, text in changes.items():
                     (t / f).write_bytes(text.encode("utf-8"))
-                return set(run_checks(t, files)[0]) - base
+                return set(run_checks(t, files, pin)[0]) - base
             finally:
                 for f, data in saved.items():
                     (t / f).write_bytes(data)
 
+        doc_pat = r"^programs/workloads/cft-hard-workloads/MODELS\.md"
+        broken = doc_pat + r":\d+: broken link NO-SUCH-DELIVERED\.md$"
+        missing = (doc_pat + r":\d+: `programs/no-such-delivered\.cftl` "
+                   r"is quoted")
+        not_delivered = (r"^the delivered pack's documents are exempt by "
+                         r"programs/workloads/cft-hard-workloads/SHA256SUMS, "
+                         r"which is not the list as delivered")
         pack_controls = [
             ({pdoc: planted_doc}, tracked,
-             r"^programs/workloads/cft-hard-workloads/MODELS\.md is exempt "
-             r"as delivered, but is not the bytes"),
-            ({pdoc: planted_doc}, tracked,
-             r"^programs/workloads/cft-hard-workloads/MODELS\.md:\d+: broken "
-             r"link NO-SUCH-DELIVERED\.md$"),
-            ({pdoc: planted_doc}, tracked,
-             r"^programs/workloads/cft-hard-workloads/MODELS\.md:\d+: "
-             r"`programs/no-such-delivered\.cftl` is quoted"),
+             doc_pat + r" is exempt as delivered, but is not the bytes"),
+            ({pdoc: planted_doc}, tracked, broken),
+            ({pdoc: planted_doc}, tracked, missing),
             ({DELIVERED_SUMS: re.sub(r"(?m)^[0-9a-f]{64}  README\.md\n", "",
-                                     sums, count=1)}, tracked,
-             r"^programs/workloads/cft-hard-workloads/README\.md is exempt "
-             r"as delivered, but .*SHA256SUMS does not list it"),
+                                     sums, count=1)}, tracked, not_delivered),
+            (coordinated, tracked, not_delivered),
+            (coordinated, tracked, broken),
+            (coordinated, tracked, missing),
             ({}, [f for f in tracked if f != DELIVERED_SUMS],
              r"^the delivered pack's documents are exempt by "
              r"programs/workloads/cft-hard-workloads/SHA256SUMS, which is "
@@ -838,12 +864,13 @@ def run_controls(root, tracked, baseline):
                 failures.append("NEGATIVE CONTROL FAILED TO FAIL: %s, planted "
                                 "in the delivered pack; new problems: %s"
                                 % (pat, sorted(got) or "none"))
-        got = planted({pdoc: planted_doc, DELIVERED_SUMS: resum})
+        got = planted(coordinated,
+                      pin=hashlib.sha256(resum.encode("utf-8")).hexdigest())
         if resum == sums or got:
             failures.append("the delivered pack's exemption did not exempt "
-                            "a document recorded as delivered; new problems: "
-                            "%s" % (sorted(got) or "none (the record did not "
-                                    "change)"))
+                            "a document its pinned list records; new "
+                            "problems: %s" % (sorted(got) or "none (the "
+                                              "list did not change)"))
         for f, add, pat in CONTROLS:
             orig = (t / f).read_text(encoding="utf-8")
             edits.append((f, orig, orig + add, pat))

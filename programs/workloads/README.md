@@ -113,6 +113,9 @@ corrected or brought to this tree's conventions. A file it would have
 written differently is its business; a defect it finds in this tree is
 ours. The docs check (`python/check_docs_index.py`) exempts the pack's
 five documents from its link and quoted-path checks, by name, for exactly
-as long as each is the bytes the pack's SHA256SUMS records for it.
+as long as each is the bytes the pack's SHA256SUMS records for it and that
+list is the one delivered: the check pins the list's SHA-256 (9aff7024...),
+so a document edited together with its line in the list is refused too,
+which `sha256sum -c` alone cannot see.
 
 About 11 MB, which Logan accepted.
