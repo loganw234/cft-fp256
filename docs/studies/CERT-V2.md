@@ -673,7 +673,10 @@ transcend.py):
   - the benchmark `host/tools/cft_bench_peers.c`;
   - `python/tests/test_transcend.py`, through gmpy2 when it is
     installed;
-  - the Python binding `bindings/python/cftmpfr`, through gmpy2.
+  - the Python binding `bindings/python/cftmpfr`, through gmpy2;
+  - `docs/studies/ext-a/mpfr_scale.c`, the EXT-A study's instrument,
+    which its own header says "is not built by any Makefile and no gate
+    runs it".
 
   None of them is on a certificate's making or audit.
 
@@ -786,7 +789,11 @@ READ: ROADMAP.md's plan; R8's design; part M of the round's survey, 4.4.
     E + 244 bits and the guard. So 2^1024 needs about 1,300 bits: five or
     six fp256 constants in each lane's scratch. gen_2opi.py makes
     270,336 bits for fp256's whole range. That is my estimate (EST);
-    M2's window decides it.
+    M2's window decides it. The copy also costs instructions:
+    - the STLs that fill it from the bank each segment (part M, 4.3);
+    - the LDX that picks the window by the argument's exponent. The plan
+      says "choosing the window by the exponent needs a copy in each
+      lane's scratch, read by LDX" (ROADMAP.md, step 6, M2).
 - **The definition decides.** LANGUAGE.md makes the reference
   interpreter on the step graph "the definition of correct for every
   compiled image". The language refuses `exp` today (`transcendental`).
@@ -930,7 +937,11 @@ PROPOSED.
   - a segment line's STATUS never carries STATUS[6] (`marked`);
   - a run with replays has `lane-flags yes` (`replay-lane-flags`);
   - a run with replays names a source (`replay-source`);
-  - `changed` is at most `marked` (`malformed`).
+  - `changed` is at most `marked` (`malformed`);
+  - the runs with replay lines are exactly the runs the header's
+    `replay-method` lines name (`replay-method`). A run with replays and
+    no method line, or a method line for a run with none or for no run,
+    is refused by that name.
 - A run whose image can mark must ask for the block. The writers ask for
   it whenever the image needs flag control (CAPS2[14]), since a mark
   alone does not say which lane.
@@ -1108,23 +1119,42 @@ contract:
   an auditor after ee78152 covers a certificate made before it, and
   would refuse such an image `program-image`, blaming an honest
   certificate.
-- **The fix I propose: the profile versions the program model too.** Its
-  record gains program sets:
+- **The fix I propose: the profile versions the program model too.** The
+  rule: any change to what an accepted image computes, or to whether an
+  image loads, steps the profile.
+  - A change to an accepted image's result or acceptance is a major
+    step. ee78152 was one by this rule: images with 513, 600 and 70,000
+    constants loaded before it and are refused after.
+  - A feature that loads images refused before only because their
+    encoding was unclaimed (an unknown control code, say), and leaves
+    every accepted image as it was, is a minor step. Those refusals were
+    of encodings held for later, and become acceptances. R24's codes 12
+    to 14 would be one.
+- **The record is a backstop for the rule, not its definition.** The
+  profile's record gains program sets, so that a gate catches what it
+  can:
   - the golden corpus's images, initial states and every boundary state,
     which `certificates/MANIFEST` already holds;
-  - a set of load cases: for each of the loader's rules, an image at its
-    edge, accepted, and one past it, refused by name, generated from
-    seq.py as the vectors are.
+  - load cases, generated from seq.py as the vectors are. For each of
+    the loader's rules: an image at its edge, accepted, and one past it,
+    refused by name. For each header field, acceptance at its
+    encoding's extremes: the field's maximum where an image that size
+    can be built, and otherwise the largest that can. Also acceptance at
+    the values around any limit a field could gain, such as the
+    capacities tiles publish.
 
-  Then any change to what an image computes, or to whether it loads,
-  moves a recorded case and steps the profile:
-  - a change to an accepted image's result or acceptance is a major step.
-    ee78152 would have been one;
-  - a feature that loads images refused before only because their
-    encoding was unclaimed (an unknown control code, say), and leaves
-    every accepted image as it was, is a minor step. Its recorded
-    refusals were of encodings held for later, and become acceptances.
-    R24's codes 12 to 14 would be one.
+  The extremes are what would have caught ee78152:
+  - Its rule was new. Before it, seq.py's comment said "`n_consts` above
+    this is not refused", so no per-rule case sat at or past 512.
+  - The corpus's images carry at most 7 constants (verifier-VCV2,
+    measured).
+  - So per-rule cases alone would only have gained new cases, and the
+    gate would have passed. A recorded acceptance of 513 or 70,000
+    constants moves instead.
+
+  A change the record still does not reach steps the profile by the rule
+  alone, at its committer's word, which is how CONFORMANCE.md's number
+  is kept today.
 - **The other way was a separate version for the program model.** I do
   not propose it. It would name one contract with two numbers that can
   drift apart, while CONFORMANCE.md's profile already holds the program
@@ -1752,7 +1782,8 @@ PROPOSED.
 - **1. Integrity.** As in version 1.
 - **2. Form.** The strict reader, with the new lines' spellings and form
   rules (`marked`, `replay-lane-flags`, `replay-source`,
-  `provenance-order`). Then the auditor's choice (`choice`).
+  `replay-method`, `provenance-order`, and `changed` at most `marked`,
+  `malformed`). Then the auditor's choice (`choice`).
 - **2a. The signature,** when one is handed: `signature-format`,
   `signature`, `signature-key`, `signer`.
 - **3. Salt.** As in version 1.
@@ -1800,6 +1831,7 @@ An auditor that cannot evaluate the definition refuses
 | `marked` | 2 | a segment line's STATUS carries STATUS[6] |
 | `replay-lane-flags` | 2 | a run with replay lines says `lane-flags no` |
 | `replay-source` | 2 | a run with replay lines names no source |
+| `replay-method` | 2 | a run with replay lines that no `replay-method` line names, or a `replay-method` line for a run with none, or for no run |
 | `provenance-order` | 2 | `started` is after `finished`, or `finished` after `issued` |
 | `signature-format` | 4 | the signature file handed breaks its form |
 | `signature` | 4 | the signature names another certificate, or does not verify |
@@ -1961,8 +1993,10 @@ tags: the block's `cft-certificate 2 lane-flags`, and the signature's
     to the profile's record, so that no recorded case could move unless
     the profile did. That record is CONFORMANCE.md's vectors
     (`vectors/SHA256SUMS`) and the program sets: the golden corpus's
-    states, and the load cases. The extension changes CONFORMANCE.md's
-    versioning rule (question 6);
+    states, and the load cases at each loader rule's edge and each
+    header field's extremes. The record is a backstop: the rule, not
+    the record, defines when the profile steps. The extension changes
+    CONFORMANCE.md's versioning rule (question 6);
   - **the language's version,** kept in the golden model and written
     into cftc's manifest, so that cft-segrun can state it. A gate would
     hold it to the language's committed graphs and its refusal tables,
@@ -2039,6 +2073,7 @@ red.
 | a re-run block | the certified hash of another block (one lane's inexact cleared) | `segment-lane-flags` |
 | the mark at the reader | a segment's STATUS with STATUS[6] set | `marked` |
 | replay structure | replay lines in a `lane-flags no` run; in a run with `source none`; out of order; a count one off; `changed` above `marked` | `replay-lane-flags`, `replay-source`, `line-order`, `count`, `malformed` |
+| the method lines | a run with replays and no `replay-method` line; a method line for a run without replays; one for a run past the last | `replay-method`, each |
 | whether a replay is due | a replay line dropped (the re-run still marks a lane); a line for a segment that marked none | `replay-missing`, `replay-unmarked` |
 | raw values | `raw-end` the hash of another state; `raw-lanes` of a block with [7] cleared; `marked` one off | `replay-raw` |
 | `changed` | one more, and one fewer, than the replay changes | `replay-changed` |
@@ -2141,25 +2176,33 @@ argument.
    instead; the audit checks that against the golden model. cft-audit
    cannot audit a replayed segment until a C implementation of the
    language exists. *Recommended: yes.* (Sections 7.3 and 7.5.)
-3. **M2 at fp256, past its range.** The plan marks every lane past a
-   stated range. There are three ways to handle that:
-   - **(a) a wide range,** so that no argument a program reaches leaves
-     it, and marks stay rare. 2^1024 needs about 1,300 bits of 2/pi
-     (gen_2opi.py's rule), five or six scratch constants a lane. Past
-     the range, mark and replay, as the plan says.
-   - **(b) a narrow range,** as the plan reads. A long run, a forcing
-     sin(t) for one, is replayed on the host in every segment, and
-     audited by the golden model alone.
-   - **(c) refuse past the range by name.** The routine's own range test
-     knows. Either a word in a scratch slot the language defines carries
-     the refusal out of the lane, or a writer that replays tests each
-     marked lane's argument against the routine's range. The cost is a
-     scratch slot and its instructions in every lane, or the routine's
-     range carried to every writer; and such a run is not certified as
-     version 2.
+3. **M2 at fp256: its range, and what happens past it.** The plan says
+   "a stated range, beyond which a lane is marked and replayed", and
+   states no width. That is two choices, and they combine:
+   - **How wide the range is.**
+     - *Wide*, so that no argument a program reaches leaves it, and
+       marks stay rare. 2^1024 needs about 1,300 bits of 2/pi
+       (gen_2opi.py's rule). That costs five or six scratch slots a
+       lane, the STLs that fill them from the bank each segment, and the
+       LDX that picks the window by the exponent.
+     - *Narrow*: cheaper, but programs leave it. A long run, a forcing
+       sin(t) for one, then marks its lanes in every segment.
+   - **What happens past it.**
+     - *Mark and replay*, as the plan says. The run is certified, at the
+       replays' cost: on the host, or on the tile by a slower full-range
+       image. A replayed segment is audited by the golden model alone.
+     - *Refuse by name.* The routine's own range test knows. Either a
+       word in a scratch slot the language defines carries the refusal
+       out of the lane, or a writer that replays tests each marked
+       lane's argument against the range. The cost is a scratch slot
+       and its instructions in every lane, or the range carried to every
+       writer. The run is not certified as version 2; version 1 still
+       records it.
 
-   *Recommended: (a), its cost measured by M2. It needs nothing new, and
-   it certifies what (c) would refuse.* (Sections 7.1, 7.3 and 7.5.)
+   *Recommended: a wide range, its cost measured by M2, with mark and
+   replay past it. Past a wide range, lanes are rare, so replaying them
+   costs less than a refusal's carrier in every lane, and the run stays
+   certified.* (Sections 7.1, 7.3 and 7.5.)
 
 **Sources and wider runs (item 3)**
 
@@ -2175,9 +2218,10 @@ argument.
 
 6. **Which definition a certificate claims.** Each certificate names
    two things:
-   - the conformance profile, extended to version the program model. Its
-     record gains the golden corpus and a set of load cases, so that a
-     change like ee78152's to seq.py's loader steps it;
+   - the conformance profile, extended to version the program model: any
+     change to what an accepted image computes, or to whether an image
+     loads, steps it, as ee78152's change to seq.py's loader would have.
+     The golden corpus and a set of load cases are the gate's backstop;
    - a new language version.
 
    An auditor under a definition that does not cover the certificate's
