@@ -4649,8 +4649,11 @@ number the certificate plan's steps, not these.
     plan and kept in the round's records, gives 719,697 LUTs (82.66%),
     1,051.5 block-RAM tiles (78.24%) and 260 UltraRAMs (40.63%); SLR0's
     LUTs are at 86.12%. It closed at +0.003 ns with all four of the
-    build script's timing options, and a fifth tile would need 90.9% of
-    the LUTs (docs/SCALING.md).
+    build script's timing options. A fifth tile does not fit: one more
+    revision-7 tile (143,004 LUTs out of context) on q135b's measured
+    LUTs comes to about 862,700, 99.1% of the part. docs/SCALING.md's
+    "Four remains the wall" was worked on 2026-09-02 for a smaller
+    tile.
   - Of the 11 hard workloads that missed:
     - nine exceed the instructions, some the scratch as well;
       Lorenz-tangent hard and wide cannot fit under any allocation;
@@ -4669,7 +4672,8 @@ number the certificate plan's steps, not these.
 **The parts.** Parcels with verifiers, golden-first, the send-back rule
 and the testing rule, as the last rounds ran.
 
-0. **A1, the acceptance set**, approved and built on its branch:
+0. **A1, the acceptance set**, approved, and built on its branch; not
+   yet verified or merged:
    - the workloads tracked in the repo, at programs/workloads once A1
      merges, with Logan's note;
    - the six references, the four variational references and the ten
@@ -4681,9 +4685,9 @@ and the testing rule, as the last rounds ran.
    docs and tests first. The RTL comes after, in one revision, so that
    revision carries everything the later parts need of a tile.
    - **R8F, flag control.** Two instructions: a quiet region, in which
-     the ALU's flags do not reach FLAGS, and a raise, which ORs a
-     register's five flag bits into FLAGS, and under R8L into the
-     lane's byte. A routine then runs quiet and raises exactly the IEEE
+     the ALU's flags reach neither FLAGS nor, under R8L, the lane's
+     byte, and a raise, which ORs a register's five flag bits into
+     FLAGS, and under R8L into the lane's byte. A routine then runs quiet and raises exactly the IEEE
      flags of the operation it implements, divide-by-zero included.
      - The raise also carries the mark for a lane whose last bit a
        routine could not decide (R8L's bit [7]). A run with any lane
@@ -4705,7 +4709,8 @@ and the testing rule, as the last rounds ran.
      - a marked lane: where it is replayed (the golden model on the
        host, or a slower image) and how the replay is recorded;
      - whether a wider run may use the same source compiled at the wider
-       format, which C4's routines need.
+       format, which C4's routines need, and with it whether a
+       certificate names its source, which step 3 left out.
      The design comes to the lead before version 2 is fixed.
    - **R21 and R22**, augmented addition (`augadd`/`augerr`) and stepped
      STX/LDX: already in the model, the software backend and `asm.py`
@@ -4716,9 +4721,9 @@ and the testing rule, as the last rounds ran.
      ceiling goes. The image format and the certificate are unchanged,
      and the compiler needs only a target that names the larger
      capacity. That capacity needs a field past CAPS[23:20]'s 2^15. It
-     goes in CAPS2, whose port from the sequencer is 16 bits today and
-     widens, because a certificate's `device-caps` carries only CAPS
-     and CAPS2.
+     goes in CAPS2, whose 16-bit input to the CSR block (cft_csr's
+     `caps2`, driven by cft_krnl) widens, because a certificate's
+     `device-caps` carries only CAPS and CAPS2.
      - A design study comes first: the fetch, its timing at 135 MHz, its
        cost in block RAM, and what a stall costs a step.
    - **The deep build.** A build of the same RTL with more scratch a
@@ -4754,8 +4759,9 @@ and the testing rule, as the last rounds ran.
    - The interpreter, the renderers and the intention-out's checks take
      them, and L3 gains their derivative rules.
    - What holds today's refusals is restated with them: test_lang.py,
-     test_lang_readback.py, and LANGUAGE.md's refusal tables, which
-     test_lang.py holds to the code. The challenge suite's expectations
+     test_lang_readback.py, LANGUAGE.md's table "Every refusal, by
+     name", which test_lang.py holds to the code, and LANGUAGE.md's
+     other statements of the two refusals. The challenge suite's expectations
      are the suite's to restate. The workload pack's own copy of
      LANGUAGE.md stays as delivered.
 3. **C4, routines in the compiler.**
@@ -4778,10 +4784,11 @@ and the testing rule, as the last rounds ran.
 4. **T1, time-dependent systems.** LANGUAGE.md and the tests:
    - t as a state variable;
    - its exactness with a dyadic h, and its drift otherwise, measured;
-   - a step counter as the exact construction. One written
-     `d/dt k = 1/h` stayed exact through 10^4 steps at fp32, fp64 and
-     fp256, under rk4 and euler (verifier-P6), and t from it is one
-     rounding.
+   - a step counter as the exact construction. One written with h's
+     reciprocal as a number (`d/dt k = 100` at h = 1/100, 10 at 1/10, 3
+     at 1/3) stayed an exact count through 10^4 steps at fp32, fp64 and
+     fp256, under rk4 and euler (verifier-P6). `d/dt k = 1/h` is
+     refused `h-scope` in a flow. t from the counter is one rounding.
    There is no reserved `t`. Forcing by sin or cos waits for M2; a
    rotation carried in the state works before it.
 5. **The math library.** The golden definition is
@@ -4828,8 +4835,8 @@ and the testing rule, as the last rounds ran.
 **What it is not.**
 - Compile time, which is later performance work (Logan).
 - A scheduling order for scratch traffic, which is performance work
-  too, though on today's card it is the only route that might fit
-  Gray-Scott hard.
+  too, though on today's card it might fit Gray-Scott hard, which
+  otherwise needs the stage cut that was not chosen.
 - Adaptive steps and events, per-operation attributes in the language
   (a source choosing an attribute per operation; C4's internal
   attributes are a routine's own), and a Python front end. Step 3's
@@ -4839,18 +4846,20 @@ and the testing rule, as the last rounds ran.
   chosen. The 2026-09-18 plan (Programs across tiles, above) keeps its
   partitioner, its asynchronous API and its shared-bank link
   configuration, unbuilt and not placed here.
-- The gallery. The lead's recommendation is one gallery after step 6,
-  with literature-checked answers and certificates published. Logan's
-  reply dropped step 5 and did not decide the gallery. Step 3's Next
-  line (above) and its two gallery waves are superseded by his reply.
+- The gallery. Logan's reply dropped step 5, the work order's gallery
+  wave 1, which step 3's Next line (above) put first, with step 6
+  beside it. That line's wave 2, the work order's step 7, his reply did
+  not mention. The lead's recommendation is that wave 2 be the one
+  gallery, after step 6, with literature-checked answers and
+  certificates published; Logan has not decided it.
 
 **Sentences elsewhere that this plan supersedes.** Each is restated by
 the parcel that changes its subject, or by the lead when the round
 closes:
 - the inlining obstacle stated as spilling registers only: step 3's
-  "What it is not" (above), LANGUAGE.md's rows for `runtime-division`
-  and `runtime-sqrt`, and ORBITS.md's fragment-inliner sentence (L4 and
-  C4);
+  "What it is not" (above), LANGUAGE.md's known limit "Inlining divfull
+  or sqrtfull means spilling the registers around it", and ORBITS.md's
+  fragment-inliner sentence (L4 and C4);
 - docs/studies/OPT-D-contract.md's rejection of an in-program correctly
   rounded divide as a second rounding authority, which divfull has
   since answered (C4);
