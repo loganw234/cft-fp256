@@ -1075,12 +1075,12 @@ class Checker:
             where = {"const": "a constant", "default": "a default",
                      "block": "an expansion block's primal line"}.get(
                 ctx.mode, "the state's equations")
-            raise Refusal("tangent-scope", f"{name} belongs to the "
+            raise Refusal("tangent-scope", f"{name} is read from the "
                           f"tangent vector {vec}, and {where} cannot read a "
                           f"tangent: the state never depends on its "
                           f"tangents", line)
         if vec != ctx.tvec:
-            raise Refusal("tangent-scope", f"{name} belongs to {vec}, "
+            raise Refusal("tangent-scope", f"{name} is read from {vec}, "
                           f"and these are {ctx.tvec}'s equations: one tangent "
                           f"vector never reads another", line)
         rest = name[len(vec) + 1:]

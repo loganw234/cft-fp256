@@ -92,10 +92,10 @@ CATALOGUE = {
     # -- the variational equations --------------------------------------
     "tangent-mismatch": "a written tangent equation, tangent let or "
                         "expansion line that is not the derivation's",
-    "tangent-scope": "a tangent component read where it cannot be: by the "
-                     "state's equations, lets or constants, or by another "
-                     "tangent vector's equations; or a tangent vector read "
-                     "whole",
+    "tangent-scope": "a name in a tangent vector read where it cannot be: "
+                     "by the state's equations, lets or constants, or by "
+                     "another tangent vector's equations; or a tangent "
+                     "vector read whole",
     # -- operations v1 does not have -----------------------------------
     "runtime-division": "a division with an operand that is not a "
                         "constant",

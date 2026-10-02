@@ -82,7 +82,7 @@ def compile_(text, source="<test>"):
 @lru_cache(maxsize=None)
 def graph(text):
     """compile_, once a text: the boundary cases are the costly ones (a
-    min chain's tangent of 100 terms is 8,099 nodes)."""
+    min chain's tangent of 100 terms is 9,999 nodes)."""
     return compile_(text)
 
 

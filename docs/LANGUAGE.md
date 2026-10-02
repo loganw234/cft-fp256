@@ -170,6 +170,10 @@ the gate holds that.
     `hypot` and the rest of the list in `python/cft_golden/lang/check.py`);
   - `h`, the step's own name;
   - `inf infinity nan snan`.
+- `tangent` became a keyword with the variational equations (part
+  two, 2026-10-02). A source written before them that names a value
+  `tangent` is refused now: `reserved-name` where it declares it,
+  `syntax` where it reads it (verifier-VI2).
 
 ### Statements
 
@@ -1225,9 +1229,10 @@ held to the derivation byte for byte. A difference is `tangent-mismatch`,
 named at the first label or component, in the canonical form's order,
 whose definition differs. Of a vector's equations a source writes all
 or none (`missing-equation`), and of its lines in a block all or none.
-A tangent component read where it cannot be - by the state's equations,
-lets or constants, or by another vector's equations - is
-`tangent-scope`, and so is a vector read whole (`v` for `v.x`).
+A name in a tangent vector - a component, a tangent let or a label -
+read where it cannot be - by the state's equations, lets or constants,
+or by another vector's equations - is `tangent-scope`, and so is a
+vector read whole (`v` for `v.x`).
 
 ### The step graph, version 2
 
@@ -1433,15 +1438,18 @@ stage certifies one, both auditors accepting.
 
 - **A long chain of unnamed operations** makes each one's tangent
   write its unnamed operands again wherever its rule reads an operand
-  (a product, fma, abs, copysign, the min family, a select's
-  condition), so the tangent grows with the square of the chain's
-  length: 5,049 tangent nodes for an unnamed 100-term product, against
-  198 if read across, and 8,099 for an unnamed min chain 90 deep
-  (measured, the second by verifier-VL3); a sum chain stays linear.
-  Naming parts of the chain with lets keeps it linear, since a let is
-  read by name. From 102 terms an unnamed product's tangent would
-  print past the parser's 100 levels, and the source is refused
-  `too-deep` (D2); lets keep it within reach as well.
+  (a product, fma, abs, copysign, the min family), so the tangent
+  grows with the square of the chain's length: 5,049 tangent nodes
+  for an unnamed 100-term product, against 198 if read across, and
+  8,099 for an unnamed min chain of 90 terms (measured, the second by
+  verifier-VL3). A sum chain stays linear, and so does a chain through
+  a select's condition, which takes no tangent (198 nodes at 100
+  terms, verifier-VI2). Naming parts of the chain with lets keeps it
+  linear, since a let is read by name. From 102 terms an unnamed
+  product's tangent would print past the parser's 100 levels - from
+  101 under euler and stormer-verlet, whose step writes the field one
+  level deeper - and the source is refused `too-deep` (D2); lets keep
+  it within reach as well.
 - **The compiler's choice between its orders reads no capacity.** It
   takes the fewest instructions a step, then the fewest one-beat cycles;
   the interleaved walk, offered only for a graph with tangents, wins for
@@ -1449,14 +1457,16 @@ stage certifies one, both auditors accepting.
   2,568 and 389), but for two, three or four vectors at N = 40 the six
   older orders' fewer instructions win at more scratch (5,288
   instructions and 490 slots, against 6,286 and 300, at T = 3). At
-  T = 2 the chosen order takes 450 slots (3,936 instructions), so
-  Lorenz-96 at N = 40 with two vectors is refused `scratch-capacity` on
-  every 256-slot target (verifier-VL3, measured). Choosing by the
+  T = 2 the chosen order takes 450 slots (3,934 instructions a step),
+  so Lorenz-96 at N = 40 with two vectors is refused `scratch-capacity`
+  on every 256-slot target (verifier-VL3, measured). Choosing by the
   target's capacity would make the image depend on the target, which
   the compiler's design rules out (python/cftc).
 - **Capacity.** Lorenz-96 with one tangent vector needs 2N + 59 slots a
-  lane from N = 14 (measured; below that the older orders win with
-  fewer, and N = 12 takes 84): N = 40 takes 139 and fits every target;
+  lane from N = 14 (measured). Below that the count departs from it by
+  a slot or a few either way: N = 9 takes 78, an older order's; N = 10
+  takes 75 and N = 12 takes 84, the interleaved walk's (verifier-VI2).
+  N = 40 takes 139 and fits every target;
   a 256-slot target holds it up to N = 98 (255 slots) and refuses it
   (`scratch-capacity`) from N = 99 (257); the U50's revision 7 (2,048)
   accepts N = 100 (259).
@@ -1529,7 +1539,7 @@ The variational equations:
 | name | what it refuses |
 |---|---|
 | `tangent-mismatch` | a written tangent equation, tangent let or expansion line that is not the derivation's |
-| `tangent-scope` | a tangent component read by the state's equations, lets or constants, or by another tangent vector's equations; or a tangent vector read whole |
+| `tangent-scope` | a name in a tangent vector read by the state's equations, lets or constants, or by another tangent vector's equations; or a tangent vector read whole |
 
 Operations v1 does not have:
 

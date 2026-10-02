@@ -44,11 +44,11 @@ with the primal's own. That keeps the language's promise for the
 tangent's text - every operation written is performed, once, in the order
 the canonical form writes it - at a known price: a long chain of unnamed
 operations whose rules read an operand (products, fma, abs, copysign,
-the min family, a select's condition) makes each one's tangent write its
-unnamed operands again, so the tangent grows with the square of the
-chain (measured: 5,049 nodes for a 100-term product chain, 198 without
-copies; 8,099 for a min chain 90 deep). Naming parts with lets keeps it
-linear.
+the min family) makes each one's tangent write its unnamed operands
+again, so the tangent grows with the square of the chain (measured:
+5,049 nodes for a 100-term product chain, 198 without copies; 8,099 for
+a min chain of 90 terms). A select's condition takes no tangent, so a
+chain through it stays linear. Naming parts with lets keeps it linear.
 
 The walk is iterative, from the outputs, and makes the tangent of a node
 only when some output's tangent reads it, so a comparison's operands and
