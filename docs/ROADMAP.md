@@ -4595,24 +4595,33 @@ Logan, after step 3 closed (main aaca616):
 
 This plan goes to him before any code beyond the acceptance parcel.
 Nothing in it exists yet unless it says so. The facts come from three
-read-only surveys of main aaca616, whose reports and citations are in
-the round's records (`Data/runs/2026-10-02-step6-round/`).
+read-only surveys of main aaca616 and from verifier-P6's check of this
+plan; their reports and citations are in the round's records
+(`Data/runs/2026-10-02-step6-round/`). The steps are the
+controlled-divergence work order's. "Steps 5 and 6" above (2026-09-30)
+number the certificate plan's steps, not these.
 
 **What the surveys found.**
 - **Division and square root** exist in-program as divfull and sqrtfull
-  (`programs/divfull-*.cfta` and `programs/sqrtfull-*.cfta`, written by
-  `python/gen_divfull.py`): 210-216 and 186-195 instructions, correct
-  in the last bit under every attribute by an exact residual. Three
-  things keep them out of a compiled program:
+  (`programs/divfull-*.cfta` and `programs/sqrtfull-*.cfta`, which are
+  `python/cft_golden/divfull.py`'s programs as text): 210-216 and
+  186-195 instructions, correct in the last bit under every attribute
+  by an exact residual. The model's tests hold that at all four formats
+  and all five attributes; the tile's own bench holds fp32 to fp128
+  under two attributes. Three things keep them out of a compiled
+  program:
   - **FLAGS.** The run's flags are scaffolding (6/3 raises inexact,
     measured at fp64 and fp256). The contract's flags are a deposit
     that libcft ORs in, and no opcode can raise divide-by-zero.
   - **The compiler.** It carries one instruction a node, in the
     program's one attribute. Its bank holds constants, their sign-flips
-    and params, never a raw word such as +inf, -0 or a NaN.
-  - **Format.** A routine's words differ by format, which ends "the
-    same words at every format", and with it the certificate's wider
-    run (docs/CERTIFICATES.md).
+    and params: never a raw word such as +inf or a NaN, and -0 only as
+    the sign-flip of the constant 0.
+  - **Format.** A routine's words differ by format. That ends the
+    compiler's rule that "a system's instruction words are the same at
+    every format" (`python/cftc/lower.py`), and with it the
+    certificate's wider run, which needs the same instruction words
+    (docs/CERTIFICATES.md).
 - **The math library's ground.**
   - The golden model's 39 correctly rounded functions are the
     definition (`cft_golden/transcend.py`), held by the `transcend`
@@ -4624,115 +4633,155 @@ the round's records (`Data/runs/2026-10-02-step6-round/`).
     cannot be decided in-lane (the table maker's dilemma) needs a
     per-lane way to say so.
   - 2/pi for Payne-Hanek at fp256 does not fit the bank: 270,336 bits
-    against at most 121,344.
+    against 121,344 significand bits in 512 constants (131,072 as raw
+    words).
 - **Programs past one tile.**
   - Instructions (32,768), scratch (2,048) and deposits (1,024) are
     build parameters up to 2^15, each published as a four-bit log2
     field (CAPS[23:20], CAPS2[3:0] and CAPS[19:16]). The bank (512) is
     fixed by the instruction format.
-  - There is no path between tiles, only round trips through the host
-    on one shared bus.
-  - The quad has no room left. q135b's routed utilization report, read
-    on amd-arc-box for this plan and kept in the round's records,
-    gives 719,697 LUTs (82.66%), 1,051.5 block-RAM tiles (78.24%) and
-    260 UltraRAMs (40.63%); SLR0's LUTs are at 86.12%. The quad closed
-    at +0.003 ns with every timing option.
+  - There is no path between tiles as built, only round trips through
+    the host on one shared bus. The shared-bank link configuration of
+    the 2026-09-18 plan (Programs across tiles, above) would give one
+    without RTL; it is untried.
+  - The quad's limits are its LUTs and its timing, not its UltraRAM.
+    q135b's routed utilization report, read on amd-arc-box for this
+    plan and kept in the round's records, gives 719,697 LUTs (82.66%),
+    1,051.5 block-RAM tiles (78.24%) and 260 UltraRAMs (40.63%); SLR0's
+    LUTs are at 86.12%. It closed at +0.003 ns with all four of the
+    build script's timing options, and a fifth tile would need 90.9% of
+    the LUTs (docs/SCALING.md).
   - Of the 11 hard workloads that missed:
     - nine exceed the instructions, some the scratch as well;
       Lorenz-tangent hard and wide cannot fit under any allocation;
     - two exceed only the scratch: FPUT and phi4 extended;
-    - only two are within the compiler's reach, Gray-Scott (hard and
-      wide, at 34,719 instructions) and phi4 extended (2,156 slots), and
-      neither is shown achievable.
+    - only three are within the compiler's reach, Gray-Scott hard and
+      wide (34,719 instructions) and phi4 extended (2,156 slots), and
+      none is shown achievable.
 - **Time-dependent systems** already work with t as a state variable
   (`state t`, `d/dt t = 1`). With a dyadic step (h = 1/64), t stayed
   exactly k h through 10^4 steps at fp64 and fp256, under rk4, euler
-  and stormer-verlet. With h = 1/100 it drifted, by 1,003 ulps of t at
-  fp64 after 10^4 steps. A reserved `t` would refuse today's own
-  advised sources, as `tangent` did.
+  and stormer-verlet. With h = 1/100 it drifted: after 10^4 steps at
+  fp64, by 1,003 ulps of t under rk4 and euler, and by -1,299 under
+  stormer-verlet. A reserved `t` would refuse today's own advised
+  sources, as `tangent` did.
 
 **The parts.** Parcels with verifiers, golden-first, the send-back rule
 and the testing rule, as the last rounds ran.
 
-0. **A1, the acceptance set**, approved and building:
+0. **A1, the acceptance set**, approved and built on its branch:
    - the workloads tracked in the repo, at programs/workloads once A1
      merges, with Logan's note;
    - the six references, the four variational references and the ten
      workloads that fit the card, with fixed runs and committed digests;
    - a driver that is the admission test for a card;
-   - an `acceptance` stage.
+   - the stages `acceptance` (gate) and `acceptance-far` (full census).
 1. **Revision 8, golden-first.** Each piece goes into the model
    (`seq.py`), the software backend (`program.c`), both assemblers, the
-   docs and tests first. The RTL comes after, in one revision.
+   docs and tests first. The RTL comes after, in one revision, so that
+   revision carries everything the later parts need of a tile.
    - **R8F, flag control.** Two instructions: a quiet region, in which
      the ALU's flags do not reach FLAGS, and a raise, which ORs a
-     register's five flag bits into FLAGS. A routine then runs quiet
-     and raises exactly the IEEE flags of the operation it implements,
-     divide-by-zero included. The names and encodings are the parcel's
-     to propose; a CAPS2 bit publishes them.
-   - **R8L, per-lane flags,** R23 as designed (docs/SEQUENCER.md), one
-     byte a lane:
+     register's five flag bits into FLAGS, and under R8L into the
+     lane's byte. A routine then runs quiet and raises exactly the IEEE
+     flags of the operation it implements, divide-by-zero included.
+     - The raise also carries the mark for a lane whose last bit a
+       routine could not decide (R8L's bit [7]). A run with any lane
+       marked says so whether or not it asked for the per-lane block.
+       The one revision therefore holds what M1 and M2 need of a tile.
+     - The names and encodings are the parcel's to propose. A free
+       CAPS2 bit publishes them; R21, R22 and R23 hold [11] to [13].
+   - **R8L, per-lane flags:** R23's design (docs/SEQUENCER.md), one
+     byte a lane, with one change:
      - bits [4:0] the IEEE flags, [5] deposit overflow, [6] a
        strict-scratch fault;
-     - bit [7] reserved for a lane a routine could not decide.
+     - bit [7], which R23 left reserved and zero, the mark R8F's raise
+       sets.
      This takes an ABI step (0.17, `cft_run_args.lane_flags`), the
-     module rebuilt, cft-segrun and cft-audit, the remote protocol, and
-     **certificate format version 2**, which records the per-lane flags
-     and any lane refused or replayed.
+     module rebuilt, cft-segrun and cft-audit, and the remote protocol.
+   - **Certificate format version 2,** designed once, with R8L, for
+     everything this step needs of it:
+     - the per-lane flags;
+     - a marked lane: where it is replayed (the golden model on the
+       host, or a slower image) and how the replay is recorded;
+     - whether a wider run may use the same source compiled at the wider
+       format, which C4's routines need.
+     The design comes to the lead before version 2 is fixed.
    - **R21 and R22**, augmented addition (`augadd`/`augerr`) and stepped
      STX/LDX: already in the model, the software backend and `asm.py`
      (`test_seq_rev8.py`); no tile carries either. They come to cft-asm
-     and the RTL.
+     with R8F's assembler work, and to the RTL.
    - **R8S, instruction streaming.** The program is read from card
      memory through a prefetch, not held on-chip, so the instruction
      ceiling goes. The image format and the certificate are unchanged,
      and the compiler needs only a target that names the larger
-     capacity. CAPS needs a field past 2^15.
+     capacity. That capacity needs a field past CAPS[23:20]'s 2^15. It
+     goes in CAPS2, whose port from the sequencer is 16 bits today and
+     widens, because a certificate's `device-caps` carries only CAPS
+     and CAPS2.
      - A design study comes first: the fetch, its timing at 135 MHz, its
        cost in block RAM, and what a stall costs a step.
    - **The deep build.** A build of the same RTL with more scratch a
-     lane (4,096 to 8,192 slots), as a single or dual tile. Logan's rule
-     for program limits (2026-09-28): "as large as we can, ideally
-     adjustable as the other parameters are". It gives up the quad's
-     four-tile throughput. cftc gains a target for it.
-   - **The RTL revision** follows the golden-first pieces and the
-     streaming design. Its RTL plan comes to Logan before the RTL work
-     starts. Then:
+     lane, 4,096 to 8,192 slots, adjustable per build as Logan's rule
+     for program limits asks (2026-09-28): "as large as we can, ideally
+     adjustable as the other parameters are".
+     - Both depths publish in CAPS2[3:0], as 12 and 13, with no CAPS
+       change.
+     - 8,192 slots need a single or dual tile, about 260 or 516
+       UltraRAMs, which gives up the quad's four-tile throughput.
+     - 4,096 might fit the quad's UltraRAM (about 516 of 640, the
+       survey's estimate), but not obviously its timing.
+     - The RTL plan proposes which, after a probe build. cftc gains a
+       target for each build.
+   - **The RTL revision** follows the golden-first pieces, certificate
+     version 2's design and the streaming design. Its RTL plan comes to
+     Logan before the RTL work starts. Then:
      - `make sim`, Icarus, with Verilator while iterating, and the
        formal proofs that touch it;
-     - two bitstreams on amd-arc-box, one at a time, at
-       `KERNEL_FREQ=135000000`: the quad, and the deep single;
+     - the bitstreams on amd-arc-box, one at a time, at
+       `KERNEL_FREQ=135000000`: the quad, and the deep build;
      - the card legs, with the acceptance set as the admission test,
-       and the workloads that missed run on the deep build.
+       and the workloads that missed run on whichever build holds them.
 2. **L4, run-time division and square root in the language,
    golden-first.**
    - `a / b` and `sqrt(a)` with non-constant operands become nodes,
      whose golden definition is `softfloat`'s div and sqrt, with exact
      flags.
-   - `runtime-division` and `runtime-sqrt` go.
+   - `runtime-division` and `runtime-sqrt` go. Until C4, cftc refuses
+     the new nodes by name, with a refusal of its own that L4 proposes,
+     so that D2's rule holds in between: an accepted source compiles or
+     is refused by name, and exit 70 stays a defect in the compiler.
    - The interpreter, the renderers and the intention-out's checks take
      them, and L3 gains their derivative rules.
-   - The challenge suite's expectations for those refusals become the
-     suite's to restate.
+   - What holds today's refusals is restated with them: test_lang.py,
+     test_lang_readback.py, and LANGUAGE.md's refusal tables, which
+     test_lang.py holds to the code. The challenge suite's expectations
+     are the suite's to restate. The workload pack's own copy of
+     LANGUAGE.md stays as delivered.
 3. **C4, routines in the compiler.**
-   - A generator in the manner of `gen_divfull` writes each routine as
-     a relocatable fragment: registers from the allocator, raw-word
-     bank slots as a new slot kind, internal attributes allowed.
+   - A generator in the model, in the manner of `cft_golden/divfull.py`,
+     writes each routine as a relocatable fragment: registers from the
+     allocator, raw-word bank slots as a new slot kind, and the
+     routine's own internal attributes, which the source never sees.
    - It is flag-exact through R8F.
    - The internal check learns routines. An image with one needs the
      flag-control feature, so revision 7's targets refuse it by name
      (`target-feature`), and the software targets run it once R8F is
      in the software backend.
    - **Format-specific words:** a certified wider run of such a program
-     is refused by name under certificate version 1, as cft-orbits'
-     runs are, until version 2 says otherwise.
+     is refused by name, as cft-orbits' wider runs are, unless
+     certificate version 2 defines one.
    - **Code size:** the compiler's sharing, and a call loop (one
      inlined copy in a REPEAT over argument slots) where calls are
-     many. A CALL instruction is not in this revision.
+     many. The call loop needs only revision 7's LDX, STX, IADD and
+     REPEAT. A CALL instruction is not in this revision.
 4. **T1, time-dependent systems.** LANGUAGE.md and the tests:
    - t as a state variable;
    - its exactness with a dyadic h, and its drift otherwise, measured;
-   - a step counter as the exact construction.
+   - a step counter as the exact construction. One written
+     `d/dt k = 1/h` stayed exact through 10^4 steps at fp32, fp64 and
+     fp256, under rk4 and euler (verifier-P6), and t from it is one
+     rounding.
    There is no reserved `t`. Forcing by sin or cos waits for M2; a
    rotation carried in the state works before it.
 5. **The math library.** The golden definition is
@@ -4743,10 +4792,8 @@ and the testing rule, as the last rounds ran.
      - Double-word in the program's format, using augmented addition; at
        fp32, triple-word.
      - An in-lane test of whether the last bit is decided. A lane that
-       is not is marked in bit 7 and replayed. Where the replay runs
-       (the golden model on the host, or a slower image) and how the
-       certificate records it is M1's design, to come to the lead
-       first.
+       is not is marked through R8F's raise and replayed, as certificate
+       version 2's design says.
      - The surveyor's estimates, nothing measured: about 100 bank
        constants at fp64 with a 32-entry table, and about 150
        instructions a call at fp64 and 750 at fp256.
@@ -4763,15 +4810,17 @@ and the testing rule, as the last rounds ran.
 **The order.**
 - A1 now.
 - Then, side by side:
-  - R8F with R8L, golden-first through the software backend, the ABI
-    step and certificate version 2;
+  - R8F with R8L, and R21/R22's cft-asm work, golden-first through the
+    software backend and the ABI step;
+  - certificate version 2's design, then version 2;
   - L4;
   - T1;
   - the streaming design study.
-- C4 follows R8F and L4.
+- C4 follows R8F, L4 and certificate version 2's design.
 - M1 follows C4 and R8L.
-- The RTL revision follows R8F, R8L, R21/R22 and the approved streaming
-  design.
+- The RTL revision follows R8F, R8L, R21/R22, certificate version 2's
+  design and the approved streaming design. The deep build's and the
+  streaming build's cftc targets come with it.
 - M2, M3 and M4 after M1.
 - At each merge, the gate budget on amd-arc-box. After the revision, the
   card legs and the acceptance set on the card.
@@ -4779,15 +4828,45 @@ and the testing rule, as the last rounds ran.
 **What it is not.**
 - Compile time, which is later performance work (Logan).
 - A scheduling order for scratch traffic, which is performance work
-  too.
-- Adaptive steps and events, per-operation attributes, and a Python
-  front end. Step 3's "What it is not" named them, and this plan does
-  not place them.
+  too, though on today's card it is the only route that might fit
+  Gray-Scott hard.
+- Adaptive steps and events, per-operation attributes in the language
+  (a source choosing an attribute per operation; C4's internal
+  attributes are a routine's own), and a Python front end. Step 3's
+  "What it is not" named them, and this plan does not place them.
 - A CALL instruction.
-- A split of one program across tiles, a cut by component or by stage:
-  not chosen.
-- The gallery: one gallery after step 6, with literature-checked answers
-  and certificates published.
+- A split of one program across tiles, by component or by stage: not
+  chosen. The 2026-09-18 plan (Programs across tiles, above) keeps its
+  partitioner, its asynchronous API and its shared-bank link
+  configuration, unbuilt and not placed here.
+- The gallery. The lead's recommendation is one gallery after step 6,
+  with literature-checked answers and certificates published. Logan's
+  reply dropped step 5 and did not decide the gallery. Step 3's Next
+  line (above) and its two gallery waves are superseded by his reply.
+
+**Sentences elsewhere that this plan supersedes.** Each is restated by
+the parcel that changes its subject, or by the lead when the round
+closes:
+- the inlining obstacle stated as spilling registers only: step 3's
+  "What it is not" (above), LANGUAGE.md's rows for `runtime-division`
+  and `runtime-sqrt`, and ORBITS.md's fragment-inliner sentence (L4 and
+  C4);
+- docs/studies/OPT-D-contract.md's rejection of an in-program correctly
+  rounded divide as a second rounding authority, which divfull has
+  since answered (C4);
+- R23's "[7] reserved, zero" and its certificate "as it covers the
+  counts" (docs/SEQUENCER.md), and LANGUAGE.md's "FLAGS belongs to the
+  run, not to a lane" (R8L);
+- SEQUENCER.md's estimate of about 388 UltraRAMs for the quad, and the
+  2026-09-18 plan's quad "that closed at +0.040 ns with 80% of the
+  part's LUTs" (round 2's), against q135b's measured figures; that
+  plan's lane with "256 private scratch slots" (2,048 on revision 7's
+  U50), its partitioner in `asm.py`, and its pre-R18 cut prices (the
+  lead);
+- the compiler manifest's note that its cost model is "believed ... not
+  measured": the card has measured it, and runs 2.2% to 5.8% slower
+  than it (docs/VALIDATION.md). Changing the note changes the committed
+  compiled files, so it waits for C4.
 
 **For Logan.**
 - Approve this plan, or change it, before any code beyond A1.
