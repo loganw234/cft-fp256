@@ -555,10 +555,10 @@ static int seq_augadd_highest(const seq_insn *d)
 }
 
 /* Revision 8 against the device, BY NAME. Every tile built so far reads
- * CAPS2[11] and [12] as zero: it decodes code 10 as HALT, and it never
- * reads imm on STX/LDX, so it would access without stepping - neither a
- * fault it could raise. So each is refused here, before the register map
- * is touched, naming the instruction and the bit. */
+ * CAPS2[11], [12] and [14] as zero: it decodes codes 10 to 14 as HALT,
+ * and it never reads imm on STX/LDX, so it would access without stepping
+ * - none of them a fault it could raise. So each is refused here, before
+ * the register map is touched, naming the instruction and the bit. */
 static cft_status seq_rev8_against_device(const cft_seq_caps *c,
                                           const seq_insn *d, uint32_t pc)
 {

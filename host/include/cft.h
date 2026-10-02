@@ -660,7 +660,7 @@ typedef struct cft_caps {
                                 * the ALU extensions beyond the group
                                 * bits; bits 11:8 = CAPS2[7:4], the
                                 * second feature nibble revision 3
-                                * opened; bits 16:12 = CAPS2[12:8]. The
+                                * opened; bits 18:12 = CAPS2[14:8]. The
                                 * assigned bits are the macros below -
                                 * CFT_SEQ_FEAT_*, CFT_ALU_EXT_* and
                                 * CFT_FEAT_REDUCE_SEG; do not keep a
