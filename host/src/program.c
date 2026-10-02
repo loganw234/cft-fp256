@@ -140,7 +140,16 @@ enum { SEQ_HALT = 0, SEQ_REPEAT, SEQ_ENDREP, SEQ_DEPOSIT, SEQ_SETACT,
        SEQ_ACTALL, SEQ_STL, SEQ_LDL, SEQ_STX, SEQ_LDX,
        /* revision 8 (proposed 2026-09-29): augmentedAddition's two
         * halves - see the block above seq_validate */
-       SEQ_AUGADD, SEQ_AUGERR };
+       SEQ_AUGADD, SEQ_AUGERR,
+       /* revision 8's R24 (the step-6 round): flag control, a quiet
+        * region and a raise - see the block above seq_validate */
+       SEQ_QUIET, SEQ_ENDQUIET, SEQ_RAISE };
+
+/* R24: quiet regions nest four deep, as loops do, in a field of their
+ * own; a raise reads rA[4:0] as the five flags and rA[7] as the mark. */
+#define SEQ_MAX_QUIET    4
+#define SEQ_RAISE_FLAGS  0x1Fu
+#define SEQ_RAISE_MARK   7
 
 /* Revision 8's post-step: imm[11:0] of an STX or LDX, twelve-bit two's
  * complement. imm[23:12] stays a field nothing reads. */
@@ -489,7 +498,28 @@ static cft_status seq_check_operands(const cft_program *p,
  *                                 twelve-bit imm[11:0], except an LDX
  *                                 into rb itself, which keeps what it
  *                                 loaded (CORE-V XCVmem). Zero is the
- *                                 instruction as it always was. */
+ *                                 instruction as it always was.
+ *
+ * And the step-6 round's R23 and R24 (2026-10-02, ABI 0.17), held to the
+ * model by seq_check.py's flag-control corpus:
+ *
+ *   quiet       (code 12)  open a quiet region; endquiet (13) closes the
+ *                          innermost. Inside one, the five IEEE flags of
+ *                          every instruction - ALU, augadd/augerr, and a
+ *                          raise's own - reach neither the run's flags nor
+ *                          a lane's byte (754-2019 5.7.4's saveAllFlags
+ *                          and restoreFlags). Regions nest four deep and
+ *                          properly with loops, so the depth at an
+ *                          instruction is a function of where it stands;
+ *   raise rA    (code 14)  for every active lane, rA[4:0] ORed into the
+ *                          flags and the lane's byte outside a region,
+ *                          and rA[7] MARKS the lane - CFT_STATUS_MARKED,
+ *                          CFT_LANE_MARKED - anywhere. Nothing else of
+ *                          rA is read;
+ *   the byte    R23's, one a lane: [4:0] its flags outside every region,
+ *               [5] its deposit overflow, [6] its strict fault, [7] its
+ *               mark - written to cft_run_args.lane_flags, for the lanes
+ *               the caller has, where the caller asks for it. */
 
 /* The signed post-step an STX or LDX carries, or 0 - and 0 for STL and
  * LDL, whose imm[23:0] is a slot and not a step. */
@@ -554,6 +584,18 @@ static cft_status seq_rev8_against_device(const cft_seq_caps *c,
                       d->op == SEQ_STX ? "STX" : "LDX", step);
         return CFT_ERR_UNSUPPORTED;
     }
+    if ((d->op == SEQ_QUIET || d->op == SEQ_ENDQUIET ||
+         d->op == SEQ_RAISE) &&
+        !(c->features & CFT_SEQ_FEAT_FLAG_CONTROL)) {
+        cft_set_error("instruction %lu is %s - revision 8's flag control, "
+                      "R24 - and this device does not publish it (CAPS2[14] "
+                      "clear, cft_caps.seq_features bit 18 - "
+                      "CFT_SEQ_FEAT_FLAG_CONTROL); a tile without it "
+                      "decodes the code as HALT", (unsigned long)pc,
+                      d->op == SEQ_QUIET    ? "QUIET"
+                      : d->op == SEQ_ENDQUIET ? "ENDQUIET" : "RAISE");
+        return CFT_ERR_UNSUPPORTED;
+    }
     return CFT_OK;
 }
 
@@ -602,6 +644,9 @@ static cft_status seq_rev8_against_device(const cft_seq_caps *c,
  * bit, rnd (9.5 fixes the rounding, so no attribute can be spelled),
  * imm[23:0] and imm[31:28].
  *
+ * R24's quiet and endquiet read nothing, as HALT does; its raise reads
+ * `ra` alone, as SETACT does, so imm[25] and nothing else of imm.
+ *
  * No control code reads rnd, a `k` flag or `kx`: none reads a rounding
  * attribute (augadd and augerr round, at the one rounding 9.5 fixes),
  * and none reads the constant bank. */
@@ -633,7 +678,10 @@ static const struct {
     [SEQ_AUGADD]  = { "AUGADD",  SEQ_F_RD | SEQ_F_RA | SEQ_F_RB,
                       SEQ_HI_RD | SEQ_HI_RA | SEQ_HI_RB },
     [SEQ_AUGERR]  = { "AUGERR",  SEQ_F_RD | SEQ_F_RA | SEQ_F_RB,
-                      SEQ_HI_RD | SEQ_HI_RA | SEQ_HI_RB }
+                      SEQ_HI_RD | SEQ_HI_RA | SEQ_HI_RB },
+    [SEQ_QUIET]    = { "QUIET",    0,        0 },
+    [SEQ_ENDQUIET] = { "ENDQUIET", 0,        0 },
+    [SEQ_RAISE]    = { "RAISE",    SEQ_F_RA, SEQ_HI_RA }
 };
 #define SEQ_NCTRL  ((int)(sizeof seq_ctrl / sizeof seq_ctrl[0]))
 
@@ -700,6 +748,15 @@ static cft_status seq_validate(const cft_program *p)
     uint64_t mult[SEQ_MAX_DEPTH + 1];
     uint64_t worst = 0;
     int top = 0;
+    /* R24: every bracket open, loops and quiet regions together,
+     * innermost last, with the instruction each opened at - so that the
+     * two kinds nest properly within each other (a region opened in a
+     * loop body closes in that body; one opened outside a loop closes
+     * outside it), which makes whether an instruction is quiet a property
+     * of where it stands. The depth checks below bound the stack. */
+    int bkind[SEQ_MAX_DEPTH + SEQ_MAX_QUIET];
+    uint32_t bpc[SEQ_MAX_DEPTH + SEQ_MAX_QUIET];
+    int nb = 0, qdepth = 0;
 
     mult[0] = 1;
     for (pc = 0; pc < p->n_insns; pc++) {
@@ -783,14 +840,52 @@ static cft_status seq_validate(const cft_program *p)
                 return CFT_ERR_INVALID_ARGUMENT;
             }
             mult[top] = mult[top - 1] * d.imm;
+            bkind[nb] = SEQ_REPEAT;
+            bpc[nb++] = pc;
         } else if (d.op == SEQ_ENDREP) {
             if (depth == 0) {
                 cft_set_error("instruction %lu is an ENDREP with no REPEAT "
                               "open", (unsigned long)pc);
                 return CFT_ERR_INVALID_ARGUMENT;
             }
+            if (bkind[nb - 1] != SEQ_REPEAT) {
+                cft_set_error("instruction %lu is an ENDREP that closes its "
+                              "loop while the quiet region opened at "
+                              "instruction %lu is open: a region opened in a "
+                              "loop body closes in that body",
+                              (unsigned long)pc, (unsigned long)bpc[nb - 1]);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
+            nb--;
             depth--;
             top--;
+        } else if (d.op == SEQ_QUIET) {
+            if (qdepth >= SEQ_MAX_QUIET) {
+                cft_set_error("instruction %lu is a QUIET inside %d open "
+                              "quiet regions, and regions nest at most %d "
+                              "deep", (unsigned long)pc, qdepth,
+                              SEQ_MAX_QUIET);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
+            qdepth++;
+            bkind[nb] = SEQ_QUIET;
+            bpc[nb++] = pc;
+        } else if (d.op == SEQ_ENDQUIET) {
+            if (qdepth == 0) {
+                cft_set_error("instruction %lu is an ENDQUIET with no quiet "
+                              "region open", (unsigned long)pc);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
+            if (bkind[nb - 1] != SEQ_QUIET) {
+                cft_set_error("instruction %lu is an ENDQUIET inside the loop "
+                              "opened at instruction %lu, around a region "
+                              "opened outside it: a region opened outside a "
+                              "loop closes outside it", (unsigned long)pc,
+                              (unsigned long)bpc[nb - 1]);
+                return CFT_ERR_INVALID_ARGUMENT;
+            }
+            nb--;
+            qdepth--;
         } else if ((d.op == SEQ_ACTALL || d.op == SEQ_HALT) && depth > 0) {
             /* Both would make the all-lanes-done early exit
              * observable - ACTALL because it can reactivate a lane,
@@ -808,6 +903,20 @@ static cft_status seq_validate(const cft_program *p)
                               "observable", (unsigned long)pc);
             return CFT_ERR_INVALID_ARGUMENT;
         }
+        /* R24. A region is 754-2019 5.7.4's save and its restore, and a
+         * program that stops between them has two faithful readings - the
+         * flags since the save stand, nothing having restored them, or
+         * they never reached the flags - so it is refused rather than one
+         * of them chosen. Every bracket open here is a region: a HALT in a
+         * loop was refused above. */
+        if (d.op == SEQ_HALT && qdepth > 0) {
+            cft_set_error("instruction %lu is HALT inside the quiet region "
+                          "opened at instruction %lu: a region is a save and "
+                          "its restore, and a program cannot stop between "
+                          "them", (unsigned long)pc,
+                          (unsigned long)bpc[nb - 1]);
+            return CFT_ERR_INVALID_ARGUMENT;
+        }
     }
     if (depth != 0) {
         /* depth > 0 needs a REPEAT, so there is a last instruction */
@@ -815,6 +924,15 @@ static cft_status seq_validate(const cft_program *p)
                       "open loop%s: every REPEAT needs its ENDREP",
                       (unsigned long)(p->n_insns - 1u), depth,
                       depth == 1 ? "" : "s");
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    if (qdepth != 0) {
+        /* R24, for the reason a HALT inside a region is refused */
+        cft_set_error("the program ends, after instruction %lu, inside %d "
+                      "open quiet region%s, the innermost opened at "
+                      "instruction %lu: every QUIET needs its ENDQUIET",
+                      (unsigned long)(p->n_insns - 1u), qdepth,
+                      qdepth == 1 ? "" : "s", (unsigned long)bpc[nb - 1]);
         return CFT_ERR_INVALID_ARGUMENT;
     }
     return CFT_OK;
@@ -868,6 +986,11 @@ void cft_sw_seq_caps(cft_seq_caps *out)
 #ifndef CFT_NO_AUGMENTED
     out->features |= CFT_SEQ_FEAT_AUGADD;
 #endif
+    /* The step-6 round's R23 and R24 (ABI 0.17), on the same terms: this
+     * executor keeps a byte a lane and writes it where a run asks, and it
+     * runs quiet regions and raises - so a software handle's seq_features
+     * is 0x7ff1f in a default build. */
+    out->features |= CFT_SEQ_FEAT_LANE_FLAGS | CFT_SEQ_FEAT_FLAG_CONTROL;
     /* Not here, and not missing: CFT_SEQ_FEAT_SCALAR and
      * CFT_FEAT_REDUCE_SEG. The software backend publishes both (since
      * 2026-09-24), but they are features of device.c's elementwise path
@@ -948,7 +1071,8 @@ static cft_status seq_check_against_device(cft_device *dev,
          * all. */
         if (d.ctrl) {
             if (d.op == SEQ_DEPOSIT || d.op == SEQ_SETACT ||
-                d.op == SEQ_STL     || d.op == SEQ_STX)
+                d.op == SEQ_STL     || d.op == SEQ_STX ||
+                d.op == SEQ_RAISE)
                 reg = seq_reg(d.ra, d.ha);
             if (d.op == SEQ_LDL || d.op == SEQ_LDX)
                 reg = seq_reg(d.rd, d.hd);
@@ -1583,6 +1707,12 @@ typedef struct {
      * ANDed with the mask, computed once and read by both. */
     int    keep[BLOCK_LANES];
     uint32_t counts[BLOCK_LANES];
+    /* R23's byte a lane (ABI 0.17): [4:0] the IEEE flags the lane raised
+     * outside every quiet region, CFT_LANE_DEPOSIT_OVERFLOW,
+     * CFT_LANE_SCRATCH_RANGE and CFT_LANE_MARKED. Kept for every run -
+     * an OR beside the one into the run's word - and written out only
+     * where the caller asks, for the lanes it has. */
+    uint8_t lflags[BLOCK_LANES];
     /* The program's scratch_depth slots a lane, or NULL for a program
      * that touches no scratch and declares no block. Out of line rather
      * than inside this struct because it is four megabytes at 256 slots
@@ -1648,7 +1778,7 @@ static uint32_t seq_matching_endrep(const cft_program *p, uint32_t pc)
  * unreachable and says so. */
 static cft_status seq_exec_augmented(const cft_program *p, seq_block *B,
                                      int nlane, const seq_insn *d,
-                                     uint32_t *flags)
+                                     uint32_t *flags, int loud)
 {
 #ifndef CFT_NO_AUGMENTED
     const int rd = seq_reg(d->rd, d->hd);
@@ -1664,11 +1794,17 @@ static cft_status seq_exec_augmented(const cft_program *p, seq_block *B,
                              &r, &e, &fl))
             return CFT_ERR_INTERNAL;
         cft_bn_copy(&B->regs[i][rd], d->op == SEQ_AUGERR ? &e : &r);
-        *flags |= fl;
+        /* R24: a quiet region silences them, here as for an ALU
+         * instruction; otherwise they reach the run's word and the
+         * lane's byte alike (R23). */
+        if (loud) {
+            *flags |= fl;
+            B->lflags[i] |= (uint8_t)fl;
+        }
     }
     return CFT_OK;
 #else
-    (void)p; (void)B; (void)nlane; (void)d; (void)flags;
+    (void)p; (void)B; (void)nlane; (void)d; (void)flags; (void)loud;
     return CFT_ERR_INTERNAL;
 #endif
 }
@@ -1714,6 +1850,11 @@ static cft_status seq_run_block(const cft_program *p, const cft_bn *konst,
     struct { uint32_t body; uint32_t left; } stack[SEQ_MAX_DEPTH];
     int sp = 0;
     uint32_t pc = 0;
+    /* R24's quiet depth, counted in program order. seq_validate nests
+     * regions properly with loops, so a loop body the early exit skips
+     * has balanced brackets and the count after it is the count before
+     * it: the depth at an instruction is a function of where it stands. */
+    int qdepth = 0;
 
     while (pc < p->n_insns) {
         seq_insn d;
@@ -1742,7 +1883,10 @@ static cft_status seq_run_block(const cft_program *p, const cft_bn *konst,
                                    &outv, &fl))
                     return CFT_ERR_INTERNAL;
                 cft_bn_copy(&B->regs[i][rd], &outv);
-                *flags |= fl;
+                if (!qdepth) {          /* R24: a region silences them */
+                    *flags |= fl;
+                    B->lflags[i] |= (uint8_t)fl;
+                }
             }
             pc++;
             continue;
@@ -1785,7 +1929,9 @@ static cft_status seq_run_block(const cft_program *p, const cft_bn *konst,
                 if (!B->active[i])
                     continue;
                 if (B->counts[i] >= p->max_deposits) {
+                    /* a report, which no quiet region hides (R24) */
                     *status |= CFT_STATUS_DEPOSIT_OVERFLOW;
+                    B->lflags[i] |= (uint8_t)CFT_LANE_DEPOSIT_OVERFLOW;
                     continue;
                 }
                 slot = (first_elem + (size_t)i) * p->max_deposits +
@@ -1886,6 +2032,7 @@ static cft_status seq_run_block(const cft_program *p, const cft_bn *konst,
                 if (strict_range &&
                     cft_bn_bitlen(&B->regs[i][rb]) > p->scratch_log2) {
                     *status |= CFT_STATUS_SCRATCH_RANGE;
+                    B->lflags[i] |= (uint8_t)CFT_LANE_SCRATCH_RANGE;
                     /* +0, which is what an untouched slot reads back as.
                      * Never a stale register: that would make the result
                      * depend on whatever the lane happened to hold. */
@@ -1917,9 +2064,47 @@ static cft_status seq_run_block(const cft_program *p, const cft_bn *konst,
         case SEQ_AUGADD:
         case SEQ_AUGERR: {
             const cft_status ast = seq_exec_augmented(p, B, nlane, &d,
-                                                      flags);
+                                                      flags, !qdepth);
             if (ast != CFT_OK)
                 return ast;
+            pc++;
+            break;
+        }
+
+        /* R24: a quiet region's two ends. Not per lane - a region is a
+         * property of an instruction's place in the program. */
+        case SEQ_QUIET:
+            qdepth++;
+            pc++;
+            break;
+
+        case SEQ_ENDQUIET:
+            qdepth--;
+            pc++;
+            break;
+
+        /* R24's raise, for every ACTIVE lane: rA[4:0] ORed into the flags
+         * and the lane's byte outside a region (754-2019 5.7.4's
+         * raiseFlags - any subset, never a clear), and rA[7] marking the
+         * lane anywhere: the mark is not an IEEE flag, and a lost one
+         * would make an undecided last bit look decided. Nothing else of
+         * rA is read. An inactive lane raises and marks nothing (P3). */
+        case SEQ_RAISE: {
+            const int ra = seq_reg(d.ra, d.ha);
+            for (i = 0; i < nlane; i++) {
+                uint32_t low;
+                if (!B->active[i])
+                    continue;
+                low = (uint32_t)cft_bn_extract(&B->regs[i][ra], 0, 8);
+                if (!qdepth) {
+                    *flags |= low & SEQ_RAISE_FLAGS;
+                    B->lflags[i] |= (uint8_t)(low & SEQ_RAISE_FLAGS);
+                }
+                if ((low >> SEQ_RAISE_MARK) & 1u) {
+                    *status |= CFT_STATUS_MARKED;
+                    B->lflags[i] |= (uint8_t)CFT_LANE_MARKED;
+                }
+            }
             pc++;
             break;
         }
@@ -2277,6 +2462,12 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
             io.idx_scratch_src   = A->idx_scratch_src;
             io.lane_mask         = A->lane_mask;
             io.lane_mask_bytes   = A->lane_mask_bytes;
+            /* ABI 0.17's block, handed across as the mask is: device.c
+             * refuses it by name where the device does not publish
+             * CFT_SEQ_FEAT_LANE_FLAGS, and a backend that does writes a
+             * byte a lane the caller has. */
+            io.lane_flags        = A->lane_flags;
+            io.lane_flags_bytes  = A->lane_flags_bytes;
             /* Which device backend is device.c's business: the
              * dispatcher in backend.h hands the run to the XRT one or
              * the remote one (docs/REMOTE.md) and this file names
@@ -2400,6 +2591,7 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
                     ? 1 : 0;
             B->active[i] = B->keep[i];
             B->counts[i] = 0;
+            B->lflags[i] = 0;       /* R23: every run starts at zero */
             /* "Slots start at +0 for every lane at the start of a run,
              * except where R5 preloads them" - so every slot is zeroed
              * for every block, and then the block's first n_scratch_in
@@ -2434,6 +2626,13 @@ static cft_status seq_program_run(cft_program *prog, const cft_run_args *A)
             for (i = 0; i < k; i++)
                 if (B->keep[i])
                     counts[off + i] = B->counts[i];
+        /* R23's block (ABI 0.17), on the counts' terms: lane i's byte at
+         * byte i, for the lanes the caller has - a masked lane's is the
+         * caller's and is not written. */
+        if (A->lane_flags)
+            for (i = 0; i < k; i++)
+                if (B->keep[i])
+                    A->lane_flags[off + i] = B->lflags[i];
         /* And the block's scratch-out, after its last deposit. Every
          * element is written, including a slot no instruction ever
          * stored to: it reads as +0, which is the same normative rule
@@ -2559,6 +2758,23 @@ static cft_status seq_check_round2(const cft_program *p,
                       "would give lanes somebody else's bit", who,
                       (unsigned long)A->lane_mask_bytes, (unsigned long)A->n,
                       (unsigned long)((A->n + 7u) / 8u));
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    /* ABI 0.17 (docs/SEQUENCER.md R23): the per-lane flags block, on the
+     * mask's rule and for the mask's reason. The two are byte arrays a
+     * run's lanes size, (n + 7) / 8 of bits and n of flags, and a caller
+     * that sized one by the other is told rather than overrun. */
+    if (!A->lane_flags && A->lane_flags_bytes) {
+        cft_set_error("%s: lane_flags_bytes = %lu with no lane_flags", who,
+                      (unsigned long)A->lane_flags_bytes);
+        return CFT_ERR_INVALID_ARGUMENT;
+    }
+    if (A->lane_flags && A->lane_flags_bytes != A->n) {
+        cft_set_error("%s: lane_flags_bytes is %lu and the per-lane flags "
+                      "of %lu lanes are exactly %lu bytes, a byte a lane - "
+                      "not a mask's (n + 7) / 8", who,
+                      (unsigned long)A->lane_flags_bytes, (unsigned long)A->n,
+                      (unsigned long)A->n);
         return CFT_ERR_INVALID_ARGUMENT;
     }
     /* The bound, checked BEFORE the run on every backend (R16): an

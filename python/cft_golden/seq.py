@@ -2097,7 +2097,9 @@ def _flags_draw(insns, rng, nreg, brackets):
     not a loop, or a raise of a register. A register's low byte is what
     the lane computed, so the flags a raise ORs and whether it marks are
     the program's own - both halves of every lane's byte are reached
-    without a value written for them."""
+    without a value written for them. Half the raises read r0, r1 or r2,
+    the lane's inputs, because most of thirty-two registers are never
+    written in a short program and a raise of +0 reaches nothing."""
     kind = rng.randrange(6)
     if kind < 2 and brackets.count(QUIET) < MAX_QUIET_DEPTH:
         insns.append(quiet())
@@ -2106,7 +2108,8 @@ def _flags_draw(insns, rng, nreg, brackets):
         insns.append(endquiet())
         brackets.pop()
     else:
-        insns.append(raise_(rng.randrange(nreg)))
+        insns.append(raise_(rng.randrange(3) if rng.random() < 0.5
+                            else rng.randrange(nreg)))
 
 
 def random_inputs(fmt, rng, n):

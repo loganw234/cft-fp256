@@ -596,8 +596,9 @@ CFT_API cft_status cft_open(const char *artifact, int index, cft_device **out)
      * computed, so a caller that asked cft_get_caps first, as cft.h tells
      * it to, was told no by a handle that would have said yes (the
      * default build's seq_features was 0x671f; it was 0x7f1f from then,
-     * and is 0x1ff1f since ABI 0.16 published revision 8's two bits -
-     * a -DCFT_NO_PROGRAM build's 0x1810 rather than 0x10). */
+     * 0x1ff1f once ABI 0.16 published revision 8's two bits, and is
+     * 0x7ff1f since ABI 0.17 published R23's and R24's - a
+     * -DCFT_NO_PROGRAM build's 0x1810 rather than 0x10). */
     dev->seq.features  |= CFT_SEQ_FEAT_SCALAR | CFT_FEAT_REDUCE_SEG;
     dev->backend_name   = "software";
     dev->hw             = NULL;
@@ -735,6 +736,23 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
                             void *deposits, uint32_t *counts, size_t n,
                             uint32_t *flags, uint32_t *bus)
 {
+    /* R23's per-lane flags block (ABI 0.17) is refused BY NAME where the
+     * device does not publish CFT_SEQ_FEAT_LANE_FLAGS: every tile built so
+     * far, whose CAPS2[13] reads zero and which refuses MODE[24] at start
+     * with STATUS[3], and a remote handle whose server's device lacks it.
+     * Unlike a mask, which a remote client compacts away, the block can
+     * only be made where the lanes ran, so neither route can stand in. */
+    if (dev && io && io->lane_flags &&
+        !(dev->seq.features & CFT_SEQ_FEAT_LANE_FLAGS)) {
+        cft_set_error(
+            "a per-lane flags block needs CFT_SEQ_FEAT_LANE_FLAGS, which %s "
+            "does not publish (CAPS2[13], cft_caps.seq_features bit 17); "
+            "ask cft_get_caps before passing one, or run without it and "
+            "read the run's flags",
+            dev->backend == CFT_BACKEND_REMOTE
+                ? "this remote handle's server" : "this device");
+        return CFT_ERR_UNSUPPORTED;
+    }
 #ifdef CFT_ENABLE_XRT
     if (dev && dev->backend == CFT_BACKEND_XRT) {
         cft_bindings bd;

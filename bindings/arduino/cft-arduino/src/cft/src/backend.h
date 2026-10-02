@@ -331,6 +331,11 @@ typedef struct cft_seq_run_io {
     const uint32_t *idx_a, *idx_b, *idx_c, *idx_scratch_in;
     size_t idx_a_src, idx_b_src, idx_c_src, idx_scratch_src;
     const uint8_t *lane_mask; size_t lane_mask_bytes;
+    /* ABI 0.17, appended (docs/SEQUENCER.md R23): the per-lane flags
+     * block, n bytes, or NULL. device.c refuses it by name on a device
+     * that does not publish CFT_SEQ_FEAT_LANE_FLAGS - every tile so far -
+     * so a backend that sees one writes a byte a lane the caller has */
+    uint8_t *lane_flags; size_t lane_flags_bytes;
 } cft_seq_run_io;
 
 /* Run a sequencer program (docs/SEQUENCER.md). A backend with several
@@ -349,12 +354,15 @@ typedef struct cft_seq_run_io {
  *
  * flags is the run's sticky IEEE word. bus carries STATUS: bits 0..2
  * only on CFT_ERR_BUS_FAULT, as everywhere else in this header, and
- * on success the two REPORTS, CFT_STATUS_DEPOSIT_OVERFLOW (bit 4) and
- * CFT_STATUS_SCRATCH_RANGE (bit 5) - reports rather than errors,
- * because what fit is correct and what was in range is correct. A
- * backend hands back BOTH or it is not this contract: one that stopped
- * at bit 4 computed a strict image correctly and told the caller
- * nothing, which is the one thing strict exists to prevent.
+ * on success the REPORTS, CFT_STATUS_DEPOSIT_OVERFLOW (bit 4),
+ * CFT_STATUS_SCRATCH_RANGE (bit 5) and, since ABI 0.17,
+ * CFT_STATUS_MARKED (bit 6) - reports rather than errors, because what
+ * fit is correct, what was in range is correct, and a marked lane's
+ * outputs are what the program computed. A backend hands back ALL THREE
+ * or it is not this contract: one that stopped at bit 4 computed a
+ * strict image correctly and told the caller nothing, which is the one
+ * thing strict exists to prevent, and one that stopped at bit 5 would
+ * hand back an undecided last bit as though it were decided.
  *
  * Every tile the device has, since 2026-09-25 (backend_xrt.cpp's
  * run_job): a sequencer lane depends on its own index alone, as an

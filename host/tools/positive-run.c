@@ -972,14 +972,27 @@ int main(int argc, char **argv)
     printf("flags         0x%08x  %s\n", (unsigned)flags, words);
     /* The word first and in hex, because replayers read it from there
      * (atlas-engine's run_set.py does); the names follow it. */
-    printf("status        0x%08x%s%s\n", (unsigned)bus,
-           (bus & CFT_STATUS_DEPOSIT_OVERFLOW)
-           ? "  deposit-overflow: a lane deposited more than max_deposits"
-           : "",
-           (bus & CFT_STATUS_SCRATCH_RANGE)
-           ? "  scratch-range: a strict image indexed the scratch at or "
-             "past the depth"
-           : "");
+    {
+        /* ABI 0.17's report (R24), named only when it is set, so every
+         * plate made before it reads as it did - and guarded, as this
+         * file guards every feature newer than it, for an older cft.h */
+        const char *marked = "";
+#ifdef CFT_STATUS_MARKED
+        if (bus & CFT_STATUS_MARKED)
+            marked = "  marked: a raise marked a lane whose last bit its "
+                     "routine could not decide";
+#endif
+        printf("status        0x%08x%s%s%s\n", (unsigned)bus,
+               (bus & CFT_STATUS_DEPOSIT_OVERFLOW)
+               ? "  deposit-overflow: a lane deposited more than "
+                 "max_deposits"
+               : "",
+               (bus & CFT_STATUS_SCRATCH_RANGE)
+               ? "  scratch-range: a strict image indexed the scratch at or "
+                 "past the depth"
+               : "",
+               marked);
+    }
 
     /* the program digest: image bytes, then bank bytes */
     {

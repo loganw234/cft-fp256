@@ -89,7 +89,10 @@ FMT_CODE = {"fp32": 0, "fp64": 1, "fp128": 2, "fp256": 3}
 
 
 class RunArgs(ctypes.Structure):
-    """cft_run_args, field for field (host/include/cft.h, ABI 0.14)."""
+    """cft_run_args, field for field (host/include/cft.h, ABI 0.17): a
+    struct of another size is refused by the library at every call, so a
+    field this mirror lacked would refuse every run here (maskflags.py
+    imports this class too)."""
     _fields_ = [("struct_size", ctypes.c_size_t),
                 ("a", ctypes.c_void_p), ("b", ctypes.c_void_p),
                 ("c", ctypes.c_void_p),
@@ -112,7 +115,10 @@ class RunArgs(ctypes.Structure):
                 ("idx_scratch_in", ctypes.c_void_p),
                 ("idx_scratch_src", ctypes.c_size_t),
                 ("lane_mask", ctypes.c_void_p),
-                ("lane_mask_bytes", ctypes.c_size_t)]
+                ("lane_mask_bytes", ctypes.c_size_t),
+                # ABI 0.17 (docs/SEQUENCER.md R23); NULL and 0 here
+                ("lane_flags", ctypes.c_void_p),
+                ("lane_flags_bytes", ctypes.c_size_t)]
 
 
 def load_library():
