@@ -41,6 +41,13 @@ def flag_words(flags):
     return [w for b, w in FLAG_WORDS if flags & b]
 
 
+def _call_loop_above():
+    """The call loop's constant, as the manifest states it: read when the
+    manifest is built, so that a test lowering it is seen."""
+    from . import callloop
+    return callloop.CALL_LOOP_ABOVE
+
+
 def _hex(fmt, bits):
     return K.bits_hex(fmt, bits)
 
@@ -223,13 +230,17 @@ def build(c):
         m["lowering"]["graph_tangent_by_op"] = g.tangent_counts
     x = getattr(prog, "x", None)
     blocks = getattr(x, "blocks", None)
-    if blocks:
+    loops = getattr(x, "loops", None)
+    if blocks or loops:
         # the routines' own entries (C4), only where the step has them, so
         # a manifest without them is what it was
         from cft_golden import routines as R
         calls = {}
         for _j, op, _f, _r in blocks:
             calls[op] = calls.get(op, 0) + 1
+        for li in loops or ():
+            nd = x.nodes[li]
+            calls[nd.op] = calls.get(nd.op, 0) + len(nd.calls)
         m["routines"] = {
             "calls": calls,
             "per_call": {op: len(R.fragment(op, fmt, g.rnd))
@@ -245,17 +256,41 @@ def build(c):
                      "operation's flags: revision 8's flag control, "
                      "QUIET, ENDQUIET and RAISE (docs/SEQUENCER.md R24)",
         }
+        if loops:
+            # only where the step, its routines inlined, would pass the
+            # call loop's constant (callloop.py)
+            m["routines"]["call_loops"] = {
+                "above": _call_loop_above(),
+                "loops": [{"op": x.nodes[li].op,
+                           "depth": x.nodes[li].depth,
+                           "calls": len(x.nodes[li].calls),
+                           "records": [x.nodes[li].base,
+                                       x.nodes[li].base + x.nodes[li].stride
+                                       * len(x.nodes[li].calls) - 1],
+                           "fixed": {name: low.slot_of[ref] for name, ref
+                                     in x.nodes[li].fixed.items()}}
+                          for li in loops],
+                "executed_per_step": prog.executed(),
+            }
     cost = {
         "assumes": "revision 7, a single-pass tile (docs/SEQUENCER.md "
                    "R12-R19); measured on revision 7's quad on the U50, "
                    "where ten compiled programs ran 2.2% to 5.8% slower "
                    "than this model (docs/VALIDATION.md, 2026-10-02)",
     }
-    if blocks:
+    if blocks or loops:
         cost["routines"] = ("QUIET and ENDQUIET a cycle each, RAISE a beat "
                             "a cycle once its register has landed: believed, "
                             "from R18's prices for the control codes it "
                             "built, since no tile has revision 8's R24")
+    if loops:
+        cost["call_loops"] = ("a call loop runs as unrolled, its REPEAT and "
+                              "each ENDREP a cycle; an LDX waits for its "
+                              "index to have landed, fires two steps later "
+                              "than an LDL and holds the next instruction "
+                              "that is not one two cycles; an STX waits for "
+                              "its index landed: R18's rules, believed, since "
+                              "no compiled image has run them on a card")
     cost["cycles_per_step_one_beat"] = c.cycles_one_beat
     cost["cycles_per_step_sixteen_beats"] = c.cycles_sixteen_beats
     m.update({

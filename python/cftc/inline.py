@@ -38,11 +38,19 @@ that read the routine read it), and its flags are raised once. The
 internal check holds that of the image without reading any of this: it
 instantiates each routine's fragment from the golden model itself
 (check.py).
+
+A step past the call loop's constant (callloop.py) is expanded with some
+batches LOOPED: the order is first contracted, each looped batch one
+item at its last call's place (callloop.contracted), and the batch
+becomes one LOOP node, which reads every call's operands, followed by a
+RESULT node a call, which computes nothing - the call's result is in its
+record once the loop has run, as a spilled value is in its slot.
 """
 
 from cft_golden import routines as R
 from cft_golden import softfloat as sf
 
+from . import callloop
 from .ir import ROUTINES
 from .lower import LNode
 from .refusals import InternalError
@@ -50,7 +58,8 @@ from .refusals import InternalError
 
 class XNode(LNode):
     """A node of the expanded step: a language node (kind "lang"), a
-    routine's instruction ("quiet") or a routine's raise ("raise")."""
+    routine's instruction ("quiet"), a routine's raise ("raise"), a call
+    loop ("loop") or a looped call's result ("result")."""
     __slots__ = ("rnd", "kind", "block", "routine", "at")
 
     def __init__(self, op, args, labels, origin, rnd=None, kind="lang",
@@ -58,16 +67,36 @@ class XNode(LNode):
         super().__init__(op, args, labels, origin)
         self.rnd = rnd          # a routine instruction's own attribute
         self.kind = kind
-        self.block = block      # the routine instance, for quiet and raise
+        self.block = block      # the routine instance, for quiet and raise;
+        #                         the loop, for a loop and its results
         self.routine = routine  # the lowered routine node it comes from
-        self.at = at            # (its index in the fragment, the body's size)
+        self.at = at            # (its index in the fragment, the body's
+        #                         size); a result's (call, calls)
+
+
+class LoopNode(XNode):
+    """A looped batch: its operands, call by call (each call's a, then its
+    b), and - once the allocator has placed them - where its records
+    begin, how many slots each is, and the inputs every call takes from
+    one bank slot, which no record holds (callloop.plan)."""
+    __slots__ = ("calls", "arity", "depth", "base", "stride", "fixed")
+
+    def __init__(self, op, args, block, calls, arity, depth):
+        super().__init__(op, args, [], [], kind="loop", block=block)
+        self.calls = list(calls)        # the lowered routine nodes
+        self.arity = arity
+        self.depth = depth
+        self.base = None                # the first record's first slot
+        self.stride = arity             # a record's slots
+        self.fixed = {}                 # {input name: its bank ref}
 
 
 class Expanded:
     """The lowered step expanded in one order: the allocator's input, the
-    lowering's bank and graph, and each routine instance's block."""
+    lowering's bank and graph, each inlined routine instance's block and
+    each call loop."""
 
-    def __init__(self, low, nodes, outs, blocks):
+    def __init__(self, low, nodes, outs, blocks, loops=()):
         self.low = low
         self.graph = low.graph
         self.nodes = nodes
@@ -78,23 +107,45 @@ class Expanded:
         self.routines = low.routines
         # [(lowered routine node, op, its first expanded node, its raise)]
         self.blocks = blocks
+        # [its loop node], in the step's order
+        self.loops = list(loops)
 
     @property
     def fmt(self):
         return self.graph.fmt
 
 
-def expand(low, order):
+def expand(low, order, looped=()):
     """-> Expanded: `order`'s nodes, each routine node replaced at its
     place by its fragment bound to its operands, then a raise of its
-    flag word (the module docstring)."""
+    flag word; or, a looped batch's (`looped`, callloop's Batches), one
+    loop node at its last call's place and its calls' results (the
+    module docstring)."""
     g = low.graph
     fmt, rnd = g.fmt, g.rnd
-    nodes, keyed, map_low, blocks = [], {}, {}, []
+    nodes, keyed, map_low, blocks, loops = [], {}, {}, [], []
 
     def word_bits(r):
         return r[1] if r[0] == "w" else None
-    for j in order:
+    items = callloop.contracted(low, order, looped) if looped else \
+        [("n", j) for j in order]
+    for kind, j in items:
+        if kind == "b":
+            batch = looped[j]
+            args = []
+            for c in batch.calls:
+                args += [map_low[a[1]] if a[0] == "n" else a
+                         for a in low.nodes[c].args]
+            li = len(nodes)
+            nodes.append(LoopNode(batch.op, args, len(loops), batch.calls,
+                                  batch.arity, batch.depth))
+            loops.append(li)
+            for k, c in enumerate(batch.calls):
+                nodes.append(XNode("result", (), [], [], kind="result",
+                                   block=len(loops) - 1, routine=c,
+                                   at=(k, len(batch.calls))))
+                map_low[c] = ("n", len(nodes) - 1)
+            continue
         nd = low.nodes[j]
         args = tuple(map_low[a[1]] if a[0] == "n" else a for a in nd.args)
         if nd.op not in ROUTINES:
@@ -132,4 +183,4 @@ def expand(low, order):
         blocks.append((j, nd.op, first, len(nodes) - 1))
         map_low[j] = res
     outs = [map_low[r[1]] if r[0] == "n" else r for r in low.outs]
-    return Expanded(low, nodes, outs, blocks)
+    return Expanded(low, nodes, outs, blocks, loops)

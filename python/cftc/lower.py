@@ -50,7 +50,10 @@ nothing else (docs/ROADMAP.md, step 3: literal evaluation):
    can be. A word is never h-scaled, never halved, never a param and
    never shared with a const slot (a const slot may be h-scaled or a run
    value; a word may not). They come after the params, so a step's const,
-   flip and param slots are where they would be without routines.
+   flip and param slots are where they would be without routines. A step
+   with call loops (callloop.py) adds the loop's words the same way: its
+   step, the word 1, here, and each loop's record base once the
+   allocation is chosen (callloop.finish).
    The bank holds 512 on every device: params, addressed constants and
    words past it are refused `bank-capacity`, the language's own name for
    the limit, here for the cause the checker cannot see; and the fold
@@ -305,22 +308,27 @@ def layout(graph, nodes, outs, param_bits=None, words=()):
     return slots
 
 
-def routine_words(graph, nodes):
+def routine_words(graph, nodes, loop_words=()):
     """[Slot]: the words the step's routines read, one slot a bit pattern
     - the division's words in divfull's order, then the root's that are
-    new (module docstring) - each naming every (routine, word) it is."""
+    new, then the call loop's that are new (module docstring) - each
+    naming every (routine, word) it is; a call loop's as ("loop", name)."""
     from cft_golden import routines as R
     slots, at = [], {}
+
+    def add(op, name, bits):
+        if bits not in at:
+            at[bits] = len(slots)
+            slots.append(Slot("word", None, None, None, bits, 0, names=[]))
+        slots[at[bits]].names.append((op, name))
     for op in ("div", "sqrt"):
         if not any(nd.op == op for nd in nodes):
             continue
         f = R.fragment(op, graph.fmt, graph.rnd)
         for name, bits in f.words.items():
-            if bits not in at:
-                at[bits] = len(slots)
-                slots.append(Slot("word", None, None, None, bits, 0,
-                                  names=[]))
-            slots[at[bits]].names.append((op, name))
+            add(op, name, bits)
+    for name, bits in loop_words:
+        add("loop", name, bits)
     return slots
 
 
@@ -355,11 +363,12 @@ def _slot_words(low, s):
     return f"the flip of {name}" if s.kind == "flip" else name
 
 
-def lower(graph, param_bits=None, source=None):
+def lower(graph, param_bits=None, source=None, loop_words=()):
     """-> Lowered: shared, folded once, and given its bank - the routines'
-    words in it, or `bank-capacity` where they do not fit."""
+    words in it, and a call loop's step word (`loop_words`,
+    callloop.WORDS), or `bank-capacity` where they do not fit."""
     nodes, outs, merged = share(graph)
-    words = routine_words(graph, nodes)
+    words = routine_words(graph, nodes, loop_words)
     if words:
         used = {r[1] for nd in nodes for r in nd.args if r[0] == "c"} | \
             {r[1] for r in outs if r[0] == "c"}
@@ -367,12 +376,14 @@ def lower(graph, param_bits=None, source=None):
         if need > BANK_MAX:
             ops = [op for op in ("div", "sqrt")
                    if any(nd.op == op for nd in nodes)]
+            loop = " and the call loop it runs some of them in" \
+                if loop_words else ""
             refuse("bank-capacity",
                    f"{len(graph.param)} params, {len(used)} constants and "
                    f"{len(words)} words of the routine"
                    f"{'s' if len(ops) > 1 else ''} the compiler inlines for "
-                   f"{' and '.join(ops)} come to {need}: the bank holds "
-                   f"{BANK_MAX} on every device", source=source)
+                   f"{' and '.join(ops)}{loop} come to {need}: the bank "
+                   f"holds {BANK_MAX} on every device", source=source)
     nodes, outs, folds = fold(graph, nodes, outs, len(words))
     slots = layout(graph, nodes, outs, param_bits, words)
     low = Lowered(graph, nodes, outs, slots, merged, folds)

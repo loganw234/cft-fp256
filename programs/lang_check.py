@@ -63,7 +63,9 @@ many lanes and at several step counts: the image's REPEAT patched to 1,
   H  plants in a copy of the package: each stopped by the internal check,
      and with the check off each red on seq.py, its failing lanes counted;
      with the routines' (C4): a raise dropped, a raise inside its quiet
-     region, a region dropped, a routine reading another word
+     region, a region dropped, a routine reading another word; and the
+     call loop's (C4), its constant lowered in the copy: the index not
+     stepped past a record, a call's raise dropped, a loop a call short
   I  the corpus's coverage, every tally nonzero, div and sqrt among the
      operations
   J  every source the language accepts reads back (D2): maps reading h at
@@ -95,6 +97,18 @@ many lanes and at several step counts: the image's REPEAT patched to 1,
      (cft_golden/routines.py: division and root, four formats, five
      attributes) run as a program on seq.py against softfloat, its bits and
      each lane's own flag word, over test_divfull's pools whole
+  L  the call loop (C4, python/cftc/callloop.py): planar N bodies under rk4
+     at N = 8, whose step with its 224 routines inlined passes the
+     constant, 32,768 - compiled with its largest batch looped alone, as
+     the rule says, inside sw's 256 slots, and run on seq.py against the
+     interpreter at 1 and 2 steps, states and FLAGS, on lanes that
+     overflow, hold a signalling NaN, hold subnormals and hold zeros; and
+     Kepler under rk4 at fp64 and fp256 with the constant lowered, every
+     batch looped and the largest alone, at 1, 2 and 5 steps - the fp64
+     image with every batch looped certified through cft-segrun on
+     libcft's software backend (a main run and a half-step run) and
+     accepted by the golden reader, the golden audit and cft-audit, in
+     full and sampled. Leg H holds three plants of the loop's own
 
 A check skipped prints a line that starts with SKIP, which the runner
 counts and names on its VERDICT line.
@@ -236,15 +250,17 @@ def special_lanes(fmt, n, base, rng):
 # ---- running an image ------------------------------------------------------
 
 def image_at(image, steps):
-    """The image with its one REPEAT counting `steps` - every other word
-    the same, as programs/check.py's _patch_trip makes a run of another
-    length."""
+    """The image with its segment's REPEAT - its first - counting `steps`,
+    every other word the same, as programs/check.py's _patch_trip makes a
+    run of another length. A call loop's REPEATs (C4) are inside the step
+    and keep their counts."""
     img = asm.Image.from_bytes(image)
     words = list(img.insns)
     for k, w in enumerate(words):
         d = asm.decode(w)
         if d["ctrl"] and d["op"] == asm.REPEAT:
             words[k] = asm.repeat(steps)
+            break
     return asm.Image(img.fmt, words, img.consts, img.max_deposits, img.flags,
                      scratch_depth=img.scratch_depth,
                      scratch_io=img.scratch_io).to_bytes()
@@ -1577,8 +1593,8 @@ PLANTS = {
          "            srcs = (srcs[0], srcs[2], srcs[1])\n"
          "        dying = [k for k in keys if self.next_use(k, q) is None]\n")],
     "a register reused while live": [
-        ("__init__.py", "    c.program = prog = best_program(low)\n",
-         "    c.program = prog = best_program(low)\n"
+        ("__init__.py", "    c.lowered, c.program = low, prog\n",
+         "    c.lowered, c.program = low, prog\n"
          "    _plant_reuse(prog)\n"),
         ("__init__.py", "def compile_text(",
          "def _plant_reuse(prog):\n"
@@ -1712,6 +1728,9 @@ def leg_plants(rng, work):
 # scaffolding's inexact is the one flag of the run.
 _DIV3 = "system pd\nformat fp64\nstate x\nnext x = x / 3\nstep map\n"
 _ROOTS = "system pr\nformat fp64\nstate x\nnext x = sqrt(x)\nstep map\n"
+_DIV2 = ("system pl\nformat fp64\nstate x, y\nnext x = x / 3\n"
+         "next y = y / 7\nstep map\n")       # no flag but the routines'
+_LOOPS = ("callloop.py", "CALL_LOOP_ABOVE = 32768", "CALL_LOOP_ABOVE = 0")
 ROUTINE_PLANTS = {
     "a routine's raise dropped": (
         [("regalloc.py",
@@ -1734,6 +1753,23 @@ ROUTINE_PLANTS = {
         [("inline.py", '("w", f.words[s[1]])',
           '("w", f.words["K_MAN" if s[1] == "K_SIGN" else s[1]])')],
         _DIV3, None, 2),
+    # the call loop's (C4), its constant lowered in the copy so that two
+    # divisions loop
+    "a call loop's index not stepped past its record": (
+        [_LOOPS, ("callloop.py",
+                  '    code.append(("stx", reg[f.result]))\n'
+                  '    code.append(("step",))\n',
+                  '    code.append(("stx", reg[f.result]))\n')],
+        _DIV2, None, 2),
+    "a call loop's raise dropped": (
+        [_LOOPS, ("callloop.py", '    code.append(("raise", reg[f.flags]))\n',
+                  "")],
+        _DIV2, None, 2),
+    "a call loop one call short": (
+        [_LOOPS, ("regalloc.py",
+                  '        self.emit(Ins("repeat", slot=K, node=j))',
+                  '        self.emit(Ins("repeat", slot=K - 1, node=j))')],
+        _DIV2, None, 2),
 }
 
 
@@ -2465,6 +2501,123 @@ def leg_routine_pools():
           f"s)", f"{len(bad_cases)} wrong, first {bad_cases[:2]}")
 
 
+# ---- L: the call loop (C4) ---------------------------------------------------
+
+KEPLER_RK4 = ("system kepler\nformat {fmt}\nstate x, y, px, py\n"
+              "let r2 = fma(x, x, y * y)\nlet r3 = r2 * sqrt(r2)\n"
+              "d/dt x = px\nd/dt y = py\nd/dt px = -(x / r3)\n"
+              "d/dt py = -(y / r3)\nstep rk4, h = 1/100\n")
+
+
+def nbody_source(n, fmt="fp64"):
+    """Planar N bodies, unit masses and G = 1, under rk4: each pair's
+    1 / (s sqrt(s)) - a root and a division of 1 - and the accelerations
+    as fma chains over the pairs."""
+    xs, ys = [f"x{i}" for i in range(n)], [f"y{i}" for i in range(n)]
+    us, vs = [f"u{i}" for i in range(n)], [f"v{i}" for i in range(n)]
+    lines = [f"system nbody{n}", f"format {fmt}",
+             "state " + ", ".join(xs + ys + us + vs)]
+    for i in range(n):
+        for j in range(i + 1, n):
+            p = f"{i}_{j}"
+            lines += [f"let dx{p} = x{j} - x{i}", f"let dy{p} = y{j} - y{i}",
+                      f"let s{p} = fma(dx{p}, dx{p}, dy{p} * dy{p})",
+                      f"let k{p} = 1 / (s{p} * sqrt(s{p}))"]
+    for i in range(n):
+        lines += [f"d/dt x{i} = u{i}", f"d/dt y{i} = v{i}"]
+    for i in range(n):
+        for comp, tgt in (("x", "u"), ("y", "v")):
+            expr = None
+            for j in range(n):
+                if j == i:
+                    continue
+                p = f"{min(i, j)}_{max(i, j)}"
+                kk, dd = f"k{p}", f"d{comp}{p}"
+                if expr is None:
+                    expr = f"{kk} * {dd}" if i < j else f"-({kk} * {dd})"
+                else:
+                    expr = (f"fma({kk}, {dd}, {expr})" if i < j
+                            else f"fma(-{kk}, {dd}, {expr})")
+            lines.append(f"d/dt {tgt}{i} = {expr}")
+    lines.append("step rk4, h = 1/100")
+    return "\n".join(lines) + "\n"
+
+
+def leg_call_loops(rng, segrun=None, audit=None, work=None):
+    from cftc import callloop
+    above = callloop.CALL_LOOP_ABOVE
+    section(f"L. the call loop (C4): a step whose routines, inlined, would "
+            f"pass {above:,} instructions runs batches of them in loops - "
+            f"eight bodies under rk4 at the constant itself; Kepler under "
+            f"rk4 with it lowered, every batch looped and the largest alone")
+    t0 = time.perf_counter()
+    c = cftc.compile_text(nbody_source(8), 2, source="nbody8", stem="nbody8")
+    p = c.program
+    looped = [(b.op, b.depth, len(b.calls)) for b in c.looped]
+    check(looped == [("div", 2, 56)] and len(p.body) + 1 <= above and
+          c.accepted_by == ["sw"] and p.slots_used <= 256,
+          f"N = 8: the step, its 224 routines inlined, passes {above:,}; "
+          f"its largest batch - the first two stages' 56 divisions of 1 - "
+          f"looped alone brings it to {len(p.body) + 1:,} written, "
+          f"{p.executed():,} run, {p.slots_used} scratch slots, accepted by "
+          f"sw ({time.perf_counter() - t0:.0f} s)",
+          f"looped {looped}, {len(p.body) + 1:,} written, "
+          f"{p.slots_used} slots, accepted by {c.accepted_by}")
+    g = c.ir
+    box = [(-1, 1)] * (2 * 8) + [(-0.5, 0.5)] * (2 * 8)
+    lanes = lanes_for(g.fmt, g.n_state, rng, 3, box)
+    lanes += special_lanes(g.fmt, g.n_state, lanes[0], rng)
+    lanes.append([0] * g.n_state)
+    t1 = time.perf_counter()
+    failing, first, fok, ref = compare_routine(c, lanes, None, 2)
+    cover(c, ref.flags)
+    check(not failing and fok, f"N = 8: {len(lanes)} lanes at 1 and 2 steps "
+          f"equal the interpreter, FLAGS {ref.flags:#x} included - lanes "
+          f"that overflow, hold a signalling NaN, hold subnormals and hold "
+          f"zeros (0/0) among them ({time.perf_counter() - t1:.0f} s)",
+          f"{len(failing)} lanes differ from step {first}, FLAGS "
+          f"{'equal' if fok else 'differ'}")
+    for fmt in ("fp64", "fp256"):
+        text = KEPLER_RK4.format(fmt=fmt)
+        size = len(cftc.compile_text(text, 5).program.body) + 1
+        try:
+            for low_to, what in ((0, "every batch"),
+                                 (size - 1, "the largest batch alone")):
+                callloop.CALL_LOOP_ABOVE = low_to
+                c = cftc.compile_text(text, 5, source=f"kepler-rk4-{fmt}")
+                looped = sorted((b.op, b.depth, len(b.calls))
+                                for b in c.looped)
+                want = ([("div", 2, 4), ("div", 4, 4), ("sqrt", 1, 2),
+                         ("sqrt", 3, 2)] if low_to == 0 else [("div", 2, 4)])
+                lanes = lanes_for(c.ir.fmt, 4, rng, 6, BOX["kepler-sv"])
+                lanes += special_lanes(c.ir.fmt, 4, lanes[0], rng)
+                lanes.append([0] * 4)
+                failing, first, fok, ref = compare_routine(c, lanes, None, 5)
+                check(looped == want and not failing and fok,
+                      f"Kepler under rk4 at {fmt}, the constant at "
+                      f"{low_to:,} ({what}): {len(lanes)} lanes at 1, 2 and "
+                      f"5 steps equal the interpreter, FLAGS {ref.flags:#x} "
+                      f"included",
+                      f"looped {looped}; {len(failing)} lanes differ from "
+                      f"step {first}, FLAGS {'equal' if fok else 'differ'}")
+                if fmt == "fp64" and low_to == 0:
+                    every = c
+        finally:
+            callloop.CALL_LOOP_ABOVE = above
+    # libcft's software backend runs the loops as seq.py does: the image
+    # with every batch looped, certified and audited by both auditors
+    if not segrun or not Path(segrun).is_file():
+        skip("L: cft-segrun's certificate of a looped image",
+             f"no cft-segrun at {segrun!r} (the stage builds it)")
+        return
+    have_audit = bool(audit) and Path(audit).is_file()
+    if not have_audit:
+        skip("L: cft-audit on the looped image's certificate",
+             f"no cft-audit at {audit!r} (the stage builds it)")
+    certify(every, "kepler-rk4-looped-fp64", Path(segrun).resolve(),
+            Path(audit).resolve() if have_audit else None, rng, work)
+
+
 # ---- I: coverage ---------------------------------------------------------------
 
 def leg_coverage(routines=True):
@@ -2584,7 +2737,9 @@ def main(argv=None):
             ("readback", lambda: leg_readback(a.hmaps, rng("readback"))),
             ("routines", lambda: leg_routines(a.routines,
                                               rng("routines"))),
-            ("pools", leg_routine_pools)]
+            ("pools", leg_routine_pools),
+            ("loops", lambda: leg_call_loops(rng("loops"), a.segrun,
+                                             a.audit, work))]
     try:
         for name, fn in legs:
             if only and name not in only:

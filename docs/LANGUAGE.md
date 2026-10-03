@@ -338,12 +338,13 @@ the language takes 754's clauses 4.1, 10 and 11 at their strictest:
 The compiler (L2) may commute the operands of `+` and `*`, share
 identical subexpressions, schedule and allocate freely, and (parcel C4)
 carry a division or a square root as a routine inlined where its node
-stands. None of these changes a value or the run's FLAGS: verifier-P1
-measured the commutations bit for bit, NaN payloads included; FLAGS is
-a sticky OR; and a routine runs quiet and raises exactly its
-operation's flags, held bit for bit, and flag for flag a lane at a
-time, to the golden function at every format and attribute ("The
-operations").
+stands - or, in a step that would otherwise pass 32,768 instructions,
+called in a loop. None of these changes a value or the run's FLAGS:
+verifier-P1 measured the commutations bit for bit, NaN payloads
+included; FLAGS is a sticky OR; and a routine, inlined or called, runs
+quiet and raises exactly its operation's flags, held bit for bit, and
+flag for flag a lane at a time, to the golden function at every format
+and attribute ("The operations").
 
 ### The operations
 
@@ -394,6 +395,32 @@ their operands in those functions' order.
   and the source never sees them. An image holding one needs that
   feature, so revision 7's targets refuse it, `target-feature`, and the
   software targets compile and run it.
+- **A call loop.** A step whose routines, inlined, would pass 32,768
+  instructions - the largest instruction memory a tile has - runs
+  batches of them in loops instead: one copy of the routine in a
+  `repeat`, called once a record in the scratch, the record's operands
+  stored before the loop and its result read back after
+  (python/cftc/callloop.py). A batch is the calls of one operation at
+  one routine depth, so none reads another's result; the largest is
+  looped first, then the next, until the step fits or none is left; an
+  operand every call takes from one bank slot - the 1 of a reciprocal,
+  the constant of `x / 3` - is read from the bank and kept out of the
+  records. The constant is the compiler's own and no target's number,
+  so one image still serves every target that takes it. That is
+  Logan's rule (2026-10-02): asked whether to build the loop with the
+  routines or when a program first needs it, he chose "Build it now,
+  last in C4 (Recommended)", inline unless the step would pass 32,768.
+  Planar N bodies under rk4 at fp64 need it from N = 8: the step is
+  40,477 instructions inlined and 31,342 with the first two stages' 56
+  divisions looped, 41,957 run, 3.5% more of the cost model's cycles a
+  step, in 243 scratch slots for 220. Where inlining fits too (N = 6 and
+  7, the loop forced), one loop adds 3.5% to the cycles, two 6.4% to
+  6.6% and all four 7.8% to 8.2%, and the image shrinks by 22%, 45% and
+  89% to 90% (measured, C4). A looped batch keeps every call's operands
+  and results in the scratch across its loop, so a step that needs two
+  loops or more can pass a 256-slot scratch: N = 8 with two would take
+  272 slots, which the software backend's default refuses
+  (`scratch-capacity`) and a deeper one runs.
 - **A division by a constant** divides by the constant rounded once:
   `x / 3` is RN(x / RN(3)), the correctly rounded x/3 wherever the
   constant is exact in the format, and never a product by a rounded
@@ -2227,8 +2254,11 @@ software backend, runs each on seq.py against `lang.run`, bit for bit
 with FLAGS and tangents at several step counts, and holds each refused
 `target-feature` on revision 7's targets and through the command line
 (exit 3, never 70); the `tangent` stage's leg L compiles the quotient's
-and the root's rules the same way. The routines themselves are held to
-softfloat by python/tests/test_routines.py, and their inlining by
+and the root's rules the same way; and the `lang` stage's leg L holds
+the call loop - eight bodies under rk4, which the constant itself loops,
+and Kepler under rk4 with the constant lowered - and leg H three plants
+of the loop's own. The routines themselves are held to softfloat by
+python/tests/test_routines.py, and their inlining and their loops by
 `python/tests/test_cftc.py`.
 
 ## What v1 does not do
@@ -2264,7 +2294,11 @@ softfloat by python/tests/test_routines.py, and their inlining by
     every format, and with it certificate version 1's wider run, which
     is refused by name for an image holding a routine; certificate
     version 2's wider-source run compiles the source one format up
-    instead.
+    instead;
+  - **size**: a routine is 155 to 191 instructions, so a step with many
+    is long; past 32,768 instructions a step runs batches of them in
+    call loops, Logan's rule ("The operations"), at a few percent of
+    its cycles.
 - **Run-time transcendentals.** The correctly rounded math library is a
   later step.
 - **A built-in time, adaptive steps and events.** There is no reserved

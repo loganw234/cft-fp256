@@ -36,6 +36,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
 import cftc                                      # noqa: E402
+from cftc import callloop                        # noqa: E402
 from cftc import check as cftc_check             # noqa: E402
 from cftc import targets as T                    # noqa: E402
 from cft_golden import FORMATS, asm, lang        # noqa: E402
@@ -878,7 +879,206 @@ def test_the_internal_check_holds_a_routine():
                       c.lowered.half_bits)
 
 
-# ---- the variational equations (L3) -----------------------------------------
+# ---- C4: the call loop -------------------------------------------------------
+# A step whose routines, inlined, would pass callloop.CALL_LOOP_ABOVE
+# instructions runs batches of them in loops (Logan's rule, 2026-10-02).
+# The constant is lowered here so that small systems loop; the lang stage
+# holds the natural case - eight bodies under rk4 - at the constant itself.
+
+KEPLER_RK4 = ("system kepler\nformat fp64\nstate x, y, px, py\n"
+              "let r2 = fma(x, x, y * y)\nlet r3 = r2 * sqrt(r2)\n"
+              "d/dt x = px\nd/dt y = py\nd/dt px = -(x / r3)\n"
+              "d/dt py = -(y / r3)\nstep rk4, h = 1/100\n")
+FIXED = ("system f\nformat fp64\nstate x, y, u, v\n"
+         "next x = 1 / (x * x + 1)\nnext y = 1 / (y * y + 2)\n"
+         "next u = sqrt(u * u + 1) / 3\nnext v = sqrt(v * v + 2) / 3\n"
+         "step map\n")
+
+
+def _looped(monkeypatch, text, above, steps=2, **kw):
+    monkeypatch.setattr(callloop, "CALL_LOOP_ABOVE", above)
+    return cftc.compile_text(text, steps, source="loop.cftl", **kw)
+
+
+def _batches(c):
+    return [(b.op, b.depth, len(b.calls)) for b in c.looped]
+
+
+def test_a_step_past_the_constant_loops_the_largest_batch_first(monkeypatch):
+    """Kepler under rk4 has four batches: the first two stages' roots
+    (depth 1) and divisions (2), the last two's (3, 4). A constant one
+    under its inlined step loops the largest batch - a division's, four
+    calls - and no more; a constant of 0 loops all four. Each image runs as
+    lang.run does, states and FLAGS, on lanes that divide 0 by 0, hold a
+    signalling NaN and hold subnormals; the manifest and the text say
+    what was looped, and nothing of it appears where nothing was."""
+    inl = cftc.compile_text(KEPLER_RK4, 2)
+    assert inl.looped == []
+    assert "call_loops" not in inl.manifest["routines"]
+    assert "call_loops" not in inl.manifest["cost_model"]
+    assert "; call loops" not in inl.cfta
+    size = len(inl.program.body) + 1
+    assert inl.program.executed() == size
+    states, _t = _routine_lanes(inl.graph, "loop")
+    c = _looped(monkeypatch, KEPLER_RK4, size - 1)
+    assert _batches(c) == [("div", 2, 4)]
+    assert len(c.program.body) + 1 <= size - 1
+    assert c.program.executed() > size
+    _held(c, states, None, 2)
+    m = c.manifest["routines"]
+    assert m["calls"] == {"sqrt": 4, "div": 8}
+    loops = m["call_loops"]
+    assert loops["above"] == size - 1
+    assert [(e["op"], e["depth"], e["calls"]) for e in loops["loops"]] == \
+        [("div", 2, 4)]
+    assert loops["executed_per_step"] == c.program.executed()
+    assert "call_loops" in c.manifest["cost_model"]
+    assert "; call loops 1, " in c.cfta
+    assert "\n  repeat 4 " in c.cfta and "\n    ldx      r" in c.cfta
+    assert "\n    stx      r" in c.cfta and "\n      fma.rtz  r" in c.cfta
+    c0 = _looped(monkeypatch, KEPLER_RK4, 0)
+    assert sorted(_batches(c0)) == [("div", 2, 4), ("div", 4, 4),
+                                    ("sqrt", 1, 2), ("sqrt", 3, 2)]
+    _held(c0, states, None, 2)
+
+
+def test_a_batch_of_one_call_is_never_looped(monkeypatch):
+    """Three divisions each reading the last are three batches of one
+    call; a loop of one would only add its own instructions, so past the
+    constant the step stays inlined, and runs as lang.run does."""
+    text = ("system chain\nformat fp64\nstate x\n"
+            "next x = ((x / 3) / 5) / 7\nstep map\n")
+    c = _looped(monkeypatch, text, 0)
+    assert c.looped == [] and c.program.loops() == []
+    assert c.manifest["routines"]["calls"] == {"div": 3}
+    states, _t = _routine_lanes(c.graph, "chain")
+    _held(c, states, None, 2)
+
+
+def test_one_looped_image_serves_every_target_that_takes_it(monkeypatch):
+    """The constant is the compiler's, never a target's: the same source
+    loops the same way for sw and sw:4096 - one image, the same bytes - and
+    revision 7's targets still refuse it `target-feature`, by name."""
+    a = _looped(monkeypatch, KEPLER_RK4, 1000)
+    b = _looped(monkeypatch, KEPLER_RK4, 1000, target="sw:4096")
+    assert a.looped and a.image == b.image and a.bank == b.bank
+    with pytest.raises(lang.Refusal) as e:
+        _looped(monkeypatch, KEPLER_RK4, 1000, target="u50-rev7")
+    assert e.value.name == "target-feature"
+
+
+def test_a_loop_with_tangent_vectors_and_at_every_format(monkeypatch):
+    """Looped calls with two tangent vectors under rk4, at fp256 (the
+    quotient's and the root's derivatives are divisions too), and Kepler
+    looped at fp32, fp128 and fp256 and under rtz, rdn, rup and rmm: each
+    as lang.run, states, tangents and FLAGS."""
+    text, _line = ROUTINE["both, a let, rk4, two vectors"]
+    c = _looped(monkeypatch, text, 0)
+    assert c.looped and c.graph.tangent == ["v", "w"]
+    states, tans = _routine_lanes(c.graph, "loop tangent")
+    _held(c, states, tans, 2)
+    for fmt, rnd in (("fp32", "rne"), ("fp128", "rne"), ("fp256", "rne"),
+                     ("fp64", "rtz"), ("fp64", "rdn"), ("fp64", "rup"),
+                     ("fp64", "rmm")):
+        text = KEPLER_RK4.replace("format fp64", f"format {fmt}\nround {rnd}")
+        c = _looped(monkeypatch, text, 0)
+        assert len(c.looped) == 4
+        states, _t = _routine_lanes(c.graph, f"loop {fmt} {rnd}")
+        _held(c, states, None, 2)
+
+
+def test_an_input_every_call_takes_from_one_slot_is_no_part_of_a_record(
+        monkeypatch):
+    """Two divisions of 1 (N bodies' 1 / (s sqrt(s)) is 56 of them at
+    N = 8) and two divisions by 3: the 1 and the 3 are read from the bank
+    by the loop's body, each record one slot - the a for the divisions by
+    3, the b for those of 1 - and the result over it."""
+    c = _looped(monkeypatch, FIXED, 0)
+    assert sorted(_batches(c)) == [("div", 1, 2), ("div", 2, 2),
+                                   ("sqrt", 1, 2)]
+    by = {(e["op"], e["depth"]): e
+          for e in c.manifest["routines"]["call_loops"]["loops"]}
+    one = by[("div", 1)]
+    assert list(one["fixed"]) == ["a"]
+    assert c.lowered.slots[one["fixed"]["a"]].exact == 1
+    assert one["records"][1] - one["records"][0] == 1
+    three = by[("div", 2)]
+    assert list(three["fixed"]) == ["b"]
+    assert c.lowered.slots[three["fixed"]["b"]].exact == 3
+    assert by[("sqrt", 1)]["fixed"] == {}
+    states, _t = _routine_lanes(c.graph, "fixed")
+    _held(c, states, None, 2)
+
+
+def test_the_internal_check_holds_a_call_loop(monkeypatch):
+    """Controls for check.py's loop rules, each a damaged looped image of
+    Kepler under rk4: the index's last step dropped (the next call reads
+    the last one's result), the call's raise dropped, a loop's count one
+    short, an operand stored into the wrong record, and the index stepped
+    by another word (4, which the routines hold) than the 1. Each an
+    InternalError; the image as written passes."""
+    c = _looped(monkeypatch, KEPLER_RK4, 0)
+    insns = list(asm.Image.from_bytes(c.image).insns)
+    dec = [asm.decode(w) for w in insns]
+
+    def ctrl(k, name):
+        return dec[k]["ctrl"] and asm.CTRL_NAMES.get(dec[k]["op"]) == name
+
+    def refused(words):
+        with pytest.raises(cftc.InternalError):
+            cftc_check.verify(c.lowered, c.program, _image_with(c, words),
+                              c.steps, c.lowered.half_bits)
+    reps = [k for k in range(len(dec)) if ctrl(k, "repeat")]
+    ends = [k for k in range(len(dec)) if ctrl(k, "endrep")]
+    r, e = reps[1], ends[0]                 # the first call loop
+    assert r < e < reps[2]
+    step = e - 1                            # its last instruction: the step
+    assert not dec[step]["ctrl"] and \
+        sf.OP_NAMES[dec[step]["op"]] == "iadd"
+    refused(insns[:step] + insns[step + 1:])
+    rz = next(k for k in range(r, e) if ctrl(k, "raise"))
+    refused(insns[:rz] + insns[rz + 1:])
+    w = list(insns)
+    w[r] = asm.repeat(dec[r]["imm"] - 1)
+    refused(w)
+    node, calls = c.program.loops()[0]
+    loop = c.program.x.nodes[node]
+    first = range(loop.base, loop.base + loop.stride * calls)
+    st = max(k for k in range(r) if ctrl(k, "stl")
+             and (dec[k]["imm"] & asm.SLOT_MASK) in first)
+    w = list(insns)
+    w[st] = asm.stl(dec[st]["ra"], (dec[st]["imm"] & asm.SLOT_MASK) + 1)
+    refused(w)
+    # the index stepped by another word, not the 1: evaluated concretely,
+    # the next call reads a slot no record is in
+    four = c.lowered.slot_of[("w", 4)]
+    w = list(insns)
+    w[step] = asm.alu(dec[step]["op"], dec[step]["rd"], dec[step]["ra"],
+                      four, kb=True)
+    refused(w)
+    cftc_check.verify(c.lowered, c.program, c.image, c.steps,
+                      c.lowered.half_bits)
+
+
+def test_a_call_loop_is_counted_as_the_loader_counts_it(monkeypatch):
+    """The worst case the loader bounds counts a loop's body once a call:
+    the compilation's, and seq.py's own reading of the image, agree; and
+    the cycle model runs the loop as unrolled."""
+    c = _looped(monkeypatch, KEPLER_RK4, 0, steps=7)
+    p = c.program
+    assert c.worst_case == len(p.prologue) + 1 + 7 * p.executed() + \
+        len(p.epilogue) + 1
+    insns = [asm.decode(w) for w in asm.Image.from_bytes(c.image).insns]
+    mult, worst = [1], 0
+    for d in insns:
+        worst += mult[-1]
+        if d["ctrl"] and d["op"] == asm.REPEAT:
+            mult.append(mult[-1] * d["imm"])
+        elif d["ctrl"] and d["op"] == asm.ENDREP:
+            mult.pop()
+    assert worst == c.worst_case
+    from cftc import schedule
+    assert len(schedule.unrolled(p.body)) + 1 == p.executed()
 # The `tangent` stage (programs/tangent_check.py) holds every compiled
 # variational image to lang.run on seq.py; these are its smaller facts.
 

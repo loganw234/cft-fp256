@@ -42,7 +42,9 @@ version, with the SHA-256 of every committed compiled file
 1 is every cftc from L2 (2026-10-01) until the record began, never
 bumped; 2 is the manifest's cost note restated as measured (C4); 3 is
 the routines: a source that divides or takes a root at run time, which
-2 refused, compiles (C4).
+2 refused, compiles (C4); 4 is the call loop: a step whose routines,
+inlined, would pass 32,768 instructions, which 3 inlined whole, runs
+batches of them in loops (C4).
 
 A format override: compile_text and compile_file take `fmt`, a format's
 name, which replaces the value of the source's `format` statement
@@ -72,6 +74,21 @@ FLAG_CONTROL, CAPS2[14], so revision 7's targets refuse it
 `target-feature` and the software targets compile and run it; a bank the
 routines' words would take past 512 is `bank-capacity`. Until C4 such a
 system was refused `runtime-routine`, a name that went with it.
+
+A step whose routines, inlined, would pass 32,768 instructions - the
+largest instruction memory a tile has, a constant of the compiler's that
+no target is read for (callloop.CALL_LOOP_ABOVE; Logan's rule,
+2026-10-02) - runs batches of them in CALL LOOPS instead: one copy of a
+routine in a REPEAT over records in the scratch, the largest batch first,
+until the step fits or none is left (callloop.py). Measured on planar N
+bodies under rk4 at fp64 (C4's ledger, 2026-10-02): at N = 8 the step,
+40,477 instructions inlined, loops the first two stages' 56 divisions
+and is 31,342 written and 41,957 run (+3.7%), 3.5% more of the model's
+cycles a step at sixteen beats, in 243 scratch slots for 220. Where
+inlining fits too (N = 6 and 7, the loop forced), one loop adds 3.5% to
+the cycles (3.6% to the instructions run), two 6.4% to 6.6% (6.7% to
+6.9%) and all four 7.8% to 8.2% (8.4% to 8.7%), while the image shrinks
+by 22%, 45% and 89% to 90%.
 
 A system with tangent vectors (docs/LANGUAGE.md, "The variational
 equations") compiles the same way: its step graph is version 2, read by
@@ -117,6 +134,7 @@ from cft_golden import asm, seq
 from cft_golden import lang
 from cft_golden.lang import constants as K
 
+from . import callloop
 from . import manifest as M
 from . import targets as T
 from .check import verify
@@ -128,7 +146,7 @@ from .regalloc import best_program
 from .schedule import cycles
 from .targets import BUILTIN, Target
 
-VERSION = 3               # the output version: the module docstring, outputs.py
+VERSION = 4               # the output version: the module docstring, outputs.py
 MAX_STEPS = (1 << 32) - 1
 MAX_WORST = 1 << 40
 
@@ -341,6 +359,28 @@ def _param_bits(graph, params, source):
     return out
 
 
+def _call_loops(g, pb, src, low0, prog0):
+    """-> (lowered, program, looped batches): the step's batches looped,
+    the largest first, until it fits CALL_LOOP_ABOVE or none is left
+    (callloop.py), lowered again with the loop's step word and, once the
+    allocation is chosen, its record bases (callloop.finish). A batch is
+    known by its operation and depth, which the fold - the one thing the
+    words' room can change - leaves alone. A step with no batch of two
+    calls or more has nothing a loop shortens, and stays inlined."""
+    sizes = {b.key(): b for b in callloop.batches(low0)}
+    keys = [b.key() for b in callloop.by_size(low0)]
+    if not keys:
+        return low0, prog0, []
+    low = lower(g, pb, source=src, loop_words=callloop.WORDS)
+    for k in range(1, len(keys) + 1):
+        looped = callloop.select(low, keys[:k], sizes)
+        prog = best_program(low, looped=looped)
+        if len(prog.body) + 1 <= callloop.CALL_LOOP_ABOVE:
+            break
+    callloop.finish(low, prog, src)
+    return low, prog, looped
+
+
 def compile_graph(graph, steps, target="sw", stem="system", source=None,
                   source_bytes=None, params=None):
     """Compile a checked step graph (lang.StepGraph) into its outputs."""
@@ -369,13 +409,23 @@ def compile_graph(graph, steps, target="sw", stem="system", source=None,
                        if source_bytes is not None else None)
     g = Graph(c.graph_bytes)
     c.ir = g
-    c.lowered = low = lower(g, _param_bits(graph, params, src), source=src)
+    pb = _param_bits(graph, params, src)
+    low = lower(g, pb, source=src)
     half = halve(low, src) if low.h_slots else None
-    c.program = prog = best_program(low)
-    c.worst_case = (len(prog.prologue) + 1 + steps * (len(prog.body) + 1)
+    prog = best_program(low)
+    c.looped = []
+    if low.routines and len(prog.body) + 1 > callloop.CALL_LOOP_ABOVE:
+        low, prog, c.looped = _call_loops(g, pb, src, low, prog)
+        half = halve(low, src) if low.h_slots else None
+    c.lowered, c.program = low, prog
+    # a step's instructions as it runs them: its call loops' bodies once a
+    # call (equal to the step's length where it has none), as the loader
+    # counts the worst case
+    run_step = prog.executed()
+    c.worst_case = (len(prog.prologue) + 1 + steps * run_step
                     + len(prog.epilogue) + 1)
     if c.worst_case > MAX_WORST:
-        refuse("loader-bound", f"{steps:,} steps of {len(prog.body) + 1:,} "
+        refuse("loader-bound", f"{steps:,} steps of {run_step:,} "
                f"instructions is {c.worst_case:,} instructions at worst, and "
                f"the loader's bound is 2^40 on every device", source=src)
     c.depth = scratch_declared(prog.slots_used)

@@ -35,10 +35,18 @@ revision 8's QUIET, ENDQUIET and RAISE around it, and its words as
 control (R24). The program's attribute is the suffix on the language's
 four rounded operations; a quiet operation's rounding field, which it
 does not read, is zero.
+
+A step past the call loop's constant (callloop.py) writes each looped
+batch as an inner `repeat K` ... `endrep`, its body indented one more,
+with revision 7's `ldx`, `stx` and `iadd` for the record index and the
+loop's words (LOOP_STEP, each loop's LOOP_BASE) as `.const` lines; a
+header line names each loop, its calls and its records' slots.
 """
 
 from cft_golden import asm
 from cft_golden.lang import constants as K
+
+from . import callloop
 
 COMMENT_COL = 36
 COMMENT_MAX = 200
@@ -64,8 +72,9 @@ def bank_role(low, k):
     if s.kind == "word":
         ops = []
         for op, _n in s.names:
-            if op not in ops:
-                ops.append(op)
+            name = "the call loop" if op == "loop" else op
+            if name not in ops:
+                ops.append(name)
         also = sorted({n for _o, n in s.names} - {s.names[0][1]})
         return f"a word of {' and '.join(ops)}" + \
             (f", also {', '.join(also)}" if also else "")
@@ -96,8 +105,11 @@ class Namer:
 
     def routine(self, j):
         """The routine node an expanded node comes from: its label, or
-        its expression in the lowered step's names."""
+        its expression in the lowered step's names; a call loop, by its
+        operation and its place among the step's loops."""
         nd = self.x.nodes[j]
+        if self.kind(j) == "loop":
+            return f"{nd.op} loop {nd.block + 1}"
         low_nd = self.low.nodes[nd.routine]
         return low_nd.label or self.low_names.expr(nd.routine)
 
@@ -141,14 +153,52 @@ def _src(s):
 ROUTINE_SOURCE = {"div": "divfull's", "sqrt": "sqrtfull's"}
 
 
+def routine_fragment(low, op):
+    from cft_golden import routines as R
+    return R.fragment(op, low.graph.fmt, low.graph.rnd)
+
+
+def _loop_text(low, namer, ins, pad):
+    """A call loop's own instructions (callloop.py)."""
+    nd = namer.x.nodes[ins.node]
+    name = namer.routine(ins.node)
+    if ins.kind == "repeat":
+        recs = nd.stride * len(nd.calls)
+        fixed = "".join(f", its {n} b{low.slot_of[r]} for every call"
+                        for n, r in nd.fixed.items())
+        return _line(f"{pad}repeat {ins.slot}",
+                     f"{name}: {len(nd.calls)} calls of "
+                     f"{ROUTINE_SOURCE[nd.op]} routine, one a record, "
+                     f"slots {nd.base}..{nd.base + recs - 1}{fixed}")
+    if ins.kind == "endrep":
+        return _line(f"{pad}endrep", f"{name}: the next call")
+    if ins.kind == "index":
+        if ins.op == "ior":
+            return _line(f"{pad}{'ior':<8} r{ins.rd}, {_src(ins.srcs[0])}, "
+                         f"{_src(ins.srcs[1])}",
+                         f"{name}: the record index, slot {nd.base}")
+        return _line(f"{pad}{'iadd':<8} r{ins.rd}, {_src(ins.srcs[0])}, "
+                     f"{_src(ins.srcs[1])}", f"{name}: the next slot")
+    if ins.kind == "ldx":
+        return _line(f"{pad}{'ldx':<8} r{ins.rd}, r{ins.srcs[0][1]}",
+                     f"{name}: the call's operand, from its record")
+    return _line(f"{pad}{'stx':<8} r{ins.srcs[0][1]}, r{ins.srcs[1][1]}",
+                 f"{name}: the call's result, into its record")
+
+
 def _ins_text(low, namer, ins, indent, out_of, block=None):
     pad = "  " * indent
+    if ins.kind in ("repeat", "endrep", "index", "ldx", "stx"):
+        return _loop_text(low, namer, ins, pad)
     if ins.kind == "quiet":
         return _line(f"{pad}quiet", f"{block[0]}: {ROUTINE_SOURCE[block[1]]} "
                                     f"routine, run quiet")
     if ins.kind == "endquiet":
         return f"{pad}endquiet"
     if ins.kind == "raise":
+        if namer.kind(ins.node) == "loop":
+            return _line(f"{pad}{'raise':<8} r{ins.srcs[0][1]}",
+                         f"{namer.routine(ins.node)}: the call's flags")
         return _line(f"{pad}{'raise':<8} r{ins.srcs[0][1]}",
                      f"{namer.routine(ins.node)}'s flags")
     if ins.kind == "alu":
@@ -157,6 +207,11 @@ def _ins_text(low, namer, ins, indent, out_of, block=None):
             mnem += "." + asm.RND_NAMES[ins.rnd]
         code = f"{pad}{mnem:<8} r{ins.rd}, " + ", ".join(_src(s)
                                                          for s in ins.srcs)
+        if namer.kind(ins.node) == "loop":
+            nd = namer.x.nodes[ins.node]
+            f_len = len(routine_fragment(low, nd.op))
+            return _line(code, f"{namer.routine(ins.node)} "
+                               f"[{ins.key[1] + 1}/{f_len}]")
         if namer.kind(ins.node) == "quiet":
             at = namer.x.nodes[ins.node].at
             return _line(code, f"{namer.routine(ins.node)} [{at[0]}/{at[1]}]")
@@ -173,6 +228,9 @@ def _ins_text(low, namer, ins, indent, out_of, block=None):
         where = "its home" if own else f"slot {ins.slot}"
         return _line(code, f"{namer.key(ins.key)}, from {where}")
     code = f"{pad}{'stl':<8} r{ins.srcs[0][1]}, {ins.slot}"
+    if ins.node is not None and namer.kind(ins.node) == "loop":
+        return _line(code, f"{namer.key(ins.key)}, into its record for "
+                           f"{namer.routine(ins.node)}")
     if ins.slot < low.graph.n_state and ins.key in out_of.get(ins.slot, ()):
         what = f"next {low.graph.components[ins.slot]}"
     elif ins.slot < low.graph.n_state and ins.key == ("s", ins.slot):
@@ -226,10 +284,14 @@ def cfta(low, prog, steps, meta):
         + (f" (r{regs[0]}..r{regs[-1]})" if regs else ""),
     ]
     blocks = getattr(x, "blocks", None)
-    if blocks:
+    loops = getattr(x, "loops", None)
+    if blocks or loops:
         calls = {}
         for _j, op, _f, _r in blocks:
             calls[op] = calls.get(op, 0) + 1
+        for li in loops or ():
+            nd = x.nodes[li]
+            calls[nd.op] = calls.get(nd.op, 0) + len(nd.calls)
         made = ", ".join(f"{op} {k}" for op, k in calls.items())
         raises = counts["raises"]
         lines.append(f"; routines {made} a step: {prog.routine_alu()} of the "
@@ -237,6 +299,17 @@ def cfta(low, prog, steps, meta):
                      f"raise{'' if raises == 1 else 's'}, "
                      f"{counts['brackets']} brackets (revision 8's flag "
                      f"control)")
+    if loops:
+        lines.append(f"; call loops {len(loops)}, the step past "
+                     f"{callloop.CALL_LOOP_ABOVE:,} instructions inlined: "
+                     + "; ".join(
+                         f"{x.nodes[li].op} x {len(x.nodes[li].calls)} at "
+                         f"depth {x.nodes[li].depth}, records from slot "
+                         f"{x.nodes[li].base}" for li in loops)
+                     + f"; {counts['indexed']} ldx and stx, "
+                       f"{counts['index']} index instructions, "
+                       f"{counts['loops']} repeats and endreps; "
+                       f"{prog.executed():,} instructions run a step")
     lines += [
         "",
         f".format   {g.fmt_name}",
@@ -268,16 +341,18 @@ def cfta(low, prog, steps, meta):
     lines.append(f"repeat {steps}")
     depth = 1
     for k, ins in enumerate(prog.body):
-        if ins.kind == "endquiet":
+        if ins.kind in ("endquiet", "endrep"):
             depth -= 1
         block = None
         if ins.kind == "quiet":
             # the block the region opens: its first ALU instruction's
             nxt = next(b for b in prog.body[k + 1:] if b.kind == "alu")
+            xn = x.nodes[nxt.node]
             block = (namer.routine(nxt.node),
-                     low.nodes[x.nodes[nxt.node].routine].op)
+                     xn.op if namer.kind(nxt.node) == "loop"
+                     else low.nodes[xn.routine].op)
         lines.append(_ins_text(low, namer, ins, depth, out_of, block))
-        if ins.kind == "quiet":
+        if ins.kind in ("quiet", "repeat"):
             depth += 1
     lines.append("endrep")
     if prog.epilogue:

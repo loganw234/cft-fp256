@@ -210,33 +210,69 @@ def order(low, name, margin=0, pinned=(), budget=29):
     return out
 
 
+def unrolled(body):
+    """A step body as it executes: a call loop's body once a call, its
+    ENDREP each time, its REPEAT once (callloop.py)."""
+    out, k = [], 0
+    while k < len(body):
+        ins = body[k]
+        if ins.kind != "repeat":
+            out.append(ins)
+            k += 1
+            continue
+        e = k + 1
+        while body[e].kind != "endrep":
+            e += 1
+        out.append(ins)
+        for _ in range(ins.slot):
+            out.extend(body[k + 1:e + 1])
+        k = e + 1
+    return out
+
+
 def cycles(body, beats):
     """The model's cycles a step, steady state, for a step body (a list of
-    regalloc.Ins) on a block of `beats` beats."""
+    regalloc.Ins) on a block of `beats` beats.
+
+    A call loop (C4) runs as unrolled() says, its REPEAT and each ENDREP a
+    cycle; its LDX waits for its index to have LANDED, fires its value two
+    steps later than an LDL's, and holds the next instruction that is not
+    an LDX two cycles; its STX waits for its data forwarded and its index
+    landed; its index arithmetic is ALU arithmetic (R18's rules for the
+    indexed codes, which no compiled program has run on a card: believed,
+    as the routines' own prices are)."""
     ready = {}
     land = 0
     t = 0
-    prev_store = False
+    prev_store = prev_ldx = False
     marks = []
+    steps = unrolled(body)
     for _ in range(3):
-        for ins in body:
-            if ins.kind in ("quiet", "endquiet"):
+        for ins in steps:
+            if ins.kind in ("quiet", "endquiet", "repeat", "endrep"):
                 t += 1
-                prev_store = False
+                prev_store = prev_ldx = False
                 continue
             start = t
-            for r in ins.reads():
+            reads = ins.reads()
+            for k, r in enumerate(reads):
+                landed = ins.kind == "raise" or \
+                    (ins.kind == "ldx") or (ins.kind == "stx" and k == 1)
                 start = max(start, ready.get(r, 0) +
-                            (LANDED if ins.kind == "raise" else 0))
+                            (LANDED if landed else 0))
             if ins.kind == "ldl" and prev_store:
                 start = max(start, t + 2)
-            if ins.kind in ("alu", "copy"):
+            if ins.kind != "ldx" and prev_ldx:
+                start = max(start, t + 2)
+            if ins.kind in ("alu", "copy", "index"):
                 ready[ins.rd] = start + LAT
                 land = max(land, start + LAT)
-            elif ins.kind == "ldl":
-                ready[ins.rd] = start + (LAT if start < land else FAST_LOAD)
+            elif ins.kind in ("ldl", "ldx"):
+                ready[ins.rd] = start + (LAT if start < land else FAST_LOAD) \
+                    + (2 if ins.kind == "ldx" else 0)
             t = start + beats
-            prev_store = ins.kind == "stl"
+            prev_store = ins.kind in ("stl", "stx")
+            prev_ldx = ins.kind == "ldx"
         t += 1                      # ENDREP
         marks.append(t)
     return marks[-1] - marks[-2]

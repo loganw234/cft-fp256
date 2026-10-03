@@ -2,7 +2,7 @@
  "cftc_manifest": 1,
  "compiler": {
   "name": "cftc",
-  "version": 3
+  "version": 4
  },
  "source": {
   "path": "programs/systems/kepler-sv-fp256.cftl",
