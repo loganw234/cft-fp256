@@ -42,7 +42,8 @@ Where version 1 stands (2026-09-30; version 2's own is under "Version
 - the golden certificates, twelve programs and their certificates in
   `certificates/`, hold both writers to committed bytes (see "Golden
   certificates"), and version 2's cases beside them hold the golden
-  writer and auditor until version 2's C half;
+  writer and auditor, and cft-audit beside the golden auditor since its
+  C half (cft-segrun's remake of them is the next parcel's);
 - `cft-orbits` certifies its own runs on the Newton route, each sample
   interval a segment of one image, with its angular momentum's drift as
   an exact entry where asked (2026-09-30; [ORBITS.md](ORBITS.md),
