@@ -12,7 +12,9 @@ python/tests/test_ed25519.py holds it to section 7.1's test vectors.
     public_key(secret)              the 32-byte public key of a 32-byte
                                     secret (5.1.5)
     sign(secret, message)           the 64-byte signature (5.1.6)
-    verify(public, message, sig)    True or False (5.1.7)
+    verify(public, message, sig)    True or False (5.1.7, and no key of
+                                    small order)
+    small_order(public)             is it a key of small order?
 
 The curve is the twisted Edwards curve -x^2 + y^2 = 1 + d x^2 y^2 over
 GF(p), p = 2^255 - 19, d = -121665/121666, with the base point B whose y
@@ -36,7 +38,13 @@ Verification is the RFC's: R and A must decode (5.1.3: y below p, a
 square root that exists, no "negative zero"), S must be below L, and the
 cofactored group equation [8][S]B = [8]R + [8][k]A must hold - the
 equation 5.1.7 states, of which the cofactorless [S]B = R + [k]A is a
-sufficient special case.
+sufficient special case. And one refusal the RFC leaves to its user: a
+key A of small order ([8]A the identity, the eight points of the
+curve's torsion), under which [8][k]A vanishes, so that any R = [S]B
+verifies for every message - a signature nobody made (verifier-VCV2B,
+2026-10-02; the lead's decision). A key with a small-order component
+and a prime-order part is accepted: signing under it needs the secret
+of that part.
 """
 
 import hashlib
@@ -159,6 +167,17 @@ def decode_point(data):
     return (x, y, 1, (x * y) % P)
 
 
+def small_order(public):
+    """Is `public` a key of small order: 32 bytes that decode to a
+    point A with [8]A the identity? Such a key vouches for nothing, since
+    every R = [S]B verifies under it for every message."""
+    if not isinstance(public, (bytes, bytearray)) or \
+            len(public) != PUBLIC_BYTES:
+        return False
+    a_pt = decode_point(bytes(public))
+    return a_pt is not None and _same(_mul(8, a_pt), IDENTITY)
+
+
 def _sha512_int(*parts):
     """SHA-512 of the parts, read as a little-endian integer."""
     return int.from_bytes(hashlib.sha512(b"".join(parts)).digest(),
@@ -203,8 +222,9 @@ def sign(secret, message):
 
 def verify(public, message, signature):
     """Does `signature` verify for `message` under the 32-byte `public`
-    key? False for any key or signature that does not decode, any S at
-    or above L, and any that fails the group equation."""
+    key? False for any key or signature that does not decode, a key of
+    small order, any S at or above L, and any that fails the group
+    equation."""
     if not isinstance(public, (bytes, bytearray)) or \
             len(public) != PUBLIC_BYTES:
         return False
@@ -216,6 +236,8 @@ def verify(public, message, signature):
     r_pt = decode_point(signature[:32])
     if a_pt is None or r_pt is None:
         return False
+    if _same(_mul(8, a_pt), IDENTITY):
+        return False                    # a key of small order
     big_s = int.from_bytes(signature[32:], "little")
     if big_s >= L:
         return False

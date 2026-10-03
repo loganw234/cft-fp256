@@ -1398,12 +1398,16 @@ def _streams_or_zero(fmt, n, streams):
 
 def certify_run(kind, image, bank, salt, states, results, *, steps,
                 streams=None, parameters=(), h_slots=(),
-                scratch_depth=seq.SCRATCH_D):
+                scratch_depth=seq.SCRATCH_D, main_image=None):
     """A Run from a chain of boundary states and segment results (from
     run_chain, or a producer's own): the hashes of every boundary, the
     image and program digests, the streams' hashes - keyed under `salt`,
     or open when `salt` is None. The image is read as written for
-    `scratch_depth` slots, the depth its chain ran at."""
+    `scratch_depth` slots, the depth its chain ran at. A wider run is
+    certified beside its main run, whose image (`main_image`) version 1's
+    routine rule tests: a wider run of a main image that holds QUIET,
+    ENDQUIET or RAISE is refused `aux-image`, whatever the wider image
+    holds (CERTIFICATES.md, "Auxiliary runs")."""
     prog = seq.Program.from_bytes(bytes(image), scratch_depth=scratch_depth)
     why = _segment_shape(prog)
     if why:
@@ -1418,11 +1422,15 @@ def certify_run(kind, image, bank, salt, states, results, *, steps,
                       f"{len(results)} segments have {len(results) + 1} "
                       f"boundary states, and {len(states)} were given")
     if kind == "wider":
-        # once the run's own checks have passed, as cft-segrun checks it:
-        # the wider image is the main image's words one rung up, so it
-        # holds the same codes, and the writer refuses what every audit
-        # would
-        why = routine_words(prog)
+        # after the run's shape and states, and before its steps and
+        # parameters, which the golden writer reads at encode: the MAIN
+        # image is tested, as cft-segrun and every audit test it
+        if main_image is None:
+            raise TypeError("a wider run is certified beside its main run: "
+                            "hand certify_run the main image (main_image), "
+                            "which version 1's routine rule tests")
+        why = routine_words(seq.Program.from_bytes(
+            bytes(main_image), scratch_depth=scratch_depth))
         if why:
             raise Refusal("aux-image", f"the wider run: {why}")
     fmt = prog.fmt

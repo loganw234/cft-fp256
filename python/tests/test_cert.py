@@ -159,7 +159,7 @@ def lor():
     r1 = cert.certify_run("half-step", img, bank_half, SALT, st1, rs1,
                           steps=100, h_slots=(0, 1, 2))
     r2 = cert.certify_run("wider", img128, bank_w, SALT, st2, rs2,
-                          steps=100)
+                          steps=100, main_image=img)
     runs = (r0, r1, r2)
     shapes = [(F64, 3), (F64, 3), (F128, 3)]
     ends = {(0, 0): st0[0], (0, S): st0[-1], (1, 0): st1[0],
@@ -183,7 +183,7 @@ def lor():
         cert.certify_run("half-step", img, bank_half, None, st1, rs1,
                          steps=100, h_slots=(0, 1, 2)),
         cert.certify_run("wider", img128, bank_w, None, st2, rs2,
-                         steps=100))
+                         steps=100, main_image=img))
     open_data = cert.encode(opened(open_runs, (e0, e1, e2, e3)))
     return types.SimpleNamespace(
         open_runs=open_runs, open_data=open_data,
@@ -2124,7 +2124,8 @@ def test_a_wider_image_is_held_to_its_constants_and_header():
              "header's scratch_io_word")):
         init = init_w * (2 if "scratch_io" in (why or "") else 1)
         st1, rs1 = cert.run_chain(img, b"", init, 2)
-        r1 = cert.certify_run("wider", img, b"", SALT, st1, rs1, steps=1)
+        r1 = cert.certify_run("wider", img, b"", SALT, st1, rs1, steps=1,
+                              main_image=main_img)
         data = cert.encode(keyed((r0, r1), ()))
         # None for the bank of an image that carries its constants
         args = (data, SALT, {0: (main_img, None), 1: (img, None)})

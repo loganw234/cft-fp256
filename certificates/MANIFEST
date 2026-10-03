@@ -727,7 +727,7 @@ block 4 3f7c54571faee024e3fd68603c5c95f6a4c8ef73a398840b974f3f57737a116f
 
 case signed-fp64
 what every header line of version 2 spelt out - texts with spaces and non-ASCII, the device lines, the writer and compiler builds, the environment - keyed, its initial state made by the shake-box generator, superseding flagstep-fp64-lanes, and signed under the published test key; audited with its signature, the keyring naming the issuer, the superseded certificate and the initial state regenerated
-certificate certificates/signed-fp64/signed-fp64.cert 94bfe25112ca36133a2106d4ef65c7496ae7b5b0356d59321ec04631f976016d
+certificate certificates/signed-fp64/signed-fp64.cert 386c39b194b53ad66360a9306f327ecd61209d3672e031077c24dfedd4841bc2
 version 2
 mode keyed
 salt certificates/example.salt 630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd
@@ -738,8 +738,8 @@ accuracy 0 none
 verdict accepted
 states certificates/signed-fp64/states
 blocks certificates/signed-fp64/states
-signature certificates/signed-fp64/signed-fp64.cert.sig 50d958bb116b588cb541fee530f66cedae68c529011c10273e3e760ea7cf120a
-keyring certificates/signed-fp64/keyring 409b28c6a1ceb695f53b0823cd3d5fc53ff73d1a6ad599c1a7814d2fa1d2a91c
+signature certificates/signed-fp64/signed-fp64.cert.sig 8d8098f40539500620c8a4f7b870570574e2885d8fd2d71321c2e62dcdcfbafa
+keyring certificates/signed-fp64/keyring a4810d05f821fdf26d4143f7ec4e1c76747f63d5cf614d39ab8cf825faadcd98
 superseded flagstep-fp64-lanes
 define none
 regenerate yes
@@ -1028,7 +1028,7 @@ raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8
 
 case v2-signature-format
 what a signature file of four lines (from signed-fp64; refused signature-format)
-certificate certificates/v2-controls/v2-signature-format.cert 94bfe25112ca36133a2106d4ef65c7496ae7b5b0356d59321ec04631f976016d
+certificate certificates/v2-controls/v2-signature-format.cert 386c39b194b53ad66360a9306f327ecd61209d3672e031077c24dfedd4841bc2
 version 2
 mode keyed
 salt certificates/example.salt 630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd
@@ -1039,8 +1039,8 @@ accuracy 0 none
 verdict refused signature-format
 states certificates/signed-fp64/states
 blocks certificates/signed-fp64/states
-signature certificates/v2-controls/v2-signature-format/v2-signature-format.cert.sig 9a80267c06c7be1ff2d7ae36b43ad747ea3d5f41c27a6fcf3015c3c04ce07ea7
-keyring certificates/signed-fp64/keyring 409b28c6a1ceb695f53b0823cd3d5fc53ff73d1a6ad599c1a7814d2fa1d2a91c
+signature certificates/v2-controls/v2-signature-format/v2-signature-format.cert.sig dc520859f8ce2214b7526502f09cb0e7562b8b133b4e90cc84ab06975111d436
+keyring certificates/signed-fp64/keyring a4810d05f821fdf26d4143f7ec4e1c76747f63d5cf614d39ab8cf825faadcd98
 superseded flagstep-fp64-lanes
 define none
 regenerate yes
@@ -1062,7 +1062,7 @@ block 2 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
 
 case v2-signature
 what another certificate's signature file (from signed-fp64; refused signature)
-certificate certificates/v2-controls/v2-signature.cert 94bfe25112ca36133a2106d4ef65c7496ae7b5b0356d59321ec04631f976016d
+certificate certificates/v2-controls/v2-signature.cert 386c39b194b53ad66360a9306f327ecd61209d3672e031077c24dfedd4841bc2
 version 2
 mode keyed
 salt certificates/example.salt 630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd
@@ -1074,7 +1074,7 @@ verdict refused signature
 states certificates/signed-fp64/states
 blocks certificates/signed-fp64/states
 signature certificates/v2-controls/v2-signature/v2-signature.cert.sig 1ee1d97d0ab105875bbf9d06c6122063534ca10e1a6351180186532e145cf5fd
-keyring certificates/signed-fp64/keyring 409b28c6a1ceb695f53b0823cd3d5fc53ff73d1a6ad599c1a7814d2fa1d2a91c
+keyring certificates/signed-fp64/keyring a4810d05f821fdf26d4143f7ec4e1c76747f63d5cf614d39ab8cf825faadcd98
 superseded flagstep-fp64-lanes
 define none
 regenerate yes
@@ -1096,7 +1096,7 @@ block 2 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
 
 case v2-signature-key
 what a signature by a key other than the certificate's issuer-key (from signed-fp64; refused signature-key)
-certificate certificates/v2-controls/v2-signature-key.cert 94bfe25112ca36133a2106d4ef65c7496ae7b5b0356d59321ec04631f976016d
+certificate certificates/v2-controls/v2-signature-key.cert 386c39b194b53ad66360a9306f327ecd61209d3672e031077c24dfedd4841bc2
 version 2
 mode keyed
 salt certificates/example.salt 630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd
@@ -1107,8 +1107,8 @@ accuracy 0 none
 verdict refused signature-key
 states certificates/signed-fp64/states
 blocks certificates/signed-fp64/states
-signature certificates/v2-controls/v2-signature-key/v2-signature-key.cert.sig 817b1a5634ae9f62553ff2ec3547f8b8f27b523dc26f73cf8cef56ee0f51c744
-keyring certificates/signed-fp64/keyring 409b28c6a1ceb695f53b0823cd3d5fc53ff73d1a6ad599c1a7814d2fa1d2a91c
+signature certificates/v2-controls/v2-signature-key/v2-signature-key.cert.sig a87de6252d3bc915b39b0536063a5e8310ccef2d67c3424ea32df21813ef20a2
+keyring certificates/signed-fp64/keyring a4810d05f821fdf26d4143f7ec4e1c76747f63d5cf614d39ab8cf825faadcd98
 superseded flagstep-fp64-lanes
 define none
 regenerate yes
@@ -1130,7 +1130,7 @@ block 2 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
 
 case v2-signer
 what a keyring naming the signing key as another holder than the issuer (from signed-fp64; refused signer)
-certificate certificates/v2-controls/v2-signer.cert 94bfe25112ca36133a2106d4ef65c7496ae7b5b0356d59321ec04631f976016d
+certificate certificates/v2-controls/v2-signer.cert 386c39b194b53ad66360a9306f327ecd61209d3672e031077c24dfedd4841bc2
 version 2
 mode keyed
 salt certificates/example.salt 630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd
@@ -1141,7 +1141,7 @@ accuracy 0 none
 verdict refused signer
 states certificates/signed-fp64/states
 blocks certificates/signed-fp64/states
-signature certificates/signed-fp64/signed-fp64.cert.sig 50d958bb116b588cb541fee530f66cedae68c529011c10273e3e760ea7cf120a
+signature certificates/signed-fp64/signed-fp64.cert.sig 8d8098f40539500620c8a4f7b870570574e2885d8fd2d71321c2e62dcdcfbafa
 keyring certificates/v2-controls/v2-signer/keyring e85501491803db8c4dd9cb4342fd14ea2920f9cd78b06b395267c953be9e5e85
 superseded flagstep-fp64-lanes
 define none
@@ -1164,7 +1164,7 @@ block 2 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
 
 case v2-supersedes
 what another certificate handed as the one it supersedes (from signed-fp64; refused supersedes)
-certificate certificates/v2-controls/v2-supersedes.cert 94bfe25112ca36133a2106d4ef65c7496ae7b5b0356d59321ec04631f976016d
+certificate certificates/v2-controls/v2-supersedes.cert 386c39b194b53ad66360a9306f327ecd61209d3672e031077c24dfedd4841bc2
 version 2
 mode keyed
 salt certificates/example.salt 630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd
@@ -1175,8 +1175,8 @@ accuracy 0 none
 verdict refused supersedes
 states certificates/signed-fp64/states
 blocks certificates/signed-fp64/states
-signature certificates/signed-fp64/signed-fp64.cert.sig 50d958bb116b588cb541fee530f66cedae68c529011c10273e3e760ea7cf120a
-keyring certificates/signed-fp64/keyring 409b28c6a1ceb695f53b0823cd3d5fc53ff73d1a6ad599c1a7814d2fa1d2a91c
+signature certificates/signed-fp64/signed-fp64.cert.sig 8d8098f40539500620c8a4f7b870570574e2885d8fd2d71321c2e62dcdcfbafa
+keyring certificates/signed-fp64/keyring a4810d05f821fdf26d4143f7ec4e1c76747f63d5cf614d39ab8cf825faadcd98
 superseded markstep-fp64
 define none
 regenerate yes
@@ -1696,7 +1696,7 @@ block 4 3f7c54571faee024e3fd68603c5c95f6a4c8ef73a398840b974f3f57737a116f
 
 case v2-initial-state
 what the generator's tag changed: it does not regenerate the initial state (from signed-fp64; refused initial-state)
-certificate certificates/v2-controls/v2-initial-state.cert e9c0129b95aaf893b78ec78f47fc1c53e6d5d4a9019f85f27996390060306a8f
+certificate certificates/v2-controls/v2-initial-state.cert 7893ceff050fae32dd5d31ee06984cd68b460594c67f53b6e194c7482cc86b38
 version 2
 mode keyed
 salt certificates/example.salt 630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd
@@ -1708,7 +1708,7 @@ verdict refused initial-state
 states certificates/signed-fp64/states
 blocks certificates/signed-fp64/states
 signature none
-keyring certificates/signed-fp64/keyring 409b28c6a1ceb695f53b0823cd3d5fc53ff73d1a6ad599c1a7814d2fa1d2a91c
+keyring certificates/signed-fp64/keyring a4810d05f821fdf26d4143f7ec4e1c76747f63d5cf614d39ab8cf825faadcd98
 superseded flagstep-fp64-lanes
 define none
 regenerate yes

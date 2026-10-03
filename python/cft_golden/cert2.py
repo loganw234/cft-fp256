@@ -398,6 +398,10 @@ def _header_lines(p):
         L.append("initial given")
     else:
         _g, name, args = p.initial
+        if not isinstance(name, str) or not _NAME.fullmatch(name) or \
+                name in WORDS:
+            raise Refusal("malformed", f"a generator's name is a name, and "
+                                       f"not one of the words: {name!r}")
         L.append(" ".join(["initial", "generator", name]
                           + [text_token(a) for a in args]))
     return L
@@ -569,6 +573,8 @@ class _Reader(V1._Reader):
     """Version 1's reader, its token readers and its rules for a line that
     is not the one expected, over version 2's order."""
 
+    _language = None        # the language line's value, once read
+
     def _block_rest(self):
         out = []
         for i in range(self.pos, len(self.lines)):
@@ -713,6 +719,7 @@ class _Reader(V1._Reader):
     def provenance(self):
         profile = self.version_or("profile", ("unknown",))
         language = self.version_or("language", ("none", "unknown"))
+        self._language = language
         platform_ = self.text_or("device-platform", ("none", "unknown"))
         xrt = self.text_or("device-xrt", ("none", "unknown"))
         tok = self.one("device-clock")
@@ -755,14 +762,20 @@ class _Reader(V1._Reader):
             raise self.malformed(f"'issuer-key' {tok[:80]!r} is not an "
                                  f"Ed25519 public key - 64 lowercase hex "
                                  f"digits - nor 'none'", self.pos - 1)
+        if tok != "none":
+            why = key_problem(tok)
+            if why is not None:
+                raise self.fail(why[0], f"'issuer-key' {tok}: {why[1]}",
+                                self.pos - 1)
         key = tok
         hos = self.text_or("host-os", ("unknown", "withheld"))
         harch = self.text_or("host-arch", ("unknown", "withheld"))
-        t_at = self.pos
         started = self.time_or_unknown("started")
         finished = self.time_or_unknown("finished")
+        self.provenance_order(((started, "started"),), (finished, "finished"))
         issued = self.time_or_unknown("issued")
-        self.provenance_order(t_at, started, finished, issued)
+        self.provenance_order(((finished, "finished"), (started, "started")),
+                              (issued, "issued"))
         tok = self.one("supersedes")
         if tok != "none" and not _HEX[64].fullmatch(tok):
             raise self.malformed(f"'supersedes' {tok[:80]!r} is not a body "
@@ -776,19 +789,21 @@ class _Reader(V1._Reader):
                           hos, harch, started, finished, issued, sup, env,
                           initial)
 
-    def provenance_order(self, at, started, finished, issued):
-        """Where the times are known, started <= finished <= issued: each
-        pair of known times in order, refused at the later line."""
-        t = [read_time(x) if x != "unknown" else None
-             for x in (started, finished, issued)]
-        names = ("started", "finished", "issued")
-        for a, b in ((0, 1), (1, 2), (0, 2)):
-            if t[a] is not None and t[b] is not None and t[a] > t[b]:
+    def provenance_order(self, earlier, later):
+        """Where the times are known, started <= finished <= issued,
+        checked as each time is read, in the line order, at the later
+        line (the one just read): `later` against each of the `earlier`
+        times above it."""
+        value, name = later
+        if value == "unknown":
+            return
+        t = read_time(value)
+        for ev, en in earlier:
+            if ev != "unknown" and read_time(ev) > t:
                 raise self.fail("provenance-order",
-                                f"'{names[a]}' is after '{names[b]}': a run "
-                                f"starts before it finishes, and a "
-                                f"certificate is issued after its runs",
-                                at + b)
+                                f"'{en}' is after '{name}': a run starts "
+                                f"before it finishes, and a certificate is "
+                                f"issued after its runs", self.pos - 1)
 
     def methods(self):
         n = self.count_line("replay-methods", "replay-method", 0, True)
@@ -828,6 +843,11 @@ class _Reader(V1._Reader):
             if not _ENV.fullmatch(toks[1]):
                 raise self.malformed(f"variable name {toks[1][:80]!r} is not "
                                      f"[A-Z][A-Z0-9_]*, at most 64", at)
+            if toks[1] not in ENVIRONMENT_NAMES:
+                raise self.malformed(f"variable {toks[1]} is not one of the "
+                                     f"writer's list, the variables libcft "
+                                     f"and cft-segrun read: a certificate "
+                                     f"names those alone", at)
             if out and toks[1] <= out[-1][0]:
                 if toks[1] == out[-1][0]:
                     raise self.fail("line-unexpected",
@@ -849,9 +869,11 @@ class _Reader(V1._Reader):
         if toks == ["initial", "given"]:
             return ("given",)
         if len(toks) >= 3 and toks[1] == "generator":
-            if not _NAME.fullmatch(toks[2]):
+            if not _NAME.fullmatch(toks[2]) or toks[2] in WORDS:
                 raise self.malformed(f"generator name {toks[2][:80]!r} is "
-                                     f"not [a-z][a-z0-9-]*, at most 64", at)
+                                     f"not [a-z][a-z0-9-]*, at most 64, or "
+                                     f"is one of the words "
+                                     f"({', '.join(WORDS)})", at)
             args = toks[3:]
             if len(args) > MAX_GENERATOR_ARGS:
                 raise self.malformed(f"a generator takes at most "
@@ -978,6 +1000,12 @@ class _Reader(V1._Reader):
         if tok == "none":
             return None
         digest = self.hexn(tok, 64, "the source's SHA-256", at)
+        if self._language == "none":
+            raise self.malformed("this run names a source, and the "
+                                 "certificate's language is 'none', which "
+                                 "says no run names one: a certificate "
+                                 "whose runs name a source states the "
+                                 "language's version, or 'unknown'", at)
         name = self.text_or("source-name", ("none",))
         graph = self.hexn(self.one("graph"), 64, "the step graph's SHA-256",
                           self.pos - 1)
@@ -1437,15 +1465,16 @@ def run_chain(image, bank, initial, segments, *, streams=None,
 
 def certify_run(kind, image, bank, salt, chain, *, steps, streams=None,
                 parameters=(), h_slots=(), scratch_depth=seq.SCRATCH_D,
-                source=None):
+                source=None, main_image=None):
     """A Run from a Chain (run_chain's): the hashes of every boundary and
     block, each replay's raw end and raw block, the image and program
     digests, the streams' hashes - keyed under `salt`, or open when it is
-    None - and `source`, a Source or None."""
+    None - and `source`, a Source or None. A wider run is handed its main
+    run's image, as version 1's certify_run is."""
     base = V1.certify_run(kind, image, bank, salt, chain.states,
                           chain.results, steps=steps, streams=streams,
                           parameters=parameters, h_slots=h_slots,
-                          scratch_depth=scratch_depth)
+                          scratch_depth=scratch_depth, main_image=main_image)
     segs = []
     for k, s in enumerate(base.chain):
         lanes = (lane_flags_hash(salt, chain.blocks[k]) if chain.lane_flags
@@ -1587,11 +1616,33 @@ def read_signature_file(sig):
             lines[4].split(" ")[1])
 
 
+def key_problem(hexkey):
+    """Why a key's 64 hex digits are no key a holder signs with, or None:
+    (`malformed`, ...) where they encode no point of the curve, and
+    (`signer`, ...) where the point is of small order - [8]A the identity,
+    under which a signature nobody made verifies for every message
+    (verifier-VCV2B; the lead's decision, 2026-10-02). Read wherever a key
+    is: the certificate's issuer-key, a keyring's lines, a signature
+    file's key."""
+    raw = bytes.fromhex(hexkey)
+    if ed25519.decode_point(raw) is None:
+        return ("malformed", "it encodes no point of the curve, so it is no "
+                             "Ed25519 public key")
+    if ed25519.small_order(raw):
+        return ("signer", "a key of small order ([8]A the identity): under "
+                          "it a signature nobody made verifies for every "
+                          "message, so no holder vouches by it")
+    return None
+
+
 def check_signature_file(data, sig):
     """Does `sig` sign the certificate `data`? -> the signing key's hex,
     or `signature-format` (the file's form) or `signature` (another
     certificate's, or a signature that does not verify)."""
     key, digest, s = read_signature_file(sig)
+    if ed25519.small_order(bytes.fromhex(key)):
+        raise Refusal("signer", f"the signature file's key {key}: "
+                                f"{key_problem(key)[1]}")
     mine = body_hash_of(data)
     if digest != mine:
         raise Refusal("signature", f"the signature names the certificate "
@@ -1631,6 +1682,10 @@ def read_keyring(data):
         if toks[1] in out:
             raise Refusal("signer", f"keyring line {n}: key {toks[1][:16]}... "
                                     f"again")
+        why = key_problem(toks[1])
+        if why is not None:
+            raise Refusal("signer", f"keyring line {n}: key {toks[1]}: "
+                                    f"{why[1]}")
         out[toks[1]] = holder
     return out
 
@@ -1757,8 +1812,11 @@ class _Cover:
         p = cert.provenance
         self.profile = version_text(PROFILE)
         self.language = version_text(_language_version())
+        # the language is compared only where a run names a source: no
+        # check reads it otherwise, whatever the certificate states
+        named = any(r.source is not None for r in cert.runs)
         self.covered = covers(PROFILE, p.profile) and \
-            covers(_language_version(), p.language)
+            (not named or covers(_language_version(), p.language))
         self.cert_profile, self.cert_language = p.profile, p.language
 
     def describe(self):
@@ -2088,7 +2146,9 @@ def _check_sources(cert, sources, progs, cover):
             definition = None       # no h to halve: a replay refuses below
         how = (f"recompiled by {s.compiler[0]} {s.compiler[1]} for "
                f"{text_token(s.compiler[2])}" if compiled is not None else
-               "no compiler named")
+               "no compiler named, so the image's map is not re-derived "
+               "from it - only a marked lane's replay and a definition "
+               "re-run compare the two")
         out[r] = {"bytes": b, "graph": graph, "definition": definition,
                   "compiled": compiled,
                   "note": f"run {r} source {s.digest}: checked - the "

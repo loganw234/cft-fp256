@@ -32,6 +32,7 @@ test_cert.py alone).
 
 import dataclasses
 import hashlib
+import os
 import re
 import subprocess
 import sys
@@ -59,6 +60,18 @@ F64, F128 = FORMATS["fp64"], FORMATS["fp128"]
 SALT = bytes(range(32))
 TEST_SEED = bytes(range(32, 64))
 TEST_KEY = ed25519.public_key(TEST_SEED).hex()
+# the issuer the test key is bound to in a keyring: evidently a test, since
+# anyone holding the published seed can sign as it (verifier-VCV2B's note)
+TEST_ISSUER = "cft test issuer (published key)"
+# RFC 8032 section 7.1 TEST 1's public key: a key that is not the test key
+RFC_TEST_1_KEY = ("d75a980182b10ab7d54bfed3c964073a"
+                  "0ee172f3daa62325af021a68f707511a")
+# the identity, a key of small order (test_ed25519.py's SMALL_ORDER has all
+# eight), and verifier-VCV2B's signature that verifies under it for every
+# message: R = [1234567]B, S = 1234567
+SMALL_KEY = "01" + "00" * 31
+SMALL_SIG = (ed25519.encode_point(ed25519._mul(1234567, ed25519.B))
+             + (1234567).to_bytes(32, "little")).hex()
 IDN = cert.Identity(backend="software", device_xclbin="none",
                     device_version="none", device_caps="none", device_tiles=1)
 CFTC = ("cftc", cftc.VERSION)
@@ -228,7 +241,7 @@ def lz():
             cert2.certify_run("wider-source", c128.image, c128.bank, None,
                               ch[2], steps=100, source=lines128),
             cert2.certify_run("wider", img_w, bank_w, None, ch[3],
-                              steps=100))
+                              steps=100, main_image=c64.image))
     shapes = [(F64, 3), (F64, 3), (F128, 3), (F128, 3)]
     ends = {}
     for r, c in enumerate(ch):
@@ -326,7 +339,7 @@ def full(fl):
         compiler_build="commit=" + "b" * 40 +
                        " tracked=modified untracked=present",
         certificate_id="cert 0001 / " + LODZ,
-        issuer="Logan W.", issuer_key=TEST_KEY, host_os="linux-6.8.0",
+        issuer=TEST_ISSUER, issuer_key=TEST_KEY, host_os="linux-6.8.0",
         host_arch="x86_64", started="2026-10-02T12:00:00Z",
         finished="2026-10-02T12:00:05Z", issued="2026-10-02T12:00:06Z",
         supersedes=cert2.body_hash_of(fl.data),
@@ -339,7 +352,8 @@ def full(fl):
     return types.SimpleNamespace(img=img, init=init, chain=ch, cert=c,
                                  data=data,
                                  sig=cert2.signature_file(TEST_SEED, data),
-                                 ring=f"key {TEST_KEY} Logan%20W.\n"
+                                 ring=(f"key {TEST_KEY} "
+                                       f"{cert2.text_token(TEST_ISSUER)}\n")
                                  .encode("ascii"))
 
 
@@ -519,6 +533,14 @@ def test_the_times_in_their_order(full):
     cert.parse(reencode(full.data, finished="unknown"))
     cert.parse(reencode(full.data, started="unknown", finished="unknown",
                         issued="unknown"))
+    # in the line order (verifier-VCV2B): finished before started is
+    # refused at finished's line, before issued's impossible date is read
+    late = edit(edit(edit(full.data, "started ",
+                          "started 2026-10-02T12:00:06Z"),
+                     "finished ", "finished 2026-10-02T12:00:05Z"),
+                "issued ", "issued 2026-02-30T00:00:00Z")
+    got = refused("provenance-order", cert.parse, late)
+    assert lines_of(late)[got.line - 1].startswith("finished ")
 
 
 @pytest.mark.parametrize("line,value", [
@@ -543,6 +565,25 @@ def test_versions_that_read(full):
     assert cert2.covers((1, 0), "none")
 
 
+def test_language_none_names_no_source(mk, fl):
+    """`language none` says no run names a source (verifier-VCV2B: it was
+    read beside one): refused `malformed` at the first run's source line,
+    and by the writer. Where no run names a source the language is not
+    compared, whatever is stated - no check reads it - and the profile
+    always is."""
+    data = edit(mk.data, "language ", "language none")
+    got = refused("malformed", cert.parse, data)
+    assert lines_of(data)[got.line - 1].startswith("source ")
+    refused("malformed", reencode, mk.data, language="none")
+    assert cert2._Cover(cert.parse(edit(fl.data, "language ",
+                                        "language 9"))).covered
+    assert not cert2._Cover(cert.parse(edit(mk.data, "language ",
+                                            "language 9"))).covered
+    assert not cert2._Cover(cert.parse(edit(fl.data, "profile ",
+                                            "profile 9"))).covered
+    assert cert2._Cover(cert.parse(mk.data)).covered
+
+
 def test_keys_digests_builds_and_clock(full):
     for prefix, value in (
             ("issuer-key ", "issuer-key " + TEST_KEY[:63]),
@@ -564,8 +605,17 @@ def test_keys_digests_builds_and_clock(full):
             ("initial ", "initial generator Shake-box x"),
             ("initial ", "initial generator shake-box " + " ".join(
                 ["a"] * 17)),
-            ("initial ", "initial generator shake-box a%2fb")):
+            ("initial ", "initial generator shake-box a%2fb"),
+            ("initial ", "initial generator given x"),
+            ("initial ", "initial generator none"),
+            ("initial ", "initial generator unknown x y"),
+            ("initial ", "initial generator withheld x")):
         refused("malformed", cert.parse, edit(full.data, prefix, value))
+    # verifier-VCV2B's case: signed-fp64's generator renamed a word
+    line = lines_of(full.data)[find(lines_of(full.data), "initial ")]
+    got = refused("malformed", cert.parse, edit(
+        full.data, "initial ", line.replace(" shake-box ", " given ")))
+    assert "one of the words" in got.message
 
 
 def test_the_environment_lines(full):
@@ -576,7 +626,9 @@ def test_the_environment_lines(full):
     refused("line-unexpected", cert.parse,
             rebuilt(L[:i] + [a, a] + L[i + 2:]))
     for bad in ("env cft_timeout_ms 60000", "env CFT-X 1", "env 1X 2",
-                "env CFT_TIMEOUT_MS 60%3000", "env CFT_TIMEOUT_MS none"):
+                "env CFT_TIMEOUT_MS 60%3000", "env CFT_TIMEOUT_MS none",
+                # verifier-VCV2B: a name off the writer's list, a home path
+                "env HOME /home/logan", "env CFT_HOME x"):
         refused("malformed", cert.parse, rebuilt(L[:i] + [bad]
                                                  + L[i + 1:]))
 
@@ -747,6 +799,12 @@ def test_markstep_audits_and_says_what_it_replayed(mk):
     v = audit_mk(mk, states=every, choose={0: [2]})
     assert "handed: re-run - from states handed" in v.lines()
     assert v.header()[0].startswith("auditor golden python-")
+    # a source with no compiler named: the verdict says what is unchecked
+    # (verifier-VCV2B: c = 3/5 against 3/4 passes unless the definition is
+    # re-run, or a lane is replayed)
+    assert any(ln.startswith(f"run 0 source {mk.run.source.digest}: checked")
+               and "no compiler named, so the image's map is not re-derived "
+                   "from it" in ln for ln in v.lines())
 
 
 def test_the_keyed_mode_protects_states_and_nothing_else(mk, mk_keyed):
@@ -861,8 +919,9 @@ def test_version_1_records_the_machines_own_values(mk):
 def test_a_signed_certificate(full):
     v = audit_full(full, signature=full.sig, keyring=full.ring,
                    superseded=None)
-    assert f"signature: by key {TEST_KEY}, verified, held by Logan%20W. by " \
-           f"the keyring handed" in v.lines()
+    assert f"signature: by key {TEST_KEY}, verified, held by " \
+           f"{cert2.text_token(TEST_ISSUER)} by the keyring handed" \
+        in v.lines()
     v = audit_full(full, signature=full.sig)
     assert f"signature: by key {TEST_KEY}, verified, which no keyring " \
            f"handed names" in v.lines()
@@ -911,7 +970,8 @@ def test_a_signature_by_another_key(full):
 def test_a_keyring_names_the_signer(full):
     other = f"key {TEST_KEY} Someone%20Else\n".encode("ascii")
     refused("signer", audit_full, full, signature=full.sig, keyring=other)
-    for bad in (b"key " + TEST_KEY.encode() + b" Logan W.\n",
+    for bad in (b"key " + TEST_KEY.encode() + b" "
+                + TEST_ISSUER.encode() + b"\n",
                 b"key " + TEST_KEY[:63].encode() + b" x\n",
                 b"key " + TEST_KEY.encode() + b" x",
                 full.ring + full.ring, b"\x00\n", "text"):
@@ -921,9 +981,63 @@ def test_a_keyring_names_the_signer(full):
     refused("signer", audit_full, full, keyring=b"junk\n")
     # a keyring that names other keys only
     v = audit_full(full, signature=full.sig,
-                   keyring=("key " + "e" * 64 + " x\n").encode())
+                   keyring=f"key {RFC_TEST_1_KEY} x\n".encode())
     assert any("which the keyring handed does not name" in ln
                for ln in v.lines())
+
+
+def small_order_keys():
+    """The eight keys of small order, as test_ed25519.py derives them: the
+    multiples of [L]P for the point P whose y is 3 and x even."""
+    E = ed25519
+    x = E._recover_x(3, 0)
+    q = E._mul(E.L, (x, 3, 1, (x * 3) % E.P))
+    return [E.encode_point(E._mul(k, q)).hex() for k in range(8)]
+
+
+def test_a_key_of_small_order_is_refused_wherever_a_key_is_read(
+        full, tmp_path):
+    """verifier-VCV2B's case and the lead's decision. Under a key of
+    small order ([8]A the identity) a signature nobody made verifies for
+    every message, so such a key is refused `signer` wherever a key is
+    read: the certificate's issuer-key line (by the reader, and so by the
+    writer reading its text back), a keyring's line, a signature file's
+    key, and the key tool's verify. A key that encodes no point is no key
+    either: `malformed` on the issuer-key line, `signer` in a keyring."""
+    keys = small_order_keys()
+    assert SMALL_KEY in keys and len(set(keys)) == 8
+    for k in keys:
+        data = edit(full.data, "issuer-key ", f"issuer-key {k}")
+        got = refused("signer", cert.parse, data)
+        assert lines_of(data)[got.line - 1] == f"issuer-key {k}"
+    refused("signer", reencode, full.data, issuer_key=SMALL_KEY)
+    no_point = "02" + "00" * 31                 # y = 2: no square root
+    data = edit(full.data, "issuer-key ", f"issuer-key {no_point}")
+    got = refused("malformed", cert.parse, data)
+    assert lines_of(data)[got.line - 1] == f"issuer-key {no_point}"
+    # VCV2B's forged signature, under the identity, on a certificate that
+    # names no key: the signature file's key is refused before anything
+    plain = reencode(full.data, issuer_key="none")
+    forged = (f"cft-signature 1\nscheme ed25519\nkey {SMALL_KEY}\n"
+              f"certificate {cert2.body_hash_of(plain)}\n"
+              f"signature {SMALL_SIG}\n").encode("ascii")
+    got = refused("signer", cert.audit, plain, SALT, {0: (full.img, None)},
+                  states={0: {0: full.init}}, signature=forged)
+    assert SMALL_KEY in got.message
+    refused("signer", cert2.check_signature_file, plain, forged)
+    # a keyring's key, of small order or no point, with or without a
+    # signature handed
+    for k in (SMALL_KEY, keys[3], no_point):
+        ring = f"key {k} x\n".encode("ascii")
+        refused("signer", audit_full, full, keyring=ring)
+        refused("signer", audit_full, full, signature=full.sig,
+                keyring=ring)
+    # the key tool's verify
+    c = tmp_path / "plain.cert"
+    c.write_bytes(plain)
+    (tmp_path / "plain.cert.sig").write_bytes(forged)
+    rc, out, err = _tool("verify", "--cert", c)
+    assert rc == 4 and "refused signer" in err, (rc, err)
 
 
 def test_either_version_is_signed(full):
@@ -1265,11 +1379,14 @@ def test_version_1_has_no_wider_run_of_a_routine_image(mk, lz):
     init_w = [cert.widen("fp64", x) for x in v1.init]
     st, rs = cert.run_chain(img_w, bank_w, init_w, 3)
     got = refused("aux-image", cert.certify_run, "wider", img_w, bank_w,
-                  None, st, rs, steps=4)
+                  None, st, rs, steps=4, main_image=v1.img)
     assert got.message == "the wider run: " + ROUTINE_WIDER
-    # the writer's own checks come first, as cft-segrun's do
+    # the run's shape and states come first, as in cft-segrun
     refused("state-shape", cert.certify_run, "wider", img_w, bank_w, None,
-            st[:-1], rs, steps=4)
+            st[:-1], rs, steps=4, main_image=v1.img)
+    # a wider run is handed its main image: without it, no rule to apply
+    with pytest.raises(TypeError):
+        cert.certify_run("wider", img_w, bank_w, None, st, rs, steps=4)
     # the audit, of a certificate a writer that did not refuse would make
     main = cert.parse(v1.data).runs[0]
     hs = [cert.state_hash(None, cert.state_bytes("fp128", s)) for s in st]
@@ -1322,11 +1439,70 @@ def test_version_1_has_no_wider_run_of_a_routine_image(mk, lz):
     runs = (cert.certify_run("main", lz.c64.image, lz.c64.bank, None, st0,
                              rs0, steps=100),
             cert.certify_run("wider", lw, lz.bank_w, None, st1, rs1,
-                             steps=100))
+                             steps=100, main_image=lz.c64.image))
     data = cert.encode(cert.Certificate("open", None, IDN, runs, ()))
     cert.audit(data, None, {0: (lz.c64.image, lz.c64.bank),
                             1: (lw, lz.bank_w)},
                states={0: {0: lz.init}, 1: {0: lz.init_w}})
+
+
+def test_the_golden_writer_tests_the_main_image():
+    """verifier-VCV2B's W1 and W2: the routine rule tests the MAIN image,
+    as the contract, cft-segrun and both audits do, never the wider run's
+    own. markstep's source compiled by cftc holds no flag control; the
+    hand-written markstep image does.
+    - W1: the main image is markstep, the wider image cftc's compile at
+      fp128: the golden writer refuses `aux-image`, as cft-segrun does
+      (exit 5), and the audit refuses it for the routine.
+    - W2, the reverse: the main image is cftc's compile, the wider image
+      markstep at fp128: the routine rule does not apply and the golden
+      writer writes it, as cft-segrun does; the audit refuses the
+      certificate `aux-image`, the wider image not being the main one's
+      words."""
+    v1 = make_v1_markstep()
+    src = MARK_SRC.read_bytes()
+    plain64 = cftc.compile_graph(cert2.source_graph(src, "fp64"), 4, "sw",
+                                 stem="markstep")
+    plain128 = cftc.compile_graph(cert2.source_graph(src, "fp128"), 4, "sw",
+                                  stem="markstep")
+    for c in (plain64, plain128):
+        prog = seq.Program.from_bytes(c.image)
+        assert not seq.features_rev8(prog.insns) & seq.FEAT_FLAG_CONTROL
+    init_w = [cert.widen("fp64", x) for x in v1.init]
+    # W1
+    st, rs = cert.run_chain(plain128.image, plain128.bank, init_w, 3)
+    got = refused("aux-image", cert.certify_run, "wider", plain128.image,
+                  plain128.bank, None, st, rs, steps=4, main_image=v1.img)
+    assert got.message == "the wider run: " + ROUTINE_WIDER
+    main = cert.parse(v1.data).runs[0]
+    hs = [cert.state_hash(None, cert.state_bytes("fp128", s)) for s in st]
+    wider = cert.Run("wider", "fp128", cert.sha256(plain128.image),
+                     cert.sha256(plain128.image + plain128.bank), main.lanes,
+                     4, tuple(cert.stream_hash(None, n, bytes(16 * 3))
+                              for n in "abc"), (),
+                     tuple(cert.Segment(hs[k], hs[k + 1], f, s)
+                           for k, (f, s) in enumerate(rs)), hs[-1])
+    data = cert.encode(cert.Certificate("open", None, IDN, (main, wider),
+                                        ()))
+    got = refused("aux-image", cert.audit, data, None,
+                  {0: (v1.img, v1.bank), 1: (plain128.image, plain128.bank)},
+                  states={0: {0: v1.init}, 1: {0: init_w}})
+    assert got.run == 1 and got.message == "run 1 (wider): " + ROUTINE_WIDER
+    # W2
+    img_w = header_wider(v1.img)
+    bank_w = widened("fp64", v1.bank)
+    st0, rs0 = cert.run_chain(plain64.image, plain64.bank, v1.init, 3)
+    st1, rs1 = cert.run_chain(img_w, bank_w, init_w, 3)
+    runs = (cert.certify_run("main", plain64.image, plain64.bank, None, st0,
+                             rs0, steps=4),
+            cert.certify_run("wider", img_w, bank_w, None, st1, rs1, steps=4,
+                             main_image=plain64.image))
+    data = cert.encode(cert.Certificate("open", None, IDN, runs, ()))
+    got = refused("aux-image", cert.audit, data, None,
+                  {0: (plain64.image, plain64.bank), 1: (img_w, bank_w)},
+                  states={0: {0: v1.init}, 1: {0: init_w}})
+    assert got.run == 1 and "not the main image one format wider" in \
+        got.message
 
 
 # ---- 9: the re-runs, the blocks and the replays ---------------------------------
@@ -1530,7 +1706,9 @@ def test_the_writer_spells_each_field_or_refuses_it(mk):
                    dict(device_clock=0), dict(profile=(2, 0)),
                    dict(environment=(("lower", "1"),)),
                    dict(environment=(("CFT_TIMEOUT_MS", ""),)),
+                   dict(environment=(("HOME", "/home/x"),)),
                    dict(initial=("generator", "x", ("given",))),
+                   dict(initial=("generator", "given", ("x",))),
                    dict(started="2026-10-02 12:00:00")):
         refused("malformed", reencode, mk.data, **change)
 
@@ -1572,6 +1750,7 @@ def test_the_key_tool(tmp_path, full):
     tk = tmp_path / "published.key"
     tk.write_text(f"cft-signing-key 1\nscheme ed25519\nseed "
                   f"{TEST_SEED.hex()}\nkey {TEST_KEY}\n", newline="\n")
+    os.chmod(tk, 0o600)         # owner-only, which POSIX checks
     rc, out, err = _tool("sign", "--key", tk, "--cert", c, "--out",
                          tmp_path / "t.sig")
     assert rc == 0, err
@@ -1580,7 +1759,7 @@ def test_the_key_tool(tmp_path, full):
     ring.write_bytes(full.ring)
     rc, out, err = _tool("verify", "--cert", c, "--sig", tmp_path / "t.sig",
                          "--keyring", ring)
-    assert rc == 0 and "held by Logan%20W." in out, err
+    assert rc == 0 and f"held by {cert2.text_token(TEST_ISSUER)}" in out, err
     bad = bytearray(full.sig)
     bad[-3] ^= 1
     (tmp_path / "bad.sig").write_bytes(bytes(bad))
@@ -1591,6 +1770,31 @@ def test_the_key_tool(tmp_path, full):
     assert rc == 64 and "refused usage" in err
     rc, out, err = _tool("frobnicate")
     assert rc == 64
+    # sign signs a certificate the strict reader reads, nothing else: bytes
+    # with a good hash line are refused by the reader's name
+    junk = tmp_path / "junk.cert"
+    body = b"not a certificate\n"
+    junk.write_bytes(body + b"hash " + hashlib.sha256(body).hexdigest()
+                     .encode("ascii") + b"\n")
+    rc, out, err = _tool("sign", "--key", key, "--cert", junk)
+    name = err.split("refused ", 1)[1].split(":", 1)[0]
+    assert rc == cert.REFUSALS[name] and rc != 0, err
+    assert not (tmp_path / "junk.cert.sig").exists()
+
+
+def test_the_key_tool_refuses_a_key_file_others_may_read(tmp_path,
+                                                         monkeypatch):
+    """On a POSIX system a key file its group or others may read or write
+    is refused (`usage`). Here the check is forced on, so that Windows,
+    which does not check (its permissions are ACLs), runs it too."""
+    import cft_sign
+    k = tmp_path / "loose.key"
+    k.write_text(cft_sign.key_text(TEST_SEED), newline="\n")
+    os.chmod(k, 0o644)
+    monkeypatch.setattr(cft_sign, "_POSIX", True)
+    with pytest.raises(cft_sign.Stop) as ei:
+        cft_sign.read_key(k)
+    assert ei.value.name == "usage" and "chmod 600" in ei.value.why
 
 
 # ---- the page's example and test vectors -----------------------------------------

@@ -133,6 +133,9 @@ CONTROLS = "certificates/v2-controls"
 # owner's.
 EXAMPLE_SALT = bytes(range(32))
 TEST_SEED = bytes(range(32, 64))
+# the issuer the test key is bound to in signed-fp64's keyring: evidently
+# a test, since anyone holding the published seed can sign as it
+TEST_ISSUER = "cft test issuer (published key)"
 # RFC 8032 section 7.1 TEST 1's secret: a key that is not the test key
 OTHER_SEED = bytes.fromhex("9d61b19deffd5a60ba844af492ec2cc4"
                            "4449c5697b326919703bac031cae7f60")
@@ -1086,7 +1089,7 @@ def recipes2():
                            " tracked=modified untracked=present",
             certificate_id="cert 0001 / " + chr(0x141) + chr(0xF3) + "d"
                            + chr(0x17A),
-            issuer="Logan W.",
+            issuer=TEST_ISSUER,
             issuer_key=cert2.ed25519.public_key(TEST_SEED).hex(),
             host_os="linux-6.8.0", host_arch="x86_64",
             started="2026-10-02T12:00:00Z", finished="2026-10-02T12:00:05Z",
@@ -1096,7 +1099,7 @@ def recipes2():
             initial=("generator", "shake-box", FULL_BOX)),
         mode="keyed", sign=True,
         keyring=f"key {cert2.ed25519.public_key(TEST_SEED).hex()} "
-                f"Logan%20W.\n",
+                f"{cert2.text_token(TEST_ISSUER)}\n",
         superseded="flagstep-fp64-lanes", regenerate=True))
     rb_init = cert.state_bytes("fp64", cert2.generate_initial(
         ("generator", "shake-box", REBUILT_BOX), "fp64", 2, 3))
@@ -1463,7 +1466,8 @@ def golden_runs(case, images, salt):
         runs.append(cert.certify_run(r.kind, img, bank, salt, st, rs,
                                      steps=r.steps, parameters=r.parameters,
                                      h_slots=r.h_slots,
-                                     scratch_depth=case.depth))
+                                     scratch_depth=case.depth,
+                                     main_image=images[case.runs[0].image]))
         chains.append((st, rs))
         progs[r.index] = (img, bank or None)
         shapes.append((prog.fmt, prog.n_scratch_in))
@@ -1516,11 +1520,23 @@ def page_example2():
 # writer says `golden`). Every other line is held byte for byte. The
 # header's statements - certificate-id, issuer, issuer-key, supersedes
 # and initial - are handed to it, as the golden writer is handed them.
-C_WRITER_MEASURED = ("build-id", "device-platform", "device-xrt",
-                     "device-clock", "device-serial", "writer",
-                     "writer-runtime", "compiler-build", "replay-method",
-                     "host-os", "host-arch", "started", "finished", "issued",
+C_WRITER_MEASURED = ("build-id", "writer", "writer-runtime",
+                     "compiler-build", "replay-method", "host-os",
+                     "host-arch", "started", "finished", "issued",
                      "environment", "env")
+# The four device lines are left out too only where the case carries a
+# card's values (signed-fp64): `none`, which a software run measures and
+# writes, is held byte for byte (verifier-VCV2B).
+C_WRITER_DEVICE = ("device-platform", "device-xrt", "device-clock",
+                   "device-serial")
+
+
+def device_exempt(data):
+    """Does a certificate carry a card's device lines, which a C writer
+    on the software backend cannot write?"""
+    lines = cert.body_of(data).decode("ascii").split(chr(10))
+    return any(ln.startswith("device-platform ") and
+               ln != "device-platform none" for ln in lines)
 
 _COMPILES = {}
 
@@ -1552,7 +1568,7 @@ class Made:
 
 
 def write_run2(r, img, bank, salt, depth, src_lines=None, source=None,
-               source_params=()):
+               source_params=(), main_image=None):
     """One version-2 run by the golden writer: its chain (each block, each
     marked lane replayed by the source's definition) and its Run."""
     prog = cert.seq.Program.from_bytes(img, scratch_depth=depth)
@@ -1568,7 +1584,8 @@ def write_run2(r, img, bank, salt, depth, src_lines=None, source=None,
                          steps=r["steps"])
     run = cert2.certify_run(r["kind"], img, bank, salt, ch, steps=r["steps"],
                             parameters=r["params"], h_slots=r["h_slots"],
-                            scratch_depth=depth, source=src_lines)
+                            scratch_depth=depth, source=src_lines,
+                            main_image=main_image)
     return run, ch, (prog.fmt, prog.n_scratch_in)
 
 
@@ -1601,7 +1618,8 @@ def make2(rc, made, image_bytes):
             dict(kind=r.kind, init=r.init, segments=r.segments,
                  steps=r.steps, params=r.params, h_slots=tuple(h_slots),
                  lane_flags=r.lane_flags), img, bank, salt, rc.depth,
-            src_lines, r.source, r.source_params)
+            src_lines, r.source, r.source_params,
+            image_bytes(rc.runs[0].image))
         runs.append(run)
         chains.append(ch)
         shapes.append(shape)
@@ -1654,7 +1672,8 @@ def remake2(case, data, images):
                  steps=r.steps, params=r.parameters, h_slots=r.h_slots,
                  lane_flags=cr.lane_flags),
             img, bank, salt, case.depth, sl, src,
-            cr.source.params if cr.source else ())
+            cr.source.params if cr.source else (),
+            images[case.runs[0].image])
         runs.append(run)
         chains.append(ch)
         shapes.append(shape)
@@ -2397,7 +2416,7 @@ def hold_case2(case, corpus, images, seed, made):
                    f"{case.name}: its signature is the published test key's, "
                    f"made again byte for byte")
     if case.writers == "both":
-        NOTES.append(case.name)
+        NOTES.append((case.name, device_exempt(data)))
     hold_audits2(case, corpus, seed)
 
 
@@ -2478,11 +2497,14 @@ def check(seed, keep):
                "control this script's recipes make", f"missing {missing[:6]}")
     print("== 5b. the C writer's half of version 2", flush=True)
     if NOTES:
+        card = [n for n, d in NOTES if d]
         print(f"  NOTE  {len(NOTES)} version-2 cases a C writer must "
               f"reproduce (writers both), every line but "
-              f"{', '.join(C_WRITER_MEASURED)} byte for byte: cft-segrun "
-              f"writes version 1 only until version 2's C half, the next "
-              f"parcel's: {', '.join(NOTES)}", flush=True)
+              f"{', '.join(C_WRITER_MEASURED)} byte for byte, and the four "
+              f"device lines too where the case carries a card's values "
+              f"({', '.join(card) or 'none'}): cft-segrun writes version 1 "
+              f"only until version 2's C half, the next parcel's: "
+              f"{', '.join(n for n, _d in NOTES)}", flush=True)
     print("== 7. the page's example certificates", flush=True)
     ex = [c for c in corpus.cases if c.name == "example"]
     if check_that(len(ex) == 1, "the corpus has the case `example`"):

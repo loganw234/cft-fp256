@@ -18,7 +18,7 @@ writer-runtime python-3.12.9,mpmath-1.3.0
 compiler-build commit=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb tracked=modified untracked=present
 replay-methods 0
 certificate-id cert%200001%20/%20%C5%81%C3%B3d%C5%BA
-issuer Logan%20W.
+issuer cft%20test%20issuer%20(published%20key)
 issuer-key 29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7
 host-os linux-6.8.0
 host-arch x86_64
@@ -51,4 +51,4 @@ replays 0
 output db7cffaff0db8b28dd7e67909601ed05188955cfc327620f6ddb4173569b80e6
 accuracy 0
 end
-hash 89e4140cf7939aa86dd5b61627dbe59c4aeb85499d7b5bb7888bde8f2548cd29
+hash 7bc19f1cbc189a4b852423cf3a2833c6e85ae989d81b6d5805aae5e1e81e1057

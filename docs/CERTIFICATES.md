@@ -11,8 +11,10 @@ the whole of versions 1 and 2. Every section up to "Version 2" is version
 keeps version 1's rules where it does not say otherwise. A reader and an
 auditor of either version can be written from it alone. An auditor reads
 both versions, choosing by the magic line, and version 1's verdicts are
-unchanged: the golden auditor does so today, and `cft-audit` reads version
-1 until version 2's C half ("Version 2").
+unchanged but for one rule that came with version 2: a wider run of a
+routine image is refused `aux-image` ("Auxiliary runs"). The golden
+auditor does so today, and `cft-audit` reads version 1 until version 2's
+C half ("Version 2").
 
 Where version 1 stands (2026-09-30; version 2's own is under "Version
 2"):
@@ -634,8 +636,17 @@ certify a wider run of such an image, and every audit refuses one,
   holds a routine (QUIET, ENDQUIET or RAISE), whose words are its
   format's, so no image is it one format wider; certificate version 2's
   wider-source run compiles its source one format up instead".
-- **A writer** checks it once a wider run's own checks have passed, and
-  before the accuracy entries, and makes nothing.
+- **A writer** checks the main image too, and makes nothing. cft-segrun
+  checks it once every run's own checks have passed, and before the
+  accuracy entries. The golden writer's `cert.certify_run`, handed the
+  main image beside a wider run, checks it after the wider run's shape
+  and states and before its steps and parameters, which the golden writer
+  reads only at `encode`. So where one wider run has two faults - a
+  routine main image and steps 0, a parameter out of order or a parameter
+  named twice - the two writers can name different ones first, which
+  version 1's contract allows: a writer's refusal names a fault it found,
+  in no order the contract fixes. With the rule's fault alone they agree,
+  W1 and W2 below among it.
 - **Who holds it:** the golden writer's `cert.certify_run` and the golden
   audit (`cert.routine_words`), and `cft-segrun` and `cft-audit` from
   parcel C4's C half, with version 2's wider relation the same.
@@ -645,7 +656,11 @@ certify a wider run of such an image, and every audit refuses one,
   Kepler, each with the same construction on Lorenz-63, which has no
   routine, written and accepted. The construction is the main image's
   words with header bytes 20 to 23, the precision code, set to fp128's,
-  and its bank and initial state widened exactly.
+  and its bank and initial state widened exactly. test_cert2.py also
+  holds verifier-VCV2B's W1, a routine main image beside a wider image
+  that holds no flag control (refused, by the golden writer as by
+  cft-segrun), and W2, the reverse (written by both, and refused by the
+  audit as not the main image's words).
 
 Version 2's `wider-source` run, the program's source compiled one format
 wider, is how such a program gets a wider estimate.
@@ -2566,9 +2581,11 @@ writer must reproduce it from the C half on.
   spaces and non-ASCII, the device lines, the writer's and compiler's
   builds, and the environment. It is keyed, its initial state is the
   `shake-box` generator's, and it supersedes `flagstep-fp64-lanes`. Its
-  `.sig` is the test key's. Its audit is handed the signature, a keyring
-  naming the issuer, and the superseded certificate, and it regenerates
-  the initial state.
+  `.sig` is the test key's, and its issuer `cft test issuer (published
+  key)`: anyone holding the published seed can sign as the key's holder,
+  so the keyring binds it to an evidently test name, never a person's.
+  Its audit is handed the signature, that keyring and the superseded
+  certificate, and it regenerates the initial state.
 - `lorenz63-rk4-fp64-rebuilt`: a compiled Lorenz-63 run whose initial
   state is `shake-box`'s. Its full audit is handed the source and no
   state, recompiles the image, regenerates the initial state and re-runs
@@ -2596,9 +2613,9 @@ version 2's 34 new names. `definition-unavailable` and `replay-undecided`
 are refusals of the auditor's or the writer's environment, so their
 controls are test_cert2.py's plants.
 
-The corpus's data is 333 KB: 313 files and 332,988 bytes besides
-corpus.py (2026-10-02). Version 2 added 143 files of 114,954 bytes, the
-controls' 59 of them 88,153, and the manifest grew from 23,839 bytes to
+The corpus's data is 333 KB: 313 files and 333,220 bytes besides
+corpus.py (2026-10-02). Version 2 added 143 files of 115,186 bytes, the
+controls' 59 of them 88,327, and the manifest grew from 23,839 bytes to
 89,262. Before that it was 170 files and 152,611 bytes (152,617 until
 step 5 made the manifest's three `golden` words `both`, and 145,061
 before the fixes round's cases, both 2026-09-30).
@@ -2745,9 +2762,11 @@ For a version-2 case it holds 1 and 2 as above, and then:
    committed file, and the signature made again by the test key;
 5. a NOTE naming each case marked `writers both`, which a C writer must
    reproduce from version 2's C half on. It must write every line but
-   its own measurements byte for byte: `build-id`, the four device lines,
-   `writer`, `writer-runtime`, `compiler-build`, the `replay-method`
-   lines, the three times, `host-os`, `host-arch` and the environment.
+   its own measurements byte for byte: `build-id`, `writer`,
+   `writer-runtime`, `compiler-build`, the `replay-method` lines, the
+   three times, `host-os`, `host-arch` and the environment, and the four
+   device lines only where the case carries a card's values
+   (signed-fp64): `none`, which a software run writes there, is held.
    It is handed the header's statements, as the golden writer is:
    `certificate-id`, `issuer`, `issuer-key`, `supersedes` and `initial`.
    cft-segrun writes version 1 until then;
@@ -2948,7 +2967,9 @@ Where things stand (2026-10-02):
 - the golden implementation is `python/cft_golden/cert2.py`: the reader,
   the writer, the replays, the sources, the signature and the audit.
   `cert.parse` and `cert.audit` choose by the magic line, so version 1's
-  code and verdicts are untouched;
+  reader is untouched. Version 1's golden writer and audit gained one
+  rule with version 2, the wider run of a routine image (`aux-image`),
+  which changes their verdicts for routine images alone;
 - its gate is `python/tests/test_cert2.py`, with a negative control for
   each check below, caught by name ("Version 2's controls");
 - Ed25519 is `python/cft_golden/ed25519.py`, held to RFC 8032's test
@@ -2986,8 +3007,9 @@ Its accuracy is this, of this kind. The issuer says the rest."
 - where the auditor chooses, that the source's interpreter itself ends a
   segment on its certified state with its certified flags (the definition
   re-run);
-- with a signature file handed, that the key named in it vouched for these
-  bytes; with a keyring, whose key it is;
+- with a signature file handed, that the holder of the key named in it,
+  a key not of small order, vouched for these bytes; with a keyring,
+  whose key it is;
 - with the superseded certificate handed, that it is the one named.
 
 **What it does not prove.** Any provenance line: a time, a place, the
@@ -3011,7 +3033,7 @@ says.
 | `mode`, `salt-commitment` (K) | as in version 1 |
 | `build-id`, `backend`, `device-xclbin`, `device-version`, `device-caps`, `device-tiles` | as in version 1 ("Identity") |
 | `profile <version>` | the conformance profile the bits are claimed under; or `unknown` |
-| `language <version>` | the language's version; `none` where no run names a source; or `unknown` |
+| `language <version>` | the language's version; `none` where no run names a source, and only there (refused `malformed` at a run's source line beside it); or `unknown` |
 | `device-platform <text>` | the card's platform (shell) name as XRT reports it; `none` for the software backend; `unknown` |
 | `device-xrt <text>` | XRT's version; `none`; `unknown` |
 | `device-clock <n>` | the kernel clock in Hz, a decimal of at least 1; `none`; `unknown` |
@@ -3023,7 +3045,7 @@ says.
 | `replay-method <r> golden` or `replay-method <r> image <digest>` | how the producer replayed run r's marked lanes: by the golden model, or by a replay image (its SHA-256); one line for each run with replay lines, runs strictly increasing |
 | `certificate-id <text>` | an identifier the issuer assigned before writing; `none` |
 | `issuer <text>` | who issues it: a name, an ORCID for a person, or an organisation's identifier; `none`; `withheld`, the writers' default |
-| `issuer-key <key>` | the Ed25519 public key it is to be signed with; `none` |
+| `issuer-key <key>` | the Ed25519 public key it is to be signed with: a point of the curve (`malformed` where it encodes none) and not of small order (`signer` where [8]A is the identity); `none` |
 | `host-os <text>` | the host's OS by name (`linux`, `windows`), with its version only on request (`linux-6.8`, the kernel's for Linux); `unknown`; `withheld` |
 | `host-arch <text>` | the host's architecture (`x86_64`); `unknown`; `withheld` |
 | `started <time>` | when the first run began; `unknown` |
@@ -3031,8 +3053,8 @@ says.
 | `issued <time>` | when the certificate was written; `unknown` |
 | `supersedes <digest>` | the body hash of a certificate this one replaces; `none` |
 | `environment <n>` | how many `env` lines follow |
-| `env <name> <text>` | a variable of the writer's list that was set, and its value; names strictly increasing |
-| `initial given`, or `initial generator <name> <text> ...` | how run 0's initial state was made: handed as data, or by a named generator and at most 16 arguments |
+| `env <name> <text>` | a variable of the writer's list that was set, and its value; names strictly increasing, and a name off the list `malformed` |
+| `initial given`, or `initial generator <name> <text> ...` | how run 0's initial state was made: handed as data, or by a named generator, whose name is never one of the four words, and at most 16 arguments |
 | `runs <R>` | as in version 1 |
 
 **A run block,** R of them. Run 0 is the main run.
@@ -3273,7 +3295,15 @@ relations to it:
 - **defined by** (`compiler none`): the run computes what the source's
   reference interpreter computes. This is checked by running the
   interpreter, the definition re-run, at the auditor's choice. It holds for
-  a hand-written image, if that image is right.
+  a hand-written image, if that image is right. Without the definition
+  re-run the audit checks the source itself (step 4a) and compares the
+  image with it only where a marked lane is replayed, so an image of
+  another map - a constant 3/5 where the source says 3/4 - passes there.
+  The verdict's source line says so: "no compiler named, so the image's
+  map is not re-derived from it - only a marked lane's replay and a
+  definition re-run compare the two" (verifier-VCV2B). The re-run costs
+  every lane the definition's interpreter, so the auditor spends it only
+  by choice, as version 1's audit spends a full re-run.
 
 **The format.** The source is taken at the run's `program-format`: a main
 run's format must be the source's own (`source-format`), and a
@@ -3387,8 +3417,10 @@ header lines:
 
 **Coverage.** An auditor's definition covers a certificate's when, for
 each of the two, the majors are equal and the auditor's minor is at least
-the certificate's. `language none` is covered by every language, since no
-check reads one. `unknown` is never covered.
+the certificate's. The language is compared only where a run names a
+source: where none does, no check reads it, so it is covered whatever the
+certificate states (a writer writes `none` there, and `none` beside a
+named source is refused `malformed`). `unknown` is never covered.
 
 **Who is blamed when a re-derivation fails.** Where the auditor's
 definition covers the certificate's, a failure is the certificate's, under
@@ -3455,13 +3487,20 @@ cft-segrun read: `CFT_DIVSQRT_FULL`, `CFT_DIVSQRT_SEQ`, `CFT_SEGRUN_PLANT`,
 `CFT_XRT_MASK_ADDR_OVERRIDE`, `CFT_XRT_PROGRAM_CUTS`, `CFT_XRT_REDUCE_BC`,
 `CFT_XRT_TILES`, `CFT_XRT_TILE_ORDER`, `CFT_XRT_TRACE`, `CFT_XRT_WITNESS`
 and `XCL_EMULATION_MODE`. A writer writes those that are set, by name, and
-none carries a path. test_cert2.py holds the list to the code's `getenv`
-calls and libcft's instrument seeds, so a new variable cannot be missed.
+none carries a path. The reader holds `env` to the list: a name off it
+is refused `malformed`, so a certificate carries no variable but those -
+not a home directory, a user name or a path - and a variable joins the
+list with the code that reads it. test_cert2.py holds the list to the
+code's `getenv` calls and libcft's instrument seeds, so a new variable
+cannot be missed.
 
 **The times.** Where they are known, `started` is no later than
 `finished`, and `finished` no later than `issued`, and so `started` no
 later than `issued`: each pair of known times, refused at the later line
-(`provenance-order`). They are reported: no time is checked.
+(`provenance-order`). The reader checks each time as it reads it, in the
+line order, so an order broken at `finished` is refused there, before
+`issued` is read (whose own form is checked only then). They are
+reported: no time is checked against a clock.
 
 **The device's extra lines** (`device-platform`, `device-xrt`,
 `device-clock`, `device-serial`) come from the library's image identity,
@@ -3499,9 +3538,21 @@ signature to committed bytes. Its keys are 32 bytes and its signatures 64.
 Verification is RFC 8032 section 5.1.7's: R and the key decode by 5.1.3
 (y below p, a square root that exists, no x of zero with its sign bit
 set), S is below L, and the cofactored equation [8][S]B = [8]R + [8][k]A
-holds. Small-order keys and points are not refused, as RFC 8032 does not
-refuse them, and an implementation in another language must decide the
-cofactored equation too.
+holds. And one refusal the RFC leaves to its user (verifier-VCV2B, the
+lead's decision, 2026-10-02): **a key of small order** - [8]A the
+identity, one of the eight points of the curve's torsion - is refused.
+Under such a key [8][k]A vanishes, so any R = [S]B verifies for every
+message: a signature nobody made. It is refused by name, `signer`,
+wherever a key is read: the certificate's `issuer-key` (by the reader,
+and so by every writer, which reads its text back), a keyring's line, and
+a signature file's key; a key that encodes no point is `malformed` on the
+`issuer-key` line and `signer` in a keyring. A point R of small order is
+not refused, since the equation then needs the key's secret, and neither
+is a key with a small-order component beside a prime-order part, since
+signing under it needs that part's secret. An implementation in another
+language decides the cofactored equation, refuses the same eight keys,
+and is held to `python/tests/test_ed25519.py`'s vectors: the RFC's five,
+the eight keys of small order, and the decoding and S edges.
 
 **The message** is `cft-signature 1`, a NUL, then the 32 bytes of the body
 hash: a signature over a certificate is a signature over nothing else.
@@ -3522,24 +3573,35 @@ hex> <text>`, each key once, and the verdict then names the key's holder.
 
 **The audit** (step 2a), when a signature file is handed:
 - the file follows its form (`signature-format`);
+- its key is not of small order (`signer`);
 - its `certificate` line is this certificate's body hash, and the
   signature verifies (`signature`);
 - the key is the certificate's `issuer-key`, where it names one
   (`signature-key`);
 - in a keyring handed, the key's holder is the certificate's `issuer`,
   where the issuer is a text (`signer`). A keyring that breaks its form is
-  `signer` too, whether or not a signature is handed.
+  `signer` too, whether or not a signature is handed, and so is one whose
+  line names a key of small order or no point.
 
 Without a keyring the verdict says the key is one no keyring handed
-names. What a signature proves: the key's holder vouched for these bytes.
-Not when, and not that the bits are right: the audit proves the bits.
+names. What a signature proves: whoever holds the secret of the key's
+prime-order part - the key's holder - vouched for these bytes, since a
+key of small order, under which nobody's signature is needed, is refused
+before the signature is read. Which person that is, a keyring handed
+says, as far as the auditor trusts it. Not when, and not that the bits
+are right: the audit proves the bits.
 
 **The key tool,** `python/cft_sign.py`: `keygen` draws a secret from the
 operating system's secure randomness into a new file and prints the public
 key; `public` prints a key file's public key; `sign` writes a
 certificate's `.sig`; `verify` checks one, and for version 2 its key and
 signer, with step 2a's names. It never overwrites a file and never prints
-a secret.
+a secret. `sign` signs only a certificate the strict reader reads, of
+either version, and refuses anything else by the reader's name, bytes
+with a good hash line that are no certificate among them. On a POSIX
+system it refuses a key file its group or others may read or write, as
+ssh does; on Windows, whose permissions are ACLs that a mode does not
+show, it does not check them.
 
 **The published test key** is the secret `20 21 22 ... 3f`, printed on
 this page as the example salt is, so it is a test key only and never an
@@ -3548,8 +3610,9 @@ owner's.
 What a reviewer of the implementation should look at: it is not
 constant-time (Python's integers, and a double-and-add that branches on
 the scalar), so a secret signing on a machine an adversary can time leaks;
-nothing zeroes a secret in memory; and the key tool's file permissions are
-the operating system's (owner-only on Linux, not on Windows).
+nothing zeroes a secret in memory; and the key tool writes a key file
+owner-only and refuses a group- or world-accessible one on POSIX
+systems, and enforces neither on Windows.
 
 ### Version 2's strict reader
 
@@ -3696,7 +3759,7 @@ for the new lines. The new names:
 | `signature-format` | 4 | a signature file handed breaks its form |
 | `signature` | 4 | the signature names another certificate, or does not verify |
 | `signature-key` | 4 | the signing key is not the certificate's `issuer-key` |
-| `signer` | 4 | a keyring handed names the signing key under another holder than the `issuer`, or breaks its form |
+| `signer` | 4 | a keyring handed names the signing key under another holder than the `issuer`, or breaks its form; a key read anywhere - the certificate's `issuer-key`, a keyring's line, a signature file's key - is of small order ([8]A the identity) |
 | `supersedes` | 4 | the superseded certificate handed is not whole, or not the one named, or the certificate names none |
 | `source-digest` | 4 | a source handed is not the one its run names, is handed for a run that names none, or `sources` is not in its shape |
 | `source-refused` | 4 | the language refuses a source handed, at the run's format, or refuses to run it on a replay's or a definition re-run's inputs |
@@ -3897,15 +3960,30 @@ rebuilds from its source and its generator alone. The controls cover:
   stand for M1's;
 - the golden writer's own refusals, and every field it cannot spell;
 - the key tool: a key made, never overwritten, signing and verifying both
-  ways, a bad key file;
+  ways, a bad key file, a key file others may read (POSIX's check, forced
+  on), and bytes that are no certificate refused by `sign`;
 - the dispatch, the keyed mode's reach, the verdict's three levels, the
   writer's environment list against the code, and the published example
-  and test vectors.
+  and test vectors;
+- from verifier-VCV2B's findings: the eight keys of small order refused
+  `signer` on the issuer-key line, in a keyring and as a signature
+  file's key (its forged signature among them), and by the key tool; a
+  key of no point; a generator named one of the words, by the reader and
+  the writer; the times' order checked in the line order, before a later
+  line's form; `language none` beside a source, and the language not
+  compared where no run names one; an `env` name off the writer's list;
+  the defined-by source's verdict line; and the routine rule's W1 and W2,
+  the golden writer testing the main image.
 
 `python/tests/test_ed25519.py` holds Ed25519 to RFC 8032 section 7.1's five
 vectors, every refusal of 5.1.3 and 5.1.7, and the cofactored equation, on
 a key with a small-order component where a cofactorless verifier parts
-from it. The census by plants that version 1 had, each check disabled in a
+from it. Beside them it holds vectors for another implementation to be
+held to: the eight keys of small order, each refused though verifier
+VCV2B's signature satisfies the equation under it; six encodings that
+decode to no point (y = p, y = p + 1, y = 2^255 - 1, a y with no square
+root, and x = 0 with its sign bit set at y = 1 and y = p - 1); and three
+signatures whose S is at or above L. The census by plants that version 1 had, each check disabled in a
 copy, has not been run on version 2: it is the verifier's.
 
 ### What waits for the C half
@@ -3914,9 +3992,11 @@ The next parcel builds version 2 in C, against this page:
 - **cft-segrun:** `--lane-flags`, asking for the block (ABI 0.17) and
   writing `run-<r>-segment-<k>.flags`, and asking whenever the image
   needs flag control; `--replay-image IMG`, an option of each run, writing
-  `replay-method <r> image <digest>`, refusing `replay-missing` (a mark
-  and no replay route) and `replay-undecided` (the replay image marks
-  too); `--source SRC --manifest M`, the source lines from cftc's
+  `replay-method <r> image <digest>`; refusing `replay-source` where a
+  run that marks a lane names no source (the golden writer's name for
+  it), `replay-missing` where it names one and was handed no replay
+  image, and `replay-undecided` where the replay image marks the lane
+  too; `--source SRC --manifest M`, the source lines from cftc's
   manifest, held to the files it runs; `profile` from the library's own
   constant; the header's statements as options (issuer, identifier,
   issuer-key, initial, supersedes) with the privacy defaults; measuring
@@ -3926,23 +4006,31 @@ The next parcel builds version 2 in C, against this page:
   version 1.
 - **cft-audit:** both readers, by the magic line; block files in
   `--states DIR`; re-runs that ask for the block where a run says `yes`;
-  its library's profile compared with the certificate's
-  (`definition-differs`); `--signature`, `--keyring` and `--superseded`;
-  Ed25519 in C, held to the same vectors and the cofactored equation. It
+  its library's profile and language version compared with the
+  certificate's (`definition-differs`); `--signature`, `--keyring` and
+  `--superseded`; Ed25519 in C, held to test_ed25519.py's vectors (the
+  RFC's five, the eight keys of small order refused, the decoding and S
+  edges) and the cofactored equation, and a key of small order refused
+  `signer` wherever a key is read. It
   takes no source: a replay in a re-run segment, a wider-source relation
   and a definition re-run refuse `source-missing` there exactly where the
   golden auditor handed no source does, so the two keep one verdict.
 - **libcft:** `cft_image_id` grows by the platform's name, the XRT
   version, the clock and the serial (ABI 0.18), and `cft.h` states the
-  profile it implements.
+  profile it implements and the language version beside it, since
+  `definition-differs` compares both. cft-audit evaluates no language,
+  so its language version is the one its tree's golden model states
+  (`python/cft_golden/lang/version.py`).
 - **The gates:** audit_check.py hands cft-audit test_cert2.py's calls and
   the corpus's version-2 cases, which it names today and does not hand;
   corpus.py's check has cft-segrun remake each case the corpus marks
-  `writers both`, leaving out of both certificates `build-id`, the four
-  device lines, `writer`, `writer-runtime`, `compiler-build`, the
-  `replay-method` lines, the three times, `host-os`, `host-arch` and the
-  environment (corpus.py's `C_WRITER_MEASURED`), and holding every other
-  line byte for byte. A replay certificate cft-segrun writes
+  `writers both`, leaving out of both certificates `build-id`, `writer`,
+  `writer-runtime`, `compiler-build`, the `replay-method` lines, the
+  three times, `host-os`, `host-arch` and the environment (corpus.py's
+  `C_WRITER_MEASURED`), and the four device lines only where the case
+  carries a card's values (signed-fp64; `C_WRITER_DEVICE`), and holding
+  every other line byte for byte: a software run writes `none` on the
+  device lines, and six of the seven cases carry it. A replay certificate cft-segrun writes
   (`replay-method 0 image`) is held to the golden writer's
   (`replay-method 0 golden`) that way. The corpus check names those
   seven cases today, in a NOTE.
@@ -3952,8 +4040,9 @@ The next parcel builds version 2 in C, against this page:
 
 - **Sign a time,** or check one. An RFC 3161 token over the body hash
   would bound `issued` from above; that is for a later version.
-- **Check a place, the issuer without a keyring, the environment or the
-  device's extra lines.** Each is reported.
+- **Check a place, the issuer without a keyring, the environment's values
+  or the device's extra lines.** Each is reported; the environment's
+  names are held to the writer's list.
 - **Bind a key to a person,** distribute keys or revoke them. The keyring
   is the auditor's input.
 - **Audit sources or replays in C.** cft-audit takes no source, since

@@ -13,7 +13,14 @@ its SHA-256 is held below so that an edit to it is seen.
 Then what 5.1.3 and 5.1.7 make a verifier refuse: a key or an R that
 does not decode (y at or above p, no square root, an x of zero with its
 sign bit set), an S at or above L, the wrong lengths, and a signature
-that verifies for another message or another key.
+that verifies for another message or another key. And one refusal the
+RFC leaves to its user: the eight keys of small order (verifier-VCV2B,
+2026-10-02).
+
+The vectors below the RFC's - SMALL_ORDER, UNDECODABLE and S_EDGES - are
+for an implementation in another language to be held to as well (the C
+half's Ed25519, docs/CERTIFICATES.md): each is refused, by `verify`, and
+a key of small order by name wherever a certificate's key is read.
 """
 
 import hashlib
@@ -96,6 +103,61 @@ VECTORS = [
      "dc2a4459e7369633a52b1bf277839a00201009a3efbf3ecb69bea2186c26b589"
      "09351fc9ac90b3ecfdfbc7c66431e0303dca179c138ac17ad9bef1177331a704"),
 ]
+
+
+# The eight keys of small order - every point of the curve's torsion,
+# [8]A the identity - each in its one encoding, computed here (below) as
+# the multiples of [L]P for the point P whose y is 3 and x even. Under such
+# a key [8][k]A vanishes, so any R = [S]B satisfies the cofactored
+# equation for every message: verifier-VCV2B's forgery, R = [1234567]B
+# and S = 1234567. verify refuses them all.
+SMALL_ORDER = (
+    ("order 1, the identity",
+     "0100000000000000000000000000000000000000000000000000000000000000"),
+    ("order 2",
+     "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"),
+    ("order 4, x even",
+     "0000000000000000000000000000000000000000000000000000000000000000"),
+    ("order 4, x odd",
+     "0000000000000000000000000000000000000000000000000000000000000080"),
+    ("order 8",
+     "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05"),
+    ("order 8",
+     "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc85"),
+    ("order 8",
+     "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a"),
+    ("order 8",
+     "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac03fa"),
+)
+# 5.1.3's refusals as encodings: (what, the integer they spell, 32 bytes).
+UNDECODABLE = (
+    ("y = p", (1 << 255) - 19,
+     "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"),
+    ("y = p + 1, the identity's y unreduced", (1 << 255) - 18,
+     "eeffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"),
+    ("y = 2^255 - 1", (1 << 255) - 1,
+     "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"),
+    ("y = 2, whose x^2 has no square root", 2,
+     "0200000000000000000000000000000000000000000000000000000000000000"),
+    ("y = 1 with the sign bit set: x = 0, negative", 1 | (1 << 255),
+     "0100000000000000000000000000000000000000000000000000000000000080"),
+    ("y = p - 1 with the sign bit set: x = 0, negative",
+     ((1 << 255) - 20) | (1 << 255),
+     "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+)
+# 5.1.7's S at or above L, on TEST 1's key and empty message: (what, the
+# signature). S + L is TEST 1's S plus L, the same scalar mod L.
+S_EDGES = (
+    ("S + L",
+     "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155"
+     "4c8c7872aa064e049dbb3013fbf29380d25bf5f0595bbe24655141438e7a101b"),
+    ("S = L",
+     "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155"
+     "edd3f55c1a631258d69cf7a2def9de1400000000000000000000000000000010"),
+    ("S = 2^256 - 1",
+     "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e06522490155"
+     "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+)
 
 
 def _v(name):
@@ -238,6 +300,87 @@ def test_verification_is_the_cofactored_equation():
         assert E._same(lhs, rhs) == (k % 2 == 0)
         found += k % 2
     assert found, "no odd k among 64 messages"
+
+
+def test_the_small_order_keys_are_the_curves_torsion():
+    """SMALL_ORDER is every point T with [8]T the identity, each once
+    and each at its order: the multiples [k]Q, k = 0..7, of Q = [L]P for
+    the point P whose y is 3 and x even, which has order 8."""
+    x = E._recover_x(3, 0)
+    q = E._mul(E.L, (x, 3, 1, (x * 3) % E.P))
+    assert not E._same(E._mul(4, q), E.IDENTITY)
+    assert {E.encode_point(E._mul(k, q)).hex() for k in range(8)} == \
+        {h for _w, h in SMALL_ORDER}
+    for what, h in SMALL_ORDER:
+        a = E.decode_point(bytes.fromhex(h))
+        assert a is not None and E.encode_point(a).hex() == h, what
+        order = next(n for n in (1, 2, 4, 8)
+                     if E._same(E._mul(n, a), E.IDENTITY))
+        assert what.startswith(f"order {order}"), what
+
+
+@pytest.mark.parametrize("what,key", SMALL_ORDER)
+def test_a_key_of_small_order_is_refused(what, key):
+    """verifier-VCV2B's forgery: under a key of small order, R = [r]B
+    and S = r satisfy the cofactored equation for every message, since
+    [8][k]A is the identity - so verify refuses the key itself, and
+    small_order names it."""
+    pub = bytes.fromhex(key)
+    assert E.small_order(pub), what
+    r = 1234567
+    sig = E.encode_point(E._mul(r, E.B)) + r.to_bytes(32, "little")
+    a = E.decode_point(pub)
+    for msg in (b"", b"any message", b"cft-signature 1\x00" + bytes(32)):
+        k = E._sha512_int(sig[:32], pub, msg) % E.L
+        lhs = E._mul(8, E._mul(r, E.B))
+        rhs = E._mul(8, E._add(E.decode_point(sig[:32]), E._mul(k, a)))
+        assert E._same(lhs, rhs), "the equation alone accepts it"
+        assert not E.verify(pub, msg, sig), what
+
+
+def test_a_key_with_a_small_order_part_is_accepted():
+    """A key A + T, with A of prime order and T of small order, is not of
+    small order: signing under it needs A's secret, and the cofactored
+    equation lets T pass (test_verification_is_the_cofactored_equation
+    signs under one). small_order is False for it, for the RFC's keys,
+    and for what is not a key."""
+    s, _ = E._expand(bytes(range(32, 64)))
+    a = E._mul(s, E.B)
+    for _w, h in SMALL_ORDER:
+        mixed = E.encode_point(E._add(a, E.decode_point(bytes.fromhex(h))))
+        assert not E.small_order(mixed)
+    for v in VECTORS:
+        assert not E.small_order(bytes.fromhex(v[2]))
+    for bad in (b"", bytes(31), bytes(33), "x" * 32):
+        assert not E.small_order(bad)
+    for _w, _n, h in UNDECODABLE:
+        assert not E.small_order(bytes.fromhex(h))
+
+
+@pytest.mark.parametrize("what,n,enc", UNDECODABLE)
+def test_the_undecodable_vectors(what, n, enc):
+    """Each spells its integer, decodes to no point, and is refused as
+    the key and as R."""
+    data = bytes.fromhex(enc)
+    assert data == n.to_bytes(32, "little"), what
+    assert E.decode_point(data) is None, what
+    sk, pk, msg, sig = _v("TEST 1")
+    assert not E.verify(data, msg, sig)
+    assert not E.verify(pk, msg, data + sig[32:])
+
+
+@pytest.mark.parametrize("what,sig", S_EDGES)
+def test_the_s_edge_vectors(what, sig):
+    """Each is TEST 1's R with an S at or above L: refused, though S + L
+    is TEST 1's scalar mod L."""
+    sk, pk, msg, good = _v("TEST 1")
+    bad = bytes.fromhex(sig)
+    assert bad[:32] == good[:32]
+    assert int.from_bytes(bad[32:], "little") >= E.L
+    assert not E.verify(pk, msg, bad), what
+    if what == "S + L":
+        assert int.from_bytes(bad[32:], "little") - E.L == \
+            int.from_bytes(good[32:], "little")
 
 
 def test_the_curve_and_its_base_point():
