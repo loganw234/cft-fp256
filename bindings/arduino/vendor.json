@@ -186,7 +186,7 @@
     {
       "source": "host/src/xclbin_clock.h",
       "dest": "src/cft/src/xclbin_clock.h",
-      "sha256": "9034395012a45c76a134621bccce3edcfc8e3e2f4945aae414aff226f4df5535"
+      "sha256": "50936bcf5be9731de263be93ad23278df35eb80f6169276ab483654d572414de"
     }
   ]
 }

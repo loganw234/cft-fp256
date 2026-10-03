@@ -33,9 +33,15 @@
  * its byte 144 (file byte 448); the section headers from 456, each 40
  * bytes - m_sectionKind (u32) at 0, m_sectionName at 4, m_sectionOffset
  * (u64) at 24 and m_sectionSize (u64) at 32, little-endian. BUILD_METADATA
- * is kind 14. Measured on every image in the cft2204 distro (2026-10-02):
- * the two hw images name one constraint each, 10000000:cft_krnl_1.ap_clk
- * and the same over cft_krnl_1 to _4, and the nine hw_emu images none.
+ * is kind 14. Measured in the cft2204 distro, read only, which holds
+ * fifteen images (four hw, eleven hw_emu): on 2026-10-02 the constraints
+ * of eleven were counted - the hw images of /root/cft-fp256/build-r8-hw
+ * and build-r8-quad name one each, 10000000:cft_krnl_1.ap_clk and the same
+ * over cft_krnl_1 to _4, and nine hw_emu images none - and this reader
+ * read those two hw images and build/cft_hw_emu.xclbin (not known). On
+ * 2026-10-03 verifier-VCV2CW read the two 135 MHz hw images of
+ * /root/cft-quad-tip/ (build-single-tip-135, build-quad-tip-135) with it:
+ * 135000000 each. The two hw_emu images of /root/cft-red/ were not read.
  *
  * Header-only and static inline, in C99 and C++, so that the XRT backend
  * (C++) and host/tests/api_test.c (C, which holds this file to synthetic

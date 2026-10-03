@@ -597,9 +597,12 @@ def run_tool(args, env=None, binary=None, v2=False):
     if not v2:
         args = as_v1(args)
     try:
+        # the tool writes UTF-8 (its paths and values are the process's
+        # own text, section 14's leg i), which a console's code page
+        # cannot always decode
         r = subprocess.run([str(binary or TOOL)] + [str(a) for a in args],
-                           capture_output=True, text=True, env=e,
-                           timeout=TOOL_TIMEOUT)
+                           capture_output=True, encoding="utf-8",
+                           errors="replace", env=e, timeout=TOOL_TIMEOUT)
     except subprocess.TimeoutExpired:
         return (-1, "", f"segrun_check: the tool ran past {TOOL_TIMEOUT} s "
                         f"and was stopped")
@@ -2534,6 +2537,13 @@ def rounding_seen(programs, chains):
 
 def main():
     global TOOL, SERVE, SALT, EXPECT_ID, EXPECT_XRT, DEPTH, AUDIT, DEPTH_V2
+    # a check's words can carry what no console code page spells (the
+    # tool's own text, section 14's leg i): escaped, never a crash
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="backslashreplace")
+        except (AttributeError, ValueError):
+            pass
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--tool", required=True, help="the cft-segrun binary")
     ap.add_argument("--serve", help="cft-serve, for the remote leg")

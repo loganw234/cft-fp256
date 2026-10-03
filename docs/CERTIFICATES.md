@@ -1889,15 +1889,19 @@ killed by a signal leaves the certificate it created, empty, and its
 boundary files, since a signal runs no cleanup; at 99f1b43 the same
 kill truncated a file already at `--out`. The trial holds every run's
 initial state, and can refuse a certificate the runs alone could write
-(**Memory**, above). On Windows the command line reaches the tool
-through the system's code page, which maps a character it lacks to a
-near one ("best fit") before the tool reads it: a U+2212 MINUS SIGN,
+(**Memory**, above). On Windows a narrow `main` is handed its command
+line through the system's code page, which maps a character it lacks to
+a near one ("best fit") before the tool reads it: a U+2212 MINUS SIGN,
 U+FF0D FULLWIDTH HYPHEN-MINUS or U+2010 HYPHEN before 1 arrives as
 `-1`, and is refused as -1 is, and U+FF11 FULLWIDTH DIGIT ONE arrives as
 `1` and is taken as 1 (verifier-W1b on `--uses`, and S1 on a lane and a
 slot, 2026-09-30). So a spelling outside ASCII can be read as an ASCII
-one there. It is Windows' conversion, before `main`, for every option
-of every tool in this tree: a known limit, not fixed.
+one there. cft-segrun no longer meets it: since 2026-10-03 it reads the
+wide command line (*The process's own text*, under **Version 2** below),
+at both versions, so each such spelling is its own characters - U+FF11
+is not a decimal, and `--segments` given it is `malformed` (section 14,
+leg i). Every other tool in this tree still takes Windows' conversion,
+before `main`, for every option: a known limit there, not fixed.
 
 **What it certifies, and what it does not.** It certifies what ran:
 which states each segment started and ended on, as hashes, with its
@@ -1949,10 +1953,13 @@ tool's choice is named where it had one:
   line takes, or a text in its one spelling, percent-encoded. So
   signed-fp64's certificate-id - "cert 0001 / ", then U+0141, U+00F3, d
   and U+017A - is `--certificate-id
-  cert%200001%20/%20%C5%81%C3%B3d%C5%BA`: Windows hands a C program's
-  `main` its command line in the system's code page, which cannot carry
-  U+0141, and the encoded spelling reaches the tool through any code page
-  whole. `--certificate-id` (`none` by default), `--issuer`
+  cert%200001%20/%20%C5%81%C3%B3d%C5%BA`: the encoded spelling reaches the
+  tool whole through whatever makes its command line, a shell, a script or
+  a console whose code page cannot carry U+0141 among them (the lead's
+  decision, 2026-10-02). A statement given as its characters is
+  `malformed`: U+0141, o, d, U+017A is never read as Lodz, which is what
+  Windows' ANSI code page makes of it by best fit. `--certificate-id`
+  (`none` by default), `--issuer`
   (`withheld` by default; `none`, or a text), `--issuer-key` (`none`, or
   64 lowercase hex digits; a key that encodes no point is `malformed` and
   one of small order `signer`, as the golden writer's read-back names
@@ -1967,17 +1974,41 @@ tool's choice is named where it had one:
   host-os-version` (`windows-<major>.<minor>.<build>`, the kernel's
   release on Linux, the system's version elsewhere); `x86_64` for amd64 and
   x86_64, `aarch64` for arm64 and aarch64, any other machine by its own
-  name. A measurement that fails is `unknown`.
+  name in lower case - uname's, and on Windows the native architecture
+  `GetNativeSystemInfo` reports, named as Python's `platform.machine`
+  names it there (`x86`, `mips`, `alpha`, `powerpc`, `arm`, `ia64`), one
+  that Python's table has no name for `unknown`. A measurement that fails
+  is `unknown`.
 - `started` before the first segment, `finished` after the last, `issued`
   as the certificate is written, each in UTC and `unknown` where the
   clock does not answer. A clock that went back while the tool ran, which
   would break their order, is refused `provenance-order`.
 - `environment` and an `env` line for each variable of the writer's list
   that is set non-empty, in the list's order: segrun.c's table, held equal
-  to `cert2.ENVIRONMENT_NAMES` by the gate. A value no text can spell -
-  one of the four words, more than 255 characters encoded, not UTF-8 - is
-  refused `malformed` before anything is made, as the golden writer's
-  text rule refuses it.
+  to `cert2.ENVIRONMENT_NAMES` by the gate. Each value is the process's
+  own text (below): on Windows `GetEnvironmentVariableW`'s, in UTF-8, not
+  the ANSI code page's that `getenv` answers. A value no text can spell -
+  one of the four words, more than 255 characters encoded, not UTF-8, or
+  on Windows an unpaired surrogate - is refused `malformed` before
+  anything is made, as the golden writer's text rule refuses it.
+
+*The process's own text* (verifier-VCV2CW, 2026-10-03). The values the
+tool reads are recorded as the process has them, as the golden writer's
+are (Python's `os.environ` and `Path`). Windows hands a C program's `main`
+its arguments, and `getenv` its values, in the ANSI code page, which spells
+U+0141 as L by best fit and U+00E9 and U+20AC as bytes that are not
+UTF-8; so on Windows the tool reads the wide command line
+(`CommandLineToArgvW`), each argument in UTF-8, at both versions, and
+opens every path through its wide form (`_wfopen`, `_wopen`, `_wmkdir`,
+`_wrmdir`, `_wremove`). A source's file name, and every path the tool is
+handed, may then be any Unicode name, and `source-name` spells the file's
+own. Where the C runtime and Unicode split the command line differently -
+the count, or an argument that is ASCII as Unicode - the tool says so
+(`usage`) rather than guess which argument is which; an argument with no
+UTF-8 spelling (an unpaired surrogate, which only Windows can hand a
+program) is `usage` too. Version 1's bytes are unchanged for every
+command line both read alike. Elsewhere the bytes the process holds are
+its text, handed on as they are.
 
 *A run.* `--lane-flags` asks for the per-lane block (ABI 0.17), which the
 run also asks for wherever its image holds QUIET, ENDQUIET or RAISE. Its
@@ -1997,7 +2028,9 @@ image is the manifest's, and but for a half-step run's, whose bank is its
 relation's, the bank too (`source-image`). `--compiler none` says the
 image is not the source's compile, which defines it (`compiler none`):
 then neither is held to the manifest. The source's name is SRC's file
-name, without directories; the compiler line is the manifest's name,
+name, without directories, as the system's path rules part it (on Windows
+after the last `/` or `\` and past a drive's `X:`, elsewhere after the
+last `/`, as `Path.name` parts it); the compiler line is the manifest's name,
 output version and target. The source params are the manifest's
 param_overrides, names in byte order, each value spelt as the language's
 canonical literal by a port of `lang.constants.literal` on the library's
@@ -2031,9 +2064,11 @@ in both versions: a `wider` run beside a routine main image is
 *Refused at a segment,* with the files written so far left and said so:
 `replay-source`, `replay-missing`, `replay-undecided`, and
 `replay-lane-flags`, which only a library that reports a mark in a run
-that asked for no block can reach. *Before anything is made*: every
-other version-2 refusal above. `provenance-order` and `replay-lane-flags`
-have no test: only a clock that goes back, or a library that misreports,
+that asked for no block can reach. *After the runs,* as the header's times
+are written: `provenance-order`, the files the runs wrote left and said
+so. *Before anything is made*: every other version-2 refusal above, the
+command line's among them. `provenance-order` and `replay-lane-flags` have
+no test: only a clock that goes back, or a library that misreports,
 reaches either.
 
 *Memory.* The trial counts version 2's pieces too: each block's hash,
@@ -2264,14 +2299,18 @@ It also holds git to ignoring the tool's binary.
 
 Its section 14 (`host/tests/segrun_check_v2.py`, since version 2's C half)
 holds version 2; every section before it asks for `--format-version 1`,
-so version 1 is held as it was. It certifies, keyed and open, flagstep
-with its blocks; `replaystep`, written in the gate with its source, an
-image marking lane 1 in segment 0 (its value right) and lane 0 in segment
-1 (its last bit wrong), replayed by cftc's compile of the source;
-Lorenz-63 compiled with source params (rho 29, beta 2.625) beside a
-half-step and a wider-source run and a wider-source estimate; flagstep
-with every statement given and both privacy defaults published; and a run
-at `--scratch-depth 2048`. Each is byte for byte the golden writer's
+so version 1 is held as it was. It certifies flagstep with its blocks;
+`replaystep`, written in the gate with its source, an image marking lane
+1 in segment 0 (its value right) and lane 0 in segment 1 (its last bit
+wrong), replayed by cftc's compile of the source; and Lorenz-63 compiled
+with source params (rho 29, beta 2.625) beside a half-step and a
+wider-source run and a wider-source estimate - each keyed and open; then
+flagstep with every statement given and both privacy defaults published,
+keyed; a run at `--scratch-depth 2048`, open; and `replaystep` again with
+its source, and every path the tool is handed, named past any one code
+page (U+0141, U+00E9, U+20AC, U+1D11E, spaces), open, its `source-name`
+the golden writer's spelling of the file's own name. Each is byte for
+byte the golden writer's
 (`cert2.run_chain`, replaying by the definition, `certify_run`, and
 `encode` handed the tool's header lines), every boundary, block and raw
 file the golden chain's, and the golden audit accepts each, handed the
@@ -2284,15 +2323,31 @@ literals at every edge of the canonical spelling; the issuer-key to
 test_ed25519.py's vectors (the published key and RFC 8032's taken, the
 eight keys of small order `signer`, the six of no point `malformed`);
 every version-2 refusal by name and code beside a control, with the golden
-writer's twin where it has one; the remote rule through a loopback
-cft-serve; and, on a card (`hw/card-segrun.sh`), the device lines from the
-tile and the per-lane block refused by name on revision 7.
+writer's twin where it has one; the process's own text (since 2026-10-03,
+verifier-VCV2CW's finding): `CFT_XRT_BIND` set to U+0141, U+00E9 and a,
+U+20AC, b, each `env` line the golden writer's, a value with no UTF-8
+spelling in the platform's form `malformed` beside the golden writer's
+twin, a statement given as its characters and `--segments` as U+FF11
+FULLWIDTH DIGIT ONE each `malformed` (best fit spells them Lodz and 1),
+and on Windows an argument with no UTF-8 spelling `usage` - the tool of
+7ec2178, reading main's and getenv's ANSI text, fails twelve of those
+checks (planted by running it, 2026-10-03); the remote rule through a
+loopback cft-serve; and,
+on a card (`hw/card-segrun.sh`), the device lines from the tile, the serial
+published as a text but never printed, and the per-lane block refused by
+name on revision 7.
 
+With the process's own text (verifier-VCV2CW's finding, 2026-10-03):
+1,044 checks on the Windows desktop and one SKIP, the trial's cost NOT
+TESTED there, 91 s, the desktop about 2 % busy before it - sections 1 to
+13 716, as before, and section 14 328, which alone (`--v2-only`) takes
+8 s. Section 14 alone in WSL (cft2204, gcc 11.4, Python 3.10): 326
+checks, 0 failed, 6 s, without Windows' argument case and its two checks.
+The whole gate not yet run in WSL, nor on a card.
 With version 2's section 14 (2026-10-03): 1,020 checks on the Windows
 desktop and one SKIP, the trial's cost NOT TESTED there, 96 s, the
 desktop about 6 % busy - sections 1 to 13 716, as before version 2, and
-section 14 304, which alone (`--v2-only`) takes 10 s. Not yet run in WSL
-or on a card.
+section 14 304, which alone (`--v2-only`) takes 10 s.
 With a negative lane and slot (S1's second send-back, 2026-09-30): 679
 checks on the Windows desktop and one SKIP, the trial's cost NOT TESTED
 there, 88 s; in WSL (cft2204, gcc 11.4, at 350f7f2), 682 checks, 0

@@ -62,8 +62,22 @@ one gives none, or `--format-version 2`, and holds:
      every run block the software backend's;
   h. on a card (--device): a version-2 certificate made on the tile, its
      device lines filled from the card (not `none`), its serial withheld
-     until published, its run blocks the software backend's; and the
-     per-lane block refused by name, which no revision-7 tile publishes.
+     until published (and published, a text, never printed here), its run
+     blocks the software backend's; and the per-lane block refused by
+     name, which no revision-7 tile publishes;
+  i. the process's own text, past the ANSI code page Windows hands main
+     and getenv (verifier-VCV2CW, 2026-10-03): CFT_XRT_BIND set to U+0141,
+     U+00E9 and a, U+20AC, b, each `env` line the golden writer's; a value
+     with no UTF-8 spelling in the platform's form (Windows: an unpaired
+     surrogate; elsewhere: bytes that are not UTF-8) refused `malformed`,
+     as the golden writer refuses it; an issuer given as its characters,
+     not its spelling, `malformed`, and --segments as U+FF11 FULLWIDTH
+     DIGIT ONE `malformed` (best fit spells them Lodz and 1); on Windows
+     an argument with no UTF-8 spelling `usage`; and replaystep with its
+     source, and every path the tool is handed, named past any one code
+     page (U+0141, U+00E9, U+20AC, U+1D11E, spaces), byte for byte the
+     golden writer's with `source-name` its spelling of the file's own
+     name.
 """
 
 import dataclasses
@@ -337,13 +351,14 @@ def audit_args(prog, chains, sdir, sampled, seed):
 
 
 def certify(prog, mode, tag="", device="sw", extra=(), env=None,
-            hold_golden=True):
+            hold_golden=True, stem=None):
     """cft-segrun on a version-2 program, held to the golden writer, its
-    files to the golden chain's, and the golden audit. -> (bytes, sdir,
+    files to the golden chain's, and the golden audit; every path the
+    tool is handed under `stem` where it is given. -> (bytes, sdir,
     parsed) or None."""
     salt = SC.SALT if mode == "keyed" else None
     what = f"v2 {prog.name} {mode}{tag}"
-    stem = WORK / "v2" / re.sub(r"[^A-Za-z0-9.-]+", "-", what)
+    stem = stem or WORK / "v2" / re.sub(r"[^A-Za-z0-9.-]+", "-", what)
     d = Path(str(stem) + ".in")
     out, sdir = Path(str(stem) + ".cert"), Path(str(stem) + ".states")
     salt_path = WORK / "salt.bin" if salt is not None else None
@@ -666,7 +681,7 @@ def hold_keys(work, flag):
 TOOL_LIMITS = {"build-width": 78, "build-format": 78}
 
 
-def refused(label, name, args, env=None, after=False, twin=None):
+def refused(label, name, args, env=None, after=False, twin=None, leg="f"):
     """f. one refusal: its name and code; nothing left behind before the
     run, or the files written so far left and said so after it; the golden
     writer's twin by the same name where it has one."""
@@ -678,7 +693,8 @@ def refused(label, name, args, env=None, after=False, twin=None):
     got = m.group(1) if m else None
     code = cert.REFUSALS.get(name, SC.TOOL_OWN.get(name, TOOL_LIMITS.get(
         name)))
-    SC.check(rc == code and got == name, f"f. refused {name} (exit {code}): "
+    SC.check(rc == code and got == name,
+             f"{leg}. refused {name} (exit {code}): "
              f"{label}", f"exit {rc}, {got or 'no refusal named'}: "
              f"{se.strip()[-260:]}")
     if out is not None:
@@ -989,6 +1005,115 @@ def _set(a, opt, value, nth=0):
     return a
 
 
+# i. the process's own text (verifier-VCV2CW, 2026-10-03): Windows hands
+# main and getenv the ANSI code page's spelling - U+0141 as L by best fit,
+# U+00E9 and U+20AC as bytes that are not UTF-8 - so the tool reads the
+# wide APIs there, and a certificate records the process's text, as the
+# golden writer (os.environ, Path) does
+PROCESS_TEXTS = (("U+0141", chr(0x141)), ("U+00E9", chr(0xE9)),
+                 ("a, U+20AC, b", "a" + chr(0x20AC) + "b"))
+# a directory and a source named past any one code page: U+0141, U+00F3
+# and U+017A (none of them in cp1252), U+00E9 and U+20AC (both in it),
+# U+1D11E (outside the BMP: a surrogate pair in UTF-16), and spaces
+LODZ = chr(0x141) + chr(0xF3) + "d" + chr(0x17A)
+UNICODE_NAME = (LODZ + " caf" + chr(0xE9) + " " + chr(0x20AC) + " " +
+                chr(0x1D11E))
+SURROGATE = chr(0xD800)             # an unpaired surrogate
+
+
+def hold_process_text(work, flag, rs):
+    """i. the values the tool reads, as the process has them: an
+    environment variable's value, a source's file name, and every path
+    the tool is handed, past the ANSI code page; each held to the golden
+    writer's line for the same value, and the refusals beside them."""
+    d = work / "v2" / "text"
+    d.mkdir(parents=True, exist_ok=True)
+    for k, (what, value) in enumerate(PROCESS_TEXTS):
+        env = {"CFT_XRT_BIND": value}
+        out = d / f"env{k}.cert"
+        try:
+            rc, _, se = run_tool(tool_args(flag, d / f"env{k}.in", out,
+                                           d / f"env{k}.states", None), env)
+        except UnicodeError as e:
+            SC.skip(f"i. CFT_XRT_BIND set to {what}",
+                    f"this host's environment cannot carry it: {e}")
+            continue
+        if not SC.check(rc == 0, f"i. CFT_XRT_BIND set to {what}: written",
+                        f"rc {rc}: {se.strip()[-300:]}"):
+            continue
+        data = out.read_bytes()
+        gold = [f"env {n} {cert2.text_token(v)}"
+                for n, v in cert2.environment(env)]
+        have = [ln for ln in lines_of(data) if ln.startswith("env ")]
+        SC.check(have == gold and line(data, "environment") ==
+                 str(len(gold)), f"i. CFT_XRT_BIND set to {what}: the golden "
+                 f"writer's line, `{gold[0]}`", f"the tool wrote {have}")
+    # a value with no UTF-8 spelling, in the form the platform hands one
+    if os.name == "nt":
+        what, value = "an unpaired surrogate (U+D800)", SURROGATE
+        twin_value = value
+    else:
+        what, value = "bytes that are not UTF-8 (a, 0xFF, b)", \
+            bytes((0x61, 0xFF, 0x62))
+        twin_value = os.fsdecode(value)
+    refused(f"CFT_XRT_BIND set to {what}", "malformed",
+            [str(x) for x in tool_args(flag, d / "bad.in", d / "bad.cert",
+                                       d / "bad.states", None)],
+            env={"CFT_XRT_BIND": value},
+            twin=lambda: cert2.text_token(twin_value), leg="i")
+    # a statement is taken in its own spelling, never as its characters:
+    # U+0141, o, d, U+017A, which the ANSI code page's best fit spells
+    # "Lodz" - a text, which Windows' narrow argv handed the tool to take
+    refused("an issuer given as its characters, U+0141, o, d, U+017A, not "
+            "in its percent-encoded spelling (the ANSI code page's best fit "
+            "spells it Lodz)", "malformed",
+            [str(x) for x in tool_args(
+                flag, d / "raw.in", d / "raw.cert", d / "raw.states", None,
+                extra=("--issuer", chr(0x141) + "od" + chr(0x17A)))],
+            leg="i")
+    # and a number is its own characters: U+FF11 FULLWIDTH DIGIT ONE, which
+    # best fit spells 1 and Windows' narrow argv handed on as one segment
+    # (verifier-W1b and S1's known limit, 2026-09-30, for cft-segrun)
+    refused("--segments given as U+FF11 FULLWIDTH DIGIT ONE (best fit "
+            "spells it 1)", "malformed",
+            _set([str(x) for x in tool_args(flag, d / "ff11.in",
+                                             d / "ff11.cert",
+                                             d / "ff11.states", None)],
+                 "--segments", chr(0xFF11)), leg="i")
+    if os.name == "nt":
+        refused("an argument with no UTF-8 spelling (an unpaired surrogate, "
+                "U+D800), which only Windows can hand a program", "usage",
+                [str(x) for x in tool_args(
+                    flag, d / "arg.in", d / "arg.cert", d / "arg.states",
+                    None, extra=("--issuer", SURROGATE))], leg="i")
+    else:
+        print("  NOTE  i. an argument with no UTF-8 spelling is Windows' "
+              "alone (an unpaired surrogate): here the tool is handed bytes, "
+              "and reads them as they are", flush=True)
+    # replaystep with its source, and every path the tool is handed, in a
+    # directory and under a name past any one code page
+    try:
+        udir = d / UNICODE_NAME
+        udir.mkdir(parents=True, exist_ok=True)
+        usrc = udir / (UNICODE_NAME + ".cftl")
+        usrc.write_bytes(REPLAYSTEP_SRC)
+    except (OSError, UnicodeError) as e:
+        SC.skip("i. a source, and every path, named past any one code page",
+                f"this file system cannot hold the name: {e}")
+        return
+    prog = dataclasses.replace(rs, name="replaystep-named", runs=[
+        dataclasses.replace(rs.runs[0], source=usrc)])
+    print("== v2 replaystep, its source and every path named past any one "
+          "code page, open", flush=True)
+    res = certify(prog, "open", stem=udir / UNICODE_NAME)
+    if res:
+        tok = cert2.text_token(usrc.name)
+        SC.check(line(res[0], "source-name") == tok,
+                 f"i. its source-name is the golden writer's spelling of the "
+                 f"file's own name, {tok}",
+                 f"the tool wrote {line(res[0], 'source-name')!r}")
+
+
 def hold_remote(serve, flag, rs, sw):
     """g. flagstep's blocks and replaystep's replays through a loopback
     cft-serve: the device lines unknown, the run blocks the software
@@ -1053,8 +1178,17 @@ def hold_card(device, l63_sw):
     pub = certify(prog, "keyed", " card published", device=device,
                   extra=("--publish", "device-serial"), hold_golden=False)
     if pub:
-        print(f"  NOTE  the card's serial, published: "
-              f"{line(pub[0], 'device-serial')}", flush=True)
+        # the serial itself is not printed: a card run's log is quoted
+        # into the record, and the serial stays in the work directory's
+        # certificate (verifier-VCV2CW, 2026-10-03)
+        s = line(pub[0], "device-serial") or ""
+        SC.check(s == "unknown" or (s not in ("withheld", "none") and
+                                    cert2.read_text(s) is not None),
+                 f"h. on the card, --publish device-serial: the serial "
+                 f"written as a text ({len(s)} characters, not printed "
+                 f"here), or unknown where XRT gives none",
+                 f"it is {s!r}" if s in ("withheld", "none", "") else
+                 "it is a token that is no text's spelling")
     sw = certify(prog, "keyed", " sw", hold_golden=False)
     if res and sw:
         SC.check(SC.runs_part(res[0]) == SC.runs_part(sw[0]),
@@ -1142,5 +1276,6 @@ def hold_v2(sc, work, card=False, device="sw", serve=None):
     hold_literals(work, rs)
     hold_keys(work, flag)
     hold_refusals(work, flag, rs, rs_c, lz)
+    hold_process_text(work, flag, rs)
     if serve is not None:
         hold_remote(serve, flag, rs, sw)

@@ -50,7 +50,10 @@
  *     each option taking its line's own value as the certificate spells
  *     it (check_statements), the issuer and the device serial withheld
  *     unless given or published; the host's OS and architecture, the
- *     times and the writer's list's environment, measured;
+ *     times and the writer's list's environment, measured - the
+ *     environment's values, like a source's file name, as the process
+ *     has them, which on Windows is the wide APIs' text and not the ANSI
+ *     code page's ("the process's own text", below);
  *   - a run's per-lane block (--lane-flags, and wherever its image holds
  *     flag control), each segment's written beside the boundaries;
  *   - its source (--source SRC --manifest M, check_source): the source
@@ -394,6 +397,159 @@ typedef struct stat stat_t;
 #  include <sys/utsname.h>
 #endif
 
+/* ---- the process's own text --------------------------------------------
+ * A certificate records the values the tool reads as the process has them
+ * (docs/CERTIFICATES.md, "Encodings": a text is UTF-8): an environment
+ * variable's value, and a source's file name. Windows hands main its
+ * arguments, and getenv its values, converted to the ANSI code page, which
+ * cannot carry most of Unicode - U+0141 arrives as L by best fit, and
+ * U+00E9 and a, U+20AC, b as bytes that are not UTF-8 (verifier-VCV2CW,
+ * 2026-10-03). So on Windows the arguments are the wide command line's
+ * (CommandLineToArgvW), each environment value GetEnvironmentVariableW's,
+ * each in UTF-8, and every path is opened through its wide form; elsewhere
+ * the bytes the process was handed are its text, as Python's are the
+ * golden writer's. The header's statements stay in their own
+ * percent-encoded spelling (the lead's decision, 2026-10-02): an option
+ * the user spells, not a value the tool reads.
+ *
+ * The path functions here run from cleanup(), so they never refuse: each
+ * answers as the C library's would, NULL or -1 with errno set (EILSEQ for
+ * a path that is not UTF-8, which no argument read here can be). */
+#if defined(_WIN32)
+#  include <shellapi.h>             /* CommandLineToArgvW */
+#  include <wchar.h>
+#  if defined(_MSC_VER)
+#    pragma comment(lib, "shell32.lib")
+#  endif
+#  ifndef WC_ERR_INVALID_CHARS
+#    define WC_ERR_INVALID_CHARS 0x80
+#  endif
+
+/* UTF-16 to UTF-8, malloc'd: NULL with errno EILSEQ where the string has
+ * no UTF-8 spelling (an unpaired surrogate), ENOMEM where memory fails */
+static char *u8_of_wide(const wchar_t *w)
+{
+    int n = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, w, -1, NULL,
+                                0, NULL, NULL);
+    char *s;
+    if (n <= 0) {
+        errno = EILSEQ;
+        return NULL;
+    }
+    s = (char *)malloc((size_t)n);
+    if (!s) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, w, -1, s, n, NULL,
+                            NULL) != n) {
+        free(s);
+        errno = EILSEQ;
+        return NULL;
+    }
+    return s;
+}
+
+/* UTF-8 to UTF-16, malloc'd: NULL with errno EILSEQ where the bytes are
+ * not UTF-8, ENOMEM where memory fails */
+static wchar_t *wide_of_u8(const char *s)
+{
+    int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, NULL,
+                                0);
+    wchar_t *w;
+    if (n <= 0) {
+        errno = EILSEQ;
+        return NULL;
+    }
+    w = (wchar_t *)malloc((size_t)n * sizeof *w);
+    if (!w) {
+        errno = ENOMEM;
+        return NULL;
+    }
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, w, n) !=
+        n) {
+        free(w);
+        errno = EILSEQ;
+        return NULL;
+    }
+    return w;
+}
+
+static FILE *u8_fopen(const char *path, const char *mode)
+{
+    wchar_t *w = wide_of_u8(path), *m = w ? wide_of_u8(mode) : NULL;
+    FILE *f = w && m ? _wfopen(w, m) : NULL;
+    int e = errno;
+    free(w);
+    free(m);
+    errno = e;
+    return f;
+}
+
+/* cert_write.h's cw_create_new through the path's wide form: O_EXCL, and
+ * a path that is there called so whatever it is (Windows answers O_EXCL
+ * on a directory with EACCES) */
+static FILE *u8_create_new(const char *path)
+{
+    struct _stat sb;
+    wchar_t *w = wide_of_u8(path);
+    FILE *f = NULL;
+    int fd, e;
+    if (!w)
+        return NULL;
+    fd = _wopen(w, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
+                _S_IREAD | _S_IWRITE);
+    if (fd < 0) {
+        e = errno;
+        if (e == EACCES && _wstat(w, &sb) == 0)
+            e = EEXIST;
+    } else {
+        f = _fdopen(fd, "wb");
+        e = errno;
+        if (!f) {
+            _close(fd);
+            _wremove(w);
+        }
+    }
+    free(w);
+    errno = e;
+    return f;
+}
+
+static int u8_mkdir(const char *path)
+{
+    wchar_t *w = wide_of_u8(path);
+    int r = w ? _wmkdir(w) : -1, e = errno;
+    free(w);
+    errno = e;
+    return r;
+}
+
+static int u8_rmdir(const char *path)
+{
+    wchar_t *w = wide_of_u8(path);
+    int r = w ? _wrmdir(w) : -1, e = errno;
+    free(w);
+    errno = e;
+    return r;
+}
+
+static int u8_remove(const char *path)
+{
+    wchar_t *w = wide_of_u8(path);
+    int r = w ? _wremove(w) : -1, e = errno;
+    free(w);
+    errno = e;
+    return r;
+}
+#else
+#  define u8_fopen(p, m)    fopen((p), (m))
+#  define u8_create_new(p)  cw_create_new(p)
+#  define u8_mkdir(p)       MKDIR(p)
+#  define u8_rmdir(p)       RMDIR(p)
+#  define u8_remove(p)      remove(p)
+#endif
+
 /* ---- certificate format version 2: the definition's macros ------------
  * cft.h states the conformance profile libcft implements and the
  * language's version beside it - parcel CV2CA's block, four integers,
@@ -509,10 +665,10 @@ static void cleanup(void)
     if (CERT_FP) {
         fclose(CERT_FP);
         CERT_FP = NULL;
-        remove(CERT_PATH);
+        u8_remove(CERT_PATH);
     }
     if (STATES_CREATED && STATE_FILES == 0) {
-        RMDIR(STATES_DIR);
+        u8_rmdir(STATES_DIR);
         STATES_CREATED = 0;
     } else if (STATES_CREATED && SIDE_FILES) {
         fprintf(stderr, "cft-segrun: no certificate was written; the %llu "
@@ -611,7 +767,7 @@ static void *xcalloc(size_t n, size_t sz)
 /* The whole file, or NULL with errno set. */
 static uint8_t *read_file(const char *path, size_t *n_out)
 {
-    FILE *f = fopen(path, "rb");
+    FILE *f = u8_fopen(path, "rb");
     uint8_t *buf;
     size_t cap = 1 << 16, have = 0;
     if (!f)
@@ -1532,20 +1688,29 @@ static void host_os_raw(char *out, size_t cap, int with_version)
 
 /* The host's architecture, as the golden writer's host_arch names it:
  * amd64 and x86_64 as x86_64, arm64 and aarch64 as aarch64, any other
- * machine by its own name in lower case. */
+ * machine by its own name in lower case. Elsewhere that name is uname's;
+ * on Windows it is the native architecture GetNativeSystemInfo reports,
+ * named as Python's platform.machine names it there (CPython 3.12's
+ * table: x86, MIPS, Alpha, PowerPC, ARM, ia64, AMD64, ARM64), and one that
+ * table has no name for is `unknown`. */
 static void host_arch_raw(char *out, size_t cap)
 {
 #if defined(_WIN32)
     SYSTEM_INFO si;
+    const char *name;
     GetNativeSystemInfo(&si);
-    switch (si.wProcessorArchitecture) {
-    case PROCESSOR_ARCHITECTURE_AMD64: snprintf(out, cap, "x86_64"); break;
-#  if defined(PROCESSOR_ARCHITECTURE_ARM64)
-    case PROCESSOR_ARCHITECTURE_ARM64: snprintf(out, cap, "aarch64"); break;
-#  endif
-    case PROCESSOR_ARCHITECTURE_INTEL: snprintf(out, cap, "x86"); break;
-    default: snprintf(out, cap, "unknown"); break;
+    switch (si.wProcessorArchitecture) {    /* PROCESSOR_ARCHITECTURE_* */
+    case 0:  name = "x86";     break;       /* INTEL */
+    case 1:  name = "mips";    break;
+    case 2:  name = "alpha";   break;
+    case 3:  name = "powerpc"; break;       /* PPC */
+    case 5:  name = "arm";     break;
+    case 6:  name = "ia64";    break;
+    case 9:  name = "x86_64";  break;       /* AMD64 */
+    case 12: name = "aarch64"; break;       /* ARM64 */
+    default: name = "unknown"; break;
     }
+    snprintf(out, cap, "%s", name);
 #else
     struct utsname u;
     size_t i;
@@ -1974,9 +2139,11 @@ static void check_run(run_spec *r, size_t idx)
  *
  * Each option's value is the line's own value, as the certificate spells
  * it: one of the words the line takes, or a text's one spelling - its
- * UTF-8 bytes percent-encoded, so that any value reaches the tool through
- * any code page (Windows hands a narrow main() its command line in the
- * system's, which has no Ł for signed-fp64's certificate-id); an
+ * UTF-8 bytes percent-encoded, so that any value reaches the tool whole
+ * through whatever made its command line (the tool reads that line as
+ * Unicode, "the process's own text", above, but a shell, a script or a
+ * console may spell it in a code page with no Ł for signed-fp64's
+ * certificate-id); an
  * Ed25519 key or a body hash, 64 lowercase hex digits; a build in
  * build-id's grammar; or the `initial` line's tokens. The privacy
  * defaults (decisions 9 and 10): the issuer `withheld`, the device's
@@ -2141,10 +2308,23 @@ static void check_source(run_spec *r, size_t idx)
     sha_hex(src, sn, r->src_digest);
     free(src);
 
-    /* the file's name, without its directories */
+    /* the file's name, without its directories, as the system's own path
+     * rules part them (the golden writer's Path.name): on Windows after
+     * the last / or \ and past a drive's "X:", elsewhere after the last /
+     * (a \ is a file name's character there) */
     base = r->source_path + strlen(r->source_path);
+#if defined(_WIN32)
     while (base > r->source_path && base[-1] != '/' && base[-1] != '\\')
         base--;
+    if (base == r->source_path && r->source_path[0] &&
+        r->source_path[1] == ':' &&
+        ((r->source_path[0] >= 'A' && r->source_path[0] <= 'Z') ||
+         (r->source_path[0] >= 'a' && r->source_path[0] <= 'z')))
+        base += 2;
+#else
+    while (base > r->source_path && base[-1] != '/')
+        base--;
+#endif
     if (cw_text_token((const unsigned char *)base, strlen(base), r->src_name))
         refuse("malformed", "run %lu: the source's file name '%.80s' cannot be "
                "spelt as a text - empty, not UTF-8, past 255 characters "
@@ -2434,7 +2614,7 @@ static void write_boundary(size_t r, uint64_t b, const void *state, size_t n)
              (unsigned long)r, (unsigned long long)b);
     /* created new: the directory is the run's own, so a file already
      * there is one this run did not make, and it is left as it is */
-    f = cw_create_new(path);
+    f = u8_create_new(path);
     if (!f)
         refuse("output", "%s cannot be created (%s)", path,
                errno == EEXIST ? "a file this run did not make is there "
@@ -2465,7 +2645,7 @@ static void write_side(size_t r, uint64_t k, const char *tail,
     FILE *f;
     snprintf(path, cap, "%s/run-%lu-segment-%llu%s", STATES_DIR,
              (unsigned long)r, (unsigned long long)k, tail);
-    f = cw_create_new(path);
+    f = u8_create_new(path);
     if (!f)
         refuse("output", "%s cannot be created (%s)", path,
                errno == EEXIST ? "a file this run did not make is there "
@@ -3239,7 +3419,7 @@ static uint8_t *read_back(const run_spec *runs, const uint8_t *salt,
     int more;
     snprintf(path, cap, "%s/run-%lu-boundary-%llu.bin", STATES_DIR,
              (unsigned long)r, (unsigned long long)b);
-    f = fopen(path, "rb");
+    f = u8_fopen(path, "rb");
     if (!f)
         refuse("output", "entry %lu: %s cannot be read back (%s)",
                (unsigned long)j, path, strerror(errno));
@@ -3392,6 +3572,53 @@ static void put_parameters(text *t, const run_spec *R)
 static char HOST_OS[CW_TEXT_MAX + 1], HOST_ARCH[CW_TEXT_MAX + 1];
 static char *ENV_TOK[sizeof ENV_NAMES / sizeof ENV_NAMES[0]];
 
+/* An environment variable's value as the process has it ("the process's
+ * own text", above), malloc'd: NULL where it is unset or set empty, and
+ * then *bad set where it is set to a value with no UTF-8 spelling (on
+ * Windows, an unpaired surrogate; elsewhere the bytes are handed on, and
+ * the text's own check refuses bytes that are not UTF-8). */
+static char *env_text(const char *name, int *bad)
+{
+#if defined(_WIN32)
+    wchar_t wname[80], *w;
+    DWORD n, m;
+    char *s;
+    *bad = 0;
+    if (!MultiByteToWideChar(CP_UTF8, 0, name, -1, wname, 80))
+        return NULL;
+    for (;;) {
+        n = GetEnvironmentVariableW(wname, NULL, 0);
+        if (n <= 1)                     /* unset, or set empty */
+            return NULL;
+        w = (wchar_t *)xcalloc(n, sizeof *w);
+        m = GetEnvironmentVariableW(wname, w, n);
+        if (m < n)
+            break;
+        free(w);                        /* it grew between the two calls */
+    }
+    if (m == 0) {
+        free(w);
+        return NULL;
+    }
+    s = u8_of_wide(w);
+    free(w);
+    if (!s && errno == ENOMEM)
+        refuse("memory", "the environment variable %s's value could not be "
+               "held in UTF-8", name);
+    *bad = s == NULL;
+    return s;
+#else
+    const char *v = getenv(name);
+    char *s;
+    *bad = 0;
+    if (!v || !*v)
+        return NULL;
+    s = (char *)xcalloc(strlen(v) + 1, 1);
+    memcpy(s, v, strlen(v) + 1);
+    return s;
+#endif
+}
+
 static void measure_host(void)
 {
     char raw[512];
@@ -3408,9 +3635,16 @@ static void measure_host(void)
      * string counts as unset (libcft's rule, since cmd and PowerShell
      * remove a variable set empty) */
     for (i = 0; i < N_ENV_NAMES; i++) {
-        const char *v = getenv(ENV_NAMES[i]);
+        int bad;
+        char *v = env_text(ENV_NAMES[i], &bad);
         ENV_TOK[i] = NULL;
-        if (!v || !*v)
+        if (bad)
+            refuse("malformed", "the environment variable %s is set to a "
+                   "value with no UTF-8 spelling (an unpaired surrogate), "
+                   "which no text can spell, and a version-2 certificate "
+                   "writes every variable of the writer's list that is set",
+                   ENV_NAMES[i]);
+        if (!v)
             continue;
         ENV_TOK[i] = (char *)xcalloc(CW_TEXT_MAX + 1, 1);
         if (cw_text_token((const unsigned char *)v, strlen(v), ENV_TOK[i]))
@@ -3420,6 +3654,7 @@ static void measure_host(void)
                    "withheld and given), and a version-2 certificate writes "
                    "every variable of the writer's list that is set: %.80s",
                    ENV_NAMES[i], v);
+        free(v);
     }
 }
 
@@ -3829,6 +4064,54 @@ static int do_hash(const char *kind, const char *file, const uint8_t *salt)
 
 /* ---- main -------------------------------------------------------------- */
 
+#if defined(_WIN32)
+/* The arguments as the process has them ("the process's own text",
+ * above): the wide command line's, each in UTF-8, in place of main's,
+ * which the C runtime converted to the ANSI code page. CommandLineToArgvW
+ * splits the line by the C runtime's rules; where the two disagree - the
+ * count, or an argument that is ASCII as Unicode, which every ANSI code
+ * page spells the same (argv[0] aside, which each reads its own way) -
+ * the tool says so rather than guess which argument is which (usage).
+ * The other way round proves nothing: best fit spells U+0141 as L, so an
+ * argument ASCII as the C runtime has it need not be ASCII. An argument
+ * with no UTF-8 spelling (an unpaired surrogate) is refused too: the tool
+ * reads its command line as text. */
+static char **utf8_args(int argc, char **argv)
+{
+    int n = 0, i;
+    wchar_t **w = CommandLineToArgvW(GetCommandLineW(), &n);
+    char **out;
+    if (!w)
+        refuse("usage", "the command line cannot be read as Unicode "
+               "(CommandLineToArgvW failed, error %lu)",
+               (unsigned long)GetLastError());
+    if (n != argc)
+        refuse("usage", "the command line splits into %d arguments as "
+               "Unicode and into %d as the C runtime reads it", n, argc);
+    out = (char **)xcalloc((size_t)n + 1, sizeof *out);
+    for (i = 0; i < n; i++) {
+        const unsigned char *a;
+        size_t k;
+        int ascii = 1;
+        out[i] = u8_of_wide(w[i]);
+        if (!out[i] && errno == ENOMEM)
+            refuse("memory", "argument %d could not be held in UTF-8", i);
+        if (!out[i])
+            refuse("usage", "argument %d has no UTF-8 spelling (an unpaired "
+                   "surrogate), and this tool reads its command line as "
+                   "text", i);
+        for (a = (const unsigned char *)out[i], k = 0; a[k]; k++)
+            ascii &= a[k] < 0x80;
+        if (i > 0 && ascii && strcmp(argv[i], out[i]) != 0)
+            refuse("usage", "argument %d is '%.80s' as the C runtime reads "
+                   "the command line and '%.80s' as Unicode", i, argv[i],
+                   out[i]);
+    }
+    LocalFree(w);
+    return out;
+}
+#endif
+
 int main(int argc, char **argv)
 {
     const char *out_path = NULL, *states_path = NULL, *salt_path = NULL;
@@ -3877,6 +4160,9 @@ int main(int argc, char **argv)
                 "is to be refused");
     }
 
+#if defined(_WIN32)
+    argv = utf8_args(argc, argv);
+#endif
     if (argc < 2) {
         usage_text(stderr);
         refuse("usage", "nothing to do");
@@ -4191,7 +4477,7 @@ int main(int argc, char **argv)
      * created at all, since --states must not exist yet - so the
      * certificate can never be one of the boundary files. */
     CERT_PATH = out_path;
-    CERT_FP = cw_create_new(out_path);
+    CERT_FP = u8_create_new(out_path);
     if (!CERT_FP) {
         if (errno == EEXIST)
             refuse("output", "--out %s is there already; the certificate is "
@@ -4216,7 +4502,7 @@ int main(int argc, char **argv)
         }
     }
     STATES_DIR = states_path;
-    if (MKDIR(states_path) != 0)
+    if (u8_mkdir(states_path) != 0)
         refuse("output", "--states %s cannot be created (%s); it must be a "
                "new directory, so that no two runs' states mix",
                states_path, strerror(errno));
@@ -4507,7 +4793,7 @@ int main(int argc, char **argv)
         refuse("output", "a short write to %s", out_path);
     if (fclose(CERT_FP) != 0) {
         CERT_FP = NULL;
-        remove(out_path);
+        u8_remove(out_path);
         refuse("output", "%s could not be closed", out_path);
     }
     CERT_FP = NULL;
