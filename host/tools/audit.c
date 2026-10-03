@@ -5056,8 +5056,8 @@ int main(void)
         } else if (!strcmp(tok[0], "sha512")) {
             static uint8_t m[1 << 15];
             uint8_t d[64];
-            size_t n = probe_bytes(tok[1], m, sizeof m);
-            sha512(m, n, d);
+            size_t nb = probe_bytes(tok[1], m, sizeof m);
+            sha512(m, nb, d);
             probe_hex_out(d, 64);
         } else if (!strcmp(tok[0], "sha512rep")) {
             uint8_t d[64], blk[1000], byte = 0;
@@ -5074,11 +5074,11 @@ int main(void)
         } else if (!strcmp(tok[0], "ed-verify")) {
             static uint8_t m[1 << 15];
             uint8_t key[32], sig[64];
-            size_t n;
+            size_t nb;
             probe_bytes(tok[1], key, 32);
-            n = probe_bytes(tok[2], m, sizeof m);
+            nb = probe_bytes(tok[2], m, sizeof m);
             probe_bytes(tok[3], sig, 64);
-            printf("%d\n", ed25519_verify(key, m, n, sig));
+            printf("%d\n", ed25519_verify(key, m, nb, sig));
         } else if (!strcmp(tok[0], "ed-key") || !strcmp(tok[0], "ed-small") ||
                    !strcmp(tok[0], "ed-decode")) {
             uint8_t key[32];
