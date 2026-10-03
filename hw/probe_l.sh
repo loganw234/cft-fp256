@@ -109,7 +109,10 @@ def read(name):
     for line in f.read_text(errors="replace").splitlines():
         m = UTIL.search(line)
         if m:
-            r[(m.group(1), m.group(2))] = int(m.group(3))
+            # The FIRST line of each name: report_utilization's summary
+            # table. Later tables (the primitives, the SLR rows) repeat
+            # the names, some with zeros, and must not overwrite it.
+            r.setdefault((m.group(1), m.group(2)), int(m.group(3)))
         m = PATH.search(line)
         if m:
             r[(m.group(2), m.group(1))] = (float(m.group(3)), float(m.group(4)),
