@@ -4981,7 +4981,9 @@ a tile: M1 and M2 need R24's raise, with its mark, and R23's byte.
   abort, which verifier-VS8 found after that plan was written; three
   images where it names two, "the quad, and the deep build"; a deep
   build of up to 16,384 slots, past its "4,096 to 8,192"; and, by
-  question 9, a quad that may lack R21.
+  question 9, a quad that may lack R21, with M1's routines then written
+  with TwoSum on every target, where that plan writes M1 "using
+  augmented addition".
 - Ten questions close the section: S8's seven and three more.
 
 **1. The items**
@@ -5033,7 +5035,8 @@ R22, R23 and R24 act, takes only registered inputs from this revision.
     up. Normalising it is the difficulty: S11 to S13 normalise r, and
     the sixteen levels, S0 to S15, leave none to normalise e after r is
     rounded. So either design needs r's rounding point and direction
-    before r's leading-zero count.
+    without waiting for r's leading-zero count: (b) before it, (a)
+    beside it.
 - **The change both designs need: a re-anchor at S6.** For augadd and
   augerr only, the anchor is the operand with the larger exponent
   (ep + MAN_W >= ec); every other operation keeps today's (ep >= ec).
@@ -5049,11 +5052,26 @@ R22, R23 and R24 act, takes only registered inputs from this revision.
   - My probe (computed: a transcription of S1 and S6 to S10, not the
     RTL; 20,000 random sums a format): under today's anchor a
     non-cancelling sum's leading bit took 27 places at fp32 and 56 at
-    fp64; under the re-anchor 8, the six and two reached only where the
-    anchor is subnormal, where e is zero. Design (b)'s decision, taken
+    fp64. Under the re-anchor it took the six wherever the anchor is
+    normal; a subnormal anchor puts it lower, anywhere down to the
+    anchor's own leading bit, always with e zero (my sample reached two
+    such places, verifier-VRP8's more). Design (b)'s decision, taken
     from the window at the six places, gave the exact e in all 19,867
     sums at fp32 and 19,988 at fp64, the marker's case and cancellation
-    included.
+    included. verifier-VRP8's own transcription, from the RTL, gave r
+    and e exact on 92,000 sums at the four formats, near-cancelling
+    sums, exact ties and subnormal anchors among them.
+  - The gate is a choice, not a need. verifier-VRP8 applied the
+    re-anchor to every ordinary operation (FMA, ADD, SUB and MUL, 89,243
+    at the four formats) and found the window's value, sign and marker
+    unchanged in all of them: the two anchors differ only where both
+    alignments are left shifts that fit. Ungated it is today's one
+    compare with a constant offset, and saves the second compare and the
+    select (about 100 LUTs a tile, estimate). This plan keeps the gate,
+    so that ordinary operations run exactly the alignment every bench,
+    proof and card run so far has exercised, rather than one whose
+    results are equal by a new argument; the ungated form is the
+    fallback if S6's timing or area asks for it.
 - **Two designs, each one pass at LATENCY 16**, as R21 asks ("one array
   pass and one register write each"); the stage map's levels:
   - (b) e through r's normaliser:
@@ -5138,15 +5156,15 @@ R22, R23 and R24 act, takes only registered inputs from this revision.
   How much of each the existing logic absorbs, and how Vivado packs it,
   can move any of them by a factor of two. So these figures cannot
   choose between the designs, or decide the quad: probe L does.
-- **Timing:** both designs touch S6's anchor compare (a second compare
-  and a select) and S15's flags, result select and pack. (b) puts the
-  decision into S10, between its carry chain and its select; (a) adds
-  S11's decision and negation beside r's leading-zero count and a second
-  path through S12 to S14, and leaves S10 and r's path alone. Out of
-  context the kernel's worst path is an engine path at +1.576 ns and no
-  lane path is worse (revision 7's read); in context the pipe's stages
-  are not reported one by one. q135's second class of worst paths enters
-  the pipe at S0, which R21 does not lengthen.
+- **Timing:** both designs touch S6's anchor compare (the gate's second
+  compare and select) and S15's flags, result select and pack. (b) puts
+  the decision into S10, between its carry chain and its select; (a)
+  adds S11's decision and negation beside r's leading-zero count and a
+  second path through S12 to S14, and leaves S10 and r's path alone.
+  Out of context the kernel's worst path is an engine path at +1.576 ns
+  and no lane path is worse (revision 7's read); in context the pipe's
+  stages are not reported one by one. q135's second class of worst
+  paths enters the pipe at S0, which R21 does not lengthen.
 - **Held:** with the sideband at zero every other operation keeps
   today's anchor and computes the function it computes today: the four
   fpfma benches, the kernel benches, krnlseq, and on the card
@@ -5473,6 +5491,11 @@ long runs are the lead's (Logan, 2026-09-29): Icarus `make sim`,
   - The four fpfma benches, fp32 to fp256, and their multi-pass forms
     gain augadd and augerr against cft_golden.augmented, the definition,
     beside every operation they hold today.
+  - The attribute codes 5 to 7, which no bench drives today
+    (tb/fpfma_common.py iterates 0 to 4): the fpfma benches, and
+    tb/test_krnl.py through an elementwise run, hold them to RNE, as
+    MODE[14:12] documents. Since R21 they carry its mode's separation
+    from an outside code.
   - tb/test_krnl.py: VERSION, CAPS and CAPS2 at the U50's values and
     the open-core ones; MODE[24] refused where the feature is clear.
     tb/krnl_caps.py learns EN_AUGADD and SEQ_STREAM_D.
@@ -5494,9 +5517,13 @@ long runs are the lead's (Logan, 2026-09-29): Icarus `make sim`,
   - R21: a tie rounded to even, inexact from augadd, e's sign kept on a
     round up, x returned as e in the far case, e keyed on s6_far alone
     (red on a partly shifted-out operand), underflow lost for a tiny e,
-    the re-anchor applied to ADD (red in the fpfma benches), the
+    ties toward zero reached by ADD and augerr's select reached by ADD
+    (each red in the fpfma benches), an outside attribute code 5 to 7
+    reaching R21's mode (red in the new case for codes 5 to 7), the
     sideband left live in the engine, port C reading rc for codes 10
-    and 11, their flag enable left off;
+    and 11, their flag enable left off. Not a plant: the re-anchor
+    applied to ordinary operations, which changes no window
+    (verifier-VRP8), so no bench can go red on it;
   - R22: the step before the access, `ldx rX, rX, s` keeping the step,
     a masked lane stepping, a negative step's high word at fp64;
   - R23: a masked lane's byte written, [5] or [6] dropped, a beat's
@@ -5560,7 +5587,9 @@ about three times its RTL (estimate).
      green: the abort; then the fetch's hooks with D1's unit and
      cft_krnl.sv's SEQ_STREAM_D, and probe S on that tree, which holds
      the seam, the abort and streaming and nothing else; then R24, R23,
-     R21's decode (after B) and R22;
+     R21's decode and R22. C branches from the seam, not from B's
+     merge, so that probe S, which synthesises the kernel with its
+     lanes, sees today's lanes; B's lanes join C before R21's decode;
    - E, beside it: the lane-flags block on XRT, the cftc targets,
      seq_check's `--device`;
    - a verifier for each; probe K and probe E on the merged tree.
@@ -5651,16 +5680,18 @@ plan raises. Each has a recommendation.
    already changes the committed manifests.
 8. **R21's design.** Both designs re-anchor augadd and augerr at S6 by
    exponent, so that r's rounding point is one of six fixed places (part
-   1, where a transcription of the pipe checked the decision on about
-   40,000 sums). (b) decides at S10 and sends augerr's e through r's
-   normaliser: the least area, with the decision on S10's path. (a)
-   decides at S11 and normalises e in a second path: S10 and r's path
-   untouched, at about twice the area. Neither can be costed with
-   confidence from the RTL's shape (4,000 to 9,000 LUTs a tile against
-   10,000 to 15,000, each figure movable by a factor of two).
-   Recommended: probe L builds (b) and reads its LUTs and S10's slack,
-   and (a) is built only if (b) costs S10 its timing. Either way one
-   pass, LATENCY 16 and no fusion.
+   1, where two transcriptions of the pipe, mine and verifier-VRP8's,
+   checked the decision on about 132,000 sums). (b) decides at S10 and
+   sends augerr's e through r's normaliser: the least area, with the
+   decision on S10's path. (a) decides at S11 and normalises e in a
+   second path: S10 and r's path untouched, at about twice the area.
+   The re-anchor keeps a gate so that ordinary operations keep today's
+   alignment (part 1 gives the reason and the ungated option). Neither
+   design can be costed with confidence from the RTL's shape (4,000 to
+   9,000 LUTs a tile against 10,000 to 15,000, each figure movable by a
+   factor of two). Recommended: probe L builds (b) and reads its LUTs
+   and S10's slack, and (a) is built only if (b) costs S10 its timing.
+   Either way one pass, LATENCY 16 and no fusion.
 9. **Whether the quad carries R21.** On part 2's estimates R21's lanes
    take the quad to between 85.5% and 92% of the part's LUTs (89% to
    95% of SLR0's), past anything that has closed. Recommended: build the
@@ -5687,6 +5718,15 @@ plan raises. Each has a recommendation.
      they are unchanged on every revision-8 image. A case added with a
      routine has one image under the second way, and needs a record for
      each form under the first.
+   - So under this recommendation R21's lanes on the single and the deep
+     build serve no compiled routine until a quad carries R21: only
+     hand-written programs, the side project's compensated steps among
+     them, use augadd and augerr there. That makes this question also
+     whether those two carry R21 at all. Recommended: they do. They
+     have the room (revision 7's single used 31.31% of the part's
+     LUTs), it is an item you chose, it is then proven on a card rather
+     than built and carried nowhere, and a later quad, or a larger part,
+     turns it on with a build parameter rather than a new revision.
 10. **R22's load step costs up to one instruction's beats** (p up to
     1), because a stepped load writes two registers a beat through one
     write port; a store's step is free (p = 0). Accept this rather than
