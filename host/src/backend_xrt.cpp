@@ -118,6 +118,7 @@
 #endif
 
 #include "backend.h"
+#include "caps_decode.h"   /* VERSION, CAPS, CAPS2 -> cft_seq_caps */
 #include "slice.h"
 #include "mask_bits.h"
 #include "tile_select.h"
@@ -250,7 +251,7 @@ constexpr uint32_t TILE_MAGIC  = 0x43465430u;   /* "CFT0" */
 constexpr uint32_t KNOWN_VERSIONS[] = { 0x00000410u, 0x00000500u,
                                         0x00000600u, 0x00000700u,
                                         0x00000800u, 0x00000900u,
-                                        0x00000A00u };
+                                        0x00000A00u, 0x00000B00u };
 constexpr uint32_t SEQ_VERSION = 0x00000600u;   /* first map with PROG_PTR */
 constexpr uint32_t BANK_VERSION = 0x00000700u;  /* first map with BANK_PTR */
 /* first map with CAPS2 and the two scratch pointers */
@@ -278,6 +279,28 @@ constexpr uint32_t SEG_VERSION = 0x00000900u;
  * leave unset go out as zero, and the tile reads none of them without
  * MODE[23:19]. */
 constexpr uint32_t IDX_VERSION = 0x00000A00u;
+/* 0xB00 (2026-10-02, revision 8's seam, docs/ROADMAP.md "Revision 8"):
+ * LFLAGS_PTR at 0xB0/0xB4 as kernel argument 17 - R23's per-lane flag
+ * block, written by the tile after the counts when MODE[24] asks for it,
+ * so on the D master beside the deposits, the counts and scratch-out.
+ * Every program launch on such a tile passes all EIGHTEEN arguments, the
+ * eighteenth a one-beat stand-in that is bound and never asked for: no
+ * tile publishes CAPS2[13] at the seam, so MODE[24] stays clear and
+ * device.c refuses a run that asks for the block, by name, before it
+ * gets here. The real block on XRT is the lane-flags item's (round 2).
+ * The same map carries CAPS2[14:11], revision 8's four program-model
+ * bits, and CAPS2[20:16], a streamed instruction capacity; the decode is
+ * host/src/caps_decode.h's, and believes neither below this version.
+ * Reductions and elementwise runs pass what they passed, and argument 17
+ * goes out as zero there, which the tile never reads without MODE[24]. */
+constexpr uint32_t LFLAGS_VERSION = 0x00000B00u;
+/* The decode's own names for the same maps (host/src/caps_decode.h),
+ * which this file does not use in its place: held equal here, so the two
+ * cannot drift apart without the build saying so. */
+static_assert(SCRATCH_VERSION == CFT_MAP_CAPS2, "caps_decode.h: CAPS2's map");
+static_assert(SEG_VERSION == CFT_MAP_SEG, "caps_decode.h: SEG/NRES's map");
+static_assert(IDX_VERSION == CFT_MAP_IDX, "caps_decode.h: the five pointers' map");
+static_assert(LFLAGS_VERSION == CFT_MAP_LFLAGS, "caps_decode.h: LFLAGS_PTR's map");
 
 inline bool version_known(uint32_t v)
 {
@@ -300,6 +323,10 @@ constexpr int ARG_SCRATCH_IN = 9, ARG_SCRATCH_OUT = 10;
  * through the A master as the image, the bank and the preload are. */
 constexpr int ARG_IDX_A = 12, ARG_IDX_B = 13, ARG_IDX_C = 14;
 constexpr int ARG_IDX_SI = 15, ARG_MASK = 16;
+/* 17 (VERSION 0xB00, revision 8's R23): LFLAGS_PTR at 0xB0, WRITTEN by
+ * the tile, so on the D master as the deposits, the counts and
+ * scratch-out are (hw/kernel.xml). */
+constexpr int ARG_LFLAGS = 17;
 
 /* MODE[15]: this run belongs to cft_seq and MODE[7:0] is ignored. */
 constexpr uint32_t MODE_SEQ = 1u << 15;
@@ -542,6 +569,12 @@ struct Tile {
      * passes every one of them. */
     xrt::bo     ia, ib, ic, isi, mk;
     size_t      ia_cap = 0, ib_cap = 0, ic_cap = 0, isi_cap = 0, mk_cap = 0;
+    /* And 0xB00's one (revision 8's seam): R23's per-lane flag block,
+     * argument 17 on the D master. One beat, bound on every program
+     * launch on such a tile and never asked for until a tile publishes
+     * CAPS2[13] and the lane-flags item binds the caller's block. */
+    xrt::bo     lf;
+    size_t      lf_cap = 0;
     /* The compute unit's name as XRT knows it ("cft_krnl:{cft_krnl_2}"),
      * so a refusal names the unit an operator can find in xbutil and in
      * CFT_XRT_TILES, not only this handle's index for it. */
@@ -2222,63 +2255,14 @@ static int cftx_open_impl(const char *artifact, int index, void **out,
     *version        = ver;
     *flags_readable = 1;      /* proven above, or we did not get here */
     if (seq) {
-        /* CAPS[27:16] carries the EXPONENT of each capacity - four bits
-         * each, which only fits because every one of them is a power of
-         * two by construction (two memory depths and a field width;
-         * rtl/cft_krnl.sv names them once and hands them to cft_seq as
-         * parameters). Shift, do not transcribe: a literal 64 here is
-         * how a host would go on believing a trimmed tile was a full
-         * one.
-         *
-         * A tile whose VERSION predates these fields reads zeros, and
-         * cft_caps documents zero as UNKNOWN - so the caps check in
-         * cft_program_load simply does not fire against it, which is
-         * the behaviour that tile had before the fields existed. The
-         * card-day images are 0x410 and are exactly that case. */
-        const uint32_t sizes = (caps >> 16) & 0xFFFu;
-        /* The feature nibble, and above it the ALU extensions of
-         * CAPS[31:28] - IMUL is bit 28, cft.h's CFT_ALU_EXT_IMUL.
-         *
-         * The nibble shift already carries revision 2's two new bits
-         * and needed no change for them: CAPS[5] lands in
-         * seq_features bit 1 (CFT_SEQ_FEAT_REGS32) and CAPS[6] in bit
-         * 2 (CFT_SEQ_FEAT_BANK_PTR), which is what the field was
-         * shaped for. Shift, do not enumerate. */
-        seq->features = ((caps >> 4) & 0xFu) | (((caps >> 28) & 0xFu) << 4);
-        /* CAPS2[7:4] is the second sequencer feature nibble and lands
-         * in seq_features bits 11:8, which is CFT_SEQ_FEAT_SCRATCH at
-         * [4] and CFT_SEQ_FEAT_SCRATCH_IO at [5]. Shift, do not
-         * enumerate, exactly as the first nibble does - the two bits
-         * revision 3 assigns and the two it reserves travel together. */
-        seq->features |= ((caps2 >> 4) & 0xFu) << 8;
-        /* CAPS2[8] lands on bit 12: CFT_FEAT_REDUCE_SEG (2026-09-14),
-         * the SEG/NRES pair and opcode 31 as a streaming maximum. Only
-         * where the map has the pair - a tile below 0x900 with the bit
-         * set would be a capability register lying about its map. */
-        if (ver >= SEG_VERSION && (caps2 & 0x100u))
-            seq->features |= 0x1000u;
-        /* CAPS2[9] and [10] land on bits 13 and 14 (ABI 0.14,
-         * docs/ROUND2.md): INDEXED and LANE_MASK, only where the map
-         * has the five registers they need. */
-        if (ver >= IDX_VERSION) {
-            if (caps2 & 0x200u) seq->features |= 0x2000u;
-            if (caps2 & 0x400u) seq->features |= 0x4000u;
-        }
-        /* And the depth: CAPS2[3:0] is log2 of it, meaningful only
-         * where CAPS2[4] says the memory is there. A tile below 0x800
-         * reads a zero word here, which is no scratch and a depth of
-         * zero - UNKNOWN, and enforced against nothing, which is the
-         * behaviour such a tile had before the register existed. */
-        seq->max_scratch = (caps2 & 0x10u) ? (1u << (caps2 & 0xFu)) : 0u;
-        if (sizes == 0) {
-            seq->max_deposits = 0;
-            seq->max_insns    = 0;
-            seq->max_consts   = 0;
-        } else {
-            seq->max_deposits = 1u << ((caps >> 16) & 0xFu);
-            seq->max_insns    = 1u << ((caps >> 20) & 0xFu);
-            seq->max_consts   = 1u << ((caps >> 24) & 0xFu);
-        }
+        /* What the three words MEAN is host/src/caps_decode.h's - every
+         * feature nibble and bit, every capacity, and the map each is
+         * believed on, revision 8's CAPS2[14:11] (seq_features bits 15 to
+         * 18) and CAPS2[20:16] (max_insns) behind 0xB00 among them - so
+         * that api_test holds the decode on machines that cannot build
+         * this file. It moved there unchanged for every map below 0xB00
+         * (2026-10-02, revision 8's seam). */
+        cft_caps_decode(ver, caps, caps2, seq);
     }
     *out            = own.release();
     return ST_OK;
@@ -3189,6 +3173,11 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
                 ensure_one(D, tile, tile.mk, tile.mk_cap, ARG_MASK,
                            p.mask_pad);
             }
+            /* Argument 17 on a 0xB00 map: one beat, the stand-in
+             * LFLAGS_VERSION describes. Not staged - the tile writes it
+             * only under MODE[24], which this backend never sets. */
+            if (D.version >= LFLAGS_VERSION)
+                ensure_one(D, tile, tile.lf, tile.lf_cap, ARG_LFLAGS, 32);
 
             if (!ob[0]) {
                 size_t off = w[0].off;
@@ -3292,8 +3281,8 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
          * version guards, and XRT throws rather than adapts. Every buffer
          * the map has is bound on every run of that contract whether or
          * not this program uses it; an 0xA00 launch passes all
-         * seventeen, because XRT's start sends the whole argument
-         * register image (2026-09-14). */
+         * seventeen, and an 0xB00 launch all eighteen, because XRT's
+         * start sends the whole argument register image (2026-09-14). */
         t.start = [&, i](size_t tl) -> xrt::run {
             PSlice &p = ps[i];
             Tile &tile = D.tiles[tl];
@@ -3302,7 +3291,9 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
             if (mask_ov && D.version >= IDX_VERSION) {
                 /* A card-day instrument (2026-09-15): argument 16
                  * replaced by a raw address, so that a read of it faults
-                 * if the tile issues one. */
+                 * if the tile issues one. On a 0xB00 map argument 17
+                 * travels too, the stand-in, so the instrument changes
+                 * the one argument it names and no other. */
                 const uint64_t addr = std::strtoull(mask_ov, nullptr, 16);
                 xrt::run rr(tile.k);
                 rr.set_arg(0, mode);
@@ -3319,12 +3310,21 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
                 rr.set_arg(14, *ob[CFT_ROLE_IC]);
                 rr.set_arg(15, *ob[CFT_ROLE_ISI]);
                 rr.set_arg(16, addr);
+                if (D.version >= LFLAGS_VERSION)
+                    rr.set_arg(ARG_LFLAGS, tile.lf);
                 std::fprintf(stderr, "[xrt trace] tile %zu: argument 16 "
                              "overridden with 0x%016llx\n", tl,
                              static_cast<unsigned long long>(addr));
                 rr.start();
                 return rr;
             }
+            if (D.version >= LFLAGS_VERSION)
+                return tile.k(mode, lanes, *ob[0], *ob[1], *ob[2], *ob[3],
+                              tile.pg, tile.cn, tile.bk, *ob[CFT_ROLE_SI],
+                              *ob[CFT_ROLE_SO], static_cast<uint64_t>(0),
+                              *ob[CFT_ROLE_IA], *ob[CFT_ROLE_IB],
+                              *ob[CFT_ROLE_IC], *ob[CFT_ROLE_ISI], tile.mk,
+                              tile.lf);
             if (D.version >= IDX_VERSION)
                 return tile.k(mode, lanes, *ob[0], *ob[1], *ob[2], *ob[3],
                               tile.pg, tile.cn, tile.bk, *ob[CFT_ROLE_SI],
@@ -3373,6 +3373,17 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
                             tile.k.read_register(0x8Cu + 8u * k);
                         std::fprintf(stderr, "[xrt trace]   %-6s = "
                                      "0x%08x%08x\n", pname[k], hi, lo);
+                    }
+                    if (D.version >= LFLAGS_VERSION) {
+                        /* Argument 17 as the tile holds it, beside the
+                         * stand-in's address the host bound (0xB00). */
+                        const uint32_t lo = tile.k.read_register(0xB0u);
+                        const uint32_t hi = tile.k.read_register(0xB4u);
+                        std::fprintf(stderr, "[xrt trace]   %-6s = "
+                                     "0x%08x%08x (bound 0x%016llx)\n",
+                                     "LFLAGS", hi, lo,
+                                     static_cast<unsigned long long>(
+                                         tile.lf.address()));
                     }
                     if (D.version >= IDX_VERSION) {
                         std::fprintf(stderr, "[xrt trace]   mask bo address "

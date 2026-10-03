@@ -101,7 +101,13 @@ authority:
    the four rung benches replay 111,278 cases the golden model generates for them (`vectors.testset`, at smaller budgets than the published sets) through
    `cft_fpfma_pipe` bit for bit, flags included; the kernel is driven
    through its CSR and AXI interfaces, by the streaming engine and by
-   the sequencer; the shared normalise and alignment ladders are held
+   the sequencer, and since revision 8's seam (2026-10-02) its argument
+   map `hw/kernel.xml` is held to the CSR's decode - every argument
+   written through the bus at its XML offset and read back from the
+   register the RTL decodes (`test_krnl.py`'s
+   `kernel_xml_is_the_csr_map`, where nothing had checked the two
+   before) - and CAPS and CAPS2 to the words the plan computed for a
+   seam tile; the shared normalise and alignment ladders are held
    against the private shifters they replaced; the reduction
    accumulator, the fault paths, the seed opcodes and the three trims -
    the quarter tile; the full beat with binary256 left out, the shape

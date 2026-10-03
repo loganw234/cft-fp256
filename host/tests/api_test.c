@@ -30,6 +30,7 @@
 #include "../src/lane_cut.h"
 #include "../src/mask_bits.h"
 #include "../src/backend.h"      /* cftx_last_error */
+#include "../src/caps_decode.h"  /* VERSION, CAPS, CAPS2 -> cft_seq_caps */
 #include "../src/remote.h"       /* cftr_last_error */
 
 static int failures;
@@ -1686,6 +1687,103 @@ int main(void)
             printf("  a lane mask repacks correctly for 18 lane counts x "
                    "64 bit offsets, writing no byte past the tile's own "
                    "lanes\n");
+    }
+
+    /* --- a tile's capability words, decoded (revision 8's seam) ----
+     *
+     * host/src/caps_decode.h, here for slice.h's reason: the XRT backend
+     * turns VERSION, CAPS and CAPS2 into cft_seq_caps, and that file
+     * builds only with XRT, so without this no machine that can build
+     * the decode could run it. Held to the words docs/ROADMAP.md's plan
+     * computed from rtl/cft_krnl.sv's assembly ("What a revision-8 U50
+     * tile reads"), to a seam tile's and revision 7's, and to the rule
+     * that a field is believed only on a map that has it. */
+    {
+        static const struct {
+            const char *what;
+            uint32_t ver, caps, caps2;
+            uint32_t features, insns, deposits, consts, scratch;
+        } cw[] = {
+            /* revision 8's seam: every new bit zero, revision 7's words */
+            { "a seam tile at the U50's capacities", 0xB00u, 0x19FAFFFFu,
+              0x000007FBu, 0x7F1Fu, 32768u, 1024u, 512u, 2048u },
+            { "a seam tile at the open-core capacities", 0xB00u,
+              0x19E6FFFFu, 0x000007F8u, 0x7F1Fu, 16384u, 64u, 512u, 256u },
+            { "revision 7's U50 tile", 0xA00u, 0x19FAFFFFu, 0x000007FBu,
+              0x7F1Fu, 32768u, 1024u, 512u, 2048u },
+            /* the plan's revision-8 U50 words (streaming at 2^24) */
+            { "revision 8 at 2,048 slots", 0xB00u, 0x19FAFFFFu,
+              0x00187FFBu, 0x7FF1Fu, 1u << 24, 1024u, 512u, 2048u },
+            { "revision 8 at 4,096 slots", 0xB00u, 0x19FAFFFFu,
+              0x00187FFCu, 0x7FF1Fu, 1u << 24, 1024u, 512u, 4096u },
+            { "revision 8 without R21", 0xB00u, 0x19FAFFFFu, 0x001877FBu,
+              0x77F1Fu, 1u << 24, 1024u, 512u, 2048u },
+            /* behind 0xB00 only: an 0xA00 map cannot have these fields,
+             * and a word that claims them is not believed */
+            { "revision 8's fields on an 0xA00 map", 0xA00u, 0x19FAFFFFu,
+              0x00187FFBu, 0x7F1Fu, 32768u, 1024u, 512u, 2048u },
+            /* a five-bit log2, 31 its top */
+            { "CAPS2[20:16] at its top", 0xB00u, 0x19FAFFFFu, 0x001F07FBu,
+              0x7F1Fu, 1u << 31, 1024u, 512u, 2048u },
+            /* no CAPS2 below 0x800: revision 2's words, one handed in */
+            { "a 0x700 tile, whose map has no CAPS2", 0x700u, 0x18C6FF7Fu,
+              0x00187FFBu, 0x17u, 4096u, 64u, 256u, 0u },
+            /* card day: no capacity fields, every one UNKNOWN */
+            { "a 0x410 tile, before the capacity fields", 0x410u,
+              0x00001F0Fu, 0u, 0x0u, 0u, 0u, 0u, 0u }
+        };
+        size_t k;
+        int bad = 0;
+        for (k = 0; k < sizeof cw / sizeof cw[0]; k++) {
+            cft_seq_caps sc;
+            memset(&sc, 0xA5, sizeof sc);
+            cft_caps_decode(cw[k].ver, cw[k].caps, cw[k].caps2, &sc);
+            if (sc.features != cw[k].features || sc.max_insns != cw[k].insns ||
+                sc.max_deposits != cw[k].deposits ||
+                sc.max_consts != cw[k].consts ||
+                sc.max_scratch != cw[k].scratch) {
+                CHECK(0, "caps decode, %s (VERSION 0x%x, CAPS 0x%08lx, CAPS2 "
+                      "0x%08lx): features 0x%lx insns %lu deposits %lu consts "
+                      "%lu scratch %lu, want 0x%lx %lu %lu %lu %lu",
+                      cw[k].what, (unsigned)cw[k].ver,
+                      (unsigned long)cw[k].caps, (unsigned long)cw[k].caps2,
+                      (unsigned long)sc.features, (unsigned long)sc.max_insns,
+                      (unsigned long)sc.max_deposits,
+                      (unsigned long)sc.max_consts,
+                      (unsigned long)sc.max_scratch,
+                      (unsigned long)cw[k].features, (unsigned long)cw[k].insns,
+                      (unsigned long)cw[k].deposits,
+                      (unsigned long)cw[k].consts,
+                      (unsigned long)cw[k].scratch);
+                bad = 1;
+            }
+        }
+        /* The plan's other claim: a revision-8 U50 tile's seq_features is
+         * the software handle's word at ABI 0.17. One word, two sources -
+         * cft_sw_seq_caps and device.c's publishing, against the decode of
+         * the words rtl/cft_krnl.sv will assemble. */
+        {
+            cft_caps swc;
+            cft_seq_caps sc;
+            memset(&swc, 0, sizeof swc);
+            swc.struct_size = sizeof swc;
+            cft_caps_decode(0xB00u, 0x19FAFFFFu, 0x00187FFBu, &sc);
+            CHECK(cft_get_caps(dev, &swc) == CFT_OK &&
+                  swc.seq_features == sc.features,
+                  "the software handle publishes seq_features 0x%lx and a "
+                  "revision-8 U50 tile's words decode to 0x%lx; the plan "
+                  "says they are one word",
+                  (unsigned long)swc.seq_features, (unsigned long)sc.features);
+            if (swc.seq_features != sc.features)
+                bad = 1;
+        }
+        if (!bad)
+            printf("  capability words: %lu decodes as the plan computed "
+                   "them - a seam tile seq_features 0x7f1f and 32,768 "
+                   "instructions, revision 8 0x7ff1f (0x77f1f without "
+                   "R21) and 2^24, nothing of revision 8 believed below "
+                   "0xB00 - and the software handle's word is revision "
+                   "8's\n", (unsigned long)(sizeof cw / sizeof cw[0]));
     }
 
     /* --- divide and square root ----------------------------------

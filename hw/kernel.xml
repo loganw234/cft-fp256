@@ -150,6 +150,21 @@
       <arg name="mask" addressQualifier="1" id="16" port="m_axi_a"
            size="0x8" offset="0xA8" type="void*"
            hostOffset="0x0" hostSize="0x8"/>
+      <!-- 17 (revision 8's R23, docs/SEQUENCER.md; VERSION 0xB00,
+           2026-10-02): the run's PER-LANE FLAG BLOCK, n bytes, lane i's
+           at byte i, written after the counts when MODE[24] asks for it.
+           APPENDED, for the reason every argument above was. It is
+           WRITTEN, so it binds to m_axi_d beside d, cnt and scratch_out;
+           hw/link.cfg and hw/link_quad.cfg bind each master, not each
+           argument, so neither changes. Offset 0xB0, matching LFLAGS_PTR
+           in rtl/cft_csr.sv. Declared at revision 8's seam: nothing
+           writes through it until CAPS2[13] says so. A host's program
+           launch on a 0xB00 tile must still pass it - XRT's start sends
+           the whole argument register image, so a declared argument
+           travels with the launch or not at all (0x900's lesson). -->
+      <arg name="lflags" addressQualifier="1" id="17" port="m_axi_d"
+           size="0x8" offset="0xB0" type="void*"
+           hostOffset="0x0" hostSize="0x8"/>
     </args>
   </kernel>
 </root>

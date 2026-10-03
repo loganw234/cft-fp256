@@ -134,6 +134,14 @@ module cft_fpfma_pipe #(
     input  logic                 en,
     input  logic                 in_valid,
     input  logic [2:0]           rnd,      // rounding attribute, per op
+    // Revision 8's R21 sideband (docs/ROADMAP.md, "Revision 8"), per op
+    // like rnd: 0 an ordinary operation, 1 augadd, 2 augerr. INERT at
+    // revision 8's seam: nothing in this pipe reads it until R21's lanes
+    // are built, and every instantiation ties it to zero (cft_lanes hands
+    // on the array's, which every driver ties to zero).
+    /* verilator lint_off UNUSEDSIGNAL */
+    input  logic [1:0]           aug_mode,
+    /* verilator lint_on UNUSEDSIGNAL */
     // Precomputed result. When byp is high the datapath's answer is
     // discarded and byp_d/byp_f are delivered at the output instead,
     // carried down the same sideband the specials already use. This is

@@ -551,7 +551,8 @@ class Bench:
         for name in ("cfg_n", "cfg_a", "cfg_b", "cfg_c", "cfg_d",
                      "cfg_prog", "cfg_bank", "cfg_sin", "cfg_sout",
                      "cfg_cnt", "cfg_indexed", "cfg_idx_a", "cfg_idx_b",
-                     "cfg_idx_c", "cfg_idx_si", "cfg_mask_en", "cfg_mask"):
+                     "cfg_idx_c", "cfg_idx_si", "cfg_mask_en", "cfg_mask",
+                     "cfg_lflags_en", "cfg_lflags"):
             getattr(dut, name).value = 0
         cocotb.start_soon(self.ram.serve())
         dut.ap_rst_n.value = 0
@@ -649,6 +650,12 @@ class Bench:
         # says it was not read.
         dut.cfg_mask_en.value = 1 if lane_mask else 0
         dut.cfg_mask.value = MASK_BASE if lane_mask else 0xDEAD_7000
+        # ...and revision 8's R23 flag block (its seam, 2026-10-02): no
+        # run here asks for it, and the CSR refuses MODE[24] on every
+        # build until R23 is built, so the pointer is aimed at nothing -
+        # a write there trips the write logger's window assertion.
+        dut.cfg_lflags_en.value = 0
+        dut.cfg_lflags.value = 0xDEAD_8000
 
     # -- a refused run ---------------------------------------------------
 
@@ -1287,6 +1294,15 @@ class Bench:
             f"{'set' if prog.flags & seq.FLAG_SCRATCH_STRICT else 'clear'}; "
             f"with it clear the index is reduced modulo the depth and this "
             f"bit must never be raised.")
+        # Revision 8's R24 mark, err[5] -> STATUS[6] since the revision's
+        # seam (2026-10-02), held here for the reason err[4] is: every
+        # program this file runs holds the tile to the model on it. No
+        # program here raises one, and the seam's tile ties it to zero,
+        # so both say clear until R24 is built.
+        want_mark = bool(want.status & seq.STATUS_MARKED)
+        assert bool(err & 0x20) == want_mark, (
+            f"{label}: err[5] (a RAISE marked a lane -> STATUS[6]) is "
+            f"{bool(err & 0x20)}, model says {want_mark}")
         assert (err & 0x7) == 0, (
             f"{label}: err[2:0]={err & 0x7} - the model memory answered "
             f"OKAY on every beat, so a bus fault here is the module's")

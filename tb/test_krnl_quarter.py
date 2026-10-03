@@ -42,7 +42,8 @@ from cft_golden import (  # noqa: E402
 )
 
 from test_krnl import (run_op, check_op_groups, check_seq_caps,  # noqa: E402
-                       check_caps2, CAPS, CAPS2, MAGIC, VERSION, CTRL)
+                       check_caps2, check_seam_words,
+                       CAPS, CAPS2, MAGIC, VERSION, CTRL)
 from test_krnl_reduce import run_sum  # noqa: E402
 import busfx  # noqa: E402
 
@@ -77,7 +78,7 @@ async def quarter_tile_end_to_end(dut):
     await ClockCycles(dut.ap_clk, 4)
 
     assert await axil.read_dword(MAGIC) == 0x43465430
-    assert await axil.read_dword(VERSION) == 0x00000A00   # ROUND2's five pointers, 2026-09-15
+    assert await axil.read_dword(VERSION) == 0x00000B00   # revision 8's LFLAGS_PTR, 2026-10-02
 
     caps = await axil.read_dword(CAPS)
     assert (caps & 0xF) == 0b0011, (
@@ -94,7 +95,11 @@ async def quarter_tile_end_to_end(dut):
     # pins (tb/Makefile's OPEN_CAPS_GENERICS, through the wrapper): a
     # quarter tile left at cft_krnl's own default would be built at the
     # U50's 2,048 slots, and CAPS alone cannot say so (revision 7).
-    check_caps2(await axil.read_dword(CAPS2))
+    caps2 = await axil.read_dword(CAPS2)
+    check_caps2(caps2)
+    # ...and both words against the plan's numbers for a revision-8
+    # seam tile at the open-core capacities, fp32 and fp64 only.
+    check_seam_words(caps, caps2, 0b0011)
 
     status = await axil.read_dword(CTRL)
     assert status & 0x4, "kernel must come up idle"

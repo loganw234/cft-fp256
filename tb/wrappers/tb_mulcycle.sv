@@ -53,13 +53,13 @@ module tb_mulcycle #(
 
   cft_lanes #(.BEAT_BITS(256), .LATENCY(LATENCY), .MUL_PASSES(1)) u_ref (
       .clk(clk), .rst_n(rst_n),
-      .in_valid(in_valid), .op(op), .rnd(rnd), .prec(prec),
+      .in_valid(in_valid), .op(op), .rnd(rnd), .aug_mode(2'b00), .prec(prec),
       .a(a), .b(b), .c(c), .in_ready(ready_ref),
       .out_valid(ov_ref), .d(d_ref), .lane_flags(lf_ref));
 
   cft_lanes #(.BEAT_BITS(256), .LATENCY(LATENCY), .MUL_PASSES(MC)) u_mc (
       .clk(clk), .rst_n(rst_n),
-      .in_valid(in_valid), .op(op), .rnd(rnd), .prec(prec),
+      .in_valid(in_valid), .op(op), .rnd(rnd), .aug_mode(2'b00), .prec(prec),
       .a(a), .b(b), .c(c), .in_ready(ready_mc),
       .out_valid(ov_mc), .d(d_mc), .lane_flags(lf_mc));
 

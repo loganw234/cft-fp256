@@ -50,7 +50,7 @@ module tb_fpfma_fp128 #(
       .op(op), .a(a), .b(b), .c(c), .valid(bv), .d(bd), .flags(bf));
   cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(16),
                    .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP)) u_dut (
-      .clk(clk), .rst_n(rst_n), .en(en), .in_valid(in_valid), .rnd(rnd),
+      .clk(clk), .rst_n(rst_n), .en(en), .in_valid(in_valid), .rnd(rnd), .aug_mode(2'b00),
       .byp(bv), .byp_d(bd), .byp_f(bf),
       .a(a), .b(b), .c(c),
       .out_valid(out_valid), .d(d), .flags(flags),

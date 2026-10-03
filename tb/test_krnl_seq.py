@@ -104,6 +104,8 @@ CAPS2, SINPTR, SOUTPTR = 0x6C, 0x70, 0x78
 # ABI 0.14: the four index-table pointers and the lane mask's.
 IDXAPTR, IDXBPTR, IDXCPTR = 0x88, 0x90, 0x98
 IDXSIPTR, MASKPTR = 0xA0, 0xA8
+# Revision 8's seam (VERSION 0xB00): R23's per-lane flag block.
+LFLAGSPTR = 0xB0
 
 MODE_SEQ = 1 << 15          # this run belongs to cft_seq
 CAPS_SEQ = 1 << 15          # ... and this bitstream has one
@@ -115,6 +117,10 @@ MODE_IDX_C, MODE_IDX_SI = 1 << 21, 1 << 22
 MODE_LANE_MASK = 1 << 23
 CAPS2_INDEXED = 1 << 9
 CAPS2_LANE_MASK = 1 << 10
+# MODE[24]: R23's per-lane flag block (revision 8), honoured only under
+# CAPS2[13] - which no build sets at revision 8's seam, so it is refused.
+MODE_LANE_FLAGS = 1 << 24
+CAPS2_LANE_FLAGS = 1 << 13
 
 ST_REFUSED = 1 << 3
 ST_DEPOSIT_OVF = 1 << 4
@@ -737,10 +743,12 @@ async def krnl_sequencer(dut):
     await ClockCycles(dut.ap_clk, 4)
 
     assert await axil.read_dword(MAGIC) == 0x43465430
-    assert await axil.read_dword(VERSION) == 0x00000A00, \
+    assert await axil.read_dword(VERSION) == 0x00000B00, \
         ("the map grew again at v0.8.0 - CAPS2 at 0x6C and the two "
-         "scratch pointers at 0x70/0x74 and 0x78/0x7C - and at v0.9.0, "
-         "by SEG/NRES at 0x80/0x84")
+         "scratch pointers at 0x70/0x74 and 0x78/0x7C - at v0.9.0, by "
+         "SEG/NRES at 0x80/0x84, at v0.10.0 by round 2's five pointers "
+         "at 0x88..0xA8, and at v0.11.0 by revision 8's LFLAGS_PTR at "
+         "0xB0")
     caps = await axil.read_dword(CAPS)
     check_seq_caps(caps)
     # CAPS2 against the localparam cft_krnl elaborates the scratch
@@ -759,7 +767,10 @@ async def krnl_sequencer(dut):
                       (CNTPTR,  0x0000_0002_4680_ACE0),
                       (BANKPTR, 0x0000_0003_1470_2580),
                       (SINPTR,  0x0000_0004_1357_9BD0),
-                      (SOUTPTR, 0x0000_0005_2468_ACE0)):
+                      (SOUTPTR, 0x0000_0005_2468_ACE0),
+                      # revision 8's seam: R23's block, read by nothing
+                      # yet, stored and read back like the rest
+                      (LFLAGSPTR, 0x0000_0006_1357_2468)):
         await write64(axil, addr, val)
         lo = await axil.read_dword(addr)
         hi = await axil.read_dword(addr + 4)
@@ -1307,15 +1318,27 @@ async def krnl_sequencer(dut):
         "an identity table must be bit-identical to the dense run, and "
         "both of these came off the tile")
 
-    # ---- the guard is still armed on the bit above ours ---------------
+    # ---- the guard is still armed on the bits above ours --------------
     #
-    # MODE[24] is the bottom of what is left of the reserved range, and
-    # MODE[31] its top: both must be REFUSED with STATUS[3] and no
-    # memory touched, which is what says that opening [22:19] and [23]
-    # did not open the window above them.
+    # MODE[24] is revision 8's R23 bit since its seam (2026-10-02): the
+    # per-lane flag block, honoured only where CAPS2[13] is set, and the
+    # seam sets it on no build - so it must be REFUSED here exactly as it
+    # was while it was reserved. MODE[25] is now the bottom of what is
+    # left of the reserved range and MODE[31] its top: both must be
+    # REFUSED with STATUS[3] and no memory touched, which is what says
+    # that opening [22:19], [23] and [24] did not open the window above
+    # them.
+    assert not ((await axil.read_dword(CAPS2)) & CAPS2_LANE_FLAGS), (
+        "CAPS2[13] is set, so MODE[24] is honoured on this build and the "
+        "refusal below no longer holds: the lane-flags block's own case "
+        "belongs here now (docs/ROADMAP.md, revision 8's R23)")
     flags_before = await axil.read_dword(FLAGS)
     await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
-                           1 << 24, "MODE[24], reserved on every build",
+                           MODE_LANE_FLAGS, "MODE[24], R23's lane-flags "
+                           "block, on a build whose CAPS2[13] is clear",
+                           flags_before)
+    await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
+                           1 << 25, "MODE[25], reserved on every build",
                            flags_before)
     await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
                            1 << 31, "MODE[31], reserved on every build",

@@ -157,11 +157,12 @@ async def sum_end_to_end(dut):
     await ClockCycles(dut.ap_clk, 4)
 
     assert await axil.read_dword(MAGIC) == 0x43465430
-    assert await axil.read_dword(VERSION) == 0x00000A00, \
+    assert await axil.read_dword(VERSION) == 0x00000B00, \
         "reductions arrived at v0.5.0; the map grew again at v0.6.0, " \
         "once more at v0.7.0 when BANK_PTR was appended, at v0.8.0 " \
-        "when CAPS2 and the two scratch pointers were, and at v0.9.0 " \
-        "when SEG/NRES were"
+        "when CAPS2 and the two scratch pointers were, at v0.9.0 " \
+        "when SEG/NRES were, at v0.10.0 when round 2's five pointers " \
+        "were, and at v0.11.0 when revision 8's LFLAGS_PTR was"
     caps = await axil.read_dword(CAPS)
     assert (caps >> 8) & (1 << 5), \
         "CAPS must advertise the reduction group once SUM is built"

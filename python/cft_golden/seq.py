@@ -345,8 +345,9 @@ STATUS_SCRATCH_RANGE = 1 << 5
 # a lane whose last bit a routine's own test could not decide, to be
 # replayed before its answer is used - and the run says so here whether or
 # not it asked for R23's per-lane block. The first STATUS bit no tile and
-# no backend claims (rtl/cft_csr.sv reads STATUS as six bits padded with
-# zeros). Not an IEEE flag, so no quiet region silences it.
+# no backend claims (rtl/cft_csr.sv read STATUS as six bits padded with
+# zeros until revision 8's seam, and reads [6] as zero until R24 is
+# built). Not an IEEE flag, so no quiet region silences it.
 STATUS_MARKED = 1 << 6
 
 # R23's byte a lane, Result.lane_flags: [4:0] the five IEEE flags the lane
