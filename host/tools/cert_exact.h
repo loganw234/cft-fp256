@@ -119,13 +119,14 @@ CX_TABLE const cft_round RND_CODE[5] = { CFT_RNE, CFT_RTZ, CFT_RDN, CFT_RUP,
 
 /* ---- the certificate's words ------------------------------------------ */
 
-enum { K_MAIN, K_HALF, K_WIDER };               /* a run's kind */
-CX_TABLE const char *const KIND_NAME[3] = { "main", "half-step", "wider" };
-enum { M_DRIFT, M_HALVING, M_WIDER };           /* an entry's method */
-CX_TABLE const char *const METHOD_NAME[3] = { "drift", "step-halving",
-                                              "wider" };
+enum { K_MAIN, K_HALF, K_WIDER, K_WSRC };       /* a run's kind */
+CX_TABLE const char *const KIND_NAME[4] = { "main", "half-step", "wider",
+                                            "wider-source" };
+enum { M_DRIFT, M_HALVING, M_WIDER, M_WSRC };   /* an entry's method */
+CX_TABLE const char *const METHOD_NAME[4] = { "drift", "step-halving",
+                                              "wider", "wider-source" };
 CX_TABLE const char *const KINDS[3] = { "bound", "estimate", "measurement" };
-CX_TABLE const int METHOD_KIND[3] = { 2, 1, 1 };   /* measurement, estimate */
+CX_TABLE const int METHOD_KIND[4] = { 2, 1, 1, 1 }; /* measurement, estimate */
 enum { V_EXACT, V_ROUNDED, V_ENCLOSED };        /* a value's form */
 
 #define MAX_TERMS    64
@@ -797,7 +798,8 @@ CX_FN int cx_entry_check(const entry_t *E, uint64_t n_runs,
         return CX_RUN;
     }
     if (E->method != M_DRIFT) {
-        int want = E->method == M_HALVING ? K_HALF : K_WIDER;
+        int want = E->method == M_HALVING ? K_HALF :
+                   E->method == M_WSRC ? K_WSRC : K_WIDER;
         if (E->uses == 0 || used->kind != want) {
             snprintf(why, cap, "a %s estimate compares run 0 with a %s run; "
                      "run %llu is %s", METHOD_NAME[E->method],
