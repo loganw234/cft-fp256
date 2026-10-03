@@ -27,6 +27,7 @@ VERILOG_SOURCES = \
     $(RTLDIR)/cft_engine.sv \
     $(RTLDIR)/cft_engine_stream.sv \
     $(RTLDIR)/cft_lanes.sv \
+    $(RTLDIR)/cft_ifetch.sv \
     $(RTLDIR)/cft_seq.sv \
     $(RTLDIR)/cft_krnl.sv \
     $(TBDIR)/wrappers/tb_fpfma_fp32.sv \

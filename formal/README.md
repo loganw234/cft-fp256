@@ -35,6 +35,11 @@ fails.
 | `mulexact.sby cover_*` | rtl/cft_mulpass.sv | the claims are reached with a non-zero product, a product carrying into the top bit, and every pass's selection | cover |
 | `mulpass_real.sby` x4 | rtl/cft_mulpass.sv | the same exactness claim as ONE property, unfactored, at the four geometries a solver will take that way | bmc, both multipliers standing, **boolector** |
 | `lzcone.sby` x4 | rtl/cft_fpfma_pipe.sv | `cft_lzcone` bit-identical to `formal/cft_lzcone_ref.sv`, the priority-loop cone frozen at the moment of the split (2026-09-07), at each of the four window widths - 78, 165, 345 and 717 bits | comb miter; one bmc step is the whole input space at each width |
+| `ifetch.sby prove` | rtl/cft_ifetch.sv | never a word past n_insns or after a fault; a fault bit raised by a bad beat the next cycle and by nothing else; every AR beat-aligned, at most BURST beats, inside one 4 KB page and the instruction section, held until taken; at most OUT_MAX outstanding; `idle` exactly when nothing is outstanding; no new AR after a quiesce, an init or a fault; cft_fifo's caller contract | **unbounded** (k-induction, depth 3, with 10 helper invariants, all proven), ~1 s |
+| `ifetch.sby data_prove` | rtl/cft_ifetch.sv | every word `ok` presents is the image's word at the address presented - no wrong place, order, dropped or doubled position, or stale store slot | **unbounded** (k-induction, depth 3, 22 more helpers), ~5 s |
+| `ifetch.sby deliver_prove` | rtl/cft_ifetch.sv | a consumer waiting on one address below n_insns is answered within 18 cycles, in a cooperative world | **unbounded** (k-induction, depth 19), ~4 min |
+| `ifetch.sby ends_prove` | rtl/cft_ifetch.sv | idle within 14 cycles of a quiesce, an init or a fault, faults included | **unbounded** (k-induction, depth 15), ~4 s |
+| `ifetch.sby cover` | rtl/cft_ifetch.sv | 13 shapes reachable: a straddling word, a backward jump with bursts in flight, the FIFO full, the most bursts outstanding, a 4 KB cut, both faults, an underrun, the capacity's last word | bmc to depth 40, ~8 s |
 | `negcontrol.sby` | rtl/cft_fifo.sv | "the head bypass was never needed" - **deliberately false, must be refuted** | bmc, cex at step 3 |
 
 In detail:
@@ -217,6 +222,65 @@ budgets, fp128 at five and ten, and fp256 at ten.
 desktop, is in docs/VALIDATION.md's 2026-09-07 entry with the per-task
 table.
 
+## cft_ifetch: k-induction over claims and proven helper invariants
+
+Revision 8's instruction fetch (docs/studies/R8S-streaming.md, section
+13 for the unit as built; parcel RD1, 2026-10-03). tb_ifetch_formal.sv
+has the world, every claim and every helper, and the scope.
+
+**The world.** The consumer is free - every cycle's want, address,
+take, REPEAT entry, quiesce, init and load - within the interface's own
+rules (a take only with `ok`; the parse's loads only between a run's
+start and its first request, the k-th load being instruction k). The
+memory is an in-order AXI slave whose timing is free, and, outside
+data_prove, whose RLAST and RRESP are free as well.
+
+**The data, by one watched instruction.** `widx` and `wdata` are
+anyconst: one instruction anywhere, holding any value. Beats carry
+wdata's two granules where its bytes fall and free data elsewhere, and
+all free data in a beat that is non-OKAY or past its burst's length.
+"Whenever `ok` answers widx the word is wdata" is then the claim for
+every address and every image. data_prove holds it against an honest
+memory, which is enough: a word reaches `ok` at least two cycles after
+its beat lands, a bad beat raises its fault bit the next cycle, and
+`ok` is never high with a fault bit set - all three in `prove`.
+
+**Why not pdr.** abc pdr proved most of the control claims alone in
+seconds (16 of 19 at first, 12 of the 16 left once each claim group
+became a generate block) but kept timing out on three of them - the
+AR inside the section, the FIFO never written full, the length fault -
+and on the data claim it reached frame 7 with 10,486 clauses in 49 s
+and did not converge (measured). Each of those needs an invariant
+relating the unit's bookkeeping to the memory's: counts, the length
+queue, the read engine's position, the reservation, the realigner's
+window, the chain of live bursts. pdr did earn its run: it found a
+real hole, a beat counter that wrapped and let a 512-beat burst after
+an init look short (fixed: it saturates).
+
+**So the invariants are written down.** Each is a helper assertion in
+the harness (`h_*` for the control bookkeeping, `d_*` for where the
+watched word is and what puts it there), attached to the unit's
+internals by probes - `connect -nounset -set` after `flatten` and
+`memory_map`, which make the store's and the FIFO's memories
+registers - and proven with the claims: k-induction proves every
+assertion of a task together, assuming them all at the steps before.
+Basecase and induction passing is an unbounded proof; the depth is the
+induction's (3 for the safety tasks; 19 and 15 for the two bounded
+ones, whose waits must fit the window). Every task attaches every
+probe, since an undriven probe is a free value and a helper reading one
+would be refuted rather than pass. The helpers were found by reading
+induction counterexamples; none was a defect in the RTL.
+
+**Three traps met on the way, each recorded where it bites.**
+- A window that does not start at reset: `f_past_valid || !rst_n` is
+  assumed every cycle, or k-induction opens on an unchecked state.
+- yosys sizes a narrowing cast inside a comparison without wrapping:
+  `0 == 5 + 3'(4'd3)` evaluates false in yosys 0.68 (measured), so the
+  harness's wrapping sums are explicitly sized wires.
+- The formal address space is 13 bits, so the section ends at least a
+  beat below 2^13; the engine's next-beat pointer would otherwise wrap
+  after the last beat. The hardware's addresses are 64 bits.
+
 ## What is NOT proven
 
 * **Other parameterizations.** The FIFO proof runs one small instance
@@ -231,6 +295,16 @@ table.
   is the exception**: it is proven at the real 24-bit chunk and at every
   (P, COLS) pair the tile builds, which is every rung and every
   `MUL_PASSES` value, so no width argument is being made for it.
+* **cft_ifetch at the U50's sizes, in a tile, and outside a cooperative
+  memory's bounds.** The proof runs a 16-instruction capacity, a 4-word
+  store, an 8-word FIFO, bursts of 2 (2 live, 4 in all), 13-bit
+  addresses and two-bit granules; the byte geometry is the image
+  format's, unchanged, and the unit reads no instruction bit, but
+  4,096 / 2^24 / 512 / 8 / 4 / 8 are argued from it, as the FIFO's
+  sizes are. It proves the unit alone: cft_seq's hooks are round 2's.
+  The two bounded claims hold in a world where the memory answers at
+  once; with a slow memory the wait adds the memory's round trip, which
+  tb/test_ifetch.py measures at 0, 125 and 256 cycles.
 * **cft_mulpass off the live rung.** The harnesses pace at exactly the
   lane's own NP, which is what `cft_lanes` gives the live rung. The
   module's header says a lane seeing a LONGER enabled period still
@@ -282,7 +356,7 @@ consequences shape this directory:
   induction whose hypothesis the engine finds rather than a human
   writes (the price: the invariant is not a readable artifact);
 * run.sh checks for assertion cells twice - once before anything runs,
-  on the five single-file harnesses, and once per task afterwards on
+  on the six single-file harnesses, and once per task afterwards on
   the model sby actually built and solved - because the frontend's
   failure mode for unsupported constructs is silence;
 * the negative control is not decoration. It is the proof that the

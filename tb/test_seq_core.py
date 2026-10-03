@@ -238,12 +238,35 @@ class SeqRam:
     addressing are what is under test - and the schedule-independence
     argument that hostile timing exists to make already has a home in
     test_krnl.py's backpressure runs against the same AXI style.
+
+    Revision 8 (R8S, parcel RD1) gave it a round trip and a depth, for
+    the instruction fetch, whose read engine keeps bursts in flight:
+    `rd_latency` cycles from an AR's acceptance to its first beat, a
+    PIPELINED delay as tb/busfx.py's latency() is - each burst is
+    stamped with its release cycle when accepted and served in order,
+    one beat a cycle - and `rd_depth` bursts accepted and unfinished
+    before ARREADY drops. At the defaults, 0 and 4, it is the slave it
+    always was, cycle for cycle. `clk` names the clock where the DUT's
+    is not `ap_clk`, and a DUT with no write master (cft_ifetch) is
+    served the read half alone. Two hooks let a bench be uncooperative
+    on purpose, both None by default: `rresp_at(burst, beat)` gives a
+    beat's RRESP, and `beats_for(burst, asked)` how many beats a burst
+    really returns, RLAST on the last - shorter or longer than ARLEN
+    asked is a length fault. Bursts are numbered from 0 in issue order,
+    as arlog lists them.
     """
 
-    def __init__(self, dut, size=RAM_BYTES):
+    def __init__(self, dut, size=RAM_BYTES, rd_latency=0, rd_depth=4,
+                 clk=None):
         self.dut = dut
         self.size = size
         self.mem = bytearray(size)
+        self.rd_latency = rd_latency
+        self.rd_depth = rd_depth
+        self.clk = dut.ap_clk if clk is None else clk
+        self.has_wr = hasattr(dut, "m_wr_awvalid")
+        self.rresp_at = None
+        self.beats_for = None
         self.reset_log()
 
     # -- test-side access ------------------------------------------------
@@ -353,15 +376,23 @@ class SeqRam:
         dut.m_rd_rdata.value = 0
         dut.m_rd_rlast.value = 0
         dut.m_rd_rresp.value = 0
-        dut.m_wr_awready.value = 1
-        dut.m_wr_wready.value = 1
-        dut.m_wr_bvalid.value = 0
-        dut.m_wr_bresp.value = 0
+        if self.has_wr:
+            dut.m_wr_awready.value = 1
+            dut.m_wr_wready.value = 1
+            dut.m_wr_bvalid.value = 0
+            dut.m_wr_bresp.value = 0
 
+        # A pending read is [address of its next beat, beats it will
+        # still send, the first cycle it may be presented in, its number,
+        # beats sent so far]. `cyc` numbers the cycle whose ReadOnly this
+        # pass is in; a burst accepted in it is presentable from cycle
+        # cyc + 1 + rd_latency, which at latency 0 is the very next
+        # cycle - the slave this class has always been.
         pend, cur_r = [], None
         awq, wq, bq, cur_w = [], [], 0, None
-        arready, rvalid, rlast, rdata = 1, 0, 0, 0
+        arready, rvalid, rlast, rdata, rresp = 1, 0, 0, 0, 0
         bvalid = 0
+        cyc = 0
 
         while True:
             await ReadOnly()
@@ -372,15 +403,19 @@ class SeqRam:
                 self._check_burst(addr, alen, "read")
                 if addr % BEAT_BYTES:
                     self.unaligned_ar += 1
-                pend.append([addr, alen + 1])
+                n = len(self.arlog)
+                beats = (alen + 1 if self.beats_for is None
+                         else self.beats_for(n, alen + 1))
+                pend.append([addr, beats, cyc + 1 + self.rd_latency, n, 0])
                 self.ar_count += 1
                 self.arlog.append((addr, alen + 1))
             if rvalid and _i(dut.m_rd_rready):
                 cur_r[0] += BEAT_BYTES
                 cur_r[1] -= 1
+                cur_r[4] += 1
                 if cur_r[1] == 0:
                     cur_r = None
-            if cur_r is None and pend:
+            if cur_r is None and pend and pend[0][2] <= cyc + 1:
                 cur_r = pend.pop(0)
 
             was_valid, rvalid = rvalid, int(cur_r is not None)
@@ -388,56 +423,63 @@ class SeqRam:
                 rlast = int(cur_r[1] == 1)
                 rdata = int.from_bytes(
                     self.mem[cur_r[0]:cur_r[0] + BEAT_BYTES], "little")
+                if self.rresp_at is not None:
+                    rresp = self.rresp_at(cur_r[3], cur_r[4])
             else:
                 rlast = 0
-            arready = int(len(pend) < 4)
+            arready = int(len(pend) < self.rd_depth)
 
             # ---- write master ------------------------------------------
-            if _i(dut.m_wr_awvalid):
-                addr, alen = _i(dut.m_wr_awaddr), _i(dut.m_wr_awlen)
-                self._check_burst(addr, alen, "write")
-                awq.append([addr, alen + 1])
-                self.aw_count += 1
-            if _i(dut.m_wr_wvalid):
-                wq.append((_i(dut.m_wr_wdata), _i(dut.m_wr_wstrb),
-                           _i(dut.m_wr_wlast)))
-            if bvalid and _i(dut.m_wr_bready):
-                bvalid = 0
+            if self.has_wr:
+                if _i(dut.m_wr_awvalid):
+                    addr, alen = _i(dut.m_wr_awaddr), _i(dut.m_wr_awlen)
+                    self._check_burst(addr, alen, "write")
+                    awq.append([addr, alen + 1])
+                    self.aw_count += 1
+                if _i(dut.m_wr_wvalid):
+                    wq.append((_i(dut.m_wr_wdata), _i(dut.m_wr_wstrb),
+                               _i(dut.m_wr_wlast)))
+                if bvalid and _i(dut.m_wr_bready):
+                    bvalid = 0
 
-            while True:
-                if cur_w is None:
-                    if not awq:
+                while True:
+                    if cur_w is None:
+                        if not awq:
+                            break
+                        base, beats = awq.pop(0)
+                        cur_w = [base, beats, 0]
+                    if not wq:
                         break
-                    base, beats = awq.pop(0)
-                    cur_w = [base, beats, 0]
-                if not wq:
-                    break
-                data, strb, last = wq.pop(0)
-                at = cur_w[0] + cur_w[2] * BEAT_BYTES
-                for k in range(BEAT_BYTES):
-                    if (strb >> k) & 1:
-                        self.mem[at + k] = (data >> (8 * k)) & 0xFF
-                self.wbeats.append((at, strb))
-                cur_w[2] += 1
-                ends = cur_w[2] == cur_w[1]
-                assert bool(last) == ends, (
-                    f"WLAST at beat {cur_w[2]} of a burst AWLEN said was "
-                    f"{cur_w[1]} beats long (AXI4 A3.4.1)")
-                if ends:
-                    bq += 1
-                    cur_w = None
-            if not bvalid and bq:
-                bq -= 1
-                bvalid = 1
+                    data, strb, last = wq.pop(0)
+                    at = cur_w[0] + cur_w[2] * BEAT_BYTES
+                    for k in range(BEAT_BYTES):
+                        if (strb >> k) & 1:
+                            self.mem[at + k] = (data >> (8 * k)) & 0xFF
+                    self.wbeats.append((at, strb))
+                    cur_w[2] += 1
+                    ends = cur_w[2] == cur_w[1]
+                    assert bool(last) == ends, (
+                        f"WLAST at beat {cur_w[2]} of a burst AWLEN said was "
+                        f"{cur_w[1]} beats long (AXI4 A3.4.1)")
+                    if ends:
+                        bq += 1
+                        cur_w = None
+                if not bvalid and bq:
+                    bq -= 1
+                    bvalid = 1
 
-            await RisingEdge(dut.ap_clk)
+            await RisingEdge(self.clk)
+            cyc += 1
             dut.m_rd_arready.value = arready
-            dut.m_wr_bvalid.value = bvalid
+            if self.has_wr:
+                dut.m_wr_bvalid.value = bvalid
             if rvalid or was_valid:
                 dut.m_rd_rvalid.value = rvalid
                 dut.m_rd_rlast.value = rlast
                 if rvalid:
                     dut.m_rd_rdata.value = rdata
+                    if self.rresp_at is not None:
+                        dut.m_rd_rresp.value = rresp
 
 
 # ----------------------------------------------------------------------

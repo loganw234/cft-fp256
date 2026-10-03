@@ -211,13 +211,24 @@ cycles krnlfused krnlplain simmc seqcycles:
 # without it, and this list HAS drifted (cft_reduce_acc shipped
 # unlisted, so one gate run "passed" while skipping it).
 # cft_normseg's ports are packed vectors now, which is all 0.33 could not parse.
+# rtl/cft_ifetch.sv (revision 8's instruction fetch) is read with the
+# kernel and also elaborated on its own, at the U50's capacities and with
+# no stream, with an explicit no-latch check: until round 2 instantiates
+# it in cft_seq, `hierarchy -top cft_krnl` drops it, and a module nothing
+# elaborates is a module this gate would pass unread.
 yosys-lint:
 	yosys -q -p "read_verilog -sv -I rtl rtl/cft_fpfma.sv rtl/cft_fpfma_pipe.sv \
 	  rtl/cft_opmux.sv rtl/cft_simpleops.sv rtl/cft_imul.sv rtl/cft_seedop.sv rtl/cft_csr.sv \
 	  rtl/cft_fifo.sv rtl/cft_mulfrac.sv rtl/cft_mulpass.sv rtl/cft_reduce_acc.sv rtl/cft_normseg.sv \
 	  rtl/cft_engine.sv rtl/cft_engine_stream.sv \
-	  rtl/cft_lanes.sv rtl/cft_seq.sv rtl/cft_krnl.sv; \
+	  rtl/cft_lanes.sv rtl/cft_ifetch.sv rtl/cft_seq.sv rtl/cft_krnl.sv; \
 	  hierarchy -check -top cft_krnl; proc; opt -fast; stat -top cft_krnl"
+	yosys -q -p "read_verilog -sv rtl/cft_fifo.sv rtl/cft_ifetch.sv; \
+	  hierarchy -check -top cft_ifetch; proc; opt -fast; \
+	  select -assert-none t:\$$dlatch t:\$$adlatch t:\$$dlatchsr; stat -top cft_ifetch"
+	yosys -q -p "read_verilog -sv rtl/cft_fifo.sv rtl/cft_ifetch.sv; \
+	  chparam -set STREAM_D 4096 cft_ifetch; hierarchy -check -top cft_ifetch; proc; opt -fast; \
+	  select -assert-none t:\$$dlatch t:\$$adlatch t:\$$dlatchsr; stat -top cft_ifetch"
 
 # The standardized verification run: every gate, one command,
 # resumable and logged, census block at the end. verify/README.md.
@@ -244,14 +255,16 @@ verify-gate:
 
 .PHONY: verify verify-quick verify-gate formal formal-image yosys-lint
 
-# The formal property gate (formal/README.md): six proof files run as
-# thirty tasks - the unbounded FIFO proof, the complete seedop
+# The formal property gate (formal/README.md): seven proof files run as
+# thirty-five tasks - the unbounded FIFO proof, the complete seedop
 # special-routing proof, the simpleops-vs-frozen-ref equivalence
 # miter, the leading-zero cone against the priority form it replaced
-# at all four window widths, and cft_mulpass' exactness at the real
+# at all four window widths, cft_mulpass' exactness at the real
 # 24-bit chunk for every pass geometry the tile builds (as two lemmas
 # per geometry, plus the whole claim as one property for the four
-# geometries where a solver takes it) - plus the negative control, all
+# geometries where a solver takes it), and revision 8's instruction
+# fetch, cft_ifetch, by k-induction (its control, its words, its bounded
+# answer and its quiesce, with a cover) - plus the negative control, all
 # inside the pinned cft-formal image. formal/run.sh is the list, and
 # the recipe exits nonzero unless every task passes AND the negative
 # control is refuted.

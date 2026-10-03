@@ -9,8 +9,8 @@
 # (docker/Dockerfile.formal), so the host needs Docker and nothing
 # else. Same gate on a developer box and in CI, same claim.
 #
-# The gate is six proof files - thirty tasks - and a tripwire, in this
-# order:
+# The gate is seven proof files - thirty-five tasks - and a tripwire, in
+# this order:
 #
 #   fifo.sby      prove+cover   cft_fifo contract, unbounded (pdr)
 #   seedop.sby    check+cover   cft_seedop special-case routing
@@ -23,6 +23,10 @@
 #                               composition argument's independent check
 #   lzcone.sby    4 rungs       cft_lzcone == the priority-loop cone it
 #                               replaced, complete at each window width
+#   ifetch.sby    4 proofs      cft_ifetch, revision 8's instruction fetch:
+#                 + cover       its control, its words, its bounded answer
+#                               and its quiesce, unbounded (k-induction
+#                               with proven helper invariants)
 #   negcontrol.sby              a deliberately broken property that MUST
 #                               be refuted - a gate that cannot fail
 #                               proves nothing, and this run discovered
@@ -32,11 +36,12 @@
 #
 # VACUITY IS CHECKED TWICE, and the second check is the general one.
 #
-# Before any proof runs, a preflight elaborates the five single-file
+# Before any proof runs, a preflight elaborates the six single-file
 # harnesses and counts their assertion cells, because the frontend's
 # failure mode for unsupported constructs is silence, not an error.
 # That check cannot cover mulexact.sby, whose model only exists after a
-# flatten, a cutpoint and a set of `connect` commands; mirroring those
+# flatten, a cutpoint and a set of `connect` commands (ifetch.sby's is
+# counted at its harness's defaults, before its probes attach); mirroring those
 # in a second script would be a copy to drift.
 #
 # So EVERY task, old and new, is also checked after it runs, on the
@@ -95,6 +100,7 @@ vacuity seedop     tb_seedop_formal   11 ../rtl/cft_seedop.sv tb_seedop_formal.s
 vacuity equiv      tb_simpleops_equiv  3 ../rtl/cft_simpleops.sv ../tb/wrappers/cft_simpleops_ref.sv tb_simpleops_equiv.sv
 vacuity lzcone     tb_lzcone_equiv     3 -I ../rtl ../rtl/cft_fpfma_pipe.sv cft_lzcone_ref.sv tb_lzcone_equiv.sv
 vacuity negcontrol tb_negcontrol_formal 1 ../rtl/cft_fifo.sv tb_negcontrol_formal.sv
+vacuity ifetch     tb_ifetch_formal   26 ../rtl/cft_fifo.sv ../rtl/cft_ifetch.sv tb_ifetch_formal.sv
 
 if [ "$preflight_bad" -ne 0 ]; then
     echo
@@ -223,6 +229,18 @@ run_proof mulpass_real.sby p237c1  1 "fp256 x10: whole claim, one property"
 # arithmetic. Both are measured in the 2026-09-07 entry, with the step
 # each stalls on. mulexact.sby covers every one of those geometries at
 # the real chunk, which is what the gate certifies.
+
+# cft_ifetch (revision 8, R8S; parcel RD1, 2026-10-03), at a 16-word
+# capacity, a 4-word store, an 8-word FIFO and two-bit granules
+# (tb_ifetch_formal.sv has the scope). Each task is k-induction over its
+# claims and the helper invariants that make them inductive, all
+# proven; ifetch.sby says why not pdr. The minimums are each task's
+# measured count of checks in its solved model.
+run_proof ifetch.sby   prove         26 "fetch: control, faults, AR, FIFO"
+run_proof ifetch.sby   data_prove    49 "fetch: each word is the image's"
+run_proof ifetch.sby   deliver_prove 50 "fetch: answered within 18 cycles"
+run_proof ifetch.sby   ends_prove    27 "fetch: idle within 14 of a stop"
+run_proof ifetch.sby   cover         13 "fetch: control shapes reachable"
 
 # --- the negative control ------------------------------------------------
 # expect fail in negcontrol.sby means: rc 0 == the broken property was
