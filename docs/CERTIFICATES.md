@@ -2513,6 +2513,18 @@ whose checks are held by the gates' controls: test_cert.py's through
 section 2, and segrun_check's section 12. The census below is
 verifier-W1's, run after the move.
 
+Since version 2's C half (parcel CV2CA, 2026-10-02) `tools/audit.c` has
+259 sites, and `definition-differs` is a site of its own (the judgement
+`refuse` hands to `judge_differs`), so planting it makes a re-derivation
+refuse by its own name. The census also reports version 2's names: each
+one's sites, and how it found them, and each name with no site - a
+check that needs a source or a regeneration, which the tool does not
+take - with why. Nor does it plant inside `tools/ed25519.h` or
+`tools/sha512.h`, whose answers section 7 holds to their vectors. Its
+instrumented copy was built and replayed (MEASURED, three sites planted,
+the baseline 192 of 192 recorded cases); the census over every site and
+every recorded case has not been run on version 2: it is the lead's.
+
 On `tools/audit.c` as of 0ad2609 (unchanged since the move, 0612b37),
 with the gate's 6,669 cases, the census found 163 sites (186 s on the
 desktop; verifier-W1, 2026-09-30). At ca1327f, before the move, it
