@@ -634,7 +634,7 @@ raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8
 
 case lorenz63-rk4-fp64-sourced
 what Lorenz-63 compiled from programs/systems/lorenz63-rk4-fp64.cftl by cftc for sw: 3 lanes, a main run of 3 segments, a half-step run of 6 on the compile's half bank (its h-slots the compile's), and a wider-source run of 3 - the source compiled at fp128; the wider-source estimate, whose wider run has the source's constants rounded at fp128 where version 1's carries the fp64 bank's widened, and the step-halving estimate
-certificate certificates/lorenz63-rk4-fp64-sourced/lorenz63-rk4-fp64-sourced.cert 9b5eb27ad68c0bfab4d6fc4dd04914b909f8401d6fbaed86ced9b7f71793a77e
+certificate certificates/lorenz63-rk4-fp64-sourced/lorenz63-rk4-fp64-sourced.cert 8524c7101d4d705b7d4d3bdd917f7e1851588f65793f6ed5886728266fee19cb
 version 2
 mode open
 depth 256
@@ -761,7 +761,7 @@ block 2 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
 
 case lorenz63-rk4-fp64-rebuilt
 what Lorenz-63 compiled by cftc, 2 lanes, 2 segments, its initial state made by the shake-box generator: its audit is handed the source and no state, recompiles the image, regenerates the initial state and re-runs every segment - rebuilt
-certificate certificates/lorenz63-rk4-fp64-rebuilt/lorenz63-rk4-fp64-rebuilt.cert 962583e7e3403af2b66e2c393861c4a77fbc677bde7e8c4e725781f0d35cd048
+certificate certificates/lorenz63-rk4-fp64-rebuilt/lorenz63-rk4-fp64-rebuilt.cert fcdfbd443c4ac0eabf934b1f19946d7b01842241075a69a2f28ae257a6938cd5
 version 2
 mode open
 depth 256
@@ -1266,7 +1266,7 @@ raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8
 
 case v2-source-format
 what the fp128 compile certified as a main run of the fp64 source (from lorenz63-rk4-fp64-sourced; refused source-format)
-certificate certificates/v2-controls/v2-source-format.cert 1e60fdc036e6984bf3f302541a47cb30cf61d3a4524016254fe4db995564544e
+certificate certificates/v2-controls/v2-source-format.cert a40ae6e9c0ad1e4a78685ff2b7b1f9c7d0e14b3b79f496bd401c9116575d9dd4
 version 2
 mode open
 depth 256
@@ -1296,7 +1296,7 @@ boundary 3 86905264cdb35c0ddd13585dec4e9db35b947ae7b1525b5e83387ce01199926f
 
 case v2-source-graph
 what another system's step graph named (from lorenz63-rk4-fp64-sourced; refused source-graph)
-certificate certificates/v2-controls/v2-source-graph.cert 2b29d8622874802dd877a8f17cbafe0c0387d289bbbdb31dced18187293b432e
+certificate certificates/v2-controls/v2-source-graph.cert 635128279a70316158da05825ffd845c853279156e99e352430b4ff423693d31
 version 2
 mode open
 depth 256
@@ -1352,7 +1352,7 @@ boundary 3 86905264cdb35c0ddd13585dec4e9db35b947ae7b1525b5e83387ce01199926f
 
 case v2-source-param
 what a source param in a spelling that is not the language's canonical one, rho 28.0 (from lorenz63-rk4-fp64-sourced; refused source-param)
-certificate certificates/v2-controls/v2-source-param.cert 38850c84c5abaf36772f728a0884f71ef749ab90fbf725fd0e82335a6b88fdce
+certificate certificates/v2-controls/v2-source-param.cert 102e30ebe5af0bf89be66df8f50b60adca894d543dd0d9fc551f1351bf7a36dd
 version 2
 mode open
 depth 256
@@ -1439,7 +1439,7 @@ boundary 3 6bc9ddfabdb2e4b00f118b38ae9a3c6b07c934c15ce77385f768777639801e7c
 
 case v2-source-image
 what the steps restated: the recompile's image is not the run's (from lorenz63-rk4-fp64-sourced; refused source-image)
-certificate certificates/v2-controls/v2-source-image.cert 9586a0fb855b0a809ce97e433143c04ddbfab1eab4cd0b81426c26cad068b893
+certificate certificates/v2-controls/v2-source-image.cert 9b248478a51180c2b351e8f839954a20d9627fe49381b2e598ccf02546178bea
 version 2
 mode open
 depth 256
@@ -1495,7 +1495,7 @@ boundary 3 86905264cdb35c0ddd13585dec4e9db35b947ae7b1525b5e83387ce01199926f
 
 case v2-compiler-differs
 what another compiler named, whose recompile differs: the auditor's own limit (from lorenz63-rk4-fp64-sourced; refused compiler-differs)
-certificate certificates/v2-controls/v2-compiler-differs.cert fa47d616d14b82da78fac7bcb89ad47a3ea5815ab11ffb62d3e476ec73e23d4f
+certificate certificates/v2-controls/v2-compiler-differs.cert d78f403b49822e6cf993e59cae98a4d13e9ff892e8f46d4545d305a1d1af237c
 version 2
 mode open
 depth 256
@@ -1730,7 +1730,7 @@ block 2 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
 
 case v2-aux-source
 what the wider-source run compiled for another target (from lorenz63-rk4-fp64-sourced; refused aux-source)
-certificate certificates/v2-controls/v2-aux-source.cert a70c74e41a71d10c00533988634298c457eab6c032813af63302501828699135
+certificate certificates/v2-controls/v2-aux-source.cert 7b5a2f86dcf42ec4da95ac76a5cf76284790021a6bddcadcb432ac9621897151
 version 2
 mode open
 depth 256
