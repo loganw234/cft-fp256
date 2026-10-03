@@ -37,7 +37,7 @@ fails.
 | `lzcone.sby` x4 | rtl/cft_fpfma_pipe.sv | `cft_lzcone` bit-identical to `formal/cft_lzcone_ref.sv`, the priority-loop cone frozen at the moment of the split (2026-09-07), at each of the four window widths - 78, 165, 345 and 717 bits | comb miter; one bmc step is the whole input space at each width |
 | `ifetch.sby prove` | rtl/cft_ifetch.sv | never a word past n_insns or after a fault; a fault bit raised by a bad beat the next cycle and by nothing else; every AR beat-aligned, at most BURST beats, inside one 4 KB page and the instruction section, held until taken; at most OUT_MAX outstanding; `idle` exactly when nothing is outstanding; no new AR after a quiesce, an init or a fault; cft_fifo's caller contract | **unbounded** (k-induction, depth 3, with 10 helper invariants, all proven), ~1 s |
 | `ifetch.sby data_prove` | rtl/cft_ifetch.sv | every word `ok` presents is the image's word at the address presented - no wrong place, order, dropped or doubled position, or stale store slot | **unbounded** (k-induction, depth 3, 22 more helpers), ~5 s |
-| `ifetch.sby deliver_prove` | rtl/cft_ifetch.sv | a consumer waiting on one address below n_insns is answered within 18 cycles, in a cooperative world | **unbounded** (k-induction, depth 19), ~4 min |
+| `ifetch.sby deliver_prove` | rtl/cft_ifetch.sv | a consumer waiting on one address below n_insns is answered within 18 cycles, in a cooperative world | **unbounded** (k-induction, depth 19), 3 to 4 min |
 | `ifetch.sby ends_prove` | rtl/cft_ifetch.sv | idle within 14 cycles of a quiesce, an init or a fault, faults included | **unbounded** (k-induction, depth 15), ~4 s |
 | `ifetch.sby cover` | rtl/cft_ifetch.sv | 13 shapes reachable: a straddling word, a backward jump with bursts in flight, the FIFO full, the most bursts outstanding, a 4 KB cut, both faults, an underrun, the capacity's last word | bmc to depth 40, ~8 s |
 | `negcontrol.sby` | rtl/cft_fifo.sv | "the head bypass was never needed" - **deliberately false, must be refuted** | bmc, cex at step 3 |
@@ -449,3 +449,28 @@ and time out rather than fail. It did not - bitwuzla refuted it in
 seconds, on two columns at once.
 
 A proof that has never been watched failing is a claim, not a gate.
+
+cft_ifetch was validated against S8's nine plants for the fetch
+(docs/studies/R8S-streaming.md, sections 8 and 13), each a one-edit
+copy of the unit (2026-10-03, parcel RD1). Run as the claims alone - a
+bounded check from reset with the harness's `HELPERS = 0`, so that the
+failure names the claim the plant breaks - every one was refuted in
+one or two seconds:
+
+| plant | refuted claim | step |
+|---|---|---|
+| the store's range one past its end | `a_word` | (data_prove's own basecase) |
+| a redirect that keeps the FIFO's words | `a_word` | 7 |
+| abandoned bursts' beats not dropped | `a_word` | 7 |
+| the realigner one granule off at an odd offset | `a_word` | 7 |
+| a retarget that keeps the old count | `a_word` | 4 |
+| no quiesce | `a_quiet` | 4 |
+| a faulted word handed over | `a_fault_ends` | 6 |
+| no stream built (the capacity taken as the store's depth) | `a_delivers` | 20 |
+| the presented address one bit short | `a_past_n` | 3 |
+
+In the gate's own tasks, with the helpers on, each plant fails a
+helper first or leaves a task unproven, and the no-stream plant leaves
+the probes nothing to attach to; so the gate goes red on every one of
+them, by the helper's name where the bench and the claims-alone run
+name the behaviour.

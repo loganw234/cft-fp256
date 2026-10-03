@@ -5,7 +5,10 @@ reads the program from card memory instead of holding it on chip
 (docs/ROADMAP.md, "Step 6 ... (plan of record, 2026-10-02)", R8S). This
 study designs the fetch, prices it, and outlines the RTL plan, which goes
 to Logan before any RTL work. Nothing in it is built. Every file and line
-number is the tree at 1acc73a.
+number is the tree at 1acc73a. (Since 2026-10-03 the fetch unit is
+built, alone, and no tile carries it yet: section 13 records it as
+built, with the interface round 2 wires and every departure from
+sections 2 and 3.)
 
 How each number is marked:
 - **measured**: read from a Vivado report or a card run, or run for this
@@ -987,6 +990,216 @@ meets the fetch:
    the result queue's three slots (R19 measured 7.0; section 4).
    Recommended: a bench measures it, and cftc corrects it with C4's other
    cost-model work, which already changes the committed manifests.
+
+## 13. The fetch unit as built (parcel RD1, 2026-10-03)
+
+Round 1, item D1, of revision 8's RTL revision (docs/ROADMAP.md,
+"Revision 8: step 6's RTL revision", part 5): the unit of section 2,
+alone, under its own proof. cft_seq.sv is round 2's and is untouched;
+nothing instantiates the unit yet. Numbers are marked as the rest of
+this study marks them. The work, every run and every measurement are
+in the round's ledger (`ledger/RD1.md`).
+
+### What is in the tree
+
+- **rtl/cft_ifetch.sv.** The store (STORE_D, the build's SEQ_IMEM_D,
+  4,096 at the U50); the stream (a cft_fifo of 2^FIFO_LOG2 = 512 words,
+  filled by the unit's own read engine on master A: bursts of 8 beats,
+  4 live, 8 counting abandoned ones, one ID in order, never across 4 KB
+  or past n_insns, a burst issued whole and only into reserved room);
+  the realigner at 4-byte granules; the rules of section 2 (hit and
+  miss, where the stream stands, the redirect, the capture, the
+  retarget, the quiesce, the faults). STREAM_D equal to STORE_D builds
+  no stream: no FIFO, no engine, no realigner, the port tied off, idle
+  high. Parameters a build sets: STORE_D and STREAM_D; the others are
+  this study's figures.
+- **tb/test_ifetch.py**, `make -C tb ifetch`. A cycle-level model of
+  cft_seq's fetch states drives the unit and decides its control flow
+  from the words it is handed; a reference walk of each program, under
+  the same seeded lane decisions, must visit the same addresses with
+  the same words. SeqRam (tb/test_seq_core.py) gained the read latency
+  section 8 asks for - pipelined, stamped at each burst's acceptance -
+  an acceptance depth, and two fault hooks; at its defaults it is the
+  slave it was. Not in SIM_BENCHES yet: joining moves the bench count
+  CLAUDE.md states, which is the lead's to restate.
+- **formal/ifetch.sby** with tb_ifetch_formal.sv, in formal/run.sh.
+- **yosys-lint** reads the unit with the kernel (unused there until
+  round 2) and elaborates it alone at both builds, with a no-latch
+  check.
+
+### The interface, for round 2
+
+The module's header has it in full; in brief, cft_seq drives:
+
+| port | cft_seq drives or reads | when |
+|---|---|---|
+| `init` | 1 | S_IDLE with `start`, before the parse's first instruction |
+| `cfg_ibase` | `prog_q + 32 + (bank_ext_q ? 0 : h_nconsts << esz_sh)` | stable from the parse to the run's end |
+| `cfg_n` | `h_ninsns[PCW:0]` (the header check has refused more than STREAM_D) | as cfg_ibase |
+| `ld`, `ld_word` | S_IMG_PARSE's instruction arm, `pw[63:0]`, in `insn_i` order | every instruction; the unit keeps the first STORE_D, and the parse still scans all of them |
+| `want`, `addr` | `(S_FETCH or S_FETCH2 or S_SKIP_F or S_SKIP_D or S_ISSUE) && !take`; `pc + 1` in S_ISSUE, `pc` otherwise | every cycle |
+| `word`, `ok` | `cur <= word` where today `cur <= imem_q`; the skip reads `word` | a cycle after the want |
+| `take` | S_FETCH2 and S_SKIP_D when `ok`; S_ISSUE's last unheld step when it continues | only with `ok` |
+| `cap`, `cap_pc` | 1 and `pc + 1` when a REPEAT enters its body (S_DECODE, the branch that pushes the loop stack) | never with want or take |
+| `quiesce` | S_DRAIN_SETUP (every cycle of it is harmless) | the block's end |
+| `idle` | S_WAIT_B waits for it beside the write responses; the abort waits for it before done | |
+| `fault_rd`, `fault_len` | OR into STATUS[0] and STATUS[2]; their OR is the abort's fetch fault | sticky to the next init |
+| `m_rd_*` | muxed with the main read engine onto cft_seq's port: the fetch's AR while it is valid, R beats to the fetch while it is not idle, `m_rd_sel` 0 while the fetch owns the port | from a block's first want until idle after it ends |
+
+What changes in the states:
+- **want is low in a take cycle.** Each of the three consuming states
+  presents the consumed word's own address in the cycle it consumes,
+  and asking the stream for a word again after its pop is a jump to
+  it (a redirect).
+- **S_FETCH2 and S_SKIP_D wait while `ok` is low**, presenting the
+  address again; S_ISSUE's continuation needs `ok`. With want low in a
+  take cycle, `ok` means exactly "the word presented last cycle is
+  here", so `nxt_ok` is redundant beside it, and `ok` is never high for
+  an address at or past n_insns, so it stands for `32'(pc) + 32'd1 <
+  h_ninsns` too (section 2, optional).
+- **A fault leaves `ok` low for ever**, so a consumer waiting in
+  S_FETCH2 waits until the abort ends the run: the abort must watch the
+  fault bits from every state.
+
+What round 2 also owes the unit (sections 2 and 9): `pc` and
+`skip_depth` at PCW+1 bits of the capacity and `lp_body` at PCW; the
+header check against STREAM_D; the elaboration guards; SEQ_STREAM_D in
+cft_krnl.sv with CAPS and CAPS2 from it; and the main read engine's
+issue held off while the fetch is not idle - the unit issues only
+between a want and the next quiesce, init or fault, so S_WAIT_B waiting
+for idle is the whole of it.
+
+### Where it departs from, or settles, sections 2 and 3
+
+1. **An address at or past n_insns asks for nothing.** No redirect, and
+   `ok` stays low: the unit never returns a word past n_insns (section
+   2 says so) and is not disturbed by the lookahead of the last
+   instruction.
+2. **A retarget also needs the body's first address below n_insns.**
+   Without that, a REPEAT as an image's last word - only an image that
+   bypassed the loader has one - would empty a no-stream build's store,
+   and the next block's pc 0 would wait for a stream that is not built.
+   With it, a no-stream build never retargets.
+3. **A fault on any fetch burst ends delivery**, abandoned or live: the
+   memory failed on a read of the image either way, and the bench
+   holds a fault on a burst a quiesce abandoned.
+4. **"The unit delivers no word from that burst"** is built as: no word
+   from a beat that faulted (non-OKAY, an early RLAST, or no RLAST on
+   the beat ARLEN named), and no word at all once a fault is seen. An
+   earlier OKAY beat of the same burst may already have been handed
+   over: each beat is vouched for by its own RRESP, and holding every
+   burst until its last beat would cost every stream start a burst of
+   latency. The plan's "a read fault on an instruction word ends the
+   run" holds: the unit raises the bit and stops, and the abort ends
+   the run.
+5. **The realigner holds RREADY low while it empties a beat**: four
+   cycles a beat, a word a cycle, against the consumer's peak of half a
+   word a cycle (section 1). Abandoned beats, and every beat once a
+   fault is seen, are taken at once.
+6. **The reservation is in beats**: the FIFO's count, plus a beat for a
+   realigner still emptying one, plus 4 instructions for every live
+   beat in flight and in the burst, never past 512 - and the burst
+   issued whole or not at all, the engine's full-burst rule.
+7. **The per-burst beat counter saturates.** The proof found that a
+   wrapping 9-bit counter lets a burst that never ends look short, or
+   right, after an init clears its first flag (below).
+8. **The burst's length check is the engine's rule**, beat by beat:
+   short or long is flagged on the beat that shows it, and the burst is
+   drained to its RLAST.
+
+### The proof
+
+Every task is unbounded: k-induction proving all of a task's assertions
+together, its claims and the helper invariants that make them
+inductive, each of which is proven, not assumed. At a 16-instruction
+capacity, a 4-word store, an 8-word FIFO, bursts of 2 (2 live, 4 in
+all), 13-bit addresses and two-bit granules; the byte geometry is the
+image format's, unchanged (measured, the cft-formal image, one task at
+a time, 4 CPUs, two runs, the desktop at 7 to 51%):
+
+| task | the memory | proves | depth | time | checks |
+|---|---|---|---|---|---|
+| prove | free timing, RLAST, RRESP | never past n_insns or after a fault; faults raised by bad beats and only by them; every AR aligned, at most BURST beats, inside a 4 KB page and the section, held until taken; at most OUT_MAX outstanding; idle truthful; silence after a quiesce, init or fault; cft_fifo's caller contract | 3 | 1 s | 26 |
+| data_prove | honest, free timing | every word `ok` presents is the image's word at the address presented | 3 | 5 s | 49 |
+| deliver_prove | honest, prompt | a consumer waiting on one address is answered within 18 cycles | 19 | 176 to 243 s | 50 |
+| ends_prove | prompt, faults free | idle within 14 cycles of a quiesce, an init or a fault | 15 | 4 s | 27 |
+| cover | free | 13 shapes reached, at steps 3 to 14 | 40 | 8 s | 13 |
+
+data_prove's honest memory is enough because a word reaches `ok` at
+least two cycles after its beat lands, a bad beat raises its bit the
+next cycle, and `ok` is never high with a bit raised - all three in
+prove. pdr, the FIFO proof's engine, proved most control claims alone
+in seconds but not three of them nor the data claim (measured; formal/
+README.md has the figures), and on the way it found a real hole: the
+beat counter of departure 7, at step 518. The invariants k-induction
+needed were read off its counterexamples; none was a defect in the RTL.
+
+### The bench
+
+13 cases, each at SeqRam read latencies 0, 125 and 256, with a 64-word
+store and a 4,096-word capacity: 13/13 under Verilator (57 s wall) and
+under Icarus (69 s wall), the desktop idle (measured). What it
+measured, in the model:
+- **A program the store holds** reads nothing and never waits, at every
+  latency: every cycle is today's.
+- **A body that starts in the store and runs past it** (200
+  instructions from pc 5) and **a body past the store longer than it**
+  (200 past a 64-word store) wait no cycle at 125 or 256: the store's
+  words cover the refill. Each back-jump into the store redirects once
+  (counted: one burst at the store's end a pass).
+- **A body past the store that fits it** is captured: the block's
+  bursts are exactly one sequential stream. The next block's restart at
+  pc 0, after the store moved, waits one round trip: latency plus about
+  5 cycles. So does each enclosing back-jump that misses, nesting four
+  deep.
+- **The skip at a 256-cycle round trip** (a word every two cycles, the
+  fastest consumer) waits 1,101 cycles over a 4,093-word scan, about
+  13%; at 125, one cycle. Four bursts of eight in flight is section 1's
+  sizing for half a word a cycle at 256, and the unit's own few cycles a
+  round trip take it just past the edge. The card's bound is 144.
+- **The quiesce:** a block that halts while the stream prefetches is
+  idle 32, 129 and 258 cycles after its end at latencies 0, 125 and 256
+  - the round trip of what was in flight - and no AR begins until the
+  next block's first request.
+
+### The plants
+
+S8's nine (section 8), each in a fresh copy of commit d0c3fdf, each
+red by name in the bench and in the proof (measured). Plants 6 to 9
+name mechanisms that live partly in cft_seq.sv and cft_krnl.sv, round
+2's files; each is planted as the unit's own share of the mechanism,
+and round 2 plants the rest. "The claims alone" is a bounded check
+from reset of the proof's claims with its helpers switched off
+(`HELPERS = 0`), which names the claim a plant breaks; the gate's own
+tasks name the helper it breaks first, or prove nothing (a helper no
+longer inductive), and every plant fails at least one of them.
+
+| plant | as planted in the unit | the bench | the claims alone |
+|---|---|---|---|
+| 1. the store's range one past its end | the hit test reads `addr <= send` | 9 of the 12 cases the bench then had red: "the unit handed ... for address 64, whose word is ... - a word the memory did not deliver there" | `a_word` (data_prove's own basecase too) |
+| 2. a redirect that keeps the FIFO's words | the FIFO's clear is the quiesce's and the init's alone | 3 cases red, the body past the store, the body larger than the store, nesting: wrong words after a back-jump | `a_word`, step 7 |
+| 3. abandoned bursts' beats not dropped | no burst is ever treated as abandoned | nesting four deep, at latency 125: a wrong word at address 98 | `a_word`, step 7 |
+| 4. the realigner one granule off in the 4-byte case | every granule offset read as even | every_granule_offset and section_across_4k: wrong words at the odd offsets | `a_word`, step 7 |
+| 5. a retarget that keeps the old count | the retarget moves the range and keeps its count | 5 cases red: stale store words read as hits | `a_word`, step 4 |
+| 6. no quiesce | the stream stops only at an init | quiesce_stops_the_stream: "an AR ... began while the fetch was quiesced". The first bench had no case for it - its one early halt also planted a fault, which stopped the stream first - and the case was written for this plant | `a_quiet`, step 4 |
+| 7. a faulted word executed | `ok` not held low by the fault bits, and the realigner takes bad beats | the three fault cases: "ok high after a fault" | `a_fault_ends`, step 6 |
+| 8. CAPS2 from the store's depth instead of the capacity | the unit built as if its capacity were the store's depth: no stream | a hang: "a block did not end within 77,440 cycles (state FETCH2, pc 64)" | `a_delivers`, step 20; the gate's tasks cannot attach their probes, there being no stream |
+| 9. `pc` one bit short | the address the consumer presents read one bit short | only program_of_exactly_the_capacity, the implicit halt's image: "a word for address 4096, at or past n_insns = 4096" | `a_past_n`, step 3 |
+
+The claims alone on the unit as built: the control claims pass to
+depth 30 (341 s), the data claim through depth 14 before its steps
+outgrow a short run (measured).
+
+### Left for round 2 and for probe S
+
+- cft_seq's hooks, as the interface above says, then the bench
+  configuration `seq_corestr` (section 8) through the whole sequencer.
+- Probe S: whether Vivado keeps the store cascade-free
+  (`cascade_height` pins it if not); the path from `take` - late, out
+  of the admission - into the FIFO's read address (`rp + rd_en` into
+  the block RAM), which a skid register would cut at a cycle of
+  latency; the unit's LUTs and registers.
+- The bench joining SIM_BENCHES, with CLAUDE.md's count.
 
 ## Sources and measurements
 

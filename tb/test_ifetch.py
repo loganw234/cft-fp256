@@ -29,8 +29,10 @@ that fits it (captured) and one that does not, nesting four deep with
 early exits and skips at every depth, block restarts after a retarget,
 every 4-byte granule offset of the instruction section, a section
 across 4 KB, a program of exactly the capacity ending in HALT and by the
-implicit halt, and the faults - a non-OKAY beat, a short burst, a long
-one, and a fault on a burst a quiesce has abandoned.
+implicit halt, blocks that halt while the stream still prefetches (the
+quiesce: idle within a bound, no AR until the next block), and the
+faults - a non-OKAY beat, a short burst, a long one, and a fault on a
+burst a quiesce has abandoned.
 
     make -C tb ifetch                 Icarus (the suite's default)
     make -C tb ifetch SIM=verilator   while iterating
@@ -335,6 +337,8 @@ class Consumer:
         self.max_wait = 0        # the longest such run
         self.cycles = 0
         self.starts = []         # the monitor's cycle at each block's first want
+        self.max_idle = 0        # the longest quiesce-to-idle wait
+        self.q_cyc = 0
 
     def _drive(self, want=0, addr=0, take=0, cap=0, cap_pc=0, quiesce=0):
         d = self.dut
@@ -454,8 +458,10 @@ class Consumer:
             elif st == "END":
                 quiesce, st = 1, "IDLE"
                 self.mon.quiet = True
+                self.q_cyc = cyc
             elif st == "IDLE":
                 if _i(dut.idle):
+                    self.max_idle = max(self.max_idle, cyc - self.q_cyc)
                     self._drive()
                     return tr, False
             # a cycle spent waiting for a word that was asked for is a
@@ -716,6 +722,26 @@ async def program_of_exactly_the_capacity(dut):
             await run_case(b, words, 1, SEED + 23, lat,
                            "capacity, " + ("HALT" if is_ctrl(last) else "implicit halt"),
                            base=0x100000, limit=4 * n + 40 * (lat + 64))
+
+
+@cocotb.test()
+async def quiesce_stops_the_stream(dut):
+    """A block that halts while the stream is still prefetching past the
+    store, three blocks running: at each block's end the unit stops
+    issuing, drops what is in flight and is idle within a round trip and
+    its bursts' beats, and no AR begins until the next block's first
+    request (the monitor holds that). Without the quiesce the stream
+    would run on into the next block's setup reads - S8's plant 6."""
+    b = await bench_up(dut)
+    rng = random.Random(SEED + 40)
+    words = alus(rng, 10) + [halt()] + alus(rng, STORE_D + 400)
+    for lat in LATENCIES:
+        cons, mon = await run_case(b, words, 3, SEED + 41, lat, "quiesce")
+        bound = lat + 2 * OUT_MAX * BURST + 32
+        assert cons.max_idle <= bound, (
+            f"idle {cons.max_idle} cycles after a quiesce at latency {lat}, "
+            f"past {bound}: the stream did not stop")
+        dut._log.info(f"quiesce @ lat {lat}: longest quiesce-to-idle {cons.max_idle} cycles")
 
 
 # ---- the faults -------------------------------------------------------

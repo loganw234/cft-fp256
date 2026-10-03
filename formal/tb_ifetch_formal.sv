@@ -118,6 +118,11 @@ module tb_ifetch_formal #(
     parameter bit P_CTRL    = 1'b1,
     parameter bit P_DELIV   = 1'b0,
     parameter bit P_ENDS    = 1'b0,
+    // The helper invariants (h_*, d_*). On in every gate task; off only to
+    // run the claims alone as a bounded check from reset, which names the
+    // claim a planted defect breaks rather than the helper it breaks
+    // first (the plants were run that way, the round's ledger RD1.md).
+    parameter bit HELPERS   = 1'b1,
     parameter int WAIT_MAX  = 18,
     parameter int IDLE_MAX  = 14
 ) (
@@ -509,6 +514,8 @@ module tb_ifetch_formal #(
       if (f_past_valid) begin
         // the claim
         a_word:  assert (!(ok && p_addr == widx) || word == wdata);
+      end
+      if (f_past_valid && HELPERS) begin
         // where the watched word is
         d_store: assert (!(widx >= probe_base && widx < probe_send) || smem_w == wdata);
         d_fifo:  assert (!(probe_s_on && widx >= probe_spos &&
@@ -616,7 +623,7 @@ module tb_ifetch_formal #(
                   ((probe_drop_n == '0 && probe_out_n != '0) ? probe_bcnt : 9'd0);
 
     always_comb begin
-      if (f_past_valid) begin
+      if (f_past_valid && HELPERS) begin
         h_out:  assert (32'(probe_out_n) == 32'(qn) + (arvalid ? 1 : 0));
         h_lr:   assert (32'(probe_live_n) + 32'(probe_drop_n) == 32'(probe_out_n));
         h_live: assert (32'(probe_live_n) <= LIVE_MAX);
