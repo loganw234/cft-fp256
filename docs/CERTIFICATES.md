@@ -13,8 +13,9 @@ auditor of either version can be written from it alone. An auditor reads
 both versions, choosing by the magic line, and version 1's verdicts are
 unchanged but for one rule that came with version 2: a wider run of a
 routine image is refused `aux-image` ("Auxiliary runs"). The golden
-auditor does so today, and `cft-audit` reads version 1 until version 2's
-C half ("Version 2").
+auditor does so, and so does `cft-audit`, which reads both versions since
+version 2's C half and audits in C every step of version 2 that needs no
+source ("Version 2"; "The audit tool").
 
 Where version 1 stands (2026-09-30; version 2's own is under "Version
 2"):
@@ -2150,11 +2151,16 @@ and card-p3b3).
 
 `cft-audit` is the C auditor, the plan's step 4: every step of "The
 audit", the strict reader included, in this page's order, beside the
-golden one. `make -C host all` builds it, from `host/tools/audit.c`.
+golden one. Since version 2's C half (parcel CV2CA, 2026-10-02) it reads
+both versions and audits version 2 too, every step that needs no source
+(**Version 2**, below). `make -C host all` builds it, from
+`host/tools/audit.c`.
 
     cft-audit --cert CERT [--salt SALT] [--states DIR] [--seed HEX]
+              [--signature SIG] [--keyring RING] [--superseded OLD]
               --run 0 --image IMG [--bank BANK] [--stream a|b|c FILE ...]
                       [--choose all|sample:K|K,K,...]
+                      [--define all|K,K,...]
               [--run 1 --image IMG ...] ...
     cft-audit --read --cert CERT [--salt SALT]
     cft-audit --sample SEED R S K
@@ -2312,6 +2318,68 @@ is not independent of libcft. For a certificate cft-segrun made on the
 software backend, libcft made it, so only the golden auditor is
 independent of the producer there.
 
+**Version 2** (parcel CV2CA, 2026-10-02). A file whose first 18 bytes are
+`cft-certificate 2` and a newline is version 2's, as `cert.audit`
+chooses: version 2's strict reader ("Version 2's strict reader") and
+version 2's audit, in "Version 2's audit"'s order. Every other file is
+version 1's, read and audited as before. Version 2's inputs, beside
+version 1's options:
+- `--signature SIG`, `--keyring RING` and `--superseded OLD`: the `.sig`
+  file, a keyring and the superseded certificate (`signature`, `keyring`
+  and `superseded`), read before step 1;
+- `--define SPEC`, in a run's block: the definition re-run's segments,
+  `all` or `K,K,...` (`define`), held at step 2 as a choice is
+  (`choice`);
+- `--states DIR` also hands every file named `run-<r>-segment-<k>.flags`,
+  r and k in their one decimal spelling, as run r's block of segment k
+  (`lane_flags`), listed and opened before step 1 as a state file is; one
+  named so but spelt otherwise is `usage`. A raw end and a raw block
+  (`-raw.bin`, `-raw.flags`) are not read, and version 1 reads no block
+  file.
+A version-1 certificate handed one of these is `usage`, as `cert.audit`
+raises a TypeError for them.
+
+What it does with them:
+- **It takes no source,** and has no interpreter or compiler of the
+  language. A step that needs one refuses `source-missing` exactly where
+  the golden auditor handed no source does: a replay line of a re-run
+  segment, after the line's own checks (`replay-missing`,
+  `replay-unmarked`, `replay-raw`); a wider-source relation, after
+  `aux-format`, `aux-lanes`, `aux-source` and the steps; and a definition
+  re-run, at its first segment whose start is known (`state-missing`
+  before that). So it accepts a certificate with replay lines only where
+  the segments it re-runs carry none, and none with a wider-source run.
+  A run that names a source is reported "named, not handed".
+- **It regenerates no initial state.** A generator is reported: the golden
+  model's `shake-box` as not regenerated, any other as not known - the
+  lines the golden auditor prints when it is not asked to regenerate.
+- **Its re-runs** ask libcft for each segment's block (ABI 0.17's
+  `lane_flags`) where the run says `yes`, and hold it to the segment
+  line's `lanes`. Where the run says `no`, a mark is STATUS[6], the OR of
+  the lanes' marks (R23).
+- **The signature** is verified in C: Ed25519 (RFC 8032, section 5.1) in
+  `host/tools/ed25519.h`, with SHA-512 (FIPS 180-4) in
+  `host/tools/sha512.h`, both written for this tree from their
+  specifications, header-only, and verification alone
+  (`python/cft_sign.py` signs). The cofactored equation, S below L, R and
+  the key decoded by 5.1.3, and a key of small order refused `signer`
+  wherever a key is read - the issuer-key line, a keyring's line, a
+  signature file's key - through `ed25519_key_check`, the one decoding
+  cft-segrun shares. It is not constant-time: it handles public data
+  only.
+- **The definition** is this library's: cft.h's `CFT_PROFILE_*` and
+  `CFT_LANGUAGE_*`, which the gate holds to the golden model's. Where they
+  do not cover the certificate's, a re-derivation that fails - step 4's
+  loader verdicts, the wider-source relation, a re-run with its replay
+  line's checks, and the segment line's - is refused
+  `definition-differs` at its own location, as `cert2._Through` does.
+- **Accepted,** stdout is two header lines, `auditor cft-audit <build
+  id>` (the library's `cft_build_id()`) and `audited <time>` (UTC), the
+  auditor's identity and the audit's time that `cert2.Verdict.header()`
+  holds and the comparison between auditors leaves out, and then
+  `cert2.Verdict.lines()`, byte for byte. `--read` prints
+  `cft-certificate 2: READ`, as version 1's does with its number.
+
 **Its gate** is `host/tests/audit_check.py`, `make -C host audittest`,
 which `verify/run.sh`'s `audit` stage runs in the gate budget. It hands
 both auditors the same inputs, and requires the same verdict: the
@@ -2327,18 +2395,29 @@ refusal's name, code and location, or both ACCEPTED with the same lines.
    - a seed the operating system draws: different in two audits, and
      the same verdict again when handed back;
    - five controls the plant census asked for (below);
-   - git ignoring the binary.
-2. **test_cert.py**, run in the gate's process with `cert.parse` and
-   `cert.audit` shadowed. Every top-level call its tests make is handed
-   to the tool too, translated into files and options. So the tool is
-   held to every control the golden auditor is held to whose arguments
-   files and options can spell, and stays so as controls are added.
+   - git ignoring the binary;
+   - since version 2's C half: version 2's `usage` refusals (each of its
+     inputs beside a version-1 certificate, out of its place, twice, a
+     file not there, a block file misspelt or a directory by its name), a
+     misspelt block file beside a version-1 certificate not read, and
+     cft.h's profile and language macros, the tool's writer's list of
+     variables and its generators against the golden model's.
+2. **test_cert.py and test_cert2.py**, each run in the gate's process
+   with `cert.parse` and `cert.audit` shadowed. Every top-level call their
+   tests make is handed to the tool too, translated into files and
+   options. So the tool is held to every control the golden auditor is
+   held to whose arguments files and options can spell, and stays so as
+   controls are added.
    - A call whose arguments no file or option spells faithfully is
      counted and named, not compared: a list where a mapping goes, a
      string or bool key, an integer past the format, a salt that is not
      bytes.
    - A seed the golden audit draws is caught and handed to the tool.
    - An executor the test makes refuse is the instrument.
+   - A version-2 audit call handed a source, or asked to regenerate, is
+     held to the golden auditor handed neither, as the tool is
+     (`no_source_kwargs`); the golden call's own result still goes back
+     to the test.
 3. **segrun_check's certificates:** cft-segrun on its programs, keyed
    and open, with the accuracy entries segrun_check gives them (every
    method, scope, form and direction; since step 5), each audited in
@@ -2346,7 +2425,15 @@ refusal's name, code and location, or both ACCEPTED with the same lines.
    fixed seed.
 4. **The golden corpus** (`certificates/MANIFEST`), where the tree has
    one: every case the same three ways, the two auditors against each
-   other and against the manifest's verdict.
+   other and against the manifest's verdict. Each version-2 case and
+   control is handed as corpus.py hands the golden auditor its blocks,
+   signature, keyring, superseded certificate and definition re-run,
+   without the source and the regeneration: in full, from every committed
+   state, and for a case a writer makes sampled under the fixed seed and
+   from every state choosing the segments with no replay line and no
+   definition re-run, where the tool can accept a certificate whose
+   replays it cannot make. How many keep the manifest's verdict handed no
+   source is printed.
 5. **The narrow builds**, both at `CFT_MAX_FORMAT=2`:
    - at its own 576-bit bigint: `build-width` at the example's
      `accuracy` line, in an audit and in `--read`, and the same runs with
@@ -2374,6 +2461,18 @@ refusal's name, code and location, or both ACCEPTED with the same lines.
    - an element's exact value and width against `cert.element_fraction`;
    - `cft_convert` and `cft_to_decimal_char` against `cert.widen` and
      `chars.to_decimal`.
+7. **Ed25519 and SHA-512** (since version 2's C half), through the same
+   probe build: every vector `python/tests/test_ed25519.py` carries -
+   the RFC's five, every bit of their signatures, their messages and
+   keys edited, another key's signature, the three S at or above L, the
+   six encodings of no point as key and as R, the eight keys of small
+   order with verifier-VCV2B's forgery under each, 64 signatures under a
+   key with a small-order part (the cofactored equation, odd k among
+   them), the mixed keys, the page's version-2 test vector and random
+   keys the golden model signs - each answer the golden model's; and
+   SHA-512's published examples ("abc", the 448-bit and 896-bit
+   messages, a million 'a's, the empty message) and every length across
+   its padding against hashlib.
 
 Measured on the desktop, niced, on a day it was in use (2026-09-29, at
 ca1327f): 6,799 checks, 0 failed, 219 s. That run read the corpus from
@@ -2882,8 +2981,11 @@ Logan's permission.
   card's device lines.
 - One made through a remote handle.
 - Streams other than +0, which cft-segrun does not take.
-- A version-2 certificate made by a C writer, or audited by cft-audit:
-  version 2's C half, the next parcel's.
+- A version-2 certificate made by a C writer: version 2's C half, the
+  next parcel's. cft-audit audits every version-2 case and control since
+  its C half, handed what the manifest hands but the source and the
+  regeneration, and gives the golden auditor's verdict for the same
+  ("The audit tool").
 - A replay decided through mpmath: no node of the language reaches it
   yet, so `definition-unavailable` and `replay-undecided` have no
   committed case.
@@ -2978,10 +3080,15 @@ Where things stand (2026-10-02):
   `python/cft_sign.py`;
 - the profile's version lives in `python/cft_golden/profile.py`, and the
   language's in `python/cft_golden/lang/version.py`;
-- `cft-segrun` writes, and `cft-audit` reads, version 1 only. Their version
-  2 is the next parcel's, built against this page ("What waits for the C
-  half", below). Until then `host/tests/audit_check.py` names every
-  version-2 certificate it meets, and hands it to neither tool.
+- `cft-audit` reads both versions and audits version 2 in C since its C
+  half (parcel CV2CA, 2026-10-02): every step that needs no source, with
+  Ed25519 and SHA-512 in C, and `source-missing` where a step needs one
+  ("The audit tool"). `host/tests/audit_check.py` holds it to the golden
+  auditor on every call test_cert2.py makes and every version-2 case and
+  control of the corpus, the golden auditor handed no source as the tool
+  is;
+- `cft-segrun` writes version 1 only. Its version 2 is the next parcel's,
+  built against this page ("What waits for the C half", below).
 
 ### What a version-2 certificate says
 
@@ -3989,7 +4096,31 @@ copy, has not been run on version 2: it is the verifier's.
 
 ### What waits for the C half
 
-The next parcel builds version 2 in C, against this page:
+Version 2's C half is two parcels, built against this page. Built (parcel
+CV2CA, 2026-10-02; "The audit tool" is its manual):
+- **cft-audit:** both readers, by the magic line; block files in
+  `--states DIR`; re-runs that ask for the block where a run says `yes`;
+  its library's profile and language version compared with the
+  certificate's (`definition-differs`); `--signature`, `--keyring` and
+  `--superseded`; Ed25519 in C (`host/tools/ed25519.h`, with SHA-512 in
+  `host/tools/sha512.h`), held to test_ed25519.py's vectors (the RFC's
+  five, the eight keys of small order refused, the decoding and S edges)
+  and the cofactored equation, and a key of small order refused `signer`
+  wherever a key is read. It takes no source: a replay in a re-run
+  segment, a wider-source relation and a definition re-run refuse
+  `source-missing` there exactly where the golden auditor handed no
+  source does, so the two keep one verdict.
+- **cft.h** states the profile it implements and the language version
+  beside it, `CFT_PROFILE_MAJOR` and `_MINOR` and `CFT_LANGUAGE_MAJOR` and
+  `_MINOR` ([HOSTAPI.md](HOSTAPI.md)), since `definition-differs` compares
+  both. cft-audit evaluates no language, so its language version is the
+  one its tree's golden model states (`python/cft_golden/lang/version.py`),
+  and audit_check.py holds the four to the two Python files.
+- **The audit gate:** audit_check.py hands cft-audit test_cert2.py's calls
+  and the corpus's version-2 cases and controls, held to the golden
+  auditor handed no source and not asked to regenerate, as the tool is.
+
+The next parcel builds the rest:
 - **cft-segrun:** `--lane-flags`, asking for the block (ABI 0.17) and
   writing `run-<r>-segment-<k>.flags`, and asking whenever the image
   needs flag control; `--replay-image IMG`, an option of each run, writing
@@ -4005,26 +4136,9 @@ The next parcel builds version 2 in C, against this page:
   itself; the device's extra lines through `cft_image_id` at ABI 0.18; and
   `--format-version 1`, kept for the corpus and for runs that stay
   version 1.
-- **cft-audit:** both readers, by the magic line; block files in
-  `--states DIR`; re-runs that ask for the block where a run says `yes`;
-  its library's profile and language version compared with the
-  certificate's (`definition-differs`); `--signature`, `--keyring` and
-  `--superseded`; Ed25519 in C, held to test_ed25519.py's vectors (the
-  RFC's five, the eight keys of small order refused, the decoding and S
-  edges) and the cofactored equation, and a key of small order refused
-  `signer` wherever a key is read. It
-  takes no source: a replay in a re-run segment, a wider-source relation
-  and a definition re-run refuse `source-missing` there exactly where the
-  golden auditor handed no source does, so the two keep one verdict.
 - **libcft:** `cft_image_id` grows by the platform's name, the XRT
-  version, the clock and the serial (ABI 0.18), and `cft.h` states the
-  profile it implements and the language version beside it, since
-  `definition-differs` compares both. cft-audit evaluates no language,
-  so its language version is the one its tree's golden model states
-  (`python/cft_golden/lang/version.py`).
-- **The gates:** audit_check.py hands cft-audit test_cert2.py's calls and
-  the corpus's version-2 cases, which it names today and does not hand;
-  corpus.py's check has cft-segrun remake each case the corpus marks
+  version, the clock and the serial (ABI 0.18).
+- **The gates:** corpus.py's check has cft-segrun remake each case the corpus marks
   `writers both`, leaving out of both certificates `build-id`, `writer`,
   `writer-runtime`, `compiler-build`, the `replay-method` lines, the
   three times, `host-os`, `host-arch` and the environment (corpus.py's

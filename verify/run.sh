@@ -1187,20 +1187,29 @@ stage acceptance-far "the hard workloads' own oracle on the four images past the
 # cft-audit and cert.audit are handed the same inputs and must give the
 # same verdict - a refusal's name, exit code and location, or both
 # ACCEPTED with the same lines. The inputs: every parse call test_cert.py
-# makes, and every audit call whose arguments files and options can
-# carry, shadowed in-process (so pytest; the rest are counted and
-# named); cft-segrun's certificates of segrun_check's programs, in full,
-# from the initial states and sampled; the golden corpus; and two narrow
-# builds of libcft and the tool at CFT_MAX_FORMAT=2, at its own bigint
-# and at CFT_BN_LIMBS=64, which must refuse build-width and build-format
-# and audit the rest in full - so a C compiler. A stage of its own in the
-# gate budget (the lead, 2026-09-29): about four minutes on the desktop,
-# too long for quick, where programs keeps both writers' checks.
+# and test_cert2.py make, and every audit call whose arguments files and
+# options can carry, shadowed in-process (so pytest; the rest are counted
+# and named), a version-2 call held to the golden auditor handed no
+# source and not asked to regenerate, since cft-audit takes neither
+# (version 2's C half, parcel CV2CA, 2026-10-02); cft-segrun's
+# certificates of segrun_check's programs, in full, from the initial
+# states and sampled; the golden corpus, version 2's cases and controls
+# among it, the same way; two narrow builds of libcft and the tool at
+# CFT_MAX_FORMAT=2, at its own bigint and at CFT_BN_LIMBS=64, which must
+# refuse build-width and build-format and audit the rest in full; the
+# tool's numerics; and its Ed25519 and SHA-512 against every vector
+# test_ed25519.py carries and SHA-512's published examples, through a
+# probe build - so a C compiler. Section 1 holds cft.h's CFT_PROFILE_*
+# and CFT_LANGUAGE_* to profile.py and lang/version.py. A stage of its
+# own in the gate budget (the lead, 2026-09-29): about four minutes on
+# the desktop until version 2's C half, about seven since (test_cert2.py's
+# shadow its most), too long for quick, where programs keeps both
+# writers' checks.
 do_audit() {
   HOSTMAKE audittest PYTHON="$PYBIN"
 }
 need host-cc python pytest
-stage audit "the C auditor held to the golden one: test_cert.py's parse calls and every audit call files can carry, cft-segrun's certificates and the golden corpus through both, the same refusal by name, code and location or the same verdict; and two narrow builds refusing build-width and build-format" -- do_audit
+stage audit "the C auditor held to the golden one: test_cert.py's and test_cert2.py's parse calls and every audit call files can carry (version 2's without the source), cft-segrun's certificates and the golden corpus through both, the same refusal by name, code and location or the same verdict; two narrow builds refusing build-width and build-format; its numerics, Ed25519 and SHA-512 against their vectors; cft.h's profile and language macros against the golden model's" -- do_audit
 
 # A certificate's two estimates, scored (docs/studies/ACC-A-estimates.md,
 # programs/estimates.py). Each runs --against the committed runs in

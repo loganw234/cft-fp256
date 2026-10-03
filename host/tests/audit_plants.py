@@ -27,9 +27,15 @@ Then:
      golden verdict: RED, with the case and what the gate would print;
   3. a site whose cases all still agree is GREEN: another check refuses
      each of them by the same name at the same place; a site no case
-     reaches is UNREACHED, green by construction, and named.
+     reaches is UNREACHED, green by construction, and named;
+  4. version 2's names (since its C half, parcel CV2CA): each name's sites
+     and how the census found them, the recorded cases the golden auditor
+     refuses by it, and each name with no site in tools/audit.c - a check
+     that needs a source or a regeneration, which cft-audit does not take -
+     named with why.
 
-Exit 0 when every site is red; the report names every one that is not.
+Exit 0 when every site is red and every version-2 name without a site is
+explained; the report names every one that is not.
 """
 
 import argparse
@@ -52,6 +58,82 @@ import audit_check as ac  # noqa: E402  (tool_verdict, same, compile_with)
 SITE = re.compile(r"^cft-audit: site (\d+)$", re.M)
 CALL = re.compile(r"\b(refuse|malformed)\s*\(")
 TIMEOUT = 20
+
+# Version 2's own refusal names (docs/CERTIFICATES.md, "Version 2's
+# refusals"; test_cert2.py's table test holds the same set), which the
+# census counts as reached or not since version 2's C half (parcel CV2CA).
+# cft-audit takes no source and regenerates no initial state, so the names
+# of the checks that need one have no site in tools/audit.c: those are
+# named, with why, rather than counted unreached.
+V2_NAMES = (
+    "marked", "replay-lane-flags", "replay-source", "replay-method",
+    "provenance-order", "signature-format", "signature", "signature-key",
+    "signer", "supersedes", "source-digest", "source-refused",
+    "source-format", "source-graph", "source-param", "source-shape",
+    "source-image", "source-missing", "lane-flags-shape", "lane-flags-hash",
+    "initial-state", "lane-flags-identity", "aux-source",
+    "segment-lane-flags", "replay-missing", "replay-unmarked", "replay-raw",
+    "replay-changed", "definition-end", "definition-flags",
+    "definition-differs", "definition-unavailable", "compiler-differs",
+    "replay-undecided")
+NO_SITE_WHY = {
+    "source-digest": "a source handed, and cft-audit takes none",
+    "source-refused": "the language's own refusal of a source",
+    "source-format": "a source's own format",
+    "source-graph": "a source's step graph",
+    "source-param": "a source param read by the language",
+    "source-shape": "a source's lane",
+    "source-image": "a recompile of a source",
+    "compiler-differs": "a recompile of a source",
+    "initial-state": "a regenerated initial state, and cft-audit regenerates "
+                     "none",
+    "replay-changed": "a marked lane replayed by the source's interpreter",
+    "definition-end": "a definition re-run by the source's interpreter",
+    "definition-flags": "a definition re-run by the source's interpreter",
+    "definition-unavailable": "the source's interpreter, unable",
+    "replay-undecided": "a writer's name, never an auditor's",
+}
+
+
+def v2_report(sites, red, green, unreached, cases):
+    """Version 2's names: the sites each has in tools/audit.c, and how the
+    census found them; how many recorded cases the golden auditor refused
+    by each; and the names with no site, each with why."""
+    state = {}
+    for sid, name, line, *_ in red:
+        state.setdefault(name, []).append("red")
+    for sid, name, line, *_ in green:
+        state.setdefault(name, []).append("GREEN")
+    for sid, name, line in unreached:
+        state.setdefault(name, []).append("UNREACHED")
+    by_golden = {}
+    for c in cases:
+        if c["want"][0] == "refused":
+            by_golden[c["want"][1][0]] = by_golden.get(c["want"][1][0], 0) + 1
+    have = {name for _sid, name, _line in sites}
+    with_site = [n for n in V2_NAMES if n in have]
+    reached = [n for n in with_site if any(s != "UNREACHED"
+                                           for s in state.get(n, []))]
+    print(f"== version 2's names: {len(with_site)} of {len(V2_NAMES)} have a "
+          f"site in tools/audit.c, {len(reached)} of them reached by a "
+          f"recorded case", flush=True)
+    for n in V2_NAMES:
+        if n in have:
+            marks = state.get(n, [])
+            tally = ", ".join(f"{k} {marks.count(k)}"
+                              for k in ("red", "GREEN", "UNREACHED")
+                              if marks.count(k))
+            print(f"  {n:24s} {len([1 for _s, nm, _l in sites if nm == n])} "
+                  f"site(s): {tally or 'not planted (--only)'}; "
+                  f"{by_golden.get(n, 0)} recorded case(s) the golden auditor "
+                  f"refuses by it")
+        else:
+            print(f"  {n:24s} no site: {NO_SITE_WHY.get(n, 'NOT EXPLAINED')}"
+                  f"; {by_golden.get(n, 0)} recorded case(s) the golden "
+                  f"auditor refuses by it")
+    unexplained = [n for n in V2_NAMES if n not in have and n not in
+                   NO_SITE_WHY]
+    return not unexplained
 
 
 def instrument(src):
@@ -282,9 +364,10 @@ def main():
     for sid, name, line in unreached:
         print(f"  UNREACHED  site {sid:3d} {name:22s} audit.c:{line}: no "
               f"recorded case reaches it")
+    explained = v2_report(sites, red, green, unreached, cases)
     if not args.copy:
         shutil.rmtree(copy, ignore_errors=True)
-    return 0 if not green and not unreached else 1
+    return 0 if not green and not unreached and explained else 1
 
 
 if __name__ == "__main__":

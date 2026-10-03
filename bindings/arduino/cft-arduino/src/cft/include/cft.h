@@ -128,6 +128,29 @@ extern "C" {
  * header it compiled against. */
 CFT_API uint32_t cft_abi_version(void);
 
+/* The definition this library implements      (certificate version 2,
+ * 2026-10-02; CONFORMANCE.md, "Versioning")
+ *
+ * The conformance profile - the bits and the program model the golden
+ * model defines (python/cft_golden/profile.py) - and beside it the
+ * language's version (python/cft_golden/lang/version.py), each a major
+ * and a minor, spelt "2", or "2.1" once a minor step is taken. A
+ * version-2 certificate names both on its `profile` and `language` lines
+ * (docs/CERTIFICATES.md, "The definition"): cft-segrun writes them from
+ * these, and cft-audit compares them with a certificate's. Where each
+ * major is equal and each minor at least the certificate's, this
+ * library's definition covers the certificate's, and otherwise a
+ * re-derivation that fails is refused `definition-differs`, the auditor's
+ * own limit. The library evaluates no language: CFT_LANGUAGE_* is the
+ * version the golden model of this tree states, which the C tools are
+ * held to. host/tests/audit_check.py holds all four equal to the two
+ * Python files. Neither is the ABI version above, which versions the
+ * calls, not the bits. */
+#define CFT_PROFILE_MAJOR  2
+#define CFT_PROFILE_MINOR  0
+#define CFT_LANGUAGE_MAJOR 1
+#define CFT_LANGUAGE_MINOR 0
+
 /* Which source tree this library was built from   (ABI 0.15, 2026-09-28)
  *
  * The version above says which calls exist; it did not move for the

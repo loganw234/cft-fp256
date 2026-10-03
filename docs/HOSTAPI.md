@@ -3389,14 +3389,49 @@ response. A server refuses any other bit by name; `PROG_RUN` and
 as `PROG_RUN_EX` whatever its image's flags; a run that does not travels
 as it did, so a server's counts of every earlier call are unchanged.
 
-**What does not take it.** `cft-segrun` never asks for the block, and
-`cft-audit`'s re-runs do not either: a version-1 certificate has no line
-for it (docs/CERTIFICATES.md), so it waits for certificate version 2. A
-marked run is certified as its STATUS says. The WebAssembly module's
-calls ask for no block; the module is rebuilt at 0.17 at the merge, as
-every step's is.
+**What does not take it.** `cft-segrun` never asks for the block: a
+version-1 certificate has no line for it (docs/CERTIFICATES.md), so it
+waits for certificate version 2, and a marked run is certified as its
+STATUS says. `cft-audit` asks for it since version 2's C half (parcel
+CV2CA, 2026-10-02), in each re-run of a version-2 run that says
+`lane-flags yes`, and holds it to the segment line's hash; its re-runs of
+version 1 ask for none. The WebAssembly module's calls ask for no block;
+the module is rebuilt at 0.17 at the merge, as every step's is.
 
 **The ABI version.** An additive pair of fields and three bits:
 `CFT_ABI_VERSION_MINOR` moved to 17 for them (2026-10-02). A caller that
 needs the block or flag control asks for 0.17, and then asks
 `cft_get_caps` whether the device has them.
+
+## The definition the library implements (certificate version 2, 2026-10-02)
+
+A version-2 certificate names the definition its bits are claimed under,
+on its `profile` and `language` lines (docs/CERTIFICATES.md, "The
+definition"), and an auditor compares them with its own. `cft.h` states
+the library's, in one block below `cft_abi_version`:
+
+    CFT_PROFILE_MAJOR   2    the conformance profile (CONFORMANCE.md,
+    CFT_PROFILE_MINOR   0    "Versioning"): python/cft_golden/profile.py
+    CFT_LANGUAGE_MAJOR  1    the language's version: python/cft_golden/
+    CFT_LANGUAGE_MINOR  0    lang/version.py
+
+- **Integers, not strings.** A version is spelt `2`, or `2.1` once a
+  minor step is taken (cert2.version_text). A definition covers a
+  certificate's when each major is equal and each minor at least the
+  certificate's; the language is compared only where a run names a
+  source, and `unknown` is never covered.
+- **Who reads them.** `cft-audit` compares them with every version-2
+  certificate's, and where they do not cover it, a re-derivation that
+  fails is refused `definition-differs` (exit 78), the auditor's own
+  limit, exactly where the golden auditor refuses it. `cft-segrun` writes
+  them on a version-2 certificate's two lines.
+- **The language's is the golden model's.** The library evaluates no
+  language; `CFT_LANGUAGE_*` is the version the golden model of this tree
+  states, which the C tools are held to.
+- **Held equal** to the two Python files by `host/tests/audit_check.py`'s
+  first section, in the `audit` stage (the lead's names and choice,
+  2026-10-02, with parcel CV2CA). A step of either file without the macro
+  fails it by name.
+- **Not the ABI version.** `CFT_ABI_VERSION` versions the calls; these
+  version the bits and the sources. Adding them changed no call, so the
+  ABI did not move for them.
