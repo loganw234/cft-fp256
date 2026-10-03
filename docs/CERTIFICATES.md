@@ -2335,7 +2335,10 @@ file the golden chain's, and the golden audit accepts each, handed the
 sources and blocks, in full and sampled. It holds the measured lines to
 the golden writer's own functions on the host, the profile and language
 to `profile.py` and `lang/version.py`, the environment to the list's
-variables set and segrun.c's table to `cert2.ENVIRONMENT_NAMES`; one run's
+variables set and segrun.c's table to `cert2.ENVIRONMENT_NAMES`, the tool
+handed none of the list but what a leg sets - removed from its
+environment, not set empty, which XRT reads as an emulation mode to load
+(the card leg on q135b failed so, the lead, 2026-10-03); one run's
 two versions to the same state and stream hashes; 22 source-param
 literals at every edge of the canonical spelling; the issuer-key to
 test_ed25519.py's vectors (the published key and RFC 8032's taken, the
@@ -2360,6 +2363,10 @@ on a card (`hw/card-segrun.sh`), the device lines from the tile, the serial
 published as a text but never printed, and the per-lane block refused by
 name on revision 7.
 
+With the writer's list removed from the tool's environment, not set
+empty (the card leg on q135b, 2026-10-03): 1,057 checks on the Windows
+desktop and one SKIP, 102 s, the desktop about 8 % busy before it -
+sections 1 to 13 716, section 14 341. Not yet run on a card.
 With the Unicode split deciding (verifier-VCV2CW's second check,
 2026-10-03): 1,055 checks on the Windows desktop and one SKIP, the trial's
 cost NOT TESTED there, 88 s, the desktop about 2 % busy before it -
