@@ -1409,12 +1409,6 @@ def certify_run(kind, image, bank, salt, states, results, *, steps,
     if why:
         raise Refusal("program-shape", f"this program is not a segment: "
                                        f"{why}")
-    if kind == "wider":
-        # the wider image is the main image's words one rung up, so it
-        # holds the same codes: the writer refuses what every audit would
-        why = routine_words(prog)
-        if why:
-            raise Refusal("aux-image", f"a wider run: {why}")
     if not results:
         raise Refusal("malformed", "a run has at least one segment, and this "
                                    "one has none: the format has no "
@@ -1423,6 +1417,14 @@ def certify_run(kind, image, bank, salt, states, results, *, steps,
         raise Refusal("state-shape",
                       f"{len(results)} segments have {len(results) + 1} "
                       f"boundary states, and {len(states)} were given")
+    if kind == "wider":
+        # once the run's own checks have passed, as cft-segrun checks it:
+        # the wider image is the main image's words one rung up, so it
+        # holds the same codes, and the writer refuses what every audit
+        # would
+        why = routine_words(prog)
+        if why:
+            raise Refusal("aux-image", f"the wider run: {why}")
     fmt = prog.fmt
     nslots = prog.n_scratch_in
     n = len(states[0]) // nslots
@@ -2176,21 +2178,22 @@ def _check_relations(cert, salt, progs, strm, known):
 
 def routine_words(prog):
     """Why version 1 has no wider run of this image, or None: it holds
-    revision 8's flag control - QUIET, ENDQUIET or RAISE (R24) - which a
-    routine brings, and a routine's words and bank words are format-specific
-    (masks, biases, Newton passes). Its words re-encoded one rung up can
-    pass the wider relation and compute nothing the main run means, so no
-    writer makes such a run and every audit refuses it, `aux-image` (the
-    lead's decision, 2026-10-02, with parcel C4's design). Certificate
-    version 2's `wider-source` is the way such a program gets a wider
-    estimate."""
+    revision 8's flag control - a control word (bit 31) whose code is 12,
+    13 or 14, QUIET, ENDQUIET or RAISE (R24), among its instruction words,
+    which follow the header and any constants the image carries - which a
+    routine brings, and a routine's words and bank words are
+    format-specific (masks, biases, Newton passes). Its words re-encoded
+    one rung up can pass the wider relation and compute nothing the main
+    run means, so no writer makes such a run and every audit refuses it,
+    `aux-image` at the wider run (the lead's decision, 2026-10-02, with
+    parcel C4's design; the sentence is cft-segrun's and cft-audit's, C4's
+    C half). Certificate version 2's `wider-source` is the way such a
+    program gets a wider estimate."""
     if seq.features_rev8(prog.insns) & seq.FEAT_FLAG_CONTROL:
-        return ("the main image holds revision 8's flag control (QUIET, "
-                "ENDQUIET or RAISE), as a routine does, and a routine's words "
-                "are format-specific: its words one format wider compute "
-                "nothing the main run means, so version 1 has no wider run "
-                "of it - version 2's wider-source run, the source compiled "
-                "one format wider, is the way to that estimate")
+        return ("the main image holds a routine (QUIET, ENDQUIET or RAISE), "
+                "whose words are its format's, so no image is it one format "
+                "wider; certificate version 2's wider-source run compiles "
+                "its source one format up instead")
     return None
 
 

@@ -1227,24 +1227,49 @@ def test_h_slots_with_a_source_are_the_compiles(lz):
              sources={2: lz.src})
 
 
-def test_version_1_has_no_wider_run_of_a_routine_image(mk):
+# cft-segrun's and cft-audit's sentence for it (parcel C4's C half), which
+# the golden audit gives at the wider run, `run 1 (wider): ` before it
+ROUTINE_WIDER = ("the main image holds a routine (QUIET, ENDQUIET or "
+                 "RAISE), whose words are its format's, so no image is it "
+                 "one format wider; certificate version 2's wider-source run "
+                 "compiles its source one format up instead")
+
+
+def header_wider(image):
+    """C4's construction of a wider image (lang_check's leg E): the main
+    image's words with header bytes 20-23, the precision code, set to
+    fp128's."""
+    wide = bytearray(image)
+    wide[20:24] = (2).to_bytes(4, "little")
+    return bytes(wide)
+
+
+def test_version_1_has_no_wider_run_of_a_routine_image(mk, lz):
     """Version 1's rule since 2026-10-02 (the lead's decision, with C4's
     design): a main image holding QUIET, ENDQUIET or RAISE has no wider
-    run - a routine's words are format-specific - refused `aux-image` by
-    the golden writer and the golden audit, version 1's and version 2's.
-    (Its C half, cft-segrun and cft-audit, is parcel C4's; this control
+    run - a routine's words are format-specific - refused `aux-image`
+    (exit 5) at the wider run by the golden writer and the golden audit,
+    version 1's and version 2's, after the format, the lanes and the steps
+    and before the instruction words. Its C half, cft-segrun and cft-audit,
+    is parcel C4's, held by lang_check's leg E on Kepler; this control
     sits here so that audit_check's shadow of test_cert.py does not hand
-    it to a cft-audit that refuses it only from then on.)"""
+    it to a cft-audit that refuses it only from then on. The same
+    construction on Lorenz-63, which has no routine, is written and
+    accepted."""
     v1 = make_v1_markstep()
     src = MARK_ASM.read_text(encoding="utf-8")
     img_w = asm.assemble(src.replace(".format   fp64", ".format   fp128"),
                          "markstep-wider")
+    assert img_w == header_wider(v1.img), "C4's construction, byte for byte"
     bank_w = widened("fp64", v1.bank)
     init_w = [cert.widen("fp64", x) for x in v1.init]
     st, rs = cert.run_chain(img_w, bank_w, init_w, 3)
     got = refused("aux-image", cert.certify_run, "wider", img_w, bank_w,
                   None, st, rs, steps=4)
-    assert "flag control" in got.message and "wider-source" in got.message
+    assert got.message == "the wider run: " + ROUTINE_WIDER
+    # the writer's own checks come first, as cft-segrun's do
+    refused("state-shape", cert.certify_run, "wider", img_w, bank_w, None,
+            st[:-1], rs, steps=4)
     # the audit, of a certificate a writer that did not refuse would make
     main = cert.parse(v1.data).runs[0]
     hs = [cert.state_hash(None, cert.state_bytes("fp128", s)) for s in st]
@@ -1259,7 +1284,16 @@ def test_version_1_has_no_wider_run_of_a_routine_image(mk):
     got = refused("aux-image", cert.audit, data, None,
                   {0: (v1.img, v1.bank), 1: (img_w, bank_w)},
                   states={0: {0: v1.init}, 1: {0: init_w}})
-    assert got.run == 1 and "flag control" in got.message
+    assert (got.line, got.run, got.segment, got.entry) == (None, 1, None,
+                                                           None)
+    assert got.message == "run 1 (wider): " + ROUTINE_WIDER
+    # after the steps: a wider run stating other steps is refused for them
+    wrong = cert.encode(cert.Certificate(
+        "open", None, IDN, (main, dataclasses.replace(wider, steps=5)), ()))
+    got = refused("aux-image", cert.audit, wrong, None,
+                  {0: (v1.img, v1.bank), 1: (img_w, bank_w)},
+                  states={0: {0: v1.init}, 1: {0: init_w}})
+    assert "steps" in got.message and got.run == 1
     # and version 2's wider relation, the same rule
     ch_main = cert2.run_chain(v1.img, v1.bank, v1.init, 3, steps=4,
                               definition=cert2.Definition(
@@ -1278,7 +1312,21 @@ def test_version_1_has_no_wider_run_of_a_routine_image(mk):
                   {0: (v1.img, v1.bank), 1: (img_w, bank_w)},
                   states={0: {0: v1.init}, 1: {0: init_w}},
                   sources={0: v1.src})
-    assert got.run == 1
+    assert got.run == 1 and got.message == "run 1 (wider): " + ROUTINE_WIDER
+    # the same construction on Lorenz-63, which holds no routine: written
+    # by the golden writer and accepted by the golden audit
+    lw = header_wider(lz.c64.image)
+    assert lw == lz.img_w
+    st0, rs0 = cert.run_chain(lz.c64.image, lz.c64.bank, lz.init, 1)
+    st1, rs1 = cert.run_chain(lw, lz.bank_w, lz.init_w, 1)
+    runs = (cert.certify_run("main", lz.c64.image, lz.c64.bank, None, st0,
+                             rs0, steps=100),
+            cert.certify_run("wider", lw, lz.bank_w, None, st1, rs1,
+                             steps=100))
+    data = cert.encode(cert.Certificate("open", None, IDN, runs, ()))
+    cert.audit(data, None, {0: (lz.c64.image, lz.c64.bank),
+                            1: (lw, lz.bank_w)},
+               states={0: {0: lz.init}, 1: {0: lz.init_w}})
 
 
 # ---- 9: the re-runs, the blocks and the replays ---------------------------------

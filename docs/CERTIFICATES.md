@@ -622,11 +622,33 @@ routine, and a routine's words and bank words are format-specific (masks,
 biases, Newton passes). Its words one rung up can pass every check above
 and compute nothing the main run means. So every writer refuses to
 certify a wider run of such an image, and every audit refuses one,
-`aux-image`, after the steps and before the instruction words: the golden
-writer's `cert.certify_run` and the golden audit (`cert.routine_words`),
-and `cft-segrun` and `cft-audit` from parcel C4's C half. Version 2's
-`wider-source` run, the program's source compiled one format wider, is how
-such a program gets a wider estimate.
+`aux-image` (exit 5):
+- **The criterion.** The main image holds a control word (bit 31 set)
+  whose code, its low byte, is 12, 13 or 14. Its words are read after the
+  header and after any constants the image carries (none under an
+  external bank).
+- **The audit** checks it on each wider run, after `aux-format`,
+  `aux-lanes` and the steps, and before the instruction words and the
+  scratch depth. Its location is the wider run (`run=1` where it is run
+  1), and its sentence is the writer's: "run 1 (wider): the main image
+  holds a routine (QUIET, ENDQUIET or RAISE), whose words are its
+  format's, so no image is it one format wider; certificate version 2's
+  wider-source run compiles its source one format up instead".
+- **A writer** checks it once a wider run's own checks have passed, and
+  before the accuracy entries, and makes nothing.
+- **Who holds it:** the golden writer's `cert.certify_run` and the golden
+  audit (`cert.routine_words`), and `cft-segrun` and `cft-audit` from
+  parcel C4's C half, with version 2's wider relation the same.
+  `CFT_SEGRUN_PLANT=wider-routine` makes cft-segrun write the certificate
+  it refuses, so that an audit has one to refuse ("The segment runner").
+  The controls are test_cert2.py's on markstep and lang_check's leg E on
+  Kepler, each with the same construction on Lorenz-63, which has no
+  routine, written and accepted. The construction is the main image's
+  words with header bytes 20 to 23, the precision code, set to fp128's,
+  and its bank and initial state widened exactly.
+
+Version 2's `wider-source` run, the program's source compiled one format
+wider, is how such a program gets a wider estimate.
 
 **The main run attached as its own half-step run is refused.** Without
 these checks it would pass everything, with an estimate of 0
@@ -1220,10 +1242,11 @@ The controls cover:
   `cft-certificate 2` reaches version 2's reader and is `line-missing` at
   `profile` (verifier-VCV2 named the two controls that moved from
   `version`), and `cft-certificate 3` is `version`;
-- since 2026-10-02, a wider run of a routine image, refused `aux-image` by
-  the golden writer and audit (its control is in test_cert2.py, so that
-  audit_check.py does not hand it to a cft-audit that refuses it only from
-  parcel C4's C half on);
+- since 2026-10-02, a wider run of a routine image, refused `aux-image` at
+  the wider run by the golden writer and audit (its control is in
+  test_cert2.py, so that audit_check.py does not hand it to a cft-audit
+  that refuses it only from parcel C4's C half on; C4's control is
+  lang_check's leg E);
 - the identity lines held to their spelling alone, `device-tiles`
   among them;
 - each kind that is not its method's;
@@ -1634,7 +1657,11 @@ makes a run refuse by that name, and says so. With `--build-id` or
 refused and exits 0 with the right output (verifier-C6). A fourth,
 `trial-skipped`, refuses nothing: it skips the trial's allocations
 (**Memory**, below), keeping its size checks, so that the gate can
-measure what the trial costs the runs. The read-back refusal has a
+measure what the trial costs the runs. A fifth, `wider-routine` (parcel
+C4, 2026-10-02), turns a refusal into a certificate: a wider run of a
+routine image, which every writer refuses `aux-image` ("Auxiliary runs"),
+is written as stated, so that an audit has one to refuse. The read-back
+refusal has a
 plant BUILD instead of an instrument (the lead's condition, 2026-09-30).
 Compiled with `-DCFT_SEGRUN_PLANT_STATE_CHANGED`, by the gate and never
 by the Makefile, the first state read back has a bit flipped, and the
