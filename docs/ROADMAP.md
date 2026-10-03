@@ -4935,6 +4935,809 @@ version 2 (above). The first wave started when A1 merged, on
 2026-10-02. The RTL revision's own plan still comes to him before its
 RTL work, as the revision-7 round's did.
 
+### Revision 8: step 6's RTL revision (plan of record, 2026-10-02)
+
+For Logan's approval. Nothing in this section is built, and no RTL
+changes until he approves it. Step 6's plan (above) puts revision 8's
+RTL after its golden-first pieces, certificate version 2's design and
+the streaming design, and says: "Its RTL plan comes to Logan before the
+RTL work starts". This is that plan, in revision 7's manner (above).
+
+- **The contract** for every item is docs/SEQUENCER.md's "Revision 8"
+  (R21 to R24), built golden-first and refused by name on every tile
+  today, and S8's study, docs/studies/R8S-streaming.md, for streaming.
+  This plan adds the tile's part and points to them for the detail.
+- **The facts** are read in the tree at 7ccc441 (rtl/, hw/, host/, tb/,
+  formal/) and in q135b's routed reports (the round's box/). The
+  reading, the arithmetic and each estimate's basis are in the round's
+  ledger (`Data/runs/2026-10-02-step6-round/ledger/RP8.md`).
+- **Numbers** are marked measured (a report or a run), computed
+  (arithmetic on measured or read numbers) or estimate (mine). Every LUT
+  and register figure for a change is an estimate from the RTL's shape:
+  nothing here is synthesised.
+
+**What Logan chose** (step 6's plan, verbatim): for revision 8, "Flag
+control, Per-lane flags (R23), TwoSum + stepped scratch, Instruction
+streaming"; for programs too big for one tile, "Streaming + deep build
+(Recommended)". One revision carries everything the later parts need of
+a tile: M1 and M2 need R24's raise, with its mark, and R23's byte.
+
+**In brief.**
+- Six items: R21, R22, R23, R24, streaming (R8S), and an abort for a
+  read burst of the wrong length, which hangs a sequencer run today. A
+  seam commit of registers and ports goes in first.
+- Nothing a program runs today changes. Every new form takes an
+  encoding every loader refuses today, or a MODE bit every tile refuses.
+  The abort changes only a run whose memory faults.
+- R21 is the largest and least certain item, and it is in the lanes,
+  not the sequencer: about 4,000 to 15,000 LUTs a tile by design,
+  against 2,230 to 4,980 for the rest of the revision (estimates, R21's
+  of low confidence). The quad has little room: q135b used 82.66% of
+  the part's LUTs, 86.12% in SLR0, and closed at +0.003 ns with all four
+  of the build script's timing options (measured). So the lanes are
+  probed first, and question 9 recommends the quad without R21 unless
+  the probe finds R21 cheap.
+- Three images: a single (the timing probe, and an image), the
+  streaming quad, and a deep single for scratch past 4,096 slots.
+- Where it departs from step 6's plan of record: a sixth item, the
+  abort, which verifier-VS8 found after that plan was written; three
+  images where it names two, "the quad, and the deep build"; a deep
+  build of up to 16,384 slots, past its "4,096 to 8,192"; and, by
+  question 9, a quad that may lack R21, with M1's routines then written
+  with TwoSum on every target, where that plan writes M1 "using
+  augmented addition".
+- Ten questions close the section: S8's seven and three more.
+
+**1. The items**
+
+| item | contract | publishes | a program that runs today |
+|---|---|---|---|
+| R21, augadd and augerr | SEQUENCER.md R21 | CAPS2[11] | unchanged: codes 10 and 11 are refused by every loader today |
+| R22, stepped STX and LDX | R22 | CAPS2[12] | unchanged: a zero step is today's instruction |
+| R23, per-lane flags | R23 | CAPS2[13]; MODE[24]; LFLAGS_PTR at 0xB0, kernel argument 17; VERSION 0xB00 | unchanged: a run that does not ask pays no cycle |
+| R24, flag control | R24 | CAPS2[14]; STATUS[6] | unchanged: codes 12 to 14 are refused today |
+| R8S, streaming | R8S-streaming.md | CAPS2[20:16]; CAPS[23:20] as min(15, its log2) | unchanged up to 4,096 instructions; past them, no stall a step for cftc's images (S8) |
+| the abort | the engine's rule since 2026-08-30 | STATUS[0] and [2], as today | only a run whose memory faults |
+
+**The margins each item is weighed against.** Revision 7's single,
+rev7b, had +0.423 ns on every kernel path at 135 MHz, its worst the
+engine's CSR into a reader (22 levels). The quad, q135b, has +0.003 ns.
+Its own worst paths are not on the desktop's record; its sibling q135,
+the same tiles with default directives, missed on two classes, both in
+one tile: u_seq's deposit counter into the deposit buffer's write enable
+at F (route-bound, 8 to 10 levels), and the engine's FIFO into the fp256
+pipe's S0 bypass (25 levels, 16 of them CARRY8). So the F stage, where
+R22, R23 and R24 act, takes only registered inputs from this revision.
+
+**R21: augadd and augerr.**
+- **Does the FMA datapath give both results?** In one pass, with a
+  change to its alignment and an early decision; not as it stands
+  (READ, rtl/cft_fpfma_pipe.sv):
+  - the exact sum is there. S9 and S10 race the sum and both differences
+    of the aligned operands in a window about three significands wide
+    (78, 165, 345 and 717 bits at the four formats). Where the alignment
+    loses no bit of the smaller operand, the window is the sum exactly.
+    Where it loses one (the marker, today's sticky rail), the smaller
+    operand is below a quarter ulp of the larger, so r is the larger and
+    e is the smaller operand itself;
+  - the operand at the window's fixed place is not the larger. It is the
+    one whose lowest bit has the larger exponent (`bp = (ep >= ec)`,
+    :644), and in ADD's shape the product's lowest bit sits MAN_W below
+    a's (s1_ep, :481-482). So c anchors whenever its exponent is within
+    MAN_W binades of a's, and the sum's leading bit, and with it r's
+    rounding point, takes about one window position per significand
+    bit: verifier-VRP8 counted 24 at fp32 and 53 at fp64 over 20,000
+    same-sign sums;
+  - r is the window normalised by S11 to S13 and rounded at S14 (the
+    stage map's levels), with roundTiesTowardZero (round up on guard AND
+    sticky; overflow to infinity) and R21's flag rule: no inexact unless
+    r overflows, and underflow without inexact where e is non-zero and
+    below 2^emin, which both instructions raise;
+  - e is the window below r's rounding point, negated where r rounded
+    up. Normalising it is the difficulty: S11 to S13 normalise r, and
+    the sixteen levels, S0 to S15, leave none to normalise e after r is
+    rounded. So either design needs r's rounding point and direction
+    without waiting for r's leading-zero count: (b) before it, (a)
+    beside it.
+- **The change both designs need: a re-anchor at S6.** For augadd and
+  augerr only, the anchor is the operand with the larger exponent
+  (ep + MAN_W >= ec); every other operation keeps today's (ep >= ec).
+  With SH = P + 4, the larger operand's leading bit then sits at one of
+  two fixed places, 3P + 2 when a anchors and 2P + 3 when c does. Both
+  operands stay inside the window (the smaller one's left shift reaches
+  2P + 3 bits where it reaches P + 4 today), and a sum that does not
+  cancel has its leading bit there or one away (a carry, or a borrow).
+  So r's rounding point is one of six fixed places. Where the leading
+  bit falls lower (a subtraction of operands within a binade of each
+  other, or subnormal operands), the sum has at most P bits and e is
+  zero.
+  - My probe (computed: a transcription of S1 and S6 to S10, not the
+    RTL; 20,000 random sums a format): under today's anchor a
+    non-cancelling sum's leading bit took 27 places at fp32 and 56 at
+    fp64. Under the re-anchor it took the six wherever the anchor is
+    normal; a subnormal anchor puts it lower, anywhere down to the
+    anchor's own leading bit, always with e zero (my sample reached two
+    such places, verifier-VRP8's more). Design (b)'s decision, taken
+    from the window at the six places, gave the exact e in all 19,867
+    sums at fp32 and 19,988 at fp64, the marker's case and cancellation
+    included. verifier-VRP8's own transcription, from the RTL, gave r
+    and e exact on 92,000 sums at the four formats, near-cancelling
+    sums, exact ties and subnormal anchors among them.
+  - The gate is a choice, not a need. verifier-VRP8 applied the
+    re-anchor to every ordinary operation (FMA, ADD, SUB and MUL, 89,243
+    at the four formats) and found the window's value, sign and marker
+    unchanged in all of them: the two anchors differ only where both
+    alignments are left shifts that fit. Ungated it is today's one
+    compare with a constant offset, and saves the second compare and the
+    select (about 100 LUTs a tile, estimate). This plan keeps the gate,
+    so that ordinary operations run exactly the alignment every bench
+    and card run so far has exercised, rather than one whose
+    results are equal by a new argument; the ungated form is the
+    fallback if S6's timing or area asks for it.
+- **Two designs, each one pass at LATENCY 16**, as R21 asks ("one array
+  pass and one register write each"); the stage map's levels:
+  - (b) e through r's normaliser:
+    - S9: each place's sticky, its low-half part, from the registered
+      half-sums;
+    - S10: after the add, the leading bit's place (from the anchor and
+      the carry or borrow), its guard and sticky, and r's direction (up
+      on guard AND sticky). For augerr S10's select writes e's field in
+      place of the sum: the bits below the point, from the selected
+      magnitude where r rounds down and from the other difference S9 and
+      S10 already compute where it rounds up (that field is the
+      negation), with the sign flipped; zero below the six places. For
+      augadd it writes the sum, and e's field goes to the tininess test;
+    - S11 to S13: r's leading-zero count and shifts normalise whichever
+      the select wrote. S14: augadd rounds r; augerr rounds nothing,
+      since e has at most P bits. S15: pack, the flag rule, and the
+      marker's case;
+    - its risk is S10, where the decision sits between the stage's
+      carry chain and its select.
+  - (a) e through a second normaliser:
+    - S10 as today but for the re-anchor. S11: the same decision, from
+      S10's registered window, beside r's leading-zero count, and e's
+      field formed there, negated where r rounds up (a carry chain about
+      two significands long);
+    - S12: e's own leading-zero count; S13 and S14: its coarse and fine
+      shifts; S15: its exponent and pack, selected for augerr, and
+      augadd's tininess from e's count;
+    - S10 and r's stages are untouched, at about twice (b)'s area. One
+      segmented normaliser shared by the four rungs, as FUSE_NORM shares
+      r's (rtl/cft_normseg.sv), would cut that area, at the slack that
+      kept FUSE_NORM out of the shipping builds (2026-09-01).
+  - Not proposed: a second pass (Fast2Sum's two subtractions after r),
+    which needs hidden registers and three dependent passes for one
+    instruction; and fusing the recommended pair, which needs a second
+    register-file write port.
+- **The RTL:**
+  - cft_fpfma_pipe.sv: the re-anchor at S6 under the sideband; the
+    attribute; the decision and e's field ((b) at S10, or (a) at S11
+    with its normaliser at S12 to S14); the flag rule; 9.5's special
+    values and signed zeros for both halves; and e as the smaller
+    operand wherever the marker is set, not only in the far case
+    (s6_far), since an operand can be partly shifted out: rebuilt from
+    the sign, exponent and significand the pipe carries, through the
+    specials sideband;
+  - cft_lanes.sv: a two-bit sideband to every pipe (0 an ordinary
+    operation, 1 augadd, 2 augerr). Not the attribute's codes 5 to 7:
+    MODE[14:12] says those "behave as RNE" (rtl/cft_csr.sv), so an
+    elementwise run could reach a new mode there. The pipe maps the
+    sideband onto its own attribute line at S0, where codes 5 to 7 from
+    outside stay RNE, so the round stage's decode gains no input. The
+    engine ties the sideband to zero;
+  - cft_seq.sv: codes 10 and 11 decode as piped writers (piped_fn,
+    writer_fn, reads_fn) reading ra on port A and rb on port C: port C's
+    register address (rf_raddr_c) and its hazard compare (adm_rc) take
+    rb's field for these two codes. They fire as ADD with the sideband,
+    and with their flag enable on, where every control code fires with
+    it off today (al_fen = fire_alu), so their flags reach FLAGS, R23's
+    byte and R24's tag. The request is ADD's shape (a, 1.0, c), so the
+    request mux and its forwarding path are unchanged. The image parse's
+    stream need learns their ra and rb, and RAISE's ra: a stream read
+    only through them would otherwise not be loaded and would read +0,
+    which cft_seq.sv's own comment calls a silent wrong answer;
+  - cft_krnl.sv: the sideband from cft_seq to the array, and EN_AUGADD,
+    a build parameter (default 1) publishing CAPS2[11] (question 9).
+- **Cost** (estimate, low confidence): (b) about 4,000 to 9,000 LUTs a
+  tile and 500 to 1,500 registers; (a) about 10,000 to 15,000 LUTs and
+  5,000 to 8,000 registers; no block RAM or UltraRAM. The basis is each
+  function's width summed over the tile's fifteen pipes (computed: 867
+  significand bits, 1,024 result bits, 1,824 low-field bits of 2P + 6 a
+  pipe, 2,691 window bits), at about a LUT a bit unless said:
+  - both designs: the re-anchor, 300 to 750; the marker's case, 1,000 to
+    1,300; the decision's guards and stickies at six places, 900 to
+    1,300; the attribute, the flag rule and the sideband's line, 300 to
+    600;
+  - (b): e's field in S10's select, 0 to 2,700 (none where the select's
+    LUTs have inputs to spare, one a window bit where not); augadd's
+    tininess test over the low field, 1,500 to 2,000;
+  - (a): the negation and the field's select, 3,600 to 3,800; the second
+    leading-zero count, 600 to 1,500; the second shifter, 2,500 to 4,000
+    (a model: P + 1 outputs a pipe through log4 of 2P + 6 levels of 4:1,
+    3,566 a tile); e's pack and result select, 1,100 to 1,400.
+  How much of each the existing logic absorbs, and how Vivado packs it,
+  can move any of them by a factor of two. So these figures cannot
+  choose between the designs, or decide the quad: probe L does.
+- **Timing:** both designs touch S6's anchor compare (the gate's second
+  compare and select) and S15's flags, result select and pack. (b) puts
+  the decision into S10, between its carry chain and its select; (a)
+  adds S11's decision and negation beside r's leading-zero count and a
+  second path through S12 to S14, and leaves S10 and r's path alone.
+  Out of context the kernel's worst path is an engine path at +1.576 ns
+  and no lane path is worse (revision 7's read); in context the pipe's
+  stages are not reported one by one. q135's second class of worst
+  paths enters the pipe at S0, which R21 does not lengthen.
+- **Held:** with the sideband at zero every other operation keeps
+  today's anchor and computes the function it computes today: the four
+  fpfma benches, the kernel benches, krnlseq, and on the card
+  cft-selftest's 1,224,915 cases.
+
+**R22: a post-step on STX and LDX.**
+- The step is the contract's own arithmetic, rb := rb + step modulo
+  2^W, which is IADD on the encoding. So the array computes it, an IADD
+  of rb and the step sign-extended to the format's width, and P1 holds.
+- A stepped STX fires that IADD at its own F, a slot a store leaves
+  free today, and becomes a writer of rb: a queue slot, and every later
+  reader of rb waits for it as for any writer. p = 0 a beat. Stepped
+  stores on one index form a dependent chain under R14's landed rule, as
+  an indexed access's rb always has.
+- A stepped LDX writes two registers a beat, rd and rb, through the
+  file's one write port. So its step is an internal IADD issued after
+  the load: up to one more instruction's beats, p up to 1. A fast load
+  with no load behind it may hide the IADD in a slot it leaves free,
+  which seqcycles measures. A load step free in every case needs a
+  second write port: the file's block RAM doubled and a live-value
+  table, in the issue and retire logic that took revision 7 two
+  send-backs to get right. Not proposed (question 10).
+- What that does to R22's worth (SEQUENCER.md, "What each is worth,
+  counted"): the Taylor coefficient's steps are on its loads, so its
+  stepped loop costs what today's loop costs, in fewer words (280
+  against 342 at N = 30). Streaming removes the ceiling that made the
+  unrolled form's O(N^2) words expensive, and that form is the fastest.
+  A store's free step and the words are what R22 buys; seqcycles
+  measures p for both, and the table is recomputed from it.
+- The RTL is cft_seq.sv's: the stepped forms in writer_fn and the
+  admission's destination; two more sources for the request's operands
+  (rb as the bank read it, and the step at the format's width), chosen
+  in parallel from registers, so the forwarded operand still enters at
+  the last level; the load's internal IADD. `ldx rX, rX, step` writes
+  the load alone (R22's rung 2).
+- Cost (estimate): 400 to 700 LUTs a tile (the step's 256-bit
+  broadcast and select about half of it), about 50 registers. Timing:
+  the F stage's request mux and the admission, every one of whose paths
+  had +0.423 ns or more in revision 7's single (verifier-R4's R19
+  admission path among them).
+
+**R23: per-lane flags.**
+- The tile's part is confirmed as SEQUENCER.md proposes it: MODE[24]
+  asks; LFLAGS_PTR at 0xB0 and 0xB4 is kernel argument 17 on m_axi_d,
+  beside cnt; VERSION moves from 0xA00 to 0xB00, as every appended
+  register has moved it. The link configurations bind each master, not
+  each argument, so hw/link.cfg and hw/link_quad.cfg do not change.
+- **The state, checked:** SEQUENCER.md's eight flops a lane (its seven
+  and the mark) is right, and it holds at every format, not only at
+  fp32's 128 lanes: the block has 128 slots at every format (sixteen
+  beats of eight positions), so 1,024 flops a tile (computed). None can
+  be derived from today's state: a lane's count at max_deposits does
+  not say whether it overflowed.
+  - [4:0] at the retire, from the terms wb_flags_fn ORs today: each
+    position's five flags under the row its beat fired with and its flag
+    enable, which R24's tag joins;
+  - [5] and [6] at F, from DEPOSIT's overflow by position and the strict
+    test's suppression by bank; [7] from RAISE;
+  - each captured from a registered copy of today's term, a cycle late,
+    so no R23 logic sits on today's paths, the F stage's deposit path
+    among them (the margins, above). A sticky byte read only at the
+    drain loses nothing by a cycle;
+  - cleared with `active` at each block's start.
+- **The drain, checked:** one stream after the counts, 32 lanes a beat.
+  128, 64, 32 and 16 lanes a block are 4, 2, 1 and half a beat
+  (computed), so "at most four" holds. At fp256 a block starts on a
+  16-byte boundary, so its half beat goes at that offset with byte
+  strobes. Strobed by the caller's mask, as the counts are, at about two
+  cycles a beat (S_CNT_PACK and S_CNT_SEND's rate). A run that does not
+  ask skips it.
+- **The RTL:** cft_seq.sv (the flops, their captures, the drain's
+  states, the pointer and enable as ports); cft_csr.sv (LFLAGS_PTR,
+  MODE[24] refused unless the feature is built, VERSION); cft_krnl.sv
+  (FEAT_LANE_FLAGS, CAPS2[13]); hw/kernel.xml (argument 17). On the
+  host, host/src/backend_xrt.cpp gains 0xB00, the argument, MODE[24]
+  when a run asks, and a block a tile copied to its lanes' offset as the
+  counts are. Every program launch on a 0xB00 tile passes all eighteen
+  arguments, 0x900's lesson.
+- Cost (estimate): 1,000 to 2,000 LUTs a tile (half a LUT to one a flop
+  for the sticky update, about 500 for the drain's byte select, the rest
+  control), about 1,100 registers, no block RAM. Timing: none of today's
+  paths, given the registered captures.
+
+**R24: flag control.**
+- As SEQUENCER.md's "What a tile would need" proposes:
+  - QUIET and ENDQUIET decode in S_DECODE, as REPEAT and ENDREP do, and
+    walk no beats. The depth is three bits, reset at each block's start;
+  - the tag is taken at admission and travels with its beat. It joins
+    al_fen, the flag enable that already rides beside every fired beat
+    (fq) and gates flags_q at the retire, so a region's edge never moves
+    a beat already in the pipe;
+  - RAISE is piped as SETACT is, its ra read from the bank under R14's
+    landed rule with no forwarding mux, and acts at F: its active lanes'
+    ra[4:0] into FLAGS and R23's byte unless tagged, and ra[7] into the
+    byte and the run's mark, tagged or not;
+  - the mark is cft_seq's err[5] and cft_krnl's eng_err[6], and
+    cft_csr.sv reads STATUS as {25'b0, eng_err};
+  - the region rules are the loader's. A stream that bypassed them
+    still terminates.
+- Cost (estimate): 150 to 400 LUTs a tile, about 20 registers. QUIET
+  and ENDQUIET cost a few cycles each, as REPEAT does; RAISE a step a
+  beat, as SETACT. Timing: al_fen gains an input, flags_q a registered
+  term, S_DECODE a case.
+
+**R8S: instruction streaming.**
+- As S8's study designs it (sections 2 to 9): a new rtl/cft_ifetch.sv
+  (a 4,096-word store, a 512-word FIFO, its own read engine on master A,
+  a realigner at 4-byte granules), its hooks in cft_seq.sv,
+  SEQ_STREAM_D in cft_krnl.sv, and cft_csr.sv's caps2 widened to 32
+  bits.
+- **With R21 to R24 in the same files.** S8 (section 10) found no
+  conflict of function. The files are shared, so:
+  - the CSR and kernel changes all items need (caps2's width, STATUS's,
+    the CAPS2 slots, MODE[24], LFLAGS_PTR, VERSION, the lanes' sideband)
+    go into one seam commit first, every new bit zero, as 0xA00's five
+    registers did at round 2's seam;
+  - cft_seq.sv has one author in turn, as revision 7's R18 and R19 had
+    one, since they share the decode, the issue pipe and the read
+    channel: the abort and the fetch's hooks first, so that probe S
+    reads streaming alone (question 6), then R24, R23, R21's decode and
+    R22;
+  - the fetch's faults end the run through the abort, below, not a
+    mechanism of their own.
+- **A correction to the study's compatibility table.** Its first row (a
+  revision-7 host on a streaming tile reads 32,768 and runs) assumed no
+  VERSION step. R23's register moves VERSION to 0xB00, and libcft
+  refuses at open a VERSION it does not know, by name ("hardware
+  contract ... is not one this library knows",
+  host/src/backend_xrt.cpp). So no host built on libcft before revision
+  8's host build opens a revision-8 tile: it refuses rather than
+  misreads, as at every VERSION step before.
+  (host/tools/cft_resident.cpp drives XRT directly and reads no VERSION;
+  it would run its elementwise passes, which revision 8 leaves
+  unchanged.)
+- Cost (S8's estimate and computation): about 1,000 LUTs a tile (500 to
+  1,500; verifier-VS8 noted that the study's own rows sum to 490 to
+  890); 55 RAMB36 a tile freed, 220 on the quad, so q135b's 1,051.5
+  block-RAM tiles become about 831.5 (61.9%); registers 400 to 800 (my
+  estimate). Timing: the instruction memory's block-RAM cascade leaves
+  the fetch path, the family behind ra-135single's worst path (+0.089
+  ns), rev7a's second (+0.101) and u_seq's worst out of context
+  (+1.885); the new logic is registered and shallow (S8, section 5).
+- A program of at most 4,096 instructions runs from the store in
+  today's cycles, and every program file in the tree is that size (S8
+  measured 73). A larger one streams with no stall a step for every
+  image cftc emits (S8, section 4), held on the card by the ten
+  workloads' ms a step.
+
+**The abort: a read burst of the wrong length ends the run.**
+- Today (READ, cft_seq.sv's read channel; verifier-VS8): a short burst
+  latches the length fault, STATUS[2], but leaves the burst counter
+  above zero, so the next burst is never issued and a multi-beat read
+  (the image, the bank, the scratch-in, a stream) waits for ever. The
+  engine has ended a run on a length error since 2026-08-30;
+  docs/CARDDAY.md's "A hang should no longer be how a bus fault
+  presents" is the engine's, not the sequencer's.
+- A long burst does not hang today: the beat that should have been last
+  zeroes the count, the next burst can issue, and the extra beats are
+  taken as a later read's data, a wrong answer with STATUS[2]
+  (verifier-VRP8).
+- After, the engine's rule (rtl/cft_engine_stream.sv): a length fault
+  on any sequencer read ends the run. No new burst is issued, a write
+  burst already committed delivers its beats (streaming's quiesce
+  overlaps the drains), every read in flight lands (a long burst drained
+  to its RLAST), and done comes with STATUS[2]. And S8's rule for the
+  fetch, widened to the parse: a read fault on an instruction word ends
+  the run too, so no word the memory did not vouch for runs. So does a
+  read fault on the header beat, whose counts and flags decide what the
+  run reads and runs. A read fault on data (the bank, the scratch-in, a
+  stream, the mask, a table) completes the run as today, STATUS[0]
+  saying its outputs are not to be trusted. Question 4.
+- Cost (estimate): 50 to 150 LUTs a tile.
+
+**The seam** (one commit, first): cft_csr.sv (LFLAGS_PTR, MODE[24]
+refused, VERSION 0xB00, STATUS at seven bits, caps2 at 32), cft_krnl.sv
+(the CAPS2 slots at zero, the sideband tied off), cft_lanes.sv and
+cft_fpfma_pipe.sv (the sideband port, inert), cft_seq.sv (the new
+ports, inert), hw/kernel.xml (argument 17), and the host's map (0xB00,
+the argument, CAPS2[11] to [14] onto seq_features bits 15 to 18 behind
+0xB00, CAPS2[20:16] onto max_insns). With every new bit zero, every
+program and run computes as today, the benches change only where they
+read VERSION and the map, and device-test refuses revision 8 on it by
+name, as on revision 7. Cost (estimate): 100 to 150 LUTs and about 70
+registers a tile.
+
+**What a revision-8 U50 tile reads** (computed from cft_krnl.sv's
+assembly): VERSION 0x00000B00; CAPS 0x19faffff, unchanged
+(CAPS[23:20] = min(15, 24) = 15); CAPS2 0x00187ffb at 2,048 slots,
+0x00187ffc at 4,096, 0x001877fb without R21; seq_features 0x7ff1f, the
+software handle's word at ABI 0.17, or 0x77f1f without R21. No ABI
+step: R8's ABI 0.17 has every field. cft_image_id's growth is version
+2's ABI 0.18 (docs/studies/CERT-V2.md, section 13), not this plan's.
+The open-core configurations keep streaming off (S8) and take the rest
+as their parameters allow.
+
+**2. The cost, added up, and the quad**
+
+| | LUTs a tile (estimate) | the quad's LUTs | SLR0's LUTs |
+|---|---|---|---|
+| q135b (measured) | | 719,697 (82.66%) | 378,652 (86.12%) |
+| revision 8 without R21's lanes | 2,230 to 4,980 | 83.68% to 84.94% | 87.13% to 88.39% |
+| with R21's lanes, design (b) | 6,230 to 13,980 | 85.52% to 89.08% | 88.95% to 92.48% |
+| with R21's lanes, design (a) | 12,230 to 19,980 | 88.27% to 91.83% | 91.68% to 95.21% |
+| any row at 4,096 slots | 600 more (S8's estimate, the 16:1 select) | 0.28 points more | 0.27 points more |
+
+- "Without R21's lanes" is the seam (100 to 150), R24 (150 to 400), R23
+  (1,000 to 2,000), R22 (400 to 700), R21's decode in cft_seq.sv (30 to
+  80), the abort (50 to 150) and streaming (500 to 1,500).
+- Computed from q135b's routed report (SLR0's capacity 439,680, from
+  its 86.12%), with two tiles a SLR as S8 inferred. Block RAM falls by
+  220 tiles (streaming). Registers go from 26.56% to between 27% and
+  29% (R23's 1,024 flops a tile among them). UltraRAM is unchanged at
+  2,048 slots, and 516 of 640 (80.6%) at 4,096.
+- No quad on record has closed with more LUTs than q135b. Round 2's
+  closed at 80% (+0.040 ns) and the earlier ones sat near 69%
+  (docs/VALIDATION.md). q135, the same tiles built with default
+  directives and one tile retimed, missed by 0.457 ns on route-bound
+  paths, with v++ warning "The available LUTs may not be sufficient". A
+  quad past 85% of the part is untried; past about 86% of the part, or
+  89% of SLR0, I do not expect one to close at 135 MHz (estimate).
+- So the order measures before it commits: probe L (the lanes) and
+  probe K (the kernel) give the tile's real figure before any
+  7.5-hour quad.
+
+**3. The builds**
+
+Every build is on amd-arc-box, one heavy link at a time, at
+`KERNEL_FREQ=135000000`, with docs/BITSTREAM-BUILDS.md's checks: the
+tree and its content asserted, the clock applied, kernel_wns_ns,
+verify-image; the host built `XRT=1` with its test binaries named on
+the make line.
+
+- **The probes**, one at a time on amd-arc-box, never beside a link or
+  the lead's long runs. The rev7a probe single is the precedent: an
+  early read of timing in context, from a tree before its fixes.
+  - **L**, out of context: cft_lanes at the U50's four rungs, today's
+    against R21's, design (b) first and (a) after it if (b) costs S10
+    its timing. It must show R21's LUTs a tile and S10's slack, and that
+    no lane path becomes the kernel's worst (+1.576 ns today, an engine
+    path). Its figures answer question 8 and pick question 9's branch
+    before any quad.
+  - **S**, out of context, S8's question 6: the seam, the abort and the
+    fetch with its hooks, before the revision's other RTL is in (part
+    5). It must show the fetch path off u_seq's worst list, the store
+    without a cascade (`cascade_height` if Vivado makes one), and, from
+    a hierarchical report, the instruction memory's real share of the
+    tile's 217 block-RAM tiles (S8's caution).
+  - **K**, out of context: cft_krnl at the U50's capacities with the
+    whole revision, at 2,048 and 4,096 slots and at the deep single's
+    depth. It must show the tile's LUTs, registers, block RAM, UltraRAM
+    and worst paths; the quad's projection follows from q135b's report.
+  - **E**, emulation: an hw_emu single of the merged tree (about 4
+    minutes to build, BITSTREAM-BUILDS.md) with device-test's revision-8
+    legs on it, to test kernel.xml's argument 17, the host's map and the
+    lane-flags block before any hw link.
+  - **U**, out of context, only if a packed quad at 8,192 slots is
+    still wanted: whether two 4,096 x 32 sub-arrays map to one URAM288
+    (S8, section 7).
+- **The images:**
+  1. **rev8a, the single** (hw/link.cfg, the whole revision with R21,
+     at the slots the quad will have, about 2.6 hours as rev7b's 156
+     minutes): the timing probe in context, and the u50-rev8 image if
+     its tree is final. It must close with no revision-8 path among its
+     ten worst before the quad starts; then its early card legs
+     (device-test, api-test, the acceptance set). Step 6's plan names
+     two bitstreams; this third is the probe the rev7a precedent asks
+     for, shipped as revision 7's single was.
+  2. **The streaming quad** (hw/link_quad.cfg, about 7.5 hours as
+     q135b's 445 minutes), with q135b's options from the start: RETIMING
+     on all four tiles, ExtraTimingOpt, AggressiveExplore, post-route
+     phys_opt. u50-rev8-quad, at 4,096 slots if probe K's projection
+     fits, else at 2,048 (question 5), and with or without R21 as
+     question 9 decides.
+  3. **The deep build**, by Logan's rule for program limits, "as large
+     as we can, ideally adjustable as the other parameters are": a
+     single at 8,192 slots, 256 UltraRAMs a tile and 260 of 640 with the
+     shell's, which one SLR can hold; or 16,384 slots (516 of 640) if
+     that closes in context, where its scratch crosses both SLRs (probe
+     K shows the 64:1 sub-array select's depth, not the crossing).
+     16,384 departs from step 6's plan, whose deep build is "4,096 to
+     8,192 slots". u50-rev8-deep. A quad cannot hold 8,192 slots
+     unpacked (1,028 UltraRAMs, computed); a dual (516) needs a link
+     configuration of its own and holds no program the single does not,
+     so it is not proposed.
+- Box time: about 12.6 hours for the three images built once, up to
+  about 28.6 if the quad is built three times (an estimate: each image
+  priced at its revision-7 counterpart's measured build, 156, 445 and
+  468 minutes).
+- cftc gains a target for each image (python/cftc/targets.py): max_insns
+  2^24, the image's depth, its feature word.
+- Which misses each holds (S8, section 4, and the survey's part T): the
+  quad at 2,048, Gray-Scott hard and wide, Kuramoto-Sivashinsky and
+  reservoir extended; at 4,096, Lorenz-tangent hard and wide, FPUT and
+  phi4 extended as well; the deep single, the three larger extended
+  programs, whose slots their compiles against its target report.
+
+**4. How it is held**
+
+Every bench compares against the golden model, as now. Agents run quick
+tests only: single benches under Verilator, golden tests and plants. The
+long runs are the lead's (Logan, 2026-09-29): Icarus `make sim`,
+`simmc`, `lint`, `formal` and the gate.
+
+- **Benches** (cocotb; Verilator while iterating, Icarus to confirm):
+  - tb/test_seq_core.py gains cases for each item against seq.py, which
+    defines them all:
+    - R21: ties, either operand anchoring, the far case and a partly
+      shifted-out operand, cancellation, overflow, underflow without
+      inexact, specials and signed zeros, a dependency through rb on
+      port C, every format;
+    - R22: wrap, strict, `ldx rX, rX, s`, masked lanes, a dependent
+      chain;
+    - R23: the three identities, a masked lane untouched, a lane SETACT
+      dropped still written, fp256's half beat, nothing written without
+      MODE[24];
+    - R24: four regions deep with loops, a raise in and out of a region,
+      the mark inside one, a skipped body holding one, the tag across a
+      region's edge with beats in flight;
+    - the abort: a short and a long burst on each multi-beat read.
+  - Its configurations: seq_core (no stream), seq_coreu50 (the U50's,
+    streaming past 4,096), the multi-pass pair, and S8's seq_corestr (a
+    64-word store and a 2^16 capacity, SeqRam with a read latency of 0,
+    125 and 256), which joins SIM_BENCHES.
+  - The four fpfma benches, fp32 to fp256, and their multi-pass forms
+    gain augadd and augerr against cft_golden.augmented, the definition,
+    beside every operation they hold today.
+  - The attribute codes 5 to 7, which no bench drives today
+    (tb/fpfma_common.py iterates 0 to 4): the fpfma benches, and
+    tb/test_krnl.py through an elementwise run, hold them to RNE, as
+    MODE[14:12] documents. Since R21 they carry its mode's separation
+    from an outside code.
+  - tb/test_krnl.py: VERSION, CAPS and CAPS2 at the U50's values and
+    the open-core ones; MODE[24] refused where the feature is clear.
+    tb/krnl_caps.py learns EN_AUGADD and SEQ_STREAM_D.
+    tb/test_krnl_seq.py: S8's capacity cases and the lane-flags block
+    through the kernel. tb/test_krnl_faults.py: the sequencer's faults
+    (its five cases start elementwise runs only today).
+  - `make seqcycles` gains rows for what each item costs (augadd, a
+    stepped store and load, QUIET, RAISE, the lane-flags drain, a
+    streamed program, a redirect at the 64-word store) and measures the
+    one-beat column of S8's question 7.
+- **Formal:** a new formal/ifetch.sby with tb_ifetch_formal.sv (S8,
+  section 8); fifo.sby covers the fetch's FIFO as a cft_fifo instance;
+  lzcone.sby gains a width if design (a) adds a leading-zero count.
+  formal/run.sh and the proof counts in docs/VERIFICATION.md and the
+  root README move with them. yosys-lint and Verilator's fatal warnings
+  take every new module.
+- **Plants**, each in a fresh copy and each red in a named case:
+  - S8's nine for the fetch;
+  - R21: a tie rounded to even, inexact from augadd, e's sign kept on a
+    round up, x returned as e in the far case, e keyed on s6_far alone
+    (red on a partly shifted-out operand), underflow lost for a tiny e,
+    ties toward zero reached by ADD and augerr's select reached by ADD
+    (each red in the fpfma benches), an outside attribute code 5 to 7
+    reaching R21's mode (red in the new case for codes 5 to 7), the
+    sideband left live in the engine, port C reading rc for codes 10
+    and 11, their flag enable left off. Not a plant: the re-anchor
+    applied to ordinary operations, which changes no window
+    (verifier-VRP8), so no bench can go red on it;
+  - R22: the step before the access, `ldx rX, rX, s` keeping the step,
+    a masked lane stepping, a negative step's high word at fp64;
+  - R23: a masked lane's byte written, [5] or [6] dropped, a beat's
+    flags in another row, fp256's offset, a block written without
+    MODE[24];
+  - R24: the tag taken at retirement, a raise in a region not silenced,
+    the mark silenced, the depth not reset at a block, STATUS[6]
+    dropped;
+  - the abort: a long burst not drained, a short one still hanging, a
+    faulted instruction word run;
+  - the seam: MODE[24] accepted without the feature, argument 17 at an
+    offset LFLAGS_PTR is not.
+- **Host legs:** host/tests/seq_check.py, which holds program.c to
+  seq.py in the gate, gains a `--device` mode so its corpora run through
+  a card handle against the model (proposed; on a revision-7 card its
+  revision-8 corpus records refusals by name). device-test's revision-8
+  legs (try_load_rev8, check_lane_flags) compare on a revision-8 tile,
+  where today they record refusals by name.
+- **Card legs**, on each image:
+  - the acceptance set as the admission test (`programs/acceptance.py
+    --device`): 20 of 20 at the committed digests;
+  - device-test `-i`, `-q -n 8`, `-n 4096` and `-r`, its revision-8 legs
+    comparing; api-test; card-identity, reading the words above;
+    cft-selftest over the vector sets, since R21 changes the FMA pipe;
+  - card-segrun's version-1 certificates, as today;
+  - the ten workloads' ms a step against 2026-10-01's, equal within
+    run-to-run spread (S8's claim of no stall a step); the misses on the
+    image that holds them, bit for bit with the software backend at the
+    device's depth, on the pack's three lanes and on every lane, as A1's
+    driver holds the ten;
+  - S8's redirect probe and capacity legs (an image of 32,769
+    instructions; the capacity plus one refused at the header);
+  - certificate version 2's card cases, once CV2B merges (CERT-V2.md,
+    sections 6, 7 and 13): `cft-segrun --lane-flags` on the quad, a
+    block a segment beside the certificate and its identities against
+    each segment line; markstep's replay by an image under R17's mask;
+    both auditors, cft-audit refusing `source-missing` where a replay is
+    the golden auditor's.
+
+**5. The order of work**
+
+Parcels with verifiers, under the send-back rule. The times are
+estimates against revision 7's: its parcels went from dispatch (04:12)
+to the tree its single was built from (11:44) in about seven and a half
+hours, two send-backs included (the round's ledger), and revision 8 has
+about three times its RTL (estimate).
+
+0. Logan answers the questions below. C4's design stop, running now,
+   reports anything it needs of a tile before round 2; from then the
+   tile's program model is R21 to R24 and streaming.
+1. Round 1, in parallel, about a day:
+   - A, the seam and the host's map, first (hours);
+   - B, R21 in the lanes, design (b), with probe L at its end and (a)
+     after it if L says so. L's figures answer question 8 and pick
+     question 9's branch before round 2;
+   - D1, rtl/cft_ifetch.sv alone, with formal/ifetch.sby and SeqRam's
+     read latency;
+   - probe U, if wanted (an hour or two).
+2. Round 2, about two days:
+   - C, cft_seq.sv, one author in turn, a commit each with its benches
+     green: the abort; then the fetch's hooks with D1's unit and
+     cft_krnl.sv's SEQ_STREAM_D, and probe S on that tree, which holds
+     the seam, the abort and streaming and nothing else; then R24, R23,
+     R21's decode and R22. C branches from the seam, not from B's
+     merge, so that probe S, which synthesises the kernel with its
+     lanes, sees today's lanes; B's lanes join C before R21's decode;
+   - E, beside it: the lane-flags block on XRT, the cftc targets,
+     seq_check's `--device`;
+   - a verifier for each; probe K and probe E on the merged tree.
+3. The lead's long runs on amd-arc-box: Icarus `make sim` with
+   seq_corestr (revision 7's took 10,010 s for 26 targets on the desktop
+   at one job, and seq_coreu50 alone 5,353 s on the box), `simmc`,
+   `lint`, `formal`, and the gate budget (125 and 127 minutes at today's
+   two runs): about a day of box time.
+4. The images in the order of part 3: 12.6 to 28.6 hours of box time.
+5. The card legs on each image: about an hour each, the misses' long
+   profiles longer.
+6. The records: SEQUENCER.md (R21 to R24 built, streaming's section, the
+   capacities), HOSTAPI.md, ARCHITECTURE.md's CAPS2 table,
+   COMPATIBILITY.md, VERIFICATION.md, CAPABILITIES.md, LAYOUTS.md and
+   SCALING.md with the measured utilization, and the VALIDATION entry.
+   Then schedule.py's redirect term, reported and not in the objective,
+   once the card has measured a redirect (S8, section 4).
+
+**6. What could make it two revisions, and how this plan avoids it**
+
+Logan's rule since step 4 is one program-model revision, and step 6's
+plan puts everything the later parts need of a tile into this one.
+- **R21 too large for the quad.** EN_AUGADD makes it a build's choice
+  inside one RTL revision, as the open-core builds already choose their
+  capacities: the program model is revision 8 on every build, and one
+  without R21 refuses augadd and augerr by name, as revision 7 does.
+  Probe L measures before any quad is built; what a quad without R21
+  means for M1 and the acceptance set is question 9's.
+- **Streaming late.** Its unit is built first, alone, under its own
+  proof. A SEQ_STREAM_D equal to the store's depth builds no stream, but
+  this plan holds the images for it, since programs past one tile are
+  the step's goal.
+- **A later part asking for more.** C4's design stop reports before
+  round 2. The step's later parts name nothing of a tile beyond R21 to
+  R24: M1 its augmented addition and its mark, M2 revision 3's LDX and
+  its mark, certificate version 2 R23's block and R24's mark
+  (CERT-V2.md, sections 6, 7 and 13). Anything else is refused by name
+  in software until a later revision.
+- **A defect found on the card.** It is fixed in this revision and the
+  image rebuilt; a host defect needs no RTL.
+- **The packed scratch.** A change inside the scratch at one build's
+  depth, not the program model; deferred unless 8,192 slots are wanted
+  on a quad.
+
+**7. Questions for Logan**
+
+S8's seven, restated with verifier-VS8's corrections, then three this
+plan raises. Each has a recommendation.
+
+1. **The store's depth: 4,096 instructions.** Every program in the tree
+   is within it (the largest is 2,511), so each runs as today, and it
+   frees 55 RAMB36 a tile. Recommended.
+2. **The capacity a U50 build publishes: 2^24 instructions,** a 128 MB
+   image, half of the tile's A pseudo-channel; a build parameter.
+   Recommended.
+3. **CAPS2[20:16] as a five-bit log2,** zero meaning CAPS[23:20] is the
+   capacity, and CAPS[23:20] published as min(15, the log2). VS8's
+   correction: the field can say 2^31, but a build parameter is an `int`
+   and stops at 2^30, so the elaboration guard says 2^30. Recommended.
+4. **Faults.** S8's question, widened by VS8's finding: a length fault
+   on any sequencer read ends the run, where today a short burst hangs
+   every multi-beat read and a long one hands its extra beats to a later
+   read; a read fault on an instruction word, in the parse or the fetch,
+   or on the header beat ends the run, so nothing the memory did not
+   vouch for decides what runs (S8 proposed ending the block; one abort
+   for every read ends the run); a fault on data completes the run as
+   today. Recommended.
+5. **The deep build's shape.** The streaming quad at 4,096 slots if
+   probe K's projection fits, else at 2,048; and a deep single at 8,192
+   slots, or 16,384 if that closes in context. Both depart from step 6's
+   plan: three images where it names two (the single is the timing
+   probe), and 16,384 past its "4,096 to 8,192 slots", by your rule of
+   as large as we can. S8 recommended the quad at 4,096 after a probe,
+   and a packed-scratch probe before choosing 8,192's shape; this plan
+   waits for probe K because of the LUTs (part 2) and defers the packed
+   quad. Recommended.
+6. **An early streaming-only probe** out of context (probe S), on the
+   seam, the abort and the fetch's hooks before the revision's other RTL
+   is in: part 5 puts the fetch first in cft_seq.sv for it. The
+   bitstreams wait for the whole revision. Recommended.
+7. **schedule.py's one-beat column** charges one cycle for an
+   independent instruction. The RTL takes about seven for arithmetic,
+   bound by the result queue's three slots (verifier-R4 measured 7.0 for
+   R19, every lane masked), about four for one that writes no register
+   (4.3 for a store, the same measurement), and near four for a fast
+   load (VS8). Recommended: seqcycles measures it in this revision's
+   bench round, and cftc corrects it with C4's cost model work, which
+   already changes the committed manifests.
+8. **R21's design.** Both designs re-anchor augadd and augerr at S6 by
+   exponent, so that r's rounding point is one of six fixed places (part
+   1, where two transcriptions of the pipe, mine and verifier-VRP8's,
+   checked the decision on about 132,000 sums). (b) decides at S10 and
+   sends augerr's e through r's normaliser: the least area, with the
+   decision on S10's path. (a) decides at S11 and normalises e in a
+   second path: S10 and r's path untouched, at about twice the area.
+   The re-anchor keeps a gate so that ordinary operations keep today's
+   alignment (part 1 gives the reason and the ungated option). Neither
+   design can be costed with confidence from the RTL's shape (4,000 to
+   9,000 LUTs a tile against 10,000 to 15,000, each figure movable by a
+   factor of two). Recommended: probe L builds (b) and reads its LUTs
+   and S10's slack, and (a) is built only if (b) costs S10 its timing.
+   Either way one pass, LATENCY 16 and no fusion.
+9. **Whether the quad carries R21.** On part 2's estimates R21's lanes
+   take the quad to between 85.5% and 92% of the part's LUTs (89% to
+   95% of SLR0's), past anything that has closed. Recommended: build the
+   quad without R21 (EN_AUGADD = 0, its CAPS2[11] clear), with R21 on
+   the single and the deep build, unless probe L measures R21's lanes at
+   about 2,000 LUTs a tile or fewer, which keeps the whole revision
+   within about 86% of the part and 89% of SLR0. If a quad with R21 then
+   misses 135 MHz, rebuild it at 130 MHz (your standing word for a quad
+   that misses 135), and only then without R21. What a quad without R21
+   means:
+   - M1, which step 6's plan writes with augmented addition, would use
+     TwoSum there: an exact error too, beside a round-to-nearest-even
+     sum, at 8 instructions a compensated step against 3 (SEQUENCER.md's
+     table). Either C4's generator writes each routine both ways, and
+     one source compiles to different images on the quad and on the
+     single or deep build: the same answers once marked lanes are
+     replayed, but other digests, other bits at ties, possibly other
+     marked lanes, and certificates of different images, which ends
+     cftc's rule that one image serves every target. Or it writes the
+     TwoSum form for every target: one image everywhere, without R21's
+     speed. Recommended: the second, until every image carries R21;
+     C4's to confirm.
+   - The acceptance set's twenty cases use neither routines nor R21, so
+     they are unchanged on every revision-8 image. A case added with a
+     routine has one image under the second way, and needs a record for
+     each form under the first.
+   - So under this recommendation R21's lanes on the single and the deep
+     build serve no compiled routine until a quad carries R21: only
+     hand-written programs, the side project's compensated steps among
+     them, use augadd and augerr there. That makes this question also
+     whether those two carry R21 at all. Recommended: they do. They
+     have the room (revision 7's single used 31.31% of the part's
+     LUTs), it is an item you chose, it is then proven on a card rather
+     than built and carried nowhere, and a later quad, or a larger part,
+     turns it on with a build parameter rather than a new revision.
+10. **R22's load step costs up to one instruction's beats** (p up to
+    1), because a stepped load writes two registers a beat through one
+    write port; a store's step is free (p = 0). Accept this rather than
+    a second write port for the register file. Recommended. R22 then
+    buys a looped product's words and its stores' steps.
+
+**Approval.** Not yet given. The plan goes to Logan after its verifier,
+and the RTL waits for his answers.
+
 ## The adoption story these serve
 
 Two tiers, one contract: a software library anyone can run on
