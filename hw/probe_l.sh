@@ -31,7 +31,9 @@
 #
 # Env: VIVADO_SETTINGS (default /data/Xilinx/Vivado/2022.2/settings64.sh),
 #      FREQ (135), PART (xcu50-fsvh2104-2-e), JOBS (2 runs at once),
-#      BASE_RTL (unset: no control).
+#      BASE_RTL (unset: no control), RUNGS (default "fp32 fp64 fp128
+#      fp256"; e.g. RUNGS=fp256 with impl places and routes the widest
+#      pipe alone - the tile figure needs all four, at synth).
 set -u
 stage=${1:-synth}
 out=${2:-build_probe_l}
@@ -71,9 +73,11 @@ run_one() { # name exp_w man_w en_augadd rtl_dir
   echo "$(date +%T) $name rc=$rc $(( $(date +%s) - t0 ))s"
 }
 
+RUNGS=${RUNGS:-fp32 fp64 fp128 fp256}
 runs=()
 for r in "8 23 fp32" "11 52 fp64" "15 112 fp128" "19 236 fp256"; do
   set -- $r
+  case " $RUNGS " in *" $3 "*) ;; *) continue;; esac
   runs+=("$3-en0 $1 $2 0 $root/rtl" "$3-en1 $1 $2 1 $root/rtl")
   [ -n "${BASE_RTL:-}" ] && runs+=("$3-base $1 $2 none $BASE_RTL")
 done
