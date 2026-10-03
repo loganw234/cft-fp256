@@ -2401,7 +2401,17 @@ refusal's name, code and location, or both ACCEPTED with the same lines.
      file not there, a block file misspelt or a directory by its name), a
      misspelt block file beside a version-1 certificate not read, and
      cft.h's profile and language macros, the tool's writer's list of
-     variables and its generators against the golden model's.
+     variables and its generators against the golden model's;
+   - twelve version-2 controls no test_cert2.py call hands the tool as it
+     is handed them: `definition-differs` inside each re-derivation a
+     source-free audit reaches past step 4 (a segment line's flags and
+     block, a replay line's raw values and its absence, the wider-source
+     relation), audits accepted under a definition that does not cover
+     the certificate's (by the profile's minor, and by the language where
+     a run names a source), a signature file whose key encodes no point
+     (`signature`), the wider-source relation's lanes and steps, and
+     blocks past segment 9, which the golden auditor reads, and its
+     verdict lists, in their decimal spelling's order (10 before 9).
 2. **test_cert.py and test_cert2.py**, each run in the gate's process
    with `cert.parse` and `cert.audit` shadowed. Every top-level call their
    tests make is handed to the tool too, translated into files and

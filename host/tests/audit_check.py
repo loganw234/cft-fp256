@@ -936,6 +936,140 @@ def section_tool(work):
            "block file")
     definition_checks()
     census_controls(work)
+    v2_census_controls(work)
+
+
+def v2_census_controls(work):
+    """Golden against tool on version-2 inputs no test_cert2.py call hands
+    the tool as it is handed them (no source): `definition-differs` raised
+    inside each region cert2._Through covers that step 4 does not reach -
+    a re-run's segment line (segment-flags, segment-lane-flags), a replay
+    line's own checks (replay-raw, replay-missing) and the wider-source
+    relation (aux-format) - under a certificate whose profile this
+    library's does not cover; and an audit ACCEPTED under a definition
+    that does not cover the certificate's (the verdict's "do not cover
+    them" line), by the profile's minor and by the language where a run
+    names a source. Without these, every definition-differs the gate
+    compared was step 4's."""
+    import test_cert2 as T2
+    print("== 1d. version 2's controls: definition-differs in each re-derivation "
+          "a source-free audit reaches, and a verdict under a definition "
+          "that does not cover the certificate's", flush=True)
+    fl = fixture_function(T2.fl)()
+    mk = T2.make_markstep()
+    lz = fixture_function(T2.lz)()
+    n = 0
+
+    def one(label, data, salt, programs, want=None, **kw):
+        nonlocal n
+        n += 1
+        d = work / "census2" / f"c{n}"
+        if d.exists():
+            shutil.rmtree(d)
+        d.mkdir(parents=True)
+        kw, dropped = no_source_kwargs(kw)
+        g = golden(cert.audit, data, salt, programs, **kw)
+        args = translate(d, data, salt, programs=programs, **kw)
+        hold(args, None, g, f"{label}: {describe(g)}", d, quiet=False)
+        if want is not None:
+            check(g[0] == want[0] and (g[0] != "refused" or
+                                       (g[1][0], g[1][2]) == want[1:]),
+                  f"  and the golden verdict is the control's: {want}",
+                  describe(g))
+
+    def seg(data, k, field, value):
+        L = T2.lines_of(data)
+        i = T2.find(L, f"segment {k} ")
+        t = L[i].split(" ")
+        t[field] = value
+        return T2.rebuilt(L[:i] + [" ".join(t)] + L[i + 1:])
+
+    def prof(data, value="profile 3"):
+        return T2.edit(data, value.split(" ")[0] + " ", value)
+    fl_states = {0: {0: fl.init}}
+    one("flagstep, profile 3, segment 1's flags wrong",
+        prof(seg(fl.data, 1, 7, "21")), None, {0: (fl.img, None)},
+        ("refused", "definition-differs", ("-", "0", "1", "-")),
+        states=fl_states)
+    blk = fl.chain.blocks[0]
+    other = bytes([blk[0] & ~0x10]) + blk[1:]
+    one("flagstep, profile 3, segment 0's block another",
+        prof(T2._block_line(fl, 0, other)), None, {0: (fl.img, None)},
+        ("refused", "definition-differs", ("-", "0", "0", "-")),
+        states=fl_states)
+    L = T2.lines_of(mk.data)
+    r = T2.find(L, "replay ")
+    t = L[r].split(" ")
+    t[7] = cert.parse(mk.data).runs[0].chain[1].end
+    raw = T2.rebuilt(L[:r] + [" ".join(t)] + L[r + 1:])
+    mk_args = dict(states={0: {0: mk.init}}, sources={0: mk.src})
+    one("markstep, profile 3, its replay line's raw end the segment's",
+        prof(raw), None, {0: (mk.img, mk.bank)},
+        ("refused", "definition-differs", ("-", "0", "1", "-")), **mk_args)
+    i = T2.find(L, "replay-methods ")
+    m = T2.find(L, "replays ")
+    gone = L[:i] + ["replay-methods 0"] + L[i + 2:m] + ["replays 0"] + \
+        L[r + 1:]
+    one("markstep, profile 3, its replay lines gone",
+        prof(T2.rebuilt(gone)), None, {0: (mk.img, mk.bank)},
+        ("refused", "definition-differs", ("-", "0", "1", "-")), **mk_args)
+    r0, r1, _r2, r3 = lz.runs
+    same = dataclasses.replace(r0, kind="wider-source")
+    one("lorenz-63, profile 3, its wider-source run the main run's format",
+        prof(T2.with_runs(lz, (r0, r1, same, r3))), None,
+        {**lz.progs, 2: lz.progs[0]},
+        ("refused", "definition-differs", ("-", "2", "-", "-")),
+        states={**lz.states, 2: {0: lz.init}},
+        sources={0: lz.src, 1: lz.src, 2: lz.src})
+    one("flagstep, profile 2.1: accepted, under a definition that does not "
+        "cover it", prof(fl.data, "profile 2.1"), None, {0: (fl.img, None)},
+        ("accepted",), states=fl_states)
+    every = {0: dict(enumerate(mk.chain.states))}
+    one("markstep, language 2, its unreplayed segments: accepted, under a "
+        "definition that does not cover it", prof(mk.data, "language 2"),
+        None, {0: (mk.img, mk.bank)}, ("accepted",), states=every,
+        choose={0: [0, 2]}, sources={0: mk.src})
+    # paths only the C tool has code of its own for: a signature file whose
+    # key encodes no point (cert2 refuses no such key there: its signature
+    # does not verify), the wider-source relation's lanes and steps, and
+    # blocks past segment 9, which cert2._check_blocks reads in their
+    # decimal spelling's order (10 before 9) and the verdict lists so
+    full = fixture_function(T2.full)(fl)
+    S = full.sig.decode("ascii").split("\n")[:-1]
+    nopoint = "\n".join(S[:2] + ["key 02" + "00" * 31] + S[3:]) + "\n"
+    one("the signed certificate, a signature file whose key encodes no "
+        "point", full.data, T2.SALT, {0: (full.img, None)},
+        ("refused", "signature", ("-", "-", "-", "-")),
+        states={0: {0: full.init}}, signature=nopoint.encode("ascii"))
+    wide = dataclasses.replace(lz.runs[2], lanes=4)
+    one("lorenz-63, its wider-source run of 4 lanes (its state not handed)",
+        T2.with_runs(lz, (r0, r1, wide, r3)), None, lz.progs,
+        ("refused", "aux-lanes", ("-", "2", "-", "-")),
+        states={0: {0: lz.init}, 1: {0: lz.init}, 3: {0: lz.init_w}})
+    slow = dataclasses.replace(lz.runs[2], steps=99)
+    one("lorenz-63, its wider-source run of 99 steps a segment",
+        T2.with_runs(lz, (r0, r1, slow, r3)), None, lz.progs,
+        ("refused", "aux-image", ("-", "2", "-", "-")), states=lz.states)
+    from cft_golden import cert2
+    img = T2.flagstep_image()
+    init = [T2.d64(v) for v in ("3", "1", "3", "5")]
+    ch = cert2.run_chain(img, b"", init, 12, lane_flags=True)
+    run12 = cert2.certify_run("main", img, b"", None, ch, steps=1)
+    data12 = cert2.encode(cert2.Certificate(
+        "open", None, T2.IDN, T2.prov(language="none"), (run12,), ()))
+    blocks = dict(enumerate(ch.blocks))
+    one("flagstep of 12 segments, every block handed: accepted, the blocks "
+        "listed in their spelling's order", data12, None, {0: (img, None)},
+        ("accepted",), states={0: {0: init}}, lane_flags={0: blocks})
+    bad = dict(blocks)
+    for k in (9, 10):
+        b = bytearray(bad[k])
+        b[0] ^= 0x01
+        bad[k] = bytes(b)
+    one("flagstep of 12 segments, blocks 9 and 10 not the certified ones: "
+        "10 is read first", data12, None, {0: (img, None)},
+        ("refused", "lane-flags-hash", ("-", "0", "10", "-")),
+        states={0: {0: init}}, lane_flags={0: bad})
 
 
 def definition_checks():
