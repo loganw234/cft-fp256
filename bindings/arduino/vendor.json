@@ -64,6 +64,11 @@
       "sha256": "2b605b6fe455898df7765abfd97446a9b4c3ce9ff2d2993fcbc88b9b5b541c9b"
     },
     {
+      "source": "host/src/caps_decode.h",
+      "dest": "src/cft/src/caps_decode.h",
+      "sha256": "0efe7ac21187120556832a001da534e8c607a7e4523f5f06a2498f5c245f5c7d"
+    },
+    {
       "source": "host/src/chars.c",
       "dest": "src/cft/src/chars.c",
       "sha256": "299d6d05c939f4eab29e8009274ee2434bba0b5a1852eee24f3cd01c7749fbc1"
