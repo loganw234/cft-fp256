@@ -818,6 +818,10 @@ module cft_krnl #(
       .in_valid (mode_seq_q ? seq_lv    : eng_lv),
       .op       (mode_seq_q ? seq_lop   : eng_lop),
       .rnd      (mode_seq_q ? seq_lrnd  : eng_lrnd),
+      // R21's sideband, TIED OFF at revision 8's seam: no driver
+      // reaches it until R21's decode is built, and the engine's half
+      // of the mux will be zero for good (docs/ROADMAP.md, R21).
+      .aug_mode (2'b00),
       .prec     (mode_seq_q ? seq_lprec : eng_lprec),
       .a        (mode_seq_q ? seq_la    : eng_la),
       .b        (mode_seq_q ? seq_lb    : eng_lb),

@@ -902,6 +902,11 @@ module cft_seq #(
   logic                 al_valid;
   logic [7:0]           al_op;
   logic [2:0]           al_rnd;
+  // R21's sideband (revision 8's seam): a constant zero until R21's
+  // decode drives it, and the same signal reaches the shared array (as
+  // lane_aug_mode) and the private one below.
+  logic [1:0]           al_aug;
+  assign al_aug = 2'b00;
   logic [BEAT_BITS-1:0] al_a, al_b, al_c;
   logic                 al_rdy;
   logic                 al_ov;
@@ -932,7 +937,8 @@ module cft_seq #(
           .MUL_PASSES(MUL_PASSES)
       ) u_lanes (
           .clk(ap_clk), .rst_n(ap_rst_n),
-          .in_valid(al_valid), .op(al_op), .rnd(al_rnd), .prec(prec_q),
+          .in_valid(al_valid), .op(al_op), .rnd(al_rnd),
+          .aug_mode(al_aug), .prec(prec_q),
           .a(al_a), .b(al_b), .c(al_c), .in_ready(al_rdy),
           .out_valid(al_ov), .d(al_d), .lane_flags(al_lf));
     end else begin : g_shared_lanes

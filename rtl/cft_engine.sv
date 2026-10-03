@@ -253,7 +253,7 @@ module cft_engine #(
         cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n), .en(1'b1),
             .in_valid(ex_valid && (prec_r == PREC_FP32)),
-            .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
+            .rnd(rnd_r), .aug_mode(2'b00), .byp(bv), .byp_d(bd), .byp_f(bf),
             .a(fa), .b(fb), .c(fc),
             .out_valid(), .d(dd), .flags(f32_l[gi]),
             // EXT_MUL is left at its default here, so the lane builds its
@@ -300,7 +300,7 @@ module cft_engine #(
         cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n), .en(1'b1),
             .in_valid(ex_valid && (prec_r == PREC_FP64)),
-          .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
+          .rnd(rnd_r), .aug_mode(2'b00), .byp(bv), .byp_d(bd), .byp_f(bf),
             .a(fa), .b(fb), .c(fc),
             .out_valid(), .d(dd), .flags(f64_l[gi]),
             .mul_a(), .mul_b(), .mul_p('0),
@@ -339,7 +339,7 @@ module cft_engine #(
         cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY)) u_fma (
             .clk(ap_clk), .rst_n(ap_rst_n), .en(1'b1),
             .in_valid(ex_valid && (prec_r == PREC_FP128)),
-          .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
+          .rnd(rnd_r), .aug_mode(2'b00), .byp(bv), .byp_d(bd), .byp_f(bf),
             .a(fa), .b(fb), .c(fc),
             .out_valid(), .d(dd), .flags(f128_l[gi]),
             .mul_a(), .mul_b(), .mul_p('0),
@@ -373,7 +373,7 @@ module cft_engine #(
       cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY)) u_wfma (
           .clk(ap_clk), .rst_n(ap_rst_n), .en(1'b1),
           .in_valid(ex_valid && (prec_r == PREC_FP256)),
-          .rnd(rnd_r), .byp(bv), .byp_d(bd), .byp_f(bf),
+          .rnd(rnd_r), .aug_mode(2'b00), .byp(bv), .byp_d(bd), .byp_f(bf),
           .a(w_fa), .b(w_fb), .c(w_fc),
           .out_valid(), .d(d256), .flags(f256),
           .mul_a(), .mul_b(), .mul_p('0),
