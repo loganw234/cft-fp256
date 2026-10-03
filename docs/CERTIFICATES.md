@@ -1382,7 +1382,7 @@ bank:
 
 The C auditor is held to these controls as well. Its gate hands it every
 parse call test_cert.py makes, and every audit call whose arguments
-files and options can carry, 243 of 282; the other 39 are counted and
+files and options can carry, 244 of 283; the other 39 are counted and
 named. It requires the golden auditor's verdict by name, code and
 location ("The audit tool").
 
@@ -2445,7 +2445,13 @@ refusal's name, code and location, or both ACCEPTED with the same lines.
    from every state choosing the segments with no replay line and no
    definition re-run, where the tool can accept a certificate whose
    replays it cannot make. How many keep the manifest's verdict handed no
-   source is printed.
+   source is printed, and each that does not by the verdict both auditors
+   give it. Measured (2026-10-03, at parcel CV2CA's b886236): 20 of the
+   37 keep it; of the other 17, 8 are refused `source-missing` and 3
+   `state-missing` before the check the case is for, 3 `aux-source` and 1
+   `aux-image` at run 1, the half-step run, and 2 are accepted,
+   v2-source-format and v2-source-shape, whose defects only the source
+   shows.
 5. **The narrow builds**, both at `CFT_MAX_FORMAT=2`:
    - at its own 576-bit bigint: `build-width` at the example's
      `accuracy` line, in an audit and in `--read`, and the same runs with
@@ -2722,13 +2728,19 @@ writer must reproduce it from the C half on.
 
 Thirty are controls, under `certificates/v2-controls/`, which the manifest
 marks `writers golden`. Each is a case's certificate with one edit, or its
-case with one of the audit's inputs replaced, and every auditor must
-refuse it by its verdict's name. There is one for each of version 2's
-refusals that a committed case can carry: `marked`, `replay-lane-flags`,
-`replay-source`, `replay-method`, `provenance-order`, `signature-format`,
-`signature`, `signature-key`, `signer`, `supersedes`, `source-digest`,
-`source-refused`, `source-format`, `source-graph`, `source-param`,
-`source-shape`, `source-image`, `compiler-differs`, `source-missing`,
+case with one of the audit's inputs replaced, and every auditor handed
+the case's inputs, its source among them, must refuse it by its
+verdict's name. (cft-audit, which takes no source, gives that name on
+19 of them, refuses nine by another name - `source-missing` on four,
+`aux-source` on three, `aux-image` and `state-missing` on one each -
+and accepts two, v2-source-format and v2-source-shape, whose defects
+only the source shows: "The audit tool".) There is one for each of
+version 2's refusals that a committed case can carry: `marked`,
+`replay-lane-flags`, `replay-source`, `replay-method`,
+`provenance-order`, `signature-format`, `signature`, `signature-key`,
+`signer`, `supersedes`, `source-digest`, `source-refused`,
+`source-format`, `source-graph`, `source-param`, `source-shape`,
+`source-image`, `compiler-differs`, `source-missing`,
 `lane-flags-shape`, `lane-flags-hash`, `lane-flags-identity`,
 `initial-state`, `aux-source`, `segment-lane-flags`, `replay-missing`,
 `replay-unmarked`, `replay-raw`, `replay-changed` and
@@ -3108,9 +3120,10 @@ Where things stand (2026-10-02):
   half (parcel CV2CA, 2026-10-02): every step that needs no source, with
   Ed25519 and SHA-512 in C, and `source-missing` where a step needs one
   ("The audit tool"). `host/tests/audit_check.py` holds it to the golden
-  auditor on every call test_cert2.py makes and every version-2 case and
-  control of the corpus, the golden auditor handed no source as the tool
-  is;
+  auditor on every parse call test_cert2.py makes and every audit call
+  whose arguments files and options can carry, and on every version-2
+  case and control of the corpus, the golden auditor handed no source as
+  the tool is;
 - `cft-segrun` writes version 1 only. Its version 2 is the next parcel's,
   built against this page ("What waits for the C half", below).
 
@@ -4036,8 +4049,9 @@ text-token           Logan%20W.
 ### Version 2's controls
 
 The golden corpus commits thirty of them, one for each refusal a
-committed case can carry, which every auditor must give ("Golden
-certificates", version 2's cases).
+committed case can carry, which every auditor handed the case's inputs,
+its source among them, must give ("Golden certificates", version 2's
+cases).
 `python/tests/test_cert2.py` holds version 2's mechanisms to negative
 controls, each by the name of the check it exists for, every one but the
 byte flip over a valid hash line. Its fixtures are markstep (open and

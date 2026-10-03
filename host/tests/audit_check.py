@@ -1420,7 +1420,8 @@ def section_corpus2(work, root, names):
     no replay line, with no definition re-run - which is where cft-audit
     can accept a certificate whose replays it cannot make; a control, in
     full and from every state. How many keep the manifest's verdict handed
-    no source is counted and printed."""
+    no source is printed, and each that does not by the verdict both
+    auditors give it."""
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "corpus_for_audit_check", root / "certificates" / "corpus.py")
@@ -1428,7 +1429,7 @@ def section_corpus2(work, root, names):
     spec.loader.exec_module(CP)
     corpus = CP.read_manifest()         # its own tree's, as CP.rp reads
     by = {c.name: c for c in corpus.cases}
-    kept = moved = 0
+    kept, moved = 0, {}
     for name in names:
         case = by[name]
         data = CP.rp(case.certificate[0]).read_bytes()
@@ -1487,13 +1488,19 @@ def section_corpus2(work, root, names):
                     else ("refused", case.verdict)
                 same_verdict = g[0] == want[0] and (
                     g[0] != "refused" or g[1][0] == want[1])
-                kept += same_verdict
-                moved += not same_verdict
+                if same_verdict:
+                    kept += 1
+                else:
+                    got = "ACCEPTED" if g[0] == "accepted" else \
+                        g[1][0] if g[0] == "refused" else str(g[1])
+                    moved.setdefault(got, []).append(name)
     print(f"  NOTE  {len(names)} version-2 cases and controls handed to both "
-          f"auditors; {kept} keep their manifest verdict handed no source, "
-          f"and {moved} reach a check that needs the source or the "
-          f"regeneration first (source-missing, state-missing), where both "
-          f"auditors give that verdict instead", flush=True)
+          f"auditors as the manifest hands them but the source and the "
+          f"regeneration: {kept} keep their manifest verdict, and "
+          f"{sum(len(c) for c in moved.values())} do not, each given one "
+          f"verdict by both auditors, as measured: "
+          + "; ".join(f"{v} {len(c)} ({', '.join(c)})"
+                      for v, c in sorted(moved.items())), flush=True)
 
 
 # ---- section 5: the narrow builds -------------------------------------------
