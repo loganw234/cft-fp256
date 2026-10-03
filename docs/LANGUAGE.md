@@ -402,11 +402,19 @@ their operands in those functions' order.
   stored before the loop and its result read back after
   (python/cftc/callloop.py). A batch is the calls of one operation at
   one routine depth, so none reads another's result; the largest is
-  looped first, then the next, until the step fits or none is left; an
-  operand every call takes from one bank slot - the 1 of a reciprocal,
-  the constant of `x / 3` - is read from the bank and kept out of the
-  records. The constant is the compiler's own and no target's number,
-  so one image still serves every target that takes it. That is
+  looped first, then the next, until the step fits or none is left. A
+  batch of one call is never looped - its loop would only add the
+  loop's instructions to its one copy - so a step whose routines sit one
+  to a batch, a chain of divisions each reading the last, is compiled
+  inlined past the constant: the software targets, whose instruction
+  memory is unbounded, take it, and a target that holds fewer
+  instructions than its image refuses it, `program-capacity`, by name
+  (verifier-VC4's 180 chained divisions: 34,201 instructions a step,
+  inlined). An operand every call takes from one bank slot - the 1 of a
+  reciprocal, the constant of `x / 3` - is read from the bank and kept
+  out of the records. The constant is the compiler's own and no
+  target's number, so one image still serves every target that takes
+  it. That is
   Logan's rule (2026-10-02): asked whether to build the loop with the
   routines or when a program first needs it, he chose "Build it now,
   last in C4 (Recommended)", inline unless the step would pass 32,768.
@@ -417,10 +425,26 @@ their operands in those functions' order.
   7, the loop forced), one loop adds 3.5% to the cycles, two 6.4% to
   6.6% and all four 7.8% to 8.2%, and the image shrinks by 22%, 45% and
   89% to 90% (measured, C4). A looped batch keeps every call's operands
-  and results in the scratch across its loop, so a step that needs two
-  loops or more can pass a 256-slot scratch: N = 8 with two would take
-  272 slots, which the software backend's default refuses
-  (`scratch-capacity`) and a deeper one runs.
+  in its records, and its results until they are read, where inlining
+  consumes each as it goes - so a loop can need far more scratch than
+  the inlined step it replaces, and the step that first passes the
+  constant can be the one that no longer fits: verifier-VC4's source of
+  32,769 instructions loops one batch of 170 calls into 653 slots,
+  refused `scratch-capacity` on the software backend's default 256,
+  where one instruction shorter it compiles inlined in 171 (and N = 8
+  bodies with two loops would take 272). The constant is Logan's rule,
+  so that is its consequence, and a writer has two ways through: compile
+  for a deeper scratch - `--target sw:1024`, or any `sw:N` up to 32,768
+  slots, the image the same bytes - or write a step that stays under
+  32,768 instructions, with fewer routine calls a step. The loop's
+  design departs from the step-6 plan's in four ways, each recorded in
+  parcel C4's ledger and stated here or in `python/cftc/callloop.py`:
+  the records are placed where the loop stands, in the lowest slots free
+  there, rather than in a region fixed before allocation, so their first
+  slot is a bank word written once the allocation is chosen; an operand
+  every call takes from one bank slot is kept out of the records; a
+  batch of one call is never looped; and cftc's output version went to
+  4 for the loop (python/cftc's docstring).
 - **A division by a constant** divides by the constant rounded once:
   `x / 3` is RN(x / RN(3)), the correctly rounded x/3 wherever the
   constant is exact in the format, and never a product by a rounded
@@ -2301,7 +2325,9 @@ stage's leg K2, and their inlining and their loops by
   - **size**: a routine is 155 to 191 instructions, so a step with many
     is long; past 32,768 instructions a step runs batches of them in
     call loops, Logan's rule ("The operations"), at a few percent of
-    its cycles.
+    its cycles - and a wide batch, looped, can need more scratch than
+    the inlined step did; a step whose routines sit one to a batch
+    stays inlined past the constant.
 - **Run-time transcendentals.** The correctly rounded math library is a
   later step.
 - **A built-in time, adaptive steps and events.** There is no reserved

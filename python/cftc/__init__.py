@@ -80,15 +80,30 @@ largest instruction memory a tile has, a constant of the compiler's that
 no target is read for (callloop.CALL_LOOP_ABOVE; Logan's rule,
 2026-10-02) - runs batches of them in CALL LOOPS instead: one copy of a
 routine in a REPEAT over records in the scratch, the largest batch first,
-until the step fits or none is left (callloop.py). Measured on planar N
-bodies under rk4 at fp64 (C4's ledger, 2026-10-02): at N = 8 the step,
-40,477 instructions inlined, loops the first two stages' 56 divisions
-and is 31,342 written and 41,957 run (+3.7%), 3.5% more of the model's
-cycles a step at sixteen beats, in 243 scratch slots for 220. Where
-inlining fits too (N = 6 and 7, the loop forced), one loop adds 3.5% to
-the cycles (3.6% to the instructions run), two 6.4% to 6.6% (6.7% to
-6.9%) and all four 7.8% to 8.2% (8.4% to 8.7%), while the image shrinks
-by 22%, 45% and 89% to 90%.
+until the step fits or none is left (callloop.py). A batch of one call
+is never looped, since its loop would only add the loop's instructions to
+its one copy; so a step whose routines sit one to a batch - a chain of
+divisions, each reading the last - is compiled inlined past the
+constant: the software targets, whose instruction memory is unbounded,
+take it, and a target holding fewer instructions than its image refuses
+it `program-capacity`, by name (verifier-VC4's 180 chained divisions:
+34,201 instructions, inlined). A loop keeps every call's operands and
+results in the scratch across it, where inlining consumes each as it
+goes, so it can need far more slots than the inlined step: verifier-
+VC4's source of 32,769 instructions loops one batch of 170 calls into
+653 slots and is refused `scratch-capacity` on sw's 256, where one
+instruction shorter it compiles inlined in 171. That is the rule's
+consequence, not a defect of it: such a source compiles for a deeper
+scratch (sw:1024, any sw:N, the image the same bytes), or under the
+constant with fewer routine calls a step. Measured on planar N bodies
+under rk4 at fp64 (C4's ledger, 2026-10-02): at N = 8 the step, 40,477
+instructions inlined, loops the first two stages' 56 divisions and is
+31,342 written and 41,957 run (+3.7%), 3.5% more of the model's cycles a
+step at sixteen beats, in 243 scratch slots for 220. Where inlining fits
+too (N = 6 and 7, the loop forced), one loop adds 3.5% to the cycles
+(3.6% to the instructions run), two 6.4% to 6.6% (6.7% to 6.8%) and all
+four 7.8% to 8.2% (8.4% to 8.7%), while the image shrinks by 22%, 45% and
+89% to 90%.
 
 A system with tangent vectors (docs/LANGUAGE.md, "The variational
 equations") compiles the same way: its step graph is version 2, read by
