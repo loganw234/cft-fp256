@@ -888,6 +888,24 @@ asks for the per-lane block.
 | Arduino | the vendored copy re-synced |
 | certificates | `cft-segrun` never asks for the block until certificate version 2. A version-1 certificate records a marked run as its STATUS says |
 
+### Revision 8's seam (2026-10-02, no ABI step): VERSION 0xB00
+
+The first commit of revision 8's RTL (docs/ROADMAP.md, "Revision 8"):
+every register and port the revision's items need, every new bit zero,
+so every program and run computes as it did on revision 7. VERSION moves
+from 0xA00 to 0xB00 for one register, LFLAGS_PTR at 0xB0 (kernel
+argument 17). ABI 0.17 already has every field and bit; docs/HOSTAPI.md,
+"A revision-8 tile's map", is libcft's side.
+
+| surface | status at the seam |
+|---|---|
+| hardware | LFLAGS_PTR at 0xB0, written and read back, written through by nothing; MODE[24] refused where CAPS2[13] is clear, which is every build; STATUS seven bits wide, [6] zero; CAPS2 32 bits, [14:11] and [20:16] zero, so a seam tile reads revision 7's CAPS and CAPS2; the R21 sideband `aug_mode` in the lanes, tied to zero; VERSION 0xB00, and the benches that assert it moved with it |
+| XRT | 0xB00 accepted; CAPS2[11] to [14] decoded onto `seq_features` bits 15 to 18 and CAPS2[20:16] onto `max_insns`, both only from 0xB00; all eighteen arguments passed on every program launch on such a map, the eighteenth a one-beat stand-in. A seam tile publishes 0x7f1f and 32,768, revision 7's, and every revision-8 form is refused on it by name |
+| an older library | refuses a 0xB00 tile at `cft_open`, by name (`CFT_ERR_UNSUPPORTED`, "hardware contract 0x00000b00 is not one this library knows"), rather than misread its map - the plan's correction to the streaming study's first compatibility row |
+| remote | no frame change: HELLO carries `seq_features` and `max_insns` as before, so a server fronting a 0xB00 tile reports what its library decoded |
+| Node / Browser | unchanged: the module has no XRT backend, and no source it builds changed |
+| Arduino | the vendored copy re-synced: `src/caps_decode.h`, the decode the XRT backend calls, is its 34th file, included by nothing there |
+
 ## Hosts and boards
 
 Where the library has been built and run, as opposed to where it is

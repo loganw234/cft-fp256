@@ -338,7 +338,8 @@ module cft_krnl #(
    * localparam its RTL is built with, so a tile cannot advertise a bit
    * it would turn away - and a build that clears one has the CSR
    * refuse the MODE bits that would select it, as it refuses every
-   * bit of MODE[31:24]. */
+   * bit of MODE[31:25] (MODE[31:24] until revision 8's seam gave [24]
+   * to R23). */
   localparam bit FEAT_INDEXED   = 1'b1;
   localparam bit FEAT_LANE_MASK = 1'b1;
   logic [63:0] cfg_idx_a, cfg_idx_b, cfg_idx_c, cfg_idx_si;

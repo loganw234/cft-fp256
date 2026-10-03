@@ -3600,8 +3600,10 @@ an indexed slot is never refused.
 **The mark: rung 3.** Neither 754 nor RISC-V has one. Where a raise's
 `ra[7]` is set, the lane is marked: R23's bit [7] for the lane, and
 STATUS[6], `CFT_STATUS_MARKED`, for the run. STATUS[6] is the first bit no
-tile and no backend claims: `rtl/cft_csr.sv` reads STATUS as six bits
-padded with zeros. A marked lane's outputs are still written - its
+tile and no backend claims: `rtl/cft_csr.sv` read STATUS as six bits
+padded with zeros until revision 8's seam (2026-10-02), which widened it
+to seven with [6] wired to cft_seq's err[5], zero until R24 is built. A
+marked lane's outputs are still written - its
 deposits, its count and its scratch-out are what the program computed, the
 same on every machine - and the mark says that the routine's own test found
 its last bit undecided, so the lane is to be replayed before its answer is
@@ -3717,8 +3719,9 @@ refuses by name and what it does not compare.
   `{25'b0, eng_err}`. CAPS2[14].
 - On the host, the XRT backend maps CAPS2[11] to [14] onto
   `seq_features` bits 15 to 18 behind the VERSION that carries them -
-  today it maps CAPS2[10:4] bit by bit, and no higher bit
-  (`host/src/backend_xrt.cpp`). Its `ST_REPORTS` passes bit 6 already:
+  which it does from revision 8's seam (2026-10-02), behind 0xB00, in
+  `host/src/caps_decode.h`; until then it mapped CAPS2[10:4] bit by bit,
+  and no higher bit (`host/src/backend_xrt.cpp`). Its `ST_REPORTS` passes bit 6 already:
   0x30 until 2026-10-02, when CV2's reading of the certificate path made
   it 0x70, so a tile that sets STATUS[6] does not lose the mark - and a
   card certificate with it - on the way out, as a tile's STATUS[5] was

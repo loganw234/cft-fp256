@@ -3400,3 +3400,54 @@ every step's is.
 `CFT_ABI_VERSION_MINOR` moved to 17 for them (2026-10-02). A caller that
 needs the block or flag control asks for 0.17, and then asks
 `cft_get_caps` whether the device has them.
+
+## A revision-8 tile's map: VERSION 0xB00 (revision 8's seam, 2026-10-02)
+
+Revision 8's RTL (docs/ROADMAP.md, "Revision 8") begins with a seam:
+the registers and ports every item needs, every new bit zero. The tile's
+side is docs/ARCHITECTURE.md's map - LFLAGS_PTR at 0xB0 as kernel
+argument 17, MODE[24] refused where CAPS2[13] is clear, STATUS[6], and
+CAPS2 widened to carry [14:11] and [20:16] - and VERSION moves from 0xA00
+to 0xB00 for the register. This is libcft's side. No ABI step: ABI
+0.17's fields and bits are every one it needs.
+
+- **Open.** libcft accepts 0xB00 beside every older version.
+- **The decode** (host/src/caps_decode.h, which the XRT backend calls
+  and `api-test` holds on any machine): CAPS2[11] to [14] land on
+  `seq_features` bits 15 to 18 - `CFT_SEQ_FEAT_AUGADD`,
+  `CFT_SEQ_FEAT_SCRATCH_STEP`, `CFT_SEQ_FEAT_LANE_FLAGS` and
+  `CFT_SEQ_FEAT_FLAG_CONTROL` - and CAPS2[20:16], where it is not zero,
+  sets `max_insns` to two to its power: a five-bit log2 of a streamed
+  instruction capacity, zero meaning CAPS[23:20] is the capacity. Both
+  only from 0xB00: a word below it claiming either is not believed.
+- **What a seam tile reports.** At the U50's capacities it reads CAPS
+  0x19faffff and CAPS2 0x000007fb, revision 7's words, so `seq_features`
+  is 0x7f1f and `max_insns` 32,768, as on revision 7. Every revision-8
+  form is refused there by name as on revision 7: an image holding
+  augadd, augerr, a stepped STX or LDX, quiet, endquiet or raise at
+  `cft_program_load`, naming the instruction and the bit, and a run
+  asking for the lane-flags block at `cft_program_run_ex`, naming
+  `CFT_SEQ_FEAT_LANE_FLAGS`.
+- **What a revision-8 U50 tile will report** (the plan's words, computed
+  from rtl/cft_krnl.sv's assembly): CAPS2 0x00187ffb at 2,048 scratch
+  slots, so `seq_features` 0x7ff1f - the software handle's word at 0.17,
+  which `api-test` holds equal to it - and `max_insns` 2^24; 0x77f1f
+  without R21.
+- **Argument 17.** Every program launch on a 0xB00 tile passes all
+  eighteen arguments, the eighteenth a one-beat buffer that is bound and
+  never asked for until a tile publishes CAPS2[13] and the lane-flags
+  item binds the caller's block. Elementwise runs and reductions pass
+  what they passed, and argument 17 goes out as zero there, which the
+  tile never reads without MODE[24].
+- **An older libcft and a 0xB00 tile.** A library built before this map
+  refuses such a tile at `cft_open`, by name: `CFT_ERR_UNSUPPORTED`,
+  "hardware contract 0x00000b00 is not one this library knows (...) - the
+  register map may differ", before it reads CAPS2. It refuses rather than
+  misreads, as at every VERSION step before. That corrects the streaming
+  study's compatibility table (docs/studies/R8S-streaming.md, section 6),
+  whose first row - a revision-7 host on a streaming tile reads 32,768
+  and runs - assumed no VERSION step; R23's register moves it, and no
+  host built on libcft before this map opens a revision-8 tile. (The
+  resident probe, host/tools/cft_resident.cpp, drives XRT itself and
+  reads only STATUS and FLAGS, so it would run its elementwise passes,
+  which revision 8 leaves unchanged.)
