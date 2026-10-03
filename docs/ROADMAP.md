@@ -4706,7 +4706,8 @@ and the testing rule, as the last rounds ran.
        an opening and a closing, so it is QUIET (12) and ENDQUIET (13),
        with RAISE ra (14). They are published by CAPS2[14], with regions
        nesting four deep with loops. The mark is never silenced by a
-       region. Revision 7's tiles refuse all three by name.
+       region. On a revision-7 tile, libcft refuses all three by name
+       at load.
    - **R8L, per-lane flags:** R23's design (docs/SEQUENCER.md), one
      byte a lane, with one change:
      - bits [4:0] the IEEE flags, [5] deposit overflow, [6] a
@@ -4716,9 +4717,10 @@ and the testing rule, as the last rounds ran.
      This takes an ABI step (0.17, `cft_run_args.lane_flags`), the
      module rebuilt, cft-segrun and cft-audit, and the remote protocol.
      **Built golden-first** (parcel R8, 2026-10-02; docs/SEQUENCER.md,
-     R23, and docs/HOSTAPI.md, ABI 0.17), with MODE[24], STATUS[6] for a
-     marked lane, and the module rebuilt. cft-segrun asks for the block
-     only from certificate version 2.
+     R23, and docs/HOSTAPI.md, ABI 0.17), with STATUS[6] for a marked
+     lane and the module rebuilt. MODE[24], the tile's request for the
+     block, is defined, and no tile carries it yet. cft-segrun asks for
+     the block only from certificate version 2.
    - **Certificate format version 2,** designed once, with R8L, for
      everything this step needs of it:
      - the per-lane flags;

@@ -17361,3 +17361,118 @@ What sampled points cannot see is stated in LANGUAGE.md.
 - The desktop was Logan's.
 - Five parcels and up to four verifiers ran beside one another, each niced and one run at a time. The desktop's load ran from 0% to 62% as they swung.
 - amd-arc-box ran the gates alone.
+
+## 2026-10-02 - step 6's first wave, part two: revision 8's flag control and per-lane flags, golden-first, at ABI 0.17 (R8)
+
+**Why.**
+- Logan chose, for FLAGS in routines, "Flag control in rev 8 (Recommended)", and for revision 8, "Flag control, Per-lane flags (R23), TwoSum + stepped scratch, Instruction streaming" (the first entry of this round).
+- A correctly rounded routine runs many instructions whose flags are scaffolding: divfull's 6/3 raises inexact, and no opcode raises divide-by-zero. The language's FLAGS is the OR of the IEEE flags of what a source writes.
+- So a routine runs quiet and raises exactly the flags of the operation it implements. The math library marks a lane whose last bit it cannot decide.
+- The plan of record says revision 8 is built golden-first, with its RTL to come in one revision whose plan goes to Logan first (parcel RP8, launched).
+
+**R8's design, reviewed by the lead before the build** (59b19e6; the lead's five answers, 2026-10-02 10:57):
+- **R24, flag control.**
+  - Three control codes: QUIET (12), ENDQUIET (13) and RAISE ra (14), published by CAPS2[14] (`seq_features` bit 18). The plan had said "two instructions", but a region needs an opening and a closing.
+  - Regions nest properly with loops, four deep.
+  - Inside a region the IEEE flags of every instruction, a raise's included, reach neither FLAGS nor the lane's byte. Deposit overflow, the strict-scratch fault and the mark are never silenced.
+  - Outside a region, RAISE ORs ra[4:0] into FLAGS and the lane's byte. ra[7] marks the lane anywhere: byte [7], and STATUS[6] for the run.
+  - Every loader refuses, by name: a HALT inside a region, a region left open, an ENDQUIET with none open, crossed brackets, a fifth nest, and any field the codes do not read.
+  - The rungs, by Logan's rule:
+    - the region is 754-2019's saveAllFlags and restoreFlags, and the raise its raiseFlags (§5.7.4, rung 1; believed, the standard not being open);
+    - "from a register" is RISC-V Zicsr's CSRRS (rung 2);
+    - the bit order and the mark are rung 3.
+- **R23, per-lane flags,** with its reserved bit given to the mark.
+  - A byte a lane: [4:0] the IEEE flags raised outside regions, [5] deposit overflow, [6] the strict-scratch fault, [7] the mark. MODE[24] asks for it.
+  - The identities: the OR of the lanes' [4:0] is FLAGS, of [6:5] is STATUS[5:4], and of [7] is STATUS[6].
+  - `Result.lane_flags` in the model.
+  - ABI 0.17: `cft_run_args.lane_flags` and `lane_flags_bytes`, which must be exactly n.
+  - PROG_RUN_EX's want word.
+  - For the tile, still proposed: LFLAGS_PTR 0xB0, kernel argument 17 and VERSION 0xB00.
+- **Until certificate version 2,** cft-segrun never asks for the block. A version-1 certificate records a marked run as its STATUS says (the lead's answer 3).
+
+**What R8 built** (ffa9326, 55cba15, 20f6180, c5e4bb7, 3e22fed, f9f1cdc).
+- seq.py and asm.py, then program.c and cft.h at ABI 0.17, with the remote protocol's want word. libcft's software handle publishes `seq_features` 0x7ff1f.
+- **cft-asm reads all of revision 8:** R21's augadd and augerr, R22's post-step, and R24's three codes. programs/check.py's new arms hold it to asm.py:
+  - a 160-program corpus that asserts what it reached;
+  - 46 sources and 10 images, each against the contract's verdict;
+  - the post-step's bounds.
+- **cftc's software targets publish both bits;** revision 7's refuse an image that needs FLAG_CONTROL, `target-feature`. The ten compiled references' manifests moved one line each (`seq_features`).
+- **device-test:** caps of 19 bits; a raise image that loads where the bit is published and is refused by name where not; a lane-flags leg, with the block refused by name where its bit is absent.
+- **The XRT backend's report mask** passes STATUS[6] (0x30 to 0x70). R8 found it in its design (10:46), and CV2 raised it while designing certificate version 2.
+- **segrun_check's `markstep`:** STATUS 64, 64, 64, 0, 0 reaches every certificate's segment lines, the audit, and a loopback server.
+- **MEASURED by R8** (the desktop at 1-5% load):
+  - 431 pytest;
+  - seq_check;
+  - api-test;
+  - remote-test 440 and 440;
+  - device-test on sw and loopback 10,088, and sw -b 4,838;
+  - segruntest 716 (1 skip, the Windows page rule);
+  - corpustest 156;
+  - asmtest 345;
+  - cpp-api-test 213,689;
+  - the docs check, sync and gen_odes.
+
+**Verifier-VR8: no (a), no (b).**
+- **The model.**
+  - An independent one-lane model agrees with seq.py on 30,000 programs: regions in loops and loops in regions four deep, ACTALL, SETACT, masks, padding lanes, overflowing deposits and strict faults.
+  - Every bracket sequence up to length 7 (2,396,744 programs) gets the same verdict, rule and instruction from a grammar oracle, seq.py and program.c.
+  - Of the 693 single-field words VR8 probed, the 656 that set a field the codes do not read are refused by name, and the 37 that set only fields they read are accepted: RAISE's ra bits, imm[25], `raise r0` to `r31`.
+- **Nothing that ran before changed.** Revision-7 programs compute what they did at 1acc73a: 4,050 generated programs and the 73 committed in the model, and 1,685 generated (949 of them also through `cft_program_run`) and the 73 in program.c.
+- **program.c:**
+  - 30,000 programs at depths 16, 64 and 256 (1.44 M lane bytes), 0 mismatches;
+  - every bad `lane_flags_bytes` refused by name;
+  - a masked lane's byte the caller's, over two remote chunks at n = 160,000;
+  - a 0.16 caller's old calls unchanged;
+  - a 0.16 client and a 0.17 server refuse each other at HELLO, by name.
+- **The assemblers:** 600 structured and 4,680 bracket images, 0 mismatches, and 11 plants caught.
+- VR8 also drove cftc's `target-feature` for FLAG_CONTROL end to end, in memory, on all four revision-7 targets. R8 had left that undriven.
+- **The stages red until the module was rebuilt** were exactly node, wasm, demos and remote's WebSocket leg. Each failed on the old module's ABI, and node's second failure on its `seq_features` word, 0x1ff1f.
+
+**The module, rebuilt by the lead** (031cafd, on R8's branch before the merge). The pinned emsdk 6.0.9 image is cached on the desktop, so there was no download. It ran in build.sh's own container with a CPU cap, since the desktop was in use. That the cap changes nothing a build writes is believed, not measured: both builds ran capped. The parts this change cannot reach equal the earlier uncapped builds' (`cft_node.js`, the vectors' digest, every page line but the module's).
+- Two clean builds were byte for byte equal, both negative-control pages too:
+  - cft_node.wasm 276,300 bytes (6c5849bf...);
+  - conformance.html 1,409,956 (cb45769a...);
+  - demos.html 596,019 (a3114020...);
+  - cft_node.js unchanged.
+- demos_chains.json was re-recorded, and all 15 chains came back unchanged.
+- verify.mjs OK after `make vectors`: abi 17, 141 `cftw_*` exports, and 1,068,915 cases over 168 sets through the page's bytes.
+- node test.mjs 137 passed and 0 failed; verify_demos.mjs passes; the WebSocket leg 68 checks, 0 failures.
+
+**On amd-arc-box and the card** (at 031cafd; logs in the round's box/r8-031cafd/).
+- The XRT build: exactly the two known warnings (tools/cft_resident.cpp:264 and :265), every binary linking XRT.
+- **device-test on revision 7's quad** (q135b, `seq_features` 0x7f1f), 0 failed in each mode: -q -n 8 2,641 checks, -n 4096 10,281, -r 2,420.
+- Every revision-8 form is refused there by name. For example: "CFT_SEQ_FEAT_FLAG_CONTROL absent, a raise and a quiet region -> operation or format not available on this device: instruction 0 is RAISE - revision 8's flag control, R24 - and this device does not publish it (CAPS2[14] clear, ...".
+- api-test passes.
+- **The acceptance set on the card,** with the new library: 20 of 20, 174 checks, 383 s.
+
+**The lead's merge** (7ccc441).
+- docs/README.md and docs/VERIFICATION.md conflicted. In VERIFICATION.md, three rows conflicted, and a word-level diff against the base showed that R8 changed only the programs row and the branch only the lang and tangent rows. The resolution keeps each side's.
+- ROADMAP's plan marks R8F and R8L built: three codes, not two instructions. VI3's two loose sentences are restated: libcft, not the tile, refuses the forms on a revision-7 tile, and MODE[24] is defined and carried by no tile yet.
+- docs/COMPATIBILITY.md gains the ABI 0.17 section R8 handed back, and bindings/wasm/README.md's rebuild section puts the native tools first, as the log does.
+- MEASURED on the merged tree: 890 tests in 369 s, at 57% load (test_cftc, the language files, test_seq_rev8 and its flags, test_asm, test_seq).
+- **The gate budget at 7ccc441,** niced, from a load of 0.09 (run 20261002-155223-7ccc441, 127 minutes): **PASS.**
+  - 35 stages executed, 0 failed. 8 skipped by name (buildargs, the six language legs, demos), and the same four inner skips as the gates above.
+  - golden: 3,101 passed and 3 skipped (599 s), 3,104 collected with R8's `test_seq_rev8_flags.py` (60) and two more in `test_cftc.py`.
+  - programs: 346 checks over 37 images, 344 at e737aea; segrun_check 719 checks, 682 at e737aea, markstep's among them; the corpus check 156.
+  - lang: 189 ok (129 s). tangent: 130 ok (210 s). acceptance: 41 of 41, 249 checks (481 s).
+  - transcend: 607,217 and 580,977 comparisons, C == model.
+  - mpfr: 739,234 cases, 0 value and 0 flag mismatches; mp-err-check's 16,814,033 results, 0 over their bound.
+  - remote: 184,736 cases.
+
+  VERIFICATION.md's golden row carries these figures. The stage logs are in the round's box/gate-7ccc441/.
+- **VERIFICATION.md's acceptance row, restated.** It said the stage had "not yet run" through the runner, though each of the round's three gates ran it (481 s at 1acc73a, 484 s at e737aea, 481 s here). It called `--golden all` "not run", though the lead ran it on the box at 61f8b66, before A1's last two fixes: 20 of 20, 188 checks, 2,281 s (the first entry of this round). It now gives both.
+
+**A restatement of the entry above** (verifier-VI2's three notes):
+- "The section was restated at the merge": the LANGUAGE.md restatement is in b34e660, the commit that added that entry; the merge e737aea still said "takes four operations".
+- Its T1 paragraph's "the step counter goes wrong after the first step" has the exception ROADMAP gives: with h = 1/64 under euler and stormer-verlet the counter stays exact under every attribute.
+- VERIFICATION's tangent row gives 209 s, the stage's own timer; the runner's line read 210 s.
+
+**Known limits, recorded rather than fixed** (Logan's rule).
+- No language source can make an image that needs FLAG_CONTROL until C4, so cftc's refusal of one is held by the bit table and by VR8's in-memory drive, not by a source.
+- The identities come apart at the model's recorded padding seam: seq.py's ACTALL wakes a padding lane, where a tile does not. That happened in 1,875 of VR8's runs, and the identities came apart in 541 of them.
+- LANGUAGE.md's FLAGS sentence in its "What v1 does not do" (line 1061 at 7ccc441) is left for C4, which makes run-time routines raise through R24.
+- Where a device publishes FLAG_CONTROL without LANE_FLAGS, device-test's lane-flags leg exits before its quiet-region claim (VR8).
+- R23's quotation of RISC-V's V extension ("Inactive elements do not set FP exception flags") predates R8, and VR8 did not determine it.
+- HOSTAPI.md's R24 refusal list omits "an ENDQUIET with no region open". SEQUENCER.md and VERIFICATION.md say "five forms" where PROGRAMS.md says seven for the same set.
+- On `sw`, device-test's device-against-software leg compares the software backend with itself.
+- 754-2019 §5.7.4 is cited as believed: the standard is not open.

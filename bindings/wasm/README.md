@@ -1215,22 +1215,26 @@ software backend computes and reports the new bits: its `seq_features`
 is **0x7ff1f** where it was 0x1ff1f. `cftw_abi_version()` answers 17,
 which `verify.mjs` holds against `cft.h`.
 
-Until this rebuild, R8's branch carried four stages red for the module's
-ABI alone: `node`, `wasm`, `demos` and `remote`'s WebSocket leg
-(verifier-VR8 listed them and showed the ABI their only cause).
+Until this rebuild, R8's branch carried four stages red for the old
+module: `node`, `wasm`, `demos` and `remote`'s WebSocket leg. Verifier-VR8
+listed them. Each failed on the module's ABI, and node's second failure
+on its `seq_features` word, 0x1ff1f.
 
-The order was the one the 0.16 rebuild gives:
-1. `build.sh`;
-2. the five native tools built, then `verify_demos.mjs --record`. Its
-   two FAILs were the stale page's (it embedded the 0.16 module), as the
-   order predicts;
-3. `build_demos.sh`;
-4. a second clean build of both, with `bindings/wasm/build/` removed
+The order was the 0.16 rebuild's:
+1. the five native tools, which `verify_demos.mjs` runs, built first;
+2. `build.sh`;
+3. `verify_demos.mjs --record`. Its two FAILs were the stale page's (it
+   embedded the 0.16 module), as the order predicts;
+4. `build_demos.sh`;
+5. a second clean build of both, with `bindings/wasm/build/` removed
    between, every output and both negative-control pages byte for byte.
 
 The container was the one both scripts run, `--inside`, with
-`--cpus 4` added because the desktop was in use; the cap changes
-nothing a build writes. All 15 chains of the 13 configurations came
+`--cpus 4` added because the desktop was in use. That the cap changes
+nothing a build writes is believed, not measured here: both builds ran
+capped. The parts this change cannot reach equal the earlier uncapped
+builds': `cft_node.js`, the vectors' digest, and every line of the page
+but the two that carry the module. All 15 chains of the 13 configurations came
 back unchanged; the module stamp, the date, the rates, the seconds and
 the tools' report lines moved.
 

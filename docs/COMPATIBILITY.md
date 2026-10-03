@@ -853,6 +853,41 @@ the contract's precision moved, byte for byte.
 | Node / Browser | the module rebuilt at 0.16 as every change to its sources requires: `733cfa2c...`, 266,089 bytes, still 141 `cftw_*` exports. It answers the crafted header ARTIFACT, "describes 4294967336", where the module before it answered "out of memory" (verifier-F4). `program_test.mjs` holds that, and a sentence on every refusal, when it is run: no stage runs it. `conformance.html` and `demos.html` were rebuilt on it, byte-identical over two clean builds, and the demos chains re-recorded with every chain unchanged (bindings/wasm/README.md) |
 | Arduino | the vendored copy re-synced |
 
+### ABI 0.17 (2026-10-02): revision 8's flag control and per-lane flags
+
+The library's side of revision 8's R24 and R23 (docs/SEQUENCER.md),
+defined golden-first; no tile carries either. It is ADDITIVE for every
+program a 0.16 library loads. Every 0.16 loader refused control codes 12
+to 14, so no program they load can raise or set STATUS[6]. Such a
+program computes and reports exactly what it did at 0.16, unless its run
+asks for the per-lane block.
+- **`CFT_SEQ_FEAT_FLAG_CONTROL`** (CAPS2[14]; `seq_features` bit 18):
+  QUIET, ENDQUIET and RAISE ra. A region silences the IEEE flags of the
+  instructions inside it, and a raise ORs a register's five flag bits
+  into FLAGS. A raise's ra[7] marks the lane, and the run's STATUS[6]
+  (`CFT_STATUS_MARKED`). A malformed bracket is refused at load, by
+  name.
+- **`CFT_SEQ_FEAT_LANE_FLAGS`** (CAPS2[13]; bit 17): `cft_run_args`
+  gains `lane_flags` and `lane_flags_bytes`, a byte a lane. A count other
+  than n is refused by name, and NULL with 0 asks for no block.
+- **The software backend computes and publishes both,** so a software
+  handle's `seq_features` is **0x7ff1f** (0x1ff1f at 0.16).
+- **What an older caller meets:** `cft_run_args` grew, so a 0.16
+  caller's struct is refused by name at `cft_program_run_ex`, and its
+  other calls run as before. A 0.16 peer and a 0.17 peer refuse each
+  other at HELLO.
+
+| surface | status at ABI 0.17 |
+|---|---|
+| C (`cft.h`) | complete. `api-test` holds the block's refusals and a masked lane's byte. `seq_check.py` holds the flag-control corpus, the brackets' refusals and the remote legs to the model. `segrun_check.py`'s `markstep` carries STATUS[6] into every certificate's segment lines |
+| hardware | no RTL. Revision 7's tiles read CAPS2[13] and [14] as zero, and libcft refuses both forms on them by name (device-test on q135b, 2026-10-02) |
+| XRT | the report mask passes STATUS[6] (0x70, from 0x30). The block is refused by name on a device without CAPS2[13]. Compiled with XRT=1 on amd-arc-box with the two known warnings |
+| remote | PROG_RUN_EX's `want` word: bit 1 asks for the block, and any unknown bit is refused by name. A 0.16 peer is refused at HELLO |
+| Node / Browser | the module rebuilt at 0.17: `6c5849bf...`, 276,300 bytes, still 141 `cftw_*` exports. No export reaches the per-lane block. It publishes **0x7ff1f**, which `test.mjs` holds. `conformance.html` and `demos.html` were rebuilt on it, and the demos chains re-recorded with every chain unchanged (bindings/wasm/README.md) |
+| C++ (`cft.hpp`) | no wrapper for the block; a C++ caller reaches it through `cft.h` |
+| Arduino | the vendored copy re-synced |
+| certificates | `cft-segrun` never asks for the block until certificate version 2. A version-1 certificate records a marked run as its STATUS says |
+
 ## Hosts and boards
 
 Where the library has been built and run, as opposed to where it is
