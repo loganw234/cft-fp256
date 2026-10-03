@@ -574,12 +574,28 @@ SALT = None
 EXPECT_ID = None
 
 
-def run_tool(args, env=None, binary=None):
-    """The tool (or another build of it, `binary`) on `args`."""
+def as_v1(args):
+    """A certificate's command line as sections 1 to 13 give it: since
+    certificate version 2's C half cft-segrun writes version 2 by default,
+    and those sections hold version 1, byte for byte what the tool wrote
+    before, so each asks for it - `--format-version 1` before the rest -
+    unless it names a version itself. A command line with no --out (the
+    small modes, and the refusals that leave it out) is as given."""
+    a = [str(x) for x in args]
+    if "--out" in a and "--format-version" not in a:
+        return ["--format-version", "1"] + a
+    return a
+
+
+def run_tool(args, env=None, binary=None, v2=False):
+    """The tool (or another build of it, `binary`) on `args`, version 1's
+    command line (as_v1) unless `v2` (section 14)."""
     e = dict(os.environ)
     e.pop("CFT_SEGRUN_PLANT", None)
     if env:
         e.update(env)
+    if not v2:
+        args = as_v1(args)
     try:
         r = subprocess.run([str(binary or TOOL)] + [str(a) for a in args],
                            capture_output=True, text=True, env=e,
@@ -2096,7 +2112,7 @@ def peak_commit(args, env=None):
         k32.K32GetProcessMemoryInfo.argtypes = [
             wt.HANDLE, ctypes.POINTER(Counters), wt.DWORD]
         k32.K32GetProcessMemoryInfo.restype = wt.BOOL
-        p = subprocess.Popen([str(TOOL)] + [str(a) for a in args],
+        p = subprocess.Popen([str(TOOL)] + as_v1(args),
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                              text=True, env=tool_env(env))
     except (ImportError, AttributeError, OSError, ValueError) as e:
@@ -2145,8 +2161,7 @@ def least_address_space(argf, d, tag, env=None, step=4096):
         def lim():
             resource.setrlimit(resource.RLIMIT_AS, (limit, hard))
         try:
-            r = subprocess.run([str(TOOL)] + [str(a) for a in
-                                              argf(out, sdir)],
+            r = subprocess.run([str(TOOL)] + as_v1(argf(out, sdir)),
                                capture_output=True, text=True,
                                preexec_fn=lim, env=tool_env(env),
                                timeout=TOOL_TIMEOUT)
@@ -2469,6 +2484,7 @@ def hold_remote(work, legs):
 PATHS = {}
 EXPECT_XRT = None
 AUDIT = None        # cft-audit, the C auditor, held beside the golden one
+DEPTH_V2 = None     # section 14's golden depth: DEPTH, or a run's stated one
 # The scratch depth the golden writer runs at (revision 7): the DEVICE's,
 # read out of the CAPS2 its expected identity names (cert.scratch_depth_of,
 # which is also what the audit re-runs at), or the software backend's 256.
@@ -2514,7 +2530,7 @@ def rounding_seen(programs, chains):
 
 
 def main():
-    global TOOL, SERVE, SALT, EXPECT_ID, EXPECT_XRT, DEPTH, AUDIT
+    global TOOL, SERVE, SALT, EXPECT_ID, EXPECT_XRT, DEPTH, AUDIT, DEPTH_V2
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--tool", required=True, help="the cft-segrun binary")
     ap.add_argument("--serve", help="cft-serve, for the remote leg")
@@ -2541,6 +2557,9 @@ def main():
                     help="no wider runs: for a device without fp128")
     ap.add_argument("--programs", help="certify only these, by name, "
                     "comma-separated (the card leg's negative control)")
+    ap.add_argument("--v2-only", action="store_true",
+                    help="section 14 alone, certificate version 2 (for "
+                    "iterating; the gate runs every section)")
     args = ap.parse_args()
     TOOL = Path(args.tool).resolve()
     SERVE = Path(args.serve).resolve() if args.serve else None
@@ -2582,6 +2601,12 @@ def main():
     if AUDIT is None:
         skip("cft-audit beside the golden audit", "no --audit given (make "
              "-C host segruntest gives it)")
+    DEPTH_V2 = DEPTH
+    if args.v2_only:
+        import segrun_check_v2
+        segrun_check_v2.hold_v2(sys.modules[__name__], work, card,
+                                args.device, SERVE)
+        return finish(work, args, t_all)
 
     print("== the binary, ignored by git", flush=True)
     hold_ignored()
@@ -2735,7 +2760,14 @@ def main():
         bad("the remote leg: a software certificate it compares with was "
             "not made")
     hold_peak(work, flag)
+    # section 14: certificate format version 2 (host/tests/segrun_check_v2.py)
+    import segrun_check_v2
+    segrun_check_v2.hold_v2(sys.modules[__name__], work, card, args.device,
+                            SERVE)
+    return finish(work, args, t_all)
 
+
+def finish(work, args, t_all):
     if not args.keep:
         shutil.rmtree(work, ignore_errors=True)
     print(f"segrun_check: {CHECKS} checks, {len(FAILED)} failed, "
