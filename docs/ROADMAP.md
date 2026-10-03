@@ -4751,6 +4751,13 @@ and the testing rule, as the last rounds ran.
      VCV2 over four checks. Logan, on its twelve questions, verbatim:
      "Regarding the 12 questions, the recommended solutions are
      appropriate as stated". Version 2's build follows R8's merge.
+     **Built golden-first** (parcel CV2B, 2026-10-02; docs/CERTIFICATES.md,
+     "Version 2", and CONFORMANCE.md's versioning, the tree at profile
+     2): the reader, writer and audit in the golden model, replays by
+     it, sources recompiled by cftc, Ed25519 for the signature, and the
+     corpus, verified by VCV2B over two checks. Its C half is next:
+     cft-segrun writing version 2, cft-audit reading both versions with
+     Ed25519 in C, the device lines at ABI 0.18, and the module rebuilt.
    - **R21 and R22**, augmented addition (`augadd`/`augerr`) and stepped
      STX/LDX: already in the model, the software backend and `asm.py`
      (`test_seq_rev8.py`); no tile carries either. They come to cft-asm
@@ -5735,8 +5742,12 @@ plan raises. Each has a recommendation.
     a second write port for the register file. Recommended. R22 then
     buys a looped product's words and its stores' steps.
 
-**Approval.** Not yet given. The plan goes to Logan after its verifier,
-and the RTL waits for his answers.
+**Approval.** Given on 2026-10-02 at 22:27, after verifier-VRP8's three
+checks. Logan, verbatim: on question 9, "Only if probe L finds it cheap
+(Recommended)"; on the other nine, "Approve as written
+(Recommended)". So the quad carries R21 only if probe L measures its
+lanes at about 2,000 LUTs a tile or fewer, and every other question
+is decided as recommended. The RTL starts with round 1 (part 5).
 
 ## The adoption story these serve
 
