@@ -206,6 +206,147 @@ static inline const char *cw_salt_commitment(const uint8_t *salt,
     return NULL;
 }
 
+/* ---- version 2 (docs/CERTIFICATES.md, "Version 2") --------------------
+ *
+ * What a version-2 writer adds to version 1's encoding, beside it: the
+ * per-lane flags' hash under version 2's tag, and a text's one spelling.
+ * Version 1's tags and spellings are untouched, so one run's version-1
+ * and version-2 certificates carry the same state and stream hashes. */
+
+/* "Hashes in version 2": a segment's per-lane flags, n bytes, lane i's at
+ * byte i, behind `cft-certificate 2 lane-flags` and a NUL - keyed as a
+ * state is, plain SHA-256 in an open certificate. */
+static const char CW_TAG_LANE_FLAGS[] = "cft-certificate 2 lane-flags";
+#define CW_TAG_LANE_FLAGS_LEN (sizeof CW_TAG_LANE_FLAGS)  /* 29, the NUL */
+
+static inline const char *cw_lane_flags_hash(const uint8_t *salt,
+                                             const void *block, size_t n,
+                                             char hex[CW_HEX])
+{
+    return cw_tagged_hash(salt, CW_TAG_LANE_FLAGS, CW_TAG_LANE_FLAGS_LEN,
+                          block, n, hex);
+}
+
+/* "Version 2's encodings": a TEXT is a value's UTF-8 bytes, each byte
+ * from 0x21 to 0x7E but `%` standing as itself and every other byte `%`
+ * and two uppercase hex digits, 1 to 255 characters once encoded, and
+ * never one of the four words (none, unknown, withheld, given). */
+#define CW_TEXT_MAX 255
+
+static inline int cw_is_word(const char *s)
+{
+    return !strcmp(s, "none") || !strcmp(s, "unknown") ||
+           !strcmp(s, "withheld") || !strcmp(s, "given");
+}
+
+/* Are these n bytes UTF-8, as Python's strict decoder reads it: no byte
+ * past 0xF4, no overlong form, no surrogate, nothing past U+10FFFF? */
+static inline int cw_utf8_ok(const unsigned char *s, size_t n)
+{
+    size_t i = 0;
+    while (i < n) {
+        unsigned c = s[i];
+        size_t k, need;
+        unsigned long cp;
+        if (c < 0x80) {
+            i++;
+            continue;
+        }
+        if (c >= 0xC2 && c <= 0xDF) {
+            need = 1;
+            cp = c & 0x1F;
+        } else if (c >= 0xE0 && c <= 0xEF) {
+            need = 2;
+            cp = c & 0x0F;
+        } else if (c >= 0xF0 && c <= 0xF4) {
+            need = 3;
+            cp = c & 0x07;
+        } else {
+            return 0;
+        }
+        if (n - i - 1 < need)
+            return 0;
+        for (k = 1; k <= need; k++) {
+            if ((s[i + k] & 0xC0) != 0x80)
+                return 0;
+            cp = (cp << 6) | (s[i + k] & 0x3F);
+        }
+        if ((need == 2 && cp < 0x800) || (need == 3 && cp < 0x10000) ||
+            (cp >= 0xD800 && cp <= 0xDFFF) || cp > 0x10FFFF)
+            return 0;
+        i += need + 1;
+    }
+    return 1;
+}
+
+/* A value's one spelling as a text, into out (CW_TEXT_MAX + 1 bytes): 0,
+ * or 1 where it has none - empty, not UTF-8, longer than 255 characters
+ * encoded, or one of the four words (the golden writer's text_token
+ * refuses each `malformed`). */
+static inline int cw_text_token(const unsigned char *raw, size_t n,
+                                char out[CW_TEXT_MAX + 1])
+{
+    static const char H[] = "0123456789ABCDEF";
+    size_t i, len = 0;
+    if (n == 0 || !cw_utf8_ok(raw, n))
+        return 1;
+    for (i = 0; i < n; i++) {
+        unsigned c = raw[i];
+        if (c >= 0x21 && c <= 0x7E && c != 0x25) {
+            if (len + 1 > CW_TEXT_MAX)
+                return 1;
+            out[len++] = (char)c;
+        } else {
+            if (len + 3 > CW_TEXT_MAX)
+                return 1;
+            out[len++] = '%';
+            out[len++] = H[c >> 4];
+            out[len++] = H[c & 15];
+        }
+    }
+    out[len] = 0;
+    /* a text whose value is one of the words: its bytes are ASCII
+     * letters, so its token is the word itself */
+    return cw_is_word(out) ? 1 : 0;
+}
+
+/* Is `tok` a text's one spelling (the strict reader's read_text): 1 to
+ * 255 characters, each from 0x21 to 0x7E other than `%`, or `%` and two
+ * UPPERCASE hex digits naming a byte that may not stand as itself; the
+ * bytes decoded UTF-8; the value not one of the four words. */
+static inline int cw_text_ok(const char *tok)
+{
+    unsigned char raw[CW_TEXT_MAX];
+    size_t i = 0, n = 0, len = strlen(tok);
+    if (len < 1 || len > CW_TEXT_MAX)
+        return 0;
+    while (i < len) {
+        unsigned c = (unsigned char)tok[i];
+        if (c == '%') {
+            unsigned v = 0, k;
+            for (k = 1; k <= 2; k++) {
+                unsigned d = (unsigned char)tok[i + k];
+                if (d >= '0' && d <= '9')
+                    v = v * 16 + (d - '0');
+                else if (d >= 'A' && d <= 'F')
+                    v = v * 16 + (d - 'A' + 10);
+                else
+                    return 0;           /* a lowercase digit, or the end */
+            }
+            if (v >= 0x21 && v <= 0x7E && v != 0x25)
+                return 0;               /* a byte that may stand as itself */
+            raw[n++] = (unsigned char)v;
+            i += 3;
+        } else if (c >= 0x21 && c <= 0x7E) {
+            raw[n++] = (unsigned char)c;
+            i++;
+        } else {
+            return 0;
+        }
+    }
+    return cw_utf8_ok(raw, n) && !cw_is_word(tok);
+}
+
 /* ---- identity -------------------------------------------------------- */
 
 /* cft_build_id()'s grammar, as the page's reader holds the build-id line
@@ -249,6 +390,17 @@ typedef struct {
     const char *build_id;
     const char *backend;          /* one of the page's four words */
     char xclbin[72], version[16], caps[24], tiles[24];
+    /* Version 2's device lines (ABI 0.18's cft_image_id; docs/
+     * CERTIFICATES.md, "Provenance"): each a text's one spelling or the
+     * word the backend gives - `none` on the software backend, which has
+     * no card, `unknown` through a remote handle (the protocol carries
+     * none of them), on an image the library cannot name, or where the
+     * library knows no value. The serial's spelling is kept apart, "" where
+     * none is known: a writer withholds it unless asked. A version-1
+     * writer reads none of them. */
+    char platform[CW_TEXT_MAX + 1], xrt[CW_TEXT_MAX + 1], clock[24];
+    char serial[CW_TEXT_MAX + 1];
+    int  no_card;                 /* 1 on the software backend */
 } cw_identity;
 
 static inline const char *cw_identify(cft_device *dev, const cft_caps *caps,
@@ -268,6 +420,12 @@ static inline const char *cw_identify(cft_device *dev, const cft_caps *caps,
     memset(&im, 0, sizeof im);
     im.struct_size = sizeof im;
     st = cft_get_image_id(dev, &im);
+    /* version 2's device lines: unknown until a backend says otherwise */
+    snprintf(id->platform, sizeof id->platform, "unknown");
+    snprintf(id->xrt, sizeof id->xrt, "unknown");
+    snprintf(id->clock, sizeof id->clock, "unknown");
+    id->serial[0] = 0;
+    id->no_card = sw;
     if (st == CFT_OK && im.struct_size >= offsetof(cft_image_id, caps) +
                                             2 * sizeof im.caps[0]) {
         cw_hex(im.sha256, 32, id->xclbin);
@@ -280,7 +438,33 @@ static inline const char *cw_identify(cft_device *dev, const cft_caps *caps,
                      (unsigned)im.caps[0], (unsigned)im.caps[1]);
         else
             snprintf(id->caps, sizeof id->caps, "unknown");
+        /* ABI 0.18's fields, where this library filled them: a text the
+         * library knows, spelt as a text; one it does not ("", 0), or one
+         * no text can spell, `unknown` - never cut short or guessed */
+        if (im.struct_size >= offsetof(cft_image_id, serial) +
+                              sizeof im.serial) {
+            char t[CW_TEXT_MAX + 1];
+            im.platform[sizeof im.platform - 1] = 0;
+            im.xrt_version[sizeof im.xrt_version - 1] = 0;
+            im.serial[sizeof im.serial - 1] = 0;
+            if (!cw_text_token((const unsigned char *)im.platform,
+                               strlen(im.platform), t))
+                snprintf(id->platform, sizeof id->platform, "%s", t);
+            if (!cw_text_token((const unsigned char *)im.xrt_version,
+                               strlen(im.xrt_version), t))
+                snprintf(id->xrt, sizeof id->xrt, "%s", t);
+            if (im.clock_hz >= 1 && im.clock_hz <= (uint64_t)INT64_MAX)
+                snprintf(id->clock, sizeof id->clock, "%llu",
+                         (unsigned long long)im.clock_hz);
+            if (!cw_text_token((const unsigned char *)im.serial,
+                               strlen(im.serial), t))
+                snprintf(id->serial, sizeof id->serial, "%s", t);
+        }
     } else if (sw) {
+        /* no card: version 2's four device lines are `none` too */
+        snprintf(id->platform, sizeof id->platform, "none");
+        snprintf(id->xrt, sizeof id->xrt, "none");
+        snprintf(id->clock, sizeof id->clock, "none");
         /* no xclbin and no registers: the fields do not exist here */
         snprintf(id->xclbin, sizeof id->xclbin, "none");
         snprintf(id->version, sizeof id->version, "none");

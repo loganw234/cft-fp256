@@ -1415,10 +1415,13 @@ def entry_args(entries):
 
 
 def tool_args(case, runs_io, out, sdir, entries=()):
-    """cft-segrun's command line for `case`: runs_io is each run's
-    (image path, bank path or None, init path); `entries` are the case's
-    accuracy entries, as cert.Entry objects whose values are not read."""
-    a = ["--out", out, "--states", sdir]
+    """cft-segrun's command line for a version-1 `case`: runs_io is each
+    run's (image path, bank path or None, init path); `entries` are the
+    case's accuracy entries, as cert.Entry objects whose values are not
+    read. cft-segrun writes version 2 by default since version 2's C half,
+    so a version-1 case asks for version 1 (`--format-version 1`), which
+    writes what the tool wrote before, byte for byte."""
+    a = ["--format-version", "1", "--out", out, "--states", sdir]
     a += ["--salt", rp(case.salt[0])] if case.mode == "keyed" else ["--open"]
     depth = case.runs[0].depth_param()
     if depth is not None:
