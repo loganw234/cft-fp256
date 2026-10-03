@@ -3466,20 +3466,21 @@ disagree is refused as before, and so its four lines are `unknown` too.
   zero, zero hertz, twenty digits, no colon, no BUILD_METADATA, two, a
   section past the file, no unit opened - a planted wrong expectation
   failing both named cases (measured, 2026-10-02).
-- **The real images** in the cft2204 distro, read only. It holds fifteen,
-  four hw and eleven hw_emu, and not all were read. On 2026-10-02 the
-  `--clock.freqHz` constraints of eleven were counted: the hw single and
-  quad of `/root/cft-fp256/build-r8-hw` and `build-r8-quad` name one each,
-  10,000,000 Hz (bring-up builds of 2026-09-11 and 12, verifier-VCV2CW
-  dates them, linked at `rebuild-2022.sh`'s default, CLAUDE.md's trap 1),
-  and nine hw_emu images none. `xclbin_clock.h` read three: those two
-  (10,000,000 Hz on `cft_krnl_1`, and on the quad's four) and
-  `/root/cft-fp256/build/cft_hw_emu.xclbin` (not known). On 2026-10-03
-  verifier-VCV2CW read the two 135 MHz hw images, `/root/cft-quad-tip/`'s
-  `build-single-tip-135` and `build-quad-tip-135`, with `xclbin_clock.h`:
-  135,000,000 Hz each. The two hw_emu images of `/root/cft-red/` were not
-  read. The XRT backend compiles against XRT 2.14's headers there with the
-  host build's warnings and none.
+- **The real images** in the cft2204 distro, read only: fifteen, four hw
+  and eleven hw_emu, and verifier-VCV2CW ran `xclbin_clock.h` on every one
+  (2026-10-03). The hw single and quad of `/root/cft-fp256/build-r8-hw`
+  and `build-r8-quad` read 10,000,000 Hz, on `cft_krnl_1` and on the
+  quad's four (bring-up builds of 2026-09-11 and 12, linked at
+  `rebuild-2022.sh`'s default, CLAUDE.md's trap 1); `/root/cft-quad-tip/`'s
+  `build-single-tip-135` and `build-quad-tip-135` read 135,000,000 Hz, on
+  one unit and on four; the eleven hw_emu images - four in
+  `/root/cft-fp256`, five in `/root/wsl-untracked-20260902`, two in
+  `/root/cft-red` - read not known, none naming `--clock.freqHz`; and a
+  fifth unit asked of a quad is not known. This step's own reads, on
+  2026-10-02, were three of them (the two 10 MHz images and
+  `/root/cft-fp256/build/cft_hw_emu.xclbin`). The XRT backend compiles
+  against XRT 2.14's headers there with the host build's warnings and
+  none.
 - **device-test** prints the four fields on an xclbin, reported and not
   checked - the serial withheld, as a certificate's is, and only its
   length printed unless `--show-serial` (2026-10-03: a card run's log is

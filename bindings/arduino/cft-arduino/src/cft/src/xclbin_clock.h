@@ -34,14 +34,16 @@
  * bytes - m_sectionKind (u32) at 0, m_sectionName at 4, m_sectionOffset
  * (u64) at 24 and m_sectionSize (u64) at 32, little-endian. BUILD_METADATA
  * is kind 14. Measured in the cft2204 distro, read only, which holds
- * fifteen images (four hw, eleven hw_emu): on 2026-10-02 the constraints
- * of eleven were counted - the hw images of /root/cft-fp256/build-r8-hw
- * and build-r8-quad name one each, 10000000:cft_krnl_1.ap_clk and the same
- * over cft_krnl_1 to _4, and nine hw_emu images none - and this reader
- * read those two hw images and build/cft_hw_emu.xclbin (not known). On
- * 2026-10-03 verifier-VCV2CW read the two 135 MHz hw images of
- * /root/cft-quad-tip/ (build-single-tip-135, build-quad-tip-135) with it:
- * 135000000 each. The two hw_emu images of /root/cft-red/ were not read.
+ * fifteen images, four hw and eleven hw_emu, and verifier-VCV2CW ran this
+ * reader on every one of them (2026-10-03): /root/cft-fp256/build-r8-hw,
+ * the single, 10000000 on cft_krnl_1; build-r8-quad 10000000 on
+ * cft_krnl_1 to _4 (both bring-up builds of 2026-09-11 and 12, linked at
+ * hw/rebuild-2022.sh's default); /root/cft-quad-tip/build-single-tip-135
+ * 135000000 on cft_krnl_1 and build-quad-tip-135 135000000 on its four;
+ * and the eleven hw_emu images (four in /root/cft-fp256, five in
+ * /root/wsl-untracked-20260902, two in /root/cft-red) not known, none
+ * naming --clock.freqHz. A fifth unit asked of a quad is not known. This
+ * step's own reads, on 2026-10-02, were three of them.
  *
  * Header-only and static inline, in C99 and C++, so that the XRT backend
  * (C++) and host/tests/api_test.c (C, which holds this file to synthetic

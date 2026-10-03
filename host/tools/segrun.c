@@ -4065,29 +4065,53 @@ static int do_hash(const char *kind, const char *file, const uint8_t *salt)
 /* ---- main -------------------------------------------------------------- */
 
 #if defined(_WIN32)
-/* The arguments as the process has them ("the process's own text",
- * above): the wide command line's, each in UTF-8, in place of main's,
- * which the C runtime converted to the ANSI code page. CommandLineToArgvW
- * splits the line by the C runtime's rules; where the two disagree - the
- * count, or an argument that is ASCII as Unicode, which every ANSI code
- * page spells the same (argv[0] aside, which each reads its own way) -
- * the tool says so rather than guess which argument is which (usage).
- * The other way round proves nothing: best fit spells U+0141 as L, so an
- * argument ASCII as the C runtime has it need not be ASCII. An argument
- * with no UTF-8 spelling (an unpaired surrogate) is refused too: the tool
- * reads its command line as text. */
-static char **utf8_args(int argc, char **argv)
+/* Whether the command line's ANSI form is exact: every character in the
+ * system code page as itself, none spelt by best fit or by the default
+ * character. A UTF-8 code page spells every string that has a UTF-8
+ * spelling (an unpaired surrogate is refused on its own, below); a code
+ * page the question cannot be put to answers no. */
+static int ansi_form_exact(const wchar_t *line)
 {
-    int n = 0, i;
-    wchar_t **w = CommandLineToArgvW(GetCommandLineW(), &n);
+    UINT acp = GetACP();
+    BOOL used = FALSE;
+    if (acp == CP_UTF8)
+        return 1;
+    if (WideCharToMultiByte(acp, WC_NO_BEST_FIT_CHARS, line, -1, NULL, 0,
+                            NULL, &used) == 0)
+        return 0;
+    return !used;
+}
+
+/* The arguments as the process has them ("the process's own text",
+ * above): the wide command line's, split by CommandLineToArgvW, each in
+ * UTF-8, in place of main's - and their count in place of argc. main's
+ * are the C runtime's split of the line's ANSI form, which the system
+ * code page makes by best fit: on cp1252 U+3000, U+2002, U+2003 and
+ * U+2009 become a space, U+FF02, U+2033 and U+02BA a quote and U+FF3C a
+ * backslash, so the runtime splits another string, and the Unicode split,
+ * the one this tool reads, decides (verifier-VCV2CW, 2026-10-03). Only
+ * where the ANSI form is exact are the two held to each other - the
+ * count, and each argument that is ASCII as Unicode, which every code page
+ * spells the same (argv[0] aside, which each reads its own way) - so that
+ * a C runtime that splits a quoting form otherwise than CommandLineToArgvW
+ * is refused by name (usage) rather than guessed at. An argument with no
+ * UTF-8 spelling (an unpaired surrogate) is refused too: the tool reads
+ * its command line as text. */
+static char **utf8_args(int *argc, char **argv)
+{
+    const wchar_t *line = GetCommandLineW();
+    int n = 0, i, exact;
+    wchar_t **w = CommandLineToArgvW(line, &n);
     char **out;
     if (!w)
         refuse("usage", "the command line cannot be read as Unicode "
                "(CommandLineToArgvW failed, error %lu)",
                (unsigned long)GetLastError());
-    if (n != argc)
+    exact = ansi_form_exact(line);
+    if (exact && n != *argc)
         refuse("usage", "the command line splits into %d arguments as "
-               "Unicode and into %d as the C runtime reads it", n, argc);
+               "Unicode and into %d as the C runtime reads it, and the "
+               "system code page spells it exactly", n, *argc);
     out = (char **)xcalloc((size_t)n + 1, sizeof *out);
     for (i = 0; i < n; i++) {
         const unsigned char *a;
@@ -4102,12 +4126,13 @@ static char **utf8_args(int argc, char **argv)
                    "text", i);
         for (a = (const unsigned char *)out[i], k = 0; a[k]; k++)
             ascii &= a[k] < 0x80;
-        if (i > 0 && ascii && strcmp(argv[i], out[i]) != 0)
+        if (exact && i > 0 && ascii && strcmp(argv[i], out[i]) != 0)
             refuse("usage", "argument %d is '%.80s' as the C runtime reads "
                    "the command line and '%.80s' as Unicode", i, argv[i],
                    out[i]);
     }
     LocalFree(w);
+    *argc = n;
     return out;
 }
 #endif
@@ -4161,7 +4186,7 @@ int main(int argc, char **argv)
     }
 
 #if defined(_WIN32)
-    argv = utf8_args(argc, argv);
+    argv = utf8_args(&argc, argv);
 #endif
     if (argc < 2) {
         usage_text(stderr);

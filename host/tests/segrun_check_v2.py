@@ -72,12 +72,16 @@ one gives none, or `--format-version 2`, and holds:
      surrogate; elsewhere: bytes that are not UTF-8) refused `malformed`,
      as the golden writer refuses it; an issuer given as its characters,
      not its spelling, `malformed`, and --segments as U+FF11 FULLWIDTH
-     DIGIT ONE `malformed` (best fit spells them Lodz and 1); on Windows
-     an argument with no UTF-8 spelling `usage`; and replaystep with its
-     source, and every path the tool is handed, named past any one code
-     page (U+0141, U+00E9, U+20AC, U+1D11E, spaces), byte for byte the
-     golden writer's with `source-name` its spelling of the file's own
-     name.
+     DIGIT ONE `malformed` (best fit spells them Lodz and 1), and an
+     issuer a, U+3000, b `malformed` though best fit makes U+3000 a space
+     (verifier-VCV2CW's second check); on Windows an argument with no
+     UTF-8 spelling `usage`; and replaystep with its source, and every
+     path the tool is handed, named past any one code page (U+0141,
+     U+00E9, U+20AC, U+1D11E, spaces), and again named with the
+     characters best fit spells as a space, a quote and a backslash
+     (U+3000, U+2002, U+2003, U+2009, U+FF02, U+2033, U+02BA, U+FF3C),
+     each byte for byte the golden writer's with `source-name` its
+     spelling of the file's own name.
 """
 
 import dataclasses
@@ -1019,6 +1023,15 @@ LODZ = chr(0x141) + chr(0xF3) + "d" + chr(0x17A)
 UNICODE_NAME = (LODZ + " caf" + chr(0xE9) + " " + chr(0x20AC) + " " +
                 chr(0x1D11E))
 SURROGATE = chr(0xD800)             # an unpaired surrogate
+# characters the system code page's best fit spells as a space (U+3000
+# IDEOGRAPHIC SPACE, U+2002 EN SPACE, U+2003 EM SPACE, U+2009 THIN SPACE),
+# a quote (U+FF02 FULLWIDTH QUOTATION MARK, U+2033 DOUBLE PRIME, U+02BA
+# MODIFIER LETTER DOUBLE PRIME) or a backslash (U+FF3C, here before a
+# quote), so that the C runtime's split of the line's ANSI form is not the
+# Unicode one (cp1252, verifier-VCV2CW, 2026-10-03)
+BEST_FIT_NAME = ("a" + chr(0x3000) + "b" + chr(0x2002) + "c" + chr(0x2003) +
+                 "d" + chr(0x2009) + "e" + chr(0xFF02) + "f" + chr(0x2033) +
+                 "g" + chr(0x2BA) + "h" + chr(0xFF3C) + chr(0xFF02) + "i")
 
 
 def hold_process_text(work, flag, rs):
@@ -1080,6 +1093,14 @@ def hold_process_text(work, flag, rs):
                                              d / "ff11.cert",
                                              d / "ff11.states", None)],
                  "--segments", chr(0xFF11)), leg="i")
+    # a statement given as characters best fit spells as a space: the
+    # Unicode split decides, and the statement is malformed (not a usage
+    # refusal of the runtime's other split)
+    refused("an issuer given as its characters a, U+3000, b (best fit "
+            "spells U+3000 a space)", "malformed",
+            [str(x) for x in tool_args(
+                flag, d / "sp.in", d / "sp.cert", d / "sp.states", None,
+                extra=("--issuer", "a" + chr(0x3000) + "b"))], leg="i")
     if os.name == "nt":
         refused("an argument with no UTF-8 spelling (an unpaired surrogate, "
                 "U+D800), which only Windows can hand a program", "usage",
@@ -1108,6 +1129,32 @@ def hold_process_text(work, flag, rs):
     res = certify(prog, "open", stem=udir / UNICODE_NAME)
     if res:
         tok = cert2.text_token(usrc.name)
+        SC.check(line(res[0], "source-name") == tok,
+                 f"i. its source-name is the golden writer's spelling of the "
+                 f"file's own name, {tok}",
+                 f"the tool wrote {line(res[0], 'source-name')!r}")
+    # and again with the source, --out, --states and every input named
+    # with the characters best fit spells as a space, a quote and a
+    # backslash: the C runtime's split of the ANSI form differs, and the
+    # Unicode split, which the tool reads, decides
+    try:
+        bdir = d / ("best fit " + BEST_FIT_NAME)
+        bdir.mkdir(parents=True, exist_ok=True)
+        bsrc = bdir / (BEST_FIT_NAME + ".cftl")
+        bsrc.write_bytes(REPLAYSTEP_SRC)
+    except (OSError, UnicodeError) as e:
+        SC.skip("i. a source, and every path, named with characters best "
+                "fit spells as a space, a quote and a backslash",
+                f"this file system cannot hold the name: {e}")
+        return
+    prog = dataclasses.replace(rs, name="replaystep-best-fit", runs=[
+        dataclasses.replace(rs.runs[0], source=bsrc)])
+    print("== v2 replaystep, its source and every path named with "
+          "characters best fit spells as a space, a quote and a backslash, "
+          "open", flush=True)
+    res = certify(prog, "open", stem=bdir / BEST_FIT_NAME)
+    if res:
+        tok = cert2.text_token(bsrc.name)
         SC.check(line(res[0], "source-name") == tok,
                  f"i. its source-name is the golden writer's spelling of the "
                  f"file's own name, {tok}",

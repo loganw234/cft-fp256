@@ -1901,7 +1901,15 @@ wide command line (*The process's own text*, under **Version 2** below),
 at both versions, so each such spelling is its own characters - U+FF11
 is not a decimal, and `--segments` given it is `malformed` (section 14,
 leg i). Every other tool in this tree still takes Windows' conversion,
-before `main`, for every option: a known limit there, not fixed.
+before `main`, for every option: a known limit there, not fixed. How a
+UCRT or MSVC build's C runtime splits a doubled quote inside quotes is not
+determined here (no such toolchain): msvcrt, this tree's, splits the 28
+classic quoting forms as `CommandLineToArgvW` does (verifier-VCV2CW,
+2026-10-03), and a runtime that splits one otherwise is refused `usage`
+where the line's ANSI form is exact, and read by `CommandLineToArgvW`'s
+rules where it is not. Nor is how the runtime reads a double-byte code
+page's trail byte 0x5C, a backslash's byte (this desktop's code page is
+cp1252).
 
 **What it certifies, and what it does not.** It certifies what ran:
 which states each segment started and ended on, as hashes, with its
@@ -1997,18 +2005,24 @@ tool reads are recorded as the process has them, as the golden writer's
 are (Python's `os.environ` and `Path`). Windows hands a C program's `main`
 its arguments, and `getenv` its values, in the ANSI code page, which spells
 U+0141 as L by best fit and U+00E9 and U+20AC as bytes that are not
-UTF-8; so on Windows the tool reads the wide command line
-(`CommandLineToArgvW`), each argument in UTF-8, at both versions, and
-opens every path through its wide form (`_wfopen`, `_wopen`, `_wmkdir`,
-`_wrmdir`, `_wremove`). A source's file name, and every path the tool is
-handed, may then be any Unicode name, and `source-name` spells the file's
-own. Where the C runtime and Unicode split the command line differently -
-the count, or an argument that is ASCII as Unicode - the tool says so
-(`usage`) rather than guess which argument is which; an argument with no
-UTF-8 spelling (an unpaired surrogate, which only Windows can hand a
-program) is `usage` too. Version 1's bytes are unchanged for every
-command line both read alike. Elsewhere the bytes the process holds are
-its text, handed on as they are.
+UTF-8; so on Windows the tool reads the wide command line, split by
+`CommandLineToArgvW`, each argument in UTF-8, at both versions, and opens
+every path through its wide form (`_wfopen`, `_wopen`, `_wmkdir`,
+`_wrmdir`, `_wremove`). The Unicode split decides. The C runtime's argv is
+its own split of the line's ANSI form, which best fit makes, and on cp1252
+best fit spells U+3000, U+2002, U+2003 and U+2009 as a space, U+FF02,
+U+2033 and U+02BA as a quote and U+FF3C as a backslash, so that split can
+be of another string (verifier-VCV2CW, 2026-10-03). Only where the line's
+ANSI form is exact - every character in the system code page as itself -
+are the two held to each other, the count and each argument that is ASCII
+as Unicode, and a C runtime that splits a quoting form otherwise is then
+refused `usage` rather than guessed at. A source's file name, and every
+path the tool is handed, may then hold any character that has a UTF-8
+spelling, best fit's spaces and quotes among them, and `source-name`
+spells the file's own; an argument with no UTF-8 spelling (an unpaired
+surrogate, which only Windows can hand a program) is `usage`. Version 1's
+bytes are unchanged for every command line both read alike. Elsewhere the
+bytes the process holds are its text, handed on as they are.
 
 *A run.* `--lane-flags` asks for the per-lane block (ABI 0.17), which the
 run also asks for wherever its image holds QUIET, ENDQUIET or RAISE. Its
@@ -2081,7 +2095,11 @@ cannot.
 against, which a library links to; the issuer-key's decoding is a check
 of the tool's own until cft-audit's Ed25519 (the auditor's half) brings
 one for the tree, and then calls it; the device lines are those of one
-handle, as version 1's are.
+handle, as version 1's are. libcft reads its own variables of the list
+(`CFT_TIMEOUT_MS`, `CFT_DIVSQRT_SEQ`, `CFT_DIVSQRT_FULL`,
+`CFT_TRANSCEND_MINPREC`) through `getenv`, so on Windows a non-ASCII value
+of one is recorded as the process has it and acted on by the library as
+its best fit - numeric in practice (verifier-VCV2CW, 2026-10-03).
 
 **Its gate** is `host/tests/segrun_check.py`, `make -C host segruntest`,
 which `verify/run.sh`'s `programs` stage runs. It certifies
@@ -2329,21 +2347,29 @@ U+20AC, b, each `env` line the golden writer's, a value with no UTF-8
 spelling in the platform's form `malformed` beside the golden writer's
 twin, a statement given as its characters and `--segments` as U+FF11
 FULLWIDTH DIGIT ONE each `malformed` (best fit spells them Lodz and 1),
-and on Windows an argument with no UTF-8 spelling `usage` - the tool of
-7ec2178, reading main's and getenv's ANSI text, fails twelve of those
-checks (planted by running it, 2026-10-03); the remote rule through a
+an issuer a, U+3000, b `malformed` and replaystep with every path named
+with the characters best fit spells as a space, a quote and a backslash,
+each the golden writer's, and on Windows an argument with no UTF-8
+spelling `usage` - the tool of 7ec2178, reading main's and getenv's ANSI
+text, fails fourteen of those checks, and that of 45a8024, whose
+cross-check compared the runtime's best-fit split, the two of best fit's
+spaces and quotes (planted by running them, 2026-10-03); the remote rule
+through a
 loopback cft-serve; and,
 on a card (`hw/card-segrun.sh`), the device lines from the tile, the serial
 published as a text but never printed, and the per-lane block refused by
 name on revision 7.
 
+With the Unicode split deciding (verifier-VCV2CW's second check,
+2026-10-03): 1,055 checks on the Windows desktop and one SKIP, the trial's
+cost NOT TESTED there, 88 s, the desktop about 2 % busy before it -
+sections 1 to 13 716, as before, and section 14 339, which alone
+(`--v2-only`) takes 8 s; section 14 alone in WSL (cft2204, gcc 11.4,
+Python 3.10), 337 checks, 0 failed, 6 s, without Windows' argument case
+and its two checks. The whole gate not yet run in WSL, nor on a card.
 With the process's own text (verifier-VCV2CW's finding, 2026-10-03):
-1,044 checks on the Windows desktop and one SKIP, the trial's cost NOT
-TESTED there, 91 s, the desktop about 2 % busy before it - sections 1 to
-13 716, as before, and section 14 328, which alone (`--v2-only`) takes
-8 s. Section 14 alone in WSL (cft2204, gcc 11.4, Python 3.10): 326
-checks, 0 failed, 6 s, without Windows' argument case and its two checks.
-The whole gate not yet run in WSL, nor on a card.
+1,044 checks on the Windows desktop and one SKIP, 91 s - section 14 328;
+section 14 alone in WSL 326 checks, 0 failed, 6 s.
 With version 2's section 14 (2026-10-03): 1,020 checks on the Windows
 desktop and one SKIP, the trial's cost NOT TESTED there, 96 s, the
 desktop about 6 % busy - sections 1 to 13 716, as before version 2, and
