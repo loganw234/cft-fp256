@@ -39,3 +39,9 @@ Makefile text eol=lf
 certificates/**/*.cert -text
 certificates/**/*.bin binary
 certificates/*.salt binary
+# Version 2's (CV2B, 2026-10-02): a segment's per-lane block is bytes,
+# one a lane, that can hold 0d 0a; a signature file and a keyring are
+# ASCII the manifest holds by SHA-256, so never converted either.
+certificates/**/*.flags binary
+certificates/**/*.sig -text
+certificates/**/keyring -text

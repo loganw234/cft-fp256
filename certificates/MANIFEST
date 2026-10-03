@@ -9,40 +9,62 @@
 # run block and accuracy value of the certificate. The identity
 # lines name the implementation that made it.
 #
+# A case of version 2 says whether a C writer must reproduce it
+# (`writers both`), or whether it is a control that no writer makes
+# and every auditor refuses by its verdict's name (`writers golden`),
+# and what its audit is handed: the sources, the blocks, a signature
+# and a keyring, the certificate it supersedes, the definition re-run
+# and the regenerated initial state.
+#
 # The one salt here, certificates/example.salt, is the bytes 00 01
-# .. 1f: docs/CERTIFICATES.md prints it, so it is a TEST salt only,
-# and never an owner's.
-cft-golden-corpus 1
+# .. 1f, and the one signing key the test key, whose secret is 20 21
+# .. 3f: docs/CERTIFICATES.md prints both, so each is a TEST value
+# only, and never an owner's.
+cft-golden-corpus 2
 
 source certificates/programs/augsum-fp64.cfta c883bdfcf24fdaaac2fe7da96b1e565f8a527586357074d45a6f7246bd31d464
 source certificates/programs/deepwrap-fp64.cfta 4876b3d10d0375059b998039484d9d7c85b6914724e3a52b67f6c027371aa649
 source certificates/programs/flagstep-fp64.cfta b8ecf694f9bafbbbd6c6a442b9f9cf749e0a4f1354188a8ee44a799e975bb948
+source certificates/programs/markstep-fp64.cfta 2e398e7fdba23a0305115e8a1c8d8dca961024d5e780cc7a6eda508ba3e1cd7a
+source certificates/programs/markstep-fp64.cftl 78607fe6de418566894321bf255f48d7cd2f6caed4af4d5623bb9a6252548de0
 image certificates/images/augsum-fp64.cftp 7ecd133081fc7a35bf0a5b9cf5d749c94688f8005a5d090c748318d091858198 source certificates/programs/augsum-fp64.cfta
 image certificates/images/deepwrap-fp64.cftp f3e494eb4a14c935ed1374173126125b8d4ad6e3948b90558af0ab42b886fa85 source certificates/programs/deepwrap-fp64.cfta
 image certificates/images/flagstep-fp64.cftp e3f822d4acea1d12e19c8fae19569e5ea7747acea6b44c8e9fb36e42226efb14 source certificates/programs/flagstep-fp64.cfta
 image certificates/images/henonheiles-lf-fp128.cftp 36aae70a12aa0921eedac68c3f783bcbec28bb8043981e0aa0887c98f95a4fef source programs/henonheiles-lf-fp64.cfta format fp128
 image certificates/images/henonheiles-lf-fp256.cftp bca321c224cba29f3bf32eea494157b64ea01c1e1022cde88adee82c0d6e91d5 library henonheiles-lf-fp256.cftp
 image certificates/images/henonheiles-lf-fp64.cftp af8b49674a8053b28b631ad50714e61eb0ec51487b3f40d6490b87bfe357ec77 library henonheiles-lf-fp64.cftp
+image certificates/images/lorenz63-rk4-fp128-cftc.cftp 672cd0971fca3264914986bfd47149caf5dbf2f509096f0f98a98440411591ed compiled programs/systems/lorenz63-rk4-fp64.cftl format fp128 steps 100 target sw params 0
 image certificates/images/lorenz63-rk4-fp128.cftp ae1f5f5d9a3ac70415476f8cc984e05a57d788186997d28498f612449dae938f source programs/lorenz63-rk4-fp64.cfta format fp128
 image certificates/images/lorenz63-rk4-fp256.cftp 8561f230aa2695dc3f2a68b5350ec820770fbbded5c8d043b146bbf01c4da5c0 library lorenz63-rk4-fp256.cftp
+image certificates/images/lorenz63-rk4-fp64-cftc.cftp ff422cc92960485de0faf79f4d7a4225fdb6cf34f3baee6f5a76d33772294f1e compiled programs/systems/lorenz63-rk4-fp64.cftl format fp64 steps 100 target sw params 0
 image certificates/images/lorenz63-rk4-fp64.cftp a4f98313cb8aad6262879db9f31ac393af8219116d931645f987bab051838b65 library lorenz63-rk4-fp64.cftp
 image certificates/images/lorenz96-rk4-fp128.cftp 3bd9c4026d0ee6e82df6e000e70686cab205381457797f08993531f561944d88 source programs/lorenz96-rk4-fp64.cfta format fp128
 image certificates/images/lorenz96-rk4-fp256.cftp d16f1cbf13408b00b41eb596109aa3743e5d9cca1c76ce2a588824c0771c2cdf library lorenz96-rk4-fp256.cftp
 image certificates/images/lorenz96-rk4-fp64.cftp c45fbe8277d7b530be8a027167936485fa272101575133391ba79a11dc150db0 library lorenz96-rk4-fp64.cftp
+image certificates/images/markstep-fp64.cftp 86bfd74a3cb1435a384d4e703ca82ff50488e9b9fab3f37c0a991c90340b55bf source certificates/programs/markstep-fp64.cfta
 
 case lorenz63-rk4-fp64
 what Lorenz-63 by RK4 at fp64, 3 lanes: a main run of 3 segments, a half-step run of 6 and a wider fp128 run of 3; a wider estimate enclosed in fp64 and a step-halving estimate exact
 certificate certificates/lorenz63-rk4-fp64/lorenz63-rk4-fp64.cert d1a7ce61cc9771265a559f4642afd552136264eff8e011679a27c527daba55f6
+version 1
 mode open
 depth 256
 backends any
+writers both
 accuracy 2 both
 verdict accepted
 states certificates/lorenz63-rk4-fp64/states
+blocks certificates/lorenz63-rk4-fp64/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
 runs 3
 run 0 main
 image certificates/images/lorenz63-rk4-fp64.cftp
 bank programs/lorenz63-rk4-fp64.classic.bank c91cc547b6d5f616fff66d2abd2cbc83d1cfb4bce464d9a6ae79473bd947bf09
+source none
 segments 3
 steps 100
 parameters 2
@@ -55,6 +77,7 @@ boundary 3 6bc9ddfabdb2e4b00f118b38ae9a3c6b07c934c15ce77385f768777639801e7c
 run 1 half-step h-slots 3 0 1 2
 image certificates/images/lorenz63-rk4-fp64.cftp
 bank certificates/lorenz63-rk4-fp64/run-1.bank a7db2cff0d527899e6e9e23943d08b4d3c139d4ff141081ded41599345ea3290
+source none
 segments 6
 steps 100
 parameters 1
@@ -69,6 +92,7 @@ boundary 6 095aba15fbc4efcb74fc9cb62150f0bf89cb587a1fdbd79942f8759cb58a0b3f
 run 2 wider
 image certificates/images/lorenz63-rk4-fp128.cftp
 bank certificates/lorenz63-rk4-fp64/run-2.bank 62756c92acb35a52c9842a4f4dbc8c0a81c55bf174db117d3b093b85bd6656a3
+source none
 segments 3
 steps 100
 parameters 0
@@ -80,16 +104,25 @@ boundary 3 041b8a7ac2da5a1529029b0ca419110dd9a9dc2030107827b190f76ade05e879
 case lorenz63-rk4-fp256
 what Lorenz-63 by RK4 at fp256, 3 lanes: a main run of 3 segments and a half-step run of 6
 certificate certificates/lorenz63-rk4-fp256/lorenz63-rk4-fp256.cert 0d7adc68f3b6dfad9d4225770dfe8d42a2c3b77c5d865c6854e8fc6c5603b1d5
+version 1
 mode open
 depth 256
 backends any
+writers both
 accuracy 0 none
 verdict accepted
 states certificates/lorenz63-rk4-fp256/states
+blocks certificates/lorenz63-rk4-fp256/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
 runs 2
 run 0 main
 image certificates/images/lorenz63-rk4-fp256.cftp
 bank programs/lorenz63-rk4-fp256.classic.bank 479ab866c54897712d18553e791d53da65f250aeed7336a82ee690101e76a7d0
+source none
 segments 3
 steps 100
 parameters 2
@@ -102,6 +135,7 @@ boundary 3 39a27912f059e0ca76585705ea9d877ab73215309d379a21fe2fd741d31fcdee
 run 1 half-step h-slots 3 0 1 2
 image certificates/images/lorenz63-rk4-fp256.cftp
 bank certificates/lorenz63-rk4-fp256/run-1.bank b880caca418768813ebfcbf06dceb306abf1097f7edb1f2f03d718ba2e58ba26
+source none
 segments 6
 steps 100
 parameters 1
@@ -117,16 +151,25 @@ boundary 6 2b98244bc1e55c8c550a9e41a884f5acfcfe61d77e6c4f0a6fc0469428d49ec6
 case lorenz96-rk4-fp64
 what Lorenz-96 by RK4 at fp64, 2 lanes of 40 slots: a main run of 2 segments, a half-step run of 4 and a wider fp128 run of 2
 certificate certificates/lorenz96-rk4-fp64/lorenz96-rk4-fp64.cert 2117f3dbba7588b398e0337c66c606c0a7d722d744005eff7eed3a571e63f146
+version 1
 mode open
 depth 256
 backends any
+writers both
 accuracy 0 none
 verdict accepted
 states certificates/lorenz96-rk4-fp64/states
+blocks certificates/lorenz96-rk4-fp64/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
 runs 3
 run 0 main
 image certificates/images/lorenz96-rk4-fp64.cftp
 bank programs/lorenz96-rk4-fp64.classic.bank 68c249869952646c5031c3022e398bf9685df880da1559e9f4021cbb207d2b09
+source none
 segments 2
 steps 20
 parameters 2
@@ -138,6 +181,7 @@ boundary 2 ff52257ec82797e94f8d5db5ce568488d1988e78e8cb4edb8fa39becfa703853
 run 1 half-step h-slots 3 0 1 2
 image certificates/images/lorenz96-rk4-fp64.cftp
 bank certificates/lorenz96-rk4-fp64/run-1.bank 00725aa1a6cfd8908184c739d6dfe4fabe113ced20de5e101f9407b987836700
+source none
 segments 4
 steps 20
 parameters 1
@@ -150,6 +194,7 @@ boundary 4 d553a36cdcefc109befecc04ecdfc8f036a7496d6baf51f8200ef5780cc5f242
 run 2 wider
 image certificates/images/lorenz96-rk4-fp128.cftp
 bank certificates/lorenz96-rk4-fp64/run-2.bank a83f5df43788a134e34d08e5b141fefa94b684050c3eb71d6faa9f1c37e808c4
+source none
 segments 2
 steps 20
 parameters 0
@@ -160,16 +205,25 @@ boundary 2 e7e6eeee848b90ccb6e5ba7fe0b069de08b55967e09d10b6bb30eb774951332c
 case lorenz96-rk4-fp256
 what Lorenz-96 by RK4 at fp256, 2 lanes of 40 slots: a main run of 2 segments and a half-step run of 4
 certificate certificates/lorenz96-rk4-fp256/lorenz96-rk4-fp256.cert 4509221115a71c4bc37d3c68febcda75f83650adcb57a5a43f14bb0a8a05fcb5
+version 1
 mode open
 depth 256
 backends any
+writers both
 accuracy 0 none
 verdict accepted
 states certificates/lorenz96-rk4-fp256/states
+blocks certificates/lorenz96-rk4-fp256/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
 runs 2
 run 0 main
 image certificates/images/lorenz96-rk4-fp256.cftp
 bank programs/lorenz96-rk4-fp256.classic.bank 8f2c14637f4e0cc5d85bd41d8b113a7e329f9e7a84da86f99e8645b4e8e176ae
+source none
 segments 2
 steps 20
 parameters 2
@@ -181,6 +235,7 @@ boundary 2 e4926a1eb67256615a5da36c8be587d8618e68a5cc7e753d9d1325b94673bad5
 run 1 half-step h-slots 3 0 1 2
 image certificates/images/lorenz96-rk4-fp256.cftp
 bank certificates/lorenz96-rk4-fp256/run-1.bank 01dff4fdbca8ee0e6b375fd5a1c020d56814094e2d4edb8db8412f5d281be064
+source none
 segments 4
 steps 20
 parameters 1
@@ -194,16 +249,25 @@ boundary 4 b18f4146533414490093cb0803367f3051c1124c46bdd9a3909ee5c6c486a9d8
 case henonheiles-lf-fp64
 what Henon-Heiles by Stormer-Verlet at fp64, 4 lanes: a main run of 4 segments, a half-step run of 8 and a wider fp128 run of 4
 certificate certificates/henonheiles-lf-fp64/henonheiles-lf-fp64.cert b1935e7a3163a97ea4f711a71b91fa9976757daf64e0d1149cf53dddd667bb54
+version 1
 mode open
 depth 256
 backends any
+writers both
 accuracy 0 none
 verdict accepted
 states certificates/henonheiles-lf-fp64/states
+blocks certificates/henonheiles-lf-fp64/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
 runs 3
 run 0 main
 image certificates/images/henonheiles-lf-fp64.cftp
 bank programs/henonheiles-lf-fp64.classic.bank ba37e0dd52e236a51a1fde9aecbf52171bcc339b8d374d05e32aba6527c12b4e
+source none
 segments 4
 steps 100
 parameters 2
@@ -217,6 +281,7 @@ boundary 4 244a84891971d9d6ebd78301df19c9477660a9ac46195ff69f4d3d1401585b32
 run 1 half-step h-slots 3 0 1 2
 image certificates/images/henonheiles-lf-fp64.cftp
 bank certificates/henonheiles-lf-fp64/run-1.bank e06b0fd3d44d71c9a90d0c8878b744723aad78e2b936b4abc0fe87aeb47bb3af
+source none
 segments 8
 steps 100
 parameters 1
@@ -233,6 +298,7 @@ boundary 8 2913a11e322ab71b1ecb9acee9d9b41c394209b320f53a18ac4e37aaff27997d
 run 2 wider
 image certificates/images/henonheiles-lf-fp128.cftp
 bank certificates/henonheiles-lf-fp64/run-2.bank 7321b3cfebf4c3fef2abc6f25c2e31990eb628c6d0380a587c3df03f9384eda0
+source none
 segments 4
 steps 100
 parameters 0
@@ -245,16 +311,25 @@ boundary 4 7b5848bed66a1fd3a390db08459140962c1de5aa02c185f3856f6d3c92d39bb2
 case henonheiles-lf-fp256
 what Henon-Heiles by Stormer-Verlet at fp256, 4 lanes: a main run of 4 segments and a half-step run of 8; the energy's drift over the lanes, exact, near the width rule
 certificate certificates/henonheiles-lf-fp256/henonheiles-lf-fp256.cert afd7cabd2261d09bb5814f1b6ecdd818d6fbc2baca17dc6e9faa2985e203b3ea
+version 1
 mode open
 depth 256
 backends any
+writers both
 accuracy 1 both
 verdict accepted
 states certificates/henonheiles-lf-fp256/states
+blocks certificates/henonheiles-lf-fp256/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
 runs 2
 run 0 main
 image certificates/images/henonheiles-lf-fp256.cftp
 bank programs/henonheiles-lf-fp256.classic.bank 1969d0fa5bddab0fc3846df208f5ad13a53d47f7bbddd15cfaef96271c348b5b
+source none
 segments 4
 steps 100
 parameters 2
@@ -268,6 +343,7 @@ boundary 4 e31244e0d0a8b5d27edf5259c102840015f45bd949913ae1020bda1d25e6d3ef
 run 1 half-step h-slots 3 0 1 2
 image certificates/images/henonheiles-lf-fp256.cftp
 bank certificates/henonheiles-lf-fp256/run-1.bank 4ddc402f2e40fc02755cdbd9012826d6a87dab56b63705963ffae9fc0528fcf0
+source none
 segments 8
 steps 100
 parameters 1
@@ -285,17 +361,26 @@ boundary 8 7e1da6b4067792d73d840701db7a024f6c88f30e183eb42c8fcf0bedcdba1f32
 case example
 what docs/CERTIFICATES.md's example certificate, byte for byte: Henon-Heiles at fp64, 2 lanes, a main run of 2 segments and a half-step run of 4, KEYED under the page's example salt, with the page's two entries
 certificate certificates/example/example.cert 420a28c6aeb0c48ea1f65030f15ca917b5fb2a471b6d0d95226c2fb6a12f29e1
+version 1
 mode keyed
 salt certificates/example.salt 630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd
 depth 256
 backends any
+writers both
 accuracy 2 both
 verdict accepted
 states certificates/example/states
+blocks certificates/example/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
 runs 2
 run 0 main
 image certificates/images/henonheiles-lf-fp64.cftp
 bank programs/henonheiles-lf-fp64.classic.bank ba37e0dd52e236a51a1fde9aecbf52171bcc339b8d374d05e32aba6527c12b4e
+source none
 segments 2
 steps 100
 parameters 0
@@ -305,6 +390,7 @@ boundary 2 9179580724bf13bc74314aaf5fc7dfde9320f81228e01b0d1fade3824b470d4b
 run 1 half-step h-slots 3 0 1 2
 image certificates/images/henonheiles-lf-fp64.cftp
 bank certificates/example/run-1.bank e06b0fd3d44d71c9a90d0c8878b744723aad78e2b936b4abc0fe87aeb47bb3af
+source none
 segments 4
 steps 100
 parameters 0
@@ -317,16 +403,25 @@ boundary 4 febc1558877e43a9ac1343eed3f6638e4a9f15a4ccf20179408283c5c228498d
 case flagstep-fp64
 what flagstep, the corpus's own: 2 lanes, 5 segments raising flags 20, 0, 1, 0, 20 and STATUS 48, 48, 0, 48, 48
 certificate certificates/flagstep-fp64/flagstep-fp64.cert c254f0e630663cd429cdeddfefbf11a247cf64a70e5e98777dc030bbee2fe65a
+version 1
 mode open
 depth 256
 backends any
+writers both
 accuracy 0 none
 verdict accepted
 states certificates/flagstep-fp64/states
+blocks certificates/flagstep-fp64/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
 runs 1
 run 0 main
 image certificates/images/flagstep-fp64.cftp
 bank none
+source none
 segments 5
 steps 1
 parameters 0
@@ -340,16 +435,25 @@ boundary 5 6c54e55edc297041f3b6cf644e6a5230871435d94284432ae2dc3c54712d6be5
 case augsum-fp64
 what augsum, the corpus's own: revision 8's augadd and augerr in a compensated sum, and a stepped STX and LDX; 4 lanes, 3 segments, lanes 2 and 3 meeting augadd ties, +-(2^53 + 3), at which roundTiesTowardZero and roundTiesToEven part; the software backend only
 certificate certificates/augsum-fp64/augsum-fp64.cert 281c81104bb8f61b0a6bc2c8fa96ab16a39ea7d43df0847361e3f5187abb49eb
+version 1
 mode open
 depth 256
 backends software
+writers both
 accuracy 0 none
 verdict accepted
 states certificates/augsum-fp64/states
+blocks certificates/augsum-fp64/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
 runs 1
 run 0 main
 image certificates/images/augsum-fp64.cftp
 bank none
+source none
 segments 3
 steps 4
 parameters 0
@@ -361,16 +465,25 @@ boundary 3 7eaf9a3f82d66105d2eac45bbf591d72c03e1f70085af6c0d7738da220d863cc
 case deepwrap-fp64-256
 what deepwrap, the corpus's own, at 256 scratch slots: a non-strict ldx at p and stx at p + 2, for p = 16,384 down to 128, reach the carried block at every depth up to p, so every depth from 128 to 32,768 has its own chain; a main run of 3 segments and a half-step run of 6, each stating the depth; 2 lanes
 certificate certificates/deepwrap-fp64-256/deepwrap-fp64-256.cert 51c6137329756b4129a7034fb7fbf2d442e01c3a7be8f181f78df54684641bf1
+version 1
 mode open
 depth 256
 backends any
+writers both
 accuracy 0 none
 verdict accepted
 states certificates/deepwrap-fp64-256/states
+blocks certificates/deepwrap-fp64-256/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
 runs 2
 run 0 main
 image certificates/images/deepwrap-fp64.cftp
 bank certificates/deepwrap-fp64-256/run-0.bank e67413fcbdfb04e11164facce78836a5d3276eaeedb7633d5278ab6ba808694b
+source none
 segments 3
 steps 1
 parameters 1
@@ -382,6 +495,7 @@ boundary 3 0ffcb9c855f990e86ba5e17e97ba13d44836368f69ec032028f4f8181528d16f
 run 1 half-step h-slots 1 0
 image certificates/images/deepwrap-fp64.cftp
 bank certificates/deepwrap-fp64-256/run-1.bank b0ea8c8030d1d85f81d94b0fd701c4dce24e5316f1ccfeefa8d47705fade2849
+source none
 segments 6
 steps 1
 parameters 1
@@ -397,16 +511,25 @@ boundary 6 92b851e60c3557000fa750ca2e6766297f1e084468b54133414cf3bdb70a888d
 case deepwrap-fp64-2048
 what deepwrap, the corpus's own, at 2,048 scratch slots: a non-strict ldx at p and stx at p + 2, for p = 16,384 down to 128, reach the carried block at every depth up to p, so every depth from 128 to 32,768 has its own chain; a main run of 3 segments and a half-step run of 6, each stating the depth; 2 lanes
 certificate certificates/deepwrap-fp64-2048/deepwrap-fp64-2048.cert 603db61d51bd09b246f1b765154bacdd5e6b4636be7e5207b5dd55f2c1d7b975
+version 1
 mode open
 depth 2048
 backends any
+writers both
 accuracy 0 none
 verdict accepted
 states certificates/deepwrap-fp64-2048/states
+blocks certificates/deepwrap-fp64-2048/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
 runs 2
 run 0 main
 image certificates/images/deepwrap-fp64.cftp
 bank certificates/deepwrap-fp64-2048/run-0.bank e67413fcbdfb04e11164facce78836a5d3276eaeedb7633d5278ab6ba808694b
+source none
 segments 3
 steps 1
 parameters 1
@@ -418,6 +541,7 @@ boundary 3 8a0dc79f98ef4a65e6c75b7992dc1f858472bdb1c27e68cab8cbfbf2ccb04986
 run 1 half-step h-slots 1 0
 image certificates/images/deepwrap-fp64.cftp
 bank certificates/deepwrap-fp64-2048/run-1.bank b0ea8c8030d1d85f81d94b0fd701c4dce24e5316f1ccfeefa8d47705fade2849
+source none
 segments 6
 steps 1
 parameters 1
@@ -433,16 +557,25 @@ boundary 6 5be43c0b3187c2da814f00db5aea761689f03c9ec1420d78e0d7d618d0978245
 case lorenz63-rk4-fp64-half-init
 what Lorenz-63 at fp64, 2 lanes, a main run of 2 segments and a half-step run of 4 entered from an initial state of its OWN: a relation the certificate states and does not hold, refused aux-start
 certificate certificates/lorenz63-rk4-fp64-half-init/lorenz63-rk4-fp64-half-init.cert a98caa4ff1d58ca9971306704a62335db4774013db6e5d4453bc046ebf85bc1c
+version 1
 mode open
 depth 256
 backends any
+writers both
 accuracy 0 none
 verdict refused aux-start
 states certificates/lorenz63-rk4-fp64-half-init/states
+blocks certificates/lorenz63-rk4-fp64-half-init/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
 runs 2
 run 0 main
 image certificates/images/lorenz63-rk4-fp64.cftp
 bank programs/lorenz63-rk4-fp64.classic.bank c91cc547b6d5f616fff66d2abd2cbc83d1cfb4bce464d9a6ae79473bd947bf09
+source none
 segments 2
 steps 100
 parameters 2
@@ -454,6 +587,7 @@ boundary 2 56249d4c8cfceaa2f801f138c6d7c2f1c049636e304c3b99b80e8ba73e730c0b
 run 1 half-step h-slots 3 0 1 2
 image certificates/images/lorenz63-rk4-fp64.cftp
 bank certificates/lorenz63-rk4-fp64-half-init/run-1.bank a7db2cff0d527899e6e9e23943d08b4d3c139d4ff141081ded41599345ea3290
+source none
 segments 4
 steps 100
 parameters 1
@@ -463,3 +597,1391 @@ boundary 1 355e1894c4f8d24c81d2ab0fa1ba6c7fa46eaf9a703a4f6fa55ee316f2f64ea9
 boundary 2 e4743b91d3b7f6d8294725bedae94e79bd7b5ad3c60a840676f2f62e7ede26c7
 boundary 3 f81ba5a11d15fe942c97f1986f5708bbc5e8358ff09d87f1a805fb506d32bf86
 boundary 4 97b13a863e53b048507f81dde2cdff286320f5eab726fc5aa0ea8900c8a5dfc4
+
+case markstep-fp64
+what version 2's replay case and docs/CERTIFICATES.md's version-2 example, byte for byte: markstep, defined by its source, 3 lanes, 3 segments of 4 steps; segment 1 marks lanes 0 and 1, lane 0's last bit wrong, and the golden writer replays both by the definition (replay 1 marked 2 changed 1); the counter's drift; audited with every segment run by the source's interpreter too
+certificate certificates/markstep-fp64/markstep-fp64.cert dd7e4bbeb55ad244d5de1d73fa9463608f3ae2be52f10d95b125123a4435ffaa
+version 2
+mode open
+depth 256
+backends software
+writers both
+accuracy 1 both
+verdict accepted
+states certificates/markstep-fp64/states
+blocks certificates/markstep-fp64/states
+signature none
+keyring none
+superseded none
+define 0:all
+regenerate no
+runs 1
+run 0 main
+image certificates/images/markstep-fp64.cftp
+bank certificates/markstep-fp64/run-0.bank f8c9845e50830dc5e2141f4c13ee8cf1c19638c28f2c6153d8cc4b0c3c052004
+source certificates/programs/markstep-fp64.cftl 78607fe6de418566894321bf255f48d7cd2f6caed4af4d5623bb9a6252548de0
+segments 3
+steps 4
+parameters 0
+boundary 0 055fe20e4e25c16675e4e70bbb64d0ebf438f3054b1e53fb96a023ce89fbcead
+boundary 1 1cde7d9d40c5c3911747aaf5a627139e5bfebaabd65908b03bcfce37347fc9c9
+boundary 2 535a3d3522722baf17ce30891a9889adf0092f1d9b475a7fca5efda58f5270a5
+boundary 3 aec47571f4b49b6620523504bdb9ad35c5538600651ca92013c9a6c37dbe8172
+block 0 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 1 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 2 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8a8797cc6f045fc700359756a6986c19d987ec667e3c57b6a3da0706
+
+case lorenz63-rk4-fp64-sourced
+what Lorenz-63 compiled from programs/systems/lorenz63-rk4-fp64.cftl by cftc for sw: 3 lanes, a main run of 3 segments, a half-step run of 6 on the compile's half bank (its h-slots the compile's), and a wider-source run of 3 - the source compiled at fp128; the wider-source estimate, whose wider run has the source's constants rounded at fp128 where version 1's carries the fp64 bank's widened, and the step-halving estimate
+certificate certificates/lorenz63-rk4-fp64-sourced/lorenz63-rk4-fp64-sourced.cert 9b5eb27ad68c0bfab4d6fc4dd04914b909f8401d6fbaed86ced9b7f71793a77e
+version 2
+mode open
+depth 256
+backends software
+writers both
+accuracy 2 both
+verdict accepted
+states certificates/lorenz63-rk4-fp64-sourced/states
+blocks certificates/lorenz63-rk4-fp64-sourced/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
+runs 3
+run 0 main
+image certificates/images/lorenz63-rk4-fp64-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-0.bank c91cc547b6d5f616fff66d2abd2cbc83d1cfb4bce464d9a6ae79473bd947bf09
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 3
+steps 100
+parameters 1
+parameter members 3
+boundary 0 9fd3043360306f8ed70785dd2793a6cbcb9813d49993c4728e26090a56b545f7
+boundary 1 a422aad97b3b4d3a47f8f47c8eeb4b892af64f45486507af1b98a170ee954619
+boundary 2 4d97b31b231a7e37d5e9b1595ff6363b86a6e807ca5587eeccd0f8365c4f301e
+boundary 3 6bc9ddfabdb2e4b00f118b38ae9a3c6b07c934c15ce77385f768777639801e7c
+run 1 half-step h-slots 3 0 1 2
+image certificates/images/lorenz63-rk4-fp64-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-1.bank a7db2cff0d527899e6e9e23943d08b4d3c139d4ff141081ded41599345ea3290
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 6
+steps 100
+parameters 0
+boundary 0 9fd3043360306f8ed70785dd2793a6cbcb9813d49993c4728e26090a56b545f7
+boundary 1 2b07b1198cbfeb1083893cecee2f2815c08c0290a5cb36514fff2193009da675
+boundary 2 0acb188adcbdac42246b4a3c9a22f0e6f7004237597dfb2072db48c8dcc443da
+boundary 3 e9f9a5952f28c9202ad77698d81154082a4e86877b941f94e38328ba1d4d1772
+boundary 4 a82c34b3020a1e4a639bcc39f01ff53f5cdf9e9f5f79ed6f2852a251d74fe460
+boundary 5 bd20a6f67fd3c2934d4c3fb6225011e32392b70e24f5bd9e6d8a0f616ddb0a3c
+boundary 6 095aba15fbc4efcb74fc9cb62150f0bf89cb587a1fdbd79942f8759cb58a0b3f
+run 2 wider-source
+image certificates/images/lorenz63-rk4-fp128-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-2.bank 9d34e3f7489c3bfd2ac6ba54ae017b83b90be4b8ae2c3b018bf7e9a13dee102d
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 3
+steps 100
+parameters 0
+boundary 0 8282d52a63d3f57202563d30842df2d8133f6d7bc94058c6d1f2425b87ada52f
+boundary 1 e77691ece6eb959999e1a09eab112b557cbe269c7ee1074982a0025946648d82
+boundary 2 58efb5ae11e7029763f25f3f6460318e48ae7fb9468e619e7fb1d011f2eab8c6
+boundary 3 86905264cdb35c0ddd13585dec4e9db35b947ae7b1525b5e83387ce01199926f
+
+case flagstep-fp64-lanes
+what flagstep at version 2 with each segment's per-lane flags: 3 lanes whose counters start at 3, 2 and 1, so that in each of the 5 segments the lanes raise different flags; the counter's drift
+certificate certificates/flagstep-fp64-lanes/flagstep-fp64-lanes.cert db83f4a63cc96159a475f84c9f13e4f208842ccaa68e310d1b5d8d95eda4a3ab
+version 2
+mode open
+depth 256
+backends software
+writers both
+accuracy 1 both
+verdict accepted
+states certificates/flagstep-fp64-lanes/states
+blocks certificates/flagstep-fp64-lanes/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
+runs 1
+run 0 main
+image certificates/images/flagstep-fp64.cftp
+bank none
+source none
+segments 5
+steps 1
+parameters 0
+boundary 0 119f276fc34895868cfe041d0042b8b03ae1443e341c7c9ea5428881ffc143f0
+boundary 1 e099b72218536c0e5d5e4241b3a368e1491bfcb77464a253278edd851cc1954d
+boundary 2 a90108c464eb9e364dc749a60dce039e142d65cabe94fedd38b14ed294a25b75
+boundary 3 c102635a3edff4f7fb183c3b0c2a4c5347843c8cf78359f5f5022d2f88d12901
+boundary 4 45997409dc6c3522148c105e6b2eba3e96a4fe5555c5398563b406e4749811ad
+boundary 5 01a2a470d594bfe459452ee6a248a790cdb4edae2d40a38e912c129628e69b8c
+block 0 ce83a885ead810b37a752877e97ca05e57fb7cacd743e4676c05818e48044b16
+block 1 a1186de365d1eea598275c82b5764772590555bbf1f844c1757e62c962bea20c
+block 2 e2781f11474e87de73e18303c660a5b36edf90debe942d3ce9fc0a0cb6d2b96b
+block 3 bfa8daf1ef28269ed46a6b00abd11f4caa9c9275f5cef61a91f3129e1991f0b1
+block 4 3f7c54571faee024e3fd68603c5c95f6a4c8ef73a398840b974f3f57737a116f
+
+case signed-fp64
+what every header line of version 2 spelt out - texts with spaces and non-ASCII, the device lines, the writer and compiler builds, the environment - keyed, its initial state made by the shake-box generator, superseding flagstep-fp64-lanes, and signed under the published test key; audited with its signature, the keyring naming the issuer, the superseded certificate and the initial state regenerated
+certificate certificates/signed-fp64/signed-fp64.cert 94bfe25112ca36133a2106d4ef65c7496ae7b5b0356d59321ec04631f976016d
+version 2
+mode keyed
+salt certificates/example.salt 630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd
+depth 256
+backends software
+writers both
+accuracy 0 none
+verdict accepted
+states certificates/signed-fp64/states
+blocks certificates/signed-fp64/states
+signature certificates/signed-fp64/signed-fp64.cert.sig 50d958bb116b588cb541fee530f66cedae68c529011c10273e3e760ea7cf120a
+keyring certificates/signed-fp64/keyring 409b28c6a1ceb695f53b0823cd3d5fc53ff73d1a6ad599c1a7814d2fa1d2a91c
+superseded flagstep-fp64-lanes
+define none
+regenerate yes
+runs 1
+run 0 main
+image certificates/images/flagstep-fp64.cftp
+bank none
+source none
+segments 3
+steps 1
+parameters 0
+boundary 0 eed2d888dd2be61bf876e091a1886a83c7ef5bd732f8d32b66d46a5b9d65fdd9
+boundary 1 ac87ce952ef5e87e1e47c1c1c0caebb1c7ef254217eec3f04a8e32ebb1255187
+boundary 2 9eb833aad529813d8927f1530d32f352e743144698eef4dcefb58730bca16817
+boundary 3 e6cdc7fb82a68a6703406eb0213ae3e1a58ef368d12990ba1fd324a73b860945
+block 0 3abd807250d1b53741c345896f2d79faf6e7dcdb75860e98a2f84e38e874c236
+block 1 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
+block 2 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
+
+case lorenz63-rk4-fp64-rebuilt
+what Lorenz-63 compiled by cftc, 2 lanes, 2 segments, its initial state made by the shake-box generator: its audit is handed the source and no state, recompiles the image, regenerates the initial state and re-runs every segment - rebuilt
+certificate certificates/lorenz63-rk4-fp64-rebuilt/lorenz63-rk4-fp64-rebuilt.cert 962583e7e3403af2b66e2c393861c4a77fbc677bde7e8c4e725781f0d35cd048
+version 2
+mode open
+depth 256
+backends software
+writers both
+accuracy 0 none
+verdict accepted
+states certificates/lorenz63-rk4-fp64-rebuilt/states
+blocks certificates/lorenz63-rk4-fp64-rebuilt/states
+signature none
+keyring none
+superseded none
+define none
+regenerate yes
+runs 1
+run 0 main
+image certificates/images/lorenz63-rk4-fp64-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-rebuilt/run-0.bank c91cc547b6d5f616fff66d2abd2cbc83d1cfb4bce464d9a6ae79473bd947bf09
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 2
+steps 100
+parameters 0
+boundary 0 e90b47e89e24756ad9baf0d8cfe95c1c6c00ae5b4ffc698230ab2216124ab368
+boundary 1 c5775dd2d8f2e1f59400e39fa345ad2bd6f9271c98775fba13ad277c35238a39
+boundary 2 80a130a6d64d076381609a03f740ea76981bcdef46e7da5a9d26550c1764daf0
+
+case markstep-fp64-other-b
+what markstep on a bank whose b is 1/4, not its source's 1/7: an honest certificate of another map, whose marked lanes the writer replays by the source; it holds together, and the definition re-run of segment 0 refuses it definition-end
+certificate certificates/markstep-fp64-other-b/markstep-fp64-other-b.cert 35e50615fe566a6df89ee99aa76f5dc23989d59db5f62323e83ade44b57ae943
+version 2
+mode open
+depth 256
+backends software
+writers both
+accuracy 1 both
+verdict refused definition-end
+states certificates/markstep-fp64-other-b/states
+blocks certificates/markstep-fp64-other-b/states
+signature none
+keyring none
+superseded none
+define 0:0
+regenerate no
+runs 1
+run 0 main
+image certificates/images/markstep-fp64.cftp
+bank certificates/markstep-fp64-other-b/run-0.bank b04cdd73750d907f6e2fb85b0225e2f0070078baa9133e31654a0b10a880a07f
+source certificates/programs/markstep-fp64.cftl 78607fe6de418566894321bf255f48d7cd2f6caed4af4d5623bb9a6252548de0
+segments 3
+steps 4
+parameters 0
+boundary 0 055fe20e4e25c16675e4e70bbb64d0ebf438f3054b1e53fb96a023ce89fbcead
+boundary 1 fcbc4d6bdb84934cfb823abf3838c320562c943617904e8145e8963c7f228862
+boundary 2 42bd1a0a5e71f8d1d8342f6e3f447f34ed134f54262c5be8463a69a424130366
+boundary 3 91728a8c4d3bce1be387f940040df8cf3fc05b8d889b76860d06c5d7d803ff65
+block 0 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 1 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 2 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+raw 1 1531dcfdfc5cd5bdaa5dfe4b94695887b941e4c681c682988178dfe9a41aacee 609f5d0e8a8797cc6f045fc700359756a6986c19d987ec667e3c57b6a3da0706
+
+case markstep-fp64-loud
+what markstep on a bank whose no-mark word is 1, so that every lane raises invalid each step: the map's values with other flags; the definition re-run of segment 2 refuses it definition-flags
+certificate certificates/markstep-fp64-loud/markstep-fp64-loud.cert b09c2f4d9635ac9bfa6dcdc96f772f749ea375929c04b215c547453e76ea60ba
+version 2
+mode open
+depth 256
+backends software
+writers both
+accuracy 1 both
+verdict refused definition-flags
+states certificates/markstep-fp64-loud/states
+blocks certificates/markstep-fp64-loud/states
+signature none
+keyring none
+superseded none
+define 0:2
+regenerate no
+runs 1
+run 0 main
+image certificates/images/markstep-fp64.cftp
+bank certificates/markstep-fp64-loud/run-0.bank 203e75f295704382e881d0ea041a42b68bdd8c940a1cb9da7c3aee7361433647
+source certificates/programs/markstep-fp64.cftl 78607fe6de418566894321bf255f48d7cd2f6caed4af4d5623bb9a6252548de0
+segments 3
+steps 4
+parameters 0
+boundary 0 055fe20e4e25c16675e4e70bbb64d0ebf438f3054b1e53fb96a023ce89fbcead
+boundary 1 1cde7d9d40c5c3911747aaf5a627139e5bfebaabd65908b03bcfce37347fc9c9
+boundary 2 535a3d3522722baf17ce30891a9889adf0092f1d9b475a7fca5efda58f5270a5
+boundary 3 aec47571f4b49b6620523504bdb9ad35c5538600651ca92013c9a6c37dbe8172
+block 0 10d083af91c061f2c89df71ee6928f959756b77c1ad17aa2383457da90524293
+block 1 b3c8a62f9e376b75af1cff96bf920e942c97cbc440a3d1f2ae537ff8b6d11bb2
+block 2 10d083af91c061f2c89df71ee6928f959756b77c1ad17aa2383457da90524293
+raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 4b17bbff874b013fc4f3b46465c31acbb6f77a7377cc6e201132bea4b4693791
+
+case v2-marked
+what a segment line's STATUS with the mark, STATUS[6] (from markstep-fp64; refused marked)
+certificate certificates/v2-controls/v2-marked.cert c05cbe187f51f2403bd211392e7bf858f06ee7624ed566bb429444251f922c1a
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 1 both
+verdict refused marked
+states certificates/markstep-fp64/states
+blocks certificates/markstep-fp64/states
+signature none
+keyring none
+superseded none
+define 0:all
+regenerate no
+runs 1
+run 0 main
+image certificates/images/markstep-fp64.cftp
+bank certificates/markstep-fp64/run-0.bank f8c9845e50830dc5e2141f4c13ee8cf1c19638c28f2c6153d8cc4b0c3c052004
+source certificates/programs/markstep-fp64.cftl 78607fe6de418566894321bf255f48d7cd2f6caed4af4d5623bb9a6252548de0
+segments 3
+steps 4
+parameters 0
+boundary 0 055fe20e4e25c16675e4e70bbb64d0ebf438f3054b1e53fb96a023ce89fbcead
+boundary 1 1cde7d9d40c5c3911747aaf5a627139e5bfebaabd65908b03bcfce37347fc9c9
+boundary 2 535a3d3522722baf17ce30891a9889adf0092f1d9b475a7fca5efda58f5270a5
+boundary 3 aec47571f4b49b6620523504bdb9ad35c5538600651ca92013c9a6c37dbe8172
+block 0 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 1 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 2 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8a8797cc6f045fc700359756a6986c19d987ec667e3c57b6a3da0706
+
+case v2-replay-lane-flags
+what replay lines in a run that says lane-flags no (from markstep-fp64; refused replay-lane-flags)
+certificate certificates/v2-controls/v2-replay-lane-flags.cert 1daf65742b5cde8e06aaa89dab78f90cc5e41ae2bbe08ba8fa965d2458db6e4d
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 1 both
+verdict refused replay-lane-flags
+states certificates/markstep-fp64/states
+blocks certificates/markstep-fp64/states
+signature none
+keyring none
+superseded none
+define 0:all
+regenerate no
+runs 1
+run 0 main
+image certificates/images/markstep-fp64.cftp
+bank certificates/markstep-fp64/run-0.bank f8c9845e50830dc5e2141f4c13ee8cf1c19638c28f2c6153d8cc4b0c3c052004
+source certificates/programs/markstep-fp64.cftl 78607fe6de418566894321bf255f48d7cd2f6caed4af4d5623bb9a6252548de0
+segments 3
+steps 4
+parameters 0
+boundary 0 055fe20e4e25c16675e4e70bbb64d0ebf438f3054b1e53fb96a023ce89fbcead
+boundary 1 1cde7d9d40c5c3911747aaf5a627139e5bfebaabd65908b03bcfce37347fc9c9
+boundary 2 535a3d3522722baf17ce30891a9889adf0092f1d9b475a7fca5efda58f5270a5
+boundary 3 aec47571f4b49b6620523504bdb9ad35c5538600651ca92013c9a6c37dbe8172
+block 0 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 1 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 2 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8a8797cc6f045fc700359756a6986c19d987ec667e3c57b6a3da0706
+
+case v2-replay-source
+what replay lines in a run that names no source (from markstep-fp64; refused replay-source)
+certificate certificates/v2-controls/v2-replay-source.cert db36235fde7a707aaf7f5ae1dda6884c5b8e82a86a7620b1760d001ddd9231a2
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 1 both
+verdict refused replay-source
+states certificates/markstep-fp64/states
+blocks certificates/markstep-fp64/states
+signature none
+keyring none
+superseded none
+define 0:all
+regenerate no
+runs 1
+run 0 main
+image certificates/images/markstep-fp64.cftp
+bank certificates/markstep-fp64/run-0.bank f8c9845e50830dc5e2141f4c13ee8cf1c19638c28f2c6153d8cc4b0c3c052004
+source certificates/programs/markstep-fp64.cftl 78607fe6de418566894321bf255f48d7cd2f6caed4af4d5623bb9a6252548de0
+segments 3
+steps 4
+parameters 0
+boundary 0 055fe20e4e25c16675e4e70bbb64d0ebf438f3054b1e53fb96a023ce89fbcead
+boundary 1 1cde7d9d40c5c3911747aaf5a627139e5bfebaabd65908b03bcfce37347fc9c9
+boundary 2 535a3d3522722baf17ce30891a9889adf0092f1d9b475a7fca5efda58f5270a5
+boundary 3 aec47571f4b49b6620523504bdb9ad35c5538600651ca92013c9a6c37dbe8172
+block 0 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 1 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 2 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8a8797cc6f045fc700359756a6986c19d987ec667e3c57b6a3da0706
+
+case v2-replay-method
+what a run with replay lines and no replay-method line (from markstep-fp64; refused replay-method)
+certificate certificates/v2-controls/v2-replay-method.cert 4134108ec96154f3513b6d7cf336ddeaadea1583d90104c278d319de6de2bf90
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 1 both
+verdict refused replay-method
+states certificates/markstep-fp64/states
+blocks certificates/markstep-fp64/states
+signature none
+keyring none
+superseded none
+define 0:all
+regenerate no
+runs 1
+run 0 main
+image certificates/images/markstep-fp64.cftp
+bank certificates/markstep-fp64/run-0.bank f8c9845e50830dc5e2141f4c13ee8cf1c19638c28f2c6153d8cc4b0c3c052004
+source certificates/programs/markstep-fp64.cftl 78607fe6de418566894321bf255f48d7cd2f6caed4af4d5623bb9a6252548de0
+segments 3
+steps 4
+parameters 0
+boundary 0 055fe20e4e25c16675e4e70bbb64d0ebf438f3054b1e53fb96a023ce89fbcead
+boundary 1 1cde7d9d40c5c3911747aaf5a627139e5bfebaabd65908b03bcfce37347fc9c9
+boundary 2 535a3d3522722baf17ce30891a9889adf0092f1d9b475a7fca5efda58f5270a5
+boundary 3 aec47571f4b49b6620523504bdb9ad35c5538600651ca92013c9a6c37dbe8172
+block 0 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 1 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 2 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8a8797cc6f045fc700359756a6986c19d987ec667e3c57b6a3da0706
+
+case v2-provenance-order
+what started after finished (from markstep-fp64; refused provenance-order)
+certificate certificates/v2-controls/v2-provenance-order.cert 2fffa3415eade84e9483893a1c7957677c906be57c72f2c16ce727b805510a7f
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 1 both
+verdict refused provenance-order
+states certificates/markstep-fp64/states
+blocks certificates/markstep-fp64/states
+signature none
+keyring none
+superseded none
+define 0:all
+regenerate no
+runs 1
+run 0 main
+image certificates/images/markstep-fp64.cftp
+bank certificates/markstep-fp64/run-0.bank f8c9845e50830dc5e2141f4c13ee8cf1c19638c28f2c6153d8cc4b0c3c052004
+source certificates/programs/markstep-fp64.cftl 78607fe6de418566894321bf255f48d7cd2f6caed4af4d5623bb9a6252548de0
+segments 3
+steps 4
+parameters 0
+boundary 0 055fe20e4e25c16675e4e70bbb64d0ebf438f3054b1e53fb96a023ce89fbcead
+boundary 1 1cde7d9d40c5c3911747aaf5a627139e5bfebaabd65908b03bcfce37347fc9c9
+boundary 2 535a3d3522722baf17ce30891a9889adf0092f1d9b475a7fca5efda58f5270a5
+boundary 3 aec47571f4b49b6620523504bdb9ad35c5538600651ca92013c9a6c37dbe8172
+block 0 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 1 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 2 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8a8797cc6f045fc700359756a6986c19d987ec667e3c57b6a3da0706
+
+case v2-signature-format
+what a signature file of four lines (from signed-fp64; refused signature-format)
+certificate certificates/v2-controls/v2-signature-format.cert 94bfe25112ca36133a2106d4ef65c7496ae7b5b0356d59321ec04631f976016d
+version 2
+mode keyed
+salt certificates/example.salt 630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd
+depth 256
+backends software
+writers golden
+accuracy 0 none
+verdict refused signature-format
+states certificates/signed-fp64/states
+blocks certificates/signed-fp64/states
+signature certificates/v2-controls/v2-signature-format/v2-signature-format.cert.sig 9a80267c06c7be1ff2d7ae36b43ad747ea3d5f41c27a6fcf3015c3c04ce07ea7
+keyring certificates/signed-fp64/keyring 409b28c6a1ceb695f53b0823cd3d5fc53ff73d1a6ad599c1a7814d2fa1d2a91c
+superseded flagstep-fp64-lanes
+define none
+regenerate yes
+runs 1
+run 0 main
+image certificates/images/flagstep-fp64.cftp
+bank none
+source none
+segments 3
+steps 1
+parameters 0
+boundary 0 eed2d888dd2be61bf876e091a1886a83c7ef5bd732f8d32b66d46a5b9d65fdd9
+boundary 1 ac87ce952ef5e87e1e47c1c1c0caebb1c7ef254217eec3f04a8e32ebb1255187
+boundary 2 9eb833aad529813d8927f1530d32f352e743144698eef4dcefb58730bca16817
+boundary 3 e6cdc7fb82a68a6703406eb0213ae3e1a58ef368d12990ba1fd324a73b860945
+block 0 3abd807250d1b53741c345896f2d79faf6e7dcdb75860e98a2f84e38e874c236
+block 1 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
+block 2 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
+
+case v2-signature
+what another certificate's signature file (from signed-fp64; refused signature)
+certificate certificates/v2-controls/v2-signature.cert 94bfe25112ca36133a2106d4ef65c7496ae7b5b0356d59321ec04631f976016d
+version 2
+mode keyed
+salt certificates/example.salt 630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd
+depth 256
+backends software
+writers golden
+accuracy 0 none
+verdict refused signature
+states certificates/signed-fp64/states
+blocks certificates/signed-fp64/states
+signature certificates/v2-controls/v2-signature/v2-signature.cert.sig 1ee1d97d0ab105875bbf9d06c6122063534ca10e1a6351180186532e145cf5fd
+keyring certificates/signed-fp64/keyring 409b28c6a1ceb695f53b0823cd3d5fc53ff73d1a6ad599c1a7814d2fa1d2a91c
+superseded flagstep-fp64-lanes
+define none
+regenerate yes
+runs 1
+run 0 main
+image certificates/images/flagstep-fp64.cftp
+bank none
+source none
+segments 3
+steps 1
+parameters 0
+boundary 0 eed2d888dd2be61bf876e091a1886a83c7ef5bd732f8d32b66d46a5b9d65fdd9
+boundary 1 ac87ce952ef5e87e1e47c1c1c0caebb1c7ef254217eec3f04a8e32ebb1255187
+boundary 2 9eb833aad529813d8927f1530d32f352e743144698eef4dcefb58730bca16817
+boundary 3 e6cdc7fb82a68a6703406eb0213ae3e1a58ef368d12990ba1fd324a73b860945
+block 0 3abd807250d1b53741c345896f2d79faf6e7dcdb75860e98a2f84e38e874c236
+block 1 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
+block 2 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
+
+case v2-signature-key
+what a signature by a key other than the certificate's issuer-key (from signed-fp64; refused signature-key)
+certificate certificates/v2-controls/v2-signature-key.cert 94bfe25112ca36133a2106d4ef65c7496ae7b5b0356d59321ec04631f976016d
+version 2
+mode keyed
+salt certificates/example.salt 630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd
+depth 256
+backends software
+writers golden
+accuracy 0 none
+verdict refused signature-key
+states certificates/signed-fp64/states
+blocks certificates/signed-fp64/states
+signature certificates/v2-controls/v2-signature-key/v2-signature-key.cert.sig 817b1a5634ae9f62553ff2ec3547f8b8f27b523dc26f73cf8cef56ee0f51c744
+keyring certificates/signed-fp64/keyring 409b28c6a1ceb695f53b0823cd3d5fc53ff73d1a6ad599c1a7814d2fa1d2a91c
+superseded flagstep-fp64-lanes
+define none
+regenerate yes
+runs 1
+run 0 main
+image certificates/images/flagstep-fp64.cftp
+bank none
+source none
+segments 3
+steps 1
+parameters 0
+boundary 0 eed2d888dd2be61bf876e091a1886a83c7ef5bd732f8d32b66d46a5b9d65fdd9
+boundary 1 ac87ce952ef5e87e1e47c1c1c0caebb1c7ef254217eec3f04a8e32ebb1255187
+boundary 2 9eb833aad529813d8927f1530d32f352e743144698eef4dcefb58730bca16817
+boundary 3 e6cdc7fb82a68a6703406eb0213ae3e1a58ef368d12990ba1fd324a73b860945
+block 0 3abd807250d1b53741c345896f2d79faf6e7dcdb75860e98a2f84e38e874c236
+block 1 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
+block 2 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
+
+case v2-signer
+what a keyring naming the signing key as another holder than the issuer (from signed-fp64; refused signer)
+certificate certificates/v2-controls/v2-signer.cert 94bfe25112ca36133a2106d4ef65c7496ae7b5b0356d59321ec04631f976016d
+version 2
+mode keyed
+salt certificates/example.salt 630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd
+depth 256
+backends software
+writers golden
+accuracy 0 none
+verdict refused signer
+states certificates/signed-fp64/states
+blocks certificates/signed-fp64/states
+signature certificates/signed-fp64/signed-fp64.cert.sig 50d958bb116b588cb541fee530f66cedae68c529011c10273e3e760ea7cf120a
+keyring certificates/v2-controls/v2-signer/keyring e85501491803db8c4dd9cb4342fd14ea2920f9cd78b06b395267c953be9e5e85
+superseded flagstep-fp64-lanes
+define none
+regenerate yes
+runs 1
+run 0 main
+image certificates/images/flagstep-fp64.cftp
+bank none
+source none
+segments 3
+steps 1
+parameters 0
+boundary 0 eed2d888dd2be61bf876e091a1886a83c7ef5bd732f8d32b66d46a5b9d65fdd9
+boundary 1 ac87ce952ef5e87e1e47c1c1c0caebb1c7ef254217eec3f04a8e32ebb1255187
+boundary 2 9eb833aad529813d8927f1530d32f352e743144698eef4dcefb58730bca16817
+boundary 3 e6cdc7fb82a68a6703406eb0213ae3e1a58ef368d12990ba1fd324a73b860945
+block 0 3abd807250d1b53741c345896f2d79faf6e7dcdb75860e98a2f84e38e874c236
+block 1 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
+block 2 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
+
+case v2-supersedes
+what another certificate handed as the one it supersedes (from signed-fp64; refused supersedes)
+certificate certificates/v2-controls/v2-supersedes.cert 94bfe25112ca36133a2106d4ef65c7496ae7b5b0356d59321ec04631f976016d
+version 2
+mode keyed
+salt certificates/example.salt 630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd
+depth 256
+backends software
+writers golden
+accuracy 0 none
+verdict refused supersedes
+states certificates/signed-fp64/states
+blocks certificates/signed-fp64/states
+signature certificates/signed-fp64/signed-fp64.cert.sig 50d958bb116b588cb541fee530f66cedae68c529011c10273e3e760ea7cf120a
+keyring certificates/signed-fp64/keyring 409b28c6a1ceb695f53b0823cd3d5fc53ff73d1a6ad599c1a7814d2fa1d2a91c
+superseded markstep-fp64
+define none
+regenerate yes
+runs 1
+run 0 main
+image certificates/images/flagstep-fp64.cftp
+bank none
+source none
+segments 3
+steps 1
+parameters 0
+boundary 0 eed2d888dd2be61bf876e091a1886a83c7ef5bd732f8d32b66d46a5b9d65fdd9
+boundary 1 ac87ce952ef5e87e1e47c1c1c0caebb1c7ef254217eec3f04a8e32ebb1255187
+boundary 2 9eb833aad529813d8927f1530d32f352e743144698eef4dcefb58730bca16817
+boundary 3 e6cdc7fb82a68a6703406eb0213ae3e1a58ef368d12990ba1fd324a73b860945
+block 0 3abd807250d1b53741c345896f2d79faf6e7dcdb75860e98a2f84e38e874c236
+block 1 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
+block 2 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
+
+case v2-source-digest
+what a source handed with one byte changed (from markstep-fp64; refused source-digest)
+certificate certificates/v2-controls/v2-source-digest.cert dd7e4bbeb55ad244d5de1d73fa9463608f3ae2be52f10d95b125123a4435ffaa
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 1 both
+verdict refused source-digest
+states certificates/markstep-fp64/states
+blocks certificates/markstep-fp64/states
+signature none
+keyring none
+superseded none
+define 0:all
+regenerate no
+runs 1
+run 0 main
+image certificates/images/markstep-fp64.cftp
+bank certificates/markstep-fp64/run-0.bank f8c9845e50830dc5e2141f4c13ee8cf1c19638c28f2c6153d8cc4b0c3c052004
+source certificates/v2-controls/v2-source-digest/markstep-fp64.cftl 8973c93ca4808cb75c4d756f5559e2f2274674a5e4051a44e71d73d4a261de31
+segments 3
+steps 4
+parameters 0
+boundary 0 055fe20e4e25c16675e4e70bbb64d0ebf438f3054b1e53fb96a023ce89fbcead
+boundary 1 1cde7d9d40c5c3911747aaf5a627139e5bfebaabd65908b03bcfce37347fc9c9
+boundary 2 535a3d3522722baf17ce30891a9889adf0092f1d9b475a7fca5efda58f5270a5
+boundary 3 aec47571f4b49b6620523504bdb9ad35c5538600651ca92013c9a6c37dbe8172
+block 0 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 1 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 2 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8a8797cc6f045fc700359756a6986c19d987ec667e3c57b6a3da0706
+
+case v2-source-refused
+what a source the language refuses (step mapp), named and handed (from markstep-fp64; refused source-refused)
+certificate certificates/v2-controls/v2-source-refused.cert 0313999b8842c307e757b6ae8bf963ff2f7801128a2e8c88f1e4fe687422ca86
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 1 both
+verdict refused source-refused
+states certificates/markstep-fp64/states
+blocks certificates/markstep-fp64/states
+signature none
+keyring none
+superseded none
+define 0:all
+regenerate no
+runs 1
+run 0 main
+image certificates/images/markstep-fp64.cftp
+bank certificates/markstep-fp64/run-0.bank f8c9845e50830dc5e2141f4c13ee8cf1c19638c28f2c6153d8cc4b0c3c052004
+source certificates/v2-controls/v2-source-refused/markstep-fp64.cftl 3f006978668e73a833512d9470b645ce9150db83d35bbfb752a9df1785fd7e80
+segments 3
+steps 4
+parameters 0
+boundary 0 055fe20e4e25c16675e4e70bbb64d0ebf438f3054b1e53fb96a023ce89fbcead
+boundary 1 1cde7d9d40c5c3911747aaf5a627139e5bfebaabd65908b03bcfce37347fc9c9
+boundary 2 535a3d3522722baf17ce30891a9889adf0092f1d9b475a7fca5efda58f5270a5
+boundary 3 aec47571f4b49b6620523504bdb9ad35c5538600651ca92013c9a6c37dbe8172
+block 0 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 1 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 2 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8a8797cc6f045fc700359756a6986c19d987ec667e3c57b6a3da0706
+
+case v2-source-format
+what the fp128 compile certified as a main run of the fp64 source (from lorenz63-rk4-fp64-sourced; refused source-format)
+certificate certificates/v2-controls/v2-source-format.cert 1e60fdc036e6984bf3f302541a47cb30cf61d3a4524016254fe4db995564544e
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 0 none
+verdict refused source-format
+states certificates/v2-controls/v2-source-format/states
+blocks certificates/lorenz63-rk4-fp64-sourced/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
+runs 1
+run 0 main
+image certificates/images/lorenz63-rk4-fp128-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-2.bank 9d34e3f7489c3bfd2ac6ba54ae017b83b90be4b8ae2c3b018bf7e9a13dee102d
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 3
+steps 100
+parameters 0
+boundary 0 8282d52a63d3f57202563d30842df2d8133f6d7bc94058c6d1f2425b87ada52f
+boundary 1 e77691ece6eb959999e1a09eab112b557cbe269c7ee1074982a0025946648d82
+boundary 2 58efb5ae11e7029763f25f3f6460318e48ae7fb9468e619e7fb1d011f2eab8c6
+boundary 3 86905264cdb35c0ddd13585dec4e9db35b947ae7b1525b5e83387ce01199926f
+
+case v2-source-graph
+what another system's step graph named (from lorenz63-rk4-fp64-sourced; refused source-graph)
+certificate certificates/v2-controls/v2-source-graph.cert 2b29d8622874802dd877a8f17cbafe0c0387d289bbbdb31dced18187293b432e
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 2 both
+verdict refused source-graph
+states certificates/lorenz63-rk4-fp64-sourced/states
+blocks certificates/lorenz63-rk4-fp64-sourced/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
+runs 3
+run 0 main
+image certificates/images/lorenz63-rk4-fp64-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-0.bank c91cc547b6d5f616fff66d2abd2cbc83d1cfb4bce464d9a6ae79473bd947bf09
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 3
+steps 100
+parameters 1
+parameter members 3
+boundary 0 9fd3043360306f8ed70785dd2793a6cbcb9813d49993c4728e26090a56b545f7
+boundary 1 a422aad97b3b4d3a47f8f47c8eeb4b892af64f45486507af1b98a170ee954619
+boundary 2 4d97b31b231a7e37d5e9b1595ff6363b86a6e807ca5587eeccd0f8365c4f301e
+boundary 3 6bc9ddfabdb2e4b00f118b38ae9a3c6b07c934c15ce77385f768777639801e7c
+run 1 half-step h-slots 3 0 1 2
+image certificates/images/lorenz63-rk4-fp64-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-1.bank a7db2cff0d527899e6e9e23943d08b4d3c139d4ff141081ded41599345ea3290
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 6
+steps 100
+parameters 0
+boundary 0 9fd3043360306f8ed70785dd2793a6cbcb9813d49993c4728e26090a56b545f7
+boundary 1 2b07b1198cbfeb1083893cecee2f2815c08c0290a5cb36514fff2193009da675
+boundary 2 0acb188adcbdac42246b4a3c9a22f0e6f7004237597dfb2072db48c8dcc443da
+boundary 3 e9f9a5952f28c9202ad77698d81154082a4e86877b941f94e38328ba1d4d1772
+boundary 4 a82c34b3020a1e4a639bcc39f01ff53f5cdf9e9f5f79ed6f2852a251d74fe460
+boundary 5 bd20a6f67fd3c2934d4c3fb6225011e32392b70e24f5bd9e6d8a0f616ddb0a3c
+boundary 6 095aba15fbc4efcb74fc9cb62150f0bf89cb587a1fdbd79942f8759cb58a0b3f
+run 2 wider-source
+image certificates/images/lorenz63-rk4-fp128-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-2.bank 9d34e3f7489c3bfd2ac6ba54ae017b83b90be4b8ae2c3b018bf7e9a13dee102d
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 3
+steps 100
+parameters 0
+boundary 0 8282d52a63d3f57202563d30842df2d8133f6d7bc94058c6d1f2425b87ada52f
+boundary 1 e77691ece6eb959999e1a09eab112b557cbe269c7ee1074982a0025946648d82
+boundary 2 58efb5ae11e7029763f25f3f6460318e48ae7fb9468e619e7fb1d011f2eab8c6
+boundary 3 86905264cdb35c0ddd13585dec4e9db35b947ae7b1525b5e83387ce01199926f
+
+case v2-source-param
+what a source param in a spelling that is not the language's canonical one, rho 28.0 (from lorenz63-rk4-fp64-sourced; refused source-param)
+certificate certificates/v2-controls/v2-source-param.cert 38850c84c5abaf36772f728a0884f71ef749ab90fbf725fd0e82335a6b88fdce
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 2 both
+verdict refused source-param
+states certificates/lorenz63-rk4-fp64-sourced/states
+blocks certificates/lorenz63-rk4-fp64-sourced/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
+runs 3
+run 0 main
+image certificates/images/lorenz63-rk4-fp64-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-0.bank c91cc547b6d5f616fff66d2abd2cbc83d1cfb4bce464d9a6ae79473bd947bf09
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 3
+steps 100
+parameters 1
+parameter members 3
+boundary 0 9fd3043360306f8ed70785dd2793a6cbcb9813d49993c4728e26090a56b545f7
+boundary 1 a422aad97b3b4d3a47f8f47c8eeb4b892af64f45486507af1b98a170ee954619
+boundary 2 4d97b31b231a7e37d5e9b1595ff6363b86a6e807ca5587eeccd0f8365c4f301e
+boundary 3 6bc9ddfabdb2e4b00f118b38ae9a3c6b07c934c15ce77385f768777639801e7c
+run 1 half-step h-slots 3 0 1 2
+image certificates/images/lorenz63-rk4-fp64-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-1.bank a7db2cff0d527899e6e9e23943d08b4d3c139d4ff141081ded41599345ea3290
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 6
+steps 100
+parameters 0
+boundary 0 9fd3043360306f8ed70785dd2793a6cbcb9813d49993c4728e26090a56b545f7
+boundary 1 2b07b1198cbfeb1083893cecee2f2815c08c0290a5cb36514fff2193009da675
+boundary 2 0acb188adcbdac42246b4a3c9a22f0e6f7004237597dfb2072db48c8dcc443da
+boundary 3 e9f9a5952f28c9202ad77698d81154082a4e86877b941f94e38328ba1d4d1772
+boundary 4 a82c34b3020a1e4a639bcc39f01ff53f5cdf9e9f5f79ed6f2852a251d74fe460
+boundary 5 bd20a6f67fd3c2934d4c3fb6225011e32392b70e24f5bd9e6d8a0f616ddb0a3c
+boundary 6 095aba15fbc4efcb74fc9cb62150f0bf89cb587a1fdbd79942f8759cb58a0b3f
+run 2 wider-source
+image certificates/images/lorenz63-rk4-fp128-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-2.bank 9d34e3f7489c3bfd2ac6ba54ae017b83b90be4b8ae2c3b018bf7e9a13dee102d
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 3
+steps 100
+parameters 0
+boundary 0 8282d52a63d3f57202563d30842df2d8133f6d7bc94058c6d1f2425b87ada52f
+boundary 1 e77691ece6eb959999e1a09eab112b557cbe269c7ee1074982a0025946648d82
+boundary 2 58efb5ae11e7029763f25f3f6460318e48ae7fb9468e619e7fb1d011f2eab8c6
+boundary 3 86905264cdb35c0ddd13585dec4e9db35b947ae7b1525b5e83387ce01199926f
+
+case v2-source-shape
+what the Lorenz-63 run naming markstep's source, whose lane is two slots to its three (from lorenz63-rk4-fp64-sourced; refused source-shape)
+certificate certificates/v2-controls/v2-source-shape.cert 1803a1a8cadcb326f5efe8884bf3da8b7dcaa551b4dd5106c9cd0e713a1186c0
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 0 none
+verdict refused source-shape
+states certificates/v2-controls/v2-source-shape/states
+blocks certificates/lorenz63-rk4-fp64-sourced/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
+runs 1
+run 0 main
+image certificates/images/lorenz63-rk4-fp64-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-0.bank c91cc547b6d5f616fff66d2abd2cbc83d1cfb4bce464d9a6ae79473bd947bf09
+source certificates/programs/markstep-fp64.cftl 78607fe6de418566894321bf255f48d7cd2f6caed4af4d5623bb9a6252548de0
+segments 3
+steps 100
+parameters 1
+parameter members 3
+boundary 0 9fd3043360306f8ed70785dd2793a6cbcb9813d49993c4728e26090a56b545f7
+boundary 1 a422aad97b3b4d3a47f8f47c8eeb4b892af64f45486507af1b98a170ee954619
+boundary 2 4d97b31b231a7e37d5e9b1595ff6363b86a6e807ca5587eeccd0f8365c4f301e
+boundary 3 6bc9ddfabdb2e4b00f118b38ae9a3c6b07c934c15ce77385f768777639801e7c
+
+case v2-source-image
+what the steps restated: the recompile's image is not the run's (from lorenz63-rk4-fp64-sourced; refused source-image)
+certificate certificates/v2-controls/v2-source-image.cert 9586a0fb855b0a809ce97e433143c04ddbfab1eab4cd0b81426c26cad068b893
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 2 both
+verdict refused source-image
+states certificates/lorenz63-rk4-fp64-sourced/states
+blocks certificates/lorenz63-rk4-fp64-sourced/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
+runs 3
+run 0 main
+image certificates/images/lorenz63-rk4-fp64-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-0.bank c91cc547b6d5f616fff66d2abd2cbc83d1cfb4bce464d9a6ae79473bd947bf09
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 3
+steps 100
+parameters 1
+parameter members 3
+boundary 0 9fd3043360306f8ed70785dd2793a6cbcb9813d49993c4728e26090a56b545f7
+boundary 1 a422aad97b3b4d3a47f8f47c8eeb4b892af64f45486507af1b98a170ee954619
+boundary 2 4d97b31b231a7e37d5e9b1595ff6363b86a6e807ca5587eeccd0f8365c4f301e
+boundary 3 6bc9ddfabdb2e4b00f118b38ae9a3c6b07c934c15ce77385f768777639801e7c
+run 1 half-step h-slots 3 0 1 2
+image certificates/images/lorenz63-rk4-fp64-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-1.bank a7db2cff0d527899e6e9e23943d08b4d3c139d4ff141081ded41599345ea3290
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 6
+steps 100
+parameters 0
+boundary 0 9fd3043360306f8ed70785dd2793a6cbcb9813d49993c4728e26090a56b545f7
+boundary 1 2b07b1198cbfeb1083893cecee2f2815c08c0290a5cb36514fff2193009da675
+boundary 2 0acb188adcbdac42246b4a3c9a22f0e6f7004237597dfb2072db48c8dcc443da
+boundary 3 e9f9a5952f28c9202ad77698d81154082a4e86877b941f94e38328ba1d4d1772
+boundary 4 a82c34b3020a1e4a639bcc39f01ff53f5cdf9e9f5f79ed6f2852a251d74fe460
+boundary 5 bd20a6f67fd3c2934d4c3fb6225011e32392b70e24f5bd9e6d8a0f616ddb0a3c
+boundary 6 095aba15fbc4efcb74fc9cb62150f0bf89cb587a1fdbd79942f8759cb58a0b3f
+run 2 wider-source
+image certificates/images/lorenz63-rk4-fp128-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-2.bank 9d34e3f7489c3bfd2ac6ba54ae017b83b90be4b8ae2c3b018bf7e9a13dee102d
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 3
+steps 100
+parameters 0
+boundary 0 8282d52a63d3f57202563d30842df2d8133f6d7bc94058c6d1f2425b87ada52f
+boundary 1 e77691ece6eb959999e1a09eab112b557cbe269c7ee1074982a0025946648d82
+boundary 2 58efb5ae11e7029763f25f3f6460318e48ae7fb9468e619e7fb1d011f2eab8c6
+boundary 3 86905264cdb35c0ddd13585dec4e9db35b947ae7b1525b5e83387ce01199926f
+
+case v2-compiler-differs
+what another compiler named, whose recompile differs: the auditor's own limit (from lorenz63-rk4-fp64-sourced; refused compiler-differs)
+certificate certificates/v2-controls/v2-compiler-differs.cert fa47d616d14b82da78fac7bcb89ad47a3ea5815ab11ffb62d3e476ec73e23d4f
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 2 both
+verdict refused compiler-differs
+states certificates/lorenz63-rk4-fp64-sourced/states
+blocks certificates/lorenz63-rk4-fp64-sourced/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
+runs 3
+run 0 main
+image certificates/images/lorenz63-rk4-fp64-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-0.bank c91cc547b6d5f616fff66d2abd2cbc83d1cfb4bce464d9a6ae79473bd947bf09
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 3
+steps 100
+parameters 1
+parameter members 3
+boundary 0 9fd3043360306f8ed70785dd2793a6cbcb9813d49993c4728e26090a56b545f7
+boundary 1 a422aad97b3b4d3a47f8f47c8eeb4b892af64f45486507af1b98a170ee954619
+boundary 2 4d97b31b231a7e37d5e9b1595ff6363b86a6e807ca5587eeccd0f8365c4f301e
+boundary 3 6bc9ddfabdb2e4b00f118b38ae9a3c6b07c934c15ce77385f768777639801e7c
+run 1 half-step h-slots 3 0 1 2
+image certificates/images/lorenz63-rk4-fp64-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-1.bank a7db2cff0d527899e6e9e23943d08b4d3c139d4ff141081ded41599345ea3290
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 6
+steps 100
+parameters 0
+boundary 0 9fd3043360306f8ed70785dd2793a6cbcb9813d49993c4728e26090a56b545f7
+boundary 1 2b07b1198cbfeb1083893cecee2f2815c08c0290a5cb36514fff2193009da675
+boundary 2 0acb188adcbdac42246b4a3c9a22f0e6f7004237597dfb2072db48c8dcc443da
+boundary 3 e9f9a5952f28c9202ad77698d81154082a4e86877b941f94e38328ba1d4d1772
+boundary 4 a82c34b3020a1e4a639bcc39f01ff53f5cdf9e9f5f79ed6f2852a251d74fe460
+boundary 5 bd20a6f67fd3c2934d4c3fb6225011e32392b70e24f5bd9e6d8a0f616ddb0a3c
+boundary 6 095aba15fbc4efcb74fc9cb62150f0bf89cb587a1fdbd79942f8759cb58a0b3f
+run 2 wider-source
+image certificates/images/lorenz63-rk4-fp128-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-2.bank 9d34e3f7489c3bfd2ac6ba54ae017b83b90be4b8ae2c3b018bf7e9a13dee102d
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 3
+steps 100
+parameters 0
+boundary 0 8282d52a63d3f57202563d30842df2d8133f6d7bc94058c6d1f2425b87ada52f
+boundary 1 e77691ece6eb959999e1a09eab112b557cbe269c7ee1074982a0025946648d82
+boundary 2 58efb5ae11e7029763f25f3f6460318e48ae7fb9468e619e7fb1d011f2eab8c6
+boundary 3 86905264cdb35c0ddd13585dec4e9db35b947ae7b1525b5e83387ce01199926f
+
+case v2-source-missing
+what the replay's source not handed (from markstep-fp64; refused source-missing)
+certificate certificates/v2-controls/v2-source-missing.cert dd7e4bbeb55ad244d5de1d73fa9463608f3ae2be52f10d95b125123a4435ffaa
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 1 both
+verdict refused source-missing
+states certificates/markstep-fp64/states
+blocks certificates/markstep-fp64/states
+signature none
+keyring none
+superseded none
+define 0:all
+regenerate no
+runs 1
+run 0 main
+image certificates/images/markstep-fp64.cftp
+bank certificates/markstep-fp64/run-0.bank f8c9845e50830dc5e2141f4c13ee8cf1c19638c28f2c6153d8cc4b0c3c052004
+source none
+segments 3
+steps 4
+parameters 0
+boundary 0 055fe20e4e25c16675e4e70bbb64d0ebf438f3054b1e53fb96a023ce89fbcead
+boundary 1 1cde7d9d40c5c3911747aaf5a627139e5bfebaabd65908b03bcfce37347fc9c9
+boundary 2 535a3d3522722baf17ce30891a9889adf0092f1d9b475a7fca5efda58f5270a5
+boundary 3 aec47571f4b49b6620523504bdb9ad35c5538600651ca92013c9a6c37dbe8172
+block 0 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 1 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 2 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8a8797cc6f045fc700359756a6986c19d987ec667e3c57b6a3da0706
+
+case v2-lane-flags-shape
+what a block handed one byte short (from flagstep-fp64-lanes; refused lane-flags-shape)
+certificate certificates/v2-controls/v2-lane-flags-shape.cert db83f4a63cc96159a475f84c9f13e4f208842ccaa68e310d1b5d8d95eda4a3ab
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 1 both
+verdict refused lane-flags-shape
+states certificates/flagstep-fp64-lanes/states
+blocks certificates/v2-controls/v2-lane-flags-shape/blocks
+signature none
+keyring none
+superseded none
+define none
+regenerate no
+runs 1
+run 0 main
+image certificates/images/flagstep-fp64.cftp
+bank none
+source none
+segments 5
+steps 1
+parameters 0
+boundary 0 119f276fc34895868cfe041d0042b8b03ae1443e341c7c9ea5428881ffc143f0
+boundary 1 e099b72218536c0e5d5e4241b3a368e1491bfcb77464a253278edd851cc1954d
+boundary 2 a90108c464eb9e364dc749a60dce039e142d65cabe94fedd38b14ed294a25b75
+boundary 3 c102635a3edff4f7fb183c3b0c2a4c5347843c8cf78359f5f5022d2f88d12901
+boundary 4 45997409dc6c3522148c105e6b2eba3e96a4fe5555c5398563b406e4749811ad
+boundary 5 01a2a470d594bfe459452ee6a248a790cdb4edae2d40a38e912c129628e69b8c
+block 0 fc6b8f6e08e4cd7e6fa1a1115bbdf4c850b52dab72dbe3879a83a45b6133d608
+block 1 a1186de365d1eea598275c82b5764772590555bbf1f844c1757e62c962bea20c
+block 2 e2781f11474e87de73e18303c660a5b36edf90debe942d3ce9fc0a0cb6d2b96b
+block 3 bfa8daf1ef28269ed46a6b00abd11f4caa9c9275f5cef61a91f3129e1991f0b1
+block 4 3f7c54571faee024e3fd68603c5c95f6a4c8ef73a398840b974f3f57737a116f
+
+case v2-lane-flags-hash
+what a block handed with one byte changed (from flagstep-fp64-lanes; refused lane-flags-hash)
+certificate certificates/v2-controls/v2-lane-flags-hash.cert db83f4a63cc96159a475f84c9f13e4f208842ccaa68e310d1b5d8d95eda4a3ab
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 1 both
+verdict refused lane-flags-hash
+states certificates/flagstep-fp64-lanes/states
+blocks certificates/v2-controls/v2-lane-flags-hash/blocks
+signature none
+keyring none
+superseded none
+define none
+regenerate no
+runs 1
+run 0 main
+image certificates/images/flagstep-fp64.cftp
+bank none
+source none
+segments 5
+steps 1
+parameters 0
+boundary 0 119f276fc34895868cfe041d0042b8b03ae1443e341c7c9ea5428881ffc143f0
+boundary 1 e099b72218536c0e5d5e4241b3a368e1491bfcb77464a253278edd851cc1954d
+boundary 2 a90108c464eb9e364dc749a60dce039e142d65cabe94fedd38b14ed294a25b75
+boundary 3 c102635a3edff4f7fb183c3b0c2a4c5347843c8cf78359f5f5022d2f88d12901
+boundary 4 45997409dc6c3522148c105e6b2eba3e96a4fe5555c5398563b406e4749811ad
+boundary 5 01a2a470d594bfe459452ee6a248a790cdb4edae2d40a38e912c129628e69b8c
+block 0 9cf0116c624f235a172713fcc6b1cf8feeb0f1dfba17e7bc94c05265e2447012
+block 1 a1186de365d1eea598275c82b5764772590555bbf1f844c1757e62c962bea20c
+block 2 e2781f11474e87de73e18303c660a5b36edf90debe942d3ce9fc0a0cb6d2b96b
+block 3 bfa8daf1ef28269ed46a6b00abd11f4caa9c9275f5cef61a91f3129e1991f0b1
+block 4 3f7c54571faee024e3fd68603c5c95f6a4c8ef73a398840b974f3f57737a116f
+
+case v2-lane-flags-identity
+what a block whose OR lacks the flag word's inexact, certified and handed (from flagstep-fp64-lanes; refused lane-flags-identity)
+certificate certificates/v2-controls/v2-lane-flags-identity.cert 643347c9fd490c9cd0f45fe9c3dc1bc5ea192b73636b3237a62a9375b0374c3c
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 1 both
+verdict refused lane-flags-identity
+states certificates/flagstep-fp64-lanes/states
+blocks certificates/v2-controls/v2-lane-flags-identity/blocks
+signature none
+keyring none
+superseded none
+define none
+regenerate no
+runs 1
+run 0 main
+image certificates/images/flagstep-fp64.cftp
+bank none
+source none
+segments 5
+steps 1
+parameters 0
+boundary 0 119f276fc34895868cfe041d0042b8b03ae1443e341c7c9ea5428881ffc143f0
+boundary 1 e099b72218536c0e5d5e4241b3a368e1491bfcb77464a253278edd851cc1954d
+boundary 2 a90108c464eb9e364dc749a60dce039e142d65cabe94fedd38b14ed294a25b75
+boundary 3 c102635a3edff4f7fb183c3b0c2a4c5347843c8cf78359f5f5022d2f88d12901
+boundary 4 45997409dc6c3522148c105e6b2eba3e96a4fe5555c5398563b406e4749811ad
+boundary 5 01a2a470d594bfe459452ee6a248a790cdb4edae2d40a38e912c129628e69b8c
+block 0 9cf0116c624f235a172713fcc6b1cf8feeb0f1dfba17e7bc94c05265e2447012
+block 1 a1186de365d1eea598275c82b5764772590555bbf1f844c1757e62c962bea20c
+block 2 e2781f11474e87de73e18303c660a5b36edf90debe942d3ce9fc0a0cb6d2b96b
+block 3 bfa8daf1ef28269ed46a6b00abd11f4caa9c9275f5cef61a91f3129e1991f0b1
+block 4 3f7c54571faee024e3fd68603c5c95f6a4c8ef73a398840b974f3f57737a116f
+
+case v2-initial-state
+what the generator's tag changed: it does not regenerate the initial state (from signed-fp64; refused initial-state)
+certificate certificates/v2-controls/v2-initial-state.cert e9c0129b95aaf893b78ec78f47fc1c53e6d5d4a9019f85f27996390060306a8f
+version 2
+mode keyed
+salt certificates/example.salt 630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd
+depth 256
+backends software
+writers golden
+accuracy 0 none
+verdict refused initial-state
+states certificates/signed-fp64/states
+blocks certificates/signed-fp64/states
+signature none
+keyring certificates/signed-fp64/keyring 409b28c6a1ceb695f53b0823cd3d5fc53ff73d1a6ad599c1a7814d2fa1d2a91c
+superseded flagstep-fp64-lanes
+define none
+regenerate yes
+runs 1
+run 0 main
+image certificates/images/flagstep-fp64.cftp
+bank none
+source none
+segments 3
+steps 1
+parameters 0
+boundary 0 eed2d888dd2be61bf876e091a1886a83c7ef5bd732f8d32b66d46a5b9d65fdd9
+boundary 1 ac87ce952ef5e87e1e47c1c1c0caebb1c7ef254217eec3f04a8e32ebb1255187
+boundary 2 9eb833aad529813d8927f1530d32f352e743144698eef4dcefb58730bca16817
+boundary 3 e6cdc7fb82a68a6703406eb0213ae3e1a58ef368d12990ba1fd324a73b860945
+block 0 3abd807250d1b53741c345896f2d79faf6e7dcdb75860e98a2f84e38e874c236
+block 1 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
+block 2 d53315bea08cec50d2591fcaf3b32dc5d289cdc6c16b7e8bed8c8e3f7ceaa34e
+
+case v2-aux-source
+what the wider-source run compiled for another target (from lorenz63-rk4-fp64-sourced; refused aux-source)
+certificate certificates/v2-controls/v2-aux-source.cert a70c74e41a71d10c00533988634298c457eab6c032813af63302501828699135
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 2 both
+verdict refused aux-source
+states certificates/lorenz63-rk4-fp64-sourced/states
+blocks certificates/lorenz63-rk4-fp64-sourced/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
+runs 3
+run 0 main
+image certificates/images/lorenz63-rk4-fp64-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-0.bank c91cc547b6d5f616fff66d2abd2cbc83d1cfb4bce464d9a6ae79473bd947bf09
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 3
+steps 100
+parameters 1
+parameter members 3
+boundary 0 9fd3043360306f8ed70785dd2793a6cbcb9813d49993c4728e26090a56b545f7
+boundary 1 a422aad97b3b4d3a47f8f47c8eeb4b892af64f45486507af1b98a170ee954619
+boundary 2 4d97b31b231a7e37d5e9b1595ff6363b86a6e807ca5587eeccd0f8365c4f301e
+boundary 3 6bc9ddfabdb2e4b00f118b38ae9a3c6b07c934c15ce77385f768777639801e7c
+run 1 half-step h-slots 3 0 1 2
+image certificates/images/lorenz63-rk4-fp64-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-1.bank a7db2cff0d527899e6e9e23943d08b4d3c139d4ff141081ded41599345ea3290
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 6
+steps 100
+parameters 0
+boundary 0 9fd3043360306f8ed70785dd2793a6cbcb9813d49993c4728e26090a56b545f7
+boundary 1 2b07b1198cbfeb1083893cecee2f2815c08c0290a5cb36514fff2193009da675
+boundary 2 0acb188adcbdac42246b4a3c9a22f0e6f7004237597dfb2072db48c8dcc443da
+boundary 3 e9f9a5952f28c9202ad77698d81154082a4e86877b941f94e38328ba1d4d1772
+boundary 4 a82c34b3020a1e4a639bcc39f01ff53f5cdf9e9f5f79ed6f2852a251d74fe460
+boundary 5 bd20a6f67fd3c2934d4c3fb6225011e32392b70e24f5bd9e6d8a0f616ddb0a3c
+boundary 6 095aba15fbc4efcb74fc9cb62150f0bf89cb587a1fdbd79942f8759cb58a0b3f
+run 2 wider-source
+image certificates/images/lorenz63-rk4-fp128-cftc.cftp
+bank certificates/lorenz63-rk4-fp64-sourced/run-2.bank 9d34e3f7489c3bfd2ac6ba54ae017b83b90be4b8ae2c3b018bf7e9a13dee102d
+source programs/systems/lorenz63-rk4-fp64.cftl dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
+segments 3
+steps 100
+parameters 0
+boundary 0 8282d52a63d3f57202563d30842df2d8133f6d7bc94058c6d1f2425b87ada52f
+boundary 1 e77691ece6eb959999e1a09eab112b557cbe269c7ee1074982a0025946648d82
+boundary 2 58efb5ae11e7029763f25f3f6460318e48ae7fb9468e619e7fb1d011f2eab8c6
+boundary 3 86905264cdb35c0ddd13585dec4e9db35b947ae7b1525b5e83387ce01199926f
+
+case v2-segment-lane-flags
+what segment 0's block certified as another (one lane's inexact cleared), the blocks not handed (from flagstep-fp64-lanes; refused segment-lane-flags)
+certificate certificates/v2-controls/v2-segment-lane-flags.cert 643347c9fd490c9cd0f45fe9c3dc1bc5ea192b73636b3237a62a9375b0374c3c
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 1 both
+verdict refused segment-lane-flags
+states certificates/flagstep-fp64-lanes/states
+blocks certificates/flagstep-fp64-lanes/states
+signature none
+keyring none
+superseded none
+define none
+regenerate no
+runs 1
+run 0 main
+image certificates/images/flagstep-fp64.cftp
+bank none
+source none
+segments 5
+steps 1
+parameters 0
+boundary 0 119f276fc34895868cfe041d0042b8b03ae1443e341c7c9ea5428881ffc143f0
+boundary 1 e099b72218536c0e5d5e4241b3a368e1491bfcb77464a253278edd851cc1954d
+boundary 2 a90108c464eb9e364dc749a60dce039e142d65cabe94fedd38b14ed294a25b75
+boundary 3 c102635a3edff4f7fb183c3b0c2a4c5347843c8cf78359f5f5022d2f88d12901
+boundary 4 45997409dc6c3522148c105e6b2eba3e96a4fe5555c5398563b406e4749811ad
+boundary 5 01a2a470d594bfe459452ee6a248a790cdb4edae2d40a38e912c129628e69b8c
+
+case v2-replay-missing
+what the replay line and its method dropped: the re-run still marks (from markstep-fp64; refused replay-missing)
+certificate certificates/v2-controls/v2-replay-missing.cert 4e0b88e017a7c9fe119fa9142e59d94c0865d2186c6ab6f8a621e8fe95042762
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 1 both
+verdict refused replay-missing
+states certificates/markstep-fp64/states
+blocks certificates/markstep-fp64/states
+signature none
+keyring none
+superseded none
+define 0:all
+regenerate no
+runs 1
+run 0 main
+image certificates/images/markstep-fp64.cftp
+bank certificates/markstep-fp64/run-0.bank f8c9845e50830dc5e2141f4c13ee8cf1c19638c28f2c6153d8cc4b0c3c052004
+source certificates/programs/markstep-fp64.cftl 78607fe6de418566894321bf255f48d7cd2f6caed4af4d5623bb9a6252548de0
+segments 3
+steps 4
+parameters 0
+boundary 0 055fe20e4e25c16675e4e70bbb64d0ebf438f3054b1e53fb96a023ce89fbcead
+boundary 1 1cde7d9d40c5c3911747aaf5a627139e5bfebaabd65908b03bcfce37347fc9c9
+boundary 2 535a3d3522722baf17ce30891a9889adf0092f1d9b475a7fca5efda58f5270a5
+boundary 3 aec47571f4b49b6620523504bdb9ad35c5538600651ca92013c9a6c37dbe8172
+block 0 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 1 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 2 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8a8797cc6f045fc700359756a6986c19d987ec667e3c57b6a3da0706
+
+case v2-replay-unmarked
+what a replay line for segment 0, which marks no lane (from markstep-fp64; refused replay-unmarked)
+certificate certificates/v2-controls/v2-replay-unmarked.cert 12a68ef446d926eb8f354a8341f810e12360322f8f135bf0dfbf7ff0c562438e
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 1 both
+verdict refused replay-unmarked
+states certificates/markstep-fp64/states
+blocks certificates/markstep-fp64/states
+signature none
+keyring none
+superseded none
+define 0:all
+regenerate no
+runs 1
+run 0 main
+image certificates/images/markstep-fp64.cftp
+bank certificates/markstep-fp64/run-0.bank f8c9845e50830dc5e2141f4c13ee8cf1c19638c28f2c6153d8cc4b0c3c052004
+source certificates/programs/markstep-fp64.cftl 78607fe6de418566894321bf255f48d7cd2f6caed4af4d5623bb9a6252548de0
+segments 3
+steps 4
+parameters 0
+boundary 0 055fe20e4e25c16675e4e70bbb64d0ebf438f3054b1e53fb96a023ce89fbcead
+boundary 1 1cde7d9d40c5c3911747aaf5a627139e5bfebaabd65908b03bcfce37347fc9c9
+boundary 2 535a3d3522722baf17ce30891a9889adf0092f1d9b475a7fca5efda58f5270a5
+boundary 3 aec47571f4b49b6620523504bdb9ad35c5538600651ca92013c9a6c37dbe8172
+block 0 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 1 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 2 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8a8797cc6f045fc700359756a6986c19d987ec667e3c57b6a3da0706
+
+case v2-replay-raw
+what raw-end the hash of the corrected end (from markstep-fp64; refused replay-raw)
+certificate certificates/v2-controls/v2-replay-raw.cert 237ed158799de362dc826f82210a08c9bb538e0e90372f9e7e4110ab49e4d2ee
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 1 both
+verdict refused replay-raw
+states certificates/markstep-fp64/states
+blocks certificates/markstep-fp64/states
+signature none
+keyring none
+superseded none
+define 0:all
+regenerate no
+runs 1
+run 0 main
+image certificates/images/markstep-fp64.cftp
+bank certificates/markstep-fp64/run-0.bank f8c9845e50830dc5e2141f4c13ee8cf1c19638c28f2c6153d8cc4b0c3c052004
+source certificates/programs/markstep-fp64.cftl 78607fe6de418566894321bf255f48d7cd2f6caed4af4d5623bb9a6252548de0
+segments 3
+steps 4
+parameters 0
+boundary 0 055fe20e4e25c16675e4e70bbb64d0ebf438f3054b1e53fb96a023ce89fbcead
+boundary 1 1cde7d9d40c5c3911747aaf5a627139e5bfebaabd65908b03bcfce37347fc9c9
+boundary 2 535a3d3522722baf17ce30891a9889adf0092f1d9b475a7fca5efda58f5270a5
+boundary 3 aec47571f4b49b6620523504bdb9ad35c5538600651ca92013c9a6c37dbe8172
+block 0 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 1 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 2 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8a8797cc6f045fc700359756a6986c19d987ec667e3c57b6a3da0706
+
+case v2-replay-changed
+what changed one more than the replay changes (from markstep-fp64; refused replay-changed)
+certificate certificates/v2-controls/v2-replay-changed.cert 67b8fe53f0a2fae15373227816216fd7a75241ba05d9f2ac886f10744b34a91d
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 1 both
+verdict refused replay-changed
+states certificates/markstep-fp64/states
+blocks certificates/markstep-fp64/states
+signature none
+keyring none
+superseded none
+define 0:all
+regenerate no
+runs 1
+run 0 main
+image certificates/images/markstep-fp64.cftp
+bank certificates/markstep-fp64/run-0.bank f8c9845e50830dc5e2141f4c13ee8cf1c19638c28f2c6153d8cc4b0c3c052004
+source certificates/programs/markstep-fp64.cftl 78607fe6de418566894321bf255f48d7cd2f6caed4af4d5623bb9a6252548de0
+segments 3
+steps 4
+parameters 0
+boundary 0 055fe20e4e25c16675e4e70bbb64d0ebf438f3054b1e53fb96a023ce89fbcead
+boundary 1 1cde7d9d40c5c3911747aaf5a627139e5bfebaabd65908b03bcfce37347fc9c9
+boundary 2 535a3d3522722baf17ce30891a9889adf0092f1d9b475a7fca5efda58f5270a5
+boundary 3 aec47571f4b49b6620523504bdb9ad35c5538600651ca92013c9a6c37dbe8172
+block 0 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 1 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 2 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8a8797cc6f045fc700359756a6986c19d987ec667e3c57b6a3da0706
+
+case v2-definition-differs
+what changed one more, under a language the auditor's does not cover (2) (from markstep-fp64; refused definition-differs)
+certificate certificates/v2-controls/v2-definition-differs.cert 8859469844b28b8f1b5914acc78f4eba81a335cf3f6f2bd066d37f8469a7c55b
+version 2
+mode open
+depth 256
+backends software
+writers golden
+accuracy 1 both
+verdict refused definition-differs
+states certificates/markstep-fp64/states
+blocks certificates/markstep-fp64/states
+signature none
+keyring none
+superseded none
+define 0:all
+regenerate no
+runs 1
+run 0 main
+image certificates/images/markstep-fp64.cftp
+bank certificates/markstep-fp64/run-0.bank f8c9845e50830dc5e2141f4c13ee8cf1c19638c28f2c6153d8cc4b0c3c052004
+source certificates/programs/markstep-fp64.cftl 78607fe6de418566894321bf255f48d7cd2f6caed4af4d5623bb9a6252548de0
+segments 3
+steps 4
+parameters 0
+boundary 0 055fe20e4e25c16675e4e70bbb64d0ebf438f3054b1e53fb96a023ce89fbcead
+boundary 1 1cde7d9d40c5c3911747aaf5a627139e5bfebaabd65908b03bcfce37347fc9c9
+boundary 2 535a3d3522722baf17ce30891a9889adf0092f1d9b475a7fca5efda58f5270a5
+boundary 3 aec47571f4b49b6620523504bdb9ad35c5538600651ca92013c9a6c37dbe8172
+block 0 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 1 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+block 2 ab5ab0fedc83e5a1a1871c427eccbcd3cf0fc1bb74a82a552adfd9b4e57f391b
+raw 1 a5fd77453b1490370b4b61408509a445862ab35166f194499d9eac99fa24b3cd 609f5d0e8a8797cc6f045fc700359756a6986c19d987ec667e3c57b6a3da0706

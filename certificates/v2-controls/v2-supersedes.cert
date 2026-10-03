@@ -1,0 +1,54 @@
+cft-certificate 2
+mode keyed
+salt-commitment 14599c5e32d506724573517b8c32df264cbc4e6b6ad7198cce440fe26d84e1ff
+build-id unknown
+backend software
+device-xclbin none
+device-version none
+device-caps none
+device-tiles 1
+profile 2
+language none
+device-platform xilinx_u50_gen3x16_xdma_5_202210_1
+device-xrt 2.19.194
+device-clock 135000000
+device-serial SN%200001%20(a%20test)
+writer golden commit=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa tracked=clean untracked=none
+writer-runtime python-3.12.9,mpmath-1.3.0
+compiler-build commit=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb tracked=modified untracked=present
+replay-methods 0
+certificate-id cert%200001%20/%20%C5%81%C3%B3d%C5%BA
+issuer Logan%20W.
+issuer-key 29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7
+host-os linux-6.8.0
+host-arch x86_64
+started 2026-10-02T12:00:00Z
+finished 2026-10-02T12:00:05Z
+issued 2026-10-02T12:00:06Z
+supersedes e4d611584a3ce53fa9d52dd268dbc7fcfc3821bb78ed8374053a69abb0bba530
+environment 2
+env CFT_TIMEOUT_MS 60000
+env XCL_EMULATION_MODE hw_emu
+initial generator shake-box signed%20case 2 4 -1 1
+runs 1
+run 0 main
+program-format fp64
+program-image e3f822d4acea1d12e19c8fae19569e5ea7747acea6b44c8e9fb36e42226efb14
+program-digest e3f822d4acea1d12e19c8fae19569e5ea7747acea6b44c8e9fb36e42226efb14
+source none
+lanes 2
+steps 1
+stream-a 87a9cc070651e023fab7e78a1b231a255792e0f080cc65ae37016a13aecd2d6f
+stream-b a1ed0921019e6d04aca20ab6707b45e13d4216d0e4279258d1984ba77f437bd4
+stream-c e283c4c0dd49286dfb605e205822aa2d90d991293a49ea51b13b7abdcb9336a0
+parameters 0
+lane-flags yes
+segments 3
+segment 0 start 0835835ca743eb04aa405ade9779b83bbdbeedaa6479f67358892adf8a89ce9d end 829aa99b575f5c4c95eaa89b242b2b36c6167c1ef0f988dd2c03f041e69f49b5 flags 20 status 48 lanes 5bb0da4b747bc5303ba46b0d96b6b5d8eccffdc09cd24316dad2934892f7f12a
+segment 1 start 829aa99b575f5c4c95eaa89b242b2b36c6167c1ef0f988dd2c03f041e69f49b5 end 2e6e210bbb7370d6a7a62c4e8f0ca2d89cd1c2060dbddbd3f6d7f67ce73af438 flags 16 status 48 lanes 14ba5b835ffaf03e4cf3eeb5fb921146955b8e0eaa53e12d79435cad92137ea4
+segment 2 start 2e6e210bbb7370d6a7a62c4e8f0ca2d89cd1c2060dbddbd3f6d7f67ce73af438 end db7cffaff0db8b28dd7e67909601ed05188955cfc327620f6ddb4173569b80e6 flags 16 status 48 lanes 14ba5b835ffaf03e4cf3eeb5fb921146955b8e0eaa53e12d79435cad92137ea4
+replays 0
+output db7cffaff0db8b28dd7e67909601ed05188955cfc327620f6ddb4173569b80e6
+accuracy 0
+end
+hash f0406ef65cd5407b8a0da111a18de11795a5a33233dded1495ba180b9624513a

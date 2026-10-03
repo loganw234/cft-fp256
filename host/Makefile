@@ -1256,7 +1256,11 @@ clean-segrun:
 #                       committed certificate defines them (the plan's
 #                       step 5); every boundary file; the golden audit's
 #                       expected verdict, in full and sampled; and the
-#                       page's example.
+#                       page's example. Since 2026-10-02 version 2's
+#                       cases too, made again by the golden writer
+#                       (cft-segrun writes version 1 until version 2's
+#                       C half), and thirty controls, each refused by
+#                       its name.
 #
 # segruntest holds the tool and the golden writer to each other, so a
 # change that moves both at once passes it; this holds both to bytes

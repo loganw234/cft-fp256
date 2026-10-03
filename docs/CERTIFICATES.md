@@ -38,7 +38,8 @@ Where version 1 stands (2026-09-30; version 2's own is under "Version
   an entry's value with one code, `host/tools/cert_exact.h`;
 - the golden certificates, twelve programs and their certificates in
   `certificates/`, hold both writers to committed bytes (see "Golden
-  certificates");
+  certificates"), and version 2's cases beside them hold the golden
+  writer and auditor until version 2's C half;
 - `cft-orbits` certifies its own runs on the Newton route, each sample
   interval a segment of one image, with its angular momentum's drift as
   an exact entry where asked (2026-09-30; [ORBITS.md](ORBITS.md),
@@ -2449,7 +2450,7 @@ to an encoding. A committed certificate does not move. Every such change
 either keeps the corpus's bytes, or changes them in a commit that says
 so, made by `python certificates/corpus.py make`.
 
-**The cases.** There are twelve, each small: 2 to 4 lanes, and 2 to 8
+**The cases.** Version 1 has twelve, each small: 2 to 4 lanes, and 2 to 8
 segments a run. Each holds something no other does:
 - `lorenz63-rk4-fp64`, `lorenz96-rk4-fp64` and `henonheiles-lf-fp64`: the
   three ODE programs at fp64, open. Each has a half-step run and a wider
@@ -2508,10 +2509,72 @@ segments a run. Each holds something no other does:
   the main run does not hold, so its expected verdict is the refusal
   `aux-start`: one committed negative for every auditor.
 
-The corpus's data is about 153 KB: 170 files and 152,611 bytes besides
-corpus.py (152,617 until step 5 made the manifest's three `golden`
-words `both`, and 145,061 before the fixes round's cases, both
-2026-09-30).
+**Version 2's cases** (2026-10-02) are the golden writer's, since
+cft-segrun writes version 1 until version 2's C half. Seven are
+certificates a writer makes. The manifest marks each `writers both`: a C
+writer must reproduce it from the C half on.
+- `markstep-fp64`: the replay case, and this page's version-2 example,
+  byte for byte. markstep's image computes its source's map, and beside it
+  a routine's own test, run quiet, which marks lanes 0 and 1 in segment 1
+  and writes lane 0's last bit wrong. The golden writer replays both
+  lanes by the definition (`replay 1 marked 2 changed 1`). Its audit is
+  handed the source and also re-runs every segment by the source's
+  interpreter (`define 0:all`).
+- `lorenz63-rk4-fp64-sourced`: Lorenz-63 compiled by cftc for `sw` from
+  `programs/systems/lorenz63-rk4-fp64.cftl`, 3 lanes. It has a main run, a
+  half-step run on the compile's half bank and h-slots, and a
+  wider-source run: the same source compiled at fp128. Its estimates are
+  `wider-source`, enclosed in fp64, and `step-halving`, exact. Its lanes
+  are `lorenz63-rk4-fp64`'s, and the two wider estimates differ, since
+  the wider-source run's constants are the source's rounded at fp128 and
+  the wider run's are the fp64 bank's widened: over the lanes 2.546e-14
+  and 2.600e-14, on lane 0 2.7e-15 and 1.8e-15 (measured 2026-10-02).
+  The step-halving value is version 1's case's, bit for bit. Its audit
+  recompiles every run's image.
+- `flagstep-fp64-lanes`: flagstep with each segment's per-lane flags, 3
+  lanes whose counters start at 3, 2 and 1. So in each of the 5 segments
+  the lanes raise different flags, and a block written against another
+  lane, or another segment, fails it. It carries the counter's drift.
+- `signed-fp64`: every header line of version 2 spelled out: texts with
+  spaces and non-ASCII, the device lines, the writer's and compiler's
+  builds, and the environment. It is keyed, its initial state is the
+  `shake-box` generator's, and it supersedes `flagstep-fp64-lanes`. Its
+  `.sig` is the test key's. Its audit is handed the signature, a keyring
+  naming the issuer, and the superseded certificate, and it regenerates
+  the initial state.
+- `lorenz63-rk4-fp64-rebuilt`: a compiled Lorenz-63 run whose initial
+  state is `shake-box`'s. Its full audit is handed the source and no
+  state, recompiles the image, regenerates the initial state and re-runs
+  every segment: the verdict's `rebuilt`.
+- `markstep-fp64-other-b` and `markstep-fp64-loud`: honest certificates of
+  other maps, on a bank whose b is 1/4 and not the source's 1/7, and on
+  one that raises invalid in every lane. Each holds together. The
+  definition re-run of one segment refuses them, `definition-end` and
+  `definition-flags`.
+
+Thirty are controls, under `certificates/v2-controls/`, which the manifest
+marks `writers golden`. Each is a case's certificate with one edit, or its
+case with one of the audit's inputs replaced, and every auditor must
+refuse it by its verdict's name. There is one for each of version 2's
+refusals that a committed case can carry: `marked`, `replay-lane-flags`,
+`replay-source`, `replay-method`, `provenance-order`, `signature-format`,
+`signature`, `signature-key`, `signer`, `supersedes`, `source-digest`,
+`source-refused`, `source-format`, `source-graph`, `source-param`,
+`source-shape`, `source-image`, `compiler-differs`, `source-missing`,
+`lane-flags-shape`, `lane-flags-hash`, `lane-flags-identity`,
+`initial-state`, `aux-source`, `segment-lane-flags`, `replay-missing`,
+`replay-unmarked`, `replay-raw`, `replay-changed` and
+`definition-differs`. With the two definition cases above, that is 32 of
+version 2's 34 new names. `definition-unavailable` and `replay-undecided`
+are refusals of the auditor's or the writer's environment, so their
+controls are test_cert2.py's plants.
+
+The corpus's data is 333 KB: 313 files and 332,988 bytes besides
+corpus.py (2026-10-02). Version 2 added 143 files of 114,954 bytes, the
+controls' 59 of them 88,153, and the manifest grew from 23,839 bytes to
+89,262. Before that it was 170 files and 152,611 bytes (152,617 until
+step 5 made the manifest's three `golden` words `both`, and 145,061
+before the fixes round's cases, both 2026-09-30).
 
 **The files.**
 - `certificates/MANIFEST`: every case, every file it names, and each
@@ -2522,51 +2585,91 @@ words `both`, and 145,061 before the fixes round's cases, both
     also carries;
   - a wider run's from its main run's source, with the `.format` line a
     rung up;
-  - the corpus's own from `certificates/programs/`.
+  - the corpus's own from `certificates/programs/`, markstep's definition
+    `markstep-fp64.cftl` beside its image;
+  - a compiled image (version 2's): cftc's compile of a source at a
+    format, with its steps and target, compiled again.
 - `certificates/<case>/<case>.cert`: the certificate.
 - `certificates/<case>/states/run-<r>-boundary-<b>.bin`: every boundary
   of every run, lane-major, as cft-segrun writes them. Handed whole, the
   directory serves a sampled audit; its boundary-0 files alone serve a
   full audit from the initial states.
+- `certificates/<case>/states/run-<r>-segment-<k>.flags`: in a version-2
+  run with lane flags, each segment's per-lane block, one byte a lane,
+  which the audit is handed. Beside them, `run-<r>-segment-<k>-raw.bin`
+  and `-raw.flags`: each replayed segment's raw end state and raw block,
+  as the machine wrote them before the replay. The certificate hashes
+  both; no audit needs them.
 - `certificates/<case>/run-<r>.bank`: a bank that is no library file, a
-  half-step run's halved bank or a wider run's widened one.
+  half-step run's halved bank or a wider run's widened one, or a version-2
+  run's: a compile's bank, or markstep's.
 - `certificates/example.salt`: the example salt, 00 01 .. 1f. This page
   prints it, so it is a test salt only, and never an owner's.
+- `certificates/signed-fp64/signed-fp64.cert.sig` and `keyring`: the
+  detached signature by the test key, whose secret is 20 21 .. 3f, and
+  the keyring its audit is handed. This page prints the key too (version
+  2's "The detached signature"), so it signs test certificates only.
+- `certificates/v2-controls/<name>.cert`, and `certificates/v2-controls/
+  <name>/`: each control's certificate, and the files it hands that its
+  case does not: a source, a block, a signature, a keyring, or states
+  renumbered with its runs.
 - `certificates/corpus.py`: `make` writes the corpus, and `check` is its
   gate.
-- Git keeps the bytes: a certificate is `-text`, and the states and the
-  salt are `binary` (.gitattributes).
+- Git keeps the bytes: a certificate, a signature file and a keyring are
+  `-text`, and the states, the blocks and the salt are `binary`
+  (.gitattributes).
 
 **The manifest** is text in a certificate's own style: printable ASCII
 and LF, one record a line, its key first, single spaces. It takes two
 liberties: `#` begins a comment line, and blank lines separate cases.
 Paths are from the repository's root.
 - Its first record, after the comment lines at its head, is
-  `cft-golden-corpus 1`. Then comes `source <path> <sha256>`
-  for each of the corpus's own programs, and `image <path> <sha256>
-  library <name>` or `image <path> <sha256> source <path> [format <fmt>]`
-  for each image.
+  `cft-golden-corpus 2` (`1` until version 2's cases, 2026-10-02). Then
+  comes `source <path> <sha256>` for each of the corpus's own programs,
+  and for each image one of `image <path> <sha256> library <name>`,
+  `image <path> <sha256> source <path> [format <fmt>]`, or `image <path>
+  <sha256> compiled <source> format <fmt> steps <K> target <t> params <n>
+  [<name> <literal>] ...`, cftc's compile with its run's params.
 - A block for each case follows:
   - `case`, then `what`, a sentence for a person;
-  - `certificate <path> <sha256>`;
+  - `certificate <path> <sha256>`, and `version 1` or `version 2`, the
+    certificate's format version;
   - `mode`, and for a keyed case `salt <path> <sha256>`;
   - `depth`, and `backends any` or `backends software`;
+  - `writers both` or `writers golden`. `both`: the golden writer and a
+    C writer each make it (version 2's C writer from its C half on).
+    `golden`: a control, made by corpus.py from its case by one edit;
   - `accuracy 0 none`, or `accuracy <A> both` when the case has A
     entries. `both` says both writers make them: the golden writer, and
     cft-segrun handed each entry's definition, each held to the
     committed bytes. Until step 5 the word was `golden`, the golden
     writer's alone;
   - `verdict accepted` or `verdict refused <name>`;
-  - `states <dir>` and `runs <R>`.
+  - `states <dir>` and `blocks <dir>`, where the boundaries and the
+    blocks handed are;
+  - what the audit is handed besides: `signature <path> <sha256>` or
+    `signature none`, the same for `keyring`, `superseded <case>` or
+    `superseded none`, `define none`, `define <run>:all` or `define
+    <run>:<k>,<k>...` for a definition re-run, and `regenerate no` or
+    `regenerate yes`;
+  - `runs <R>`.
+  A version-1 case is handed nothing of version 2's: `writers both`, its
+  blocks its states, and the rest `none` or `no`.
 - Each run follows its case's lines:
   - its `run` line as the certificate spells it;
   - `image <path>`;
   - `bank <path> <sha256>` or `bank none`;
+  - `source <path> <sha256>`, the source its audit is handed, or `source
+    none`;
   - `segments`, `steps`, `parameters` and each `parameter`;
   - a `boundary <b> <sha256>` line for each boundary, the SHA-256 of the
-    state file's bytes, not the certificate's tagged hash.
+    state file's bytes, not the certificate's tagged hash;
+  - in a run with blocks, a `block <k> <sha256>` line for each segment's,
+    and a `raw <k> <sha256> <sha256>` line for each replayed segment's
+    raw end state and raw block.
 - corpus.py's `read_manifest` reads it strictly and names the line of
-  any departure. Another gate may import it.
+  any departure. Another gate may import it: `programs/estimates.py`
+  does, and scores version 1's cases alone.
 
 **As a regression test.** `make -C host corpustest` runs `corpus.py check
 --tool ./cft-segrun`, and verify/run.sh's `programs` stage runs it beside
@@ -2604,10 +2707,43 @@ case it holds:
    its seed printed;
 7. the case named `example` being this page's example certificate.
 
+For a version-2 case it holds 1 and 2 as above, and then:
+3. the golden writer making the committed bytes again: cert2's
+   `run_chain` with each block, every marked lane replayed by the
+   source's definition, and `certify_run`; each accuracy value derived
+   again; and `encode`, handed the committed certificate's header lines
+   and each run's statements of its source (its name, compiler and
+   params);
+4. every boundary, block and raw file of the golden chain against its
+   committed file, and the signature made again by the test key;
+5. a NOTE naming each case marked `writers both`, which a C writer must
+   reproduce from version 2's C half on. It must write every line but
+   its own measurements byte for byte: `build-id`, the four device lines,
+   `writer`, `writer-runtime`, `compiler-build`, the `replay-method`
+   lines, the three times, `host-os`, `host-arch` and the environment.
+   It is handed the header's statements, as the golden writer is:
+   `certificate-id`, `issuer`, `issuer-key`, `supersedes` and `initial`.
+   cft-segrun writes version 1 until then;
+6. the golden audit giving the case its verdict, handed what the manifest
+   says: the sources, the blocks, the signature and keyring, the
+   superseded certificate, the definition re-run and the regeneration.
+   It audits in full from the initial states alone, or from no state
+   where the case regenerates, and for a case a writer makes, sampled
+   from the committed states too;
+7. `markstep-fp64` being this page's version-2 example.
+
+A control is held to its recipe instead of a writer: its certificate is
+its case's with its edit made again, byte for byte, its own files and its
+manifest entry are the recipe's, and its audit refuses it by its
+verdict's name.
+
 It is 156 checks, 21 to 32 s on the Windows desktop, niced. The
 slowest was with the desktop at about 77 % from other work (2026-09-29).
 With the fixes round's cases it was 21 to 23 s (2026-09-30), and with
-the tool making the accuracy cases whole, 22 to 25 s (2026-09-30).
+the tool making the accuracy cases whole, 22 to 25 s (2026-09-30). With
+version 2's cases it is 288 checks, 28 and 32 s on the desktop, niced,
+with it 4 to 10 % busy; without the tool, version 1's twelve remakes skipped by
+name, 239 checks in 27 and 29 s at 2 to 6 % (2026-10-02).
 
 **Changing it.** A change that moves any byte of the corpus fails the
 gate by name: a change to the model, a hash, an encoding, the assembler's
@@ -2618,7 +2754,11 @@ byte for byte, where the one it makes equals it but for `build-id` and
 the hash line, and every boundary file has the committed manifest's
 digest. So a case's bytes, and the commit its `build-id` names, move
 only when what it certifies does (the fixes round, 2026-09-30). `make
---rewrite-all` writes every certificate the tool makes.
+--rewrite-all` writes every certificate the tool makes. `make
+--keep-version-1` keeps every version-1 case as committed, its files
+untouched and no tool needed, and writes version 2's cases and controls
+again: version 2's are the golden writer's, and corpus.py's recipes
+make them.
 
 **Its producer.** `make` refuses a tool whose build is not clean, so each
 certificate names a commit anyone can check out. Every certificate but
@@ -2638,6 +2778,11 @@ for value. So `make` kept both certificates byte for byte (2026-09-30).
 `example`'s is the golden writer's, with the identity this page prints
 (`build-id unknown`), and the check holds cft-segrun's to it but for
 `build-id`.
+
+Version 2's cases are the golden writer's, written by `make
+--keep-version-1` at the commit that added them (2026-10-02). Every
+measured header line is `unknown`, as the example's `build-id` is, but
+in `signed-fp64`, which spells each out.
 
 **As a conformance test.** Another implementation (another library, a
 GPU library, a tile) takes each case's images, banks and initial states
@@ -2670,7 +2815,15 @@ The other rules:
 - **Auditors.** An auditor conforms when it gives each case its
   `verdict`, in full and sampled. The audit tool's gate holds
   `cft-audit` to that, beside the golden auditor ("The audit tool",
-  its fourth section).
+  its fourth section). A version-2 auditor is handed what the case's
+  manifest lines say, and gives every control its verdict too.
+- **Version 2.** A version-2 implementation conforms on a case marked
+  `writers both` when, handed the header's statements, it reproduces
+  every line but its own measurements (the regression test's step 5
+  names them): every run block, its source lines, lane flags and replays
+  included, and every accuracy value. Its boundary, block and raw files
+  are the committed ones. It may replay a marked lane by an image of its
+  own, which its `replay-method` line names.
 
 The corpus is described here and committed in this repository, and
 published nowhere else. Publishing it outside this repository needs
@@ -2682,6 +2835,11 @@ Logan's permission.
   card's device lines.
 - One made through a remote handle.
 - Streams other than +0, which cft-segrun does not take.
+- A version-2 certificate made by a C writer, or audited by cft-audit:
+  version 2's C half, the next parcel's.
+- A replay decided through mpmath: no node of the language reaches it
+  yet, so `definition-unavailable` and `replay-undecided` have no
+  committed case.
 
 ## What version 1 does not do
 
@@ -3654,6 +3812,9 @@ text-token           Logan%20W.
 
 ### Version 2's controls
 
+The golden corpus commits thirty of them, one for each refusal a
+committed case can carry, which every auditor must give ("Golden
+certificates", version 2's cases).
 `python/tests/test_cert2.py` holds version 2's mechanisms to negative
 controls, each by the name of the check it exists for, every one but the
 byte flip over a valid hash line. Its fixtures are markstep (open and
@@ -3749,11 +3910,14 @@ The next parcel builds version 2 in C, against this page:
 - **The gates:** audit_check.py hands cft-audit test_cert2.py's calls and
   the corpus's version-2 cases, which it names today and does not hand;
   corpus.py's check has cft-segrun remake each case the corpus marks
-  `writers both`, normalizing `build-id`, `writer`, `writer-runtime`,
-  `compiler-build`, the `replay-method` lines, the three times, `host-os`,
-  `host-arch` and the environment, and holding every other line byte for
-  byte. A replay certificate cft-segrun writes (`replay-method 0 image`)
-  is held to the golden writer's (`replay-method 0 golden`) that way.
+  `writers both`, leaving out of both certificates `build-id`, the four
+  device lines, `writer`, `writer-runtime`, `compiler-build`, the
+  `replay-method` lines, the three times, `host-os`, `host-arch` and the
+  environment (corpus.py's `C_WRITER_MEASURED`), and holding every other
+  line byte for byte. A replay certificate cft-segrun writes
+  (`replay-method 0 image`) is held to the golden writer's
+  (`replay-method 0 golden`) that way. The corpus check names those
+  seven cases today, in a NOTE.
 - **The WASM module** is rebuilt at ABI 0.18.
 
 ### What version 2 does not do

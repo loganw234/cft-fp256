@@ -1,0 +1,64 @@
+cft-certificate 2
+mode open
+build-id unknown
+backend software
+device-xclbin none
+device-version none
+device-caps none
+device-tiles 1
+profile 2
+language 1
+device-platform none
+device-xrt none
+device-clock none
+device-serial none
+writer golden unknown
+writer-runtime unknown
+compiler-build none
+replay-methods 1
+replay-method 0 golden
+certificate-id none
+issuer withheld
+issuer-key none
+host-os unknown
+host-arch unknown
+started unknown
+finished unknown
+issued unknown
+supersedes none
+environment 0
+initial given
+runs 1
+run 0 main
+program-format fp64
+program-image 86bfd74a3cb1435a384d4e703ca82ff50488e9b9fab3f37c0a991c90340b55bf
+program-digest 97088646bc0079578c2ed4bd3159d6c7307a94a373e5fb07b598f589aba14b78
+source 3f006978668e73a833512d9470b645ce9150db83d35bbfb752a9df1785fd7e80
+source-name markstep-fp64.cftl
+graph 6dafed3fffaadbcd84a6833fad87155eb4cdf64a2930ee9cd4350a5f428a768d
+compiler none
+source-params 0
+lanes 3
+steps 4
+stream-a 24491f6a040123086eefac186e747eabad55bed41b9a74b2726990a1e8c6fe37
+stream-b f53ceee9b603ad198e8fcb872fa3f441062e7c1375d400d6dee175d571317631
+stream-c d3a329f70c79c48c2a594b4ff24b775c9b26aec851986f1f06f2c677a7d4668a
+parameters 0
+lane-flags yes
+segments 3
+segment 0 start 19592d8392f28690fa4526c23bb3389cb95e2c02ed9599e9bfdb758b0d56315b end 4cfcbbef215250707c8a80561463e75d424c5e2dd980ff724e8a6837133c4a20 flags 16 status 0 lanes cbf0bb15dddc2923be5b88871873a94d3673135fa2e5a0496ddee10825adaaaf
+segment 1 start 4cfcbbef215250707c8a80561463e75d424c5e2dd980ff724e8a6837133c4a20 end 2e01e5bfde9714b9166ff860633ad3122c1b3182a6972881b8c269727fdb7e0c flags 16 status 0 lanes cbf0bb15dddc2923be5b88871873a94d3673135fa2e5a0496ddee10825adaaaf
+segment 2 start 2e01e5bfde9714b9166ff860633ad3122c1b3182a6972881b8c269727fdb7e0c end 59e0ae73145a06c7f223ea7d64cf3042a96f9a562ace14968f50da7862aa57e2 flags 16 status 0 lanes cbf0bb15dddc2923be5b88871873a94d3673135fa2e5a0496ddee10825adaaaf
+replays 1
+replay 1 marked 2 changed 1 raw-end a4c7e417201e52528159f3f1ffdfe13c7cff12b47fc394dd2a57f92ec994a047 raw-lanes 0791994b8a4cb0817d19b23c4af478ee7060ca7da47e9eec92b465ec1e842669
+output 59e0ae73145a06c7f223ea7d64cf3042a96f9a562ace14968f50da7862aa57e2
+accuracy 1
+entry 0 drift
+kind measurement
+uses 0
+scope max-lanes
+quantity counter terms 1
+term 1/1 s0
+value exact c/1
+end
+hash 60d6b7341bc990f9d4eb16c910fc30bcfcf55db14a03b05963fa8a723c01decc
