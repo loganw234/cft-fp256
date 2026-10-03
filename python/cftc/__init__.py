@@ -35,6 +35,27 @@ What it writes, for a stem (the source's name without .cftl):
 Every refusal is the language's Refusal (cft_golden.lang), by name. An
 InternalError is a defect in the compiler, never a property of a source.
 
+VERSION is cftc's OUTPUT version (C4, 2026-10-02): bumped with any change
+to the bytes cftc writes for some source, and recorded, version by
+version, with the SHA-256 of every committed compiled file
+(programs/systems/cftc-outputs.txt; outputs.py; the lang stage's leg F).
+1 is every cftc from L2 (2026-10-01) until the record began, never
+bumped; 2 is the manifest's cost note restated as measured (C4).
+
+A format override: compile_text and compile_file take `fmt`, a format's
+name, which replaces the value of the source's `format` statement
+(lang.compile_text's `fmt`; `--format` on the command line). The system
+is compiled at that format; the manifest's "source" says so, and an
+override equal to the declared format changes no byte. Certificate
+version 2's wider-source run compiles a source one format up with it
+(docs/studies/CERT-V2.md, 8.4).
+
+compiler_id() - `--compiler-id` on the command line - is the build id of
+the repository cftc runs from, in libcft's grammar (cft_build_id(),
+docs/HOSTAPI.md): host/tools/gen_build_id.sh's own answer, run on that
+repository, or `unknown`. It is provenance, which varies with the
+checkout, so no file cftc writes carries it.
+
 Until parcel C4, a system with a run-time division or square root - the
 language's div and sqrt, which its interpreter runs (L4) - is refused
 `runtime-routine`, first and on every target, at the first source line
@@ -78,6 +99,8 @@ figures): the index did not change it.
 
 import hashlib
 import re
+import shutil
+import subprocess
 from fractions import Fraction
 from pathlib import Path
 
@@ -96,13 +119,56 @@ from .regalloc import best_program
 from .schedule import cycles
 from .targets import BUILTIN, Target
 
-VERSION = 1
+VERSION = 2               # the output version: the module docstring, outputs.py
 MAX_STEPS = (1 << 32) - 1
 MAX_WORST = 1 << 40
 
 __all__ = ["BUILTIN", "Compilation", "InternalError", "MAX_STEPS", "NAMES",
            "Target", "VERSION", "compile_file", "compile_graph",
-           "compile_text", "get_target", "lang"]
+           "compile_text", "compiler_id", "get_target", "lang"]
+
+ROOT = Path(__file__).resolve().parents[2]
+_ID = re.compile(r"commit=([0-9a-f]{40}|[0-9a-f]{64}) "
+                 r"tracked=(clean|modified) untracked=(none|present)")
+
+
+def compiler_id_detail():
+    """(id, why): the repository cftc runs from, in cft_build_id()'s
+    grammar, from host/tools/gen_build_id.sh --print - the one generator,
+    run, not restated - or ("unknown", the reason). The repository is
+    python/cftc's grandparent; the script says `unknown` itself where
+    that is not the top of a work tree, where git is missing or warns."""
+    script = ROOT / "host" / "tools" / "gen_build_id.sh"
+    if not script.is_file():
+        return "unknown", f"no {script.as_posix()} beside python/cftc"
+    sh = shutil.which("sh")
+    if sh is None:
+        return ("unknown", "no POSIX shell (sh) on PATH to run "
+                "host/tools/gen_build_id.sh")
+    try:
+        r = subprocess.run([sh, script.as_posix(), "--print", ROOT.as_posix()],
+                           capture_output=True, text=True, timeout=120,
+                           cwd=str(ROOT / "host"))
+    except (OSError, subprocess.SubprocessError) as e:
+        return "unknown", f"gen_build_id.sh did not run: {e}"
+    lines = r.stdout.splitlines()
+    line = lines[0].strip() if len(lines) == 1 else None
+    if r.returncode != 0 or line is None:
+        return ("unknown", f"gen_build_id.sh exited {r.returncode}, "
+                f"answering {len(lines)} lines: "
+                f"{(r.stderr or r.stdout).strip()[:200]}")
+    if line == "unknown":
+        return ("unknown", "gen_build_id.sh says unknown: `make -C host "
+                "print-build-id`, or the header it writes, says why")
+    if not _ID.fullmatch(line):
+        return ("unknown", f"gen_build_id.sh answered out of grammar: "
+                f"{line[:120]!r}")
+    return line, None
+
+
+def compiler_id():
+    """The build id of the repository cftc runs from, or `unknown`."""
+    return compiler_id_detail()[0]
 
 
 def get_target(name):
@@ -331,6 +397,12 @@ def compile_graph(graph, steps, target="sw", stem="system", source=None,
     c = Compilation()
     c.stem, c.source, c.steps, c.target = stem, src, steps, t
     c.graph = graph
+    # a format override, where the source declares another format: the
+    # graph is at the override (lang.compile_text's fmt); the manifest and
+    # the .cfta say so. One equal to the declared format is no override.
+    own = getattr(graph, "source_format", None)
+    c.format_override = (own, graph.fmt.name) \
+        if own is not None and own != graph.fmt.name else None
     c.graph_bytes = graph.to_bytes()
     c.source_sha256 = (hashlib.sha256(source_bytes).hexdigest()
                        if source_bytes is not None else None)
@@ -347,7 +419,8 @@ def compile_graph(graph, steps, target="sw", stem="system", source=None,
                f"the loader's bound is 2^40 on every device", source=src)
     c.depth = scratch_declared(prog.slots_used)
     meta = {"stem": stem, "source": src, "target": t.name,
-            "source_sha256": c.source_sha256 or "(none: a graph)"}
+            "source_sha256": c.source_sha256 or "(none: a graph)",
+            "format_override": c.format_override}
     c.cfta = cfta(low, prog, steps, meta)
     c.image_obj = assemble(c.cfta, stem)
     c.image = c.image_obj.to_bytes()
@@ -403,14 +476,15 @@ def compile_graph(graph, steps, target="sw", stem="system", source=None,
 
 
 def compile_text(text, steps, target="sw", source="<text>", stem=None,
-                 params=None):
+                 params=None, fmt=None):
     """Compile a system's text: a str, or a file's bytes - which is how a
     caller holding a file should pass it, as lang.compile_text takes it.
     A text-mode read turns a lone CR into a line end before the
     language's character rule could refuse it (D1's finding, the rule
     L1 adopted); bytes reach the rule whole, and the source's SHA-256 is
-    of those bytes."""
-    system = lang.compile_text(text, source)
+    of those bytes. `fmt`, a format's name, overrides the source's
+    `format` statement (the module docstring)."""
+    system = lang.compile_text(text, source, fmt)
     raw = bytes(text) if isinstance(text, (bytes, bytearray)) \
         else text.encode("utf-8")
     return compile_graph(system.graph, steps, target,
@@ -419,10 +493,10 @@ def compile_text(text, steps, target="sw", source="<text>", stem=None,
 
 
 def compile_file(path, steps, target="sw", stem=None, params=None,
-                 source=None):
+                 source=None, fmt=None):
     p = Path(path)
     data = p.read_bytes()
-    system = lang.load(p)
+    system = lang.load(p, fmt)
     name = stem or (p.name[:-5] if p.name.endswith(".cftl") else p.stem)
     return compile_graph(system.graph, steps, target, stem=name,
                          source=source or p.as_posix(), source_bytes=data,

@@ -2,7 +2,7 @@
  "cftc_manifest": 1,
  "compiler": {
   "name": "cftc",
-  "version": 1
+  "version": 2
  },
  "source": {
   "path": "programs/systems/lorenz96-rk4-fp64.cftl",
@@ -450,7 +450,7 @@
   }
  ],
  "cost_model": {
-  "assumes": "revision 7, a single-pass tile; believed from docs/SEQUENCER.md R12-R19, not measured; the card's measurement is the lead's",
+  "assumes": "revision 7, a single-pass tile (docs/SEQUENCER.md R12-R19); measured on revision 7's quad on the U50, where ten compiled programs ran 2.2% to 5.8% slower than this model (docs/VALIDATION.md, 2026-10-02)",
   "cycles_per_step_one_beat": 8960,
   "cycles_per_step_sixteen_beats": 14477
  },

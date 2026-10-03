@@ -47,23 +47,29 @@ class System:
         self.graph = graph
 
 
-def compile_text(text, source="<text>"):
+def compile_text(text, source="<text>", fmt=None):
     """Parse and check a system's text - a str, or a file's bytes, which
     is how a caller holding a file should pass it (a text-mode read
     turns a lone CR into a line end before the character rule could
-    refuse it). A Refusal names the source."""
-    graph = _check(text, source)
+    refuse it). A Refusal names the source.
+
+    `fmt`, a format's name, overrides the source's `format` statement
+    (docs/LANGUAGE.md, "Statements"): the source must still declare a
+    format, and the system is checked and its graph built at `fmt`. An
+    override equal to the declared format changes nothing. The graph's
+    `source_format` says what the text declared."""
+    graph = _check(text, source, fmt)
     if not isinstance(text, str):
         text = bytes(text).decode("utf-8")      # the check read it whole
     return System(source, text, graph)
 
 
-def load(path):
+def load(path, fmt=None):
     """compile_text of a file's bytes: UTF-8, held whole to the
     character rule (docs/LANGUAGE.md, "The text") - a byte-order mark
     included, which outside a comment is refused like any other
-    character outside ASCII."""
-    return compile_text(Path(path).read_bytes(), str(path))
+    character outside ASCII. `fmt` as compile_text takes it."""
+    return compile_text(Path(path).read_bytes(), str(path), fmt)
 
 
 __all__ = ["CATALOGUE", "COMPILER_REFUSALS", "GREEK", "INTEGRATORS", "NAMES",

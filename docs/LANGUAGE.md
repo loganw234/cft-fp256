@@ -215,6 +215,18 @@ language makes anyway, and is held to it ("The variational equations",
   equation `next`), never both (`mixed-equations`).
 - Every state component has exactly one equation: `missing-equation` if
   it has none, `duplicate-equation` if it has two.
+- **A format override** (parcel C4). A caller may check a source at
+  another format - `lang.compile_text(text, source, fmt)` and
+  `lang.load(path, fmt)`, and the compiler's `--format` - and certificate
+  version 2's wider-source run compiles a source one format up so
+  (docs/studies/CERT-V2.md, 8.4). The source must still declare a format,
+  and its own line is checked (`missing-format`, `unknown-format`); the
+  override replaces that line's value, so the system is checked, its
+  constants rounded and its step graph built at the override, and the
+  canonical form declares the override. An override that names no
+  format is `unknown-format`, with no line, since no line holds it. One
+  equal to the declared format changes nothing. The graph keeps what the
+  text declared beside it, never in its bytes.
 
 ### Literals
 

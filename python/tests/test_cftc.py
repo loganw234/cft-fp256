@@ -808,3 +808,121 @@ def test_scratch_capacity_names_the_tangent_slots():
     assert "200 state, 200 for 1 tangent vector" in e.value.sentence
     c = cftc.compile_text(text, 2, target="u50-rev7")
     assert c.program.slots_used >= 400
+
+
+# ---- C4's first commit: the format override, the compiler id, VERSION ----
+
+def test_a_format_override_compiles_the_source_at_another_format():
+    """compile_file's fmt is the language's override: every output the
+    compile of the text with its format line replaced writes, but the
+    manifest's "source" saying so and the .cfta's one line more; and an
+    override equal to the declared format changes no byte at all."""
+    path = SYSTEMS / "lorenz63-rk4-fp64.cftl"
+    data = path.read_bytes()
+    src = "programs/systems/lorenz63-rk4-fp64.cftl"
+    plain = cftc.compile_file(path, 9, source=src)
+    same = cftc.compile_file(path, 9, source=src, fmt="fp64")
+    assert same.files() == plain.files()
+    assert same.format_override is None
+    over = cftc.compile_file(path, 9, source=src, fmt="fp128")
+    swapped = cftc.compile_text(data.replace(b"format fp64", b"format fp128"),
+                                9, source=src, stem="lorenz63-rk4-fp64")
+    assert over.format_override == ("fp64", "fp128")
+    assert over.source_sha256 == plain.source_sha256       # the source's bytes
+    for what in ("image", "bank", "graph", "canonical", "math"):
+        assert over._bytes(what) == swapped._bytes(what), what
+    m = json.loads(over.manifest_bytes)
+    assert m["source"]["format_override"] == {"source": "fp64",
+                                              "compiled": "fp128"}
+    assert m["format"] == "fp128"
+    assert "format_override" not in json.loads(plain.manifest_bytes)["source"]
+    assert "; format  fp128 by a format override; the source declares " \
+           "fp64\n" in over.cfta
+    # the .cfta: the swapped text's, but for the source's digest (the
+    # override's is the source's own bytes') and the one line more
+    assert over.cfta.replace("; format  fp128 by a format override; the "
+                             "source declares fp64\n", "").replace(
+        over.source_sha256, "S") == swapped.cfta.replace(
+        swapped.source_sha256, "S")
+
+
+def test_the_format_override_through_the_command_line(tmp_path):
+    py = [sys.executable, str(ROOT / "python" / "cftc")]
+    src = str(SYSTEMS / "henonheiles-lf-fp64.cftl")
+    r = subprocess.run(py + [src, "--steps", "3", "--format", "fp256",
+                             "--out", str(tmp_path / "a")],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    m = json.loads((tmp_path / "a" / "henonheiles-lf-fp64.manifest.json")
+                   .read_bytes())
+    assert (m["format"], m["source"]["format_override"]["source"]) == \
+        ("fp256", "fp64")
+    r = subprocess.run(py + [src, "--steps", "3", "--format", "fp99",
+                             "--out", str(tmp_path / "b")],
+                       capture_output=True, text=True)
+    assert r.returncode == 3, r.stderr
+    assert r.stderr.startswith("cftc: refused unknown-format: ")
+    assert not (tmp_path / "b").exists()
+
+
+def test_the_compiler_id_is_the_build_ids_grammar(monkeypatch):
+    """--compiler-id runs host/tools/gen_build_id.sh on the repository
+    cftc runs from: its answer, in cft_build_id()'s grammar, or unknown -
+    and unknown, with a reason, where there is no shell or no script."""
+    py = [sys.executable, str(ROOT / "python" / "cftc")]
+    r = subprocess.run(py + ["--compiler-id"], capture_output=True,
+                       text=True)
+    assert r.returncode == 0, r.stderr
+    line = r.stdout.strip()
+    assert r.stdout.count("\n") == 1
+    assert line == "unknown" or cftc._ID.fullmatch(line), line
+    ident, why = cftc.compiler_id_detail()
+    assert ident == line and (why is None) == (line != "unknown")
+    sh = __import__("shutil").which("sh")
+    if sh is not None:                      # the one generator, run directly
+        d = subprocess.run([sh, "host/tools/gen_build_id.sh", "--print",
+                            ROOT.as_posix()], capture_output=True,
+                           text=True, cwd=str(ROOT))
+        assert d.stdout.strip() == line
+    monkeypatch.setattr(cftc.shutil, "which", lambda name: None)
+    assert cftc.compiler_id_detail()[0] == "unknown"
+    assert "no POSIX shell" in cftc.compiler_id_detail()[1]
+    monkeypatch.undo()
+    monkeypatch.setattr(cftc, "ROOT", ROOT / "python" / "nowhere")
+    ident, why = cftc.compiler_id_detail()
+    assert ident == "unknown" and "gen_build_id.sh" in why
+
+
+def test_version_is_the_records_last_and_the_record_holds():
+    """cftc's VERSION is an output version: the record's last block is
+    VERSION's and names every committed compiled file with its digest
+    (the lang stage's leg F holds the same, with its plants)."""
+    from cftc import outputs as O
+    text = (SYSTEMS / O.RECORD_NAME).read_text(encoding="ascii")
+    files = O.committed(SYSTEMS)
+    assert O.problems(text, files, cftc.VERSION) == []
+    blocks = O.parse(text)
+    assert [v for v, _b in blocks] == list(range(1, cftc.VERSION + 1))
+    m = json.loads((SYSTEMS / "compiled" / "lorenz63-rk4-fp64.manifest.json")
+                   .read_bytes())
+    assert m["compiler"] == {"name": "cftc", "version": cftc.VERSION}
+    assert "2.2% to 5.8% slower" in m["cost_model"]["assumes"]
+    # the rule is mechanical: each break is named
+    some = sorted(files)[0]
+    assert O.problems(text, dict(files, **{some: "0" * 64}), cftc.VERSION)
+    assert O.problems(text, files, cftc.VERSION + 1)
+    assert O.problems(text, {p: d for p, d in files.items() if p != some},
+                      cftc.VERSION)
+    with pytest.raises(O.RecordError):
+        O.append(text, dict(files, **{some: "0" * 64}), cftc.VERSION)
+    with pytest.raises(O.RecordError):
+        O.append(text, files, cftc.VERSION + 2)
+    new, what = O.append(text, dict(files, **{"compiled/z.cfta": "1" * 64}),
+                         cftc.VERSION)
+    assert new.endswith("1" * 64 + "  compiled/z.cfta\n") and "1 new" in what
+    assert O.problems(new, dict(files, **{"compiled/z.cfta": "1" * 64}),
+                      cftc.VERSION) == []
+    bumped, _w = O.append(text, files, cftc.VERSION + 1)
+    assert [v for v, _b in O.parse(bumped)][-1] == cftc.VERSION + 1
+    with pytest.raises(O.RecordError):
+        O.parse(text.replace("version 1\n", "version 3\n", 1))

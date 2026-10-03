@@ -126,10 +126,16 @@ def build(c):
                   "default": K.frac_text(g.param[s.index][1])}
                  for s in low.slots if s.kind == "param" and not s.default]
     integ, h, opts = g.integrator
+    source = {"path": c.source, "sha256": c.source_sha256}
+    over = getattr(c, "format_override", None)
+    if over:
+        # only where a format override changed the format, so that every
+        # other manifest is what it was (C4)
+        source["format_override"] = {"source": over[0], "compiled": over[1]}
     m = {
         "cftc_manifest": 1,
         "compiler": {"name": "cftc", "version": c.version},
-        "source": {"path": c.source, "sha256": c.source_sha256},
+        "source": source,
         "graph": {"cftl_graph": g.version, "file": f"{c.stem}.graph.json",
                   "sha256": g.sha256},
         "system": g.system,
@@ -204,9 +210,10 @@ def build(c):
         m["lowering"]["graph_tangent_by_op"] = g.tangent_counts
     m.update({
         "cost_model": {
-            "assumes": "revision 7, a single-pass tile; believed from "
-                       "docs/SEQUENCER.md R12-R19, not measured; the card's "
-                       "measurement is the lead's",
+            "assumes": "revision 7, a single-pass tile (docs/SEQUENCER.md "
+                       "R12-R19); measured on revision 7's quad on the U50, "
+                       "where ten compiled programs ran 2.2% to 5.8% slower "
+                       "than this model (docs/VALIDATION.md, 2026-10-02)",
             "cycles_per_step_one_beat": c.cycles_one_beat,
             "cycles_per_step_sixteen_beats": c.cycles_sixteen_beats,
         },

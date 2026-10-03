@@ -2234,3 +2234,74 @@ def test_run_inputs_past_4300_digits_are_refused_by_name():
             lang.run(g, **kw)
         assert e.value.name == name, (name, kw.keys(), e.value.name)
         assert len(str(e.value)) < 400
+
+
+# ---- the format override (C4; certificate version 2's wider-source run) --
+
+@pytest.mark.parametrize("name", REFS)
+def test_a_format_override_is_the_source_with_its_format_replaced(name):
+    """`fmt` replaces the value of the source's format statement: the
+    graph at every format is the graph of the text with that line
+    replaced, byte for byte, and the graph says what the text declared;
+    an override equal to the declared format changes no byte."""
+    data = (SYSTEMS / f"{name}.cftl").read_bytes()
+    own = name.rsplit("-", 1)[1]
+    plain = lang.compile_text(data, name).graph
+    assert plain.source_format == own
+    for fmt in ("fp32", "fp64", "fp128", "fp256"):
+        g = lang.compile_text(data, name, fmt=fmt).graph
+        swapped = data.replace(f"format {own}".encode(),
+                               f"format {fmt}".encode())
+        assert swapped != data or fmt == own
+        assert g.to_bytes() == lang.compile_text(swapped, name).graph \
+            .to_bytes(), fmt
+        assert (g.fmt.name, g.source_format) == (fmt, own)
+        # its canonical form declares the override, and reads back
+        canon = lang.render_canonical(g)
+        assert f"\nformat {fmt}\n" in canon
+        assert lang.compile_text(canon, "canonical").graph.to_bytes() == \
+            g.to_bytes()
+    assert lang.load(SYSTEMS / f"{name}.cftl", own).graph.to_bytes() == \
+        plain.to_bytes()
+
+
+def test_a_format_override_refuses_by_name():
+    """The override is a format's name; anything else is unknown-format,
+    with no line, since no line of the source holds it. The source must
+    still be a source: its own format line is required, and checked."""
+    text = "system s\nformat fp64\nstate x\nnext x = x * 3\nstep map\n"
+    for bad in ("fp99", "FP64", "", "binary64", "fp64 ", "x" * 500):
+        with pytest.raises(lang.Refusal) as e:
+            lang.compile_text(text, "s.cftl", fmt=bad)
+        assert (e.value.name, e.value.line) == ("unknown-format", None), bad
+        assert e.value.sentence.startswith("the format override")
+        assert len(e.value.sentence) < 200
+    with pytest.raises(lang.Refusal) as e:
+        lang.compile_text(text, "s.cftl", fmt=FORMATS["fp64"])
+    assert e.value.name == "unknown-format"
+    with pytest.raises(lang.Refusal) as e:
+        lang.compile_text(text.replace("format fp64\n", ""), "s.cftl",
+                          fmt="fp128")
+    assert e.value.name == "missing-format"
+    with pytest.raises(lang.Refusal) as e:
+        lang.compile_text(text.replace("fp64", "fp99"), "s.cftl",
+                          fmt="fp128")
+    assert (e.value.name, e.value.line) == ("unknown-format", 2)
+
+
+def test_a_format_override_rounds_the_constants_at_its_format():
+    """A constant is rounded once at the format the graph is built at:
+    the override's - so a constant that overflows binary32 is refused
+    there by name, as the same text declaring fp32 is."""
+    text = "system s\nformat fp64\nstate x\nnext x = x * 1e300\nstep map\n"
+    assert lang.compile_text(text, "s", fmt="fp128").graph.fmt.name == "fp128"
+    for t, kw in ((text, {"fmt": "fp32"}),
+                  (text.replace("fp64", "fp32"), {})):
+        with pytest.raises(lang.Refusal) as e:
+            lang.compile_text(t, "s", **kw)
+        assert e.value.name == "constant-overflow"
+    g = lang.compile_text("system s\nformat fp64\nstate x\n"
+                          "next x = x * (1/3)\nstep map\n", "s",
+                          fmt="fp256").graph
+    want = C.round_once(FORMATS["fp256"], sf.RND_RNE, Fraction(1, 3))[0]
+    assert [c[2] for c in g.const] == [want]
