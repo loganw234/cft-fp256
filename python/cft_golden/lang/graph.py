@@ -267,14 +267,9 @@ class StepGraph:
         self.tangent = list(tangent)        # the tangent vectors' names
         self.tangent_field = tangent_field  # Section or None
         self.tangent_step = tangent_step    # Section, when tangent
-        # Where the source holds a run-time division or square root: the
-        # lines, ascending, at which the checker built a div or sqrt node -
-        # an equation's, a let's, a written tangent equation's or tangent
-        # let's, a line of an expansion block, whatever the statement (L4).
-        # The checker sets it; a graph read from bytes, or made otherwise,
-        # has None. Never part of the bytes: the compiler's interim refusal,
-        # `runtime-routine`, names the first of them (python/cftc).
-        self.routine_lines = None
+        # (routine_lines, the source lines holding a run-time division or
+        # root, went with the compiler's interim refusal at C4: nothing
+        # else read them)
         # The format the SOURCE declares, where the checker built the graph:
         # its `format` line's value, which a format override (check's `fmt`,
         # cftc's --format) replaces - so the graph is at `fmt`, and this
@@ -327,7 +322,6 @@ class StepGraph:
                       self.lane, self.param, self.integrator, self.const,
                       self.field, self.step, self.tangent,
                       self.tangent_field, self.tangent_step)
-        g.routine_lines = self.routine_lines
         g.source_format = self.source_format
         for k, v in changes.items():
             setattr(g, k, v)

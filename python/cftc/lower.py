@@ -42,10 +42,26 @@ nothing else (docs/ROADMAP.md, step 3: literal evaluation):
    order. That is gen_odes.py's classic order for the three references.
    Only slots an instruction addresses are in it. The halved bank halves
    every h-scaled slot exactly and leaves every other one alone.
+   Then, where the step divides or takes a root (C4), the WORDS its
+   routines read (cft_golden/routines.py): one slot for each distinct
+   bit pattern, the division's words first in divfull's own order, then
+   the root's that are new - raw encodings at the format, an infinity,
+   -0, NaNs and integers among them, which no constant of the language
+   can be. A word is never h-scaled, never halved, never a param and
+   never shared with a const slot (a const slot may be h-scaled or a run
+   value; a word may not). They come after the params, so a step's const,
+   flip and param slots are where they would be without routines.
+   The bank holds 512 on every device: params, addressed constants and
+   words past it are refused `bank-capacity`, the language's own name for
+   the limit, here for the cause the checker cannot see; and the fold
+   adds a flip only while there is room with the words counted.
 
 Nothing here reads an encoding to decide anything - only exact values
 and structure - so a system's instruction words are the same at every
-format. Encodings decide only the bank's bytes and halving-underflow.
+format, unless it divides or takes a root: a routine's words are its
+format's (its Newton passes, its masks and biases), so are its bank
+words, and the image with them. Encodings decide only the bank's bytes
+and halving-underflow.
 """
 
 from fractions import Fraction
@@ -73,19 +89,21 @@ class LNode:
 
 
 class Slot:
-    """One bank slot: a const entry, a const entry's flip, or a param."""
+    """One bank slot: a const entry, a const entry's flip, a param, or a
+    routine's word."""
     __slots__ = ("kind", "index", "exact", "factor", "bits", "flags",
-                 "default")
+                 "default", "names")
 
     def __init__(self, kind, index, exact, factor, bits, flags,
-                 default=True):
-        self.kind = kind            # "const", "flip" or "param"
+                 default=True, names=None):
+        self.kind = kind            # "const", "flip", "param" or "word"
         self.index = index          # the const's or the param's index
         self.exact = exact          # the exact value the slot stands for
         self.factor = factor        # h-factor, or None
         self.bits = bits
         self.flags = flags          # the one rounding's flags
         self.default = default      # a param at its default
+        self.names = names          # a word's [(routine, word name)]
 
 
 class Lowered:
@@ -101,11 +119,15 @@ class Lowered:
         self.folds = folds
         self.slot_of = {}
         for k, s in enumerate(slots):
+            if s.kind == "word":
+                self.slot_of[("w", s.bits)] = k
+                continue
             key = {"const": "c", "flip": "f", "param": "p"}[s.kind]
             self.slot_of[(key, s.index)] = k
         self.h_slots = [k for k, s in enumerate(slots)
                         if s.factor is not None and s.factor != 0]
         self.half_bits = None           # set by halve()
+        self.routines = []              # set by lower(): div, sqrt present
 
     @property
     def fmt(self):
@@ -160,9 +182,10 @@ def share(graph):
     return nodes, outs, merged
 
 
-def fold(graph, nodes, outs):
+def fold(graph, nodes, outs, n_words=0):
     """-> (nodes, outs, folds): the one fold, applied in the graph's node
-    order while the bank has room (module docstring)."""
+    order while the bank has room, the routines' n_words counted (module
+    docstring)."""
     users = [[] for _ in nodes]
     for j, nd in enumerate(nodes):
         for pos, r in enumerate(nd.args):
@@ -181,7 +204,8 @@ def fold(graph, nodes, outs):
     n_param = len(graph.param)
 
     def bank_size():
-        return n_param + sum(1 for u in cuse if u) + sum(1 for u in fuse if u)
+        return n_param + n_words + sum(1 for u in cuse if u) + \
+            sum(1 for u in fuse if u)
 
     dead, folds = set(), []
     for j, nd in enumerate(nodes):
@@ -233,9 +257,10 @@ def fold(graph, nodes, outs):
     return kept, outs, folds
 
 
-def layout(graph, nodes, outs, param_bits=None):
+def layout(graph, nodes, outs, param_bits=None, words=()):
     """-> [Slot]: the bank (module docstring). `param_bits` maps a param's
-    index to (bits, flags, exact) for a run value given in its place."""
+    index to (bits, flags, exact) for a run value given in its place;
+    `words` are the routines' word slots, which go last."""
     used_c, used_f = set(), set()
     for nd in nodes:
         for r in nd.args:
@@ -271,11 +296,31 @@ def layout(graph, nodes, outs, param_bits=None):
             params.append(Slot("param", i, ex, None, b, fl, default=False))
         else:
             params.append(Slot("param", i, exact, None, bits, flags))
-    slots = hs + plain + params
+    slots = hs + plain + params + list(words)
     if len(slots) > BANK_MAX:
         raise InternalError(f"{len(slots)} bank slots: the fold adds a flip "
-                            f"only while there is room, and L1 refuses more "
-                            f"than {BANK_MAX} params and constants")
+                            f"only while there is room, L1 refuses more "
+                            f"than {BANK_MAX} params and constants, and "
+                            f"lower() refuses the routines' words past it")
+    return slots
+
+
+def routine_words(graph, nodes):
+    """[Slot]: the words the step's routines read, one slot a bit pattern
+    - the division's words in divfull's order, then the root's that are
+    new (module docstring) - each naming every (routine, word) it is."""
+    from cft_golden import routines as R
+    slots, at = [], {}
+    for op in ("div", "sqrt"):
+        if not any(nd.op == op for nd in nodes):
+            continue
+        f = R.fragment(op, graph.fmt, graph.rnd)
+        for name, bits in f.words.items():
+            if bits not in at:
+                at[bits] = len(slots)
+                slots.append(Slot("word", None, None, None, bits, 0,
+                                  names=[]))
+            slots[at[bits]].names.append((op, name))
     return slots
 
 
@@ -310,12 +355,29 @@ def _slot_words(low, s):
     return f"the flip of {name}" if s.kind == "flip" else name
 
 
-def lower(graph, param_bits=None):
-    """-> Lowered: shared, folded once, and given its bank."""
+def lower(graph, param_bits=None, source=None):
+    """-> Lowered: shared, folded once, and given its bank - the routines'
+    words in it, or `bank-capacity` where they do not fit."""
     nodes, outs, merged = share(graph)
-    nodes, outs, folds = fold(graph, nodes, outs)
-    slots = layout(graph, nodes, outs, param_bits)
+    words = routine_words(graph, nodes)
+    if words:
+        used = {r[1] for nd in nodes for r in nd.args if r[0] == "c"} | \
+            {r[1] for r in outs if r[0] == "c"}
+        need = len(graph.param) + len(used) + len(words)
+        if need > BANK_MAX:
+            ops = [op for op in ("div", "sqrt")
+                   if any(nd.op == op for nd in nodes)]
+            refuse("bank-capacity",
+                   f"{len(graph.param)} params, {len(used)} constants and "
+                   f"{len(words)} words of the routine"
+                   f"{'s' if len(ops) > 1 else ''} the compiler inlines for "
+                   f"{' and '.join(ops)} come to {need}: the bank holds "
+                   f"{BANK_MAX} on every device", source=source)
+    nodes, outs, folds = fold(graph, nodes, outs, len(words))
+    slots = layout(graph, nodes, outs, param_bits, words)
     low = Lowered(graph, nodes, outs, slots, merged, folds)
+    low.routines = [op for op in ("div", "sqrt")
+                    if any(nd.op == op for nd in nodes)]
     for f in folds:
         f["slots"] = [low.slot_of[("f", i)] for i in f["consts"]]
     return low

@@ -1,0 +1,61 @@
+; kepler - the canonical form, regenerated from the step graph
+; sha256 52dd14db02ef561e112ade5b2b3e38f9978f2d524051de2d7a06ea7f96681f74
+;
+; Read back, this text gives the same step graph, byte for byte. Every
+; operation is written once, in the order it is performed; each one
+; that rounds rounds once, under rne (roundTiesToEven), in binary64.
+;
+; operations: the equations 8 (1 fma, 2 mul, 2 div, 1 sqrt, 2 neg);
+;             a step 14 (7 fma, 2 mul, 2 div, 1 sqrt, 2 neg);
+;             each tangent vector's equations 20 (6 fma, 3 mul, 5 div, 2 sqrt, 4 neg)
+;             and its step 26 (12 fma, 3 mul, 5 div, 2 sqrt, 4 neg)
+;
+; constants, exact value -> binary64 under rne:
+;   h    0.01   0x3f847ae147ae147b  0x1.47ae147ae147bp-7  inexact, relative error +2.0817e-17
+;   h/2  0.005  0x3f747ae147ae147b  0x1.47ae147ae147bp-8  inexact, relative error +2.0817e-17
+;   2    2      0x4000000000000000  0x1p+1                exact
+; h-scaled, halved by a step-halving bank: h, h/2
+
+system kepler
+format fp64
+round  rne
+state  x, y, px, py
+tangent v
+
+let r2 = fma(x, x, y * y)
+let r3 = r2 * sqrt(r2)
+d/dt x = px
+d/dt y = py
+d/dt px = -(x / r3)
+d/dt py = -(y / r3)
+
+let v.r2 = fma(v.x, x, fma(x, v.x, fma(v.y, y, y * v.y)))
+let v.r3 = fma(v.r2, sqrt(r2), r2 * (v.r2 / (2 * sqrt(r2))))
+d/dt v.x = v.px
+d/dt v.y = v.py
+d/dt v.px = -(fma(-(x / r3), v.r3, v.x) / r3)
+d/dt v.py = -(fma(-(y / r3), v.r3, v.y) / r3)
+
+step stormer-verlet, h = 0.01, q = (x, y), p = (px, py)
+expansion
+  let Q1.x = fma(h/2, px, x)
+  let Q1.y = fma(h/2, py, y)
+  let a1.r2 = fma(Q1.x, Q1.x, Q1.y * Q1.y)
+  let a1.r3 = a1.r2 * sqrt(a1.r2)
+  let P1.px = fma(h, -(Q1.x / a1.r3), px)
+  let P1.py = fma(h, -(Q1.y / a1.r3), py)
+  next x = fma(h/2, P1.px, Q1.x)
+  next y = fma(h/2, P1.py, Q1.y)
+  next px = P1.px
+  next py = P1.py
+  let v.Q1.x = fma(h/2, v.px, v.x)
+  let v.Q1.y = fma(h/2, v.py, v.y)
+  let v.a1.r2 = fma(v.Q1.x, Q1.x, fma(Q1.x, v.Q1.x, fma(v.Q1.y, Q1.y, Q1.y * v.Q1.y)))
+  let v.a1.r3 = fma(v.a1.r2, sqrt(a1.r2), a1.r2 * (v.a1.r2 / (2 * sqrt(a1.r2))))
+  let v.P1.px = fma(h, -(fma(-(Q1.x / a1.r3), v.a1.r3, v.Q1.x) / a1.r3), v.px)
+  let v.P1.py = fma(h, -(fma(-(Q1.y / a1.r3), v.a1.r3, v.Q1.y) / a1.r3), v.py)
+  next v.x = fma(h/2, v.P1.px, v.Q1.x)
+  next v.y = fma(h/2, v.P1.py, v.Q1.y)
+  next v.px = v.P1.px
+  next v.py = v.P1.py
+end

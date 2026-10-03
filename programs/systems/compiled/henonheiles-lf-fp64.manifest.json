@@ -2,7 +2,7 @@
  "cftc_manifest": 1,
  "compiler": {
   "name": "cftc",
-  "version": 2
+  "version": 3
  },
  "source": {
   "path": "programs/systems/henonheiles-lf-fp64.cftl",

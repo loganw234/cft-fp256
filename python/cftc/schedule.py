@@ -16,7 +16,13 @@ slower than it (docs/VALIDATION.md, 2026-10-02):
   value lands 17 cycles on; otherwise it is fast, a few cycles;
 * an LDL straight after an STL waits two cycles (R18);
 * REPEAT and ENDREP wait for nothing; a register written after it was
-  read, or written twice, costs nothing (R12's in-order retire).
+  read, or written twice, costs nothing (R12's in-order retire);
+* a routine's instructions (C4) are ALU instructions and cost what they
+  do; its QUIET and ENDQUIET cost a cycle each and wait for nothing, and
+  its RAISE waits for its register to have LANDED - R18's rule for
+  SETACT, three cycles past a forwarded link - then walks the beats one
+  a cycle. Those three are revision 8's R24, which no tile has, so their
+  prices are believed, from R18's for the control codes it built.
 
 So at a full block (sixteen beats) every order costs the same, to within
 a cycle a dependent pair, and only below one block does the order
@@ -55,6 +61,7 @@ The candidate orders:
 
 LAT = 17            # LATENCY 16 + 1: a dependent link, issue to issue
 FAST_LOAD = 3       # a fast LDL's value, issue to readable (R18), believed
+LANDED = 3          # a landed read's cycles past a forwarded one (R18)
 
 CANDIDATES = (("graph", 0), ("pressure", 0), ("latency", 0),
               ("integrated", 2), ("integrated", 4), ("integrated", 8))
@@ -213,9 +220,14 @@ def cycles(body, beats):
     marks = []
     for _ in range(3):
         for ins in body:
+            if ins.kind in ("quiet", "endquiet"):
+                t += 1
+                prev_store = False
+                continue
             start = t
             for r in ins.reads():
-                start = max(start, ready.get(r, 0))
+                start = max(start, ready.get(r, 0) +
+                            (LANDED if ins.kind == "raise" else 0))
             if ins.kind == "ldl" and prev_store:
                 start = max(start, t + 2)
             if ins.kind in ("alu", "copy"):

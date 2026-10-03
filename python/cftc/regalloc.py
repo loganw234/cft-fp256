@@ -40,7 +40,7 @@ dead at ENDREP. check.py proves that of every image this writes.
 import heapq
 from bisect import bisect_right
 
-from . import schedule
+from . import inline, schedule
 from .ir import ROUNDED
 from .refusals import InternalError
 
@@ -52,12 +52,18 @@ FAR = 1 << 40
 class Ins:
     """One instruction of a compiled image, before it is text.
 
-    kind  alu   an operation of the step: op, rnd, rd, srcs, node
-          copy  ior rd, src, src - a value moved, bit for bit
-          ldl   rd := scratch[slot]
-          stl   scratch[slot] := srcs[0]
-    A source is ("r", register) or ("b", bank slot). `node` is the lowered
-    node an alu computes; `key` the value a copy, load or store moves."""
+    kind  alu       an operation of the step, or of a routine inlined in
+                    it: op, rnd, rd, srcs, node
+          copy      ior rd, src, src - a value moved, bit for bit
+          ldl       rd := scratch[slot]
+          stl       scratch[slot] := srcs[0]
+          quiet     QUIET: a routine's quiet region opens (R24, C4)
+          endquiet  ENDQUIET: it closes
+          raise     RAISE srcs[0]: a routine's flag word into FLAGS
+    A source is ("r", register) or ("b", bank slot). `node` is the node an
+    alu or a raise computes (of the lowering, or of the expanded step
+    where the step has routines: inline.py); `key` the value a copy, load
+    or store moves."""
     __slots__ = ("kind", "op", "rnd", "rd", "srcs", "slot", "node", "key")
 
     def __init__(self, kind, rd=None, srcs=(), slot=None, op=None, rnd=0,
@@ -79,7 +85,7 @@ class Program:
     """An allocated segment: prologue, step body, epilogue."""
 
     def __init__(self, prologue, body, epilogue, pinned, m, slots_used,
-                 order, pinning):
+                 order, pinning, x=None):
         self.prologue = prologue
         self.body = body
         self.epilogue = epilogue
@@ -89,17 +95,31 @@ class Program:
         self.order = order
         self.pinning = pinning
         self.candidate = None
+        self.x = x                      # what was allocated: the lowering,
+        #                                 or its expansion (inline.py)
 
     @property
     def spill_slots(self):
         return self.slots_used - self.m
 
     def step_counts(self):
-        c = {"alu": 0, "copies": 0, "loads": 0, "stores": 0}
+        """alu (a routine's instructions among them), copies, loads,
+        stores; and, a step with routines, its raises and its brackets."""
+        c = {"alu": 0, "copies": 0, "loads": 0, "stores": 0, "raises": 0,
+             "brackets": 0}
         for ins in self.body:
             c[{"alu": "alu", "copy": "copies", "ldl": "loads",
-               "stl": "stores"}[ins.kind]] += 1
+               "stl": "stores", "raise": "raises", "quiet": "brackets",
+               "endquiet": "brackets"}[ins.kind]] += 1
         return c
+
+    def routine_alu(self):
+        """How many of the step's ALU instructions are routines'."""
+        nodes = getattr(self.x, "nodes", None)
+        if not nodes:
+            return 0
+        return sum(1 for ins in self.body if ins.kind == "alu" and
+                   getattr(nodes[ins.node], "kind", "lang") == "quiet")
 
     def registers(self):
         regs = set()
@@ -320,6 +340,10 @@ class _Alloc:
     def node(self, p, j):
         q = 2 * p
         nd = self.low.nodes[j]
+        kind = getattr(nd, "kind", "lang")
+        if kind == "raise":
+            self.raise_(q, j, nd.args[0])
+            return
         keys = []
         for r in nd.args:
             if r[0] in "sln" and r not in keys:
@@ -355,13 +379,32 @@ class _Alloc:
             else:
                 dest = self.victim(q, set())
                 self.evict(dest, q)
-        self.emit(Ins("alu", op=nd.op,
-                      rnd=self.rnd if nd.op in ROUNDED else 0,
-                      rd=dest, srcs=srcs, node=j))
+        if kind == "quiet":
+            # a routine's instruction: its OWN attribute where it rounds
+            rnd = nd.rnd or 0
+        else:
+            rnd = self.rnd if nd.op in ROUNDED else 0
+        self.emit(Ins("alu", op=nd.op, rnd=rnd, rd=dest, srcs=srcs, node=j))
         for k in dying:
             self.release(k)
         self.place(key, dest)
         self.computed.add(key)
+
+    def raise_(self, q, j, k):
+        """A routine's raise (inline.py): its flag word into a register if
+        it is not in one, RAISE it, and let it go if this was its last
+        use. It writes no register."""
+        if k not in self.where:
+            s = self.copy_slot(k)
+            if s is None:
+                raise InternalError(f"routine flag word {k} is needed by its "
+                                    f"raise, node {j}, and is nowhere")
+            r = self.take_reg(q, {k})
+            self.ldl(r, s, k)
+            self.place(k, r)
+        self.emit(Ins("raise", srcs=(("r", self.where[k]),), node=j, key=k))
+        if self.next_use(k, q) is None:
+            self.release(k)
 
     def stores(self, q):
         """The homed stores whose turn has come after position q.
@@ -547,9 +590,19 @@ class _Alloc:
             self.slot_put(self.n + j, ("l", j))
         self.out = body
         self.stores(-1)
+        quiet = False
         for p, j in enumerate(self.order):
+            # a routine's instructions run in a quiet region, opened before
+            # its block's first and closed after its last; its raise, and
+            # every language node, stand outside one (inline.py)
+            here = getattr(self.low.nodes[j], "kind", "lang") == "quiet"
+            if here != quiet:
+                self.emit(Ins("quiet" if here else "endquiet"))
+                quiet = here
             self.node(p, j)
             self.stores(2 * p + 1)
+        if quiet:
+            self.emit(Ins("endquiet"))
         self.closing()
         self.out = epilogue
         for i in range(self.n):
@@ -557,11 +610,22 @@ class _Alloc:
             if sk in self.pinned:
                 self.stl(self.pinned[sk], i, sk)
         return Program(prologue, body, epilogue, dict(self.pinned), self.m,
-                       max(self.m, self.next_spill), self.order, self.pinning)
+                       max(self.m, self.next_spill), self.order, self.pinning,
+                       x=self.low)
 
 
 def allocate(low, order, pinning="none"):
     return _Alloc(low, order, pinning).run()
+
+
+def allocate_order(low, order, pinning):
+    """A candidate order allocated: as it always was for a step without
+    routines, and through the routines' expansion (inline.py) for one with
+    them, its order then the expanded step's own."""
+    if not getattr(low, "routines", None):
+        return allocate(low, order, pinning)
+    x = inline.expand(low, order)
+    return allocate(x, list(range(len(x.nodes))), pinning)
 
 
 def pinnings(low):
@@ -599,7 +663,7 @@ def best_program(low, candidates=None):
         for ci, (name, margin) in enumerate(candidates or
                                             schedule.candidates(low)):
             order = schedule.order(low, name, margin, keys, len(REGS))
-            prog = allocate(low, order, pin)
+            prog = allocate_order(low, order, pin)
             prog.candidate = (name, margin)
             cost = (len(prog.body) + 1, schedule.cycles(prog.body, 1),
                     len(prog.prologue) + len(prog.epilogue), pi, ci)

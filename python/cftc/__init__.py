@@ -40,7 +40,9 @@ to the bytes cftc writes for some source, and recorded, version by
 version, with the SHA-256 of every committed compiled file
 (programs/systems/cftc-outputs.txt; outputs.py; the lang stage's leg F).
 1 is every cftc from L2 (2026-10-01) until the record began, never
-bumped; 2 is the manifest's cost note restated as measured (C4).
+bumped; 2 is the manifest's cost note restated as measured (C4); 3 is
+the routines: a source that divides or takes a root at run time, which
+2 refused, compiles (C4).
 
 A format override: compile_text and compile_file take `fmt`, a format's
 name, which replaces the value of the source's `format` statement
@@ -56,13 +58,20 @@ docs/HOSTAPI.md): host/tools/gen_build_id.sh's own answer, run on that
 repository, or `unknown`. It is provenance, which varies with the
 checkout, so no file cftc writes carries it.
 
-Until parcel C4, a system with a run-time division or square root - the
-language's div and sqrt, which its interpreter runs (L4) - is refused
-`runtime-routine`, first and on every target, at the first source line
-holding one, whatever the statement (an equation, a let, a written
-tangent or a line of an expansion block): a tile has no such
-instruction, and the compiler does not yet inline the routines
-(divfull, sqrtfull) that compute them.
+A run-time division or square root - the language's div and sqrt (L4) -
+is a ROUTINE (C4): a tile has no such instruction, so each node is
+inlined where it stands as divfull's or sqrtfull's own instructions,
+relocated and specialised at the program's attribute
+(cft_golden/routines.py), run in a quiet region, then a RAISE of a word
+holding exactly the operation's flags (revision 8's flag control,
+docs/SEQUENCER.md R24). inline.py expands them for the allocator, which
+gives their registers and spills around them; their raw words are bank
+slots of their own (lower.py); the internal check holds each to its
+fragment, taken from the golden model (check.py). Such an image needs
+FLAG_CONTROL, CAPS2[14], so revision 7's targets refuse it
+`target-feature` and the software targets compile and run it; a bank the
+routines' words would take past 512 is `bank-capacity`. Until C4 such a
+system was refused `runtime-routine`, a name that went with it.
 
 A system with tangent vectors (docs/LANGUAGE.md, "The variational
 equations") compiles the same way: its step graph is version 2, read by
@@ -119,7 +128,7 @@ from .regalloc import best_program
 from .schedule import cycles
 from .targets import BUILTIN, Target
 
-VERSION = 2               # the output version: the module docstring, outputs.py
+VERSION = 3               # the output version: the module docstring, outputs.py
 MAX_STEPS = (1 << 32) - 1
 MAX_WORST = 1 << 40
 
@@ -332,58 +341,10 @@ def _param_bits(graph, params, source):
     return out
 
 
-# The operations the language has (L4, 2026-10-02) and the compiler does not
-# carry yet: a tile has no divide or square-root instruction, and each is
-# compiled as an inlined routine (divfull, sqrtfull) only from parcel C4,
-# after revision 8's flag control lets a routine raise exactly the flags of
-# the operation it implements. Until then a graph holding one is refused
-# by name - first, before anything here reads the graph (ir.py's op table
-# would stop at `div` with an internal error, exit 70) - at the first
-# source line holding one, whatever the statement: an equation, a let, a
-# written tangent equation or tangent let, a line of an expansion block,
-# in the order the source writes them. So every source the language
-# accepts compiles or is refused by name (D2's rule). The lines are the
-# checker's (lang's StepGraph.routine_lines, where it built each division
-# and root); a graph read from bytes carries none, and the refusal names
-# no line.
-ROUTINES = {"div": ("divides", "divfull"),
-            "sqrt": ("takes a square root", "sqrtfull")}
-
-
-def refuse_routines(graph, source=None):
-    """`runtime-routine` if the graph holds a run-time division or square
-    root, at the first source line holding one, in source order and
-    whatever its statement (the graph's routine_lines); otherwise
-    nothing."""
-    found = set()
-    for name in ("field", "step", "tangent_field", "tangent_step"):
-        sec = graph.section(name)
-        if sec is not None:
-            found |= {op for op, _a, _l in sec.nodes if op in ROUTINES}
-    if not found:
-        return
-    lines = getattr(graph, "routine_lines", None)
-    line = lines[0] if lines else None
-    ops = [op for op in ROUTINES if op in found]
-    what = " and ".join(ROUTINES[op][0] for op in ops)
-    many = len(ops) > 1
-    refuse("runtime-routine",
-           f"this step {what} at run time ({', '.join(ops)}): the language "
-           f"has {'these operations' if many else 'the operation'}, "
-           f"correctly rounded, and a tile has no instruction for "
-           f"{'them' if many else 'it'} - the compiler carries "
-           f"{'each' if many else 'it'} only as an inlined routine "
-           f"({', '.join(ROUTINES[op][1] for op in ops)}), from parcel C4, "
-           f"after revision 8's flag control; until then the interpreter, "
-           f"lang.run, runs this system", source=source or "<graph>",
-           line=line)
-
-
 def compile_graph(graph, steps, target="sw", stem="system", source=None,
                   source_bytes=None, params=None):
     """Compile a checked step graph (lang.StepGraph) into its outputs."""
     src = source or "<graph>"
-    refuse_routines(graph, src)
     t = get_target(target)
     if isinstance(steps, bool) or not isinstance(steps, int) \
             or not 1 <= steps <= MAX_STEPS:
@@ -408,7 +369,7 @@ def compile_graph(graph, steps, target="sw", stem="system", source=None,
                        if source_bytes is not None else None)
     g = Graph(c.graph_bytes)
     c.ir = g
-    c.lowered = low = lower(g, _param_bits(graph, params, src))
+    c.lowered = low = lower(g, _param_bits(graph, params, src), source=src)
     half = halve(low, src) if low.h_slots else None
     c.program = prog = best_program(low)
     c.worst_case = (len(prog.prologue) + 1 + steps * (len(prog.body) + 1)
@@ -431,9 +392,15 @@ def compile_graph(graph, steps, target="sw", stem="system", source=None,
     c.features = [f for f in T.FEATURE_BITS if f in feats]
     missing = [f for f in c.features if f not in t.features()]
     if missing:
+        why = ""
+        if "FLAG_CONTROL" in missing:
+            why = (f": it raises its routines' flags ("
+                   f"{' and '.join(low.routines)}) through revision 8's "
+                   f"flag control, QUIET, ENDQUIET and RAISE, which no "
+                   f"tile has yet; the software targets run it")
         refuse("target-feature", f"the image needs "
                f"{', '.join(f'{f} ({T.CAPS_PLACE[f]})' for f in missing)}, "
-               f"which {t.name} does not publish", source=src)
+               f"which {t.name} does not publish{why}", source=src)
     if len(c.image_obj.insns) > t.max_insns:
         refuse("program-capacity", f"the image is "
                f"{len(c.image_obj.insns):,} instructions and {t.name} holds "

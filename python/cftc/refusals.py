@@ -4,14 +4,15 @@
 
 The language has one exception and one list of names
 (cft_golden.lang.refusals: CATALOGUE for the checker and the
-interpreter, COMPILER_REFUSALS for these). The compiler raises its eight
+interpreter, COMPILER_REFUSALS for these). The compiler raises its seven
 through that class - never a subclass, never a class of its own - so a
 writer meets one form of refusal from the parser to the image:
 `<source>:<line>: <name>: <sentence>`.
 
   target-format      the graph's format is not one the target carries
   target-feature     the image needs a feature bit the target does not
-                     publish
+                     publish - revision 8's flag control, for an image
+                     holding a routine, on revision 7's targets (C4)
   program-capacity   more instructions than the target's image holds
   scratch-capacity   state, lane params and spills past the target's
                      scratch depth a lane
@@ -21,18 +22,22 @@ writer meets one form of refusal from the parser to the image:
                      immediate a segment's steps are
   halving-underflow  an h-scaled constant whose exact halving
                      underflows, so no step-halving bank holds it
-  runtime-routine    a run-time division or square root (the language's
-                     div and sqrt, L4), which the compiler carries only
-                     as an inlined routine, from parcel C4: raised first,
-                     on every target, at the first source line holding
-                     one, whatever its statement, so that no source the
-                     language accepts reaches an internal error (exit 70)
-                     in between
+
+and one of the language's own: `bank-capacity`, the bank's 512 on every
+device, which the checker raises for params and constants and the
+compiler for the words of the routines it inlines (C4) - one limit, one
+name, the cause in the sentence.
+
+Until parcel C4 an eighth, `runtime-routine`, refused a run-time division
+or square root (L4); C4 compiles them, and the name went with it.
 """
 
 NAMES = ("target-format", "target-feature", "program-capacity",
          "scratch-capacity", "loader-bound", "segment-steps",
-         "halving-underflow", "runtime-routine")
+         "halving-underflow")
+# the language's names the compiler raises too, for a cause the checker
+# cannot see (the module docstring)
+SHARED = ("bank-capacity",)
 
 
 class InternalError(AssertionError):
@@ -43,7 +48,7 @@ class InternalError(AssertionError):
 
 def refusal(name, sentence, source=None, line=None):
     """The language's Refusal for one of the compiler's names."""
-    if name not in NAMES:
+    if name not in NAMES and name not in SHARED:
         raise InternalError(f"{name!r} is not one of the compiler's "
                             f"refusals")
     from cft_golden.lang import Refusal          # L1's one class

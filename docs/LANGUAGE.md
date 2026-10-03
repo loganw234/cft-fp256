@@ -872,11 +872,12 @@ step rk4, h = 1/100
   (parcel L4), the language writes it as one division, `let t = k / 100`,
   which is the attribute's rounding of n/100 at every count (measured to
   10^4 by verifier-VI2: rne and rup at all four formats, and all five
-  attributes at fp64). The compiler refuses that division as
-  `runtime-routine` until parcel C4, so a compiled program takes four
-  operations instead: the exact residual and the one correction that
-  the golden model's divide ends with (`python/cft_golden/sequences.py`),
-  q = fma(r, y, q0):
+  attributes at fp64). The compiler refused that division as
+  `runtime-routine` until parcel C4, which carries it as a routine of
+  177 to 191 instructions (186 at fp64 under rne); four operations are
+  still the cheaper route to the same time: the exact residual and the
+  one correction that the golden model's divide ends with
+  (`python/cft_golden/sequences.py`), q = fma(r, y, q0):
   ```
   let q = k * dt
   let r = fma(-q, 100, k)   ; k - 100 q, exactly
@@ -1921,9 +1922,10 @@ One exception, `lang.Refusal`, carries:
 Nothing else escapes the parser or the checker, and the gate fuzzes the
 references to hold that. `python/cft_golden/lang/refusals.py` is the one
 list: the checker's and the interpreter's names, each made by a test in
-this definition's gate, and the compiler's eight at the end, reserved
+this definition's gate, and the compiler's seven at the end, reserved
 for it. The compiler raises them through the same class, and its own
-gate makes each one.
+gate makes each one; it raises one of the checker's besides,
+`bank-capacity`, for the cause the checker cannot see (below).
 
 The text and its declarations:
 
@@ -1949,7 +1951,7 @@ The text and its declarations:
 | `unused` | a const, param, lane param, let or h that nothing uses; h is used only where a constant of the step scales with it, so a map whose every use of h folds away is `unused` |
 | `cycle` | a definition that depends on itself |
 | `not-constant` | a value needed when the program is compiled that reads the state, a param, a lane param or a let |
-| `bank-capacity` | more than 512 params and constants: the bank holds 512 on every device |
+| `bank-capacity` | more than 512 params and constants: the bank holds 512 on every device. The compiler raises it too where the words of the routines it inlines for a division or a root take the bank past 512 (C4) |
 
 Equations, indices and the step:
 
@@ -2020,33 +2022,25 @@ The compiler's, reserved for it (L2).
 - The first five are a target's stated capacities (the plan's item 10).
   They depend on the lowering and on the device, so the compiler raises
   them. The bank's 512 is the same on every device, and the checker
-  raises that one itself as `bank-capacity`.
-- The next two are the compiled image's own.
-- The eighth, `runtime-routine`, is the compiler's own until parcel C4
-  (L4, 2026-10-02). A run-time division or square root is an operation
-  of the language, which the interpreter runs; a tile has no instruction
-  for either, and the compiler carries one only as an inlined routine
-  (divfull, sqrtfull), from C4, after revision 8's flag control lets a
-  routine raise exactly the flags of the operation it implements. Until
-  then the compiler refuses such a graph by this name, on every target,
-  first - before any other of its checks, and before its own reading of
-  the graph, whose operation table would stop at `div` with an internal
-  error - at the first source line holding one, in the order the source
-  writes its statements and whatever the statement: an equation, a let,
-  a written tangent equation or tangent let, a line of an expansion
-  block. The checker meets each run-time division and root at its line,
-  since it evaluates every statement a source writes, and hands the
-  lines to the compiler with the graph (never in its bytes: a graph read
-  from bytes carries none, and the refusal names no line). Until
-  2026-10-02's send-back (verifier-VL4's (b)1) the compiler named the
-  graph's nodes' lines, the primal's, so a source that wrote its tangent
-  or its expansion block above its equations was refused at an
-  equation's line. So every source the language accepts compiles or is
-  refused by name, and exit 70 stays a defect in the compiler (D2's
-  rule). With C4 the name goes: revision 7's targets refuse such an
-  image `target-feature`, and the software targets run it.
+  raises that one itself as `bank-capacity` - for params and constants.
+  The words of the routines the compiler inlines for a division or a
+  root (C4) live in the bank too, which the checker cannot see, so the
+  compiler raises the same name where they take the bank past 512, its
+  sentence counting the params, the constants and the words: one limit,
+  one name.
+- The other two are the compiled image's own.
+- Until parcel C4 an eighth, `runtime-routine` (L4, 2026-10-02), refused
+  a run-time division or square root on every target, first, at the
+  first source line holding one, whatever the statement, so that no
+  source the language accepted reached an internal error before the
+  compiler carried them (D2's rule). C4 carries them as inlined routines
+  ("The operations"), and the name went with it: an image holding a
+  routine needs revision 8's flag control, so revision 7's targets
+  refuse it `target-feature`, by name, and the software targets compile
+  and run it. Every source the language accepts compiles or is refused
+  by name, and exit 70 stays a defect in the compiler.
 
-The checker never raises any of the eight. The sentences below are their
+The checker never raises any of the seven. The sentences below are their
 form; the compiler words each one for the case at hand.
 
 | name | what it refuses | its sentence |
@@ -2058,7 +2052,6 @@ form; the compiler words each one for the case at hand.
 | `target-feature` | a feature whose CAPS bit the target does not publish | "this image needs a feature the target's CAPS bits do not publish" |
 | `segment-steps` | a step count outside 1 to 2^32-1, the range of the REPEAT immediate a segment's steps are | "a segment is one REPEAT of 1 to 4,294,967,295 steps; this count is not one" |
 | `halving-underflow` | an h-scaled constant whose exact halving underflows, so the step-halving bank cannot hold it exactly | "this h-scaled constant underflows when halved, so the step-halving bank would not be this bank halved exactly" |
-| `runtime-routine` | a division or square root at run time, until parcel C4 | "this step divides or takes a square root at run time, which the compiler carries only as an inlined routine, from parcel C4" |
 
 ## The gate
 

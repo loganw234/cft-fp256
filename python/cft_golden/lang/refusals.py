@@ -61,7 +61,9 @@ CATALOGUE = {
     "cycle": "a definition that depends on itself",
     "not-constant": "a value needed when the program is compiled that "
                     "reads the state, a param, a lane param or a let",
-    "bank-capacity": "more than 512 params and constants: the bank "
+    "bank-capacity": "more than 512 params and constants - and, the "
+                     "compiler's count, with the words of the routines it "
+                     "inlines for a division or a root (C4): the bank "
                      "holds 512 on every device",
     # -- equations, indices, the step ---------------------------------
     "missing-equation": "a state component with no equation",
@@ -99,7 +101,8 @@ CATALOGUE = {
     # -- operations v1 does not have -----------------------------------
     # (runtime-division and runtime-sqrt went with L4, 2026-10-02: a
     # run-time division and square root are operations, div and sqrt;
-    # until parcel C4 the compiler refuses them, `runtime-routine`)
+    # the compiler refused them `runtime-routine` until parcel C4 carried
+    # them as inlined routines, and that name went too)
     "transcendental": "a transcendental function at run time",
     "irrational-constant": "a square root of a constant that is no "
                            "rational's square (2, or a negative one), or a "
@@ -139,11 +142,13 @@ CATALOGUE = {
 
 # The compiler's refusals, reserved for it (L2): the target's stated
 # capacities (the plan's item 10), which depend on the lowering and on
-# the device, two of the compiled image's own, and one the compiler's
-# own until parcel C4 (L4's). The checker never raises these; the
-# compiler raises them through the same Refusal, so the language has one
-# class and one list of names, and docs/LANGUAGE.md gives each its
-# sentence.
+# the device, and two of the compiled image's own. The checker never
+# raises these; the compiler raises them through the same Refusal, so the
+# language has one class and one list of names, and docs/LANGUAGE.md
+# gives each its sentence. The compiler also raises one of the
+# catalogue's, bank-capacity, where the words of the routines it inlines
+# take the bank past 512 (C4): one limit, one name. Until C4 an eighth,
+# runtime-routine, refused a run-time division or root (L4).
 COMPILER_REFUSALS = {
     "scratch-capacity": "registers plus scratch past the target's: "
                         "2,048 slots on the U50's revision 7, 256 "
@@ -160,10 +165,6 @@ COMPILER_REFUSALS = {
     "halving-underflow": "an h-scaled constant whose exact halving "
                          "underflows, so the step-halving bank cannot "
                          "hold it exactly",
-    "runtime-routine": "a division or square root at run time, which the "
-                       "compiler carries only as an inlined routine "
-                       "(divfull, sqrtfull), from parcel C4; until then "
-                       "the interpreter runs such a system",
 }
 
 # Every name a Refusal may carry: the checker's and the interpreter's,

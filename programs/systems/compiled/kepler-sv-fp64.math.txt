@@ -1,0 +1,26 @@
+kepler - the mathematical form, regenerated from the step graph
+binary64 (fp64), roundTiesToEven
+
+Each operation here is exact. The program performs the same
+operations, each rounded once, in the order the canonical form
+writes them.
+
+where
+  r2 = x·x + y·y
+  r3 = r2·√(r2)
+
+the equations
+  dx/dt = px
+  dy/dt = py
+  dpx/dt = −x/r3
+  dpy/dt = −y/r3
+
+one step: Stormer-Verlet, drift-kick-drift (stormer-verlet), with v the right-hand sides of dQ/dt and a those of dP/dt
+  h = 0.01
+  Y = (x, y, px, py)
+  Q = (x, y)
+  P = (px, py)
+  Q1 = Q + (h/2)·v(P)
+  P1 = P + h·a(Q1)
+  Q ↦ Q1 + (h/2)·v(P1)
+  P ↦ P1

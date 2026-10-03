@@ -442,20 +442,23 @@ def test_a_long_chain_costs_no_depth():
 
 
 def test_the_class_carries_the_compilers_names():
-    """The compiler raises its eight through this one class: each is
-    accepted, and a name in neither list is an internal error. The eighth,
-    runtime-routine, is the compiler's own until parcel C4 (L4)."""
+    """The compiler raises its seven through this one class: each is
+    accepted, and a name in neither list is an internal error. An eighth,
+    runtime-routine, refused a run-time division or root until parcel C4
+    inlined them (L4); it is no name now, nor are the language's two
+    before it. The compiler raises one catalogue name besides,
+    bank-capacity, where its routines' words take the bank past 512."""
     for name in lang.COMPILER_REFUSALS:
         r = lang.Refusal(name, "a sentence", 3, "x.cftl")
         assert str(r) == f"x.cftl:3: {name}: a sentence"
     assert {"segment-steps", "halving-underflow", "target-format",
             "target-feature", "program-capacity", "scratch-capacity",
-            "loader-bound", "runtime-routine"} == set(lang.COMPILER_REFUSALS)
-    # the two the language made before L4 are no name at all now
-    for gone in ("runtime-division", "runtime-sqrt"):
+            "loader-bound"} == set(lang.COMPILER_REFUSALS)
+    for gone in ("runtime-division", "runtime-sqrt", "runtime-routine"):
         assert gone not in lang.NAMES
         with pytest.raises(AssertionError):
             lang.Refusal(gone, "x")
+    assert "bank-capacity" in lang.CATALOGUE
     assert not set(lang.COMPILER_REFUSALS) & set(lang.CATALOGUE)
     with pytest.raises(AssertionError):
         lang.Refusal("no-such-name", "x")

@@ -21,8 +21,28 @@ attribute, for the four that round). The segment must:
   it began - which, by induction, makes every step the step;
 * store the pinned state back to its homes after the loop;
 * carry a bank whose every slot is its entry's encoding, or that
-  encoding's sign-flip, or the param's value; and a halved bank whose
-  h-scaled slots are exactly half and whose others are the same.
+  encoding's sign-flip, or the param's value, or a word of the step's
+  routines; and a halved bank whose h-scaled slots are exactly half and
+  whose others are the same.
+
+A step that divides or takes a root (C4) holds each routine to its
+FRAGMENT, which the check takes from the golden model itself
+(cft_golden/routines.py) - not from the compiler's inlining - and
+instantiates over the node's operand symbols: each instruction a symbol
+(its opcode, its own attribute where it rounds, its operands; a word the
+slot holding its bits), simplified by the fragment's own rules
+(routines.simplify) and interned, so that instances which share an
+instruction share its symbol, as the image computes it once. Then:
+* every expected symbol, a language node's or a routine's instruction's,
+  is computed exactly once;
+* a routine's instructions stand inside a quiet region and the
+  language's outside every one (the two can never be one symbol: every
+  instruction of a routine reads one of its words or its values, which
+  routines.invariants proves of every fragment) - so a scaffolding flag
+  cannot reach FLAGS and a language node's flags cannot be lost;
+* each routine node's flag word is RAISEd exactly once, outside every
+  region, and nothing else is raised;
+* regions are balanced within the step, and none stands outside it.
 
 A failure is an InternalError - a defect in the compiler, never a
 property of the source. seq.py against the interpreter is the other net
@@ -31,15 +51,17 @@ property of the source. seq.py against the interpreter is the other net
 
 from collections import Counter
 
-from cft_golden import asm
+from cft_golden import asm, seq
+from cft_golden import routines as R
 from cft_golden.seqflags import (FLAG_BANK_EXT, FLAG_SCRATCH_IO,
                                  FLAG_SCRATCH_STRICT)
 
-from .ir import ROUNDED
+from .ir import ROUNDED, ROUTINES
 from .lower import exact_value
 from .refusals import InternalError
 
 OP_OF = {v: k for k, v in asm.OP_NAMES.items()}
+QUIET, ENDQUIET, RAISE = seq.QUIET, seq.ENDQUIET, seq.RAISE   # R24
 
 
 class _Syms:
@@ -83,9 +105,15 @@ def verify(low, prog, image_bytes, steps, half_values=None):
     sym_in = [S(("in", i)) for i in range(n)]
     sym_lane = [S(("lane", j)) for j in range(nl)]
     sym_bank = [S(("bank", k)) for k in range(len(low.slots))]
+    # a routine's word is the slot holding its bits (lower.py)
+    word_slot = {s.bits: k for k, s in enumerate(low.slots)
+                 if s.kind == "word"}
+    bits_of_sym = {sym_bank[k]: b for b, k in word_slot.items()}
 
-    # what each lowered node is, from the lowering's own refs
-    expected = []
+    # what each lowered node is, from the lowering's own refs; a routine
+    # node's, its fragment from the golden model (module docstring)
+    expected, lang_syms, flag_syms = [], [], []
+    quiet_syms = set()
 
     def ref_sym(r):
         kind, i = r
@@ -96,9 +124,43 @@ def verify(low, prog, image_bytes, steps, half_values=None):
         if kind == "n":
             return expected[i]
         return sym_bank[low.slot_of[r]]
-    for nd in low.nodes:
-        rnd = g.rnd if nd.op in ROUNDED else None
-        expected.append(S((nd.op, rnd, tuple(ref_sym(a) for a in nd.args))))
+    for j, nd in enumerate(low.nodes):
+        args = tuple(ref_sym(a) for a in nd.args)
+        if nd.op not in ROUTINES:
+            rnd = g.rnd if nd.op in ROUNDED else None
+            sym = S((nd.op, rnd, args))
+            expected.append(sym)
+            lang_syms.append(sym)
+            continue
+        f = R.fragment(nd.op, g.fmt, g.rnd)
+        inputs = dict(zip(f.inputs, args))
+        vals = {}
+        for i, (opc, r, srcs) in enumerate(f.body):
+            ss = []
+            for s in srcs:
+                if s[0] == "in":
+                    ss.append(inputs[s[1]])
+                elif s[0] == "v":
+                    ss.append(vals[s])
+                else:
+                    k = word_slot.get(f.words[s[1]])
+                    if k is None:
+                        _fail(f"{nd.op} node {j}'s word {s[1]} is in no bank "
+                              f"slot")
+                    ss.append(sym_bank[k])
+            ss = tuple(ss)
+            same = R.simplify(opc, ss, bits_of_sym.get, g.fmt.sign_mask)
+            if same is not None:
+                vals[("v", i)] = same
+                continue
+            sym = S((asm.OP_NAMES[opc], r, ss))
+            vals[("v", i)] = sym
+            quiet_syms.add(sym)
+        expected.append(vals[f.result])
+        flag_syms.append(vals[f.flags])
+    if quiet_syms & set(lang_syms):
+        _fail("a routine's instruction is a language node's: the two "
+              "classes must not meet")
     want_out = [ref_sym(o) for o in low.outs]
 
     words = [asm.decode(w) for w in img.insns]
@@ -118,6 +180,8 @@ def verify(low, prog, image_bytes, steps, half_values=None):
     epi = words[ends[0] + 1:-1]
 
     regs, slots = {}, {}
+    qdepth = [0]
+    raised = Counter()
 
     def read_reg(r, where):
         if r not in regs:
@@ -137,6 +201,20 @@ def verify(low, prog, image_bytes, steps, half_values=None):
                 code = d["op"]
                 if code not in allow:
                     _fail(f"{where} is {asm.CTRL_NAMES.get(code, code)}")
+                if code == QUIET:
+                    qdepth[0] += 1
+                    continue
+                if code == ENDQUIET:
+                    if not qdepth[0]:
+                        _fail(f"{where} closes no quiet region")
+                    qdepth[0] -= 1
+                    continue
+                if code == RAISE:
+                    if qdepth[0]:
+                        _fail(f"{where} raises inside a quiet region, where "
+                              f"its flags would be silenced")
+                    raised[read_reg(d["ra"], where)] += 1
+                    continue
                 slot = d["imm"] & asm.SLOT_MASK
                 if code == asm.LDL:
                     regs[d["rd"]] = read_slot(slot, where)
@@ -157,21 +235,29 @@ def verify(low, prog, image_bytes, steps, half_values=None):
                     continue
                 vals.append(sym_bank[idx] if is_const
                             else read_reg(idx, where))
-            if op == "ior":
-                if len(set(vals)) != 1 or d["rnd"]:
+            if op == "ior" and len(set(vals)) == 1:
+                if d["rnd"]:
                     _fail(f"{where} is an ior that is not a copy")
                 regs[d["rd"]] = vals[0]
                 continue
             if op in ROUNDED:
-                if d["rnd"] != g.rnd:
+                if not qdepth[0] and d["rnd"] != g.rnd:
                     _fail(f"{where}: {op} carries attribute {d['rnd']}, "
                           f"not the program's {g.rnd}")
-                rnd = g.rnd
+                rnd = d["rnd"]
             else:
                 if d["rnd"]:
                     _fail(f"{where}: quiet {op} carries a rounding field")
                 rnd = None
             sym = S((op, rnd, tuple(vals)))
+            if qdepth[0] and sym not in quiet_syms:
+                _fail(f"{where}: {op} stands in a quiet region, and is no "
+                      f"routine's instruction: its flags would be lost")
+            if not qdepth[0] and sym in quiet_syms:
+                _fail(f"{where}: a routine's {op} stands outside its quiet "
+                      f"region, where its scaffolding flags would stand")
+            if not qdepth[0] and op == "ior":
+                _fail(f"{where} is an ior that is not a copy")
             computed[sym] += 1
             regs[d["rd"]] = sym
 
@@ -192,14 +278,21 @@ def verify(low, prog, image_bytes, steps, half_values=None):
         if key[0] == "s":
             del slots[key[1]]
     computed = Counter()
-    run(body, "step", {asm.LDL, asm.STL}, computed)
-    want_nodes = Counter(expected)
+    run(body, "step", {asm.LDL, asm.STL, QUIET, ENDQUIET, RAISE}, computed)
+    if qdepth[0]:
+        _fail("the step ends inside a quiet region")
+    want_nodes = Counter(lang_syms) + Counter(quiet_syms)
     if computed != want_nodes:
         missing = want_nodes - computed
         extra = computed - want_nodes
         _fail(f"the step computes {sum(computed.values())} operations for "
-              f"{len(expected)} nodes: {len(missing)} missing, "
+              f"{len(expected)} nodes ({len(quiet_syms)} routine "
+              f"instructions among them): {len(missing)} missing, "
               f"{len(extra)} not the step's")
+    if raised != Counter(flag_syms):
+        _fail(f"the step raises {sum(raised.values())} flag words for "
+              f"{len(flag_syms)} routines: each routine's once, and no "
+              f"other, is due")
     for i in range(n):
         key = ("s", i)
         if key in prog.pinned:
@@ -227,7 +320,20 @@ def verify(low, prog, image_bytes, steps, half_values=None):
 def _verify_bank(low, half_values):
     g = low.graph
     fmt = g.fmt
+    # the words: exactly the bit patterns the step's routines' fragments
+    # read, each once, from the golden model (cft_golden/routines.py)
+    want = set()
+    for op in sorted({nd.op for nd in low.nodes if nd.op in ROUTINES}):
+        want |= set(R.fragment(op, fmt, g.rnd).words.values())
+    have = [s.bits for s in low.slots if s.kind == "word"]
+    if len(set(have)) != len(have) or set(have) != want:
+        _fail(f"the bank's {len(have)} word slots are not the "
+              f"{len(want)} words the step's routines read, each once")
     for k, s in enumerate(low.slots):
+        if s.kind == "word":
+            if s.factor is not None:
+                _fail(f"bank slot {k}, a word, is h-scaled")
+            continue
         if s.kind == "param":
             if s.default and s.bits != g.param[s.index][2]:
                 _fail(f"bank slot {k} is not param {g.param[s.index][0]}'s "
