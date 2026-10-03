@@ -2146,6 +2146,7 @@ static void read_provenance(rdr_t *R, cert_t *C)
     line_t *l;
     long long ln;
     const char *v;
+    int kc;
 
     C->profile = rd_version_or(R, K2_PROFILE, U, 1);
     C->language = rd_version_or(R, K2_LANGUAGE, NU, 2);
@@ -2190,18 +2191,15 @@ static void read_provenance(rdr_t *R, cert_t *C)
         /* cert2.key_problem, wherever a key is read: no point is no key
          * (`malformed` here), and one of small order vouches for nothing
          * (`signer`: verifier-VCV2B; the lead's decision, 2026-10-02) */
-        switch (ed25519_key_check(key)) {
-        case ED25519_KEY_NO_POINT:
+        kc = ed25519_key_check(key);
+        if (kc == ED25519_KEY_NO_POINT)
             malformed(ln, "'issuer-key' %s: it encodes no point of the "
                       "curve, so it is no Ed25519 public key", v);
-        case ED25519_KEY_SMALL_ORDER:
+        if (kc == ED25519_KEY_SMALL_ORDER)
             refuse("signer", AT_LINE(ln), "line %lld: 'issuer-key' %s: a key "
                    "of small order ([8]A the identity): under it a signature "
                    "nobody made verifies for every message, so no holder "
                    "vouches by it", ln, v);
-        default:
-            break;
-        }
     }
     C->issuer_key = v;
     C->host_os = rd_text_or(R, K2_HOSTOS, UW, 2);
@@ -3366,6 +3364,7 @@ static const char *read_keyring(const char *key)
         size_t off = (size_t)(p - RING), len = (size_t)(e - p), t, sp = 0;
         char *ln = copy + off, *k, *holder;
         uint8_t raw[32];
+        int kc;
         for (t = 0; t < len; t++)
             if (ln[t] == ' ')
                 sp++;
@@ -3375,7 +3374,10 @@ static const char *read_keyring(const char *key)
                    "hex> <text>'", (unsigned long)line + 1);
         k = ln + 4;
         holder = strchr(k, ' ');
-        *holder++ = 0;
+        if (holder)
+            *holder++ = 0;
+        else                            /* only where the census skipped */
+            holder = k + strlen(k);     /* the check above: an empty text */
         if (!hex_exact(k, 64))
             refuse("signer", NOWHERE, "keyring line %lu: 'key <64 lowercase "
                    "hex> <text>'", (unsigned long)line + 1);
@@ -3387,19 +3389,18 @@ static const char *read_keyring(const char *key)
                 refuse("signer", NOWHERE, "keyring line %lu: key %.16s... "
                        "again", (unsigned long)line + 1, k);
         unhex32(k, raw);
-        switch (ed25519_key_check(raw)) {
-        case ED25519_KEY_NO_POINT:
+        /* two checks, not a switch: a case falling into the next would let
+         * the census's plant of one hide behind the other's refusal */
+        kc = ed25519_key_check(raw);
+        if (kc == ED25519_KEY_NO_POINT)
             refuse("signer", NOWHERE, "keyring line %lu: key %s: it encodes "
                    "no point of the curve, so it is no Ed25519 public key",
                    (unsigned long)line + 1, k);
-        case ED25519_KEY_SMALL_ORDER:
+        if (kc == ED25519_KEY_SMALL_ORDER)
             refuse("signer", NOWHERE, "keyring line %lu: key %s: a key of "
                    "small order ([8]A the identity): under it a signature "
                    "nobody made verifies for every message, so no holder "
                    "vouches by it", (unsigned long)line + 1, k);
-        default:
-            break;
-        }
         keys[line] = k;
         if (key && !strcmp(k, key))
             found = holder;
@@ -3421,6 +3422,9 @@ static void check_signature(const cert_t *C, const char *name, char *out,
     char keyhex[65];
     const char *holder;
     size_t i, nl = 0;
+    for (i = 0; i < 5; i++)
+        e[i] = SIG;                     /* set below; never read unset, even
+                                         * where the census skips a check */
     if (!SIG) {
         if (RING)
             read_keyring(NULL);         /* held to its form all the same */
@@ -3496,7 +3500,7 @@ static void check_signature(const cert_t *C, const char *name, char *out,
 /* Step 3a (cert2._check_superseded): -> the verdict's line, in `out` */
 static void check_superseded(const cert_t *C, char *out, size_t cap)
 {
-    char got[65];
+    char got[65] = "";
     size_t cut;
     int st;
     if (!SUP) {

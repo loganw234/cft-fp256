@@ -1041,6 +1041,15 @@ def v2_census_controls(work):
         "point", full.data, T2.SALT, {0: (full.img, None)},
         ("refused", "signature", ("-", "-", "-", "-")),
         states={0: {0: full.init}}, signature=nopoint.encode("ascii"))
+    # its certificate line another body's, its signature this one's: only
+    # the certificate line's own check refuses it (the signature verifies)
+    from cft_golden import cert2 as C2
+    named = "\n".join(S[:3] + [f"certificate {C2.body_hash_of(fl.data)}"]
+                      + S[4:]) + "\n"
+    one("the signed certificate, a signature file naming another "
+        "certificate, its signature this one's", full.data, T2.SALT,
+        {0: (full.img, None)}, ("refused", "signature", ("-", "-", "-", "-")),
+        states={0: {0: full.init}}, signature=named.encode("ascii"))
     wide = dataclasses.replace(lz.runs[2], lanes=4)
     one("lorenz-63, its wider-source run of 4 lanes (its state not handed)",
         T2.with_runs(lz, (r0, r1, wide, r3)), None, lz.progs,
