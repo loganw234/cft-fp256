@@ -58,7 +58,7 @@ module tb_reduce_acc #(
   cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY),
                    .EXT_MUL(1'b0)) u_add (
       .clk(clk), .rst_n(rst_n), .en(1'b1),
-      .in_valid(add_valid), .rnd(rnd),
+      .in_valid(add_valid), .rnd(rnd), .aug_mode(2'b00),
       .byp(1'b0), .byp_d('0), .byp_f('0),
       .a(add_a), .b(FP32_ONE), .c(add_b),
       .out_valid(), .d(add_res), .flags(add_flags),

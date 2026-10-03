@@ -88,6 +88,13 @@ module cft_lanes #(
     input  logic                 in_valid,
     input  logic [7:0]           op,     // opcode, sampled per issue
     input  logic [2:0]           rnd,    // 754 attribute, per issue
+    // Revision 8's R21 sideband (docs/ROADMAP.md, "Revision 8"), per
+    // issue like rnd: 0 an ordinary operation, 1 augadd, 2 augerr. Not
+    // the attribute's codes 5 to 7, which MODE[14:12] documents as RNE,
+    // so no elementwise run can reach R21's mode. Handed to every pipe;
+    // INERT at revision 8's seam - every driver ties it to zero and no
+    // pipe reads it until R21's lanes are built.
+    input  logic [1:0]           aug_mode,
     input  logic [1:0]           prec,   // PREC_CODE; stable per run
     input  logic [BEAT_BITS-1:0] a,
     input  logic [BEAT_BITS-1:0] b,
@@ -452,6 +459,7 @@ module cft_lanes #(
             .clk(clk), .rst_n(rst_n), .en(en),
             .in_valid(in_valid && (prec == PREC_FP32)),
             .rnd(rnd),
+            .aug_mode(aug_mode),
             .byp(bv_m), .byp_d(bd_m), .byp_f(bf_m),
             .a(fa), .b(fb), .c(fc),
             .out_valid(), .d(dd), .flags(f32_l[gi]),
@@ -511,6 +519,7 @@ module cft_lanes #(
             .clk(clk), .rst_n(rst_n), .en(en),
             .in_valid(in_valid && (prec == PREC_FP64)),
             .rnd(rnd),
+            .aug_mode(aug_mode),
             .byp(bv_m), .byp_d(bd_m), .byp_f(bf_m),
             .a(fa), .b(fb), .c(fc),
             .out_valid(), .d(dd), .flags(f64_l[gi]),
@@ -567,6 +576,7 @@ module cft_lanes #(
             .clk(clk), .rst_n(rst_n), .en(en),
             .in_valid(in_valid && (prec == PREC_FP128)),
             .rnd(rnd),
+            .aug_mode(aug_mode),
             .byp(bv_m), .byp_d(bd_m), .byp_f(bf_m),
             .a(fa), .b(fb), .c(fc),
             .out_valid(), .d(dd), .flags(f128_l[gi]),
@@ -619,6 +629,7 @@ module cft_lanes #(
           .clk(clk), .rst_n(rst_n), .en(en),
           .in_valid(in_valid && (prec == PREC_FP256)),
           .rnd(rnd),
+          .aug_mode(aug_mode),
           .byp(bv_m), .byp_d(bd_m), .byp_f(bf_m),
           .a(fa), .b(fb), .c(fc),
           .out_valid(), .d(dd), .flags(f256_l),

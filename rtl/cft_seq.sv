@@ -266,12 +266,25 @@ module cft_seq #(
      * writes one of its elements. */
     input  logic              cfg_mask_en,
     input  logic [ADDR_W-1:0] cfg_mask,
+    /* Revision 8's R23 (docs/SEQUENCER.md): MODE[24], decoded in the CSR,
+     * asks for the per-lane flag block, written at cfg_lflags
+     * (LFLAGS_PTR, 0xB0) after the counts. INERT at revision 8's seam:
+     * the CSR refuses MODE[24] on a build whose FEAT_LANE_FLAGS is
+     * clear, which is every build until R23 is built, so nothing below
+     * reads either port yet. */
+    /* verilator lint_off UNUSEDSIGNAL */
+    input  logic              cfg_lflags_en,
+    input  logic [ADDR_W-1:0] cfg_lflags,
+    /* verilator lint_on UNUSEDSIGNAL */
     output logic              busy,
     output logic              done,       // one-cycle pulse
     output logic              refuse,     // valid with done
     output logic [4:0]        flags,      // valid from done to next start
-    output logic [4:0]        err,        // [2:0] bus faults, [3] dep ovf,
-                                          // [4] scratch index out of range
+    output logic [5:0]        err,        // [2:0] bus faults, [3] dep ovf,
+                                          // [4] scratch index out of range,
+                                          // [5] a RAISE marked a lane
+                                          // (revision 8's R24; zero until
+                                          // R24 is built)
 
     // ---- the ALU array (cft_lanes) ---------------------------------
     // The per-issue request the issue machine builds, and the array's
@@ -280,6 +293,13 @@ module cft_seq #(
     output logic                 lane_valid,
     output logic [7:0]           lane_op,
     output logic [2:0]           lane_rnd,
+    // Revision 8's R21 sideband, the array's aug_mode: 0 an ordinary
+    // operation, 1 augadd, 2 augerr. Zero at revision 8's seam, until
+    // R21's decode is built: every code this module decodes today is an
+    // ordinary operation. libcft refuses codes 10 and 11 by name on a
+    // tile without CAPS2[11], and a stream that bypassed the loader
+    // decodes them here as HALT (the `default` arm).
+    output logic [1:0]           lane_aug_mode,
     output logic [1:0]           lane_prec,
     output logic [BEAT_BITS-1:0] lane_a,
     output logic [BEAT_BITS-1:0] lane_b,
@@ -902,6 +922,11 @@ module cft_seq #(
   logic                 al_valid;
   logic [7:0]           al_op;
   logic [2:0]           al_rnd;
+  // R21's sideband (revision 8's seam): a constant zero until R21's
+  // decode drives it, and the same signal reaches the shared array (as
+  // lane_aug_mode) and the private one below.
+  logic [1:0]           al_aug;
+  assign al_aug = 2'b00;
   logic [BEAT_BITS-1:0] al_a, al_b, al_c;
   logic                 al_rdy;
   logic                 al_ov;
@@ -918,6 +943,7 @@ module cft_seq #(
   assign lane_valid = al_valid;
   assign lane_op    = al_op;
   assign lane_rnd   = al_rnd;
+  assign lane_aug_mode = al_aug;
   assign lane_prec  = prec_q;
   assign lane_a     = al_a;
   assign lane_b     = al_b;
@@ -932,7 +958,8 @@ module cft_seq #(
           .MUL_PASSES(MUL_PASSES)
       ) u_lanes (
           .clk(ap_clk), .rst_n(ap_rst_n),
-          .in_valid(al_valid), .op(al_op), .rnd(al_rnd), .prec(prec_q),
+          .in_valid(al_valid), .op(al_op), .rnd(al_rnd),
+          .aug_mode(al_aug), .prec(prec_q),
           .a(al_a), .b(al_b), .c(al_c), .in_ready(al_rdy),
           .out_valid(al_ov), .d(al_d), .lane_flags(al_lf));
     end else begin : g_shared_lanes
@@ -2019,7 +2046,9 @@ module cft_seq #(
   logic        rd_fault_q, wr_fault_q, len_fault_q;
 
   assign flags  = flags_q;
-  assign err    = {scr_rng_q, dep_ovf_q, len_fault_q, wr_fault_q,
+  // err[5], R24's mark (STATUS[6] through cft_krnl), is a constant
+  // zero at revision 8's seam: no RAISE decodes until R24 is built.
+  assign err    = {1'b0, scr_rng_q, dep_ovf_q, len_fault_q, wr_fault_q,
                    rd_fault_q};
   assign refuse = refuse_q;
   assign busy   = (st != S_IDLE);

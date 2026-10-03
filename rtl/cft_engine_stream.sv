@@ -1812,7 +1812,7 @@ module cft_engine_stream #(
                   .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM),
                   .FUSE_ALIGN(FUSE_ALIGN), .MUL_PASSES(MUL_PASSES)) u_lanes (
           .clk(ap_clk), .rst_n(ap_rst_n),
-          .in_valid(lane_valid), .op(lane_op), .rnd(lane_rnd),
+          .in_valid(lane_valid), .op(lane_op), .rnd(lane_rnd), .aug_mode(2'b00),
           .prec(lane_prec), .a(lane_a), .b(lane_b), .c(lane_c),
           .in_ready(arr_rdy),
           .out_valid(), .d(arr_d), .lane_flags(arr_lf));

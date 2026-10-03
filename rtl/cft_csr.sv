@@ -38,10 +38,14 @@
 //                 [23:19] ABI 0.14 (docs/ROUND2.md): [19] a, [20] b,
 //                 [21] c and [22] scratch_in fetched through the index
 //                 table at 0x88..0xA0, honoured only under CAPS2[9];
-//                 [23] the lane mask at 0xA8, only under CAPS2[10]. A
-//                 build whose feature parameter is clear REFUSES its
-//                 bit exactly as the reserved range is refused:
-//                 [31:24] RESERVED, MUST BE ZERO. A non-zero bit here
+//                 [23] the lane mask at 0xA8, only under CAPS2[10].
+//                 [24] revision 8's R23 (docs/SEQUENCER.md): the run
+//                 writes a flag byte a lane at LFLAGS_PTR (0xB0),
+//                 honoured only under CAPS2[13] - and at revision 8's
+//                 seam no build carries it. A build whose feature
+//                 parameter is clear REFUSES its bit exactly as the
+//                 reserved range is refused:
+//                 [31:25] RESERVED, MUST BE ZERO. A non-zero bit here
 //                 is refused at start with STATUS[3], nothing begins
 //                 and no memory is touched. This guard did not exist
 //                 before the scalar bits, which is exactly why the three bits
@@ -65,7 +69,7 @@
 //                 a refusal is not a run, and scrubbing the previous
 //                 run's flags would be quietly rewriting history
 //   0x44  MAGIC   RO: 0x43465430 "CFT0"
-//   0x48  VERSION RO: 0x00000A00 (v0.10.0). Guards the REGISTER MAP,
+//   0x48  VERSION RO: 0x00000B00 (v0.11.0). Guards the REGISTER MAP,
 //                 not the feature set - features are announced in CAPS.
 //                 A host accepts any version whose map it knows.
 //   0x4C  CAPS    RO: what this bitstream actually implements.
@@ -176,6 +180,15 @@
 //                     scratch access at or past SCRATCH_D, and the
 //                     access was suppressed rather than reduced modulo
 //                     the depth. A report like [4], not an IEEE flag.
+//                 [6] MARKED on a sequencer run (revision 8's R24): a
+//                     RAISE marked a lane whose last bit a routine
+//                     could not decide. Its outputs are written, and
+//                     are to be replayed before they are used. A report
+//                     like [4] and [5], not an IEEE flag, and no quiet
+//                     region silences it. cft_seq's err[5], which is
+//                     zero on every tile until R24 is built - so a
+//                     revision-8 seam tile reads this bit as zero.
+//                 [31:7] read as zero.
 //   0x54  PROG_PTR 64-bit HBM byte address of the program image
 //                 (header, constants, instructions - see
 //                 docs/SEQUENCER.md), 32-byte aligned. Read by the
@@ -220,9 +233,26 @@
 //                        under MODE[22:19] (2026-09-15)
 //                 [10]   LANE_MASK: the mask at 0xA8 is read under
 //                        MODE[23] (2026-09-15)
-//                 [31:11] reserved, zero - room for the capacities and
+//                 [11]   AUGADD: control codes 10 and 11, augadd and
+//                        augerr (revision 8's R21)
+//                 [12]   SCRATCH_STEP: a post-step on STX and LDX (R22)
+//                 [13]   LANE_FLAGS: MODE[24] and the flag block at
+//                        LFLAGS_PTR (R23)
+//                 [14]   FLAG_CONTROL: QUIET, ENDQUIET and RAISE, and
+//                        STATUS[6] (R24)
+//                 [15]   reserved, zero
+//                 [20:16] log2 of the instructions a program may have
+//                        on a tile that STREAMS them (R8S,
+//                        docs/studies/R8S-streaming.md); zero on a tile
+//                        that holds every instruction on chip, where
+//                        CAPS[23:20] is the capacity
+//                 [31:21] reserved, zero - room for the capacities and
 //                        features that come next, so the NEXT one
 //                        does not move the map again
+//                 [14:11] and [20:16] arrived at revision 8's seam
+//                 (2026-10-02), every one ZERO until the item that
+//                 builds it sets it, and none of them moved VERSION:
+//                 LFLAGS_PTR did.
 //                 A log2 field of zero would have to mean "one slot",
 //                 not "no scratch", which is why [4] exists beside
 //                 [3:0]; and a tile older than this register reads
@@ -289,6 +319,19 @@
 //                 bytes, bit i lane i, set for a lane that runs; read
 //                 at block setup when MODE[23] is set, which CAPS2[10]
 //                 announces and the same guard refuses without it.
+//   0xB0  LFLAGS_PTR  revision 8's R23 (2026-10-02, VERSION 0xB00;
+//                 kernel argument 17): 64-bit HBM byte address of the
+//                 run's PER-LANE FLAG BLOCK, n bytes, lane i's at byte
+//                 i - the five IEEE flags it raised outside every quiet
+//                 region, its deposit overflow, its strict scratch fault
+//                 and its mark (docs/SEQUENCER.md R23). WRITTEN, after
+//                 the counts, and only when MODE[24] is set, which
+//                 CAPS2[13] announces and the guard refuses without it -
+//                 so it binds to m_axi_d beside d, cnt and scratch_out.
+//                 Appended at revision 8's seam for the reason 0x88..0xA8
+//                 were appended at round 2's: the items that write it and
+//                 the host that binds it share one map and one version.
+//                 Nothing writes through it until R23 is built.
 
 `timescale 1ns/1ps
 
@@ -320,9 +363,9 @@ module cft_csr (
     input  logic        busy,
     input  logic        done,        // one-cycle pulse
     input  logic [4:0]  eng_flags,
-    input  logic [5:0]  eng_err,     // sticky faults + refusal + deposit
-                                     // overflow + scratch range, see
-                                     // STATUS
+    input  logic [6:0]  eng_err,     // sticky faults + refusal + deposit
+                                     // overflow + scratch range + mark
+                                     // (revision 8's seam), see STATUS
     input  logic [3:0]  prec_caps,   // constant; from cft_krnl's EN_* params
     input  logic [7:0]  op_caps,     // constant; opcode groups present
     // CAPS[7:4]: what the SEQUENCER can do beyond the base program
@@ -343,12 +386,15 @@ module cft_csr (
     // CAPS2 (0x6C), the second capability word: [3:0] log2 of the
     // scratch slots a lane, [4] a scratch exists, [5] its per-run
     // block exists, [6] SCRATCH_STRICT, [7] SCALAR, [8] REDUCE_SEG,
-    // [9] INDEXED, [10] LANE_MASK, [31:11] reserved (the port is
-    // sixteen bits; the read pads the top half). The scratch fields
-    // are assembled by cft_krnl from the same localparams cft_seq
-    // elaborates its scratch from, so the register cannot drift from
-    // the memory it describes without the elaboration changing too.
-    input  logic [15:0] caps2,
+    // [9] INDEXED, [10] LANE_MASK, and since revision 8's seam [11]
+    // AUGADD, [12] SCRATCH_STEP, [13] LANE_FLAGS, [14] FLAG_CONTROL and
+    // [20:16] the log2 of a streamed instruction capacity; [15] and
+    // [31:21] reserved. The port is the whole word since that seam (it
+    // was sixteen bits, and the read padded the top half). The scratch
+    // fields are assembled by cft_krnl from the same localparams
+    // cft_seq elaborates its scratch from, so the register cannot drift
+    // from the memory it describes without the elaboration changing too.
+    input  logic [31:0] caps2,
     // The sequencer's on-chip capacities, as LOG2, from the very
     // parameters cft_krnl hands cft_seq - so CAPS cannot drift from
     // the memories it describes without the elaboration changing too.
@@ -386,6 +432,12 @@ module cft_csr (
      * MASK_PTR. Decoded here beside cfg_indexed and for the same
      * reason - the sequencer reads one name rather than a bit index. */
     output logic        cfg_mask_en,
+    /* MODE[24] (revision 8's R23): the run writes its per-lane flag
+     * block at LFLAGS_PTR. Decoded here beside cfg_mask_en and for the
+     * same reason. Refused by the guard below on a build whose
+     * feat_lane_flags is clear, which at revision 8's seam is every
+     * build, so nothing downstream reads it yet. */
+    output logic        cfg_lflags_en,
     output logic        cfg_mode_bad,  // a MODE bit this build refuses
     /* Constants from cft_krnl's localparams, exactly as prec_caps and
      * op_caps are: the tile decides what it carries, the CSR decides
@@ -403,6 +455,12 @@ module cft_csr (
      * over the caller's bytes in the lanes it was told to leave
      * alone, confidently and with clean flags. */
     input  logic        feat_lane_mask,
+    /* ...and the same for the per-lane flag block (CAPS2[13], revision
+     * 8's R23). A build whose sequencer does not write LFLAGS_PTR
+     * refuses MODE[24] rather than ignoring it: an ignored ask would
+     * leave the caller reading whatever its buffer held as each lane's
+     * flags, confidently, beside a FLAGS word that says otherwise. */
+    input  logic        feat_lane_flags,
     output logic [63:0] cfg_cnt,
     // SEG / NRES (0x80 / 0x84): a reduction's segment length and its
     // result count; zero is the whole array.
@@ -414,7 +472,11 @@ module cft_csr (
     // build whose FEAT_INDEXED or FEAT_LANE_MASK is clear, the MODE
     // bits that would select them are refused (cfg_mode_bad).
     output logic [63:0] cfg_idx_a, cfg_idx_b, cfg_idx_c, cfg_idx_si,
-    output logic [63:0] cfg_mask
+    output logic [63:0] cfg_mask,
+    // Revision 8's seam (2026-10-02): LFLAGS_PTR (0xB0), the per-lane
+    // flag block's address, R23's kernel argument 17. Read by nothing
+    // until R23 is built; MODE[24], which would select it, is refused.
+    output logic [63:0] cfg_lflags
 );
 
   localparam [31:0] MAGIC   = 32'h4346_5430;
@@ -480,7 +542,22 @@ module cft_csr (
   // that wrote a table pointer to a 0x900 tile would write into a
   // decode default, which is the whole of why VERSION moves. The
   // host accepts {0x410, 0x500, 0x600, 0x700, 0x800, 0x900, 0xA00}.
-  localparam [31:0] VERSION = 32'h0000_0A00;
+  //
+  // 0xA00 -> 0xB00 (2026-10-02, revision 8's seam, docs/ROADMAP.md
+  // "Revision 8") is the same bump a sixth time, and the second made
+  // at a seam: LFLAGS_PTR exists at 0xB0/0xB4 as kernel argument 17,
+  // the address R23's per-lane flag block is written to, so that the
+  // items that will write it and the host that binds it share one map.
+  // Nothing writes through it at the seam: MODE[24], which asks for the
+  // block, is refused by the guard below while FEAT_LANE_FLAGS is clear,
+  // and CAPS2[13] stays zero until R23 sets it - at this same version,
+  // because a feature bit does not move VERSION. The seam's other
+  // changes add no register and so do not move it either: STATUS[6]
+  // (R24's mark) is a bit of a register that exists, and CAPS2[14:11]
+  // and [20:16] are fields of one. A host that wrote LFLAGS_PTR to an
+  // 0xA00 tile would write into a decode default. The host accepts
+  // {0x410, 0x500, 0x600, 0x700, 0x800, 0x900, 0xA00, 0xB00}.
+  localparam [31:0] VERSION = 32'h0000_0B00;
 
   logic ap_start_q, ap_done_q, ap_idle;
   logic [31:0] gier_q, ier_q;
@@ -489,6 +566,7 @@ module cft_csr (
   logic [63:0] sin_q, sout_q;
   logic [31:0] seg_q, nres_q;              // 0x80 / 0x84
   logic [63:0] idx_a_q, idx_b_q, idx_c_q, idx_si_q, mask_q;   // 0x88 .. 0xAF
+  logic [63:0] lflags_q;                   // 0xB0 / 0xB4, revision 8
 
   assign ap_idle  = !busy;
   assign cfg_op   = mode_q[7:0];
@@ -510,17 +588,19 @@ module cft_csr (
   assign cfg_idx_c  = idx_c_q;
   assign cfg_idx_si = idx_si_q;
   assign cfg_mask   = mask_q;
+  assign cfg_lflags = lflags_q;
   assign cfg_sout = sout_q;
 
-  assign cfg_scalar   = mode_q[18:16];
-  assign cfg_indexed  = mode_q[22:19];
-  assign cfg_mask_en  = mode_q[23];
+  assign cfg_scalar    = mode_q[18:16];
+  assign cfg_indexed   = mode_q[22:19];
+  assign cfg_mask_en   = mode_q[23];
+  assign cfg_lflags_en = mode_q[24];
 
   /* A MODE bit this build will not honour, which must be REFUSED and
    * never ignored: an ignored stride-0 flag reads n elements from a
    * one-element buffer, and an ignored index table reads the dense
    * stream and answers from the wrong elements with clean flags.
-   * [31:24] is reserved on every build; [23:16] is refused unless the
+   * [31:25] is reserved on every build; [24:16] is refused unless the
    * feature parameter says this tile carries it.
    *
    * Written as an OR of named terms rather than a mask compare, for the
@@ -528,10 +608,14 @@ module cft_csr (
    * is one typo away from silently permitting a bit.
    *
    * MODE[23], the lane mask, has its own feature bit as of P3 and is
-   * refused exactly where the tile cannot honour it; [31:24] is what
-   * is left of the reserved range. */
+   * refused exactly where the tile cannot honour it. MODE[24], R23's
+   * flag block, has its own from revision 8's seam on the same terms -
+   * and the seam builds it nowhere, so every tile refuses it as it
+   * refused it when it was reserved. [31:25] is what is left of the
+   * reserved range. */
   assign cfg_mode_bad =
-      (mode_q[31:24] != 8'b0)                     ||
+      (mode_q[31:25] != 7'b0)                     ||
+      (mode_q[24] && !feat_lane_flags)            ||
       (mode_q[23] && !feat_lane_mask)             ||
       (|mode_q[22:19] && !feat_indexed)           ||
       (|mode_q[18:16] && !feat_scalar);
@@ -580,6 +664,7 @@ module cft_csr (
       seg_q <= '0; nres_q <= '0;
       idx_a_q <= '0; idx_b_q <= '0; idx_c_q <= '0; idx_si_q <= '0;
       mask_q <= '0;
+      lflags_q <= '0;
     end else begin
       start <= 1'b0;
 
@@ -664,6 +749,11 @@ module cft_csr (
           10'h029: idx_si_q[63:32] <= (idx_si_q[63:32] & ~wmask) | (wdata_q & wmask);
           10'h02A: mask_q[31:0]    <= (mask_q[31:0]    & ~wmask) | (wdata_q & wmask);
           10'h02B: mask_q[63:32]   <= (mask_q[63:32]   & ~wmask) | (wdata_q & wmask);
+          // 0xB0 / 0xB4: LFLAGS_PTR (revision 8's R23), appended at
+          // revision 8's seam for the reason every pointer above the
+          // read-only block was.
+          10'h02C: lflags_q[31:0]  <= (lflags_q[31:0]  & ~wmask) | (wdata_q & wmask);
+          10'h02D: lflags_q[63:32] <= (lflags_q[63:32] & ~wmask) | (wdata_q & wmask);
           default: ;
         endcase
       end
@@ -713,14 +803,16 @@ module cft_csr (
           10'h012: s_axi_control_rdata <= VERSION;
           10'h013: s_axi_control_rdata <= {alu_ext, cap_kreg, cap_imem, cap_maxd,
                                            op_caps, seq_feat, prec_caps};
-          10'h014: s_axi_control_rdata <= {26'b0, eng_err};
+          // Seven bits since revision 8's seam: [6] is R24's mark
+          // (cft_seq's err[5]), zero until R24 is built.
+          10'h014: s_axi_control_rdata <= {25'b0, eng_err};
           10'h015: s_axi_control_rdata <= prog_q[31:0];
           10'h016: s_axi_control_rdata <= prog_q[63:32];
           10'h017: s_axi_control_rdata <= cnt_q[31:0];
           10'h018: s_axi_control_rdata <= cnt_q[63:32];
           10'h019: s_axi_control_rdata <= bank_q[31:0];
           10'h01A: s_axi_control_rdata <= bank_q[63:32];
-          10'h01B: s_axi_control_rdata <= {16'b0, caps2};
+          10'h01B: s_axi_control_rdata <= caps2;   // whole since revision 8
           10'h01C: s_axi_control_rdata <= sin_q[31:0];
           10'h01D: s_axi_control_rdata <= sin_q[63:32];
           10'h01E: s_axi_control_rdata <= sout_q[31:0];
@@ -737,6 +829,8 @@ module cft_csr (
           10'h029: s_axi_control_rdata <= idx_si_q[63:32];
           10'h02A: s_axi_control_rdata <= mask_q[31:0];
           10'h02B: s_axi_control_rdata <= mask_q[63:32];
+          10'h02C: s_axi_control_rdata <= lflags_q[31:0];
+          10'h02D: s_axi_control_rdata <= lflags_q[63:32];
           default: s_axi_control_rdata <= 32'h0;
         endcase
       end

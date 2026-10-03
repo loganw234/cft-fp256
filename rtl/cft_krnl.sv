@@ -294,7 +294,7 @@ module cft_krnl #(
   logic [2:0]  eng_err;
   logic        seq_busy, seq_done, seq_refuse;
   logic [4:0]  seq_flags;
-  logic [4:0]  seq_err;
+  logic [5:0]  seq_err;     // [5], R24's mark, since revision 8's seam
   logic [7:0]  cfg_op;
   logic [3:0]  cfg_prec;
   logic [2:0]  cfg_rnd;
@@ -344,6 +344,28 @@ module cft_krnl #(
   logic [63:0] cfg_idx_a, cfg_idx_b, cfg_idx_c, cfg_idx_si;
   logic [63:0] cfg_mask;
   logic        cfg_mask_en;
+  /* Revision 8's seam (docs/ROADMAP.md, "Revision 8", 2026-10-02): the
+   * slots of CAPS2[14:11], every one ZERO until the item that builds
+   * it sets it -
+   *   [11] R21, augadd and augerr (control codes 10 and 11);
+   *   [12] R22, the post-step on STX and LDX;
+   *   [13] R23, the per-lane flag block: MODE[24] and LFLAGS_PTR at
+   *        0xB0, which the CSR's guard refuses from FEAT_LANE_FLAGS as
+   *        it refuses MODE[23] from FEAT_LANE_MASK;
+   *   [14] R24, flag control (QUIET, ENDQUIET, RAISE) and STATUS[6].
+   * Localparams and not parameters, for the reason FEAT_INDEXED and
+   * FEAT_LANE_MASK were localparams at round 2's seam: a build that
+   * could set one here would advertise an instruction no decoder in
+   * this tree computes. R21's becomes EN_AUGADD, a build parameter
+   * (the plan's question 9), when its decode is built. CAPS2[20:16],
+   * the streamed instruction capacity, is zero below for the same
+   * reason until SEQ_STREAM_D exists (round 2). */
+  localparam bit FEAT_AUGADD       = 1'b0;
+  localparam bit FEAT_SCRATCH_STEP = 1'b0;
+  localparam bit FEAT_LANE_FLAGS   = 1'b0;
+  localparam bit FEAT_FLAG_CONTROL = 1'b0;
+  logic [63:0] cfg_lflags;
+  logic        cfg_lflags_en;
 
   logic [2:0] cfg_scalar;
   logic [3:0] cfg_indexed;
@@ -435,6 +457,7 @@ module cft_krnl #(
   logic [2:0] run_bus;
   logic       run_ovf;
   logic       run_rng;   // revision 4 R8: an index past the depth
+  logic       run_mark;  // revision 8 R24: a RAISE marked a lane
 
   assign run_busy  = mode_seq_q ? seq_busy      : eng_busy;
   assign run_done  = mode_seq_q ? seq_done      : eng_done;
@@ -444,6 +467,10 @@ module cft_krnl #(
   // The engine has no scratch and no indexed access, so this is a
   // sequencer-only bit, exactly as the deposit overflow above is.
   assign run_rng   = mode_seq_q ? seq_err[4]    : 1'b0;
+  // ...and the engine has no RAISE, so R24's mark is a sequencer-only
+  // bit too: STATUS[6]. cft_seq ties err[5] to zero until R24 is built,
+  // so at revision 8's seam every tile reads it as zero.
+  assign run_mark  = mode_seq_q ? seq_err[5]    : 1'b0;
   assign refuse_any = refused_q | seq_refused_q;
 
   // FLAGS is the last RUN's truth, and a refusal is not a run.
@@ -531,8 +558,11 @@ module cft_krnl #(
       // no output to distrust, and 0x8 exactly is what tells a host
       // "this did not happen" without also telling it the memory
       // system is broken. Bit 4, the deposit overflow, is masked with
-      // them: a run that never deposited cannot have overflowed.
-      .eng_err({run_rng & ~refuse_any, run_ovf & ~refuse_any, refuse_any,
+      // them: a run that never deposited cannot have overflowed. Bit 6,
+      // R24's mark (revision 8's seam), likewise: a run that never ran
+      // marked no lane.
+      .eng_err({run_mark & ~refuse_any, run_rng & ~refuse_any,
+                run_ovf & ~refuse_any, refuse_any,
                 run_bus & {3{~refuse_any}}}),
       .prec_caps(PREC_CAPS),
       //
@@ -595,8 +625,27 @@ module cft_krnl #(
       // cft_seq elaborates the memory from, for the reason the three
       // log2 fields of CAPS are: two copies of a number is how a
       // capability register ends up describing a memory that is no
-      // longer that size.
-      .caps2({5'b0,        // [15:11] reserved, zero
+      // longer that size. The whole 32-bit word since revision 8's
+      // seam, whose fields [20:16] and [14:11] are zero below until
+      // the item that builds each sets it.
+      .caps2({11'b0,       // [31:21] reserved, zero
+              5'b0,        // [20:16] log2 of the instructions a program
+                           //      may have on a tile that STREAMS them
+                           //      (R8S, docs/studies/R8S-streaming.md,
+                           //      section 6). Zero says CAPS[23:20] is
+                           //      the capacity, as on every tile until
+                           //      round 2's SEQ_STREAM_D publishes
+                           //      log2 SEQ_STREAM_D where it exceeds
+                           //      SEQ_IMEM_D.
+              1'b0,        // [15] reserved, zero
+              FEAT_FLAG_CONTROL, // [14] FLAG_CONTROL (revision 8's R24):
+                           //      QUIET, ENDQUIET, RAISE, STATUS[6]
+              FEAT_LANE_FLAGS,   // [13] LANE_FLAGS (R23): MODE[24] and
+                           //      the block at LFLAGS_PTR; from the
+                           //      localparam the CSR's refusal reads
+              FEAT_SCRATCH_STEP, // [12] SCRATCH_STEP (R22): STX and
+                           //      LDX's post-step
+              FEAT_AUGADD, // [11] AUGADD (R21): codes 10 and 11
               FEAT_LANE_MASK, // [10] LANE_MASK: MASK_PTR at 0xA8 is read
                            //      at block setup under MODE[23] and a
                            //      lane whose bit is clear runs nothing
@@ -661,13 +710,14 @@ module cft_krnl #(
       .cfg_prog(cfg_prog), .cfg_bank(cfg_bank),
       .cfg_sin(cfg_sin), .cfg_sout(cfg_sout), .cfg_cnt(cfg_cnt),
       .cfg_scalar(cfg_scalar), .cfg_indexed(cfg_indexed),
-      .cfg_mask_en(cfg_mask_en),
+      .cfg_mask_en(cfg_mask_en), .cfg_lflags_en(cfg_lflags_en),
       .cfg_mode_bad(mode_bad),
       .feat_scalar(FEAT_SCALAR), .feat_indexed(FEAT_INDEXED),
-      .feat_lane_mask(FEAT_LANE_MASK),
+      .feat_lane_mask(FEAT_LANE_MASK), .feat_lane_flags(FEAT_LANE_FLAGS),
       .cfg_seg(cfg_seg), .cfg_nres(cfg_nres),
       .cfg_idx_a(cfg_idx_a), .cfg_idx_b(cfg_idx_b), .cfg_idx_c(cfg_idx_c),
-      .cfg_idx_si(cfg_idx_si), .cfg_mask(cfg_mask)
+      .cfg_idx_si(cfg_idx_si), .cfg_mask(cfg_mask),
+      .cfg_lflags(cfg_lflags)
   );
 
   // ---- the shared masters --------------------------------------------
@@ -805,6 +855,13 @@ module cft_krnl #(
   logic                      arr_rdy, arr_ov;
   logic [BEAT_BITS-1:0]      arr_d;
   logic [BEAT_BITS/32*5-1:0] arr_lf;
+  // Revision 8's seam: the sequencer's R21 sideband (0 an ordinary
+  // operation, 1 augadd, 2 augerr). Driven - to zero, until R21's
+  // decode is built - and read by nothing yet: the array's aug_mode is
+  // tied off below, and joins this through mode_seq_q when R21 does.
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [1:0]                seq_laug;
+  /* verilator lint_on UNUSEDSIGNAL */
 
   // The array's acceptance strobe reaches both issuers; each gates its
   // own issue on it, and each is a no-op at MUL_PASSES=1 where the
@@ -818,6 +875,10 @@ module cft_krnl #(
       .in_valid (mode_seq_q ? seq_lv    : eng_lv),
       .op       (mode_seq_q ? seq_lop   : eng_lop),
       .rnd      (mode_seq_q ? seq_lrnd  : eng_lrnd),
+      // R21's sideband, TIED OFF at revision 8's seam: no driver
+      // reaches it until R21's decode is built, and the engine's half
+      // of the mux will be zero for good (docs/ROADMAP.md, R21).
+      .aug_mode (2'b00),
       .prec     (mode_seq_q ? seq_lprec : eng_lprec),
       .a        (mode_seq_q ? seq_la    : eng_la),
       .b        (mode_seq_q ? seq_lb    : eng_lb),
@@ -906,8 +967,13 @@ module cft_krnl #(
        * CSR has already refused MODE[23] on a build whose
        * FEAT_LANE_MASK is 0, so what arrives here is honoured. */
       .cfg_mask_en(cfg_mask_en), .cfg_mask(cfg_mask),
+      /* ...and revision 8's R23 flag block, INERT at the seam: the CSR
+       * refuses MODE[24] on a build whose FEAT_LANE_FLAGS is clear,
+       * which is every build until R23 is, so cft_seq reads neither. */
+      .cfg_lflags_en(cfg_lflags_en), .cfg_lflags(cfg_lflags),
       .busy(seq_busy), .done(seq_done), .refuse(seq_refuse),
       .lane_valid(seq_lv), .lane_op(seq_lop), .lane_rnd(seq_lrnd),
+      .lane_aug_mode(seq_laug),
       .lane_prec(seq_lprec), .lane_a(seq_la), .lane_b(seq_lb), .lane_c(seq_lc),
       .lane_ready(arr_rdy), .lane_ov(arr_ov), .lane_d(arr_d), .lane_flags(arr_lf),
       .flags(seq_flags), .err(seq_err),

@@ -216,7 +216,21 @@ def caps2_expected():
     # state of the tile while the two parcels land one at a time.
     indexed = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_INDEXED")
     lmask = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_LANE_MASK")
-    return ((lmask << 10) | (indexed << 9) | (seg << 8) | (scalar << 7) |
+    # [14:11], revision 8's seam (2026-10-02): R21's augadd and augerr,
+    # R22's stepped index, R23's lane-flags block and R24's flag control.
+    # Read from the RTL like every bit above them, so each item's parcel
+    # sets its own bit and this follows.
+    aug = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_AUGADD")
+    step = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_SCRATCH_STEP")
+    lflags = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_LANE_FLAGS")
+    fctl = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_FLAG_CONTROL")
+    # [20:16], the streamed instruction capacity's log2 (R8S): zero on
+    # every tile until round 2's SEQ_STREAM_D exists to publish it, and
+    # pinned at zero here until then. [15] and [31:21] are reserved.
+    stream_log2 = 0
+    return ((stream_log2 << 16) | (fctl << 14) | (lflags << 13) |
+            (step << 12) | (aug << 11) |
+            (lmask << 10) | (indexed << 9) | (seg << 8) | (scalar << 7) |
             (1 << 6) | (1 << 5) | (1 << 4) | (d.bit_length() - 1))
 
 
@@ -241,8 +255,10 @@ def check_caps2(caps2):
         f"CAPS2 is {caps2:#010x}, want {want:#010x} - [3:0] log2 of the "
         f"scratch slots a lane, [4] a scratch exists, [5] the per-run "
         f"block exists, [6] SCRATCH_STRICT, [7] SCALAR operands, "
-        f"[8] REDUCE_SEG, [9] INDEXED, [10] LANE_MASK, "
-        f"[31:11] reserved zero")
+        f"[8] REDUCE_SEG, [9] INDEXED, [10] LANE_MASK, [11] AUGADD, "
+        f"[12] SCRATCH_STEP, [13] LANE_FLAGS, [14] FLAG_CONTROL, "
+        f"[20:16] log2 of a streamed instruction capacity, [15] and "
+        f"[31:21] reserved zero")
 
 
 def seq_caps_expected():
@@ -516,8 +532,9 @@ async def krnl_end_to_end(dut):
     # 0x700 -> 0x800 at revision 3: the map GREW again, by CAPS2 at
     # 0x6C and the two scratch pointers at 0x70 and 0x78; 0x800 ->
     # 0x900 on 2026-09-14, by SEG/NRES at 0x80/0x84 (ask 7); 0xA00 on
-    # 2026-09-15 by the five pointers at 0x88..0xA8 (docs/ROUND2.md).
-    assert await axil.read_dword(VERSION) == 0x00000A00
+    # 2026-09-15 by the five pointers at 0x88..0xA8 (docs/ROUND2.md);
+    # 0xB00 on 2026-10-02 by LFLAGS_PTR at 0xB0, revision 8's seam.
+    assert await axil.read_dword(VERSION) == 0x00000B00
     caps = await axil.read_dword(CAPS)
     # CAPS[3:0] against what this bench was BUILT with, not against 0xF: a
     # trimmed build (make krnlf128) must advertise exactly the rungs it
