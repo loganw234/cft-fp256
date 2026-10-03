@@ -9,7 +9,7 @@
 # (docker/Dockerfile.formal), so the host needs Docker and nothing
 # else. Same gate on a developer box and in CI, same claim.
 #
-# The gate is seven proof files - thirty-five tasks - and a tripwire, in
+# The gate is seven proof files - thirty-eight tasks - and a tripwire, in
 # this order:
 #
 #   fifo.sby      prove+cover   cft_fifo contract, unbounded (pdr)
@@ -23,10 +23,11 @@
 #                               composition argument's independent check
 #   lzcone.sby    4 rungs       cft_lzcone == the priority-loop cone it
 #                               replaced, complete at each window width
-#   ifetch.sby    4 proofs      cft_ifetch, revision 8's instruction fetch:
-#                 + cover       its control, its words, its bounded answer
+#   ifetch.sby    6 proofs      cft_ifetch, revision 8's instruction fetch:
+#                 + 2 covers    its control, its words, its bounded answer
 #                               and its quiesce, unbounded (k-induction
-#                               with proven helper invariants)
+#                               with proven helper invariants), at two
+#                               sizes - the second a four-burst FIFO
 #   negcontrol.sby              a deliberately broken property that MUST
 #                               be refuted - a gate that cannot fail
 #                               proves nothing, and this run discovered
@@ -100,7 +101,7 @@ vacuity seedop     tb_seedop_formal   11 ../rtl/cft_seedop.sv tb_seedop_formal.s
 vacuity equiv      tb_simpleops_equiv  3 ../rtl/cft_simpleops.sv ../tb/wrappers/cft_simpleops_ref.sv tb_simpleops_equiv.sv
 vacuity lzcone     tb_lzcone_equiv     3 -I ../rtl ../rtl/cft_fpfma_pipe.sv cft_lzcone_ref.sv tb_lzcone_equiv.sv
 vacuity negcontrol tb_negcontrol_formal 1 ../rtl/cft_fifo.sv tb_negcontrol_formal.sv
-vacuity ifetch     tb_ifetch_formal   26 ../rtl/cft_fifo.sv ../rtl/cft_ifetch.sv tb_ifetch_formal.sv
+vacuity ifetch     tb_ifetch_formal   30 ../rtl/cft_fifo.sv ../rtl/cft_ifetch.sv tb_ifetch_formal.sv
 
 if [ "$preflight_bad" -ne 0 ]; then
     echo
@@ -231,16 +232,21 @@ run_proof mulpass_real.sby p237c1  1 "fp256 x10: whole claim, one property"
 # the real chunk, which is what the gate certifies.
 
 # cft_ifetch (revision 8, R8S; parcel RD1, 2026-10-03), at a 16-word
-# capacity, a 4-word store, an 8-word FIFO and two-bit granules
-# (tb_ifetch_formal.sv has the scope). Each task is k-induction over its
-# claims and the helper invariants that make them inductive, all
-# proven; ifetch.sby says why not pdr. The minimums are each task's
-# measured count of checks in its solved model.
-run_proof ifetch.sby   prove         26 "fetch: control, faults, AR, FIFO"
-run_proof ifetch.sby   data_prove    49 "fetch: each word is the image's"
-run_proof ifetch.sby   deliver_prove 50 "fetch: answered within 18 cycles"
-run_proof ifetch.sby   ends_prove    27 "fetch: idle within 14 of a stop"
-run_proof ifetch.sby   cover         13 "fetch: control shapes reachable"
+# capacity, a 4-word store, an 8-word FIFO and two-bit granules, and
+# the wide_ tasks again with a 32-word FIFO (four bursts, LIVE_MAX 2) and
+# a 64-word capacity, where the three shapes a one-burst FIFO cannot
+# reach occur (verifier-VRD1; tb_ifetch_formal.sv has the scope). Each
+# proof is k-induction over its claims and the helper invariants that
+# make them inductive, all proven; ifetch.sby says why not pdr. The
+# minimums are each task's measured count of checks in its solved model.
+run_proof ifetch.sby   prove           30 "fetch: control, faults, AR, FIFO"
+run_proof ifetch.sby   data_prove      57 "fetch: words, 2+ cycles after landing"
+run_proof ifetch.sby   deliver_prove   54 "fetch: answered within 18 cycles"
+run_proof ifetch.sby   ends_prove      31 "fetch: idle within 14 of a stop"
+run_proof ifetch.sby   cover           14 "fetch: control shapes reachable"
+run_proof ifetch.sby   wide_prove      27 "fetch, 4-burst FIFO: control"
+run_proof ifetch.sby   wide_data_prove 54 "fetch, 4-burst FIFO: words"
+run_proof ifetch.sby   wide_cover       4 "fetch, 4-burst FIFO: 3 shapes, full"
 
 # --- the negative control ------------------------------------------------
 # expect fail in negcontrol.sby means: rc 0 == the broken property was

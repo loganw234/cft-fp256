@@ -1067,7 +1067,14 @@ header check against STREAM_D; the elaboration guards; SEQ_STREAM_D in
 cft_krnl.sv with CAPS and CAPS2 from it; and the main read engine's
 issue held off while the fetch is not idle - the unit issues only
 between a want and the next quiesce, init or fault, so S_WAIT_B waiting
-for idle is the whole of it.
+for idle is the whole of it. And the converse, which that does not
+give (verifier-VRD1): the main read engine DRAINED when the fetch's span
+opens. "R beats belong to the fetch exactly while it is not idle" holds
+only if no main-engine beat is still to come. A setup load stops at its
+last expected beat, so a burst the memory made long would leave beats
+on the R channel, and the fetch would take them as its own. So: no
+fetch AR until every main-engine burst has seen its RLAST, or a long
+one is refused and drained to it, as the engines' length rule does.
 
 ### Where it departs from, or settles, sections 2 and 3
 
@@ -1111,24 +1118,48 @@ for idle is the whole of it.
 
 Every task is unbounded: k-induction proving all of a task's assertions
 together, its claims and the helper invariants that make them
-inductive, each of which is proven, not assumed. At a 16-instruction
-capacity, a 4-word store, an 8-word FIFO, bursts of 2 (2 live, 4 in
-all), 13-bit addresses and two-bit granules; the byte geometry is the
-image format's, unchanged (measured, the cft-formal image, one task at
-a time, 4 CPUs, two runs, the desktop at 7 to 51%):
+inductive, each of which is proven, not assumed. Two configurations
+share the image format's byte geometry, 13-bit addresses and two-bit
+granules: the default sizes - a 16-instruction capacity, a 4-word
+store, an 8-word FIFO, bursts of 2 (2 live, 4 in all), as section 8
+planned - and the wide sizes, added after verifier-VRD1 (below): the
+FIFO at 32 words, four bursts, with LIVE_MAX at 2 below the four it
+could take, and a 64-instruction capacity (measured, the cft-formal
+image, one task at a time, 4 CPUs, the desktop at 0 to 26%; time is
+sby's elapsed clock):
 
-| task | the memory | proves | depth | time | checks |
-|---|---|---|---|---|---|
-| prove | free timing, RLAST, RRESP | never past n_insns or after a fault; faults raised by bad beats and only by them; every AR aligned, at most BURST beats, inside a 4 KB page and the section, held until taken; at most OUT_MAX outstanding; idle truthful; silence after a quiesce, init or fault; cft_fifo's caller contract | 3 | 1 s | 26 |
-| data_prove | honest, free timing | every word `ok` presents is the image's word at the address presented | 3 | 5 s | 49 |
-| deliver_prove | honest, prompt | a consumer waiting on one address is answered within 18 cycles | 19 | 176 to 243 s | 50 |
-| ends_prove | prompt, faults free | idle within 14 cycles of a quiesce, an init or a fault | 15 | 4 s | 27 |
-| cover | free | 13 shapes reached, at steps 3 to 14 | 40 | 8 s | 13 |
+| task | sizes | the memory | proves | depth | time | checks |
+|---|---|---|---|---|---|---|
+| prove | default | free timing, RLAST, RRESP | never past n_insns or after a fault; faults raised by bad beats and only by them; every AR aligned, at most BURST beats, inside a 4 KB page and the section, held until taken; at most OUT_MAX outstanding; idle truthful; silence after a quiesce, init or fault; cft_fifo's caller contract; the three shapes below never reached | 3 | under 1 s | 30 |
+| data_prove | default | honest, free timing | every word `ok` presents is the image's word at the address presented; a stream word is handed over two or more cycles after its beat lands | 3 | 8 s | 57 |
+| deliver_prove | default | honest, prompt | a consumer waiting on one address is answered within 18 cycles | 19 | 181 s | 54 |
+| ends_prove | default | prompt, faults free | idle within 14 cycles of a quiesce, an init or a fault | 15 | 3 s | 31 |
+| cover | default | free | 14 shapes reached, at steps 3 to 14 - among them a stream word handed over exactly two cycles after its beat landed | 40 | 6 s | 14 |
+| wide_prove | wide | free timing, RLAST, RRESP | prove's claims and helpers | 3 | under 1 s | 27 |
+| wide_data_prove | wide | honest, free timing | data_prove's claims and helpers | 3 | 39 s | 54 |
+| wide_cover | wide | free | the three shapes reached (steps 5 to 7), and the 32-word FIFO full (step 38) | 44 | 89 s | 4 |
+
+**Why two sizes.** At the default sizes the FIFO holds exactly one
+burst, so three shapes of the reservation cannot occur there: a whole
+burst launching while the unit is not empty, more than BURST beats
+owed to live bursts, and the launch's `live_n < LIVE_MAX` term deciding
+anything. All three happen at the U50's sizes. verifier-VRD1 found them
+missing. The default-size tasks now assert the three unreachable; at
+the wide sizes all three occur, the claims are proven, and VRD1's plant
+v13 is red (the plants, below). The bounded claims run at the default
+sizes only. The three are the shapes found missing, not a proof that no
+other is: tb/test_ifetch.py runs the unit at the U50's stream sizes and
+is the net for any shape neither configuration reaches. Section 8
+planned the default sizes alone; the wide ones are an addition.
 
 data_prove's honest memory is enough because a word reaches `ok` at
-least two cycles after its beat lands, a bad beat raises its bit the
-next cycle, and `ok` is never high with a bit raised - all three in
-prove. pdr, the FIFO proof's engine, proved most control claims alone
+least two cycles after its beat lands (`a_lat`, in data_prove; the
+cover task reaches exactly two), a bad beat raises its bit the next
+cycle, and `ok` is never high with a bit raised (both in prove). Up to
+its bad beat a faulting memory's run is an honest one's, the word shown
+in that beat's own cycle is from older beats, and from the next cycle
+`ok` is low until an init drops everything. pdr, the FIFO proof's
+engine, proved most control claims alone
 in seconds but not three of them nor the data claim (measured; formal/
 README.md has the figures), and on the way it found a real hole: the
 beat counter of departure 7, at step 518. The invariants k-induction
@@ -1136,10 +1167,13 @@ needed were read off its counterexamples; none was a defect in the RTL.
 
 ### The bench
 
-13 cases, each at SeqRam read latencies 0, 125 and 256, with a 64-word
-store and a 4,096-word capacity: 13/13 under Verilator (57 s wall) and
-under Icarus (69 s wall), the desktop idle (measured). What it
-measured, in the model:
+13 cases, each at SeqRam read latencies 0, 125 and 256 - the
+abandoned-burst case at 125 and 256 only: it plants its fault on a
+burst the block's halt must find still in flight, which a memory
+answering at once does not leave - with a 64-word store and a
+4,096-word capacity: 13/13 under Verilator (57 s wall) and under Icarus
+(69 s wall), the desktop idle (measured). What it measured, in the
+model:
 - **A program the store holds** reads nothing and never waits, at every
   latency: every cycle is today's.
 - **A body that starts in the store and runs past it** (200
@@ -1176,9 +1210,9 @@ longer inductive), and every plant fails at least one of them.
 
 | plant | as planted in the unit | the bench | the claims alone |
 |---|---|---|---|
-| 1. the store's range one past its end | the hit test reads `addr <= send` | 9 of the 12 cases the bench then had red: "the unit handed ... for address 64, whose word is ... - a word the memory did not deliver there" | `a_word` (data_prove's own basecase too) |
+| 1. the store's range one past its end | the hit test reads `addr <= send` | 8 of the 12 cases the bench then had red: "the unit handed ... for address 64, whose word is ... - a word the memory did not deliver there" | `a_word` (data_prove's own basecase too) |
 | 2. a redirect that keeps the FIFO's words | the FIFO's clear is the quiesce's and the init's alone | 3 cases red, the body past the store, the body larger than the store, nesting: wrong words after a back-jump | `a_word`, step 7 |
-| 3. abandoned bursts' beats not dropped | no burst is ever treated as abandoned | nesting four deep, at latency 125: a wrong word at address 98 | `a_word`, step 7 |
+| 3. abandoned bursts' beats not dropped | no burst is ever treated as abandoned | nesting four deep, in its first run - latency 0, 4,574 ns into the test: a wrong word at address 98 | `a_word`, step 7 |
 | 4. the realigner one granule off in the 4-byte case | every granule offset read as even | every_granule_offset and section_across_4k: wrong words at the odd offsets | `a_word`, step 7 |
 | 5. a retarget that keeps the old count | the retarget moves the range and keeps its count | 5 cases red: stale store words read as hits | `a_word`, step 4 |
 | 6. no quiesce | the stream stops only at an init | quiesce_stops_the_stream: "an AR ... began while the fetch was quiesced". The first bench had no case for it - its one early halt also planted a fault, which stopped the stream first - and the case was written for this plant | `a_quiet`, step 4 |
@@ -1190,6 +1224,16 @@ The claims alone on the unit as built: the control claims pass to
 depth 30 (341 s), the data claim through depth 14 before its steps
 outgrow a short run (measured).
 
+verifier-VRD1 planted a tenth, v13: the launch's `live_n < LIVE_MAX`
+term removed. The bench catches it - the U50's 6-bit `live_b` wraps at
+64, and a wrong word is handed over at address 453 at latency 0 - and
+the proof's default sizes did not, because a one-burst FIFO never lets
+the term decide. That is what the proof's wide sizes are for (above).
+There the gate's `wide_prove` fails on `h_live`, a bounded check from
+reset refutes `h_live` at step 8, and a directed search finds the FIFO
+written while full - `a_fifo_full` broken - at step 43 (measured;
+formal/README.md has the runs).
+
 ### Left for round 2 and for probe S
 
 - cft_seq's hooks, as the interface above says, then the bench
@@ -1198,7 +1242,17 @@ outgrow a short run (measured).
   (`cascade_height` pins it if not); the path from `take` - late, out
   of the admission - into the FIFO's read address (`rp + rd_en` into
   the block RAM), which a skid register would cut at a cycle of
-  latency; the unit's LUTs and registers.
+  latency; the unit's LUTs and registers. And two paths where the unit
+  as built is not what section 5 expected (verifier-VRD1):
+  - the redirect is combinational from `addr` through the range compare
+    (25 bits at the U50) and the stand compare against `spos` into the
+    FIFO's synchronous clear and the stream's next state, where section
+    5 expected the logic registered. Registering it is a design change:
+    the answer takes the FIFO's head with no address compare because
+    the flush lands in the request's own edge;
+  - `word` passes two 2:1 selects, not one: cft_fifo's own head bypass
+    (its bypass register or its RAM's read register), then the store's
+    read register or that head. Both inputs are registers either way.
 - The bench joining SIM_BENCHES, with CLAUDE.md's count.
 
 ## Sources and measurements

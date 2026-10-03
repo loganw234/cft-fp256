@@ -92,8 +92,10 @@
 //               ok is low while the stream has not delivered it, never
 //               high for an address at or past n_insns, and held low
 //               once a fault is seen. It comes from registers through
-//               one 2:1 select (the store's read register, or the
-//               FIFO's head), so the admission's path stays short.
+//               two 2:1 selects - cft_fifo's own head bypass (its
+//               bypass register or its RAM's read register), then the
+//               store's read register or that head - so the admission's
+//               path stays short.
 //   take        the consumer takes `word` this cycle (only with ok):
 //               S_FETCH2 and S_SKIP_D when ok, and S_ISSUE's last
 //               unheld step when it continues with the word. S_FETCH2
@@ -127,7 +129,24 @@
 //               The port is the fetch's from a block's first want until
 //               `idle` after it ends; the main read engine issues
 //               nothing in that span, so R beats belong to the fetch
-//               exactly while it is not idle.
+//               exactly while it is not idle - PROVIDED the main read
+//               engine is drained when the span opens. A setup load
+//               stops at its last expected beat, so a burst the memory
+//               made long would still have beats on the R channel, and
+//               the fetch would take them as its own. Round 2 owes
+//               that obligation: no fetch AR until every main-engine
+//               burst has seen its RLAST (or a long one is refused and
+//               drained to it, as the engines' length rule does).
+//
+// The redirect, for probe S: `redir` is combinational from `addr`
+// through the range compare (AW bits, 25 at the U50), the stand
+// compare against spos or spos + 1, and into the FIFO's synchronous
+// clear and the stream's next state - where S8's section 5 expected
+// the logic registered. If probe S finds it on the critical path,
+// registering it is a design change, not a retiming: the answer below
+// takes the FIFO's head with no address compare because the flush
+// lands in the request's own edge, so a redirect a cycle late would
+// need `ok` held low for the cycle between.
 //
 // What the unit guarantees the port: an AR only between a want and the
 // next quiesce, init or fault, 32-byte aligned, of at most BURST beats,

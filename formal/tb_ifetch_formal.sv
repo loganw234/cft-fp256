@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // tb_ifetch_formal: the instruction fetch unit, rtl/cft_ifetch.sv,
-// against every consumer and every in-order memory (revision 8, R8S;
-// docs/studies/R8S-streaming.md, section 8; parcel RD1).
+// against every consumer and every in-order memory - the two bounded
+// claims against a memory that answers at once (revision 8, R8S;
+// docs/studies/R8S-streaming.md, sections 8 and 13; parcel RD1).
 //
 // THE WORLD. The consumer is free: want, addr, take, cap, cap_pc,
 // quiesce, init and ld are the solver's, every cycle, subject only to
@@ -32,9 +33,10 @@
 //
 // THE TASKS, each asserting its groups (a group a task does not assert is
 // not elaborated, so each task's model holds only what its claims read).
-// Every task is unbounded: k-induction proving all of the task's
+// Every proof task is unbounded: k-induction proving all of the task's
 // assertions together - its claims (a_*) and the helper invariants (h_*,
 // d_*) that make them inductive, each of which is proven, not assumed.
+// The two cover tasks are bounded searches for reachability.
 //
 //   prove        (free RLAST and RRESP; depth 3)
 //     a_past_n       ok only for an address wanted, and below n_insns;
@@ -55,14 +57,18 @@
 //                    through probes the script attaches;
 //     h_*            what the unit's bookkeeping means in the memory's
 //                    terms (counts, the length queue, the read engine's
-//                    position, the reservation).
+//                    position, the reservation);
+//     s_*            at the default sizes only, the scope facts: the
+//                    three shapes of HONEST SCOPE below never occur.
 //   data_prove   (HONEST; depth 3; prove's claims and helpers beside it)
 //     a_word         the word ok presents is the image's word at the
 //                    address wanted the cycle before;
+//     a_lat          the stream hands a word over at least two cycles
+//                    after the beat carrying it landed (P_LAT);
 //     d_*            where the watched word is - the store's slot, the
 //                    FIFO's slot, the realigner's window and carry - and
 //                    the positions, alignments and burst chain that put
-//                    it there.
+//                    it there, and for a_lat how long it has been there.
 //   deliver_prove (HONEST, and a cooperative memory: ARREADY always, a
 //                  beat whenever one is owed; depth 19; with prove's and
 //                  data_prove's assertions)
@@ -73,27 +79,58 @@
 //                 than a beat past its ARLEN; depth 15; with prove's)
 //     a_ends         after a quiesce, an init or a fault, the unit is
 //                    idle within IDLE_MAX cycles.
-//   cover        the shapes the proofs lean on are reachable.
+//   cover        the shapes the proofs lean on are reachable (14), among
+//                them a stream word handed over exactly two cycles after
+//                its beat landed - a_lat's bound, met.
+//   wide_prove, wide_data_prove
+//                prove's and data_prove's assertions at the wide sizes
+//                (HONEST SCOPE), the scope facts aside;
+//   wide_cover   the three shapes reached at the wide sizes, and the
+//                FIFO full there.
 //
 // WHY A FAULTED BEAT'S WORD NEEDS NO DATA TASK OF ITS OWN. A word
-// reaches `ok` no sooner than two cycles after its beat is taken (the
-// realigner's register, then the FIFO), a bad beat raises its bit the
-// cycle after it is taken (a_rd_fault, a_len_fault), and ok is never
-// high with a bit raised (a_fault_ends). So no word of a bad beat is
-// ever handed over, and data_prove can hold the words against an honest
-// memory. The bench holds the same three against SeqRam's faults.
+// reaches `ok` at least two cycles after the beat carrying it lands on
+// the bus (a_lat, in data_prove; the realigner's register, then the
+// FIFO's), a bad beat raises its bit the cycle after it lands
+// (a_rd_fault, a_len_fault, in prove), and ok is never high with a bit
+// raised (a_fault_ends, in prove). Up to its bad beat a faulting
+// memory's run is an honest memory's; the word ok shows in that beat's
+// own cycle came from beats two or more cycles older, and from the next
+// cycle ok is low until an init, which drops everything. So no word of
+// a bad beat is ever handed over, and data_prove can hold the words
+// against an honest memory. The bench holds the same against SeqRam's
+// faults.
 //
-// HONEST SCOPE. The parameters are small: a 16-instruction capacity, a
-// 4-word store, an 8-word FIFO, bursts of 2 beats, 2 live and 4 in all,
-// 13-bit addresses (so the section can cross a 4 KB page), and
-// two-bit granules. The byte geometry is the U50's - a 4-byte granule,
-// an 8-byte instruction, a 32-byte beat - because it is the image
-// format's and does not change with GW; the unit never reads an
-// instruction's bits, so narrowing the granule removes data, not
-// control. Every control shape the unit has exists at these sizes, and
-// the cover task shows the ones the proofs lean on are reachable. The
-// U50's 4,096 / 2^24 / 512 / 8 / 4 / 8 are argued from these, as
-// fifo.sby argues 256 x 512 from 8 x 8.
+// HONEST SCOPE. Two configurations, one byte geometry: the U50's - a
+// 4-byte granule, an 8-byte instruction, a 32-byte beat - because it is
+// the image format's and does not change with GW. The unit never reads
+// an instruction's bits, so the two-bit granules both configurations
+// use remove data, not control.
+//   The default sizes (prove, data_prove, deliver_prove, ends_prove,
+// cover): a 16-instruction capacity, a 4-word store, an 8-word FIFO,
+// bursts of 2 beats, 2 live and 4 in all, 13-bit addresses (so the
+// section can cross a 4 KB page). The FIFO holds exactly one burst, so
+// three shapes of the reservation cannot occur: a whole burst launching
+// while the unit is not empty, more than BURST beats owed to live
+// bursts, and the launch's `live_n < LIVE_MAX` term deciding anything.
+// verifier-VRD1 found them missing (2026-10-03); g_scope asserts each
+// unreachable here, proven with the claims in every default-size task
+// but cover.
+//   The wide sizes (wide_prove, wide_data_prove, wide_cover): the FIFO
+// at 32 words, four bursts, with LIVE_MAX = 2 below the four it could
+// take, and a 64-instruction capacity so that a stream can fill it.
+// wide_cover reaches all three shapes and the full FIFO, and the control
+// and data claims are proven there. live_b's three bits wrap at 8 as the
+// U50's six wrap at 64, so the launch's LIVE_MAX term carries weight
+// here as it does on the card: VRD1's v13, which removes it, passes at
+// the default sizes and is refuted here from reset (formal/README.md).
+//   Neither runs the bounded claims at the wide sizes, nor the U50's
+// own 4,096 / 2^24 / 512 / 8 / 4 / 8, which are argued from these, as
+// fifo.sby argues 256 x 512 from 8 x 8 - and the three shapes are the
+// ones found missing, not a proof that nothing else is. For any shape
+// neither configuration reaches, the net is tb/test_ifetch.py, which
+// runs the unit at the U50's stream sizes (512 / 8 / 4 / 8, with a
+// 64-word store and a 4,096-word capacity).
 
 `timescale 1ns/1ps
 
@@ -118,10 +155,13 @@ module tb_ifetch_formal #(
     parameter bit P_CTRL    = 1'b1,
     parameter bit P_DELIV   = 1'b0,
     parameter bit P_ENDS    = 1'b0,
-    // The helper invariants (h_*, d_*). On in every gate task; off only to
-    // run the claims alone as a bounded check from reset, which names the
-    // claim a planted defect breaks rather than the helper it breaks
-    // first (the plants were run that way, the round's ledger RD1.md).
+    // data_prove's latency claim (a_lat) and its helpers, inside P_DATA
+    parameter bit P_LAT     = 1'b0,
+    // The helper invariants (h_*, d_*) and the scope facts (s_*). On in
+    // every gate task; off only to run the claims alone as a bounded check
+    // from reset, which names the claim a planted defect breaks rather
+    // than the helper it breaks first (the plants were run that way, the
+    // round's ledger RD1.md).
     parameter bit HELPERS   = 1'b1,
     parameter int WAIT_MAX  = 18,
     parameter int IDLE_MAX  = 14
@@ -155,6 +195,11 @@ module tb_ifetch_formal #(
   localparam int QW  = $clog2(OUT_MAX + 1);
   localparam int LW  = $clog2(BURST + 2);       // asked lengths, and one past
   localparam int HW  = 9;                       // beats sent, saturating as the unit's
+  localparam int FDEPTH = 1 << FIFO_LOG2;
+  // The FIFO holds exactly one burst's instructions (the default sizes):
+  // then three shapes of the reservation cannot occur, and g_scope
+  // asserts as much; with room for more, the cover task reaches them.
+  localparam bit ONE_BURST = (FDEPTH == (GPB / 2) * BURST);
 
   // ---- the image: where it is, how long, and the watched word ---------
   (* anyconst *) logic [ADDR_W-1:0] ibase;
@@ -308,6 +353,23 @@ module tb_ifetch_formal #(
     end
   end
 
+  // The beat carrying the watched word's last granule, wb2 (a word that
+  // straddles two beats is formed when the second is in the window), and
+  // w_age: the cycles since a beat at wb2 last landed on the bus, live or
+  // abandoned - 1, 2, or 3 meaning three or more, or none yet. data_prove's
+  // a_lat reads them, and the cover task's c_lat_two.
+  logic [ADDR_W:0] wb2;
+  logic            w_land;
+  logic [1:0]      w_age;
+  assign wb2    = (ADDR_W + 1)'(wa1 >> BSH);
+  assign w_land = r_hs && ((ADDR_W + 1)'(cur_byte >> BSH) == wb2);
+  always_ff @(posedge clk) begin
+    if (!rst_n)
+      w_age <= 2'd3;
+    else
+      w_age <= w_land ? 2'd1 : ((w_age == 2'd3) ? 2'd3 : w_age + 2'd1);
+  end
+
   // ---- what the harness knows of each beat and each request ---------------
   logic bad_rd, bad_len;
   assign bad_rd  = r_hs && (rresp != 2'b00);
@@ -351,9 +413,11 @@ module tb_ifetch_formal #(
   // ---- the FIFO's contract, through probes ----------------------------
   // Attached by ifetch.sby's `connect -nounset -set` on the flattened
   // design (formal/README.md: the frontend has no other way to a
-  // submodule's internals). A probe that fails to attach is left
-  // undriven, which sby's model build turns into a free value, so its
-  // assertions are refuted rather than passed.
+  // submodule's internals). A connect whose internal name does not
+  // resolve stops the build: yosys errors, and sby ends the task in
+  // ERROR (rc 16), which run.sh reports as a failure. A probe with no
+  // connect at all is left undriven, which sby's model build turns into
+  // a free value, so its assertions are refuted rather than passed.
   (* keep *) logic                 probe_fq_wr;
   (* keep *) logic                 probe_fq_rd;
   (* keep *) logic [FIFO_LOG2:0]   probe_fq_cnt;
@@ -377,13 +441,19 @@ module tb_ifetch_formal #(
   (* keep *) logic                    probe_ra_v;
   (* keep *) logic [U_JW-1:0]         probe_ra_j;
   (* keep *) logic                    probe_s_on;
+  // ...and the launch's own terms, for the scope facts and their covers
+  (* keep *) logic                    probe_launch;
+  (* keep *) logic                    probe_redir;
+  (* keep *) logic [31:0]             probe_need;
+  (* keep *) logic [31:0]             probe_len_c;
 
   // ...and, for data_prove, where the words are: the store's and the
-  // FIFO's memories (made registers by the script's memory_map), the
+  // FIFO's memories (made registers by the script's memory_map; the
+  // FIFO's FDEPTH words as one vector, slot k at [k*IW +: IW]), the
   // FIFO's pointers, read register and bypass, the realigner's window
-  // and carry, and the unit's positions. These are written for the
-  // formal sizes, a 4-word store and an 8-word FIFO; g_p_data refuses
-  // any other.
+  // and carry, and the unit's positions. These are written for a 4-word
+  // store and eight granules a beat, at any FIFO depth; g_p_data refuses
+  // any other store or beat.
   (* keep *) logic [AW-1:0]             probe_spos;
   (* keep *) logic [AW-1:0]             probe_base;
   (* keep *) logic [AW-1:0]             probe_send;
@@ -396,20 +466,10 @@ module tb_ifetch_formal #(
   (* keep *) logic [BEAT_BITS-1:0]      probe_ra_b;
   (* keep *) logic [GW-1:0]             probe_ra_c;
   (* keep *) logic [IW-1:0]             probe_smem0, probe_smem1, probe_smem2, probe_smem3;
-  (* keep *) logic [IW-1:0]             probe_fmem0, probe_fmem1, probe_fmem2, probe_fmem3;
-  (* keep *) logic [IW-1:0]             probe_fmem4, probe_fmem5, probe_fmem6, probe_fmem7;
+  (* keep *) logic [FDEPTH*IW-1:0]      probe_fmem;
   (* keep *) logic [FIFO_LOG2-1:0]      probe_rp, probe_wp;
   (* keep *) logic [IW-1:0]             probe_ram_q, probe_byp_d;
   (* keep *) logic                      probe_byp_v1, probe_byp_v2;
-
-  // one of eight words, for data_prove's FIFO slots
-  function automatic logic [IW-1:0] fpick(input logic [2:0] s,
-      input logic [IW-1:0] m0, m1, m2, m3, m4, m5, m6, m7);
-    case (s)
-      3'd0: fpick = m0;  3'd1: fpick = m1;  3'd2: fpick = m2;  3'd3: fpick = m3;
-      3'd4: fpick = m4;  3'd5: fpick = m5;  3'd6: fpick = m6;  default: fpick = m7;
-    endcase
-  endfunction
 
   // ---- the properties ----------------------------------------------------
   logic new_ar;
@@ -417,9 +477,26 @@ module tb_ifetch_formal #(
   assign new_ar  = arvalid && !p_arwait;
   assign ar_last = (ADDR_W + 1)'(araddr) + ((ADDR_W + 1)'(arlen) << BSH);
 
+  // The three shapes of the reservation a one-burst FIFO cannot reach,
+  // and the U50's 512-word FIFO does (verifier-VRD1, 2026-10-03): a whole
+  // burst launching while the unit is not empty (a word in the FIFO, a
+  // beat in the window or a live beat owed); more than BURST beats owed
+  // to live bursts; and the launch's `live_n < LIVE_MAX` term deciding -
+  // every other term of the launch true, and live_n at LIVE_MAX. At the
+  // default sizes g_scope asserts each unreachable; at sizes with room
+  // for more than one burst the cover task reaches each.
+  logic sh_full_busy, sh_owed, sh_live_gate;
+  assign sh_full_busy = probe_launch && probe_len_c == 32'(BURST) &&
+                        (probe_fq_cnt != '0 || probe_ra_v || probe_live_b != '0);
+  assign sh_owed      = 32'(probe_live_b) > BURST;
+  assign sh_live_gate = probe_s_on && !probe_rs_go && !fault && !probe_redir &&
+                        !init && !quiesce && !arvalid && probe_rd_left != '0 &&
+                        32'(probe_out_n) < OUT_MAX && probe_need <= 32'(FDEPTH) &&
+                        32'(probe_live_n) >= LIVE_MAX;
+
   if (P_DATA) begin : g_p_data
-    if (STORE_D != 4 || FIFO_LOG2 != 3 || GPB != 8) begin : g_sizes
-      $error("tb_ifetch_formal: data_prove's probes are written for a 4-word store, an 8-word FIFO and 8 granules a beat");
+    if (STORE_D != 4 || GPB != 8) begin : g_sizes
+      $error("tb_ifetch_formal: data_prove's probes are written for a 4-word store and 8 granules a beat");
     end
     // ---- the data helpers ------------------------------------------------
     // Where the watched word can be, and that it is wdata wherever it is:
@@ -450,23 +527,31 @@ module tb_ifetch_formal #(
     assign e_abs = XW'(sec0 >> BSH) + XW'(e_rel);
 
     // the store's slot and the FIFO's slot for widx, and the FIFO's head
-    logic [IW-1:0] smem_w, fmem_w, fmem_rp, fhead;
-    logic [AW-1:0] wrel;
-    logic [2:0]    fslot;
+    logic [IW-1:0]        smem_w, fmem_w, fmem_rp, fhead;
+    logic [AW-1:0]        wrel;
+    logic [FIFO_LOG2-1:0] fslot;
     assign smem_w  = (widx[1:0] == 2'd0) ? probe_smem0 : (widx[1:0] == 2'd1) ? probe_smem1
                    : (widx[1:0] == 2'd2) ? probe_smem2 : probe_smem3;
     assign wrel    = widx - probe_spos;
-    assign fslot   = probe_rp + wrel[2:0];
-    assign fmem_w  = fpick(fslot, probe_fmem0, probe_fmem1, probe_fmem2, probe_fmem3,
-                           probe_fmem4, probe_fmem5, probe_fmem6, probe_fmem7);
-    assign fmem_rp = fpick(probe_rp, probe_fmem0, probe_fmem1, probe_fmem2, probe_fmem3,
-                           probe_fmem4, probe_fmem5, probe_fmem6, probe_fmem7);
+    assign fslot   = probe_rp + wrel[FIFO_LOG2-1:0];
+    // slot selects by constant indices, as the unit's own ra_word is
+    always_comb begin
+      fmem_w  = '0;
+      fmem_rp = '0;
+      for (int k = 0; k < FDEPTH; k = k + 1) begin
+        if (32'(fslot) == k)    fmem_w  = probe_fmem[k*IW +: IW];
+        if (32'(probe_rp) == k) fmem_rp = probe_fmem[k*IW +: IW];
+      end
+    end
     assign fhead   = (probe_byp_v1 || probe_byp_v2) ? probe_byp_d : probe_ram_q;
-    // Wrapping sums as three-bit wires, never as a narrowing cast inside a
-    // comparison: yosys sizes `a + 3'(b)` against its comparand without
-    // wrapping (measured, 2026-10-03: `0 == 5 + 3'(4'd3)` evaluates false).
-    logic [2:0] wp_exp, q0m, nxm;
-    assign wp_exp = probe_rp + probe_fq_cnt[2:0];
+    // Wrapping sums as wires of their own width, never as a narrowing
+    // cast inside a comparison: yosys sizes `c == a + 3'(b)` without
+    // wrapping where the simulators wrap (measured 2026-10-03, with c, a
+    // three bits and b four: c = 0, a = 5, b = 3 gives 0 in yosys 0.68 and
+    // 1 in Icarus 12 and Verilator 5.020).
+    logic [FIFO_LOG2-1:0] wp_exp;
+    logic [2:0]           q0m, nxm;
+    assign wp_exp = probe_rp + probe_fq_cnt[FIFO_LOG2-1:0];
     assign q0m    = gofs + {probe_ra_pos[1:0], 1'b0};
     assign nxm    = gofs + {probe_ra_pos[1:0], 1'b0} + {2'b0, odd};
 
@@ -556,7 +641,7 @@ module tb_ifetch_formal #(
                          32'(probe_cnt) <= STORE_D && probe_send <= n);
         d_parse: assert (!parse || (probe_base == '0 &&
                          32'(probe_send) == ((32'(ld_cnt) < STORE_D) ? 32'(ld_cnt) : STORE_D)));
-        d_fptr:  assert (probe_wp == wp_exp && 32'(probe_fq_cnt) <= 8);
+        d_fptr:  assert (probe_wp == wp_exp && 32'(probe_fq_cnt) <= FDEPTH);
         // the chain: the first live burst starts at the beat the
         // realigner takes next (less what its head has landed), each
         // starts where the one before ends, and the engine asks next for
@@ -582,6 +667,42 @@ module tb_ifetch_formal #(
                            ? (probe_rd_left == '0)
                            : (32'(e_abs) + 32'(probe_rd_left) ==
                               32'(last_beat >> BSH) + 1)));
+      end
+    end
+
+    // ---- the latency (P_LAT; task data_prove) ----------------------------
+    // A word reaches `ok` at least two cycles after its beat lands: the
+    // third of the three facts behind "no word of a bad beat is handed
+    // over" (the header), and the one that is a property of the unit's
+    // registers rather than of its fault logic. w_age, wb2 and w_land are
+    // the harness's (below the memory), so the cover task can show the
+    // bound is met exactly.
+    if (P_LAT) begin : g_lat
+      logic w_in_fifo, w_in_win;
+      // the watched word in the FIFO, or in the window and not yet emitted
+      // (every word a window emits ends in the window's own beat)
+      assign w_in_fifo = probe_s_on && widx >= probe_spos && 32'(wrel) < 32'(probe_fq_cnt);
+      assign w_in_win  = probe_ra_v && widx >= probe_ra_pos && ((gw1 >> 3) == (gb >> 3));
+      always_comb begin
+        if (f_past_valid) begin
+          // the claim: the stream hands over the watched word only when no
+          // beat carrying it landed this cycle or the last
+          a_lat:    assert (!(ok && probe_rq_s && p_addr == widx) ||
+                            (w_age >= 2'd2 && !w_land));
+        end
+        if (f_past_valid && HELPERS) begin
+          // a word in the FIFO, or a beat in the window, came after every
+          // abandoned burst (one ID, in order), so none is still to land
+          d_nodrop: assert (!(probe_ra_v || probe_fq_cnt != '0) || probe_drop_n == '0);
+          // the watched word, once in the FIFO, landed two or more cycles ago
+          d_age:    assert (!w_in_fifo || w_age >= 2'd2);
+          // ...and while it is in the FIFO or the window, no beat of it is
+          // still to land: no burst is live (at the program's end the next
+          // beat may be its own, but nothing is outstanding or can launch),
+          // or the beat the realigner takes next is past its beat
+          d_noland: assert (!(w_in_fifo || w_in_win) || probe_live_n == '0 ||
+                            32'(e_abs) > 32'(wb2));
+        end
       end
     end
   end
@@ -639,6 +760,24 @@ module tb_ifetch_formal #(
                         (fault ? 0 : WPB * 32'(probe_live_b)) <= (1 << FIFO_LOG2));
         h_owed: assert (fault || 9'(probe_live_b) == owed);
         h_son:  assert (!probe_s_on || !quiet);
+        // a live head with no fault has landed fewer beats than its length
+        // (a beat past it is a length fault), so every live burst still
+        // owes a beat. Needed by s_live_gate, true at any size.
+        h_bcl:  assert (fault || probe_drop_n != '0 || probe_out_n == '0 ||
+                        probe_bcnt < 9'(probe_lq[U_LW-1:0]));
+      end
+    end
+
+    // The scope facts: at the default sizes, the three shapes above
+    // never occur. Off with the helpers, so that a claims-alone run
+    // names a claim.
+    if (ONE_BURST) begin : g_scope
+      always_comb begin
+        if (f_past_valid && HELPERS) begin
+          s_full_busy: assert (!sh_full_busy);
+          s_owed:      assert (!sh_owed);
+          s_live_gate: assert (!sh_live_gate);
+        end
       end
     end
 
@@ -718,36 +857,54 @@ module tb_ifetch_formal #(
       last_ok_addr <= p_addr;
     end
   end
-  always_comb begin
-    if (f_past_valid) begin
-      // the watched word, handed over
-      c_word:          cover (ok && p_addr == widx && n >= AW'(STORE_D + 2));
-      // ...when it straddles two beats (an odd granule offset, at the
-      // beat's last granule)
-      c_straddle:      cover (ok && p_addr == widx && wa0[BSH-1:2] == '1 &&
-                              widx >= AW'(STORE_D));
-      // a backward jump answered while bursts are still outstanding
-      c_jump_inflight: cover (ok && ever_ok && p_addr + AW'(1) < last_ok_addr &&
-                              qn != '0 && p_addr >= AW'(STORE_D));
-      // an underrun: the consumer waited, then was answered
-      c_underrun:      cover (ok && w_cnt >= 6'd2);
-      // a program of the whole capacity, its last word handed over and
-      // the presented address at n_insns itself
-      c_capacity:      cover (n == AW'(STREAM_D) && p_want && p_addr == n - AW'(1) && ok);
-      c_addr_at_n:     cover (n == AW'(STREAM_D) && want && addr == n && ever_ok);
-      // a burst cut by the 4 KB page, the section going on past it
-      c_4k:            cover (arvalid && araddr[11:BSH] == '1 &&
-                              sec_end > (ADDR_W + 2)'(araddr) + (ADDR_W + 2)'(1 << BSH));
-      // two bursts outstanding, and the most the unit allows
-      c_two_out:       cover (qn >= QW'(2));
-      c_full_out:      cover (32'(qn) + (arvalid ? 1 : 0) == OUT_MAX);
-      // each fault, raised
-      c_fault_rd:      cover (fault_rd && ever_ok);
-      c_fault_len:     cover (fault_len && ever_ok);
-      // a quiesce with bursts outstanding
-      c_quiesce_drain: cover (quiet && qn != '0 && ever_ok);
-      // the FIFO full (the reservation reached)
-      c_fifo_full:     cover (probe_fq_cnt == (FIFO_LOG2 + 1)'(1 << FIFO_LOG2));
+
+  if (!ONE_BURST) begin : g_cov_wide
+    // At sizes with room for more than one burst (task wide_cover): the
+    // three shapes the default sizes cannot reach, and the reservation
+    // reaching the larger FIFO's every slot.
+    always_comb begin
+      if (f_past_valid) begin
+        c_full_busy: cover (sh_full_busy);
+        c_owed:      cover (sh_owed);
+        c_live_gate: cover (sh_live_gate);
+        c_fifo_full: cover (probe_fq_cnt == (FIFO_LOG2 + 1)'(FDEPTH));
+      end
+    end
+  end else begin : g_cov
+    always_comb begin
+      if (f_past_valid) begin
+        // the watched word, handed over
+        c_word:          cover (ok && p_addr == widx && n >= AW'(STORE_D + 2));
+        // ...when it straddles two beats (an odd granule offset, at the
+        // beat's last granule)
+        c_straddle:      cover (ok && p_addr == widx && wa0[BSH-1:2] == '1 &&
+                                widx >= AW'(STORE_D));
+        // ...from the stream, exactly two cycles after its beat landed: so
+        // a_lat's "at least two" is reached, and is the bound
+        c_lat_two:       cover (ok && probe_rq_s && p_addr == widx && w_age == 2'd2);
+        // a backward jump answered while bursts are still outstanding
+        c_jump_inflight: cover (ok && ever_ok && p_addr + AW'(1) < last_ok_addr &&
+                                qn != '0 && p_addr >= AW'(STORE_D));
+        // an underrun: the consumer waited, then was answered
+        c_underrun:      cover (ok && w_cnt >= 6'd2);
+        // a program of the whole capacity, its last word handed over and
+        // the presented address at n_insns itself
+        c_capacity:      cover (n == AW'(STREAM_D) && p_want && p_addr == n - AW'(1) && ok);
+        c_addr_at_n:     cover (n == AW'(STREAM_D) && want && addr == n && ever_ok);
+        // a burst cut by the 4 KB page, the section going on past it
+        c_4k:            cover (arvalid && araddr[11:BSH] == '1 &&
+                                sec_end > (ADDR_W + 2)'(araddr) + (ADDR_W + 2)'(1 << BSH));
+        // two bursts outstanding, and the most the unit allows
+        c_two_out:       cover (qn >= QW'(2));
+        c_full_out:      cover (32'(qn) + (arvalid ? 1 : 0) == OUT_MAX);
+        // each fault, raised
+        c_fault_rd:      cover (fault_rd && ever_ok);
+        c_fault_len:     cover (fault_len && ever_ok);
+        // a quiesce with bursts outstanding
+        c_quiesce_drain: cover (quiet && qn != '0 && ever_ok);
+        // the FIFO full (the reservation reached)
+        c_fifo_full:     cover (probe_fq_cnt == (FIFO_LOG2 + 1)'(1 << FIFO_LOG2));
+      end
     end
   end
 

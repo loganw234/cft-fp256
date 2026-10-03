@@ -256,7 +256,7 @@ verify-gate:
 .PHONY: verify verify-quick verify-gate formal formal-image yosys-lint
 
 # The formal property gate (formal/README.md): seven proof files run as
-# thirty-five tasks - the unbounded FIFO proof, the complete seedop
+# thirty-eight tasks - the unbounded FIFO proof, the complete seedop
 # special-routing proof, the simpleops-vs-frozen-ref equivalence
 # miter, the leading-zero cone against the priority form it replaced
 # at all four window widths, cft_mulpass' exactness at the real
@@ -264,7 +264,8 @@ verify-gate:
 # per geometry, plus the whole claim as one property for the four
 # geometries where a solver takes it), and revision 8's instruction
 # fetch, cft_ifetch, by k-induction (its control, its words, its bounded
-# answer and its quiesce, with a cover) - plus the negative control, all
+# answer and its quiesce, with a cover; the control and the words again
+# with a four-burst FIFO, with a cover) - plus the negative control, all
 # inside the pinned cft-formal image. formal/run.sh is the list, and
 # the recipe exits nonzero unless every task passes AND the negative
 # control is refuted.
