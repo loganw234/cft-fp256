@@ -1343,6 +1343,16 @@ CFT_API cft_status cft_get_image_id(cft_device *dev, cft_image_id *out)
         c.version     = raw.version;
         c.n_caps      = raw.n_caps;
         memcpy(c.caps, raw.caps, sizeof c.caps);
+        /* ABI 0.18: the device lines of certificate format version 2,
+         * NUL-terminated by the backend and terminated here again, so
+         * that no caller can be handed a text that runs off its field */
+        memcpy(c.platform, raw.platform, sizeof c.platform);
+        c.platform[sizeof c.platform - 1] = 0;
+        memcpy(c.xrt_version, raw.xrt_version, sizeof c.xrt_version);
+        c.xrt_version[sizeof c.xrt_version - 1] = 0;
+        c.clock_hz    = raw.clock_hz;
+        memcpy(c.serial, raw.serial, sizeof c.serial);
+        c.serial[sizeof c.serial - 1] = 0;
         if (want > sizeof c)
             want = sizeof c;
         c.struct_size = want;

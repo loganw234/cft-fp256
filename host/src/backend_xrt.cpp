@@ -131,6 +131,22 @@
 #ifdef CFT_NO_PROGRAM
 #  error "the XRT backend hashes the image it loads with sha256.c, which CFT_NO_PROGRAM (or CFT_TINY) removes - build XRT=1 without it"
 #endif
+/* ABI 0.18's device lines (cft.h, cft_image_id): the kernel clock the
+ * image's own BUILD_METADATA states, read by the one copy api-test holds
+ * to synthetic images on every host. */
+#include "xclbin_clock.h"
+/* And the XRT version the library is built against: its version header,
+ * at the path a newer XRT ships it, else the older one (XRT 2.14, the
+ * cft2204 distro, has include/version.h). Its XRT_DRIVER_VERSION macro is
+ * the version, a comma, and the commit; where neither header or the macro
+ * is there, the version is "" - not known - and the build is unchanged. */
+#if defined(__has_include)
+#  if __has_include(<xrt/detail/version.h>)
+#    include <xrt/detail/version.h>
+#  elif __has_include(<version.h>)
+#    include <version.h>
+#  endif
+#endif
 
 /* mirrors cft_status; see backend.h */
 enum {
@@ -407,6 +423,70 @@ std::string hex32(uint32_t v)
     return std::string(b);
 }
 
+/* ---- ABI 0.18's device lines (cft.h, cft_image_id) ------------------ */
+
+/* The XRT this library is built against: XRT_DRIVER_VERSION (the
+ * version, a comma, the commit) up to its comma, or "" where the version
+ * header is not there or has no such macro. */
+std::string xrt_built_version()
+{
+#if defined(XRT_DRIVER_VERSION)
+    std::string v(XRT_DRIVER_VERSION);
+    const size_t comma = v.find(',');
+    if (comma != std::string::npos)
+        v.resize(comma);
+    return v;
+#else
+    return std::string();
+#endif
+}
+
+/* The first non-empty string a JSON text gives `key` (a quoted key, a
+ * colon, a quoted string), or "": for the serial in XRT's platform report
+ * (xrt::info::device::platform), which nests it under the card's
+ * management controller. A value with an escape, which no serial has, is
+ * not read; "N/A", XRT's word for a field it could not read, is not a
+ * serial. */
+std::string json_string_of(const std::string &js, const std::string &key)
+{
+    const std::string q = "\"" + key + "\"";
+    size_t at = 0;
+    while ((at = js.find(q, at)) != std::string::npos) {
+        size_t p = at + q.size();
+        while (p < js.size() && (js[p] == ' ' || js[p] == '\n' ||
+                                 js[p] == '\t' || js[p] == '\r'))
+            p++;
+        at = p;
+        if (p >= js.size() || js[p] != ':')
+            continue;
+        p++;
+        while (p < js.size() && (js[p] == ' ' || js[p] == '\n' ||
+                                 js[p] == '\t' || js[p] == '\r'))
+            p++;
+        if (p >= js.size() || js[p] != '"')
+            continue;
+        const size_t end = js.find('"', p + 1);
+        if (end == std::string::npos)
+            break;
+        std::string v = js.substr(p + 1, end - p - 1);
+        if (v.find('\\') != std::string::npos || v.empty() || v == "N/A" ||
+            v == "n/a")
+            continue;
+        return v;
+    }
+    return std::string();
+}
+
+/* A text into a fixed field of cft_image_raw, NUL-terminated, or "" where
+ * it would not fit: a value is never cut short (cft.h). */
+void put_text(char *field, size_t cap, const std::string &v)
+{
+    if (v.size() < cap && v.find('\0') == std::string::npos)
+        std::memcpy(field, v.c_str(), v.size() + 1);
+    else
+        field[0] = 0;
+}
+
 /* An artifact's bytes, whole, for cftx_open to hash and then hand to
  * XRT. ONE read: the digest cft_get_image_id reports is of the bytes
  * that were loaded, and not of the file read again later, which could
@@ -590,6 +670,14 @@ struct Dev {
     uint32_t          n_caps = 0;
     uint32_t          caps_words[4] = {};
     std::string       caps_refusal;
+    /* ABI 0.18's device lines, recorded at open with the rest (cft.h,
+     * cft_image_id): the platform's name as XRT reports it, the kernel
+     * clock the image's BUILD_METADATA states (0 where it names none for
+     * every unit opened), and the card's serial from XRT's platform
+     * report; "" and 0 where not known. */
+    std::string       platform_name;
+    uint64_t          clock_hz = 0;
+    std::string       serial;
 };
 
 /* Grow a tile's buffers to hold `bytes`.
@@ -2215,6 +2303,48 @@ static int cftx_open_impl(const char *artifact, int index, void **out,
         }
     }
 
+    /* ABI 0.18's device lines (cft.h, cft_image_id), recorded here with
+     * the image's digest and words so that cftx_image_id still reaches no
+     * device. The platform and the serial are XRT's answers, each "" where
+     * XRT gives none or throws: neither can fail an open, and neither is
+     * ever guessed. The kernel clock is the image's own record of its link
+     * (xclbin_clock.h), for the compute units opened - the instance of
+     * each kernel:{instance} name - and 0 where it names none for all. */
+    try {
+        D->platform_name = D->dev.get_info<xrt::info::device::name>();
+    } catch (const std::bad_alloc &) {
+        throw;                          /* the boundary's out-of-memory */
+    } catch (const std::exception &) {
+        D->platform_name.clear();
+    }
+    try {
+        D->serial = json_string_of(
+            D->dev.get_info<xrt::info::device::platform>(), "serial_number");
+    } catch (const std::bad_alloc &) {
+        throw;
+    } catch (const std::exception &) {
+        D->serial.clear();
+    }
+    {
+        std::vector<std::string> inst;
+        std::vector<const char *> ptr;
+        for (const auto &t : D->tiles) {
+            const size_t b = t.cu.find('{'), e = t.cu.rfind('}');
+            inst.push_back(b != std::string::npos && e != std::string::npos
+                           && e > b ? t.cu.substr(b + 1, e - b - 1) : t.cu);
+        }
+        for (const auto &s : inst)
+            ptr.push_back(s.c_str());
+        char why[320];
+        uint64_t hz = 0;
+        if (cft_xclbin_kernel_clock(
+                reinterpret_cast<const unsigned char *>(image.data()),
+                image.size(), ptr.data(), ptr.size(), &hz, why, sizeof why))
+            D->clock_hz = hz;
+        else
+            D->clock_hz = 0;
+    }
+
     D->version      = ver;
     *format_mask    = caps & 0xFu;
     *op_groups      = (caps >> 8) & 0xFFu;
@@ -2329,6 +2459,12 @@ extern "C" int cftx_image_id(void *hw, cft_image_raw *out)
         out->n_caps  = D->n_caps;
         for (int i = 0; i < 4; i++)
             out->caps[i] = D->caps_words[i];
+        /* ABI 0.18: the device lines, as cftx_open recorded them */
+        put_text(out->platform, sizeof out->platform, D->platform_name);
+        put_text(out->xrt_version, sizeof out->xrt_version,
+                 xrt_built_version());
+        out->clock_hz = D->clock_hz;
+        put_text(out->serial, sizeof out->serial, D->serial);
         return ST_OK;
     });
 }

@@ -9112,6 +9112,21 @@ static void check_image_identity(cft_device *dev, const char *artifact)
             printf("  image identity: the digest is the SHA-256 of %s, "
                    "%lu bytes\n", path, (unsigned long)len);
     }
+    /* ABI 0.18's device lines (certificate format version 2's
+     * device-platform, device-xrt, device-clock and device-serial):
+     * REPORTED, as a certificate reports them, and printed here so that
+     * a card run records what this card and this XRT answer. Each text
+     * is NUL-terminated inside its field by the library; nothing else
+     * about them can be checked against the file. */
+    CHECK(memchr(im.platform, 0, sizeof im.platform) != NULL &&
+          memchr(im.xrt_version, 0, sizeof im.xrt_version) != NULL &&
+          memchr(im.serial, 0, sizeof im.serial) != NULL,
+          "the image identity: a 0.18 text field runs off its array");
+    printf("  device lines (ABI 0.18, reported): platform \"%.255s\", XRT "
+           "\"%.63s\", kernel clock %llu Hz%s, serial \"%.255s\"\n",
+           im.platform, im.xrt_version, (unsigned long long)im.clock_hz,
+           im.clock_hz ? "" : " (not known: the image states none for "
+           "every unit opened)", im.serial);
     {
         static const cft_op group_op[7] = {CFT_FMA, CFT_ABS, CFT_MIN,
                                            CFT_CMPLT, CFT_IADD, CFT_SUM,

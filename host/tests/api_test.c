@@ -31,6 +31,7 @@
 #include "../src/mask_bits.h"
 #include "../src/backend.h"      /* cftx_last_error */
 #include "../src/remote.h"       /* cftr_last_error */
+#include "../src/xclbin_clock.h" /* ABI 0.18's clock_hz, for the XRT backend */
 
 static int failures;
 
@@ -864,6 +865,137 @@ int main(void)
               im.struct_size == sizeof(size_t) - 1,
               "a struct_size below sizeof(size_t) must be an argument error, "
               "with the struct untouched");
+
+        /* ABI 0.18 appended the device lines (platform, xrt_version,
+         * clock_hz, serial) after the 0.17 struct, whose size is where
+         * they begin: a caller built against 0.17 passes that size, and
+         * its call is the one it always made - here the same refusal,
+         * nothing written. */
+        CHECK(offsetof(cft_image_id, platform) == 72 &&
+              offsetof(cft_image_id, xrt_version) == 72 + 256 &&
+              offsetof(cft_image_id, clock_hz) == 72 + 256 + 64 &&
+              offsetof(cft_image_id, serial) == 72 + 256 + 64 + 8 &&
+              sizeof im == 72 + 256 + 64 + 8 + 256,
+              "cft_image_id's 0.18 fields are not appended after the 0.17 "
+              "struct's 72 bytes in their order: platform at %lu, "
+              "xrt_version at %lu, clock_hz at %lu, serial at %lu, %lu in "
+              "all", (unsigned long)offsetof(cft_image_id, platform),
+              (unsigned long)offsetof(cft_image_id, xrt_version),
+              (unsigned long)offsetof(cft_image_id, clock_hz),
+              (unsigned long)offsetof(cft_image_id, serial),
+              (unsigned long)sizeof im);
+        memset(&im, 0xA5, sizeof im);
+        im.struct_size = offsetof(cft_image_id, platform);
+        st = cft_get_image_id(dev, &im);
+        wrote = 0;
+        for (k = offsetof(cft_image_id, sha256); k < sizeof im; k++)
+            wrote += b[k] != 0xA5;
+        CHECK(st == CFT_ERR_UNSUPPORTED && im.struct_size == 0 &&
+              wrote == 0, "a 0.17 caller's cft_get_image_id on the software "
+              "backend: %s, struct_size %lu, %lu bytes written; it must be "
+              "refused as before, nothing filled", cft_strerror(st),
+              (unsigned long)im.struct_size, (unsigned long)wrote);
+    }
+
+    /* xclbin_clock.h: the kernel clock an image's BUILD_METADATA states,
+     * which the XRT backend reports as cft_image_id's clock_hz (ABI 0.18).
+     * It needs no XRT, so it is held here, on every host, to synthetic
+     * axlf images: a constraint that names every unit opened gives its
+     * clock, and every other shape gives 0 with a reason - never a
+     * guess. The real images in the cft2204 distro were read by it too
+     * (CV2CW's ledger, 2026-10-02): the hw single and quad, 10 MHz on
+     * their own units, and the hw_emu images none. */
+    {
+        static unsigned char img[4096];
+        const char *one[] = { "cft_krnl_1" };
+        const char *quad[] = { "cft_krnl_1", "cft_krnl_2", "cft_krnl_3",
+                               "cft_krnl_4" };
+        struct { const char *what, *meta; int n_meta; size_t at;
+                 const char *const *inst; size_t n_inst; uint64_t want; }
+        C[] = {
+            { "one unit named", "{\"options\": \"--clock.freqHz 135000000:"
+              "cft_krnl_1.ap_clk --config hw/link.cfg\"}", 1, 0, one, 1,
+              135000000u },
+            { "four units, all named", "{\"options\": \"--clock.freqHz "
+              "135000000:cft_krnl_1.ap_clk,cft_krnl_2.ap_clk,"
+              "cft_krnl_3.ap_clk,cft_krnl_4.ap_clk --link\"}", 1, 0, quad, 4,
+              135000000u },
+            { "four units, one at the default", "{\"options\": "
+              "\"--clock.freqHz 135000000:cft_krnl_1.ap_clk,cft_krnl_2.ap_clk,"
+              "cft_krnl_4.ap_clk\"}", 1, 0, quad, 4, 0 },
+            { "a longer name is not its prefix", "{\"options\": "
+              "\"--clock.freqHz 135000000:cft_krnl_10.ap_clk\"}", 1, 0, one,
+              1, 0 },
+            { "another port is not ap_clk", "{\"options\": "
+              "\"--clock.freqHz 135000000:cft_krnl_1.ap_clk_2\"}", 1, 0, one,
+              1, 0 },
+            { "two constraints", "{\"options\": \"--clock.freqHz 135000000:"
+              "cft_krnl_1.ap_clk --clock.freqHz 100000000:cft_krnl_1.ap_clk"
+              "\"}", 1, 0, one, 1, 0 },
+            { "no constraint (an hw_emu link)", "{\"options\": \"--link "
+              "--target hw_emu\"}", 1, 0, one, 1, 0 },
+            { "a leading zero", "{\"options\": \"--clock.freqHz 0135000000:"
+              "cft_krnl_1.ap_clk\"}", 1, 0, one, 1, 0 },
+            { "zero hertz", "{\"options\": \"--clock.freqHz 0:cft_krnl_1."
+              "ap_clk\"}", 1, 0, one, 1, 0 },
+            { "twenty digits", "{\"options\": \"--clock.freqHz "
+              "10000000000000000000:cft_krnl_1.ap_clk\"}", 1, 0, one, 1, 0 },
+            { "no colon", "{\"options\": \"--clock.freqHz 135000000 "
+              "cft_krnl_1.ap_clk\"}", 1, 0, one, 1, 0 },
+            { "no BUILD_METADATA section", "{\"options\": \"--clock.freqHz "
+              "135000000:cft_krnl_1.ap_clk\"}", 0, 0, one, 1, 0 },
+            { "two BUILD_METADATA sections", "{\"options\": "
+              "\"--clock.freqHz 135000000:cft_krnl_1.ap_clk\"}", 2, 0, one,
+              1, 0 },
+            { "a section past the file", "{\"options\": \"--clock.freqHz "
+              "135000000:cft_krnl_1.ap_clk\"}", 1, 3000, one, 1, 0 },
+            { "no unit opened", "{\"options\": \"--clock.freqHz 135000000:"
+              "cft_krnl_1.ap_clk\"}", 1, 0, one, 0, 0 },
+        };
+        size_t c;
+        for (c = 0; c < sizeof C / sizeof C[0]; c++) {
+            size_t len = strlen(C[c].meta), off = 1024, j;
+            uint64_t hz = 12345, size = len;
+            char why[400];
+            int got;
+            memset(img, 0, sizeof img);
+            memcpy(img, "xclbin2\0", 8);
+            img[448] = (unsigned char)(C[c].n_meta ? C[c].n_meta + 1 : 1);
+            /* section 0 is a BITSTREAM of no bytes; then the metadata */
+            for (j = 0; j < (size_t)C[c].n_meta; j++) {
+                unsigned char *s = img + 456 + 40 * (j + 1);
+                uint64_t o = C[c].at ? C[c].at : off, z = size;
+                int bb;
+                s[0] = 14;
+                for (bb = 0; bb < 8; bb++) {
+                    s[24 + bb] = (unsigned char)(o >> (8 * bb));
+                    s[32 + bb] = (unsigned char)(z >> (8 * bb));
+                }
+            }
+            memcpy(img + off, C[c].meta, len);
+            got = cft_xclbin_kernel_clock(img, off + len + (C[c].at ? 0 : 16),
+                                          C[c].inst, C[c].n_inst, &hz, why,
+                                          sizeof why);
+            CHECK(C[c].want ? (got == 1 && hz == C[c].want)
+                            : (got == 0 && hz == 0 && why[0] != 0),
+                  "xclbin_clock: %s: it answered %d, %llu Hz (%s)",
+                  C[c].what, got, (unsigned long long)hz,
+                  got ? "" : why);
+        }
+        memset(img, 0, sizeof img);
+        {
+            uint64_t hz = 1;
+            char why[400];
+            CHECK(cft_xclbin_kernel_clock(img, sizeof img, one, 1, &hz, why,
+                                          sizeof why) == 0 && hz == 0,
+                  "xclbin_clock: bytes that are no axlf name a clock");
+            memcpy(img, "xclbin2\0", 8);
+            img[448] = 200;         /* 200 sections run past 4,096 bytes */
+            CHECK(cft_xclbin_kernel_clock(img, sizeof img, one, 1, &hz, why,
+                                          sizeof why) == 0 && hz == 0,
+                  "xclbin_clock: a section table past the file names a "
+                  "clock");
+        }
     }
 
     /* max_scratch, appended at ABI 0.10, and the same sentinel proof
