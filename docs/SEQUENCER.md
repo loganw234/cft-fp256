@@ -3139,10 +3139,23 @@ instruction's result in one pass at its sixteen levels:
 The four fpfma benches, fp32 to fp256 with their multi-pass forms, hold
 both codes to `augmented.py` bit for bit beside every operation they held
 before (docs/VERIFICATION.md). A build parameter, EN_AUGADD, leaves R21's
-lanes out (docs/ROADMAP.md, question 9). Until round 2's decode drives the
-sideband - and on every tile built so far - CAPS2[11] reads zero and code
-10 decodes as HALT (`rtl/cft_seq.sv`'s `default` arm), so the loader
-refuses both codes there by name, naming the instruction.
+lanes out (docs/ROADMAP.md, question 9). Probe L measured them on
+2026-10-03, at s6-rb fcc7da8 (one pipe out of context at each rung,
+Vivado 2022.2, the U50's part, 135 MHz). EN_AUGADD = 1 less 0 is +407,
++674, +1,077 and +2,489 LUTs a pipe at fp32, fp64, fp128 and fp256
+(registers +54, +62, -161 and +207): +10,595 LUTs and +565 registers a
+tile, +42,380 LUTs on the quad - over question 9's 2,000, so the quad is
+built without R21. The synthesis slack into S10 falls by 0.99, 1.30,
+1.86 and 1.98 ns and stays positive; placed and routed alone, fp256's
+pipe keeps +1.815 ns into S10 with R21 (+2.770 without), +1.523 into S6
+(+2.858) and +1.089 at its worst (+1.118), so design (b) keeps S10's
+timing and design (a) is not built (question 8). At EN_AUGADD = 0 the
+pipe synthesises to exactly 5e033f6's at fp32, fp64 and fp128, and one
+LUT apart at fp256 (30,251 against 30,250, registers equal). Until round
+2's decode drives the sideband - and on every tile built so far -
+CAPS2[11] reads zero and code 10 decodes as HALT (`rtl/cft_seq.sv`'s
+`default` arm), so the loader refuses both codes there by name, naming
+the instruction.
 
 ### R22. A post-step on `STX` and `LDX`
 

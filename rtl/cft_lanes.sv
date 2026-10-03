@@ -84,9 +84,11 @@ module cft_lanes #(
     parameter int MUL_PASSES = 1,
     // Revision 8's R21 in every pipe: augadd and augerr behind aug_mode
     // (rtl/cft_fpfma_pipe.sv's R21 section). 1, the default, builds them;
-    // 0 builds none of it and every pipe is the one revision 7 shipped,
-    // which is how a build that cannot afford the LUTs leaves R21 out
-    // inside the same RTL revision (docs/ROADMAP.md, question 9).
+    // at 0 every pipe's R21 terms are constant or unread, for synthesis
+    // to remove, leaving the pipe revision 7 shipped (probe L's control,
+    // in the pipe's header) - how a build that cannot afford the LUTs
+    // leaves R21 out inside the same RTL revision (docs/ROADMAP.md,
+    // question 9; probe L measured R21 at +10,595 LUTs a tile).
     parameter bit EN_AUGADD  = 1'b1
 )(
     input  logic                 clk,

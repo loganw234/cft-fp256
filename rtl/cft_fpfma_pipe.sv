@@ -82,39 +82,66 @@
 // there, as MODE[14:12] documents, so no elementwise run can reach
 // R21's mode. golden: python/cft_golden/augmented.py, bit for bit.
 //
+// The stages below are the stage map's levels, S0 to S15 (the register
+// prefixes lag them by one from S12 on, as this header says above).
+//
+//   S1   the re-anchor's compare (below), made on the biased fields and
+//        registered; and the smaller operand's own encoding onto the
+//        specials sideband, for an R21 operation that is not a special.
 //   S6   THE RE-ANCHOR. For R21 the anchor is the operand of larger
 //        exponent (ep + MAN_W >= ec, the product's lowest bit sitting
-//        MAN_W below a's in ADD's shape - a compare made at S1 on the
-//        biased fields, so S6 only selects it); every other operation
-//        keeps ep >= ec. The larger operand's leading bit then sits at
-//        3P+2 (a anchors) or 2P+3 (c anchors), so a sum that does not
-//        cancel has its leading bit there or one away: r's rounding
-//        point is one of SIX fixed places, and where the leading bit
-//        falls lower the sum has at most P bits and e is zero.
-//   S1   the smaller operand's own encoding onto the specials sideband,
-//        for an R21 operation that is not a special; S8: where the
-//        marker is set (an operand partly or wholly shifted out, not
-//        only s6_far) e IS that operand, and augerr delivers it from
-//        there - underflow when its exponent field is zero.
+//        MAN_W below a's in ADD's shape - S1's compare, which S6 only
+//        selects); every other operation keeps ep >= ec. The larger
+//        operand's leading bit then sits at 3P+2 (a anchors) or 2P+3 (c
+//        anchors), so a sum that does not cancel has its leading bit
+//        there or one away: r's rounding point is one of SIX fixed
+//        places, and where the leading bit falls lower the sum has at
+//        most P bits and e is zero. Also the anchor in the top binade,
+//        for augerr's r overflow.
+//   S8   where the marker is set (an operand partly or wholly shifted
+//        out, not only s6_far) e IS the smaller operand, and augerr
+//        becomes a special that delivers it from the sideband -
+//        underflow when its exponent field is zero.
 //   S10  THE DECISION, for augerr: the leading bit's place from the
 //        anchor and the carry or borrow, its guard and sticky, r's
 //        direction (up on guard AND sticky). Where e is non-zero the
 //        select writes e's field in place of the sum - the bits below
 //        r's rounding point, from the selected magnitude where r rounds
 //        down and from the OTHER difference where it rounds up (that
-//        field is the negation), its sign flipped, zero above. Also r's
-//        overflow, which only the top binade's anchor can reach.
-//   S11-S13 normalise whichever the select wrote; S13 rounds r for
-//        augadd with ties toward zero and nothing for augerr (e has at
-//        most P bits, so its guard and sticky are zero), and tests
-//        augadd's e for tininess over the field below r's LSB.
+//        field is the negation), its sign flipped, zero above; where e
+//        is zero it writes the sum. Also r's overflow, which only the
+//        top binade's anchor can reach.
+//   S11-S13 normalise whichever the select wrote.
+//   S14  the round stage (its block is stage13, its registers s13_*):
+//        rounds r for augadd with ties toward zero and nothing for
+//        augerr (e has at most P bits, so its guard and sticky are
+//        zero), and tests augadd's e for tininess over the field below
+//        r's LSB.
 //   S15  the flag rule: no inexact unless r overflows (then both
 //        results are that infinity, with overflow and inexact);
 //        underflow WITHOUT inexact where e is non-zero and below 2^EMIN;
 //        augerr's zero e takes r's sign, +0 for an exact cancellation.
 //
-// EN_AUGADD = 0 builds none of it: every R21 term is a constant zero
-// and the attribute line is the outside code, today's pipe.
+// Where this departs from the plan's stage account for (b), each the
+// same function (verifier-VRB): the low-half stickies are formed in S10
+// from S9's registered half-sums, not registered at S9; the re-anchor's
+// compare is made at S1 and S6 only selects; the smaller operand's
+// encoding is taken at S1, not rebuilt from what the pipe carries;
+// augadd's tininess is tested at S14 on the normalised field, so S10
+// does nothing for augadd; augerr's zero e writes the sum, not zeros;
+// augerr's marker case is decided at S8, not S15, and delivered through
+// S15's specials mux; and augerr's r overflow, which the plan's account
+// does not place, is decided at S6 (the top binade) and S10.
+//
+// EN_AUGADD = 0: the attribute line carries the outside code, and every
+// R21 condition is a constant false, so each branch folds to today's
+// arm. The R21 registers stay in the source - constant zero, or (r's
+// sign, s10_aug_rsg to s12_aug_rsg) live with no reader - and S1's and
+// S12's R21 terms are computed and unread, for synthesis to remove.
+// Probe L (Vivado 2022.2, xcu50, 2026-10-03) synthesised that pipe to
+// exactly 5e033f6's LUTs, registers, CARRY8 and DSPs at fp32, fp64 and
+// fp128, and one LUT apart at fp256 (30,251 against 30,250, registers
+// equal); verifier-VRB proved fp32's equivalent to 5e033f6's by yosys.
 
 `timescale 1ns/1ps
 
@@ -167,9 +194,10 @@ module cft_fpfma_pipe #(
     parameter int MUL_PERIOD = 0,
     // R21's lanes (revision 8): 1, the default, builds augadd and
     // augerr behind the aug_mode sideband (the header's R21 section);
-    // 0 builds none of it - aug_mode is then read by nothing and the
-    // pipe is the one every revision before 8 shipped. A build's choice
-    // (docs/ROADMAP.md, question 9), threaded down from cft_lanes.
+    // at 0 aug_mode is read by nothing and every R21 term is constant
+    // or unread, for synthesis to remove - the pipe every revision
+    // before 8 shipped, as probe L measured (the header). A build's
+    // choice (docs/ROADMAP.md, question 9), threaded down from cft_lanes.
     parameter bit EN_AUGADD = 1'b1
 ) (
     input  logic                 clk,
@@ -644,7 +672,7 @@ module cft_fpfma_pipe #(
         // operand's own encoding - c where a anchors, a where c does -
         // which S8 delivers as augerr's e wherever the marker says e is
         // that operand, and whose exponent field says whether e is
-        // subnormal (augerr's flags at S8, augadd's tininess at S13).
+        // subnormal (augerr's flags at S8, augadd's tininess at S14).
         // Nothing reads the slot of a non-special otherwise.
         s1_spec_d <= r21a ? s0_c : s0_a;
       end
@@ -928,7 +956,7 @@ module cft_fpfma_pipe #(
       // specials slot S1 loaded, with underflow where it is subnormal (e
       // non-zero and below 2^EMIN: its exponent field is zero) and
       // nothing else; augadd's r comes out of the datapath as for any
-      // sum, and S13 reads e's tininess from the same slot.
+      // sum, and S14 reads e's tininess from the same slot.
       if (is_augerr(rd_dly[7]) && s7_marker && !s7_spc) begin
         s8_spc <= 1'b1;
         s8_spf <= (s7_spd[W-2 -: EXP_W] == '0) ? (5'b1 << FL_UNDERFLOW) : 5'b0;
@@ -1021,7 +1049,8 @@ module cft_fpfma_pipe #(
   logic [4:0]   s10_spf;
   int           s10_g;
   // R21: e's field was written (augerr), r overflows (augerr) and r's
-  // sign for that infinity - all constant zero at EN_AUGADD = 0.
+  // sign for that infinity. At EN_AUGADD = 0 the first two are constant
+  // zero and the third carries s9_sbig with no reader.
   logic         s10_aug_ew, s10_aug_rovf, s10_aug_rsg;
 
   // The high halves, as wires: the select below and R21's decision both
@@ -1473,7 +1502,7 @@ module cft_fpfma_pipe #(
     end
   end
 
-  // ---- R21 at the round stage's level: augadd's e, and the carries ----
+  // ---- R21 at the round stage's level (S14): augadd's e, the carries -
   //
   // augadd's window is the sum, so its e is the field below r's lowest
   // bit - s12_norm[NW-1-P:0], the guard at the top, when r is normal
@@ -1598,7 +1627,7 @@ module cft_fpfma_pipe #(
         // overflow is decided at S10, above). Underflow, WITHOUT inexact,
         // where e is non-zero and below 2^EMIN: augerr's e is the value
         // just packed, exact, so its tininess is the round stage's;
-        // augadd's was taken from the field below r (S13).
+        // augadd's was taken from the field below r (S14).
         if (is_r21(rd_dly[DEPTH-2])) begin
           if (fl[FL_OVERFLOW])
             fl = (5'b1 << FL_OVERFLOW) | (5'b1 << FL_INEXACT);

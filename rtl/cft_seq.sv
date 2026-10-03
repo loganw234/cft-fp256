@@ -903,8 +903,9 @@ module cft_seq #(
   logic [7:0]           al_op;
   logic [2:0]           al_rnd;
   // R21's sideband (revision 8's seam): a constant zero until R21's
-  // decode drives it, and the same signal reaches the shared array (as
-  // lane_aug_mode) and the private one below.
+  // decode drives it, read by the private array below. RA's seam
+  // (fdf67d8) also hands it to the shared array, as its lane_aug_mode
+  // port, which this branch does not declare.
   logic [1:0]           al_aug;
   assign al_aug = 2'b00;
   logic [BEAT_BITS-1:0] al_a, al_b, al_c;

@@ -98,8 +98,8 @@ authority:
    were reported as a pass. The files checked are derived from the bench
    list rather than written beside it, so a bench cannot be run and left
    unchecked. The benches:
-   the four rung benches replay 247,576 vectors the golden model generates for them through
-   `cft_fpfma_pipe` bit for bit, flags included (`vectors.testset` at smaller budgets than the published sets, at every attribute; every arithmetic case again at the reserved attribute codes 5 to 7, held to RNE as MODE[14:12] documents; and since revision 8's round 1, R21's augadd and augerr against `cft_golden.augmented`, 61,024 of each); the kernel is driven
+   the four rung benches replay 247,576 vectors through
+   `cft_fpfma_pipe` bit for bit, flags included, every expected value the golden model's (`vectors.testset` at smaller budgets than the published sets, at every attribute; every arithmetic case again at the reserved attribute codes 5 to 7, held to RNE as MODE[14:12] documents; and since revision 8's round 1, R21's augadd and augerr against `cft_golden.augmented`, 61,024 of each, on `vectors.augmented_pairs` and its swaps and on four random families of the bench's own, `tb/fpfma_common.py`'s, which supply 11,200 of the 247,576); the kernel is driven
    through its CSR and AXI interfaces, by the streaming engine and by
    the sequencer; the shared normalise and alignment ladders are held
    against the private shifters they replaced; the reduction

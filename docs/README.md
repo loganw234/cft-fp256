@@ -1,9 +1,9 @@
 # The documents, by what you open them for
 
-Forty-two files, 69,739 lines. Flat in one directory they look like one
+Forty-two files, 69,752 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **26,109 lines you consult while working** — the three under *Start here*,
+- **26,122 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,675 lines of tool manual**, one per shipped program;
 - **2,011 lines of operations**, read when you are about to do something to
@@ -45,7 +45,7 @@ product, not the implementation.
 |---|---|---|
 | [DETERMINISM.md](DETERMINISM.md) | 1,442 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 1,169 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
-| [SEQUENCER.md](SEQUENCER.md) | 3,769 | The orbit sequencer and the program model. |
+| [SEQUENCER.md](SEQUENCER.md) | 3,782 | The orbit sequencer and the program model. |
 | [LANGUAGE.md](LANGUAGE.md) | 2,345 | The language for dynamical systems: the grammar, the semantics (literal evaluation, exact constants rounded once, one attribute a program), the integrators written in it, time (t in the state, a step counter, forcing by a rotation, each measured), the step graph, the reference interpreter that is the definition of correct for every compiled image, the intention-out, the variational equations (tangent vectors and the rule that differentiates each operation), and every refusal by name. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 952 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
