@@ -25,17 +25,21 @@ both ACCEPTED with the same verdict, line for line.
      by the operating system, printed, different each audit, and the
      same verdict again under it; git ignoring the binary in both its
      forms;
-  2. test_cert.py, run in this process with cert.parse and cert.audit
-     SHADOWED: every top-level call a test makes is also handed to the
-     tool, so "every control test_cert.py makes" is every call its
-     tests make, and stays so as controls are added. The golden call's
-     own result goes back to the test unchanged, and pytest must pass.
-     A call whose arguments no file or option can carry faithfully (a
-     list where a mapping goes, a str or bool key, an integer past the
+  2. test_cert.py and test_cert2.py, run in this process with cert.parse
+     and cert.audit SHADOWED: every top-level call a test makes is also
+     handed to the tool, so "every control test_cert.py makes" is every
+     call its tests make, and stays so as controls are added. The golden
+     call's own result goes back to the test unchanged, and pytest must
+     pass. A call whose arguments no file or option can carry faithfully
+     (a list where a mapping goes, a str or bool key, an integer past the
      format, a salt that is not bytes) is counted and named by reason,
      never compared. A seed the golden audit draws is caught and handed
      to the tool; an executor test_cert.py makes refuse (a monkeypatched
-     seq.run) is the tool's instrument, CFT_AUDIT_PLANT=executor-refuses;
+     seq.run) is the tool's instrument, CFT_AUDIT_PLANT=executor-refuses.
+     cft-audit takes no source and regenerates no initial state, so a
+     version-2 audit call handed either is held to the golden auditor
+     handed neither (no_source_kwargs), where a replay, a wider-source
+     relation and a definition re-run refuse source-missing in both;
   3. the certificates segrun_check makes: cft-segrun on its programs,
      keyed and open, with the accuracy entries segrun_check gives them
      (every method, scope, form and direction), each audited in full from
@@ -43,7 +47,10 @@ both ACCEPTED with the same verdict, line for line.
      under a fixed seed;
   4. the golden corpus (certificates/MANIFEST), where the tree has one:
      each case in full and sampled, both auditors against each other and
-     against the manifest's verdict;
+     against the manifest's verdict; each version-2 case and control as
+     corpus.py hands the golden auditor its blocks, signature, keyring,
+     superseded certificate and definition re-run, without the source and
+     the regeneration (section_corpus2);
   5. two narrow builds: libcft and cft-audit compiled at CFT_MAX_FORMAT=2
      (formats to fp128), at its own 576-bit cft_bn and at CFT_BN_LIMBS=64
      (NARROW_BUILDS). The first must refuse `build-width` (78) at an
@@ -64,7 +71,16 @@ both ACCEPTED with the same verdict, line for line.
      cert.element_fraction, and the library's widening (cft_convert) and
      exact decimal (cft_to_decimal_char) to cert.widen and
      chars.to_decimal - measured before they are trusted, on a fixed
-     seed's random cases and each operation's edges.
+     seed's random cases and each operation's edges;
+  7. Ed25519 verification and SHA-512 in C (tools/ed25519.h and
+     tools/sha512.h, version 2's detached signature), through the same
+     probe build: every vector python/tests/test_ed25519.py carries, each
+     answer the golden model's, and SHA-512's published examples and every
+     length across its padding against hashlib.
+
+Section 1 also holds cft.h's CFT_PROFILE_* and CFT_LANGUAGE_* to
+python/cft_golden/profile.py and lang/version.py, and the tool's writer's
+list of variables and its generators to cert2.py's.
 
 With --record DIR, every tool run is kept as a case - its files, its
 command line and the golden verdict it must give - for
@@ -154,7 +170,9 @@ def golden(fn, *a, **k):
         return "refused", (e.name, e.exit_code, loc_of(e))
     except Exception as e:      # noqa: BLE001 - reported, never raised
         return "error", type(e).__name__
-    return "accepted", (v.lines() if isinstance(v, cert.Verdict) else None)
+    # a verdict of either version: cert.Verdict, or cert2.Verdict
+    return "accepted", (v.lines() if callable(getattr(v, "lines", None))
+                        else None)
 
 
 REFUSED = re.compile(r"^cft-audit: refused ([a-z-]+): ", re.M)
@@ -181,7 +199,10 @@ def run_tool(args, env=None, cwd=None):
 
 
 def tool_verdict(rc, out, err):
-    """The tool's answer in golden()'s shape."""
+    """The tool's answer in golden()'s shape. An accepted version-2 verdict
+    keeps the tool's two header lines (its identity and the audit's time,
+    cert2.Verdict.header()'s place); same() holds them to their shape and
+    compares the lines after them."""
     if rc == 0:
         return "accepted", out.split("\n")[:-1] if out.endswith("\n") \
             else out.split("\n")
@@ -189,6 +210,27 @@ def tool_verdict(rc, out, err):
     if m and l:
         return "refused", (m.group(1), rc, tuple(l.groups()))
     return "error", f"exit {rc}: {err.strip()[-300:]}"
+
+
+V2_HEADER = (re.compile(r"auditor cft-audit (?:unknown|commit=[0-9a-f]{40}"
+                        r"(?:[0-9a-f]{24})? tracked=(?:clean|modified) "
+                        r"untracked=(?:none|present))"),
+             re.compile(r"audited [0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:"
+                        r"[0-9]{2}:[0-9]{2}Z"))
+
+
+def verdict_lines(t_lines, g_lines):
+    """The tool's verdict lines to compare with the golden's: after the two
+    header lines where the golden verdict is version 2's, which the tool
+    must print (its identity and the audit's time, as cert2.Verdict.header()
+    holds them for the golden auditor). -> (lines, why or "")"""
+    if g_lines and g_lines[0].startswith("cft-certificate 2:"):
+        if len(t_lines) < 2 or not V2_HEADER[0].fullmatch(t_lines[0]) or \
+                not V2_HEADER[1].fullmatch(t_lines[1]):
+            return t_lines, (f"a version-2 verdict without the tool's header "
+                             f"(auditor, audited): {t_lines[:2]}")
+        return t_lines[2:], ""
+    return t_lines, ""
 
 
 def same(g, t, read_only=False):
@@ -208,9 +250,14 @@ def same(g, t, read_only=False):
                     else t[1])
             return False, f"golden ACCEPTED; the tool {said}"
         if read_only:
-            ok_read = bool(t[1]) and t[1][0].startswith(
-                "cft-certificate 1: READ")
+            ok_read = bool(t[1]) and (
+                t[1][0].startswith("cft-certificate 1: READ") or
+                t[1][0].startswith("cft-certificate 2: READ"))
             return ok_read, "" if ok_read else f"the tool printed {t[1][:2]}"
+        lines, why = verdict_lines(t[1], g[1])
+        if why:
+            return False, why
+        t = (t[0], lines)
         if t[1] != list(g[1]):
             diff = next((f"line {i + 1}: golden {x!r}, tool {y!r}"
                          for i, (x, y) in enumerate(zip(g[1], t[1]))
@@ -285,20 +332,55 @@ def _formats(data):
         return []
 
 
+def _choice_spec(c):
+    """A choice of segments as the tool spells it (--choose, --define)."""
+    if c == "all":
+        return "all"
+    if isinstance(c, tuple) and len(c) == 2 and c[0] == "sample":
+        if not _is_int(c[1]):
+            raise Untranslatable("a sample size that is not an integer")
+        return f"sample:{c[1]}"
+    if isinstance(c, (list, tuple)):
+        if not all(_is_int(k) for k in c):
+            raise Untranslatable("a segment that is not an integer")
+        return ",".join(str(k) for k in c)
+    if isinstance(c, str) and re.fullmatch(r"[a-z]+", c) and c != "all":
+        return c
+    raise Untranslatable(f"a choice {c!r} with no spelling")
+
+
+V2_INPUTS = ("sources", "lane_flags", "signature", "keyring", "superseded",
+             "define", "regenerate")
+
+
 def translate(workdir, data, salt, programs=None, states=None, streams=None,
-              choose=None, seed=None, read_only=False):
-    """-> the tool's arguments, with the files written into workdir."""
+              choose=None, seed=None, read_only=False, sources=None,
+              lane_flags=None, signature=None, keyring=None, superseded=None,
+              define=None, regenerate=False):
+    """-> the tool's arguments, with the files written into workdir.
+
+    Version 2's inputs (cert2.audit's keywords): the blocks go into the
+    states directory as run-<r>-segment-<k>.flags, the signature, keyring
+    and superseded certificate into files of their own, and `define` into
+    each run's --define. `sources` is not carried: cft-audit takes no
+    source, so the caller compares it with the golden auditor handed none
+    (no_source_kwargs). `regenerate=True` has no spelling: the tool
+    regenerates no initial state."""
     if not isinstance(data, (bytes, bytearray)):
         raise Untranslatable("the certificate is not bytes")
-    if bytes(data[:18]) == b"cft-certificate 2\n":
-        # The golden reader dispatches a version-2 body to version 2's
-        # reader (docs/CERTIFICATES.md, "Version 2"), and cft-audit reads
-        # version 1 only until the C half: test_cert.py's two controls
-        # that put a version-1 body under `cft-certificate 2` are
-        # `line-missing` there and `version` here. Counted and named.
-        raise Untranslatable("a version-2 certificate, which cft-audit "
-                             "reads from the C half on (CV2B's next "
-                             "parcel)")
+    v2 = bytes(data[:18]) == b"cft-certificate 2\n"
+    if not v2 and (any(x is not None for x in (
+            sources, lane_flags, signature, keyring, superseded, define))
+            or regenerate is not False):
+        raise Untranslatable("version 2's inputs beside a version-1 "
+                             "certificate, which cert.audit refuses with a "
+                             "TypeError")
+    if regenerate is True:
+        raise Untranslatable("regenerate=True: cft-audit regenerates no "
+                             "initial state (no_source_kwargs drops it)")
+    if regenerate is not False:
+        raise Untranslatable(f"regenerate={regenerate!r:.20}: a choice that "
+                             f"is not a bool has no spelling")
     (workdir / "c.cert").write_bytes(bytes(data))
     args = ["--cert", workdir / "c.cert"]
     if read_only:
@@ -366,31 +448,24 @@ def translate(workdir, data, salt, programs=None, states=None, streams=None,
             raise Untranslatable("choose is not a mapping")
         for r, c in choose.items():
             b = block(r)
-            if c == "all":
-                spec = "all"
-            elif isinstance(c, tuple) and len(c) == 2 and c[0] == "sample":
-                if not _is_int(c[1]):
-                    raise Untranslatable("a sample size that is not an "
-                                         "integer")
-                spec = f"sample:{c[1]}"
-            elif isinstance(c, (list, tuple)):
-                if not all(_is_int(k) for k in c):
-                    raise Untranslatable("a segment that is not an integer")
-                spec = ",".join(str(k) for k in c)
-            elif isinstance(c, str) and re.fullmatch(r"[a-z]+", c) and \
-                    c != "all":
-                spec = c
-            else:
-                raise Untranslatable(f"a choice {c!r} with no spelling")
-            b += ["--choose", spec]
+            b += ["--choose", _choice_spec(c)]
+    if define is not None:
+        if not isinstance(define, dict):
+            raise Untranslatable("define is not a mapping")
+        for r, c in define.items():
+            if isinstance(c, tuple) and len(c) == 2 and c[0] == "sample":
+                raise Untranslatable("a definition re-run of a sample, which "
+                                     "has no spelling")
+            b = block(r)
+            b += ["--define", _choice_spec(c)]
     for r, b in blocks.items():
         if b:
             args += ["--run", str(r)] + b
+    sd = workdir / "states"
     if states is not None:
         if not isinstance(states, dict):
             raise Untranslatable("states is not a mapping")
-        sd = workdir / "states"
-        sd.mkdir()
+        sd.mkdir(exist_ok=True)
         for r, per in states.items():
             if not _is_int(r) or r < 0:
                 raise Untranslatable(f"a states key {r!r} no file name holds")
@@ -402,8 +477,54 @@ def translate(workdir, data, salt, programs=None, states=None, streams=None,
                                          f"holds")
                 (sd / f"run-{r}-boundary-{b_}.bin").write_bytes(
                     _bytes_of(fmt_of(r), s, "a state"))
+    if lane_flags is not None:
+        if not isinstance(lane_flags, dict):
+            raise Untranslatable("lane_flags is not a mapping")
+        sd.mkdir(exist_ok=True)
+        for r, per in lane_flags.items():
+            if not _is_int(r) or r < 0:
+                raise Untranslatable(f"a lane_flags key {r!r} no file name "
+                                     f"holds")
+            if not isinstance(per, dict):
+                raise Untranslatable("a run's blocks that are not a mapping")
+            for k, blk in per.items():
+                if not _is_int(k) or k < 0:
+                    raise Untranslatable(f"a block's segment {k!r} no file "
+                                         f"name holds")
+                if not isinstance(blk, (bytes, bytearray)):
+                    raise Untranslatable("a block that is not bytes")
+                (sd / f"run-{r}-segment-{k}.flags").write_bytes(bytes(blk))
+    if states is not None or lane_flags is not None:
         args += ["--states", sd]
+    for value, fname, opt in ((signature, "c.sig", "--signature"),
+                              (keyring, "ring", "--keyring"),
+                              (superseded, "old.cert", "--superseded")):
+        if value is None:
+            continue
+        if not isinstance(value, (bytes, bytearray)):
+            raise Untranslatable(f"{opt[2:]} that is not bytes")
+        (workdir / fname).write_bytes(bytes(value))
+        args += [opt, workdir / fname]
     return args
+
+
+def no_source_kwargs(kw):
+    """A version-2 golden audit's keywords for the same audit as cft-audit
+    can be handed it: no source - so that a replay in a re-run segment, a
+    wider-source relation and a definition re-run refuse `source-missing`
+    in both (docs/CERTIFICATES.md, "What waits for the C half") - and not
+    asked to regenerate the initial state, which the tool does not do, so
+    that both report a generator as not regenerated. A regenerate that is
+    not a bool is kept, and is untranslatable. -> (kwargs, what was
+    dropped: a tuple of "source" and "regenerate")."""
+    out, dropped = dict(kw), []
+    if out.get("sources") is not None:
+        out.pop("sources")
+        dropped.append("source")
+    if out.get("regenerate") is True:
+        out.pop("regenerate")
+        dropped.append("regenerate")
+    return (out, tuple(dropped)) if dropped else (kw, ())
 
 
 # ---- section 2: test_cert.py, shadowed --------------------------------------
@@ -440,6 +561,10 @@ class Shadow:
         self.t_tool = 0.0          # seconds in the tool's runs
         self.t_files = 0.0         # seconds writing their files
         self.slowest = []          # (seconds, label)
+        self.no_source = 0         # version-2 calls held to the golden
+                                   # auditor handed no source
+        self.no_regen = 0          # ... and not asked to regenerate
+        self.versions = {1: 0, 2: 0}   # mirrored calls by the version
 
     def _dir(self, read_only):
         """A parse call writes its certificate (and salt) over the last
@@ -462,7 +587,8 @@ class Shadow:
         d = self._dir(read_only)
         try:
             if kind == "parse":
-                args = translate(d, a[0] if a else k.get("data"),
+                data = a[0] if a else k.get("data")
+                args = translate(d, data,
                                  a[1] if len(a) > 1 else k.get("salt"),
                                  read_only=True)
             else:
@@ -470,6 +596,7 @@ class Shadow:
                          "choose", "seed")
                 kw = dict(zip(names, a))
                 kw.update(k)
+                data = kw.get("data")
                 args = translate(d, **kw)
         except Untranslatable as e:
             key = f"{test}: {e}"
@@ -480,6 +607,8 @@ class Shadow:
             self.untranslatable[key] = self.untranslatable.get(key, 0) + 1
             return
         self.mirrored[kind] += 1
+        self.versions[2 if isinstance(data, (bytes, bytearray)) and
+                      bytes(data[:18]) == b"cft-certificate 2\n" else 1] += 1
         t1 = time.perf_counter()
         rc, out, err = run_tool(args, env, cwd=d)
         t2 = time.perf_counter()
@@ -521,6 +650,7 @@ class Shadow:
         top = self.depth == 0
         self.depth += 1
         cert.os.drawn.clear()
+        kw = None
         try:
             try:
                 res = ORIG_AUDIT(*a, **k)
@@ -529,62 +659,91 @@ class Shadow:
                 res, g = e, ("refused", (e.name, e.exit_code, loc_of(e)))
             except Exception as e:      # noqa: BLE001
                 res, g = e, ("error", type(e).__name__)
+            if top:
+                names = ("data", "salt", "programs", "states", "streams",
+                         "choose", "seed")
+                kw = dict(zip(names, a))
+                kw.update(k)
+                if kw.get("seed") is None and cert.os.drawn:
+                    kw["seed"] = cert.os.drawn[0]
+                data = kw.get("data")
+                if isinstance(data, (bytes, bytearray)) and \
+                        bytes(data[:18]) == b"cft-certificate 2\n":
+                    # cft-audit takes no source and regenerates nothing: it
+                    # is held to the golden auditor handed no source and
+                    # not asked to regenerate, where a replay, a
+                    # wider-source relation and a definition re-run refuse
+                    # source-missing in both (the golden call's own result
+                    # still goes back to the test)
+                    kw, dropped = no_source_kwargs(kw)
+                    if dropped:
+                        g = golden(ORIG_AUDIT, **kw)
+                        self.no_source += "source" in dropped
+                        self.no_regen += "regenerate" in dropped
         finally:
             self.depth -= 1
         if top:
             env = None
             if cert.seq.run is not ORIG_SEQ_RUN:
                 env = {"CFT_AUDIT_PLANT": "executor-refuses"}
-            names = ("data", "salt", "programs", "states", "streams",
-                     "choose", "seed")
-            kw = dict(zip(names, a))
-            kw.update(k)
-            if kw.get("seed") is None and cert.os.drawn:
-                kw["seed"] = cert.os.drawn[0]
             self.mirror("audit", g, (), kw, env=env)
         if isinstance(res, BaseException):
             raise res
         return res
 
 
-def section_shadow(work):
+def section_shadow(work, files=("test_cert.py", "test_cert2.py")):
+    """Section 2: each test file run in this process with cert.parse and
+    cert.audit shadowed - test_cert.py's version-1 calls, and since version
+    2's C half (parcel CV2CA) test_cert2.py's, whose audit calls are held
+    to the golden auditor handed no source."""
     global ORIG_PARSE, ORIG_AUDIT, ORIG_SEQ_RUN
     import pytest
-    print("== 2. test_cert.py shadowed: every parse call, and every audit "
-          "call files and options can carry, through the tool too",
-          flush=True)
+    print("== 2. test_cert.py and test_cert2.py shadowed: every parse call, "
+          "and every audit call files and options can carry, through the "
+          "tool too", flush=True)
     ORIG_PARSE, ORIG_AUDIT, ORIG_SEQ_RUN = cert.parse, cert.audit, seq.run
-    sh = Shadow(work)
-    real_os = cert.os
-    cert.os = _Os(real_os)
-    cert.parse, cert.audit = sh.parse, sh.audit
-    t0 = time.perf_counter()
-    try:
-        rc = pytest.main([str(ROOT / "python" / "tests" / "test_cert.py"),
-                          "-q", "-p", "no:cacheprovider"])
-    finally:
-        cert.parse, cert.audit = ORIG_PARSE, ORIG_AUDIT
-        cert.os = real_os
-    dt = time.perf_counter() - t0
-    check(rc == 0, f"test_cert.py passes with the shadow on ({dt:.0f} s: "
-          f"{sh.t_tool:.0f} s in the tool's {sum(sh.mirrored.values())} runs, "
-          f"{sh.t_files:.0f} s writing their files, the rest the golden "
-          f"model)", f"pytest exit {rc}")
-    print("  NOTE  the slowest tool runs: " + "; ".join(
-        f"{lab} {s:.2f} s" for s, lab in reversed(sh.slowest)), flush=True)
-    for kind in ("parse", "audit"):
-        n, m = sh.calls[kind], sh.mirrored[kind]
-        check(m > 0, f"{kind}: {m} of {n} top-level calls handed to the tool "
-              f"too, each the same verdict"
-              + (f" ({len([f for f in sh.fails if f', {kind} call' in f])} "
-                 f"differ)" if sh.fails else ""))
-    if sh.untranslatable:
-        n = sum(sh.untranslatable.values())
-        print(f"  NOTE  {n} calls with arguments no file or option carries "
-              f"faithfully, not compared:", flush=True)
-        for key, c in sorted(sh.untranslatable.items()):
-            print(f"          {c:4d}  {key}", flush=True)
-    return sh
+    out = []
+    for fname in files:
+        sh = Shadow(work)
+        real_os = cert.os
+        cert.os = _Os(real_os)
+        cert.parse, cert.audit = sh.parse, sh.audit
+        t0 = time.perf_counter()
+        try:
+            rc = pytest.main([str(ROOT / "python" / "tests" / fname),
+                              "-q", "-p", "no:cacheprovider"])
+        finally:
+            cert.parse, cert.audit = ORIG_PARSE, ORIG_AUDIT
+            cert.os = real_os
+        dt = time.perf_counter() - t0
+        check(rc == 0, f"{fname} passes with the shadow on ({dt:.0f} s: "
+              f"{sh.t_tool:.0f} s in the tool's {sum(sh.mirrored.values())} "
+              f"runs, {sh.t_files:.0f} s writing their files, the rest the "
+              f"golden model)", f"pytest exit {rc}")
+        print(f"  NOTE  {fname}'s slowest tool runs: " + "; ".join(
+            f"{lab} {s:.2f} s" for s, lab in reversed(sh.slowest)),
+            flush=True)
+        for kind in ("parse", "audit"):
+            n, m = sh.calls[kind], sh.mirrored[kind]
+            check(m > 0, f"{fname} {kind}: {m} of {n} top-level calls handed "
+                  f"to the tool too, each the same verdict"
+                  + (f" ({len([f for f in sh.fails if f', {kind} call' in f])}"
+                     f" differ)" if sh.fails else ""))
+        print(f"  NOTE  {fname}: {sh.versions[1]} calls of version 1 and "
+              f"{sh.versions[2]} of version 2 compared; {sh.no_source} "
+              f"version-2 audits held to the golden auditor handed no "
+              f"source, as cft-audit takes none, and {sh.no_regen} to it not "
+              f"asked to regenerate the initial state, which cft-audit does "
+              f"not do", flush=True)
+        if sh.untranslatable:
+            n = sum(sh.untranslatable.values())
+            print(f"  NOTE  {fname}: {n} calls with arguments no file or "
+                  f"option carries faithfully, not compared:", flush=True)
+            for key, c in sorted(sh.untranslatable.items()):
+                print(f"          {c:4d}  {key}", flush=True)
+        out.append(sh)
+    return out
 
 
 # ---- section 1: the tool's own ----------------------------------------------
@@ -667,13 +826,21 @@ def section_tool(work):
            "CFT_AUDIT_PLANT empty")
     lor = work / "own" / "l.cert"
     lor.write_bytes(b"cft-certificate 1\n")
+    # a file version 2's dispatch takes (its first 18 bytes), for the
+    # usage refusals of version 2's inputs, which come before step 1
+    lor2 = work / "own" / "l2.cert"
+    lor2.write_bytes(b"cft-certificate 2\n")
     (d / "states-bad").mkdir(exist_ok=True)
     (d / "states-bad" / "run-01-boundary-0.bin").write_bytes(b"")
+    (d / "blocks-bad").mkdir(exist_ok=True)
+    (d / "blocks-bad" / "run-0-segment-01.flags").write_bytes(b"")
     # a directory by a boundary file's name: `usage` BEFORE step 1, which
     # this certificate (no hash line) would fail - so a tool that found it
     # only at step 7 says hash-line here (verifier-A1)
     (d / "states-dir" / "run-0-boundary-0.bin").mkdir(parents=True,
                                                       exist_ok=True)
+    (d / "blocks-dir" / "run-0-segment-0.flags").mkdir(parents=True,
+                                                       exist_ok=True)
     for label, args, env in (
             ("no argument at all", [], None),
             ("an unknown option", ["--cert", lor, "--lanes", "3"], None),
@@ -720,7 +887,33 @@ def section_tool(work):
             ("--seed with no value, last", ["--read", "--cert", lor,
                                             "--seed"], None),
             ("--stream ab", ["--cert", lor, "--run", "0", "--stream", "ab",
-                             lor], None)):
+                             lor], None),
+            # version 2's inputs (parcel CV2CA): beside a version-1
+            # certificate, as cert.audit raises a TypeError for them; in
+            # their places; and a block file's name, before step 1
+            ("--signature beside a version-1 certificate",
+             ["--cert", lor, "--signature", lor], None),
+            ("--keyring beside a version-1 certificate",
+             ["--cert", lor, "--keyring", lor], None),
+            ("--superseded beside a version-1 certificate",
+             ["--cert", lor, "--superseded", lor], None),
+            ("--define beside a version-1 certificate",
+             ["--cert", lor, "--run", "0", "--define", "all"], None),
+            ("--define before any --run", ["--cert", lor2, "--define",
+                                           "all"], None),
+            ("--define twice in a block", ["--cert", lor2, "--run", "0",
+                                           "--define", "all", "--define",
+                                           "0"], None),
+            ("--signature twice", ["--cert", lor2, "--signature", lor,
+                                   "--signature", lor], None),
+            ("--read with --keyring", ["--read", "--cert", lor2,
+                                       "--keyring", lor], None),
+            ("a signature file that is not there",
+             ["--cert", lor2, "--signature", d / "absent"], None),
+            ("a block file misspelt, for a version-2 certificate",
+             ["--cert", lor2, "--states", d / "blocks-bad"], None),
+            ("a directory named as a block file, found before step 1",
+             ["--cert", lor2, "--states", d / "blocks-dir"], None)):
         rc, out, err = run_tool(args, env, cwd=d)
         t = tool_verdict(rc, out, err)
         code = TOOL_OWN["usage"]
@@ -730,7 +923,199 @@ def section_tool(work):
               f"{t}")
         record(d, args, env, ["refused", ["usage", code, ["-"] * 4]],
                f"usage: {label}")
+    # version 1 reads no block file, as before version 2: the same
+    # misspelt block file beside a version-1 certificate is not read, and
+    # the certificate (no hash line) is refused at step 1
+    args = ["--cert", lor, "--states", d / "blocks-bad"]
+    rc, out, err = run_tool(args, cwd=d)
+    t = tool_verdict(rc, out, err)
+    want = ("refused", ("hash-line", 1, ("-", "-", "-", "-")))
+    check(t == want, "a misspelt block file beside a version-1 certificate "
+          "is not read: hash-line at step 1, as before version 2", f"{t}")
+    record(d, args, None, [want[0], list(want[1])], "version 1 reads no "
+           "block file")
+    definition_checks()
     census_controls(work)
+    v2_census_controls(work)
+
+
+def v2_census_controls(work):
+    """Golden against tool on version-2 inputs no test_cert2.py call hands
+    the tool as it is handed them (no source): `definition-differs` raised
+    inside each region cert2._Through covers that step 4 does not reach -
+    a re-run's segment line (segment-flags, segment-lane-flags), a replay
+    line's own checks (replay-raw, replay-missing) and the wider-source
+    relation (aux-format) - under a certificate whose profile this
+    library's does not cover; and an audit ACCEPTED under a definition
+    that does not cover the certificate's (the verdict's "do not cover
+    them" line), by the profile's minor and by the language where a run
+    names a source. Without these, every definition-differs the gate
+    compared was step 4's."""
+    import test_cert2 as T2
+    print("== 1d. version 2's controls: definition-differs in each re-derivation "
+          "a source-free audit reaches, and a verdict under a definition "
+          "that does not cover the certificate's", flush=True)
+    fl = fixture_function(T2.fl)()
+    mk = T2.make_markstep()
+    lz = fixture_function(T2.lz)()
+    n = 0
+
+    def one(label, data, salt, programs, want=None, **kw):
+        nonlocal n
+        n += 1
+        d = work / "census2" / f"c{n}"
+        if d.exists():
+            shutil.rmtree(d)
+        d.mkdir(parents=True)
+        kw, dropped = no_source_kwargs(kw)
+        g = golden(cert.audit, data, salt, programs, **kw)
+        args = translate(d, data, salt, programs=programs, **kw)
+        hold(args, None, g, f"{label}: {describe(g)}", d, quiet=False)
+        if want is not None:
+            check(g[0] == want[0] and (g[0] != "refused" or
+                                       (g[1][0], g[1][2]) == want[1:]),
+                  f"  and the golden verdict is the control's: {want}",
+                  describe(g))
+
+    def seg(data, k, field, value):
+        L = T2.lines_of(data)
+        i = T2.find(L, f"segment {k} ")
+        t = L[i].split(" ")
+        t[field] = value
+        return T2.rebuilt(L[:i] + [" ".join(t)] + L[i + 1:])
+
+    def prof(data, value="profile 3"):
+        return T2.edit(data, value.split(" ")[0] + " ", value)
+    fl_states = {0: {0: fl.init}}
+    one("flagstep, profile 3, segment 1's flags wrong",
+        prof(seg(fl.data, 1, 7, "21")), None, {0: (fl.img, None)},
+        ("refused", "definition-differs", ("-", "0", "1", "-")),
+        states=fl_states)
+    blk = fl.chain.blocks[0]
+    other = bytes([blk[0] & ~0x10]) + blk[1:]
+    one("flagstep, profile 3, segment 0's block another",
+        prof(T2._block_line(fl, 0, other)), None, {0: (fl.img, None)},
+        ("refused", "definition-differs", ("-", "0", "0", "-")),
+        states=fl_states)
+    L = T2.lines_of(mk.data)
+    r = T2.find(L, "replay ")
+    t = L[r].split(" ")
+    t[7] = cert.parse(mk.data).runs[0].chain[1].end
+    raw = T2.rebuilt(L[:r] + [" ".join(t)] + L[r + 1:])
+    mk_args = dict(states={0: {0: mk.init}}, sources={0: mk.src})
+    one("markstep, profile 3, its replay line's raw end the segment's",
+        prof(raw), None, {0: (mk.img, mk.bank)},
+        ("refused", "definition-differs", ("-", "0", "1", "-")), **mk_args)
+    i = T2.find(L, "replay-methods ")
+    m = T2.find(L, "replays ")
+    gone = L[:i] + ["replay-methods 0"] + L[i + 2:m] + ["replays 0"] + \
+        L[r + 1:]
+    one("markstep, profile 3, its replay lines gone",
+        prof(T2.rebuilt(gone)), None, {0: (mk.img, mk.bank)},
+        ("refused", "definition-differs", ("-", "0", "1", "-")), **mk_args)
+    r0, r1, _r2, r3 = lz.runs
+    same = dataclasses.replace(r0, kind="wider-source")
+    one("lorenz-63, profile 3, its wider-source run the main run's format",
+        prof(T2.with_runs(lz, (r0, r1, same, r3))), None,
+        {**lz.progs, 2: lz.progs[0]},
+        ("refused", "definition-differs", ("-", "2", "-", "-")),
+        states={**lz.states, 2: {0: lz.init}},
+        sources={0: lz.src, 1: lz.src, 2: lz.src})
+    one("flagstep, profile 2.1: accepted, under a definition that does not "
+        "cover it", prof(fl.data, "profile 2.1"), None, {0: (fl.img, None)},
+        ("accepted",), states=fl_states)
+    every = {0: dict(enumerate(mk.chain.states))}
+    one("markstep, language 2, its unreplayed segments: accepted, under a "
+        "definition that does not cover it", prof(mk.data, "language 2"),
+        None, {0: (mk.img, mk.bank)}, ("accepted",), states=every,
+        choose={0: [0, 2]}, sources={0: mk.src})
+    # paths only the C tool has code of its own for: a signature file whose
+    # key encodes no point (cert2 refuses no such key there: its signature
+    # does not verify), the wider-source relation's lanes and steps, and
+    # blocks past segment 9, which cert2._check_blocks reads in their
+    # decimal spelling's order (10 before 9) and the verdict lists so
+    full = fixture_function(T2.full)(fl)
+    S = full.sig.decode("ascii").split("\n")[:-1]
+    nopoint = "\n".join(S[:2] + ["key 02" + "00" * 31] + S[3:]) + "\n"
+    one("the signed certificate, a signature file whose key encodes no "
+        "point", full.data, T2.SALT, {0: (full.img, None)},
+        ("refused", "signature", ("-", "-", "-", "-")),
+        states={0: {0: full.init}}, signature=nopoint.encode("ascii"))
+    # its certificate line another body's, its signature this one's: only
+    # the certificate line's own check refuses it (the signature verifies)
+    from cft_golden import cert2 as C2
+    named = "\n".join(S[:3] + [f"certificate {C2.body_hash_of(fl.data)}"]
+                      + S[4:]) + "\n"
+    one("the signed certificate, a signature file naming another "
+        "certificate, its signature this one's", full.data, T2.SALT,
+        {0: (full.img, None)}, ("refused", "signature", ("-", "-", "-", "-")),
+        states={0: {0: full.init}}, signature=named.encode("ascii"))
+    wide = dataclasses.replace(lz.runs[2], lanes=4)
+    one("lorenz-63, its wider-source run of 4 lanes (its state not handed)",
+        T2.with_runs(lz, (r0, r1, wide, r3)), None, lz.progs,
+        ("refused", "aux-lanes", ("-", "2", "-", "-")),
+        states={0: {0: lz.init}, 1: {0: lz.init}, 3: {0: lz.init_w}})
+    slow = dataclasses.replace(lz.runs[2], steps=99)
+    one("lorenz-63, its wider-source run of 99 steps a segment",
+        T2.with_runs(lz, (r0, r1, slow, r3)), None, lz.progs,
+        ("refused", "aux-image", ("-", "2", "-", "-")), states=lz.states)
+    from cft_golden import cert2
+    img = T2.flagstep_image()
+    init = [T2.d64(v) for v in ("3", "1", "3", "5")]
+    ch = cert2.run_chain(img, b"", init, 12, lane_flags=True)
+    run12 = cert2.certify_run("main", img, b"", None, ch, steps=1)
+    data12 = cert2.encode(cert2.Certificate(
+        "open", None, T2.IDN, T2.prov(language="none"), (run12,), ()))
+    blocks = dict(enumerate(ch.blocks))
+    one("flagstep of 12 segments, every block handed: accepted, the blocks "
+        "listed in their spelling's order", data12, None, {0: (img, None)},
+        ("accepted",), states={0: {0: init}}, lane_flags={0: blocks})
+    bad = dict(blocks)
+    for k in (9, 10):
+        b = bytearray(bad[k])
+        b[0] ^= 0x01
+        bad[k] = bytes(b)
+    one("flagstep of 12 segments, blocks 9 and 10 not the certified ones: "
+        "10 is read first", data12, None, {0: (img, None)},
+        ("refused", "lane-flags-hash", ("-", "0", "10", "-")),
+        states={0: {0: init}}, lane_flags={0: bad})
+
+
+def definition_checks():
+    """What cft-audit holds as version 2's definition and lists, against the
+    golden model's: cft.h's CFT_PROFILE_* and CFT_LANGUAGE_* (the lead's
+    names, 2026-10-02) against python/cft_golden/profile.py and
+    lang/version.py, which decide `definition-differs` in both auditors;
+    audit.c's writer's list of variables against cert2.ENVIRONMENT_NAMES;
+    and its generators against cert2.GENERATORS."""
+    from cft_golden import cert2, profile
+    from cft_golden.lang import version as lang_version
+    text = (HOST / "include" / "cft.h").read_text(encoding="utf-8")
+    got = {n: int(v) for n, v in re.findall(
+        r"^#define (CFT_(?:PROFILE|LANGUAGE)_(?:MAJOR|MINOR))\s+(\d+)\s*$",
+        text, re.M)}
+    want = {"CFT_PROFILE_MAJOR": profile.VERSION[0],
+            "CFT_PROFILE_MINOR": profile.VERSION[1],
+            "CFT_LANGUAGE_MAJOR": lang_version.VERSION[0],
+            "CFT_LANGUAGE_MINOR": lang_version.VERSION[1]}
+    check(got == want, f"cft.h's profile and language macros are "
+          f"profile.py's {profile.VERSION} and lang/version.py's "
+          f"{lang_version.VERSION}: {got}", f"want {want}")
+    src = (HOST / "tools" / "audit.c").read_text(encoding="utf-8")
+    try:
+        block = src[src.index("BEGIN ENVIRONMENT_NAMES"):
+                    src.index("END ENVIRONMENT_NAMES")]
+        names = tuple(re.findall(r'"([A-Z0-9_]+)"', block))
+    except ValueError:
+        names = ()
+    check(names == tuple(cert2.ENVIRONMENT_NAMES), f"cft-audit's list of the "
+          f"variables an env line may name is cert2.ENVIRONMENT_NAMES, "
+          f"{len(names)} of them", f"{names}")
+    m = re.search(r"GENERATORS\[\] = \{([^}]*)\}", src)
+    gens = tuple(re.findall(r'"([a-z0-9-]+)"', m.group(1))) if m else ()
+    check(set(gens) == set(cert2.GENERATORS), f"cft-audit's generators, "
+          f"which it reports and does not regenerate, are cert2.GENERATORS: "
+          f"{', '.join(gens)}", f"{gens}")
 
 
 def census_controls(work):
@@ -813,7 +1198,12 @@ def drawn_seed_checks(work, case):
     g = golden(ORIG_AUDIT or cert.audit, **dict(kw, seed=s))
     t = tool_verdict(*run_tool(args + ["--seed", seeds[0][0]]))
     agree, why = same(g, t)
-    check(agree and t[1] == seeds[0][1].split("\n")[:-1],
+
+    def timeless(lines):
+        # a version-2 verdict's header carries the audit's time
+        return [ln for ln in lines if not ln.startswith("audited ")]
+    check(agree and timeless(t[1]) ==
+          timeless(seeds[0][1].split("\n")[:-1]),
           "the drawn seed handed back gives the same verdict, and the "
           "golden audit's under it", why)
 
@@ -999,8 +1389,6 @@ def section_corpus(work, root):
     for c in cases:
         data = (root / c["certificate"]).read_bytes()
         if data[:18] == b"cft-certificate 2\n":
-            # cft-audit reads version 1 only until the C half; corpus.py
-            # check holds each version-2 case to the golden auditor
             version_2.append(c["name"])
             continue
         salt = (root / c["salt"]).read_bytes() if c["salt"] else None
@@ -1017,10 +1405,102 @@ def section_corpus(work, root):
         audits_of(work, f"corpus {c['name']}", data, salt, progs, states,
                   None, c.get("verdict"))
     if version_2:
-        print(f"  NOTE  {len(version_2)} version-2 cases, not handed to the "
-              f"tool: cft-audit reads version 2 from the C half on (CV2B's "
-              f"next parcel), and corpus.py check holds each to the golden "
-              f"auditor: {', '.join(version_2)}", flush=True)
+        section_corpus2(work, root, version_2)
+
+
+def section_corpus2(work, root, names):
+    """Section 4's version-2 cases (since version 2's C half): each case and
+    control handed to both auditors as corpus.py's audit_inputs2 hands the
+    golden one - its blocks, signature, keyring, superseded certificate and
+    definition re-run - but no source and no regeneration, which cft-audit
+    does not take (no_source_kwargs); the golden auditor handed the same is
+    the verdict both must give. A case a writer makes is audited in full as
+    the manifest hands it, sampled under the fixed seed, in full from every
+    committed state, and from every state choosing the segments that carry
+    no replay line, with no definition re-run - which is where cft-audit
+    can accept a certificate whose replays it cannot make; a control, in
+    full and from every state. How many keep the manifest's verdict handed
+    no source is printed, and each that does not by the verdict both
+    auditors give it."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "corpus_for_audit_check", root / "certificates" / "corpus.py")
+    CP = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(CP)
+    corpus = CP.read_manifest()         # its own tree's, as CP.rp reads
+    by = {c.name: c for c in corpus.cases}
+    kept, moved = 0, {}
+    for name in names:
+        case = by[name]
+        data = CP.rp(case.certificate[0]).read_bytes()
+        try:
+            parsed = cert.parse(data)
+        except cert.Refusal:
+            parsed = None           # a control the reader refuses
+        modes = [("in full as the manifest hands it", False, None)]
+        if case.writers != "golden":
+            modes.append(("sampled", True, None))
+        modes.append(("in full from every committed state", False, "every"))
+        if parsed is not None and case.writers != "golden" and \
+                any(r.replays for r in parsed.runs):
+            modes.append(("from every state, the segments with no replay "
+                          "line and no definition re-run", False,
+                          "unreplayed"))
+        for how, sampled, states_mode in modes:
+            salt, progs, kw = CP.audit_inputs2(case, corpus, sampled,
+                                               FIXED_SEED)
+            if states_mode:
+                try:
+                    kw["states"] = {
+                        r.index: {b: CP.rp(r.state_path(case, b)).read_bytes()
+                                  for b in range(r.segments + 1)}
+                        for r in case.runs}
+                except OSError as e:
+                    print(f"  NOTE  corpus {name}, {how}: not every state is "
+                          f"committed ({e}); not made", flush=True)
+                    continue
+                kw.pop("choose", None)
+                kw.pop("seed", None)
+            if states_mode == "unreplayed":
+                ch = {}
+                for i, run in enumerate(parsed.runs):
+                    reps = {x.segment for x in run.replays}
+                    keep = [k for k in range(len(run.chain)) if k not in reps]
+                    if reps and keep:
+                        ch[i] = keep
+                kw["choose"] = ch
+                # the definition re-run is the auditor's own choice too,
+                # and one this tool always refuses: this audit makes none
+                kw.pop("define", None)
+            kw, dropped = no_source_kwargs(kw)
+            d = work / "corpus2" / f"{name}-{len(how)}-{int(sampled)}"
+            if d.exists():
+                shutil.rmtree(d)
+            d.mkdir(parents=True)
+            g = golden(cert.audit, data, salt, progs, **kw)
+            args = translate(d, data, salt, programs=progs, **kw)
+            label = (f"corpus {name} (version 2), {how}"
+                     + (f", without the {' and the '.join(dropped)}"
+                        if dropped else "") + f": {describe(g)}")
+            hold(args, None, g, label, d, quiet=False)
+            if states_mode is None and not sampled:
+                want = ("accepted", None) if case.verdict == "accepted" \
+                    else ("refused", case.verdict)
+                same_verdict = g[0] == want[0] and (
+                    g[0] != "refused" or g[1][0] == want[1])
+                if same_verdict:
+                    kept += 1
+                else:
+                    got = "ACCEPTED" if g[0] == "accepted" else \
+                        g[1][0] if g[0] == "refused" else str(g[1])
+                    moved.setdefault(got, []).append(name)
+    print(f"  NOTE  {len(names)} version-2 cases and controls handed to both "
+          f"auditors as the manifest hands them but the source and the "
+          f"regeneration: {kept} keep their manifest verdict, and "
+          f"{sum(len(c) for c in moved.values())} do not, each given one "
+          f"verdict by both auditors, as measured: "
+          + "; ".join(f"{v} {len(c)} ({', '.join(c)})"
+                      for v, c in sorted(moved.items())), flush=True)
 
 
 # ---- section 5: the narrow builds -------------------------------------------
@@ -1516,6 +1996,25 @@ def numeric_cases(rng):
     return out
 
 
+PROBE = {}
+
+
+def build_probe(work, cc, lib_src):
+    """The probe build of tools/audit.c (-DCFT_AUDIT_PROBE), once for the
+    sections that run it. -> its path, or None where it did not build."""
+    if "exe" in PROBE:
+        return PROBE["exe"]
+    d = work / "probe"
+    d.mkdir(parents=True, exist_ok=True)
+    exe = d / ("cft-audit-probe" + (".exe" if os.name == "nt" else ""))
+    t0 = time.perf_counter()
+    built, err = compile_with(cc, lib_src, exe, ["-DCFT_AUDIT_PROBE"], work)
+    check(built, f"the probe, tools/audit.c with -DCFT_AUDIT_PROBE, built "
+          f"({time.perf_counter() - t0:.0f} s)", err[-400:])
+    PROBE["exe"] = exe if built else None
+    return PROBE["exe"]
+
+
 def section_numerics(work, cc, lib_src):
     print("== 6. the tool's numerics - its division, gcd, exact arithmetic "
           "and rounding, an element's exact value, and the library's "
@@ -1526,13 +2025,8 @@ def section_numerics(work, cc, lib_src):
              "host audittest gives both)")
         return
     import random
-    d = work / "probe"
-    d.mkdir(parents=True, exist_ok=True)
-    exe = d / ("cft-audit-probe" + (".exe" if os.name == "nt" else ""))
-    t0 = time.perf_counter()
-    built, err = compile_with(cc, lib_src, exe, ["-DCFT_AUDIT_PROBE"], work)
-    if not check(built, f"the probe, tools/audit.c with -DCFT_AUDIT_PROBE, "
-                 f"built ({time.perf_counter() - t0:.0f} s)", err[-400:]):
+    exe = build_probe(work, cc, lib_src)
+    if exe is None:
         return
     cases = numeric_cases(random.Random(20260929))
     t0 = time.perf_counter()
@@ -1559,6 +2053,191 @@ def section_numerics(work, cc, lib_src):
               "; ".join(w for w in wrong if w.startswith(op))[:600])
 
 
+# ---- section 7: Ed25519 and SHA-512 against their vectors -------------------
+
+# FIPS 180-4's SHA-512 examples, as NIST publishes them (the examples with
+# intermediate values, and FIPS 180-2's appendix C for the million 'a's),
+# and the empty message: (what, the message or (byte, count), the digest).
+# Each is held to Python's hashlib as well, which would show a digest typed
+# wrong here.
+SHA512_PUBLISHED = (
+    ("the empty message", b"",
+     "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce"
+     "47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e"),
+    ('"abc"', b"abc",
+     "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a"
+     "2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"),
+    ("the 448-bit message",
+     b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+     "204a8fc6dda82f0a0ced7beb8e08a41657c16ef468b228a8279be331a703c335"
+     "96fd15c13b1b07f9aa1d3bea57789ca031ad85c7a71dd70354ec631238ca3445"),
+    ("the 896-bit message",
+     b"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmn"
+     b"hijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu",
+     "8e959b75dae313da8cf4f72814fc143f8f7779c6eb9f7fa17299aeadb6889018"
+     "501d289e4900f7e4331b99dec4b5433ac7d329eeb6dd26545e96e55b874be909"),
+    ("a million 'a's", (0x61, 1000000),
+     "e718483d0ce769644e2e42c7bc15b4638e1f98b13b2044285632a803afa973eb"
+     "de0ff244877ea60a4cb0432ce577c31beb009c5c2c49aa2e4eadb217ad8cc09b"),
+)
+
+
+def ed25519_cases(rng):
+    """(probe line, the answer, the group it counts in): every vector
+    python/tests/test_ed25519.py carries, each answer the golden model's
+    (python/cft_golden/ed25519.py) and the test's own - the RFC's five,
+    every bit of each signature, the message's and the key's edges,
+    another key's signature, the eight keys of small order with verifier
+    VCV2B's forgery, the six encodings of no point as key and as R, the
+    three S at or above L, signatures under a key with a small-order part
+    (the cofactored equation, odd k among them), the mixed keys, the
+    page's version-2 test vector - and random keys the golden model signs;
+    then SHA-512's published examples and every length across a block's
+    padding edge against hashlib."""
+    import hashlib as H
+    import test_ed25519 as TE
+    from cft_golden import ed25519 as E
+    out = []
+
+    def h(b):
+        return b.hex() if b else "-"
+
+    def verify(pk, m, s, group):
+        want = "1" if E.verify(pk, m, s) else "0"
+        out.append((f"ed-verify {pk.hex()} {h(m)} {s.hex()}", want, group))
+        return want
+
+    for v in TE.VECTORS:
+        sk, pk, msg, sig = TE._v(v[0])
+        assert verify(pk, msg, sig, "the RFC's five verified") == "1"
+        for i in range(8 * len(sig)):
+            bad = bytearray(sig)
+            bad[i // 8] ^= 1 << (i % 8)
+            verify(pk, msg, bytes(bad), "every bit of their signatures")
+        edits = [msg + b"\x00"]
+        for i in ((0, len(msg) - 1) if msg else ()):
+            bad = bytearray(msg)
+            bad[i] ^= 1
+            edits.append(bytes(bad))
+        for m in edits:
+            assert verify(pk, m, sig, "their messages edited") == "0"
+        for i in (0, 31):
+            bad = bytearray(pk)
+            bad[i] ^= 1
+            assert verify(bytes(bad), msg, sig, "their keys edited") == "0"
+        out.append((f"ed-key {pk.hex()}", "0", "their keys: a prime-order "
+                    "part"))
+    _sk1, _pk1, msg, sig1 = TE._v("TEST 2")
+    _sk2, pk2, _m, _s = TE._v("TEST 3")
+    assert verify(pk2, msg, sig1, "another key's signature") == "0"
+    _sk, pk, msg, good = TE._v("TEST 1")
+    for _what, s in TE.S_EDGES:
+        assert verify(pk, msg, bytes.fromhex(s), "S at or above L") == "0"
+    for _what, _n, enc in TE.UNDECODABLE:
+        out.append((f"ed-key {enc}", "1", "encodings of no point"))
+        out.append((f"ed-decode {enc}", "0", "encodings of no point"))
+        out.append((f"ed-small {enc}", "0", "encodings of no point"))
+        b = bytes.fromhex(enc)
+        assert verify(b, msg, good, "no point, as key or as R") == "0"
+        assert verify(pk, msg, b + good[32:], "no point, as key or as R") \
+            == "0"
+    r = 1234567
+    forged = E.encode_point(E._mul(r, E.B)) + r.to_bytes(32, "little")
+    for _what, key in TE.SMALL_ORDER:
+        out.append((f"ed-key {key}", "2", "the eight keys of small order"))
+        out.append((f"ed-small {key}", "1", "the eight keys of small order"))
+        for m in (b"", b"any message", b"cft-signature 1\x00" + bytes(32)):
+            assert verify(bytes.fromhex(key), m, forged, "VCV2B's forgery "
+                          "under each") == "0"
+    t2 = (0, E.P - 1, 1, 0)
+    s, prefix = E._expand(bytes(range(32, 64)))
+    pub2 = E.encode_point(E._add(E._mul(s, E.B), t2))
+    odd = 0
+    for i in range(64):
+        m = b"cofactor " + bytes([i])
+        rr = E._sha512_int(prefix, m) % E.L
+        r_enc = E.encode_point(E._mul(rr, E.B))
+        k = E._sha512_int(r_enc, pub2, m) % E.L
+        odd += k % 2
+        assert verify(pub2, m, r_enc + ((rr + k * s) % E.L).to_bytes(
+            32, "little"), "the cofactored equation (A + T, T of order "
+            "2)") == "1"
+    assert odd, "no odd k: the cofactorless equation would not part"
+    a = E._mul(s, E.B)
+    for _w, hx in TE.SMALL_ORDER:
+        mixed = E.encode_point(E._add(a, E.decode_point(bytes.fromhex(hx))))
+        out.append((f"ed-key {mixed.hex()}", "0", "keys with a small-order "
+                    "part"))
+    rows = dict(ln.split(None, 1) for ln in re.search(
+        r"```[a-z]*\n(.*?)```", DOC.read_text(encoding="utf-8")[
+            DOC.read_text(encoding="utf-8").index(
+                "<!-- the version-2 test vectors -->"):], re.S).group(1)
+        .strip().split("\n"))
+    assert verify(bytes.fromhex(rows["test-key"]),
+                  bytes.fromhex(rows["signed-message"]),
+                  bytes.fromhex(rows["signature"]),
+                  "the page's version-2 test vector") == "1"
+    for _ in range(40):
+        sk = bytes(rng.getrandbits(8) for _ in range(32))
+        m = bytes(rng.getrandbits(8) for _ in range(rng.randint(0, 300)))
+        pk = E.public_key(sk)
+        sg = E.sign(sk, m)
+        verify(pk, m, sg, "random keys the golden model signs")
+        bad = bytearray(sg)
+        bad[rng.randrange(64)] ^= 1 << rng.randrange(8)
+        verify(pk, m, bytes(bad), "random keys the golden model signs")
+    for what, m, digest in SHA512_PUBLISHED:
+        if isinstance(m, tuple):
+            data = bytes([m[0]]) * m[1]
+            line = f"sha512rep {m[0]:02x} {m[1]}"
+        else:
+            data, line = m, f"sha512 {h(m)}"
+        assert H.sha512(data).hexdigest() == digest, what
+        out.append((line, digest, "SHA-512's published examples"))
+    for n in list(range(0, 300)) + [1000, 1023, 1024, 4095]:
+        m = bytes(rng.getrandbits(8) for _ in range(n))
+        out.append((f"sha512 {h(m)}", H.sha512(m).hexdigest(),
+                    "SHA-512 at every length across its padding"))
+    return out
+
+
+def section_ed25519(work, cc, lib_src):
+    print("== 7. Ed25519 verification and SHA-512 in C (tools/ed25519.h, "
+          "tools/sha512.h) against every vector test_ed25519.py carries, "
+          "FIPS 180-4's examples and hashlib, through the probe build",
+          flush=True)
+    if not cc or not lib_src:
+        skip("Ed25519 and SHA-512", "no --cc and --lib-src given (make -C "
+             "host audittest gives both)")
+        return
+    import random
+    exe = build_probe(work, cc, lib_src)
+    if exe is None:
+        return
+    t0 = time.perf_counter()
+    cases = ed25519_cases(random.Random(20261002))
+    t1 = time.perf_counter()
+    r = subprocess.run([str(exe)], input="".join(c + "\n" for c, _w, _g in
+                                                 cases),
+                       capture_output=True, text=True, timeout=600)
+    got = r.stdout.split("\n")
+    check(r.returncode == 0, f"the probe ran {len(cases)} operations "
+          f"({time.perf_counter() - t1:.1f} s; the golden model's answers "
+          f"{t1 - t0:.1f} s)", r.stderr.strip()[-300:])
+    tally = {}
+    for i, (line, want, group) in enumerate(cases):
+        t = tally.setdefault(group, [0, 0, []])
+        t[0] += 1
+        if i < len(got) and got[i] == want:
+            t[1] += 1
+        else:
+            t[2].append(f"{line[:100]}: the probe says "
+                        f"{(got[i] if i < len(got) else '(nothing)')[:40]!r}, "
+                        f"the golden {want[:40]!r}")
+    for group, (n, good, wrong) in tally.items():
+        check(n == good, f"{group}: {good} of {n}", "; ".join(wrong)[:600])
+
+
 # ---- main -------------------------------------------------------------------
 
 def main():
@@ -1572,7 +2251,7 @@ def main():
     ap.add_argument("--keep", help="write everything here and keep it")
     ap.add_argument("--record", help="keep every tool run as a case here, "
                     "for audit_plants.py")
-    ap.add_argument("--sections", default="1,2,3,4,5,6",
+    ap.add_argument("--sections", default="1,2,3,4,5,6,7",
                     help="which sections to run (default all)")
     ap.add_argument("--corpus-root", help="the tree whose certificates/ "
                     "holds the golden corpus (default this one)")
@@ -1611,6 +2290,8 @@ def main():
         section_narrow(work, args.cc, args.lib_src)
     if "6" in sections:
         section_numerics(work, args.cc, args.lib_src)
+    if "7" in sections:
+        section_ed25519(work, args.cc, args.lib_src)
     if not args.keep:
         shutil.rmtree(work, ignore_errors=True)
     print(f"audit_check: {CHECKS} checks, {len(FAILED)} failed, "

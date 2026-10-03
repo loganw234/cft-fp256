@@ -1291,29 +1291,36 @@ corpustest: cft-segrun$(EXE)
 # hand gcc the headers too.
 #
 #   make audittest      the equality gate, tests/audit_check.py: every
-#                       parse call test_cert.py makes, and every audit
-#                       call whose arguments files and options can
-#                       carry, shadowed through the tool; cft-segrun's
-#                       certificates of segrun_check's programs; the
-#                       golden corpus where the tree has one; each held
+#                       parse call test_cert.py and test_cert2.py make,
+#                       and every audit call whose arguments files and
+#                       options can carry, shadowed through the tool;
+#                       cft-segrun's certificates of segrun_check's
+#                       programs; the golden corpus where the tree has
+#                       one, version 2's cases among it; each held
 #                       to the same verdict as cert.audit - the
 #                       refusal's name, code and location, or both
-#                       ACCEPTED with the same lines; and the library
+#                       ACCEPTED with the same lines; the library
 #                       and the tool compiled narrow with $(CC), at
 #                       CFT_MAX_FORMAT=2 with its own bigint and with
 #                       CFT_BN_LIMBS=64, which must refuse build-width
-#                       and build-format and audit the rest in full.
+#                       and build-format and audit the rest in full;
+#                       and a probe build for the numerics and for
+#                       Ed25519 and SHA-512 (tools/ed25519.h and
+#                       tools/sha512.h, header-only, version 2's
+#                       signature) against their vectors.
 #                       verify/run.sh's `audit` stage runs it, in the
 #                       gate budget (about four minutes on the desktop,
-#                       2026-09-29).
+#                       2026-09-29; about seven since version 2's C half,
+#                       2026-10-02).
 # ===================================================================
 TOOLS += cft-audit$(EXE)
 all: cft-audit$(EXE)
 clean: clean-audit
 .PHONY: audittest clean-audit
 
-cft-audit$(EXE): tools/audit.c tools/cert_exact.h libcft.a src/bigint.h \
-                 src/sha256.h include/cft_config.h
+cft-audit$(EXE): tools/audit.c tools/cert_exact.h tools/ed25519.h \
+                 tools/sha512.h libcft.a src/bigint.h src/sha256.h \
+                 include/cft_config.h
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/audit.c libcft.a -o $@ \
 		$(XRTLIBS)
 
