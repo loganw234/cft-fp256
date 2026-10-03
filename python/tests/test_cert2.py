@@ -25,9 +25,11 @@ is for. The fixtures:
   rb    Lorenz-63 compiled, its initial state generated: an audit that
         rebuilds it from the source and the generator alone.
 
-The C auditor reads version 2 from the next parcel on: until then
-host/tests/audit_check.py does not hand it these calls (it shadows
-test_cert.py alone).
+The C auditor reads version 2 since its C half (parcel CV2CA,
+2026-10-02): host/tests/audit_check.py shadows this file as it does
+test_cert.py, handing cft-audit every parse call and every audit call
+files and options can carry, each version-2 audit held to the golden
+auditor handed no source and not asked to regenerate, as cft-audit is.
 """
 
 import dataclasses
