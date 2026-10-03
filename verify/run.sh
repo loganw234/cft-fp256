@@ -150,14 +150,16 @@ BUDGET=""
 # the golden one (audit), and since 2026-09-30 two cases of the
 # certificate estimates' study (estimates), since 2026-10-01 the
 # language's variational equations (tangent), and since 2026-10-02 the
-# acceptance set (acceptance). `full` is the census. Measured on the
+# acceptance set (acceptance) and the compiler's routines, split from
+# the language's quick stage (lang-routines). `full` is the census.
+# Measured on the
 # Windows desktop (docs/VERIFICATION.md has the table, quiet against
 # loaded): quick ~20 min, gate ~2 h with the box quiet and ~4 h loaded
 # now that the formal gate holds thirty proofs and a negative control
 # (thirty-one tasks), full longer by the simulation suite and the two
 # browser replays; on the WSL distro the replay stages take seconds.
 BUDGET_QUICK=docs,generated,buildargs,sweepjudge,innerskips,ensurevectors,selfcheck,divsqrt,clause5,character,augmented,status96,formatof,diff,seq,programs,lang,reduce,photograph,bindings,lang-cpp,lang-rust,lang-julia,lang-go,lang-csharp,lang-r,lang-fortran,workloads,demos,soak-quick,remote
-BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit,estimates,tangent,acceptance
+BUDGET_GATE=golden,vectors,lint,formal,libcft,$BUDGET_QUICK,transcend,mpfr,cpp,audit,estimates,lang-routines,tangent,acceptance
 RESUME=""
 FRESH=0
 REQUIRE_ALL=0
@@ -1031,32 +1033,75 @@ stage programs "the program library: both assemblers against the MANIFEST, the r
 
 # The language's compiler held to the language (python/cftc; the
 # language is docs/LANGUAGE.md; programs/lang_check.py's docstring names
-# the legs). Every image the compiler writes runs on seq.py against the
-# language's reference interpreter, lang.run, bit for bit with FLAGS, on
-# many lanes at 1, 2, 5 and the image's own steps - a wrong semantics can
-# hide on one lane at the final step: the three references at four
-# formats and five attributes, nine written shapes and a seeded generated
-# corpus at every format; the references beside gen_odes.py's images and
-# classic banks, their costs pinned; the halved bank, the params, resume.
-# Then cft-segrun certifies each compiled reference with a half-step run
-# and a step-halving estimate, and the golden audit and cft-audit accept
-# each in full and sampled; two processes under two PYTHONHASHSEEDs write
-# the bytes programs/systems/compiled/ holds; every refusal by name; five
-# plants in a copy of the package, each stopped by the compiler's internal
-# check and red on seq.py with it off. Since L4 (2026-10-02), generated
-# sources that divide or take a root at run time - which the language
-# has and the compiler refuses `runtime-routine` until parcel C4 - each
-# refused by that name at its line on every target, never an internal
-# error. In the quick budget: about two
-# minutes on the desktop, niced (L2, 2026-10-01; the lead's rule, quick
-# at about three minutes or less).
+# the legs, and its GROUPS which stage runs which). Every image the
+# compiler writes runs on seq.py against the language's reference
+# interpreter, lang.run, bit for bit with FLAGS, on many lanes at 1, 2,
+# 5 and the image's own steps - a wrong semantics can hide on one lane at
+# the final step: the three references at four formats and five
+# attributes, nine written shapes and a seeded generated corpus at every
+# format; the references beside gen_odes.py's images and classic banks,
+# their costs pinned; the halved bank, the params, resume. Then
+# cft-segrun certifies each compiled reference - Kepler's, whose image
+# holds routines (parcel C4), among them - with a half-step run and a
+# step-halving estimate, and the golden audit and cft-audit accept each
+# in full and sampled; both C tools refuse a version-1 wider run of a
+# routine image, `aux-image`; two processes under two PYTHONHASHSEEDs
+# write the bytes programs/systems/compiled/ holds, and cftc's output
+# version is the record's last (programs/systems/cftc-outputs.txt);
+# every refusal by name, the routines' `target-feature` on revision 7's
+# targets and `bank-capacity` among them; plants in a copy of the
+# package - five of the lowering's, four of the routines' and three of
+# the call loop's - each stopped by the compiler's internal check and
+# red on seq.py with it off; every source the language accepts reads
+# back; and the core tally. A source that divides or takes a root at
+# run time compiles since C4 - L4's interim `runtime-routine` went with
+# it - and the routines' own legs are the next stage's. In the quick
+# budget (L2, 2026-10-01; the lead's rule, quick at about three minutes
+# or less): since the split below (2026-10-02) its legs take about two
+# and a half minutes run directly on a quiet desktop (149 s of the 296 s
+# every leg took at 370e0b2, the desktop 3 to 5% busy), and took 969 s
+# through the runner there with a game in the foreground; until the
+# split the stage ran every leg, 276 s through the runner on amd-arc-box
+# at 370e0b2 and 129 s at 7ccc441.
 do_lang() {
   HOSTMAKE "cft-segrun$EXE" "cft-audit$EXE" || return 1
-  PY "$ROOT/programs/lang_check.py" --segrun "$ROOT/host/cft-segrun$EXE" \
-     --audit "$ROOT/host/cft-audit$EXE"
+  PY "$ROOT/programs/lang_check.py" --group core \
+     --segrun "$ROOT/host/cft-segrun$EXE" --audit "$ROOT/host/cft-audit$EXE"
 }
 need host-cc python
-stage lang "the language's compiler held to its interpreter: every image on seq.py against lang.run bit for bit with FLAGS at several step counts (the references at four formats and five attributes, written shapes and a generated corpus at every format, the references beside gen_odes.py's images and classic banks), certified through cft-segrun and accepted by both auditors, deterministic, every refusal by name, its plants red" -- do_lang
+stage lang "the language's compiler held to its interpreter: every image on seq.py against lang.run bit for bit with FLAGS at several step counts (the references at four formats and five attributes, written shapes and a generated corpus at every format, the references beside gen_odes.py's images and classic banks), certified through cft-segrun and accepted by both auditors, a routine image's wider run refused by both C tools, deterministic, its output version recorded, every refusal by name, its plants red, every accepted source read back, its tally" -- do_lang
+
+# The language's run-time division and square root in the compiler
+# (parcel C4; programs/lang_check.py's routines group: legs K, K2, L and
+# the tally I2). Every flag of both through the interpreter at every
+# format; Kepler's reference at every format and under every attribute,
+# its costs pinned; generated sources that divide or take a root - in
+# equations and lets, with and without tangent vectors, under every
+# integrator, format and attribute - compiled for the software targets,
+# one image for sw, sw:4096 and sw:32768, and run on seq.py against
+# lang.run at 1, 2 and 5 steps, states, tangents and FLAGS, each refused
+# `target-feature` on revision 7's targets and through the command line,
+# exit 3; the 40 routines (cft_golden/routines.py: two operations, four
+# formats, five attributes) run as programs against softfloat on their
+# full pools, bits and each lane's flag word; and the call loop - eight
+# bodies under rk4, which the compiler's constant of 32,768 instructions
+# loops, and Kepler under rk4 with the constant lowered, every batch
+# looped and the largest alone, the image with every batch looped
+# certified through cft-segrun and accepted by both auditors. Its tally:
+# div and sqrt at every format, attribute and integrator, the five
+# flags, loops of both. In the gate budget, not quick (the lead's split,
+# 2026-10-02: these legs took `lang` to 276 s through the runner on
+# amd-arc-box, past quick's three minutes): about two and a half minutes
+# run directly on a quiet desktop (147 s of the 296 s at 370e0b2 - leg K
+# 104 s, K2 14 s, L 29 s), and 669 s through the runner there with a
+# game in the foreground.
+do_lang_routines() {
+  HOSTMAKE "cft-segrun$EXE" "cft-audit$EXE" || return 1
+  PY "$ROOT/programs/lang_check.py" --group routines \
+     --segrun "$ROOT/host/cft-segrun$EXE" --audit "$ROOT/host/cft-audit$EXE"
+}
+need host-cc python
+stage lang-routines "the language's run-time division and square root, compiled as routines: every flag of both through the interpreter; Kepler and generated sources that divide or take a root, at every format, attribute and integrator, on seq.py against lang.run bit for bit with FLAGS and tangents, refused by name on revision 7's targets; the 40 routines against softfloat on their full pools; the call loop past 32,768 instructions, held, certified and audited; its tally" -- do_lang_routines
 
 # The language's variational equations held (docs/LANGUAGE.md, "The
 # variational equations"; programs/tangent_check.py's docstring names the

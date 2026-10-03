@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""The `lang` runner stage: the compiler (python/cftc) held to the language.
+"""The `lang` and `lang-routines` runner stages: the compiler (python/cftc)
+held to the language.
 
     python programs/lang_check.py [--segrun host/cft-segrun[.exe]]
                                   [--audit host/cft-audit[.exe]]
-                                  [--corpus N] [--only A,B,...]
+                                  [--corpus N] [--group G,...]
+                                  [--only A,B,...]
     python programs/lang_check.py --write     regenerate the committed
                                               compiled references
     python programs/lang_check.py --record    append to cftc's output-version
@@ -66,8 +68,10 @@ many lanes and at several step counts: the image's REPEAT patched to 1,
      region, a region dropped, a routine reading another word; and the
      call loop's (C4), its constant lowered in the copy: the index not
      stepped past a record, a call's raise dropped, a loop a call short
-  I  the corpus's coverage, every tally nonzero, div and sqrt among the
-     operations
+  I  the core legs' coverage, every tally nonzero: every operation the
+     compiler carries as one instruction, every attribute, format and
+     integrator, the lowering's shapes, the four flags (I2 is the
+     routines')
   J  every source the language accepts reads back (D2): maps reading h at
      random - forms that scale with h, that fold away, that are
      nonlinear - chains at the parser's 100 - negations used as
@@ -109,6 +113,18 @@ many lanes and at several step counts: the image's REPEAT patched to 1,
      libcft's software backend (a main run and a half-step run) and
      accepted by the golden reader, the golden audit and cft-audit, in
      full and sampled. Leg H holds three plants of the loop's own
+
+  I2 the routines' coverage: each of div and sqrt compiled and run at
+     every format and under every attribute and integrator, the five
+     flags raised by those runs, and call loops run of both
+
+The legs come in two groups, each with its tally (GROUPS, below): core,
+legs A to H and J with I its tally, which is the `lang` stage, in the
+quick budget; and routines, legs K, K2 and L with I2 its tally, the
+`lang-routines` stage, in the gate budget (verify/run.sh). `--group`
+runs a group; with no selection both run. A tally runs when every leg
+of its group ran; where `--only` ran part of a group, its tally is a
+SKIP line.
 
 A check skipped prints a line that starts with SKIP, which the runner
 counts and names on its VERDICT line.
@@ -494,6 +510,35 @@ def cover(c, flags):
     COVER["homed"] += c.program.pinning != "all"
     COVER["pinned"] += c.program.pinning != "none"
     COVER["flags"] |= flags
+
+
+# The routines' own tally (C4), fed by the routines group's legs alone (K
+# and L), so that the core tally above holds from the core legs and this
+# one from its own: for each of div and sqrt, the formats, attributes and
+# integrators an image holding it was compiled under and run at; the
+# flags those runs raised; and the call loops run - their count, their
+# calls, and which routines they looped.
+RCOVER = {"images": 0, "flags": 0, "loops": 0, "looped_calls": 0,
+          "looped_ops": set(),
+          "by_op": {op: {"formats": set(), "rounds": set(),
+                         "integrators": set(), "images": 0}
+                    for op in ("div", "sqrt")}}
+
+
+def rcover(c, flags):
+    RCOVER["images"] += 1
+    ops = c.ir.op_counts()
+    for op, d in RCOVER["by_op"].items():
+        if ops.get(op):
+            d["images"] += 1
+            d["formats"].add(c.ir.fmt_name)
+            d["rounds"].add(c.ir.rnd_name)
+            d["integrators"].add(c.ir.integrator[0])
+    RCOVER["flags"] |= flags
+    for b in getattr(c, "looped", ()):
+        RCOVER["loops"] += 1
+        RCOVER["looped_calls"] += len(b.calls)
+        RCOVER["looped_ops"].add(b.op)
 
 
 # ---- A and B: the references -------------------------------------------
@@ -2308,7 +2353,7 @@ def leg_routines(count, rng):
             lanes += special_lanes(c.ir.fmt, n, lanes[0], rng)
             lanes.append([0] * n)               # 0/0 and the root of 0
             failing, first, fok, ref = compare(c, lanes, None, steps)
-            cover(c, ref.flags)
+            rcover(c, ref.flags)
             check(not failing and fok and "FLAG_CONTROL" in c.features and
                   c.accepted_by == ["sw"],
                   f"{base} {fmt}: {len(lanes)} lanes at 1, 2, 5 and {steps} "
@@ -2330,7 +2375,7 @@ def leg_routines(count, rng):
             lanes = lanes_for(c.ir.fmt, c.ir.n_state, rng, 8, BOX[base])
             lanes += special_lanes(c.ir.fmt, c.ir.n_state, lanes[0], rng)
             failing, first, fok, ref = compare(c, lanes, None, steps)
-            cover(c, ref.flags)
+            rcover(c, ref.flags)
             check(not failing and fok, f"{base} fp64 {rnd}: {len(lanes)} "
                   f"lanes equal the interpreter, FLAGS included - the "
                   f"routines specialised at {rnd}",
@@ -2392,7 +2437,7 @@ def leg_routines(count, rng):
             tans = [[lanes_for(fmt, g.n_state, rng, 1)[0] for _ in g.tangent]
                     for _ in lanes]
         failing, first, fok, ref = compare_routine(c, lanes, tans, 5)
-        cover(c, ref.flags)
+        rcover(c, ref.flags)
         flags |= ref.flags
         if failing or not fok:
             wrong.append(f"routine {k}: {len(failing)} lanes differ from "
@@ -2570,7 +2615,7 @@ def leg_call_loops(rng, segrun=None, audit=None, work=None):
     lanes.append([0] * g.n_state)
     t1 = time.perf_counter()
     failing, first, fok, ref = compare_routine(c, lanes, None, 2)
-    cover(c, ref.flags)
+    rcover(c, ref.flags)
     check(not failing and fok, f"N = 8: {len(lanes)} lanes at 1 and 2 steps "
           f"equal the interpreter, FLAGS {ref.flags:#x} included - lanes "
           f"that overflow, hold a signalling NaN, hold subnormals and hold "
@@ -2593,6 +2638,7 @@ def leg_call_loops(rng, segrun=None, audit=None, work=None):
                 lanes += special_lanes(c.ir.fmt, 4, lanes[0], rng)
                 lanes.append([0] * 4)
                 failing, first, fok, ref = compare_routine(c, lanes, None, 5)
+                rcover(c, ref.flags)
                 check(looped == want and not failing and fok,
                       f"Kepler under rk4 at {fmt}, the constant at "
                       f"{low_to:,} ({what}): {len(lanes)} lanes at 1, 2 and "
@@ -2620,19 +2666,18 @@ def leg_call_loops(rng, segrun=None, audit=None, work=None):
 
 # ---- I: coverage ---------------------------------------------------------------
 
-def leg_coverage(routines=True):
-    section("I. what the corpus covered")
+def leg_coverage():
+    """The core group's tally, from the core legs alone (A to D: the
+    references, the corpus, the let-heavy maps)."""
+    section("I. what the core legs covered")
     ops = COVER["ops"]
     want_ops = ["fma", "add", "sub", "mul", "neg", "abs", "copysign", "min",
                 "max", "minnum", "maxnum", "cmplt", "cmple", "cmpeq",
-                "select"] + (["div", "sqrt"] if routines else [])
+                "select"]
     print(f"  {COVER['systems']} systems; ops {dict(sorted(ops.items()))}")
     check(all(ops.get(o) for o in want_ops), "every operation the compiler "
-          "carries was compiled and run" + (" - every one of the language's, "
-                                            "div and sqrt as routines (leg K)"
-                                            if routines else
-                                            " (div and sqrt are leg K's, "
-                                            "which did not run)"),
+          "carries as one instruction was compiled and run (div and sqrt, "
+          "its routines, are the routines group's tally, I2)",
           f"missing {[o for o in want_ops if not ops.get(o)]}")
     check(COVER["rounds"] == {"rne", "rtz", "rdn", "rup", "rmm"},
           "every attribute", f"{sorted(COVER['rounds'])}")
@@ -2654,6 +2699,51 @@ def leg_coverage(routines=True):
                        (sf.FLAG_UNDERFLOW, "underflow"),
                        (sf.FLAG_INEXACT, "inexact")):
         check(COVER["flags"] & flag, f"a run raised {word}")
+
+
+def leg_routine_coverage():
+    """The routines group's tally (C4), from its legs alone (K and L):
+    each of div and sqrt compiled and run at every format, under every
+    attribute and integrator; the five flags raised by those runs; and
+    call loops run, of both routines."""
+    section("I2. what the routines group covered")
+    for op, d in RCOVER["by_op"].items():
+        print(f"  {op}: {d['images']} images; formats {sorted(d['formats'])}"
+              f"; attributes {sorted(d['rounds'])}; integrators "
+              f"{sorted(d['integrators'])}")
+        check(d["images"] and d["formats"] == {"fp32", "fp64", "fp128",
+                                               "fp256"},
+              f"{op}, a routine: compiled and run at every format",
+              f"{d['images']} images, at {sorted(d['formats'])}")
+        check(d["rounds"] == {"rne", "rtz", "rdn", "rup", "rmm"},
+              f"{op}: under every attribute, the routine specialised at each",
+              f"{sorted(d['rounds'])}")
+        check(d["integrators"] >= {"rk4", "euler", "stormer-verlet", "map"},
+              f"{op}: under every integrator", f"{sorted(d['integrators'])}")
+    for flag, word in ((sf.FLAG_INVALID, "invalid"),
+                       (sf.FLAG_DIVZERO, "divideByZero"),
+                       (sf.FLAG_OVERFLOW, "overflow"),
+                       (sf.FLAG_UNDERFLOW, "underflow"),
+                       (sf.FLAG_INEXACT, "inexact")):
+        check(RCOVER["flags"] & flag, f"a routine image's run raised {word}")
+    check(RCOVER["loops"] and RCOVER["looped_ops"] == {"div", "sqrt"},
+          f"call loops compiled and run: {RCOVER['loops']} loops of "
+          f"{RCOVER['looped_calls']} calls, div's and sqrt's",
+          f"{RCOVER['loops']} loops, of {sorted(RCOVER['looped_ops'])}")
+
+
+# The legs in their two groups, each with its tally: `core` the `lang`
+# stage's, in the quick budget, and `routines` the `lang-routines` stage's,
+# in the gate budget (verify/run.sh; the lead's split, 2026-10-02, when
+# the routines' legs took `lang` past quick's three minutes). A group's
+# tally runs when every leg of the group ran - `--group`, or no selection
+# at all, which runs both - and where `--only` ran part of a group its
+# tally is a SKIP line, never left out silently.
+GROUPS = (("core", ("refs", "corpus", "letmaps", "banks", "libcft",
+                    "determinism", "refusals", "plants", "readback"),
+           "I, the core tally"),
+          ("routines", ("routines", "pools", "loops"),
+           "I2, the routines' tally"))
 
 
 # ---- the committed references ----------------------------------------------
@@ -2687,8 +2777,8 @@ def record_main():
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--segrun", help="host/cft-segrun, for leg E")
-    ap.add_argument("--audit", help="host/cft-audit, for leg E")
+    ap.add_argument("--segrun", help="host/cft-segrun, for legs E and L")
+    ap.add_argument("--audit", help="host/cft-audit, for legs E and L")
     ap.add_argument("--corpus", type=int, default=48,
                     help="generated systems in leg A (default 48)")
     ap.add_argument("--letmaps", type=int, default=120,
@@ -2698,9 +2788,19 @@ def main(argv=None):
     ap.add_argument("--routines", type=int, default=40,
                     help="sources that divide or take a root in leg K "
                          "(default 40)")
+    ap.add_argument("--group", default="",
+                    help="a comma list of groups, each its legs and its tally: "
+                         "core (refs, corpus, letmaps, banks, libcft, "
+                         "determinism, refusals, plants, readback; the lang "
+                         "stage) and routines (routines, pools, loops; the "
+                         "lang-routines stage). With neither --group nor "
+                         "--only, both")
     ap.add_argument("--only", default="",
-                    help="a comma list of legs: refs,corpus,letmaps,banks,libcft,"
-                         "determinism,refusals,plants,readback,routines,pools")
+                    help="a comma list of legs: refs, corpus, letmaps, banks, "
+                         "libcft, determinism, refusals, plants, readback "
+                         "(the core group), routines, pools, loops (the "
+                         "routines group); a group's tally runs only when "
+                         "all its legs ran, and is a SKIP line otherwise")
     ap.add_argument("--write", action="store_true",
                     help="write programs/systems/compiled/ and exit")
     ap.add_argument("--record", action="store_true",
@@ -2716,7 +2816,19 @@ def main(argv=None):
         return write_references()
     if a.record:
         return record_main()
-    only = {x for x in a.only.split(",") if x}
+    groups = {name: legs for name, legs, _t in GROUPS}
+    asked = [x for x in a.group.split(",") if x]
+    only = [x for x in a.only.split(",") if x]
+    known = [leg for legs in groups.values() for leg in legs]
+    for g in asked:
+        if g not in groups:
+            ap.error(f"--group {g}: the groups are {', '.join(groups)}")
+    for leg in only:
+        if leg not in known:
+            ap.error(f"--only {leg}: the legs are {', '.join(known)}")
+    if not asked and not only:
+        asked = list(groups)
+    selected = {leg for g in asked for leg in groups[g]} | set(only)
     t0 = time.perf_counter()
     work = Path(tempfile.mkdtemp(prefix="lang-check-"))
 
@@ -2740,15 +2852,26 @@ def main(argv=None):
             ("pools", leg_routine_pools),
             ("loops", lambda: leg_call_loops(rng("loops"), a.segrun,
                                              a.audit, work))]
+    if sorted(name for name, _fn in legs) != sorted(known):
+        raise AssertionError("a leg is in no group, or a group names a leg "
+                             "there is not")
+    tallies = {"core": leg_coverage, "routines": leg_routine_coverage}
     try:
         for name, fn in legs:
-            if only and name not in only:
+            if name not in selected:
                 continue
             t = time.perf_counter()
             fn()
             print(f"  ({name}: {time.perf_counter() - t:.1f} s)")
-        if not only or {"refs", "corpus"} <= only:
-            leg_coverage(routines=not only or "routines" in only)
+        # each group's tally, where its legs ran (GROUPS)
+        for gname, glegs, title in GROUPS:
+            ran = [leg for leg in glegs if leg in selected]
+            if len(ran) == len(glegs):
+                tallies[gname]()
+            elif ran:
+                skip(title, f"its group's legs did not all run (--only): "
+                            f"{', '.join(x for x in glegs if x not in ran)} "
+                            f"did not")
     finally:
         shutil.rmtree(work, ignore_errors=True)
     dt = time.perf_counter() - t0

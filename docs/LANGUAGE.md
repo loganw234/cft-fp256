@@ -2244,21 +2244,24 @@ that the section and the measurement cannot part:
 It takes about 50 s on one core of the desktop, nearly all of it the
 interpreter's own arithmetic.
 
-The compiled images are held to the interpreter by the `lang` and
-`tangent` stages (`programs/lang_check.py`, `programs/tangent_check.py`;
+The compiled images are held to the interpreter by the `lang`,
+`lang-routines` and `tangent` stages (`programs/lang_check.py`, whose
+two groups of legs are the first two, and `programs/tangent_check.py`;
 docs/VERIFICATION.md). Images with routines (parcel C4) are held there
-as any image is: the `lang` stage's leg K compiles generated sources
-that divide or take a root - in equations and lets, with and without
-tangent vectors, under every integrator, format and attribute - for the
-software backend, runs each on seq.py against `lang.run`, bit for bit
-with FLAGS and tangents at several step counts, and holds each refused
-`target-feature` on revision 7's targets and through the command line
-(exit 3, never 70); the `tangent` stage's leg L compiles the quotient's
-and the root's rules the same way; and the `lang` stage's leg L holds
-the call loop - eight bodies under rk4, which the constant itself loops,
-and Kepler under rk4 with the constant lowered - and leg H three plants
-of the loop's own. The routines themselves are held to softfloat by
-python/tests/test_routines.py, and their inlining and their loops by
+as any image is: the `lang-routines` stage's leg K compiles generated
+sources that divide or take a root - in equations and lets, with and
+without tangent vectors, under every integrator, format and attribute -
+for the software backend, runs each on seq.py against `lang.run`, bit
+for bit with FLAGS and tangents at several step counts, and holds each
+refused `target-feature` on revision 7's targets and through the
+command line (exit 3, never 70); its leg L holds the call loop - eight
+bodies under rk4, which the constant itself loops, and Kepler under rk4
+with the constant lowered; the `tangent` stage's leg L compiles the
+quotient's and the root's rules the same way; and the `lang` stage
+certifies Kepler's routine images and holds the routines' four plants
+and the loop's three in its leg H. The routines themselves are held to
+softfloat by python/tests/test_routines.py and the `lang-routines`
+stage's leg K2, and their inlining and their loops by
 `python/tests/test_cftc.py`.
 
 ## What v1 does not do
