@@ -44,6 +44,45 @@ FLAGS, MAGIC, VERSION, CAPS, STATUS = 0x40, 0x44, 0x48, 0x4C, 0x50
 # pointers because appending is the only change a shipped map takes.
 CAPS2 = 0x6C
 
+# Every kernel argument's register as rtl/cft_csr.sv decodes it, (offset,
+# bytes) by hw/kernel.xml's argument name. kernel_xml_is_the_csr_map
+# holds kernel.xml to this table AND writes each argument at the offset
+# kernel.xml gives it, reading it back here, so the RTL's decode, the
+# xml a bitstream is packaged with and this table cannot part company -
+# the header of rtl/cft_csr.sv says "the three must move together", and
+# until revision 8's seam nothing checked that they did. LFLAGS_PTR at
+# 0xB0 is revision 8's (VERSION 0xB00), argument 17.
+CSR_ARGS = {
+    "mode": (0x10, 4), "n": (0x18, 8),
+    "a": (0x20, 8), "b": (0x28, 8), "c": (0x30, 8), "d": (0x38, 8),
+    "prog": (0x54, 8), "cnt": (0x5C, 8), "bank": (0x64, 8),
+    "scratch_in": (0x70, 8), "scratch_out": (0x78, 8),
+    "seg": (0x80, 8),                        # SEG low, NRES high
+    "idx_a": (0x88, 8), "idx_b": (0x90, 8), "idx_c": (0x98, 8),
+    "idx_si": (0xA0, 8), "mask": (0xA8, 8),
+    "lflags": (0xB0, 8),
+}
+
+# ---- what a revision-8 tile reads at its seam --------------------------
+# docs/ROADMAP.md, "Revision 8": the seam, and "What a revision-8 U50
+# tile reads". VERSION 0xB00, and every revision-8 bit of CAPS and CAPS2
+# zero until the item that builds it sets it - CAPS2[11] augadd and
+# augerr, [12] the stepped index, [13] the lane-flags block, [14] flag
+# control, [20:16] the streamed instruction capacity - so a seam tile's
+# words are revision 7's. PINNED here as the plan computed them, for the
+# U50's capacities and the open-core ones, beside check_caps2's
+# derivation from the RTL: a derived expectation follows a bit set by
+# mistake, and these are the words the host's decode
+# (host/src/caps_decode.h, held to the same numbers in api-test) and
+# cftc's targets were given. When an item sets its bit, its parcel
+# changes these words, deliberately. CAPS[3:0] is the build's rungs.
+VERSION_SEAM = 0x00000B00
+SEAM_WORDS = {
+    # (SEQ_MAXD, SEQ_IMEM_D, SEQ_SCRATCH_D): (CAPS with [3:0] clear, CAPS2)
+    (1024, 32768, 2048): (0x19FAFFF0, 0x000007FB),    # the U50's
+    (64, 16384, 256):    (0x19E6FFF0, 0x000007F8),    # the open-core ones
+}
+
 # ---- which rungs THIS build carries ------------------------------------
 # tb/Makefile's trimmed targets (`krnlf128`, `krnlf64f128`) build the
 # kernel with -Pcft_krnl.EN_FP256=0 (and EN_FP32=0) and hand the same
@@ -261,6 +300,28 @@ def check_caps2(caps2):
         f"[31:21] reserved zero")
 
 
+def check_seam_words(caps, caps2, prec_mask):
+    """CAPS and CAPS2 against the words the plan computed for a revision-8
+    seam tile at this build's capacities (SEAM_WORDS). A configuration the
+    table does not have is a failure, not a skip: add its words from the
+    plan's arithmetic rather than letting the check pass by absence."""
+    key = (krnl_param("SEQ_MAXD"), krnl_param("SEQ_IMEM_D"),
+           krnl_param("SEQ_SCRATCH_D"))
+    assert key in SEAM_WORDS, (
+        f"no computed seam words for (SEQ_MAXD, SEQ_IMEM_D, SEQ_SCRATCH_D) "
+        f"= {key}: add them to SEAM_WORDS from the plan's arithmetic")
+    want_caps, want_caps2 = SEAM_WORDS[key]
+    want_caps |= prec_mask
+    assert caps == want_caps, (
+        f"CAPS is {caps:#010x}; a revision-8 seam tile at {key} reads "
+        f"{want_caps:#010x} (docs/ROADMAP.md, revision 8: CAPS unchanged, "
+        f"CAPS[23:20] min(15, log2 of the capacity))")
+    assert caps2 == want_caps2, (
+        f"CAPS2 is {caps2:#010x}; a revision-8 seam tile at {key} reads "
+        f"{want_caps2:#010x} - every revision-8 bit ([14:11], [20:16]) "
+        f"zero until its item is built")
+
+
 def seq_caps_expected():
     """(feat, log2 maxd, log2 imem, log2 kreg) as the RTL declares them."""
     # The two a build sets since revision 7, as this build set them; the
@@ -400,6 +461,39 @@ async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None, rnd=RND_RNE):
                   f"bit-exact, flags {got_f:#07b}")
 
 
+async def run_refused_mode_bit(dut, axil, ram, mode_bit, name):
+    """An elementwise run the CSR must throw back for one MODE bit this
+    build does not honour: STATUS[3] alone, done still asserted, nothing
+    written to D, and the previous run's FLAGS left alone - a refusal is
+    not a run (rtl/cft_csr.sv's guard, cfg_mode_bad). The run is an
+    ordinary fp FMA on the build's narrowest rung, so the bit is the only
+    thing wrong with it."""
+    flags_before = await axil.read_dword(FLAGS)
+    ram.write(D_BASE, b"\xC3" * 64)
+    await axil.write_dword(MODE, OP_FMA | (PREC_CODE[BASE.name] << 8)
+                           | mode_bit)
+    await write64(axil, NREG, EPB)
+    await write64(axil, APTR, A_BASE)
+    await write64(axil, BPTR, B_BASE)
+    await write64(axil, CPTR, C_BASE)
+    await write64(axil, DPTR, D_BASE)
+    await axil.write_dword(CTRL, 1)
+    for _ in range(200):
+        await ClockCycles(dut.ap_clk, 5)
+        if (await axil.read_dword(CTRL)) & 0x2:
+            break
+    else:
+        raise AssertionError(f"{name}: a refused run must still complete")
+    got = await axil.read_dword(STATUS)
+    assert got == 0x8, (
+        f"{name}: STATUS {got:#05b}, want the refusal bit alone - a MODE "
+        f"bit this build does not honour is REFUSED, never ignored")
+    assert ram.read(D_BASE, 64) == b"\xC3" * 64, f"{name}: a refused run wrote D"
+    assert (await axil.read_dword(FLAGS)) == flags_before, (
+        f"{name}: a refusal moved FLAGS, and a refusal is not a run")
+    dut._log.info(f"{name}: refused with STATUS[3], D and FLAGS untouched")
+
+
 # MODE[18:16] - a set bit makes that operand STRIDE-0: one value read once
 # and applied to the whole run (CAPS2[7]).
 async def run_scalar(dut, axil, ram, fmt, op, n, seed, which, rnd=RND_RNE):
@@ -534,7 +628,7 @@ async def krnl_end_to_end(dut):
     # 0x900 on 2026-09-14, by SEG/NRES at 0x80/0x84 (ask 7); 0xA00 on
     # 2026-09-15 by the five pointers at 0x88..0xA8 (docs/ROUND2.md);
     # 0xB00 on 2026-10-02 by LFLAGS_PTR at 0xB0, revision 8's seam.
-    assert await axil.read_dword(VERSION) == 0x00000B00
+    assert await axil.read_dword(VERSION) == VERSION_SEAM
     caps = await axil.read_dword(CAPS)
     # CAPS[3:0] against what this bench was BUILT with, not against 0xF: a
     # trimmed build (make krnlf128) must advertise exactly the rungs it
@@ -552,7 +646,10 @@ async def krnl_end_to_end(dut):
                      else "; all four, so absent-rung refusals are NOT TESTED"))
     check_op_groups(caps)
     check_seq_caps(caps)
-    check_caps2(await axil.read_dword(CAPS2))
+    caps2 = await axil.read_dword(CAPS2)
+    check_caps2(caps2)
+    # ...and both words against the plan's own numbers for a seam tile.
+    check_seam_words(caps, caps2, PREC_MASK)
     status = await axil.read_dword(CTRL)
     assert status & 0x4, "kernel must come up idle"
 
@@ -693,6 +790,28 @@ async def krnl_end_to_end(dut):
     assert (await axil.read_dword(STATUS)) == 0x8, "want the refusal bit"
     assert ram.read(D_BASE, 64) == b"\xAA" * 64, "a refused run wrote"
     await run_op(dut, axil, ram, BASE, OP_ADD, EPB, seed=221)
+
+    # ---- revision 8's MODE[24], refused where CAPS2[13] is clear ------
+    #
+    # MODE[24] asks for R23's per-lane flag block (docs/SEQUENCER.md),
+    # honoured only on a build whose CAPS2[13] is set - and revision 8's
+    # seam sets it on none, so the CSR must REFUSE the bit as it refused
+    # it while it was reserved: STATUS[3] alone, done still asserted, D
+    # untouched, FLAGS left alone. MODE[25] is the bottom of what is left
+    # of the reserved range and is refused on every build. Each refusal
+    # is followed by an accepted run, whose own STATUS == 0 assert proves
+    # the sticky cleared.
+    if caps2 & (1 << 13):
+        dut._log.info("CAPS2[13] set: MODE[24] is honoured on this build, "
+                      "and its block is test_krnl_seq's to hold")
+    else:
+        await run_refused_mode_bit(dut, axil, ram, 1 << 24,
+                                   "MODE[24], R23's lane-flags block, on a "
+                                   "build whose CAPS2[13] is clear")
+        await run_op(dut, axil, ram, BASE, OP_ADD, EPB, seed=223)
+    await run_refused_mode_bit(dut, axil, ram, 1 << 25,
+                               "MODE[25], reserved on every build")
+    await run_op(dut, axil, ram, BASE, OP_ADD, EPB, seed=224)
 
     # ---- a real rung this build LACKS --------------------------------
     #
@@ -898,3 +1017,83 @@ async def csr_latches_the_handshake_beat(dut):
             f"CSR {addr:#x}: read back {got:#010x}, wrote {want:#010x} "
             f"(bus carried {POISON:#010x} the cycle after the handshake)")
     dut._log.info("CSR latches the handshake beat, not the following cycle")
+
+
+# ---- hw/kernel.xml IS the CSR map ------------------------------------
+#
+# kernel.xml is what a bitstream is packaged with, and XRT writes each
+# argument's value at the offset the xml gives it. An argument at an
+# offset the CSR does not decode is a host write into a decode default -
+# a pointer the tile never sees - and one at another register's offset
+# is worse. No bench read the xml until revision 8's seam, whose plan
+# names this as a plant: "argument 17 at an offset LFLAGS_PTR is not".
+
+@cocotb.test()
+async def kernel_xml_is_the_csr_map(dut):
+    """hw/kernel.xml's arguments are exactly CSR_ARGS - ids 0, 1, 2...
+    in order, each at the table's offset and size, revision 8's argument
+    17 (lflags) a written pointer on m_axi_d - and, through the bus, a
+    distinct value written at each argument's XML offset reads back from
+    the table's register, so the RTL's decode is the third party to the
+    agreement rather than an assumption."""
+    import xml.etree.ElementTree as ET
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n, reset_active_level=False)
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+
+    xml_path = Path(__file__).resolve().parents[1] / "hw" / "kernel.xml"
+    args = [{"name": a.get("name"), "id": int(a.get("id")),
+             "offset": int(a.get("offset"), 16), "size": int(a.get("size"), 16),
+             "port": a.get("port"), "aq": a.get("addressQualifier")}
+            for a in ET.parse(xml_path).getroot().iter("arg")]
+    ids = [a["id"] for a in args]
+    assert ids == list(range(len(args))), (
+        f"kernel.xml's argument ids are {ids}: a host binds arguments by "
+        f"position, so they run 0, 1, 2... in order with none skipped")
+    names = [a["name"] for a in args]
+    assert len(set(names)) == len(names) and set(names) == set(CSR_ARGS), (
+        f"kernel.xml declares {sorted(set(names) - set(CSR_ARGS))} that the "
+        f"CSR map does not, and lacks {sorted(set(CSR_ARGS) - set(names))}")
+    for a in args:
+        off, size = CSR_ARGS[a["name"]]
+        assert (a["offset"], a["size"]) == (off, size), (
+            f"kernel.xml puts {a['name']} (argument {a['id']}) at "
+            f"{a['offset']:#x}, {a['size']} bytes; rtl/cft_csr.sv decodes it "
+            f"at {off:#x}, {size} bytes")
+    lf = next(a for a in args if a["name"] == "lflags")
+    assert (lf["id"], lf["port"], lf["aq"]) == (17, "m_axi_d", "1"), (
+        f"revision 8's LFLAGS_PTR is argument 17, a pointer the tile WRITES "
+        f"and so on m_axi_d (docs/ROADMAP.md, R23); kernel.xml has it as "
+        f"argument {lf['id']} on {lf['port']}, addressQualifier {lf['aq']}")
+
+    # Through the bus: each argument written at the offset kernel.xml
+    # gives it, every one before any is read, then each read back from
+    # the register the table names - so an argument the CSR does not
+    # decode reads zero, and two that alias read the later one's value.
+    want = {}
+    for a in args:
+        k = a["id"]
+        if a["size"] == 4:
+            v = 0x5A00_0000 | (k << 16) | (0x0100 + k)
+            await axil.write_dword(a["offset"], v)
+        else:
+            v = (0xA5 << 56) | (k << 40) | (0x00C0_FFEE ^ (k * 0x0101_0101))
+            await write64(axil, a["offset"], v)
+        want[a["name"]] = v
+    for a in args:
+        off, size = CSR_ARGS[a["name"]]
+        got = await axil.read_dword(off)
+        if size == 8:
+            got |= (await axil.read_dword(off + 4)) << 32
+        assert got == want[a["name"]], (
+            f"{a['name']} (argument {a['id']}) written at kernel.xml's "
+            f"{a['offset']:#x} reads back {got:#x} from the CSR's {off:#x}, "
+            f"not {want[a['name']]:#x}")
+    dut._log.info(f"kernel.xml: {len(args)} arguments, ids 0..{len(args) - 1}, "
+                  f"each written at its XML offset and read back from the "
+                  f"register rtl/cft_csr.sv decodes there; argument 17 is "
+                  f"lflags at {lf['offset']:#x} on m_axi_d")
