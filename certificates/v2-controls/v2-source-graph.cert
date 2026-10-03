@@ -35,7 +35,7 @@ program-digest a9823f5d36c32ccf232a9a2db588a0decd6ea90df37acaabdbeef132d4ba52f9
 source dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
 source-name lorenz63-rk4-fp64.cftl
 graph 6dafed3fffaadbcd84a6833fad87155eb4cdf64a2930ee9cd4350a5f428a768d
-compiler cftc 2 sw
+compiler cftc 4 sw
 source-params 0
 lanes 3
 steps 100
@@ -58,7 +58,7 @@ program-digest d0d4a4a9494378d385fe2a3b9bf42c6fc1d4d1d3140bfe43403a66dc30509a09
 source dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
 source-name lorenz63-rk4-fp64.cftl
 graph e3153e4d526117574089681d5539012b16fc7d493015315656ceda6c5e93e80c
-compiler cftc 2 sw
+compiler cftc 4 sw
 source-params 0
 lanes 3
 steps 100
@@ -83,7 +83,7 @@ program-digest 7d3ebf844131b9ef3d0d0ea2ccbf9006cd8c02be1b6d335c9f916fa2a9e78788
 source dd309ffbd8cdd04f62643e38e2270e1850804f81de26118941e518cbeda161fa
 source-name lorenz63-rk4-fp64.cftl
 graph 712868a54c6dcdde14e53b0e3e6c9d77221eec5c46cab1b9180ed7a67558062c
-compiler cftc 2 sw
+compiler cftc 4 sw
 source-params 0
 lanes 3
 steps 100
@@ -110,4 +110,4 @@ uses 1
 scope max-lanes
 value exact 81e790cdd/1000000000000
 end
-hash ad07acf9e8874f736f899bea8d42ca9388dd9a6be5692cdf463b52bc08c14cc4
+hash e44d16b2aebde6e87ab7524976069ebd9e561c46ded182a51d9b7c319840cd1e
