@@ -1,14 +1,14 @@
 # The cft-fp256 conformance profile
 
-**Profile 1, 2026-09-16.** This document is the contract as a
-specification: what an implementation must produce to be called
-cft-fp256 conforming, what it may choose freely, and the files and
-hashes that "conforming" is scored against. It is written so that an
-implementation can be built and proven without this repository's RTL
-or library - a different chip, a different process, a different
-language - and still be interchangeable with them bit for bit. The
-reasoning behind every rule is in `docs/DETERMINISM.md`; this file
-states the rules.
+**Profile 2, 2026-10-02** (profile 1 was 2026-09-16; "Versioning" says
+why it stepped). This document is the contract as a specification: what
+an implementation must produce to be called cft-fp256 conforming, what
+it may choose freely, and the files and hashes that "conforming" is
+scored against. It is written so that an implementation can be built
+and proven without this repository's RTL or library - a different
+chip, a different process, a different language - and still be
+interchangeable with them bit for bit. The reasoning behind every rule
+is in `docs/DETERMINISM.md`; this file states the rules.
 
 ## Two levels, and they are not the same thing
 
@@ -218,9 +218,9 @@ Conformance is scored, not read.
    `vectors/out/`: for each format, the opcode sets at each attribute,
    the transcendental sets, the character-conversion sets, the formatOf
    sets to every format (its own included), the reduction sets, the
-   augmented set and the magnitude set - **1,068,915 cases at profile
-   1**, each line one case with its inputs, its expected result and its
-   expected flags. `vectors/SHA256SUMS` lists the SHA-256 of each set,
+   augmented set and the magnitude set - **1,068,915 cases at profiles
+   1 and 2**, each line one case with its inputs, its expected result
+   and its expected flags. `vectors/SHA256SUMS` lists the SHA-256 of each set,
    and the generator writes LF line endings on every platform so those
    hashes mean one thing everywhere. A generation that finishes also
    writes its own `SHA256SUMS` beside the sets, last, in the same form
@@ -265,22 +265,95 @@ Conformance is scored, not read.
 
 ## Versioning
 
-- **The profile version is the vectors.** Profile *N* is identified by
-  the generator's parameters and the SHA-256 of each of its sets as
-  `vectors/SHA256SUMS` records them, together with the golden model
-  that produced them. Profile 1 is 2026-09-16.
-- **A change to any recorded bit or flag is a new profile number**, with
-  a note here and an entry in `docs/VALIDATION.md` saying which cases
-  changed and why. Never a quiet refresh: a document recording a run
-  against an earlier profile is right about that run, and stays.
-- **An addition is a minor step**: a new operation or a new set that
-  changes no recorded case extends the profile (1.1, 1.2, ...); an
-  implementation of profile 1 remains conforming to profile 1.
-- **The C ABI is a different number.** `CFT_ABI_VERSION` (0.14 at
-  profile 1) versions the calling surface of one implementation, not
-  the bits; a device's `VERSION` register versions one register map.
-  Neither changes the profile, and the profile does not change with
-  them.
+- **The profile versions the bits and the program model.** Profile *N*
+  is identified by the generator's parameters and the SHA-256 of each of
+  its sets as `vectors/SHA256SUMS` records them, together with the
+  golden model that produced them, whose program model (section 6:
+  `seq.py`, its loader included) it versions too. The golden model
+  states its number in `python/cft_golden/profile.py`, and a version-2
+  certificate names it on its `profile` line (`docs/CERTIFICATES.md`,
+  "The definition").
+- **The rule.** Any change to what an accepted image computes, or to
+  whether an image loads, steps it.
+  - **A major step** is a change to any recorded bit or flag, or to an
+    accepted image's result, flags, STATUS or acceptance: an image that
+    loaded and is refused, or one whose run moves by a bit.
+  - **A minor step** is an addition that changes no recorded case and no
+    accepted image: a new operation or a new set, or an encoding every
+    loader refused only because it was unclaimed, now taken (2.1, 2.2,
+    ...). An implementation of profile 2 remains conforming to profile 2.
+  - Each step has a note here and an entry in `docs/VALIDATION.md`
+    saying what changed and why. Never a quiet refresh: a document
+    recording a run against an earlier profile is right about that run,
+    and stays.
+- **The record.** Its record, the golden corpus plus load cases at each
+  loader rule's edge and at each header field's encoding extremes, is a
+  backstop, not the rule.
+  - The vector sets and the golden corpus (`certificates/MANIFEST`:
+    every case's images, initial states and boundary states) are held by
+    gates today, so a change that moves one of their bits fails by name.
+  - The load cases are not built yet. For each of the loader's rules
+    they would hold an image at its edge, accepted, and one past it,
+    refused by name; for each header field, acceptance at its encoding's
+    extremes. The extremes are what would have caught ee78152 (below):
+    the corpus's images carry at most 8 constants (measured
+    2026-10-02).
+  - A change the record does not reach steps the profile by the rule
+    alone, at its committer's word, as every step did before 2026-10-02.
+- **The tree is at profile 2** (2026-10-02). Profile 1 was 2026-09-16's
+  vector sets and model. The rule above took effect with certificate
+  format version 2, the first thing that names a profile (Logan's
+  decision on `docs/studies/CERT-V2.md`'s question 6, 2026-10-02). Under
+  it, the model's changes since 2026-09-16 (`seq.py`'s history) are:
+  - **ee78152 (2026-10-01) is a major step.** seq.py's loader began
+    refusing images whose header declares more than 512 constants (513,
+    600 and 70,000 among them), which the model of 2026-09-16 loaded and
+    ran. The old rule kept the number at 1, since no vector moved, so
+    an auditor after ee78152 would have covered a certificate made
+    before it and refused such an image `program-image`, blaming an
+    honest certificate.
+  - **Revision 8's forms are minor steps:** augadd and augerr (codes 10
+    and 11), the stepped STX and LDX, and quiet, endquiet and raise
+    (codes 12 to 14). Every loader before them refused those encodings,
+    and every image it accepted computes the same bits.
+  - **Revision 7's scratch depth as a run's parameter is a minor step:**
+    a run at the default, 256, computes what it computed before, and
+    another depth is a choice no run could make before (2026-09-29).
+  - Nothing named a profile between them, so they are one major step,
+    2. The vector sets did not move: profile 2's 1,068,915 cases are
+    profile 1's, and `vectors/SHA256SUMS` is unchanged.
+- **The C ABI is a different number.** `CFT_ABI_VERSION` (0.14 when
+  profile 1 was set, 0.17 at profile 2) versions the calling surface of
+  one implementation, not the bits; a device's `VERSION` register
+  versions one register map. Neither changes the profile, and the
+  profile does not change with them.
+
+### The language's version
+
+The language (`docs/LANGUAGE.md`) has a version of its own since
+2026-10-02, beside the profile: a version-2 certificate whose runs name
+a source states it on its `language` line.
+- **Its home** is `python/cft_golden/lang/version.py`, in the golden
+  model beside the language's definition: its checker and its reference
+  interpreter, `lang.run`, the definition of correct for every compiled
+  image.
+- **It started at 1** with certificate format version 2, the first thing
+  that names it. The majors the language would have taken before then,
+  about four from L1 by verifier-VCV2's count (the step-size-sign
+  refusal, D2's `unused` and `too-deep`, and `tangent` reserved), are
+  before its count.
+- **Its rule is the profile's.** A major step whenever an accepted source
+  is refused, or computes another thing: a new keyword an old source used
+  as a name, a refusal added, a node's golden function changed. A minor
+  step for an addition that changes no accepted source: a function, an
+  integrator or a statement the language refused before only because it
+  did not have it.
+- **What it decides.** An auditor compares a certificate's `profile` and
+  `language` with its own. Where its own do not cover the certificate's
+  (each major equal, and its minor at least the certificate's), a
+  failed re-derivation is refused `definition-differs`, the auditor's
+  limit, rather than blamed on the certificate (`docs/CERTIFICATES.md`,
+  "The definition").
 
 ## The documents this rests on
 

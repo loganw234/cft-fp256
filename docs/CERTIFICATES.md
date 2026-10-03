@@ -3351,11 +3351,12 @@ header lines:
   Since 2026-10-02 it versions the program model too: any change to what
   an accepted image computes, or to whether an image loads, steps it. The
   golden model states it, and the tree is at profile 2;
-- **`language`**: the language's version, kept in the golden model and
-  stepped by the same rule for sources: a major step whenever an accepted
-  source is refused or computes another thing, a minor step for an
-  addition that changes none. It starts at 1. A certificate whose runs
-  name no source writes `none`.
+- **`language`**: the language's version (CONFORMANCE.md, "The
+  language's version"), kept in the golden model and stepped by the same
+  rule for sources: a major step whenever an accepted source is refused
+  or computes another thing, a minor step for an addition that changes
+  none. It starts at 1. A certificate whose runs name no source writes
+  `none`.
 
 **Coverage.** An auditor's definition covers a certificate's when, for
 each of the two, the majors are equal and the auditor's minor is at least
