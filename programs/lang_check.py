@@ -1286,8 +1286,11 @@ def wider_routine_controls(segrun, audit, rng, work):
                                                    for v in block])}
         for name, data in files.items():
             (d / name).write_bytes(data)
-        args = ["--out", d / "c.cert", "--states", d / "states", "--open",
-                "--device", "sw",
+        # version 1 (--format-version 1): cft-segrun writes version 2 by
+        # default since version 2's C half; this leg holds version 1's
+        # routine rule, and its control is audited as version 1
+        args = ["--format-version", "1", "--out", d / "c.cert", "--states",
+                d / "states", "--open", "--device", "sw",
                 "--run", "main", "--image", d / "image.cftp", "--bank",
                 d / "main.bank", "--init", d / "init.bin", "--segments", 1,
                 "--steps", steps,
@@ -1360,7 +1363,11 @@ def certify(c, name, segrun, audit, rng, work):
             p.unlink()
     if states.exists():
         shutil.rmtree(states)
-    args = ["--out", out, "--states", states, "--open", "--device", "sw"]
+    # version 1 (--format-version 1): cft-segrun writes version 2 by default
+    # since version 2's C half, and a routine image would then need its
+    # source and a replay route; this leg certifies version 1
+    args = ["--format-version", "1", "--out", out, "--states", states,
+            "--open", "--device", "sw"]
     if c.depth != 256:
         args += ["--scratch-depth", c.depth]
     args += ["--run", "main", "--image", d / "image.cftp", "--bank",

@@ -916,6 +916,36 @@ def hold_refusals(work, flag, rs, rs_c, lz):
             "itself)", "replay-undecided",
             args(with_run(plain, 0, replay=(rs.runs[0].image,
                                             rs.runs[0].bank))), after=True)
+    # C4's rule at version 2: a wider run of a routine image (QUIET,
+    # ENDQUIET or RAISE in the main image) refused aux-image before
+    # anything runs, as at version 1; lanes whose k never meets 5 or 22,
+    # so that the golden writer's chain reaches its check
+    rimg, rbank = rs.runs[0].image, rs.runs[0].bank
+    quiet = [fbits("fp64", t) for t in ("100", "0.25", "200", "0.5")]
+    wimg = asm.assemble(REPLAYSTEP.replace(".format   fp64",
+                                           ".format   fp128"), "replay128")
+    wbank = cert.state_bytes("fp128", [cert.widen("fp64", x) for x in
+                                       cert.state_values("fp64", rbank)])
+    wide = [cert.widen("fp64", x) for x in quiet]
+    rw = Prog2("replaystep-wider", [
+        Run2("main", rimg, rbank, quiet, "fp64", 1, 4),
+        Run2("wider", wimg, wbank, wide, "fp128", 1, 4)])
+
+    def golden_routine_wider():
+        ch = cert2.run_chain(wimg, wbank, wide, 1)
+        cert2.certify_run("wider", wimg, wbank, None, ch, steps=4,
+                          main_image=rimg)
+    refused("a version-2 wider run of a routine image", "aux-image",
+            args(rw), twin=golden_routine_wider)
+    rc, _, se = run_tool(args(rw), {"CFT_SEGRUN_PLANT": "wider-routine"})
+    SC.check(rc == 0, "f. control: CFT_SEGRUN_PLANT=wider-routine writes "
+             "that version-2 certificate as stated, for an audit to refuse",
+             f"rc {rc}: {se.strip()[-200:]}")
+    lzw = dataclasses.replace(lz_nosrc, runs=[
+        lz_nosrc.runs[0], dataclasses.replace(lz_nosrc.runs[2],
+                                              kind="wider")])
+    control("a version-2 wider run beside a main image with no routine "
+            "(Lorenz-63; the writer checks no relation)", args(lzw))
     # what memory a version-2 run needs, tried before anything is made
     refused("10^12 segments asking for the per-lane block", "memory",
             args(with_run(flag, 0, segments=10 ** 12), ()))

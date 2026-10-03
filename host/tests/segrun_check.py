@@ -624,7 +624,10 @@ def write_inputs(work, prog):
 
 
 def tool_args(prog, paths, out, states, salt_path, device="sw"):
-    args = ["--out", out, "--states", states]
+    """Version 1's command line for `prog` (section 14 has its own): it
+    names the version itself, so a caller that runs the tool directly -
+    audit_check's section 3 - gets version 1 as these sections do."""
+    args = ["--format-version", "1", "--out", out, "--states", states]
     args += ["--salt", salt_path] if salt_path else ["--open"]
     args += ["--device", device]
     for spec, (img, bank, init) in zip(prog.runs, paths):
