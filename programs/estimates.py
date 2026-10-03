@@ -252,6 +252,11 @@ def load_cases(only=None):
     read is held to its manifest SHA-256 and every state to its
     certificate's hash before it is used."""
     man = corpus.read_manifest()
+    # the estimates are version 1's: certificate format version 2's cases
+    # (CV2B, 2026-10-02) - the golden writer's, and their controls - are
+    # neither scored nor listed, so the committed runs (docs/studies/
+    # acc-a/) still name every case this reads
+    v1 = [c for c in man.cases if c.version == 1]
     # --cases is refused by name, before any scoring, for a name that is
     # not in the corpus (here, before anything loads) or a corpus case that
     # is not scored (after the loop, once the other named cases' load
@@ -261,8 +266,13 @@ def load_cases(only=None):
     if unknown:
         sys.exit(f"estimates: --cases names no case of certificates/MANIFEST: "
                  f"{', '.join(unknown)}")
+    later = sorted(set(only or ()) - {c.name for c in v1})
+    if later:
+        sys.exit(f"estimates: --cases names a case of certificate format "
+                 f"version 2, which the estimates do not score: "
+                 f"{', '.join(later)}")
     scored, skipped = [], []
-    for c in man.cases:
+    for c in v1:
         if only and c.name not in only:
             continue
         bases = {image_base(man.images[r.image]) for r in c.runs}

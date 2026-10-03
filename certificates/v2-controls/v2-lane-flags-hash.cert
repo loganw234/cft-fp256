@@ -1,0 +1,60 @@
+cft-certificate 2
+mode open
+build-id unknown
+backend software
+device-xclbin none
+device-version none
+device-caps none
+device-tiles 1
+profile 2
+language none
+device-platform none
+device-xrt none
+device-clock none
+device-serial none
+writer golden unknown
+writer-runtime unknown
+compiler-build none
+replay-methods 0
+certificate-id none
+issuer withheld
+issuer-key none
+host-os unknown
+host-arch unknown
+started unknown
+finished unknown
+issued unknown
+supersedes none
+environment 0
+initial given
+runs 1
+run 0 main
+program-format fp64
+program-image e3f822d4acea1d12e19c8fae19569e5ea7747acea6b44c8e9fb36e42226efb14
+program-digest e3f822d4acea1d12e19c8fae19569e5ea7747acea6b44c8e9fb36e42226efb14
+source none
+lanes 3
+steps 1
+stream-a 24491f6a040123086eefac186e747eabad55bed41b9a74b2726990a1e8c6fe37
+stream-b f53ceee9b603ad198e8fcb872fa3f441062e7c1375d400d6dee175d571317631
+stream-c d3a329f70c79c48c2a594b4ff24b775c9b26aec851986f1f06f2c677a7d4668a
+parameters 0
+lane-flags yes
+segments 5
+segment 0 start 407193d98a0ef213de6aa18d02f508495a07d32204ab5b46332d16684bd05f35 end c3d3a3ffb2983bacbfad746b17732ea133d44c2306b0e5b5f2c21a6d648f7169 flags 21 status 48 lanes 966a4f311e80e9f7b1e02f4dabbfb832319e8b2353ec65970a4a6c655136ae94
+segment 1 start c3d3a3ffb2983bacbfad746b17732ea133d44c2306b0e5b5f2c21a6d648f7169 end 43f97da5b2162c49b87e3bb71e81bad303629aafa5a82717f13ae9fc0b634a78 flags 1 status 48 lanes f7c4cf7105a3562408467515ea50f074794e31d88afb93ff713e9ee846c23432
+segment 2 start 43f97da5b2162c49b87e3bb71e81bad303629aafa5a82717f13ae9fc0b634a78 end 754700e69105bbad8cb1a3c7e437fe16ecad8ca15d2899e75b2e2b986204602c flags 21 status 48 lanes 42a28fc945096a77b67a810df913cadc36e33ec6c05a9df13d96b85d47df5abc
+segment 3 start 754700e69105bbad8cb1a3c7e437fe16ecad8ca15d2899e75b2e2b986204602c end e5639c59d9d42b75a4c5c86f129794717964ec9d28a01f95acf20283192dfb3e flags 20 status 48 lanes be5d2e7ae8729ecd5539b6dbbc1ec600e5c73964c12ba3574efe9b3032f4240a
+segment 4 start e5639c59d9d42b75a4c5c86f129794717964ec9d28a01f95acf20283192dfb3e end 6a5baff9ee077a4a2b585f1331927cdb79543496a920b280cc469ba5188a9556 flags 20 status 48 lanes 3d71935b975fd91e5cb5dc681da6c19c0835da7430fb025b67d89f91d03e9d70
+replays 0
+output 6a5baff9ee077a4a2b585f1331927cdb79543496a920b280cc469ba5188a9556
+accuracy 1
+entry 0 drift
+kind measurement
+uses 0
+scope max-lanes
+quantity counter terms 1
+term 1/1 s0
+value exact 5/1
+end
+hash e4d611584a3ce53fa9d52dd268dbc7fcfc3821bb78ed8374053a69abb0bba530

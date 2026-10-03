@@ -152,6 +152,10 @@ def cfta(low, prog, steps, meta):
         f"; system  {g.system}: {g.fmt_name}, {g.rnd_name}, {integ}"
         + (f", h = {K.literal(h)}" if h is not None else ""),
     ]
+    over = meta.get("format_override")
+    if over:
+        lines.append(f"; format  {over[1]} by a format override; the source "
+                     f"declares {over[0]}")
     if g.T:
         n = g.n_primal
         lines.append("; tangent " + ", ".join(

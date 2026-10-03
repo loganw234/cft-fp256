@@ -290,6 +290,15 @@ def translate(workdir, data, salt, programs=None, states=None, streams=None,
     """-> the tool's arguments, with the files written into workdir."""
     if not isinstance(data, (bytes, bytearray)):
         raise Untranslatable("the certificate is not bytes")
+    if bytes(data[:18]) == b"cft-certificate 2\n":
+        # The golden reader dispatches a version-2 body to version 2's
+        # reader (docs/CERTIFICATES.md, "Version 2"), and cft-audit reads
+        # version 1 only until the C half: test_cert.py's two controls
+        # that put a version-1 body under `cft-certificate 2` are
+        # `line-missing` there and `version` here. Counted and named.
+        raise Untranslatable("a version-2 certificate, which cft-audit "
+                             "reads from the C half on (CV2B's next "
+                             "parcel)")
     (workdir / "c.cert").write_bytes(bytes(data))
     args = ["--cert", workdir / "c.cert"]
     if read_only:
@@ -986,8 +995,14 @@ def section_corpus(work, root):
         return
     cases = read_manifest(man)
     check(len(cases) > 0, f"{man} names {len(cases)} cases")
+    version_2 = []
     for c in cases:
         data = (root / c["certificate"]).read_bytes()
+        if data[:18] == b"cft-certificate 2\n":
+            # cft-audit reads version 1 only until the C half; corpus.py
+            # check holds each version-2 case to the golden auditor
+            version_2.append(c["name"])
+            continue
         salt = (root / c["salt"]).read_bytes() if c["salt"] else None
         progs = {i: ((root / r["image"]).read_bytes(),
                      (root / r["bank"]).read_bytes() if r["bank"] else None)
@@ -1001,6 +1016,11 @@ def section_corpus(work, root):
                     (sdir / f).read_bytes()
         audits_of(work, f"corpus {c['name']}", data, salt, progs, states,
                   None, c.get("verdict"))
+    if version_2:
+        print(f"  NOTE  {len(version_2)} version-2 cases, not handed to the "
+              f"tool: cft-audit reads version 2 from the C half on (CV2B's "
+              f"next parcel), and corpus.py check holds each to the golden "
+              f"auditor: {', '.join(version_2)}", flush=True)
 
 
 # ---- section 5: the narrow builds -------------------------------------------

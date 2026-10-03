@@ -159,7 +159,7 @@ def lor():
     r1 = cert.certify_run("half-step", img, bank_half, SALT, st1, rs1,
                           steps=100, h_slots=(0, 1, 2))
     r2 = cert.certify_run("wider", img128, bank_w, SALT, st2, rs2,
-                          steps=100)
+                          steps=100, main_image=img)
     runs = (r0, r1, r2)
     shapes = [(F64, 3), (F64, 3), (F128, 3)]
     ends = {(0, 0): st0[0], (0, S): st0[-1], (1, 0): st1[0],
@@ -183,7 +183,7 @@ def lor():
         cert.certify_run("half-step", img, bank_half, None, st1, rs1,
                          steps=100, h_slots=(0, 1, 2)),
         cert.certify_run("wider", img128, bank_w, None, st2, rs2,
-                         steps=100))
+                         steps=100, main_image=img))
     open_data = cert.encode(opened(open_runs, (e0, e1, e2, e3)))
     return types.SimpleNamespace(
         open_runs=open_runs, open_data=open_data,
@@ -439,7 +439,15 @@ def test_a_count_changed(lor):
 
 def test_magic_and_version(lor):
     L = lines_of(lor.data)
-    refused("version", cert.parse, rebuilt(["cft-certificate 2"] + L[1:]))
+    # Since version 2 (docs/CERTIFICATES.md, "Version 2"), the reader
+    # dispatches on the magic line: a version-1 body under
+    # `cft-certificate 2` reaches version 2's reader, which finds `runs`
+    # where its first new line, `profile`, belongs - `line-missing`, where
+    # until then it was `version` (verifier-VCV2's two controls).
+    got = refused("line-missing", cert.parse,
+                  rebuilt(["cft-certificate 2"] + L[1:]))
+    assert got.line == find(L, "runs ") + 1 and "'profile'" in got.message
+    refused("version", cert.parse, rebuilt(["cft-certificate 3"] + L[1:]))
     refused("magic", cert.parse, rebuilt(["cft-certificat 1"] + L[1:]))
     refused("malformed", cert.parse, rebuilt(["cft-certificate 1 x"]
                                              + L[1:]))
@@ -2116,7 +2124,8 @@ def test_a_wider_image_is_held_to_its_constants_and_header():
              "header's scratch_io_word")):
         init = init_w * (2 if "scratch_io" in (why or "") else 1)
         st1, rs1 = cert.run_chain(img, b"", init, 2)
-        r1 = cert.certify_run("wider", img, b"", SALT, st1, rs1, steps=1)
+        r1 = cert.certify_run("wider", img, b"", SALT, st1, rs1, steps=1,
+                              main_image=main_img)
         data = cert.encode(keyed((r0, r1), ()))
         # None for the bank of an image that carries its constants
         args = (data, SALT, {0: (main_img, None), 1: (img, None)})
@@ -2333,9 +2342,12 @@ def test_a_version_of_any_size_is_a_version(lor):
     size - past 2^63 - 1 too - names a version: `version`, not
     `malformed`."""
     L = lines_of(lor.data)
-    for v in ("2", "9223372036854775808", "9" * 5000):
+    for v in ("3", "9223372036854775808", "9" * 5000):
         refused("version", cert.parse, rebuilt([f"cft-certificate {v}"]
                                                + L[1:]))
+    # version 2 is read by version 2's reader (test_magic_and_version)
+    refused("line-missing", cert.parse, rebuilt(["cft-certificate 2"]
+                                                + L[1:]))
     for v in ("01", "-1", "1.0", "one"):
         refused("malformed", cert.parse, rebuilt([f"cft-certificate {v}"]
                                                  + L[1:]))

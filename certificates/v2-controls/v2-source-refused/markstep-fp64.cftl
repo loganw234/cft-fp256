@@ -1,0 +1,15 @@
+; markstep - the definition of certificates/programs/markstep-fp64.cfta,
+; the golden corpus's replay case (docs/CERTIFICATES.md, "Golden
+; certificates"; certificate format version 2). The image computes this
+; map, step for step and flag for flag, except where its own test marks a
+; lane (R24's raise with bit 7) - and there, once, it writes a wrong last
+; bit. A version-2 certificate replays each marked lane by this source's
+; reference interpreter and certifies the definition's values.
+system markstep
+format fp64
+round  rne
+state  k, x
+param  a = 9/10, b = 1/7
+next   k = k + 1
+next   x = x * a + b
+step   mapp

@@ -632,7 +632,8 @@ def golden_certificate(prog, chains, salt, identity):
                                   rs, steps=spec.steps,
                                   parameters=spec.params,
                                   h_slots=spec.h_slots,
-                                  scratch_depth=DEPTH)
+                                  scratch_depth=DEPTH,
+                                  main_image=prog.runs[0].image)
                  for spec, (st, rs) in zip(prog.runs, chains))
     return cert.encode(cert.Certificate(
         "keyed" if salt is not None else "open",
@@ -928,7 +929,8 @@ def golden_write(runs_specs, salt=None):
                                      st, rs, steps=spec.steps,
                                      parameters=spec.params,
                                      h_slots=spec.h_slots,
-                                     scratch_depth=DEPTH))
+                                     scratch_depth=DEPTH,
+                                     main_image=runs_specs[0].image))
     return cert.encode(cert.Certificate(
         "keyed" if salt is not None else "open",
         cert.salt_commitment(salt) if salt is not None else None,
@@ -1382,7 +1384,8 @@ def golden_write_entries(specs, entries, salt=None):
                                      st, rs, steps=spec.steps,
                                      parameters=spec.params,
                                      h_slots=spec.h_slots,
-                                     scratch_depth=DEPTH))
+                                     scratch_depth=DEPTH,
+                                     main_image=specs[0].image))
     return cert.encode(cert.Certificate(
         "keyed" if salt is not None else "open",
         cert.salt_commitment(salt) if salt is not None else None,
@@ -1967,7 +1970,8 @@ def hold_depth(work, l63):
             runs.append(cert.certify_run(
                 spec.kind, spec.image, spec.bank, None, st, rs,
                 steps=spec.steps, parameters=with_depth(spec.params, 2048),
-                h_slots=spec.h_slots, scratch_depth=2048))
+                h_slots=spec.h_slots, scratch_depth=2048,
+                main_image=l63.runs[0].image))
             states[r] = {b: boundary_file(sdir, r, b).read_bytes()
                          for b in range(len(st))}
             wrong += [(r, b) for b in range(len(st)) if states[r][b]
@@ -2488,7 +2492,8 @@ def rounding_seen(programs, chains):
             continue
         runs = [cert.certify_run(s.kind, s.image, s.bank, None, st, rs,
                                  steps=s.steps, parameters=s.params,
-                                 h_slots=s.h_slots, scratch_depth=DEPTH)
+                                 h_slots=s.h_slots, scratch_depth=DEPTH,
+                                 main_image=prog.runs[0].image)
                 for s, (st, rs) in zip(prog.runs, chains[prog.name])]
         for e, g in zip(prog.entries, golden_entries(prog.entries, runs,
                                                      prog.runs,

@@ -1,4 +1,4 @@
-# Certificates, version 1
+# Certificates
 
 A certificate is a text file that says what a deterministic run was and
 how accurate it is: which program ran, on which inputs, cut into which
@@ -6,10 +6,18 @@ segments, which state each segment began and ended on, what flags it
 raised, and what its accuracy is, of which kind. An audit checks that
 statement by re-running segments on an implementation the producer does
 not control, starting each from its certified start state. This page is
-the whole of version 1. A reader and an auditor can be written from it
-alone.
+the whole of versions 1 and 2. Every section up to "Version 2" is version
+1's, and stays its contract; "Version 2" adds what version 2 adds and
+keeps version 1's rules where it does not say otherwise. A reader and an
+auditor of either version can be written from it alone. An auditor reads
+both versions, choosing by the magic line, and version 1's verdicts are
+unchanged but for one rule that came with version 2: a wider run of a
+routine image is refused `aux-image` ("Auxiliary runs"). The golden
+auditor does so today, and `cft-audit` reads version 1 until version 2's
+C half ("Version 2").
 
-Where things stand (2026-09-30):
+Where version 1 stands (2026-09-30; version 2's own is under "Version
+2"):
 - the golden implementation is `python/cft_golden/cert.py`: encode,
   strict parse, the hashes, the chain and the audit, which re-runs
   segments with `seq.run`;
@@ -32,7 +40,8 @@ Where things stand (2026-09-30):
   an entry's value with one code, `host/tools/cert_exact.h`;
 - the golden certificates, twelve programs and their certificates in
   `certificates/`, hold both writers to committed bytes (see "Golden
-  certificates");
+  certificates"), and version 2's cases beside them hold the golden
+  writer and auditor until version 2's C half;
 - `cft-orbits` certifies its own runs on the Newton route, each sample
   interval a segment of one image, with its angular momentum's drift as
   an exact entry where asked (2026-09-30; [ORBITS.md](ORBITS.md),
@@ -71,8 +80,10 @@ this device image. Their accuracy is this, of this kind."
   checked.
 - Authorship. The hash line catches corruption, not forgery. Nothing in
   version 1 is signed, and anyone can write a self-consistent
-  certificate for bits it computed itself. A signature, when one is
-  defined, is detached (see "The detached signature").
+  certificate for bits it computed itself. A signature is detached (see
+  "The detached signature"): version 2 defines it, Ed25519 over the body
+  hash, and it signs a version-1 certificate as it signs its own, the
+  certificate's bytes the same signed or not.
 - Independence, for a certificate that libcft's software backend made:
   libcft made it, so only the golden auditor is an implementation
   independent of it there.
@@ -579,7 +590,7 @@ relation, in this order, before it re-runs anything:
 |---|---|---|
 | `aux-format` | the main run's format | the next rung: fp32 to fp64, fp64 to fp128, fp128 to fp256. At fp256, the top of the ladder, refused: a program image is at most fp256, so a rounding estimate by a wider re-run cannot exist there |
 | `aux-lanes` | the main run's lanes | the main run's lanes |
-| `aux-image` | the same steps a segment, and the same image digest; then the main run's scratch depth | the same steps, and an image that is the main image one format wider: the same instruction words, `max_deposits`, flags, constant count and scratch word, the precision code one rung up, and any constants the image carries exactly widened; then the main run's scratch depth |
+| `aux-image` | the same steps a segment, and the same image digest; then the main run's scratch depth | the same steps; a main image that holds no QUIET, ENDQUIET or RAISE (below); an image that is the main image one format wider: the same instruction words, `max_deposits`, flags, constant count and scratch word, the precision code one rung up, and any constants the image carries exactly widened; then the main run's scratch depth |
 | `aux-segments` | twice the main run's segments | the main run's segments |
 | `aux-h-slots` | the main image takes its constants from a bank, and each named slot is inside that bank and holds a finite nonzero value there | (none named) |
 | `aux-bank` | each named slot exactly half the main bank's value; every other slot bit-identical | every slot the main bank's value exactly widened |
@@ -605,6 +616,54 @@ Why a wider run is held to its instructions rather than to its image
 digest: an image's header carries its format's precision code, so an
 image one format wider cannot be the same bytes (`seq.Program.to_bytes`
 and `asm.Image.to_bytes` both write it).
+
+**A routine image has no wider run** (the lead's decision, 2026-10-02,
+with the step-6 round's C4). A main image that holds revision 8's flag
+control - any QUIET, ENDQUIET or RAISE (docs/SEQUENCER.md, R24) - holds a
+routine, and a routine's words and bank words are format-specific (masks,
+biases, Newton passes). Its words one rung up can pass every check above
+and compute nothing the main run means. So every writer refuses to
+certify a wider run of such an image, and every audit refuses one,
+`aux-image` (exit 5):
+- **The criterion.** The main image holds a control word (bit 31 set)
+  whose code, its low byte, is 12, 13 or 14. Its words are read after the
+  header and after any constants the image carries (none under an
+  external bank).
+- **The audit** checks it on each wider run, after `aux-format`,
+  `aux-lanes` and the steps, and before the instruction words and the
+  scratch depth. Its location is the wider run (`run=1` where it is run
+  1), and its sentence is the writer's: "run 1 (wider): the main image
+  holds a routine (QUIET, ENDQUIET or RAISE), whose words are its
+  format's, so no image is it one format wider; certificate version 2's
+  wider-source run compiles its source one format up instead".
+- **A writer** checks the main image too, and makes nothing. cft-segrun
+  checks it once every run's own checks have passed, and before the
+  accuracy entries. The golden writer's `cert.certify_run`, handed the
+  main image beside a wider run, checks it after the wider run's shape
+  and states and before its steps and parameters, which the golden writer
+  reads only at `encode`. So where one wider run has two faults - a
+  routine main image and steps 0, a parameter out of order or a parameter
+  named twice - the two writers can name different ones first, which
+  version 1's contract allows: a writer's refusal names a fault it found,
+  in no order the contract fixes. With the rule's fault alone they agree,
+  W1 and W2 below among it.
+- **Who holds it:** the golden writer's `cert.certify_run` and the golden
+  audit (`cert.routine_words`), and `cft-segrun` and `cft-audit` from
+  parcel C4's C half, with version 2's wider relation the same.
+  `CFT_SEGRUN_PLANT=wider-routine` makes cft-segrun write the certificate
+  it refuses, so that an audit has one to refuse ("The segment runner").
+  The controls are test_cert2.py's on markstep and lang_check's leg E on
+  Kepler, each with the same construction on Lorenz-63, which has no
+  routine, written and accepted. The construction is the main image's
+  words with header bytes 20 to 23, the precision code, set to fp128's,
+  and its bank and initial state widened exactly. test_cert2.py also
+  holds verifier-VCV2B's W1, a routine main image beside a wider image
+  that holds no flag control (refused, by the golden writer as by
+  cft-segrun), and W2, the reverse (written by both, and refused by the
+  audit as not the main image's words).
+
+Version 2's `wider-source` run, the program's source compiled one format
+wider, is how such a program gets a wider estimate.
 
 **The main run attached as its own half-step run is refused.** Without
 these checks it would pass everything, with an estimate of 0
@@ -768,13 +827,19 @@ statement of what it ran on.
 
 ## The detached signature
 
-Reserved, and nothing more.
-- A later version may define a signature. It signs the body's hash,
-  the 32 bytes the hash line carries.
-- It lives in a file of its own, beside the certificate, never inside
-  it. The certificate's bytes are the same signed or not.
-- A version-1 reader never reads a signature.
-- Version 1 defines no scheme.
+Version 1 reserved it, and defined nothing more:
+- it signs the body's hash, the 32 bytes the hash line carries;
+- it lives in a file of its own, beside the certificate, never inside
+  it, so the certificate's bytes are the same signed or not;
+- a version-1 reader never reads a signature;
+- version 1 defines no scheme.
+
+Version 2 defines the scheme, and it signs a certificate of either version
+(Version 2, "The detached signature"): Ed25519 over `cft-signature 1`, a
+NUL and the body hash, in a five-line `<certificate>.sig`. A version-1
+certificate signed so is still read and audited by version 1's rules,
+which read no signature; the key tool, `python/cft_sign.py`, verifies its
+signature.
 
 ## The strict reader
 
@@ -789,9 +854,13 @@ A reader decides, in this order, and refuses at the first failure:
    single spaces and none at either end. Otherwise `malformed`.
 4. **The magic line.** The first line's key is `cft-certificate`
    (otherwise `magic`), and the line is `cft-certificate 1` exactly. A
-   second and last token spelt as a decimal integer other than 1 is
-   `version`, whatever its size - past 2^63 - 1 too, since a version is
-   a name here and not a count; anything else is `malformed`.
+   body whose first line is exactly `cft-certificate 2` is not version
+   1's: the reader sends it to version 2's reader (Version 2, "Version
+   2's strict reader"), so a version-1 body under that line is refused
+   there, `line-missing` at `profile`. Any other second and last token
+   spelt as a decimal integer is `version`, whatever its size - past
+   2^63 - 1 too, since a version is a name here and not a count; anything
+   else is `malformed`.
 5. **The keys.** Every line's key is a key of version 1. Otherwise
    `unknown-line`, wherever the line stands.
 6. **The mode.** The second line is the mode line (when it is not, the
@@ -1056,7 +1125,7 @@ accuracy 7, the auditor's own usage 64. The name is the report.
 | `hash-line` | 1 | the file's last line is not `hash` and 64 lowercase hex digits, or there is none |
 | `body-hash` | 1 | the hash line is not the SHA-256 of the body |
 | `magic` | 2 | the first line is not the magic line, or the body is empty |
-| `version` | 2 | the magic line names a version other than 1 |
+| `version` | 2 | the magic line names a version other than 1 and 2 |
 | `mode-unknown` | 2 | the mode line's value is not `keyed` or `open` |
 | `commitment-missing` | 2 | a keyed certificate has no `salt-commitment` line |
 | `commitment-unexpected` | 2 | an open certificate has a `salt-commitment` line |
@@ -1085,7 +1154,7 @@ accuracy 7, the auditor's own usage 64. The name is the report.
 | `continuity` | 5 | a segment does not start where the one before it ended, or the output is not the last end |
 | `aux-format` | 5 | an auxiliary run's format is not its relation's, including any wider run of an fp256 run |
 | `aux-lanes` | 5 | an auxiliary run's lanes differ from the main run's |
-| `aux-image` | 5 | an auxiliary run's image or steps are not the main run's, or the main run's one format wider, or it runs at another scratch depth than the main run's |
+| `aux-image` | 5 | an auxiliary run's image or steps are not the main run's, or the main run's one format wider, or it runs at another scratch depth than the main run's; a wider run of a main image that holds QUIET, ENDQUIET or RAISE |
 | `aux-segments` | 5 | a half-step run without twice the segments, or a wider run without the same |
 | `aux-h-slots` | 5 | a named h-slot outside the bank, or holding zero or a non-finite value there, or a main image that takes no bank |
 | `aux-bank` | 5 | a bank that is not the main bank halved in exactly the named slots, or exactly widened |
@@ -1184,7 +1253,15 @@ The controls cover:
   enclosure's ends;
 - a decimal that disagrees with its hex; an element read hex, then NaN,
   then decimal, and an enclosure's lower end before its upper; and a
-  version of any size;
+  version of any size. Since version 2, a version-1 body under
+  `cft-certificate 2` reaches version 2's reader and is `line-missing` at
+  `profile` (verifier-VCV2 named the two controls that moved from
+  `version`), and `cft-certificate 3` is `version`;
+- since 2026-10-02, a wider run of a routine image, refused `aux-image` at
+  the wider run by the golden writer and audit (its control is in
+  test_cert2.py, so that audit_check.py does not hand it to a cft-audit
+  that refuses it only from parcel C4's C half on; C4's control is
+  lang_check's leg E);
 - the identity lines held to their spelling alone, `device-tiles`
   among them;
 - each kind that is not its method's;
@@ -1595,7 +1672,11 @@ makes a run refuse by that name, and says so. With `--build-id` or
 refused and exits 0 with the right output (verifier-C6). A fourth,
 `trial-skipped`, refuses nothing: it skips the trial's allocations
 (**Memory**, below), keeping its size checks, so that the gate can
-measure what the trial costs the runs. The read-back refusal has a
+measure what the trial costs the runs. A fifth, `wider-routine` (parcel
+C4, 2026-10-02), turns a refusal into a certificate: a wider run of a
+routine image, which every writer refuses `aux-image` ("Auxiliary runs"),
+is written as stated, so that an audit has one to refuse. The read-back
+refusal has a
 plant BUILD instead of an instrument (the lead's condition, 2026-09-30).
 Compiled with `-DCFT_SEGRUN_PLANT_STATE_CHANGED`, by the gate and never
 by the Makefile, the first state read back has a bit flipped, and the
@@ -2411,7 +2492,7 @@ to an encoding. A committed certificate does not move. Every such change
 either keeps the corpus's bytes, or changes them in a commit that says
 so, made by `python certificates/corpus.py make`.
 
-**The cases.** There are twelve, each small: 2 to 4 lanes, and 2 to 8
+**The cases.** Version 1 has twelve, each small: 2 to 4 lanes, and 2 to 8
 segments a run. Each holds something no other does:
 - `lorenz63-rk4-fp64`, `lorenz96-rk4-fp64` and `henonheiles-lf-fp64`: the
   three ODE programs at fp64, open. Each has a half-step run and a wider
@@ -2470,10 +2551,74 @@ segments a run. Each holds something no other does:
   the main run does not hold, so its expected verdict is the refusal
   `aux-start`: one committed negative for every auditor.
 
-The corpus's data is about 153 KB: 170 files and 152,611 bytes besides
-corpus.py (152,617 until step 5 made the manifest's three `golden`
-words `both`, and 145,061 before the fixes round's cases, both
-2026-09-30).
+**Version 2's cases** (2026-10-02) are the golden writer's, since
+cft-segrun writes version 1 until version 2's C half. Seven are
+certificates a writer makes. The manifest marks each `writers both`: a C
+writer must reproduce it from the C half on.
+- `markstep-fp64`: the replay case, and this page's version-2 example,
+  byte for byte. markstep's image computes its source's map, and beside it
+  a routine's own test, run quiet, which marks lanes 0 and 1 in segment 1
+  and writes lane 0's last bit wrong. The golden writer replays both
+  lanes by the definition (`replay 1 marked 2 changed 1`). Its audit is
+  handed the source and also re-runs every segment by the source's
+  interpreter (`define 0:all`).
+- `lorenz63-rk4-fp64-sourced`: Lorenz-63 compiled by cftc for `sw` from
+  `programs/systems/lorenz63-rk4-fp64.cftl`, 3 lanes. It has a main run, a
+  half-step run on the compile's half bank and h-slots, and a
+  wider-source run: the same source compiled at fp128. Its estimates are
+  `wider-source`, enclosed in fp64, and `step-halving`, exact. Its lanes
+  are `lorenz63-rk4-fp64`'s, and the two wider estimates differ, since
+  the wider-source run's constants are the source's rounded at fp128 and
+  the wider run's are the fp64 bank's widened: over the lanes 2.546e-14
+  and 2.600e-14, on lane 0 2.7e-15 and 1.8e-15 (measured 2026-10-02).
+  The step-halving value is version 1's case's, bit for bit. Its audit
+  recompiles every run's image.
+- `flagstep-fp64-lanes`: flagstep with each segment's per-lane flags, 3
+  lanes whose counters start at 3, 2 and 1. So in each of the 5 segments
+  the lanes raise different flags, and a block written against another
+  lane, or another segment, fails it. It carries the counter's drift.
+- `signed-fp64`: every header line of version 2 spelled out: texts with
+  spaces and non-ASCII, the device lines, the writer's and compiler's
+  builds, and the environment. It is keyed, its initial state is the
+  `shake-box` generator's, and it supersedes `flagstep-fp64-lanes`. Its
+  `.sig` is the test key's, and its issuer `cft test issuer (published
+  key)`: anyone holding the published seed can sign as the key's holder,
+  so the keyring binds it to an evidently test name, never a person's.
+  Its audit is handed the signature, that keyring and the superseded
+  certificate, and it regenerates the initial state.
+- `lorenz63-rk4-fp64-rebuilt`: a compiled Lorenz-63 run whose initial
+  state is `shake-box`'s. Its full audit is handed the source and no
+  state, recompiles the image, regenerates the initial state and re-runs
+  every segment: the verdict's `rebuilt`.
+- `markstep-fp64-other-b` and `markstep-fp64-loud`: honest certificates of
+  other maps, on a bank whose b is 1/4 and not the source's 1/7, and on
+  one that raises invalid in every lane. Each holds together. The
+  definition re-run of one segment refuses them, `definition-end` and
+  `definition-flags`.
+
+Thirty are controls, under `certificates/v2-controls/`, which the manifest
+marks `writers golden`. Each is a case's certificate with one edit, or its
+case with one of the audit's inputs replaced, and every auditor must
+refuse it by its verdict's name. There is one for each of version 2's
+refusals that a committed case can carry: `marked`, `replay-lane-flags`,
+`replay-source`, `replay-method`, `provenance-order`, `signature-format`,
+`signature`, `signature-key`, `signer`, `supersedes`, `source-digest`,
+`source-refused`, `source-format`, `source-graph`, `source-param`,
+`source-shape`, `source-image`, `compiler-differs`, `source-missing`,
+`lane-flags-shape`, `lane-flags-hash`, `lane-flags-identity`,
+`initial-state`, `aux-source`, `segment-lane-flags`, `replay-missing`,
+`replay-unmarked`, `replay-raw`, `replay-changed` and
+`definition-differs`. With the two definition cases above, that is 32 of
+version 2's 34 new names. `definition-unavailable` and `replay-undecided`
+are refusals of the auditor's or the writer's environment, so their
+controls are test_cert2.py's plants.
+
+The corpus's data is 333 KB: 313 files and 333,220 bytes besides
+corpus.py (2026-10-02). Version 2 added 143 files of 115,186 bytes, the
+controls' 59 of them 88,327, and the manifest grew from 23,839 bytes to
+89,262. Before that it was 170 files and 152,611 bytes (152,617 until
+step 5 made the manifest's three `golden` words `both`, and 145,061
+before the fixes round's cases, both 2026-09-30).
 
 **The files.**
 - `certificates/MANIFEST`: every case, every file it names, and each
@@ -2484,51 +2629,91 @@ words `both`, and 145,061 before the fixes round's cases, both
     also carries;
   - a wider run's from its main run's source, with the `.format` line a
     rung up;
-  - the corpus's own from `certificates/programs/`.
+  - the corpus's own from `certificates/programs/`, markstep's definition
+    `markstep-fp64.cftl` beside its image;
+  - a compiled image (version 2's): cftc's compile of a source at a
+    format, with its steps and target, compiled again.
 - `certificates/<case>/<case>.cert`: the certificate.
 - `certificates/<case>/states/run-<r>-boundary-<b>.bin`: every boundary
   of every run, lane-major, as cft-segrun writes them. Handed whole, the
   directory serves a sampled audit; its boundary-0 files alone serve a
   full audit from the initial states.
+- `certificates/<case>/states/run-<r>-segment-<k>.flags`: in a version-2
+  run with lane flags, each segment's per-lane block, one byte a lane,
+  which the audit is handed. Beside them, `run-<r>-segment-<k>-raw.bin`
+  and `-raw.flags`: each replayed segment's raw end state and raw block,
+  as the machine wrote them before the replay. The certificate hashes
+  both; no audit needs them.
 - `certificates/<case>/run-<r>.bank`: a bank that is no library file, a
-  half-step run's halved bank or a wider run's widened one.
+  half-step run's halved bank or a wider run's widened one, or a version-2
+  run's: a compile's bank, or markstep's.
 - `certificates/example.salt`: the example salt, 00 01 .. 1f. This page
   prints it, so it is a test salt only, and never an owner's.
+- `certificates/signed-fp64/signed-fp64.cert.sig` and `keyring`: the
+  detached signature by the test key, whose secret is 20 21 .. 3f, and
+  the keyring its audit is handed. This page prints the key too (version
+  2's "The detached signature"), so it signs test certificates only.
+- `certificates/v2-controls/<name>.cert`, and `certificates/v2-controls/
+  <name>/`: each control's certificate, and the files it hands that its
+  case does not: a source, a block, a signature, a keyring, or states
+  renumbered with its runs.
 - `certificates/corpus.py`: `make` writes the corpus, and `check` is its
   gate.
-- Git keeps the bytes: a certificate is `-text`, and the states and the
-  salt are `binary` (.gitattributes).
+- Git keeps the bytes: a certificate, a signature file and a keyring are
+  `-text`, and the states, the blocks and the salt are `binary`
+  (.gitattributes).
 
 **The manifest** is text in a certificate's own style: printable ASCII
 and LF, one record a line, its key first, single spaces. It takes two
 liberties: `#` begins a comment line, and blank lines separate cases.
 Paths are from the repository's root.
 - Its first record, after the comment lines at its head, is
-  `cft-golden-corpus 1`. Then comes `source <path> <sha256>`
-  for each of the corpus's own programs, and `image <path> <sha256>
-  library <name>` or `image <path> <sha256> source <path> [format <fmt>]`
-  for each image.
+  `cft-golden-corpus 2` (`1` until version 2's cases, 2026-10-02). Then
+  comes `source <path> <sha256>` for each of the corpus's own programs,
+  and for each image one of `image <path> <sha256> library <name>`,
+  `image <path> <sha256> source <path> [format <fmt>]`, or `image <path>
+  <sha256> compiled <source> format <fmt> steps <K> target <t> params <n>
+  [<name> <literal>] ...`, cftc's compile with its run's params.
 - A block for each case follows:
   - `case`, then `what`, a sentence for a person;
-  - `certificate <path> <sha256>`;
+  - `certificate <path> <sha256>`, and `version 1` or `version 2`, the
+    certificate's format version;
   - `mode`, and for a keyed case `salt <path> <sha256>`;
   - `depth`, and `backends any` or `backends software`;
+  - `writers both` or `writers golden`. `both`: the golden writer and a
+    C writer each make it (version 2's C writer from its C half on).
+    `golden`: a control, made by corpus.py from its case by one edit;
   - `accuracy 0 none`, or `accuracy <A> both` when the case has A
     entries. `both` says both writers make them: the golden writer, and
     cft-segrun handed each entry's definition, each held to the
     committed bytes. Until step 5 the word was `golden`, the golden
     writer's alone;
   - `verdict accepted` or `verdict refused <name>`;
-  - `states <dir>` and `runs <R>`.
+  - `states <dir>` and `blocks <dir>`, where the boundaries and the
+    blocks handed are;
+  - what the audit is handed besides: `signature <path> <sha256>` or
+    `signature none`, the same for `keyring`, `superseded <case>` or
+    `superseded none`, `define none`, `define <run>:all` or `define
+    <run>:<k>,<k>...` for a definition re-run, and `regenerate no` or
+    `regenerate yes`;
+  - `runs <R>`.
+  A version-1 case is handed nothing of version 2's: `writers both`, its
+  blocks its states, and the rest `none` or `no`.
 - Each run follows its case's lines:
   - its `run` line as the certificate spells it;
   - `image <path>`;
   - `bank <path> <sha256>` or `bank none`;
+  - `source <path> <sha256>`, the source its audit is handed, or `source
+    none`;
   - `segments`, `steps`, `parameters` and each `parameter`;
   - a `boundary <b> <sha256>` line for each boundary, the SHA-256 of the
-    state file's bytes, not the certificate's tagged hash.
+    state file's bytes, not the certificate's tagged hash;
+  - in a run with blocks, a `block <k> <sha256>` line for each segment's,
+    and a `raw <k> <sha256> <sha256>` line for each replayed segment's
+    raw end state and raw block.
 - corpus.py's `read_manifest` reads it strictly and names the line of
-  any departure. Another gate may import it.
+  any departure. Another gate may import it: `programs/estimates.py`
+  does, and scores version 1's cases alone.
 
 **As a regression test.** `make -C host corpustest` runs `corpus.py check
 --tool ./cft-segrun`, and verify/run.sh's `programs` stage runs it beside
@@ -2566,10 +2751,45 @@ case it holds:
    its seed printed;
 7. the case named `example` being this page's example certificate.
 
+For a version-2 case it holds 1 and 2 as above, and then:
+3. the golden writer making the committed bytes again: cert2's
+   `run_chain` with each block, every marked lane replayed by the
+   source's definition, and `certify_run`; each accuracy value derived
+   again; and `encode`, handed the committed certificate's header lines
+   and each run's statements of its source (its name, compiler and
+   params);
+4. every boundary, block and raw file of the golden chain against its
+   committed file, and the signature made again by the test key;
+5. a NOTE naming each case marked `writers both`, which a C writer must
+   reproduce from version 2's C half on. It must write every line but
+   its own measurements byte for byte: `build-id`, `writer`,
+   `writer-runtime`, `compiler-build`, the `replay-method` lines, the
+   three times, `host-os`, `host-arch` and the environment, and the four
+   device lines only where the case carries a card's values
+   (signed-fp64): `none`, which a software run writes there, is held.
+   It is handed the header's statements, as the golden writer is:
+   `certificate-id`, `issuer`, `issuer-key`, `supersedes` and `initial`.
+   cft-segrun writes version 1 until then;
+6. the golden audit giving the case its verdict, handed what the manifest
+   says: the sources, the blocks, the signature and keyring, the
+   superseded certificate, the definition re-run and the regeneration.
+   It audits in full from the initial states alone, or from no state
+   where the case regenerates, and for a case a writer makes, sampled
+   from the committed states too;
+7. `markstep-fp64` being this page's version-2 example.
+
+A control is held to its recipe instead of a writer: its certificate is
+its case's with its edit made again, byte for byte, its own files and its
+manifest entry are the recipe's, and its audit refuses it by its
+verdict's name.
+
 It is 156 checks, 21 to 32 s on the Windows desktop, niced. The
 slowest was with the desktop at about 77 % from other work (2026-09-29).
 With the fixes round's cases it was 21 to 23 s (2026-09-30), and with
-the tool making the accuracy cases whole, 22 to 25 s (2026-09-30).
+the tool making the accuracy cases whole, 22 to 25 s (2026-09-30). With
+version 2's cases it is 288 checks, 28 and 32 s on the desktop, niced,
+with it 4 to 10 % busy; without the tool, version 1's twelve remakes skipped by
+name, 239 checks in 27 and 29 s at 2 to 6 % (2026-10-02).
 
 **Changing it.** A change that moves any byte of the corpus fails the
 gate by name: a change to the model, a hash, an encoding, the assembler's
@@ -2580,7 +2800,11 @@ byte for byte, where the one it makes equals it but for `build-id` and
 the hash line, and every boundary file has the committed manifest's
 digest. So a case's bytes, and the commit its `build-id` names, move
 only when what it certifies does (the fixes round, 2026-09-30). `make
---rewrite-all` writes every certificate the tool makes.
+--rewrite-all` writes every certificate the tool makes. `make
+--keep-version-1` keeps every version-1 case as committed, its files
+untouched and no tool needed, and writes version 2's cases and controls
+again: version 2's are the golden writer's, and corpus.py's recipes
+make them.
 
 **Its producer.** `make` refuses a tool whose build is not clean, so each
 certificate names a commit anyone can check out. Every certificate but
@@ -2600,6 +2824,11 @@ for value. So `make` kept both certificates byte for byte (2026-09-30).
 `example`'s is the golden writer's, with the identity this page prints
 (`build-id unknown`), and the check holds cft-segrun's to it but for
 `build-id`.
+
+Version 2's cases are the golden writer's, written by `make
+--keep-version-1` at the commit that added them (2026-10-02). Every
+measured header line is `unknown`, as the example's `build-id` is, but
+in `signed-fp64`, which spells each out.
 
 **As a conformance test.** Another implementation (another library, a
 GPU library, a tile) takes each case's images, banks and initial states
@@ -2632,7 +2861,15 @@ The other rules:
 - **Auditors.** An auditor conforms when it gives each case its
   `verdict`, in full and sampled. The audit tool's gate holds
   `cft-audit` to that, beside the golden auditor ("The audit tool",
-  its fourth section).
+  its fourth section). A version-2 auditor is handed what the case's
+  manifest lines say, and gives every control its verdict too.
+- **Version 2.** A version-2 implementation conforms on a case marked
+  `writers both` when, handed the header's statements, it reproduces
+  every line but its own measurements (the regression test's step 5
+  names them): every run block, its source lines, lane flags and replays
+  included, and every accuracy value. Its boundary, block and raw files
+  are the committed ones. It may replay a marked lane by an image of its
+  own, which its `replay-method` line names.
 
 The corpus is described here and committed in this repository, and
 published nowhere else. Publishing it outside this repository needs
@@ -2644,11 +2881,16 @@ Logan's permission.
   card's device lines.
 - One made through a remote handle.
 - Streams other than +0, which cft-segrun does not take.
+- A version-2 certificate made by a C writer, or audited by cft-audit:
+  version 2's C half, the next parcel's.
+- A replay decided through mpmath: no node of the language reaches it
+  yet, so `definition-unavailable` and `replay-undecided` have no
+  committed case.
 
 ## What version 1 does not do
 
-- **Sign.** The detached signature is reserved, and no scheme is
-  defined.
+- **Sign.** The detached signature is reserved, and version 1 defines no
+  scheme. Version 2 defines one, which signs a version-1 certificate too.
 - **Carry a bound.** No version-1 method has a rigorous remainder.
 - **Carry a value that is not an exact rational.** Every version-1
   method's value is a polynomial in exact states, or a difference of
@@ -2681,3 +2923,1144 @@ Logan's permission.
   its runs state a depth that way ("The chain"). cft-segrun states one
   in every run block when it is given `--scratch-depth N`, which it
   takes for the software backend only.
+
+## Version 2
+
+Version 2 says what a run MEANS, where version 1 says what the machine
+did. Logan decided its design on 2026-10-02, as twelve recommendations:
+"Regarding the 12 questions, the recommended solutions are appropriate as
+stated". This part of the page is the whole of version 2. Every section
+above is version 1's and stays its contract; where version 2 keeps a rule
+of version 1's, this part says so and does not restate it.
+
+A version-2 certificate adds five things to version 1's:
+- **the per-lane flags** of every segment (docs/SEQUENCER.md, R23), as a
+  hash a segment;
+- **marked lanes replayed.** A routine that cannot decide a lane's last bit
+  marks the lane (R24). Version 2 replays each marked lane by the program's
+  definition and certifies the corrected segment, with the machine's raw
+  segment on a replay line. So a version-2 chain is the definition's
+  wherever it stands;
+- **the source** a run was compiled from, or is defined by, checked by
+  recompiling or by the language's interpreter, and `wider-source`, the
+  same source compiled one format wider;
+- **the definition** it is claimed under: the conformance profile
+  (CONFORMANCE.md, now versioning the program model) and the language's
+  version. A failure under an auditor whose definition does not cover the
+  certificate's is that auditor's own limit, `definition-differs`;
+- **provenance**: who issued it and with which key, when, on what host, by
+  which writer and compiler build, on which device, in which environment,
+  from which initial state, replacing which certificate. Each is reported,
+  never checked, and the issuer and the device's serial are written only
+  on request. A detached Ed25519 signature, defined here, signs a
+  certificate of either version.
+
+**Version 1 stays the format for the machine's own values.** A run with a
+marked lane is certified under version 1 as its STATUS says: STATUS[6] set,
+re-derived by the audit, and not replayed (the lead's decision,
+2026-10-02). Version 1's certificates stay as they are: the corpus's,
+cft-orbits', and every run whose producer wants the machine's values. A
+version-1 certificate is never made version 2. Re-certifying a run writes a
+new certificate, which may name the old one in `supersedes`.
+
+Where things stand (2026-10-02):
+- the golden implementation is `python/cft_golden/cert2.py`: the reader,
+  the writer, the replays, the sources, the signature and the audit.
+  `cert.parse` and `cert.audit` choose by the magic line, so version 1's
+  reader is untouched. Version 1's golden writer and audit gained one
+  rule with version 2, the wider run of a routine image (`aux-image`),
+  which changes their verdicts for routine images alone;
+- its gate is `python/tests/test_cert2.py`, with a negative control for
+  each check below, caught by name ("Version 2's controls");
+- Ed25519 is `python/cft_golden/ed25519.py`, held to RFC 8032's test
+  vectors by `python/tests/test_ed25519.py`, and the key tool is
+  `python/cft_sign.py`;
+- the profile's version lives in `python/cft_golden/profile.py`, and the
+  language's in `python/cft_golden/lang/version.py`;
+- `cft-segrun` writes, and `cft-audit` reads, version 1 only. Their version
+  2 is the next parcel's, built against this page ("What waits for the C
+  half", below). Until then `host/tests/audit_check.py` names every
+  version-2 certificate it meets, and hands it to neither tool.
+
+### What a version-2 certificate says
+
+**The statement.** "These bits are what this program means: its
+definition's values from these inputs and parameters, every lane its
+routine could not decide replayed by that definition, under this profile
+and this language. The machine's own values, where they differ, are these
+replay lines. The run was compiled from, or is defined by, this source.
+Its accuracy is this, of this kind. The issuer says the rest."
+
+**What an audit proves,** beyond version 1's "What an audit proves":
+- for every segment it re-runs, the segment's per-lane flags, through
+  their hash;
+- for every re-run segment in which the machine marked a lane: which lanes
+  it marked, and its raw end state and flags before any replay, through
+  the replay line; and that each marked lane's certified values are
+  exactly what the definition computes from the lane's certified start;
+- for each run whose source it was handed: that the source is the one
+  named, that the language accepts it at the run's format, its step graph,
+  its params, and, where a compiler is named, that the image and bank are
+  that compiler's compile of it;
+- that a wider-source run is the main run's source compiled one format
+  wider, run from exactly widened inputs;
+- where the auditor chooses, that the source's interpreter itself ends a
+  segment on its certified state with its certified flags (the definition
+  re-run);
+- with a signature file handed, that the holder of the key named in it,
+  a key not of small order, vouched for these bytes; with a keyring,
+  whose key it is;
+- with the superseded certificate handed, that it is the one named.
+
+**What it does not prove.** Any provenance line: a time, a place, the
+issuer without a keyring, the writer, the environment, the device's
+platform, XRT, clock or serial. Each is reported as stated and not
+checked, unknown, none or withheld. Nor that a key belongs to a person:
+the keyring is the auditor's own. Nor when a signature was made.
+
+### Version 2's lines, in order
+
+The file is version 1's ("The file"): printable ASCII and LF, tokens
+separated by one space, a body ending in `end`, then the hash line. Lines
+marked (K) appear in a keyed certificate only. Groups repeat as their count
+says.
+
+**The header.**
+
+| line | values |
+|---|---|
+| `cft-certificate 2` | the magic line |
+| `mode`, `salt-commitment` (K) | as in version 1 |
+| `build-id`, `backend`, `device-xclbin`, `device-version`, `device-caps`, `device-tiles` | as in version 1 ("Identity") |
+| `profile <version>` | the conformance profile the bits are claimed under; or `unknown` |
+| `language <version>` | the language's version; `none` where no run names a source, and only there (refused `malformed` at a run's source line beside it); or `unknown` |
+| `device-platform <text>` | the card's platform (shell) name as XRT reports it; `none` for the software backend; `unknown` |
+| `device-xrt <text>` | XRT's version; `none`; `unknown` |
+| `device-clock <n>` | the kernel clock in Hz, a decimal of at least 1; `none`; `unknown` |
+| `device-serial <text>` | the card's serial; `none`; `unknown`; `withheld`, the writers' default |
+| `writer <name> <build>` | the program that wrote it (`cft-segrun`, `cft-orbits`, `golden`) and its build in `build-id`'s grammar or `unknown`; or `writer unknown` whole |
+| `writer-runtime <text>` | the golden writer's Python, and mpmath's version wherever it evaluated the definition (`python-3.12.9,mpmath-1.3.0`); `none` for a C writer; `unknown` |
+| `compiler-build <build>` | in `build-id`'s grammar, the build of the compiler that made the runs' images; `none`; `unknown` |
+| `replay-methods <n>` | how many `replay-method` lines follow |
+| `replay-method <r> golden` or `replay-method <r> image <digest>` | how the producer replayed run r's marked lanes: by the golden model, or by a replay image (its SHA-256); one line for each run with replay lines, runs strictly increasing |
+| `certificate-id <text>` | an identifier the issuer assigned before writing; `none` |
+| `issuer <text>` | who issues it: a name, an ORCID for a person, or an organisation's identifier; `none`; `withheld`, the writers' default |
+| `issuer-key <key>` | the Ed25519 public key it is to be signed with: a point of the curve (`malformed` where it encodes none) and not of small order (`signer` where [8]A is the identity); `none` |
+| `host-os <text>` | the host's OS by name (`linux`, `windows`), with its version only on request (`linux-6.8`, the kernel's for Linux); `unknown`; `withheld` |
+| `host-arch <text>` | the host's architecture (`x86_64`); `unknown`; `withheld` |
+| `started <time>` | when the first run began; `unknown` |
+| `finished <time>` | when the last run ended; `unknown` |
+| `issued <time>` | when the certificate was written; `unknown` |
+| `supersedes <digest>` | the body hash of a certificate this one replaces; `none` |
+| `environment <n>` | how many `env` lines follow |
+| `env <name> <text>` | a variable of the writer's list that was set, and its value; names strictly increasing, and a name off the list `malformed` |
+| `initial given`, or `initial generator <name> <text> ...` | how run 0's initial state was made: handed as data, or by a named generator, whose name is never one of the four words, and at most 16 arguments |
+| `runs <R>` | as in version 1 |
+
+**A run block,** R of them. Run 0 is the main run.
+
+| line | values |
+|---|---|
+| `run <i> main`, `run <i> half-step h-slots <n> <slot> ...`, `run <i> wider` | as in version 1 |
+| `run <i> wider-source` | an auxiliary run: the main run's source compiled one format wider |
+| `program-format`, `program-image`, `program-digest` | as in version 1 |
+| `source <digest>` or `source none` | the SHA-256 of the source file's bytes; `none` is version 1's run, which names no source |
+| `source-name <text>` | with a source only: its file name, without directories; or `none` |
+| `graph <digest>` | with a source only: the SHA-256 of its step graph's canonical bytes at the run's format |
+| `compiler none` or `compiler <name> <n> <text>` | with a source only: `none` where the image is not claimed to be the source's compile; else the compiler's name, its output version and the target (`compiler cftc 1 u50-rev7-quad`) |
+| `source-params <p>`, then p lines `source-param <name> <literal>` | with a source only: the run values given for the source's params, names strictly increasing in byte order, each literal the language's canonical spelling of its value |
+| `lanes`, `steps`, `stream-a`, `stream-b`, `stream-c`, `parameters`, `parameter` | as in version 1 |
+| `lane-flags yes` or `lane-flags no` | whether the run asked for the per-lane block |
+| `segments <S>` | as in version 1 |
+| `segment <k> start <h> end <h> flags <n> status <n>` | as in version 1, the corrected segment ("A marked lane and its replay"); with `lane-flags yes` it ends in two more tokens, `lanes <h>`, the hash of the segment's block |
+| `replays <m>`, then m lines `replay <k> marked <n> changed <c> raw-end <digest> raw-lanes <digest>` | one line for each segment in which the machine marked a lane, segments strictly increasing |
+| `output <digest>` | as in version 1 |
+
+**The accuracy block** is version 1's, with a fourth method, `entry <j>
+wider-source`, of kind `estimate`, which uses a wider-source run. **The
+end** is version 1's: `end`, then `hash`.
+
+**The words.** A field with no value holds one of four words, and a text
+is never one of them:
+- `unknown`: the producer did not record it;
+- `none`: the field does not exist for this producer;
+- `withheld`: the producer has the value and chose not to publish it;
+- `given`: run 0's initial state was handed as data (`initial` only).
+Each line takes the words its table cell lists, and no other. A word on a
+line that does not take it is `malformed`.
+
+### Version 2's encodings
+
+Version 1's encodings stand: a decimal, a digest, a register word, an
+element, a rational, a word and a name. Version 2 adds six, each with one
+spelling:
+- **A text** is a value's UTF-8 bytes, percent-encoded as URIs encode
+  them. A byte from 0x21 to 0x7E other than `%` stands as itself. Every
+  other byte is `%` and two uppercase hex digits: a space, `%` itself, a
+  control character, a byte of a non-ASCII character. A byte that may
+  stand as itself is never encoded, the bytes decoded are UTF-8, and the
+  token is 1 to 255 characters. So `Logan W.` is `Logan%20W.` and `100%`
+  is `100%25`. A writer refuses a text equal to one of the four words
+  (`malformed`).
+- **A time** is `YYYY-MM-DDTHH:MM:SSZ`: UTC, a real Gregorian date, hours
+  00 to 23, minutes and seconds 00 to 59, `T` and `Z` in upper case, no
+  fraction and no other offset. It is one spelling of RFC 3339's
+  `date-time`. A leap second (60) is refused, as SOURCE_DATE_EPOCH counts
+  none.
+- **A version** is a major in decimal, then `.` and a minor where the minor
+  is not 0: `1`, `1.2`. Each part is at least 1, at most 2^63 - 1, with no
+  leading zero. So `1.0`, `01` and `0` are refused.
+- **A key** is 64 lowercase hex digits: an Ed25519 public key.
+- **A variable's name** is an uppercase letter, then uppercase letters,
+  digits and `_`, at most 64 characters. Its value is a text, and a
+  variable set to the empty string counts as unset (libcft's rule).
+- **A param's name** is the language's: a letter or `_`, then letters,
+  digits and `_`. Its literal is a token the audit holds to the language's
+  canonical spelling ("Sources").
+
+A writer's and a generator's names are version 1's names, and never one of
+the four words. A build is `build-id`'s grammar ("Identity").
+
+### Hashes in version 2
+
+Version 1's tags are kept. A state, a stream and the salt's commitment hash
+exactly as in version 1, so one run's version-1 and version-2 certificates
+carry the same state and stream hashes, and the corpus holds both to one
+set of boundary files. A replay line's raw end is a state, under the state
+tag. Two new objects take new tags:
+
+| what | tag |
+|---|---|
+| a segment's per-lane flags | `cft-certificate 2 lane-flags` then 0x00, then the block's n bytes, lane i's at byte i |
+| a signature's message | `cft-signature 1` then 0x00, then the 32 bytes of the body hash |
+
+A block's hash is keyed as a state's is: HMAC-SHA-256 under the salt in a
+keyed certificate, plain SHA-256 in an open one. The body hash covers
+every line, so it covers each block, each replay line's two hashes and
+every source line. The test vectors are under "Version 2's example and
+test vectors".
+
+### The per-lane flags
+
+**What a run gives** (docs/SEQUENCER.md, R23). One byte a lane: [4:0] the
+five IEEE flags the lane raised outside every quiet region, in FLAGS's
+order; [5] its deposit overflowed; [6] its strict access fell past the
+depth; [7] a raise marked it. So [7:5] are STATUS[6:4] one place up. Over
+the lanes a run owns, the OR of [4:0] is FLAGS, the OR of [6:5] is
+STATUS[5:4], and the OR of [7] is STATUS[6]. A run asks for the block with
+MODE[24], at ABI 0.17 through `cft_run_args.lane_flags`, and over the
+remote protocol through PROG_RUN_EX's `want` word. A segment yields one
+block.
+
+**The lines.** `lane-flags yes` says the run asked for the block, and then
+every segment line ends in `lanes <h>`, its certified block's hash.
+`lane-flags no` is version 1's run, and its segment lines end at `status`.
+A pair where the run says `no`, or none where it says `yes`, is
+`malformed`. No lane's byte is in the clear: a block is n bytes a
+segment, which as hex would be twice the size of every state. A run's
+flag word and STATUS stay in the clear, as in version 1.
+
+**When a run asks.** A writer asks for the block whenever the image needs
+flag control (CAPS2[14]: any QUIET, ENDQUIET or RAISE), since a mark alone
+does not say which lane, and otherwise as its producer chooses. The chain
+does not change: a block is an output of its segment, not an input to the
+next.
+
+**Beside the certificate.** A writer writes each segment's block into the
+states directory as `run-<r>-segment-<k>.flags`, n bytes, beside the
+boundaries. A person reads them to find which lane raised invalid. An
+auditor need not be handed them, since a re-run recomputes each block.
+
+**What the audit checks.**
+- At step 7, each block handed: its size is the run's lanes, and it belongs
+  to a segment that exists of a run that says `yes`
+  (`lane-flags-shape`); its hash is the segment's (`lane-flags-hash`); and
+  R23's identities against the segment line, which need no re-run
+  (`lane-flags-identity`): the OR of its bytes' [4:0] is the flag word, the
+  OR of their [6:5] is STATUS[5:4], and no byte carries [7], since a
+  certified block's marks are resolved. So a sampled audit handed the
+  blocks checks every segment's block, re-run or not.
+- At step 9, each re-run segment's block is computed with the segment, a
+  block of lanes at a time, as its end state is, and must hash to the
+  certified value (`segment-lane-flags`).
+
+### A marked lane and its replay
+
+**What happens on the machine.** A correctly rounded routine runs inside a
+quiet region and tests in-lane whether its last bit is decided. It raises
+its operation's flags, with bit 7 set where its test failed, and the mark
+sets the lane byte's [7] and STATUS[6]. A quiet region never silences a
+mark. A marked lane's values are the routine's best guess, not necessarily
+the correctly rounded ones.
+
+**What a segment line means.** In version 2 a segment line is the
+DEFINITION's segment: what the source's reference interpreter computes.
+- Where no lane was marked, that is the machine's own run, and the line
+  means what it meant in version 1.
+- Where a lane was marked, the line is the corrected segment:
+  - each marked lane's end values are the definition's, from the lane's
+    certified start;
+  - each marked lane's byte is the definition's five flags in [4:0], the
+    raw [6:5], and [7] clear;
+  - the flag word is the OR of the corrected bytes' [4:0], and STATUS is
+    the raw STATUS with STATUS[6] cleared;
+  - the machine's raw result goes on a replay line, one for the segment
+    however many lanes it marked.
+- So the chain holds the definition's states throughout. Continuity keeps
+  version 1's rule, an accuracy entry reads correct states, and a lane
+  marked once runs on the fast image from the next segment.
+
+A version-2 segment line's STATUS never carries STATUS[6]: the reader
+refuses it, `marked`. A producer who cannot replay, because it has no
+source to name or no replay route, writes version 1.
+
+**The replay line.** `replay <k> marked <n> changed <c> raw-end <digest>
+raw-lanes <digest>`:
+- k is the segment, strictly increasing over the run's lines, below S;
+- `marked` is how many lanes the machine marked there, 1 to the run's
+  lanes;
+- `changed` is how many of those the replay changed, 0 to `marked`: a
+  marked lane whose end values (its slice of the end state) the definition
+  moves. It counts how often the routine's undecided guess was in fact
+  wrong, and it is for a person and for measuring routines;
+- `raw-end` is the hash of the segment's raw end state, before any replay,
+  under the state tag;
+- `raw-lanes` is the hash of the segment's raw block, under the block's
+  tag. The marked lanes are its bytes with [7] set.
+
+**The method,** in the header: `replay-methods <n>`, then one line for
+each run that has replay lines, `replay-method <r> golden` or
+`replay-method <r> image <digest>`. They are reported, and they sit in the
+header because two writers of one run make them differently.
+
+**Form rules,** which the reader checks with no inputs:
+- a segment line's STATUS carries no STATUS[6] (`marked`);
+- a run with replay lines says `lane-flags yes` (`replay-lane-flags`) and
+  names a source (`replay-source`), each refused at its `replays` line,
+  `replay-lane-flags` first, after the count has been held to its lines;
+- `changed` is at most `marked`, `marked` at least 1 and at most the run's
+  lanes, and a replay's segment below S (`malformed`);
+- the runs with replay lines are exactly the runs the header's
+  `replay-method` lines name (`replay-method`). A method line for a run
+  without replay lines, or for no run, is refused at that line; a run with
+  replay lines and no method line, at its `replays` line.
+
+**Where the replay is made.**
+- **The arbiter is the golden model.** A replay of lane i is
+  `lang.run` of the source's step graph at the run's format, with the run's
+  source params and h (h/2 for a half-step run), on lane i's certified
+  start values for the segment's `steps`. Lanes do not interact, so a lane
+  run alone is the lane as it is in the run. Each node is evaluated by its
+  golden function: a division and a root by softfloat's, and a
+  transcendental, when the language has one, by `transcend.py`'s.
+- **A slower image is a producer's shortcut.** An image of the same source
+  compiled with a more accurate routine, run over the marked lanes. A C
+  producer has no interpreter of the language, so it replays that way. Its
+  answer is accepted exactly when it is the definition's, lane by lane:
+  the audit always replays by the definition, whatever the producer used,
+  so a replay image is never handed to an auditor.
+- **The lane's layout.** A lane of the image's scratch block is the
+  graph's lane: its state, then each tangent vector's components, then its
+  lane params, which is cftc's layout and the interpreter's. A run whose
+  image's slots a lane are not that is refused `source-shape` by writer
+  and audit alike.
+
+**Beside the certificate.** For each segment with a replay line, a writer
+writes the raw end state and the raw block, as
+`run-<r>-segment-<k>-raw.bin` and `run-<r>-segment-<k>-raw.flags`, and it
+may copy the source as `run-<r>.cftl`. A re-run recomputes the raw values,
+so an audit needs none of them.
+
+**The binding.** A replay record carries no golden value. The source and
+its graph are named by digest, the definition by `profile` and `language`,
+and each marked lane is replayed from its certified start, which the
+segment's start hash binds. The values the definition computes are spliced
+into the re-run's raw end, and the result must hash to the segment's `end`;
+the corrected block must hash to its `lanes`. So a replayed lane's
+certified value is its slice of the end state, bound by the end hash, and
+the audit checks that it is exactly what the golden functions compute
+through the interpreter. Correct rounding makes a value unique only under
+one contract, which is why the definition is named ("The definition").
+
+### Sources
+
+**Two relations.** A run that names a source stands in one of two
+relations to it:
+- **compiled from** (`compiler <name> <n> <target>`): the image and bank
+  are what that compiler, at that output version, makes of the source for
+  that target, with the run's steps and source params. Compilation is byte
+  for byte deterministic, and one image serves every target that accepts
+  it, so the target decides only acceptance. This is checked by
+  recompiling;
+- **defined by** (`compiler none`): the run computes what the source's
+  reference interpreter computes. This is checked by running the
+  interpreter, the definition re-run, at the auditor's choice. It holds for
+  a hand-written image, if that image is right. Without the definition
+  re-run the audit checks the source itself (step 4a) and compares the
+  image with it only where a marked lane is replayed, so an image of
+  another map - a constant 3/5 where the source says 3/4 - passes there.
+  The verdict's source line says so: "no compiler named, so the image's
+  map is not re-derived from it - only a marked lane's replay and a
+  definition re-run compare the two" (verifier-VCV2B). The re-run costs
+  every lane the definition's interpreter, so the auditor spends it only
+  by choice, as version 1's audit spends a full re-run.
+
+**The format.** The source is taken at the run's `program-format`: a main
+run's format must be the source's own (`source-format`), and a
+wider-source run's is one rung up. The rung up is the format override: the
+source with its format statement's value replaced, which the language and
+cftc both take (`--format`).
+
+**Naming is optional.** A run may write `source none`, and gives up its
+replays and any wider-source run. A run with replays, and a wider-source
+run and its main run, name a source. The source's digest is unkeyed in
+both modes, as the program digests are, so a reader can confirm a guessed
+source: the keyed mode protects neither the program nor its source.
+
+**The source param's literal** is the language's canonical spelling of
+its exact value (LANGUAGE.md, "The intention-out"): a decimal within 24
+significant digits, a hexadecimal significand for a longer dyadic value,
+otherwise `p` or `p/q`. So `29` and `1/2` stand, and `29.0` and `0.50`
+are refused at the audit (`source-param`), whose reading of a literal is
+the language's.
+
+**`steps`** is checked where a compiler is named (it is the image's REPEAT
+count) or a definition re-run or replay is made (it is the definition's
+step count). It stays reported elsewhere, as in version 1.
+
+**What the audit checks** (step 4a), for each run that names a source the
+audit was handed, in this order:
+1. its SHA-256 is the run's `source` (`source-digest`);
+2. the language accepts it at the run's format (`source-refused`, the
+   language's own refusal named in the sentence);
+3. a main run's format is the source's own (`source-format`);
+4. its step graph's SHA-256 at the run's format is the run's `graph`
+   (`source-graph`);
+5. each source param names a param of the graph, its literal is the
+   canonical spelling of its value, and the language accepts the value for
+   that param at that format (`source-param`);
+6. the image's slots a lane are the graph's lane (`source-shape`);
+7. where a compiler is named, the auditor's compiler compiles the source
+   with the run's steps, source params, format and target. The image, and
+   but for a half-step run the bank, must be the run's. A half-step run's
+   bank is its relation's to check (step 8). Where they are not:
+   `source-image` when the auditor's compiler is the named name and output
+   version, since the claim is then false; `compiler-differs` otherwise,
+   the auditor's own limit. A target the auditor's compiler does not have,
+   and a source it refuses for that target, are judged the same way.
+
+A source handed for a run that names none, or in another shape than
+{run: bytes}, is `source-digest`. A source named and not handed is
+reported "named, not handed - stated, not checked", and a later step that
+needs it refuses `source-missing`: a replay, a wider-source relation, a
+definition re-run. The recompile costs the compiler's time, bounded by the
+source handed.
+
+### The wider-source run
+
+`run <i> wider-source` is the main run's source compiled at the next rung,
+with the same steps, source params and target, from exactly widened
+inputs. Its relation is checked at step 8, in this order:
+- `aux-format`: the next rung; at fp256, the top of the ladder, refused;
+- `aux-lanes`: the main run's lanes;
+- `aux-source`: both runs name the source and a compiler, and they are the
+  same source digest, source params, compiler name, output version and
+  target;
+- `aux-image`: the same steps a segment, then the recompile at the next
+  rung, which step 4a made (`source-missing` where the source was not
+  handed), then the main run's scratch depth;
+- `aux-segments`: the main run's segment count;
+- `aux-streams` and `aux-start`: the main run's streams and initial state
+  exactly widened, as for version 1's wider run.
+
+An entry `entry <j> wider-source`, of kind `estimate`, uses a wider-source
+run. Its value is version 1's wider function: the largest absolute
+difference over the slots between run 0's final state and the run's.
+
+**Why both kinds stay.** Version 1's wider run carries the main bank's
+constants exactly widened, so it estimates the rounding of the arithmetic
+on those constants. The wider-source run rounds h, h/2 and h/6 once at the
+wider format, so it estimates the rounding relative to the system as
+written, the constants' rounding included. On Lorenz-63 at fp64 the two
+differ by about 3.5e-15 at t = 3, the time shift of h's rounding. Neither
+is a bound. A program with a routine has only the wider-source run.
+
+**A routine image has no version-1 wider run.** A main image holding any
+QUIET, ENDQUIET or RAISE (a routine's flag control) is refused a `wider`
+run, `aux-image`, by every writer and every audit, of either version
+("Auxiliary runs"). A routine's words are format-specific, so its words
+one rung up can pass the wider relation and compute nothing the main run
+means.
+
+**The other relations' source lines** (`aux-source`, at the place it
+holds in each: after `aux-lanes`). A half-step run's source lines are the
+main run's, all of them, and a wider run names no source: its relation is
+to the main image. Where the main run was compiled from a source the audit
+was handed, a half-step run's h-slots must be exactly the slots the
+recompile names as carrying the step (`aux-h-slots`): the step halved, all
+of it and nothing else. That turns version 1's "not proved" into a check.
+
+### The definition
+
+A certificate names the definition its bits are claimed under, in two
+header lines:
+- **`profile`**: the conformance profile (CONFORMANCE.md, "Versioning").
+  Since 2026-10-02 it versions the program model too: any change to what
+  an accepted image computes, or to whether an image loads, steps it. The
+  golden model states it, and the tree is at profile 2;
+- **`language`**: the language's version (CONFORMANCE.md, "The
+  language's version"), kept in the golden model and stepped by the same
+  rule for sources: a major step whenever an accepted source is refused
+  or computes another thing, a minor step for an addition that changes
+  none. It starts at 1. A certificate whose runs name no source writes
+  `none`.
+
+**Coverage.** An auditor's definition covers a certificate's when, for
+each of the two, the majors are equal and the auditor's minor is at least
+the certificate's. The language is compared only where a run names a
+source: where none does, no check reads it, so it is covered whatever the
+certificate states (a writer writes `none` there, and `none` beside a
+named source is refused `malformed`). `unknown` is never covered.
+
+**Who is blamed when a re-derivation fails.** Where the auditor's
+definition covers the certificate's, a failure is the certificate's, under
+its own name. Where it does not, every re-derivation that fails is refused
+`definition-differs` (exit 78), naming both definitions and the failure it
+stands for: the auditor's own limit, not a verdict on the certificate.
+Hand the audit the named definition, a checkout of the golden model at a
+commit that implements it, and it decides. A false certificate is refused
+either way, so claiming an old definition gains a producer nothing. The
+re-derivations are:
+- step 4's loader checks: `program-image` for an image that does not load,
+  `program-format` and `program-shape`;
+- step 4a's language checks and recompile: `source-refused`,
+  `source-graph`, `source-param`, `source-shape`, `source-image` and
+  `compiler-differs` (where both the definition and the compiler differ,
+  `definition-differs` is named, since the compiler reads the language);
+- step 8's wider-source relation;
+- step 9's re-runs and replays, and step 9a.
+
+Where every check passes, the verdict accepts and names both definitions,
+saying where the auditor's does not cover the certificate's that every
+re-derivation passed under the auditor's.
+
+**An auditor that cannot evaluate the definition** refuses
+`definition-unavailable` (exit 78) where it first needs to: no mpmath for
+a node whose golden function is decided through mpmath's enclosures, or
+an enclosure that reached its precision cap (`transcend.py`'s
+`ZivEscalation`). No node of the language reaches `transcend.py` yet: the
+language refuses `exp` (`transcendental`), and its division and root are
+softfloat's. M1's routines will be the first. A writer that meets the same
+refuses `replay-undecided` (exit 78).
+
+### Provenance
+
+**Three kinds of field.** A field is CHECKED when an auditor can re-derive
+it from what it is handed (a re-run, a recompile, a regeneration, a
+signature), READ when the audit's arithmetic takes it as given so that a
+false value fails its own re-run, and REPORTED otherwise, stated and not
+checked. Every provenance line but four is REPORTED:
+- `issuer-key` is CHECKED by the signature, and `issuer` by a keyring;
+- `supersedes` is CHECKED where the superseded certificate is handed;
+- `initial` is CHECKED where the auditor knows the generator and chooses
+  to regenerate;
+- `profile` and `language` are REPORTED, and compared with the auditor's
+  own to name a failure's cause.
+
+**Identify the run, not the person** (Logan's decisions 9 and 10).
+- Written only on request: the issuer and the device's serial, whose
+  default is `withheld`; and `host-os`'s version.
+- Never carried: the host name, the user name, the CPU model, paths, a
+  licence, a contact, and free text, the params' meanings among it. Each
+  is personal data, a fingerprint, or the publication's, and none can
+  change the bits. The source carries the params' meanings, and the
+  certificate names the source by digest.
+- An issuer, where there is one, is a name, an ORCID for a person, or an
+  organisation's identifier, as the issuer chooses.
+- The keyed mode protects states only. The salt keys every state, stream,
+  block and raw hash, and no provenance line: each one is published or
+  withheld.
+
+**The environment.** The writer's list is every variable libcft and
+cft-segrun read: `CFT_DIVSQRT_FULL`, `CFT_DIVSQRT_SEQ`, `CFT_SEGRUN_PLANT`,
+`CFT_TIMEOUT_MS`, `CFT_TRANSCEND_MINPREC`, `CFT_XRT_BIND`, `CFT_XRT_CAPS`,
+`CFT_XRT_MASK_ADDR_OVERRIDE`, `CFT_XRT_PROGRAM_CUTS`, `CFT_XRT_REDUCE_BC`,
+`CFT_XRT_TILES`, `CFT_XRT_TILE_ORDER`, `CFT_XRT_TRACE`, `CFT_XRT_WITNESS`
+and `XCL_EMULATION_MODE`. A writer writes those that are set, by name, and
+none carries a path. The reader holds `env` to the list: a name off it
+is refused `malformed`, so a certificate carries no variable but those -
+not a home directory, a user name or a path - and a variable joins the
+list with the code that reads it. test_cert2.py holds the list to the
+code's `getenv` calls and libcft's instrument seeds, so a new variable
+cannot be missed.
+
+**The times.** Where they are known, `started` is no later than
+`finished`, and `finished` no later than `issued`, and so `started` no
+later than `issued`: each pair of known times, refused at the later line
+(`provenance-order`). The reader checks each time as it reads it, in the
+line order, so an order broken at `finished` is refused there, before
+`issued` is read (whose own form is checked only then). They are
+reported: no time is checked against a clock.
+
+**The device's extra lines** (`device-platform`, `device-xrt`,
+`device-clock`, `device-serial`) come from the library's image identity,
+which grows at ABI 0.18. Through a remote handle they are `unknown`, as
+version 1's xclbin digest is.
+
+**`certificate-id`** is the issuer's own name for the certificate, chosen
+before it is written. The body hash stays the certificate's intrinsic
+name, and the verdict prints it. A DOI belongs to a publication's record,
+minted after the bytes exist, never to the body.
+
+**The initial-state generators.** `initial generator <name> <args>` says
+run 0's initial state is what the named generator makes. The golden model
+defines one, `shake-box` (A1's rule for its reference lanes, without its
+special lanes): `shake-box <tag> <lo> <hi> ...`, a (lo, hi) pair for each
+slot of a lane, each bound a constant in the language's canonical
+spelling. Lane k's slot j is a value in [lo_j, hi_j] at twice the format's
+precision, drawn from SHAKE-256 of `<tag> lane <k> state <j>`, rounded
+once to nearest. Regenerating costs the certificate's lanes, so the
+auditor does it only by its own choice (`regenerate`), and then needs no
+initial state handed; the regenerated state must hash to run 0's boundary
+0 (`initial-state`, which also names arguments the generator cannot use).
+A generator the auditor does not know is reported. In a keyed
+certificate a generator publishes boundary 0, which the salt otherwise
+protects, and the verdict says so.
+
+### The detached signature
+
+Version 1 reserved it ("The detached signature", above). Version 2
+defines it, and it signs a certificate of either version.
+
+**The scheme** is Ed25519 (RFC 8032). It is deterministic: one key and one
+certificate give one signature, byte for byte, so a gate can hold a
+signature to committed bytes. Its keys are 32 bytes and its signatures 64.
+Verification is RFC 8032 section 5.1.7's: R and the key decode by 5.1.3
+(y below p, a square root that exists, no x of zero with its sign bit
+set), S is below L, and the cofactored equation [8][S]B = [8]R + [8][k]A
+holds. And one refusal the RFC leaves to its user (verifier-VCV2B, the
+lead's decision, 2026-10-02): **a key of small order** - [8]A the
+identity, one of the eight points of the curve's torsion - is refused.
+Under such a key [8][k]A vanishes, so any R = [S]B verifies for every
+message: a signature nobody made. It is refused by name, `signer`,
+wherever a key is read: the certificate's `issuer-key` (by the reader,
+and so by every writer, which reads its text back), a keyring's line, and
+a signature file's key; a key that encodes no point is `malformed` on the
+`issuer-key` line and `signer` in a keyring. A point R of small order is
+not refused, since the equation then needs the key's secret, and neither
+is a key with a small-order component beside a prime-order part, since
+signing under it needs that part's secret. An implementation in another
+language decides the cofactored equation, refuses the same eight keys,
+and is held to `python/tests/test_ed25519.py`'s vectors: the RFC's five,
+the eight keys of small order, and the decoding and S edges.
+
+**The message** is `cft-signature 1`, a NUL, then the 32 bytes of the body
+hash: a signature over a certificate is a signature over nothing else.
+
+**The file** is `<certificate>.sig`, by the certificate's byte rules, five
+lines:
+
+    cft-signature 1
+    scheme ed25519
+    key <64 hex>
+    certificate <64 hex>
+    signature <128 hex>
+
+**The key's identity** is the public key itself. A certificate names the
+key it is to be signed with by `issuer-key`, and which person holds a key
+is in no certificate. An auditor may be handed a keyring, lines `key <64
+hex> <text>`, each key once, and the verdict then names the key's holder.
+
+**The audit** (step 2a), when a signature file is handed:
+- the file follows its form (`signature-format`);
+- its key is not of small order (`signer`);
+- its `certificate` line is this certificate's body hash, and the
+  signature verifies (`signature`);
+- the key is the certificate's `issuer-key`, where it names one
+  (`signature-key`);
+- in a keyring handed, the key's holder is the certificate's `issuer`,
+  where the issuer is a text (`signer`). A keyring that breaks its form is
+  `signer` too, whether or not a signature is handed, and so is one whose
+  line names a key of small order or no point.
+
+Without a keyring the verdict says the key is one no keyring handed
+names. What a signature proves: whoever holds the secret of the key's
+prime-order part - the key's holder - vouched for these bytes, since a
+key of small order, under which nobody's signature is needed, is refused
+before the signature is read. Which person that is, a keyring handed
+says, as far as the auditor trusts it. Not when, and not that the bits
+are right: the audit proves the bits.
+
+**The key tool,** `python/cft_sign.py`: `keygen` draws a secret from the
+operating system's secure randomness into a new file and prints the public
+key; `public` prints a key file's public key; `sign` writes a
+certificate's `.sig`; `verify` checks one, and for version 2 its key and
+signer, with step 2a's names. It never overwrites a file and never prints
+a secret. `sign` signs only a certificate the strict reader reads, of
+either version, and refuses anything else by the reader's name, bytes
+with a good hash line that are no certificate among them. On a POSIX
+system it refuses a key file its group or others may read or write, as
+ssh does; on Windows, whose permissions are ACLs that a mode does not
+show, it does not check them.
+
+**The published test key** is the secret `20 21 22 ... 3f`, printed on
+this page as the example salt is, so it is a test key only and never an
+owner's.
+
+What a reviewer of the implementation should look at: it is not
+constant-time (Python's integers, and a double-and-add that branches on
+the scalar), so a secret signing on a machine an adversary can time leaks;
+nothing zeroes a secret in memory; and the key tool writes a key file
+owner-only and refuses a group- or world-accessible one on POSIX
+systems, and enforces neither on Windows.
+
+### Version 2's strict reader
+
+The reader chooses by the magic line. A body whose first line is exactly
+`cft-certificate 2` is version 2's; every other body goes to version 1's
+reader, which refuses a second token spelt as a decimal other than 1 or 2
+as `version`. So a version-1 body under `cft-certificate 2` reaches
+version 2's reader, which finds `runs` where `profile` belongs
+(`line-missing`), and a version-2 body under `cft-certificate 1` reaches
+version 1's, which refuses `profile`, its first line of no version-1 key
+(`unknown-line`).
+
+Version 2's reader decides in version 1's order ("The strict reader"): the
+hash line, the body's hash, the bytes, the magic line, every key a key of
+version 2 (`unknown-line`), the mode and its commitment, then the lines in
+version 2's order, with version 1's rules for counts, indices, a line not
+the one expected, and values. Version 2's groups follow those rules:
+`replay-methods`, `environment`, `source-params` and `replays` each count
+the lines that directly follow it. The keys strictly increase in
+`replay-method` lines by run, in `env` lines by name, in `source-param`
+lines by name in byte order, and in `replay` lines by segment: a repeat is
+`line-unexpected` and a smaller one `line-order`. Then the form rules
+above, in the line order: `marked` at its segment line,
+`replay-lane-flags` and `replay-source` at a `replays` line,
+`provenance-order` at the later time, and last, after every run is read,
+`replay-method`.
+
+### Version 2's audit
+
+**What an auditor is handed,** beyond version 1's:
+- `sources`: {run: the source's bytes};
+- `lane_flags`: {run: {segment: the block's bytes}};
+- `signature`: a `.sig` file's bytes, and `keyring`: a keyring's bytes;
+- `superseded`: the certificate this one names in `supersedes`;
+- its own choices: `define`, {run: `all` or a list of segments}, the
+  segments to run by the source's interpreter too; and `regenerate`, to
+  regenerate run 0's initial state by its named generator.
+
+**What an audit spends.** Version 1's rule holds: never by a number the
+certificate states. A recompile is bounded by the source handed; a replay
+is one marked lane of a re-run segment, by the interpreter; a definition
+re-run and a regeneration are the auditor's own choices, and each spends
+the stated lanes because the auditor chose it.
+
+**The order of the checks.** An auditor refuses at the first failure. The
+steps are version 1's, with these inserted or extended:
+1. **Integrity:** as in version 1.
+2. **Form:** version 2's strict reader. Then the auditor's own choices:
+   its segments (version 1's `choice`), the definition re-run's segments
+   (`choice`: distinct, existing, at least one, of a run that exists), and
+   `regenerate`, True or False (`choice`).
+- **2a. The signature,** when one is handed, or a keyring alone.
+3. **Salt:** as in version 1.
+- **3a. Supersedes,** when the superseded certificate is handed: it is
+  whole, and its body hash is the one named (`supersedes`); one handed
+  where the certificate names none is `supersedes` too.
+4. **Programs:** as in version 1, the loader's verdicts through the
+   definition.
+- **4a. Sources:** "Sources", above.
+5. **Streams** and 6. **Continuity:** as in version 1; continuity runs on
+   the certified, corrected chain. A run is bounded as in version 1, and
+   by the regenerated initial state where the auditor chose to regenerate.
+7. **States handed:** first the initial state regenerated, where the
+   auditor chose it and knows the generator (`initial-state`); then version
+   1's states handed; then the blocks handed (`lane-flags-shape`,
+   `lane-flags-hash`, `lane-flags-identity`).
+8. **Relations:** version 1's, with `aux-source` and the strengthened
+   `aux-h-slots`, and the wider-source relation; run by run, each in its
+   table's order.
+9. **Re-runs,** each chosen segment in ascending order, a block of lanes
+   at a time, in this order:
+   1. re-run the image from the segment's start: the raw end, flag word,
+      STATUS and block (`state-missing`, `program-image` as in version 1);
+   2. a segment whose raw block marks a lane has a replay line
+      (`replay-missing`), and one that marks none has none
+      (`replay-unmarked`). A run that says `lane-flags no` and whose re-run
+      marks a lane is `replay-missing`: the producer could not have found
+      the lane;
+   3. the line's `raw-end`, `raw-lanes` and `marked` are the re-run's
+      (`replay-raw`);
+   4. each marked lane replayed by the definition (`source-missing` where
+      the source was not handed, `definition-unavailable`), and `changed`
+      the number of marked lanes whose values the replay moved
+      (`replay-changed`);
+   5. the corrected end, block, flag word and STATUS are the segment
+      line's: `segment-end`, `segment-lane-flags` (where the run says
+      `yes`), `segment-flags` and `segment-status`, version 1's names, now
+      against the corrected values.
+   A segment with no replay line and no mark gets version 1's checks, and
+   its block.
+- **9a. The definition re-run,** the auditor's choice: each chosen
+  segment, from its start (handed or re-run into, `state-missing`), run by
+  the source's interpreter lane by lane (`source-missing`,
+  `definition-unavailable`), must end on the certified state
+  (`definition-end`) and raise the certified flag word and, where the run
+  says `yes`, the certified block, the definition's lane bytes carrying
+  [4:0] alone (`definition-flags`). This is the check for a hand-written
+  image that a source defines.
+10. **Accuracy:** as in version 1, with `wider-source` entries.
+
+A replay or a definition re-run the language refuses on its inputs (a
+half-step run whose source declares no h to halve) is `source-refused`.
+
+**The verdict** of an accepted audit says, in this order: ACCEPTED; the
+certificate's name, its body hash; the mode; the signature (none handed,
+or verified, by which key, and its holder where a keyring names it); the
+superseded certificate (none, checked, or named and not handed); the
+definition, the certificate's and the auditor's, and whether the
+auditor's covers it; for each run, version 1's line of what was re-run,
+then its source (none; checked by the language, and recompiled by which
+compiler; or named and not handed), its lane flags (how many blocks
+re-run, which handed), its replays (how many lanes in how many segments,
+each matched), and its definition re-run where one was chosen; each
+accuracy value, re-derived; the initial state (given, regenerated by
+which generator, or reported); what the audit was handed, at one of three
+levels after ACM's and NISO's vocabulary: **rebuilt** (every image and
+bank the auditor's own recompile, the initial state regenerated, no other
+state handed), **re-run from the start** (states at boundary 0 alone), or
+**re-run**; then version 1's identity lines, and each provenance line:
+stated and not checked, unknown, none or withheld. The golden model's
+`cert2.Verdict.lines()` is its byte-exact form, which a C auditor's gate
+will hold it to. The auditor's own identity, with its mpmath version, and
+the audit's time are a header above the verdict
+(`cert2.Verdict.header()`), which the comparison between auditors leaves
+out.
+
+### Version 2's refusals
+
+Version 1's names keep their meaning and their codes: `aux-format`,
+`aux-lanes`, `aux-image`, `aux-segments` and `aux-streams` and `aux-start`
+for the wider-source relation; `aux-h-slots`, strengthened;
+`segment-end`, `segment-flags` and `segment-status`, against the corrected
+values; `accuracy-run` for a wider-source entry on a run of another kind;
+`malformed`, `line-missing`, `line-order`, `line-unexpected` and `count`
+for the new lines. The new names:
+
+| name | exit | when |
+|---|---|---|
+| `marked` | 2 | a segment line's STATUS carries STATUS[6] |
+| `replay-lane-flags` | 2 | a run with replay lines says `lane-flags no`; a writer asked to certify a run that marks a lane without the block |
+| `replay-source` | 2 | a run with replay lines names no source; a writer asked to replay with no definition |
+| `replay-method` | 2 | a run with replay lines that no `replay-method` line names, or a `replay-method` line for a run with none, or for no run |
+| `provenance-order` | 2 | `started` after `finished`, `finished` after `issued`, or `started` after `issued`, where both are known |
+| `signature-format` | 4 | a signature file handed breaks its form |
+| `signature` | 4 | the signature names another certificate, or does not verify |
+| `signature-key` | 4 | the signing key is not the certificate's `issuer-key` |
+| `signer` | 4 | a keyring handed names the signing key under another holder than the `issuer`, or breaks its form; a key read anywhere - the certificate's `issuer-key`, a keyring's line, a signature file's key - is of small order ([8]A the identity) |
+| `supersedes` | 4 | the superseded certificate handed is not whole, or not the one named, or the certificate names none |
+| `source-digest` | 4 | a source handed is not the one its run names, is handed for a run that names none, or `sources` is not in its shape |
+| `source-refused` | 4 | the language refuses a source handed, at the run's format, or refuses to run it on a replay's or a definition re-run's inputs |
+| `source-format` | 4 | a main run's format is not its source's own |
+| `source-graph` | 4 | the source's step graph is not the one named |
+| `source-param` | 4 | a source param names no param, its literal is not the canonical spelling of a constant, or the language refuses the value for that param |
+| `source-shape` | 4 | the image's slots a lane are not the source's lane: its state, each tangent vector, its lane params |
+| `source-image` | 4 | the source, compiled by the named compiler and output version, is not the run's image or bank |
+| `source-missing` | 4 | a check needs a source that was not handed: a replay, a wider-source relation, a definition re-run |
+| `lane-flags-shape` | 4 | a block handed is not the run's lanes long, belongs to a segment or run that has none, or `lane_flags` is not in its shape |
+| `lane-flags-hash` | 4 | a block handed is not the certified one |
+| `initial-state` | 4 | the named generator, regenerating, does not make run 0's initial state, or cannot from its arguments |
+| `lane-flags-identity` | 5 | a block handed disagrees with its segment line's flag word or STATUS[5:4], or a byte carries [7] |
+| `aux-source` | 5 | an auxiliary run's source lines are not its relation's |
+| `segment-lane-flags` | 6 | a re-run segment's corrected block is not the certified one |
+| `replay-missing` | 6 | a re-run segment marked a lane, and no replay line names it |
+| `replay-unmarked` | 6 | a replay line names a segment whose re-run marked no lane |
+| `replay-raw` | 6 | a replay line's `raw-end`, `raw-lanes` or `marked` is not the re-run's |
+| `replay-changed` | 6 | `changed` is not the number of marked lanes the replay changed |
+| `definition-end` | 6 | (the auditor's choice) the definition's run of a segment does not end on its certified state |
+| `definition-flags` | 6 | (the auditor's choice) it does not raise the certified flags or block |
+| `definition-differs` | 78 | a re-derivation failed, and the auditor's definition does not cover the certificate's `profile` and `language` |
+| `definition-unavailable` | 78 | the auditor cannot evaluate the definition: no mpmath for a node that needs it, or an enclosure at its precision cap |
+| `compiler-differs` | 78 | a recompile differs, and the auditor's compiler is another name or output version, or failed |
+| `replay-undecided` | 78 | a writer cannot replay a marked lane: the definition cannot be evaluated there, or a replay image marks it too |
+
+The codes are version 1's families. 78 is the one version 1 gives a tool's
+own limits (cft-audit's `build-width` and `build-format`), and
+`definition-differs`, `definition-unavailable`, `compiler-differs` and
+`replay-undecided` join it: each is the auditor's or the writer's limit,
+not a verdict on the certificate.
+
+### Version 2's example and test vectors
+
+This certificate is what `python/cft_golden/cert2.py` writes for the
+golden corpus's replay case: `certificates/programs/markstep-fp64.cfta`,
+defined by `certificates/programs/markstep-fp64.cftl` (`next k = k + 1`,
+`next x = x * a + b`, a = 9/10 and b = 1/7 each rounded once), three lanes
+from (k, x) = (0, 0.3333), (100, 0.5) and (50, 0.2), three segments of four
+steps, open, with the counter's drift over the lanes. Every measured
+header line is `unknown`, as version 1's example's `build-id` is.
+`python/tests/test_cert2.py` regenerates it, holds this block to it byte
+for byte, and audits it.
+
+<!-- the version-2 example certificate -->
+```
+cft-certificate 2
+mode open
+build-id unknown
+backend software
+device-xclbin none
+device-version none
+device-caps none
+device-tiles 1
+profile 2
+language 1
+device-platform none
+device-xrt none
+device-clock none
+device-serial none
+writer golden unknown
+writer-runtime unknown
+compiler-build none
+replay-methods 1
+replay-method 0 golden
+certificate-id none
+issuer withheld
+issuer-key none
+host-os unknown
+host-arch unknown
+started unknown
+finished unknown
+issued unknown
+supersedes none
+environment 0
+initial given
+runs 1
+run 0 main
+program-format fp64
+program-image 86bfd74a3cb1435a384d4e703ca82ff50488e9b9fab3f37c0a991c90340b55bf
+program-digest 97088646bc0079578c2ed4bd3159d6c7307a94a373e5fb07b598f589aba14b78
+source 78607fe6de418566894321bf255f48d7cd2f6caed4af4d5623bb9a6252548de0
+source-name markstep-fp64.cftl
+graph 6dafed3fffaadbcd84a6833fad87155eb4cdf64a2930ee9cd4350a5f428a768d
+compiler none
+source-params 0
+lanes 3
+steps 4
+stream-a 24491f6a040123086eefac186e747eabad55bed41b9a74b2726990a1e8c6fe37
+stream-b f53ceee9b603ad198e8fcb872fa3f441062e7c1375d400d6dee175d571317631
+stream-c d3a329f70c79c48c2a594b4ff24b775c9b26aec851986f1f06f2c677a7d4668a
+parameters 0
+lane-flags yes
+segments 3
+segment 0 start 19592d8392f28690fa4526c23bb3389cb95e2c02ed9599e9bfdb758b0d56315b end 4cfcbbef215250707c8a80561463e75d424c5e2dd980ff724e8a6837133c4a20 flags 16 status 0 lanes cbf0bb15dddc2923be5b88871873a94d3673135fa2e5a0496ddee10825adaaaf
+segment 1 start 4cfcbbef215250707c8a80561463e75d424c5e2dd980ff724e8a6837133c4a20 end 2e01e5bfde9714b9166ff860633ad3122c1b3182a6972881b8c269727fdb7e0c flags 16 status 0 lanes cbf0bb15dddc2923be5b88871873a94d3673135fa2e5a0496ddee10825adaaaf
+segment 2 start 2e01e5bfde9714b9166ff860633ad3122c1b3182a6972881b8c269727fdb7e0c end 59e0ae73145a06c7f223ea7d64cf3042a96f9a562ace14968f50da7862aa57e2 flags 16 status 0 lanes cbf0bb15dddc2923be5b88871873a94d3673135fa2e5a0496ddee10825adaaaf
+replays 1
+replay 1 marked 2 changed 1 raw-end a4c7e417201e52528159f3f1ffdfe13c7cff12b47fc394dd2a57f92ec994a047 raw-lanes 0791994b8a4cb0817d19b23c4af478ee7060ca7da47e9eec92b465ec1e842669
+output 59e0ae73145a06c7f223ea7d64cf3042a96f9a562ace14968f50da7862aa57e2
+accuracy 1
+entry 0 drift
+kind measurement
+uses 0
+scope max-lanes
+quantity counter terms 1
+term 1/1 s0
+value exact c/1
+end
+hash 797c51ef95e1e10eade458cd0897ca786a7d70ceee46424f0492eb19c7b2fb34
+```
+
+Reading it: the image marks lanes 0 and 1 in segment 1, where k is 7 and
+106, and raises invalid with the mark there. Lane 0's last bit is wrong
+and lane 1's is right, so the replay changes one of the two marked lanes.
+Every certified segment raises inexact alone (flag word 16, every lane's
+byte 0x10) with STATUS 0: the definition's, where the machine's segment 1
+raised 17 and STATUS 64, which only the replay line's hashes now carry.
+The counter rose by 12 in every lane over the twelve steps, and the drift
+is exactly 12 (`c/1`).
+
+The test vectors, which test_cert2.py holds to the implementation:
+the example salt; a block of three lanes keyed and open; the published
+test key; and a signature by it over the body hash of `cft-certificate 2`
+and an LF alone:
+
+<!-- the version-2 test vectors -->
+```
+salt                 000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f
+lane-flags-bytes     109100
+lane-flags-hash      526bcd6e3d251c183731802a6782037506878d0b3adebfd1778634e5ca0a9dd6
+open-lane-flags-hash ff136cc613ce720e89697f7479216e686dda325059e01f24f075ce276f5d8ec6
+test-seed            202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f
+test-key             29acbae141bccaf0b22e1a94d34d0bc7361e526d0bfe12c89794bc9322966dd7
+body-hash            1890cecc078460af04b03a9fca373e4ad37426ada26439f7d87d1a3e8f09947c
+signed-message       6366742d7369676e61747572652031001890cecc078460af04b03a9fca373e4ad37426ada26439f7d87d1a3e8f09947c
+signature            fbde0e5f01480f39a4fee9b6f275cea4a2dbe3253bba89b57492635c871fdfef93b8e5b4ca14ba4c4a68612d7a9bfe74afe0fb4e7f91d3fdf4d23c02dcf06907
+text                 Logan W.
+text-token           Logan%20W.
+```
+
+### Version 2's controls
+
+The golden corpus commits thirty of them, one for each refusal a
+committed case can carry, which every auditor must give ("Golden
+certificates", version 2's cases).
+`python/tests/test_cert2.py` holds version 2's mechanisms to negative
+controls, each by the name of the check it exists for, every one but the
+byte flip over a valid hash line. Its fixtures are markstep (open and
+keyed); Lorenz-63 compiled from `programs/systems` by cftc with rho = 29,
+with a half-step run, a wider-source run and version 1's wider run, an
+estimate on each; flagstep with lane flags and a drift; a certificate with
+every header line spelled out, its initial state generated, signed under
+the test key and superseding flagstep's; and a Lorenz-63 run that an audit
+rebuilds from its source and its generator alone. The controls cover:
+- version 1's census on version 2's grammar: a byte flipped anywhere,
+  every line dropped and repeated, an unknown line at every position,
+  every adjacent pair exchanged (a drift's terms aside, whose order is the
+  producer's), every count one more and one less;
+- every encoding's other spellings: texts (a space unencoded, `%41`,
+  lowercase hex, 256 characters, a word as a text), times (month 13,
+  February 30, 24:00:00, a leap second, a lowercase z or t, an offset, no
+  seconds, a fraction, 2100-02-29), versions (`02`, `2.0`, `2.01`, `2.`,
+  `0`, 20 digits), keys, digests, builds, the clock, the writer, the
+  generator, every word on a line that does not take it, and the
+  environment's names, order and repeats;
+- every form rule by name, at its line: `marked`, `replay-lane-flags`,
+  `replay-source`, `replay-method` (three ways), `provenance-order`
+  (three pairs), a replay line's counts and order;
+- the versions of the format, both ways, and `cft-certificate 3`;
+- step 2a: the file's form eight ways, a flipped signature, another
+  certificate's, another key's, a keyring's other holder and its form,
+  and a version-1 certificate signed;
+- step 3a, step 4's loader under profile 1 (513 constants, loaded before
+  ee78152 and refused after) and profile 2, and every check of step 4a,
+  `compiler-differs` and an equal recompile under another output version;
+- `source-missing` at a replay, a wider-source relation and a definition
+  re-run;
+- the blocks handed (each shape, the hash, each of R23's identities), the
+  initial state regenerated (another tag, too few arguments, a bound not
+  in its canonical spelling, an unknown generator);
+- every wider-source relation (another source, another target, other
+  params, the same format, another segment count, streams and start not
+  widened, version 1's wider image as one), each auxiliary run's source
+  lines, and the h-slots held to the recompile's;
+- a version-1 and a version-2 wider run of a routine image, refused
+  `aux-image` by writer and audit;
+- every re-run check: the block, a replay due and undue (in a `no` run
+  too), each raw value, `changed` one more and one fewer, and the raw end,
+  block, flag word and another STATUS certified as the corrected segment;
+- the definition re-run (an image whose b is not the source's, and one
+  that raises invalid in every lane), its choices, and `definition-differs`
+  under six certificates' definitions, against `replay-changed` under the
+  auditor's own;
+- `definition-unavailable` and `replay-undecided`, with mpmath taken away
+  from a node planted as transcendental, and with an enclosure forced to
+  its cap: no node of the language reaches mpmath yet, so these plants
+  stand for M1's;
+- the golden writer's own refusals, and every field it cannot spell;
+- the key tool: a key made, never overwritten, signing and verifying both
+  ways, a bad key file, a key file others may read (POSIX's check, forced
+  on), and bytes that are no certificate refused by `sign`;
+- the dispatch, the keyed mode's reach, the verdict's three levels, the
+  writer's environment list against the code, and the published example
+  and test vectors;
+- from verifier-VCV2B's findings: the eight keys of small order refused
+  `signer` on the issuer-key line, in a keyring and as a signature
+  file's key (its forged signature among them), and by the key tool; a
+  key of no point; a generator named one of the words, by the reader and
+  the writer; the times' order checked in the line order, before a later
+  line's form; `language none` beside a source, and the language not
+  compared where no run names one; an `env` name off the writer's list;
+  the defined-by source's verdict line; and the routine rule's W1 and W2,
+  the golden writer testing the main image.
+
+`python/tests/test_ed25519.py` holds Ed25519 to RFC 8032 section 7.1's five
+vectors, every refusal of 5.1.3 and 5.1.7, and the cofactored equation, on
+a key with a small-order component where a cofactorless verifier parts
+from it. Beside them it holds vectors for another implementation to be
+held to: the eight keys of small order, each refused though verifier
+VCV2B's signature satisfies the equation under it; six encodings that
+decode to no point (y = p, y = p + 1, y = 2^255 - 1, a y with no square
+root, and x = 0 with its sign bit set at y = 1 and y = p - 1); and three
+signatures whose S is at or above L. The census by plants that version 1 had, each check disabled in a
+copy, has not been run on version 2: it is the verifier's.
+
+### What waits for the C half
+
+The next parcel builds version 2 in C, against this page:
+- **cft-segrun:** `--lane-flags`, asking for the block (ABI 0.17) and
+  writing `run-<r>-segment-<k>.flags`, and asking whenever the image
+  needs flag control; `--replay-image IMG`, an option of each run, writing
+  `replay-method <r> image <digest>`; refusing `replay-source` where a
+  run that marks a lane names no source (the golden writer's name for
+  it), `replay-missing` where it names one and was handed no replay
+  image, and `replay-undecided` where the replay image marks the lane
+  too; `--source SRC --manifest M`, the source lines from cftc's
+  manifest, held to the files it runs; `profile` from the library's own
+  constant; the header's statements as options (issuer, identifier,
+  issuer-key, initial, supersedes) with the privacy defaults; measuring
+  the times, the host's OS and architecture, and the environment list
+  itself; the device's extra lines through `cft_image_id` at ABI 0.18; and
+  `--format-version 1`, kept for the corpus and for runs that stay
+  version 1.
+- **cft-audit:** both readers, by the magic line; block files in
+  `--states DIR`; re-runs that ask for the block where a run says `yes`;
+  its library's profile and language version compared with the
+  certificate's (`definition-differs`); `--signature`, `--keyring` and
+  `--superseded`; Ed25519 in C, held to test_ed25519.py's vectors (the
+  RFC's five, the eight keys of small order refused, the decoding and S
+  edges) and the cofactored equation, and a key of small order refused
+  `signer` wherever a key is read. It
+  takes no source: a replay in a re-run segment, a wider-source relation
+  and a definition re-run refuse `source-missing` there exactly where the
+  golden auditor handed no source does, so the two keep one verdict.
+- **libcft:** `cft_image_id` grows by the platform's name, the XRT
+  version, the clock and the serial (ABI 0.18), and `cft.h` states the
+  profile it implements and the language version beside it, since
+  `definition-differs` compares both. cft-audit evaluates no language,
+  so its language version is the one its tree's golden model states
+  (`python/cft_golden/lang/version.py`).
+- **The gates:** audit_check.py hands cft-audit test_cert2.py's calls and
+  the corpus's version-2 cases, which it names today and does not hand;
+  corpus.py's check has cft-segrun remake each case the corpus marks
+  `writers both`, leaving out of both certificates `build-id`, `writer`,
+  `writer-runtime`, `compiler-build`, the `replay-method` lines, the
+  three times, `host-os`, `host-arch` and the environment (corpus.py's
+  `C_WRITER_MEASURED`), and the four device lines only where the case
+  carries a card's values (signed-fp64; `C_WRITER_DEVICE`), and holding
+  every other line byte for byte: a software run writes `none` on the
+  device lines, and six of the seven cases carry it. A replay certificate cft-segrun writes
+  (`replay-method 0 image`) is held to the golden writer's
+  (`replay-method 0 golden`) that way. The corpus check names those
+  seven cases today, in a NOTE.
+- **The WASM module** is rebuilt at ABI 0.18.
+
+### What version 2 does not do
+
+- **Sign a time,** or check one. An RFC 3161 token over the body hash
+  would bound `issued` from above; that is for a later version.
+- **Check a place, the issuer without a keyring, the environment's values
+  or the device's extra lines.** Each is reported; the environment's
+  names are held to the writer's list.
+- **Bind a key to a person,** distribute keys or revoke them. The keyring
+  is the auditor's input.
+- **Audit sources or replays in C.** cft-audit takes no source, since
+  there is no C compiler or interpreter of the language, so a certificate
+  with a replay in a re-run segment, or with a wider-source run, is the
+  golden auditor's. Where marks come by design (M2 past its range), that
+  can be every segment.
+- **Decide across definitions.** An auditor whose definition does not
+  cover a certificate's refuses `definition-differs` rather than decide.
+- **Prove a slower image right.** The audit checks the replayed values
+  against the definition instead.
+- **Carry a bound, or a value that is not an exact rational,** certify
+  deposits, lane masks, index tables, or streams that change between
+  segments, certify cft-orbits' exact route or give it a wider run, or
+  record a remote run's depth or device lines. As in version 1.
+- **Countersign** an auditor's verdict, **publish** (the gallery's
+  publication record carries the licence, the contact and a DOI), or
+  **interoperate** as PROV-O, SLSA or RO-Crate.
+- **Hide provenance with the salt.** A keyed certificate's provenance lines
+  are in the clear, or withheld.
+- **Make a version-1 certificate version 2.**

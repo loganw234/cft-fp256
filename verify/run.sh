@@ -1017,7 +1017,9 @@ stage seq "the sequencer: C vs model over fuzzed programs, plain and with indexe
 # bytes, and audited. segruntest holds the two writers to each other, so
 # a change that moves both at once passes it; this one does not. It
 # joined this stage beside segruntest by the lead's decision (2026-09-29),
-# about 25 s of it on the desktop.
+# about 25 s of it on the desktop. Since 2026-10-02 it holds certificate
+# format version 2's cases too, the golden writer's until version 2's C
+# half, and thirty controls each refused by its name.
 do_programs() {
   HOSTMAKE -k collatz asmtest segruntest corpustest PYTHON="$PYBIN"
 }

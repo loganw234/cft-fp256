@@ -3,11 +3,19 @@
 """cftc's command line.
 
     python -m cftc SOURCE.cftl --steps S [--target NAME] [--out DIR]
-                   [--stem NAME] [--param NAME=VALUE ...]
+                   [--stem NAME] [--param NAME=VALUE ...] [--format FMT]
     python -m cftc --targets
+    python -m cftc --compiler-id
 
 (run from python/, or with python/ on PYTHONPATH; `python python/cftc
 ...` works from the repository's root as well.)
+
+`--format FMT` compiles the source at FMT, one of fp32, fp64, fp128 and
+fp256, in place of the format its `format` statement declares (the
+package's docstring; a format that is none of the four is refused
+`unknown-format`). `--compiler-id` prints the build id of the
+repository cftc runs from, in libcft's grammar, or `unknown` with the
+reason on stderr, and exits 0 (cftc.compiler_id).
 
 Exit 0: every file written. A refusal prints
 `cftc: refused <name>: <source>[:<line>]: <sentence>` on stderr and exits
@@ -27,7 +35,7 @@ if __package__ in (None, ""):
     __package__ = "cftc"
     import cftc  # noqa: F401,E402
 
-from cftc import InternalError, compile_file, lang  # noqa: E402
+from cftc import InternalError, compile_file, compiler_id_detail, lang  # noqa: E402,E501
 from cftc import targets as T  # noqa: E402
 
 EXIT_REFUSED = 3
@@ -55,9 +63,21 @@ def main(argv=None):
     ap.add_argument("--param", action="append", default=[],
                     metavar="NAME=VALUE", help="a param's run value, read "
                     "exactly as the language reads a default")
+    ap.add_argument("--format", dest="fmt", metavar="FMT",
+                    help="compile at FMT (fp32, fp64, fp128 or fp256) in "
+                    "place of the format the source declares")
     ap.add_argument("--targets", action="store_true",
                     help="list the built-in targets and exit")
+    ap.add_argument("--compiler-id", action="store_true",
+                    help="print the build id of the repository cftc runs "
+                    "from, or unknown, and exit")
     a = ap.parse_args(argv)
+    if a.compiler_id:
+        ident, why = compiler_id_detail()
+        print(ident)
+        if why:
+            print(f"cftc: compiler id unknown: {why}", file=sys.stderr)
+        return 0
     if a.targets:
         for name, t in T.BUILTIN.items():
             print(f"{name:14s} {','.join(t.formats):23s} "
@@ -84,7 +104,7 @@ def main(argv=None):
         ap.error(f"{a.source} is not a file")
     try:
         c = compile_file(a.source, a.steps, a.target, stem=a.stem,
-                         params=params or None)
+                         params=params or None, fmt=a.fmt)
     except lang.Refusal as e:
         where = e.source or a.source
         if e.line is not None:

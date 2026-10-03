@@ -138,6 +138,26 @@ REFUSALS = {
     "accuracy-finite": 7, "accuracy-value": 7,
     # 64: the auditor was asked for something the certificate lacks
     "choice": 64,
+    # Version 2's own names (cert2.py; docs/CERTIFICATES.md, "Version 2"),
+    # in the same families. A version-1 certificate never meets one: the
+    # dispatching reader sends it to version 1's reader and audit, whose
+    # verdicts are unchanged.
+    "marked": 2, "replay-lane-flags": 2, "replay-source": 2,
+    "replay-method": 2, "provenance-order": 2,
+    "signature-format": 4, "signature": 4, "signature-key": 4,
+    "signer": 4, "supersedes": 4, "source-digest": 4, "source-refused": 4,
+    "source-format": 4, "source-graph": 4, "source-param": 4,
+    "source-shape": 4, "source-image": 4, "source-missing": 4,
+    "lane-flags-shape": 4, "lane-flags-hash": 4, "initial-state": 4,
+    "lane-flags-identity": 5, "aux-source": 5,
+    "segment-lane-flags": 6, "replay-missing": 6, "replay-unmarked": 6,
+    "replay-raw": 6, "replay-changed": 6, "definition-end": 6,
+    "definition-flags": 6,
+    # 78: the auditor's (or a writer's) own limit, not a verdict on the
+    # certificate - version 1's family for cft-audit's build-width and
+    # build-format, which are the tool's own names and not here
+    "definition-differs": 78, "definition-unavailable": 78,
+    "compiler-differs": 78, "replay-undecided": 78,
 }
 
 
@@ -888,8 +908,9 @@ class _Reader:
         if first != [MAGIC, "1"]:
             if len(first) == 2 and _DEC.fullmatch(first[1]):
                 raise Refusal("version", f"this is 'cft-certificate "
-                                         f"{first[1]}', and this reader "
-                                         f"speaks version 1 only", line=1)
+                                         f"{first[1][:40]}', and this "
+                                         f"reader speaks versions 1 and 2",
+                              line=1)
             raise Refusal("malformed", "line 1 must be exactly "
                                        "'cft-certificate 1'", line=1)
         # Every key is known before any structure is read, so that an
@@ -1217,13 +1238,24 @@ def parse(data, salt=None):
     The order is the specification's: the hash line, the body's hash,
     then the body line by line. With `salt`, the salt is checked too
     (after the body has been read): against the commitment of a keyed
-    certificate, and refused outright for an open one."""
+    certificate, and refused outright for an open one.
+
+    It reads both versions, choosing by the magic line (docs/
+    CERTIFICATES.md, "Version 2"): a body whose first line is exactly
+    `cft-certificate 2` is version 2's, read by cert2.py into a
+    cert2.Certificate; every other body goes to version 1's reader,
+    unchanged, which refuses any other version by `version`."""
     body, digest = _split_hash(data)
     if sha256(body) != digest:
         raise Refusal("body-hash",
                       "the hash line is not the SHA-256 of the body: the "
                       "bytes are not the ones it was written over")
-    cert = _Reader(_split_lines(body)).certificate()
+    lines = _split_lines(body)
+    if lines and lines[0] == [MAGIC, "2"]:
+        from . import cert2
+        cert = cert2.read_body(lines)
+    else:
+        cert = _Reader(lines).certificate()
     if salt is not None:
         check_salt(cert, salt)
     return cert
@@ -1366,12 +1398,16 @@ def _streams_or_zero(fmt, n, streams):
 
 def certify_run(kind, image, bank, salt, states, results, *, steps,
                 streams=None, parameters=(), h_slots=(),
-                scratch_depth=seq.SCRATCH_D):
+                scratch_depth=seq.SCRATCH_D, main_image=None):
     """A Run from a chain of boundary states and segment results (from
     run_chain, or a producer's own): the hashes of every boundary, the
     image and program digests, the streams' hashes - keyed under `salt`,
     or open when `salt` is None. The image is read as written for
-    `scratch_depth` slots, the depth its chain ran at."""
+    `scratch_depth` slots, the depth its chain ran at. A wider run is
+    certified beside its main run, whose image (`main_image`) version 1's
+    routine rule tests: a wider run of a main image that holds QUIET,
+    ENDQUIET or RAISE is refused `aux-image`, whatever the wider image
+    holds (CERTIFICATES.md, "Auxiliary runs")."""
     prog = seq.Program.from_bytes(bytes(image), scratch_depth=scratch_depth)
     why = _segment_shape(prog)
     if why:
@@ -1385,6 +1421,18 @@ def certify_run(kind, image, bank, salt, states, results, *, steps,
         raise Refusal("state-shape",
                       f"{len(results)} segments have {len(results) + 1} "
                       f"boundary states, and {len(states)} were given")
+    if kind == "wider":
+        # after the run's shape and states, and before its steps and
+        # parameters, which the golden writer reads at encode: the MAIN
+        # image is tested, as cft-segrun and every audit test it
+        if main_image is None:
+            raise TypeError("a wider run is certified beside its main run: "
+                            "hand certify_run the main image (main_image), "
+                            "which version 1's routine rule tests")
+        why = routine_words(seq.Program.from_bytes(
+            bytes(main_image), scratch_depth=scratch_depth))
+        if why:
+            raise Refusal("aux-image", f"the wider run: {why}")
     fmt = prog.fmt
     nslots = prog.n_scratch_in
     n = len(states[0]) // nslots
@@ -1403,20 +1451,23 @@ def certify_run(kind, image, bank, salt, states, results, *, steps,
 
 # ---- accuracy: each value as the stated function of certified runs ------
 
-def derive(entry, runs, shapes, states):
+def derive(entry, runs, shapes, states, method_run=None):
     """The exact value `entry` names, computed from certified states.
 
     `runs` are the certificate's runs; `shapes[r]` is (format, slots a
     lane) of run r's program; `states[(r, b)]` is run r's boundary-b
     state (boundary 0 the initial state, boundary S the output), each
     already held to its certified hash. The width rule applies to every
-    value computed, in the order the specification fixes."""
+    value computed, in the order the specification fixes. `method_run`
+    is the table of the run each estimate uses, METHOD_RUN by default;
+    version 2 (cert2.py) hands its own, with `wider-source`."""
     r = entry.uses
     if not 0 <= r < len(runs):
         raise Refusal("accuracy-run", f"entry uses run {r}, and the "
                                       f"certificate has {len(runs)}")
     if entry.method != "drift":
-        want = METHOD_RUN[entry.method]
+        want = (METHOD_RUN if method_run is None else
+                method_run)[entry.method]
         if r == 0 or runs[r].kind != want:
             raise Refusal("accuracy-run",
                           f"a {entry.method} estimate compares run 0 with a "
@@ -1693,9 +1744,28 @@ def _as_values(fmt, s, name, where, run=None, segment=None):
 
 
 def audit(data, salt, programs, states=None, streams=None, choose=None,
-          seed=None):
-    """Audit a certificate. Returns a Verdict, or raises the first
-    Refusal in the specification's order:
+          seed=None, **version_2):
+    """Audit a certificate of either version, choosing by its magic line:
+    a certificate whose first line is `cft-certificate 2` goes to
+    cert2.audit, which takes version 2's inputs as keywords (sources,
+    lane_flags, signature, keyring, superseded, define); every other one
+    to version 1's audit below, unchanged, which takes none of them."""
+    if isinstance(data, (bytes, bytearray)) and \
+            bytes(data[:18]) == b"cft-certificate 2\n":
+        from . import cert2
+        return cert2.audit(data, salt, programs, states, streams, choose,
+                           seed, **version_2)
+    if version_2:
+        raise TypeError(f"a version-1 audit takes no "
+                        f"{', '.join(sorted(version_2))}: those are version "
+                        f"2's inputs")
+    return audit_v1(data, salt, programs, states, streams, choose, seed)
+
+
+def audit_v1(data, salt, programs, states=None, streams=None, choose=None,
+             seed=None):
+    """Audit a version-1 certificate. Returns a Verdict, or raises the
+    first Refusal in the specification's order:
 
       1 integrity   the hash line, the body's hash
       2 form        the strict reader
@@ -2005,6 +2075,9 @@ def _check_relations(cert, salt, progs, strm, known):
                                            f"the main run's - a half-step run "
                                            f"is the same image", run=r)
         else:
+            why = routine_words(P0["prog"])
+            if why:
+                raise Refusal("aux-image", f"{where}: {why}", run=r)
             why = _wider_image(P0["prog"], PA["prog"])
             if why:
                 raise Refusal("aux-image", f"{where} is not the main image "
@@ -2109,6 +2182,27 @@ def _check_relations(cert, salt, progs, strm, known):
                 raise Refusal("aux-start",
                               f"{where} does not start on the main run's "
                               f"initial state exactly widened", run=r)
+
+
+def routine_words(prog):
+    """Why version 1 has no wider run of this image, or None: it holds
+    revision 8's flag control - a control word (bit 31) whose code is 12,
+    13 or 14, QUIET, ENDQUIET or RAISE (R24), among its instruction words,
+    which follow the header and any constants the image carries - which a
+    routine brings, and a routine's words and bank words are
+    format-specific (masks, biases, Newton passes). Its words re-encoded
+    one rung up can pass the wider relation and compute nothing the main
+    run means, so no writer makes such a run and every audit refuses it,
+    `aux-image` at the wider run (the lead's decision, 2026-10-02, with
+    parcel C4's design; the sentence is cft-segrun's and cft-audit's, C4's
+    C half). Certificate version 2's `wider-source` is the way such a
+    program gets a wider estimate."""
+    if seq.features_rev8(prog.insns) & seq.FEAT_FLAG_CONTROL:
+        return ("the main image holds a routine (QUIET, ENDQUIET or RAISE), "
+                "whose words are its format's, so no image is it one format "
+                "wider; certificate version 2's wider-source run compiles "
+                "its source one format up instead")
+    return None
 
 
 def _wider_image(p0, pa):
