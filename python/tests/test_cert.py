@@ -439,7 +439,15 @@ def test_a_count_changed(lor):
 
 def test_magic_and_version(lor):
     L = lines_of(lor.data)
-    refused("version", cert.parse, rebuilt(["cft-certificate 2"] + L[1:]))
+    # Since version 2 (docs/CERTIFICATES.md, "Version 2"), the reader
+    # dispatches on the magic line: a version-1 body under
+    # `cft-certificate 2` reaches version 2's reader, which finds `runs`
+    # where its first new line, `profile`, belongs - `line-missing`, where
+    # until then it was `version` (verifier-VCV2's two controls).
+    got = refused("line-missing", cert.parse,
+                  rebuilt(["cft-certificate 2"] + L[1:]))
+    assert got.line == find(L, "runs ") + 1 and "'profile'" in got.message
+    refused("version", cert.parse, rebuilt(["cft-certificate 3"] + L[1:]))
     refused("magic", cert.parse, rebuilt(["cft-certificat 1"] + L[1:]))
     refused("malformed", cert.parse, rebuilt(["cft-certificate 1 x"]
                                              + L[1:]))
@@ -2333,9 +2341,12 @@ def test_a_version_of_any_size_is_a_version(lor):
     size - past 2^63 - 1 too - names a version: `version`, not
     `malformed`."""
     L = lines_of(lor.data)
-    for v in ("2", "9223372036854775808", "9" * 5000):
+    for v in ("3", "9223372036854775808", "9" * 5000):
         refused("version", cert.parse, rebuilt([f"cft-certificate {v}"]
                                                + L[1:]))
+    # version 2 is read by version 2's reader (test_magic_and_version)
+    refused("line-missing", cert.parse, rebuilt(["cft-certificate 2"]
+                                                + L[1:]))
     for v in ("01", "-1", "1.0", "one"):
         refused("malformed", cert.parse, rebuilt([f"cft-certificate {v}"]
                                                  + L[1:]))

@@ -1,0 +1,62 @@
+; markstep-fp64 - certificate format version 2's replay case, the
+; golden corpus's own (certificates/MANIFEST; docs/CERTIFICATES.md,
+; "Golden certificates"). Not host/tests/segrun_check.py's MARKSTEP,
+; which is revision 8's leg for STATUS[6] in version 1.
+;
+; certificates/programs/markstep-fp64.cftl defines what it computes: a
+; counter k and a value x, each step k <- k + 1 and x <- x a + b, each
+; operation rounded once, as the language's interpreter rounds it. This
+; image computes the same, and beside it a routine's own test, run quiet
+; (R24): where a lane's k is 7 it writes x's last bit wrong and marks the
+; lane; where k is 106 it marks the lane and leaves x right. Then it
+; raises the mark (bit 7 of r9) with invalid (bit 0) - its guess at the
+; flags, which the replay corrects - and nothing else of its own test,
+; whose operations are scaffolding.
+;
+; From lanes k = 0, 100 and 50, four steps a segment, segment 1 marks
+; lanes 0 and 1 - lane 0 wrongly, lane 1 rightly - and no other segment
+; marks a lane. A version-2 certificate carries segment 1 replayed by the
+; definition (`replay 1 marked 2 changed 1`); a version-1 certificate of
+; the same run carries the machine's own values and STATUS[6].
+.format   fp64
+.deposits 0
+.bank     external
+.scratch  in 2
+.scratch  out 2
+
+.const    A        ; a, the source's param 9/10, rounded once
+.const    B        ; b, 1/7, rounded once
+.const    ONE      ; 1
+.const    K7       ; 7: where lane 0's guess is wrong
+.const    K106     ; 106: where lane 1's guess is right
+.const    IONE     ; the raw encoding 1: flips x's last bit
+.const    MARK     ; the raw encoding 0x81: a raise's mark, bit 7, and invalid
+.const    ZERO     ; the raw encoding 0: no mark
+
+.reg      k   = r3
+.reg      x   = r4
+.reg      ax  = r5
+.reg      at7 = r6
+.reg      at1 = r7
+.reg      bad = r8
+.reg      mk  = r9
+
+ldl    k, 0
+ldl    x, 1
+repeat 4
+  mul    ax, x, A
+  add    x, ax, B                ; x <- x a + b: the definition's two roundings
+  quiet
+    cmpeq  at7, k, K7
+    cmpeq  at1, k, K106
+    ixor   bad, x, IONE
+    select x, bad, x, at7        ; where k = 7, the wrong last bit
+    select mk, MARK, ZERO, at7
+    select mk, MARK, mk, at1     ; the mark where k = 7 or k = 106
+  endquiet
+  raise  mk
+  add    k, k, ONE               ; k <- k + 1
+endrep
+stl    k, 0
+stl    x, 1
+halt
