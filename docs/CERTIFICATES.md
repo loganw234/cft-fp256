@@ -652,9 +652,10 @@ certify a wider run of such an image, and every audit refuses one,
   parcel C4's C half, with version 2's wider relation the same.
   `CFT_SEGRUN_PLANT=wider-routine` makes cft-segrun write the certificate
   it refuses, so that an audit has one to refuse ("The segment runner").
-  The controls are test_cert2.py's on markstep and lang_check's leg E on
-  Kepler, each with the same construction on Lorenz-63, which has no
-  routine, written and accepted. The construction is the main image's
+  The controls are test_cert.py's and test_cert2.py's on markstep, the
+  first handed to cft-audit by the audit tool's gate, and lang_check's
+  leg E on Kepler, each with the same construction on Lorenz-63, which
+  has no routine, written and accepted. The construction is the main image's
   words with header bytes 20 to 23, the precision code, set to fp128's,
   and its bank and initial state widened exactly. test_cert2.py also
   holds verifier-VCV2B's W1, a routine main image beside a wider image
@@ -1258,10 +1259,10 @@ The controls cover:
   `profile` (verifier-VCV2 named the two controls that moved from
   `version`), and `cft-certificate 3` is `version`;
 - since 2026-10-02, a wider run of a routine image, refused `aux-image` at
-  the wider run by the golden writer and audit (its control is in
-  test_cert2.py, so that audit_check.py does not hand it to a cft-audit
-  that refuses it only from parcel C4's C half on; C4's control is
-  lang_check's leg E);
+  the wider run by the golden writer and audit, which audit_check.py hands
+  to cft-audit since parcel C4's C half (test_cert2.py holds its sentence,
+  its place and version 2's relation; C4's control is lang_check's leg
+  E);
 - the identity lines held to their spelling alone, `device-tiles`
   among them;
 - each kind that is not its method's;

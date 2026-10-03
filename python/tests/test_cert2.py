@@ -1365,11 +1365,10 @@ def test_version_1_has_no_wider_run_of_a_routine_image(mk, lz):
     (exit 5) at the wider run by the golden writer and the golden audit,
     version 1's and version 2's, after the format, the lanes and the steps
     and before the instruction words. Its C half, cft-segrun and cft-audit,
-    is parcel C4's, held by lang_check's leg E on Kepler; this control
-    sits here so that audit_check's shadow of test_cert.py does not hand
-    it to a cft-audit that refuses it only from then on. The same
-    construction on Lorenz-63, which has no routine, is written and
-    accepted."""
+    is parcel C4's, held by lang_check's leg E on Kepler, and
+    test_cert.py's version-1 case hands it to cft-audit through
+    audit_check's shadow. The same construction on Lorenz-63, which has
+    no routine, is written and accepted."""
     v1 = make_v1_markstep()
     src = MARK_ASM.read_text(encoding="utf-8")
     img_w = asm.assemble(src.replace(".format   fp64", ".format   fp128"),

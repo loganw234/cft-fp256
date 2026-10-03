@@ -1434,6 +1434,49 @@ def test_no_wider_run_above_fp256():
     assert "top of the ladder" in e.message
 
 
+def test_no_wider_run_of_a_routine_image():
+    """Version 1's rule since 2026-10-02 (the lead's decision, with parcel
+    C4's design): a main image holding QUIET, ENDQUIET or RAISE - a
+    routine's flag control - has no wider run, refused `aux-image` (exit
+    5) at the wider run by the golden writer and the golden audit. It
+    sits here once both auditors refuse it (C4's cft-audit), so that
+    audit_check.py's shadow hands it to cft-audit and audit_plants.py's
+    census sees that refusal reached; test_cert2.py holds its sentence,
+    its place in the order, version 2's relation and the contrast."""
+    src = (ROOT / "certificates" / "programs" /
+           "markstep-fp64.cfta").read_text(encoding="utf-8")
+    img = asm.assemble(src, "markstep-fp64")
+    wide = bytearray(img)
+    wide[20:24] = (2).to_bytes(4, "little")     # C4's construction: fp128
+    wide = bytes(wide)
+    vals = [cert.round_rational("fp64", Fraction(9, 10), "rne"),
+            cert.round_rational("fp64", Fraction(1, 7), "rne"),
+            dec64("1"), dec64("7"), dec64("106"), 1, 0x81, 0]
+    bank = cert.state_bytes("fp64", vals)
+    bank_w = cert.state_bytes("fp128", [cert.widen("fp64", v) for v in vals])
+    init = [dec64(t) for t in ("0", "0.3333", "100", "0.5", "50", "0.2")]
+    init_w = [cert.widen("fp64", v) for v in init]
+    st0, rs0 = cert.run_chain(img, bank, init, 3)
+    st1, rs1 = cert.run_chain(wide, bank_w, init_w, 3)
+    main = cert.certify_run("main", img, bank, None, st0, rs0, steps=4)
+    refused("aux-image", cert.certify_run, "wider", wide, bank_w, None, st1,
+            rs1, steps=4, main_image=img)
+    hs = [cert.state_hash(None, cert.state_bytes("fp128", s)) for s in st1]
+    wider = cert.Run("wider", "fp128", cert.sha256(wide),
+                     cert.sha256(wide + bank_w), main.lanes, 4,
+                     tuple(cert.stream_hash(None, n, bytes(16 * 3))
+                           for n in "abc"), (),
+                     tuple(cert.Segment(hs[k], hs[k + 1], f, st)
+                           for k, (f, st) in enumerate(rs1)), hs[-1])
+    data = cert.encode(cert.Certificate("open", None, IDENTITY,
+                                        (main, wider), ()))
+    got = refused("aux-image", cert.audit, data, None,
+                  {0: (img, bank), 1: (wide, bank_w)},
+                  states={0: {0: init}, 1: {0: init_w}})
+    assert (got.line, got.run, got.segment, got.entry) == (None, 1, None,
+                                                           None)
+
+
 # ---- accuracy ---------------------------------------------------------------
 
 def _with_entries(lor, entries):
