@@ -2379,7 +2379,169 @@ def hold_audits2(case, corpus, seed):
                        f"{e.message}")
 
 
-def hold_case2(case, corpus, images, seed, made):
+C_REMADE = []           # the writers-both cases cft-segrun remade, held
+
+
+def c_writer_args(case, data, out, sdir, work):
+    """cft-segrun's version-2 command line for a case marked `writers
+    both`: the manifest's inputs (each run's image, bank, initial state,
+    segments, steps and parameters), the committed certificate's header
+    statements in their own spelling (certificate-id, issuer, issuer-key,
+    supersedes, initial) and each run's lane-flags word, its accuracy
+    entries' definitions (never their values), and for each run that names
+    a source, cftc's compile of it made here at the run's format (the
+    format override one rung up for a wider-source run), steps, target and
+    source params: its manifest, from which the tool takes the run's source
+    lines and to whose files it holds the run, and, where the run replays a
+    marked lane, its image and bank as the replay image - this tool's route,
+    which its replay-method line names where the golden writer's says
+    golden."""
+    import cftc
+    c = cert.parse(data, salt=rp(case.salt[0]).read_bytes()
+                   if case.salt else None)
+    body = cert.body_of(data).decode("ascii").split("\n")[:-1]
+
+    def val(key):
+        return next(ln[len(key) + 1:] for ln in body
+                    if ln.split(" ")[0] == key)
+    a = ["--out", out, "--states", sdir]
+    a += ["--salt", rp(case.salt[0])] if case.mode == "keyed" else ["--open"]
+    depth = case.runs[0].depth_param()
+    if depth is not None:
+        a += ["--scratch-depth", str(depth)]
+    for key in ("certificate-id", "issuer", "issuer-key", "supersedes",
+                "initial"):
+        a += [f"--{key}", val(key)]
+    for r, cr in zip(case.runs, c.runs):
+        a += ["--run", r.kind]
+        if r.kind == "half-step":
+            a += ["--h-slots", ",".join(str(s) for s in r.h_slots)]
+        a += ["--image", rp(r.image)]
+        if r.bank:
+            a += ["--bank", rp(r.bank[0])]
+        a += ["--init", rp(r.state_path(case, 0)), "--segments",
+              str(r.segments), "--steps", str(r.steps)]
+        for n, v in r.parameters:
+            if n != DEPTH_PARAM:
+                a += ["--param", f"{n}={v}"]
+        if cr.lane_flags:
+            a += ["--lane-flags"]
+        if cr.source is None:
+            continue
+        if r.source is None:
+            raise ValueError(f"run {r.index} names a source the manifest "
+                             f"does not hand")
+        src = rp(r.source[0]).read_bytes()
+        own = cert2.own_format(src)
+        target = cr.source.compiler[2] if cr.source.compiler else "sw"
+        comp = cftc.compile_text(src, r.steps, target,
+                                 source=Path(r.source[0]).name,
+                                 fmt=None if cr.fmt == own else cr.fmt,
+                                 params=dict(cr.source.params) or None)
+        man = work / f"{case.name}-run-{r.index}.manifest.json"
+        man.write_bytes(comp.manifest_bytes)
+        a += ["--source", rp(r.source[0]), "--manifest", man]
+        if cr.source.compiler is None:
+            a += ["--compiler", "none"]
+        if cr.replays:
+            rimg = work / f"{case.name}-run-{r.index}.replay.cftp"
+            rbank = work / f"{case.name}-run-{r.index}.replay.bank"
+            rimg.write_bytes(comp.image)
+            rbank.write_bytes(comp.half_bank if r.kind == "half-step"
+                              else comp.bank)
+            a += ["--replay-image", rimg, "--replay-bank", rbank]
+    return a + entry_args(c.accuracy)
+
+
+def held_lines(data, device):
+    """A version-2 certificate's body lines a C writer is held to: every
+    line but its own measurements (C_WRITER_MEASURED), and the four device
+    lines too where the case carries a card's values (C_WRITER_DEVICE)."""
+    skip = set(C_WRITER_MEASURED) | (set(C_WRITER_DEVICE) if device
+                                     else set())
+    return [ln for ln in cert.body_of(data).decode("ascii").split("\n")[:-1]
+            if ln.split(" ")[0] not in skip]
+
+
+def hold_case2_tool(case, data, work):
+    """5. cft-segrun remakes a case marked `writers both` (version 2's C
+    half): every line but its own measurements byte for byte, and its
+    files - boundaries, blocks and raw files - the committed ones; a case
+    with a signature is signed by cft_sign.py with the published test key,
+    the tool writing its body, and verified with the committed keyring."""
+    out, sdir = work / f"{case.name}.c.cert", work / f"{case.name}.c.states"
+    t1 = time.perf_counter()
+    try:
+        args = c_writer_args(case, data, out, sdir, work)
+    except Exception as e:      # noqa: BLE001 - reported, not raised
+        bad(f"{case.name}: cft-segrun's command line could not be made: "
+            f"{type(e).__name__}: {e}")
+        return
+    e = dict(os.environ)
+    for n in cert2.ENVIRONMENT_NAMES:
+        e.pop(n, None)
+    try:
+        r = subprocess.run([str(TOOL)] + [str(x) for x in args],
+                           capture_output=True, text=True, env=e,
+                           timeout=TOOL_TIMEOUT)
+        rc, se = r.returncode, r.stderr
+    except subprocess.TimeoutExpired:
+        rc, se = -1, f"corpus: the tool ran past {TOOL_TIMEOUT} s"
+    if not check_that(rc == 0, f"{case.name}: cft-segrun writes it at version "
+                      f"2 on the software backend "
+                      f"({time.perf_counter() - t1:.1f} s)",
+                      f"rc {rc}: {se.strip()[-400:]}"):
+        return
+    mine = out.read_bytes()
+    try:
+        cert.parse(mine, salt=rp(case.salt[0]).read_bytes()
+                   if case.salt else None)
+    except cert.Refusal as x:
+        bad(f"{case.name}: the golden reader refuses cft-segrun's: {x}")
+        return
+    device = device_exempt(data)
+    want, got = held_lines(data, device), held_lines(mine, device)
+    same = want == got
+    check_that(same, f"{case.name}: cft-segrun writes every line but its own "
+               f"measurements byte for byte ({len(want)} lines; the device "
+               f"lines {'left out: a card' if device else 'held'}"
+               f"{'; its replay-method names its replay image' if any(ln.startswith('replay-method ') for ln in cert.body_of(mine).decode('ascii').split(chr(10))) else ''})",
+               first_difference("\n".join(want).encode("ascii"),
+                                "\n".join(got).encode("ascii")))
+    names = sorted(os.listdir(sdir)) if sdir.is_dir() else []
+    want_names = sorted(Path(p).name for p, _h in case.files()
+                        if p.startswith(case.states + "/"))
+    files_same = names == want_names and all(
+        (sdir / nm).read_bytes() == rp(f"{case.states}/{nm}").read_bytes()
+        for nm in names)
+    check_that(files_same, f"{case.name}: its {len(want_names)} boundary, "
+               f"block and raw files are the committed ones, byte for byte",
+               f"it wrote {names[:8]}")
+    if case.signature:
+        key = work / "test.key"
+        if not key.exists():
+            pub = cert2.ed25519.public_key(TEST_SEED).hex()
+            key.write_text(f"cft-signing-key 1\nscheme ed25519\nseed "
+                           f"{TEST_SEED.hex()}\nkey {pub}\n",
+                           encoding="ascii", newline="\n")
+        sign = ROOT / "python" / "cft_sign.py"
+        s = subprocess.run([sys.executable, str(sign), "sign", "--key",
+                            str(key), "--cert", str(out)],
+                           capture_output=True, text=True)
+        v = subprocess.run([sys.executable, str(sign), "verify", "--cert",
+                            str(out), "--keyring", str(rp(case.keyring[0]))],
+                           capture_output=True, text=True)
+        check_that(s.returncode == 0 and v.returncode == 0,
+                   f"{case.name}: cft_sign.py signs cft-segrun's certificate "
+                   f"with the published test key, and it verifies, the "
+                   f"keyring naming its issuer",
+                   f"sign rc {s.returncode}, verify rc {v.returncode}: "
+                   f"{(s.stderr + v.stderr).strip()[-300:]}")
+    if same and files_same:
+        C_REMADE.append(case.name)
+
+
+def hold_case2(case, corpus, images, seed, made, work=None):
     """A version-2 case a writer makes: steps 3, 4, 5 and 6."""
     print(f"== {case.name} (version 2, {case.mode}, {len(case.runs)} "
           f"run{'s' if len(case.runs) > 1 else ''}, writers {case.writers}, "
@@ -2420,6 +2582,12 @@ def hold_case2(case, corpus, images, seed, made):
                    f"made again byte for byte")
     if case.writers == "both":
         NOTES.append((case.name, device_exempt(data)))
+        if TOOL is None:
+            SKIPS.append(f"{case.name}: cft-segrun's version-2 remake")
+            print(f"SKIP  {case.name}: cft-segrun's version-2 remake: no "
+                  f"--tool given", flush=True)
+        else:
+            hold_case2_tool(case, data, work)
     hold_audits2(case, corpus, seed)
 
 
@@ -2490,7 +2658,7 @@ def check(seed, keep):
                 bad(f"{case.name}: a version-2 control this script has no "
                     f"recipe for")
             else:
-                hold_case2(case, corpus, images, seed, made)
+                hold_case2(case, corpus, images, seed, made, work)
     finally:
         if not keep:
             shutil.rmtree(work, ignore_errors=True)
@@ -2499,15 +2667,23 @@ def check(seed, keep):
     check_that(not missing, "the manifest holds every version-2 case and "
                "control this script's recipes make", f"missing {missing[:6]}")
     print("== 5b. the C writer's half of version 2", flush=True)
-    if NOTES:
-        card = [n for n, d in NOTES if d]
-        print(f"  NOTE  {len(NOTES)} version-2 cases a C writer must "
-              f"reproduce (writers both), every line but "
-              f"{', '.join(C_WRITER_MEASURED)} byte for byte, and the four "
-              f"device lines too where the case carries a card's values "
-              f"({', '.join(card) or 'none'}): cft-segrun writes version 1 "
-              f"only until version 2's C half, the next parcel's: "
-              f"{', '.join(n for n, _d in NOTES)}", flush=True)
+    # The NOTE that named the cases a C writer must reproduce, until
+    # version 2's C half, is a check since it: cft-segrun remade each case
+    # marked `writers both`, every line but its own measurements byte for
+    # byte (C_WRITER_MEASURED; the four device lines too where a case
+    # carries a card's values, C_WRITER_DEVICE), and its files the
+    # committed ones. Without --tool each remake is a SKIP above, by name.
+    both = [n for n, _d in NOTES]
+    card = [n for n, d in NOTES if d]
+    if TOOL is not None:
+        check_that(both and sorted(C_REMADE) == sorted(both),
+                   f"cft-segrun remade all {len(both)} version-2 cases marked "
+                   f"writers both, every line but "
+                   f"{', '.join(C_WRITER_MEASURED)} byte for byte, and the "
+                   f"four device lines too where the case carries a card's "
+                   f"values ({', '.join(card) or 'none'}), its files the "
+                   f"committed ones: {', '.join(both)}",
+                   f"remade {sorted(C_REMADE)} of {sorted(both)}")
     print("== 7. the page's example certificates", flush=True)
     ex = [c for c in corpus.cases if c.name == "example"]
     if check_that(len(ex) == 1, "the corpus has the case `example`"):
