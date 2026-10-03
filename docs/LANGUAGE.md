@@ -336,10 +336,15 @@ the language takes 754's clauses 4.1, 10 and 11 at their strictest:
   three, and how many more: `h - h at line 5 is 0`.
 
 The compiler (L2) may commute the operands of `+` and `*`, share
-identical subexpressions, schedule and allocate freely. None of these
-changes a value or the run's FLAGS: verifier-P1 measured the
-commutations bit for bit, NaN payloads included, and FLAGS is a sticky
-OR.
+identical subexpressions, schedule and allocate freely, and (parcel C4)
+carry a division or a square root as a routine inlined where its node
+stands - or, in a step that would otherwise pass 32,768 instructions,
+called in a loop. None of these changes a value or the run's FLAGS:
+verifier-P1 measured the commutations bit for bit, NaN payloads
+included; FLAGS is a sticky OR; and a routine, inlined or called, runs
+quiet and raises exactly its operation's flags, held bit for bit, and
+flag for flag a lane at a time, to the golden function at every format
+and attribute ("The operations").
 
 ### The operations
 
@@ -379,9 +384,70 @@ their operands in those functions' order.
   arithmetic node does; `sqrt(-0)` is -0 and the root of +infinity is
   +infinity, neither raising anything; underflow is detected after
   rounding, as everywhere here. A tile has no divide or square-root
-  instruction: the compiler carries them only from parcel C4, and
-  refuses them by name until then (`runtime-routine`, "Every refusal, by
-  name"). The interpreter runs them now.
+  instruction, so the compiler (parcel C4) carries each as a routine
+  inlined where its node stands: divfull's or sqrtfull's own
+  instructions, relocated and specialised at the program's attribute
+  (python/cft_golden/routines.py) - 177 to 191 for a division and 155
+  to 171 for a root, by format and attribute - run in a quiet region,
+  then a raise of a word holding exactly the operation's flags (revision
+  8's flag control, docs/SEQUENCER.md, R24). The routine's internal
+  attributes, such as the division's one truncating fma, are its own,
+  and the source never sees them. An image holding one needs that
+  feature, so revision 7's targets refuse it, `target-feature`, and the
+  software targets compile and run it.
+- **A call loop.** A step whose routines, inlined, would pass 32,768
+  instructions - the largest instruction memory a tile has - runs
+  batches of them in loops instead: one copy of the routine in a
+  `repeat`, called once a record in the scratch, the record's operands
+  stored before the loop and its result read back after
+  (python/cftc/callloop.py). A batch is the calls of one operation at
+  one routine depth, so none reads another's result; the largest is
+  looped first, then the next, until the step fits or none is left. A
+  batch of one call is never looped - its loop would only add the
+  loop's instructions to its one copy - so a step whose routines sit one
+  to a batch, a chain of divisions each reading the last, is compiled
+  inlined past the constant: the software targets, whose instruction
+  memory is unbounded, take it. Revision 7's targets refuse it
+  `target-feature` first, as they refuse every image with a routine;
+  a target that published flag control and held fewer instructions
+  than the image would refuse it `program-capacity`, by name, and no
+  built-in target is that yet (verifier-VC4's 180 chained divisions:
+  34,201 instructions a step, inlined). An operand every call takes from one bank slot - the 1 of a
+  reciprocal, the constant of `x / 3` - is read from the bank and kept
+  out of the records. The constant is the compiler's own and no
+  target's number, so one image still serves every target that takes
+  it. That is
+  Logan's rule (2026-10-02): asked whether to build the loop with the
+  routines or when a program first needs it, he chose "Build it now,
+  last in C4 (Recommended)", inline unless the step would pass 32,768.
+  Planar N bodies under rk4 at fp64 need it from N = 8: the step is
+  40,477 instructions inlined and 31,342 with the first two stages' 56
+  divisions looped, 41,957 run, 3.5% more of the cost model's cycles a
+  step, in 243 scratch slots for 220. Where inlining fits too (N = 6 and
+  7, the loop forced), one loop adds 3.5% to the cycles, two 6.4% to
+  6.6% and all four 7.8% to 8.2%, and the image shrinks by 22%, 45% and
+  89% to 90% (measured, C4). A looped batch keeps every call's operands
+  in its records, and its results until they are read, where inlining
+  consumes each as it goes - so a loop can need far more scratch than
+  the inlined step it replaces, and the step that first passes the
+  constant can be the one that no longer fits: verifier-VC4's source of
+  32,769 instructions loops one batch of 170 calls into 653 slots,
+  refused `scratch-capacity` on the software backend's default 256,
+  where one instruction shorter it compiles inlined in 171 (and N = 8
+  bodies with two loops would take 272). The constant is Logan's rule,
+  so that is its consequence, and a writer has two ways through: compile
+  for a deeper scratch - `--target sw:1024`, or any deeper `sw:N` up
+  to 32,768 slots, the image the same bytes - or write a step that
+  stays under 32,768 instructions, with fewer routine calls a step.
+  The loop's design departs from the step-6 plan's in four ways, each
+  recorded in parcel C4's ledger and stated here or in
+  `python/cftc/callloop.py`:
+  the records are placed where the loop stands, in the lowest slots free
+  there, rather than in a region fixed before allocation, so their first
+  slot is a bank word written once the allocation is chosen; an operand
+  every call takes from one bank slot is kept out of the records; a
+  batch of one call is never looped; and cftc's output version went to
+  4 for the loop (python/cftc's docstring).
 - **A division by a constant** divides by the constant rounded once:
   `x / 3` is RN(x / RN(3)), the correctly rounded x/3 wherever the
   constant is exact in the format, and never a product by a rounded
@@ -412,8 +478,9 @@ Until 2026-10-02 a division with an operand that is not a constant was
 refused here, `runtime-division`, and a square root, `runtime-sqrt` at
 run time and `irrational-constant` of any constant, `sqrt(4)` included.
 Both are operations now ("The operations"; parcel L4), and both names
-are gone: the compiler refuses the operations by a name of its own,
-`runtime-routine`, until parcel C4 carries them.
+are gone. The compiler refused them by a name of its own,
+`runtime-routine`, until parcel C4 carried them as inlined routines;
+that name went with it.
 
 ## Constants
 
@@ -859,11 +926,12 @@ step rk4, h = 1/100
   (parcel L4), the language writes it as one division, `let t = k / 100`,
   which is the attribute's rounding of n/100 at every count (measured to
   10^4 by verifier-VI2: rne and rup at all four formats, and all five
-  attributes at fp64). The compiler refuses that division as
-  `runtime-routine` until parcel C4, so a compiled program takes four
-  operations instead: the exact residual and the one correction that
-  the golden model's divide ends with (`python/cft_golden/sequences.py`),
-  q = fma(r, y, q0):
+  attributes at fp64). The compiler refused that division as
+  `runtime-routine` until parcel C4, which carries it as a routine of
+  177 to 191 instructions (186 at fp64 under rne); four operations are
+  still the cheaper route to the same time: the exact residual and the
+  one correction that the golden model's divide ends with
+  (`python/cft_golden/sequences.py`), q = fma(r, y, q0):
   ```
   let q = k * dt
   let r = fma(-q, 100, k)   ; k - 100 q, exactly
@@ -1573,11 +1641,12 @@ has one, written again where it has none.
   divisions and roots a step, and each vector adds one, `y / p`'s. So T
   vectors add T divisions for every division or root of the step whose
   tangent the step's tangent reads - rk4 with one such division in its
-  right-hand side performs four a step, and each vector adds four. Once
-  the compiler carries a division (parcel C4), as an inlined routine of
-  about 209 ALU instructions at fp64 and 213 at fp256 (divfull, measured
-  by the step-6 survey), that is about 840 instructions a vector a step
-  there.
+  right-hand side performs four a step, and each vector adds four. The
+  compiler carries a division as an inlined routine (parcel C4) of 177
+  to 191 instructions by format and attribute, 186 at fp64 under rne, so
+  there each vector adds about 720 instructions a step: rk4 with
+  `x / fma(x, x, 1)` takes 768 instructions a step, and 1,489 with one
+  vector (measured, C4).
 
 **Reading a primal value.** A rule reads a primal value by name where it
 has one - a state component, a param, a lane param, a constant, a let, a
@@ -1907,9 +1976,10 @@ One exception, `lang.Refusal`, carries:
 Nothing else escapes the parser or the checker, and the gate fuzzes the
 references to hold that. `python/cft_golden/lang/refusals.py` is the one
 list: the checker's and the interpreter's names, each made by a test in
-this definition's gate, and the compiler's eight at the end, reserved
+this definition's gate, and the compiler's seven at the end, reserved
 for it. The compiler raises them through the same class, and its own
-gate makes each one.
+gate makes each one; it raises one of the checker's besides,
+`bank-capacity`, for the cause the checker cannot see (below).
 
 The text and its declarations:
 
@@ -1935,7 +2005,7 @@ The text and its declarations:
 | `unused` | a const, param, lane param, let or h that nothing uses; h is used only where a constant of the step scales with it, so a map whose every use of h folds away is `unused` |
 | `cycle` | a definition that depends on itself |
 | `not-constant` | a value needed when the program is compiled that reads the state, a param, a lane param or a let |
-| `bank-capacity` | more than 512 params and constants: the bank holds 512 on every device |
+| `bank-capacity` | more than 512 params and constants: the bank holds 512 on every device. The compiler raises it too where the words of the routines it inlines for a division or a root take the bank past 512 (C4) |
 
 Equations, indices and the step:
 
@@ -2006,33 +2076,25 @@ The compiler's, reserved for it (L2).
 - The first five are a target's stated capacities (the plan's item 10).
   They depend on the lowering and on the device, so the compiler raises
   them. The bank's 512 is the same on every device, and the checker
-  raises that one itself as `bank-capacity`.
-- The next two are the compiled image's own.
-- The eighth, `runtime-routine`, is the compiler's own until parcel C4
-  (L4, 2026-10-02). A run-time division or square root is an operation
-  of the language, which the interpreter runs; a tile has no instruction
-  for either, and the compiler carries one only as an inlined routine
-  (divfull, sqrtfull), from C4, after revision 8's flag control lets a
-  routine raise exactly the flags of the operation it implements. Until
-  then the compiler refuses such a graph by this name, on every target,
-  first - before any other of its checks, and before its own reading of
-  the graph, whose operation table would stop at `div` with an internal
-  error - at the first source line holding one, in the order the source
-  writes its statements and whatever the statement: an equation, a let,
-  a written tangent equation or tangent let, a line of an expansion
-  block. The checker meets each run-time division and root at its line,
-  since it evaluates every statement a source writes, and hands the
-  lines to the compiler with the graph (never in its bytes: a graph read
-  from bytes carries none, and the refusal names no line). Until
-  2026-10-02's send-back (verifier-VL4's (b)1) the compiler named the
-  graph's nodes' lines, the primal's, so a source that wrote its tangent
-  or its expansion block above its equations was refused at an
-  equation's line. So every source the language accepts compiles or is
-  refused by name, and exit 70 stays a defect in the compiler (D2's
-  rule). With C4 the name goes: revision 7's targets refuse such an
-  image `target-feature`, and the software targets run it.
+  raises that one itself as `bank-capacity` - for params and constants.
+  The words of the routines the compiler inlines for a division or a
+  root (C4) live in the bank too, which the checker cannot see, so the
+  compiler raises the same name where they take the bank past 512, its
+  sentence counting the params, the constants and the words: one limit,
+  one name.
+- The other two are the compiled image's own.
+- Until parcel C4 an eighth, `runtime-routine` (L4, 2026-10-02), refused
+  a run-time division or square root on every target, first, at the
+  first source line holding one, whatever the statement, so that no
+  source the language accepted reached an internal error before the
+  compiler carried them (D2's rule). C4 carries them as inlined routines
+  ("The operations"), and the name went with it: an image holding a
+  routine needs revision 8's flag control, so revision 7's targets
+  refuse it `target-feature`, by name, and the software targets compile
+  and run it. Every source the language accepts compiles or is refused
+  by name, and exit 70 stays a defect in the compiler.
 
-The checker never raises any of the eight. The sentences below are their
+The checker never raises any of the seven. The sentences below are their
 form; the compiler words each one for the case at hand.
 
 | name | what it refuses | its sentence |
@@ -2044,7 +2106,6 @@ form; the compiler words each one for the case at hand.
 | `target-feature` | a feature whose CAPS bit the target does not publish | "this image needs a feature the target's CAPS bits do not publish" |
 | `segment-steps` | a step count outside 1 to 2^32-1, the range of the REPEAT immediate a segment's steps are | "a segment is one REPEAT of 1 to 4,294,967,295 steps; this count is not one" |
 | `halving-underflow` | an h-scaled constant whose exact halving underflows, so the step-halving bank cannot hold it exactly | "this h-scaled constant underflows when halved, so the step-halving bank would not be this bank halved exactly" |
-| `runtime-routine` | a division or square root at run time, until parcel C4 | "this step divides or takes a square root at run time, which the compiler carries only as an inlined routine, from parcel C4" |
 
 ## The gate
 
@@ -2210,15 +2271,25 @@ that the section and the measurement cannot part:
 It takes about 50 s on one core of the desktop, nearly all of it the
 interpreter's own arithmetic.
 
-The compiled images are held to the interpreter by the `tangent` stage
-(`programs/tangent_check.py`; docs/VERIFICATION.md). The compiler's
-interim refusal is held by `python/tests/test_cftc.py` - on every target,
-through each entry point and the command line (exit 3, never 70), and at
-its line where a written tangent, a tangent let or an expansion block
-comes first - and by the `lang` stage's leg K, on generated sources that
-divide or take a root and on their canonical forms with the written-out
-step and the tangent moved above the equations; the rules by the
-`tangent` stage's leg L.
+The compiled images are held to the interpreter by the `lang`,
+`lang-routines` and `tangent` stages (`programs/lang_check.py`, whose
+two groups of legs are the first two, and `programs/tangent_check.py`;
+docs/VERIFICATION.md). Images with routines (parcel C4) are held there
+as any image is: the `lang-routines` stage's leg K compiles generated
+sources that divide or take a root - in equations and lets, with and
+without tangent vectors, under every integrator, format and attribute -
+for the software backend, runs each on seq.py against `lang.run`, bit
+for bit with FLAGS and tangents at several step counts, and holds each
+refused `target-feature` on revision 7's targets and through the
+command line (exit 3, never 70); its leg L holds the call loop - eight
+bodies under rk4, which the constant itself loops, and Kepler under rk4
+with the constant lowered; the `tangent` stage's leg L compiles the
+quotient's and the root's rules the same way; and the `lang` stage
+certifies Kepler's routine images and holds the routines' four plants
+and the loop's three in its leg H. The routines themselves are held to
+softfloat by python/tests/test_routines.py and the `lang-routines`
+stage's leg K2, and their inlining and their loops by
+`python/tests/test_cftc.py`.
 
 ## What v1 does not do
 
@@ -2232,25 +2303,34 @@ step and the tangent moved above the equations; the rules by the
   on the tile or the host; certified renormalisation; tangents with
   respect to params or lane params; reverse mode, second derivatives;
   a tangent the state reads.
-- **Run-time division and square root in a compiled program.** The
-  language and its interpreter have them (L4, 2026-10-02); the compiler
-  refuses them by name, `runtime-routine`, until parcel C4 inlines the
-  routines that compute them, divfull and sqrtfull. Spilling the
-  registers around a routine is the least of that - at most 15 of its
-  values are live at once (the step-6 survey, measured). The rest:
+- **Run-time division and square root on revision 7's tiles.** The
+  compiler carries both from parcel C4, as routines inlined from divfull
+  and sqrtfull ("The operations"). Spilling the registers around one was
+  the least of it - at most 16 of a specialised routine's values are
+  live at once, and the allocator spills around it as around any value
+  (measured, C4). The rest, and where each stands:
   - **flags**: a routine's own FLAGS are its scaffolding (6/3 raises
-    inexact), and no instruction raises divideByZero, so a routine needs
-    revision 8's flag control (R8F) to raise exactly the flags of the
-    operation it implements, as the language defines them;
-  - **the compiler's one instruction a node**, in the program's one
-    attribute, with a bank of constants, their sign-flips and params: a
-    routine needs raw words (an infinity, NaNs, -0), its own internal
-    attributes and real bitwise ORs, which the compiler's internal check
-    refuses today;
+    inexact), and no instruction raises divideByZero. Revision 8's flag
+    control (R24) runs a routine quiet and raises exactly its
+    operation's flags; no tile has it before revision 8's RTL, so
+    revision 7's targets refuse such an image, `target-feature`;
+  - **the compiler's one instruction a node**: a routine's raw words (an
+    infinity, NaNs, -0, integers) are a bank slot kind of their own, its
+    internal attributes ride in its instructions, and the compiler's
+    internal check holds each routine to its fragment, instruction for
+    instruction, with its quiet region and its raise;
   - **format**: a routine's words differ by format, which ends the
     compiler's rule that a system's instruction words are the same at
-    every format, and with it the certificate's wider run, unless
-    certificate version 2 defines one.
+    every format, and with it certificate version 1's wider run, which
+    is refused by name for an image holding a routine; certificate
+    version 2's wider-source run compiles the source one format up
+    instead;
+  - **size**: a routine is 155 to 191 instructions, so a step with many
+    is long; past 32,768 instructions a step runs batches of them in
+    call loops, Logan's rule ("The operations"), at a few percent of
+    its cycles - and a wide batch, looped, can need more scratch than
+    the inlined step did; a step whose routines sit one to a batch
+    stays inlined past the constant.
 - **Run-time transcendentals.** The correctly rounded math library is a
   later step.
 - **A built-in time, adaptive steps and events.** There is no reserved

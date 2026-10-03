@@ -16,7 +16,13 @@ slower than it (docs/VALIDATION.md, 2026-10-02):
   value lands 17 cycles on; otherwise it is fast, a few cycles;
 * an LDL straight after an STL waits two cycles (R18);
 * REPEAT and ENDREP wait for nothing; a register written after it was
-  read, or written twice, costs nothing (R12's in-order retire).
+  read, or written twice, costs nothing (R12's in-order retire);
+* a routine's instructions (C4) are ALU instructions and cost what they
+  do; its QUIET and ENDQUIET cost a cycle each and wait for nothing, and
+  its RAISE waits for its register to have LANDED - R18's rule for
+  SETACT, three cycles past a forwarded link - then walks the beats one
+  a cycle. Those three are revision 8's R24, which no tile has, so their
+  prices are believed, from R18's for the control codes it built.
 
 So at a full block (sixteen beats) every order costs the same, to within
 a cycle a dependent pair, and only below one block does the order
@@ -55,6 +61,7 @@ The candidate orders:
 
 LAT = 17            # LATENCY 16 + 1: a dependent link, issue to issue
 FAST_LOAD = 3       # a fast LDL's value, issue to readable (R18), believed
+LANDED = 3          # a landed read's cycles past a forwarded one (R18)
 
 CANDIDATES = (("graph", 0), ("pressure", 0), ("latency", 0),
               ("integrated", 2), ("integrated", 4), ("integrated", 8))
@@ -203,28 +210,69 @@ def order(low, name, margin=0, pinned=(), budget=29):
     return out
 
 
+def unrolled(body):
+    """A step body as it executes: a call loop's body once a call, its
+    ENDREP each time, its REPEAT once (callloop.py)."""
+    out, k = [], 0
+    while k < len(body):
+        ins = body[k]
+        if ins.kind != "repeat":
+            out.append(ins)
+            k += 1
+            continue
+        e = k + 1
+        while body[e].kind != "endrep":
+            e += 1
+        out.append(ins)
+        for _ in range(ins.slot):
+            out.extend(body[k + 1:e + 1])
+        k = e + 1
+    return out
+
+
 def cycles(body, beats):
     """The model's cycles a step, steady state, for a step body (a list of
-    regalloc.Ins) on a block of `beats` beats."""
+    regalloc.Ins) on a block of `beats` beats.
+
+    A call loop (C4) runs as unrolled() says, its REPEAT and each ENDREP a
+    cycle; its LDX waits for its index to have LANDED, fires its value two
+    steps later than an LDL's, and holds the next instruction that is not
+    an LDX two cycles; its STX waits for its data forwarded and its index
+    landed; its index arithmetic is ALU arithmetic (R18's rules for the
+    indexed codes, which no compiled program has run on a card: believed,
+    as the routines' own prices are)."""
     ready = {}
     land = 0
     t = 0
-    prev_store = False
+    prev_store = prev_ldx = False
     marks = []
+    steps = unrolled(body)
     for _ in range(3):
-        for ins in body:
+        for ins in steps:
+            if ins.kind in ("quiet", "endquiet", "repeat", "endrep"):
+                t += 1
+                prev_store = prev_ldx = False
+                continue
             start = t
-            for r in ins.reads():
-                start = max(start, ready.get(r, 0))
+            reads = ins.reads()
+            for k, r in enumerate(reads):
+                landed = ins.kind == "raise" or \
+                    (ins.kind == "ldx") or (ins.kind == "stx" and k == 1)
+                start = max(start, ready.get(r, 0) +
+                            (LANDED if landed else 0))
             if ins.kind == "ldl" and prev_store:
                 start = max(start, t + 2)
-            if ins.kind in ("alu", "copy"):
+            if ins.kind != "ldx" and prev_ldx:
+                start = max(start, t + 2)
+            if ins.kind in ("alu", "copy", "index"):
                 ready[ins.rd] = start + LAT
                 land = max(land, start + LAT)
-            elif ins.kind == "ldl":
-                ready[ins.rd] = start + (LAT if start < land else FAST_LOAD)
+            elif ins.kind in ("ldl", "ldx"):
+                ready[ins.rd] = start + (LAT if start < land else FAST_LOAD) \
+                    + (2 if ins.kind == "ldx" else 0)
             t = start + beats
-            prev_store = ins.kind == "stl"
+            prev_store = ins.kind in ("stl", "stx")
+            prev_ldx = ins.kind == "ldx"
         t += 1                      # ENDREP
         marks.append(t)
     return marks[-1] - marks[-2]

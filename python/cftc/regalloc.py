@@ -35,12 +35,25 @@ Nothing but the homes and the pinned registers carries a value from one
 step to the next: a spill slot is written before it is read within a
 step, a lane param's slot is never written, and every other register is
 dead at ENDREP. check.py proves that of every image this writes.
+
+A call loop (callloop.py) is one node of the expanded step. At its place
+its records take the lowest run of slots free there, from the spill pool
+or past it (records()); every call's operands are stored into them -
+those already in registers first, each value once loaded and stored to
+all its records, and let go where this was its last use - then the
+registers the loop body needs are freed by the same rule as any
+(Belady's), and the loop is written with them. Each call's result is
+then in its record, where a following RESULT node finds it, as a spilled
+value: loaded where it is used. A record's slots join the pool again
+once the loop has run: a division's a at once, a result when it dies.
 """
 
 import heapq
 from bisect import bisect_right
 
-from . import schedule
+from cft_golden import softfloat as sf
+
+from . import callloop, inline, schedule
 from .ir import ROUNDED
 from .refusals import InternalError
 
@@ -52,12 +65,27 @@ FAR = 1 << 40
 class Ins:
     """One instruction of a compiled image, before it is text.
 
-    kind  alu   an operation of the step: op, rnd, rd, srcs, node
-          copy  ior rd, src, src - a value moved, bit for bit
-          ldl   rd := scratch[slot]
-          stl   scratch[slot] := srcs[0]
-    A source is ("r", register) or ("b", bank slot). `node` is the lowered
-    node an alu computes; `key` the value a copy, load or store moves."""
+    kind  alu       an operation of the step, or of a routine inlined in
+                    it: op, rnd, rd, srcs, node; in a call loop's body,
+                    node the loop and key ("loop", its index in the
+                    fragment)
+          copy      ior rd, src, src - a value moved, bit for bit
+          ldl       rd := scratch[slot]
+          stl       scratch[slot] := srcs[0]
+          quiet     QUIET: a routine's quiet region opens (R24, C4)
+          endquiet  ENDQUIET: it closes
+          raise     RAISE srcs[0]: a routine's flag word into FLAGS
+          index     a call loop's record index: op ior (rd := a word)
+                    or iadd (rd := rd + the word 1)
+          repeat    a call loop's REPEAT, slot its count
+          endrep    its ENDREP
+          ldx       rd := scratch[srcs[0]], the index's slot
+          stx       scratch[srcs[1]] := srcs[0]
+    A source is ("r", register) or ("b", bank slot). `node` is the node an
+    alu or a raise computes (of the lowering, or of the expanded step
+    where the step has routines: inline.py), or the call loop an index,
+    repeat, endrep, ldx or stx belongs to; `key` the value a copy, load
+    or store moves."""
     __slots__ = ("kind", "op", "rnd", "rd", "srcs", "slot", "node", "key")
 
     def __init__(self, kind, rd=None, srcs=(), slot=None, op=None, rnd=0,
@@ -79,7 +107,7 @@ class Program:
     """An allocated segment: prologue, step body, epilogue."""
 
     def __init__(self, prologue, body, epilogue, pinned, m, slots_used,
-                 order, pinning):
+                 order, pinning, x=None):
         self.prologue = prologue
         self.body = body
         self.epilogue = epilogue
@@ -89,17 +117,60 @@ class Program:
         self.order = order
         self.pinning = pinning
         self.candidate = None
+        self.x = x                      # what was allocated: the lowering,
+        #                                 or its expansion (inline.py)
 
     @property
     def spill_slots(self):
         return self.slots_used - self.m
 
+    _COUNT = {"alu": "alu", "copy": "copies", "ldl": "loads",
+              "stl": "stores", "raise": "raises", "quiet": "brackets",
+              "endquiet": "brackets", "index": "index", "repeat": "loops",
+              "endrep": "loops", "ldx": "indexed", "stx": "indexed"}
+
     def step_counts(self):
-        c = {"alu": 0, "copies": 0, "loads": 0, "stores": 0}
+        """The step's instructions as written, by kind: alu (a routine's
+        among them, a call loop's body once), copies, loads, stores; a
+        step with routines, its raises and its brackets; one with a call
+        loop, its index arithmetic, its REPEATs and ENDREPs (loops) and
+        its LDX and STX (indexed)."""
+        c = {"alu": 0, "copies": 0, "loads": 0, "stores": 0, "raises": 0,
+             "brackets": 0, "index": 0, "loops": 0, "indexed": 0}
         for ins in self.body:
-            c[{"alu": "alu", "copy": "copies", "ldl": "loads",
-               "stl": "stores"}[ins.kind]] += 1
+            c[self._COUNT[ins.kind]] += 1
         return c
+
+    def executed(self):
+        """The instructions a step executes, its ENDREP among them: a call
+        loop's body once a call, its ENDREP each time, its REPEAT once."""
+        n, mult = 1, 1
+        for ins in self.body:
+            if ins.kind == "repeat":
+                n += 1
+                mult = ins.slot
+                continue
+            if ins.kind == "endrep":
+                n += mult
+                mult = 1
+                continue
+            n += mult
+        return n
+
+    def loops(self):
+        """[(its loop node, its calls)], in the step's order."""
+        return [(ins.node, ins.slot) for ins in self.body
+                if ins.kind == "repeat"]
+
+    def routine_alu(self):
+        """How many of the step's ALU instructions are routines', as
+        written (a call loop's body once)."""
+        nodes = getattr(self.x, "nodes", None)
+        if not nodes:
+            return 0
+        return sum(1 for ins in self.body if ins.kind == "alu" and
+                   getattr(nodes[ins.node], "kind", "lang") in
+                   ("quiet", "loop"))
 
     def registers(self):
         regs = set()
@@ -320,6 +391,16 @@ class _Alloc:
     def node(self, p, j):
         q = 2 * p
         nd = self.low.nodes[j]
+        kind = getattr(nd, "kind", "lang")
+        if kind == "raise":
+            self.raise_(q, j, nd.args[0])
+            return
+        if kind == "loop":
+            self.loop_(q, j)
+            return
+        if kind == "result":
+            self.result_(q, j)
+            return
         keys = []
         for r in nd.args:
             if r[0] in "sln" and r not in keys:
@@ -355,13 +436,164 @@ class _Alloc:
             else:
                 dest = self.victim(q, set())
                 self.evict(dest, q)
-        self.emit(Ins("alu", op=nd.op,
-                      rnd=self.rnd if nd.op in ROUNDED else 0,
-                      rd=dest, srcs=srcs, node=j))
+        if kind == "quiet":
+            # a routine's instruction: its OWN attribute where it rounds
+            rnd = nd.rnd or 0
+        else:
+            rnd = self.rnd if nd.op in ROUNDED else 0
+        self.emit(Ins("alu", op=nd.op, rnd=rnd, rd=dest, srcs=srcs, node=j))
         for k in dying:
             self.release(k)
         self.place(key, dest)
         self.computed.add(key)
+
+    def raise_(self, q, j, k):
+        """A routine's raise (inline.py): its flag word into a register if
+        it is not in one, RAISE it, and let it go if this was its last
+        use. It writes no register."""
+        if k not in self.where:
+            s = self.copy_slot(k)
+            if s is None:
+                raise InternalError(f"routine flag word {k} is needed by its "
+                                    f"raise, node {j}, and is nowhere")
+            r = self.take_reg(q, {k})
+            self.ldl(r, s, k)
+            self.place(k, r)
+        self.emit(Ins("raise", srcs=(("r", self.where[k]),), node=j, key=k))
+        if self.next_use(k, q) is None:
+            self.release(k)
+
+    def records(self, size):
+        """The lowest run of `size` slots free here - in the spill pool, or
+        past its top - taken out of the pool."""
+        free = set(self.spill_heap)
+        top = self.next_spill
+        for s in sorted(free) + [top]:
+            if all(t in free or t >= top for t in range(s, s + size)):
+                break
+        took = set(range(s, s + size))
+        self.spill_heap = [t for t in self.spill_heap if t not in took]
+        heapq.heapify(self.spill_heap)
+        self.next_spill = max(top, s + size)
+        return s
+
+    def loop_(self, q, j):
+        """A call loop (the module docstring; callloop.py)."""
+        from cft_golden import routines as R
+        nd = self.low.nodes[j]
+        K, ar = len(nd.calls), nd.arity
+        names = R.INPUTS[nd.op]
+        # an input every call takes from one bank slot is no part of a
+        # record: the body reads the slot (callloop.plan)
+        nd.fixed = {}
+        for i, name in enumerate(names):
+            refs = {nd.args[ar * c + i] for c in range(K)}
+            ref = next(iter(refs))
+            if len(refs) == 1 and ref[0] not in "sln":
+                nd.fixed[name] = ref
+        if len(nd.fixed) == ar:
+            nd.fixed = {}
+        varying = [i for i, name in enumerate(names) if name not in nd.fixed]
+        nd.stride = len(varying)
+        nd.base = base = self.records(nd.stride * K)
+        # 1. every call's operands into its record: each value once, those
+        # in registers first (so that loading the rest evicts no operand
+        # still owed a record), and let go where this was its last use
+        occ = {}
+        for c in range(K):
+            for at, i in enumerate(varying):
+                occ.setdefault(nd.args[ar * c + i], []).append(
+                    base + nd.stride * c + at)
+        vals = sorted(occ, key=lambda a: a not in self.where)
+
+        def record(r, s, a):
+            self.emit(Ins("stl", srcs=(("r", r),), slot=s, key=a, node=j))
+        for a in vals:
+            if a[0] not in "sln":
+                r = self.take_reg(q)
+                self.copy(r, ("b", self.low.slot_of[a]), a)
+                for s in occ[a]:
+                    record(r, s, a)
+                continue
+            if a not in self.where:
+                s0 = self.copy_slot(a)
+                if s0 is None:
+                    raise InternalError(f"call loop {nd.block}: operand {a} "
+                                        f"is in no register or slot")
+                r = self.take_reg(q, {a})
+                self.ldl(r, s0, a)
+                self.place(a, r)
+            r = self.where[a]
+            for s in occ[a]:
+                record(r, s, a)
+            if self.next_use(a, q) is None:
+                self.release(a)
+        # 2. the registers the body needs, freed as any are
+        code, need = callloop.plan(nd.op, self.low.graph.fmt, self.rnd,
+                                   tuple(nd.fixed))
+        held, regs = [], []
+        for i in range(need):
+            r = self.take_reg(q, set(held))
+            hk = ("loop register", j, i)
+            self.place(hk, r)
+            held.append(hk)
+            regs.append(r)
+        for hk in held:
+            self.unplace(hk)
+        # 3. the loop
+        rI = regs[0]
+        slot_of = self.low.slot_of
+        # the base's word is the bank's once this allocation is chosen
+        # (callloop.finish), so its instruction names the base till then
+        b_base = ("base", base)
+        b_step = ("b", slot_of[("w", callloop.STEP_BITS)])
+        self.emit(Ins("index", op="ior", rd=rI, srcs=(b_base, b_base),
+                      node=j))
+        self.emit(Ins("repeat", slot=K, node=j))
+        for item in code:
+            kind = item[0]
+            if kind == "ldx":
+                self.emit(Ins("ldx", rd=regs[item[1]], srcs=(("r", rI),),
+                              node=j))
+            elif kind == "step":
+                self.emit(Ins("index", op="iadd", rd=rI,
+                              srcs=(("r", rI), b_step), node=j))
+            elif kind in ("quiet", "endquiet"):
+                self.emit(Ins(kind, node=j))
+            elif kind == "alu":
+                _k, i, opc, rnd, d, ss = item
+                srcs = tuple(("r", regs[v]) if t == "r" else
+                             ("b", slot_of[nd.fixed[v]]) if t == "k" else
+                             ("b", slot_of[("w", v)]) for t, v in ss)
+                self.emit(Ins("alu", op=sf.OP_NAMES[opc], rnd=rnd or 0,
+                              rd=regs[d], srcs=srcs, node=j,
+                              key=("loop", i)))
+            elif kind == "raise":
+                self.emit(Ins("raise", srcs=(("r", regs[item[1]]),),
+                              node=j))
+            elif kind == "stx":
+                self.emit(Ins("stx", srcs=(("r", regs[item[1]]),
+                                           ("r", rI)), node=j))
+            else:
+                raise InternalError(f"call loop plan item {kind}")
+        self.emit(Ins("endrep", node=j))
+        # 4. a record's slots but its last are free at once; each result is
+        # in its record's last (result_)
+        for k in range(K):
+            for s in range(nd.stride - 1):
+                heapq.heappush(self.spill_heap, base + nd.stride * k + s)
+
+    def result_(self, q, j):
+        """A looped call's result: in its record, as a spilled value is in
+        its slot - a division's over its b, a root's over its a."""
+        nd = self.low.nodes[j]
+        loop = self.low.nodes[self.low.loops[nd.block]]
+        s = loop.base + loop.stride * nd.at[0] + loop.stride - 1
+        key = ("n", j)
+        self.slot_put(s, key)
+        self.computed.add(key)
+        if self.next_use(key, q) is None:
+            self.release(key)
 
     def stores(self, q):
         """The homed stores whose turn has come after position q.
@@ -547,9 +779,19 @@ class _Alloc:
             self.slot_put(self.n + j, ("l", j))
         self.out = body
         self.stores(-1)
+        quiet = False
         for p, j in enumerate(self.order):
+            # a routine's instructions run in a quiet region, opened before
+            # its block's first and closed after its last; its raise, and
+            # every language node, stand outside one (inline.py)
+            here = getattr(self.low.nodes[j], "kind", "lang") == "quiet"
+            if here != quiet:
+                self.emit(Ins("quiet" if here else "endquiet"))
+                quiet = here
             self.node(p, j)
             self.stores(2 * p + 1)
+        if quiet:
+            self.emit(Ins("endquiet"))
         self.closing()
         self.out = epilogue
         for i in range(self.n):
@@ -557,11 +799,23 @@ class _Alloc:
             if sk in self.pinned:
                 self.stl(self.pinned[sk], i, sk)
         return Program(prologue, body, epilogue, dict(self.pinned), self.m,
-                       max(self.m, self.next_spill), self.order, self.pinning)
+                       max(self.m, self.next_spill), self.order, self.pinning,
+                       x=self.low)
 
 
 def allocate(low, order, pinning="none"):
     return _Alloc(low, order, pinning).run()
+
+
+def allocate_order(low, order, pinning, looped=()):
+    """A candidate order allocated: as it always was for a step without
+    routines, and through the routines' expansion (inline.py) for one with
+    them - `looped` the batches it runs in call loops (callloop.py) - its
+    order then the expanded step's own."""
+    if not getattr(low, "routines", None):
+        return allocate(low, order, pinning)
+    x = inline.expand(low, order, looped)
+    return allocate(x, list(range(len(x.nodes))), pinning)
 
 
 def pinnings(low):
@@ -588,10 +842,11 @@ def pinned_keys(low, pinning):
     return keys
 
 
-def best_program(low, candidates=None):
+def best_program(low, candidates=None, looped=()):
     """The cheapest allocation among the candidate orders and pinnings:
     fewest instructions a step, then the model's cycles a step at one
-    beat, then the fewest outside the loop, then the fixed order."""
+    beat, then the fewest outside the loop, then the fixed order. A step
+    with call loops (`looped`) counts its instructions as written."""
     best = None
     tried = []
     for pi, pin in enumerate(pinnings(low)):
@@ -599,7 +854,7 @@ def best_program(low, candidates=None):
         for ci, (name, margin) in enumerate(candidates or
                                             schedule.candidates(low)):
             order = schedule.order(low, name, margin, keys, len(REGS))
-            prog = allocate(low, order, pin)
+            prog = allocate_order(low, order, pin, looped)
             prog.candidate = (name, margin)
             cost = (len(prog.body) + 1, schedule.cycles(prog.body, 1),
                     len(prog.prologue) + len(prog.epilogue), pi, ci)

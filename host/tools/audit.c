@@ -2397,6 +2397,24 @@ static const char *wider_image(const prog_t *p0, const prog_t *pa)
     return NULL;
 }
 
+/* Does an image hold a routine (C4): any of revision 8's QUIET, ENDQUIET
+ * or RAISE, control codes 12 to 14 (R24)? The language's compiler writes
+ * them around every routine it inlines and nowhere else, and a routine's
+ * words are its format's, so such an image has no wider run: refused
+ * `aux-image` (check_relations), as cft-segrun refuses to write one. */
+static int routine_image(const prog_t *p)
+{
+    uint32_t n = le32(p->image + 8), k;
+    size_t c = p->bank_ext ? 0 : p->n_consts;
+    const uint8_t *ins = p->image + 32 + c * ESZ(p->fmt);
+    for (k = 0; k < n; k++) {
+        uint32_t lo = le32(ins + (size_t)k * 8u), code = lo & 0xFFu;
+        if ((lo >> 31) & 1u && (code == 12u || code == 13u || code == 14u))
+            return 1;
+    }
+    return 0;
+}
+
 /* Step 8 (cert._check_relations). */
 static void check_relations(const cert_t *C, const uint8_t *salt,
                             const prog_t *P)
@@ -2448,6 +2466,12 @@ static void check_relations(const cert_t *C, const uint8_t *salt,
                 refuse("aux-image", AT_RUN(r), "run %llu (%s): its image digest "
                        "is not the main run's - a half-step run is the same "
                        "image", (unsigned long long)r, w);
+        } else if (routine_image(P0)) {
+            refuse("aux-image", AT_RUN(r), "run %llu (%s): the main image "
+                   "holds a routine (QUIET, ENDQUIET or RAISE), whose words "
+                   "are its format's, so no image is it one format wider; "
+                   "certificate version 2's wider-source run compiles its "
+                   "source one format up instead", (unsigned long long)r, w);
         } else if ((why = wider_image(P0, PA)) != NULL) {
             refuse("aux-image", AT_RUN(r), "run %llu (%s) is not the main image "
                    "one format wider: %s", (unsigned long long)r, w, why);

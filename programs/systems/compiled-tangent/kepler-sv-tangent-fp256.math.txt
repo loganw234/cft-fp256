@@ -1,0 +1,43 @@
+kepler - the mathematical form, regenerated from the step graph
+binary256 (fp256), roundTiesToEven
+
+Each operation here is exact. The program performs the same
+operations, each rounded once, in the order the canonical form
+writes them.
+
+where
+  r2 = x·x + y·y
+  r3 = r2·√(r2)
+
+the equations
+  dx/dt = px
+  dy/dt = py
+  dpx/dt = −x/r3
+  dpy/dt = −y/r3
+
+the variational equations of the tangent vector v
+  v.r2 = v.x·x + x·v.x + v.y·y + y·v.y
+  v.r3 = v.r2·√(r2) + r2·(v.r2/(2·√(r2)))
+  d(v.x)/dt = v.px
+  d(v.y)/dt = v.py
+  d(v.px)/dt = −((−x/r3)·v.r3 + v.x)/r3
+  d(v.py)/dt = −((−y/r3)·v.r3 + v.y)/r3
+
+one step: Stormer-Verlet, drift-kick-drift (stormer-verlet), with v the right-hand sides of dQ/dt and a those of dP/dt
+  h = 0.01
+  Y = (x, y, px, py)
+  Q = (x, y)
+  P = (px, py)
+  Q1 = Q + (h/2)·v(P)
+  P1 = P + h·a(Q1)
+  Q ↦ Q1 + (h/2)·v(P1)
+  P ↦ P1
+
+the tangent v's step: the same method on δQ and δP, with Dv·δP and Da·δQ the right-hand sides of v above
+  δY = (v.x, v.y, v.px, v.py)
+  δQ = (v.x, v.y)
+  δP = (v.px, v.py)
+  δQ1 = δQ + (h/2)·Dv(P)·δP
+  δP1 = δP + h·Da(Q1)·δQ1
+  δQ ↦ δQ1 + (h/2)·Dv(P1)·δP1
+  δP ↦ δP1

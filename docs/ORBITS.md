@@ -350,8 +350,15 @@ no call. Room is not the obstacle any more: under `--engine segments`
 the orbit state lives in the scratch block between the instructions
 that use it. The splice is: putting one inside another program's loop
 body needs a fragment inliner that relocates its registers and
-constants and turns its deposits into moves, and nothing in the tree
-does that yet. `--rsqrt exact` is therefore a loop-engine route, and
+constants and turns its deposits into a result and a raise of its
+flags. Since step 6's parcel C4 the language's compiler has one
+(python/cft_golden/routines.py, `python/cftc`): divfull and sqrtfull
+relocated and specialised at the program's attribute, run in a quiet
+region, then raising exactly their operation's flags (revision 8's
+flag control, docs/SEQUENCER.md, R24). cft-orbits' engines do not use
+it: their programs come from the tool's own builder, and no tile has
+revision 8's flag control yet. `--rsqrt exact` is therefore a
+loop-engine route, and
 `--rsqrt newton` exists so that all three engines have a step they can
 run - which they then have to run bit for bit.
 

@@ -36,9 +36,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 
 import cftc                                      # noqa: E402
+from cftc import callloop                        # noqa: E402
 from cftc import check as cftc_check             # noqa: E402
 from cftc import targets as T                    # noqa: E402
 from cft_golden import FORMATS, asm, lang        # noqa: E402
+from cft_golden import routines as R             # noqa: E402
 from cft_golden import softfloat as sf           # noqa: E402
 from cft_golden.lang import constants as K       # noqa: E402
 
@@ -200,11 +202,15 @@ def test_the_compiler_raises_the_languages_names():
     compiler raises is in L1's COMPILER_REFUSALS, raised through L1's
     Refusal, and no other name can be."""
     assert set(cftc.NAMES) == set(lang.COMPILER_REFUSALS)
-    for name in cftc.NAMES:
+    for name in cftc.NAMES + cftc.refusals.SHARED:
         e = cftc.refusals.refusal(name, "a sentence")
         assert isinstance(e, lang.Refusal) and e.name == name
-    with pytest.raises(cftc.InternalError):
-        cftc.refusals.refusal("unused", "not the compiler's")
+    # the one catalogue name the compiler raises too: the bank's 512 (C4)
+    assert cftc.refusals.SHARED == ("bank-capacity",)
+    assert set(cftc.refusals.SHARED) <= set(lang.CATALOGUE)
+    for name in ("unused", "runtime-routine"):
+        with pytest.raises((cftc.InternalError, AssertionError)):
+            cftc.refusals.refusal(name, "not the compiler's")
 
 
 def _hh():
@@ -599,11 +605,13 @@ def test_a_step_count_past_the_digit_limit_is_refused_by_name():
     assert len(str(e.value)) < 400
 
 
-# ---- L4: run-time division and square root, refused by name until C4 ----------
-# The language has them (div, sqrt) and its interpreter runs them; a tile has
-# no such instruction, and the compiler inlines their routines only from
-# parcel C4. Until then cftc refuses them `runtime-routine`, first, on every
-# target, at the first source line holding one - never an internal error.
+# ---- C4: run-time division and square root, inlined as routines --------------
+# The language has them (div, sqrt, L4); a tile has no such instruction, and
+# cftc inlines each as its routine (cft_golden/routines.py), quiet, then a
+# raise of exactly its flags. Such an image needs revision 8's flag control:
+# the software targets compile and run it, revision 7's refuse it
+# `target-feature`, by name - never an internal error. These sources were
+# L4's interim refusal's; each now compiles.
 
 ROUTINE = {   # name: (source, the first line holding a division or a root)
     "a quotient": ("system d\nformat fp64\nstate x, y\nnext x = x\n"
@@ -641,81 +649,142 @@ ROUTINE = {   # name: (source, the first line holding a division or a root)
 }
 
 
-@pytest.mark.parametrize("case", list(ROUTINE))
-def test_the_interim_refusal_on_every_target(case):
-    """compile_text on every built-in target and sw:N, compile_graph of the
-    language's graph and of a graph read from its bytes (which carries no
-    lines): `runtime-routine`, at the first line in source order holding
-    one, whatever its statement, before the compiler's other checks (a
-    step count of 0, a target without the format) and before its own
-    reading of the graph."""
-    text, line = ROUTINE[case]
-    g = lang.compile_text(text, "src.cftl").graph
-    assert {"div", "sqrt"} & set(g.op_counts("step"))
-    assert g.routine_lines[0] == line
-    assert lang.StepGraph.from_bytes(g.to_bytes()).routine_lines is None
-    trim = T.Target("trim", ("fp64",), 32768, 512, 2048, 1024,
-                    T.TILE_FEATURES)
-    for target in T.names() + ["sw:4096", "sw:32768", trim]:
-        for steps in (3, 0):
-            with pytest.raises(lang.Refusal) as e:
-                cftc.compile_text(text, steps, target=target,
-                                  source="src.cftl")
-            assert (e.value.name, e.value.line, e.value.source) == \
-                ("runtime-routine", line, "src.cftl"), (target, str(e.value))
-    with pytest.raises(lang.Refusal) as e:
-        cftc.compile_graph(g, 3, source="src.cftl")
-    assert (e.value.name, e.value.line) == ("runtime-routine", line)
-    back = lang.StepGraph.from_bytes(g.to_bytes())
-    with pytest.raises(lang.Refusal) as e:
-        cftc.compile_graph(back, 3)
-    assert (e.value.name, e.value.line) == ("runtime-routine", None)
-    ops = [op for op in ("div", "sqrt") if op in g.op_counts("step")]
-    s = e.value.sentence
-    assert s.startswith("this step ") and f"({', '.join(ops)})" in s, s
-    assert "parcel C4" in s and "lang.run" in s
-    for op, routine in (("div", "divfull"), ("sqrt", "sqrtfull")):
-        assert (routine in s) == (op in ops), s
-    # and the interpreter runs it
+def _routine_lanes(g, seed):
+    """Lanes for a routine image: rationals, a zero state (0/0, a root of
+    0), a signalling NaN, the smallest subnormal - and, with tangent
+    vectors, a tangent for each."""
     fmt = g.fmt
-    lanes = [[K.round_once(fmt, sf.RND_RNE, Fraction(v, 7))[0]] * g.n_state
-             for v in (3, 11)]
-    kw = {"tangents": [[lane] * len(g.tangent) for lane in lanes]} \
-        if g.tangent else {}
-    assert len(lang.run(g, lanes, 2, **kw).states) == 2
+    rng = random.Random(seed)
+
+    def val():
+        return K.round_once(fmt, sf.RND_RNE,
+                            Fraction(rng.randint(-900, 900), 97))[0]
+    states = [[val() for _ in range(g.n_state)] for _ in range(5)]
+    states += [[0] * g.n_state, [sf.snan_bits(fmt)] * g.n_state,
+               [1] * g.n_state]
+    tans = None
+    if g.tangent:
+        tans = [[[val() for _ in range(g.n_state)] for _ in g.tangent]
+                for _ in states]
+    return states, tans
 
 
-def test_the_interim_refusal_through_the_command_line(tmp_path):
-    """Exit 3 with the name and the line, nothing written, never 70."""
+def _held(c, states, tans, steps):
+    """The image (compiled at `steps`) on seq.py against lang.run."""
+    r = c.run(states, tangents=tans)
+    ref = lang.run(c.graph, states, steps, tangents=tans)
+    m, n = c.ir.m, c.ir.n_primal
+    got = [r.scratch_out[k * m:k * m + n] for k in range(len(states))]
+    assert got == ref.states
+    if tans is not None:
+        gt = [r.scratch_out[k * m + n:k * m + c.ir.n_state]
+              for k in range(len(states))]
+        assert gt == [[v for vec in t for v in vec] for t in ref.tangents]
+    assert r.flags == ref.flags
+    return r
+
+
+@pytest.mark.parametrize("case", list(ROUTINE))
+def test_each_routine_compiles_on_the_software_targets(case):
+    """Each source - a quotient, a root, both under rk4 with two vectors, a
+    quotient by a constant, by h and by zero, a written tangent, a tangent
+    let or an expansion block first - compiles for sw and sw:4096, its image
+    holding QUIET, ENDQUIET and RAISE, accepted by the software targets
+    alone; and runs on seq.py as lang.run does, states, tangents and
+    FLAGS, on lanes that divide 0 by 0, hold a signalling NaN and hold
+    subnormals."""
+    text, _line = ROUTINE[case]
+    g = lang.compile_text(text, "src.cftl").graph
+    ops = [op for op in ("div", "sqrt") if op in g.op_counts("step")]
+    assert ops
+    states, tans = _routine_lanes(g, case)
+    for steps in (1, 3):
+        for target in ("sw", "sw:4096"):
+            c = cftc.compile_text(text, steps, target=target,
+                                  source="src.cftl")
+            assert "FLAG_CONTROL" in c.features
+            assert c.accepted_by == ["sw"]
+            names = {asm.CTRL_NAMES.get(asm.decode(w)["op"])
+                     for w in c.image_obj.insns if asm.decode(w)["ctrl"]}
+            assert {"quiet", "endquiet", "raise"} <= names
+            m = c.manifest
+            assert set(m["routines"]["calls"]) == set(ops)
+            assert m["per_step"]["instructions"] == len(c.program.body) + 1
+            assert all(b["kind"] != "word" or b["exact"] is None
+                       for b in m["bank"])
+        _held(c, states, tans, steps)
+    # a graph read from its bytes compiles to the same image
+    back = lang.StepGraph.from_bytes(g.to_bytes())
+    assert cftc.compile_graph(back, 3, source="src.cftl").image == c.image
+
+
+@pytest.mark.parametrize("case", list(ROUTINE))
+def test_revision_7s_targets_refuse_a_routine_by_name(case):
+    """No tile has revision 8's flag control: on each of revision 7's
+    targets, and a trimmed one, a routine image is refused
+    `target-feature`, the sentence naming FLAG_CONTROL, CAPS2[14] and the
+    routines - by name, never an internal error; a step count of 0 is
+    still `segment-steps`, first."""
+    text, _line = ROUTINE[case]
+    g = lang.compile_text(text, "src.cftl").graph
+    ops = [op for op in ("div", "sqrt") if op in g.op_counts("step")]
+    trim = T.Target("trim", ("fp32", "fp64", "fp128", "fp256"), 32768, 512,
+                    2048, 1024, T.TILE_FEATURES)
+    for target in ["u50-rev7", "u50-rev7-quad", "u50-round2", "open-core",
+                   trim]:
+        with pytest.raises(lang.Refusal) as e:
+            cftc.compile_text(text, 3, target=target, source="src.cftl")
+        assert e.value.name == "target-feature", (target, str(e.value))
+        s = e.value.sentence
+        assert "FLAG_CONTROL (CAPS2[14])" in s and "revision 8" in s, s
+        assert all(op in s for op in ops), s
+        with pytest.raises(lang.Refusal) as e:
+            cftc.compile_text(text, 0, target=target)
+        assert e.value.name == "segment-steps"
+
+
+def test_a_routine_through_the_command_line(tmp_path):
+    """sw: exit 0, the files, the text's regions; a revision-7 target: exit
+    3, `target-feature`, nothing written; never 70."""
     py = [sys.executable, str(ROOT / "python" / "cftc")]
-    for k, (case, (text, line)) in enumerate(ROUTINE.items()):
-        src = tmp_path / f"routine{k}.cftl"
-        src.write_bytes(text.encode("ascii"))
-        out = tmp_path / f"out{k}"
-        r = subprocess.run(py + [str(src), "--steps", "2", "--target",
-                                 "u50-rev7-quad", "--out", str(out)],
-                           capture_output=True, text=True)
-        assert r.returncode == 3, (case, r.returncode, r.stderr)
-        assert r.stderr.startswith("cftc: refused runtime-routine: "), r.stderr
-        assert f"routine{k}.cftl:{line}: this step " in r.stderr, r.stderr
-        assert "internal error" not in r.stderr
-        assert not out.exists()
+    text, _line = ROUTINE["both, a let, rk4, two vectors"]
+    src = tmp_path / "b.cftl"
+    src.write_bytes(text.encode("ascii"))
+    r = subprocess.run(py + [str(src), "--steps", "2", "--out",
+                             str(tmp_path / "a")], capture_output=True,
+                       text=True)
+    assert r.returncode == 0, r.stderr
+    cfta = (tmp_path / "a" / "b.cfta").read_text(encoding="ascii")
+    assert "\n  quiet " in cfta and "\n  endquiet\n" in cfta
+    assert "\n  raise    r" in cfta and "\n    fma.rtz  r" in cfta
+    assert "; routines " in cfta
+    r = subprocess.run(py + [str(src), "--steps", "2", "--target",
+                             "u50-rev7-quad", "--out", str(tmp_path / "b")],
+                       capture_output=True, text=True)
+    assert r.returncode == 3, r.stderr
+    assert r.stderr.startswith("cftc: refused target-feature: ")
+    assert "internal error" not in r.stderr
+    assert not (tmp_path / "b").exists()
 
 
-def test_divisions_and_roots_that_fold_compile():
+def test_divisions_and_roots_that_fold_compile_without_a_routine():
     """A constant over a constant and the root of a rational's square fold
-    (L4), so a system holding only those compiles, and its image equals
-    the interpreter."""
+    (L4): a system holding only those has no routine and no flag control,
+    and every target accepts it; x / (1 + 1) is a division at run time, a
+    routine, and the software targets alone."""
     text = ("system f\nformat fp64\nstate x, y\nnext x = x * (8/3)\n"
             "next y = fma(y, sqrt(9/4), x / (1 + 1) * 0 + x * (1/3))\n"
             "step map\n")
-    with pytest.raises(lang.Refusal) as e:      # x / (1 + 1) divides
-        cftc.compile_text(text, 3)
-    assert (e.value.name, e.value.line) == ("runtime-routine", 5)
+    c = cftc.compile_text(text, 3)
+    assert c.manifest["routines"]["calls"] == {"div": 1}
+    states, _t = _routine_lanes(c.graph, "fold")
+    _held(c, states, None, 3)
     text = text.replace("x / (1 + 1) * 0 + ", "")
     c = cftc.compile_text(text, 3)
     assert "div" not in c.graph.op_counts() and \
         "sqrt" not in c.graph.op_counts()
+    assert "FLAG_CONTROL" not in c.features and "routines" not in c.manifest
+    assert "u50-rev7" in c.accepted_by
     lanes = [[K.round_once(c.ir.fmt, sf.RND_RNE, Fraction(v, 9))[0]] * 2
              for v in (2, -5, 13)]
     r = c.run(lanes)
@@ -724,7 +793,292 @@ def test_divisions_and_roots_that_fold_compile():
         ref.states and r.flags == ref.flags
 
 
-# ---- the variational equations (L3) -----------------------------------------
+def test_the_bank_capacity_counts_the_routines_words():
+    """The language holds params and constants to 512; the compiler counts
+    the routines' words too, and refuses the language's own name,
+    `bank-capacity`, where they take the bank past it - a sentence naming
+    all three. Below the limit the same source compiles."""
+    def source(k):
+        ps = ", ".join(f"p{i} = {i + 1}" for i in range(k))
+        total = " + ".join(f"p{i}" for i in range(k))
+        return (f"system wide\nformat fp64\nstate x, y\nparam {ps}\n"
+                f"next x = x / y + ({total})\nnext y = y\nstep map\n")
+    words = len(set(R.fragment("div", FORMATS["fp64"],
+                               sf.RND_RNE).words.values()))
+    over = 512 - words + 1
+    lang.compile_text(source(over), "wide")             # the language's 512
+    with pytest.raises(lang.Refusal) as e:
+        cftc.compile_text(source(over), 2)
+    assert e.value.name == "bank-capacity"
+    assert f"{over} params, 0 constants and {words} words" in \
+        e.value.sentence and "512 on every device" in e.value.sentence
+    c = cftc.compile_text(source(over - 1), 2)
+    assert len(c.lowered.slots) == 512
+
+
+def _routine_compile():
+    text = ("system p\nformat fp64\nstate x, y\nnext x = (x + 1) / y\n"
+            "next y = y * 3\nstep map\n")
+    return cftc.compile_text(text, 2)
+
+
+def _image_with(c, words):
+    img = asm.Image.from_bytes(c.image)
+    return asm.Image(img.fmt, words, img.consts, img.max_deposits, img.flags,
+                     scratch_depth=img.scratch_depth,
+                     scratch_io=img.scratch_io).to_bytes()
+
+
+def test_the_internal_check_holds_a_routine():
+    """Controls for check.py's routine rules, each a damaged image of a
+    step with a division and the language's own nodes: an instruction of
+    the routine moved outside its region; the raise moved inside it; the
+    raise dropped; the truncating fma made rne; a language node moved into
+    the region; a word's bits changed in the bank. Each an InternalError."""
+    c = _routine_compile()
+    insns = list(asm.Image.from_bytes(c.image).insns)
+    dec = [asm.decode(w) for w in insns]
+
+    def ctrl(k, name):
+        return dec[k]["ctrl"] and asm.CTRL_NAMES.get(dec[k]["op"]) == name
+    q = next(k for k in range(len(dec)) if ctrl(k, "quiet"))
+    e = next(k for k in range(len(dec)) if ctrl(k, "endquiet"))
+    r = next(k for k in range(len(dec)) if ctrl(k, "raise"))
+    assert q < e < r
+
+    def refused(words):
+        with pytest.raises(cftc.InternalError):
+            cftc_check.verify(c.lowered, c.program, _image_with(c, words),
+                              c.steps, c.lowered.half_bits)
+    w = list(insns)                     # the region's last instruction out
+    w[e - 1], w[e] = w[e], w[e - 1]
+    refused(w)
+    w = list(insns)                     # the raise in
+    w[e], w[r] = w[r], w[e]
+    refused(w)
+    refused(insns[:r] + insns[r + 1:])  # the raise dropped
+    k = next(k for k in range(q, e) if not dec[k]["ctrl"]
+             and dec[k]["op"] == sf.OP_FMA and dec[k]["rnd"] == sf.RND_RTZ)
+    w = list(insns)                     # the routine's own rtz made rne
+    w[k] = (insns[k] & ~(0x7 << 24)) | (sf.RND_RNE << 24)
+    refused(w)
+    # a language node into the region: the instruction before QUIET, if it
+    # is the language's, moved after it
+    lang_k = max(k for k in range(q) if not dec[k]["ctrl"])
+    w = list(insns)
+    w[lang_k], w[q] = w[q], w[lang_k]
+    refused(w)
+    # the bank: a word's bits
+    k = next(k for k, s in enumerate(c.lowered.slots) if s.kind == "word")
+    c.lowered.slots[k].bits ^= 1
+    with pytest.raises(cftc.InternalError):
+        cftc_check.verify(c.lowered, c.program, c.image, c.steps,
+                          c.lowered.half_bits)
+    c.lowered.slots[k].bits ^= 1
+    cftc_check.verify(c.lowered, c.program, c.image, c.steps,
+                      c.lowered.half_bits)
+
+
+# ---- C4: the call loop -------------------------------------------------------
+# A step whose routines, inlined, would pass callloop.CALL_LOOP_ABOVE
+# instructions runs batches of them in loops (Logan's rule, 2026-10-02).
+# The constant is lowered here so that small systems loop; the lang stage
+# holds the natural case - eight bodies under rk4 - at the constant itself.
+
+KEPLER_RK4 = ("system kepler\nformat fp64\nstate x, y, px, py\n"
+              "let r2 = fma(x, x, y * y)\nlet r3 = r2 * sqrt(r2)\n"
+              "d/dt x = px\nd/dt y = py\nd/dt px = -(x / r3)\n"
+              "d/dt py = -(y / r3)\nstep rk4, h = 1/100\n")
+FIXED = ("system f\nformat fp64\nstate x, y, u, v\n"
+         "next x = 1 / (x * x + 1)\nnext y = 1 / (y * y + 2)\n"
+         "next u = sqrt(u * u + 1) / 3\nnext v = sqrt(v * v + 2) / 3\n"
+         "step map\n")
+
+
+def _looped(monkeypatch, text, above, steps=2, **kw):
+    monkeypatch.setattr(callloop, "CALL_LOOP_ABOVE", above)
+    return cftc.compile_text(text, steps, source="loop.cftl", **kw)
+
+
+def _batches(c):
+    return [(b.op, b.depth, len(b.calls)) for b in c.looped]
+
+
+def test_a_step_past_the_constant_loops_the_largest_batch_first(monkeypatch):
+    """Kepler under rk4 has four batches: the first two stages' roots
+    (depth 1) and divisions (2), the last two's (3, 4). A constant one
+    under its inlined step loops the largest batch - a division's, four
+    calls - and no more; a constant of 0 loops all four. Each image runs as
+    lang.run does, states and FLAGS, on lanes that divide 0 by 0, hold a
+    signalling NaN and hold subnormals; the manifest and the text say
+    what was looped, and nothing of it appears where nothing was."""
+    inl = cftc.compile_text(KEPLER_RK4, 2)
+    assert inl.looped == []
+    assert "call_loops" not in inl.manifest["routines"]
+    assert "call_loops" not in inl.manifest["cost_model"]
+    assert "; call loops" not in inl.cfta
+    size = len(inl.program.body) + 1
+    assert inl.program.executed() == size
+    states, _t = _routine_lanes(inl.graph, "loop")
+    c = _looped(monkeypatch, KEPLER_RK4, size - 1)
+    assert _batches(c) == [("div", 2, 4)]
+    assert len(c.program.body) + 1 <= size - 1
+    assert c.program.executed() > size
+    _held(c, states, None, 2)
+    m = c.manifest["routines"]
+    assert m["calls"] == {"sqrt": 4, "div": 8}
+    loops = m["call_loops"]
+    assert loops["above"] == size - 1
+    assert [(e["op"], e["depth"], e["calls"]) for e in loops["loops"]] == \
+        [("div", 2, 4)]
+    assert loops["executed_per_step"] == c.program.executed()
+    assert "call_loops" in c.manifest["cost_model"]
+    assert "; call loops 1, " in c.cfta
+    assert "\n  repeat 4 " in c.cfta and "\n    ldx      r" in c.cfta
+    assert "\n    stx      r" in c.cfta and "\n      fma.rtz  r" in c.cfta
+    c0 = _looped(monkeypatch, KEPLER_RK4, 0)
+    assert sorted(_batches(c0)) == [("div", 2, 4), ("div", 4, 4),
+                                    ("sqrt", 1, 2), ("sqrt", 3, 2)]
+    _held(c0, states, None, 2)
+
+
+def test_a_batch_of_one_call_is_never_looped(monkeypatch):
+    """Three divisions each reading the last are three batches of one
+    call; a loop of one would only add its own instructions, so past the
+    constant the step stays inlined, and runs as lang.run does."""
+    text = ("system chain\nformat fp64\nstate x\n"
+            "next x = ((x / 3) / 5) / 7\nstep map\n")
+    c = _looped(monkeypatch, text, 0)
+    assert c.looped == [] and c.program.loops() == []
+    assert c.manifest["routines"]["calls"] == {"div": 3}
+    states, _t = _routine_lanes(c.graph, "chain")
+    _held(c, states, None, 2)
+
+
+def test_one_looped_image_serves_every_target_that_takes_it(monkeypatch):
+    """The constant is the compiler's, never a target's: the same source
+    loops the same way for sw and sw:4096 - one image, the same bytes - and
+    revision 7's targets still refuse it `target-feature`, by name."""
+    a = _looped(monkeypatch, KEPLER_RK4, 1000)
+    b = _looped(monkeypatch, KEPLER_RK4, 1000, target="sw:4096")
+    assert a.looped and a.image == b.image and a.bank == b.bank
+    with pytest.raises(lang.Refusal) as e:
+        _looped(monkeypatch, KEPLER_RK4, 1000, target="u50-rev7")
+    assert e.value.name == "target-feature"
+
+
+def test_a_loop_with_tangent_vectors_and_at_every_format(monkeypatch):
+    """Looped calls with two tangent vectors under rk4, at fp256 (the
+    quotient's and the root's derivatives are divisions too), and Kepler
+    looped at fp32, fp128 and fp256 and under rtz, rdn, rup and rmm: each
+    as lang.run, states, tangents and FLAGS."""
+    text, _line = ROUTINE["both, a let, rk4, two vectors"]
+    c = _looped(monkeypatch, text, 0)
+    assert c.looped and c.graph.tangent == ["v", "w"]
+    states, tans = _routine_lanes(c.graph, "loop tangent")
+    _held(c, states, tans, 2)
+    for fmt, rnd in (("fp32", "rne"), ("fp128", "rne"), ("fp256", "rne"),
+                     ("fp64", "rtz"), ("fp64", "rdn"), ("fp64", "rup"),
+                     ("fp64", "rmm")):
+        text = KEPLER_RK4.replace("format fp64", f"format {fmt}\nround {rnd}")
+        c = _looped(monkeypatch, text, 0)
+        assert len(c.looped) == 4
+        states, _t = _routine_lanes(c.graph, f"loop {fmt} {rnd}")
+        _held(c, states, None, 2)
+
+
+def test_an_input_every_call_takes_from_one_slot_is_no_part_of_a_record(
+        monkeypatch):
+    """Two divisions of 1 (N bodies' 1 / (s sqrt(s)) is 56 of them at
+    N = 8) and two divisions by 3: the 1 and the 3 are read from the bank
+    by the loop's body, each record one slot - the a for the divisions by
+    3, the b for those of 1 - and the result over it."""
+    c = _looped(monkeypatch, FIXED, 0)
+    assert sorted(_batches(c)) == [("div", 1, 2), ("div", 2, 2),
+                                   ("sqrt", 1, 2)]
+    by = {(e["op"], e["depth"]): e
+          for e in c.manifest["routines"]["call_loops"]["loops"]}
+    one = by[("div", 1)]
+    assert list(one["fixed"]) == ["a"]
+    assert c.lowered.slots[one["fixed"]["a"]].exact == 1
+    assert one["records"][1] - one["records"][0] == 1
+    three = by[("div", 2)]
+    assert list(three["fixed"]) == ["b"]
+    assert c.lowered.slots[three["fixed"]["b"]].exact == 3
+    assert by[("sqrt", 1)]["fixed"] == {}
+    states, _t = _routine_lanes(c.graph, "fixed")
+    _held(c, states, None, 2)
+
+
+def test_the_internal_check_holds_a_call_loop(monkeypatch):
+    """Controls for check.py's loop rules, each a damaged looped image of
+    Kepler under rk4: the index's last step dropped (the next call reads
+    the last one's result), the call's raise dropped, a loop's count one
+    short, an operand stored into the wrong record, and the index stepped
+    by another word (4, which the routines hold) than the 1. Each an
+    InternalError; the image as written passes."""
+    c = _looped(monkeypatch, KEPLER_RK4, 0)
+    insns = list(asm.Image.from_bytes(c.image).insns)
+    dec = [asm.decode(w) for w in insns]
+
+    def ctrl(k, name):
+        return dec[k]["ctrl"] and asm.CTRL_NAMES.get(dec[k]["op"]) == name
+
+    def refused(words):
+        with pytest.raises(cftc.InternalError):
+            cftc_check.verify(c.lowered, c.program, _image_with(c, words),
+                              c.steps, c.lowered.half_bits)
+    reps = [k for k in range(len(dec)) if ctrl(k, "repeat")]
+    ends = [k for k in range(len(dec)) if ctrl(k, "endrep")]
+    r, e = reps[1], ends[0]                 # the first call loop
+    assert r < e < reps[2]
+    step = e - 1                            # its last instruction: the step
+    assert not dec[step]["ctrl"] and \
+        sf.OP_NAMES[dec[step]["op"]] == "iadd"
+    refused(insns[:step] + insns[step + 1:])
+    rz = next(k for k in range(r, e) if ctrl(k, "raise"))
+    refused(insns[:rz] + insns[rz + 1:])
+    w = list(insns)
+    w[r] = asm.repeat(dec[r]["imm"] - 1)
+    refused(w)
+    node, calls = c.program.loops()[0]
+    loop = c.program.x.nodes[node]
+    first = range(loop.base, loop.base + loop.stride * calls)
+    st = max(k for k in range(r) if ctrl(k, "stl")
+             and (dec[k]["imm"] & asm.SLOT_MASK) in first)
+    w = list(insns)
+    w[st] = asm.stl(dec[st]["ra"], (dec[st]["imm"] & asm.SLOT_MASK) + 1)
+    refused(w)
+    # the index stepped by another word, not the 1: evaluated concretely,
+    # the next call reads a slot no record is in
+    four = c.lowered.slot_of[("w", 4)]
+    w = list(insns)
+    w[step] = asm.alu(dec[step]["op"], dec[step]["rd"], dec[step]["ra"],
+                      four, kb=True)
+    refused(w)
+    cftc_check.verify(c.lowered, c.program, c.image, c.steps,
+                      c.lowered.half_bits)
+
+
+def test_a_call_loop_is_counted_as_the_loader_counts_it(monkeypatch):
+    """The worst case the loader bounds counts a loop's body once a call:
+    the compilation's, and seq.py's own reading of the image, agree; and
+    the cycle model runs the loop as unrolled."""
+    c = _looped(monkeypatch, KEPLER_RK4, 0, steps=7)
+    p = c.program
+    assert c.worst_case == len(p.prologue) + 1 + 7 * p.executed() + \
+        len(p.epilogue) + 1
+    insns = [asm.decode(w) for w in asm.Image.from_bytes(c.image).insns]
+    mult, worst = [1], 0
+    for d in insns:
+        worst += mult[-1]
+        if d["ctrl"] and d["op"] == asm.REPEAT:
+            mult.append(mult[-1] * d["imm"])
+        elif d["ctrl"] and d["op"] == asm.ENDREP:
+            mult.pop()
+    assert worst == c.worst_case
+    from cftc import schedule
+    assert len(schedule.unrolled(p.body)) + 1 == p.executed()
 # The `tangent` stage (programs/tangent_check.py) holds every compiled
 # variational image to lang.run on seq.py; these are its smaller facts.
 

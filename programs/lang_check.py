@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # Copyright 2026 Logan W.
 # SPDX-License-Identifier: Apache-2.0
-"""The `lang` runner stage: the compiler (python/cftc) held to the language.
+"""The `lang` and `lang-routines` runner stages: the compiler (python/cftc)
+held to the language.
 
     python programs/lang_check.py [--segrun host/cft-segrun[.exe]]
                                   [--audit host/cft-audit[.exe]]
-                                  [--corpus N] [--only A,B,...]
+                                  [--corpus N] [--group G,...]
+                                  [--only A,B,...]
     python programs/lang_check.py --write     regenerate the committed
                                               compiled references
     python programs/lang_check.py --record    append to cftc's output-version
@@ -40,8 +42,16 @@ many lanes and at several step counts: the image's REPEAT patched to 1,
   D  resume: one segment of 2S equals two of S
   E  libcft's software backend: cft-segrun certifies each compiled
      reference (a main run, a half-step run on the halved bank, a
-     step-halving estimate); the golden reader, the golden audit and
-     cft-audit accept each, in full and sampled
+     step-halving estimate) - Kepler's, whose image holds routines, among
+     them (C4); the golden reader, the golden audit and cft-audit accept
+     each, in full and sampled; and version 1's wider run refused for an
+     image holding a routine (C4): cft-segrun refuses to write a wider
+     run of Kepler's image, `aux-image` (exit 5, nothing made), and
+     cft-audit refuses the certificate the instrument
+     CFT_SEGRUN_PLANT=wider-routine makes of it, `aux-image` at run 1;
+     the same construction on Lorenz-63, which holds none, is written and
+     accepted, so the rule alone refuses (the golden half is certificate
+     version 2's parcel's)
   F  determinism: two processes under two PYTHONHASHSEEDs write the same
      bytes, and the committed compiled references are those bytes; and
      cftc's VERSION as an output version (C4): the record,
@@ -50,10 +60,18 @@ many lanes and at several step counts: the image's REPEAT patched to 1,
      - with its digest and nothing else, so a compiler change that moves
      a committed byte fails here until VERSION is bumped (python/cftc/
      outputs.py); the record's check caught on five plants in memory
-  G  every refusal of the compiler's, by name
+  G  every refusal of the compiler's, by name, and the language's
+     bank-capacity, which it raises for its routines' words (C4)
   H  plants in a copy of the package: each stopped by the internal check,
-     and with the check off each red on seq.py, its failing lanes counted
-  I  the corpus's coverage, every tally nonzero
+     and with the check off each red on seq.py, its failing lanes counted;
+     with the routines' (C4): a raise dropped, a raise inside its quiet
+     region, a region dropped, a routine reading another word; and the
+     call loop's (C4), its constant lowered in the copy: the index not
+     stepped past a record, a call's raise dropped, a loop a call short
+  I  the core legs' coverage, every tally nonzero: every operation the
+     compiler carries as one instruction, every attribute, format and
+     integrator, the lowering's shapes, the four flags (I2 is the
+     routines')
   J  every source the language accepts reads back (D2): maps reading h at
      random - forms that scale with h, that fold away, that are
      nonlinear - chains at the parser's 100 - negations used as
@@ -64,18 +82,49 @@ many lanes and at several step counts: the image's REPEAT patched to 1,
      canonical form read back, or refused by the name its source decides;
      never an InternalError. No class of these reached a generator above,
      and each stopped the compiler at exit 70 until D2's rules.
-  K  run-time division and square root (L4): generated sources the
+  K  run-time division and square root (L4), inlined as routines (C4):
+     every flag of both through the interpreter at every format; Kepler's
+     reference (kepler-sv) at every format and under every attribute
+     against the interpreter, its costs pinned; and generated sources the
      language accepts that divide or take a root - in equations and lets,
      with and without tangent vectors, under every integrator, format and
-     attribute - each read back through its canonical form, run by the
-     interpreter on lanes that overflow, hold a signalling NaN and hold
-     subnormals, and refused by the compiler `runtime-routine` at the first
-     line holding one, on every target and through the command line (exit
-     3) - never an InternalError, the D2 rule between L4 and parcel C4,
-     which compiles them; and each one's canonical form with its
-     written-out step and its tangent lines moved above its equations,
-     refused at the first line holding one whatever the statement
-     (verifier-VL4's (b)1)
+     attribute - each read back through its canonical form, compiled for
+     the software targets (one image for sw, sw:4096 and sw:32768) and
+     run on seq.py against the interpreter at 1, 2 and 5 steps, states,
+     tangents and FLAGS, on lanes that overflow, hold a signalling NaN,
+     hold subnormals and hold zeros; each refused `target-feature`,
+     naming FLAG_CONTROL, on revision 7's targets and through the command
+     line (exit 3, never 70); each one's canonical form with its
+     written-out step and its tangent lines moved above its equations
+     compiling to the same image
+  K2 the routines on their full pools: each of the 40 fragments
+     (cft_golden/routines.py: division and root, four formats, five
+     attributes) run as a program on seq.py against softfloat, its bits and
+     each lane's own flag word, over test_divfull's pools whole
+  L  the call loop (C4, python/cftc/callloop.py): planar N bodies under rk4
+     at N = 8, whose step with its 224 routines inlined passes the
+     constant, 32,768 - compiled with its largest batch looped alone, as
+     the rule says, inside sw's 256 slots, and run on seq.py against the
+     interpreter at 1 and 2 steps, states and FLAGS, on lanes that
+     overflow, hold a signalling NaN, hold subnormals and hold zeros; and
+     Kepler under rk4 at fp64 and fp256 with the constant lowered, every
+     batch looped and the largest alone, at 1, 2 and 5 steps - the fp64
+     image with every batch looped certified through cft-segrun on
+     libcft's software backend (a main run and a half-step run) and
+     accepted by the golden reader, the golden audit and cft-audit, in
+     full and sampled. Leg H holds three plants of the loop's own
+
+  I2 the routines' coverage: each of div and sqrt compiled and run at
+     every format and under every attribute and integrator, the five
+     flags raised by those runs, and call loops run of both
+
+The legs come in two groups, each with its tally (GROUPS, below): core,
+legs A to H and J with I its tally, which is the `lang` stage, in the
+quick budget; and routines, legs K, K2 and L with I2 its tally, the
+`lang-routines` stage, in the gate budget (verify/run.sh). `--group`
+runs a group; with no selection both run. A tally runs when every leg
+of its group ran; where `--only` ran part of a group, its tally is a
+SKIP line.
 
 A check skipped prints a line that starts with SKIP, which the runner
 counts and names on its VERDICT line.
@@ -102,6 +151,7 @@ sys.path.insert(0, str(ROOT / "python"))
 import cftc                                               # noqa: E402
 from cftc import outputs as O                             # noqa: E402
 from cftc import targets as TG                            # noqa: E402
+from cft_golden import routines as R                      # noqa: E402
 from cftc.schedule import cycles                          # noqa: E402
 from cftc.regalloc import Ins                             # noqa: E402
 from cft_golden import FORMATS, asm, cert, lang, seq      # noqa: E402
@@ -127,6 +177,14 @@ PINNED = {
     "lorenz96-rk4": (873, 760, 60, 50, 29, 48, 5),
     "henonheiles-lf": (23, 12, 0, 0, 9, 4, 5),
 }
+# The reference that divides and takes a root at run time (C4): Kepler's
+# problem under Stormer-Verlet, three routines a step. No gen_odes.py image
+# or classic bank stands beside it, so leg K holds it (every format, every
+# attribute, its costs pinned), leg E certifies it and leg F commits it.
+ROUTINE_REFS = {"kepler-sv": 10}
+ROUTINE_REF_LANES = {"kepler-sv": 12}
+BOX["kepler-sv"] = [(-2, 2), (-2, 2), (-1, 1), (-1, 1)]
+PINNED["kepler-sv"] = (545, 525, 0, 0, 29, 4, 40)
 
 
 # ---- reporting ---------------------------------------------------------
@@ -208,15 +266,17 @@ def special_lanes(fmt, n, base, rng):
 # ---- running an image ------------------------------------------------------
 
 def image_at(image, steps):
-    """The image with its one REPEAT counting `steps` - every other word
-    the same, as programs/check.py's _patch_trip makes a run of another
-    length."""
+    """The image with its segment's REPEAT - its first - counting `steps`,
+    every other word the same, as programs/check.py's _patch_trip makes a
+    run of another length. A call loop's REPEATs (C4) are inside the step
+    and keep their counts."""
     img = asm.Image.from_bytes(image)
     words = list(img.insns)
     for k, w in enumerate(words):
         d = asm.decode(w)
         if d["ctrl"] and d["op"] == asm.REPEAT:
             words[k] = asm.repeat(steps)
+            break
     return asm.Image(img.fmt, words, img.consts, img.max_deposits, img.flags,
                      scratch_depth=img.scratch_depth,
                      scratch_io=img.scratch_io).to_bytes()
@@ -450,6 +510,35 @@ def cover(c, flags):
     COVER["homed"] += c.program.pinning != "all"
     COVER["pinned"] += c.program.pinning != "none"
     COVER["flags"] |= flags
+
+
+# The routines' own tally (C4), fed by the routines group's legs alone (K
+# and L), so that the core tally above holds from the core legs and this
+# one from its own: for each of div and sqrt, the formats, attributes and
+# integrators an image holding it was compiled under and run at; the
+# flags those runs raised; and the call loops run - their count, their
+# calls, and which routines they looped.
+RCOVER = {"images": 0, "flags": 0, "loops": 0, "looped_calls": 0,
+          "looped_ops": set(),
+          "by_op": {op: {"formats": set(), "rounds": set(),
+                         "integrators": set(), "images": 0}
+                    for op in ("div", "sqrt")}}
+
+
+def rcover(c, flags):
+    RCOVER["images"] += 1
+    ops = c.ir.op_counts()
+    for op, d in RCOVER["by_op"].items():
+        if ops.get(op):
+            d["images"] += 1
+            d["formats"].add(c.ir.fmt_name)
+            d["rounds"].add(c.ir.rnd_name)
+            d["integrators"].add(c.ir.integrator[0])
+    RCOVER["flags"] |= flags
+    for b in getattr(c, "looped", ()):
+        RCOVER["loops"] += 1
+        RCOVER["looped_calls"] += len(b.calls)
+        RCOVER["looped_ops"].add(b.op)
 
 
 # ---- A and B: the references -------------------------------------------
@@ -1128,7 +1217,8 @@ def param_slot_bits(c, name):
 
 def leg_libcft(segrun, audit, rng, work):
     section("E. cft-segrun certifies the compiled references; both "
-            "auditors accept")
+            "auditors accept; a wider run of a routine image refused by "
+            "both C tools")
     if not segrun or not Path(segrun).is_file():
         skip("E: cft-segrun's certificates of the compiled images",
              f"no cft-segrun at {segrun!r} (the stage builds it)")
@@ -1140,9 +1230,9 @@ def leg_libcft(segrun, audit, rng, work):
     if not have_audit:
         skip("E: cft-audit on each certificate",
              f"no cft-audit at {audit!r} (the stage builds it)")
-    for base in REFS:
+    for base, steps in {**REFS, **ROUTINE_REFS}.items():
         for fmt in ("fp64", "fp256"):
-            c = cftc.compile_file(SYSTEMS / f"{base}-{fmt}.cftl", REFS[base],
+            c = cftc.compile_file(SYSTEMS / f"{base}-{fmt}.cftl", steps,
                                   source=f"programs/systems/{base}-{fmt}"
                                          ".cftl")
             certify(c, f"{base}-{fmt}", segrun, audit if have_audit else None,
@@ -1158,6 +1248,96 @@ def leg_libcft(segrun, audit, rng, work):
         return
     certify(c, "generated-lane-params", segrun,
             audit if have_audit else None, rng, work)
+    wider_routine_controls(segrun, audit if have_audit else None, rng, work)
+
+
+def wider_routine_controls(segrun, audit, rng, work):
+    """C4: version 1 has no wider run of an image holding a routine - its
+    words and its bank words are its format's - so both C tools refuse
+    one, `aux-image` (exit 5): cft-segrun will not write it, and cft-audit
+    refuses one made through the gate's instrument
+    (CFT_SEGRUN_PLANT=wider-routine). The wider image is the main image's
+    own words one rung up, its bank and start exactly widened - all that
+    version 1's relation holds - so the routine rule alone refuses it; the
+    same construction on Lorenz-63, which holds no routine, is written and
+    accepted. (The golden writer's and audit's half is certificate version
+    2's parcel's.)"""
+    sizes = {"fp64": 8, "fp128": 16}
+    for base, routine in (("kepler-sv", True), ("lorenz63-rk4", False)):
+        steps = ROUTINE_REFS.get(base) or REFS[base]
+        c = cftc.compile_file(SYSTEMS / f"{base}-fp64.cftl", steps,
+                              source=f"programs/systems/{base}-fp64.cftl")
+        g = c.ir
+        d = work / "certs" / f"wider-{base}"
+        if d.exists():
+            shutil.rmtree(d)
+        d.mkdir(parents=True)
+        block = c.scratch_block(lanes_for(g.fmt, g.n_state, rng, 2,
+                                          BOX.get(base)))
+        wide = bytearray(c.image)
+        wide[20:24] = (2).to_bytes(4, "little")     # the precision code
+        files = {
+            "image.cftp": c.image, "main.bank": c.bank,
+            "init.bin": cert.state_bytes("fp64", block),
+            "wide.cftp": bytes(wide),
+            "wide.bank": b"".join(cert.widen(g.fmt_name, v).to_bytes(
+                sizes["fp128"], "little") for v in c.lowered.bank_values()),
+            "wide.bin": cert.state_bytes("fp128", [cert.widen(g.fmt_name, v)
+                                                   for v in block])}
+        for name, data in files.items():
+            (d / name).write_bytes(data)
+        args = ["--out", d / "c.cert", "--states", d / "states", "--open",
+                "--device", "sw",
+                "--run", "main", "--image", d / "image.cftp", "--bank",
+                d / "main.bank", "--init", d / "init.bin", "--segments", 1,
+                "--steps", steps,
+                "--run", "wider", "--image", d / "wide.cftp", "--bank",
+                d / "wide.bank", "--init", d / "wide.bin", "--segments", 1,
+                "--steps", steps]
+        cmd = [str(segrun)] + [str(a) for a in args]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if routine:
+            check(r.returncode == 5 and r.stderr.startswith(
+                "cft-segrun: refused aux-image: run 1 (wider)") and
+                not (d / "c.cert").exists() and not (d / "states").exists(),
+                f"{base}: cft-segrun refuses a wider run of its image, which "
+                f"holds routines, aux-image (exit 5), nothing made",
+                f"rc {r.returncode}: {r.stderr.strip()[-200:]}")
+            env = dict(os.environ, CFT_SEGRUN_PLANT="wider-routine")
+            r = subprocess.run(cmd, capture_output=True, text=True,
+                               timeout=600, env=env)
+            if not check(r.returncode == 0 and (d / "c.cert").is_file(),
+                         f"{base}: through the instrument "
+                         f"CFT_SEGRUN_PLANT=wider-routine it is written",
+                         f"rc {r.returncode}: {r.stderr.strip()[-200:]}"):
+                continue
+        elif not check(r.returncode == 0, f"{base}: cft-segrun writes the "
+                       f"same construction for an image with no routine",
+                       f"rc {r.returncode}: {r.stderr.strip()[-200:]}"):
+            continue
+        if not audit:
+            skip(f"{base}: cft-audit on the wider run", "no cft-audit")
+            continue
+        seed = hashlib.sha256(f"lang wider {base}".encode()).digest()
+        a = subprocess.run(
+            [str(audit)] + [str(x) for x in (
+                "--cert", d / "c.cert", "--states", d / "states", "--seed",
+                seed.hex(), "--run", "0", "--image", d / "image.cftp",
+                "--bank", d / "main.bank", "--choose", "all", "--run", "1",
+                "--image", d / "wide.cftp", "--bank", d / "wide.bank",
+                "--choose", "all")],
+            capture_output=True, text=True, timeout=600)
+        if routine:
+            check(a.returncode == 5 and "cft-audit: refused aux-image: run 1 "
+                  "(wider): the main image holds a routine" in a.stderr and
+                  "location line=- run=1 segment=- entry=-" in a.stderr,
+                  f"{base}: cft-audit refuses that certificate, aux-image at "
+                  f"run 1 (exit 5): version 1 has no wider run of a routine "
+                  f"image", f"rc {a.returncode}: {a.stderr.strip()[-200:]}")
+        else:
+            check(a.returncode == 0, f"{base}: cft-audit accepts it - the "
+                  f"rule refuses routine images alone",
+                  f"rc {a.returncode}: {a.stderr.strip()[-200:]}")
 
 
 def certify(c, name, segrun, audit, rng, work):
@@ -1253,7 +1433,7 @@ def certify(c, name, segrun, audit, rng, work):
 
 def compiled_references():
     out = {}
-    for base, steps in REFS.items():
+    for base, steps in {**REFS, **ROUTINE_REFS}.items():
         for fmt in ("fp64", "fp256"):
             c = cftc.compile_file(SYSTEMS / f"{base}-{fmt}.cftl", steps,
                                   source=f"programs/systems/{base}-{fmt}"
@@ -1296,15 +1476,17 @@ def leg_determinism(work):
                      f"{seed} ran", r.stderr.strip()[-300:]):
             return
         seen.append(json.loads(r.stdout))
+    nrefs = 2 * (len(REFS) + len(ROUTINE_REFS))
     check(seen[0] == seen[1] and len(seen[0]) > 50,
           f"PYTHONHASHSEED 0 and 4242 write the same bytes: {len(seen[0])} "
-          f"files (the six references and six generated systems, every "
+          f"files (the {nrefs} references and six generated systems, every "
           f"output)")
     files = compiled_references()
     have = sorted(p.name for p in COMPILED.iterdir()) if COMPILED.is_dir() \
         else []
     check(have == sorted(files), f"programs/systems/compiled/ holds exactly "
-          f"the six references' {len(files)} files",
+          f"the {nrefs} references' {len(files)} files, Kepler's with "
+          f"routines among them",
           f"it holds {len(have)}: run programs/lang_check.py --write")
     wrong = [n for n, data in files.items()
              if (COMPILED / n).is_file() and (COMPILED / n).read_bytes()
@@ -1415,12 +1597,26 @@ def leg_refusals():
            "h = 3 x 2^-149 at fp32, whose half is not exact")
     routine = ("system dv\nformat fp64\nstate x, y\nnext x = x\n"
                "next y = sqrt(abs(x)) / y\nstep map\n")
-    expect("runtime-routine", lambda: cftc.compile_text(routine, 2),
-           "a run-time root and division, which the compiler carries only "
-           "from parcel C4 (L4; leg K holds it on every target)")
-    check(made == set(cftc.NAMES), f"every one of the compiler's "
-          f"{len(cftc.NAMES)} names was made", f"missing "
-          f"{sorted(set(cftc.NAMES) - made)}")
+    expect("target-feature",
+           lambda: cftc.compile_text(routine, 2, target="u50-rev7"),
+           "a run-time root and division on revision 7's tile, which has no "
+           "flag control for their routines (C4; leg K holds every target)")
+    words = len({b for op in ("div", "sqrt") for b in R.fragment(
+        op, FORMATS["fp64"], sf.RND_RNE).words.values()})
+    k = 512 - words + 1
+    wide = ("system wide\nformat fp64\nstate x, y\nparam "
+            + ", ".join(f"p{i} = {i + 1}" for i in range(k))
+            + "\nnext x = sqrt(abs(x)) / y + ("
+            + " + ".join(f"p{i}" for i in range(k)) + ")\nnext y = y\n"
+            "step map\n")
+    expect("bank-capacity", lambda: cftc.compile_text(wide, 2),
+           f"{k} params and the {words} words of a division's and a root's "
+           f"routines, past the bank's 512 - the language's name, raised by "
+           f"the compiler for the words the checker cannot see (C4)")
+    want = set(cftc.NAMES) | set(cftc.refusals.SHARED)
+    check(made == want, f"every one of the compiler's {len(cftc.NAMES)} "
+          f"names was made, and the language's bank-capacity it raises "
+          f"too", f"missing {sorted(want - made)}")
 
 
 # ---- H: plants -----------------------------------------------------------------
@@ -1442,8 +1638,8 @@ PLANTS = {
          "            srcs = (srcs[0], srcs[2], srcs[1])\n"
          "        dying = [k for k in keys if self.next_use(k, q) is None]\n")],
     "a register reused while live": [
-        ("__init__.py", "    c.program = prog = best_program(low)\n",
-         "    c.program = prog = best_program(low)\n"
+        ("__init__.py", "    c.lowered, c.program = low, prog\n",
+         "    c.lowered, c.program = low, prog\n"
          "    _plant_reuse(prog)\n"),
         ("__init__.py", "def compile_text(",
          "def _plant_reuse(prog):\n"
@@ -1567,6 +1763,97 @@ def leg_plants(rng, work):
                   + ("" if fok else ", FLAGS differ")
                   for t, (nf, n, f, fok) in lanes_red.items()),
               "no lane differs")
+    leg_routine_plants(rng, work, len(PLANTS))
+
+
+# The routines' plants (C4), each with a system and lanes on which seq.py can
+# see it: a dropped or silenced raise only where the routine is the one source
+# of a flag (x / 3 raises inexact and nothing else does), and a region
+# dropped only where the routine is exact (roots of squares), so that its
+# scaffolding's inexact is the one flag of the run.
+_DIV3 = "system pd\nformat fp64\nstate x\nnext x = x / 3\nstep map\n"
+_ROOTS = "system pr\nformat fp64\nstate x\nnext x = sqrt(x)\nstep map\n"
+_DIV2 = ("system pl\nformat fp64\nstate x, y\nnext x = x / 3\n"
+         "next y = y / 7\nstep map\n")       # no flag but the routines'
+_LOOPS = ("callloop.py", "CALL_LOOP_ABOVE = 32768", "CALL_LOOP_ABOVE = 0")
+ROUTINE_PLANTS = {
+    "a routine's raise dropped": (
+        [("regalloc.py",
+          '        self.emit(Ins("raise", srcs=(("r", self.where[k]),), '
+          'node=j, key=k))',
+          "        pass  # PLANT: the raise dropped")],
+        _DIV3, None, 2),
+    "a routine's raise inside its quiet region": (
+        [("regalloc.py",
+          '            here = getattr(self.low.nodes[j], "kind", "lang") == '
+          '"quiet"',
+          '            here = getattr(self.low.nodes[j], "kind", "lang") in '
+          '("quiet", "raise")')],
+        _DIV3, None, 2),
+    "a routine's quiet region dropped": (
+        [("regalloc.py", "            if here != quiet:",
+          "            if False:  # PLANT: no region")],
+        _ROOTS, [[4], [9], [1 << 52], [25]], 1),
+    "a routine reading another word": (
+        [("inline.py", '("w", f.words[s[1]])',
+          '("w", f.words["K_MAN" if s[1] == "K_SIGN" else s[1]])')],
+        _DIV3, None, 2),
+    # the call loop's (C4), its constant lowered in the copy so that two
+    # divisions loop
+    "a call loop's index not stepped past its record": (
+        [_LOOPS, ("callloop.py",
+                  '    code.append(("stx", reg[f.result]))\n'
+                  '    code.append(("step",))\n',
+                  '    code.append(("stx", reg[f.result]))\n')],
+        _DIV2, None, 2),
+    "a call loop's raise dropped": (
+        [_LOOPS, ("callloop.py", '    code.append(("raise", reg[f.flags]))\n',
+                  "")],
+        _DIV2, None, 2),
+    "a call loop one call short": (
+        [_LOOPS, ("regalloc.py",
+                  '        self.emit(Ins("repeat", slot=K, node=j))',
+                  '        self.emit(Ins("repeat", slot=K - 1, node=j))')],
+        _DIV2, None, 2),
+}
+
+
+def leg_routine_plants(rng, work, base_k):
+    for k, (what, (edits, text, lanes, steps)) in enumerate(
+            ROUTINE_PLANTS.items(), base_k):
+        try:
+            on = plant_copy(edits, f"{k}on", work)
+            off = plant_copy(edits + [CHECK_OFF], f"{k}off", work)
+        except AssertionError as e:
+            bad(f"plant {what!r}: {e}")
+            continue
+        try:
+            on.compile_text(text, steps, source=what)
+            stopped = "accepted"
+        except on.InternalError as e:
+            stopped = "stopped"
+            print(f"        {str(e)[:150]}")
+        except Exception as e:                         # noqa: BLE001
+            stopped = type(e).__name__
+        check(stopped == "stopped", f"plant {what!r}: the internal check "
+              f"stops it", f"it was {stopped}")
+        try:
+            c = off.compile_text(text, steps, source=what)
+        except Exception as e:                         # noqa: BLE001
+            bad(f"plant {what!r}: with the check off it does not compile "
+                f"({type(e).__name__}: {e})")
+            continue
+        fmt = c.ir.fmt
+        if lanes is None:
+            states = lanes_for(fmt, c.ir.n_state, rng, 8)
+        else:
+            states = [[K.round_once(fmt, sf.RND_RNE, Fraction(v))[0]
+                       for v in row] for row in lanes]
+        failing, first, fok, ref = compare(c, states, None, steps)
+        check(bool(failing) or not fok, f"plant {what!r}: red on seq.py with "
+              f"the check off - {len(failing)} of {len(states)} lanes, FLAGS "
+              f"{'equal' if fok else 'differ'} (the interpreter's "
+              f"{ref.flags:#x})", "no lane differs and FLAGS agree")
 
 
 # ---- J: every source the language accepts reads back -----------------------
@@ -1849,17 +2136,54 @@ def leg_readback(count, rng):
           f"{len(wrong)} otherwise")
 
 
-# ---- K: run-time division and square root (L4) ------------------------------
+# ---- K: run-time division and square root (L4, C4) -----------------------------
 
 # The language has `a / b` and `sqrt(a)` with operands that are not constants
 # (the nodes div and sqrt, softfloat's div and sqrt under the program's
-# attribute), and its interpreter runs them; the compiler carries them only
-# from parcel C4, and until then refuses them `runtime-routine`, first, at the
-# first source line holding one (docs/LANGUAGE.md). D2's rule must hold in
-# between: every source the language accepts compiles or is refused by name.
+# attribute, L4), and the compiler carries each as a routine inlined where it
+# stands (C4): an image holding one needs revision 8's flag control, which
+# the software targets publish and revision 7's do not. D2's rule holds: every
+# source the language accepts compiles or is refused by name.
 
 ROUTINE_TARGETS = ["sw", "sw:4096", "sw:32768", "u50-rev7", "u50-rev7-quad",
                    "u50-round2", "open-core"]
+SW_TARGETS = ("sw", "sw:4096", "sw:32768")
+REV7_TARGETS = ("u50-rev7", "u50-rev7-quad", "u50-round2", "open-core")
+
+
+def compare_routine(c, states, tans, top):
+    """compare() with tangent vectors as well: seq.py on the image at 1, 2,
+    5 and `top` steps against lang.run's checkpoints - states, tangents and
+    FLAGS. -> (failing lanes, first step a lane or FLAGS parts, flags equal
+    everywhere, the reference run)."""
+    marks = sorted({s for s in CHECKPOINTS if s < top} | {top})
+    ref = lang.run(c.graph, states, top, at=tuple(s for s in marks
+                                                  if s != top),
+                   tangents=tans)
+    g = c.ir
+    m, n, ns = g.m, g.n_primal, g.n_state
+    block = c.scratch_block(states, None, tans)
+    failing, first, flags_ok = set(), None, True
+    for s in marks:
+        r = run_image(image_at(c.image, s), c, states, block=block)
+        if s == top:
+            want, wflags = ref.states, ref.flags
+            wt = ref.tangents if tans is not None else None
+        else:
+            want, wflags = ref.at[s]
+            wt = ref.at_tangents[s] if tans is not None else None
+        for k in range(len(states)):
+            out = r.scratch_out[k * m:(k + 1) * m]
+            bad_lane = out[:n] != want[k]
+            if wt is not None:
+                bad_lane |= out[n:ns] != [v for vec in wt[k] for v in vec]
+            if bad_lane:
+                failing.add(k)
+                first = s if first is None else first
+        if r.flags != wflags or r.status != 0:
+            flags_ok = False
+            first = s if first is None else first
+    return failing, first, flags_ok, ref
 
 
 def g_routine_expr(rng, states, ops, depth):
@@ -2008,21 +2332,60 @@ def _routine_flags():
 
 
 def leg_routines(count, rng):
-    section(f"K. run-time division and square root (L4): every flag of both "
-            f"through the interpreter at every format, and {count} generated "
-            f"sources that divide or take a root, each read back, run, and "
-            f"refused by the compiler by name at its line on "
-            f"{len(ROUTINE_TARGETS)} targets")
+    section(f"K. run-time division and square root (L4, C4): every flag of "
+            f"both through the interpreter at every format; Kepler's "
+            f"reference at every format and attribute; {count} generated "
+            f"sources that divide or take a root, compiled for the software "
+            f"targets and run against the interpreter, and refused "
+            f"`target-feature` on revision 7's")
     t0 = time.perf_counter()
     fails = _routine_flags()
     check(not fails, "every flag of div and sqrt at fp32, fp64, fp128 and "
           "fp256: each lane's result and FLAGS softfloat's, div's five and "
           "sqrt's invalid and inexact among them", "; ".join(fails[:4]))
-    tally, wrong, internal, moved = {}, [], [], {}
-    flags = runs = 0
+    # -- the reference that divides: every format, every attribute, pinned
+    for base, steps in ROUTINE_REFS.items():
+        for fmt in ("fp32", "fp64", "fp128", "fp256"):
+            c = ref_compile(base, fmt, steps=steps)
+            n = c.ir.n_state
+            lanes = lanes_for(c.ir.fmt, n, rng, ROUTINE_REF_LANES[base],
+                              BOX[base])
+            lanes += special_lanes(c.ir.fmt, n, lanes[0], rng)
+            lanes.append([0] * n)               # 0/0 and the root of 0
+            failing, first, fok, ref = compare(c, lanes, None, steps)
+            rcover(c, ref.flags)
+            check(not failing and fok and "FLAG_CONTROL" in c.features and
+                  c.accepted_by == ["sw"],
+                  f"{base} {fmt}: {len(lanes)} lanes at 1, 2, 5 and {steps} "
+                  f"steps equal the interpreter, FLAGS {ref.flags:#x} "
+                  f"included; its {c.manifest['routines']['calls']} routines "
+                  f"need FLAG_CONTROL, and sw alone of the built-in targets "
+                  f"takes it",
+                  f"{len(failing)} lanes differ from step {first}, FLAGS "
+                  f"{'equal' if fok else 'differ'}")
+            if fmt == "fp64":
+                got = compiled_costs(c)
+                row = (got["instructions"], got["alu"], got["loads"],
+                       got["stores"], got["registers"], got["slots"],
+                       got["bank"])
+                check(row == PINNED[base], f"{base}: the compiled costs are "
+                      f"the pinned {PINNED[base]}", f"measured {row}")
+        for rnd in ("rtz", "rdn", "rup", "rmm"):
+            c = ref_compile(base, "fp64", rnd, steps=steps)
+            lanes = lanes_for(c.ir.fmt, c.ir.n_state, rng, 8, BOX[base])
+            lanes += special_lanes(c.ir.fmt, c.ir.n_state, lanes[0], rng)
+            failing, first, fok, ref = compare(c, lanes, None, steps)
+            rcover(c, ref.flags)
+            check(not failing and fok, f"{base} fp64 {rnd}: {len(lanes)} "
+                  f"lanes equal the interpreter, FLAGS included - the "
+                  f"routines specialised at {rnd}",
+                  f"{len(failing)} lanes differ from step {first}")
+    # -- generated sources: compiled, run, and refused by name
+    tally, wrong, internal, kinds = {}, [], [], {}
+    flags = held = 0
     cli = []
     for k in range(count):
-        text, line = g_routine(random.Random(f"lang routines {k}"), k)
+        text, _line = g_routine(random.Random(f"lang routines {k}"), k)
         try:
             g = lang.compile_text(text, f"routine-{k}").graph
         except lang.Refusal as e:
@@ -2038,28 +2401,33 @@ def leg_routines(count, rng):
             wrong.append(f"routine {k}: its canonical form reads back as "
                          f"another graph")
         lang.render_math(g)
-        # the canonical form with its written-out step and its tangent lines
-        # above its equations: the same graph, refused at the first line
-        # holding a division or root - a block's or a tangent's line, where
-        # the compiler named the equation's until verifier-VL4's (b)1
-        text2, line2, kind2 = moved_up(canon)
         try:
-            same = lang.compile_text(text2, f"routine-{k}-moved").graph
-            if same.to_bytes() != g.to_bytes():
-                wrong.append(f"routine {k}, moved up: another graph")
-            cftc.compile_text(text2, 2, source=f"routine-{k}-moved",
-                              stem="k")
-            wrong.append(f"routine {k}, moved up: compiled")
-        except lang.Refusal as e:
-            if (e.name, e.line) != ("runtime-routine", line2):
-                wrong.append(f"routine {k}, moved up: refused {e.name} at "
-                             f"line {e.line} where runtime-routine at line "
-                             f"{line2}, a {kind2} line, is due")
+            images = {}
+            for t in SW_TARGETS:
+                c = cftc.compile_text(text, 5, target=t,
+                                      source=f"routine-{k}", stem="k")
+                images[t] = c.image
+            if len(set(images.values())) != 1:
+                wrong.append(f"routine {k}: the software targets' images "
+                             f"differ")
+            # the canonical form, its written-out step and its tangent lines
+            # moved above its equations: the same graph, so the same image
+            text2, _l2, kind2 = moved_up(canon)
+            c2 = cftc.compile_text(text2, 5, source=f"routine-{k}-moved",
+                                   stem="k")
+            if c2.image != c.image:
+                wrong.append(f"routine {k}, moved up: another image")
             else:
-                moved[kind2] = moved.get(kind2, 0) + 1
+                kinds[kind2] = kinds.get(kind2, 0) + 1
+        except lang.Refusal as e:
+            tally[e.name] = tally.get(e.name, 0) + 1
+            wrong.append(f"routine {k}: refused {e.name} on the software "
+                         f"targets: {e.sentence[:100]}")
+            continue
         except cftc.InternalError as e:
-            internal.append(f"routine {k}, moved up: internal error (exit "
-                            f"70): {str(e)[:120]}")
+            internal.append(f"routine {k}: internal error (exit 70): "
+                            f"{str(e)[:120]}")
+            continue
         fmt = g.fmt
         lanes = lanes_for(fmt, g.n_state, rng, 3)
         lanes += special_lanes(fmt, g.n_state, lanes[0], rng)
@@ -2068,81 +2436,249 @@ def leg_routines(count, rng):
         if g.tangent:
             tans = [[lanes_for(fmt, g.n_state, rng, 1)[0] for _ in g.tangent]
                     for _ in lanes]
-        r = lang.run(g, lanes, 2, tangents=tans)
-        flags |= r.flags
-        runs += 1
-        for t in ROUTINE_TARGETS:
+        failing, first, fok, ref = compare_routine(c, lanes, tans, 5)
+        rcover(c, ref.flags)
+        flags |= ref.flags
+        if failing or not fok:
+            wrong.append(f"routine {k}: {len(failing)} lanes differ from "
+                         f"step {first}, FLAGS {'equal' if fok else 'differ'}")
+        else:
+            held += 1
+        for t in REV7_TARGETS:
             try:
-                cftc.compile_text(text, 2, target=t, source=f"routine-{k}",
+                cftc.compile_text(text, 5, target=t, source=f"routine-{k}",
                                   stem="k")
                 wrong.append(f"routine {k} on {t}: compiled")
             except lang.Refusal as e:
-                key = f"{e.name} at its line" if e.line == line else \
-                    f"{e.name} at line {e.line}"
-                tally[key] = tally.get(key, 0) + 1
-                if (e.name, e.line) != ("runtime-routine", line):
-                    wrong.append(f"routine {k} on {t}: refused {e.name} at "
-                                 f"line {e.line} where runtime-routine at "
-                                 f"line {line} is due ({e.sentence[:80]})")
+                tally[e.name] = tally.get(e.name, 0) + 1
+                if e.name != "target-feature" or \
+                        "FLAG_CONTROL (CAPS2[14])" not in e.sentence:
+                    wrong.append(f"routine {k} on {t}: refused {e.name}, "
+                                 f"where target-feature naming FLAG_CONTROL "
+                                 f"is due ({e.sentence[:80]})")
             except cftc.InternalError as e:
                 internal.append(f"routine {k} on {t}: internal error (exit "
                                 f"70): {str(e)[:120]}")
         if len(cli) < 3:
-            cli.append((k, text, line))
+            cli.append((k, text))
     py = [sys.executable, str(ROOT / "python" / "cftc")]
     with tempfile.TemporaryDirectory() as tmp:
-        for k, text, line in cli:
+        for k, text in cli:
             src = Path(tmp) / f"routine{k}.cftl"
             src.write_bytes(text.encode("ascii"))
-            out = Path(tmp) / f"out{k}"
+            out = Path(tmp) / f"sw{k}"
+            p = subprocess.run(py + [str(src), "--steps", "2", "--out",
+                                     str(out)], capture_output=True,
+                               text=True)
+            cfta = out / f"routine{k}.cfta"
+            if p.returncode != 0 or not cfta.is_file() or \
+                    "\n  quiet " not in cfta.read_text(encoding="ascii"):
+                wrong.append(f"routine {k} through the command line on sw: "
+                             f"rc {p.returncode}, {p.stderr.strip()[:120]}")
+            out = Path(tmp) / f"quad{k}"
             p = subprocess.run(py + [str(src), "--steps", "2", "--target",
                                      "u50-rev7-quad", "--out", str(out)],
                                capture_output=True, text=True)
             if p.returncode != 3 or not p.stderr.startswith(
-                    "cftc: refused runtime-routine: ") or \
-                    f"routine{k}.cftl:{line}: " not in p.stderr or \
-                    out.exists():
-                wrong.append(f"routine {k} through the command line: rc "
-                             f"{p.returncode}, {p.stderr.strip()[:120]}")
+                    "cftc: refused target-feature: ") or out.exists():
+                wrong.append(f"routine {k} through the command line on "
+                             f"u50-rev7-quad: rc {p.returncode}, "
+                             f"{p.stderr.strip()[:120]}")
     for f in (internal + wrong)[:10]:
         print(f"        {f}")
     print(f"  outcomes: {dict(sorted(tally.items()))}")
-    print(f"  moved up, refused at the first line holding one, by the kind "
-          f"of that line: {dict(sorted(moved.items()))}")
-    print(f"  the interpreter's FLAGS over the {runs} runs: {flags:#x}")
+    print(f"  moved up, the same image, by the kind of the first line "
+          f"holding a division or root: {dict(sorted(kinds.items()))}")
+    print(f"  FLAGS over the {held} images held: {flags:#x}")
     check(not internal, f"no InternalError: {count} generated sources that "
           f"divide or take a root, on {len(ROUTINE_TARGETS)} targets each, "
           f"and their canonical forms moved up",
           f"{len(internal)} stopped the compiler with an internal error, "
           f"exit 70")
-    check(not wrong and runs >= count // 2 and
-          {"block", "tangent", "equation"} <= set(moved),
-          f"{runs} sources accepted by the language read back and run on the "
-          f"interpreter, every one refused `runtime-routine` at the first "
-          f"line holding a division or a root on every target, and "
-          f"{len(cli)} through the command line, exit 3, nothing written; "
-          f"each one's canonical form with its written-out step and its "
-          f"tangent lines moved above its equations, the same graph, refused "
-          f"at the first line holding one - an expansion block's line "
-          f"{moved.get('block', 0)} times, a written tangent's "
-          f"{moved.get('tangent', 0)}, an equation's or a let's "
-          f"{moved.get('equation', 0)} ({time.perf_counter() - t0:.1f} s)",
+    check(not wrong and held >= count // 2 and
+          {"block", "tangent", "equation"} <= set(kinds),
+          f"{held} sources accepted by the language read back, compiled for "
+          f"the software targets - one image for the three - and run on "
+          f"seq.py equal to the interpreter at 1, 2 and 5 steps, states, "
+          f"tangents and FLAGS, on lanes that overflow, hold a signalling "
+          f"NaN, hold subnormals and hold zeros; each refused "
+          f"`target-feature`, naming FLAG_CONTROL, on revision 7's "
+          f"{len(REV7_TARGETS)} targets, and {len(cli)} through the command "
+          f"line (exit 0 on sw with the text's regions, exit 3 on "
+          f"u50-rev7-quad, nothing written); each one's canonical form with "
+          f"its written-out step and tangent lines moved above its "
+          f"equations the same image - its first line holding one an "
+          f"expansion block's {kinds.get('block', 0)} times, a written "
+          f"tangent's {kinds.get('tangent', 0)}, an equation's or a let's "
+          f"{kinds.get('equation', 0)} ({time.perf_counter() - t0:.1f} s)",
           f"{len(wrong)} otherwise")
+
+
+def leg_routine_pools():
+    section("K2. the routines on their full pools (C4): each of the 40 "
+            "fragments - division and root, four formats, five attributes - "
+            "softfloat's bits and each lane's own flag word")
+    sys.path.insert(0, str(ROOT / "python" / "tests"))
+    try:
+        from routine_pools import div_pairs, sqrt_xs
+    finally:
+        sys.path.remove(str(ROOT / "python" / "tests"))
+    t0 = time.perf_counter()
+    total, bad_cases = 0, []
+    for fmt in ("fp32", "fp64", "fp128", "fp256"):
+        F = FORMATS[fmt]
+        pairs, xs = div_pairs(F, light=False), sqrt_xs(F, light=False)
+        for rnd in range(5):
+            for op, ls in (("div", pairs), ("sqrt", xs)):
+                f = R.fragment(op, F, rnd)
+                if op == "div":
+                    outs, words = R.run(f, [p[0] for p in ls],
+                                        [p[1] for p in ls])
+                else:
+                    outs, words = R.run(f, ls)
+                for i, x in enumerate(ls):
+                    args = x if op == "div" else (x,)
+                    if (outs[i], words[i]) != R.GOLDEN[op](F, *args, rnd):
+                        bad_cases.append(f"{op} {fmt} rnd {rnd} {args}")
+                total += len(ls)
+    check(not bad_cases, f"{total:,} lanes over the 40 fragments, each "
+          f"softfloat's result and flag word ({time.perf_counter() - t0:.0f} "
+          f"s)", f"{len(bad_cases)} wrong, first {bad_cases[:2]}")
+
+
+# ---- L: the call loop (C4) ---------------------------------------------------
+
+KEPLER_RK4 = ("system kepler\nformat {fmt}\nstate x, y, px, py\n"
+              "let r2 = fma(x, x, y * y)\nlet r3 = r2 * sqrt(r2)\n"
+              "d/dt x = px\nd/dt y = py\nd/dt px = -(x / r3)\n"
+              "d/dt py = -(y / r3)\nstep rk4, h = 1/100\n")
+
+
+def nbody_source(n, fmt="fp64"):
+    """Planar N bodies, unit masses and G = 1, under rk4: each pair's
+    1 / (s sqrt(s)) - a root and a division of 1 - and the accelerations
+    as fma chains over the pairs."""
+    xs, ys = [f"x{i}" for i in range(n)], [f"y{i}" for i in range(n)]
+    us, vs = [f"u{i}" for i in range(n)], [f"v{i}" for i in range(n)]
+    lines = [f"system nbody{n}", f"format {fmt}",
+             "state " + ", ".join(xs + ys + us + vs)]
+    for i in range(n):
+        for j in range(i + 1, n):
+            p = f"{i}_{j}"
+            lines += [f"let dx{p} = x{j} - x{i}", f"let dy{p} = y{j} - y{i}",
+                      f"let s{p} = fma(dx{p}, dx{p}, dy{p} * dy{p})",
+                      f"let k{p} = 1 / (s{p} * sqrt(s{p}))"]
+    for i in range(n):
+        lines += [f"d/dt x{i} = u{i}", f"d/dt y{i} = v{i}"]
+    for i in range(n):
+        for comp, tgt in (("x", "u"), ("y", "v")):
+            expr = None
+            for j in range(n):
+                if j == i:
+                    continue
+                p = f"{min(i, j)}_{max(i, j)}"
+                kk, dd = f"k{p}", f"d{comp}{p}"
+                if expr is None:
+                    expr = f"{kk} * {dd}" if i < j else f"-({kk} * {dd})"
+                else:
+                    expr = (f"fma({kk}, {dd}, {expr})" if i < j
+                            else f"fma(-{kk}, {dd}, {expr})")
+            lines.append(f"d/dt {tgt}{i} = {expr}")
+    lines.append("step rk4, h = 1/100")
+    return "\n".join(lines) + "\n"
+
+
+def leg_call_loops(rng, segrun=None, audit=None, work=None):
+    from cftc import callloop
+    above = callloop.CALL_LOOP_ABOVE
+    section(f"L. the call loop (C4): a step whose routines, inlined, would "
+            f"pass {above:,} instructions runs batches of them in loops - "
+            f"eight bodies under rk4 at the constant itself; Kepler under "
+            f"rk4 with it lowered, every batch looped and the largest alone")
+    t0 = time.perf_counter()
+    c = cftc.compile_text(nbody_source(8), 2, source="nbody8", stem="nbody8")
+    p = c.program
+    looped = [(b.op, b.depth, len(b.calls)) for b in c.looped]
+    check(looped == [("div", 2, 56)] and len(p.body) + 1 <= above and
+          c.accepted_by == ["sw"] and p.slots_used <= 256,
+          f"N = 8: the step, its 224 routines inlined, passes {above:,}; "
+          f"its largest batch - the first two stages' 56 divisions of 1 - "
+          f"looped alone brings it to {len(p.body) + 1:,} written, "
+          f"{p.executed():,} run, {p.slots_used} scratch slots, accepted by "
+          f"sw ({time.perf_counter() - t0:.0f} s)",
+          f"looped {looped}, {len(p.body) + 1:,} written, "
+          f"{p.slots_used} slots, accepted by {c.accepted_by}")
+    g = c.ir
+    box = [(-1, 1)] * (2 * 8) + [(-0.5, 0.5)] * (2 * 8)
+    lanes = lanes_for(g.fmt, g.n_state, rng, 3, box)
+    lanes += special_lanes(g.fmt, g.n_state, lanes[0], rng)
+    lanes.append([0] * g.n_state)
+    t1 = time.perf_counter()
+    failing, first, fok, ref = compare_routine(c, lanes, None, 2)
+    rcover(c, ref.flags)
+    check(not failing and fok, f"N = 8: {len(lanes)} lanes at 1 and 2 steps "
+          f"equal the interpreter, FLAGS {ref.flags:#x} included - lanes "
+          f"that overflow, hold a signalling NaN, hold subnormals and hold "
+          f"zeros (0/0) among them ({time.perf_counter() - t1:.0f} s)",
+          f"{len(failing)} lanes differ from step {first}, FLAGS "
+          f"{'equal' if fok else 'differ'}")
+    for fmt in ("fp64", "fp256"):
+        text = KEPLER_RK4.format(fmt=fmt)
+        size = len(cftc.compile_text(text, 5).program.body) + 1
+        try:
+            for low_to, what in ((0, "every batch"),
+                                 (size - 1, "the largest batch alone")):
+                callloop.CALL_LOOP_ABOVE = low_to
+                c = cftc.compile_text(text, 5, source=f"kepler-rk4-{fmt}")
+                looped = sorted((b.op, b.depth, len(b.calls))
+                                for b in c.looped)
+                want = ([("div", 2, 4), ("div", 4, 4), ("sqrt", 1, 2),
+                         ("sqrt", 3, 2)] if low_to == 0 else [("div", 2, 4)])
+                lanes = lanes_for(c.ir.fmt, 4, rng, 6, BOX["kepler-sv"])
+                lanes += special_lanes(c.ir.fmt, 4, lanes[0], rng)
+                lanes.append([0] * 4)
+                failing, first, fok, ref = compare_routine(c, lanes, None, 5)
+                rcover(c, ref.flags)
+                check(looped == want and not failing and fok,
+                      f"Kepler under rk4 at {fmt}, the constant at "
+                      f"{low_to:,} ({what}): {len(lanes)} lanes at 1, 2 and "
+                      f"5 steps equal the interpreter, FLAGS {ref.flags:#x} "
+                      f"included",
+                      f"looped {looped}; {len(failing)} lanes differ from "
+                      f"step {first}, FLAGS {'equal' if fok else 'differ'}")
+                if fmt == "fp64" and low_to == 0:
+                    every = c
+        finally:
+            callloop.CALL_LOOP_ABOVE = above
+    # libcft's software backend runs the loops as seq.py does: the image
+    # with every batch looped, certified and audited by both auditors
+    if not segrun or not Path(segrun).is_file():
+        skip("L: cft-segrun's certificate of a looped image",
+             f"no cft-segrun at {segrun!r} (the stage builds it)")
+        return
+    have_audit = bool(audit) and Path(audit).is_file()
+    if not have_audit:
+        skip("L: cft-audit on the looped image's certificate",
+             f"no cft-audit at {audit!r} (the stage builds it)")
+    certify(every, "kepler-rk4-looped-fp64", Path(segrun).resolve(),
+            Path(audit).resolve() if have_audit else None, rng, work)
 
 
 # ---- I: coverage ---------------------------------------------------------------
 
 def leg_coverage():
-    section("I. what the corpus covered")
+    """The core group's tally, from the core legs alone (A to D: the
+    references, the corpus, the let-heavy maps)."""
+    section("I. what the core legs covered")
     ops = COVER["ops"]
     want_ops = ["fma", "add", "sub", "mul", "neg", "abs", "copysign", "min",
                 "max", "minnum", "maxnum", "cmplt", "cmple", "cmpeq",
                 "select"]
     print(f"  {COVER['systems']} systems; ops {dict(sorted(ops.items()))}")
     check(all(ops.get(o) for o in want_ops), "every operation the compiler "
-          "carries was compiled and run - all the language's but div and "
-          "sqrt, which it refuses until parcel C4 (leg K)", f"missing "
-          f"{[o for o in want_ops if not ops.get(o)]}")
+          "carries as one instruction was compiled and run (div and sqrt, "
+          "its routines, are the routines group's tally, I2)",
+          f"missing {[o for o in want_ops if not ops.get(o)]}")
     check(COVER["rounds"] == {"rne", "rtz", "rdn", "rup", "rmm"},
           "every attribute", f"{sorted(COVER['rounds'])}")
     check(COVER["formats"] == {"fp32", "fp64", "fp128", "fp256"},
@@ -2163,6 +2699,51 @@ def leg_coverage():
                        (sf.FLAG_UNDERFLOW, "underflow"),
                        (sf.FLAG_INEXACT, "inexact")):
         check(COVER["flags"] & flag, f"a run raised {word}")
+
+
+def leg_routine_coverage():
+    """The routines group's tally (C4), from its legs alone (K and L):
+    each of div and sqrt compiled and run at every format, under every
+    attribute and integrator; the five flags raised by those runs; and
+    call loops run, of both routines."""
+    section("I2. what the routines group covered")
+    for op, d in RCOVER["by_op"].items():
+        print(f"  {op}: {d['images']} images; formats {sorted(d['formats'])}"
+              f"; attributes {sorted(d['rounds'])}; integrators "
+              f"{sorted(d['integrators'])}")
+        check(d["images"] and d["formats"] == {"fp32", "fp64", "fp128",
+                                               "fp256"},
+              f"{op}, a routine: compiled and run at every format",
+              f"{d['images']} images, at {sorted(d['formats'])}")
+        check(d["rounds"] == {"rne", "rtz", "rdn", "rup", "rmm"},
+              f"{op}: under every attribute, the routine specialised at each",
+              f"{sorted(d['rounds'])}")
+        check(d["integrators"] >= {"rk4", "euler", "stormer-verlet", "map"},
+              f"{op}: under every integrator", f"{sorted(d['integrators'])}")
+    for flag, word in ((sf.FLAG_INVALID, "invalid"),
+                       (sf.FLAG_DIVZERO, "divideByZero"),
+                       (sf.FLAG_OVERFLOW, "overflow"),
+                       (sf.FLAG_UNDERFLOW, "underflow"),
+                       (sf.FLAG_INEXACT, "inexact")):
+        check(RCOVER["flags"] & flag, f"a routine image's run raised {word}")
+    check(RCOVER["loops"] and RCOVER["looped_ops"] == {"div", "sqrt"},
+          f"call loops compiled and run: {RCOVER['loops']} loops of "
+          f"{RCOVER['looped_calls']} calls, div's and sqrt's",
+          f"{RCOVER['loops']} loops, of {sorted(RCOVER['looped_ops'])}")
+
+
+# The legs in their two groups, each with its tally: `core` the `lang`
+# stage's, in the quick budget, and `routines` the `lang-routines` stage's,
+# in the gate budget (verify/run.sh; the lead's split, 2026-10-02, when
+# the routines' legs took `lang` past quick's three minutes). A group's
+# tally runs when every leg of the group ran - `--group`, or no selection
+# at all, which runs both - and where `--only` ran part of a group its
+# tally is a SKIP line, never left out silently.
+GROUPS = (("core", ("refs", "corpus", "letmaps", "banks", "libcft",
+                    "determinism", "refusals", "plants", "readback"),
+           "I, the core tally"),
+          ("routines", ("routines", "pools", "loops"),
+           "I2, the routines' tally"))
 
 
 # ---- the committed references ----------------------------------------------
@@ -2196,8 +2777,8 @@ def record_main():
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--segrun", help="host/cft-segrun, for leg E")
-    ap.add_argument("--audit", help="host/cft-audit, for leg E")
+    ap.add_argument("--segrun", help="host/cft-segrun, for legs E and L")
+    ap.add_argument("--audit", help="host/cft-audit, for legs E and L")
     ap.add_argument("--corpus", type=int, default=48,
                     help="generated systems in leg A (default 48)")
     ap.add_argument("--letmaps", type=int, default=120,
@@ -2207,9 +2788,19 @@ def main(argv=None):
     ap.add_argument("--routines", type=int, default=40,
                     help="sources that divide or take a root in leg K "
                          "(default 40)")
+    ap.add_argument("--group", default="",
+                    help="a comma list of groups, each its legs and its tally: "
+                         "core (refs, corpus, letmaps, banks, libcft, "
+                         "determinism, refusals, plants, readback; the lang "
+                         "stage) and routines (routines, pools, loops; the "
+                         "lang-routines stage). With neither --group nor "
+                         "--only, both")
     ap.add_argument("--only", default="",
-                    help="a comma list of legs: refs,corpus,letmaps,banks,libcft,"
-                         "determinism,refusals,plants,readback,routines")
+                    help="a comma list of legs: refs, corpus, letmaps, banks, "
+                         "libcft, determinism, refusals, plants, readback "
+                         "(the core group), routines, pools, loops (the "
+                         "routines group); a group's tally runs only when "
+                         "all its legs ran, and is a SKIP line otherwise")
     ap.add_argument("--write", action="store_true",
                     help="write programs/systems/compiled/ and exit")
     ap.add_argument("--record", action="store_true",
@@ -2225,7 +2816,19 @@ def main(argv=None):
         return write_references()
     if a.record:
         return record_main()
-    only = {x for x in a.only.split(",") if x}
+    groups = {name: legs for name, legs, _t in GROUPS}
+    asked = [x for x in a.group.split(",") if x]
+    only = [x for x in a.only.split(",") if x]
+    known = [leg for legs in groups.values() for leg in legs]
+    for g in asked:
+        if g not in groups:
+            ap.error(f"--group {g}: the groups are {', '.join(groups)}")
+    for leg in only:
+        if leg not in known:
+            ap.error(f"--only {leg}: the legs are {', '.join(known)}")
+    if not asked and not only:
+        asked = list(groups)
+    selected = {leg for g in asked for leg in groups[g]} | set(only)
     t0 = time.perf_counter()
     work = Path(tempfile.mkdtemp(prefix="lang-check-"))
 
@@ -2245,16 +2848,30 @@ def main(argv=None):
             ("plants", lambda: leg_plants(rng("plants"), work)),
             ("readback", lambda: leg_readback(a.hmaps, rng("readback"))),
             ("routines", lambda: leg_routines(a.routines,
-                                              rng("routines")))]
+                                              rng("routines"))),
+            ("pools", leg_routine_pools),
+            ("loops", lambda: leg_call_loops(rng("loops"), a.segrun,
+                                             a.audit, work))]
+    if sorted(name for name, _fn in legs) != sorted(known):
+        raise AssertionError("a leg is in no group, or a group names a leg "
+                             "there is not")
+    tallies = {"core": leg_coverage, "routines": leg_routine_coverage}
     try:
         for name, fn in legs:
-            if only and name not in only:
+            if name not in selected:
                 continue
             t = time.perf_counter()
             fn()
             print(f"  ({name}: {time.perf_counter() - t:.1f} s)")
-        if not only or {"refs", "corpus"} <= only:
-            leg_coverage()
+        # each group's tally, where its legs ran (GROUPS)
+        for gname, glegs, title in GROUPS:
+            ran = [leg for leg in glegs if leg in selected]
+            if len(ran) == len(glegs):
+                tallies[gname]()
+            elif ran:
+                skip(title, f"its group's legs did not all run (--only): "
+                            f"{', '.join(x for x in glegs if x not in ran)} "
+                            f"did not")
     finally:
         shutil.rmtree(work, ignore_errors=True)
     dt = time.perf_counter() - t0

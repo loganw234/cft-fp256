@@ -252,6 +252,12 @@
  *   trial-skipped      the trial's allocations are skipped, its size
  *                      checks kept (try_runs), so that the gate can hold
  *                      the trial to costing the runs nothing
+ * and a fifth writes what would be refused, for the audit's control:
+ *   wider-routine      a wider run whose main image holds a routine is
+ *                      written as stated instead of refused `aux-image`
+ *                      (C4, main() after check_run), so that the gate can
+ *                      hand cft-audit the certificate it must refuse
+ *                      (programs/lang_check.py, leg E)
  * Any other value is refused as `usage`.
  *
  * ---------------------------------------------------------------
@@ -384,6 +390,7 @@ static const struct { const char *name; int code; } REFUSAL[] = {
     { "width", 3 },
     { "salt-length", 4 }, { "program-image", 4 }, { "program-shape", 4 },
     { "state-shape", 4 },
+    { "aux-image", 5 },
     { "accuracy-run", 7 }, { "accuracy-scope", 7 }, { "accuracy-slot", 7 },
     { "accuracy-finite", 7 },
     /* the tool's own (docs/CERTIFICATES.md, "The segment runner") */
@@ -403,7 +410,7 @@ static unsigned long long STATE_FILES = 0;
 
 /* CFT_SEGRUN_PLANT, the instrument (the header comment). */
 static int PLANT_UNREADABLE = 0, PLANT_UNWRITTEN = 0, PLANT_WIDE = 0;
-static int PLANT_NO_TRIAL = 0;
+static int PLANT_NO_TRIAL = 0, PLANT_WIDER_ROUTINE = 0;
 
 /* --scratch-depth N, or 0 where it was not given: the software backend
  * is then opened plainly, at its own 256, and no run block states it */
@@ -786,6 +793,25 @@ static void add_term(entry_spec *X, const char *s)
     free(X->term_s);
     grown[X->n_term_s++] = s;
     X->term_s = grown;
+}
+
+/* Does a run's image hold a routine (C4): any of revision 8's QUIET,
+ * ENDQUIET or RAISE (control codes 12, 13 and 14, R24)? A control word has
+ * bit 31 set and its code in bits 7:0, both in the word's low half; the
+ * words start after the header and, but under BANK_EXT, the constants.
+ * check_run has held the header to the bytes. */
+static int holds_routine(const run_spec *r)
+{
+    size_t off = HEADER_BYTES + ((r->H.flags & CFT_PROG_FLAG_BANK_EXT) ? 0u
+                                 : (size_t)r->H.n_consts * r->esz);
+    uint32_t k;
+    for (k = 0; k < r->H.n_insns; k++) {
+        uint32_t lo = get_le32(r->img + off + (size_t)k * 8u);
+        uint32_t code = lo & 0xFFu;
+        if ((lo >> 31) & 1u && (code == 12u || code == 13u || code == 14u))
+            return 1;
+    }
+    return 0;
 }
 
 /* Everything about run `idx` that can be refused before a device is
@@ -1950,14 +1976,18 @@ int main(int argc, char **argv)
             PLANT_WIDE = 1;
         else if (!strcmp(plant, "trial-skipped"))
             PLANT_NO_TRIAL = 1;
+        else if (!strcmp(plant, "wider-routine"))
+            PLANT_WIDER_ROUTINE = 1;
         else
             refuse("usage", "CFT_SEGRUN_PLANT=%s is not an instrument this "
                    "tool has (flags-unreadable, flags-unwritten, "
-                   "flags-wide, trial-skipped)", plant);
+                   "flags-wide, trial-skipped, wider-routine)", plant);
         fprintf(stderr, "cft-segrun: CFT_SEGRUN_PLANT=%s - an instrument: "
                 "%s\n", plant, PLANT_NO_TRIAL ? "the trial's allocations "
-                "are skipped, its size checks kept" : "this run is to be "
-                "refused");
+                "are skipped, its size checks kept" : PLANT_WIDER_ROUTINE ?
+                "a wider run of a routine image is written as stated, a "
+                "certificate cft-audit must refuse (aux-image)" : "this run "
+                "is to be refused");
     }
 
     if (argc < 2) {
@@ -2122,6 +2152,23 @@ int main(int argc, char **argv)
                "is main (--run main ...)");
     for (r = 0; r < n_runs; r++)
         check_run(&runs[r], r);
+    /* A wider run of a routine image (C4): refused, by both writers and
+     * both audits, as `aux-image`. A routine's instruction words and its
+     * bank words are its format's - its Newton passes, its masks, its
+     * biases - so the main image's words at the next rung, which is all
+     * version 1's relation holds, compute nothing a wider estimate means.
+     * QUIET, ENDQUIET or RAISE in the main image is the sign of one: the
+     * language's compiler writes them around every routine and nowhere
+     * else. Certificate version 2's wider-source run relates the source's
+     * compile one format up instead. */
+    for (r = 1; r < n_runs; r++)
+        if (runs[r].kind == K_WIDER && holds_routine(&runs[0]) &&
+            !PLANT_WIDER_ROUTINE)
+            refuse("aux-image", "run %lu (wider): the main image holds a "
+                   "routine (QUIET, ENDQUIET or RAISE), whose words are its "
+                   "format's, so no image is it one format wider; "
+                   "certificate version 2's wider-source run compiles its "
+                   "source one format up instead", (unsigned long)r);
 
     /* ---- the accuracy entries, before anything is made ----------------- */
 #if CX_EXACT

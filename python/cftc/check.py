@@ -21,8 +21,42 @@ attribute, for the four that round). The segment must:
   it began - which, by induction, makes every step the step;
 * store the pinned state back to its homes after the loop;
 * carry a bank whose every slot is its entry's encoding, or that
-  encoding's sign-flip, or the param's value; and a halved bank whose
-  h-scaled slots are exactly half and whose others are the same.
+  encoding's sign-flip, or the param's value, or a word of the step's
+  routines; and a halved bank whose h-scaled slots are exactly half and
+  whose others are the same.
+
+A step that divides or takes a root (C4) holds each routine to its
+FRAGMENT, which the check takes from the golden model itself
+(cft_golden/routines.py) - not from the compiler's inlining - and
+instantiates over the node's operand symbols: each instruction a symbol
+(its opcode, its own attribute where it rounds, its operands; a word the
+slot holding its bits), simplified by the fragment's own rules
+(routines.simplify) and interned, so that instances which share an
+instruction share its symbol, as the image computes it once. Then:
+* every expected symbol, a language node's or a routine's instruction's,
+  is computed exactly once;
+* a routine's instructions stand inside a quiet region and the
+  language's outside every one (the two can never be one symbol: every
+  instruction of a routine reads one of its words or its values, which
+  routines.invariants proves of every fragment) - so a scaffolding flag
+  cannot reach FLAGS and a language node's flags cannot be lost;
+* each routine node's flag word is RAISEd exactly once, outside every
+  region, and nothing else is raised;
+* regions are balanced within the step, and none stands outside it.
+
+A step with CALL LOOPS (callloop.py) is executed as the tile runs it: an
+inner REPEAT's body once a call, symbolically, its index arithmetic -
+the iadd and the copy of a word outside a region - evaluated concretely,
+since every word's bits are known, so that each LDX and STX names the
+slot the tile would: within the slots the image names statically, an
+STX never below m. A call's routine is then the fragment UNBOUND, so in
+a region each instruction's operands are first put through
+routines.simplify, as binding them puts the inlined fragment's; and a
+loop computes its routine afresh each call, so a routine instruction may
+be computed more than once there - quietly, and pure - while outside the
+loops it is still computed exactly once, and every language node exactly
+once, outside them. The bank's words may then also be those the index
+arithmetic reads, each once.
 
 A failure is an InternalError - a defect in the compiler, never a
 property of the source. seq.py against the interpreter is the other net
@@ -31,15 +65,20 @@ property of the source. seq.py against the interpreter is the other net
 
 from collections import Counter
 
-from cft_golden import asm
+from cft_golden import asm, seq
+from cft_golden import routines as R
+from cft_golden import softfloat as sf
 from cft_golden.seqflags import (FLAG_BANK_EXT, FLAG_SCRATCH_IO,
                                  FLAG_SCRATCH_STRICT)
 
-from .ir import ROUNDED
+from .ir import ROUNDED, ROUTINES
 from .lower import exact_value
 from .refusals import InternalError
 
 OP_OF = {v: k for k, v in asm.OP_NAMES.items()}
+QUIET, ENDQUIET, RAISE = seq.QUIET, seq.ENDQUIET, seq.RAISE   # R24
+# what a call loop's body may hold (callloop.py)
+LOOP_ALLOW = frozenset({asm.LDX, asm.STX, QUIET, ENDQUIET, RAISE})
 
 
 class _Syms:
@@ -83,9 +122,15 @@ def verify(low, prog, image_bytes, steps, half_values=None):
     sym_in = [S(("in", i)) for i in range(n)]
     sym_lane = [S(("lane", j)) for j in range(nl)]
     sym_bank = [S(("bank", k)) for k in range(len(low.slots))]
+    # a routine's word is the slot holding its bits (lower.py)
+    word_slot = {s.bits: k for k, s in enumerate(low.slots)
+                 if s.kind == "word"}
+    bits_of_sym = {sym_bank[k]: b for b, k in word_slot.items()}
 
-    # what each lowered node is, from the lowering's own refs
-    expected = []
+    # what each lowered node is, from the lowering's own refs; a routine
+    # node's, its fragment from the golden model (module docstring)
+    expected, lang_syms, flag_syms = [], [], []
+    quiet_syms = set()
 
     def ref_sym(r):
         kind, i = r
@@ -96,9 +141,43 @@ def verify(low, prog, image_bytes, steps, half_values=None):
         if kind == "n":
             return expected[i]
         return sym_bank[low.slot_of[r]]
-    for nd in low.nodes:
-        rnd = g.rnd if nd.op in ROUNDED else None
-        expected.append(S((nd.op, rnd, tuple(ref_sym(a) for a in nd.args))))
+    for j, nd in enumerate(low.nodes):
+        args = tuple(ref_sym(a) for a in nd.args)
+        if nd.op not in ROUTINES:
+            rnd = g.rnd if nd.op in ROUNDED else None
+            sym = S((nd.op, rnd, args))
+            expected.append(sym)
+            lang_syms.append(sym)
+            continue
+        f = R.fragment(nd.op, g.fmt, g.rnd)
+        inputs = dict(zip(f.inputs, args))
+        vals = {}
+        for i, (opc, r, srcs) in enumerate(f.body):
+            ss = []
+            for s in srcs:
+                if s[0] == "in":
+                    ss.append(inputs[s[1]])
+                elif s[0] == "v":
+                    ss.append(vals[s])
+                else:
+                    k = word_slot.get(f.words[s[1]])
+                    if k is None:
+                        _fail(f"{nd.op} node {j}'s word {s[1]} is in no bank "
+                              f"slot")
+                    ss.append(sym_bank[k])
+            ss = tuple(ss)
+            same = R.simplify(opc, ss, bits_of_sym.get, g.fmt.sign_mask)
+            if same is not None:
+                vals[("v", i)] = same
+                continue
+            sym = S((asm.OP_NAMES[opc], r, ss))
+            vals[("v", i)] = sym
+            quiet_syms.add(sym)
+        expected.append(vals[f.result])
+        flag_syms.append(vals[f.flags])
+    if quiet_syms & set(lang_syms):
+        _fail("a routine's instruction is a language node's: the two "
+              "classes must not meet")
     want_out = [ref_sym(o) for o in low.outs]
 
     words = [asm.decode(w) for w in img.insns]
@@ -106,7 +185,8 @@ def verify(low, prog, image_bytes, steps, half_values=None):
             d["op"] == asm.REPEAT]
     ends = [k for k, d in enumerate(words) if d["ctrl"] and
             d["op"] == asm.ENDREP]
-    if len(reps) != 1 or len(ends) != 1 or reps[0] > ends[0]:
+    if not reps or len(reps) != len(ends) or reps[0] > ends[-1] or \
+            reps[-1] > ends[-1] or ends[0] < reps[0]:
         _fail("the image is not one REPEAT over the step")
     if words[reps[0]]["imm"] != steps:
         _fail(f"the REPEAT counts {words[reps[0]]['imm']}, not {steps}")
@@ -114,10 +194,36 @@ def verify(low, prog, image_bytes, steps, half_values=None):
     if not (last["ctrl"] and last["op"] == asm.HALT):
         _fail("the image does not end with halt")
     pro = words[:reps[0]]
-    body = words[reps[0] + 1:ends[0]]
-    epi = words[ends[0] + 1:-1]
+    body = words[reps[0] + 1:ends[-1]]
+    epi = words[ends[-1] + 1:-1]
+    # every other REPEAT and ENDREP is a call loop's (callloop.py): one
+    # deep, inside the step
+    nest = 0
+    for k, d in enumerate(body):
+        if d["ctrl"] and d["op"] == asm.REPEAT:
+            nest += 1
+            if nest > 1:
+                _fail(f"step instruction {k} opens a loop inside a call loop")
+        elif d["ctrl"] and d["op"] == asm.ENDREP:
+            nest -= 1
+            if nest < 0:
+                _fail(f"step instruction {k} closes no call loop")
+    if nest:
+        _fail("a call loop is not closed within the step")
+    # an indexed access stays within the slots the image names statically
+    reach = 0
+    for d in words:
+        if d["ctrl"] and d["op"] in (asm.STL, asm.LDL):
+            reach = max(reach, (d["imm"] & asm.SLOT_MASK) + 1)
 
     regs, slots = {}, {}
+    qdepth = [0]
+    raised = Counter()
+    # a value whose bits are known: the words, and what a call loop's index
+    # arithmetic makes of them, evaluated concretely
+    concrete = dict(bits_of_sym)
+    loop_words = set()
+    computed_in = Counter()         # in a call loop's body
 
     def read_reg(r, where):
         if r not in regs:
@@ -130,13 +236,69 @@ def verify(low, prog, image_bytes, steps, half_values=None):
                   f"defined here")
         return slots[s]
 
-    def run(part, name, allow, computed=None):
-        for k, d in enumerate(part):
+    def index(d, where):
+        idx = concrete.get(read_reg(d["rb"], where))
+        if idx is None:
+            _fail(f"{where}: its index r{d['rb']} is not a slot the image "
+                  f"computes from its words")
+        if idx >= reach:
+            _fail(f"{where}: its index, slot {idx}, is past every slot the "
+                  f"image names ({reach})")
+        if seq.index_step(d):
+            _fail(f"{where} steps its index, which no compiled image does")
+        return idx
+
+    def run(part, name, allow, computed=None, in_loop=False):
+        k = 0
+        while k < len(part):
+            d = part[k]
             where = f"{name} instruction {k}"
+            k += 1
             if d["ctrl"]:
                 code = d["op"]
                 if code not in allow:
                     _fail(f"{where} is {asm.CTRL_NAMES.get(code, code)}")
+                if code == asm.REPEAT:
+                    # a call loop: its body, once a call, symbolically
+                    e = k
+                    while not (part[e]["ctrl"] and
+                               part[e]["op"] == asm.ENDREP):
+                        e += 1
+                    if d["imm"] < 1:
+                        _fail(f"{where} is a call loop of no calls")
+                    depth0 = qdepth[0]
+                    for call in range(d["imm"]):
+                        run(part[k:e], f"{name} loop at {k - 1}, call {call},",
+                            LOOP_ALLOW, computed, in_loop=True)
+                        if qdepth[0] != depth0:
+                            _fail(f"{where}: a call loop's body leaves its "
+                                  f"quiet regions unbalanced")
+                    k = e + 1
+                    continue
+                if code == QUIET:
+                    qdepth[0] += 1
+                    continue
+                if code == ENDQUIET:
+                    if not qdepth[0]:
+                        _fail(f"{where} closes no quiet region")
+                    qdepth[0] -= 1
+                    continue
+                if code == RAISE:
+                    if qdepth[0]:
+                        _fail(f"{where} raises inside a quiet region, where "
+                              f"its flags would be silenced")
+                    raised[read_reg(d["ra"], where)] += 1
+                    continue
+                if code == asm.LDX:
+                    regs[d["rd"]] = read_slot(index(d, where), where)
+                    continue
+                if code == asm.STX:
+                    s = index(d, where)
+                    if s < m:
+                        _fail(f"{where} writes slot {s}, a state home or a "
+                              f"lane param's, through an index")
+                    slots[s] = read_reg(d["ra"], where)
+                    continue
                 slot = d["imm"] & asm.SLOT_MASK
                 if code == asm.LDL:
                     regs[d["rd"]] = read_slot(slot, where)
@@ -157,22 +319,55 @@ def verify(low, prog, image_bytes, steps, half_values=None):
                     continue
                 vals.append(sym_bank[idx] if is_const
                             else read_reg(idx, where))
-            if op == "ior":
-                if len(set(vals)) != 1 or d["rnd"]:
+            if op == "ior" and len(set(vals)) == 1:
+                if d["rnd"]:
                     _fail(f"{where} is an ior that is not a copy")
+                if not qdepth[0] and vals[0] in bits_of_sym:
+                    loop_words.add(bits_of_sym[vals[0]])
                 regs[d["rd"]] = vals[0]
                 continue
+            if not qdepth[0] and op == "iadd" and \
+                    all(v in concrete for v in vals):
+                # a call loop's index arithmetic, on known bits
+                if d["rnd"]:
+                    _fail(f"{where}: iadd carries a rounding field")
+                bits, _fl = sf.iadd(g.fmt, concrete[vals[0]],
+                                    concrete[vals[1]])
+                for v in vals:
+                    if v in bits_of_sym:
+                        loop_words.add(bits_of_sym[v])
+                sym = S(("bits", bits))
+                concrete[sym] = bits
+                regs[d["rd"]] = sym
+                continue
+            if qdepth[0]:
+                # a routine's instruction as the fragment's rules have it
+                # once its operands are bound (routines.simplify): a call
+                # loop's body is the fragment unbound
+                same = R.simplify(d["op"], tuple(vals), bits_of_sym.get,
+                                  g.fmt.sign_mask)
+                if same is not None:
+                    regs[d["rd"]] = same
+                    continue
             if op in ROUNDED:
-                if d["rnd"] != g.rnd:
+                if not qdepth[0] and d["rnd"] != g.rnd:
                     _fail(f"{where}: {op} carries attribute {d['rnd']}, "
                           f"not the program's {g.rnd}")
-                rnd = g.rnd
+                rnd = d["rnd"]
             else:
                 if d["rnd"]:
                     _fail(f"{where}: quiet {op} carries a rounding field")
                 rnd = None
             sym = S((op, rnd, tuple(vals)))
-            computed[sym] += 1
+            if qdepth[0] and sym not in quiet_syms:
+                _fail(f"{where}: {op} stands in a quiet region, and is no "
+                      f"routine's instruction: its flags would be lost")
+            if not qdepth[0] and sym in quiet_syms:
+                _fail(f"{where}: a routine's {op} stands outside its quiet "
+                      f"region, where its scaffolding flags would stand")
+            if not qdepth[0] and op == "ior":
+                _fail(f"{where} is an ior that is not a copy")
+            (computed_in if in_loop else computed)[sym] += 1
             regs[d["rd"]] = sym
 
     # the segment's start: the scratch block, nothing else
@@ -192,14 +387,31 @@ def verify(low, prog, image_bytes, steps, half_values=None):
         if key[0] == "s":
             del slots[key[1]]
     computed = Counter()
-    run(body, "step", {asm.LDL, asm.STL}, computed)
-    want_nodes = Counter(expected)
-    if computed != want_nodes:
-        missing = want_nodes - computed
-        extra = computed - want_nodes
-        _fail(f"the step computes {sum(computed.values())} operations for "
-              f"{len(expected)} nodes: {len(missing)} missing, "
-              f"{len(extra)} not the step's")
+    run(body, "step", {asm.LDL, asm.STL, QUIET, ENDQUIET, RAISE, asm.REPEAT},
+        computed)
+    if qdepth[0]:
+        _fail("the step ends inside a quiet region")
+    # each language node once, outside every call loop; each routine
+    # instruction at least once and, outside the call loops, at most once
+    # (a call loop computes its routine afresh each call, quiet)
+    want_lang = Counter(lang_syms)
+    missing = [s for s in want_lang if computed[s] != want_lang[s] or
+               computed_in[s]]
+    missing += [s for s in quiet_syms if computed[s] > 1 or
+                computed[s] + computed_in[s] < 1]
+    extra = [s for s in set(computed) | set(computed_in)
+             if s not in want_lang and s not in quiet_syms]
+    if missing or extra:
+        n_in = sum(computed_in.values())
+        _fail(f"the step computes {sum(computed.values())} operations"
+              + (f" and {n_in} in call loops" if n_in else "")
+              + f" for {len(expected)} nodes ({len(quiet_syms)} routine "
+              f"instructions among them): {len(missing)} missing or "
+              f"repeated, {len(extra)} not the step's")
+    if raised != Counter(flag_syms):
+        _fail(f"the step raises {sum(raised.values())} flag words for "
+              f"{len(flag_syms)} routines: each routine's once, and no "
+              f"other, is due")
     for i in range(n):
         key = ("s", i)
         if key in prog.pinned:
@@ -221,13 +433,28 @@ def verify(low, prog, image_bytes, steps, half_values=None):
         if slots.get(i) != want_out[i]:
             _fail(f"after the loop component {g.components[i]}'s home does "
                   f"not hold its last value")
-    _verify_bank(low, half_values)
+    _verify_bank(low, half_values, loop_words)
 
 
-def _verify_bank(low, half_values):
+def _verify_bank(low, half_values, loop_words=frozenset()):
     g = low.graph
     fmt = g.fmt
+    # the words: exactly the bit patterns the step's routines' fragments
+    # read, from the golden model (cft_golden/routines.py), and those a
+    # call loop's index arithmetic read - each once
+    want = set(loop_words)
+    for op in sorted({nd.op for nd in low.nodes if nd.op in ROUTINES}):
+        want |= set(R.fragment(op, fmt, g.rnd).words.values())
+    have = [s.bits for s in low.slots if s.kind == "word"]
+    if len(set(have)) != len(have) or set(have) != want:
+        _fail(f"the bank's {len(have)} word slots are not the "
+              f"{len(want)} words the step's routines and call loops read, "
+              f"each once")
     for k, s in enumerate(low.slots):
+        if s.kind == "word":
+            if s.factor is not None:
+                _fail(f"bank slot {k}, a word, is h-scaled")
+            continue
         if s.kind == "param":
             if s.default and s.bits != g.param[s.index][2]:
                 _fail(f"bank slot {k} is not param {g.param[s.index][0]}'s "

@@ -40,7 +40,11 @@ to the bytes cftc writes for some source, and recorded, version by
 version, with the SHA-256 of every committed compiled file
 (programs/systems/cftc-outputs.txt; outputs.py; the lang stage's leg F).
 1 is every cftc from L2 (2026-10-01) until the record began, never
-bumped; 2 is the manifest's cost note restated as measured (C4).
+bumped; 2 is the manifest's cost note restated as measured (C4); 3 is
+the routines: a source that divides or takes a root at run time, which
+2 refused, compiles (C4); 4 is the call loop: a step whose routines,
+inlined, would pass 32,768 instructions, which 3 inlined whole, runs
+batches of them in loops (C4).
 
 A format override: compile_text and compile_file take `fmt`, a format's
 name, which replaces the value of the source's `format` statement
@@ -56,13 +60,52 @@ docs/HOSTAPI.md): host/tools/gen_build_id.sh's own answer, run on that
 repository, or `unknown`. It is provenance, which varies with the
 checkout, so no file cftc writes carries it.
 
-Until parcel C4, a system with a run-time division or square root - the
-language's div and sqrt, which its interpreter runs (L4) - is refused
-`runtime-routine`, first and on every target, at the first source line
-holding one, whatever the statement (an equation, a let, a written
-tangent or a line of an expansion block): a tile has no such
-instruction, and the compiler does not yet inline the routines
-(divfull, sqrtfull) that compute them.
+A run-time division or square root - the language's div and sqrt (L4) -
+is a ROUTINE (C4): a tile has no such instruction, so each node is
+inlined where it stands as divfull's or sqrtfull's own instructions,
+relocated and specialised at the program's attribute
+(cft_golden/routines.py), run in a quiet region, then a RAISE of a word
+holding exactly the operation's flags (revision 8's flag control,
+docs/SEQUENCER.md R24). inline.py expands them for the allocator, which
+gives their registers and spills around them; their raw words are bank
+slots of their own (lower.py); the internal check holds each to its
+fragment, taken from the golden model (check.py). Such an image needs
+FLAG_CONTROL, CAPS2[14], so revision 7's targets refuse it
+`target-feature` and the software targets compile and run it; a bank the
+routines' words would take past 512 is `bank-capacity`. Until C4 such a
+system was refused `runtime-routine`, a name that went with it.
+
+A step whose routines, inlined, would pass 32,768 instructions - the
+largest instruction memory a tile has, a constant of the compiler's that
+no target is read for (callloop.CALL_LOOP_ABOVE; Logan's rule,
+2026-10-02) - runs batches of them in CALL LOOPS instead: one copy of a
+routine in a REPEAT over records in the scratch, the largest batch first,
+until the step fits or none is left (callloop.py). A batch of one call
+is never looped, since its loop would only add the loop's instructions to
+its one copy; so a step whose routines sit one to a batch - a chain of
+divisions, each reading the last - is compiled inlined past the
+constant: the software targets, whose instruction memory is unbounded,
+take it; revision 7's targets refuse it `target-feature` first, as
+they refuse every image with a routine, and a target that published
+flag control and held fewer instructions than the image would refuse
+it `program-capacity`, by name - no built-in target is that yet
+(verifier-VC4's 180 chained divisions: 34,201 instructions, inlined). A loop keeps every call's operands and
+results in the scratch across it, where inlining consumes each as it
+goes, so it can need far more slots than the inlined step: verifier-
+VC4's source of 32,769 instructions loops one batch of 170 calls into
+653 slots and is refused `scratch-capacity` on sw's 256, where one
+instruction shorter it compiles inlined in 171. That is the rule's
+consequence, not a defect of it: such a source compiles for a deeper
+scratch (sw:1024 or any deeper sw:N, the image the same bytes), or under the
+constant with fewer routine calls a step. Measured on planar N bodies
+under rk4 at fp64 (C4's ledger, 2026-10-02): at N = 8 the step, 40,477
+instructions inlined, loops the first two stages' 56 divisions and is
+31,342 written and 41,957 run (+3.7%), 3.5% more of the model's cycles a
+step at sixteen beats, in 243 scratch slots for 220. Where inlining fits
+too (N = 6 and 7, the loop forced), one loop adds 3.5% to the cycles
+(3.6% to the instructions run), two 6.4% to 6.6% (6.7% to 6.8%) and all
+four 7.8% to 8.2% (8.4% to 8.7%), while the image shrinks by 22%, 45% and
+89% to 90%.
 
 A system with tangent vectors (docs/LANGUAGE.md, "The variational
 equations") compiles the same way: its step graph is version 2, read by
@@ -108,6 +151,7 @@ from cft_golden import asm, seq
 from cft_golden import lang
 from cft_golden.lang import constants as K
 
+from . import callloop
 from . import manifest as M
 from . import targets as T
 from .check import verify
@@ -119,7 +163,7 @@ from .regalloc import best_program
 from .schedule import cycles
 from .targets import BUILTIN, Target
 
-VERSION = 2               # the output version: the module docstring, outputs.py
+VERSION = 4               # the output version: the module docstring, outputs.py
 MAX_STEPS = (1 << 32) - 1
 MAX_WORST = 1 << 40
 
@@ -332,58 +376,32 @@ def _param_bits(graph, params, source):
     return out
 
 
-# The operations the language has (L4, 2026-10-02) and the compiler does not
-# carry yet: a tile has no divide or square-root instruction, and each is
-# compiled as an inlined routine (divfull, sqrtfull) only from parcel C4,
-# after revision 8's flag control lets a routine raise exactly the flags of
-# the operation it implements. Until then a graph holding one is refused
-# by name - first, before anything here reads the graph (ir.py's op table
-# would stop at `div` with an internal error, exit 70) - at the first
-# source line holding one, whatever the statement: an equation, a let, a
-# written tangent equation or tangent let, a line of an expansion block,
-# in the order the source writes them. So every source the language
-# accepts compiles or is refused by name (D2's rule). The lines are the
-# checker's (lang's StepGraph.routine_lines, where it built each division
-# and root); a graph read from bytes carries none, and the refusal names
-# no line.
-ROUTINES = {"div": ("divides", "divfull"),
-            "sqrt": ("takes a square root", "sqrtfull")}
-
-
-def refuse_routines(graph, source=None):
-    """`runtime-routine` if the graph holds a run-time division or square
-    root, at the first source line holding one, in source order and
-    whatever its statement (the graph's routine_lines); otherwise
-    nothing."""
-    found = set()
-    for name in ("field", "step", "tangent_field", "tangent_step"):
-        sec = graph.section(name)
-        if sec is not None:
-            found |= {op for op, _a, _l in sec.nodes if op in ROUTINES}
-    if not found:
-        return
-    lines = getattr(graph, "routine_lines", None)
-    line = lines[0] if lines else None
-    ops = [op for op in ROUTINES if op in found]
-    what = " and ".join(ROUTINES[op][0] for op in ops)
-    many = len(ops) > 1
-    refuse("runtime-routine",
-           f"this step {what} at run time ({', '.join(ops)}): the language "
-           f"has {'these operations' if many else 'the operation'}, "
-           f"correctly rounded, and a tile has no instruction for "
-           f"{'them' if many else 'it'} - the compiler carries "
-           f"{'each' if many else 'it'} only as an inlined routine "
-           f"({', '.join(ROUTINES[op][1] for op in ops)}), from parcel C4, "
-           f"after revision 8's flag control; until then the interpreter, "
-           f"lang.run, runs this system", source=source or "<graph>",
-           line=line)
+def _call_loops(g, pb, src, low0, prog0):
+    """-> (lowered, program, looped batches): the step's batches looped,
+    the largest first, until it fits CALL_LOOP_ABOVE or none is left
+    (callloop.py), lowered again with the loop's step word and, once the
+    allocation is chosen, its record bases (callloop.finish). A batch is
+    known by its operation and depth, which the fold - the one thing the
+    words' room can change - leaves alone. A step with no batch of two
+    calls or more has nothing a loop shortens, and stays inlined."""
+    sizes = {b.key(): b for b in callloop.batches(low0)}
+    keys = [b.key() for b in callloop.by_size(low0)]
+    if not keys:
+        return low0, prog0, []
+    low = lower(g, pb, source=src, loop_words=callloop.WORDS)
+    for k in range(1, len(keys) + 1):
+        looped = callloop.select(low, keys[:k], sizes)
+        prog = best_program(low, looped=looped)
+        if len(prog.body) + 1 <= callloop.CALL_LOOP_ABOVE:
+            break
+    callloop.finish(low, prog, src)
+    return low, prog, looped
 
 
 def compile_graph(graph, steps, target="sw", stem="system", source=None,
                   source_bytes=None, params=None):
     """Compile a checked step graph (lang.StepGraph) into its outputs."""
     src = source or "<graph>"
-    refuse_routines(graph, src)
     t = get_target(target)
     if isinstance(steps, bool) or not isinstance(steps, int) \
             or not 1 <= steps <= MAX_STEPS:
@@ -408,13 +426,23 @@ def compile_graph(graph, steps, target="sw", stem="system", source=None,
                        if source_bytes is not None else None)
     g = Graph(c.graph_bytes)
     c.ir = g
-    c.lowered = low = lower(g, _param_bits(graph, params, src))
+    pb = _param_bits(graph, params, src)
+    low = lower(g, pb, source=src)
     half = halve(low, src) if low.h_slots else None
-    c.program = prog = best_program(low)
-    c.worst_case = (len(prog.prologue) + 1 + steps * (len(prog.body) + 1)
+    prog = best_program(low)
+    c.looped = []
+    if low.routines and len(prog.body) + 1 > callloop.CALL_LOOP_ABOVE:
+        low, prog, c.looped = _call_loops(g, pb, src, low, prog)
+        half = halve(low, src) if low.h_slots else None
+    c.lowered, c.program = low, prog
+    # a step's instructions as it runs them: its call loops' bodies once a
+    # call (equal to the step's length where it has none), as the loader
+    # counts the worst case
+    run_step = prog.executed()
+    c.worst_case = (len(prog.prologue) + 1 + steps * run_step
                     + len(prog.epilogue) + 1)
     if c.worst_case > MAX_WORST:
-        refuse("loader-bound", f"{steps:,} steps of {len(prog.body) + 1:,} "
+        refuse("loader-bound", f"{steps:,} steps of {run_step:,} "
                f"instructions is {c.worst_case:,} instructions at worst, and "
                f"the loader's bound is 2^40 on every device", source=src)
     c.depth = scratch_declared(prog.slots_used)
@@ -431,9 +459,15 @@ def compile_graph(graph, steps, target="sw", stem="system", source=None,
     c.features = [f for f in T.FEATURE_BITS if f in feats]
     missing = [f for f in c.features if f not in t.features()]
     if missing:
+        why = ""
+        if "FLAG_CONTROL" in missing:
+            why = (f": it raises its routines' flags ("
+                   f"{' and '.join(low.routines)}) through revision 8's "
+                   f"flag control, QUIET, ENDQUIET and RAISE, which no "
+                   f"tile has yet; the software targets run it")
         refuse("target-feature", f"the image needs "
                f"{', '.join(f'{f} ({T.CAPS_PLACE[f]})' for f in missing)}, "
-               f"which {t.name} does not publish", source=src)
+               f"which {t.name} does not publish{why}", source=src)
     if len(c.image_obj.insns) > t.max_insns:
         refuse("program-capacity", f"the image is "
                f"{len(c.image_obj.insns):,} instructions and {t.name} holds "

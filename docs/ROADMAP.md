@@ -4553,6 +4553,10 @@ intention-out beside every image.
   is a later parcel. cft-orbits computes r^-3 in a program from the
   seed and a fixed Newton chain: a deterministic composite, not a
   correctly rounded one, which a later parcel could offer by name.
+  (Restated by step 6: L4 made both operations of the language, and
+  parcel C4 compiles them as inlined routines. Spilling was the least
+  of it; the routine's flags, its raw words and its format were the
+  rest - docs/LANGUAGE.md, "What v1 does not do".)
 - Run-time transcendentals: the correctly rounded math library, a
   later step of the work order.
 - Time-dependent systems (t would ride in the state), adaptive steps
@@ -4804,10 +4808,11 @@ and the testing rule, as the last rounds ran.
    - `a / b` and `sqrt(a)` with non-constant operands become nodes,
      whose golden definition is `softfloat`'s div and sqrt, with exact
      flags.
-   - `runtime-division` and `runtime-sqrt` go. Until C4, cftc refuses
-     the new nodes by name, with a refusal of its own that L4 proposes,
-     so that D2's rule holds in between: an accepted source compiles or
+   - `runtime-division` and `runtime-sqrt` go. Until C4, cftc refused
+     the new nodes by name, with a refusal of its own that L4 proposed,
+     so that D2's rule held in between: an accepted source compiles or
      is refused by name, and exit 70 stays a defect in the compiler.
+     Since C4 they compile, and `runtime-routine` is gone.
    - The interpreter, the renderers and the intention-out's checks take
      them, and L3 gains their derivative rules.
    - What holds today's refusals is restated with them: test_lang.py,
@@ -4816,7 +4821,20 @@ and the testing rule, as the last rounds ran.
      other statements of the two refusals. The challenge suite's
      expectations are the suite's to restate. The workload pack's own
      copy of LANGUAGE.md stays as delivered.
-3. **C4, routines in the compiler.**
+3. **C4, routines in the compiler: built, verified by VC4 over two
+   checks and merged** (2026-10-02; LANGUAGE.md's compiler text and "A
+   call loop", `python/cft_golden/routines.py`, `python/cftc/`).
+   Division and square root are inlined routines, flag-exact through
+   R24's QUIET, ENDQUIET and RAISE, refused `target-feature` on
+   revision 7's targets and run on the software targets; Kepler is a
+   committed reference; the call loop is Logan's rule, "Build it now,
+   last in C4 (Recommended)", inline unless the step would pass
+   32,768 instructions; cftc's VERSION is an output version, 4; the
+   C half of version 1's routine-wider rule is in cft-segrun and
+   cft-audit; and the `lang` stage's routine legs are a stage of
+   their own, `lang-routines`, in the gate budget. Its four
+   departures from the design below are named in LANGUAGE.md. M1
+   builds on its fragments.
    - A generator in the model, in the manner of `cft_golden/divfull.py`,
      writes each routine as a relocatable fragment: registers from the
      allocator, raw-word bank slots as a new slot kind, and the

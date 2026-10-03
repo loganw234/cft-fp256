@@ -51,28 +51,33 @@ lang_check.py, whose helpers this reuses), with tangents:
      renormalisation: cft-audit in full and sampled, the golden audit
      sampled, line for line
   G  cft-segrun certifies each compiled variational reference (a main
-     run, a half-step run on the halved bank, a step-halving estimate);
-     the golden reader and audit and cft-audit accept each
+     run, a half-step run on the halved bank, a step-halving estimate) -
+     Kepler's, whose image holds routines, among them (C4); the golden
+     reader and audit and cft-audit accept each
   H  determinism: two processes under two PYTHONHASHSEEDs; the committed
      programs/systems/compiled-tangent/ is what the compiler writes, and
-     the `lang` stage's 48 committed files still are
-  I  refusals by name, the language's and the compiler's, with tangents
+     the `lang` stage's 64 committed files still are
+  I  refusals by name, the language's and the compiler's, with tangents;
+     a quotient and a root with two tangent vectors compiled for the
+     software targets and run as the interpreter runs them, and refused
+     `target-feature` on revision 7's (C4)
   J  plants: three wrong derivations, red on D and on the exponent; the
      same rule rounded otherwise, green on D and red on the committed
      bytes; three in a copy of the compiler, each stopped by its internal
      check and, with that off, red on seq.py
   K  coverage: every operation the rules write, every activity pattern
      of fma, every format, attribute and integrator, one and two vectors
-  L  the quotient's and the root's rules (L4), golden-only since the
-     compiler refuses both until parcel C4 (leg I makes the refusal, on
-     every target): written shapes and lang_check's generated sources that
-     divide or take a root, with tangent vectors - the tangent exactly
-     against this stage's own dual numbers (the quotient rule; the root as
-     the exact evaluation takes it) and against a central difference at
-     2^-64 in exact rationals; the primal unchanged; the specials bit for
-     bit; and plants - a root without its 2 and a quotient's wrong sign
-     red on both, a right root derivative written through r * r = a green
-     on the difference and red on the exact check
+  L  the quotient's and the root's rules (L4): written shapes and
+     lang_check's generated sources that divide or take a root, with
+     tangent vectors - the tangent exactly against this stage's own dual
+     numbers (the quotient rule; the root as the exact evaluation takes
+     it) and against a central difference at 2^-64 in exact rationals;
+     the primal unchanged; each compiled, its routines inlined (C4), and
+     run on seq.py against the interpreter at 1, 2 and 5 steps, states,
+     every tangent and FLAGS, at every format; the specials bit for bit;
+     and plants - a root without its 2 and a quotient's wrong sign red on
+     both, a right root derivative written through r * r = a green on the
+     difference and red on the exact check
 
 A check skipped prints a line that starts with SKIP, which the runner
 counts and names on its VERDICT line.
@@ -108,7 +113,8 @@ import lang_check as LC                                   # noqa: E402
 
 SYSTEMS = ROOT / "programs" / "systems"
 COMPILED = SYSTEMS / "compiled-tangent"
-TREFS = {"lorenz63-rk4-tangent": 100, "lorenz96-rk4-tangent": 20}
+TREFS = {"lorenz63-rk4-tangent": 100, "lorenz96-rk4-tangent": 20,
+         "kepler-sv-tangent": 10}       # Kepler's: routines (C4)
 # Lorenz-63's largest Lyapunov exponent at sigma 10, rho 28, beta 8/3, as
 # the round's brief gives it (the figure commonly quoted, to four places)
 LITERATURE = Fraction(9056, 10000)
@@ -1087,7 +1093,8 @@ def leg_determinism(work):
     have = sorted(p.name for p in COMPILED.iterdir()) if COMPILED.is_dir() \
         else []
     check(have == sorted(files), f"programs/systems/compiled-tangent/ holds "
-          f"exactly the four variational references' {len(files)} files",
+          f"exactly the {2 * len(TREFS)} variational references' "
+          f"{len(files)} files, Kepler's with routines among them",
           f"it holds {len(have)}: run programs/tangent_check.py --write")
     wrong = [n for n, d in files.items()
              if (COMPILED / n).is_file() and (COMPILED / n).read_bytes() != d]
@@ -1098,11 +1105,12 @@ def leg_determinism(work):
              if not (LC.COMPILED / n).is_file()
              or (LC.COMPILED / n).read_bytes() != d]
     graphs = [n for n in v1 if n.endswith(".graph.json")]
-    check(len(v1) == 48 and not wrong and all(
+    nv1 = 16 * (len(LC.REFS) + len(LC.ROUTINE_REFS))
+    check(len(v1) == nv1 and not wrong and all(
         json.loads(v1[n])["cftl_graph"] == 1 for n in graphs),
-        f"the `lang` stage's 48 committed compiled files are still what the "
-        f"compiler writes, byte for byte, its {len(graphs)} graphs version 1",
-        f"differ: {wrong[:6]}")
+        f"the `lang` stage's {nv1} committed compiled files are still what "
+        f"the compiler writes, byte for byte, its {len(graphs)} graphs "
+        f"version 1", f"differ: {wrong[:6]}")
 
 
 # ---- I: refusals by name --------------------------------------------------
@@ -1157,15 +1165,34 @@ def leg_refusals():
     expect("lane-shape", lambda: lang.run(lang.load(l63).graph, [[0, 0, 0]],
                                           1),
            "lang.run of a system with a tangent vector, given none")
-    # L4: a quotient and a root with tangent vectors, whose rules divide too
+    # L4 and C4: a quotient and a root with tangent vectors, whose rules
+    # divide too - compiled for the software targets, the same image for
+    # each, and run as the interpreter runs it; refused by name on revision
+    # 7's, which have no flag control
     routine = ("system dv\nformat fp64\nstate x, y\ntangent v, w\n"
                "d/dt x = y / sqrt(x * x + 1)\nd/dt y = -x\n"
                "step rk4, h = 1/16\n")
-    for t in LC.ROUTINE_TARGETS:
-        expect("runtime-routine", lambda: cftc.compile_text(routine, 2,
-                                                            target=t),
-               f"a quotient and a root with two tangent vectors on {t} "
-               f"(the compiler carries them only from parcel C4)")
+    images = set()
+    for t in LC.SW_TARGETS:
+        c = cftc.compile_text(routine, 2, target=t)
+        images.add(c.image)
+    g = c.ir
+    states = [[K.round_once(g.fmt, sf.RND_RNE, Fraction(v, 7))[0]] * 2
+              for v in (3, -11, 0)]
+    tans = [[[K.round_once(g.fmt, sf.RND_RNE, Fraction(u, 5))[0]] * 2
+             for u in (1, -2)] for _ in states]
+    failing, first, fok, _ref = LC.compare_routine(c, states, tans, 2)
+    check(len(images) == 1 and not failing and fok,
+          f"a quotient and a root with two tangent vectors compile for "
+          f"{', '.join(LC.SW_TARGETS)} - one image - and run as the "
+          f"interpreter runs them, states, both tangents and FLAGS, a zero "
+          f"lane among them ({c.manifest['routines']['calls']} routines a "
+          f"step)", f"{len(failing)} lanes differ from step {first}")
+    for t in LC.REV7_TARGETS:
+        expect("target-feature", lambda: cftc.compile_text(routine, 2,
+                                                           target=t),
+               f"the same on {t}, which has no flag control for its "
+               f"routines (C4)")
     try:
         cftc.compile_file(l63, 3).scratch_block([[0, 0, 0]])
         bad("a compiled variational image's block without its tangents - "
@@ -1194,7 +1221,7 @@ def leg_refusals():
                                      "lorenz63-rk4-tangent-fp64.cftp")
               .is_file(), "the command line compiles a variational source")
     check(made == {"tangent-mismatch", "tangent-scope", "scratch-capacity",
-                   "program-capacity", "lane-shape", "runtime-routine"},
+                   "program-capacity", "lane-shape", "target-feature"},
           "every refusal named here was made", f"made {sorted(made)}")
 
 
@@ -1510,8 +1537,8 @@ def leg_routines(count, rng):
     section(f"L. the quotient's and the root's rules (L4): {len(L4_SHAPES)} "
             f"written shapes and {count} generated systems that divide or "
             f"take a root, with tangent vectors - the derivative exactly and "
-            f"by a central difference, the primal unchanged, the specials, "
-            f"plants")
+            f"by a central difference, the primal unchanged, each compiled "
+            f"and run against the interpreter (C4), the specials, plants")
     t0 = time.perf_counter()
     graphs = l4_graphs(l4_texts(count, "tangent routines"))
     tot = bad_n = ftot = fbad = 0
@@ -1537,6 +1564,34 @@ def leg_routines(count, rng):
           f"without the tangent, on lanes that overflow, hold a signalling "
           f"NaN and hold subnormals, its graph's lines",
           f"changed: {changed[:4]}")
+    # compiled (C4): each system's image, its routines inlined, on seq.py
+    # against the interpreter - states, every tangent and FLAGS
+    held, missed, formats = 0, [], set()
+    for g, text, what in graphs:
+        try:
+            c = cftc.compile_text(text, 5, source=what)
+        except lang.Refusal as e:
+            missed.append(f"{what}: refused {e.name}: {e.sentence[:80]}")
+            continue
+        fmt = g.fmt
+        states = LC.lanes_for(fmt, g.n_state, rng, 3)
+        states += LC.special_lanes(fmt, g.n_state, states[0], rng)
+        states.append([0] * g.n_state)
+        tans = [[LC.lanes_for(fmt, g.n_state, rng, 1)[0] for _ in g.tangent]
+                for _ in states]
+        failing, first, fok, _ref = LC.compare_routine(c, states, tans, 5)
+        if failing or not fok:
+            missed.append(f"{what}: {len(failing)} lanes from step {first}, "
+                          f"FLAGS {'equal' if fok else 'differ'}")
+        else:
+            held += 1
+            formats.add(fmt.name)
+    check(not missed and formats == {"fp32", "fp64", "fp128", "fp256"},
+          f"{held} of them compiled for the software backend, their routines "
+          f"inlined, and run on seq.py as the interpreter runs them at 1, 2 "
+          f"and 5 steps - states, every tangent and FLAGS, on lanes that "
+          f"overflow, hold a signalling NaN, hold subnormals and hold zeros - "
+          f"at {', '.join(sorted(formats))}", "; ".join(missed[:4]))
     # the specials, bit for bit, against the rules computed with softfloat
     fmt = FORMATS["fp64"]
 

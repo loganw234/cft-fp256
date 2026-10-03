@@ -365,29 +365,31 @@ def compiled(wid, steps, target):
 
 
 def image_at(image, steps):
-    """The image with its one REPEAT counting `steps`, every other word the
-    same (programs/check.py's _patch_trip; lang_check.image_at)."""
+    """The image with its segment's REPEAT - its first - counting `steps`,
+    every other word the same (programs/check.py's _patch_trip;
+    lang_check.image_at). A call loop's REPEATs (parcel C4) are inside the
+    step and keep their counts: patching them too ran a looped image wrong
+    on 41 of 52 lanes (verifier-VC4, 2026-10-02)."""
     img = asm.Image.from_bytes(image)
     words = list(img.insns)
     for k, w in enumerate(words):
         dd = asm.decode(w)
         if dd["ctrl"] and dd["op"] == asm.REPEAT:
             words[k] = asm.repeat(steps)
+            break
     return asm.Image(img.fmt, words, img.consts, img.max_deposits, img.flags,
                      scratch_depth=img.scratch_depth,
                      scratch_io=img.scratch_io).to_bytes()
 
 
 def repeat_count(image):
-    """The steps a segment: the image's one REPEAT's count."""
-    counts = []
+    """The steps a segment: the count of the image's segment REPEAT, its
+    first - a call loop's REPEATs (parcel C4) are inside the step."""
     for w in asm.Image.from_bytes(image).insns:
         dd = asm.decode(w)
         if dd["ctrl"] and dd["op"] == asm.REPEAT:
-            counts.append(dd["imm"])
-    if len(counts) != 1:
-        raise ValueError(f"the image has {len(counts)} REPEATs, not one")
-    return counts[0]
+            return dd["imm"]
+    raise ValueError("the image has no REPEAT, so it is not a segment")
 
 
 # ---- the comparisons, each a list of problems by name ----------------------

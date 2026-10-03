@@ -1,0 +1,17 @@
+; Kepler's problem, a body about a fixed centre of unit mass (G = 1),
+; stepped by Stormer-Verlet: the first reference that divides and takes a
+; root at run time. r3 = |q|^3 is one root and a product; each force
+; component one division by it, so a step runs three routines, inlined
+; (docs/LANGUAGE.md, "The operations"; parcel C4). An image with them
+; needs revision 8's flag control: the software targets run it.
+system kepler
+format fp256
+round  rne
+state  x, y, px, py
+let r2 = fma(x, x, y * y)
+let r3 = r2 * sqrt(r2)
+d/dt x  = px
+d/dt y  = py
+d/dt px = -(x / r3)
+d/dt py = -(y / r3)
+step   stormer-verlet, h = 1/100, q = (x, y), p = (px, py)

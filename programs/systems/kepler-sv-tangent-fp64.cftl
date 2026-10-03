@@ -1,0 +1,19 @@
+; Kepler's problem with its variational equations: kepler-sv-fp64 and one
+; tangent vector, stepped beside the state by the same program. The
+; tangent is derived, never written (docs/LANGUAGE.md, "The variational
+; equations"): each quotient's tangent is (dx - r dr3)/r3 and the root's
+; dr2/(2 sqrt(r2)), so a vector adds a run-time division for each
+; division and root the step's tangent reads - three more routines a step
+; (C4).
+system kepler
+format fp64
+round  rne
+state  x, y, px, py
+tangent v
+let r2 = fma(x, x, y * y)
+let r3 = r2 * sqrt(r2)
+d/dt x  = px
+d/dt y  = py
+d/dt px = -(x / r3)
+d/dt py = -(y / r3)
+step   stormer-verlet, h = 1/100, q = (x, y), p = (px, py)
