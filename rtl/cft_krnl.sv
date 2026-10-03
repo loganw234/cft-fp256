@@ -871,7 +871,12 @@ module cft_krnl #(
               .EN_FP32(EN_FP32), .EN_FP64(EN_FP64),
               .EN_FP128(EN_FP128), .EN_FP256(EN_FP256),
               .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM),
-              .FUSE_ALIGN(FUSE_ALIGN), .MUL_PASSES(MUL_PASSES)) u_lanes (
+              .FUSE_ALIGN(FUSE_ALIGN), .MUL_PASSES(MUL_PASSES),
+              // R21's lanes are built only where CAPS2[11] is published:
+              // FEAT_AUGADD is 0 until round 2's decode makes it the
+              // EN_AUGADD build parameter, so no lane carries R21's
+              // logic unread (verifier-VRB's merge note).
+              .EN_AUGADD(FEAT_AUGADD)) u_lanes (
       .clk(ap_clk), .rst_n(ap_rst_n),
       .in_valid (mode_seq_q ? seq_lv    : eng_lv),
       .op       (mode_seq_q ? seq_lop   : eng_lop),

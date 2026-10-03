@@ -4,7 +4,8 @@
 // wrapper per format keeps parameter overrides out of the simulator
 // command line, which is the part that differs between simulators.
 //
-// MUL_PASSES is the one override the wrapper does take, so the same
+// MUL_PASSES is one of the two overrides the wrapper takes (EN_AUGADD,
+// R21's lanes, is the other), so the same
 // bench can score the pipe at a multi-cycle budget: the wrapper then
 // paces the pipe exactly as cft_lanes would - a phase counter with the
 // period the geometry include derives for this rung, `en` on its last
@@ -16,12 +17,17 @@
 `timescale 1ns/1ps
 
 module tb_fpfma_fp32 #(
-    parameter int MUL_PASSES = 1
+    parameter int MUL_PASSES = 1,
+    // R21's lanes in the pipe (rtl/cft_fpfma_pipe.sv). The bench drives
+    // aug_mode at 1; at 0 it holds every other operation to the model
+    // and leaves the sideband idle (CFT_EN_AUGADD=0, tb/fpfma_common.py).
+    parameter bit EN_AUGADD = 1'b1
 ) (
     input  logic        clk,
     input  logic        rst_n,
     input  logic        in_valid,
     input  logic [2:0]  rnd,
+    input  logic [1:0]  aug_mode,  // R21's sideband: 0, 1 augadd, 2 augerr
     input  logic [7:0]  op,
     input  logic [31:0] a,
     input  logic [31:0] b,
@@ -74,8 +80,10 @@ module tb_fpfma_fp32 #(
   cft_simpleops #(.EXP_W(8), .MAN_W(23)) u_simple (
       .op(op), .a(a), .b(b), .c(c), .valid(bv), .d(bd), .flags(bf));
   cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(16),
-                   .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP)) u_dut (
-      .clk(clk), .rst_n(rst_n), .en(en), .in_valid(in_valid), .rnd(rnd), .aug_mode(2'b00),
+                   .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP),
+                   .EN_AUGADD(EN_AUGADD)) u_dut (
+      .clk(clk), .rst_n(rst_n), .en(en), .in_valid(in_valid), .rnd(rnd),
+      .aug_mode(aug_mode),
       .byp(bv), .byp_d(bd), .byp_f(bf),
       .a(a), .b(b), .c(c),
       .out_valid(out_valid), .d(d), .flags(flags),

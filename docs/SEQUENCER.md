@@ -3109,17 +3109,53 @@ a padding lane and a lane SETACT dropped run no instruction, so they write
 no `rd` and raise no flag - P3's rule, which
 `python/tests/test_seq_rev8.py` holds with a signaling NaN in each.
 
-**What a tile would need** (revision 8's RTL: believed, not built). Both
-codes go through the issue pipe into the array as an ALU instruction
-does - one array pass and one register write each, under R13 to R15's
-hazards and forwarding - rather than through the control path, and R10's
-stream-need parse names their `ra` and `rb`. In the lanes, the adder's
-rounding gains ties-toward-zero (a nearest mode whose tie goes down: round
-up on guard AND sticky), and a second output selects e, the exact sum
-less the rounded one; in the far case e is the smaller operand unchanged.
-Every tile built so far reads CAPS2[11] as zero and would decode code 10
-as HALT (`rtl/cft_seq.sv`'s `default` arm), so the loader refuses both
-codes there by name, naming the instruction.
+**What a tile does: the lanes built, the decode round 2's** (revision 8's
+RTL, docs/ROADMAP.md's plan of record; golden-first, so `augmented.py`
+stays the definition and the lanes are held to it). Both codes are to go
+through the issue pipe into the array as an ALU instruction does - one
+array pass and one register write each, under R13 to R15's hazards and
+forwarding - rather than through the control path, with R10's
+stream-need parse naming their `ra` and `rb`: that decode is round 2's.
+The lanes are built (round 1, the plan's design (b),
+`rtl/cft_fpfma_pipe.sv`'s R21 section). Every FMA pipe takes a two-bit
+sideband, `aug_mode` (0 an ordinary operation, 1 augadd, 2 augerr),
+beside its attribute, with ADD's operands (x, 1.0, y), and computes the
+instruction's result in one pass at its sixteen levels:
+- the sideband becomes an internal attribute at the pipe's first level,
+  where an outside attribute code 5 to 7 becomes round-to-nearest-even,
+  as MODE[14:12] documents, so no elementwise run can reach R21's mode;
+- for these two codes the operand of larger exponent anchors the
+  alignment, so that r's rounding point is one of six fixed places;
+- r is the sum rounded ties toward zero (up on guard AND sticky; an
+  overflow goes to infinity); augerr's e is the field below r's rounding
+  point - from the other difference where r rounds up, which is its
+  negation - normalised by r's own normaliser; wherever bits of the
+  smaller operand leave the window (the marker, not only the far case),
+  e is that operand unchanged;
+- the flags are this section's: no inexact unless r overflows, when both
+  results are that infinity; underflow without inexact where e is
+  non-zero and below 2^emin; and 9.5's special values and signed zeros.
+
+The four fpfma benches, fp32 to fp256 with their multi-pass forms, hold
+both codes to `augmented.py` bit for bit beside every operation they held
+before (docs/VERIFICATION.md). A build parameter, EN_AUGADD, leaves R21's
+lanes out (docs/ROADMAP.md, question 9). Probe L measured them on
+2026-10-03, at s6-rb fcc7da8 (one pipe out of context at each rung,
+Vivado 2022.2, the U50's part, 135 MHz). EN_AUGADD = 1 less 0 is +407,
++674, +1,077 and +2,489 LUTs a pipe at fp32, fp64, fp128 and fp256
+(registers +54, +62, -161 and +207): +10,595 LUTs and +565 registers a
+tile, +42,380 LUTs on the quad - over question 9's 2,000, so the quad is
+built without R21. The synthesis slack into S10 falls by 0.99, 1.30,
+1.86 and 1.98 ns and stays positive; placed and routed alone, fp256's
+pipe keeps +1.815 ns into S10 with R21 (+2.770 without), +1.523 into S6
+(+2.858) and +1.089 at its worst (+1.118), so design (b) keeps S10's
+timing and design (a) is not built (question 8). At EN_AUGADD = 0 the
+pipe synthesises to exactly 5e033f6's at fp32, fp64 and fp128, and one
+LUT apart at fp256 (30,251 against 30,250, registers equal). Until round
+2's decode drives the sideband - and on every tile built so far -
+CAPS2[11] reads zero and code 10 decodes as HALT (`rtl/cft_seq.sv`'s
+`default` arm), so the loader refuses both codes there by name, naming
+the instruction.
 
 ### R22. A post-step on `STX` and `LDX`
 

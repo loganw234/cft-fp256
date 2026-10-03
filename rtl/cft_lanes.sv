@@ -31,7 +31,8 @@
 //
 // The interface is per-ISSUE: op and rnd travel with each beat (the
 // pipe already carries the attribute alongside each operation, which
-// is what lets adjacent sequencer instructions round differently),
+// is what lets adjacent sequencer instructions round differently), and
+// since revision 8 so does aug_mode, R21's sideband, beside rnd,
 // while prec is stable per run - it selects the live bank and the
 // ladders' mode, and both drivers snapshot it at start and hold it
 // until their last result has retired.
@@ -80,7 +81,15 @@ module cft_lanes #(
     // 2 at MUL_PASSES=2. The results are bit-identical at every value
     // - the trade is throughput for area, in the wide modes only, and
     // tb_mulcycle holds the array to it against itself.
-    parameter int MUL_PASSES = 1
+    parameter int MUL_PASSES = 1,
+    // Revision 8's R21 in every pipe: augadd and augerr behind aug_mode
+    // (rtl/cft_fpfma_pipe.sv's R21 section). 1, the default, builds them;
+    // at 0 every pipe's R21 terms are constant or unread, for synthesis
+    // to remove, leaving the pipe revision 7 shipped (probe L's control,
+    // in the pipe's header) - how a build that cannot afford the LUTs
+    // leaves R21 out inside the same RTL revision (docs/ROADMAP.md,
+    // question 9; probe L measured R21 at +10,595 LUTs a tile).
+    parameter bit EN_AUGADD  = 1'b1
 )(
     input  logic                 clk,
     input  logic                 rst_n,
@@ -91,9 +100,10 @@ module cft_lanes #(
     // Revision 8's R21 sideband (docs/ROADMAP.md, "Revision 8"), per
     // issue like rnd: 0 an ordinary operation, 1 augadd, 2 augerr. Not
     // the attribute's codes 5 to 7, which MODE[14:12] documents as RNE,
-    // so no elementwise run can reach R21's mode. Handed to every pipe;
-    // INERT at revision 8's seam - every driver ties it to zero and no
-    // pipe reads it until R21's lanes are built.
+    // so no elementwise run can reach R21's mode. Handed to every pipe,
+    // which honours it with ADD's operands (x, 1.0, y) - the request
+    // shape the sequencer fires codes 10 and 11 in - and reads nothing
+    // of it at EN_AUGADD = 0. The engine ties it to zero for good.
     input  logic [1:0]           aug_mode,
     input  logic [1:0]           prec,   // PREC_CODE; stable per run
     input  logic [BEAT_BITS-1:0] a,
@@ -455,7 +465,8 @@ module cft_lanes #(
         cft_fpfma_pipe #(.EXP_W(8), .MAN_W(23), .LATENCY(LATENCY),
                          .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
                          .EXT_ALIGN(USE_FUSED_ALIGN),
-                         .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP32)) u_fma (
+                         .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP32),
+                         .EN_AUGADD(EN_AUGADD)) u_fma (
             .clk(clk), .rst_n(rst_n), .en(en),
             .in_valid(in_valid && (prec == PREC_FP32)),
             .rnd(rnd),
@@ -515,7 +526,8 @@ module cft_lanes #(
         cft_fpfma_pipe #(.EXP_W(11), .MAN_W(52), .LATENCY(LATENCY),
                          .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
                          .EXT_ALIGN(USE_FUSED_ALIGN),
-                         .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP64)) u_fma (
+                         .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP64),
+                         .EN_AUGADD(EN_AUGADD)) u_fma (
             .clk(clk), .rst_n(rst_n), .en(en),
             .in_valid(in_valid && (prec == PREC_FP64)),
             .rnd(rnd),
@@ -572,7 +584,8 @@ module cft_lanes #(
         cft_fpfma_pipe #(.EXP_W(15), .MAN_W(112), .LATENCY(LATENCY),
                          .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
                          .EXT_ALIGN(USE_FUSED_ALIGN),
-                         .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP128)) u_fma (
+                         .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP128),
+                         .EN_AUGADD(EN_AUGADD)) u_fma (
             .clk(clk), .rst_n(rst_n), .en(en),
             .in_valid(in_valid && (prec == PREC_FP128)),
             .rnd(rnd),
@@ -625,7 +638,8 @@ module cft_lanes #(
       cft_fpfma_pipe #(.EXP_W(19), .MAN_W(236), .LATENCY(LATENCY),
                        .EXT_MUL(USE_FUSED_MUL), .EXT_NORM(USE_FUSED_NORM),
                        .EXT_ALIGN(USE_FUSED_ALIGN),
-                       .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP256)) u_fma (
+                       .MUL_PASSES(MUL_PASSES), .MUL_PERIOD(NP256),
+                       .EN_AUGADD(EN_AUGADD)) u_fma (
           .clk(clk), .rst_n(rst_n), .en(en),
           .in_valid(in_valid && (prec == PREC_FP256)),
           .rnd(rnd),
