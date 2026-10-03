@@ -506,7 +506,10 @@ def oracle_problems(states, flags, each, v):
 
 def segrun(tool, device, d, segments, steps):
     out, states = d / "c.cert", d / "states"
-    args = [tool, "--out", out, "--states", states, "--open"]
+    # version 1: cft-segrun writes version 2 by default since version 2's
+    # C half, and this leg holds version 1's certificate and its audit
+    args = [tool, "--format-version", "1", "--out", out, "--states", states,
+            "--open"]
     if device == "sw":
         args += ["--device", "sw", "--scratch-depth", DEPTH]
     else:

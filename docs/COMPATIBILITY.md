@@ -904,7 +904,38 @@ argument 17). ABI 0.17 already has every field and bit; docs/HOSTAPI.md,
 | an older library | refuses a 0xB00 tile at `cft_open`, by name (`CFT_ERR_UNSUPPORTED`, "hardware contract 0x00000b00 is not one this library knows"), rather than misread its map - the plan's correction to the streaming study's first compatibility row |
 | remote | no frame change: HELLO carries `seq_features` and `max_insns` as before, so a server fronting a 0xB00 tile reports what its library decoded |
 | Node / Browser | unchanged: the module has no XRT backend, and no source it builds changed |
-| Arduino | the vendored copy re-synced: `src/caps_decode.h`, the decode the XRT backend calls, is its 34th file, included by nothing there |
+| Arduino | the vendored copy re-synced: `src/caps_decode.h`, the decode the XRT backend calls, joins it, included by nothing there (35 files with ABI 0.18's `src/xclbin_clock.h`) |
+
+### ABI 0.18 (2026-10-02): certificate version 2's device lines
+
+The library's side of certificate format version 2's provenance
+(docs/CERTIFICATES.md, "Provenance"), built with cft-segrun's version 2
+(the writer's half of its C half, parcel CV2CW; docs/HOSTAPI.md,
+"Certificate version 2's device lines at ABI 0.18"). It is ADDITIVE: an
+output struct grew, under the size handshake it already had.
+- **`cft_image_id`** gains `platform`, `xrt_version`, `clock_hz` and
+  `serial`, appended after its 72 bytes. On an XRT handle: the card's
+  platform name as XRT reports it, the XRT version the library was built
+  against, the kernel clock the image's own BUILD_METADATA states (its one
+  `--clock.freqHz` constraint naming every unit opened; XRT reports the
+  shell's clocks, not the kernel's) and the card's serial from XRT's
+  platform report, each "" or 0 where not known.
+- **The software backend and a remote handle** refuse `cft_get_image_id`
+  by name as they did, so a certificate writes `none` and `unknown` there.
+- **What an older caller meets:** a 0.17 caller passes its old
+  `struct_size` and is filled exactly as before; its other calls run as
+  before. A 0.17 peer and a 0.18 peer refuse each other at HELLO.
+
+| surface | status at ABI 0.18 |
+|---|---|
+| C (`cft.h`) | complete. `api-test` holds the layout, a 0.17-sized call refused unchanged on the software backend, and the clock reader (`host/src/xclbin_clock.h`) on fifteen synthetic images and two malformed ones; device-test prints the four fields on an xclbin, the serial withheld unless `--show-serial` |
+| hardware | no RTL: the image's bytes and XRT's answers, nothing a tile publishes |
+| XRT | the four fields recorded at `cft_open`. Compiled against XRT 2.14's headers in cft2204 with no warning; the clock reader run by verifier-VCV2CW on all fifteen of that distro's images: its four hw images 10, 10, 135 and 135 MHz on their own units (the 135 MHz pair in `/root/cft-quad-tip/`), its eleven hw_emu images not known. Not yet compiled with XRT=1 on amd-arc-box, and not yet run on a card |
+| remote | no frame change: `cft_get_image_id` refused on the client as before, so the four lines are `unknown`. A 0.17 peer is refused at HELLO |
+| Node / Browser | the module's sources need nothing new - no export reaches `cft_get_image_id` - and the integrator rebuilds it at 0.18, as every step's is; `verify.mjs` and `test.mjs` read the version from `cft.h`, so they fail against the 0.17 module until then |
+| C++ (`cft.hpp`) | no wrapper for the four fields; a C++ caller reaches them through `cft.h`, and `header_abi_version` reads the macros |
+| Arduino | the vendored copy re-synced, `src/xclbin_clock.h` among its 35 files, beside the seam's `src/caps_decode.h` |
+| certificates | `cft-segrun` writes certificate version 2 by default since this step, its four device lines from `cft_image_id`: `none` on the software backend, `unknown` through a remote handle, the card's on an xclbin, the serial `withheld` until published; version 1 with `--format-version 1`, byte for byte as before |
 
 ## Hosts and boards
 

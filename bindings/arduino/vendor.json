@@ -21,7 +21,7 @@
     {
       "source": "host/include/cft.h",
       "dest": "src/cft/include/cft.h",
-      "sha256": "2e4b4f20406a6997b9c65a51327f6b44486a2ab064cd5a1d6c21fd2e3f0465fa"
+      "sha256": "f9b1c580ea1219c80a925701ae689e8b4d54bc2c8b02b48eca66f9119653be0e"
     },
     {
       "source": "host/include/cft_config.h",
@@ -41,7 +41,7 @@
     {
       "source": "host/src/backend.h",
       "dest": "src/cft/src/backend.h",
-      "sha256": "b02a13e281e7cff8e085709a5a3b3afb50392faff6f8a64e9b73f6c5082d0337"
+      "sha256": "57777c6746af43d8817dd5dc1df07292e1d4fe5b2ee86d4f9e958df4c11184e0"
     },
     {
       "source": "host/src/backend_remote.c",
@@ -86,7 +86,7 @@
     {
       "source": "host/src/device.c",
       "dest": "src/cft/src/device.c",
-      "sha256": "c84d6a424e236ba20b8aa9ddd63f153d85f87687be36bcc0c8272884371d4ebe"
+      "sha256": "6131fe4fd114fcd9054bc3db9fcf31a824164626052607136605bee75aed6455"
     },
     {
       "source": "host/src/divfull_images.h",
@@ -187,6 +187,11 @@
       "source": "host/src/transcend.h",
       "dest": "src/cft/src/transcend.h",
       "sha256": "2e72e199444866f8142151c45482ae040bec1cf87738504af363a5a7bdbecfa1"
+    },
+    {
+      "source": "host/src/xclbin_clock.h",
+      "dest": "src/cft/src/xclbin_clock.h",
+      "sha256": "ee4fc4ae21c7f4252e856e2d915c5834815002965c2d1cd30f70cc3408b9bfea"
     }
   ]
 }

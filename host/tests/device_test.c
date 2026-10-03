@@ -8894,6 +8894,12 @@ out:
 static int expect_refusal;
 static const char *const refusal_kind[3] = {"none", "mixed", "unreadable"};
 
+/* --show-serial: print the card's serial (ABI 0.18) in full. By default
+ * it is withheld, as a version-2 certificate's device-serial is until
+ * published, and only its length printed: a card run's log is quoted
+ * into the record (verifier-VCV2CW, 2026-10-03). */
+static int show_serial;
+
 /* The two plants' decoded caps and supports, kept by check_image_plants
  * to be held to the unplanted handle under test once it is open. */
 #define PLANT_PROBES 2
@@ -9111,6 +9117,36 @@ static void check_image_identity(cft_device *dev, const char *artifact)
         if (!memcmp(im.sha256, want, 32) && im.image_bytes == (uint64_t)len)
             printf("  image identity: the digest is the SHA-256 of %s, "
                    "%lu bytes\n", path, (unsigned long)len);
+    }
+    /* ABI 0.18's device lines (certificate format version 2's
+     * device-platform, device-xrt, device-clock and device-serial):
+     * REPORTED, as a certificate reports them, and printed here so that
+     * a card run records what this card and this XRT answer - the serial
+     * withheld, as a certificate's is, unless --show-serial. Each text
+     * is NUL-terminated inside its field by the library; nothing else
+     * about them can be checked against the file. */
+    CHECK(memchr(im.platform, 0, sizeof im.platform) != NULL &&
+          memchr(im.xrt_version, 0, sizeof im.xrt_version) != NULL &&
+          memchr(im.serial, 0, sizeof im.serial) != NULL,
+          "the image identity: a 0.18 text field runs off its array");
+    {
+        char serial[300];
+        if (!memchr(im.serial, 0, sizeof im.serial))
+            snprintf(serial, sizeof serial, "not printed: it runs off its "
+                     "field (the failure above)");
+        else if (!im.serial[0])
+            snprintf(serial, sizeof serial, "none reported");
+        else if (show_serial)
+            snprintf(serial, sizeof serial, "\"%.255s\"", im.serial);
+        else
+            snprintf(serial, sizeof serial, "withheld (%lu characters; "
+                     "--show-serial prints it)",
+                     (unsigned long)strlen(im.serial));
+        printf("  device lines (ABI 0.18, reported): platform \"%.255s\", "
+               "XRT \"%.63s\", kernel clock %llu Hz%s, serial %s\n",
+               im.platform, im.xrt_version, (unsigned long long)im.clock_hz,
+               im.clock_hz ? "" : " (not known: the image states none for "
+               "every unit opened)", serial);
     }
     {
         static const cft_op group_op[7] = {CFT_FMA, CFT_ABS, CFT_MIN,
@@ -9442,6 +9478,8 @@ int main(int argc, char **argv)
             quick = 1;
         } else if (!strcmp(argv[argi], "-i")) {
             only_id = 1;
+        } else if (!strcmp(argv[argi], "--show-serial")) {
+            show_serial = 1;
         } else if (!strcmp(argv[argi], "--expect-refusal") &&
                    argi + 1 < argc) {
             const char *want = argv[++argi];
@@ -9505,6 +9543,11 @@ int main(int argc, char **argv)
                     "planted, and each\n"
                     "      planted handle's decode held to the unplanted "
                     "one's\n"
+                    "  --show-serial\n"
+                    "      print the card's serial (ABI 0.18) in full; "
+                    "by default it is\n"
+                    "      withheld, as a certificate's is, and only its "
+                    "length printed\n"
                     "  --scratch-depth N\n"
                     "      the software device under test (\"sw\") at N "
                     "scratch slots a lane;\n"

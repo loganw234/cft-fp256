@@ -1007,10 +1007,15 @@ stage seq "the sequencer: C vs model over fuzzed programs, plain and with indexe
 # keyed and open; the golden writer, handed each certificate's identity
 # lines, the salt and the initial states, runs every segment itself and
 # must write the same bytes, and the golden audit must accept each, in
-# full and sampled. A stage of its own would have moved the runner's
-# stage count, which CLAUDE.md states; the gate is about the library's
-# programs, so it lives here. -k, so a failing asmtest still lets the
-# certificate gate report.
+# full and sampled. Since version 2's C half (2026-10-02) cft-segrun
+# writes certificate version 2 by default: those sections ask for version
+# 1 (--format-version 1), and its section 14 (host/tests/segrun_check_v2.py)
+# holds version 2 byte for byte to the golden writer - the per-lane
+# blocks, a marked lane replayed, a source and its manifest, a
+# wider-source run, every header line and every refusal by name. A stage
+# of its own would have moved the runner's stage count, which CLAUDE.md
+# states; the gate is about the library's programs, so it lives here. -k,
+# so a failing asmtest still lets the certificate gate report.
 #
 # Then the golden certificates (host/Makefile's corpustest,
 # certificates/corpus.py; docs/CERTIFICATES.md, "Golden certificates"):
@@ -1020,8 +1025,9 @@ stage seq "the sequencer: C vs model over fuzzed programs, plain and with indexe
 # a change that moves both at once passes it; this one does not. It
 # joined this stage beside segruntest by the lead's decision (2026-09-29),
 # about 25 s of it on the desktop. Since 2026-10-02 it holds certificate
-# format version 2's cases too, the golden writer's until version 2's C
-# half, and thirty controls each refused by its name.
+# format version 2's cases too, made again by the golden writer and,
+# since version 2's C half, the seven a C writer makes by cft-segrun as
+# well, and thirty controls each refused by its name.
 do_programs() {
   HOSTMAKE -k collatz asmtest segruntest corpustest PYTHON="$PYBIN"
 }

@@ -729,7 +729,10 @@ def segrun(segrun_path, work, image, bank, block, fmt, steps, segments,
         out.unlink()
     if states.exists():
         shutil.rmtree(states)
-    args = ["--out", out, "--states", states, "--open", "--device", "sw"]
+    # version 1 (--format-version 1): cft-segrun writes version 2 by
+    # default since version 2's C half, and this leg reads version 1's
+    args = ["--format-version", "1", "--out", out, "--states", states,
+            "--open", "--device", "sw"]
     if depth != 256:
         args += ["--scratch-depth", depth]
     args += ["--run", "main", "--image", work / "image.cftp", "--bank",
@@ -976,7 +979,10 @@ def certify(c, name, segrun_path, audit_path, rng, work):
         out.unlink()
     if states_dir.exists():
         shutil.rmtree(states_dir)
-    args = ["--out", out, "--states", states_dir, "--open", "--device", "sw"]
+    # version 1 (--format-version 1): cft-segrun writes version 2 by
+    # default since version 2's C half, and this leg's audits are version 1's
+    args = ["--format-version", "1", "--out", out, "--states", states_dir,
+            "--open", "--device", "sw"]
     if c.depth != 256:
         args += ["--scratch-depth", c.depth]
     args += ["--run", "main", "--image", d / "image.cftp", "--bank",

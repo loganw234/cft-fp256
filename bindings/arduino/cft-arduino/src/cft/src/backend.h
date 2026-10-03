@@ -82,13 +82,24 @@ void cftx_close(void *hw);
  * it the image - or when a tile's words could not be read at open; the
  * sentence says which, and names the tile. CFT_XRT_CAPS plants either
  * for device-test (backend_xrt.cpp). Recorded at open, so it touches no
- * device and answers on a poisoned handle. */
+ * device and answers on a poisoned handle.
+ *
+ * ABI 0.18 appends the device lines of certificate format version 2,
+ * each recorded at open too (cft.h, cft_image_id): the platform's name
+ * as XRT reports it, the XRT version the library was built against, the
+ * kernel clock the image's BUILD_METADATA states (xclbin_clock.h) and
+ * the card's serial from XRT's platform report. "" or 0 where it is not
+ * known; a text that would not fit is "" rather than cut short. */
 typedef struct cft_image_raw {
     uint8_t  sha256[32];
     uint64_t bytes;
     uint32_t version;
     uint32_t n_caps;
     uint32_t caps[4];
+    char     platform[256];
+    char     xrt_version[64];
+    uint64_t clock_hz;
+    char     serial[256];
 } cft_image_raw;
 
 int cftx_image_id(void *hw, cft_image_raw *out);

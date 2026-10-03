@@ -711,8 +711,10 @@ def segrun(tool, work, tag, runs):
     None having failed."""
     d = work / tag
     d.mkdir(parents=True)
-    args = ["--out", d / "c.cert", "--states", d / "states", "--open",
-            "--device", "sw"]
+    # version 1 (--format-version 1): cft-segrun writes version 2 by
+    # default since version 2's C half, and the sweep scores version 1
+    args = ["--format-version", "1", "--out", d / "c.cert", "--states",
+            d / "states", "--open", "--device", "sw"]
     progs = {}
     for r, (kind, hs, img, fmt, bank, init, segs, steps) in enumerate(runs):
         (d / f"run{r}.cftp").write_bytes(img)

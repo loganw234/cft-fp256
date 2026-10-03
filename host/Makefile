@@ -1213,6 +1213,16 @@ clean-programs:
 #                       state read back is changed (output); and what the
 #                       entries cost in memory: no state beside the runs',
 #                       and drifts' states read back a pair at a time.
+#                       All of that is version 1's, each command line
+#                       asking for it (--format-version 1). Its section
+#                       14 (tests/segrun_check_v2.py) holds certificate
+#                       version 2, the tool's default since version 2's
+#                       C half: the per-lane blocks, a marked lane
+#                       replayed by an image of its source, a source and
+#                       its manifest, a wider-source run, every header
+#                       statement and measured line, the issuer-key's
+#                       decoding, and every version-2 refusal by name,
+#                       byte for byte the golden writer's (cert2.py).
 #                       verify/run.sh's `programs` stage runs it.
 #
 # The tree's build id goes in as make test hands api-test its own, so a
@@ -1227,6 +1237,7 @@ clean: clean-segrun
 .PHONY: segruntest clean-segrun
 
 cft-segrun$(EXE): tools/segrun.c tools/cert_exact.h tools/cert_write.h \
+                  tools/ed25519.h tools/sha512.h \
                   libcft.a src/bigint.h include/cft_config.h
 	$(CC) $(CSTD) $(CFLAGS) $(WARN) $(INC) tools/segrun.c libcft.a -o $@ \
 		$(XRTLIBS)
@@ -1257,10 +1268,11 @@ clean-segrun:
 #                       step 5); every boundary file; the golden audit's
 #                       expected verdict, in full and sampled; and the
 #                       page's example. Since 2026-10-02 version 2's
-#                       cases too, made again by the golden writer
-#                       (cft-segrun writes version 1 until version 2's
-#                       C half), and thirty controls, each refused by
-#                       its name.
+#                       cases too, made again by the golden writer and,
+#                       the seven marked `writers both`, by cft-segrun
+#                       (version 2's C half), every line but its own
+#                       measurements byte for byte; and thirty controls,
+#                       each refused by its name.
 #
 # segruntest holds the tool and the golden writer to each other, so a
 # change that moves both at once passes it; this holds both to bytes

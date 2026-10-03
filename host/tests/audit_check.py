@@ -512,7 +512,7 @@ def no_source_kwargs(kw):
     """A version-2 golden audit's keywords for the same audit as cft-audit
     can be handed it: no source - so that a replay in a re-run segment, a
     wider-source relation and a definition re-run refuse `source-missing`
-    in both (docs/CERTIFICATES.md, "What waits for the C half") - and not
+    in both (docs/CERTIFICATES.md, "Version 2's C half") - and not
     asked to regenerate the initial state, which the tool does not do, so
     that both report a generator as not regenerated. A regenerate that is
     not a bool is kept, and is untranslatable. -> (kwargs, what was
