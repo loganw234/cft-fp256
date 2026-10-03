@@ -32,7 +32,9 @@ Where version 1 stands (2026-09-30; version 2's own is under "Version
   the library (see "The segment runner"), their accuracy entries
   included since the plan's step 5 (2026-09-30; [ROADMAP.md](ROADMAP.md),
   "Steps 5 and 6"), and the `programs` stage holds them byte for byte to
-  the golden writer;
+  the golden writer. Since version 2's C half (2026-10-02) it writes
+  version 2 by default, and version 1 with `--format-version 1`, byte for
+  byte what it wrote before;
 - the C auditor, `cft-audit`, audits them in C beside the golden one
   (see "The audit tool"), and the `audit` stage holds its verdicts equal
   to `cert.audit`'s (2026-09-29; the plan of record,
@@ -1388,8 +1390,12 @@ location ("The audit tool").
 
 `cft-segrun` is the C writer of any segment program, the plan's step 3.
 It runs a program as consecutive segments on one libcft device handle,
-keeps the state at every boundary, and writes a version-1 certificate,
-its accuracy entries included since the plan's step 5 (2026-09-30).
+keeps the state at every boundary, and writes a certificate, its accuracy
+entries included since the plan's step 5 (2026-09-30). Since version 2's
+C half (2026-10-02) it writes version 2 by default ("Version 2", below
+in this section) and version 1 with `--format-version 1`, byte for byte
+what it wrote before; everything up to "Version 2" here is the version-1
+manual, and holds for version 2 where that part does not say otherwise.
 `make -C host all` builds it, from `host/tools/segrun.c`. `cft-orbits`
 writes certificates of its own runs too ([ORBITS.md](ORBITS.md),
 "Certified runs"), with the same encoding, `host/tools/cert_write.h`,
@@ -1402,12 +1408,21 @@ spells the rest itself: the magic line, `runs`, each `run` line,
 `parameters` and each `parameter`, `segments`, `output` and `accuracy`.
 
     cft-segrun --out CERT --states DIR (--salt SALT | --open)
+               [--format-version 1|2]
                [--device sw|<xclbin>|cft://host:port | --scratch-depth N]
+               [--certificate-id ID] [--issuer ISSUER] [--issuer-key KEY]
+               [--initial INITIAL] [--supersedes DIGEST]
+               [--compiler-build BUILD]
+               [--publish device-serial|host-os-version ...]
                --run main --image IMG [--bank BANK] --init INIT
                           --segments S --steps K [--param NAME=N ...]
+                          [--lane-flags]
+                          [--source SRC --manifest M [--compiler none]]
+                          [--replay-image IMG [--replay-bank BANK]]
                [--run half-step --h-slots I,J,... --image IMG ...]
                [--run wider --image IMG ...]
-               [--entry drift|step-halving|wider --uses R
+               [--run wider-source --image IMG ...]
+               [--entry drift|step-halving|wider|wider-source --uses R
                         --scope max-lanes|lane:I
                         [--quantity LABEL --term C[,sI...] ...]
                         --value exact|rounded:FMT:RND|enclosed:FMT] ...
@@ -1415,6 +1430,12 @@ spells the rest itself: the magic line, `runs`, each `run` line,
                (--salt SALT | --open)
     cft-segrun --hash commitment --salt SALT
     cft-segrun --build-id
+
+The options from `--certificate-id` to `--publish`, a run's from
+`--lane-flags` to `--replay-bank`, and a `wider-source` run are version
+2's: beside `--format-version 1` each is refused `usage`, naming it. A
+`wider-source` entry there is `malformed`, version 1's methods being the
+other three.
 
 **What it runs.**
 - Each `--run` opens a run block, and the options after it are that
@@ -1890,6 +1911,143 @@ run entered from a state other than the main run's, is written as
 stated, an estimate against it computed as stated, and the audit
 refuses it (`aux-bank`, `aux-start`). It signs nothing.
 
+**Version 2** (parcel CV2CW, 2026-10-02; "Version 2", below, is its
+contract, and the golden writer, `cert2.py`, its authority). Without
+`--format-version 1` the tool writes version 2: version 1's lines, chain
+and accuracy entries as above, and these.
+
+*The header.* Each line comes from where the contract says, and the
+tool's choice is named where it had one:
+- `profile` and `language` are the library's definition, cft.h's
+  `CFT_PROFILE_*` and `CFT_LANGUAGE_*`, spelt as a version is (`2`,
+  `1.1`); `language none` where no run names a source.
+- The four device lines are `cft_image_id`'s at ABI 0.18
+  ([HOSTAPI.md](HOSTAPI.md)): `none` on the software backend; `unknown`
+  through a remote handle, on an XRT image the library cannot name, and
+  wherever the library knows no value; on a card, the platform's name,
+  the XRT version the library was built against, the kernel clock the
+  image's own BUILD_METADATA states and the card's serial, each spelt as
+  a text. A value the card reports that no text can spell is written
+  `unknown`, not refused (the tool's choice). `device-serial` is
+  `withheld` where the library knows a serial, unless `--publish
+  device-serial`.
+- `writer cft-segrun <build-id>` (`cft_build_id()`, or `unknown`) and
+  `writer-runtime none`. `compiler-build` is `--compiler-build`'s (a
+  build in build-id's grammar, or `unknown`), else `unknown` where a run
+  names a compiler and `none` where none does; the option is `usage` where
+  no run names a compiler, and so is `none` where one does.
+- `replay-methods`, and `replay-method <r> image <digest>` for each run
+  with replay lines: the replay image's SHA-256. Its bank, where it takes
+  one (`--replay-bank`), is not named on that line, which has no place for
+  it: a known limit, the lead's decision (2026-10-02). The method is
+  reported and never checked - the audit holds a replayed value to the
+  definition, not to the replay image - and the bank is determined all the
+  same: it is the compile of the run's named source by its named compiler
+  and target.
+- The header's statements, each the option of its line's name, each
+  taking the line's own value as the certificate spells it: a word the
+  line takes, or a text in its one spelling, percent-encoded. So
+  signed-fp64's certificate-id - "cert 0001 / ", then U+0141, U+00F3, d
+  and U+017A - is `--certificate-id
+  cert%200001%20/%20%C5%81%C3%B3d%C5%BA`: Windows hands a C program's
+  `main` its command line in the system's code page, which cannot carry
+  U+0141, and the encoded spelling reaches the tool through any code page
+  whole. `--certificate-id` (`none` by default), `--issuer`
+  (`withheld` by default; `none`, or a text), `--issuer-key` (`none`, or
+  64 lowercase hex digits; a key that encodes no point is `malformed` and
+  one of small order `signer`, as the golden writer's read-back names
+  them), `--supersedes` (`none`, or the superseded certificate's body
+  hash, its hash line's 64 digits) and `--initial` (`given`, or the line's
+  tokens in one argument: `--initial "generator shake-box <tag> <lo>
+  <hi> ..."`, at most sixteen arguments). The generator is reported: the
+  tool does not regenerate the state it is handed.
+- `host-os` and `host-arch`, measured as the golden writer's `host_os` and
+  `host_arch` measure them: `windows`, `linux`, or another system's own
+  name in lower case, with its version only on `--publish
+  host-os-version` (`windows-<major>.<minor>.<build>`, the kernel's
+  release on Linux, the system's version elsewhere); `x86_64` for amd64 and
+  x86_64, `aarch64` for arm64 and aarch64, any other machine by its own
+  name. A measurement that fails is `unknown`.
+- `started` before the first segment, `finished` after the last, `issued`
+  as the certificate is written, each in UTC and `unknown` where the
+  clock does not answer. A clock that went back while the tool ran, which
+  would break their order, is refused `provenance-order`.
+- `environment` and an `env` line for each variable of the writer's list
+  that is set non-empty, in the list's order: segrun.c's table, held equal
+  to `cert2.ENVIRONMENT_NAMES` by the gate. A value no text can spell -
+  one of the four words, more than 255 characters encoded, not UTF-8 - is
+  refused `malformed` before anything is made, as the golden writer's
+  text rule refuses it.
+
+*A run.* `--lane-flags` asks for the per-lane block (ABI 0.17), which the
+run also asks for wherever its image holds QUIET, ENDQUIET or RAISE. Its
+segment lines end in `lanes <h>`, and each segment's certified block is
+written beside the boundaries as `run-<r>-segment-<k>.flags`.
+
+`--source SRC --manifest M` names the run's source: the tool has no
+interpreter of the language, so the graph's digest and the source params
+come from M, the manifest cftc wrote beside the image, and are held to the
+files the run runs, in this order: SRC's SHA-256 is the manifest's source
+(`source-digest`, also for a manifest that names none); the manifest's
+format is the run's, its graph being the step graph at the run's format
+(`source-graph`); a main or half-step run's manifest names no format
+override (`source-format`); its lane, scratch.in, is the image's slots a
+lane (`source-shape`); and, the run being compiled from the source, the
+image is the manifest's, and but for a half-step run's, whose bank is its
+relation's, the bank too (`source-image`). `--compiler none` says the
+image is not the source's compile, which defines it (`compiler none`):
+then neither is held to the manifest. The source's name is SRC's file
+name, without directories; the compiler line is the manifest's name,
+output version and target. The source params are the manifest's
+param_overrides, names in byte order, each value spelt as the language's
+canonical literal by a port of `lang.constants.literal` on the library's
+bigint; a value past it is the tool's own limit, `build-width`. A manifest
+the tool cannot read - not JSON, not cftc's version 1, a field missing, a
+value not frac_text's spelling - is `usage`.
+
+*A marked lane.* A segment whose block marks a lane is certified as the
+definition's segment. With no source the run is refused `replay-source`,
+and with one but no `--replay-image`, `replay-missing`: the tool replays
+only by the contract's producer's shortcut, an image of the same source
+that decides the lane, with its constants in `--replay-bank`. The marked
+lanes run once on it, each from the segment's start, with their own
+block; a lane it marks too is `replay-undecided` (exit 78). Each marked
+lane's values and five IEEE flags are the replay's, its [6:5] the raw
+byte's; the flag word is the corrected bytes' OR and STATUS loses STATUS[6].
+The raw end state and raw block are hashed for the replay line and
+written beside the boundaries as `-raw.bin` and `-raw.flags`. A
+`--replay-image` on a run that names no source is `replay-source` before
+anything runs ("a writer asked to replay with no definition"). The replay
+image is held to its own header: `program-image` (it does not load, or its
+bank is not the size it addresses), `program-format` (another format
+than the run's), `program-shape` and `source-shape` (another lane).
+
+*Wider-source.* `--run wider-source` is the main run's source compiled one
+rung up; the tool checks none of its relation, as it checks no auxiliary
+run's, and `--entry wider-source` is its estimate. C4's routine rule holds
+in both versions: a `wider` run beside a routine main image is
+`aux-image`.
+
+*Refused at a segment,* with the files written so far left and said so:
+`replay-source`, `replay-missing`, `replay-undecided`, and
+`replay-lane-flags`, which only a library that reports a mark in a run
+that asked for no block can reach. *Before anything is made*: every
+other version-2 refusal above. `provenance-order` and `replay-lane-flags`
+have no test: only a clock that goes back, or a library that misreports,
+reaches either.
+
+*Memory.* The trial counts version 2's pieces too: each block's hash,
+kept; the block, a replay's raw end, its marked lanes' start and end and
+the two blocks, taken and let go; the longer text. A run's replay lines
+grow as its segments mark lanes, refused `memory` part way where they
+cannot.
+
+*Known limits.* The XRT version is the one the library was built
+against, which a library links to; the issuer-key's decoding is a check
+of the tool's own until cft-audit's Ed25519 (the auditor's half) brings
+one for the tree, and then calls it; the device lines are those of one
+handle, as version 1's are.
+
 **Its gate** is `host/tests/segrun_check.py`, `make -C host segruntest`,
 which `verify/run.sh`'s `programs` stage runs. It certifies
 `lorenz63-rk4`, `lorenz96-rk4` and `henonheiles-lf` at fp64 and fp256,
@@ -2104,6 +2262,37 @@ NOT TESTED too, and the gate goes on (at eb2d1ae, run as `nobody` under
 a hard limit of about 8 GB, it stopped with a traceback; verifier-C7).
 It also holds git to ignoring the tool's binary.
 
+Its section 14 (`host/tests/segrun_check_v2.py`, since version 2's C half)
+holds version 2; every section before it asks for `--format-version 1`,
+so version 1 is held as it was. It certifies, keyed and open, flagstep
+with its blocks; `replaystep`, written in the gate with its source, an
+image marking lane 1 in segment 0 (its value right) and lane 0 in segment
+1 (its last bit wrong), replayed by cftc's compile of the source;
+Lorenz-63 compiled with source params (rho 29, beta 2.625) beside a
+half-step and a wider-source run and a wider-source estimate; flagstep
+with every statement given and both privacy defaults published; and a run
+at `--scratch-depth 2048`. Each is byte for byte the golden writer's
+(`cert2.run_chain`, replaying by the definition, `certify_run`, and
+`encode` handed the tool's header lines), every boundary, block and raw
+file the golden chain's, and the golden audit accepts each, handed the
+sources and blocks, in full and sampled. It holds the measured lines to
+the golden writer's own functions on the host, the profile and language
+to `profile.py` and `lang/version.py`, the environment to the list's
+variables set and segrun.c's table to `cert2.ENVIRONMENT_NAMES`; one run's
+two versions to the same state and stream hashes; 22 source-param
+literals at every edge of the canonical spelling; the issuer-key to
+test_ed25519.py's vectors (the published key and RFC 8032's taken, the
+eight keys of small order `signer`, the six of no point `malformed`);
+every version-2 refusal by name and code beside a control, with the golden
+writer's twin where it has one; the remote rule through a loopback
+cft-serve; and, on a card (`hw/card-segrun.sh`), the device lines from the
+tile and the per-lane block refused by name on revision 7.
+
+With version 2's section 14 (2026-10-03): 1,020 checks on the Windows
+desktop and one SKIP, the trial's cost NOT TESTED there, 96 s, the
+desktop about 6 % busy - sections 1 to 13 716, as before version 2, and
+section 14 304, which alone (`--v2-only`) takes 10 s. Not yet run in WSL
+or on a card.
 With a negative lane and slot (S1's second send-back, 2026-09-30): 679
 checks on the Windows desktop and one SKIP, the trial's cost NOT TESTED
 there, 88 s; in WSL (cft2204, gcc 11.4, at 350f7f2), 682 checks, 0
@@ -2552,10 +2741,10 @@ segments a run. Each holds something no other does:
   the main run does not hold, so its expected verdict is the refusal
   `aux-start`: one committed negative for every auditor.
 
-**Version 2's cases** (2026-10-02) are the golden writer's, since
-cft-segrun writes version 1 until version 2's C half. Seven are
+**Version 2's cases** (2026-10-02) are the golden writer's. Seven are
 certificates a writer makes. The manifest marks each `writers both`: a C
-writer must reproduce it from the C half on.
+writer must reproduce it, and since version 2's C half cft-segrun does
+(the check's step 5, below).
 - `markstep-fp64`: the replay case, and this page's version-2 example,
   byte for byte. markstep's image computes its source's map, and beside it
   a routine's own test, run quiet, which marks lanes 0 and 1 in segment 1
@@ -2761,16 +2950,24 @@ For a version-2 case it holds 1 and 2 as above, and then:
    params);
 4. every boundary, block and raw file of the golden chain against its
    committed file, and the signature made again by the test key;
-5. a NOTE naming each case marked `writers both`, which a C writer must
-   reproduce from version 2's C half on. It must write every line but
+5. cft-segrun remaking each case marked `writers both` (version 2's C
+   half, 2026-10-02), on the software backend. It writes every line but
    its own measurements byte for byte: `build-id`, `writer`,
    `writer-runtime`, `compiler-build`, the `replay-method` lines, the
    three times, `host-os`, `host-arch` and the environment, and the four
    device lines only where the case carries a card's values
    (signed-fp64): `none`, which a software run writes there, is held.
    It is handed the header's statements, as the golden writer is:
-   `certificate-id`, `issuer`, `issuer-key`, `supersedes` and `initial`.
-   cft-segrun writes version 1 until then;
+   `certificate-id`, `issuer`, `issuer-key`, `supersedes` and `initial`,
+   in their own spelling, and each run's lane-flags word. For each run
+   that names a source the check compiles it with cftc at the run's
+   format, steps, target and source params, and hands the tool that
+   compile's manifest and, where the run replays a marked lane, its image
+   and bank as the replay image. Its boundary, block and raw files must be
+   the committed ones; signed-fp64, the tool writing its body, is signed
+   by `python/cft_sign.py` with the published test key and verified with
+   the committed keyring. A check counts the seven remade, and without
+   `--tool` each remake is a SKIP by name;
 6. the golden audit giving the case its verdict, handed what the manifest
    says: the sources, the blocks, the signature and keyring, the
    superseded certificate, the definition re-run and the regeneration.
@@ -2790,7 +2987,9 @@ With the fixes round's cases it was 21 to 23 s (2026-09-30), and with
 the tool making the accuracy cases whole, 22 to 25 s (2026-09-30). With
 version 2's cases it is 288 checks, 28 and 32 s on the desktop, niced,
 with it 4 to 10 % busy; without the tool, version 1's twelve remakes skipped by
-name, 239 checks in 27 and 29 s at 2 to 6 % (2026-10-02).
+name, 239 checks in 27 and 29 s at 2 to 6 % (2026-10-02). With cft-segrun
+remaking version 2's seven cases too: 311 checks, 0 failed, 28 to 32 s on
+the desktop, niced, at 6 to 10 % (2026-10-03).
 
 **Changing it.** A change that moves any byte of the corpus fails the
 gate by name: a change to the model, a hash, an encoding, the assembler's
@@ -2882,8 +3081,9 @@ Logan's permission.
   card's device lines.
 - One made through a remote handle.
 - Streams other than +0, which cft-segrun does not take.
-- A version-2 certificate made by a C writer, or audited by cft-audit:
-  version 2's C half, the next parcel's.
+- A version-2 certificate audited by cft-audit: the auditor's half of
+  version 2's C half. cft-segrun, the C writer, remakes the seven cases
+  since its half (2026-10-02).
 - A replay decided through mpmath: no node of the language reaches it
   yet, so `definition-unavailable` and `replay-undecided` have no
   committed case.
@@ -2978,10 +3178,14 @@ Where things stand (2026-10-02):
   `python/cft_sign.py`;
 - the profile's version lives in `python/cft_golden/profile.py`, and the
   language's in `python/cft_golden/lang/version.py`;
-- `cft-segrun` writes, and `cft-audit` reads, version 1 only. Their version
-  2 is the next parcel's, built against this page ("What waits for the C
-  half", below). Until then `host/tests/audit_check.py` names every
-  version-2 certificate it meets, and hands it to neither tool.
+- `cft-segrun` writes version 2, its default since version 2's C half
+  (parcel CV2CW, 2026-10-02), and version 1 with `--format-version 1`
+  ("The segment runner"); libcft names the device's extra lines at ABI
+  0.18; and the corpus check has cft-segrun remake every case a C writer
+  makes ("Golden certificates"). `cft-audit` reads version 1 only until
+  its own half ("What waits for the C half", below): until then
+  `host/tests/audit_check.py` names every version-2 certificate it meets,
+  and does not hand it to cft-audit.
 
 ### What a version-2 certificate says
 
@@ -3989,9 +4193,10 @@ copy, has not been run on version 2: it is the verifier's.
 
 ### What waits for the C half
 
-The next parcel builds version 2 in C, against this page:
-- **cft-segrun:** `--lane-flags`, asking for the block (ABI 0.17) and
-  writing `run-<r>-segment-<k>.flags`, and asking whenever the image
+Version 2's C half is two parcels, built against this page. The writer's
+half is built (parcel CV2CW, 2026-10-02); the auditor's is the rest:
+- **cft-segrun (built):** `--lane-flags`, asking for the block (ABI 0.17)
+  and writing `run-<r>-segment-<k>.flags`, and asking whenever the image
   needs flag control; `--replay-image IMG`, an option of each run, writing
   `replay-method <r> image <digest>`; refusing `replay-source` where a
   run that marks a lane names no source (the golden writer's name for
@@ -4004,7 +4209,8 @@ The next parcel builds version 2 in C, against this page:
   the times, the host's OS and architecture, and the environment list
   itself; the device's extra lines through `cft_image_id` at ABI 0.18; and
   `--format-version 1`, kept for the corpus and for runs that stay
-  version 1.
+  version 1. "The segment runner" is its manual, and segrun_check's
+  section 14 its gate.
 - **cft-audit:** both readers, by the magic line; block files in
   `--states DIR`; re-runs that ask for the block where a run says `yes`;
   its library's profile and language version compared with the
@@ -4017,15 +4223,17 @@ The next parcel builds version 2 in C, against this page:
   and a definition re-run refuse `source-missing` there exactly where the
   golden auditor handed no source does, so the two keep one verdict.
 - **libcft:** `cft_image_id` grows by the platform's name, the XRT
-  version, the clock and the serial (ABI 0.18), and `cft.h` states the
-  profile it implements and the language version beside it, since
-  `definition-differs` compares both. cft-audit evaluates no language,
-  so its language version is the one its tree's golden model states
-  (`python/cft_golden/lang/version.py`).
+  version, the clock and the serial (ABI 0.18; built with cft-segrun,
+  [HOSTAPI.md](HOSTAPI.md), "Certificate version 2's device lines at ABI
+  0.18"), and `cft.h` states the profile it implements and the language
+  version beside it, since `definition-differs` compares both. cft-audit
+  evaluates no language, so its language version is the one its tree's
+  golden model states (`python/cft_golden/lang/version.py`).
 - **The gates:** audit_check.py hands cft-audit test_cert2.py's calls and
   the corpus's version-2 cases, which it names today and does not hand;
   corpus.py's check has cft-segrun remake each case the corpus marks
-  `writers both`, leaving out of both certificates `build-id`, `writer`,
+  `writers both` (built with cft-segrun), leaving out of both
+  certificates `build-id`, `writer`,
   `writer-runtime`, `compiler-build`, the `replay-method` lines, the
   three times, `host-os`, `host-arch` and the environment (corpus.py's
   `C_WRITER_MEASURED`), and the four device lines only where the case
@@ -4033,8 +4241,8 @@ The next parcel builds version 2 in C, against this page:
   every other line byte for byte: a software run writes `none` on the
   device lines, and six of the seven cases carry it. A replay certificate cft-segrun writes
   (`replay-method 0 image`) is held to the golden writer's
-  (`replay-method 0 golden`) that way. The corpus check names those
-  seven cases today, in a NOTE.
+  (`replay-method 0 golden`) that way. The NOTE that named those seven
+  cases is a check: all seven remade ("Golden certificates").
 - **The WASM module** is rebuilt at ABI 0.18.
 
 ### What version 2 does not do

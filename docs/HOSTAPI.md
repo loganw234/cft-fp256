@@ -3400,3 +3400,90 @@ every step's is.
 `CFT_ABI_VERSION_MINOR` moved to 17 for them (2026-10-02). A caller that
 needs the block or flag control asks for 0.17, and then asks
 `cft_get_caps` whether the device has them.
+
+## Certificate version 2's device lines at ABI 0.18 (2026-10-02)
+
+Certificate format version 2 records four facts about the device beside
+its image (docs/CERTIFICATES.md, "Provenance"): `device-platform`,
+`device-xrt`, `device-clock` and `device-serial`. They come from the
+library's image identity, which grows by them at this step, built with
+the writer's half of version 2's C half (parcel CV2CW):
+
+    char     platform[256];    the card's platform name; "" not known
+    char     xrt_version[64];  XRT's version, as built; "" not known
+    uint64_t clock_hz;         the kernel clock in Hz; 0 not known
+    char     serial[256];      the card's serial; "" not known
+
+appended to `cft_image_id` after its 72 bytes, under the size handshake it
+already had: a caller built against 0.17 passes its old `struct_size` and
+is filled exactly as before. Each text is NUL-terminated inside its field,
+and a value that would not fit is "" - never cut short. "" and 0 are "not
+known", which a certificate writes `unknown`.
+
+**What fills them, on an XRT handle,** each recorded at `cft_open` with
+the image's digest and words, so that `cft_get_image_id` still reaches no
+device:
+- `platform`: XRT's device name, `xrt::device::get_info<
+  xrt::info::device::name>()` - the platform (shell) name as XRT reports
+  it.
+- `xrt_version`: the version header's `XRT_DRIVER_VERSION` up to its
+  comma, from `<xrt/detail/version.h>` where the XRT has it and
+  `<version.h>` otherwise (XRT 2.14 has the latter, giving `2.14.354`).
+  It is the XRT the library was BUILT against; a library links to that
+  XRT, so it is the one that runs unless the XRT was changed under a built
+  library. Where neither header, or the macro, is there it is "", and the
+  build is unchanged.
+- `clock_hz`: the kernel clock as the image's own record of its link
+  states it - the `--clock.freqHz` constraint on the v++ command line its
+  BUILD_METADATA section carries (`host/src/xclbin_clock.h`), only where
+  there is exactly one and it names `<instance>.ap_clk` for every compute
+  unit opened. XRT does not report this clock: on the U50's shell the
+  constraint is realised by a clocking wizard inside the bitstream, and
+  CLOCK_FREQ_TOPOLOGY, which XRT programs and reports, lists the shell's
+  own clocks (hbm_aclk 450, KERNEL_CLK 500, DATA_CLK 300 MHz on every image
+  measured; `hw/verify-image.sh`, its checks 5b and 6). An image linked
+  without the constraint - an hw_emu image - says 0.
+- `serial`: the first non-empty `serial_number` string in XRT's platform
+  report (`xrt::info::device::platform`), not XRT's "N/A".
+Neither the platform nor the serial can fail an open: where XRT throws or
+answers nothing the field is "".
+
+**Unchanged:** the software backend and a remote handle REFUSE
+`cft_get_image_id` by name, as they did at 0.15 to 0.17, and fill none of
+the four. A certificate writes the device lines `none` on the software
+backend, which has no card, and `unknown` through a remote handle, whose
+protocol carries none of them - as it writes version 1's xclbin digest
+(docs/CERTIFICATES.md, "The segment runner"). An XRT image whose tiles
+disagree is refused as before, and so its four lines are `unknown` too.
+
+**How it is held.**
+- **api-test:** the layout (`platform` at 72, `xrt_version` at 328,
+  `clock_hz` at 392, `serial` at 400, 656 bytes in all); a 0.17-sized
+  call on the software backend refused with nothing written; and
+  `xclbin_clock.h` on fifteen synthetic axlf images and two malformed
+  ones - one unit and four named, a unit left at the default, a longer
+  name not its prefix, another port, two constraints, none, a leading
+  zero, zero hertz, twenty digits, no colon, no BUILD_METADATA, two, a
+  section past the file, no unit opened - a planted wrong expectation
+  failing both named cases (measured, 2026-10-02).
+- **The real images** in the cft2204 distro, read by `xclbin_clock.h`
+  (2026-10-02, read only): the hw single 10,000,000 Hz on `cft_krnl_1`,
+  the hw quad 10,000,000 Hz on its four (both linked at
+  `rebuild-2022.sh`'s default, CLAUDE.md's trap 1), the nine hw_emu images
+  none. The XRT backend compiles against XRT 2.14's headers there with the
+  host build's warnings and none.
+- **device-test** prints the four fields on an xclbin, reported and not
+  checked; the card run is the lead's.
+- **cft-segrun's gate** (segrun_check's section 14): the software
+  backend's four lines `none`, a remote handle's `unknown`, and on a card
+  each filled from the tile, the serial `withheld` until published.
+
+**The ABI version.** An additive growth of an output struct:
+`CFT_ABI_VERSION_MINOR` moved to 18 for it (2026-10-02). The remote
+protocol's frames are unchanged; its HELLO carries `cft_abi_version()`,
+so a 0.17 peer and a 0.18 peer refuse each other by name, as every step's
+do. The WebAssembly module's sources need nothing new - no export reaches
+`cft_get_image_id` - and it is rebuilt at 0.18 by the integrator, as
+every step's is; `verify.mjs` and node's `test.mjs` read the version from
+`cft.h`, so they fail against the 0.17 module until it is. A caller that
+needs the four fields asks for 0.18.

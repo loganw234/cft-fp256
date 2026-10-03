@@ -3,17 +3,26 @@
  *
  * cft-segrun - run a program as consecutive segments, keep the state at
  * every boundary, and write the certificate (docs/CERTIFICATES.md,
- * version 1). Step 3 of the plan of record (docs/ROADMAP.md, "Segments,
- * certificates and the audit tool"); the page's section "The segment
- * runner" is this tool's manual.
+ * versions 1 and 2). Step 3 of the plan of record (docs/ROADMAP.md,
+ * "Segments, certificates and the audit tool"); the page's section "The
+ * segment runner" is this tool's manual.
  *
  *   cft-segrun --out CERT --states DIR (--salt SALT | --open)
+ *              [--format-version 1|2]
  *              [--device sw|<xclbin>|cft://host:port | --scratch-depth N]
+ *              [--certificate-id ID] [--issuer ISSUER] [--issuer-key KEY]
+ *              [--initial INITIAL] [--supersedes DIGEST]
+ *              [--compiler-build BUILD]
+ *              [--publish device-serial|host-os-version ...]
  *              --run main --image IMG [--bank BANK] --init INIT
  *                         --segments S --steps K [--param NAME=N ...]
+ *                         [--lane-flags]
+ *                         [--source SRC --manifest M [--compiler none]]
+ *                         [--replay-image IMG [--replay-bank BANK]]
  *              [--run half-step --h-slots I,J,... --image IMG ...]
  *              [--run wider --image IMG ...]
- *              [--entry drift|step-halving|wider --uses R
+ *              [--run wider-source --image IMG ...]
+ *              [--entry drift|step-halving|wider|wider-source --uses R
  *                       --scope max-lanes|lane:I
  *                       [--quantity LABEL --term C[,sI...] ...]
  *                       --value exact|rounded:FMT:RND|enclosed:FMT] ...
@@ -21,6 +30,37 @@
  *              (--salt SALT | --open)
  *   cft-segrun --hash commitment --salt SALT
  *   cft-segrun --build-id
+ *
+ * ---------------------------------------------------------------
+ * Version 2 (certificate format version 2's C half, parcel CV2CW,
+ * 2026-10-02)
+ * ---------------------------------------------------------------
+ *
+ * The tool writes version 2 by default, and version 1 with
+ * `--format-version 1`: the old code, byte for byte what it wrote before
+ * (the corpus's version-1 cases and segrun_check's sections 1 to 13 hold
+ * it). Every option version 1 has no line for, given beside it, is
+ * `usage`, naming it. Version 2 adds, as docs/CERTIFICATES.md's "Version
+ * 2" says and the golden writer, python/cft_golden/cert2.py, writes:
+ *   - the header's new lines (put_v2_header): the definition, from cft.h's
+ *     CFT_PROFILE_* and CFT_LANGUAGE_* (a fallback block below until
+ *     CV2CA's merge); the device lines through cft_image_id at ABI 0.18
+ *     (cert_write.h's cw_identify); the writer and its build; the
+ *     compiler's build; each run's replay method; the header's statements,
+ *     each option taking its line's own value as the certificate spells
+ *     it (check_statements), the issuer and the device serial withheld
+ *     unless given or published; the host's OS and architecture, the
+ *     times and the writer's list's environment, measured;
+ *   - a run's per-lane block (--lane-flags, and wherever its image holds
+ *     flag control), each segment's written beside the boundaries;
+ *   - its source (--source SRC --manifest M, check_source): the source
+ *     lines from cftc's manifest, held to the files the run runs;
+ *   - a marked lane replayed (replay_segment) by an image of the run's
+ *     source (--replay-image, --replay-bank), the corrected segment
+ *     certified and the raw one on a replay line and in -raw files;
+ *   - `run <i> wider-source` and `entry <j> wider-source`.
+ * Its refusals are the page's names (the table below gains them) and its
+ * gate is segrun_check's section 14 (host/tests/segrun_check_v2.py).
  *
  * ---------------------------------------------------------------
  * What it does
@@ -702,8 +742,12 @@ static unsigned hexnib(char c)
  *
  * TO BE REPLACED BY CV2CA's DECODER AT THE MERGE (the lead's decision,
  * 2026-10-02): the tree keeps one Ed25519 decoder in C, which cft-audit's
- * verification brings, and the lead repoints the one call to this
- * function (in check_statements) and drops this block. */
+ * verification brings - `int ed25519_key_check(const unsigned char
+ * key[32])` in host/tools/ed25519.h, returning ED25519_KEY_OK (0),
+ * ED25519_KEY_NO_POINT (1) and ED25519_KEY_SMALL_ORDER (2), the three
+ * values below in their order. The swap is an #include and a rename of
+ * the one call (in check_statements) and its three names, and this block
+ * goes. */
 enum { SEG_KEY_OK = 0, SEG_KEY_NO_POINT = 1, SEG_KEY_SMALL_ORDER = 2 };
 
 typedef struct { uint32_t v[8]; } fe;   /* mod 2^255 - 19, 32-bit limbs */
@@ -3646,15 +3690,25 @@ static void usage_text(FILE *f)
 {
     fputs(
 "cft-segrun - run a program as consecutive segments and write the certificate\n"
-"(docs/CERTIFICATES.md, version 1; \"The segment runner\" is the manual)\n"
+"(docs/CERTIFICATES.md, versions 1 and 2; \"The segment runner\" is the\n"
+"manual)\n"
 "\n"
 "  cft-segrun --out CERT --states DIR (--salt SALT | --open)\n"
+"             [--format-version 1|2]\n"
 "             [--device sw|<xclbin>|cft://host:port | --scratch-depth N]\n"
+"             [--certificate-id ID] [--issuer ISSUER] [--issuer-key KEY]\n"
+"             [--initial INITIAL] [--supersedes DIGEST]\n"
+"             [--compiler-build BUILD]\n"
+"             [--publish device-serial|host-os-version ...]\n"
 "             --run main --image IMG [--bank BANK] --init INIT\n"
 "                        --segments S --steps K [--param NAME=N ...]\n"
+"                        [--lane-flags]\n"
+"                        [--source SRC --manifest M [--compiler none]]\n"
+"                        [--replay-image IMG [--replay-bank BANK]]\n"
 "             [--run half-step --h-slots I,J,... --image IMG ...]\n"
 "             [--run wider --image IMG ...]\n"
-"             [--entry drift|step-halving|wider --uses R\n"
+"             [--run wider-source --image IMG ...]\n"
+"             [--entry drift|step-halving|wider|wider-source --uses R\n"
 "                      --scope max-lanes|lane:I\n"
 "                      [--quantity LABEL --term C[,sI...] ...]\n"
 "                      --value exact|rounded:FMT:RND|enclosed:FMT] ...\n"
@@ -3696,6 +3750,25 @@ static void usage_text(FILE *f)
 "                  runs wrote to DIR, read back once they have run\n"
 "  --hash KIND     print one of the page's hashes of FILE, and exit\n"
 "  --build-id      print cft_build_id(), which the build-id line carries\n"
+"\n", f);
+    /* in two pieces: one string past C99's 4,095 characters is a warning */
+    fputs(
+"Version 2 (the default; --format-version 1 writes version 1):\n"
+"  --certificate-id, --issuer, --issuer-key, --supersedes, --initial\n"
+"                  the header's statements, each its line's own value as\n"
+"                  the certificate spells it: a word the line takes, or a\n"
+"                  text percent-encoded (cert%200001 is \"cert 0001\");\n"
+"                  --initial \"generator <name> <text> ...\" or given\n"
+"  --compiler-build BUILD  the compiler's build, where a run names one\n"
+"  --publish WHAT  device-serial or host-os-version, withheld by default\n"
+"  --lane-flags    a run asks for the per-lane block, written beside the\n"
+"                  boundaries (asked too wherever its image needs flag\n"
+"                  control)\n"
+"  --source SRC --manifest M  the run's source and cftc's manifest of it:\n"
+"                  the source lines, held to the files the run runs;\n"
+"                  --compiler none: the image is not its compile\n"
+"  --replay-image IMG [--replay-bank BANK]  an image of the source that\n"
+"                  replays a lane the run marks\n"
 "\n"
 "The streams a, b and c are +0. Refusals are named on stderr as\n"
 "\"cft-segrun: refused <name>: <why>\"; the exit code is the name's.\n", f);
