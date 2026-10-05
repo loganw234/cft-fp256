@@ -3305,7 +3305,8 @@ kernel's forms; and anything a tile adds to build either item.
 
 *Built golden-first on 2026-10-02 (the step-6 round's R8): the model,
 the software backend at ABI 0.17 and the remote protocol. A tile carries
-it from revision 8's RTL, and until then every device but the software
+it from revision 8's RTL (built 2026-10-05; "Revision 8 in the tile", at
+the end), and until a bitstream does every device but the software
 backend - and a remote handle over one - refuses the block by name. It
 changed how a run reports, so it was written down before any code:
 2026-09-29, and its mark on 2026-10-02.*
@@ -3818,3 +3819,28 @@ from such a tree.
   Held against `seq.py` in `tb/test_seq_core.py`'s three `flag_control_`
   cases and through the kernel in `tb/test_krnl_seq.py`'s
   `krnl_flag_control`.
+- **R23, per-lane flags** (built 2026-10-05). A byte for each of the
+  block's 128 lane slots, 1,024 flops at every format, addressed as
+  `active` is. [4:0] are taken at the retire: each position's five flags
+  under the row its beat fired with and its flag enable, so R24's tag
+  silences them as it silences FLAGS. [5], [6] and [7] are taken at F:
+  DEPOSIT's overflow by position, the strict test's suppression by
+  position, and a RAISE's `ra[7]`, with its `ra[4:0]` unless tagged.
+  Each is captured from a registered copy of the term the run's own
+  report takes, a cycle late, so no R23 logic sits on an existing path.
+  The bytes clear at each block's start. MODE[24] asks for the block:
+  it drains after the counts and before the scratch-out block, 32 lanes
+  a beat at the counts' two cycles a beat. Each byte is strobed where
+  the lane is below `n` and the caller's mask keeps it, so a masked
+  lane's byte is the caller's, and a lane SETACT dropped is written with
+  what it raised while active. A block is 4, 2, 1 or half a beat, and
+  fp256's half beat goes at its block's 16-byte offset in the beat. A
+  run that does not ask never enters the drain and writes nothing
+  (`make seqcycles`' earlier rows the same); one that asks pays 11, 7, 5
+  and 5 cycles a block at fp32, fp64, fp128 and fp256 (the R23 row).
+  CAPS2[13] is published on every build, and the CSR lets MODE[24]
+  through. Held against `seq.py`'s `Result.lane_flags`, byte for byte
+  and with the three identities read off the tile's own bytes, in
+  `tb/test_seq_core.py`'s two `lane_flags_` cases and the R24 fuzz, and
+  through the kernel in `tb/test_krnl_seq.py`'s `krnl_lane_flags`,
+  where the register at 0xB0 is the address the block lands at.

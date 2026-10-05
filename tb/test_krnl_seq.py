@@ -169,6 +169,10 @@ IC_BASE, ISI_BASE = 0x160000, 0x168000
 # pass every check here if the regions touched. One bit a lane, so
 # 64 KB is half a million lanes.
 MASK_BASE = 0x170000
+# R23's per-lane flag block (revision 8), a byte a lane at LFLAGS_PTR
+# (0xB0), in its own region for the reason every block above has one:
+# the 64 KB between the elementwise corner and the scratch-in block.
+LF_BASE = 0x100000
 EW_BASES = (0xC0000, 0xD0000, 0xE0000, 0xF0000)
 
 POISON = 0xAA
@@ -236,7 +240,7 @@ def pack_idx(table):
 async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
                           prec_code, op_noise=0, bank=None,
                           scratch_in=None, idx=(None, None, None, None),
-                          mode_extra=0, mask=None):
+                          mode_extra=0, mask=None, lane_flags=False):
     """Everything a host does between having a program and having an
     answer, in the order XRT does it.
 
@@ -302,6 +306,15 @@ async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
         idx_mode |= MODE_LANE_MASK
     else:
         await write64(axil, MASKPTR, 0xDEAD_8000)
+    # R23's block (revision 8): MODE[24] and LFLAGS_PTR at 0xB0, the region
+    # poisoned so a byte the tile did not write reads as the caller's; and
+    # the pointer POISONED where no block is asked for, as the tables' are.
+    if lane_flags:
+        ram.write(LF_BASE, bytes([POISON]) * (n + GUARD))
+        await write64(axil, LFLAGSPTR, LF_BASE)
+        idx_mode |= MODE_LANE_FLAGS
+    else:
+        await write64(axil, LFLAGSPTR, 0xDEAD_9000)
     await axil.write_dword(MODE, op_noise | (prec_code << 8) | MODE_SEQ |
                            idx_mode | mode_extra)
     await write64(axil, NREG, n)
@@ -338,7 +351,8 @@ async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
 
 async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0,
                    bank=None, scratch_in=None, tries=3000,
-                   idx=(None, None, None, None), n=None, mask=None):
+                   idx=(None, None, None, None), n=None, mask=None,
+                   lane_flags=False):
     """One sequencer run, scored against the model on every observable.
 
     With an index table, `va`/`vb`/`vc` are the SOURCES that table
@@ -365,8 +379,27 @@ async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0,
 
     await stage_and_start(axil, ram, prog.to_bytes(), prog, va, vb, vc, n,
                           PREC_CODE[fmt.name], op_noise, bank=bank,
-                          scratch_in=scratch_in, idx=idx, mask=mask)
+                          scratch_in=scratch_in, idx=idx, mask=mask,
+                          lane_flags=lane_flags)
     await poll_done(dut, axil, name, tries=tries)
+
+    # R23's block, where the run asked: lane i's byte at LF_BASE + i - the
+    # address LFLAGS_PTR at 0xB0 was written with, so a register at 0xB0
+    # that did not drive the pointer lands it elsewhere - and a masked
+    # lane's byte the caller's poison; GUARD bytes past it untouched.
+    if lane_flags:
+        got_lf = ram.read(LF_BASE, n + GUARD)
+        for i in range(n):
+            if keep[i]:
+                assert got_lf[i] == res.lane_flags[i], (
+                    f"{name}: lane {i}'s flag byte {got_lf[i]:#04x}, model "
+                    f"{res.lane_flags[i]:#04x}")
+            else:
+                assert got_lf[i] == POISON, (
+                    f"{name}: lane {i} is masked and its flag byte was "
+                    f"written")
+        assert got_lf[n:] == bytes([POISON]) * GUARD, (
+            f"{name}: the tile wrote past the lane-flag block")
 
     got_dep = ram.read(D_BASE, dep_bytes + GUARD)
     bad = 0
@@ -1352,15 +1385,16 @@ async def krnl_sequencer(dut):
     # REFUSED with STATUS[3] and no memory touched, which is what says
     # that opening [22:19], [23] and [24] did not open the window above
     # them.
-    assert not ((await axil.read_dword(CAPS2)) & CAPS2_LANE_FLAGS), (
-        "CAPS2[13] is set, so MODE[24] is honoured on this build and the "
-        "refusal below no longer holds: the lane-flags block's own case "
-        "belongs here now (docs/ROADMAP.md, revision 8's R23)")
-    flags_before = await axil.read_dword(FLAGS)
-    await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
-                           MODE_LANE_FLAGS, "MODE[24], R23's lane-flags "
-                           "block, on a build whose CAPS2[13] is clear",
-                           flags_before)
+    if (await axil.read_dword(CAPS2)) & CAPS2_LANE_FLAGS:
+        # R23 is built (revision 8's round 2): MODE[24] is honoured, and
+        # the block's own case is krnl_lane_flags.
+        flags_before = await axil.read_dword(FLAGS)
+    else:
+        flags_before = await axil.read_dword(FLAGS)
+        await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
+                               MODE_LANE_FLAGS, "MODE[24], R23's lane-flags "
+                               "block, on a build whose CAPS2[13] is clear",
+                               flags_before)
     await run_refused_mode(dut, axil, ram, pg32, a_id, b_id, c_id, n_id,
                            1 << 25, "MODE[25], reserved on every build",
                            flags_before)
@@ -1471,6 +1505,65 @@ async def krnl_flag_control(dut):
     await run_refused(dut, axil, ram, bytes(bad), prog, a, b, words, n,
                       PREC_CODE["fp32"], "a refusal after a marked run",
                       flags_now)
+
+
+@cocotb.test()
+async def krnl_lane_flags(dut):
+    """Revision 8's R23 through the kernel: CAPS2[13] published, MODE[24]
+    honoured, and the block written at the address the register at 0xB0
+    holds - verifier-VRA's note on the seam, whose bus leg held a distinct
+    register at each argument's offset and not that 0xB0 drives the pointer
+    cft_seq reads. Every lane's byte against the model, masked and not,
+    over two blocks and a ragged third; and a run without MODE[24] leaves
+    the region untouched."""
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n,
+                         reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n,
+                       reset_active_level=False, size=2 ** 21)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"), dut.ap_clk,
+                dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+                mem=ram_a.mem)
+    ram = ram_a
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+
+    assert (await axil.read_dword(CAPS2)) & CAPS2_LANE_FLAGS, (
+        "this build's CAPS2[13] is clear, so MODE[24] would be refused")
+    rng = random.Random(0x23)
+    for fmt in (FP32, FP256):
+        n = 2 * 16 * (256 // fmt.width) + 5
+        a = gen_stream(fmt, n, rng)
+        b = gen_stream(fmt, n, rng)
+        words = [(rng.getrandbits(fmt.width) & ~0x80) |
+                 (0x80 if i % 4 == 0 else 0) for i in range(n)]
+        prog = seq.Program(fmt, [
+            seq.alu(OP_MUL, 3, ra=0, rb=1),
+            seq.quiet(), seq.raise_(2), seq.endquiet(),
+            seq.deposit(3), seq.setact(1), seq.deposit(3),
+            seq.raise_(2), seq.halt()], max_deposits=1)
+        await run_prog(dut, axil, ram, prog, a, b, words,
+                       f"{fmt.name} the lane-flag block through the kernel",
+                       lane_flags=True)
+        keep = [i % 3 != 1 for i in range(n)]
+        await run_prog(dut, axil, ram, prog, a, b, words,
+                       f"{fmt.name} the lane-flag block under a mask",
+                       lane_flags=True, mask=keep)
+        ram.write(LF_BASE, bytes([POISON]) * (n + GUARD))
+        await run_prog(dut, axil, ram, prog, a, b, words,
+                       f"{fmt.name} no MODE[24]")
+        assert ram.read(LF_BASE, n + GUARD) == bytes([POISON]) * (n + GUARD), (
+            f"{fmt.name}: a run without MODE[24] wrote the lane-flag region")
 
 
 @cocotb.test()

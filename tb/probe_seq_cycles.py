@@ -458,3 +458,42 @@ async def streaming_costs(dut):
                   "  ".join(f"{c:8.1f}" for c in row) + "   /block "
                   "(a block restart at pc 0 is a redirect)")
     b.pin = None
+
+
+# ---- revision 8's R23: what the per-lane flag block costs -------------
+#
+# The same program run twice at each format, without MODE[24] and with
+# it, four blocks each: identical answers, so the only difference is the
+# block's drain after the counts - 32 lanes a beat at the counts' rate,
+# so four beats a block at fp32, two at fp64, one at fp128 and a half
+# beat at fp256 - and its setup. A run that does not ask is the dense
+# row above, unchanged ("a run that does not ask pays no cycle").
+@cocotb.test()
+async def lane_flags_drain(dut):
+    b = Bench(dut)
+    await b.start()
+    iand = seq.alu(sf.OP_IAND, 3, 0, 0)
+    insns = [iand, seq.deposit(3), seq.halt()]
+    dut._log.info("== R23: one stream and a deposit, without MODE[24] "
+                  "and with it")
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb = lanes_per_block(fmt)
+        blocks = 4
+        n = lpb * blocks
+        pool = [sf.one_bits(fmt)] * n
+        prog = seq.Program(fmt, insns, consts=(), max_deposits=1)
+        esz = fmt.width // 8
+        out = {}
+        for lf in (False, True):
+            b._stage(fmt, prog.to_bytes(), pool, pool, pool, n,
+                     n * esz, 4 * n)
+            b._drive_cfg(fmt, n, lane_flags=lf)
+            t0 = get_sim_time("ns")
+            refused, _flags, err = await b._go(8_000_000, f"MODE[24] {lf}")
+            assert refused == 0 and err == 0, (lf, refused, err)
+            out[lf] = (get_sim_time("ns") - t0) / CLK_NS
+        dut._log.info(
+            f"  {fmt.name:<6} {n:4d} lanes  without {out[False]:8.0f} cyc "
+            f"({out[False] / blocks:7.1f}/block)   with {out[True]:8.0f} "
+            f"cyc ({out[True] / blocks:7.1f}/block)   "
+            f"{(out[True] - out[False]) / blocks:+6.1f} cycles a block")

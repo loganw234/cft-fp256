@@ -217,6 +217,11 @@ ISI_BASE = 0x0D_0000
 # check here if the regions were adjacent. One bit a lane, so 64 KB is
 # half a million lanes - far more than any case below uses.
 MASK_BASE = 0x0E_0000
+# R23's per-lane flag block (revision 8), a byte a lane at LFLAGS_PTR: its
+# own region, for the reason every other block has one - a drain that wrote
+# the counts' region, or the mask's, would pass a check that shared one.
+# 64 KB is that many lanes.
+LF_BASE = 0x0F_0000
 D_BASE = 0x10_0000
 
 POISON = 0xA5
@@ -776,7 +781,7 @@ class Bench:
         assert CNT_BASE + cnt_bytes + GUARD <= D_BASE
 
     def _drive_cfg(self, fmt, n, bank_ptr=None, scratch=False,
-                   idx_mask=0, lane_mask=False):
+                   idx_mask=0, lane_mask=False, lane_flags=False):
         dut = self.dut
         dut.cfg_prec.value = PREC_CODE[fmt.name]
         dut.cfg_n.value = n
@@ -812,12 +817,12 @@ class Bench:
         # says it was not read.
         dut.cfg_mask_en.value = 1 if lane_mask else 0
         dut.cfg_mask.value = MASK_BASE if lane_mask else 0xDEAD_7000
-        # ...and revision 8's R23 flag block (its seam, 2026-10-02): no
-        # run here asks for it, and the CSR refuses MODE[24] on every
-        # build until R23 is built, so the pointer is aimed at nothing -
-        # a write there trips the write logger's window assertion.
-        dut.cfg_lflags_en.value = 0
-        dut.cfg_lflags.value = 0xDEAD_8000
+        # ...and revision 8's R23 flag block on the same terms: a run
+        # that does not ask (MODE[24] clear) must write nothing, so its
+        # pointer is aimed at nothing - a write there trips the write
+        # logger's window assertion; one that asks has it at LF_BASE.
+        dut.cfg_lflags_en.value = 1 if lane_flags else 0
+        dut.cfg_lflags.value = LF_BASE if lane_flags else 0xDEAD_8000
 
     # -- a refused run ---------------------------------------------------
 
@@ -849,7 +854,7 @@ class Bench:
 
     async def program(self, fmt, prog, a, b, c, n, label,
                       *, check_flags=True, image=None, bank=None,
-                      scratch_in=None):
+                      scratch_in=None, lane_flags=False):
         """Run `prog` over `n` lanes and compare the whole machine.
 
         `a`, `b`, `c` are the REAL streams, one value per lane in
@@ -873,7 +878,7 @@ class Bench:
         self._padding_selfcheck(fmt, prog, a, b, c, n, want, label,
                                 bank=bank, scratch_in=scratch_in)
         self._drive_cfg(fmt, n, bank_ptr=bank is not None,
-                        scratch=prog.scratch_io)
+                        scratch=prog.scratch_io, lane_flags=lane_flags)
 
         budget = self._budget(fmt, prog, n, len(image))
         refused, flags, err = await self._go(budget, label)
@@ -891,12 +896,16 @@ class Bench:
             windows.append((CNT_BASE, cnt_bytes, "count"))
         if sout_bytes:
             windows.append((SOUT_BASE, sout_bytes, "scratch-out"))
+        if lane_flags:
+            windows.append((LF_BASE, n, "lane flags"))
         self.ram.assert_writes_inside(windows, label)
         self.ram.assert_guards(windows, label)
 
         self._compare(fmt, prog, n, want, flags, err, a, b, c, label,
                       check_flags)
         self._compare_scratch_out(fmt, prog, n, want, label)
+        if lane_flags:
+            self._compare_lane_flags(n, want, [True] * n, flags, err, label)
         self.cases["program"] += 1
         return want
 
@@ -1058,7 +1067,7 @@ class Bench:
     async def masked(self, fmt, prog, a, b, c, n, keep, label, *,
                      check_flags=True, check_reads=True, scratch_in=None,
                      pre=None, idx_a=None, idx_b=None, idx_c=None,
-                     idx_scratch_in=None):
+                     idx_scratch_in=None, lane_flags=False):
         """Run `prog` over `n` lanes with a lane mask and compare the
         whole machine: the lanes the mask keeps against the model, and
         the lanes it clears against the BYTES THAT WERE THERE BEFORE.
@@ -1125,7 +1134,7 @@ class Bench:
         pad = -len(raw) % BEAT_BYTES
         self.ram.stage(MASK_BASE, bytes(raw) + bytes([POISON]) * pad)
         self._drive_cfg(fmt, n, scratch=prog.scratch_io, lane_mask=True,
-                        idx_mask=idx_mask)
+                        idx_mask=idx_mask, lane_flags=lane_flags)
 
         budget = self._budget(fmt, prog, n, len(image))
         # ...plus the mask fetch, one round trip a block, and the
@@ -1146,6 +1155,8 @@ class Bench:
             windows.append((CNT_BASE, cnt_bytes, "count"))
         if sout_bytes:
             windows.append((SOUT_BASE, sout_bytes, "scratch-out"))
+        if lane_flags:
+            windows.append((LF_BASE, n, "lane flags"))
         self.ram.assert_writes_inside(windows, label)
         self.ram.assert_guards(windows, label)
 
@@ -1153,6 +1164,8 @@ class Bench:
             self._check_mask_reads(fmt, n, label)
         self._compare_masked(fmt, prog, n, keep, want, flags, err, label,
                              check_flags)
+        if lane_flags:
+            self._compare_lane_flags(n, want, keep, flags, err, label)
         self.cases["masked"] += 1
         return want
 
@@ -1481,6 +1494,40 @@ class Bench:
             cycles += blocks * worst * 2
         cycles += bursts * (lat + 64)
         return min(cycles, 8_000_000)
+
+    def _compare_lane_flags(self, n, want, keep, flags, err, label):
+        """R23's block (revision 8) against the model's Result.lane_flags:
+        lane i's byte at LF_BASE + i for every lane the caller has, and the
+        caller's poison for a masked one - the counts' rule. Then the three
+        identities, from the bytes the TILE wrote (docs/SEQUENCER.md, R23):
+        over the lanes the run owns, the OR of [4:0] is FLAGS, the OR of
+        [6:5] is STATUS[5:4] (err[4:3]) and the OR of [7] is STATUS[6]
+        (err[5])."""
+        got = self.ram.fetch(LF_BASE, n)
+        bad = []
+        for i in range(n):
+            if keep[i]:
+                if got[i] != want.lane_flags[i]:
+                    bad.append((i, got[i], want.lane_flags[i]))
+            elif got[i] != POISON:
+                bad.append((i, got[i], "untouched"))
+        assert not bad, (
+            f"{label}: {len(bad)}/{n} lane-flag bytes differ from the model "
+            f"(lane, got, want): {bad[:8]}")
+        owned = [got[i] for i in range(n) if keep[i]]
+        acc = 0
+        for v in owned:
+            acc |= v
+        assert (acc & 0x1F) == flags, (
+            f"{label}: the bytes' [4:0] OR to {acc & 0x1F:#07b} and FLAGS is "
+            f"{flags:#07b}")
+        assert ((acc >> 5) & 3) == ((err >> 3) & 3), (
+            f"{label}: the bytes' [6:5] OR to {(acc >> 5) & 3:#04b} and "
+            f"STATUS[5:4] is {(err >> 3) & 3:#04b}")
+        assert ((acc >> 7) & 1) == ((err >> 5) & 1), (
+            f"{label}: the bytes' [7] OR to {(acc >> 7) & 1} and STATUS[6] "
+            f"is {(err >> 5) & 1}")
+        self.cases["lane_flags"] += 1
 
     def _compare_scratch_out(self, fmt, prog, n, want, label):
         """The block the run hands back through SCRATCH_OUT_PTR, against
@@ -7247,7 +7294,9 @@ async def flag_control_fuzz(dut):
     """The model's own R24 arm (seq.random_program(flags=True)): quiet,
     endquiet and raise drawn among the rest, regions nested properly with
     loops, on every rung - whole state compared, FLAGS and the mark
-    included."""
+    included, and since R23 each run's per-lane flag block with it (every
+    program here asks for MODE[24]), so the byte is held over the same
+    random regions, deposits and scratch accesses as the run's reports."""
     bench = Bench(dut)
     await bench.start()
     made = marked = quiet = 0
@@ -7274,7 +7323,8 @@ async def flag_control_fuzz(dut):
             n = rng.choice(sizes)
             a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
             want = await bench.program(fmt, prog, a, b, c, n,
-                                       f"R24 fuzz {name} #{k} n={n}")
+                                       f"R24 fuzz {name} #{k} n={n}",
+                                       lane_flags=True)
             k += 1
             marked += bool(want.status & seq.STATUS_MARKED)
             quiet += any(seq.decode(w)["ctrl"] and
@@ -7284,3 +7334,100 @@ async def flag_control_fuzz(dut):
     dut._log.info(f"R24 fuzz: {made} programs, {quiet} with a region, "
                   f"{marked} marked a lane")
     assert quiet > made // 3, "hardly any fuzzed program opened a region"
+
+
+# ======================================================================
+# revision 8's R23: per-lane sticky flags
+# ======================================================================
+#
+# docs/SEQUENCER.md, R23; docs/ROADMAP.md, "Revision 8", R23. MODE[24]
+# (cfg_lflags_en) asks for a byte a lane at LFLAGS_PTR after the counts:
+# [4:0] the IEEE flags the lane raised outside every quiet region, [5] its
+# deposit overflowed, [6] its strict access fell past the depth, [7] a
+# RAISE marked it. Held to the model's Result.lane_flags byte for byte
+# (Bench._compare_lane_flags), with the three identities read off the
+# tile's own bytes.
+
+def _r23_prog(fmt):
+    """Every source of every bit in one program: an ALU instruction's flags
+    (r0 * r1); a quiet region holding a loud ADD and a raise, whose [4:0]
+    are silenced and whose mark is not; a deposit, then SETACT on r1 -
+    lanes whose r1 is a zero leave here - and a second deposit, which
+    overflows max_deposits 1 in every lane still active; a strict STX at
+    r1's bit pattern, past the depth in most lanes; and a raise outside
+    every region. A lane that left at the SETACT keeps what it raised
+    before it."""
+    return seq.Program(fmt, [
+        seq.alu(sf.OP_MUL, 3, ra=0, rb=1),
+        seq.quiet(),
+        seq.alu(sf.OP_ADD, 4, ra=0, rc=1),
+        seq.raise_(2),
+        seq.endquiet(),
+        seq.deposit(3),
+        seq.setact(1),
+        seq.deposit(3),
+        seq.stx(0, 1),
+        seq.raise_(2),
+        seq.halt()], max_deposits=1, flags=seq.FLAG_SCRATCH_STRICT)
+
+
+def _r23_streams(fmt, n, seed):
+    """r0 and r1 the specials-heavy mix (±0 among them, so SETACT drops
+    lanes), r2 a raise word a lane with the mark in every fourth."""
+    rng = random.Random(seed)
+    a = seq.random_inputs(fmt, rng, n)
+    b = seq.random_inputs(fmt, rng, n)
+    c = [(rng.getrandbits(fmt.width) & ~0x80) | (0x80 if i % 4 == 0 else 0)
+         for i in range(n)]
+    return a, b, c
+
+
+@cocotb.test()
+async def lane_flags_block(dut):
+    """At every format, over two blocks and a ragged third (so fp256's
+    sixteen-lane blocks put a half beat at offset 0 and one at offset 16):
+    the block against the model and the three identities; every bit of the
+    byte asserted to vary across the run's lanes, so that a bit dropped or
+    a row misplaced is a difference and not a coincidence. Then the same
+    run without MODE[24]: nothing written at LFLAGS_PTR."""
+    bench = Bench(dut)
+    await bench.start()
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb = lanes_per_block(fmt)
+        n = 2 * lpb + 5
+        prog = _r23_prog(fmt)
+        a, b, c = _r23_streams(fmt, n, 2300 + fmt.width)
+        want = await bench.program(fmt, prog, a, b, c, n,
+                                   f"{fmt.name}: the lane-flag block",
+                                   lane_flags=True)
+        for bit in range(8):
+            ones = sum(1 for v in want.lane_flags if v >> bit & 1)
+            assert 0 < ones < n, (
+                f"{fmt.name}: bit {bit} of the byte is {ones} of {n} lanes "
+                f"in the model - the case cannot see it dropped or moved")
+        await bench.program(fmt, prog, a, b, c, n,
+                            f"{fmt.name}: no MODE[24], no block")
+        assert bench.ram.fetch(LF_BASE, n) == bytes([POISON]) * n, (
+            f"{fmt.name}: a run without MODE[24] wrote at LFLAGS_PTR")
+
+
+@cocotb.test()
+async def lane_flags_masked_and_dropped(dut):
+    """A masked run: a masked lane's byte is the caller's (poison here),
+    as its count is; a lane SETACT dropped IS the caller's, and its byte
+    holds what it raised while it was active. fp32 and fp256."""
+    bench = Bench(dut)
+    await bench.start()
+    for fmt in (FP32, FP256):
+        lpb = lanes_per_block(fmt)
+        n = lpb + 9
+        prog = _r23_prog(fmt)
+        a, b, c = _r23_streams(fmt, n, 2400 + fmt.width)
+        keep = _keep(n, 2)
+        want = await bench.masked(fmt, prog, a, b, c, n, keep,
+                                  f"{fmt.name}: lane flags under a mask",
+                                  lane_flags=True)
+        dropped = [i for i in range(n) if keep[i] and not want.active[i]]
+        assert dropped and any(want.lane_flags[i] for i in dropped), (
+            f"{fmt.name}: no kept lane that SETACT dropped raised anything - "
+            f"the case cannot see a dropped lane's byte left unwritten")

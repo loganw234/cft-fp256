@@ -93,15 +93,17 @@
 //     cfg_d is written - a lane's d-th deposit at element index
 //     (i * max_deposits + d), slots the lane never reached as +0
 //     (P2: addressed by index, never arrival) - then the per-lane
-//     deposit counts as uint32 at cfg_cnt + 4*i, then, under
-//     flags.SCRATCH_IO, n_scratch_out slots a lane at cfg_sout in the
-//     same lane-major layout the preload reads. Lanes at or beyond
-//     cfg_n get none of the three: the tail of the caller's buffers
-//     is theirs, untouched. A MASKED lane (R17) gets none of the three
-//     either, and for the same reason - it is not a lane the caller
-//     gave this run - but it sits INSIDE the window rather than past
-//     it, so what "untouched" means on the bus is a beat whose bytes
-//     for that lane's elements carry no write strobe.
+//     deposit counts as uint32 at cfg_cnt + 4*i, then, where the run
+//     asked (MODE[24], revision 8's R23), the per-lane flag byte at
+//     cfg_lflags + i, then, under flags.SCRATCH_IO, n_scratch_out
+//     slots a lane at cfg_sout in the same lane-major layout the
+//     preload reads. Lanes at or beyond cfg_n get none of them: the
+//     tail of the caller's buffers is theirs, untouched. A MASKED lane
+//     (R17) gets none of them either, and for the same reason - it is
+//     not a lane the caller gave this run - but it sits INSIDE the
+//     window rather than past it, so what "untouched" means on the bus
+//     is a beat whose bytes for that lane's elements carry no write
+//     strobe.
 //
 //  4. DONE. `flags` is the sticky OR of active-lane contributions
 //     across the whole run; err[2:0] carry the engine's three bus
@@ -148,7 +150,8 @@
 // nothing during a block and runs in exactly the cycles it did before.
 //
 // The read port serves the program image and the three input streams
-// (phases never overlap); the write port serves deposits and counts.
+// (phases never overlap); the write port serves deposits and counts,
+// and the lane-flag and scratch-out blocks after them.
 // cft_krnl steers each read to the A, B or C master by the buffer it
 // belongs to (m_rd_sel), since on HBM a master reaches only its own
 // bank; one read port still keeps the whole machine a straight line.
@@ -310,15 +313,13 @@ module cft_seq #(
     input  logic              cfg_mask_en,
     input  logic [ADDR_W-1:0] cfg_mask,
     /* Revision 8's R23 (docs/SEQUENCER.md): MODE[24], decoded in the CSR,
-     * asks for the per-lane flag block, written at cfg_lflags
-     * (LFLAGS_PTR, 0xB0) after the counts. INERT at revision 8's seam:
-     * the CSR refuses MODE[24] on a build whose FEAT_LANE_FLAGS is
-     * clear, which is every build until R23 is built, so nothing below
-     * reads either port yet. */
-    /* verilator lint_off UNUSEDSIGNAL */
+     * asks for the per-lane flag block, a byte a lane, written at
+     * cfg_lflags (LFLAGS_PTR, 0xB0) after the counts. The CSR refuses
+     * MODE[24] on a build whose FEAT_LANE_FLAGS is clear, so a bit that
+     * arrives here is one this module implements. cfg_lflags is 32-byte
+     * aligned, as cfg_prog is (the library allocates the block). */
     input  logic              cfg_lflags_en,
     input  logic [ADDR_W-1:0] cfg_lflags,
-    /* verilator lint_on UNUSEDSIGNAL */
     output logic              busy,
     output logic              done,       // one-cycle pulse
     output logic              refuse,     // valid with done
@@ -483,6 +484,9 @@ module cft_seq #(
   // R17's mask pointer and its enable, latched for the same reason.
   logic [ADDR_W-1:0] mask_q;
   logic              mask_en_q;
+  // R23's pointer and its enable, latched for the same reason.
+  logic [ADDR_W-1:0] lf_q;
+  logic              lf_en_q;
 
   // element bytes / lanes per beat / log2(lanes per beat)
   logic [5:0] esz;
@@ -1469,6 +1473,8 @@ module cft_seq #(
     S_CNT_SETUP, S_CNT_PACK, S_CNT_SEND,
     S_SO_SETUP, S_SO_RD, S_SO_W8, S_SO_PACK, S_SO_SEND,
     S_WAIT_B, S_NEXT_BLK, S_FIN,
+    // Revision 8's R23: the per-lane flag block, after the counts.
+    S_LF_SETUP, S_LF_PACK, S_LF_SEND,
     // Revision 8: the abort's wait - every read in flight landed, every
     // write response in, the issue pipe empty - then S_FIN.
     S_ABORT
@@ -2282,7 +2288,9 @@ module cft_seq #(
                       (st == S_CNT_PACK) || (st == S_CNT_SEND) ||
                       (st == S_SO_SETUP) || (st == S_SO_RD) ||
                       (st == S_SO_W8) || (st == S_SO_PACK) ||
-                      (st == S_SO_SEND) || (st == S_WAIT_B);
+                      (st == S_SO_SEND) || (st == S_WAIT_B) ||
+                      (st == S_LF_SETUP) || (st == S_LF_PACK) ||
+                      (st == S_LF_SEND);
   assign abort_safe = !((st == S_IDLE) || (st == S_FIN) || (st == S_ABORT) ||
                         (st == S_DECODE) || (st == S_ISSUE)) &&
                       (!drain_st || wr_quiet);
@@ -2745,6 +2753,142 @@ module cft_seq #(
   endgenerate
   assign scr_oor_bk = oor_banks_fn(scr_oor, wpe_sh);
 
+  // ---- revision 8's R23: per-lane sticky flags -----------------------
+  //
+  // A byte a lane slot, BLK_LANES of them, addressed as `active` is ({beat,
+  // position}, 1,024 flops at sixteen beats of eight positions, at every
+  // format): [4:0] the five IEEE flags the lane raised outside every quiet
+  // region (R24), in FLAGS's order; [5] its deposit overflowed; [6] its
+  // indexed access fell past the depth under SCRATCH_STRICT; [7] a RAISE
+  // marked it - STATUS[6:4]'s three reports one place up, lane by lane
+  // (docs/SEQUENCER.md, R23). Sticky, cleared at each block's start with
+  // the register file's valid bits, and read only by the drain after the
+  // counts (S_LF_*), when the run asked (MODE[24], lf_en_q).
+  //
+  // Every term is the one the run's own reports take today, captured from
+  // a REGISTERED copy a cycle late, so no R23 logic sits on today's paths
+  // - the retire, the F stage's deposit path among them (docs/ROADMAP.md,
+  // revision 8, R23: the margins). Two sources a cycle, each one beat's
+  // row of positions:
+  //   the retire: a landing beat's lane flags, under the row it fired with
+  //     and its flag enable (fq: arithmetic, and not admitted quiet) -
+  //     wb_flags_or's terms before it ORs them;
+  //   F: a RAISE's ra[4:0] unless the beat is quiet and its ra[7], a
+  //     DEPOSIT's overflow by position (bt_dep_ovf), and STX's and LDX's
+  //     strict suppression by position (scr_oor), each under the beat's
+  //     active row.
+  // A lane the caller does not have - masked, or past n - is never active,
+  // so its byte stays 0, and the drain does not write it.
+  logic [BLK_LANES*8-1:0] lflags;
+  logic                   lf_rv, lf_fv;
+  logic [NBSH-1:0]        lf_rbeat, lf_fbeat;
+  logic [WORDS*8-1:0]     lf_rbits, lf_fbits, lf_rbits_c, lf_fbits_c;
+  logic                   lf_f_c;
+  generate
+    for (genvar gf = 0; gf < WORDS; gf = gf + 1) begin : g_lf
+      logic here;          // the position exists at this format
+      assign here = (32'(gf) < 32'(lpb));
+      assign lf_rbits_c[gf*8 +: 8] =
+          {3'b0, (here && wb_act[gf]) ? al_lf[gf*5 +: 5] : 5'b0};
+      assign lf_fbits_c[gf*8 +: 8] = {
+          raise_go && here && bt_act[gf] && ra_low8[gf*8 + 7],     // [7]
+          lf_f_c && c_scr_idx && here && bt_act[gf] && scr_oor[gf],  // [6]
+          lf_f_c && (pf_op == C_DEPOSIT) && bt_dep_ovf[gf],          // [5]
+          (raise_go && !pf_quiet && here && bt_act[gf])
+              ? ra_low8[gf*8 +: 5] : 5'b0};                          // [4:0]
+    end
+  endgenerate
+  // an F-stage control beat acting this cycle (every F action's gate)
+  assign lf_f_c = !issue_hold && pf_v && pf_ctrl;
+  always_ff @(posedge ap_clk) begin
+    lf_rv    <= al_ov && seq_live && fq[LATENCY-1];
+    lf_rbeat <= wb_tag[NBSH-1:0];
+    lf_rbits <= lf_rbits_c;
+    lf_fv    <= lf_f_c;
+    lf_fbeat <= pf_bt[NBSH-1:0];
+    lf_fbits <= lf_fbits_c;
+    if (!ap_rst_n || rf_clear)
+      lflags <= '0;
+    else
+      for (int b = 0; b < NBEATS; b = b + 1)
+        for (int q = 0; q < WORDS; q = q + 1)
+          lflags[(b*WORDS + q)*8 +: 8] <= lflags[(b*WORDS + q)*8 +: 8] |
+              ((lf_rv && 32'(lf_rbeat) == b) ? lf_rbits[q*8 +: 8]
+                                                       : 8'b0) |
+              ((lf_fv && 32'(lf_fbeat) == b) ? lf_fbits[q*8 +: 8]
+                                                       : 8'b0);
+  end
+
+  // The drain's beat: BEAT_BYTES lanes' bytes, lane L at byte L - the block's
+  // first byte in the beat. A block's lanes sit in slots (L >> lpb_sh) x
+  // WORDS + (L mod lpb) - the dense index to {beat, position} - so the
+  // select is written over CONSTANT candidates (the format, which beat of
+  // the block, the block's offset in the beat), never a computed index into
+  // the 1,024 flops: at 256 bits a byte has about eight candidates, where a
+  // computed index would be a 128:1 multiplexer a byte. A block narrower
+  // than a beat (fp256's sixteen lanes) starts at a multiple of its own
+  // width within the beat, which is the only offset `off` takes.
+  localparam int LFB = BEAT_BYTES;                          // lanes a beat
+  localparam int LFK = (BLK_LANES + LFB - 1) / LFB;         // beats a block
+  localparam int LFKW = (LFK > 1) ? $clog2(LFK) : 1;
+  function automatic [BEAT_BITS-1:0] lf_beat_fn(input [BLK_LANES*8-1:0] lf,
+                                                input [1:0] lsh,
+                                                input [LFKW-1:0] k,
+                                                input [5:0] off);
+    logic [BEAT_BITS-1:0] r;
+    int L, slot;
+    begin
+      r = '0;
+      for (int f = 0; f < 4; f = f + 1)
+        if (32'(lsh) == f)
+          for (int kk = 0; kk < LFK; kk = kk + 1)
+            if (32'(k) == kk)
+              for (int o = 0; o < LFB; o = o + (NBEATS << f))
+                if (32'(off) == o)
+                  for (int j = 0; j < LFB; j = j + 1) begin
+                    L = kk*LFB + j - o;
+                    if (L >= 0 && L < (NBEATS << f)) begin
+                      slot = (L >> f) * WORDS + (L & ((1 << f) - 1));
+                      if (slot < BLK_LANES)
+                        r[j*8 +: 8] = lf[slot*8 +: 8];
+                    end
+                  end
+      lf_beat_fn = r;
+    end
+  endfunction
+  // ...and its strobes: a byte for a lane below blk_n that the caller has
+  // (mask_lane, dense by lane) - the counts' rule.
+  function automatic [LFB-1:0] lf_strb_fn(input [BLK_LANES-1:0] ml,
+                                          input [1:0] lsh,
+                                          input [LFKW-1:0] k,
+                                          input [5:0] off,
+                                          input [LB:0] bn);
+    logic [LFB-1:0] r;
+    int L;
+    begin
+      r = '0;
+      for (int f = 0; f < 4; f = f + 1)
+        if (32'(lsh) == f)
+          for (int kk = 0; kk < LFK; kk = kk + 1)
+            if (32'(k) == kk)
+              for (int o = 0; o < LFB; o = o + (NBEATS << f))
+                if (32'(off) == o)
+                  for (int j = 0; j < LFB; j = j + 1) begin
+                    L = kk*LFB + j - o;
+                    if (L >= 0 && L < (NBEATS << f) && L < BLK_LANES)
+                      r[j] = (32'(L) < 32'(bn)) && ml[L];
+                  end
+      lf_strb_fn = r;
+    end
+  endfunction
+  // The drain's cursor - the beat of the block being packed - and the
+  // block's first byte in its first beat: the block starts at byte
+  // blk_base of the 32-byte-aligned block, so its offset in a beat is
+  // blk_base's low bits, nonzero only where a block is narrower than a beat.
+  logic [LFKW-1:0] lf_k;
+  logic [5:0]      lf_off;
+  assign lf_off = 6'(blk_base[$clog2(LFB)-1:0]);
+
   // 2. The per-bank ADDRESS those slots imply, for the beat named.
   //    Bank w serves lane position w >> wsh, so it takes that lane's
   //    slot; the beat is the low NBSH bits, as it is in the register
@@ -3112,6 +3256,14 @@ module cft_seq #(
   assign scr_out_elem = scr_elem_fn(dc_posn, scr_rdata, wpe_sh);
 
 
+  // R23's drain beat and its strobes (above), as continuous assigns for
+  // the reason rd_bl's is one (an Icarus livelock under always_comb), and
+  // here because they read mask_lane; S_LF_PACK registers them.
+  logic [BEAT_BITS-1:0] lf_beat;
+  logic [LFB-1:0]       lf_strb;
+  assign lf_beat = lf_beat_fn(lflags, lpb_sh, lf_k, lf_off);
+  assign lf_strb = lf_strb_fn(mask_lane, lpb_sh, lf_k, lf_off, blk_n);
+
   // ==== the machine ====================================================
   always_ff @(posedge ap_clk) begin
     if (!ap_rst_n) begin
@@ -3156,6 +3308,7 @@ module cft_seq #(
       // caller has, so its idle value has to be the one that says
       // "every lane", and a run without a mask never writes it.
       mask_q <= '0; mask_en_q <= 1'b0; mask_lane <= {BLK_LANES{1'b1}};
+      lf_q <= '0; lf_en_q <= 1'b0; lf_k <= '0;
       gt_tbl <= '0; gt_have <= '0; gt_left <= '0; gt_taddr <= '0;
       gt_base <= '0; gt_idx <= '0; gt_scr <= 1'b0; gt_beat <= '0;
       gt_pos <= '0; gt_lane <= '0; gt_slot <= '0;
@@ -3338,6 +3491,7 @@ module cft_seq #(
             // the scratch wipe make the same promise about state that
             // outlives a run, and for the same reason.
             mask_q <= cfg_mask; mask_en_q <= cfg_mask_en;
+            lf_q <= cfg_lflags; lf_en_q <= cfg_lflags_en;
             mask_lane <= {BLK_LANES{1'b1}};
             flags_q <= '0; dep_ovf_q <= 1'b0; scr_rng_q <= 1'b0;
             mark_q <= 1'b0;
@@ -4341,9 +4495,59 @@ module cft_seq #(
               // of the block, which is where the contract puts it; a
               // program that declares none touches neither the
               // pointer nor the bus.
-              st <= (h_nsout != 0) ? S_SO_SETUP : S_WAIT_B;
+              // ...and before it, R23's block where the run asked for it.
+              st <= lf_en_q ? S_LF_SETUP
+                  : (h_nsout != 0) ? S_SO_SETUP : S_WAIT_B;
             else
               st <= S_CNT_PACK;
+          end
+        end
+
+        // ---- the per-lane flag block (revision 8, R23) ----------------
+        //
+        // A byte a lane at lf_q + the lane's global index, after the
+        // counts and before the scratch-out block, in the counts' shape: a
+        // beat packed in one cycle (lf_beat_fn, BEAT_BYTES lanes) and sent
+        // in the next, strobed where the lane is below blk_n and the
+        // caller's (mask_lane) - a masked lane's byte is the caller's, as
+        // its count is. A block of 128, 64, 32 or 16 lanes is 4, 2, 1 or
+        // half a beat; the half beat sits at its block's offset in the
+        // 32-byte beat (lf_off), its other half unstrobed. A run that did
+        // not ask (MODE[24] clear) never comes here and writes nothing.
+        S_LF_SETUP: begin
+          as_fill <= '0; as_strb <= '0; as_data <= '0;
+          drain_last <= 1'b0;
+          // the counts' stream quiet first, as S_SO_SETUP waits
+          if (wr_burst_left == 0 && !m_wr_awvalid && !wr_aw_open &&
+              !m_wr_wvalid && wr_beats_left == 0) begin
+            wr_addr <= lf_q + (blk_base & ~(64'(LFB) - 64'd1));
+            wr_beats_left <= (32'(lf_off) + 32'(blk_n) + 32'(LFB - 1))
+                             >> $clog2(LFB);
+            lf_k <= '0;
+            st <= S_LF_PACK;
+          end
+        end
+
+        S_LF_PACK: begin
+          as_data <= lf_beat;
+          as_strb <= lf_strb;
+          if ((32'(lf_k) + 32'd1) * 32'(LFB) >= 32'(lf_off) + 32'(blk_n))
+            drain_last <= 1'b1;
+          lf_k <= lf_k + LFKW'(1);
+          st <= S_LF_SEND;
+        end
+
+        S_LF_SEND: begin
+          if ((!m_wr_wvalid || m_wr_wready) && wr_after != 0) begin
+            m_wr_wvalid <= 1'b1;
+            m_wr_wdata <= as_data;
+            m_wr_wstrb <= as_strb;
+            m_wr_wlast <= (wr_after == 1);
+            as_fill <= '0; as_strb <= '0; as_data <= '0;
+            if (drain_last)
+              st <= (h_nsout != 0) ? S_SO_SETUP : S_WAIT_B;
+            else
+              st <= S_LF_PACK;
           end
         end
 

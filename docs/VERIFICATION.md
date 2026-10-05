@@ -124,7 +124,16 @@ authority:
    and out of them, the mark inside one, a skipped body holding one, the
    tag across a region's edge with beats in flight, the depth reset at a
    block, and the model's own R24 fuzz arm - and the mark through the
-   kernel to STATUS[6] (`test_krnl_seq.py`'s `krnl_flag_control`); the
+   kernel to STATUS[6] (`test_krnl_seq.py`'s `krnl_flag_control`); since
+   R23 (2026-10-05) the per-lane flag block is held byte for byte
+   against the model's `Result.lane_flags` with the three identities
+   read off the tile's own bytes - every bit of the byte varying across
+   the run's lanes at every format, fp256's half beats at both offsets,
+   a masked lane's byte left the caller's, a lane SETACT dropped still
+   written, nothing written without MODE[24], and every R24 fuzz
+   program asking for it (`test_seq_core.py`'s two `lane_flags_` cases)
+   - and through the kernel, with the register at 0xB0 the address the
+   block lands at (`test_krnl_seq.py`'s `krnl_lane_flags`); the
    shared normalise and alignment ladders are held
    against the private shifters they replaced; the reduction
    accumulator, the fault paths, the seed opcodes and the three trims -

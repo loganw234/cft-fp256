@@ -380,7 +380,10 @@ module cft_krnl #(
    * reason until SEQ_STREAM_D exists (round 2). */
   localparam bit FEAT_AUGADD       = 1'b0;
   localparam bit FEAT_SCRATCH_STEP = 1'b0;
-  localparam bit FEAT_LANE_FLAGS   = 1'b0;
+  // R23 is built (revision 8's round 2): the per-lane flag block, written
+  // at LFLAGS_PTR after the counts when MODE[24] asks, which the CSR's
+  // guard accepts from this bit.
+  localparam bit FEAT_LANE_FLAGS   = 1'b1;
   // R24 is built (revision 8's round 2): QUIET, ENDQUIET and RAISE decode
   // in cft_seq, and its mark reaches STATUS[6].
   localparam bit FEAT_FLAG_CONTROL = 1'b1;
@@ -1005,9 +1008,10 @@ module cft_krnl #(
        * CSR has already refused MODE[23] on a build whose
        * FEAT_LANE_MASK is 0, so what arrives here is honoured. */
       .cfg_mask_en(cfg_mask_en), .cfg_mask(cfg_mask),
-      /* ...and revision 8's R23 flag block, INERT at the seam: the CSR
-       * refuses MODE[24] on a build whose FEAT_LANE_FLAGS is clear,
-       * which is every build until R23 is, so cft_seq reads neither. */
+      /* ...and revision 8's R23 flag block on the same terms: the CSR
+       * refuses MODE[24] on a build whose FEAT_LANE_FLAGS is clear, so
+       * what arrives here is honoured - the block written at
+       * LFLAGS_PTR (0xB0) after the counts. */
       .cfg_lflags_en(cfg_lflags_en), .cfg_lflags(cfg_lflags),
       .busy(seq_busy), .done(seq_done), .refuse(seq_refuse),
       .lane_valid(seq_lv), .lane_op(seq_lop), .lane_rnd(seq_lrnd),
