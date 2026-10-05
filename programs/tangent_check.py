@@ -1433,10 +1433,12 @@ def leg_coverage():
 #
 # d(a / b) = fma(-r, db, da) / b and d sqrt(a) = da / (2 * r), r the
 # operation's own result (docs/LANGUAGE.md, "The quotient and the root").
-# The compiler carries neither until parcel C4 (leg I makes its refusal),
-# so this leg is the golden model's: the derivative exactly against this
-# stage's own dual numbers and by a central difference, the primal
-# unchanged, the specials bit for bit, and plants.
+# The derivative exactly against this stage's own dual numbers and by a
+# central difference, the primal unchanged, the specials bit for bit, and
+# plants; and since parcel C4, which compiles both as inlined routines,
+# each system compiled and run on seq.py against the interpreter (leg I
+# makes revision 7's `target-feature` refusal). Until C4 this leg was the
+# golden model's alone.
 
 L4_SHAPES = {
     "map": "system m\nformat fp64\nstate x, y, z\ntangent v\n"

@@ -1872,14 +1872,18 @@ convention ("What the fourth check cannot see").
   invisible to exact evaluation (measured: it passed every point). It is
   held by this document's rule table held to the code - each rule
   rendered on a one-operation system - by the blocks above, held to the
-  renderers, and, for every rule but the quotient's and the root's, by
-  the committed compiled variational references' graph bytes
-  (`programs/systems/compiled-tangent/`), none of which divides or takes
-  a root until parcel C4 compiles them: until then the rule table is
-  those two rules' holder (L4; verifier-VL4 planted the quotient's rule
-  rounded otherwise and the root's halved first, each green on the
-  fourth check and the central difference and red on the rule-table
-  test, the root's on the cost test as well);
+  renderers, and by the committed compiled variational references' graph
+  bytes (`programs/systems/compiled-tangent/`). Until parcel C4 none of
+  those divided or took a root, and the rule table was the quotient's
+  and the root's rules' only holder (L4; verifier-VL4 planted the
+  quotient's rule rounded otherwise and the root's halved first, each
+  green on the fourth check and the central difference and red on the
+  rule-table test, the root's on the cost test as well). Since C4 the
+  bytes hold those two rules as well, through Kepler's references, which
+  divide and take a root: the quotient's rule rounded otherwise (its
+  numerator a product and then a sum) and the root's halved first each
+  move both of Kepler's committed graphs and no other (measured
+  2026-10-05);
 - **special values**: NaNs, infinities and the sign of zero do not exist
   in exact arithmetic. They are held by the interpreter against seq.py
   bit for bit, with tangents holding signalling NaNs, infinities, -0 and

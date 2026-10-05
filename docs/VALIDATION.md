@@ -17476,3 +17476,223 @@ What sampled points cannot see is stated in LANGUAGE.md.
 - HOSTAPI.md's R24 refusal list omits "an ENDQUIET with no region open". SEQUENCER.md and VERIFICATION.md say "five forms" where PROGRAMS.md says seven for the same set.
 - On `sw`, device-test's device-against-software leg compares the software backend with itself.
 - 754-2019 §5.7.4 is cited as believed: the standard is not open.
+
+## 2026-10-03 - step 6's second wave: revision 8's RTL plan (for Logan), certificate format version 2 golden-first and the step to profile 2 (CV2B), routines in the compiler (C4)
+
+**Why.**
+- Step 6's plan of record puts revision 8's RTL after its golden-first pieces, and says: "Its RTL plan comes to Logan before the RTL work starts". Parcel RP8 wrote that plan.
+- Logan decided certificate version 2's twelve questions on 2026-10-02, verbatim: "Regarding the 12 questions, the recommended solutions are appropriate as stated". Version 2's build followed R8's merge (parcel CV2B, the golden half).
+- L4 put run-time division and square root into the language, and cftc refused them `runtime-routine` until parcel C4. On the call loop Logan chose, verbatim: "Build it now, last in C4 (Recommended)". The rule is to inline unless the step would pass 32,768 instructions, a fixed constant the compiler never reads from a target.
+
+**RP8: revision 8's RTL plan of record** (ROADMAP, "Revision 8: step 6's RTL revision"; merged as bd5a128). Nothing in it was built when it merged, and the RTL waited for Logan's answers, given below.
+- **Six items after a seam commit:** R21 to R24, streaming, and an abort for a read burst of the wrong length, which hangs a sequencer run today (verifier-VS8's finding).
+- **R21 in one pass at latency 16:**
+  - augadd and augerr re-align at S6 by their own exponents, so r's rounding point is one of six fixed places;
+  - design (b) decides at S10, design (a) at S11, and probe L chooses;
+  - costs 4,000-9,000 and 10,000-15,000 LUTs a tile, estimates of low confidence.
+- **The cost table and the quad:** revision 8 without R21's lanes projects to 83.7-84.9% of the part from q135b's measured 82.66% (computed from estimates); with R21's lanes, 85.5-91.8%, more than any quad that has closed.
+- **Three images,** the single, the streaming quad and the deep single, with probes L, S, K, E and U. About 12.6 to 28.6 hours of box time for the images (estimates).
+- **Ten questions for Logan.** Question 9 recommends a quad without R21 unless probe L measures R21's lanes at about 2,000 LUTs a tile or fewer. Then M1 writes TwoSum on every target until every image carries R21, so that one image serves every target.
+- **Verifier-VRP8, three checks:**
+  - **First, two (b)s:** design (b) rested on a false reading of the FMA pipe's alignment (the operand at the window's fixed place is the one whose lowest bit has the larger exponent, so r's rounding point moves with the operands); and question 6's early probe disagreed with the plan's order.
+  - **Second:** the redesign held on VRP8's own copy of the pipe, written from the RTL: r and e exact on 40,000 sums at fp32, 40,000 at fp64, 8,000 at fp128 and 4,000 at fp256, near-cancelling and subnormal anchors among them. Re-anchoring ordinary operations left the window, sign and sticky equal on 89,243 operations. One new (b): a planned test fault that could not fail.
+  - **Third:** clean. Its three replacement faults go red, measured in the fpfma benches' own vectors (ties toward zero in ADD on 1,047, 1,021, 561 and 373 case-attribute pairs).
+- **Restated at the merge:** the gate's reason, "every bench and card run". No formal proof covers the pipe's alignment (VRP8).
+- **Approved:** presented to Logan at about 18:10, with question 9 first, and approved at 22:27 (28179da). Logan's words:
+  - on question 9, "Only if probe L finds it cheap (Recommended)";
+  - on the other nine, "Approve as written (Recommended)".
+  So the quad carries R21 only if probe L measures its lanes at about 2,000 LUTs a tile or fewer. Probe L's figures come with parcel RB, in the next entry.
+
+**CV2B: certificate format version 2, golden-first** (merged as 9d03fe6).
+- **The contract:** docs/CERTIFICATES.md's "Version 2". It covers:
+  - the lines, encodings and hashes;
+  - the per-lane flags;
+  - a marked lane and its replay by the golden model;
+  - sources recompiled by cftc;
+  - the wider-source run;
+  - the definition (`profile`, `language`), with `definition-differs`;
+  - provenance with its privacy defaults (the issuer and the device serial withheld unless given, host-os's version on request);
+  - the detached Ed25519 signature for either version;
+  - the strict reader, the audit and its refusals by name.
+  Version 1's sections stay its contract. Version 1's reader is untouched, apart from its `version` refusal's sentence; its audit and golden writer changed for routine images alone (the routine-wider rule).
+- **The code:**
+  - `python/cft_golden/cert2.py`, with cert.py's dispatch by the magic line;
+  - `python/cft_golden/ed25519.py`, written from RFC 8032 §5.1 with nothing copied: cofactored, and a key of small order refused `signer` wherever a key is read;
+  - `python/cft_sign.py`, the key tool;
+  - `python/cft_golden/profile.py` and `lang/version.py`.
+- **The corpus** at manifest grammar 2:
+  - version 1's twelve cases byte for byte;
+  - seven version-2 cases a C writer must reproduce (`writers both`), `markstep-fp64` the page's example;
+  - thirty controls, each refused by its name, covering 32 of version 2's 34 new names. The other two, `definition-unavailable` and `replay-undecided`, are reachable only through test plants until M1 gives a language node a golden function in mpmath.
+- **Its choices where the study left one,** each in the page: `source-shape`, `replay-undecided` exit 78, step 7's and step 8's orders, a half-step run's recompile held by its image, and `regenerate` the auditor's choice.
+- **Version 1's routine-wider rule, the golden half,** held to C4's C half. Both writers and both audits agree on W0 to W3 by name, exit 5 and location, measured by VCV2B against C4's built tools.
+- **Verifier-VCV2B, two checks.**
+  - **First, no (a) and four (b)s:**
+    1. **Small-order keys.** Under the 8 keys with [8]A = O, a signature nobody made verified for any certificate: signed-fp64 with issuer-key `0100…00` was ACCEPTED, "verified, held by Logan%20W.".
+    2. A generator could be named one of the four reserved words.
+    3. The provenance times were ordered after all three were read.
+    4. The golden writer tested the wider run's image for the routine rule, where the contract tests the main one.
+  - **The lead's decision on (b)1:** refuse a key whose [8]A is the identity, by name, wherever a key is read. Keep the cofactored equation; a key with a prime-order part stays acceptable, since signing under it needs that part's secret.
+  - **Fixed at 8b623ab,** each with its control. The eight small-order keys, six encodings of no point and three signatures with S >= L are now vectors a C implementation is held to.
+  - **Also fixed at the lead's request:**
+    - the test keyring bound the PUBLISHED test key to the real name "Logan W.", so anyone with the published seed could sign as him; the issuer is now `cft test issuer (published key)`;
+    - the device lines are exempt from the C writer's comparison only where a case carries a card's values;
+    - `env` names are held to the writer's list of 15;
+    - `language none` is refused where a run names a source;
+    - a `compiler none` verdict says the map was not re-derived.
+  - **Second check:** no (a), no (b).
+    - Its forgery: 0 of 24 accepted. `cryptography`, being cofactorless, still accepts 7.
+    - Every route a key takes refuses `signer`.
+    - The vectors were recomputed independently.
+    - "Logan W." is gone from every certificate, keyring and fixture.
+- **MEASURED by CV2B** (the desktop at 2-7%):
+  - test_cert2 and test_ed25519, 139 passed;
+  - test_cert, 103;
+  - the corpus check, 288 checks with cft-segrun and 239 with 12 named skips without;
+  - segrun_check, 645 with 4 named skips;
+  - the docs check, gen_odes and sync.
+  - **VCV2B measured:** byte for byte against `cryptography` 43.0.0 / OpenSSL 3.4.1 on 200 keys and messages; every single-bit flip refused; segruntest 716 with 1 named skip.
+- **The lead's early run of its handed-back stages on amd-arc-box at 8c44d37,** before the fixes: 9 of 9 PASS in 30 minutes.
+  - golden 3,229 passed and 3 skipped;
+  - the corpus check 288;
+  - audit_check 6,800 checks;
+  - acceptance, lang, tangent, programs and estimates.
+  The logs are in the round's box/cv2b-early-8c44d37/.
+
+**The step to profile 2** (CONFORMANCE.md's versioning: a note there, and this entry).
+- **What changed.** The profile now versions the golden model's program model, seq.py and its loader, besides the vector sets. Any change to what an accepted image computes, or to whether an image loads, steps it. This is Logan's decision on CERT-V2's question 6.
+- **Under the rule, the model's changes since 2026-09-16:**
+  - **ee78152 (2026-10-01) is a major step.** seq.py's loader began refusing images that declare more than 512 constants, which the model of 2026-09-16 loaded and ran.
+  - Revision 7's scratch depth as a run's parameter and revision 8's forms are minor steps.
+  - They make one major step, to profile 2.
+- **The vector sets did not move:** profile 2's 1,068,915 cases are profile 1's, and `vectors/SHA256SUMS` is unchanged (VCV2B: one commit, ffefb5c, 2026-09-16).
+- **The language has a version of its own,** 1, in `python/cft_golden/lang/version.py`, with the profile's rule.
+- **Why it matters:** a version-2 certificate names both, and an auditor whose own do not cover a certificate's refuses `definition-differs` rather than blame the certificate. Under the old rule ee78152 kept the number at 1, so an auditor after it would have refused an honest older certificate's 513-constant image `program-image`.
+
+**C4: routines in the compiler** (merged as 248162c).
+- **`python/cft_golden/routines.py`,** golden-first, takes divfull's and sqrtfull's own programs mechanically into fragments specialised at the attribute: 177 to 191 instructions for division, 155 to 171 for the root. divfull.py is untouched.
+- **cftc inlines them:**
+  - QUIET, the body, ENDQUIET, then RAISE of a register holding exactly the operation's flags;
+  - the routines' words a third bank slot kind;
+  - `bank-capacity`, the language's one name, past 512;
+  - the internal check builds the fragments' symbols itself.
+  An image with a routine needs FLAG_CONTROL, so revision 7's four targets refuse it `target-feature`, and the software targets run it. `runtime-routine` is gone.
+- **Kepler** is committed under Störmer-Verlet at fp64 and fp256, with its tangent twin, and certified.
+- **The call loop,** by Logan's rule:
+  - a step whose routines, inlined, would pass 32,768 instructions loops batches of calls, the largest first, until it fits;
+  - a batch of one call is never looped.
+  - On eight bodies under rk4 at fp64: 40,477 instructions inlined; looped, 31,342 written and 41,957 run (+3.7%), 3.5% more cycles at sixteen beats, 243 scratch slots for 220.
+- **Its four departures from the approved design,** each named: records in the lowest free run of spill slots where the loop stands; an input every call takes from one bank slot read from the bank; no batch of one; VERSION 4.
+- **cftc VERSION is an output version,** 4 now, its record in `programs/systems/cftc-outputs.txt`. The committed manifests moved by their version line alone, and by the cost note's "measured" at 33bd8a5. With them came the format override (`--format`) and `--compiler-id`.
+- **The C half of version 1's routine-wider rule:** cft-segrun and cft-audit refuse a wider run whose main image holds QUIET, ENDQUIET or RAISE, `aux-image`, exit 5. The control is lang_check's leg E.
+- **The `lang` stage split** (b15228e, the lead's decision). The lead's early box run measured `lang` at 276 s, past quick's three minutes. `lang` runs the core legs in the quick budget, and a new stage, `lang-routines`, runs the routine, pool and loop legs in the gate budget, each group with its own tally. The runner now has 51 stages: 31 quick, 44 gate.
+- **Verifier-VC4.**
+  - **The routines:** its own exact-rational oracle, written from 754; operands near midpoints by congruences and Hensel lifting; subnormal ties; the boundaries; 46 specials. 0 mismatches against softfloat at four formats and five attributes, and 222,165 lane-runs through four harnesses (each lane's R23 byte softfloat's flags, divide-by-zero included, no mark ever set), 0 wrong.
+  - **The compiler:** 110 compilations of its own sources and 56,805 hard lanes through compiled images, 0 wrong. bank-capacity at 512 and 513; target-feature; 10 internal-check plants stopped.
+  - **The loop:** 32,768 inlined and 32,769 looped; 362 forced and fuzzed compilations, 0 wrong; looped images certified and accepted by both auditors.
+  - **The record** rebuilt version by version, file for file, and all 20 acceptance digests reproduced.
+  - **The split:** no assertion dropped; 238 checks identical, 12 new, 7 stricter.
+  - **Two (b)s, both in text:** a docstring's "6.7% to 6.9%" (6.68% and 6.85% measured), and the loop rule's wording, which omitted the batch of one.
+  - **Fixed at af323ec,** with three notes:
+    - acceptance.py's `image_at` patched every REPEAT, which would break a looped image (41 of 52 lanes, unreached today);
+    - LANGUAGE.md understated that a loop can need more scratch than inlining;
+    - LANGUAGE.md named only one of the four departures.
+  - **Its second check, of af323ec:** both (b)s and the three notes resolved. The fixed `image_at` leaves 0 of 52 lanes wrong where 41 were; `sw:1024` and deeper give the same image bytes; the 32,769-instruction source is refused `scratch-capacity` on `sw` and `sw:512`.
+    - One new (b), introduced by af323ec: "a target that holds fewer instructions than its image refuses it, `program-capacity`" is false for every built-in bounded target, which refuses such an image `target-feature` first, since none publishes flag control. The case is the 180-chain on revision 7's four targets.
+    - The lead restated it in the merge (248162c), with VC4's wording note that `sw:N` holds from `sw:1024` up. The verifier of this entry checks it.
+- **MEASURED by C4** (the desktop at 3-5%):
+  - pytest on the compiler's and the language's files, 625 passed;
+  - lang_check 245, tangent_check 141;
+  - the docs check, gen_odes, sync, gen_divfull;
+  - acceptance 2 of 2.
+  The stage times through the runner on the desktop were taken while Logan used it, a game in the foreground at up to 99%: 969 s and 669 s, against about 149 s and 147 s quiet.
+- **The lead's early run of its handed-back stages on amd-arc-box at 370e0b2:** 9 of 9 PASS in 34 minutes.
+  - golden 3,190 and 3 skipped;
+  - lang 245 in 276 s;
+  - tangent 141;
+  - acceptance 41 of 41;
+  - audit_check 6,800.
+  The logs are in the round's box/c4-early-370e0b2/.
+
+**The census case** (c8e4ce1, merged after C4 as 5e033f6): a version-1 test that audit_check's section 2 hands to cft-audit, wanting `aux-image` at run 1. It holds only with C4's C half: against cft-audit without it, that case fails ("the tool ACCEPTED").
+
+**The lead's merges.**
+- **RP8's** conflicted in docs/README.md's counts alone.
+- **CV2B's** conflicted in README and VERIFICATION's golden row: the head was the branch's (3,104 at 7ccc441) and the tail was CV2B's, and both were kept. README was recounted from the files by script.
+- **C4's** (248162c) conflicted in README's counts and in VERIFICATION, where CV2B's sentence on the programs row met C4's lang and new lang-routines rows. Both sides were kept.
+- **The census case's** (5e033f6) conflicted in README's counts alone. Each merge recounted README from the files.
+- **Restated by the lead:**
+  - CLAUDE.md's stage counts: 31 of 51, 44 of 51;
+  - run.sh's tangent comment and VERIFICATION's tangent row: the `lang` stage's committed files are 64 since Kepler, not 48;
+  - ROADMAP: CV2B built golden-first and C4 built, with L4's interim sentence restated;
+  - VERIFICATION's acceptance row: "the set's 20 entries and the oracle's 21 programs", VI3's note.
+- **An integration regression of the lead's merges, found and fixed.**
+  - CV2B committed its sourced cases at cftc's output VERSION 2 (`compiler cftc 2 sw`), and C4's merge took VERSION to 4.
+  - So at 5e033f6 the golden corpus check failed 5 checks: v2-source-image was judged compiler-differs rather than source-image, and v2-compiler-differs and v2-aux-source were no longer remade byte for byte.
+  - Parcel CV2CW found it, golden-only, at the base it was given.
+  - Each verifier had checked its own branch, consistent alone. The lead's merge checks ran the compiler's tests, the certificate tests and the docs check, but not the corpus check, where the two meet.
+  - **The fix, e45a2f7:** `certificates/corpus.py make --keep-version-1`. Version 1's twelve cases were kept untouched; the sourced and rebuilt cases and six controls were remade by the golden writer, with only their compiler lines, hash lines and manifest digests moving.
+  - The corpus check then gave 239 checks and 0 failed golden-only, and 288 and 0 failed with cft-segrun.
+- **The gate budget at 5e033f6,** niced, from a load of 0.00 (run 20261002-224705-5e033f6, 131 minutes): **FAIL, 1 stage.**
+  - 36 stages executed; 8 skipped by name (buildargs, the six language legs, demos); the same four inner skips as the gates above.
+  - `programs` failed on exactly the five corpus checks above. Its assemblers (346) and segrun_check (719) passed.
+  - Everything else passed:
+    - golden 3,330 passed and 3 skipped (689 s);
+    - lang, the core legs in the quick budget, 220 (136 s); lang-routines 37 (140 s);
+    - tangent 141 (252 s);
+    - acceptance 41 of 41, 249 checks (483 s);
+    - audit_check 6,802 checks (159 s);
+    - transcend, mpfr, mp-err-check and remote at the figures of the gate above.
+  - The logs are in the round's box/gate-5e033f6/.
+- **The gate budget at e45a2f7,** niced, from a load of 0.32 (run 20261003-013349-e45a2f7, 131 minutes): **PASS.**
+  - 36 stages executed, 0 failed; 8 skipped by name; the same four inner skips.
+  - golden 3,330 passed and 3 skipped (690 s), 3,333 collected: C4's test_routines.py (59), 22 in test_cftc.py and 8 in test_lang.py; CV2B's test_cert2.py (102), test_ed25519.py (37) and one in test_cert.py (the census case).
+  - programs: the assemblers 346, segrun_check 719, the corpus check 288.
+  - lang (core, quick) 220 (137 s); lang-routines 37 (141 s); tangent 141 (254 s).
+  - acceptance 41 of 41, 249 checks (482 s); audit_check 6,802 checks (162 s).
+  - transcend 607,217 and 580,977 comparisons, C == model; mpfr 739,234 cases, 0 value and 0 flag mismatches; remote 184,736 cases.
+
+  VERIFICATION.md's golden, lang, lang-routines and tangent rows carry these figures. The stage logs are in the round's box/gate-e45a2f7/.
+
+**A restatement of the entry above** (verifier-VI3's notes).
+- It places LANGUAGE.md's FLAGS sentence in "What v1 does not do". Line 1061 is in "The reference interpreter", under "What a run does"; "What v1 does not do" begins at 2211.
+- VERIFICATION's acceptance row said "all 41 entries". The 41 are the set's 20 entries and the oracle's 21 programs.
+- On the demos page the recording's line moved too, not only the module's.
+- COMPATIBILITY's ABI 0.17 section omits that a count with no buffer is also refused by name.
+- Its C++ row says there is no wrapper for the block, but `cft.hpp`'s `run_ex` passes the caller's whole struct, block included.
+
+**Known limits, recorded rather than fixed** (Logan's rule).
+- **The RTL plan is a plan.** Its LUT figures are estimates from the RTL's shape, R21's of low confidence. Question 9's branch is probe L's to decide; its measured figures come with parcel RB, in the next entry.
+- **Ed25519 here is verification of public data plus a key tool.**
+  - It is not constant-time.
+  - The key tool checks a key file's permissions on POSIX only, not on Windows.
+  - A keyring vouches for a key only as far as the auditor trusts it.
+- **Two refusal names, `definition-unavailable` and `replay-undecided`,** are reachable only through test plants until M1.
+- **The writers' order with two faults in one wider run differs:** the golden writer and cft-segrun can name different ones first, which version 1's contract allows.
+- **A version stated on `language` where no run names a source** is read and not compared.
+- **A loop can need more scratch than inlining.** VC4's 32,769-instruction source loops 170 calls into 653 slots and is refused `scratch-capacity` on sw, where one instruction shorter it compiles inlined in 171. The constant is Logan's rule; LANGUAGE.md states the consequence.
+- **At e45a2f7, the C half of version 2 waits for its parcels** (CV2CA and CV2CW, in the next entry):
+  - cft-segrun writing version 2;
+  - cft-audit reading both versions, with Ed25519 in C;
+  - the device lines at ABI 0.18;
+  - the module rebuilt.
+  Until then cft-segrun writes version 1, and cft-audit refuses a version-2 certificate by name: `version` at line 1, "this reader speaks version 1 only" (measured by the lead on markstep-fp64 at 8c44d37).
+- **VCV2B's sentence notes:** CV2B's "five controls remade" were six; its segrun_check count of 645 was not reproduced (716, neither failing); the key-file check also refuses execute bits.
+
+**A restatement of the entry above, before its push** (verifier-VI4's findings; 2026-10-05).
+- **Its one wrong answer.** The entry says C4's merge restated L4's interim sentence. It did so only in part: text that C4 left stale still said cftc refuses a run-time division or root `runtime-routine`, and that the tangent stage's leg L is golden-only. VI4 found it in three places:
+  - ROADMAP's head for L4;
+  - VERIFICATION's tangent row, legs I and L;
+  - run.sh's comment on the tangent stage.
+
+  This note's commit restates all three. It also restates two more of the same kind, which the lead found while fixing them:
+  - tangent_check.py's comment above leg L;
+  - LANGUAGE.md's rounding-order bullet, which said the rule table alone holds the quotient's and the root's rules. Since C4, Kepler's committed variational graphs hold them too. The quotient's rule rounded otherwise (its numerator a product and then a sum) and the root's halved first each move both of Kepler's graphs and no other (measured 2026-10-05).
+
+  No figure moves.
+- **Its other notes:**
+  - "Thirty controls ... covering 32 of version 2's 34 new names": the thirty controls cover 30 names. The corpus reaches 32 with the two `writers both` definition cases.
+  - VRP8's three replacement faults were computed with the golden model over the fpfma benches' vectors. They were not measured in a bench run.
+  - lang-routines' 141 s at e45a2f7 is lang_check's own timer; the runner printed 142 s. The 140 s at 5e033f6 is the runner's.
+  - The known limit "(measured by the lead on markstep-fp64 at 8c44d37)" was in no ledger when the entry was written. It is recorded, late, in the round's ledger (2026-10-03 05:19), and VI4 reproduced it at ba80c17: rc 2, `version` at line 1.
+  - C4's "the software targets, whose instruction memory is unbounded": sw's limit is 0xFFFFFFFF instructions, which is unbounded in practice.
