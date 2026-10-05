@@ -261,6 +261,20 @@ static void lane_windows_slipped(const cft_lane_shape *S, size_t first,
     }
 }
 
+/* ...and the slip the per-lane flags block invites (revision 8, R23):
+ * every tile's block copied to the caller's lane 0, as though the tile's
+ * own lane 0 were the run's. Right whenever one tile runs the whole run -
+ * every single-tile image, and every run the planner hands one slice - so
+ * a check that never cut a run across tiles would pass it. A second
+ * NEGATIVE CONTROL for lane_cut_misreads. */
+static void lane_windows_lf_at_zero(const cft_lane_shape *S, size_t first,
+                                    size_t lanes, cft_lane_win *w)
+{
+    cft_lane_windows(S, first, lanes, w);
+    if (S->has_lf)
+        w[CFT_LANE_LF].off = 0;
+}
+
 /* Whether o[0..nt) names every tile of [0, nt) exactly once. */
 static int tile_order_is_perm(const size_t *o, size_t nt)
 {
@@ -438,6 +452,10 @@ static int lane_cut_misreads(lane_windows_fn fn, int trials, int report,
         for (r = 0; r < 4; r++)
             if ((lane_rng(&s) % 3) == 0 && (r < 3 || S.has_sin))
                 S.src_elems[r] = 1 + (size_t)(lane_rng(&s) % 500);
+        /* R23's per-lane flags block (revision 8: the XRT backend copies
+         * each tile's block to its slice's first lane), in half the
+         * shapes: a byte a lane at every format */
+        S.has_lf = (int)(lane_rng(&s) & 1);
 
         k = seeded ? cft_plan_lane_cuts(S.n, ntiles, lane_rng(&s), sl)
                    : cft_plan_slices(S.n, S.esz, ntiles, sl);
@@ -461,6 +479,7 @@ static int lane_cut_misreads(lane_windows_fn fn, int trials, int report,
         full[CFT_LANE_IC] = S.src_elems[2] ? S.n * 4 : 0;
         full[CFT_LANE_ISI] = (S.has_sin && S.src_elems[3])
                                  ? S.n * S.n_sin * 4 : 0;
+        full[CFT_LANE_LF] = S.has_lf ? S.n : 0;
         for (r = 0; r < 4; r++)
             if (S.src_elems[r] && (r < 3 || S.has_sin))
                 full[r == 3 ? CFT_LANE_SIN : r] = S.src_elems[r] * S.esz;
@@ -1627,6 +1646,8 @@ int main(void)
                                               &unaligned, &empty);
         const int caught = lane_cut_misreads(lane_windows_slipped, 4000, 0,
                                              &u2, &e2);
+        const int caught_lf = lane_cut_misreads(lane_windows_lf_at_zero,
+                                                4000, 0, &u2, &e2);
         cft_slice x[8], y[8], z[8];
         const size_t kx = cft_plan_lane_cuts(1000, 4, 77, x);
         const size_t ky = cft_plan_lane_cuts(1000, 4, 77, y);
@@ -1643,6 +1664,10 @@ int main(void)
         CHECK(caught > 0,
               "NEGATIVE CONTROL: a lane cut that sizes the scratch-in block "
               "by the scratch-out width passed every check");
+        CHECK(caught_lf > 0,
+              "NEGATIVE CONTROL: a lane cut that copies every tile's "
+              "per-lane flags block to the caller's lane 0 passed every "
+              "check");
         /* cft_tile_order, the scheduler's placement: seed 0 is the
          * identity, any seed is a permutation of the tiles, one (seed,
          * wave) is one order, and the fuzz does move tasks - over many
@@ -1737,12 +1762,15 @@ int main(void)
                            (unsigned long)moved);
             }
         }
-        if (!misread && caught > 0 && unaligned > 0 && empty > 0)
+        if (!misread && caught > 0 && caught_lf > 0 && unaligned > 0 &&
+            empty > 0)
             printf("  lane cut: 4,000 random runs over both planners, every "
-                   "block covered exactly once and every indexed source "
-                   "whole; %d cuts off a beat boundary, %d runs leaving a "
-                   "tile empty; a cut that slips scratch-in's width is caught "
-                   "in %d\n", unaligned, empty, caught);
+                   "block covered exactly once - the per-lane flags block "
+                   "among them - and every indexed source whole; %d cuts off "
+                   "a beat boundary, %d runs leaving a tile empty; a cut that "
+                   "slips scratch-in's width is caught in %d, one that copies "
+                   "every tile's flags to lane 0 in %d\n", unaligned, empty,
+                   caught, caught_lf);
     }
 
     /* --- a lane mask cut for one tile (ABI 0.14, R17) -------------
