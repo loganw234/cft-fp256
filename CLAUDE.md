@@ -80,9 +80,10 @@ Full procedure in **`docs/BITSTREAM-BUILDS.md`**. The short version:
 
 ## Gates, and which ones mean something
 
-**`make sim` now gates (fixed 2026-09-12).** It runs its twenty-six
+**`make sim` now gates (fixed 2026-09-12).** It runs its twenty-seven
 benches (`seq_coreu50`, the sequencer at the U50's capacities, joined
-them on 2026-09-29) and then reads the `results.xml` each one wrote, via
+them on 2026-09-29, and `ifetch`, revision 8's instruction fetch, on
+2026-10-05) and then reads the `results.xml` each one wrote, via
 `tb/check_results.py`. A recorded failure, a missing results file or an
 unparseable one all fail the target and name the bench and the message.
 Before this, cocotb's inability to set an exit code — stated in its own
@@ -139,7 +140,9 @@ vendored files, all identical to `host/` (28 on 2026-09-12; round 2
 added `mask_bits.h` and its neighbour; 32 from 2026-09-25, when
 `tile_select.h` and `lane_cut.h` joined `host/src`; 33 from 2026-09-28,
 `build_id.c`, whose GENERATED header lives in `host/gen/` because
-`sync.py` would vendor it from `host/src` or `host/include`). A NEW `.c` or `.h` in
+`sync.py` would vendor it from `host/src` or `host/include`; 35 from
+2026-10-03, when revision 8's seam added `caps_decode.h` and ABI 0.18
+`xclbin_clock.h`). A NEW `.c` or `.h` in
 `host/src` fails it too, as unvendored, until `sync.py` is re-run (it
 vendors those two extensions only). Any edit to a vendored host
 source fails it until `sync.py` is re-run - which is the gate doing its

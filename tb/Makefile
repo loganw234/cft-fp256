@@ -73,7 +73,8 @@ SIM_BENCHES = fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg \
               normshare seedop reduceacc reduce reducenowide krnl krnlf128 \
               krnlf64f128 \
               quarter faults redprog \
-              seq_core seq_coreu50 krnlseq seqbanks mulpass mulcycle mulcycle2
+              seq_core seq_coreu50 krnlseq seqbanks mulpass mulcycle mulcycle2 \
+              ifetch
 
 # A bench writes sim_build/<target name>/results.xml. One does not: the
 # multi-cycle multiplier bench is parameterised by the pass budget, so
