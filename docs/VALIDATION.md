@@ -17696,3 +17696,259 @@ What sampled points cannot see is stated in LANGUAGE.md.
   - lang-routines' 141 s at e45a2f7 is lang_check's own timer; the runner printed 142 s. The 140 s at 5e033f6 is the runner's.
   - The known limit "(measured by the lead on markstep-fp64 at 8c44d37)" was in no ledger when the entry was written. It is recorded, late, in the round's ledger (2026-10-03 05:19), and VI4 reproduced it at ba80c17: rc 2, `version` at line 1.
   - C4's "the software targets, whose instruction memory is unbounded": sw's limit is 0xFFFFFFFF instructions, which is unbounded in practice.
+
+## 2026-10-05 - step 6's third wave: revision 8's seam and the host's map (RA), R21 in the lanes (RB) with probe L (the quad goes without R21), the instruction fetch alone (RD1), certificate version 2's C half at ABI 0.18 (CV2CA, CV2CW); the card legs on revision 7's quad
+
+**Why.**
+- Revision 8's RTL plan, approved on 2026-10-02 (the entry above), starts with round 1:
+  - A, the seam and the host's map;
+  - B, R21 in the lanes, design (b), with probe L at its end;
+  - D1, rtl/cft_ifetch.sv alone.
+- Certificate version 2's golden half merged in the entry above (CV2B). Its C half is in two parcels:
+  - cft-audit reading version 2, with Ed25519 in C (CV2CA);
+  - cft-segrun writing version 2 by default, with a device's lines at ABI 0.18 (CV2CW).
+- The round paused at Logan's word on 2026-10-03 at 05:20 ("Once they wrap up go ahead and take a pause where we are until I resume"). It resumed on 2026-10-05. From then on the verifiers are Sonnet models. Logan, verbatim: "switch to Sonnet models for verifiers, testing if they perform well in that role, as most "information" is passed to them correctly or at least complete enough to manage, the task of trying to verify it is simpler and not as demanding as writing the initial."
+
+**RA: revision 8's seam and the host's map** (merged as 9a449f1).
+- **The seam, one commit first (fdf67d8):**
+  - **cft_csr.sv:** LFLAGS_PTR at 0xB0 and 0xB4; MODE[24] refused unless R23 is built, as an unpublished bit is; VERSION 0xB00; STATUS at seven bits, [6] the mark; CAPS2 at 32 bits.
+  - **cft_krnl.sv:** FEAT_AUGADD, FEAT_SCRATCH_STEP, FEAT_LANE_FLAGS and FEAT_FLAG_CONTROL are localparams at 0, CAPS2[11] to [14]. CAPS2[20:16] is zero. The sequencer's err[5] reaches STATUS[6].
+  - **The lanes:** a two-bit `aug_mode` beside the attribute in cft_lanes and cft_fpfma_pipe, tied to zero wherever it enters. cft_seq.sv's new ports are inert.
+  - **hw/kernel.xml:** argument 17, `lflags`, on m_axi_d at 0xB0.
+- **The host's map (5e00ef1):**
+  - libcft accepts VERSION 0xB00 at open;
+  - CAPS2[14:11] map onto seq_features bits 15 to 18, behind 0xB00 only (host/src/caps_decode.h);
+  - CAPS2[20:16] maps onto max_insns, a five-bit log2, zero meaning CAPS[23:20];
+  - argument 17 is bound on every program launch at 0xB00, as a one-beat stand-in. The lead chose that, since XRT will not submit a run with an argument unbound (0x900's lesson). MODE[24] stays clear, and the real block on XRT is round 2's.
+- **What a seam tile reads, on the U50:** VERSION 0xB00, CAPS 0x19faffff, CAPS2 0x000007fb, seq_features 0x7f1f, max_insns 32,768. Every new bit is zero, so it computes as revision 7.
+- **An older libcft refuses a 0xB00 tile at open by name**, read from 5e033f6's backend_xrt.cpp: CFT_ERR_UNSUPPORTED, "hardware contract 0x00000b00 is not one this library knows". That is the plan's correction to S8's compatibility table.
+- **MEASURED by RA** (cft-sim, Verilator 5.020, `--cpus 4`, 1 to 65% load):
+  - quarter 1/1, krnl 2/2, krnlseq 3/3, reduce 11/11, faults 5/5;
+  - seq_core 63/63 (289 s) and seq_coreu50 63/63 (343 s);
+  - api-test; device-test on sw and on loopback, 10,088 checks each;
+  - the docs check; sync 34.
+  - Its plants are red: MODE[24] accepted without the feature (krnl_end_to_end, krnl_sequencer), and argument 17 at 0xB8 (kernel_xml_is_the_csr_map).
+- **Verifier-VRA, one check: no (a), no (b).**
+  - **The seam proven inert:** yosys equiv_simple and equiv_induct -seq 5 over cft_csr, with VERSION reverted and the 0xB0 decode removed: 2,298 of 2,298 cells. The control leaves exactly rdata[8] (0xA00 against 0xB00) unproven.
+  - seq_core 63/63 at both trees, with identical simulated time (6,077,448 ns).
+  - What the tile reads, recomputed from the RTL's concatenations:
+    - the U50: 0x19faffff, 0x7fb, 0x7f1f and 32,768;
+    - open-core at fp32 and fp64: 0x19e6fff3, 0x7f8, 0x7f1f and 16,384.
+  - The decode: older tiles differ in 0 of 7,000,000 words; 0xB00 only in the two differences allowed.
+  - Its plants are red: RA's two, and three of its own (STATUS[6] from a deposit overflow; CAPS2[20:16] read as a count; the RTL moved alone).
+
+**RB: R21 in the lanes, design (b)** (merged as 24a4d37).
+- **What it is:** augadd and augerr in one pass at latency 16. They re-anchor by their own exponents, the compare at S1 and the select at S6. The decision is at S10; e takes its own field; ties go toward zero (IEEE 754's augmentedAddition).
+- **Five named departures:**
+  - the low half's stickies at S10, not S9;
+  - the re-anchor's compare at S1, so S6 only selects;
+  - the smaller operand's encoding taken at S1;
+  - augadd's tininess at the rounding stage;
+  - augerr's e = 0 writes the sum.
+- **MEASURED by RB** (cft-sim, Verilator, `--cpus 4 --memory 12g`):
+  - a bit-level Python model against cft_golden.augmented on 74,168 pairs, no mismatch;
+  - the fpfma benches bit-exact: fp32 116,736, fp64 60,480, fp128 39,580 and fp256 30,780 operations, augadd and augerr among them, with the outside attribute codes 5 to 7 held to RNE; MC=10 the same;
+  - EN_AUGADD=0 bit-exact, fp32 44,032 and fp256 14,332;
+  - ten plants red in their named families, and a control (the re-anchor removed) red.
+- **At the merge:** u_lanes takes `.EN_AUGADD(FEAT_AUGADD)`, which is 0, so no kernel lane carries R21's logic until round 2 publishes CAPS2[11]. The arrays the benches build alone keep EN_AUGADD's default of 1.
+- **Verifier-VRB, one check: no (a), no (b).**
+  - No mismatch in 346,358 R21 operations and 421,569 ordinary ones, on its own vectors at four formats, at MUL_PASSES=10, and at fp32 under Icarus.
+  - The ordinary-only dumps are byte-identical at 5e033f6, at fcc7da8, and at fcc7da8 with EN_AUGADD=0.
+  - Yosys equivalence at fp32: 5,068 points proven.
+  - RB's ten plants are red on its vectors, and five of its own.
+
+**Probe L** (amd-arc-box, 2026-10-03 00:59 to 01:32; Vivado 2022.2, xcu50, 135 MHz, out of context; fcc7da8 against 5e033f6; logs in the round's box/probe-l-fcc7da8/).
+- **MEASURED, one pipe:** R21 costs +407 LUTs at fp32, +674 at fp64, +1,077 at fp128 and +2,489 at fp256.
+- **COMPUTED:** a tile is 8 x 407 + 4 x 674 + 2 x 1,077 + 2,489 = **+10,595 LUTs** (+565 registers), so +42,380 on a quad.
+- **Routed fp256:** S10 +2.770 ns without R21 and +1.815 ns with it; S6 +2.858 and +1.523; the worst +1.118 and +1.089. Every slack is positive at 7.407 ns.
+- **The decisions:**
+  - Question 9 asked for about 2,000 LUTs a tile or fewer, so **the quad is built without R21** (EN_AUGADD = 0, CAPS2[11] clear). R21 goes on the single and the deep build, and M1 writes TwoSum on every target until every image carries R21.
+  - Design (b) keeps S10's timing, so **design (a) is not built.**
+- **The control:** EN_AUGADD=0 against the base is equal in LUTs and registers at fp32, fp64 and fp128. At fp256 it is one LUT more (30,251 against 30,250). VRB proved fp32's logic equivalent, so the one LUT is a mapping difference: the claim "builds the pipe revision 7 shipped" holds in function, not LUT for LUT.
+
+**RD1: the instruction fetch, alone** (merged as ff0df23).
+- **The unit, rtl/cft_ifetch.sv:**
+  - a store of STORE_D words (4,096 at the U50);
+  - a 512-word cft_fifo stream fed by its own read engine: bursts of 8, at most 4 live and 8 outstanding, never across 4 KB or past the program's end;
+  - a realigner at 4-byte granules;
+  - redirects, capture, retarget and quiesce;
+  - sticky fault_rd and fault_len.
+
+  A build with STREAM_D equal to STORE_D builds no stream. Nothing in rtl/ instantiates it yet: its hooks are round 2's.
+- **The proof, formal/ifetch.sby:** eight tasks, at the default sizes and at a "wide" set where the FIFO holds four bursts. Six are unbounded proofs (k-induction with proven helpers), and two are cover tasks (bounded searches).
+  - The proof found a real defect, a 9-bit beat counter that wrapped. It now saturates.
+- **The bench, tb/test_ifetch.py:** 13 cases at read latencies 0, 125 and 256. A redirect costs about the latency plus 5 cycles; a skip at 256 stalls about 13%.
+- **S8's nine plants** are red in the bench and on named claims.
+- **Eight departures from the study,** named in its section 13 with the interface round 2 wires.
+- **Verifier-VRD1, two checks.**
+  - **First, four (b)s:**
+    1. "Every control shape exists at these sizes" was false. Three shapes are unreachable at the formal sizes, where the FIFO is exactly one burst, and happen at the U50's. A plant (v13, LIVE_MAX's gate removed) handed a wrong word in the bench and still proved.
+    2. The two-cycle latency was claimed proven and was not asserted.
+    3. Plant 1 was red in 8 of 12 cases, not 9.
+    4. Plant 3 was red at latency 0, not 125.
+  - **Fixed at af1b0b2:**
+    - the wide size set, with wide_prove, wide_data_prove and wide_cover, which reaches the three shapes at steps 5 to 7;
+    - the default sizes now assert the three shapes unreachable;
+    - a_lat asserted, with a cover at exactly two cycles;
+    - the figures restated.
+  - **Second check: no (a), no (b).** The eight tasks pass (379 s). v13's overrun at step 43 is real, reproduced in VRD1's own wider unrestricted world. A one-cycle-latency plant is red.
+
+**CV2CA: cft-audit reads version 2, Ed25519 in C** (merged as bb6aca5).
+- **What it built:**
+  - host/tools/audit.c reads both versions;
+  - host/tools/sha512.h and ed25519.h, header-only: verification per RFC 8032 section 5.1, with the cofactored equation. `ed25519_key_check` refuses a key that is no point or is of small order, returning ED25519_KEY_OK 0, NO_POINT 1 and SMALL_ORDER 2;
+  - cft.h's CFT_PROFILE_MAJOR 2, MINOR 0, CFT_LANGUAGE_MAJOR 1 and MINOR 0, held equal to profile.py and lang/version.py.
+- **MEASURED by CV2CA:**
+  - audit_check, all seven sections, 17,865 checks, 0 failed (460 s at 43% load);
+  - 243 certificate tests; the corpus check with cft-segrun, 288/0;
+  - the crypto probe, 3,129 operations equal to the golden model;
+  - version 1 unchanged over 6,265 parse calls and 244 of 283 audits;
+  - gcc 11.4 on Linux, clean.
+- **Verifier-VCV2CA, two checks.**
+  - **First: no (a), three text (b)s.**
+    1. The NOTE and VERIFICATION said the 17 undecided cases reach `source-missing` or `state-missing` first. Truly 11 do (8 + 3).
+    2. Sentences said cft-segrun already used the shared Ed25519, true only after the joint merge below. The lead's decision: true at the merge.
+    3. "every call" was 139 of 147.
+
+    It also measured:
+    - 3,756 mutations and 120 audits identical across the version-1 tools;
+    - 7,394 malformed inputs and 5,602 planted audit faults agreeing with the golden model;
+    - 18,361 crypto operations equal to the golden model and hashlib, at -O2 and under UBSan and ASan.
+  - **Second:** (b)1 and (b)3 closed at 00cdf7d. CV2CA was clear.
+
+**CV2CW: cft-segrun writes version 2, at ABI 0.18** (merged as 4449c49, with the fix 86e72b8 merged as c039998).
+- **What it built:**
+  - cft-segrun writes version 2 by default. `--format-version 1` stays byte for byte, and every gate that writes version 1 asks for it;
+  - `--lane-flags`, `--replay-image`, `--source`/`--manifest`, the header's statements as options with the privacy defaults, the measured times, the host and the environment;
+  - ABI 0.18: `cft_image_id` grows by the platform, the XRT version, the kernel clock from the image's BUILD_METADATA, and the card's serial (withheld by default);
+  - segrun_check's section 14.
+- **Verifier-VCV2CW, three checks.**
+  - **First, two (b)s:**
+    1. On Windows, environment values and file names went through the ANSI code page: Ł was written L, é refused.
+    2. A claim about the images it read overstated its scope.
+  - **Fixed at 45a8024:** wide argv as UTF-8, the wide file functions, and GetEnvironmentVariableW.
+  - **Second, one residual (b):** the CRT's best fit turned seven characters into a space or a quote. Option 1 at 7d4d604: the two splits are compared only where the conversion is exact.
+  - **Third: no (a), no (b).** Every best-fit character in source, out and states paths matches the golden writer.
+- **The card leg's defect, found on the card** (below): section 14 set the writer's environment list to "" instead of removing it, and XRT reads XCL_EMULATION_MODE="" as an emulation mode. Fixed at 86e72b8 (merged as c039998), with a new check, hold_child_env, red against the old harness.
+
+**The lead's merges and commits on step6-w3** (from e45a2f7):
+- **9a449f1, RA.**
+- **24a4d37, RB:**
+  - cft_seq's comment taken from RA; the lanes', the pipe's and the four fpfma wrappers' from RB;
+  - u_lanes given `.EN_AUGADD(FEAT_AUGADD)`.
+- **bb6aca5, CV2CA:** HOSTAPI's two new sections both kept.
+- **4449c49, CV2CW, with the joint swap:**
+  - segrun.c's fallback macros removed, since cft.h has them;
+  - its own decoding-only Ed25519 check (about 210 lines) replaced by ed25519.h's `ed25519_key_check`, so the tree has one Ed25519 in C;
+  - the make rule names ed25519.h and sha512.h;
+  - CERTIFICATES' C-half section renamed, with the reference to it;
+  - the Arduino vendoring at 35 files.
+- **7bfc65f, the module rebuilt at ABI 0.18,** in the pinned emsdk 6.0.9 image (`--cpus 4`):
+  - two clean builds byte for byte;
+  - all 15 chains unchanged;
+  - verify.mjs OK after `make vectors`: abi 18, 141 exports, 1,068,915 cases over 168 sets;
+  - node test.mjs 137/0.
+
+  The lead's slip: the first `make vectors` ran an MSYS2 Python without mpmath. The rebuild is recorded in DEMOS.md and the two bindings' READMEs (ee0adb9).
+- **c039998:** CV2CW's 86e72b8.
+- **ff0df23:** RD1.
+  - README conflicted on counts. A first resolution would have taken one side whole and dropped RD1's other README rows; it was caught, and the merge recreated and resolved hunk by hunk.
+  - tb/test_seq_core.py merged RA's Bench edits and RD1's SeqRam, which do not overlap. Under Verilator three seq_core cases passed together with them, and ifetch 13 of 13.
+- **ab3a724:** ifetch joins SIM_BENCHES (27), with every count that moves; CLAUDE.md's vendored count, 35.
+- **4b69c01: CV2CW's environment finding, decided by the lead.**
+  - "a variable set to the empty string counts as unset (libcft's rule)" is restated. The writers still record a variable set empty as unset, so no certificate's bits change.
+  - The text no longer calls that libcft's rule, and names the four variables libcft reads otherwise:
+    - CFT_XRT_TRACE set empty turns tracing on;
+    - CFT_TIMEOUT_MS set empty reads as 0, the 20-minute cap;
+    - CFT_XRT_TILES set empty is refused by name at open;
+    - XCL_EMULATION_MODE set empty is a mode to XRT, so a card does not open.
+- **2237a49, main merged (b1cd9a1):** VERIFICATION's four adjacent rows conflicted though each was changed on one side only, and each was taken from its side.
+- **6fe4a4a:** verifier-VI4b's sentence notes on the pushed note, restated (below).
+- **55097ff, the fix gate6 asked for** (below): the corpus check writes the published test key at mode 0600, as cft_sign.py writes a key.
+
+**The card: revision 7's quad, q135b** (amd-arc-box; xclbin e826b613...). Logs in the round's box/w3-card-4449c49/ and box/w3-card2-c039998/.
+- **The XRT build** at 4449c49 and at c039998 has exactly the two known warnings (cft_resident.cpp:264 and :265), and every binary links xrt_coreutil.
+- **At 4449c49:**
+  - api-test passes;
+  - device-test `-q -n 8` 2,642 checks, `-n 4096` 10,282 and `-r` 2,421, 0 failed in each;
+  - device-test `-i`: contract 0x00000a00, seq_features 0x7f1f, and the device lines at ABI 0.18: platform xilinx_u50_gen3x16_xdma_base_5, XRT 2.19.194, **kernel clock 135,000,000 Hz** (read from BUILD_METADATA, as the reader expects of q135b), serial "none reported";
+  - **the acceptance set on the card: 20 of 20, 174 checks, 368 s.**
+- **hw/card-segrun.sh at 4449c49: 6 checks, 1 failed.** Its segrun_check legs gave 642 checks with 3 failed, all section 14's card leg (rc 69, "cft_open: no such device ... creating shim library name"). That is CV2CW's defect above.
+- **At c039998: card-segrun PASS,** 6 checks, 0 failed (174 s). The certificates made on the card: 652 checks, 0 failed, 0 skipped (107 s). device-test `-q -n 8` 2,642/0.
+- **Revision 8's forms are refused by name on q135b,** as on every revision-7 tile. No revision-8 image exists yet.
+
+**Measured on the merged tree, on the desktop:**
+- **At 4449c49:**
+  - both tools with 0 warnings;
+  - segruntest 1,055/0, 1 skip (93 s);
+  - corpustest 311/0;
+  - audit_check 17,808/0, with 3 crypto-probe skips without `--lib-src` (356 s);
+  - the docs check; sync 35.
+- **At c039998:** segruntest 1,057/0, 1 skip (130 s, load 0.00).
+- **At 4b69c01:** cft-segrun rebuilt with 0 warnings; test_cert2 102 passed.
+
+**The long RTL runs** (amd-arc-box, the runner's `--only sim,simmc,lint,formal` at 4b69c01, SIM_JOBS=6 and MC=10, niced, from load 0.08). The trees are equal at 6fe4a4a and 55097ff: rtl 73c96e4c, tb 67c2b438, formal 5e4e967d.
+- **sim, Icarus: PASS,** 27 benches and 224 cases, nothing skipped, in 6,298 s (1 h 45 min) at six jobs. From 02:17 gate6 ran beside it. The record before was 5,968 s at 3197dc6, for 26 benches, beside simmc and a card session.
+- **simmc: PASS,** 17 benches and 103 cases at MC=10, in 4,893 s, among them seq_coremc10's 63. gate7 ran beside it from 04:51.
+- **lint: PASS,** 84 s.
+- **formal: PASS, 39 of 39,** the 38 proofs and the negative control refuted, in 601 s. The fetch's eight are among them (deliver_prove 168 s, wide_cover 102 s).
+- **The verdict:** PASS, nothing skipped, 197 minutes in all (02:09 to 05:27). Logs in the round's box/w3rtl-4b69c01/.
+
+**The gate budget at 6fe4a4a: FAIL, `programs` alone** (amd-arc-box, niced, from load 6.04, beside the RTL runs' sim at six jobs).
+- **The failure:** the corpus check gave 311 checks with 1 failed, signed-fp64. cft_sign.py refused the published test key, "its group or others" able to read it.
+- **The cause:** CV2CW's C remake of the corpus (0fbdf28) writes the key under the umask, 0644 or 0664. On POSIX cft_sign.py refuses such a key, rightly. Windows has no such check, so every desktop run passed: CV2CW's, its verifier's and the lead's at 4449c49 and c039998. The check had not run on Linux before this gate.
+- **The fix, 55097ff:** the key is written at 0600, by os.open, as cft_sign.py writes one.
+  - MEASURED on the desktop: corpustest 311/0.
+  - MEASURED in WSL cft2204 (umask 0022): 311/0 at 55097ff, and at its parent 311 checks with 1 failed, gate6's own refusal.
+- **A slip of the lead's on the way:** the first WSL try cloned the step6-w3 worktree, whose .git file holds a Windows path that Linux git cannot follow. The clone failed, and the unguarded script ran its build in WSL's working directory, which was the main checkout. It wrote 19 untracked build files there (a Linux cft-segrun, libcft.a, 16 objects, the build-id header), and checked corpus.py out to the parent and back. Nothing tracked changed. The 19 files were removed, and the rerun cloned the main repository with every step guarded.
+- Every other stage passed (153 minutes). The logs are in the round's box/gate6-6fe4a4a/.
+
+**The gate budget at 55097ff: PASS** (amd-arc-box, niced, run 20261005-045137-55097ff, 140 minutes, from a load of 2.55; the RTL runs' simmc, lint and formal ran beside it until 05:27).
+- 36 stages executed, 0 failed, 8 skipped by name (buildargs, the six language legs, demos), and the same four inner skips (golden 3, remote 1).
+- golden: 3,330 passed and 3 skipped (720 s), of 3,333 collected.
+- programs: the assemblers 346 over 37 images; segrun_check 1,058 checks with nothing skipped (the one check the desktop skips runs on Linux); the corpus check 311 (148 s).
+- lang (core, quick): 220 (141 s). lang-routines: 37 (139 s). tangent: 141 (256 s).
+- acceptance: 41 of 41, 249 checks (488 s). audit_check: 17,865 checks (212 s), up from 6,802 with CV2CA's version-2 sections.
+- formal: 39 of 39 (606 s). lint: 82 s.
+- transcend: 607,217 and 580,977 comparisons, C == model. mpfr: 739,234 cases, 0 value and 0 flag mismatches. remote: 184,736 cases.
+
+  VERIFICATION.md's golden, programs, lang, lang-routines, tangent, acceptance, audit, sim, simmc and formal rows carry these figures and the RTL runs'. The stage logs are in the round's box/gate7-55097ff/.
+
+**Verifier-VI4b's notes on the note above** (Sonnet; it found no (a) and no (b) in b1cd9a1, which was then pushed):
+- Leg (G) of the tangent row certifies six compiled variational references since C4, not four. So does leg (H)'s check message. Restated in 6fe4a4a.
+- The lang-routines row said "141 s through the runner" at e45a2f7 against the note's 142 s. It now gives the runner's 142 s there, and lang_check's own 141 s.
+- Leg (L)'s 27 systems each run at their own format, the four formats all among them. Restated.
+- The committed bytes hold the quotient's rule through its both-tangents arm, the arm the note's plant names.
+- The note quotes "Thirty" with a capital T, where the entry has "thirty".
+
+**Known limits, recorded rather than fixed** (Logan's rule).
+- **R21 is not on the quad,** by question 9 and probe L's +10,595 LUTs a tile. M1 writes TwoSum on every target until every image carries R21.
+- **EN_AUGADD=0 builds revision 7's pipe in function, not LUT for LUT at fp256** (one LUT, probe L's control).
+- **The seam's bus leg** holds that a distinct register sits at each argument's offset, not that the register at 0xB0 drives cfg_lflags. Nothing reads cfg_lflags at the seam. R23's bench is where that becomes checkable (round 2, parcel C).
+- **VRA's sentence notes:**
+  - VERIFICATION and test_krnl's SEAM_WORDS comment credit the plan with the seam's and the open-core words. The plan computed revision 8's U50 words, and the others follow from them and the parameters. The words are right;
+  - SEQUENCER.md's opening status line still describes the model as "VERSION 0xA00, CAPS[7:4] and CAPS2[10:0]", in revision 6's framing. The plan's record step restates it at the revision's end.
+- **VRB's sentence notes:**
+  - two unnamed departures: augerr's marker at S8, and r's overflow at S6 and S10;
+  - "every R21 term is a constant zero" with EN_AUGADD=0: the registers remain until synthesis removes them;
+  - "S13 rounds r" should be S14;
+  - VERIFICATION's "vectors the golden model generates": 11,200 of the 247,576 are random families;
+  - `lane_aug_mode` was named before RA declared it;
+  - the plan's plant "the sideband left live in the engine", and test_krnl's case for the codes 5 to 7, are unbuilt. Both are round 2's, kernel side.
+- **VRD1's sentence notes:**
+  - VERIFICATION.md places "at two sizes" after the two bounds, so it can read as both bounds run at both sizes. formal/README.md and the study say the default sizes only;
+  - the study's section 13 still opens "Every task is unbounded" over a table with two cover tasks;
+  - wide_cover holds only the three shapes and the full FIFO;
+  - two round-2 notes, carried into parcel C's brief: a redirect's path is combinational from cft_seq's pc through the 25-bit compare into the FIFO's clear (for probe S), and the main read engine must drain to RLAST before the fetch owns the R channel.
+- **VCV2CA's notes:**
+  - the golden model sorts the blocks it is handed by string (0, 1, 10, 11, 2, ...), and cft-audit copies it. The contract is silent on the order;
+  - "before the check the case is for" should read "instead of";
+  - "takes no source" for v2-initial-state (the regeneration).
+- **VCV2CW's notes:**
+  - libcft's own getenv is narrow on Windows (four variables);
+  - the UCRT's doubled-quote parsing is not determined;
+  - a DBCS trail byte of 0x5C;
+  - the card leg accepts any clock but `none`, so the lead checked the value: 135,000,000 Hz on q135b.
+- **A variable set empty is recorded as unset,** though libcft does not read four of the writer's list that way (4b69c01 names them). With two of them a run is recorded as though they were unset. With the other two a card run writes no certificate. None changes a run's bits.
+- **Ed25519 in C,** like the golden model's, verifies public data and checks keys. It is not constant-time, which public data does not need.
+- **No revision-8 image exists.** Every revision-8 form is refused by name on revision 7's quad, and probe E's hw_emu single comes after round 2.
