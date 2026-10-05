@@ -3413,8 +3413,9 @@ static void measure_host(void)
         cw_text_token((const unsigned char *)raw, strlen(raw), HOST_ARCH))
         snprintf(HOST_ARCH, sizeof HOST_ARCH, "unknown");
     /* the writer's list's variables that are set: one set to the empty
-     * string counts as unset (libcft's rule, since cmd and PowerShell
-     * remove a variable set empty) */
+     * string is recorded as unset, since cmd and PowerShell remove a
+     * variable set empty (libcft reads most of the list the same way,
+     * not all of it: CERTIFICATES.md, "Version 2's encodings") */
     for (i = 0; i < N_ENV_NAMES; i++) {
         int bad;
         char *v = env_text(ENV_NAMES[i], &bad);

@@ -1555,9 +1555,10 @@ def host_arch():
 
 
 def environment(environ=None):
-    """The writer's list's variables that are set, by name: a variable set
-    to the empty string counts as unset (libcft's rule, since cmd and
-    PowerShell remove a variable set empty)."""
+    """The writer's list's variables that are set, by name. A variable set
+    to the empty string is recorded as unset, since cmd and PowerShell
+    remove a variable set empty. libcft reads most of the list the same
+    way, but not all of it (CERTIFICATES.md, "Version 2's encodings")."""
     environ = os.environ if environ is None else environ
     return tuple((n, environ[n]) for n in ENVIRONMENT_NAMES
                  if environ.get(n))

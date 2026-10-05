@@ -3548,8 +3548,23 @@ spelling:
   leading zero. So `1.0`, `01` and `0` are refused.
 - **A key** is 64 lowercase hex digits: an Ed25519 public key.
 - **A variable's name** is an uppercase letter, then uppercase letters,
-  digits and `_`, at most 64 characters. Its value is a text, and a
-  variable set to the empty string counts as unset (libcft's rule).
+  digits and `_`, at most 64 characters. Its value is a text. A
+  variable set to the empty string is recorded as unset: cmd and
+  PowerShell remove a variable set empty, so an empty value cannot be
+  kept on every host. libcft reads most of the writer's list the same
+  way, but not all of it:
+  - On the XRT backend, CFT_XRT_TRACE set empty turns tracing on, and
+    CFT_TIMEOUT_MS set empty reads as 0, which gives the 20-minute cap
+    where the default is 60 seconds. A run with either set empty is
+    recorded as though it were unset, though neither changes a run's
+    bits.
+  - CFT_XRT_TILES set empty is refused by name when the device opens.
+  - XRT takes XCL_EMULATION_MODE set empty as an emulation mode, and on
+    a card the device then fails to open (the card leg at step6-w3
+    4449c49, 2026-10-03).
+
+  So with either of those last two set empty, a card run writes no
+  certificate. The software backend reads neither.
 - **A param's name** is the language's: a letter or `_`, then letters,
   digits and `_`. Its literal is a token the audit holds to the language's
   canonical spelling ("Sources").

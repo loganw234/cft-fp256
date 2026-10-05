@@ -1504,7 +1504,12 @@ PROPOSED.
 - **An env value** is a text. A variable set to the empty string counts
   as unset. That is libcft's own rule: "The empty string is the variable
   unset", since cmd and PowerShell remove a variable set empty
-  (CERTIFICATES.md, "The audit tool").
+  (CERTIFICATES.md, "The audit tool"). (Restated 2026-10-05: that
+  sentence is the audit tool's rule for its own instrument, and
+  cft-segrun's for its own. libcft reads most of the writer's list the
+  same way, but not all of it; CERTIFICATES.md, "Version 2's
+  encodings", says which variables differ. The writers still record a
+  variable set empty as unset.)
 - **`withheld`** is rule 2's word.
 
 ### 9.2 The header's new lines
