@@ -55,7 +55,7 @@ PYTHON ?= python3
 
 .PHONY: sim simmc fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
         normprobe seedop reduceacc reduce krnl krnlf128 krnlf64f128 krnlseq quarter faults \
-        seq_core seq_coreu50 seq_coreu50mc seqprobe seqcycles seqtrace seqbp redprog krnlfused krnlplain cycles seqbanks \
+        seq_core seq_coreu50 seq_coreu50mc ifetch seqprobe seqcycles seqtrace seqbp redprog krnlfused krnlplain cycles seqbanks \
         mulpass mulcycle mulcycle2 fp32mc fp64mc fp128mc fp256mc reducemc \
         krnlmc krnlseqmc quartermc faultsmc seq_coremc seqbanksmc cyclesmc clean
 
@@ -680,6 +680,25 @@ seq_coreu50mc:
 		KRNL_PARAMS="-Pcft_seq.MUL_PASSES=$(MC) $(foreach g,$(SEQ_U50_GENERICS),-Pcft_seq.$(g))" \
 		COCOTB_RESULTS_FILE=sim_build/seq_coreu50mc$(MC)/results.xml \
 		&& $(PYTHON) check_results.py sim_build/seq_coreu50mc$(MC)/results.xml
+
+# The instruction fetch unit alone (revision 8, R8S; rtl/cft_ifetch.sv),
+# against SeqRam at read latencies 0, 125 and 256, driven by a model of
+# cft_seq's fetch states and held to a reference walk of each program
+# (tb/test_ifetch.py). A 64-word store - S8's seq_corestr store - so that
+# nearly every program streams, and a 4,096-word capacity, so that a
+# program of exactly the capacity is eight thousand cycles; the rest are
+# the U50's. Each word reaches the simulator as -Pcft_ifetch.<word> and
+# the line reaches the bench as CFT_GENERICS, as seq_coreu50's does.
+# Not in SIM_BENCHES yet: joining it moves the bench count that CLAUDE.md,
+# README.md, docs/VERIFICATION.md and verify/run.sh state, which is the
+# lead's to restate (parcel RD1 handed it back, 2026-10-03).
+IFETCH_GENERICS ?= STORE_D=64 STREAM_D=4096
+ifetch:
+	CFT_GENERICS="$(IFETCH_GENERICS)" timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_ifetch \
+		MODULE=test_ifetch SIM_BUILD=sim_build/ifetch \
+		KRNL_PARAMS="$(foreach g,$(IFETCH_GENERICS),-Pcft_ifetch.$(g))" \
+		COCOTB_RESULTS_FILE=sim_build/ifetch/results.xml \
+		&& $(PYTHON) check_results.py sim_build/ifetch/results.xml
 
 # Diagnostic probe for seq_core, not part of `make sim`. One trivial
 # program into a quiet cft_seq, printing the state register, both bus

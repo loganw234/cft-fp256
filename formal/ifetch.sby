@@ -1,0 +1,185 @@
+# Formal gate for rtl/cft_ifetch.sv, revision 8's instruction fetch
+# (docs/studies/R8S-streaming.md, sections 8 and 13; parcel RD1). The
+# harness, tb_ifetch_formal.sv, has the world, the watched-word argument,
+# every claim and every helper invariant, why a faulted beat needs no
+# data task of its own, and the honest-scope statement: two
+# configurations, tasks tagged `small` and `wide` below.
+#
+# small - a 16-instruction capacity, a 4-word store, an 8-word FIFO (one
+# burst), bursts of 2, two-bit granules:
+#
+#   sby -f ifetch.sby prove          unbounded, k-induction at depth 3,
+#                                    RLAST and RRESP free: never past
+#                                    n_insns, never after a fault; faults
+#                                    raised by bad beats and by nothing
+#                                    else; every AR aligned, short, inside
+#                                    a 4 KB page and the section, held
+#                                    until taken; outstanding bounded, idle
+#                                    truthful, silence after a quiesce, an
+#                                    init or a fault; the FIFO's caller
+#                                    contract; and the three shapes a
+#                                    one-burst FIFO cannot reach, unreached
+#   sby -f ifetch.sby data_prove     unbounded, k-induction at depth 3,
+#                                    against an honest memory of free
+#                                    timing: the word ok presents is the
+#                                    image's word at the address presented,
+#                                    and a stream word is handed over two or
+#                                    more cycles after its beat landed
+#                                    (prove's claims proven again beside it)
+#   sby -f ifetch.sby deliver_prove  unbounded, k-induction at depth 19, in a
+#                                    cooperative world (ARREADY always, a
+#                                    beat whenever one is owed) with an
+#                                    honest memory: a consumer waiting on one
+#                                    address below n_insns, doing nothing
+#                                    else, is answered within WAIT_MAX (18)
+#                                    cycles (the data claims beside it)
+#   sby -f ifetch.sby ends_prove     unbounded, k-induction at depth 15, the
+#                                    cooperative world with RRESP free and
+#                                    bursts at most a beat long: idle within
+#                                    IDLE_MAX (14) cycles of a quiesce, an
+#                                    init or a fault
+#   sby -f ifetch.sby cover          the shapes the proofs lean on are
+#                                    reachable
+#
+# wide - the FIFO at 32 words (four bursts) with LIVE_MAX at 2 and a
+# 64-instruction capacity, so that a whole burst launches into a busy
+# unit, more than a burst's beats are owed, and the LIVE_MAX term decides
+# (verifier-VRD1, 2026-10-03: none of the three can happen at `small`):
+#
+#   sby -f ifetch.sby wide_prove       prove's claims and helpers, unbounded
+#   sby -f ifetch.sby wide_data_prove  data_prove's, unbounded
+#   sby -f ifetch.sby wide_cover       the three shapes reached, and the FIFO
+#                                      full (bmc to depth 44)
+#
+# Task names end _prove or _cover, so .gitignore covers their work dirs.
+#
+# WHY k-INDUCTION, AND WHY IT IS NOT A BOUNDED CLAIM. abc pdr, the FIFO
+# proof's engine, proved most of these claims alone in seconds but not
+# three of the control claims nor the data claim, whose invariants relate
+# the unit's bookkeeping to the memory's and its words to the image's
+# (formal/README.md has the measurements). Each such invariant is
+# written in the harness as a helper assertion (h_*, d_*), attached to
+# the unit's internals by the probes below, and proven with the claims:
+# k-induction proves every assertion of a task together, assuming them
+# all at the steps before. Basecase and induction both passing is an
+# unbounded proof, as pdr's is; the depth is the induction's, not a
+# horizon. The helpers are claims about the RTL too, and each one is
+# checked, not assumed.
+#
+# The probes reach the unit's bookkeeping, the launch's terms, the
+# store's and the FIFO's memories (made registers by memory_map), the
+# FIFO's pointers, read register and bypass, and the realigner - attached
+# on the flattened design with `connect -nounset -set`, as mulexact.sby
+# attaches its own (formal/README.md). The FIFO's words are one probe,
+# attached as a comma list per configuration (`small:`, `wide:`). Every
+# task attaches every probe: a connect naming no wire stops the build
+# (yosys errors, sby rc 16), and a probe left undriven becomes a free
+# value in sby's model build, so a helper that read one would be refuted
+# rather than vacuously proven. rtl/cft_ifetch.sv and rtl/cft_fifo.sv are
+# read unmodified.
+#
+# Run from formal/ (run.sh does), so the relative paths below resolve.
+
+[tasks]
+prove           small
+data_prove      small
+deliver_prove   small
+ends_prove      small
+cover           small
+wide_prove      wide
+wide_data_prove wide
+wide_cover      wide
+
+[options]
+prove:        mode prove
+prove:        depth 3
+data_prove:   mode prove
+data_prove:   depth 3
+deliver_prove: mode prove
+deliver_prove: depth 19
+ends_prove:   mode prove
+ends_prove:   depth 15
+cover:        mode cover
+cover:        depth 40
+wide_prove:      mode prove
+wide_prove:      depth 3
+wide_data_prove: mode prove
+wide_data_prove: depth 3
+wide_cover:      mode cover
+wide_cover:      depth 44
+
+[engines]
+prove:        smtbmc yices
+data_prove:   smtbmc yices
+deliver_prove: smtbmc yices
+ends_prove:   smtbmc yices
+cover:        smtbmc bitwuzla
+wide_prove:      smtbmc yices
+wide_data_prove: smtbmc yices
+wide_cover:      smtbmc bitwuzla
+
+[script]
+read_verilog -defer -formal -sv cft_fifo.sv
+read_verilog -defer -formal -sv cft_ifetch.sv
+read_verilog -defer -formal -sv tb_ifetch_formal.sv
+prove:        chparam -set P_CTRL 1 tb_ifetch_formal
+data_prove:   chparam -set HONEST 1 -set P_CTRL 1 -set P_DATA 1 -set P_LAT 1 tb_ifetch_formal
+deliver_prove: chparam -set HONEST 1 -set LIVE 1 -set P_CTRL 1 -set P_DATA 1 -set P_DELIV 1 tb_ifetch_formal
+ends_prove:   chparam -set LIVE 1 -set P_CTRL 1 -set P_ENDS 1 tb_ifetch_formal
+cover:        chparam -set P_CTRL 0 tb_ifetch_formal
+wide_prove:      chparam -set FIFO_LOG2 5 -set STREAM_D 64 -set P_CTRL 1 tb_ifetch_formal
+wide_data_prove: chparam -set FIFO_LOG2 5 -set STREAM_D 64 -set HONEST 1 -set P_CTRL 1 -set P_DATA 1 -set P_LAT 1 tb_ifetch_formal
+wide_cover:      chparam -set FIFO_LOG2 5 -set STREAM_D 64 -set P_CTRL 0 tb_ifetch_formal
+hierarchy -top tb_ifetch_formal
+proc
+flatten
+memory_map
+cd tb_ifetch_formal
+connect -nounset -set \probe_fq_wr    \dut.g_stream.fq_wr
+connect -nounset -set \probe_fq_rd    \dut.g_stream.fq_rd
+connect -nounset -set \probe_fq_cnt   \dut.fq_cnt
+connect -nounset -set \probe_out_n    \dut.g_stream.out_n
+connect -nounset -set \probe_drop_n   \dut.g_stream.drop_n
+connect -nounset -set \probe_live_n   \dut.g_stream.live_n
+connect -nounset -set \probe_live_b   \dut.g_stream.live_b
+connect -nounset -set \probe_lq       \dut.g_stream.lq
+connect -nounset -set \probe_bcnt     \dut.g_stream.bcnt
+connect -nounset -set \probe_rd_ba    \dut.g_stream.rd_ba
+connect -nounset -set \probe_rd_left  \dut.g_stream.rd_left
+connect -nounset -set \probe_ra_v     \dut.g_stream.ra_v
+connect -nounset -set \probe_ra_j     \dut.g_stream.ra_j
+connect -nounset -set \probe_s_on     \dut.s_on
+connect -nounset -set \probe_launch   \dut.g_stream.launch
+connect -nounset -set \probe_redir    \dut.g_stream.redir
+connect -nounset -set \probe_need     \dut.g_stream.need
+connect -nounset -set \probe_len_c    \dut.g_stream.len_c
+connect -nounset -set \probe_spos     \dut.spos
+connect -nounset -set \probe_base     \dut.base
+connect -nounset -set \probe_send     \dut.send
+connect -nounset -set \probe_cnt      \dut.cnt
+connect -nounset -set \probe_ra_pos   \dut.g_stream.ra_pos
+connect -nounset -set \probe_ra_first \dut.g_stream.ra_first
+connect -nounset -set \probe_ra_j0    \dut.g_stream.ra_j0
+connect -nounset -set \probe_rs_go    \dut.g_stream.rs_go
+connect -nounset -set \probe_rq_s     \dut.rq_s
+connect -nounset -set \probe_ra_b     \dut.g_stream.ra_b
+connect -nounset -set \probe_ra_c     \dut.g_stream.ra_c
+connect -nounset -set \probe_smem0    \dut.smem[0]
+connect -nounset -set \probe_smem1    \dut.smem[1]
+connect -nounset -set \probe_smem2    \dut.smem[2]
+connect -nounset -set \probe_smem3    \dut.smem[3]
+small: connect -nounset -set \probe_fmem \dut.g_stream.u_fifo.mem[7],\dut.g_stream.u_fifo.mem[6],\dut.g_stream.u_fifo.mem[5],\dut.g_stream.u_fifo.mem[4],\dut.g_stream.u_fifo.mem[3],\dut.g_stream.u_fifo.mem[2],\dut.g_stream.u_fifo.mem[1],\dut.g_stream.u_fifo.mem[0]
+wide:  connect -nounset -set \probe_fmem \dut.g_stream.u_fifo.mem[31],\dut.g_stream.u_fifo.mem[30],\dut.g_stream.u_fifo.mem[29],\dut.g_stream.u_fifo.mem[28],\dut.g_stream.u_fifo.mem[27],\dut.g_stream.u_fifo.mem[26],\dut.g_stream.u_fifo.mem[25],\dut.g_stream.u_fifo.mem[24],\dut.g_stream.u_fifo.mem[23],\dut.g_stream.u_fifo.mem[22],\dut.g_stream.u_fifo.mem[21],\dut.g_stream.u_fifo.mem[20],\dut.g_stream.u_fifo.mem[19],\dut.g_stream.u_fifo.mem[18],\dut.g_stream.u_fifo.mem[17],\dut.g_stream.u_fifo.mem[16],\dut.g_stream.u_fifo.mem[15],\dut.g_stream.u_fifo.mem[14],\dut.g_stream.u_fifo.mem[13],\dut.g_stream.u_fifo.mem[12],\dut.g_stream.u_fifo.mem[11],\dut.g_stream.u_fifo.mem[10],\dut.g_stream.u_fifo.mem[9],\dut.g_stream.u_fifo.mem[8],\dut.g_stream.u_fifo.mem[7],\dut.g_stream.u_fifo.mem[6],\dut.g_stream.u_fifo.mem[5],\dut.g_stream.u_fifo.mem[4],\dut.g_stream.u_fifo.mem[3],\dut.g_stream.u_fifo.mem[2],\dut.g_stream.u_fifo.mem[1],\dut.g_stream.u_fifo.mem[0]
+connect -nounset -set \probe_rp       \dut.g_stream.u_fifo.rp
+connect -nounset -set \probe_wp       \dut.g_stream.u_fifo.wp
+connect -nounset -set \probe_ram_q    \dut.g_stream.u_fifo.ram_q
+connect -nounset -set \probe_byp_d    \dut.g_stream.u_fifo.byp_d
+connect -nounset -set \probe_byp_v1   \dut.g_stream.u_fifo.byp_v1
+connect -nounset -set \probe_byp_v2   \dut.g_stream.u_fifo.byp_v2
+cd ..
+prep -top tb_ifetch_formal
+
+[files]
+../rtl/cft_fifo.sv
+../rtl/cft_ifetch.sv
+tb_ifetch_formal.sv
