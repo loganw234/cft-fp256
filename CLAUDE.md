@@ -80,9 +80,10 @@ Full procedure in **`docs/BITSTREAM-BUILDS.md`**. The short version:
 
 ## Gates, and which ones mean something
 
-**`make sim` now gates (fixed 2026-09-12).** It runs its twenty-six
+**`make sim` now gates (fixed 2026-09-12).** It runs its twenty-seven
 benches (`seq_coreu50`, the sequencer at the U50's capacities, joined
-them on 2026-09-29) and then reads the `results.xml` each one wrote, via
+them on 2026-09-29, and `seq_corestr`, the sequencer streaming past a
+64-word store, on 2026-10-05) and then reads the `results.xml` each one wrote, via
 `tb/check_results.py`. A recorded failure, a missing results file or an
 unparseable one all fail the target and name the bench and the message.
 Before this, cocotb's inability to set an exit code — stated in its own
