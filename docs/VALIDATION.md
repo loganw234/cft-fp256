@@ -17678,3 +17678,21 @@ What sampled points cannot see is stated in LANGUAGE.md.
   - the module rebuilt.
   Until then cft-segrun writes version 1, and cft-audit refuses a version-2 certificate by name: `version` at line 1, "this reader speaks version 1 only" (measured by the lead on markstep-fp64 at 8c44d37).
 - **VCV2B's sentence notes:** CV2B's "five controls remade" were six; its segrun_check count of 645 was not reproduced (716, neither failing); the key-file check also refuses execute bits.
+
+**A restatement of the entry above, before its push** (verifier-VI4's findings; 2026-10-05).
+- **Its one wrong answer.** The entry says C4's merge restated L4's interim sentence. It did so only in part: text that C4 left stale still said cftc refuses a run-time division or root `runtime-routine`, and that the tangent stage's leg L is golden-only. VI4 found it in three places:
+  - ROADMAP's head for L4;
+  - VERIFICATION's tangent row, legs I and L;
+  - run.sh's comment on the tangent stage.
+
+  This note's commit restates all three. It also restates two more of the same kind, which the lead found while fixing them:
+  - tangent_check.py's comment above leg L;
+  - LANGUAGE.md's rounding-order bullet, which said the rule table alone holds the quotient's and the root's rules. Since C4, Kepler's committed variational graphs hold them too. The quotient's rule rounded otherwise (its numerator a product and then a sum) and the root's halved first each move both of Kepler's graphs and no other (measured 2026-10-05).
+
+  No figure moves.
+- **Its other notes:**
+  - "Thirty controls ... covering 32 of version 2's 34 new names": the thirty controls cover 30 names. The corpus reaches 32 with the two `writers both` definition cases.
+  - VRP8's three replacement faults were computed with the golden model over the fpfma benches' vectors. They were not measured in a bench run.
+  - lang-routines' 141 s at e45a2f7 is lang_check's own timer; the runner printed 142 s. The 140 s at 5e033f6 is the runner's.
+  - The known limit "(measured by the lead on markstep-fp64 at 8c44d37)" was in no ledger when the entry was written. It is recorded, late, in the round's ledger (2026-10-03 05:19), and VI4 reproduced it at ba80c17: rc 2, `version` at line 1.
+  - C4's "the software targets, whose instruction memory is unbounded": sw's limit is 0xFFFFFFFF instructions, which is unbounded in practice.

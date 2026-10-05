@@ -4803,8 +4803,8 @@ and the testing rule, as the last rounds ran.
        and the workloads that missed run on whichever build holds them.
 2. **L4, run-time division and square root in the language,
    golden-first: built, verified by VL4 over four checks and merged**
-   (2026-10-02; LANGUAGE.md). cftc's interim refusal is named
-   `runtime-routine`.
+   (2026-10-02; LANGUAGE.md). cftc's interim refusal was named
+   `runtime-routine`, until C4 compiled both.
    - `a / b` and `sqrt(a)` with non-constant operands become nodes,
      whose golden definition is `softfloat`'s div and sqrt, with exact
      flags.

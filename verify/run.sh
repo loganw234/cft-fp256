@@ -1126,7 +1126,9 @@ stage lang-routines "the language's run-time division and square root, compiled 
 # wrong derivations red on the derivative and the exponent, a rule
 # rounded otherwise red on the committed bytes, and four compiler plants
 # red on seq.py; since L4 (2026-10-02), the quotient's and the root's
-# rules, golden-only, exactly and by a central difference, with plants.
+# rules, exactly and by a central difference, with plants - golden-only
+# until C4, and since then compiled, their routines inlined, on seq.py
+# against lang.run, and refused `target-feature` on revision 7's targets.
 # In the gate budget: 196 s run directly and 346 s
 # through the runner on the desktop, niced and in use, and past 13
 # minutes, unfinished, beside another process holding it at 100% (L3,
