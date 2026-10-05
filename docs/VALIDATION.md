@@ -17970,3 +17970,15 @@ What sampled points cannot see is stated in LANGUAGE.md.
     - its 6: probe L synthesises one pipe a rung, where the plan's part 3 says cft_lanes; its synthesis is unconstrained, as hw/synth_ooc.tcl's is; and its control's "must be equal" leans on Vivado removing R21's dead registers;
   - verifier-VCV2CW's closing note was not carried, and is now: on Windows, a glued argv[0] form is refused `usage`, and a U+3000 after the program's name is now an argument of its own. A launcher writes neither;
   - CERTIFICATES.md wraps two lines unevenly, at about 4448 and 4494.
+
+**A correction to the note above** (verifier-VI5b, Sonnet, on eaf9a0b: VI5's three (b)s fixed, the code's change right; two (b)s in the note's own wording, text only).
+- The note says an empty CFT_XRT_MASK_ADDR_OVERRIDE acted "on a tile at VERSION 0x900 or later". The guard is IDX_VERSION, 0xA00. 0x900 is SEG_VERSION, and no launch there carries argument 16. So read 0xA00 or later.
+- The note, the code's comment and the commit message say every other instrument of the list reads an empty value as unset. CFT_XRT_TRACE is one too, and an empty value turns it on, as CERTIFICATES.md says just above. Every other instrument but TRACE reads empty as unset. CERTIFICATES.md and the comment now say so; a commit message cannot be changed.
+- VI5b's other notes:
+  - the note's "+1.815 ns and +1.361 ns" are routed slacks;
+  - its "about 4448 and 4494" were bae224a's lines. At eaf9a0b they are 4452 and 4498;
+  - "the seven `writers both` cases" are version 2's seven. The MANIFEST marks 19, version 1's twelve among them. CERTIFICATES.md now says so;
+  - corpus.py's section 5b checks only that all seven were remade. Each case's own hold remakes it; the docstring now says so;
+  - ROADMAP now dates the C half 2026-10-02 to 03, as the other documents date its parcels;
+  - HOSTAPI's flag-control rule for cft-segrun is version 2's; now said so;
+  - the note above passed over one of VI5's notes: the entry's "MEASURED by RA (cft-sim, ...)" heads runs that were made on the desktop and not in cft-sim, api-test and device-test among them.

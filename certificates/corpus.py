@@ -59,8 +59,9 @@ WHAT `check` HOLDS, for every case certificates/MANIFEST lists:
      and of the backend, which the gate fixes to software. build-id names
      the library build, which changes with every commit by design, and
      the hash line covers it. Its boundary files are the committed ones.
-     Version 2's cases marked `writers both` are the C writer's too, and
-     section 5b has cft-segrun remake each of them;
+     Version 2's cases marked `writers both` are the C writer's too: each
+     case's hold has cft-segrun remake it, and section 5b checks that all
+     seven were;
   6. the golden audit gives each case its expected verdict, in full from
      the initial states alone (from nothing but the sources and the
      generator where the case regenerates), and, for a case a writer

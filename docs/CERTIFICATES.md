@@ -46,7 +46,7 @@ Where version 1 stands (2026-09-30; version 2's own is under "Version
   certificates"), and version 2's cases beside them hold the golden
   writer and auditor, and since version 2's C half cft-audit beside the
   golden auditor and cft-segrun beside the golden writer: the corpus
-  check has it remake the seven `writers both` cases;
+  check has it remake the seven version-2 cases marked `writers both`;
 - `cft-orbits` certifies its own runs on the Newton route, each sample
   interval a segment of one image, with its angular momentum's drift as
   an exact entry where asked (2026-09-30; [ORBITS.md](ORBITS.md),
@@ -3565,10 +3565,11 @@ spelling:
     4449c49, 2026-10-03).
 
   So with either of those last two set empty, a card run writes no
-  certificate. The software backend reads neither. The list's
-  instruments read an empty value as unset, as libcft's own rule for
-  them says; CFT_XRT_MASK_ADDR_OVERRIDE did not until 2026-10-05, when
-  an empty one handed the tile address 0 for a lane mask's argument.
+  certificate. The software backend reads neither. The list's other
+  instruments, every one but CFT_XRT_TRACE above, read an empty value
+  as unset. CFT_XRT_MASK_ADDR_OVERRIDE did not before 2026-10-05: set
+  empty, it handed a tile at VERSION 0xA00 or later address 0 for the
+  lane mask's argument.
 - **A param's name** is the language's: a letter or `_`, then letters,
   digits and `_`. Its literal is a token the audit holds to the language's
   canonical spelling ("Sources").

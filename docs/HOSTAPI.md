@@ -3390,7 +3390,7 @@ as `PROG_RUN_EX` whatever its image's flags; a run that does not travels
 as it did, so a server's counts of every earlier call are unchanged.
 
 **Who takes it.** `cft-segrun` asks for the block when it writes
-version 2 with `--lane-flags`, and wherever its image needs flag
+version 2, with `--lane-flags` and wherever its image needs flag
 control (parcel CV2CW); a version-1 certificate has no line for it
 (docs/CERTIFICATES.md), and a marked run there is certified as its
 STATUS says. `cft-audit` asks for it since version 2's C half (parcel

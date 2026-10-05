@@ -3424,10 +3424,11 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
             Tile &tile = D.tiles[tl];
             xrt::bo **const ob = p.ob;
             const uint64_t lanes = static_cast<uint64_t>(p.lanes);
-            /* Set empty, the instrument is unset, as every instrument's
-             * variable is (instrument_seed; 2026-10-05: it took address
-             * 0 before, while a certificate records the empty variable
-             * as unset - verifier-VI5). */
+            /* Set empty, the instrument is unset, as the list's other
+             * instruments are but CFT_XRT_TRACE, which an empty value turns
+             * on (docs/CERTIFICATES.md). Before 2026-10-05 it took address
+             * 0, while a certificate records the empty variable as unset
+             * (verifier-VI5). */
             if (mask_ov && *mask_ov && D.version >= IDX_VERSION) {
                 /* A card-day instrument (2026-09-15): argument 16
                  * replaced by a raw address, so that a read of it faults
