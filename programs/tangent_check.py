@@ -1093,7 +1093,7 @@ def leg_determinism(work):
         seen.append(json.loads(r.stdout))
     check(seen[0] == seen[1] and len(seen[0]) > 40,
           f"PYTHONHASHSEED 0 and 4242 write the same bytes: {len(seen[0])} "
-          f"files (the four variational references and five generated "
+          f"files (the six variational references and five generated "
           f"systems with tangents, every output)")
     files = compiled_references()
     have = sorted(p.name for p in COMPILED.iterdir()) if COMPILED.is_dir() \
