@@ -105,18 +105,22 @@ MAXD = _seq_generic("MAXD", 64)
 # The instruction STORE since revision 8 (R8S), and the CAPACITY beside it:
 # cft_seq's STREAM_D defaults to IMEM_D, a tile that does not stream, which
 # is seq_core's. seq_coreu50 is the U50's 4,096-word store and 2^24
-# capacity, and seq_corestr a 64-word store and a 2^16 capacity, so that
-# nearly every program here streams (tb/Makefile).
+# capacity; seq_corestr_full, S8's, a 64-word store and a 2^16 capacity;
+# and seq_corestr, in `make sim`, the same store and a 4,096-word capacity
+# under the cases written for the fetch. Most of this bench's programs fit
+# even a 64-word store: 13 of its 98 cases run one that streams past it
+# (tb/Makefile says which, and why the targets are two).
 IMEM_D = _seq_generic("IMEM_D", 1024)
 STREAM_D = _seq_generic("STREAM_D", IMEM_D)
 STREAMS = STREAM_D > IMEM_D
 # SeqRam's read latency, in cycles from an AR's acceptance to its first
 # beat (revision 8): CFT_SEQ_LAT is a comma list, and the bench takes its
 # values in turn, run by run, so every case that runs three programs or
-# more meets each. seq_corestr runs at 0, 125 and 256 (the card's round
-# trip is bounded by 144; the design is sized for 256); every other
-# target at 0, the slave this bench always had. A case that HOLDS cycles
-# pins 0 (Bench.hold): its bounds were measured against that slave.
+# more meets each. seq_corestr and seq_corestr_full run at 0, 125 and 256
+# (the card's round trip is bounded by 144; the design is sized for 256);
+# every other target at 0, the slave this bench always had. A case that
+# HOLDS cycles pins 0 (Bench.hold): its bounds were measured against that
+# slave.
 LATS = tuple(int(x) for x in
              os.environ.get("CFT_SEQ_LAT", "0").split(",") if x.strip())
 # 256 -> 512 at revision 3 (R7): the ninth kx index bit made the
@@ -6702,9 +6706,11 @@ async def abort_single_beat_reads(dut):
 # fetch hooks and rtl/cft_ifetch.sv. At seq_core the tile does not stream
 # (STREAM_D == IMEM_D) and these cases hold today's machine; at
 # seq_coreu50 a program past 4,096 instructions streams; at seq_corestr
-# (a 64-word store, a 2^16 capacity, read latencies 0, 125 and 256) nearly
-# every program here does, and every other case in this file runs through
-# the stream as well.
+# and seq_corestr_full (a 64-word store, capacities of 4,096 and 2^16, read
+# latencies 0, 125 and 256) these cases' programs run past the store, but
+# for the resident twins that set a line. seq_corestr runs these cases,
+# by name, beside the_whole_divide_and_root (tb/Makefile);
+# seq_corestr_full runs every case in this file, most of them resident.
 
 FETCH_OUT_MAX, FETCH_BURST = 8, 8      # rtl/cft_ifetch.sv's defaults
 
@@ -6778,21 +6784,28 @@ async def a_program_of_exactly_the_capacity(dut):
     shape: one ends in HALT, the other in a DEPOSIT, so the block ends by
     the implicit halt with pc EQUAL to the capacity. pc one bit short
     would wrap it to 0 and the block would restart for ever: that one
-    fails by the budget (R8S-streaming.md, section 2, "Widths"). At the
-    U50's 2^24 the image is 128 MB and is not simulated; seq_core's 1,024
-    (no stream) and seq_corestr's 65,536 run it."""
+    fails by the budget (R8S-streaming.md, section 2, "Widths"). Each
+    image runs at every read latency the build runs (since 2026-10-05;
+    until then the two ran once each, at the first two). At the U50's
+    2^24 the image is 128 MB and is not simulated; seq_core's 1,024 (no
+    stream), seq_corestr's 4,096 and seq_corestr_full's 65,536 run it."""
     bench = Bench(dut)
     await bench.start()
     if STREAM_D > 65536:
         dut._log.info(f"not on this build: an image of {STREAM_D} "
                       f"instructions is not simulated")
         return
-    for ends in ("halt", "implicit"):
-        await _long_run(bench, FP32, STREAM_D, ends,
-                        f"{STREAM_D} instructions, ending by "
-                        f"{'HALT' if ends == 'halt' else 'the implicit halt'}")
-        dut._log.info(f"capacity {STREAM_D} ({ends}): {bench.last_cycles:.0f} "
-                      f"cycles at latency {bench.lat}")
+    for lat in LATS:
+        bench.pin = lat
+        for ends in ("halt", "implicit"):
+            how = "HALT" if ends == "halt" else "the implicit halt"
+            await _long_run(bench, FP32, STREAM_D, ends,
+                            f"{STREAM_D} instructions, ending by {how}, "
+                            f"latency {lat}")
+            dut._log.info(f"capacity {STREAM_D} ({ends}): "
+                          f"{bench.last_cycles:.0f} cycles at latency "
+                          f"{bench.lat}")
+    bench.pin = None
 
 
 def _indep(k, seed=0):
@@ -6996,7 +7009,9 @@ async def misaligned_instruction_sections(dut):
 async def the_stream_across_4k(dut):
     """An image placed so that bursts from the store's end would cross a
     4 KB page if the fetch did not cut them there: SeqRam refuses a
-    crossing burst, and the run is held to the model."""
+    crossing burst, and the run is held to the model. Each placement runs
+    at every read latency the build runs (since 2026-10-05; until then
+    the two ran once each, at the first two)."""
     bench = Bench(dut)
     await bench.start()
     fmt = FP32
@@ -7011,10 +7026,13 @@ async def the_stream_across_4k(dut):
         base = 0x31_0000 - 32 - 4 - 8 * k + 4
         base -= base % 32
         bench.prog_base = base
-        await bench.program(fmt, prog, operands(fmt, n, 980 + k),
-                            operands(fmt, n, 981), operands(fmt, n, 982), n,
-                            f"instruction {k} at a 4 KB page, image at "
-                            f"{base:#x}")
+        for lat in LATS:
+            bench.pin = lat
+            await bench.program(fmt, prog, operands(fmt, n, 980 + k),
+                                operands(fmt, n, 981), operands(fmt, n, 982),
+                                n, f"instruction {k} at a 4 KB page, image "
+                                f"at {base:#x}, latency {lat}")
+        bench.pin = None
     bench.prog_base = PROG_BASE
 
 

@@ -3864,9 +3864,15 @@ from such a tree.
   depth are a bit wider than log2 of the capacity, the header refuses
   past the capacity, and the open-core configurations build no stream
   (`SEQ_STREAM_D` equal to the store). Held in `tb/test_seq_core.py` at
-  `seq_core` (no stream), `seq_coreu50` (past 4,096) and `seq_corestr`,
-  which joined `make sim`: a 64-word store and a 2^16 capacity, so nearly
-  every program there streams, at those three latencies; and through the
+  `seq_core` (no stream), `seq_coreu50` (past 4,096), `seq_corestr` in
+  `make sim` - a 64-word store and a 4,096-word capacity at those three
+  latencies, under the cases written for the fetch and the one other case
+  whose programs outgrow the store - and `seq_corestr_full` in `make
+  simmc`, S8's configuration whole: every case at a 2^16 capacity and the
+  three latencies, under Verilator. They are two targets since
+  2026-10-05, when Icarus could not finish the whole one inside its
+  target's four hours; and most of the bench's programs fit even a
+  64-word store, so most of its cases run resident there. Through the
   kernel, `tb/test_krnl_seq.py`'s image of 32,769 instructions and the
   capacity plus one refused at the header.
 - **R24, flag control** (built 2026-10-05). QUIET and ENDQUIET decode in

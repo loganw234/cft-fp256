@@ -1271,7 +1271,23 @@ formal/README.md has the runs).
 - cft_seq's hooks, as the interface above says, then the bench
   configuration `seq_corestr` (section 8) through the whole sequencer.
   Done in round 2: the hooks at cbce00a, and `seq_corestr` in `make sim`
-  from the same commit.
+  from the same commit. Two targets since 2026-10-05. Under Icarus the
+  whole bench at three latencies could not finish inside its target's
+  four hours: 35 of 94 cases in 3 h 02 min on amd-arc-box at six jobs
+  (the lead's run at 2b84449). So S8's configuration whole is
+  `seq_corestr_full`, in `make simmc` under Verilator, and `seq_corestr`,
+  in `make sim`, runs the cases written for the fetch and
+  `the_whole_divide_and_root` at a 4,096-word capacity (tb/Makefile).
+  Section 8's "nearly every program then streams" was not so. Counted
+  without a simulator (`tb/stream_census.py`: the bench's own programs,
+  cocotb stubbed, each counted where the Bench budgets it; measured at
+  S8's build on the split's tree), 13 of the bench's 98 cases run a
+  program longer than the 64-word store, 66 runs of the 1,575 counted.
+  Twenty cases stop early there, at their first check of a cycle count
+  or a planted fault, so only their first runs are counted; none is
+  longer than 11 instructions, but for the fetch's own, which stream.
+  The other case that streams is `the_whole_divide_and_root`: twelve
+  runs of up to 214 instructions.
 - Probe S: whether Vivado keeps the store cascade-free
   (`cascade_height` pins it if not); the path from `take` - late, out
   of the admission - into the FIFO's read address (`rp + rd_en` into

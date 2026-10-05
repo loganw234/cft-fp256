@@ -719,9 +719,12 @@ stage sim "cocotb RTL suite, all 28 targets, SIM_JOBS at a time (docker cft-sim)
 # tile's own census, beside the shipping default rather than instead
 # of it. Not in the quick or gate budgets - it is the third tier's
 # gate. On 2026-09-29 it took 1 h 16 min at four jobs on amd-arc-box,
-# where sim took 1 h 40 min at six (docs/VERIFICATION.md).
+# where sim took 1 h 40 min at six (docs/VERIFICATION.md). Since
+# 2026-10-05 it also runs seq_corestr_full, the sequencer's bench whole
+# through the fetch at three read latencies, under Verilator: Icarus
+# cannot finish it inside the target's four hours (tb/Makefile).
 need docker
-stage simmc "cocotb suite at the multi-cycle pass budget MC (docker cft-sim)" -- do_simmc
+stage simmc "cocotb suite at the multi-cycle pass budget MC, and the sequencer's bench whole through the fetch under Verilator (docker cft-sim)" -- do_simmc
 
 need docker
 stage lint "yosys elaboration gate, every RTL file (docker cft-sim)" -- do_lint
