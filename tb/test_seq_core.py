@@ -300,6 +300,12 @@ class SeqRam:
         # flight landed, a long burst drained to its RLAST - since a beat
         # left here is the next run's first read.
         self.pending = 0
+        # Cycles from a write burst's last W beat to its B response
+        # (verifier-VC12's, committed with its case): at 0 the slave this
+        # class has always been, answering the cycle after. The abort's
+        # wait for every B (S_ABORT's wr_bresp_left) is held only by a slave
+        # that answers late - abort_waits_for_a_late_b.
+        self.b_delay = 0
         self.cyc = 0            # the cycle serve() is in
         self.reset_log()
 
@@ -430,7 +436,7 @@ class SeqRam:
         # cyc + 1 + rd_latency, which at latency 0 is the very next
         # cycle - the slave this class has always been.
         pend, cur_r = [], None
-        awq, wq, bq, cur_w = [], [], 0, None
+        awq, wq, bq, cur_w = [], [], [], None
         arready, rvalid, rlast, rdata, rresp = 1, 0, 0, 0, 0
         bvalid = 0
         cyc = 0
@@ -507,10 +513,10 @@ class SeqRam:
                         f"WLAST at beat {cur_w[2]} of a burst AWLEN said was "
                         f"{cur_w[1]} beats long (AXI4 A3.4.1)")
                     if ends:
-                        bq += 1
+                        bq.append(cyc + self.b_delay)
                         cur_w = None
-                if not bvalid and bq:
-                    bq -= 1
+                if not bvalid and bq and bq[0] <= cyc:
+                    bq.pop(0)
                     bvalid = 1
 
             await RisingEdge(self.clk)
@@ -544,11 +550,13 @@ class Fault:
     region (the image, the bank, stream b) rather than counting bursts.
     """
 
-    def __init__(self, dut, ram, lo, hi, kind, which=0, beat=0):
+    def __init__(self, dut, ram, lo, hi, kind, which=0, beat=0, k=1):
         assert kind in ("short", "long", "rresp"), kind
         self.dut, self.ram = dut, ram
         self.lo, self.hi, self.kind = lo, hi, kind
-        self.which, self.beat = which, beat
+        # short or long by k beats (verifier-VC12's generalisation; 1 is
+        # the fault every case before it planted)
+        self.which, self.beat, self.k = which, beat, k
         self.seen = 0
         self.burst = None      # its number in SeqRam's arlog, once issued
         self.asked = None
@@ -562,10 +570,10 @@ class Fault:
             self.seen += 1
         if n == self.burst:
             if self.kind == "short":
-                assert asked >= 2, "a one-beat burst cannot be short"
-                return asked - 1
+                assert asked > self.k, "short by more than the burst has"
+                return asked - self.k
             if self.kind == "long":
-                return asked + 1
+                return asked + self.k
         return asked
 
     def _rresp_at(self, burst, beat):
@@ -575,7 +583,7 @@ class Fault:
         # no AR after it (Bench.faulted), where the fetch's bursts already
         # in flight are issued after the faulted one's AR and before it.
         if burst == self.burst:
-            shows = {"rresp": self.beat, "short": self.asked - 2,
+            shows = {"rresp": self.beat, "short": self.asked - self.k - 1,
                      "long": self.asked - 1}[self.kind]
             if beat == shows:
                 self.at_cyc = self.ram.cyc
@@ -7907,3 +7915,469 @@ async def stepped_fuzz(dut):
         assert k == trials, f"{name}: {k} of {trials} R22 programs drawn"
         made += k
     dut._log.info(f"R22 fuzz: {made} programs, {steps} stepped STX/LDX")
+
+
+# ======================================================================
+# the abort, by verifier-VC12's cases (follow-up B of the step-6 round)
+# ======================================================================
+#
+# verifier-VC12 checked the abort (587c39f) and the fetch's hooks (cbce00a)
+# and found four claims no committed case could fail: each is red on a
+# plant these cases above miss (its ledger, the plants table). Lifted
+# from its appendix, with the monitor they rest on:
+#   a SLVERR on the mask, a table or a gathered element completes the run
+#     with err[0] - every case above planted only a long burst there;
+#   a fault while a write burst is committed: the burst delivers its
+#     beats and no AR or AW follows - no case above faulted then;
+#   the abort waits for every B, held only by a slave that answers late;
+#   VRD1's protections, a long or short last setup burst before a block's
+#     first fetch, at latencies 0, 125 and 256.
+
+class PortMon:
+    """cft_seq's own AXI port, watched from outside a cycle at a time
+    (verifier-VC12's Mon): every AW's beats delivered and every B taken,
+    every AR's RLAST taken, done one cycle wide, the port quiet while idle,
+    no AR or AW LAUNCHED once abort_any showed, and no R beat taken on the
+    wrong side of the port's mux (the fetch's or the main engine's, by
+    the fetch's idle line when the burst was accepted)."""
+
+    def __init__(self, dut):
+        self.dut = dut
+        self.ar = self.rlast = 0
+        self.aw = self.exp_w = self.w = self.b = 0
+        self.done_widths = []
+        self.idle_viol = []
+        self.cyc = 0
+        self.task = None
+        self.prev_arv = self.prev_aw = 0
+        self.run_abort0 = None
+        self.late_ar = []
+        self.late_aw = []
+        self.ar_side = []
+        self.mis_attr = []
+
+    def start(self):
+        self.task = cocotb.start_soon(self.run())
+
+    def stop(self):
+        self.task.kill()
+
+    async def run(self):
+        d = self.dut
+        dw = 0
+        while True:
+            await ReadOnly()
+            self.cyc += 1
+            arv = _i(d.m_rd_arvalid)
+            if _i(d.start):
+                self.run_abort0 = None
+            elif (self.run_abort0 is None and _i(d.busy)
+                  and _i(d.abort_any)):
+                self.run_abort0 = self.cyc
+            if arv and not self.prev_arv and self.run_abort0 is not None \
+                    and self.cyc > self.run_abort0:
+                self.late_ar.append((self.cyc, self.run_abort0))
+            self.prev_arv = arv
+            awv = _i(d.m_wr_awvalid)
+            if (awv and not self.prev_aw and self.run_abort0 is not None
+                    and self.cyc > self.run_abort0):
+                self.late_aw.append((self.cyc, self.run_abort0))
+            self.prev_aw = awv
+            idle_now = _i(d.if_idle)
+            if _i(d.m_rd_arvalid) and _i(d.m_rd_arready):
+                self.ar += 1
+                self.ar_side.append(0 if idle_now else 1)
+            if _i(d.m_rd_rvalid) and _i(d.m_rd_rready):
+                side = 0 if idle_now else 1
+                head = self.ar_side[0] if self.ar_side else None
+                if head is None or head != side:
+                    self.mis_attr.append((self.cyc, head, side))
+                if _i(d.m_rd_rlast):
+                    self.rlast += 1
+                    if self.ar_side:
+                        self.ar_side.pop(0)
+            if _i(d.m_wr_awvalid) and _i(d.m_wr_awready):
+                self.aw += 1
+                self.exp_w += _i(d.m_wr_awlen) + 1
+            if _i(d.m_wr_wvalid) and _i(d.m_wr_wready):
+                self.w += 1
+            if _i(d.m_wr_bvalid) and _i(d.m_wr_bready):
+                self.b += 1
+            if _i(d.done):
+                dw += 1
+            elif dw:
+                self.done_widths.append(dw)
+                dw = 0
+            if not _i(d.busy) and not _i(d.done):
+                for nm in ("m_rd_arvalid", "m_wr_awvalid", "m_wr_wvalid"):
+                    if _i(getattr(d, nm)):
+                        self.idle_viol.append((self.cyc, nm))
+            await RisingEdge(d.ap_clk)
+
+    def settled(self, label):
+        assert self.exp_w == self.w, (
+            f"{label}: {self.exp_w} W beats owed by the AWs accepted, "
+            f"{self.w} delivered - a write burst cut short or beats beyond")
+        assert self.aw == self.b, (
+            f"{label}: {self.aw} AWs accepted, {self.b} B responses taken - "
+            f"a B response left unwaited")
+        assert self.ar == self.rlast, (
+            f"{label}: {self.ar} ARs accepted, {self.rlast} RLASTs taken - a "
+            f"read burst not drained to its RLAST")
+        assert all(w == 1 for w in self.done_widths), (
+            f"{label}: done pulse widths {self.done_widths}")
+        assert not self.late_aw, (
+            f"{label}: an AW launched after abort_any showed: "
+            f"{self.late_aw[:4]} (launch cycle, abort cycle)")
+        assert not self.mis_attr, (
+            f"{label}: R beats taken on the wrong side of the port's mux "
+            f"(cycle, issuer of the burst in flight, side taken): "
+            f"{self.mis_attr[:4]}")
+        assert not self.late_ar, (
+            f"{label}: an AR launched after abort_any showed: "
+            f"{self.late_ar[:4]} (launch cycle, abort cycle)")
+        assert not self.idle_viol, (
+            f"{label}: traffic on the port while idle: {self.idle_viol[:4]}")
+
+
+def _state_names():
+    """cft_seq's state names in the enum's order, read from the RTL."""
+    import re
+    src = (Path(__file__).resolve().parents[1] / "rtl" /
+           "cft_seq.sv").read_text(encoding="utf-8")
+    m = re.search(r"typedef enum logic \[5:0\] \{(.*?)\} state_e;", src, re.S)
+    body = re.sub(r"//[^\n]*", "", m.group(1))
+    return [x.strip() for x in body.split(",") if x.strip()]
+
+
+class AbortProbe:
+    """The first cycle of each run in which abort_any is high: the state
+    the machine is in, and whether a write burst was open or committed
+    then (not wr_quiet)."""
+
+    def __init__(self, dut):
+        self.dut = dut
+        self.rec = []
+        self.task = None
+        self.names = _state_names()
+
+    def start(self):
+        self.task = cocotb.start_soon(self.run())
+
+    def stop(self):
+        self.task.kill()
+
+    async def run(self):
+        d = self.dut
+        cyc = 0
+        seen = False
+        while True:
+            await ReadOnly()
+            cyc += 1
+            if _i(d.start):
+                seen = False
+            if not seen and _i(d.busy) and _i(d.abort_any):
+                seen = True
+                st = _i(d.st)
+                self.rec.append((self.names[st] if st < len(self.names)
+                                 else st, 0 if _i(d.wr_quiet) else 1, cyc))
+            await RisingEdge(d.ap_clk)
+
+
+def _check_partial(bench, fmt, prog, n, want, label):
+    """Whatever an aborted run wrote is the model's: every deposit element
+    and count that is not the caller's poison equals the model's, and every
+    strobed byte is inside the deposit and count windows."""
+    ebytes = fmt.width // 8
+    maxdep = prog.max_deposits
+    dep_bytes, cnt_bytes = n * maxdep * ebytes, 4 * n
+    got_dep = bench.ram.fetch(D_BASE, dep_bytes)
+    got_cnt = bench.ram.fetch(CNT_BASE, cnt_bytes)
+    pel = bytes([POISON]) * ebytes
+    wd = wc = 0
+    for i in range(n):
+        for s in range(maxdep):
+            raw = got_dep[(i * maxdep + s) * ebytes:
+                          (i * maxdep + s + 1) * ebytes]
+            if raw != pel:
+                wd += 1
+                g = int.from_bytes(raw, "little")
+                assert g == want.deposits[i * maxdep + s], (
+                    f"{label}: deposit[lane {i} slot {s}] got {g:#x} want "
+                    f"{want.deposits[i * maxdep + s]:#x}")
+        raw = got_cnt[4 * i:4 * i + 4]
+        if raw != bytes([POISON]) * 4:
+            wc += 1
+            assert int.from_bytes(raw, "little") == want.counts[i], (
+                f"{label}: count[lane {i}] got "
+                f"{int.from_bytes(raw, 'little')} want {want.counts[i]}")
+    bench.ram.assert_writes_inside(
+        [(D_BASE, dep_bytes, "deposit"), (CNT_BASE, cnt_bytes, "count")],
+        label)
+    return wd, wc
+
+
+async def _fault_in_the_drain(bench, mon, fmt, prog, a, b, c, n, label,
+                              fault, *, expect, slack=30000):
+    """One run with a fetch fault planted, wherever it lands: the books
+    (PortMon), the error bit, nothing left on the read channel, and every
+    byte written the model's. A planted burst that was never issued is a
+    clean run, held whole."""
+    ebytes = fmt.width // 8
+    image = prog.to_bytes()
+    dep_bytes, cnt_bytes = n * prog.max_deposits * ebytes, 4 * n
+    want = seq.run(prog, list(a), list(b), list(c))
+    bench._stage(fmt, image, a, b, c, n, dep_bytes, cnt_bytes)
+    bench._drive_cfg(fmt, n)
+    budget = bench._budget(fmt, prog, n, len(image)) + slack
+    fault.install()
+    try:
+        refused, flags, err = await bench._go(budget, label)
+    finally:
+        fault.remove()
+    assert refused == 0, f"{label}: refusal"
+    if fault.burst is None:
+        assert err == 0, f"{label}: err={err:#x} with no fault planted"
+        mon.settled(label)
+        wd, wc = _check_partial(bench, fmt, prog, n, want, label)
+        assert wd == n * prog.max_deposits and wc == n, (
+            f"{label}: a clean run wrote {wd} deposits and {wc} counts")
+        return None
+    assert bench.ram.pending == 0, (
+        f"{label}: done with {bench.ram.pending} read burst(s) still to land")
+    if expect == "length":
+        assert err & 4 and not err & 1, f"{label}: err={err:#x}, want length"
+    else:
+        assert err & 1 and not err & 4, f"{label}: err={err:#x}, want read"
+    mon.settled(label)
+    _check_partial(bench, fmt, prog, n, want, label)
+    return err
+
+
+def _parse_bursts(img_len):
+    """The parse's read bursts of an image of img_len bytes."""
+    addr, left, parse = PROG_BASE + 32, -(-(img_len - 32) // 32), 0
+    while left:
+        ln = min(64, left, (4096 - (addr & 0xFFF)) // 32)
+        addr, left, parse = addr + 32 * ln, left - ln, parse + 1
+    return parse
+
+
+def _drain_fault_prog(fmt):
+    """A program that halts at pc 22 with the stream prefetching past the
+    store, then drains twelve deposits a lane - so a fault on a fetch burst
+    the halt abandoned lands during the deposit drain, between bursts or
+    mid-burst, in the counts or in S_WAIT_B, as its latency puts it."""
+    D = 12
+    return seq.Program(
+        fmt, _indep(10) + [seq.deposit(3 + (i % 8)) for i in range(D)] +
+        [seq.halt()] + _indep(IMEM_D + 400), max_deposits=D)
+
+
+@cocotb.test()
+async def abort_data_faults_on_the_mask_and_tables(dut):
+    """A SLVERR on the mask read, on an index table or on a gathered
+    element is DATA: the run completes with the model's answer and err[0]
+    (cft_seq's contract, item 5). verifier-VC12's plant pf - those reads
+    ending the run as an instruction's do - was green in every case above,
+    which planted only a long burst there."""
+    bench = Bench(dut)
+    await bench.start()
+    mon = PortMon(dut)
+    mon.start()
+    fmt = FP32
+    lpb = lanes_per_block(fmt)
+    n = lpb + 9
+    a, b, c = (operands(fmt, n, s) for s in (7801, 7802, 7803))
+    prog = _abort_prog(fmt)
+    keep = _keep(n, 1)
+    for which in (0, 1):
+        label = f"a SLVERR on the mask read, block {which} (data)"
+        f = Fault(dut, bench.ram, MASK_BASE, MASK_BASE + 0x10000, "rresp",
+                  which=which)
+        await bench.faulted(fmt, prog, a, b, c, n, label, f, expect="data",
+                            keep=keep)
+        mon.settled(label)
+    src = operands(fmt, 3 * n, 7804)
+    tbl = _perm_table(n, len(src), 7805)
+    for lohi, what, which in (((IA_BASE, IA_BASE + 0x10000), "table", 0),
+                              ((IA_BASE, IA_BASE + 0x10000), "table", 1),
+                              ((A_BASE, A_BASE + 0x10000), "element", 3),
+                              ((A_BASE, A_BASE + 0x10000), "element", 40)):
+        label = f"a SLVERR on a gather {what} read {which} (data)"
+        f = Fault(dut, bench.ram, *lohi, "rresp", which=which)
+        await bench.faulted(fmt, prog, src, b, c, n, label, f, expect="data",
+                            idx_a=tbl)
+        mon.settled(label)
+    mon.stop()
+
+
+@cocotb.test()
+async def abort_before_the_first_fetch(dut):
+    """VRD1's note, held: a long (or short) setup burst immediately before a
+    block's first fetch, at read latencies 0, 125 and 256. Stream c is the
+    last setup read of a program that reads all three, and the machine
+    goes to S_FETCH on the edge its last beat is taken. No burst of any
+    kind may follow it, nothing may be left on the channel, and a clean run
+    follows. Two mechanisms hold it, each alone (verifier-VC12's plants ph
+    and pi): `want` low while the main engine is not drained, and the
+    unit's quiesce in S_ABORT; its plant pe, both removed, is red here."""
+    bench = Bench(dut)
+    await bench.start()
+    if not STREAMS or IMEM_D > 1024:
+        # Its programs run past the store, so at the U50's 4,096-word
+        # store each is over 4,000 instructions: held at seq_corestr's
+        # 64-word store, where the same shapes cost a tenth.
+        dut._log.info("not on this build: held at seq_corestr")
+        return
+    mon = PortMon(dut)
+    mon.start()
+    fmt = FP32
+    n = 20
+    a, b, c = (operands(fmt, n, s) for s in (7501, 7502, 7503))
+    prog = seq.Program(fmt, _indep(IMEM_D + 136) +
+                       [seq.deposit(3), seq.deposit(4), seq.halt()],
+                       max_deposits=2)
+    for lat in (0, 125, 256):
+        bench.pin = lat
+        await bench.program(fmt, prog, a, b, c, n, f"control, latency {lat}")
+        mon.settled("control")
+        for kind, k in (("long", 1), ("long", 3), ("long", 30), ("short", 1)):
+            for base, name in ((C_BASE, "stream c (last setup read)"),
+                               (B_BASE, "stream b")):
+                label = f"latency {lat}: {name} {kind} by {k}"
+                f = Fault(dut, bench.ram, base, base + 0x10000, kind, k=k)
+                await bench.faulted(fmt, prog, a, b, c, n, label, f,
+                                    expect="length")
+                mon.settled(label)
+        await bench.program(fmt, prog, a, b, c, n,
+                            f"then clean, latency {lat}")
+    bench.pin = None
+    mon.stop()
+
+
+# The drain-time fetch faults the two cases below plant. Chosen from
+# verifier-VC12's two sweeps, run again on this tree (2026-10-05, 312 runs:
+# read depths 8 and 1, latencies 0 to 300 by 12, four faults; and B delays
+# 3 and 40 by the same latencies, two faults): 42 runs then faulted with a
+# write burst open or committed - 36 and 6, VC12's own counts - all in
+# S_DRAIN_RUN. Each list keeps several of those and a few that land
+# elsewhere, so that the cases reach what they are for at a fraction of
+# the sweep's cost; the first asserts that it still does.
+#   (read depth, latency, burst past the parse's, kind, Fault's args, error)
+DRAIN_FAULTS_C = (
+    (8, 0, 0, "rresp", dict(beat=0), "word"),
+    (8, 0, 0, "long", dict(k=1), "length"),
+    (8, 144, 5, "short", dict(k=2), "length"),     # committed
+    (8, 276, 2, "rresp", dict(beat=5), "word"),    # committed
+    (1, 60, 5, "short", dict(k=2), "length"),      # committed
+    (1, 204, 2, "rresp", dict(beat=5), "word"),    # committed
+    (1, 300, 0, "rresp", dict(beat=0), "word"),
+)
+#   (B delay, latency, burst past the parse's, kind, Fault's args, error):
+# b_delay 3 at latency 276 is the run verifier-VC12's plant pa failed
+DRAIN_FAULTS_B = (
+    (3, 0, 0, "rresp", dict(beat=0), "word"),
+    (3, 276, 2, "rresp", dict(beat=5), "word"),    # committed
+    (40, 288, 2, "rresp", dict(beat=5), "word"),   # committed
+    (40, 132, 0, "rresp", dict(beat=0), "word"),
+)
+
+
+@cocotb.test()
+async def abort_with_a_write_burst_committed(dut):
+    """A fault on a fetch burst the halt abandoned, landing in the deposit
+    drain: the abort's second rule - a write burst already committed
+    delivers its beats, from the drain producing them - and no AR or AW
+    launched after the fault, every B taken, every RLAST taken, whatever
+    was written the model's, and a clean run after. verifier-VC12's plant
+    pc, the abort leaving a drain with a burst committed, hangs here."""
+    bench = Bench(dut)
+    await bench.start()
+    if not STREAMS or IMEM_D > 1024:
+        # Its programs run past the store, so at the U50's 4,096-word
+        # store each is over 4,000 instructions: held at seq_corestr's
+        # 64-word store, where the same shapes cost a tenth.
+        dut._log.info("not on this build: held at seq_corestr")
+        return
+    mon = PortMon(dut)
+    ap = AbortProbe(dut)
+    mon.start()
+    ap.start()
+    fmt = FP32
+    n = lanes_per_block(fmt) + 5
+    a, b, c = (operands(fmt, n, s) for s in (7701, 7702, 7703))
+    prog = _drain_fault_prog(fmt)
+    img_len = len(prog.to_bytes())
+    parse = _parse_bursts(img_len)
+    lo, hi = PROG_BASE + 32, PROG_BASE + img_len
+    depth0 = bench.ram.rd_depth
+    committed = runs = 0
+    for depth, lat, plus, kind, kw, expect in DRAIN_FAULTS_C:
+        bench.ram.rd_depth = depth
+        bench.pin = lat
+        label = f"depth {depth} latency {lat}: fetch burst +{plus} {kind} {kw}"
+        f = Fault(dut, bench.ram, lo, hi, kind, which=parse + plus, **kw)
+        n_before = len(ap.rec)
+        await _fault_in_the_drain(bench, mon, fmt, prog, a, b, c, n, label,
+                                  f, expect=expect)
+        if len(ap.rec) > n_before and ap.rec[-1][1]:
+            committed += 1
+        runs += 1
+        await _clean_after(bench, fmt, label)
+    bench.ram.rd_depth = depth0
+    bench.pin = None
+    ap.stop()
+    mon.stop()
+    dut._log.info(f"faults in the drain: {runs} runs, {committed} with a "
+                  f"write burst open or committed at the fault")
+    assert committed >= 2, (
+        f"only {committed} of {runs} runs faulted with a write burst open or "
+        f"committed: the case no longer reaches what it is for")
+
+
+@cocotb.test()
+async def abort_waits_for_a_late_b(dut):
+    """The same drain-time faults against a slave whose write response comes
+    b_delay cycles after a burst's last W beat: the abort waits for every B
+    (S_ABORT's wr_bresp_left), so done never comes with a response in the
+    air. verifier-VC12's plant pa - S_ABORT's exit without that wait - is
+    green against a slave that answers at once, and red here."""
+    bench = Bench(dut)
+    await bench.start()
+    if not STREAMS or IMEM_D > 1024:
+        # Its programs run past the store, so at the U50's 4,096-word
+        # store each is over 4,000 instructions: held at seq_corestr's
+        # 64-word store, where the same shapes cost a tenth.
+        dut._log.info("not on this build: held at seq_corestr")
+        return
+    mon = PortMon(dut)
+    ap = AbortProbe(dut)
+    mon.start()
+    ap.start()
+    fmt = FP32
+    n = lanes_per_block(fmt) + 5
+    a, b, c = (operands(fmt, n, s) for s in (7701, 7702, 7703))
+    prog = _drain_fault_prog(fmt)
+    img_len = len(prog.to_bytes())
+    parse = _parse_bursts(img_len)
+    lo, hi = PROG_BASE + 32, PROG_BASE + img_len
+    runs = in_air = 0
+    for bd, lat, plus, kind, kw, expect in DRAIN_FAULTS_B:
+        bench.ram.b_delay = bd
+        bench.pin = lat
+        label = f"b_delay {bd} latency {lat}: fetch burst +{plus} {kind}"
+        f = Fault(dut, bench.ram, lo, hi, kind, which=parse + plus, **kw)
+        n_before = len(ap.rec)
+        await _fault_in_the_drain(bench, mon, fmt, prog, a, b, c, n, label,
+                                  f, expect=expect)
+        if len(ap.rec) > n_before and ap.rec[-1][1]:
+            in_air += 1
+        runs += 1
+        bench.ram.b_delay = 0
+        await _clean_after(bench, fmt, label)
+    bench.pin = None
+    ap.stop()
+    mon.stop()
+    dut._log.info(f"late B: {runs} runs, {in_air} with a write burst open or "
+                  f"committed at the fault")

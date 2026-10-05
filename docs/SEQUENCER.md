@@ -3831,9 +3831,14 @@ from such a tree.
   contract, item 5, and `S_ABORT`; `tb/test_seq_core.py`'s four `abort_`
   cases (a short and a long burst on every multi-beat read, a long one
   on every single-beat read, a read fault on the header, on an
-  instruction and on data, each followed by a clean run on the same
-  instance) and `tb/test_krnl_faults.py`'s two sequencer cases through
-  the kernel.
+  instruction and on data, most followed by a clean run on the same
+  instance - each stream's faults as a group, the fp256 constant beat's
+  data faults not at all) and `tb/test_krnl_faults.py`'s two sequencer
+  cases through the kernel; and verifier-VC12's four, committed after it
+  found each claim unheld (a data fault on the mask, a table or a
+  gathered element; a fetch fault with a write burst committed; a
+  slave's late B; a long or short last setup burst before a block's first
+  fetch), each under a monitor of the module's own port.
 - **The fetch's hooks** (built 2026-10-05). `rtl/cft_ifetch.sv` (round
   1's unit, unchanged) replaces the instruction memory: its store holds
   the program's first `IMEM_D` instructions (4,096 on the U50, where the
@@ -3851,7 +3856,10 @@ from such a tree.
   instructions reads nothing during a block and runs in exactly the
   cycles it did (`make seqcycles`' 72 rows the same before and after);
   past the store, a loop pass costs what it costs resident at read
-  latencies 0, 125 and 256 (`make seqcyclesstr`). `pc` and the skip's
+  latencies 0, 125 and 256 once a pass has run - the first pass after a
+  retarget, while the store captures the body, also waits for the
+  stream's round trip (`make seqcyclesstr`, whose rows are the passes
+  after it). `pc` and the skip's
   depth are a bit wider than log2 of the capacity, the header refuses
   past the capacity, and the open-core configurations build no stream
   (`SEQ_STREAM_D` equal to the store). Held in `tb/test_seq_core.py` at

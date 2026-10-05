@@ -109,10 +109,21 @@ authority:
    before) - and CAPS and CAPS2 to the words the plan computed for a
    seam tile; since revision 8's abort (2026-10-05) a sequencer run
    whose memory faults is held to end - a short and a long burst on
-   every one of its reads, a read fault on its header, on an instruction
-   and on data, each followed by a clean run on the same instance
-   (`test_seq_core.py`'s `abort_` cases, `test_krnl_faults.py`'s two
-   sequencer cases); since revision 8's fetch (2026-10-05) the
+   every one of its multi-beat reads and a long one on each single-beat
+   read (a one-beat burst cannot be short), a read fault on its header,
+   on an instruction and on data, most followed by a clean run on the
+   same instance (each stream's faults as a group, the fp256 constant
+   beat's data faults not at all) (`test_seq_core.py`'s `abort_` cases,
+   `test_krnl_faults.py`'s two sequencer cases) - and, since
+   verifier-VC12 found four claims no case could fail, a SLVERR on the
+   mask, a table or a gathered element completing the run, a fetch fault
+   landing with a write burst committed (the burst delivered, no AR or
+   AW after it), the abort waiting for a slave's late B, and a long or
+   short last setup burst before a block's first fetch at three
+   latencies, each under a monitor of the module's own port
+   (`abort_data_faults_on_the_mask_and_tables`,
+   `abort_with_a_write_burst_committed`, `abort_waits_for_a_late_b`,
+   `abort_before_the_first_fetch`); since revision 8's fetch (2026-10-05) the
    sequencer's unit bench runs a third time as `seq_corestr`, a
    64-word instruction store and a 2^16 capacity against a memory
    answering at 0, 125 and 256 cycles, so nearly every program in it

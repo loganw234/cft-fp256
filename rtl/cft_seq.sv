@@ -3773,10 +3773,13 @@ module cft_seq #(
                         (bank_ext_q ? 64'd0 : (64'(h_nconsts) << esz_sh));
           rd_sel  <= 2'd0;
           // Under BANK_EXT the constants have already been read from
-          // the bank, so the image is instructions alone.
-          rd_beats_left <=
-            ((bank_ext_q ? 32'd0 : (h_nconsts << esz_sh))
-             + (h_ninsns << 3) + 32'd31) >> 5;
+          // the bank, so the image is instructions alone. The bytes are
+          // summed in 64 bits: n_insns x 8 passes 32 bits from 2^29
+          // instructions, and the capacity guard allows 2^30 (verifier-
+          // VC12, 2026-10-05); the beats, at most 2^28 + 512, fit 32.
+          rd_beats_left <= 32'(
+            ((bank_ext_q ? 64'd0 : (64'(h_nconsts) << esz_sh))
+             + (64'(h_ninsns) << 3) + 64'd31) >> 5);
           rd_stream_on <= 1'b1;
           kons_left <= bank_ext_q ? 32'd0 : h_nconsts;
           insn_left <= h_ninsns;

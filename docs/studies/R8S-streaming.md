@@ -1270,6 +1270,8 @@ formal/README.md has the runs).
 
 - cft_seq's hooks, as the interface above says, then the bench
   configuration `seq_corestr` (section 8) through the whole sequencer.
+  Done in round 2: the hooks at cbce00a, and `seq_corestr` in `make sim`
+  from the same commit.
 - Probe S: whether Vivado keeps the store cascade-free
   (`cascade_height` pins it if not); the path from `take` - late, out
   of the admission - into the FIFO's read address (`rp + rd_en` into
@@ -1288,7 +1290,9 @@ formal/README.md has the runs).
   - `word` passes two 2:1 selects, not one: cft_fifo's own head bypass
     (its bypass register or its RAM's read register), then the store's
     read register or that head. Both inputs are registers either way.
-- The bench joining SIM_BENCHES, with CLAUDE.md's count.
+- The bench joining SIM_BENCHES, with CLAUDE.md's count. Done in round
+  2: `seq_corestr` joined at cbce00a, and CLAUDE.md's count was restated
+  at the merge of round 1's lanes into round 2 (fba8f4c).
 
 ## Sources and measurements
 

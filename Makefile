@@ -213,9 +213,11 @@ cycles krnlfused krnlplain simmc seqcycles:
 # cft_normseg's ports are packed vectors now, which is all 0.33 could not parse.
 # rtl/cft_ifetch.sv (revision 8's instruction fetch) is read with the
 # kernel and also elaborated on its own, at the U50's capacities and with
-# no stream, with an explicit no-latch check: until round 2 instantiates
-# it in cft_seq, `hierarchy -top cft_krnl` drops it, and a module nothing
-# elaborates is a module this gate would pass unread.
+# no stream, with an explicit no-latch check. Until round 2 instantiated
+# it in cft_seq (cbce00a) `hierarchy -top cft_krnl` dropped it, and a
+# module nothing elaborates is a module this gate would pass unread; it
+# elaborates it now, at the kernel's defaults, and the two runs of its own
+# keep the latch check and the no-stream build the defaults do not make.
 yosys-lint:
 	yosys -q -p "read_verilog -sv -I rtl rtl/cft_fpfma.sv rtl/cft_fpfma_pipe.sv \
 	  rtl/cft_opmux.sv rtl/cft_simpleops.sv rtl/cft_imul.sv rtl/cft_seedop.sv rtl/cft_csr.sv \
