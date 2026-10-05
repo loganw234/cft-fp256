@@ -3236,16 +3236,28 @@ bit is about the encoding. STX with `ra` = `rb` has one register write,
 the step's, and keeps it. (Until the send-back of 2026-09-29 this form was
 refused, a rung-3 choice taken while rung 2 had an answer.)
 
-**What a tile would need** (believed, not built). A stepped STX writes one
-register, rb, and a stepped LDX two, rd and then rb - one, when rd is rb;
-the register file has one write port. In today's scratch states the port is idle in the cycle
-the index is on the bus (`S_SCR_AD`), so a step could ride it there. Under
-R18, where a load retires through the array's queue (P1's rule), the step
-is a second producer and needs a write cycle a beat unless revision 8
-gives it another path - which is what decides this item's worth, below.
-Every tile built so far reads CAPS2[12] as zero and never reads imm on the
-indexed pair, so it would access without stepping; the loader refuses a
-non-zero step there by name.
+**What a tile would need** (believed when written; built on 2026-10-05,
+below). A stepped STX writes one register, rb, and a stepped LDX two, rd
+and then rb - one, when rd is rb; the register file has one write port.
+In the scratch states before R18 the port was idle in the cycle the index
+was on the bus (`S_SCR_AD`), so a step could ride it there. Under R18,
+where a load retires through the array's queue (P1's rule), the step is a
+second producer and needs a write cycle a beat unless revision 8 gives it
+another path - which is what decides this item's worth, below. Every tile
+built before revision 8's RTL reads CAPS2[12] as zero and never reads imm
+on the indexed pair, so it would access without stepping; the loader
+refuses a non-zero step there by name.
+
+**What a tile does** (revision 8's RTL, built 2026-10-05; "Revision 8 in
+the tile", at the end). The array computes the step, as IADD on the
+encoding, so P1 holds. A stepped STX fires IADD(rb as the bank read it,
+the step) at its own F - the request slot a store leaves free - and is a
+writer of rb: a queue slot, which every later reader of rb waits for.
+Its step costs no beat (p = 0, measured). A stepped LDX whose
+destination is not its index is followed by an internal IADD rb, rb,
+step, issued as an instruction of its own before the next word: up to
+one more instruction's beats (p up to 1, measured at about one). `ldx rX,
+rX, step` issues none, and keeps what it loaded.
 
 ### What each is worth, counted
 
@@ -3923,3 +3935,39 @@ from such a tree.
   attribute codes 5 to 7, which R21's internal codes share the
   attribute line with, are held to RNE through the kernel in
   `tb/test_krnl.py`'s `krnl_attribute_codes_5_to_7`.
+- **R22, the post-step on STX and LDX** (built 2026-10-05). imm[11:0] of
+  the indexed pair is read at last, a signed step. The array computes
+  the step: IADD of the index and the step, sign-extended to the format's
+  width - a lane's lowest word the twelve bits extended, its higher words
+  the sign - so the index is a function of the program alone at every
+  width.
+  - A stepped STX is a writer of rb, the destination its queue slot
+    names. At F, beside its store, it fires the IADD into the array's
+    request slot, which a store leaves free. Its operands are rb as the
+    bank read it (an indexed code's rb waits under R14's landed rule) and
+    the step, both registers chosen in parallel with the other sources,
+    so the forwarded operand still enters at the last level.
+  - A stepped LDX whose destination is not its index is followed by an
+    internal instruction, IADD rb, rb, with the step as operand b in
+    place of a constant. The issue admits it at the LDX's last step,
+    before the next word, which stays wanted and is taken at the IADD's
+    own last step. `ldx rX, rX, step` issues none and keeps what it
+    loaded.
+  - A step raises no flag and is masked by the active bit, as every
+    write is. Under SCRATCH_STRICT the access is judged on the index as
+    it stood, and the step goes on.
+  - The cost (`make seqcycles`' R22 rows, a block each): twenty stepped
+    stores 562.2 cycles against twenty unstepped 561.2, so p = 0; twenty
+    stepped loads 897.2 against 538.2, about one more instruction's beats
+    a load, so p = 1; and twenty stepped stores on one index 960.2, each
+    waiting for the step before it.
+  - CAPS2[12] is published on every build. Held against `seq.py` in
+    `tb/test_seq_core.py`'s five R22 cases at every configuration: a walk
+    up by stores and down by loads at every format, wrapping through 0
+    and crossing zero downward; the field's two ends; a walk under
+    SCRATCH_STRICT; `ldx rX, rX` and `stx rX, rX`; a mask and a dropped
+    lane; a dependent chain at one beat, two and a block; and the model's
+    revision-8 fuzz arm. Through the kernel in `tb/test_krnl_seq.py`'s
+    `krnl_scratch_step`. With it the tile reads the plan's words: CAPS2
+    0x00187FFB on the single, 0x001877FB on the quad's tile without R21,
+    and 0x000077F8 on the open-core configurations. VERSION stays 0xB00.

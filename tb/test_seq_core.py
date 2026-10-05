@@ -7666,9 +7666,9 @@ async def augadd_fuzz(dut):
     """The model's revision-8 fuzz arm (seq.random_program(rev8=True)),
     with R24's forms beside it: augadd, augerr and the recommended pair
     among the rest, with loops and quiet regions, whole state compared and
-    each lane's byte. A program with a stepped STX or LDX is drawn and set
-    aside until R22 is built (it needs CAPS2[12]), and so is one with
-    ACTALL (the model wakes padding lanes there; the tile does not)."""
+    each lane's byte. Since R22 is built a program may hold stepped STX
+    and LDX too; one with ACTALL is set aside (the model wakes padding
+    lanes there; the tile does not)."""
     bench = Bench(dut)
     await bench.start()
     if not EN_AUGADD:
@@ -7686,7 +7686,7 @@ async def augadd_fuzz(dut):
             insns, consts = seq.random_program(fmt, rng, rev8=True,
                                                flags=True)
             need = seq.features_rev8(insns)
-            if need & seq.FEAT_SCRATCH_STEP or not need & seq.FEAT_AUGADD:
+            if not need & seq.FEAT_AUGADD:
                 continue
             if worst_case_insns(insns) > cap or has_actall(insns):
                 continue
@@ -7705,3 +7705,205 @@ async def augadd_fuzz(dut):
         assert k == trials, f"{name}: {k} of {trials} R21 programs drawn"
         made += k
     dut._log.info(f"R21 fuzz: {made} programs, {augs} augadd/augerr words")
+
+
+# ======================================================================
+# revision 8's R22: a post-step on STX and LDX
+# ======================================================================
+#
+# docs/SEQUENCER.md, R22; docs/ROADMAP.md, "Revision 8", R22. imm[11:0] of
+# STX and LDX is a signed step: after the access, rb := rb + step modulo
+# 2^W - IADD on the encoding - except an LDX whose destination is its
+# index, which keeps what it loaded. A stepped STX fires the IADD at its
+# own F and becomes a writer of rb; a stepped LDX's step is an internal
+# IADD issued after it. Held against seq.py's _post_step, every format.
+
+def _r22_index(fmt, n, rng, base=40):
+    """Index registers as integer bit patterns: most lanes small, one in
+    five two below the top of the encoding (a +1 walk wraps through 0),
+    one in five at 1 (a -1 walk crosses zero to 2^W - 1, which the
+    modulo takes to the depth's last slot)."""
+    top = (1 << fmt.width) - 2
+    out = []
+    for i in range(n):
+        k = i % 5
+        out.append(_int_bits(fmt, top) if k == 1 else
+                   _int_bits(fmt, 1) if k == 2 else
+                   _int_bits(fmt, base + rng.randrange(SCRATCH_D)))
+    return out
+
+
+def _r22_walk(fmt, up, down):
+    """Five stepped stores walking up from r1, five stepped loads walking
+    back down from where they stopped, then r1 itself deposited: the slots
+    each lane wrote and read, and the index after ten steps at the
+    format's full width."""
+    return seq.Program(fmt, [
+        seq.repeat(5), seq.stx(0, 1, up), seq.endrep(),
+        seq.repeat(5), seq.ldx(4, 1, down), seq.deposit(4), seq.endrep(),
+        seq.deposit(1),
+        seq.halt()], max_deposits=6)
+
+
+@cocotb.test()
+async def stepped_index_walks_and_wraps(dut):
+    """A walk up by stores and back by loads at every format and over two
+    blocks and a ragged third, with lanes that wrap through 0 and cross
+    zero downward; then the field's two ends, +2047 and -2048, whose sign
+    extension reaches every word of a wide lane (the plan's plant "a
+    negative step's high word at fp64" is red here); then a walk under
+    SCRATCH_STRICT, where an access past the depth is suppressed and
+    reported and the step goes on regardless."""
+    bench = Bench(dut)
+    await bench.start()
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb = lanes_per_block(fmt)
+        n = 2 * lpb + 3
+        rng = random.Random(2201 + fmt.width)
+        a = operands(fmt, n, 2202 + fmt.width)
+        idx = _r22_index(fmt, n, rng)
+        c = operands(fmt, n, 2203 + fmt.width)
+        await bench.program(fmt, _r22_walk(fmt, 1, -1), a, idx, c, n,
+                            f"{fmt.name}: a walk by +1 and -1",
+                            lane_flags=True)
+        await bench.program(fmt, _r22_walk(fmt, seq.STEP_MAX, seq.STEP_MIN),
+                            a, idx, c, n,
+                            f"{fmt.name}: a walk by +2047 and -2048",
+                            lane_flags=True)
+        strict = seq.Program(fmt, _r22_walk(fmt, 37, -11).insns,
+                             max_deposits=6, flags=seq.FLAG_SCRATCH_STRICT)
+        want = await bench.program(fmt, strict, a, idx, c, n,
+                                   f"{fmt.name}: a walk under SCRATCH_STRICT",
+                                   lane_flags=True)
+        assert want.status & seq.STATUS_SCRATCH_RANGE, (
+            f"{fmt.name}: no access past the depth, so the case cannot see "
+            f"a step suppressed with its access")
+
+
+@cocotb.test()
+async def ldx_into_its_own_index_keeps_the_load(dut):
+    """`ldx rX, rX, step` keeps what it loaded and drops the step (R22's
+    rung 2), and `stx rX, rX, step` stores the index as it stood and then
+    steps it. A tile that stepped the load's destination, or stored the
+    stepped index, deposits other values."""
+    bench = Bench(dut)
+    await bench.start()
+    for fmt in (FP32, FP64, FP256):
+        n = lanes_per_block(fmt) + 5
+        rng = random.Random(2211 + fmt.width)
+        idx = [_int_bits(fmt, rng.randrange(8)) for _ in range(n)]
+        prog = seq.Program(fmt, [
+            seq.stx(1, 1, 3),        # scratch[r1] := r1; r1 += 3
+            seq.stx(0, 1, 2),        # scratch[r1] := r0; r1 += 2
+            seq.deposit(1),
+            seq.alu(sf.OP_IAND, 2, 1, 1),   # r2 := r1
+            seq.ldx(1, 1, -4),       # r1 := scratch[r1] (the step dropped)
+            seq.deposit(1),
+            seq.ldx(5, 2, -5),       # r5 := scratch[r2]; r2 -= 5
+            seq.ldx(6, 2, 1),        # r6 := scratch[r2]; r2 += 1
+            seq.deposit(5), seq.deposit(6), seq.deposit(2),
+            seq.halt()], max_deposits=5)
+        await bench.program(fmt, prog, operands(fmt, n, 2212), idx,
+                            operands(fmt, n, 2213), n,
+                            f"{fmt.name}: ldx rX, rX and stx rX, rX",
+                            lane_flags=True)
+
+
+@cocotb.test()
+async def stepped_index_masked_and_dropped(dut):
+    """A masked lane and a lane SETACT dropped do not step (a step is a
+    register write, masked by the active bit as every write is, P3):
+    ACTALL revives the dropped lanes and r1 is deposited, so a lane that
+    stepped while inactive deposits a different index."""
+    bench = Bench(dut)
+    await bench.start()
+    for fmt in (FP32, FP64):
+        n = lanes_per_block(fmt) + 9
+        rng = random.Random(2221 + fmt.width)
+        idx = [_int_bits(fmt, rng.randrange(64)) for _ in range(n)]
+        c = [0 if i % 4 == 1 else _int_bits(fmt, 1) for i in range(n)]
+        prog = seq.Program(fmt, [
+            seq.setact(2),           # lanes whose r2 is zero leave
+            seq.stx(0, 1, 7),
+            seq.ldx(4, 1, 1),
+            seq.actall(),
+            seq.deposit(1), seq.deposit(4),
+            seq.halt()], max_deposits=2)
+        keep = _keep(n, 5)
+        want = await bench.masked(fmt, prog, operands(fmt, n, 2222), idx, c,
+                                  n, keep,
+                                  f"{fmt.name}: steps under a mask and SETACT",
+                                  lane_flags=True)
+        dropped = [i for i in range(n) if keep[i] and c[i] == 0]
+        assert dropped, f"{fmt.name}: SETACT dropped no kept lane"
+
+
+@cocotb.test()
+async def stepped_dependent_chain(dut):
+    """Stepped stores on one index back to back, each waiting for the
+    step before it under R14's landed rule; a stepped load's internal
+    IADD followed at once by an ALU read of the index, a store indexed
+    by it and a deposit of it; at one beat, two beats and a whole block,
+    so the hazards meet the pipe at every depth."""
+    bench = Bench(dut)
+    await bench.start()
+    for fmt in (FP32, FP128):
+        lpb = lanes_per_block(fmt)
+        prog = seq.Program(fmt, [
+            seq.stx(0, 1, 1), seq.stx(0, 1, 1), seq.stx(0, 1, 1),
+            seq.ldx(4, 1, -2),
+            seq.alu(sf.OP_IADD, 5, 1, 1),    # r5 := r1 + r1, just stepped
+            seq.stx(4, 1, 5),
+            seq.ldx(6, 1, 0),
+            seq.deposit(5), seq.deposit(6), seq.deposit(1),
+            seq.halt()], max_deposits=3)
+        for n in (lpb, 2 * lpb + 1, NBEATS * lpb):
+            rng = random.Random(2231 + n + fmt.width)
+            idx = [_int_bits(fmt, rng.randrange(200)) for _ in range(n)]
+            await bench.program(fmt, prog, operands(fmt, n, 2232), idx,
+                                operands(fmt, n, 2233), n,
+                                f"{fmt.name}: a stepped chain, n={n}",
+                                lane_flags=True)
+
+
+@cocotb.test()
+async def stepped_fuzz(dut):
+    """The model's revision-8 fuzz arm (seq.random_program(rev8=True)) with
+    R24's forms beside it: stepped stores and loads among the rest, a
+    quarter of the loads into their own index, augadd and augerr where
+    the build carries them, loops and quiet regions - whole state
+    compared, each lane's byte with it."""
+    bench = Bench(dut)
+    await bench.start()
+    made = steps = 0
+    for name, trials, sizes, cap in (("fp32", 8, [9, 33, 128], 600),
+                                     ("fp64", 5, [7, 31, 64], 500),
+                                     ("fp256", 3, [3, 16], 150)):
+        fmt = FORMATS[name]
+        rng = random.Random(20261022 ^ fmt.width)
+        k = attempts = 0
+        while k < trials and attempts < trials * 200:
+            attempts += 1
+            insns, consts = seq.random_program(fmt, rng, rev8=True,
+                                               flags=True)
+            need = seq.features_rev8(insns)
+            if not need & seq.FEAT_SCRATCH_STEP:
+                continue
+            if need & seq.FEAT_AUGADD and not EN_AUGADD:
+                continue
+            if worst_case_insns(insns) > cap or has_actall(insns):
+                continue
+            try:
+                prog = seq.Program(fmt, insns, consts, rng.choice([1, 2, 4]))
+            except seq.ProgramError:
+                continue
+            n = rng.choice(sizes)
+            a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
+            await bench.program(fmt, prog, a, b, c, n,
+                                f"R22 fuzz {name} #{k} n={n}",
+                                lane_flags=True)
+            k += 1
+            steps += sum(1 for w in insns if seq.index_step(seq.decode(w)))
+        assert k == trials, f"{name}: {k} of {trials} R22 programs drawn"
+        made += k
+    dut._log.info(f"R22 fuzz: {made} programs, {steps} stepped STX/LDX")

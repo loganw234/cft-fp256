@@ -131,6 +131,8 @@ CAPS2_LANE_FLAGS = 1 << 13
 # CAPS2[11]: R21's augadd and augerr, where the build carries them
 # (EN_AUGADD; the quad's tile does not - tb/Makefile's krnlseqnoaug).
 CAPS2_AUGADD = 1 << 11
+# CAPS2[12]: R22's post-step on STX and LDX, on every build since round 2.
+CAPS2_SCRATCH_STEP = 1 << 12
 # CAPS2[14]: R24's flag control (QUIET, ENDQUIET, RAISE; STATUS[6]),
 # published since revision 8's round 2 built it.
 CAPS2_FLAG_CONTROL = 1 << 14
@@ -1622,6 +1624,58 @@ async def krnl_augadd(dut):
             seq.deposit(3), seq.deposit(4), seq.halt()], max_deposits=2)
         await run_prog(dut, axil, ram, prog, a, b, c,
                        f"{fmt.name} an R21-free program on the quad's tile",
+                       lane_flags=True)
+
+
+@cocotb.test()
+async def krnl_scratch_step(dut):
+    """Revision 8's R22 through the kernel, on the array the elementwise
+    engine shares: a stepped STX fires its IADD into that array at its own
+    F, and a stepped LDX's internal IADD follows it as an instruction of
+    its own. A walk up by stores and down by loads, with lanes that wrap
+    through 0 and cross zero downward, `ldx rX, rX` keeping its load, and
+    the index deposited, at fp32 and fp64 (a negative step's high word),
+    against the model."""
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n,
+                         reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n,
+                       reset_active_level=False, size=2 ** 21)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"), dut.ap_clk,
+                dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+                mem=ram_a.mem)
+    ram = ram_a
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+
+    assert (await axil.read_dword(CAPS2)) & CAPS2_SCRATCH_STEP, (
+        "this build's CAPS2[12] is clear, so a stepped STX or LDX would be "
+        "refused by the loader")
+    rng = random.Random(0x22)
+    for fmt, n in ((FP32, 40), (FP64, 13)):
+        top = (1 << fmt.width) - 2
+        idx = [top if i % 5 == 1 else 1 if i % 5 == 2 else 40 + rng.randrange(200)
+               for i in range(n)]
+        a = gen_stream(fmt, n, rng)
+        c = gen_stream(fmt, n, rng)
+        prog = seq.Program(fmt, [
+            seq.repeat(3), seq.stx(0, 1, 1), seq.endrep(),
+            seq.repeat(3), seq.ldx(4, 1, -1), seq.deposit(4), seq.endrep(),
+            seq.ldx(1, 1, 5),        # rd is rb: the load wins, no step
+            seq.deposit(1),
+            seq.halt()], max_deposits=4)
+        await run_prog(dut, axil, ram, prog, a, idx, c,
+                       f"{fmt.name} a stepped walk through the kernel",
                        lane_flags=True)
 
 

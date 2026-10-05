@@ -146,7 +146,14 @@ authority:
    tile, built without R21, by its own target, `krnlseqnoaug`: a named
    subset of `test_krnl_seq.py` at EN_AUGADD = 0, CAPS2[11] clear, each
    code ending its block where it stands, an R21-free program, a masked
-   one and the lane-flag block; the
+   one and the lane-flag block; since R22 (2026-10-05) the post-step on
+   STX and LDX is held against the model at every configuration - a walk
+   that wraps through 0 and crosses zero downward at every format, the
+   step field's two ends, a walk under SCRATCH_STRICT, `ldx rX, rX` and
+   `stx rX, rX`, a mask and a dropped lane, a dependent chain at three
+   block lengths and the model's revision-8 fuzz arm
+   (`test_seq_core.py`'s five R22 cases) - and through the kernel
+   (`test_krnl_seq.py`'s `krnl_scratch_step`); the
    shared normalise and alignment ladders are held
    against the private shifters they replaced; the reduction
    accumulator, the fault paths, the seed opcodes and the three trims -

@@ -397,7 +397,9 @@ module cft_krnl #(
   // R21 is built (revision 8's round 2) where EN_AUGADD says so: the
   // lanes, the sequencer's decode and CAPS2[11] all follow it.
   localparam bit FEAT_AUGADD       = EN_AUGADD;
-  localparam bit FEAT_SCRATCH_STEP = 1'b0;
+  // R22 is built (revision 8's round 2), on every build: STX and LDX's
+  // post-step, imm[11:0].
+  localparam bit FEAT_SCRATCH_STEP = 1'b1;
   // R23 is built (revision 8's round 2): the per-lane flag block, written
   // at LFLAGS_PTR after the counts when MODE[24] asks, which the CSR's
   // guard accepts from this bit.

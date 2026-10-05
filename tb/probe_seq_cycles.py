@@ -520,3 +520,66 @@ async def lane_flags_drain(dut):
             f"({out[False] / blocks:7.1f}/block)   with {out[True]:8.0f} "
             f"cyc ({out[True] / blocks:7.1f}/block)   "
             f"{(out[True] - out[False]) / blocks:+6.1f} cycles a block")
+
+
+# ---- revision 8's R22: what a step costs (the plan's p) ---------------
+#
+# Its own test, last, because every row before it is read against the
+# rows of earlier revisions: the scratch's marks outlive a run, so a run
+# that dirties more of the scratch moves the wipe of the next run that
+# uses it - measured, when these rows ran at the end of control_programs'
+# fp32 list and fp64's "stl x 20" row read 785.2 a block for 707.5.
+def step_programs():
+    # Revision 8's R22: what a step costs (the plan's p). Twenty indexed
+    # stores and twenty indexed loads, each on its own index register, as
+    # they are and stepped: a store's step fires at its own F and costs no
+    # beat, but makes the store a writer of its index and so takes a queue
+    # slot; a load's step is an internal IADD after it, up to one more
+    # instruction's beats. Then stores on ONE index, stepped, each waiting
+    # for the step before it under R14's landed rule.
+    yield ("stx x 20, independent (R22's reference)",
+           [seq.stx(0, 3 + k) for k in range(20)]
+           + [seq.deposit(0), seq.halt()], 1)
+    yield ("stx x 20, independent, stepped (R22)",
+           [seq.stx(0, 3 + k, 1) for k in range(20)]
+           + [seq.deposit(0), seq.halt()], 1)
+    yield ("ldx x 20, independent (R22's reference)",
+           [seq.ldx(23 + k % 8, 3 + k) for k in range(20)]
+           + [seq.deposit(23), seq.halt()], 1)
+    yield ("ldx x 20, independent, stepped (R22)",
+           [seq.ldx(23 + k % 8, 3 + k, 1) for k in range(20)]
+           + [seq.deposit(23), seq.halt()], 1)
+    yield ("stx x 20 on one index, stepped (R22)",
+           [seq.stx(0, 1, 1)] * 20 + [seq.deposit(0), seq.halt()], 1)
+
+
+@cocotb.test()
+async def scratch_step_per_block(dut):
+    """R22's rows, four blocks at each of fp32, fp64 and fp128, beside
+    their unstepped references. Not compared here (test_seq_core.py does
+    that), only the cost."""
+    b = Bench(dut)
+    await b.start()
+    for fmt in (FP32, FP64, FP128):
+        lpb = lanes_per_block(fmt)
+        blocks = 4
+        n = lpb * blocks
+        one = sf.one_bits(fmt)
+        pool = [one] * n
+        dut._log.info(f"== R22 {fmt.name}: {n} lanes = {blocks} blocks of {lpb}")
+        for label, insns, maxdep in step_programs():
+            prog = seq.Program(fmt, insns, consts=(), max_deposits=maxdep)
+            esz = fmt.width // 8
+            # Each row twice, the second timed: the scratch's marks then
+            # hold what this program writes and no row before it, so each
+            # row is read without its neighbour's wipe in it.
+            for timed in (False, True):
+                b._stage(fmt, prog.to_bytes(), pool, pool, pool, n,
+                         n * maxdep * esz, 4 * n)
+                b._drive_cfg(fmt, n)
+                t0 = get_sim_time("ns")
+                refused, flags, err = await b._go(4_000_000, label)
+                cyc = (get_sim_time("ns") - t0) / CLK_NS
+                assert refused == 0 and err == 0, (label, refused, err)
+            dut._log.info(f"  {label:<44} {cyc:9.0f} cycles  "
+                          f"{cyc / blocks:8.1f} /block  {cyc / n:6.2f} /lane")

@@ -473,6 +473,10 @@ module cft_seq #(
   // R21): ADD, whose operands cft_opmux shapes as (a, 1.0, c), with the
   // sideband saying which half of the pair the pipe keeps.
   localparam logic [7:0] OP_ADD = 8'd1;
+  // ...and revision 8's R22 step: IADD, the integer group's add on the
+  // encoding, which is the contract's own arithmetic for rb := rb + step
+  // modulo 2^W (docs/ROADMAP.md, R22) - the array computes it, so P1 holds.
+  localparam logic [7:0] OP_IADD = 8'd19;
 
   // ---- the scratch's geometry (revision 3, R4) -----------------------
   // SCRSW is the slot field's width and the reduction the indexed
@@ -1413,6 +1417,20 @@ module cft_seq #(
   assign c_ctrl = cur[31];
   assign c_imm  = cur[63:32];
 
+  // Revision 8's R22. The internal IADD a stepped LDX owes, admitted after
+  // its last step as if it were the next instruction: IADD rb, rb, with
+  // kb and kc set so that neither port B nor C is read, and the step in
+  // imm[11:0] - which the F stage takes as operand b in place of a
+  // constant (c_istep), sign-extended to the format's width. c_sld says
+  // cur is a stepped LDX still owing it; both are registers, set where
+  // cur is, so that neither adds logic to the admission's or the take's
+  // paths beyond an AND.
+  logic        c_istep, c_sld;
+  logic [63:0] stp_word;
+  assign stp_word = {4'b0, 1'b0, 1'b0, cur[58], cur[58], 12'b0, cur[43:32],
+                     1'b0, 1'b0, 1'b1, 1'b1, 1'b0, 3'b0, 4'b0, 4'b0,
+                     cur[19:16], cur[19:16], OP_IADD};
+
   // The constant index each operand names. Without `kx` it is the
   // operand's own 4-bit field, zero-extended; with `kx` it is a byte
   // of `imm`, which is what makes the whole bank reachable. The
@@ -1550,6 +1568,14 @@ module cft_seq #(
   //   AUGADD, AUGERR rd, ra, rb       read ra on port A and rb on port C;
   //     (revision 8, R21)             write rd - an ALU instruction's
   //                                   shape, with rb where ADD has rc
+  //   STX ra, rb, step (R22, step     as STX, and WRITES rb: its F fires
+  //     not zero)                     IADD(rb as the bank read it, the
+  //                                   step) into the array, a slot a store
+  //                                   leaves free, so it is a writer of rb
+  //   LDX rd, rb, step (R22, step     as LDX (a writer of rd), then an
+  //     not zero, rd not rb)          internal IADD rb, rb, step issued
+  //                                   after it: up to one more
+  //                                   instruction's beats (stp_word)
   //
   // R21's two exist only where EN_AUGADD is set; at 0 they are unknown
   // codes, as on revision 7, and end the block in S_DECODE.
@@ -1574,10 +1600,26 @@ module cft_seq #(
                  w[7:0] == C_RAISE || aug_fn(w);
     end
   endfunction
+  // Revision 8's R22: a stepped STX or LDX - imm[11:0], w[43:32], a signed
+  // step not zero. Zero is the instruction exactly as it always was.
+  function automatic logic stepped_fn(input [63:0] w);
+    begin
+      stepped_fn = w[31] && (w[7:0] == C_STX || w[7:0] == C_LDX) &&
+                   (w[43:32] != 12'd0);
+    end
+  endfunction
+  // ...and a stepped LDX whose destination is not its index, which owes
+  // the internal IADD (`ldx rX, rX, step` keeps what it loaded, R22)
+  function automatic logic sld_fn(input [63:0] w);
+    begin
+      sld_fn = stepped_fn(w) && (w[7:0] == C_LDX) &&
+               ({w[56], w[11:8]} != {w[58], w[19:16]});
+    end
+  endfunction
   function automatic logic writer_fn(input [63:0] w);
     begin
       writer_fn = !w[31] || w[7:0] == C_LDL || w[7:0] == C_LDX ||
-                  aug_fn(w);
+                  aug_fn(w) || (stepped_fn(w) && w[7:0] == C_STX);
     end
   endfunction
   // {c, b, a}
@@ -1648,15 +1690,19 @@ module cft_seq #(
   assign adm_ld    = adm_w[31] && (adm_w[7:0] == C_LDL || adm_w[7:0] == C_LDX);
   assign adm_fast  = adm_ld && all_fast;
   assign adm_ld_ok = FWD || !adm_ld || all_fast;
+  // R22: a stepped LDX's last step admits its internal IADD (stp_word)
+  // instead of the next word, which is neither taken nor waited for.
   assign adm_go  = (st == S_DECODE) ? (c_piped && adm_ld_ok) :
-                   (st == S_ISSUE) && !rd_hold && last_step && if_ok &&
-                   imq_piped && adm_ld_ok;
+                   (st == S_ISSUE) && !rd_hold && last_step &&
+                   (c_sld || (if_ok && imq_piped)) && adm_ld_ok;
   assign adm_take = adm_go && q_room;
-  assign adm_w   = (st == S_ISSUE) ? if_word : cur;
+  assign adm_w   = (st == S_ISSUE) ? (c_sld ? stp_word : if_word) : cur;
   assign adm_wr  = writer_fn(adm_w);
   assign q_push  = adm_take && adm_wr;
   assign adm_reads = reads_fn(adm_w);
-  assign adm_rd  = {adm_w[56], adm_w[11:8]};
+  // ...and a stepped STX's destination is rb (R22), every other writer's rd
+  assign adm_rd  = (stepped_fn(adm_w) && adm_w[7:0] == C_STX)
+                 ? {adm_w[58], adm_w[19:16]} : {adm_w[56], adm_w[11:8]};
   assign adm_ra  = {adm_w[57], adm_w[15:12]};
   assign adm_rb  = {adm_w[58], adm_w[19:16]};
   // ...port C's field is rb's for augadd and augerr (R21), which read rb
@@ -1924,6 +1970,10 @@ module cft_seq #(
   logic [2:0]    pb_rnd, pf_rnd;
   logic          pb_ka, pb_kb, pb_kc, pf_ka, pf_kb, pf_kc;
   logic          pb_ctrl, pf_ctrl;
+  // R22: a beat's step (imm[11:0]), whether it is a stepped STX's, and
+  // whether it is the internal IADD's (operand b the step)
+  logic [11:0]   pb_step, pf_step;
+  logic          pb_sstep, pf_sstep, pb_istep, pf_istep;
   logic [SCRSW-1:0] pb_slot, pf_slot;
   // ...and an LDX's two more (R18): G reads the scratch at the address
   // F formed, H fires what came back. pX_oor carries R8's suppressed
@@ -2051,7 +2101,8 @@ module cft_seq #(
   assign if_fst     = (st == S_FETCH) || (st == S_FETCH2) ||
                       (st == S_SKIP_F) || (st == S_SKIP_D) || (st == S_ISSUE);
   assign if_take    = (((st == S_FETCH2) || (st == S_SKIP_D)) && if_ok) ||
-                      ((st == S_ISSUE) && !rd_hold && last_step && if_ok);
+                      ((st == S_ISSUE) && !rd_hold && last_step && if_ok &&
+                       !c_sld);
   assign if_want    = if_fst && !if_take && !abort_any &&
                       (rd_burst_left == 9'd0) && !rd_long_q && !rd_arvalid_q;
   assign if_addr    = (st == S_ISSUE) ? pc + (PCW+1)'(1) : pc;
@@ -2637,6 +2688,15 @@ module cft_seq #(
   // request with both operands from the file (ra on A, rb on C) and its
   // flag enable on - and the sideband says which half the pipe keeps.
   logic                 pf_aug, fire_aug;
+  // R22: a stepped STX beat at F also fires its step into the array:
+  // IADD(rb as the bank read it - an indexed code's rb waits for its
+  // producer under R14's landed rule, so the bank has it - and the step at
+  // the format's width), under the beat's row, with its flag enable off.
+  // The internal IADD of a stepped LDX fires as an ALU beat with the step
+  // as operand b. Both new sources are registers, chosen in parallel with
+  // the others, so the forwarded operand still enters at the last level.
+  logic                 fire_sstep;
+  logic [BEAT_BITS-1:0] stp_vec;
   logic [BEAT_BITS-1:0] ld_val, alt_a, alt_b, alt_c;
   logic                 use_op_a, use_op_b, use_op_c;
   assign fire_alu = pf_v && !pf_ctrl;
@@ -2645,7 +2705,22 @@ module cft_seq #(
   assign pf_aug   = EN_AUGADD && pf_ctrl &&
                     (pf_op == C_AUGADD || pf_op == C_AUGERR);
   assign fire_aug = pf_v && pf_aug;
-  assign fire_go  = fire_alu || fire_ldl || fire_ldx || fire_aug;
+  assign fire_sstep = pf_v && pf_sstep;
+  assign fire_go  = fire_alu || fire_ldl || fire_ldx || fire_aug ||
+                    fire_sstep;
+  // The step sign-extended to each lane's width: a lane's lowest word holds
+  // the twelve bits sign-extended to 32, and its higher words the sign.
+  function automatic [BEAT_BITS-1:0] stepv_fn(input [11:0] s,
+                                              input [1:0] wsh);
+    logic [BEAT_BITS-1:0] r;
+    begin
+      for (int w = 0; w < WORDS; w = w + 1)
+        r[w*32 +: 32] = ((32'(w) & ((32'd1 << wsh) - 32'd1)) == 32'd0)
+                      ? {{20{s[11]}}, s} : {32{s[11]}};
+      stepv_fn = r;
+    end
+  endfunction
+  assign stp_vec  = stepv_fn(pf_step, wpe_sh);
   assign ld_val   = zero_oor_fn(scr_rdata, ph_v ? ph_oor : '0);
   // A FAST load's beat (the send-back; the rule is with the admission):
   // its value, the same ld_val the array path would fire, goes into the
@@ -2662,8 +2737,12 @@ module cft_seq #(
   assign fw_bt  = fw_x ? ph_bt : pf_bt;
   assign fw_wwe = fw_x ? wb_wwe_fn(h_act, wpe_sh) : bt_wwe;
   assign fw_pop = fw && (fw_bt == 6'({1'b0, nb_blk} - 6'd1));
-  assign alt_a    = fire_alu ? kq_a : ld_val;
-  assign alt_b    = fire_alu ? kq_b : ld_val;
+  assign alt_a    = fire_alu ? kq_a : fire_sstep ? rf_rdata_b : ld_val;
+  // pf_istep is F's context, which an LDX firing at H does not have (F is
+  // a bubble then, and its context whatever the bubble carried): it is
+  // read only under fire_alu, F's own fire.
+  assign alt_b    = (fire_sstep || (fire_alu && pf_istep)) ? stp_vec :
+                    fire_alu ? kq_b : ld_val;
   assign alt_c    = fire_alu ? kq_c : '0;
   // augadd and augerr read no constant (a control code's read set is its
   // row in the decode table), so A and C are the file's, forwarded as an
@@ -2691,7 +2770,9 @@ module cft_seq #(
   //    stays inside the memory instead of indexing past it, exactly
   //    as k_idx_* slices a constant index. For STX and LDX it is the
   //    low SCRSW bits of the lane's own `rb`, which arrives on the
-  //    register file's B read port.
+  //    register file's B read port - the index as it stands, before
+  //    any post-step (revision 8's R22: imm[11:0] of the pair is a
+  //    step, applied after the access by an IADD in the array).
   //
   //    A lane's low 32 bits sit in the FIRST word of its run of
   //    words (position p occupies banks p << wpe_sh upward, little
@@ -3339,6 +3420,9 @@ module cft_seq #(
       pb_fast <= 1'b0; pf_fast <= 1'b0; pg_fast <= 1'b0; ph_fast <= 1'b0;
       c_fast <= 1'b0; q_f0 <= 1'b0; q_f1 <= 1'b0; q_f2 <= 1'b0;
       c_quiet <= 1'b0; pb_quiet <= 1'b0; pf_quiet <= 1'b0;
+      c_istep <= 1'b0; c_sld <= 1'b0;
+      pb_step <= '0; pf_step <= '0;
+      pb_sstep <= 1'b0; pf_sstep <= 1'b0; pb_istep <= 1'b0; pf_istep <= 1'b0;
       qdepth <= '0; mark_q <= 1'b0;
       al_row <= '0; al_fen <= 1'b0; al_tag <= '0; al_aug <= 2'd0;
       pf_aa <= '0; pf_ab <= '0; pf_ac <= '0;
@@ -4250,6 +4334,8 @@ module cft_seq #(
           // stream once it has arrived. Waiting presents pc again.
           if (if_ok) begin
             cur <= if_word;
+            c_istep <= 1'b0;
+            c_sld <= sld_fn(if_word);
             st <= S_DECODE;
           end
         end
@@ -4408,15 +4494,32 @@ module cft_seq #(
               // with it. The pipe acts on or fires this instruction's
               // last two beats meanwhile. if_ok is the word's being
               // here, and is never high past the program's end.
-              pc <= pc + 1;
-              if (if_ok) begin
-                cur <= if_word;
-                if (imq_piped && q_room && adm_ld_ok)
-                  bt <= adm_first;       // R19: its first live beat
+              // R22: a stepped LDX's step, as the internal IADD that
+              // follows it, before the next word - which stays wanted
+              // (pc does not move), and is taken at the IADD's own last
+              // step. With room it is admitted now (adm_take), as the
+              // next word would be; without, S_DECODE admits it.
+              if (c_sld) begin
+                cur <= stp_word;
+                c_istep <= 1'b1;
+                c_sld <= 1'b0;
+                if (q_room)
+                  bt <= adm_first;
                 else
                   st <= S_DECODE;
-              end else
-                st <= S_FETCH;
+              end else begin
+                pc <= pc + 1;
+                if (if_ok) begin
+                  cur <= if_word;
+                  c_istep <= 1'b0;
+                  c_sld <= sld_fn(if_word);
+                  if (imq_piped && q_room && adm_ld_ok)
+                    bt <= adm_first;       // R19: its first live beat
+                  else
+                    st <= S_DECODE;
+                end else
+                  st <= S_FETCH;
+              end
             end
           end
         end
@@ -4773,6 +4876,9 @@ module cft_seq #(
         pb_quiet <= c_quiet;
         pb_bt   <= bt;
         pb_slot <= c_imm[SCRSW-1:0];
+        pb_step <= c_imm[11:0];
+        pb_sstep <= c_ctrl && (c_op == C_STX) && (c_imm[11:0] != 12'd0);
+        pb_istep <= c_istep;
         pb_kidx_a <= k_idx_a; pb_kidx_b <= k_idx_b; pb_kidx_c <= k_idx_c;
         pf_v    <= pb_v;
         pf_op   <= pb_op;
@@ -4783,6 +4889,9 @@ module cft_seq #(
         pf_quiet <= pb_quiet;
         pf_bt   <= pb_bt;
         pf_slot <= pb_slot;
+        pf_step <= pb_step;
+        pf_sstep <= pb_sstep;
+        pf_istep <= pb_istep;
         pf_aa   <= rf_raddr_a; pf_ab <= rf_raddr_b; pf_ac <= rf_raddr_c;
         // an LDX's G and H: the address F put on the scratch's read
         // port is read at G, and what came back fires at H
@@ -4801,7 +4910,8 @@ module cft_seq #(
         // request: its write is the retire block's (fw).
         if (fire_go) begin
           al_valid <= 1'b1;
-          al_op    <= fire_alu ? pf_op : fire_aug ? OP_ADD : OP_IOR;
+          al_op    <= fire_alu ? pf_op : fire_aug ? OP_ADD :
+                      fire_sstep ? OP_IADD : OP_IOR;
           al_rnd   <= fire_alu ? pf_rnd : 3'd0;
           // R21: 1 augadd, 2 augerr, 0 every other request. 9.5 fixes the
           // pair's rounding, so the attribute is not read under it.
@@ -4813,7 +4923,8 @@ module cft_seq #(
           // ...and quiet beats raise nothing (R24): the tag the beat
           // was admitted with, not the region the machine is in now.
           // R21's two raise their flags as an ALU instruction does.
-          al_fen   <= (fire_alu || fire_aug) && !pf_quiet;
+          // ...and a step raises none (R22: IADD's arithmetic, no flag).
+          al_fen   <= ((fire_alu && !pf_istep) || fire_aug) && !pf_quiet;
           al_tag   <= fire_ldx ? ph_bt : pf_bt;
         end
         if (pf_v && pf_ctrl) begin
