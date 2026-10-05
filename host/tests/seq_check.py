@@ -115,8 +115,16 @@ program, or refuses it otherwise, is a mismatch. So on a revision-7 card
 the revision-8 and flag-control corpora record their programs' refusals
 by name while every other corpus compares; on a revision-8 quad without
 R21 the augmented-addition programs are refused and the rest compare.
-Formats the device does not carry are not compared, by name. The remote
-legs' fake servers are the library's own and run as always.
+On a device that lacks AUGADD or SCRATCH_STEP the flag-control corpus is
+drawn WITHOUT its revision-8 arm, because nearly every program that arm
+touches holds an augadd, and on such a quad R24's regions and R23's block,
+which it carries, would otherwise go uncompared behind refusals that have
+nothing to do with them; the revision-8 corpus still holds those refusals
+by name. The draw stays deterministic: each corpus's generator is seeded
+from --seed and the format as always, and whether the arm is drawn is a
+function of the device's feature word alone, so one seed and one word give
+one corpus. Formats the device does not carry are not compared, by name.
+The remote legs' fake servers are the library's own and run as always.
 """
 
 import argparse
