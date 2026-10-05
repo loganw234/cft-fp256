@@ -22,8 +22,8 @@ the corpus's bytes or changes them in a commit that says so, by running
 
 TWO VERSIONS. Version 1's cases are cft-segrun's certificates, held to the
 golden writer. Version 2's (docs/CERTIFICATES.md, "Version 2") are the
-golden writer's: cft-segrun writes version 1 only until version 2's C half,
-and each version-2 case says whether a C writer must reproduce it then
+golden writer's, and since version 2's C half (parcel CV2CW) cft-segrun's
+too: each version-2 case says whether a C writer must reproduce it
 (`writers both`) or whether it is a control no writer makes, made here
 from a case by one named edit and refused by every auditor by one name
 (`writers golden`).
@@ -59,8 +59,8 @@ WHAT `check` HOLDS, for every case certificates/MANIFEST lists:
      and of the backend, which the gate fixes to software. build-id names
      the library build, which changes with every commit by design, and
      the hash line covers it. Its boundary files are the committed ones.
-     Version 2's cases marked `writers both` are named here as the C
-     writer's, from the next parcel on;
+     Version 2's cases marked `writers both` are the C writer's too, and
+     section 5b has cft-segrun remake each of them;
   6. the golden audit gives each case its expected verdict, in full from
      the initial states alone (from nothing but the sources and the
      generator where the case regenerates), and, for a case a writer

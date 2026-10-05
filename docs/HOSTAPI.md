@@ -3389,9 +3389,10 @@ response. A server refuses any other bit by name; `PROG_RUN` and
 as `PROG_RUN_EX` whatever its image's flags; a run that does not travels
 as it did, so a server's counts of every earlier call are unchanged.
 
-**What does not take it.** `cft-segrun` never asks for the block: a
-version-1 certificate has no line for it (docs/CERTIFICATES.md), so it
-waits for certificate version 2, and a marked run is certified as its
+**Who takes it.** `cft-segrun` asks for the block when it writes
+version 2 with `--lane-flags`, and wherever its image needs flag
+control (parcel CV2CW); a version-1 certificate has no line for it
+(docs/CERTIFICATES.md), and a marked run there is certified as its
 STATUS says. `cft-audit` asks for it since version 2's C half (parcel
 CV2CA, 2026-10-02), in each re-run of a version-2 run that says
 `lane-flags yes`, and holds it to the segment line's hash; its re-runs of

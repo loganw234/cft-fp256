@@ -17952,3 +17952,21 @@ What sampled points cannot see is stated in LANGUAGE.md.
 - **A variable set empty is recorded as unset,** though libcft does not read four of the writer's list that way (4b69c01 names them). With two of them a run is recorded as though they were unset. With the other two a card run writes no certificate. None changes a run's bits.
 - **Ed25519 in C,** like the golden model's, verifies public data and checks keys. It is not constant-time, which public data does not need.
 - **No revision-8 image exists.** Every revision-8 form is refused by name on revision 7's quad, and probe E's hw_emu single comes after round 2.
+
+**A restatement of the entry above, before its push** (verifier-VI5, Sonnet, on e45a2f7..bae224a: no (a), three (b)s, all text; no figure moves).
+- **(b)1, a merge that lost a parcel's text.** At 4449c49 the lead resolved docs/README.md's CERTIFICATES row by taking CV2CA's row whole. That dropped CV2CW's rewrite of the writer's clause, so the row still said cft-segrun "writes version 1 from the library". It now carries both: cft-segrun writes either version, version 2 by default, and cft-audit audits both in C. VI5 found it by a three-way comparison of the row; the docs check cannot see words.
+- **(b)2, a sentence the merges made false.** CERTIFICATES.md's opening list said cft-segrun's remake of the version-2 cases was "the next parcel's". Since CV2CW, the corpus check has cft-segrun remake the seven `writers both` cases (its section 5b; gate6 and gate7 printed it), and the sentence now says so. Git merged the old sentence without a conflict.
+- **(b)3, a restatement false of the code: five, not four.** The entry and 4b69c01 said libcft reads four of the writer's list otherwise when set empty. The fifth is CFT_XRT_MASK_ADDR_OVERRIDE, a card-day instrument. Set empty, it was on, handing the tile address 0 for argument 16, the lane mask's, on a tile at VERSION 0x900 or later. A certificate records that empty variable as unset.
+  - **Fixed in the code**, so that the instrument reads empty as unset, as every other instrument of the list does: host/src/backend_xrt.cpp tests `*mask_ov` too.
+  - So the four the entry names are again the whole list. CERTIFICATES.md says so, and when the fifth stopped.
+- **VI5's other notes, restated here:**
+  - stale sentences from before the C half, now restated: HOSTAPI's "cft-segrun never asks for the block" (it asks with `--lane-flags`, and wherever its image needs flag control); corpus.py's two comments; ROADMAP's "Its C half is next";
+  - the module's rebuild order in bindings/wasm/README.md: the native tools came first, as the rebuild's log shows; now listed so;
+  - "13 cases at read latencies 0, 125 and 256": one of them runs at 125 and 256 only, as RD1 recorded;
+  - the programs stage's 148 s is the stage's own time, of which the corpus check took 28 s. The entry's timers are mixed: golden's 720 s is pytest's; tangent's 256 s and audit's 212 s are the runner's;
+  - probe L's "the one LUT is a mapping difference" rests on an fp32 equivalence proof, and is inferred for fp256;
+  - two of verifier-VRB's closing notes were not carried, and are now:
+    - its 1: RB's departures 1 and 4 rested on RB's own timing estimate, unmeasured, and departure 4 adds a cone at the pipe's critical stage. Probe L's routed S10 and S13 measured them since: +1.815 ns and +1.361 ns with R21;
+    - its 6: probe L synthesises one pipe a rung, where the plan's part 3 says cft_lanes; its synthesis is unconstrained, as hw/synth_ooc.tcl's is; and its control's "must be equal" leans on Vivado removing R21's dead registers;
+  - verifier-VCV2CW's closing note was not carried, and is now: on Windows, a glued argv[0] form is refused `usage`, and a U+3000 after the program's name is now an argument of its own. A launcher writes neither;
+  - CERTIFICATES.md wraps two lines unevenly, at about 4448 and 4494.

@@ -1270,12 +1270,12 @@ VERSION 0xB00, and the software handle's `seq_features` is still
 answers 18, which `verify.mjs` holds against `cft.h`.
 
 The order was the one the 0.17 rebuild gives:
-1. `build.sh` (47 s);
-2. the native tools built (0 warnings), then `verify_demos.mjs --record`.
-   It failed as the order predicts, on the stale page: that page embedded
-   the 0.17 module and reported ABI 0.17;
-3. `build_demos.sh` (10 s);
-4. a second clean build of both (44 s and 10 s), with
+1. the native tools built (0 warnings, 10 s);
+2. `build.sh` (47 s);
+3. `verify_demos.mjs --record`. It failed as the order predicts, on the
+   stale page: that page embedded the 0.17 module and reported ABI 0.17;
+4. `build_demos.sh` (10 s);
+5. a second clean build of both (44 s and 10 s), with
    `bindings/wasm/build/` removed between. Every output came out byte for
    byte, and both negative-control pages too.
 

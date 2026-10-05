@@ -4759,7 +4759,8 @@ and the testing rule, as the last rounds ran.
      "Version 2", and CONFORMANCE.md's versioning, the tree at profile
      2): the reader, writer and audit in the golden model, replays by
      it, sources recompiled by cftc, Ed25519 for the signature, and the
-     corpus, verified by VCV2B over two checks. Its C half is next:
+     corpus, verified by VCV2B over two checks. **Its C half is built**
+     (parcels CV2CA and CV2CW, 2026-10-03, step 6's third wave):
      cft-segrun writing version 2, cft-audit reading both versions with
      Ed25519 in C, the device lines at ABI 0.18, and the module rebuilt.
    - **R21 and R22**, augmented addition (`augadd`/`augerr`) and stepped
