@@ -422,7 +422,8 @@ again at ABI 0.16 (2026-09-29), it reported **0x1ff1f** - revision 8's
 `SEQ_FEAT_AUGADD` and `SEQ_FEAT_SCRATCH_STEP` added - and still 1 for
 IMUL. Rebuilt at ABI 0.17 (2026-10-02), it reports **0x7ff1f** -
 revision 8's `SEQ_FEAT_LANE_FLAGS` and `SEQ_FEAT_FLAG_CONTROL` added -
-and still 1 for IMUL, which `test.mjs` holds. The module committed before the
+and still 1 for IMUL, which `test.mjs` holds; rebuilt at ABI 0.18
+(2026-10-03), the same. The module committed before the
 2026-09-24 rebuild (built 2026-09-15,
 `b558a56`) reported 0x271f - SCALAR, REDUCE_SEG and LANE_MASK clear -
 and 0 for IMUL. It computed SCALAR, REDUCE_SEG and IMUL without

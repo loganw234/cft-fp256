@@ -1256,6 +1256,53 @@ same names:
     bindings/wasm/conformance.html 1,409,956 bytes  sha256 cb45769a7249ecd9...
     bindings/wasm/demos.html         596,019 bytes  sha256 a311402001d3a122...
 
+### Rebuilt at ABI 0.18, 2026-10-03 (the step-6 round's third wave) - a certificate's device lines and profile 2
+
+The bump for certificate format version 2's device lines and profile 2,
+parcels CV2CW and CV2CA (docs/HOSTAPI.md and docs/COMPATIBILITY.md, ABI
+0.18): `cft_image_id` grows by the platform, the XRT version, the clock
+from the image's BUILD_METADATA and the card's serial, and `cft.h` gains
+the profile and language macros. Neither reaches the module. As at 0.15,
+`wasm_api.c` exports no call to `cft_get_image_id`, and it is unchanged.
+Revision 8's seam (parcel RA) decodes CAPS2's new bits only on a tile at
+VERSION 0xB00, and the software handle's `seq_features` is still
+**0x7ff1f**, which `bindings/node/test.mjs` holds. `cftw_abi_version()`
+answers 18, which `verify.mjs` holds against `cft.h`.
+
+The order was the one the 0.17 rebuild gives:
+1. `build.sh` (47 s);
+2. the native tools built (0 warnings), then `verify_demos.mjs --record`.
+   It failed as the order predicts, on the stale page: that page embedded
+   the 0.17 module and reported ABI 0.17;
+3. `build_demos.sh` (10 s);
+4. a second clean build of both (44 s and 10 s), with
+   `bindings/wasm/build/` removed between. Every output came out byte for
+   byte, and both negative-control pages too.
+
+The container was the pinned emsdk 6.0.9 image that both scripts run,
+`--inside`, with `--cpus 4`. All 15 chains of the 13 configurations came
+back unchanged. Only the module stamp, the date, the rates, the seconds
+and the tools' report lines moved.
+
+The first `make vectors` ran an MSYS2 Python without mpmath, the lead's
+slip, so `verify.mjs` stopped for want of vectors. Rerun with the
+project's Python, `make vectors` took 108 s, and then **VERIFY OK**
+(1,117 s):
+- abi 18 on both sides and 141 `cftw_*` entry points;
+- 4,015 embedded cases over 20 sets;
+- 1,068,915 cases over 168 sets through the page's bytes;
+- 832,915 over 148 sets through the wrappers themselves.
+
+`bindings/node/test.mjs` passed 137 and failed 0. `verify_demos.mjs`
+passed against the rebuilt page, and so did the WebSocket leg (`make -C
+host wstest`). Still **141 `cftw_*` exports**, the same names. The module
+is the same length as at 0.17, with other bytes:
+
+    bindings/node/cft_node.wasm      276,300 bytes  sha256 db4dc5ff8bab8bce...
+    bindings/node/cft_node.js         74,146 bytes  sha256 dc845833acf075cb...  (unchanged)
+    bindings/wasm/conformance.html 1,409,956 bytes  sha256 85d815c1c25a21c5...
+    bindings/wasm/demos.html         596,046 bytes  sha256 057535abe51c74f6...
+
 ## A second page: the five workloads, measured (2026-09-04)
 
 `demos.html` is the other deliverable of this directory. Same

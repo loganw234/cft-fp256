@@ -19,12 +19,12 @@ Live beside the conformance page at
 
 | | |
 |---|---|
-| page | `bindings/wasm/demos.html`, 596,019 bytes |
-| sha256 | `a311402001d3a1226cf45da5d988601edc4bcb64b490dad30c202535037a2e26` |
-| module | `bindings/node/cft_node.wasm`, 276,300 bytes, sha256 `6c5849bfe0c8327e37893813b118b5d98b32aa10b222d182f0ac347887c368d4` |
+| page | `bindings/wasm/demos.html`, 596,046 bytes |
+| sha256 | `057535abe51c74f6856663390086bd40d73406ef28500d5b0a28b2b7b51c3136` |
+| module | `bindings/node/cft_node.wasm`, 276,300 bytes, sha256 `db4dc5ff8bab8bcefb1ec2842629ece5c528536c3f907c26c8f5fa64c764b76e` |
 | toolchain | emcc 6.0.9 (4e4223852a0835923411059a3929907d7df1232e), `emscripten/emsdk:6.0.9@sha256:96617f27fe16421588241def73908fd348a7f9d260440ed0d00b36dcf7a063cc` |
 | configurations | 13, over 15 chains |
-| recorded | 2026-10-02, per `bindings/wasm/demos_chains.json`'s own `recorded` field - the recorder writes the UTC date, the same day on the recording desktop's clock (13:52 there, 20:52 UTC); re-recorded for the step-6 round's rebuild of the ABI 0.17 module, every chain unchanged |
+| recorded | 2026-10-03, per `bindings/wasm/demos_chains.json`'s own `recorded` field - the recorder writes the UTC date, the same day on the recording desktop's clock (about 04:08 there, 11:08 UTC); re-recorded for the step-6 round's rebuild of the ABI 0.18 module, every chain unchanged |
 
 ---
 
@@ -517,8 +517,8 @@ one fact is not paranoia when the fact is the whole argument.
 with `bindings/wasm/build/` removed between them (2026-09-07; the
 2026-09-04 page was 486,822 bytes, sha256 `e3711319627e6828...`, built
 the same way). Those are that day's bytes. The page has been rebuilt
-with the module since - the committed one is 596,019 bytes, sha256
-`a311402001d3a122...`, at ABI 0.17 - so read the pair above as the
+with the module since - the committed one is 596,046 bytes, sha256
+`057535abe51c74f6...`, at ABI 0.18 - so read the pair above as the
 2026-09-07 measurement and the table at the top of this file as what
 is in the tree.
 
