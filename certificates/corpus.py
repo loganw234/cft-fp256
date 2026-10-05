@@ -2521,9 +2521,15 @@ def hold_case2_tool(case, data, work):
         key = work / "test.key"
         if not key.exists():
             pub = cert2.ed25519.public_key(TEST_SEED).hex()
-            key.write_text(f"cft-signing-key 1\nscheme ed25519\nseed "
-                           f"{TEST_SEED.hex()}\nkey {pub}\n",
-                           encoding="ascii", newline="\n")
+            # Mode 0600, as cft_sign.py writes a key: on POSIX it refuses
+            # one its group or others can read (`usage`), and a file made
+            # under the umask is 0644 or 0664 - the gate on amd-arc-box
+            # failed here (2026-10-05); Windows has no such check.
+            fd = os.open(str(key), os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                         | getattr(os, "O_BINARY", 0), 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(f"cft-signing-key 1\nscheme ed25519\nseed "
+                        f"{TEST_SEED.hex()}\nkey {pub}\n".encode("ascii"))
         sign = ROOT / "python" / "cft_sign.py"
         s = subprocess.run([sys.executable, str(sign), "sign", "--key",
                             str(key), "--cert", str(out)],
