@@ -73,7 +73,11 @@ fragment, taken from the golden model (check.py). Such an image needs
 FLAG_CONTROL, CAPS2[14], so revision 7's targets refuse it
 `target-feature` and the software targets compile and run it; a bank the
 routines' words would take past 512 is `bank-capacity`. Until C4 such a
-system was refused `runtime-routine`, a name that went with it.
+system was refused `runtime-routine`, a name that went with it. Revision
+8's images publish FLAG_CONTROL, and their targets compile it too: they
+are PROVISIONAL until those images' depths are final, reached as
+targets.provisional(name) and by no name, list or manifest (targets.py's
+text says which values wait on what).
 
 A step whose routines, inlined, would pass 32,768 instructions - the
 largest instruction memory a tile has, a constant of the compiler's that

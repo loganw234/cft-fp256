@@ -448,6 +448,32 @@ their operands in those functions' order.
   every call takes from one bank slot is kept out of the records; a
   batch of one call is never looped; and cftc's output version went to
   4 for the loop (python/cftc's docstring).
+- **Revision 8's targets, provisional** (parcel E, 2026-10-05). Revision
+  8's three images publish flag control: the single (`u50-rev8`, with
+  R21's augmented addition), the streaming quad (`u50-rev8-quad`, without
+  it - probe L measured R21's lanes at +10,595 LUTs a tile, so the quad is
+  built without them) and the deep single (`u50-rev8-deep`).
+  python/cftc/targets.py states each from the plan (docs/ROADMAP.md,
+  "Revision 8"): 2^24 instructions a program, streamed; 512 constants and
+  1,024 deposit slots a lane; and the plan's feature words, 0x7ff1f for
+  the single and the deep build, the software handle's, and 0x77f1f for
+  the quad. So a routine image compiles for each, the same bytes as for
+  the software targets, where revision 7's refuse it `target-feature`;
+  and a step past 32,768 instructions compiles for them too, as for the
+  software targets. Their scratch depths are PROVISIONAL: the quad's
+  4,096 slots if probe K's projection of it fits, else 2,048 (the
+  plan's question 5); the single's the quad's, since it is built "at the
+  slots the quad will have"; and the deep build's 8,192, or 16,384 if
+  that closes in context. One slot past each depth is refused
+  `scratch-capacity`, by name. Until those depths are final the three are
+  not built in (the lead's decision, 2026-10-05): `--target` and
+  `cftc.get_target` refuse their names as any unknown target's, and no
+  manifest's `accepted_by` lists them - otherwise "cftc 4 u50-rev8" in a
+  manifest or a certificate would mean two images over time. Python
+  reaches them as `targets.provisional(name)`. They join the built-in
+  table at the image build, all three at once, as one output version step
+  with the committed manifests, the output record and the certificate
+  corpus remade.
 - **A division by a constant** divides by the constant rounded once:
   `x / 3` is RN(x / RN(3)), the correctly rounded x/3 wherever the
   constant is exact in the format, and never a product by a rounded
@@ -2103,7 +2129,7 @@ form; the compiler words each one for the case at hand.
 
 | name | what it refuses | its sentence |
 |---|---|---|
-| `scratch-capacity` | registers plus scratch past the target's: 2,048 slots on the U50's revision 7, 256 elsewhere | "this step keeps more values a lane than the target's registers and scratch slots hold" |
+| `scratch-capacity` | registers plus scratch past the target's: 2,048 slots on the U50's revision 7, 256 elsewhere, N on `sw:N`; on revision 8's provisional targets 4,096 and 8,192 for now ("The operations") | "this step keeps more values a lane than the target's registers and scratch slots hold" |
 | `program-capacity` | more instructions than the target's image holds | "this step lowers to more instructions than the target's image holds" |
 | `loader-bound` | more than 2^40 worst-case instructions, the loader's bound on every device | "this segment's worst case is past 2^40 instructions, the loader's bound on every device" |
 | `target-format` | a format the target does not carry | "this format is not one the target carries" |
