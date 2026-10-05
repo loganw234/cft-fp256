@@ -3437,11 +3437,12 @@ to 0xB00 for the register. This is libcft's side. No ABI step: ABI
   which `api-test` holds equal to it - and `max_insns` 2^24; 0x77f1f
   without R21.
 - **Argument 17.** Every program launch on a 0xB00 tile passes all
-  eighteen arguments, the eighteenth a one-beat buffer that is bound and
-  never asked for until a tile publishes CAPS2[13] and the lane-flags
-  item binds the caller's block. Elementwise runs and reductions pass
-  what they passed, and argument 17 goes out as zero there, which the
-  tile never reads without MODE[24].
+  eighteen arguments. At the seam the eighteenth was a one-beat buffer
+  bound and never asked for; since the lane-flags item (below, 2026-10-05)
+  it is the run's block where the run asks for one on a tile publishing
+  CAPS2[13], and that one-beat stand-in otherwise. Elementwise runs and
+  reductions pass what they passed, and argument 17 goes out as zero
+  there, which the tile never reads without MODE[24].
 - **An older libcft and a 0xB00 tile.** A library built before this map
   refuses such a tile at `cft_open`, by name: `CFT_ERR_UNSUPPORTED`,
   "hardware contract 0x00000b00 is not one this library knows (...) - the
@@ -3454,6 +3455,87 @@ to 0xB00 for the register. This is libcft's side. No ABI step: ABI
   resident probe, host/tools/cft_resident.cpp, drives XRT itself and
   reads only STATUS and FLAGS, so it would run its elementwise passes,
   which revision 8 leaves unchanged.)
+
+## The lane-flags block on XRT (revision 8's lane-flags item, 2026-10-05)
+
+R23's block (ABI 0.17, above) on a tile, the host's side of revision 8's
+round 2 (docs/ROADMAP.md, "Revision 8", part 5, item E). The tile's side
+is SEQUENCER.md's R23 and the plan: MODE[24] asks; the tile keeps a byte
+a lane, 128 slots at every format, and drains it after the counts, 32
+lanes a beat, lane j's byte at byte j of LFLAGS_PTR's buffer - so a
+block of 16 fp256 lanes starts on a 16-byte boundary and goes as half a
+beat with byte strobes - strobed by the caller's mask as the counts are.
+No ABI step: 0.17 has every field.
+
+**A run that asks** (`lane_flags` non-NULL), on an XRT device:
+- `device.c` holds it to `CFT_SEQ_FEAT_LANE_FLAGS` first, as before and
+  in the same words: a device without the bit - every tile before
+  revision 8's, and a 0xB00 map with CAPS2[13] clear, the seam's - is
+  `CFT_ERR_UNSUPPORTED`, naming the bit, before any run.
+- On a tile that publishes it, the XRT backend sets MODE[24] on every
+  tile of the run and binds, as argument 17, a buffer on the tile's D
+  master the size of its slice's lanes, a byte each, beat-rounded - never
+  the caller's own memory, for the counts' reason: a byte a lane is
+  never worth a device copy. Each tile's block lands at its slice's first
+  lane in the caller's buffer, as the counts do, across any cut of the
+  run's lanes over tiles: `host/src/lane_cut.h`'s window, `[first, first
+  + lanes)`. Nothing is merged; FLAGS and STATUS stay the OR over tiles.
+- Under a lane mask the caller's bytes are staged into the tile's buffer
+  first: the tile strobes a masked lane off, so the bytes it leaves are
+  the caller's, as R17 says. With no mask nothing goes up, since every
+  lane below a tile's N is written.
+- A resident buffer the block lands in (one carved from `cft_alloc`) is
+  told so on both sides of the run, as for the counts: its copies over
+  the block brought home and staled before, staled again after.
+- A tile that publishes CAPS2[13] and still refuses MODE[24] (STATUS[3])
+  disagrees with its own CAPS2; the refusal's sentence names MODE[24]
+  beside the image and precision causes it always named.
+
+**A run that does not ask** binds the one-beat stand-in, with MODE[24]
+clear, so every program launch on 0xB00 still passes eighteen arguments
+(0x900's lesson). **A map below 0xB00** has no LFLAGS_PTR: a block that
+reached the backend there - only a device whose CAPS2 and VERSION
+disagree could send one past `device.c` - is refused by name, "this
+bitstream's contract is 0x..., which has no LFLAGS_PTR - the per-lane
+flags block arrived at 0x00000b00", the same second line every pointer
+since 0x700 has. `CFT_XRT_TRACE` prints argument 17 as the tile holds it
+beside the buffer bound, and patterns the block's last beat past each
+tile's N with 0xCC before the run and reads it back after, the WSTRB test
+the counts have had since 2026-09-15.
+
+**How it is held, and what is not yet:**
+- `api-test`: the window over 4,000 random runs of both planners, the
+  block in half of them, covered exactly once lane for lane; and a
+  negative control that copies every tile's block to the caller's lane 0
+  - right on a single tile, wrong across a cut - caught (1,741 of 4,000,
+  measured 2026-10-05).
+- `device-test`'s lane-flags leg, on any device that publishes the bit,
+  against the software backend: under a mask with holes and with none;
+  the flag-control image's identities, its quiet region and control; and
+  an image whose lanes overflow their deposit slot and make a strict
+  access past the depth, so that [5] and [6] are each set in some lanes
+  and clear in others. The capacity legs add a page of the block a tile
+  (4,096 lanes) and one beat past it, with and without a mask. Run on the
+  software backend and through a loopback `cft-serve` (2026-10-05); two
+  plants in the software executor - a masked lane's byte written, [5]
+  dropped - each fail it by name.
+- `host/tests/seq_check.py --device <image>` runs the seven corpora
+  through the device's handle against the model, at the device's scratch
+  depth; its flag-control corpus asks for the block on every run, so on a
+  revision-8 tile it holds the tile's bytes to `seq.run`'s, lane by lane
+  - device-test holds them to the software backend's. A program needing a
+  bit the device does not publish is held refused by name instead: on a
+  revision-7 card, the revision-8 and flag-control corpora; on the quad
+  without R21, the augmented-addition programs. Measured on the software
+  backend, through a loopback `cft-serve`, at `sw:2048` and `sw:4096`,
+  and through a proxy that showed the client a revision-7 tile's word
+  (0x7f1f) and the quad's (0x77f1f) while the server computed (2026-10-05,
+  parcel E's ledger).
+- The XRT backend compiles with `XRT=1` against XRT 2.14 in cft2204 with
+  no warning, as at 6fe4a4a. No revision-8 image exists yet, so the path
+  has run on no device: probe E (an hw_emu single of the merged tree,
+  device-test's revision-8 legs on it) and the card legs are where it
+  is first run.
 
 ## The definition the library implements (certificate version 2, 2026-10-02)
 

@@ -299,16 +299,19 @@ constexpr uint32_t IDX_VERSION = 0x00000A00u;
  * LFLAGS_PTR at 0xB0/0xB4 as kernel argument 17 - R23's per-lane flag
  * block, written by the tile after the counts when MODE[24] asks for it,
  * so on the D master beside the deposits, the counts and scratch-out.
- * Every program launch on such a tile passes all EIGHTEEN arguments, the
- * eighteenth a one-beat stand-in that is bound and never asked for: no
- * tile publishes CAPS2[13] at the seam, so MODE[24] stays clear and
- * device.c refuses a run that asks for the block, by name, before it
- * gets here. The real block on XRT is the lane-flags item's (round 2).
- * The same map carries CAPS2[14:11], revision 8's four program-model
- * bits, and CAPS2[20:16], a streamed instruction capacity; the decode is
- * host/src/caps_decode.h's, and believes neither below this version.
- * Reductions and elementwise runs pass what they passed, and argument 17
- * goes out as zero there, which the tile never reads without MODE[24]. */
+ * Every program launch on such a tile passes all EIGHTEEN arguments
+ * (0x900's lesson, below). A run that asks for the block - on a tile
+ * publishing CAPS2[13], which device.c holds it to by name first - gets
+ * a buffer of its slice's lanes bound there and MODE[24] set, and each
+ * tile's block is copied to its slice's first lane in the caller's
+ * buffer as the counts are (revision 8's lane-flags item, 2026-10-05). A
+ * run that does not ask binds a one-beat stand-in the tile never writes,
+ * with MODE[24] clear. The same map carries CAPS2[14:11], revision 8's
+ * four program-model bits, and CAPS2[20:16], a streamed instruction
+ * capacity; the decode is host/src/caps_decode.h's, and believes neither
+ * below this version. Reductions and elementwise runs pass what they
+ * passed, and argument 17 goes out as zero there, which the tile never
+ * reads without MODE[24]. */
 constexpr uint32_t LFLAGS_VERSION = 0x00000B00u;
 /* The decode's own names for the same maps (host/src/caps_decode.h),
  * which this file does not use in its place: held equal here, so the two
@@ -346,6 +349,13 @@ constexpr int ARG_LFLAGS = 17;
 
 /* MODE[15]: this run belongs to cft_seq and MODE[7:0] is ignored. */
 constexpr uint32_t MODE_SEQ = 1u << 15;
+/* MODE[24] (revision 8's R23, docs/SEQUENCER.md): write the per-lane
+ * flags block at LFLAGS_PTR after the counts. Set only on a run that
+ * asked for the block. It is the lowest bit of the range every tile
+ * since the scalar guard refuses at start with STATUS[3], so a tile
+ * without CAPS2[13] asked for a block refuses the run rather than
+ * ignoring the ask - and device.c refuses first, by name. */
+constexpr uint32_t MODE_LFLAGS = 1u << 24;
 
 /* STATUS, as rtl/cft_csr.sv lays it out. Bits 4 and 5 are also
  * CFT_STATUS_DEPOSIT_OVERFLOW and CFT_STATUS_SCRATCH_RANGE in the
@@ -649,10 +659,13 @@ struct Tile {
      * passes every one of them. */
     xrt::bo     ia, ib, ic, isi, mk;
     size_t      ia_cap = 0, ib_cap = 0, ic_cap = 0, isi_cap = 0, mk_cap = 0;
-    /* And 0xB00's one (revision 8's seam): R23's per-lane flag block,
-     * argument 17 on the D master. One beat, bound on every program
-     * launch on such a tile and never asked for until a tile publishes
-     * CAPS2[13] and the lane-flags item binds the caller's block. */
+    /* And 0xB00's one (revision 8's R23): the per-lane flag block,
+     * argument 17 on the D master. Sized per run and cached by ensure_one
+     * like the counts buffer, and for the counts' reason never the
+     * caller's own memory: a byte a lane is never worth a device copy.
+     * Bound on every program launch on such a tile - a run that asks for
+     * the block gets its slice's lanes, beat-rounded, and one that does
+     * not a one-beat stand-in the tile never writes (MODE[24] clear). */
     xrt::bo     lf;
     size_t      lf_cap = 0;
     /* The compute unit's name as XRT knows it ("cft_krnl:{cft_krnl_2}"),
@@ -2909,9 +2922,18 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
     const size_t sin_bytes   = io->scratch_in_bytes;
     void *scratch_out        = io->scratch_out;
     const size_t sout_bytes  = io->scratch_out_bytes;
+    /* R23's per-lane flags block (ABI 0.17): n bytes, lane i's at byte i,
+     * or NULL. program.c held its count to n by name; held again here,
+     * as the scratch blocks are held to their shapes below, because a
+     * count this file cut by and the caller did not mean would hand a
+     * tile's bytes to another lane. */
+    uint8_t *const lane_flags = io->lane_flags;
     if (bank_bytes && !bank)
         return ST_INVALID_ARGUMENT;
     if ((sin_bytes && !scratch_in) || (sout_bytes && !scratch_out))
+        return ST_INVALID_ARGUMENT;
+    if ((io->lane_flags_bytes && !lane_flags) ||
+        (lane_flags && io->lane_flags_bytes != n))
         return ST_INVALID_ARGUMENT;
 
     Dev &D = *static_cast<Dev *>(hw);
@@ -3018,6 +3040,24 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
         return ST_UNSUPPORTED;
     }
 
+    /* And a sixth time, for R23's per-lane flags block: LFLAGS_PTR and
+     * argument 17 arrived at 0xB00, so a tile below it has nowhere to
+     * write one. device.c has already refused the block against a device
+     * that does not publish CAPS2[13] - the refusal a caller should see,
+     * naming CFT_SEQ_FEAT_LANE_FLAGS; caps_decode.h believes that bit only
+     * from 0xB00, so this is the second line of the same defence, for a
+     * device whose CAPS2 and whose VERSION disagree. */
+    if (lane_flags && D.version < LFLAGS_VERSION) {
+        char buf[256];
+        std::snprintf(buf, sizeof buf,
+                      "this bitstream's contract is 0x%08x, which has no "
+                      "LFLAGS_PTR - the per-lane flags block arrived at "
+                      "0x%08x. CAPS2 bit 13 says in advance which it is.",
+                      D.version, LFLAGS_VERSION);
+        set_err(buf);
+        return ST_UNSUPPORTED;
+    }
+
     if (n == 0) {
         if (flags) *flags = 0;
         if (bus)   *bus   = 0;
@@ -3090,6 +3130,7 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
     shape.src_elems[1] = io->idx_b ? io->idx_b_src : 0;
     shape.src_elems[2] = io->idx_c ? io->idx_c_src : 0;
     shape.src_elems[3] = io->idx_scratch_in ? io->idx_scratch_src : 0;
+    shape.has_lf = lane_flags != nullptr;
     {
         const size_t sin_want = shape.src_elems[3]
                                     ? shape.src_elems[3] * esz
@@ -3122,6 +3163,11 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
     const uint8_t *const lane_mask = io->lane_mask;
     if (lane_mask)
         idx_mode |= 1u << 23;
+    /* MODE[24] from the same pointer the block's bytes go to, for the
+     * same reason: a buffer bound without its bit, or the bit without its
+     * buffer, cannot happen. The same on every tile. */
+    if (lane_flags)
+        idx_mode |= MODE_LFLAGS;
 
     /* MODE[7:0] is not written because it is ignored: the program says
      * what to compute. So is the rounding field - every instruction
@@ -3149,7 +3195,7 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
         size_t first, lanes;
         cft_lane_win w[CFT_LANE_ROLES];
         size_t spad[3], dep_pad, cnt_pad, sin_pad, sout_pad, itab_pad[4];
-        size_t mask_pad;
+        size_t mask_pad, lf_pad;
         xrt::bo *ob[CFT_ROLE_COUNT];
     };
     std::vector<PSlice> ps(slices.size());
@@ -3173,6 +3219,18 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
          * the host did not set could only ever read as "every lane". */
         p.mask_pad = std::max(beat_round(cft_mask_bytes(p.lanes)),
                               static_cast<size_t>(32));
+        /* R23's block: the slice's lanes, a byte each, beat-rounded. The
+         * tile drains it 32 lanes a beat from its own lane 0 - lane j at
+         * byte j, so a block of 16 fp256 lanes starts on a 16-byte
+         * boundary and goes as half a beat with byte strobes - and
+         * strobes off every lane at or past its N. A drain that sent its
+         * last block's beats whole would still land inside the buffer:
+         * ensure_one's capacity is whole 4 KiB pages, and a block (128,
+         * 64, 32 or 16 bytes, on its own boundary) never crosses one. One
+         * beat, the stand-in, when the run does not ask. */
+        p.lf_pad = lane_flags ? std::max(beat_round(p.w[CFT_LANE_LF].len),
+                                         static_cast<size_t>(32))
+                              : 32u;
         for (int r = 0; r < CFT_ROLE_COUNT; r++)
             p.ob[r] = nullptr;
     }
@@ -3184,6 +3242,7 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
     auto *pcnt = reinterpret_cast<uint8_t *>(counts);
     const auto *psin = static_cast<const uint8_t *>(scratch_in);
     auto *psout = static_cast<uint8_t *>(scratch_out);
+    uint8_t *const plf = lane_flags;
     const bool trace = std::getenv("CFT_XRT_TRACE") != nullptr;
     const char *const mask_ov = std::getenv("CFT_XRT_MASK_ADDR_OVERRIDE");
 
@@ -3204,9 +3263,10 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
          * three streams, the deposit window, the two scratch blocks and
          * the four tables, each bound at its slice's window of the
          * caller's buffer on the tile the scheduler chose. The image,
-         * the bank and the counts are staged always: the image and the
-         * bank do not grow with n at all, and the counts are four bytes
-         * a lane whatever the format. */
+         * the bank, the counts and R23's per-lane flags are staged
+         * always: the image and the bank do not grow with n at all, the
+         * counts are four bytes a lane whatever the format, and the flags
+         * one. */
         t.stage = [&, i](size_t tl) {
             PSlice &p = ps[i];
             Tile &tile = D.tiles[tl];
@@ -3309,11 +3369,13 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
                 ensure_one(D, tile, tile.mk, tile.mk_cap, ARG_MASK,
                            p.mask_pad);
             }
-            /* Argument 17 on a 0xB00 map: one beat, the stand-in
-             * LFLAGS_VERSION describes. Not staged - the tile writes it
-             * only under MODE[24], which this backend never sets. */
+            /* Argument 17 on a 0xB00 map: this slice's block where the
+             * run asks for one (MODE[24]), else the one-beat stand-in the
+             * tile never writes. Never a caller's buffer: the block lands
+             * in the caller's memory ON THE HOST, as the counts do. */
             if (D.version >= LFLAGS_VERSION)
-                ensure_one(D, tile, tile.lf, tile.lf_cap, ARG_LFLAGS, 32);
+                ensure_one(D, tile, tile.lf, tile.lf_cap, ARG_LFLAGS,
+                           p.lf_pad);
 
             if (!ob[0]) {
                 size_t off = w[0].off;
@@ -3349,6 +3411,14 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
                     scratch_out && sout_bytes)
                     stage(tile.so, psout + w[CFT_LANE_SOUT].off,
                           w[CFT_LANE_SOUT].len, p.sout_pad);
+                /* R23's block on the same terms: a masked lane's byte is
+                 * the caller's (docs/SEQUENCER.md R23), and the tile
+                 * strobes it off, so the caller's bytes go first and the
+                 * tile writes the kept lanes' over them. Unmasked, every
+                 * lane below N is written and nothing goes up. */
+                if (lane_flags)
+                    stage(tile.lf, plf + w[CFT_LANE_LF].off,
+                          w[CFT_LANE_LF].len, p.lf_pad);
             }
             if (trace && p.cnt_pad > p.lanes * 4) {
                 /* The count window's staging pad - the last beat's lanes
@@ -3359,6 +3429,15 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
                 std::memset(tile.cn.map<uint8_t *>() + p.lanes * 4, 0xCC,
                             p.cnt_pad - p.lanes * 4);
                 tile.cn.sync(XCL_BO_SYNC_BO_TO_DEVICE, p.cnt_pad, 0);
+            }
+            if (trace && lane_flags && p.lf_pad > p.lanes) {
+                /* ...and the same WSTRB test for R23's block, whose last
+                 * beat is part lanes past this tile's N at every format:
+                 * the pad patterned before the run, read back after it
+                 * (the trace below). */
+                std::memset(tile.lf.map<uint8_t *>() + p.lanes, 0xCC,
+                            p.lf_pad - p.lanes);
+                tile.lf.sync(XCL_BO_SYNC_BO_TO_DEVICE, p.lf_pad, 0);
             }
             {
                 /* tile.si and tile.so are only created on an 0x800
@@ -3433,8 +3512,9 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
                 /* A card-day instrument (2026-09-15): argument 16
                  * replaced by a raw address, so that a read of it faults
                  * if the tile issues one. On a 0xB00 map argument 17
-                 * travels too, the stand-in, so the instrument changes
-                 * the one argument it names and no other. */
+                 * travels too - the run's block or the stand-in, as on
+                 * every launch - so the instrument changes the one
+                 * argument it names and no other. */
                 const uint64_t addr = std::strtoull(mask_ov, nullptr, 16);
                 xrt::run rr(tile.k);
                 rr.set_arg(0, mode);
@@ -3517,14 +3597,17 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
                     }
                     if (D.version >= LFLAGS_VERSION) {
                         /* Argument 17 as the tile holds it, beside the
-                         * stand-in's address the host bound (0xB00). */
+                         * address the host bound (0xB00): the run's block
+                         * under MODE[24], else the stand-in. */
                         const uint32_t lo = tile.k.read_register(0xB0u);
                         const uint32_t hi = tile.k.read_register(0xB4u);
                         std::fprintf(stderr, "[xrt trace]   %-6s = "
-                                     "0x%08x%08x (bound 0x%016llx)\n",
+                                     "0x%08x%08x (bound 0x%016llx, %s)\n",
                                      "LFLAGS", hi, lo,
                                      static_cast<unsigned long long>(
-                                         tile.lf.address()));
+                                         tile.lf.address()),
+                                     lane_flags ? "the run's block, MODE[24]"
+                                                : "the stand-in");
                     }
                     if (D.version >= IDX_VERSION) {
                         std::fprintf(stderr, "[xrt trace]   mask bo address "
@@ -3553,6 +3636,18 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
                                      "untouched, the strobes held; anything "
                                      "else the tile wrote through a strobe "
                                      "that was off)\n");
+                    }
+                    if (lane_flags && p.lf_pad > p.lanes) {
+                        tile.lf.sync(XCL_BO_SYNC_BO_FROM_DEVICE, p.lf_pad,
+                                     0);
+                        const uint8_t *lp = tile.lf.map<const uint8_t *>();
+                        std::fprintf(stderr, "[xrt trace] tile %zu lane-flags "
+                                     "pad bytes [%zu, %zu) after the run:",
+                                     tl, p.lanes, p.lf_pad);
+                        for (size_t k = p.lanes; k < p.lf_pad; k++)
+                            std::fprintf(stderr, " %02x", lp[k]);
+                        std::fprintf(stderr, "\n[xrt trace]   (cc = "
+                                     "untouched, the strobes held)\n");
                     }
                 } catch (const std::exception &e) {
                     std::fprintf(stderr, "[xrt trace] tile %zu register read "
@@ -3595,6 +3690,17 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
             if (counts)
                 std::memcpy(pcnt + w[CFT_LANE_CNT].off,
                             tile.cn.map<uint8_t *>(), w[CFT_LANE_CNT].len);
+            /* R23's block, on the counts' terms: this tile wrote its
+             * lanes' bytes from its own lane 0, and they go to the
+             * slice's first lane in the caller's buffer - lane_cut.h's
+             * window, which api-test holds over every cut. Nothing is
+             * merged: each byte is the one tile's that ran its lane (P2),
+             * and FLAGS and STATUS stay the OR over tiles. */
+            if (lane_flags) {
+                tile.lf.sync(XCL_BO_SYNC_BO_FROM_DEVICE, p.lf_pad, 0);
+                std::memcpy(plf + w[CFT_LANE_LF].off,
+                            tile.lf.map<uint8_t *>(), w[CFT_LANE_LF].len);
+            }
             /* The scratch-out block, on the deposit window's terms:
              * skipped when the program declares none, and a RESIDENT one
              * does not come back - an integrator's state can stay on the
@@ -3643,12 +3749,22 @@ static int cftx_program_run_impl(void *hw, int fmt, const void *image,
          * cft_program_load validated the image, so either one means the
          * device and this code disagree about something both thought was
          * settled. The run did not happen. */
+        /* A run that asked for R23's block set MODE[24], which a tile
+         * without CAPS2[13] refuses at start the same way: device.c held
+         * the run to the bit first, so a tile that publishes the bit and
+         * refuses the MODE disagrees with its own CAPS2, and the sentence
+         * names that possibility rather than leaving it to be guessed. */
         set_err("kernel REFUSED the program (STATUS 0x" + hex32(status_acc) +
                 "): either MODE selected a precision this bitstream does "
                 "not implement, or the tile rejected the program image - "
                 "too many instructions, constants or deposit slots for its "
-                "on-chip memories, or a header it did not recognise. "
-                "Nothing was computed and nothing was written." +
+                "on-chip memories, or a header it did not recognise" +
+                std::string(lane_flags
+                                ? ", or it refused MODE[24], the per-lane "
+                                  "flags block this run asked for, which "
+                                  "its CAPS2[13] publishes"
+                                : "") +
+                ". Nothing was computed and nothing was written." +
                 at_where(J));
         return ST_UNSUPPORTED;
     }

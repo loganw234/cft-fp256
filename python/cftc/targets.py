@@ -31,6 +31,53 @@ The built-in table, and where each number is stated:
                 and hw/openxc7, 16,384 / 256 / 64; formats per build, all
                 four unless a build trims them (a trimmed build is a
                 Target of its own, written in code).
+
+PROVISIONAL, and not built in: revision 8's three images (docs/ROADMAP.md,
+"Revision 8: step 6's RTL revision", part 3; parcel E, 2026-10-05). Each
+holds 2^24 instructions a program, streamed (CAPS2[20:16] = 24, the plan's
+question 2), and the U50's 1,024 deposit slots and 512 constants a lane
+(CAPS 0x19faffff, unchanged from revision 7). Each publishes revision 8's
+flag control, so the run-time division and square root (C4's routines)
+compile for each where revision 7's targets refuse them `target-feature`.
+Their feature words are the plan's, computed from rtl/cft_krnl.sv's
+assembly ("What a revision-8 U50 tile reads"), and python/tests/
+test_cftc.py holds each target to the words it decodes from:
+
+  u50-rev8       the single (rev8a), with R21: seq_features 0x7ff1f
+                 (CAPS2 0x00187ffc at 4,096 slots, 0x00187ffb at 2,048).
+                 Built "at the slots the quad will have", so its depth is
+                 the quad's.
+  u50-rev8-quad  the streaming quad WITHOUT R21: seq_features 0x77f1f,
+                 CAPS2[11] clear (CAPS2 0x001877fb at 2,048, the plan's;
+                 0x001877fc at 4,096, CAPS2[3:0] moved by the same
+                 assembly). Question 9's branch: probe L measured R21's
+                 lanes at +10,595 LUTs a tile, far past the 2,000 that
+                 would have kept the quad with them.
+  u50-rev8-deep  the deep single, with R21: seq_features 0x7ff1f, the
+                 single's words with CAPS2[3:0] at its depth (0x00187ffd
+                 at 8,192, 0x00187ffe at 16,384).
+
+Which values are provisional, and what decides each:
+  * the quad's scratch depth, 4,096 slots here, waits on probe K: 4,096 if
+    its projection of the quad fits, else 2,048 (the plan's question 5);
+    the single's follows the quad's;
+  * the deep build's, 8,192 here, waits on its closure in context: 16,384
+    if that closes, else 8,192.
+The instruction capacity, the deposit slots, the constants and the
+feature words are the plan's and not waiting on a probe.
+
+So they are kept out of BUILTIN until those depths are final (the lead's
+decision, 2026-10-05): get(), names() and the command line's --target do
+not see them - naming one is refused as any unknown target is - and no
+manifest's accepted_by lists them, so no manifest or certificate can name
+a target whose parameters will still move ("cftc 4 u50-rev8" would
+otherwise mean two images over time). Python reaches them through
+provisional(name), and compile_text(target=...) takes the Target itself.
+Joining BUILTIN is the lead's, at the image build: all three at once, as
+ONE output version step (python/cftc/outputs.py), with the committed
+manifests regenerated, the output record's block appended and the
+certificate corpus remade (`certificates/corpus.py make
+--keep-version-1`), as e45a2f7 did for cftc 4.
 """
 
 from dataclasses import dataclass
@@ -75,6 +122,10 @@ SCRATCH_DEPTH_MAX = 1 << 15         # CAPS2[3:0] is a four-bit log2
 
 SW_FEATURES = 0x7ff1f               # ABI 0.17's software handle
 TILE_FEATURES = 0x7f1f              # every tile from revision 6 on
+# revision 8 (the plan's words): every bit cft.h defines, the software
+# handle's word; and the quad's, without R21's AUGADD (CAPS2[11])
+REV8_FEATURES = 0x7ff1f
+REV8_QUAD_FEATURES = 0x77f1f
 
 
 @dataclass(frozen=True)
@@ -127,8 +178,42 @@ BUILTIN = {
 }
 
 
+# Revision 8's images, PROVISIONAL (the module's text): not built in, so
+# not reached by get(), names(), the command line or accepted_by. The
+# scratch depths wait on probe K (the quad's, and with it the single's)
+# and on the deep build's closure; the rest is the plan's.
+REV8_INSNS = 1 << 24                # CAPS2[20:16] = 24, streamed
+REV8_DEPTH = 4096                   # provisional: probe K, else 2,048
+REV8_DEEP_DEPTH = 8192              # provisional: 16,384 if that closes
+
+PROVISIONAL = {
+    "u50-rev8": Target("u50-rev8", ALL_FORMATS, REV8_INSNS, 512, REV8_DEPTH,
+                       1024, REV8_FEATURES,
+                       "docs/ROADMAP.md, revision 8's single (rev8a), with "
+                       "R21; provisional: its depth is the quad's"),
+    "u50-rev8-quad": Target("u50-rev8-quad", ALL_FORMATS, REV8_INSNS, 512,
+                            REV8_DEPTH, 1024, REV8_QUAD_FEATURES,
+                            "docs/ROADMAP.md, revision 8's streaming quad, "
+                            "without R21; provisional: its depth waits on "
+                            "probe K"),
+    "u50-rev8-deep": Target("u50-rev8-deep", ALL_FORMATS, REV8_INSNS, 512,
+                            REV8_DEEP_DEPTH, 1024, REV8_FEATURES,
+                            "docs/ROADMAP.md, revision 8's deep single, with "
+                            "R21; provisional: its depth waits on its "
+                            "closure"),
+}
+
+
+def provisional(name):
+    """A provisional target (PROVISIONAL) by name, or None. The way Python
+    and the tests reach revision 8's targets until they are built in;
+    get() never returns one."""
+    return PROVISIONAL.get(name)
+
+
 def get(name):
-    """A built-in target by name, `sw:N` included, or None."""
+    """A built-in target by name, `sw:N` included, or None. A provisional
+    target's name is not one: it is refused as any unknown name is."""
     if isinstance(name, Target):
         return name
     if name in BUILTIN:

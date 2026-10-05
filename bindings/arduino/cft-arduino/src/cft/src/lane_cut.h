@@ -38,12 +38,18 @@ enum {
     CFT_LANE_SIN, CFT_LANE_SOUT,            /* the scratch blocks */
     CFT_LANE_IA, CFT_LANE_IB, CFT_LANE_IC,  /* the streams' index tables */
     CFT_LANE_ISI,                           /* the scratch block's */
+    CFT_LANE_LF,                            /* R23's per-lane flags */
     CFT_LANE_ROLES
 };
 
 /* What a run's blocks are shaped by. `src_elems[r]` is non-zero exactly
  * when block r (a, b, c or scratch-in) is INDEXED, and is then the
- * length of its source in elements; a dense block has none. */
+ * length of its source in elements; a dense block has none. `has_lf`
+ * says the run asked for R23's per-lane flags (ABI 0.17, cft_run_args.
+ * lane_flags): a byte a lane at every format, lane i's at byte i, which
+ * a tile writes from its own lane 0 (docs/SEQUENCER.md R23 - so a block
+ * of 16 fp256 lanes starts on a 16-byte boundary) and the XRT backend
+ * copies to its slice's first lane, as it does the counts. */
 typedef struct {
     size_t n;               /* lanes in the run */
     size_t esz;             /* bytes an element */
@@ -51,6 +57,7 @@ typedef struct {
     size_t n_sin, n_sout;   /* scratch slots a lane, in and out */
     int    has_sin, has_sout;
     size_t src_elems[4];    /* a, b, c, scratch-in: 0 = dense */
+    int    has_lf;          /* the per-lane flags block asked for */
 } cft_lane_shape;
 
 /* One block's window for one slice: bytes into the caller's buffer.
@@ -103,6 +110,12 @@ static void cft_lane_windows(const cft_lane_shape *S, size_t first,
     if (S->has_sout) {
         w[CFT_LANE_SOUT].off = first * S->n_sout * esz;
         w[CFT_LANE_SOUT].len = lanes * S->n_sout * esz;
+    }
+    /* A byte a lane whatever the format: the counts' rule at a quarter of
+     * their width, never the element's. */
+    if (S->has_lf) {
+        w[CFT_LANE_LF].off = first;
+        w[CFT_LANE_LF].len = lanes;
     }
 }
 

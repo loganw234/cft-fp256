@@ -737,11 +737,13 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
                             uint32_t *flags, uint32_t *bus)
 {
     /* R23's per-lane flags block (ABI 0.17) is refused BY NAME where the
-     * device does not publish CFT_SEQ_FEAT_LANE_FLAGS: every tile built so
-     * far, whose CAPS2[13] reads zero and which refuses MODE[24] at start
-     * with STATUS[3], and a remote handle whose server's device lacks it.
-     * Unlike a mask, which a remote client compacts away, the block can
-     * only be made where the lanes ran, so neither route can stand in. */
+     * device does not publish CFT_SEQ_FEAT_LANE_FLAGS: every tile before
+     * revision 8's, and a revision-8 map whose CAPS2[13] reads zero - the
+     * seam's - each of which refuses MODE[24] at start with STATUS[3]; and
+     * a remote handle whose server's device lacks it. Unlike a mask, which
+     * a remote client compacts away, the block can only be made where the
+     * lanes ran, so neither route can stand in. A tile that publishes the
+     * bit is handed the block (backend_xrt.cpp, since 2026-10-05). */
     if (dev && io && io->lane_flags &&
         !(dev->seq.features & CFT_SEQ_FEAT_LANE_FLAGS)) {
         cft_set_error(
@@ -919,17 +921,29 @@ int cft_backend_program_run(struct cft_device *dev, int fmt,
          * brought home and staled before, and staled again after,
          * because the run may have filled one of them in between (the
          * streams and the counts carved from one buffer). Until
-         * 2026-09-25 neither happened (verifier-V7). */
+         * 2026-09-25 neither happened (verifier-V7). R23's per-lane
+         * flags block (revision 8) lands the same way, a byte a lane,
+         * and is told so on the same terms - and under a mask the backend
+         * READS the caller's bytes first, which the bring-home before
+         * makes current. */
         {
             const size_t cb = n > ((size_t)-1) / 4u ? (size_t)-1 : n * 4u;
+            uint8_t *const lf = io ? io->lane_flags : NULL;
             int rc = cft_host_out(dev, counts, cb);
             if (rc != CFT_OK)
                 return rc;
+            if (lf) {
+                rc = cft_host_out(dev, lf, n);
+                if (rc != CFT_OK)
+                    return rc;
+            }
             backend_call();
             rc = cftx_program_run(dev->hw, fmt, image, image_bytes, io,
                                   max_deposits, a, b, c, deposits, counts,
                                   n, &bd, flags, bus);
             buf_note_host_write(dev, counts, cb);
+            if (lf)
+                buf_note_host_write(dev, lf, n);
             return rc;
         }
     }

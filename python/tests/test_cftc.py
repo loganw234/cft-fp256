@@ -17,6 +17,10 @@ that argument rests on, cheap enough for the golden stage:
   manifest's shape, asm.py's round trip, the internal check refusing a
   damaged image, and the command line's exits - a source whose
   canonical form would not read back refused by name, exit 3, never 70;
+* revision 8's three targets, PROVISIONAL (parcel E): each held to the
+  plan's computed words, kept out of the built-in table, the command line
+  and accepted_by, compiling C4's routines, and refusing one slot past its
+  provisional depth by name;
 * the variational equations: an image with tangent vectors run as
   lang.run runs it, its lane block and manifest, the interleaved
   candidate offered only with tangents, scratch-capacity naming the
@@ -1280,3 +1284,196 @@ def test_version_is_the_records_last_and_the_record_holds():
     assert [v for v, _b in O.parse(bumped)][-1] == cftc.VERSION + 1
     with pytest.raises(O.RecordError):
         O.parse(text.replace("version 1\n", "version 3\n", 1))
+
+
+# ---- revision 8's targets, PROVISIONAL (parcel E, 2026-10-05) ----------------
+# cftc/targets.py's PROVISIONAL: the plan's three revision-8 images, held to
+# the plan's computed words. Not built in until their depths are final (the
+# lead's decision): get(), names(), the command line and accepted_by do not
+# see them, and cftc's output version does not move for them.
+
+REV8 = ("u50-rev8", "u50-rev8-quad", "u50-rev8-deep")
+# "What a revision-8 U50 tile reads" (docs/ROADMAP.md, "Revision 8"): CAPS
+# unchanged from revision 7; CAPS2 0x00187ffb at 2,048 slots, 0x00187ffc at
+# 4,096 and 0x001877fb without R21; seq_features 0x7ff1f, 0x77f1f without.
+PLAN_CAPS = 0x19faffff
+
+
+def _decode_b00(caps, caps2):
+    """A 0xB00 tile's words as host/src/caps_decode.h decodes them, which
+    api-test holds in C to the same words: (seq_features, max_insns,
+    max_consts, scratch depth, max_deposits)."""
+    feats = ((caps >> 4) & 0xF) | (((caps >> 28) & 0xF) << 4)
+    feats |= ((caps2 >> 4) & 0xF) << 8
+    for bit, feat in ((0x100, 0x1000), (0x200, 0x2000), (0x400, 0x4000)):
+        if caps2 & bit:
+            feats |= feat
+    feats |= ((caps2 >> 11) & 0xF) << 15
+    insns = 1 << ((caps >> 20) & 0xF)
+    if (caps2 >> 16) & 0x1F:
+        insns = 1 << ((caps2 >> 16) & 0x1F)
+    depth = 1 << (caps2 & 0xF) if caps2 & 0x10 else 0
+    return (feats, insns, 1 << ((caps >> 24) & 0xF), depth,
+            1 << ((caps >> 16) & 0xF))
+
+
+def _caps2(depth, r21):
+    """The CAPS2 a revision-8 U50 image at `depth` slots publishes: the
+    plan's 0x00187ffb with CAPS2[3:0] at the depth's log2, and CAPS2[11]
+    clear without R21."""
+    word = 0x00187ff0 | (depth.bit_length() - 1)
+    return word if r21 else word & ~0x800
+
+
+def test_the_plans_words_decode_as_the_plan_says():
+    """The transcription above, anchored to the plan's three stated words
+    and to revision 7's, through which a seam tile reads as revision 7."""
+    assert _decode_b00(PLAN_CAPS, 0x00187ffb) == \
+        (0x7ff1f, 1 << 24, 512, 2048, 1024)
+    assert _decode_b00(PLAN_CAPS, 0x00187ffc) == \
+        (0x7ff1f, 1 << 24, 512, 4096, 1024)
+    assert _decode_b00(PLAN_CAPS, 0x001877fb) == \
+        (0x77f1f, 1 << 24, 512, 2048, 1024)
+    assert _decode_b00(PLAN_CAPS, 0x000007fb) == \
+        (0x7f1f, 32768, 512, 2048, 1024)
+    assert _caps2(2048, True) == 0x00187ffb
+    assert _caps2(4096, True) == 0x00187ffc
+    assert _caps2(2048, False) == 0x001877fb
+
+
+def test_revision_8s_targets_are_the_plans_words():
+    """Each provisional target is its image's words decoded: the single and
+    the deep build with R21, 0x7ff1f, the software handle's word; the quad
+    without it, 0x77f1f, AUGADD alone apart; 2^24 instructions, 512
+    constants and 1,024 deposit slots each. Their depths are the
+    provisional values the module states: 4,096 for the quad, and the
+    single at the quad's (probe K: else 2,048 for both); 8,192 for the deep
+    build (16,384 if that closes)."""
+    single, quad, deep = (T.provisional(n) for n in REV8)
+    for t, r21 in ((single, True), (quad, False), (deep, True)):
+        assert t.formats == T.ALL_FORMATS
+        assert (t.seq_features, t.max_insns, t.max_consts, t.scratch_depth,
+                t.max_deposits) == \
+            _decode_b00(PLAN_CAPS, _caps2(t.scratch_depth, r21)), t.name
+    assert single.seq_features == deep.seq_features == 0x7ff1f == \
+        T.SW_FEATURES
+    assert quad.seq_features == 0x77f1f
+    assert single.seq_features ^ quad.seq_features == \
+        T.FEATURE_BITS["AUGADD"]
+    assert single.scratch_depth == quad.scratch_depth == 4096
+    assert deep.scratch_depth == 8192
+    for t in (single, quad, deep):
+        assert {"FLAG_CONTROL", "LANE_FLAGS", "SCRATCH_STEP"} <= \
+            set(t.features())
+    assert "AUGADD" in single.features() and "AUGADD" in deep.features()
+    assert "AUGADD" not in quad.features()
+
+
+def test_revision_8s_targets_are_not_built_in(tmp_path):
+    """Until their depths are final: not in BUILTIN, get() or names(), and
+    named on the command line or to get_target each is refused as any
+    unknown target is - exit 64 there, nothing written - and no
+    accepted_by lists one, so no manifest or certificate can name it."""
+    assert T.names() == ["sw", "u50-rev7", "u50-rev7-quad", "u50-round2",
+                         "open-core"]
+    for name in REV8:
+        assert name not in T.BUILTIN and T.get(name) is None
+        assert T.provisional(name) is T.PROVISIONAL[name]
+        with pytest.raises(ValueError, match="is not a target here"):
+            cftc.get_target(name)
+    for name in ("sw", "u50-rev7", "sw:2048", "u50-rev9"):
+        assert T.provisional(name) is None
+    from cftc import manifest as M
+    for feats in ([], ["FLAG_CONTROL"], ["AUGADD", "LANE_FLAGS"]):
+        assert not set(M.accepted_by("fp64", feats, 10, 0)) & set(REV8)
+    assert M.accepted_by("fp64", ["FLAG_CONTROL"], 10, 0) == ["sw"]
+    py = [sys.executable, str(ROOT / "python" / "cftc")]
+    r = subprocess.run(py + [str(SYSTEMS / "lorenz63-rk4-fp64.cftl"),
+                             "--steps", "2", "--target", "u50-rev8",
+                             "--out", str(tmp_path / "out")],
+                       capture_output=True, text=True)
+    assert r.returncode == 64 and "is not a target" in r.stderr, r.stderr
+    assert not (tmp_path / "out").exists()
+
+
+def _routine_for(text, name):
+    """A routine source compiled for a provisional target: FLAG_CONTROL
+    among its needs, the manifest naming the target, and accepted_by still
+    the built-in table's alone."""
+    c = cftc.compile_text(text, 2, target=T.provisional(name),
+                          source="src.cftl")
+    assert "FLAG_CONTROL" in c.features
+    assert c.accepted_by == ["sw"]
+    assert c.manifest["target"]["name"] == name
+    assert c.manifest["target"]["max_insns"] == 1 << 24
+    return c
+
+
+@pytest.mark.parametrize("case", list(ROUTINE))
+def test_routines_compile_for_the_revision_8_quad(case):
+    """The quad publishes FLAG_CONTROL, without R21, so every routine
+    source compiles for it - the image and bank the same bytes as for sw,
+    one image serving every target that takes it - where revision 7's
+    targets refuse it `target-feature`."""
+    text, _line = ROUTINE[case]
+    base = cftc.compile_text(text, 2, source="src.cftl")
+    c = _routine_for(text, "u50-rev8-quad")
+    assert c.image == base.image and c.bank == base.bank
+
+
+def test_routines_compile_for_every_revision_8_target():
+    """...and for the single and the deep build, which publish it too: the
+    target is read only for its refusals, so one source shows it."""
+    text, _line = ROUTINE["a quotient"]
+    images = {_routine_for(text, name).image for name in REV8}
+    assert images == {cftc.compile_text(text, 2, source="src.cftl").image}
+
+
+def test_program_capacity_on_revision_8s_targets():
+    """On every revision-8 target a routine image passes the feature check,
+    and the capacity after it is refused by name: program-capacity, never
+    target-feature. Each target holds 2^24 instructions (the words test),
+    and an image past that is not one a test compiles, so the refusal is
+    held at each target's own fields with its instruction capacity one
+    under the image's size; at the size itself it compiles."""
+    import dataclasses
+    text, _line = ROUTINE["a quotient"]
+    n = len(cftc.compile_text(text, 2).image_obj.insns)
+    for name in REV8:
+        t = T.provisional(name)
+        with pytest.raises(lang.Refusal) as e:
+            cftc.compile_text(text, 2,
+                              target=dataclasses.replace(t, max_insns=n - 1))
+        assert e.value.name == "program-capacity", str(e.value)
+        assert f"{n:,} instructions and {name} holds {n - 1:,}" in \
+            e.value.sentence
+        cftc.compile_text(text, 2, target=dataclasses.replace(t, max_insns=n))
+
+
+def _lane_chain(k):
+    """A state and k lane params, each read once: k + 1 scratch slots, in a
+    chain that compiles in time linear in k (a wide step's is about
+    quadratic: 36 s at 4,097 slots on the desktop, against 2.4 s here)."""
+    lines = ["system lanes", "format fp64", "state x"]
+    lines += [f"lane param p{j} = 1" for j in range(k)]
+    lines += ["next x = x + " + " + ".join(f"p{j}" for j in range(k)),
+              "step map"]
+    return "\n".join(lines) + "\n"
+
+
+@pytest.mark.parametrize("name", REV8)
+def test_scratch_capacity_one_past_each_revision_8_depth(name):
+    """One slot past each target's provisional depth is refused
+    `scratch-capacity`, by name, the sentence giving the slots needed, the
+    target and its depth; the deep build takes the quad's depth plus one."""
+    t = T.provisional(name)
+    d = t.scratch_depth
+    with pytest.raises(lang.Refusal) as e:
+        cftc.compile_text(_lane_chain(d), 1, target=t)
+    assert e.value.name == "scratch-capacity", str(e.value)
+    assert f"needs {d + 1:,} scratch slots" in e.value.sentence
+    assert f"{name} has {d:,}" in e.value.sentence
+    if name == "u50-rev8-deep":
+        quad = T.provisional("u50-rev8-quad").scratch_depth
+        c = cftc.compile_text(_lane_chain(quad), 1, target=t)
+        assert c.program.slots_used == quad + 1

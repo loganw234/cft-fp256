@@ -906,6 +906,22 @@ argument 17). ABI 0.17 already has every field and bit; docs/HOSTAPI.md,
 | Node / Browser | unchanged: the module has no XRT backend, and no source it builds changed |
 | Arduino | the vendored copy re-synced: `src/caps_decode.h`, the decode the XRT backend calls, joins it, included by nothing there (35 files with ABI 0.18's `src/xclbin_clock.h`) |
 
+### Revision 8's lane-flags block on XRT (2026-10-05, no ABI step)
+
+The host's side of R23 on a tile (docs/HOSTAPI.md, "The lane-flags block
+on XRT"): a run asking for the block on a tile that publishes CAPS2[13]
+gets it, MODE[24] set and each tile's bytes copied to its slice's first
+lane, as the counts are. No tile publishes the bit yet, so on every
+device that exists every call behaves as it did.
+
+| surface | status |
+|---|---|
+| hardware | no image: the RTL is round 2's (parcel C); a revision-8 image is the first that can take the block |
+| XRT | the block on a 0xB00 tile publishing CAPS2[13]: argument 17 the slice's buffer, MODE[24] set, the caller's bytes staged under a mask, each tile's block copied to its lanes' offset. A run that does not ask passes the one-beat stand-in with MODE[24] clear, eighteen arguments as before. Refused by name, as before, on a device without the bit; a block on a map below 0xB00 refused by name in the backend too. Compiled with XRT=1 in cft2204 with no warning; run on no device yet (probe E and the card legs are the lead's) |
+| C (`cft.h`) | unchanged. `api-test` holds the block's window over every cut, with a negative control; device-test's lane-flags leg gains a run with no mask, the per-lane deposit overflow and strict range, and a page of the block a tile in its capacity legs (software and loopback, 2026-10-05) |
+| remote | no frame change: a server fronting such a tile serves the block through `PROG_RUN_EX`'s bit 1, as it serves the software backend's |
+| Arduino | the vendored copy re-synced (`src/lane_cut.h`, `src/device.c`, `src/backend.h`; still 35 files) |
+
 ### ABI 0.18 (2026-10-02): certificate version 2's device lines
 
 The library's side of certificate format version 2's provenance

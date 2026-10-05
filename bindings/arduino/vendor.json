@@ -41,7 +41,7 @@
     {
       "source": "host/src/backend.h",
       "dest": "src/cft/src/backend.h",
-      "sha256": "57777c6746af43d8817dd5dc1df07292e1d4fe5b2ee86d4f9e958df4c11184e0"
+      "sha256": "e6f90ee8c900f2a999c56b26a6174dbe63f4cfde344edec143f1d60a826774b5"
     },
     {
       "source": "host/src/backend_remote.c",
@@ -86,7 +86,7 @@
     {
       "source": "host/src/device.c",
       "dest": "src/cft/src/device.c",
-      "sha256": "6131fe4fd114fcd9054bc3db9fcf31a824164626052607136605bee75aed6455"
+      "sha256": "96c1304779788ac3761900ce572e4ee163129dfaedf80ef0a169939c1366a0d7"
     },
     {
       "source": "host/src/divfull_images.h",
@@ -106,7 +106,7 @@
     {
       "source": "host/src/lane_cut.h",
       "dest": "src/cft/src/lane_cut.h",
-      "sha256": "5f2e7a5d24baca9f979c86f8465215524179ea1389b7f0ecd58a9ba9dd3c09d7"
+      "sha256": "0c503dae8b1156047a9fb58b2626e783265e6f8b23465ba34fc9bd3adb3bad15"
     },
     {
       "source": "host/src/mask_bits.h",

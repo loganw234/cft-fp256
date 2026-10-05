@@ -344,8 +344,10 @@ typedef struct cft_seq_run_io {
     const uint8_t *lane_mask; size_t lane_mask_bytes;
     /* ABI 0.17, appended (docs/SEQUENCER.md R23): the per-lane flags
      * block, n bytes, or NULL. device.c refuses it by name on a device
-     * that does not publish CFT_SEQ_FEAT_LANE_FLAGS - every tile so far -
-     * so a backend that sees one writes a byte a lane the caller has */
+     * that does not publish CFT_SEQ_FEAT_LANE_FLAGS - every tile before
+     * revision 8's - so a backend that sees one writes a byte a lane the
+     * caller has: the XRT backend from each tile's block, copied to its
+     * slice's first lane as the counts are (lane_cut.h), never bound */
     uint8_t *lane_flags; size_t lane_flags_bytes;
 } cft_seq_run_io;
 

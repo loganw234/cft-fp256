@@ -4411,11 +4411,11 @@ out:
 }
 
 /* ABI 0.17's per-lane flags (docs/SEQUENCER.md R23) and revision 8's
- * flag control (R24), device against software, under a mask with holes.
- * Four claims, and they fail differently:
+ * flag control (R24), device against software. Six claims, and they fail
+ * differently:
  *
- *   1. the two backends agree byte for byte - deposits, FLAGS, STATUS
- *      and the block;
+ *   1. the two backends agree byte for byte under a mask with holes -
+ *      deposits, counts, FLAGS, STATUS and the block;
  *   2. the block's identities hold on the device: over the lanes the
  *      caller has, the OR of the bytes' [4:0] is FLAGS, of [6:5] is
  *      STATUS[5:4], and of [7] is STATUS[6], the mark;
@@ -4428,13 +4428,27 @@ out:
  *      invalid - the inputs are finite and the raise's operand is ANDed
  *      with 0x9E - so no lane's byte and not FLAGS may carry it. The
  *      same image without the region is the control: invalid in every
- *      kept lane's byte, so the claim could have failed.
+ *      kept lane's byte, so the claim could have failed;
+ *   5. the same image with no mask: the two backends agree, every lane's
+ *      byte is written and the identities hold - the run whose block an
+ *      XRT tile writes without the caller's bytes staged under it first
+ *      (backend_xrt.cpp stages them only under a mask);
+ *   6. a lane's two reports, which the image above cannot raise: an image
+ *      whose lanes overflow their one deposit slot where b is not zero
+ *      ([5]) and make a strict access past the depth where c's index
+ *      says so ([6]), under the mask and without it. The two backends
+ *      agree, counts included, the identities hold, and where the run has
+ *      eight lanes or more each bit is set in some kept lanes and clear
+ *      in others - so [6:5]'s identity is held on bits that are set, and
+ *      a block that reported every lane, or none, would differ.
  *
  * Where the device does not publish CFT_SEQ_FEAT_LANE_FLAGS the block is
  * refused, by name, before any run - and that refusal is scored here.
  * Where it publishes the block and not CFT_SEQ_FEAT_FLAG_CONTROL, claims
- * 1 to 3 are held on an image with neither the raise nor the region,
- * and the rest is NOT COMPARED, by name. */
+ * 1 to 3 and 5 are held on an image with neither the raise nor the
+ * region, and claim 4 is NOT COMPARED, by name; claim 6 needs the scratch
+ * and its strict range, and is NOT COMPARED, by name, where either is
+ * absent. */
 static void check_lane_flags(cft_device *sw, cft_device *hw, cft_format fmt,
                              size_t n)
 {
@@ -4443,7 +4457,7 @@ static void check_lane_flags(cft_device *sw, cft_device *hw, cft_format fmt,
     const int ebits = LAYOUT[(int)fmt].exp_bits;
     uint8_t img[512], konst[3 * MAXE];
     uint64_t ins[8], ctl[6];
-    size_t bytes, cbytes = 0, i;
+    size_t bytes, cbytes = 0, rbytes, i;
     cft_caps hc;
     uint8_t *a = (uint8_t *)malloc(n * esz);
     uint8_t *b = (uint8_t *)malloc(n * esz);
@@ -4452,20 +4466,27 @@ static void check_lane_flags(cft_device *sw, cft_device *hw, cft_format fmt,
     uint8_t *l_sw = (uint8_t *)malloc(n);
     uint8_t *l_hw = (uint8_t *)malloc(n);
     uint8_t *mask = (uint8_t *)malloc((n + 7) / 8);
-    uint8_t ctlimg[512];
-    cft_program *ps = NULL, *ph = NULL, *pc = NULL;
+    /* claim 6's operands: b with zeros, so that some lanes do not
+     * overflow, and c an index a lane, in range or past the depth */
+    uint8_t *b6 = (uint8_t *)malloc(n * esz);
+    uint8_t *c6 = (uint8_t *)malloc(n * esz);
+    uint32_t *k_sw = (uint32_t *)malloc(n * sizeof(uint32_t));
+    uint32_t *k_hw = (uint32_t *)malloc(n * sizeof(uint32_t));
+    uint8_t ctlimg[512], rimg[512];
+    cft_program *ps = NULL, *ph = NULL, *pc = NULL, *ps6 = NULL, *ph6 = NULL;
     cft_run_args A;
     uint32_t fl_sw = 0, fl_hw = 0, bus_sw = 0, bus_hw = 0, fl = 0, bus = 0;
     uint32_t or_lo = 0, or_mid = 0, or_mark = 0;
     cft_status st;
     size_t masked_lanes = 0, marked = 0, ninsns;
-    int control = 0;
+    int control = 0, pass6;
 
     memset(&hc, 0, sizeof hc);
     hc.struct_size = sizeof hc;
     if (cft_get_caps(hw, &hc) != CFT_OK)
         memset(&hc, 0, sizeof hc);
-    if (!a || !b || !d_sw || !d_hw || !l_sw || !l_hw || !mask) {
+    if (!a || !b || !d_sw || !d_hw || !l_sw || !l_hw || !mask || !b6 ||
+        !c6 || !k_sw || !k_hw) {
         printf("  FAIL seq lane flags: out of memory\n");
         failures++;
         goto out;
@@ -4531,28 +4552,32 @@ static void check_lane_flags(cft_device *sw, cft_device *hw, cft_format fmt,
         goto out;
     }
 
-#define LF_RUN(prog_, dst_, lf_, flo_, buso_)                          \
+    /* One run, its outputs patterned first: the deposits (one slot a
+     * lane in every image here), the counts and the block, so that a
+     * masked lane's untouched bytes are told from written ones. */
+#define LF_RUN(prog_, msk_, bin_, cin_, dst_, cnt_, lf_, flo_, buso_)  \
     do {                                                               \
         memset(&A, 0, sizeof A);                                       \
         A.struct_size = sizeof A;                                      \
-        A.a = a; A.b = b; A.c = b;                                     \
+        A.a = a; A.b = (bin_); A.c = (cin_);                           \
         A.n = n;                                                       \
         A.deposits = (dst_);                                           \
+        A.counts = (cnt_);                                             \
         A.flags_out = (flo_);                                          \
         A.bus_out = (buso_);                                           \
-        A.lane_mask = mask;                                            \
-        A.lane_mask_bytes = (n + 7) / 8;                               \
+        A.lane_mask = (msk_);                                          \
+        A.lane_mask_bytes = (msk_) ? (n + 7) / 8 : 0;                  \
         A.lane_flags = (lf_);                                          \
-        A.lane_flags_bytes = (lf_) ? n : 0;                            \
+        A.lane_flags_bytes = n;                                        \
         memset((dst_), 0x5a, n * esz);                                 \
-        if (lf_)                                                       \
-            memset((lf_), 0x5a, n);                                    \
+        memset((cnt_), 0x5a, n * sizeof(uint32_t));                    \
+        memset((lf_), 0x5a, n);                                        \
         st = cft_program_run_ex((prog_), &A);                          \
     } while (0)
 
     if (!(hc.seq_features & CFT_SEQ_FEAT_LANE_FLAGS)) {
         /* refused by name, before any run */
-        LF_RUN(ph, d_hw, l_hw, &fl, &bus);
+        LF_RUN(ph, mask, b, b, d_hw, k_hw, l_hw, &fl, &bus);
         checks++;
         if (st != CFT_ERR_UNSUPPORTED ||
             !strstr(cft_last_error(), "CFT_SEQ_FEAT_LANE_FLAGS")) {
@@ -4572,7 +4597,7 @@ static void check_lane_flags(cft_device *sw, cft_device *hw, cft_format fmt,
     }
 
     /* 1. software against the device */
-    LF_RUN(ps, d_sw, l_sw, &fl_sw, &bus_sw);
+    LF_RUN(ps, mask, b, b, d_sw, k_sw, l_sw, &fl_sw, &bus_sw);
     checks++;
     if (st != CFT_OK) {
         printf("  FAIL seq lane flags: the software backend refused the run "
@@ -4580,7 +4605,7 @@ static void check_lane_flags(cft_device *sw, cft_device *hw, cft_format fmt,
         failures++;
         goto out;
     }
-    LF_RUN(ph, d_hw, l_hw, &fl_hw, &bus_hw);
+    LF_RUN(ph, mask, b, b, d_hw, k_hw, l_hw, &fl_hw, &bus_hw);
     checks++;
     if (st != CFT_OK) {
         printf("  FAIL seq lane flags: the device refused the run (%s: %s)\n",
@@ -4590,12 +4615,15 @@ static void check_lane_flags(cft_device *sw, cft_device *hw, cft_format fmt,
     }
     checks++;
     if (memcmp(d_sw, d_hw, n * esz) != 0 || memcmp(l_sw, l_hw, n) != 0 ||
+        memcmp(k_sw, k_hw, n * sizeof(uint32_t)) != 0 ||
         fl_sw != fl_hw || bus_sw != bus_hw) {
         printf("  FAIL seq lane flags: the device and the software backend "
                "differ (FLAGS 0x%02x / 0x%02x, STATUS 0x%08x / 0x%08x, "
-               "block %s)\n", (unsigned)fl_hw, (unsigned)fl_sw,
+               "block %s, counts %s)\n", (unsigned)fl_hw, (unsigned)fl_sw,
                (unsigned)bus_hw, (unsigned)bus_sw,
-               memcmp(l_sw, l_hw, n) ? "differs" : "equal");
+               memcmp(l_sw, l_hw, n) ? "differs" : "equal",
+               memcmp(k_sw, k_hw, n * sizeof(uint32_t)) ? "differ"
+                                                         : "equal");
         failures++;
     }
 
@@ -4645,50 +4673,235 @@ static void check_lane_flags(cft_device *sw, cft_device *hw, cft_format fmt,
         printf("  seq lane flags: %lu lanes, %lu of them masked, device == "
                "software, identities hold, masked bytes untouched\n",
                (unsigned long)n, (unsigned long)masked_lanes);
+    } else {
+        checks++;
+        if ((fl_hw & 1u) || (or_lo & 1u)) {
+            printf("  FAIL seq lane flags: invalid reached FLAGS or a lane's "
+                   "byte, and only the quiet region's multiply raises it\n");
+            failures++;
+        }
+        st = cft_program_load(hw, ctlimg, cbytes, &pc);
+        checks++;
+        if (st != CFT_OK) {
+            printf("  FAIL seq lane flags: the device refused the control "
+                   "image (%s: %s)\n", cft_strerror(st), cft_last_error());
+            failures++;
+            goto out;
+        }
+        LF_RUN(pc, mask, b, b, d_hw, k_hw, l_hw, &fl, &bus);
+        checks++;
+        if (st != CFT_OK || !(fl & 1u)) {
+            printf("  FAIL seq lane flags: the control - the image without "
+                   "its region - did not raise invalid (%s, FLAGS 0x%02x), "
+                   "so claim 4 could not have failed\n", cft_strerror(st),
+                   (unsigned)fl);
+            failures++;
+        } else {
+            for (i = 0; i < n; i++)
+                if (((mask[i >> 3] >> (i & 7u)) & 1) && !(l_hw[i] & 1u)) {
+                    printf("  FAIL seq lane flags: the control's lane %lu "
+                           "does not carry invalid\n", (unsigned long)i);
+                    failures++;
+                    break;
+                }
+        }
+        printf("  seq lane flags: %lu lanes, %lu masked, %lu marked, device "
+               "== software, identities hold (FLAGS 0x%02x, STATUS 0x%08x), "
+               "masked bytes untouched, the region silent and its control "
+               "loud\n", (unsigned long)n, (unsigned long)masked_lanes,
+               (unsigned long)marked, (unsigned)fl_hw, (unsigned)bus_hw);
+    }
+
+    /* 5. no mask: every lane is the caller's, so every byte is written */
+    {
+        size_t unwritten = 0;
+        uint32_t lo5 = 0, mid5 = 0, mark5 = 0;
+        LF_RUN(ps, NULL, b, b, d_sw, k_sw, l_sw, &fl_sw, &bus_sw);
+        checks++;
+        if (st != CFT_OK) {
+            printf("  FAIL seq lane flags, no mask: the software backend "
+                   "refused the run (%s: %s)\n", cft_strerror(st),
+                   cft_last_error());
+            failures++;
+            goto out;
+        }
+        LF_RUN(ph, NULL, b, b, d_hw, k_hw, l_hw, &fl_hw, &bus_hw);
+        checks++;
+        if (st != CFT_OK) {
+            printf("  FAIL seq lane flags, no mask: the device refused the "
+                   "run (%s: %s)\n", cft_strerror(st), cft_last_error());
+            failures++;
+            goto out;
+        }
+        for (i = 0; i < n; i++) {
+            unwritten += l_hw[i] == 0x5a;
+            lo5 |= l_hw[i] & 0x1Fu;
+            mid5 |= (l_hw[i] >> 5) & 3u;
+            mark5 |= (l_hw[i] >> 7) & 1u;
+        }
+        CHECK(memcmp(d_sw, d_hw, n * esz) == 0 && memcmp(l_sw, l_hw, n) == 0 &&
+              memcmp(k_sw, k_hw, n * sizeof(uint32_t)) == 0 &&
+              fl_sw == fl_hw && bus_sw == bus_hw,
+              "seq lane flags, no mask: the device and the software backend "
+              "differ (FLAGS 0x%02x / 0x%02x, STATUS 0x%08x / 0x%08x, block "
+              "%s)", (unsigned)fl_hw, (unsigned)fl_sw, (unsigned)bus_hw,
+              (unsigned)bus_sw, memcmp(l_sw, l_hw, n) ? "differs" : "equal");
+        CHECK(unwritten == 0, "seq lane flags, no mask: %lu of %lu lanes' "
+              "bytes still hold the pattern - with no mask every lane is "
+              "the caller's and its byte is written", (unsigned long)unwritten,
+              (unsigned long)n);
+        CHECK(lo5 == fl_hw && mid5 == ((bus_hw >> 4) & 3u) &&
+              mark5 == ((bus_hw & CFT_STATUS_MARKED) ? 1u : 0u),
+              "seq lane flags, no mask: the identities do not hold - OR "
+              "[4:0] 0x%02x against FLAGS 0x%02x, OR [6:5] %u against "
+              "STATUS[5:4] %u, OR [7] %u against STATUS[6] %u",
+              (unsigned)lo5, (unsigned)fl_hw, (unsigned)mid5,
+              (unsigned)((bus_hw >> 4) & 3u), (unsigned)mark5,
+              (unsigned)((bus_hw >> 6) & 1u));
+        printf("  seq lane flags, no mask: %lu lanes, every byte written, "
+               "device == software, identities hold (FLAGS 0x%02x, STATUS "
+               "0x%08x)\n", (unsigned long)n, (unsigned)fl_hw,
+               (unsigned)bus_hw);
+    }
+
+    /* 6. a lane's deposit overflow [5] and strict range [6].
+     *
+     * deposit r0 (its one slot); setact r1 - b zero in every fifth lane
+     * drops it; deposit r0 again, past the slot in every lane still
+     * active; actall; ldx r4, r2 under SCRATCH_STRICT, c's bit pattern
+     * the index - all ones (past every depth) in lanes 1, 5, 9, ..., a
+     * small slot below eight in the rest; r3 = r0 + r1 for [4:0];
+     * halt. ACTALL revives the lanes the caller has and no masked one,
+     * so a masked lane reports nothing either way. */
+    if (!(hc.seq_features & CFT_SEQ_FEAT_SCRATCH) ||
+        !(hc.seq_features & CFT_SEQ_FEAT_SCRATCH_STRICT)) {
+        not_here(NH_OTHER, "COMPARED", "  seq lane flags, a lane's deposit "
+                 "overflow and strict range", "this device does not publish "
+                 "%s, which the strict access needs",
+                 (hc.seq_features & CFT_SEQ_FEAT_SCRATCH)
+                     ? "CFT_SEQ_FEAT_SCRATCH_STRICT" : "CFT_SEQ_FEAT_SCRATCH");
         goto out;
     }
-    checks++;
-    if ((fl_hw & 1u) || (or_lo & 1u)) {
-        printf("  FAIL seq lane flags: invalid reached FLAGS or a lane's "
-               "byte, and only the quiet region's multiply raises it\n");
-        failures++;
+    memcpy(b6, b, n * esz);
+    memset(c6, 0, n * esz);
+    for (i = 0; i < n; i++) {
+        if (i % 5 == 0)
+            memset(b6 + i * esz, 0, esz);                 /* +0: no overflow */
+        if (i % 4 == 1)
+            memset(c6 + i * esz, 0xFF, esz);             /* past the depth */
+        else
+            c6[i * esz] = (uint8_t)(i % 7);               /* slot 0..6 */
     }
-    st = cft_program_load(hw, ctlimg, cbytes, &pc);
+    ins[0] = seq_ctrl(3, 0, 0);                          /* DEPOSIT r0 */
+    ins[1] = seq_ctrl(4, 1, 0);                          /* SETACT r1 */
+    ins[2] = seq_ctrl(3, 0, 0);                          /* DEPOSIT r0 */
+    ins[3] = seq_ctrl(5, 0, 0);                          /* ACTALL */
+    ins[4] = seq_ldx(4, 2);                              /* LDX r4, r2 */
+    ins[5] = seq_alu(CFT_ADD, 3, 0, 3, 1, CFT_RNE, 0, 0);
+    ins[6] = seq_ctrl(0, 0, 0);                          /* HALT */
+    rbytes = seq_image_scratch(rimg, fmt, ins, 7, NULL, 0, 1,
+                               CFT_PROG_FLAG_SCRATCH_STRICT, 0, 0);
+    st = cft_program_load(sw, rimg, rbytes, &ps6);
+    if (st == CFT_OK)
+        st = cft_program_load(hw, rimg, rbytes, &ph6);
     checks++;
     if (st != CFT_OK) {
-        printf("  FAIL seq lane flags: the device refused the control image "
+        printf("  FAIL seq lane flags, the reports image: refused at load "
                "(%s: %s)\n", cft_strerror(st), cft_last_error());
         failures++;
         goto out;
     }
-    LF_RUN(pc, d_hw, l_hw, &fl, &bus);
-    checks++;
-    if (st != CFT_OK || !(fl & 1u)) {
-        printf("  FAIL seq lane flags: the control - the image without its "
-               "region - did not raise invalid (%s, FLAGS 0x%02x), so claim "
-               "4 could not have failed\n", cft_strerror(st), (unsigned)fl);
-        failures++;
-    } else {
-        for (i = 0; i < n; i++)
-            if (((mask[i >> 3] >> (i & 7u)) & 1) && !(l_hw[i] & 1u)) {
-                printf("  FAIL seq lane flags: the control's lane %lu does "
-                       "not carry invalid\n", (unsigned long)i);
+    pass6 = 1;
+    {
+        int pass;
+        size_t set5 = 0, clear5 = 0, set6 = 0, clear6 = 0;
+        for (pass = 0; pass < 2; pass++) {
+            const uint8_t *m = pass ? NULL : mask;
+            uint32_t lo6 = 0, mid6 = 0, mark6 = 0;
+            const char *how = pass ? "no mask" : "under the mask";
+            LF_RUN(ps6, m, b6, c6, d_sw, k_sw, l_sw, &fl_sw, &bus_sw);
+            checks++;
+            if (st != CFT_OK) {
+                printf("  FAIL seq lane flags, the reports image %s: the "
+                       "software backend refused the run (%s: %s)\n", how,
+                       cft_strerror(st), cft_last_error());
                 failures++;
-                break;
+                goto out;
             }
+            LF_RUN(ph6, m, b6, c6, d_hw, k_hw, l_hw, &fl_hw, &bus_hw);
+            checks++;
+            if (st != CFT_OK) {
+                printf("  FAIL seq lane flags, the reports image %s: the "
+                       "device refused the run (%s: %s)\n", how,
+                       cft_strerror(st), cft_last_error());
+                failures++;
+                goto out;
+            }
+            for (i = 0; i < n; i++) {
+                const int kept = !m || ((m[i >> 3] >> (i & 7u)) & 1);
+                if (!kept) {
+                    if (l_hw[i] != 0x5a)
+                        pass6 = 0;
+                    continue;
+                }
+                lo6 |= l_hw[i] & 0x1Fu;
+                mid6 |= (l_hw[i] >> 5) & 3u;
+                mark6 |= (l_hw[i] >> 7) & 1u;
+                if (l_hw[i] & CFT_LANE_DEPOSIT_OVERFLOW) set5++; else clear5++;
+                if (l_hw[i] & CFT_LANE_SCRATCH_RANGE) set6++; else clear6++;
+            }
+            CHECK(memcmp(d_sw, d_hw, n * esz) == 0 &&
+                  memcmp(l_sw, l_hw, n) == 0 &&
+                  memcmp(k_sw, k_hw, n * sizeof(uint32_t)) == 0 &&
+                  fl_sw == fl_hw && bus_sw == bus_hw,
+                  "seq lane flags, the reports image %s: the device and the "
+                  "software backend differ (FLAGS 0x%02x / 0x%02x, STATUS "
+                  "0x%08x / 0x%08x, block %s, counts %s)", how,
+                  (unsigned)fl_hw, (unsigned)fl_sw, (unsigned)bus_hw,
+                  (unsigned)bus_sw,
+                  memcmp(l_sw, l_hw, n) ? "differs" : "equal",
+                  memcmp(k_sw, k_hw, n * sizeof(uint32_t)) ? "differ"
+                                                            : "equal");
+            CHECK(lo6 == fl_hw && mid6 == ((bus_hw >> 4) & 3u) &&
+                  mark6 == ((bus_hw & CFT_STATUS_MARKED) ? 1u : 0u),
+                  "seq lane flags, the reports image %s: the identities do "
+                  "not hold - OR [4:0] 0x%02x against FLAGS 0x%02x, OR [6:5] "
+                  "%u against STATUS[5:4] %u, OR [7] %u against STATUS[6] %u",
+                  how, (unsigned)lo6, (unsigned)fl_hw, (unsigned)mid6,
+                  (unsigned)((bus_hw >> 4) & 3u), (unsigned)mark6,
+                  (unsigned)((bus_hw >> 6) & 1u));
+        }
+        CHECK(pass6, "seq lane flags, the reports image under the mask: a "
+              "masked lane's byte was written");
+        if (n >= 8) {
+            CHECK(set5 && clear5 && set6 && clear6,
+                  "seq lane flags, the reports image: [5] set in %lu kept "
+                  "lanes and clear in %lu, [6] set in %lu and clear in %lu - "
+                  "each must be both, or its identity was held on zeros",
+                  (unsigned long)set5, (unsigned long)clear5,
+                  (unsigned long)set6, (unsigned long)clear6);
+            printf("  seq lane flags, the reports image: under the mask and "
+                   "without it, device == software, counts included, "
+                   "identities hold, [5] set in %lu kept lanes and clear in "
+                   "%lu, [6] set in %lu and clear in %lu\n",
+                   (unsigned long)set5, (unsigned long)clear5,
+                   (unsigned long)set6, (unsigned long)clear6);
+        } else {
+            not_here(NH_OTHER, "TESTED", "  seq lane flags, the reports "
+                     "image's reach", "%lu lanes are too few for every one "
+                     "of [5] and [6] to be both set and clear (eight are "
+                     "enough); the comparison itself ran", (unsigned long)n);
+        }
     }
 #undef LF_RUN
-    printf("  seq lane flags: %lu lanes, %lu masked, %lu marked, device == "
-           "software, identities hold (FLAGS 0x%02x, STATUS 0x%08x), masked "
-           "bytes untouched, the region silent and its control loud\n",
-           (unsigned long)n, (unsigned long)masked_lanes,
-           (unsigned long)marked, (unsigned)fl_hw, (unsigned)bus_hw);
 out:
     cft_program_free(ps);
     cft_program_free(ph);
     cft_program_free(pc);
+    cft_program_free(ps6);
+    cft_program_free(ph6);
     free(a); free(b); free(d_sw); free(d_hw); free(l_sw); free(l_hw);
-    free(mask);
+    free(mask); free(b6); free(c6); free(k_sw); free(k_hw);
 }
 
 /* The indexed elementwise call on a device that does not publish
@@ -5062,13 +5275,17 @@ static void check_program_past_a_page(cft_device *dev, cft_format fmt)
  * emulation. */
 static int capacity_run(cft_program *prog, cft_format fmt, size_t n,
                         uint32_t maxdep, int masked, const char *what,
-                        size_t per_tile)
+                        size_t per_tile, int want_lf)
 {
     const size_t esz = cft_format_size(fmt);
     uint8_t *a = (uint8_t *)malloc(n * esz);
     uint8_t *dep = (uint8_t *)malloc(n * maxdep * esz);
     uint32_t *cnt = (uint32_t *)malloc(n * 4);
     uint8_t *mask = masked ? (uint8_t *)calloc((n + 7) / 8, 1) : NULL;
+    /* R23's block where the leg asks for it: the one-deposit image raises
+     * nothing and reports nothing, so a kept lane's byte is 0 and a
+     * masked lane's the caller's 0x5a */
+    uint8_t *lf = want_lf ? (uint8_t *)malloc(n) : NULL;
     uint8_t zero[MAXE];
     uint32_t fl = 0xFFu, bus = 0xFFFFFFFFu;
     cft_run_args A;
@@ -5077,10 +5294,10 @@ static int capacity_run(cft_program *prog, cft_format fmt, size_t n,
     int ok = 1;
 
     memset(zero, 0, sizeof zero);
-    if (!a || !dep || !cnt || (masked && !mask)) {
+    if (!a || !dep || !cnt || (masked && !mask) || (want_lf && !lf)) {
         printf("  FAIL seq capacity: out of memory for %s at %lu lanes\n",
                what, (unsigned long)n);
-        free(a); free(dep); free(cnt); free(mask);
+        free(a); free(dep); free(cnt); free(mask); free(lf);
         return 0;
     }
     fill_finite(a, fmt, n);
@@ -5091,6 +5308,8 @@ static int capacity_run(cft_program *prog, cft_format fmt, size_t n,
         for (i = 0; i < n; i++)
             if (i % 3)
                 mask[i / 8] |= (uint8_t)(1u << (i % 8));
+    if (want_lf)
+        memset(lf, 0x5a, n);
     memset(&A, 0, sizeof A);
     A.struct_size = sizeof A;
     A.a = a;
@@ -5101,6 +5320,8 @@ static int capacity_run(cft_program *prog, cft_format fmt, size_t n,
     A.bus_out = &bus;
     A.lane_mask = mask;
     A.lane_mask_bytes = masked ? (n + 7) / 8 : 0;
+    A.lane_flags = lf;
+    A.lane_flags_bytes = want_lf ? n : 0;
     st = cft_program_run_ex(prog, &A);
     if (st != CFT_OK) {
         printf("  FAIL seq capacity: %s, %lu lanes (%lu a tile): %s (%s)\n",
@@ -5118,10 +5339,14 @@ static int capacity_run(cft_program *prog, cft_format fmt, size_t n,
                            cnt[i] != 1;
                 for (d = 1; d < maxdep && !lane_bad; d++)
                     lane_bad = memcmp(slot + d * esz, zero, esz) != 0;
+                if (want_lf)
+                    lane_bad |= lf[i] != 0;
             } else {
                 for (d = 0; d < maxdep * esz && !lane_bad; d++)
                     lane_bad = slot[d] != 0x5a;
                 lane_bad |= cnt[i] != 0xA5A5A5A5u;
+                if (want_lf)
+                    lane_bad |= lf[i] != 0x5a;
             }
             if (lane_bad && !bad++)
                 first_bad = i;
@@ -5135,20 +5360,25 @@ static int capacity_run(cft_program *prog, cft_format fmt, size_t n,
             ok = 0;
         }
     }
-    free(a); free(dep); free(cnt); free(mask);
+    free(a); free(dep); free(cnt); free(mask); free(lf);
     return ok;
 }
 
 static void check_program_capacity(cft_device *dev, cft_format fmt)
 {
+    /* `lf` asks for R23's per-lane flags block, a byte a lane: a page of
+     * it is 4,096 lanes a tile (revision 8's lane-flags item, 2026-10-05),
+     * held where the device publishes CFT_SEQ_FEAT_LANE_FLAGS. */
     static const struct {
         size_t per_tile;
-        int masked;
+        int masked, lf;
         const char *what;
     } legs[] = {
-        {1024, 0, "a page of counts"},
-        {32768, 0, "a page of mask bits, no mask"},
-        {32768, 1, "a page of mask bits, every third lane masked"},
+        {1024, 0, 0, "a page of counts"},
+        {32768, 0, 0, "a page of mask bits, no mask"},
+        {32768, 1, 0, "a page of mask bits, every third lane masked"},
+        {4096, 0, 1, "a page of lane flags, no mask"},
+        {4096, 1, 1, "a page of lane flags, every third lane masked"},
     };
     static int done;
     const size_t esz = cft_format_size(fmt), epb = 32 / esz;
@@ -5184,20 +5414,29 @@ static void check_program_capacity(cft_device *dev, cft_format fmt)
     }
     for (l = 0; l < sizeof legs / sizeof legs[0]; l++) {
         size_t plus;
+        if (legs[l].lf && !(caps.seq_features & CFT_SEQ_FEAT_LANE_FLAGS)) {
+            if (legs[l].masked)              /* one line for the pair */
+                not_here(NH_OTHER, "TESTED", "    a page of lane flags a "
+                         "tile", "this device does not publish "
+                         "CFT_SEQ_FEAT_LANE_FLAGS (the refusal is scored "
+                         "with the sequencer's lane-flags leg)");
+            continue;
+        }
         for (plus = 0; plus <= epb; plus += epb) {
             const size_t n = tiles * legs[l].per_tile + plus;
             checks++;
             ran++;
             if (capacity_run(prog, fmt, n, 1, legs[l].masked, legs[l].what,
-                             legs[l].per_tile + plus))
+                             legs[l].per_tile + plus, legs[l].lf))
                 passed++;
             else
                 failures++;
         }
     }
     printf("    a program at each tile's boundaries, %lu tile%s: a page of "
-           "counts and of mask bits, each exactly and one beat past, with "
-           "and without a mask - %d of %d right\n", (unsigned long)tiles,
+           "counts, of mask bits and - where the device publishes the "
+           "block - of lane flags, each exactly and one beat past, with and "
+           "without a mask - %d of %d right\n", (unsigned long)tiles,
            tiles == 1 ? "" : "s", passed, ran);
     cft_program_free(prog);
 
@@ -5280,7 +5519,8 @@ static void check_program_capacity(cft_device *dev, cft_format fmt)
                    cft_last_error());
             failures++;
         } else if (capacity_run(big, fmt, n, 16, 0,
-                                "a quarter of one tile's HBM channel", per)) {
+                                "a quarter of one tile's HBM channel", per,
+                                0)) {
             printf("    a program at a quarter of one tile's HBM channel "
                    "(%lu lanes a tile, 64 MB of deposits each): right\n",
                    (unsigned long)per);
