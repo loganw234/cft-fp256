@@ -19,15 +19,24 @@
 #                   instruction memory's real share of a tile's block-RAM
 #                   tiles (217 at revision 7, of which the 32K IMEM was 64
 #                   RAMB36 by its geometry alone; R8S-streaming.md, section
-#                   5's caution)
+#                   5's caution). Each row is INCLUSIVE of its children:
+#                   u_fetch's counts hold u_fifo's, and u_seq's hold both
+#                   (verifier-VC12's synthesis: u_fetch 8 RAMB36 and 1
+#                   RAMB18, the store's 7 and 1 and the FIFO's 1). The
+#                   store's own share is u_fetch's less u_fifo's.
 #   SEQ_WORST       u_seq's twenty worst endpoints, each FETCH where it
 #                   starts in the fetch unit - the plan wants the fetch path
 #                   OFF this list (revision 7 out of context: the IMEM's
 #                   seven-deep block-RAM cascade into bt_reg, +1.885 ns, was
-#                   u_seq's worst)
+#                   u_seq's worst). Taken from the DESIGN's worst 400
+#                   paths, so where the kernel's worst 400 lie mostly
+#                   outside u_seq it lists fewer than twenty, and says how
+#                   many; u_seq's own worst 25 are then in
+#                   paths_<tag>_u_seq.rpt, which this script always writes.
 #   BRAM, CASCADE   every block RAM in the fetch unit with its cascade
-#                   order: the store must be cascade-free (if Vivado chains
-#                   it, `(* cascade_height = 1 *)` on the store pins it)
+#                   order: the store must be cascade-free, and carries
+#                   `cascade_height = 1` since verifier-VC12's synthesis
+#                   found Vivado chaining it
 #   PATH_TAKE_RP    `take` - late, out of the admission - through the pop
 #                   into the FIFO's read address (rp + rd_en into the block
 #                   RAM), R8S-streaming.md section 13
@@ -40,8 +49,13 @@
 #                   bypass, then the store's read register or that head -
 #                   into the admission and the issue (VRD1's second)
 #
-# Each section is caught on its own, so a query that finds nothing (a
-# name Vivado changed) prints PROBE_S_ERR and the rest still run.
+# Each section is caught on its own, so an ERROR in one prints PROBE_S_ERR
+# and the rest still run. A `-quiet` query that matches nothing is not an
+# error and prints no path at all - so each path section ends with a count
+# line, and a count of 0 is a name Vivado changed, not a clean result.
+# The UTIL lines are the summary table's: report_utilization repeats the
+# same names in later tables, some with zeros, and only the first line of
+# each name is printed (as hw/probe_l.sh reads them).
 
 set freq 135
 set part "xcu50-fsvh2104-2-e"
@@ -77,8 +91,11 @@ proc path_line {tag p} {
 proc report_all {tag out} {
   set wns [get_property SLACK [lindex [get_timing_paths -max_paths 1 -nworst 1 -setup] 0]]
   puts "PROBE_S_WNS_${tag}: $wns"
+  set seen {}
   foreach line [split [report_utilization -return_string] "\n"] {
-    if {[regexp {^\| (CLB LUTs|CLB Registers|Block RAM Tile|URAM|DSPs)} $line]} {
+    if {[regexp {^\| (CLB LUTs|CLB Registers|Block RAM Tile|URAM|DSPs)} $line -> name]} {
+      if {[lsearch -exact $seen $name] >= 0} { continue }
+      lappend seen $name
       puts "PROBE_S_UTIL_${tag}: [string trim $line]"
     }
   }
@@ -92,7 +109,7 @@ proc report_all {tag out} {
         puts "PROBE_S_HIER_${tag}: [string trim $line]"
       }
     }
-    puts "PROBE_S_HIER_${tag}: (columns as util_${tag}_hier.rpt's header; the store is u_fetch's own RAMB36, the FIFO's are u_fifo's)"
+    puts "PROBE_S_HIER_${tag}: (columns as util_${tag}_hier.rpt's header; each row includes its children - the store's share is u_fetch's less u_fifo's)"
   }
   sec "seq_worst" {
     set n 0
@@ -102,7 +119,7 @@ proc report_all {tag out} {
       incr n
       if {$n >= 20} { break }
     }
-    puts "PROBE_S_SEQ_WORST_${tag}: $n endpoints in u_seq listed"
+    puts "PROBE_S_SEQ_WORST_${tag}: $n endpoints in u_seq listed, from the design's worst 400 (u_seq's own worst 25: paths_${tag}_u_seq.rpt)"
   }
   sec "bram" {
     set brams [get_cells -quiet -hierarchical -filter {PRIMITIVE_GROUP == BLOCKRAM && NAME =~ "u_seq/u_fetch/*"}]
@@ -118,26 +135,38 @@ proc report_all {tag out} {
   sec "take_rp" {
     set to [get_pins -quiet -of_objects [get_cells -quiet -hierarchical -filter {PRIMITIVE_GROUP == BLOCKRAM && NAME =~ "u_seq/u_fetch/*u_fifo*"}] -filter {REF_PIN_NAME =~ ADDR*}]
     set to [concat $to [get_pins -quiet -hierarchical -filter {NAME =~ "u_seq/u_fetch/*u_fifo*/rp_reg*/D"}]]
+    set k 0
     foreach p [get_timing_paths -quiet -max_paths 3 -nworst 1 -setup -to $to] {
       path_line "PROBE_S_PATH_TAKE_RP_${tag}" $p
+      incr k
     }
+    puts "PROBE_S_PATH_TAKE_RP_${tag}: $k paths ([llength $to] endpoint pins matched)"
   }
   sec "redirect" {
     set from [get_cells -quiet -hierarchical -filter {NAME =~ "u_seq/pc_reg*"}]
     set to [get_pins -quiet -hierarchical -filter {(NAME =~ "u_seq/u_fetch/*u_fifo*/wp_reg*/*" || NAME =~ "u_seq/u_fetch/*u_fifo*/rp_reg*/*" || NAME =~ "u_seq/u_fetch/*u_fifo*/count_reg*/*" || NAME =~ "u_seq/u_fetch/*u_fifo*/byp_v*_reg*/*") && (REF_PIN_NAME == D || REF_PIN_NAME == R || REF_PIN_NAME == S || REF_PIN_NAME == CE)}]
+    set k 0
     foreach p [get_timing_paths -quiet -max_paths 3 -nworst 1 -setup -from $from -to $to] {
       path_line "PROBE_S_PATH_REDIRECT_FIFO_${tag}" $p
+      incr k
     }
+    puts "PROBE_S_PATH_REDIRECT_FIFO_${tag}: $k paths ([llength $from] pc cells, [llength $to] endpoint pins matched)"
     set to2 [get_pins -quiet -hierarchical -filter {(NAME =~ "u_seq/u_fetch/*spos_reg*/*" || NAME =~ "u_seq/u_fetch/*s_on_reg*/*" || NAME =~ "u_seq/u_fetch/*rs_go_reg*/*" || NAME =~ "u_seq/u_fetch/*ra_v_reg*/*") && (REF_PIN_NAME == D || REF_PIN_NAME == R || REF_PIN_NAME == S || REF_PIN_NAME == CE)}]
+    set k 0
     foreach p [get_timing_paths -quiet -max_paths 3 -nworst 1 -setup -from $from -to $to2] {
       path_line "PROBE_S_PATH_REDIRECT_STREAM_${tag}" $p
+      incr k
     }
+    puts "PROBE_S_PATH_REDIRECT_STREAM_${tag}: $k paths ([llength $to2] endpoint pins matched)"
   }
   sec "word" {
     set from [get_cells -quiet -hierarchical -filter {NAME =~ "u_seq/u_fetch/*st_q_reg*" || NAME =~ "u_seq/u_fetch/*u_fifo*/byp_d_reg*" || NAME =~ "u_seq/u_fetch/*u_fifo*/ram_q_reg*" || NAME =~ "u_seq/u_fetch/*rq_hit_reg*" || (PRIMITIVE_GROUP == BLOCKRAM && NAME =~ "u_seq/u_fetch/*")}]
+    set k 0
     foreach p [get_timing_paths -quiet -max_paths 5 -nworst 1 -setup -from $from] {
       path_line "PROBE_S_PATH_WORD_${tag}" $p
+      incr k
     }
+    puts "PROBE_S_PATH_WORD_${tag}: $k paths ([llength $from] start cells matched)"
   }
   report_timing_summary -file $out/timing_${tag}.rpt -no_detailed_paths
   report_timing -max_paths 25 -unique_pins -file $out/paths_${tag}.rpt

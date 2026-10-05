@@ -17,7 +17,13 @@
 //      program, [base, send), at index address mod STORE_D. The image
 //      parse fills [0, min(n_insns, STORE_D)) at run start, as it
 //      fills imem today. No cascade: the store is the instruction
-//      memory's 4K x 64 shape, 8 RAMB36 side by side (S8, section 5).
+//      memory's 4K x 64 shape, its block RAMs side by side (S8, section
+//      5) - and said so to Vivado, which otherwise chains them: verifier-
+//      VC12's synthesis of this unit with Vivado 2022.2 (2026-10-05, a
+//      reduced top) put 6 of its 9 block RAMs in cascades of four and two.
+//      `cascade_height = 1` on the store, which UG901 says turns off
+//      block-RAM cascading for the RAM it is placed on (UltraScale and
+//      later), so that probe S reads the shape S8 sized.
 //   2. THE STREAM. A cft_fifo of 2^FIFO_LOG2 words (512), filled in
 //      program order from the position `spos` by this module's own
 //      read engine: bursts of BURST beats (8, 32 instructions), at
@@ -291,7 +297,9 @@ module cft_ifetch #(
   // capture never meet at one index in a wanted cycle: the capture
   // writes at send, and every address inside the range [base, send)
   // has another index, since send - base < STORE_D while it writes.
-  (* ram_style = "block" *)
+  // Block RAM, and no cascade (the header's item 1): Vivado reads both
+  // attributes on an inferred RAM; the simulators and Yosys ignore them.
+  (* ram_style = "block", cascade_height = 1 *)
   logic [IW-1:0] smem [0:STORE_D-1];
   logic [IW-1:0] st_q;
   logic          st_wr;

@@ -25,7 +25,9 @@
 #   - the fetch path off u_seq's worst list (PROBE_S_SEQ_WORST: no line
 #     marked FETCH near the top, where the base's IMEM cascade stood);
 #   - the store without a cascade (PROBE_S_CASCADE: 0 of the fetch unit's
-#     block RAMs in one; if not, `(* cascade_height = 1 *)` pins it);
+#     block RAMs in one). The store carries `cascade_height = 1` since
+#     verifier-VC12's synthesis found Vivado chaining it (6 of the unit's 9
+#     block RAMs, in cascades of four and two);
 #   - from the hierarchical report, the instruction memory's real share of
 #     the tile's block-RAM tiles (PROBE_S_HIER, against the base's);
 #   - verifier-VRD1's two paths, the take -> rp path, and the redirect's
@@ -61,8 +63,10 @@ grep -q "parameter int SEQ_STREAM_D  = 16777216" "$root/rtl/cft_krnl.sv" || {
 if [ -n "${BASE_RTL:-}" ] && grep -q "cft_ifetch #" "$BASE_RTL/cft_seq.sv"; then
   echo "BASE_RTL's cft_seq instantiates the fetch: not a tree from before it" >&2; exit 1
 fi
+# The vendor script reads unset variables, so -u is off around it, as
+# every other hw script sources its setup (verifier-VC12).
 # shellcheck disable=SC1090
-source "$VIVADO_SETTINGS" >/dev/null 2>&1
+set +u; source "$VIVADO_SETTINGS" >/dev/null 2>&1; set -u
 command -v vivado >/dev/null || { echo "no vivado after $VIVADO_SETTINGS" >&2; exit 1; }
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
