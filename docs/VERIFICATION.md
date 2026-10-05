@@ -107,7 +107,12 @@ authority:
    register the RTL decodes (`test_krnl.py`'s
    `kernel_xml_is_the_csr_map`, where nothing had checked the two
    before) - and CAPS and CAPS2 to the words the plan computed for a
-   seam tile; the shared normalise and alignment ladders are held
+   seam tile; since revision 8's abort (2026-10-05) a sequencer run
+   whose memory faults is held to end - a short and a long burst on
+   every one of its reads, a read fault on its header, on an instruction
+   and on data, each followed by a clean run on the same instance
+   (`test_seq_core.py`'s `abort_` cases, `test_krnl_faults.py`'s two
+   sequencer cases); the shared normalise and alignment ladders are held
    against the private shifters they replaced; the reduction
    accumulator, the fault paths, the seed opcodes and the three trims -
    the quarter tile; the full beat with binary256 left out, the shape

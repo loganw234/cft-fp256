@@ -3747,3 +3747,30 @@ refuses by name and what it does not compare.
   CSRRSI's immediate is five.
 - Lowering a flag inside a run, which R23 declines: a region lowers
   nothing.
+
+### Revision 8 in the tile (the step-6 round's round 2, from 2026-10-05)
+
+The RTL plan of record (docs/ROADMAP.md, "Revision 8: step 6's RTL
+revision") builds revision 8 in `rtl/cft_seq.sv` one item at a time, in
+the plan's order. Each line below says what a tile carries once that
+item's commit is in it; a bitstream carries it only once one is built
+from such a tree.
+
+- **The abort** (built 2026-10-05). A sequencer read burst of the wrong
+  length ends the run, the engine's rule since 2026-08-30: from the
+  fault on no new burst is issued, read or write; a write burst already
+  committed delivers its beats; every read in flight lands, a long burst
+  drained to its RLAST; and done comes with STATUS[2]. A read fault on
+  the header beat, or on a beat holding any byte of an instruction, ends
+  the run the same way with STATUS[0], so no word the memory did not
+  vouch for decides what runs. A read fault on data - the constants, the
+  bank, the scratch-in, a stream, the mask, a table - completes the run
+  as it always did, STATUS[0] saying its outputs are not to be trusted.
+  Until then a short burst left the sequencer waiting for ever, and a
+  long one handed its extra beat to a later read. `rtl/cft_seq.sv`'s
+  contract, item 5, and `S_ABORT`; `tb/test_seq_core.py`'s four `abort_`
+  cases (a short and a long burst on every multi-beat read, a long one
+  on every single-beat read, a read fault on the header, on an
+  instruction and on data, each followed by a clean run on the same
+  instance) and `tb/test_krnl_faults.py`'s two sequencer cases through
+  the kernel.

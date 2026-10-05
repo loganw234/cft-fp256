@@ -109,6 +109,27 @@
 //     max_deposits: the excess dropped, what fit is correct) - the
 //     kernel maps it to STATUS[4], STATUS[3] being the refusal.
 //
+//  5. THE ABORT (revision 8, docs/ROADMAP.md "The abort"). A read burst
+//     of the wrong length - RLAST before the beat ARLEN named (short), or
+//     missing on it (long) - ENDS THE RUN, the engine's rule since
+//     2026-08-30 (rtl/cft_engine_stream.sv, "abandoning a run the memory
+//     system broke"). Until revision 8 a short burst left the burst
+//     counter above zero, so the next burst was never issued and a
+//     multi-beat read waited for ever; a long one zeroed the count a beat
+//     early and handed its extra beats to a later read as data. Now, from
+//     the fault on: no new burst is issued, read or write; a write burst
+//     already committed (its AW issued) delivers its beats; every read in
+//     flight lands, a long burst drained to its RLAST and a short one
+//     ended by its own; and done comes with err[2] (STATUS[2]). A read
+//     fault (RRESP not OKAY) on the HEADER BEAT or on a beat holding any
+//     byte of an INSTRUCTION ends the run the same way, with err[0], so
+//     no word the memory did not vouch for decides what runs. A read
+//     fault on DATA - the constants, the bank, the scratch-in, a stream,
+//     the mask, a table - completes the run as it always did, err[0]
+//     saying its outputs are not to be trusted. An aborted run writes
+//     nothing after the fault but the committed burst; S_ABORT is where
+//     it waits for the reads, the write responses and the issue pipe.
+//
 // cfg_prog is 32-byte aligned (the library guarantees it); cfg_cnt is
 // 4-byte aligned. n == 0 completes immediately, touching nothing.
 //
@@ -1140,6 +1161,13 @@ module cft_seq #(
   logic [31:0]       rd_beats_left;   // beats not yet requested
   logic [8:0]        rd_burst_left;   // beats left in the open burst
   logic              rd_stream_on;    // a state wants read traffic
+  // The abort (revision 8; the contract's item 5). rd_long_q: the open
+  // burst ran past the beat ARLEN named, and its beats are being drained
+  // to its RLAST - they belong to no reader. abort_q: the run is ending on
+  // a fault; no new burst is issued from the cycle after the fault, and
+  // the state machine goes to S_ABORT at its next safe point (abort_go).
+  logic              rd_long_q;
+  logic              abort_q;
 
   // ---- AXI write side (single outstanding burst) ----------------------
   logic [ADDR_W-1:0] wr_addr;
@@ -1363,7 +1391,10 @@ module cft_seq #(
     S_DRAIN_SETUP, S_DRAIN_RUN,
     S_CNT_SETUP, S_CNT_PACK, S_CNT_SEND,
     S_SO_SETUP, S_SO_RD, S_SO_W8, S_SO_PACK, S_SO_SEND,
-    S_WAIT_B, S_NEXT_BLK, S_FIN
+    S_WAIT_B, S_NEXT_BLK, S_FIN,
+    // Revision 8: the abort's wait - every read in flight landed, every
+    // write response in, the issue pipe empty - then S_FIN.
+    S_ABORT
   } state_e;
   state_e st;
   // R16's placement strobe. The sentinel arm of S_GTH_ELEM and the
@@ -2044,6 +2075,53 @@ module cft_seq #(
   logic        scr_rng_q;
   logic        refuse_q;
   logic        rd_fault_q, wr_fault_q, len_fault_q;
+
+  // ---- the abort's three decisions (revision 8; the contract's item 5) --
+  //
+  // A beat of the open burst that shows its length wrong: RLAST before the
+  // beat ARLEN named, or none on it - the engine's rule, beat by beat. A
+  // beat of a burst already known long (rd_long_q) is being drained and is
+  // no reader's, and shows nothing more.
+  logic rd_acc, rd_len_bad, rd_word_bad, img_beat_insn;
+  assign rd_acc     = m_rd_rvalid && m_rd_rready;
+  assign rd_len_bad = rd_acc && !rd_long_q && (rd_burst_left != 9'd0) &&
+                      (m_rd_rlast ? (rd_burst_left != 9'd1)
+                                  : (rd_burst_left == 9'd1));
+  // A beat the image parse absorbs holds an instruction's byte unless every
+  // one of its 32 bytes is a constant still to come: the window holds
+  // pw_have bytes of what follows, so the constants not yet in it are
+  // kons_left * esz - pw_have bytes, and the beat is all constants only
+  // when that is a whole beat or more. A beat is absorbed only when the
+  // window is too empty to peel (S_IMG_PARSE's rule), so its bytes start
+  // where the window's end. The bank pass and an image with no
+  // instruction left hold none.
+  assign img_beat_insn = (insn_left != 32'd0) &&
+                         ((kons_left << esz_sh) < 32'(pw_have) + 32'd32);
+  // A read fault on the header beat or an instruction's beat ends the run;
+  // on any other beat it is data, and the run completes with err[0].
+  assign rd_word_bad = rd_acc && (m_rd_rresp != 2'b00) &&
+                       ((st == S_HDR_R) ||
+                        ((st == S_IMG_PARSE) && !bank_phase && img_beat_insn));
+  // Where the state machine may leave for S_ABORT: anywhere a run's reads
+  // happen (the setup states - no write is open there and the issue pipe
+  // is empty), between instructions (S_FETCH, S_FETCH2 and the skip, never
+  // in the middle of an instruction's beats: S_DECODE and S_ISSUE finish
+  // the instruction in hand, every word of which the memory vouched for),
+  // at the block's end, and in the drains once no write burst is open or
+  // committed - a committed burst delivers its beats first, from the drain
+  // that was producing them.
+  logic wr_quiet, drain_st, abort_safe, abort_go;
+  assign wr_quiet   = (wr_burst_left == 9'd0) && !m_wr_awvalid &&
+                      !wr_aw_open && !m_wr_wvalid;
+  assign drain_st   = (st == S_DRAIN_RUN) || (st == S_CNT_SETUP) ||
+                      (st == S_CNT_PACK) || (st == S_CNT_SEND) ||
+                      (st == S_SO_SETUP) || (st == S_SO_RD) ||
+                      (st == S_SO_W8) || (st == S_SO_PACK) ||
+                      (st == S_SO_SEND) || (st == S_WAIT_B);
+  assign abort_safe = !((st == S_IDLE) || (st == S_FIN) || (st == S_ABORT) ||
+                        (st == S_DECODE) || (st == S_ISSUE)) &&
+                      (!drain_st || wr_quiet);
+  assign abort_go   = abort_q && abort_safe;
 
   assign flags  = flags_q;
   // err[5], R24's mark (STATUS[6] through cft_krnl), is a constant
@@ -2821,6 +2899,7 @@ module cft_seq #(
       db_we <= '0;
       rd_stream_on <= 1'b0; wr_stream_on <= 1'b0;
       rd_beats_left <= '0; rd_burst_left <= '0;
+      rd_long_q <= 1'b0; abort_q <= 1'b0;
       wr_beats_left <= '0; wr_burst_left <= '0;
       wr_aw_open <= 1'b0; wr_bresp_left <= '0;
       lane_cursor <= '0; slot_cursor <= '0;
@@ -2871,18 +2950,33 @@ module cft_seq #(
       scr_clean_go <= 1'b0;
 
       // ---- read channel: one burst in flight --------------------------
+      //
+      // The open burst ends at its RLAST, whatever its length (revision 8,
+      // the abort). A SHORT burst - RLAST before the beat ARLEN named - is
+      // over at that RLAST, so its count is zeroed there; until revision 8
+      // it stayed above zero, no next burst was ever issued and the read
+      // waited for ever. A LONG one - no RLAST on that beat - is flagged on
+      // it, and rd_long_q drains the rest to its RLAST; until revision 8
+      // those beats were taken as a later read's data. Either ends the run
+      // (abort_q, below), as a read fault on the header or an instruction
+      // does: from the next cycle no burst is issued, and S_ABORT drains
+      // what is in flight.
       if (m_rd_arvalid && m_rd_arready)
         m_rd_arvalid <= 1'b0;
-      if (m_rd_rvalid && m_rd_rready) begin
+      if (rd_acc) begin
         if (m_rd_rresp != 2'b00) rd_fault_q <= 1'b1;
-        if (rd_burst_left != 0) begin
-          rd_burst_left <= rd_burst_left - 1;
-          if (m_rd_rlast && rd_burst_left != 1) len_fault_q <= 1'b1;
-          if (!m_rd_rlast && rd_burst_left == 1) len_fault_q <= 1'b1;
+        if (rd_long_q) begin
+          if (m_rd_rlast) rd_long_q <= 1'b0;
+        end else if (rd_burst_left != 0) begin
+          rd_burst_left <= m_rd_rlast ? 9'd0 : rd_burst_left - 9'd1;
+          if (rd_len_bad) len_fault_q <= 1'b1;
+          if (!m_rd_rlast && rd_burst_left == 1) rd_long_q <= 1'b1;
         end
       end
+      if (rd_len_bad || rd_word_bad)
+        abort_q <= 1'b1;
       if (rd_stream_on && !m_rd_arvalid && rd_burst_left == 0 &&
-          rd_beats_left != 0) begin
+          !rd_long_q && !abort_q && rd_beats_left != 0) begin
         m_rd_araddr   <= rd_addr;
         m_rd_sel      <= rd_sel;
         m_rd_arlen    <= rd_bl;
@@ -2909,8 +3003,11 @@ module cft_seq #(
       else if (!(m_wr_awvalid && m_wr_awready) &&
                (m_wr_bvalid && m_wr_bready))
         wr_bresp_left <= wr_bresp_left - 1;
+      // No new write burst once the run is ending on a fault (the abort): a
+      // burst already committed still delivers its beats, from the drain
+      // producing them, and the drain stops at the next burst's AW.
       if (wr_stream_on && !m_wr_awvalid && !wr_aw_open &&
-          wr_burst_left == 0 && wr_beats_left != 0) begin
+          wr_burst_left == 0 && wr_beats_left != 0 && !abort_q) begin
         m_wr_awaddr   <= wr_addr;
         m_wr_awlen    <= wr_bl;
         m_wr_awvalid  <= 1'b1;
@@ -2976,10 +3073,26 @@ module cft_seq #(
         end
       end
 
+      // ---- the abort takes over at its next safe point -----------------
+      //
+      // Exclusive of every state's own arm: in the cycle the machine leaves
+      // for S_ABORT nothing a state would have done is done - no refusal
+      // decided from a header beat the memory faulted, no burst set up, no
+      // drain begun. The fault's own beat was consumed by its state's arm
+      // the cycle before, as any beat is; abort_q is registered at that
+      // edge. No new read is issued from then on (the read channel's issue
+      // tests abort_q), and S_ABORT raises RREADY for the burst in flight.
+      if (abort_go) begin
+        st <= S_ABORT;
+        rd_stream_on <= 1'b0;
+        rd_beats_left <= '0;
+        m_rd_rready <= 1'b0;
+      end else
       case (st)
         // --------------------------------------------------------------
         S_IDLE: begin
           if (start) begin
+            abort_q <= 1'b0;
             prec_q <= cfg_prec[1:0];
             n_q <= cfg_n; a_q <= cfg_a; b_q <= cfg_b; c_q <= cfg_c;
             d_q <= cfg_d; prog_q <= cfg_prog; cnt_q <= cfg_cnt;
@@ -4068,6 +4181,32 @@ module cft_seq #(
         S_FIN: begin
           done <= 1'b1;
           st <= S_IDLE;
+        end
+
+        // ---- the abort (revision 8; the contract's item 5) ---------------
+        //
+        // Entered at a safe point (abort_go) once a fault has ended the
+        // run. Nothing new is issued here; this waits for what is already
+        // committed: the read burst in flight to land - RREADY high for it,
+        // a long one drained to its RLAST, a short one already ended by
+        // its own - so that no beat of this run reaches the next one's
+        // first read; every write response (a committed write burst has
+        // delivered its beats before abort_go let the machine leave the
+        // drain that was producing them); and the issue pipe, so that no
+        // result of this run lands in the next one's register file - the
+        // array is shared, and a run's results retire whatever state the
+        // machine is in. Then done, with err[2] or err[0] saying why.
+        S_ABORT: begin
+          m_rd_rready  <= (rd_burst_left != 0) || rd_long_q;
+          m_wr_bready  <= 1'b1;
+          if (rd_burst_left == 0 && !rd_long_q && !m_rd_arvalid &&
+              wr_bresp_left == 0 && wr_quiet &&
+              q_n == 2'd0 && pipe_idle) begin
+            m_rd_rready  <= 1'b0;
+            m_wr_bready  <= 1'b0;
+            wr_stream_on <= 1'b0;
+            st <= S_FIN;
+          end
         end
 
         default: st <= S_IDLE;

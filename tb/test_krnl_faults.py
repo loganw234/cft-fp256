@@ -290,3 +290,149 @@ async def a_clean_run_after_a_fault_is_clean(dut):
     from test_krnl import run_op
     await run_op(dut, axil, ram_a, FP32, OP_FMA, 64, seed=305)
     dut._log.info("recovered: a clean run after an abort is bit-exact")
+
+
+# ---- the sequencer's faults (revision 8, the abort) --------------------
+#
+# Until revision 8 every case above started an elementwise run, and the
+# sequencer had no abort: a short burst on any of its reads left its burst
+# counter above zero and the run never ended, and a long one handed its
+# extra beat to a later read (docs/ROADMAP.md, "Revision 8", "The abort").
+# These run a program through the kernel - the masters, the steering by
+# m_rd_sel and the CSR's STATUS - with a fault on the image's read (A), on
+# a stream (B), and a read fault on an instruction against one on data.
+
+from cft_golden import seq, softfloat as sf  # noqa: E402
+from cft_golden import PREC_CODE  # noqa: E402
+
+MODE_SEQ = 1 << 15
+PROGPTR, CNTPTR, BANKPTR = 0x54, 0x5C, 0x64
+SINPTR, SOUTPTR, MASKPTR = 0x70, 0x78, 0xA8
+SEQ_PROG, SEQ_CNT = 0xF0000, 0xE0000
+POISON_SEQ = 0x5A
+
+
+def _seq_prog():
+    """Three streams read, three deposits, one constant."""
+    return seq.Program(FP32, [
+        seq.alu(sf.OP_ADD, 3, ra=0, rc=2),
+        seq.alu(sf.OP_MUL, 4, ra=1, rb=3),
+        seq.alu(OP_FMA, 5, ra=4, rb=0, rc=0, kc=True),
+        seq.deposit(3), seq.deposit(4), seq.deposit(5),
+        seq.halt()], consts=[sf.one_bits(FP32)], max_deposits=3)
+
+
+async def _start_seq(axil, ram, prog, n, seed):
+    """Stage a program and its streams and start it. Does not wait."""
+    rng = random.Random(seed)
+    vals = [[rng.getrandbits(32) for _ in range(n)] for _ in range(3)]
+    for base, v in zip((A_BASE, B_BASE, C_BASE), vals):
+        ram.write(base, b"".join(x.to_bytes(4, "little") for x in v))
+    ram.write(SEQ_PROG, prog.to_bytes())
+    ram.write(D_BASE, bytes([POISON_SEQ]) * (n * prog.max_deposits * 4))
+    ram.write(SEQ_CNT, bytes([POISON_SEQ]) * (n * 4))
+    await axil.write_dword(MODE, (PREC_CODE["fp32"] << 8) | MODE_SEQ)
+    await write64(axil, NREG, n)
+    await write64(axil, APTR, A_BASE)
+    await write64(axil, BPTR, B_BASE)
+    await write64(axil, CPTR, C_BASE)
+    await write64(axil, DPTR, D_BASE)
+    await write64(axil, PROGPTR, SEQ_PROG)
+    await write64(axil, CNTPTR, SEQ_CNT)
+    for reg in (BANKPTR, SINPTR, SOUTPTR, MASKPTR):
+        await write64(axil, reg, 0xDEAD_0000 + reg)
+    await axil.write_dword(CTRL, 1)
+    return vals
+
+
+def _seq_outputs(ram, prog, n):
+    dep = ram.read(D_BASE, n * prog.max_deposits * 4)
+    cnt = ram.read(SEQ_CNT, n * 4)
+    return dep, cnt
+
+
+async def _seq_clean(dut, axil, ram, prog, n, label):
+    """A run after a faulted one: STATUS 0 and the model's answer."""
+    vals = await _start_seq(axil, ram, prog, n, seed=909)
+    await _await_done(dut, axil, f"{label}: the clean run after it")
+    st = await axil.read_dword(STATUS)
+    assert st == 0, f"{label}: STATUS {st:#x} on the clean run after it"
+    want = seq.run(prog, *vals)
+    dep, cnt = _seq_outputs(ram, prog, n)
+    got = [int.from_bytes(dep[4 * k:4 * k + 4], "little")
+           for k in range(n * prog.max_deposits)]
+    assert got == want.deposits, (
+        f"{label}: the clean run after it differs from the model - "
+        f"something of the faulted run was still in flight")
+
+
+@cocotb.test()
+async def a_sequencer_length_fault_ends_the_run(dut):
+    """A short image burst and a long stream burst, through the kernel:
+    ap_done within the bound, STATUS[2], nothing written - the faults
+    land before the first block's drains - and a clean run after each."""
+    axil, ram_a, ram_b, ram_c, ram_d = await _bringup(dut)
+    prog = _seq_prog()
+    n = 40
+    for k, (ram, kw, label) in enumerate((
+            (ram_a, dict(short_at=1), "a short image burst"),
+            (ram_b, dict(long_at=0), "a long stream-b burst"),
+            (ram_c, dict(short_at=0), "a short stream-c burst"))):
+        for r in (ram_a, ram_b, ram_c, ram_d):
+            r.fx.reset()
+        ram.fx.arm(**kw)
+        await _start_seq(axil, ram_a, prog, n, seed=700 + k)
+        await _await_done(dut, axil, f"sequencer, {label}")
+        st = await axil.read_dword(STATUS)
+        assert st & ST_RLEN and not st & ST_RRESP, (
+            f"sequencer, {label}: STATUS {st:#x}, want the length bit alone")
+        dep, cnt = _seq_outputs(ram_a, prog, n)
+        assert set(dep) == {POISON_SEQ} and set(cnt) == {POISON_SEQ}, (
+            f"sequencer, {label}: an aborted run wrote its outputs")
+        for r in (ram_a, ram_b, ram_c, ram_d):
+            r.fx.reset()
+        await _seq_clean(dut, axil, ram_a, prog, n, f"sequencer, {label}")
+        dut._log.info(f"sequencer, {label}: ended, STATUS {st:#x}, recovered")
+
+
+@cocotb.test()
+async def a_sequencer_read_fault_on_an_instruction_ends_the_run(dut):
+    """A SLVERR on an instruction's beat ends the run (STATUS[0], nothing
+    written): no word the memory did not vouch for runs. The same SLVERR
+    on a stream's beat is data, and the run completes with the model's
+    answer and STATUS[0]."""
+    axil, ram_a, ram_b, ram_c, ram_d = await _bringup(dut)
+    prog = _seq_prog()
+    n = 40
+    # ram_a's beats in order: the header (0), the image's (from 1), then
+    # stream a's.
+    image_beats = -(-(len(prog.to_bytes()) - 32) // 32)
+    for at, aborts, label in ((1, True, "an instruction's beat"),
+                              (image_beats, True, "the image's last beat"),
+                              (image_beats + 2, False, "a stream-a beat")):
+        for r in (ram_a, ram_b, ram_c, ram_d):
+            r.fx.reset()
+        ram_a.fx.arm(resp_at=at, resp=AxiResp.SLVERR)
+        vals = await _start_seq(axil, ram_a, prog, n, seed=at)
+        await _await_done(dut, axil, f"sequencer, a SLVERR on {label}")
+        st = await axil.read_dword(STATUS)
+        assert st & ST_RRESP and not st & ST_RLEN, (
+            f"sequencer, a SLVERR on {label}: STATUS {st:#x}")
+        dep, cnt = _seq_outputs(ram_a, prog, n)
+        if aborts:
+            assert set(dep) == {POISON_SEQ} and set(cnt) == {POISON_SEQ}, (
+                f"sequencer, a SLVERR on {label}: the run went on and "
+                f"wrote its outputs - a faulted instruction word was run")
+        else:
+            want = seq.run(prog, *vals)
+            got = [int.from_bytes(dep[4 * k:4 * k + 4], "little")
+                   for k in range(n * prog.max_deposits)]
+            assert got == want.deposits, (
+                f"sequencer, a SLVERR on {label}: a data fault completes "
+                f"the run, and this one's outputs differ from the model")
+        for r in (ram_a, ram_b, ram_c, ram_d):
+            r.fx.reset()
+        await _seq_clean(dut, axil, ram_a, prog, n,
+                         f"sequencer, a SLVERR on {label}")
+        dut._log.info(f"sequencer, a SLVERR on {label}: STATUS {st:#x}, "
+                      f"{'ended' if aborts else 'completed'}")

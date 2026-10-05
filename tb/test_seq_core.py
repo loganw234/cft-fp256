@@ -267,6 +267,12 @@ class SeqRam:
         self.has_wr = hasattr(dut, "m_wr_awvalid")
         self.rresp_at = None
         self.beats_for = None
+        # Read bursts accepted and not wholly delivered: an AR taken and
+        # waiting, or a burst with beats still to present. The abort's
+        # cases (revision 8) hold it to zero at done - every read in
+        # flight landed, a long burst drained to its RLAST - since a beat
+        # left here is the next run's first read.
+        self.pending = 0
         self.reset_log()
 
     # -- test-side access ------------------------------------------------
@@ -417,6 +423,7 @@ class SeqRam:
                     cur_r = None
             if cur_r is None and pend and pend[0][2] <= cyc + 1:
                 cur_r = pend.pop(0)
+            self.pending = len(pend) + (cur_r is not None)
 
             was_valid, rvalid = rvalid, int(cur_r is not None)
             if rvalid:
@@ -480,6 +487,63 @@ class SeqRam:
                     dut.m_rd_rdata.value = rdata
                     if self.rresp_at is not None:
                         dut.m_rd_rresp.value = rresp
+
+
+class Fault:
+    """One fault planted on one read burst (revision 8, the abort): the
+    `which`-th burst, in issue order, whose address lies in [lo, hi).
+
+      "short"  the burst returns one beat fewer than ARLEN asked, RLAST on
+               its last - a length fault the tile must END, where until
+               revision 8 it waited for ever;
+      "long"   one beat more, RLAST on the extra one - a length fault whose
+               extra beat must be DRAINED, where until revision 8 it was
+               handed to a later read as data;
+      "rresp"  beat `beat` of the burst answers SLVERR with the right data.
+
+    Installed on SeqRam's two hooks. The burst is found by its address,
+    read off the AR channel as SeqRam accepts it, so a case names a
+    region (the image, the bank, stream b) rather than counting bursts.
+    """
+
+    def __init__(self, dut, ram, lo, hi, kind, which=0, beat=0):
+        assert kind in ("short", "long", "rresp"), kind
+        self.dut, self.ram = dut, ram
+        self.lo, self.hi, self.kind = lo, hi, kind
+        self.which, self.beat = which, beat
+        self.seen = 0
+        self.burst = None      # its number in SeqRam's arlog, once issued
+        self.asked = None
+
+    def _beats_for(self, n, asked):
+        addr = _i(self.dut.m_rd_araddr)
+        if self.burst is None and self.lo <= addr < self.hi:
+            if self.seen == self.which:
+                self.burst, self.asked = n, asked
+            self.seen += 1
+        if n == self.burst:
+            if self.kind == "short":
+                assert asked >= 2, "a one-beat burst cannot be short"
+                return asked - 1
+            if self.kind == "long":
+                return asked + 1
+        return asked
+
+    def _rresp_at(self, burst, beat):
+        return 2 if (self.kind == "rresp" and burst == self.burst
+                     and beat == self.beat) else 0
+
+    def install(self):
+        self.ram.beats_for = self._beats_for
+        self.ram.rresp_at = self._rresp_at
+
+    def remove(self):
+        self.ram.beats_for = None
+        self.ram.rresp_at = None
+        # SeqRam drives RRESP only while a hook is installed, so a
+        # planted SLVERR on the run's last beat would otherwise stand on
+        # the wire for the next run.
+        self.dut.m_rd_rresp.value = 0
 
 
 # ----------------------------------------------------------------------
@@ -1121,6 +1185,153 @@ class Bench:
         assert (err & 0x7) == 0, (
             f"{label}: err[2:0]={err & 0x7} - the model memory answered "
             f"OKAY on every beat")
+
+    # -- a run the memory faults (revision 8, the abort) -----------------
+
+    async def faulted(self, fmt, prog, a, b, c, n, label, fault, *,
+                      expect, lanes_done=0, bank=None, scratch_in=None,
+                      idx_a=None, keep=None):
+        """Run `prog` over `n` lanes with `fault` planted on one read
+        burst, and hold the abort's rule (docs/ROADMAP.md, revision 8,
+        "The abort"; rtl/cft_seq.sv's contract, item 5):
+
+          "length"  a short or long burst: done comes, with err[2], and
+                    the run ended there - no burst issued after the
+                    faulted one, every read in flight landed (a long
+                    burst's extra beat drained), and the outputs exactly
+                    those of the lanes whose blocks finished before it
+                    (`lanes_done`), every other byte untouched;
+          "word"    a read fault on the header or an instruction: the
+                    same, with err[0] in place of err[2];
+          "data"    a read fault on data: the run COMPLETES, computes the
+                    model's answer (SeqRam returns the right bytes with
+                    its SLVERR), and says err[0].
+
+        A masked run takes `keep`, a gathered one `idx_a` (stream a's
+        table). The model is run as the case's own run would be."""
+        assert expect in ("length", "word", "data"), expect
+        ebytes = fmt.width // 8
+        maxdep = prog.max_deposits
+        image = prog.to_bytes()
+        dep_bytes = n * maxdep * ebytes
+        cnt_bytes = 4 * n
+        want = seq.run(prog, list(a), list(b), list(c), bank=bank,
+                       scratch_in=scratch_in, idx_a=idx_a,
+                       lane_mask=None if keep is None else list(keep))
+        if keep is None:
+            keep = [True] * n
+        self._stage(fmt, image, a, b, c, n, dep_bytes, cnt_bytes, bank=bank,
+                    scratch_in=scratch_in)
+        if idx_a is not None:
+            raw = b"".join(int(t).to_bytes(4, "little") for t in idx_a)
+            raw += bytes(POISON for _ in range(-len(raw) % BEAT_BYTES))
+            self.ram.stage(IA_BASE, raw)
+        masked = not all(keep)
+        if masked:
+            raw = bytearray((n + 7) // 8)
+            for i, k in enumerate(keep):
+                if k:
+                    raw[i >> 3] |= 1 << (i & 7)
+            pad = -len(raw) % BEAT_BYTES
+            self.ram.stage(MASK_BASE, bytes(raw) + bytes([POISON]) * pad)
+        self._drive_cfg(fmt, n, bank_ptr=bank is not None,
+                        scratch=prog.scratch_io,
+                        idx_mask=1 if idx_a is not None else 0,
+                        lane_mask=masked)
+        budget = self._budget(fmt, prog, n, len(image))
+        budget += 64 * (len(idx_a) + 64) if idx_a is not None else 0
+        budget += 64 * (1 + -(-n // lanes_per_block(fmt))) if masked else 0
+        fault.install()
+        try:
+            refused, flags, err = await self._go(budget, label)
+        finally:
+            fault.remove()
+        assert fault.burst is not None, (
+            f"{label}: the fault was never planted - no read burst landed in "
+            f"[{fault.lo:#x}, {fault.hi:#x}) as number {fault.which}")
+        assert refused == 0, f"{label}: a faulted run reported a refusal"
+        assert self.ram.pending == 0, (
+            f"{label}: done with {self.ram.pending} read burst(s) still to "
+            f"land - a beat left on the channel is the next run's first read")
+        if expect == "length":
+            assert err & 0x4, (
+                f"{label}: err={err:#x}, no length fault (err[2]) reported for "
+                f"a {fault.kind} burst")
+            assert not err & 0x1, (
+                f"{label}: err={err:#x} - err[0] without a read fault planted")
+        else:
+            assert err & 0x1, (
+                f"{label}: err={err:#x}, no read fault (err[0]) reported")
+            assert not err & 0x4, (
+                f"{label}: err={err:#x} - a length fault where the burst's "
+                f"length was right")
+        nsout = prog.n_scratch_out if prog.scratch_io else 0
+        if expect == "data":
+            lanes_done = n
+        else:
+            assert len(self.ram.arlog) == fault.burst + 1, (
+                f"{label}: {len(self.ram.arlog) - fault.burst - 1} read "
+                f"burst(s) issued after the faulted one (number "
+                f"{fault.burst}): an aborted run issues no new burst. "
+                f"{self.ram.arlog[fault.burst:fault.burst + 4]}")
+        # The outputs: the model's for every lane of a block that finished
+        # (and the caller's), the caller's poison for every other.
+        got_dep = self.ram.fetch(D_BASE, dep_bytes)
+        got_cnt = self.ram.fetch(CNT_BASE, cnt_bytes)
+        got_so = self.ram.fetch(SOUT_BASE, n * nsout * ebytes)
+        poison_el = bytes([POISON]) * ebytes
+        for i in range(n):
+            ran = i < lanes_done and keep[i]
+            for s in range(maxdep):
+                raw = got_dep[(i * maxdep + s) * ebytes:
+                              (i * maxdep + s + 1) * ebytes]
+                if ran:
+                    g = int.from_bytes(raw, "little")
+                    assert g == want.deposits[i * maxdep + s], (
+                        f"{label}: deposit[lane {i} slot {s}] got {g:#x} want "
+                        f"{want.deposits[i * maxdep + s]:#x}")
+                else:
+                    assert raw == poison_el, (
+                        f"{label}: deposit[lane {i} slot {s}] written "
+                        f"({raw.hex()}) by a run that ended before its block")
+            raw = got_cnt[4 * i:4 * i + 4]
+            if ran:
+                assert int.from_bytes(raw, "little") == want.counts[i], (
+                    f"{label}: count[lane {i}] got "
+                    f"{int.from_bytes(raw, 'little')} want {want.counts[i]}")
+            else:
+                assert raw == b"\xa5" * 4, (
+                    f"{label}: count[lane {i}] written ({raw.hex()}) by a run "
+                    f"that ended before its block")
+            for s in range(nsout):
+                raw = got_so[(i * nsout + s) * ebytes:
+                             (i * nsout + s + 1) * ebytes]
+                if ran:
+                    assert (int.from_bytes(raw, "little")
+                            == want.scratch_out[i * nsout + s]), (
+                        f"{label}: scratch_out[lane {i} slot {s}] differs")
+                else:
+                    assert raw == poison_el, (
+                        f"{label}: scratch_out[lane {i} slot {s}] written by a "
+                        f"run that ended before its block")
+        windows = []
+        if dep_bytes:
+            windows.append((D_BASE, dep_bytes, "deposit"))
+        if cnt_bytes:
+            windows.append((CNT_BASE, cnt_bytes, "count"))
+        if nsout:
+            windows.append((SOUT_BASE, n * nsout * ebytes, "scratch-out"))
+        self.ram.assert_writes_inside(windows, label)
+        if lanes_done == 0:
+            self.ram.assert_no_writes(label)
+        if expect == "data":
+            assert flags == want.flags, (
+                f"{label}: FLAGS {flags:#07b}, model {want.flags:#07b}")
+        self.cases["faulted"] += 1
+        self.dut._log.info(
+            f"{label}: err={err:#x}, {len(self.ram.arlog)} read bursts, "
+            f"{self.last_cycles:.0f} cycles to done")
+        return want
 
     def _budget(self, fmt, prog, n, image_bytes):
         blocks = max(1, -(-n // lanes_per_block(fmt)))
@@ -6099,3 +6310,200 @@ async def masked_scratch_out_drains_a_converged_lane(dut):
                 f"convergence says, so the case is mis-built")
     dut._log.info("the scratch-out drain skips a masked lane and keeps a "
                   "converged one")
+
+
+# ======================================================================
+# revision 8: the abort - a read burst of the wrong length ends the run
+# ======================================================================
+#
+# docs/ROADMAP.md, "Revision 8", "The abort: a read burst of the wrong
+# length ends the run", and rtl/cft_seq.sv's contract, item 5. Each case
+# plants one fault on one read of a run (Fault, on SeqRam's hooks), holds
+# the faulted run to Bench.faulted's rule, and then runs a clean program
+# on the same instance against the model: a beat of the faulted run left
+# on the channel - a long burst not drained - is that run's first read,
+# and a short burst still counted hangs it.
+
+def _abort_prog(fmt):
+    """Three streams read, three deposits, one constant: every read a
+    run can make of the image and the operands has a beat to fault."""
+    A, M = sf.OP_ADD, sf.OP_MUL
+    return seq.Program(fmt, [
+        seq.alu(A, 3, ra=0, rc=2),
+        seq.alu(M, 4, ra=1, rb=3),
+        seq.alu(sf.OP_FMA, 5, ra=4, rb=0, rc=0, kc=True),
+        seq.deposit(3), seq.deposit(4), seq.deposit(5),
+        seq.halt()], consts=[sf.one_bits(fmt)], max_deposits=3)
+
+
+async def _clean_after(bench, fmt, label):
+    """The run after a faulted one, against the model: nothing of the
+    faulted run is left in flight to be read as this one's."""
+    n = lanes_per_block(fmt) + 3
+    await bench.program(fmt, _abort_prog(fmt), operands(fmt, n, 811),
+                        operands(fmt, n, 812), operands(fmt, n, 813), n,
+                        f"{label}, then a clean run")
+
+
+@cocotb.test()
+async def abort_header_and_image(dut):
+    """The header beat and the image: a long header (one beat, so it
+    cannot be short), a SLVERR on it, a short and a long image burst, a
+    SLVERR on a beat holding an instruction - each ends the run before any
+    block, writing nothing - and a SLVERR on a beat holding only constants,
+    which is data: the run completes with err[0] and the model's answer."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    n = 20
+    a, b, c = (operands(fmt, n, s) for s in (801, 802, 803))
+    prog = _abort_prog(fmt)
+    img = len(prog.to_bytes())
+    assert img > 32 + BEAT_BYTES, "the image must be a multi-beat read"
+    hdr = (PROG_BASE, PROG_BASE + 1)
+    body = (PROG_BASE + 32, PROG_BASE + img)
+    for lohi, kind, expect, what in (
+            (hdr, "long", "length", "a long header beat"),
+            (hdr, "rresp", "word", "a SLVERR on the header beat"),
+            (body, "short", "length", "a short image burst"),
+            (body, "long", "length", "a long image burst")):
+        label = f"abort: {what}"
+        f = Fault(dut, bench.ram, *lohi, kind)
+        await bench.faulted(fmt, prog, a, b, c, n, label, f, expect=expect)
+        await _clean_after(bench, fmt, label)
+    # an instruction's beat: the image's first beat holds the constant and
+    # seven instructions' bytes, and its last beat the last instructions'
+    for beat in (0, -(-(img - 32) // BEAT_BYTES) - 1):
+        label = f"abort: a SLVERR on image beat {beat}, an instruction's"
+        f = Fault(dut, bench.ram, *body, "rresp", beat=beat)
+        await bench.faulted(fmt, prog, a, b, c, n, label, f, expect="word")
+        await _clean_after(bench, fmt, label)
+    # A beat of constants alone is DATA. fp256 with three constants: the
+    # image's first three beats are the constants, the fourth the first
+    # instructions.
+    f256 = FP256
+    one = sf.one_bits(f256)
+    p256 = seq.Program(f256, [
+        seq.alu(sf.OP_ADD, 3, ra=0, rc=0, kc=True),
+        seq.alu(sf.OP_ADD, 3, ra=3, rc=1, kc=True),
+        seq.alu(sf.OP_ADD, 3, ra=3, rc=2, kc=True),
+        seq.deposit(3), seq.halt()],
+        consts=[one, sf.max_normal_bits(f256), sf.min_subnormal_bits(f256)],
+        max_deposits=1)
+    n2 = 5
+    a2, b2, c2 = (operands(f256, n2, s) for s in (821, 822, 823))
+    body2 = (PROG_BASE + 32, PROG_BASE + len(p256.to_bytes()))
+    for k in (0, 2):
+        label = f"a SLVERR on the fp256 image's constant beat {k} (data)"
+        f = Fault(dut, bench.ram, *body2, "rresp", beat=k)
+        await bench.faulted(f256, p256, a2, b2, c2, n2, label, f,
+                            expect="data")
+    label = "abort: a SLVERR on the fp256 image's first instruction beat"
+    f = Fault(dut, bench.ram, *body2, "rresp", beat=3)
+    await bench.faulted(f256, p256, a2, b2, c2, n2, label, f, expect="word")
+    await _clean_after(bench, f256, label)
+    dut._log.info(f"the abort, header and image: {bench.cases['faulted']} "
+                  f"faulted runs")
+
+
+@cocotb.test()
+async def abort_bank_and_scratch_in(dut):
+    """The two other multi-beat reads before the first instruction: a
+    BANK_EXT image's bank and the scratch-in block. A short or a long
+    burst ends the run; a SLVERR on either is data, and the run
+    completes."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    n = 24
+    a, b, c = (operands(fmt, n, s) for s in (831, 832, 833))
+    bank = [sf.one_bits(fmt)] + operands(fmt, 11, 834)
+    prog = seq.Program(fmt, [
+        seq.alu(sf.OP_ADD, 3, ra=0, rc=1, kc=True),
+        seq.alu(sf.OP_MUL, 4, ra=3, rb=9, kb=True),
+        seq.deposit(3), seq.deposit(4), seq.halt()],
+        flags=seq.FLAG_BANK_EXT, n_consts=12, max_deposits=2)
+    blo = (BANK_BASE, BANK_BASE + 0x8000)
+    for kind, expect in (("short", "length"), ("long", "length"),
+                         ("rresp", "data")):
+        label = f"abort: a {kind} bank burst"
+        f = Fault(dut, bench.ram, *blo, kind, beat=1)
+        await bench.faulted(fmt, prog, a, b, c, n, label, f, expect=expect,
+                            bank=bank)
+        await _clean_after(bench, fmt, label)
+    nsin = 3
+    sprog = seq.Program(fmt, [
+        seq.ldl(3, 0), seq.ldl(4, 2),
+        seq.alu(sf.OP_ADD, 5, ra=3, rc=4),
+        seq.alu(sf.OP_ADD, 5, ra=5, rc=0),
+        seq.stl(5, 1), seq.deposit(5), seq.halt()],
+        flags=seq.FLAG_SCRATCH_IO, n_scratch_in=nsin, n_scratch_out=2,
+        max_deposits=1)
+    sin = operands(fmt, n * nsin, 835)
+    slo = (SIN_BASE, SIN_BASE + 0x30000)
+    for kind, expect in (("short", "length"), ("long", "length"),
+                         ("rresp", "data")):
+        label = f"abort: a {kind} scratch-in burst"
+        f = Fault(dut, bench.ram, *slo, kind, beat=2)
+        await bench.faulted(fmt, sprog, a, b, c, n, label, f, expect=expect,
+                            scratch_in=sin)
+        await _clean_after(bench, fmt, label)
+
+
+@cocotb.test()
+async def abort_streams(dut):
+    """The three operand streams, each a multi-beat read every block: a
+    short and a long burst in the first block end the run with nothing
+    written; a long or a short one in the SECOND block leaves the first
+    block's outputs written in full and the second's untouched; a SLVERR on
+    a stream is data, and the run completes."""
+    bench = Bench(dut)
+    await bench.start()
+    for fmt in (FP32, FP64):
+        lpb = lanes_per_block(fmt)
+        n = 2 * lpb + 5
+        a, b, c = (operands(fmt, n, s) for s in (841, 842, 843))
+        prog = _abort_prog(fmt)
+        for r, base in enumerate((A_BASE, B_BASE, C_BASE)):
+            lohi = (base, base + 0x10000)
+            for kind, expect, which, done in (
+                    ("short", "length", 0, 0), ("long", "length", 0, 0),
+                    ("long", "length", 1, lpb), ("short", "length", 1, lpb),
+                    ("rresp", "data", 0, n)):
+                label = (f"abort: {fmt.name} stream {'abc'[r]}, a {kind} "
+                         f"burst in block {which}")
+                f = Fault(dut, bench.ram, *lohi, kind, which=which, beat=3)
+                await bench.faulted(fmt, prog, a, b, c, n, label, f,
+                                    expect=expect, lanes_done=done)
+            await _clean_after(bench, fmt, label)
+
+
+@cocotb.test()
+async def abort_single_beat_reads(dut):
+    """The single-beat reads: the lane mask's (R17) and a gather's table
+    and element reads (R16). A single beat cannot be short; a long one
+    ends the run, its extra beat drained."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    lpb = lanes_per_block(fmt)
+    n = lpb + 9
+    a, b, c = (operands(fmt, n, s) for s in (851, 852, 853))
+    prog = _abort_prog(fmt)
+    keep = _keep(n, 1)
+    for which, done in ((0, 0), (1, lpb)):
+        label = f"abort: a long mask read in block {which}"
+        f = Fault(dut, bench.ram, MASK_BASE, MASK_BASE + 0x10000, "long",
+                  which=which)
+        await bench.faulted(fmt, prog, a, b, c, n, label, f, expect="length",
+                            lanes_done=done, keep=keep)
+        await _clean_after(bench, fmt, label)
+    src = operands(fmt, 3 * n, 854)
+    tbl = _perm_table(n, len(src), 855)
+    for lohi, what in (((IA_BASE, IA_BASE + 0x10000), "table"),
+                       ((A_BASE, A_BASE + 0x10000), "element")):
+        label = f"abort: a long gather {what} read"
+        f = Fault(dut, bench.ram, *lohi, "long", which=2)
+        await bench.faulted(fmt, prog, src, b, c, n, label, f,
+                            expect="length", idx_a=tbl)
+        await _clean_after(bench, fmt, label)
