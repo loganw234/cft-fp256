@@ -93,6 +93,29 @@ def control_programs():
            quiet_pair + [seq.deposit(3), seq.halt()], 1)
     yield ("raise x 20 (R24)", [seq.raise_(0)] * 20
            + [seq.deposit(0), seq.halt()], 1)
+    # Revision 8's R21: augadd and augerr fire into the array as an ALU
+    # instruction does, so twenty independent ones should cost what the
+    # twenty IANDs of the reference row do. Every R21 row reads the one
+    # stream the reference reads (r0, on port C as well as A), because a
+    # second stream is a second load at every block's setup and would be
+    # counted against the instruction. The recommended pair is two
+    # instructions. The chains wait for each result, through ra on port A
+    # and through rb on port C, which forwards as A does; their reference
+    # is the IAND chain beside them.
+    yield ("augadd x 20 (R21)", [seq.augadd(3, 0, 0)] * 20
+           + [seq.deposit(3), seq.halt()], 1)
+    pair = []
+    for k in range(10):
+        pair += [seq.augerr(3, 0, 0), seq.augadd(4, 0, 0)]
+    yield ("augerr, augadd x 10 (R21)", pair + [seq.deposit(3), seq.halt()],
+           1)
+    yield ("iand x 20, dependent (R21's reference)",
+           [seq.alu(sf.OP_IAND, 3, 3, 0)] * 20
+           + [seq.deposit(3), seq.halt()], 1)
+    yield ("augadd x 20, dependent through ra (R21)",
+           [seq.augadd(3, 3, 0)] * 20 + [seq.deposit(3), seq.halt()], 1)
+    yield ("augadd x 20, dependent through rb (R21)",
+           [seq.augadd(3, 0, 3)] * 20 + [seq.deposit(3), seq.halt()], 1)
 
 
 @cocotb.test()

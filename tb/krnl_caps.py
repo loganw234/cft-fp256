@@ -14,7 +14,11 @@ change to the kernel's defaults moves the bench with it, and the two can
 never be told different numbers.
 
     $ python tb/krnl_caps.py
-    MAXD=1024 IMEM_D=4096 SCRATCH_D=2048 STREAM_D=16777216
+    MAXD=1024 IMEM_D=4096 SCRATCH_D=2048 STREAM_D=16777216 EN_AUGADD=1
+
+Since R21's decode (revision 8's round 2) it also prints EN_AUGADD, the
+build parameter that says whether R21 is built, so seq_coreu50's cft_seq
+decodes codes 10 and 11 exactly when the U50's kernel does.
 
 Exits non-zero, naming the parameter, if the kernel stops declaring one.
 """
@@ -37,6 +41,12 @@ def main():
             sys.exit(f"krnl_caps.py: {SRC.name} declares no "
                      f"`parameter int {krnl}`")
         words.append(f"{own}={m.group(1)}")
+    m = re.search(r"^\s*parameter\s+bit\s+EN_AUGADD\s*=\s*1'b([01])",
+                  src, re.MULTILINE)
+    if not m:
+        sys.exit(f"krnl_caps.py: {SRC.name} declares no "
+                 f"`parameter bit EN_AUGADD`")
+    words.append(f"EN_AUGADD={m.group(1)}")
     print(" ".join(words))
 
 

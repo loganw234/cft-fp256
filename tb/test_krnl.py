@@ -81,16 +81,20 @@ CSR_ARGS = {
 # hooks (R8S) the U50's store is 4,096 and its capacity 2^24: CAPS[23:20]
 # stays 15, min(15, 24), so CAPS is unchanged, and CAPS2[20:16] reads 24.
 # Since R24, CAPS2[14] (flag control) on every build, and since R23
-# CAPS2[13] (the lane-flag block). So 0x001867FB at the U50's, where the
-# plan's whole revision reads 0x00187FFB with [14:11] set (docs/ROADMAP.md,
-# "What a revision-8 U50 tile reads"). The open-core configurations keep
-# streaming off (SEQ_STREAM_D equal to the store).
+# CAPS2[13] (the lane-flag block). Since R21's decode CAPS2[11] where the
+# build carries R21 (EN_AUGADD, the plan's question 9): 0x00186FFB at the
+# U50's single, and 0x001867FB on the quad's tile, built without it
+# (tb/Makefile's krnlseqnoaug) - where the plan's whole revision reads
+# 0x00187FFB with [14:11] set, and 0x001877FB without R21
+# (docs/ROADMAP.md, "What a revision-8 U50 tile reads"). The open-core
+# configurations keep streaming off (SEQ_STREAM_D equal to the store).
 VERSION_SEAM = 0x00000B00
 SEAM_WORDS = {
-    # (SEQ_MAXD, SEQ_IMEM_D, SEQ_SCRATCH_D, SEQ_STREAM_D):
+    # (SEQ_MAXD, SEQ_IMEM_D, SEQ_SCRATCH_D, SEQ_STREAM_D, EN_AUGADD):
     #     (CAPS with [3:0] clear, CAPS2)
-    (1024, 4096, 2048, 1 << 24): (0x19FAFFF0, 0x001867FB),   # the U50's
-    (64, 16384, 256, 16384):     (0x19E6FFF0, 0x000067F8),   # open-core
+    (1024, 4096, 2048, 1 << 24, 1): (0x19FAFFF0, 0x00186FFB),  # the single
+    (1024, 4096, 2048, 1 << 24, 0): (0x19FAFFF0, 0x001867FB),  # quad tile
+    (64, 16384, 256, 16384, 1):     (0x19E6FFF0, 0x00006FF8),  # open-core
 }
 
 # ---- which rungs THIS build carries ------------------------------------
@@ -220,6 +224,39 @@ def krnl_param(name):
     return int(m.group(1))
 
 
+def krnl_param_bit(name):
+    """A cft_krnl `parameter bit` as THIS build has it - krnl_param's rule
+    for the one-bit build choices: the CFT_GENERICS override (0 or 1) the
+    target built with, or else the declared default. Revision 8's
+    EN_AUGADD is the first a bench keys on: the quad's tile is built
+    without R21 (tb/Makefile's krnlseqnoaug)."""
+    import re
+    for g in os.environ.get("CFT_GENERICS", "").split():
+        gname, _, value = g.partition("=")
+        if gname == name:
+            assert value in ("0", "1"), (
+                f"CFT_GENERICS {g!r}: {name} is a bit parameter")
+            return int(value)
+    src = (RTL / "cft_krnl.sv").read_text(encoding="utf-8")
+    m = re.search(r"^\s*parameter\s+bit\s+%s\s*=\s*1'b([01])" % name,
+                  src, re.MULTILINE)
+    assert m, f"cft_krnl.sv has no `parameter bit {name}`"
+    return int(m.group(1))
+
+
+def _feat_augadd():
+    """CAPS2[11] as this build has it. FEAT_AUGADD has been EN_AUGADD, a
+    build parameter, since R21's decode (revision 8's round 2): asserted
+    here, so a localparam set back to a constant is a failure and not a
+    bit read from the wrong place."""
+    import re
+    src = (RTL / "cft_krnl.sv").read_text(encoding="utf-8")
+    assert re.search(r"^\s*localparam\s+bit\s+FEAT_AUGADD\s*=\s*"
+                     r"EN_AUGADD\s*;", src, re.MULTILINE), (
+        "cft_krnl.sv's FEAT_AUGADD is no longer EN_AUGADD")
+    return krnl_param_bit("EN_AUGADD")
+
+
 def _port_literal(path, port):
     """The value of a constant 4-bit port wired as `.<port>(4'bxxxx)`."""
     import re
@@ -268,8 +305,9 @@ def caps2_expected():
     # [14:11], revision 8's seam (2026-10-02): R21's augadd and augerr,
     # R22's stepped index, R23's lane-flags block and R24's flag control.
     # Read from the RTL like every bit above them, so each item's parcel
-    # sets its own bit and this follows.
-    aug = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_AUGADD")
+    # sets its own bit and this follows - R21's from the build parameter
+    # EN_AUGADD it has been since its decode.
+    aug = _feat_augadd()
     step = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_SCRATCH_STEP")
     lflags = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_LANE_FLAGS")
     fctl = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_FLAG_CONTROL")
@@ -321,11 +359,12 @@ def check_seam_words(caps, caps2, prec_mask):
     table does not have is a failure, not a skip: add its words from the
     plan's arithmetic rather than letting the check pass by absence."""
     key = (krnl_param("SEQ_MAXD"), krnl_param("SEQ_IMEM_D"),
-           krnl_param("SEQ_SCRATCH_D"), krnl_param("SEQ_STREAM_D"))
+           krnl_param("SEQ_SCRATCH_D"), krnl_param("SEQ_STREAM_D"),
+           krnl_param_bit("EN_AUGADD"))
     assert key in SEAM_WORDS, (
         f"no computed words for (SEQ_MAXD, SEQ_IMEM_D, SEQ_SCRATCH_D, "
-        f"SEQ_STREAM_D) = {key}: add them to SEAM_WORDS from the plan's "
-        f"arithmetic")
+        f"SEQ_STREAM_D, EN_AUGADD) = {key}: add them to SEAM_WORDS from "
+        f"the plan's arithmetic")
     want_caps, want_caps2 = SEAM_WORDS[key]
     want_caps |= prec_mask
     assert caps == want_caps, (
@@ -421,7 +460,11 @@ def gen_stream(fmt, n, rng):
     return out
 
 
-async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None, rnd=RND_RNE):
+async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None, rnd=RND_RNE,
+                 want_rnd=None):
+    """One elementwise run at MODE[14:12] = `rnd`, scored against the
+    model at `want_rnd` (`rnd` unless given): the attribute codes 5 to 7
+    are RNE by MODE's contract, so a case driving them names RNE here."""
     ba, bb, bc, bd = bases if bases else (A_BASE, B_BASE, C_BASE, D_BASE)
     ebytes = fmt.width // 8
     rng = random.Random(seed)
@@ -429,7 +472,8 @@ async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None, rnd=RND_RNE):
     vb = gen_stream(fmt, n, rng)
     vc = gen_stream(fmt, n, rng)
 
-    exp = [compute(fmt, op, va[i], vb[i], vc[i], rnd) for i in range(n)]
+    m_rnd = rnd if want_rnd is None else want_rnd
+    exp = [compute(fmt, op, va[i], vb[i], vc[i], m_rnd) for i in range(n)]
     exp_d = [e[0] for e in exp]
     exp_f = 0
     for e in exp:
@@ -476,7 +520,8 @@ async def run_op(dut, axil, ram, fmt, op, n, seed, bases=None, rnd=RND_RNE):
     got_err = await axil.read_dword(STATUS)
     assert got_err == 0, \
         f"{fmt.name} {OP_NAMES[op]}: STATUS {got_err:#05b}, bus faults during the run"
-    dut._log.info(f"{fmt.name} {OP_NAMES[op]} {RND_NAMES[rnd]} n={n}: "
+    dut._log.info(f"{fmt.name} {OP_NAMES[op]} "
+                  f"{RND_NAMES.get(rnd, f'attribute code {rnd}')} n={n}: "
                   f"bit-exact, flags {got_f:#07b}")
 
 
@@ -957,6 +1002,48 @@ async def krnl_end_to_end(dut):
 
 # ---- raw AXI4-Lite corner cases --------------------------------------
 #
+@cocotb.test()
+async def krnl_attribute_codes_5_to_7(dut):
+    """MODE[14:12] = 5, 6 and 7 through an elementwise run are RNE, as
+    MODE's contract says (rtl/cft_csr.sv, docs/ARCHITECTURE.md) - at every
+    rung this build carries, on ADD, the shape R21's augadd and augerr
+    ride the array in, and on FMA. Since R21 the pipe's attribute line
+    carries two internal codes, 5 and 6, written only from the sequencer's
+    aug_mode sideband, and an outside 5 to 7 must still reach RNE and
+    never R21's mode (docs/ROADMAP.md, part 4; verifier-VRB's note that no
+    kernel case held it). No bench drove these codes through the kernel
+    before; tb/fpfma_common.py holds them on the bare pipes."""
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n, reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n, reset_active_level=False,
+                       size=2 ** 20)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 20,
+               mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 20,
+               mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"), dut.ap_clk,
+                dut.ap_rst_n, reset_active_level=False, size=2 ** 20,
+                mem=ram_a.mem)
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+    seed = 570
+    for fmt in (FP32, FP64, FP128, FP256):
+        if not carried(fmt):
+            continue
+        n = 4 * (256 // fmt.width)      # four beats at every rung
+        for op in (OP_ADD, OP_FMA):
+            for code in (5, 6, 7):
+                seed += 1
+                await run_op(dut, axil, ram_a, fmt, op, n, seed=seed,
+                             rnd=code, want_rnd=RND_RNE)
+
+
 # cocotbext-axi's AxiLiteMaster issues one write at a time and waits for
 # BVALID before starting the next, which is also what XRT's MMIO path
 # does. That politeness hides a whole class of CSR bugs: anything the

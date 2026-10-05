@@ -127,6 +127,12 @@ KMEM_D = 512
 # Scratch slots a lane (revision 3, R4), and the reduction the indexed
 # forms apply. A power of two by construction.
 SCRATCH_D = _seq_generic("SCRATCH_D", 256)
+# Revision 8's R21 (the plan's question 9): 1, cft_seq's default, decodes
+# augadd and augerr; 0 is the quad's tile, where the two codes are unknown
+# ones (HALT), and the R21 cases run their other half (seq_core with
+# CFT_GENERICS="EN_AUGADD=0" and -Pcft_seq.EN_AUGADD=0; through the kernel,
+# tb/Makefile's krnlseqnoaug).
+EN_AUGADD = _seq_generic("EN_AUGADD", 1)
 
 # EVERY MODEL CALL IN THIS BENCH IS AT THE DUT'S DEPTH (revision 7). The
 # depth is part of what a non-strict STX/LDX means, so a model left at
@@ -7431,3 +7437,271 @@ async def lane_flags_masked_and_dropped(dut):
         assert dropped and any(want.lane_flags[i] for i in dropped), (
             f"{fmt.name}: no kept lane that SETACT dropped raised anything - "
             f"the case cannot see a dropped lane's byte left unwritten")
+
+
+# ======================================================================
+# revision 8's R21: augadd and augerr, decoded
+# ======================================================================
+#
+# docs/SEQUENCER.md, R21; docs/ROADMAP.md, "Revision 8", R21. Control
+# codes 10 and 11 read ra on port A and rb on port C, write rd, and fire
+# into the array as ADD with the aug_mode sideband and their flag enable
+# on (the lanes are parcel B's, held to cft_golden.augmented in the four
+# fpfma benches). Held here against seq.py, which calls
+# augmented.augmented_add. Every run asks for R23's block, so each lane's
+# flags are compared as well as the run's OR. A build without R21
+# (EN_AUGADD=0, the quad's) runs each case's other half: the two codes
+# are unknown ones there, and a block ends where one stands (HALT), as on
+# revision 7 - the loader refuses them first, by name, from CAPS2[11].
+
+# The plan's families (docs/ROADMAP.md, part 4), named by what the model
+# says a pair does, so that each one is in a case because it was asked
+# for and not by chance.
+R21_FAMILIES = ("special", "signed zero", "overflow", "underflow exact",
+                "tie", "cancel", "far or partial", "near", "close", "swap")
+
+
+def _r21_family(fmt, fam, x, y, r, fl):
+    """Which of R21_FAMILIES the pair (x, y) - from tb/fpfma_common.py's
+    family `fam` - belongs to, given augmentedAddition's r and flags, or
+    None. In priority order: an operand's class first, then what the sum
+    did, then the family it was drawn from."""
+    expm = fmt.exp_mask << fmt.man_w
+    mag = (1 << (fmt.width - 1)) - 1
+    if (x & expm) == expm or (y & expm) == expm:
+        return "special"
+    if (x & mag) == 0 or (y & mag) == 0:
+        return "signed zero"
+    if fl & sf.FLAG_OVERFLOW:
+        return "overflow"
+    if (fl & sf.FLAG_UNDERFLOW) and not (fl & sf.FLAG_INEXACT):
+        return "underflow exact"
+    # A tie where roundTiesTowardZero and roundTiesToEven part: r is not
+    # the ordinary sum's rounding.
+    if r != sf.compute(fmt, sf.OP_ADD, x, 0, y, sf.RND_RNE)[0]:
+        return "tie"
+    if (r & mag) == 0:
+        return "cancel"
+    if fam == "partial":
+        return "far or partial"
+    if fam in ("near", "close", "swap"):
+        return fam
+    return None
+
+
+def r21_pairs(fmt, n, seed):
+    """n operand pairs (x, y) for R21 at `fmt`, every family in
+    R21_FAMILIES among them, about n / 11 of each and the rest drawn as
+    they come. From parcel B's families (tb/fpfma_common.py's aug_pairs,
+    cft_golden's adversarial pool for clause 9.5 and its neighbours),
+    shuffled by `seed`. Returns (pairs, {family: count})."""
+    from fpfma_common import aug_pairs
+    from cft_golden import augmented_add
+    rng = random.Random(seed ^ (fmt.width * 2101))
+    full = aug_pairs(fmt)
+    rng.shuffle(full)
+    quota = max(1, n // (len(R21_FAMILIES) + 1))
+    got = {f: [] for f in R21_FAMILIES}
+    rest = []
+    for fam, x, y in full:
+        if all(len(v) >= quota for v in got.values()) and \
+                len(rest) >= n:
+            break
+        r, _e, fl = augmented_add(fmt, x, y)
+        f = _r21_family(fmt, fam, x, y, r, fl)
+        if f is not None and len(got[f]) < quota:
+            got[f].append((x, y))
+        elif len(rest) < n:
+            rest.append((x, y))
+    pairs = [p for f in R21_FAMILIES for p in got[f]]
+    pairs += rest[:n - len(pairs)]
+    rng.shuffle(pairs)
+    return pairs[:n], {f: len(v) for f, v in got.items()}
+
+
+def _r21_absent(fmt, n, seed):
+    """EN_AUGADD=0: an augadd image and an augerr image, each ending its
+    block where the code stands - the tile runs the image, the model runs
+    it with HALT in the code's place. A MUL and a deposit before it, so
+    the block's first half is a computation the HALT must keep; a deposit
+    after it, which must not happen."""
+    rng = random.Random(seed)
+    a = seq.random_inputs(fmt, rng, n)
+    b = seq.random_inputs(fmt, rng, n)
+    c = seq.random_inputs(fmt, rng, n)
+    for code in (seq.augadd(4, 0, 1), seq.augerr(4, 0, 1)):
+        head = [seq.alu(sf.OP_MUL, 3, ra=0, rb=1), seq.deposit(3)]
+        tail = [seq.deposit(4), seq.halt()]
+        image = seq.Program(fmt, head + [code] + tail, max_deposits=2)
+        model = seq.Program(fmt, head + [seq.halt()] + tail, max_deposits=2)
+        yield code, image, model, a, b, c
+
+
+async def _r21_absent_run(bench, label):
+    for fmt in (FP32, FP64, FP128, FP256):
+        n = 2 * lanes_per_block(fmt) + 3
+        for code, image, model, a, b, c in _r21_absent(fmt, n, 2100):
+            name = seq.CTRL_NAMES[seq.decode(code)["op"]]
+            await bench.program(fmt, model, a, b, c, n,
+                                f"{fmt.name}: {label}, EN_AUGADD=0: {name} "
+                                f"ends its block where it stands",
+                                image=image.to_bytes(), lane_flags=True)
+
+
+def _r21_family_prog(fmt):
+    """Both halves of the pair, in both orders, so either operand anchors
+    in each lane (the pipe anchors the larger exponent): four results a
+    lane, deposited."""
+    return seq.Program(fmt, [
+        seq.augerr(3, 0, 1), seq.augadd(4, 0, 1),
+        seq.augerr(5, 1, 0), seq.augadd(6, 1, 0),
+        seq.deposit(3), seq.deposit(4), seq.deposit(5), seq.deposit(6),
+        seq.halt()], max_deposits=4)
+
+
+@cocotb.test()
+async def augadd_and_augerr_every_family(dut):
+    """Every family of the plan's list at every format, over two blocks
+    and a ragged third: each lane one pair, both halves, both operand
+    orders, against seq.py - deposits, counts, FLAGS, and each lane's
+    R23 byte. Asserts every family was drawn, so that a family missing
+    from a format is a failure here and not a gap."""
+    bench = Bench(dut)
+    await bench.start()
+    if not EN_AUGADD:
+        await _r21_absent_run(bench, "the family program")
+        return
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb = lanes_per_block(fmt)
+        n = 2 * lpb + 5
+        pairs, fams = r21_pairs(fmt, n, 2101)
+        missing = [f for f, k in fams.items() if k == 0]
+        assert not missing, (
+            f"{fmt.name}: no pair of the families {missing} among "
+            f"tb/fpfma_common.py's aug_pairs - the case cannot hold them")
+        a = [x for x, _ in pairs]
+        b = [y for _, y in pairs]
+        c = [0] * n
+        want = await bench.program(fmt, _r21_family_prog(fmt), a, b, c, n,
+                                   f"{fmt.name}: augadd and augerr, every "
+                                   f"family", lane_flags=True)
+        assert want.flags, f"{fmt.name}: the pairs raised no flag at all"
+        dut._log.info(f"{fmt.name}: {n} lanes, families "
+                      + ", ".join(f"{f} {k}" for f, k in fams.items())
+                      + f"; FLAGS {want.flags:#07b}")
+
+
+@cocotb.test()
+async def augadd_reads_rb_on_port_c(dut):
+    """A dependency through rb on port C, at every format and at one beat,
+    two beats and one lane, and a whole block: rb written by the
+    instruction just before - an ALU result, an augadd's, an augerr's -
+    and both ports reading the register just written. Port C reading rc,
+    or its hazard compare taking rc's field, reads the wrong register or
+    the right one too early, and a lane differs."""
+    bench = Bench(dut)
+    await bench.start()
+    if not EN_AUGADD:
+        await _r21_absent_run(bench, "the port-C chain")
+        return
+    for fmt in (FP32, FP64, FP128, FP256):
+        lpb = lanes_per_block(fmt)
+        prog = seq.Program(fmt, [
+            seq.alu(sf.OP_MUL, 3, ra=0, rb=1),   # r3 = a * b
+            seq.augadd(4, 2, 3),                 # rb = r3, just written
+            seq.augerr(5, 4, 3),                 # ra = an augadd's result
+            seq.augadd(6, 0, 5),                 # rb = an augerr's result
+            seq.augerr(7, 6, 6),                 # both ports, just written
+            seq.deposit(4), seq.deposit(5), seq.deposit(6), seq.deposit(7),
+            seq.halt()], max_deposits=4)
+        for n in (lpb, 2 * lpb + 1, NBEATS * lpb):
+            rng = random.Random(2102 + n + fmt.width)
+            a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
+            await bench.program(fmt, prog, a, b, c, n,
+                                f"{fmt.name}: rb through port C, n={n}",
+                                lane_flags=True)
+
+
+@cocotb.test()
+async def augadd_masked_and_quiet(dut):
+    """Under a mask, with a lane SETACT drops, and with augerr inside a
+    quiet region: a masked or dropped lane writes nothing and raises
+    nothing, and a quiet augerr's flags reach neither FLAGS nor its lane's
+    byte (R24's tag joins R21's flag enable). The quiet augerr reads
+    other operands than the loud augadd, and the case asserts that its
+    flags, leaked, would show."""
+    bench = Bench(dut)
+    await bench.start()
+    if not EN_AUGADD:
+        await _r21_absent_run(bench, "the masked program")
+        return
+    body = [seq.augerr(3, 0, 2), seq.augadd(4, 0, 1), seq.setact(1),
+            seq.augerr(5, 0, 1),
+            seq.deposit(3), seq.deposit(4), seq.deposit(5), seq.halt()]
+    for fmt in (FP32, FP256):
+        lpb = lanes_per_block(fmt)
+        n = lpb + 9
+        rng = random.Random(2103 + fmt.width)
+        a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
+        # every fifth lane's r1 a zero, so SETACT drops kept lanes too
+        b = [0 if i % 5 == 2 else v for i, v in enumerate(b)]
+        keep = _keep(n, 3)
+        quiet = seq.Program(fmt, [seq.quiet(), body[0], seq.endquiet()]
+                            + body[1:], max_deposits=3)
+        loud = seq.Program(fmt, body, max_deposits=3)
+        w_q = seq.run(quiet, a, b, c, lane_mask=keep)
+        w_l = seq.run(loud, a, b, c, lane_mask=keep)
+        assert w_q.lane_flags != w_l.lane_flags, (
+            f"{fmt.name}: the quiet augerr raises nothing its loud twin "
+            f"does not - the case cannot see the tag ignored")
+        assert any(keep[i] and not w_q.active[i] for i in range(n)), (
+            f"{fmt.name}: SETACT dropped no kept lane")
+        await bench.masked(fmt, quiet, a, b, c, n, keep,
+                           f"{fmt.name}: augerr quiet, under a mask",
+                           lane_flags=True)
+
+
+@cocotb.test()
+async def augadd_fuzz(dut):
+    """The model's revision-8 fuzz arm (seq.random_program(rev8=True)),
+    with R24's forms beside it: augadd, augerr and the recommended pair
+    among the rest, with loops and quiet regions, whole state compared and
+    each lane's byte. A program with a stepped STX or LDX is drawn and set
+    aside until R22 is built (it needs CAPS2[12]), and so is one with
+    ACTALL (the model wakes padding lanes there; the tile does not)."""
+    bench = Bench(dut)
+    await bench.start()
+    if not EN_AUGADD:
+        await _r21_absent_run(bench, "the fuzz's stand-in")
+        return
+    made = augs = 0
+    for name, trials, sizes, cap in (("fp32", 8, [9, 33, 128], 600),
+                                     ("fp64", 5, [7, 31, 64], 500),
+                                     ("fp256", 3, [3, 16], 150)):
+        fmt = FORMATS[name]
+        rng = random.Random(20261021 ^ fmt.width)
+        k = attempts = 0
+        while k < trials and attempts < trials * 200:
+            attempts += 1
+            insns, consts = seq.random_program(fmt, rng, rev8=True,
+                                               flags=True)
+            need = seq.features_rev8(insns)
+            if need & seq.FEAT_SCRATCH_STEP or not need & seq.FEAT_AUGADD:
+                continue
+            if worst_case_insns(insns) > cap or has_actall(insns):
+                continue
+            try:
+                prog = seq.Program(fmt, insns, consts, rng.choice([1, 2, 4]))
+            except seq.ProgramError:
+                continue
+            n = rng.choice(sizes)
+            a, b, c = (seq.random_inputs(fmt, rng, n) for _ in range(3))
+            await bench.program(fmt, prog, a, b, c, n,
+                                f"R21 fuzz {name} #{k} n={n}",
+                                lane_flags=True)
+            k += 1
+            augs += sum(1 for w in insns if seq.decode(w)["ctrl"] and
+                        seq.decode(w)["op"] in (seq.AUGADD, seq.AUGERR))
+        assert k == trials, f"{name}: {k} of {trials} R21 programs drawn"
+        made += k
+    dut._log.info(f"R21 fuzz: {made} programs, {augs} augadd/augerr words")

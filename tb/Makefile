@@ -73,7 +73,8 @@ SIM_BENCHES = fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg \
               normshare seedop reduceacc reduce reducenowide krnl krnlf128 \
               krnlf64f128 \
               quarter faults redprog \
-              seq_core seq_coreu50 seq_corestr krnlseq seqbanks mulpass mulcycle \
+              seq_core seq_coreu50 seq_corestr krnlseq krnlseqnoaug \
+              seqbanks mulpass mulcycle \
               mulcycle2
 
 # A bench writes sim_build/<target name>/results.xml. One does not: the
@@ -422,6 +423,29 @@ krnlseq:
 		MODULE=test_krnl_seq SIM_BUILD=sim_build/krnlseq \
 		COCOTB_RESULTS_FILE=sim_build/krnlseq/results.xml \
 		&& $(PYTHON) check_results.py sim_build/krnlseq/results.xml
+
+# The quad's tile (revision 8's R21; docs/ROADMAP.md, question 9): the
+# kernel built WITHOUT R21, EN_AUGADD=0, which is how the quad ships -
+# Logan's answer to question 9 was "Only if probe L finds it cheap", and
+# probe L measured R21's lanes at +10,595 LUTs a tile. Every other target
+# builds R21 (the default, the single's and the deep build's), so without
+# this one `make sim` would never build the tile the quad carries.
+# A named subset of test_krnl_seq, not the whole bench a second time
+# (krnlseq is among the suite's longest):
+#   krnl_augadd, flipped by CAPS2[11] clear: the plan's words for this
+#     tile, an augadd and an augerr image each ending its block where
+#     the code stands (an unknown code's HALT, as on revision 7), and an
+#     R21-free program bit-exact;
+#   krnl_lane_mask, the ordinary sequencer case: ordinary programs,
+#     masked and not, on the array the engine shares;
+#   krnl_lane_flags, so R23 is held on the quad's configuration too.
+# A case added to test_krnl_seq reaches this target only when named here.
+krnlseqnoaug:
+	TESTCASE=krnl_augadd,krnl_lane_mask,krnl_lane_flags CFT_GENERICS="EN_AUGADD=0" $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_krnl \
+		MODULE=test_krnl_seq SIM_BUILD=sim_build/krnlseqnoaug \
+		KRNL_PARAMS="-Pcft_krnl.EN_AUGADD=0" \
+		COCOTB_RESULTS_FILE=sim_build/krnlseqnoaug/results.xml \
+		&& $(PYTHON) check_results.py sim_build/krnlseqnoaug/results.xml
 
 # The kernel with BOTH fused ladders on - the configuration the size
 # campaign built, measured and equivalence-proved lane by lane, and

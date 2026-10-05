@@ -259,7 +259,17 @@ module cft_seq #(
     // The multi-cycle multiplier's pass budget, for the private array
     // only (cft_lanes has the story); the kernel's array is paced by
     // the kernel and reaches this module as lane_ready.
-    parameter int MUL_PASSES = 1
+    parameter int MUL_PASSES = 1,
+    // Revision 8's R21 (docs/ROADMAP.md, question 9): 1, the default,
+    // decodes control codes 10 and 11 - augadd and augerr - and fires
+    // them into the array with the aug_mode sideband; cft_krnl publishes
+    // CAPS2[11] from the same parameter. At 0 the two codes are unknown
+    // ones, as on revision 7: a stream that reaches one ends its block
+    // there (HALT), and a loader refuses them first, by name, from
+    // CAPS2[11]. The quad is built at 0 (probe L: +10,595 LUTs a tile).
+    /* verilator lint_off WIDTHTRUNC */
+    parameter bit EN_AUGADD  = 1'b1
+    /* verilator lint_on WIDTHTRUNC */
 )(
     input  logic              ap_clk,
     input  logic              ap_rst_n,
@@ -439,6 +449,9 @@ module cft_seq #(
                          C_DEPOSIT = 8'd3, C_SETACT = 8'd4, C_ACTALL = 8'd5,
                          C_STL = 8'd6, C_LDL = 8'd7,
                          C_STX = 8'd8, C_LDX = 8'd9,
+                         // Revision 8's R21: augmentedAddition's two
+                         // halves (754-2019 9.5), decoded where EN_AUGADD.
+                         C_AUGADD = 8'd10, C_AUGERR = 8'd11,
                          // Revision 8's R24, flag control
                          // (docs/SEQUENCER.md): a quiet region and a raise.
                          C_QUIET = 8'd12, C_ENDQUIET = 8'd13,
@@ -456,6 +469,10 @@ module cft_seq #(
   // verified operation, not arithmetic of the sequencer's own (P1);
   // and the retire takes no flag from a load whatever the array says.
   localparam logic [7:0] OP_IOR = 8'd17;
+  // ...and the opcode augadd and augerr ride the array as (revision 8,
+  // R21): ADD, whose operands cft_opmux shapes as (a, 1.0, c), with the
+  // sideband saying which half of the pair the pipe keeps.
+  localparam logic [7:0] OP_ADD = 8'd1;
 
   // ---- the scratch's geometry (revision 3, R4) -----------------------
   // SCRSW is the slot field's width and the reduction the indexed
@@ -1003,11 +1020,13 @@ module cft_seq #(
   logic                 al_valid;
   logic [7:0]           al_op;
   logic [2:0]           al_rnd;
-  // R21's sideband (revision 8's seam): a constant zero until R21's
-  // decode drives it, and the same signal reaches the shared array (as
-  // lane_aug_mode) and the private one below.
+  // R21's sideband (revision 8): 0 an ordinary operation, 1 augadd, 2
+  // augerr, registered with the request it travels beside (al_op, al_rnd)
+  // and set at every fire, so it is 0 for every beat but an augadd's or
+  // an augerr's. The same signal reaches the shared array (as
+  // lane_aug_mode, which cft_krnl hands the array only in a sequencer
+  // run) and the private one below.
   logic [1:0]           al_aug;
-  assign al_aug = 2'b00;
   logic [BEAT_BITS-1:0] al_a, al_b, al_c;
   logic                 al_rdy;
   logic                 al_ov;
@@ -1036,7 +1055,7 @@ module cft_seq #(
           .BEAT_BITS(BEAT_BITS), .LATENCY(LATENCY),
           .EN_FP32(EN_FP32), .EN_FP64(EN_FP64),
           .EN_FP128(EN_FP128), .EN_FP256(EN_FP256),
-          .MUL_PASSES(MUL_PASSES)
+          .MUL_PASSES(MUL_PASSES), .EN_AUGADD(EN_AUGADD)
       ) u_lanes (
           .clk(ap_clk), .rst_n(ap_rst_n),
           .in_valid(al_valid), .op(al_op), .rnd(al_rnd),
@@ -1528,24 +1547,37 @@ module cft_seq #(
   //   STX ra, rb                      read ports A and B; write none
   //   LDL rd                          read nothing from the file; write rd
   //   LDX rd, rb                      read port B; write rd
+  //   AUGADD, AUGERR rd, ra, rb       read ra on port A and rb on port C;
+  //     (revision 8, R21)             write rd - an ALU instruction's
+  //                                   shape, with rb where ADD has rc
+  //
+  // R21's two exist only where EN_AUGADD is set; at 0 they are unknown
+  // codes, as on revision 7, and end the block in S_DECODE.
   //
   // REPEAT, ENDREP, ACTALL and HALT walk no beats and stay in S_DECODE,
   // and so, since revision 8's R24, do QUIET and ENDQUIET.
   // A control code's read set is its row above, NOT ka/kb/kc: the loader
   // refuses those bits on a control code, and a stream that bypassed the
   // loader still reads the register the scratch states always read.
+  function automatic logic aug_fn(input [63:0] w);
+    begin
+      aug_fn = EN_AUGADD && w[31] &&
+               (w[7:0] == C_AUGADD || w[7:0] == C_AUGERR);
+    end
+  endfunction
   function automatic logic piped_fn(input [63:0] w);
     begin
       piped_fn = !w[31] ||
                  w[7:0] == C_DEPOSIT || w[7:0] == C_SETACT ||
                  w[7:0] == C_STL || w[7:0] == C_LDL ||
                  w[7:0] == C_STX || w[7:0] == C_LDX ||
-                 w[7:0] == C_RAISE;
+                 w[7:0] == C_RAISE || aug_fn(w);
     end
   endfunction
   function automatic logic writer_fn(input [63:0] w);
     begin
-      writer_fn = !w[31] || w[7:0] == C_LDL || w[7:0] == C_LDX;
+      writer_fn = !w[31] || w[7:0] == C_LDL || w[7:0] == C_LDX ||
+                  aug_fn(w);
     end
   endfunction
   // {c, b, a}
@@ -1560,10 +1592,15 @@ module cft_seq #(
         reads_fn = 3'b011;
       else if (w[7:0] == C_LDX)
         reads_fn = 3'b010;
+      else if (aug_fn(w))
+        reads_fn = 3'b101;
       else
         reads_fn = 3'b000;
     end
   endfunction
+  // R21's two, which read rb on port C (the decode table above)
+  logic       c_aug;
+  assign c_aug     = aug_fn(cur);
   logic       c_piped, imq_piped, adm_wr;
   logic [2:0] adm_reads;
   assign c_piped   = piped_fn(cur);
@@ -1622,7 +1659,10 @@ module cft_seq #(
   assign adm_rd  = {adm_w[56], adm_w[11:8]};
   assign adm_ra  = {adm_w[57], adm_w[15:12]};
   assign adm_rb  = {adm_w[58], adm_w[19:16]};
-  assign adm_rc  = {adm_w[59], adm_w[23:20]};
+  // ...port C's field is rb's for augadd and augerr (R21), which read rb
+  // there; every other instruction's is rc.
+  assign adm_rc  = aug_fn(adm_w) ? {adm_w[58], adm_w[19:16]}
+                                 : {adm_w[59], adm_w[23:20]};
   // the youngest queued writer of each register operand, if any
   assign dep_n_a = adm_reads[0] && ((q_after >= 2'd2 && q_e1 == adm_ra) ||
                                     (q_after >= 2'd1 && q_e0 == adm_ra));
@@ -2593,12 +2633,19 @@ module cft_seq #(
   // from registered selects, and the forwarding path, the longest into
   // the request, is not made longer.
   logic                 fire_alu, fire_ldl, fire_ldx, fire_go;
+  // R21: an augadd or augerr beat at F fires as an ALU beat does - ADD's
+  // request with both operands from the file (ra on A, rb on C) and its
+  // flag enable on - and the sideband says which half the pipe keeps.
+  logic                 pf_aug, fire_aug;
   logic [BEAT_BITS-1:0] ld_val, alt_a, alt_b, alt_c;
   logic                 use_op_a, use_op_b, use_op_c;
   assign fire_alu = pf_v && !pf_ctrl;
   assign fire_ldl = pf_v && pf_ctrl && pf_op == C_LDL && !pf_fast;
   assign fire_ldx = ph_v && !ph_fast;
-  assign fire_go  = fire_alu || fire_ldl || fire_ldx;
+  assign pf_aug   = EN_AUGADD && pf_ctrl &&
+                    (pf_op == C_AUGADD || pf_op == C_AUGERR);
+  assign fire_aug = pf_v && pf_aug;
+  assign fire_go  = fire_alu || fire_ldl || fire_ldx || fire_aug;
   assign ld_val   = zero_oor_fn(scr_rdata, ph_v ? ph_oor : '0);
   // A FAST load's beat (the send-back; the rule is with the admission):
   // its value, the same ld_val the array path would fire, goes into the
@@ -2618,9 +2665,12 @@ module cft_seq #(
   assign alt_a    = fire_alu ? kq_a : ld_val;
   assign alt_b    = fire_alu ? kq_b : ld_val;
   assign alt_c    = fire_alu ? kq_c : '0;
-  assign use_op_a = fire_alu && !pf_ka;
+  // augadd and augerr read no constant (a control code's read set is its
+  // row in the decode table), so A and C are the file's, forwarded as an
+  // ALU operand is; B is ADD's 1.0, which cft_opmux supplies.
+  assign use_op_a = (fire_alu && !pf_ka) || fire_aug;
   assign use_op_b = fire_alu && !pf_kb;
-  assign use_op_c = fire_alu && !pf_kc;
+  assign use_op_c = (fire_alu && !pf_kc) || fire_aug;
   // The same mask for the beat the SCRATCH states are working on. A
   // store is a register write for P3's purposes and a load writes rd,
   // so both are masked by exactly this - an all-inactive loop body
@@ -3290,7 +3340,7 @@ module cft_seq #(
       c_fast <= 1'b0; q_f0 <= 1'b0; q_f1 <= 1'b0; q_f2 <= 1'b0;
       c_quiet <= 1'b0; pb_quiet <= 1'b0; pf_quiet <= 1'b0;
       qdepth <= '0; mark_q <= 1'b0;
-      al_row <= '0; al_fen <= 1'b0; al_tag <= '0;
+      al_row <= '0; al_fen <= 1'b0; al_tag <= '0; al_aug <= 2'd0;
       pf_aa <= '0; pf_ab <= '0; pf_ac <= '0;
       dep_v_a <= 1'b0; dep_v_b <= 1'b0; dep_v_c <= 1'b0;
       // The constant bank is read unconditionally on every cycle, so
@@ -3705,8 +3755,10 @@ module cft_seq #(
               scr_all <= 1'b1;
             // ...and which operand streams it reads. The register
             // fields are {imm[25..27], the 4-bit field} since revision
-            // 2; a control code reads ra (DEPOSIT, SETACT, STL, STX) or
-            // rb (STX, LDX) and never rc.
+            // 2; a control code reads ra (DEPOSIT, SETACT, STL, STX,
+            // RAISE, and R21's AUGADD and AUGERR) or rb (STX, LDX, and
+            // R21's two) and never rc. A stream read only through one of
+            // them would otherwise not be loaded, and read +0.
             //
             // `op_reads` gates each field by what the OPCODE consumes,
             // for the reason its own comment gives at length: through a
@@ -3725,10 +3777,11 @@ module cft_seq #(
             end else begin
               if ((pw[7:0] == C_DEPOSIT || pw[7:0] == C_SETACT ||
                    pw[7:0] == C_STL || pw[7:0] == C_STX ||
-                   pw[7:0] == C_RAISE) &&
+                   pw[7:0] == C_RAISE || aug_fn(pw[63:0])) &&
                   {pw[57], pw[15:12]} < 5'd3)
                 rd_need[pw[13:12]] <= 1'b1;
-              if ((pw[7:0] == C_STX || pw[7:0] == C_LDX) &&
+              if ((pw[7:0] == C_STX || pw[7:0] == C_LDX ||
+                   aug_fn(pw[63:0])) &&
                   {pw[58], pw[19:16]} < 5'd3)
                 rd_need[pw[17:16]] <= 1'b1;
             end
@@ -4335,7 +4388,8 @@ module cft_seq #(
           if (!rd_hold) begin
             rf_raddr_a <= {c_ra, bt[NBSH-1:0]};
             rf_raddr_b <= {c_rb, bt[NBSH-1:0]};
-            rf_raddr_c <= {c_rc, bt[NBSH-1:0]};
+            // port C reads rb for augadd and augerr (R21)
+            rf_raddr_c <= {c_aug ? c_rb : c_rc, bt[NBSH-1:0]};
             if (c_is_ldl && issue_this)
               scr_raddr <= scr_flat_fn(c_imm[SCRSW-1:0], bt);
             // R19: on to the next beat this instruction issues, jumping
@@ -4747,15 +4801,19 @@ module cft_seq #(
         // request: its write is the retire block's (fw).
         if (fire_go) begin
           al_valid <= 1'b1;
-          al_op    <= fire_alu ? pf_op : OP_IOR;
+          al_op    <= fire_alu ? pf_op : fire_aug ? OP_ADD : OP_IOR;
           al_rnd   <= fire_alu ? pf_rnd : 3'd0;
+          // R21: 1 augadd, 2 augerr, 0 every other request. 9.5 fixes the
+          // pair's rounding, so the attribute is not read under it.
+          al_aug   <= !fire_aug ? 2'd0 : (pf_op == C_AUGERR) ? 2'd2 : 2'd1;
           al_a     <= use_op_a ? op_a : alt_a;
           al_b     <= use_op_b ? op_b : alt_b;
           al_c     <= use_op_c ? op_c : alt_c;
           al_row   <= fire_ldx ? h_act : bt_act;
           // ...and quiet beats raise nothing (R24): the tag the beat
           // was admitted with, not the region the machine is in now.
-          al_fen   <= fire_alu && !pf_quiet;
+          // R21's two raise their flags as an ALU instruction does.
+          al_fen   <= (fire_alu || fire_aug) && !pf_quiet;
           al_tag   <= fire_ldx ? ph_bt : pf_bt;
         end
         if (pf_v && pf_ctrl) begin

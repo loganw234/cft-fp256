@@ -3109,13 +3109,14 @@ a padding lane and a lane SETACT dropped run no instruction, so they write
 no `rd` and raise no flag - P3's rule, which
 `python/tests/test_seq_rev8.py` holds with a signaling NaN in each.
 
-**What a tile does: the lanes built, the decode round 2's** (revision 8's
+**What a tile does: the lanes and the decode built** (revision 8's
 RTL, docs/ROADMAP.md's plan of record; golden-first, so `augmented.py`
-stays the definition and the lanes are held to it). Both codes are to go
+stays the definition and the lanes are held to it). Both codes go
 through the issue pipe into the array as an ALU instruction does - one
 array pass and one register write each, under R13 to R15's hazards and
 forwarding - rather than through the control path, with R10's
-stream-need parse naming their `ra` and `rb`: that decode is round 2's.
+stream-need parse naming their `ra` and `rb`: that decode is round 2's,
+built on 2026-10-05 ("Revision 8 in the tile", at the end).
 The lanes are built (round 1, the plan's design (b),
 `rtl/cft_fpfma_pipe.sv`'s R21 section). Every FMA pipe takes a two-bit
 sideband, `aug_mode` (0 an ordinary operation, 1 augadd, 2 augerr),
@@ -3152,10 +3153,14 @@ pipe keeps +1.815 ns into S10 with R21 (+2.770 without), +1.523 into S6
 timing and design (a) is not built (question 8). At EN_AUGADD = 0 the
 pipe synthesises to exactly 5e033f6's at fp32, fp64 and fp128, and one
 LUT apart at fp256 (30,251 against 30,250, registers equal). Until round
-2's decode drives the sideband - and on every tile built so far -
-CAPS2[11] reads zero and code 10 decodes as HALT (`rtl/cft_seq.sv`'s
-`default` arm), so the loader refuses both codes there by name, naming
-the instruction.
+2's decode drove the sideband - and on every tile built so far - CAPS2[11]
+reads zero and code 10 decodes as HALT (`rtl/cft_seq.sv`'s `default`
+arm), so the loader refuses both codes there by name, naming the
+instruction. Since that decode, one parameter decides all of it: a tile
+built with EN_AUGADD = 1 (the default; the single and the deep build)
+decodes both codes and publishes CAPS2[11], and one built at 0 (the quad)
+is that revision-7 tile again on these two codes - CAPS2[11] zero, both
+ending the block as unknown codes, and the loader refusing them first.
 
 ### R22. A post-step on `STX` and `LDX`
 
@@ -3880,3 +3885,34 @@ from such a tree.
   `tb/test_seq_core.py`'s two `lane_flags_` cases and the R24 fuzz, and
   through the kernel in `tb/test_krnl_seq.py`'s `krnl_lane_flags`,
   where the register at 0xB0 is the address the block lands at.
+- **R21's decode** (built 2026-10-05, after round 1's lanes were merged
+  in). AUGADD and AUGERR, control codes 10 and 11, go through the issue
+  pipe as ALU instructions do: piped writers of `rd`, reading `ra` on
+  port A and `rb` on port C, where an ALU instruction has `rc` - port C's
+  register address and its hazard compare both take `rb`'s field for
+  these two codes. They fire as ADD (whose operands `cft_opmux` shapes as
+  (a, 1.0, c)) with the `aug_mode` sideband at 1 or 2, registered beside
+  the request and zero on every other one, and with their flag enable on,
+  so their flags reach FLAGS and R23's byte, and R24's quiet tag silences
+  them as it does an ALU instruction's. The parse's stream need names
+  their `ra` and `rb`. In the kernel the array takes the sequencer's
+  sideband in a sequencer run and zero in an elementwise one, for good.
+  EN_AUGADD, a build parameter of `cft_krnl` and `cft_seq` (default 1),
+  builds the lanes' R21, the decode and CAPS2[11] together; at 0, the
+  quad's tile, the two codes are unknown ones, as on revision 7. They
+  cost what an ALU instruction does: twenty augadds, or ten
+  augerr-augadd pairs, per block what twenty IANDs do, and a chain
+  through `ra` or `rb` what an IAND chain does (`make seqcycles`' R21
+  rows). Held against `seq.py`, both halves and both operand orders, in
+  `tb/test_seq_core.py`'s four `augadd_` cases at every configuration -
+  every family of the plan's list at every format, a dependency through
+  `rb` on port C, a mask, a dropped lane and a quiet augerr, and the
+  model's revision-8 fuzz arm. Through the kernel in
+  `tb/test_krnl_seq.py`'s `krnl_augadd`: every family at fp32 and fp256,
+  then an elementwise ADD straight after a run ending on an augerr. The
+  quad's tile is held by `make krnlseqnoaug`, a named subset of that
+  bench built at EN_AUGADD = 0: CAPS2[11] clear, each code ending its
+  block where it stands, and an R21-free program bit-exact. The outside
+  attribute codes 5 to 7, which R21's internal codes share the
+  attribute line with, are held to RNE through the kernel in
+  `tb/test_krnl.py`'s `krnl_attribute_codes_5_to_7`.

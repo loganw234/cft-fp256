@@ -65,7 +65,8 @@ from cft_golden import (  # noqa: E402
 from cft_golden import seq  # noqa: E402
 
 from test_krnl import (  # noqa: E402
-    run_op, check_seq_caps, check_caps2, krnl_param,
+    run_op, check_seq_caps, check_caps2, krnl_param, krnl_param_bit,
+    check_seam_words, PREC_MASK,
 )
 
 # The tile's instruction capacity, PARSED from the RTL rather than
@@ -123,9 +124,13 @@ MODE_LANE_MASK = 1 << 23
 CAPS2_INDEXED = 1 << 9
 CAPS2_LANE_MASK = 1 << 10
 # MODE[24]: R23's per-lane flag block (revision 8), honoured only under
-# CAPS2[13] - which no build sets at revision 8's seam, so it is refused.
+# CAPS2[13] - which no build set at revision 8's seam, and every build has
+# set since R23 was built (round 2).
 MODE_LANE_FLAGS = 1 << 24
 CAPS2_LANE_FLAGS = 1 << 13
+# CAPS2[11]: R21's augadd and augerr, where the build carries them
+# (EN_AUGADD; the quad's tile does not - tb/Makefile's krnlseqnoaug).
+CAPS2_AUGADD = 1 << 11
 # CAPS2[14]: R24's flag control (QUIET, ENDQUIET, RAISE; STATUS[6]),
 # published since revision 8's round 2 built it.
 CAPS2_FLAG_CONTROL = 1 << 14
@@ -352,7 +357,7 @@ async def stage_and_start(axil, ram, image, prog, va, vb, vc, n,
 async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0,
                    bank=None, scratch_in=None, tries=3000,
                    idx=(None, None, None, None), n=None, mask=None,
-                   lane_flags=False):
+                   lane_flags=False, image=None):
     """One sequencer run, scored against the model on every observable.
 
     With an index table, `va`/`vb`/`vc` are the SOURCES that table
@@ -377,7 +382,12 @@ async def run_prog(dut, axil, ram, prog, va, vb, vc, name, op_noise=0,
     # model would accept a drain that had overwritten the buffer.
     keep = [True] * n if mask is None else list(mask)
 
-    await stage_and_start(axil, ram, prog.to_bytes(), prog, va, vb, vc, n,
+    # `image` is what the tile runs where it is not the model's program:
+    # the quad's tile, built without R21, runs an augadd image the model
+    # scores as the same program with HALT where the code stands.
+    await stage_and_start(axil, ram,
+                          prog.to_bytes() if image is None else image,
+                          prog, va, vb, vc, n,
                           PREC_CODE[fmt.name], op_noise, bank=bank,
                           scratch_in=scratch_in, idx=idx, mask=mask,
                           lane_flags=lane_flags)
@@ -1505,6 +1515,114 @@ async def krnl_flag_control(dut):
     await run_refused(dut, axil, ram, bytes(bad), prog, a, b, words, n,
                       PREC_CODE["fp32"], "a refusal after a marked run",
                       flags_now)
+
+
+@cocotb.test()
+async def krnl_augadd(dut):
+    """Revision 8's R21 through the kernel, on the array the elementwise
+    engine shares, either way the build has it.
+
+    With R21 (CAPS2[11], EN_AUGADD=1, the single and the deep build):
+    augadd and augerr, both orders, over every family of the plan's list
+    (test_seq_core's r21_pairs) at fp32 and fp256, bit-exact against the
+    model with each lane's byte; then an elementwise ADD straight after a
+    run whose last array request was an augerr - the sequencer's sideband
+    register still holds augerr's code, and the kernel hands the array the
+    sequencer's sideband in a sequencer run only (the plan's plant "the
+    sideband left live in the engine" is red here).
+
+    Without it (CAPS2[11] clear, EN_AUGADD=0 - the quad's tile, built
+    without R21 because probe L measured R21's lanes at +10,595 LUTs a
+    tile and Logan's answer to the plan's question 9 was "Only if probe L
+    finds it cheap"): CAPS and CAPS2 at the plan's words for that tile; an
+    augadd image and an augerr image each ending its block where the code
+    stands, as an unknown code does on revision 7 (HALT, the determinism
+    contract's rule for an unassigned code); and an R21-free program
+    bit-exact."""
+    from test_seq_core import r21_pairs, R21_FAMILIES
+    cocotb.start_soon(Clock(dut.ap_clk, 4, units="ns").start())
+    axil = AxiLiteMaster(AxiLiteBus.from_prefix(dut, "s_axi_control"),
+                         dut.ap_clk, dut.ap_rst_n,
+                         reset_active_level=False)
+    ram_a = AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_a"),
+                       dut.ap_clk, dut.ap_rst_n,
+                       reset_active_level=False, size=2 ** 21)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_b"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamRead(AxiReadBus.from_prefix(dut, "m_axi_c"), dut.ap_clk,
+               dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+               mem=ram_a.mem)
+    AxiRamWrite(AxiWriteBus.from_prefix(dut, "m_axi_d"), dut.ap_clk,
+                dut.ap_rst_n, reset_active_level=False, size=2 ** 21,
+                mem=ram_a.mem)
+    ram = ram_a
+    dut.ap_rst_n.value = 0
+    await ClockCycles(dut.ap_clk, 8)
+    dut.ap_rst_n.value = 1
+    await ClockCycles(dut.ap_clk, 4)
+
+    caps = await axil.read_dword(CAPS)
+    caps2 = await axil.read_dword(CAPS2)
+    check_caps2(caps2)
+    check_seam_words(caps, caps2, PREC_MASK)
+    built = bool(caps2 & CAPS2_AUGADD)
+    assert built == bool(krnl_param_bit("EN_AUGADD")), (
+        f"CAPS2[11] is {int(built)} on a build with EN_AUGADD="
+        f"{krnl_param_bit('EN_AUGADD')}")
+    rng = random.Random(0x21)
+
+    if built:
+        for fmt, n in ((FP32, 72), (FP256, 21)):
+            pairs, fams = r21_pairs(fmt, n, 0x2101)
+            assert all(fams[f] for f in R21_FAMILIES), (fmt.name, fams)
+            a = [x for x, _ in pairs]
+            b = [y for _, y in pairs]
+            prog = seq.Program(fmt, [
+                seq.augerr(3, 0, 1), seq.augadd(4, 0, 1),
+                seq.augerr(5, 1, 0), seq.augadd(6, 1, 0),
+                seq.deposit(3), seq.deposit(4), seq.deposit(5),
+                seq.deposit(6), seq.halt()], max_deposits=4)
+            await run_prog(dut, axil, ram, prog, a, b, [0] * n,
+                           f"{fmt.name} augadd and augerr, every family",
+                           lane_flags=True)
+        # The sideband after the run: the last request this program makes
+        # of the array is an augerr's, so the sequencer's register holds 2
+        # when the elementwise run starts.
+        n = 32
+        a = gen_stream(FP32, n, rng)
+        b = gen_stream(FP32, n, rng)
+        prog = seq.Program(FP32, [
+            seq.augadd(3, 0, 1), seq.augerr(4, 0, 1),
+            seq.deposit(3), seq.deposit(4), seq.halt()], max_deposits=2)
+        await run_prog(dut, axil, ram, prog, a, b, [0] * n,
+                       "fp32 a run ending on an augerr")
+        await run_op(dut, axil, ram, FP32, OP_ADD, n, seed=0x2102,
+                     bases=EW_BASES)
+        return
+
+    # The quad's tile: the two codes are unknown ones.
+    for fmt, n in ((FP32, 40), (FP256, 9)):
+        a = gen_stream(fmt, n, rng)
+        b = gen_stream(fmt, n, rng)
+        c = gen_stream(fmt, n, rng)
+        head = [seq.alu(OP_MUL, 3, ra=0, rb=1), seq.deposit(3)]
+        tail = [seq.deposit(4), seq.halt()]
+        for code in (seq.augadd(4, 0, 1), seq.augerr(4, 0, 1)):
+            name = seq.CTRL_NAMES[seq.decode(code)["op"]]
+            image = seq.Program(fmt, head + [code] + tail, max_deposits=2)
+            model = seq.Program(fmt, head + [seq.halt()] + tail,
+                                max_deposits=2)
+            await run_prog(dut, axil, ram, model, a, b, c,
+                           f"{fmt.name} {name} without R21 ends the block",
+                           image=image.to_bytes(), lane_flags=True)
+        prog = seq.Program(fmt, [
+            seq.alu(OP_FMA, 3, ra=0, rb=1, rc=2),
+            seq.alu(OP_MUL, 4, ra=3, rb=3),
+            seq.deposit(3), seq.deposit(4), seq.halt()], max_deposits=2)
+        await run_prog(dut, axil, ram, prog, a, b, c,
+                       f"{fmt.name} an R21-free program on the quad's tile",
+                       lane_flags=True)
 
 
 @cocotb.test()

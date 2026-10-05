@@ -196,7 +196,22 @@ module cft_krnl #(
     parameter int SEQ_MAXD      = 1024,
     parameter int SEQ_IMEM_D    = 4096,
     parameter int SEQ_SCRATCH_D = 2048,
-    parameter int SEQ_STREAM_D  = 16777216
+    parameter int SEQ_STREAM_D  = 16777216,
+    // ---- revision 8's R21 (docs/ROADMAP.md, question 9) ----------------
+    //
+    // augadd and augerr: 1, the default, builds them in every lane
+    // (rtl/cft_fpfma_pipe.sv's R21 section) and the sequencer decodes
+    // control codes 10 and 11 onto them; CAPS2[11] says so. 0 leaves
+    // R21 out inside the same RTL revision: every lane's R21 terms
+    // constant, the two codes unknown ones (a block ends where one
+    // stands, as on revision 7), CAPS2[11] clear, and a loader refusing
+    // them by name. The QUAD is built at 0 - Logan's answer to question
+    // 9 was "Only if probe L finds it cheap", and probe L measured R21's
+    // lanes at +10,595 LUTs a tile - and the single and the deep build
+    // carry R21. tb/Makefile's krnlseqnoaug holds the 0 tile.
+    /* verilator lint_off WIDTHTRUNC */
+    parameter bit EN_AUGADD     = 1'b1
+    /* verilator lint_on WIDTHTRUNC */
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -374,11 +389,14 @@ module cft_krnl #(
    * Localparams and not parameters, for the reason FEAT_INDEXED and
    * FEAT_LANE_MASK were localparams at round 2's seam: a build that
    * could set one here would advertise an instruction no decoder in
-   * this tree computes. R21's becomes EN_AUGADD, a build parameter
-   * (the plan's question 9), when its decode is built. CAPS2[20:16],
+   * this tree computes. R21's became EN_AUGADD, a build parameter
+   * (the plan's question 9), when its decode was built (round 2,
+   * below). CAPS2[20:16],
    * the streamed instruction capacity, is zero below for the same
    * reason until SEQ_STREAM_D exists (round 2). */
-  localparam bit FEAT_AUGADD       = 1'b0;
+  // R21 is built (revision 8's round 2) where EN_AUGADD says so: the
+  // lanes, the sequencer's decode and CAPS2[11] all follow it.
+  localparam bit FEAT_AUGADD       = EN_AUGADD;
   localparam bit FEAT_SCRATCH_STEP = 1'b0;
   // R23 is built (revision 8's round 2): the per-lane flag block, written
   // at LFLAGS_PTR after the counts when MODE[24] asks, which the CSR's
@@ -894,13 +912,9 @@ module cft_krnl #(
   logic                      arr_rdy, arr_ov;
   logic [BEAT_BITS-1:0]      arr_d;
   logic [BEAT_BITS/32*5-1:0] arr_lf;
-  // Revision 8's seam: the sequencer's R21 sideband (0 an ordinary
-  // operation, 1 augadd, 2 augerr). Driven - to zero, until R21's
-  // decode is built - and read by nothing yet: the array's aug_mode is
-  // tied off below, and joins this through mode_seq_q when R21 does.
-  /* verilator lint_off UNUSEDSIGNAL */
+  // Revision 8's R21: the sequencer's sideband (0 an ordinary operation,
+  // 1 augadd, 2 augerr), joined to the array through mode_seq_q below.
   logic [1:0]                seq_laug;
-  /* verilator lint_on UNUSEDSIGNAL */
 
   // The array's acceptance strobe reaches both issuers; each gates its
   // own issue on it, and each is a no-op at MUL_PASSES=1 where the
@@ -910,19 +924,19 @@ module cft_krnl #(
               .EN_FP128(EN_FP128), .EN_FP256(EN_FP256),
               .FUSE_MUL(FUSE_MUL), .FUSE_NORM(FUSE_NORM),
               .FUSE_ALIGN(FUSE_ALIGN), .MUL_PASSES(MUL_PASSES),
-              // R21's lanes are built only where CAPS2[11] is published:
-              // FEAT_AUGADD is 0 until round 2's decode makes it the
-              // EN_AUGADD build parameter, so no lane carries R21's
-              // logic unread (verifier-VRB's merge note).
+              // R21's lanes are built only where CAPS2[11] is published,
+              // from the one parameter, so no lane carries R21's logic
+              // unread (verifier-VRB's merge note).
               .EN_AUGADD(FEAT_AUGADD)) u_lanes (
       .clk(ap_clk), .rst_n(ap_rst_n),
       .in_valid (mode_seq_q ? seq_lv    : eng_lv),
       .op       (mode_seq_q ? seq_lop   : eng_lop),
       .rnd      (mode_seq_q ? seq_lrnd  : eng_lrnd),
-      // R21's sideband, TIED OFF at revision 8's seam: no driver
-      // reaches it until R21's decode is built, and the engine's half
-      // of the mux will be zero for good (docs/ROADMAP.md, R21).
-      .aug_mode (2'b00),
+      // R21's sideband, the sequencer's in a sequencer run and ZERO in
+      // an elementwise one, for good (docs/ROADMAP.md, R21): the engine
+      // has no augadd, and the sequencer's register holds the last value
+      // it fired, which must not reach the engine's next run.
+      .aug_mode (mode_seq_q ? seq_laug : 2'b00),
       .prec     (mode_seq_q ? seq_lprec : eng_lprec),
       .a        (mode_seq_q ? seq_la    : eng_la),
       .b        (mode_seq_q ? seq_lb    : eng_lb),
@@ -994,7 +1008,7 @@ module cft_krnl #(
             .ADDR_W(64),
             .EN_FP32(EN_FP32), .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),
             .EN_FP256(EN_FP256), .OWN_LANES(1'b0),
-            .MUL_PASSES(MUL_PASSES)) u_seq (
+            .MUL_PASSES(MUL_PASSES), .EN_AUGADD(EN_AUGADD)) u_seq (
       .ap_clk(ap_clk), .ap_rst_n(ap_rst_n),
       .start(start && run_ok && cfg_seq),
       // prec_ok has already proved cfg_prec[3:2] is zero, so the top
