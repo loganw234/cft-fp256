@@ -470,6 +470,13 @@ module tb_ifetch_formal #(
   (* keep *) logic [FIFO_LOG2-1:0]      probe_rp, probe_wp;
   (* keep *) logic [IW-1:0]             probe_ram_q, probe_byp_d;
   (* keep *) logic                      probe_byp_v1, probe_byp_v2;
+  // ...and the FIFO's late pop (the S1 follow-up, 2026-10-05): a stream
+  // word taken leaves the FIFO a cycle later, so while pop_q stands the
+  // FIFO's count is one above the stream's and its head is the word
+  // taken - the logical stream starts one slot on.
+  (* keep *) logic                      probe_pop_q;
+  logic [FIFO_LOG2:0]                   lcnt;     // the stream's words in it
+  assign lcnt = probe_fq_cnt - (FIFO_LOG2 + 1)'(probe_pop_q);
 
   // ---- the properties ----------------------------------------------------
   logic new_ar;
@@ -533,7 +540,8 @@ module tb_ifetch_formal #(
     assign smem_w  = (widx[1:0] == 2'd0) ? probe_smem0 : (widx[1:0] == 2'd1) ? probe_smem1
                    : (widx[1:0] == 2'd2) ? probe_smem2 : probe_smem3;
     assign wrel    = widx - probe_spos;
-    assign fslot   = probe_rp + wrel[FIFO_LOG2-1:0];
+    // the logical head is a slot on from rp while a pop is pending
+    assign fslot   = probe_rp + FIFO_LOG2'(probe_pop_q) + wrel[FIFO_LOG2-1:0];
     // slot selects by constant indices, as the unit's own ra_word is
     always_comb begin
       fmem_w  = '0;
@@ -604,7 +612,7 @@ module tb_ifetch_formal #(
         // where the watched word is
         d_store: assert (!(widx >= probe_base && widx < probe_send) || smem_w == wdata);
         d_fifo:  assert (!(probe_s_on && widx >= probe_spos &&
-                           32'(wrel) < 32'(probe_fq_cnt)) || fmem_w == wdata);
+                           32'(wrel) < 32'(lcnt)) || fmem_w == wdata);
         d_head:  assert (probe_fq_cnt == '0 || fhead == fmem_rp);
         d_win:   assert (!probe_ra_v || &rb_ok);
         // the window starts on a beat, and between beats the next
@@ -628,7 +636,7 @@ module tb_ifetch_formal #(
         // a stream's first beat starts at the word holding its position
         d_j0:    assert (!(probe_s_on && probe_ra_first && !probe_rs_go) ||
                          32'(probe_ra_j0) == ((32'(q0m) + 1) >> 1));
-        d_pos:   assert (!probe_s_on || probe_ra_pos == probe_spos + AW'(probe_fq_cnt));
+        d_pos:   assert (!probe_s_on || probe_ra_pos == probe_spos + AW'(lcnt));
         // the realigner never passes the program's end, and is short of it
         // while it holds a word or a live burst still owes it beats
         d_bound: assert (!probe_s_on ||
@@ -681,7 +689,7 @@ module tb_ifetch_formal #(
       logic w_in_fifo, w_in_win;
       // the watched word in the FIFO, or in the window and not yet emitted
       // (every word a window emits ends in the window's own beat)
-      assign w_in_fifo = probe_s_on && widx >= probe_spos && 32'(wrel) < 32'(probe_fq_cnt);
+      assign w_in_fifo = probe_s_on && widx >= probe_spos && 32'(wrel) < 32'(lcnt);
       assign w_in_win  = probe_ra_v && widx >= probe_ra_pos && ((gw1 >> 3) == (gb >> 3));
       always_comb begin
         if (f_past_valid) begin
@@ -755,6 +763,9 @@ module tb_ifetch_formal #(
                          32'(probe_rd_ba >> BSH) + 32'(probe_rd_left) ==
                          32'(last_beat >> BSH) + 1));
         h_raj:  assert (!probe_ra_v || 32'(probe_ra_j) < WPB);
+        // a pending pop's word is still in the FIFO, of a stream that is on
+        // (a flush or a stop in the pop's cycle cancels it)
+        h_popq: assert (!probe_pop_q || (probe_fq_cnt != '0 && probe_s_on));
         h_room: assert (32'(probe_fq_cnt) +
                         (probe_ra_v ? WPB - 32'(probe_ra_j) : 0) +
                         (fault ? 0 : WPB * 32'(probe_live_b)) <= (1 << FIFO_LOG2));

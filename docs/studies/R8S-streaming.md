@@ -1113,6 +1113,25 @@ one is refused and drained to it, as the engines' length rule does.
 8. **The burst's length check is the engine's rule**, beat by beat:
    short or long is flagged on the beat that shows it, and the burst is
    drained to its RLAST.
+9. **`take` reaches no block-RAM pin** (after probe S1, 2026-10-05,
+   whose worst routed path, +0.452 ns at 135 MHz out of context, was
+   take into the FIFO's read address, with the store's read enable
+   at +0.626 ns and the FIFO's rp beside them). A stream word taken
+   leaves the FIFO a cycle later (`pop_q`), so the FIFO's read address
+   and rp come from a register. No consumer sees the difference: `want`
+   is low in a take cycle, so `ok` is low in the next, and the stream's
+   term of `ok` is held low in that cycle anyway, for a consumer that
+   wanted and took at once - which then waits a cycle rather than seeing
+   the taken word again. The FIFO's count is one high in that cycle,
+   which only makes the reservation more cautious. Its write enable is
+   the realigner's word alone (a word written as a redirect clears the
+   FIFO is cleared with it), the store reads every cycle (st_q is used
+   only the cycle after a wanted one), and the launch selects the read
+   engine's next address and beats left instead of gating its adders'
+   operand (S1: launch through rd_ba's eight carry levels, +1.148 ns).
+   Section 13's earlier note expected a skid register at a cycle of
+   latency; the consumer's own spacing makes it free. The streaming
+   cycle rows and the fetch's bench run in exactly the cycles they did.
 
 ### The proof
 
@@ -1130,7 +1149,7 @@ sby's elapsed clock):
 
 | task | sizes | the memory | proves | depth | time | checks |
 |---|---|---|---|---|---|---|
-| prove | default | free timing, RLAST, RRESP | never past n_insns or after a fault; faults raised by bad beats and only by them; every AR aligned, at most BURST beats, inside a 4 KB page and the section, held until taken; at most OUT_MAX outstanding; idle truthful; silence after a quiesce, init or fault; cft_fifo's caller contract; the three shapes below never reached | 3 | under 1 s | 30 |
+| prove | default | free timing, RLAST, RRESP | never past n_insns or after a fault; faults raised by bad beats and only by them; every AR aligned, at most BURST beats, inside a 4 KB page and the section, held until taken; at most OUT_MAX outstanding; idle truthful; silence after a quiesce, init or fault; cft_fifo's caller contract; the three shapes below never reached | 3 | under 1 s | 30 (31 with departure 9's helper) |
 | data_prove | default | honest, free timing | every word `ok` presents is the image's word at the address presented; a stream word is handed over two or more cycles after its beat lands | 3 | 8 s | 57 |
 | deliver_prove | default | honest, prompt | a consumer waiting on one address is answered within 18 cycles | 19 | 181 s | 54 |
 | ends_prove | default | prompt, faults free | idle within 14 cycles of a quiesce, an init or a fault | 15 | 3 s | 31 |
@@ -1164,6 +1183,19 @@ in seconds but not three of them nor the data claim (measured; formal/
 README.md has the figures), and on the way it found a real hole: the
 beat counter of departure 7, at step 518. The invariants k-induction
 needed were read off its counterexamples; none was a defect in the RTL.
+
+Departure 9's late pop (2026-10-05) moved four of the helpers, by a
+probe of `pop_q`. While it stands the FIFO holds one word more than the
+stream, its head the taken word, so `d_fifo`, `d_pos` and the latency
+helper read the stream's count, the FIFO's less the pending pop, and its
+head a slot on from rp. One helper is new, `h_popq`: a pending pop's
+word is still in the FIFO, of a stream that is on. Every task passed
+again on the cft-formal image (measured, one task at a time, 4 CPUs):
+prove 1 s (31 checks), data_prove 9 s (58), deliver_prove 174 s (55),
+ends_prove 4 s (32), cover 8 s (14), wide_prove 4 s (28),
+wide_data_prove 41 s (55), wide_cover 88 s (4), and fifo.sby's prove
+and cover, cft_fifo unchanged. Removing `ok`'s guard on the pending pop
+refutes data_prove's `a_word` (measured, a copy of the tree).
 
 ### The bench
 
@@ -1242,7 +1274,10 @@ formal/README.md has the runs).
   (`cascade_height` pins it if not); the path from `take` - late, out
   of the admission - into the FIFO's read address (`rp + rd_en` into
   the block RAM), which a skid register would cut at a cycle of
-  latency; the unit's LUTs and registers. And two paths where the unit
+  latency; the unit's LUTs and registers. Probe S1 (2026-10-05, the
+  lead's, on amd-arc-box): the store was cascaded (now pinned), and the
+  take path was the kernel's worst routed path, +0.452 ns - now
+  departure 9, at no cycle of latency, for probe S3 to read. And two paths where the unit
   as built is not what section 5 expected (verifier-VRD1):
   - the redirect is combinational from `addr` through the range compare
     (25 bits at the U50) and the stand compare against `spos` into the

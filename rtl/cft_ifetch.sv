@@ -109,6 +109,15 @@
 //               falls to S_FETCH as a one-step instruction's does.
 //               ok also stands for `32'(pc) + 32'd1 < h_ninsns`, which
 //               may come off the admission path.
+//               take is LATE - the end of the admission's and the
+//               issue's decisions - so it reaches no block-RAM pin
+//               (probe S1, 2026-10-05: take into the FIFO's read address
+//               was the kernel's worst routed path, +0.452 ns at 135 MHz
+//               out of context). A stream word taken leaves the FIFO a
+//               cycle later (pop_q, below), which no consumer can see:
+//               want is low in a take cycle, so ok is low in the next,
+//               and ok's stream term is held low in that cycle anyway,
+//               for a consumer that wanted and took at once.
 //   cap, cap_pc one cycle when a REPEAT enters its body (not when it
 //               skips), with the body's first address, pc + 1. Never in
 //               a cycle with want or take (S_DECODE has neither).
@@ -286,17 +295,23 @@ module cft_ifetch #(
   logic [IW-1:0]      fq_data;   // the FIFO's head, valid while fq_any
   logic [FIFO_LOG2:0] fq_cnt;
   logic               fq_any;
+  logic               pop_q;     // a pop the FIFO applies this cycle
 
   // ---- the store ------------------------------------------------------
   //
   // One write port (the parse's writes, and the capture's) and one
   // read port, registered, whose address is the consumer's own: the
-  // store reads `addr` every cycle it is wanted, and whether the word
-  // it reads is the answer is decided beside it (rq_hit), from the
-  // range compare registered in the same cycle. The read and the
+  // store reads `addr` EVERY cycle, and whether the word it reads is the
+  // answer is decided beside it (rq_hit), from the range compare
+  // registered in the same cycle. st_q is read only the cycle after a
+  // wanted one (rq_hit is want's register), so a read in a cycle that
+  // wants nothing is never used, and the read port needs no enable -
+  // which keeps `want`, and through it `take`, off the block RAM's
+  // enable pin (probe S1: ENARDEN at +0.626 ns). The read and the
   // capture never meet at one index in a wanted cycle: the capture
   // writes at send, and every address inside the range [base, send)
-  // has another index, since send - base < STORE_D while it writes.
+  // has another index, since send - base < STORE_D while it writes. In
+  // a cycle that wants nothing they may, and that read is unused.
   // Block RAM, and no cascade (the header's item 1): Vivado reads both
   // attributes on an inferred RAM; the simulators and Yosys ignore them.
   (* ram_style = "block", cascade_height = 1 *)
@@ -312,7 +327,7 @@ module cft_ifetch #(
 
   always_ff @(posedge clk) begin
     if (st_wr) smem[send[SW-1:0]] <= st_wd;
-    if (want)  st_q <= smem[addr[SW-1:0]];
+    st_q <= smem[addr[SW-1:0]];
   end
 
   // ---- the request: the address wanted this cycle --------------------
@@ -344,8 +359,13 @@ module cft_ifetch #(
   end
   assign fault = fault_rd || fault_len;
   assign word  = rq_hit ? st_q : fq_data;
-  assign ok    = !fault && (rq_hit || (rq_s && fq_any));
-  // A stream word taken leaves the FIFO.
+  // The stream's term is low while pop_q stands: the FIFO's head is then
+  // the word taken last cycle, which leaves it at this cycle's edge. No
+  // consumer that keeps the interface asks then (want is low in a take
+  // cycle, so rq_s is low in the next); one that wanted and took at once
+  // waits a cycle rather than seeing the taken word again.
+  assign ok    = !fault && (rq_hit || (rq_s && fq_any && !pop_q));
+  // A stream word taken leaves the FIFO - a cycle later (pop_q).
   assign pop   = take && ok && !rq_hit;
 
   // ---- the range: the parse, the capture and the retarget ------------
@@ -408,6 +428,22 @@ module cft_ifetch #(
       // cft_fifo's caller contract holds by construction: a write only
       // into room the reservation below kept, a read only of a word
       // `ok` showed. A flush is its synchronous clear.
+      //
+      // Both enables come from registers, so that `take` - late, out of
+      // the consumer's admission - reaches no pin of the FIFO's block
+      // RAM (probe S1: take into its read address, +0.452 ns, the
+      // kernel's worst path). The read is the pop a cycle late (pop_q):
+      // the taken word stays the FIFO's head for that cycle, which `ok`
+      // never shows (above), and the FIFO's count is one high for it,
+      // which only makes the launch's reservation more cautious. A pop
+      // in a cycle that flushes is not applied (the flush empties the
+      // FIFO), and there is never a second pop while one is pending
+      // (ok's stream term is low then). The write is the realigner's
+      // word whenever it has one: in a cycle that flushes, the word is
+      // written into a FIFO being cleared, so it is cleared with it -
+      // cft_fifo's clear takes the count and both pointers to zero and
+      // keeps its bypass invalid - and no redirect reaches the write
+      // enable either.
       logic          fq_clr, fq_wr, fq_rd;
       logic [IW-1:0] fq_wd;
       assign fq_clr = redir || stop;
@@ -416,7 +452,7 @@ module cft_ifetch #(
           .wr_en(fq_wr), .wr_data(fq_wd),
           .rd_en(fq_rd), .rd_data(fq_data), .count(fq_cnt));
       assign fq_any = (fq_cnt != '0);
-      assign fq_rd  = pop && !fq_clr;
+      assign fq_rd  = pop_q;
 
       // ---- outstanding bursts ------------------------------------------
       //
@@ -493,7 +529,7 @@ module cft_ifetch #(
                                 ((ra_pos + AW'(1)) == cfg_n));
       // A live beat with nothing wrong, for the current stream.
       assign ra_acc  = acc && !hd_drop && !fault && !beat_bad && !redir && !stop;
-      assign fq_wr   = ra_v && !fq_clr;
+      assign fq_wr   = ra_v;
       assign fq_wd   = ra_word;
 
       // RREADY: always for a beat to drop (an abandoned burst's, or any
@@ -537,6 +573,15 @@ module cft_ifetch #(
       logic [12:0] to4k;
       logic [31:0] len_a, len_c, need;
       logic        launch;
+      // The read engine's next address and beats left after a launch,
+      // formed whether or not one happens: the launch - late, through a
+      // redirect from the consumer's request - then only selects them,
+      // where synthesis had folded it into the adders' operands, eight
+      // carry levels before rd_ba (probe S1: +1.148 ns, u_seq's worst
+      // routed endpoint after the FIFO's and the store's pins). keep
+      // holds the sums as nets of their own.
+      (* keep = "true" *) logic [ADDR_W-1:0] rd_ba_nx;
+      (* keep = "true" *) logic [AW:0]       rd_left_nx;
       assign to4k   = (13'd4096 - {1'b0, rd_ba[11:0]}) >> BSH;
       assign len_a  = (32'(rd_left) < 32'(BURST)) ? 32'(rd_left) : 32'(BURST);
       assign len_c  = (32'(to4k) < len_a) ? 32'(to4k) : len_a;
@@ -547,6 +592,8 @@ module cft_ifetch #(
                       (32'(live_n) < 32'(LIVE_MAX)) &&
                       (32'(out_n) < 32'(OUT_MAX)) &&
                       (need <= 32'(FDEPTH));
+      assign rd_ba_nx   = rd_ba + (ADDR_W'(len_c) << BSH);
+      assign rd_left_nx = rd_left - (AW + 1)'(len_c);
 
       // The length queue: shift down at an RLAST, push at a launch
       // behind whatever is left.
@@ -564,7 +611,7 @@ module cft_ifetch #(
 
       always_ff @(posedge clk) begin
         if (!rst_n) begin
-          s_on <= 1'b0;  spos <= '0;  rs_go <= 1'b0;
+          s_on <= 1'b0;  spos <= '0;  rs_go <= 1'b0;  pop_q <= 1'b0;
           out_n <= '0;  drop_n <= '0;  live_n <= '0;  live_b <= '0;
           lq <= '0;  bcnt <= '0;
           rd_ba <= '0;  rd_left <= '0;
@@ -573,6 +620,9 @@ module cft_ifetch #(
           fault_rd <= 1'b0;  fault_len <= 1'b0;
           m_rd_arvalid <= 1'b0;  m_rd_araddr <= '0;  m_rd_arlen <= '0;
         end else begin
+          // ---- the FIFO's late pop: this cycle's, unless it flushes
+          pop_q <= pop && !fq_clr;
+
           // ---- the position
           if (stop)
             s_on <= 1'b0;
@@ -598,8 +648,8 @@ module cft_ifetch #(
             m_rd_arvalid <= 1'b1;
             m_rd_araddr  <= rd_ba;
             m_rd_arlen   <= 8'(len_c - 32'd1);
-            rd_ba        <= rd_ba + (ADDR_W'(len_c) << BSH);
-            rd_left      <= rd_left - (AW + 1)'(len_c);
+            rd_ba        <= rd_ba_nx;
+            rd_left      <= rd_left_nx;
           end else if (m_rd_arvalid && m_rd_arready)
             m_rd_arvalid <= 1'b0;
 
@@ -675,6 +725,7 @@ module cft_ifetch #(
       assign fq_data      = '0;
       assign fq_cnt       = '0;
       assign fq_any       = 1'b0;
+      assign pop_q        = 1'b0;
       assign idle         = 1'b1;
       assign fault_rd     = 1'b0;
       assign fault_len    = 1'b0;
