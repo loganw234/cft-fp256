@@ -38,8 +38,11 @@ one gives none, or `--format-version 2`, and holds:
      `writer cft-segrun <build-id>`, `writer-runtime none`; the software
      backend's four device lines `none`; the times in their spelling and
      order; the environment exactly the writer's list's variables that are
-     set, one set empty left out; and segrun.c's table of names held to
-     cert2.ENVIRONMENT_NAMES, so a variable joins it with the code;
+     set, one set empty left out; segrun.c's table of names held to
+     cert2.ENVIRONMENT_NAMES, so a variable joins it with the code; and
+     the tool handed none of the list but what a leg sets - removed from
+     its environment, not set empty, which XRT reads as an emulation mode
+     to load (the card leg on q135b, 2026-10-03);
   c. one run's version-1 and version-2 certificates carrying the same
      state and stream hashes (the contract's sentence);
   d. a source param's literal: manifests whose param_overrides carry
@@ -254,13 +257,56 @@ def tool_args(prog, d, out, sdir, salt_path, device="sw", extra=()):
     return a + SC.entry_options(prog.entries)
 
 
-def run_tool(args, env=None):
-    """The tool on a version-2 command line: no --format-version added,
-    and the writer's list's variables cleared from the environment but for
-    those `env` sets."""
-    e = {n: "" for n in cert2.ENVIRONMENT_NAMES}
-    e.update(env or {})
-    return SC.run_tool(args, env=e, v2=True)
+def run_tool(args, env=None, binary=None):
+    """The tool (or `binary`) on a version-2 command line: no
+    --format-version added,
+    and the writer's list's variables REMOVED from its environment, then
+    those `env` sets - so that the environment is the one the golden
+    writer's environment() is handed (`env`, all it holds of the list).
+    Removed, not set empty: XRT reads XCL_EMULATION_MODE set to "" as an
+    emulation mode whose library to name, and fails ("error creating shim
+    library name"), and libcft's XRT backend takes CFT_XRT_TRACE,
+    CFT_XRT_TILES and CFT_TIMEOUT_MS set empty as set - which failed the
+    card leg on q135b (the lead, 2026-10-03), and nothing on the software
+    backend reads."""
+    return SC.run_tool(args, env=dict(env or {}), binary=binary, v2=True,
+                       unset=cert2.ENVIRONMENT_NAMES)
+
+
+def hold_child_env():
+    """b. the environment run_tool hands the tool: the writer's list's
+    variables absent - not set empty - even where the gate's own
+    environment sets them, and a leg's set as given. A Python child stands
+    in for the tool and says what it was handed."""
+    import sys
+    probe = ("import os, sys; print(','.join(n + '=' + os.environ[n] for n "
+             "in sys.argv[1].split(',') if n in os.environ))")
+    names = ",".join(cert2.ENVIRONMENT_NAMES)
+    planted = {"XCL_EMULATION_MODE": "hw_emu", "CFT_XRT_TRACE": "1",
+               "CFT_TIMEOUT_MS": ""}
+    saved = {n: os.environ.get(n) for n in planted}
+    try:
+        os.environ.update(planted)
+        rc, out, se = run_tool(["-c", probe, names], binary=sys.executable)
+        SC.check(rc == 0 and out.strip() == "",
+                 "b. the tool's environment holds none of the writer's "
+                 "list, though the gate's sets XCL_EMULATION_MODE, "
+                 "CFT_XRT_TRACE and CFT_TIMEOUT_MS (set empty): removed, not "
+                 "set empty, which XRT reads as an emulation mode (the card "
+                 "leg, 2026-10-03)", f"rc {rc}: it held {out.strip()!r} "
+                 f"{se.strip()[-200:]}")
+        rc, out, se = run_tool(["-c", probe, names],
+                               env={"CFT_XRT_BIND": "decline-outputs"},
+                               binary=sys.executable)
+        SC.check(rc == 0 and out.strip() == "CFT_XRT_BIND=decline-outputs",
+                 "b. and a leg's variable is set as given, alone of the list",
+                 f"rc {rc}: it held {out.strip()!r} {se.strip()[-200:]}")
+    finally:
+        for n, v in saved.items():
+            if v is None:
+                os.environ.pop(n, None)
+            else:
+                os.environ[n] = v
 
 
 # ---- the golden writer ------------------------------------------------------
@@ -542,8 +588,10 @@ def hold_measured(what, data, publish_os=False, env=None, device="none"):
     SC.check(all(p is not None for p in parsed) and parsed == sorted(parsed),
              f"{what}: started, finished and issued are times, in order "
              f"({times[0]} .. {times[2]})", f"{times}")
+    # the golden writer's environment() handed the environment the tool
+    # had of the list (run_tool: the list removed, then `env`)
     want_env = [(n, cert2.text_token(v)) for n, v in
-                sorted((env or {}).items()) if v]
+                cert2.environment(env or {})]
     have_env = [tuple(ln.split(" ")[1:]) for ln in lines_of(data)
                 if ln.startswith("env ")]
     SC.check(line(data, "environment") == str(len(want_env)) and
@@ -1257,6 +1305,7 @@ def hold_v2(sc, work, card=False, device="sw", serve=None):
           flush=True)
     (work / "v2").mkdir(parents=True, exist_ok=True)
     hold_env_table()
+    hold_child_env()
     flag = flagstep2()
     rs, rs_c = replaystep(work / "v2")
     lz = lorenz2()

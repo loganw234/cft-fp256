@@ -587,11 +587,14 @@ def as_v1(args):
     return a
 
 
-def run_tool(args, env=None, binary=None, v2=False):
+def run_tool(args, env=None, binary=None, v2=False, unset=()):
     """The tool (or another build of it, `binary`) on `args`, version 1's
-    command line (as_v1) unless `v2` (section 14)."""
+    command line (as_v1) unless `v2` (section 14); the variables named in
+    `unset` removed from its environment, then `env`'s set."""
     e = dict(os.environ)
     e.pop("CFT_SEGRUN_PLANT", None)
+    for n in unset:
+        e.pop(n, None)
     if env:
         e.update(env)
     if not v2:
