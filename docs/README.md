@@ -1,9 +1,9 @@
 # The documents, by what you open them for
 
-Forty-two files, 70,116 lines. Flat in one directory they look like one
+Forty-two files, 70,156 lines. Flat in one directory they look like one
 undifferentiated pile; they are not, and the split is close to even:
 
-- **26,215 lines you consult while working** — the three under *Start here*,
+- **26,255 lines you consult while working** — the three under *Start here*,
   the contract, and the reference you call into;
 - **6,675 lines of tool manual**, one per shipped program;
 - **2,015 lines of operations**, read when you are about to do something to
@@ -33,7 +33,7 @@ answer is not in here — it is `make verify-quick`, and
 | document | lines | what it is for |
 |---|---|---|
 | [INTEGRATION.md](INTEGRATION.md) | 253 | Choosing a path: which surface to use for which job. The shortest route from "I have a workload" to "I know what to call." |
-| [VERIFICATION.md](VERIFICATION.md) | 500 | Every gate, what it proves, how long it really takes. Twelve tiers, fifty-one runner stages. |
+| [VERIFICATION.md](VERIFICATION.md) | 507 | Every gate, what it proves, how long it really takes. Twelve tiers, fifty-one runner stages. |
 | [COMPLIANCE.md](COMPLIANCE.md) | 172 | IEEE 754-2019 clause by clause: what is implemented, what is refused, and where each is proven. |
 
 ## The contract
@@ -45,7 +45,7 @@ product, not the implementation.
 |---|---|---|
 | [DETERMINISM.md](DETERMINISM.md) | 1,442 | The determinism contract itself — the argument the whole project rests on, including the unassigned-opcode hazard and every time it has fired. |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 1,176 | The tile: register map, MODE and CAPS words, the rule for when VERSION moves. |
-| [SEQUENCER.md](SEQUENCER.md) | 3,776 | The orbit sequencer and the program model. |
+| [SEQUENCER.md](SEQUENCER.md) | 3,802 | The orbit sequencer and the program model. |
 | [LANGUAGE.md](LANGUAGE.md) | 2,345 | The language for dynamical systems: the grammar, the semantics (literal evaluation, exact constants rounded once, one attribute a program), the integrators written in it, time (t in the state, a step counter, forcing by a rotation, each measured), the step graph, the reference interpreter that is the definition of correct for every compiled image, the intention-out, the variational equations (tangent vectors and the rule that differentiates each operation), and every refusal by name. |
 | [COMPATIBILITY.md](COMPATIBILITY.md) | 970 | One section per ABI step, with a per-surface table. Read before assuming a call exists on a given surface. |
 | [LAYOUTS.md](LAYOUTS.md) | 191 | Every xclbin layout the U50 could carry - tile mixes and their clocks - derived by `hw/gen_layouts.py`, never typed. |
@@ -55,7 +55,7 @@ product, not the implementation.
 
 | document | lines | what it is for |
 |---|---|---|
-| [HOSTAPI.md](HOSTAPI.md) | 3,453 | The host API, function by function. The largest reference here and the one most often wanted. |
+| [HOSTAPI.md](HOSTAPI.md) | 3,460 | The host API, function by function. The largest reference here and the one most often wanted. |
 | [TRANSCENDENTALS.md](TRANSCENDENTALS.md) | 1,737 | The thirty-nine correctly-rounded transcendentals, by ABI phase, with the evidence for each. |
 | [REMOTE.md](REMOTE.md) | 1,433 | The remote backend: a tile behind a socket, the frame protocol and the WebSocket path. |
 | [PROGRAMS.md](PROGRAMS.md) | 640 | Programs as files: the assembler, the program library, the runner. |

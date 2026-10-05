@@ -19,7 +19,7 @@ Apache-2.0.
 | What it computes | How you call it | How it is checked | On the card | When it pays |
 |---|---|---|---|---|
 | binary32 / 64 / 128 / 256 | C, C++, Python, Rust, Julia, Go, C#, R, Fortran | **1,068,915** conformance cases | Alveo U50: 1,071,635, 1,224,915, then the published 1,068,915 cases replayed on silicon | **binary128 4.5x**, **binary256 5.5x** |
-| 31 opcodes, 5 rounding modes, 39 transcendentals | one ABI; software, FPGA or remote; no dependencies | **51** gate stages, 26 RTL sims, 38 proofs | 427 M elem/s, 4 tiles, ~35 W | **binary32 / 64: a CPU wins** |
+| 31 opcodes, 5 rounding modes, 39 transcendentals | one ABI; software, FPGA or remote; no dependencies | **51** gate stages, 27 RTL sims, 38 proofs | 427 M elem/s, 4 tiles, ~35 W | **binary32 / 64: a CPU wins** |
 
 <sub>Speed-ups are **multiply**, one tile against the fastest software on the same machine - the CPU's own FPU, `__float128` or MPFR, never our own softfloat. Four tiles reach 17.5x and 21.1x. Fused multiply-add is a different picture, and better: 14.0x at binary128 on one tile. [Where those lines fall, measured](#when-this-matters-and-when-it-does-not).</sub>
 
@@ -170,7 +170,7 @@ the tables and the method; the charts regenerate with
 |---|---|
 | `python/cft_golden` | The definition of correct. Exact Python - integers only, the standard library alone for the arithmetic, with mpmath's interval context deciding the transcendentals: 31 opcodes, all five rounding modes, the complete IEEE clause 5 function set, and all thirty-nine transcendentals correctly rounded. Everything else is scored against this, never against each other. |
 | `rtl/` | The tile. Fifteen 16-stage pipelined fused-multiply-add cores in four banks - 8x fp32, 4x fp64, 2x fp128, 1x fp256, each a separate pipe at its own significand width - plus operand steering, a streaming engine, a reduction accumulator and an on-chip program sequencer. (A shared fracturable multiplier exists behind `FUSE_MUL` and ships **off**: fracturing spends DSP blocks to save logic, which is the wrong trade on an FPGA - `docs/NOVEL.md` entry 6.) Yosys-clean, portability enforced in CI. |
-| `tb/` and `formal/` | 26 simulation targets checking every result and every flag against the golden model, and 38 machine-checked proofs, plus a negative control that must be refuted or the gate has stopped being able to catch a bug. |
+| `tb/` and `formal/` | 27 simulation targets checking every result and every flag against the golden model, and 38 machine-checked proofs, plus a negative control that must be refuted or the gate has stopped being able to catch a bug. |
 | `host/` | **libcft**: about 24,000 lines of C99 in `host/src`, no dependencies, no build step for callers. One ABI reachable from C, C++, Python, Rust, Julia, Go, C#, R and Fortran, with software, FPGA and remote backends behind identical calls. On a multi-tile card an elementwise call is split across every tile and a segmented reduction by whole segments; a whole-array reduction takes the largest power of two of the tiles, because only that cuts the tree at a node; and, since 2026-09-25, a sequencer program's lanes are cut across every tile the same way an elementwise call's elements are. |
 | `bindings/` | The WebAssembly build behind the pages above, a Node package, and a Python drop-in for the MPFR pattern. |
 | `hw/` | Vitis packaging, HBM layout and the build pipeline. Bitstreams built and run on silicon. |

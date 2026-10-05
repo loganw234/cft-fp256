@@ -165,9 +165,25 @@ module cft_krnl #(
     //                  The deposit buffer is SEQ_MAXD x NBEATS x 32
     //                  bytes a tile (512 KiB here), eight banks with a
     //                  write address each.
-    //   SEQ_IMEM_D     instructions. 1,024 -> 4,096 -> 16,384 -> 32,768
-    //                  (revisions 2, 3 and 7), the last value CAPS[23:20]
-    //                  can publish. 256 KB a tile.
+    //   SEQ_IMEM_D     the instruction STORE since revision 8 (R8S): the
+    //                  program's first SEQ_IMEM_D instructions, or a loop
+    //                  body a REPEAT moved it to, on chip (rtl/cft_ifetch.sv).
+    //                  It was the capacity until then: 1,024 -> 4,096 ->
+    //                  16,384 -> 32,768 (revisions 2, 3 and 7), and 4,096
+    //                  at revision 8, 32 KB a tile, where 32,768 was 256 KB
+    //                  (the plan's question 1: every program in the tree is
+    //                  within it, the largest 2,511, and so runs as before).
+    //   SEQ_STREAM_D   the instruction CAPACITY (revision 8, R8S): past the
+    //                  store, a program streams from card memory through
+    //                  the A master. 2^24 on the U50, a 128 MB image, half
+    //                  of the tile's A pseudo-channel (the plan's question
+    //                  2), published in CAPS2[20:16] as its log2 and in
+    //                  CAPS[23:20] as min(15, its log2), so a host that
+    //                  reads only CAPS sizes against 32,768 and is told the
+    //                  rest by CAPS2. EQUAL TO SEQ_IMEM_D BUILDS NO STREAM:
+    //                  the tile is then the one it was, CAPS2[20:16] zero
+    //                  and CAPS[23:20] the store's log2 - the open-core
+    //                  configurations' choice. A power of two to 2^30.
     //   SEQ_SCRATCH_D  scratch slots a lane. 256 -> 2,048 at revision 7,
     //                  1 MiB a tile. NOT purely a capacity: STX/LDX
     //                  reduce an index modulo it unless the image is
@@ -178,8 +194,9 @@ module cft_krnl #(
     // constant bank needs index bits the instruction format does not
     // have (docs/ROADMAP.md, "The program limits").
     parameter int SEQ_MAXD      = 1024,
-    parameter int SEQ_IMEM_D    = 32768,
-    parameter int SEQ_SCRATCH_D = 2048
+    parameter int SEQ_IMEM_D    = 4096,
+    parameter int SEQ_SCRATCH_D = 2048,
+    parameter int SEQ_STREAM_D  = 16777216
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -411,8 +428,10 @@ module cft_krnl #(
   // build sets them). Their history: IMEM_D went 1024 -> 4096 at
   // revision 2, 4096 -> 16384 at revision 3 and 16384 -> 32768 at
   // revision 7 (docs/SEQUENCER.md, R2, R6 and revision 7), with no
-  // feature bit any time: CAPS[23:20] publishes log2 IMEM_D, so a host
-  // learns the new capacity from the field it was already reading. The
+  // feature bit any time: CAPS[23:20] published log2 IMEM_D, so a host
+  // learned the new capacity from the field it was already reading.
+  // Revision 8 made IMEM_D the store and added SEQ_STREAM_D, the capacity
+  // past CAPS[23:20]'s 2^15, in CAPS2[20:16] (SEQ_CAP_LOG2, below). The
   // scratch (revision 3, R4) is published in CAPS2[3:0] as log2 with
   // CAPS2[4] set, because a log2 field of zero would have to mean one
   // slot rather than none - the same silicon at every precision for
@@ -433,6 +452,17 @@ module cft_krnl #(
   // `localparam int KREG` (KMEM_D) - tb/test_krnl.py parses both out
   // of the RTL and fails if they part company.
   localparam int SEQ_KIDX_W = 9;
+  // Revision 8 (R8S): the instruction capacity as the two fields publish
+  // it. CAPS2[20:16] is log2 SEQ_STREAM_D on a tile that streams and zero
+  // on one that does not, where CAPS[23:20] alone is the capacity, as on
+  // every tile before; CAPS[23:20] is min(15, log2 SEQ_STREAM_D), the most
+  // its four bits say, so a host that reads only CAPS never sizes a
+  // program past what the tile takes. cft_seq's guards hold the two
+  // parameters to powers of two (the store to SEQ_STREAM_D, the capacity
+  // to 2^30, a tile that does not stream to 2^15).
+  localparam int SEQ_STREAM_LOG2 = $clog2(SEQ_STREAM_D);
+  localparam bit SEQ_STREAMS     = (SEQ_STREAM_D > SEQ_IMEM_D);
+  localparam int SEQ_CAP_LOG2    = (SEQ_STREAM_LOG2 > 15) ? 15 : SEQ_STREAM_LOG2;
   // CAPS carries the EXPONENT of each capacity in four bits, which is
   // only honest while the capacity is a power of two no larger than
   // 2^15: $clog2 is the CEILING, so a capacity that was not a power of
@@ -630,14 +660,15 @@ module cft_krnl #(
       // seam, whose fields [20:16] and [14:11] are zero below until
       // the item that builds each sets it.
       .caps2({11'b0,       // [31:21] reserved, zero
-              5'b0,        // [20:16] log2 of the instructions a program
+              SEQ_STREAMS ? 5'(SEQ_STREAM_LOG2) : 5'b0,
+                           // [20:16] log2 of the instructions a program
                            //      may have on a tile that STREAMS them
                            //      (R8S, docs/studies/R8S-streaming.md,
-                           //      section 6). Zero says CAPS[23:20] is
-                           //      the capacity, as on every tile until
-                           //      round 2's SEQ_STREAM_D publishes
-                           //      log2 SEQ_STREAM_D where it exceeds
-                           //      SEQ_IMEM_D.
+                           //      section 6): log2 SEQ_STREAM_D, 24 on the
+                           //      U50. Zero says CAPS[23:20] is the
+                           //      capacity, as on every tile before
+                           //      revision 8 and on one built with
+                           //      SEQ_STREAM_D equal to SEQ_IMEM_D.
               1'b0,        // [15] reserved, zero
               FEAT_FLAG_CONTROL, // [14] FLAG_CONTROL (revision 8's R24):
                            //      QUIET, ENDQUIET, RAISE, STATUS[6]
@@ -703,7 +734,10 @@ module cft_krnl #(
       // would have to mean "capacity 1", not "unknown", so there is no
       // room in a log2 field to say "no sequencer"; CAPS[15] says that.
       .cap_maxd(4'($clog2(SEQ_MAXD))),
-      .cap_imem(4'($clog2(SEQ_IMEM_D))),
+      // [23:20], the instruction capacity: min(15, log2 SEQ_STREAM_D)
+      // since revision 8 - the store's depth on a tile that does not
+      // stream, and 15 on the U50's, whose 2^24 is CAPS2[20:16]'s.
+      .cap_imem(4'(SEQ_CAP_LOG2)),
       .cap_kreg(4'(SEQ_KIDX_W)),
       .cfg_op(cfg_op), .cfg_prec(cfg_prec), .cfg_rnd(cfg_rnd),
       .cfg_seq(cfg_seq), .cfg_n(cfg_n),
@@ -938,13 +972,15 @@ module cft_krnl #(
   // statement of what it has to be, and 16 satisfies it at LATENCY 16 -
   // the block no longer has to outrun the pipe by a beat, because the
   // issue state and the drain state both retire results.
-  // MAXD, IMEM_D and KMEM_D are the on-chip caps the hardware checks a
-  // program image against, and refuses past - a program the tile
-  // cannot hold is not a program the tile may half-run. They come from
-  // the parameters above rather than as literals here, because CAPS
-  // publishes their log2 and the two must be the same numbers.
+  // MAXD, STREAM_D and KMEM_D are the caps the hardware checks a program
+  // image against, and refuses past - a program the tile cannot hold is
+  // not a program the tile may half-run; IMEM_D is the instruction
+  // store's depth since revision 8. They come from the parameters above
+  // rather than as literals here, because CAPS and CAPS2 publish their
+  // log2 and the two must be the same numbers.
   cft_seq #(.BEAT_BITS(BEAT_BITS), .LATENCY(16), .NBEATS(16),
-            .MAXD(SEQ_MAXD), .IMEM_D(SEQ_IMEM_D), .KMEM_D(SEQ_KMEM_D),
+            .MAXD(SEQ_MAXD), .IMEM_D(SEQ_IMEM_D), .STREAM_D(SEQ_STREAM_D),
+            .KMEM_D(SEQ_KMEM_D),
             .SCRATCH_D(SEQ_SCRATCH_D),
             .ADDR_W(64),
             .EN_FP32(EN_FP32), .EN_FP64(EN_FP64), .EN_FP128(EN_FP128),

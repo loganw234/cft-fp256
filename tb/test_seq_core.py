@@ -102,7 +102,23 @@ def _seq_generic(name, default):
 
 
 MAXD = _seq_generic("MAXD", 64)
+# The instruction STORE since revision 8 (R8S), and the CAPACITY beside it:
+# cft_seq's STREAM_D defaults to IMEM_D, a tile that does not stream, which
+# is seq_core's. seq_coreu50 is the U50's 4,096-word store and 2^24
+# capacity, and seq_corestr a 64-word store and a 2^16 capacity, so that
+# nearly every program here streams (tb/Makefile).
 IMEM_D = _seq_generic("IMEM_D", 1024)
+STREAM_D = _seq_generic("STREAM_D", IMEM_D)
+STREAMS = STREAM_D > IMEM_D
+# SeqRam's read latency, in cycles from an AR's acceptance to its first
+# beat (revision 8): CFT_SEQ_LAT is a comma list, and the bench takes its
+# values in turn, run by run, so every case that runs three programs or
+# more meets each. seq_corestr runs at 0, 125 and 256 (the card's round
+# trip is bounded by 144; the design is sized for 256); every other
+# target at 0, the slave this bench always had. A case that HOLDS cycles
+# pins 0 (Bench.hold): its bounds were measured against that slave.
+LATS = tuple(int(x) for x in
+             os.environ.get("CFT_SEQ_LAT", "0").split(",") if x.strip())
 # 256 -> 512 at revision 3 (R7): the ninth kx index bit made the
 # second half of the bank reachable, and cft_seq's DEFAULT moved with
 # it because tb/test_krnl.py holds cft_krnl's SEQ_KIDX_W against it.
@@ -273,6 +289,7 @@ class SeqRam:
         # flight landed, a long burst drained to its RLAST - since a beat
         # left here is the next run's first read.
         self.pending = 0
+        self.cyc = 0            # the cycle serve() is in
         self.reset_log()
 
     # -- test-side access ------------------------------------------------
@@ -292,6 +309,13 @@ class SeqRam:
         # and R16's read count is asserted against it rather than
         # inferred from the answer being right.
         self.arlog = []
+        # ...and, beside each, how many read bursts were still pending -
+        # accepted and not wholly delivered - as it was accepted
+        # (revision 8): a block's setup read issued while a fetch burst
+        # of the block before is still in flight shows here as a
+        # non-zero count, which is the quiesce failing.
+        self.arpend = []
+        self.arcyc = []         # the cycle each was accepted in
 
     def stage(self, addr, data):
         assert addr + len(data) <= self.size, "staging past the model RAM"
@@ -402,6 +426,7 @@ class SeqRam:
 
         while True:
             await ReadOnly()
+            self.cyc = cyc
 
             # ---- read master -------------------------------------------
             if arready and _i(dut.m_rd_arvalid):
@@ -412,6 +437,8 @@ class SeqRam:
                 n = len(self.arlog)
                 beats = (alen + 1 if self.beats_for is None
                          else self.beats_for(n, alen + 1))
+                self.arpend.append(len(pend) + (cur_r is not None))
+                self.arcyc.append(cyc)
                 pend.append([addr, beats, cyc + 1 + self.rd_latency, n, 0])
                 self.ar_count += 1
                 self.arlog.append((addr, alen + 1))
@@ -514,6 +541,7 @@ class Fault:
         self.seen = 0
         self.burst = None      # its number in SeqRam's arlog, once issued
         self.asked = None
+        self.at_cyc = None     # the cycle the fault showed in
 
     def _beats_for(self, n, asked):
         addr = _i(self.dut.m_rd_araddr)
@@ -530,6 +558,16 @@ class Fault:
         return asked
 
     def _rresp_at(self, burst, beat):
+        # The cycle the beat that shows the fault was last presented in
+        # (it is accepted then): the SLVERR beat, a short burst's early
+        # RLAST, or a long one's beat without it. A fetch fault is held to
+        # no AR after it (Bench.faulted), where the fetch's bursts already
+        # in flight are issued after the faulted one's AR and before it.
+        if burst == self.burst:
+            shows = {"rresp": self.beat, "short": self.asked - 2,
+                     "long": self.asked - 1}[self.kind]
+            if beat == shows:
+                self.at_cyc = self.ram.cyc
         return 2 if (self.kind == "rresp" and burst == self.burst
                      and beat == self.beat) else 0
 
@@ -646,8 +684,21 @@ def has_actall(insns):
 class Bench:
     def __init__(self, dut):
         self.dut = dut
-        self.ram = SeqRam(dut)
+        # Eight bursts accepted at once: the fetch keeps up to eight in
+        # flight (four live), and the main read engine one.
+        self.ram = SeqRam(dut, rd_depth=8)
         self.cases = Counter()
+        # Revision 8: a case that holds cycles runs at latency 0 (LATS);
+        # every other takes the latencies in turn, a run at a time.
+        self.hold = False
+        self.nrun = 0
+        self.lat = 0
+        # ...or one latency, named, for a case that compares runs at
+        # each latency in turn (None: the rotation).
+        self.pin = None
+        # Where the image is staged: a case that places the instruction
+        # section across a 4 KB page moves it.
+        self.prog_base = PROG_BASE
 
     async def start(self):
         dut = self.dut
@@ -668,6 +719,10 @@ class Bench:
 
     async def _go(self, budget, label):
         dut = self.dut
+        self.lat = (self.pin if self.pin is not None else
+                    0 if self.hold else LATS[self.nrun % len(LATS)])
+        self.nrun += 1
+        self.ram.rd_latency = self.lat
         await RisingEdge(dut.ap_clk)
         dut.start.value = 1
         # Cycles from the start pulse to `done`, kept for the cases that
@@ -683,7 +738,8 @@ class Bench:
             if type(exc).__name__ != "SimTimeoutError":
                 raise
             raise AssertionError(
-                f"{label}: no `done` within {budget} cycles. The module "
+                f"{label}: no `done` within {budget} cycles (read latency "
+                f"{self.lat}). The module "
                 f"issued {self.ram.ar_count} read burst(s) and "
                 f"{self.ram.aw_count} write burst(s); busy="
                 f"{_i(dut.busy)}.") from None
@@ -698,7 +754,7 @@ class Bench:
                bank=None, scratch_in=None):
         ram = self.ram
         ram.poison()
-        ram.stage(PROG_BASE, image)
+        ram.stage(self.prog_base, image)
         ebytes = fmt.width // 8
         if bank is not None:
             # Laid out exactly as an image's constant section is -
@@ -728,7 +784,7 @@ class Bench:
         dut.cfg_b.value = B_BASE
         dut.cfg_c.value = C_BASE
         dut.cfg_d.value = D_BASE
-        dut.cfg_prog.value = PROG_BASE
+        dut.cfg_prog.value = self.prog_base
         dut.cfg_cnt.value = CNT_BASE
         # Poisoned unless this run supplies a bank: a program without
         # flags.BANK_EXT must never read the pointer, and aiming it at
@@ -916,7 +972,7 @@ class Bench:
         # on each. Derived from the tables, never typed.
         entries = sum(len(t) for t in tables if t is not None)
         entries += len(idx_scratch_in) if idx_scratch_in is not None else 0
-        budget += 64 * (entries + 64)
+        budget += self._rt() * (entries + 64)
 
         refused, flags, err = await self._go(budget, label)
         assert refused == 0, f"{label}: the module refused a valid program"
@@ -1075,11 +1131,11 @@ class Bench:
         # ...plus the mask fetch, one round trip a block, and the
         # gather's own traffic where there is a table. Derived from the
         # tables and the geometry, never typed.
-        budget += 64 * (1 + -(-n // lanes_per_block(fmt)))
+        budget += self._rt() * (1 + -(-n // lanes_per_block(fmt)))
         entries = sum(len(t) for t in
                       (idx_a, idx_b, idx_c, idx_scratch_in)
                       if t is not None)
-        budget += 64 * (entries + 64) if entries else 0
+        budget += self._rt() * (entries + 64) if entries else 0
         refused, flags, err = await self._go(budget, label)
         assert refused == 0, f"{label}: the module refused a valid program"
 
@@ -1190,7 +1246,7 @@ class Bench:
 
     async def faulted(self, fmt, prog, a, b, c, n, label, fault, *,
                       expect, lanes_done=0, bank=None, scratch_in=None,
-                      idx_a=None, keep=None):
+                      idx_a=None, keep=None, fetch=False):
         """Run `prog` over `n` lanes with `fault` planted on one read
         burst, and hold the abort's rule (docs/ROADMAP.md, revision 8,
         "The abort"; rtl/cft_seq.sv's contract, item 5):
@@ -1208,7 +1264,9 @@ class Bench:
                     its SLVERR), and says err[0].
 
         A masked run takes `keep`, a gathered one `idx_a` (stream a's
-        table). The model is run as the case's own run would be."""
+        table). The model is run as the case's own run would be. `fetch`
+        says the faulted burst is the instruction fetch's (revision 8,
+        R8S), whose fault ends the run through the same abort."""
         assert expect in ("length", "word", "data"), expect
         ebytes = fmt.width // 8
         maxdep = prog.max_deposits
@@ -1239,8 +1297,8 @@ class Bench:
                         idx_mask=1 if idx_a is not None else 0,
                         lane_mask=masked)
         budget = self._budget(fmt, prog, n, len(image))
-        budget += 64 * (len(idx_a) + 64) if idx_a is not None else 0
-        budget += 64 * (1 + -(-n // lanes_per_block(fmt))) if masked else 0
+        budget += self._rt() * (len(idx_a) + 64) if idx_a is not None else 0
+        budget += self._rt() * (1 + -(-n // lanes_per_block(fmt))) if masked else 0
         fault.install()
         try:
             refused, flags, err = await self._go(budget, label)
@@ -1268,12 +1326,23 @@ class Bench:
         nsout = prog.n_scratch_out if prog.scratch_io else 0
         if expect == "data":
             lanes_done = n
-        else:
+        elif not fetch:
             assert len(self.ram.arlog) == fault.burst + 1, (
                 f"{label}: {len(self.ram.arlog) - fault.burst - 1} read "
                 f"burst(s) issued after the faulted one (number "
                 f"{fault.burst}): an aborted run issues no new burst. "
                 f"{self.ram.arlog[fault.burst:fault.burst + 4]}")
+        else:
+            # The fetch keeps bursts in flight, so the ones issued after
+            # the faulted burst's AR and before its fault showed are
+            # legitimate; none may begin after it (two cycles to register
+            # the fault, one for the AR).
+            late = [(hex(a), c) for (a, _), c in
+                    zip(self.ram.arlog, self.ram.arcyc)
+                    if c > fault.at_cyc + 3]
+            assert not late, (
+                f"{label}: read burst(s) issued after the fetch's fault "
+                f"showed in cycle {fault.at_cyc}: {late[:4]}")
         # The outputs: the model's for every lane of a block that finished
         # (and the caller's), the caller's poison for every other.
         got_dep = self.ram.fetch(D_BASE, dep_bytes)
@@ -1332,6 +1401,12 @@ class Bench:
             f"{label}: err={err:#x}, {len(self.ram.arlog)} read bursts, "
             f"{self.last_cycles:.0f} cycles to done")
         return want
+
+    def _rt(self):
+        """A single-beat read's round trip, for the budgets: the state
+        machine's handful of cycles and the memory's latency at its
+        worst for this run (revision 8's LATS)."""
+        return 64 + (0 if self.hold else max(LATS))
 
     def _budget(self, fmt, prog, n, image_bytes):
         blocks = max(1, -(-n // lanes_per_block(fmt)))
@@ -1392,6 +1467,19 @@ class Bench:
                               + blk * nsout * 4 + 64
                               + blk * prog.max_deposits * 4 + 64
                               + 6 * NBEATS + 400))
+        # Revision 8: a memory with a round trip (LATS) charges every read
+        # burst its latency - the header, the image's bursts, a block's
+        # mask, scratch-in and streams - and a program past the store
+        # streams: a redirect a block at most at its restart, one a loop
+        # pass at most, each a round trip and a few bursts, and the stream
+        # itself. A bound, budgeted at the worst latency the run may meet.
+        lat = (self.pin if self.pin is not None else
+               0 if self.hold else max(LATS))
+        bursts = 4 + image_bytes // (64 * BEAT_BYTES) + 8 * blocks
+        if STREAMS and len(prog.insns) > IMEM_D:
+            bursts += blocks * (2 + worst // 16)
+            cycles += blocks * worst * 2
+        cycles += bursts * (lat + 64)
         return min(cycles, 8_000_000)
 
     def _compare_scratch_out(self, fmt, prog, n, want, label):
@@ -1668,9 +1756,18 @@ async def refusal_matrix(dut):
         FP32, raw_image(FP32, body, consts, prec=7),
         "precision code 7 is not on the ladder")
 
+    # The capacity plus one, refused at the header with no instruction
+    # read. Since revision 8 the capacity is STREAM_D, past the store's
+    # IMEM_D on a tile that streams (2^24 on the U50's, whose image would
+    # be 128 MB), so the image is the header alone: the count is what is
+    # refused (R8S-streaming.md, section 8). Until revision 8 this was an
+    # image of IMEM_D + 1 halts.
     await bench.refuse(
-        FP32, raw_image(FP32, [seq.halt()] * (IMEM_D + 1)),
-        f"n_insns {IMEM_D + 1} exceeds IMEM_D")
+        FP32, raw_image(FP32, [], n_insns=STREAM_D + 1),
+        f"n_insns {STREAM_D + 1} exceeds the capacity STREAM_D")
+    assert bench.ram.arlog == [(PROG_BASE, 1)], (
+        f"the capacity plus one: the tile read {bench.ram.arlog[:4]} - a "
+        f"count past the capacity is refused from the header beat alone")
     await bench.refuse(
         FP32, raw_image(FP32, body,
                         [sf.one_bits(FP32)] * (KMEM_D + 1)),
@@ -3371,6 +3468,9 @@ async def scratch_wipe_costs_what_was_written(dut):
     256."""
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     fmt = FP32
     lpb = lanes_per_block(fmt)
     blocks = 4
@@ -3505,6 +3605,9 @@ async def scratch_first_block_after_reset_costs_one_sub_array(dut):
     mean less three of the next run's blocks (f681dee 4,249)."""
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     watch = _BroadcastWatch(dut)
     fmt = FP32
     lpb = lanes_per_block(fmt)
@@ -3611,6 +3714,9 @@ async def scratch_preload_nothing_reads_is_not_loaded(dut):
     cycles logged against R5's 41,300."""
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     fmt = FP32
     lpb = lanes_per_block(fmt)
     n = lpb
@@ -4359,6 +4465,9 @@ async def control_codes_hold_their_overlap(dut):
     """
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     fmt = FP32
     n = 4 * lanes_per_block(fmt)
     # Every program measured before any is judged, so a red run still
@@ -4650,6 +4759,9 @@ async def masked_beats_hold_their_saving(dut):
     dense run) and the after-side, and answers what the model says."""
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     fmt = FP32
     lpb, lpbeat = lanes_per_block(fmt), lanes_per_beat(fmt)
     n = 4 * lpb
@@ -4853,6 +4965,9 @@ async def loads_cost_no_more_than_before(dut):
         return
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     cost = {}
     for name in ("fp32", "fp64", "fp128", "fp256"):
         fmt = FORMATS[name]
@@ -4896,6 +5011,9 @@ async def store_then_load_costs_what_the_sentence_says(dut):
     possible gain), never more."""
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     fmt = FP32
     n = 4 * lanes_per_block(fmt)
     iand = seq.alu(sf.OP_IAND, 4, 0, 0)
@@ -5086,6 +5204,9 @@ async def masked_chains_cost_no_more_than_before(dut):
         return
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     F = sf.OP_FMA
     cost = {}
     for name in ("fp32", "fp64", "fp128", "fp256"):
@@ -6116,6 +6237,9 @@ async def masked_every_lane_completes_with_nothing_written(dut):
     """
     bench = Bench(dut)
     await bench.start()
+    # It holds cycles, measured against the slave this bench always
+    # had: every run at read latency 0 (revision 8's LATS).
+    bench.hold = True
     for name in ("fp32", "fp256"):
         fmt = FORMATS[name]
         n = lanes_per_block(fmt) + 1
@@ -6506,4 +6630,422 @@ async def abort_single_beat_reads(dut):
         f = Fault(dut, bench.ram, *lohi, "long", which=2)
         await bench.faulted(fmt, prog, src, b, c, n, label, f,
                             expect="length", idx_a=tbl)
+        await _clean_after(bench, fmt, label)
+
+
+# ======================================================================
+# revision 8: the instruction fetch, through the whole sequencer (R8S)
+# ======================================================================
+#
+# docs/studies/R8S-streaming.md, sections 8 and 13; rtl/cft_seq.sv's
+# fetch hooks and rtl/cft_ifetch.sv. At seq_core the tile does not stream
+# (STREAM_D == IMEM_D) and these cases hold today's machine; at
+# seq_coreu50 a program past 4,096 instructions streams; at seq_corestr
+# (a 64-word store, a 2^16 capacity, read latencies 0, 125 and 256) nearly
+# every program here does, and every other case in this file runs through
+# the stream as well.
+
+FETCH_OUT_MAX, FETCH_BURST = 8, 8      # rtl/cft_ifetch.sv's defaults
+
+
+def _long_program(fmt, n, ends="halt"):
+    """prog_fills_imem's shape (tb/test_krnl_seq.py), n instructions: every
+    lane dropped by a SETACT of +0, so the REPEAT that follows finds none
+    active and its body is SKIPPED, walked to the matching ENDREP at two
+    cycles a word through REPEAT/ENDREP pairs - a word the fetch got wrong,
+    aliased or misaligned, lands the skip elsewhere and the program
+    diverges. Then ACTALL and the last words execute. `ends` "halt" ends in
+    HALT; "implicit" in a DEPOSIT, so the block ends by the implicit halt
+    with pc at n - which needs pc's extra bit when n is the capacity."""
+    if ends == "halt":
+        tail = [seq.endrep(), seq.actall(),
+                seq.alu(sf.OP_ADD, 20, ra=0, rc=2), seq.deposit(20),
+                seq.halt()]
+    else:
+        tail = [seq.endrep(), seq.actall(),
+                seq.alu(sf.OP_ADD, 20, ra=0, rc=2),
+                seq.alu(sf.OP_MUL, 21, ra=20, rb=1), seq.deposit(21)]
+    body = [seq.setact(5), seq.repeat(2)]
+    fill_end = n - len(tail)
+    i = 2
+    while i < fill_end:
+        if i + 1 < fill_end and (i % 3):
+            body += [seq.repeat(2), seq.endrep()]
+            i += 2
+        else:
+            body.append(seq.alu(sf.OP_ADD, rd=(i % 32), ra=0, rc=1))
+            i += 1
+    body += tail
+    assert len(body) == n
+    return seq.Program(fmt, body, max_deposits=1)
+
+
+async def _long_run(bench, fmt, n_insns, ends, label):
+    prog = _long_program(fmt, n_insns, ends)
+    n = 9
+    await bench.program(fmt, prog, operands(fmt, n, 900 + n_insns % 97),
+                        operands(fmt, n, 901), operands(fmt, n, 902), n,
+                        label)
+
+
+@cocotb.test()
+async def a_program_longer_than_the_old_imem(dut):
+    """36,864 instructions - revision 7's 32,768 and a 4,096-word store's
+    worth more - on a tile that streams: the bulk skipped through the
+    stream, the last words executed at addresses past 2^15, held to the
+    model. Beside it the capacity plus one is refused at the header
+    (refusal_matrix). A tile that does not stream, or holds less, says so
+    and runs nothing here."""
+    bench = Bench(dut)
+    await bench.start()
+    n_insns = 32768 + 4096
+    if not STREAMS or STREAM_D < n_insns:
+        dut._log.info(f"not on this build: capacity {STREAM_D}, store "
+                      f"{IMEM_D} - no program of {n_insns} instructions")
+        return
+    for k in range(len(LATS)):
+        await _long_run(bench, FP32, n_insns, "halt",
+                        f"{n_insns} instructions, streamed")
+    dut._log.info(f"{n_insns} instructions past a {IMEM_D}-word store: "
+                  f"{bench.cases['program']} runs, last {bench.last_cycles:.0f} "
+                  f"cycles at latency {bench.lat}")
+
+
+@cocotb.test()
+async def a_program_of_exactly_the_capacity(dut):
+    """Two images of exactly STREAM_D instructions in prog_fills_imem's
+    shape: one ends in HALT, the other in a DEPOSIT, so the block ends by
+    the implicit halt with pc EQUAL to the capacity. pc one bit short
+    would wrap it to 0 and the block would restart for ever: that one
+    fails by the budget (R8S-streaming.md, section 2, "Widths"). At the
+    U50's 2^24 the image is 128 MB and is not simulated; seq_core's 1,024
+    (no stream) and seq_corestr's 65,536 run it."""
+    bench = Bench(dut)
+    await bench.start()
+    if STREAM_D > 65536:
+        dut._log.info(f"not on this build: an image of {STREAM_D} "
+                      f"instructions is not simulated")
+        return
+    for ends in ("halt", "implicit"):
+        await _long_run(bench, FP32, STREAM_D, ends,
+                        f"{STREAM_D} instructions, ending by "
+                        f"{'HALT' if ends == 'halt' else 'the implicit halt'}")
+        dut._log.info(f"capacity {STREAM_D} ({ends}): {bench.last_cycles:.0f} "
+                      f"cycles at latency {bench.lat}")
+
+
+def _indep(k, seed=0):
+    """k ALU instructions none of which reads another's result: r3..r10
+    from r0..r2 in turn, so an instruction costs its beats."""
+    out = []
+    for i in range(k):
+        rd = 3 + ((i + seed) % 8)
+        if i % 3 == 1:
+            out.append(seq.alu(sf.OP_MUL, rd, ra=0, rb=1))
+        else:
+            out.append(seq.alu((sf.OP_ADD, sf.OP_ADD, sf.OP_SUB)[i % 3], rd,
+                               ra=(i % 3), rc=((i + 1) % 3)))
+    return out
+
+
+def _loop_prog(fmt, start, body, trips):
+    """A loop whose body is `body` independent instructions from pc
+    `start` (its REPEAT at start - 1), then two deposits."""
+    pre = _indep(start - 1, seed=5)
+    return seq.Program(fmt, pre + [seq.repeat(trips)] + _indep(body) +
+                       [seq.endrep(), seq.deposit(3), seq.deposit(4),
+                        seq.halt()], max_deposits=2)
+
+
+@cocotb.test()
+async def loop_bodies_past_the_store_cost_no_stall_a_pass(dut):
+    """The store covers the stream's refill (R8S-streaming.md, sections 3
+    and 4), held as cycles a pass at every latency the build runs, one
+    full fp32 block (sixteen beats an instruction). A pass is the
+    difference of four trips and two over two. Two resident loops (20 and
+    50 instructions from pc 5, inside even a 64-word store) give a pass's
+    cost per instruction and its fixed part; then, against that line:
+
+      * a 200-instruction body from pc 5, which starts in the store and
+        runs past it - every image cftc emits that is larger than the
+        store: within 2% and 16 cycles of the line, no stall a pass;
+      * a 200-instruction body from pc 100, past the store and longer
+        than it, captured to the store's depth: at most one redirect a
+        pass over the line (latency + 300);
+      * a 40-instruction body from pc 100, past the store and inside its
+        depth, captured on its first pass: from the third pass, within 2%
+        and 16 cycles of the line, as its resident twin costs.
+
+    Where the store holds every one of them (seq_core, seq_coreu50) the
+    three are resident and the line holds them trivially."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    n = lanes_per_block(fmt)
+    a, b, c = (operands(fmt, n, s) for s in (930, 931, 932))
+
+    async def per_pass(start, body, label):
+        cost = []
+        for trips in (2, 4):
+            prog = _loop_prog(fmt, start, body, trips)
+            await bench.program(fmt, prog, a, b, c, n,
+                                f"{label}, {trips} trips, latency {bench.pin}")
+            cost.append(bench.last_cycles)
+        return (cost[1] - cost[0]) / 2
+
+    for lat in LATS:
+        bench.pin = lat
+        p20 = await per_pass(5, 20, "resident 20")
+        p50 = await per_pass(5, 50, "resident 50")
+        per_insn = (p50 - p20) / 30
+        fixed = p20 - 20 * per_insn
+
+        def line(k):
+            return k * per_insn + fixed
+        inside = await per_pass(5, 200, "200 from pc 5")
+        past_long = await per_pass(100, 200, "200 from pc 100")
+        past_fit = await per_pass(100, 40, "40 from pc 100")
+        dut._log.info(
+            f"latency {lat}: a pass costs {per_insn:.2f} cycles an "
+            f"instruction + {fixed:.1f}; 200 from pc 5: {inside:.1f} "
+            f"(line {line(200):.1f}); 200 from pc 100: {past_long:.1f}; "
+            f"40 from pc 100: {past_fit:.1f} (line {line(40):.1f}) - "
+            f"store {IMEM_D}, capacity {STREAM_D}")
+        assert abs(inside - line(200)) <= 0.02 * line(200) + 16, (
+            f"latency {lat}: a body that starts in the store and runs past it "
+            f"costs {inside:.1f} cycles a pass against the resident line's "
+            f"{line(200):.1f}: the store no longer covers the refill")
+        assert past_long <= 1.02 * line(200) + 16 + lat + 300, (
+            f"latency {lat}: a body past the store and longer than it costs "
+            f"{past_long:.1f} cycles a pass, more than one redirect over the "
+            f"line's {line(200):.1f}")
+        assert abs(past_fit - line(40)) <= 0.02 * line(40) + 16, (
+            f"latency {lat}: a captured body costs {past_fit:.1f} cycles a "
+            f"pass from its third, against its resident twin's "
+            f"{line(40):.1f}: the capture did not hold it")
+    bench.pin = None
+
+
+def _nest_program(fmt):
+    """Four nested loops with bodies on both sides of a 64-word store's
+    range, a skipped loop at every depth (REPEAT 0, which the loader
+    refuses and the tile is defined to skip, so the program is built
+    unchecked), and lanes leaving as r2 counts down in the innermost body
+    - so loops exit early at every depth and later REPEATs find no lane
+    and are skipped."""
+    k0 = 0                                     # the constant 1.0
+
+    def alus(k, seed):
+        return _indep(k, seed)
+
+    def skipped(k, seed):
+        return ([seq.encode(seq.REPEAT, ctrl=True, imm=0)] + alus(k, seed) +
+                [seq.repeat(2)] + alus(2, seed + 1) + [seq.endrep(),
+                                                       seq.endrep()])
+    count = [seq.alu(sf.OP_SUB, 2, ra=2, rc=k0, kc=True), seq.setact(2)]
+    l4 = ([seq.repeat(3)] + alus(6, 1) + skipped(2, 2) + count +
+          alus(3, 3) + [seq.deposit(3), seq.endrep()])
+    l3 = ([seq.repeat(2)] + alus(5, 4) + skipped(3, 5) + l4 + alus(4, 6) +
+          [seq.endrep()])
+    l2 = ([seq.repeat(2)] + alus(40, 7) + skipped(1, 8) + l3 +
+          alus(30, 9) + [seq.endrep()])
+    l1 = ([seq.repeat(3)] + alus(6, 10) + skipped(4, 11) + l2 +
+          alus(7, 12) + [seq.endrep()])
+    insns = alus(2, 13) + l1 + alus(5, 14) + [seq.deposit(4), seq.halt()]
+    return unchecked(fmt, insns, consts=[sf.one_bits(fmt)], max_deposits=40)
+
+
+@cocotb.test()
+async def nesting_four_deep_streamed(dut):
+    """_nest_program over two blocks (so the second restarts at pc 0 after
+    the first moved the store), lanes leaving at their own trip, at every
+    latency the build runs: bit for bit with the model."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    prog = _nest_program(fmt)
+    n = lanes_per_block(fmt) + 17
+    one = sf.one_bits(fmt)
+    # r2 counts down by 1.0 a pass of the innermost body: lane i leaves
+    # after 1 + i % 12 of them, so lanes leave at every depth's pass.
+    cnt = [sf.round_pack(fmt, 0, 1 + i % 12, 0)[0] for i in range(n)]
+    for k in range(max(1, len(LATS))):
+        await bench.program(fmt, prog, operands(fmt, n, 940 + k),
+                            [one] * n, cnt, n,
+                            f"nesting four deep ({len(prog.insns)} words)")
+    dut._log.info(f"nesting four deep: {len(prog.insns)} instructions, store "
+                  f"{IMEM_D}, {bench.cases['program']} runs")
+
+
+@cocotb.test()
+async def block_restarts_after_a_retarget(dut):
+    """A loop past the store that fits it, captured each block, over three
+    blocks: every block's pc 0 is outside the store the block before left,
+    and is fetched again - held to the model at every latency."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    prog = _loop_prog(fmt, 100, 40, 3)
+    n = 3 * lanes_per_block(fmt) - 5
+    for k in range(max(1, len(LATS))):
+        await bench.program(fmt, prog, operands(fmt, n, 950 + k),
+                            operands(fmt, n, 951), operands(fmt, n, 952), n,
+                            "three blocks, a captured loop past the store")
+        dut._log.info(f"three blocks past the store: {bench.last_cycles:.0f} "
+                      f"cycles at latency {bench.lat}")
+
+
+def _misaligned_prog(fmt, nconsts, bank_ext=False):
+    """About 120 instructions using the constants, a loop past a 64-word
+    store; its instruction section starts at 32 + 4 x nconsts at fp32."""
+    insns = (_indep(70, 1) + [seq.repeat(3)] +
+             [seq.alu(sf.OP_FMA, 3, ra=0, rb=1, rc=k % max(1, nconsts),
+                      kc=nconsts > 0) for k in range(20)] +
+             [seq.endrep()] + _indep(25, 2) +
+             [seq.deposit(3), seq.deposit(4), seq.halt()])
+    consts = [sf.one_bits(fmt)] + list(range(1, nconsts)) if nconsts else []
+    if bank_ext:
+        return seq.Program(fmt, insns, flags=seq.FLAG_BANK_EXT,
+                           n_consts=nconsts, max_deposits=2), consts
+    return seq.Program(fmt, insns, consts=consts, max_deposits=2), None
+
+
+@cocotb.test()
+async def misaligned_instruction_sections(dut):
+    """The instruction section at every 4-byte granule offset modulo 32:
+    fp32 images with 0 to 7 constants put it at 32 + 4k, and a BANK_EXT
+    image's is at 32. Each streams past a 64-word store and loops back,
+    held to the model (the realigner's granule, and cfg_ibase's sum)."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    n = 20
+    for k in range(8):
+        prog, _ = _misaligned_prog(fmt, k)
+        await bench.program(fmt, prog, operands(fmt, n, 960 + k),
+                            operands(fmt, n, 961), operands(fmt, n, 962), n,
+                            f"section at byte {32 + 4 * k}")
+    prog, bank = _misaligned_prog(fmt, 5, bank_ext=True)
+    await bench.program(fmt, prog, operands(fmt, n, 970),
+                        operands(fmt, n, 971), operands(fmt, n, 972), n,
+                        "BANK_EXT, section at byte 32", bank=bank)
+
+
+@cocotb.test()
+async def the_stream_across_4k(dut):
+    """An image placed so that bursts from the store's end would cross a
+    4 KB page if the fetch did not cut them there: SeqRam refuses a
+    crossing burst, and the run is held to the model."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    n = 20
+    prog, _ = _misaligned_prog(fmt, 1)
+    for k in (IMEM_D + 5, IMEM_D + 37):
+        if k >= len(prog.insns):
+            dut._log.info(f"not on this build: instruction {k} is past the "
+                          f"program, which the {IMEM_D}-word store holds")
+            continue
+        # instruction k at a page boundary, at a 4-byte offset
+        base = 0x31_0000 - 32 - 4 - 8 * k + 4
+        base -= base % 32
+        bench.prog_base = base
+        await bench.program(fmt, prog, operands(fmt, n, 980 + k),
+                            operands(fmt, n, 981), operands(fmt, n, 982), n,
+                            f"instruction {k} at a 4 KB page, image at "
+                            f"{base:#x}")
+    bench.prog_base = PROG_BASE
+
+
+@cocotb.test()
+async def fetch_quiesces_before_the_next_block(dut):
+    """A block that halts at pc 10 while the stream prefetches past the
+    store, over four blocks: at every block's end the fetch is quiesced
+    and idle within latency + 2 x OUT_MAX x BURST + 32 cycles - the round
+    trip of what was in flight - and no read of the next block's setup
+    (mask, scratch-in, streams) is issued while a fetch burst is
+    outstanding. Watched on cft_seq's own if_quiesce and if_idle."""
+    bench = Bench(dut)
+    await bench.start()
+    fmt = FP32
+    # Past the store where the tile streams; within the capacity where
+    # it does not, and there nothing is fetched and the hold is trivial.
+    fill = min(IMEM_D + 400, STREAM_D - 12)
+    prog = seq.Program(fmt, _indep(10) + [seq.deposit(3), seq.halt()] +
+                       _indep(fill), max_deposits=1)
+    n = 4 * lanes_per_block(fmt)
+    for k in range(max(1, len(LATS))):
+        lat = LATS[bench.nrun % len(LATS)]
+        stats = {"ends": 0, "longest": 0, "run": None, "q": False}
+
+        async def watch():
+            # From each quiesce's first cycle to the fetch's idle.
+            while True:
+                await RisingEdge(dut.ap_clk)
+                await ReadOnly()
+                q, idle = _i(dut.if_quiesce), _i(dut.if_idle)
+                if q and not stats["q"]:
+                    stats["ends"] += 1
+                    stats["run"] = 0
+                if stats["run"] is not None:
+                    if idle:
+                        stats["longest"] = max(stats["longest"], stats["run"])
+                        stats["run"] = None
+                    else:
+                        stats["run"] += 1
+                stats["q"] = bool(q)
+        task = cocotb.start_soon(watch())
+        await bench.program(fmt, prog, operands(fmt, n, 990 + k),
+                            operands(fmt, n, 991), operands(fmt, n, 992), n,
+                            f"halting at pc 10, four blocks, latency {lat}")
+        task.kill()
+        bound = lat + 2 * FETCH_OUT_MAX * FETCH_BURST + 32
+        dut._log.info(f"quiesce at latency {lat}: {stats['ends']} block ends, "
+                      f"idle within {stats['longest']} cycles (bound {bound})")
+        assert stats["ends"] >= 4, (
+            f"latency {lat}: {stats['ends']} quiesces over four blocks - a "
+            f"block ended without stopping the fetch")
+        assert stats["longest"] <= bound, (
+            f"latency {lat}: the fetch was idle {stats['longest']} cycles "
+            f"after a block's end, past {bound}: it did not stop")
+        img_lo = bench.prog_base
+        img_hi = img_lo + len(prog.to_bytes())
+        for (addr, _), pend in zip(bench.ram.arlog, bench.ram.arpend):
+            if not img_lo <= addr < img_hi:
+                assert pend == 0, (
+                    f"latency {lat}: a setup read at {addr:#x} issued with "
+                    f"{pend} read burst(s) still outstanding")
+
+
+@cocotb.test()
+async def abort_on_a_fetch_fault(dut):
+    """A fault on the instruction fetch's own burst ends the run through
+    the abort (rtl/cft_seq.sv's contract, item 5; the unit holds `ok`
+    low): a SLVERR on a streamed word with STATUS[0], a short and a long
+    fetch burst with STATUS[2]; nothing written, no burst begun after the
+    fault showed, nothing left in flight - and a clean run after each. A
+    tile that does not stream has no fetch burst, and says so."""
+    bench = Bench(dut)
+    await bench.start()
+    if not STREAMS:
+        dut._log.info("not on this build: it does not stream")
+        return
+    fmt = FP32
+    n = 20
+    prog = _long_program(fmt, IMEM_D + 200, "halt")
+    img = prog.to_bytes()
+    # the parse's own bursts come first in the image's region: count them
+    # by the read engine's rule (64 beats, never across 4 KB)
+    addr, left, parse = PROG_BASE + 32, -(-(len(img) - 32) // 32), 0
+    while left:
+        ln = min(64, left, (4096 - (addr & 0xFFF)) // 32)
+        addr, left, parse = addr + 32 * ln, left - ln, parse + 1
+    a, b, c = (operands(fmt, n, s) for s in (1001, 1002, 1003))
+    for kind, expect in (("rresp", "word"), ("short", "length"),
+                         ("long", "length")):
+        label = f"abort: a {kind} fetch burst"
+        f = Fault(dut, bench.ram, PROG_BASE + 32, PROG_BASE + len(img), kind,
+                  which=parse, beat=1)
+        await bench.faulted(fmt, prog, a, b, c, n, label, f, expect=expect,
+                            fetch=True)
         await _clean_after(bench, fmt, label)

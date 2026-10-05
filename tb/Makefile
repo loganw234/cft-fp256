@@ -55,7 +55,7 @@ PYTHON ?= python3
 
 .PHONY: sim simmc fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg normshare \
         normprobe seedop reduceacc reduce krnl krnlf128 krnlf64f128 krnlseq quarter faults \
-        seq_core seq_coreu50 seq_coreu50mc ifetch seqprobe seqcycles seqtrace seqbp redprog krnlfused krnlplain cycles seqbanks \
+        seq_core seq_coreu50 seq_coreu50mc seq_corestr ifetch seqprobe seqcycles seqcyclesstr seqtrace seqbp redprog krnlfused krnlplain cycles seqbanks \
         mulpass mulcycle mulcycle2 fp32mc fp64mc fp128mc fp256mc reducemc \
         krnlmc krnlseqmc quartermc faultsmc seq_coremc seqbanksmc cyclesmc clean
 
@@ -73,7 +73,8 @@ SIM_BENCHES = fp32 fp64 fp128 fp256 mulfrac mulshare simpleops normseg \
               normshare seedop reduceacc reduce reducenowide krnl krnlf128 \
               krnlf64f128 \
               quarter faults redprog \
-              seq_core seq_coreu50 krnlseq seqbanks mulpass mulcycle mulcycle2
+              seq_core seq_coreu50 seq_corestr krnlseq seqbanks mulpass mulcycle \
+              mulcycle2
 
 # A bench writes sim_build/<target name>/results.xml. One does not: the
 # multi-cycle multiplier bench is parameterised by the pass budget, so
@@ -472,14 +473,19 @@ krnlplain:
 # The capacities an open-core configuration keeps (revision 7,
 # 2026-09-29). cft_krnl's SEQ_MAXD, SEQ_IMEM_D and SEQ_SCRATCH_D are
 # parameters since that revision and default to the U50's - 1,024
-# deposit slots, 32,768 instructions, 2,048 scratch slots - while the
+# deposit slots, 32,768 instructions (since revision 8 a 4,096-word store
+# and a 2^24 capacity), 2,048 scratch slots - while the
 # board was measured through openXC7 with 64, 16,384 and 256
 # (hw/openxc7, 2026-09-22) and the quarter tile has always had them. So
 # both name them. ONE list, handed to the simulator as -P and to the
 # bench as CFT_GENERICS, which is what test_krnl.py derives its
 # expected CAPS and CAPS2 from - KRNLF128_GENERICS's rule, so the build
 # and the expectation cannot be told two different stories.
-OPEN_CAPS_GENERICS = SEQ_MAXD=64 SEQ_IMEM_D=16384 SEQ_SCRATCH_D=256
+# SEQ_STREAM_D joined at revision 8 (R8S): equal to SEQ_IMEM_D it builds
+# no stream, and the open-core configurations keep streaming off - the
+# kernel's default is the U50's 2^24, which with a 16,384-word store would
+# stream past it.
+OPEN_CAPS_GENERICS = SEQ_MAXD=64 SEQ_IMEM_D=16384 SEQ_SCRATCH_D=256 SEQ_STREAM_D=16384
 BOARD_PARAMS = -Pcft_krnl.FUSE_NORM=1 -Pcft_krnl.FUSE_ALIGN=1                -Pcft_krnl.MUL_PASSES=$(MC) \
                $(foreach g,$(OPEN_CAPS_GENERICS),-Pcft_krnl.$(g))
 
@@ -646,7 +652,9 @@ seq_core:
 
 # The same bench with cft_seq built at the U50's capacities (revision 7,
 # 2026-09-29): 1,024 deposit slots, 32,768 instructions, 2,048 scratch
-# slots - rtl/cft_krnl.sv's SEQ_* defaults, which krnl_caps.py reads out
+# slots - and since revision 8 (R8S) a 4,096-word instruction store and a
+# 2^24 capacity, so a program past 4,096 instructions streams here -
+# rtl/cft_krnl.sv's SEQ_* defaults, which krnl_caps.py reads out
 # of that file so the numbers exist once. seq_core runs cft_seq at its
 # own defaults (64, 1,024, 256); this one is where every model run is at
 # 2,048 slots, the top slot is 2,047, a non-strict index wraps at 2,048
@@ -680,6 +688,24 @@ seq_coreu50mc:
 		KRNL_PARAMS="-Pcft_seq.MUL_PASSES=$(MC) $(foreach g,$(SEQ_U50_GENERICS),-Pcft_seq.$(g))" \
 		COCOTB_RESULTS_FILE=sim_build/seq_coreu50mc$(MC)/results.xml \
 		&& $(PYTHON) check_results.py sim_build/seq_coreu50mc$(MC)/results.xml
+
+# The same bench through the instruction fetch (revision 8, R8S; S8's
+# seq_corestr, docs/studies/R8S-streaming.md section 8): cft_seq with a
+# 64-word store and a 2^16 capacity, so that nearly every program in
+# tb/test_seq_core.py streams past the store, against SeqRam with a read
+# latency of 0, 125 and 256 cycles taken a run at a time (CFT_SEQ_LAT; the
+# card's round trip is bounded by 144 and the design is sized for 256). The
+# cases that hold cycles pin latency 0, and their programs fit the store;
+# the streaming cases hold their own. One list again: each word reaches the
+# simulator as -Pcft_seq.<word> and the bench as CFT_GENERICS.
+SEQ_STR_GENERICS = IMEM_D=64 STREAM_D=65536
+SEQ_STR_LAT ?= 0,125,256
+seq_corestr:
+	CFT_SEQ_LAT=$(SEQ_STR_LAT) CFT_GENERICS="$(SEQ_STR_GENERICS)" timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
+		MODULE=test_seq_core SIM_BUILD=sim_build/seq_corestr \
+		KRNL_PARAMS="$(foreach g,$(SEQ_STR_GENERICS),-Pcft_seq.$(g))" \
+		COCOTB_RESULTS_FILE=sim_build/seq_corestr/results.xml \
+		&& $(PYTHON) check_results.py sim_build/seq_corestr/results.xml
 
 # The instruction fetch unit alone (revision 8, R8S; rtl/cft_ifetch.sv),
 # against SeqRam at read latencies 0, 125 and 256, driven by a model of
@@ -722,6 +748,17 @@ seqcycles:
 		MODULE=probe_seq_cycles SIM_BUILD=sim_build/seqcycles \
 		COCOTB_RESULTS_FILE=sim_build/seqcycles/results.xml \
 		&& $(PYTHON) check_results.py sim_build/seqcycles/results.xml
+
+# ...and its streaming rows (revision 8, R8S): the same probe at
+# seq_corestr's build, a 64-word store and a 2^16 capacity, where its
+# streaming_costs prints what a program past the store costs at read
+# latencies 0, 125 and 256; at seqcycles' build (no stream) it says so.
+seqcyclesstr:
+	CFT_GENERICS="$(SEQ_STR_GENERICS)" timeout $(SEQ_TIMEOUT) $(MAKE) -f cocotb.mk SIM=$(SIM) TOPLEVEL=cft_seq \
+		MODULE=probe_seq_cycles SIM_BUILD=sim_build/seqcyclesstr \
+		KRNL_PARAMS="$(foreach g,$(SEQ_STR_GENERICS),-Pcft_seq.$(g))" \
+		COCOTB_RESULTS_FILE=sim_build/seqcyclesstr/results.xml \
+		&& $(PYTHON) check_results.py sim_build/seqcyclesstr/results.xml
 
 # The other diagnostic: one program, every cycle of the issue pipe and
 # the retire written to sim_build/trace/trace.txt (tb/probe_trace.py).

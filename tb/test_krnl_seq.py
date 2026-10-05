@@ -75,6 +75,11 @@ from test_krnl import (  # noqa: E402
 # that builds another value hands it here as CFT_GENERICS
 # (test_krnl.krnl_param), so this is the number THIS build has.
 SEQ_IMEM_D = krnl_param("SEQ_IMEM_D")
+# ...and since revision 8 (R8S) the CAPACITY beside it: SEQ_IMEM_D is the
+# instruction store, and past it a program streams from card memory up to
+# SEQ_STREAM_D instructions - 2^24 on the U50, equal to the store on the
+# open-core configurations, which do not stream.
+SEQ_STREAM_D = krnl_param("SEQ_STREAM_D")
 # ...and the scratch's depth, on the same terms. It moved into existence
 # at revision 3 and to 2,048 at revision 7 - and unlike the other two it
 # is part of what an instruction MEANS (a non-strict STX/LDX reduces
@@ -940,14 +945,24 @@ async def krnl_sequencer(dut):
     # bulk is skipped rather than executed - see prog_fills_imem - so
     # the case costs about 8,200 cycles of skip rather than the 160,000
     # that executing every instruction would.
+    #
+    # Since revision 8 (R8S) a tile that streams holds SEQ_IMEM_D in its
+    # store and takes SEQ_STREAM_D: the case is then an image of 32,769
+    # instructions - one past revision 7's capacity, the image device-test
+    # loads on a card - streamed through the kernel's A master past the
+    # store, its last words at addresses past 2^15. A tile that does not
+    # stream runs its store full, as before.
     n_imem = 16
-    pimem = prog_fills_imem(FP32, SEQ_IMEM_D)
-    assert len(pimem.to_bytes()) == 32 + 8 * SEQ_IMEM_D
+    n_full = 32769 if SEQ_STREAM_D > SEQ_IMEM_D else SEQ_IMEM_D
+    pimem = prog_fills_imem(FP32, n_full)
+    assert len(pimem.to_bytes()) == 32 + 8 * n_full
     await run_prog(dut, axil, ram, pimem,
                    gen_stream(FP32, n_imem, rng, tame=True),
                    gen_stream(FP32, n_imem, rng, tame=True),
                    gen_stream(FP32, n_imem, rng, tame=True),
-                   f"fp32 {SEQ_IMEM_D} instructions, IMEM full",
+                   f"fp32 {n_full} instructions, "
+                   + ("streamed past the store" if n_full > SEQ_IMEM_D
+                      else "IMEM full"),
                    # The default budget is 30,000 cycles and this run
                    # needed more than twice that at IMEM_D 16384: about
                    # 20,500 to parse a 131 KB image an instruction a
@@ -958,13 +973,19 @@ async def krnl_sequencer(dut):
                    # 32,768 (revision 7), inside the 300,000 given.
                    tries=30000)
 
-    # ...and one more than the memory holds is refused at the header,
-    # which is the boundary the capacity actually is. The image is
-    # emitted in full and honestly, so the refusal is unambiguous
-    # about which check fired.
-    too_big = bytearray(pimem.to_bytes())
-    too_big[8:12] = (SEQ_IMEM_D + 1).to_bytes(4, "little")
-    too_big += bytes(8)   # the honest body for one more insn
+    # ...and one more than the capacity is refused at the header, which
+    # is the boundary the capacity actually is. Where the capacity is the
+    # store the image is emitted in full and honestly, so the refusal is
+    # unambiguous about which check fired; where it streams, 2^24 + 1
+    # instructions would be a 128 MB image, so it is the header alone -
+    # the count is what is refused (R8S-streaming.md, section 8).
+    if SEQ_STREAM_D > SEQ_IMEM_D:
+        too_big = bytearray(pimem.to_bytes()[:32])
+        too_big[8:12] = (SEQ_STREAM_D + 1).to_bytes(4, "little")
+    else:
+        too_big = bytearray(pimem.to_bytes())
+        too_big[8:12] = (SEQ_IMEM_D + 1).to_bytes(4, "little")
+        too_big += bytes(8)   # the honest body for one more insn
     # Re-read FLAGS here rather than reusing the word captured before
     # the refusal block: run_refused asserts the refusal did not scrub
     # the PREVIOUS RUN's flags, and the previous run is the IMEM-full
@@ -973,7 +994,7 @@ async def krnl_sequencer(dut):
     await run_refused(dut, axil, ram, bytes(too_big), pimem,
                       gen_stream(FP32, 8, rng), gen_stream(FP32, 8, rng),
                       gen_stream(FP32, 8, rng), 8, PREC_CODE["fp32"],
-                      f"n_insns {SEQ_IMEM_D + 1} exceeds IMEM_D",
+                      f"n_insns {SEQ_STREAM_D + 1} exceeds the capacity",
                       flags_now)
 
     # ---- revision 7: the deposit budget at the cap, and one past it --

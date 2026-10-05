@@ -76,11 +76,20 @@ CSR_ARGS = {
 # (host/src/caps_decode.h, held to the same numbers in api-test) and
 # cftc's targets were given. When an item sets its bit, its parcel
 # changes these words, deliberately. CAPS[3:0] is the build's rungs.
+#
+# Revision 8's round 2 (parcel C) moves them item by item. Since the fetch's
+# hooks (R8S) the U50's store is 4,096 and its capacity 2^24: CAPS[23:20]
+# stays 15, min(15, 24), so CAPS is unchanged, and CAPS2[20:16] reads 24 -
+# 0x001807FB, where the plan's whole revision reads 0x00187FFB with
+# [14:11] set (docs/ROADMAP.md, "What a revision-8 U50 tile reads"). The
+# open-core configurations keep streaming off (SEQ_STREAM_D equal to the
+# store), so their words are the seam's.
 VERSION_SEAM = 0x00000B00
 SEAM_WORDS = {
-    # (SEQ_MAXD, SEQ_IMEM_D, SEQ_SCRATCH_D): (CAPS with [3:0] clear, CAPS2)
-    (1024, 32768, 2048): (0x19FAFFF0, 0x000007FB),    # the U50's
-    (64, 16384, 256):    (0x19E6FFF0, 0x000007F8),    # the open-core ones
+    # (SEQ_MAXD, SEQ_IMEM_D, SEQ_SCRATCH_D, SEQ_STREAM_D):
+    #     (CAPS with [3:0] clear, CAPS2)
+    (1024, 4096, 2048, 1 << 24): (0x19FAFFF0, 0x001807FB),   # the U50's
+    (64, 16384, 256, 16384):     (0x19E6FFF0, 0x000007F8),   # open-core
 }
 
 # ---- which rungs THIS build carries ------------------------------------
@@ -263,10 +272,15 @@ def caps2_expected():
     step = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_SCRATCH_STEP")
     lflags = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_LANE_FLAGS")
     fctl = _localparam_bit(RTL / "cft_krnl.sv", "FEAT_FLAG_CONTROL")
-    # [20:16], the streamed instruction capacity's log2 (R8S): zero on
-    # every tile until round 2's SEQ_STREAM_D exists to publish it, and
-    # pinned at zero here until then. [15] and [31:21] are reserved.
-    stream_log2 = 0
+    # [20:16], the streamed instruction capacity's log2 (R8S, revision 8's
+    # round 2): log2 SEQ_STREAM_D on a tile that streams, past its store,
+    # and zero on one that does not, where CAPS[23:20] is the capacity.
+    # [15] and [31:21] are reserved.
+    cap, store = krnl_param("SEQ_STREAM_D"), krnl_param("SEQ_IMEM_D")
+    assert cap == 1 << (cap.bit_length() - 1) and store <= cap <= 1 << 30, (
+        f"SEQ_STREAM_D={cap}: a power of two from the store ({store}) to "
+        f"2^30")
+    stream_log2 = cap.bit_length() - 1 if cap > store else 0
     return ((stream_log2 << 16) | (fctl << 14) | (lflags << 13) |
             (step << 12) | (aug << 11) |
             (lmask << 10) | (indexed << 9) | (seg << 8) | (scalar << 7) |
@@ -306,10 +320,11 @@ def check_seam_words(caps, caps2, prec_mask):
     table does not have is a failure, not a skip: add its words from the
     plan's arithmetic rather than letting the check pass by absence."""
     key = (krnl_param("SEQ_MAXD"), krnl_param("SEQ_IMEM_D"),
-           krnl_param("SEQ_SCRATCH_D"))
+           krnl_param("SEQ_SCRATCH_D"), krnl_param("SEQ_STREAM_D"))
     assert key in SEAM_WORDS, (
-        f"no computed seam words for (SEQ_MAXD, SEQ_IMEM_D, SEQ_SCRATCH_D) "
-        f"= {key}: add them to SEAM_WORDS from the plan's arithmetic")
+        f"no computed words for (SEQ_MAXD, SEQ_IMEM_D, SEQ_SCRATCH_D, "
+        f"SEQ_STREAM_D) = {key}: add them to SEAM_WORDS from the plan's "
+        f"arithmetic")
     want_caps, want_caps2 = SEAM_WORDS[key]
     want_caps |= prec_mask
     assert caps == want_caps, (
@@ -328,7 +343,10 @@ def seq_caps_expected():
     # constant bank stays a localparam (a deeper one is an instruction-
     # format change, not a capacity).
     maxd = krnl_param("SEQ_MAXD")
-    imem = krnl_param("SEQ_IMEM_D")
+    # CAPS[23:20] is the instruction CAPACITY's log2, at most 15, since
+    # revision 8 (R8S): SEQ_STREAM_D's, which is SEQ_IMEM_D's - the store's
+    # - on a tile that does not stream.
+    imem = krnl_param("SEQ_STREAM_D")
     kmem = _localparam(RTL / "cft_krnl.sv", "SEQ_KMEM_D")
     kidx = _localparam(RTL / "cft_krnl.sv", "SEQ_KIDX_W")
     # cft_seq owns the constant bank's depth as its own localparam, and
@@ -344,13 +362,13 @@ def seq_caps_expected():
     # ceiling; this said DOWN until revision 7) - a cap a host would size
     # a program against and be refused by - and one past 2^15 would wrap
     # its field.
-    for name, v in (("SEQ_MAXD", maxd), ("SEQ_IMEM_D", imem),
-                    ("SEQ_KMEM_D", kmem)):
+    for name, v in (("SEQ_MAXD", maxd), ("SEQ_KMEM_D", kmem)):
         assert v == 1 << (v.bit_length() - 1) and v <= 1 << 15, (
             f"{name}={v} is not a power of two in 1..2^15; CAPS publishes "
             f"its log2 in four bits")
     feat = _port_literal(RTL / "cft_krnl.sv", "seq_feat")
-    return feat, maxd.bit_length() - 1, imem.bit_length() - 1, kidx
+    return (feat, maxd.bit_length() - 1, min(15, imem.bit_length() - 1),
+            kidx)
 
 
 def check_seq_caps(caps):
@@ -361,7 +379,7 @@ def check_seq_caps(caps):
     assert got == (feat, l_maxd, l_imem, l_kreg), (
         "CAPS does not publish the sequencer capacities cft_krnl "
         f"elaborates: feature nibble {got[0]:#x} (want {feat:#x}), "
-        f"log2 MAXD {got[1]} (want {l_maxd}), log2 IMEM_D {got[2]} "
+        f"log2 MAXD {got[1]} (want {l_maxd}), the capacity's log2 {got[2]} "
         f"(want {l_imem}), log2 addressable consts {got[3]} "
         f"(want {l_kreg}) - CAPS is {caps:#010x}")
     ext = _port_literal(RTL / "cft_krnl.sv", "alu_ext")

@@ -3774,3 +3774,29 @@ from such a tree.
   instruction and on data, each followed by a clean run on the same
   instance) and `tb/test_krnl_faults.py`'s two sequencer cases through
   the kernel.
+- **The fetch's hooks** (built 2026-10-05). `rtl/cft_ifetch.sv` (round
+  1's unit, unchanged) replaces the instruction memory: its store holds
+  the program's first `IMEM_D` instructions (4,096 on the U50, where the
+  memory held 32,768), and past it a program streams from the image
+  through the A master, up to `STREAM_D` instructions (2^24 on the U50,
+  CAPS2[20:16] = 24; CAPS[23:20] stays 15). The parse hands the unit every
+  instruction; the fetch states, the skip and the issue's continuation ask
+  it for the word they need next, a cycle ahead as they addressed the
+  memory, and wait while a streamed word is on its way; a REPEAT whose
+  body starts outside the store moves the store to it; the block's end
+  quiesces it, and `S_WAIT_B` waits for it to be idle. Its faults end the
+  run through the abort, STATUS[0] or STATUS[2]. The read port is the
+  fetch's from a block's first request to its idle, and opens only with
+  the main read engine drained. A program of at most `IMEM_D`
+  instructions reads nothing during a block and runs in exactly the
+  cycles it did (`make seqcycles`' 72 rows the same before and after);
+  past the store, a loop pass costs what it costs resident at read
+  latencies 0, 125 and 256 (`make seqcyclesstr`). `pc` and the skip's
+  depth are a bit wider than log2 of the capacity, the header refuses
+  past the capacity, and the open-core configurations build no stream
+  (`SEQ_STREAM_D` equal to the store). Held in `tb/test_seq_core.py` at
+  `seq_core` (no stream), `seq_coreu50` (past 4,096) and `seq_corestr`,
+  which joined `make sim`: a 64-word store and a 2^16 capacity, so nearly
+  every program there streams, at those three latencies; and through the
+  kernel, `tb/test_krnl_seq.py`'s image of 32,769 instructions and the
+  capacity plus one refused at the header.

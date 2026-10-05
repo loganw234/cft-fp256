@@ -137,6 +137,13 @@
 //               that obligation: no fetch AR until every main-engine
 //               burst has seen its RLAST (or a long one is refused and
 //               drained to it, as the engines' length rule does).
+//               DISCHARGED in round 2 (cft_seq.sv's fetch hooks):
+//               cft_seq raises `want` only with its main read engine
+//               drained - no burst counted, none draining long, no AR
+//               standing - and never while a fault is ending the run;
+//               a long setup burst sets the abort, which drains it to
+//               its RLAST and ends the run before any fetch. So the
+//               abort's drain is ordered before the first fetch.
 //
 // The redirect, for probe S: `redir` is combinational from `addr`
 // through the range compare (AW bits, 25 at the U50), the stand

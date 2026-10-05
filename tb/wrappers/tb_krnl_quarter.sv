@@ -31,7 +31,10 @@ module tb_krnl_quarter #(
     parameter int MUL_PASSES    = 1,
     parameter int SEQ_MAXD      = 64,
     parameter int SEQ_IMEM_D    = 16384,
-    parameter int SEQ_SCRATCH_D = 256
+    parameter int SEQ_SCRATCH_D = 256,
+    // ...and the capacity, equal to the store: this tile streams nothing
+    // (revision 8's R8S; the open-core configurations keep it off).
+    parameter int SEQ_STREAM_D  = 16384
 ) (
     input  logic         ap_clk,
     input  logic         ap_rst_n,
@@ -136,6 +139,7 @@ module tb_krnl_quarter #(
   cft_krnl #(.EN_FP64(1'b1), .EN_FP128(1'b0), .EN_FP256(1'b0),
              .BEAT_BITS(64), .MUL_PASSES(MUL_PASSES),
              .SEQ_MAXD(SEQ_MAXD), .SEQ_IMEM_D(SEQ_IMEM_D),
-             .SEQ_SCRATCH_D(SEQ_SCRATCH_D)) u_krnl (.*);
+             .SEQ_SCRATCH_D(SEQ_SCRATCH_D),
+             .SEQ_STREAM_D(SEQ_STREAM_D)) u_krnl (.*);
 
 endmodule
