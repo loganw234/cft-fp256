@@ -133,7 +133,19 @@ authority:
    priority form it replaced, complete at every window width; and the
    multi-cycle multiplier's exactness at the real 24-bit chunk for
    every pass geometry the tile builds, as two lemmas per geometry plus
-   the whole claim as one property where a solver will take it. A
+   the whole claim as one property where a solver will take it; and,
+   since 2026-10-03, revision 8's instruction fetch (rtl/cft_ifetch.sv,
+   not yet in any tile) against every consumer and every in-order
+   memory - its words the image's, each handed over two or more cycles
+   after its beat lands, its reads inside the program and the 4 KB
+   page, its faults raised and final, nothing issued after a quiesce -
+   and, against a memory that answers at once, a waiting consumer
+   answered and a stopped unit idle, each within a bound; at two sizes,
+   the second with room in the FIFO for four bursts, where the three
+   shapes of the reservation a one-burst FIFO cannot reach occur (the
+   bench at the U50's stream sizes is the net for any shape neither
+   reaches); by k-induction over the claims and the helper invariants
+   that make them inductive, every one proven. A
    negative control - a deliberately broken property - must be refuted
    every run, and every task's solved model is counted for assertion
    cells so a proof cannot pass empty. formal/README.md has the table.
@@ -260,7 +272,7 @@ suite - so a Linux host lands nearer the quiet column or below it.
 | on the card: `cft-resident <xclbin> --op all` (the engine's own rate, with software, cross-unit and repeat checks; step 6) | 20 to 40 s an image | | `make -C host XRT=1 cft-resident`; four units at once on the quad |
 | on the card: `device-test <xclbin> -b -n 4096` and `cft-bench <xclbin> --resident` (the library's resident path held to the staged one, then measured) | 1 s and 25 s an image | | since ABI 0.11; `-b` also runs on the software backend in the runner's `selfcheck` stage |
 | `hw/run-device-test.sh` under hw_emu (xsim, the desktop's WSL, 2026-09-07/08) | link: one tile 4 min, four tiles 6 min | every kernel invocation 1 to 3 min whatever its element count | `-s -n 24` on four tiles **333 min** (98 checks); `-q -n 8` on one tile passed fp32's 50 checks in 221 min and was stopped; `-r` is days. Not an evening check until device-test has an emulation budget. Since 2026-09-18 the scratch leg's strict section adds two invocations a format, and the 32,769-lane program leg is skipped BY NAME when `XCL_EMULATION_MODE` is set |
-| `formal` (30 proofs plus the negative control; the gate's own verdict line counts all 31 as tasks) | **7 min** on the merged tree with the box otherwise idle (420 s of solver time; 14 min in an earlier run beside other work) | the same gate ran for **more than two and a half hours** earlier that day and had to be stopped - not load, but an IMUL equivalence task that had been left in the list and does not close; parked, the gate was back to 7 min | the fp256 fold lemma alone is 2 to 4 min; the old four-proof gate was 29 s, which is the number older notes quote |
+| `formal` (38 proofs plus the negative control; the gate's own verdict line counts all 39 as tasks) | **7 min** on the merged tree with the box otherwise idle (420 s of solver time; 14 min in an earlier run beside other work), before revision 8's fetch joined it; the fetch's eight tasks (ifetch.sby) add **356 s** on the desktop, 191 s of it `deliver_prove` and 96 s `wide_cover` (parcel RD1, 2026-10-03, wall time, one task at a time in the cft-formal image at 4 CPUs, the desktop at 0 to 26 %; its first five took 192 to 261 s in two earlier runs, before the wide sizes) | the same gate ran for **more than two and a half hours** earlier that day and had to be stopped - not load, but an IMUL equivalence task that had been left in the list and does not close; parked, the gate was back to 7 min | the fp256 fold lemma alone is 2 to 4 min; the old four-proof gate was 29 s, which is the number older notes quote |
 | `character` | 2.6 min | 5 min | |
 | `transcend` | 12.6 min | **52 min** | the thirty-nine functions twice, the second pass through the escalation path |
 | `bindings` (cftmpfr vs gmpy2) | 2.4 min | 8 min | |
